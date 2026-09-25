@@ -1,6 +1,7 @@
 import { PageHeader } from "@aios/ui-web";
 import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
+import { useTranslation } from "react-i18next";
 
 const SECTIONS = [
   { to: "/admin/verification-queue", label: "전략 검수 대기열", desc: "FD-13.2 수동 검증" },
@@ -20,10 +21,11 @@ const SECTIONS = [
 // 표면화할 에러 경로가 없다 — 진입 시 실제로 실패할 수 있는 지점은 이 라우트를
 // 감싸는 AdminRoute(useMe())뿐이며, 그 isError 분기를 여기서 함께 고쳤다.
 export function AdminHomePage() {
+  const { t } = useTranslation();
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="관리자 도구" />
+        <PageHeader title={t("legacy.adminHomePage.title1")} />
         <div className="grid grid-cols-2 gap-4">
           {SECTIONS.map((s) => (
             <Link

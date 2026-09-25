@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+
 from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
 from src.data.models.market_data import Ticker
 from src.services.safety.distrust_wiring import (
@@ -112,6 +114,36 @@ async def test_check_and_persist_with_zero_references_reports_one_source():
     assert level == DataDistrustLevel.DEGRADED_SINGLE_SOURCE
     _query, args = pool.conn.executed[0]
     assert args[3] == 1  # primary만
+
+
+class _RaisingProvider:
+    """계약 위반 대역 — reference_quotes.py의 두 구현체는 실패를 항상 None
+    으로 흡수하지만(모듈 docstring), 미래의 세 번째 구현이 그 계약을 어길
+    가능성에 대비해 check_and_persist_distrust가 이를 삼키지 않고 그대로
+    전파하는지(fail-closed) 검증한다 — 조용히 NORMAL/DEGRADED로 잘못
+    판정하고 DB에 쓰는 것보다 예외로 이번 틱을 실패시키는 편이 안전하다."""
+
+    async def get_reference_ticker(self, symbol: str) -> Ticker | None:
+        raise RuntimeError("참조 소스 어댑터 내부 결함(계약 위반 시뮬레이션)")
+
+
+async def test_provider_exception_propagates_instead_of_silently_persisting():
+    pool = _FakePool()
+    monitor = DataDistrustMonitor()
+    providers = [_FakeProvider(_ticker("100.1")), _RaisingProvider()]
+
+    with pytest.raises(RuntimeError):
+        await check_and_persist_distrust(
+            pool,
+            monitor,
+            providers,
+            exchange="bitget",
+            symbol="BTC/USDT",
+            primary=_ticker("100"),
+            candles=[],
+        )
+
+    assert pool.conn.executed == []  # 예외 발생 전이라 잘못된 상태가 DB에 쓰이지 않음
 
 
 async def test_restore_distrust_state_restores_each_row_into_monitor():

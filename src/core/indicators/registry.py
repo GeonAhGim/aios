@@ -9,6 +9,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.2 L02
 콜러블 자체(함수 객체)는 해시에 넣을 수 없으므로 `__name__`으로 대신한다 —
 동일 모듈에서 재기동해도 같은 이름이 나오므로 프로세스 재기동에 안정적이다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -78,6 +79,10 @@ class IndicatorRegistry:
 
     def validate_params(self, name: str, params: Mapping[str, int]) -> dict[str, int]:
         spec = self.get(name)
+        known_names: set[str] = {ps.name for ps in spec.params}
+        unknown = set(params) - known_names
+        if unknown:
+            raise IndicatorError("STRATEGY_PARAM_UNKNOWN")
         resolved: dict[str, int] = {}
         for param_spec in spec.params:
             value = params.get(param_spec.name, param_spec.default)

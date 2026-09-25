@@ -1,12 +1,12 @@
-"""회계 항등식 검사 — §3.4:
+"""Accounting identity check — §3.4:
 `gross_pnl - fees - slippage - funding + fx - estimated_tax = net_pnl`,
 `end = start + net_pnl + Σcashflow`.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6.
 
-절대 예외를 던지지 않는다 — 입력 중 하나라도 `None`(미리컨실)이면 `ok=False`
-+ `pending_fields`로 "왜 아직 판단할 수 없는지"를 그대로 보고한다. 0으로
-대체해 억지로 항등식을 통과시키지 않는다."""
+Never raises an exception — if any input is `None` (unrealised PnL), returns
+`ok=False` and reports exactly which fields are missing via `pending_fields`.
+Never substitutes zero to force the identity through."""
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -38,8 +38,9 @@ def _signed(cf: Cashflow) -> Decimal:
 
 
 def _require(value: Decimal | None, field: str) -> Decimal:
-    """pending 필드 검사 이후에도 `None`이면 호출자의 불변식 위반 —
-    조용히 0으로 대체하지 않고 예외로 드러낸다."""
+    """Called after pending-field check: if still `None`, the caller violated
+    an invariant — surface it as an exception rather than silently substituting
+    zero."""
     if value is None:
         raise ValueError(f"{field}가 None (pending_fields 검사를 통과했어야 함)")
     return value
@@ -74,9 +75,9 @@ def check_identity(
     valuation_residual = expected_end - end_value
 
     ok = breakdown_residual == 0 and valuation_residual == 0
-    # 절댓값을 더한다(단순 합이 아니다) — 두 잔차가 부호만 반대고 크기가
-    # 같으면 단순 합은 0으로 상쇄돼 ok=False인데 residual=0이라는 모순된
-    # 신호를 낸다. 절댓값 합은 그 상쇄가 없어 항상 "실제 불일치 크기"를
-    # 반영한다.
+    # Sum absolute values (not a plain sum) — when two residuals differ only
+    # by sign and have equal magnitude, a plain sum cancels to 0, sending the
+    # contradictory signal ok=False but residual=0. Absolute sum avoids that
+    # cancellation and always reflects the true mismatch magnitude.
     residual = abs(breakdown_residual) + abs(valuation_residual)
     return IdentityResult(ok=ok, residual=residual, pending_fields=())

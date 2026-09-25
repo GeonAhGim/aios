@@ -31,8 +31,8 @@ from src.foundation.backtest.application.quick_backtest import QuickBacktestResu
 from src.foundation.backtest.domain.models_v2 import BacktestConfigV2
 from src.foundation.backtest.vector.fills import VectorSignal, run_vector_backtest
 from src.foundation.backtest.vector.signals import BoolSignal
+from src.foundation.market_data.api import CandleColumns
 from src.foundation.market_data.contracts.v1 import Timeframe
-from src.foundation.market_data.domain.candle_columns import CandleColumns
 
 __all__ = [
     "WalkForwardError",

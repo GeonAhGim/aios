@@ -3,6 +3,7 @@
 각 테스트 시작 전 normal/재가동없음으로 리셋해 전역 싱글톤 행 상태를
 격리한다.
 """
+
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -19,6 +20,7 @@ from src.core.safety.circuit_breaker import (
     CircuitBreakerLevel,
     CircuitBreakerMetrics,
     CircuitBreakerService,
+    CircuitBreakerState,
     compute_level,
 )
 from src.core.safety.data_freshness import DataFreshnessTracker
@@ -174,9 +176,7 @@ async def test_unknown_data_delay_does_not_read_as_normal(pool, policy):
     None을 "지연 없음"으로 읽으면 CB가 stale 데이터에서도 절대 트립하지 않는
     fail-open이 된다(§9 R-43 원문 결함) — evaluate()가 NORMAL을 내면 안 된다."""
     service = CircuitBreakerService(pool, policy)
-    metrics = await collect_circuit_breaker_metrics(
-        pool, ApiCallTracker(), DataFreshnessTracker()
-    )
+    metrics = await collect_circuit_breaker_metrics(pool, ApiCallTracker(), DataFreshnessTracker())
     assert metrics.data_delay_sec is None
 
     result = await service.evaluate(metrics)
@@ -314,3 +314,90 @@ async def test_concurrent_set_level_only_one_writer_wins(pool, policy):
 
     final = await service.get_state()
     assert final.level in (CircuitBreakerLevel.WARNING, CircuitBreakerLevel.RESTRICTED)
+
+
+def test_data_freshness_record_rejects_naive_close_time():
+    """negative — CLAUDE.md 불변식(모든 datetime은 tz-aware UTC) 검증.
+    naive close_time을 그대로 저장하면 max_delay_sec의 `now - close_time`이
+    naive/aware를 섞어 잘못된 델타를 만들거나 TypeError로 죽는다 — record()
+    시점에 명시적으로 거부해야 한다(R-42 관측점의 입력 검증)."""
+    tracker = DataFreshnessTracker()
+    naive_close_time = datetime(2026, 1, 1, 0, 0, 0)
+
+    with pytest.raises(ValueError):
+        tracker.record("bitget", "BTC/USDT", naive_close_time)
+
+
+def test_data_freshness_max_delay_sec_rejects_naive_now():
+    """negative — max_delay_sec(now) 쪽 입력도 같은 불변식을 지킨다.
+    관측은 정상(tz-aware)으로 하나 있어도, 호출자가 naive `now`를 넘기면
+    거부해야 한다(호출부 실수가 조용히 잘못된 지연값으로 새지 않도록)."""
+    tracker = DataFreshnessTracker()
+    tracker.record("bitget", "BTC/USDT", datetime.now(timezone.utc))
+    naive_now = datetime(2026, 1, 1, 0, 0, 0)
+
+    with pytest.raises(ValueError):
+        tracker.max_delay_sec(naive_now)
+
+
+async def test_set_level_rejects_mismatched_expected_state(pool, policy):
+    """negative — 105 CAS. 동시성 경쟁이 전혀 없어도, 실제 DB 행과 다른
+    `expected`(오래된/틀린 전제조건)를 넘기면 조용히 성공하지 않고
+    ConcurrencyConflictError를 던진다. 위 동시성 테스트는 경쟁 상황에서만
+    검증하므로, 여기서는 전제조건 불일치 자체를 단독으로 확인한다."""
+    service = CircuitBreakerService(pool, policy)
+    actual = await service.get_state()
+    assert actual.level == CircuitBreakerLevel.NORMAL
+
+    stale_expected = CircuitBreakerState(
+        level=CircuitBreakerLevel.HALTED, reactivation_approval_id=None
+    )
+
+    with pytest.raises(ConcurrencyConflictError):
+        await service._set_level(
+            CircuitBreakerLevel.WARNING, reactivation_approval_id=None, expected=stale_expected
+        )
+
+    unchanged = await service.get_state()
+    assert unchanged.level == CircuitBreakerLevel.NORMAL
+
+
+async def test_evaluate_reactivation_request_failure_leaves_state_unchanged(
+    pool, policy, monkeypatch
+):
+    """실패주입 — halted 상태에서 조건이 완화돼 재가동 요청을 만드는 도중
+    approval.create_request가 실패하면(승인 서비스/DB 장애), 예외를 삼켜
+    반쪼가리 상태(요청 없이 조용히 normal로 넘어가는 등)로 새면 안 된다.
+    fail-closed 기본값(CLAUDE.md §3) — 예외가 그대로 전파되고, DB 행은
+    직전 halted·reactivation_approval_id=None 그대로 남아야 한다."""
+    service = CircuitBreakerService(pool, policy)
+    await service.evaluate(CircuitBreakerMetrics(data_delay_sec=Decimal("6")))  # halted
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("simulated approval service outage")
+
+    monkeypatch.setattr(approval, "create_request", _boom)
+
+    with pytest.raises(RuntimeError):
+        await service.evaluate(CircuitBreakerMetrics())  # 조건 완화 -> 재가동 요청 시도
+
+    unchanged = await service.get_state()
+    assert unchanged.level == CircuitBreakerLevel.HALTED
+    assert unchanged.reactivation_approval_id is None
+
+
+async def test_collect_metrics_propagates_order_reject_query_failure(pool, monkeypatch):
+    """실패주입 — R-43 metrics_collector fail-closed 검증. 5개 지표 중 하나를
+    계산하는 DB 쿼리(_order_reject_rate_pct)가 커넥션 장애로 실패하면,
+    collect_circuit_breaker_metrics()는 Decimal("0")("문제 없음")으로 조용히
+    대체하지 않고 예외를 그대로 전파해야 한다 — 삼키면 그 지표에서 R3/R7과
+    같은 fail-open 결함이 재발한다."""
+    import src.core.safety.metrics_collector as metrics_collector_module
+
+    async def _boom(*args, **kwargs):
+        raise asyncpg.exceptions.PostgresConnectionError("simulated connection loss")
+
+    monkeypatch.setattr(metrics_collector_module, "_order_reject_rate_pct", _boom)
+
+    with pytest.raises(asyncpg.exceptions.PostgresConnectionError):
+        await collect_circuit_breaker_metrics(pool, ApiCallTracker())

@@ -14,6 +14,7 @@ import { Alert, Button, EmptyState, Field, Input } from "@aios/ui-web";
 import type { CandlestickPoint } from "@aios/ui-web";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ScriptEditor, type ScriptEditorMarker } from "../../components/ScriptEditor";
+import { useTranslation } from "react-i18next";
 
 // BT-13 — 차트에 붙는 즉시 백테스트 패널. 선행 BT-10c(task-1619, POST
 // /v1/backtests/quick)를 소비하는 유일한 화면이다. 스크립트 편집은 DSL-13a
@@ -72,11 +73,11 @@ function buildQuickConfig(venue: Venue): BacktestConfigV2Input {
 }
 
 function TooManyBarsNotice({ bars, max }: { bars: number; max: number }) {
+  const { t } = useTranslation();
   return (
     <Alert tone="danger">
       <p>
-        봉 수 {bars}개가 즉시 백테스트 상한 {max}개를 넘습니다. 전체 백테스트(BT-11)를 이용하세요.
-      </p>
+        {t("legacy.backtestPanel.t1", { bars: bars, max: max })}</p>
     </Alert>
   );
 }
@@ -105,6 +106,7 @@ export function BacktestPanel({
   runQuickBacktest,
   height = DEFAULT_HEIGHT,
 }: BacktestPanelProps) {
+  const { t } = useTranslation();
   const [source, setSource] = useState(DEFAULT_SCRIPT);
   const [initialCash, setInitialCash] = useState(DEFAULT_INITIAL_CASH);
   const mutation = useMutation({ mutationFn: runQuickBacktest });
@@ -190,13 +192,13 @@ export function BacktestPanel({
     : [];
 
   return (
-    <section aria-label="즉시 백테스트" className="space-y-3">
-      <h2 className="text-sm font-medium text-fg-secondary">즉시 백테스트</h2>
+    <section aria-label={t("legacy.backtestPanel.ariaLabel2")} className="space-y-3">
+      <h2 className="text-sm font-medium text-fg-secondary">{t("legacy.backtestPanel.t3")}</h2>
 
       <ScriptEditor value={source} onChange={handleSourceChange} markers={markers} disabled={mutation.isPending} rows={8} />
 
       <div className="flex items-end gap-3">
-        <Field label="초기 자본">
+        <Field label={t("legacy.backtestPanel.label4")}>
           <Input
             type="number"
             min="0"
@@ -207,25 +209,23 @@ export function BacktestPanel({
           />
         </Field>
         <Button type="button" onClick={handleRun} disabled={runDisabled} loading={mutation.isPending} data-testid="backtest-run">
-          실행
-        </Button>
+          {t("legacy.backtestPanel.t5")}</Button>
         {mutation.isPending && (
           <Button type="button" variant="secondary" onClick={() => mutation.reset()} data-testid="backtest-cancel">
-            취소
-          </Button>
+            {t("legacy.backtestPanel.t6")}</Button>
         )}
       </div>
 
-      {noCandles && <EmptyState>표시할 캔들이 없어 백테스트를 실행할 수 없습니다.</EmptyState>}
+      {noCandles && <EmptyState>{t("legacy.backtestPanel.t7")}</EmptyState>}
       {showGenericError && <BacktestRunError error={mutation.error} />}
 
       {mutation.data && (
         <dl className="grid grid-cols-3 gap-x-4 gap-y-1 text-xs" data-testid="backtest-summary">
-          <dt className="text-fg-muted">최종 자산</dt>
+          <dt className="text-fg-muted">{t("legacy.backtestPanel.t8")}</dt>
           <dd>{mutation.data.finalEquity}</dd>
-          <dt className="text-fg-muted">체결 수</dt>
+          <dt className="text-fg-muted">{t("legacy.backtestPanel.t9")}</dt>
           <dd>{mutation.data.fills.length}</dd>
-          <dt className="text-fg-muted">봉 수</dt>
+          <dt className="text-fg-muted">{t("legacy.backtestPanel.t10")}</dt>
           <dd>{mutation.data.bars}</dd>
         </dl>
       )}

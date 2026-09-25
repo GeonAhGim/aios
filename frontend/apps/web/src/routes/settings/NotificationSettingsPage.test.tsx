@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -25,6 +26,26 @@ let historyResult: { data: unknown; isError: boolean; error: unknown; refetch: (
   refetch: vi.fn(),
 };
 
+const pushEnable = vi.fn();
+const pushDisable = vi.fn();
+let pushResult: {
+  status: "unsupported" | "idle" | "denied" | "subscribed" | "error";
+  error: Error | null;
+  deviceId: number | null;
+  enable: typeof pushEnable;
+  disable: typeof pushDisable;
+  isEnabling: boolean;
+  isDisabling: boolean;
+} = {
+  status: "idle",
+  error: null,
+  deviceId: null,
+  enable: pushEnable,
+  disable: pushDisable,
+  isEnabling: false,
+  isDisabling: false,
+};
+
 vi.mock("@aios/shared-hooks", () => ({
   useNotificationPreferences: () => preferencesResult,
   useUpdateNotificationPreferences: () => updateResult,
@@ -33,9 +54,15 @@ vi.mock("@aios/shared-hooks", () => ({
   useLogout: () => vi.fn(),
 }));
 
+vi.mock("../../pwa/usePushNotifications", () => ({
+  usePushNotifications: () => pushResult,
+}));
+
 afterEach(() => {
   cleanup();
   updateMutate.mockReset();
+  pushEnable.mockReset();
+  pushDisable.mockReset();
   preferencesResult = {
     data: { execution_alert: true, dispute_update: true },
     isLoading: false,
@@ -45,6 +72,15 @@ afterEach(() => {
   };
   updateResult = { mutate: updateMutate, isError: false, error: null };
   historyResult = { data: [], isError: false, error: null, refetch: vi.fn() };
+  pushResult = {
+    status: "idle",
+    error: null,
+    deviceId: null,
+    enable: pushEnable,
+    disable: pushDisable,
+    isEnabling: false,
+    isDisabling: false,
+  };
 });
 
 function renderPage() {
@@ -113,5 +149,56 @@ describe("NotificationSettingsPage 조회·변경 에러 표시", () => {
 
     await waitFor(() => expect(screen.getByText("알림 이력이 없습니다.")).toBeInTheDocument());
     expect(screen.getByText("execution_alert")).toBeInTheDocument();
+  });
+});
+
+// UX-17: 브라우저 지원 여부·권한 흐름을 usePushNotifications의 status에 그대로 반영하는지 확인.
+describe("NotificationSettingsPage 푸시 알림 카드", () => {
+  it("unsupported면 지원하지 않는다는 안내만 보이고 켜기 버튼은 없다", async () => {
+    pushResult = { ...pushResult, status: "unsupported" };
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText("이 브라우저/기기는 푸시 알림을 지원하지 않습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "알림 켜기" })).not.toBeInTheDocument();
+  });
+
+  it("idle 상태에서 알림 켜기를 누르면 enable을 호출한다", async () => {
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "알림 켜기" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "알림 켜기" }));
+
+    expect(pushEnable).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribed 상태면 해지 버튼을 보여주고 누르면 disable을 호출한다", async () => {
+    pushResult = { ...pushResult, status: "subscribed", deviceId: 3 };
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "구독 해지" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "구독 해지" }));
+
+    expect(pushDisable).toHaveBeenCalledTimes(1);
+  });
+
+  // negative: 권한 거부는 재시도 가능한 에러(error)와 구분되는 안내(브라우저 설정
+  // 변경 필요)를 보여줘야 한다 — 같은 배너로 뭉치면 사용자가 재시도 버튼만 누르고
+  // 계속 실패하는 루프에 빠진다.
+  it("negative: denied 상태면 브라우저 설정 안내 문구를 보여준다", async () => {
+    pushResult = { ...pushResult, status: "denied" };
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/브라우저 알림 권한이 거부되었습니다/)).toBeInTheDocument(),
+    );
+  });
+
+  it("negative: error 상태면 에러 메시지를 배너로 보여준다", async () => {
+    pushResult = { ...pushResult, status: "error", error: new Error("구독에 실패했습니다") };
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("구독에 실패했습니다")).toBeInTheDocument());
   });
 });

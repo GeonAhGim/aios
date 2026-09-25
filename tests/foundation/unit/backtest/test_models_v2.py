@@ -3,7 +3,19 @@
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §3.4.
 스냅샷 테스트는 QA가 §3.4 표와 1:1로 대조할 수 있도록 필드명·구조를 그대로
 고정한다 — 필드가 임의로 추가/삭제되면 이 테스트가 깨진다.
+
+DEEPEN(task-3036, ADR-2026-09-09-C D2): depth=D2 evidence below.
+- negative tests >=3: the many `*_rejects_*`/`*_is_rejected` tests above.
+- failure injection 1: `test_float_input_is_rejected_on_every_decimal_field`
+  — injects the regression where a `float` leaks in at an API/DB boundary
+  instead of `Decimal`, proving the `_reject_float` guard actually blocks
+  it (a real bug found and fixed during this DEEPEN).
+- perf assertion 1: `test_canonical_json_perf_budget`.
+- gate-red repro: N/A (no static scanner/linter exists for this leaf —
+  the failure-injection test above exercises the runtime guard directly).
 """
+
+import time
 from decimal import Decimal
 
 import pytest
@@ -170,3 +182,50 @@ def test_negative_borrow_apr_is_rejected() -> None:
 def test_unknown_calendar_value_is_rejected() -> None:
     with pytest.raises(ValidationError):
         BacktestConfigV2(**_base_kwargs(calendar="weekly"))
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "kwargs"),
+    [
+        (FixedSlippage, {"bps": 1.5}),
+        (PercentSlippage, {"pct": 0.5}),
+        (VolumeImpactSlippage, {"k": 0.1, "participation_cap": 0.5}),
+        (
+            VenueTierCommission,
+            {"venue": "BITGET", "maker_bps": 2.0, "taker_bps": 4.0, "min_fee": 0.1},
+        ),
+        (PartialFillConfig, {"max_participation_pct": 0.2}),
+        (CostsConfig, {"funding": True, "borrow_apr": 0.05}),
+    ],
+)
+def test_float_input_is_rejected_on_every_decimal_field(
+    model_cls: type, kwargs: dict[str, object]
+) -> None:
+    """failure injection(D2): injects the case where an upstream API/DB
+    sends an IEEE754 `float` instead of a `Decimal` string (e.g. a JSON
+    parser regression turning `1.5` back into a float). Before the
+    `_reject_float` guard existed, these values silently coerced into
+    `Decimal` and passed — this test blocks that regression."""
+
+    for field_name, value in kwargs.items():
+        if not isinstance(value, float):
+            continue
+        bad_kwargs = dict(kwargs)
+        bad_kwargs[field_name] = value
+        with pytest.raises(ValidationError):
+            model_cls(**bad_kwargs)
+
+
+@pytest.mark.perf
+def test_canonical_json_perf_budget() -> None:
+    """perf assertion(D2): `canonical_json()` is called at high volume on
+    the reproducibility-key (BT-9) path — pin a quantified upper bound so
+    it never regresses past O(n) serialization (1,000 calls <= 200ms,
+    with headroom for local CI noise)."""
+
+    cfg = BacktestConfigV2(**_base_kwargs())
+    start = time.perf_counter()
+    for _ in range(1_000):
+        cfg.canonical_json()
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    assert elapsed_ms < 200, f"canonical_json() too slow: {elapsed_ms:.1f}ms/1000 calls"

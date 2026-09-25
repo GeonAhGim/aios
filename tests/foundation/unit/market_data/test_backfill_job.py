@@ -13,8 +13,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass
@@ -34,7 +36,9 @@ from src.foundation.market_data.ports.coverage_repository import (
     CoverageSpan as StoredCoverageSpan,
 )
 from src.foundation.market_data.ports.provider import (
+    ProviderCandle,
     ProviderCapabilities,
+    ProviderTick,
     TimeSpan,
 )
 
@@ -101,7 +105,9 @@ class _FakeProvider:
         self.calls.append(span)
         return self._answers[(span.start, span.end)]
 
-    async def subscribe(self, listings: Sequence[VenueListing]) -> AsyncIterator[object]:
+    async def subscribe(
+        self, listings: Sequence[VenueListing]
+    ) -> AsyncIterator[ProviderTick | ProviderCandle]:
         raise NotImplementedError
 
 
@@ -184,10 +190,10 @@ async def _run(
     series_key: SeriesKey | None = None,
 ):
     return await run_backfill_job(
-        conn=object(),  # type: ignore[arg-type]
-        provider=provider,  # type: ignore[arg-type]
-        store=store,  # type: ignore[arg-type]
-        coverage_repo=coverage_repo,  # type: ignore[arg-type]
+        conn=cast(asyncpg.Connection, object()),
+        provider=provider,
+        store=store,
+        coverage_repo=coverage_repo,
         listing=listing or _listing(),
         series_key=series_key or _series_key(),
         tf=Timeframe.H1,
@@ -335,3 +341,30 @@ async def test_venue_mismatch_between_listing_and_series_key_is_rejected() -> No
         )
     assert provider.calls == []
     assert store.rows == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hours", [[0, 2, 3], [3, 0, 2], [0, 3]])
+async def test_sparse_response_preserves_holes_and_resumes(hours: list[int]) -> None:
+    """Sparse/reordered responses must not claim missing candles (I-10)."""
+    store = _FakeCandleStore()
+    repo = _FakeCoverageRepository()
+    provider = _FakeProvider({(_dt(0), _dt(4)): _columns(hours)})
+    result = await _run(provider, store, repo, range_start=_dt(0), range_end=_dt(4))
+    right_start = 2 if 2 in hours else 3
+    expected = [(_dt(0), _dt(1)), (_dt(right_start), _dt(4))]
+    assert [(s.start, s.end) for s in repo.spans] == expected
+    assert [(s.start_at, s.end_at) for s in result.merged_coverage] == expected
+    assert result.segments[0].stored == len(hours)
+    assert result.segments[0].span is None
+    assert list(result.segments[0].spans) == repo.spans
+
+    remaining = _FakeProvider({(_dt(1), _dt(right_start)): _columns(range(1, right_start))})
+    resumed = await _run(remaining, store, repo, range_start=_dt(0), range_end=_dt(4))
+    assert resumed.gaps_planned == 1
+    assert [(s.start, s.end) for s in remaining.calls] == [(_dt(1), _dt(right_start))]
+    assert [(s.start_at, s.end_at) for s in resumed.merged_coverage] == [(_dt(0), _dt(4))]
+    remaining.calls.clear()
+    replay = await _run(remaining, store, repo, range_start=_dt(0), range_end=_dt(4))
+    assert replay.gaps_planned == 0
+    assert remaining.calls == []

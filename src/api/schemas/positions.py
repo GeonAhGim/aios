@@ -1,12 +1,14 @@
-"""LB-19 positions 읽기 API 응답 스키마 — HTTP 세부만 여기 두고, 계약 자체는
-`src/foundation/positions/contracts/v1.py`를 그대로 감싼다(106번 §2, LB-17
-docstring의 "별도 뷰 모델 금지" 원칙). 요청 본문 스키마는 없다 — 쓰기
-엔드포인트가 없다.
+"""LB-19 positions read API response schema — HTTP details only; the contract
+itself wraps `src/foundation/positions/contracts/v1.py` verbatim (Rule 106 §2,
+LB-17 principle: "no separate view model"). No request body schema — write
+endpoints do not exist.
 
-저널 커서는 불투명 문자열이지만 내용은 마지막 `sequence_no`다(§4.3 저널은
-`(position_key, sequence_no)` 단조 증가라 이 값 하나로 재개 지점이 정해진다).
-디코딩 실패는 도메인이 아니라 전송 계층 오류라 여기서 `InvalidCursorError`로
-표현하고 전역 핸들러가 VALIDATION_INVALID_FIELD 봉투로 번역한다."""
+The journal cursor is an opaque string whose content is the last `sequence_no`
+(§4.3: the journal is monotonically increasing on `(position_key, sequence_no)`,
+so this single value determines the resume point).
+Decode failure is a transport-layer error, not a domain error, so we express it
+here as `InvalidCursorError` and let the global handler translate it into a
+VALIDATION_INVALID_FIELD envelope."""
 from __future__ import annotations
 
 from datetime import date
@@ -31,7 +33,7 @@ __all__ = [
 
 
 class InvalidCursorError(ValueError):
-    """`cursor` 쿼리 파라미터가 이 API가 발급한 형식이 아니다."""
+    """The `cursor` query parameter is not in the format issued by this API."""
 
 
 def encode_cursor(sequence_no: int) -> str:
@@ -39,7 +41,7 @@ def encode_cursor(sequence_no: int) -> str:
 
 
 def decode_cursor(raw: str | None) -> int:
-    """없으면 처음부터(0). 음수·비정수는 거부한다."""
+    """Return 0 if absent (start from beginning). Reject negatives and non-integers."""
     if raw is None or raw == "":
         return 0
     try:
@@ -61,8 +63,9 @@ class PositionJournalResponse(BaseModel):
 
 
 class NavSeriesResponse(BaseModel):
-    """`missing_dates`는 범위 안에서 아직 NAV가 산출되지 않은 날 — 0으로
-    채우지 않고 빠졌다는 사실을 그대로 드러낸다(FD-3.3 "never assume zero")."""
+    """`missing_dates` are days within the range where NAV has not yet been
+    calculated — we expose the absence directly instead of filling with zeros
+    (FD-3.3 "never assume zero")."""
 
     account_id: UUID
     start_date: date

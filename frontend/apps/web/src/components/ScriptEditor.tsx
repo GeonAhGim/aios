@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface ScriptEditorMarker {
   line: number;
@@ -26,6 +27,7 @@ const LINE_HEIGHT_EM = 1.5;
 // 일반화한다 — 호출부가 여러 진단을 합쳐 보여줘야 하는 경우가 와도 이 파일을
 // 다시 고칠 필요가 없다.
 export function ScriptEditor({ value, onChange, markers = [], disabled = false, rows = 20 }: ScriptEditorProps) {
+  const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
 
@@ -65,7 +67,7 @@ export function ScriptEditor({ value, onChange, markers = [], disabled = false, 
         <textarea
           ref={textareaRef}
           data-testid="script-editor-textarea"
-          aria-label="스크립트 소스"
+          aria-label={t("legacy.scriptEditor.ariaLabel1")}
           value={value}
           disabled={disabled}
           spellCheck={false}
@@ -79,7 +81,7 @@ export function ScriptEditor({ value, onChange, markers = [], disabled = false, 
         <div data-testid="script-editor-markers" className="space-y-1">
           {markers.map((m, index) => (
             <p key={`${m.line}:${m.col}:${index}`} data-testid={`script-editor-marker-${index}`} className="text-xs text-danger">
-              {m.line}행 {m.col}열: {m.message}
+              {t("legacy.scriptEditor.t2", { line: m.line, col: m.col, message: m.message })}
             </p>
           ))}
         </div>

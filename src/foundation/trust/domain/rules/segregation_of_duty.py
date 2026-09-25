@@ -12,50 +12,37 @@ must route through here to reject an attempt by "the requester themself to
 approve/execute their own request" — no feature should reinvent
 `if a == b: raise ...` on its own.
 
-As of 2026-09-08, two call sites are wired to this primitive: the DUAL-mode
-second-signature check in `core/approval/service.py` (previously reinvented
-inline), and CM-5's author != approver enforcement in `mandates/
-application/activate_revision.py` (the proposer identity it compares
-against comes from the existing audit trail — see that module's docstring).
+As of 2026-09-16, three call sites are wired to this primitive: the
+DUAL-mode second-signature check in `core/approval/service.py`, CM-5's
+author != approver enforcement in `mandates/application/
+activate_revision.py` (the proposer identity it compares against comes
+from the existing audit trail — see that module's docstring), and PLT-35's
+break-glass approval pre-check (the DB CHECK constraint on
+`break_glass_grant` remains the second line of defense). The static scan
+in `tests/foundation/unit/trust/test_segregation_of_duty_static.py`
+asserts "no code outside this primitive directly compares
+actor/counterparty equality" and that all three call sites import this
+module (directly, or — for `core/security/break_glass.py`, see below —
+via the composition root that injects this function into it) — if any of
+them is later rewritten to reinvent the comparison inline, this static
+check catches it immediately.
 
-Unverified: PLT-35 (`core/security/break_glass.py`) is still only a
-spec-level plan and does not exist as a leaf yet. The static scan in
-`tests/foundation/unit/trust/test_segregation_of_duty_static.py` asserts
-"no code outside this primitive directly compares actor/counterparty
-equality" — if PLT-35 is later built and reinvents this inline instead of
-routing through this module, this static check catches it immediately.
+RATCHET-2 (`core-no-io`, ADR-2026-09-10-C) forbids `src/core` from
+importing `src/foundation`, so `core/security/break_glass.py` can no
+longer import this module directly (task-5311) — it takes the checker as
+an injected `SegregationOfDutyChecker` parameter instead (the Protocol +
+`SegregationOfDutyViolation` are now owned by
+`src.core.security.segregation_of_duty_port`, which this module implements
+and re-exports for the two call sites that still import it directly).
+`src/api/routers/admin_break_glass.py` is the composition root that wires
+`assert_actor_not_counterparty` from here into `break_glass.approve_grant`.
 """
+
 from __future__ import annotations
 
-from collections.abc import Hashable
-
-
-class SegregationOfDutyViolation(Exception):
-    """The same subject tried to act as both the actor and counterparty of
-    an action."""
-
-    def __init__(self, actor_id: Hashable, action: str) -> None:
-        super().__init__(
-            f"{action}: actor({actor_id!r})는 자기 자신의 counterparty가 될 수 없습니다."
-        )
-        self.actor_id = actor_id
-        self.action = action
-
-
-def assert_actor_not_counterparty(
-    actor_id: Hashable, counterparty_id: Hashable | None, *, action: str
-) -> None:
-    """Rejects if actor_id equals this action's counterparty_id.
-
-    If `counterparty_id` is `None` (no one has taken that role yet — e.g.
-    before the first DUAL-approval signature, before a mandate draft
-    proposal), there is nothing to compare against, so it passes through.
-    Equality between the two ids is decided with `==`, so this works as-is
-    for any identifier type that supports value equality (`UUID`, `str`,
-    `int`, etc.).
-    """
-    if counterparty_id is not None and actor_id == counterparty_id:
-        raise SegregationOfDutyViolation(actor_id, action)
-
+from src.core.security.segregation_of_duty_port import (
+    SegregationOfDutyViolation,
+    assert_actor_not_counterparty,
+)
 
 __all__ = ["SegregationOfDutyViolation", "assert_actor_not_counterparty"]

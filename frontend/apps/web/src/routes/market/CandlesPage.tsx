@@ -10,6 +10,7 @@ import { CandleQualityBadge } from "../../components/CandleQualityBadge";
 import { DataFreshness } from "../../components/DataFreshness";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { AppShell } from "../../components/layout/AppShell";
+import { useTranslation } from "react-i18next";
 
 // spec §3.1 market_data 계약. task-719(createMarketDataClient·getCandles)와
 // task-629(parseCandleSeries·CandleQualityBadge)만 재사용해 배선한다 — 새
@@ -61,15 +62,15 @@ function toChartPoints(series: CandleQueryResult["series"]): CandlestickPoint[] 
 }
 
 function NoInstrumentSelected() {
+  const { t } = useTranslation();
   return (
     <AppShell>
       <div className="max-w-3xl space-y-4">
-        <PageHeader title="캔들 차트" />
+        <PageHeader title={t("legacy.candlesPage.title1")} />
         <EmptyState>
-          심볼을 먼저 선택하세요.{" "}
+          {t("legacy.candlesPage.t2", { val: " " })}
           <Link to="/market/instruments" className="underline">
-            심볼 목록으로 이동
-          </Link>
+            {t("legacy.candlesPage.t3")}</Link>
         </EmptyState>
       </div>
     </AppShell>
@@ -77,6 +78,7 @@ function NoInstrumentSelected() {
 }
 
 export function CandlesPage({ fetchCandles = marketDataClient.getCandles, now }: CandlesPageProps) {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const instrumentId = searchParams.get("instrument_id");
   const [venue, setVenue] = useState<Venue>(VENUES[0]);
@@ -108,10 +110,10 @@ export function CandlesPage({ fetchCandles = marketDataClient.getCandles, now }:
   return (
     <AppShell>
       <div className="max-w-3xl space-y-4">
-        <PageHeader title="캔들 차트" action={asOf && <DataFreshness asOf={asOf} now={anchor} />} />
+        <PageHeader title={t("legacy.candlesPage.title4")} action={asOf && <DataFreshness asOf={asOf} now={anchor} />} />
 
         <div className="flex flex-wrap items-end gap-3">
-          <Field label="거래소">
+          <Field label={t("legacy.candlesPage.label5")}>
             <Select value={venue} onChange={(e) => setVenue(e.target.value as Venue)}>
               {VENUES.map((v) => (
                 <option key={v} value={v}>
@@ -120,12 +122,12 @@ export function CandlesPage({ fetchCandles = marketDataClient.getCandles, now }:
               ))}
             </Select>
           </Field>
-          <Field label="심볼">
+          <Field label={t("legacy.candlesPage.label6")}>
             <p className="px-3 py-2 text-sm text-fg" data-testid="candles-instrument-id">
               {instrumentId}
             </p>
           </Field>
-          <Field label="타임프레임">
+          <Field label={t("legacy.candlesPage.label7")}>
             <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)}>
               {TIMEFRAMES.map((t) => (
                 <option key={t} value={t}>
@@ -150,7 +152,7 @@ export function CandlesPage({ fetchCandles = marketDataClient.getCandles, now }:
             {query.isLoading ? (
               <LoadingState />
             ) : points.length === 0 ? (
-              <EmptyState>표시할 캔들이 없습니다.</EmptyState>
+              <EmptyState>{t("legacy.candlesPage.t8")}</EmptyState>
             ) : (
               <CandlestickChart data={points} />
             )}

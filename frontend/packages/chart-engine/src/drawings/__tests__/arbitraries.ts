@@ -105,3 +105,101 @@ export function genCollection(rng: Rng, maxSize = 12): DrawingCollection {
   const size = rng.int(0, maxSize);
   return Array.from({ length: size }, (_, i) => genDrawing(rng, `d-${i}-${rng.int(0, 9999)}`));
 }
+
+/** Ids that would leak into `Object.prototype` if a decoder ever used an object/Map keyed by id. */
+export const ADVERSARIAL_IDS: readonly string[] = [
+  "__proto__",
+  "constructor",
+  "prototype",
+  "hasOwnProperty",
+  "toString",
+  String.fromCharCode(0x200b, 0x200b, 0x200b), // zero-width spaces only
+  "a".repeat(5000),
+];
+
+type Json = Record<string, unknown>;
+
+const REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  trendline: ["points"],
+  rectangle: ["points"],
+  fibonacci: ["points", "levels"],
+  "horizontal-line": ["price"],
+  "vertical-line": ["time"],
+};
+
+export type WireCorruption =
+  | "missing_field"
+  | "unknown_field"
+  | "invalid_number"
+  | "bad_schema_version"
+  | "duplicate_id"
+  | "truncated_points"
+  | "unknown_kind";
+
+const WIRE_CORRUPTIONS: readonly WireCorruption[] = [
+  "missing_field",
+  "unknown_field",
+  "invalid_number",
+  "bad_schema_version",
+  "duplicate_id",
+  "truncated_points",
+  "unknown_kind",
+];
+
+export interface CorruptedDocument {
+  readonly doc: unknown;
+  readonly corruption: WireCorruption;
+}
+
+/**
+ * Injects one structural corruption into an encoded drawings document, chosen
+ * and targeted by `rng` (a fault-injection fuzzer for the wire format). The
+ * result is never a valid `DrawingsDocument` — every corruption kind removes,
+ * mistypes or duplicates something `fromDrawingsDocument` must reject.
+ */
+export function corruptDocument(
+  rng: Rng,
+  doc: { readonly schema_version: number; readonly drawings: readonly Json[] },
+): CorruptedDocument | null {
+  if (doc.drawings.length === 0) return null;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const clone = JSON.parse(JSON.stringify(doc)) as { schema_version: unknown; drawings: Json[] };
+    const index = rng.int(0, clone.drawings.length - 1);
+    const drawing = clone.drawings[index]!;
+    const kind = drawing.kind as string;
+    const corruption = rng.pick(WIRE_CORRUPTIONS);
+    switch (corruption) {
+      case "missing_field": {
+        const required = REQUIRED_FIELDS[kind] ?? [];
+        if (required.length === 0) continue;
+        delete drawing[rng.pick(required)];
+        break;
+      }
+      case "unknown_field":
+        drawing.__drift_injected__ = "unexpected";
+        break;
+      case "invalid_number": {
+        const numericKeys = Object.keys(drawing).filter((k) => typeof drawing[k] === "number");
+        if (numericKeys.length === 0) continue;
+        drawing[rng.pick(numericKeys)] = "not-a-number";
+        break;
+      }
+      case "bad_schema_version":
+        clone.schema_version = rng.pick<unknown>([0, 2, "1", null]);
+        break;
+      case "duplicate_id":
+        if (clone.drawings.length < 2) continue;
+        drawing.id = clone.drawings[(index + 1) % clone.drawings.length]!.id;
+        break;
+      case "truncated_points":
+        if (!Array.isArray(drawing.points)) continue;
+        drawing.points = (drawing.points as unknown[]).slice(0, 1);
+        break;
+      case "unknown_kind":
+        drawing.kind = "ellipse";
+        break;
+    }
+    return { doc: clone, corruption };
+  }
+  return null;
+}

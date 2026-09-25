@@ -1,23 +1,26 @@
-"""IND-1 — 스트리밍 상태 기반 증분 지표 계산(리플레이·실시간 동일 결과).
+"""IND-1 — Streaming state-based incremental indicator computation (identical replay/live results).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.3 `engine/incremental.py`,
-§9.3 IND-1 (DoD: 증분 = 일괄(`engine/vectorized.py`) 결과 1e-9 이내 동일).
+§9.3 IND-1 (DoD: incremental = batch (`engine/vectorized.py`) results within 1e-9).
 
-순수 모듈 — I/O·numpy 없음. 지표 조회·파라미터 검증·lookback은 `engine/__init__.py`
-경유로 L02 레지스트리에 위임한다(lookback은 L01 TA-Lib 실측값이 단일 출처, 재계산 금지).
-각 bar 뒤 상태의 "준비됨" 여부가 레지스트리 lookback과 어긋나면
-`INDICATOR_LOOKBACK_MISMATCH`로 fail-closed 한다(창 산식이 L01과 조용히 어긋나는 것을 막는
-자기검증).
+Pure module — no I/O, no numpy. Indicator lookup, parameter validation, and lookback
+are delegated via `engine/__init__.py` to the L02 registry (lookback relies on L01
+TA-Lib measured values as the single source of truth; re-computation is prohibited).
+If the "ready" state after each bar diverges from the registry lookback,
+fail-closed with `INDICATOR_LOOKBACK_MISMATCH` (self-validation that prevents the
+window calculation from silently drifting from L01).
 
-수치 규칙(일괄 엔진과 1e-9 동일성을 위해 양쪽이 같은 산식을 쓴다):
-- 창 통계(SMA·최대·최소·편차)는 매 bar 창 전체를 다시 계산한다 — 누적 합을
-  더하고 빼는 방식은 긴 스트림에서 부동소수 drift가 1e-9를 넘을 수 있다.
-- EMA 시드는 첫 period개의 단순평균(TA-Lib 기본 호환), 갱신 `prev + (x - prev) * k`.
-- Wilder 평활(RSI·ATR)은 첫 period개 단순평균 시드 후 `(prev * (p - 1) + x) / p`.
-- MACD fast 라인은 TA-Lib과 같이 `slow - fast`개 bar를 버린 뒤 시드한다.
-- lookback 미충족 구간은 None으로 명시 반환한다(0 대체 금지).
-- 0 나눗셈 보호는 정확한 0 비교(TA-Lib의 1e-8 근사 대신). MFI는 TA-Lib과 같이
-  총 흐름 < 1.0 이면 0.
+Numerical rules (both engines use the same formula for 1e-9 identity):
+- Window statistics (SMA, max, min, deviation) are re-computed over the full window
+  each bar — additive/subtractive accumulation can exceed 1e-9 float drift on long streams.
+- EMA seed: simple average of the first `period` bars (TA-Lib default compatible),
+  update: `prev + (x - prev) * k`.
+- Wilder smoothing (RSI, ATR): seed with simple average of the first `period` bars,
+  then `(prev * (p - 1) + x) / p`.
+- MACD fast line: discard `slow - fast` bars then seed, matching TA-Lib.
+- Periods before lookback is satisfied return None explicitly (never substitute 0).
+- Zero-division guard uses exact 0 comparison (not TA-Lib's 1e-8 approximation).
+  MFI: when total flow < 1.0, return 0, matching TA-Lib.
 """
 from __future__ import annotations
 
@@ -33,7 +36,8 @@ __all__ = ["IncrementalIndicator"]
 
 
 class _Window:
-    """고정 길이 창. 통계는 매 bar 창 전체를 다시 계산한다(누적 drift 없음)."""
+    """Fixed-length window. Statistics are re-computed over the full window
+    each bar (no cumulative drift)."""
 
     def __init__(self, size: int) -> None:
         self.size = size
@@ -63,7 +67,7 @@ class _Window:
 
 
 class _Ema:
-    """SMA 시드 EMA. `skip`개 bar를 버린 뒤 시드 창을 채운다(MACD fast 라인용)."""
+    """SMA-seeded EMA. Discards `skip` bars, then fills the seed window (for MACD fast line)."""
 
     def __init__(self, period: int, skip: int = 0) -> None:
         self._k = 2.0 / (period + 1)
@@ -84,7 +88,8 @@ class _Ema:
 
 
 class _Wilder:
-    """Wilder 평활: 첫 period개 단순평균 시드 후 `(prev * (p - 1) + x) / p`."""
+    """Wilder smoothing: seed with simple average of the first `period` bars,
+    then `(prev * (p - 1) + x) / p`."""
 
     def __init__(self, period: int) -> None:
         self._period = period
@@ -272,7 +277,7 @@ _STATES: dict[str, Callable[[dict[str, int]], _State]] = {
 
 
 class IncrementalIndicator:
-    """bar 하나씩 받아 지표값을 내는 스트리밍 계산기(리플레이·실시간 동일 경로)."""
+    """Streaming calculator that consumes bars one at a time (identical replay/live path)."""
 
     def __init__(
         self,
@@ -288,7 +293,8 @@ class IncrementalIndicator:
         self.bars_seen = 0
 
     def update(self, bar: Bar) -> dict[str, float | None]:
-        """다음 bar를 반영하고 출력별 값을 돌려준다. lookback 미충족이면 값은 None."""
+        """Process the next bar and return output values.
+        Returns None for outputs not yet past lookback."""
         inputs = validate_input(self.spec, bar)
         values = self._state.update(inputs)
         self.bars_seen += 1

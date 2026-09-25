@@ -12,7 +12,18 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.4 PAYOUT_PAID, §9 
 (이미 `PAID`/`FAILED`인 배치 재확정 시도, 105번 표준 조건부 UPDATE 실패)는
 여기서 try/except로 잡지 않고 전역 `EXCEPTION_MAP`(src/api/contracts/
 exception_mapping.py, PLT 계약 task-108/112)에 위임한다 — 이 두 예외를
-그 표에 추가하는 것도 이 리프의 일부다."""
+그 표에 추가하는 것도 이 리프의 일부다.
+
+PLT-35-fix(task-3850): confirming a payout batch as PAID records real
+money having left the ledger, so it now also carries
+`require_break_glass("tenant_read")` -- of the 3 break-glass scopes
+(`kill_switch_override`/`tenant_read`/`credential_revoke`, fixed in the
+PLT-35 core, not extended by this leaf) none literally matches "confirm a
+payout batch"; this approximates with the closest of the three,
+`tenant_read` (elevated access to a specific seller/tenant's payout
+status) -- a precise 4th scope (e.g. `payout_confirm`) would need a PM
+decision to extend the core (out of scope for this leaf)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -22,8 +33,10 @@ import asyncpg
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from src.api.admin_deps import require_break_glass
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.deps import get_current_admin, get_pool
+from src.core.security.break_glass import BreakGlassGrant
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
@@ -49,6 +62,7 @@ async def post_mark_payout_paid(
     body: MarkPayoutPaidRequest,
     admin: User = Depends(get_current_admin),
     pool: asyncpg.Pool = Depends(get_pool),
+    _grant: BreakGlassGrant = Depends(require_break_glass("tenant_read")),  # noqa: B008 -- same existing convention as admin_deps.py (the factory call itself is the Depends argument)
 ) -> ApiResponse[PayoutBatchView]:
     async with pool.acquire() as conn, conn.transaction():
         result = await mark_payout_paid(

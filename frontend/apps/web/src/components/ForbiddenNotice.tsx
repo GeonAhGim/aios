@@ -1,6 +1,7 @@
 import { classifyForbidden, getApiErrorMessage } from "@aios/shared-types";
 import { Alert, Button } from "@aios/ui-web";
 import { DenialReasons } from "./DenialReasons";
+import { useTranslation } from "react-i18next";
 
 // 403 응답을 classifyForbidden(shared-types/forbidden.ts)의 네 갈래로 나눠 보여주는
 // 표시 전용 컴포넌트. status가 403이 아니면(또는 error가 비어있으면) null을 반환해
@@ -28,6 +29,7 @@ function extractMessage(error: unknown): string | undefined {
 }
 
 export function ForbiddenNotice({ error, onStepUp }: ForbiddenNoticeProps) {
+  const { t } = useTranslation();
   const kind = classifyForbidden(error);
   if (!kind) return null;
 
@@ -40,8 +42,7 @@ export function ForbiddenNotice({ error, onStepUp }: ForbiddenNoticeProps) {
       {kind === "mfa_required" && onStepUp && (
         <div className="mt-2">
           <Button size="sm" variant="primary" onClick={onStepUp}>
-            step-up 인증
-          </Button>
+            {t("legacy.forbiddenNotice.t1")}</Button>
         </div>
       )}
     </Alert>

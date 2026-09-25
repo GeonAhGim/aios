@@ -1,9 +1,10 @@
 # RESEARCH_DATA_SOURCE_EVAL — 리서치 데이터 소스 평가 (RD-1)
 
 - 리프: RD-1 (`docs/specs/L4_research_data_and_market_ecosystem_v1.0.md` §9 RD-1, 대상 목록은 §2.3)
-- 범위: **문서만.** 코드 변경 0. 이 문서가 통과하기 전에는 RD-10~18(어댑터) 리프를 배정하지 않는다(§9 RD-1 note).
+- 범위: **라이선스 게이트 문서** + 기계 검증(task-2904 deepen). 판정 본문은 이 파일이 진실이고, `src/foundation/research_data/domain/source_eval_gate.py`(+`source_eval_parse.py`)가 DoD (a)(c)(e)(f)와 §9.1/§9.2 허용·금지 스냅샷을 fail-closed로 재검증한다. CLI: `python scripts/check_research_data_source_eval.py`(OPS-42: CI 필수 게이트 미승격·warn 후보). 이 문서가 통과하기 전에는 RD-10~18(어댑터) 리프를 배정하지 않는다(§9 RD-1 note).
 - 대상: §2.3 표 그대로 계층 A 8종 — OpenDART, ECOS, KOSIS, KRX 정보데이터시스템, FRED, SEC EDGAR, GDELT, 범용 RSS/Atom.
 - 확인 날짜: 모든 원문 인용은 **2026-09-09**에 해당 URL에서 확인했다(웹 검색 도구 사용, JS 렌더링 SPA는 원문 확보 불가 — 해당 소스는 그 사실 자체를 판정 근거로 남긴다).
+- 리프 분류: **문서+게이트**(순수 문서 전용 아님). DEPTH_DC_RD D0 지적(문서만)을 기계 게이트·D2 테스트로 해소 — 새 어댑터 기능 추가 없음.
 
 ## 0. 채점 원칙 — 이 리프는 "최고점을 고르는" 문서가 아니라 라이선스 게이트다
 
@@ -219,7 +220,7 @@ CH-0(`CHART_ENGINE_FORK_EVAL.md`)이 후보 중 최선을 고르는 비교 평�
 - **KOSIS**: 필요(활용신청 → 자동승인 → 회원당 인증키 1개, 전 서비스 공용 — 절차 존재만 확인, 세부 조항 수치는 인용하지 않음).
 
 ### 9.4 INVARIANTS.md I-01~I-11 저촉 확인
-이 리프는 문서 리프(코드 변경 0)라 대부분의 불변조건은 해당사항이 없다. 관련 있는 두 개만 확인한다:
+이 리프는 판정 문서 + 순수 게이트(`domain/source_eval_gate.py`)다. 관련 있는 항목만 확인한다:
 - **I-08**(MCP/도구 서버는 REST/도메인 계층 이상의 인가·비즈니스 로직을 갖지 않는다): RD-16 MCP 도구(`research_data_search`)가 이 문서의 `link_only` 판정을 우회해 본문을 반환해서는 안 된다. 판정 자체는 도메인 계층(`domain/redistribution.py`, RD-3)에 있어야 하고 MCP는 얇은 프록시로 그 결과를 그대로 전달해야 한다 — 이 결론이 I-08과 충돌하지 않는다.
-- **I-10**("구현됨 ≠ 작동함", 안전/정책 컴포넌트는 배선 증명 필요): 이 문서 자체는 판정표일 뿐이며, GDELT·RSS의 `link_only` 강제와 SEC EDGAR·OpenDART의 서술 본문 `store_excerpt` 제한이 **RD-3(`domain/redistribution.py`)에서 실제로 `body_ref=None`을 강제하고 RD-4/RD-15 적대적 통합테스트로 배선 증명될 때까지는 I-10을 충족하지 않는다**. RD-1(이 문서)은 게이트 통과일 뿐 완료 증명이 아니다.
-- 나머지 I-01/02/03/04/05/06/07/09/11은 이 리프의 범위(문서·라이선스 판정)와 무관해 해당사항 없음.
+- **I-10**("구현됨 ≠ 작동함", 안전/정책 컴포넌트는 배선 증명 필요): 이 문서 자체는 판정표일 뿐이며, GDELT·RSS의 `link_only` 강제와 SEC EDGAR·OpenDART의 서술 본문 `store_excerpt` 제한이 **RD-3(`domain/redistribution.py`)에서 실제로 `body_ref=None`을 강제하고 RD-4/RD-15 적대적 통합테스트로 배선 증명될 때까지는 I-10을 충족하지 않는다**. RD-1의 기계 게이트는 문서 DoD 회귀만 막으며, 런타임 배선 증명은 아니다.
+- 나머지 I-01/02/03/04/05/06/07/09/11은 이 리프의 범위(문서·라이선스 판정·문서 게이트)와 무관해 해당사항 없음.

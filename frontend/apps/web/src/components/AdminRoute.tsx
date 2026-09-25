@@ -5,16 +5,17 @@ import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { ErrorMessage } from "./ErrorMessage";
 import { ForbiddenNotice } from "./ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // FD-18 — is_platform_admin 가드.
 export function AdminRoute({ children }: { children: ReactNode }) {
+  const { t } = useTranslation();
   const { data: me, isLoading, isError, error, refetch } = useMe();
 
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-bg text-fg-muted">
-        로딩 중...
-      </div>
+        {t("legacy.adminRoute.t1")}</div>
     );
   }
   // task-1155: useMe()가 네트워크/서버 오류로 실패하면 이전에는 me가 undefined인

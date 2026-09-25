@@ -1,3 +1,4 @@
+import "../i18n";
 import "@testing-library/jest-dom/vitest";
 import type { InstrumentView, ParsedInstrumentView, SymbolAlias } from "@aios/shared-types";
 import { cleanup, render, screen } from "@testing-library/react";

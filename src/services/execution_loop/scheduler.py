@@ -25,12 +25,25 @@ main.py의 다른 백그라운드 루프(heartbeat/alert/risk_guard)와 같은 �
   리스를 획득/갱신한 것만 tick 대상으로 돌려준다(I-02, §4.1) — 다른
   프로세스가 만료 전 리스를 쥐고 있으면 그 execution_id는 이번 주기에
   조용히 건너뛴다(예외를 던지지 않는다).
+- R-48 -- `distrust_provider_factory` is optional (reference quotes only
+  strengthen the safety net, they are not a precondition of the block logic
+  itself, so `run_execution_tick`'s `distrust_providers` default of `()` is
+  also a valid value). But leaving this factory empty pins the reference
+  quorum at 0 every tick, so `DataDistrustMonitor` can only ever judge
+  `DEGRADED_SINGLE_SOURCE`/`DISTRUSTED` (the 0-reference branch) -- the real
+  wiring (background_loops.py) must fill it in (this argument was entirely
+  missing once before, a wiring defect that meant the 2-source quorum
+  comparison never ran in production, task-2810). Different adapters need
+  different reference sources (Bitget futures mark price needs the adapter
+  resolved for this tick), so it takes a `(adapter, exchange) -> providers`
+  factory rather than a fixed list decided at construction time.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -50,10 +63,12 @@ from src.services.execution_loop.tick import FenceReaderFactory, run_execution_t
 from src.services.order_service.gate import PreSubmitGate
 from src.services.order_service.submit import PublishFn
 from src.services.order_service.worm_decision_check import DecisionReader
+from src.services.safety.reference_quotes import ReferenceQuoteProvider
 
 logger = logging.getLogger(__name__)
 
 AdapterResolver = Callable[[UUID, str], Awaitable[ExchangeAdapter]]
+DistrustProviderFactory = Callable[[ExchangeAdapter, str], Sequence[ReferenceQuoteProvider]]
 
 DEFAULT_MAX_CONCURRENT_TICKS = 4
 _LEASE_TTL_INTERVAL_MULTIPLIER = 5  # §5.2 Draft — interval_sec의 5배
@@ -83,6 +98,7 @@ class ExecutionLoopScheduler:
         ttl_override_seconds: float | None = None,
         fence_reader_factory: FenceReaderFactory | None = None,
         decision_reader: DecisionReader | None = None,
+        distrust_provider_factory: DistrustProviderFactory | None = None,
     ) -> None:
         self._pool = pool
         self._resolve_adapter = resolve_adapter
@@ -94,6 +110,7 @@ class ExecutionLoopScheduler:
         self._owner_id = owner_id
         self._fence_reader_factory = fence_reader_factory
         self._decision_reader = decision_reader
+        self._distrust_provider_factory = distrust_provider_factory
         self._lease_ttl_seconds = (
             ttl_override_seconds
             if ttl_override_seconds is not None
@@ -136,7 +153,9 @@ class ExecutionLoopScheduler:
         return report
 
     async def _tick_one(self, row: dict[str, object], report: TickReport) -> None:
-        execution_id = int(row["id"])  # type: ignore[call-overload]
+        raw_execution_id = row["id"]
+        assert isinstance(raw_execution_id, int)
+        execution_id = raw_execution_id
         user_id = row["user_id"]
         exchange = str(row["exchange"])
         assert isinstance(user_id, UUID)
@@ -149,6 +168,11 @@ class ExecutionLoopScheduler:
                     "execution_loop: execution_id=%s 자격증명 없음 — 이번 틱 건너뜀", execution_id
                 )
                 return
+            distrust_providers = (
+                self._distrust_provider_factory(adapter, exchange)
+                if self._distrust_provider_factory is not None
+                else ()
+            )
             try:
                 await run_execution_tick(
                     self._pool,
@@ -163,6 +187,7 @@ class ExecutionLoopScheduler:
                     publish=self._publish,
                     pre_submit_gate=self._pre_submit_gate,
                     distrust_monitor=self._distrust_monitor,
+                    distrust_providers=distrust_providers,
                     fence_reader_factory=self._fence_reader_factory,
                     decision_reader=self._decision_reader,
                 )

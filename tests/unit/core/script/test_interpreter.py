@@ -8,6 +8,7 @@ DSL-3 `parse()` → DSL-7 `lower_program()` 산출물을 그대로 실행한다.
 AST로 정적 검사, (5) 결정론(재실행·바이트 왕복 동일). 참조 구현 대비 동일성은
 `test_interpreter_property.py`.
 """
+
 from __future__ import annotations
 
 import ast
@@ -17,6 +18,7 @@ from typing import cast
 
 import pytest
 
+import src.core.script.runtime.interpreter as interpreter_module
 from src.core.script.grammar.ast import Identifier, NumberLiteral
 from src.core.script.grammar.parser import parse
 from src.core.script.ir import (
@@ -40,6 +42,7 @@ from src.core.script.runtime import (
     broadcast,
     execute,
 )
+from tests.conftest import PerfBudget
 
 _RUNTIME_DIR = Path(__file__).resolve().parents[4] / "src" / "core" / "script" / "runtime"
 
@@ -236,7 +239,12 @@ def test_deep_expression_runs_under_tiny_recursion_limit() -> None:
 
 
 _ALLOWED_IMPORT_PREFIXES = (
-    "__future__", "collections.abc", "dataclasses", "math", "typing", "src.core.script."
+    "__future__",
+    "collections.abc",
+    "dataclasses",
+    "math",
+    "typing",
+    "src.core.script.",
 )
 
 
@@ -261,3 +269,84 @@ def test_runtime_modules_import_no_io_and_never_call_themselves(module: str) -> 
             )
             assert not own, f"{module}: {func.name}가 자기 자신을 호출(재귀)"
             assert not (isinstance(callee, ast.Name) and callee.id in {"open", "exec", "eval"})
+
+
+# ---- DEEPEN(task-2917): 실패 주입(빌트인 디스패치 예외) ----
+
+
+def test_builtin_dispatch_exception_propagates_unmasked_and_leaves_no_residue() -> None:
+    """빌트인 본체는 DSL-9 소유이고 인터프리터는 `_call`에서 호출만 중계한다
+    (모듈 docstring 19~22행) — 네트워크·거래소 어댑터를 감싼 실제 빌트인이
+    인프라 장애(연결 끊김 등)로 예외를 던지는 상황을 시뮬레이션한다. `_call`은
+    `fn(args, site)`를 try/except 없이 그대로 호출한다: 그 예외를
+    `ScriptRuntimeError`로 감싸 삼키거나 부분 결과를 성공으로 위장해 반환하면
+    안 되고, 원래 예외 타입 그대로(가장 fail-closed한 형태) 즉시 전파해야
+    한다. 이어서 같은 IR을 정상 레지스트리로 재실행해 이전 실행의 예외가
+    인터프리터 전역 상태를 오염시키지 않았음을 확인한다(매 `execute()` 호출은
+    새 `_Machine` 인스턴스)."""
+    ir = lower_program(parse("input close: series<float> = 0\nlet m = ta.sma(close, 2)"))
+
+    def _flaky(_args: tuple[Value, ...], _site: CallSite) -> Value:
+        raise ConnectionError("simulated exchange adapter timeout")
+
+    with pytest.raises(ConnectionError, match="simulated exchange adapter timeout"):
+        execute(ir, bar_count=5, inputs={"close": CLOSE}, builtins={("ta", "sma"): _flaky})
+
+    result = execute(ir, bar_count=5, inputs={"close": CLOSE}, builtins={("ta", "sma"): _sma})
+    assert result.bindings["m"] == Series((None, 2.0, 2.5, 3.5, 3.0))
+
+
+# ---- DEEPEN(task-2917): 수치 성능 단언(인터프리터 실행 지연) ----
+
+
+@pytest.mark.perf
+def test_execution_latency_p95_within_backtest_budget_slice(perf_budget: PerfBudget) -> None:
+    """ADR-2026-09-09-C Decision 1의 백테스트 예산(로컬 기준, 1개월 M1 1심볼
+    3초) 중 인터프리터 1회 실행(스택 머신이 명령열을 한 번 훑는 것) 몫을
+    하루치 단위(bar_count=1440, 1일치 1분봉)로 쪼개 250ms로 상한한다. 30개
+    let 체인을 20회 반복 실행해 p95로 잰다. 파싱·로우어링(DSL-3/DSL-7의
+    몫, 각자 성능 단언을 이미 잼)은 루프 밖에서 한 번만 수행해 이중으로
+    재지 않는다. task-7434: process_time 기반 perf_budget으로 측정한다
+    (coverage tracer 정지 포함)."""
+    lines = [f"let v{i} = v{i - 1} * 1.0001 + 1 - 1" for i in range(1, 30)]
+    source = "input close: series<float> = 0\nlet v0 = close\n" + "\n".join(lines)
+    ir = lower_program(parse(source))
+    bar_count = 1440
+    close = Series.of_floats([float(i % 100) for i in range(bar_count)])
+
+    samples = perf_budget.samples(
+        lambda: execute(ir, bar_count=bar_count, inputs={"close": close}), n=20
+    )
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+
+    budget_ms = 250.0
+    print(f"[DSL-8 execute] p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
+
+
+# ---- DEEPEN(task-2917): 게이트 적색 재현(빌트인 반환값 검사 무력화) ----
+
+
+def test_builtin_return_check_removal_lets_length_mismatch_through_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_call`의 빌트인 반환값 검사(`check_value(result, instr.type, self._n,
+    ...)`, 모듈 docstring "빌트인 반환값도 주석·봉 수와 대조한다")가
+    무력화되는 회귀를 먼저 재현한다: 검사를 항등 함수로 바꾸면 길이가 틀린
+    반환값(bar_count=5인데 원소 1개짜리 시리즈)이 그대로 바인딩에 들어가
+    프로그램이 조용히 "성공"해버린다(레드 — 바로 위 길이 불일치 negative
+    테스트가 잡는 그 케이스가 무검사로 통과함). 원래 구현은 `check_value`가
+    즉시 `ScriptRuntimeError`로 거부한다(회귀 가드)."""
+    ir = lower_program(parse("input close: series<float> = 0\nlet m = ta.sma(close, 2)"))
+    bad_len: BuiltinRegistry = {("ta", "sma"): lambda _a, _s: Series.of_floats([1.0])}
+
+    monkeypatch.setattr(interpreter_module, "check_value", lambda v, *_a, **_k: v)
+    result = execute(ir, bar_count=5, inputs={"close": CLOSE}, builtins=bad_len)
+    assert result.bindings["m"] == Series.of_floats(
+        [1.0]
+    )  # 회귀: 길이 불일치가 무검사로 통과(레드)
+
+    monkeypatch.undo()
+    with pytest.raises(ScriptRuntimeError, match="길이"):
+        execute(ir, bar_count=5, inputs={"close": CLOSE}, builtins=bad_len)

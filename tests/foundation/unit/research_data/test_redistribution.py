@@ -3,15 +3,19 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §3, §9 RD-3
 DoD (a)(b).
 """
+
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from typing import cast
 from uuid import uuid4
 
 import pytest
 
 from src.foundation.market_data.domain.entitlement import source_contract as source_contract_module
 from src.foundation.market_data.domain.entitlement.source_contract import (
+    DataUse,
     RedistributionScope,
     SourceCapability,
     SourceContractGrant,
@@ -152,3 +156,85 @@ def test_delegates_to_permits_use_not_reimplemented(monkeypatch: pytest.MonkeyPa
     # 바꾸면 위임하는 구현은 통과로 뒤집힌다.
     monkeypatch.setattr(redistribution_module, "permits_use", lambda scope, use: True)
     assert_redistribution_allowed(item, source, _grant(scope=RedistributionScope.NONE))
+
+
+# ---- DEEPEN(task-2907) — DEPTH_DC_RD.md D2 부족분: 실패주입/성능단언/게이트적색 ----
+
+
+def test_corrupted_grant_scope_propagates_keyerror_instead_of_silently_permitting() -> None:
+    """실패 주입 — DC-27 grant가 pydantic 검증을 우회해 만들어진 경우(예:
+    성능 경로에서 `model_construct`를 쓰는 어댑터, 또는 구버전 enum 값이
+    남은 행의 역직렬화) `redistribution_scope`가 이 코드가 아는
+    `RedistributionScope` 멤버가 아닐 수 있다. `permits_use` 내부 딕셔너리
+    조회는 이때 `KeyError`를 던지는데, `assert_redistribution_allowed`는
+    이를 삼켜 조용히 허용으로 돌리지 않고 그대로 전파해야 한다 — 모르는
+    상태를 허용으로 해석하는 것은 fail-open이라 금지된다."""
+    item = _item(body_ref="full article text")
+    source = _source(redistribution="store_full")
+    bogus_scope = cast(RedistributionScope, "BOGUS_SCOPE")
+    grant = SourceContractGrant.model_construct(
+        allowed=True,
+        tier=SourceContractTier.FREE,
+        redistribution_scope=bogus_scope,
+        rate_limit=60,
+        quota=1000,
+        capability=_CAPABILITY,
+        denial_reason=None,
+    )
+    with pytest.raises(KeyError):
+        assert_redistribution_allowed(item, source, grant)
+
+
+@pytest.mark.perf
+def test_assert_redistribution_allowed_meets_latency_budget_for_bulk_calls() -> None:
+    """성능 단언 — 순수 함수(I/O 없음) 호출은 상수 시간이어야 한다. 대량
+    반복 호출(예: 배치 수집 후 일괄 검증)이 절대시간 예산 내에 있다 —
+    회귀가 있다면(예: 매 호출마다 소스 테이블을 O(n) 스캔하는 재구현으로
+    퇴화) 예산을 넘는다."""
+    item = _item(body_ref=None)
+    source = _source(redistribution="link_only")
+    grant = _grant()
+
+    budget_sec = 1.0  # 실측 로컬 <0.05s(20,000회, 상수시간 순수 함수 기준)
+    start_time = time.perf_counter()
+    for _ in range(20_000):
+        assert_redistribution_allowed(item, source, grant)
+    elapsed = time.perf_counter() - start_time
+
+    print(f"[RD-3 redistribution] 20000 calls in {elapsed:.3f}s (budget<{budget_sec}s)")
+    assert elapsed < budget_sec, (
+        f"assert_redistribution_allowed 20000회 호출이 예산({budget_sec}s)을 "
+        f"넘었습니다({elapsed:.3f}s) — 상수시간 순수 함수가 아닌 무언가로 "
+        "퇴화했는지 확인하세요."
+    )
+
+
+def test_gate_red_if_license_gate_removed_existing_negative_would_flip() -> None:
+    """게이트 적색 재현 — RD-3(a) 라이선스 게이트(link_only + body_ref
+    거부) 줄이 실수로 삭제된 회귀를 흉내낸 대조 구현을 구성해, 그 버전은
+    동일 입력을 거부하지 않고 조용히 통과시킴(green→red 반전)을 실측한다.
+    현재 구현은 동일 입력을 여전히 거부한다 — 이 테스트가 실제로 위험한
+    회귀를 잡아낼 수 있다는 증거다."""
+    item = _item(body_ref="a")
+    source = _source(redistribution="link_only")
+    grant = _grant()
+
+    def _regressed_without_license_gate(
+        item: ResearchItem, source: SourceMeta, grant: SourceContractGrant
+    ) -> None:
+        # RD-3(a) 라이선스 게이트가 빠진 회귀 -- 등급 게이트만 남았다고 가정.
+        if (
+            not grant.allowed
+            or grant.redistribution_scope is None
+            or not source_contract_module.permits_use(
+                grant.redistribution_scope, DataUse.INTERNAL_CALC
+            )
+        ):
+            raise RedistributionViolationError(item, reason="source_contract_denied")
+        # (license gate missing here -- link_only + body_ref 조합을 걸러내지 못한다)
+
+    _regressed_without_license_gate(item, source, grant)  # raise 없음 == 회귀가 실제로 위험함
+
+    with pytest.raises(RedistributionViolationError) as exc_info:
+        assert_redistribution_allowed(item, source, grant)
+    assert exc_info.value.reason == "link_only_body_present"

@@ -1,22 +1,24 @@
-"""LA-23b — 컬럼지향 읽기 전용 뷰(ADR-2026-09-04-A #1).
+"""LA-23b — Column-oriented read-only view (ADR-2026-09-04-A #1).
 
 Spec: docs/design/ADR-2026-09-04-A-market-data-replay-perf.md #1,
 docs/specs/L4_market_data_positions_ledger_v1.0.md#§8.4.
 
-리플레이·백테스트 같은 대량 소비자가 캔들 하나하나를 pydantic
-`CandleRecord`로 검증·인스턴스화하지 않고도 순회할 수 있게 ts/o/h/l/c/v를
-배열로 담는다. `close_time`은 쓰기 시점 불변식(`domain/quality/ohlc_sanity.
-check_candle`이 `close_time == open_time + duration(timeframe)`을 강제하고,
-위반 캔들은 REJECT로 격리되어 `md_candle`에 저장되지 않는다)에 따라 항상
-유도 가능하므로 배열로 들고 다니지 않는다.
+Provides array containers for ts/o/h/l/c/v so bulk consumers like replay
+and backtesting can iterate candle rows without validating/instantiating
+each one through the pydantic `CandleRecord`. `close_time` is derivable
+at write time from the invariant (`domain/quality/ohlc_sanity.check_candle`
+enforces `close_time == open_time + duration(timeframe)`), and violating
+candles are quarantined as REJECT and never stored in `md_candle`, so it
+is not held in the array.
 
-ADR 원문은 배열을 "ts/o/h/l/c/v"로만 적었지만, `quote_volume`은 여기서
-빼면 `to_candle_records`가 `CandleRecord`를 무손실 재구성하지 못해
-`domain/lineage.batch_hash`가 원래 값과 달라진다 — contracts/v1 불변(P5)과
-batch_hash 바이트 동일성(P3 WORM, 같은 ADR #2) 둘 다 지키려면 필요한
-확장이다(정직하게 남겨 두는 편차).
+The ADR originally listed the array as "ts/o/h/l/c/v" only; excluding
+`quote_volume` here would prevent `to_candle_records` from losslessly
+reconstructing `CandleRecord`, causing `domain/lineage.batch_hash` to
+differ from the original value. Adding it is a necessary extension to
+satisfy both contracts/v1 immutability (P5) and batch_hash byte
+identity (P3 WORM, same ADR #2) — a documented deviation kept openly.
 
-I/O 없음 — 순수 데이터 홀더 + 순수 변환 함수만 담는다.
+No I/O — holds pure data holders and pure transformation functions only.
 """
 from __future__ import annotations
 
@@ -32,8 +34,8 @@ __all__ = ["CandleColumns", "MismatchedColumnLengthError", "to_candle_records"]
 
 
 class MismatchedColumnLengthError(ValueError):
-    """`MD_CANDLE_COLUMNS_LENGTH_MISMATCH` — 배열 길이가 서로 다르면
-    인덱스 접근이 조용히 어긋난 행을 짝지을 수 있다(fail-closed로 거부)."""
+    """`MD_CANDLE_COLUMNS_LENGTH_MISMATCH` — when array lengths differ,
+    index-based access silently pairs mismatched rows (reject via fail-closed)."""
 
     def __init__(self, lengths: dict[str, int]) -> None:
         super().__init__(f"CandleColumns 배열 길이가 서로 다릅니다: {lengths}")
@@ -41,9 +43,9 @@ class MismatchedColumnLengthError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class CandleColumns:
-    """읽기 전용 컬럼 배열. 인덱스 `i`가 캔들 하나에 대응한다(`ts[i]`가
-    `open_time`). 정렬 순서(`open_time ASC`)는 어댑터의 `ORDER BY`가
-    보장한다 — 이 타입 자체는 정렬을 검증하지 않는다."""
+    """Read-only column arrays. Index `i` maps to one candle (`ts[i]` is
+    `open_time`). Sort order (`open_time ASC`) is guaranteed by the
+    adapter's `ORDER BY` — this type itself does not verify sorting."""
 
     ts: list[AwareDatetime]
     open: list[Decimal]
@@ -58,16 +60,17 @@ class CandleColumns:
 
 
 def to_candle_records(columns: CandleColumns, key: SeriesKey) -> list[CandleRecord]:
-    """`columns`가 `key`(venue/instrument_id/timeframe)로 필터링해 조회한
-    결과라고 전제한다(호출자 책임 — 포트 계약, `ports/candle_store.
-    CandleStore.read_candles_columnar` 참고). 그래서 행마다 `SeriesKey`를 새로
-    만들지 않고 `key` 인스턴스를 그대로 공유한다 — WHERE 절이 이미 그 값과
-    같은 행만 돌려주므로 값은 항상 같다.
+    """Assumes `columns` was queried filtered by `key` (venue/instrument_id/
+    timeframe) (caller's responsibility — port contract, see
+    `ports/candle_store.CandleStore.read_candles_columnar`). Skips
+    rebuilding `SeriesKey` per row and shares the `key` instance directly —
+    the WHERE clause already returns only rows matching that value, so it
+    is always identical.
 
-    `CandleRecord.model_construct`로 필드 검증을 건너뛴다 — DB에서 읽은
-    Decimal·tz-aware datetime은 asyncpg가 이미 올바른 타입으로 반환하므로
-    (NUMERIC→Decimal, TIMESTAMPTZ→aware datetime) 재검증은 순수 비용이다.
-    쓰기 시점에 `ohlc_sanity.check_candle`을 통과한 데이터에만 안전하다."""
+    Skips field validation via `CandleRecord.model_construct` — asyncpg
+    already returns the correct types from the DB (NUMERIC→Decimal,
+    TIMESTAMPTZ→aware datetime), so re-validation is pure overhead. Safe
+    only for data that passed `ohlc_sanity.check_candle` at write time."""
     n = len(columns)
     lengths = {
         "open": len(columns.open),

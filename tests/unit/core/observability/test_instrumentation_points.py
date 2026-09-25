@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -358,3 +359,71 @@ async def test_submit_paper_intent_records_order_intent_metric(
 
     assert intent.state == "SUBMITTED"
     assert spy.counters == [(FOUNDATION_PAPER_CONTROL_ORDER_INTENT_COUNT_TOTAL, {"mode": "paper"})]
+
+
+# task-3147 DEEPEN — 도메인 거부 negative 2건 추가(기존 1건 + 아래 2건 = 3건).
+# §7.2 카운터는 제출 완료된 의도만 세야 하므로, 거부 시 오탐 없이 비어야 한다.
+# risk_repo/mandate_repo/connection_repo는 각 거부 경로 모두 평가 전에 실패하거나
+# monkeypatch로 대역돼 미사용 — 셋 다 Any로 캐스팅해 넘긴다.
+_UNUSED_PORTS: tuple[Any, Any, Any] = (None, None, None)
+
+
+async def test_submit_paper_intent_denied_by_risk_gate_records_no_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deployment = _paper_deployment()
+    repo = _FakePaperControlRepository(deployment)
+    adapter = FakePaperExecutionAdapter()
+    spy = _SpyMetrics()
+
+    async def deny_risk_gate(*args: object, **kwargs: object) -> RiskEvaluationView:
+        return RiskEvaluationView(
+            id=uuid4(),
+            gate_kind=GateKind.PRE_INTENT,
+            outcome=RiskOutcome.DENY,
+            reason_codes=["RISK_KILL_SWITCH_GLOBAL"],
+            obligations=[],
+            rule_version="v1",
+            evaluated_at=datetime.now(timezone.utc),
+            expires_at=None,
+        )
+
+    monkeypatch.setattr(submit_paper_intent_module, "evaluate_risk_gate", deny_risk_gate)
+
+    with pytest.raises(submit_paper_intent_module.RiskGateDeniedError):
+        await submit_paper_intent_module.submit_paper_intent(
+            repo,
+            adapter,
+            *_UNUSED_PORTS,
+            deployment_id=deployment.id,
+            expected_fence_token=1,
+            sequence=1,
+            metrics=spy,
+        )
+
+    assert spy.counters == []
+
+
+async def test_submit_paper_intent_fence_superseded_records_no_metric() -> None:
+    deployment = _paper_deployment()  # fence_token=1
+    repo = _FakePaperControlRepository(deployment)
+    adapter = FakePaperExecutionAdapter()
+    spy = _SpyMetrics()
+
+    with pytest.raises(submit_paper_intent_module.FenceSupersededError):
+        await submit_paper_intent_module.submit_paper_intent(
+            repo,
+            adapter,
+            *_UNUSED_PORTS,
+            deployment_id=deployment.id,
+            expected_fence_token=999,
+            sequence=1,
+            metrics=spy,
+        )
+
+    assert spy.counters == []
+
+
+# 성능 예산(ADR-2026-09-09-C Decision 1) + 게이트 적색 재현은
+# test_submit_order_perf_budget.py로 분리(§7 파일 정책 — 행동/계측 단언 축과
+# 지연 측정 축은 독립적으로 변경되는 별개 관심사).

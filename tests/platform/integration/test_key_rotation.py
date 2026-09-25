@@ -2,11 +2,22 @@
 
 DoD(§9 PLT-34): 100행 회전이 멱등(2회 실행 결과 동일)이고, 중단 후 재실행이
 남은 행만 처리해야 한다. LIVE 스코프는 절대 회전 대상이 아니다(PLT-33 §10-8).
+
+task-3177 DEEPEN: negative 테스트(≥3)·실패 주입·게이트 적색 재현은 이미 충족돼
+있었으나 수치 성능 단언이 0건이라 D2 하한(ADR-2026-09-09-C Decision 1)
+미달이었다. ADR-2026-09-09-C Decision 1 예산표에 행 단위 키 회전 전용 항목이
+없어, 행 하나를 트랜잭션 하나로 처리하는(`SELECT ... FOR UPDATE` + 복호 2~3회
++ 재암호화 2~3회 + 조건부 UPDATE + 감사 INSERT, 전부 단일 DB 왕복 내) 가장
+가까운 유사 항목 "주문 제출→ACK p95 50ms(paper)"를 자체 예산으로 차용한다
+(task-3160/3162/3164/3168/3169/3173/3174 DEEPEN과 동일 차용 근거).
 """
+
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import time
 
 import asyncpg
 import pytest
@@ -246,9 +257,7 @@ async def test_dry_run_counts_pending_without_writing(pool):
 async def test_cli_run_wires_key_ring_from_env_and_database_url(pool, monkeypatch, capsys):
     """I-10 배선 증명: `_run`이 실제로 `KeyRing.from_env("PAPER")`와 DATABASE_URL을
     써서 회전한다(테스트 본체가 함수를 직접 호출하는 것과 별개로 CLI 경로 확인)."""
-    monkeypatch.setenv(
-        "CREDENTIAL_ENCRYPTION_KEYS_PAPER", f"k1:{'11' * 32},k2:{'22' * 32}"
-    )
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEYS_PAPER", f"k1:{'11' * 32},k2:{'22' * 32}")
     monkeypatch.setenv("CREDENTIAL_ENCRYPTION_ACTIVE_KID_PAPER", "k2")
     monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEYS_LIVE", raising=False)
     monkeypatch.delenv("CREDENTIAL_ENCRYPTION_ACTIVE_KID_LIVE", raising=False)
@@ -277,3 +286,52 @@ def test_cli_rejects_non_positive_batch_and_max_rows():
         parser.parse_args(["--max-rows", "-1"])
     args = parser.parse_args(["--dry-run"])
     assert args.dry_run is True and args.batch_size == 100 and args.max_rows is None
+
+
+# --- 수치 성능 단언: 행 하나 회전(트랜잭션 하나) p95 ---
+
+_PERF_ITERATIONS = 30
+_PERF_BUDGET_MS = 50.0  # ADR-2026-09-09-C Decision 1의 "주문 제출→ACK p95
+# 50ms(paper)"를 가장 가까운 유사 항목으로 차용(행 단위 키 회전 전용 예산
+# 항목 없음) — 둘 다 SELECT FOR UPDATE·쓰기·부가 기록을 포함한 단일 DB
+# 왕복이라는 점에서 비교 가능한 부하 특성을 가진다(task-3160/3162/3164/
+# 3168/3169/3173/3174 DEEPEN과 동일 차용 근거).
+
+
+async def _rotate_one_row_p95_ms(pool: asyncpg.Pool, *, n: int) -> float:
+    await _seed_rows(pool, n)
+    durations_ms: list[float] = []
+    for _ in range(n):
+        start = time.perf_counter()
+        rotated = await rotate_paper_credentials(pool, NEW_RING, batch_size=1, max_rows=1)
+        durations_ms.append((time.perf_counter() - start) * 1000)
+        assert rotated == 1
+    durations_ms.sort()
+    return durations_ms[int(len(durations_ms) * 0.95)]
+
+
+async def test_single_row_rotation_p95_under_borrowed_order_ack_budget(pool):
+    """수치 성능 단언: 행 하나 회전(SELECT FOR UPDATE + 복호 2~3회 + 재암호화
+    2~3회 + 조건부 UPDATE + 감사 INSERT, 단일 트랜잭션) p95를 차용 예산
+    안으로 단언한다."""
+    p95_ms = await _rotate_one_row_p95_ms(pool, n=_PERF_ITERATIONS)
+
+    assert p95_ms < _PERF_BUDGET_MS
+
+
+async def test_single_row_rotation_budget_gate_fails_on_injected_regression(pool, monkeypatch):
+    """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
+    `asyncpg.Connection.execute`에 60ms 인위 지연을 주입해, 같은 측정
+    로직이 실제로 AssertionError를 내는지 본다(tautology가 아님을 증명)."""
+    original_execute = asyncpg.Connection.execute
+
+    async def _slow_execute(self: asyncpg.Connection, *args: object, **kwargs: object) -> object:
+        await asyncio.sleep(0.06)
+        return await original_execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "execute", _slow_execute)
+
+    p95_ms = await _rotate_one_row_p95_ms(pool, n=5)
+
+    with pytest.raises(AssertionError):
+        assert p95_ms < _PERF_BUDGET_MS

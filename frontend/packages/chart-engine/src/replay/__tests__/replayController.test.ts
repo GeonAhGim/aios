@@ -277,3 +277,126 @@ describe("data-path wiring (I-10)", () => {
     expect(source).not.toMatch(/\bDate\.now\b|\bglobalThis\.|\bwindow\.|\bperformance\./);
   });
 });
+
+// DEEPEN(task-3075) of task-1539 (CH-7, commit 527e719), per DEPTH_CH audit
+// (task-2729, docs/audit/DEPTH_CH.md): the original 12-test leaf had
+// negative>=7 and backtest golden-sequence identity, but zero failure
+// injection, no numeric performance assertion (the I-10 wiring check above is
+// a static source grep, not a runtime measurement), no gate-red reproduction,
+// and no D3 (adversarial/multi-instance) proof. This block fills those gaps.
+describe("DEEPEN(task-3075): failure injection, numeric perf, gate-red, D3", () => {
+  it("실패 주입: a clock.setTimeout failure propagates out of play() instead of being swallowed", () => {
+    const stream = loadedStream();
+    const throwingClock: ReplayClock = {
+      setTimeout(): ReplayTimer {
+        throw new Error("clock: timer subsystem exhausted");
+      },
+      clearTimeout(): void {},
+    };
+    const controller = createReplayController(stream, { clock: throwingClock });
+
+    expect(() => controller.play()).toThrow(/timer subsystem exhausted/);
+    // documents the current fail-open ordering: status flips to "playing" and the
+    // "play" frame is emitted *before* schedule() calls the (throwing) clock.
+    expect(controller.state().status).toBe("playing");
+  });
+
+  it("실패 주입: a throwing subscriber propagates out of seek() and stops later listeners, but the cursor it already moved is not rolled back", () => {
+    const fake = createFakeClock();
+    const stream = loadedStream();
+    const controller = createReplayController(stream, { clock: fake.clock });
+    const goodCalls: ReplayFrame[] = [];
+    controller.subscribe(() => {
+      throw new Error("listener: render failed");
+    });
+    controller.subscribe((f) => goodCalls.push(f));
+
+    expect(() => controller.seek(T0 + 2 * H)).toThrow(/render failed/);
+    expect(controller.state().cursorTs).toBe(T0 + 2 * H);
+    expect(goodCalls).toHaveLength(0);
+  });
+
+  it("수치 성능: stepping through 5,000 confirmed bars one at a time stays under a 500ms budget", () => {
+    const N = 5000;
+    const asOfMs = T0 + (N + 1) * H;
+    const records: CandleRecord[] = [];
+    for (let i = 0; i < N; i += 1) records.push(candle(i));
+    const parsed = parseCandleSeries({
+      data: {
+        key: KEY,
+        candles: records,
+        gaps: [] as Array<[string, string]>,
+        adjustment: "RAW",
+        as_of: iso(asOfMs),
+        series_hash: "perf-bench",
+        expected_count: N,
+        missing_count: 0,
+        instrument_id: KEY.instrument_id,
+        symbol: "BTCUSDT",
+        canonical_symbol: "BTC/USDT",
+        entitlement: { mode: "delayed", delayed_seconds: 900 },
+        schema_version: "v1",
+      },
+      meta: { trace_id: "6d2f7c1a-0b3e-4f5a-8c9d-1e2f3a4b5c6d", as_of: iso(asOfMs), page: null },
+    });
+    const stream = createCandleStream({ key: KEY });
+    expect(stream.applyPage(parsed)).toMatchObject({ ok: true, inserted: N });
+    const fake = createFakeClock();
+    const controller = createReplayController(stream, { clock: fake.clock });
+
+    const startedAt = performance.now();
+    for (let i = 0; i < N; i += 1) controller.step(1);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(controller.state()).toMatchObject({ visibleCount: N, totalCount: N, atEnd: true });
+    expect(elapsedMs).toBeLessThan(500);
+  });
+
+  it("게이트 적색 재현: the final tick frame already reports status paused and atEnd — flipping status after emit would go red", () => {
+    const { controller, frames, advance } = setup();
+    controller.play();
+    advance(1000 * GOLDEN_BARS.length);
+    const lastTick = frames.filter((f) => f.cause === "tick").at(-1)!;
+    expect(lastTick.state.status).toBe("paused");
+    expect(lastTick.state.atEnd).toBe(true);
+  });
+
+  it("게이트 적색 재현: two consecutive setSpeed calls while playing keep exactly one pending timer — a missing clearTimer would double-schedule and skip a bar", () => {
+    const { controller, advance, pending } = setup({ barIntervalMs: 1000, speed: 1 });
+    controller.play();
+    controller.setSpeed(2);
+    controller.setSpeed(4);
+    expect(pending()).toBe(1);
+    advance(250); // 1000 / 4
+    expect(controller.state().visibleCount).toBe(1);
+  });
+
+  it("어드버서리얼(D3): two controllers over independent streams never share cursor or timer state", () => {
+    const a = setup();
+    const b = setup();
+    a.controller.seek(T0 + 1 * H);
+    expect(b.controller.state().cursorTs).toBeNull();
+    a.controller.play();
+    a.advance(1000);
+    expect(b.pending()).toBe(0);
+    a.controller.dispose();
+    expect(() => b.controller.play()).not.toThrow();
+  });
+
+  it("어드버서리얼(D3): two controllers sharing one CandleStream keep independent cursors, and disposing one leaves the other's stream subscription intact", () => {
+    const fake = createFakeClock();
+    const stream = loadedStream();
+    const frames2: ReplayFrame[] = [];
+    const c1 = createReplayController(stream, { clock: fake.clock });
+    const c2 = createReplayController(stream, { clock: fake.clock });
+    c2.subscribe((f) => frames2.push(f));
+
+    c1.seek(T0 + 3 * H);
+    expect(c2.state().cursorTs).toBeNull();
+
+    c1.dispose();
+    stream.applyRealtime({ candle: candle(6, { close: "999" }), confirmed: true });
+    expect(frames2.at(-1)!.cause).toBe("stream");
+    expect(c2.state().totalCount).toBe(7);
+  });
+});

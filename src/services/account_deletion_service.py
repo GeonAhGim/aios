@@ -1,23 +1,26 @@
-"""11.6 — 회원탈퇴 API (AccountDeletionService).
+"""11.6 — Account Deletion API (AccountDeletionService).
 
-Spec: 기능설계문서_v1.20.md#FD-11.4, FD-16, 정책문서 8.10
+Spec: FunctionalSpec_v1.20.md#FD-11.4, FD-16, Policy 8.10
 
-작업트리 11번 그룹 서문이 명시적으로 FD-16(전략 실행 제어판) 완료
-이후로 미뤄뒀던 유일한 리프 — RUNNING 실행 존재 확인이 그 대상 테이블
-(strategy_executions)이 있어야 가능했기 때문. FD-16이 끝났으니 이제
-착수한다.
+The WorkTree 11 group preamble marks this as the only leaf explicitly
+deferred until FD-16 (Strategy Execution Control Panel) is complete —
+verifying RUNNING executions required the target table
+(strategy_executions) to exist first. Now that FD-16 is done, we begin.
 
-재인증(password)은 로그인 시도가 아니라 이미 인증된 세션의 민감 액션
-확인이다 — AuthService.authenticate()의 잠금 카운터/MFA 흐름을 타지
-않고 비밀번호 해시만 직접 검증한다(재인증 실패가 로그인 실패 잠금
-카운터를 건드리면 안 됨 — 별개 관심사).
+Re-authentication (password) is not a login attempt but a sensitive-action
+confirmation within an already-authenticated session — it bypasses the
+lock counter / MFA flow of AuthService.authenticate() and verifies the
+password hash directly (re-auth failure must not touch the login-failure
+lock counter — a separate concern).
 
-유예기간(Draft 30일) 중 재로그인 시 탈퇴가 자동 취소된다 —
-AuthService.authenticate()가 이 leaf에서 함께 갱신되어 PENDING_DELETION
-상태를 감지하면 ACTIVE로 되돌린다.
+Deletion is automatically cancelled if the user logs in during the
+grace period (Draft 30 days) — AuthService.authenticate() is updated
+in this leaf and, upon detecting PENDING_DELETION status, reverts it
+to ACTIVE.
 
-실제 파기 절차(유예기간 경과 후 PII 익명화 등)는 19.4 법률검토 대상
-이라 스콥 밖 — 여기서는 PENDING_DELETION 전이까지만 다룬다.
+Actual purge procedures (PII anonymization after grace period expires,
+etc.) fall under scope 19.4 legal review and are out of scope here —
+we only handle the transition to PENDING_DELETION.
 """
 from __future__ import annotations
 
@@ -35,7 +38,7 @@ _hasher = PasswordHasher()
 
 
 class AccountDeletionError(Exception):
-    """FD-11.4 실패 — 라우터가 400/403/404로 변환."""
+    """FD-11.4 failure — router converts to 400/403/404."""
 
 
 class DeletionResult(BaseModel):

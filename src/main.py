@@ -6,6 +6,7 @@ Spec: 16_backend_signatures.md, ADR-2026-08-10-B
 만들어진 40여개 서비스가 전부 asyncpg.Pool을 직접 받는 방식이라 raw asyncpg가
 실제 계약이다 — asyncpg.Pool 하나를 app.state에 두고 라우터가 Depends로 꺼낸다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -38,6 +39,7 @@ from src.core.safety.metrics_collector import ApiCallTracker
 from src.core.security.key_ring import KeyRing
 from src.exchanges.common.instrumented_adapter import instrumented_adapter_factory
 from src.exchanges.factory import build_adapter
+from src.foundation.ems.application.tick_algo import AlgoScheduler
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
@@ -59,6 +61,7 @@ from src.foundation.positions.application.scheduler import PositionsScheduler
 from src.services.background_loops import flag_enabled, run_periodic_loop, start_background_loops
 from src.services.credential_resolver import CredentialResolver
 from src.services.exchange_credential_service import ExchangeCredentialService
+from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.safety.circuit_breaker_loop import cooldown_ticks
 
 logger = logging.getLogger(__name__)
@@ -72,154 +75,190 @@ def _asyncpg_dsn(database_url: str) -> str:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 07번 §7.1 — JSON Lines 구조화 로깅. 스키마는 있었으나 호출자가 없어
     # 운영에서 한 번도 활성화되지 않았다(전수감사 §3).
-    configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
+    # configure_logging()의 반환값(QueueListener)을 저장해 finally에서 반드시
+    # stop() 한다 — 저장하지 않으면 리스너 스레드가 매 lifespan(=테스트의 client
+    # 픽스처 매 사용)마다 하나씩 영원히 새어, 전체 스위트를 오래 돌릴수록 스레드가
+    # 누적되며 관측된 flaky(esc-ci-pytest: 매번 다른 테스트가 걸리는 asyncpg/Windows
+    # 커넥션 오류)의 근본 원인이 된다(schema.py의 configure_logging docstring 경고).
+    log_listener = configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
     secrets = load_env_secrets()
     policy = load_risk_policy()
     pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
 
-    async def _event_bus_audit_sink(record: dict[str, Any]) -> None:
-        """§5.5 "모든 handler 예외는 audit_log에 자동 기록"을 실제 audit_log
-        테이블(7.4)에 연결 — 이 콜백 없이는 EventBus 실패가 기록되지 않는다."""
-        async with pool.acquire() as conn:
-            await record_audit_log(
-                conn,
-                actor_agent=record["actor_agent"],
-                action_type=record["action_type"],
-                target_type=record.get("target_type"),
-                target_id=record.get("target_id"),
-                decision_data=record["decision_data"],
+    # I-01(실패 닫힘) — pool 생성 이후의 모든 단계(event_bus 시작, credential
+    # 배선, background_loops 시작 등)는 실패할 수 있다. 이전에는 이 구간이
+    # try/finally 바깥이라 여기서 raise하면 pool이 한 번도 close()되지 않고
+    # 새는 결함이 있었다(회귀: tests/integration/test_app_lifespan.py::
+    # test_lifespan_shutdown_clean_when_background_loops_raises). 이제 pool
+    # 생성 직후부터 try로 감싸 어느 단계에서 실패해도 finally가 pool을 닫는다.
+    event_bus: InProcessEventBus | None = None
+    loops = None
+    ledger_tasks: list[asyncio.Task[None]] = []
+    market_data_tasks: list[asyncio.Task[None]] = []
+    positions_tasks: list[asyncio.Task[None]] = []
+    algo_tasks: list[asyncio.Task[None]] = []
+    try:
+
+        async def _event_bus_audit_sink(record: dict[str, Any]) -> None:
+            """§5.5 "모든 handler 예외는 audit_log에 자동 기록"을 실제 audit_log
+            테이블(7.4)에 연결 — 이 콜백 없이는 EventBus 실패가 기록되지 않는다."""
+            async with pool.acquire() as conn:
+                await record_audit_log(
+                    conn,
+                    actor_agent=record["actor_agent"],
+                    action_type=record["action_type"],
+                    target_type=record.get("target_type"),
+                    target_id=record.get("target_id"),
+                    decision_data=record["decision_data"],
+                )
+
+        # FD-17.1 — 실제 이메일/푸시 발송기(SMTP·FCM/APNs)는 미확정(Draft)이라 senders
+        # 없이 등록한다. "발송 실패"로 정직하게 기록되며 EventBus CRITICAL 재시도(§5.5).
+        event_bus = InProcessEventBus(audit_sink=_event_bus_audit_sink)
+        NotificationGateway(pool).register(event_bus)
+        await event_bus.start()
+
+        # 레드팀 감사(#02) — 요청마다 새로 만들면 CredentialResolver의 5분 TTL
+        # _cache가 매번 비어 시작한다 — pool/event_bus와 동일하게 한 번만 만든다.
+        credential_ring = KeyRing.from_legacy_hex(
+            secrets.credential_encryption_key.get_secret_value()
+        )
+        credential_service = ExchangeCredentialService(pool, key_ring=credential_ring)
+        # PM 배정 ⑤ 2단계 — 어댑터 호출 성공/실패 계측(background_loops와 공유).
+        api_tracker = ApiCallTracker()
+        # 전수감사 2026-09-06 P0 — R-42 DataFreshnessTracker를 실제로 만들어 양쪽에
+        # 주입한다: instrumented_adapter_factory(get_ohlcv 성공 시 갱신)와
+        # start_background_loops(safety_reactivation tick이 읽음). 이전에는 이
+        # 트래커가 테스트에서만 생성돼 data_delay_sec이 항상 None("모름")으로
+        # 평가되고, compute_level이 fail-closed로 영구 HALTED를 채택했다.
+        freshness_tracker = DataFreshnessTracker()
+        credential_resolver = CredentialResolver(
+            credential_service,
+            adapter_factory=instrumented_adapter_factory(
+                api_tracker, build_adapter, freshness=freshness_tracker
+            ),
+        )
+
+        # FD-8/FD-9/FD-14 — heartbeat/alert/risk_guard/execution_loop/safety 재가동
+        # 루프 생성·재시작 복구는 background_loops.py로 분리했다(P6). lifespan은
+        # 시작·정지만 담당한다.
+        loops = await start_background_loops(
+            pool=pool,
+            policy=policy,
+            event_bus=event_bus,
+            credential_resolver=credential_resolver,
+            api_tracker=api_tracker,
+            freshness_tracker=freshness_tracker,
+            reactivation_history=deque(maxlen=cooldown_ticks(policy)),  # R-45
+        )
+
+        # LC-10/LC-16 — 원장 무결성(5분 주기)·정산 배치(일 1회 00:10 KST) 루프.
+        # execution_loop과 같은 패턴·같은 플래그 관례(`AIOS_EXECUTION_LOOP_ENABLED`).
+        ledger_scheduler = LedgerIntegrityScheduler(
+            pool,
+            journal=PostgresJournalRepository(pool),
+            balances=PostgresBalanceRepository(pool),
+            audit=PostgresAuditEventRepository(pool),
+            registry=get_registry(),
+            payouts=PostgresPayoutRepository(pool),
+        )
+
+        # PLT-08 — run_forever() 대신 run_periodic_loop로 LoopHealth를 계측한다
+        # (scheduler.py 시그니처 불변). 정산 루프는 ~24h 간격이라 "3×interval
+        # stale" 판정에 맞지 않아 계측 대상에서 뺀다.
+        async def _ledger_integrity_loop() -> None:
+            await run_periodic_loop(
+                "ledger_integrity",
+                ledger_scheduler.interval_seconds,
+                ledger_scheduler.run_once,
+                health=loop_health(),
+                on_error="ledger_integrity: 이번 주기 전체 실패 — 다음 주기에 재시도",
             )
 
-    # FD-17.1 — 실제 이메일/푸시 발송기(SMTP·FCM/APNs)는 미확정(Draft)이라 senders
-    # 없이 등록한다. "발송 실패"로 정직하게 기록되며 EventBus CRITICAL 재시도(§5.5).
-    event_bus = InProcessEventBus(audit_sink=_event_bus_audit_sink)
-    NotificationGateway(pool).register(event_bus)
-    await event_bus.start()
+        if flag_enabled("AIOS_LEDGER_SCHEDULER_ENABLED"):
+            ledger_tasks = [
+                asyncio.create_task(_ledger_integrity_loop()),
+                asyncio.create_task(ledger_scheduler.run_payout_forever()),
+            ]
+        else:
+            logger.warning(
+                "ledger_scheduler: AIOS_LEDGER_SCHEDULER_ENABLED=0 — "
+                "원장 스케줄러를 띄우지 않습니다."
+            )
 
-    # 레드팀 감사(#02) — 요청마다 새로 만들면 CredentialResolver의 5분 TTL
-    # _cache가 매번 비어 시작한다 — pool/event_bus와 동일하게 한 번만 만든다.
-    credential_ring = KeyRing.from_legacy_hex(secrets.credential_encryption_key.get_secret_value())
-    credential_service = ExchangeCredentialService(pool, key_ring=credential_ring)
-    # PM 배정 ⑤ 2단계 — 어댑터 호출 성공/실패 계측(background_loops와 공유).
-    api_tracker = ApiCallTracker()
-    # 전수감사 2026-09-06 P0 — R-42 DataFreshnessTracker를 실제로 만들어 양쪽에
-    # 주입한다: instrumented_adapter_factory(get_ohlcv 성공 시 갱신)와
-    # start_background_loops(safety_reactivation tick이 읽음). 이전에는 이
-    # 트래커가 테스트에서만 생성돼 data_delay_sec이 항상 None("모름")으로
-    # 평가되고, compute_level이 fail-closed로 영구 HALTED를 채택했다.
-    freshness_tracker = DataFreshnessTracker()
-    credential_resolver = CredentialResolver(
-        credential_service,
-        adapter_factory=instrumented_adapter_factory(
-            api_tracker, build_adapter, freshness=freshness_tracker
-        ),
-    )
-
-    # FD-8/FD-9/FD-14 — heartbeat/alert/risk_guard/execution_loop/safety 재가동
-    # 루프 생성·재시작 복구는 background_loops.py로 분리했다(P6). lifespan은
-    # 시작·정지만 담당한다.
-    loops = await start_background_loops(
-        pool=pool,
-        policy=policy,
-        event_bus=event_bus,
-        credential_resolver=credential_resolver,
-        api_tracker=api_tracker,
-        freshness_tracker=freshness_tracker,
-        reactivation_history=deque(maxlen=cooldown_ticks(policy)),  # R-45
-    )
-
-    # LC-10/LC-16 — 원장 무결성(5분 주기)·정산 배치(일 1회 00:10 KST) 루프.
-    # execution_loop과 같은 패턴·같은 플래그 관례(`AIOS_EXECUTION_LOOP_ENABLED`).
-    ledger_scheduler = LedgerIntegrityScheduler(
-        pool,
-        journal=PostgresJournalRepository(pool),
-        balances=PostgresBalanceRepository(pool),
-        audit=PostgresAuditEventRepository(pool),
-        registry=get_registry(),
-        payouts=PostgresPayoutRepository(pool),
-    )
-    # PLT-08 — run_forever() 대신 run_periodic_loop로 LoopHealth를 계측한다
-    # (scheduler.py 시그니처 불변). 정산 루프는 ~24h 간격이라 "3×interval
-    # stale" 판정에 맞지 않아 계측 대상에서 뺀다.
-    async def _ledger_integrity_loop() -> None:
-        await run_periodic_loop(
-            "ledger_integrity",
-            ledger_scheduler.interval_seconds,
-            ledger_scheduler.run_once,
-            health=loop_health(),
-            on_error="ledger_integrity: 이번 주기 전체 실패 — 다음 주기에 재시도",
+        # LA-18 — 시장데이터 품질 게이지 주기 export. ledger_scheduler와 같은
+        # 패턴·플래그 관례. `watched`는 운영 심볼 배선 미확정(§10)이라 비워 둔다
+        # — 지금은 이미 저장된 배치만 훑어 게이지를 갱신한다(quality_metrics.py 참조).
+        market_data_scheduler = MarketDataQualityScheduler(
+            pool,
+            store=PostgresCandleStore(pool),
+            refs=PostgresReferenceRepository(pool),
+            cal=PostgresCalendarRepository(pool),
+            batches=PostgresBatchRepository(pool),
+            registry=get_registry(),
         )
+        if flag_enabled("AIOS_MARKET_DATA_SCHEDULER_ENABLED"):
+            market_data_tasks = [asyncio.create_task(market_data_scheduler.run_forever())]
+        else:
+            logger.warning(
+                "market_data_scheduler: AIOS_MARKET_DATA_SCHEDULER_ENABLED=0 — "
+                "시장데이터 품질 스케줄러를 띄우지 않습니다."
+            )
 
-    ledger_tasks: list[asyncio.Task[None]] = []
-    if flag_enabled("AIOS_LEDGER_SCHEDULER_ENABLED"):
-        ledger_tasks = [
-            asyncio.create_task(_ledger_integrity_loop()),
-            asyncio.create_task(ledger_scheduler.run_payout_forever()),
-        ]
-    else:
-        logger.warning(
-            "ledger_scheduler: AIOS_LEDGER_SCHEDULER_ENABLED=0 — 원장 스케줄러를 띄우지 않습니다."
+        # LB-17 — positions 마크·대사·NAV 주기 실행. 위 두 스케줄러와 같은 패턴·
+        # 플래그 관례. `tracked`는 운영 계좌·현금잔고 어댑터 미확정(§10)이라 비워
+        # 둔다 — 나머지 인자가 전부 선택이라 `tracked=()`로도 배선이 끝난다.
+        positions_scheduler = PositionsScheduler(
+            pool, snapshots=PostgresSnapshotRepository(pool), registry=get_registry()
         )
+        if flag_enabled("AIOS_POSITIONS_SCHEDULER_ENABLED"):
+            positions_tasks = [
+                asyncio.create_task(positions_scheduler.run_mark_forever()),
+                asyncio.create_task(positions_scheduler.run_reconcile_forever()),
+                asyncio.create_task(positions_scheduler.run_nav_forever()),
+            ]
+        else:
+            logger.warning(
+                "positions_scheduler: AIOS_POSITIONS_SCHEDULER_ENABLED=0 — "
+                "positions 스케줄러를 띄우지 않습니다."
+            )
 
-    # LA-18 — 시장데이터 품질 게이지 주기 export. ledger_scheduler와 같은
-    # 패턴·플래그 관례. `watched`는 운영 심볼 배선 미확정(§10)이라 비워 둔다
-    # — 지금은 이미 저장된 배치만 훑어 게이지를 갱신한다(quality_metrics.py 참조).
-    market_data_scheduler = MarketDataQualityScheduler(
-        pool,
-        store=PostgresCandleStore(pool),
-        refs=PostgresReferenceRepository(pool),
-        cal=PostgresCalendarRepository(pool),
-        batches=PostgresBatchRepository(pool),
-        registry=get_registry(),
-    )
-    market_data_tasks: list[asyncio.Task[None]] = []
-    if flag_enabled("AIOS_MARKET_DATA_SCHEDULER_ENABLED"):
-        market_data_tasks = [asyncio.create_task(market_data_scheduler.run_forever())]
-    else:
-        logger.warning(
-            "market_data_scheduler: AIOS_MARKET_DATA_SCHEDULER_ENABLED=0 — "
-            "시장데이터 품질 스케줄러를 띄우지 않습니다."
-        )
+        # EM-15 — algo (TWAP/VWAP/POV/IS) tick scheduler. Same pattern/flag convention as
+        # the three schedulers above. Registration is in-memory only (start_algo.py
+        # docstring, no algo-run table exists yet) — whatever request path calls
+        # `start_algo` registers the resulting plan on `app.state.algo_scheduler` so this
+        # loop's ticks actually reach it.
+        algo_scheduler = AlgoScheduler(pool, PostgresOrderRepository())
+        if flag_enabled("AIOS_ALGO_SCHEDULER_ENABLED"):
+            algo_tasks = [asyncio.create_task(algo_scheduler.run_forever())]
+        else:
+            logger.warning(
+                "algo_scheduler: AIOS_ALGO_SCHEDULER_ENABLED=0 — algo 스케줄러를 띄우지 않습니다."
+            )
 
-    # LB-17 — positions 마크·대사·NAV 주기 실행. 위 두 스케줄러와 같은 패턴·
-    # 플래그 관례. `tracked`는 운영 계좌·현금잔고 어댑터 미확정(§10)이라 비워
-    # 둔다 — 나머지 인자가 전부 선택이라 `tracked=()`로도 배선이 끝난다.
-    positions_scheduler = PositionsScheduler(
-        pool, snapshots=PostgresSnapshotRepository(pool), registry=get_registry()
-    )
-    positions_tasks: list[asyncio.Task[None]] = []
-    if flag_enabled("AIOS_POSITIONS_SCHEDULER_ENABLED"):
-        positions_tasks = [
-            asyncio.create_task(positions_scheduler.run_mark_forever()),
-            asyncio.create_task(positions_scheduler.run_reconcile_forever()),
-            asyncio.create_task(positions_scheduler.run_nav_forever()),
-        ]
-    else:
-        logger.warning(
-            "positions_scheduler: AIOS_POSITIONS_SCHEDULER_ENABLED=0 — "
-            "positions 스케줄러를 띄우지 않습니다."
-        )
-
-    app.state.pool = pool
-    app.state.secrets = secrets
-    app.state.event_bus = event_bus
-    app.state.credential_resolver = credential_resolver
-    app.state.execution_scheduler = loops.execution_scheduler
-    app.state.ledger_scheduler = ledger_scheduler
-    app.state.market_data_scheduler = market_data_scheduler
-    app.state.positions_scheduler = positions_scheduler
-    try:
+        app.state.pool = pool
+        app.state.secrets = secrets
+        app.state.event_bus = event_bus
+        app.state.credential_resolver = credential_resolver
+        app.state.execution_scheduler = loops.execution_scheduler
+        app.state.ledger_scheduler = ledger_scheduler
+        app.state.market_data_scheduler = market_data_scheduler
+        app.state.positions_scheduler = positions_scheduler
+        app.state.algo_scheduler = algo_scheduler
         yield
     finally:
-        all_scheduler_tasks = [*ledger_tasks, *market_data_tasks, *positions_tasks]
+        all_scheduler_tasks = [*ledger_tasks, *market_data_tasks, *positions_tasks, *algo_tasks]
         for task in all_scheduler_tasks:
             task.cancel()
         for task in all_scheduler_tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        await loops.stop()
-        await event_bus.stop()
+        if loops is not None:
+            await loops.stop()
+        if event_bus is not None:
+            await event_bus.stop()
         await pool.close()
+        log_listener.stop()
 
 
 def create_app() -> FastAPI:

@@ -108,6 +108,42 @@ describe("buildChartLayoutControls 저장 도형 배선(CH-4b)", () => {
   });
 });
 
+// 게이트 적색 재현(DEEPEN task-3099, DEPTH_CH task-2729 감사 #2012 보강): task-2012
+// (a4269edc) 커밋 메시지는 "onSave 체이닝을 되돌리면 CH-4b 통합 테스트 3건 중 2건이
+// FAIL한다"고 주장했지만, 그 되돌린 상태를 실제로 구현해 대조 검증한 파일 내 증거가
+// 없어 DEPTH 감사에서 재현 불인정 판정을 받았다. 아래 naive는 CH-4b(a4269edc) 이전
+// 상태 — onSave가 layout.save()만 부르고 그 결과 layoutId로 persistDrawings를 체이닝
+// 하지 않는 코드 — 를 그대로 재구현한 것이다. real(buildChartLayoutControls)과 동일한
+// 입력에서 naive는 persistDrawings를 절대 호출하지 않음을 직접 단언해, "체이닝을
+// 되돌리면 실패한다"는 주장을 이 파일 안에서 재현한다.
+function buildNaiveOnSave(layout: UseChartLayoutResult): () => void {
+  return () => {
+    void layout.save();
+  };
+}
+
+describe("buildChartLayoutControls 저장 도형 배선(CH-4b) — 게이트 적색 재현", () => {
+  it("naive(체이닝을 되돌린) onSave는 save가 layoutId를 반환해도 persistDrawings를 호출하지 않는다 — real은 호출한다", async () => {
+    const save = vi.fn(async () => "layout-9");
+    const persistDrawings = vi.fn(async () => {});
+    const layout = baseLayout({ save });
+
+    const naiveOnSave = buildNaiveOnSave(layout);
+    naiveOnSave();
+    await Promise.resolve();
+    await Promise.resolve();
+    // naive(되돌린 상태)에서는 여기서 이미 실패를 놓친다 — persistDrawings 미호출.
+    expect(persistDrawings).not.toHaveBeenCalled();
+
+    const realControls = buildChartLayoutControls(layout, "BTCUSDT", "BITGET", persistDrawings);
+    realControls.onSave();
+    await Promise.resolve();
+    await Promise.resolve();
+    // 동일 save/layoutId 조합에서 real은 호출한다 — 이 대조가 되돌림을 실제로 적발함을 증명.
+    expect(persistDrawings).toHaveBeenCalledWith("layout-9");
+  });
+});
+
 describe("buildChartLayoutControls 패널 제거/삭제", () => {
   it("onDelete는 layout.remove를 호출한다", () => {
     const remove = vi.fn(async () => {});

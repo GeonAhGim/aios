@@ -1,4 +1,5 @@
 """L4_strategy_portfolio_backtest_v1.0.md#§2 row 93, §8 line 572 — risk_parity.py tests."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -85,3 +86,24 @@ def test_size_rejects_none_exposures():
 def test_size_rejects_none_realized_vol_pct():
     with pytest.raises(SizingInputMissingError):
         size(_inp(realized_vol_pct=None))
+
+
+class _RaisingExposures:
+    """실행 조회 대역이 손상돼 `total_exposure_pct` 하이드레이션에 실패하는
+    지연 프록시를 흉내낸다(예: L18 aggregate()의 캐시된 조회 대역 오류)."""
+
+    @property
+    def total_exposure_pct(self) -> Decimal:
+        raise RuntimeError("exposures feed corrupted mid-read")
+
+
+def test_size_propagates_exposures_feed_failure_without_swallowing():
+    """`exposures`가 `None`이 아니라 통과하지만(그래서 `require()`는 걸러내지
+    못한다), 실제 필드 접근에서 손상된 조회 대역이 예외를 던지면 `size()`의
+    어떤 코드 경로도 그것을 삼키고 기본값(0 비중 등)으로 대체하지 않는다 —
+    fail-closed로 그대로 전파해야 한다."""
+    inp = _inp()
+    inp.exposures = _RaisingExposures()
+
+    with pytest.raises(RuntimeError, match="exposures feed corrupted"):
+        size(inp)

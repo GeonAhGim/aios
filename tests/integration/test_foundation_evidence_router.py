@@ -1,6 +1,7 @@
 """FND-03 통합테스트 — /v1/foundation/evidence 라우터. 실제 FastAPI 앱 + 실제
 dev DB. 쓰기 API는 없다(스키마 docstring 참조) — 이 라우터는 읽기 전용이라
 직접 이벤트를 만들려면 application 계층(append_audit_event)을 통해야 한다."""
+
 import uuid
 from pathlib import Path
 from uuid import uuid4
@@ -136,3 +137,90 @@ async def test_verify_chain_succeeds_for_admin_with_intact_chain(client, pool):
     )
     assert response.status_code == 200
     assert response.json()["data"] == {"verified": True}
+
+
+# ── negative tests (3건 이상 — 불변식 위반 입력을 명시적으로 거부) ──
+
+
+async def test_negative_secret_payload_via_repo(client, pool):
+    """AUD-004: secret 키를 담은 payload로 append_audit_event 호출 시
+    UnsafePayloadError가 발생해야 한다."""
+    from src.foundation.evidence.domain.rules import UnsafePayloadError
+
+    repo = PostgresAuditEventRepository(pool)
+    with pytest.raises(UnsafePayloadError, match="secret|token|password"):
+        await append_audit_event(
+            repo,
+            RecordAuditEventCommand(
+                tenant_id=uuid4(),
+                aggregate_type="test",
+                aggregate_id=uuid4(),
+                action="test_action",
+                outcome=Outcome.SUCCESS,
+                actor_subject_id=uuid4(),
+                trace_id=uuid4(),
+                payload={"api_key": "should_be_reflected"},
+            ),
+        )
+
+
+async def test_negative_nested_secret_payload_via_repo(client, pool):
+    """AUD-004: 중첩 dict의 키에도 secret 패턴이 발견되면 UnsafePayloadError."""
+    from src.foundation.evidence.domain.rules import UnsafePayloadError
+
+    repo = PostgresAuditEventRepository(pool)
+    with pytest.raises(UnsafePayloadError, match="secret|token|password"):
+        await append_audit_event(
+            repo,
+            RecordAuditEventCommand(
+                tenant_id=uuid4(),
+                aggregate_type="test",
+                aggregate_id=uuid4(),
+                action="test_action",
+                outcome=Outcome.SUCCESS,
+                actor_subject_id=uuid4(),
+                trace_id=uuid4(),
+                payload={"metadata": {"password": "hidden"}},
+            ),
+        )
+
+
+async def test_negative_limit_boundary(client):
+    """79번 §3: limit 쿼리 파라미터가 ge=1 조건을 위반하면 4xx."""
+    headers, _ = await _register(client)
+    response = await client.get(
+        "/v1/foundation/evidence/timeline",
+        headers=headers,
+        params={"limit": 0},
+    )
+    assert response.status_code == 400
+
+
+async def test_verify_chain_returns_403_for_non_admin(client):
+    """체인 검증을 비관리자가 호출하면 403 Forbidden."""
+    headers, _ = await _register(client)
+    response = await client.post(
+        "/v1/foundation/evidence/chain:verify",
+        headers=headers,
+    )
+    assert response.status_code == 403
+
+
+# ── failure-injection (1건 이상 — monkeypatch로 의존성 예외 유발) ──
+
+
+async def test_failure_db_error_returns_500(client, monkeypatch):
+    """DB 연결 실패 시 500 Internal Server Error 반환."""
+    headers, _ = await _register(client)
+    import asyncpg
+
+    async def failing_acquire(self, *args, **kwargs):
+        raise asyncpg.PostgresConnectionError("connection refused")
+
+    monkeypatch.setattr(asyncpg.Pool, "acquire", failing_acquire)
+
+    response = await client.get(
+        "/v1/foundation/evidence/timeline",
+        headers=headers,
+    )
+    assert response.status_code == 500

@@ -1,6 +1,7 @@
 """FD-8.4 통합테스트 — Executor의 LIVE 하드가드 + PAPER 제출 + FSM 전이."""
 
 import json
+import time
 import uuid
 from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
@@ -385,3 +386,107 @@ async def test_submission_failure_does_not_roll_back_fsm_state(pool):
         )
 
     assert calls == []
+
+
+class _QueryCountingConnectionCtx:
+    """acquire() 컨텍스트 프록시 — 내부 connection에 query logger를 달아
+    순차 DB 왕복 수를 센다(test_perf_journal_append.py와 동일 기법, 단
+    record_fill_in_position_ledger는 connection을 노출하지 않고 자체
+    pool.acquire()를 여는 어댑터라 pool 자체를 얇게 감싼다)."""
+
+    def __init__(self, inner_ctx: object, sink: list[str]) -> None:
+        self._inner_ctx = inner_ctx
+        self._sink = sink
+        self._conn = None
+        self._log = None
+
+    async def __aenter__(self):
+        self._conn = await self._inner_ctx.__aenter__()
+        self._log = lambda record: self._sink.append(getattr(record, "query", ""))
+        self._conn.add_query_logger(self._log)
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if self._conn is not None and self._log is not None:
+            self._conn.remove_query_logger(self._log)
+        return await self._inner_ctx.__aexit__(exc_type, exc, tb)
+
+
+class _QueryCountingPool:
+    """`record_fill_in_position_ledger(pool, order)`가 유일하게 쓰는
+    `pool.acquire()`만 감싼다 — 저장소들(snapshots/journal/audit)은 pool을
+    보관만 하고 재획득하지 않는다(postgres_{snapshot,journal}_repository.py
+    확인됨), 그래서 이 얇은 프록시로 전체 호출의 순차 왕복을 빠짐없이 잡는다."""
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+        self.queries: list[str] = []
+
+    def acquire(self) -> _QueryCountingConnectionCtx:
+        return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
+
+
+_MAX_LEDGER_ROUND_TRIPS_HOT = 18  # 실측 16(고정 경로) + 여유 2, LB-18과 동일 관례
+_MAX_LEDGER_LATENCY_MS = 2000.0
+
+
+@pytest.mark.perf
+async def test_record_fill_in_position_ledger_bounded_round_trips_and_latency(pool):
+    """LB-12 수치 성능 단언 — DEPTH 감사(task-2723)가 원 리프(commit
+    5424d67)에 이 축 증빙이 전무하다고 판정했다(docs/audit/DEPTH_LA_LB_LC.md
+    #425). record_fill_in_position_ledger()는 pos_account 부트스트랩 →
+    record_fill(LB-18이 자체 순차 왕복 <=10을 이미 가드) → legacy
+    positions/pos_snapshot 투영까지 3단계를 순차 DB 왕복으로 수행하는
+    얇은 어댑터다(모듈 docstring). 절대 지연 p95를 좁게 단언하면 CI
+    인프라 왕복비용 변동만으로 상시 적색이 된다는 선례
+    (tests/integration/foundation/positions/test_perf_journal_append.py,
+    task-822/1059 decision)를 따라 이 리프는: (1) 구조 회귀 가드로 순차
+    DB 왕복 수 상한을 단언하고, (2) 지연은 "행 하나 처리가 무한정 걸리지
+    않는다"는 느슨한 sanity 상한(2초)만 건다 — 정상 환경에서 절대 깨지지
+    않을 만큼 여유롭지만, N+1류 회귀가 왕복 수 상한을 우회하더라도 이
+    상한에는 걸린다."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, mode="PAPER")
+
+    def _filled_order(quantity: Decimal, price: Decimal) -> Order:
+        return Order(
+            client_order_id=f"lb12-perf-{uuid.uuid4().hex}",
+            strategy_id="strat-executor-test",
+            strategy_version="1.0.0",
+            execution_id=execution_id,
+            symbol="BTC/USDT",
+            exchange="bitget",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=quantity,
+            status=OrderStatus.FILLED,
+            filled_quantity=quantity,
+            average_fill_price=Money(amount=price, currency=Currency.USDT),
+            asset_class=AssetClass.CRYPTO,
+        )
+
+    # 첫 체결(계좌·스냅샷·legacy positions 행을 새로 만드는 콜드 경로)은
+    # 측정에서 제외한다 — 운영 핫패스는 같은 실행이 반복 체결하는 두 번째
+    # 이후 호출(기존 계좌/스냅샷/legacy 행 재사용)이다.
+    await record_fill_in_position_ledger(pool, _filled_order(Decimal("1"), Decimal("100")))
+
+    counting_pool = _QueryCountingPool(pool)
+    started = time.perf_counter()
+    await record_fill_in_position_ledger(counting_pool, _filled_order(Decimal("1"), Decimal("101")))
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    round_trip_count = len(counting_pool.queries)
+
+    print(
+        f"\nrecord_fill_in_position_ledger (hot path) latency={elapsed_ms:.3f}ms "
+        f"(sanity max={_MAX_LEDGER_LATENCY_MS}ms); "
+        f"sequential DB round trips={round_trip_count} (max={_MAX_LEDGER_ROUND_TRIPS_HOT})"
+    )
+
+    assert round_trip_count <= _MAX_LEDGER_ROUND_TRIPS_HOT, (
+        f"record_fill_in_position_ledger 순차 DB 왕복 수({round_trip_count})가 "
+        f"상한({_MAX_LEDGER_ROUND_TRIPS_HOT})을 초과했습니다 — 왕복 수 회귀입니다."
+    )
+    assert elapsed_ms < _MAX_LEDGER_LATENCY_MS, (
+        f"record_fill_in_position_ledger 지연({elapsed_ms:.1f}ms)이 sanity 상한"
+        f"({_MAX_LEDGER_LATENCY_MS}ms)을 초과했습니다."
+    )

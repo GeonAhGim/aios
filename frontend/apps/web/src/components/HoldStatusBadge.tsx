@@ -1,5 +1,6 @@
 import type { HoldState, ParsedHoldView, ParsedPayoutBatchView, PayoutBatchState } from "@aios/shared-types";
 import { Alert, Badge } from "@aios/ui-web";
+import { useTranslation } from "react-i18next";
 
 // spec §4.5 홀드 상태기계·§3.3 (C) PayoutBatchView 표시 전용 배지.
 // InstrumentLifecycleBadge/CandleQualityBadge와 같은 순수 표시 컴포넌트
@@ -61,10 +62,11 @@ function needsExpiryReview(state: HoldState, expiresAt: string, now: string | un
 }
 
 export function HoldStatusBadge({ hold, now }: HoldStatusBadgeProps) {
+  const { t } = useTranslation();
   if (hold.kind === "unsupported_schema_version") {
     return (
       <div data-testid="hold-status-badge">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(hold.received)}).</Alert>
+        <Alert tone="danger">{t("legacy.holdStatusBadge.t1", { string: String(hold.received) })}</Alert>
       </div>
     );
   }
@@ -72,7 +74,7 @@ export function HoldStatusBadge({ hold, now }: HoldStatusBadgeProps) {
   if (hold.kind !== "ok") {
     return (
       <div data-testid="hold-status-badge">
-        <Alert tone="danger">홀드 정보를 해석할 수 없습니다.</Alert>
+        <Alert tone="danger">{t("legacy.holdStatusBadge.t2")}</Alert>
       </div>
     );
   }
@@ -87,18 +89,18 @@ export function HoldStatusBadge({ hold, now }: HoldStatusBadgeProps) {
       </Badge>
       {flagged && (
         <Badge tone="danger" data-testid="hold-expiry-review-badge">
-          만료 확인 필요
-        </Badge>
+          {t("legacy.holdStatusBadge.t3")}</Badge>
       )}
     </div>
   );
 }
 
 export function PayoutBatchStatusBadge({ payoutBatch }: PayoutBatchStatusBadgeProps) {
+  const { t } = useTranslation();
   if (payoutBatch.kind === "unsupported_schema_version") {
     return (
       <div data-testid="payout-batch-status-badge">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(payoutBatch.received)}).</Alert>
+        <Alert tone="danger">{t("legacy.holdStatusBadge.t4", { string: String(payoutBatch.received) })}</Alert>
       </div>
     );
   }
@@ -106,7 +108,7 @@ export function PayoutBatchStatusBadge({ payoutBatch }: PayoutBatchStatusBadgePr
   if (payoutBatch.kind !== "ok") {
     return (
       <div data-testid="payout-batch-status-badge">
-        <Alert tone="danger">정산 배치 정보를 해석할 수 없습니다.</Alert>
+        <Alert tone="danger">{t("legacy.holdStatusBadge.t5")}</Alert>
       </div>
     );
   }

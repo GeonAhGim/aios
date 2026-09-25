@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md Sec 9 RD-5
 DoD (a)-(d).
 """
+
 from __future__ import annotations
 
 import ast
@@ -11,6 +12,8 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID, uuid4
+
+import pytest
 
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts.v1 import Venue
@@ -173,6 +176,76 @@ def test_link_item_ticker_venue_lookup_delegates_to_symbol_master_resolve() -> N
     )
     assert result.instrument_id == instrument_id
     assert result.reason is None
+
+
+# ---- negative (task-4169 DEEPEN) ----
+
+
+def test_extract_entity_key_rejects_corp_reg_no_one_digit_short() -> None:
+    """Negative: a 12-digit numeric string (one short of the 13-digit
+    corp-reg-no length) must not be accepted as CORP_REG_NO -- RD-A4 forbids
+    guessing at a near-miss shape."""
+    assert extract_entity_key("110111009749") is None
+
+
+def test_extract_entity_key_rejects_corp_reg_no_with_non_digit_character() -> None:
+    """Negative: a 13-character candidate containing a non-digit must not be
+    classified as CORP_REG_NO even though the length matches."""
+    assert extract_entity_key("110111009749A") is None
+
+
+def test_extract_entity_key_rejects_ticker_with_unknown_venue() -> None:
+    """Negative: the `TICKER:VENUE` shape parses only when VENUE names a
+    member of the `Venue` enum -- an unrecognised venue must not raise or
+    fall through to another key shape, it must yield no deterministic key."""
+    assert extract_entity_key("AAPL:NASDAQ") is None
+
+
+def test_is_valid_isin_rejects_wrong_length_candidate() -> None:
+    """Negative: ISO 6166 fixes the ISIN length at 12 -- an 11- or
+    13-character candidate must be rejected outright, before any checksum
+    math runs."""
+    assert is_valid_isin(_VALID_ISIN[:-1]) is False
+    assert is_valid_isin(_VALID_ISIN + "0") is False
+
+
+def test_extract_entity_key_rejects_empty_and_whitespace_only_input() -> None:
+    """Negative: an empty or whitespace-only `instruments` entry is not a
+    deterministic key of any of the four RD-A4 shapes."""
+    assert extract_entity_key("") is None
+    assert extract_entity_key("   ") is None
+
+
+# ---- failure injection (task-4169 DEEPEN) ----
+
+
+def test_extract_entity_key_propagates_unexpected_symbol_normalizer_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure injection: `_krx_code_key` only catches `SymbolNormalizationError`
+    from LA-7's `to_canonical` -- if `to_canonical` raises some other
+    exception (a bug in the normalizer, or a future refactor that adds an
+    unrelated crash path), `extract_entity_key` must propagate it rather than
+    silently reporting "no deterministic key". Swallowing an unexpected
+    exception here would hide the underlying defect behind a normal-looking
+    `None` result."""
+
+    def _raising_to_canonical(venue: Venue, raw: str) -> str:
+        raise RuntimeError("injected symbol_normalizer failure")
+
+    monkeypatch.setattr(
+        "src.foundation.research_data.domain.entity_link.to_canonical",
+        _raising_to_canonical,
+    )
+
+    try:
+        extract_entity_key("005930")
+    except RuntimeError as exc:
+        assert str(exc) == "injected symbol_normalizer failure"
+    else:
+        raise AssertionError(
+            "extract_entity_key must propagate unexpected to_canonical failures, not swallow them"
+        )
 
 
 _BANNED_FUZZY_MODULES = frozenset({"difflib", "rapidfuzz", "Levenshtein", "fuzzywuzzy"})

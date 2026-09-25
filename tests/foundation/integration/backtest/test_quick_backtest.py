@@ -15,10 +15,10 @@ docs/design/ADR-2026-09-04-A-market-data-replay-perf.md #1·#3.
 시딩은 `perf_replay_support.seed_candles`와 같은 COPY 경로지만 가격을 결정론
 톱니(41봉 주기) 걸음으로 만들어 SMA 교차 전략이 실제 주문을 내게 한다.
 """
+
 from __future__ import annotations
 
 import os
-import time
 import uuid
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
@@ -56,6 +56,7 @@ from src.foundation.market_data.contracts.v1 import (
     Verdict,
 )
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from tests.conftest import PerfBudget
 from tests.integration.foundation.market_data.perf_replay_support import (
     DAY_ROW_COUNT,
     MONTH_ROW_COUNT,
@@ -66,8 +67,18 @@ from tests.integration.foundation.market_data.perf_replay_support import (
 _MONTH_TARGET_SECONDS = 5.0  # §7 즉시 백테스트(1개월 M1) ≤5s — 운영 목표, 비차단(print)
 _MAX_READ_ROUND_TRIPS = 1  # read_candles_columnar 단일 SELECT
 _CANDLE_COLUMNS = (
-    "venue", "instrument_id", "timeframe", "open_time", "close_time",
-    "open", "high", "low", "close", "volume", "quote_volume", "batch_id",
+    "venue",
+    "instrument_id",
+    "timeframe",
+    "open_time",
+    "close_time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "quote_volume",
+    "batch_id",
 )
 _CONFIG = BacktestConfigV2(
     slippage=FixedSlippage(bps=Decimal("5")),
@@ -105,9 +116,18 @@ def _rows(instrument_id: uuid.UUID, batch_id: uuid.UUID, t0: datetime, n: int) -
     for i in range(n):
         o, c = _walk(i), _walk(i + 1)
         yield (
-            Venue.BITGET.value, instrument_id, Timeframe.M1.value, t0 + timedelta(minutes=i),
-            t0 + timedelta(minutes=i + 1), o, max(o, c) + 1, min(o, c) - 1, c,
-            Decimal("1000000"), None, batch_id,
+            Venue.BITGET.value,
+            instrument_id,
+            Timeframe.M1.value,
+            t0 + timedelta(minutes=i),
+            t0 + timedelta(minutes=i + 1),
+            o,
+            max(o, c) + 1,
+            min(o, c) - 1,
+            c,
+            Decimal("1000000"),
+            None,
+            batch_id,
         )
 
 
@@ -127,17 +147,25 @@ async def _seed(pool, *, row_count: int) -> tuple[SeriesKey, datetime, datetime]
                 uuid.uuid4().int % (2**62),
             )
             batch = IngestBatchResult(
-                batch_id=uuid.uuid4(), source="test", venue=Venue.BITGET,
-                instrument_id=instrument_id, timeframe=Timeframe.M1, range_start=t0,
-                range_end=t0 + timedelta(minutes=row_count), request_fingerprint=uuid.uuid4().hex,
+                batch_id=uuid.uuid4(),
+                source="test",
+                venue=Venue.BITGET,
+                instrument_id=instrument_id,
+                timeframe=Timeframe.M1,
+                range_start=t0,
+                range_end=t0 + timedelta(minutes=row_count),
+                request_fingerprint=uuid.uuid4().hex,
                 verdict=QualityVerdict(
                     verdict=Verdict.ACCEPT, accepted=row_count, quarantined=0, rejected=0, issues=[]
                 ),
-                batch_hash=uuid.uuid4().hex, audit_event_id=audit_id, stored_range=None,
+                batch_hash=uuid.uuid4().hex,
+                audit_event_id=audit_id,
+                stored_range=None,
             )
             await PostgresBatchRepository(pool).create(conn, batch)
             await conn.copy_records_to_table(
-                "md_candle", records=_rows(instrument_id, batch.batch_id, t0, row_count),
+                "md_candle",
+                records=_rows(instrument_id, batch.batch_id, t0, row_count),
                 columns=_CANDLE_COLUMNS,
             )
             as_of = await conn.fetchval("SELECT now()")
@@ -145,7 +173,11 @@ async def _seed(pool, *, row_count: int) -> tuple[SeriesKey, datetime, datetime]
 
 
 async def _read_columns_counting(
-    pool, store: PostgresCandleStore, key: SeriesKey, start: datetime, end: datetime,
+    pool,
+    store: PostgresCandleStore,
+    key: SeriesKey,
+    start: datetime,
+    end: datetime,
     as_of: datetime,
 ) -> tuple[CandleColumns, int]:
     """같은 커넥션에서 워밍업 1회(asyncpg 코덱 조회 흡수) 후 두 번째 읽기의 쿼리 수를 센다."""
@@ -192,7 +224,7 @@ class _SmaCross:
 
 def _run_counting(
     columns: CandleColumns, monkeypatch: pytest.MonkeyPatch
-) -> tuple[QuickBacktestResult, _SmaCross, int, float]:
+) -> tuple[QuickBacktestResult, _SmaCross, int]:
     magnify_calls = 0
     original = qf.magnify
 
@@ -203,31 +235,39 @@ def _run_counting(
 
     monkeypatch.setattr(qf, "magnify", _counted)
     strategy = _SmaCross()
-    started = time.perf_counter()
     result = run_quick_backtest(
         _CONFIG, columns, timeframe=Timeframe.M1, strategy=strategy, initial_cash=Decimal("10000")
     )
-    return result, strategy, magnify_calls, time.perf_counter() - started
+    return result, strategy, magnify_calls
 
 
 @pytest.mark.perf
-async def test_one_month_m1_column_path_budget(pool, candle_store, monkeypatch):
+async def test_one_month_m1_column_path_budget(
+    pool, candle_store, monkeypatch, perf_budget: PerfBudget
+):
     """§7 1개월(43,200) M1 — 게이트는 왕복 1회·평가 횟수·체결 모델 호출 수·정합성. 5s는 print."""
     key, t0, as_of = await _seed(pool, row_count=MONTH_ROW_COUNT)
     columns, round_trips = await _read_columns_counting(
         pool, candle_store, key, t0, t0 + timedelta(minutes=MONTH_ROW_COUNT), as_of
     )
-    result, strategy, magnify_calls, elapsed = _run_counting(columns, monkeypatch)
+
+    result, strategy, magnify_calls = None, None, None
+
+    def _run_test() -> None:
+        nonlocal result, strategy, magnify_calls
+        result, strategy, magnify_calls = _run_counting(columns, monkeypatch)
+
+    sample = perf_budget.assert_within(_run_test, budget_ms=5000.0, label="quick_backtest 1month")
 
     print(
-        f"\nquick_backtest 1month/{MONTH_ROW_COUNT} M1: engine {elapsed:.3f}s "
-        f"(target<{_MONTH_TARGET_SECONDS}s §7 운영 목표, 비차단); fills={len(result.fills)} "
-        f"read round trips={round_trips} (max={_MAX_READ_ROUND_TRIPS}); "
+        f"\nquick_backtest 1month/{MONTH_ROW_COUNT} M1: engine cpu={sample.cpu_ms:.3f}ms "
+        f"(target<{_MONTH_TARGET_SECONDS * 1000}ms §7 운영 목표, 비차단); "
+        f"fills={len(result.fills)} read round trips={round_trips} (max={_MAX_READ_ROUND_TRIPS}); "
         f"magnify calls={magnify_calls} (= orders, bars={result.bars})"
     )
     assert len(columns) == MONTH_ROW_COUNT == result.bars == strategy.calls
     assert round_trips <= _MAX_READ_ROUND_TRIPS
-    assert len(result.fills) > 100  # 톱니 걸음이면 SMA 교차가 수백 회 — 실제로 체결이 일어났다
+    assert len(result.fills) > 100  # 톱니 걸음이면 SMA 교차가 수백 회 — 실제로 체결이 일아났다
     assert magnify_calls == len(result.fills) < result.bars  # 체결 모델은 주문마다만, 봉마다 아님
     assert all(f.remaining_quantity == 0 for f in result.fills)
     assert result.expired_orders <= 1  # 데이터 말단에 걸린 주문 최대 1건
@@ -241,8 +281,8 @@ async def test_same_as_of_twice_gives_identical_fill_log(pool, candle_store, mon
     async with pool.acquire() as conn:
         first = await candle_store.read_candles_columnar(conn, key, t0, end, as_of)
         second = await candle_store.read_candles_columnar(conn, key, t0, end, as_of)
-    a, _, _, _ = _run_counting(first, monkeypatch)
-    b, _, _, _ = _run_counting(second, monkeypatch)
+    a, _, _ = _run_counting(first, monkeypatch)
+    b, _, _ = _run_counting(second, monkeypatch)
     assert a.fills == b.fills and repr(a.fills) == repr(b.fills)
     assert a.equity_curve == b.equity_curve and len(a.fills) > 0
     assert all(f.side == OrderSide.BUY for f in a.fills[::2])  # 롱 진입/청산 교대

@@ -14,7 +14,11 @@ Spec: 02b_bitget_api_v2_full_spec_v1.md §5.4, P0
 
 2026-09-03 task-1032(PLT-40a 선행) — Plan/TPSL 주문 메서드군은
 `futures_plan_mixin.py`로 분리(P6.line_cap 준수, 순수 이동만, 동작 변경 0).
+
+2026-09-25 task-6797(P6.line_cap) — batch place/cancel (2 methods) moved
+to `futures_batch_order_mixin.py` (pure move, no behavior change).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -102,9 +106,7 @@ class BitgetFuturesTradingMixin:
         if order.price is not None:
             body["price"] = str(order.price.amount)
 
-        raw = await self._request(
-            "POST", "/api/v2/mix/order/place-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/mix/order/place-order", body=body)
         data = raw["data"]
         return order.model_copy(
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
@@ -131,9 +133,7 @@ class BitgetFuturesTradingMixin:
         if "size" in kwargs:
             body["newSize"] = str(kwargs["size"])
 
-        raw = await self._request(
-            "POST", "/api/v2/mix/order/modify-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/mix/order/modify-order", body=body)
         data = raw["data"]
         return await self.get_futures_order(data["orderId"], symbol=symbol)
 
@@ -190,9 +190,7 @@ class BitgetFuturesTradingMixin:
         body: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "POST", "/api/v2/mix/order/cancel-all-orders", body=body
-        )
+        raw = await self._request("POST", "/api/v2/mix/order/cancel-all-orders", body=body)
         return bool(raw.get("code") == "00000")
 
     async def get_futures_order(
@@ -223,9 +221,7 @@ class BitgetFuturesTradingMixin:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/mix/order/orders-pending", params=params
-        )
+        raw = await self._request("GET", "/api/v2/mix/order/orders-pending", params=params)
         return [_row_to_futures_order(row) for row in raw["data"].get("entrustedList") or []]
 
     async def get_futures_order_history(
@@ -237,9 +233,7 @@ class BitgetFuturesTradingMixin:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/mix/order/orders-history", params=params
-        )
+        raw = await self._request("GET", "/api/v2/mix/order/orders-history", params=params)
         return [_row_to_futures_order(row) for row in raw["data"].get("entrustedList") or []]
 
     async def get_futures_fills(
@@ -254,7 +248,5 @@ class BitgetFuturesTradingMixin:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/mix/order/fills", params=params
-        )
+        raw = await self._request("GET", "/api/v2/mix/order/fills", params=params)
         return list(raw["data"].get("fillList") or [])

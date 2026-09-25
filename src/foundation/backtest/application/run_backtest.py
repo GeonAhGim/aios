@@ -6,13 +6,21 @@ Phase 1 범위(position.py/portfolio/engine.py와 동일 가정): 단일 종목,
 walk-forward/Monte Carlo는 이 함수를 반복 호출하는 상위 오케스트레이션
 (109번 §5, 이 파일의 범위 밖)의 몫이다.
 """
+
 from __future__ import annotations
 
+import logging
+import time
 from datetime import date
 from decimal import Decimal
 from typing import NamedTuple
 
 from src.core.indicators.talib_adapter import IndicatorService
+from src.core.observability.metric_names import (
+    BACKTEST_RUN_COUNT_TOTAL,
+    BACKTEST_RUN_DURATION_SECONDS,
+)
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.core.portfolio.engine import PortfolioEngine, PortfolioEngineError
 from src.core.strategy.condition_evaluator import IndicatorDataMissingError
 from src.core.strategy.engine import StrategyEngine
@@ -31,6 +39,8 @@ from src.foundation.backtest.domain.rules import has_enough_warmup, warn_if_zero
 from src.services.condition_compiler import ORDER_FILLED
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.market_state import build_market_state
+
+logger = logging.getLogger(__name__)
 
 _SYNTHETIC_EXECUTION_ID = -1  # 실제 실행 execution_id(항상 양수)와 절대 겹치지 않는 고정 음수
 
@@ -70,8 +80,26 @@ def run_backtest(
     bars: list[Candle],
     *,
     indicator_service: IndicatorService | None = None,
+    metrics: MetricsPort | None = None,
 ) -> BacktestResult:
+    # PLT-10 instrumentation point — defaults to NullMetrics, so existing callers
+    # that don't pass `metrics` stay unaffected.
+    metrics = metrics if metrics is not None else NullMetrics()
+    started = time.monotonic()
     if not has_enough_warmup(total_bars=len(bars), warmup_bars=config.warmup_bars):
+        metrics.counter(BACKTEST_RUN_COUNT_TOTAL, {"outcome": "insufficient_warmup"})
+        logger.warning(
+            "backtest_run_rejected",
+            extra={
+                "event": "backtest_run_rejected",
+                "payload": {
+                    "reason": "insufficient_warmup",
+                    "strategy_id": config.strategy_id,
+                    "bar_count": len(bars),
+                    "warmup_bars": config.warmup_bars,
+                },
+            },
+        )
         raise BacktestRunError(
             f"bar 개수({len(bars)})가 warmup_bars({config.warmup_bars})를 초과하지 않습니다."
         )
@@ -155,27 +183,69 @@ def run_backtest(
         try:
             decision = portfolio_engine.allocate(signal, portfolio_state)
         except PortfolioEngineError as exc:
-            warnings.append(f"bar {bar_index}: PortfolioEngine 예외 — {exc}")
+            if signal.direction == OrderSide.BUY:
+                reason = "이미 보유 포지션이 있는 상태에서 재진입(BUY) 신호 발생"
+            else:
+                reason = "포지션이 없는 상태에서 SELL 신호 발생"
+            warnings.append(f"bar {bar_index}: PortfolioEngine 예외 — {reason} ({exc})")
             continue
         if decision is None:
             continue
 
+        try:
+            filled_state = _order_filled_target(fsm_config, signal.to_state)
+        except BacktestRunError as exc:
+            metrics.counter(BACKTEST_RUN_COUNT_TOTAL, {"outcome": "failed"})
+            metrics.observe(
+                BACKTEST_RUN_DURATION_SECONDS,
+                time.monotonic() - started,
+                {"outcome": "failed"},
+            )
+            logger.error(
+                "backtest_run_failed",
+                extra={
+                    "event": "backtest_run_failed",
+                    "duration_ms": round((time.monotonic() - started) * 1000),
+                    "payload": {
+                        "reason": str(exc),
+                        "strategy_id": config.strategy_id,
+                        "bar_index": bar_index,
+                    },
+                },
+            )
+            raise
         pending = _PendingOrder(
             side=signal.direction,
             quantity=decision.approved_quantity,
-            filled_state=_order_filled_target(fsm_config, signal.to_state),
+            filled_state=filled_state,
         )
 
-    metrics = compute_metrics(
+    result_metrics = compute_metrics(
         equity_curve=equity_curve,
         fills=fills,
         initial_equity=config.initial_equity,
         periods_per_year=config.periods_per_year,
     )
+    elapsed = time.monotonic() - started
+    metrics.counter(BACKTEST_RUN_COUNT_TOTAL, {"outcome": "completed"})
+    metrics.observe(BACKTEST_RUN_DURATION_SECONDS, elapsed, {"outcome": "completed"})
+    logger.info(
+        "backtest_run_completed",
+        extra={
+            "event": "backtest_run_completed",
+            "duration_ms": round(elapsed * 1000),
+            "payload": {
+                "strategy_id": config.strategy_id,
+                "bar_count": len(bars),
+                "fill_count": len(fills),
+                "warning_count": len(warnings),
+            },
+        },
+    )
     return BacktestResult(
         config=config,
         fills=fills,
         equity_curve=equity_curve,
-        metrics=metrics,
+        metrics=result_metrics,
         warnings=warnings,
     )

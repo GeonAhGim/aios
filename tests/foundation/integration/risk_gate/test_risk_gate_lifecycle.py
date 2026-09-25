@@ -1,12 +1,15 @@
 """FND-06 Risk & Safety Gate 통합테스트 — 실제 dev DB 대상. 48번 §5/78번 §6 중
 FND-07(paper_control)/order adapter 없이 재현 가능한 범위(RSK-001~005)."""
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
+import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -27,6 +30,7 @@ from src.foundation.connections.domain.models import (
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.evidence.application.get_audit_timeline import get_audit_timeline
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.mandates.application.pause_mandate import pause_mandate
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import (
     MissingScopeRefError,
@@ -41,6 +45,8 @@ from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_tenant
+from tests.support.db import ensure_worker_database
+from tests.support.deep_downgrade import purge_position_snapshots
 
 
 class _FakeHealthyConnectionRepo:
@@ -317,6 +323,113 @@ async def test_kill_switch_after_cached_allow_takes_effect_immediately(
     assert second.id != first.id  # 캐시가 무효화돼 새로 평가됐음을 방증
 
 
+class _FailingMandateRepo:
+    """H-11 fail-closed 회귀용 fake — mandate 저장소 조회 자체가 실패했을 때
+    (예: DB 단절) risk_gate가 이미 캐시된(그리고 이제 검증 불가능한) ALLOW로
+    조용히 넘어가지 않고 예외를 그대로 전파하는지 확인한다. `evaluate_risk_gate`
+    는 캐시 조회보다 먼저 mandate 상태를 읽어 fingerprint를 계산하므로, 이
+    조회가 실패하면 캐시 히트 여부를 확인하기도 전에 예외가 난다 — 암묵적
+    ALLOW로 뭉개지는 경로가 없다는 뜻이다."""
+
+    async def get_mandate(self, tenant_id):  # noqa: ANN001, ANN201
+        raise RuntimeError("mandate store unavailable")
+
+    async def get_revision(self, revision_id):  # noqa: ANN001, ANN201
+        # Stub — 이 테스트는 get_mandate 실패 경로만 타며 get_revision은
+        # 호출되지 않음. 캐시 무효화 회귀 테스트에서 mandate 조회 자체가
+        # 실패하면 예외가 전파됨을 확인한다.
+        return None
+
+
+async def test_mandate_lookup_failure_never_falls_back_to_cached_allow(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """H-11 DoD — 무효화(여기서는 mandate 상태 확인 자체) 실패 시 fail-closed:
+    캐시에 유효한 ALLOW가 있어도 mandate 저장소를 읽을 수 없으면 그 캐시를
+    신뢰하지 않고 예외를 전파해야 한다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    warm = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert warm.outcome.value == "ALLOW"
+
+    with pytest.raises(RuntimeError):
+        await evaluate_risk_gate(
+            repo,
+            _FailingMandateRepo(),
+            connection_repo,
+            tenant_id=tenant_id,
+            gate_kind=GateKind.DEPLOYMENT,
+        )
+
+
+async def test_pause_mandate_immediately_denies_next_risk_gate_evaluation(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """H-11 DoD — pause 직후 0ms에 REJECT: `pause_mandate` 커맨드를(라우터의
+    명시적 `risk_gate_repo.invalidate_evaluations()` 호출 없이) 직접 호출해도,
+    이미 데워진 risk_gate ALLOW 캐시를 곧바로 재사용하지 않아야 한다.
+    `subject_fingerprint`가 이제 mandate revision id+state를 포함하므로,
+    pause가 커밋되는 순간 fingerprint 자체가 바뀌어 옛 캐시 행은 더 이상
+    조회되지 않는다 — 별도 무효화 호출이나 TTL 만료를 기다릴 필요가 없다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    warm = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert warm.outcome.value == "ALLOW"
+
+    await pause_mandate(mandate_repo, tenant_id=tenant_id)
+
+    result = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert result.outcome.value == "DENY"
+    assert result.id != warm.id
+
+
+async def test_concurrent_pause_and_evaluate_never_serves_stale_allow_once_paused(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """H-11 DoD — 동시 pause+submit 경합: pause 커맨드와 여러 번의 risk_gate
+    재평가를 동시에 실행한다. 경합 도중(아직 pause가 커밋되기 전) 평가가
+    ALLOW를 받는 것은 TOCTOU상 허용되지만, pause가 완료된 *이후* 실행되는
+    어떤 평가도 그 이전에 데워진 stale ALLOW를 돌려받아서는 안 된다."""
+    tenant_id = await _tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    warm = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert warm.outcome.value == "ALLOW"
+
+    async def _submit_loop() -> list[str]:
+        outcomes = []
+        for _ in range(20):
+            r = await evaluate_risk_gate(
+                repo,
+                mandate_repo,
+                connection_repo,
+                tenant_id=tenant_id,
+                gate_kind=GateKind.DEPLOYMENT,
+            )
+            outcomes.append(r.outcome.value)
+        return outcomes
+
+    await asyncio.gather(
+        pause_mandate(mandate_repo, tenant_id=tenant_id),
+        _submit_loop(),
+    )
+
+    after = await evaluate_risk_gate(
+        repo, mandate_repo, connection_repo, tenant_id=tenant_id, gate_kind=GateKind.DEPLOYMENT
+    )
+    assert after.outcome.value == "DENY"
+
+
 async def test_global_kill_switch_invalidates_cached_allow_for_every_tenant(
     pool, repo, mandate_repo, trust_repo, connection_repo
 ):
@@ -421,9 +534,7 @@ async def test_activate_missing_scope_ref_for_tenant_scope_is_rejected(pool, rep
         )
 
 
-async def test_activate_and_deactivate_safety_control_record_audit_events(
-    pool, repo, audit_repo
-):
+async def test_activate_and_deactivate_safety_control_record_audit_events(pool, repo, audit_repo):
     """전수감사 §6 — safety control 활성화/비활성화가 실제 감사 이벤트를
     남기는지 확인(append_audit_event 호출자 0이던 문제의 회귀 테스트)."""
     tenant_id = await _tenant(pool)
@@ -465,10 +576,12 @@ async def test_activate_and_deactivate_safety_control_record_audit_events(
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
-def _run_alembic(*args: str) -> None:
+def _run_alembic(*args: str, database_url: str | None = None) -> None:
+    env = {**os.environ, "DATABASE_URL": database_url} if database_url else None
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -574,9 +687,7 @@ async def test_idempotency_digest_unique_rejects_duplicate(pool):
                     digest,
                 )
         finally:
-            await conn.execute(
-                "DELETE FROM safety_control WHERE idempotency_digest = $1", digest
-            )
+            await conn.execute("DELETE FROM safety_control WHERE idempotency_digest = $1", digest)
 
 
 async def test_paused_by_control_id_fk_rejects_unknown_control(pool):
@@ -628,35 +739,166 @@ async def test_evaluate_risk_gate_always_records_trace_id_from_context(
     assert row["trace_id"] == expected_trace_id
 
 
-async def test_migration_round_trip_restores_gate_kinds_and_new_columns(pool):
+async def test_migration_round_trip_restores_gate_kinds_and_new_columns():
     """DoD(2) — upgrade→downgrade→upgrade 왕복을 실DB로 재현: downgrade는
     3개 신규 컬럼을 지우고 CHECK를 옛 2종으로 되돌리며, 재차 upgrade하면
-    정확히 원래(6종 + 3개 컬럼) 상태로 복원돼야 한다."""
+    정확히 원래(6종 + 3개 컬럼) 상태로 복원돼야 한다. Disposable DB clone
+    (task-5783) -- never the shared session DB other tests and
+    `scripts/replay_verify.py` depend on. An interrupted downgrade can only
+    corrupt its own throwaway DB."""
+    migration_db_url = await ensure_worker_database(os.environ["DATABASE_URL"], "migrationrt_fnd06")
+    migration_pool = await asyncpg.create_pool(
+        migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
+        min_size=1,
+        max_size=2,
+    )
     try:
-        before = await _gate_kind_check_def(pool)
+        before = await _gate_kind_check_def(migration_pool)
         assert "PRE_SUBMIT" in before
         assert "INTRADAY" in before
         assert "RECOVERY" in before
-        assert await _column_exists(pool, "risk_evaluation", "trace_id")
-        assert await _column_exists(pool, "safety_control", "idempotency_digest")
-        assert await _column_exists(pool, "strategy_executions", "paused_by_control_id")
+        assert await _column_exists(migration_pool, "risk_evaluation", "trace_id")
+        assert await _column_exists(migration_pool, "safety_control", "idempotency_digest")
+        assert await _column_exists(migration_pool, "strategy_executions", "paused_by_control_id")
 
-        _run_alembic("downgrade", "c7e6a3b2d4f5")
+        # deep downgrade: see tests/support/deep_downgrade.py
+        await purge_position_snapshots(migration_pool)
+        _run_alembic("downgrade", "c7e6a3b2d4f5", database_url=migration_db_url)
 
-        after_downgrade = await _gate_kind_check_def(pool)
+        after_downgrade = await _gate_kind_check_def(migration_pool)
         assert "PRE_SUBMIT" not in after_downgrade
         assert "INTRADAY" not in after_downgrade
         assert "RECOVERY" not in after_downgrade
-        assert not await _column_exists(pool, "risk_evaluation", "trace_id")
-        assert not await _column_exists(pool, "safety_control", "idempotency_digest")
-        assert not await _column_exists(pool, "strategy_executions", "paused_by_control_id")
+        assert not await _column_exists(migration_pool, "risk_evaluation", "trace_id")
+        assert not await _column_exists(migration_pool, "safety_control", "idempotency_digest")
+        assert not await _column_exists(
+            migration_pool, "strategy_executions", "paused_by_control_id"
+        )
 
-        _run_alembic("upgrade", "head")
+        _run_alembic("upgrade", "head", database_url=migration_db_url)
 
-        after_upgrade = await _gate_kind_check_def(pool)
+        after_upgrade = await _gate_kind_check_def(migration_pool)
         assert after_upgrade == before
-        assert await _column_exists(pool, "risk_evaluation", "trace_id")
-        assert await _column_exists(pool, "safety_control", "idempotency_digest")
-        assert await _column_exists(pool, "strategy_executions", "paused_by_control_id")
+        assert await _column_exists(migration_pool, "risk_evaluation", "trace_id")
+        assert await _column_exists(migration_pool, "safety_control", "idempotency_digest")
+        assert await _column_exists(migration_pool, "strategy_executions", "paused_by_control_id")
     finally:
-        _run_alembic("upgrade", "head")
+        await migration_pool.close()
+
+
+@pytest.mark.perf
+async def test_idempotency_digest_unique_violation_detection_stays_fast_at_scale(pool):
+    """성능 단언(D2) — safety_control.idempotency_digest UNIQUE는 인덱스를
+    타야 한다. 인덱스 없이 순차 스캔이면 위반 감지 시간이 기존 행 수에
+    비례해 늘어난다. 200개의 서로 다른 digest를 먼저 채운 뒤, 그중 하나를
+    중복 삽입하는 시도가 여전히 짧은 시간 안에 거부되는지 확인한다(웜업
+    1회로 최초 쿼리플랜 컴파일 비용을 측정에서 제외)."""
+    tenant_id = await _tenant(pool)
+    digests = [
+        hashlib.sha256(f"r-34-perf-{tenant_id}-{i}".encode()).hexdigest() for i in range(200)
+    ]
+    async with pool.acquire() as conn:
+        try:
+            for i, digest in enumerate(digests):
+                await conn.execute(
+                    "INSERT INTO safety_control "
+                    "(scope, scope_ref, reason, actor_subject_id, fence_token, idempotency_digest) "
+                    "VALUES ('ACCOUNT', $1, 'perf-scale-fill', $2, $3, $4)",
+                    str(tenant_id),
+                    tenant_id,
+                    i + 1,
+                    digest,
+                )
+
+            async def _duplicate_insert(digest: str, fence: int) -> None:
+                with pytest.raises(asyncpg.UniqueViolationError):
+                    await conn.execute(
+                        "INSERT INTO safety_control "
+                        "(scope, scope_ref, reason, actor_subject_id, fence_token, "
+                        " idempotency_digest) "
+                        "VALUES ('ACCOUNT', $1, 'perf-scale-dup', $2, $3, $4)",
+                        str(tenant_id),
+                        tenant_id,
+                        fence,
+                        digest,
+                    )
+
+            await _duplicate_insert(digests[1], 9001)  # 웜업 — 계획 캐시 컴파일 제외
+
+            start = time.perf_counter()
+            await _duplicate_insert(digests[0], 9002)
+            elapsed = time.perf_counter() - start
+            assert elapsed < 0.5, (
+                f"UNIQUE 위반 감지가 {elapsed:.3f}s 걸렸다 — 인덱스 미사용(순차 스캔) 의심"
+            )
+        finally:
+            await conn.execute("DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id)
+
+
+async def test_concurrent_replay_with_same_idempotency_digest_only_one_instance_wins(pool):
+    """다중 인스턴스 리플레이 경합(D3) — §5 "요청 Idempotency-Key"는 여러
+    앱 인스턴스가 네트워크 재시도로 동시에 같은 activate 요청을 다시 보내는
+    상황을 막기 위한 것이다. 10개의 동시 삽입이 정확히 같은
+    idempotency_digest를 갖고 경합해도 UNIQUE 제약이 정확히 하나만 통과시켜야
+    한다(나머지는 유실이 아니라 명시적 거부)."""
+    tenant_id = await _tenant(pool)
+    digest = hashlib.sha256(f"r-34-concurrent-replay:{tenant_id}".encode()).hexdigest()
+
+    async def _try_insert(fence: int) -> bool:
+        async with pool.acquire() as conn:
+            try:
+                await conn.execute(
+                    "INSERT INTO safety_control "
+                    "(scope, scope_ref, reason, actor_subject_id, fence_token, "
+                    " idempotency_digest) "
+                    "VALUES ('ACCOUNT', $1, 'concurrent-replay', $2, $3, $4)",
+                    str(tenant_id),
+                    tenant_id,
+                    fence,
+                    digest,
+                )
+                return True
+            except asyncpg.UniqueViolationError:
+                return False
+
+    try:
+        results = await asyncio.gather(*[_try_insert(i) for i in range(10)])
+        assert results.count(True) == 1, "동시 재시도(다중 인스턴스) 중 정확히 하나만 성공해야 한다"
+        assert results.count(False) == 9
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM safety_control WHERE actor_subject_id = $1", tenant_id)
+
+
+async def test_concurrent_evaluate_risk_gate_calls_never_cross_contaminate_trace_id(
+    pool, repo, mandate_repo, trust_repo, connection_repo
+):
+    """적대적/동시성 증명(D3) — `context.py` 모듈독스트링대로 asyncio 태스크는
+    생성 시점의 ContextVar를 복제해 상속한다. 여러 tenant의
+    `evaluate_risk_gate()` 호출을 동시에 실행해도, 각자 자신이 `bind()`한
+    trace_id만 기록해야 한다 — 한 요청의 trace_id가 다른 요청의
+    `risk_evaluation` 행으로 새어 들어가면 §3.8 감사 추적 자체가 오염된다."""
+    tenants = [await _tenant(pool) for _ in range(5)]
+    for tenant_id in tenants:
+        await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
+
+    async def _evaluate(tenant_id: UUID) -> tuple[UUID, str]:
+        with bind_request_context() as ctx:
+            result = await evaluate_risk_gate(
+                repo,
+                mandate_repo,
+                connection_repo,
+                tenant_id=tenant_id,
+                gate_kind=GateKind.DEPLOYMENT,
+            )
+            assert result.outcome.value == "ALLOW"
+            return ctx.trace_id, result.trace_id
+
+    pairs = await asyncio.gather(*[_evaluate(t) for t in tenants])
+    for expected_trace_id, recorded_trace_id in pairs:
+        assert recorded_trace_id == expected_trace_id
+
+    all_trace_ids = [expected for expected, _ in pairs]
+    assert len(set(all_trace_ids)) == len(all_trace_ids), (
+        "서로 다른 동시 요청이 같은 trace_id를 공유했다 — 컨텍스트 격리 실패"
+    )

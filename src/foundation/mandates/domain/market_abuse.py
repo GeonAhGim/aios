@@ -15,6 +15,7 @@ import, type, or judging logic with that module (see the static test in
 Pure and deterministic (CM-A2): no clock, RNG, or I/O of any kind -- every
 timestamp is supplied by the caller inside `window`.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -65,16 +66,20 @@ def _missing(pattern_id: str, field_name: str) -> AbuseHit:
     )
 
 
-def _safe(
-    fn: Any, pattern_id: str, *args: Any
-) -> list[AbuseHit]:
+def _safe(fn: Any, pattern_id: str, *args: Any) -> list[AbuseHit]:
     """I-02 fail-closed: a field missing deeper than the top level of
     `window` (e.g. one fill dict lacking `owner_id`) must still surface as a
     `DATA_MISSING` hit instead of a silently-empty result or an uncaught
-    crash -- same posture as `domain/evaluator.py::_run_rule`."""
+    crash -- same posture as `domain/evaluator.py::_run_rule`. `ArithmeticError`
+    is caught alongside `KeyError`/`TypeError` because a corrupted numeric or
+    datetime value can pass every `isinstance` guard upstream and still raise
+    it deep in `qty`/`executed_at` arithmetic (`Decimal.__add__`,
+    `datetime.__sub__`); letting that escape here would turn a data-integrity
+    problem into a silent gap instead of a `DATA_MISSING` hit (DEEPEN
+    task-2864, mirrors the CM-6/CM-7 corrupted-numeric-type findings)."""
     try:
         return list(fn(*args))
-    except (KeyError, TypeError) as exc:
+    except (KeyError, TypeError, ArithmeticError) as exc:
         return [_missing(pattern_id, str(exc))]
 
 

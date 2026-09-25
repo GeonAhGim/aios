@@ -1,0 +1,114 @@
+# requirements-lock.txt -- exact, reproducible venv for this repo (task-3577).
+#
+# Problem this solves: rebuilding the venv from pyproject.toml alone lets pip
+# pick whatever the newest matching release is on the day of the install, and
+# that has repeatedly produced a different, broken environment than the one
+# CI/other machines are actually running on -- e.g. TA-Lib 0.8.0/0.6.8 (instead
+# of 0.7.1) breaking tests/unit/core/indicators/test_generate_specs.py's
+# expected indicator count, pytest-timeout/tzdata missing outright, and a
+# pydantic point release changing market_data JSON-schema snapshots.
+#
+# Regenerate (only when you intend to move the pinned floor -- see
+# docs/DEPENDENCIES.md):
+#   py -3.10 -m venv <scratch-venv>
+#   <scratch-venv>/Scripts/python -m pip install -e "C:\aios\aios[dev,test]"
+#   <scratch-venv>/Scripts/python -m pip freeze | grep -v '^-e ' > requirements-lock.txt
+# Then reinstall the real venv from the lock file (`pip install -r
+# requirements-lock.txt`) and run `pytest tests/unit -q` before committing the
+# refreshed file.
+#
+# Install: pip install -r requirements-lock.txt && pip install -e . --no-deps
+alembic==1.20.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+ast_serialize==0.11.2
+async-timeout==5.0.1
+asyncpg==0.31.0
+backports.asyncio.runner==1.2.0
+boolean.py==5.0
+build==1.6.1
+CacheControl==0.14.4
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+colorama==0.4.6
+coverage==7.16.1
+cryptography==50.0.1
+cyclonedx-python-lib==11.12.0
+defusedxml==0.7.1
+dnspython==2.8.0
+email-validator==2.3.0
+exceptiongroup==1.3.1
+execnet==2.1.2
+fastapi==0.141.1
+filelock==3.32.6
+greenlet==3.5.6
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.19
+iniconfig==2.3.0
+librt==0.15.0
+license-expression==30.4.4
+Mako==1.4.1
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mdurl==0.1.2
+msgpack==1.2.2
+lightgbm==4.7.0
+mypy==2.3.1
+mypy_extensions==1.1.0
+numpy==2.2.6
+packageurl-python==0.17.6
+packaging==26.3
+pathspec==1.1.1
+pip==26.2.1
+pip-requirements-parser==32.0.1
+pip_api==0.0.35
+pip_audit==2.10.1
+platformdirs==4.11.8
+pluggy==1.6.0
+prometheus_client==0.26.0
+py-cpuinfo2==10.1.1
+py-serializable==2.1.0
+pyarrow==25.0.1
+pycparser==3.0
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+PyJWT==2.14.0
+PyOTP==2.10.0
+pyparsing==3.3.2
+pyproject_hooks==1.2.0
+redis==8.1.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-benchmark==5.3.0
+pytest-cov==7.1.0
+pytest-timeout==2.4.0
+pytest-xdist==3.8.0
+python-dotenv==1.2.3
+PyYAML==6.0.3
+requests==2.34.2
+rich==15.0.0
+ruff==0.16.7
+setuptools==84.0.0
+sortedcontainers==2.4.0
+SQLAlchemy==2.0.53
+starlette==1.6.0
+TA-Lib==0.7.1
+tomli==2.4.1
+tomli_w==1.2.0
+types-PyYAML==6.0.12.20260906
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.4
+urllib3==2.7.0
+uvicorn==0.53.0
+watchfiles==1.2.0
+websockets==16.1.1

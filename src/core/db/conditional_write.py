@@ -1,13 +1,14 @@
-"""동시성/원자성 표준 공용 헬퍼.
+"""Shared helper for concurrency/atomicity standard.
 
 Spec: AIOSproject 105_concurrency_and_atomicity_engineering_standard_v1.0.md
 
-19개 서비스(dispute_resolution_service, portfolio_service, verification_service,
-strategy_builder_service, wallet_service 등)가 "상태를 읽고 검증한 뒤, 그 상태를
-UPDATE 조건에 다시 걸고 RETURNING으로 확인한다"는 같은 패턴을 각자 손으로
-재구현해왔다. 이 헬퍼는 그 패턴을 한 곳으로 모은다 — 기존 서비스를 강제
-마이그레이션하지는 않지만(동작은 이미 올바름), FND-01(src/foundation/) 이후 새
-bounded context는 이 헬퍼를 통해서만 조건부 쓰기를 수행한다.
+Nineteen services (dispute_resolution_service, portfolio_service, verification_service,
+strategy_builder_service, wallet_service, etc.) each hand-implemented the same pattern:
+"read and validate the state, then re-apply it as an UPDATE condition and confirm via
+RETURNING". This helper consolidates that pattern in one place — it does not force
+migration of existing services (their behavior is already correct), but new bounded
+contexts created after FND-01 (src/foundation/) must perform conditional writes only
+through this helper.
 """
 from __future__ import annotations
 
@@ -17,10 +18,10 @@ import asyncpg
 
 
 class ConcurrencyConflictError(Exception):
-    """읽은 상태와 쓰려는 시점의 실제 상태가 달랐다.
+    """The actual state at write time differed from the state we read.
 
-    호출자는 재조회 후 재시도하거나 사용자에게 409로 노출한다 — 이 예외를
-    삼키지 않는다.
+    The caller must re-query and retry, or expose a 409 to the user — do not
+    swallow this exception.
     """
 
 
@@ -36,27 +37,29 @@ async def conditional_update(
     returning: str = "*",
     extra_conditions: dict[str, Any] | None = None,
 ) -> asyncpg.Record:
-    """`WHERE <id_column> = $1 AND <expected_state_column> IS NOT DISTINCT FROM $2`로
-    조건부 UPDATE하고 RETURNING이 빈 결과면 ConcurrencyConflictError를 던진다.
+    """Conditional UPDATE with
+    `WHERE <id_column> = $1 AND <expected_state_column> IS NOT DISTINCT FROM $2`,
+    raising ConcurrencyConflictError if RETURNING yields an empty result.
 
-    `IS NOT DISTINCT FROM`을 쓰는 이유(`=` 대신) — FND-02 activate_revision()처럼
-    "아직 아무 값도 없음"(NULL)을 기대 상태로 거는 전이(최초 활성화 등)가 실제로
-    있다. 일반 `=`는 `NULL = NULL`이 NULL(거짓 취급)이라 이 경우 항상 매치
-    실패하므로, 호출자가 NULL을 다뤄야 할 때마다 이 헬퍼를 우회하게 된다 —
-    `IS NOT DISTINCT FROM`은 NULL과 non-NULL 양쪽에서 직관대로 동작해 그 우회를
-    막는다.
+    Why `IS NOT DISTINCT FROM` (instead of `=`) — transitions that expect "no value yet"
+    (NULL), such as FND-02 activate_revision(), do exist (initial activation, etc.).
+    Plain `=` treats `NULL = NULL` as NULL (false), causing a constant mismatch in these
+    cases and forcing callers to bypass this helper whenever they handle NULL.
+    `IS NOT DISTINCT FROM` behaves intuitively for both NULL and non-NULL, preventing
+    that bypass.
 
-    `table`/`id_column`/`expected_state_column`/`returning`과 `set_values`/
-    `extra_conditions`의 **키**(컬럼명)는 호출자 코드에 상수로 박혀 있어야 한다
-    (사용자 입력을 그대로 받지 않는다). 값은 이 함수가 전부 위치 매개변수로
-    바인딩하므로 호출자가 `$N` 번호를 직접 셀 필요가 없다 — 컬럼 순서를 잘못
-    세는 실수를 원천 차단한다.
+    The **keys** (column names) of `table`/`id_column`/`expected_state_column`/`returning`
+    and `set_values`/`extra_conditions` must be hardcoded in the caller's code
+    (never pass user input directly). Values are bound as positional parameters by this
+    function, so the caller never needs to count `$N` numbers themselves — this prevents
+    errors from miscounting column order.
 
-    `extra_conditions`(기본값 없음=None, 기존 호출부는 전부 영향 없음) — 주
-    조건(`expected_state_column`) 외에 추가로 WHERE에 걸 (컬럼→기대값) 쌍.
-    L4-07 `orders` 전이가 `status` 일치에 더해 `version = $expected_version`
-    (낙관적 락, I5)까지 같은 UPDATE 문 하나로 걸 때 쓴다 — 별도 SELECT 없이
-    RETURNING 0행이면 상태·버전 둘 중 하나라도 어긋났다는 뜻이 된다.
+    `extra_conditions` (default None, no impact on existing callers) — additional
+    (column->expected_value) pairs to append to the WHERE clause beyond the main condition
+    (`expected_state_column`). Used when the L4-07 `orders` transition needs to assert
+    both `status` match and `version = $expected_version` (optimistic lock, I5) in a
+    single UPDATE statement — if RETURNING returns 0 rows without a separate SELECT,
+    it means either the state or the version has drifted.
     """
     extra_items = list((extra_conditions or {}).items())
     base_params = [id_value, expected_state_value, *(v for _, v in extra_items)]
@@ -68,7 +71,7 @@ async def conditional_update(
     set_start = len(base_params) + 1
     set_clause = ", ".join(f"{col} = ${set_start + i}" for i, col in enumerate(set_columns))
     sql = (
-        f"UPDATE {table} SET {set_clause} "  # noqa: S608 — 컬럼명은 호출자 상수(위 docstring)
+        f"UPDATE {table} SET {set_clause} "  # noqa: S608 — column names are caller constants (see docstring)
         f"WHERE {id_column} = $1 AND {expected_state_column} IS NOT DISTINCT FROM $2"
         f"{extra_clause} "
         f"RETURNING {returning}"
@@ -77,7 +80,7 @@ async def conditional_update(
     row = await conn.fetchrow(sql, *params)
     if row is None:
         raise ConcurrencyConflictError(
-            f"{table}.{id_column}={id_value}: 다른 요청이 먼저 처리했습니다"
-            "(동시 처리 충돌) — 다시 조회 후 시도하세요."
+            f"{table}.{id_column}={id_value}: another request was processed first"
+            "(concurrency conflict) — please re-query and try again."
         )
     return row

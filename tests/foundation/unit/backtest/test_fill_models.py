@@ -7,6 +7,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 비교 금지). 5개 소스 모듈이 서로 임포트하지 않으므로 이 테스트 파일도
 모듈별 섹션을 독립적으로 구성한다.
 """
+
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 

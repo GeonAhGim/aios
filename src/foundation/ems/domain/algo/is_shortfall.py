@@ -36,6 +36,7 @@ pacing on the tail, the same rule twap.py/pov.py already document. This
 module reuses `AlgoConstraintError`/`ParentTerminalError` from EM-8's
 `twap.py` rather than declaring a third copy of the same two exceptions.
 """
+
 from __future__ import annotations
 
 import math
@@ -74,6 +75,23 @@ def _slice_count(parent: ParentOrder) -> int:
             f"{parent.algo.slice_interval_sec}s."
         )
     return count
+
+
+def _validate_participation_cap(max_participation_pct: Decimal) -> None:
+    """EM-A2 fail-closed: validate the cap itself, once, via the same
+    `guard.check_participation` the per-slice loop below calls -- with a
+    dummy `planned_qty=0`/`market_volume=1` pair so only the cap-range
+    check (the first of check_participation's three fail-closed checks)
+    can fire. Without this call, a corrupted/out-of-range
+    `max_participation_pct` (e.g. a post-validation mutation bug --
+    `AlgoSpec.max_participation_pct`'s `Field(gt=0, le=100)` only runs at
+    construction time, not on attribute assignment) would drive every
+    non-final slice's cap to `<= 0`, so every per-slice
+    `check_participation` call below is skipped (`slice_qty` resolves to
+    `0`) and the exempt final slice silently absorbs the whole order
+    unconstrained -- see the DEEPEN 2502 failure-injection and gate-red
+    tests in test_algo_is_shortfall.py."""
+    check_participation(Decimal("0"), Decimal("1"), max_participation_pct)
 
 
 def _urgency_weights(urgency: Decimal, slice_count: int) -> list[Decimal]:
@@ -117,6 +135,7 @@ def plan_is_schedule(
         )
 
     max_participation_pct = parent.algo.max_participation_pct
+    _validate_participation_cap(max_participation_pct)
     scheduled_ats = [
         parent.algo.start + timedelta(seconds=parent.algo.slice_interval_sec * index)
         for index in range(slice_count)

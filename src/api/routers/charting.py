@@ -9,6 +9,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.2,
 도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
 `EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(404/409는 기존 코드
 재사용, task-1557 decision)."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -102,7 +103,7 @@ async def patch_update_layout(
     return ok(result)
 
 
-@router.delete("/layouts/{layout_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/layouts/{layout_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_layout_by_id(
     layout_id: UUID,
     context: TenantContext = Depends(get_tenant_context),
@@ -176,7 +177,11 @@ async def get_indicator_template_by_id(
     return ok(result)
 
 
-@router.delete("/indicator-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/indicator-templates/{template_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 async def delete_indicator_template_by_id(
     template_id: UUID,
     context: TenantContext = Depends(get_tenant_context),

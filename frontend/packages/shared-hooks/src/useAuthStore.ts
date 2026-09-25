@@ -12,10 +12,22 @@ interface AuthState {
   logout: () => void;
 }
 
+// task-3633: window는 있지만 localStorage가 undefined인 환경(CI 재현: esc-ci-88205564777f,
+// Node의 네이티브 webstorage가 jsdom의 Storage와 충돌해 window.localStorage가 undefined가
+// 됐다 — apps/web/vitest.config.ts의 execArgv: ["--no-experimental-webstorage"]가 근본
+// 원인을 고쳤지만(task-3460), 임베디드 웹뷰 등 실제로 localStorage가 없는 런타임도 있으므로
+// window 존재만으로는 불충분하다는 방어는 남겨둔다.
+const readStoredToken = (): string | null => {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") {
+    return null;
+  }
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+};
+
 // 클라이언트 로컬 상태(토큰, 현재 사용자)만 Zustand로 관리한다 — 서버 데이터는
 // 여기 두지 않는다(TanStack Query와 역할 분리, 17번 문서 §17.4 원칙).
 export const useAuthStore = create<AuthState>((set) => ({
-  token: typeof window !== "undefined" ? localStorage.getItem(TOKEN_STORAGE_KEY) : null,
+  token: readStoredToken(),
   user: null,
   setToken: (token) => {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);

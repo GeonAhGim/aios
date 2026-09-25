@@ -3,8 +3,10 @@
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5
 (§9 FA-5 DoD "컨텍스트 없는 쓰기 정적 검사 0건", §2.1 application 행).
 """
+
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
@@ -190,3 +192,78 @@ async def test_resolve_portfolio_scope_rejects_closed_parent_fund():
 
     with pytest.raises(EntityContextResolutionError):
         await resolve_portfolio_scope(repo, tenant_id, hierarchy.portfolio.portfolio_id)
+
+
+async def test_resolve_portfolio_scope_mid_lookup_infra_failure_propagates_fail_closed(
+    monkeypatch,
+):
+    """실패주입+게이트재현 — DEPTH 감사(task-2724)가 지적한 공백: 지금까지의
+    negative는 전부 "존재하지 않음/폐쇄됨" 같은 정상 입력 검증 거부였을 뿐,
+    저장소 자체가 예외/DB 오류로 죽는 경우는 한 번도 흉내내지 않았다.
+    portfolio는 정상 조회되지만 그 다음 단계(`get_fund`)에서 인프라 장애가
+    나면, `resolve_portfolio_scope`는 이미 조회된 portfolio를 그대로 돌려주는
+    폴백 없이 그 예외를 그대로 전파해야 한다(부분 검증 후 통과 없음)."""
+    user_id = uuid4()
+    tenant_id = uuid4()
+    repo, hierarchy = _seeded_repo(user_id, tenant_id)
+
+    async def _flaky_get_fund(tenant_id: UUID, fund_id: UUID) -> Fund | None:
+        raise RuntimeError("simulated entities repository outage")
+
+    monkeypatch.setattr(repo, "get_fund", _flaky_get_fund)
+
+    with pytest.raises(RuntimeError, match="simulated entities repository outage"):
+        await resolve_portfolio_scope(repo, tenant_id, hierarchy.portfolio.portfolio_id)
+
+
+async def test_resolve_portfolio_scope_concurrent_mixed_owner_and_intruder_do_not_cross_leak():
+    """D3증거 — 서로 다른 tenant가 소유한 portfolio_id 조회를 asyncio.gather로
+    동시에 섞어 실행해도(공유 repo 인스턴스 하나) 각 호출은 자신의 tenant_id
+    기준으로만 판정된다 — 동시 실행이 만드는 공유 상태 오염으로 한 tenant의
+    소유 판정이 다른 tenant로 새는 사고(교차 유출)가 없음을 증명한다."""
+    tenants = [(uuid4(), uuid4()) for _ in range(5)]
+    repo = _FakeEntityRepository()
+    hierarchies = {}
+    for user_id, tenant_id in tenants:
+        h = build_default_hierarchy(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            base_currency=Currency.USDT,
+            jurisdiction="KR",
+            region_tag="kr-seoul",
+            venue_account_ref="venue-acct-1",
+            inception=date(2026, 1, 1),
+        )
+        repo.legal_entities[h.legal_entity.entity_id] = h.legal_entity
+        repo.funds[h.fund.fund_id] = h.fund
+        repo.portfolios[h.portfolio.portfolio_id] = h.portfolio
+        repo.sub_accounts[h.sub_account.sub_account_id] = h.sub_account
+        hierarchies[tenant_id] = h
+
+    async def _resolve_as_owner(tenant_id: UUID) -> UUID:
+        portfolio = await resolve_portfolio_scope(
+            repo, tenant_id, hierarchies[tenant_id].portfolio.portfolio_id
+        )
+        return portfolio.portfolio_id
+
+    async def _resolve_as_intruder(victim_tenant_id: UUID, intruder_tenant_id: UUID) -> Exception:
+        try:
+            await resolve_portfolio_scope(
+                repo, intruder_tenant_id, hierarchies[victim_tenant_id].portfolio.portfolio_id
+            )
+        except EntityContextResolutionError as exc:
+            return exc
+        raise AssertionError("교차 테넌트 조회가 거부되지 않았습니다")
+
+    owner_calls = [_resolve_as_owner(tenant_id) for _, tenant_id in tenants]
+    intruder_calls = [
+        _resolve_as_intruder(tenants[i][1], tenants[(i + 1) % len(tenants)][1])
+        for i in range(len(tenants))
+    ]
+    owner_results, intruder_results = await asyncio.gather(
+        asyncio.gather(*owner_calls), asyncio.gather(*intruder_calls)
+    )
+
+    for (_, tenant_id), returned_portfolio_id in zip(tenants, owner_results, strict=True):
+        assert returned_portfolio_id == hierarchies[tenant_id].portfolio.portfolio_id
+    assert all(isinstance(exc, EntityContextResolutionError) for exc in intruder_results)

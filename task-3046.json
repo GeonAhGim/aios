@@ -1,0 +1,36 @@
+{
+  "worker": "claude-local-4",
+  "role": "claude-local",
+  "model": "",
+  "stage": "implement",
+  "parent": null,
+  "depends_on": [],
+  "attempts": 1,
+  "title": "DEEPEN 1754 BT-20 백테스트 기업행위 반영 (설정 필드만 있고 구현이 없다)",
+  "spec": "docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.5 BT-20, ADR-2026-09-06-G §9. `BacktestConfigV2.adjustments{splits,dividends}`가 계약에 선언돼 있으나 이를 구현하는 리프가 없다 — TradingView·Bloomberg는 기본 제공한다. DoD: 2:1 분할 픽스처에서 분할조정 체결과 원시 체결이 알려진 비율만큼 차이, 미조정 모드는 결과 지표에 플래그로 표시, 조정 미적용을 조용히 통과시키지 않음.",
+  "files": [
+    "src/foundation/backtest/domain/corporate_actions.py",
+    "tests/unit/backtest/"
+  ],
+  "status": "done",
+  "commit": "fa5bdbce",
+  "tests": "21 passed",
+  "note": "Implementation+tests already exist on origin/main (fa5bdbce, task-1754). All 21 tests pass, ruff+mypy clean. Task was already completed — verifying and closing.",
+  "decision": "",
+  "priority": 2,
+  "id": 3046,
+  "updated_at": "2026-09-16T00:00:00+00:00",
+  "rev": 16,
+  "orig_role": "backend",
+  "processed": false,
+  "engine": "claude-local",
+  "metrics": {
+    "num_turns": 61,
+    "duration_ms": 2141798,
+    "duration_api_ms": 2094778,
+    "cost_usd": 4.787453500000001,
+    "cache_read": 1375297
+  },
+  "max_turns": 120,
+  "elapsed_sec": 2145
+}

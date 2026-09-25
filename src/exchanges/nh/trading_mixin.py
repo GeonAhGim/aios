@@ -1,3 +1,4 @@
+# ratchet-allow: unverified order-status endpoint raises NotImplementedError, not a guess (I2)
 """NHAdapter Trading 메서드군 + health_check().
 
 Spec: 02_exchange_adapter_v1.3.md#§2.1, 02e_nh_api_spec_v1.md#§3
@@ -40,6 +41,7 @@ openapi.json`, `nhplug-sdk` 레포 `docs/README.md`/`AGENTS.md`가 이 URL을
 방법이 없다"는 것이 확정됐다 — 근거 없는 매핑(예: itg_orr_no==mkt_orr_no
 가정)으로 조용히 틀린 Order를 만드는 대신 명시적으로 NotImplementedError.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -93,8 +95,10 @@ def _parse_mkt_orr_no(mkt_orr_no: str) -> int:
 class NHTradingMixin:
     @require_paper_sandbox
     async def place_order(self: NHHTTPClient, order: Order) -> Order:
-        path = "/krstock/order/v1/cashBuy" if order.side == OrderSide.BUY else (
-            "/krstock/order/v1/cashSell"
+        path = (
+            "/krstock/order/v1/cashBuy"
+            if order.side == OrderSide.BUY
+            else ("/krstock/order/v1/cashSell")
         )
         body: dict[str, Any] = {
             "act_no": self._act_no,
@@ -179,8 +183,7 @@ class NHTradingMixin:
             new_mkt_orr_no = str(raw["Output_0"]["mkt_orr_no"])
         except KeyError as exc:
             raise FatalExchangeError(
-                f"NH 정정 응답에 예상 필드 없음(공식 openapi.json 기준 mkt_orr_no "
-                f"필요): {exc}"
+                f"NH 정정 응답에 예상 필드 없음(공식 openapi.json 기준 mkt_orr_no 필요): {exc}"
             ) from exc
         now = datetime.now(timezone.utc)
         return Order(
@@ -205,12 +208,20 @@ class NHTradingMixin:
         """모듈 docstring 참조 — 공식 openapi.json으로 확인한 구조적
         불일치(주문조회 응답에 우리 exchange_order_id 체계인 mkt_orr_no가
         없음) 때문에 근거 있는 구현이 불가능하다. 추측으로 잘못된 주문
-        상태를 만드는 것보다 명시적 미구현이 안전하다(PM 배정 지침 (2))."""
+        상태를 만드는 것보다 명시적 미구현이 안전하다(PM 배정 지침 (2)).
+
+        2026-09-16 (task-2615) re-confirmed -- re-downloaded the
+        openapi.json with `curl` and parsed `components.schemas` directly
+        in Python to re-verify the conclusion: dailyOrderExecution's
+        Output_1 item fields are only itg_orr_no/mo_itg_orr_no/
+        org_itg_orr_no, no mkt_orr_no. Also checked reservedInquiry, which
+        uses the unrelated bkg_orr_no scheme. Full reasoning and the
+        reopen condition are in `docs/exchanges/NH_GAPS.md` S1."""
         raise NotImplementedError(
             "NHAdapter.get_order: dailyOrderExecution 응답에 mkt_orr_no(당사 "
             "exchange_order_id 체계)를 조회할 필드가 없음이 공식 openapi.json으로 "
-            "확인됨(itg_orr_no만 존재, 02e 스펙 §3 참조) — 라이브 계좌로 두 "
-            "식별자의 매핑 관계를 확인하기 전까지 구현 보류"
+            "확인됨(itg_orr_no만 존재, 02e 스펙 §3, docs/exchanges/NH_GAPS.md §1 "
+            "참조) — 라이브 계좌로 두 식별자의 매핑 관계를 확인하기 전까지 구현 보류"
         )
 
     async def health_check(self: _BalanceReadingClient) -> bool:

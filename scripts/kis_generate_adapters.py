@@ -39,10 +39,7 @@ tr_id 오름차순 정렬, 고정 폭 텍스트랩(textwrap), 라인 예산 기�
 from __future__ import annotations
 
 import importlib.util
-import json
-import re
 import sys
-import unicodedata
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -52,32 +49,60 @@ REFERENCE_PATH = ROOT / "docs" / "design" / "kis_tr_reference.json"
 ADAPTER_DIR = ROOT / "src" / "exchanges" / "kis"
 GENERATED_DIR = ADAPTER_DIR / "generated"
 
-# 파일당 300줄 상한(BR-12 DoD) — 헤더(모듈 docstring+import)에 넉넉히 40줄을 남기고
-# 본문(메서드 텍스트)은 260줄 예산으로 청크를 채운다.
-_FILE_LINE_CAP = 300
-_CHUNK_BODY_BUDGET = 260
-
 # 예외 오버라이드 표 — ADR 근거와 함께 tr_id별 필드(path/method/params/response)를
 # 보정할 때만 채운다(`kis_tr_coverage._SCOPE_OVERRIDES`와 동일 원칙). 현재 BR-11
 # 기계 추출 결과에 추출 오류가 0건이라 비어 있다.
 _EXCEPTION_OVERRIDES: dict[str, dict[str, Any]] = {}
 
 
-class KisGenerateError(ValueError):
-    """기준 목록 형식 오류 또는 생성 불가능한 행(미지원 HTTP 메서드 등)."""
-
-
 def _load_module(name: str, path: Path) -> ModuleType:
+    """`sys.modules`에 이미 있으면 재사용한다 -- 분할된 스크립트들이 서로 같은
+    이름으로 서로를 로드할 때(예: 이 모듈과 `kis_chunking.py`가 둘 다
+    `kis_rendering`을 로드) 다시 실행하면 같은 파일이라도 클래스 정체성이
+    갈라져(`KisGenerateError`가 두 개의 서로 다른 클래스가 됨) `isinstance`/
+    `pytest.raises`가 깨진다."""
+    existing = sys.modules.get(name)
+    if existing is not None:
+        return existing
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise KisGenerateError(f"모듈 로드 실패: {path}")
+        raise ImportError(f"모듈 로드 실패: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-_coverage = _load_module("kis_tr_coverage", Path(__file__).resolve().parent / "kis_tr_coverage.py")
+_HERE = Path(__file__).resolve().parent
+_coverage = _load_module("kis_tr_coverage", _HERE / "kis_tr_coverage.py")
+_rendering = _load_module("kis_rendering", _HERE / "kis_rendering.py")
+_chunking = _load_module("kis_chunking", _HERE / "kis_chunking.py")
+_labels = _load_module("kis_labels", _HERE / "kis_labels.py")
+
+# 하위 호환 재노출 -- 테스트가 이 모듈에서 직접 참조한다(예: `gen.is_order_method`,
+# `gen.render_rest_method`). 실제 정의는 각 분할 모듈에 있다.
+KisGenerateError = _rendering.KisGenerateError
+render_rest_method = _rendering.render_rest_method
+render_ws_method = _rendering.render_ws_method
+render_method = _rendering.render_method
+is_order_method = _rendering.is_order_method
+_pascal = _rendering._pascal
+_FILE_LINE_CAP = _chunking._FILE_LINE_CAP
+_chunk_rows = _chunking._chunk_rows
+render_init_module = _chunking.render_init_module
+_PROTOCOLS_MODULE = _chunking._PROTOCOLS_MODULE
+
+
+def render_chunk_file(domain: str, idx: int, rows: list[dict[str, Any]]) -> str:
+    """`_chunking.render_chunk_file`에 이 모듈의 `_FILE_LINE_CAP`을 그대로
+    전달한다 -- 테스트가 `_FILE_LINE_CAP`을 이 모듈에서 monkeypatch하므로 값을
+    복사해두면 안 되고 호출 시점에 다시 읽어야 한다."""
+    return str(_chunking.render_chunk_file(domain, idx, rows, file_line_cap=_FILE_LINE_CAP))
+
+
+def render_tr_labels_file(domain: str, rows: list[dict[str, Any]]) -> str:
+    """`render_chunk_file`과 같은 이유로 `_FILE_LINE_CAP`을 호출 시점에 전달한다."""
+    return str(_labels.render_tr_labels_file(domain, rows, file_line_cap=_FILE_LINE_CAP))
 
 
 def scan_handwritten_source(adapter_dir: Path) -> str:
@@ -96,393 +121,6 @@ def select_todo_rows(reference: dict[str, Any], handwritten_source: str) -> list
         if reason == "미착수":
             todo.append({**row, **_EXCEPTION_OVERRIDES.get(row["tr_id"], {})})
     return todo
-
-
-def _pascal(domain: str) -> str:
-    return "".join(part.capitalize() for part in domain.split("_"))
-
-
-def _method_name(row: dict[str, Any]) -> str:
-    stem = Path(row["source_path"]).stem
-    slug = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")
-    return f"{slug}_{row['tr_id'].lower()}"
-
-
-def _summary_line(row: dict[str, Any]) -> str:
-    params = row["params"]
-    required = ", ".join(p["name"] for p in params if p["required"]) or "none"
-    optional = ", ".join(p["name"] for p in params if not p["required"]) or "none"
-    label_file = f"{row['domain']}_tr_labels.py"
-    if row["method"] == "WS":
-        fields = ", ".join(row["response"]["fields"]) or "none"
-        return (
-            f"WS tr_id={row['tr_id']}. Korean label: see generated/{label_file}. "
-            f"Required parameters: {required}. Response fields: {fields}."
-        )
-    containers = ", ".join(row["response"]["containers"]) or "none"
-    return (
-        f"{row['method']} {row['path']} (tr_id={row['tr_id']}). "
-        f"Korean label: see generated/{label_file}. "
-        f"Required: {required}. Optional: {optional}. Response containers: {containers}."
-    )
-
-
-_DOC_WRAP_WIDTH = 88  # ruff E501(line-length=100)은 동아시아 폭 문자를 2로 센다 -- 들여쓰기
-# 8칸을 빼고도 안전하도록 문자수가 아니라 표시폭(_display_width) 기준으로 감싼다.
-
-
-def _display_width(text: str) -> int:
-    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
-
-
-def _wrap_display(text: str, max_width: int) -> list[str]:
-    """`textwrap.wrap`은 문자수만 세어 한글 등 폭 2 문자가 섞이면 실제 렌더 폭을
-    과소평가한다 -- 표시폭 기준으로 직접 감싼다(순수 함수, 결정론)."""
-    lines: list[str] = []
-    current = ""
-    current_width = 0
-    for word in text.split(" "):
-        word_width = _display_width(word)
-        if word_width > max_width:
-            if current:
-                lines.append(current)
-                current, current_width = "", 0
-            chunk = ""
-            chunk_width = 0
-            for ch in word:
-                ch_width = _display_width(ch)
-                if chunk_width + ch_width > max_width and chunk:
-                    lines.append(chunk)
-                    chunk, chunk_width = "", 0
-                chunk += ch
-                chunk_width += ch_width
-            current, current_width = chunk, chunk_width
-            continue
-        sep_width = 1 if current else 0
-        if current and current_width + sep_width + word_width > max_width:
-            lines.append(current)
-            current, current_width = word, word_width
-        else:
-            current = f"{current} {word}" if current else word
-            current_width += sep_width + word_width
-    if current:
-        lines.append(current)
-    return lines or [text]
-
-
-def _docstring_lines(row: dict[str, Any], indent: str) -> list[str]:
-    summary = _summary_line(row).replace('"""', "'''")
-    wrapped = _wrap_display(summary, _DOC_WRAP_WIDTH)
-    lines = [
-        f'{indent}"""Auto-generated by BR-12 (ADR-2026-09-06-I D7).',
-        f"{indent}Unverified: real-account round trip not confirmed.",
-    ]
-    lines.extend(f"{indent}{w}" for w in wrapped)
-    lines.append(f'{indent}"""')
-    return lines
-
-
-def render_rest_method(row: dict[str, Any]) -> list[str]:
-    if row["method"] not in ("GET", "POST"):
-        raise KisGenerateError(f"{row['tr_id']}: 지원하지 않는 HTTP 메서드 {row['method']!r}")
-    name = _method_name(row)
-    arg_name = "params" if row["method"] == "GET" else "body"
-    lines = [""]
-    if is_order_method(row):
-        lines.append("    @require_paper_sandbox")
-    lines.extend(
-        [
-            f"    async def {name}(",
-            "        self, params: dict[str, Any] | None = None",
-            "    ) -> dict[str, Any]:",
-        ]
-    )
-    lines.extend(_docstring_lines(row, "        "))
-    lines.extend(
-        [
-            "        return await self._request(",
-            f'            "{row["method"]}",',
-            f'            "{row["path"]}",',
-            f'            "{row["tr_id"]}",',
-            f"            {arg_name}=params or {{}},",
-            "        )",
-        ]
-    )
-    return lines
-
-
-def render_ws_method(row: dict[str, Any]) -> list[str]:
-    if row["method"] != "WS":
-        raise KisGenerateError(f"{row['tr_id']}: WS 렌더러에 비-WS 행 전달됨")
-    name = _method_name(row)
-    lines = [
-        "",
-        f"    async def {name}(",
-        "        self,",
-        "        tr_key: str,",
-        "        callback: MessageHandler,",
-        "        *,",
-        "        on_reconnecting: ReconnectHook | None = None,",
-        "        on_reconnected: ReconnectHook | None = None,",
-        "        connect_fn: ConnectFn = _connect,",
-        "    ) -> None:",
-    ]
-    lines.extend(_docstring_lines(row, "        "))
-    lines.extend(
-        [
-            "        approval_key = await self.get_ws_approval_key()",
-            "        url = WS_PAPER_URL if self._is_paper_trading else WS_REAL_URL",
-            "        subscribe_msg = _build_subscribe_message(",
-            f'            approval_key, "{row["tr_id"]}", tr_key',
-            "        )",
-            "",
-            "        async def _on_frame(raw: str) -> None:",
-            "            await callback(raw)",
-            "",
-            "        await _run_kis_ws_subscription(",
-            "            url,",
-            "            subscribe_msg,",
-            "            _on_frame,",
-            "            connect_fn=connect_fn,",
-            "            on_reconnecting=on_reconnecting,",
-            "            on_reconnected=on_reconnected,",
-            "        )",
-        ]
-    )
-    return lines
-
-
-def is_order_method(row: dict[str, Any]) -> bool:
-    """BR-12 리프(review:1971 REJECT 후속) -- 주문성 TR 판정.
-
-    KIS TR 기준 목록 안 POST 메서드 48건은 예외 없이 매수/매도/정정/취소/예약주문
-    (레이블에 "주문" 포함)이다. 이 저장소 안에서는 method == "POST"가 곧
-    주문성이라는 뜻이라 이름 규칙에 기대지 않는다(fail-closed 원칙 -- 분류가
-    모호하면 가드를 붙이는 쪽이 안전하다, decision 참조). GET/WS는 조회·구독뿐이라
-    대상에서 뺀다."""
-    return bool(row["method"] == "POST")
-
-
-def render_method(row: dict[str, Any]) -> list[str]:
-    return render_ws_method(row) if row["method"] == "WS" else render_rest_method(row)
-
-
-def _chunk_rows(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    """tr_id 오름차순을 유지한 채 라인 예산으로 그리디 분할(결정론)."""
-    chunks: list[list[dict[str, Any]]] = []
-    current: list[dict[str, Any]] = []
-    current_lines = 0
-    for row in rows:
-        rendered = render_method(row)
-        if current and current_lines + len(rendered) > _CHUNK_BODY_BUDGET:
-            chunks.append(current)
-            current = []
-            current_lines = 0
-        current.append(row)
-        current_lines += len(rendered)
-    if current:
-        chunks.append(current)
-    return chunks
-
-
-def render_chunk_file(domain: str, idx: int, rows: list[dict[str, Any]]) -> str:
-    has_rest = any(r["method"] != "WS" for r in rows)
-    has_ws = any(r["method"] == "WS" for r in rows)
-    has_order = any(is_order_method(r) for r in rows)
-    protocol_bases = sorted(
-        name for name, flag in (("_KISRestHost", has_rest), ("_KISWsHost", has_ws)) if flag
-    )
-    class_name = f"KISGenerated{_pascal(domain)}{idx:02d}Mixin"
-
-    lines: list[str] = [
-        f'"""Auto-generated by BR-12 (ADR-2026-09-06-I D7) -- {domain} chunk {idx:02d}',
-        "of TRs not yet implemented.",
-        "",
-        "`scripts/kis_generate_adapters.py` generated this from",
-        "`docs/design/kis_tr_reference.json` (BR-11) -- do not hand-edit (a regeneration",
-        "overwrites it). Only request assembly is done, using values extracted mechanically",
-        "from the example scripts; responses are returned unparsed -- field-level type",
-        "mapping is domain knowledge left to the verification leaves (BR-13~15) once a real",
-        "account is available.",
-        '"""',
-        "from __future__ import annotations",
-        "",
-    ]
-    if has_rest:
-        lines += ["from typing import Any", ""]
-    first_party: list[str] = []
-    if has_order:
-        first_party.append("from src.exchanges.common.live_guard import require_paper_sandbox")
-    first_party.append(
-        f"from src.exchanges.kis.generated._protocols import {', '.join(protocol_bases)}"
-    )
-    if has_ws:
-        first_party.append(
-            "from src.exchanges.kis.websocket_connection import (\n"
-            "    ConnectFn,\n"
-            "    MessageHandler,\n"
-            "    ReconnectHook,\n"
-            "    _connect,\n"
-            "    _run_kis_ws_subscription,\n"
-            ")"
-        )
-        first_party.append(
-            "from src.exchanges.kis.websocket_mixin import (\n"
-            "    WS_PAPER_URL,\n"
-            "    WS_REAL_URL,\n"
-            ")"
-        )
-        first_party.append(
-            "from src.exchanges.kis.websocket_parsing import _build_subscribe_message"
-        )
-    lines += first_party
-    lines += ["", "", f"class {class_name}({', '.join(protocol_bases)}):"]
-    for row in rows:
-        lines.extend(render_method(row))
-    lines.append("")
-    text = "\n".join(lines)
-    if text.count("\n") + 1 > _FILE_LINE_CAP:
-        raise KisGenerateError(
-            f"{domain} 청크 {idx:02d}: {text.count(chr(10)) + 1}줄 > {_FILE_LINE_CAP}줄 상한"
-        )
-    return text
-
-
-_LABEL_LINE_WIDTH_BUDGET = 96  # 단일 줄로 뒀을 때 ruff E501(100, 동아시아 폭 2) 여유
-_LABEL_CHUNK_WIDTH = 84  # 줄바꿈 시 각 조각의 표시폭 상한(들여쓰기+따옴표 여유 포함)
-
-
-def _wrap_literal(text: str, max_width: int) -> list[str]:
-    """`text`를 표시폭 기준 `max_width` 이하 조각으로 문자 단위(단어 경계 무시)로
-    자른다 -- 인접 문자열 리터럴로 이어 붙이면 원문과 바이트 동일(정보 손실 없음).
-    한글 레이블은 데이터라 `_wrap_display`(단어 단위, 줄바꿈에 공백 정보 유실 가능)를
-    쓰면 안 된다."""
-    chunks: list[str] = []
-    current = ""
-    current_width = 0
-    for ch in text:
-        ch_width = _display_width(ch)
-        if current and current_width + ch_width > max_width:
-            chunks.append(current)
-            current, current_width = "", 0
-        current += ch
-        current_width += ch_width
-    if current:
-        chunks.append(current)
-    return chunks or [text]
-
-
-def _tr_label_entry(tr_id: str, label: str) -> list[str]:
-    key_literal = json.dumps(tr_id, ensure_ascii=False)
-    single = f"    {key_literal}: {json.dumps(label, ensure_ascii=False)},"
-    if _display_width(single) <= _LABEL_LINE_WIDTH_BUDGET:
-        return [single]
-    lines = [f"    {key_literal}: ("]
-    lines.extend(
-        f"        {json.dumps(chunk, ensure_ascii=False)}"
-        for chunk in _wrap_literal(label, _LABEL_CHUNK_WIDTH)
-    )
-    lines.append("    ),")
-    return lines
-
-
-def render_tr_labels_file(domain: str, rows: list[dict[str, Any]]) -> str:
-    """`domain`의 한글 TR 레이블 보관 파일 -- 독스트링·주석이 아닌 일반 dict
-    리터럴이라 `check_code_language.py`(ADR-2026-09-07-A) 검사 대상이 아니다.
-    `_summary_line`이 메서드 독스트링 대신 이 파일을 가리킨다(정보 보존)."""
-    entries = "\n".join(
-        line for row in rows for line in _tr_label_entry(row["tr_id"], row["label"])
-    )
-    text = "\n".join(
-        [
-            '"""Auto-generated by BR-12 (ADR-2026-09-06-I D7) -- Korean TR labels for',
-            f"{domain}.",
-            "",
-            "`scripts/kis_generate_adapters.py` generates this from",
-            "`docs/design/kis_tr_reference.json` (BR-11) -- do not hand-edit (a regeneration",
-            "overwrites it). ADR-2026-09-07-A only requires English comments/docstrings under",
-            "`src/`; plain string/dict literals may stay Korean, so the labels live here",
-            "instead of in the generated mixins' docstrings.",
-            '"""',
-            "from __future__ import annotations",
-            "",
-            "TR_LABELS: dict[str, str] = {",
-            entries,
-            "}",
-            "",
-        ]
-    )
-    if text.count("\n") + 1 > _FILE_LINE_CAP:
-        raise KisGenerateError(
-            f"{domain} tr_labels: {text.count(chr(10)) + 1}줄 > {_FILE_LINE_CAP}줄 상한"
-        )
-    return text
-
-
-_PROTOCOLS_MODULE = '''"""Auto-generated by BR-12 (ADR-2026-09-06-I D7) -- adapter interfaces for
-generated mixins.
-
-`scripts/kis_generate_adapters.py` generates this -- do not hand-edit. Explicitly
-inheriting from a Protocol base (structural typing) means cross-mixin access like
-`self._request`/`self._is_paper_trading` doesn't need `# type: ignore[attr-defined]` --
-the real implementation is filled in by `KISAdapter`'s other mixins
-(`_KISHTTPClient`/`KISWebSocketMixin`), which come earlier in the MRO (a design choice
-to avoid growing the PLT-40 type-ignore budget ratchet).
-"""
-from __future__ import annotations
-
-from typing import Any, Protocol
-
-
-class _KISRestHost(Protocol):
-    async def _request(
-        self,
-        method: str,
-        path: str,
-        tr_id: str,
-        *,
-        params: dict[str, Any] | None = None,
-        body: dict[str, Any] | None = None,
-    ) -> dict[str, Any]: ...
-
-
-class _KISWsHost(Protocol):
-    _is_paper_trading: bool
-
-    async def get_ws_approval_key(self) -> str: ...
-'''
-
-
-def render_init_module(chunk_names: list[tuple[str, str]]) -> str:
-    """`chunk_names`: (module_stem, class_name) 목록(파일 생성 순서와 동일)."""
-    import_lines = [
-        f"from src.exchanges.kis.generated.{stem} import (\n    {cls},\n)"
-        for stem, cls in chunk_names
-    ]
-    # 미착수 0건(모든 TR이 수기 구현됨)이면 청크가 없다 -- 그때도 유효한 클래스가
-    # 나오도록 빈 베이스는 object 하나로 채운다(구문 오류 방지).
-    bases = ",\n    ".join(cls for _, cls in chunk_names) or "object"
-    return "\n".join(
-        [
-            '"""Auto-generated by BR-12 (ADR-2026-09-06-I D7) -- combines the per-domain',
-            "generated mixins into one.",
-            "",
-            "`scripts/kis_generate_adapters.py` generates this -- do not hand-edit. adapter.py",
-            "only needs to inherit `KISGeneratedMixin` (a new chunk only regenerates this",
-            "file; adapter.py itself does not change).",
-            '"""',
-            "from __future__ import annotations",
-            "",
-            *import_lines,
-            "",
-            "",
-            "class KISGeneratedMixin(",
-            f"    {bases},",
-            "):",
-            '    """Facade combining all BR-12 generated mixins (per-domain chunks)."""',
-            "",
-        ]
-    )
 
 
 def generate_files(reference: dict[str, Any], handwritten_source: str) -> dict[str, str]:

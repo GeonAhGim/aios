@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // spec §3.4 세션·토큰. task-606(sessions.ts: parseSessionView/createSessionsClient)과
 // task-454(logout.ts: logout/logoutAll)를 처음으로 실제 라우트에 배선한다 — 이 파일은
@@ -85,24 +86,24 @@ function SessionRow({
   disabled: boolean;
   onRevoke: () => void;
 }) {
+  const { t } = useTranslation();
   const revoked = view.revokedAt !== null;
   return (
     <li className="flex items-center justify-between gap-4 py-3">
       <div>
         <div className="flex items-center gap-2">
           <p className="font-medium text-fg">{view.userAgent ?? "알 수 없는 기기"}</p>
-          {isCurrent && <Badge tone="accent">이 기기</Badge>}
-          {revoked && <Badge tone="neutral">폐기됨</Badge>}
+          {isCurrent && <Badge tone="accent">{t("legacy.sessionsPage.t1")}</Badge>}
+          {revoked && <Badge tone="neutral">{t("legacy.sessionsPage.t2")}</Badge>}
         </div>
         <p className="text-sm text-fg-muted">
-          IP {view.ip ?? "알 수 없음"} · 생성 {new Date(view.createdAt).toLocaleString()} · 최근 활동{" "}
+          IP {view.ip ?? "알 수 없음"} {t("legacy.sessionsPage.t3")}{new Date(view.createdAt).toLocaleString()} {t("legacy.sessionsPage.t4", { val: " " })}
           {new Date(view.lastSeenAt).toLocaleString()}
         </p>
       </div>
       {canRevoke(view) && (
         <Button type="button" variant="danger" size="sm" disabled={disabled} onClick={onRevoke}>
-          폐기
-        </Button>
+          {t("legacy.sessionsPage.t5")}</Button>
       )}
     </li>
   );
@@ -113,6 +114,7 @@ export function SessionsPage({
   sessionsClient,
   getCurrentSessionId = defaultGetCurrentSessionId,
 }: SessionsPageProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [actionError, setActionError] = useState<unknown>(null);
@@ -164,7 +166,7 @@ export function SessionsPage({
   // best-effort 계약이다(task-454 decision) — 여기서 그 결과를 다시 성공/실패로
   // 분기하면 오히려 그 계약을 어기게 되므로, 무조건 정리 후 리다이렉트한다.
   async function handleRevokeAll() {
-    const confirmed = window.confirm("모든 기기에서 로그아웃합니다. 계속할까요?");
+    const confirmed = window.confirm(t("legacy.sessionsPage.t10"));
     if (!confirmed) return;
     setPendingAll(true);
     await client.revokeAll();
@@ -175,11 +177,10 @@ export function SessionsPage({
     <AppShell>
       <div className="max-w-3xl space-y-6">
         <PageHeader
-          title="활성 세션"
+          title={t("legacy.sessionsPage.title6")}
           action={
             <Button type="button" variant="secondary" size="sm" onClick={handleRevokeAll} loading={pendingAll}>
-              전체 로그아웃
-            </Button>
+              {t("legacy.sessionsPage.t7")}</Button>
           }
         />
 
@@ -187,7 +188,7 @@ export function SessionsPage({
         {actionError !== null && <ErrorBanner error={actionError} />}
 
         {!query.isError && query.isLoading && <LoadingState />}
-        {!query.isError && !query.isLoading && rows.length === 0 && <EmptyState>활성 세션이 없습니다.</EmptyState>}
+        {!query.isError && !query.isLoading && rows.length === 0 && <EmptyState>{t("legacy.sessionsPage.t8")}</EmptyState>}
         {!query.isError && !query.isLoading && rows.length > 0 && (
           <Card>
             <ul className="divide-y divide-border">
@@ -202,7 +203,7 @@ export function SessionsPage({
                   />
                 ) : (
                   <li key={`invalid-${index}`} className="py-3">
-                    <Alert tone="danger">세션 정보를 해석할 수 없습니다.</Alert>
+                    <Alert tone="danger">{t("legacy.sessionsPage.t9")}</Alert>
                   </li>
                 ),
               )}

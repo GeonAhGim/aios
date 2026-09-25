@@ -1,31 +1,36 @@
-"""LiveReadonlyAccountProvider — 실 거래소 어댑터(legacy `CredentialResolver`)
-위의 read-only `ReadonlyAccountProvider` 구현.
+"""LiveReadonlyAccountProvider — live exchange adapter (legacy ``CredentialResolver``)
 
-Spec: AIOSproject 74번 §3, 전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §6).
+Read-only ``ReadonlyAccountProvider`` implementation on top of the legacy credential
+system.
 
-기존 자격증명 시스템 재사용 — FND-05 자신의 vault(74번 §3 "acquire short-lived
-vault lease")는 아직 진짜 비밀을 다루지 않는다. `confirm_connection.py`가
-`SecretLease(lease_ref=f"lease-{uuid4().hex}")`로 자리표시자만 만드는 이유가
-그것이다 — 실 API 키는 legacy `CredentialResolver`(12.4, exchange_credentials
-테이블)가 이미 갖고 있으므로, 새 vault를 만드는 대신 그걸 그대로 쓴다
-(`src/api/routers/foundation/validation.py`가 이미 같은 방식으로 FND-04를
-legacy 자격증명에 연결해둔 선례가 있다).
+Spec: AIOSproject #74 §3, full audit (agent-platform-12, docs/FULL_AUDIT_2026-09-02.md
+§6).
 
-scope 검증의 한계 — `exchange_credential_service.py`가 이미 문서화한 것과
-같은 제약: Bitget/KIS 어댑터 둘 다 API 키의 권한범위(READ_BALANCE 등 AIOS
-분류)를 조회하는 엔드포인트를 구현하지 않는다(FD-13.3 "지원 안 하면 경고
-문구로 대체, 거짓으로 확인됐다고 주장하지 않는다"). 이 어댑터도 같은
-원칙을 따른다 — `verify_readonly_scope()`는 연결 자체를 막지 않기 위해
-요청된 스코프를 그대로 승인된 것으로 다루되, `ScopeProof.provider_verified
-=False`로 "이건 provider가 독립적으로 확인해준 게 아니다"를 정직하게
-남긴다.
+Reuses the existing credential system — FND-05's own vault (§3 "acquire short-lived
+vault lease") does not yet handle real secrets. The reason
+``confirm_connection.py`` creates only a placeholder via
+``SecretLease(lease_ref=f"lease-{uuid4().hex}")`` is that the real API key is
+already held by the legacy ``CredentialResolver`` (sec. 12.4, ``exchange_credentials``
+table), so instead of creating a new vault we reuse the existing one
+(`src/api/routers/foundation/validation.py` already has a precedent for linking
+FND-04 to legacy credentials in the same way).
 
-position — Bitget/KIS 두 어댑터 모두 spot 전용이라 `get_positions()`가
-항상 빈 리스트를 반환하도록 이미 문서화돼 있다(account_mixin.py 참조,
-"거래소가 AIOS의 전략별 컨텍스트를 모르므로"). 그래도 이 어댑터는 그
-사실에 기대어 호출을 생략하지 않는다 — 그대로 호출해서 결과를 병합만
-한다. 나중에 다른 거래소/계약 유형이 실제 값을 채우기 시작해도 이 코드는
-바꿀 필요가 없다.
+Scope verification limitation — same constraint documented in
+``exchange_credential_service.py``: neither the Bitget nor KIS adapter implements an
+endpoint to query API-key permission scopes (READ_BALANCE, etc. in AIOS's
+classification) (FD-13.3 "If unsupported, substitute with a warning; do not claim
+it verified"). This adapter follows the same principle —
+``verify_readonly_scope()`` treats the requested scopes as approved without blocking
+the connection itself, but honestly records
+``ScopeProof.provider_verified=False`` ("this was not independently verified by the
+provider").
+
+Positions — both Bitget and KIS adapters are spot-only; ``get_positions()`` is
+already documented to always return an empty list (see ``account_mixin.py``,
+"the exchange does not know AIOS's strategy-level context"). Nevertheless, this
+adapter does not skip the call based on that fact — it calls anyway and merges the
+result. If other exchanges or contract types start populating real values later,
+this code will need no changes.
 """
 from __future__ import annotations
 
@@ -60,10 +65,10 @@ class LiveReadonlyAccountProvider:
         self._requested_capability_profile = requested_capability_profile
 
     async def verify_readonly_scope(self, lease: SecretLease) -> ScopeProof:
-        # get_adapter()가 CredentialNotFoundError를 던지면(등록 안 됨/해지됨)
-        # 그대로 전파한다 — confirm_connection.py가 이미 모든 예외를
-        # ScopeVerificationFailedError로 감싼다. get_balance() 호출 자체가
-        # "이 키가 실제로 동작하는가"의 유일하고 충분한 검증이다.
+        # If get_adapter() raises CredentialNotFoundError (not registered / revoked),
+        # propagate it — confirm_connection.py already wraps all exceptions in
+        # ScopeVerificationFailedError. The get_balance() call itself is the only
+        # and sufficient verification that "this key actually works".
         adapter = await self._resolver.get_adapter(self._user_id, self._exchange)
         await adapter.get_balance()
         return ScopeProof(

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RATE_LIMIT_ERROR_CODE, getApiErrorMessage } from "@aios/shared-types";
 import { Alert, Button } from "@aios/ui-web";
 import { useRateLimitNotice } from "../hooks/useRetryableAction";
+import { useTranslation } from "react-i18next";
 
 // task-841(§3.3 error taxonomy, §9 PLT-25): useRetryableAction을 쓰는 어느 화면이든
 // 429 RATE_LIMIT_EXCEEDED로 백오프 대기 중이면 이 배너 하나가 화면 상단에 뜬다.
@@ -18,6 +19,7 @@ import { useRateLimitNotice } from "../hooks/useRetryableAction";
 // 실제 재시도 시점이 어긋날 수 있으므로, 버튼은 "표시된 대기가 끝나길 기다리는"
 // 확인 버튼이 아니라 그 대기 자체를 건너뛰는 수단이다(retryNow → interruptibleSleep.skip).
 export function RateLimitNotice() {
+  const { t } = useTranslation();
   const notice = useRateLimitNotice();
   // notice는 useSyncExternalStore 알림(렌더 바깥 이벤트)으로 바뀌므로, 새 notice의
   // retryAfterSec 반영을 useEffect에 맡기면 "이전 remainingSec으로 한 번 더 렌더된
@@ -50,8 +52,7 @@ export function RateLimitNotice() {
                 {remainingSec > 0 ? `${remainingSec}초 후 자동으로 다시 시도합니다.` : "곧 다시 시도합니다."}
               </span>
               <Button size="sm" variant="secondary" onClick={notice.retryNow}>
-                지금 다시 시도
-              </Button>
+                {t("legacy.rateLimitNotice.t1")}</Button>
             </div>
           </div>
         </Alert>

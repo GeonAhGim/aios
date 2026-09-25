@@ -3,6 +3,7 @@
 `tests/conftest.py`가 `TEST_DATABASE_URL`을 `DATABASE_URL` 환경변수로
 옮겨 두므로, 여기서는 asyncpg DSN 변환과 주문+체결 시딩 헬퍼만 둔다.
 """
+
 from __future__ import annotations
 
 import os
@@ -22,7 +23,15 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=8)
+    # max_size=32 (not 8): allocate_order_fills's caller holds one
+    # transaction connection while `entities.get_sub_account/get_portfolio/
+    # get_fund` each acquire a second, separate connection from this same
+    # pool per call (`EntityRepository` methods open their own `conn` — see
+    # `PostgresEntityRepository`). A concurrency test running N `allocate_
+    # order_fills` calls in parallel therefore needs up to 2N connections at
+    # once; 8 starves and deadlocks at N=10 (same reason ledger/positions
+    # conftest.py use max_size=64).
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=32)
     yield p
     await p.close()
 
@@ -65,8 +74,13 @@ async def create_order_with_fills(
             " exchange, side, order_type, quantity, status, fund_id, portfolio_id) "
             "VALUES ($1, $2, $3, 'fa8-test', 'v1', 'AAPL', 'NASDAQ', $4, 'MARKET', $5, "
             " 'FILLED', $6, $7)",
-            order_id, user_id, f"fa8-test-{order_id}", side, total_quantity,
-            fund_id, portfolio_id,
+            order_id,
+            user_id,
+            f"fa8-test-{order_id}",
+            side,
+            total_quantity,
+            fund_id,
+            portfolio_id,
         )
         for i, (quantity, price) in enumerate(fills):
             await conn.execute(
@@ -75,7 +89,11 @@ async def create_order_with_fills(
                 " quantity, price, fee, fee_currency, liquidity, venue_ts) "
                 "VALUES ($1, 'NASDAQ', $2, 'ext-order-1', 'AAPL', $3, $4, $5, 0, 'USD', "
                 " 'TAKER', now())",
-                f"fa8-fill-{order_id}-{i}", order_id, side, quantity, price,
+                f"fa8-fill-{order_id}-{i}",
+                order_id,
+                side,
+                quantity,
+                price,
             )
     return order_id
 

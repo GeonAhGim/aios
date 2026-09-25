@@ -1,16 +1,18 @@
-"""DSL-14 — Pine Script v5 부분 문법 임포터(렉서·파서).
+"""DSL-14 — Pine Script v5 partial-grammar importer (lexer + parser).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§9.9(DSL-14), 선행 DSL-3(`grammar/parser.py`, task-1337, 5812ee4).
+§9.9 (DSL-14), prerequisite DSL-3 (`grammar/parser.py`, task-1337, 5812ee4).
 
-디렉터리명이 `import`면 파이썬 예약어라 패키지로 쓸 수 없어 `import_`를
-쓴다(명세의 `script/import/pine/`에 대응). 여기서 만드는 AST/렉서는 기존
-AIOS Script 문법(`src/core/script/grammar/{lexer,parser}.py`)과 다른
-언어(Pine v5)를 다루므로 그 모듈들을 재사용하지도, 수정하지도 않는다.
+Uses `import_` because a directory named `import` is a Python reserved word
+and cannot be used as a package name (this corresponds to the spec's
+`script/import/pine/`). The AST/lexer built here handle a different language
+(Pine v5) from the existing AIOS Script grammar
+(`src/core/script/grammar/{lexer,parser}.py`), so those modules are neither
+reused nor modified.
 
-AIOS Script로의 변환(transpile)은 DSL-15(`transpile.py`)의 몫이다 —
-`parse()`가 반환하는 `PineProgram`이 DSL-14의 최종 산출물이자 DSL-15의
-입력이다.
+Conversion (transpile) to AIOS Script is DSL-15's job (`transpile.py`) —
+the `PineProgram` `parse()` returns is DSL-14's final output and DSL-15's
+input.
 """
 from __future__ import annotations
 

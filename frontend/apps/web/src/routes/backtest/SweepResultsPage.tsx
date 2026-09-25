@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { AppShell } from "../../components/layout/AppShell";
+import { useTranslation } from "react-i18next";
 
 // BT-18(task-2428) — BT-16(task-2371 f76a07ee grid.sweep_grid, task-2426 e9be3488
 // sweep_grid_and_record + experiment_ledger.py)이 만든 그리드 스윕 결과를 히트맵·
@@ -81,11 +82,12 @@ function SweepHeatmap({
   metric: string;
   points: SweepPointResultView[];
 }) {
+  const { t } = useTranslation();
   if (axes.length !== 2) {
     return (
       <Card>
-        <CardTitle>히트맵</CardTitle>
-        <p className="text-sm text-fg-muted">히트맵은 축이 정확히 2개일 때만 표시됩니다(현재 {axes.length}개).</p>
+        <CardTitle>{t("legacy.sweepResultsPage.t1")}</CardTitle>
+        <p className="text-sm text-fg-muted">{t("legacy.sweepResultsPage.t2", { length: axes.length })}</p>
       </Card>
     );
   }
@@ -99,7 +101,7 @@ function SweepHeatmap({
 
   return (
     <Card>
-      <CardTitle>히트맵 — {metric}</CardTitle>
+      <CardTitle>{t("legacy.sweepResultsPage.t3", { metric: metric })}</CardTitle>
       <div className="overflow-x-auto">
         <table className="border-collapse text-xs">
           <thead>
@@ -144,26 +146,26 @@ function SweepHeatmap({
 }
 
 function SweepStabilityCard({ stability }: { stability: SweepStabilityView | null }) {
+  const { t } = useTranslation();
   return (
     <Card>
-      <CardTitle>안정성 표면</CardTitle>
+      <CardTitle>{t("legacy.sweepResultsPage.t4")}</CardTitle>
       {stability === null ? (
         <p className="text-sm text-fg-muted">
-          안정성 표면을 계산할 수 없습니다(축이 2개가 아니거나 그리드가 너무 작음).
-        </p>
+          {t("legacy.sweepResultsPage.t5")}</p>
       ) : (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-          <dt className="text-fg-muted">최적점</dt>
+          <dt className="text-fg-muted">{t("legacy.sweepResultsPage.t6")}</dt>
           <dd className="tabular">
             {Object.entries(stability.bestAxisValues)
               .map(([k, v]) => `${k}=${v}`)
               .join(", ")}
           </dd>
-          <dt className="text-fg-muted">이웃 평균</dt>
+          <dt className="text-fg-muted">{t("legacy.sweepResultsPage.t7")}</dt>
           <dd className="tabular">{stability.neighborMean}</dd>
-          <dt className="text-fg-muted">이웃 표준편차</dt>
+          <dt className="text-fg-muted">{t("legacy.sweepResultsPage.t8")}</dt>
           <dd className="tabular">{stability.neighborStd}</dd>
-          <dt className="text-fg-muted">고립 여부</dt>
+          <dt className="text-fg-muted">{t("legacy.sweepResultsPage.t9")}</dt>
           <dd>
             <Badge tone={stability.isolated ? "danger" : "success"}>
               {stability.isolated ? "고립됨(과최적화 의심)" : "안정적"}
@@ -176,10 +178,11 @@ function SweepStabilityCard({ stability }: { stability: SweepStabilityView | nul
 }
 
 function SweepReproducibilityTable({ points }: { points: SweepPointResultView[] }) {
+  const { t } = useTranslation();
   if (points.length === 0) return null;
   return (
     <Card>
-      <CardTitle>재현 키</CardTitle>
+      <CardTitle>{t("legacy.sweepResultsPage.t10")}</CardTitle>
       <ul className="divide-y divide-border text-xs">
         {points.map((p) => (
           <li key={p.comboKey} className="flex items-center justify-between gap-4 py-2">
@@ -195,6 +198,7 @@ function SweepReproducibilityTable({ points }: { points: SweepPointResultView[] 
 }
 
 export function SweepResultsPage({ runSweep = defaultRunSweep }: SweepResultsPageProps) {
+  const { t } = useTranslation();
   const location = useLocation();
   const request = (location.state as SweepResultsLocationState | null)?.sweepRequest ?? null;
 
@@ -207,10 +211,10 @@ export function SweepResultsPage({ runSweep = defaultRunSweep }: SweepResultsPag
   return (
     <AppShell>
       <div className="max-w-5xl space-y-6">
-        <PageHeader title="파라미터 스윕 결과" />
+        <PageHeader title={t("legacy.sweepResultsPage.title11")} />
 
         {request === null && (
-          <EmptyState>먼저 파라미터 스윕을 구성해 실행하세요. 이 화면은 실행된 스윕의 결과만 표시합니다.</EmptyState>
+          <EmptyState>{t("legacy.sweepResultsPage.t12")}</EmptyState>
         )}
 
         {request !== null && query.isLoading && <LoadingState />}

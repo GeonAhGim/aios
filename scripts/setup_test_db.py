@@ -24,6 +24,14 @@ PLT-36: `--template`은 이름 고정 `aios_test_template` DB를 만들고 마�
 `ensure_worker_database`가 pytest-xdist 워커별 DB를 여기서
 `CREATE DATABASE ... TEMPLATE`로 복제해, 워커마다 마이그레이션을 재실행하지
 않고도(각 ~1초) 격리된 DB를 준다.
+
+task-5807: worker 하나가 끝날 때마다 `--reset`이 새로 만들고 아무도 지우지 않아
+`aios_test_*`가 무한히 쌓였다(50개, 0.78GB, 클러스터 백업의 96%). 두 명령을
+더한다 — 둘 다 pm/worker_runner.py·pm/scripts/cleanup_orphan_test_dbs.py가
+서브프로세스로만 호출하고, 여기서 직접 사람이 칠 일은 드물다:
+
+    python scripts/setup_test_db.py pm --drop         # aios_test_pm DROP(없으면 조용히 통과)
+    python scripts/setup_test_db.py --list            # "aios_test_<name> <size_bytes>" 한 줄씩
 """
 from __future__ import annotations
 
@@ -60,23 +68,95 @@ def _asyncpg_dsn(url: str) -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
-async def _ensure_database(server_url: str, database: str, *, reset: bool) -> bool:
-    """maintenance DB(postgres)에 붙어 대상 DB를 만든다. 반환값: 새로 만들었는지."""
+async def _ensure_database(
+    server_url: str, database: str, *, reset: bool, migrate_url: str | None = None
+) -> bool:
+    """maintenance DB(postgres)에 붙어 대상 DB를 만든다. 반환값: 새로 만들었는지.
+
+    task-5782(esc-ci-prepare, 0f693214): 이 함수는 exists 조회 -> DROP -> CREATE가
+    원자적이지 않았다. 같은 이름(예: `aios_test_ci`)을 향한 두 호출이 동시에
+    `reset=True`로 들어오면 둘 다 exists=True를 보고 둘 다 `DROP DATABASE`를
+    쏘는데, 먼저 성공한 쪽이 지운 직후 늦은 쪽의 `DROP DATABASE`(IF EXISTS
+    없음)가 `InvalidCatalogNameError`로 죽었다. 호출자 쪽 락(pm/local_ci.py의
+    db_provision_lock)은 그 오케스트레이터를 거치는 경로만 보호하므로, 이
+    함수 자체를 postgres advisory lock으로 직렬화해 어떤 호출 경로든(다른
+    스크립트·수동 실행 포함) 안전하게 만든다. `DROP DATABASE IF EXISTS`도 함께
+    써서 락 밖에서 이미 지워진 경우(예: 수동 정리)에도 죽지 않는다.
+
+    task-5822(esc-ci-prepare 재발): 위 락은 CREATE까지만 감쌌다. `main()`은
+    락 해제 후 별도로 `_migrate()`(alembic subprocess)를 불렀는데, 그 창에서
+    같은 DB를 향한 동시 `--reset` 호출(예: local_ci와 ci_recheck이 겹쳐 실행)이
+    락을 잡아 방금 만든 DB를 다시 DROP하면, migrate 쪽 커넥션이
+    `InvalidCatalogNameError`로 죽었다. `migrate_url`을 넘기면 마이그레이션을
+    advisory lock을 쥔 채로(락 해제 전에) 실행해 그 창을 없앤다.
+    """
     admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
     try:
-        exists = await admin.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database)
-        if exists and reset:
+        await admin.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", database)
+        try:
+            exists = await admin.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", database
+            )
+            if exists and reset:
+                await admin.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = $1 AND pid <> pg_backend_pid()",
+                    database,
+                )
+                await admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+                exists = None
+            created = False
+            if not exists:
+                await admin.execute(f'CREATE DATABASE "{database}"')
+                created = True
+            if migrate_url is not None:
+                _migrate(migrate_url)
+            return created
+        finally:
+            await admin.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", database)
+    finally:
+        await admin.close()
+
+
+async def _drop_database(server_url: str, database: str) -> bool:
+    """대상 DB를 지운다(존재하지 않으면 아무 일도 하지 않는다). 반환값: 실제로 지웠는지.
+    `_ensure_database`와 같은 advisory lock으로 직렬화 — 같은 이름을 향한 동시 --reset과
+    경합해도 DROP 순서가 꼬이지 않는다."""
+    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
+    try:
+        await admin.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", database)
+        try:
+            exists = await admin.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", database
+            )
+            if not exists:
+                return False
             await admin.execute(
                 "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
                 "WHERE datname = $1 AND pid <> pg_backend_pid()",
                 database,
             )
-            await admin.execute(f'DROP DATABASE "{database}"')
-            exists = None
-        if not exists:
-            await admin.execute(f'CREATE DATABASE "{database}"')
+            await admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
             return True
-        return False
+        finally:
+            await admin.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", database)
+    finally:
+        await admin.close()
+
+
+async def _list_test_databases(server_url: str) -> list[tuple[str, int]]:
+    """`aios_test_` 접두어 DB만 (이름, 바이트 크기) 목록으로 — healthcheck.py의
+    test_db_bloat 소견과 scripts/cleanup_orphan_test_dbs.py(pm 저장소)가 이 출력을 파싱한다."""
+    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
+    try:
+        rows = await admin.fetch(
+            "SELECT datname, pg_database_size(datname) AS size "
+            "FROM pg_database WHERE datname LIKE $1 ORDER BY datname",
+            PREFIX + "%",
+        )
+        # pg_database_size는 호출자에게 접속 권한 없는 DB에는 NULL을 준다(권한 부족,
+        # DROP과 SELECT 사이 경합 등) -- 0으로 취급해 집계에서 조용히 빠지게 한다.
+        return [(r["datname"], int(r["size"] or 0)) for r in rows]
     finally:
         await admin.close()
 
@@ -102,7 +182,23 @@ def main() -> int:
         action="store_true",
         help="이름 고정 aios_test_template DB를 생성·마이그레이션(PLT-36 워커별 복제 원본)",
     )
+    parser.add_argument(
+        "--drop",
+        action="store_true",
+        help="생성 없이 aios_test_<name>만 DROP(task-5807, worker_runner 종료 시 정리용)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="aios_test_* 전부를 'name size_bytes' 한 줄씩 출력하고 종료(name/--template 불필요)",
+    )
     args = parser.parse_args()
+
+    if args.list:
+        server_url = _server_url()
+        for database, size in asyncio.run(_list_test_databases(server_url)):
+            print(f"{database} {size}")
+        return 0
 
     if args.template:
         name = "template"
@@ -115,10 +211,17 @@ def main() -> int:
         raise SystemExit("이름은 소문자·숫자·밑줄 40자 이내여야 합니다.")
     database = PREFIX + name
     server_url = _server_url()
+
+    if args.drop:
+        dropped = asyncio.run(_drop_database(server_url, database))
+        print(f"{'DROP 완료' if dropped else '존재하지 않음(스킵)'}: {database}")
+        return 0
+
     test_url = _with_database(server_url, database)
 
-    created = asyncio.run(_ensure_database(server_url, database, reset=args.reset))
-    _migrate(test_url)
+    created = asyncio.run(
+        _ensure_database(server_url, database, reset=args.reset, migrate_url=test_url)
+    )
 
     if args.print_env:
         print(f"TEST_DATABASE_URL={test_url}")

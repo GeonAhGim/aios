@@ -1,11 +1,11 @@
-"""14번 — 전략 편집기 API 요청·응답 스키마.
+"""Strategy editor API request/response schemas (Task 14).
 
-편차: 16_backend_signatures.md §16.4 Draft는 진입/청산 조건 각 1개
-(ConditionSpec 단수)만 가정했지만, 실제 구현된 ConditionCompiler/
-PreviewCalculator는 진입/청산/손절 조건 각각을 리스트+AND/OR 결합으로
-받는다(services/condition_compiler.py, services/preview_service.py 참조,
-이미 이 세션에서 완성돼 테스트까지 통과한 실제 계약) — 여기서는 Draft가
-아니라 그 실제 서비스 시그니처에 맞춘다.
+Deviation: 16_backend_signatures.md §16.4 Draft assumes a single
+ConditionSpec each for entry and exit conditions, but the implemented
+ConditionCompiler/PreviewCalculator accept lists of entry/exit/stop-loss
+conditions combined with AND/OR logic (see services/condition_compiler.py,
+services/preview_service.py — an actual contract completed this session and
+tested). This module follows the real service signatures, not the Draft.
 """
 from __future__ import annotations
 

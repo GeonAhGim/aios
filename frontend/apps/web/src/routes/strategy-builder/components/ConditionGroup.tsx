@@ -1,6 +1,7 @@
 import type { PreviewCondition } from "@aios/shared-types";
 import { Select } from "@aios/ui-web";
 import { ConditionRow } from "./ConditionRow";
+import { useTranslation } from "react-i18next";
 
 interface ConditionGroupProps {
   title: string;
@@ -26,6 +27,7 @@ export function ConditionGroup({
   onCombineChange,
   indicators,
 }: ConditionGroupProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
@@ -36,8 +38,8 @@ export function ConditionGroup({
             onChange={(e) => onCombineChange(e.target.value as "AND" | "OR")}
             className="w-auto py-1 text-xs"
           >
-            <option value="AND">모두 만족(AND)</option>
-            <option value="OR">하나라도 만족(OR)</option>
+            <option value="AND">{t("legacy.conditionGroup.t1")}</option>
+            <option value="OR">{t("legacy.conditionGroup.t2")}</option>
           </Select>
         )}
       </div>
@@ -59,8 +61,7 @@ export function ConditionGroup({
         onClick={() => onConditionsChange([...conditions, { ...EMPTY_CONDITION }])}
         className="text-xs font-medium text-accent-hover hover:underline"
       >
-        + 조건 추가
-      </button>
+        {t("legacy.conditionGroup.t3")}</button>
     </div>
   );
 }

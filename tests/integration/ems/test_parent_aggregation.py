@@ -6,8 +6,10 @@ rules (`domain/parent_child.py`) actually land on `orders.status`/
 Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md §9 EM-3, EM-2 DoD
 ("집계·전파 규칙, 초과 거부"). task-2121.
 """
+
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import datetime, timezone
@@ -75,14 +77,20 @@ async def test_recompute_partial_fill_rolls_up_from_one_child(pool):
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("10"))
     await _insert_order(
-        pool, user_id, status="PARTIALLY_FILLED",
-        quantity=Decimal("4"), filled_quantity=Decimal("4"), parent_order_id=parent_id,
+        pool,
+        user_id,
+        status="PARTIALLY_FILLED",
+        quantity=Decimal("4"),
+        filled_quantity=Decimal("4"),
+        parent_order_id=parent_id,
     )
 
     async with pool.acquire() as conn:
         result = await recompute_parent_aggregate(
-            repo, conn,
-            parent_order_id=parent_id, trace_id=uuid.uuid4(),
+            repo,
+            conn,
+            parent_order_id=parent_id,
+            trace_id=uuid.uuid4(),
             occurred_at=datetime.now(timezone.utc),
         )
 
@@ -96,14 +104,20 @@ async def test_recompute_full_fill_sums_across_children(pool):
     parent_id = await _insert_order(pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("10"))
     for qty in (Decimal("6"), Decimal("4")):
         await _insert_order(
-            pool, user_id, status="FILLED",
-            quantity=qty, filled_quantity=qty, parent_order_id=parent_id,
+            pool,
+            user_id,
+            status="FILLED",
+            quantity=qty,
+            filled_quantity=qty,
+            parent_order_id=parent_id,
         )
 
     async with pool.acquire() as conn:
         result = await recompute_parent_aggregate(
-            repo, conn,
-            parent_order_id=parent_id, trace_id=uuid.uuid4(),
+            repo,
+            conn,
+            parent_order_id=parent_id,
+            trace_id=uuid.uuid4(),
             occurred_at=datetime.now(timezone.utc),
         )
 
@@ -116,14 +130,20 @@ async def test_recompute_all_children_terminal_zero_fill_cancels_parent(pool):
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("10"))
     await _insert_order(
-        pool, user_id, status="CANCELLED",
-        quantity=Decimal("10"), filled_quantity=Decimal("0"), parent_order_id=parent_id,
+        pool,
+        user_id,
+        status="CANCELLED",
+        quantity=Decimal("10"),
+        filled_quantity=Decimal("0"),
+        parent_order_id=parent_id,
     )
 
     async with pool.acquire() as conn:
         result = await recompute_parent_aggregate(
-            repo, conn,
-            parent_order_id=parent_id, trace_id=uuid.uuid4(),
+            repo,
+            conn,
+            parent_order_id=parent_id,
+            trace_id=uuid.uuid4(),
             occurred_at=datetime.now(timezone.utc),
         )
 
@@ -137,8 +157,10 @@ async def test_recompute_is_a_noop_before_any_child_exists(pool):
 
     async with pool.acquire() as conn:
         result = await recompute_parent_aggregate(
-            repo, conn,
-            parent_order_id=parent_id, trace_id=uuid.uuid4(),
+            repo,
+            conn,
+            parent_order_id=parent_id,
+            trace_id=uuid.uuid4(),
             occurred_at=datetime.now(timezone.utc),
         )
 
@@ -151,11 +173,19 @@ async def test_children_awaiting_cancel_excludes_terminal_children(pool):
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("10"))
     open_child = await _insert_order(
-        pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("3"), parent_order_id=parent_id,
+        pool,
+        user_id,
+        status="ACKNOWLEDGED",
+        quantity=Decimal("3"),
+        parent_order_id=parent_id,
     )
     await _insert_order(
-        pool, user_id, status="FILLED",
-        quantity=Decimal("7"), filled_quantity=Decimal("7"), parent_order_id=parent_id,
+        pool,
+        user_id,
+        status="FILLED",
+        quantity=Decimal("7"),
+        filled_quantity=Decimal("7"),
+        parent_order_id=parent_id,
     )
 
     async with pool.acquire() as conn:
@@ -168,7 +198,10 @@ async def test_reserve_child_slice_rejects_over_commit_against_real_row(pool):
     repo = PostgresOrderRepository()
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(
-        pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("10"),
+        pool,
+        user_id,
+        status="ACKNOWLEDGED",
+        quantity=Decimal("10"),
         committed_child_qty=Decimal("7"),
     )
 
@@ -217,7 +250,10 @@ async def test_release_more_than_reserved_is_rejected(pool):
     repo = PostgresOrderRepository()
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(
-        pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("10"),
+        pool,
+        user_id,
+        status="ACKNOWLEDGED",
+        quantity=Decimal("10"),
         committed_child_qty=Decimal("2"),
     )
 
@@ -226,3 +262,39 @@ async def test_release_more_than_reserved_is_rejected(pool):
             await release_reserved_slice(
                 repo, conn, parent_order_id=parent_id, slice_qty=Decimal("3")
             )
+
+
+async def test_concurrent_reserve_child_slice_never_overcommits_parent_qty(pool):
+    """D3 다중 인스턴스 -- 같은 parent를 두 트랜잭션이 동시에 경합해도(각 6,
+    합 12 > parent qty 10) `get_for_update`의 FOR UPDATE 직렬화 덕에 정확히
+    하나만 성공(committed=6)하고 나머지 하나는 뒤늦게 갱신된
+    committed_child_qty를 다시 읽고 AlgoConstraintError로 거부된다(둘 다
+    성공해 12로 초과되는 일은 없다). 두 호출 모두 `submit_order`/
+    `transition()`이 요구하는 것과 같은 계약대로 명시적 `conn.transaction()`
+    안에서 실행한다(§5.1과 동일 패턴) -- 이 계약 없이는 FOR UPDATE가 각
+    문장 단위로만 걸려 직렬화를 보장하지 못한다."""
+    repo = PostgresOrderRepository()
+    user_id = await create_test_user(pool)
+    parent_id = await _insert_order(pool, user_id, status="ACKNOWLEDGED", quantity=Decimal("10"))
+
+    async def attempt(slice_qty: Decimal) -> Decimal | AlgoConstraintError:
+        try:
+            async with pool.acquire() as conn, conn.transaction():
+                result = await reserve_child_slice(
+                    repo, conn, parent_order_id=parent_id, new_slice_qty=slice_qty
+                )
+                return result.committed_child_qty
+        except AlgoConstraintError as exc:
+            return exc
+
+    results = await asyncio.gather(attempt(Decimal("6")), attempt(Decimal("6")))
+    successes = [r for r in results if isinstance(r, Decimal)]
+    rejections = [r for r in results if isinstance(r, AlgoConstraintError)]
+    assert len(successes) == 1
+    assert len(rejections) == 1
+    assert successes[0] == Decimal("6")
+
+    committed = await pool.fetchval(
+        "SELECT committed_child_qty FROM orders WHERE order_id = $1", parent_id
+    )
+    assert committed == Decimal("6")

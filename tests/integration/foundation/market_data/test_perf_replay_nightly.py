@@ -30,12 +30,15 @@ ADR #2 "Rejected") — §8.4 목표(1개월 5s) 실달성은 CA ADR 개정 사�
 상향)도 xfail 은닉(task-920 XPASS strict 전례)도 아니다. task-1405는 이
 게이트를 값 변경 없이 기본 CI에서 이 파일로 옮기기만 했다.
 """
+
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 from datetime import time as dt_time
 
+import asyncpg
 import pytest
 
 from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
@@ -47,7 +50,7 @@ from src.foundation.market_data.adapters.postgres_reference_repository import (
     PostgresReferenceRepository,
 )
 from src.foundation.market_data.application.replay_candles import replay
-from src.foundation.market_data.contracts.v1 import ReplayRequest
+from src.foundation.market_data.contracts.v1 import ReplayRequest, SeriesKey
 from tests.integration.foundation.market_data.perf_replay_support import (
     DAY_ROW_COUNT,
     MONTH_ROW_COUNT,
@@ -90,14 +93,23 @@ async def _seeded_request(pool, batch_repo, *, t0: datetime, row_count: int) -> 
         pool, batch_repo, instrument_id=instrument_id, t0=t0, row_count=row_count
     )
     return ReplayRequest(
-        key=series_key(instrument_id), start=t0, end=t0 + timedelta(minutes=row_count),
+        key=series_key(instrument_id),
+        start=t0,
+        end=t0 + timedelta(minutes=row_count),
         as_of=as_of,
     )
 
 
 async def _timed_replay(
-    pool, request: ReplayRequest, *, label: str, row_count: int, target_seconds: float,
-    candle_store, reference_repo, calendar_repo,
+    pool,
+    request: ReplayRequest,
+    *,
+    label: str,
+    row_count: int,
+    target_seconds: float,
+    candle_store,
+    reference_repo,
+    calendar_repo,
 ) -> float:
     started = time.perf_counter()
     series = await replay(
@@ -134,9 +146,14 @@ async def test_replay_1day_1440_candles_under_0_5s(
         pool, batch_repo, t0=_next_utc_midnight(), row_count=DAY_ROW_COUNT
     )
     elapsed_seconds = await _timed_replay(
-        pool, request, label="1day", row_count=DAY_ROW_COUNT,
-        target_seconds=_DAY_TARGET_SECONDS, candle_store=candle_store,
-        reference_repo=reference_repo, calendar_repo=calendar_repo,
+        pool,
+        request,
+        label="1day",
+        row_count=DAY_ROW_COUNT,
+        target_seconds=_DAY_TARGET_SECONDS,
+        candle_store=candle_store,
+        reference_repo=reference_repo,
+        calendar_repo=calendar_repo,
     )
     assert elapsed_seconds < _DAY_TARGET_SECONDS, (
         f"리플레이 {DAY_ROW_COUNT}행 처리 시간({elapsed_seconds:.3f}s)이 "
@@ -153,9 +170,14 @@ async def test_replay_43200_candles_under_5s(
     (모듈 docstring — task-1122 decision(c), 값 변경 없이 nightly로 이동)."""
     request = await _seeded_request(pool, batch_repo, t0=_next_minute(), row_count=MONTH_ROW_COUNT)
     elapsed_seconds = await _timed_replay(
-        pool, request, label="1month", row_count=MONTH_ROW_COUNT,
-        target_seconds=_MONTH_TARGET_SECONDS, candle_store=candle_store,
-        reference_repo=reference_repo, calendar_repo=calendar_repo,
+        pool,
+        request,
+        label="1month",
+        row_count=MONTH_ROW_COUNT,
+        target_seconds=_MONTH_TARGET_SECONDS,
+        candle_store=candle_store,
+        reference_repo=reference_repo,
+        calendar_repo=calendar_repo,
     )
     assert elapsed_seconds < _MONTH_REGRESSION_CEILING_SECONDS, (
         f"리플레이 {MONTH_ROW_COUNT}행 처리 시간({elapsed_seconds:.3f}s)이 "
@@ -172,11 +194,55 @@ async def test_replay_525600_candles_under_30s(
     (모듈 docstring의 실측 노트) nightly 성능 잡에서만 돈다."""
     request = await _seeded_request(pool, batch_repo, t0=_next_minute(), row_count=YEAR_ROW_COUNT)
     elapsed_seconds = await _timed_replay(
-        pool, request, label="1year", row_count=YEAR_ROW_COUNT,
-        target_seconds=_YEAR_TARGET_SECONDS, candle_store=candle_store,
-        reference_repo=reference_repo, calendar_repo=calendar_repo,
+        pool,
+        request,
+        label="1year",
+        row_count=YEAR_ROW_COUNT,
+        target_seconds=_YEAR_TARGET_SECONDS,
+        candle_store=candle_store,
+        reference_repo=reference_repo,
+        calendar_repo=calendar_repo,
     )
     assert elapsed_seconds < _YEAR_TARGET_SECONDS, (
         f"리플레이 {YEAR_ROW_COUNT}행 처리 시간({elapsed_seconds:.3f}s)이 "
         f"목표({_YEAR_TARGET_SECONDS}s)를 초과했습니다."
     )
+
+
+class _SlowCandleStore(PostgresCandleStore):
+    """negative test 전용 — 컬럼 조회 직전에 지연을 주입해 §8.4 절대시간
+    계약 회귀를 재현한다(느려진 어댑터가 목표를 넘기는 최소 재현)."""
+
+    async def read_candles_columnar(
+        self, conn: asyncpg.Connection, key: SeriesKey, start, end, as_of
+    ):
+        await asyncio.sleep(_DAY_TARGET_SECONDS + 0.2)
+        return await super().read_candles_columnar(conn, key, start, end, as_of)
+
+
+@pytest.mark.perf
+@pytest.mark.nightly
+async def test_day_target_gate_detects_injected_latency(
+    pool, batch_repo, reference_repo, calendar_repo
+):
+    """negative: 조회에 §8.4 1일 목표(0.5s)를 넘는 지연을 주입하면
+    `test_replay_1day_1440_candles_under_0_5s`가 거는 절대시간 단언이
+    실제로 실패한다 — 위 게이트가 진짜 성능 회귀를 잡는다는 증명(I-10)."""
+    request = await _seeded_request(
+        pool, batch_repo, t0=_next_utc_midnight(), row_count=DAY_ROW_COUNT
+    )
+    elapsed_seconds = await _timed_replay(
+        pool,
+        request,
+        label="1day-injected-latency",
+        row_count=DAY_ROW_COUNT,
+        target_seconds=_DAY_TARGET_SECONDS,
+        candle_store=_SlowCandleStore(pool),
+        reference_repo=reference_repo,
+        calendar_repo=calendar_repo,
+    )
+    with pytest.raises(AssertionError):
+        assert elapsed_seconds < _DAY_TARGET_SECONDS, (
+            f"리플레이 {DAY_ROW_COUNT}행 처리 시간({elapsed_seconds:.3f}s)이 "
+            f"목표({_DAY_TARGET_SECONDS}s)를 초과했습니다."
+        )

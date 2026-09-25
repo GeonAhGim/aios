@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // FD-10.1 self-service — SOLO(본인 1인)와 DUAL의 첫 서명을 여기서 처리한다.
 // DUAL 두 번째 서명자는 아직 신원 해석 로직이 없어(계정 연결 안 됨)
@@ -41,6 +42,7 @@ function waitRemainingSeconds(request: ApprovalRequest): number {
 }
 
 function RequestCard({ request }: { request: ApprovalRequest }) {
+  const { t } = useTranslation();
   const approve = useApproveMyRequest();
   const reject = useRejectMyRequest();
   const [remaining, setRemaining] = useState(() => waitRemainingSeconds(request));
@@ -58,7 +60,7 @@ function RequestCard({ request }: { request: ApprovalRequest }) {
       if (action === "approve") await approve.mutateAsync(request.id);
       else await reject.mutateAsync(request.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("처리에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.myApprovalRequestsPage.t6")));
     }
   }
 
@@ -71,7 +73,7 @@ function RequestCard({ request }: { request: ApprovalRequest }) {
         </Badge>
       </div>
       <p className="text-xs text-fg-muted">
-        요청 #{request.id} · {new Date(request.createdAt).toLocaleString()}
+        {t("legacy.myApprovalRequestsPage.t1", { id: request.id })}{new Date(request.createdAt).toLocaleString()}
         {request.firstApproverId && " · 1차 서명 완료(2차 서명 대기)"}
       </p>
       {error !== null && <RequestActionError error={error} />}
@@ -91,24 +93,22 @@ function RequestCard({ request }: { request: ApprovalRequest }) {
           loading={reject.isPending}
           onClick={() => handle("reject")}
         >
-          거절
-        </Button>
+          {t("legacy.myApprovalRequestsPage.t2")}</Button>
       </div>
     </li>
   );
 }
 
 export function MyApprovalRequestsPage() {
+  const { t } = useTranslation();
   const { data: requests, isLoading, isError, error, refetch } = useMyApprovalRequests();
 
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="내 승인 대기 요청" />
+        <PageHeader title={t("legacy.myApprovalRequestsPage.title3")} />
         <p className="text-xs text-fg-muted">
-          FD-10.1 — LIVE 실행 전환 등 리스크가 큰 조작은 강제 대기시간 이후 본인이
-          직접 승인해야 진행됩니다.
-        </p>
+          {t("legacy.myApprovalRequestsPage.t4")}</p>
         {isError ? (
           <RequestActionError error={error} onRetry={() => refetch()} />
         ) : isLoading ? (
@@ -120,7 +120,7 @@ export function MyApprovalRequestsPage() {
             ))}
           </ul>
         ) : (
-          <EmptyState>대기 중인 승인 요청이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.myApprovalRequestsPage.t5")}</EmptyState>
         )}
       </div>
     </AppShell>

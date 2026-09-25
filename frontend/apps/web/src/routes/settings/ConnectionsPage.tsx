@@ -14,6 +14,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
+import { useTranslation } from "react-i18next";
 
 const CAPABILITY_OPTIONS: CapabilityScope[] = ["READ_BALANCE", "READ_POSITION", "READ_ACTIVITY"];
 
@@ -53,6 +54,7 @@ function ConnectionRow({
   syncing: boolean;
   revoking: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <li className="rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
@@ -60,31 +62,26 @@ function ConnectionRow({
           <div className="flex items-center gap-2">
             <p className="font-medium text-fg">{connection.maskedAccountLabel}</p>
             <StatusBadge status={connection.state} />
-            {connection.scopeVerified && <span className="text-xs text-fg-muted">범위 검증됨</span>}
+            {connection.scopeVerified && <span className="text-xs text-fg-muted">{t("legacy.connectionsPage.t1")}</span>}
           </div>
           <p className="text-xs text-fg-muted">
-            제공자 {connection.providerCode} · revision {connection.revision} ·{" "}
-            {connection.capabilityProfile.join(", ")}
+            {t("legacy.connectionsPage.t2", { providerCode: connection.providerCode, revision: connection.revision, val: " ", val2: connection.capabilityProfile.join(", ") })}
             {connection.createdAt && ` · 생성: ${new Date(connection.createdAt).toLocaleString()}`}
           </p>
         </div>
         <div className="flex gap-2">
           <Button type="button" variant="secondary" size="sm" loading={confirming} onClick={onConfirm}>
-            확인(confirm)
-          </Button>
+            {t("legacy.connectionsPage.t3")}</Button>
           <Button type="button" variant="secondary" size="sm" loading={syncing} onClick={onSync}>
-            동기화(sync)
-          </Button>
+            {t("legacy.connectionsPage.t4")}</Button>
           <Button type="button" variant="danger" size="sm" loading={revoking} onClick={onRevoke}>
-            해제(revoke)
-          </Button>
+            {t("legacy.connectionsPage.t5")}</Button>
         </div>
       </div>
       {snapshot && (
         <div className="mt-3 rounded-md border border-border-strong bg-bg p-3 text-xs text-fg-muted">
           <p>
-            스냅샷 {new Date(snapshot.capturedAt).toLocaleString()} · 신선도 {snapshot.freshness} ·{" "}
-            {snapshot.currency}
+            {t("legacy.connectionsPage.t6")}{new Date(snapshot.capturedAt).toLocaleString()} {t("legacy.connectionsPage.t7", { freshness: snapshot.freshness, val: " ", currency: snapshot.currency })}
           </p>
           <ul className="mt-1 space-y-0.5">
             {snapshot.values.map((value) => (
@@ -100,6 +97,7 @@ function ConnectionRow({
 }
 
 export function ConnectionsPage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, error, refetch } = useConnections();
   const beginConnection = useBeginConnection();
   const confirmConnection = useConfirmConnection();
@@ -176,7 +174,7 @@ export function ConnectionsPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="계정 연동(Connections)" />
+        <PageHeader title={t("legacy.connectionsPage.title8")} />
 
         <section className="space-y-3">
           {isError ? (
@@ -206,27 +204,26 @@ export function ConnectionsPage() {
               ))}
             </ul>
           ) : (
-            <EmptyState>등록된 계정 연동이 없습니다.</EmptyState>
+            <EmptyState>{t("legacy.connectionsPage.t9")}</EmptyState>
           )}
           {!isError && !isLoading && (
             <Button type="button" variant="secondary" size="sm" onClick={() => refetch()}>
-              새로고침
-            </Button>
+              {t("legacy.connectionsPage.t10")}</Button>
           )}
         </section>
 
         <section className="space-y-3 rounded-lg border border-border-strong bg-bg p-4">
-          <h2 className="text-sm font-semibold text-fg">새 연동 생성</h2>
+          <h2 className="text-sm font-semibold text-fg">{t("legacy.connectionsPage.t11")}</h2>
           <form className="space-y-3" onSubmit={handleCreate}>
             <div className="flex items-end gap-2">
-              <Field label="제공자 코드" error={fieldErrors.provider_code}>
+              <Field label={t("legacy.connectionsPage.label12")} error={fieldErrors.provider_code}>
                 <Input
                   value={providerCode}
                   onChange={(e) => {
                     setProviderCode(e.target.value);
                     clearField("provider_code");
                   }}
-                  placeholder="예: toss"
+                  placeholder={t("legacy.connectionsPage.placeholder13")}
                   className="w-48"
                 />
               </Field>
@@ -237,13 +234,13 @@ export function ConnectionsPage() {
                     setOpaqueAccountRef(e.target.value);
                     clearField("opaque_account_ref");
                   }}
-                  placeholder="연동 대상 참조값"
+                  placeholder={t("legacy.connectionsPage.placeholder14")}
                   className="w-72"
                 />
               </Field>
             </div>
             <fieldset className="space-y-1.5">
-              <legend className="text-sm font-medium text-fg-secondary">요청 권한 범위</legend>
+              <legend className="text-sm font-medium text-fg-secondary">{t("legacy.connectionsPage.t15")}</legend>
               <div className="flex gap-4">
                 {CAPABILITY_OPTIONS.map((scope) => (
                   <label key={scope} className="flex items-center gap-1.5 text-sm text-fg">
@@ -270,8 +267,7 @@ export function ConnectionsPage() {
               loading={beginConnection.isPending}
               disabled={!providerCode.trim() || !opaqueAccountRef.trim() || capabilityProfile.length === 0}
             >
-              생성
-            </Button>
+              {t("legacy.connectionsPage.t16")}</Button>
           </form>
           {createError ? <ConnectionActionError error={createError} /> : null}
         </section>

@@ -1,5 +1,7 @@
 """14.3 통합테스트 — 실제 dev DB 대상."""
+
 import asyncio
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -113,6 +115,144 @@ async def test_save_strategy_rejects_duplicate_id_version(service, pool):
             exchange="bitget",
             fsm_definition={},
         )
+
+
+async def test_save_strategy_accepts_well_formed_condition(service, pool):
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    saved = await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={
+            "states": ["IDLE", "HOLDING"],
+            "transitions": [
+                {
+                    "from_state": "IDLE",
+                    "to_state": "HOLDING",
+                    "condition": "RSI_timeperiod14 < 30",
+                }
+            ],
+        },
+    )
+
+    assert saved.lifecycle_status == "GENERATED"
+
+
+async def test_save_strategy_rejects_syntax_error_in_condition(service, pool):
+    """L16 DoD — 문법 오류 fsm_definition 저장 400. `RSI_timeperiod14`와 임계값
+    사이에 비교 연산자가 없어 `_ATOMIC_RE`가 매칭되지 않는 절이다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    with pytest.raises(StrategyLifecycleError):
+        await service.save_strategy(
+            owner,
+            strategy_id,
+            "1.0.0",
+            target_asset="BTC/USDT",
+            market="crypto",
+            exchange="bitget",
+            fsm_definition={
+                "states": ["IDLE", "HOLDING"],
+                "transitions": [
+                    {
+                        "from_state": "IDLE",
+                        "to_state": "HOLDING",
+                        "condition": "RSI_timeperiod14 30",
+                    }
+                ],
+            },
+        )
+
+
+async def test_save_strategy_rejects_syntax_error_in_and_combined_condition(service, pool):
+    """조합(AND)의 두 번째 절만 문법 오류인 경우에도 저장을 거부해야 한다 —
+    첫 절만 검사하고 통과시키는 회귀를 막는다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    with pytest.raises(StrategyLifecycleError):
+        await service.save_strategy(
+            owner,
+            strategy_id,
+            "1.0.0",
+            target_asset="BTC/USDT",
+            market="crypto",
+            exchange="bitget",
+            fsm_definition={
+                "states": ["IDLE", "HOLDING"],
+                "transitions": [
+                    {
+                        "from_state": "IDLE",
+                        "to_state": "HOLDING",
+                        "condition": "RSI_timeperiod14 < 30 AND close BROKEN 90",
+                    }
+                ],
+            },
+        )
+
+
+async def test_save_strategy_accepts_raw_market_column_condition(service, pool):
+    """ConditionCompiler는 손절 조건에 지표가 아닌 raw market-data 컬럼(`close`
+    등)도 그대로 쓴다(`condition_compiler.py`) — 이 조건도 `_ATOMIC_RE` 문법만
+    지키면 저장은 통과해야 한다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    saved = await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={
+            "states": ["HOLDING", "STOP_LOSS"],
+            "transitions": [
+                {
+                    "from_state": "HOLDING",
+                    "to_state": "STOP_LOSS",
+                    "condition": "close < 90",
+                }
+            ],
+        },
+    )
+
+    assert saved.lifecycle_status == "GENERATED"
+
+
+async def test_save_strategy_accepts_order_filled_reserved_literal(service, pool):
+    """`ORDER_FILLED`(condition_compiler.ORDER_FILLED)는 사용자 조건식이 아니라
+    주문 체결 시스템 이벤트를 나타내는 예약 리터럴이라 `_ATOMIC_RE` 문법
+    대상이 아니다 — 저장이 막히면 안 된다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+
+    saved = await service.save_strategy(
+        owner,
+        strategy_id,
+        "1.0.0",
+        target_asset="BTC/USDT",
+        market="crypto",
+        exchange="bitget",
+        fsm_definition={
+            "states": ["IDLE", "BUY_ORDER_PENDING"],
+            "transitions": [
+                {
+                    "from_state": "IDLE",
+                    "to_state": "BUY_ORDER_PENDING",
+                    "condition": "ORDER_FILLED",
+                }
+            ],
+        },
+    )
+
+    assert saved.lifecycle_status == "GENERATED"
 
 
 async def test_transition_to_next_stage_succeeds(service, pool):
@@ -266,3 +406,126 @@ def test_assert_executable_blocks_freshly_generated_strategy():
 
 def test_assert_executable_allows_approved_strategy():
     assert_executable("APPROVED")  # 예외가 발생하지 않으면 성공
+
+
+# --- D2 증빙 보강(task-3351) — 성능 단언 + 게이트 적색 재현. 위 negative
+# 테스트 4건(중복 id/version, 단계 건너뛰기 금지, 종단 상태 이탈 금지,
+# assert_executable 차단)과 실패 주입 1건(test_concurrent_transitions_
+# only_one_succeeds)은 이미 있었다 — ADR-2026-09-09-C Decision 1 D2
+# 하한(negative>=3, 실패 주입 1, 성능 단언 1, 게이트 적색 재현 1)에서
+# 남은 두 항목만 채운다. ---
+
+
+@pytest.mark.perf
+async def test_save_strategy_p95_latency_within_normalized_budget(service, pool):
+    """성능 단언 — ADR-2026-09-09-C Decision 1 예산표에는 전략 저장 전용
+    항목이 없다(가장 가까운 DSL 컴파일 300ms는 별도 컴파일 단계라 여기엔
+    안 맞는다). save_strategy()는 105번 표준(존재 여부 SELECT + 조건부
+    INSERT)을 따르는 순차 DB 왕복 2회짜리라, tests/integration/foundation/
+    ledger/test_perf_journal.py(LC-17)와 같은 근거로 이 환경의 기준 DB
+    왕복비용(rt) 대비 정규화한 p95를 잰다 — 절대 ms를 고정하면 CI 인프라
+    변동성에 흔들린다(같은 파일의 task-1029 전례)."""
+    baseline_samples_ms: list[float] = []
+    for _ in range(5 + 30):
+        started = time.perf_counter()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        baseline_samples_ms.append((time.perf_counter() - started) * 1000)
+    baseline_samples_ms = baseline_samples_ms[5:]
+    baseline_samples_ms.sort()
+    baseline_p95_ms = baseline_samples_ms[int(len(baseline_samples_ms) * 0.95)]
+
+    sample_count = 30
+    owner = await create_test_user(pool)
+    latencies_ms: list[float] = []
+    for _ in range(sample_count):
+        strategy_id = f"perf-strategy-{uuid4().hex[:8]}"
+        started = time.perf_counter()
+        await service.save_strategy(
+            owner,
+            strategy_id,
+            "1.0.0",
+            target_asset="BTC/USDT",
+            market="crypto",
+            exchange="bitget",
+            fsm_definition={"states": ["IDLE"]},
+        )
+        latencies_ms.append((time.perf_counter() - started) * 1000)
+
+    latencies_ms.sort()
+    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95)]
+    normalized_target_ms = max(30.0, 6 * baseline_p95_ms)
+
+    print(
+        f"\nstrategy_builder save_strategy latency: p95={p95_ms:.3f}ms (n={sample_count}); "
+        f"baseline round-trip p95={baseline_p95_ms:.3f}ms (n=30); "
+        f"normalized target={normalized_target_ms:.3f}ms (max(30, 6*rt))"
+    )
+    assert p95_ms < normalized_target_ms
+
+
+async def test_gate_red_without_conditional_write_guard_double_succeeds(pool):
+    """게이트 적색 재현 — transition_lifecycle()의 UPDATE는 방금 읽은
+    lifecycle_status를 WHERE 절 조건으로 다시 거는 105번 표준(조건부
+    UPDATE)을 따른다(레드팀 감사 #17, src의 주석 참고). 위
+    test_concurrent_transitions_only_one_succeeds는 그 결과(정확히 1건만
+    성공)를 녹색으로 증명한다. 이 테스트는 그 조건절만 뺀 "읽고 나서
+    조건 없이 쓰기" 버전을 이 파일 안에서만 재현해, 조건절이 없으면
+    동시에 들어온 두 전이 요청이 서로의 커밋을 못 본 채 둘 다 성공으로
+    보고돼버림(잃어버린 갱신)을 보여준다 — 실제 서비스 코드는 이 적색을
+    막는다."""
+    owner = await create_test_user(pool)
+    strategy_id = f"test-strategy-{uuid4().hex[:8]}"
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO strategies "
+            "(strategy_id, version, owner_user_id, target_asset, market, exchange, "
+            " fsm_definition, author_agent, lifecycle_status) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'GENERATED')",
+            strategy_id,
+            "1.0.0",
+            owner,
+            "BTC/USDT",
+            "crypto",
+            "bitget",
+            "{}",
+            "user",
+        )
+
+    arrived = 0
+    released = asyncio.Event()
+
+    async def _naive_transition_without_guard() -> None:
+        nonlocal arrived
+        async with pool.acquire() as conn:
+            await conn.fetchval(
+                "SELECT lifecycle_status FROM strategies WHERE strategy_id = $1 AND version = $2",
+                strategy_id,
+                "1.0.0",
+            )
+            arrived += 1
+            if arrived >= 2:
+                released.set()
+            else:
+                await released.wait()
+            # 105번 표준 위반 재현: 방금 읽은 상태를 WHERE 조건으로 다시
+            # 걸지 않는다.
+            await conn.execute(
+                "UPDATE strategies SET lifecycle_status = $3 "
+                "WHERE strategy_id = $1 AND version = $2",
+                strategy_id,
+                "1.0.0",
+                "BACKTESTING",
+            )
+
+    results = await asyncio.gather(
+        _naive_transition_without_guard(),
+        _naive_transition_without_guard(),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    assert len(successes) == 2, (
+        "적색 재현 실패 — 조건절 없는 UPDATE라면 두 시도 모두 예외 없이 "
+        f"성공해야 합니다(실제: {results})"
+    )

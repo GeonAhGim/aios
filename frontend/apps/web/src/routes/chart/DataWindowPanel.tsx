@@ -17,6 +17,7 @@ import {
 } from "@aios/chart-engine/src/legend/dataWindow";
 import { Alert } from "@aios/ui-web";
 import type { OverlaySeriesByOutput } from "./ChartPlotLayer";
+import { useTranslation } from "react-i18next";
 
 const DATA_WINDOW_ERROR_REASONS: Record<DataWindowErrorCode, string> = {
   CHART_DATA_WINDOW_DUPLICATE_INDICATOR: "같은 지표 id가 중복되어 데이터 윈도우를 표시할 수 없습니다.",
@@ -81,6 +82,7 @@ export interface DataWindowPanelProps {
 }
 
 export function DataWindowPanel({ overlays, overlaySeries, candles, crosshairTimeMs }: DataWindowPanelProps) {
+  const { t } = useTranslation();
   const snapshots = useMemo(() => buildIndicatorSnapshots(overlays, overlaySeries, candles), [overlays, overlaySeries, candles]);
   const dataIndex = useMemo(() => resolveDataIndex(candles, crosshairTimeMs), [candles, crosshairTimeMs]);
 
@@ -94,7 +96,7 @@ export function DataWindowPanel({ overlays, overlaySeries, candles, crosshairTim
   }
 
   return (
-    <section aria-label="데이터 윈도우" data-testid="data-window-panel" className="rounded-lg border border-border p-3 text-xs">
+    <section aria-label={t("legacy.dataWindowPanel.ariaLabel1")} data-testid="data-window-panel" className="rounded-lg border border-border p-3 text-xs">
       {errorCode ? (
         <div data-testid="data-window-error">
           <Alert tone="warning">
@@ -102,21 +104,23 @@ export function DataWindowPanel({ overlays, overlaySeries, candles, crosshairTim
           </Alert>
         </div>
       ) : (
-        <table className="w-full">
-          <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.indicatorId}:${row.outputKey}`} data-testid="data-window-row">
-                <td style={{ color: row.color }}>{row.label}</td>
-                <td className="text-right">{row.value}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td className="text-fg-muted">표시할 지표가 없습니다.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <tbody>
+              {rows.map((row) => (
+                <tr key={`${row.indicatorId}:${row.outputKey}`} data-testid="data-window-row">
+                  <td style={{ color: row.color }}>{row.label}</td>
+                  <td className="text-right">{row.value}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td className="text-fg-muted">{t("legacy.dataWindowPanel.t2")}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

@@ -12,6 +12,8 @@ const SUCCESS_STATUSES = new Set([
   "SUCCESS",
   // task-2346(FE-OPS-5): 계정 연동(connections) 정상 상태.
   "ACTIVE_READONLY",
+  // task-2668(CM-18): 컴플라이언스 판정(ComplianceVerdict) 통과.
+  "ALLOW",
 ]);
 const DANGER_STATUSES = new Set([
   "SUSPENDED",
@@ -29,6 +31,8 @@ const DANGER_STATUSES = new Set([
   "REVOKED",
   // task-2346(FE-OPS-5): 계정 연동 완전 단절 상태.
   "DISCONNECTED",
+  // task-2668(CM-18): 컴플라이언스 판정(ComplianceVerdict) 거부 — fail-closed.
+  "DENY",
 ]);
 const WARNING_STATUSES = new Set([
   "PAUSED",
@@ -46,6 +50,8 @@ const WARNING_STATUSES = new Set([
   "PENDING_CONSENT",
   "CONNECTING",
   "DEGRADED",
+  // task-2668(CM-18): 컴플라이언스 판정(ComplianceVerdict) 경고 — 통과하되 기록.
+  "WARN",
 ]);
 
 // 여러 도메인(실행 status, 결제 status, 분쟁 status 등)이 같은 3단계

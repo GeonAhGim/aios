@@ -1,8 +1,8 @@
-"""RevokeMembership 커맨드.
+"""RevokeMembership command.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§4.1 Membership,
-§9 PLT-29. `suspend_membership.py`와 동일하게 세션 폐기는 PLT-24 `logout_all`을
-재사용한다.
+§9 PLT-29. Session termination reuses PLT-24 `logout_all`, same as
+`suspend_membership.py`.
 """
 from __future__ import annotations
 
@@ -21,16 +21,16 @@ from src.services.auth.logout import logout_all
 
 
 class RevokeTargetNotFoundError(Exception):
-    """context.tenant_id에 subject_id의 ACTIVE/SUSPENDED 멤버십이 없다(다른
-    tenant 소유 포함 — 73번 §8.3 "404 동형"). 404 RESOURCE_NOT_FOUND."""
+    """No ACTIVE/SUSPENDED membership for subject_id under context.tenant_id (including
+    ownership by another tenant — 73 §8.3 "404 isomorphism"). 404 RESOURCE_NOT_FOUND."""
 
 
 class RevokeAuthorizationError(Exception):
-    """73번 §4.1 전이표 — actor role이 이 전이를 수행할 수 없다. 403 AUTHZ_FORBIDDEN."""
+    """73 §4.1 transition table — actor role cannot perform this transition. 403 AUTHZ_FORBIDDEN."""
 
 
 class RevokeLastOwnerError(Exception):
-    """73번 I4 "tenant당 ACTIVE OWNER >= 1". 409 STATE_INVALID_TRANSITION."""
+    """73 I4 "ACTIVE OWNER >= 1 per tenant". 409 STATE_INVALID_TRANSITION."""
 
 
 async def revoke_membership(
@@ -43,10 +43,10 @@ async def revoke_membership(
     actor_role = MembershipRole(context.role)
 
     async with pool.acquire() as conn, conn.transaction():
-        # get_active_membership은 ACTIVE만 돌려준다 — SUSPENDED도 revoke 대상
-        # 이므로(73번 §4.1 "ACTIVE/SUSPENDED -> RevokeMembership"), tenant로
-        # 필터링한 이력에서 아직 REVOKED되지 않은 행을 찾는다. 상태 머신상
-        # 이런 행은 최대 1개다.
+        # get_active_membership returns only ACTIVE — but SUSPENDED is also a
+        # revoke target (73 §4.1 "ACTIVE/SUSPENDED -> RevokeMembership"), so
+        # find the non-REVOKED row in the history filtered by tenant. At most
+        # one such row exists in the state machine.
         candidates = [
             m
             for m in await membership_repo.list_memberships_for_subject(conn, subject_id)

@@ -46,6 +46,7 @@ API 패밀리 안에 있을 가능성이 국내파생과의 유사성보다 높�
 있는 근사치, **미검증**). fail-closed 원칙상 애매하면 거부가 허용보다
 안전하다.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -56,6 +57,7 @@ from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus
+from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 _OVERSEAS_DERIVATIVE_ASSET_CLASSES = (AssetClass.OVERSEAS_FUTURES, AssetClass.OVERSEAS_OPTION)
@@ -91,7 +93,7 @@ def _reject_if_expired(expiry_date: date | None, *, now: datetime | None = None)
 
 class KISOverseasFutureoptionMixin:
     async def get_overseas_futureoption_price(
-        self, symbol: str, *, is_option: bool = False
+        self: KISHTTPClient, symbol: str, *, is_option: bool = False
     ) -> Ticker:
         # Cross-checked against kis_tr_reference.json (review task-1978 REJECT
         # follow-up, task-1983): HHDFC55010000 (futures) is inquire-price,
@@ -103,7 +105,7 @@ class KISOverseasFutureoptionMixin:
             if is_option
             else "/uapi/overseas-futureoption/v1/quotations/inquire-price"
         )
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             path,
             tr_id,
@@ -123,19 +125,19 @@ class KISOverseasFutureoptionMixin:
         )
 
     @require_paper_sandbox
-    async def place_overseas_futureoption_order(self, order: Order) -> Order:
+    async def place_overseas_futureoption_order(self: KISHTTPClient, order: Order) -> Order:
         _require_overseas_derivative_asset_class(order)
         _reject_if_expired(order.expiry_date)
         body: dict[str, Any] = {
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "SLL_BUY_DVSN_CD": "02" if order.side == OrderSide.BUY else "01",
             "PDNO": order.symbol,
             "ORD_QTY": str(order.quantity),
             "ORD_PRC": str(order.price.amount) if order.price is not None else "0",
             "ORD_DVSN": "02" if order.price is not None else "01",
         }
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/uapi/overseas-futureoption/v1/trading/order", "OTFM3001U", body=body
         )
         try:
@@ -149,19 +151,19 @@ class KISOverseasFutureoptionMixin:
 
     @require_paper_sandbox
     async def cancel_overseas_futureoption_order(
-        self, order_id: str, *, quantity: Decimal
+        self: KISHTTPClient, order_id: str, *, quantity: Decimal
     ) -> bool:
         orgno, odno = order_id.split(":", 1)
         body: dict[str, Any] = {
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "ORGN_ODNO": odno,
             "KRX_FWDG_ORD_ORGNO": orgno,
             "RVSE_CNCL_DVSN_CD": "02",
             "ORD_QTY": str(quantity),
             "ORD_PRC": "0",
         }
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/uapi/overseas-futureoption/v1/trading/order-rvsecncl",
             "OTFM3003U",
@@ -169,17 +171,19 @@ class KISOverseasFutureoptionMixin:
         )
         return bool(raw.get("rt_cd") == "0")
 
-    async def get_overseas_futureoption_balance(self) -> list[AccountBalance]:
+    async def get_overseas_futureoption_balance(
+        self: KISHTTPClient,
+    ) -> list[AccountBalance]:
         # kis_tr_reference.json: OTFM1412R's real path is inquire-unpd
         # (review task-1978 REJECT follow-up, task-1983 -- inquire-balance
         # was the wrong wiring).
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/overseas-futureoption/v1/trading/inquire-unpd",
             "OTFM1412R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "CTX_AREA_FK200": "",
                 "CTX_AREA_NK200": "",
             },

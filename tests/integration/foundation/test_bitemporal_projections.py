@@ -9,19 +9,23 @@ real write. (4) the write paths (position snapshot fold, balance apply)
 switched from UPDATE to DELETE+INSERT but still leave exactly one row per
 natural key -- no observable difference from a real UPDATE.
 """
+
 from __future__ import annotations
 
 import os
 import uuid
 from decimal import Decimal
+from uuid import UUID
 
 import asyncpg
 import pytest
 
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
 )
+from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.ledger.conftest import create_ledger_account
 from tests.integration.foundation.positions.conftest import (
@@ -50,13 +54,23 @@ def _assert_no_update_violation(exc_info: pytest.ExceptionInfo) -> None:
         assert "no-update violation" in str(exc_info.value)
 
 
+def _snapshot_key(tenant_id: UUID) -> str:
+    return str(
+        PositionKey(
+            venue="TESTVENUE",
+            instrument_id=f"INST{uuid.uuid4().hex[:8]}",
+            strategy_id="default",
+            execution_id="paper",
+            portfolio_id=default_portfolio_id(tenant_id),
+        )
+    )
+
+
 async def test_aios_app_cannot_update_pos_snapshot(pool: asyncpg.Pool) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = f"pos:{uuid.uuid4().hex}"
-    await open_position(
-        pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
-    )
+    position_key = _snapshot_key(tenant_id)
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
 
     with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)) as exc_info:
         async with pool.acquire() as conn, conn.transaction():
@@ -103,7 +117,7 @@ async def test_aios_app_cannot_update_positions(pool: asyncpg.Pool) -> None:
 async def test_pos_snapshot_fold_keeps_single_current_row(pool: asyncpg.Pool) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
-    position_key = f"pos:{uuid.uuid4().hex}"
+    position_key = _snapshot_key(tenant_id)
     snapshot = await open_position(
         pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
     )
@@ -132,7 +146,10 @@ async def test_ledger_balance_apply_keeps_single_current_row(pool: asyncpg.Pool)
 
     async with pool.acquire() as conn, conn.transaction():
         await repo.apply(
-            conn, account_code, delta_balance=Decimal("50"), delta_held=Decimal("0"),
+            conn,
+            account_code,
+            delta_balance=Decimal("50"),
+            delta_held=Decimal("0"),
             expected_seq=0,
         )
 
@@ -182,3 +199,109 @@ async def test_positions_replace_keeps_single_current_row(pool: asyncpg.Pool) ->
         {"id": legacy_id, "quantity": Decimal("7"), "tx_to": None}
     ]
     assert [dict(r) for r in current_rows] == [dict(r) for r in base_rows]
+
+
+# -- D2-deepen: failure-injection, numerical assertion, gate-red reproduction --
+
+
+async def test_failure_injection_no_update_trigger_blocks_table_owner_on_pos_snapshot(
+    pool: asyncpg.Pool,
+) -> None:
+    """REVOKE UPDATE never binds the owning role (PostgreSQL: the owner
+    always retains implicit privileges) -- `no_update_guard.py`'s own
+    docstring claims the *trigger*, not REVOKE, is what makes UPDATE
+    physically impossible even for the owner. This is a failure-injection
+    test for that specific claim: skip `SET ROLE aios_app` entirely and
+    issue the UPDATE as the migration/superuser connection that actually
+    owns `pos_snapshot` -- if the trigger alone still blocks it, the
+    defense-in-depth claim is real, not just documentation (mirrors
+    `test_worm_trigger_blocks_table_owner_on_audit_log` in
+    `tests/integration/test_db_roles.py` for the sibling WORM guard)."""
+    tenant_id = await create_test_tenant(pool)
+    account_id = await create_pos_account(pool, tenant_id)
+    position_key = _snapshot_key(tenant_id)
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
+
+    with pytest.raises(asyncpg.RaiseError, match="no-update violation"):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "UPDATE pos_snapshot SET quantity = 1 WHERE position_key = $1", position_key
+            )
+
+
+async def test_numerical_assertion_ledger_balance_survives_many_sequential_deltas_no_drift(
+    pool: asyncpg.Pool,
+) -> None:
+    """FA-10's write path replaces the `ledger_balance` row via DELETE+INSERT
+    on every `apply()` call instead of UPDATE-in-place. Numerical invariant:
+    run 20 real DELETE+INSERT cycles with distinct Decimal deltas and assert
+    the final balance equals the *exact* Decimal sum of all deltas (no float
+    drift across repeated real-DB round trips), `last_entry_seq` advanced by
+    exactly 20, and the natural key still resolves to exactly one row -- the
+    projection table's PK (unlike a real bitemporal history table) can never
+    hold more than one row per key, since DELETE removes the old version
+    before INSERT adds the new one."""
+    account_code = await create_ledger_account(pool, initial_balance=Decimal("100"))
+    repo = PostgresBalanceRepository(pool)
+
+    deltas = [Decimal(i + 1) * Decimal("0.13") * (1 if i % 2 == 0 else -1) for i in range(20)]
+    expected_balance = Decimal("100") + sum(deltas)
+
+    for seq, delta in enumerate(deltas):
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.apply(
+                conn, account_code, delta_balance=delta, delta_held=Decimal("0"), expected_seq=seq
+            )
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT lb.balance, lb.last_entry_seq, lb.tx_to FROM ledger_balance lb "
+            "JOIN ledger_account la ON la.account_id = lb.account_id "
+            "WHERE la.account_code = $1",
+            account_code,
+        )
+
+    assert len(rows) == 1, "DELETE+INSERT must never leave more than one row per account"
+    assert rows[0]["balance"] == expected_balance, (
+        f"balance {rows[0]['balance']} != exact expected {expected_balance} -- Decimal drift "
+        "across 20 DELETE+INSERT cycles"
+    )
+    assert rows[0]["last_entry_seq"] == 20
+    assert rows[0]["tx_to"] is None
+
+
+async def test_gate_red_reproduction_bulk_update_across_multiple_positions_blocked(
+    pool: asyncpg.Pool,
+) -> None:
+    """Reproduce the exact incident class FA-10 exists to prevent: a
+    maintenance/backfill script that "fixes" many rows in one UPDATE
+    statement, not just a single row by primary key. Insert three
+    `positions` rows for the same tenant and issue one bulk UPDATE with no
+    id filter -- the BEFORE UPDATE trigger fires on the first row touched
+    and aborts the *entire* statement, so this is gate-red (all-or-nothing
+    rejection), not a partial write that would silently corrupt some rows
+    while "only" failing on the last one."""
+    tenant_id = await create_test_tenant(pool)
+    async with pool.acquire() as conn:
+        legacy_ids = [
+            await conn.fetchval(
+                "INSERT INTO positions (user_id, symbol, exchange, strategy_id, quantity, "
+                "average_entry_price, entry_time) "
+                "VALUES ($1, $2, 'TESTEX', 'test-strategy', 1, 1, now()) RETURNING id",
+                tenant_id,
+                f"SYM{i}",
+            )
+            for i in range(3)
+        ]
+
+    with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)) as exc_info:
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("SET ROLE aios_app")
+            await conn.execute("UPDATE positions SET quantity = 999 WHERE user_id = $1", tenant_id)
+    _assert_no_update_violation(exc_info)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT quantity FROM positions WHERE id = ANY($1)", legacy_ids)
+    assert [r["quantity"] for r in rows] == [Decimal("1")] * 3, (
+        "bulk UPDATE must be rejected atomically -- no row may end up partially updated"
+    )

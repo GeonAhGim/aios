@@ -27,6 +27,7 @@ CTFO6118R, 시세 FHMIF10000000 — 전부 실전 tr_id이고 모의투자 치�
 못했으므로(같은 미검증 사유), `Order.expiry_date`를 이 mixin이 요청을
 보내기 전에 직접 검사해 fail-closed로 거부한다.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -38,6 +39,7 @@ from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 _MARKET_CODE_FUTURES = "JF"  # 국내지수선물 등 선물류(미검증 — §4 시장코드 명명 관례 연장)
@@ -104,9 +106,11 @@ def calculate_settlement_pnl(
 
 
 class KISDomesticFutureoptionMixin:
-    async def get_futureoption_price(self, symbol: str, *, is_option: bool = False) -> Ticker:
+    async def get_futureoption_price(
+        self: KISHTTPClient, symbol: str, *, is_option: bool = False
+    ) -> Ticker:
         market_code = _MARKET_CODE_OPTION if is_option else _MARKET_CODE_FUTURES
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "GET",
             "/uapi/domestic-futureoption/v1/quotations/inquire-price",
             "FHMIF10000000",
@@ -126,13 +130,13 @@ class KISDomesticFutureoptionMixin:
         )
 
     @require_paper_sandbox
-    async def place_futureoption_order(self, order: Order) -> Order:
+    async def place_futureoption_order(self: KISHTTPClient, order: Order) -> Order:
         _require_derivative_asset_class(order)
         _reject_if_expired(order.expiry_date)
         body: dict[str, Any] = {
             "ORD_PRCS_DVSN_CD": "02",
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "SLL_BUY_DVSN_CD": "02" if order.side == OrderSide.BUY else "01",
             "SHTN_PDNO": order.symbol,
             "ORD_QTY": str(order.quantity),
@@ -142,7 +146,7 @@ class KISDomesticFutureoptionMixin:
             "ORD_DVSN_CD": _order_division(order.order_type),
             "CTAC_TLNO": "",
         }
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST", "/uapi/domestic-futureoption/v1/trading/order", "TTTO1101U", body=body
         )
         try:
@@ -155,12 +159,14 @@ class KISDomesticFutureoptionMixin:
         )
 
     @require_paper_sandbox
-    async def cancel_futureoption_order(self, order_id: str, *, quantity: Decimal) -> bool:
+    async def cancel_futureoption_order(
+        self: KISHTTPClient, order_id: str, *, quantity: Decimal
+    ) -> bool:
         orgno, odno = order_id.split(":", 1)
         body: dict[str, Any] = {
             "ORD_PRCS_DVSN_CD": "02",
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "ORGN_ODNO": odno,
             "KRX_FWDG_ORD_ORGNO": orgno,
             "RVSE_CNCL_DVSN_CD": "02",
@@ -176,7 +182,7 @@ class KISDomesticFutureoptionMixin:
             "RMN_QTY_YN": "N",
             "ORD_DVSN_CD": "02",
         }
-        raw = await self._request(  # type: ignore[attr-defined]
+        raw = await self._request(
             "POST",
             "/uapi/domestic-futureoption/v1/trading/order-rvsecncl",
             "TTTO1103U",
@@ -184,14 +190,14 @@ class KISDomesticFutureoptionMixin:
         )
         return bool(raw.get("rt_cd") == "0")
 
-    async def get_futureoption_balance(self) -> list[AccountBalance]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_futureoption_balance(self: KISHTTPClient) -> list[AccountBalance]:
+        raw = await self._request(
             "GET",
             "/uapi/domestic-futureoption/v1/trading/inquire-balance",
             "CTFO6118R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "MGNA_DVSN": "01",
                 "EXCC_STAT_CD": "1",
                 "CTX_AREA_FK200": "",

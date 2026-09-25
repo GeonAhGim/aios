@@ -22,6 +22,7 @@ tenant 소유 `order_id`는 항상 같은 `None`으로 접는다(§8.3 "404 동�
 `_LEGACY_TABLES_POLICY_ONLY`)와는 이중 방어 — RLS가 나중에 켜져도
 이 필터는 그대로 유효하고, RLS가 없는 지금은 이 필터가 유일한 방어선이다.
 """
+
 from __future__ import annotations
 
 import base64
@@ -81,6 +82,12 @@ def _row_to_order_view(row: asyncpg.Record) -> OrderView:
         version=row["version"],
         parent_order_id=row["parent_order_id"],
         algo_run_id=row["algo_run_id"],
+        # `orders.committed_child_qty` was added by EM-3 (f553385a, task-2121)
+        # after this leaf (L4-26, task-1602) landed — that column already
+        # exists in the schema/view, so reading it here is not itself a
+        # schema/view change. Dropping the read would silently report 0 for
+        # every order instead of the real aggregate, which is worse than the
+        # narrow scope note this addresses.
         committed_child_qty=row["committed_child_qty"],
         unknown_since=row["unknown_since"],
         provider_order_date=row["provider_order_date"],
@@ -96,11 +103,21 @@ def _encode_cursor(created_at: datetime, order_id: UUID) -> str:
 
 def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
     try:
-        raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        raw = base64.b64decode(cursor.encode("ascii"), altchars=b"-_", validate=True).decode(
+            "utf-8"
+        )
         created_at_str, _, order_id_str = raw.partition(_CURSOR_SEP)
         if not order_id_str:
             raise ValueError("cursor에 구분자가 없습니다")
-        return datetime.fromisoformat(created_at_str), UUID(order_id_str)
+        created_at = datetime.fromisoformat(created_at_str)
+        if created_at.tzinfo is None:
+            # fromisoformat() silently accepts a tz-less string as a naive
+            # datetime. A crafted cursor could smuggle one through, and
+            # asyncpg would then interpret it in the server's local timezone,
+            # breaking the keyset boundary (CLAUDE.md: datetimes are always
+            # timezone-aware UTC). Reject fail-closed instead.
+            raise ValueError("cursor의 timestamp에 timezone 정보가 없습니다")
+        return created_at, UUID(order_id_str)
     except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
         raise InvalidOrderCursorError(f"유효하지 않은 cursor: {cursor!r}") from exc
 

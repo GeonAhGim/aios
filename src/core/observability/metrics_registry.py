@@ -4,6 +4,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md §9 L0-1 (108번 관측
 I/O 없음 — `/metrics` 라우터(L0-5)가 `render_text()`를 그대로 응답 본문으로 반환한다.
 미검증: 실제 Prometheus 서버의 스크레이핑 동작은 확인하지 않았다.
 """
+
 from __future__ import annotations
 
 import threading
@@ -43,12 +44,12 @@ class Counter:
     _values: dict[LabelValues, float] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def inc(self, amount: float = 1.0, **labels: str) -> None:
-        if amount < 0:
-            raise ValueError("Counter.inc amount must be >= 0")
+    def inc(self, delta: float = 1.0, **labels: str) -> None:
+        if delta < 0:
+            raise ValueError("Counter.inc delta must be >= 0")
         key = _validate_labels(self.label_names, labels)
         with self._lock:
-            self._values[key] = self._values.get(key, 0.0) + amount
+            self._values[key] = self._values.get(key, 0.0) + delta
 
     def samples(self) -> dict[LabelValues, float]:
         with self._lock:
@@ -67,13 +68,13 @@ class Gauge:
         with self._lock:
             self._values[key] = value
 
-    def inc(self, amount: float = 1.0, **labels: str) -> None:
+    def inc(self, delta: float = 1.0, **labels: str) -> None:
         key = _validate_labels(self.label_names, labels)
         with self._lock:
-            self._values[key] = self._values.get(key, 0.0) + amount
+            self._values[key] = self._values.get(key, 0.0) + delta
 
-    def dec(self, amount: float = 1.0, **labels: str) -> None:
-        self.inc(-amount, **labels)
+    def dec(self, delta: float = 1.0, **labels: str) -> None:
+        self.inc(-delta, **labels)
 
     def samples(self) -> dict[LabelValues, float]:
         with self._lock:
@@ -176,9 +177,7 @@ class MetricsRegistry:
                 lines.append(f"{gauge.name}{label_str} {_format_value(value)}")
         for hist in self._histograms.values():
             lines.append(f"# TYPE {hist.name} histogram")
-            for label_values, (counts, total_sum, total_count) in sorted(
-                hist.samples().items()
-            ):
+            for label_values, (counts, total_sum, total_count) in sorted(hist.samples().items()):
                 bucket_label_names = hist.label_names + ("le",)
                 for upper, cumulative in zip(hist.buckets, counts, strict=True):
                     bound = _format_value(upper)

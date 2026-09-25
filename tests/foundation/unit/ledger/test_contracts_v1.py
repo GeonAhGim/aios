@@ -7,6 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.3 (C), §9 LC-1.
 실패"). 필드 추가는 minor 변경이므로 허용되고, 그 경우에만 fixture를
 함께 갱신한다.
 """
+
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -171,6 +172,35 @@ def test_payout_batch_view_state_literal_rejects_unknown() -> None:
             release_entry_id=None,
             paid_entry_id=None,
         )
+
+
+def test_ledger_event_fund_and_portfolio_id_default_to_none() -> None:
+    """기존 사건 타입(TOPUP 등)은 FA-8 이전처럼 두 필드를 생략하고, 그때도
+    스키마가 `None`을 채워 넣는다(750f222 FA-8 docstring의 "생략 시 None"
+    보장) — fixture 스냅샷만으로는 이 기본값 동작을 검증하지 못한다."""
+    event = _sample_event()
+    assert event.fund_id is None
+    assert event.portfolio_id is None
+
+
+def test_ledger_event_accepts_fund_and_portfolio_id() -> None:
+    """FA-8 allocate_fills 경로는 두 필드를 명시적으로 채운다
+    (postgres_journal_repository.append가 그대로 INSERT에 실어 보낸다)."""
+    fund_id = uuid4()
+    portfolio_id = uuid4()
+    event = _sample_event(fund_id=fund_id, portfolio_id=portfolio_id)
+    assert event.fund_id == fund_id
+    assert event.portfolio_id == portfolio_id
+
+
+def test_ledger_event_fund_id_rejects_non_uuid() -> None:
+    with pytest.raises(ValidationError):
+        _sample_event(fund_id="not-a-uuid")
+
+
+def test_ledger_event_portfolio_id_rejects_non_uuid() -> None:
+    with pytest.raises(ValidationError):
+        _sample_event(portfolio_id="not-a-uuid")
 
 
 def test_integrity_report_drift_tuple_roundtrip() -> None:

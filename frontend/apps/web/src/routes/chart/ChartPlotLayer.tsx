@@ -33,6 +33,7 @@
 // instead of surfacing one `PlotLayerIssue` for the offending output the way
 // every other malformed-spec case already does.
 import type { ReactNode } from "react";
+import { CATEGORICAL_PALETTE } from "@aios/ui-web";
 import type { StreamCandle } from "@aios/chart-engine/src/data/candleStream";
 import type { OverlayEntry } from "@aios/chart-engine/src/indicators/overlayRegistry";
 import type { IndicatorStyleOutput } from "@aios/chart-engine/src/plugins/indicatorPlugin";
@@ -131,10 +132,16 @@ export interface PlotLayerResult {
   readonly issues: readonly PlotLayerIssue[];
 }
 
-const PALETTE = ["#eab308", "#38bdf8", "#f472b6", "#a78bfa", "#34d399", "#fb923c"];
-
+// UX-3: 리터럴 팔레트 대신 dataviz 스킬로 검증된 공용 카테고리 팔레트(ui-web의
+// chartPalette.ts)를 재사용한다 -- 인디케이터 출력 색이 다른 화면(AllocationBarChart
+// 등)의 카테고리 색과 동일한 순서·대비 규칙을 따르게 된다.
 function styleFor(output: string, index: number): IndicatorStyleOutput {
-  return { output, color: PALETTE[index % PALETTE.length]!, lineWidth: 1.5, visible: true };
+  return {
+    output,
+    color: CATEGORICAL_PALETTE[index % CATEGORICAL_PALETTE.length]!,
+    lineWidth: 1.5,
+    visible: true,
+  };
 }
 
 function toSvgPoints(points: readonly Point2D[]): string {

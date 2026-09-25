@@ -1,5 +1,6 @@
-"""AIOS Script 정적 타입 시스템 패키지 — 타입 격자(DSL-4 `types.py`)와
-DSL-1 AST에 대한 타입 검사기(DSL-4 `checker.py`)."""
+"""AIOS Script static type system package — type lattice (DSL-4 `types.py`) and
+type checker for DSL-1 AST (DSL-4 `checker.py`)."""
+
 from __future__ import annotations
 
 from src.core.script.typing.checker import ScriptTypeError, TypeEnv, check_program, infer_type

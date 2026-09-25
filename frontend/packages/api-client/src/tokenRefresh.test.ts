@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AiosApiClient, ApiError } from "./client";
 import { configureUnauthorizedHandler } from "./http";
-import { configureTokenClearHandler, configureTokenRefreshHandler, refreshAccessToken } from "./tokenRefresh";
+import {
+  configureTokenClearHandler,
+  configureTokenRefreshHandler,
+  refreshAccessToken,
+  type TokenRefreshHandler,
+} from "./tokenRefresh";
 import { createTokenStore } from "./tokenStore";
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -322,5 +327,62 @@ describe("refreshAccessToken 실패 시 등록된 clearHandler 호출(tokenStore
     expect(store.getAccess()).toBeNull();
     expect(store.getRefresh()).toBeNull();
     expect(store.peekSessionId()).toBeNull();
+  });
+});
+
+// DEEPEN task-3184(docs/audit/DEPTH_PLT.md #1324): 위 "동시 호출은 핸들러를
+// 1회만 실행" 테스트는 *호출 횟수*만 단언해 single-flight가 실제 ms 단위
+// 이득으로 이어지는지(수치 성능)와, 그 가드 자체가 깨지는 회귀를 잡아내는
+// 적색 재현이 없었다(PLT축은 D2 하한만 적용, ADR-2026-09-09-C). PLT축은
+// ADR-2026-09-09-C 안전축 목록 밖이라 D3(다중 인스턴스 등)는 불요.
+describe("DEEPEN 3184: 수치 성능 단언 + 게이트 적색 재현", () => {
+  afterEach(() => {
+    configureTokenRefreshHandler(null);
+  });
+
+  // 수치 성능: handler가 실제 네트워크 지연(setTimeout, 마이크로태스크 flush가
+  // 아닌 real timer)을 흉내내면, 직렬 실행(20건 x 지연)이었을 경우 예산을 크게
+  // 초과했을 것이다. 공유된 단일 in-flight 프라미스이므로 실측 wall-clock
+  // 시간이 지연 1회분에 수렴함을 performance.now()로 직접 잰다(카운트가 아닌
+  // 실제 ms 단언).
+  it("수치 성능: 동시 20건은 refresh 지연 1회분에 수렴하고 20배로 늘지 않는다", async () => {
+    const REFRESH_LATENCY_MS = 40;
+    const handler: TokenRefreshHandler = () =>
+      new Promise((resolve) => setTimeout(() => resolve(true), REFRESH_LATENCY_MS));
+    configureTokenRefreshHandler(vi.fn(handler));
+
+    const start = performance.now();
+    const results = await Promise.all(Array.from({ length: 20 }, () => refreshAccessToken()));
+    const elapsedMs = performance.now() - start;
+
+    expect(results).toEqual(Array<boolean>(20).fill(true));
+    // 직렬이었다면 20 x 40ms = 800ms 이상 걸렸을 것 — 지연 1회분(40ms)의 3배
+    // (여유 마진 포함 120ms) 미만이면 공유된 단일 실행으로 수렴했다고 본다.
+    expect(elapsedMs).toBeLessThan(REFRESH_LATENCY_MS * 3);
+  });
+
+  // 게이트 적색 재현: refreshAccessToken()의 inFlightRefresh 공유 가드를 뺀
+  // "매 호출마다 handler를 독립 실행"하는 이전 방식을 로컬로 재현한다. 파일
+  // 상단 주석(31-36행)대로 회전형 refresh_token은 재사용 시 서버가 세션
+  // 전체를 폐기하므로, 이 적색은 실제로 정상 세션들이 서로를 강제 로그아웃
+  // 시키는 회귀를 뜻한다 — 단순 스냅샷 드리프트 가드가 아니다.
+  function naiveRefreshWithoutSingleFlight(handler: TokenRefreshHandler): Promise<boolean> {
+    return Promise.resolve(handler());
+  }
+
+  it("게이트 적색 재현: single-flight 가드 없이 재구현하면 동시 20건이 handler를 20회 호출한다(적색) vs 실제 refreshAccessToken은 1회(녹색)", async () => {
+    const naiveHandler = vi.fn().mockResolvedValue(true);
+    const realHandler = vi.fn().mockResolvedValue(true);
+
+    const naiveResults = await Promise.all(
+      Array.from({ length: 20 }, () => naiveRefreshWithoutSingleFlight(naiveHandler)),
+    );
+    expect(naiveHandler).toHaveBeenCalledTimes(20); // 적색: 가드 없으면 동시 호출 수만큼 회전 요청이 나간다
+    expect(naiveResults).toEqual(Array<boolean>(20).fill(true));
+
+    configureTokenRefreshHandler(realHandler);
+    const realResults = await Promise.all(Array.from({ length: 20 }, () => refreshAccessToken()));
+    expect(realHandler).toHaveBeenCalledTimes(1); // 녹색: 실제 구현은 단일 in-flight 프라미스로 수렴한다
+    expect(realResults).toEqual(Array<boolean>(20).fill(true));
   });
 });

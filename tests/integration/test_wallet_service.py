@@ -1,4 +1,5 @@
 """FD-13.11 통합테스트 — 실제 dev DB 대상 (WalletService)."""
+import asyncio
 from decimal import Decimal
 from pathlib import Path
 
@@ -6,7 +7,11 @@ import asyncpg
 import pytest
 from dotenv import dotenv_values
 
-from src.services.wallet_service import WalletService, WalletTopupError
+from src.services.wallet_service import (
+    WalletService,
+    WalletTopupError,
+    WalletTopupInvalidTransitionError,
+)
 from tests.integration.conftest import create_test_user
 
 
@@ -89,3 +94,47 @@ async def test_confirm_topup_rejects_nonexistent_request(service, pool):
 
     with pytest.raises(WalletTopupError):
         await service.confirm_topup(999999999, admin, idempotency_key="key-1")
+
+
+async def test_concurrent_confirm_only_one_succeeds(service, pool, monkeypatch):
+    """QA task-1587 — task-1583이 신설한 WalletTopupInvalidTransitionError(409)가
+    실제로 도달 가능한지 증명한다(그전까지는 매핑 표에만 있고 어느 테스트도
+    이 예외를 실제로 발생시키지 않았다). test_verification_service.py::
+    test_concurrent_decisions_only_one_succeeds와 동일 원칙 — barrier로 두
+    confirm_topup() 호출의 초기 SELECT가 반드시 같은 시점에 끝나도록 강제해
+    "둘 다 PENDING을 봤다"는 레이스를 결정적으로 재현한다."""
+    user = await create_test_user(pool)
+    admin_a = await create_test_user(pool)
+    admin_b = await create_test_user(pool)
+    topup = await service.request_topup(user, Decimal("10000"))
+
+    arrived = 0
+    released = asyncio.Event()
+    original_fetchrow = asyncpg.pool.PoolConnectionProxy.fetchrow
+
+    async def _synced_fetchrow(self, query, *args, **kwargs):
+        nonlocal arrived
+        result = await original_fetchrow(self, query, *args, **kwargs)
+        if "SELECT user_id, requested_amount, status, confirmed_at" in query:
+            arrived += 1
+            if arrived >= 2:
+                released.set()
+            else:
+                await released.wait()
+        return result
+
+    monkeypatch.setattr(asyncpg.pool.PoolConnectionProxy, "fetchrow", _synced_fetchrow)
+
+    results = await asyncio.gather(
+        service.confirm_topup(topup.id, admin_a, idempotency_key="key-a"),
+        service.confirm_topup(topup.id, admin_b, idempotency_key="key-b"),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, WalletTopupInvalidTransitionError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+
+    balance = await service.get_balance(user)
+    assert balance.balance == Decimal("10000")

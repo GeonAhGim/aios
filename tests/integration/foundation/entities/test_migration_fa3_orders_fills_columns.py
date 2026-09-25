@@ -26,6 +26,7 @@ from src.foundation.entities.domain.defaults import (
     default_portfolio_id,
 )
 from tests.integration.conftest import create_test_tenant, create_test_user
+from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c9f4e2a1b6d7"
@@ -97,6 +98,7 @@ async def test_upgrade_downgrade_upgrade_round_trip_adds_and_removes_columns(poo
         for column in ("fund_id", "portfolio_id"):
             assert await _column_exists(pool, table, column)
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     for table in ("orders", "fills"):
         for column in ("fund_id", "portfolio_id"):
@@ -129,7 +131,7 @@ async def test_negative_insert_with_nonexistent_fund_id_rejected_by_fk(pool):
 async def test_fills_are_never_backfilled_because_worm_blocks_update(pool):
     """`fills`는 `073beca589d5`의 append-only 트리거가 모든 UPDATE를 거부한다
     — 부모 order가 정상 백필돼도 fill 행은 영구히 NULL로 남는 게 정답이다."""
-    bootstrapped_user = await create_test_tenant(pool)
+    bootstrapped_user = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
     repo = PostgresEntityRepository(pool)
     entity = await repo.create_legal_entity(
         LegalEntity(
@@ -156,6 +158,7 @@ async def test_fills_are_never_backfilled_because_worm_blocks_update(pool):
         )
     )
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     async with pool.acquire() as conn:
         order_id = await _insert_bare_order(conn, bootstrapped_user)
@@ -188,8 +191,8 @@ async def test_fills_are_never_backfilled_because_worm_blocks_update(pool):
 
 
 async def test_backfill_computes_default_ids_for_bootstrapped_user_and_nulls_the_rest(pool):
-    bootstrapped_user = await create_test_tenant(pool)
-    bare_user = await create_test_tenant(pool)
+    bootstrapped_user = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+    bare_user = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
 
     repo = PostgresEntityRepository(pool)
     entity = await repo.create_legal_entity(
@@ -217,6 +220,7 @@ async def test_backfill_computes_default_ids_for_bootstrapped_user_and_nulls_the
         )
     )
 
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
     async with pool.acquire() as conn:
         bootstrapped_order_id = await _insert_bare_order(conn, bootstrapped_user)

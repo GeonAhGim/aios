@@ -1,16 +1,17 @@
-"""FA-13 — 이벤트 스토어 계약 v1.
+"""FA-13 — Event store contract v1.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§2.4 FA-13,
 107_contract_versioning_and_compatibility_standard_v1.0.md.
 
-`DomainEvent`는 `core/eventstore/`의 유일한 공개 표면이다 — `append.py`·
-`replay.py`(FA-15)·`projections/*.py`(FA-14)는 전부 이 계약을 통해서만
-이벤트를 주고받는다. 필드 추가는 minor(107번, 기본값 필수) — 제거·의미
-변경은 `v2` 모듈 신설.
+`DomainEvent` is the sole public surface of `core/eventstore/` —
+`append.py`, `replay.py` (FA-15), and `projections/*.py` (FA-14) exchange
+events exclusively through this contract. Adding fields is a minor change
+(107, defaults required); removing fields or changing semantics requires a
+new `v2` module.
 
-`hash`/`prev_hash`는 호출자가 계산해 넘기는 값이 아니라 어댑터
-(`append.py`)가 `(stream_id, seq)` UNIQUE 제약 + 조건부 INSERT로 부여하는
-해시체인 링크다(§5).
+`hash` / `prev_hash` are not values computed by the caller — they are
+hash-chain links assigned by the adapter (`append.py`) via a
+`(stream_id, seq)` UNIQUE constraint + conditional INSERT (§5).
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
 class DomainEvent(BaseModel):
-    """append-only `event_store` 행 하나의 뷰(§2.4 표)."""
+    """View of a single append-only `event_store` row (§2.4 table)."""
 
     stream_id: str
     seq: int

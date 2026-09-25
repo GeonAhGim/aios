@@ -20,14 +20,15 @@ from typing import Any
 
 from src.data.models.market_data import Ticker
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus
+from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 _MARKET_CODE = "B"  # 채권시장(공식 예제 확인)
 
 
 class KISDomesticBondMixin:
-    async def get_bond_price(self, bond_code: str) -> Ticker:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_bond_price(self: KISHTTPClient, bond_code: str) -> Ticker:
+        raw = await self._request(
             "GET",
             "/uapi/domestic-bond/v1/quotations/inquire-price",
             "FHKBJ773400C0",
@@ -47,7 +48,7 @@ class KISDomesticBondMixin:
         )
 
     @require_paper_sandbox
-    async def place_bond_order(self, order: Order) -> Order:
+    async def place_bond_order(self: KISHTTPClient, order: Order) -> Order:
         """`ORD_QTY2`(채권 전용 수량 필드명 — 주식의 `ORD_QTY`와 다름,
         공식 예제 확인)와 `BOND_ORD_UNPR`(채권 단가)을 쓴다."""
         tr_id = "TTTC0952U" if order.side == OrderSide.BUY else "TTTC0958U"
@@ -57,8 +58,8 @@ class KISDomesticBondMixin:
             else "/uapi/domestic-bond/v1/trading/sell"
         )
         body: dict[str, Any] = {
-            "CANO": self._cano,  # type: ignore[attr-defined]
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+            "CANO": self._cano,
+            "ACNT_PRDT_CD": self._acnt_prdt_cd,
             "PDNO": order.symbol,
             "ORD_QTY2": str(order.quantity),
             "BOND_ORD_UNPR": str(order.price.amount) if order.price is not None else "0",
@@ -69,21 +70,21 @@ class KISDomesticBondMixin:
             "ORD_SVR_DVSN_CD": "0",
             "CTAC_TLNO": "",
         }
-        raw = await self._request("POST", path, tr_id, body=body)  # type: ignore[attr-defined]
+        raw = await self._request("POST", path, tr_id, body=body)
         output = raw.get("output", {})
         exchange_order_id = f"{output.get('KRX_FWDG_ORD_ORGNO', '')}:{output.get('ODNO', '')}"
         return order.model_copy(
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
 
-    async def get_bond_balance(self) -> list[AccountBalance]:
-        raw = await self._request(  # type: ignore[attr-defined]
+    async def get_bond_balance(self: KISHTTPClient) -> list[AccountBalance]:
+        raw = await self._request(
             "GET",
             "/uapi/domestic-bond/v1/trading/inquire-balance",
             "CTSC8407R",
             params={
-                "CANO": self._cano,  # type: ignore[attr-defined]
-                "ACNT_PRDT_CD": self._acnt_prdt_cd,  # type: ignore[attr-defined]
+                "CANO": self._cano,
+                "ACNT_PRDT_CD": self._acnt_prdt_cd,
                 "INQR_CNDT": "00",
                 "PDNO": "",
                 "BUY_DT": "",

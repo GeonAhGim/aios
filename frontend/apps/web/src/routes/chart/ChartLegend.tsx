@@ -17,6 +17,7 @@
 // 동기화된 시각 표시(DoD)는 ChartPanes.tsx가 legend/crosshairSync.ts만으로 직접
 // 충족한다.
 import type { ObjectTreeEntry } from "@aios/chart-engine/src/legend/objectTree";
+import { useTranslation } from "react-i18next";
 
 export interface ChartLegendProps {
   readonly objectTree: readonly ObjectTreeEntry[];
@@ -28,9 +29,10 @@ export interface ChartLegendProps {
 }
 
 export function ChartLegend({ objectTree, onToggleVisible, onMoveEntry, onToggleLocked }: ChartLegendProps) {
+  const { t } = useTranslation();
   return (
-    <section aria-label="차트 레전드" className="space-y-2 rounded-lg border border-border p-3 text-xs" data-testid="chart-legend">
-      <ul aria-label="지표 트리" data-testid="chart-legend-objecttree" className="space-y-1">
+    <section aria-label={t("legacy.chartLegend.ariaLabel1")} className="space-y-2 rounded-lg border border-border p-3 text-xs" data-testid="chart-legend">
+      <ul aria-label={t("legacy.chartLegend.ariaLabel2")} data-testid="chart-legend-objecttree" className="space-y-1">
         {objectTree.map((entry, index) => (
           <li key={entry.id} className="flex items-center justify-between gap-2">
             <span>
@@ -75,7 +77,7 @@ export function ChartLegend({ objectTree, onToggleVisible, onMoveEntry, onToggle
             </span>
           </li>
         ))}
-        {objectTree.length === 0 && <li className="text-fg-muted">지표·그리기가 없습니다.</li>}
+        {objectTree.length === 0 && <li className="text-fg-muted">{t("legacy.chartLegend.t3")}</li>}
       </ul>
     </section>
   );

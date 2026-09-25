@@ -8,16 +8,30 @@
 발화(True) 동치를 별도 단언. (3) 미지 연산자·지원 밖 지표/파라미터·혼합 결합은
 위치 포함 전체 거부(negative). (4) compat_map은 JSON 직렬화 가능 dict, node_hash·
 script_hash 동봉, 결정론. I-10 배선 증명: 브리지 문법이 FROZEN 평가기의 원자
-정규식·`extract_indicator_keys`와 동기화돼 있음을 단언한다. 지연은 print만.
+정규식·`extract_indicator_keys`와 동기화돼 있음을 단언한다.
+
+DEEPEN(task-2921): task-2727 DEPTH 감사(docs/audit/DEPTH_DSL_IND.md)에서 원
+task-1555(commit 0d4b4ca)가 D2 하한 미달로 판정됨 — negative 12건은 이미
+충분하나(위 (3)) 실패 주입·수치 성능 단언·게이트 적색 재현이 없었다. 새 기능
+추가 없이 이 리프의 증빙만 보강한다: (5) 수치 성능 단언으로 승격
+(`test_all_fixture_cases_are_covered_and_latency_printed`의 print만 하던 지연
+측정을 ADR-2026-09-09-C "DSL 컴파일 300ms" 예산의 한 조각에 대한 assert로
+교체). (6) 실패 주입: 레지스트리가 `IndicatorError`(taxonomy) 밖의 인프라성
+예외를 던지면 감싸지거나 삼켜지지 않고 그대로 전파되고, 이어지는 정상 호출을
+오염시키지 않음(순수 함수)을 확인. (7) 게이트 적색 재현: I-10 동기화 단언이
+실제 드리프트에서 진짜로 AssertionError를 내는지(tautology가 아님) 확인.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 
 import pytest
 
+from src.core.indicators.registry import DEFAULT_REGISTRY
 from src.core.script.compat import (
     COMPAT_SCHEMA,
     SIGNAL_NAME,
@@ -137,13 +151,99 @@ def test_roundtrip_same_signal_as_cond_v2(
     assert (got is True) == (ref is True)  # 발화 동치는 무조건
 
 
-def test_all_fixture_cases_are_covered_and_latency_printed() -> None:
-    started = time.perf_counter()
-    for expr, _, _, _ in ALL_CASES:
-        bridge_cond_v2(expr)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    print(f"cond_v2_bridge: {len(ALL_CASES)} cases, {elapsed_ms:.1f}ms")  # noqa: T201
+def test_all_fixture_cases_are_covered() -> None:
     assert len(FIXTURE_CASES) == 15 and len(ALL_CASES) >= 20
+
+
+# ---- DEEPEN(task-2921): 수치 성능 단언 ----
+
+
+@pytest.mark.perf
+def test_bridge_latency_p95_within_compile_budget_slice() -> None:
+    """DEEPEN(task-2921): ADR-2026-09-09-C Decision 1 'DSL 컴파일 300ms' 예산 중
+    브리지(정규식 분해 + 레지스트리 조회 + DSL-3 재파싱) 몫을 20ms로 상한, 전체
+    케이스 배치를 30회 반복한 p95로 잰다(이전
+    `test_all_fixture_cases_are_covered_and_latency_printed`는 print만 하고
+    단언을 의도적으로 피했다 — task-2727 DEPTH 감사 지적)."""
+    samples: list[float] = []
+    for _ in range(30):
+        started = time.perf_counter()
+        for expr, _, _, _ in ALL_CASES:
+            bridge_cond_v2(expr)
+        samples.append(time.perf_counter() - started)
+    samples.sort()
+    p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)] * 1000
+    budget_ms = 20.0
+    print(f"[DSL-10 bridge] {len(ALL_CASES)} cases p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
+
+
+@pytest.mark.perf
+def test_bridge_budget_gate_actually_fails_when_batch_stalls_past_20ms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: 브리지 내부에서 쓰는 DSL-3 `parse`가 실제로 느려지면
+    `test_bridge_latency_p95_within_compile_budget_slice`와 동일한 단언식이
+    진짜로 `AssertionError`를 내는지(= CI가 빨간불이 되는지) 확인한다 — 그
+    단언이 항상 통과하는 tautology가 아님을 보장한다."""
+    original_parse = bridge_mod.parse
+
+    def _stalled_parse(source: str):
+        time.sleep(0.025)  # > 20ms 예산(단일 케이스도 초과)
+        return original_parse(source)
+
+    monkeypatch.setattr(bridge_mod, "parse", _stalled_parse)
+
+    started = time.perf_counter()
+    bridge_cond_v2(ALL_CASES[0][0])
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    budget_ms = 20.0
+    with pytest.raises(AssertionError):
+        assert elapsed_ms < budget_ms
+
+
+# ---- DEEPEN(task-2921): 실패 주입 ----
+
+
+def test_registry_infra_failure_propagates_unwrapped_and_does_not_corrupt_next_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: `_parse_atom`은 `registry.get`/`validate_params`가 던지는
+    `IndicatorError`(taxonomy)만 `CondV2BridgeError`로 감싼다(모듈 소스의
+    `except IndicatorError` 참고). 레지스트리가 인프라 장애(예: 향후 원격
+    레지스트리 조회 실패)로 `IndicatorError`가 아닌 예외를 던지면 taxonomy
+    밖이므로 감싸지거나 삼켜지지 않고 원래 타입 그대로 즉시 전파돼야 한다.
+    이어서 정상 레지스트리로 같은 표현식을 재변환해 실패한 호출이 전역 상태를
+    오염시키지 않음(bridge_cond_v2는 순수 함수, 매 호출이 새 결과)도 확인한다."""
+    original_get = DEFAULT_REGISTRY.get
+
+    def _flaky_get(name: str):
+        raise RuntimeError("registry lookup infra failure")
+
+    monkeypatch.setattr(DEFAULT_REGISTRY, "get", _flaky_get)
+    with pytest.raises(RuntimeError, match="infra failure"):
+        bridge_cond_v2("RSI > 30")
+
+    monkeypatch.setattr(DEFAULT_REGISTRY, "get", original_get)
+    b = bridge_cond_v2("RSI > 30")  # 실패한 호출이 다음 호출을 오염시키지 않음
+    assert b.compat_map["nodes"]["atom:0"]["key"] == "RSI"
+
+
+# ---- DEEPEN(task-2921): 게이트 적색 재현(I-10 동기화) ----
+
+
+def test_sync_gate_actually_fails_when_bridge_regex_drifts_from_frozen_evaluator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: `test_bridge_grammar_is_synced_with_frozen_evaluator`와
+    동일한 단언식이, 브리지 정규식이 FROZEN 평가기에서 실제로 갈라지면 정말로
+    `AssertionError`를 내는지(= CI가 빨간불이 되는지) 확인한다. 이게 없으면 그
+    동기화 단언이 항상 통과하는 tautology인지 아무도 검증하지 못한다."""
+    drifted = re.compile(r"^(?P<key>\S+)\s+(?P<op>>=|<=|==)\s+(?P<threshold>-?\d+)$")
+    assert drifted.pattern != cond_v2._ATOMIC_RE.pattern
+    monkeypatch.setattr(bridge_mod, "_ATOMIC_RE", drifted)
+    with pytest.raises(AssertionError):
+        assert bridge_mod._ATOMIC_RE.pattern == cond_v2._ATOMIC_RE.pattern
 
 
 def test_spec_example_source_text() -> None:

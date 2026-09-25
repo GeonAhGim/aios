@@ -1,159 +1,21 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { API_ROUTES, type ApiRouteName } from "./apiPaths";
 
-// task-1333: §3.7 IdempotencyScope · §9 PLT-15 전수 회귀 가드. apiPaths.ts의
-// idempotencyRequired 표식(단일 출처)이 실제 호출부와 어긋나지 않는지 소스
-// 스캔으로 양방향 대조한다. 개별 클라이언트 테스트(idempotency.test.ts 등,
-// task-321/338/493/1024/1049)는 "헤더가 붙는지"만 보장할 뿐, "새 금전 라우트에
-// 부착을 빠뜨렸는지"는 아무도 보지 않았다 — 이 파일이 그 틈을 막는다.
-const CLIENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "clients");
+// [QA task-2730 DEPTH_PLT] 실패 주입: 순수 소스 스캔이라 원래 외부 의존성이 없으나,
+// listClientSourceFiles가 거치는 유일한 외부 경계(파일시스템)를 vi.mock으로 대체해
+// 읽기 실패를 인위적으로 주입한다. mockImplementationOnce는 1회 호출 후 actual 구현으로
+// 자동 복귀하므로 다른 테스트에 영향을 주지 않는다. idempotencyScan.ts가 node:fs를
+// import하는 시점보다 이 mock이 먼저 적용되도록 vi.mock은 항상 호이스팅된다.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readdirSync: vi.fn(actual.readdirSync), readFileSync: vi.fn(actual.readFileSync) };
+});
+const { readdirSync, readFileSync } = await import("node:fs");
 
-const IDEMPOTENT_METHODS = new Set(["postIdempotent", "postEnvelopeIdempotent"]);
-
-// route()의 주석대로 legacyPath는 "리소스 경로"의 단일 출처이지 "연산"의 단일
-// 출처가 아니다 — GET 목록·POST 생성이 같은 라우트 이름을 공유한다(예:
-// executions.base = listExecutions의 requestByRoute + createExecution의
-// postIdempotent). requestByRoute/request/requestEnvelope는 이 레포에서 항상
-// GET 조회 용도로만 쓰이므로(POST 바디를 싣는 money 연산은 전부 post 계열
-// 헬퍼를 거친다), "금전 라우트가 비멱등으로 호출됐다" 위반은 실제로 post 계열
-// 뮤테이션 메서드로 대체됐을 때만 의미가 있다.
-const MUTATING_NON_IDEMPOTENT_METHODS = new Set([
-  "post",
-  "postEnvelope",
-  "put",
-  "putEnvelope",
-  "patch",
-  "patchEnvelope",
-  "del",
-]);
-
-// 주석 안의 코드 예시(설명용)가 실호출로 오탐되지 않도록 지운다. 길이·개행은
-// 보존해 이후 정규식의 인덱스 기반 탐색(findConsumingMethod)이 흔들리지 않게 한다.
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
-    .replace(/\/\/[^\n]*/g, (m) => " ".repeat(m.length));
-}
-
-interface RouteCallSite {
-  routeName: string;
-  method: string;
-}
-
-// foundation.ts의 PAPER_DEPLOYMENT_COMMAND_ROUTES처럼 `Record<Command, ApiRouteName>`
-// 꼴로 라우트 이름을 간접 참조하는 모듈 상수를 찾아 식별자→라우트이름[] 로 펼친다.
-function extractRouteMapIdentifiers(source: string): Map<string, string[]> {
-  const map = new Map<string, string[]>();
-  const pattern = /const\s+([A-Za-z_$][\w$]*)\s*:\s*Record<[^=]*>\s*=\s*\{([\s\S]*?)\n\};/g;
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(source)) !== null) {
-    const routeNames = [...m[2].matchAll(/"([a-zA-Z][\w]*(?:\.[a-zA-Z][\w]*)+)"/g)].map((x) => x[1]);
-    map.set(m[1], routeNames);
-  }
-  return map;
-}
-
-// `const path = resolvePath(...)...; ... this.<method>(path, ...)` 처럼 라우트가
-// 변수를 거쳐 호출부에 도달하는 경우, 대입 지점 이후 가장 가까운 소비 호출을 찾는다.
-// 윈도우를 두는 이유: 같은 변수명(`path`)이 다른 메서드에서도 재사용되므로 무한정
-// 탐색하면 엉뚱한 메서드의 호출을 집어올 수 있다 — 이 레포의 실제 스타일(대입 직후
-// 바로 소비)에서는 600자면 충분하고 넘치는 법이 없다.
-function findConsumingMethod(source: string, fromIndex: number, varName: string): string | null {
-  const window = source.slice(fromIndex, fromIndex + 600);
-  const match = window.match(new RegExp(`this\\.([A-Za-z]\\w*)\\(\\s*${varName}\\b`));
-  return match ? match[1] : null;
-}
-
-// clients/*.ts 소스 하나에서 "이 라우트가 어떤 this.<method>(...)로 호출됐는지"
-// 전부 뽑아낸다. 패턴은 실제 코드에서 관찰되는 4가지뿐이다:
-//   A) this.<method>(resolvePath("route")...)            — 직접 중첩
-//   A') this.<method>(resolvePath(IDENT)...)              — Record 간접 참조 직접 중첩
-//   B) const v = resolvePath("route")...; this.<method>(v)  — 변수 경유
-//   B') const v = resolvePath(IDENT)...; this.<method>(v)   — Record 간접 참조 변수 경유
-//   C) this.requestByRoute("route"...)                    — resolvePath 없이 직접
-export function findCallSites(source: string): RouteCallSite[] {
-  const stripped = stripComments(source);
-  const routeMaps = extractRouteMapIdentifiers(stripped);
-  const sites: RouteCallSite[] = [];
-  let m: RegExpExecArray | null;
-
-  const directLiteral = /this\.([A-Za-z]\w*)\(\s*resolvePath\(\s*"([a-zA-Z][\w.]*)"/g;
-  while ((m = directLiteral.exec(stripped)) !== null) {
-    sites.push({ method: m[1], routeName: m[2] });
-  }
-
-  const directIdent = /this\.([A-Za-z]\w*)\(\s*resolvePath\(\s*([A-Za-z_$][\w$]*)\s*[[)]/g;
-  while ((m = directIdent.exec(stripped)) !== null) {
-    for (const routeName of routeMaps.get(m[2]) ?? []) sites.push({ method: m[1], routeName });
-  }
-
-  const varLiteral = /const\s+(\w+)\s*=\s*resolvePath\(\s*"([a-zA-Z][\w.]*)"/g;
-  while ((m = varLiteral.exec(stripped)) !== null) {
-    const method = findConsumingMethod(stripped, m.index + m[0].length, m[1]);
-    if (method) sites.push({ method, routeName: m[2] });
-  }
-
-  const varIdent = /const\s+(\w+)\s*=\s*resolvePath\(\s*([A-Za-z_$][\w$]*)\s*[[)]/g;
-  while ((m = varIdent.exec(stripped)) !== null) {
-    const method = findConsumingMethod(stripped, m.index + m[0].length, m[1]);
-    if (method) for (const routeName of routeMaps.get(m[2]) ?? []) sites.push({ method, routeName });
-  }
-
-  const byRoute = /this\.(requestByRoute)\(\s*"([a-zA-Z][\w.]*)"/g;
-  while ((m = byRoute.exec(stripped)) !== null) {
-    sites.push({ method: m[1], routeName: m[2] });
-  }
-
-  return sites;
-}
-
-interface ScanResult {
-  // 표식은 있는데(idempotencyRequired=true) 멱등 호출부가 하나도 없다.
-  markedWithoutIdempotentCall: string[];
-  // 표식은 있는데 일반(비멱등) 메서드로 호출됐다.
-  markedButNonIdempotentCall: string[];
-  // 멱등 메서드로 호출됐는데 표식이 없다.
-  idempotentCallButUnmarked: string[];
-}
-
-// DoD (2)(3): 소스 스캔 + 표식 양방향 대조. 화이트리스트는 두지 않는다 — 이 레포의
-// 실제 14개 금전 라우트가 전부 근거(주석)와 함께 apiPaths.ts에 등록돼 있으므로
-// 예외를 둘 이유가 없다.
-export function scanCallSites(
-  files: Array<{ path: string; source: string }>,
-  routes: Record<string, { idempotencyRequired?: boolean }>,
-): ScanResult {
-  const moneyRoutes = new Set(Object.entries(routes).filter(([, d]) => d.idempotencyRequired).map(([name]) => name));
-  const seenIdempotentForRoute = new Set<string>();
-  const markedButNonIdempotentCall: string[] = [];
-  const idempotentCallButUnmarked: string[] = [];
-
-  for (const file of files) {
-    for (const site of findCallSites(file.source)) {
-      const isIdempotentMethod = IDEMPOTENT_METHODS.has(site.method);
-      const isMoney = moneyRoutes.has(site.routeName);
-      if (isMoney && isIdempotentMethod) seenIdempotentForRoute.add(site.routeName);
-      if (isMoney && MUTATING_NON_IDEMPOTENT_METHODS.has(site.method)) {
-        markedButNonIdempotentCall.push(`${file.path}: "${site.routeName}" via this.${site.method}(...)`);
-      }
-      if (!isMoney && isIdempotentMethod) {
-        idempotentCallButUnmarked.push(`${file.path}: "${site.routeName}" via this.${site.method}(...)`);
-      }
-    }
-  }
-
-  const markedWithoutIdempotentCall = [...moneyRoutes].filter((r) => !seenIdempotentForRoute.has(r));
-  return { markedWithoutIdempotentCall, markedButNonIdempotentCall, idempotentCallButUnmarked };
-}
-
-function listClientSourceFiles(): Array<{ path: string; source: string }> {
-  return readdirSync(CLIENTS_DIR)
-    .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
-    .map((name) => ({ path: `clients/${name}`, source: readFileSync(join(CLIENTS_DIR, name), "utf-8") }));
-}
+// task-4973: 스캐너 본체(findCallSites/scanCallSites/listClientSourceFiles)는
+// idempotencyScan.ts로 옮겼다 — bench/idempotencyScan_bench.mjs(성능, N배 ratchet)와
+// 이 파일(기능, 결과 집합)이 같은 구현을 공유한다. 이 파일은 이제 기능 단언만 갖는다.
+const { findCallSites, scanCallSites, listClientSourceFiles } = await import("./idempotencyScan");
 
 describe("idempotencyScan — findCallSites 자체 검증(스캐너 파서)", () => {
   it("패턴 A(직접 중첩)를 인식한다", () => {
@@ -196,6 +58,42 @@ describe("idempotencyScan — findCallSites 자체 검증(스캐너 파서)", ()
 describe("idempotencyScan — negative fixture(위반이 실제로 FAIL한다)", () => {
   const MONEY_ROUTES = { "x.money": { idempotencyRequired: true } };
 
+  it.each(["post", "postEnvelope", "put", "patch", "del"])("멱등 호출 뒤 같은 경로의 %s 호출도 검출한다", (method) => {
+    for (const indirect of [false, true]) {
+      const source = [
+        'const CMD: Record<string, string> = {',
+        '  start: "x.money",',
+        '};',
+        `const path = resolvePath(${indirect ? "CMD[command]" : '"x.money"'});`,
+        "this.postIdempotent(path, body, key);",
+        `this.${method}(path, body);`,
+      ].join("\n");
+      expect(scanCallSites([{ path: "fixture.ts", source }], MONEY_ROUTES)).toEqual({
+        markedWithoutIdempotentCall: [],
+        markedButNonIdempotentCall: [`fixture.ts: "x.money" via this.${method}(...)`],
+        idempotentCallButUnmarked: [],
+      });
+    }
+  });
+
+  it("다른 메서드의 동명 경로를 이전 라우트의 소비로 오인하지 않는다", () => {
+    const source = `class Client {
+      money() { const path = resolvePath("x.money"); this.postIdempotent(path, body, key); }
+      other() { const path = resolvePath("x.other"); this.post(path, body); }
+    }`;
+    expect(scanCallSites([{ path: "fixture.ts", source }], MONEY_ROUTES).markedButNonIdempotentCall).toEqual([]);
+  });
+
+  it("600자 뒤의 재사용도 수집하고 내부 블록의 동명 변수는 제외한다", () => {
+    const source = `const path = resolvePath("x.money");
+      this.postIdempotent(path, body, key);
+      { const path = resolvePath("x.other"); this.post(path, body); }
+      ${" ".repeat(650)}
+      this.put(path, body);`;
+    expect(scanCallSites([{ path: "fixture.ts", source }], MONEY_ROUTES).markedButNonIdempotentCall)
+      .toEqual(['fixture.ts: "x.money" via this.put(...)']);
+  });
+
   it("금전 라우트를 일반 post로 바꾼 fixture는 markedButNonIdempotentCall·markedWithoutIdempotentCall을 채운다", () => {
     const files = [{ path: "fixture.ts", source: 'return this.post(resolvePath("x.money"), body);' }];
     const result = scanCallSites(files, MONEY_ROUTES);
@@ -216,10 +114,65 @@ describe("idempotencyScan — negative fixture(위반이 실제로 FAIL한다)",
     expect(result.markedButNonIdempotentCall).toEqual([]);
     expect(result.idempotentCallButUnmarked).toEqual([]);
   });
+
+  // [QA task-2730 DEPTH_PLT] negative 3번째: 기존 2건은 모두 패턴 A(직접 리터럴 중첩)만
+  // 겨냥했다. foundation.ts의 PAPER_DEPLOYMENT_COMMAND_ROUTES처럼 Record 간접 참조를
+  // 거쳐 변수로 소비되는 실제 스타일(패턴 B')에서도 비멱등 재호출이 검출되는지는
+  // 아무도 확인하지 않았다 — findCallSites 자체 검증 테스트는 이 조합을 멱등 메서드
+  // 경로로만 확인했을 뿐, "위반"(post 등 비멱등)으로는 확인하지 않는다.
+  it("Record 간접 참조(변수 경유)로 비멱등 재호출된 fixture도 markedButNonIdempotentCall을 채운다", () => {
+    const files = [
+      {
+        path: "fixture.ts",
+        source: [
+          'const CMD: Record<string, string> = {',
+          '  start: "x.money",',
+          "};",
+          "const path = resolvePath(CMD[command]).replace(':id', d);",
+          "return this.post(path, body);",
+        ].join("\n"),
+      },
+    ];
+    const result = scanCallSites(files, MONEY_ROUTES);
+    expect(result.markedButNonIdempotentCall).toEqual(['fixture.ts: "x.money" via this.post(...)']);
+    expect(result.markedWithoutIdempotentCall).toEqual(["x.money"]);
+  });
 });
 
-// DoD (2)(3): 실제 clients/*.ts 전수 스캔. 이 테스트가 새 금전 라우트의 멱등
-// 부착 누락(또는 표식 누락)을 잡는 회귀 가드 본체다.
+// [QA task-2730 DEPTH_PLT] 실패 주입: listClientSourceFiles가 거치는 유일한 외부 경계인
+// 파일시스템 읽기가 깨졌을 때 스캔이 결과를 조용히 비워서 "위반 없음"으로 위장하지
+// 않고 즉시 예외를 전파하는지(fail-closed) 확인한다. 이게 없으면 CI 러너의 권한
+// 문제 등으로 clients/*.ts 일부가 안 읽혀도 게이트가 녹색으로 통과해버릴 수 있다.
+describe("idempotencyScan — 실패 주입(파일시스템 읽기 실패는 조용히 삼켜지지 않는다)", () => {
+  it("readFileSync가 던지면 listClientSourceFiles가 그대로 전파한다(fail-closed)", () => {
+    vi.mocked(readFileSync).mockImplementationOnce(() => {
+      throw new Error("EACCES: permission denied, open 'clients/wallet.ts'");
+    });
+    expect(() => listClientSourceFiles()).toThrow("EACCES: permission denied");
+  });
+
+  it("readdirSync가 던지면 listClientSourceFiles가 그대로 전파한다(fail-closed)", () => {
+    vi.mocked(readdirSync).mockImplementationOnce(() => {
+      throw new Error("ENOENT: no such file or directory, scandir 'clients'");
+    });
+    expect(() => listClientSourceFiles()).toThrow("ENOENT: no such file or directory");
+  });
+});
+
+// task-4973: CI 적색 실제 원인 2/2 — 이 자리에 있던 "clients/*.ts 전수 스캔이 200ms
+// 이내"(이후 300~550ms 관측치로 완화해 1000ms까지 올렸던, a22cdb09/task-4968) 벽시계
+// 상한 단위 테스트는 설계 결함이었다: CI 워크트리는 `npm run test --workspaces`로 5개
+// 워크스페이스의 vitest worker thread가 같은 머신에서 동시에 뜨고,
+// ts.createSourceFile(consumingMethods)의 JIT/GC가 그 CPU 경합에 비선형으로 반응해
+// 값이 흔들린다 — 완화(상한을 계속 올리는 것)는 금지되어 있고, 애초에 벽시계 절대
+// 상한 자체가 공유 하드웨어에서 플레이키하다(같은 이유로 density_bench.mjs도
+// 절대 ms 게이트를 쓰지 않는다, densityRatchet.mjs 문서 참조). 성능 요구는
+// bench/idempotencyScan_bench.mjs로 옮겼다: 스캔 직전 같은 프로세스에서 측정한
+// 참조 워크로드(calib) 대비 배율로 판정해, 워크트리가 얼마나 붐비든 "이 실행 자체가
+// 기준보다 몇 배 느린가"만 본다 — 알고리즘이 실제로 비선형 회귀했을 때는 calib도
+// 같이 비례해 커지지 않으므로 여전히 잡힌다. `npm run bench:idempotency-scan
+// --workspace=packages/api-client`로 실행(CI에서는 density_bench와 동일하게
+// 별도 label 단계).
 describe("idempotencyScan — clients/*.ts 전수 스캔(회귀 가드 본체)", () => {
   it("apiPaths.ts 표식과 실제 호출부가 완전히 일치한다(양방향)", () => {
     const result = scanCallSites(listClientSourceFiles(), API_ROUTES);

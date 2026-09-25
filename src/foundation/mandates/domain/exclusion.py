@@ -16,6 +16,7 @@ No I/O — every function here takes only `MandateRevision`/`PolicyEvaluationSub
 value objects and returns plain data (I-01~I-11: pure domain functions, no
 network/db/clock calls).
 """
+
 from __future__ import annotations
 
 from src.foundation.mandates.domain.models import (
@@ -24,6 +25,23 @@ from src.foundation.mandates.domain.models import (
     PolicyOutcome,
 )
 from src.foundation.mandates.domain.rules import evaluate_policy
+
+# Gate-red regression guard (DEEPEN task-2855): the exact set of reason codes
+# that `evaluate_exclusion_lists`/`evaluate_leverage` can emit. Verified by
+# test_exclusion_rules.py's CI guard test, which independently triggers every
+# branch and asserts the produced set equals this constant. If a future edit
+# renames, drops, or adds a branch without updating this constant, that test
+# fails red immediately instead of the drift going unnoticed downstream.
+ALL_EXCLUSION_REASON_CODES: frozenset[str] = frozenset(
+    {
+        "POLICY_ASSET_CLASS_EXCLUDED",
+        "POLICY_COUNTRY_EXCLUDED",
+        "POLICY_CURRENCY_EXCLUDED",
+        "POLICY_LIQUIDITY_BELOW_MINIMUM",
+        "POLICY_ESG_EXCLUDED",
+        "POLICY_MAX_LEVERAGE",
+    }
+)
 
 
 def evaluate_exclusion_lists(

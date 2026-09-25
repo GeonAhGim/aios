@@ -6,9 +6,12 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§3.7, §9 PLT-14
 리프에서 손대지 않는다 — `core/idempotency.py`의 `tenant_id`/`digest`가
 전부 optional이라 그 파일은 무수정으로 계속 통과해야 한다(DoD).
 """
+
 from __future__ import annotations
 
+import math
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -17,15 +20,29 @@ import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 
+import src.api.contracts.idempotency as idempotency_contract
 from src.api.contracts.handlers import install_exception_handlers
 from src.api.contracts.idempotency import (
     HEADER_NAME,
     IdempotencyScope,
+    compute_body_digest,
     require_idempotency_key,
     run_idempotent,
 )
 from src.api.deps import get_current_user, get_pool
+from src.core.idempotency import with_idempotency
 from src.services.auth_service import User
+
+# ADR-2026-09-09-C Decision 1 축별 성능 예산표에 idempotency digest 전용
+# 항목이 없어 가장 가까운 유사 항목("사전거래 게이트 p99 5ms" — I/O 없이
+# 순수 CPU 연산만으로 즉시 판정을 내는 동기 로직)을 자체 예산으로 차용한다.
+_DIGEST_P99_BUDGET_SECONDS = 0.005
+
+
+def _p99(samples: list[float]) -> float:
+    ordered = sorted(samples)
+    index = max(0, math.ceil(0.99 * len(ordered)) - 1)
+    return ordered[index]
 
 
 def _asyncpg_dsn() -> str:
@@ -194,9 +211,79 @@ async def test_purge_expired_removes_only_past_rows(pool):
 
     assert deleted >= 1
     async with pool.acquire() as conn:
-        assert await conn.fetchval(
-            "SELECT 1 FROM idempotency_keys WHERE key = $1", expired_key
-        ) is None
-        assert await conn.fetchval(
-            "SELECT 1 FROM idempotency_keys WHERE key = $1", live_key
-        ) == 1
+        assert (
+            await conn.fetchval("SELECT 1 FROM idempotency_keys WHERE key = $1", expired_key)
+            is None
+        )
+        assert await conn.fetchval("SELECT 1 FROM idempotency_keys WHERE key = $1", live_key) == 1
+
+
+async def test_compute_exception_releases_claim_and_allows_retry(pool):
+    """compute()가 예외를 던지면 core/idempotency.py의 `with_idempotency`가
+    선점 행(status_code=0)을 지워야 한다(모듈 docstring 80-81행). 지우지
+    않으면 그 key는 영원히 IN_PROGRESS로 남아 재시도가 항상 409만 받는
+    회귀가 된다 — 실패 주입으로 이 fail-safe 경로를 직접 증명한다."""
+    key = f"idem-fail-{uuid.uuid4().hex}"
+    calls = 0
+
+    async def failing_compute() -> tuple[int, dict]:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await with_idempotency(pool, key, failing_compute)
+
+    async def ok_compute() -> tuple[int, dict]:
+        nonlocal calls
+        calls += 1
+        return 201, {"ok": True}
+
+    status_code, body = await with_idempotency(pool, key, ok_compute)
+
+    assert status_code == 201
+    assert body == {"ok": True}
+    assert calls == 2  # 실패한 첫 시도 후 재시도가 실제로 compute()를 다시 실행함
+
+
+@pytest.mark.perf
+def test_compute_body_digest_p99_latency_within_budget():
+    """`compute_body_digest`는 I/O 없이 순수 CPU(정렬+직렬화+sha256)만 쓰므로
+    ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
+    차용해 반복 호출 p99가 그 안에 드는지 단언한다."""
+    body = {"amount": "10.00", "items": [{"sku": f"sku-{i}", "qty": i} for i in range(50)]}
+
+    samples: list[float] = []
+    for _ in range(30):
+        started = time.perf_counter()
+        compute_body_digest(body)
+        samples.append(time.perf_counter() - started)
+
+    assert _p99(samples) < _DIGEST_P99_BUDGET_SECONDS
+
+
+@pytest.mark.perf
+def test_gate_red_reproduction_digest_p99_budget_guard_catches_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """위 단언이 상시-녹색 tautology가 아님을 증명 — `compute_body_digest`가
+    호출하는 `canonical_json`(idempotency.py 59-61행)에 예산의 배수만큼
+    지연을 주입하면(직렬화 로직 회귀를 흉내) 같은 p99 단언이 실제로
+    적색(AssertionError)이 되어야 한다."""
+    original_canonical_json = idempotency_contract.canonical_json
+
+    def slow_canonical_json(value: object) -> str:
+        time.sleep(_DIGEST_P99_BUDGET_SECONDS * 3)
+        return original_canonical_json(value)
+
+    monkeypatch.setattr(idempotency_contract, "canonical_json", slow_canonical_json)
+
+    body = {"amount": "10.00"}
+    samples: list[float] = []
+    for _ in range(5):
+        started = time.perf_counter()
+        idempotency_contract.compute_body_digest(body)
+        samples.append(time.perf_counter() - started)
+
+    with pytest.raises(AssertionError):
+        assert _p99(samples) < _DIGEST_P99_BUDGET_SECONDS

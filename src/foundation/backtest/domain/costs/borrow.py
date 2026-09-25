@@ -10,12 +10,13 @@ day-count 관례는 ACT/365(실제 경과일수 / 365)로 고정한다 — 분�
 계약서 대조는 하지 않았다). 분자(실제 경과일수)는 윤년이어도 달력 그대로
 셈한다 — 분모만 365로 고정한다(ACT/365 fixed).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
 
-from src.foundation.backtest.domain.costs import round_cost
+from src.foundation.backtest.domain.costs import exact_total_seconds, round_cost
 from src.foundation.backtest.domain.models_v2 import CostsConfig
 
 _DAYS_PER_YEAR = Decimal(365)
@@ -52,6 +53,6 @@ def compute_borrow_cost(
             f"exit_time은 entry_time보다 앞일 수 없다: entry={entry_time}, exit={exit_time}"
         )
 
-    holding_days = Decimal((exit_time - entry_time).total_seconds()) / _SECONDS_PER_DAY
+    holding_days = exact_total_seconds(exit_time - entry_time) / _SECONDS_PER_DAY
     cost = notional * config.borrow_apr * holding_days / _DAYS_PER_YEAR
     return round_cost(cost)

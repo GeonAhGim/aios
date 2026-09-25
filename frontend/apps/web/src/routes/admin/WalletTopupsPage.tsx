@@ -6,6 +6,7 @@ import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 입금확인(confirmTopup) 실패는 err.message를 직접
 // 노출하지 않고 routeApiError로 판정해 403/그 외를 각각 ForbiddenNotice/
@@ -28,6 +29,7 @@ function TopupActionError({ error, onRetry }: { error: unknown; onRetry?: () => 
 }
 
 export function WalletTopupsPage() {
+  const { t } = useTranslation();
   const {
     data,
     isLoading,
@@ -51,35 +53,34 @@ export function WalletTopupsPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="충전 요청 대기 목록" />
+        <PageHeader title={t("legacy.walletTopupsPage.title1")} />
         {topupsIsError ? (
           <TopupActionError error={topupsError} onRetry={() => refetchTopups()} />
         ) : isLoading ? (
           <LoadingState />
         ) : data && data.items.length > 0 ? (
           <ul className="space-y-3">
-            {data.items.map((t) => (
+            {data.items.map((topup) => (
               <li
-                key={t.id}
+                key={topup.id}
                 className="rounded-lg border border-border bg-surface p-4"
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-fg">충전요청 #{t.id}</p>
+                    <p className="font-medium text-fg">{t("legacy.walletTopupsPage.t2", { id: topup.id })}</p>
                     <p className="tabular text-sm text-fg-muted">
-                      {t.requestedAmount} 크레딧 · {new Date(t.requestedAt).toLocaleString()}
+                      {t("legacy.walletTopupsPage.t3", { requestedAmount: topup.requestedAmount })}{new Date(topup.requestedAt).toLocaleString()}
                     </p>
                   </div>
                   <Button
                     type="button"
                     className="!bg-success hover:!bg-success/90"
                     loading={confirm.isPending}
-                    onClick={() => handleConfirm(t.id)}
+                    onClick={() => handleConfirm(topup.id)}
                   >
-                    입금 확인
-                  </Button>
+                    {t("legacy.walletTopupsPage.t4")}</Button>
                 </div>
-                {actionError?.topupId === t.id && (
+                {actionError?.topupId === topup.id && (
                   <div className="mt-3">
                     <TopupActionError error={actionError.error} />
                   </div>
@@ -88,7 +89,7 @@ export function WalletTopupsPage() {
             ))}
           </ul>
         ) : (
-          <EmptyState>대기 중인 충전 요청이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.walletTopupsPage.t5")}</EmptyState>
         )}
       </div>
     </AppShell>

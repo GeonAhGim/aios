@@ -110,3 +110,11 @@ def test_denies_as_missing_when_bars_used_below_min_bars():
 def test_allows_at_exact_min_bars_boundary():
     result = var_es(_inputs(bars_used=60), _POLICY)
     assert result.outcome == RiskOutcome.ALLOW
+
+
+def test_when_both_var_and_es_breach_var_reason_wins():
+    # var 체크가 es 체크보다 먼저 return하므로, 둘 다 초과해도 reason_code는
+    # 항상 RISK_VAR_EXCEEDED여야 한다 — 순서가 바뀌면 이 단언이 깨진다.
+    result = var_es(_inputs(var_pct=Decimal("5.5"), es_pct=Decimal("8.0")), _POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.reason_code == "RISK_VAR_EXCEEDED"

@@ -1,16 +1,16 @@
-"""HTTP 진입점 요청 컨텍스트 바인딩 미들웨어 — request_id의 상위 집합.
+"""HTTP entry-point request context binding middleware — superset of request_id.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.1(A), §9 PLT-05.
 
-`RequestIdMiddleware`(task-107, `X-Request-ID` 왕복)를 상속해 그 계약은 그대로
-두고, 그 위에 `RequestContext`(8필드) 전체를 바인딩한다. `traceparent`(W3C
-trace-context) 헤더가 있으면 그 trace-id를 채택해 업스트림 프록시/APM과
-trace_id가 이어지게 하고, 없거나 형식이 아니면 새로 생성한다.
+Inherits from `RequestIdMiddleware` (task-107, `X-Request-ID` round-trip) and keeps
+that contract intact, then binds the full `RequestContext` (8 fields) on top. When
+a `traceparent` (W3C trace-context) header is present, it adopts the trace-id to
+chain the trace_id with upstream proxy/APM; otherwise a new one is generated.
 
-요청 종료 시 `event=http_request_completed` 로그 1줄(108 §2 8필드 + duration_ms/
-route/status)과 `aios.api.request.*` 메트릭을 남긴다. `main.py`는 이 미들웨어만
-등록한다 — 부모 `RequestIdMiddleware`를 별도로 또 등록하면 `X-Request-ID`를 두 번
-set하게 된다(무해하지만 불필요, §2.1 표 참조).
+At request end, emits one `event=http_request_completed` log line (108 §2 8 fields
++ duration_ms/route/status) and `aios.api.request.*` metrics. Only this middleware
+is registered in `main.py` — registering the parent `RequestIdMiddleware` separately
+would set `X-Request-ID` twice (harmless but unnecessary, see §2.1 table).
 """
 from __future__ import annotations
 
@@ -40,9 +40,9 @@ _TRACEPARENT_RE = re.compile(r"^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]
 
 
 def _extract_trace_id(traceparent: str | None) -> uuid.UUID:
-    """W3C `traceparent` 헤더에서 trace-id를 뽑는다. 형식이 아니거나 all-zero
-    (스펙상 무효값)면 새 trace_id를 생성한다 — 클라이언트가 헤더를 보냈다는
-    이유만으로 신뢰하지 않는다."""
+    """Extract trace-id from the W3C `traceparent` header. Generates a new trace_id
+    when the format is invalid or all-zero (invalid value per spec) — do not trust
+    just because the client sent the header."""
     if traceparent:
         match = _TRACEPARENT_RE.match(traceparent)
         if match and match.group(1) != "0" * 32:
@@ -51,10 +51,10 @@ def _extract_trace_id(traceparent: str | None) -> uuid.UUID:
 
 
 def _route_template(request: Request) -> str:
-    """라벨/로그용 경로 템플릿(예: `/executions/{execution_id}/start`) — 실제
-    값이 섞인 `request.url.path`를 그대로 쓰면 메트릭 카디널리티가 무한히
-    늘어난다(§3.2 라벨 카디널리티 상한). 매칭되는 라우트가 없으면(404) 원본
-    경로로 폴백한다."""
+    """Route template for labels/logging (e.g. `/executions/{execution_id}/start`) —
+    using the actual request.url.path with concrete values would cause unbounded
+    metric cardinality growth (§3.2 label cardinality cap). Falls back to the
+    original path when no matching route is found (404)."""
     for route in request.app.routes:
         match, _child_scope = route.matches(request.scope)
         if match == Match.FULL:

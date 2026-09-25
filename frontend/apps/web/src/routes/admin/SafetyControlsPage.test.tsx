@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,10 @@ import { SafetyControlsPage } from "./SafetyControlsPage";
 
 const deactivateMutate = vi.fn();
 const evaluateRecoveryMutate = vi.fn();
+const activateSafetyControlMutate = vi.fn();
+const evaluateRiskGateMutate = vi.fn();
+const approveRuleBundleMutate = vi.fn();
+const activateRuleBundleMutate = vi.fn();
 const refetchControls = vi.fn();
 
 const CONTROL = {
@@ -40,6 +45,10 @@ vi.mock("@aios/shared-hooks", () => ({
   useSafetyControls: () => controlsResult,
   useDeactivateSafetyControl: () => ({ mutate: deactivateMutate, isPending: false }),
   useEvaluateRecovery: () => ({ mutate: evaluateRecoveryMutate, isPending: false }),
+  useActivateSafetyControl: () => ({ mutate: activateSafetyControlMutate, isPending: false }),
+  useEvaluateRiskGate: () => ({ mutate: evaluateRiskGateMutate, isPending: false }),
+  useApproveRuleBundle: () => ({ mutate: approveRuleBundleMutate, isPending: false }),
+  useActivateRuleBundle: () => ({ mutate: activateRuleBundleMutate, isPending: false }),
   useMe: () => ({ data: { email: "admin@example.com", isPlatformAdmin: true } }),
   useLogout: () => vi.fn(),
 }));
@@ -48,6 +57,10 @@ afterEach(() => {
   cleanup();
   deactivateMutate.mockReset();
   evaluateRecoveryMutate.mockReset();
+  activateSafetyControlMutate.mockReset();
+  evaluateRiskGateMutate.mockReset();
+  approveRuleBundleMutate.mockReset();
+  activateRuleBundleMutate.mockReset();
   refetchControls.mockReset();
   controlsResult = {
     data: { controls: [CONTROL], asOf: "2026-09-09T00:00:00Z" },
@@ -219,5 +232,153 @@ describe("SafetyControlsPage 복구 평가(evaluate-recovery)", () => {
 
     await waitFor(() => expect(screen.getByText(/복구 평가 결과/)).toBeInTheDocument());
     expect(screen.getByText("ALLOW")).toBeInTheDocument();
+  });
+});
+
+describe("SafetyControlsPage 개통(admin activate)", () => {
+  it("scope·scopeRef·reason으로 activate.mutate를 호출한다", () => {
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("대상 참조(scope_ref, 선택)"), {
+      target: { value: "tenant-9" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("사유"), { target: { value: "긴급 정지" } });
+    fireEvent.click(screen.getByRole("button", { name: "개통" }));
+
+    expect(activateSafetyControlMutate).toHaveBeenCalledWith(
+      { scope: "GLOBAL", scopeRef: "tenant-9", reason: "긴급 정지" },
+      expect.anything(),
+    );
+  });
+
+  it("negative: AUTHZ_FORBIDDEN(403) 개통 실패는 권한 없음 안내를 보여준다", async () => {
+    activateSafetyControlMutate.mockImplementation((_vars, opts) => {
+      opts?.onError?.(new ApiError(403, "raw forbidden activate", "trace-4", "AUTHZ_FORBIDDEN"));
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "개통" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("이 작업을 수행할 권한이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw forbidden activate")).not.toBeInTheDocument();
+  });
+});
+
+describe("SafetyControlsPage 리스크 게이트 평가(evaluate)", () => {
+  it("gateKind·connectionId로 evaluate.mutate를 호출한다", () => {
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("커넥션 ID(선택)"), { target: { value: "conn-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "평가" }));
+
+    expect(evaluateRiskGateMutate).toHaveBeenCalledWith(
+      { gateKind: "PRE_TRADE", connectionId: "conn-1" },
+      expect.anything(),
+    );
+  });
+
+  it("성공하면 결과 배너에 outcome을 보여준다", async () => {
+    evaluateRiskGateMutate.mockImplementation((_vars, opts) => {
+      opts?.onSuccess?.({
+        id: "e1",
+        gateKind: "PRE_TRADE",
+        outcome: "DENY",
+        reasonCodes: [],
+        obligations: [],
+        ruleVersion: "v1",
+        evaluatedAt: "2026-09-09T00:00:00Z",
+        expiresAt: null,
+        traceId: "trace-5",
+        schemaVersion: "v1",
+      });
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "평가" }));
+
+    await waitFor(() => expect(screen.getByText(/평가 결과/)).toBeInTheDocument());
+    expect(screen.getByText("DENY")).toBeInTheDocument();
+  });
+
+  it("negative: evaluate 실패는 ErrorMessage를 보여준다", async () => {
+    evaluateRiskGateMutate.mockImplementation((_vars, opts) => {
+      opts?.onError?.(new ApiError(500, "평가에 실패했습니다.", "trace-6"));
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "평가" }));
+
+    await waitFor(() => expect(screen.getByText("평가에 실패했습니다.")).toBeInTheDocument());
+  });
+});
+
+describe("SafetyControlsPage 룰번들 승인/활성화", () => {
+  it("승인 버튼은 bundleId·approvalRef로 approve.mutate를 호출한다", () => {
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("룰번들 ID"), { target: { value: "bundle-1" } });
+    fireEvent.change(screen.getByPlaceholderText("승인 참조(approval_ref)"), {
+      target: { value: "appr-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "승인" }));
+
+    expect(approveRuleBundleMutate).toHaveBeenCalledWith(
+      { bundleId: "bundle-1", body: { approvalRef: "appr-1" } },
+      expect.anything(),
+    );
+  });
+
+  it("활성화 버튼은 bundleId로 activate.mutate를 호출한다", () => {
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("룰번들 ID"), { target: { value: "bundle-2" } });
+    fireEvent.click(screen.getByRole("button", { name: "활성화" }));
+
+    expect(activateRuleBundleMutate).toHaveBeenCalledWith("bundle-2", expect.anything());
+  });
+
+  it("negative: AUTHZ_FORBIDDEN(403) 승인 실패는 권한 없음 안내를 보여준다", async () => {
+    approveRuleBundleMutate.mockImplementation((_vars, opts) => {
+      opts?.onError?.(new ApiError(403, "raw forbidden bundle", "trace-7", "AUTHZ_FORBIDDEN"));
+    });
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("룰번들 ID"), { target: { value: "bundle-3" } });
+    fireEvent.click(screen.getByRole("button", { name: "승인" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("이 작업을 수행할 권한이 없습니다.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("raw forbidden bundle")).not.toBeInTheDocument();
+  });
+
+  it("성공하면 룰번들 상태 배너를 보여준다", async () => {
+    activateRuleBundleMutate.mockImplementation((_vars, opts) => {
+      opts?.onSuccess?.({
+        id: "bundle-4",
+        scope: "GLOBAL",
+        version: "1",
+        ruleHash: "hash",
+        engineVersion: "1",
+        policySnapshot: {},
+        state: "ACTIVE",
+        effectiveFrom: null,
+        effectiveTo: null,
+        createdBy: "admin",
+        approvedBy: "admin",
+        approvalRef: "appr-1",
+        approvedAt: null,
+        activatedAt: "2026-09-09T00:00:00Z",
+        retiredAt: null,
+      });
+    });
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("룰번들 ID"), { target: { value: "bundle-4" } });
+    fireEvent.click(screen.getByRole("button", { name: "활성화" }));
+
+    await waitFor(() => expect(screen.getByText(/룰번들 상태/)).toBeInTheDocument());
   });
 });

@@ -14,11 +14,12 @@ Subaccount 확장 메서드는 `Executor`를 거치지 않고 거래소에 직�
 다음 leaf가 이 메서드들을 라우터에 배선하면서 그 가드를 재발명하는 걸
 잊어도 최소 안전장치는 남는다.
 """
+
 from __future__ import annotations
 
 import functools
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 
@@ -36,4 +37,4 @@ def require_paper_sandbox(func: F) -> F:
             )
         return await func(self, *args, **kwargs)
 
-    return wrapper  # type: ignore[return-value]
+    return cast(F, wrapper)

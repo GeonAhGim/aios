@@ -1,59 +1,82 @@
-"""BT-1 — 백테스트 현실성 계약 v2 (`BacktestConfigV2`).
+"""BT-1 — Backtest realism contract v2 (`BacktestConfigV2`).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.5 BT-1, §3.4(백테스트 현실성 계약), §9.5 BT-1,
-107_contract_versioning_and_compatibility_standard_v1.0.md §3.3(MAJOR 변경).
+§2.5 BT-1, §3.4 (backtest realism contract), §9.5 BT-1,
+107_contract_versioning_and_compatibility_standard_v1.0.md §3.3 (MAJOR change).
 
-`domain/models.py`(v1, `BacktestConfig`)는 109번 명세의 고정 bps 슬리피지·
-수수료만 지원하는 계약이다. 이 v2는 체결 현실성 모델(슬리피지 3종·수수료
-등급·지연·부분체결·주문유형·bar magnifier·펀딩/차입 비용·조정·캘린더)을
-더한 신규 계약이라 v1을 고치지 않고 병존시킨다(107번 §3.3 — 필드 의미
-변경은 새 버전 모듈, 기존 모듈은 불변).
+`domain/models.py` (v1, `BacktestConfig`) is the contract that only supports
+the fixed-bps slippage/commission from spec 109. This v2 adds a fill-realism
+model (3 slippage kinds, commission tiers, latency, partial fills, order
+types, bar magnifier, funding/borrow costs, adjustments, calendar), so it is
+a new contract kept alongside v1 without modifying it (spec 107 §3.3 — a
+change in field meaning goes into a new version module; existing modules
+stay immutable).
 
-BT-2~7(체결 모델)·BT-9(재현 키)가 이 계약에 1:1 의존하므로 §3.4 표 밖의
-필드를 임의로 추가하지 않는다. `reproducibility_key`(재현 키, BT-9 책임)
-산식 자체는 여기서 구현하지 않는다 — `BacktestConfigV2.canonical_json()`은
-그 해시의 입력이 될 정준(canonical) 직렬화만 보장한다(결정론: 같은 값의
-모델은 항상 같은 바이트열을 낸다).
+BT-2~7 (fill models) and BT-9 (reproducibility key) depend 1:1 on this
+contract, so fields outside the §3.4 table must not be added arbitrarily.
+The `reproducibility_key` (reproducibility key, owned by BT-9) formula
+itself is not implemented here — `BacktestConfigV2.canonical_json()` only
+guarantees the canonical serialization that is the input to that hash
+(determinism: the same-valued model always yields the same byte sequence).
 
-모든 금액·비율·수수료는 `Decimal`이다(float 금지, 부동소수 오차가 체결
-현실성 모델의 비교·누적 계산에 섞이는 것을 막는다).
+All amounts/ratios/fees are `Decimal` (float is forbidden, to keep binary
+floating-point error out of the fill-realism model's comparison and
+accumulation calculations).
 """
+
 from __future__ import annotations
 
 import json
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from src.foundation.market_data.contracts.v1 import Timeframe
 
 SCHEMA_VERSION: Literal["backtest-v2"] = "backtest-v2"
 
 
+def _reject_float(value: object) -> object:
+    """Reject `float` explicitly, since it carries binary floating-point
+    error (module docstring's "no float" invariant — pydantic's default
+    behavior silently coerces `float` into `Decimal`, so without this
+    validator the invariant is never wired in). `int`/`str`/`Decimal`
+    pass through unchanged."""
+
+    if isinstance(value, float):
+        raise ValueError("float is not accepted here — pass Decimal or a decimal string")
+    return value
+
+
+NonNegativeDecimal = Annotated[Decimal, BeforeValidator(_reject_float), Field(ge=0)]
+UnitDecimal = Annotated[Decimal, BeforeValidator(_reject_float), Field(gt=0, le=1)]
+OptionalNonNegativeDecimal = Annotated[Decimal, BeforeValidator(_reject_float), Field(ge=0)] | None
+
+
 class FixedSlippage(BaseModel):
-    """봉마다 고정 bps만큼 불리한 체결가를 가정한다."""
+    """Assumes a fill price worse by a fixed bps on every bar."""
 
     kind: Literal["fixed"] = "fixed"
-    bps: Decimal = Field(ge=0)
+    bps: NonNegativeDecimal
 
 
 class PercentSlippage(BaseModel):
-    """체결가 대비 고정 비율(%)만큼 불리한 체결가를 가정한다."""
+    """Assumes a fill price worse by a fixed percentage of the fill price."""
 
     kind: Literal["percent"] = "percent"
-    pct: Decimal = Field(ge=0)
+    pct: NonNegativeDecimal
 
 
 class VolumeImpactSlippage(BaseModel):
-    """주문량이 봉 거래량에서 차지하는 참여율(participation)에 비례해
-    시장충격을 가한다. `participation_cap`은 한 봉에서 소화 가능한 최대
-    참여율(0 초과 1 이하) — 초과분 이월 처리는 체결 모델(BT-2~7)의 책임."""
+    """Applies market impact proportional to the order's participation rate
+    in the bar's volume. `participation_cap` is the max participation rate
+    a single bar can absorb (greater than 0, at most 1) — carrying over the
+    excess is the fill model's (BT-2~7) responsibility."""
 
     kind: Literal["volume_impact"] = "volume_impact"
-    k: Decimal = Field(ge=0)
-    participation_cap: Decimal = Field(gt=0, le=1)
+    k: NonNegativeDecimal
+    participation_cap: UnitDecimal
 
 
 SlippageModel = Annotated[
@@ -63,24 +86,25 @@ SlippageModel = Annotated[
 
 
 class VenueTierCommission(BaseModel):
-    """거래소·등급별 메이커/테이커 수수료 + 최소 수수료(정액)."""
+    """Maker/taker commission per venue/tier + minimum fee (flat amount)."""
 
     venue: str
-    maker_bps: Decimal = Field(ge=0)
-    taker_bps: Decimal = Field(ge=0)
-    min_fee: Decimal = Field(ge=0)
+    maker_bps: NonNegativeDecimal
+    taker_bps: NonNegativeDecimal
+    min_fee: NonNegativeDecimal
 
 
 class PartialFillConfig(BaseModel):
-    """한 봉에서 채울 수 있는 최대 참여율(0 초과 1 이하) — 초과 주문은
-    체결 모델(BT-5)이 부분체결로 처리한다."""
+    """Max participation rate fillable in a single bar (greater than 0, at
+    most 1) — orders exceeding it are handled as partial fills by the fill
+    model (BT-5)."""
 
-    max_participation_pct: Decimal = Field(gt=0, le=1)
+    max_participation_pct: UnitDecimal
 
 
 class OrderTypesConfig(BaseModel):
-    """엔진이 허용하는 주문유형 스위치. 꺼진 유형으로 들어온 주문은 체결
-    모델(BT-6)이 거부한다."""
+    """Switches for order types the engine allows. An order of a disabled
+    type is rejected by the fill model (BT-6)."""
 
     limit: bool
     stop: bool
@@ -89,15 +113,17 @@ class OrderTypesConfig(BaseModel):
 
 
 class CostsConfig(BaseModel):
-    """`borrow_apr`은 공매도 등 차입 포지션에만 적용되므로 무차입 전략은
-    `None`(적용 안 함)을 명시적으로 남긴다 — 0%로 조용히 채우지 않는다."""
+    """`borrow_apr` only applies to borrowed positions such as short sales,
+    so a strategy without borrowing must explicitly leave it as `None`
+    (not applied) — it is not silently filled with 0%."""
 
     funding: bool
-    borrow_apr: Decimal | None = Field(default=None, ge=0)
+    borrow_apr: OptionalNonNegativeDecimal = None
 
 
 class AdjustmentsConfig(BaseModel):
-    """분할·배당 조정을 각각 켜고 끈다(§3.4 `adjustments{splits, dividends}`)."""
+    """Toggles split and dividend adjustments independently
+    (§3.4 `adjustments{splits, dividends}`)."""
 
     splits: bool
     dividends: bool
@@ -107,8 +133,9 @@ CalendarMode = Literal["session", "24x7"]
 
 
 class BacktestConfigV2(BaseModel):
-    """§3.4 백테스트 현실성 계약. 재생 1회 실행에 필요한 체결 현실성
-    입력 전체를 고정(pin)한다 — 실행 도중 값을 바꾸지 않는다(105번 원칙)."""
+    """§3.4 backtest realism contract. Pins the full set of fill-realism
+    inputs needed for a single replay run — values are not changed during
+    the run (standard-105 principle)."""
 
     schema_version: Literal["backtest-v2"] = SCHEMA_VERSION
     slippage: SlippageModel
@@ -122,9 +149,11 @@ class BacktestConfigV2(BaseModel):
     calendar: CalendarMode
 
     def canonical_json(self) -> str:
-        """`reproducibility_key`(BT-9) 입력용 정준 직렬화 — 키 정렬·구분자
-        고정으로 같은 값이면 항상 같은 바이트열을 낸다. 해시 계산 자체는
-        BT-9(`domain/reproducibility.py`)의 책임이며 여기서는 하지 않는다."""
+        """Canonical serialization for the `reproducibility_key` (BT-9)
+        input — sorted keys and fixed separators mean the same value always
+        yields the same byte sequence. The hash computation itself is
+        BT-9's (`domain/reproducibility.py`) responsibility and is not
+        done here."""
 
         return json.dumps(
             self.model_dump(mode="json"),

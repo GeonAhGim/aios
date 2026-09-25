@@ -6,6 +6,7 @@ import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 const STATUSES = ["ACTIVE", "SUSPENDED"];
 
@@ -29,6 +30,7 @@ function UserActionError({ error, onRetry }: { error: unknown; onRetry?: () => v
 }
 
 export function UserManagementPage() {
+  const { t } = useTranslation();
   const [emailSearch, setEmailSearch] = useState("");
   const {
     data: users,
@@ -61,10 +63,10 @@ export function UserManagementPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="사용자 관리" />
+        <PageHeader title={t("legacy.userManagementPage.title1")} />
         <Input
           type="text"
-          placeholder="이메일 검색"
+          placeholder={t("legacy.userManagementPage.placeholder2")}
           value={emailSearch}
           onChange={(e) => setEmailSearch(e.target.value)}
           className="max-w-sm"
@@ -84,7 +86,7 @@ export function UserManagementPage() {
                       <StatusBadge status={u.status} />
                     </div>
                     <p className="text-sm text-fg-muted">
-                      가입 {new Date(u.createdAt).toLocaleDateString()}
+                      {t("legacy.userManagementPage.t3")}{new Date(u.createdAt).toLocaleDateString()}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -101,7 +103,7 @@ export function UserManagementPage() {
                     </Select>
                     <Input
                       type="text"
-                      placeholder="판매정지 사유"
+                      placeholder={t("legacy.userManagementPage.placeholder4")}
                       value={suspendReasons[u.userId] ?? ""}
                       onChange={(e) =>
                         setSuspendReasons((r) => ({ ...r, [u.userId]: e.target.value }))
@@ -114,8 +116,7 @@ export function UserManagementPage() {
                       size="sm"
                       onClick={() => handleSuspendSeller(u.userId)}
                     >
-                      판매정지
-                    </Button>
+                      {t("legacy.userManagementPage.t5")}</Button>
                   </div>
                 </div>
                 {actionError?.userId === u.userId && (
@@ -127,7 +128,7 @@ export function UserManagementPage() {
             ))}
           </ul>
         ) : (
-          <EmptyState>사용자가 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.userManagementPage.t6")}</EmptyState>
         )}
       </div>
     </AppShell>

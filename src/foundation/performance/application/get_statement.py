@@ -1,6 +1,6 @@
-"""GetStatement/ListStatements 쿼리 — 테넌트 스코프 강제 + 안전 한계 문구.
+"""GetStatement/ListStatements queries — enforce tenant scope + safety limitation text.
 
-Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§9(L49), 81번
+Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§9(L49), 81st
 §3 "labels estimates ... never calls result 'guaranteed'".
 
 FA-6(docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-6, §9 table
@@ -23,12 +23,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from src.foundation.entities.api import default_portfolio_id
 from src.foundation.entities.application.resolve_context import (
     EntityContextResolutionError,
     EntityRepository,
     resolve_portfolio_scope,
 )
-from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.performance.application.statement_projection import statement_to_view
 from src.foundation.performance.contracts.v1 import PerformanceStatementView, StatementState
 from src.foundation.performance.ports.repository import PerformanceRepository
@@ -43,8 +43,8 @@ class StatementNotFoundError(Exception):
 
 
 class CrossTenantStatementAccessError(Exception):
-    """72번 에러 taxonomy `AUTH_PERFORMANCE_SCOPE_DENIED` — 호출부가 403으로
-    매핑한다. 존재 여부는 흘리지 않는다(73번 TRU-006과 동일 원칙)."""
+    """Error taxonomy `AUTH_PERFORMANCE_SCOPE_DENIED` — caller maps to 403.
+    Does not leak existence (same principle as 73rd TRU-006)."""
 
     def __init__(self, statement_id: UUID) -> None:
         super().__init__(f"AUTH_PERFORMANCE_SCOPE_DENIED: {statement_id}")

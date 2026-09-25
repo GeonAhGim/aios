@@ -16,6 +16,7 @@ JSON bytes: dict order is fixed by pydantic's field-declaration order, and
 every value (hashes, reason codes, `evaluated_at`) is taken verbatim from
 the stored rows instead of being recomputed.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -47,32 +48,59 @@ class ExplainError(Exception):
         super().__init__(message)
 
 
-async def explain(repo: MandateRepository, decision_id: UUID) -> ComplianceDecision:
+class ExplainDecisionNotFoundError(ExplainError):
+    """CM-17 API wiring (task-2618) — a dedicated subclass for
+    `ExplainErrorCode.DECISION_NOT_FOUND`. `EXCEPTION_MAP` in
+    `src/api/contracts/exception_registry_foundation.py` picks an ErrorCode
+    per exception *type* only (a single `ExplainError` that can carry either
+    code cannot be mapped to two different HTTP statuses), so the two
+    failure modes are split into their own types here. `.code` is still set
+    to `ExplainErrorCode.DECISION_NOT_FOUND`, so existing
+    `except ExplainError`/`exc.code` callers keep working unchanged."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(ExplainErrorCode.DECISION_NOT_FOUND, message)
+
+
+class ExplainBundleDriftedError(ExplainError):
+    """Dedicated subclass for `ExplainErrorCode.BUNDLE_DRIFTED` — same
+    reason as the class above (EXCEPTION_MAP type-based mapping)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(ExplainErrorCode.BUNDLE_DRIFTED, message)
+
+
+async def explain(
+    repo: MandateRepository, decision_id: UUID, *, tenant_id: UUID | None = None
+) -> ComplianceDecision:
     """§9 CM-13 public contract. Calling this any number of times with the same
     `decision_id` returns the identical `ComplianceDecision` — it does not re-evaluate
-    rules, but replays the stored `policy_decision`/`policy_bundle` rows as-is."""
+    rules, but replays the stored `policy_decision`/`policy_bundle` rows as-is.
+
+    `tenant_id` (task-2618, CM-17 API wiring): when given, a decision owned
+    by a different tenant is rejected with the same `DECISION_NOT_FOUND` as
+    a genuinely missing id — the API layer must not leak whether a
+    `decision_id` exists for someone else's tenant (same principle as
+    doc-73 TRU-006; spec §9 CM-17 DoD "404 isomorphism"). `None` (the
+    default) keeps every existing internal caller — none of which cross a
+    tenant boundary — unchanged."""
     decision = await repo.get_policy_decision(decision_id)
-    if decision is None:
-        raise ExplainError(
-            ExplainErrorCode.DECISION_NOT_FOUND,
-            f"policy_decision {decision_id} does not exist",
-        )
+    if decision is None or (tenant_id is not None and decision.tenant_id != tenant_id):
+        raise ExplainDecisionNotFoundError(f"policy_decision {decision_id} does not exist")
 
     bundle = await repo.get_bundle(decision.bundle_id)
     if bundle is None:
         # policy_decision.bundle_id has a DB FK to policy_bundle, so this is
         # unreachable through the normal write path — but explain() must
         # still fail closed here instead of crashing on `bundle.rule_hash`.
-        raise ExplainError(
-            ExplainErrorCode.BUNDLE_DRIFTED,
-            f"policy_bundle {decision.bundle_id} referenced by decision {decision_id} is missing",
+        raise ExplainBundleDriftedError(
+            f"policy_bundle {decision.bundle_id} referenced by decision {decision_id} is missing"
         )
 
     revision = await repo.get_revision(bundle.mandate_revision_id)
     if revision is None:
-        raise ExplainError(
-            ExplainErrorCode.BUNDLE_DRIFTED,
-            f"mandate_revision {bundle.mandate_revision_id} for bundle {bundle.id} is missing",
+        raise ExplainBundleDriftedError(
+            f"mandate_revision {bundle.mandate_revision_id} for bundle {bundle.id} is missing"
         )
 
     current_rule_hash = compile_rule_hash(revision)
@@ -82,10 +110,9 @@ async def explain(repo: MandateRepository, decision_id: UUID) -> ComplianceDecis
         # migration). Silently recomputing here would mean two different
         # judgments get reported as "the same decision" — instead this
         # rejects, per §9 CM-13 DoD (b) "no quiet re-judgment".
-        raise ExplainError(
-            ExplainErrorCode.BUNDLE_DRIFTED,
+        raise ExplainBundleDriftedError(
             f"policy_bundle {bundle.id} rule_hash mismatch: "
-            f"stored={bundle.rule_hash} current={current_rule_hash}",
+            f"stored={bundle.rule_hash} current={current_rule_hash}"
         )
 
     row = PolicyDecisionRow(

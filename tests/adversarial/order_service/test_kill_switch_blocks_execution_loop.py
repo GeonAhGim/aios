@@ -83,9 +83,12 @@ async def test_active_kill_switch_blocks_execution_loop_new_order_submission(
         pool,
         resolve_adapter=_resolver_for(adapter, user_id),
         policy=load_risk_policy(),
-        # background_loops.py의 실제 프로덕션 값(require_mandate=False)과
-        # 그대로 맞춘다 — 이 테스트는 "프로덕션 조립 경로 그대로"가 목적.
-        pre_submit_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
+        # background_loops.py의 실제 프로덕션 값(H-1b/task-3369부터
+        # require_mandate=True)과 그대로 맞춘다 — 이 테스트는 "프로덕션 조립
+        # 경로 그대로"가 목적. kill switch(1층)가 mandate 분기보다 먼저
+        # 평가되므로 이 값 자체는 이 테스트의 결과(신규 제출 0회)를 바꾸지
+        # 않는다.
+        pre_submit_gate=make_foundation_pre_submit_gate(pool, require_mandate=True),
         distrust_monitor=DataDistrustMonitor(),
         lease_repo=PostgresExecutionLeaseRepository(pool),
         owner_id=f"kill-switch-test-{uuid.uuid4().hex[:8]}",

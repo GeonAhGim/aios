@@ -1,0 +1,5 @@
+{
+  "note": "task-2687 UX-3 hardcoded-color ratchet floor. Empty on purpose: the only two production-code offenders found at introduction time (apps/web/src/routes/chart/ChartPlotLayer.tsx's PALETTE, packages/ui-web/src/CandlestickChart.tsx's CHART_COLORS) were migrated to token references (CATEGORICAL_PALETTE / getComputedStyle(--color-*)) in the same task instead of being grandfathered here. New violations fail at 0 directly.",
+  "generated_at": "2026-09-16T00:00:00+00:00",
+  "files": {}
+}

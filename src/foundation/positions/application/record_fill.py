@@ -2,52 +2,43 @@
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §5, §9.3 LB-11.
 
-순서는 LC-9 `post_entry.py`와 동일한 정신을 따른다: 락 → 멱등 사전 확인 →
-규칙 계산 → 쓰기 → 감사. 다만 `PositionJournalRepository.append`(LB-9)이
-`position_key` 단위 advisory lock과 idempotency 판정을 이미 자신의 트랜잭션
-안에서 하므로(포트 docstring), 이 함수가 먼저 **같은 이름공간·같은 키**로
-lock을 선점해 두는 이유는 원가법(FIFO/WEIGHTED) 계산이 "잠금 이후" 상태를
-읽고 계산해야 하기 때문이다 — lock 없이 스냅샷을 먼저 읽으면(그 사이
-동시 체결이 커밋될 수 있음) 오래된 lots 위에서 실현손익을 계산하는
-경쟁상태가 생긴다. `journal.append`가 다시 같은 lock을 요청하는 것은
+순서는 LC-9 `post_entry.py`와 동일한 정신을 따른다: 락 → 멱등 사전 확인 → 규칙 계산 → 쓰기 → 감사.
+다만 `PositionJournalRepository.append`(LB-9)이 `position_key` 단위 advisory lock과 idempotency
+판정을 이미 자신의 트랜잭션 안에서 하므로(포트 docstring), 이 함수가 먼저 **같은 이름공간·같은
+키**로 lock을 선점해 두는 이유는 원가법(FIFO/WEIGHTED) 계산이 "잠금 이후" 상태를 읽고 계산해야
+하기 때문이다 — lock 없이 스냅샷을 먼저 읽으면(그 사이 동시 체결이 커밋될 수 있음) 오래된 lots
+위에서 실현손익을 계산하는 경쟁상태가 생긴다. `journal.append`가 다시 같은 lock을 요청하는 것은
 같은 트랜잭션 안에서는 즉시 반환되므로(재진입) 안전하다.
 
-멱등 재입력은 `pos_journal.idempotency_key`에 이미 같은 키가 있는지(EXISTS,
-UNIQUE 인덱스라 O(1)) 먼저 살펴 원가법 계산 자체를 건너뛴다 — 이미 소진된 로트 위에 같은 체결을
-또 적용하면 (진짜로는 멱등인데도) `NegativeQuantityError`가 잘못 튀어나올
-수 있기 때문이다(재전송은 성공해야 한다). 그래도 최종 판단은 `journal.append`
-가 돌려주는 `sequence_no`로 한다 — `sequence_no <= snapshot.last_journal_seq`
-면 이미 접힌 엔트리(REPLAY), 그렇지 않으면(`== last_journal_seq + 1`) 새
-엔트리다. REPLAY는 스냅샷 upsert도, 감사 이벤트도 만들지 않는다(post_entry의
-"digest 일치 REPLAY는 감사도 안 남긴다" 원칙과 동일 — 감사이벤트는 항상
-저널 엔트리 하나당 정확히 하나, "1:1"). `idempotency_key`가 같은데 내용이
-다르면(`POS_IDEMPOTENCY_DIGEST_MISMATCH`) `journal.append`가 예외를 던지고,
-이 함수는 그대로 전파한다 — 호출자 버그이므로 재시도 불가, 감사는 남기지
-않는다(taxonomy상 "불가" 등급이라 §4.3에 DENIED 감사 요구가 없다 — C 도메인
-분개의 "감사 이벤트 없는 분개 없음"과 달리 B 도메인은 그 요구가 없다).
+멱등 재입력은 `pos_journal.idempotency_key`에 이미 같은 키가 있는지(EXISTS, UNIQUE 인덱스라 O(1))
+먼저 살펴 원가법 계산 자체를 건너뛴다 — 이미 소진된 로트 위에 같은 체결을 또 적용하면 (진짜로는
+멱등인데도) `NegativeQuantityError`가 잘못 튀어나올 수 있기 때문이다(재전송은 성공해야 한다).
+그래도 최종 판단은 `journal.append`가 돌려주는 `sequence_no`로 한다 — `sequence_no <=
+snapshot.last_journal_seq` 면 이미 접힌 엔트리(REPLAY), 그렇지 않으면(`== last_journal_seq + 1`)
+새 엔트리다. REPLAY는 스냅샷 upsert도, 감사 이벤트도 만들지 않는다(post_entry의 "digest 일치
+REPLAY는 감사도 안 남긴다" 원칙과 동일 — 감사이벤트는 항상 저널 엔트리 하나당 정확히 하나, "1:1").
+`idempotency_key`가 같은데 내용이 다르면(`POS_IDEMPOTENCY_DIGEST_MISMATCH`) `journal.append`가
+예외를 던지고, 이 함수는 그대로 전파한다 — 호출자 버그이므로 재시도 불가, 감사는 남기지
+않는다(taxonomy상 "불가" 등급이라 §4.3에 DENIED 감사 요구가 없다 — C 도메인 분개의 "감사 이벤트
+없는 분개 없음"과 달리 B 도메인은 그 요구가 없다).
 
-원가법·분개 규칙 자체는 재구현하지 않는다: 로트 시딩은
-`snapshot_builder._seeded_cost_basis`와 같은 모양을 이 파일에도 두되(모듈
-경계상 private 헬퍼를 다른 모듈이 import하지 않는다), 실제 원가 계산은
-`cost_basis.selector.cost_basis_for` + `FifoLots/WeightedAverage.apply`
-(LB-2/LB-3)이 하고, 저널 엔트리 입력 조립은 `journal_rules.fill_entry`
-(LB-5)가 한다. 새 엔트리가 persist된 뒤의 스냅샷 접힘은
-`snapshot_builder.apply_one`(LB-5)을 그대로 재사용한다 — 원가법을 두 번
-계산하는 것처럼 보이지만(먼저 realized_pnl_base를 얻으려고 한 번,
-`apply_one`이 저널 엔트리를 접으며 한 번) 둘 다 같은 로트·같은 입력에서
-결정론적으로 같은 결과를 내므로 드리프트가 아니다 — `apply_one`이 실제
-스냅샷의 유일한 "진실 계산" 경로라는 §4.3 "스냅샷 = fold(저널)" 불변을
-어기지 않기 위한 의도적 선택이다.
+원가법·분개 규칙 자체는 재구현하지 않는다: 로트 시딩은 `snapshot_builder._seeded_cost_basis`와
+같은 모양을 이 파일에도 두되(모듈 경계상 private 헬퍼를 다른 모듈이 import하지 않는다), 실제 원가
+계산은 `cost_basis.selector.cost_basis_for` + `FifoLots/WeightedAverage.apply` (LB-2/LB-3)이 하고,
+저널 엔트리 입력 조립은 `journal_rules.fill_entry` (LB-5)가 한다. 새 엔트리가 persist된 뒤의
+스냅샷 접힘은 `snapshot_builder.apply_one`(LB-5)을 그대로 재사용한다 — 원가법을 두 번 계산하는
+것처럼 보이지만(먼저 realized_pnl_base를 얻으려고 한 번, `apply_one`이 저널 엔트리를 접으며 한 번)
+둘 다 같은 로트·같은 입력에서 결정론적으로 같은 결과를 내므로 드리프트가 아니다 — `apply_one`이
+실제 스냅샷의 유일한 "진실 계산" 경로라는 §4.3 "스냅샷 = fold(저널)" 불변을 어기지 않기 위한
+의도적 선택이다.
 
-`asset_class`는 `RecordFillCommand`(계약)에 없다 — `pos_account`/
-`pos_snapshot`에도 아직 저장할 곳이 없다(instrument_ref 테이블 미착수,
-LB-8 마이그레이션 주석 참고). 그래서 이 함수는 호출자가 이미 알고 있는
-값(주문의 `asset_class`)을 키워드 인자로 받는다 — LB-12가 기존
+`asset_class`는 `RecordFillCommand`(계약)에 없다 — `pos_account`/`pos_snapshot`에도 아직 저장할
+곳이 없다(instrument_ref 테이블 미착수, LB-8 마이그레이션 주석 참고). 그래서 이 함수는 호출자가
+이미 알고 있는 값(주문의 `asset_class`)을 키워드 인자로 받는다 — LB-12가 기존
 `order.asset_class`를 그대로 넘기게 된다.
 
-가격·수수료가 계좌 기준통화와 다른 통화면 `fx_rate`(호출자가 미리 조회한
-`FXRate`)가 있어야 한다 — 0 대체 금지(`fx.FxRateMissingError`, 재시도
-가능). 같은 통화면 `fx_rate`를 넘기지 않아도 된다.
+가격·수수료가 계좌 기준통화와 다른 통화면 `fx_rate`(호출자가 미리 조회한 `FXRate`)가 있어야 한다 —
+0 대체 금지(`fx.FxRateMissingError`, 재시도 가능). 같은 통화면 `fx_rate`를 넘기지 않아도 된다.
 """
 from __future__ import annotations
 
@@ -60,8 +51,13 @@ from uuid import UUID
 import asyncpg
 
 from src.data.models.base import AssetClass, Currency, FXRate, Money
-from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
+from src.foundation.evidence.api import (
+    AuditEvent,
+    Classification,
+    Outcome,
+    assert_safe_payload,
+    compute_payload_hash,
+)
 from src.foundation.positions.contracts.v1 import (
     JournalEntryType,
     Lot,

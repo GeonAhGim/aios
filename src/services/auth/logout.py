@@ -1,10 +1,10 @@
-"""PLT-24 — 세션 폐기(로그아웃) 유스케이스.
+"""PLT-24 — Session revocation (logout) use case.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §3.4, §9 PLT-24.
 
-`session_repository.revoke()`/`revoke_all_for_user()`(PLT-23)에 그대로
-위임한다 — 둘 다 이미 멱등(`revoked_at IS NULL` 조건)이라 여기서는
-사유 문자열과 소유권 검사만 더한다.
+Delegates directly to `session_repository.revoke()` / `revoke_all_for_user()` (PLT-23) —
+both are already idempotent (condition on `revoked_at IS NULL`), so this layer
+adds only a reason string and ownership check.
 """
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from src.services.auth import session_repository
 
 
 class LogoutSessionMismatchError(Exception):
-    """`session_id`가 요청한 `user_id` 소유가 아니다 — 다른 사용자의
-    세션 id를 추측해 임의로 폐기시키지 못하게 막는다(403 `AUTHZ_FORBIDDEN`
-    으로 매핑). 이미 폐기된 세션은 소유자를 알 수 없으므로 검사하지 않고
-    조용히 no-op 처리한다(revoke()가 멱등이라 안전)."""
+    """The `session_id` does not belong to the requested `user_id` — prevents
+    guessing and revoking other users' session IDs (mapped to 403
+    `AUTHZ_FORBIDDEN`). Already-revoked sessions return owner information,
+    so they are silently treated as a no-op (safe because revoke() is idempotent)."""
 
 
 async def logout(pool: asyncpg.Pool, *, session_id: UUID, user_id: UUID) -> None:

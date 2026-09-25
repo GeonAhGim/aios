@@ -6,11 +6,20 @@ docstring 참조. services/auth 매핑은 `exception_registry.py`(같은 이유�
 있다. 공개 API(`map_exception()`/`override_status()`)는 `exception_mapping.py`가 이 파일과
 자매 모듈의 EXCEPTION_MAP_*/STATUS_OVERRIDE_*를 합쳐서 제공한다.
 """
+
 from __future__ import annotations
 
 from starlette import status
 
 from src.api.contracts.error_codes import ErrorCode
+from src.api.contracts.exception_registry_foundation_ai_assistant import EXCEPTION_MAP_AI_ASSISTANT
+from src.api.contracts.exception_registry_foundation_mandates import (
+    EXCEPTION_MAP_FOUNDATION_MANDATES,
+)
+from src.api.contracts.exception_registry_foundation_personal import (
+    EXCEPTION_MAP_FOUNDATION_PERSONAL,
+)
+from src.api.contracts.exception_registry_foundation_research import EXCEPTION_MAP_RESEARCH
 from src.api.schemas.positions import InvalidCursorError
 from src.core.script.runtime.series import ScriptRuntimeError
 from src.foundation.backtest.application.quick_backtest import (
@@ -47,17 +56,6 @@ from src.foundation.entities.application.resolve_context import EntityContextRes
 from src.foundation.evidence.domain.rules import ChainIntegrityError
 from src.foundation.ledger.application.payouts import UnknownPayoutBatchError
 from src.foundation.ledger.application.queries import WalletLedgerDriftError
-from src.foundation.mandates.application.activate_revision import (
-    CoolingOffNotElapsedError,
-    CrossTenantMandateAccessError,
-    InvalidRevisionStateError,
-    MaterialChangeRequiresFreshConsentError,
-    MaterialChangeRequiresReauthError,
-    RevisionNotFoundError,
-    SelfApprovalNotAllowedError,
-)
-from src.foundation.mandates.application.create_draft_mandate import MandateAlreadyExistsError
-from src.foundation.mandates.application.evaluate_policy import NoActiveMandateError
 from src.foundation.market_data.application.get_candles import (
     AsOfInFutureError,
     QuarantinedViewUnsupportedError,
@@ -91,7 +89,9 @@ from src.foundation.paper_control.application.start_deployment import (
 from src.foundation.paper_control.application.start_deployment import (
     InvalidDeploymentStateError as StartInvalidDeploymentStateError,
 )
-from src.foundation.paper_control.application.start_deployment import RiskGateDeniedError
+from src.foundation.paper_control.application.start_deployment import (
+    RiskGateDeniedError,
+)
 from src.foundation.paper_control.domain.rules import InvalidProvenanceError
 from src.foundation.performance.adapters.paper_input_adapter import UnreconciledInputError
 from src.foundation.performance.application.compute_statement import MethodologyNotFoundError
@@ -115,6 +115,7 @@ from src.foundation.reconciliation.application.resolve_reconciliation import (
     NotResolvableError,
     ReconciliationStateNotFoundError,
 )
+from src.foundation.reporting.application.account_summary import AccountNotFoundError
 from src.foundation.risk_gate.application.activate_rule_bundle import (
     MissingApprovalRefError,
     RuleBundleNotFoundError,
@@ -191,16 +192,10 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ConnectionRevokedDuringSyncError, ErrorCode.STATE_INVALID_TRANSITION),
     (ProviderUnavailableError, ErrorCode.EXCHANGE_FATAL),
     (ConnectionNotRevocableError, ErrorCode.STATE_INVALID_TRANSITION),
-    (MandateAlreadyExistsError, ErrorCode.STATE_INVALID_TRANSITION),
-    (NoActiveMandateError, ErrorCode.RESOURCE_NOT_FOUND),
-    (RevisionNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
-    (CrossTenantMandateAccessError, ErrorCode.RESOURCE_NOT_FOUND),
-    (InvalidRevisionStateError, ErrorCode.STATE_INVALID_TRANSITION),
-    (MaterialChangeRequiresReauthError, ErrorCode.AUTH_MFA_REQUIRED),
-    (MaterialChangeRequiresFreshConsentError, ErrorCode.POLICY_DENIED),
-    (CoolingOffNotElapsedError, ErrorCode.STATE_INVALID_TRANSITION),
-    # CM-5 (task-2118) — author != approver (CM-A3) violation, mapped to 400 (per DoD).
-    (SelfApprovalNotAllowedError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # The foundation.mandates.* cluster (activate_revision/evaluate_policy/
+    # create_draft_mandate/explain) moved to exception_registry_foundation_mandates.py
+    # (task-2618, this file hit the P6.line_cap 300-line guard again).
+    *EXCEPTION_MAP_FOUNDATION_MANDATES,
     # evidence.py 체인 무결성 — 없는 코드라 409 conflict로 접는다.
     (ChainIntegrityError, ErrorCode.STATE_INVALID_TRANSITION),
     # PLT-21b(task-1217) — foundation/paper_control·performance·reconciliation.
@@ -230,10 +225,9 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (UnauthorizedSafetyControlScopeError, ErrorCode.AUTHZ_FORBIDDEN),
     (MissingScopeRefError, ErrorCode.VALIDATION_INVALID_FIELD),
     (SafetyControlNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
-    # R-53 — RECOVERY gate DENY (any of evidence/approval/cooldown/fresh not
-    # met). Folded into RISK_DENIED (403) using the same convention as
-    # RiskGateDeniedError (start_deployment.py) — reason_codes ride in
-    # details (including RSK-007).
+    # R-53 — RECOVERY gate DENY (any of evidence/approval/cooldown/fresh not met).
+    # Folded into RISK_DENIED (403) using the same convention as RiskGateDeniedError
+    # (start_deployment.py) — reason_codes ride in details (including RSK-007).
     (RecoveryDeniedError, ErrorCode.RISK_DENIED),
     (DisclosureNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (DisclosureRetiredError, ErrorCode.VALIDATION_DISCLOSURE_RETIRED),
@@ -269,25 +263,30 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ReplayIncompleteError, ErrorCode.DATA_COVERAGE_MISSING),
     (MarketDataQueryError, ErrorCode.VALIDATION_INVALID_FIELD),
     (AsOfInFutureError, ErrorCode.VALIDATION_INVALID_FIELD),
-    (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD), *EXCEPTION_MAP_RESEARCH,
     # CH-5(task-1557) — foundation/charting. 타 테넌트도 미존재와 동형 404
     # (§9.6 DoD "타 테넌트 404") — ConcurrencyConflictError(409)는 이미
     # exception_registry.py에 전역 등록돼 있어 여기 새로 추가하지 않는다.
     (ChartLayoutNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (CrossTenantChartLayoutAccessError, ErrorCode.RESOURCE_NOT_FOUND),
     (DrawingValidationError, ErrorCode.VALIDATION_INVALID_FIELD),
-    # CH-17b (task-1904) — foundation/charting indicator template. Another
-    # tenant's access also folds into a 404 isomorphic to nonexistence
-    # (same principle as CH-5). Duplicate creation (409) folds into
-    # ConcurrencyConflictError (already registered globally in
-    # exception_registry.py), so it is not added here again.
+    # CH-17b (task-1904) — foundation/charting indicator template. Another tenant's access folds
+    # into 404 too (same as CH-5). Duplicate creation (409) folds into ConcurrencyConflictError,
+    # already global in exception_registry.py.
     (ChartIndicatorTemplateNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (CrossTenantChartIndicatorTemplateAccessError, ErrorCode.RESOURCE_NOT_FOUND),
-    # FA-6(task-1944) — explicit portfolio_id scope resolution failure on
-    # the positions/performance read paths (nonexistent/closed/other
-    # tenant/unattributed). Follows the same non-disclosure-of-existence
-    # 404-uniformity principle (same as §9 LB-19) — 404, not 403.
+    # FA-6(task-1944) — explicit portfolio_id scope resolution failure on the positions/performance
+    # read paths (nonexistent/closed/other tenant/unattributed). Follows the same
+    # non-disclosure-of-existence 404-uniformity principle (same as §9 LB-19) — 404, not 403.
     (EntityContextResolutionError, ErrorCode.RESOURCE_NOT_FOUND),
+    # U-2a(task-2629) — dashboard.py account summary read path. Same
+    # non-disclosure-of-existence 404-uniformity principle as LB-19.
+    (AccountNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
+    # task-2749 U-15 — personal-mode PAPER->LIVE promotion checklist bucket,
+    # split into exception_registry_foundation_personal.py (P6.line_cap).
+    *EXCEPTION_MAP_FOUNDATION_PERSONAL,
+    # task-2630 U-3a — assistant.py, split out (P6.line_cap).
+    *EXCEPTION_MAP_AI_ASSISTANT,
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [

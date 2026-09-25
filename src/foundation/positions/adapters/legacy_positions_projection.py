@@ -1,21 +1,23 @@
-"""LB-10 — `pos_snapshot`을 기존 legacy `positions` 조회 형태로 투영.
+"""LB-10 — Project `pos_snapshot` into legacy `positions` query shape.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.3 LB-10.
 
-task-376 decision: "FROZEN 아님 — 그대로 진행. ... 쓰기 경로는 건드리지
-않는다 — 읽기 투영만." §2.3 표가 적어둔 `project(conn, snap)`(스냅샷 →
-legacy 행 upsert)은 여기서 구현하지 않는다 — 그 쓰기 경로 전환은 LB-12
-몫이다. 이 리프는 LB-9(`postgres_snapshot_repository.py`)가 이미 채우는
-`pos_snapshot`을, 기존 3개 서비스(`risk_guard_service.py`·
-`portfolio_service.py`·`report_service.py`)가 `positions` 테이블에서
-직접 읽는 것과 같은 모양으로 읽어서 신·구 경로 조회 결과가 같음을
-증명하는 읽기 전용 어댑터다.
+task-376 decision: "Not FROZEN — proceed as-is. ... Do not touch write
+paths — read-only projection." The `project(conn, snap)` (snapshot →
+legacy row upsert) described in §2.3 table is not implemented here — that
+write path transition belongs to LB-12. This leaf is a read-only adapter
+that reads `pos_snapshot` (already populated by LB-9
+`postgres_snapshot_repository.py`) in the same shape that three existing
+services (`risk_guard_service.py`, `portfolio_service.py`,
+`report_service.py`) read directly from the `positions` table, proving
+that new and legacy query paths yield identical results.
 
-행 대응은 `pos_snapshot.legacy_position_id`(FK `positions(id)`, LB-8)로
-고정된다(§9 R10) — 이 컬럼은 아직 아무도 쓰지 않는다(LB-9 `upsert`도
-채우지 않음, 위 결정 참고). `INNER JOIN`이므로 대응하는 legacy 행이 아직
-연결되지 않은 스냅샷은 결과에서 조용히 빠진다(예외가 아니라 빈
-리스트) — 호출자가 존재를 가정하고 예외 처리를 준비할 필요가 없다.
+Row mapping is fixed via `pos_snapshot.legacy_position_id` (FK
+`positions(id)`, LB-8) (§9 R10) — no one writes this column yet (LB-9
+`upsert` does not populate it either; see decision above). Because this
+uses `INNER JOIN`, snapshots whose legacy row is not yet linked quietly
+drop from results (empty list, not an exception) — callers need not
+prepare for exceptions assuming existence.
 """
 from __future__ import annotations
 
@@ -40,12 +42,14 @@ _SELECT_SQL = """
 
 @dataclass(frozen=True)
 class LegacyPositionRow:
-    """legacy `positions` 행 하나를 `pos_snapshot`에서 재구성한 투영 결과.
+    """Projected result reconstructing one legacy `positions` row from
+    `pos_snapshot`.
 
-    필드는 3개 기존 서비스가 실제로 읽는 컬럼의 합집합이다 —
-    `risk_guard_service`/`portfolio_service`(quantity·realized_pnl·
-    unrealized_pnl 합산)와 `report_service`(strategy_id·execution_id·
-    realized_pnl·closed_at, 청산 포지션만)."""
+    Fields are the union of columns actually read by the three existing
+    services — `risk_guard_service` / `portfolio_service` (quantity,
+    realized_pnl, unrealized_pnl sum) and `report_service`
+    (strategy_id, execution_id, realized_pnl, closed_at, closed positions
+    only)."""
 
     legacy_position_id: int
     execution_id: int | None
@@ -60,10 +64,10 @@ class LegacyPositionRow:
 
 
 class LegacyPositionsProjection:
-    """`pos_snapshot`을 legacy `positions` 조회 형태로 읽는다(읽기 전용).
+    """Reads `pos_snapshot` in legacy `positions` query shape (read-only).
 
-    어느 테이블도 갱신하지 않는다 — `project`류 쓰기 메서드는 이 클래스에
-    없다(위 모듈 docstring의 결정 참고)."""
+    Does not update any table — no `project`-style write methods exist on
+    this class (see decision in module docstring above)."""
 
     async def get_positions(
         self,
@@ -73,9 +77,10 @@ class LegacyPositionsProjection:
         symbol: str,
         exchange: str,
     ) -> list[LegacyPositionRow]:
-        """같은 계정·심볼의 legacy 대응 포지션 전부(열림·청산 이력 포함,
-        `entry_time` 오름차순 — legacy 재진입은 새 행). 대응하는 legacy
-        행이 없으면 빈 리스트(예외 아님)."""
+        """All legacy counterpart positions for the same account/symbol
+        (open and closed history, ordered by `entry_time` ascending —
+        re-entries produce new rows). Returns empty list if no matching
+        legacy row exists (not an exception)."""
         rows = await conn.fetch(_SELECT_SQL, user_id, symbol, exchange)
         return [
             LegacyPositionRow(

@@ -6,17 +6,25 @@ transition_lifecycle()에 연결"을 실제로 구현한다.
 경로다 — 사용자가 그 전이를 직접 호출할 방법은 여전히 없다(라우터
 편차 3 그대로 유지, 이 커맨드가 대신 내부에서 호출).
 """
+
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.indicators.talib_adapter import IndicatorService
+from src.core.observability.metric_names import (
+    VALIDATION_RUN_COUNT_TOTAL,
+    VALIDATION_RUN_DURATION_SECONDS,
+)
+from src.core.observability.metrics import MetricsPort, NullMetrics
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMStrategyConfig
+from src.foundation.backtest.api import BacktestConfig, CostModel
 from src.foundation.backtest.application.run_backtest import BacktestRunError, run_backtest
-from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from src.foundation.validation.contracts.v1 import Outcome as ContractOutcome
 from src.foundation.validation.contracts.v1 import RunState as ContractRunState
 from src.foundation.validation.contracts.v1 import StartValidationCommand, ValidationResultView
@@ -32,6 +40,8 @@ from src.services.strategy_builder_service import (
     StrategyBuilderService,
     StrategyLifecycleError,
 )
+
+logger = logging.getLogger(__name__)
 
 CHECK_TYPE = "backtest"
 """76번 §3의 6개 체크 중 지금 FND-10이 실제로 계산 가능한 것 하나만 —
@@ -68,6 +78,7 @@ def _run_to_view(
         obligations=[] if result is None else list(result.obligations),
         result_hash=None if result is None else result.result_hash,
         created_at=run.created_at,
+        evidence_refs=[] if result is None else list(result.evidence_refs),
     )
 
 
@@ -79,7 +90,12 @@ async def start_validation(
     command: StartValidationCommand,
     bars: list[Candle],
     indicator_service: IndicatorService | None = None,
+    metrics: MetricsPort | None = None,
 ) -> ValidationResultView:
+    # PLT-10 instrumentation point — defaults to NullMetrics, so existing callers
+    # that don't pass `metrics` stay unaffected.
+    metrics = metrics if metrics is not None else NullMetrics()
+    started = time.monotonic()
     try:
         detail = await strategy_service.get_strategy(
             owner_user_id, command.strategy_id, command.strategy_version
@@ -165,23 +181,39 @@ async def start_validation(
         backtest_result = run_backtest(
             backtest_config, fsm_config, bars, indicator_service=indicator_service
         )
-    except BacktestRunError:
+    except BacktestRunError as exc:
         await validation_repo.mark_failed(run.id)
+        metrics.counter(VALIDATION_RUN_COUNT_TOTAL, {"outcome": "backtest_error"})
+        metrics.observe(
+            VALIDATION_RUN_DURATION_SECONDS,
+            time.monotonic() - started,
+            {"outcome": "backtest_error"},
+        )
+        logger.error(
+            "validation_run_failed",
+            extra={
+                "event": "validation_run_failed",
+                "duration_ms": round((time.monotonic() - started) * 1000),
+                "payload": {
+                    "run_id": str(run.id),
+                    "strategy_id": str(command.strategy_id),
+                    "reason": str(exc),
+                },
+            },
+        )
         raise
 
-    outcome, obligations, hard_fail_reasons = evaluate_validation_policy(
-        backtest_result.warnings
-    )
-    metrics = backtest_result.metrics.model_dump(mode="json")
+    outcome, obligations, hard_fail_reasons = evaluate_validation_policy(backtest_result.warnings)
+    metrics_payload = backtest_result.metrics.model_dump(mode="json")
     result = ValidationResult(
         id=uuid4(),
         run_id=run.id,
         outcome=DomainOutcome(outcome.value),
-        metrics=metrics,
+        metrics=metrics_payload,
         warnings=tuple(backtest_result.warnings),
         hard_fail_reasons=tuple(hard_fail_reasons),
         obligations=tuple(obligations),
-        result_hash=compute_result_hash(metrics),
+        result_hash=compute_result_hash(metrics_payload),
         created_at=datetime.now(timezone.utc),
     )
     completed_run, saved_result = await validation_repo.complete_with_result(run.id, result)
@@ -194,4 +226,20 @@ async def start_validation(
             command.strategy_id, command.strategy_version, "VALIDATING"
         )
 
+    elapsed = time.monotonic() - started
+    metrics.counter(VALIDATION_RUN_COUNT_TOTAL, {"outcome": outcome.value})
+    metrics.observe(VALIDATION_RUN_DURATION_SECONDS, elapsed, {"outcome": outcome.value})
+    logger.info(
+        "validation_run_completed",
+        extra={
+            "event": "validation_run_completed",
+            "duration_ms": round(elapsed * 1000),
+            "payload": {
+                "run_id": str(run.id),
+                "strategy_id": str(command.strategy_id),
+                "outcome": outcome.value,
+                "hard_fail_reason_count": len(hard_fail_reasons),
+            },
+        },
+    )
     return _run_to_view(completed_run, saved_result)

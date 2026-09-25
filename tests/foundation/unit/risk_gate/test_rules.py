@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from src.foundation.risk_gate.domain.models import (
     RiskEvaluationInput,
     RiskOutcome,
@@ -15,6 +17,7 @@ from src.foundation.risk_gate.domain.rules import (
     compute_subject_fingerprint,
     evaluate_risk,
 )
+from tests.conftest import PerfBudget
 
 
 def _control(scope: SafetyScope, state=SafetyControlState.ACTIVE) -> SafetyControl:
@@ -133,3 +136,60 @@ def test_fingerprint_differs_for_different_gate_kind():
     a = compute_subject_fingerprint("tenant-1", "DEPLOYMENT", "payload")
     b = compute_subject_fingerprint("tenant-1", "PRE_INTENT", "payload")
     assert a != b
+
+
+def test_compose_safety_controls_duplicate_scope_keeps_a_single_deterministic_reason() -> None:
+    """`active_by_scope = {c.scope: c for c in active}`는 dict 키가
+    scope라 같은 scope의 control이 여러 개 있어도 한 항목으로 합쳐진다 —
+    reason 코드가 scope당 정확히 하나만 나와야 한다(중복 reason은 감사
+    로그를 흐트러뜨린다)."""
+    first = _control(SafetyScope.ACCOUNT)
+    second = _control(SafetyScope.ACCOUNT)
+
+    outcome, reasons = compose_safety_controls((first, second))
+
+    assert outcome == RiskOutcome.DENY
+    assert reasons == ["RISK_KILL_SWITCH_ACTIVE_ACCOUNT"]
+    assert len(reasons) == 1
+
+
+@pytest.mark.perf
+def test_compute_subject_fingerprint_meets_latency_budget_over_many_calls(
+    perf_budget: PerfBudget,
+) -> None:
+    """캐시 재사용 경로(RSK-001)가 fingerprint 계산 자체의 비용으로 막히지
+    않아야 한다."""
+    iterations = 20_000
+    budget_ms = 1000.0
+
+    def _run() -> None:
+        for _ in range(iterations):
+            compute_subject_fingerprint("tenant-1", "DEPLOYMENT", "payload")
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"compute_subject_fingerprint() x{iterations}",
+    )
+
+
+@pytest.mark.perf
+def test_evaluate_risk_meets_latency_budget_over_many_calls(perf_budget: PerfBudget) -> None:
+    """ALLOW 경로(가장 흔한 호출)의 결정 트리 평가가 절대시간 예산 내에
+    있어야 한다 — risk gate는 매 intent/deployment 평가마다 호출되는 hot
+    path다."""
+    iterations = 20_000
+    budget_ms = 1000.0
+    gate_input = RiskEvaluationInput(
+        mandate_available=True, mandate_blocking=False, connection_fresh=True
+    )
+
+    def _run() -> None:
+        for _ in range(iterations):
+            evaluate_risk(gate_input)
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        label=f"evaluate_risk() x{iterations}",
+    )

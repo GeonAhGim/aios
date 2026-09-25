@@ -129,11 +129,12 @@ async def record_fill_in_position_ledger(
                     " position_key, tenant_id, account_id, instrument_id, quantity, avg_cost,"
                     " cost_method, lots, realized_pnl_base, unrealized_pnl_base, fees_base,"
                     " funding_base, mark_price, mark_at, last_journal_seq, legacy_position_id,"
-                    " updated_at"
+                    " fund_id, portfolio_id, updated_at"
                     ") "
                     "SELECT position_key, tenant_id, account_id, instrument_id, quantity,"
                     " avg_cost, cost_method, lots, realized_pnl_base, unrealized_pnl_base,"
-                    " fees_base, funding_base, mark_price, mark_at, last_journal_seq, $1, now()"
+                    " fees_base, funding_base, mark_price, mark_at, last_journal_seq, $1,"
+                    " fund_id, portfolio_id, now()"
                     " FROM prior",
                     legacy_id, position_key,
                 )

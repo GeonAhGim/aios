@@ -4,6 +4,7 @@ import { useCursorPage } from "../../hooks/useCursorPage";
 import { usePositionJournal, type PositionsClientLike } from "../../hooks/usePositions";
 import type { CursorNavigatorMeta } from "../../lib/cursorPagination";
 import { PositionsQueryError } from "./PositionsQueryError";
+import { useTranslation } from "react-i18next";
 
 interface CommittedPage {
   cursor: string | undefined;
@@ -49,6 +50,7 @@ interface PositionJournalPanelProps {
 }
 
 export function PositionJournalPanel({ client, positionKey, pageSize = 20 }: PositionJournalPanelProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // InstrumentsPage(task-824)와 같은 관용: 마지막으로 "확정된" (cursor → next_cursor)
   // 쌍을 상태로 두고 useCursorPage에 meta로 넘긴다. 새 커서의 응답이 도착했을 때만
@@ -71,28 +73,25 @@ export function PositionJournalPanel({ client, positionKey, pageSize = 20 }: Pos
   if (!open) {
     return (
       <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)} data-testid={`${testIdBase}-open`}>
-        저널 보기
-      </Button>
+        {t("legacy.positionJournalPanel.t1")}</Button>
     );
   }
 
   return (
     <div className="rounded-md border border-border p-3 text-sm" data-testid={testIdBase}>
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-medium">저널</span>
+        <span className="font-medium">{t("legacy.positionJournalPanel.t2")}</span>
         <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(false)}>
-          닫기
-        </Button>
+          {t("legacy.positionJournalPanel.t3")}</Button>
       </div>
 
       {query.isError ? (
         <PositionsQueryError error={query.error} notFoundTitle="저널이 없습니다." onRetry={() => query.refetch()} />
       ) : query.isPending ? (
-        <p className="text-fg-muted">불러오는 중…</p>
+        <p className="text-fg-muted">{t("legacy.positionJournalPanel.t4")}</p>
       ) : items.length === 0 ? (
         <p className="text-fg-muted" data-testid={`${testIdBase}-empty`}>
-          저널 항목이 없습니다.
-        </p>
+          {t("legacy.positionJournalPanel.t5")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -129,8 +128,7 @@ export function PositionJournalPanel({ client, positionKey, pageSize = 20 }: Pos
           disabled={!pager.hasPrev || query.isFetching}
           data-testid={`${testIdBase}-prev`}
         >
-          이전
-        </Button>
+          {t("legacy.positionJournalPanel.t6")}</Button>
         <Button
           type="button"
           variant="secondary"
@@ -139,8 +137,7 @@ export function PositionJournalPanel({ client, positionKey, pageSize = 20 }: Pos
           disabled={!pager.hasNext || query.isFetching}
           data-testid={`${testIdBase}-next`}
         >
-          다음
-        </Button>
+          {t("legacy.positionJournalPanel.t7")}</Button>
       </div>
     </div>
   );

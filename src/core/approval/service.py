@@ -1,40 +1,42 @@
-"""10.1 — Critical Risk 승인 요청 생성/처리 (ApprovalService).
+"""10.1 — Critical Risk approval request creation/processing (ApprovalService).
 
 Spec: 기능설계문서_v1.20.md#FD-10.1, ADR-2026-08-10-D
 
-- scope="USER": 정책문서 4.9가 허용한 사용자 레벨 — SOLO(본인 1인)/DUAL
-  (서로 다른 계정의 순차 서명), mandatory_wait_seconds 하한 60초(13번
-  §13.1, FD-11.3 ApprovalMode와 동일 하한).
-- scope="PLATFORM": 시스템 전역 Kill Switch·Circuit Breaker 재가동 등 —
-  ADR-2026-08-10-D §③ 확정대로 하한 180초, 1인 체제(조건부).
+- scope="USER": user-level as allowed by policy doc 4.9 — SOLO (self alone) / DUAL
+  (sequential signatures from two different accounts), mandatory_wait_seconds floor
+  of 60s (§13.1, same floor as FD-11.3 ApprovalMode).
+- scope="PLATFORM": platform-wide Kill Switch / Circuit Breaker re-activation etc. —
+  floor of 180s per ADR-2026-08-10-D §③, single-signer regime (conditional).
 
-편차/해석: FD-10.1 원문은 "60초 타이머(버튼 비활성화)"와 "expires_at(60초
-후 — 응답 없으면 거부)"를 같은 60초로 서술하는데, 문자 그대로 구현하면
-"대기 종료 시점과 자동거부 시점이 동일"해져 승인 가능 창이 사실상 0초가
-된다 — 실사용/테스트 모두 불가능. 여기서는 mandatory_wait_seconds(승인
-버튼이 열리는 시점)와 이후 응답 가능 창(RESPONSE_WINDOW_SECONDS, Draft
-5분)을 분리해 expires_at = created_at + mandatory_wait_seconds +
-RESPONSE_WINDOW_SECONDS로 계산한다.
+Deviation/interpretation: the FD-10.1 text describes both the "60s timer (button
+disabled)" and "expires_at (60s later — rejected if no response)" as the same 60
+seconds, but a literal implementation would make "wait-end time and auto-reject
+time identical," collapsing the approval window to effectively 0 seconds — unusable
+for both real use and tests. Here mandatory_wait_seconds (when the approve button
+becomes enabled) is separated from the subsequent response window
+(RESPONSE_WINDOW_SECONDS, Draft 5 min), so expires_at = created_at +
+mandatory_wait_seconds + RESPONSE_WINDOW_SECONDS.
 
-편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): approve()/reject() 자체는
-"누가 호출했는지"를 검증하지 않는다 — scope="USER"(SOLO=본인 1인,
-DUAL=서로 다른 두 계정 순차 서명)인데도 HTTP 노출은 admin.py의 관리자
-전용 엔드포인트뿐이었다. src/api/routers/users.py에 자기 요청만 처리할
-수 있는 self-service 엔드포인트(/users/me/approval-requests/*)를 추가해
-"본인 소유 요청"으로 제한된 승인·거절을 연다 — SOLO 전체와 DUAL의 첫
-서명은 이걸로 충분하지만, DUAL의 두 번째 서명자는 시스템에 신원이
-등록돼 있지 않다(user_approval_settings.second_approver_contact는
-연락처 문자열일 뿐 user_id로 해석하는 로직이 없음) — 검증 없이 아무나
-"두 번째 서명자"를 자처하게 둘 수 없으므로, 그 경로는 여전히 관리자
-전용 엔드포인트로만 남긴다(신원 해석 설계가 생기기 전까지 정직한 축소).
+Deviation (2026-09-01, gap found after app assembly): approve()/reject() themselves
+do not verify "who called" — even though scope="USER" (SOLO = self alone, DUAL =
+sequential signatures from two different accounts), the only HTTP exposure was
+admin.py's admin-only endpoints. Added a self-service endpoint in
+src/api/routers/users.py that only handles the caller's own requests
+(/users/me/approval-requests/*), opening up approve/reject restricted to
+"requests owned by the caller" — this is enough for all of SOLO and DUAL's first
+signature, but DUAL's second signer has no registered identity in the system
+(user_approval_settings.second_approver_contact is just a contact string, with no
+logic resolving it to a user_id) — since anyone could claim to be the "second
+signer" without verification, that path is still left admin-only (an honest
+reduction in scope until identity resolution is designed).
 
-task-1723 P1-D: 원래 303줄(P6 300줄 초과)이던 이 모듈을 순수 이동으로
-분할했다 — ApprovalRequest 모델/공용 조회 헬퍼(ApprovalError, _row_to_model,
-_fetch)는 _shared.py로 이동. 승인/거절 로직은 테스트가 `_fetch`를
-모듈 속성으로 monkeypatch한다(tests/integration/test_approval_service.py의
-동시성 레이스 재현) — 그 몽키패치가 이 모듈의 전역 `_fetch` 바인딩을
-대상으로 하므로, approve/reject 등은 그 몽키패치가 보이는 이 모듈에
-그대로 남긴다.
+task-1723 P1-D: this module was originally 303 lines (over the P6 300-line cap)
+and was split via a pure move — the ApprovalRequest model / shared lookup helpers
+(ApprovalError, _row_to_model, _fetch) moved to _shared.py. The approve/reject
+logic stays here because tests monkeypatch `_fetch` as a module attribute
+(tests/integration/test_approval_service.py reproduces a concurrency race) — since
+that monkeypatch targets this module's global `_fetch` binding, approve/reject
+etc. remain in this module where the monkeypatch is visible.
 """
 from __future__ import annotations
 
@@ -47,11 +49,11 @@ from uuid import UUID
 import asyncpg
 
 from src.core.approval._shared import ApprovalError, ApprovalRequest, _fetch, _row_to_model
-from src.data.models.serialization import DecimalSafeEncoder
-from src.foundation.trust.domain.rules.segregation_of_duty import (
+from src.core.security.segregation_of_duty_port import (
     SegregationOfDutyViolation,
     assert_actor_not_counterparty,
 )
+from src.data.models.serialization import DecimalSafeEncoder
 
 __all__ = [
     "ApprovalError",
@@ -67,13 +69,13 @@ __all__ = [
 
 USER_WAIT_SECONDS = 60
 PLATFORM_WAIT_SECONDS = 180
-RESPONSE_WINDOW_SECONDS = 300  # Draft — 위 docstring 편차 설명 참조
+RESPONSE_WINDOW_SECONDS = 300  # Draft — see the deviation note in the docstring above
 
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 async def get_request(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
-    """다른 서비스(예: 9.4b Circuit Breaker 재가동)가 요청 상태를 폴링할 때 사용."""
+    """Used when another service (e.g. 9.4b Circuit Breaker re-activation) polls request status."""
     return await _fetch(pool, request_id)
 
 
@@ -83,12 +85,12 @@ async def list_pending(
     scope: str | None = None,
     user_id: UUID | None = None,
 ) -> list[ApprovalRequest]:
-    """편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): 승인 대기 요청을
-    "목록으로" 조회할 방법이 스펙 어디에도 없어, 요청자가 자기 요청 ID를
-    알 방법이 없었다(FD-17 발송기가 아직 없어 알림 본문 딥링크로도 못
-    받음) — get_request()는 이미 id를 아는 경우만 쓸 수 있다. user_id로
-    거르면(scope="USER" 요청은 항상 user_id가 채워짐) 자연히 본인 요청만
-    보인다."""
+    """Deviation (2026-09-01, gap found after app assembly): the spec nowhere
+    describes a way to list pending approval requests, so a requester had no way
+    to learn their own request id (FD-17's dispatcher doesn't exist yet, so there's
+    no notification-body deep link either) — get_request() can only be used once
+    the id is already known. Filtering by user_id (scope="USER" requests always
+    have user_id populated) naturally shows only the caller's own requests."""
     conditions = ["status = 'PENDING'"]
     params: list[object] = []
     if scope is not None:
@@ -150,10 +152,11 @@ async def create_request(
         )
     result = _row_to_model(row)
 
-    # PLATFORM 범위(특정 user_id 없음)는 "관리자 전체 수신" 설계가 아직 없어
-    # 오늘은 발행하지 않는다 — 수신자 없이 발행하면 NotificationGateway가
-    # user_id 누락으로 매번 실패 처리한다(가짜 성공보다 조용한 누락이 낫다는
-    # 판단, 이 게이트가 생기면 이 조건만 풀면 된다).
+    # PLATFORM scope (no specific user_id) has no "broadcast to all admins" design
+    # yet, so it is not published today — publishing without a recipient would make
+    # NotificationGateway fail every time on a missing user_id (a judgment call that
+    # a quiet omission beats a fake success; once that gate exists, just lift this
+    # condition).
     if publish is not None and scope == "USER" and user_id is not None:
         await publish(
             "approval.request.created",
@@ -169,13 +172,13 @@ async def create_request(
 
 
 async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> ApprovalRequest:
-    """레드팀 감사(docs/RED_TEAM_FINDINGS.md #04) 반영 — "읽고 나서 별도로
-    쓰기"는 두 승인이 거의 동시에 들어오면 둘 다 통과시킬 수 있다(SOLO
-    이중승인, DUAL 첫서명자 위조). 아래 세 UPDATE 모두 WHERE절에 그
-    시점의 실제 DB 상태를 다시 검사해 원자적으로 만든다 — RETURNING이
-    빈 행이면 그사이 다른 요청이 먼저 상태를 바꿨다는 뜻이므로
-    ApprovalError로 실패시킨다(wallet_service.py::confirm_topup()이
-    쓰는 것과 동일 패턴)."""
+    """Reflects red-team audit findings (docs/RED_TEAM_FINDINGS.md #04) — "read then
+    write separately" can let two near-simultaneous approvals both pass (SOLO
+    double-approval, DUAL first-signer forgery). Each of the three UPDATEs below
+    re-checks the actual DB state at that moment in its WHERE clause to make it
+    atomic — if RETURNING comes back empty, it means another request already
+    changed the status in the meantime, so it fails with ApprovalError (the same
+    pattern used by wallet_service.py::confirm_topup())."""
     request = await _fetch(pool, request_id)
     if request.status != "PENDING":
         raise ApprovalError(f"이미 처리된 요청: status={request.status}")
@@ -206,7 +209,7 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
             raise ApprovalError("이미 처리된 요청입니다(동시 요청 충돌).")
         return _row_to_model(row)
 
-    # DUAL — 서로 다른 계정의 순차 서명(4.9 원칙)
+    # DUAL — sequential signatures from different accounts (principle 4.9)
     if request.first_approver_id is None:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -260,16 +263,17 @@ async def reject(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> Appr
 
 
 async def cancel(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
-    """9.4b/9.6 — 대기 중 조건 재악화 시 자동 취소(악화된 상태로 재가동되는
-    경로 원천 차단)."""
+    """9.4b/9.6 — auto-cancel on condition re-deterioration while pending (blocks
+    the path of re-activating from a deteriorated state at the source)."""
     return await _update(
         pool, request_id, status="CANCELLED", resolved_at=datetime.now(timezone.utc)
     )
 
 
 async def expire_pending(pool: asyncpg.Pool) -> list[int]:
-    """FD-10.1 예외상황 — 타이머 만료까지 아무도 응답하지 않으면 자동 거부
-    (fail-safe, 암묵적 승인 없음). 주기적으로(예: 안전 루프에서) 호출한다."""
+    """FD-10.1 exception case — auto-reject if nobody responds before the timer
+    expires (fail-safe, no implicit approval). Called periodically (e.g. from the
+    safety loop)."""
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """

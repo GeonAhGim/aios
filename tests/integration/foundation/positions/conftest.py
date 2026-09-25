@@ -29,7 +29,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=64)
     yield p
     await p.close()

@@ -9,6 +9,7 @@ import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
+import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 리뷰 작성 실패는 err.message를 직접 노출하지 않고
 // routeApiError(task-483)로 판정해 400/403/그 외를 각각 BadRequestNotice/
@@ -36,6 +37,7 @@ function CreateReviewError({ error, fieldErrors }: { error: unknown; fieldErrors
 }
 
 export function WriteReviewPage() {
+  const { t } = useTranslation();
   const { purchaseId } = useParams<{ purchaseId: string }>();
   const [searchParams] = useSearchParams();
   const listingId = Number(searchParams.get("listingId") ?? 0);
@@ -53,14 +55,14 @@ export function WriteReviewPage() {
     setError(null);
     setFromError(null);
     if (!listingId) {
-      setClientError("리스팅 정보가 없습니다 — 마켓플레이스 상세 화면에서 다시 시도해주세요.");
+      setClientError(t("legacy.writeReviewPage.t3"));
       return;
     }
     try {
       await createReview.mutateAsync({ listingId, body: { rating, comment: comment || undefined } });
       navigate(`/marketplace/${listingId}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err : new Error("리뷰 작성에 실패했습니다."));
+      setError(err instanceof ApiError ? err : new Error(t("legacy.writeReviewPage.t4")));
       setFromError(err);
     }
   }
@@ -83,7 +85,7 @@ export function WriteReviewPage() {
               className="w-full accent-accent"
             />
           </Field>
-          <Field label="코멘트 (선택)" error={fieldErrors.comment}>
+          <Field label={t("legacy.writeReviewPage.label1")} error={fieldErrors.comment}>
             <Textarea
               value={comment}
               onChange={(e) => {
@@ -96,8 +98,7 @@ export function WriteReviewPage() {
           {clientError && <Alert>{clientError}</Alert>}
           {error !== null && <CreateReviewError error={error} fieldErrors={fieldErrors} />}
           <Button type="submit" loading={createReview.isPending} className="w-full">
-            리뷰 제출
-          </Button>
+            {t("legacy.writeReviewPage.t2")}</Button>
         </form>
       </div>
     </AppShell>

@@ -1,3 +1,4 @@
+import "../i18n";
 import "@testing-library/jest-dom/vitest";
 import { AiosApiClient } from "@aios/api-client";
 import { classifyForbidden, type MembershipCapabilities, type MembershipView } from "@aios/shared-types";

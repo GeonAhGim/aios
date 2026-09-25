@@ -2,10 +2,12 @@
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-11.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from time import perf_counter
 from uuid import UUID
 
 import pytest
@@ -195,3 +197,30 @@ def test_restate_position_rejects_sequence_gap() -> None:
             late_entry=gapped_entry,
             now=_dt(2026, 9, 10),
         )
+
+
+# ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701 DEEPEN 선례와 동일 패턴) ----
+
+
+@pytest.mark.perf
+def test_restate_position_hot_path_performance() -> None:
+    # restate_position은 소급 정정마다 호출되는 순수 함수(apply_one 재폴드 +
+    # BitemporalRecord 재구성 + check_no_overlap)다. 10,000회 호출이 1s
+    # 내로 끝나야 한다 — I/O 없는 순수 계약의 실측 증명.
+    prior = _prior_record([_ENTRY_1, _ENTRY_2], valid_from=_dt(2026, 9, 4), tx_from=_dt(2026, 9, 4))
+    now = _dt(2026, 9, 10)
+    iterations = 10_000
+
+    started = perf_counter()
+    for _ in range(iterations):
+        restate_position(
+            position_key=_POSITION_KEY,
+            cost_method=CostMethod.FIFO,
+            asset_class=AssetClass.CRYPTO,
+            prior=prior,
+            late_entry=_LATE_ENTRY,
+            now=now,
+        )
+    elapsed = perf_counter() - started
+
+    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"

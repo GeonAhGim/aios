@@ -1,14 +1,16 @@
-"""L4 §9 PLT-25 — 토큰 버킷 포트 + 인메모리 구현.
+"""L4 §9 PLT-25 — Token bucket port + in-memory implementation.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-25, §10.4
 
-`RateLimiter`는 Protocol이라 어댑터 교체가 가능하다. §10.4 미확정 사항대로
-`InMemoryTokenBucket`은 단일 프로세스 전제(멀티 프로세스 배포 시 프로세스 수만큼
-실효 한도가 늘어난다 — Redis 어댑터 전환은 이 리프 범위 밖)다.
+`RateLimiter` is a Protocol, so adapter replacement is possible. As noted in §10.4
+(undecided), `InMemoryTokenBucket` assumes a single process (in a multi-process
+deployment the effective limit scales with the number of processes — switching to a
+Redis adapter is out of scope for this leaf).
 
-`observability/metrics.py`의 `metrics()/set_metrics()` 싱글턴과 동일한 패턴으로
-`limiter()/set_limiter()`를 둔다 — 미들웨어가 매 요청 이 함수를 통해 현재 구현체를
-가져오므로, 통합테스트는 앱을 재구성하지 않고도 `set_limiter(...)`로 격리할 수 있다.
+Following the same pattern as `metrics()/set_metrics()` in `observability/metrics.py`,
+`limiter()/set_limiter()` provide a singleton accessor — the middleware fetches the
+current implementation via this function on every request, so integration tests can
+isolate behavior with `set_limiter(...)` without restructuring the app.
 """
 from __future__ import annotations
 
@@ -39,14 +41,15 @@ class _Bucket:
 
 
 class InMemoryTokenBucket:
-    """정책·키(`(policy.name, key)`)별로 독립된 토큰 버킷을 둔다. 용량은
-    `policy.limit`(버스트 허용치와 동일), 초당 리필률은 `limit / window_seconds`다
-    — 짧은 시간에 `limit`개가 연속으로 몰려도 정확히 `limit`+1번째부터 거부된다
-    (`test_rate_limit_storm.py`의 "121번째 read → 429" 전제).
+    """Maintains an independent token bucket per policy·key (`(policy.name, key)`).
+    Capacity equals `policy.limit` (same as the burst allowance), and the refill rate
+    is `limit / window_seconds` per second — even if `limit` requests arrive in rapid
+    succession, exactly the `limit`+1th request is rejected (assumption in
+    `test_rate_limit_storm.py`: "121st read → 429").
 
-    버킷 dict 접근은 단일 `asyncio.Lock`으로 직렬화한다 — 정책 수(5개) x 활성
-    키 수 규모에서 락 경합은 무시할 만하고, 프로세스 전체에 하나뿐이라 버킷별
-    락을 따로 두는 것보다 구현이 단순하다.
+    Bucket dict access is serialized through a single `asyncio.Lock` — at the scale of
+    ~5 policies × active keys, lock contention is negligible, and having one lock for
+    the entire process is simpler than per-bucket locks.
     """
 
     def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
@@ -79,11 +82,12 @@ class InMemoryTokenBucket:
 
 
 class UnlimitedRateLimiter:
-    """`NullMetrics`(observability/metrics.py)와 같은 역할의 무제한 대역 —
-    항상 허용한다. 기존 라우터 통합테스트 수백 개가 같은 프로세스 안에서
-    같은 IP/subject 키를 반복 사용하므로, 실제 `InMemoryTokenBucket`을 그대로
-    쓰면 이 리프 이후 그 테스트들이 서로 무관하게 429를 맞기 시작한다 —
-    tests/conftest.py가 매 테스트 전후로 이걸로 되돌린다."""
+    """Unlimited band — serves the same role as `NullMetrics` (observability/metrics.py).
+    Always allows. Hundreds of existing router integration tests reuse the same
+    IP/subject keys within the same process, so using the real `InMemoryTokenBucket`
+    would cause those tests to start failing with 429s unrelated to each other —
+    tests/conftest.py restores this limiter before and after each test.
+    """
 
     async def acquire(self, policy: RateLimitPolicy, key: str) -> Decision:
         return Decision(allowed=True, retry_after_s=None, remaining=policy.limit)
@@ -93,11 +97,11 @@ _current_limiter: RateLimiter = InMemoryTokenBucket()
 
 
 def limiter() -> RateLimiter:
-    """프로세스 싱글턴 rate limiter. 기본값은 `InMemoryTokenBucket`."""
+    """Process-singleton rate limiter. Default is `InMemoryTokenBucket`."""
     return _current_limiter
 
 
 def set_limiter(port: RateLimiter) -> None:
-    """싱글턴을 교체한다(테스트는 무제한 대역으로 격리 — tests/conftest.py)."""
+    """Replace the singleton (tests swap to unlimited band for isolation — tests/conftest.py)."""
     global _current_limiter
     _current_limiter = port

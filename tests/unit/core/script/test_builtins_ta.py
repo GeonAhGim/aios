@@ -8,7 +8,11 @@
 (3) 호출 규약 — ident 파생(다중 출력), 기본 파라미터, 선행 na 접두, 다중 입력,
 (4) negative: 미등록 지표·범위 밖 파라미터·lookback 부족·내부 na·bool·arity는 오류
 코드로 거부(폴백 없음). 절대 지연 단언 없음(print + 왕복수 단언).
+(5) DEEPEN(task-2920) 실패 주입: `_call`이 호출마다 다시 하는 레지스트리 조회(get)
+중 예기치 못한 예외는 삼켜지거나 위장되지 않고 원래 타입 그대로 전파되며, 실패한
+호출은 `calls` 장부에 유령 항목을 남기지 않는다.
 """
+
 from __future__ import annotations
 
 import ast
@@ -245,3 +249,34 @@ def test_interior_na_bool_and_length_mismatch_inputs_are_rejected() -> None:
     with pytest.raises(BuiltinCallError) as info:
         sma((Series.of_floats([None] * 6), 2), site)
     assert info.value.reason == "INDICATOR_LOOKBACK_INSUFFICIENT"
+
+
+# ---- DEEPEN(task-2920): 실패 주입(레지스트리 조회 중 예외) ----
+
+
+def test_registry_lookup_failure_during_call_propagates_and_leaves_no_ledger_residue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_call`은 `self._registry.get(name)`(L02 조회)을 try/except 없이 그대로
+    부른다 — 구성 시점(`__init__`)과 달리 호출마다 다시 조회하므로, 레지스트리
+    백엔드가 구성 이후 손상되거나(예: 원격 스펙 저장소 연결 끊김) 예기치 못한
+    예외를 던지는 상황을 시뮬레이션한다. 그 예외가 `BuiltinCallError`로 삼켜지거나
+    부분 결과로 위장되지 않고 원래 타입 그대로(가장 fail-closed한 형태) 즉시
+    전파되고, 실패한 호출이 `calls` 장부(I-10 감사 증거)에 유령 항목을 남기지
+    않으며, 조회를 정상으로 되돌리면 같은 인스턴스가 오염 없이 다시 정상
+    동작함을 확인한다."""
+    ta = TaBuiltins()
+    real_get = ta._registry.get
+
+    def flaky_get(name: str) -> Any:
+        raise OSError("simulated indicator registry backend unavailable")
+
+    monkeypatch.setattr(ta._registry, "get", flaky_get)
+    with pytest.raises(OSError, match="simulated indicator registry backend unavailable"):
+        run("let m = ta.sma(close, 5)", builtins=ta.table)
+    assert ta.calls == ()
+
+    monkeypatch.setattr(ta._registry, "get", real_get)
+    result = run("let m = ta.sma(close, 5)", builtins=ta.table)
+    assert_close(result.bindings["m"], engine_series("SMA", {"timeperiod": 5}))
+    assert len(ta.calls) == 1

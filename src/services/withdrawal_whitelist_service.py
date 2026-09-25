@@ -1,23 +1,26 @@
-"""11.7 — 비상 출금 목적지 화이트리스트 관리.
+"""11.7 — Emergency withdrawal destination whitelist management.
 
 Spec: 기능설계문서_v1.20.md#FD-11.5, 정책문서 7.10-A/20.1-B
 
-FD-10.3(패닉 프롬프트)가 위기 상황에서 참조할 목적지를 평상시에 미리
-등록해둔다 — "위기 상황이 닥친 뒤에는 등록 자체가 불가능"이 실제로
-강제되려면 평상시/위기상황을 구분해야 한다.
+Pre-registers destinations that FD-10.3 (panic prompt) will reference
+during a crisis — to genuinely enforce "registration itself becomes
+impossible after a crisis hits", normal-state and crisis-state must be
+distinguishable.
 
-해석(FD-9 연동): FD-11.5 원문의 "FD-9가 감지한 카운터파티 리스크 심각
-신호가 활성 상태"를 가리킬 별도의 영속 플래그가 FD-9 어디에도 없다 —
-Circuit Breaker(FD-9.4)의 RESTRICTED 이상 레벨을 "위기 상황"으로 재사용
-한다(9.6 Reconciliation이 이미 같은 인프라를 재사용하는 것과 동일 원칙 —
-새 상태를 발명하지 않는다).
+Interpretation (FD-9 integration): FD-9 has no separate persistent flag
+pointing to FD-11.5's "FD-9-detected counterparty risk severity signal
+is active" — reuse Circuit Breaker (FD-9.4) RESTRICTED-or-above levels
+as "crisis state" (same principle as 9.6 Reconciliation reusing the
+same infrastructure — do not invent a new state).
 
-destination_address는 AES-256-GCM으로 암호화 저장(src/core/security/
-encryption.py, 07번 §7.3 CREDENTIAL_ENCRYPTION_KEY 재사용). 삭제(revoke)
-기능은 04번 원문 그대로 의도적으로 제공하지 않는다.
+destination_address is stored encrypted with AES-256-GCM
+(src/core/security/encryption.py, reusing 07 §7.3 CREDENTIAL_ENCRYPTION_KEY).
+The delete (revoke) feature is intentionally not provided, exactly as
+specified in 04.
 
-FD-17.1 이벤트 발행 — 등록 성공 시 "security.withdrawal_whitelist.added"를
-발행한다(4.9 강제원칙 — 이 채널은 사용자가 끌 수 없다, channel_policy.py).
+FD-17.1 event publishing — on successful registration, publishes
+"security.withdrawal_whitelist.added" (4.9 mandatory rule — this
+channel cannot be disabled by the user, channel_policy.py).
 """
 from __future__ import annotations
 
@@ -43,7 +46,7 @@ _CRISIS_LEVELS = {
 
 
 class WithdrawalWhitelistError(Exception):
-    """FD-11.5 등록 거부 — 라우터가 409로 변환."""
+    """FD-11.5 registration rejected — router converts to 409."""
 
 
 class WithdrawalWhitelistEntry(BaseModel):
@@ -91,9 +94,9 @@ class WithdrawalWhitelistService:
                 encrypted_address,
                 label,
             )
-            # destination_address는 절대 남기지 않는다 — 실제 출금 목적지라
-            # audit_log에조차 평문으로 두면 안 됨(어느 거래소에 등록했는지·
-            # 라벨·결과만 기록).
+            # Never leave destination_address in plaintext — it is the actual
+            # withdrawal destination and must not appear even in audit_log
+            # (record only which exchange, label, and result).
             await record_audit_log(
                 conn, actor_agent=str(user_id), action_type="withdrawal_whitelist.registered",
                 user_id=user_id,
@@ -136,9 +139,9 @@ class WithdrawalWhitelistService:
         ]
 
     async def fetch_for_panic_prompt(self, user_id: UUID, exchange: str) -> list[WhitelistEntry]:
-        """FD-10.3 PanicPromptGenerator의 fetch_whitelist DI 콜백
-        시그니처(user_id, exchange) -> list[WhitelistEntry]에 그대로 연결
-        가능하도록 변환한다 — 실제 배선은 앱 조립 단계(16번)에서."""
+        """Convert to FD-10.3 PanicPromptGenerator fetch_whitelist DI callback
+        signature (user_id, exchange) -> list[WhitelistEntry] — wiring
+        happens at app assembly stage (16)."""
         entries = await self.list_for_user(user_id)
         return [
             WhitelistEntry(

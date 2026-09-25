@@ -1,10 +1,10 @@
-"""11.2/11.3 — 인증 API 요청/응답 스키마.
+"""11.2/11.3 — Auth API request/response schemas.
 
 Spec: 16_backend_signatures.md
 
-Service 계층의 User 모델을 그대로 반환하지 않고 항상 이 Response
-모델로 변환한다(16_backend_signatures.md 원칙 — 두 계층이 어긋날
-위험을 방지).
+Always converts the Service-layer User model through this Response
+model rather than returning it directly (per 16_backend_signatures.md —
+prevents divergence between the two layers).
 """
 from __future__ import annotations
 
@@ -27,21 +27,23 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    """PLT-24 — `session_id`를 함께 보내야 하는 이유는
-    `src/services/auth/refresh.py` 모듈 docstring 참조: refresh_hash만으로는
-    회전된 옛 토큰을 역참조할 수 없다."""
+    """PLT-24 — Why `session_id` must be sent alongside the refresh token:
+    see `src/services/auth/refresh.py` module docstring — a refresh_hash alone
+    cannot reverse-reference a rotated (compromised) token."""
 
     session_id: UUID
     refresh_token: str
 
 
 class TokenResponse(BaseModel):
-    """PLT-24 이전 `/auth/register`·`/auth/login` 응답 계약(레거시 단일
-    비회전 JWT) — 두 라우트는 이제 `src.services.auth.tokens.TokenPairResponse`
-    (상위 호환 슈퍼셋: access_token/token_type 유지 + refresh_token/
-    expires_in/session_id 추가)를 반환하므로 라우터에서는 더 이상 쓰지
-    않는다. 필드 삭제는 P5 아키텍처 가드가 계약 파괴로 간주해 거부하므로
-    타입만 유지한다(실제 배선은 routers/auth.py 참조)."""
+    """PLT-24 legacy `/auth/register` / `/auth/login` response contract
+    (single non-rotating JWT) — both routes now return
+    `src.services.auth.tokens.TokenPairResponse` (superset with
+    backward-compatible fields: access_token/token_type kept +
+    refresh_token/expires_in/session_id added), so this class is no longer
+    used by routers. Deleting fields would be rejected by the P5 architecture
+    guard as a contract break, so we keep the type for compatibility only
+    (actual wiring is in routers/auth.py)."""
 
     access_token: str
     token_type: str = "bearer"
@@ -52,10 +54,11 @@ class MfaVerifyRequest(BaseModel):
 
 
 class MfaSetupRequest(BaseModel):
-    """최초 설정(mfa_enabled=false)은 재인증 없이 그대로 허용한다 — 로그인
-    자체가 이미 인증 증명이다. 이미 켜진 MFA를 다시 설정(재발급)하는
-    경우에만 password가 필요하다(레드팀 감사 #11 — Bearer 토큰 탈취만으로
-    기존 secret을 덮어써 2FA를 탈취하는 경로를 막는다)."""
+    """Initial setup (mfa_enabled=false) is allowed without re-authentication —
+    the login itself already serves as proof of identity. password is only
+    required when reconfiguring (reissuing) an already-enabled MFA
+    (Red Team audit #11 — prevents an attacker who stole a Bearer token from
+    overwriting the existing secret and hijacking 2FA)."""
 
     password: str | None = None
     totp_code: str | None = None

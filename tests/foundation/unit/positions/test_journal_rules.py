@@ -4,6 +4,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-5,
 `unit/positions/test_journal_rules.py` DoD("seq 건너뜀 거부, 체인 재계산
 불일치 감지, 변조 1비트 감지").
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -95,9 +96,7 @@ def test_fill_entry_rejects_non_positive_quantity() -> None:
 
 
 def test_funding_entry_has_zero_qty_delta_and_funding_idempotency_key() -> None:
-    entry = funding_entry(
-        funding_id="fnd-1", amount_base=Decimal("-5.5"), occurred_at=_now()
-    )
+    entry = funding_entry(funding_id="fnd-1", amount_base=Decimal("-5.5"), occurred_at=_now())
     assert entry.entry_type is JournalEntryType.FUNDING
     assert entry.qty_delta == Decimal("0")
     assert entry.realized_pnl_base == Decimal("-5.5")
@@ -220,6 +219,19 @@ def test_verify_chain_detects_single_bit_tamper_in_qty_delta() -> None:
     # entry_hash는 그대로 두고 qty_delta만 바꾼다 — digest 재계산이 어긋나
     # entry_hash 불일치로 이어져야 한다.
     entries[2] = entries[2].model_copy(update={"qty_delta": entries[2].qty_delta + Decimal("1")})
+    with pytest.raises(ChainIntegrityError):
+        verify_chain("pk", entries)
+
+
+def test_verify_chain_detects_entry_type_only_tamper_not_covered_by_digest() -> None:
+    """게이트 적색 재현: `digest_for`는 `entry_type`을 입력에 포함하지
+    않는다(모듈 docstring 참고 — 재전송 판정은 qty_delta/price/fee/occurred_at
+    만 본다). `entry_type`을 FILL에서 FUNDING으로 바꿔치기해도(다른 필드는
+    그대로) `entry_hash_for`는 이를 직접 입력받으므로 `verify_chain`이 여전히
+    체인 단절로 탐지해야 한다 — entry_hash 배선이 실수로 digest와 같은
+    필드만 재계산했다면 이 케이스만 조용히 통과했을 것이다."""
+    entries = _valid_chain(3)
+    entries[1] = entries[1].model_copy(update={"entry_type": JournalEntryType.FUNDING})
     with pytest.raises(ChainIntegrityError):
         verify_chain("pk", entries)
 

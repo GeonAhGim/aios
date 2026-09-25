@@ -85,3 +85,171 @@ PLT-44 잔여 배치를 `role: copilot` task로 만들어 오케스트레이터�
 ops/copilot 워커가 도는 환경)에 유효한 GitHub 자격증명을 어떻게 공급할지 — (a) 그 환경에서 `gh auth login`
 1회 수행, (b) Copilot coding agent·repo 스코프를 가진 PAT를 `GH_TOKEN`으로 주입, 둘 중 결정해야 파일럿을
 재시도할 수 있다.
+
+## Amended (2026-09-10, OPS-34 task-2941) — 레인 v2: dirty PR 처리·격리 경로 제한·풀 재개 조건
+
+**현상**: 인증 문제 해결 후 파일럿이 재개됐고, Copilot PR 4~5건이 "Ready for review" 직전(draft)
+상태로 만들어졌으나 그사이 `main`이 빨리 움직여 여러 건이 `mergeable=CONFLICTING`(dirty)이 됐다.
+D1의 원래 폴링 로직은 dirty를 별도로 다루지 않고 체크 결과만 봤기 때문에, 체크가 아예 돌지 않는
+draft PR은 `pr_stale_hours`(기본 3h) 타임아웃으로 로컬 레인 전환만 반복했다 — PR 자체는 방치되고
+(자동 close 없음, D1 원문 그대로), Copilot 세션 비용만 반복 소모했다.
+
+### A1. dirty(mergeable=CONFLICTING) 전용 분기 추가
+`reap_copilot`이 `gh pr view`의 `mergeable` 필드가 `CONFLICTING`인 OPEN PR을 만나면, 기존처럼
+체크 결과를 기다리지 않고 `gh pr update-branch`를 **1회만** 시도한다.
+- 성공(rc=0): 새 커밋에서 체크가 다시 돌아야 하므로 이번 폴링에서는 merge/close 없이 대기한다.
+- 실패(rc≠0, 즉 진짜 충돌이라 자동 병합 불가) 또는 이미 한 번 시도했는데도 여전히 dirty: PR을
+  사유를 담은 코멘트와 함께 `gh pr close`하고, 파일 경로로 추정한 원래 축(frontend/ 접두면
+  frontend, 아니면 backend)으로 되돌린다(`_copilot_close_and_revert`). `pr_stale_hours` 타임아웃을
+  기다리지 않는다 — dirty는 시간이 지나도 저절로 안 풀리는 상태이기 때문이다.
+- D3(우리 게이트가 검증)는 그대로 유지: update-branch로 살아난 PR도 정상 체크 통과 후에만
+  기존 merge 경로(D1)를 탄다.
+
+### A2. 격리 경로 리프만 배정 (`tiers.yaml: isolated_paths`)
+D2("보낸다: 기계적·대량 작업")를 구체적인 판정 규칙으로 좁힌다. `orchestrator.is_isolated_leaf()`가
+`tiers.yaml`의 `isolated_paths`(`frontend/*`·`docs/*`·`tests/*`)와 대조해, 리프의 `files` 전부가
+그 패턴에 맞거나(예외: 파일이 정확히 1개고 저장소에 아직 없는 신규 파일 — "단일 모듈 신규 파일")
+아니면 copilot 레인 배정을 거부한다. `spawn_copilot`은 gh를 부르기 전에
+`reroute_non_isolated_copilot`으로 기준을 벗어난 task를 먼저 로컬 레인으로 되돌린다 — base가 빨리
+움직이는 기존 src 파일을 copilot에 보내는 것 자체가 A1이 다루는 dirty 발생의 주 원인이었다.
+
+### A3. 풀 재개 조건
+CTO가 반복되는 dirty/재시도 낭비 때문에 `pools.yaml`의 `copilot.size`를 0으로 내렸다. A1·A2 구현과
+단위테스트 통과를 재개 1단계 조건으로 삼아 size 1로 올린다. 이후 24시간 관찰한 머지율
+(`merged / (merged + closed)`, dirty-close 포함)이 50% 이상이면 size 2로 올린다. 50% 미만이면
+size를 다시 0으로 내리는 task를 발행하고 원인(격리 경로 판정 누락·update-branch 실패 패턴 등)을
+조사한다.
+
+### 처리 결과 (2026-09-10, task-2941 배정 시점의 실측)
+당시 열려 있던 Copilot PR 5건: #9(DC-16 backfill_job)·#10(BT-12 tearsheet)·#11(DSL-14
+lexer/parser)·#30(IND-8 dsl_indicator, WIP)·#31(DC-24 provider.py 확장, WIP).
+- #9·#10·#11: `mergeStateStatus=DIRTY`(`mergeable=CONFLICTING`), 전부 draft. 대응하는 로컬 task
+  (2158·2159·2307)는 이미 `pr_stale_hours` 타임아웃으로 backend 레인으로 전환된 뒤 완료
+  (QA·Review·DEEPEN 후속까지 끝남) — 즉 이 PR들의 작업은 로컬에서 이미 대체됐다. A1 로직을 수동
+  적용해(update-branch를 시도할 가치가 없는, 이미 superseded된 중복 draft라 바로) 사유 코멘트와
+  함께 close 처리했다.
+- #30·#31: `mergeable=MERGEABLE`이지만 `mergeStateStatus=UNSTABLE`(체크 미완료), 아직 `[WIP]` —
+  dirty가 아니고 대응하는 로컬 task(2308·2552)도 아직 시작 전이라 중복이 없다. 그대로 열어 둔다.
+
+## 파일럿 결과 재확인 (2026-09-10, DEEPEN task-3194)
+
+task-2149가 "코드 변경 없음(ADR 문서뿐)"으로 DEEPEN 리프를 받았다 — PLT-44 배치 자체가 한 번도
+실제로 생성되지 않아 PR/CI 통과·머지의 실증 증거가 없다는 QA 판정(process-verification 리프).
+이번 리프에서 실제로 PLT-44를 20건 단위 배치로 잘라 `role: copilot` task를 새로 만들고 전 과정을
+관찰하려 했으나, **2026-09-08 최초 파일럿과 정확히 같은 사전 점검 단계에서 다시 막혔다**:
+
+- 명령 인터페이스: 정상. `gh --version` 2.98.0, `gh agent-task --help`가 `create/list/view`
+  서브커맨드를 그대로 보여준다(여전히 preview).
+- 권한: **다시 실패.** 이 실행 환경(`C:\aios\wt\ops-1` worker worktree)에서 `gh auth status`·
+  `gh api user`가 "not logged in"으로 실패한다. `gh auth token`은 문자열(`gho_...`)을 반환하지만
+  그 토큰으로 `gh api user`를 호출해도 인증되지 않는다 — 2026-09-08 노트가 기록한 것과 동일한
+  증상. Amended 절(OPS-34, task-2941)이 "인증 문제 해결 후 파일럿이 재개됐다"고 적은 걸 보면
+  한 번은 어딘가(오케스트레이터 상주 프로세스 환경일 가능성이 크다)에서 인증이 됐었는데, 그
+  상태가 이 worktree/워커 실행 환경까지 이어지지 않는다는 원래 관찰이 그대로 재현됐다 — 즉
+  자격증명이 영구적으로(모든 실행 환경에) 공급된 적이 없고, 그때그때 한 프로세스에만 있다가
+  사라지는 상태로 보인다.
+- 게이트: 다시 관찰 못 함(PR이 생성되지 않았다).
+- 소요 시간·프리미엄 요청 수: 해당 없음(파일럿이 또 시작되지 않았다).
+- 조치: 원래 파일럿 노트의 판단을 그대로 따라 **PLT-44 배치 절단·`role: copilot` task 생성·
+  원본 task-1759 갱신은 이번에도 보류했다** — 인증 없이 만들면 오케스트레이터가 매 주기
+  `gh agent-task create`를 재시도만 하다 실패하는 assigned task 하나가 쌓일 뿐, PR/CI 증거는
+  여전히 생기지 않는다(실패 모드 자체는 안전하다 — `spawn_copilot`이 로그만 남기고 continue).
+  대신 fleet 코드(`orchestrator.py`) 쪽의 실제 결함 하나를 고쳤다: `gh_authenticated()`와
+  `spawn_copilot`의 미인증 분기가 "`escalations/esc-copilot-gh-auth.json` 참고"라고 2026-09-08부터
+  안내했지만, 그 파일을 실제로 쓰는 코드가 없어서 사람이 로그를 직접 뒤져야만 이 재발을 알 수
+  있었다. 이제 미인증이 감지되면 그 파일을 실제로 쓰고(인증 복구 시 자동 삭제) `dashboard.py`가
+  이미 읽는 `escalations/*.json` 규약에 얹어 대시보드에 드러나게 했다 — 파일럿 자체를 통과시키진
+  못했지만, 다음에 같은 인증 공백이 또 생겼을 때 사람이 더 빨리 알 수 있게 하는 것이 이 리프에서
+  낼 수 있는 유일한 실질 진전이라고 판단했다.
+
+**PM/CA 결정 필요(반복)**: 2026-09-08 노트와 동일한 질문이 여전히 해결되지 않았다 — 오케스트레이터
+상주 프로세스(`C:\aios\pm`)와 ops/copilot 워커가 실제로 도는 환경에 **영구적인** GitHub 자격증명을
+어떻게 공급할지: (a) 그 환경들 각각에서 `gh auth login` 1회 수행, (b) Copilot coding agent·repo
+스코프를 가진 PAT를 `GH_TOKEN` 환경변수로 주입(프로세스 재시작에도 유지되도록 시스템 환경변수
+또는 서비스 정의에 고정). 이 결정 없이는 PLT-44 파일럿을 세 번째로 재시도해도 같은 지점에서
+막힐 것이다.
+
+## 파일럿 재확인 (2026-09-10, 미이행 후속 회수 task-3534)
+
+task-3194의 note가 "PLT-44 배치/role:copilot task 생성 보류 + PM/CA 결정 필요"를 미이행 항목으로
+남겨 leak_scan이 이 리프를 자동 발행했다. 재확인 결과, **이번에는 이 worker worktree
+(`C:\aios\wt\ops-1`)에서 `gh auth status`·`gh api user`가 성공한다** — 2026-09-08·2026-09-10(task-3194)
+두 차례 재발했던 "not logged in" 증상이 이번 실행에서는 재현되지 않았다:
+
+- `gh --version` 2.98.0, `gh auth status` → `Logged in to github.com account ... (keyring)`,
+  `gh api user` → 정상 JSON 응답.
+- `escalations/esc-copilot-gh-auth.json`도 없다(task-3194가 추가한 `gh_authenticated()`가 인증
+  성공 시 이 파일을 지우므로 일관된 상태) — orchestrator.py 쪽 코드는 이미 올바르게 동작하고
+  있어 이번 리프에서 추가로 고칠 결함이 없었다.
+- 다만 이전 노트가 이미 지적한 대로 이 자격증명은 "그때그때 한 프로세스에만" 있다가 사라지는
+  것으로 보인다 — 영구 공급 방법(로그인 vs `GH_TOKEN` 고정)에 대한 PM/CA 결정은 여전히 없다.
+  이번 재확인은 그 결정을 대체하지 않는다: 다음 워커/오케스트레이터 실행에서 다시 미인증으로
+  돌아갈 수 있고, 그 경우도 안전한 실패 모드(assigned 유지 + escalation 파일)로 이미 처리된다.
+
+인증은 됐지만 PLT-44 배치 자체는 이번 리프에서도 만들지 않았다: 현재 `type-ignore-budget.txt`는
+201인데 실측 `check_type_ignore_budget.py`는 242개로 다시 예산을 초과한 상태다(task-1759류
+회귀가 또 발생, 이 저장소에서 반복돼 온 패턴). 어느 20건을 배치로 자를지는 kis/bitget BR 축
+제외(task-1759 decision) 등 도메인 판단이 필요해 ops 리프 범위를 벗어난다 — 대신 backend 역할
+follow-up task를 새로 발행해 배치 절단과 `role: copilot` 전환을 위임했다(task 상세는 fleet
+task store 참고).
+
+## Amended 2026-09-10 (D5 automatic routing, CTO)
+- User directive: use GitHub Copilot, Codex CLI and Cursor CLI actively and automatically.
+- Routing moves from the PM prompt to the orchestrator (`orchestrator.auto_route_external`, every poll):
+  ready, non-S-tier, non-retry, non-refactor-wide backend/frontend leaves are moved into external lanes in the
+  order copilot (isolated paths only) -> codex-impl -> cursor-local, each up to `size * 2` (queue buffer).
+- A lane task that fails once is bounced back to its original Claude lane (different eyes), except while every
+  Claude model is under a recorded limit, in which case P0 leaves are also routed externally. Tier S never leaves
+  the Claude lane (ADR-2026-09-09-E). `codex-local` stays the XREV cross-engine review lane; implementation uses the
+  new `codex-impl` pool. `task.orig_role` keeps repository, prompt and follow-up routing on the original axis.
+- cursor-agent 2026.08.31 is installed natively on the Windows host (LOCALAPPDATA/cursor-agent) and works in
+  `-p` stdin mode; `cursor-local` size 1. External lanes are excluded from OPS-12 rebalancing (subscription
+  quotas, not RAM, are their bound).
+- Tests: pm tests/test_auto_route_external.py, tests/test_engines.py.
+
+## 파일럿 재확인 (2026-09-16, backend follow-up task-3544)
+
+task-3534(ops)가 "배치 절단은 backend 도메인 판단(BR축 제외) 필요"로 위임한 후속. 이번 재확인에서
+지난 세 차례(2026-09-08, task-3194, task-3534)와 다른 지점에서 추가로 막혔다 — gh 인증만이
+유일한 걸림돌이 아니었다.
+
+- **gh 인증**: 이번에도 실패. 이 worktree(`C:\aios\wt\backend-1`)에서 `gh auth status` →
+  "You are not logged into any GitHub hosts." task-3534(ops-1 worktree)의 성공과 다시 엇갈린다 —
+  이전 노트들의 "그때그때 한 프로세스에만 있다가 사라진다" 관찰이 그대로 재현됐다. 영구 공급
+  방법(로그인 vs `GH_TOKEN` 고정)에 대한 PM/CA 결정은 여전히 없다.
+- **예산 전제 자체가 낡았다**: task-3534 노트가 적은 "`type-ignore-budget.txt`=201, 실측=242(회귀)"는
+  이번 리프 시작 시점에는 이미 사실이 아니다. commit `7e3c4c7d`(task-2683, KIS 잔여 43건 제거)가
+  이 리프 이전에 main에 반영돼 있어, 실측 재실행 결과 `type-ignore-budget.txt`=152, 실제
+  `check_type_ignore_budget.py`=152로 예산 초과가 없다(OK). 즉 "예산 회귀를 해소할 20건"이라는
+  급박성은 이번 시점에는 존재하지 않는다 — 파일럿은 여전히 유효한 목적(D1~D3 배관 실증)이지만,
+  긴급한 예산 위반 해소가 아니라 순수 기술부채 감축 + 파이프라인 실증 목적으로 재정의해야 한다.
+- **src/ 배치는 격리 경로 판정에 원천적으로 걸린다**: 남은 152건 중 kis/bitget(BR축, 어댑터
+  파일명 기준 `kis_provider.py`/`bitget_provider.py` 포함)을 제외한 `src/` 후보는 14건뿐이다 —
+  `src/api/routers/backtests.py`(1), `src/core/indicators/generate_specs.py`(11),
+  `src/foundation/evidence/domain/rules.py`(1), `src/services/execution_loop/equity_tracker.py`(1),
+  `src/services/execution_loop/scheduler.py`(1). 20건에 못 미칠 뿐 아니라, `src/*`는 애초에
+  `tiers.yaml: isolated_paths`(`frontend/*`·`docs/*`·`tests/*`)에 없는 경로라 A2(`orchestrator.
+  reroute_non_isolated_copilot`)가 `gh agent-task create` 호출 전에 해당 task를 무조건 로컬
+  레인으로 되돌린다 — src/ 배치로 만드는 순간 이번 파일럿의 DoD("오케스트레이터가 실제로 gh
+  agent-task create를 호출하는 것까지 관찰")는 인증 여부와 무관하게 항상 실패한다.
+  반면 실측 152건 중 125건(`tests/unit` 60, `tests/foundation` 39, `tests/integration` 22,
+  `tests/adversarial` 4)이 `tests/*`에 있고, 이 경로는 이미 격리 경로 허용 목록에 있다 — 파일럿을
+  실제로 gh 호출까지 밀어붙이려면 배치를 `tests/*`로 잡아야 한다(BR축 제외 원칙은 kis/bitget
+  전용 fixture·테스트에 그대로 적용).
+- **role:copilot task 생성 자체가 backend worker 권한 밖**: `C:\aios\pm\CLAUDE.md`("새 task는
+  `create_task`로만 만든다")와 `.claude/hooks/deny_live_pm_writes.py`(라이브 `tasks/*.json` 직접
+  편집 차단)에 따르면 새 task 파일은 `orchestrator.create_task`(오케스트레이터/CA 스크립트 전용)
+  경로로만 만들어진다 — 이 저장소 CLAUDE.md §4("task 상태 갱신은 자기 task 파일에만")와 정합적인
+  제약이다. backend-1 worker는 자기 task-3544.json 갱신 권한만 있고, 새 task-<id>.json을 직접
+  만들 권한이 없다. 지난 세 차례의 "인증 없으면 만들지 않는다"는 판단은 옳았지만, 인증이 됐어도
+  이 권한 경계 때문에 backend/ops worker가 직접 role:copilot task를 만들 수는 없었다 — 이번에
+  처음 드러난 사실이다.
+
+**PM/CA 결정 필요**: 위 네 가지가 모두 해소돼야 파일럿이 실제로 PR 생성까지 간다. 제안:
+(1) `type-ignore-budget.txt`는 이제 152=152로 정상이므로, 이 배치를 "예산 회귀 해소"가 아니라
+"D2 기준 기계적 대량 작업"으로 재분류해 PM/CA가 직접(또는 ops task로) `create_task`를 호출한다.
+(2) 새 task의 `files`는 `tests/unit`·`tests/foundation`에서 kis/bitget 전용 파일을 제외한 20건
+내외로 잡아 격리 경로 판정을 통과시킨다. (3) spawn 시점 `gh_authenticated()` 재확인은 오케스트레이터
+자기 프로세스 기준이므로 이 리프의 worktree 실패가 spawn 실패를 보장하지는 않는다 — 실제 관찰은
+task 생성 후 오케스트레이터 로그로 한다. (4) 영구 GitHub 자격증명 공급(로그인 vs `GH_TOKEN`)은
+여전히 미결이며 이번에도 대체하지 않는다.

@@ -1,12 +1,14 @@
 import { Alert, Button, Field, Input } from "@aios/ui-web";
 import type { ChartLayoutControls } from "./ChartToolbar";
 import { type ButtonSpec, useRovingToolbar } from "./useRovingToolbar";
+import { useTranslation } from "react-i18next";
 
 interface LayoutPanelControlsProps {
   layout: ChartLayoutControls;
 }
 
 export function LayoutPanelControls({ layout }: LayoutPanelControlsProps) {
+  const { t } = useTranslation();
   const panelButtons: ButtonSpec[] = layout.panels.map((p) => ({ id: `panel-${p.id}`, disabled: false }));
   const { groupRef, tabIndexFor, onFocusButton, onKeyDown } = useRovingToolbar(panelButtons);
   const conflictMessage =
@@ -18,20 +20,18 @@ export function LayoutPanelControls({ layout }: LayoutPanelControlsProps) {
 
   return (
     <>
-      <Field label="레이아웃 이름">
-        <Input aria-label="레이아웃 이름" value={layout.name} onChange={(e) => layout.onNameChange(e.target.value)} />
+      <Field label={t("legacy.layoutPanelControls.label1")}>
+        <Input aria-label={t("legacy.layoutPanelControls.ariaLabel2")} value={layout.name} onChange={(e) => layout.onNameChange(e.target.value)} />
       </Field>
       <Button type="button" variant="secondary" size="sm" disabled={layout.saveStatus === "saving"} onClick={layout.onSave}>
-        레이아웃 저장
-      </Button>
+        {t("legacy.layoutPanelControls.t3")}</Button>
       <Button type="button" variant="ghost" size="sm" onClick={layout.onDelete}>
-        레이아웃 삭제
-      </Button>
+        {t("legacy.layoutPanelControls.t4")}</Button>
       <Button type="button" variant="ghost" size="sm" aria-pressed={layout.isWatchlisted} onClick={layout.onToggleWatchlist}>
         {layout.isWatchlisted ? "관심목록 제거" : "관심목록 추가"}
       </Button>
 
-      <div ref={groupRef} role="tablist" aria-label="차트 패널" className="flex items-center gap-1" onKeyDown={onKeyDown}>
+      <div ref={groupRef} role="tablist" aria-label={t("legacy.layoutPanelControls.ariaLabel5")} className="flex items-center gap-1" onKeyDown={onKeyDown}>
         {layout.panels.map((p) => {
           const id = `panel-${p.id}`;
           return (
@@ -54,14 +54,14 @@ export function LayoutPanelControls({ layout }: LayoutPanelControlsProps) {
             </button>
           );
         })}
-        <Button type="button" variant="ghost" size="sm" aria-label="패널 추가" onClick={layout.onAddPanel}>
+        <Button type="button" variant="ghost" size="sm" aria-label={t("legacy.layoutPanelControls.ariaLabel6")} onClick={layout.onAddPanel}>
           ＋
         </Button>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          aria-label="패널 제거"
+          aria-label={t("legacy.layoutPanelControls.ariaLabel7")}
           disabled={layout.panels.length <= 1}
           onClick={layout.onRemovePanel}
         >
@@ -73,8 +73,7 @@ export function LayoutPanelControls({ layout }: LayoutPanelControlsProps) {
         <Alert tone="warning">
           <p>{conflictMessage}</p>
           <Button type="button" variant="secondary" size="sm" onClick={layout.onReload}>
-            다시 불러오기
-          </Button>
+            {t("legacy.layoutPanelControls.t8")}</Button>
         </Alert>
       )}
     </>

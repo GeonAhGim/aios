@@ -29,7 +29,12 @@ fail-closed rules (DoD):
 - ticks outside every session window are excluded because only session-
   window-derived opens are ever aggregated over; there is no separate
   in-session check to reimplement (LA-3 delegation).
+- ticks whose `venue` does not match `calendar.venue` are rejected
+  (`VenueMismatchError`) rather than aggregated — the wrong calendar's
+  session windows would otherwise exclude every tick without warning
+  (§9.10 XREV, task-3723 cross-review).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,12 +46,13 @@ from src.foundation.market_data.contracts.v2.candle_lineage import SourceKind, T
 from src.foundation.market_data.contracts.v2.microstructure import TradeTick
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from src.foundation.market_data.domain.candle_columns import CandleColumns
-from src.foundation.market_data.domain.timeframe import duration, expected_opens
+from src.foundation.market_data.domain.timeframe import align_open, duration, expected_opens
 
 __all__ = [
     "TickToCandleResult",
     "UnsortedTicksError",
     "MixedSeriesError",
+    "VenueMismatchError",
     "SessionNotFoundError",
     "ticks_to_candles",
 ]
@@ -65,6 +71,16 @@ class MixedSeriesError(ValueError):
     """`MD_TICK_TO_CANDLE_MIXED_SERIES` — all ticks passed to one call must
     share a single `(venue, instrument_id)`; mixing series would silently
     blend two symbols' prints into one OHLCV bar."""
+
+
+class VenueMismatchError(ValueError):
+    """`MD_TICK_TO_CANDLE_VENUE_MISMATCH` — the ticks' `venue` does not match
+    `calendar.venue`. Without this check, e.g. BITGET (24x7) ticks aggregated
+    against a KIS_KRX (weekday, exchange-hours) calendar would have every
+    tick outside KRX's session windows silently excluded (§9.10 XREV,
+    task-3723 cross-review) — a Sunday BITGET print would produce zero
+    candles instead of raising, quietly dropping valid trades rather than
+    surfacing the caller's calendar/venue mismatch."""
 
 
 class SessionNotFoundError(ValueError):
@@ -129,6 +145,35 @@ def _empty_result() -> TickToCandleResult:
     return TickToCandleResult(columns=empty, lineage=())
 
 
+def _validate_series(ticks: list[TradeTick], calendar: VenueCalendar) -> None:
+    """Raise if `ticks` is not a single, sorted, on-venue series. Split out of
+    `ticks_to_candles` so the three independent checks (mixed series, venue
+    mismatch, unsorted input) score separately instead of stacking onto the
+    aggregation loop's cognitive complexity."""
+    venue = ticks[0].venue
+    instrument_id = ticks[0].instrument_id
+    for tick in ticks:
+        if tick.venue != venue or tick.instrument_id != instrument_id:
+            raise MixedSeriesError(
+                f"ticks_to_candles requires a single (venue, instrument_id) series: "
+                f"got {tick.venue!r}/{tick.instrument_id!r} alongside {venue!r}/{instrument_id!r}"
+            )
+
+    if venue.value != calendar.venue:
+        raise VenueMismatchError(
+            f"ticks are for venue={venue.value!r} but calendar.venue={calendar.venue!r} — "
+            "aggregating against the wrong venue's calendar would silently exclude every "
+            "tick outside that calendar's session windows instead of raising"
+        )
+
+    for i in range(len(ticks) - 1):
+        if ticks[i].ts_event > ticks[i + 1].ts_event:
+            raise UnsortedTicksError(
+                f"tick at index {i} (ts_event={ticks[i].ts_event}) is newer than "
+                f"index {i + 1} (ts_event={ticks[i + 1].ts_event})"
+            )
+
+
 def ticks_to_candles(
     ticks: list[TradeTick], tf: Timeframe, calendar: VenueCalendar
 ) -> TickToCandleResult:
@@ -139,27 +184,17 @@ def ticks_to_candles(
     if not ticks:
         return _empty_result()
 
-    venue = ticks[0].venue
-    instrument_id = ticks[0].instrument_id
-    for tick in ticks:
-        if tick.venue != venue or tick.instrument_id != instrument_id:
-            raise MixedSeriesError(
-                f"ticks_to_candles requires a single (venue, instrument_id) series: "
-                f"got {tick.venue!r}/{tick.instrument_id!r} alongside {venue!r}/{instrument_id!r}"
-            )
-
-    for i in range(len(ticks) - 1):
-        if ticks[i].ts_event > ticks[i + 1].ts_event:
-            raise UnsortedTicksError(
-                f"tick at index {i} (ts_event={ticks[i].ts_event}) is newer than "
-                f"index {i + 1} (ts_event={ticks[i + 1].ts_event})"
-            )
-
+    _validate_series(ticks, calendar)
     deduped = _dedupe_sorted(ticks)
     tick_dt = [_ts_event_to_utc(t.ts_event) for t in deduped]
 
     step = duration(tf)
-    range_start = tick_dt[0]
+    # tick_dt[0] itself is almost never grid-aligned (a trade can print at any
+    # second). Using it as range_start would make expected_opens's `start <=
+    # cursor` filter exclude the (grid-aligned, earlier) open of the window
+    # that actually contains tick_dt[0] -- silently dropping every tick in
+    # that leading partial window instead of aggregating them.
+    range_start = align_open(tick_dt[0], tf)
     range_end = tick_dt[-1] + step
     sessions = _sessions_between(calendar, range_start, range_end)
     opens = expected_opens(range_start, range_end, tf, sessions)

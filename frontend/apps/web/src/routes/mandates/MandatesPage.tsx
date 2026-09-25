@@ -14,16 +14,18 @@ import { AppShell } from "../../components/layout/AppShell";
 import { MandateActionError } from "./MandateActionError";
 import { MandatePolicyPanel } from "./MandatePolicyPanel";
 import { MandateRuleForm } from "./MandateRuleForm";
+import { useTranslation } from "react-i18next";
 
 function RevisionRules({ revision }: { revision: MandateRevisionView }) {
+  const { t } = useTranslation();
   return (
     <ul className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-fg-muted">
-      <li>총 노출 한도: {revision.maxTotalExposurePct}%</li>
-      <li>단일 종목 한도: {revision.maxSingleInstrumentPct}%</li>
-      <li>최소 현금 버퍼: {revision.minCashBufferPct}%</li>
-      <li>일일 손실 한도: {revision.maxDailyLossPct}%</li>
-      <li>허용 자율성: {revision.allowedAutonomy}</li>
-      <li>금지 자산: {revision.forbiddenAssets.length > 0 ? revision.forbiddenAssets.join(", ") : "없음"}</li>
+      <li>{t("legacy.mandatesPage.t1", { maxTotalExposurePct: revision.maxTotalExposurePct })}</li>
+      <li>{t("legacy.mandatesPage.t2", { maxSingleInstrumentPct: revision.maxSingleInstrumentPct })}</li>
+      <li>{t("legacy.mandatesPage.t3", { minCashBufferPct: revision.minCashBufferPct })}</li>
+      <li>{t("legacy.mandatesPage.t4", { maxDailyLossPct: revision.maxDailyLossPct })}</li>
+      <li>{t("legacy.mandatesPage.t5", { allowedAutonomy: revision.allowedAutonomy })}</li>
+      <li>{t("legacy.mandatesPage.t6")}{revision.forbiddenAssets.length > 0 ? revision.forbiddenAssets.join(", ") : "없음"}</li>
     </ul>
   );
 }
@@ -45,14 +47,15 @@ function ActiveRevisionCard({
   resumePending: boolean;
   lifecycleError: unknown;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <div className="flex items-center gap-2">
-        <h2 className="font-medium text-fg">현재 활성 리비전</h2>
+        <h2 className="font-medium text-fg">{t("legacy.mandatesPage.t7")}</h2>
         {activeRevision ? (
           <StatusBadge status={activeRevision.state} />
         ) : (
-          <Badge tone="warning">위임장 미설정(주문 차단)</Badge>
+          <Badge tone="warning">{t("legacy.mandatesPage.t8")}</Badge>
         )}
       </div>
       {activeRevision ? (
@@ -61,13 +64,11 @@ function ActiveRevisionCard({
           <div className="mt-3">
             {activeRevision.state === "ACTIVE" && (
               <Button type="button" variant="secondary" size="sm" loading={pausePending} onClick={onPause}>
-                일시정지
-              </Button>
+                {t("legacy.mandatesPage.t9")}</Button>
             )}
             {activeRevision.state === "PAUSED" && (
               <Button type="button" variant="secondary" size="sm" loading={resumePending} onClick={onResume}>
-                재개
-              </Button>
+                {t("legacy.mandatesPage.t10")}</Button>
             )}
           </div>
           {lifecycleError !== null && (
@@ -78,14 +79,14 @@ function ActiveRevisionCard({
         </>
       ) : (
         <p className="mt-2 text-sm text-fg-muted">
-          활성 위임장이 없습니다 — 규칙이 없다는 뜻이 아니라 모든 주문이 차단된다는 뜻입니다.
-        </p>
+          {t("legacy.mandatesPage.t11")}</p>
       )}
     </Card>
   );
 }
 
 export function MandatesPage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, error, refetch } = useMandateStatus();
   const createDraft = useCreateMandateDraft();
   const proposeAmendment = useProposeMandateAmendment();
@@ -122,7 +123,7 @@ export function MandatesPage() {
     return (
       <AppShell>
         <div className="space-y-6">
-          <PageHeader title="위임장(Mandate)" />
+          <PageHeader title={t("legacy.mandatesPage.title12")} />
           <MandateActionError error={error} onRetry={() => refetch()} />
         </div>
       </AppShell>
@@ -133,7 +134,7 @@ export function MandatesPage() {
     return (
       <AppShell>
         <div className="space-y-6">
-          <PageHeader title="위임장(Mandate)" />
+          <PageHeader title={t("legacy.mandatesPage.title13")} />
           <LoadingState />
         </div>
       </AppShell>
@@ -145,7 +146,7 @@ export function MandatesPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="위임장(Mandate)" />
+        <PageHeader title={t("legacy.mandatesPage.title14")} />
 
         <ActiveRevisionCard
           activeRevision={activeRevision}
@@ -157,7 +158,7 @@ export function MandatesPage() {
         />
 
         <Card>
-          <h2 className="font-medium text-fg">대기 중 개정안</h2>
+          <h2 className="font-medium text-fg">{t("legacy.mandatesPage.t15")}</h2>
           {pendingRevision ? (
             <>
               <div className="mt-1">
@@ -166,8 +167,7 @@ export function MandatesPage() {
               <RevisionRules revision={pendingRevision} />
               <div className="mt-3">
                 <Button type="button" loading={activate.isPending} onClick={() => handleActivate(pendingRevision.id)}>
-                  활성화
-                </Button>
+                  {t("legacy.mandatesPage.t16")}</Button>
               </div>
               {/* DoD(b): CM-5 직무분리 위반은 버튼을 비활성화하지 않고 거부 사유를
                   노출한다 — MandateActionError가 그 배너를 담당한다. */}

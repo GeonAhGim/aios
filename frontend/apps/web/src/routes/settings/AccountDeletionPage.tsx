@@ -14,6 +14,7 @@ import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { exchangeLabel } from "../../lib/exchangeLabels";
+import { useTranslation } from "react-i18next";
 
 // 17번 문서 라우팅 표에 출금 화이트리스트(FD-11.5) 전용 화면이 없어(스펙
 // 누락으로 판단) 계정 보안 성격이 같은 이 화면에 함께 둔다.
@@ -36,6 +37,7 @@ function AccountSecurityError({ error }: { error: unknown }) {
 }
 
 export function AccountDeletionPage() {
+  const { t } = useTranslation();
   const { data: whitelist, isLoading: whitelistLoading } = useWhitelistEntries();
   const registerWhitelist = useRegisterWhitelistEntry();
   const [wlExchange, setWlExchange] = useState("bitget");
@@ -65,7 +67,7 @@ export function AccountDeletionPage() {
       setWlLabel("");
       setWlPassword("");
     } catch (err) {
-      setWlError(err instanceof ApiError ? err : new Error("등록에 실패했습니다."));
+      setWlError(err instanceof ApiError ? err : new Error(t("legacy.accountDeletionPage.t15")));
     }
   }
 
@@ -75,23 +77,22 @@ export function AccountDeletionPage() {
     try {
       const result = await requestDeletion.mutateAsync({ password: deletePassword });
       setDeletionResult(
-        `탈퇴가 예약됐습니다. ${new Date(result.deletionEffectiveAt).toLocaleString()}에 확정됩니다.`,
+        t("legacy.accountDeletionPage.t16", { val: new Date(result.deletionEffectiveAt).toLocaleString() }),
       );
     } catch (err) {
-      setDeleteError(err instanceof ApiError ? err : new Error("탈퇴 요청에 실패했습니다."));
+      setDeleteError(err instanceof ApiError ? err : new Error(t("legacy.accountDeletionPage.t17")));
     }
   }
 
   return (
     <AppShell>
       <div className="max-w-lg space-y-8">
-        <PageHeader title="계정 보안 설정" />
+        <PageHeader title={t("legacy.accountDeletionPage.title1")} />
 
         <Card>
-          <CardTitle>비상 출금 목적지 화이트리스트</CardTitle>
+          <CardTitle>{t("legacy.accountDeletionPage.t2")}</CardTitle>
           <p className="mb-4 text-xs text-fg-muted">
-            위기 상황이 닥친 뒤에는 신규 등록이 불가능합니다 — 평상시에 미리 등록해두세요.
-          </p>
+            {t("legacy.accountDeletionPage.t3")}</p>
           {whitelistLoading ? (
             <LoadingState />
           ) : whitelist && whitelist.length > 0 ? (
@@ -104,21 +105,21 @@ export function AccountDeletionPage() {
             </ul>
           ) : (
             <div className="mb-4">
-              <EmptyState>등록된 목적지가 없습니다.</EmptyState>
+              <EmptyState>{t("legacy.accountDeletionPage.t4")}</EmptyState>
             </div>
           )}
           <form onSubmit={handleWhitelistSubmit} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="거래소">
+              <Field label={t("legacy.accountDeletionPage.label5")}>
                 <Select value={wlExchange} onChange={(e) => setWlExchange(e.target.value)}>
                   <option value="bitget">bitget</option>
                 </Select>
               </Field>
-              <Field label="라벨 (선택)">
+              <Field label={t("legacy.accountDeletionPage.label6")}>
                 <Input type="text" value={wlLabel} onChange={(e) => setWlLabel(e.target.value)} />
               </Field>
             </div>
-            <Field label="출금 목적지 주소" htmlFor="wlAddress">
+            <Field label={t("legacy.accountDeletionPage.label7")} htmlFor="wlAddress">
               <Input
                 id="wlAddress"
                 type="text"
@@ -127,7 +128,7 @@ export function AccountDeletionPage() {
                 onChange={(e) => setWlAddress(e.target.value)}
               />
             </Field>
-            <Field label="비밀번호 확인" htmlFor="wlPassword">
+            <Field label={t("legacy.accountDeletionPage.label8")} htmlFor="wlPassword">
               <Input
                 id="wlPassword"
                 type="password"
@@ -138,33 +139,30 @@ export function AccountDeletionPage() {
             </Field>
             {wlError !== null && <AccountSecurityError error={wlError} />}
             <Button type="submit" loading={registerWhitelist.isPending}>
-              목적지 등록
-            </Button>
+              {t("legacy.accountDeletionPage.t9")}</Button>
           </form>
         </Card>
 
         <Card className="border-danger/30">
-          <h2 className="mb-2 text-lg font-semibold text-danger">회원 탈퇴</h2>
+          <h2 className="mb-2 text-lg font-semibold text-danger">{t("legacy.accountDeletionPage.t10")}</h2>
           {deletionResult ? (
             <div className="space-y-3">
               <Alert tone="success">{deletionResult}</Alert>
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => {
-                  logout();
+                onClick={async () => {
+                  await logout();
                   navigate("/login");
                 }}
               >
-                로그아웃
-              </Button>
+                {t("legacy.accountDeletionPage.t11")}</Button>
             </div>
           ) : (
             <form onSubmit={handleDeleteSubmit} className="space-y-3">
               <p className="text-xs text-fg-muted">
-                RUNNING 상태 실행이 있으면 탈퇴가 거부됩니다 — 먼저 모든 실행을 중지해주세요.
-              </p>
-              <Field label="비밀번호 확인" htmlFor="deletePassword">
+                {t("legacy.accountDeletionPage.t12")}</p>
+              <Field label={t("legacy.accountDeletionPage.label13")} htmlFor="deletePassword">
                 <Input
                   id="deletePassword"
                   type="password"
@@ -175,8 +173,7 @@ export function AccountDeletionPage() {
               </Field>
               {deleteError !== null && <AccountSecurityError error={deleteError} />}
               <Button type="submit" variant="danger" loading={requestDeletion.isPending}>
-                탈퇴 요청
-              </Button>
+                {t("legacy.accountDeletionPage.t14")}</Button>
             </form>
           )}
         </Card>

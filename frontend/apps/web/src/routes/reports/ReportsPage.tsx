@@ -6,6 +6,7 @@ import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 function isoDaysAgo(days: number): string {
   const d = new Date();
@@ -32,6 +33,7 @@ function ReportError({ error, onRetry }: { error: unknown; onRetry: () => void }
 }
 
 export function ReportsPage() {
+  const { t } = useTranslation();
   const [periodStart, setPeriodStart] = useState(isoDaysAgo(30));
   const [periodEnd, setPeriodEnd] = useState(isoDaysAgo(0));
   const { data: report, isLoading, isError, error, refetch } = useReport(periodStart, periodEnd);
@@ -39,15 +41,15 @@ export function ReportsPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <PageHeader title="기간별 보고서" />
+        <PageHeader title={t("legacy.reportsPage.title1")} />
 
         <div className="flex gap-4">
           <label className="space-y-1.5">
-            <span className="block text-sm font-medium text-fg-secondary">시작일</span>
+            <span className="block text-sm font-medium text-fg-secondary">{t("legacy.reportsPage.t2")}</span>
             <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
           </label>
           <label className="space-y-1.5">
-            <span className="block text-sm font-medium text-fg-secondary">종료일</span>
+            <span className="block text-sm font-medium text-fg-secondary">{t("legacy.reportsPage.t3")}</span>
             <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
           </label>
         </div>
@@ -60,18 +62,18 @@ export function ReportsPage() {
           <>
             <div className="grid grid-cols-4 gap-4">
               <Stat
-                label="총 수익률"
+                label={t("legacy.reportsPage.label4")}
                 value={`${report.totalReturn}%`}
                 tone={Number(report.totalReturn) >= 0 ? "success" : "danger"}
               />
-              <Stat label="승률" value={report.winRate ?? "N/A"} />
-              <Stat label="최대 낙폭(MDD)" value={`${report.maxDrawdown}%`} tone="danger" />
-              <Stat label="거래 횟수" value={report.tradeCount} />
+              <Stat label={t("legacy.reportsPage.label5")} value={report.winRate ?? "N/A"} />
+              <Stat label={t("legacy.reportsPage.label6")} value={`${report.maxDrawdown}%`} tone="danger" />
+              <Stat label={t("legacy.reportsPage.label7")} value={report.tradeCount} />
             </div>
 
             {report.dailyPnl.length > 0 && (
               <Card>
-                <CardTitle>손익 추이</CardTitle>
+                <CardTitle>{t("legacy.reportsPage.t8")}</CardTitle>
                 <PnlChart
                   data={report.dailyPnl.map((d) => ({
                     tradeDate: d.tradeDate,
@@ -83,30 +85,32 @@ export function ReportsPage() {
             )}
 
             <Card>
-              <CardTitle>전략별 기여도</CardTitle>
+              <CardTitle>{t("legacy.reportsPage.t9")}</CardTitle>
               {report.strategyContributions.length > 0 ? (
-                <table className="w-full text-sm">
-                  <thead className="text-left text-fg-muted">
-                    <tr>
-                      <th className="pb-2 font-normal">전략</th>
-                      <th className="pb-2 font-normal">실현 손익</th>
-                      <th className="pb-2 font-normal">거래수</th>
-                    </tr>
-                  </thead>
-                  <tbody className="tabular text-fg">
-                    {report.strategyContributions.map((c) => (
-                      <tr key={`${c.strategyId}-${c.strategyVersion}`} className="border-t border-border">
-                        <td className="py-2">
-                          {c.strategyId}@{c.strategyVersion}
-                        </td>
-                        <td className="py-2">{c.realizedPnl}</td>
-                        <td className="py-2">{c.tradeCount}</td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-fg-muted">
+                      <tr>
+                        <th className="pb-2 font-normal">{t("legacy.reportsPage.t10")}</th>
+                        <th className="pb-2 font-normal">{t("legacy.reportsPage.t11")}</th>
+                        <th className="pb-2 font-normal">{t("legacy.reportsPage.t12")}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="tabular text-fg">
+                      {report.strategyContributions.map((c) => (
+                        <tr key={`${c.strategyId}-${c.strategyVersion}`} className="border-t border-border">
+                          <td className="py-2">
+                            {c.strategyId}@{c.strategyVersion}
+                          </td>
+                          <td className="py-2">{c.realizedPnl}</td>
+                          <td className="py-2">{c.tradeCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
-                <EmptyState>해당 기간 거래 내역이 없습니다.</EmptyState>
+                <EmptyState>{t("legacy.reportsPage.t13")}</EmptyState>
               )}
             </Card>
           </>

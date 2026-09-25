@@ -16,6 +16,7 @@ import {
   type StatusLineNeighbor,
 } from "@aios/chart-engine/src/legend/statusLine";
 import { resolveDataIndex } from "./DataWindowPanel";
+import { useTranslation } from "react-i18next";
 
 function toStatusLineCandle(c: StreamCandle): StatusLineCandle {
   return {
@@ -48,11 +49,12 @@ export interface StatusLineProps {
 
 /** Persistent OHLCV row (§9.11 "showRule: always") — a DOM status line, not a hover tooltip, so every field stays visible regardless of crosshair state. */
 export function StatusLine({ candles, crosshairTimeMs }: StatusLineProps) {
+  const { t } = useTranslation();
   const dataIndex = useMemo(() => resolveDataIndex(candles, crosshairTimeMs), [candles, crosshairTimeMs]);
   const legends = useMemo(() => buildStatusLineLegends(resolveStatusLineNeighbor(candles, dataIndex)), [candles, dataIndex]);
 
   return (
-    <section aria-label="OHLCV 상태줄" data-testid="chart-status-line" className="flex flex-wrap gap-3 rounded-lg border border-border px-3 py-1 text-xs">
+    <section aria-label={t("legacy.statusLine.ariaLabel1")} data-testid="chart-status-line" className="flex flex-wrap gap-3 rounded-lg border border-border px-3 py-1 text-xs">
       {legends.map((legend) => {
         const { text, color } = legendValueText(legend);
         return (

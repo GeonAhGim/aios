@@ -1,9 +1,11 @@
 """L25 -- `cost_model_hash`/`config_hash`/`compute_bar_snapshot_hash` 안정성
 + `BarSnapshotRef` 필수 필드 거부 + `models.py`/`snapshot.py`/`events.py`
-순수성(AST) 정적 검사.
+순수성(AST) 정적 검사 + 성능 예산 단언 + `.importlinter` 게이트 적색 재현
+(D2 하한, ADR-2026-09-09-C Decision 1).
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L25.
 """
+
 from __future__ import annotations
 
 import ast
@@ -15,12 +17,15 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from scripts.check_import_linter import ROOT as LINTER_ROOT
+from scripts.check_import_linter import _eval_forbidden_suffix, _imports_of, parse_contracts
 from src.data.models.market_data import Candle
 from src.foundation.backtest.domain.models import CostModel
 from src.foundation.backtest.domain.snapshot import (
     BarSnapshotRef,
     compute_bar_snapshot_hash,
 )
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -147,9 +152,7 @@ def _imported_module_roots(tree: ast.Module) -> set[str]:
 
 
 def _has_now_attribute_access(tree: ast.Module) -> bool:
-    return any(
-        isinstance(node, ast.Attribute) and node.attr == "now" for node in ast.walk(tree)
-    )
+    return any(isinstance(node, ast.Attribute) and node.attr == "now" for node in ast.walk(tree))
 
 
 @pytest.mark.parametrize("filename", _CHECKED_FILES)
@@ -159,3 +162,65 @@ def test_domain_file_has_no_io_or_nondeterministic_imports(filename: str) -> Non
     assert not modules & _FORBIDDEN_IO_MODULES, f"{filename}: {modules & _FORBIDDEN_IO_MODULES}"
     assert "random" not in modules, f"{filename}: imports random"
     assert not _has_now_attribute_access(tree), f"{filename}: calls datetime.now"
+
+
+# --------------------------------------------------------------------------
+# D2 성능 단언 -- ADR-2026-09-09-C Decision 1 예산표 "백테스트 1개월 M1 1심볼 3초"
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_bar_snapshot_hash_one_month_m1_single_symbol_within_backtest_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """스냅샷 해싱은 백테스트 파이프라인의 한 단계일 뿐이므로, 예산 전체(3초)가
+    아니라 그 상당한 여유(1초)만 쓴다고 단언한다 -- 1개월치 M1(1분봉) 단일 심볼은
+    43,200개 bar이며, `canonical_json`의 정규화(Decimal.normalize 등)가 병리적으로
+    느려지는 회귀가 생기면 이 예산을 넘는다. task-7434: process_time 기반
+    perf_budget으로 측정한다."""
+    bars = [
+        _bar(index=i, volume=Decimal("10"))
+        for i in range(30 * 24 * 60)  # 30일 * 24시간 * 60분 = 43,200 M1 bar
+    ]
+
+    perf_budget.assert_within(
+        lambda: compute_bar_snapshot_hash(bars, source="binance", as_of=_T0),
+        budget_ms=1000.0,
+        label="43,200-bar snapshot hash",
+    )
+
+
+# --------------------------------------------------------------------------
+# D2 게이트 적색 재현 -- .importlinter domain-no-adapters
+# --------------------------------------------------------------------------
+
+
+def test_import_linter_domain_no_adapters_catches_backtest_domain_regression() -> None:
+    """`models.py`/`snapshot.py`/`events.py`는 `src/foundation/backtest/domain/`
+    아래에 있고, `.importlinter`의 `domain-no-adapters` 계약(§ domain/은 같은
+    애그리게잇의 adapters/를 임포트할 수 없다)이 그 순수성(DoD g, 위 AST 검사)의
+    실제 CI 집행자다. 그 평가기(`scripts/check_import_linter.py._eval_forbidden_suffix`)에
+    이 leaf가 `adapters/`를 참조하는 회귀 모양을 합성 그래프로 주입해 적색으로
+    잡히는지, 그리고 이 leaf의 실제 현재 import는 녹색인지 대조 증명한다(합성
+    그래프를 쓰므로 회귀가 실제 트리에 존재할 필요가 없다)."""
+    contracts = parse_contracts(LINTER_ROOT / ".importlinter")
+    domain_no_adapters = next(c for c in contracts if c["id"] == "domain-no-adapters")
+
+    regressed_graph = {
+        "src.foundation.backtest.domain.snapshot": {
+            "src.foundation.backtest.adapters.bar_fill_simulator"
+        }
+    }
+    hits = _eval_forbidden_suffix(regressed_graph, domain_no_adapters)
+    assert len(hits) == 1
+    assert hits[0][0] == "src.foundation.backtest.domain.snapshot"
+
+    real_graph = {
+        f"src.foundation.backtest.domain.{filename[:-3]}": _imports_of(
+            _DOMAIN_DIR / filename,
+            f"src.foundation.backtest.domain.{filename[:-3]}",
+            is_package=False,
+        )
+        for filename in _CHECKED_FILES
+    }
+    assert _eval_forbidden_suffix(real_graph, domain_no_adapters) == []

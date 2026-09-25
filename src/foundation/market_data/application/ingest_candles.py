@@ -1,40 +1,41 @@
-"""LA-15 — 캔들 인제스트 유스케이스: fetch → 품질 게이트 → 저장/격리 → 감사.
+"""LA-15 — Candle ingest use case: fetch → quality gate → store/quarantine → audit.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.1, §8.2, §9.2 LA-15.
 
-파이프라인은 기존 순수 도메인(LA-4~8)을 위임만 한다(재구현 금지):
+The pipeline delegates to existing pure domain modules (LA-4~8) only (no reimplementation):
 `dedupe`(LA-4) → `check_candle`(LA-4) → `detect_spikes`(LA-6) → `detect_gaps`
-(LA-5) → `decide`(LA-6). STALE(LA-5 `detect_stale`)은 §4.1 표의 "강제 위치:
-스케줄러" 그대로 이 파이프라인에 넣지 않는다 — LA-18 `quality_metrics`가
-저장된 배치를 주기적으로 훑으며 판단할 몫이다(여기서 매 ingest마다 재현하면
-백필처럼 `range_end`가 과거인 요청도 항상 STALE WARN이 붙어 verdict가
-불필요하게 PARTIAL이 된다).
+(LA-5) → `decide`(LA-6). STALE (LA-5 `detect_stale`) is not placed in this pipeline —
+per §4.1 table "forced placement: scheduler", it is the responsibility of LA-18
+`quality_metrics` to periodically scan stored batches and make that determination
+(re-running it on every ingest would cause backfill-like requests with past `range_end`
+to always carry a STALE WARN, making the verdict unnecessarily PARTIAL).
 
-`IngestSource.fetch_candles`(LA-9 포트, 이미 고정)는 DB를 모르므로 반환하는
-`CandleRecord.key.instrument_id`는 의미가 없다(어댑터가 고른 임의 값) —
-이 함수가 참조데이터에서 조회한 진짜 `instrument_id`로 무조건 다시 키를
-씌운다(어댑터가 어떤 placeholder를 골랐는지 이 함수는 신경 쓰지 않는다).
+`IngestSource.fetch_candles`(LA-9 port, already fixed) does not know about the DB, so
+the `CandleRecord.key.instrument_id` it returns is meaningless (an arbitrary value chosen
+by the adapter) — this function must unconditionally rewrite the key with the real
+`instrument_id` looked up from reference data (this function does not care which placeholder
+the adapter chose).
 
-트랜잭션 경계: 참조데이터·캘린더 조회(읽기 전용)와 소스 fetch(외부 HTTP)는
-DB 트랜잭션 밖에서 수행한다 — 느린 외부 I/O 동안 커넥션을 붙잡아 두지
-않기 위해서다(LA-14는 전부 DB I/O라 이 구분이 없었다). 저장·배치 기록·감사
-이벤트만 하나의 트랜잭션으로 묶는다 — 이 마지막 블록 안에서 무엇 하나라도
-실패하면(특히 `audit.append_event_in` 실패 주입) `md_candle`·
-`md_quarantine_candle`·`md_ingest_batch`·`md_quality_issue` 전부 롤백된다
+Transaction boundary: reference data · calendar lookup (read-only) and source fetch (external
+HTTP) are performed outside the DB transaction — to avoid holding a connection during slow
+external I/O (LA-14 was all DB I/O so this distinction did not apply). Only store · batch
+record · audit event are grouped into a single transaction — if anything fails inside this
+final block (especially `audit.append_event_in` failure injection), `md_candle` ·
+`md_quarantine_candle` · `md_ingest_batch` · `md_quality_issue` are all rolled back
 (§9 LA-15 DoD).
 
-§4.1 "배치의 REJECT 비율 > 20% → 배치 전체 QUARANTINE(부분 저장 금지)"는
-`verdict.decide`가 이미 판정하므로, 그 결과가 QUARANTINE이면 저장 대상으로
-골라 둔 "good" 캔들까지 포함해 원본 전체(`rekeyed`)를 격리한다.
+§4.1 "batch REJECT ratio > 20% → entire batch QUARANTINE (no partial store)" is already
+decided by `verdict.decide`, so when the result is QUARANTINE, the entire original
+(`rekeyed`) set is quarantined, including the "good" candles selected for storage.
 
-알려진 제약: `PostgresReferenceRepository.register()`(LA-12)는 최초 별칭을
-venue 원시 심볼 형식(`cmd.venue_symbol`)으로 심는데, `apply_lifecycle_event`
-의 RENAME 경로(LA-14)는 canonical 형식으로 새 별칭을 심는다 — 같은
-`md_symbol_alias` 테이블에 형식이 섞여 있다(KRX/US는 canonical==venue 원시라
-드러나지 않고, BASE/QUOTE 슬래시가 붙는 BITGET에서만 갈린다). 이 함수는
-아직 RENAME되지 않은 인스트루먼트를 전제로 `symbol_normalizer.to_venue`로
-`cmd.canonical_symbol`을 venue 원시 형식으로 되돌려 조회한다 — RENAME 이후
-조회는 이 리프 범위 밖(LA-12/LA-14 별칭 형식 정합화가 선행되어야 한다).
+Known constraint: `PostgresReferenceRepository.register()`(LA-12) initially writes the alias
+in venue raw symbol format (`cmd.venue_symbol`), while the RENAME path of
+`apply_lifecycle_event`(LA-14) writes the new alias in canonical format — formats are mixed
+in the same `md_symbol_alias` table (KRX/US do not show it because canonical==venue raw,
+and only BITGET with BASE/QUOTE slash differs). This function assumes instruments not yet
+renamed and looks up `cmd.canonical_symbol` converted to venue raw format via
+`symbol_normalizer.to_venue` — lookups after RENAME are outside this leaf's scope
+(LA-12/LA-14 alias format consistency must be addressed first).
 """
 from __future__ import annotations
 
@@ -45,8 +46,13 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
-from src.foundation.evidence.domain.rules import assert_safe_payload, compute_payload_hash
+from src.foundation.evidence.api import (
+    AuditEvent,
+    Classification,
+    Outcome,
+    assert_safe_payload,
+    compute_payload_hash,
+)
 from src.foundation.market_data.contracts.v1 import (
     CandleRecord,
     IngestBatchResult,
@@ -92,7 +98,7 @@ class SymbolUnknownError(Exception):
 
 
 class SymbolNotTradableError(Exception):
-    """`MD_SYMBOL_NOT_TRADABLE` — SUSPENDED/DELISTED 심볼은 ingest 거부."""
+    """`MD_SYMBOL_NOT_TRADABLE` — Symbol in SUSPENDED/DELISTED status rejected for ingest."""
 
 
 class AuditAppender(Protocol):
@@ -126,10 +132,10 @@ async def _sessions_in_range(
     end: datetime,
     cal: CalendarRepository,
 ) -> list[SessionWindow]:
-    """`[start, end)` 구간과 겹치는 세션만, 그 구간으로 잘라서 반환한다 —
-    `gap_detector.detect_gaps`가 세션의 `min(open_at)/max(close_at)`으로 기대
-    구간을 재구성하므로, 요청 구간 밖까지 포함된 세션을 그대로 넘기면 애초에
-    fetch하지도 않은 시각에 대해 가짜 GAP이 생긴다."""
+    """Return only sessions overlapping `[start, end)`, clipped to that range —
+    since `gap_detector.detect_gaps` reconstructs the expected range from each
+    session's `min(open_at)/max(close_at)`, passing sessions that extend beyond
+    the requested range would create false GAPs at times we never fetched."""
     tz = KNOWN_SESSIONS[venue.value].tz
     day = start.astimezone(tz).date()
     last_day = end.astimezone(tz).date()
@@ -222,10 +228,10 @@ async def ingest_candles(
     )
 
     async with pool.acquire() as conn, conn.transaction():
-        # `md_candle`/`md_quarantine_candle`.batch_id는 `md_ingest_batch(id)` FK다 —
-        # 배치 행(그리고 그 행이 요구하는 audit_event_id)을 먼저 커밋해야 캔들을
-        # 쓸 수 있다. 그래도 전부 한 트랜잭션이라 어느 단계가 실패하든 함께
-        # 롤백된다(§9 LA-15 DoD).
+        # `md_candle`/`md_quarantine_candle`.batch_id is FK to `md_ingest_batch(id)` —
+        # the batch row (and its required audit_event_id) must be committed first
+        # before candles can be written. Since everything is in one transaction,
+        # any failure at any stage rolls back together (§9 LA-15 DoD).
         outcome = Outcome.SUCCESS if is_stored else Outcome.DENIED
         payload: dict[str, object] = {
             "batch_id": str(batch_id),

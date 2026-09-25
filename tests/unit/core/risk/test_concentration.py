@@ -80,3 +80,32 @@ def test_missing_symbol_market_value_denies():
     result = concentration.check(inputs, POLICY)
     assert result.outcome == RiskOutcome.DENY
     assert result.missing_fields == ("exposure.symbol_market_value",)
+
+
+def test_zero_total_equity_denies_as_missing():
+    # total_equity=0 is a distinct fail-closed guard from None (corrupted
+    # equity snapshot from an upstream reconciliation bug), not just an
+    # absent field — must classify identically to missing.
+    inputs = _inputs(
+        symbol_market_value="3000", notional="500", total_equity="0", reduce_only=False
+    )
+    result = concentration.check(inputs, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.missing_fields == ("equity.total_equity",)
+
+
+def test_negative_total_equity_denies_as_missing():
+    inputs = _inputs(
+        symbol_market_value="3000", notional="500", total_equity="-100", reduce_only=False
+    )
+    result = concentration.check(inputs, POLICY)
+    assert result.outcome == RiskOutcome.DENY
+    assert result.missing_fields == ("equity.total_equity",)
+
+
+def test_reduce_only_bypasses_zero_total_equity():
+    inputs = _inputs(
+        symbol_market_value="9000", notional="9000", total_equity="0", reduce_only=True
+    )
+    result = concentration.check(inputs, POLICY)
+    assert result.outcome == RiskOutcome.ALLOW

@@ -143,8 +143,20 @@ export function createChartEngine(options: CreateChartEngineOptions = {}): Chart
   function dispose(): void {
     if (disposed) return;
     disposed = true;
-    for (const id of [...series.keys()]) removeSeries(id);
+    let firstError: unknown;
+    for (const id of [...series.keys()]) {
+      try {
+        removeSeries(id);
+      } catch (err) {
+        // A crashing backend for one series must not leak the renderer or the
+        // remaining series — finish tearing everything down, then surface the
+        // first failure to the caller once cleanup is complete.
+        if (firstError === undefined) firstError = err;
+        series.delete(id);
+      }
+    }
     renderer.dispose();
+    if (firstError !== undefined) throw firstError;
   }
 
   return {

@@ -21,12 +21,13 @@ KIS와 마찬가지로 모든 계좌 관련 API가 `act_no`(계좌번호)를 요
 (공식 SDK 확인) — 생성자에 act_no 추가(KIS의 cano/acnt_prdt_cd와 동일
 판단, 다만 NH는 계좌번호가 단일 문자열이라 분리하지 않음).
 """
+
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -38,9 +39,17 @@ from src.exchanges.common.oauth_http import MonotonicTokenCache
 from src.exchanges.common.transport import ResilientTransport
 from src.exchanges.common.types import ExchangeCapability, MarketHours
 from src.exchanges.nh.account_mixin import NHAccountMixin
+from src.exchanges.nh.credit_reserved_mixin import NHCreditReservedMixin
+from src.exchanges.nh.inquiry_extra_mixin import NHInquiryExtraMixin
 from src.exchanges.nh.market_data_mixin import NHMarketDataMixin
+from src.exchanges.nh.quote_after_hours_mixin import NHQuoteAfterHoursMixin
+from src.exchanges.nh.quote_extra_mixin import NHQuoteExtraMixin
 from src.exchanges.nh.trading_mixin import NHTradingMixin
+from src.exchanges.nh.venue_profile import NH_KR_EQUITY_PROFILE
 from src.exchanges.nh.websocket_mixin import NHWebSocketMixin
+
+if TYPE_CHECKING:
+    from src.services.oms.domain.venue_profile import VenueCapabilityProfile
 
 REAL_BASE_URL = "https://api.nhplug.com:8443"
 PAPER_BASE_URL = "https://moapi.nhplug.com:8443"
@@ -200,8 +209,12 @@ class _NHHTTPClient:
 class NHAdapter(
     _NHHTTPClient,
     NHMarketDataMixin,
+    NHQuoteAfterHoursMixin,
+    NHQuoteExtraMixin,
     NHAccountMixin,
     NHTradingMixin,
+    NHCreditReservedMixin,
+    NHInquiryExtraMixin,
     NHWebSocketMixin,
     ExchangeAdapter,
 ):
@@ -219,9 +232,13 @@ class NHAdapter(
     공식 스펙으로 "구조적으로 불가능"이 확인됐다** — 가장 가까운
     엔드포인트(dailyOrderExecution)의 응답에 place_order가 반환하는
     식별자(mkt_orr_no)를 조회할 필드가 없다(trading_mixin.py 참조).
-    WebSocket은 연결/구독/재연결까지 확인해 구현했지만(websocket_mixin.py)
-    데이터 프레임의 필드 스키마는 아직 미확인이라 `subscribe_ticker_stream()`
-    은 여전히 NotImplementedError다.
+    2026-09-16 (task-2615) re-investigation -- the asset-class official
+    openapi.json's `x-realtime-channels` confirmed the `body` field schema
+    of WebSocket data frames (`tr_cd="mc"`, domestic consolidated
+    real-time trade price), so `subscribe_ticker_stream()` is now
+    implemented (see websocket_parsing.py). Full reasoning for the
+    order-requery gap and the WS scope decision is in
+    `docs/exchanges/NH_GAPS.md`.
     """
 
     @property
@@ -253,12 +270,13 @@ class NHAdapter(
             supports_spot=True,
             supports_futures=False,
             supports_leverage=False,
-            # 접속/구독 메시지 형식은 확인했지만(02e 스펙 §4) 실제 데이터
-            # 메시지의 응답 포맷을 확인 못해 subscribe_ticker_stream()이
-            # 아직 NotImplementedError를 던진다 — 여기서 True를 선언하면
-            # "지원한다"는 거짓 신호가 된다(KIS가 겪었던 것과 동일한 실수,
-            # PM 배정 지침 (1)과 같은 원칙: 확인 안 되면 False).
-            supports_websocket=False,
+            # 2026-09-16 (task-2615) -- x-realtime-channels confirmed the
+            # tr_cd="mc" data-frame field schema, so subscribe_ticker_stream()
+            # now actually produces Ticker objects (see market_data_mixin.py).
+            # mb (order book) / d2 (execution notice) only have a confirmed
+            # schema with no consuming method yet, so they are outside what
+            # this flag means by "supported" (NH_GAPS.md S2-3).
+            supports_websocket=True,
             max_leverage=Decimal("1"),
             reference_feed_coverage="medium",
             has_official_sandbox=True,
@@ -269,3 +287,12 @@ class NHAdapter(
                 trading_days=["MON", "TUE", "WED", "THU", "FRI"],
             ),
         )
+
+    def venue_profile(self) -> VenueCapabilityProfile:
+        """BR-18 fix — `NH_KR_EQUITY_PROFILE` in
+        `exchanges/nh/venue_profile.py` was never wired to this method, so
+        calls silently fell through to the ABC default
+        (`UnsupportedCapabilityError`) — same defect as KIS, caught by
+        `scripts/check_exchange_spi.py`'s capability-vs-implementation
+        cross-check."""
+        return NH_KR_EQUITY_PROFILE

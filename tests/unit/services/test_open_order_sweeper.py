@@ -4,11 +4,21 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §3.8, §5(105번), §9(R-39).
 FA-16(task-2406): docs/specs/ibor_fund_accounting_and_resilience.md#§9.
 5개 SafetyScope 매핑, 주문 단위 조건부 UPDATE(+동반 order_events), 멱등성,
 취소 불가 주문 skip 보고, TOCTOU/동시성 race 보고, 어댑터 부분 실패를 실제
-Postgres 행으로 검증한다."""
+Postgres 행으로 검증한다.
+
+DEPTH 감사(task-2724, docs/audit/DEPTH_FA.md #2406)가 이 리프의 D3 하한
+미달로 지적한 공백 중 negative·실패주입·게이트재현·D3증명은 위 테스트들과
+`tests/adversarial/eventstore/test_no_state_change_without_event.py`가 이미
+채웠다(task-2432, 7f82784c/1e4f73b4/51cb0bef). 유일하게 남은 수치 성능
+단언만 `test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling`으로
+메운다(task-3029)."""
+
 from __future__ import annotations
 
 import asyncio
+import math
 import os
+import time
 import uuid
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -144,7 +154,10 @@ async def test_global_scope_requests_cancel_across_tenants(pool):
     order_b = await _seed_order(pool, user_b, exchange="binance")
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget", "binance"), control_id=uuid4(), scope=SafetyScope.GLOBAL,
+        pool,
+        _adapters("bitget", "binance"),
+        control_id=uuid4(),
+        scope=SafetyScope.GLOBAL,
         scope_ref="",
     )
 
@@ -164,7 +177,10 @@ async def test_provider_scope_only_matching_exchange(pool):
     binance_order = await _seed_order(pool, user_id, exchange="binance")
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget", "binance"), control_id=uuid4(), scope=SafetyScope.PROVIDER,
+        pool,
+        _adapters("bitget", "binance"),
+        control_id=uuid4(),
+        scope=SafetyScope.PROVIDER,
         scope_ref="bitget",
     )
 
@@ -180,7 +196,10 @@ async def test_tenant_scope_does_not_affect_other_tenants_order(pool):
     order_b = await _seed_order(pool, tenant_b)
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.TENANT,
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
         scope_ref=str(tenant_a),
     )
 
@@ -195,7 +214,10 @@ async def test_account_scope_only_that_accounts_order(pool):
     order_b = await _seed_order(pool, tenant_b)
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.ACCOUNT,
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.ACCOUNT,
         scope_ref=str(tenant_a),
     )
 
@@ -211,7 +233,10 @@ async def test_strategy_deployment_exec_prefix_only_that_execution(pool):
     other_order = await _seed_order(pool, user_id, execution_id=other_exec)
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.STRATEGY_DEPLOYMENT,
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.STRATEGY_DEPLOYMENT,
         scope_ref=f"exec:{target_exec}",
     )
 
@@ -226,7 +251,10 @@ async def test_strategy_deployment_dep_prefix_is_paper_control_target_not_orders
     order_id = await _seed_order(pool, user_id)
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.STRATEGY_DEPLOYMENT,
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.STRATEGY_DEPLOYMENT,
         scope_ref=f"dep:{uuid4()}",
     )
 
@@ -241,7 +269,10 @@ async def test_terminal_status_orders_are_skipped_not_raised(pool):
     rejected = await _seed_order(pool, user_id, status="REJECTED")
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.TENANT,
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
         scope_ref=str(user_id),
     )
 
@@ -259,11 +290,17 @@ async def test_repeated_call_is_idempotent_and_does_not_recall_adapter(pool):
     control_id = uuid4()
 
     first = await sweep_open_orders(
-        pool, {"bitget": adapter}, control_id=control_id, scope=SafetyScope.TENANT,
+        pool,
+        {"bitget": adapter},
+        control_id=control_id,
+        scope=SafetyScope.TENANT,
         scope_ref=str(user_id),
     )
     second = await sweep_open_orders(
-        pool, {"bitget": adapter}, control_id=control_id, scope=SafetyScope.TENANT,
+        pool,
+        {"bitget": adapter},
+        control_id=control_id,
+        scope=SafetyScope.TENANT,
         scope_ref=str(user_id),
     )
 
@@ -318,7 +355,10 @@ async def test_each_transitioned_order_produces_exactly_one_order_event(pool):
     partially_filled = await _seed_order(pool, user_id, status="PARTIALLY_FILLED")
 
     report = await sweep_open_orders(
-        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.TENANT,
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
         scope_ref=str(user_id),
     )
 
@@ -355,7 +395,10 @@ async def test_toctou_race_exposes_locked_order_in_raced(pool):
         )
         try:
             report = await sweep_open_orders(
-                pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.TENANT,
+                pool,
+                _adapters("bitget"),
+                control_id=uuid4(),
+                scope=SafetyScope.TENANT,
                 scope_ref=str(user_id),
             )
             assert report.cancel_requested == ()
@@ -384,11 +427,17 @@ async def test_concurrent_sweeps_do_not_double_cancel_same_order(pool):
 
     report_a, report_b = await asyncio.gather(
         sweep_open_orders(
-            pool, {"bitget": adapter_a}, control_id=uuid4(), scope=SafetyScope.TENANT,
+            pool,
+            {"bitget": adapter_a},
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
             scope_ref=str(user_id),
         ),
         sweep_open_orders(
-            pool, {"bitget": adapter_b}, control_id=uuid4(), scope=SafetyScope.TENANT,
+            pool,
+            {"bitget": adapter_b},
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
             scope_ref=str(user_id),
         ),
     )
@@ -408,7 +457,10 @@ async def test_concurrent_sweeps_do_not_double_cancel_same_order(pool):
 async def test_unmapped_scope_raises_instead_of_silently_matching_zero_rows(pool):
     with pytest.raises(UnmappedSafetyScopeError):
         await sweep_open_orders(
-            pool, _adapters("bitget"), control_id=uuid4(), scope="BOGUS_SCOPE",  # type: ignore[arg-type]
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope="BOGUS_SCOPE",  # type: ignore[arg-type]
             scope_ref="irrelevant",
         )
 
@@ -416,6 +468,105 @@ async def test_unmapped_scope_raises_instead_of_silently_matching_zero_rows(pool
 async def test_tenant_scope_rejects_non_uuid_scope_ref(pool):
     with pytest.raises(MalformedScopeRefError):
         await sweep_open_orders(
-            pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.TENANT,
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
             scope_ref="not-a-uuid",
         )
+
+
+async def test_strategy_deployment_exec_prefix_rejects_non_digit_id(pool):
+    """negative test(task-4139 DEEPEN) — `exec:` 접두사가 있어도 뒤가 정수가
+    아니면 §3.8 'exec:<int>' 형식 위반으로 거부한다(조용히 0건이 아니라
+    fail-closed)."""
+    with pytest.raises(MalformedScopeRefError):
+        await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.STRATEGY_DEPLOYMENT,
+            scope_ref="exec:not-a-number",
+        )
+
+
+async def test_conditional_update_failure_rolls_back_order_event_atomically(pool, monkeypatch):
+    """실패주입(task-4139 DEEPEN, monkeypatch로 의존성 예외 유발) — 조건부
+    UPDATE 의존성(`conditional_update`)이 예외를 던지면 같은 트랜잭션 안의
+    `order_events` INSERT도 함께 롤백되어야 한다(I-10: 이벤트 없는 상태변경도,
+    상태 없는 이벤트도 남지 않는다). 모듈 docstring이 명시하듯 이 실패는
+    개별 주문 실패로 삼켜지는 어댑터 예외가 아니라 "genuine invariant
+    violation"이라 그대로 전파된다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+
+    async def _raise(*args, **kwargs):
+        raise RuntimeError("conditional_update dependency exploded")
+
+    monkeypatch.setattr("src.services.safety.open_order_sweeper.conditional_update", _raise)
+
+    with pytest.raises(RuntimeError, match="conditional_update dependency exploded"):
+        await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        )
+
+    assert await _status_of(pool, order_id) == "SUBMITTED"
+    async with pool.acquire() as conn:
+        event_count = await conn.fetchval(
+            "SELECT count(*) FROM order_events WHERE order_id = $1", order_id
+        )
+    assert event_count == 0
+
+
+@pytest.mark.perf
+async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(pool):
+    """수치 성능 단언(task-3029, DEPTH 감사 task-2724가 지목한 마지막 공백).
+    단일 취소대상 주문에 대한 `sweep_open_orders` 1회 호출은 후보 선별 SELECT
+    2회 + 주문당 트랜잭션(FOR UPDATE SKIP LOCKED 잠금 -> order_events INSERT ->
+    조건부 UPDATE) 1회 + 어댑터 cancel 1회로 라운드트립 수가 고정되어 있어야
+    한다 — task-2406의 원래 결함(단일 bulk UPDATE)이 되돌아오거나 주문 단위
+    루프에 회귀(예: 후보마다 추가 조회가 붙는 것)가 생기면 이 비용이 자란다.
+
+    공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신,
+    같은 모양(주문 1건 대상 sweep)의 baseline 호출 1건 대비 정규화한 상한만
+    게이트로 쓴다(task-3004/3009 선례와 동일 패턴)."""
+    user_id = await create_test_user(pool)
+    adapter = _CountingCancelAdapter()
+
+    await _seed_order(pool, user_id)
+    baseline_start = time.perf_counter()
+    await sweep_open_orders(
+        pool,
+        {"bitget": adapter},
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
+        scope_ref=str(user_id),
+    )
+    baseline_elapsed = time.perf_counter() - baseline_start
+
+    samples: list[float] = []
+    for _ in range(30):
+        await _seed_order(pool, user_id)
+        start = time.perf_counter()
+        await sweep_open_orders(
+            pool,
+            {"bitget": adapter},
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        )
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 <= ceiling, (
+        f"sweep_open_orders(주문 1건) p95 지연 {p95:.4f}s가 정규화 상한 "
+        f"{ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 초과했습니다 -- "
+        f"주문 단위 트랜잭션 라운드트립 회귀 의심"
+    )

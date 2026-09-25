@@ -326,3 +326,151 @@ describe("candleStream source injection and lifecycle", () => {
     expect(codes).toEqual([0, 1, 0]);
   });
 });
+
+// DEEPEN(task-3074) of task-1523 (CH-2, commit df59201), per DEPTH_CH audit
+// (task-2729, docs/audit/DEPTH_CH.md): the original leaf had 19 passing tests
+// with strong negative-path coverage and seeded-shuffle determinism, but the
+// only "failure injection" was fakeSource — a domain stub, not a
+// network/transport failure simulation — and there was no numeric
+// performance assertion and no gate-red reproduction. candleStream is pure
+// and synchronous with no fetch/DB of its own, so the closest analogue to a
+// network/DB failure here is a misbehaving RealtimeCandleSource or listener —
+// the one boundary this module actually has with the outside world.
+describe("candleStream — DEEPEN(task-3074): failure injection, numeric perf, gate-red, D3", () => {
+  describe("실패 주입 (transport/listener failures, not domain stubs)", () => {
+    it("propagates a source.subscribe() failure out of connect() instead of swallowing it", () => {
+      const stream = createCandleStream({ key: KEY });
+      const failingSource: RealtimeCandleSource = {
+        subscribe() {
+          throw new Error("transport: handshake refused");
+        },
+      };
+      expect(() => stream.connect(failingSource)).toThrow(/handshake refused/);
+    });
+
+    it("rejects a zombie update delivered by the source after dispose instead of applying it", () => {
+      const stream = createCandleStream({ key: KEY });
+      let capturedHandler: ((u: RealtimeCandleUpdate) => void) | null = null;
+      const zombieSource: RealtimeCandleSource = {
+        subscribe(_key, onUpdate) {
+          capturedHandler = onUpdate;
+          return () => {
+            // simulates a transport bug: it keeps delivering after teardown/unsubscribe
+          };
+        },
+      };
+      stream.connect(zombieSource);
+      stream.dispose();
+
+      capturedHandler!(realtime(0, true)); // zombie delivery racing the teardown
+
+      expect(stream.snapshot().candles).toEqual([]);
+      expect(stream.applyRealtime(realtime(0, true))).toMatchObject({ ok: false, rejection: { code: "disposed" } });
+    });
+
+    it("does not swallow a throwing listener: the exception propagates out of applyPage instead of being silently dropped", () => {
+      const stream = createCandleStream({ key: KEY });
+      stream.subscribe(() => {
+        throw new Error("consumer: render failed");
+      });
+      expect(() => stream.applyPage(page(range(0, 1)))).toThrow(/render failed/);
+    });
+  });
+
+  describe("수치 성능", () => {
+    it("merges 8,000 candles across 20 out-of-order pages within a 1500ms budget", () => {
+      const stream = createCandleStream({ key: KEY });
+      const pages = Array.from({ length: 20 }, (_, i) => range(i * 400, i * 400 + 400));
+      const startedAt = performance.now();
+      for (const p of shuffled(pages, 7)) {
+        const result = stream.applyPage(page(p));
+        if (!result.ok) throw new Error(`unexpected rejection: ${result.rejection.code}`);
+      }
+      const elapsedMs = performance.now() - startedAt;
+      expect(stream.snapshot().candles).toHaveLength(8_000);
+      expect(elapsedMs).toBeLessThan(1500);
+    });
+
+    it("applies 3,000 strictly-descending (worst-case front-insert) realtime updates within a 2000ms budget", () => {
+      const stream = createCandleStream({ key: KEY });
+      const startedAt = performance.now();
+      for (let i = 3000; i > 0; i -= 1) {
+        stream.applyRealtime(realtime(i, true));
+      }
+      const elapsedMs = performance.now() - startedAt;
+      expect(stream.snapshot().candles).toHaveLength(3000);
+      expect(elapsedMs).toBeLessThan(2000);
+    });
+  });
+
+  describe("게이트 적색 재현 (two-phase validate-then-commit atomicity, at scale)", () => {
+    it("a duplicate_conflict buried in the middle of a 60-candle page rejects the whole page — zero partial application", () => {
+      const stream = createCandleStream({ key: KEY });
+      const records = range(0, 60);
+      records.splice(41, 0, candle(30, { close: "999" })); // conflicts with the candle(30) already staged at position 30
+      const result = stream.applyPage(page(records));
+      expect(result).toMatchObject({ ok: false, rejection: { code: "duplicate_conflict" } });
+      // if phase-1 staging and phase-2 commit were collapsed into a single pass, the 40
+      // candles preceding the conflict would already be committed by the time it is found
+      expect(stream.snapshot().candles).toEqual([]);
+    });
+
+    it("a confirmed_regression triggered mid-page rejects the whole page — none of the other 59 candles are committed", () => {
+      const stream = createCandleStream({ key: KEY });
+      stream.applyRealtime(realtime(30, true, { close: "111" }));
+      const records = range(0, 60).map((r) => (r.open_time === candle(30).open_time ? candle(30, { close: "222" }) : r));
+      const result = stream.applyPage(page(records));
+      expect(result).toMatchObject({ ok: false, rejection: { code: "confirmed_regression" } });
+      // a single-pass merge would have already inserted indices 0-29 before reaching the conflict at 30
+      expect(indices(stream.snapshot())).toEqual([30]);
+    });
+  });
+
+  describe("어드버서리얼 (D3): multi-instance isolation and deterministic replay", () => {
+    it("two independently connected streams never cross-deliver realtime updates or share dispose/unsubscribe state", () => {
+      const streamA = createCandleStream({ key: KEY });
+      const otherKey: SeriesKey = { ...KEY, instrument_id: "i-2" };
+      const streamB = createCandleStream({ key: otherKey });
+      let handlerA: ((u: RealtimeCandleUpdate) => void) | null = null;
+      let handlerB: ((u: RealtimeCandleUpdate) => void) | null = null;
+      let unsubsA = 0;
+      let unsubsB = 0;
+      streamA.connect({
+        subscribe(_key, onUpdate) {
+          handlerA = onUpdate;
+          return () => {
+            unsubsA += 1;
+          };
+        },
+      });
+      streamB.connect({
+        subscribe(_key, onUpdate) {
+          handlerB = onUpdate;
+          return () => {
+            unsubsB += 1;
+          };
+        },
+      });
+
+      handlerA!(realtime(0, true));
+      handlerB!(realtime(1, true, { key: otherKey }));
+      expect(indices(streamA.snapshot())).toEqual([0]);
+      expect(indices(streamB.snapshot())).toEqual([1]);
+
+      streamA.dispose();
+      expect(unsubsA).toBe(1);
+      expect(unsubsB).toBe(0);
+      expect(streamB.applyRealtime(realtime(2, true, { key: otherKey }))).toEqual({ ok: true, inserted: 1, replaced: 0 });
+      expect(indices(streamB.snapshot())).toEqual([1, 2]);
+    });
+
+    it("replaying the same 20-page sequence through two independent fresh streams reaches identical snapshots", () => {
+      const pages = Array.from({ length: 20 }, (_, i) => range(i * 10, i * 10 + 10));
+      const streamA = createCandleStream({ key: KEY });
+      const streamB = createCandleStream({ key: KEY });
+      for (const p of pages) streamA.applyPage(page(p));
+      for (const p of pages) streamB.applyPage(page(p));
+      expect(streamB.snapshot()).toEqual(streamA.snapshot());
+    });
+  });
+});

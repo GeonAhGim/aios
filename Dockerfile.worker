@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# H-6(ADR-2026-09-09-B) -- worker 컨테이너. src/watchdog_process.py는 메인 API 프로세스와
+# 메모리를 공유하지 않는 별도 OS 프로세스가 전제다(파일 docstring 참조) -- api와 다른
+# 컨테이너로 띄워 그 격리를 그대로 유지한다.
+
+FROM python:3.11-slim AS builder
+WORKDIR /build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY src ./src
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir .
+
+FROM python:3.11-slim AS runtime
+RUN groupadd --system app \
+    && useradd --system --gid app --no-create-home --shell /usr/sbin/nologin app
+
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+COPY src ./src
+COPY config ./config
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER app
+
+CMD ["python", "-m", "src.watchdog_process"]

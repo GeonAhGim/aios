@@ -5,6 +5,7 @@ DoD(task-453): R1/R2/R3 세 환불 시나리오 각각 Σ차=Σ대 + 환불 전�
 총잔액 불변을 직접 단언 + 같은 purchase 2회 환불 시 두 번째는 새 분개를
 만들지 않음(LC-9 REPLAY, `ledger_journal_entry` 행 그대로 1개).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -18,7 +19,7 @@ from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEv
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_hold_repository import PostgresHoldRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
-from src.foundation.ledger.application.post_entry import post_entry
+from src.foundation.ledger.application.post_entry import LedgerWriteFrozenError, post_entry
 from src.foundation.ledger.application.purchase_flow import (
     capture_hold,
     ensure_account,
@@ -27,9 +28,13 @@ from src.foundation.ledger.application.purchase_flow import (
 from src.foundation.ledger.application.refund import post_refund
 from src.foundation.ledger.contracts.v1 import LedgerEvent, LedgerEventType, UserSub
 from src.foundation.ledger.domain.chart_of_accounts import user_account as ua
+from src.foundation.ledger.domain.idempotency import IdempotencyDigestMismatchError
+from src.foundation.ledger.domain.posting_rules import MissingExtraFieldError
 from src.foundation.ledger.domain.rounding import split_commission
 from tests.integration.conftest import create_test_user
 from tests.support.ledger_seed import seed_user_available_balance
+
+_MAX_REFUND_R1_ROUND_TRIPS = 34
 
 _TEST_PURPOSE = "TEST_REFUND_PURCHASE"
 
@@ -96,15 +101,32 @@ async def _purchase(
     reference = f"test-refund:{purchase_id}"
     async with pool.acquire() as conn, conn.transaction():
         hold = await place_hold(
-            conn, buyer_id=buyer, amount=price, purpose=_TEST_PURPOSE, reference=reference,
-            expires_at=_clock() + timedelta(minutes=15), actor_subject_id=buyer, trace_id=uuid4(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=_clock() + timedelta(minutes=15),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
         await capture_hold(
-            conn, hold, seller_id=seller, commission_rate=commission_rate,
-            actor_subject_id=buyer, trace_id=uuid4(), now=_clock(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            hold,
+            seller_id=seller,
+            commission_rate=commission_rate,
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=_clock(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
             holds=ports.holds,
         )
     return purchase_id
@@ -113,8 +135,12 @@ async def _purchase(
 async def _post(pool, ports, event: LedgerEvent) -> None:
     async with pool.acquire() as conn, conn.transaction():
         await post_entry(
-            conn, event, journal=ports.journal, balances=ports.balances,
-            audit=ports.audit, clock=ports.clock,
+            conn,
+            event,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
         )
 
 
@@ -125,11 +151,18 @@ async def _release_to_available(pool, ports, seller: UUID, amount: Decimal, ref:
     async with pool.acquire() as conn:
         await ensure_account(conn, ua(seller, UserSub.AVAILABLE), Currency.KRW)
     await _post(
-        pool, ports,
+        pool,
+        ports,
         LedgerEvent(
-            event_type=LedgerEventType.PAYOUT_RELEASE, event_ref=ref, tenant_id=None,
-            actor_subject_id=None, trace_id=uuid4(), amount=amount, currency=Currency.KRW,
-            parties={"seller": seller}, extra={},
+            event_type=LedgerEventType.PAYOUT_RELEASE,
+            event_ref=ref,
+            tenant_id=None,
+            actor_subject_id=None,
+            trace_id=uuid4(),
+            amount=amount,
+            currency=Currency.KRW,
+            parties={"seller": seller},
+            extra={},
         ),
     )
 
@@ -142,11 +175,18 @@ async def _consume_available(pool, ports, seller: UUID, amount: Decimal, ref: st
     사건으로 잔액이 늘기만 해(§9 LC-9 docstring — credit-정상) 0에서 시작해도
     막히지 않는다."""
     await _post(
-        pool, ports,
+        pool,
+        ports,
         LedgerEvent(
-            event_type=LedgerEventType.PAYOUT_PAID, event_ref=ref, tenant_id=None,
-            actor_subject_id=None, trace_id=uuid4(), amount=amount, currency=Currency.KRW,
-            parties={"seller": seller}, extra={"external_ref": ref},
+            event_type=LedgerEventType.PAYOUT_PAID,
+            event_ref=ref,
+            tenant_id=None,
+            actor_subject_id=None,
+            trace_id=uuid4(),
+            amount=amount,
+            currency=Currency.KRW,
+            parties={"seller": seller},
+            extra={"external_ref": ref},
         ),
     )
 
@@ -186,9 +226,18 @@ async def test_refund_case_r1_debits_seller_pending_payout(pool, ports):
 
     async with pool.acquire() as conn, conn.transaction():
         result = await post_refund(
-            conn, purchase_id=purchase_id, buyer_id=buyer, seller_id=seller, price=price,
-            commission_rate=rate, admin_id=None, trace_id=uuid4(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            purchase_id=purchase_id,
+            buyer_id=buyer,
+            seller_id=seller,
+            price=price,
+            commission_rate=rate,
+            admin_id=None,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
         )
 
     assert result.refund_case == "R1"
@@ -219,9 +268,7 @@ async def test_refund_case_r2_debits_seller_available(pool, ports):
         pool, ports, buyer=buyer, seller=seller, price=price, commission_rate=rate
     )
     _, payout = split_commission(price, rate)
-    await _release_to_available(
-        pool, ports, seller, payout, f"test-refund:{purchase_id}:release"
-    )
+    await _release_to_available(pool, ports, seller, payout, f"test-refund:{purchase_id}:release")
 
     buyer_before = await _balance(pool, ua(buyer, UserSub.AVAILABLE))
     available_before = await _balance(pool, ua(seller, UserSub.AVAILABLE))
@@ -229,9 +276,18 @@ async def test_refund_case_r2_debits_seller_available(pool, ports):
 
     async with pool.acquire() as conn, conn.transaction():
         result = await post_refund(
-            conn, purchase_id=purchase_id, buyer_id=buyer, seller_id=seller, price=price,
-            commission_rate=rate, admin_id=None, trace_id=uuid4(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            purchase_id=purchase_id,
+            buyer_id=buyer,
+            seller_id=seller,
+            price=price,
+            commission_rate=rate,
+            admin_id=None,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
         )
 
     assert result.refund_case == "R2"
@@ -262,9 +318,7 @@ async def test_refund_case_r3_splits_available_and_receivable(pool, ports):
         pool, ports, buyer=buyer, seller=seller, price=price, commission_rate=rate
     )
     _, payout = split_commission(price, rate)
-    await _release_to_available(
-        pool, ports, seller, payout, f"test-refund:{purchase_id}:release"
-    )
+    await _release_to_available(pool, ports, seller, payout, f"test-refund:{purchase_id}:release")
     # seller가 정산금 대부분을 이미 소비 — payout(85.00)의 40.00만 남긴다.
     remaining = Decimal("40.00")
     await _consume_available(
@@ -279,9 +333,18 @@ async def test_refund_case_r3_splits_available_and_receivable(pool, ports):
 
     async with pool.acquire() as conn, conn.transaction():
         result = await post_refund(
-            conn, purchase_id=purchase_id, buyer_id=buyer, seller_id=seller, price=price,
-            commission_rate=rate, admin_id=None, trace_id=uuid4(),
-            journal=ports.journal, balances=ports.balances, audit=ports.audit, clock=ports.clock,
+            conn,
+            purchase_id=purchase_id,
+            buyer_id=buyer,
+            seller_id=seller,
+            price=price,
+            commission_rate=rate,
+            admin_id=None,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
         )
 
     assert result.refund_case == "R3"
@@ -318,7 +381,9 @@ async def test_refund_duplicate_purchase_id_is_not_double_posted(pool, ports):
     그 경우도 "두 번째는 새 분개를 만들지 않는다"는 이 테스트의 핵심 불변은
     동일하게 지켜진다."""
     buyer1, buyer2, seller = (
-        await create_test_user(pool), await create_test_user(pool), await create_test_user(pool)
+        await create_test_user(pool),
+        await create_test_user(pool),
+        await create_test_user(pool),
     )
     price = Decimal("100.00")
     rate = Decimal("0.15")
@@ -330,9 +395,17 @@ async def test_refund_duplicate_purchase_id_is_not_double_posted(pool, ports):
     async def _refund():
         async with pool.acquire() as conn, conn.transaction():
             return await post_refund(
-                conn, purchase_id=purchase_id, buyer_id=buyer1, seller_id=seller, price=price,
-                commission_rate=rate, admin_id=None, trace_id=uuid4(),
-                journal=ports.journal, balances=ports.balances, audit=ports.audit,
+                conn,
+                purchase_id=purchase_id,
+                buyer_id=buyer1,
+                seller_id=seller,
+                price=price,
+                commission_rate=rate,
+                admin_id=None,
+                trace_id=uuid4(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
                 clock=ports.clock,
             )
 
@@ -350,3 +423,245 @@ async def test_refund_duplicate_purchase_id_is_not_double_posted(pool, ports):
             f"refund:purchase:{purchase_id}",
         )
     assert count == 1
+
+
+# --- DEEPEN task-2962 — negative/거부(3) + failure-injection + 수치 성능 단언 +
+# 게이트 적색 재현. DEPTH 감사(task-2723)가 D1로 판정한 증빙 공백을 메운다. ---
+
+
+async def test_refund_rejects_invalid_refund_case(pool, ports):
+    """negative(1/3) — `posting_rules._refund`는 `refund_case`가 §4.4
+    표('R1'|'R2'|'R3') 밖이면 분개 없이 거부한다(fail-closed 불변식).
+    `post_refund`는 항상 유효한 케이스만 만들어내므로, 이 도메인 불변은
+    `post_entry`를 직접 호출해 위조된 `extra`로만 재현할 수 있다."""
+    buyer, seller = await create_test_user(pool), await create_test_user(pool)
+    price = Decimal("100.00")
+    rate = Decimal("0.15")
+    purchase_id = await _purchase(
+        pool, ports, buyer=buyer, seller=seller, price=price, commission_rate=rate
+    )
+    event = LedgerEvent(
+        event_type=LedgerEventType.REFUND,
+        event_ref=f"refund:purchase:{purchase_id}",
+        tenant_id=None,
+        actor_subject_id=None,
+        trace_id=uuid4(),
+        amount=price,
+        currency=Currency.KRW,
+        parties={"buyer": buyer, "seller": seller},
+        extra={"commission_rate": rate, "refund_case": "R4"},
+    )
+
+    with pytest.raises(MissingExtraFieldError, match="R4"):
+        async with pool.acquire() as conn, conn.transaction():
+            await post_entry(
+                conn,
+                event,
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+            )
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref = $1",
+            f"refund:purchase:{purchase_id}",
+        )
+    assert count == 0
+
+
+async def test_refund_rejects_tampered_price_as_digest_mismatch(pool, ports):
+    """negative(2/3) — 같은 `purchase_id`로 두 번째 호출이 `price`를 바꿔
+    들어오면(재전송 위조 시도) LC-9 멱등 lookup이 REPLAY 대신
+    DIGEST_MISMATCH(409)로 거부한다 — 첫 분개는 그대로, 두 번째 분개는
+    생성되지 않는다."""
+    buyer, seller = await create_test_user(pool), await create_test_user(pool)
+    price = Decimal("100.00")
+    rate = Decimal("0.15")
+    purchase_id = await _purchase(
+        pool, ports, buyer=buyer, seller=seller, price=price, commission_rate=rate
+    )
+
+    async with pool.acquire() as conn, conn.transaction():
+        first = await post_refund(
+            conn,
+            purchase_id=purchase_id,
+            buyer_id=buyer,
+            seller_id=seller,
+            price=price,
+            commission_rate=rate,
+            admin_id=None,
+            trace_id=uuid4(),
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+        )
+    assert first.refund_case == "R1"
+
+    with pytest.raises(IdempotencyDigestMismatchError):
+        async with pool.acquire() as conn, conn.transaction():
+            await post_refund(
+                conn,
+                purchase_id=purchase_id,
+                buyer_id=buyer,
+                seller_id=seller,
+                price=price * 2,
+                commission_rate=rate,
+                admin_id=None,
+                trace_id=uuid4(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+            )
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref = $1",
+            f"refund:purchase:{purchase_id}",
+        )
+    assert count == 1
+
+
+async def test_refund_rejected_and_gate_turns_red_when_ledger_frozen(pool, ports):
+    """negative(3/3) + 게이트 적색 재현(DoD) — `ledger_control.write_frozen`
+    이 true면 §4.4 fail-closed 전역 게이트가 환불 포스팅 자체를 막는다.
+    적색(거부) 상태를 실제로 만들고(UPDATE) 재현한 뒤, 원상복구해 다른
+    테스트에 새지 않게 한다(전역 단일 행 — 105번 표준과 무관하게 이 행만은
+    프로세스 전체가 공유)."""
+    buyer, seller = await create_test_user(pool), await create_test_user(pool)
+    price = Decimal("100.00")
+    rate = Decimal("0.15")
+    purchase_id = await _purchase(
+        pool, ports, buyer=buyer, seller=seller, price=price, commission_rate=rate
+    )
+
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE ledger_control SET write_frozen = TRUE WHERE id = 1")
+    try:
+        with pytest.raises(LedgerWriteFrozenError):
+            async with pool.acquire() as conn, conn.transaction():
+                await post_refund(
+                    conn,
+                    purchase_id=purchase_id,
+                    buyer_id=buyer,
+                    seller_id=seller,
+                    price=price,
+                    commission_rate=rate,
+                    admin_id=None,
+                    trace_id=uuid4(),
+                    journal=ports.journal,
+                    balances=ports.balances,
+                    audit=ports.audit,
+                    clock=ports.clock,
+                )
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE ledger_control SET write_frozen = FALSE WHERE id = 1")
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref = $1",
+            f"refund:purchase:{purchase_id}",
+        )
+    assert count == 0
+
+
+async def test_refund_rolls_back_entirely_when_audit_append_fails(pool, ports, monkeypatch):
+    """failure-injection — 모듈 docstring/§6 "감사 append 실패 → 포스팅
+    전체 롤백"을 실제로 주입해 재현한다. `journal.append`가 이미 저널·
+    분개행을 쓴 *뒤에* 감사 이벤트 체인 append가 실패해도(디스크·잠금 등
+    I/O 장애를 흉내) 트랜잭션 롤백이 판매자 PENDING_PAYOUT과 저널 모두
+    원상태로 되돌린다."""
+    buyer, seller = await create_test_user(pool), await create_test_user(pool)
+    price = Decimal("100.00")
+    rate = Decimal("0.15")
+    purchase_id = await _purchase(
+        pool, ports, buyer=buyer, seller=seller, price=price, commission_rate=rate
+    )
+    pending_before = await _balance(pool, ua(seller, UserSub.PENDING_PAYOUT))
+
+    async def _boom(*args, **kwargs):
+        raise OSError("injected audit append failure")
+
+    monkeypatch.setattr(ports.audit, "append_event_in", _boom)
+
+    with pytest.raises(OSError, match="injected audit append failure"):
+        async with pool.acquire() as conn, conn.transaction():
+            await post_refund(
+                conn,
+                purchase_id=purchase_id,
+                buyer_id=buyer,
+                seller_id=seller,
+                price=price,
+                commission_rate=rate,
+                admin_id=None,
+                trace_id=uuid4(),
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=ports.clock,
+            )
+
+    pending_after = await _balance(pool, ua(seller, UserSub.PENDING_PAYOUT))
+    assert pending_after == pending_before
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ledger_journal_entry WHERE event_ref = $1",
+            f"refund:purchase:{purchase_id}",
+        )
+    assert count == 0
+
+
+@pytest.mark.perf
+async def test_refund_r1_round_trip_count_regression_guard(pool, ports):
+    """수치 성능 단언(DoD) — `test_perf_journal.py::test_journal_append_
+    p95_under_30ms`(task-822/920/1029/1038)와 동일한 결정을 따른다: 공유
+    CI 환경의 절대 지연시간은 이 파일이 통제할 수 없는 변동성을 실측
+    31회(2026-09-15, task-2962)로 이미 드러냈으므로 게이트로 쓰지 않고,
+    구조 회귀(호출당 순차 DB 왕복 수가 다시 늘어나는 실제 코드 결함)만
+    차단 게이트로 잡는다."""
+    buyer, seller = await create_test_user(pool), await create_test_user(pool)
+    price = Decimal("100.00")
+    rate = Decimal("0.15")
+    purchase_id = await _purchase(
+        pool, ports, buyer=buyer, seller=seller, price=price, commission_rate=rate
+    )
+
+    queries: list[str] = []
+
+    def _log(record: object) -> None:
+        queries.append(getattr(record, "query", ""))
+
+    async with pool.acquire() as conn:
+        conn.add_query_logger(_log)
+        try:
+            async with conn.transaction():
+                result = await post_refund(
+                    conn,
+                    purchase_id=purchase_id,
+                    buyer_id=buyer,
+                    seller_id=seller,
+                    price=price,
+                    commission_rate=rate,
+                    admin_id=None,
+                    trace_id=uuid4(),
+                    journal=ports.journal,
+                    balances=ports.balances,
+                    audit=ports.audit,
+                    clock=ports.clock,
+                )
+        finally:
+            conn.remove_query_logger(_log)
+
+    assert result.refund_case == "R1"
+    print(
+        f"[LC-14 post_refund R1] sequential DB round trips={len(queries)} "
+        f"(max={_MAX_REFUND_R1_ROUND_TRIPS})"
+    )
+    assert len(queries) <= _MAX_REFUND_R1_ROUND_TRIPS, (
+        f"post_refund R1 순차 DB 왕복 수({len(queries)})가 상한"
+        f"({_MAX_REFUND_R1_ROUND_TRIPS})을 초과했습니다 — 왕복 수 회귀입니다."
+    )

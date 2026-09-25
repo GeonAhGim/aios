@@ -1,12 +1,13 @@
-"""LB-9 — `SnapshotRepository`(ports/snapshot_repository.py)의 asyncpg 구현.
+"""LB-9 -- asyncpg implementation of `SnapshotRepository` (ports/snapshot_repository.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §5, §9 LB-8/LB-9.
+FA-0d-fix: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-0d
+(task-771991202, CTO decision (a) on task-2405).
 
-`pos_snapshot`에는 currency 컬럼이 없다 — `avg_cost`/`mark_price`(Money)의
-통화는 `pos_account.base_currency`를 그대로 쓴다. `get`/`list_open`은
-`pos_account`를 조인해 그 값을 읽지만, `upsert`는 입력 `PositionSnapshotView.
-base_currency`를 호출자가 이미 알고 있으므로 조인 없이 그 값을 그대로
-재사용한다(쓰기 경로에서 불필요한 조회 한 번을 아낀다).
+`pos_snapshot` has no currency column -- the currency of `avg_cost`/`mark_price`
+(Money) is `pos_account.base_currency`. `get`/`list_open` join `pos_account`
+to read it; `upsert` reuses the caller's `PositionSnapshotView.base_currency`
+without the join (saves one lookup on the write path).
 
 `upsert` implements the same optimistic-locking semantics as §5's
 `conditional_update(pos_snapshot, id=position_key, expected
@@ -20,8 +21,68 @@ seq matches, carrying `legacy_position_id` forward via RETURNING) -> INSERT
 (`expected_seq=0`, per the port's docstring) hits the `NOT EXISTS(existing)`
 branch and just inserts, since `existing` is empty; later writes only
 insert a new row if `prior` deleted a row matching the same snapshot
-`existing` just read -- there is no race window between two concurrent
-writers (one SQL round trip)."""
+`existing` just read.
+
+Two concurrent first-creations (`expected_seq=0`) for the same brand-new
+`position_key` both see `existing` empty and both attempt the INSERT --
+without `ON CONFLICT (position_key) DO NOTHING`, the loser used to
+surface a raw `asyncpg.UniqueViolationError` (reproduced empirically:
+QA task-2095) instead of the domain-level `ConcurrencyConflictError` the
+`row is None` branch below raises for every other conflict shape. `DO
+NOTHING` folds that race into the same `row is None` path -- it never
+fires for the "replace" case since `prior`'s DELETE has already removed
+the old row (same natural key) before this INSERT runs, so there is
+nothing left to conflict with.
+
+task-3568 review REJECT (finding 2), task-3863 fix: `last_journal_seq IS
+NOT DISTINCT FROM $16` alone cannot tell "no row for this key yet" apart
+from "a row exists whose seq already happens to be 0" -- both make the
+DELETE match when `expected_seq=0`. A brand-new key's very first `pos_
+snapshot` row is *always* written with `last_journal_seq=0` too (per the
+port's own contract: the first upsert for a key uses `expected_seq=0`),
+so a second, unsynchronized "first creation" call for the same key that
+lands *after* the first one has already committed reads that
+just-committed seq=0 row via `existing`/`prior`'s own MVCC snapshot,
+matches it as if it were a legitimate prior version, and replaces it --
+the loser silently overwrites the winner instead of hitting `ON CONFLICT
+DO NOTHING` (empirically confirmed by
+`test_sequential_first_creation_after_winner_commits_does_not_overwrite`
+in tests/integration/foundation/positions/test_postgres_snapshot_repository.py).
+The `AND NOT ($16 = 0 AND $15 = 0)` guard on `prior`'s DELETE closes this:
+a write that neither expects nor produces any advance past the zero
+sentinel (`expected_seq=0` *and* the new row's own `last_journal_seq=0`)
+is categorically a "first creation," never a legitimate replace, so it is
+barred from matching an existing row at all -- it can only succeed via the
+`NOT EXISTS(existing)` insert branch (or, in true insert-vs-insert overlap,
+`ON CONFLICT DO NOTHING`), both of which correctly conflict once any row
+is already there. Every real replace (mark-to-market with an unchanged
+seq, or a journal fold that advances `last_journal_seq` past 0, as in
+`record_fill`'s own follow-up write to the row this same call just
+created) has a nonzero `expected_seq` or a nonzero new `last_journal_seq`
+and is untouched by the guard.
+
+FA-0d-fix (task-771991202, root cause of CI red 77871f67): the 5-part
+`position_key` (FA-0d `PositionKey`) already carries `portfolio_id`, but this
+adapter never wrote it into the `pos_snapshot.portfolio_id` column that FA-4
+(`963d5f3cfb1b`) added -- the column stayed NULL for every adapter-written
+row. The FA-0d backfill migration (`cdb114b6903f`) rewrites keys 5->4 parts
+on downgrade and needs that column to rebuild the 5th part on upgrade, so
+any migration round trip crossing it (OMS `test_db_transition_trigger`,
+risk-gate rollback tests) fail-closed with `UnbackfillablePositionKeyError`
+and left the database stuck below head, cascading into dozens of failures.
+`upsert` now parses the key through the central constructor (rejecting
+legacy/malformed keys up front with `InvalidPositionKeyError`), writes
+`portfolio_id` plus the portfolio's `fund_id` into their columns, and fences
+the write on portfolio ownership: the `owned_portfolio` CTE resolves the
+portfolio through fund -> legal_entity -> `tenant_id`, and both the DELETE
+and the INSERT are gated on it, so a cross-tenant (or never bootstrapped)
+portfolio neither deletes nor inserts anything. The failure path then runs
+one diagnostic lookup to raise the precise port error
+(`SnapshotPortfolioNotFoundError` / `SnapshotPortfolioTenantMismatchError`)
+instead of a misleading `ConcurrencyConflictError`; the happy path stays a
+single round trip (the journal-append perf guard counts them).
+"""
+
 from __future__ import annotations
 
 import json
@@ -32,6 +93,11 @@ import asyncpg
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import Currency, Money
 from src.foundation.positions.contracts.v1 import CostMethod, Lot, PositionSnapshotView
+from src.foundation.positions.domain.position_key import PositionKey
+from src.foundation.positions.ports.snapshot_repository import (
+    SnapshotPortfolioNotFoundError,
+    SnapshotPortfolioTenantMismatchError,
+)
 
 _SELECT = (
     "SELECT ps.*, pa.base_currency FROM pos_snapshot ps "
@@ -39,22 +105,41 @@ _SELECT = (
 )
 
 _UPSERT_SQL = (
-    "WITH existing AS MATERIALIZED ("
+    "WITH owned_portfolio AS MATERIALIZED ("
+    " SELECT p.portfolio_id, p.fund_id FROM portfolio p"
+    " JOIN fund f ON f.fund_id = p.fund_id"
+    " JOIN legal_entity le ON le.entity_id = f.entity_id"
+    " WHERE p.portfolio_id = $17 AND le.tenant_id = $2"
+    "), existing AS MATERIALIZED ("
     " SELECT legacy_position_id FROM pos_snapshot WHERE position_key = $1"
     "), prior AS ("
     " DELETE FROM pos_snapshot"
-    " WHERE position_key = $1 AND last_journal_seq IS NOT DISTINCT FROM $16"
+    " WHERE position_key = $1 AND tenant_id = $2"
+    " AND last_journal_seq IS NOT DISTINCT FROM $16"
+    " AND NOT ($16 = 0 AND $15 = 0)"
+    " AND EXISTS (SELECT 1 FROM owned_portfolio)"
     " RETURNING legacy_position_id"
     ") "
     "INSERT INTO pos_snapshot ("
     " position_key, tenant_id, account_id, instrument_id, quantity, avg_cost,"
     " cost_method, lots, realized_pnl_base, unrealized_pnl_base, fees_base,"
-    " funding_base, mark_price, mark_at, last_journal_seq, legacy_position_id, updated_at"
+    " funding_base, mark_price, mark_at, last_journal_seq, legacy_position_id,"
+    " fund_id, portfolio_id, updated_at"
     ") "
     "SELECT $1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14,$15,"
-    " (SELECT legacy_position_id FROM prior), now() "
+    " (SELECT legacy_position_id FROM prior), op.fund_id, op.portfolio_id, now() "
+    "FROM owned_portfolio op "
     "WHERE EXISTS (SELECT 1 FROM prior) OR NOT EXISTS (SELECT 1 FROM existing) "
+    "ON CONFLICT (position_key) DO NOTHING "
     "RETURNING *"
+)
+
+# Failure-path diagnostic only (never on the happy path): who owns the portfolio?
+_PORTFOLIO_OWNER_SQL = (
+    "SELECT le.tenant_id FROM portfolio p"
+    " JOIN fund f ON f.fund_id = p.fund_id"
+    " JOIN legal_entity le ON le.entity_id = f.entity_id"
+    " WHERE p.portfolio_id = $1"
 )
 
 
@@ -106,6 +191,9 @@ class PostgresSnapshotRepository:
     async def upsert(
         self, conn: asyncpg.Connection, snapshot: PositionSnapshotView, expected_seq: int
     ) -> PositionSnapshotView:
+        # Central constructor is the only parser -- raises InvalidPositionKeyError
+        # for legacy 4-part / malformed keys before anything touches the table.
+        portfolio_id = PositionKey.parse(snapshot.position_key).portfolio_id
         row = await conn.fetchrow(
             _UPSERT_SQL,
             snapshot.position_key,
@@ -124,14 +212,37 @@ class PostgresSnapshotRepository:
             snapshot.mark_at,
             snapshot.last_journal_seq,
             expected_seq,
+            portfolio_id,
         )
         if row is None:
-            raise ConcurrencyConflictError(
-                f"pos_snapshot.position_key={snapshot.position_key}: last_journal_seq가 "
-                f"기대값({expected_seq})과 다릅니다(동시 갱신 충돌) — "
-                "get으로 다시 조회 후 재시도하세요."
-            )
+            await self._raise_for_failed_upsert(conn, snapshot, portfolio_id, expected_seq)
         return _row_to_view(row, snapshot.base_currency)
+
+    @staticmethod
+    async def _raise_for_failed_upsert(
+        conn: asyncpg.Connection,
+        snapshot: PositionSnapshotView,
+        portfolio_id: UUID,
+        expected_seq: int,
+    ) -> None:
+        owner_tenant_id = await conn.fetchval(_PORTFOLIO_OWNER_SQL, portfolio_id)
+        if owner_tenant_id is None:
+            raise SnapshotPortfolioNotFoundError(
+                f"pos_snapshot.position_key={snapshot.position_key}: portfolio "
+                f"{portfolio_id} does not exist -- bootstrap the tenant's default "
+                "hierarchy (ensure_default_hierarchy) before writing positions."
+            )
+        if owner_tenant_id != snapshot.tenant_id:
+            raise SnapshotPortfolioTenantMismatchError(
+                f"pos_snapshot.position_key={snapshot.position_key}: portfolio "
+                f"{portfolio_id} is not owned by tenant {snapshot.tenant_id} -- "
+                "cross-tenant snapshot write rejected."
+            )
+        raise ConcurrencyConflictError(
+            f"pos_snapshot.position_key={snapshot.position_key}: last_journal_seq가 "
+            f"기대값({expected_seq})과 다릅니다(동시 갱신 충돌) — "
+            "get으로 다시 조회 후 재시도하세요."
+        )
 
     async def list_open(
         self, conn: asyncpg.Connection, tenant_id: UUID, account_id: UUID

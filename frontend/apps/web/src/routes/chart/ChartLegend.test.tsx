@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import type { ObjectTreeEntry } from "@aios/chart-engine/src/legend/objectTree";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -95,5 +96,53 @@ describe("ChartLegend — CH-16b 순서·잠금 조작", () => {
     );
 
     expect(screen.queryByRole("button", { name: "잠금 전환 trendline:1" })).not.toBeInTheDocument();
+  });
+});
+
+// DEPTH_CH audit (task-2729): task-2013 (242f346) had no numeric performance
+// assertion and no D3 multi-instance reproduction (DEEPEN task-3100).
+describe("ChartLegend — 수치 성능·D3 다중 인스턴스 (DEEPEN task-3100)", () => {
+  it("수치 성능: 지표 150개를 렌더링해도 10s 예산 내에 끝난다", () => {
+    const entries: ObjectTreeEntry[] = Array.from({ length: 150 }, (_, i) => entry({ id: `IND_${i}`, name: `IND_${i}` }));
+
+    const start = performance.now();
+    render(<ChartLegend objectTree={entries} onToggleVisible={noop} onMoveEntry={noop} onToggleLocked={noop} />);
+    const elapsedMs = performance.now() - start;
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(150);
+    // Loose budget (same convention as the VISIBLE_CANDLE_COUNT assertion in
+    // useChartLayout.test.ts) that absorbs jsdom's first-render JIT warmup and
+    // shared-machine CPU contention (task-1968), but still catches a rendering
+    // regression that goes non-linear with entry count (e.g. O(n^2) key recompute).
+    expect(elapsedMs).toBeLessThan(10000);
+  });
+
+  it("D3 다중 인스턴스: 같은 화면에 동시에 렌더된 두 ChartLegend 인스턴스는 서로의 콜백을 교차호출하지 않는다", () => {
+    const onMoveEntryA = vi.fn();
+    const onMoveEntryB = vi.fn();
+    render(
+      <>
+        <ChartLegend
+          objectTree={[entry({ id: "SMA", name: "SMA" }), entry({ id: "RSI", name: "RSI" })]}
+          onToggleVisible={noop}
+          onMoveEntry={onMoveEntryA}
+          onToggleLocked={noop}
+        />
+        <ChartLegend
+          objectTree={[entry({ id: "EMA", name: "EMA" }), entry({ id: "WMA", name: "WMA" })]}
+          onToggleVisible={noop}
+          onMoveEntry={onMoveEntryB}
+          onToggleLocked={noop}
+        />
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "순서 아래로 SMA" }));
+    expect(onMoveEntryA).toHaveBeenCalledWith("SMA", 1);
+    expect(onMoveEntryB).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "순서 아래로 EMA" }));
+    expect(onMoveEntryB).toHaveBeenCalledWith("EMA", 1);
+    expect(onMoveEntryA).toHaveBeenCalledTimes(1); // unaffected by B's later click
   });
 });

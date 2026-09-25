@@ -1,31 +1,35 @@
-"""19.1 — 통합 포트폴리오 조회 (PortfolioService.get_portfolio).
+"""19.1 — Integrated portfolio lookup (PortfolioService.get_portfolio).
 
 Spec: 기능설계문서_v1.20.md#FD-19.1, FD-16.4, FD-3.2
 
-사용자의 모든 RUNNING/PAUSED 실행(FD-16)을 하나의 포트폴리오 뷰로
-집계한다 — 전략별 배분 비중, 미배분 현금 비중, 전체 손익. 02번 §2.2
-Cross-Asset 원칙 — 이 합산은 순수 표시 목적(대시보드 집계)이며 FROZEN
-Risk Engine의 실시간 판단에는 전혀 쓰이지 않는다.
+Aggregates all RUNNING/PAUSED executions (FD-16) for a user into a single
+portfolio view — strategy allocation weights, unallocated cash weight,
+and total PnL. 02 §2.2 Cross-Asset principle — this sum is for display
+only (dashboard aggregation) and is never used by the FROZEN Risk
+Engine for real-time decisions.
 
-범위 축소(Draft): 여러 거래소·통화에 걸친 실제 환산 합산에는 FX 변환이
-필요한데 이 시스템에 아직 실제로 구동되는 환율 서비스가 없다 — Phase 1
-실제 LIVE 대상이 crypto(Bitget) 단일 자산군뿐이라는 06번 §6.1/FD-16.2
-전제를 그대로 따라, 총 현금 잔고(total_cash_balance)는 호출부가 이미
-단일 통화로 정리해 전달한다고 가정한다(여러 거래소 잔고를 합산해서
-넘기는 책임은 호출부).
+Scope reduction (Draft): Actual FX-conversion aggregation across exchanges
+and currencies would require an FX rate service, which this system does
+not yet have in production. Following the assumption in 06 §6.1/FD-16.2
+that Phase 1 LIVE targets are crypto (Bitget) only, we assume the caller
+has already normalized total_cash_balance to a single currency
+(the responsibility to sum exchange balances and pass them lies with the
+caller).
 
-weight_pct 합이 정확히 100%가 되도록 구성한다(FD-19.1 완료조건) —
-total_portfolio_value = unallocated_cash + Σcurrent_value_i로 정의하면
-Σweight_i + unallocated_cash_weight = 100%가 대수적으로 항상 성립한다.
+weight_pct sums to exactly 100% (FD-19.1 done condition):
+total_portfolio_value = unallocated_cash + Σcurrent_value_i, so
+Σweight_i + unallocated_cash_weight = 100% algebraically always holds.
 
-19.2 — 포트폴리오 재구성(rebalance): 배분 증가는 한도(16.1) 재검증 후
-반영, LIVE 실행의 배분 증가는 항상 승인을 재트리거한다(16.2와 동일
-원칙 — 자동화 수준 추적이 없어 "항상 승인 필요"로 보수적으로 처리).
-배분 감소는 한도만 낮출 뿐 포지션을 강제 청산하는 코드 경로 자체가
-없다 — "재구성이 기존 포지션을 청산하지 않는다"는 완료조건은 이
-로직이 positions 테이블을 아예 건드리지 않는다는 사실로 자연히
-보장된다. 재구성 결과 배분 총합이 잔고를 초과하면 전체를 저장 거부
-(부분 반영 없음, 원자적).
+19.2 — Portfolio rebalance: increases in allocation are applied after
+re-validating the limit (16.1); allocation increases for LIVE executions
+always re-trigger approval (same principle as 16.2 — conservative "always
+require approval" due to lack of automation-level tracking).
+Decreasing allocation only lowers the limit; there is no code path that
+forces liquidation of positions — the done condition "rebalance does not
+liquidate existing positions" is naturally guaranteed by the fact that
+this logic never touches the positions table at all. If the rebalanced
+allocation total exceeds the balance, the entire write is rejected
+(no partial updates, atomic).
 """
 from __future__ import annotations
 
@@ -69,7 +73,7 @@ class RebalanceAdjustment(BaseModel):
 
 
 class RebalanceError(Exception):
-    """FD-19.2 실패 — 라우터가 400/403/404로 변환."""
+    """FD-19.2 failure — router converts to 400/403/404."""
 
 
 class RebalanceResult(BaseModel):
@@ -153,11 +157,12 @@ class PortfolioService:
             raise RebalanceError("조정할 실행이 최소 1개 이상 필요합니다.")
 
         async with self._pool.acquire() as conn, conn.transaction():
-            # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #09) 반영 — 트랜잭션 +
-            # FOR UPDATE로 이 사용자의 RUNNING/PAUSED 실행 전체를 잠근다.
-            # 동시에 들어온 두 번째 재구성 요청은 이 트랜잭션이 끝날 때까지
-            # 자신의 SELECT ... FOR UPDATE에서 블록되므로, "서로의 아직
-            # 커밋 안 된 변경을 못 본 채 각자 통과"하는 경합이 원천 차단된다.
+            # Red team audit (docs/RED_TEAM_FINDINGS.md #09) — transaction +
+            # FOR UPDATE locks all RUNNING/PAUSED executions for this user.
+            # A second concurrent rebalance request will block on its own
+            # SELECT ... FOR UPDATE until this transaction completes,
+            # fundamentally preventing race conditions where both pass
+            # without seeing each other's uncommitted changes.
             rows = await conn.fetch(
                 "SELECT e.id AS execution_id, e.user_id, e.mode, e.allocated_capital, "
                 "s.certified_badge "

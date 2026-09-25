@@ -13,6 +13,7 @@ import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { useTranslation } from "react-i18next";
 
 const MEMBERSHIP_ROLE_OPTIONS: MembershipRole[] = ["OWNER", "ADMIN", "MEMBER", "AUDITOR", "SERVICE"];
 
@@ -57,6 +58,7 @@ function ConsentRow({
   onRevoke: () => void;
   revoking: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <li className="rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
@@ -66,14 +68,13 @@ function ConsentRow({
             <StatusBadge status={consent.state} />
           </div>
           <p className="text-xs text-fg-muted">
-            동의 ID {consent.consentId} · 공시 개정 {consent.disclosureRevision}
+            {t("legacy.trustPage.t1", { consentId: consent.consentId, disclosureRevision: consent.disclosureRevision })}
             {consent.acceptedAt && ` · 동의: ${new Date(consent.acceptedAt).toLocaleString()}`}
             {consent.revokedAt && ` · 철회: ${new Date(consent.revokedAt).toLocaleString()}`}
           </p>
         </div>
         <Button type="button" variant="secondary" size="sm" loading={revoking} onClick={onRevoke}>
-          동의 철회
-        </Button>
+          {t("legacy.trustPage.t2")}</Button>
       </div>
     </li>
   );
@@ -96,6 +97,7 @@ function MembershipResultCard({
   suspending: boolean;
   revoking: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center gap-2">
@@ -104,21 +106,20 @@ function MembershipResultCard({
         <span className="text-xs text-fg-muted">{membership.role}</span>
       </div>
       <p className="text-xs text-fg-muted">
-        멤버십 ID {membership.membershipId} · revision {membership.revision}
+        {t("legacy.trustPage.t3", { membershipId: membership.membershipId, revision: membership.revision })}
       </p>
       <div className="mt-3 flex gap-2">
         <Button type="button" variant="secondary" size="sm" loading={suspending} onClick={onSuspend}>
-          정지(suspend)
-        </Button>
+          {t("legacy.trustPage.t4")}</Button>
         <Button type="button" variant="danger" size="sm" loading={revoking} onClick={onRevoke}>
-          폐기(revoke)
-        </Button>
+          {t("legacy.trustPage.t5")}</Button>
       </div>
     </div>
   );
 }
 
 export function TrustPage() {
+  const { t } = useTranslation();
   const { data, isLoading, isError, error, refetch } = useTrustStatus();
   const revokeConsent = useRevokeConsent();
   const grantMembership = useGrantMembership();
@@ -168,10 +169,10 @@ export function TrustPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <PageHeader title="신뢰(Trust) 멤버십·동의" />
+        <PageHeader title={t("legacy.trustPage.title6")} />
 
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-fg">동의(Consent) 현황</h2>
+          <h2 className="text-sm font-semibold text-fg">{t("legacy.trustPage.t7")}</h2>
           {isError ? (
             <ConsentActionError error={error} />
           ) : isLoading ? (
@@ -194,27 +195,26 @@ export function TrustPage() {
               ))}
             </ul>
           ) : (
-            <EmptyState>등록된 동의 내역이 없습니다.</EmptyState>
+            <EmptyState>{t("legacy.trustPage.t8")}</EmptyState>
           )}
           {!isError && !isLoading && (
             <Button type="button" variant="secondary" size="sm" onClick={() => refetch()}>
-              새로고침
-            </Button>
+              {t("legacy.trustPage.t9")}</Button>
           )}
         </section>
 
         <section className="space-y-3 rounded-lg border border-border-strong bg-bg p-4">
-          <h2 className="text-sm font-semibold text-fg">멤버십 부여(Grant)</h2>
+          <h2 className="text-sm font-semibold text-fg">{t("legacy.trustPage.t10")}</h2>
           <div className="flex items-end gap-2">
-            <Field label="대상 subject_id">
+            <Field label={t("legacy.trustPage.label11")}>
               <Input
                 value={grantSubjectId}
                 onChange={(e) => setGrantSubjectId(e.target.value)}
-                placeholder="부여 대상 subject_id"
+                placeholder={t("legacy.trustPage.placeholder12")}
                 className="w-72"
               />
             </Field>
-            <Field label="역할">
+            <Field label={t("legacy.trustPage.label13")}>
               <Select value={grantRole} onChange={(e) => setGrantRole(e.target.value as MembershipRole)}>
                 {MEMBERSHIP_ROLE_OPTIONS.map((role) => (
                   <option key={role} value={role}>
@@ -230,19 +230,18 @@ export function TrustPage() {
               disabled={!grantSubjectId.trim()}
               onClick={handleGrant}
             >
-              부여
-            </Button>
+              {t("legacy.trustPage.t14")}</Button>
           </div>
         </section>
 
         <section className="space-y-3 rounded-lg border border-border-strong bg-bg p-4">
-          <h2 className="text-sm font-semibold text-fg">멤버십 정지·폐기</h2>
+          <h2 className="text-sm font-semibold text-fg">{t("legacy.trustPage.t15")}</h2>
           <div className="flex items-end gap-2">
-            <Field label="대상 subject_id">
+            <Field label={t("legacy.trustPage.label16")}>
               <Input
                 value={actionSubjectId}
                 onChange={(e) => setActionSubjectId(e.target.value)}
-                placeholder="정지·폐기 대상 subject_id"
+                placeholder={t("legacy.trustPage.placeholder17")}
                 className="w-72"
               />
             </Field>
@@ -254,8 +253,7 @@ export function TrustPage() {
               disabled={!actionSubjectId.trim()}
               onClick={handleSuspend}
             >
-              정지(suspend)
-            </Button>
+              {t("legacy.trustPage.t18")}</Button>
             <Button
               type="button"
               variant="danger"
@@ -264,8 +262,7 @@ export function TrustPage() {
               disabled={!actionSubjectId.trim()}
               onClick={handleRevokeMembership}
             >
-              폐기(revoke)
-            </Button>
+              {t("legacy.trustPage.t19")}</Button>
           </div>
 
           {membershipError ? <MembershipActionError error={membershipError} /> : null}

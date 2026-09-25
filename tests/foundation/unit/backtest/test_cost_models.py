@@ -6,14 +6,28 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 모든 기대값은 손으로 계산해 Decimal exact 비교로 단언한다(float 근사
 비교 금지). funding·borrow는 서로 다른 파일이라 이 테스트도 모듈별
 섹션으로 나눈다.
+
+DEEPEN(task-3039, ADR-2026-09-09-C D2): depth=D2 증빙.
+- negative tests >=3: 위 `*_rejects_*` 다수(음수·NaN·역전 구간·naive
+  datetime 등).
+- failure injection 1: `test_exact_total_seconds_avoids_float_precision_loss`
+  — `timedelta.total_seconds()`(float 경유)를 그대로 썼다면 서기 2300년대처럼
+  epoch에서 먼 시각에서 1e-8초 단위 오차가 생겼을 상황을 재현해, 이번
+  DEEPEN에서 고친 `exact_total_seconds`(정수 필드 직접 조합)가 그 오차를
+  없앤다는 것을 증명한다(실제로 발견해 고친 결함).
+- perf assertion 1: `test_compute_borrow_cost_perf_budget`.
+- gate-red repro: N/A(이 리프에 정적 스캐너 없음 — failure-injection
+  테스트가 런타임 가드를 직접 실행한다).
 """
-from datetime import datetime, timezone
+
+import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
 from src.data.models.trading import OrderSide
-from src.foundation.backtest.domain.costs import round_cost
+from src.foundation.backtest.domain.costs import exact_total_seconds, round_cost
 from src.foundation.backtest.domain.costs.borrow import compute_borrow_cost
 from src.foundation.backtest.domain.costs.funding import (
     compute_funding_cost,
@@ -71,9 +85,7 @@ def test_count_funding_settlements_rejects_naive_datetime() -> None:
 
 def test_count_funding_settlements_rejects_non_positive_interval_hours() -> None:
     with pytest.raises(ValueError, match="interval_hours"):
-        count_funding_settlements(
-            entry_time=_D0, exit_time=_D0.replace(hour=8), interval_hours=0
-        )
+        count_funding_settlements(entry_time=_D0, exit_time=_D0.replace(hour=8), interval_hours=0)
 
 
 @pytest.mark.parametrize(
@@ -246,3 +258,60 @@ def test_compute_borrow_cost_rejects_naive_datetime() -> None:
 def test_costs_config_rejects_negative_borrow_apr() -> None:
     with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError, contract-level
         CostsConfig(funding=False, borrow_apr=Decimal("-0.01"))
+
+
+# --------------------------------------------------------------------------
+# BT-8 DEEPEN(task-3039) — exact_total_seconds D2 증빙
+# --------------------------------------------------------------------------
+
+
+def test_exact_total_seconds_avoids_float_precision_loss() -> None:
+    """failure injection(D2): `timedelta.total_seconds()`는 내부적으로
+    마이크로초 총합을 float로 나눠 반환한다 — epoch에서 멀리 떨어진(서기
+    2300년대) 시각에서는 그 나눗셈이 1e-8초 단위까지 어긋난다(이 DEEPEN
+    이전의 `funding.py`/`borrow.py` 구현이 실제로 이 오차를 그대로 안고
+    있었다 — 실제로 발견해 고친 결함). `exact_total_seconds`는 `days`/
+    `seconds`/`microseconds` 정수 필드를 직접 조합해 그 float 나눗셈을
+    완전히 피한다."""
+
+    far_future = datetime(2300, 1, 1, 1, 2, 3, 456789, tzinfo=timezone.utc)
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    delta = far_future - epoch
+
+    float_based = Decimal(delta.total_seconds())
+    exact = exact_total_seconds(delta)
+
+    assert float_based != exact, "회귀 재현 실패: 이 델타는 float 나눗셈 오차를 드러내야 한다"
+    expected = Decimal(delta.days) * Decimal(86400) + Decimal(delta.seconds) + Decimal("0.456789")
+    assert exact == expected
+
+
+def test_compute_funding_cost_far_future_settlement_count_is_exact() -> None:
+    """수치 회귀 가드: `count_funding_settlements`가 epoch에서 아주 먼
+    시각(서기 2300년대, Python `datetime` 표현 범위 안에서는 위 float 오차가
+    경계를 흔들 만큼 커지지 않는다는 것을 확인했지만, `exact_total_seconds`로
+    바꾼 뒤에도 정상 범위 결과가 그대로 유지되는지 잠근다) — 진입이 정확히
+    정산 시각이면 그 정산이 정확히 1회 포함돼야 한다."""
+
+    entry = datetime(2300, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    exit_ = entry + timedelta(hours=7)
+    count = count_funding_settlements(entry_time=entry, exit_time=exit_)
+    assert count == 1
+
+
+@pytest.mark.perf
+def test_compute_borrow_cost_perf_budget() -> None:
+    """perf assertion(D2): `compute_borrow_cost`는 백테스트 한 회 실행에서
+    보유 포지션마다 반복 호출되는 순수 함수다 — O(1) 산술만 하므로 상한을
+    넉넉히 잡아도(10,000회 <= 200ms) 회귀를 잡아낼 수 있다."""
+
+    config = CostsConfig(funding=False, borrow_apr=Decimal("0.10"))
+    entry = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    exit_ = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+    start = time.perf_counter()
+    for _ in range(10_000):
+        compute_borrow_cost(config, notional=Decimal("100000"), entry_time=entry, exit_time=exit_)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    assert elapsed_ms < 200, f"compute_borrow_cost 너무 느림: {elapsed_ms:.1f}ms/10,000회"

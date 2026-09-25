@@ -6,8 +6,10 @@ DoD (c)/(d)/(e) must all be falsifiable: trading inside the band, dropping
 `turnover_pct`/`est_cost` instead of exact `Decimal` arithmetic must each
 fail some test here.
 """
+
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -173,3 +175,120 @@ def test_no_targets_and_no_current_exposure_is_a_no_op_plan():
     assert plan.skipped == []
     assert plan.turnover_pct == Decimal("0")
     assert plan.est_cost == Decimal("0")
+
+
+# --- D2: Decimal-only enforcement (105 standard) -- float inputs reject ------
+
+
+def test_plan_rebalance_rejects_float_target_weight():
+    """`targets` is a plain dict, not a pydantic-validated field, so the
+    Decimal-only guarantee here comes from `Decimal.__sub__` refusing to mix
+    with `float` -- a float target must fail loud (TypeError), never get
+    silently computed with float contamination (105 standard)."""
+    cfg = _config(rebalance_band_pct=Decimal("5"))
+    current = _aggregate({"BTC/USDT": Decimal("40")})
+    with pytest.raises(TypeError):
+        plan_rebalance(
+            {"BTC/USDT": 45.0}, current, cfg, {"BTC/USDT": Decimal("20000")}, Decimal("2")
+        )
+
+
+def test_plan_rebalance_rejects_float_price():
+    cfg = _config(rebalance_band_pct=Decimal("5"))
+    current = _aggregate({"BTC/USDT": Decimal("40")})
+    with pytest.raises(TypeError):
+        plan_rebalance(
+            {"BTC/USDT": Decimal("60")}, current, cfg, {"BTC/USDT": 20000.0}, Decimal("2")
+        )
+
+
+# --- D2: failure injection (ADR-2026-09-09-C Decision 1) ---------------------
+
+
+class _CorruptedSymbolMap(dict[str, Decimal]):
+    """Simulates a broken upstream feed: aggregation.py's `aggregate()`
+    output corrupted mid-transit, so iterating `per_symbol_pct` raises
+    instead of silently yielding an empty/partial symbol set."""
+
+    def __iter__(self):
+        raise ConnectionError("aggregation feed truncated mid-read")
+
+
+def test_failure_injection_plan_rebalance_propagates_corrupted_aggregate_feed():
+    cfg = _config(rebalance_band_pct=Decimal("5"))
+    current = PortfolioAggregate.model_construct(
+        total_equity=Decimal("10000"),
+        per_symbol_pct=_CorruptedSymbolMap({"BTC/USDT": Decimal("40")}),
+        per_strategy_pct={},
+        total_exposure_pct=Decimal("40"),
+        cash_pct=Decimal("60"),
+        as_of=_AS_OF,
+    )
+
+    with pytest.raises(ConnectionError):
+        plan_rebalance(
+            {"BTC/USDT": Decimal("45")}, current, cfg, {"BTC/USDT": Decimal("20000")}, Decimal("2")
+        )
+
+
+# --- D2: numeric performance assertion (pre-trade gate budget, ADR-2026-09-09-C) --
+
+
+@pytest.mark.perf
+def test_perf_plan_rebalance_p99_within_pre_trade_gate_budget():
+    """plan_rebalance() produces the trade list that precedes order
+    submission, so it sits on the same pre-trade gate path as L18's
+    aggregate() -- the "사전거래 게이트 p99 5ms" budget (ADR-2026-09-09-C
+    Decision 1) applies, sized to a 200-symbol portfolio.
+    """
+    cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
+    symbols = [f"SYM{i}/USDT" for i in range(200)]
+    current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("1000000"))
+    targets = {s: Decimal("0.6") for s in symbols}
+    prices = {s: Decimal("100") for s in symbols}
+
+    latencies_ms: list[float] = []
+    for _ in range(200):
+        start = time.perf_counter()
+        plan_rebalance(targets, current, cfg, prices, Decimal("2"))
+        latencies_ms.append((time.perf_counter() - start) * 1000)
+
+    latencies_ms.sort()
+    p99 = latencies_ms[int(len(latencies_ms) * 0.99) - 1]
+    assert p99 < 5.0, f"p99 {p99:.3f}ms exceeds pre-trade gate budget of 5ms (ADR-2026-09-09-C)"
+
+
+# --- D2: gate-red reproduction -------------------------------------------------
+
+
+def _broken_plan_rebalance_band_off_by_one(
+    targets: dict[str, Decimal],
+    current: PortfolioAggregate,
+    cfg: PortfolioConfig,
+) -> list[str]:
+    """Gate-red reproduction: a regression using `<` instead of the real
+    `plan_rebalance`'s `<=` for the rebalance-band comparison would wrongly
+    trade a delta sitting exactly on the band boundary -- contrast with the
+    real implementation's correct exclusion below."""
+    symbols = sorted(set(targets) | set(current.per_symbol_pct))
+    traded: list[str] = []
+    for symbol in symbols:
+        target_w = targets.get(symbol, Decimal("0"))
+        current_w = current.per_symbol_pct.get(symbol, Decimal("0"))
+        abs_delta = abs(target_w - current_w)
+        if abs_delta < cfg.rebalance_band_pct:  # BUG: should be <=
+            continue
+        traded.append(symbol)
+    return traded
+
+
+def test_gate_red_band_boundary_off_by_one_would_wrongly_trade():
+    cfg = _config(rebalance_band_pct=Decimal("5"))
+    current = _aggregate({"BTC/USDT": Decimal("40")})
+    targets = {"BTC/USDT": Decimal("45")}  # delta == band, exactly on the boundary
+
+    red_traded = _broken_plan_rebalance_band_off_by_one(targets, current, cfg)
+    assert red_traded == ["BTC/USDT"]  # red: wrongly trades the boundary
+
+    plan = plan_rebalance(targets, current, cfg, {"BTC/USDT": Decimal("20000")}, Decimal("2"))
+    assert plan.trades == []  # green: boundary correctly stays in the no-trade band

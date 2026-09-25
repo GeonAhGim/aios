@@ -39,9 +39,9 @@ from src.foundation.paper_control.ports.paper_adapter import (
     PaperExecutionContext,
 )
 from src.foundation.paper_control.ports.repository import PaperControlRepository
+from src.foundation.risk_gate.api import GateKind
 from src.foundation.risk_gate.application.evaluate_risk_gate import evaluate_risk_gate
 from src.foundation.risk_gate.contracts.v1 import RiskOutcome
-from src.foundation.risk_gate.domain.models import GateKind
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 __all__ = [

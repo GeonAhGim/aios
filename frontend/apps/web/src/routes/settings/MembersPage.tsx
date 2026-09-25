@@ -46,6 +46,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { useTenant } from "../../hooks/useTenant";
+import { useTranslation } from "react-i18next";
 
 const ROLE_LABELS: Record<MembershipRole, string> = {
   OWNER: "소유자",
@@ -110,6 +111,7 @@ interface MemberRowProps {
 }
 
 function MemberRow({ view, canManage, pending, onSuspend, onRevoke }: MemberRowProps) {
+  const { t } = useTranslation();
   const state = STATE_META[view.state];
   return (
     <li className="flex items-center justify-between gap-4 py-3">
@@ -127,8 +129,7 @@ function MemberRow({ view, canManage, pending, onSuspend, onRevoke }: MemberRowP
           title={!canManage ? NO_PERMISSION_TITLE : undefined}
           onClick={onSuspend}
         >
-          정지
-        </Button>
+          {t("legacy.membersPage.t1")}</Button>
         <Button
           type="button"
           variant="danger"
@@ -137,14 +138,14 @@ function MemberRow({ view, canManage, pending, onSuspend, onRevoke }: MemberRowP
           title={!canManage ? NO_PERMISSION_TITLE : undefined}
           onClick={onRevoke}
         >
-          폐기
-        </Button>
+          {t("legacy.membersPage.t2")}</Button>
       </div>
     </li>
   );
 }
 
 export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsClient, currentUserId }: MembersPageProps) {
+  const { t } = useTranslation();
   const { activeTenantId } = useTenant();
   const queryClient = useQueryClient();
   const { data: me } = useMe();
@@ -210,7 +211,7 @@ export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsCli
   }
 
   function handleRevoke(view: MembershipView) {
-    if (!window.confirm("이 멤버십을 폐기할까요?")) return;
+    if (!window.confirm(t("legacy.membersPage.t12"))) return;
     runOnMembership(view.membershipId, () => client.revoke(view.membershipId));
   }
 
@@ -218,8 +219,8 @@ export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsCli
     return (
       <AppShell>
         <div className="max-w-3xl space-y-6">
-          <PageHeader title="멤버 관리" />
-          <EmptyState>조직/가구 테넌트를 선택하면 멤버를 관리할 수 있습니다.</EmptyState>
+          <PageHeader title={t("legacy.membersPage.title3")} />
+          <EmptyState>{t("legacy.membersPage.t4")}</EmptyState>
         </div>
       </AppShell>
     );
@@ -228,13 +229,13 @@ export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsCli
   return (
     <AppShell>
       <div className="max-w-3xl space-y-6">
-        <PageHeader title="멤버 관리" />
+        <PageHeader title={t("legacy.membersPage.title5")} />
 
         {query.isError && <ListErrorBanner error={query.error} onRetry={() => query.refetch()} />}
         {actionError !== null && <MutationErrorBanner error={actionError} />}
 
         {!query.isError && query.isLoading && <LoadingState />}
-        {!query.isError && !query.isLoading && rows.length === 0 && <EmptyState>등록된 멤버가 없습니다.</EmptyState>}
+        {!query.isError && !query.isLoading && rows.length === 0 && <EmptyState>{t("legacy.membersPage.t6")}</EmptyState>}
         {!query.isError && !query.isLoading && rows.length > 0 && (
           <Card>
             <ul className="divide-y divide-border">
@@ -250,7 +251,7 @@ export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsCli
                   />
                 ) : (
                   <li key={`invalid-${index}`} className="py-3">
-                    <Alert tone="danger">멤버십 정보를 해석할 수 없습니다.</Alert>
+                    <Alert tone="danger">{t("legacy.membersPage.t7")}</Alert>
                   </li>
                 ),
               )}
@@ -259,9 +260,9 @@ export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsCli
         )}
 
         <Card className="max-w-lg">
-          <CardTitle>멤버 초대</CardTitle>
+          <CardTitle>{t("legacy.membersPage.t8")}</CardTitle>
           <form onSubmit={handleGrant} className="space-y-3">
-            <Field label="사용자 ID(subject_id)">
+            <Field label={t("legacy.membersPage.label9")}>
               <Input
                 required
                 value={subjectId}
@@ -269,7 +270,7 @@ export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsCli
                 disabled={!canManageMembers}
               />
             </Field>
-            <Field label="역할">
+            <Field label={t("legacy.membersPage.label10")}>
               <Select
                 value={role}
                 onChange={(e) => setRole(e.target.value as MembershipRole)}
@@ -289,8 +290,7 @@ export function MembersPage({ fetchMembers = fetchMembersDefault, membershipsCli
               title={!canManageMembers ? NO_PERMISSION_TITLE : undefined}
               className="w-full"
             >
-              초대
-            </Button>
+              {t("legacy.membersPage.t11")}</Button>
           </form>
         </Card>
       </div>

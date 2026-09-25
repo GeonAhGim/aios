@@ -7,7 +7,13 @@ import pytest
 
 from src.data.models.trading import OrderSide
 from src.services.oms.domain.errors import OrderValidationError
-from src.services.oms.domain.rounding import check_notional, round_price, round_qty
+from src.services.oms.domain.rounding import (
+    check_notional,
+    require_verified,
+    round_price,
+    round_qty,
+)
+from src.services.oms.domain.symbol_registry import SymbolSpec
 
 
 def test_round_price_buy_rounds_down() -> None:
@@ -58,3 +64,38 @@ def test_check_notional_rejects_below_minimum() -> None:
 
 def test_check_notional_zero_minimum_skips_check() -> None:
     check_notional(Decimal("0.01"), Decimal("0.001"), Decimal("0"))  # 예외 없이 통과
+
+
+def test_check_notional_exactly_at_minimum_is_not_rejected() -> None:
+    """notional == min_notional 경계 — 소스는 strict `<` 비교라 동일값은 통과한다."""
+    check_notional(Decimal("50"), Decimal("1"), Decimal("50"))  # 예외 없이 통과
+
+
+def test_require_verified_returns_the_spec_unchanged_when_verified_true() -> None:
+    spec = SymbolSpec(
+        canonical="BTC/USDT",
+        venue="bitget",
+        venue_symbol="BTCUSDT",
+        tick=Decimal("0.01"),
+        lot=Decimal("0.001"),
+        min_notional=Decimal("10"),
+        quote_ccy="USDT",
+        verified=True,
+    )
+    assert require_verified(spec) is spec
+
+
+def test_require_verified_raises_when_verified_false() -> None:
+    spec = SymbolSpec(
+        canonical="BTC/USDT",
+        venue="bitget",
+        venue_symbol="BTCUSDT",
+        tick=Decimal("0.01"),
+        lot=Decimal("0.001"),
+        min_notional=Decimal("10"),
+        quote_ccy="USDT",
+        verified=False,
+    )
+    with pytest.raises(OrderValidationError) as exc_info:
+        require_verified(spec)
+    assert exc_info.value.code == "OMS_VALIDATION_UNVERIFIED_SPEC"

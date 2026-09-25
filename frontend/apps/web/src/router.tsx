@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AdminApprovalRequestPage } from "./routes/admin/AdminApprovalRequestPage";
 import { MyApprovalRequestsPage } from "./routes/approvals/MyApprovalRequestsPage";
 import { AdminHomePage } from "./routes/admin/AdminHomePage";
+import { AuditLogPage } from "./routes/admin/AuditLogPage";
 import { DisputeManagementPage } from "./routes/admin/DisputeManagementPage";
 import { EvidenceChainPage } from "./routes/admin/EvidenceChainPage";
 import { PlatformListingPage } from "./routes/admin/PlatformListingPage";
@@ -15,30 +16,48 @@ import { UserManagementPage } from "./routes/admin/UserManagementPage";
 import { VerificationQueuePage } from "./routes/admin/VerificationQueuePage";
 import { WalletTopupsPage } from "./routes/admin/WalletTopupsPage";
 import { AlertsPage } from "./routes/alerts/AlertsPage";
+import { AiStudioPage } from "./routes/ai/AiStudioPage";
 import { SweepResultsPage } from "./routes/backtest/SweepResultsPage";
 import { ChartPage } from "./routes/chart/ChartPage";
+import { CompliancePage } from "./routes/compliance/CompliancePage";
+import { MandatePage } from "./routes/compliance/MandatePage";
 import { LoginPage } from "./routes/auth/LoginPage";
 import { SignupPage } from "./routes/auth/SignupPage";
 import { DashboardPage } from "./routes/dashboard/DashboardPage";
+import { DecisionHistoryPage } from "./routes/decisions/DecisionHistoryPage";
 import { DisputeSubmitPage } from "./routes/disputes/DisputeSubmitPage";
 import { ExchangeManagementPage } from "./routes/exchanges/ExchangeManagementPage";
 import { ExecutionControlPage } from "./routes/executions/ExecutionControlPage";
+import { ExecutionAlgoPage } from "./routes/executions/ExecutionAlgoPage";
+import { TcaPage } from "./routes/executions/TcaPage";
+import { FollowPage } from "./routes/follow/FollowPage";
 import { CandlesPage } from "./routes/market/CandlesPage";
 import { InstrumentsPage } from "./routes/market/InstrumentsPage";
 import { ListingDetailPage } from "./routes/marketplace/ListingDetailPage";
 import { MarketplaceBrowsePage } from "./routes/marketplace/MarketplaceBrowsePage";
 import { SellStrategyPage } from "./routes/marketplace/SellStrategyPage";
 import { MandatesPage } from "./routes/mandates/MandatesPage";
+import { ConnectionWizardPage } from "./routes/onboarding/ConnectionWizardPage";
+import { DemoChartPage } from "./routes/onboarding/DemoChartPage";
+import { DemoModePage } from "./routes/onboarding/DemoModePage";
 import { MfaSetupPage } from "./routes/onboarding/MfaSetupPage";
+import { OnboardingFlowPage } from "./routes/onboarding/OnboardingFlowPage";
 import { RiskAssessmentPage } from "./routes/onboarding/RiskAssessmentPage";
+import { FeatureFlagGate } from "./components/FeatureFlagGate";
+import { PerformanceStatementsPage } from "./routes/portfolio/PerformanceStatementsPage";
 import { PortfolioPage } from "./routes/portfolio/PortfolioPage";
+import { RebalancePage } from "./routes/whatif/RebalancePage";
 import { ReportsPage } from "./routes/reports/ReportsPage";
+import { ResearchPage } from "./routes/research/ResearchPage";
+import { ScreenerPage } from "./routes/screener/ScreenerPage";
 import { WriteReviewPage } from "./routes/reviews/WriteReviewPage";
 import { ScriptEditorPage } from "./routes/scripts/ScriptEditorPage";
+import { SignalSourcesPage } from "./routes/signals/SignalSourcesPage";
 import { AccountDeletionPage } from "./routes/settings/AccountDeletionPage";
 import { ApprovalSettingsPage } from "./routes/settings/ApprovalSettingsPage";
 import { ConnectionsPage } from "./routes/settings/ConnectionsPage";
 import { MembersPage } from "./routes/settings/MembersPage";
+import { NotificationCenterPage } from "./routes/notifications/NotificationCenterPage";
 import { NotificationSettingsPage } from "./routes/settings/NotificationSettingsPage";
 import { SessionsPage } from "./routes/settings/SessionsPage";
 import { StrategyBuilderPage } from "./routes/strategy-builder/StrategyBuilderPage";
@@ -60,12 +79,38 @@ function protectAdmin(element: ReactNode) {
   );
 }
 
-export const router = createBrowserRouter([
+export const router = createBrowserRouter(
+  [
   { path: "/", element: <Navigate to="/dashboard" replace /> },
   { path: "/signup", element: <SignupPage /> },
   { path: "/login", element: <LoginPage /> },
   { path: "/onboarding/mfa-setup", element: protect(<MfaSetupPage />) },
   { path: "/onboarding/risk-assessment", element: protect(<RiskAssessmentPage />) },
+  { path: "/onboarding/first-run", element: protect(<OnboardingFlowPage />) },
+  {
+    path: "/onboarding/connect",
+    element: protect(
+      <FeatureFlagGate flag="onboarding_connection_wizard">
+        <ConnectionWizardPage />
+      </FeatureFlagGate>,
+    ),
+  },
+  {
+    path: "/onboarding/demo",
+    element: protect(
+      <FeatureFlagGate flag="onboarding_demo_mode">
+        <DemoModePage />
+      </FeatureFlagGate>,
+    ),
+  },
+  {
+    path: "/onboarding/demo/:instrumentId",
+    element: protect(
+      <FeatureFlagGate flag="onboarding_demo_mode">
+        <DemoChartPage />
+      </FeatureFlagGate>,
+    ),
+  },
   { path: "/dashboard", element: protect(<DashboardPage />) },
   { path: "/exchanges", element: protect(<ExchangeManagementPage />) },
   { path: "/market/instruments", element: protect(<InstrumentsPage />) },
@@ -73,18 +118,31 @@ export const router = createBrowserRouter([
   { path: "/scripts/editor", element: protect(<ScriptEditorPage />) },
   { path: "/market/candles", element: protect(<CandlesPage />) },
   { path: "/chart", element: protect(<ChartPage />) },
+  { path: "/screener", element: protect(<ScreenerPage />) },
+  { path: "/research", element: protect(<ResearchPage />) },
   { path: "/backtest/sweep-results", element: protect(<SweepResultsPage />) },
   { path: "/marketplace", element: protect(<MarketplaceBrowsePage />) },
   { path: "/marketplace/sell", element: protect(<SellStrategyPage />) },
   { path: "/marketplace/:listingId", element: protect(<ListingDetailPage />) },
   { path: "/executions", element: protect(<ExecutionControlPage />) },
+  { path: "/executions/:parentId/algo", element: protect(<ExecutionAlgoPage />) },
+  { path: "/executions/:parentId/tca", element: protect(<TcaPage />) },
+  { path: "/follow", element: protect(<FollowPage />) },
+  { path: "/signals/sources", element: protect(<SignalSourcesPage />) },
+  { path: "/ai/studio", element: protect(<AiStudioPage />) },
   { path: "/portfolio", element: protect(<PortfolioPage />) },
+  { path: "/portfolio/performance-statements", element: protect(<PerformanceStatementsPage />) },
+  { path: "/rebalance", element: protect(<RebalancePage />) },
   { path: "/mandates", element: protect(<MandatesPage />) },
+  { path: "/compliance", element: protect(<CompliancePage />) },
+  { path: "/compliance/mandate", element: protect(<MandatePage />) },
+  { path: "/decisions/history", element: protect(<DecisionHistoryPage />) },
   { path: "/reports", element: protect(<ReportsPage />) },
   { path: "/wallet", element: protect(<WalletPage />) },
   { path: "/wallet/ledger", element: protect(<LedgerHistoryPage />) },
   { path: "/wallet/payouts", element: protect(<PayoutsPage />) },
   { path: "/alerts", element: protect(<AlertsPage />) },
+  { path: "/notifications", element: protect(<NotificationCenterPage />) },
   { path: "/system/paper-deployments", element: protect(<PaperDeploymentsPage />) },
   { path: "/approval-requests", element: protect(<MyApprovalRequestsPage />) },
   { path: "/settings/approval", element: protect(<ApprovalSettingsPage />) },
@@ -117,4 +175,7 @@ export const router = createBrowserRouter([
   { path: "/admin/reconciliation", element: protectAdmin(<ReconciliationPage />) },
   { path: "/admin/evidence-chain", element: protectAdmin(<EvidenceChainPage />) },
   { path: "/admin/trust", element: protectAdmin(<TrustPage />) },
-]);
+  { path: "/admin/audit-log", element: protectAdmin(<AuditLogPage />) },
+  ],
+  { future: { v7_relativeSplatPath: true } },
+);

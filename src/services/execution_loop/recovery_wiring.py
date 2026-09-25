@@ -26,13 +26,16 @@ Spec: 05_communication_architecture_v1.2.md#§5.6, src/core/event_bus/recovery.p
 
 task-2151 (L4-18a) — `run_startup_recovery` extends this file's assembly
 entry point: it reclaims expired execution leases
-(`restart_recovery.reclaim_expired_leases`), then chains into
-`recover_orders_on_startup` above, and on completion marks `RecoveryState`
-complete (wiring for §6 F6 ⑤ — `background_loops.py` wraps
-`pre_submit_gate` with that state to deny submits before recovery
-completes). outbox SENDING re-entry / UNKNOWN transition (F6 ①②③) is not
-handled here (task-2310).
+(`restart_recovery.reclaim_expired_leases`), recovers outbox commands
+stuck in SENDING (`restart_recovery.recover_stuck_outbox_commands`,
+task-2310/L4-18b, §6 F6 ①②), then chains into `recover_orders_on_startup`
+above, and on completion marks `RecoveryState` complete (wiring for §6 F6
+⑤ — `background_loops.py` wraps `pre_submit_gate` with that state to deny
+submits before recovery completes). ③ (RESYNC of non-terminal orders,
+distinct from ④'s existing `recover_orders_on_startup` re-fetch) remains
+out of scope (decision, restart_recovery.py module docstring).
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,8 +46,15 @@ import asyncpg
 from src.core.event_bus.recovery import recover_pending_orders
 from src.core.logging.audit_log import record_audit_log
 from src.data.models.trading import OrderStatus
+from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.services.execution_loop.scheduler import AdapterResolver
-from src.services.oms.application.restart_recovery import RecoveryState, reclaim_expired_leases
+from src.services.oms.adapters.order_repository import PostgresOrderRepository
+from src.services.oms.adapters.outbox_repository import OutboxRepository
+from src.services.oms.application.restart_recovery import (
+    RecoveryState,
+    reclaim_expired_leases,
+    recover_stuck_outbox_commands,
+)
 from src.services.order_service import repository
 from src.services.order_service.submit import PublishFn
 
@@ -127,16 +137,25 @@ async def run_startup_recovery(
     publish: PublishFn,
 ) -> RecoveryState:
     """task-2151 (L4-18a) assembly entry point — reclaims expired execution
-    leases, then chains into the existing `recover_orders_on_startup`, and
-    marks `RecoveryState` complete only once both steps finish.
+    leases, recovers outbox commands stuck in SENDING (task-2310/L4-18b,
+    `restart_recovery.recover_stuck_outbox_commands`, §6 F6 ①②), then
+    chains into the existing `recover_orders_on_startup`, and marks
+    `RecoveryState` complete only once every step finishes.
 
-    If either step fails, it does not mark completion and lets the
+    If any step fails, it does not mark completion and lets the
     exception propagate — even if the caller (`background_loops.py`)
     swallows it, the returned state remains incomplete, so the gate built
     by `make_recovery_gate` keeps DENYing until restart (I-10 fail-closed:
     if recovery cannot be confirmed complete, submits stay closed)."""
     state = RecoveryState()
     await reclaim_expired_leases(pool)
+    await recover_stuck_outbox_commands(
+        pool,
+        order_repo=PostgresOrderRepository(),
+        outbox_repo=OutboxRepository(),
+        resolve_adapter=resolve_adapter,
+        risk_gate_repo=PostgresRiskGateRepository(pool),
+    )
     await recover_orders_on_startup(pool, resolve_adapter=resolve_adapter, publish=publish)
     state.mark_complete()
     return state

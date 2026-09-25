@@ -1,20 +1,23 @@
-"""LA-17 — 캔들 조회. `as_of` 이전에 저장된 배치만, RAW|ADJUSTED 선택 조회.
+"""LA-17 — Candle retrieval. Queries batches saved before `as_of`, with
+RAW|ADJUSTED selection.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §9.2 LA-17.
 
-이 모듈은 재구현하지 않는다 — 배치 해시는 `domain/lineage.batch_hash`(LA-8),
-조정계수는 `domain/corporate_actions/adjustment`(LA-8), 갭 판정은
-`domain/quality/gap_detector.detect_gaps`(LA-5) + `VenueCalendar`(LA-3)에
-그대로 위임한다. 캔들 데이터 읽기는 `ports/candle_store.CandleStore`(LA-13
-어댑터)로만 하고, 이 리프에서 SQL을 새로 작성하지 않는다.
+This module does not reimplement logic — batch hashes delegate to
+`domain/lineage.batch_hash` (LA-8), adjustment factors to
+`domain/corporate_actions/adjustment` (LA-8), and gap detection to
+`domain/quality/gap_detector.detect_gaps` (LA-5) + `VenueCalendar` (LA-3).
+Candle data reads go only through `ports/candle_store.CandleStore` (LA-13
+adapter); no new SQL is written in this leaf.
 
-**미검증/제약**: `ReferenceRepository`(LA-9/12)에는 `instrument_id`만으로
-인스트루먼트 존재를 확인하는 조회가 없다(있는 것은 canonical 심볼로 찾는
-`get_instrument`뿐). 그래서 "미등록 instrument"는
-`CandleStore.last_open_time`이 `None`인 것으로 판정한다 — 이는 "등록된 적
-없음"과 "등록은 됐지만 아직 한 번도 수집되지 않음"을 구분하지 못하는
-근사치다. 두 경우 모두 호출자 조치는 같다(참조데이터 확인 후 수집을 먼저
-시켜야 한다)는 점에서 fail-closed 신호로는 충분하다고 본다.
+**Unverified / Constraint**: `ReferenceRepository` (LA-9/12) has no lookup
+that confirms instrument existence by `instrument_id` alone (the only one
+is `get_instrument`, which searches by canonical symbol). Therefore
+"unregistered instrument" is inferred from
+`CandleStore.last_open_time` being `None` — an approximation that cannot
+distinguish "never registered" from "registered but never collected". Both
+cases require the same caller action (check reference data, run collection
+first), so this is sufficient as a fail-closed signal.
 """
 from __future__ import annotations
 
@@ -55,15 +58,17 @@ __all__ = [
 
 
 class AsOfInFutureError(ValueError):
-    """`MD_AS_OF_IN_FUTURE` — `as_of`가 현재 시각보다 미래다(불가, 요청 수정)."""
+    """`MD_AS_OF_IN_FUTURE` — `as_of` is in the future relative to now
+    (impossible, request must be corrected)."""
 
     def __init__(self, as_of: datetime, now: datetime) -> None:
         super().__init__(f"as_of={as_of.isoformat()}가 현재({now.isoformat()})보다 미래입니다.")
 
 
 class UnknownSeriesError(Exception):
-    """`MD_SYMBOL_UNKNOWN` — 이 (venue, instrument, timeframe)로 저장된 캔들이
-    한 번도 없다(모듈 docstring의 근사치 제약 참고)."""
+    """`MD_SYMBOL_UNKNOWN` — No candles have ever been stored for this
+    (venue, instrument, timeframe) (see approximation constraint in module
+    docstring)."""
 
     def __init__(self, key: SeriesKey) -> None:
         super().__init__(
@@ -74,8 +79,9 @@ class UnknownSeriesError(Exception):
 
 
 class QuarantinedViewUnsupportedError(Exception):
-    """`CandleQuery.include_quarantined=True`는 `CandleStore.query`(LA-13)가
-    지원하지 않는다 — 조용히 무시하지 않고 명시적으로 거부한다(fail-closed)."""
+    """`CandleQuery.include_quarantined=True` is not supported by
+    `CandleStore.query` (LA-13) — we reject it explicitly rather than
+    silently ignoring (fail-closed)."""
 
 
 async def _ensure_known_series(
@@ -136,11 +142,12 @@ def _collect_sessions(
 def _clip_sessions(
     sessions: list[SessionWindow], start: datetime, end: datetime
 ) -> list[SessionWindow]:
-    """`detect_gaps`(LA-5)는 넘겨받은 세션 전체(`min(open_at)~max(close_at)`)를
-    기대 구간으로 삼는다 — 하루 전체 세션을 그대로 넘기면 요청한 `[start,
-    end)`보다 훨씬 넓게 갭을 판정해버린다. 그래서 세션을 요청 구간과
-    교집합으로 잘라 넘긴다(세션 밖은 여전히 갭이 아니라는 `detect_gaps`의
-    규칙은 그대로 유지된다)."""
+    """`detect_gaps` (LA-5) treats the full set of passed sessions
+    (`min(open_at)~max(close_at)`) as the expected range — passing a full
+    day's sessions as-is would cause gap detection to span much wider than
+    the requested `[start, end)`. So we clip sessions to their intersection
+    with the request range (the `detect_gaps` rule that "outside sessions are
+    not gaps" remains unchanged)."""
     clipped: list[SessionWindow] = []
     for session in sessions:
         clipped_open = max(session.open_at, start)
@@ -155,8 +162,9 @@ def _clip_sessions(
 def coalesce_gaps(
     missing_opens: list[datetime], step: timedelta
 ) -> list[tuple[datetime, datetime]]:
-    """연속(간격이 정확히 `step`)된 결측 open_time을 `[start, end)` 구간으로
-    묶는다. `CandleSeries.gaps`는 개별 시각이 아니라 구간 목록이다."""
+    """Groups consecutive (exactly `step` apart) missing open_times into
+    `[start, end)` ranges. `CandleSeries.gaps` is a list of ranges, not
+    individual timestamps."""
     if not missing_opens:
         return []
     ordered = sorted(missing_opens)
@@ -183,21 +191,23 @@ async def load_series(
     conn: asyncpg.Connection,
     now: datetime,
 ) -> tuple[list[CandleRecord], list[QualityIssue], int]:
-    """조회 → (필요 시) 조정 → 갭 판정까지의 공통 코어. `get_candles`와
-    `replay_candles`(LA-17 같은 리프)가 이 함수 하나로 로직을 공유한다 —
-    strict 여부(리플레이의 예외 발생)만 호출자가 다르게 처리한다.
+    """Shared core for retrieval → (optional) adjustment → gap detection.
+    `get_candles` and `replay_candles` (leaves like LA-17) share logic
+    through this single function — only the caller differs in strictness
+    (whether replay raises exceptions).
 
-    반환: (캔들, 갭 이슈 목록, 기대 open_time 총 개수)."""
+    Returns: (candles, gap issue list, total expected open_time count)."""
     if q.include_quarantined:
         raise QuarantinedViewUnsupportedError()
 
     key = q.key
     await _ensure_known_series(conn, store, key)
 
-    # LA-23b(ADR-2026-09-04-A #1): 대량 소비자(리플레이·이 함수의 갭 판정)는
-    # `query()`의 레코드별 pydantic 검증 대신 컬럼지향 경로로 읽는다 —
-    # `to_candle_records`가 `model_construct`로 재구성하므로 결과 값은
-    # `query()`와 동일하다(ohlc_sanity가 쓰기 시점에 이미 강제한 불변식).
+    # LA-23b (ADR-2026-09-04-A #1): bulk consumers (replay + gap detection
+    # in this function) read via the columnar path instead of per-record
+    # pydantic validation in `query()` — `to_candle_records` reconstructs
+    # with `model_construct`, so result values are identical to `query()`
+    # (ohlc_sanity already enforced the invariant at write time).
     columns = await store.read_candles_columnar(conn, key, q.start, q.end, q.as_of)
     candles = to_candle_records(columns, key)
 
@@ -222,9 +232,9 @@ async def get_candles(
     cal: CalendarRepository,
     pool: asyncpg.Pool,
 ) -> CandleSeries:
-    """§9.2 LA-17: `as_of` 이전에 저장된 배치만 조회, `adjustment`에 따라
-    RAW|ADJUSTED. 갭은 정보로만 반환한다(strict 예외는 `replay_candles`
-    소관)."""
+    """§9.2 LA-17: Query batches saved before `as_of`, RAW|ADJUSTED per
+    `adjustment`. Gaps are returned as information only (strict exceptions
+    are the responsibility of `replay_candles`)."""
     now = datetime.now(timezone.utc)
     effective_as_of = _effective_as_of(q.as_of, now)
 

@@ -1,3 +1,4 @@
+import "../../i18n";
 import "@testing-library/jest-dom/vitest";
 import { ApiError } from "@aios/api-client";
 import type { InstrumentView, ParsedInstrumentView, ParsedSymbolAlias, SymbolAlias } from "@aios/shared-types";

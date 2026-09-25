@@ -1,5 +1,6 @@
 """16번대 통합테스트 — /users/me/approval-settings, /users/me/withdrawal-whitelist,
 /users/me/delete 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import uuid
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
 from src.api.deps import get_event_bus
+from src.api.service_deps import get_approval_settings_service
 from src.core.approval.service import create_request
 from src.main import app
 from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
@@ -156,9 +158,7 @@ async def test_register_and_list_whitelist_entry(client, event_bus):
         headers=headers,
     )
     assert register_response.status_code == 201
-    assert any(
-        topic == "security.withdrawal_whitelist.added" for topic, _ in event_bus.published
-    )
+    assert any(topic == "security.withdrawal_whitelist.added" for topic, _ in event_bus.published)
 
     list_response = await client.get("/users/me/withdrawal-whitelist", headers=headers)
     assert list_response.status_code == 200
@@ -249,9 +249,7 @@ async def test_relogin_after_deletion_request_cancels_it(client):
     assert login_response.status_code == 200
 
     token = login_response.json()["data"]["access_token"]
-    me_response = await client.get(
-        "/users/me", headers={"Authorization": f"Bearer {token}"}
-    )
+    me_response = await client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
     assert me_response.json()["data"]["status"] == "ACTIVE"
 
 
@@ -347,3 +345,135 @@ async def test_self_reject_own_request_succeeds(client, pool):
 
     assert response.status_code == 200
     assert response.json()["data"]["status"] == "REJECTED"
+
+
+async def test_self_approve_before_mandatory_wait_elapsed_returns_conflict(client, pool):
+    """불변식(core/approval/service.py::approve): mandatory_wait_seconds가
+    지나기 전에는 SOLO 요청도 승인할 수 없다 — created_at을 되돌리지 않고
+    즉시 승인을 시도하면 409로 거부돼야 한다(강제 대기시간 우회 방지)."""
+    headers, user_id = await _register_with_id(client)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=user_id,
+        trigger_source="execution_high_allocation",
+        requested_action="START_LIVE_EXECUTION",
+        context={},
+        approval_mode="SOLO",
+    )
+
+    response = await client.post(
+        f"/users/me/approval-requests/{request.id}/approve", headers=headers
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "STATE_INVALID_TRANSITION"
+
+
+async def test_self_approve_nonexistent_request_returns_forbidden(client):
+    """불변식(routers/users.py::_require_own_request): 자기소유 PENDING
+    목록에 없는 request_id는 존재 여부를 밝히지 않고 항상 403으로 막아야
+    한다 — 있지도 않은 id를 대상으로 승인을 시도해도 404/409가 아니라
+    소유권 검사 단계에서 fail-closed로 거부된다."""
+    headers, _ = await _register_with_id(client)
+
+    response = await client.post("/users/me/approval-requests/999999999/approve", headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "AUTHZ_FORBIDDEN"
+
+
+async def test_self_reject_already_resolved_request_returns_forbidden(client, pool):
+    """불변식: 요청이 REJECTED로 처리되고 나면 더 이상 "본인 소유 PENDING"
+    목록에 없다 — 같은 request_id로 다시 reject를 시도하면 이중처리
+    (상태 덮어쓰기)를 막기 위해 403으로 거부돼야 한다."""
+    headers, user_id = await _register_with_id(client)
+    request = await create_request(
+        pool,
+        scope="USER",
+        user_id=user_id,
+        trigger_source="watchdog_liquidate",
+        requested_action="LIQUIDATE_POSITION",
+        context={},
+        approval_mode="SOLO",
+    )
+
+    first = await client.post(f"/users/me/approval-requests/{request.id}/reject", headers=headers)
+    assert first.status_code == 200
+
+    second = await client.post(f"/users/me/approval-requests/{request.id}/reject", headers=headers)
+
+    assert second.status_code == 403
+    assert second.json()["error_code"] == "AUTHZ_FORBIDDEN"
+
+
+# ---------- negative/실패주입 (task-4091 DEEPEN) ----------
+
+
+async def test_update_approval_settings_rejects_unknown_mode(client):
+    """불변식(ApprovalSettingsService.update): `mode`는
+    APPROVAL_MODES=('SOLO','DUAL') 화이트리스트 밖 값을 명시적으로
+    거부해야 한다 — 임의 오타/미정의 모드 문자열을 그대로 저장하면 안
+    된다."""
+    _, headers = await _register(client)
+
+    response = await client.put(
+        "/users/me/approval-settings",
+        json={"mode": "BOGUS_MODE"},
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_register_whitelist_entry_during_crisis_rejected(client, pool):
+    """불변식(withdrawal_whitelist_service.py 모듈 docstring): 위기 상황
+    (Circuit Breaker RESTRICTED 이상)에서는 새 출금 목적지 등록 자체가
+    막혀야 한다 — "위기 상황이 닥친 뒤에는 등록 불가"가 실제로 강제되는지
+    검증한다."""
+    _, headers = await _register(client)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'restricted' WHERE id = 1"
+        )
+    try:
+        response = await client.post(
+            "/users/me/withdrawal-whitelist",
+            json={
+                "exchange": "bitget",
+                "destination_address": "bc1qcoldwallet",
+                "password": STRONG_PASSWORD,
+            },
+            headers=headers,
+        )
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE system_safety_state SET circuit_breaker_level = 'normal' WHERE id = 1"
+            )
+
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "POLICY_DENIED"
+
+
+async def test_approval_settings_service_failure_propagates_as_error(client):
+    """실패주입: `ApprovalSettingsService` 의존성이 예외를 던지면 그대로
+    전파돼야 한다 -- fail-closed 기본값(CLAUDE.md §3)이 지켜지는지
+    검증한다. 조용히 기본 SOLO 설정으로 위장하면 실제 저장된 설정 조회
+    실패를 숨기게 된다."""
+    _, headers = await _register(client)
+
+    class _FailingApprovalSettingsService:
+        async def get(self, user_id):
+            raise RuntimeError("simulated approval-settings backend failure")
+
+    app.dependency_overrides[get_approval_settings_service] = lambda: (
+        _FailingApprovalSettingsService()
+    )
+    try:
+        response = await client.get("/users/me/approval-settings", headers=headers)
+    finally:
+        app.dependency_overrides.pop(get_approval_settings_service, None)
+
+    assert response.status_code == 500

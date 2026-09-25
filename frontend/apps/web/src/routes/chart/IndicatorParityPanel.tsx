@@ -19,6 +19,7 @@ import type { Bar } from "@aios/chart-engine/src/compute/clientEngine";
 import type { WorkerPool } from "@aios/chart-engine/src/compute/workerPool";
 import { createIndicatorComputePool } from "./indicatorComputePool";
 import { useIndicatorParityRows, type ServerIndicatorSeriesPort } from "./useIndicatorParityRows";
+import { useTranslation } from "react-i18next";
 
 export type { ServerIndicatorSeriesPort };
 
@@ -52,6 +53,7 @@ export function IndicatorParityPanel({
   resolveServerSeries = NO_SERVER_SERIES,
   computePool,
 }: IndicatorParityPanelProps) {
+  const { t } = useTranslation();
   const bars = useMemo(() => candles.map(toBar), [candles]);
   const ownsPool = computePool === undefined;
   const [pool] = useState<WorkerPool | null>(() => (ownsPool ? createIndicatorComputePool() : computePool));
@@ -67,7 +69,7 @@ export function IndicatorParityPanel({
   if (rows.length === 0) return null;
 
   return (
-    <section aria-label="지표 검증 상태" className="space-y-1 text-xs text-fg-secondary" data-testid="indicator-parity-panel">
+    <section aria-label={t("legacy.indicatorParityPanel.ariaLabel1")} className="space-y-1 text-xs text-fg-secondary" data-testid="indicator-parity-panel">
       {rows.map((row) => (
         <p key={row.id} data-testid={`indicator-parity-${row.id}`}>
           <span>{row.id}: </span>
@@ -75,9 +77,7 @@ export function IndicatorParityPanel({
           <span data-testid={`indicator-parity-source-${row.id}`}> ({row.source})</span>
           {row.fallbackReason && (
             <span data-testid={`indicator-parity-fallback-${row.id}`}>
-              {" "}
-              — 서버 값으로 대체됨({row.fallbackReason})
-            </span>
+              {t("legacy.indicatorParityPanel.t2", { val: " ", fallbackReason: row.fallbackReason })}</span>
           )}
           {row.computeNote && <span data-testid={`indicator-parity-note-${row.id}`}> ({row.computeNote})</span>}
         </p>

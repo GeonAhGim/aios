@@ -8,6 +8,7 @@ import type {
 import { Alert, Card, CardTitle, EmptyState, Stat } from "@aios/ui-web";
 import type { ReactNode } from "react";
 import { PositionPnLCard } from "../../components/PositionPnLCard";
+import { useTranslation } from "react-i18next";
 
 // spec §3.2 (B) 포지션 스냅샷·PnL 분해·NAV를 포트폴리오 화면에 그리는 표시 전용
 // 섹션. task-1524(LB-19)부터 fetch·파싱은 PortfolioPositionsLive(usePositions +
@@ -30,17 +31,18 @@ interface PortfolioPositionsSectionProps {
 }
 
 function NavCard({ nav }: { nav: ParsedNavSnapshot }) {
+  const { t } = useTranslation();
   if (nav.kind === "unsupported_schema_version") {
     return (
       <Card data-testid="nav-snapshot-error">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(nav.received)}).</Alert>
+        <Alert tone="danger">{t("legacy.portfolioPositionsSection.t1", { string: String(nav.received) })}</Alert>
       </Card>
     );
   }
   if (nav.kind !== "ok") {
     return (
       <Card data-testid="nav-snapshot-error">
-        <Alert tone="danger">NAV 데이터를 해석할 수 없습니다.</Alert>
+        <Alert tone="danger">{t("legacy.portfolioPositionsSection.t2")}</Alert>
       </Card>
     );
   }
@@ -49,40 +51,41 @@ function NavCard({ nav }: { nav: ParsedNavSnapshot }) {
     <Card data-testid="nav-snapshot-card">
       <CardTitle>NAV · {snapshot.nav_date}</CardTitle>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Stat label="기초 NAV" value={`${snapshot.opening_nav} ${snapshot.base_currency}`} />
-        <Stat label="현금" value={`${snapshot.cash} ${snapshot.base_currency}`} />
-        <Stat label="포지션 시가" value={`${snapshot.positions_mv} ${snapshot.base_currency}`} />
-        <Stat label="기말 NAV" value={`${snapshot.closing_nav} ${snapshot.base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label3")} value={`${snapshot.opening_nav} ${snapshot.base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label4")} value={`${snapshot.cash} ${snapshot.base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label5")} value={`${snapshot.positions_mv} ${snapshot.base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label6")} value={`${snapshot.closing_nav} ${snapshot.base_currency}`} />
       </div>
     </Card>
   );
 }
 
 function PnLBreakdownCard({ pnl }: { pnl: ParsedPnLBreakdown }) {
+  const { t } = useTranslation();
   if (pnl.kind === "unsupported_schema_version") {
     return (
       <Card data-testid="pnl-breakdown-error">
-        <Alert tone="danger">지원하지 않는 schema_version입니다 ({String(pnl.received)}).</Alert>
+        <Alert tone="danger">{t("legacy.portfolioPositionsSection.t7", { string: String(pnl.received) })}</Alert>
       </Card>
     );
   }
   if (pnl.kind !== "ok") {
     return (
       <Card data-testid="pnl-breakdown-error">
-        <Alert tone="danger">PnL 분해 데이터를 해석할 수 없습니다.</Alert>
+        <Alert tone="danger">{t("legacy.portfolioPositionsSection.t8")}</Alert>
       </Card>
     );
   }
   const { realized, unrealized, fees, funding, total, base_currency } = pnl.value;
   return (
     <Card data-testid="pnl-breakdown-card">
-      <CardTitle>PnL 분해</CardTitle>
+      <CardTitle>{t("legacy.portfolioPositionsSection.t9")}</CardTitle>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <Stat label="실현" value={`${realized} ${base_currency}`} />
-        <Stat label="미실현" value={`${unrealized} ${base_currency}`} />
-        <Stat label="수수료" value={`${fees} ${base_currency}`} />
-        <Stat label="펀딩" value={`${funding} ${base_currency}`} />
-        <Stat label="합계" value={`${total} ${base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label10")} value={`${realized} ${base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label11")} value={`${unrealized} ${base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label12")} value={`${fees} ${base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label13")} value={`${funding} ${base_currency}`} />
+        <Stat label={t("legacy.portfolioPositionsSection.label14")} value={`${total} ${base_currency}`} />
       </div>
     </Card>
   );
@@ -96,6 +99,7 @@ export function PortfolioPositionsSection({
   now,
   renderPositionExtra,
 }: PortfolioPositionsSectionProps) {
+  const { t } = useTranslation();
   const freshness = deriveFreshness(asOf, now ?? new Date(), { staleAfterSec: STALE_AFTER_SEC });
   const isStale = freshness.kind === "ok" && freshness.isStale;
 
@@ -104,8 +108,7 @@ export function PortfolioPositionsSection({
       {isStale && (
         <div data-testid="positions-stale-banner">
           <Alert tone="warning">
-            포지션 데이터의 기준 시각이 오래되었습니다. 최신 상태가 아닐 수 있습니다.
-          </Alert>
+            {t("legacy.portfolioPositionsSection.t15")}</Alert>
         </div>
       )}
 
@@ -113,9 +116,9 @@ export function PortfolioPositionsSection({
       {pnl !== undefined && <PnLBreakdownCard pnl={pnl} />}
 
       <Card>
-        <CardTitle>포지션 스냅샷</CardTitle>
+        <CardTitle>{t("legacy.portfolioPositionsSection.t16")}</CardTitle>
         {positions.length === 0 ? (
-          <EmptyState>포지션 스냅샷이 없습니다.</EmptyState>
+          <EmptyState>{t("legacy.portfolioPositionsSection.t17")}</EmptyState>
         ) : (
           <div className="space-y-3">
             {positions.map((parsed, index) => {

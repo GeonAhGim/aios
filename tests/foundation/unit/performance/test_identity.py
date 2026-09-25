@@ -1,12 +1,21 @@
 """회계 항등식 검사 — 잔차/PENDING.
 
-Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L46 DoD)."""
+Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L46 DoD).
+
+`_require()` 관련 테스트(task-3191 DEEPEN task-1759 PLT-44, commit b3957486)
+— pending 사전검사 이후에도 `None`이면 마지막 방어선으로 예외를 던지는
+헬퍼인데, `check_identity()`를 통한 정상 경로에서는 pending 검사가 항상
+먼저 걸러내므로 그 raise 분기가 한 번도 실행되지 않았다."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from src.foundation.performance.domain.identity import check_identity
+import pytest
+
+from src.foundation.performance.domain import identity
+from src.foundation.performance.domain.identity import _require, check_identity
 from src.foundation.performance.domain.models import Cashflow, CashflowKind, ComponentBreakdown
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -76,3 +85,40 @@ def test_mismatched_end_valuation_reports_nonzero_residual():
     assert result.ok is False
     assert result.residual is not None
     assert result.residual != 0
+
+
+# ---------- _require(): 마지막 방어선 ----------
+
+
+def test_require_returns_value_when_present():
+    assert _require(Decimal("5"), "gross_pnl") == Decimal("5")
+
+
+def test_require_raises_when_none():
+    """negative — pending 검사를 통과했는데도 None이면(호출자 불변식 위반)
+    조용히 0으로 대체하지 않고 즉시 예외로 드러낸다."""
+    with pytest.raises(ValueError, match="gross_pnl"):
+        _require(None, "gross_pnl")
+
+
+@pytest.mark.parametrize("field", ["fees", "slippage", "net_pnl"])
+def test_require_error_message_names_the_offending_field(field: str):
+    with pytest.raises(ValueError, match=field):
+        _require(None, field)
+
+
+def test_pending_field_drift_is_still_caught_by_require_as_last_defense(monkeypatch):
+    """실패주입 — `_BREAKDOWN_FIELDS`가 실제 필드 목록과 어긋나면(예: 향후
+    필드 추가/개명 중 하나를 pending 목록에 반영하는 걸 빠뜨림) pending
+    사전검사가 그 필드의 `None`을 놓친다. 이때도 `_require`가 마지막
+    방어선으로 예외를 던져야 한다 — 0 대체나 `TypeError`(`None - Decimal`)로
+    새는 대신."""
+    monkeypatch.setattr(
+        identity,
+        "_BREAKDOWN_FIELDS",
+        tuple(name for name in identity._BREAKDOWN_FIELDS if name != "fx"),
+    )
+    breakdown = _breakdown(fx=None)
+
+    with pytest.raises(ValueError, match="fx"):
+        check_identity(breakdown, start_value=Decimal("0"), end_value=Decimal("1100"), cashflows=[])

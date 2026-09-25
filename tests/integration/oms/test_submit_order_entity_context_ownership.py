@@ -8,10 +8,19 @@ fund_id를 담은 위조 `EntityContext`를 넘기면 orders 1행이 그 fund_id
 (a) 위조 EntityContext(같은 tenant_id + 타 테넌트 fund_id) 거부 + orders 0행,
 (b) 폐쇄된 fund를 담은 컨텍스트도 같은 예외로 거부,
 (c) 정상 경로에서 orders.fund_id/portfolio_id == entity_context 산출값.
+
+DEPTH_FA(task-2724)가 원 task-1925를 D1로 재판정한 근거 중 "수치 성능
+단언 없음"을 메우는 두 perf 테스트(`@pytest.mark.perf`)를 이 파일 끝에
+추가한다 — `verify_entity_context()`가 `submit_order()` INSERT 직전마다
+4단 계층을 재조회하는 추가 왕복을 만들었으므로(위 docstring 결함 수정),
+그 오버헤드에 명시적 예산을 건다(research_items RD-4 test_research_
+repository.py의 latency/throughput 관례 재사용, 새 perf 패턴 발명 없음).
 """
+
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -21,7 +30,10 @@ import pytest
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
-from src.foundation.entities.application.resolve_context import EntityContextResolutionError
+from src.foundation.entities.application.resolve_context import (
+    EntityContextResolutionError,
+    verify_entity_context,
+)
 from src.services.oms.application.submit_order import submit_order
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.oms.domain.symbol_registry import SymbolRegistry
@@ -61,8 +73,13 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
 def _registry() -> SymbolRegistry:
     reg = SymbolRegistry()
     reg.register(
-        "BTC/USDT", "bitget", "BTCUSDT",
-        tick=Decimal("0.1"), lot=Decimal("0.0001"), min_notional=Decimal("5"), quote_ccy="USDT",
+        "BTC/USDT",
+        "bitget",
+        "BTCUSDT",
+        tick=Decimal("0.1"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("5"),
+        quote_ccy="USDT",
     )
     return reg
 
@@ -78,7 +95,9 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', $3::jsonb,
                     'test-author', 'APPROVED')
             """,
-            strategy_id, user_id, json.dumps({}),
+            strategy_id,
+            user_id,
+            json.dumps({}),
         )
         row = await conn.fetchrow(
             """
@@ -88,21 +107,33 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING')
             RETURNING id
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return row["id"]
 
 
-def _command(user_id: uuid.UUID, execution_id: int) -> SubmitOrderCommand:
+def _command(user_id: uuid.UUID, execution_id: int, intent_seq: int = 1) -> SubmitOrderCommand:
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=intent_seq,
         window_start=datetime.now(timezone.utc),
     )
     return SubmitOrderCommand(
-        command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol="BTC/USDT",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-        asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+        command_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        scope=scope,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
     )
 
@@ -130,8 +161,13 @@ async def test_submit_order_rejects_forged_entity_context_cross_tenant_fund(pool
 
     with pytest.raises(EntityContextResolutionError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(),
-            pre_submit_gate=_allow_gate, entity_context=forged, entity_repo=entity_repo,
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=forged,
+            entity_repo=entity_repo,
         )
 
     async with pool.acquire() as conn:
@@ -161,8 +197,13 @@ async def test_submit_order_rejects_closed_fund_in_entity_context(pool):
 
     with pytest.raises(EntityContextResolutionError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(),
-            pre_submit_gate=_allow_gate, entity_context=context, entity_repo=entity_repo,
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=context,
+            entity_repo=entity_repo,
         )
 
     async with pool.acquire() as conn:
@@ -182,8 +223,13 @@ async def test_submit_order_persists_entity_context_fund_and_portfolio_ids(pool)
     entity_repo = PostgresEntityRepository(pool)
 
     result = await submit_order(
-        cmd, pool=pool, profile=_profile(), registry=_registry(),
-        pre_submit_gate=_allow_gate, entity_context=context, entity_repo=entity_repo,
+        cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry(),
+        pre_submit_gate=_allow_gate,
+        entity_context=context,
+        entity_repo=entity_repo,
     )
 
     async with pool.acquire() as conn:
@@ -192,3 +238,72 @@ async def test_submit_order_persists_entity_context_fund_and_portfolio_ids(pool)
         )
     assert order_row["fund_id"] == context.fund_id
     assert order_row["portfolio_id"] == context.portfolio_id
+
+
+@pytest.mark.perf
+async def test_verify_entity_context_latency_under_budget(pool):
+    """수치 성능 단언 — `verify_entity_context()`(4단 계층 재조회, task-1925가
+    `submit_order()` INSERT 직전에 새로 배선한 호출) 단일 호출 지연이 명시적
+    예산을 넘지 않아야 한다. N+1류 회귀(예: 4개 조회를 순차 왕복이 아니라
+    반복문으로 잘못 확장하는 변경)를 잡는 상한이지, 절대 성능 보증이 아니다."""
+    budget_sec = 1.0
+    tenant_id = await create_test_tenant(pool)
+    context = await seed_entity_context(pool, tenant_id)
+    entity_repo = PostgresEntityRepository(pool)
+
+    start = time.perf_counter()
+    await verify_entity_context(entity_repo, context)
+    elapsed = time.perf_counter() - start
+
+    print(f"[task-1925 verify_entity_context] single call {elapsed:.3f}s (budget<{budget_sec}s)")
+    assert elapsed < budget_sec, (
+        f"verify_entity_context가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    )
+
+
+@pytest.mark.perf
+async def test_submit_order_throughput_with_entity_context_verification(pool):
+    """수치 성능 단언 — `entity_repo` 실소유권 재검증이 배선된 `submit_order()`
+    경로의 처리량. 서로 다른 `intent_seq`로 스코프를 갈라 매 호출이 새 orders
+    행을 만들게 하고(멱등 재사용 경로가 아니라 verify_entity_context를 포함한
+    전체 INSERT 경로를 매번 실측), N회 순차 제출의 총 소요/처리량에 예산을
+    건다(research_items RD-4 throughput 테스트와 동일 관례)."""
+    n = 20
+    budget_sec = 10.0
+    min_ops_per_sec = 2.0
+    tenant_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, tenant_id)
+    context = await seed_entity_context(pool, tenant_id)
+    entity_repo = PostgresEntityRepository(pool)
+
+    start = time.perf_counter()
+    for seq in range(n):
+        result = await submit_order(
+            _command(tenant_id, execution_id, intent_seq=seq),
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=context,
+            entity_repo=entity_repo,
+        )
+        assert result.order_id is not None
+    elapsed = time.perf_counter() - start
+    ops_per_sec = n / elapsed
+
+    print(
+        f"[task-1925 submit_order] {n} submits (entity_context verified each) {elapsed:.3f}s "
+        f"({ops_per_sec:.1f} ops/s, budget<{budget_sec}s, min>{min_ops_per_sec} ops/s)"
+    )
+    assert elapsed < budget_sec, (
+        f"{n}회 submit_order가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    )
+    assert ops_per_sec > min_ops_per_sec, (
+        f"submit_order 처리량이 최소값({min_ops_per_sec} ops/s)에 못 미칩니다({ops_per_sec:.1f})."
+    )
+
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval(
+            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
+        )
+    assert order_count == n

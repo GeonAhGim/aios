@@ -30,8 +30,8 @@ UPDATE 7건을 §9 R-58 리프(task-1521)로 이 장부에 등재한다. 명세 
 |---|---|---|---|---|---|---|
 | RTF-01 | #42 | `correlation_with()` 미지 페어 0.0 fail-open | 명세 §1 R3 | R-11 `900704b` · R-29 `e8d4160` · R-31 `d6f48be` | `tests/unit/core/risk/test_correlation.py` missing_pairs DENY 3건 | ✅ FIXED — 잔여: 타 심볼 보유 시 과잉거부(#42) |
 | RTF-02 | #43 | `metrics_collector.data_delay_sec` 상수 0 | 명세 §1 R3/R7 | R-42 `a0652c9` · R-43 `bb513af` · 배선 `cc6a8d0` | `tests/integration/test_circuit_breaker.py::test_unknown_data_delay_does_not_read_as_normal` | ✅ FIXED(task-1714 P0 `cc6a8d0`로 main.py 배선까지 완료) |
-| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) | `tests/unit/core/safety/test_market_correlation.py` | ⏳ OPEN — 잔여: run_one_cycle이 여전히 `market_wide_correlated=None` 하드코딩(#44) |
-| RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 | ✅ FIXED(플래그 제거) — 잔여: 조립부 3곳 `require_mandate=False`(#45, task-1568 재대조로 1곳 추가 확인) |
+| RTF-03 | #44 | watchdog `market_wide_correlated=None` 고정 → LIQUIDATE 영구 미발동 | 명세 §1 R3 | R-49 `e89217e` (판정기만) · R-51 `1504fd9` (발동 경로만) · task-2838 `0bd21d09`(failure_domain 배선) · task-6391(basket 배선) | `tests/unit/core/safety/test_market_correlation.py` · `tests/unit/core/safety/test_watchdog_decide.py` AST 스캐너 하드 게이트 · `tests/unit/test_watchdog_process_basket.py` · `tests/integration/risk/test_watchdog_market_wide_liquidation_e2e.py` | ✅ FIXED — task-6391이 `run_one_cycle`에 실제 basket 시세 조달(`get_basket_returns`)을 배선, `decide(..., market_wide_correlated=...)`가 더 이상 고정 None이 아님을 E2E로 실증 |
+| RTF-04 | #45 | `foundation_gate` mandate 우회 env 플래그 | 명세 §1 R3 | R-36 `a2e2646` · H-1b `3d83e8d0`(task-3369) | `tests/integration/test_order_service_risk_gate.py` unmandated DENY 2건 · `tests/adversarial/oms/test_mandate_gate_prod_wiring.py` R-59 하드 게이트(3곳 전부) | ✅ FIXED — 조립부 3곳 전부 `require_mandate=True`(task-3369), 회귀 방지 하드 게이트가 3곳 전부 스캔(task-2836이 `wiring.py` 누락분 추가) |
 | RTF-05 | #46 | `watchdog_process._apply_decision` 무조건 UPDATE | 명세 §1 R8 | R-51 `1504fd9` | `tests/integration/risk/test_watchdog_liquidation_request.py::test_watchdog_process_has_no_unconditional_update_strategy_executions` | ✅ FIXED |
 | RTF-06 | #47 | `circuit_breaker._set_level` 무조건 UPDATE | 명세 §1 R7 | R-43 `bb513af` | `tests/integration/test_circuit_breaker.py::test_concurrent_set_level_only_one_writer_wins` | ✅ FIXED |
 | RTF-07 | #48 | `strategy_allocation` 분모 available_balance | 명세 §2.1 | R-09 `e8ae0c7` · R-17 `35ec47a` | `tests/unit/core/risk/test_strategy_allocation.py::test_denominator_is_total_equity_not_available_balance` | ✅ FIXED — 잔여: total_equity USDT 근사(명세 §10) |
@@ -90,29 +90,47 @@ fail-open(78번 §1 I2 위반).
 
 ## 2026-09-05-44 · [safety] watchdog가 `market_wide_correlated=None`을 고정으로 넘겨 LIQUIDATE가 영구 미발동 — 심각도 중간 (RTF-03)
 
-**상태**: ⏳ OPEN(부분 진행, 2026-09-09 task-1543 QA 재대조 갱신) — R-49 `e89217e`
-(task-2133)가 순수 판정기 `is_market_wide_move()`와 `decide()`의
-`failure_domain` 인자(DB_ISOLATED 강등)를 만들었고 R-51 `1504fd9`(task-2357)가
-LIQUIDATE 발동 시 `liquidation_request` INSERT 경로를 완성했지만, **호출부
-배선이 빠졌다** — `src/watchdog_process.py::run_one_cycle`은 여전히
-`decide(snapshot, market_wide_correlated=None)`을 하드코딩 호출한다(basket
-returns를 만들어 넘기는 코드가 없다). `core/safety/watchdog.py`의 LIQUIDATE
-분기는 `market_wide_correlated is True`일 때만 열리므로 시장 전체 급변 판정이
-없는 한 강제청산은 여전히 구조적으로 도달 불가 — "구현됨"이지 "배선"은 아니다
-(I-10). HALT 경로(및 R-49가 새로 붙인 DB_ISOLATED 강등 경로 — `run_one_cycle`이
-`failure_domain.diagnosis == DB_ISOLATED_FAILURE`일 때 조치를 스킵하는 별도
-분기로 대체 구현됨, `decide()`의 `failure_domain` 인자 자체는 호출부에서도
-안 씀)는 동작한다.
+**상태**: ✅ FIXED (task-6391, basket 배선)
 
-**해소 조건**: `run_one_cycle`에 basket 시세를 조달해 `is_market_wide_move()`
-결과를 `decide(..., market_wide_correlated=...)`에 실제로 전달하는 배선(별도
-리프, PM 판단).
+R-49 `e89217e`(task-2133)가 순수 판정기 `is_market_wide_move()`와 `decide()`의
+`failure_domain` 인자(DB_ISOLATED 강등)를 만들었고 R-51 `1504fd9`(task-2357)가
+LIQUIDATE 발동 시 `liquidation_request` INSERT 경로를 완성했다. task-2838(커밋
+`0bd21d09`)이 두 번째 배선 결함(`failure_domain` 미전달)을 고쳤다. 잔여
+갭이었던 `market_wide_correlated` 고정 None은 task-6391이 닫았다.
+
+**발견**: `src/watchdog_process.py::run_one_cycle`이 basket returns를 만들어
+넘기는 코드가 없어 `decide(snapshot, market_wide_correlated=None,
+failure_domain=failure_domain)`로 영구 고정 — `core/safety/watchdog.py`의
+LIQUIDATE 분기는 `market_wide_correlated is True`일 때만 열리므로 시장 전체
+급변 판정이 없는 한 강제청산이 구조적으로 도달 불가했다(판정기·발동 경로는
+"구현됨"이지 "배선"은 아니었다, I-10).
+
+**수정**: `src/watchdog_process.py`에 `get_basket_returns()`(Bitget
+`get_ohlcv` 기반 4개 심볼 basket: BTC/ETH/SOL/XRP-USDT, 5분봉 등락률, 조회
+실패 심볼은 0%로 대체하지 않고 basket에서 제외)를 추가하고, `run_one_cycle`이
+계좌 손실률이 `DEFAULT_LOSS_THRESHOLD_PCT` 이상일 때 이를 호출해
+`is_market_wide_move()` 결과를 `decide(..., market_wide_correlated=...)`에
+실제로 전달하도록 배선했다(`run_forever`도 동일 콜백을 주입). 기존
+`failure_domain` 패턴과 동일하게 `tests/unit/core/safety/test_watchdog_decide.py`에
+`market_wide_correlated`용 AST 스캐너 하드 게이트를 추가해 하드코딩 회귀를
+잡는다.
+
+**증명**: `tests/unit/test_watchdog_process_basket.py`(basket 조달 단위
+테스트 — 심볼별 등락률 계산, 조회 실패/빈 응답/open=0 심볼 제외 negative
+3건, 전체 실패 시 예외 전파 없이 빈 basket 반환하는 실패 주입 1건) ·
+`tests/unit/core/safety/test_watchdog_decide.py::test_watchdog_process_actually_passes_market_wide_correlated_to_decide`(회귀 하드 게이트) ·
+`tests/integration/risk/test_watchdog_market_wide_liquidation_e2e.py`
+— basket 과반(4개 중 3개)이 임계 이상 하락 + 계좌 90% 손실 시나리오에서
+`decide()`가 실제 LIQUIDATE 판정 → `liquidation_request` REQUESTED INSERT →
+`run_liquidation_worker_once`(실행 루프)가 그 행을 소비해 PLANNED + slice
+INSERT까지 전이하는 전체 경로 실증, 대조군(basket 과반 미만 하락 시
+HALT만 발동하고 `liquidation_request`는 생기지 않음)도 함께 검증.
 
 ---
 
 ## 2026-09-05-45 · [order_service] `foundation_gate`가 env 플래그(`AIOS_REQUIRE_MANDATE_FOR_SUBMIT`)로 mandate 검사를 조용히 끌 수 있음 — 심각도 높음 (RTF-04)
 
-**상태**: ✅ FIXED(플래그 제거) (R-36 `a2e2646` task-1403) — 조립부 스위치 잔여(아래)
+**상태**: ✅ FIXED (R-36 `a2e2646` task-1403 플래그 제거, H-1b `3d83e8d0` task-3369 조립부 3곳 `True` 전환, task-2836 회귀 방지 하드 게이트 3곳 전부 커버)
 
 **발견**: 명세 §1 R3. mandate가 없으면 통과하는 동작이 배포 시점 env var로
 결정돼 코드 리뷰 없이 뒤집을 수 있었다(I-01/I-11 취지 위반).
@@ -126,12 +144,26 @@ returns를 만들어 넘기는 코드가 없다). `core/safety/watchdog.py`의 L
 **증명**: `tests/integration/test_order_service_risk_gate.py::test_unmandated_submit_denied`,
 `::test_active_kill_switch_denies_unmandated_legacy_submit`.
 
-**잔여(2026-09-06 task-1568 재대조 갱신)**: 프로덕션 조립부 3곳(`background_loops.py`
-pre_submit_gate · `execution_deps.py` pre_start_gate · task-1538로 신설된
+**잔여였던 것(2026-09-06 task-1568 재대조 기록, 이후 해소)**: 당시 프로덕션
+조립부 3곳(`background_loops.py` pre_submit_gate · `execution_deps.py`
+pre_start_gate · task-1538로 신설된
 `src/services/oms/application/wiring.py::build_outbox_dispatcher` pre_send_gate)이
-`require_mandate=False` — execution 생성 UI가 `mandate_revision_id`를 연결하지
-않아 지금 켜면 legacy 실행 전체가 막힌다. 값이 코드에 드러나므로 env 우회는
-불가하며, mandate 연결 UI 이후 세 곳을 `True`로 전환(별도 리프).
+`require_mandate=False`였다 — execution 생성 UI가 `mandate_revision_id`를
+연결하지 않아 켜면 legacy 실행 전체가 막힌다는 이유였다.
+
+**해소**: H-1b(`3d83e8d0` task-3369)가 H-1a resolver(`foundation_mandate_
+resolution.with_resolved_mandate`, 진입 시 `mandate_revision_id` 자동 채움)를
+먼저 배선한 뒤 세 조립부 전부를 `require_mandate=True`로 전환했다(현재
+`foundation_gate.py` 모듈 docstring, grep으로 재확인: 세 파일 전부 `True`
+리터럴). R-59(task-1750)가 `tests/adversarial/oms/test_mandate_gate_prod_
+wiring.py`에 AST 기반 회귀 방지 하드 게이트를 추가했으나 `_TARGET_FILES`가
+`background_loops.py`·`execution_deps.py` 2곳만 담아 `wiring.py`가 스캔
+대상에서 빠져 있었다 — task-1568이 지적한 "2→3곳" 드리프트가 이 하드
+게이트에도 그대로 재발한 형태. task-2836이 `wiring.py`를 `_TARGET_FILES`에
+추가하고 회귀 재현 테스트
+(`test_regression_flags_third_assembly_point_wiring_py_bug_shape`)와 목록
+누락 방지 테스트(`test_third_assembly_point_is_registered_in_target_files`)를
+더해 3곳 전부가 상시 스캔되도록 고정했다.
 
 ---
 
@@ -301,7 +333,11 @@ RESOLVED 뒤 같은 구매에 새 분쟁을 열고 다시 `DELISTED_AND_REFUND`�
 
 ## 2026-09-02-39 · [execution_loop] 취소·거부·만료로 끝난 주문 뒤 FSM이 BUY/SELL_ORDER_PENDING에 영구 고착 — 심각도 높음
 
-**상태**: 🔴 OPEN (agent-platform-9f 배정 — 감사 보고서 §2-A)
+**상태**: ✅ FIXED (커밋 `53d56d2f`, `pending_fill.py` 분할본은 `bc2d7da9` —
+회귀 테스트 `tests/integration/test_execution_tick.py::
+test_failed_terminal_order_reverts_fsm_state_and_allows_resubmission`
+[CANCELLED/REJECTED/EXPIRED 3경로 파라미터화] +
+`test_still_open_pending_order_does_not_resubmit_new_order`)
 
 **발견**: 실행 루프를 운영 앱에 배선(`2e943c9`)하면서 확인. tick의
 `_handle_pending_fill_check`는 최신 주문이 최종 상태면 즉시 return하고
@@ -312,10 +348,20 @@ FILLED일 때만 `apply_fill` + FSM 전이를 한다(`tick.py:100-140`).
 재시작 복구(`recovery_wiring.py`)는 이 이유로 FILLED를 쓰지 않고 tick에
 위임하며, 취소·거부만 영속화한다 — 그 뒤의 FSM 복귀는 이 항목의 몫이다.
 
-**권장 수정 방향**: `_handle_pending_fill_check`에서 최종 상태가 FILLED가
-아니면 FSM을 PENDING 진입 전 상태(IDLE 또는 HOLDING — FSM 정의의
-역전이로 결정)로 조건부 갱신하고 `order.status.changed`를 발행. cancel.py는
-그대로 두고 tick 한 곳에서 처리하면 복구·취소·거부 세 경로가 모두 해결된다.
+**수정**: `_handle_pending_fill_check`(현재 `pending_fill.py`)가 최신 주문이
+`_FAILURE_TERMINAL_STATUSES`(CANCELLED/REJECTED/EXPIRED/FAILED)면
+`_previous_fsm_state()`로 FSM 정의에서 이 PENDING으로 들어오는 신호평가
+전이(ORDER_FILLED 제외)의 from_state를 찾아 조건부 UPDATE로 되돌린다
+(BUY_ORDER_PENDING→IDLE, SELL_ORDER_PENDING/STOP_LOSS→HOLDING). 동시성
+충돌 시(#22와 동일 원칙) 다음 tick 재시도로 넘긴다. cancel.py는 그대로
+두고 tick 한 곳(`pending_fill.py`)에서만 처리해 복구·취소·거부·만료 네
+경로가 모두 해결된다.
+
+**검증**: 취소/거부/만료 3경로 각각에서 (1) 되돌림 tick에서 신규 주문을
+내지 않고 IDLE로 복귀하는지, (2) 그 다음 tick에서 신규 주문이 실제로
+다시 나가 HOLDING까지 도달하는지 확인. 아직 살아있는 미체결 주문
+(SUBMITTED)은 되돌리지도 신규 주문도 내지 않는 기존 보호 불변식도 별도
+회귀 테스트로 유지 확인 — INVARIANTS 위반 없음.
 
 ---
 
