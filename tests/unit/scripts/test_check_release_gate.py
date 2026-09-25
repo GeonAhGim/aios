@@ -235,9 +235,17 @@ def test_evidence_entry_missing_path_key_fails_closed(
     assert "FAIL" in out
 
 
-def test_yaml_null_path_rejected_at_load(tmp_path: Path) -> None:
+def test_yaml_null_path_rejected_at_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """PLT-39: YAML에서 `path: null`/`path:` (valueless)은 Python None으로 파싱되므로
     load_stages()에서 즉시 ValueError를 일으켜 fail-closed 한다.
+
+    DEEPEN(task-6717): `test_evidence_entry_missing_path_key_fails_closed`(path 키
+    완전 누락)는 `main()`을 통한 CLI 종료코드/FAIL 출력까지 단언하는데, 이 테스트는
+    이전에 `load_stages()` 예외만 확인하고 `main()` 경로는 검증하지 않았다 —
+    ReleaseGateConfigError가 실제로 main()의 except 절까지 도달해 exit 1 +
+    "FAIL" 출력으로 이어지는지까지 같은 방식으로 단언한다.
     """
     config_path = tmp_path / "release_gates.yaml"
     # YAML 1.1: null, Null, NULL, ~, empty value → Python None
@@ -254,9 +262,20 @@ def test_yaml_null_path_rejected_at_load(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
         check_release_gate.load_stages(config_path)
 
+    exit_code = check_release_gate.main(
+        ["--stage", "a", "--config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+    assert exit_code == 1
+    assert "FAIL" in capsys.readouterr().out
 
-def test_empty_path_string_rejected_at_load(tmp_path: Path) -> None:
-    """PLT-39: `path: ''` (빈 문자열)도 load_stages()에서 거부한다."""
+
+def test_empty_path_string_rejected_at_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PLT-39: `path: ''` (빈 문자열)도 load_stages()에서 거부한다.
+
+    DEEPEN(task-6717): main() 경로의 fail-closed(exit 1 + FAIL 출력)도 함께 확인한다.
+    """
     config_path = tmp_path / "release_gates.yaml"
     config_path.write_text(
         "stages:\n"
@@ -271,9 +290,20 @@ def test_empty_path_string_rejected_at_load(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
         check_release_gate.load_stages(config_path)
 
+    exit_code = check_release_gate.main(
+        ["--stage", "a", "--config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+    assert exit_code == 1
+    assert "FAIL" in capsys.readouterr().out
 
-def test_non_string_path_rejected_at_load(tmp_path: Path) -> None:
-    """PLT-39: `path: 123` (숫자) 같은 비문자열 값도 load_stages()에서 거부한다."""
+
+def test_non_string_path_rejected_at_load(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """PLT-39: `path: 123` (숫자) 같은 비문자열 값도 load_stages()에서 거부한다.
+
+    DEEPEN(task-6717): main() 경로의 fail-closed(exit 1 + FAIL 출력)도 함께 확인한다.
+    """
     config_path = tmp_path / "release_gates.yaml"
     config_path.write_text(
         "stages:\n"
@@ -287,6 +317,12 @@ def test_non_string_path_rejected_at_load(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="path는 빈 문자열이어야 합니다"):
         check_release_gate.load_stages(config_path)
+
+    exit_code = check_release_gate.main(
+        ["--stage", "a", "--config", str(config_path), "--repo-root", str(tmp_path)]
+    )
+    assert exit_code == 1
+    assert "FAIL" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
