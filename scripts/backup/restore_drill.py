@@ -113,17 +113,10 @@ def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
 
 
 def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
-    """백업 디렉터리를 restore_data_dir로 복사한다.
-
-    실측(2026-09-25, esc-health-backup_drill_failed): 이 저장소의 베이스 백업이
-    110,830개 파일·2.4GB로 자랐다 -- 단순 os.walk 순회만으로도 120초를 넘겼다. 이전에는
-    시간제한 없는 shutil.copytree(파일 하나당 Python-level stat/open/read/write 오버헤드)로
-    복사해, nightly의 외부 하드킬(20분, `C:\\aios\\pm\\nightly.py` STEP_TIMEOUT_SEC)에
-    걸릴 때까지 진행 상황을 전혀 관측할 수 없었다(steps={} -- 이 단계가 시작됐는지조차
-    리포트에 안 남았다). Windows robocopy /MT(멀티스레드 I/O)는 같은 트리를 수 분 내로
-    끝내고, 여기서 자체 timeout도 걸어 무한정 먹통이 되는 대신 진단 가능한 실패로
-    끝나게 한다.
-    """
+    """esc-health-backup_drill_failed: 시간제한 없는 shutil.copytree가 110,830개
+    파일·2.4GB 백업(실측)을 옮기다 nightly 외부 하드킬(1200s)에 걸려 steps={}로만
+    관측됐다. Windows는 robocopy /MT(다중 I/O 스레드)+자체 timeout으로 대체 --
+    끝내 느려도 무한정 먹통이 아니라 진단 가능한 실패로 끝난다."""
     if os.name == "nt":
         import tempfile
 
@@ -145,18 +138,13 @@ def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
             with tempfile.TemporaryFile(mode="w+b") as out:
                 try:
                     r = subprocess.run(
-                        cmd,
-                        stdout=out,
-                        stderr=subprocess.STDOUT,
-                        timeout=timeout,
-                        check=False,
+                        cmd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, check=False
                     )
                 except subprocess.TimeoutExpired:
                     return False, f"timeout {timeout:.0f}s"
                 out.seek(0)
                 text = out.read().decode("utf-8", errors="replace")
-            # robocopy: 0-7은 성공(파일 복사/스킵 조합), 8 이상이 실패.
-            return r.returncode < 8, text[-4000:]
+            return r.returncode < 8, text[-4000:]  # robocopy: 0-7 성공, 8+ 실패
         except OSError as exc:
             return False, f"{type(exc).__name__}: {exc}"
     try:
@@ -221,16 +209,10 @@ def wait_for_process_start(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str | None:
-    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay가
-    끝나는지(pg_is_in_recovery)는 기다리지 않는다. 정상이면 None, 타임아웃까지 프로세스가
-    확인되지 않으면 사유 문자열을 돌려준다.
-
-    이전에는 `pg_ctl start -w -t 60`을 써서 -t가 '프로세스 기동'과 'WAL replay 완료'를
-    함께 기다렸다 -- archive recovery 중인 서버는 replay가 끝나야 연결을 받아들이므로
-    (hot_standby 없이는 recovery 중 연결이 거부된다), 735MB 베이스 백업 replay가 60초를
-    넘기면 실제로는 정상 진행 중인데도 start_postgres가 실패로 오분류됐다(task-4978).
-    이제 -t/이 함수의 timeout은 프로세스 기동(포트 바인딩 등)만 기다리고, replay 완료
-    대기는 wait_for_recovery로 분리했다."""
+    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay 완료는
+    wait_for_recovery로 분리했다(이전엔 `pg_ctl start -w -t 60`이 둘 다 기다려 735MB 베이스
+    백업 replay가 60초를 넘기면 정상 진행 중인데도 실패로 오분류됐다, task-4978). 정상이면
+    None, 타임아웃까지 확인 안 되면 사유 문자열을 돌려준다."""
     deadline = clock() + timeout
     while True:
         rc, tail = run_cmd([pg_ctl_bin, "status", "-D", str(data_dir)], cwd, env, 30)
