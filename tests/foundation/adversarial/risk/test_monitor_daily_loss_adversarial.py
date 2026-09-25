@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from src.foundation.risk.application.monitor_daily_loss import check_personal_daily_loss
 from src.foundation.risk.domain.models import PersonalRiskBundle
 from src.foundation.risk.ports.notifier import NotifyResult, PersonalNotification
@@ -152,6 +154,7 @@ async def test_exact_threshold_boundary_engages_kill():
     assert state.kill_engaged is True
 
 
+@pytest.mark.perf
 async def test_bulk_evaluation_stays_fast_pure_function_no_io_per_call():
     """perf 회귀 감시 — kill 미발동 경로(순수 threshold 비교만 탄다)는
     1000회 평가가 수백 ms를 넘지 않아야 한다."""

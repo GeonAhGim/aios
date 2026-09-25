@@ -686,6 +686,7 @@ async def test_list_positions_portfolio_id_concurrent_mixed_tenants_do_not_cross
         assert len(response.json()["data"]["items"]) == 1
 
 
+@pytest.mark.perf
 async def test_list_positions_portfolio_id_p95_latency_stays_within_normalized_ceiling(
     client, pool
 ):

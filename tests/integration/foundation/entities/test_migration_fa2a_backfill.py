@@ -241,6 +241,7 @@ async def test_backfill_is_noop_when_no_tenant_rows_exist(pool, migration_db_url
     assert await _tenant_id_of(pool, entity_id) == orphan_user_id
 
 
+@pytest.mark.perf
 async def test_backfill_of_fifty_orphaned_rows_completes_within_budget(pool, migration_db_url: str):
     # 성능단언 — 오염된 행 다수에 대한 백필이 예산 안에서 끝나는지 확인한다
     # (감사가 지적한 "성능단언 없음" 공백). fallback 표적은 이 테스트가 만든

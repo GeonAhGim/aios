@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -87,6 +89,7 @@ def test_missing_manifest_fails(tmp_path: Path) -> None:
     assert exit_code == 1
 
 
+@pytest.mark.perf
 def test_find_frozen_violations_completes_within_time_budget() -> None:
     """성능단언: 대규모 PR(수천 개 변경 파일)에서도 FROZEN 존 스캔이 예산 내에 끝나는지 확인."""
     frozen_patterns = ["aios/kernel/**", "src/core/strategy/**"]

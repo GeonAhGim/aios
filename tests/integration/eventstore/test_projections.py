@@ -475,6 +475,7 @@ async def test_positions_projection_rejects_sequence_gap_from_dropped_middle_ent
         )
 
 
+@pytest.mark.perf
 def test_positions_projection_folds_ten_thousand_fee_entries_under_budget() -> None:
     """성능 단언(D2): `project()`는 순수 fold(모듈 docstring, I/O 없음)라 DB
     없이도 측정할 수 있다 — `apply_one`이 엔트리마다 로트 전체를 다시

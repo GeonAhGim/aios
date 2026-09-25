@@ -160,6 +160,7 @@ def test_safe_counter_catches_metrics_port_exception() -> None:
     assert "metrics.counter failed" in mock_logger.warning.call_args[0][0]
 
 
+@pytest.mark.perf
 def test_prometheus_metrics_counter_increments_within_perf_budget() -> None:
     """수치 성능 단언: `_get_or_create`가 이름당 1회만 등록한다면(캐시 적중) 5,000회
     반복이 300ms 안에 끝나야 한다. 캐시가 없다면 두 번째 호출부터 동일 이름의 중복

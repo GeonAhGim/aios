@@ -28,6 +28,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import pytest
+
 from src.foundation.market_data.contracts.v1 import (
     QualityIssue,
     QualityIssueType,
@@ -156,6 +158,7 @@ def test_gate_severity_identity_comparison_regression_undercounts_rejected() -> 
     assert post_fix_rejected == 1
 
 
+@pytest.mark.perf
 def test_decide_throughput_within_latency_budget() -> None:
     """Numeric performance assertion -- 100,000 REJECT issues (pure in-memory
     arithmetic, no I/O) must be decided well inside a generous budget. A

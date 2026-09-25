@@ -294,6 +294,7 @@ async def test_concurrent_recovery_workers_do_not_double_process(pool):
     assert remaining_sending == 0  # 재클레임되지 않은 채 방치된 행 없음
 
 
+@pytest.mark.perf
 async def test_recovery_latency_bound_for_batch(pool):
     """DEPTH 감사 보강 — 숫자 성능/지연 단언. 상한이 없으면 회귀(예: 행마다
     O(n) 전체 스캔, 혹은 `unknown_resolver`의 real backoff sleep이 실수로

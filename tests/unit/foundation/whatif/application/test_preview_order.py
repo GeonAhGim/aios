@@ -346,6 +346,7 @@ class TestFailureInjection:
 
 
 class TestPerformance:
+    @pytest.mark.perf
     def test_preview_order_p99_under_5ms_pre_trade_gate_budget(self):
         """Budget: ADR-2026-09-09-C Decision 1 §23 "사전거래 게이트 p99 5ms" —
         preview_order runs the same two authorities a real pre-trade gate

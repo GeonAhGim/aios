@@ -267,6 +267,7 @@ async def test_inquiry_http_error_injection(nh_adapter: NHAdapter) -> None:
             await nh_adapter.get_integrated_margin()
 
 
+@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_get_daily_pnl_response_parsing_performance(nh_adapter: NHAdapter) -> None:
     """Performance assertion: parsing 200 daily-pnl rows stays under the

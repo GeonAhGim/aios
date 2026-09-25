@@ -329,6 +329,7 @@ async def test_db_check_constraint_rejects_hard_fail_reasons_without_fail_outcom
 # -- D2 numeric performance assertion -------------------------------------------
 
 
+@pytest.mark.perf
 async def test_p95_latency_within_bundle_round_trip_budget(bundle_repo):
     """ADR-2026-09-09-C axis performance budget: create_bundle + get_bundle
     against a real DB stays within a generous 200ms floor per iteration."""

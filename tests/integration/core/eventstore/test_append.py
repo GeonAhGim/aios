@@ -204,6 +204,7 @@ async def test_append_rejects_naive_datetime(pool: asyncpg.Pool):
         await _append(pool, stream_id, 1, occurred_at=datetime(2026, 1, 1))
 
 
+@pytest.mark.perf
 async def test_append_p95_latency_stays_within_normalized_ceiling(pool: asyncpg.Pool):
     """수치 성능 단언 — §5 "이벤트 append p95 20ms" 목표의 회귀 감시.
     공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신,

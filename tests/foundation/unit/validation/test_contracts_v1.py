@@ -349,6 +349,7 @@ def test_validation_result_view_monkeypatch_invalid_state(
 
 # ── Performance assertion ──────────────────────────────────────────────────
 
+@pytest.mark.perf
 def test_validation_result_view_latency_under_1ms() -> None:
     """ValidationResultView construction should complete in < 1ms.
     ADR-2026-09-09-C performance budget: contract validation < 1ms p95."""

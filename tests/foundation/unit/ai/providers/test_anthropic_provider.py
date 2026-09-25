@@ -352,6 +352,7 @@ async def test_generate_negative_output_tokens_clamped_to_zero(
 _OVERHEAD_BUDGET_SECONDS = 0.05
 
 
+@pytest.mark.perf
 async def test_generate_overhead_p95_under_budget_with_instant_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -380,6 +381,7 @@ async def test_generate_overhead_p95_under_budget_with_instant_transport(
     )
 
 
+@pytest.mark.perf
 async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

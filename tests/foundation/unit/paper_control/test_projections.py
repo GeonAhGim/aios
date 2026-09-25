@@ -117,6 +117,7 @@ async def test_build_deployment_list_view_propagates_repository_failure():
         await build_deployment_list_view(repo, _TENANT_ID)
 
 
+@pytest.mark.perf
 async def test_build_deployment_list_view_assembly_latency_budget():
     """성능 단언 — 1000건 조립도 순수 in-memory 매핑이므로 100ms 내에 끝나야 한다
     (105 DB 왕복은 fake로 대체했으므로 이 시간은 순수 조립 비용만 반영한다)."""

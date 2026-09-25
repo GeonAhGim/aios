@@ -334,6 +334,7 @@ async def test_clock_regression_does_not_bypass_rate_limit_fail_closed() -> None
     assert exc_info.value.kind == ExchangeErrorKind.RATE_LIMITED
 
 
+@pytest.mark.perf
 async def test_token_bucket_acquire_p99_latency_under_1ms() -> None:
     """성능 단언(DoD) — 토큰이 충분한 fast path(락 획득 + 리필 계산 +
     차감만 수행, 실제 대기 없음)에서 `acquire()` 1회 호출의 p99 지연이

@@ -270,6 +270,7 @@ def test_guard_replay_toggle_env_var_never_leaks_across_calls(monkeypatch: pytes
             assert adapter.is_paper_trading is False
 
 
+@pytest.mark.perf
 def test_blocked_guard_check_has_bounded_latency_under_repeated_calls():
     """수치 성능 단언(D2) — 가드 체크(`live_adapter_allowed()` + 예외
     생성)는 환경변수 읽기 하나뿐인 순수 CPU 경로여야 한다. 1000회 연속

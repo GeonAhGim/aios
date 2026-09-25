@@ -367,6 +367,7 @@ async def test_check_signal_equivalence_raises_when_the_cache_returns_a_stale_da
 # --- numeric performance assertion ---
 
 
+@pytest.mark.perf
 async def test_serve_signal_latency_p99_within_budget() -> None:
     """ADR-2026-09-09-C Decision 1's per-axis performance budget table has
     no ML-signal-serving row -- mirrors `tests/unit/core/indicators/

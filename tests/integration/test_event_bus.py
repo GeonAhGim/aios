@@ -163,6 +163,7 @@ async def test_backpressure_rejects_publish_when_queue_full(fast_bus):
     assert queue.qsize() == 1
 
 
+@pytest.mark.perf
 async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus):
     # 워커가 실제로 동작 중이면 큐가 계속 드레인되어 "지속적으로 가득 참" 상태를
     # 실시간으로 재현하기 어렵다 — time.monotonic()을 전역 패치하면 asyncio

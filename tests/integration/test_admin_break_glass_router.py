@@ -278,6 +278,7 @@ async def test_audit_log_route_succeeds_with_approved_grant_and_grant_is_single_
     assert second.json()["error_code"] == "STATE_INVALID_TRANSITION"
 
 
+@pytest.mark.perf
 async def test_audit_log_route_round_trip_latency_budget(client, pool):
     """관리자 조회치고 관대한 예산(p95 아래 기준으로 단일 왕복 1초) --
     실 DB + 실 HTTP 스택을 타는 통합테스트라 break_glass 코어 자체의

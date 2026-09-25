@@ -162,6 +162,7 @@ def test_failure_injection_extreme_fee_bps_still_ranks() -> None:
     assert result[1].venue == "BROKEN"
 
 
+@pytest.mark.perf
 def test_numerical_performance_assertion_500_venues_ratio() -> None:
     """Numerical performance assertion: 500 venues must not take more
     than 500× the time of a single-venue ranking — a ratio bound that

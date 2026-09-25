@@ -316,6 +316,7 @@ async def test_get_ohlcv_malformed_response_injection(
 # ============================================================================
 
 
+@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_get_ohlcv_response_parsing_performance(
     nh_adapter: NHAdapter,

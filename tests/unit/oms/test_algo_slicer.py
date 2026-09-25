@@ -171,6 +171,7 @@ def test_rng_backend_crash_propagates_without_partial_plan() -> None:
         plan_slices(req, now=req.start_at, volume_profile=None, rng=crashing_rng)
 
 
+@pytest.mark.perf
 def test_max_slice_count_planning_latency_budget() -> None:
     """500슬라이스(계약 상한) 계획을 100회 반복 — 로컬 회귀 예산이며 SLO 아님."""
     req = _request(slice_count=500, total_quantity=Decimal("500"))

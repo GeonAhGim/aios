@@ -252,6 +252,7 @@ async def test_link_entities_propagates_repository_list_failure() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_is_valid_isin_throughput_budget() -> None:
     """ADR-2026-09-09-C: `is_valid_isin` must handle ≥10k calls/sec.
     Budget: ≤100 µs per call (10k/sec → 100µs/call)."""

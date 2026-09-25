@@ -24,6 +24,7 @@ from src.core.script.grammar.lexer import (
     _is_ident_start,
     tokenize,
 )
+from tests.conftest import PerfBudget
 
 
 def _kinds(source: str) -> list[TokenKind]:
@@ -230,11 +231,15 @@ def test_invalid_emoji_character_rejected_with_correct_column():
 # --- DEPTH 감사 D2 보강: 실패 주입(장문 + 악의적 유니코드 강건성) -----------
 
 
+@pytest.mark.perf
 def test_tokenize_survives_pathological_input_without_crashing_or_hanging():
     """실패 주입(DEPTH 감사 예시): 매우 긴 입력과 악의적 유니코드를 섞어
     tokenize의 강건성을 확인한다. 두 시나리오 모두 RecursionError/IndexError
     같은 예기치 못한 크래시나 무한 루프 없이, 유한 시간 안에 정상 토큰화되거나
-    ScriptSyntaxError(fail-closed)로 끝나야 한다."""
+    ScriptSyntaxError(fail-closed)로 끝나야 한다. task-7434: 코어 경합으로
+    여전히 flaky할 수 있어 perf 마커로 직렬 단계에 옮기되, 이 테스트는
+    "무한루프가 아님"을 잡는 행 가드라 best-of-N(느린 실행을 가려버림)인
+    공용 perf_budget으로 바꾸지 않고 raw wall-clock을 유지한다."""
     # 시나리오 1: 매우 긴 유효 입력(5만 개 식별자) — 정상 토큰화, 시간 예산 내.
     huge_valid_source = " ".join(f"x{i}" for i in range(50_000))
     start = time.perf_counter()
@@ -269,23 +274,25 @@ def test_tokenize_survives_pathological_input_without_crashing_or_hanging():
 # --- DEPTH 감사 D2 보강: 수치 성능 단언(토큰화 처리량) ----------------------
 
 
-def test_tokenize_throughput_meets_budget():
+@pytest.mark.perf
+def test_tokenize_throughput_meets_budget(perf_budget: PerfBudget):
     """수치 성능 단언: 현실적인 스크립트 반복 패턴에 대해 tokenize 처리량이
     최소 500,000 chars/s(실측 약 400만 chars/s 대비 8배 여유)를 넘어야 한다
-    — 우연한 이차 복잡도 회귀(예: 문자열 슬라이스 남용)를 조기에 검출한다."""
+    — 우연한 이차 복잡도 회귀(예: 문자열 슬라이스 남용)를 조기에 검출한다.
+    task-7434: process_time 기반 perf_budget(best-of-5, 내부 워밍업 포함)으로
+    측정한다."""
     line = "let rsi_val_{i} = ta.rsi(close, length) # comment\n"
     source = "".join(line.format(i=i) for i in range(2_000))
-
-    for _ in range(5):  # 워밍업 — 첫 호출 지연을 측정에서 배제
-        tokenize(source)
-
     iterations = 20
-    start = time.perf_counter()
-    for _ in range(iterations):
-        tokens = tokenize(source)
-    elapsed_s = time.perf_counter() - start
+    tokens: list = []
 
-    throughput_chars_per_s = (len(source) * iterations) / elapsed_s
+    def _run_once() -> None:
+        nonlocal tokens
+        for _ in range(iterations):
+            tokens = tokenize(source)
+
+    sample = perf_budget.best_of(_run_once, n=5, warmup=1)
+    throughput_chars_per_s = (len(source) * iterations) / (sample.cpu_ms / 1000)
     assert tokens[-1].kind is TokenKind.EOF
     assert throughput_chars_per_s >= 500_000, (
         f"토큰화 처리량 {throughput_chars_per_s:.0f} chars/s < 500,000 chars/s 예산"

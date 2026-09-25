@@ -160,6 +160,7 @@ async def test_health_check_swallows_infra_failure_after_retries_exhausted() -> 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_get_futures_current_plan_orders_parses_large_list_within_normalized_budget() -> None:
     """수치 성능 단언 — `list(raw["data"].get("entrustedList") or [])`는
     얕은 복사뿐이라 항목 수에 선형으로 늘어야 한다. 절대 ms 상수 대신 같은

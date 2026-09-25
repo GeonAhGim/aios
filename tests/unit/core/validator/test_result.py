@@ -73,6 +73,7 @@ def test_default_factory_failure_is_propagated(monkeypatch: pytest.MonkeyPatch) 
         ValidationResult.model_rebuild(force=True)
 
 
+@pytest.mark.perf
 def test_construction_perf_p95_under_budget() -> None:
     """Simple pydantic model construction must stay well under the 1ms p95 budget."""
     samples = []

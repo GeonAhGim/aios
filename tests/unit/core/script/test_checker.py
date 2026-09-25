@@ -285,6 +285,7 @@ def test_deeply_nested_unary_fails_closed_under_low_recursion_limit() -> None:
 # ---- DEEPEN(task-2912): 수치 성능 단언(타입 검사 지연) ----
 
 
+@pytest.mark.perf
 def test_check_program_latency_stays_within_quarter_of_dsl_compile_budget() -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산은(로컬 기준) 300ms다.
     파싱 단계가 이미 절반(150ms, task-2911 DEEPEN)을 쓴다고 가정하면 타입

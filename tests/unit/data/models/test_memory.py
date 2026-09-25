@@ -60,6 +60,7 @@ def test_memory_entry_dependency_failure_propagates_fail_closed(monkeypatch):
         MemoryEntry(**_valid_kwargs())
 
 
+@pytest.mark.perf
 def test_memory_entry_construction_throughput():
     iterations = 500
     start = time.perf_counter()

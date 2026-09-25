@@ -322,6 +322,7 @@ def test_mandate_field_validator_raises_on_corrupt_view(monkeypatch):
 # --- D2 성능 단언 (performance assertion) --------------------------------------
 
 
+@pytest.mark.perf
 def test_bind_p99_latency_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 사전거래 게이트 p99 5ms 예산.
     `bind()`는 주문이 거래소로 나가기 직전에 호출되는 핵심 경로이므로

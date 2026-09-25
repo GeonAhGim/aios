@@ -330,6 +330,7 @@ def test_non_string_path_rejected_at_load(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_full_chain_resolution_completes_within_time_budget() -> None:
     """수치 성능 단언: 가장 깊은 stage(`marketplace_commercialization`, 5단계
     depends_on 체인)의 evidence 누적 해석 + 파일 존재 확인이 예산 내에

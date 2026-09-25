@@ -123,6 +123,7 @@ def test_missing_middle_event_breaks_chain():
         verify_chain([first, third])  # second가 삭제된 상황
 
 
+@pytest.mark.perf
 def test_verify_chain_throughput_budget():
     """D2 성능 단언 — 79번 스펙에 축별 예산표가 아직 없는 신규 모듈이라, 5k
     이벤트/500ms(=10k events/sec 이상 처리량)를 로컬 기준으로 고정한다. 순수

@@ -50,6 +50,7 @@ _LATENCY_SAMPLE_COUNT = 500
 _LATENCY_P95_BUDGET_MS = 20.0  # CI 튐 흡수 여유 — 핫패스 회귀(sleep/블로킹 IO 오삽입) 탐지용
 
 
+@pytest.mark.perf
 async def test_pump_processes_large_batch_within_latency_budget():
     """수치 성능 게이트(D2) — 대량 프레임 처리 총 시간과 처리량을 단언한다.
     DEPTH 감사 결손: "no numeric performance/latency assertion"."""
@@ -78,6 +79,7 @@ async def test_pump_processes_large_batch_within_latency_budget():
     )
 
 
+@pytest.mark.perf
 async def test_message_dispatch_latency_p95_stays_within_ci_gate():
     """CI 레드라인 게이트(D2) — 프레임 1건당(디코드+ack검증+seq처리+핸들러
     호출) 지연의 p95가 예산을 넘으면 빌드가 적색이 된다. 원 테스트는 이

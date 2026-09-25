@@ -246,6 +246,7 @@ async def test_research_data_search_tool_excludes_future_known_at(
 # --- D2 numeric perf assertion ---
 
 
+@pytest.mark.perf
 async def test_research_data_search_tool_latency_stays_within_normalized_ceiling(
     client,
     pool,

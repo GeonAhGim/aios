@@ -359,6 +359,7 @@ async def test_journal_write_failure_preserves_atomicity(pool: asyncpg.Pool) -> 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_concurrent_fills_serializable(pool: asyncpg.Pool) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)

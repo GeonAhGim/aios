@@ -283,6 +283,7 @@ async def test_adversarial_direct_update_of_ledger_journal_entry_fund_id_blocked
             )
 
 
+@pytest.mark.perf
 async def test_backfill_of_fifty_bootstrapped_tenants_completes_within_budget(pool):
     # 성능단언 — 감사가 지적한 "성능단언 없음" 공백을 메운다.
     await purge_position_snapshots(pool)

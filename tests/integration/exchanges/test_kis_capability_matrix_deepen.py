@@ -215,6 +215,7 @@ def _fast_futures_handler(captured: list[httpx.Request]):
     return handler
 
 
+@pytest.mark.perf
 async def test_place_order_domestic_futures_dispatch_overhead_bounded_vs_raw_request_baseline() -> (
     None
 ):

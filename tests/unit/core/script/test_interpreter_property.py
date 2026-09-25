@@ -536,6 +536,7 @@ def test_property_suite_catches_an_off_by_one_sma_regression(
 # ---- 성능 단언 ----
 
 
+@pytest.mark.perf
 def test_property_suite_runs_within_latency_budget() -> None:
     """성능 단언(ADR-2026-09-09-C D2, DEEPEN task-4146): 150개 시드 전체를
     순차 실행해도 예산(3초) 안에 끝나야 한다 — 참조 구현 대조가 우발적으로

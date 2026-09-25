@@ -213,6 +213,7 @@ def test_get_algo_progress_remaining_qty_is_exact_decimal_not_float_imprecise() 
 # -- performance assertion --------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_get_algo_progress_stays_fast_over_max_slice_count() -> None:
     """Performance assertion -- worst-case slice count (500, EM-8~11's own
     `_MAX_SLICE_COUNT`) must resolve in well under human-perceptible latency;

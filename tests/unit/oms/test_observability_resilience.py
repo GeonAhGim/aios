@@ -181,6 +181,7 @@ def test_safe_hooks_absorb_real_prometheus_relabel_failure_but_adapter_stays_fai
 # ---- 성능 단언: §7.3 로그 필드 JSON 직렬화 p95 -----------------------------------
 
 
+@pytest.mark.perf
 def test_dispatch_log_extra_json_serialization_meets_borrowed_latency_budget() -> None:
     """ADR-2026-09-09-C Decision 1 예산표에 로그 필드 직렬화 전용 항목이
     없어 가장 가까운 유사 항목("사전거래 게이트 p99 5ms")을 자체 예산으로

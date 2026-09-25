@@ -244,6 +244,7 @@ async def test_get_for_update_cross_tenant_lookup_raises_same_not_found_as_missi
 _TRANSITION_ROUND_TRIP_BUDGET = 9
 
 
+@pytest.mark.perf
 async def test_transition_round_trip_count_is_bounded_and_stable(pool):
     """DEPTH_L4_BR(task-2722) D2 — 수치 성능/지연 단언(CI 차단 게이트).
 

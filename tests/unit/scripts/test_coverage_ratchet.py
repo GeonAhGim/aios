@@ -254,6 +254,7 @@ def test_baseline_write_failure_propagates_instead_of_silent_pass(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_main_p95_latency_within_budget(tmp_path: Path) -> None:
     """coverage.xml 파싱 + baseline 비교는 파일 I/O 두 번뿐인 순수 경로다 —
     CI가 매 커밋 이 스크립트를 실행하므로 100회 반복 p95가 50ms를 넘으면

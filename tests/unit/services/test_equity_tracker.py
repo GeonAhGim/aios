@@ -205,6 +205,7 @@ async def test_record_and_persist_equity_propagates_infra_failure_fail_closed() 
     assert tracker.day_start(1) == (date(2026, 9, 2), Decimal("1000"))
 
 
+@pytest.mark.perf
 def test_record_throughput_bound_for_many_executions() -> None:
     """성능 단언 — 순수 메모리 연산이므로 실 DB 왕복 없이 10,000회
     record() 호출이 느슨한 상한 안에 끝나야 한다(다른 DEEPEN 리프의
