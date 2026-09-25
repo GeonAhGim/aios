@@ -215,6 +215,17 @@ async def test_exchange_rejection_is_fail_closed_and_propagates_not_swallowed(
     assert position is None
 
 
+@pytest.fixture(autouse=True)
+async def _clear_outbox_leftovers(pool: asyncpg.Pool):
+    """`order_command_outbox` is shared by every test in this xdist worker DB and
+    `claim_batch(limit=10)` takes PENDING rows in queue order, so leftovers from
+    earlier files can crowd out this test's own CANCEL row (main run #36187016384:
+    claimed == 0). Same remedy as test_stale_worker_late_write.py (#89)."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox")
+    yield
+
+
 async def test_cancel_request_crosses_real_outbox_boundary_to_exchange_adapter(
     pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
