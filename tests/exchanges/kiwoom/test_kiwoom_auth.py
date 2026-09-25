@@ -15,9 +15,9 @@ import pytest
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
-from src.exchanges.kiwoom.auth import (
+from src.exchanges.kiwoom.auth import KiwoomAuthClient
+from src.exchanges.kiwoom.rate_profile import (
     KiwoomAccountType,
-    KiwoomAuthClient,
     build_token_bucket,
     reset_token_bucket_registry_for_test,
 )

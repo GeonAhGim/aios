@@ -25,7 +25,10 @@ API reference before any live capital path is wired through this venue.
 Retry/backoff/circuit-breaking/clock-skew handling is delegated to
 `ResilientTransport` (L4-12, `common/transport.py`), same as KIS/NH — not
 reimplemented here. Token caching reuses `MonotonicTokenCache` (BR-10,
-`common/oauth_http.py`).
+`common/oauth_http.py`). Rate-limit profile (account type -> `TokenBucket`
+config) lives in `rate_profile.py` — split out to stay under the
+architecture guard's 300-line adapter-file cap, same reason
+`kis/rate_profile.py` is split from `kis/oauth_client.py`.
 
 Scope note — this leaf covers only auth + market data (step (b)); account
 (task-7570), trading (task-7571), and websocket (task-7572) are sibling
@@ -38,101 +41,21 @@ directly.
 from __future__ import annotations
 
 import asyncio
-import threading
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 
 from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
 from src.exchanges.common.oauth_http import MonotonicTokenCache
-from src.exchanges.common.rate_limiter import TokenBucket
 from src.exchanges.common.transport import RateLimitWaitObserver, ResilientTransport
+from src.exchanges.kiwoom.rate_profile import KiwoomAccountType, build_token_bucket
 
 # Placeholder — structurally mirrors KIS's real/paper base URL split, not a
 # confirmed Kiwoom URL (see module docstring).
 REAL_BASE_URL = "https://api.kiwoom.com"
 PAPER_BASE_URL = "https://mockapi.kiwoom.com"
-
-Verified = Literal["LIVE_VERIFIED", "DOC_ONLY", "ESTIMATED"]
-
-
-class KiwoomAccountType(str, Enum):
-    REAL = "real"
-    PAPER = "paper"
-
-
-@dataclass(frozen=True)
-class RateLimitSpec:
-    rate_per_sec: float
-    burst: float
-    verified: Verified
-
-    def new_bucket(
-        self,
-        *,
-        observer: RateLimitWaitObserver | None = None,
-        sleep: Callable[[float], Awaitable[None]] | None = None,
-    ) -> TokenBucket:
-        """`sleep` defaults to real `asyncio.sleep`; tests inject a fake one
-        (same pattern as `kis/rate_profile.py`'s `RateLimitSpec.new_bucket`) so
-        the process-wide singleton bucket doesn't force a real wall-clock wait."""
-        base_sleep = sleep or asyncio.sleep
-        if observer is None:
-            return TokenBucket(self.rate_per_sec, self.burst, sleep=base_sleep)
-
-        async def _observed_sleep(seconds: float) -> None:
-            observer.record_wait()
-            await base_sleep(seconds)
-
-        return TokenBucket(self.rate_per_sec, self.burst, sleep=_observed_sleep)
-
-
-# No confirmed published call-rate limit for Kiwoom's REST API in this
-# session (see module docstring) — these are conservative placeholders, not a
-# cited published number (contrast `kis/rate_profile.py`'s DOC_ONLY table,
-# which cites KIS's own docs/community consensus). `verified="ESTIMATED"`
-# mirrors KIS's own "unknown -> most conservative fallback" discipline
-# (`kis/rate_profile.py`'s `_CONSERVATIVE_FALLBACK`).
-_RATE_LIMIT: dict[KiwoomAccountType, RateLimitSpec] = {
-    KiwoomAccountType.REAL: RateLimitSpec(5.0, 5.0, "ESTIMATED"),
-    KiwoomAccountType.PAPER: RateLimitSpec(2.0, 2.0, "ESTIMATED"),
-}
-
-# Process-wide singleton per account type (no per-TR grouping — unlike KIS,
-# there is no confirmed TR-domain reference table for Kiwoom to group by;
-# see `kis/rate_profile.py`'s `_BUCKET_REGISTRY` docstring for why a
-# singleton registry matters: it enforces the throughput cap even if a
-# caller forgets to reuse the returned bucket).
-_BUCKET_REGISTRY: dict[KiwoomAccountType, TokenBucket] = {}
-_BUCKET_REGISTRY_LOCK = threading.Lock()
-
-
-def build_token_bucket(
-    account_type: KiwoomAccountType,
-    *,
-    observer: RateLimitWaitObserver | None = None,
-    sleep: Callable[[float], Awaitable[None]] | None = None,
-) -> TokenBucket:
-    """Always returns the same `TokenBucket` instance for a given
-    `account_type` — `observer`/`sleep` are only honored the first time a
-    bucket is created for that key."""
-    with _BUCKET_REGISTRY_LOCK:
-        bucket = _BUCKET_REGISTRY.get(account_type)
-        if bucket is None:
-            bucket = _RATE_LIMIT[account_type].new_bucket(observer=observer, sleep=sleep)
-            _BUCKET_REGISTRY[account_type] = bucket
-        return bucket
-
-
-def reset_token_bucket_registry_for_test() -> None:
-    """Test-only — clears `_BUCKET_REGISTRY` so tests stay order-independent.
-    Never call from production code (see `kis/rate_profile.py`'s equivalent)."""
-    with _BUCKET_REGISTRY_LOCK:
-        _BUCKET_REGISTRY.clear()
 
 
 class KiwoomAuthClient:

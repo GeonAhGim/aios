@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.common.types import ExchangeCapability, TickerCallback
 from src.exchanges.kiwoom.auth import KiwoomAuthClient
 from src.exchanges.kiwoom.capabilities import KIWOOM_CAPABILITY, KIWOOM_KR_EQUITY_PROFILE
@@ -123,12 +124,20 @@ class KiwoomAdapter(KiwoomMarketDataMixin, KiwoomAuthClient, ExchangeAdapter):
     async def get_order(self, order_id: str) -> Order:  # noqa: ARG002
         raise self._unsupported("get_order")
 
+    # place_order/cancel_order/modify_order carry `@require_paper_sandbox`
+    # (`common/live_guard.py`, red-team #2026-09-02-32) even though they
+    # currently only raise `_unsupported()` -- these are the fund-moving SPI
+    # methods, and the guard is this leaf's defense-in-depth regardless of
+    # whether a sibling leaf (task-7571) later gives them a real body.
+    @require_paper_sandbox
     async def place_order(self, order: Order) -> Order:  # noqa: ARG002
         raise self._unsupported("place_order")
 
+    @require_paper_sandbox
     async def cancel_order(self, order_id: str) -> bool:  # noqa: ARG002
         raise self._unsupported("cancel_order")
 
+    @require_paper_sandbox
     async def modify_order(self, order_id: str, **kwargs: Any) -> Order:  # noqa: ARG002
         raise self._unsupported("modify_order")
 
