@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -168,6 +169,37 @@ def test_structured_log_line_rejects_unknown_field_even_with_all_required_presen
             message="x",
             unexpected_field="should not be silently ignored",
         )
+
+
+def test_structured_log_line_rejects_naive_timestamp():
+    """negative — naive timestamp(tzinfo 없음)은 어느 시간대인지 알 수 없어 감사 로그의
+    시각을 신뢰할 수 없게 만든다. 108 §2/CLAUDE.md §3 "모든 datetime은 tz-aware UTC"
+    규칙을 위반하므로 생성 시점에 거부해야 한다."""
+    with pytest.raises(ValidationError):
+        StructuredLogLine(
+            timestamp=datetime(2026, 9, 3, 0, 0, 0),  # naive — tzinfo=None
+            level="info",
+            trace_id="t-1",
+            actor_subject_id="system",
+            component="foundation.trust.application",
+            event="membership_granted",
+            message="x",
+        )
+
+
+def test_structured_log_line_accepts_tz_aware_non_utc_offset():
+    """positive — UTC가 아닌 다른 tz-aware offset(예: +09:00)도 naive는 아니므로
+    허용된다. 검증은 "naive 거부"이지 "UTC 오프셋만 허용"이 아니다."""
+    line = StructuredLogLine(
+        timestamp=datetime(2026, 9, 3, 9, 0, 0, tzinfo=timezone(timedelta(hours=9))),
+        level="info",
+        trace_id="t-1",
+        actor_subject_id="system",
+        component="foundation.trust.application",
+        event="membership_granted",
+        message="x",
+    )
+    assert line.timestamp.utcoffset() == timedelta(hours=9)
 
 
 def test_structured_log_line_extra_payload_field_still_accepted():

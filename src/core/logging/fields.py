@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.core.observability.context import RequestContext
 
@@ -70,6 +70,13 @@ class StructuredLogLine(BaseModel):
     duration_ms: int | None = None
     message: str
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _timestamp_must_be_tz_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamp must be a tz-aware UTC datetime, got a naive datetime")
+        return value
 
 
 def from_record(record: logging.LogRecord, ctx: RequestContext) -> StructuredLogLine:
