@@ -60,6 +60,11 @@ def test_nh_krx_seven_digit_raises() -> None:
         to_canonical(Venue.NH_KRX, "0059301")
 
 
+def test_nh_krx_empty_string_raises_to_venue() -> None:
+    with pytest.raises(SymbolNormalizationError):
+        to_venue(Venue.NH_KRX, "")
+
+
 def test_unknown_quote_raw_raises() -> None:
     with pytest.raises(SymbolNormalizationError):
         to_canonical(Venue.BITGET, "BTCXYZ")
