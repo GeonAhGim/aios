@@ -6,7 +6,10 @@ DoD: `talib.get_functions()` 전량 등록(캔들 패턴 그룹 포함, 종수�
 버전이 결정 — 0.4.x 161종/0.6.x 201종을 리터럴로 고정하지 않는다), 같은 talib
 버전에서 생성물 바이트 동일
 (결정론), 증분=일괄 동일성 샘플 20종, 오버라이드 없는 지표도 PlotSpec 보유.
-negative: 파라미터 범위 밖 거부, 미지 함수명 거부, NaN 구간 처리(6건).
+negative: 파라미터 범위 밖 거부, 미지 함수명 거부, NaN 구간 처리(6건), TA-Lib
+미설치 시 모듈 import 자체가 fail-closed(task-8231, IND-2g — 중복
+`catalog/generate_from_talib.py` 스냅샷 제거 후 이 파일이 단일 카탈로그가 됨에
+따라 §9.3 IND-2g DoD의 "미설치 fail-closed" 항목을 흡수).
 
 DEEPEN(task-2925): task-2727 DEPTH 감사(docs/audit/DEPTH_DSL_IND.md)가 원
 task-1729(commit 45b4ce4)에 실패 주입·수치 성능 단언·게이트 적색 재현이
