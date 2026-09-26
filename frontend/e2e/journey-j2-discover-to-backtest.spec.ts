@@ -8,10 +8,13 @@ import { mockBackend } from "./support/mockBackend";
 // 추가해야 mockBackend의 폴백(catch-all)과 충돌하지 않는다.
 //
 // 갭 노트(문서 UX_JOURNEYS.md의 "있음" 표기와 실제 코드가 어긋나는 지점, apiRoutes.ts
-// 기준): 1단계 screener.run, 6단계 backtests.sweep, 7단계 researchData.search·
-// researchData.sources.list는 모두 implemented:false 유령 경로다. 각 클라이언트가
-// fetch 이전에 *RouteNotImplementedError를 던지므로 page.route 목으로도 성공
-// 응답을 만들 수 없다 — 이 단계들은 test.fixme로 남기고 우회하지 않는다.
+// 기준): 1단계 screener.run, 7단계 researchData.search·researchData.sources.list는
+// implemented:false 유령 경로다. 각 클라이언트가 fetch 이전에
+// *RouteNotImplementedError를 던지므로 page.route 목으로도 성공 응답을 만들 수
+// 없다 — 이 단계들은 test.fixme로 남기고 우회하지 않는다. 6단계 backtests.sweep은
+// task-7774(BT-18)로 implemented:true가 됐지만, 이 저널니 안에는 여전히
+// /backtest/sweep-results로 들어가는 CTA가 없어(location.state 진입만 가능) 별도
+// 사유로 fixme다.
 // G-3(문서 §2 J2 5→6단계 단절, 스크립트 컴파일이 백테스트로 자동 연결되지 않음)도
 // ScriptEditorPage.tsx 전체를 읽어 재확인했다. "즉시 백테스트" 단계는 실제로 동작하는
 // /chart의 quick-backtest(POST /v1/backtests/quick, backtest-run.spec.ts와 동일 패턴)로
@@ -203,16 +206,15 @@ test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크�
     await expect(page.getByTestId("backtest-summary")).toContainText("10500");
   });
 
-  // 갭: backtests.sweep(SweepResultsPage가 쓰는 파라미터 스윕 API)은 implemented:false
-  // 유령 경로다. BacktestsClient.runSweep()이 fetch 전에 SweepRouteNotImplementedError를
-  // 던지므로 이 화면에서 "결과 표시" 자체를 재현할 수 없다 — page.route 목으로도
-  // 우회하지 않는다. 문서의 J2 6단계 "있음" 표기는 이 지점에서 스윕 실행이 아니라
-  // /chart의 quick-backtest를 가리키는 것으로 해석해야 한다(코드로 재확인한 어긋남).
-  test.fixme("6단계 [유령경로] 파라미터 스윕 결과 화면이 스윕 실행 결과를 보여준다", async ({ page }) => {
-    // 갭: backtests.sweep은 implemented:false — BacktestsClient.runSweep()이 fetch 전에
-    // SweepRouteNotImplementedError를 던진다. page.route 목으로도 결과 표시를 재현할
-    // 수 없다 — 문서의 J2 6단계 "있음" 표기는 스윕 실행이 아니라 /chart의
-    // quick-backtest를 가리키는 것으로 해석해야 한다(코드로 재확인한 어긋남).
+  // 갭(task-7774 BT-18로 절반 해소): backtests.sweep은 이제 implemented:true고
+  // 서버 엔드포인트(POST /v1/backtests/sweep)도 배선됐다 — 더 이상 유령 경로가
+  // 아니다(SweepResultsPage.test.tsx의 단위 테스트가 실제 응답 렌더링을 이미
+  // 검증한다). 남은 갭은 이 저널니 안에 /backtest/sweep-results로 들어가는
+  // 진입점(스윕 구성→실행 CTA)이 아직 없다는 것 — SweepResultsPage는
+  // react-router location.state.sweepRequest로만 요청을 받는데, Playwright의
+  // page.goto는 그 state를 주입할 수 없다. CTA 배선은 이 리프(API 계층만)의
+  // 범위 밖이라 우회하지 않고 fixme로 남긴다.
+  test.fixme("6단계 [유령경로 절반 해소, CTA 미배선] 파라미터 스윕 결과 화면이 스윕 실행 결과를 보여준다", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/backtest/sweep-results");
   });
