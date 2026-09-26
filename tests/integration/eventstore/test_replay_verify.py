@@ -37,6 +37,7 @@ from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJ
 from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
 from src.foundation.ledger.domain.chart_of_accounts import user_account
+from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.conftest import create_test_user
@@ -241,6 +242,98 @@ async def test_replay_detects_ledger_balance_tampered_outside_the_event_trail(po
         assert debit_code in tampered_run.stderr
     finally:
         await _bump_balance(-1)
+
+
+async def test_replay_detects_order_filled_quantity_tampered_outside_the_event_trail(pool):
+    """Negative test extending the FA-15 invariant beyond `status` (already
+    covered by test_replay_flags_order_status_changed_without_event_as_mismatch
+    and the ledger-side tamper test above) to another `_ORDER_FIELDS` entry --
+    `filled_quantity` (not literally `fee_total`: `orders.fee_total` has no
+    column default and `insert_order`/`transition` never set it, so it stays
+    SQL NULL and `NULL + 1` folds back to NULL -- a no-op that would make
+    this test pass vacuously; `filled_quantity` defaults to a real `0` and
+    is one of the same `_ORDER_FIELDS`, so it exercises the identical gap).
+    A raw UPDATE that only touches this column does not change `status`, so
+    073beca589d5's I6 guard (armed only inside the `OLD.status IS DISTINCT
+    FROM NEW.status` branch) never fires and the write succeeds silently --
+    replay must still flag it, or FA-15 only ever proves the `status` column
+    agrees, not the row it claims to verify.
+
+    Like test_replay_flags_order_status_changed_without_event_as_mismatch,
+    the tamper runs inside a transaction that is always rolled back
+    (`_DiscardTransaction`), never committed: 073beca589d5's I5 trigger
+    unconditionally bumps `version` on *every* UPDATE (fee-only or not), so
+    a commit-then-restore-fee_total cleanup would still leave `version`
+    permanently desynced from what replay folds -- rollback is the only
+    cleanup that leaves zero trace. `_order_pair` is called directly on this
+    transaction's own connection so it sees the uncommitted row.
+    """
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                order_id = await insert_order(conn, user_id, status="CREATED")
+                await PostgresOrderRepository().transition(
+                    conn,
+                    order_id=order_id,
+                    expected_status=OrderStatus.CREATED,
+                    expected_version=0,
+                    new_status=OrderStatus.VALIDATED,
+                    patch={},
+                    event=_order_event(
+                        order_id,
+                        from_status=OrderStatus.CREATED,
+                        to_status=OrderStatus.VALIDATED,
+                        event="VALIDATED",
+                    ),
+                )
+
+                cutover_at = await replay_verify._cutover_at(conn)
+                clean_pair = await replay_verify._order_pair(conn, order_id, cutover_at=cutover_at)
+                assert clean_pair is not None
+                clean_replayed, clean_actual = clean_pair
+                assert replay.digest_state(clean_replayed) == replay.digest_state(clean_actual)
+
+                await conn.execute(
+                    "UPDATE orders SET filled_quantity = filled_quantity + 1 WHERE order_id = $1",
+                    order_id,
+                )
+
+                tampered_pair = await replay_verify._order_pair(
+                    conn, order_id, cutover_at=cutover_at
+                )
+                assert tampered_pair is not None
+                tampered_replayed, tampered_actual = tampered_pair
+                assert tampered_replayed["filled_quantity"] != tampered_actual["filled_quantity"]
+                assert replay.digest_state(tampered_replayed) != replay.digest_state(
+                    tampered_actual
+                )
+
+                raise _DiscardTransaction
+        except _DiscardTransaction:
+            pass
+
+
+async def test_replay_raises_when_a_dependency_fails_instead_of_reporting_false_ok(
+    pool, monkeypatch
+):
+    """Failure-injection test (DoD checklist item, task-4084 기준) -- if a
+    dependency `verify()` relies on (here, the fills lookup `_order_pair`
+    calls for every touched order) raises, the report must never come back
+    `ok=True` by silently treating the failed stream as a non-mismatch.
+    `verify()`/`_order_pair` have no `try/except` around this call (by
+    design -- FA-15 is fail-closed), so the injected exception must
+    propagate out of `verify()` unchanged rather than being swallowed."""
+    await _seed_order(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    async def _raise_dependency_error(self, conn, order_id):
+        raise RuntimeError("injected dependency failure -- fills lookup unavailable")
+
+    monkeypatch.setattr(FillsRepository, "list_for_order", _raise_dependency_error)
+
+    with pytest.raises(RuntimeError, match="injected dependency failure"):
+        await replay_verify.verify(pool, as_of=as_of, hours=1)
 
 
 async def test_replay_digest_differs_between_accounts_with_different_balances(pool):
