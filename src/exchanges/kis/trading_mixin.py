@@ -18,6 +18,7 @@ cancel_order/modify_order가 그 형식을 기대한다(문서화된 편의 규�
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Protocol
@@ -26,6 +27,7 @@ from uuid import uuid4
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.common.adapter import UnsupportedCapabilityError
 from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.kis.venue_profile import VENUE as _KIS_VENUE
@@ -119,6 +121,42 @@ def _precheck_order(order: Order, registry: SymbolRegistry) -> None:
     check_notional(price_amount, order.quantity, verified_spec.min_notional)
 
 
+async def _submit_kis_order(client: _OrderSubmittingClient, order: Order, pdno: str) -> Order:
+    """task-8338(review task-8184 REJECT follow-up) -- the actual
+    order-cash POST + response parsing + `_kis_order_id_map` recording,
+    factored out of `place_order` so the map-check and this submission run
+    inside the same `_kis_order_id_lock(order.client_order_id)` critical
+    section (TOCTOU fix) without duplicating the HTTP body assembly."""
+    body: dict[str, Any] = {
+        "CANO": client._cano,
+        "ACNT_PRDT_CD": client._acnt_prdt_cd,
+        "PDNO": pdno,
+        "ORD_DVSN": _order_division(order.order_type),
+        "ORD_QTY": str(order.quantity),
+        "ORD_UNPR": str(order.price.amount) if order.price is not None else "0",
+        "EXCG_ID_DVSN_CD": _EXCHANGE_ID,
+        "SLL_TYPE": "01" if order.side == OrderSide.SELL else "",
+        "CNDT_PRIC": "",
+    }
+    tr_id = "TTTC0012U" if order.side == OrderSide.BUY else "TTTC0011U"
+    raw = await client._request(
+        "POST", "/uapi/domestic-stock/v1/trading/order-cash", tr_id, body=body
+    )
+    # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #18b) 반영 — market_data_mixin과
+    # 동일하게 예상 필드 누락을 FatalExchangeError로 통일한다(설명 없는
+    # KeyError 대신 어떤 필드가 없었는지 드러낸다).
+    try:
+        output = raw["output"]
+        exchange_order_id = f"{output['KRX_FWDG_ORD_ORGNO']}:{output['ODNO']}"
+    except KeyError as exc:
+        raise FatalExchangeError(f"KIS 주문 응답에 예상 필드 없음: {exc}") from exc
+    if order.client_order_id:
+        client._kis_order_id_map()[order.client_order_id] = exchange_order_id
+    return order.model_copy(
+        update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
+    )
+
+
 class ClientOrderIdNotMappedError(FatalExchangeError):
     """task-8079(AUDIT F6) -- raised when a `client_order_id` has no recorded
     KIS ODNO mapping. KIS's REST API has no client_order_id concept at all
@@ -174,13 +212,20 @@ class _OrderSubmittingClient(KISHTTPClient, Protocol):
     review task-8182 REJECT follow-up) -- included explicitly in the contract for the
     same reason as the two Protocols above. task-8079(F6) adds get_order() --
     a retried client_order_id resolves to an existing ODNO mapping and
-    re-fetches its current state instead of resubmitting."""
+    re-fetches its current state instead of resubmitting. task-8338(review
+    task-8184 REJECT follow-up) adds `_unsupported()` and the per-id lock
+    accessor for `find_order_by_client_id`'s fail-closed miss path and
+    `place_order`'s check-and-set critical section."""
 
     def symbol_registry(self) -> SymbolRegistry: ...
 
     async def get_order(self, order_id: str) -> Order: ...
 
     def _kis_order_id_map(self) -> dict[str, str]: ...
+
+    def _kis_order_id_lock(self, client_order_id: str) -> asyncio.Lock: ...
+
+    def _unsupported(self, capability: str) -> UnsupportedCapabilityError: ...
 
 
 class KISTradingMixin:
@@ -220,6 +265,53 @@ class KISTradingMixin:
         except KeyError:
             raise ClientOrderIdNotMappedError(client_order_id) from None
 
+    def _kis_order_id_lock(self, client_order_id: str) -> asyncio.Lock:
+        """task-8338(review task-8184 REJECT follow-up) -- guards
+        `place_order`'s check(`_kis_order_id_map` get)-await(`_request`)-set
+        critical section for a given `client_order_id`. Without this, two
+        concurrent retries of the same `client_order_id` could both observe
+        a miss, both submit to KIS, and both then record a mapping (TOCTOU,
+        duplicate submission). Locks are created lazily per adapter
+        instance; there is no `await` between the `.get()`/store-and-return
+        below, so the single-threaded event loop cannot race on creating the
+        lock object itself."""
+        locks: dict[str, asyncio.Lock] | None = getattr(self, "_kis_client_order_id_locks", None)
+        if locks is None:
+            locks = {}
+            self._kis_client_order_id_locks = locks
+        lock = locks.get(client_order_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            locks[client_order_id] = lock
+        return lock
+
+    async def find_order_by_client_id(
+        self: _OrderSubmittingClient, client_order_id: str
+    ) -> Order | None:
+        """task-8338(review task-8184 REJECT follow-up) -- wires the F6
+        `_kis_order_id_map` correlation table into the real outbox retry
+        path (`outbox_submit.call_submit`'s pre-retry reverse lookup, spec
+        §5.4/F14). Before this override, the ABC default always raised
+        `UnsupportedCapabilityError` here, and `call_submit` catches exactly
+        that exception and returns UNKNOWN("RESEND_UNVERIFIABLE") *before*
+        ever calling `place_order` again -- so `place_order`'s own
+        `_kis_order_id_map` dedup check (task-8079) was unreachable from a
+        reclaimed-order retry (review task-8184 finding: "implemented but not wired").
+
+        `venue_profile.py`'s confirmed `supports_client_order_id=False`
+        still holds -- KIS's wire protocol genuinely has no client_order_id
+        field, so a *miss* stays fail-closed via `_unsupported()` exactly as
+        the ABC default would (returning `None` on miss would assert "the
+        exchange confirms it doesn't know this id", which KIS was never
+        asked, see the ABC docstring). A *hit*, however, is a fact this
+        adapter instance itself recorded when it originally submitted the
+        order, so resolving and returning it is safe and enables real
+        dedup on retry."""
+        mapped = self._kis_order_id_map().get(client_order_id)
+        if mapped is None:
+            raise self._unsupported("find_order_by_client_id")
+        return await self.get_order(mapped)
+
     @require_paper_sandbox
     async def place_order(self: _OrderSubmittingClient, order: Order) -> Order:
         # F5(task-8077) — route order.symbol through the LA-7 single rule
@@ -229,7 +321,12 @@ class KISTradingMixin:
         # (same uncaught-propagation contract as Bitget's _to_bitget_symbol).
         pdno = _to_venue(Venue.KIS_KRX, order.symbol)
         _precheck_order(order, self.symbol_registry())
-        if order.client_order_id:
+        if not order.client_order_id:
+            # empty client_order_id is not a correlation key (test
+            # `test_place_order_with_empty_client_order_id_never_dedupes`)
+            # -- no lock needed since there is nothing to dedupe against.
+            return await _submit_kis_order(self, order, pdno)
+        async with self._kis_order_id_lock(order.client_order_id):
             mapped = self._kis_order_id_map().get(order.client_order_id)
             if mapped is not None:
                 # task-8079(F6) DoD 1 -- retry of an already-mapped
@@ -237,34 +334,7 @@ class KISTradingMixin:
                 # submitting a new one to KIS.
                 existing = await self.get_order(mapped)
                 return existing.model_copy(update={"client_order_id": order.client_order_id})
-        body: dict[str, Any] = {
-            "CANO": self._cano,
-            "ACNT_PRDT_CD": self._acnt_prdt_cd,
-            "PDNO": pdno,
-            "ORD_DVSN": _order_division(order.order_type),
-            "ORD_QTY": str(order.quantity),
-            "ORD_UNPR": str(order.price.amount) if order.price is not None else "0",
-            "EXCG_ID_DVSN_CD": _EXCHANGE_ID,
-            "SLL_TYPE": "01" if order.side == OrderSide.SELL else "",
-            "CNDT_PRIC": "",
-        }
-        tr_id = "TTTC0012U" if order.side == OrderSide.BUY else "TTTC0011U"
-        raw = await self._request(
-            "POST", "/uapi/domestic-stock/v1/trading/order-cash", tr_id, body=body
-        )
-        # 레드팀 감사(docs/RED_TEAM_FINDINGS.md #18b) 반영 — market_data_mixin과
-        # 동일하게 예상 필드 누락을 FatalExchangeError로 통일한다(설명 없는
-        # KeyError 대신 어떤 필드가 없었는지 드러낸다).
-        try:
-            output = raw["output"]
-            exchange_order_id = f"{output['KRX_FWDG_ORD_ORGNO']}:{output['ODNO']}"
-        except KeyError as exc:
-            raise FatalExchangeError(f"KIS 주문 응답에 예상 필드 없음: {exc}") from exc
-        if order.client_order_id:
-            self._kis_order_id_map()[order.client_order_id] = exchange_order_id
-        return order.model_copy(
-            update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
-        )
+            return await _submit_kis_order(self, order, pdno)
 
     async def _rvsecncl(
         self: KISHTTPClient, order_id: str, *, decision: str, quantity: Decimal | None
