@@ -18,8 +18,6 @@ import pytest
 
 from scripts import replay_verify_db_pressure as pressure
 
-pytestmark = pytest.mark.asyncio
-
 
 def _make_probe(sequence: list[tuple[int, int] | None]):
     calls = 0
@@ -43,6 +41,7 @@ def _make_sleep():
 
 
 @pytest.mark.perf
+@pytest.mark.asyncio
 async def test_await_db_capacity_returns_immediately_under_threshold() -> None:
     """Perf assertion: no pressure on the first probe means zero sleeps and the
     call returns without paying any of the backoff schedule."""
@@ -58,6 +57,7 @@ async def test_await_db_capacity_returns_immediately_under_threshold() -> None:
     assert elapsed < 0.05
 
 
+@pytest.mark.asyncio
 async def test_await_db_capacity_waits_out_transient_pressure() -> None:
     """Negative test: pressure above threshold on the first probe, cleared by the
     second -- the gate must wait (not fail, not proceed immediately)."""
@@ -70,6 +70,7 @@ async def test_await_db_capacity_waits_out_transient_pressure() -> None:
     assert delays == [pressure.DB_PRESSURE_BACKOFF_SEC[0]]
 
 
+@pytest.mark.asyncio
 async def test_await_db_capacity_exhausts_budget_and_proceeds_anyway() -> None:
     """Negative test / fail-open: pressure that never clears must not block
     forever -- the fixed retry budget (DECISION_GUIDELINES B-2: never
@@ -83,6 +84,7 @@ async def test_await_db_capacity_exhausts_budget_and_proceeds_anyway() -> None:
     assert delays == list(pressure.DB_PRESSURE_BACKOFF_SEC)
 
 
+@pytest.mark.asyncio
 async def test_await_db_capacity_treats_unreadable_probe_as_proceed() -> None:
     """Negative test: a probe failure (network blip, DB mid-recreate) must be
     treated as unknown pressure, not as pressure itself -- it must not block a
@@ -96,6 +98,7 @@ async def test_await_db_capacity_treats_unreadable_probe_as_proceed() -> None:
     assert delays == []
 
 
+@pytest.mark.asyncio
 async def test_await_db_capacity_treats_zero_max_connections_as_proceed() -> None:
     """Failure-injection test: a probe returning `max_conn=0` (an impossible
     but not-unseen shape if `pg_settings` is misread) must not raise
@@ -109,6 +112,7 @@ async def test_await_db_capacity_treats_zero_max_connections_as_proceed() -> Non
     assert delays == []
 
 
+@pytest.mark.asyncio
 async def test_stagger_startup_jitters_within_jitter_max_bound(monkeypatch) -> None:
     """task-7648 (esc-ci-replay_verify.json, 14th+ recurrence): mirrors
     `replay_verify._sleep_before_retry`'s decorrelation proof (task-6627), but
@@ -130,6 +134,7 @@ async def test_stagger_startup_jitters_within_jitter_max_bound(monkeypatch) -> N
     assert captured == [pressure._STARTUP_JITTER_MAX_SEC * 0.25]
 
 
+@pytest.mark.asyncio
 async def test_stagger_startup_never_exceeds_jitter_max_bound() -> None:
     """Negative test: across many real draws, the jittered startup delay must
     never leave `[0, _STARTUP_JITTER_MAX_SEC]` -- a broken jitter call could
@@ -145,6 +150,7 @@ async def test_stagger_startup_never_exceeds_jitter_max_bound() -> None:
     assert all(0.0 <= delay <= pressure._STARTUP_JITTER_MAX_SEC for delay in captured)
 
 
+@pytest.mark.asyncio
 async def test_stagger_startup_always_sleeps_exactly_once() -> None:
     """Failure-injection-adjacent negative test: `stagger_startup` must call
     `sleep` exactly once per invocation -- calling it zero times would silently
@@ -161,6 +167,7 @@ async def test_stagger_startup_always_sleeps_exactly_once() -> None:
     assert calls == 1
 
 
+@pytest.mark.asyncio
 async def test_connection_pressure_returns_none_on_connect_failure(monkeypatch) -> None:
     """Failure-injection test: `connection_pressure` itself must swallow a
     connect-time OSError/PostgresError into `None`, not propagate it -- a
@@ -238,6 +245,7 @@ def test_await_reset_lock_clear_returns_immediately_when_free(perf_budget: Any) 
     perf_budget.assert_within(_free_call, budget_ms=50.0, label="reset lock free path")
 
 
+@pytest.mark.asyncio
 async def test_await_reset_lock_clear_waits_out_transient_reset() -> None:
     """Negative test: the lock held on the first probe, cleared by the second
     -- the gate must wait (not fail, not proceed immediately)."""
@@ -252,6 +260,7 @@ async def test_await_reset_lock_clear_waits_out_transient_reset() -> None:
     assert delays == [pressure.RESET_LOCK_BACKOFF_SEC[0]]
 
 
+@pytest.mark.asyncio
 async def test_await_reset_lock_clear_exhausts_budget_and_proceeds_anyway() -> None:
     """Negative test / fail-open: a lock that never clears must not block
     forever -- the fixed retry budget (DECISION_GUIDELINES B-2: never
@@ -267,6 +276,7 @@ async def test_await_reset_lock_clear_exhausts_budget_and_proceeds_anyway() -> N
     assert delays == list(pressure.RESET_LOCK_BACKOFF_SEC)
 
 
+@pytest.mark.asyncio
 async def test_await_reset_lock_clear_treats_unreadable_probe_as_proceed() -> None:
     """Negative test: a probe failure (network blip, maintenance DB
     unreachable) must be treated as unknown, not as held -- it must not block
@@ -282,6 +292,7 @@ async def test_await_reset_lock_clear_treats_unreadable_probe_as_proceed() -> No
     assert delays == []
 
 
+@pytest.mark.asyncio
 async def test_reset_lock_held_returns_none_on_connect_failure(monkeypatch) -> None:
     """Failure-injection test: `reset_lock_held` itself must swallow a
     connect-time OSError/PostgresError into `None`, not propagate it -- a
@@ -299,6 +310,7 @@ async def test_reset_lock_held_returns_none_on_connect_failure(monkeypatch) -> N
     assert result is None
 
 
+@pytest.mark.asyncio
 async def test_reset_lock_held_releases_lock_when_acquired(monkeypatch) -> None:
     """`reset_lock_held` must release the advisory lock it just took to probe
     -- a probe that leaks a held lock would itself become the contention the
