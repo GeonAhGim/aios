@@ -1,32 +1,32 @@
-"""U-8 (task-8105) 통합테스트 -- `/risk-coach/position-size` 실제 FastAPI 앱
-(TEST_DATABASE_URL은 `/auth/register` 인증 경로에서만 쓰인다 -- 이 엔드포인트
-자체는 순수 위임이라 실거래소/실DB 호출이 없다).
+"""U-8 task-8107: 실제 인증/라우터와 인메모리 저장소로 위임을 검증한다.
 
-DoD 대응: negative >= 4(미인증 401·플래그 OFF 404·config/state_input method
-불일치 시 SizingResultTamperedError 전파·미검증/위조 토큰 401), 4개 sizing
-method 각각 selector.size_for와 동일한 결과, raw HTTPException 미사용(PLT-21
-패턴 참고).
-
-(d) "다른 테넌트 계정으로 조회 시 403/404" 항목: 이 엔드포인트는 저장된
-리소스를 id로 조회하지 않는다 -- 호출자가 body에 담아 보낸 config/state_input을
-그대로 selector.size_for에 위임할 뿐이라 테넌트 소유 리소스 조회 자체가
-없다(N-자산 리스크패리티 한계와 같은 종류의 "이 구조에서는 성립하지 않는
-케이스" -- risk_parity.py 자체 docstring 참고). 그 자리를 대신해 인증 계층의
-동형 실패(위조/미검증 토큰 -> 401, 다른 사용자 계정 소유가 아닌 자원에 대한
-접근 자체가 없다는 사실을 검증)로 채운다.
+실DB/거래소 및 lifespan 사용 없음. 계정 조회 403/404는 N/A:
+요청 스키마에 계정/테넌트 선택자가 없고 저장 리소스를 조회하지 않는다.
+위조 인증 401을 테넌트 인가 증거로 간주하지 않는다.
+D3 replay_verify N/A(주문/원장 이벤트를 생성하지 않는 U-8 계산 API).
 """
 
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
+from time import perf_counter
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from src.main import app
+from src.api import deps
+from src.api.contracts.handlers import install_exception_handlers
+from src.api.routers import risk_coach
+from src.core.portfolio.config import PortfolioConfig
+from src.core.portfolio.sizing.selector import SizingResultTamperedError, size_for
+from src.core.portfolio.state_input import PortfolioStateInput
+from src.services.auth.tokens import TokenIssuer
+from src.services.auth_service import User
 
-STRONG_PASSWORD = "Str0ng!Passw0rd"
+USER_ID = uuid.UUID(int=8107)
+SESSION_ID = uuid.UUID(int=8108)
 PATH = "/risk-coach/position-size"
 
 _COST_MODEL = {"model_id": "cm-1", "cost_model_hash": "0" * 64}
@@ -58,11 +58,27 @@ def _state_input(config: dict, **overrides: object) -> dict:
 
 
 @pytest.fixture
-async def client():
-    async with app.router.lifespan_context(app):
-        transport = ASGITransport(app=app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
+async def client(monkeypatch):
+    app = FastAPI()
+    install_exception_handlers(app)
+    app.include_router(risk_coach.router, prefix="/risk-coach")
+    pool = MagicMock()
+    pool.acquire.return_value.__aenter__ = AsyncMock(return_value=object())
+    pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    app.dependency_overrides[deps.get_pool] = lambda: pool
+    user = User(
+        user_id=USER_ID, email="risk-coach@example.test", display_name=None,
+        mfa_enabled=False, mfa_verified_at=None, status="ACTIVE",
+        is_verifier=False, is_platform_admin=False,
+    )
+    monkeypatch.setattr(deps, "get_user_by_id", AsyncMock(return_value=user))
+    monkeypatch.setattr(deps.session_repository, "get_active", AsyncMock(return_value=object()))
+    # Any accidental real database connection is a test failure.
+    monkeypatch.setattr("asyncpg.connect", MagicMock(side_effect=AssertionError("real DB")))
+    monkeypatch.setattr("asyncpg.create_pool", MagicMock(side_effect=AssertionError("real DB")))
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
 
 
 @pytest.fixture(autouse=True)
@@ -71,17 +87,15 @@ def _flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _auth(client: AsyncClient) -> dict[str, str]:
-    response = await client.post(
-        "/auth/register",
-        json={"email": f"test-{uuid.uuid4().hex}@example.com", "password": STRONG_PASSWORD},
+    token = TokenIssuer.from_env().issue_access(
+        user_id=USER_ID, tenant_id=USER_ID, session_id=SESSION_ID, auth_level="PASSWORD"
     )
-    return {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
-
-
-# ---- 배선 증명 / 적색 게이트 재현(PLT-21 패턴) ----
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_route_is_mounted_on_app() -> None:
+    from src.main import app
+
     paths = app.openapi()["paths"]
     assert PATH in paths
     assert "post" in paths[PATH]
@@ -102,9 +116,6 @@ def test_router_has_zero_raw_http_exception() -> None:
     assert calls == []
 
 
-# ---- negative: 인증 필요 ----
-
-
 async def test_requires_auth(client: AsyncClient) -> None:
     config = _config("FIXED_FRACTIONAL")
     response = await client.post(PATH, json={"config": config, "state_input": _state_input(config)})
@@ -121,9 +132,6 @@ async def test_forged_token_rejected(client: AsyncClient) -> None:
     assert response.status_code == 401
 
 
-# ---- negative: 기능 플래그 OFF -> 404(있는 척하지 않는다) ----
-
-
 async def test_flag_off_returns_404(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FF_U8_RISK_COACH", raising=False)
     headers = await _auth(client)
@@ -137,9 +145,6 @@ async def test_flag_off_returns_404(client: AsyncClient, monkeypatch: pytest.Mon
     assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
 
 
-# ---- negative: config.method != state_input.portfolio_config.method -> 전파 ----
-
-
 async def test_method_mismatch_propagates_as_non_raw_http_exception(
     client: AsyncClient,
 ) -> None:
@@ -151,20 +156,14 @@ async def test_method_mismatch_propagates_as_non_raw_http_exception(
         json={"config": config, "state_input": mismatched_state_input},
         headers=headers,
     )
-    assert 400 <= response.status_code < 600
+    assert response.status_code == 500
     body = response.json()
+    assert body["error_code"] == "INTERNAL_ERROR"
     assert "trace_id" in body
     assert "Traceback" not in body["message"]
 
 
-# ---- 성공 경로: 4개 sizing method 모두 selector.size_for와 동일한 결과 ----
-
-
 async def test_fixed_fractional_matches_selector(client: AsyncClient) -> None:
-    from src.core.portfolio.config import PortfolioConfig
-    from src.core.portfolio.sizing.selector import size_for
-    from src.core.portfolio.state_input import PortfolioStateInput
-
     config = _config("FIXED_FRACTIONAL")
     state_input = _state_input(config)
     headers = await _auth(client)
@@ -178,16 +177,10 @@ async def test_fixed_fractional_matches_selector(client: AsyncClient) -> None:
     )
     data = response.json()["data"]
     assert data["method"] == "FIXED_FRACTIONAL"
-    assert Decimal(data["quantity"]) == expected.quantity
-    assert Decimal(data["weight_pct"]) == expected.weight_pct
-    assert data["inputs_hash"] == expected.inputs_hash
+    assert data == expected.model_dump(mode="json")
 
 
 async def test_volatility_target_matches_selector(client: AsyncClient) -> None:
-    from src.core.portfolio.config import PortfolioConfig
-    from src.core.portfolio.sizing.selector import size_for
-    from src.core.portfolio.state_input import PortfolioStateInput
-
     config = _config("VOLATILITY_TARGET", target_vol_pct="20")
     state_input = _state_input(config, realized_vol_pct="10")
     headers = await _auth(client)
@@ -201,16 +194,10 @@ async def test_volatility_target_matches_selector(client: AsyncClient) -> None:
     )
     data = response.json()["data"]
     assert data["method"] == "VOLATILITY_TARGET"
-    assert Decimal(data["quantity"]) == expected.quantity
-    assert Decimal(data["weight_pct"]) == expected.weight_pct
-    assert data["inputs_hash"] == expected.inputs_hash
+    assert data == expected.model_dump(mode="json")
 
 
 async def test_kelly_capped_matches_selector(client: AsyncClient) -> None:
-    from src.core.portfolio.config import PortfolioConfig
-    from src.core.portfolio.sizing.selector import size_for
-    from src.core.portfolio.state_input import PortfolioStateInput
-
     config = _config("KELLY_CAPPED", kelly_cap_pct="25")
     state_input = _state_input(config, win_rate="0.6", avg_win_loss_ratio="2")
     headers = await _auth(client)
@@ -224,16 +211,10 @@ async def test_kelly_capped_matches_selector(client: AsyncClient) -> None:
     )
     data = response.json()["data"]
     assert data["method"] == "KELLY_CAPPED"
-    assert Decimal(data["quantity"]) == expected.quantity
-    assert Decimal(data["weight_pct"]) == expected.weight_pct
-    assert data["inputs_hash"] == expected.inputs_hash
+    assert data == expected.model_dump(mode="json")
 
 
 async def test_risk_parity_matches_selector(client: AsyncClient) -> None:
-    from src.core.portfolio.config import PortfolioConfig
-    from src.core.portfolio.sizing.selector import size_for
-    from src.core.portfolio.state_input import PortfolioStateInput
-
     config = _config("RISK_PARITY")
     state_input = _state_input(
         config,
@@ -258,6 +239,58 @@ async def test_risk_parity_matches_selector(client: AsyncClient) -> None:
     )
     data = response.json()["data"]
     assert data["method"] == "RISK_PARITY"
-    assert Decimal(data["quantity"]) == expected.quantity
-    assert Decimal(data["weight_pct"]) == expected.weight_pct
-    assert data["inputs_hash"] == expected.inputs_hash
+    assert data == expected.model_dump(mode="json")
+
+
+async def test_domain_exception_propagates_unchanged():
+    config = _config("FIXED_FRACTIONAL")
+    body = risk_coach.PositionSizeRequest(
+        config=PortfolioConfig.model_validate(config),
+        state_input=PortfolioStateInput.model_validate(_state_input(_config("RISK_PARITY"))),
+    )
+    with pytest.raises(SizingResultTamperedError):
+        await risk_coach.post_position_size(body, _user=None, _flag=None)
+
+
+async def test_selector_failure_is_closed(client, monkeypatch):
+    def fail(*args):
+        raise RuntimeError("private-selector-detail")
+
+    monkeypatch.setattr(risk_coach, "size_for", fail)
+    config = _config("FIXED_FRACTIONAL")
+    response = await client.post(
+        PATH, json={"config": config, "state_input": _state_input(config)},
+        headers=await _auth(client),
+    )
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "INTERNAL_ERROR"
+    assert "private-selector-detail" not in response.text
+
+
+async def test_disabled_flag_never_calls_selector(client, monkeypatch):
+    monkeypatch.delenv("FF_U8_RISK_COACH", raising=False)
+    selector = MagicMock(side_effect=AssertionError("selector called while disabled"))
+    monkeypatch.setattr(risk_coach, "size_for", selector)
+    config = _config("FIXED_FRACTIONAL")
+    response = await client.post(
+        PATH, json={"config": config, "state_input": _state_input(config)},
+        headers=await _auth(client),
+    )
+    assert response.status_code == 404
+    selector.assert_not_called()
+
+
+async def test_position_size_p95_budget(client):
+    # U-8 has no dedicated ADR budget; borrow the 200 ms read-query budget.
+    # This measures the in-memory API, not production network latency.
+    config = _config("FIXED_FRACTIONAL")
+    headers = await _auth(client)
+    samples = []
+    for _ in range(30):
+        start = perf_counter()
+        response = await client.post(
+            PATH, json={"config": config, "state_input": _state_input(config)}, headers=headers,
+        )
+        samples.append((perf_counter() - start) * 1000)
+        assert response.status_code == 200
+    assert sorted(samples)[28] < 200
