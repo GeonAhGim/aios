@@ -5,6 +5,7 @@
 커뮤니티 SDK 레퍼런스 기준 최선 추정치라 라이브 검증 전까지는 확정 아님.
 """
 
+import asyncio
 import json
 from decimal import Decimal
 
@@ -14,6 +15,7 @@ import pytest
 from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.data.models.trading import OrderStatus
 from src.exchanges.bitget.adapter import BitgetAdapter
+from tests.conftest import PerfBudget
 from tests.integration.bitget_futures_doubles import json_response, make_adapter, make_order
 
 
@@ -50,6 +52,33 @@ async def test_place_futures_order_blocked_on_live_configured_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_futures_order(make_order())
+
+
+def test_place_futures_order_completes_within_ack_budget(perf_budget: PerfBudget) -> None:
+    """ADR-2026-09-09-C 성능예산 — 주문 제출→ACK p95 50ms(paper) 이내.
+
+    MockTransport라 네트워크 대기가 없는 순수 in-process 경로이므로
+    `perf_budget`(process_time, best-of-5)으로 측정한다 — wall-clock 예산은
+    xdist 코어 경합에서 무의미해 perf 마커 가드(task-7434)가 금지한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"orderId": "777", "clientOid": "c-1"},
+            }
+        )
+
+    adapter = make_adapter(handler)
+
+    def _place() -> object:
+        return asyncio.run(adapter.place_futures_order(make_order()))
+
+    result = _place()
+    assert result.status == OrderStatus.SUBMITTED
+    perf_budget.assert_within(_place, budget_ms=50.0, label="place_futures_order ack")
 
 
 async def test_cancel_futures_order():

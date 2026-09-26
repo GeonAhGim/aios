@@ -227,6 +227,86 @@ async def test_ensure_worker_database_recovers_from_transient_unique_violation()
     assert fake_conn.create_calls == 2
 
 
+@pytest.mark.asyncio
+async def test_ensure_worker_database_reconnects_after_transient_reset_mid_loop() -> None:
+    """esc-ci-pytest_latency_serial: a transient TCP reset that kills the admin
+    connection *mid-loop* (not just at the initial connect) is absorbed by
+    closing the dead connection, reconnecting, and retrying the DROP+CREATE
+    body -- it must not propagate as an unretried `ConnectionDoesNotExistError`."""
+    template_url = "postgresql+asyncpg://user:pass@localhost:5432/aios_test"
+
+    class _FakeConnection:
+        def __init__(self, ordinal: int) -> None:
+            self.ordinal = ordinal
+            self.closed = False
+
+        async def execute(self, sql: str, *args: object, **kwargs: object) -> str:
+            if self.ordinal == 1 and "DROP" in sql:
+                raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                    "connection was closed in the middle of operation"
+                )
+            return "0"
+
+        async def close(self) -> None:
+            self.closed = True
+
+    db_module5 = sys.modules["tests.support.db"]
+    original_connect = asyncpg.connect
+    connections: list[_FakeConnection] = []
+
+    async def _fake_connect5(*args: object, **kwargs: object) -> _FakeConnection:
+        conn = _FakeConnection(len(connections) + 1)
+        connections.append(conn)
+        return conn
+
+    try:
+        db_module5.asyncpg.connect = _fake_connect5  # pyright: ignore[reportAttributeAccessIssue]
+        db_module5._CLONE_RETRY_BASE_DELAY = 0.0  # noqa: SLF001 -- test speed, restored below
+        result_url = await ensure_worker_database(template_url, "gw0")
+    finally:
+        db_module5.asyncpg.connect = original_connect
+        db_module5._CLONE_RETRY_BASE_DELAY = 0.2  # noqa: SLF001
+
+    assert "gw0" in result_url
+    assert len(connections) == 2, "reset connection is closed and a fresh one opened"
+    assert connections[0].closed, "the dead connection from the failed attempt is closed"
+    assert connections[1].closed, "the connection that finished the clone is closed on exit"
+
+
+@pytest.mark.asyncio
+async def test_ensure_worker_database_propagates_connection_reset_after_retries() -> None:
+    """Fail-closed: if every reconnect attempt keeps hitting the same transient
+    reset, `ensure_worker_database` still raises after `_CLONE_ATTEMPTS` --
+    this never silently falls back to the template DB."""
+    template_url = "postgresql+asyncpg://user:pass@localhost:5432/aios_test"
+
+    class _FakeConnection:
+        async def execute(self, sql: str, *args: object, **kwargs: object) -> str:
+            if "DROP" in sql:
+                raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                    "connection was closed in the middle of operation"
+                )
+            return "0"
+
+        async def close(self) -> None:
+            pass
+
+    db_module6 = sys.modules["tests.support.db"]
+    original_connect = asyncpg.connect
+
+    async def _fake_connect6(*args: object, **kwargs: object) -> _FakeConnection:
+        return _FakeConnection()
+
+    try:
+        db_module6.asyncpg.connect = _fake_connect6  # pyright: ignore[reportAttributeAccessIssue]
+        db_module6._CLONE_RETRY_BASE_DELAY = 0.0  # noqa: SLF001 -- test speed, restored below
+        with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+            await ensure_worker_database(template_url, "gw0")
+    finally:
+        db_module6.asyncpg.connect = original_connect
+        db_module6._CLONE_RETRY_BASE_DELAY = 0.2  # noqa: SLF001
+
+
 # ── Boundary tests: valid inputs pass through ────────────────────────
 
 
