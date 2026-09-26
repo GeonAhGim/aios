@@ -187,7 +187,14 @@ async def _request_topup_p95_ms(pool: asyncpg.Pool, user_id: uuid.UUID, *, n: in
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
+@pytest.mark.perf
 async def test_request_topup_p95_under_borrowed_single_roundtrip_budget(pool):
+    """Wall-clock p95 over real DB round trips -- runs in the serial perf
+    stage (task-7434): under `-n auto` core contention the same call measured
+    103-117ms against a 50ms budget on two unrelated dependency PRs
+    (runs 36228616048 / 36228613530) while passing in isolation. The timer
+    lives in `_request_topup_p95_ms`, so the AST perf-marker guard (which only
+    inspects the test body) did not flag it."""
     user_id = await create_test_user(pool)
 
     p95_ms = await _request_topup_p95_ms(pool, user_id, n=_PERF_ITERATIONS)
