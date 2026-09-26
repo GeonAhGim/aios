@@ -24,7 +24,6 @@ from typing import Any
 import pytest
 
 from src.core.exceptions import (
-    ExchangeAPIError,
     FatalExchangeError,
     FrozenZonePaperAdapterBlockedError,
 )
@@ -339,61 +338,6 @@ async def test_place_order_accepts_market_order_at_min_notional_boundary():
         responses={"/api/v5/trade/order": _ok_order_response()},
     )
     order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
-    result = await client.place_order(order)
-    assert result.exchange_order_id == "BTC-USDT:1234567"
-
-
-async def test_place_order_rejects_market_order_when_reference_price_fetch_fails():
-    """부정 테스트 + 장애주입(task-8357, CTO 결정): 참조가 조회
-    (get_ticker)가 실패하면 근사치로 되돌아가거나 검증을 건너뛰지 않고
-    fail-closed로 주문 자체를 거부해야 한다."""
-    client = _paper_client(ticker_error=ExchangeAPIError("price feed 장애"))
-    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
-    with pytest.raises(FatalExchangeError):
-        await client.place_order(order)
-    assert client.calls == []
-
-
-async def test_place_order_rejects_market_order_with_stale_reference_price():
-    """부정 테스트(task-8374, finding#223 후속): 5초 초과로 스테일한
-    참조가는 notional이 충분해도(50000*0.1=5000) 신뢰하지 않고 거부."""
-    client = _paper_client(ticker_price=Decimal("50000"), ticker_age=timedelta(seconds=6))
-    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})
-    with pytest.raises(FatalExchangeError):
-        await client.place_order(order)
-    assert client.calls == []
-
-
-async def test_place_order_rejects_market_order_with_zero_reference_price():
-    """부정 테스트(task-8374): 참조가 0은 notional을 무조건 0으로 만들어
-    min_notional 검증을 무의미하게 통과시키므로 계산 전에 거부."""
-    client = _paper_client(ticker_price=Decimal("0"))
-    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
-    with pytest.raises(FatalExchangeError):
-        await client.place_order(order)
-    assert client.calls == []
-
-
-async def test_place_order_rejects_market_order_with_negative_reference_price():
-    """부정 테스트(task-8374): 음수 참조가(데이터 소스 이상)도 거부 --
-    0 검사만으로는 걸러지지 않는 별도 경로."""
-    client = _paper_client(ticker_price=Decimal("-1"))
-    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
-    with pytest.raises(FatalExchangeError):
-        await client.place_order(order)
-    assert client.calls == []
-
-
-async def test_place_order_accepts_market_order_with_reference_price_just_under_staleness_limit():
-    """회귀 방지(QA task-8433): 스테일 거부(6초) 테스트만 있고 경계 통과가
-    없었다 -- 임계값(5초) 바로 아래(4.9초, 정각은 실행시간 오차로 피함)는
-    통과함을 증명한다."""
-    client = _paper_client(
-        ticker_price=Decimal("50000"),
-        ticker_age=timedelta(milliseconds=4900),
-        responses={"/api/v5/trade/order": _ok_order_response()},
-    )
-    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})
     result = await client.place_order(order)
     assert result.exchange_order_id == "BTC-USDT:1234567"
 

@@ -154,6 +154,20 @@ _SYMBOL_LIMITS: dict[str, tuple[Decimal, Decimal, Decimal]] = {
 _MARKET_REF_PRICE_MAX_STALENESS = timedelta(seconds=5)
 
 
+def _utcnow() -> datetime:
+    """task-8454 (CI-red root cause) -- module-level indirection so tests can
+    monkeypatch the clock instead of relying on real wall-clock elapsed time.
+    Every other freshness/staleness check in this repo takes an injectable
+    `now`/`clock` argument (e.g. `core/security/break_glass.py:mfa_step_up_fresh`,
+    `foundation/ai/factory/application/promote_to_paper.py`'s `clock` param) --
+    the inline `datetime.now(timezone.utc)` this replaced was the only
+    staleness check reading the real clock directly, which made the
+    staleness comparison below sensitive to scheduling delays between the
+    ticker fetch and this check (observed as intermittent CI failures on a
+    shared, contended machine, not a real 5s-old price)."""
+    return datetime.now(timezone.utc)
+
+
 def _to_okx_side(side: OrderSide) -> str:
     return "buy" if side == OrderSide.BUY else "sell"
 
@@ -225,7 +239,7 @@ async def _validate_tick_lot_min_notional(order: Order, client: _TickerReadingOr
                 f"OKX MARKET 주문 min_notional 검증용 참조가가 유효하지 않음"
                 f"(price={ticker.price!r}): {order.symbol!r}"
             )
-        age = datetime.now(timezone.utc) - ticker.timestamp
+        age = _utcnow() - ticker.timestamp
         if age > _MARKET_REF_PRICE_MAX_STALENESS:
             raise FatalExchangeError(
                 f"OKX MARKET 주문 min_notional 검증용 참조가가 스테일함"
