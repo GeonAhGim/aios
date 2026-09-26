@@ -1,7 +1,8 @@
 # ADR-2026-09-26-D: 통합테스트 DB 격리 — 창(window) 스캔·전역 상태 테스트는 모듈별 템플릿 클론에서 돈다
 
 ## Status
-Proposed (2026-09-26, 클라우드 세션 초안). 사용자/CTO 결정 대기. 승인 시 Accepted로 갱신.
+Accepted (2026-09-26). 사용자 위임 결정("니가 판단해서 결정해") — Chief Architect(클라우드 세션 aios-a4)가 채택.
+구현 리프는 PC 세션 레인에서 발행한다(클라우드 세션 비용 중단 지시).
 
 ## Context (실측 2026-09-25~26, GitHub Quality Gate)
 - xdist(`-n auto --dist loadfile`) 워커는 **워커당 DB 1개**(`tests/support/db.ensure_worker_database`)를 세션 내내 공유한다. 파일 단위로 분산되므로 한 워커 DB에는 그 워커가 돈 모든 파일의 잔재(leftover)가 누적된다.
@@ -37,6 +38,6 @@ Proposed (2026-09-26, 클라우드 세션 초안). 사용자/CTO 결정 대기. 
 - CI 시간: 격리 모듈 6개 × 테스트별 클론 ~1초 → 분당 수십 초 이내 증가(실측 #91 verify 21~24분, 변화 없음).
 - 되돌림: 이 ADR Superseded + 공용 픽스처 제거, 모듈별 픽스처 원복.
 
-## Open questions (결정 필요)
-- 정적 가드(3번)의 hot table 목록과 baseline 범위.
-- `isolated` 등급의 클론 단위: 테스트별(현행, 가장 안전) vs 모듈별(pytest-asyncio loop scope 조정 필요, 더 빠름).
+## Open questions → 결정(2026-09-26)
+- 정적 가드(3번)의 hot table 목록: INVARIANTS.md·standard-105 패턴이 적용되는 표(orders·fills·provider_event_inbox·outbox·ledger·positions·audit 계열)를 시드로 시작하고, baseline은 도입 시점의 위반 전량으로 잡아 warn으로 시작한다(CLAUDE.md §6-6). 목록 확장은 후속 리프.
+- `isolated` 등급의 클론 단위: **테스트별(현행)** 유지. 모듈별 전환은 실측 비용(클론 p95 vs 모듈 수)이 필요할 때 별도 리프로 재검토.
