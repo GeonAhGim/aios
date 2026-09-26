@@ -191,3 +191,53 @@ def test_is_network_error_perf_within_budget(mod: ModuleType) -> None:
         mode="cpu",
         label="is_network_error",
     )
+
+
+# ---------------------------------------------------------------------------
+# task-8375: proc.stdout/stderr can be None on a capture-failure path --
+# is_network_error() must normalize instead of raising `TypeError: argument
+# of type 'NoneType' is not iterable`, and an audit run that produces no
+# output at all must be reported as an audit execution failure, not silently
+# misread as a network error or a vulnerability finding.
+# ---------------------------------------------------------------------------
+
+
+def test_is_network_error_none_does_not_raise(mod: ModuleType) -> None:
+    """Red-gate reproduction: bd49f668 crashed here with `marker in None`."""
+    assert mod.is_network_error(None) is False
+
+
+def test_is_network_error_none_stderr_with_real_network_marker_in_stdout(
+    mod: ModuleType,
+) -> None:
+    assert mod.is_network_error(None) is False
+    assert mod.is_network_error("ConnectionError: max retries exceeded") is True
+
+
+def test_main_reports_audit_execution_failure_when_capture_yields_none(
+    mod: ModuleType, tmp_path: Path
+) -> None:
+    """subprocess.run capture failure (stdout/stderr None) must surface as
+    an "audit execution failed" result -- not a network error (rc=3) and not
+    a silently-passing empty vulnerability list (rc=0)."""
+    fake_proc = subprocess.CompletedProcess(
+        args=["pip_audit"], returncode=1, stdout=None, stderr=None
+    )
+    ignore_file = tmp_path / ".pip-audit-ignore"
+    with patch.object(mod.subprocess, "run", return_value=fake_proc):
+        rc = mod.main(["--ignore-file", str(ignore_file), "--python", sys.executable])
+
+    assert rc == 1
+
+
+def test_main_empty_stdout_without_network_marker_is_audit_failure_not_network(
+    mod: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_proc = subprocess.CompletedProcess(args=["pip_audit"], returncode=1, stdout="", stderr="")
+    ignore_file = tmp_path / ".pip-audit-ignore"
+    with patch.object(mod.subprocess, "run", return_value=fake_proc):
+        rc = mod.main(["--ignore-file", str(ignore_file), "--python", sys.executable])
+
+    assert rc == 1
+    assert rc != mod.NETWORK_ERROR_RC
+    assert "감사 실행 자체가 실패" in capsys.readouterr().err
