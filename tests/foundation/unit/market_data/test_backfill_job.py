@@ -392,7 +392,9 @@ async def test_reversed_range_is_rejected_fail_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failure_injection_mid_loop_leaves_earlier_gaps_persisted() -> None:
+async def test_failure_injection_mid_loop_leaves_earlier_gaps_persisted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """실패 주입 — 두 갭(앞/뒤) 중 첫 갭은 정상 처리되고, 두 번째 갭에서
     `coverage_repo.upsert_span`이 예외를 던지면(의존성 실패 흉내) 이미
     커밋된 첫 갭의 store/coverage 기록은 롤백되지 않는다(모듈 docstring
@@ -447,7 +449,7 @@ async def test_failure_injection_mid_loop_leaves_earlier_gaps_persisted() -> Non
             raise ConnectionError("의존성(coverage_repo) 실패 주입 — 커밋 중단")
         return await real_upsert_span(conn, span)
 
-    coverage_repo.upsert_span = _flaky_upsert_span  # type: ignore[method-assign]
+    monkeypatch.setattr(coverage_repo, "upsert_span", _flaky_upsert_span)
 
     with pytest.raises(ConnectionError):
         await _run(provider, store, coverage_repo, range_start=start, range_end=end)
