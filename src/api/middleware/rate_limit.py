@@ -22,8 +22,10 @@ itself populates `X-Request-ID`/`X-Trace-Id` on 429 responses.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -41,6 +43,17 @@ from src.core.rate_limit.limiter import limiter
 from src.core.rate_limit.policy import POLICIES, RateLimitPolicy
 
 logger = logging.getLogger(__name__)
+
+# task-7989 (M2-16) -- off by default (staged rollout, MVP-2 leaf): when off,
+# `_resolve_key`'s "tenant" branch keeps trusting the unauthenticated
+# `X-Tenant-Id` header as before. `background_loops.flag_enabled`'s default
+# is "on" for the opposite reason (a background-loop kill switch), so this
+# module keeps its own default-off check rather than reusing that helper.
+FLAG_TENANT_JWT_VERIFY = "AIOS_RATE_LIMIT_TENANT_JWT_VERIFY"
+
+
+def _flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "0") == "1"
 
 
 def _client_ip(request: Request) -> str:
@@ -66,32 +79,50 @@ def default_resolve_policy(request: Request) -> RateLimitPolicy | None:
     return None
 
 
+def _verified_bearer_payload(request: Request) -> dict[str, Any] | None:
+    """Decode/verify the bearer JWT from the `Authorization` header with the
+    same secret/algorithm as `get_current_user`. Returns `None` when there is
+    no bearer token, or its signature is invalid/expired -- callers fall back
+    to an IP-keyed bucket in that case. No DB lookup (account status, tenant
+    membership) is performed -- this is only for bucket separation, not
+    authentication, which remains `get_current_user`'s responsibility.
+    """
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return None
+    secrets = request.app.state.secrets
+    try:
+        payload: dict[str, Any] = jwt.decode(
+            auth_header[7:],
+            secrets.jwt_secret_key.get_secret_value(),
+            algorithms=[secrets.jwt_algorithm],
+        )
+    except jwt.PyJWTError:
+        return None
+    return payload
+
+
 def _resolve_key(request: Request, policy: RateLimitPolicy) -> str:
     if policy.key == "ip":
         return f"ip:{_client_ip(request)}"
     if policy.key == "tenant":
+        # task-7989 (M2-16) -- RateLimitMiddleware runs pre-auth, so
+        # `X-Tenant-Id` alone is attacker-controlled: an anonymous caller
+        # could forge another tenant's id and exhaust that tenant's admin
+        # bucket (silent DoS -- real admins get 429). Behind the flag,
+        # require the same signature verification as the "subject" branch
+        # before trusting the header; an unverified/missing bearer token
+        # falls back to the IP bucket exactly like that branch.
+        if _flag_enabled(FLAG_TENANT_JWT_VERIFY) and _verified_bearer_payload(request) is None:
+            return f"ip:{_client_ip(request)}"
         tenant_id = request.headers.get("X-Tenant-Id")
         return f"tenant:{tenant_id}" if tenant_id else f"ip:{_client_ip(request)}"
-    # "subject" — Decode the JWT from the Authorization header and use only `sub`
-    # after signature verification (same secret/algorithm as get_current_user).
-    # Trusting `sub` without verification would let an attacker impersonate any
-    # user_id, exhausting that user's read/mutation bucket on their behalf
-    # (silent DoS where the real victim gets 429). We do not perform a DB lookup
-    # (get_user_by_id, account status check). This is only for bucket separation,
-    # not authentication — that remains get_current_user's responsibility.
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.lower().startswith("bearer "):
-        secrets = request.app.state.secrets
-        try:
-            payload = jwt.decode(
-                auth_header[7:],
-                secrets.jwt_secret_key.get_secret_value(),
-                algorithms=[secrets.jwt_algorithm],
-            )
-        except jwt.PyJWTError:
-            payload = None
-        if payload and payload.get("sub"):
-            return f"user:{payload['sub']}"
+    # "subject" — trusting `sub` without verification would let an attacker
+    # impersonate any user_id, exhausting that user's read/mutation bucket on
+    # their behalf (silent DoS where the real victim gets 429).
+    payload = _verified_bearer_payload(request)
+    if payload and payload.get("sub"):
+        return f"user:{payload['sub']}"
     return f"ip:{_client_ip(request)}"
 
 
