@@ -27,11 +27,8 @@ import pytest
 from src.core.script.grammar.parser import parse
 from src.core.script.ir import lower_program
 from src.core.script.ir.ops import ConstInt, IRProgram, Neg, Store
-from src.core.script.runtime.interpreter import (
-    SCRIPT_RUNTIME_LIMIT,
-    ScriptRuntimeLimitError,
-    execute,
-)
+from src.core.script.runtime.interpreter import execute
+from src.core.script.runtime.interpreter_types import SCRIPT_RUNTIME_LIMIT, ScriptRuntimeLimitError
 from src.core.script.runtime.series import Series
 from tests.conftest import PerfBudget
 
