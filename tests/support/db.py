@@ -43,8 +43,8 @@ __all__ = [
 ]
 
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
-_CLONE_ATTEMPTS = 5
-_CLONE_RETRY_BASE_DELAY = 0.5
+_CLONE_ATTEMPTS = 15
+_CLONE_RETRY_BASE_DELAY = 0.2
 
 # esc-ci-pytest.json (task-6235): local Windows CI intermittently resets the TCP
 # socket to Postgres mid-connect (WinError 64 / asyncpg ConnectionDoesNotExistError,
@@ -151,7 +151,8 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
                 asyncpg.exceptions.UniqueViolationError,
             ) as exc:
                 last_exc = exc
-                await asyncio.sleep(_CLONE_RETRY_BASE_DELAY * (attempt + 1))
+                if attempt + 1 < _CLONE_ATTEMPTS:
+                    await asyncio.sleep(_CLONE_RETRY_BASE_DELAY * (attempt + 1))
         else:
             assert last_exc is not None
             raise last_exc

@@ -11,11 +11,11 @@ not found(oracle extra 미설치), 등록 지표(DPO/MASSI/COPPOCK) 3자 교차�
 
 D2: negative >=3, failure-injection 1, 수치 성능 단언 1, 게이트 적색 재현 1.
 """
+
 from __future__ import annotations
 
 import subprocess
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -29,6 +29,7 @@ from src.core.indicators.adapters import pandas_ta_bridge as bridge
 from src.core.indicators.registry import IndicatorError
 from src.core.indicators.specs_talib import TALIB_SPECS
 from src.data.models.market_data import Candle
+from tests.conftest import PerfBudget
 
 
 def _candles_random_walk(n: int, *, seed: int = 7, base: float = 100.0) -> list[Candle]:
@@ -250,20 +251,29 @@ def test_dpo_is_causal_changing_future_candles_does_not_change_past_output() -> 
 
 
 @pytest.mark.perf
-def test_registered_indicators_compute_within_budget() -> None:
+def test_registered_indicators_compute_within_budget(perf_budget: PerfBudget) -> None:
     """예산: 3종 x 2000봉 = 전부 순수 numpy/pandas 연산(네트워크·DB 없음) —
     ADR-2026-09-09-C Decision 1에 이 리프 전용 항목은 없어(가장 가까운 항목은
     "지표 증분=일괄 동일" 계열) 이 leaf가 자체 선언한 예산을 건다: 로컬 실측
-    (3종 x 2000봉) p95 ~40ms 대비 10배 여유인 400ms."""
+    (3종 x 2000봉) p95 ~40ms 대비 10배 여유인 400ms.
+
+    task-7672: raw `time.perf_counter()`(wall-clock)는 공유 CI 호스트에서 다른
+    프로세스에 코어를 뺏기면 이 프로세스가 실제로 쓴 CPU 시간과 무관하게 값이
+    치솟는다(실측: 같은 호출이 단독 실행 시 cpu=15.6ms/wall=17.2ms인데, 호스트가
+    바쁠 때 wall만 6.6s까지 뛰었다 — esc-ci-pytest 3300s 적색의 재현 조건).
+    `perf_budget`(tests/conftest.py PerfBudget)의 `time.process_time()` 기반
+    측정으로 바꿔 예산 판정에서 호스트 경합을 제외한다 — 예산 수치(0.4s)는
+    그대로 둔다."""
     candles = _candles_random_walk(2000, seed=9)
     service = bridge.PandasTaBridgeService()
-    started = time.perf_counter()
-    for name in bridge.REGISTERED_INDICATORS:
-        spec = bridge.PANDAS_TA_SPECS[name]
-        params = {p.name: p.default for p in spec.params}
-        service.calculate(name, candles, **params)
-    elapsed = time.perf_counter() - started
-    assert elapsed < 0.4, f"3-indicator batch took {elapsed:.3f}s, budget 0.4s"
+
+    def run() -> None:
+        for name in bridge.REGISTERED_INDICATORS:
+            spec = bridge.PANDAS_TA_SPECS[name]
+            params = {p.name: p.default for p in spec.params}
+            service.calculate(name, candles, **params)
+
+    perf_budget.assert_within(run, budget_ms=400.0, label="registered_indicators_batch")
 
 
 def test_dependency_declared_without_oracle_extra() -> None:

@@ -9,16 +9,15 @@ import { mockBackend } from "./support/mockBackend";
 // route를 먼저 검사하므로 mockBackend(page) 호출 뒤에 추가해야 mockBackend의 폴백
 // (catch-all)과 충돌하지 않는다.
 //
-// 갭 노트(문서 UX_JOURNEYS.md §2 J3 단계표/§4 G-4 — task-7500으로 해소): 2단계
-// "리스크/컴플라이언스 판정 표시"는 ExecutionControlPage.tsx가 실행 생성 제출과
-// 함께 트리거하는 evaluateRiskGate(PRE_SUBMIT)의 RiskEvaluationView를
-// RiskVerdictPanel(routes/executions/components/RiskVerdictPanel.tsx, 뒤
-// FF_J3_RISK_PANEL)로 보여준다 — ALLOW/DENY, reason_codes, rule_version(규칙
-// 근거), evaluated_at(판정 시각)을 그대로 옮긴다(CM-A5와 동일 결정: 판정 로직
-// 재구현 금지). 아래 "2단계" 테스트가 이 전용 패널을 실제로 검증한다(fixme 해소).
-// 일반 오류 배너 경로(BadRequestNotice/ForbiddenNotice/ErrorMessage)는 여전히
-// createExecution 자체가 4xx로 거부될 때의 표면화 경로라 별도의 실패 주입 테스트로
-// 계속 검증한다 — 두 경로는 서로 대체하지 않는다.
+// 갭 노트(문서 UX_JOURNEYS.md §2 J3 단계표 기준): 2단계 "리스크/컴플라이언스 판정
+// 표시"는 G-4(부분 갭)였으나 task-7504(ExecutionCardResponse.last_risk_verdict 노출)
+// + task-7505(ExecutionCard.tsx 전용 패널)로 해소됐다 — 아래 2단계 테스트가 실제
+// 패널 렌더를 검증한다. 리스크 게이트 자체가 403으로 거부하는 경로(예: 위임장 한도
+// 초과로 주문 생성 자체가 막히는 경우)는 여전히 일반 오류 배너로만 표면화되므로 그
+// 경로는 별도의 실패 주입 테스트로 계속 검증한다 — 두 경로는 서로 다른 계약이다.
+// 별도로 task-7500이 제출 직후 사전 평가(evaluateRiskGate PRE_SUBMIT) 결과를
+// RiskVerdictPanel(FF_J3_RISK_PANEL, 기본 OFF)로 보여준다 — 카드 패널(저장된
+// last_risk_verdict)과 서로 다른 계약이며 아래에서 각각 검증한다.
 //
 // sw.js(서비스 워커)의 fetch 핸들러는 "/v1/"로 시작하지 않는 GET(예: /executions,
 // /portfolio, /alerts, /notifications/history)을 캐시 우선(cache-first)으로 처리하며
@@ -104,12 +103,50 @@ test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판�
     await expect(page.getByText("e2e-paper-order-strategy")).toBeVisible();
   });
 
-  // task-7500(G-4 해소): FF_J3_RISK_PANEL을 켠 상태에서 RiskVerdictPanel이 실제로
+  // task-7505(G-4 해소): task-7504가 ExecutionCardResponse.last_risk_verdict를
+  // 노출한 뒤 ExecutionCard.tsx가 전용 패널로 렌더한다 — GET /executions을
+  // last_risk_verdict가 담긴 카드로 고정해 DENY 사유 코드 표시를 재현한다.
+  test(
+    "2단계 주문 제출 시 리스크/컴플라이언스 판정이 전용 패널로 승인/거부 사유와 함께 표시된다",
+    async ({ page }) => {
+      await mockBackend(page);
+      await page.route(`${API_BASE}/executions`, (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        return json(route, 200, [
+          {
+            execution_id: 1,
+            strategy_id: "e2e-risk-verdict-strategy",
+            strategy_version: "1.0.0",
+            status: "PENDING",
+            mode: "PAPER",
+            exchange: "bitget",
+            allocated_capital: "500",
+            days_since_start: 0,
+            realized_pnl: "0",
+            unrealized_pnl: "0",
+            max_drawdown_pct: null,
+            last_risk_verdict: {
+              outcome: "DENY",
+              reason_codes: ["RSK-007"],
+              evaluated_at: "2026-01-01T00:00:00Z",
+            },
+          },
+        ]);
+      });
+      await page.goto("/executions");
+
+      await expect(page.getByText("e2e-risk-verdict-strategy")).toBeVisible();
+      await expect(page.getByText("리스크/컴플라이언스 판정: 거부")).toBeVisible();
+      await expect(page.getByText("사유: RSK-007")).toBeVisible();
+    },
+  );
+
+  // task-7500(사전 평가 패널): FF_J3_RISK_PANEL을 켠 상태에서 RiskVerdictPanel이 실제로
   // evaluateRiskGate(PRE_SUBMIT)의 outcome/reason_codes/rule_version/evaluated_at을
   // 그대로 보여주는지 검증한다. createExecution 자체는 평소처럼 성공(201)하고,
   // 리스크 게이트 evaluate만 DENY를 돌려준다 — 두 경로(생성 성공 여부 vs 판정 결과)가
   // 서로 독립적임을 함께 보여준다.
-  test("2단계 주문 제출 시 리스크/컴플라이언스 판정이 전용 패널로 승인/거부 사유와 함께 표시된다", async ({
+  test("2단계 [FF_J3_RISK_PANEL] 제출 직후 사전 평가 판정이 RiskVerdictPanel로 규칙 근거·판정 시각과 함께 표시된다", async ({
     page,
   }) => {
     await enableRiskVerdictPanel(page);
