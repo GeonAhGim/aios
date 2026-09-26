@@ -16,6 +16,7 @@ import hashlib
 import json
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -150,7 +151,7 @@ def test_ticks_to_candles_empty_input_still_validates_timeframe() -> None:
     — the empty-input short-circuit is not a license to skip validating the
     caller's other arguments (§9.10 XREV, task-7850)."""
     with pytest.raises(UnknownTimeframeError):
-        ticks_to_candles([], object(), _bitget_calendar())  # type: ignore[arg-type]
+        ticks_to_candles([], cast(Timeframe, object()), _bitget_calendar())
 
 
 # ---- (a) 결정론: 같은 입력 = 바이트 동일 직렬화 sha256 ----

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -443,7 +444,7 @@ def test_record_audit_event_command_with_invalid_outcome_monkeypatch(
             aggregate_type="Test",
             aggregate_id=uuid4(),
             action="TEST",
-            outcome="INVALID",  # type: ignore[arg-type]
+            outcome=cast(Outcome, "INVALID"),
             trace_id=uuid4(),
         )
 
