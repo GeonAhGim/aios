@@ -114,6 +114,12 @@ def _paper_client(**kwargs: Any) -> _StubClient:
     return _StubClient(demo_mode=True, **kwargs)
 
 
+def _ok_order_response(ord_id: str = "1234567") -> dict[str, Any]:
+    """반복되는 "code=0, 성공 data 행 1개" OKX 응답 스텁 -- 각 테스트에서
+    5줄짜리 dict 리터럴을 반복하지 않기 위한 헬퍼(LOC 절감, 동작 무변화)."""
+    return {"code": "0", "msg": "", "data": [{"ordId": ord_id, "sCode": "0", "sMsg": ""}]}
+
+
 # ---- LIVE 하드가드 (D3 — INVARIANTS I-02/I-03 대조 적대적 테스트) ----
 
 
@@ -148,15 +154,7 @@ async def test_modify_order_rejects_live_adapter():
 
 
 async def test_place_order_buy_limit_builds_composite_exchange_order_id():
-    client = _paper_client(
-        responses={
-            "/api/v5/trade/order": {
-                "code": "0",
-                "msg": "",
-                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
-            }
-        }
-    )
+    client = _paper_client(responses={"/api/v5/trade/order": _ok_order_response()})
     result = await client.place_order(_order(side=OrderSide.BUY, order_type=OrderType.LIMIT))
     assert result.exchange_order_id == "BTC-USDT:1234567"
     assert result.status == OrderStatus.SUBMITTED
@@ -172,15 +170,7 @@ async def test_place_order_buy_limit_builds_composite_exchange_order_id():
 
 
 async def test_place_order_sell_market_omits_price_field():
-    client = _paper_client(
-        responses={
-            "/api/v5/trade/order": {
-                "code": "0",
-                "msg": "",
-                "data": [{"ordId": "7654321", "sCode": "0", "sMsg": ""}],
-            }
-        }
-    )
+    client = _paper_client(responses={"/api/v5/trade/order": _ok_order_response("7654321")})
     result = await client.place_order(_order(side=OrderSide.SELL, order_type=OrderType.MARKET))
     _, path, body = client.calls[0]
     assert path == "/api/v5/trade/order"
@@ -191,15 +181,7 @@ async def test_place_order_sell_market_omits_price_field():
 
 
 async def test_cancel_order_splits_composite_id_and_returns_true_on_success():
-    client = _paper_client(
-        responses={
-            "/api/v5/trade/cancel-order": {
-                "code": "0",
-                "msg": "",
-                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
-            }
-        }
-    )
+    client = _paper_client(responses={"/api/v5/trade/cancel-order": _ok_order_response()})
     ok = await client.cancel_order("BTC-USDT:1234567")
     assert ok is True
     _, path, body = client.calls[0]
@@ -209,15 +191,7 @@ async def test_cancel_order_splits_composite_id_and_returns_true_on_success():
 
 
 async def test_modify_order_accepts_price_and_delegates_to_get_order():
-    client = _paper_client(
-        responses={
-            "/api/v5/trade/amend-order": {
-                "code": "0",
-                "msg": "",
-                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
-            }
-        }
-    )
+    client = _paper_client(responses={"/api/v5/trade/amend-order": _ok_order_response()})
     result = await client.modify_order(
         "BTC-USDT:1234567", price=Decimal("51000"), size=Decimal("2")
     )
@@ -350,13 +324,7 @@ async def test_place_order_accepts_small_quantity_market_order_with_sufficient_r
     실제 notional=5000 >= min_notional(1)이므로 이제는 통과해야 한다."""
     client = _paper_client(
         ticker_price=Decimal("50000"),
-        responses={
-            "/api/v5/trade/order": {
-                "code": "0",
-                "msg": "",
-                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
-            }
-        },
+        responses={"/api/v5/trade/order": _ok_order_response()},
     )
     order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})
     result = await client.place_order(order)
@@ -368,13 +336,7 @@ async def test_place_order_accepts_market_order_at_min_notional_boundary():
     통과한다(엄격한 `<` 비교, `<=` 아님) -- 참조가 1, quantity 1 -> notional 1."""
     client = _paper_client(
         ticker_price=Decimal("1"),
-        responses={
-            "/api/v5/trade/order": {
-                "code": "0",
-                "msg": "",
-                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
-            }
-        },
+        responses={"/api/v5/trade/order": _ok_order_response()},
     )
     order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
     result = await client.place_order(order)
@@ -420,6 +382,20 @@ async def test_place_order_rejects_market_order_with_negative_reference_price():
     with pytest.raises(FatalExchangeError):
         await client.place_order(order)
     assert client.calls == []
+
+
+async def test_place_order_accepts_market_order_with_reference_price_just_under_staleness_limit():
+    """회귀 방지(QA task-8433): 스테일 거부(6초) 테스트만 있고 경계 통과가
+    없었다 -- 임계값(5초) 바로 아래(4.9초, 정각은 실행시간 오차로 피함)는
+    통과함을 증명한다."""
+    client = _paper_client(
+        ticker_price=Decimal("50000"),
+        ticker_age=timedelta(milliseconds=4900),
+        responses={"/api/v5/trade/order": _ok_order_response()},
+    )
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})
+    result = await client.place_order(order)
+    assert result.exchange_order_id == "BTC-USDT:1234567"
 
 
 async def test_place_order_rejects_symbol_without_registered_limits():
@@ -481,15 +457,7 @@ async def test_place_order_latency_budget():
     가드다. 실거래소 p95/p99 레이턴시 예산은 조립체(adapter.py, 미구현)
     단계에서 계약 테스트로 별도 측정한다 — N/A(HTTP 클라이언트 미존재,
     task BR-21b 선행 필요)."""
-    client = _paper_client(
-        responses={
-            "/api/v5/trade/order": {
-                "code": "0",
-                "msg": "",
-                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
-            }
-        }
-    )
+    client = _paper_client(responses={"/api/v5/trade/order": _ok_order_response()})
     order = _order()
     start = time.perf_counter()
     for _ in range(100):
