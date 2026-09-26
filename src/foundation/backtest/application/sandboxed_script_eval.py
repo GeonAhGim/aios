@@ -35,6 +35,7 @@ from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
+from multiprocessing import get_context
 from typing import Any, TypeVar
 
 import psutil
@@ -82,7 +83,7 @@ def run_sandboxed(
     """Run `fn(*args, **kwargs)` in a single-worker `ProcessPoolExecutor`
     under `limits`. `fn` and its arguments/return value must be picklable
     (standard `multiprocessing` constraint)."""
-    with ProcessPoolExecutor(max_workers=1) as executor:
+    with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as executor:
         future = executor.submit(fn, *args, **kwargs)
         pid = _wait_for_worker_pid(executor, limits.wallclock_sec)
         exceeded = threading.Event()
@@ -140,6 +141,12 @@ def _watch_rss(
     stop: threading.Event,
     exceeded: threading.Event,
 ) -> None:
+    """Monitor child process RSS and kill if ``limit_mb`` is exceeded.
+
+    Uses delta-based comparison (RSS increase from baseline) so that a fresh spawn
+    worker on Linux/fork doesn't get killed immediately due to inheriting the parent's
+    RSS footprint.
+    """
     if pid is None:
         return
     limit_bytes = limit_mb * 1024 * 1024
@@ -147,12 +154,17 @@ def _watch_rss(
         process = psutil.Process(pid)
     except psutil.NoSuchProcess:
         return
+    baseline_rss: int | None = None
     while not stop.is_set():
         try:
             rss = process.memory_info().rss
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return
-        if rss > limit_bytes:
+        if baseline_rss is None:
+            baseline_rss = rss
+            stop.wait(_RSS_POLL_INTERVAL_SEC)
+            continue
+        if (rss - baseline_rss) > limit_bytes:
             exceeded.set()
             _kill_pid(pid)
             return
