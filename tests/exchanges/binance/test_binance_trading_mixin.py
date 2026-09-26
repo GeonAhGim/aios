@@ -288,6 +288,68 @@ async def test_place_order_rejects_empty_client_order_id():
     assert client.calls == []
 
 
+async def test_place_order_rejects_tick_misaligned_price():
+    """부정 테스트 12(task-8075, audit F4/§1): BTCUSDT의 PRICE_FILTER
+    tick(0.01)에 맞지 않는 가격은 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    order = _order(order_type=OrderType.LIMIT).model_copy(
+        update={"price": Money(amount=Decimal("60000.001"), currency=Currency.USDT)}
+    )
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_lot_misaligned_quantity():
+    """부정 테스트 13(task-8075, audit F4/§1): BTCUSDT의 LOT_SIZE
+    step(0.00001)에 맞지 않는 수량은 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    order = _order().model_copy(update={"quantity": Decimal("0.010001")})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_below_min_notional():
+    """부정 테스트 14(task-8075, audit F4/§1): 주문가치(quantity*price)가
+    BTCUSDT의 min_notional(5) 미만이면 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    order = _order(order_type=OrderType.LIMIT).model_copy(
+        update={
+            "quantity": Decimal("0.00001"),
+            "price": Money(amount=Decimal("60000"), currency=Currency.USDT),
+        }
+    )
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_market_order_skips_price_only_checks():
+    """회귀 없음(task-8075): MARKET 주문은 가격이 없어 tick/min_notional
+    검증이 적용되지 않고, lot 정렬 수량이면 정상적으로 제출된다."""
+    client = _paper_client(responses={"/api/v3/order": {"orderId": 42, "status": "NEW"}})
+    order = _order(order_type=OrderType.MARKET)
+    result = await client.place_order(order)
+    assert result.exchange_order_id == "BTCUSDT:42"
+
+
+async def test_modify_order_rejects_tick_misaligned_price():
+    """부정 테스트 15(task-8075, audit F4/§1): cancelReplace 정정도
+    tick 정렬되지 않은 가격은 거부한다."""
+    client = _paper_client()
+    with pytest.raises(FatalExchangeError):
+        await client.modify_order(
+            "BTCUSDT:1234567",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=Decimal("0.02"),
+            price=Decimal("61000.005"),
+            client_order_id="c-6",
+        )
+    assert client.calls == []
+
+
 async def test_modify_order_rejects_missing_client_order_id():
     """부정 테스트 10: cancelReplace는 대체 주문 자체의 새 idempotency
     key(newClientOrderId)가 필요하다 -- 누락되면 거부한다."""

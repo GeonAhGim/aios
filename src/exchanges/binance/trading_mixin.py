@@ -29,6 +29,16 @@ fails closed if it is missing or empty. quantity/price are rejected
 before the exchange call if they are <= 0, NaN, or infinite (same
 pre-validation convention as `okx/trading_mixin.py`'s `_validate_order`).
 
+Audit fix (task-8075, AUDIT_2026-09-26_order_path.md F4/§1): >0/finite
+alone does not catch a price that is off Binance's PRICE_FILTER tick grid
+or a quantity/notional under LOT_SIZE/NOTIONAL -- Binance would reject
+those with an exchange round trip, but a fail-closed adapter should reject
+them locally first. `_validate_venue_limits` checks quantity/price against
+`capabilities.PRICE_TICK`/`QTY_LOT`/`MIN_NOTIONAL` (DOC_ONLY, see that
+module's docstring for provenance and the intentional skip-if-unlisted
+scope) before every exchange call that submits an order (`place_order`,
+`modify_order`'s cancelReplace).
+
 Deviation: `ExchangeAdapter.cancel_order(order_id)`/`modify_order(order_id)`
 only accept a single string, but Binance's cancel/cancelReplace endpoints
 require `symbol` alongside the numeric `orderId` -- for the same reason as
@@ -57,6 +67,7 @@ from typing import Any, Protocol
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.exchanges.binance.capabilities import MIN_NOTIONAL, PRICE_TICK, QTY_LOT
 from src.exchanges.common.live_guard import require_paper_sandbox
 
 _ORDER_PATH = "/api/v3/order"
@@ -92,6 +103,37 @@ def _validate_client_order_id(client_order_id: str) -> None:
     if not client_order_id:
         raise FatalExchangeError(
             "Binance order requires a non-empty client_order_id (newClientOrderId)"
+        )
+
+
+def _validate_venue_limits(symbol: str, quantity: Decimal, price: Decimal | None) -> None:
+    """Task-8075 (audit F4/§1) -- reject a tick-misaligned price, a
+    lot-misaligned quantity, or a below-min-notional order before it
+    reaches Binance, using the DOC_ONLY filter snapshot in
+    `capabilities.py`. A symbol absent from that snapshot has no check
+    applied here (capabilities.py's docstring explains why -- unlisted
+    symbols are not guessed at). `price` is `None` for MARKET orders,
+    which skips the tick/min-notional checks below since neither the
+    submitted price nor the eventual fill price is known ahead of the
+    exchange's own matching -- only the LOT_SIZE quantity check applies to
+    a MARKET order."""
+    lot = QTY_LOT.get(symbol)
+    if lot is not None and quantity % lot != 0:
+        raise FatalExchangeError(
+            f"Binance {symbol} quantity {quantity!r} is not a multiple of lot size {lot!r}"
+        )
+    if price is None:
+        return
+    tick = PRICE_TICK.get(symbol)
+    if tick is not None and price % tick != 0:
+        raise FatalExchangeError(
+            f"Binance {symbol} price {price!r} is not aligned to tick size {tick!r}"
+        )
+    min_notional = MIN_NOTIONAL.get(symbol)
+    if min_notional is not None and quantity * price < min_notional:
+        raise FatalExchangeError(
+            f"Binance {symbol} order notional {quantity * price!r} is below "
+            f"min_notional {min_notional!r}"
         )
 
 
@@ -139,6 +181,11 @@ class BinanceTradingMixin:
             _validate_price(order.price.amount)
             params["timeInForce"] = _TIME_IN_FORCE_GTC
             params["price"] = str(order.price.amount)
+        _validate_venue_limits(
+            order.symbol,
+            order.quantity,
+            order.price.amount if order.price is not None else None,
+        )
         raw = await self._request("POST", _ORDER_PATH, params=params)
         try:
             order_id = raw["orderId"]
@@ -197,6 +244,7 @@ class BinanceTradingMixin:
             _validate_price(price)
             params["timeInForce"] = _TIME_IN_FORCE_GTC
             params["price"] = str(price)
+        _validate_venue_limits(symbol, quantity, price if order_type == OrderType.LIMIT else None)
         raw = await self._request("PUT", _CANCEL_REPLACE_PATH, params=params)
         try:
             new_order_id = raw["newOrderResponse"]["orderId"]
