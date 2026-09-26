@@ -12,6 +12,7 @@ FD-4/FD-8 소관, 이 세션 스콥 밖) positions에 행이 없는 실행은 �
 실행중인 전략이 하나도 없는 경우는 오류가 아니라 빈 목록을 반환한다
 (FD-16.4 예외상황 — 안내 문구는 프론트엔드 몫).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -20,6 +21,18 @@ from uuid import UUID
 
 import asyncpg
 from pydantic import BaseModel
+
+
+class LastRiskVerdict(BaseModel):
+    """Most recent risk gate verdict for this execution, from risk_decision
+    (R-24 WORM ledger). risk_decision.execution_ref is already populated as
+    'exec:' || orders.execution_id (format enforced by the
+    a7c3d9e1f2b4_orders_risk_decision_intent_guard.py trigger), so this
+    read-only join needs no new column or migration."""
+
+    outcome: str
+    reason_codes: list[str]
+    evaluated_at: datetime
 
 
 class ExecutionCard(BaseModel):
@@ -34,6 +47,7 @@ class ExecutionCard(BaseModel):
     realized_pnl: Decimal
     unrealized_pnl: Decimal
     max_drawdown_pct: Decimal | None
+    last_risk_verdict: LastRiskVerdict | None = None
 
 
 class ExecutionMonitoringService:
@@ -48,11 +62,21 @@ class ExecutionMonitoringService:
                        e.mode, e.exchange, e.allocated_capital, e.started_at,
                        e.max_drawdown_pct,
                        COALESCE(SUM(p.realized_pnl), 0) AS realized_pnl,
-                       COALESCE(SUM(p.unrealized_pnl), 0) AS unrealized_pnl
+                       COALESCE(SUM(p.unrealized_pnl), 0) AS unrealized_pnl,
+                       rd.outcome AS risk_outcome,
+                       rd.reason_codes AS risk_reason_codes,
+                       rd.evaluated_at AS risk_evaluated_at
                 FROM strategy_executions e
                 LEFT JOIN positions p ON p.execution_id = e.id
+                LEFT JOIN LATERAL (
+                    SELECT outcome, reason_codes, evaluated_at
+                    FROM risk_decision
+                    WHERE execution_ref = 'exec:' || e.id::text
+                    ORDER BY evaluated_at DESC
+                    LIMIT 1
+                ) rd ON true
                 WHERE e.user_id = $1
-                GROUP BY e.id
+                GROUP BY e.id, rd.outcome, rd.reason_codes, rd.evaluated_at
                 ORDER BY e.created_at DESC
                 """,
                 user_id,
@@ -63,6 +87,16 @@ class ExecutionMonitoringService:
         for row in rows:
             started_at = row["started_at"]
             days_since_start = (now - started_at).days if started_at is not None else None
+            risk_outcome = row["risk_outcome"]
+            last_risk_verdict = (
+                LastRiskVerdict(
+                    outcome=risk_outcome,
+                    reason_codes=list(row["risk_reason_codes"] or []),
+                    evaluated_at=row["risk_evaluated_at"],
+                )
+                if risk_outcome is not None
+                else None
+            )
             cards.append(
                 ExecutionCard(
                     execution_id=row["execution_id"],
@@ -76,6 +110,7 @@ class ExecutionMonitoringService:
                     realized_pnl=row["realized_pnl"],
                     unrealized_pnl=row["unrealized_pnl"],
                     max_drawdown_pct=row["max_drawdown_pct"],
+                    last_risk_verdict=last_risk_verdict,
                 )
             )
         return cards

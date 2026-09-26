@@ -49,6 +49,7 @@ is not a lenient fold (src/core/eventstore/projections/orders.py's
 or after an armed cutover, where I6 makes a broken chain structurally
 impossible).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,7 +63,7 @@ from uuid import UUID
 
 import asyncpg
 
-from scripts.replay_verify_db_pressure import await_db_capacity
+from scripts.replay_verify_db_pressure import await_db_capacity, stagger_startup
 from src.core.eventstore import replay
 from src.core.eventstore.projections import orders as orders_projection
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
@@ -431,9 +432,13 @@ async def _run(*, hours: int, as_of: datetime) -> int:
     # task-6754 (esc-ci-replay_verify.json, ND-17 regeneration of task-6727): every
     # recurrence of this escalation carries `"mode": "full"` -- i.e. it comes through
     # pm/ci_recheck.py's direct subprocess call, which (unlike pm/local_ci.py's
-    # task-6743 pre-check) has no connection-pressure gate at all. See
-    # scripts/replay_verify_db_pressure.py's module docstring for the full trace.
+    # task-6743 pre-check) has no connection-pressure gate at all. task-7648 (14th+
+    # recurrence): `stagger_startup` decorrelates the thundering herd of sibling
+    # `replay_verify.py` processes local_ci.py spawns near-simultaneously (one per
+    # xdist worker DB) that `await_db_capacity`'s own TOCTOU cannot close on its
+    # own -- see scripts/replay_verify_db_pressure.py's docstrings for the full trace.
     dsn = _asyncpg_dsn()
+    await stagger_startup(sleep=asyncio.sleep)
     await await_db_capacity(dsn, sleep=asyncio.sleep)
     pool = await _create_pool_with_retry(dsn)
     try:
@@ -487,9 +492,7 @@ def main() -> int:
         help="Window end, ISO 8601 (default: now, UTC). Fixing this makes reruns reproducible.",
     )
     args = parser.parse_args()
-    as_of = (
-        datetime.now(timezone.utc) if args.as_of is None else datetime.fromisoformat(args.as_of)
-    )
+    as_of = datetime.now(timezone.utc) if args.as_of is None else datetime.fromisoformat(args.as_of)
     return asyncio.run(_run(hours=args.hours, as_of=as_of))
 
 
