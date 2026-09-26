@@ -9,7 +9,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from scripts.consistency.common import Hit
+from scripts.consistency.common import Hit, _iter_py_files, _read_text_cached
 
 # ---------------------------------------------------------------------------
 # 8. spec_leaf_untraced
@@ -102,7 +102,11 @@ def check_spec_leaf_traceability(root: Path) -> list[Hit]:
     if not leaf_ids:
         return []
     blobs = []
-    for sub in ("src", "tests", "scripts"):
+    # "src" is already walked+read by wiring/contracts/time_money via the
+    # shared caches -- reuse them instead of a second rglob+read pass
+    # (task-8000: check_consistency.py's local CI 120s timeout).
+    blobs.extend(_read_text_cached(path) for path in _iter_py_files(root, "src"))
+    for sub in ("tests", "scripts"):
         base = root / sub
         if base.is_dir():
             for path in base.rglob("*.py"):
