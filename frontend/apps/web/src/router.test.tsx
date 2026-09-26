@@ -27,6 +27,7 @@ vi.mock("@aios/shared-hooks", async (importOriginal) => {
     useRiskProfile: () => riskResult,
     usePortfolio: () => ({ data: undefined, isLoading: false }),
     useExecutions: () => ({ data: undefined, isLoading: false }),
+    useNotificationHistory: () => ({ data: undefined, isLoading: false, isError: false, error: undefined }),
     useLogout: () => vi.fn(),
     useLogin: () => ({ mutateAsync: vi.fn(), isPending: false }),
   };
