@@ -1,8 +1,10 @@
-"""IND-10 — TA-Lib 161종 자동 생성 계약 테스트.
+"""IND-10 — 설치된 TA-Lib 전 함수 자동 생성 계약 테스트.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 IND-10
 
-DoD: 161종 등록(캔들 패턴 61종 포함), 같은 talib 버전에서 생성물 바이트 동일
+DoD: `talib.get_functions()` 전량 등록(캔들 패턴 그룹 포함, 종수는 설치된 TA-Lib
+버전이 결정 — 0.4.x 161종/0.6.x 201종을 리터럴로 고정하지 않는다), 같은 talib
+버전에서 생성물 바이트 동일
 (결정론), 증분=일괄 동일성 샘플 20종, 오버라이드 없는 지표도 PlotSpec 보유.
 negative: 파라미터 범위 밖 거부, 미지 함수명 거부, NaN 구간 처리(6건).
 
@@ -67,16 +69,58 @@ def _candles(n: int, base: float = 100.0) -> list[Candle]:
 # --- 카탈로그 크기·그룹 -----------------------------------------------------
 
 
-def test_all_161_talib_functions_are_generated() -> None:
+def test_every_installed_talib_function_is_generated() -> None:
+    """종수는 설치된 라이브러리가 결정한다 — 카탈로그는 `talib.get_functions()`와
+    정확히 같은 집합이어야 하고(누락·여분 0), 그 크기를 버전 리터럴로 고정하지
+    않는다(TA-Lib 0.4.x 161종, 0.6.x 201종 모두 이 단언을 통과해야 한다)."""
     specs = generate_talib_specs()
-    assert len(specs) == 161
+    assert len(specs) == len(talib.get_functions())
     assert set(specs) == set(ALL_TALIB_NAMES)
 
 
-def test_pattern_recognition_group_has_61_candle_functions() -> None:
+def test_pattern_recognition_group_matches_installed_candle_functions() -> None:
     pattern_names = [name for name, group in TALIB_GROUPS.items() if group == "Pattern Recognition"]
-    assert len(pattern_names) == 61
+    expected = talib.get_function_groups()["Pattern Recognition"]
+    assert sorted(pattern_names) == sorted(expected)
     assert all(name.startswith("CDL") for name in pattern_names)
+
+
+# --- 버전 유연성: 파라미터 범위가 설치된 라이브러리의 기본값을 수용해야 한다 ---
+
+
+def test_every_generated_default_lies_within_its_own_range() -> None:
+    """게이트 적색 재현(TA-Lib 0.6.x KDJ): `slowk_matype` 기본값 13이 하드코딩
+    상한 8(구 `_MATYPE_MAX = 8`, 현 `param_rules.MATYPE_MAX`) 밖에 있어 기본값 호출이
+    `STRATEGY_PARAM_OUT_OF_RANGE`로 거부됐다. 생성된 스펙은 자기 기본값을 반드시
+    수용해야 한다 — 어떤 버전의 어떤 함수든 기본값으로는 계산 가능해야 하기 때문이다."""
+    for name, spec in generate_talib_specs().items():
+        for param in spec.params:
+            assert param.min <= param.default <= param.max, (name, param)
+
+
+def test_matype_upper_bound_tracks_installed_ma_type_enum() -> None:
+    from src.core.indicators import param_rules as module
+
+    ordinals = [
+        getattr(talib.MA_Type, attr)
+        for attr in dir(talib.MA_Type)
+        if not attr.startswith("_") and isinstance(getattr(talib.MA_Type, attr), int)
+    ]
+    assert module.MATYPE_MAX == max(ordinals)
+    assert module.MATYPE_MAX >= 8  # SMA(0)..T3(8) exist in every supported version
+
+
+def test_matype_upper_bound_fails_closed_when_enum_exposes_no_ordinals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.core.indicators import param_rules as module
+
+    class _NoOrdinals:
+        SMA = "not-an-int"
+
+    monkeypatch.setattr(module.talib, "MA_Type", _NoOrdinals, raising=True)
+    with pytest.raises(ValueError, match="MA_Type"):
+        module.matype_max()
 
 
 def test_talib_groups_classify_into_exactly_ten_categories() -> None:
@@ -96,7 +140,7 @@ def test_generation_is_deterministic_across_calls() -> None:
 
 
 def test_incremental_generation_matches_batch_for_a_20_name_sample() -> None:
-    """증분(20종만 생성) == 일괄(161종 생성 후 같은 20종만 추출)."""
+    """증분(20종만 생성) == 일괄(전량 생성 후 같은 20종만 추출)."""
     sample = ALL_TALIB_NAMES[:10] + ALL_TALIB_NAMES[-10:]
     incremental = generate_talib_specs(names=sample)
     batch = generate_talib_specs()
@@ -166,15 +210,21 @@ def test_registry_rejects_out_of_range_param_for_a_generated_indicator() -> None
 
 
 def test_registry_rejects_out_of_range_matype_for_a_generated_indicator() -> None:
+    from src.core.indicators.param_rules import MATYPE_MAX
+
     registry = IndicatorRegistry(TALIB_SPECS)
     with pytest.raises(IndicatorError) as excinfo:
-        registry.validate_params("MA", {"matype": 9})
+        registry.validate_params("MA", {"matype": MATYPE_MAX + 1})
     assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
 
 
-def test_registry_accepts_matype_within_0_to_8() -> None:
+def test_registry_accepts_every_installed_matype_ordinal() -> None:
+    from src.core.indicators.param_rules import MATYPE_MAX
+
     registry = IndicatorRegistry(TALIB_SPECS)
-    assert registry.validate_params("MA", {"matype": 8}) == {"timeperiod": 30, "matype": 8}
+    assert MATYPE_MAX >= 8  # SMA(0)..T3(8) are present in every supported version
+    for ordinal in range(MATYPE_MAX + 1):
+        assert registry.validate_params("MA", {"matype": ordinal})["matype"] == ordinal
 
 
 # --- negative/positive: NaN 구간 처리 (생성된 지표 경유 IndicatorService) --
@@ -292,7 +342,7 @@ def test_full_catalog_generation_budget_gate_actually_fails_past_budget(
 
 
 def test_non_override_specs_match_fresh_generation_byte_for_byte() -> None:
-    """게이트: `_MANUAL_OVERRIDES`(specs_talib.py) 밖의 생성 전용 150종은
+    """게이트: `_MANUAL_OVERRIDES`(specs_talib.py) 밖의 생성 전용 지표는
     `TALIB_SPECS`에 있든 새로 생성하든 정준 직렬화가 바이트 동일해야 한다 —
     누군가 생성 전용 지표를 손으로 고치면(수기 작성 금지, generate_specs.py
     모듈 docstring) 이 단언이 잡는다."""

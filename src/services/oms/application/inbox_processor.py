@@ -34,16 +34,17 @@ exchange`가 이벤트의 `venue`와 다르면(위조·오배선 — 다른 거�
 "올려서 재시도"류 실패로 취급).
 
 Every time a fill is newly inserted (partial or terminal, task-7998/F3), this
-calls `position_ledger.record_fill_in_position_ledger` once, on a separate
-connection, *after* commit, for that fill only (its own quantity/price/
-sequence) — same convention as §FD-4.2-c (the ledger write is not atomic with
-the order transaction; submit.py/apply_fill() always worked this way). The
-previous FILLED-only trigger meant an order that went PARTIALLY_FILLED and
-then CANCELLED never got its filled quantity into the ledger (F3) — this
-now fires whenever `next_status()` yields PARTIALLY_FILLED or FILLED.
-Duplicate events are already blocked upstream by `ingest`/`insert_if_absent`,
-so this call itself never re-runs for the same fill (DoD: one ledger update
-per fill).
+calls `ledger_effects.apply_position_ledger` once, on a separate connection,
+*after* commit, for that fill only (its own quantity/price/sequence) — same
+convention as §FD-4.2-c (the ledger write is not atomic with the order
+transaction; submit.py/apply_fill() always worked this way). The previous
+FILLED-only trigger meant an order that went PARTIALLY_FILLED and then
+CANCELLED never got its filled quantity into the ledger (F3) — this now
+fires whenever `next_status()` yields PARTIALLY_FILLED or FILLED. Duplicate
+events are already blocked upstream by `ingest`/`insert_if_absent`, so this
+call itself never re-runs for the same fill (DoD: one ledger update per
+fill). The ledger-application step itself lives in `ledger_effects.py`, split
+out to stay under the 300-line architecture cap (task-8046).
 """
 
 from __future__ import annotations
@@ -51,8 +52,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Any, NamedTuple, cast
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -65,12 +65,11 @@ from src.data.models.trading import OrderStatus
 from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.inbox_repository import InboxRepository, InboxRow
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
+from src.services.oms.application.ledger_effects import LedgerUpdate, apply_position_ledger
 from src.services.oms.contracts.v1_events import OrderTransitionEvent, ProviderOrderEvent
 from src.services.oms.domain.fill_normalizer import aggregate
 from src.services.oms.domain.state_machine import OrderEvent, is_terminal, next_status
 from src.services.oms.ports.repository import FillRepoPort, InboxRepoPort, OrderRepoPort
-from src.services.order_service import repository as legacy_order_repository
-from src.services.order_service.position_ledger import record_fill_in_position_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -83,18 +82,6 @@ LIMIT 1
 
 def _payload_hash(order_id: UUID, provider_event_id: str) -> str:
     return hashlib.sha256(f"{order_id}:{provider_event_id}".encode()).hexdigest()
-
-
-class _LedgerUpdate(NamedTuple):
-    """Payload `_process_row` hands to `_apply_position_ledger` for one newly
-    applied fill (task-7998/F3) — this fill's own quantity/price, not the
-    order's cumulative `filled_quantity`/`average_fill_price` (passing the
-    cumulative value on every partial fill would double-count)."""
-
-    order_id: UUID
-    fill_quantity: Decimal
-    fill_price: Money
-    fill_seq: int
 
 
 class InboxProcessor:
@@ -115,7 +102,7 @@ class InboxProcessor:
 
     async def ingest(self, ev: ProviderOrderEvent) -> bool:
         """새 이벤트 삽입 + 즉시 처리(같은 tx). 중복이면 `False`(F9, 무처리)."""
-        ledger_update: _LedgerUpdate | None = None
+        ledger_update: LedgerUpdate | None = None
         async with self._pool.acquire() as conn, conn.transaction():
             inserted = await self._inbox.insert_if_absent(conn, ev)
             if not inserted:
@@ -141,14 +128,14 @@ class InboxProcessor:
             )
             ledger_update = await self._process_row(conn, row_id, ev)
         if ledger_update is not None:
-            await self._apply_position_ledger(ledger_update)
+            await apply_position_ledger(self._pool, ledger_update, metrics=self._metrics)
         return True
 
     async def process_once(self, limit: int = 100) -> int:
         """백로그 드레인 — 행마다 별도 트랜잭션(실패 격리). 처리(성공+무시)
         건수를 반환한다."""
         processed = 0
-        ledger_updates: list[_LedgerUpdate] = []
+        ledger_updates: list[LedgerUpdate] = []
         for _ in range(limit):
             try:
                 claimed, ledger_update = await self._claim_and_process_one()
@@ -163,10 +150,10 @@ class InboxProcessor:
             if ledger_update is not None:
                 ledger_updates.append(ledger_update)
         for update in ledger_updates:
-            await self._apply_position_ledger(update)
+            await apply_position_ledger(self._pool, update, metrics=self._metrics)
         return processed
 
-    async def _claim_and_process_one(self) -> tuple[bool, _LedgerUpdate | None]:
+    async def _claim_and_process_one(self) -> tuple[bool, LedgerUpdate | None]:
         async with self._pool.acquire() as conn, conn.transaction():
             # `InboxRepoPort.claim_unprocessed`는 계약상 `ProviderOrderEvent`를
             # 돌려주지만 실제 구현(`InboxRepository`)은 PK를 더한 `InboxRow`
@@ -180,8 +167,8 @@ class InboxProcessor:
 
     async def _process_row(
         self, conn: asyncpg.Connection, row_id: UUID, ev: ProviderOrderEvent
-    ) -> _LedgerUpdate | None:
-        """Returns a `_LedgerUpdate` when this call newly applied a fill
+    ) -> LedgerUpdate | None:
+        """Returns a `LedgerUpdate` when this call newly applied a fill
         (partial or full, task-7998/F3), otherwise `None`."""
         order_id = await self._resolve_order_id(conn, ev)
         if order_id is None:
@@ -270,7 +257,7 @@ class InboxProcessor:
         # `fills_for_order` was fetched after this fill's own insert, so it
         # includes this fill — its venue_ts-ordered position is this order's
         # real fill count so far (replaces F7's hardcoded fill_seq=1, task-7998).
-        return _LedgerUpdate(
+        return LedgerUpdate(
             order_id=order_id,
             fill_quantity=fill.quantity,
             fill_price=Money(amount=fill.price, currency=Currency.USDT),
@@ -297,22 +284,4 @@ class InboxProcessor:
             expected_state_value="NEW",
             set_values={"state": "IGNORED", "processed_at": datetime.now(timezone.utc)},
             returning="id",
-        )
-
-    async def _apply_position_ledger(self, update: _LedgerUpdate) -> None:
-        async with self._pool.acquire() as conn:
-            full_order = await legacy_order_repository.get_by_order_id(conn, update.order_id)
-        if full_order is None:
-            logger.warning(
-                "inbox_processor: 체결 반영 뒤 order_id=%s 조회 실패 — position_ledger 생략",
-                update.order_id,
-            )
-            return
-        await record_fill_in_position_ledger(
-            self._pool,
-            full_order,
-            fill_quantity=update.fill_quantity,
-            fill_price=update.fill_price,
-            fill_seq=update.fill_seq,
-            metrics=self._metrics,
         )
