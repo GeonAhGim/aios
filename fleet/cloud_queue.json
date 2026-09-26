@@ -1,17 +1,6 @@
 {
-  "generated_at": "2026-09-26T07:45:37+00:00",
+  "generated_at": "2026-09-26T07:57:06+00:00",
   "tasks": [
-    {
-      "id": 7619,
-      "title": "ADR-2026-09-26-B SRC-2 — ReproductionKey 해시체인 증명 문서화",
-      "spec": "ADR-2026-09-26-B Decision 2(SRC-2). 실행 결과 증명을 ReproductionKey 해시체인으로 한다는 결정(ZK 실행은 매매 경로에 채택하지 않고 사후 감사 증명 후보로만 기록)을 문서화한다. src/foundation/backtest/domain/reproducibility.py(BT-19 parity_harness가 쓰는 결정론 재현 계약)를 근거로 ReproductionKey를 '입력(스크립트 IR 해시 + 데이터 스냅샷 해시 + 파라미터 해시)을 체이닝한 단방향 해시'로 정의하고, 검증자가 재실행 없이 체인만으로 재현성을 감사할 수 있는 절차(입력 재구성 불가능성, 위조 시 체인 불일치 검출)를 적는다. 코드 변경 없음 — 문서 리프.\nDoD:\n1) docs/design/REPRODUCTION_KEY_PROOF.md에 해시체인 구성 요소·계산 순서·검증 절차 명시\n2) 기존 reproducibility.py의 실제 필드/함수명과 문서의 용어가 일치(존재하지 않는 함수를 인용하지 않음 — git grep으로 확인)\n3) 'ZK 실행은 매매 경로에 채택하지 않음, 사후 감사 후보로만 기록'을 명시적 결정으로 기재\n4) 코드 변경 0(문서만)",
-      "files": [
-        "new:docs/design/REPRODUCTION_KEY_PROOF.md"
-      ],
-      "tier": "",
-      "role": "backend",
-      "hold_note": "[cloud_session] 클라우드 적합: 문서 리프, 코드 변경 0"
-    },
     {
       "id": 7622,
       "title": "BR-23 키움증권 거래소 추가 (b) — 인증/HTTP/서명·rate-limit 클라이언트 + market_data_mixin + capabilities/venue_profile + factory 등록",
@@ -25,34 +14,6 @@
       "tier": "",
       "role": "backend",
       "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결(fake 전송, 실키 불필요), 주문경로 아님"
-    },
-    {
-      "id": 7628,
-      "title": "[janitor] 2026-09-26 — rate limiter 파편화 점검(src/exchanges/common/rate_limiter.py vs src/core/rate_limit/limiter.py)",
-      "spec": "일일 janitor(task-7593 착지 전 임시 규칙, PM_CYCLE_PROMPT.md #B-1(i)): src/exchanges/common/rate_limiter.py와 src/core/rate_limit/limiter.py 두 rate limiter 구현을 git grep으로 호출부 전부 확인해 실제로 같은 책임(윈도우/버킷 기반 호출 제한)을 중복 구현한 것인지 비교한다. 필드/동작이 동일하면 하나로 합치고 나머지를 위임 shim으로 축소(공개 계약 유지, 동작 변경 0). 동일하지 않으면(예: 하나는 exchange별 venue rate limit, 하나는 범용 API rate limit) 합치지 말고 그 차이를 note에 보고만 한다. FROZEN/S 경로(주문·정산·리스크)를 건드리면 안 되고, ratchet(loc_over_500 등) 상향 금지.",
-      "files": [
-        "src/exchanges/common/rate_limiter.py",
-        "src/core/rate_limit/limiter.py"
-      ],
-      "tier": "",
-      "role": "backend",
-      "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결, 일일 janitor(task-7593 착지 전 임시), fake로 검증 가능"
-    },
-    {
-      "id": 7847,
-      "title": "[cloud-early] M2-3 DSL string 상수 타입 1단계 - grammar+typing 배선",
-      "spec": "docs/specs/BACKLOG_devengine_v1.md M2-3(DSL 타입 5종 확장, 우선순위 2) 1단계 -- string 상수 타입 도입.\n[cloud-early] MVP-2 우선 2 독립 모듈(ADR-2026-09-26-A). AIOS Script 문법에 string을 6번째 타입으로 추가한다(alertcondition 메시지, plot 타이틀 등 상수 인자용, series/수치/불리언 격자와 섞이지 않는 독립 스칼라 -- 산술, 비교, 논리 연산 전부 거부).\n\n대상 파일: src/core/script/grammar/ast.py(TypeName Literal에 string 추가 + StringLiteral 노드), src/core/script/grammar/lexer.py(따옴표 문자열 토큰화), src/core/script/grammar/parser.py(문자열 리터럴을 primary로 파싱), src/core/script/typing/types.py(string은 NUMERIC_TYPES/BOOL_TYPES 어느 쪽에도 속하지 않음), src/core/script/typing/checker.py(string 상수 선언 타입 체크 배선).\n\nDoD 체크리스트:\n- 문자열 리터럴 파싱이 StringLiteral(kind=string) AST 노드를 만든다\n- TypeName에 string 포함, TypeNode(name=string)가 유효\n- promote_numeric(string, float)은 None 반환(산술 거부)\n- promote_bool(string, bool)은 None 반환(논리 거부)\n- cmp_result(string, string)도 None 반환(비교 연산자는 수치 전용 유지)\n- 닫히지 않은 문자열 리터럴은 lexer가 명시적 에러로 거부(무한루프, 조용한 실패 금지)\n- pytest tests/unit/core/script/ 관련 테스트 전부 통과(negative 3건 이상)\n- ruff/mypy 통과, 파일당 300줄 상한 유지\n",
-      "files": [
-        "src/core/script/grammar/ast.py",
-        "src/core/script/grammar/lexer.py",
-        "src/core/script/grammar/parser.py",
-        "src/core/script/typing/types.py",
-        "src/core/script/typing/checker.py",
-        "new:tests/unit/core/script/test_string_type.py"
-      ],
-      "tier": "",
-      "role": "backend",
-      "hold_note": "[cloud_session] 클라우드 적합: MVP-2 우선2 M2-3 DSL string 타입, GitHub 저장소만으로 완결, fake pytest 검증 가능, 주문경로 미접촉(ADR-2026-09-26-A)"
     },
     {
       "id": 7880,
