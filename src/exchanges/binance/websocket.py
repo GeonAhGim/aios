@@ -49,7 +49,7 @@ docs do not describe.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -102,7 +102,7 @@ def parse_ticker_message(raw: dict[str, Any]) -> Ticker:
             bid=Decimal(str(raw["b"])),
             ask=Decimal(str(raw["a"])),
             volume_24h=Decimal(str(raw["v"])),
-            timestamp=datetime.fromtimestamp(int(raw["E"]) / 1000, tz=UTC),
+            timestamp=datetime.fromtimestamp(int(raw["E"]) / 1000, tz=timezone.utc),
             source_type="primary",
         )
     except (KeyError, ValueError, TypeError) as exc:
@@ -120,7 +120,11 @@ def parse_depth_message(raw: dict[str, Any], *, symbol: str) -> OrderBook:
     except (KeyError, ValueError, TypeError) as exc:
         raise FatalExchangeError(f"Binance depth WS frame malformed: {exc}") from exc
     return OrderBook(
-        symbol=symbol, exchange="binance", bids=bids, asks=asks, timestamp=datetime.now(UTC)
+        symbol=symbol,
+        exchange="binance",
+        bids=bids,
+        asks=asks,
+        timestamp=datetime.now(timezone.utc),
     )
 
 

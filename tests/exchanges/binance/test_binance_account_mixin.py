@@ -12,7 +12,7 @@ replay_verify: N/A(순수 조회 어댑터 메서드, DB/이벤트스토어에 �
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -165,7 +165,7 @@ async def test_get_fills_rejects_naive_datetime_since():
 async def test_get_fills_passes_symbol_order_id_and_since():
     client = _StubClient([{"symbol": "BTCUSDT", "id": 1, "orderId": 111, "price": "1", "qty": "1"}])
     fills = await client.get_fills(
-        "BTCUSDT", order_id="111", since=datetime(2026, 1, 1, tzinfo=UTC)
+        "BTCUSDT", order_id="111", since=datetime(2026, 1, 1, tzinfo=timezone.utc)
     )
     assert fills == [{"symbol": "BTCUSDT", "id": 1, "orderId": 111, "price": "1", "qty": "1"}]
     _, path, params = client.calls[0]
@@ -173,7 +173,8 @@ async def test_get_fills_passes_symbol_order_id_and_since():
     assert params is not None
     assert params["symbol"] == "BTCUSDT"
     assert params["orderId"] == "111"
-    assert params["startTime"] == str(int(datetime(2026, 1, 1, tzinfo=UTC).timestamp() * 1000))
+    expected_start_time = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    assert params["startTime"] == str(expected_start_time)
 
 
 async def test_get_fills_raises_when_response_is_not_a_list():

@@ -26,7 +26,7 @@ never receive an array body) is unaffected.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -75,7 +75,7 @@ class BinanceMarketDataMixin:
                 bid=Decimal(str(raw["bidPrice"])),
                 ask=Decimal(str(raw["askPrice"])),
                 volume_24h=Decimal(str(raw["volume"])),
-                timestamp=datetime.now(UTC),
+                timestamp=datetime.now(timezone.utc),
                 source_type="primary",
             )
         except KeyError as exc:
@@ -97,7 +97,11 @@ class BinanceMarketDataMixin:
         except (KeyError, ValueError, TypeError) as exc:
             raise FatalExchangeError(f"Binance orderbook response malformed: {exc}") from exc
         return OrderBook(
-            symbol=symbol, exchange="binance", bids=bids, asks=asks, timestamp=datetime.now(UTC)
+            symbol=symbol,
+            exchange="binance",
+            bids=bids,
+            asks=asks,
+            timestamp=datetime.now(timezone.utc),
         )
 
     async def get_ohlcv(
@@ -126,8 +130,8 @@ class BinanceMarketDataMixin:
                         low=Decimal(str(row[3])),
                         close=Decimal(str(row[4])),
                         volume=Decimal(str(row[5])),
-                        open_time=datetime.fromtimestamp(row[0] / 1000, tz=UTC),
-                        close_time=datetime.fromtimestamp(row[6] / 1000, tz=UTC),
+                        open_time=datetime.fromtimestamp(row[0] / 1000, tz=timezone.utc),
+                        close_time=datetime.fromtimestamp(row[6] / 1000, tz=timezone.utc),
                     )
                 )
         except (IndexError, TypeError, ValueError) as exc:
