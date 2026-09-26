@@ -57,7 +57,7 @@ def _order(*, side: OrderSide = OrderSide.BUY, order_type: OrderType = OrderType
         client_order_id="c-1",
         strategy_id="s-1",
         strategy_version="v1",
-        symbol="BTCUSDT",
+        symbol="BTC/USDT",
         exchange="binance",
         side=side,
         order_type=order_type,
@@ -323,6 +323,39 @@ async def test_place_order_rejects_below_min_notional():
     with pytest.raises(FatalExchangeError):
         await client.place_order(order)
     assert client.calls == []
+
+
+async def test_place_order_rejects_already_venue_format_symbol():
+    """부정 테스트 16(task-8078, audit F5/§1): order.symbol에 이미 Binance
+    raw 형식("BTCUSDT", "/" 없음)을 넣으면 symbol_normalizer가 "/"를 찾지
+    못해 거부한다 -- canonical만 받는다는 계약을 확정한다(OKX
+    `_to_inst_id`와 동일 계약)."""
+    client = _paper_client()
+    order = _order().model_copy(update={"symbol": "BTCUSDT"})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_unknown_quote_symbol():
+    """부정 테스트 17(task-8078, audit F5/§1): 미등록 quote("BTC/XYZ")는
+    symbol_normalizer가 거부한다 -- 임의 quote를 추측해 통과시키지 않는다."""
+    client = _paper_client()
+    order = _order().model_copy(update={"symbol": "BTC/XYZ"})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_converts_canonical_symbol_to_binance_raw_symbol():
+    """회귀 없음(task-8078): 정상 canonical 심볼("ETH/USDT")은 Binance raw
+    형식("ETHUSDT")으로 변환돼 요청 params/exchange_order_id에 실린다."""
+    client = _paper_client(responses={"/api/v3/order": {"orderId": 555, "status": "NEW"}})
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"symbol": "ETH/USDT"})
+    result = await client.place_order(order)
+    _, _, params = client.calls[0]
+    assert params["symbol"] == "ETHUSDT"
+    assert result.exchange_order_id == "ETHUSDT:555"
 
 
 async def test_place_order_market_order_skips_price_only_checks():

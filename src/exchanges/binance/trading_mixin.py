@@ -39,6 +39,22 @@ module's docstring for provenance and the intentional skip-if-unlisted
 scope) before every exchange call that submits an order (`place_order`,
 `modify_order`'s cancelReplace).
 
+Audit fix (task-8078, AUDIT_2026-09-26_order_path.md F5/§1): this mixin
+used to send `order.symbol` to Binance unconverted -- `symbol_normalizer.py`
+had no `Venue.BINANCE` branch and `binance/symbols.py` did not exist, so
+there was nothing to convert/validate against (a design gap, not a missed
+call site). `place_order` now converts the canonical "BASE/QUOTE" symbol
+(e.g. "BTC/USDT") to Binance's raw "BTCUSDT" via `binance/symbols.py`
+(delegating to `symbol_normalizer`, LA-7) before building request params,
+looking up `capabilities.py` limits, or composing `exchange_order_id` --
+same precedent as `okx/trading_mixin.py::_to_inst_id`. An already-raw
+Binance symbol ("BTCUSDT", no "/") passed as `order.symbol` is rejected
+with `FatalExchangeError` rather than silently accepted, since the
+canonical parser finds no separator (fail-closed, same contract as OKX).
+`cancel_order`/`modify_order` need no such conversion -- the symbol they
+use comes from splitting `exchange_order_id`, which `place_order` already
+composed with the converted raw symbol.
+
 Deviation: `ExchangeAdapter.cancel_order(order_id)`/`modify_order(order_id)`
 only accept a single string, but Binance's cancel/cancelReplace endpoints
 require `symbol` alongside the numeric `orderId` -- for the same reason as
@@ -68,7 +84,11 @@ from typing import Any, Protocol
 from src.core.exceptions import FatalExchangeError
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.binance.capabilities import MIN_NOTIONAL, PRICE_TICK, QTY_LOT
+from src.exchanges.binance.symbols import to_binance_symbol as _to_binance_symbol
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.foundation.market_data.domain.reference.symbol_normalizer import (
+    SymbolNormalizationError,
+)
 
 _ORDER_PATH = "/api/v3/order"
 _CANCEL_REPLACE_PATH = "/api/v3/order/cancelReplace"
@@ -104,6 +124,21 @@ def _validate_client_order_id(client_order_id: str) -> None:
         raise FatalExchangeError(
             "Binance order requires a non-empty client_order_id (newClientOrderId)"
         )
+
+
+def _to_binance_raw_symbol(symbol: str) -> str:
+    """Canonical "BASE/QUOTE" (e.g. "BTC/USDT") -> Binance raw symbol
+    "BASEQUOTE" (e.g. "BTCUSDT"), delegating to `symbol_normalizer` (LA-7)
+    via `binance/symbols.py` (task-8078, audit F5/§1). An already-raw
+    Binance symbol ("BTCUSDT", no "/") passed here is rejected rather than
+    silently accepted -- callers must pass canonical symbols (same contract
+    as OKX's `_to_inst_id`)."""
+    try:
+        return _to_binance_symbol(symbol)
+    except SymbolNormalizationError as exc:
+        raise FatalExchangeError(
+            f"Binance 심볼 변환 실패 -- canonical 'BASE/QUOTE' 형식이 필요함: {symbol!r}"
+        ) from exc
 
 
 def _validate_venue_limits(symbol: str, quantity: Decimal, price: Decimal | None) -> None:
@@ -168,8 +203,9 @@ class BinanceTradingMixin:
     async def place_order(self: _BinanceOrderClient, order: Order) -> Order:
         _validate_client_order_id(order.client_order_id)
         _validate_quantity(order.quantity)
+        binance_symbol = _to_binance_raw_symbol(order.symbol)
         params: dict[str, Any] = {
-            "symbol": order.symbol,
+            "symbol": binance_symbol,
             "side": order.side.value,
             "type": order.order_type.value,
             "quantity": str(order.quantity),
@@ -182,7 +218,7 @@ class BinanceTradingMixin:
             params["timeInForce"] = _TIME_IN_FORCE_GTC
             params["price"] = str(order.price.amount)
         _validate_venue_limits(
-            order.symbol,
+            binance_symbol,
             order.quantity,
             order.price.amount if order.price is not None else None,
         )
@@ -193,7 +229,7 @@ class BinanceTradingMixin:
             raise FatalExchangeError(
                 f"Binance order response missing expected field: {exc}"
             ) from exc
-        exchange_order_id = f"{order.symbol}:{order_id}"
+        exchange_order_id = f"{binance_symbol}:{order_id}"
         return order.model_copy(
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
