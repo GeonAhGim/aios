@@ -150,7 +150,7 @@ def test_ticks_to_candles_empty_input_still_validates_timeframe() -> None:
     — the empty-input short-circuit is not a license to skip validating the
     caller's other arguments (§9.10 XREV, task-7850)."""
     with pytest.raises(UnknownTimeframeError):
-        ticks_to_candles([], object(), _bitget_calendar())
+        ticks_to_candles([], object(), _bitget_calendar())  # type: ignore[arg-type]
 
 
 # ---- (a) 결정론: 같은 입력 = 바이트 동일 직렬화 sha256 ----
