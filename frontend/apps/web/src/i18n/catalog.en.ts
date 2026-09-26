@@ -10,6 +10,7 @@ import { catalogEnLegacyA } from "./catalog.en.legacyA";
 import { catalogEnLegacyB } from "./catalog.en.legacyB";
 import { catalogEnLegacyC } from "./catalog.en.legacyC";
 import { catalogEnLegacyD } from "./catalog.en.legacyD";
+import { catalogEnExtra } from "./catalog.en.extra";
 
 // catalog.ko's values are `as const` literal strings (react-i18next needs that for
 // interpolation-argument type inference off the ko resource). catalogEn only needs
@@ -484,6 +485,7 @@ export const catalogEn = {
     draftSubmitLabel: "Create draft",
     amendSubmitLabel: "Propose amendment",
   },
+  ...catalogEnExtra,
   legacy: { ...catalogEnLegacyA, ...catalogEnLegacyB, ...catalogEnLegacyC, ...catalogEnLegacyD },
 } satisfies Stringify<CatalogKo>;
 

@@ -84,4 +84,17 @@ export const catalogKoExtra = {
     draftSubmitLabel: "초안 작성",
     amendSubmitLabel: "개정안 제안",
   },
+  // task-7500(J3 G-4): 실행 생성 시 리스크/컴플라이언스 판정을 전용 패널로 보여준다
+  // (ExecutionControlPage.tsx, FF_J3_RISK_PANEL 뒤).
+  riskVerdictPanel: {
+    title: "리스크/컴플라이언스 판정",
+    noVerdict: "아직 판정 결과가 없습니다.",
+    pending: "판정을 확인하는 중입니다...",
+    outcomeLabel: "판정 결과",
+    reasonCodesLabel: "거부 사유",
+    reasonCodesEmpty: "제공된 사유 코드가 없습니다.",
+    ruleBasisLabel: "규칙 근거",
+    evaluatedAtLabel: "판정 시각",
+    failClosed: "판정 결과를 확인할 수 없습니다. 안전을 위해 허용되지 않은 것으로 처리합니다.",
+  },
 } as const;
