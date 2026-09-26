@@ -11,11 +11,12 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import re
-import time
 from statistics import quantiles
 from typing import Any
 
 import pytest
+
+from tests.conftest import PerfBudget
 
 _PACKAGE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
@@ -85,14 +86,18 @@ def test_discovery_fails_closed_when_importlib_raises(
         _discover_package("tests.foundation.unit")
 
 
-def test_package_discovery_p95_is_within_budget() -> None:
-    """Repeated package discovery remains below the 50 ms p95 budget."""
+def test_package_discovery_p95_is_within_budget(perf_budget: PerfBudget) -> None:
+    """Repeated package discovery remains below the 50 ms p95 budget.
 
-    samples: list[float] = []
-    for _ in range(30):
-        started = time.perf_counter()
-        _discover_package("tests.foundation.unit")
-        samples.append((time.perf_counter() - started) * 1000)
+    Measured with `perf_budget` (process_time, task-7434 guard) rather than raw
+    `time.perf_counter()`: discovery is pure CPU work, and wall-clock samples
+    under xdist core contention would measure the host, not this code.
+    """
+
+    samples = [
+        s.cpu_ms
+        for s in perf_budget.samples(lambda: _discover_package("tests.foundation.unit"), n=30)
+    ]
 
     p95 = quantiles(samples, n=20, method="inclusive")[18]
     assert p95 < 50.0
