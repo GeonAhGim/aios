@@ -1,0 +1,1022 @@
+[
+  {
+    "verdict": "confirmed",
+    "fingerprint": "COMPOSITE-ORDER-ID-DELIMITER-01",
+    "title": "Colon-delimited composite exchange_order_id has no validation excluding the delimiter from symbol, unlike NH's fail-closed parsing",
+    "description": "Binance, Kiwoom, and (partially) OKX build exchange_order_id as f\"{order.symbol}:{venue_order_id}\" and reverse it on cancel/modify via split(\":\", 1), trusting order.symbol never itself contains a colon. NH's equivalent composite-id parsing validates the numeric half and fails closed if it doesn't parse as an integer; Binance/Kiwoom/OKX have no equivalent check. A colon-bearing canonical symbol is a real, precedented convention elsewhere in this codebase (KIS's \"EXCG:CODE\" overseas format). However, none of the three affected venues (Binance, OKX, Kiwoom) have an assembled Adapter class, a factory.py registration, or a SymbolRegistry/venue_profile entry -- place_order() on these mixins is unreachable from any live production path today.",
+    "root_cause": "Binance/Kiwoom's place_order()/cancel_order()/modify_order() build and parse f\"{symbol}:{id}\" with no charset constraint on symbol and no fail-closed validation of the split halves. OKX's symbol_normalizer._okx_canonical_to_raw only validates the quote currency against a whitelist, not the base component's character set, so a colon could survive its symbol conversion too.",
+    "intended_behavior": "The composite-id delimiter should be guaranteed absent from both parts (reject/escape a symbol containing ':', or use an unambiguous encoding such as length-prefixing or a struct), and split-back values should be validated against the expected shape before being sent back to the exchange, as NH's _parse_mkt_orr_no already does.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/services/oms/contracts/v1_commands.py",
+        "line": 40,
+        "scope": "SubmitOrderCommand.symbol",
+        "description": "No charset constraint at the pydantic level"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/services/oms/application/submit_order_support.py",
+        "line": 43,
+        "scope": "venue_order",
+        "description": "Order.symbol = cmd.symbol, unchanged (canonical, unconverted)"
+      },
+      {
+        "kind": "sink",
+        "file": "src/exchanges/binance/trading_mixin.py",
+        "line": 136,
+        "scope": "place_order",
+        "description": "exchange_order_id = f\"{order.symbol}:{order_id}\", later reversed via split(':', 1) in cancel_order/modify_order with no validation"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/exchanges/binance/trading_mixin.py",
+        "line": 136,
+        "description": "Colon-joined composite id construction with no charset guard"
+      },
+      {
+        "file": "src/exchanges/nh/trading_mixin.py",
+        "line": 85,
+        "description": "Contrast: _parse_mkt_orr_no fails closed (FatalExchangeError) if the numeric half isn't a valid int"
+      },
+      {
+        "file": "src/exchanges/kis/order_dispatch.py",
+        "line": 40,
+        "description": "_split_overseas_symbol confirms colon-delimited canonical symbols (\"NASD:AAPL\") are a real, precedented convention in this codebase"
+      },
+      {
+        "file": "src/exchanges/factory.py",
+        "line": 43,
+        "description": "SUPPORTED_EXCHANGES = (\"bitget\", \"kis\", \"nh\", \"paper_sim\") -- Binance/OKX/Kiwoom are absent; no register_exchange_adapter_factory() call sites exist for them either, confirming they are unreachable from any live production path"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "environmental_dependency",
+        "description": "Requires Binance/OKX/Kiwoom to actually be assembled into a constructible Adapter class and registered in factory.py/SymbolRegistry -- confirmed not the case today; also requires order.symbol to contain ':' at the moment place_order() runs, which would itself require an upstream config/routing error"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "An upstream/lower-trust source of order.symbol (a misconfigured symbol/venue mapping or marketplace-authored strategy), once these adapters are wired into production.",
+      "payloads": [
+        "order.symbol = \"NASD:AAPL\" routed to a Binance/Kiwoom/OKX place_order() call"
+      ],
+      "instructions": [
+        "Construct an Order with symbol containing a colon and route it to Binance/Kiwoom/OKX's place_order() (currently only reachable via direct unit-test construction, not any production chain).",
+        "Observe exchange_order_id is built as the colon-joined composite, and a subsequent cancel_order/modify_order call splits it incorrectly, sending a wrong/truncated symbol and corrupted order-id fragment to the venue."
+      ],
+      "observed_result": "cancel_order/modify_order for that order would send malformed identifiers, reliably failing (400 on Binance/OKX; no pre-flight check at all on Kiwoom) -- undermining the ability to cancel that order. Confirmed unreachable in production today since none of these three adapters are wired into factory.py/SUPPORTED_EXCHANGES."
+    },
+    "remediation": {
+      "strategy": "Before wiring Binance/OKX/Kiwoom into factory.py/SUPPORTED_EXCHANGES, add a charset guard rejecting ':' in order.symbol (or switch to a non-ambiguous composite-id encoding) and add NH-style fail-closed validation of the split halves in cancel_order/modify_order for all three adapters."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "None of the three affected adapters are reachable from any production code path today -- no Adapter class, no factory registration, no SymbolRegistry entry exists for any of them."
+      },
+      "impact": {
+        "score": "medium",
+        "reason": "Once wired, this would undermine the ability to cancel/modify an affected order (an availability/safety-relevant denial of the cancel path), though with no direct fund-loss primitive."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "medium",
+      "reason": "The code-level gap is certain; real-world triggerability depends on these three adapters eventually being wired into production, which is confirmed not the case today by a second, independent agent's repo-wide search."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "EMS-TCA-BOLA-01",
+    "title": "Cross-tenant read and forged write of TCA/algo-progress data via unscoped /v1/foundation/ems endpoints (BOLA)",
+    "description": "The FastAPI routers for TCA compute/read and algo-run progress under /v1/foundation/ems require only ordinary authentication (get_current_user) and never verify that the caller's tenant owns the parent_id (an OMS parent order id) supplied in the URL path. Any authenticated user who knows or infers another tenant's parent_id can read that tenant's execution-quality analytics and live algo execution state, and can write a fabricated TCA record for that tenant's order into what this codebase documents as a WORM audit-evidence store.",
+    "root_cause": "src/api/routers/foundation/ems.py's four handlers (post_compute_tca, get_latest_tca, get_tca_revision, get_algo_run_progress) depend only on Depends(get_current_user) for authentication and never cross-check the authenticated user's identity against the order/parent_id's owner before reading or writing. src/foundation/ems/adapters/tca_storage.py hardcodes tenant_id=None when persisting TCA rows (\"TCA is not tenant-scoped\" by design), and no ownership check exists at the storage layer either. src/foundation/ems/application/compute_tca.py validates only price_at_arrival_ts>0 and revision>=1; fills/bars/spread_cost/fees/total_cost are taken verbatim from the request body with no cross-check against real OMS fills or against the order's actual owner.",
+    "intended_behavior": "Before reading or computing a TCA/algo-progress record for a given parent_id, the router (or a shared dependency) must verify the authenticated caller's tenant_id matches the parent order's true owner (orders.user_id), collapsing 'not found' and 'belongs to another tenant' into the same 404 response -- the same pattern already implemented correctly in src/services/oms/application/order_query.py and used for tenant scoping in the sibling src/api/routers/foundation/performance.py router. compute_tca should derive fill/cost data from the OMS fills store rather than trusting caller-supplied numbers for someone else's order.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/api/routers/foundation/ems.py",
+        "line": 55,
+        "scope": "post_compute_tca",
+        "description": "POST /v1/foundation/ems/tca/{parent_id}:compute -- authenticated via get_current_user only, parent_id taken from URL path, fills/costs taken from request body"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/foundation/ems/application/compute_tca.py",
+        "line": 112,
+        "scope": "compute_tca",
+        "description": "Computes TCA bps from caller-supplied fills/costs with no owner cross-check, then calls repo.insert_or_get(parent_id=..., revision=...)"
+      },
+      {
+        "kind": "sink",
+        "file": "src/foundation/ems/adapters/tca_storage.py",
+        "line": 159,
+        "scope": "TcaResultRepository.insert_or_get",
+        "description": "Persists the row into foundation_audit_event with tenant_id=None; idempotent first-write-wins per (parent_id, revision), no update/correction path"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/api/routers/foundation/ems.py",
+        "line": 59,
+        "description": "post_compute_tca's only dependency is _user: User = Depends(get_current_user); _user is discarded and never referenced again"
+      },
+      {
+        "file": "src/api/routers/foundation/ems.py",
+        "line": 95,
+        "description": "get_latest_tca (GET /v1/foundation/ems/tca/{parent_id}) has the identical missing-ownership-check pattern -- returns another tenant's cost-decomposition"
+      },
+      {
+        "file": "src/api/routers/foundation/ems.py",
+        "line": 120,
+        "description": "get_algo_run_progress (GET /v1/foundation/ems/algo/{parent_id}/progress) reads AlgoScheduler._active (a single process-wide dict keyed only by parent_order_id, no tenant partitioning even in principle) -- returns another tenant's live remaining_qty/submitted_slices/demotion_reason"
+      },
+      {
+        "file": "src/api/deps.py",
+        "line": 68,
+        "description": "get_current_user authenticates identity only (token/user/suspension checks) and never touches parent_id/order ownership"
+      },
+      {
+        "file": "src/api/router_registry.py",
+        "line": 87,
+        "description": "foundation_ems.router and algo_router are mounted unconditionally in register_routers(), reachable by any authenticated principal, not admin-only"
+      },
+      {
+        "file": "src/foundation/ems/adapters/tca_storage.py",
+        "line": 26,
+        "description": "Module docstring/comment explicitly states TCA rows are stored with tenant_id=None by design"
+      },
+      {
+        "file": "src/api/routers/foundation/performance.py",
+        "line": 87,
+        "description": "Sibling foundation router passes tenant_id=user.user_id into every query -- the established codebase pattern that ems.py fails to follow"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "authentication_level",
+        "description": "Requires only an ordinary authenticated session as any user (no elevated role)"
+      },
+      {
+        "kind": "data_state",
+        "description": "Attacker must know or infer another tenant's parent_id (order UUID); this is a normal client-visible resource id returned through ordinary order-placement flow, not a secret capability token"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "An authenticated tenant A who has observed or inferred a parent_id belonging to tenant B (e.g. via a shared support ticket, a log line, enumeration, or any other channel that surfaces order ids) can read B's execution analytics and write a forged TCA record for B's order.",
+      "payloads": [
+        "GET /v1/foundation/ems/tca/{B_parent_id}  (Authorization: Bearer <tenant A token>)",
+        "GET /v1/foundation/ems/algo/{B_parent_id}/progress  (Authorization: Bearer <tenant A token>)",
+        "POST /v1/foundation/ems/tca/{B_parent_id}:compute  {\"revision\": 1, \"price_at_arrival_ts\": 1, \"fills\": [...attacker-chosen...], \"spread_cost\": \"0\", \"fees\": \"0\", \"total_cost\": \"0\"}  (Authorization: Bearer <tenant A token>)"
+      ],
+      "instructions": [
+        "Register or use an existing authenticated user account for tenant A.",
+        "Obtain a valid parent_id belonging to a different tenant B (any order id not owned by A).",
+        "Issue the GET requests above with tenant A's bearer token and B's parent_id -- observe tenant B's TCA/algo-progress data is returned with HTTP 200.",
+        "Issue the POST request above before tenant B's own pipeline computes revision 1 for that order -- observe the forged record persists and subsequent reads of revision 1 for that parent_id return the attacker-supplied numbers permanently (idempotent first-write-wins)."
+      ],
+      "observed_result": "Tenant A receives tenant B's TCA cost-decomposition and live algo execution state (200 OK, no authorization error), and a POST from tenant A permanently persists a fabricated TCA revision-1 record for tenant B's order into the WORM audit-evidence table with no ownership check anywhere in the call chain."
+    },
+    "remediation": {
+      "strategy": "Add a tenant-ownership check at the top of each of the four ems.py handlers (or via a shared FastAPI dependency) that looks up the parent order's true owner (orders.user_id via the existing OMS order_query.get_order-style lookup) and returns 404 if it doesn't match the authenticated caller's user_id -- mirroring src/api/routers/foundation/performance.py's existing tenant_id=user.user_id pattern. Additionally, compute_tca should validate submitted fills/costs against the OMS fills_repository for that order rather than trusting the request body verbatim."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "high",
+        "reason": "Any authenticated user can trigger this with no special role or precondition beyond knowing another tenant's parent_id; both routers are live-mounted and reachable today."
+      },
+      "impact": {
+        "score": "high",
+        "reason": "Cross-tenant disclosure of trading strategy/position-sizing information plus permanent, uncorrectable corruption of a documented WORM audit-evidence record for another tenant's order."
+      },
+      "overall_severity": "high"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Independently re-verified by a second agent reading every handler, the storage layer, the auth dependency, router mounting, and confirming the absence of any global middleware or dependency that could otherwise scope this by tenant."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "EXCHANGE-EXC-MSG-REDACTION-01",
+    "title": "Exchange adapter exceptions embed raw response bodies via f-strings that bypass RedactionFilter's structured payload-only redaction",
+    "description": "Bitget, KIS, and NH's HTTP client error-classification code builds exception messages via f-strings that interpolate the full parsed response body or raw response text (f\"Bitget API 오류: {data}\", etc.). RedactionFilter only inspects a Mapping assigned to record.payload; it never inspects record.msg, record.getMessage(), or an exception's str() output, so these messages are structurally invisible to redaction. This is currently masked by two independent, coincidental safeguards rather than by design: (1) JSONLinesFormatter never renders exc_info/exc_text, so logger.exception() call sites in outbox_dispatcher.py/inbox_processor.py never surface the interpolated text into a log line; (2) ExchangeError/FatalExchangeError/RetryableExchangeError are not registered in EXCEPTION_MAP, so if one escapes to a live endpoint (confirmed reachable today via exchange_credentials.py's balance/positions handlers), the global exception handler overwrites the message with a fixed string before it reaches an HTTP client. Any one future change to either safeguard would turn this into an active leak of exchange response bodies (which can include account numbers and other account-adjacent fields) through logs or HTTP responses, unredacted.",
+    "root_cause": "src/exchanges/bitget/adapter.py, src/exchanges/kis/oauth_client.py, and src/exchanges/nh/adapter.py's _classify_body-style functions construct ExchangeError.message via f\"...: {data}\" / f\"...: {response.text}\" instead of passing structured fields through a payload= mapping that RedactionFilter can inspect.",
+    "intended_behavior": "Per the codebase's own structured-logging convention (extra={\"payload\": {...}}), anything derived from an exchange response that might cross a logging or error-response boundary should be passed as structured, redactable fields rather than interpolated into a free-text message string.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/exchanges/bitget/adapter.py",
+        "line": 179,
+        "scope": "_classify_body",
+        "description": "f\"Bitget 응답이 JSON이 아님: {response.text}\" / f\"Bitget API 오류: {data}\" (line 189) become ExchangeError.message"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/exchanges/kis/oauth_client.py",
+        "line": 212,
+        "scope": "_classify_body",
+        "description": "Same f-string pattern for KIS"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/exchanges/nh/adapter.py",
+        "line": 155,
+        "scope": "_classify_body-equivalent",
+        "description": "Same f-string pattern for NH"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/core/logging/schema.py",
+        "line": 79,
+        "scope": "JSONLinesFormatter.format",
+        "description": "message=record.getMessage() only -- never reads record.exc_info/exc_text, so today's logger.exception() call sites don't surface this text (the currently-masking safeguard)"
+      },
+      {
+        "kind": "sink",
+        "file": "src/api/contracts/handlers.py",
+        "line": 100,
+        "scope": "global exception handler",
+        "description": "When code==INTERNAL_ERROR (the fallthrough for unregistered ExchangeError subclasses), the real message is discarded and replaced with a fixed string before the HTTP response is built (the second currently-masking safeguard)"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/exchanges/bitget/adapter.py",
+        "line": 189,
+        "description": "message=f\"Bitget API 오류: {data}\""
+      },
+      {
+        "file": "src/core/logging/redaction.py",
+        "line": 89,
+        "description": "RedactionFilter.filter only touches record.payload (a Mapping); no inspection of record.msg or exception text"
+      },
+      {
+        "file": "src/api/contracts/exception_mapping.py",
+        "line": 81,
+        "description": "map_exception falls through to ErrorCode.INTERNAL_ERROR for any exception type not in EXCEPTION_MAP, including ExchangeError/FatalExchangeError/RetryableExchangeError (confirmed absent from all exception_registry*.py files)"
+      },
+      {
+        "file": "src/api/routers/exchange_credentials.py",
+        "line": 93,
+        "description": "get_balance/get_positions call adapter methods directly inside request handlers with no local try/except -- confirmed live path by which an ExchangeError from _classify_body can reach the global handler today"
+      },
+      {
+        "file": "src/main.py",
+        "line": 83,
+        "description": "configure_logging() (which attaches RedactionFilter) is confirmed called before background loops start, so exchanges/oms loggers are covered by redaction as designed -- this finding is about a gap in what redaction can see, not whether it's wired at all"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "system_configuration",
+        "description": "Currently latent: requires either (a) a future fix that restores exc_info rendering in JSONLinesFormatter without also making redact() string-aware, or (b) a future change registering ExchangeError-family exceptions in EXCEPTION_MAP with a non-INTERNAL_ERROR code, or (c) a new call site doing logger.warning(f\"...{exc}\") directly instead of using the structured payload pattern"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "An operator/SRE with log access (a lower-trust principal than someone holding exchange signing credentials), or an external API caller if the INTERNAL_ERROR sanitization is ever bypassed for this exception family.",
+      "payloads": [
+        "Any KIS/Bitget/NH API error response body containing account-adjacent fields (e.g. KIS's CANO account number)"
+      ],
+      "instructions": [
+        "Trigger a live exchange_credentials.py balance/positions call for a user with a KIS credential during an exchange-side error condition (e.g. by simulating an error response in a test double).",
+        "Observe that ExchangeError's message (built via f-string interpolation of the raw response) is currently sanitized to a fixed string by the global INTERNAL_ERROR handler before reaching the client, and currently dropped from log output by JSONLinesFormatter's exc_info omission.",
+        "Demonstrate the latent risk: register ExchangeError in EXCEPTION_MAP with a passthrough message (a one-line change) and re-run the same request -- observe the raw exchange response body, including account-adjacent fields, now reaches the HTTP client unredacted."
+      ],
+      "observed_result": "No leak occurs today due to the two coincidental safeguards, but the safeguards are unrelated to RedactionFilter's design and either one changing independently would produce an unredacted leak of exchange response content through a live, already-reachable code path."
+    },
+    "remediation": {
+      "strategy": "Change ExchangeError (and its Bitget/KIS/NH construction sites) to carry the raw response body/text as a separate structured field (e.g. details: dict) rather than interpolating it into .message, and have logging call sites pass details via extra={\"payload\": {...}} so RedactionFilter can actually inspect it. This removes the whole class regardless of what happens to EXCEPTION_MAP registration or the formatter's exc_info handling."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "Requires one of two independent, currently-intact safeguards to change before this becomes an active leak; not exploitable in the current code state."
+      },
+      "impact": {
+        "score": "medium",
+        "reason": "Would expose exchange response bodies (potentially including account numbers/internal identifiers, not credentials themselves) through logs or HTTP responses if either safeguard lapses."
+      },
+      "overall_severity": "medium"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Independently re-verified by a second agent reading the formatter, all three adapters' f-string sites, the exception registry/mapping fallthrough, and confirming the exchange_credentials.py live reachability path."
+    }
+  },
+  {
+    "verdict": "rejected",
+    "fingerprint": "KIS-ASCII-GUARD-REGRESSION-CHECK-01",
+    "title": "Historical KIS non-ASCII injection guard (git:9315526c) appears absent from the runtime request path",
+    "description": "The repo's review-exchange skill checklist documents a prior incident where a non-ASCII/Korean-string injection vulnerability in the KIS adapter's request construction was found and a guard was added (commit 9315526c). No isascii()/encode('ascii')/control-char guard exists today in src/exchanges/kis/{oauth_client,trading_mixin,order_dispatch,adapter}.py, raising the question of whether this was a regression.",
+    "claimed_root_cause": "A previously-added runtime request-construction guard against non-ASCII injection may have been removed or never actually existed where searched.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/exchanges/kis/oauth_client.py",
+        "line": 224,
+        "scope": "_request",
+        "description": "Requests are constructed via httpx json=/headers= throughout; no raw string formatting into a URL or header was found"
+      },
+      {
+        "kind": "sink",
+        "file": "scripts/kis_rendering.py",
+        "line": 58,
+        "scope": "_docstring_lines",
+        "description": "The actual guard: a build-time codegen check preventing Hangul from leaking into generated Python docstrings under src/exchanges/kis/generated/"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "scripts/kis_rendering.py",
+        "line": 52,
+        "description": "Comment explicitly states this guard's purpose is preventing re-triggering the check_code_language.py English-only-source ratchet via accidentally-extracted Korean label text in generated docstrings -- not a network request-construction guard"
+      },
+      {
+        "file": "tests/unit/scripts/test_kis_generate_adapters_language_deepen.py",
+        "line": 1,
+        "description": "5 negative tests plus a failure-injection test confirm this codegen-time guard is present and actively tested today"
+      },
+      {
+        "file": "scripts/check_code_language.py",
+        "line": 36,
+        "description": "The downstream CI gate this codegen guard pre-empts (HANGUL regex), confirming the guard's real purpose"
+      }
+    ],
+    "reason": "The commit-referenced 'guard' is a build-time code-generation safeguard (scripts/kis_rendering.py) that prevents Korean text from leaking into generated Python docstrings and re-triggering the English-only-source CI ratchet -- it was never a runtime request-construction guard against network-level injection. The original SKILL.md incident description ('요청 구조가 깨질 수 있던 취약점') is ambiguously worded relative to its actual mechanism, sending the search to the wrong directory (runtime adapters instead of the codegen script). No live runtime request-construction gap exists: all KIS requests go through httpx's structured json=/headers= builders (JSON-serialized bodies, httpx's own header encoder rejects non-latin1 header content), which independently prevents the class of bug the SKILL.md entry describes. This is not a regression -- the actual guard remains present and tested today, just in a different file than the search targeted."
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "KIS-WS-ACK-NOT-VALIDATED-01",
+    "title": "KIS WebSocket subscribe/login ack is never validated -- fail-open, unlike every REST call path and unlike Bitget's WS ack handling",
+    "description": "KIS's WS receive loop only branches on PINGPONG heartbeat frames and on capturing the AES key/iv for the order-notification channel; it never inspects any success/failure field on the initial subscribe response, unlike every KIS REST call (which checks rt_cd==\"0\") and unlike Bitget's WS session (which raises WsAckError on a bad login/subscribe ack). A rejected or stale-approval-key subscription is therefore indistinguishable from a quiet market -- no error surfaced, no reconnect triggered. These subscribe methods (subscribe_ticker_stream, subscribe_orderbook_stream, subscribe_order_notification_stream, and overseas variants) have zero callers anywhere in src/services or src/foundation today -- this is currently dormant, unwired code, not part of the live execution/ingestion path.",
+    "root_cause": "src/exchanges/kis/websocket_connection.py's _run_kis_ws_subscription receive loop only checks header.tr_id==\"PINGPONG\" and body.output.key; it never reads a success/failure field from the subscribe ack, and KIS's own websocket_connection.py docstring confirms it does not reuse Bitget's ack-classification session machinery (a separate implementation was written instead).",
+    "intended_behavior": "On receiving the subscribe/login control frame, the code should check its success code and raise/surface an error if the approval_key was rejected or the channel entitlement failed, mirroring Bitget's WsAckError pattern.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/exchanges/kis/websocket_mixin.py",
+        "line": 201,
+        "scope": "subscribe_order_notification_stream",
+        "description": "Obtains approval_key, builds subscribe_msg, hands off to _run_kis_ws_subscription with no post-send ack check of its own"
+      },
+      {
+        "kind": "sink",
+        "file": "src/exchanges/kis/websocket_connection.py",
+        "line": 73,
+        "scope": "_run_kis_ws_subscription",
+        "description": "Sends the subscribe message and reads the ack without checking any success/failure field"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/exchanges/kis/websocket_connection.py",
+        "line": 67,
+        "description": "Receive loop branches only on tr_id==PINGPONG and output.key; every other JSON control frame is silently discarded"
+      },
+      {
+        "file": "src/exchanges/kis/oauth_client.py",
+        "line": 214,
+        "description": "Contrast: every KIS REST call checks rt_cd==\"0\" and raises otherwise"
+      },
+      {
+        "file": "src/exchanges/bitget/ws_parsers.py",
+        "line": 40,
+        "description": "Contrast: classify_bitget_ack raises WsAckError on a failed login/subscribe for Bitget's WS"
+      },
+      {
+        "file": "src/exchanges/common/adapter.py",
+        "line": 103,
+        "description": "Confirmed via repo-wide grep: no caller exists anywhere in src/services or src/foundation for KIS's subscribe_ticker_stream/subscribe_orderbook_stream/subscribe_order_notification_stream -- only the abstract ExchangeAdapter signature references this method name"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "environmental_dependency",
+        "description": "Requires KIS's WS subscribe ack to genuinely carry a synchronous success/failure field (not fully confirmable from this repo's source alone); requires these methods to eventually be wired into a live ingestion path, which is confirmed not the case today"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "Not attacker-driven -- an availability/observability gap triggered by a stale/invalid approval_key or a KIS-side rejection, once this code path is wired to a live caller.",
+      "payloads": [
+        "A KIS WS subscribe request using an expired or invalid approval_key"
+      ],
+      "instructions": [
+        "Call subscribe_order_notification_stream with a stale/invalid approval_key (once wired to a live caller).",
+        "Observe the receive loop never surfaces an error and never triggers a reconnect -- the channel appears idle indefinitely rather than failed."
+      ],
+      "observed_result": "A rejected subscription produces no callback and no exception, indistinguishable from a legitimately quiet market. Confirmed to have zero live callers today."
+    },
+    "remediation": {
+      "strategy": "Add a success/failure check on the initial subscribe ack in _run_kis_ws_subscription, raising an equivalent of Bitget's WsAckError on rejection, before wiring these methods into any live ingestion path."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "These subscribe methods have no live caller anywhere in the codebase today."
+      },
+      "impact": {
+        "score": "low",
+        "reason": "A fail-open reliability/observability gap, not an auth-bypass; the order-notification stream is documented as a REST-polling replacement candidate, implying REST reconciliation would remain the authoritative fallback."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "The missing check and complete absence of any live caller were both independently re-verified by a second agent; full certainty on whether KIS's WS protocol even sends a synchronous ack field is not fully repo-verifiable."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "KIS-WS-PLAINTEXT-01",
+    "title": "KIS WebSocket connects over plaintext ws://, not wss://, for all channels including the private order-notification feed",
+    "description": "All five KIS WebSocket subscribe methods (public ticker/orderbook, private order-notification, overseas variants) resolve to hardcoded ws:// URLs (ports 21000/31000), unlike every other venue adapter in this repo (Bitget, NH, Kiwoom all use wss://). The private order-notification channel carries a bearer-style approval_key in cleartext JSON at subscribe time, and the server subsequently sends the AES-256-CBC key/iv used to decrypt real account order-fill data (account number, order numbers, quantities, prices, fill status) over this same unencrypted socket -- so a network-position observer can trivially decrypt account order-fill traffic.",
+    "root_cause": "src/exchanges/kis/websocket_mixin.py hardcodes WS_REAL_URL/WS_PAPER_URL with the ws:// scheme, used identically by all subscribe_* methods for both public and private channels. This matches the ports/hosts documented in the module's own research trail (KIS's official example code) with no wss:// alternative referenced anywhere in this repo's code or design docs.",
+    "intended_behavior": "Private-channel traffic carrying the WS approval_key and the AES key/iv that decrypts account order-fill data should travel over a TLS-protected transport (wss://), as every other venue adapter in this codebase does. If KIS genuinely offers no wss:// variant of this endpoint (unconfirmed from source; see the companion needs_validation record), the risk should at minimum be documented and mitigated operationally (e.g. tunneling through a VPN/stunnel).",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/exchanges/kis/websocket_mixin.py",
+        "line": 110,
+        "scope": "WS_REAL_URL/WS_PAPER_URL",
+        "description": "ws://ops.koreainvestment.com:21000 (real) / :31000 (paper) -- plain, unencrypted scheme"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/exchanges/kis/websocket_mixin.py",
+        "line": 214,
+        "scope": "subscribe_order_notification_stream",
+        "description": "Private order-fill channel resolves to the same ws:// constant as the public channels"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/exchanges/kis/websocket_parsing.py",
+        "line": 282,
+        "scope": "_build_subscribe_message",
+        "description": "Embeds the approval_key directly in the JSON header of the subscribe envelope"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/exchanges/kis/websocket_connection.py",
+        "line": 84,
+        "scope": "_run_kis_ws_subscription",
+        "description": "Extracts the server-sent AES key/iv from body.output over the same plaintext socket"
+      },
+      {
+        "kind": "sink",
+        "file": "src/exchanges/kis/websocket_parsing.py",
+        "line": 228,
+        "scope": "decrypt_aes256_cbc/parse_order_notification_message",
+        "description": "Uses the plaintext-transmitted key/iv to decrypt subsequent account order-fill frames, which also traverse the same unencrypted socket"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/exchanges/kis/websocket_mixin.py",
+        "line": 110,
+        "description": "WS_REAL_URL = \"ws://ops.koreainvestment.com:21000\"; WS_PAPER_URL = \"ws://ops.koreainvestment.com:31000\""
+      },
+      {
+        "file": "src/exchanges/nh/websocket_mixin.py",
+        "line": 53,
+        "description": "Contrast: NH uses wss://api.nhplug.com:... for its equivalent WS endpoint"
+      },
+      {
+        "file": "src/exchanges/bitget/private_ws_mixin.py",
+        "line": 57,
+        "description": "Contrast: Bitget uses wss://ws.bitget.com/v2/ws/private for its private channel"
+      },
+      {
+        "file": "src/exchanges/kiwoom/websocket_connection.py",
+        "line": 51,
+        "description": "Contrast: Kiwoom uses wss:// for both real and paper WS endpoints"
+      },
+      {
+        "file": "docs/design/02d_kis_api_full_spec_v1.md",
+        "line": 108,
+        "description": "Repo's own KIS research notes record the same ws:// URLs with no wss:// alternative mentioned anywhere in this design doc"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "network_routing",
+        "description": "Requires network-path visibility between the AIOS deployment and ops.koreainvestment.com (shared network segment, malicious/compromised proxy, or any on-path observer) -- no host or credential compromise needed"
+      },
+      {
+        "kind": "third_party_dependency",
+        "description": "Contingent on whether KIS's platform genuinely offers no TLS variant of this WS endpoint; unconfirmed from source alone (see companion needs_validation record KIS-WS-TLS-AVAILABILITY-NEEDS-VALIDATION-01)"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "A network-position attacker able to observe traffic between the AIOS deployment and ops.koreainvestment.com:21000/31000 (e.g. a shared LAN segment, a malicious transparent proxy, or an ISP-level position).",
+      "payloads": [
+        "Passive capture of the WS handshake and subscribe frame containing the approval_key",
+        "Passive capture of the server's key/iv control frame for the order-notification channel"
+      ],
+      "instructions": [
+        "Position a passive network capture (e.g. tcpdump/Wireshark) on the path between the AIOS host and ops.koreainvestment.com.",
+        "Trigger a KIS WS private-channel subscription (subscribe_order_notification_stream) from the application.",
+        "Observe the approval_key in the cleartext JSON subscribe message, and the subsequent AES key/iv in the cleartext server response.",
+        "Use the captured key/iv to decrypt subsequent order-notification payloads captured on the same connection."
+      ],
+      "observed_result": "The approval_key and the AES key/iv protecting real account order-fill data are both visible in cleartext to any on-path observer, defeating the payload-level AES encryption via transport-level exposure of its key."
+    },
+    "remediation": {
+      "strategy": "If KIS offers a TLS-protected WS endpoint, switch WS_REAL_URL/WS_PAPER_URL to wss:// and the corresponding TLS port. If no such endpoint exists (platform constraint), document the residual risk explicitly in docs/design and recommend/require an operational mitigation (VPN/stunnel tunnel to KIS's WS endpoint) rather than leaving this as an undocumented gap."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "medium",
+        "reason": "Requires a specific network-position precondition (on-path observer), not remotely exploitable over the open internet at large."
+      },
+      "impact": {
+        "score": "high",
+        "reason": "Full compromise of confidentiality for real-time account order/fill data and the session credential, uniformly across public and private channels."
+      },
+      "overall_severity": "medium"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Code facts independently re-verified by a second agent (URL constants, all five subscribe call sites, approval_key/AES key-iv flow); the 'no wss alternative found in-repo' conclusion is corroborated by a repo-wide grep, though full external certainty requires KIS's live documentation."
+    }
+  },
+  {
+    "verdict": "needs_validation",
+    "fingerprint": "KIS-WS-TLS-AVAILABILITY-NEEDS-VALIDATION-01",
+    "title": "Whether KIS's platform offers a TLS (wss://) variant of its realtime WebSocket endpoint",
+    "description": "KIS-WS-PLAINTEXT-01 documents that this codebase's KIS adapter connects over plaintext ws://. This companion record isolates the one externally-dependent fact that determines whether a straightforward wss:// swap is even possible: does KIS's official API offer a TLS endpoint for this feed at all?",
+    "claimed_root_cause": "Not determinable from this repository's source or design docs alone -- this is an external platform-capability fact about KIS's live API, not a code defect.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/exchanges/kis/websocket_mixin.py",
+        "line": 110,
+        "scope": "WS_REAL_URL/WS_PAPER_URL",
+        "description": "Hardcoded ws:// URLs sourced from KIS's official example code per this module's own research trail"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "docs/design/02d_kis_api_full_spec_v1.md",
+        "line": 108,
+        "description": "Repo's own KIS research notes record only the ws:// URLs with no wss:// alternative referenced anywhere in this design document"
+      }
+    ],
+    "blockers": [
+      "Requires checking KIS's live, authoritative API documentation (or contacting KIS support) to determine whether a wss:// variant of the ops.koreainvestment.com realtime WS endpoint exists -- this cannot be determined by reading this repository's source or cached design docs alone, and this audit had no network access to KIS's external documentation."
+    ],
+    "validation_plan": {
+      "local": "Grep this repository's full history (not just the shallow clone available during this audit) and any archived KIS API reference PDFs/docs for a TLS/wss port or endpoint mentioned alongside the documented ws:// ports 21000/31000.",
+      "deployment": "Have a team member with access to KIS's current official developer portal/documentation confirm whether a wss:// endpoint is offered for the realtime WS feed, and if so, migrate WS_REAL_URL/WS_PAPER_URL to it as the direct remediation for KIS-WS-PLAINTEXT-01."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "NH-OAUTH-URL-SECRET-01",
+    "title": "NH OAuth2 token issuance sends api_key/api_secret as URL query-string parameters instead of the request body",
+    "description": "NH's OAuth2 token endpoint call passes appkey/appsecretkey via httpx's params= kwarg, which httpx always serializes into the request URL's query string regardless of HTTP method or the declared Content-Type header. Despite the code's own Content-Type: application/x-www-form-urlencoded header and docstring describing these as form body parameters, the actual outbound request is `POST /oauth2/token?appkey=<plaintext>&appsecretkey=<plaintext>&grant_type=client_credentials&scope=oob` with an empty body -- leaking the plaintext exchange credential into the URL on every token issuance/renewal (roughly every 24h per tenant, entirely automatically).",
+    "root_cause": "src/exchanges/nh/adapter.py's _fetch_token method calls self._client.post(\"/oauth2/token\", params={\"appkey\": ..., \"appsecretkey\": ..., ...}, headers={\"Content-Type\": \"application/x-www-form-urlencoded\"}); httpx's params= kwarg always populates the URL query string, never the body -- only data=/json=/content= populate the body. This is confirmed to be an implementation mistake relative to the sibling KIS adapter (src/exchanges/kis/oauth_client.py), which correctly sends the analogous call via json= (body).",
+    "intended_behavior": "appkey/appsecretkey/grant_type/scope should be sent as the URL-encoded request body via data={...}, matching the declared Content-Type and NH's documented API contract, and must never appear in the request line/URL where they are commonly captured by TLS-terminating proxies, API gateways/WAFs, CDNs, load balancers, and the exchange's own server-side access logs -- none of which are covered by this application's own credential-at-rest encryption or log redaction.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/services/credential_resolver.py",
+        "line": 62,
+        "scope": "CredentialResolver.get_adapter",
+        "description": "Decrypts a user's NH api_key/api_secret and constructs an NHAdapter via the factory"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/exchanges/factory.py",
+        "line": 148,
+        "scope": "build_adapter",
+        "description": "Constructs NHAdapter(api_key, api_secret, act_no, ...) from caller-supplied plaintext credentials; \"nh\" is a registered SUPPORTED_EXCHANGES entry"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/exchanges/nh/adapter.py",
+        "line": 137,
+        "scope": "_headers/_ensure_token",
+        "description": "Every authenticated NH request calls _ensure_token() before its first outbound call and again on token expiry (~24h)"
+      },
+      {
+        "kind": "sink",
+        "file": "src/exchanges/nh/adapter.py",
+        "line": 111,
+        "scope": "_fetch_token",
+        "description": "Issues POST /oauth2/token with appkey/appsecretkey in params=, which httpx serializes into the URL query string"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/exchanges/nh/adapter.py",
+        "line": 111,
+        "description": "params={\"appkey\": self._app_key, \"appsecretkey\": self._app_secret, \"grant_type\": \"client_credentials\", \"scope\": \"oob\"} passed to self._client.post"
+      },
+      {
+        "file": "src/exchanges/nh/adapter.py",
+        "line": 117,
+        "description": "headers={\"Content-Type\": \"application/x-www-form-urlencoded\"} -- declares body-form intent that the params= call never fulfills"
+      },
+      {
+        "file": "src/exchanges/kis/oauth_client.py",
+        "line": 121,
+        "description": "Sibling KIS adapter's analogous _fetch_token correctly sends credentials via json= (request body), confirming NH is the outlier / a bug not a deliberate pattern"
+      },
+      {
+        "file": "src/exchanges/factory.py",
+        "line": 41,
+        "description": "NHAdapter is imported and \"nh\" is in SUPPORTED_EXCHANGES -- this is live production wiring, not dead code"
+      },
+      {
+        "file": "src/core/logging/redaction.py",
+        "line": 89,
+        "description": "RedactionFilter only inspects record.payload (a structured Mapping); it is a no-op against any URL that might be logged by httpx/httpcore DEBUG logging or by an external proxy/gateway, providing no protection for this leak"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "environmental_dependency",
+        "description": "Requires an NH exchange credential registered for at least one user (exchange_credentials row, scope=PAPER); requires any outbound network intermediary or log sink that records full request URLs including query strings (a common default for TLS-terminating proxies, API gateways/WAFs, CDNs, load balancers, and NH's own server-side access logs)"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "A party with read access to any network-path log store that records full request URLs (proxy/WAF/gateway/CDN/load-balancer access logs, or NH's own server logs) between this application and NH's endpoint.",
+      "payloads": [
+        "GET-observable request line: POST /oauth2/token?appkey=<plaintext_appkey>&appsecretkey=<plaintext_appsecret>&grant_type=client_credentials&scope=oob HTTP/1.1"
+      ],
+      "instructions": [
+        "Register an NH exchange credential for a test user via POST /exchange-credentials (dummy/paper values).",
+        "Trigger any authenticated NH call (e.g. GET /exchange-credentials/nh/balance) to force _ensure_token()/_fetch_token() to run.",
+        "Capture the outbound HTTP request (e.g. via a local httpx event_hook, mitmproxy, or by reading the ResilientTransport's request object in a debugger/test) and observe the appkey/appsecretkey values present in the request URL query string rather than the request body."
+      ],
+      "observed_result": "The plaintext NH api_key and api_secret for the credentialed user are present in the request URL, not the body, on every token issuance/renewal -- confirmed via direct code inspection and independent verification of httpx's params= semantics."
+    },
+    "remediation": {
+      "strategy": "Change the httpx call in _fetch_token from params={...} to data={...} (or content=urlencode(...)) so the credentials populate the URL-encoded request body, matching the declared Content-Type and eliminating the query-string leak. One-line fix.",
+      "code_changes": [
+        {
+          "file_name": "src/exchanges/nh/adapter.py",
+          "fixed_code": "return await self._client.post(\n    \"/oauth2/token\",\n    data={\n        \"appkey\": self._app_key,\n        \"appsecretkey\": self._app_secret,\n        \"grant_type\": \"client_credentials\",\n        \"scope\": \"oob\",\n    },\n    headers={\"Content-Type\": \"application/x-www-form-urlencoded\"},\n)"
+        }
+      ]
+    },
+    "severity": {
+      "likelihood": {
+        "score": "high",
+        "reason": "Fires silently, automatically, with zero attacker interaction on every NH token issuance/renewal for every tenant with an NH credential; full-URL access logging is default behavior for common infrastructure (nginx, Apache, AWS ALB/CloudFront, most WAFs/API gateways)."
+      },
+      "impact": {
+        "score": "high",
+        "reason": "Directly leaks the plaintext exchange credential outside the application's own AES-256-GCM-at-rest and log-redaction boundary entirely, to any party with log access along the network path."
+      },
+      "overall_severity": "high"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Code and httpx semantics are unambiguous (params= vs data=); NH is confirmed live-wired via factory.py/CredentialResolver, not test-only code; independently re-verified by a second agent including confirmation of httpx's stable, documented request-building behavior."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "OMS-CANCEL-MODIFY-NO-IDEMPOTENCY-01",
+    "title": "cancel_order/modify_order have no command-level idempotency -- a retried call enqueues a fresh outbox row and fires a duplicate real exchange call",
+    "description": "Unlike submit_order (which has scope_hash/digest/client_order_id dedup), cancel_order() and modify_order() in the OMS application layer take no idempotency key and unconditionally enqueue a new outbox row on every invocation, including an exact retry of the same logical request. This is confirmed by the repo's own integration test, which must manually delete outbox rows after repeatedly calling cancel_order to avoid polluting the shared test queue. However, cancel_order/modify_order (and their order_service wrappers, and the EMS cancel_algo equivalent) have zero live production callers anywhere in this codebase snapshot -- no router, background loop, or scheduler currently invokes them outside of tests -- so this is a real code-level gap with no live exploitation path today.",
+    "root_cause": "src/services/oms/application/cancel_order.py and modify_order.py lock the order row, run a self-loop state transition (status unchanged), append an order_events row, and unconditionally call self._outbox.enqueue(...) with no lookup against a prior command_id or content-hash. src/services/order_service/cancel.py and modify.py mint a fresh command_id=uuid4() on every call with no caller-supplied or derived dedup key.",
+    "intended_behavior": "A retried cancel/modify request for the same logical intent (e.g. a client retry after a network timeout) should be recognized and deduplicated at the application-command layer before reaching the outbox, the same way submit_order's scope_hash/digest mechanism works, rather than relying solely on the outbox dispatcher's per-row retry idempotency (which only covers retries of an already-enqueued row, not repeated invocation of the entry point itself).",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/services/order_service/cancel.py",
+        "line": 49,
+        "scope": "cancel_order",
+        "description": "Mints command_id=uuid4() fresh on every call, no dedup key parameter exists"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/services/oms/application/cancel_order.py",
+        "line": 66,
+        "scope": "cancel_order",
+        "description": "No idempotency lookup; unconditional self-loop transition + outbox enqueue"
+      },
+      {
+        "kind": "sink",
+        "file": "src/services/oms/application/outbox_commands.py",
+        "line": 75,
+        "scope": "send_cancel/send_modify",
+        "description": "Each enqueued row is dispatched independently to adapter.cancel_order/modify_order -- N retries produce N real exchange calls"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/services/oms/application/cancel_order.py",
+        "line": 96,
+        "description": "Unconditional _outbox.enqueue call with no prior dedup check"
+      },
+      {
+        "file": "tests/integration/oms/test_cancel_modify_deepen.py",
+        "line": 295,
+        "description": "Test comment states each of 15 repeated cancel_order calls enqueues a new outbox row, and manually runs DELETE FROM order_command_outbox afterward to avoid polluting the shared test queue -- confirms the behavior empirically"
+      },
+      {
+        "file": "src/services/oms/application/outbox_commands.py",
+        "line": 9,
+        "description": "Docstring frames cancel/modify as an 'idempotent family' but only in the sense of the outbox dispatcher's own retry-on-timeout safety, not the application entry point"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "system_configuration",
+        "description": "Not reachable today: independently confirmed via repo-wide grep that no router, background loop, or execution_control/execution_loop call site invokes order_service.cancel_order/modify_order outside of tests; would become live the moment any such caller is wired in"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "Any principal already authorized to cancel/modify their own order (ordinary retry behavior, no privilege escalation) -- but only once a live caller exists.",
+      "payloads": [
+        "Two or more calls to cancel_order(order_id=X) or modify_order(order_id=X, ...) with the same logical intent"
+      ],
+      "instructions": [
+        "Call src.services.oms.application.cancel_order.cancel_order(pool, order_id) for an ACKNOWLEDGED order.",
+        "Call it again immediately for the same order_id (simulating a client retry).",
+        "Query order_command_outbox WHERE order_id=X -- observe two rows enqueued instead of one being deduplicated."
+      ],
+      "observed_result": "Each call produces its own outbox row and, once dispatched, its own real adapter.cancel_order call to the exchange -- confirmed by the cited test's own cleanup necessity."
+    },
+    "remediation": {
+      "strategy": "Add an idempotency key (derived from order_id + command_type + a caller-supplied or time-windowed dedup token) checked before enqueueing in cancel_order/modify_order, analogous to submit_order's scope_hash mechanism, before any router or worker is wired to call these functions."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "No live entrypoint exists anywhere in the current codebase that can trigger this outside of test code."
+      },
+      "impact": {
+        "score": "medium",
+        "reason": "If wired to a live retry-prone caller, could exhaust venue-side amend/cancel rate limits and inflate the audit trail with duplicate events."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Code path and test evidence directly confirmed by a second, independent agent; reachability re-verified via repo-wide grep of all plausible call sites."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "OMS-COLLISION-DIGEST-SKIP-01",
+    "title": "resolve_after_collision's digest-mismatch guard silently skips its check when the colliding row has no order_idempotency entry (legacy/new submit-path split-brain)",
+    "description": "The new OMS submit_order() path's collision-resolution helper only raises IdempotencyDigestMismatchError when a stored digest exists and differs; if no order_idempotency row exists for the colliding scope_hash (as would happen if the collision came from the legacy Executor/fenced_submit path, which shares the same deterministic scope-derivation function but never writes to order_idempotency), the mismatch check is silently skipped and the code falls through to a JOIN-based lookup that also returns nothing, ultimately raising a generic, misleadingly-worded RuntimeError. This fails closed (a crash, not a silent double-execution) rather than bypassing the safety net entirely. It is currently unreachable in production: submit_order() itself has zero live callers anywhere in this codebase -- it is fully implemented but unwired.",
+    "root_cause": "src/services/oms/application/submit_order_support.py's resolve_after_collision does `if stored_digest is not None and stored_digest != digest: raise ...` -- a None stored_digest (no order_idempotency row) skips the comparison entirely. The legacy src/core/executor/executor.py / src/services/order_service/fenced_submit.py path imports and uses the identical build_scope/client_order_id functions from src/services/oms/domain/idempotency.py but never inserts into order_idempotency, so a client_order_id collision it causes is invisible to this check.",
+    "intended_behavior": "Any orders.client_order_id collision on a given scope should either confirm the two attempts are byte-for-byte identical and return the existing OrderView, or raise IdempotencyDigestMismatchError if they differ -- never silently skip the comparison and fall through to an unrelated, misdiagnosed error.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/core/executor/executor.py",
+        "line": 100,
+        "scope": "Executor.execute",
+        "description": "Legacy path derives the same scope_hash/client_order_id as the new path but never writes order_idempotency"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/services/oms/application/submit_order.py",
+        "line": 276,
+        "scope": "submit_order",
+        "description": "New path's UNIQUE collision on orders.client_order_id calls resolve_after_collision"
+      },
+      {
+        "kind": "sink",
+        "file": "src/services/oms/application/submit_order_support.py",
+        "line": 76,
+        "scope": "resolve_after_collision",
+        "description": "stored_digest is None -> mismatch check skipped -> find_by_scope_hash also returns None (no order_idempotency row to JOIN through) -> generic RuntimeError misdescribing an isolation/timing violation"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/services/oms/application/submit_order_support.py",
+        "line": 79,
+        "description": "if stored_digest is not None and stored_digest != digest: raise IdempotencyDigestMismatchError(...)"
+      },
+      {
+        "file": "src/services/oms/adapters/order_repository.py",
+        "line": 100,
+        "description": "find_by_scope_hash requires a JOIN through order_idempotency; returns None if that table has no row even though a colliding orders row exists"
+      },
+      {
+        "file": "src/core/executor/executor.py",
+        "line": 61,
+        "description": "from src.services.oms.domain.idempotency import build_scope, client_order_id as derive_client_order_id -- confirmed same module, not just similar logic"
+      },
+      {
+        "file": "src/services/order_service/fenced_submit.py",
+        "line": 130,
+        "description": "Legacy claim path inserts into orders only, never order_idempotency (confirmed by exhaustive grep of order_idempotency across src/)"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "environmental_dependency",
+        "description": "Requires the new OMS submit_order() to actually be called in production -- independently confirmed to have zero live callers anywhere in src/ today (no production code constructs SubmitOrderCommand or imports submit_order outside of tests); the EMS algo chain that would plausibly wire it in is explicitly documented as a deferred/unwired placeholder"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "Not attacker-driven -- an operational/architectural hazard from two coexisting submission code paths during the OMS cutover, would require ordinary concurrent scheduling once both paths are live.",
+      "payloads": [
+        "A legacy Executor.execute() submission followed by a new-path submit_order() call deriving the identical scope_hash"
+      ],
+      "instructions": [
+        "Submit an order via the legacy Executor/fenced_submit path with a given (tenant_id, strategy_id, strategy_version, execution_id, intent_seq, window_start) tuple.",
+        "Submit a second order via the new OMS submit_order() with the same tuple, causing a client_order_id collision.",
+        "Observe resolve_after_collision raises a generic RuntimeError instead of either succeeding cleanly (same payload) or raising the correct IdempotencyDigestMismatchError (different payload)."
+      ],
+      "observed_result": "A crash with a misleading error message rather than the intended fail-closed digest comparison -- confirmed as dead code today since submit_order() has no live caller."
+    },
+    "remediation": {
+      "strategy": "Before wiring submit_order() to any live caller while the legacy path remains active, either (a) have the legacy path also write to order_idempotency, or (b) have resolve_after_collision fall back to comparing against the orders row's own recorded parameters directly when no order_idempotency entry exists, and raise a correctly-diagnosed error in either case."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "submit_order() has zero live callers in the current codebase; this can only be triggered once it is wired to a production entrypoint."
+      },
+      "impact": {
+        "score": "low",
+        "reason": "Fails closed (a crash), not a silent double-execution; impact is a robustness/misdiagnosis defect, not a confirmed duplicate-order or fund-loss primitive."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Code-level gap and the complete absence of any live submit_order() caller were both independently re-verified by a second agent via direct source reads and repo-wide grep."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "ORDER-SERVICE-TAUTOLOGICAL-TENANT-01",
+    "title": "order_service cancel/modify wrappers derive tenant scope from the target order itself, making the OMS layer's own ownership check tautological",
+    "description": "src/services/order_service/cancel.py and modify.py look up an order's own owner (SELECT user_id FROM orders WHERE order_id=$1) and pass that value back to the OMS layer as cmd.tenant_id, with actor_subject_id hardcoded to 'system'. The OMS layer's order.tenant_id != cmd.tenant_id check then compares two reads of the same orders.user_id column, so it can never fail -- it looks like an authorization check but structurally cannot reject anything. Neither wrapper accepts a caller-identity parameter at all. This is currently dead code: independently confirmed via repo-wide grep that no router, background loop, or worker calls order_service.cancel_order/modify_order anywhere outside of tests.",
+    "root_cause": "src/services/order_service/cancel.py:44-57 and modify.py:48-59 derive tenant_id from the target order's own user_id column rather than from an authenticated caller identity passed into the function.",
+    "intended_behavior": "cancel_order()/modify_order() in order_service should accept the authenticated caller's user_id as an explicit parameter and pass that (not the order's own owner) as tenant_id/actor_subject_id to the OMS command, so the OMS layer's ownership comparison is meaningful, matching the pattern order_query.get_order(pool, order_id, *, tenant_id) already implements correctly.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/services/order_service/cancel.py",
+        "line": 44,
+        "scope": "cancel_order",
+        "description": "SELECT user_id FROM orders WHERE order_id=$1 -- reads the order's own owner"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/services/order_service/cancel.py",
+        "line": 49,
+        "scope": "cancel_order",
+        "description": "CancelOrderCommand(tenant_id=user_id, actor_subject_id=\"system\", ...) -- the order's own owner is echoed back as the caller's claimed tenant"
+      },
+      {
+        "kind": "sink",
+        "file": "src/services/oms/application/cancel_order.py",
+        "line": 67,
+        "scope": "cancel_order",
+        "description": "if order.tenant_id != cmd.tenant_id: raise OrderNotFoundError -- both sides are reads of the same orders.user_id column, so this is always false"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/services/order_service/cancel.py",
+        "line": 53,
+        "description": "tenant_id=user_id sourced from the order row itself, not from a caller parameter"
+      },
+      {
+        "file": "src/services/oms/adapters/order_repository.py",
+        "line": 56,
+        "description": "PostgresOrderRepository builds tenant_id=row[\"user_id\"] -- the same column cancel.py already read"
+      },
+      {
+        "file": "src/services/order_service/__init__.py",
+        "line": 9,
+        "description": "cancel_order/modify_order are re-exported from the package's public __init__.py, one call site away from being wired to a live router"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "environmental_dependency",
+        "description": "Requires a future router, worker, or watchdog handler to call order_service.cancel_order/modify_order with a caller-controlled order_id and no separate authorization check of its own -- independently confirmed no such caller exists anywhere in src/ today"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "Any user able to invoke this wrapper with an arbitrary order_id, once a live caller exists.",
+      "payloads": [
+        "order_service.cancel_order(pool, order_id=<victim's order>, ...)"
+      ],
+      "instructions": [
+        "Call order_service.cancel_order(pool, order_id) with an order_id belonging to a different user than the intended caller.",
+        "Observe the function proceeds to cancel the order because tenant_id is derived from the order's own owner, not from any caller-supplied identity that could mismatch."
+      ],
+      "observed_result": "The function accepts and processes the cancel/modify request regardless of who is actually calling it, because the OMS ownership check is tautological by construction. Confirmed to have no live caller today."
+    },
+    "remediation": {
+      "strategy": "Change cancel_order()/modify_order() signatures in order_service to accept an explicit caller_user_id parameter, pass that as tenant_id/actor_subject_id, and require this fix before wiring any router or worker to these functions."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "No live entrypoint exists anywhere in the current codebase; the trigger (a caller) does not exist."
+      },
+      "impact": {
+        "score": "medium",
+        "reason": "Would allow cross-tenant cancel/modify of arbitrary orders the moment any router or worker is wired to this code without independently fixing the signature."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Mechanism and complete non-reachability independently re-verified by a second agent via direct source reads and an exhaustive repo-wide grep of every module importing order_service."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "WATCHDOG-NO-REDACTION-01",
+    "title": "watchdog_process.py (safety/kill-switch process) never attaches RedactionFilter, using stdlib logging.basicConfig instead",
+    "description": "watchdog_process.py is a separate OS process (python -m src.watchdog_process) that calls stdlib logging.basicConfig() instead of the main app's configure_logging(), so RedactionFilter is never attached and, unlike the main process's JSONLinesFormatter, the stdlib default formatter renders exc_info tracebacks in full. This is currently not exploitable: the process's exchange_adapters map is deliberately empty today (credential_resolver is intentionally not wired in per the module's own docstring), so open_order_sweeper's cancel calls all short-circuit before ever reaching a real adapter call or its logger.exception site. The other two live adapter calls this process does make (check_exchange, get_basket_returns) already swallow their exceptions without any logging call at all, independent of this gap.",
+    "root_cause": "src/watchdog_process.py calls logging.basicConfig(level=logging.INFO) at its __main__ entrypoint instead of src.core.logging.schema.configure_logging(), so RedactionFilter is never imported or attached in this process.",
+    "intended_behavior": "This safety-critical process should log through the same redaction-covered pipeline as the main process (call configure_logging() instead of basicConfig()), especially since its own docstring frames the empty exchange_adapters map as a temporary reduction with real credential wiring as an anticipated next step.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "src/watchdog_process.py",
+        "line": 260,
+        "scope": "__main__",
+        "description": "logging.basicConfig(level=logging.INFO) instead of configure_logging()"
+      },
+      {
+        "kind": "propagation",
+        "file": "src/watchdog_process.py",
+        "line": 94,
+        "scope": "build_kill_switch_service",
+        "description": "exchange_adapters={} passed deliberately -- confirmed by direct read, credential_resolver not yet wired into this process"
+      },
+      {
+        "kind": "sink",
+        "file": "src/services/safety/open_order_sweeper.py",
+        "line": 231,
+        "scope": "sweep_open_orders",
+        "description": "adapter = adapters.get(row['exchange']) always returns None with an empty map, so the code takes the continue branch and never reaches adapter.cancel_order() or its logger.exception call"
+      }
+    ],
+    "evidence": [
+      {
+        "file": "src/watchdog_process.py",
+        "line": 261,
+        "description": "logging.basicConfig(level=logging.INFO) -- confirmed absence of configure_logging()/RedactionFilter in this process by repo-wide grep"
+      },
+      {
+        "file": "src/main.py",
+        "line": 83,
+        "description": "Contrast: the main process does call configure_logging() before starting background loops"
+      },
+      {
+        "file": "src/watchdog_process.py",
+        "line": 204,
+        "description": "check_exchange's exchange call swallows its exception with `except Exception: return False` -- no logging call at all, independent of this gap"
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "environmental_dependency",
+        "description": "Becomes relevant only once credential_resolver is wired into watchdog_process's exchange_adapters (a documented, anticipated, but not-yet-completed future step)"
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "An operator/SRE with access to this process's stdout/log collection, once real exchange calls are wired in.",
+      "payloads": [
+        "An exchange adapter exception containing a raw response body, once credential_resolver is wired into this process"
+      ],
+      "instructions": [
+        "Wire credential_resolver into watchdog_process's exchange_adapters (future work, not present today).",
+        "Trigger a kill-switch sweep that calls adapter.cancel_order() and raises an ExchangeError.",
+        "Observe the resulting logger.exception() call renders the full traceback (including any interpolated response text) via the stdlib default formatter, with no RedactionFilter attached."
+      ],
+      "observed_result": "Not exploitable in the current codebase state -- exchange_adapters is empty by design, so no adapter exception is ever produced by this process today."
+    },
+    "remediation": {
+      "strategy": "Call configure_logging() instead of logging.basicConfig() in watchdog_process.py's __main__ entrypoint, ideally bundled into the same task that wires credential_resolver into this process's exchange_adapters."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "Not reachable today -- exchange_adapters is empty by design, and even the other live adapter calls in this file don't log exceptions at all."
+      },
+      "impact": {
+        "score": "low",
+        "reason": "Would only matter once real exchange calls are wired into this process, and only for the one call site (open_order_sweeper) that actually logs via logger.exception."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "Both the logging setup gap and the 'not exploitable today' mitigating fact were independently re-verified by a second agent tracing the full call chain, including two additional silent-swallow sites the original finder didn't check."
+    }
+  }
+]
