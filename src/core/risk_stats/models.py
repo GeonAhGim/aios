@@ -1,4 +1,5 @@
-"""L4_risk_and_safety_v1.0.md#2.2 — VaR/ES 결과 값 객체."""
+"""L4_risk_and_safety_v1.0.md#2.2 (R-18) — VaR/ES 결과 값 객체."""
+
 from __future__ import annotations
 
 from decimal import Decimal
