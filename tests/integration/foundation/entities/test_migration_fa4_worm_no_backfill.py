@@ -25,6 +25,7 @@ DEFERRABLE 제약 트리거(`ledger_entry_balanced_trg`, Σ차변=Σ대변 강�
 건드리지 않았음을 회귀로 확인한다 — 이미 균형 잡힌 실제 entry(post_entry로
 생성)에 한쪽만 있는 라인을 추가로 끼워 넣으면 커밋 시 거부돼야 한다(그
 INSERT 자체는 롤백되므로 원 entry는 손상되지 않는다)."""
+
 from __future__ import annotations
 
 import os
@@ -102,9 +103,7 @@ def _sweep_synthetic_snapshots(prefix: str) -> None:
     async def _sweep() -> None:
         conn = await asyncpg.connect(_asyncpg_dsn())
         try:
-            await conn.execute(
-                "DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%"
-            )
+            await conn.execute("DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%")
         finally:
             await conn.close()
 
@@ -170,6 +169,86 @@ async def test_pos_journal_never_backfilled_because_worm_blocks_update(pool):
     assert null_count == 1
 
 
+async def test_pos_journal_worm_guard_rejects_update(pool):
+    """negative: `963d5f3cfb1b`이 새로 추가한 `fund_id`/`portfolio_id`
+    컬럼조차도 기존 `pos_journal_worm_guard_trg`(4a1d0c0de004)를 우회하지
+    못한다 — 이 마이그레이션이 WORM 가드를 약화시키지 않았음을 직접
+    UPDATE 시도로 확인한다."""
+    tenant_id = await create_test_tenant(pool)
+    async with pool.acquire() as conn:
+        account_id = await conn.fetchval(
+            "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method) "
+            "VALUES ($1, 'TESTVENUE', 'KRW', 'FIFO') RETURNING account_id",
+            tenant_id,
+        )
+        position_key = f"fa4-worm-test-{uuid4().hex}"
+        await conn.execute(
+            "INSERT INTO pos_snapshot (position_key, tenant_id, account_id, instrument_id, "
+            "quantity, cost_method) VALUES ($1, $2, $3, $4, 0, 'FIFO')",
+            position_key,
+            tenant_id,
+            account_id,
+            uuid4(),
+        )
+        journal_id = await conn.fetchval(
+            "INSERT INTO pos_journal (tenant_id, account_id, position_key, sequence_no, "
+            "entry_type, qty_delta, source_event_type, source_event_id, idempotency_key, "
+            "digest, entry_hash, occurred_at) "
+            "VALUES ($1, $2, $3, 1, 'FILL', 1, 'fill', 'fa4-worm-test', $4, "
+            "'digest-placeholder', 'hash-placeholder', now()) RETURNING id",
+            tenant_id,
+            account_id,
+            position_key,
+            f"fa4-worm-test-{uuid4().hex}",
+        )
+
+    with pytest.raises(asyncpg.exceptions.RaiseError, match="append-only violation"):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("UPDATE pos_journal SET fund_id = NULL WHERE id = $1", journal_id)
+
+
+async def test_pos_journal_worm_guard_rejects_delete(pool):
+    """negative: 같은 가드가 DELETE도 거부하는지 확인한다 — UPDATE만
+    막고 DELETE로 우회할 수 있다면 append-only 보장이 무의미하다."""
+    tenant_id = await create_test_tenant(pool)
+    async with pool.acquire() as conn:
+        account_id = await conn.fetchval(
+            "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method) "
+            "VALUES ($1, 'TESTVENUE', 'KRW', 'FIFO') RETURNING account_id",
+            tenant_id,
+        )
+        position_key = f"fa4-worm-test-{uuid4().hex}"
+        await conn.execute(
+            "INSERT INTO pos_snapshot (position_key, tenant_id, account_id, instrument_id, "
+            "quantity, cost_method) VALUES ($1, $2, $3, $4, 0, 'FIFO')",
+            position_key,
+            tenant_id,
+            account_id,
+            uuid4(),
+        )
+        journal_id = await conn.fetchval(
+            "INSERT INTO pos_journal (tenant_id, account_id, position_key, sequence_no, "
+            "entry_type, qty_delta, source_event_type, source_event_id, idempotency_key, "
+            "digest, entry_hash, occurred_at) "
+            "VALUES ($1, $2, $3, 1, 'FILL', 1, 'fill', 'fa4-worm-test', $4, "
+            "'digest-placeholder', 'hash-placeholder', now()) RETURNING id",
+            tenant_id,
+            account_id,
+            position_key,
+            f"fa4-worm-test-{uuid4().hex}",
+        )
+
+    with pytest.raises(asyncpg.exceptions.RaiseError, match="append-only violation"):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM pos_journal WHERE id = $1", journal_id)
+
+    async with pool.acquire() as conn:
+        still_there = await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE id = $1", journal_id
+        )
+    assert still_there == 1
+
+
 def _clock() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -219,8 +298,12 @@ async def _post_topup(pool: asyncpg.Pool, ports: _RealPorts, event_ref: str):
     event = _topup_event(event_ref=event_ref, user_id=user_id)
     async with pool.acquire() as conn, conn.transaction():
         return await post_entry(
-            conn, event, journal=ports.journal, balances=ports.balances,
-            audit=ports.audit, clock=_clock,
+            conn,
+            event,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=_clock,
         )
 
 
@@ -278,8 +361,17 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
             "(entry_id, sequence_no, event_type, event_ref, idempotency_key, "
             " lines_digest, prev_hash, entry_hash, audit_event_id, posted_by, posted_at) "
             "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
-            entry_id, next_seq, event.event_type.value, event.event_ref, key,
-            digest, prev_hash, new_hash, audit.id, event.actor_subject_id, posted_at,
+            entry_id,
+            next_seq,
+            event.event_type.value,
+            event.event_ref,
+            key,
+            digest,
+            prev_hash,
+            new_hash,
+            audit.id,
+            event.actor_subject_id,
+            posted_at,
         )
         account_ids = {
             row["account_code"]: row["account_id"]
@@ -294,8 +386,12 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
                 "INSERT INTO ledger_posting_line "
                 "(entry_id, line_no, account_id, side, amount, currency) "
                 "VALUES ($1, $2, $3, $4, $5, $6)",
-                entry_id, line.line_no, account_ids[line.account_code],
-                line.side.value, line.amount, line.currency.value,
+                entry_id,
+                line.line_no,
+                account_ids[line.account_code],
+                line.side.value,
+                line.amount,
+                line.currency.value,
             )
 
         # task-5687: keep `ledger_balance` in lockstep with the hand-written
@@ -308,7 +404,8 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
         deltas: dict[str, Decimal] = {}
         for line in lines:
             debit_increases = account_type(line.account_code) in {
-                AccountType.ASSET, AccountType.EXPENSE,
+                AccountType.ASSET,
+                AccountType.EXPENSE,
             }
             increases = (line.side is Side.DEBIT) == debit_increases
             signed = line.amount if increases else -line.amount
@@ -324,9 +421,7 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
 async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
     await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
     _run_alembic("downgrade", _DOWN_REVISION)
-    entry_id = await _insert_pre_fa4_ledger_entry(
-        pool, f"fa4-worm-test:{uuid4().hex}", uuid4()
-    )
+    entry_id = await _insert_pre_fa4_ledger_entry(pool, f"fa4-worm-test:{uuid4().hex}", uuid4())
 
     _run_alembic("upgrade", "head")
 
@@ -340,13 +435,11 @@ async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
             entry_id,
         )
         entry_backfilled = await conn.fetchval(
-            "SELECT count(*) FROM ledger_journal_entry "
-            "WHERE entry_id = $1 AND fund_id IS NOT NULL",
+            "SELECT count(*) FROM ledger_journal_entry WHERE entry_id = $1 AND fund_id IS NOT NULL",
             entry_id,
         )
         line_backfilled = await conn.fetchval(
-            "SELECT count(*) FROM ledger_posting_line "
-            "WHERE entry_id = $1 AND fund_id IS NOT NULL",
+            "SELECT count(*) FROM ledger_posting_line WHERE entry_id = $1 AND fund_id IS NOT NULL",
             entry_id,
         )
         line_null = await conn.fetchval(
@@ -389,3 +482,43 @@ async def test_ledger_balance_invariant_regression_still_enforced(pool):
                 next_line_no,
                 account_id,
             )
+
+
+class _FailingAudit:
+    """실패주입: `AuditAppender` 포트를 구현하되 항상 던진다."""
+
+    async def append_event_in(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("injected audit append failure")
+
+
+async def test_post_entry_audit_failure_rolls_back_worm_journal(pool):
+    """실패주입: 모듈 docstring이 인용하는 §6 실패 모드("C 감사 append 실패
+    → 포스팅 전체 롤백")를 직접 유발한다. `journal.append`(WORM 테이블
+    insert)가 `audit.append_event_in` *이전에* 같은 트랜잭션에서 실행되므로,
+    감사 append가 던지면 그 WORM insert도 함께 롤백되어야 한다 — 그렇지
+    않으면 감사 로그 없는 반쪽짜리 원장 행이 영구히 남는다(WORM이라 지울
+    수 없다)."""
+    journal = PostgresJournalRepository(pool)
+    balances = PostgresBalanceRepository(pool)
+    user_id = uuid4()
+    await _create_user_available_account(pool, user_id)
+    event_ref = f"fa4-worm-test:audit-fail:{uuid4().hex}"
+    event = _topup_event(event_ref=event_ref, user_id=user_id)
+    key = idempotency_key(event)
+
+    with pytest.raises(RuntimeError, match="injected audit append failure"):
+        async with pool.acquire() as conn, conn.transaction():
+            await post_entry(
+                conn,
+                event,
+                journal=journal,
+                balances=balances,
+                audit=_FailingAudit(),
+                clock=_clock,
+            )
+
+    async with pool.acquire() as conn:
+        entry_count = await conn.fetchval(
+            "SELECT count(*) FROM ledger_journal_entry WHERE idempotency_key = $1", key
+        )
+    assert entry_count == 0
