@@ -14,6 +14,7 @@ test_paused_execution_still_checks_pending_order_fill`(수정 없이 그대로
 통과)가 이미 증명한다 — 이 파일의 `test_apply_fill_wrapper_delegates_to_inbox_processor`는
 그 위임 자체(호환 래퍼가 실제로 inbox를 타는지)를 좁게 확인한다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -24,7 +25,9 @@ from uuid import UUID, uuid4
 from src.data.models.base import Currency, Money
 from src.data.models.trading import OrderSide, OrderStatus
 from src.services.oms.adapters.inbox_repository import InboxRepository
+from src.services.oms.application.cancel_order import cancel_order
 from src.services.oms.application.inbox_processor import InboxProcessor
+from src.services.oms.contracts.v1_commands import CancelOrderCommand
 from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
 from src.services.order_service import repository as legacy_order_repository
 from src.services.order_service.submit import apply_fill
@@ -262,7 +265,9 @@ async def test_ingest_venue_mismatch_forged_event_is_ignored_fail_closed(pool):
         pool, user_id, quantity=Decimal("1"), exchange="bitget"
     )
     forged = _fill_event(
-        venue="kis", client_order_id=client_order_id, exchange_order_id=exchange_order_id,
+        venue="kis",
+        client_order_id=client_order_id,
+        exchange_order_id=exchange_order_id,
         quantity=Decimal("1"),
     )
     processor = InboxProcessor(pool)
@@ -346,3 +351,80 @@ async def test_apply_fill_wrapper_delegates_to_inbox_processor(pool):
             "SELECT count(*) FROM fills WHERE order_id = $1", order_id
         )
     assert fills_count == 1
+
+
+async def test_ingest_partial_fill_then_cancel_still_records_position(pool):
+    """DoD (task-7998/F3) — an order filled 3 of 10 units and then cancelled
+    must still have those 3 units reflected in the position ledger. Before
+    this fix, `_process_row` only ever forwarded to `_apply_position_ledger`
+    when the order reached the terminal FILLED status, so an order that went
+    PARTIALLY_FILLED and was cancelled never wrote anything to `positions`."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _seed_execution(pool, user_id)
+    order_id, client_order_id, exchange_order_id = await _insert_order(
+        pool, user_id, execution_id=execution_id, quantity=Decimal("10")
+    )
+    partial = _fill_event(
+        client_order_id=client_order_id, exchange_order_id=exchange_order_id, quantity=Decimal("3")
+    )
+    processor = InboxProcessor(pool)
+
+    assert await processor.ingest(partial) is True
+    async with pool.acquire() as conn:
+        status_after_partial = await conn.fetchval(
+            "SELECT status FROM orders WHERE order_id = $1", order_id
+        )
+    assert status_after_partial == "PARTIALLY_FILLED"
+
+    cancel_cmd = CancelOrderCommand(
+        command_id=uuid4(),
+        trace_id=uuid4(),
+        order_id=order_id,
+        tenant_id=user_id,
+        reason="TEST_CANCEL_AFTER_PARTIAL",
+        actor_subject_id=user_id,
+        issued_at=datetime.now(timezone.utc),
+    )
+    cancel_result = await cancel_order(cancel_cmd, pool=pool)
+
+    assert cancel_result.status != OrderStatus.FILLED  # never reaches terminal FILLED
+    async with pool.acquire() as conn:
+        position_qty = await conn.fetchval(
+            "SELECT quantity FROM positions WHERE execution_id = $1", execution_id
+        )
+        fills_count = await conn.fetchval(
+            "SELECT count(*) FROM fills WHERE order_id = $1", order_id
+        )
+    assert fills_count == 1
+    assert position_qty == Decimal("3")  # the partial fill must survive the cancel
+
+
+async def test_ingest_two_partial_fills_records_incremental_not_cumulative_quantity(pool):
+    """Regression guard for this fix's own failure mode — `_process_row` now
+    forwards a `_LedgerUpdate` for every partial fill, so it must carry this
+    fill's own delta quantity, not `order.filled_quantity` (cumulative).
+    Passing the cumulative value on a second partial fill would double-count
+    the first fill's quantity in the position ledger."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _seed_execution(pool, user_id)
+    order_id, client_order_id, exchange_order_id = await _insert_order(
+        pool, user_id, execution_id=execution_id, quantity=Decimal("10")
+    )
+    processor = InboxProcessor(pool)
+
+    first = _fill_event(
+        client_order_id=client_order_id, exchange_order_id=exchange_order_id, quantity=Decimal("4")
+    )
+    assert await processor.ingest(first) is True
+    second = _fill_event(
+        client_order_id=client_order_id, exchange_order_id=exchange_order_id, quantity=Decimal("3")
+    )
+    assert await processor.ingest(second) is True
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+        position_qty = await conn.fetchval(
+            "SELECT quantity FROM positions WHERE execution_id = $1", execution_id
+        )
+    assert status == "PARTIALLY_FILLED"
+    assert position_qty == Decimal("7")  # 4 + 3, not 4 + 7 (cumulative double-count)

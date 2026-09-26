@@ -6,6 +6,7 @@ LB-2/LB-3 selector가 SSOT, 재구현 금지). pos_account/pos_snapshot 부트
 동시 첫 체결 경합 시 pos_account 중복 생성 가능(connection_id NULL은
 UNIQUE 제약이 구분 못함) — Phase 1과 동일하게 막지 않는다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,10 +38,26 @@ logger = logging.getLogger(__name__)
 
 
 async def record_fill_in_position_ledger(
-    pool: asyncpg.Pool, order: Order, *, metrics: MetricsPort | None = None
+    pool: asyncpg.Pool,
+    order: Order,
+    *,
+    fill_quantity: Decimal | None = None,
+    fill_price: Money | None = None,
+    fill_seq: int = 1,
+    metrics: MetricsPort | None = None,
 ) -> None:
-    """FILLED가 아니거나 실행 컨텍스트가 없으면 아무것도 하지 않는다."""
-    if order.status != OrderStatus.FILLED or order.execution_id is None:
+    """No-op unless the order is PARTIALLY_FILLED/FILLED and has an execution
+    context (task-7998/F3 — the previous FILLED-only gate meant a partially
+    filled order that ended CANCELLED never got its fill into the ledger).
+    Omitting `fill_quantity`/`fill_price` treats `order.filled_quantity`/
+    `order.average_fill_price` as this one fill in full (keeps the existing
+    convention for single-terminal-fill callers like submit.py/
+    fenced_submit.py) — a caller that applies fills one at a time
+    (inbox_processor) passes this fill's own quantity/price/sequence instead."""
+    if (
+        order.status not in (OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED)
+        or order.execution_id is None
+    ):
         return
     metrics = metrics if metrics is not None else NullMetrics()
     # PLT-10 §7.2 `aios.order.fill.count_total` — submit_order()의 동기체결
@@ -60,13 +77,18 @@ async def record_fill_in_position_ledger(
         # portfolio (`default_portfolio_id`, UUIDv5 from the single user_id argument) —
         # the FA-5/6 multi-portfolio selection UX isn't wired into this write path yet
         # (separate leaf).
-        position_key = str(PositionKey(
-            venue=order.exchange, instrument_id=order.symbol, strategy_id=order.strategy_id,
-            execution_id=str(order.execution_id), portfolio_id=default_portfolio_id(user_id),
-        ))
-        fill_price = order.average_fill_price
-        currency = fill_price.currency if fill_price else Currency.USDT
-        price = fill_price.amount if fill_price else Decimal("0")
+        position_key = str(
+            PositionKey(
+                venue=order.exchange,
+                instrument_id=order.symbol,
+                strategy_id=order.strategy_id,
+                execution_id=str(order.execution_id),
+                portfolio_id=default_portfolio_id(user_id),
+            )
+        )
+        resolved_price = fill_price if fill_price is not None else order.average_fill_price
+        currency = resolved_price.currency if resolved_price else Currency.USDT
+        price = resolved_price.amount if resolved_price else Decimal("0")
         async with conn.transaction():
             snapshots = PostgresSnapshotRepository(pool)
             existing = await snapshots.get(conn, user_id, position_key)
@@ -76,33 +98,58 @@ async def record_fill_in_position_ledger(
                 account_id = await conn.fetchval(
                     "SELECT account_id FROM pos_account WHERE tenant_id = $1 AND venue = $2 "
                     "AND connection_id IS NULL",
-                    user_id, order.exchange,
+                    user_id,
+                    order.exchange,
                 )
                 if account_id is None:
                     account_id = await conn.fetchval(
                         "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method) "
                         "VALUES ($1, $2, $3, $4) RETURNING account_id",
-                        user_id, order.exchange, currency.value, CostMethod.FIFO.value,
+                        user_id,
+                        order.exchange,
+                        currency.value,
+                        CostMethod.FIFO.value,
                     )
                 empty = PositionSnapshotView(
-                    position_key=position_key, tenant_id=user_id, account_id=account_id,
-                    instrument_id=uuid4(), quantity=Decimal("0"), cost_method=CostMethod.FIFO,
-                    avg_cost=Money(amount=Decimal("0"), currency=currency), lots=[],
-                    realized_pnl_base=Decimal("0"), unrealized_pnl_base=None,
-                    fees_base=Decimal("0"), funding_base=Decimal("0"),
-                    mark_price=None, mark_at=None, base_currency=currency,
-                    last_journal_seq=0, updated_at=datetime.now(timezone.utc),
+                    position_key=position_key,
+                    tenant_id=user_id,
+                    account_id=account_id,
+                    instrument_id=uuid4(),
+                    quantity=Decimal("0"),
+                    cost_method=CostMethod.FIFO,
+                    avg_cost=Money(amount=Decimal("0"), currency=currency),
+                    lots=[],
+                    realized_pnl_base=Decimal("0"),
+                    unrealized_pnl_base=None,
+                    fees_base=Decimal("0"),
+                    funding_base=Decimal("0"),
+                    mark_price=None,
+                    mark_at=None,
+                    base_currency=currency,
+                    last_journal_seq=0,
+                    updated_at=datetime.now(timezone.utc),
                 )
                 await snapshots.upsert(conn, empty, expected_seq=0)
             command = RecordFillCommand(
-                tenant_id=user_id, account_id=account_id, position_key=position_key,
-                order_id=order.order_id, fill_seq=1, side=order.side,
-                quantity=order.filled_quantity, price=Money(amount=price, currency=currency),
-                fee=None, occurred_at=order.updated_at, trace_id=uuid4(),
+                tenant_id=user_id,
+                account_id=account_id,
+                position_key=position_key,
+                order_id=order.order_id,
+                fill_seq=fill_seq,
+                side=order.side,
+                quantity=fill_quantity if fill_quantity is not None else order.filled_quantity,
+                price=Money(amount=price, currency=currency),
+                fee=None,
+                occurred_at=order.updated_at,
+                trace_id=uuid4(),
             )
             snapshot = await record_fill(
-                conn, command, asset_class=order.asset_class, snapshots=snapshots,
-                journal=PostgresJournalRepository(pool), audit=PostgresAuditEventRepository(pool),
+                conn,
+                command,
+                asset_class=order.asset_class,
+                snapshots=snapshots,
+                journal=PostgresJournalRepository(pool),
+                audit=PostgresAuditEventRepository(pool),
                 clock=lambda: datetime.now(timezone.utc),
             )
             legacy_id = await conn.fetchval(
@@ -115,9 +162,16 @@ async def record_fill_in_position_ledger(
                     "execution_id, quantity, average_entry_price, realized_pnl, entry_time, "
                     "closed_at, asset_class) VALUES "
                     "($1,$2,$3,$4,$5,$6,$7,$8,now(),$9,$10) RETURNING id",
-                    user_id, order.symbol, order.exchange, order.strategy_id,
-                    order.execution_id, snapshot.quantity, snapshot.avg_cost.amount,
-                    snapshot.realized_pnl_base, closed_at, order.asset_class.value,
+                    user_id,
+                    order.symbol,
+                    order.exchange,
+                    order.strategy_id,
+                    order.execution_id,
+                    snapshot.quantity,
+                    snapshot.avg_cost.amount,
+                    snapshot.realized_pnl_base,
+                    closed_at,
+                    order.asset_class.value,
                 )
                 # FA-10: pos_snapshot forbids UPDATE -- replace via DELETE(old row) +
                 # INSERT(new version, same position_key, only legacy_position_id changes).
@@ -136,7 +190,8 @@ async def record_fill_in_position_ledger(
                     " fees_base, funding_base, mark_price, mark_at, last_journal_seq, $1,"
                     " fund_id, portfolio_id, now()"
                     " FROM prior",
-                    legacy_id, position_key,
+                    legacy_id,
+                    position_key,
                 )
             else:
                 # FA-10: positions also forbids UPDATE -- replace via DELETE + INSERT of
@@ -157,6 +212,9 @@ async def record_fill_in_position_ledger(
                     " option_type, strike_price, expiry_date, contract_multiplier,"
                     " underlying_symbol"
                     " FROM prior",
-                    legacy_id, snapshot.quantity, snapshot.avg_cost.amount,
-                    snapshot.realized_pnl_base, closed_at,
+                    legacy_id,
+                    snapshot.quantity,
+                    snapshot.avg_cost.amount,
+                    snapshot.realized_pnl_base,
+                    closed_at,
                 )
