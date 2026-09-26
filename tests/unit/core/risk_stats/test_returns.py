@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#R-18 — returns.py 순수 함수 테스트."""
+
 from decimal import Decimal
 
 import numpy as np
@@ -39,10 +40,18 @@ def test_log_returns_single_close_returns_empty():
 
 def test_scale_sigma_includes_bars_per_day_factor():
     # R4 회귀 방지: bars_per_day가 곱해지지 않으면 이 값과 달라진다.
-    assert scale_sigma(0.01, bars_per_day=1440, horizon_days=1) == pytest.approx(
-        0.01 * (1440**0.5)
-    )
+    assert scale_sigma(0.01, bars_per_day=1440, horizon_days=1) == pytest.approx(0.01 * (1440**0.5))
 
 
 def test_scale_sigma_daily_bars_horizon_one_is_identity():
     assert scale_sigma(0.02, bars_per_day=1, horizon_days=1) == pytest.approx(0.02)
+
+
+def test_scale_sigma_negative_horizon_raises():
+    with pytest.raises(ValueError):
+        scale_sigma(0.02, bars_per_day=1440, horizon_days=-1)
+
+
+def test_log_returns_empty_input_returns_empty():
+    result = log_returns([])
+    assert len(result) == 0

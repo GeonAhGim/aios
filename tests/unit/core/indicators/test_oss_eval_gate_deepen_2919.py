@@ -19,6 +19,7 @@ INDICATOR_OSS_EVAL.md, commit da52f3c)을 D2 미달로 판정했다 — 순수 �
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -103,9 +104,12 @@ def test_negative_banned_license_package_declared_in_pyproject(
     # This is the core machine-verifiable regression the leaf was missing:
     # if a future change adds a GPL/LGPL package as a real dependency, the
     # gate must fail even though the document text itself is untouched.
-    poisoned = pyproject_text.replace(
-        '"TA-Lib==0.7.1",', '"TA-Lib==0.7.1",\n    "backtrader>=1.9",', 1
+    # Anchor on the TA-Lib requirement line whatever version it pins -- a
+    # version literal here would make the poisoning a silent no-op after a bump.
+    poisoned, replaced = re.subn(
+        r'("TA-Lib==[^"]+",)', r'\1\n    "backtrader>=1.9",', pyproject_text, count=1
     )
+    assert replaced == 1
     assert poisoned != pyproject_text
     with pytest.raises(OssEvalGateError, match="BANNED_LICENSE_DEPENDENCY"):
         assert_oss_eval_gate(eval_text, poisoned)

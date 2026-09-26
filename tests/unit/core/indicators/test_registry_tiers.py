@@ -43,6 +43,7 @@ from src.core.indicators.registry import (
     canonical_spec_dict,
 )
 from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec, PlotSpec
+from src.core.indicators.specs_talib import TALIB_SPECS
 
 
 def _spec(name: str) -> IndicatorSpec:
@@ -216,11 +217,12 @@ def test_paginate_catalog_empty_input() -> None:
     assert next_cursor is None
 
 
-# --- DEFAULT_STATIC_CATALOG: 실제 161종 배선 확인 ---------------------------
+# --- DEFAULT_STATIC_CATALOG: 설치된 TA-Lib 전 종 배선 확인 ---------------------
 
 
 def test_default_static_catalog_covers_all_talib_indicators_with_no_duplicates() -> None:
-    assert len(DEFAULT_STATIC_CATALOG) == 161
+    assert set(DEFAULT_STATIC_CATALOG) == set(TALIB_SPECS)
+    assert len(DEFAULT_STATIC_CATALOG) == len(TALIB_SPECS)
     assert all(entry.tier == Tier.CORE for entry in DEFAULT_STATIC_CATALOG.values())
 
 
@@ -322,7 +324,7 @@ def test_merge_and_paginate_latency_budget_matches_list_api_p95() -> None:
     pure part's share of that budget so it cannot quietly regress into eating
     the endpoint's whole latency budget on its own. 500 script entries for a
     single tenant simulates a very large marketplace catalog merged on top of
-    all 161 real CORE indicators."""
+    every real CORE indicator of the installed TA-Lib."""
     tenant_id = uuid.uuid4()
     script_entries = [
         _script_entry(f"SCRIPT_{i:04d}", tenant_id=tenant_id, script_hash=f"{i:064x}")

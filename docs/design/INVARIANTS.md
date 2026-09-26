@@ -1,4 +1,4 @@
-# AIOS 불변조건 카탈로그 (I-01 ~ I-11)
+# AIOS 불변조건 카탈로그 (I-01 ~ I-12)
 
 출처: `docs/research/brainstorm_2026-09-03/AIOS_Registers_v1_Assumption_Contradiction_Invariant_Failure_2026-09-03.md` §3
 (Codex·Fable·ChatGPT 교차검증, 코드 레벨 근거 포함). 채택: ADR-2026-09-04-C.
@@ -17,6 +17,9 @@
 | I-09 | 주문 최종 ALLOW/DENY는 **두 개의 독립 권위**(RiskEngine 합성점 ∩ Compliance 번들 평가)를 모두 통과해야 하며, 각각 조회 증거(`risk_decision_id`·`compliance_decision_id`)를 남긴다 (2026-09-06 ADR-B D4 반영 — 이전 "mandate ∩ RiskEngine 단일 합성점" 표현은 폐기) | R-16/R-35/R-36(리스크 합성), CM-3/CM-8(컴플라이언스), OMS §3.1-a submit_order 배선 |
 | I-10 | "구현됨 ≠ 작동함": 안전/정책 컴포넌트는 배선 증명 테스트(정적 검사 또는 적대적 통합)가 있어야 완료 | 모든 리프 DoD, QA 프롬프트 |
 | I-11 | 확인이 필요한 작업은 1회성 서버측 토큰으로 미리보기와 실행을 연결한다(클라이언트 플래그만으로 불가) | 승인 워크플로·Agent Gateway |
+| I-12 | AI/에이전트는 LIVE 주문 경로에 도달할 수 없고, PAPER 승격·실행은 confirm ticket 필수(2026-09-26 ADR-2026-09-26-B Decision 3, AIS-1 신설) | `tests/adversarial/assistant/test_no_execution_access.py`(FORBIDDEN_MODULE_PREFIXES 임포트 그래프 정적 검사 + confirm ticket 없이 PAPER 승격 시도 시 거부 확인) |
 
 **실패 시나리오 카탈로그(F-01~F-12)**는 같은 레지스터 §4에 있다. QA는 해당 영역 리프에서 관련 F 항목을
-적대적 테스트로 재현·차단해야 한다.
+적대적 테스트로 재현·차단해야 한다. I-12는 기존 F-01~F-12 중 어느 것과도 직접 대응하지 않는다 — AI/에이전트
+분리는 그 레지스터가 작성된 2026-09-03 당시 존재하지 않았던 경로(AI factory PAPER 승격)이므로, 새 F-xx
+항목 없이 I-12 자신의 강제 지점(위 표)이 유일한 재현·차단 지점이다(ADR-2026-09-26-B Decision 3 실측 근거).

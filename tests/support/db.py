@@ -35,6 +35,7 @@ import pytest
 __all__ = [
     "session_database_url",
     "ensure_worker_database",
+    "drop_worker_database",
     "create_pool_with_retry",
     "tx_conn",
     "_db_name",

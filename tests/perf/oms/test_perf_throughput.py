@@ -49,7 +49,10 @@ _OUTBOX_PER_ROW_ROUND_TRIPS = 24  # test_perf_outbox_dispatch.py 실측(28-4)
 
 _INBOX_TARGET_EV_PER_SEC = 500.0  # §7.1 운영 목표 — 비차단(print)
 _INBOX_BATCH_SIZE = 500
-_INBOX_PER_ROW_ROUND_TRIPS = 20  # process_once 부분체결 1행당 실측
+_INBOX_PER_ROW_ROUND_TRIPS = 22  # process_once 부분체결 1행당 실측(task-8046
+# 재확인 — task-7998/F3가 PARTIALLY_FILLED도 position_ledger 분기를 타게
+# 바꿔 행당 +2: `legacy_order_repository.get_by_order_id` 1회 + 그 조회가
+# 쓰는 별도 acquire/release 사이클의 세션 리셋 1회)
 
 # 배치 총 소요시간의 환경 정규화 상한 = (왕복 수 예산 × 기준 왕복 p95) × 이
 # 배수. 순차 단일 커넥션이라 "왕복 수 × 기준 비용"이 자연스러운 하한이고,
