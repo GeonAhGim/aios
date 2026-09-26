@@ -41,6 +41,7 @@ def register_routers(app: FastAPI) -> None:
         positions,
         reports,
         research_data,
+        risk_coach,
         screener,
         scripts,
         strategy_builder,
@@ -96,6 +97,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(indicators.router)  # IND-12(task-1730) /v1/indicators
     app.include_router(backtests.router)  # BT-10c(task-1619) /v1/backtests/quick
     app.include_router(assistant.router)  # U-3a(task-2630) /v1/assistant
+    app.include_router(risk_coach.router, prefix="/risk-coach", tags=["risk-coach"])
     app.include_router(ai.router)  # AI-17(task-2652) /v1/ai
     app.include_router(positions.router)
     app.include_router(dashboard.router)  # U-2a(task-2629) /v1/accounts/summary
