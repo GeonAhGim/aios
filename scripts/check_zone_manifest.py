@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import sys
 from pathlib import Path
 
@@ -25,6 +26,12 @@ VALID_ZONES = ("FROZEN", "FROZEN_PAPER_ONLY", "SCAFFOLD", "OPEN")
 ALLOWED_MISSING_PREFIXES = ("aios/kernel/",)
 COVERAGE_ROOT = "src"
 
+# ADR-2026-09-26-B Decision 4 (DOM-2): src/foundation/<ctx>/ is expected to carry all
+# five layers below. A context missing one or more must say why in the manifest's
+# scaffold_reasons map, so new code cannot land without a declared layer position.
+FOUNDATION_ROOT = "src/foundation"
+FOUNDATION_LAYERS = ("domain", "application", "ports", "adapters", "contracts")
+
 
 def _matches(pattern: str, relpath: str) -> bool:
     """`**`를 "0개 이상의 디렉터리"로 해석하는 glob 매칭(fnmatch는 `**`를 `*`와
@@ -33,6 +40,59 @@ def _matches(pattern: str, relpath: str) -> bool:
         prefix = pattern[: -len("/**")]
         return relpath == prefix or relpath.startswith(prefix + "/")
     return fnmatch.fnmatch(relpath, pattern)
+
+
+def foundation_context_dirs(root: Path) -> list[Path]:
+    """Immediate bounded-context directories under src/foundation/."""
+    base = root / FOUNDATION_ROOT
+    if not base.is_dir():
+        return []
+    return sorted(
+        p for p in base.iterdir() if p.is_dir() and p.name != "__pycache__"
+    )
+
+
+def missing_layers(ctx_dir: Path) -> list[str]:
+    """Names from FOUNDATION_LAYERS that are not a directory under ctx_dir."""
+    return [layer for layer in FOUNDATION_LAYERS if not (ctx_dir / layer).is_dir()]
+
+
+def check_scaffold_reasons(root: Path, manifest: dict[str, object]) -> list[str]:
+    """DOM-2: every foundation context with a missing layer needs a non-empty
+    scaffold_reasons[ctx] entry. Introduced in warn mode (see main()) -- wiring this
+    into a hard CI gate is a follow-up ops leaf, per OPS-42's warn-before-gate pattern."""
+    raw_reasons = manifest.get("scaffold_reasons")
+    reasons: dict[str, object] = raw_reasons if isinstance(raw_reasons, dict) else {}
+    problems: list[str] = []
+    for ctx_dir in foundation_context_dirs(root):
+        missing = missing_layers(ctx_dir)
+        if not missing:
+            continue
+        ctx = ctx_dir.name
+        reason = reasons.get(ctx)
+        if not isinstance(reason, str) or not reason.strip():
+            problems.append(
+                f"{ctx}: missing layer(s) {', '.join(missing)} "
+                "but no scaffold_reasons entry"
+            )
+    return problems
+
+
+# 2026-09-26(CTO, esc-ci-zone timeout 120s): ROOT.rglob("*")는 .venv/node_modules/.git까지
+# 전부 걷고 나서 걸러내 부하 시 2분을 넘겼다(check_no_bom b89c0260와 같은 결함). os.walk로
+# 내려가면서 제외 디렉터리는 아예 들어가지 않는다.
+PRUNED_DIRS = frozenset({".git", ".venv", "__pycache__", "node_modules"})
+
+
+def _tracked_files(root: Path) -> list[str]:
+    """Repo files as posix paths relative to root, never descending into PRUNED_DIRS."""
+    out: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in PRUNED_DIRS)
+        rel_dir = Path(dirpath).relative_to(root)
+        for f in filenames:
+            out.append((rel_dir / f).as_posix() if rel_dir.parts else f)
+    return out
 
 
 def main() -> int:
@@ -49,15 +109,7 @@ def main() -> int:
         if zone not in VALID_ZONES:
             failures.append(f"알 수 없는 zone 이름: {zone} (허용: {', '.join(VALID_ZONES)})")
 
-    tracked = [
-        p.relative_to(ROOT).as_posix()
-        for p in ROOT.rglob("*")
-        if p.is_file()
-        and ".git" not in p.parts
-        and ".venv" not in p.parts
-        and "__pycache__" not in p.parts
-        and "node_modules" not in p.parts
-    ]
+    tracked = _tracked_files(ROOT)
 
     pattern_owner: dict[str, str] = {}
     for zone, patterns in zones.items():
@@ -77,6 +129,15 @@ def main() -> int:
     ]
     for rel in uncovered:
         failures.append(f"zone 미선언 소스 파일: {rel}")
+
+    scaffold_problems = check_scaffold_reasons(ROOT, manifest)
+    if scaffold_problems:
+        print(
+            "WARN: DOM-2 (ADR-2026-09-26-B) scaffold_reasons gaps -- warn mode, "
+            "does not fail the build; CI gate wiring is a follow-up ops leaf"
+        )
+        for line in scaffold_problems:
+            print(f"  - {line}")
 
     if failures:
         print("FAIL: .aios-zone 매니페스트 검증 실패")
