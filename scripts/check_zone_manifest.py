@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import fnmatch
+import os
 import sys
 from pathlib import Path
 
@@ -77,6 +78,23 @@ def check_scaffold_reasons(root: Path, manifest: dict[str, object]) -> list[str]
     return problems
 
 
+# 2026-09-26(CTO, esc-ci-zone timeout 120s): ROOT.rglob("*")는 .venv/node_modules/.git까지
+# 전부 걷고 나서 걸러내 부하 시 2분을 넘겼다(check_no_bom b89c0260와 같은 결함). os.walk로
+# 내려가면서 제외 디렉터리는 아예 들어가지 않는다.
+PRUNED_DIRS = frozenset({".git", ".venv", "__pycache__", "node_modules"})
+
+
+def _tracked_files(root: Path) -> list[str]:
+    """Repo files as posix paths relative to root, never descending into PRUNED_DIRS."""
+    out: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in PRUNED_DIRS)
+        rel_dir = Path(dirpath).relative_to(root)
+        for f in filenames:
+            out.append((rel_dir / f).as_posix() if rel_dir.parts else f)
+    return out
+
+
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows 콘솔(cp949)에서 한글 깨짐 방지
@@ -91,15 +109,7 @@ def main() -> int:
         if zone not in VALID_ZONES:
             failures.append(f"알 수 없는 zone 이름: {zone} (허용: {', '.join(VALID_ZONES)})")
 
-    tracked = [
-        p.relative_to(ROOT).as_posix()
-        for p in ROOT.rglob("*")
-        if p.is_file()
-        and ".git" not in p.parts
-        and ".venv" not in p.parts
-        and "__pycache__" not in p.parts
-        and "node_modules" not in p.parts
-    ]
+    tracked = _tracked_files(ROOT)
 
     pattern_owner: dict[str, str] = {}
     for zone, patterns in zones.items():
