@@ -16,12 +16,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 HOOK = ROOT / ".claude" / "hooks" / "session-start.sh"
 
+# On Windows, str(HOOK) is a backslash path (C:\...\.claude\hooks\session-start.sh).
+# Git Bash's argv handling drops those backslashes, so passing the absolute path
+# fails with "No such file or directory". Passing the hook's path relative to
+# cwd=ROOT in posix form sidesteps that -- there are no backslashes to mangle.
+HOOK_ARG = HOOK.relative_to(ROOT).as_posix()
+
 
 def _run(env_overrides: dict[str, str]) -> subprocess.CompletedProcess[str]:
     env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_REMOTE"}
     env.update(env_overrides)
     return subprocess.run(
-        ["bash", str(HOOK)],
+        ["bash", HOOK_ARG],
         cwd=ROOT,
         env=env,
         capture_output=True,
