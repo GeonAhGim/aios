@@ -5,7 +5,8 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 IND-1
 
 Iterates `talib.get_functions()` x `abstract.Function(name).info` to
 **generate** specs (manual writing prohibited) — group→category (`TALIB_GROUPS`),
-parameters(defaults)→integer parameter range rules, `.lookback`→measured lookback,
+parameters(defaults)→integer parameter range rules
+(`param_rules.py`), `.lookback`→measured lookback,
 output_names→output contract, output_flags/function_flags→`PlotSpec` defaults.
 
 Floating-point parameters (nbdevup, acceleration, penetration, etc.)
@@ -30,10 +31,10 @@ from typing import Any, TypedDict
 import talib
 from talib import abstract as talib_abstract
 
+from src.core.indicators.param_rules import int_param_specs
 from src.core.indicators.spec import (
     DefaultPane,
     IndicatorSpec,
-    ParamSpec,
     PlotKind,
     PlotSpec,
     ScaleHint,
@@ -57,65 +58,11 @@ class OutputStyle(TypedDict, total=False):
     precision: int
     legend_format: str
 
-_PERIOD_MIN = 1
-_PERIOD_MAX = 2000
-_MATYPE_MIN = 0
-
-
-def _matype_max() -> int:
-    """Largest `talib.MA_Type` ordinal of the installed library.
-
-    The MA type catalog grows with the C library (0.4: SMA(0)..T3(8); 0.6 adds
-    HMA(9)..RMA(13), which KDJ uses as its default). Hard-coding the upper bound
-    would reject a newer function's own default (`STRATEGY_PARAM_OUT_OF_RANGE`),
-    so it is derived from the enum members TA-Lib actually exposes.
-    """
-    # talib's stubs do not re-export `MA_Type` from the package root (the same
-    # stub limitation as `abstract.Function` below) -- it exists at runtime.
-    ma_type = talib.MA_Type  # type: ignore[attr-defined]
-    ordinals = [
-        value
-        for attr in dir(ma_type)
-        if not attr.startswith("_") and isinstance(value := getattr(ma_type, attr), int)
-    ]
-    if not ordinals:
-        raise ValueError("talib.MA_Type exposes no integer members")
-    return max(ordinals)
-
-
-_MATYPE_MAX = _matype_max()
-_DEVIATION_MIN = 0.1
-_DEVIATION_MAX = 10.0
-
-_MATYPE_PARAM_NAMES = frozenset(
-    {
-        "matype",
-        "fastmatype",
-        "slowmatype",
-        "signalmatype",
-        "slowk_matype",
-        "slowd_matype",
-        "fastd_matype",
-    }
-)
-
 _CANDLESTICK_FLAG = "Output is a candlestick"
 _SAME_SCALE_FLAG = "Output scale same as input"
 _HISTOGRAM_FLAG = "Histogram"
 _UPPER_LIMIT_FLAG = "Values represent an upper limit"
 _LOWER_LIMIT_FLAG = "Values represent a lower limit"
-
-
-def _deviation_range(default: float) -> tuple[float, float]:
-    """Decision note rule "deviation 0.1~10" (pure function). Not yet wired into
-    `ParamSpec` — see module docstring. If the default falls outside the rule range
-    (e.g. SAR acceleration), symmetrically expand to include the default
-    (always guarantees min <= default <= max)."""
-    if _DEVIATION_MIN <= default <= _DEVIATION_MAX:
-        return _DEVIATION_MIN, _DEVIATION_MAX
-    if default <= 0:
-        return 0.0, _DEVIATION_MAX
-    return min(_DEVIATION_MIN, default), max(_DEVIATION_MAX, default)
 
 
 def _flatten_inputs(input_names: Mapping[str, object]) -> tuple[str, ...]:
@@ -133,25 +80,6 @@ def _flatten_inputs(input_names: Mapping[str, object]) -> tuple[str, ...]:
         else:
             flat.append(str(value))
     return tuple(flat)
-
-
-def _int_param_specs(parameters: Mapping[str, object]) -> tuple[ParamSpec, ...]:
-    """Expose only integer parameters as `ParamSpec` (floats — see module docstring).
-
-    matype family: 0~max(talib.MA_Type) of the installed library; other integers:
-    period rule 1~2000.
-    """
-    specs: list[ParamSpec] = []
-    for name, default in parameters.items():
-        if isinstance(default, float):
-            continue
-        if not isinstance(default, int):
-            continue
-        if name in _MATYPE_PARAM_NAMES:
-            specs.append(ParamSpec(name=name, min=_MATYPE_MIN, max=_MATYPE_MAX, default=default))
-        else:
-            specs.append(ParamSpec(name=name, min=_PERIOD_MIN, max=_PERIOD_MAX, default=default))
-    return tuple(specs)
 
 
 def _style_for_function(function_flags: Sequence[str] | None) -> tuple[ScaleHint, DefaultPane]:
@@ -302,7 +230,7 @@ def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, Indica
     for name in selected:
         info = talib_abstract.Function(name).info  # type: ignore[attr-defined]
         inputs = _flatten_inputs(info["input_names"])
-        params = _int_param_specs(info["parameters"])
+        params = int_param_specs(info["parameters"])
         outputs = tuple(info["output_names"])
         scale, default_pane = _style_for_function(info["function_flags"])
         style: dict[str, OutputStyle] = {

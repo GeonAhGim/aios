@@ -90,37 +90,37 @@ def test_pattern_recognition_group_matches_installed_candle_functions() -> None:
 
 def test_every_generated_default_lies_within_its_own_range() -> None:
     """게이트 적색 재현(TA-Lib 0.6.x KDJ): `slowk_matype` 기본값 13이 하드코딩
-    상한 8(`_MATYPE_MAX = 8`) 밖에 있어 기본값 호출이 `STRATEGY_PARAM_OUT_OF_RANGE`
-    로 거부됐다. 생성된 스펙은 자기 기본값을 반드시 수용해야 한다 — 어떤 버전의
-    어떤 함수든 기본값으로는 계산 가능해야 하기 때문이다."""
+    상한 8(구 `_MATYPE_MAX = 8`, 현 `param_rules.MATYPE_MAX`) 밖에 있어 기본값 호출이
+    `STRATEGY_PARAM_OUT_OF_RANGE`로 거부됐다. 생성된 스펙은 자기 기본값을 반드시
+    수용해야 한다 — 어떤 버전의 어떤 함수든 기본값으로는 계산 가능해야 하기 때문이다."""
     for name, spec in generate_talib_specs().items():
         for param in spec.params:
             assert param.min <= param.default <= param.max, (name, param)
 
 
 def test_matype_upper_bound_tracks_installed_ma_type_enum() -> None:
-    from src.core.indicators import generate_specs as module
+    from src.core.indicators import param_rules as module
 
     ordinals = [
         getattr(talib.MA_Type, attr)
         for attr in dir(talib.MA_Type)
         if not attr.startswith("_") and isinstance(getattr(talib.MA_Type, attr), int)
     ]
-    assert module._MATYPE_MAX == max(ordinals)
-    assert module._MATYPE_MAX >= 8  # SMA(0)..T3(8) exist in every supported version
+    assert module.MATYPE_MAX == max(ordinals)
+    assert module.MATYPE_MAX >= 8  # SMA(0)..T3(8) exist in every supported version
 
 
 def test_matype_upper_bound_fails_closed_when_enum_exposes_no_ordinals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.core.indicators import generate_specs as module
+    from src.core.indicators import param_rules as module
 
     class _NoOrdinals:
         SMA = "not-an-int"
 
     monkeypatch.setattr(module.talib, "MA_Type", _NoOrdinals, raising=True)
     with pytest.raises(ValueError, match="MA_Type"):
-        module._matype_max()
+        module.matype_max()
 
 
 def test_talib_groups_classify_into_exactly_ten_categories() -> None:
@@ -210,20 +210,20 @@ def test_registry_rejects_out_of_range_param_for_a_generated_indicator() -> None
 
 
 def test_registry_rejects_out_of_range_matype_for_a_generated_indicator() -> None:
-    from src.core.indicators.generate_specs import _MATYPE_MAX
+    from src.core.indicators.param_rules import MATYPE_MAX
 
     registry = IndicatorRegistry(TALIB_SPECS)
     with pytest.raises(IndicatorError) as excinfo:
-        registry.validate_params("MA", {"matype": _MATYPE_MAX + 1})
+        registry.validate_params("MA", {"matype": MATYPE_MAX + 1})
     assert excinfo.value.code == "STRATEGY_PARAM_OUT_OF_RANGE"
 
 
 def test_registry_accepts_every_installed_matype_ordinal() -> None:
-    from src.core.indicators.generate_specs import _MATYPE_MAX
+    from src.core.indicators.param_rules import MATYPE_MAX
 
     registry = IndicatorRegistry(TALIB_SPECS)
-    assert _MATYPE_MAX >= 8  # SMA(0)..T3(8) are present in every supported version
-    for ordinal in range(_MATYPE_MAX + 1):
+    assert MATYPE_MAX >= 8  # SMA(0)..T3(8) are present in every supported version
+    for ordinal in range(MATYPE_MAX + 1):
         assert registry.validate_params("MA", {"matype": ordinal})["matype"] == ordinal
 
 

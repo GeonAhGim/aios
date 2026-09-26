@@ -31,6 +31,7 @@ import pytest
 import talib
 
 from src.core.indicators.adapters import pandas_ta_bridge as bridge
+from src.core.indicators.adapters import pandas_ta_candidates as candidates
 from src.core.indicators.registry import IndicatorError, IndicatorRegistry
 from src.core.indicators.specs_talib import TALIB_SPECS
 from src.data.models.market_data import Candle
@@ -198,7 +199,7 @@ def test_insufficient_data_returns_message_not_exception() -> None:
 def test_calculate_raises_when_library_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     """pandas-ta-classic이 `None`을 반환하는 경로(입력 검증 실패 등)를 조용히
     통과시키지 않고 fail-closed로 거부하는지 — `pta.dpo`를 직접 패치해 주입."""
-    monkeypatch.setattr(bridge.pta, "dpo", lambda *a, **k: None)
+    monkeypatch.setattr(candidates.pta, "dpo", lambda *a, **k: None)
     with pytest.raises(IndicatorError) as exc:
         _candidate_service().calculate("dpo", _candles_random_walk(50))
     assert exc.value.code == "STRATEGY_INDICATOR_COMPUTE_FAILED"
