@@ -425,6 +425,33 @@ async def test_batch_cancel_replace_orders_returns_data(make_adapter, json_respo
     assert result == {"successList": [{"orderId": "1000"}]}
 
 
+async def test_batch_cancel_replace_orders_sends_cancel_only_no_replace_fields(
+    make_adapter, json_response
+):
+    """Contract: despite the endpoint name, this method is cancel-only — it
+    must never fabricate replacement price/size fields (undocumented batch
+    schema, see docstring on `batch_cancel_replace_orders`)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert set(body.keys()) == {"orderIdList", "symbol"}
+        for entry in body["orderIdList"]:
+            assert set(entry.keys()) == {"orderId"}
+            assert "price" not in entry
+            assert "size" not in entry
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"successList": [{"orderId": "1000"}]},
+            }
+        )
+
+    adapter = make_adapter(handler)
+    await adapter.batch_cancel_replace_orders(["999"], symbol="BTC/USDT")
+
+
 async def test_cancel_symbol_orders_returns_true_on_success(make_adapter, json_response):
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/spot/trade/cancel-symbol-order"

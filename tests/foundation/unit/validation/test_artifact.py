@@ -79,6 +79,24 @@ def test_verify_detects_tampered_registry_version():
     assert verify(tampered) == ARTIFACT_HASH_MISMATCH
 
 
+def test_verify_detects_tampered_compiler_version():
+    """A forged `compiler_version` (claiming a different compiler build
+    produced this artifact) must be caught the same way as any other
+    hash-input field."""
+    artifact = _artifact()
+    tampered = artifact.model_copy(update={"compiler_version": "cc-test-forged"})
+    assert verify(tampered) == ARTIFACT_HASH_MISMATCH
+
+
+def test_verify_detects_tampered_grammar_version():
+    """A forged `grammar_version` (claiming the artifact was compiled
+    against a different DSL grammar than it actually was) must be caught
+    the same way as any other hash-input field."""
+    artifact = _artifact()
+    tampered = artifact.model_copy(update={"grammar_version": "grammar-forged"})
+    assert verify(tampered) == ARTIFACT_HASH_MISMATCH
+
+
 # --------------------------------------------------------------------------
 # D2 negative -- frozen 모델은 필드 하나만 바뀌어도 새 artifact_hash를 요구한다
 # (§2 row 158 "content-addressed and immutable once versioned").
@@ -89,6 +107,23 @@ def test_artifact_is_frozen_rejects_mutation():
     artifact = _artifact()
     with pytest.raises(ValidationError):
         artifact.strategy_id = "strat-2"
+
+
+# --------------------------------------------------------------------------
+# D2 실패주입 -- L02 레지스트리(의존성) 예외는 fail-closed로 전파돼야 한다.
+# artifact_hash가 잘못된 registry_version(예: 빈 문자열)으로 조용히 만들어지면
+# I-04(content-addressed, immutable) 위반이므로, 여기서 삼켜서 성공으로
+# 위장하지 않는지 확인한다.
+# --------------------------------------------------------------------------
+
+
+def test_build_artifact_propagates_registry_hash_failure(monkeypatch):
+    def _boom() -> str:
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch.setattr(DEFAULT_REGISTRY, "registry_hash", _boom)
+    with pytest.raises(RuntimeError, match="registry unavailable"):
+        _artifact()
 
 
 # --------------------------------------------------------------------------

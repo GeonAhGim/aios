@@ -33,6 +33,7 @@ task-5807: worker 하나가 끝날 때마다 `--reset`이 새로 만들고 아�
     python scripts/setup_test_db.py pm --drop         # aios_test_pm DROP(없으면 조용히 통과)
     python scripts/setup_test_db.py --list            # "aios_test_<name> <size_bytes>" 한 줄씩
 """
+
 from __future__ import annotations
 
 import argparse
@@ -94,9 +95,7 @@ async def _ensure_database(
     try:
         await admin.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", database)
         try:
-            exists = await admin.fetchval(
-                "SELECT 1 FROM pg_database WHERE datname = $1", database
-            )
+            exists = await admin.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database)
             if exists and reset:
                 await admin.execute(
                     "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -126,9 +125,7 @@ async def _drop_database(server_url: str, database: str) -> bool:
     try:
         await admin.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", database)
         try:
-            exists = await admin.fetchval(
-                "SELECT 1 FROM pg_database WHERE datname = $1", database
-            )
+            exists = await admin.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database)
             if not exists:
                 return False
             await admin.execute(
@@ -144,21 +141,70 @@ async def _drop_database(server_url: str, database: str) -> bool:
         await admin.close()
 
 
+_LIST_SIZE_LOCK_TIMEOUT_MS = 1_500
+_LIST_SIZE_CONCURRENCY = 16
+_LIST_SIZE_BUDGET_S = 10.0
+
+
+async def _size_of_database(pool: asyncpg.Pool, name: str) -> int:
+    """`pg_database_size`는 대상 DB에 AccessShareLock을 건다 -- 같은 서버를 공유하는
+    다른 워커가 그 순간 `DROP DATABASE`/`CREATE DATABASE ... TEMPLATE` 중이면(다른
+    워크트리들이 상시 동시 실행 중) 그 DDL이 끝날 때까지 블록될 수 있다.
+    `lock_timeout`으로 상한을 두고, 잠겼거나 권한이 없으면(호출자 접속 불가 DB는
+    NULL) 0으로 취급해 집계에서 조용히 빠지게 한다."""
+    async with pool.acquire() as conn:
+        await conn.execute(f"SET lock_timeout = '{_LIST_SIZE_LOCK_TIMEOUT_MS}ms'")
+        try:
+            size = await conn.fetchval("SELECT pg_database_size($1)", name)
+        except asyncpg.exceptions.LockNotAvailableError:
+            return 0
+        return int(size or 0)
+
+
 async def _list_test_databases(server_url: str) -> list[tuple[str, int]]:
     """`aios_test_` 접두어 DB만 (이름, 바이트 크기) 목록으로 — healthcheck.py의
-    test_db_bloat 소견과 scripts/cleanup_orphan_test_dbs.py(pm 저장소)가 이 출력을 파싱한다."""
-    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
+    test_db_bloat 소견과 scripts/cleanup_orphan_test_dbs.py(pm 저장소)가 이 출력을 파싱한다.
+
+    이름 나열(카탈로그 스캔)은 잠금·디스크 I/O가 필요 없어 즉시 끝나지만, 크기는
+    DB마다 `pg_database_size`가 그 DB의 파일들을 stat해야 해서 대상이 100+개로
+    불어난 상시 병존 워크트리 환경에서는(task-6096/esc-ci-pytest_perf 실측: 140+개,
+    직렬 조회 시 개당 0.4~1s로 전체 --list가 수십~150s) 한 번에 다 세는 것 자체가
+    비용이 된다. 개별 락 상한만으로는(직전 시도) 막지 못한다 -- 잠기지 않은
+    DB조차 개당 I/O 지연이 누적되기 때문이다. 이름 목록은 항상 전부 반환하되,
+    크기 조회는 커넥션 풀로 동시에 돌리고 전체에 유한한 시간 예산을 둔다 -- 예산
+    안에 못 끝난 DB는 크기 0으로 보고한다(cleanup_orphan_test_dbs.py는 이름으로
+    정리 대상을 판별하고 크기는 우선순위/로그용이라 최선 노력으로 충분하다).
+    테스트 예산(LIST_SUBPROCESS_BUDGET_S)을 올리는 대신, DB 증가에 무관하게 --list
+    자체가 유한 시간에 끝나도록 만드는 근본 수정이다(DECISION_GUIDELINES B-2)."""
+    dsn = _asyncpg_dsn(_with_database(server_url, "postgres"))
+    admin = await asyncpg.connect(dsn)
     try:
-        rows = await admin.fetch(
-            "SELECT datname, pg_database_size(datname) AS size "
-            "FROM pg_database WHERE datname LIKE $1 ORDER BY datname",
-            PREFIX + "%",
-        )
-        # pg_database_size는 호출자에게 접속 권한 없는 DB에는 NULL을 준다(권한 부족,
-        # DROP과 SELECT 사이 경합 등) -- 0으로 취급해 집계에서 조용히 빠지게 한다.
-        return [(r["datname"], int(r["size"] or 0)) for r in rows]
+        names = [
+            r["datname"]
+            for r in await admin.fetch(
+                "SELECT datname FROM pg_database WHERE datname LIKE $1 ORDER BY datname",
+                PREFIX + "%",
+            )
+        ]
     finally:
         await admin.close()
+
+    sizes: dict[str, int] = dict.fromkeys(names, 0)
+    pool = await asyncpg.create_pool(dsn, min_size=1, max_size=_LIST_SIZE_CONCURRENCY)
+    try:
+
+        async def _fill(name: str) -> None:
+            sizes[name] = await _size_of_database(pool, name)
+
+        tasks = [asyncio.create_task(_fill(name)) for name in names]
+        _done, pending = await asyncio.wait(tasks, timeout=_LIST_SIZE_BUDGET_S)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+    finally:
+        await pool.close()
+    return [(name, sizes[name]) for name in names]
 
 
 def _migrate(test_url: str) -> None:
@@ -229,7 +275,7 @@ def main() -> int:
     print(f"{'생성' if created else '재사용'}: {database} — alembic head 적용 완료")
     print("pytest 실행 전:")
     print(f"  bash:       export TEST_DATABASE_URL={test_url}")
-    print(f"  PowerShell: $env:TEST_DATABASE_URL = \"{test_url}\"")
+    print(f'  PowerShell: $env:TEST_DATABASE_URL = "{test_url}"')
     return 0
 
 

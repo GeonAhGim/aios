@@ -20,6 +20,7 @@ MAJOR 위반이 난다. 그래서 이 파일은 이 라우터들에 대해 "에�
 ApiError 포맷"이라는, 이번 변경 전후로 항상 참인 사실만 검증한다 — 성공
 응답이 봉투라고 거짓 주장하지 않는다.
 """
+
 from __future__ import annotations
 
 import re
@@ -121,9 +122,7 @@ async def test_users_ownership_error_response_is_the_apierror_envelope(client):
     ApiError로 변환하는지 실호출로 확인한다."""
     _, headers = await _register_user(client)
 
-    response = await client.post(
-        "/users/me/approval-requests/999999/approve", headers=headers
-    )
+    response = await client.post("/users/me/approval-requests/999999/approve", headers=headers)
 
     assert response.status_code == 403
     body = response.json()
@@ -249,9 +248,7 @@ async def test_wallet_topup_validation_error_response_is_the_apierror_envelope(c
     것만 새로 고정한다."""
     _, headers = await _register_user(client)
 
-    response = await client.post(
-        "/wallet/topup-requests", json={"amount": "0"}, headers=headers
-    )
+    response = await client.post("/wallet/topup-requests", json={"amount": "0"}, headers=headers)
 
     assert response.status_code == 400
     body = response.json()
@@ -288,15 +285,97 @@ async def test_executions_create_without_credential_is_the_apierror_envelope(cli
     assert body["error_code"] == "RESOURCE_NOT_FOUND"
 
 
+async def test_auth_register_invalid_email_format_is_the_apierror_envelope(client):
+    """SignupRequest.email이 `EmailStr`이므로 형식이 어긋난 입력은
+    FastAPI가 `RequestValidationError`를 던지고, 전역 핸들러가
+    VALIDATION_INVALID_FIELD(400) ApiError로 변환하는지 확인한다 —
+    성공 봉투(`data`/`meta`) 모양이 아니라 검증 실패 자체를 명시적으로
+    거부하는 불변식 테스트."""
+    response = await client.post(
+        "/auth/register", json={"email": "not-an-email", "password": STRONG_PASSWORD}
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_auth_register_duplicate_email_is_the_apierror_envelope(client):
+    """AuthService.signup()의 이메일 유일성 불변식 — 이미 등록된 이메일로
+    재가입을 시도하면 AuthError가 전역 핸들러를 거쳐 AUTH_INVALID_CREDENTIALS
+    (401) ApiError로 변환된다(계정열거 방지를 위해 별도 코드를 쓰지 않는다,
+    exception_mapping.py 모듈 docstring 참조)."""
+    email = _unique_email()
+    first = await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+    assert first.status_code == 201
+
+    second = await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+
+    assert second.status_code == 401
+    body = second.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "AUTH_INVALID_CREDENTIALS"
+
+
+async def test_users_me_without_authorization_header_is_the_apierror_envelope(client):
+    """get_current_user()의 인증 필수 불변식 — Authorization 헤더가 없으면
+    토큰 파싱 이전에 즉시 401 AUTH_REQUIRED ApiError로 거부되어야 한다."""
+    response = await client.get("/users/me")
+
+    assert response.status_code == 401
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "AUTH_REQUIRED"
+
+
+async def test_users_me_with_garbage_bearer_token_is_the_apierror_envelope(client):
+    """get_current_user()가 서명 검증에 실패하는 토큰을 그대로
+    TokenVerifier.verify()에 넘기면 TokenInvalidError가 전역 핸들러를 거쳐
+    AUTH_TOKEN_INVALID(401) ApiError로 변환되는지 확인한다 — 위조/손상된
+    Bearer 토큰이 정상 응답으로 새어나가지 않는다는 불변식."""
+    response = await client.get("/users/me", headers={"Authorization": "Bearer not-a-valid-jwt"})
+
+    assert response.status_code == 401
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "AUTH_TOKEN_INVALID"
+
+
+async def test_auth_register_unexpected_service_failure_is_generic_apierror_envelope(
+    client, monkeypatch
+):
+    """실패주입 — AuthService.signup()이 분류되지 않은 예외(RuntimeError)를
+    던지도록 monkeypatch하면, 전역 `Exception` 핸들러가 fail-closed로
+    500 INTERNAL_ERROR ApiError를 돌려주고 원인 메시지("db-pool-exhausted"
+    같은 내부 정보)를 응답 본문에 노출하지 않는지 확인한다
+    (src/api/contracts/handlers.py `_handle_domain_or_unknown_exception`)."""
+    from src.services.auth_service import AuthService
+
+    async def _boom(self, email, password):
+        raise RuntimeError("db-pool-exhausted")
+
+    monkeypatch.setattr(AuthService, "signup", _boom)
+
+    response = await client.post(
+        "/auth/register",
+        json={"email": _unique_email(), "password": STRONG_PASSWORD},
+    )
+
+    assert response.status_code == 500
+    body = response.json()
+    _assert_error_envelope(body)
+    assert body["error_code"] == "INTERNAL_ERROR"
+    assert "db-pool-exhausted" not in body["message"]
+
+
 async def test_portfolio_rebalance_empty_adjustments_is_the_apierror_envelope(client):
     """portfolio.py PLT-19 — PortfolioService.rebalance()가 빈 adjustments에
     RebalanceError를 던지고, 전역 핸들러가 VALIDATION_INVALID_FIELD(400)
     ApiError로 변환하는지 실호출로 확인한다."""
     _, headers = await _register_user(client)
 
-    response = await client.post(
-        "/portfolio/rebalance", json={"adjustments": []}, headers=headers
-    )
+    response = await client.post("/portfolio/rebalance", json={"adjustments": []}, headers=headers)
 
     assert response.status_code == 400
     body = response.json()

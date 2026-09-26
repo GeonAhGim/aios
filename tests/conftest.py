@@ -26,7 +26,7 @@ import pytest
 
 from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.rate_limit.limiter import UnlimitedRateLimiter, set_limiter
-from tests.support.db import ensure_worker_database
+from tests.support.db import TEMPLATE_DATABASE_URL_ENV, ensure_worker_database
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
 
 try:
@@ -65,6 +65,9 @@ if not _TEST_DATABASE_URL:
 # 아무 것도 복제하지 않고 기존과 동일하게 TEST_DATABASE_URL을 그대로 쓴다.
 _WORKER_ID = os.environ.get("PYTEST_XDIST_WORKER", "master")
 if _WORKER_ID != "master":
+    # 일회용 클론(tests/support/db.template_database_url)이 살아있는 워커 DB가 아닌
+    # 원본 템플릿에서 복제할 수 있도록, 갈아끼우기 전 URL을 남겨 둔다.
+    os.environ[TEMPLATE_DATABASE_URL_ENV] = _TEST_DATABASE_URL
     _TEST_DATABASE_URL = asyncio.run(ensure_worker_database(_TEST_DATABASE_URL, _WORKER_ID))
 
 # Do not use an operator's credentials even if their shell or local .env has
@@ -308,6 +311,13 @@ def _isolate_root_logger_state():
     original_handlers = list(root.handlers)
     original_level = root.level
     original_propagate = root.propagate
+    # task-7439 — `logging.disable(level)`은 로거별 상태가 아니라
+    # `logging.Logger.manager.disable`이라는 프로세스 전역 정수다. 위
+    # 핸들러/레벨/propagate/disabled 스냅샷은 로거별 상태만 다뤄 이 값은
+    # 놓친다 — 어떤 테스트가 `logging.disable(logging.CRITICAL)`을 호출하고
+    # 복원하지 않으면, 같은 xdist 워커에서 그 뒤에 도는 모든 caplog 단언이
+    # (레벨/핸들러가 멀쩡해 보여도) 전역 게이트에 막혀 빈 records를 본다.
+    original_manager_disable = logging.Logger.manager.disable
     # 모든 활성 로거의 핸들러 상태를 스냅샷 (getLogger()는 이미 생성된 로거만 반환)
     original_logger_states = {}
     for name in list(logging.Logger.manager.loggerDict.keys()):
@@ -332,6 +342,7 @@ def _isolate_root_logger_state():
     root.handlers[:] = original_handlers
     root.setLevel(original_level)
     root.propagate = original_propagate
+    logging.Logger.manager.disable = original_manager_disable
     for name, state in original_logger_states.items():
         try:
             logger = logging.getLogger(name)
