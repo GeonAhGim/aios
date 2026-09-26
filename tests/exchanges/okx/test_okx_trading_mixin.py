@@ -45,6 +45,7 @@ class _StubClient(OKXTradingMixin):
         ticker_price: Decimal | None = Decimal("50000"),
         ticker_error: Exception | None = None,
         ticker_age: timedelta | None = None,
+        ticker_timestamp: datetime | None = None,
     ) -> None:
         self.is_paper_trading = demo_mode
         self.is_sandboxed = demo_mode
@@ -53,6 +54,7 @@ class _StubClient(OKXTradingMixin):
         self._ticker_price = ticker_price
         self._ticker_error = ticker_error
         self._ticker_age = ticker_age if ticker_age is not None else timedelta(seconds=0)
+        self._ticker_timestamp = ticker_timestamp
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
         self.ticker_calls: list[str] = []
 
@@ -83,7 +85,9 @@ class _StubClient(OKXTradingMixin):
             bid=self._ticker_price,
             ask=self._ticker_price,
             volume_24h=Decimal("0"),
-            timestamp=datetime.now(timezone.utc) - self._ticker_age,
+            timestamp=self._ticker_timestamp
+            if self._ticker_timestamp is not None
+            else datetime.now(timezone.utc) - self._ticker_age,
             source_type="reference",
         )
 

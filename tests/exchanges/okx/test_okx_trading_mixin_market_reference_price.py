@@ -67,13 +67,26 @@ async def test_place_order_rejects_market_order_with_negative_reference_price():
     assert client.calls == []
 
 
-async def test_place_order_accepts_market_order_with_reference_price_just_under_staleness_limit():
-    """회귀 방지(QA task-8433): 스테일 거부(6초) 테스트만 있고 경계 통과가
-    없었다 -- 임계값(5초) 바로 아래(4.9초, 정각은 실행시간 오차로 피함)는
-    통과함을 증명한다."""
+async def test_place_order_accepts_market_order_with_reference_price_just_under_staleness_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """회귀 방지(QA task-8433, task-8470 정정): 스테일 거부(6초) 테스트만
+    있고 경계 통과가 없었다 -- 임계값(5초) 바로 아래(4.9초)는 통과함을
+    증명한다. task-8454가 스테일니티 검사를 `_utcnow()`로 간접화했지만
+    이 테스트는 그 뒤에도 여전히 실제 벽시계로 티커 생성~검증 사이 100ms
+    여유만 뒀다 -- CI 경합 머신에서 정확히 같은 패턴(스케줄링 지연이
+    실제 경과 시간을 예산 밖으로 밀어냄)으로 다시 거짓 거부될 수 있었다.
+    `_utcnow`를 고정하고 티커 타임스탬프도 그 동일한 고정 시각 기준으로
+    직접 지정해(`ticker_timestamp`), 실행이 아무리 느려도 age가 정확히
+    4.9초로 고정되게 한다 -- 실제 벽시계를 두 번 읽는 지점을 아예 없앤다."""
+    frozen = datetime.now(timezone.utc)
+    monkeypatch.setattr(
+        "src.exchanges.okx.trading_mixin._utcnow",
+        lambda: frozen,
+    )
     client = _paper_client(
         ticker_price=Decimal("50000"),
-        ticker_age=timedelta(milliseconds=4900),
+        ticker_timestamp=frozen - timedelta(milliseconds=4900),
         responses={"/api/v5/trade/order": _ok_order_response()},
     )
     order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})
