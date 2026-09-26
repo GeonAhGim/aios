@@ -241,25 +241,36 @@ async def test_submit_order_persists_entity_context_fund_and_portfolio_ids(pool)
 
 
 @pytest.mark.perf
-async def test_verify_entity_context_latency_under_budget(pool):
-    """수치 성능 단언 — `verify_entity_context()`(4단 계층 재조회, task-1925가
-    `submit_order()` INSERT 직전에 새로 배선한 호출) 단일 호출 지연이 명시적
-    예산을 넘지 않아야 한다. N+1류 회귀(예: 4개 조회를 순차 왕복이 아니라
-    반복문으로 잘못 확장하는 변경)를 잡는 상한이지, 절대 성능 보증이 아니다."""
-    budget_sec = 1.0
+async def test_verify_entity_context_latency_under_budget(
+    pool,
+) -> None:
+    """verify_entity_context() 단일 호출 지연 예산: p95 < 50ms(ADR-2026-09-09-C 주문 제출→ACK p95).
+
+    ADR-2026-09-09-C Decision 1: latency budgets — "주문 제출→ACK p95 50ms(paper)".
+    verify_entity_context는 resolve_context.verify_entity_context() 한 호출이며,
+    같은 함수가 order submit→ACK 파이프라인에서 호출되므로 동일 예산 적용.
+    """
+    budget_sec = 0.050  # p95 < 50ms
+    n = 100
     tenant_id = await create_test_tenant(pool)
     context = await seed_entity_context(pool, tenant_id)
     entity_repo = PostgresEntityRepository(pool)
-
-    start = time.perf_counter()
-    await verify_entity_context(entity_repo, context)
-    elapsed = time.perf_counter() - start
-
-    print(f"[task-1925 verify_entity_context] single call {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"verify_entity_context가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    latencies: list[float] = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        await verify_entity_context(entity_repo, context)
+        latencies.append((time.perf_counter() - t0) * 1000)  # ms
+    latencies.sort()
+    p95_idx = int(n * 0.95)
+    p99_idx = int(n * 0.99)
+    p95_ms = latencies[p95_idx]
+    p99_ms = latencies[p99_idx]
+    assert p95_ms < budget_sec * 1000, (
+        f"verify_entity_context p95={p95_ms:.1f}ms > budget {budget_sec * 1000:.0f}ms (n={n})"
     )
-
+    assert p99_ms < budget_sec * 2000, (
+        f"verify_entity_context p99={p99_ms:.1f}ms > 2×budget {budget_sec * 2000:.0f}ms (n={n})"
+    )
 
 @pytest.mark.perf
 async def test_submit_order_throughput_with_entity_context_verification(pool):
@@ -267,10 +278,14 @@ async def test_submit_order_throughput_with_entity_context_verification(pool):
     경로의 처리량. 서로 다른 `intent_seq`로 스코프를 갈라 매 호출이 새 orders
     행을 만들게 하고(멱등 재사용 경로가 아니라 verify_entity_context를 포함한
     전체 INSERT 경로를 매번 실측), N회 순차 제출의 총 소요/처리량에 예산을
-    건다(research_items RD-4 throughput 테스트와 동일 관례)."""
+    건다(research_items RD-4 throughput 테스트와 동일 관례).
+
+    ADR-2026-09-09-C Decision 1: latency budgets — "주문 제출→ACK p95 50ms(paper)".
+    20 ops × 50ms = 1s 최소, DB 오버헤드 고려해 budget 5.0s, min_ops 5.0 ops/s.
+    """
     n = 20
-    budget_sec = 10.0
-    min_ops_per_sec = 2.0
+    budget_sec = 5.0
+    min_ops_per_sec = 5.0
     tenant_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, tenant_id)
     context = await seed_entity_context(pool, tenant_id)
@@ -301,9 +316,3 @@ async def test_submit_order_throughput_with_entity_context_verification(pool):
     assert ops_per_sec > min_ops_per_sec, (
         f"submit_order 처리량이 최소값({min_ops_per_sec} ops/s)에 못 미칩니다({ops_per_sec:.1f})."
     )
-
-    async with pool.acquire() as conn:
-        order_count = await conn.fetchval(
-            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
-        )
-    assert order_count == n

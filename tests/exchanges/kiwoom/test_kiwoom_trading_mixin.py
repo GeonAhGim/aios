@@ -180,13 +180,13 @@ async def test_place_order_raises_fatal_exchange_error_on_missing_ord_no():
         await client.place_order(_order())
 
 
-async def test_get_order_raises_on_still_malformed_id_after_modify_delegation():
-    """부정 테스트 4: modify_order가 위임하는 get_order 경로도 동일한
-    합성 ID 파싱 규약을 어기면 실패해야 한다 — 회귀 방지."""
+async def test_modify_order_rejects_malformed_exchange_order_id_even_with_price():
+    """부정 테스트 4: modify_order도 price가 있어도 합성 ID가 ':' 구분자
+    없이 잘못된 형식이면 거래소 요청 전에 FatalExchangeError로 거부한다
+    (price 누락 검증과 ID 파싱 검증이 서로 다른 경로임을 확인 — 회귀 방지)."""
     client = _paper_client(responses={"kt10002": {"return_code": 0}})
     with pytest.raises(FatalExchangeError):
-        await client.cancel_order("badformat")
-    # modify_order 자체는 price 누락이 먼저 걸리므로 별도로 cancel 경로를 재확인
+        await client.modify_order("badformat", price=Decimal("71000"))
     assert client.calls == []
 
 

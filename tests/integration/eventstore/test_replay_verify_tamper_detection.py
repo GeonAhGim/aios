@@ -1,16 +1,22 @@
-"""FA-15 order-event-chain mismatch/cutover regressions -- split out of
-`test_replay_verify.py` to stay under the 500-line file-policy observation
-line (ADR-2026-09-10-C §7); shared DoD/ledger-side coverage and helpers
-(`_clock`, `_order_event`, `_seed_order`, `replay_verify`/`replay` imports)
-live there.
+"""FA-15 integration test -- `scripts/replay_verify.py` DoD(2) wiring proof.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#9 FA-15 DoD.
+
+Tampering with rows outside the event trail (`ledger_balance`, `orders`)
+must make the checker actually fail, both as a pure `verify()` call and as
+the real `scripts/replay_verify.py` subprocess exit code -- an always-exit-0
+checker would pass DoD(1) alone (see `test_replay_verify.py`) but not this.
+Also covers the pre/post-cutover broken-event-chain handling (task-2173).
+
+Split from `test_replay_verify.py` at task-7810 (7e9cc090/task-7695 pushed
+that file to 583 lines, check_code_ratchets.py loc_over_500 gate). Shared
+fixtures/helpers are in `_replay_verify_support.py`.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from datetime import timedelta
+from uuid import UUID
 
 import asyncpg
 import pytest
@@ -20,8 +26,13 @@ from src.core.eventstore import replay
 from src.core.eventstore.projections.orders import EventChainBrokenError
 from src.data.models.trading import OrderStatus
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
-from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.conftest import create_test_user
+from tests.integration.eventstore._replay_verify_support import (
+    _clock,
+    _order_event,
+    _run_script,
+    _seed_ledger_entry,
+)
 from tests.integration.oms.conftest import insert_order
 
 
@@ -31,46 +42,91 @@ async def pool(isolated_replay_pool: asyncpg.Pool) -> asyncpg.Pool:
     return isolated_replay_pool
 
 
-def _clock() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _order_event(
-    order_id, *, from_status: OrderStatus, to_status: OrderStatus, event: str
-) -> OrderTransitionEvent:
-    return OrderTransitionEvent(
-        order_id=order_id,
-        from_status=from_status,
-        to_status=to_status,
-        event=event,
-        reason_code=None,
-        actor_subject_id="system",
-        trace_id=uuid4(),
-        command_id=None,
-        provider_event_id=None,
-        occurred_at=_clock(),
-        payload_hash="e" * 64,
-    )
+@pytest.fixture
+def database_url(isolated_replay_db_url: str) -> str:
+    """The `scripts/replay_verify.py` subprocess must verify the same clone the
+    in-process assertions use, not the shared worker DB."""
+    return isolated_replay_db_url
 
 
 class _DiscardTransaction(Exception):
     """Sentinel to force `conn.transaction()` to roll back on a clean pass."""
 
 
+async def test_replay_detects_ledger_balance_tampered_outside_the_event_trail(pool, database_url):
+    """`ledger_journal_entry`/`ledger_posting_line` are WORM -- the only way
+    to produce "actual != replayed" against a real DB is to corrupt the
+    *derived* `ledger_balance` row directly (exactly the untracked-state-
+    change scenario FA-16 will later block at write time; FA-15 catches it
+    after the fact via replay)."""
+    debit_code = await _seed_ledger_entry(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    clean = await replay_verify.verify(pool, as_of=as_of, hours=1)
+    assert clean.ok, clean.mismatches
+
+    clean_run = _run_script(hours=1, as_of=as_of, database_url=database_url)
+    assert clean_run.returncode == 0, clean_run.stdout + clean_run.stderr
+
+    async def _bump_balance(delta: int) -> None:
+        # FA-10 (a2c4f9e1b3d5) put a no-UPDATE trigger on `ledger_balance` --
+        # a literal UPDATE now raises "no-update violation" instead of
+        # mutating the row. Reproduce the tamper the same way the real
+        # write path (`PostgresBalanceRepository.apply`) is forced to:
+        # DELETE the current row, INSERT a replacement with the same key,
+        # skipping `post_entry`/the event trail entirely -- that omission
+        # (not the DELETE+INSERT mechanics) is what the test is exercising.
+        # audit-allow: ledger_balance_raw_seed -- FA-15a/esc-2115가 금지하는
+        # 것은 초기 잔액 raw 시드다. 이건 DoD(2) "이벤트 트레일 밖 변조"를
+        # 재현하는 adversarial tamper이지 시드가 아니다.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "WITH removed AS ("
+                " DELETE FROM ledger_balance WHERE account_id = "
+                " (SELECT account_id FROM ledger_account WHERE account_code = $2)"
+                " RETURNING account_id, balance, held, pending_payout, allow_negative,"
+                " last_entry_seq, updated_at"
+                ") "
+                "INSERT INTO ledger_balance ("
+                " account_id, balance, held, pending_payout, allow_negative,"
+                " last_entry_seq, updated_at"
+                ") "
+                "SELECT account_id, balance + $1, held, pending_payout, allow_negative,"
+                " last_entry_seq, updated_at FROM removed",
+                delta,
+                debit_code,
+            )
+
+    # `ledger_balance` is mutable (not WORM), but a committed corruption here
+    # would wedge every later CI run's own `replay_verify` step (local_ci.py)
+    # permanently red -- always undo it, even if an assertion below fails.
+    await _bump_balance(1)
+    try:
+        tampered = await replay_verify.verify(pool, as_of=as_of, hours=1)
+        assert not tampered.ok
+        assert any(d.domain == "ledger" and d.key == debit_code for d in tampered.mismatches)
+
+        tampered_run = _run_script(hours=1, as_of=as_of, database_url=database_url)
+        assert tampered_run.returncode == 1, tampered_run.stdout + tampered_run.stderr
+        assert debit_code in tampered_run.stderr
+    finally:
+        await _bump_balance(-1)
+
+
 async def test_replay_detects_order_filled_quantity_tampered_outside_the_event_trail(pool):
     """Negative test extending the FA-15 invariant beyond `status` (already
     covered by test_replay_flags_order_status_changed_without_event_as_mismatch
-    and the ledger-side tamper test in test_replay_verify.py) to another
-    `_ORDER_FIELDS` entry -- `filled_quantity` (not literally `fee_total`:
-    `orders.fee_total` has no column default and `insert_order`/`transition`
-    never set it, so it stays SQL NULL and `NULL + 1` folds back to NULL --
-    a no-op that would make this test pass vacuously; `filled_quantity`
-    defaults to a real `0` and is one of the same `_ORDER_FIELDS`, so it
-    exercises the identical gap). A raw UPDATE that only touches this column
-    does not change `status`, so 073beca589d5's I6 guard (armed only inside
-    the `OLD.status IS DISTINCT FROM NEW.status` branch) never fires and the
-    write succeeds silently -- replay must still flag it, or FA-15 only ever
-    proves the `status` column agrees, not the row it claims to verify.
+    and the ledger-side tamper test above) to another `_ORDER_FIELDS` entry --
+    `filled_quantity` (not literally `fee_total`: `orders.fee_total` has no
+    column default and `insert_order`/`transition` never set it, so it stays
+    SQL NULL and `NULL + 1` folds back to NULL -- a no-op that would make
+    this test pass vacuously; `filled_quantity` defaults to a real `0` and
+    is one of the same `_ORDER_FIELDS`, so it exercises the identical gap).
+    A raw UPDATE that only touches this column does not change `status`, so
+    073beca589d5's I6 guard (armed only inside the `OLD.status IS DISTINCT
+    FROM NEW.status` branch) never fires and the write succeeds silently --
+    replay must still flag it, or FA-15 only ever proves the `status` column
+    agrees, not the row it claims to verify.
 
     Like test_replay_flags_order_status_changed_without_event_as_mismatch,
     the tamper runs inside a transaction that is always rolled back

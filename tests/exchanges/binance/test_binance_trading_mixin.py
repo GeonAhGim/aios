@@ -105,6 +105,7 @@ async def test_modify_order_rejects_live_adapter():
             order_type=OrderType.LIMIT,
             quantity=Decimal("0.02"),
             price=Decimal("61000"),
+            client_order_id="c-2",
         )
     assert client.calls == []
 
@@ -122,6 +123,7 @@ async def test_place_order_buy_limit_sends_time_in_force_and_price():
     assert params is not None
     assert params["timeInForce"] == "GTC"
     assert params["price"] == "60000"
+    assert params["newClientOrderId"] == "c-1"
 
 
 async def test_place_order_sell_market_omits_price_and_time_in_force():
@@ -153,12 +155,14 @@ async def test_modify_order_uses_cancel_replace_and_delegates_to_get_order():
         order_type=OrderType.LIMIT,
         quantity=Decimal("0.02"),
         price=Decimal("61000"),
+        client_order_id="c-2",
     )
     method, path, params = client.calls[0]
     assert (method, path) == ("PUT", "/api/v3/order/cancelReplace")
     assert params["cancelOrderId"] == "1234567"
     assert params["cancelReplaceMode"] == "STOP_ON_FAILURE"
     assert params["price"] == "61000"
+    assert params["newClientOrderId"] == "c-2"
     assert result.exchange_order_id == "BTCUSDT:9999999"
 
 
@@ -194,6 +198,7 @@ async def test_modify_order_limit_without_price_is_rejected():
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("0.02"),
+            client_order_id="c-3",
         )
     assert client.calls == []
 
@@ -214,6 +219,100 @@ async def test_place_order_limit_without_price_is_rejected():
     order = _order(order_type=OrderType.LIMIT).model_copy(update={"price": None})
     with pytest.raises(FatalExchangeError):
         await client.place_order(order)
+    assert client.calls == []
+
+
+# ---- XREV 7630 / Review 7792 정정: newClientOrderId 멱등키 + 수량/가격 사전검증 ----
+
+
+@pytest.mark.parametrize("bad_quantity", [Decimal("0"), Decimal("-0.01")])
+async def test_place_order_rejects_zero_or_negative_quantity(bad_quantity: Decimal):
+    """부정 테스트 6: 수량이 0 또는 음수면 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    order = _order().model_copy(update={"quantity": bad_quantity})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("bad_quantity", [Decimal("NaN"), Decimal("Infinity")])
+async def test_place_order_rejects_nan_or_infinite_quantity(bad_quantity: Decimal):
+    """부정 테스트 7: 수량이 NaN/Inf면 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    order = _order().model_copy(update={"quantity": bad_quantity})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("bad_amount", [Decimal("0"), Decimal("-60000")])
+async def test_place_order_rejects_non_positive_price(bad_amount: Decimal):
+    """부정 테스트 8: LIMIT 주문의 가격이 0/음수면 거래소 호출 전에
+    거부한다(NaN/Inf는 `Money`가 생성 시점에 이미 거부 -- pydantic
+    `finite_number` 제약, 여기서 재확인할 필요 없음)."""
+    client = _paper_client()
+    order = _order(order_type=OrderType.LIMIT).model_copy(
+        update={"price": Money(amount=bad_amount, currency=Currency.USDT)}
+    )
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("bad_price", [Decimal("0"), Decimal("-61000"), Decimal("NaN")])
+async def test_modify_order_rejects_non_positive_or_nan_price(bad_price: Decimal):
+    """부정 테스트 8b: cancelReplace 정정의 가격은 `Money`를 경유하지
+    않고 원시 `Decimal` kwarg로 들어오므로, 0/음수/NaN을 여기서 직접
+    거부해야 한다."""
+    client = _paper_client()
+    with pytest.raises(FatalExchangeError):
+        await client.modify_order(
+            "BTCUSDT:1234567",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=Decimal("0.02"),
+            price=bad_price,
+            client_order_id="c-5",
+        )
+    assert client.calls == []
+
+
+async def test_place_order_rejects_empty_client_order_id():
+    """부정 테스트 9: client_order_id(newClientOrderId 멱등키)가 빈
+    문자열이면 재시도 시 중복 주문을 막을 수 없으므로 거래소 호출 전에
+    거부한다(fail-closed)."""
+    client = _paper_client()
+    order = _order().model_copy(update={"client_order_id": ""})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_modify_order_rejects_missing_client_order_id():
+    """부정 테스트 10: cancelReplace는 대체 주문 자체의 새 idempotency
+    key(newClientOrderId)가 필요하다 -- 누락되면 거부한다."""
+    client = _paper_client()
+    with pytest.raises(FatalExchangeError):
+        await client.modify_order(
+            "BTCUSDT:1234567",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0.02"),
+        )
+    assert client.calls == []
+
+
+async def test_modify_order_rejects_zero_quantity():
+    """부정 테스트 11: cancelReplace 정정도 수량이 0이면 거부한다."""
+    client = _paper_client()
+    with pytest.raises(FatalExchangeError):
+        await client.modify_order(
+            "BTCUSDT:1234567",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("0"),
+            client_order_id="c-4",
+        )
     assert client.calls == []
 
 
