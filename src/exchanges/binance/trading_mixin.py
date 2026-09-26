@@ -34,8 +34,10 @@ only accept a single string, but Binance's cancel/cancelReplace endpoints
 require `symbol` alongside the numeric `orderId` -- for the same reason as
 KIS's "orgno:odno"/Kiwoom's "stk_cd:ord_no" composite convention,
 `place_order()` synthesizes `exchange_order_id` as "{symbol}:{orderId}" and
-`cancel_order`/`modify_order` expect that same format (account_mixin's
-`get_order()`, when implemented, must follow the same format).
+`cancel_order`/`modify_order` expect that same format (task-7997:
+`account_mixin.py::BinanceAccountMixin.get_order()` follows the same
+"{symbol}:{orderId}" format -- a future `BinanceAdapter` combining both
+mixins satisfies `_OrderMutatingClient` below with no further wiring).
 
 Every method in this file moves funds, so every one carries
 `@require_paper_sandbox` with no exceptions (same convention as
@@ -111,8 +113,10 @@ class _BinanceOrderClient(Protocol):
 class _OrderMutatingClient(_BinanceOrderClient, Protocol):
     """modify_order() calls get_order() on the same assembled instance --
     included explicitly in the contract for the same reason as Kiwoom
-    trading_mixin._OrderMutatingClient (get_order lives in account_mixin,
-    not yet implemented for Binance -- tests supply a stub)."""
+    trading_mixin._OrderMutatingClient (get_order lives in
+    account_mixin.py, implemented by BinanceAccountMixin as of task-7997;
+    this file's own tests still supply a stub since no BinanceAdapter
+    combining both mixins exists yet)."""
 
     async def get_order(self, order_id: str) -> Order: ...
 

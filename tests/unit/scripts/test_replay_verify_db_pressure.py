@@ -10,7 +10,9 @@ no real socket or TEST_DATABASE_URL needed.
 
 from __future__ import annotations
 
+import asyncio
 import time
+from typing import Any
 
 import pytest
 
@@ -203,22 +205,37 @@ def _make_reset_probe(sequence: list[bool | None]):
     return _probe, calls
 
 
-async def test_await_reset_lock_clear_returns_immediately_when_free() -> None:
+def test_await_reset_lock_clear_returns_immediately_when_free(perf_budget: Any) -> None:
     """Perf assertion: the lock already free on the first probe means zero
-    sleeps and the call returns without paying any of the backoff schedule."""
+    sleeps and the call returns without paying any of the backoff schedule.
+
+    `sleep`/`probe` are fakes, so "immediately" is proven structurally
+    (`delays == []`, one probe) and the cost bound is measured with
+    `perf_budget` (process_time) rather than a wall-clock `perf_counter`
+    delta, which the perf-marker guard (task-7434) rejects in the xdist stage."""
     probe, calls = _make_reset_probe([False])
     sleep, delays = _make_sleep()
 
-    started = time.perf_counter()
-    await pressure.await_reset_lock_clear(
-        "postgresql://u:p@localhost/aios_test_ci", sleep=sleep, probe=probe
+    asyncio.run(
+        pressure.await_reset_lock_clear(
+            "postgresql://u:p@localhost/aios_test_ci", sleep=sleep, probe=probe
+        )
     )
-    elapsed = time.perf_counter() - started
 
     assert len(calls) == 1
     assert calls[0] == ("postgresql://u:p@localhost/postgres", "aios_test_ci")
     assert delays == []
-    assert elapsed < 0.05
+
+    def _free_call() -> None:
+        fresh_probe, _ = _make_reset_probe([False])
+        fresh_sleep, _ = _make_sleep()
+        asyncio.run(
+            pressure.await_reset_lock_clear(
+                "postgresql://u:p@localhost/aios_test_ci", sleep=fresh_sleep, probe=fresh_probe
+            )
+        )
+
+    perf_budget.assert_within(_free_call, budget_ms=50.0, label="reset lock free path")
 
 
 async def test_await_reset_lock_clear_waits_out_transient_reset() -> None:
