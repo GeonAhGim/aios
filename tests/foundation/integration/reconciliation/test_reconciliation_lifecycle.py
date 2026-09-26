@@ -357,8 +357,12 @@ async def test_resolve_failure_injection_preserves_block_and_retry(
     assert await risk_repo.get_safety_control(before.safety_control_id) == control_before
 
 
+@pytest.mark.perf
 async def test_resolve_missing_target_rejection_p95_budget(pool, repo):
     """PLT mutation budget: DB-backed rejection alone must fit p95 < 800ms.
+
+    `perf` marker (task-7434 guard): this is a wall-clock budget over DB round
+    trips, so it runs in the serial perf stage, not under xdist core contention.
 
     This measures the command, not the full HTTP route; the route budget is
     defined in L4_platform_observability_tenancy_api_v1.0.md section 7.
