@@ -4,12 +4,22 @@ import { isFeatureEnabled, setFeatureFlagOverride } from "./featureFlags";
 afterEach(() => {
   setFeatureFlagOverride("onboarding_connection_wizard", null);
   setFeatureFlagOverride("onboarding_demo_mode", null);
+  setFeatureFlagOverride("FF_J3_RISK_PANEL", null);
 });
 
 describe("featureFlags", () => {
   it("오버라이드가 없으면 기본값(true)을 반환한다", () => {
     expect(isFeatureEnabled("onboarding_connection_wizard")).toBe(true);
     expect(isFeatureEnabled("onboarding_demo_mode")).toBe(true);
+  });
+
+  it("task-7500: FF_J3_RISK_PANEL은 오버라이드가 없으면 기본값(false)을 반환한다", () => {
+    expect(isFeatureEnabled("FF_J3_RISK_PANEL")).toBe(false);
+  });
+
+  it("negative: FF_J3_RISK_PANEL을 true로 오버라이드하면 true를 반환한다", () => {
+    setFeatureFlagOverride("FF_J3_RISK_PANEL", true);
+    expect(isFeatureEnabled("FF_J3_RISK_PANEL")).toBe(true);
   });
 
   it("negative: 로컬 오버라이드로 false를 저장하면 false를 반환한다", () => {

@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 
 from scripts import replay_verify
@@ -22,6 +23,12 @@ from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.conftest import create_test_user
 from tests.integration.oms.conftest import insert_order
+
+
+@pytest.fixture
+async def pool(isolated_replay_pool: asyncpg.Pool) -> asyncpg.Pool:
+    """Module-isolated clone -- see `isolated_replay_db_url` in conftest.py."""
+    return isolated_replay_pool
 
 
 def _clock() -> datetime:

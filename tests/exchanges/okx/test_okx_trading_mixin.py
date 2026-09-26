@@ -6,6 +6,12 @@ account_mixin.py)가 없으므로, KIS/Bitget/Kiwoom trading_mixin 테스트와
 구성한다(D2 floor: 부정 테스트 ≥3, 장애주입 1, 성능 수치 단언 1, D3:
 INVARIANTS I-02/I-03 대조 적대적 테스트 1 — 근거는 각 테스트
 docstring/모듈 하단 참고).
+
+task-7868(BR-21 정정, 리뷰 REJECT 7802) — `order.symbol`은 canonical
+"BASE/QUOTE"(예: "BTC/USDT")다. 아래 `_order()`는 이제 canonical을 쓰고,
+`place_order`가 그것을 OKX `instId`("BASE-QUOTE")로 변환해 전송하는지
+검증한다. OKX raw 형식("BTC-USDT")을 직접 넣는 옛 계약은 거부로
+확정했다(정규화 대신 명시적 실패 — `test_place_order_rejects_non_canonical_symbol`).
 """
 
 from __future__ import annotations
@@ -59,7 +65,7 @@ def _order(*, side: OrderSide = OrderSide.BUY, order_type: OrderType = OrderType
         client_order_id="c-1",
         strategy_id="s-1",
         strategy_version="v1",
-        symbol="BTC-USDT",
+        symbol="BTC/USDT",
         exchange="okx",
         side=side,
         order_type=order_type,
@@ -128,6 +134,7 @@ async def test_place_order_buy_limit_builds_composite_exchange_order_id():
     _, path, body = client.calls[0]
     assert path == "/api/v5/trade/order"
     assert body is not None
+    assert body["instId"] == "BTC-USDT"
     assert body["tdMode"] == "cash"
     assert body["side"] == "buy"
     assert body["ordType"] == "limit"
@@ -238,6 +245,18 @@ async def test_cancel_order_rejects_malformed_exchange_order_id():
     client = _paper_client()
     with pytest.raises(FatalExchangeError):
         await client.cancel_order("not-a-composite-id")
+    assert client.calls == []
+
+
+async def test_place_order_rejects_non_canonical_symbol():
+    """부정 테스트(task-7868, 리뷰 REJECT 7802): `order.symbol`이 이미 OKX
+    raw 형식("BTC-USDT", "/" 없음)이면 canonical 파서가 구분자를 찾지 못해
+    거래소 호출 전에 FatalExchangeError로 거부한다 — 정규화 대신 명시적
+    거부(계약)."""
+    client = _paper_client()
+    bad_order = _order().model_copy(update={"symbol": "BTC-USDT"})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(bad_order)
     assert client.calls == []
 
 

@@ -6,11 +6,20 @@ import { MemoryRouter } from "react-router-dom";
 import { AiosApiClient, ApiError } from "@aios/api-client";
 import type { ExecutionCreateRequest } from "@aios/shared-types";
 import { ExecutionControlPage } from "./ExecutionControlPage";
+import { setFeatureFlagOverride } from "../../lib/featureFlags";
 
 const mutateAsync = vi.fn();
 const refetch = vi.fn();
+const evaluateRiskGateMutate = vi.fn();
 let executionsData: unknown[] = [];
 let executionsError: unknown = null;
+// task-7500(J3 G-4): 기본은 idle 고정 — 플래그가 꺼진 이 스위트의 기존 단언에는
+// 영향이 없다. RiskVerdictPanel 배선 전용 describe만 이 상태를 바꾼다.
+let evaluateRiskGateState: { status: string; data?: unknown; error?: unknown } = {
+  status: "idle",
+  data: undefined,
+  error: undefined,
+};
 
 vi.mock("@aios/shared-hooks", () => ({
   useExecutions: () => ({
@@ -21,6 +30,7 @@ vi.mock("@aios/shared-hooks", () => ({
     isError: executionsError !== null,
   }),
   useCreateExecution: () => ({ mutateAsync, isPending: false, data: undefined }),
+  useEvaluateRiskGate: () => ({ mutate: evaluateRiskGateMutate, ...evaluateRiskGateState }),
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
 }));
@@ -29,8 +39,11 @@ afterEach(() => {
   cleanup();
   mutateAsync.mockReset();
   refetch.mockReset();
+  evaluateRiskGateMutate.mockReset();
+  evaluateRiskGateState = { status: "idle", data: undefined, error: undefined };
   executionsData = [];
   executionsError = null;
+  setFeatureFlagOverride("FF_J3_RISK_PANEL", null);
   vi.unstubAllGlobals();
 });
 
@@ -285,5 +298,46 @@ describe("ExecutionControlPage 실행 생성 Idempotency-Key(§3.7) 실제 헤�
     submitCreateForm(container);
     await waitFor(() => expect(secondFetch).toHaveBeenCalledTimes(1));
     expect(idempotencyKeyOf(secondFetch)).not.toBe(firstKey);
+  });
+});
+
+// task-7500(J3 G-4): 실행 생성 제출이 RiskVerdictPanel의 evaluateRiskGate(PRE_SUBMIT)를
+// 실제로 트리거하는지, 그리고 FF_J3_RISK_PANEL 기본 OFF에서는 그 부가 호출 자체가
+// 나가지 않는지를 잠근다(패널 내부 렌더 분기 자체는 RiskVerdictPanel.test.tsx가 담당).
+describe("ExecutionControlPage RiskVerdictPanel 배선(task-7500, FF_J3_RISK_PANEL)", () => {
+  it("negative: 플래그 OFF(기본값)면 제출해도 evaluateRiskGate를 호출하지 않고 패널을 보여주지 않는다", () => {
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    expect(evaluateRiskGateMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText("리스크/컴플라이언스 판정")).not.toBeInTheDocument();
+  });
+
+  it("플래그 ON이면 제출 시 evaluateRiskGate(PRE_SUBMIT)를 호출하고 판정 패널에 결과를 보여준다", () => {
+    setFeatureFlagOverride("FF_J3_RISK_PANEL", true);
+    evaluateRiskGateState = {
+      status: "success",
+      data: {
+        id: "eval-1",
+        gateKind: "PRE_SUBMIT",
+        outcome: "ALLOW",
+        reasonCodes: [],
+        obligations: [],
+        ruleVersion: "v1",
+        evaluatedAt: "2026-01-01T00:00:00Z",
+        expiresAt: null,
+        traceId: "trace-1",
+        schemaVersion: "v1",
+      },
+      error: undefined,
+    };
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    expect(evaluateRiskGateMutate).toHaveBeenCalledWith({ gateKind: "PRE_SUBMIT" });
+    expect(screen.getByText("리스크/컴플라이언스 판정")).toBeInTheDocument();
+    expect(screen.getByText("ALLOW")).toBeInTheDocument();
   });
 });
