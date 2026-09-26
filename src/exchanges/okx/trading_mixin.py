@@ -154,12 +154,12 @@ def _validate_tick_lot_min_notional(order: Order) -> None:
         if notional < min_notional:
             raise FatalExchangeError(f"OKX 최소 주문금액({min_notional}) 미달: {notional!r}")
     elif order.order_type == OrderType.MARKET:
-        # 리뷰 REJECT(task-8179) 후속 -- MARKET 주문은 `order.price`가 항상
-        # None(계약)이라 실제 quote 통화 notional(price*quantity)을 계산할
-        # 방법이 없다. 사전검증을 완전히 건너뛰는 대신, `order.quantity`를
-        # notional 근사치로 삼아 fail-closed 비교한다 -- 실거래소 왕복 없이
-        # 최소 주문금액 미달을 걸러내기 위한 근사치이지, 실측 quote
-        # notional이 아니다(정직한 한계 표기, §10).
+        # Follow-up to review REJECT (task-8179): `order.price` is always
+        # None for MARKET orders (contract), so a real quote-currency
+        # notional (price*quantity) cannot be computed. Compare
+        # `order.quantity` directly against `min_notional` as a fail-closed
+        # approximation instead of skipping the check entirely -- honest
+        # about being an approximation, not a measured quote notional (§10).
         if order.quantity < min_notional:
             raise FatalExchangeError(
                 f"OKX 최소 주문금액({min_notional}) 미달(MARKET 근사치): {order.quantity!r}"
