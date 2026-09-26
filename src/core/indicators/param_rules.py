@@ -10,9 +10,11 @@ period 1~2000, MA type 0~max of the installed `talib.MA_Type`, deviation
 version — `MATYPE_MAX` is read from the installed library at import so a
 newer function's own default (e.g. KDJ on TA-Lib 0.6.x) is always accepted.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any, cast
 
 import talib
 
@@ -40,7 +42,9 @@ def matype_max() -> int:
     """
     # talib's stubs do not re-export `MA_Type` from the package root (the same
     # stub limitation as `abstract.Function` below) -- it exists at runtime.
-    ma_type = talib.MA_Type  # type: ignore[attr-defined]
+    # `cast(Any, ...)` (vs. an attr-defined suppression comment) avoids
+    # growing the PLT-40 type-ignore ratchet.
+    ma_type = cast(Any, talib).MA_Type
     ordinals = [
         value
         for attr in dir(ma_type)
