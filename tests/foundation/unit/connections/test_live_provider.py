@@ -3,6 +3,7 @@
 
 전수감사(agent-platform-12, docs/FULL_AUDIT_2026-09-02.md §6) 배정 — 운영 DI가
 FakeReadonlyAccountProvider만 반환하던 갭을 메운 실 어댑터."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from src.data.models.trading import AccountBalance, Position
 from src.foundation.connections.adapters.live_provider import LiveReadonlyAccountProvider
 from src.foundation.connections.domain.models import CapabilityScope
 from src.foundation.connections.ports.provider import OpaqueRef, SecretLease
+from src.services.credential_resolver import CredentialNotFoundError
 
 
 class _StubAdapter:
@@ -129,9 +131,16 @@ async def test_verify_readonly_scope_is_honestly_unverified():
     """전수감사 지시 — 거래소 API에 AIOS 권한 taxonomy로 매핑되는 조회
     수단이 없으니 요청 스코프를 그대로 승인된 것으로 다루되
     provider_verified=False로 정직하게 표기한다."""
-    resolver = _StubResolver(_StubAdapter([AccountBalance(
-        exchange="bitget", asset="USDT", total=Decimal("1"), available=Decimal("1")
-    )], []))
+    resolver = _StubResolver(
+        _StubAdapter(
+            [
+                AccountBalance(
+                    exchange="bitget", asset="USDT", total=Decimal("1"), available=Decimal("1")
+                )
+            ],
+            [],
+        )
+    )
     requested = (CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION)
     provider = LiveReadonlyAccountProvider(
         resolver, user_id=uuid4(), exchange="bitget", requested_capability_profile=requested
@@ -156,3 +165,64 @@ async def test_verify_readonly_scope_propagates_bad_credential_error():
 
     with pytest.raises(ConnectionError):
         await provider.verify_readonly_scope(SecretLease(lease_ref="lease-1"))
+
+
+async def test_fetch_snapshot_rejects_unregistered_credential():
+    """negative — get_adapter()가 CredentialNotFoundError를 던지면 스냅샷을
+    빈 값으로 위장하지 않고 그대로 전파한다(fail-closed)."""
+
+    class _RejectingResolver(_StubResolver):
+        async def get_adapter(self, user_id, exchange: str):
+            raise CredentialNotFoundError("no credential registered for user/exchange")
+
+    resolver = _RejectingResolver(_StubAdapter([], []))
+    provider = LiveReadonlyAccountProvider(
+        resolver, user_id=uuid4(), exchange="bitget", requested_capability_profile=()
+    )
+
+    with pytest.raises(CredentialNotFoundError):
+        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+
+
+async def test_fetch_snapshot_truncates_currency_to_field_max_length():
+    """negative — account_snapshot.currency는 VARCHAR(10)이므로, 10자를
+    넘는 자산 심볼이 첫 잔고로 들어와도 컬럼 제약을 위반하지 않도록 잘린다."""
+    balances = [
+        AccountBalance(
+            exchange="bitget",
+            asset="SUPERLONGTICKER",
+            total=Decimal("1"),
+            available=Decimal("1"),
+        )
+    ]
+    resolver = _StubResolver(_StubAdapter(balances, []))
+    provider = LiveReadonlyAccountProvider(
+        resolver, user_id=uuid4(), exchange="bitget", requested_capability_profile=()
+    )
+
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+
+    assert len(snapshot.currency) == 10
+    assert snapshot.currency == "SUPERLONGT"
+
+
+async def test_fetch_snapshot_propagates_positions_failure():
+    """실패주입 — get_positions()가 예외를 던지면(예: 거래소 일시 장애)
+    balances를 이미 받았더라도 부분 스냅샷을 조용히 반환하지 않고 전파한다."""
+
+    class _PositionsFailingAdapter(_StubAdapter):
+        async def get_positions(self, symbol: str | None = None) -> list[Position]:
+            raise ConnectionError("positions endpoint timed out")
+
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("500"), available=Decimal("500")
+        )
+    ]
+    resolver = _StubResolver(_PositionsFailingAdapter(balances, []))
+    provider = LiveReadonlyAccountProvider(
+        resolver, user_id=uuid4(), exchange="bitget", requested_capability_profile=()
+    )
+
+    with pytest.raises(ConnectionError):
+        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
