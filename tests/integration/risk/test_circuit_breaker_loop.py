@@ -21,7 +21,6 @@ metrics_history를 반복 스캔해도 예산 내에 끝나는지(성능 단언)
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -47,21 +46,40 @@ from src.services.safety.circuit_breaker_loop import (
     run_circuit_breaker_tick,
 )
 from tests.integration.conftest import create_test_user
+from tests.support.db import ensure_worker_database, template_database_url
 
 _BAD_METRICS = CircuitBreakerMetrics(data_delay_sec=Decimal("6"))  # halted 임계(5) 초과
 
 
-def _asyncpg_dsn() -> str:
-    return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+def _asyncpg_dsn(url: str) -> str:
+    return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    """이 모듈 전용 일회용 DB 클론 위의 풀.
+
+    `run_circuit_breaker_tick`이 실측하는 `_daily_loss_pct`·`_order_reject_rate_pct`는
+    설계상 플랫폼 전역 지표라 워커 DB 전체(RUNNING strategy_executions 합, 최근
+    orders)를 읽는다. 같은 xdist 워커에서 앞서 돈 테스트가 손실 상태의 RUNNING
+    실행이나 REJECTED 주문을 남기면 "빈 DB + 실측 지표 -> normal" 전제가 깨져
+    emergency/restricted가 관측된다(CI run 36194441435: 2건 emergency). 공유 DB의
+    system_safety_state만 리셋하던 기존 방식으로는 막을 수 없어, 원본 템플릿에서
+    복제한 깨끗한 DB(tests/support/db.template_database_url)를 이 모듈에 준다.
+    """
+    url = await ensure_worker_database(template_database_url(), "cbloop")
+    p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=4)
     async with p.acquire() as conn:
         await conn.execute(
             "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
             "reactivation_approval_id = NULL WHERE id = 1"
+        )
+        # 템플릿이 마이그레이션 직후의 빈 DB가 아닐 수도 있다(로컬에서 base DB를
+        # 직접 쓴 뒤 등). 일회용 클론이므로 남아 있는 RUNNING 실행을 RETIRED로
+        # 돌려 `_daily_loss_pct`의 입력을 0으로 만든다 — 이 모듈은 "지표가 정상인
+        # 빈 플랫폼"을 전제로 CB 배선을 검증한다.
+        await conn.execute(
+            "UPDATE strategy_executions SET status = 'RETIRED' WHERE status = 'RUNNING'"
         )
     yield p
     await p.close()
@@ -336,6 +354,7 @@ async def test_run_circuit_breaker_tick_reproduces_gate_red_via_collected_metric
     assert events.count("risk.circuit_breaker.level_changed") == 1
 
 
+@pytest.mark.perf
 async def test_check_reactivation_meets_latency_budget_with_large_history(pool, cb, policy):
     """성능 단언(D2) — `can_reactivate`의 baseline 스캔은 metrics_history
     길이에 비례한다(O(n)). 큰 이력(5000 표본)을 매 호출마다 반복 스캔해도

@@ -269,6 +269,7 @@ def test_bundle_gate_red_repro_naive_outcome_trusting_aggregator_would_pass_inco
     assert real_outcome == Outcome.FAIL  # green: evaluate_bundle catches it
 
 
+@pytest.mark.perf
 def test_bundle_evaluation_throughput_within_local_budget():
     """성능 단언 1 — 순수 집계 함수라 사전거래 게이트급 예산(p99 5ms,
     ADR-2026-09-09-C)에 견줘도 훨씬 여유로워야 한다. 6개 체크 x 50 사이클

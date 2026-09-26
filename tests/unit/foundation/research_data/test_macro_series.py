@@ -224,6 +224,7 @@ def test_period_end_fails_closed_for_unsupported_frequency_value() -> None:
 # normalization of a realistic batch must clear a fixed throughput floor) ---
 
 
+@pytest.mark.perf
 def test_normalize_macro_observation_throughput_floor() -> None:
     iterations = 2_000
     started = time.perf_counter()

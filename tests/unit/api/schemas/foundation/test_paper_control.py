@@ -103,6 +103,7 @@ def test_deployment_command_request_missing_idempotency_key_raises() -> None:
         DeploymentCommandRequest.model_validate({})
 
 
+@pytest.mark.perf
 def test_deployment_list_response_construction_throughput_budget() -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""

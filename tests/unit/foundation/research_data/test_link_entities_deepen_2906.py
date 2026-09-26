@@ -158,6 +158,7 @@ async def test_link_entities_resolver_crash_mid_batch_never_calls_save_links() -
 # ---- 성능 단언 ----
 
 
+@pytest.mark.perf
 async def test_link_entities_default_limit_batch_meets_latency_budget() -> None:
     """기본 `limit=500` 규모(OpenDART 일일 배치 상한)를 절대시간 예산 내에
     처리해야 한다."""

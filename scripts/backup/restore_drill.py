@@ -112,6 +112,48 @@ def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
     conf.write_text(existing + f"\nrestore_command = '{restore_command}'\n", encoding="utf-8")
 
 
+def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
+    """esc-health-backup_drill_failed: 시간제한 없는 shutil.copytree가 110,830개
+    파일·2.4GB 백업(실측)을 옮기다 nightly 외부 하드킬(1200s)에 걸려 steps={}로만
+    관측됐다. Windows는 robocopy /MT(다중 I/O 스레드)+자체 timeout으로 대체 --
+    끝내 느려도 무한정 먹통이 아니라 진단 가능한 실패로 끝난다."""
+    if os.name == "nt":
+        import tempfile
+
+        cmd = [
+            "robocopy",
+            str(src),
+            str(dst),
+            "/E",
+            "/MT:32",
+            "/NFL",
+            "/NDL",
+            "/NJH",
+            "/NJS",
+            "/NP",
+            "/R:1",
+            "/W:1",
+        ]
+        try:
+            with tempfile.TemporaryFile(mode="w+b") as out:
+                try:
+                    r = subprocess.run(
+                        cmd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, check=False
+                    )
+                except subprocess.TimeoutExpired:
+                    return False, f"timeout {timeout:.0f}s"
+                out.seek(0)
+                text = out.read().decode("utf-8", errors="replace")
+            return r.returncode < 8, text[-4000:]  # robocopy: 0-7 성공, 8+ 실패
+        except OSError as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+    try:
+        shutil.copytree(src, dst)
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
+
+
 def _tail_lines(text: str, n: int) -> str:
     return "\n".join(text.splitlines()[-n:])
 
@@ -167,16 +209,10 @@ def wait_for_process_start(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> str | None:
-    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay가
-    끝나는지(pg_is_in_recovery)는 기다리지 않는다. 정상이면 None, 타임아웃까지 프로세스가
-    확인되지 않으면 사유 문자열을 돌려준다.
-
-    이전에는 `pg_ctl start -w -t 60`을 써서 -t가 '프로세스 기동'과 'WAL replay 완료'를
-    함께 기다렸다 -- archive recovery 중인 서버는 replay가 끝나야 연결을 받아들이므로
-    (hot_standby 없이는 recovery 중 연결이 거부된다), 735MB 베이스 백업 replay가 60초를
-    넘기면 실제로는 정상 진행 중인데도 start_postgres가 실패로 오분류됐다(task-4978).
-    이제 -t/이 함수의 timeout은 프로세스 기동(포트 바인딩 등)만 기다리고, replay 완료
-    대기는 wait_for_recovery로 분리했다."""
+    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay 완료는
+    wait_for_recovery로 분리했다(이전엔 `pg_ctl start -w -t 60`이 둘 다 기다려 735MB 베이스
+    백업 replay가 60초를 넘기면 정상 진행 중인데도 실패로 오분류됐다, task-4978). 정상이면
+    None, 타임아웃까지 확인 안 되면 사유 문자열을 돌려준다."""
     deadline = clock() + timeout
     while True:
         rc, tail = run_cmd([pg_ctl_bin, "status", "-D", str(data_dir)], cwd, env, 30)
@@ -184,8 +220,7 @@ def wait_for_process_start(
             return None
         if clock() >= deadline:
             return (
-                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다"
-                f"(rc={rc}, tail={tail[-200:]!r})"
+                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다(rc={rc}, tail={tail[-200:]!r})"
             )
         sleep(poll_interval)
 
@@ -245,6 +280,8 @@ def run_drill(
     process_start_timeout: float = 30.0,
     process_start_poll_interval: float = 1.0,
     last_failed_restore_dir: Path = LAST_FAILED_RESTORE_DIR,
+    copy_tree: Callable[[Path, Path, float], tuple[bool, str]] = _copy_backup_tree,
+    copy_timeout: float = 300.0,
 ) -> dict:
     """복구 리허설 1회. 어느 단계에서 멈추든(백업 없음/기동 실패/복구 타임아웃/replay_verify
     불일치) `steps`에 실패한 단계가 남고 `ok`는 False가 된다 -- healthcheck의
@@ -265,11 +302,9 @@ def run_drill(
 
     if restore_data_dir.exists():
         shutil.rmtree(restore_data_dir, ignore_errors=True)
-    try:
-        shutil.copytree(backup, restore_data_dir)
-        steps["restore_files"] = {"ok": True, "detail": str(restore_data_dir)}
-    except OSError as e:
-        steps["restore_files"] = {"ok": False, "detail": str(e)}
+    copy_ok, copy_detail = copy_tree(backup, restore_data_dir, copy_timeout)
+    steps["restore_files"] = {"ok": copy_ok, "detail": copy_detail or str(restore_data_dir)}
+    if not copy_ok:
         return _finish(steps, started)
 
     write_recovery_config(restore_data_dir, archive_dir)

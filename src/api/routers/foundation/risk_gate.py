@@ -187,6 +187,7 @@ async def post_evaluate_recovery(
         ),
         cooldown_sec=policy.reactivation.cooldown_sec,
         approval_ttl_sec=policy.reactivation.approval_ttl_sec,
+        circuit_breaker_policy=policy.circuit_breaker,
     )
     decision = await evaluate_recovery(
         repos,

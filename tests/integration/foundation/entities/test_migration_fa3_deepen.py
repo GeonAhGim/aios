@@ -26,7 +26,6 @@ import asyncio
 import os
 import subprocess
 import sys
-import time
 from datetime import date
 from pathlib import Path
 from uuid import uuid4
@@ -42,14 +41,30 @@ from src.foundation.entities.domain.defaults import (
     default_fund_id,
     default_portfolio_id,
 )
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c9f4e2a1b6d7"
-_PERF_BUDGET_SECONDS = 10.0
 _PERF_USER_COUNT = 50
 _CONCURRENT_RUNNERS = 8
+# task-7674: the original absolute 10.0s budget compared `elapsed` to this
+# host's clock/disk/Postgres-lock speed, not the backfill code -- it went red
+# on a busy/shared host (many concurrent worktrees hitting the same local
+# Postgres, cf. scripts/setup_test_db.py's _list_test_databases docstring)
+# with nothing in the migration changed (locally observed 5.52s idle vs
+# 11.34s while another perf test's migration ran concurrently). Same
+# RelativeBudget fix as task-7631: express the budget as a multiple of a
+# same-process pure-Python calibration loop. This op is a single
+# alembic-subprocess + real-DB migration (can't cheaply repeat for a
+# best-of-N -- each sample would re-seed 50 users), so it uses a single
+# wall-clock sample (n=1) rather than assert_within's default best-of-5.
+# Ratio derivation: worst locally observed elapsed 11.34s against a ~80ms
+# calibration (~142x); 300 keeps >2x headroom over that worst sample to
+# absorb further shared-Postgres contention while still catching a real
+# O(n) -> O(n^2) regression in the backfill.
+_PERF_MAX_RATIO = 300.0
 
 # 789c138f13fe:86-97 백필 UPDATE의 사본(asyncpg 위치 파라미터로만 변환).
 _BACKFILL_UPDATE_SQL = """
@@ -197,6 +212,7 @@ async def test_negative_insert_fills_with_nonexistent_portfolio_id_rejected_by_f
             )
 
 
+@pytest.mark.perf
 async def test_backfill_of_fifty_bootstrapped_users_completes_within_budget(pool):
     # 성능단언 — 감사가 지적한 "성능단언 없음" 공백을 메운다.
     await purge_position_snapshots(pool)
@@ -210,12 +226,10 @@ async def test_backfill_of_fifty_bootstrapped_users_completes_within_budget(pool
             await _insert_bare_order(conn, user_id)
             user_ids.append(user_id)
 
-    started = time.monotonic()
-    _run_alembic("upgrade", "head")
-    elapsed = time.monotonic() - started
-
-    assert elapsed < _PERF_BUDGET_SECONDS, (
-        f"{_PERF_USER_COUNT}명 백필이 예산({_PERF_BUDGET_SECONDS}s)을 넘겼다: {elapsed:.2f}s"
+    budget = RelativeBudget()
+    sample = budget.measure(lambda: _run_alembic("upgrade", "head"), mode="wall", n=1, warmup=0)
+    assert sample.ratio < _PERF_MAX_RATIO, (
+        f"{_PERF_USER_COUNT}명 백필: {budget.describe(sample, max_ratio=_PERF_MAX_RATIO)}"
     )
 
     async with pool.acquire() as conn:

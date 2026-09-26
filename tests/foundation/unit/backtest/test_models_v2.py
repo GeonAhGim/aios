@@ -216,6 +216,7 @@ def test_float_input_is_rejected_on_every_decimal_field(
             model_cls(**bad_kwargs)
 
 
+@pytest.mark.perf
 def test_canonical_json_perf_budget() -> None:
     """perf assertion(D2): `canonical_json()` is called at high volume on
     the reproducibility-key (BT-9) path — pin a quantified upper bound so

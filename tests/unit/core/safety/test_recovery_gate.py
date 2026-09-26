@@ -21,12 +21,14 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from src.core.loader.risk_policy_loader import load_risk_policy
 from src.core.risk.decision import RiskOutcome
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerMetrics
 from src.core.safety.recovery_gate import RecoveryDecision, can_reactivate
-from tests.conftest import PerfBudget
+from tests._perf.relative_budget import RelativeBudget
 
 COOLDOWN_SEC = 3
+_POLICY = load_risk_policy().circuit_breaker
 
 
 def _clean_history(n: int = COOLDOWN_SEC) -> list[CircuitBreakerMetrics]:
@@ -41,6 +43,7 @@ def _base_kwargs() -> dict:
         evidence_ref="evidence://ref-1",
         approval_status="APPROVED",
         fresh_risk_outcome=RiskOutcome.ALLOW,
+        policy=_POLICY,
     )
 
 
@@ -70,7 +73,65 @@ def test_cooldown_not_met_by_short_history_denies() -> None:
 def test_cooldown_not_met_by_degraded_sample_denies() -> None:
     kwargs = _base_kwargs()
     history = _clean_history()
-    history[-1] = CircuitBreakerMetrics(api_error_rate_pct=Decimal("0.01"))
+    history[-1] = CircuitBreakerMetrics(
+        api_error_rate_pct=Decimal(str(_POLICY.warning.api_error_rate_pct))
+    )
+    kwargs["metrics_history"] = history
+    decision = can_reactivate(**kwargs)
+    assert decision.outcome == RiskOutcome.DENY
+    assert decision.reason_code == "RECOVERY_COOLDOWN_NOT_MET"
+
+
+def test_sub_warning_nonzero_samples_are_baseline_and_allow() -> None:
+    """§4.3 CB 표 행 4 — baseline은 "warning 미만"이지 "정확히 0"이 아니다.
+    data_delay_sec·api_disconnect_sec는 마지막 관측 이후 경과 시간이라 실제
+    tick에서는 0이 될 수 없다(수 µs~수 초). 0을 요구하면 실 트래커 배선
+    (R-45)에서 재가동이 영원히 불가능해지는 회귀 — CI 적색
+    `test_run_circuit_breaker_tick_drives_full_reactivation_end_to_end`로
+    잡혔다. warning 임계 바로 아래의 0이 아닌 표본은 baseline이다."""
+    kwargs = _base_kwargs()
+    below_warning = CircuitBreakerMetrics(
+        data_delay_sec=Decimal(str(_POLICY.warning.data_delay_sec)) - Decimal("0.001"),
+        api_disconnect_sec=Decimal("0.5"),
+        api_error_rate_pct=Decimal(str(_POLICY.warning.api_error_rate_pct)) - Decimal("0.01"),
+    )
+    kwargs["metrics_history"] = [below_warning for _ in range(COOLDOWN_SEC)]
+    decision = can_reactivate(**kwargs)
+    assert decision.outcome == RiskOutcome.ALLOW
+
+
+@pytest.mark.parametrize(
+    "sample",
+    [
+        pytest.param(
+            CircuitBreakerMetrics(data_delay_sec=Decimal(str(_POLICY.warning.data_delay_sec))),
+            id="data_delay_at_warning",
+        ),
+        pytest.param(
+            CircuitBreakerMetrics(
+                order_reject_rate_pct=Decimal(str(_POLICY.restricted.order_reject_rate_pct))
+            ),
+            id="order_reject_at_restricted",
+        ),
+        pytest.param(
+            CircuitBreakerMetrics(daily_loss_pct=Decimal(str(_POLICY.emergency.daily_loss_pct))),
+            id="daily_loss_at_emergency",
+        ),
+        pytest.param(
+            CircuitBreakerMetrics(
+                api_disconnect_sec=Decimal(str(_POLICY.emergency.api_disconnect_sec))
+            ),
+            id="api_disconnect_at_emergency",
+        ),
+    ],
+)
+def test_sample_at_any_threshold_is_not_baseline_and_denies(sample: CircuitBreakerMetrics) -> None:
+    """negative — 어느 지표든 자기 임계(warning/restricted/emergency)에 닿은
+    표본이 cooldown 이력에 하나라도 있으면 baseline이 아니다(compute_level이
+    NORMAL이 아님)."""
+    kwargs = _base_kwargs()
+    history = _clean_history()
+    history[0] = sample
     kwargs["metrics_history"] = history
     decision = can_reactivate(**kwargs)
     assert decision.outcome == RiskOutcome.DENY
@@ -177,7 +238,9 @@ def test_adversarial_single_tainted_sample_deep_in_large_clean_history_denies() 
     스캔이 실제로 일어남을 증명한다."""
     n = 5000
     history = _clean_history(n)
-    history[n // 2] = CircuitBreakerMetrics(order_reject_rate_pct=Decimal("0.001"))
+    history[n // 2] = CircuitBreakerMetrics(
+        order_reject_rate_pct=Decimal(str(_POLICY.restricted.order_reject_rate_pct))
+    )
     kwargs = _base_kwargs()
     kwargs["metrics_history"] = history
     kwargs["cooldown_sec"] = n
@@ -190,27 +253,29 @@ def test_adversarial_single_tainted_sample_deep_in_large_clean_history_denies() 
 
 
 @pytest.mark.perf
-def test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls(
-    perf_budget: PerfBudget,
-) -> None:
-    """순수 Decimal/불리언 비교 조합이라 매우 빨라야 한다 — 절대시간 예산은
-    느린 CI 머신을 감안해 넉넉히 잡되(회귀만 잡는 목적), 큰 이력을 반복
-    스캔하는 호출이 예산을 넘으면 baseline 스캔 비용이 O(n)에서 퇴화했다는
-    신호다.
+def test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls() -> None:
+    """순수 Decimal/불리언 비교 조합이라 매우 빨라야 한다 — 예산은 여유롭게
+    잡되(회귀만 잡는 목적), 큰 이력을 반복 스캔하는 호출이 예산을 넘으면
+    baseline 스캔 비용이 O(n)에서 퇴화했다는 신호다.
 
-    task-7018(esc-ci-pytest_perf) — `time.perf_counter()` wall-clock
-    min-of-1은 이 CI 호스트의 다른 워커 프로세스에 코어를 뺏기면 그 대기
-    시간까지 계측에 섞여 flaky해진다(2.699s 관측, 로컬 단독 실행에서는
-    0.27s대로 예산의 1/7 수준 — 코드 자체의 회귀가 아니라 측정 방식의
-    부하 민감성이었다). task-6774가 공용화한 `perf_budget` 픽스처
-    (`time.process_time()` 기준 best-of-5)로 옮겨 다른 워커의 CPU 점유가
-    이 프로세스의 계측에 섞이지 않게 한다. 예산 수치는 그대로 유지한다."""
+    task-7018(esc-ci-pytest_perf) — `time.perf_counter()` wall-clock min-of-1은
+    다른 워커 프로세스에 코어를 뺏기면 그 대기 시간까지 계측에 섞여
+    flaky해진다. task-6774가 공용화한 `perf_budget` 픽스처(`time.process_time()`
+    기준 best-of-5)로 옮겨 다른 워커의 CPU 점유는 걷어냈지만, 남은 절대
+    2000ms 예산은 여전히 CI 러너 자체의 클록 속도에 매인 값이라 느린
+    러너에서 반복 적색이었다(task-7631/GitHub run 36193686857). 같은
+    프로세스에서 잰 고정 크기 순수 파이썬 루프 대비 배수로 예산을 표현하는
+    `RelativeBudget`(`tests/_perf/relative_budget.py`)으로 옮긴다 — 러너
+    속도가 바뀌어도 비율은 안정적이다. 배수 산출: 기존 절대 예산 2000ms /
+    로컬 실측 calibration 약 110ms ≈ 18.2배, 실측 op/calibration 비율은 약
+    11.1배(op 약 1219ms) — 원래 예산의 headroom 비율(약 1.64배)에 맞춰
+    20배로 반올림한다."""
     iterations = 300
     large_cooldown = 2000
     kwargs = _base_kwargs()
     kwargs["metrics_history"] = _clean_history(large_cooldown)
     kwargs["cooldown_sec"] = large_cooldown
-    budget_ms = 2000.0
+    max_ratio = 20.0
 
     decision: RecoveryDecision | None = None
 
@@ -219,9 +284,10 @@ def test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls(
         for _ in range(iterations):
             decision = can_reactivate(**kwargs)
 
-    perf_budget.assert_within(
+    RelativeBudget().assert_within(
         _run_once,
-        budget_ms=budget_ms,
+        max_ratio=max_ratio,
+        mode="cpu",
         label=f"can_reactivate {iterations}x(history={large_cooldown})",
     )
     assert decision is not None

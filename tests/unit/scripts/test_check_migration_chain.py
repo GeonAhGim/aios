@@ -14,6 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -332,6 +334,7 @@ def test_task_1814_merge_still_flags_new_unmerged_sibling_branch_as_head(
     assert check_migration_chain.main(["--versions-dir", str(shadow)]) == 1
 
 
+@pytest.mark.perf
 def test_check_migration_chain_real_versions_dir_completes_within_time_budget() -> None:
     """성능단언: 실제 저장소(116개 리비전) 전수 체인 검사가 예산 내에 끝나는지 수치로 확인한다."""
     real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"

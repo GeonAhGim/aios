@@ -317,6 +317,7 @@ def test_mandate_constraints_propagates_base_policy_failure_instead_of_silently_
 # --- Numeric performance (DEEPEN) -------------------------------------------
 
 
+@pytest.mark.perf
 def test_evaluate_mandate_constraints_meets_latency_budget_over_many_calls() -> None:
     """수치 성능 단언: 75번 §7 SLO는 사전 판정 경로에 p99 30ms를 배정한다.
     이 조합 함수는 그 경로 하류에서 실행되므로 그 자체가 병목이 되어서는

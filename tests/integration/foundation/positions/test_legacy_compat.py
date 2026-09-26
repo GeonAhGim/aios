@@ -328,6 +328,7 @@ async def test_get_positions_propagates_connection_fault_without_swallowing(proj
         )
 
 
+@pytest.mark.perf
 async def test_get_positions_completes_within_latency_budget_for_many_reentries(pool, projection):
     """legacy 재진입(같은 계정·심볼, 서로 다른 `entry_time`)이 300건 쌓인
     계정에서도 조회가 예산 안에 끝나야 한다(수치 성능 단언) — 이전엔 DoD

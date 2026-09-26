@@ -12,7 +12,6 @@ from __future__ import annotations
 import importlib.util
 import shutil
 import sys
-import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,8 +19,29 @@ from types import ModuleType
 
 import pytest
 
+from tests._perf.relative_budget import RelativeBudget
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
+
+# task-7741(esc-ci-coverage): a fixed 30s wall-clock budget for a full src/
+# tree scan is exactly the shape that produces the false-red pattern
+# documented in scripts/coverage_ratchet.py -- the local CI coverage step
+# runs pytest with --cov=src, whose global line tracer adds real per-line
+# overhead to this test's own Python execution, and a busy shared host adds
+# scheduling delay on top of that. Local measurement here already showed a
+# cold-cache first pass take ~17s against the old 30s budget -- one more
+# contention spike away from tripping it, aborting the pytest run early, and
+# producing the truncated coverage.xml this escalation is chasing. Switched
+# to RelativeBudget (task-7631 pattern): the budget is now a ratio against a
+# same-process calibration loop instead of an absolute second figure, so it
+# self-corrects for host speed/load; warmup=1 discards the cold-cache pass and
+# n=3 takes the best of 3 measured passes to absorb a one-off contention
+# spike (observed locally: 30-36x under light concurrent load, up to 277x
+# during a heavy multi-worker disk-I/O spike -- n=3 best-of plus a generous
+# ratio keeps the budget from tripping on that spike while still catching a
+# real algorithmic regression).
+_SCAN_TREE_MAX_RATIO = 500.0
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -192,9 +212,7 @@ def test_main_decrease_reports_without_update_baseline_flag(
     assert baseline_path.read_text(encoding="utf-8").strip() == "5"
 
 
-def test_main_decrease_writes_baseline_with_update_flag(
-    in_repo_dir: Path, tmp_path: Path
-) -> None:
+def test_main_decrease_writes_baseline_with_update_flag(in_repo_dir: Path, tmp_path: Path) -> None:
     target = in_repo_dir / "src"
     _write_py(target / "a.py", "x = 1  # 한글 하나\n")
     baseline_path = tmp_path / "code-language-baseline.txt"
@@ -277,11 +295,24 @@ def test_main_missing_baseline_requires_update_flag(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_count_tree_full_src_scan_completes_within_budget() -> None:
-    start = time.perf_counter()
-    total, _per_file, scanned = check_code_language.count_tree(ROOT / "src")
-    elapsed = time.perf_counter() - start
+    result: tuple[int, dict[str, int], int] | None = None
 
+    def run() -> None:
+        nonlocal result
+        result = check_code_language.count_tree(ROOT / "src")
+
+    RelativeBudget().assert_within(
+        run,
+        max_ratio=_SCAN_TREE_MAX_RATIO,
+        mode="wall",
+        n=3,
+        warmup=1,
+        label="count_tree(src) full scan",
+    )
+
+    assert result is not None
+    total, _per_file, scanned = result
     assert scanned > 0
     assert total >= 0
-    assert elapsed < 30.0, f"full src/ Hangul scan took {elapsed:.1f}s, budget is 30s"

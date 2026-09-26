@@ -6,7 +6,7 @@ Uses fixtures derived from openapi.json schemas; does NOT hit real API.
 
 from __future__ import annotations
 
-import time
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
@@ -16,6 +16,7 @@ import pytest
 from src.core.exceptions import FatalExchangeError
 from src.data.models.market_data import Candle
 from src.exchanges.nh.adapter import NHAdapter
+from tests._perf.relative_budget import RelativeBudget
 
 # ============================================================================
 # Fixtures: Mock HTTP responses based on NH openapi.json schemas
@@ -316,14 +317,22 @@ async def test_get_ohlcv_malformed_response_injection(
 # ============================================================================
 
 
-@pytest.mark.asyncio
-async def test_get_ohlcv_response_parsing_performance(
-    nh_adapter: NHAdapter,
-) -> None:
-    """Performance assertion: Parsing 100 candles should be fast (p95 < 100ms).
+@pytest.mark.perf
+def test_get_ohlcv_response_parsing_performance(nh_adapter: NHAdapter) -> None:
+    """Performance assertion: parsing 100 candles should be fast.
 
-    Task-6695 markets data endpoints should have <100ms latency (per
-    ADR-2026-09-09-C Decision 1 default budget for adapter parsing).
+    task-7674: the original absolute 100ms budget (Task-6695 / ADR-2026-09-09-C
+    Decision 1 default) measured the CI runner's clock speed, not the parsing
+    code -- it went red (414.6ms) on a busy/shared host with nothing in the
+    adapter changed (bisected candidate 8be8b176 only touches an unrelated
+    test file; local reruns of the parsing call alone measured ~0.2ms). Same
+    `RelativeBudget` fix as task-7631: express the budget as a multiple of a
+    same-process calibration loop instead of an absolute figure. The op is
+    wrapped in its own `asyncio.run()` (50 parses per sample, to sit above
+    Windows' ~15.6ms `time.process_time()` quantization) rather than driven by
+    `pytest.mark.asyncio`, so `RelativeBudget`'s sync best-of-N can call it
+    directly. Ratio derivation: locally measured best-of-5 (50x parse) ~15.6ms
+    against a ~78ms calibration (~0.2x); 0.75 keeps ~3.7x headroom.
     """
     large_response = {
         "Output_0": [
@@ -341,15 +350,19 @@ async def test_get_ohlcv_response_parsing_performance(
         "message": "ok",
     }
 
-    with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
-        mock_request.return_value = large_response
+    async def _parse_fifty_batches() -> None:
+        with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:
+            mock_request.return_value = large_response
+            for _ in range(50):
+                result = await nh_adapter.get_ohlcv("005930", "1d", limit=100)
+                assert len(result) == 100
 
-        start = time.perf_counter()
-        result = await nh_adapter.get_ohlcv("005930", "1d", limit=100)
-        elapsed_ms = (time.perf_counter() - start) * 1000
+    def _run_once() -> None:
+        asyncio.run(_parse_fifty_batches())
 
-        assert len(result) == 100
-        assert elapsed_ms < 100, f"Parsing 100 candles took {elapsed_ms:.1f}ms (budget: <100ms)"
+    RelativeBudget().assert_within(
+        _run_once, max_ratio=0.75, mode="cpu", label="100 candles x50 parse (best of 5)"
+    )
 
 
 # ============================================================================

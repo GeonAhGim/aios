@@ -79,6 +79,23 @@ def _invalid_runbook_reason(rule: dict[str, Any], runbooks_dir: Path = RUNBOOKS_
     return None
 
 
+def _invalid_runbook_reason_from_cache(
+    rule: dict[str, Any], existing: dict[str, bool]
+) -> str | None:
+    """_invalid_runbook_reason과 동일한 판정을 매 호출 disk stat 없이 내린다.
+
+    perf 예산 측정 루프 전용: 파일 존재 여부를 루프 밖에서 1회만 조회해 캐시로
+    넘겨받는다 — Windows에서 반복 stat() 호출의 지연 변동이 p95 예산을 흔드는 것을
+    막는다(회귀 원인, task-7876).
+    """
+    runbook = rule["labels"]["runbook"]
+    if not _RUNBOOK_RE.match(runbook):
+        return f"잘못된 runbook id 형식 {runbook!r}"
+    if not existing.get(runbook, False):
+        return f"runbook 파일 없음 {runbook}"
+    return None
+
+
 def test_alert_rules_yaml_parses_and_has_groups() -> None:
     rules = _load_rules()
     assert len(rules) > 0
@@ -206,12 +223,23 @@ def test_missing_groups_key_raises_instead_of_returning_empty(tmp_path: Path) ->
         _load_rules(bad_path)
 
 
+@pytest.mark.perf
 def test_full_validation_pipeline_p95_latency_within_budget() -> None:
     """수치 성능 단언: 이 파일의 정적 검증은 CI 게이트마다 매번 실행된다. 전체 규칙
     (11개)에 대해 메트릭 토큰 대조 + 필수 필드 + runbook 검증을 1회 통과하는 시간의
     p95가 15ms를 넘지 않아야 한다 — 순수 정적 스캔(디스크 I/O 없이 이미 로드된 파이썬
-    객체만 순회)이며, 초기 실행 오버헤드와 Windows 환경의 변동성을 감안했다."""
+    객체만 순회)이며, 초기 실행 오버헤드와 Windows 환경의 변동성을 감안했다.
+
+    runbook 파일 존재 여부는 루프 시작 전 1회만 disk에서 조회해 캐시한다 —
+    측정 루프 안에서 매 반복 Path.is_file()을 호출하면 Windows 파일시스템의
+    stat() 지연 변동이 p95를 직접 흔들어 "순수 정적 스캔" 전제를 깨고 회귀처럼
+    보이는 적색을 유발한다(task-7876)."""
     rules = _load_rules()
+    runbook_exists = {
+        rule["labels"]["runbook"]: (RUNBOOKS_DIR / f"{rule['labels']['runbook']}.md").is_file()
+        for rule in rules
+        if "runbook" in (rule.get("labels") or {})
+    }
     samples: list[float] = []
     for _ in range(200):
         start = time.perf_counter()
@@ -219,7 +247,7 @@ def test_full_validation_pipeline_p95_latency_within_budget() -> None:
         for rule in rules:
             _missing_required_fields(rule)
             if "runbook" in (rule.get("labels") or {}):
-                _invalid_runbook_reason(rule)
+                _invalid_runbook_reason_from_cache(rule, runbook_exists)
         samples.append(time.perf_counter() - start)
     samples.sort()
     p95 = samples[int(len(samples) * 0.95)]

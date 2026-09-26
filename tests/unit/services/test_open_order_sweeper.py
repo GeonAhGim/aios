@@ -522,6 +522,7 @@ async def test_conditional_update_failure_rolls_back_order_event_atomically(pool
     assert event_count == 0
 
 
+@pytest.mark.perf
 async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(pool):
     """수치 성능 단언(task-3029, DEPTH 감사 task-2724가 지목한 마지막 공백).
     단일 취소대상 주문에 대한 `sweep_open_orders` 1회 호출은 후보 선별 SELECT

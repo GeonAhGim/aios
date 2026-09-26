@@ -143,6 +143,7 @@ def _p95(samples: list[float]) -> float:
     return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)]
 
 
+@pytest.mark.perf
 async def test_mfa_resetup_rejection_p95_latency_budget(client):
     """수치 성능 단언 — 비밀번호 없이 재설정을 시도하는 공격 트래픽은 실제
     비밀번호 검증(bcrypt)이나 `mfa.setup()`(TOTP secret 생성) 없이 즉시
@@ -178,6 +179,7 @@ async def test_mfa_resetup_rejection_p95_latency_budget(client):
     assert p95_ms < _REJECTION_BUDGET_MS
 
 
+@pytest.mark.perf
 async def test_perf_budget_gate_actually_fails_when_rejection_path_stalls(
     client, monkeypatch: pytest.MonkeyPatch
 ) -> None:

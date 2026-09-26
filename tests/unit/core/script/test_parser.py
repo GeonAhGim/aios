@@ -23,7 +23,6 @@ fail-closed함을 대조)을 추가한다.
 from __future__ import annotations
 
 import sys
-import time
 
 import pytest
 
@@ -48,7 +47,7 @@ from src.core.script.grammar.ast import (
 )
 from src.core.script.grammar.lexer import ScriptSyntaxError
 from src.core.script.grammar.parser import parse
-from tests.conftest import paused_coverage
+from tests._perf.relative_budget import RelativeBudget
 
 # ---- §3.3 decl 5종: 파싱 성공 ----
 
@@ -437,26 +436,35 @@ def test_deeply_nested_parens_fail_closed_under_low_recursion_limit() -> None:
 # ---- DEEPEN(task-2911): 수치 성능 단언(파싱 지연) ----
 
 
+@pytest.mark.perf
 def test_parse_latency_stays_within_half_of_dsl_compile_budget() -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산은(로컬 기준) 300ms다.
     파서는 그 파이프라인의 한 단계일 뿐이므로 예산 전체를 단독으로 써서는
     안 된다. or/and/cmp/arith/term/postfix/call 계층을 모두 섞은 1000개
-    decl짜리 스크립트를 파싱해, 파서 단계 지연이 예산의 절반(150ms) 안에
-    머무름을 확인한다 — 선형 이상(이차 이상)의 성능 저하를 조기에
-    드러낸다."""
+    decl짜리 스크립트를 파싱해, 파서 단계 지연이 예산의 절반 안에 머무름을
+    확인한다 — 선형 이상(이차 이상)의 성능 저하를 조기에 드러낸다.
+
+    task-7434가 옮긴 process_time 기반 `perf_budget`(coverage tracer 정지
+    포함, `tests/conftest.py`)도 여전히 절대 150ms라 CI 러너 클록 속도에
+    매여 느린 러너에서 반복 적색이었다(task-7631/GitHub run 36193686857).
+    `RelativeBudget`(`tests/_perf/relative_budget.py`)으로 옮겨 같은
+    프로세스에서 잰 고정 크기 순수 파이썬 루프 대비 배수로 예산을
+    표현한다. 배수 산출: 기존 절대 예산 150ms / 로컬 실측 calibration 약
+    94ms ≈ 1.6배, 실측 op/calibration 비율은 약 0.83배(op 약 78ms) — 원래
+    예산의 headroom 비율(약 1.9배)에 가깝게 1.6배로 잡는다."""
     lines = [
         f"let v{i} = ta.rsi(close[{i % 5}], 14) + v{i - 1} * 2 - 1 and v{i - 1} > 0"
         for i in range(1, 1000)
     ]
     source = "let v0 = close\n" + "\n".join(lines)
+    program = None
 
-    with paused_coverage():
-        start = time.perf_counter()
+    def _run_once() -> None:
+        nonlocal program
         program = parse(source)
-        elapsed = time.perf_counter() - start
 
+    RelativeBudget().assert_within(_run_once, max_ratio=1.6, mode="cpu", label="1000-decl parse")
     assert len(program.decls) == 1000
-    assert elapsed < 0.15
 
 
 # ---- DEEPEN(task-2911): 게이트 적색 재현(SCRIPT_SYNTAX 회귀 방지) ----

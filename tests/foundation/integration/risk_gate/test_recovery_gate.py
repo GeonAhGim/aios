@@ -139,7 +139,12 @@ class _GatedRecorder:
 
 
 def _repos(risk_gate_repo, cb, pool, recorder, **overrides) -> RecoveryGateRepos:
-    kwargs = {"cooldown_sec": _COOLDOWN_SEC, "approval_ttl_sec": _APPROVAL_TTL_SEC, **overrides}
+    kwargs = {
+        "cooldown_sec": _COOLDOWN_SEC,
+        "approval_ttl_sec": _APPROVAL_TTL_SEC,
+        "circuit_breaker_policy": load_risk_policy().circuit_breaker,
+        **overrides,
+    }
     return RecoveryGateRepos(
         risk_gate=risk_gate_repo,
         circuit_breaker=cb,

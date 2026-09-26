@@ -379,6 +379,7 @@ async def test_lease_repo_failure_during_list_candidates_is_not_swallowed(pool):
         await scheduler.tick_all_running()
 
 
+@pytest.mark.perf
 async def test_tick_all_running_p95_latency_within_budget(pool):
     """성능 단언(D2, ADR-2026-09-09-C Decision 1) — 이 스케줄러 축은 예산표에
     전용 행이 없다(가장 가까운 행은 "주문 제출→ACK p95 50ms(paper)"이지만

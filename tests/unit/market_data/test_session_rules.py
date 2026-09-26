@@ -173,6 +173,7 @@ def test_is_open_and_next_open_propagate_failure_from_corrupted_sessions_for(
         cal.next_open(at)
 
 
+@pytest.mark.perf
 def test_next_open_throughput_within_latency_budget() -> None:
     """Numeric performance assertion -- 5,000 `next_open` calls spanning
     ~13.7 years of daily timestamps (pure in-memory computation, no I/O) must

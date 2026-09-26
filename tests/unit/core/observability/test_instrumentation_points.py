@@ -205,6 +205,40 @@ async def test_submit_order_denied_records_gate_and_denied_metrics(
     ) in spy.counters
 
 
+# task-7636 DEEPEN — 실패주입: 저장소 의존성이 예외를 던지면(게이트 통과 후
+# DB insert 장애) 아직 일어나지 않은 "제출 완료"를 계측이 거짓 보고해선
+# 안 된다 — 게이트 계측만 남고 제출 결과 계측(count/duration)은 기록되지
+# 않으며, 거래소 호출 자체가 이뤄지지 않았음을 함께 확인한다.
+async def test_submit_order_insert_failure_records_only_gate_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order = _order()
+    adapter = FakeExchangeAdapter()
+    spy = _SpyMetrics()
+
+    async def failing_insert(conn: object, order: Order, *, user_id: object) -> Order:
+        raise ConnectionError("simulated order repository failure")
+
+    monkeypatch.setattr(repository_module, "insert", failing_insert)
+
+    with pytest.raises(ConnectionError):
+        await submit_order(
+            order,
+            user_id=uuid4(),
+            adapter=adapter,
+            pool=_FakePool(),
+            metrics=spy,
+            pre_submit_gate=_allow_gate,
+        )
+
+    assert spy.counters == [
+        (RISK_DECISION_COUNT_TOTAL, {"engine": "core", "effect": "ALLOW", "reason_code": "none"})
+    ]
+    assert len(spy.observations) == 1
+    assert spy.observations[0][0] == RISK_EVALUATION_DURATION_SECONDS
+    assert adapter.place_order_call_count == 0
+
+
 # ---- position_ledger.py: aios.order.fill.count_total ----
 
 
@@ -289,6 +323,36 @@ async def test_reconcile_gauge_one_when_never_resolved(monkeypatch: pytest.Monke
 
     assert result.status == OrderStatus.UNKNOWN
     assert (ORDER_UNKNOWN_STATE_GAUGE, 1.0, {"exchange": "bitget"}) in spy.gauges
+
+
+# task-7636 DEEPEN — negative: 위임된 판정은 끝났는데 persisted 행이 없는
+# 상태는 불변식 위반이다 — RuntimeError로 명시적으로 거부한다(reconcile.py
+# 하단 raise). 게이지는 그 검사보다 먼저 기록되므로(§7.2), 불변식 위반이
+# 계측 자체를 가리지 않음도 함께 확인한다.
+async def test_reconcile_raises_when_persisted_row_missing_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = _order(status=OrderStatus.FILLED, execution_id=1).model_copy(
+        update={"exchange_order_id": "ex-1"}
+    )
+    resolved_view = SimpleNamespace(status=OrderStatus.FILLED, exchange="bitget")
+
+    async def fake_resolve_unknown(order_id: object, **kwargs: object) -> object:
+        return resolved_view
+
+    async def fake_get_by_order_id_missing(conn: object, order_id: object) -> Order | None:
+        return None
+
+    monkeypatch.setattr(reconcile_module.unknown_resolver, "resolve_unknown", fake_resolve_unknown)
+    monkeypatch.setattr(repository_module, "get_by_order_id", fake_get_by_order_id_missing)
+
+    adapter = FakeExchangeAdapter(get_order_status=OrderStatus.FILLED)
+    spy = _SpyMetrics()
+
+    with pytest.raises(RuntimeError, match="해소 처리 후 행이 없습니다"):
+        await resolve_unknown(pending.order_id, adapter=adapter, pool=_FakePool(), metrics=spy)
+
+    assert (ORDER_UNKNOWN_STATE_GAUGE, 0.0, {"exchange": "bitget"}) in spy.gauges
 
 
 # ---- submit_paper_intent.py: aios.foundation_paper_control.order_intent.count_total ----

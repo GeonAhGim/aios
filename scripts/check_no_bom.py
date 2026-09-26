@@ -15,13 +15,20 @@ FAIL(rc=1); 위반 수가 과거보다 늘지 않았다고 봐주는 baseline이
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BOM = b"\xef\xbb\xbf"
 SCAN_ROOT_NAMES = ("src", "tests", "scripts", "docs")
 SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "coverage", ".venv"}
+# Cold checkout (fresh CI runner / worktree reset) has no page cache, so each open() blocks on
+# physical I/O; a serial walk over ~6-7k tracked files took 60-70s and blew the 60s CI step
+# budget (esc-ci-no_bom, 2026-09-26 probe). Threads overlap that I/O latency -- this is I/O-bound
+# so the GIL is released during read(), and wall-clock drops well under budget even cold.
+SCAN_WORKERS = 32
 
 
 def has_bom(path: Path) -> bool:
@@ -33,18 +40,27 @@ def has_bom(path: Path) -> bool:
         return False
 
 
-def _scan(base: Path) -> list[Path]:
+def _iter_files(base: Path) -> list[Path]:
+    """os.walk with in-place pruning: rglob("*") descended into every skipped directory
+    (node_modules/.venv/__pycache__) before filtering, which is the difference that made the
+    original unpruned scan slow. This only lists paths -- no I/O per file yet."""
     if not base.is_dir():
         return []
     found = []
-    for path in base.rglob("*"):
-        if not path.is_file():
-            continue
-        if SKIP_DIR_NAMES & set(path.relative_to(base).parts[:-1]):
-            continue
-        if has_bom(path):
-            found.append(path)
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
+        for name in filenames:
+            found.append(Path(dirpath) / name)
     return found
+
+
+def _scan(base: Path) -> list[Path]:
+    files = _iter_files(base)
+    if not files:
+        return []
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        flags = pool.map(has_bom, files)
+    return [path for path, is_bom in zip(files, flags, strict=True) if is_bom]
 
 
 def frontend_src_dirs(repo_root: Path) -> list[Path]:
@@ -54,7 +70,14 @@ def frontend_src_dirs(repo_root: Path) -> list[Path]:
     frontend = repo_root / "frontend"
     if not frontend.is_dir():
         return []
-    return sorted({p for p in frontend.rglob("src") if p.is_dir()})
+    # Pruned walk: rglob("src") descended into node_modules (tens of thousands of entries).
+    found: set[Path] = set()
+    for dirpath, dirnames, _files in os.walk(frontend):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
+        if Path(dirpath).name == "src":
+            found.add(Path(dirpath))
+            dirnames[:] = []  # a src/ tree is scanned by _scan; no nested src lookup needed
+    return sorted(found)
 
 
 def find_bom_files(repo_root: Path) -> list[Path]:

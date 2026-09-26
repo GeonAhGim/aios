@@ -112,6 +112,7 @@ def test_trust_status_response_dependency_failure_injected(monkeypatch: pytest.M
         )
 
 
+@pytest.mark.perf
 def test_trust_status_response_construction_throughput_budget() -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""

@@ -201,6 +201,7 @@ async def test_fetch_sec_edgar_filings_builds_url_and_headers() -> None:
 # normalization of a realistic batch must clear a fixed throughput floor) ---
 
 
+@pytest.mark.perf
 def test_parse_sec_edgar_submissions_throughput_floor() -> None:
     size = 1_000
     payload = _submissions(

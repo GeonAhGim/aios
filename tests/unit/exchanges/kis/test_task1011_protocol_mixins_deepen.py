@@ -278,6 +278,7 @@ async def test_modify_order_propagates_get_order_failure_after_successful_rvsecn
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_get_ohlcv_1d_parses_large_response_within_normalized_budget() -> None:
     """market_data_mixin.py::get_ohlcv(1d 경로)는 항목 수에 선형으로
     늘어야 한다. 절대 ms 상수 대신 같은 프로세스에서 잰 동일 크기

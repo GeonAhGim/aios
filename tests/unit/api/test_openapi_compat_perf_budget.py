@@ -41,6 +41,7 @@ def _load_v1_snapshot() -> dict | None:
     return json.loads(_V1_SNAPSHOT_PATH.read_text(encoding="utf-8"))
 
 
+@pytest.mark.perf
 def test_find_violations_p95_latency_within_budget_for_real_v1_snapshot() -> None:
     snapshot = _load_v1_snapshot()
     if snapshot is None:
@@ -63,6 +64,7 @@ def _busy_wait(seconds: float) -> None:
         pass
 
 
+@pytest.mark.perf
 def test_perf_budget_guard_fails_on_injected_leaf_comparison_delay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

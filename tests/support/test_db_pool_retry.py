@@ -15,7 +15,12 @@ from typing import Any
 import asyncpg
 import pytest
 
-from tests.support.db import _pool_retry_delay, _sleep_before_pool_retry, create_pool_with_retry
+from tests.support.db import (
+    _admin_connect_with_retry,
+    _pool_retry_delay,
+    _sleep_before_pool_retry,
+    create_pool_with_retry,
+)
 
 
 class _FakePool:
@@ -272,10 +277,114 @@ async def test_create_pool_with_retry_jitters_between_attempts(
         sleeps.append(attempt)
 
     monkeypatch.setattr(db_module.asyncpg, "create_pool", _fake_create_pool)
-    monkeypatch.setattr(
-        db_module, "_sleep_before_pool_retry", _fake_sleep_before_pool_retry
-    )
+    monkeypatch.setattr(db_module, "_sleep_before_pool_retry", _fake_sleep_before_pool_retry)
 
     await create_pool_with_retry("postgresql://u:p@localhost/db")
 
     assert sleeps == [0]
+
+
+# ── _admin_connect_with_retry: esc-ci-pytest_latency_serial ──────────
+#
+# `ensure_worker_database`'s admin connect (`asyncpg.connect`, no pool
+# involved) had no retry at all, unlike `create_pool_with_retry` above -- the
+# exact same transient Windows TCP reset it retries for can hit this plain
+# connect instead, and because `ensure_worker_database` runs at conftest.py
+# *import* time (module-level `asyncio.run`), an unretried failure here
+# surfaces as "ImportError while loading conftest" for the whole pytest
+# invocation rather than one flaky test.
+
+
+@pytest.mark.asyncio
+async def test_admin_connect_with_retry_retries_transient_reset_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_module = sys.modules["tests.support.db"]
+    calls = 0
+
+    async def _fake_connect(dsn: str) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise asyncpg.exceptions.ConnectionDoesNotExistError(
+                "connection was closed in the middle of operation"
+            )
+        return "connected"
+
+    monkeypatch.setattr(db_module.asyncpg, "connect", _fake_connect)
+    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
+
+    result = await _admin_connect_with_retry("postgresql://u:p@localhost/postgres")
+
+    assert result == "connected"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_admin_connect_with_retry_retries_oserror_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same absorption for the raw `OSError` shape (WinError 64 surfaces as
+    `ConnectionResetError` before asyncpg wraps it)."""
+    db_module = sys.modules["tests.support.db"]
+    calls = 0
+
+    async def _fake_connect(dsn: str) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionResetError(22, "network name no longer available", None, 64, None)
+        return "connected"
+
+    monkeypatch.setattr(db_module.asyncpg, "connect", _fake_connect)
+    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
+
+    result = await _admin_connect_with_retry("postgresql://u:p@localhost/postgres")
+
+    assert result == "connected"
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_admin_connect_with_retry_propagates_after_exhausting_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail-closed: a persistent reset (not a one-off transient) still raises
+    after `_POOL_CONNECT_ATTEMPTS` -- this never becomes a false green."""
+    db_module = sys.modules["tests.support.db"]
+    calls = 0
+
+    async def _always_fails(dsn: str) -> str:
+        nonlocal calls
+        calls += 1
+        raise asyncpg.exceptions.ConnectionDoesNotExistError("connection does not exist")
+
+    monkeypatch.setattr(db_module.asyncpg, "connect", _always_fails)
+    monkeypatch.setattr(db_module, "_POOL_CONNECT_RETRY_BASE_DELAY", 0.0)
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await _admin_connect_with_retry("postgresql://u:p@localhost/postgres")
+
+    assert calls == db_module._POOL_CONNECT_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_admin_connect_with_retry_does_not_retry_unrelated_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-transient failure (e.g. bad credentials) raises immediately on
+    the first attempt -- only the documented transient-reset shape retries."""
+    db_module = sys.modules["tests.support.db"]
+    calls = 0
+
+    async def _fake_connect(dsn: str) -> str:
+        nonlocal calls
+        calls += 1
+        raise asyncpg.exceptions.InvalidPasswordError("password authentication failed")
+
+    monkeypatch.setattr(db_module.asyncpg, "connect", _fake_connect)
+
+    with pytest.raises(asyncpg.exceptions.InvalidPasswordError):
+        await _admin_connect_with_retry("postgresql://u:p@localhost/postgres")
+
+    assert calls == 1

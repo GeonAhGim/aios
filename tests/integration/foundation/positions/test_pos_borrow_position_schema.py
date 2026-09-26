@@ -264,6 +264,7 @@ async def test_pos_borrow_position_insert_for_other_tenant_is_rejected(pool):
 # --- 수치 성능 단언 ---------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_pos_borrow_position_batch_insert_meets_latency_budget(pool):
     """50건의 `pos_borrow_position` 순차 INSERT가 3.0초 예산 내에 끝나야
     한다(LC-15a `test_schedule_payouts_batch_meets_latency_budget`,

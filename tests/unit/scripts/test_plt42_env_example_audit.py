@@ -147,6 +147,7 @@ def test_check_env_keys_catches_direct_os_environ_regression(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_check_env_keys_perf_budget_on_real_repo() -> None:
     """The full `src/` ast scan must stay inside the CI gate step's budget
     (measured ~1.3s locally; an 8s budget leaves ~4x headroom)."""

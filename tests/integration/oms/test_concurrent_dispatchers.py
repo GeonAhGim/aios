@@ -44,6 +44,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import asyncpg
+import pytest
 
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.error_taxonomy import SentUnknownError
@@ -137,6 +138,7 @@ async def test_three_workers_send_each_row_exactly_once():
     assert Counter(e.event for e in orders.events) == {"SENT": 50, "ACK": 50}
 
 
+@pytest.mark.perf
 async def test_three_workers_throughput_has_bounded_wall_clock_latency():
     """DEPTH_L4_BR(task-2722) D2 — 수치 성능/처리량 단언(CI 차단 게이트).
 

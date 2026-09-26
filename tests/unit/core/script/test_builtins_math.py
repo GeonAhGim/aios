@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import math
 import random
-import time
 from collections.abc import Callable
 
 import pytest
@@ -34,7 +33,7 @@ from src.core.script.runtime import (
     default_builtins,
     execute,
 )
-from tests.conftest import paused_coverage
+from tests.conftest import PerfBudget
 
 SITE = CallSite("math", "x", "float", 4)
 S = Series.of_floats([1.5, -2.5, None, 4.0])
@@ -235,29 +234,33 @@ def test_wired_through_interpreter_with_default_builtins() -> None:
 # ---- DEEPEN(task-2920): 수치 성능 단언(빌트인 호출 지연) ----
 
 
-def test_series_builtin_call_latency_p95_within_backtest_budget_slice() -> None:
+@pytest.mark.perf
+def test_series_builtin_call_latency_p95_within_backtest_budget_slice(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1의 백테스트 예산(로컬 기준, 1개월 M1 1심볼 3초)
     중 빌트인 호출 1회(하루치 bar_count=1440, 1일치 1분봉에 시리즈 인자를 브로드
     캐스트하는 `apply_elementwise` 경로) 몫을 5ms로 상한한다 — DSL-8 인터프리터
     실행 예산(250ms/30-let 체인, task-2917)에서 빌트인 호출 1개가 차지할 몫에
-    넉넉한 여유를 둔 수치다. 20회 반복 실행해 p95로 잰다."""
+    넉넉한 여유를 둔 수치다. 20회 반복 실행해 p95로 잰다. task-7434:
+    process_time 기반 perf_budget으로 측정한다(coverage tracer 정지 포함).
+    task-7673: Windows `GetProcessTimes` 해상도(15.625ms/64Hz)가 batch=4에서는
+    호출당 ~3.9ms의 양자화 오차를 남겨 5ms 예산과 거의 맞닿는다 — CI 부하가
+    조금만 높아도 우연히 한 틱 더 올라간 샘플이 p95를 예산 밖으로 밀어낸다.
+    batch=8로 오차를 ~2ms로 더 줄여(conftest.py의 PerfBudget.sample 주석 참고,
+    task-6774/task-7360과 동일 기법) 예산 대비 여유를 확보한다."""
     bar_count = 1440
     series = Series.of_floats([float(i % 97) - 48.0 for i in range(bar_count)])
     site = CallSite("math", "abs", "series<float>", bar_count)
     fn = MATH_BUILTINS[("math", "abs")]
 
-    samples = []
-    for _ in range(20):
-        with paused_coverage():
-            start = time.perf_counter()
-            fn((series,), site)
-            samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    samples = perf_budget.samples(lambda: fn((series,), site), n=20, batch=8)
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
 
-    budget_sec = 0.005
-    print(f"[math.abs] bar_count={bar_count} p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    budget_ms = 5.0
+    print(f"[math.abs] bar_count={bar_count} p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
 
 
 # ---- DEEPEN(task-2920): 게이트 적색 재현(bool 도메인 거부 무력화) ----

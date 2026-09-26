@@ -3,9 +3,11 @@
 Covers construction, frozen immutability, enum validation, and equality for
 Disclosure/Consent/Tenant/Membership and their state enums.
 """
+
 import dataclasses
 import time
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -25,8 +27,8 @@ from src.foundation.trust.domain.models import (
 NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 
-def _disclosure(**overrides: object) -> Disclosure:
-    fields = dict(
+def _disclosure(**overrides: Any) -> Disclosure:
+    fields: dict[str, Any] = dict(
         id=uuid4(),
         purpose="terms_of_service",
         revision=1,
@@ -35,11 +37,11 @@ def _disclosure(**overrides: object) -> Disclosure:
         retired_at=None,
     )
     fields.update(overrides)
-    return Disclosure(**fields)  # type: ignore[arg-type]
+    return Disclosure(**fields)
 
 
-def _consent(**overrides: object) -> Consent:
-    fields = dict(
+def _consent(**overrides: Any) -> Consent:
+    fields: dict[str, Any] = dict(
         id=uuid4(),
         tenant_id=uuid4(),
         subject_id=uuid4(),
@@ -52,17 +54,19 @@ def _consent(**overrides: object) -> Consent:
         expires_at=None,
     )
     fields.update(overrides)
-    return Consent(**fields)  # type: ignore[arg-type]
+    return Consent(**fields)
 
 
-def _tenant(**overrides: object) -> Tenant:
-    fields = dict(id=uuid4(), kind=TenantKind.PERSONAL, state=TenantState.ACTIVE, created_at=NOW)
+def _tenant(**overrides: Any) -> Tenant:
+    fields: dict[str, Any] = dict(
+        id=uuid4(), kind=TenantKind.PERSONAL, state=TenantState.ACTIVE, created_at=NOW
+    )
     fields.update(overrides)
-    return Tenant(**fields)  # type: ignore[arg-type]
+    return Tenant(**fields)
 
 
-def _membership(**overrides: object) -> Membership:
-    fields = dict(
+def _membership(**overrides: Any) -> Membership:
+    fields: dict[str, Any] = dict(
         id=uuid4(),
         tenant_id=uuid4(),
         subject_id=uuid4(),
@@ -72,7 +76,7 @@ def _membership(**overrides: object) -> Membership:
         created_at=NOW,
     )
     fields.update(overrides)
-    return Membership(**fields)  # type: ignore[arg-type]
+    return Membership(**fields)
 
 
 # --- positive construction ---------------------------------------------------
@@ -173,6 +177,7 @@ def test_membership_role_construction_surfaces_injected_lookup_failure(
 # --- performance ---------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_bulk_construction_meets_latency_budget() -> None:
     """10k instantiations of every value object must stay well under 1s (p50 budget
     for pure in-memory dataclass construction, ADR-2026-09-09-C Decision 1 default)."""

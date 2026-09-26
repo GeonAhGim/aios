@@ -194,6 +194,7 @@ async def test_cancel_order_exchange_rejection_response_propagates_not_silently_
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_place_order_round_trip_throughput_within_normalized_budget() -> None:
     """`place_futureoption_order` 왕복(바디 조립 + 응답 파싱)의 반복 측정
     소요시간을, 같은 프로세스·같은 측정 시점에 측정한 동일 규모의 trivial

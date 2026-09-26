@@ -79,6 +79,24 @@ def test_verify_detects_tampered_registry_version():
     assert verify(tampered) == ARTIFACT_HASH_MISMATCH
 
 
+def test_verify_detects_tampered_compiler_version():
+    """A forged `compiler_version` (claiming a different compiler build
+    produced this artifact) must be caught the same way as any other
+    hash-input field."""
+    artifact = _artifact()
+    tampered = artifact.model_copy(update={"compiler_version": "cc-test-forged"})
+    assert verify(tampered) == ARTIFACT_HASH_MISMATCH
+
+
+def test_verify_detects_tampered_grammar_version():
+    """A forged `grammar_version` (claiming the artifact was compiled
+    against a different DSL grammar than it actually was) must be caught
+    the same way as any other hash-input field."""
+    artifact = _artifact()
+    tampered = artifact.model_copy(update={"grammar_version": "grammar-forged"})
+    assert verify(tampered) == ARTIFACT_HASH_MISMATCH
+
+
 # --------------------------------------------------------------------------
 # D2 negative -- frozen 모델은 필드 하나만 바뀌어도 새 artifact_hash를 요구한다
 # (§2 row 158 "content-addressed and immutable once versioned").
@@ -92,6 +110,73 @@ def test_artifact_is_frozen_rejects_mutation():
 
 
 # --------------------------------------------------------------------------
+# D2 negative -- 빈/부정 입력은 ValidationError로 즉시 거부해야 한다.
+# content-addressed 해시(I-04)는 유효한 입력에서만 계산되므로,
+# invalid input이 model을 통과해 artifact_hash를 계산하는 것을 막는다.
+# --------------------------------------------------------------------------
+
+
+def test_negative_none_strategy_id():
+    """strategy_id에 None을 전달하면 Pydantic ValidationError가 발생해야 한다.
+    불변식: artifact의 모든 str 필드는 None이 아닌 문자열 값만 허용된다
+    (I-04 content-addressed, fail-closed).
+    """
+    with pytest.raises(ValidationError) as ctx:
+        build_artifact(
+            strategy_id=None,
+            version="v1",
+            fsm_definition=FSM_DEFINITION,
+            compiler_version="cc-test-1",
+        )
+    assert "strategy_id" in str(ctx.value)
+
+
+def test_negative_none_version():
+    """version에 None을 전달하면 Pydantic ValidationError가 발생해야 한다.
+    불변식: 버전 필드는 None이 아닌 문자열 값만 허용된다 (I-04).
+    """
+    with pytest.raises(ValidationError) as ctx:
+        build_artifact(
+            strategy_id="strat-1",
+            version=None,
+            fsm_definition=FSM_DEFINITION,
+            compiler_version="cc-test-1",
+        )
+    assert "version" in str(ctx.value)
+
+
+def test_negative_integer_version():
+    """version에 정수(예: 1)를 전달하면 Pydantic ValidationError가 발생해야 한다.
+    불변식: 버전 필드는 str 타입만 허용된다 — 정수/float/byte는 거부된다.
+    """
+    with pytest.raises(ValidationError) as ctx:
+        build_artifact(
+            strategy_id="strat-1",
+            version=1,
+            fsm_definition=FSM_DEFINITION,
+            compiler_version="cc-test-1",
+        )
+    assert "version" in str(ctx.value)
+
+
+# --------------------------------------------------------------------------
+# D2 실패주입 -- L02 레지스트리(의존성) 예외는 fail-closed로 전파돼야 한다.
+# artifact_hash가 잘못된 registry_version(예: 빈 문자열)으로 조용히 만들어지면
+# I-04(content-addressed, immutable) 위반이므로, 여기서 삼켜서 성공으로
+# 위장하지 않는지 확인한다.
+# --------------------------------------------------------------------------
+
+
+def test_build_artifact_propagates_registry_hash_failure(monkeypatch):
+    def _boom() -> str:
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch.setattr(DEFAULT_REGISTRY, "registry_hash", _boom)
+    with pytest.raises(RuntimeError, match="registry unavailable"):
+        _artifact()
+
+
+# --------------------------------------------------------------------------
 # D2 성능 단언 -- ADR-2026-09-09-C 예산표 "DSL 컴파일 300ms"를 이 leaf에 적용.
 # build_artifact()는 컴파일 파이프라인의 마지막 단계(해시 고정)이므로, 500
 # state/2,000 transition 규모 FSM에서도 그 예산의 여유 안에서 끝남을 확인한다
@@ -99,6 +184,7 @@ def test_artifact_is_frozen_rejects_mutation():
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_build_artifact_large_fsm_within_dsl_compile_budget():
     large_fsm = {
         "states": [f"S{i}" for i in range(500)],

@@ -312,6 +312,7 @@ async def test_ibor_view_recomputes_deterministically_as_of_cutoff(
     assert replay.balances == as_of_t1.balances
 
 
+@pytest.mark.perf
 async def test_compute_ibor_view_stays_within_latency_budget_for_50_postings(
     pool, fund_id, portfolio_id, accounts
 ):

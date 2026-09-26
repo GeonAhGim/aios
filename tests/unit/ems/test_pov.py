@@ -344,6 +344,7 @@ class TestPerformanceBenchmark:
     _P99_BUDGET_MS = 50.0
     _ITERATIONS = 200
 
+    @pytest.mark.perf
     def test_plan_pov_schedule_p99_latency_under_budget(
         self, parent_order: ParentOrder
     ) -> None:

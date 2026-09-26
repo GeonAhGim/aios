@@ -279,6 +279,7 @@ async def test_membership_lookup_outage_propagates_fail_closed(pool):
 # ----------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_resolve_tenant_context_membership_path_latency_p95_within_budget(pool, repo):
     """수치 성능 단언: 멤버십이 있는 tenant 요청 경로(DB 조회 1회, §8.3)의
     p95 지연시간이 예산을 넘지 않아야 한다 — 인덱스/쿼리플랜 회귀로 조회가

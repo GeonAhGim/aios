@@ -111,3 +111,77 @@ async def test_fetch_paper_state_ignores_fail_submit_flag() -> None:
     state = await adapter.fetch_paper_state(_context())
 
     assert state == "OK"
+
+
+@pytest.mark.asyncio
+async def test_cancel_paper_order_fail_cancel_raises_connection_error() -> None:
+    """Failure injection: fail_cancel=True must raise ConnectionError instead
+    of returning None."""
+    adapter = FakePaperExecutionAdapter(fail_cancel=True)
+
+    with pytest.raises(ConnectionError, match="cancel 실패"):
+        await adapter.cancel_paper_order(_context(), provider_order_ref="fake-paper-order-abc12345")
+
+
+@pytest.mark.asyncio
+async def test_fetch_paper_state_fail_fetch_raises_connection_error() -> None:
+    """Failure injection: fail_fetch=True must raise ConnectionError instead
+    of returning "OK"."""
+    adapter = FakePaperExecutionAdapter(fail_fetch=True)
+
+    with pytest.raises(ConnectionError, match="fetch 실패"):
+        await adapter.fetch_paper_state(_context())
+
+
+@pytest.mark.asyncio
+async def test_submit_paper_intent_ref_format() -> None:
+    """Boundary: provider_order_ref must contain the fake-paper-order prefix
+    and a non-empty hex suffix."""
+    adapter = FakePaperExecutionAdapter()
+
+    ack = await adapter.submit_paper_intent(_context(), sequence=100)
+
+    assert ack.provider_order_ref.startswith("fake-paper-order-")
+    assert len(ack.provider_order_ref) > len("fake-paper-order-")
+
+
+@pytest.mark.asyncio
+async def test_cancel_paper_order_with_actual_issued_ref() -> None:
+    """Test: cancel a real ref issued by submit_paper_intent."""
+    adapter = FakePaperExecutionAdapter()
+    context = _context()
+
+    ack = await adapter.submit_paper_intent(context, sequence=1)
+    result = await adapter.cancel_paper_order(context, provider_order_ref=ack.provider_order_ref)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_all_failure_flags_independent() -> None:
+    """Negative: failure flags must be independent — setting one should not
+    affect the others."""
+    adapter_submit_fails = FakePaperExecutionAdapter(fail_submit=True)
+    adapter_cancel_fails = FakePaperExecutionAdapter(fail_cancel=True)
+    adapter_fetch_fails = FakePaperExecutionAdapter(fail_fetch=True)
+    context = _context()
+
+    # submit_fails adapter can still cancel and fetch
+    with pytest.raises(ConnectionError):
+        await adapter_submit_fails.submit_paper_intent(context, sequence=1)
+    assert await adapter_submit_fails.cancel_paper_order(context, "any-ref") is None
+    assert await adapter_submit_fails.fetch_paper_state(context) == "OK"
+
+    # cancel_fails adapter can still submit and fetch
+    ack = await adapter_cancel_fails.submit_paper_intent(context, sequence=1)
+    assert ack.provider_order_ref != ""
+    with pytest.raises(ConnectionError):
+        await adapter_cancel_fails.cancel_paper_order(context, "any-ref")
+    assert await adapter_cancel_fails.fetch_paper_state(context) == "OK"
+
+    # fetch_fails adapter can still submit and cancel
+    ack = await adapter_fetch_fails.submit_paper_intent(context, sequence=1)
+    assert ack.provider_order_ref != ""
+    assert await adapter_fetch_fails.cancel_paper_order(context, "any-ref") is None
+    with pytest.raises(ConnectionError):
+        await adapter_fetch_fails.fetch_paper_state(context)

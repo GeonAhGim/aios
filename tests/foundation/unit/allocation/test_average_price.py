@@ -117,6 +117,7 @@ def test_apply_average_price_rejects_empty_lines():
 # 수치 성능 단언만 추가한다(선례: dceb4b2b, 63764b46, 775370f2).
 
 
+@pytest.mark.perf
 def test_blended_average_price_hot_path_performance():
     fills = [
         PartialFill(quantity=Decimal("60"), price=Decimal("10.00")),
@@ -129,6 +130,7 @@ def test_blended_average_price_hot_path_performance():
     assert elapsed < 1.0
 
 
+@pytest.mark.perf
 def test_apply_average_price_hot_path_performance():
     lines = [
         AllocationLine(sub_account_id=uuid4(), quantity=Decimal("60")),

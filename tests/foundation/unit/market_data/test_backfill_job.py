@@ -8,6 +8,7 @@ DoD: 갭 계획→백필→커버리지 갱신 왕복이 실제로 갭을 없애
 것("중단 후 재개"), 빈 provider 응답이 커버리지로 조용히 둔갑하지 않는 것
 (§4.1), venue 축이 어긋난 요청이 fail-closed 거부되는 것을 검증한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
@@ -29,6 +30,7 @@ from src.foundation.market_data.contracts.v2.instruments import VenueListing
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from src.foundation.market_data.domain.coverage.gaps import IndeterminateCoverageError
 from src.foundation.market_data.ports.coverage_repository import (
     CoverageQuality,
 )
@@ -368,3 +370,92 @@ async def test_sparse_response_preserves_holes_and_resumes(hours: list[int]) -> 
     replay = await _run(remaining, store, repo, range_start=_dt(0), range_end=_dt(4))
     assert replay.gaps_planned == 0
     assert remaining.calls == []
+
+
+@pytest.mark.asyncio
+async def test_reversed_range_is_rejected_fail_closed() -> None:
+    """`plan_fetch`(DC-7)이 구간 역전(range_end < range_start)에서
+    `IndeterminateCoverageError`로 fail-closed 거부한다 — 빈 갭 목록으로
+    '커버리지 충분'을 오독하지 않는다. 이 오케스트레이션 레이어가 그
+    예외를 삼키지 않고 그대로 전파하는 것, 그리고 I/O(provider/store)가
+    전혀 일어나지 않은 채 거부되는 것을 검증한다."""
+    provider = _FakeProvider({})
+    store = _FakeCandleStore()
+    coverage_repo = _FakeCoverageRepository()
+
+    with pytest.raises(IndeterminateCoverageError):
+        await _run(provider, store, coverage_repo, range_start=_dt(4), range_end=_dt(0))
+
+    assert provider.calls == []
+    assert store.rows == {}
+    assert coverage_repo.spans == []
+
+
+@pytest.mark.asyncio
+async def test_failure_injection_mid_loop_leaves_earlier_gaps_persisted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입 — 두 갭(앞/뒤) 중 첫 갭은 정상 처리되고, 두 번째 갭에서
+    `coverage_repo.upsert_span`이 예외를 던지면(의존성 실패 흉내) 이미
+    커밋된 첫 갭의 store/coverage 기록은 롤백되지 않는다(모듈 docstring
+    "Resume after interruption" 절: 이 함수는 자체 트랜잭션을 열지 않으므로
+    갭 N에서 실패해도 1..N-1은 이미 영속화돼 있다는 문서화된 동작)."""
+    start, end = _dt(0), _dt(4)
+    covered_start, covered_end = _dt(1), _dt(2)
+    store = _FakeCandleStore()
+    coverage_repo = _FakeCoverageRepository()
+    # 중간 구간을 미리 커버해 두어 앞(00-01)/뒤(02-04) 두 갭이 생기게 한다.
+    await coverage_repo.upsert_span(
+        object(),
+        StoredCoverageSpan(
+            instrument_id=_ULID,
+            venue=Venue.BITGET,
+            timeframe=Timeframe.H1,
+            quality=CoverageQuality.PROVISIONAL,
+            start=covered_start,
+            end=covered_end,
+        ),
+    )
+    await store.upsert_batch(
+        object(),
+        uuid4(),
+        [
+            CandleRecord(
+                key=_series_key(),
+                open_time=_dt(1),
+                close_time=_dt(2),
+                open=Decimal("1"),
+                high=Decimal("1"),
+                low=Decimal("1"),
+                close=Decimal("1"),
+                volume=Decimal("1"),
+            )
+        ],
+    )
+    provider = _FakeProvider(
+        {
+            (start, covered_start): _columns([0]),
+            (covered_end, end): _columns([2, 3]),
+        }
+    )
+
+    real_upsert_span = coverage_repo.upsert_span
+    call_count = 0
+
+    async def _flaky_upsert_span(conn: object, span: StoredCoverageSpan) -> StoredCoverageSpan:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise ConnectionError("의존성(coverage_repo) 실패 주입 — 커밋 중단")
+        return await real_upsert_span(conn, span)
+
+    monkeypatch.setattr(coverage_repo, "upsert_span", _flaky_upsert_span)
+
+    with pytest.raises(ConnectionError):
+        await _run(provider, store, coverage_repo, range_start=start, range_end=end)
+
+    # 첫 갭(00-01)은 예외 전에 이미 store/coverage에 영속화돼 있다.
+    assert store.rows[(Venue.BITGET, _INSTRUMENT_ID, Timeframe.H1)]
+    persisted_starts = {s.start for s in coverage_repo.spans}
+    assert start in persisted_starts  # 첫 갭 기록은 롤백되지 않았다
+    assert covered_end not in persisted_starts  # 두 번째 갭은 실패로 커밋되지 않았다

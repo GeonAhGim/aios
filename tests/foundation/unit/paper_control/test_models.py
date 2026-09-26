@@ -183,6 +183,7 @@ def test_state_mapping_fails_closed_on_corrupted_repository_row(monkeypatch):
 # --- performance assertion ----------------------------------------------------
 
 
+@pytest.mark.perf
 def test_paper_deployment_construction_throughput():
     """Pure value-object construction has no I/O; 20k instances must build in
     well under 1s (budget: >= 20k ops/sec) — regression guard against someone

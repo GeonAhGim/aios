@@ -313,6 +313,7 @@ def test_build_static_catalog_propagates_entry_hash_failure_instead_of_dropping_
 # --- D2 성능 단언(페이지네이션/병합 지연) --------------------------------------
 
 
+@pytest.mark.perf
 def test_merge_and_paginate_latency_budget_matches_list_api_p95() -> None:
     """§9.9 IND-12 DoD requires `GET /v1/indicators` p95 <= 200ms.
     `merge_script_entries` + `list_catalog` + `paginate_catalog` are the pure,

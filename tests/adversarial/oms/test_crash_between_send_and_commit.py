@@ -34,8 +34,16 @@ from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application import restart_recovery
 from tests.integration.oms.conftest import create_test_user, insert_order
 
-_PAST = datetime.now(timezone.utc) - timedelta(minutes=5)
-_FUTURE = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+def _past() -> datetime:
+    return datetime.now(timezone.utc) - timedelta(minutes=5)
+
+
+def _future() -> datetime:
+    """호출 시점 기준 +5분. 모듈 상수로 두면 collection 시점에 고정돼, 전체
+    스위트(CI 12분)에서 이 파일이 늦게 돌면 이미 과거가 된 lease를 "살아있는
+    워커"로 심게 된다 — 복구가 그 행을 처리해 processed == 1로 적색(run #824·#836)."""
+    return datetime.now(timezone.utc) + timedelta(minutes=5)
 
 
 @pytest.fixture
@@ -159,7 +167,7 @@ async def _insert_stuck_submitted_orders(
         for _ in range(count):
             order_ids.append(await insert_order(conn, user_id, status="SUBMITTED"))
     for order_id in order_ids:
-        await _insert_stuck_outbox_row(pool, order_id, lease_until=_PAST)
+        await _insert_stuck_outbox_row(pool, order_id, lease_until=_past())
     return order_ids
 
 
@@ -170,7 +178,7 @@ async def test_crash_after_sent_before_finalize_becomes_unknown_not_resent(pool)
     user_id = await create_test_user(pool)
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id, status="SUBMITTED")
-    row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_PAST)
+    row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_past())
     adapter = _LookupAdapter(lookup_result=None)
 
     processed = await _recover(pool, adapter)
@@ -190,7 +198,7 @@ async def test_crash_before_sent_reenters_as_pending(pool):
     user_id = await create_test_user(pool)
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id, status="VALIDATED")
-    row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_PAST)
+    row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_past())
     adapter = _LookupAdapter(lookup_result=None)
 
     processed = await _recover(pool, adapter)
@@ -214,7 +222,7 @@ async def test_live_lease_not_expired_is_left_untouched(pool):
     user_id = await create_test_user(pool)
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id, status="SUBMITTED")
-    row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_FUTURE)
+    row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_future())
     adapter = _LookupAdapter(lookup_result=None)
 
     processed = await _recover(pool, adapter)
@@ -294,6 +302,7 @@ async def test_concurrent_recovery_workers_do_not_double_process(pool):
     assert remaining_sending == 0  # 재클레임되지 않은 채 방치된 행 없음
 
 
+@pytest.mark.perf
 async def test_recovery_latency_bound_for_batch(pool):
     """DEPTH 감사 보강 — 숫자 성능/지연 단언. 상한이 없으면 회귀(예: 행마다
     O(n) 전체 스캔, 혹은 `unknown_resolver`의 real backoff sleep이 실수로

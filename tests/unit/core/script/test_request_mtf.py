@@ -136,6 +136,7 @@ def test_scalar_inner_expr_is_broadcast_before_resample() -> None:
 # ---- 수치 성능 단언: request() lowering을 포함한 컴파일 지연(M2-2a 예산 재확인) ----
 
 
+@pytest.mark.perf
 def test_request_heavy_script_still_compiles_within_budget() -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산은 300ms. M2-2a가 확인한
     parse()+check_resources() 예산과 별개로, 이 리프가 추가한 `lower_program`

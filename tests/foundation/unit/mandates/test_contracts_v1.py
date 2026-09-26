@@ -20,9 +20,9 @@ dataclass/mapper module can actually exercise:
     input (`test_frozen_...`, `test_replay_across_independent_processes...`).
 """
 
+import multiprocessing
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import uuid4
@@ -297,6 +297,7 @@ def test_mapper_propagates_rule_hit_construction_failure_instead_of_silently_all
         contracts_v1.compliance_decision_from_policy_decision(row)
 
 
+@pytest.mark.perf
 def test_mapping_large_reason_code_set_completes_within_latency_budget() -> None:
     """수치 성능 단언: §7 SLO는 사전 판정 경로에 p99 30ms를 배정한다. CM-1의
     매퍼는 그 경로 하류에서 실행되므로 그 자체가 병목이 되어서는 안 된다.
@@ -332,11 +333,11 @@ def test_outcome_to_verdict_mapping_total_over_enum_members_ci_guard() -> None:
     assert set(_OUTCOME_TO_VERDICT.keys()) == set(PolicyOutcome)
 
 
-def _replay_in_subprocess(row: PolicyDecisionRow) -> tuple[str, int]:
-    """Module-level so it is picklable for `ProcessPoolExecutor` on
-    Windows (spawn start method). Returns (json_bytes, pid) tuple."""
+def _replay_in_subprocess(row: PolicyDecisionRow, out: multiprocessing.Queue) -> None:
+    """Module-level so it is picklable for the spawn start method (Windows).
+    Puts a (json_bytes, pid) tuple on ``out``."""
     decision = compliance_decision_from_policy_decision(row)
-    return (decision.model_dump_json(), os.getpid())
+    out.put((decision.model_dump_json(), os.getpid()))
 
 
 def test_replay_across_independent_processes_is_byte_identical() -> None:
@@ -345,6 +346,11 @@ def test_replay_across_independent_processes_is_byte_identical() -> None:
     동일한 `ComplianceDecision`을 내야 한다 — 프로세스 지역 캐시나 임포트
     순서에 우연히 기대는 비결정성이 없음을 실증한다(CM-A4 재현성이 단일
     프로세스에 국한되지 않음).
+
+    `ProcessPoolExecutor.map`은 빠른 작업을 이미 놀고 있는 워커에 재사용하므로
+    "PID 3개가 서로 다르다"는 전제가 부하에 따라 깨진다(CI xdist에서 3개 모두
+    같은 PID 관측). 프로세스 3개를 명시적으로 띄워 서로 다른 OS 프로세스임을
+    구조적으로 보장한다.
     """
     row = PolicyDecisionRow(
         decision_id=uuid4(),
@@ -355,8 +361,16 @@ def test_replay_across_independent_processes_is_byte_identical() -> None:
         evaluated_at=NOW,
     )
 
-    with ProcessPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(_replay_in_subprocess, [row, row, row]))
+    out: multiprocessing.Queue = multiprocessing.Queue()
+    procs = [
+        multiprocessing.Process(target=_replay_in_subprocess, args=(row, out)) for _ in range(3)
+    ]
+    for proc in procs:
+        proc.start()
+    results = [out.get(timeout=30) for _ in procs]
+    for proc in procs:
+        proc.join(timeout=30)
+        assert proc.exitcode == 0
 
     jsons, pids = zip(*results, strict=True)
 

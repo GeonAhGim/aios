@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import ast
 import sys
-import time
 from pathlib import Path
 from typing import cast
 
@@ -43,7 +42,7 @@ from src.core.script.runtime import (
     broadcast,
     execute,
 )
-from tests.conftest import paused_coverage
+from tests.conftest import PerfBudget
 
 _RUNTIME_DIR = Path(__file__).resolve().parents[4] / "src" / "core" / "script" / "runtime"
 
@@ -300,31 +299,30 @@ def test_builtin_dispatch_exception_propagates_unmasked_and_leaves_no_residue() 
 # ---- DEEPEN(task-2917): 수치 성능 단언(인터프리터 실행 지연) ----
 
 
-def test_execution_latency_p95_within_backtest_budget_slice() -> None:
+@pytest.mark.perf
+def test_execution_latency_p95_within_backtest_budget_slice(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C Decision 1의 백테스트 예산(로컬 기준, 1개월 M1 1심볼
     3초) 중 인터프리터 1회 실행(스택 머신이 명령열을 한 번 훑는 것) 몫을
     하루치 단위(bar_count=1440, 1일치 1분봉)로 쪼개 250ms로 상한한다. 30개
     let 체인을 20회 반복 실행해 p95로 잰다. 파싱·로우어링(DSL-3/DSL-7의
     몫, 각자 성능 단언을 이미 잼)은 루프 밖에서 한 번만 수행해 이중으로
-    재지 않는다."""
+    재지 않는다. task-7434: process_time 기반 perf_budget으로 측정한다
+    (coverage tracer 정지 포함)."""
     lines = [f"let v{i} = v{i - 1} * 1.0001 + 1 - 1" for i in range(1, 30)]
     source = "input close: series<float> = 0\nlet v0 = close\n" + "\n".join(lines)
     ir = lower_program(parse(source))
     bar_count = 1440
     close = Series.of_floats([float(i % 100) for i in range(bar_count)])
 
-    samples = []
-    for _ in range(20):
-        with paused_coverage():
-            start = time.perf_counter()
-            execute(ir, bar_count=bar_count, inputs={"close": close})
-            samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    samples = perf_budget.samples(
+        lambda: execute(ir, bar_count=bar_count, inputs={"close": close}), n=20
+    )
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
 
-    budget_sec = 0.25
-    print(f"[DSL-8 execute] p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    budget_ms = 250.0
+    print(f"[DSL-8 execute] p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
 
 
 # ---- DEEPEN(task-2917): 게이트 적색 재현(빌트인 반환값 검사 무력화) ----

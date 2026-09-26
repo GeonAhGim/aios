@@ -106,6 +106,7 @@ def test_resample_confirmed_rejects_length_mismatch_instead_of_truncating() -> N
 # ---- 수치 성능 단언: 리샘플 런타임 지연 ----
 
 
+@pytest.mark.perf
 def test_resample_confirmed_latency_p95_within_runtime_budget() -> None:
     """수치 성능 단언(ADR-2026-09-09-C): 5,000봉 시리즈를 ratio=5로 리샘플하는
     지연이 30회 반복 p95로 20ms 안에 머무는지 확인한다(런타임 실행은 DSL 컴파일

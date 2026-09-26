@@ -9,6 +9,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.1 (A), §9.2 LA-1.
 """
 
 import json
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -276,6 +277,27 @@ def test_data_quality_metrics_missing_key_rejected() -> None:
         )
 
 
+# ── DEEPEN: numeric 패턴(^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$) invalid numeric (LA-1) ──
+
+
+def test_candle_record_multiple_decimal_points_rejected() -> None:
+    """Decimal 필드 문자열에 소수점이 두 개면 스키마 pattern 위반으로 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_candle(open="1.2.3")
+
+
+def test_candle_record_thousands_separator_rejected() -> None:
+    """Decimal 필드 문자열에 천단위 콤마가 있으면 스키마 pattern 위반으로 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_candle(high="1,000.50")
+
+
+def test_candle_record_lone_sign_numeric_rejected() -> None:
+    """부호 문자만 있는 문자열("-")은 numeric pattern의 음의 전방탐색에 걸려 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_candle(low="-")
+
+
 # ── DEEPEN: failure-injection test (LA-1) ─────────────────────────────────
 
 
@@ -293,3 +315,152 @@ def test_quality_issue_detail_type_enforced() -> None:
                 "detail": {"price": 12345},
             }
         )
+
+
+def test_fixture_read_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FIXTURE.read_text가 실패하면 스냅샷 테스트가 예외를 삼키지 않고 그대로 전파해야 한다.
+
+    monkeypatch로 Path.read_text에 의존성 예외(OSError)를 주입한다(107번 §8).
+    """
+    original_read_text = Path.read_text
+
+    def _boom(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
+        if self == FIXTURE:
+            raise OSError("simulated fixture read failure")
+        return original_read_text(self, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    with pytest.raises(OSError):
+        json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+# ── DEEPEN: performance assertion (LA-1) ───────────────────────────────────
+
+
+@pytest.mark.perf  # wall-clock budget: serial perf stage (task-7434 guard)
+def test_candle_record_bulk_validation_throughput() -> None:
+    """1,000건 CandleRecord 검증이 예산(200ms) 내에 끝나야 한다 — O(n) 이상 회귀 감지."""
+    start = time.perf_counter()
+    for _ in range(1_000):
+        _sample_candle()
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    assert elapsed_ms < 200, f"1,000건 CandleRecord 검증이 {elapsed_ms:.1f}ms — 200ms 예산 초과"
+
+
+# ── DEEPEN: optional field (X | None) accept None / omission / round-trip (task-6978) ──
+
+
+def _sample_ingest_batch_result(**overrides: object) -> v1.IngestBatchResult:
+    base: dict[str, object] = dict(
+        batch_id=uuid4(),
+        source="test",
+        venue=v1.Venue.BITGET,
+        instrument_id=uuid4(),
+        timeframe=v1.Timeframe.M1,
+        range_start=_now(),
+        range_end=_now(),
+        request_fingerprint="fp-1",
+        verdict=v1.QualityVerdict(
+            verdict=v1.Verdict.ACCEPT, accepted=1, quarantined=0, rejected=0, issues=[]
+        ),
+        batch_hash="sha256fake",
+        audit_event_id=None,
+        stored_range=None,
+    )
+    base.update(overrides)
+    return v1.IngestBatchResult.model_validate(base)
+
+
+def _sample_lifecycle_event(**overrides: object) -> v1.LifecycleEventCommand:
+    base: dict[str, object] = dict(
+        instrument_id=uuid4(),
+        event="LIST",
+        effective_at=_now(),
+        source_ref="test",
+        actor_subject_id=uuid4(),
+        trace_id=uuid4(),
+    )
+    base.update(overrides)
+    return v1.LifecycleEventCommand.model_validate(base)
+
+
+def test_candle_record_quote_volume_none_and_omission_roundtrip() -> None:
+    """CandleRecord.quote_volume(Decimal | None = None)은 생략·명시적 None 모두
+    허용되고, model_dump/model_validate 왕복에도 None이 그대로 보존된다."""
+    omitted = _sample_candle()
+    assert omitted.quote_volume is None
+
+    explicit_none = _sample_candle(quote_volume=None)
+    assert explicit_none.quote_volume is None
+
+    roundtripped = v1.CandleRecord.model_validate(omitted.model_dump())
+    assert roundtripped.quote_volume is None
+
+
+def test_ingest_batch_result_tenant_id_none_and_omission_roundtrip() -> None:
+    """IngestBatchResult.tenant_id(UUID | None = None)은 생략·명시적 None 모두
+    허용되고, 왕복 직렬화에도 None이 보존된다."""
+    omitted = _sample_ingest_batch_result()
+    assert omitted.tenant_id is None
+
+    explicit_none = _sample_ingest_batch_result(tenant_id=None)
+    assert explicit_none.tenant_id is None
+
+    roundtripped = v1.IngestBatchResult.model_validate(omitted.model_dump())
+    assert roundtripped.tenant_id is None
+
+
+def test_lifecycle_event_command_new_venue_symbol_none_and_omission_roundtrip() -> None:
+    """LifecycleEventCommand.new_venue_symbol(str | None = None)은 생략·명시적
+    None 모두 허용되고, 왕복 직렬화에도 None이 보존된다."""
+    omitted = _sample_lifecycle_event()
+    assert omitted.new_venue_symbol is None
+
+    explicit_none = _sample_lifecycle_event(new_venue_symbol=None)
+    assert explicit_none.new_venue_symbol is None
+
+    roundtripped = v1.LifecycleEventCommand.model_validate(omitted.model_dump())
+    assert roundtripped.new_venue_symbol is None
+
+
+# ── DEEPEN: optional field invalid-value rejection (task-6978) ────────────
+
+
+def test_candle_record_quote_volume_non_numeric_rejected() -> None:
+    """quote_volume은 Optional이지만 값이 주어지면 여전히 numeric pattern을
+    통과해야 한다 — 비숫자 문자열은 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_candle(quote_volume="abc")
+
+
+def test_ingest_batch_result_tenant_id_invalid_uuid_rejected() -> None:
+    """tenant_id는 Optional(UUID | None)이지만 값이 주어지면 유효한 UUID여야
+    한다 — 형식이 틀린 문자열은 거부된다."""
+    with pytest.raises(ValidationError):
+        _sample_ingest_batch_result(tenant_id="not-a-uuid")
+
+
+def test_lifecycle_event_command_new_venue_symbol_wrong_type_rejected() -> None:
+    """new_venue_symbol은 Optional(str | None)이지만 값이 주어지면 str이어야
+    한다 — list 같은 다른 타입은 거부된다(자동 문자열 변환 없음)."""
+    with pytest.raises(ValidationError):
+        _sample_lifecycle_event(new_venue_symbol=["not-a-string"])
+
+
+# ── DEEPEN: optional field round-trip failure-injection (task-6978) ───────
+
+
+def test_optional_field_roundtrip_validate_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CandleRecord.model_validate 왕복 중 예외가 발생하면 삼켜지지 않고
+    그대로 전파되어야 한다(107번 §8) — quote_volume=None 왕복 경로에 주입."""
+    candle = _sample_candle(quote_volume=None)
+    dumped = candle.model_dump()
+
+    def _boom(cls: type[v1.CandleRecord], /, obj: object, **kwargs: object) -> v1.CandleRecord:
+        raise RuntimeError("simulated round-trip validation failure")
+
+    monkeypatch.setattr(v1.CandleRecord, "model_validate", classmethod(_boom))
+    with pytest.raises(RuntimeError):
+        v1.CandleRecord.model_validate(dumped)

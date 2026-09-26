@@ -29,7 +29,7 @@ import pytest
 from dotenv import dotenv_values
 
 from tests.integration.conftest import create_test_user
-from tests.support.db import ensure_worker_database
+from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -101,9 +101,7 @@ async def test_downgrade_then_upgrade_backfills_personal_tenant() -> None:
     runs against its own disposable DB clone
     (`tests/support/db.ensure_worker_database`), so an interrupted downgrade
     can only corrupt its own throwaway DB."""
-    migration_db_url = await ensure_worker_database(
-        os.environ["DATABASE_URL"], "tenantmembershiprt"
-    )
+    migration_db_url = await ensure_worker_database(template_database_url(), "tenantmembershiprt")
     migration_pool = await asyncpg.create_pool(
         migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
         min_size=1,
@@ -279,6 +277,7 @@ async def test_backfill_heals_user_left_without_tenant_row(pool: asyncpg.Pool) -
 # ----------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_tenant_membership_insert_latency_p95_within_budget(pool: asyncpg.Pool) -> None:
     """수치 성능 단언 — 부분 UNIQUE 인덱스(uq_tenant_membership_active)가
     걸려 있는 상태에서 `tenant_membership` 삽입 1회의 p95 지연시간이

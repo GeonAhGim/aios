@@ -152,14 +152,12 @@ def test_children_pending_cancellation_failure_injection_terminal_status_guard()
     )
     assert len(normal_result) == 1  # OPEN만 통과
 
-    # Failure injection: parent_child 모듈에서 TERMINAL_ORDER_STATUSES 를 빈 리스트로 우회
+    # Failure injection: parent_child 모듈에서 TERMINAL_ORDER_STATUSES 를 빈 frozenset으로 우회
     # → filtering 이 no-op 이 되어 모든 child 가 반환됨
     import src.foundation.ems.domain.parent_child as pc_module
 
-    original = pc_module.TERMINAL_ORDER_STATUSES
-    try:
-        pc_module.TERMINAL_ORDER_STATUSES = []
-        # FILLED child 도 no-op filtering 에 통과
+    # FILLED child 도 no-op filtering 에 통과
+    with patch.object(pc_module, "TERMINAL_ORDER_STATUSES", frozenset()):
         result = children_pending_cancellation(
             [
                 ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
@@ -167,8 +165,6 @@ def test_children_pending_cancellation_failure_injection_terminal_status_guard()
             ]
         )
         assert len(result) == 2  # 정상なら 1 → 2=all children (filtering broken)
-    finally:
-        pc_module.TERMINAL_ORDER_STATUSES = original
 
 
 # Task-3114: failure-injection 1건, 수치 성능 단언 1건, 게이트 적색 재현 1건
@@ -428,3 +424,71 @@ class TestAggregateParentStateEdgeCases:
         assert isinstance(status, OrderStatus)
         assert filled == Decimal("0")
         assert status == OrderStatus.FILLED
+
+
+# -- tasks 6918/6922: numeric performance assertions for validate_aggregate_fills
+# and compute_child_state specifically -- the existing perf test above only
+# covers aggregate_parent_state.
+
+
+def _best_of_n_elapsed_seconds(fn: Callable[[], None], *, trials: int = 5) -> float:
+    """Best-of-`trials` (minimum) wall-clock elapsed time for `fn()`.
+
+    The minimum, rather than a mean or a single sample, discards scheduling
+    noise (GC pause, CI host contention) that can only ever slow a trial
+    down, never speed it up -- so the fastest observed trial is the closest
+    proxy for the function's own cost.
+    """
+    return min(_timed_trial(fn) for _ in range(trials))
+
+
+def _timed_trial(fn: Callable[[], None]) -> float:
+    start = time.perf_counter()
+    fn()
+    return time.perf_counter() - start
+
+
+def test_validate_aggregate_fills_performance_bounded_for_1000_children() -> None:
+    """Numeric performance assertion (D2 floor): `validate_aggregate_fills`
+    over 1,000 children must stay well under a tolerant absolute budget.
+
+    Best-of-5 avoids a flaky tight wall-clock assertion -- a single slow
+    trial (GC pause, CI host contention) would otherwise fail a healthy
+    implementation. The 250ms budget is generous relative to the ~0.1ms
+    this function actually takes on 1,000 children (measured locally); it
+    exists to catch an accidental O(n^2) regression or a stray I/O call,
+    not to pin a tight per-item cost that would vary across CI hosts.
+    """
+    parent_id = uuid4()
+    children = [ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(1_000)]
+
+    elapsed = _best_of_n_elapsed_seconds(
+        lambda: validate_aggregate_fills(parent_id, children, Decimal("1000"))
+    )
+
+    assert elapsed < 0.25, (
+        f"Performance regression: validate_aggregate_fills over 1,000 children "
+        f"took {elapsed * 1000:.1f}ms (best of 5), exceeding the 250ms budget"
+    )
+
+
+def test_compute_child_state_performance_bounded_for_1000_children() -> None:
+    """Numeric performance assertion (D2 floor): `compute_child_state` over
+    1,000 children must stay well under a tolerant absolute budget.
+
+    See `test_validate_aggregate_fills_performance_bounded_for_1000_children`
+    for the best-of-5/absolute-budget rationale -- `compute_child_state` is a
+    thin wrapper around `validate_aggregate_fills`, so its own budget mirrors
+    that test's.
+    """
+    parent_id = uuid4()
+    children = [ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(1_000)]
+
+    elapsed = _best_of_n_elapsed_seconds(
+        lambda: compute_child_state(parent_id, children, Decimal("1000"))
+    )
+
+    assert elapsed < 0.25, (
+        f"Performance regression: compute_child_state over 1,000 children "
+        f"took {elapsed * 1000:.1f}ms (best of 5), exceeding the 250ms budget"
+    )

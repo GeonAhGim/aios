@@ -119,6 +119,7 @@ def test_failure_injection_atr_key_missing_from_market_state_fails_closed():
 # --- 성능 단언 (1) ----------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_performance_derive_levels_p99_latency_within_pretrade_gate_budget():
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms."""
     params = StrategyRiskParams(stop_loss_pct=Decimal("5"), take_profit_pct=Decimal("10"))

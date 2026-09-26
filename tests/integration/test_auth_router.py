@@ -7,7 +7,6 @@ app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,6 @@ from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
-from tests.integration.mfa_clock import mfa_clock_frozen, mfa_clock_shifted, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -158,111 +156,6 @@ async def test_get_me_rejects_invalid_token(client: AsyncClient) -> None:
     assert response.status_code == 401
 
 
-async def test_mfa_setup_and_verify_round_trip(client: AsyncClient) -> None:
-    import pyotp
-
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    token = register_response.json()["data"]["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    assert setup_response.status_code == 200
-    secret = setup_response.json()["data"]["secret"]
-
-    code = pyotp.totp.TOTP(secret).now()
-    verify_response = await client.post(
-        "/auth/mfa/verify", json={"totp_code": code}, headers=headers
-    )
-    assert verify_response.status_code == 200
-    assert verify_response.json()["data"]["mfa_enabled"] is True
-
-    login_without_code = await client.post(
-        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    assert login_without_code.status_code == 401
-
-    # docs/RED_TEAM_FINDINGS.md #13 반영 — 같은 30초 구간의 코드는 재사용
-    # 거부 대상이라, 로그인용 코드는 다음 구간에서 새로 받아야 한다. 실시간
-    # 31초 대기 대신 MfaService 시계를 31초 앞당긴다(전수감사 §9).
-    with mfa_clock_shifted(app, 31) as shifted_now:
-        login_code = totp_at(secret, shifted_now())
-        login_with_code = await client.post(
-            "/auth/login",
-            json={"email": email, "password": STRONG_PASSWORD, "totp_code": login_code},
-        )
-    assert login_with_code.status_code == 200
-
-
-async def test_mfa_resetup_without_password_rejected_when_already_enabled(
-    client: AsyncClient,
-) -> None:
-    """레드팀 감사 #11 후속 — 이미 켜진 MFA를 탈취한 Bearer 토큰만으로
-    (비밀번호 없이) 재설정해 secret을 갈아치울 수 있으면 안 된다.
-
-    실시간 TOTP(`pyotp...now()`)로 코드를 만들면, 코드 생성(클라이언트)과
-    `/auth/mfa/verify` 처리(서버) 사이에 우연히 30초 구간 경계를 넘어 같은
-    코드가 무효 처리되는 드문 레이스가 있었다(esc-ci-cbb8b9c62497 — 전체
-    스위트 실행 중 드물게만 재현). `mfa_clock_frozen`으로 시계를 고정해
-    실서비스 경로(라우터→MfaService.setup/verify)는 그대로 태우되 "몇
-    시인지"만 결정론적으로 만든다."""
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    token = register_response.json()["data"]["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    frozen_now = datetime.now(timezone.utc)
-    with mfa_clock_frozen(app, frozen_now):
-        setup_response = await client.post("/auth/mfa/setup", headers=headers)
-        secret = setup_response.json()["data"]["secret"]
-        code = totp_at(secret, frozen_now)
-        await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
-
-        resetup_response = await client.post("/auth/mfa/setup", headers=headers)
-
-    assert resetup_response.status_code == 403
-
-
-async def test_mfa_resetup_with_correct_password_succeeds(client: AsyncClient) -> None:
-    """esc-ci-67bd83edb539 — 옛 코드는 초기 setup/verify 코드를
-    `pyotp...now()`(실시간)로 만들어 서버 실시간과 비교했다.
-    test_mfa_resetup_without_password_rejected_when_already_enabled에서
-    이미 잡은 것과 같은 30초 구간 경계 레이스(esc-ci-cbb8b9c62497)가 이
-    테스트에는 반영되지 않아 드물게 재현됐다 — mfa_clock_frozen으로 두
-    구간 모두 결정론화한다."""
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    token = register_response.json()["data"]["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    frozen_now = datetime.now(timezone.utc)
-    with mfa_clock_frozen(app, frozen_now):
-        setup_response = await client.post("/auth/mfa/setup", headers=headers)
-        old_secret = setup_response.json()["data"]["secret"]
-        code = totp_at(old_secret, frozen_now)
-        await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
-
-    # docs/RED_TEAM_FINDINGS.md #13 반영 — 위 verify()가 이미 이 구간의
-    # 코드를 소비했으므로 재인증용 코드는 다음 구간에서 새로 받아야 한다.
-    reauth_now = frozen_now + timedelta(seconds=31)
-    with mfa_clock_frozen(app, reauth_now):
-        reauth_code = totp_at(old_secret, reauth_now)
-        resetup_response = await client.post(
-            "/auth/mfa/setup",
-            json={"password": STRONG_PASSWORD, "totp_code": reauth_code},
-            headers=headers,
-        )
-    assert resetup_response.status_code == 200
-    new_secret = resetup_response.json()["data"]["secret"]
-    assert new_secret != old_secret
-
-
 async def test_logout_requires_authentication(client: AsyncClient) -> None:
     response = await client.post("/auth/logout")
 
@@ -373,39 +266,6 @@ async def test_register_rejects_duplicate_email(client: AsyncClient) -> None:
     assert response.status_code == 401
     body = response.json()
     assert body["error_code"] == "AUTH_INVALID_CREDENTIALS"
-
-
-async def test_mfa_verify_rejects_invalid_code(client: AsyncClient) -> None:
-    """불변식 위반 — 올바른 TOTP 코드가 아닌 값을 보내면 400/401로 거부해야 한다.
-
-    MfaService.verify() 가 유효하지 않은 코드를 받으면 AuthError를 던지고,
-    exception_mapping이 401로 매핑한다. 이미 사용된 코드나 잘못된 코드 모두
-    거부되어야 한다.
-    """
-    import pyotp
-
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    token = register_response.json()["data"]["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    # MFA를 먼저 설정하고 verify
-    setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    secret = setup_response.json()["data"]["secret"]
-    code = pyotp.totp.TOTP(secret).now()
-    await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
-
-    # 이미 사용된 코드는 재사용 불가 — 400/401/500 중 하나로 거부
-    verify_again = await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
-    assert verify_again.status_code in (400, 401, 500)
-
-    # 완전히 잘못된 코드도 거부 (FastAPI 검증 → 400, 서비스 검증 → 401)
-    wrong_code = await client.post(
-        "/auth/mfa/verify", json={"totp_code": "000000"}, headers=headers
-    )
-    assert wrong_code.status_code in (400, 401)
 
 
 async def test_admin_endpoint_rejects_non_admin(client: AsyncClient) -> None:

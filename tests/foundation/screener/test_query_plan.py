@@ -152,6 +152,7 @@ def test_screen_definition_requires_at_least_one_filter() -> None:
 # ---- 성능 단언: ADR-2026-09-09-C 축별 예산("DSL 컴파일 300ms") 대비 여유 ----
 
 
+@pytest.mark.perf
 def test_build_query_plan_p95_latency_within_dsl_compile_budget() -> None:
     definition = _definition(
         filters=(

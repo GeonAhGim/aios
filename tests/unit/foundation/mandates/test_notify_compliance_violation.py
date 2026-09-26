@@ -14,6 +14,8 @@ import time
 from datetime import date
 from uuid import uuid4
 
+import pytest
+
 from src.foundation.mandates.application.notify_compliance_violation import notify_violations
 
 _TENANT = uuid4()
@@ -80,6 +82,7 @@ async def test_notify_violations_swallows_publish_failure() -> None:
     )
 
 
+@pytest.mark.perf
 async def test_notify_violations_many_rules_stays_well_under_batch_budget() -> None:
     """성능 단언 -- pure fan-out cost (no I/O) for 200 rule hits must stay far
     under the 0.5s/tenant floor `test_batch_meets_tenant_throughput_floor`

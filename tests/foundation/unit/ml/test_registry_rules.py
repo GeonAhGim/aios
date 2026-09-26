@@ -114,6 +114,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 def test_validate_new_registration_p95_within_budget() -> None:
     existing = _card()
     samples: list[float] = []

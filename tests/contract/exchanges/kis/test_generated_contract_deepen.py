@@ -228,6 +228,7 @@ def _fast_handler(case: GeneratedCase, captured: list[httpx.Request]) -> Any:
     return handler
 
 
+@pytest.mark.perf
 async def test_generated_method_call_overhead_bounded_vs_raw_request_baseline() -> None:
     """생성 메서드는 얇은 래퍼일 뿐이라(`return await self._request(...)`,
     src/exchanges/kis/generated/*_mixin.py 전수 확인) 원시 `_request` 왕복

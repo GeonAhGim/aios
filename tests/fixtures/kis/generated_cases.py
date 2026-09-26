@@ -13,13 +13,17 @@ TR 케이스 목록.
 있어(tests/unit/exchanges/kis/, tests/integration/test_kis_*.py) 범위에서
 제외한다 -- 이 픽스처는 `generated/`만 다룬다.
 """
+
 from __future__ import annotations
 
 import ast
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 REFERENCE_PATH = ROOT / "docs" / "design" / "kis_tr_reference.json"
@@ -143,3 +147,121 @@ def discover_generated_cases() -> list[GeneratedCase]:
                 )
             )
     return cases
+
+
+# ---------------------------------------------------------------------------
+# task-7730 DEEPEN(원 리프 task-6704) -- negative test 3건 + 실패주입 1건.
+#
+# 위 discovery 로직은 "생성 소스가 렌더러 템플릿과 어긋나면 즉시
+# fail-closed"를 스스로 약속한다(`GeneratedCaseDiscoveryError` docstring).
+# 그런데 이 파일에는 그 약속을 실제로 지키는지 확인하는 테스트가 하나도
+# 없었다 -- 렌더러 템플릿을 못 알아채고도 조용히 빈 목록을 내는 회귀가
+# 생겨도 아무 테스트도 잡지 못한다. 아래는 `docs/design/kis_tr_reference.json`
+# 과 `src/exchanges/kis/generated/*.py`(BR-12 원본, 손으로 수정 금지) 대신
+# `tmp_path`에 최소 재현 픽스처를 써서, 이 fail-closed 약속 자체를 직접
+# 실증한다.
+# ---------------------------------------------------------------------------
+
+
+def test_load_reference_rows_rejects_duplicate_tr_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """negative -- 기준 목록 원문에 tr_id가 중복되면(BR-11 소스 오염 또는
+    기계 추출 스크립트 결함) 조용히 마지막 행으로 덮어쓰지 않고 즉시
+    거부해야 한다(유일성 가정 위반)."""
+    reference_path = tmp_path / "kis_tr_reference.json"
+    reference_path.write_text(
+        json.dumps({"trs": [{"tr_id": "DUPE0001"}, {"tr_id": "DUPE0001"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "REFERENCE_PATH", reference_path)
+
+    with pytest.raises(GeneratedCaseDiscoveryError, match="tr_id 중복"):
+        load_reference_rows()
+
+
+def test_discover_generated_cases_rejects_module_without_exactly_one_class(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """negative -- 생성 청크 파일에 mixin 클래스가 0개 또는 2개 이상이면
+    "어느 클래스가 진짜 생성 mixin인지" 결정할 수 없으므로, 첫 번째를
+    임의로 골라 조용히 계속하지 않고 즉시 거부해야 한다."""
+    generated_dir = tmp_path / "generated"
+    generated_dir.mkdir()
+    (generated_dir / "broken_mixin.py").write_text(
+        "class A:\n    pass\n\n\nclass B:\n    pass\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "GENERATED_DIR", generated_dir)
+
+    with pytest.raises(GeneratedCaseDiscoveryError, match="정확히 1개가 아님"):
+        discover_generated_cases()
+
+
+def test_discover_generated_cases_rejects_unknown_method_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """negative -- async 메서드가 `_request()`도 `_build_subscribe_message()`도
+    호출하지 않으면(렌더러 템플릿이 바뀌었거나 손으로 수정된 흔적), 그
+    메서드를 조용히 건너뛰어 케이스 수가 소리 없이 줄어드는 회귀 대신
+    즉시 거부해야 한다(discover_generated_cases의 fail-closed 계약)."""
+    generated_dir = tmp_path / "generated"
+    generated_dir.mkdir()
+    (generated_dir / "unknown_mixin.py").write_text(
+        "class UnknownMixin:\n    async def do_something(self, params=None):\n        return {}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "GENERATED_DIR", generated_dir)
+
+    with pytest.raises(GeneratedCaseDiscoveryError, match="알려진 생성 메서드 형태가 아님"):
+        discover_generated_cases()
+
+
+def test_extract_rest_rejects_insufficient_call_shape() -> None:
+    """negative -- `self._request(...)` 호출 인자/키워드가 렌더러가 항상
+    보장하는 형태(위치인자 3개 + 키워드 1개)보다 적으면, None을 반환하거나
+    IndexError로 죽는 대신 명시적으로 거부해야 한다."""
+    call = ast.parse("self._request('GET', '/x')", mode="eval").body
+    assert isinstance(call, ast.Call)
+
+    with pytest.raises(GeneratedCaseDiscoveryError, match="인자 형태 예상과 다름"):
+        _extract_rest(call, "fixture.qualname")
+
+
+def test_extract_ws_rejects_non_constant_tr_id() -> None:
+    """negative -- `_build_subscribe_message()`의 tr_id 인자가 상수 문자열이
+    아니면(예: 변수 참조로 렌더러가 바뀜) 조용히 None/빈 문자열을 tr_id로
+    쓰지 않고 즉시 거부해야 한다."""
+    call = ast.parse("self._build_subscribe_message(approval_key, some_variable)", mode="eval").body
+    assert isinstance(call, ast.Call)
+
+    with pytest.raises(GeneratedCaseDiscoveryError, match="상수로 못 뽑음"):
+        _extract_ws(call, "fixture.qualname")
+
+
+def test_discover_generated_cases_failure_injected_read_text_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실패주입 -- 청크 파일 읽기 자체가 I/O 예외로 죽으면(디스크 장애,
+    권한 문제 등) 이를 삼켜 빈 케이스 목록으로 계속 진행하지 않고 그대로
+    전파해야 한다(조용한 회귀 대신 fail-closed, 파일 상단 모듈 docstring의
+    "I/O는 파일 읽기뿐"은 실패해도 안전해야 한다는 뜻이지 실패를 숨겨도
+    된다는 뜻이 아니다)."""
+    generated_dir = tmp_path / "generated"
+    generated_dir.mkdir()
+    (generated_dir / "unreadable_mixin.py").write_text(
+        "class UnreadableMixin:\n    pass\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(sys.modules[__name__], "GENERATED_DIR", generated_dir)
+
+    original_read_text = Path.read_text
+
+    def _failing_read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+        if self.name == "unreadable_mixin.py":
+            raise OSError("simulated disk failure reading generated chunk")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _failing_read_text)
+
+    with pytest.raises(OSError, match="simulated disk failure"):
+        discover_generated_cases()

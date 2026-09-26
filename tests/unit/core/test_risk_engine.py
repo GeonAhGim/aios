@@ -346,6 +346,7 @@ def test_check_decision_corrupted_nan_input_fails_closed_not_silently_allowed(po
     assert "RISK_RULE_ERROR:daily_loss" in decision.reason_codes
 
 
+@pytest.mark.perf
 def test_check_decision_repeated_calls_stay_within_perf_budget(policy, allocation):
     """성능 단언 — `check_decision()`은 매 tick마다 호출된다(R-32 t3). 매 호출마다
     `RiskRuleBundle` 조립·`compute_rule_hash`(정책 전체 canonical_json+sha256)가
