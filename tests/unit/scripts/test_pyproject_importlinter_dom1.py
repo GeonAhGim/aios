@@ -21,9 +21,13 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 has no stdlib tomllib
+    import tomli as tomllib
+
 import importlinter.configuration
 import pytest
-import tomllib
 from importlinter.application.ports.reporting import Report
 from importlinter.application.use_cases import (
     _register_contract_types,
