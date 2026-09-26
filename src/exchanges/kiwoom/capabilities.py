@@ -5,21 +5,22 @@
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-A/§3.2, §9 L4-04.
 
-`verified="DOC_ONLY"` on `KIWOOM_KR_EQUITY_PROFILE` is an explicit task
-instruction and reflects the profile's honest state: fields below are
-best-effort assumptions mirroring KIS/NH (same Korean-equity REST-broker
-shape), not values confirmed against Kiwoom's own published API reference in
-this session (see `auth.py`'s module docstring for the full caveat).
+`verified="DOC_ONLY"` on `KIWOOM_KR_EQUITY_PROFILE` reflects the profile's
+honest state: fields below are grounded in the official Kiwoom Securities
+REST API client repo (github.com/Kiwoom-Securities/Kiwoom-REST-API, cited in
+`auth.py`/`market_data_mixin.py`/`account_mixin.py`/`trading_mixin.py`), not
+a live Kiwoom account in this session — DOC_ONLY, not LIVE_VERIFIED.
 `price_tick`/`qty_lot`/`min_notional` are left empty rather than guessed —
-an invented tick/lot value is exactly the kind of "guessed implementation"
-CLAUDE.md §3 asks to avoid; a follow-up leaf must populate these from a real
-KRX/Kiwoom source before order validation can rely on them for this venue.
+an invented per-symbol tick/lot value is exactly the kind of "guessed
+implementation" CLAUDE.md §3 asks to avoid; a follow-up leaf must populate
+these from a real KRX/Kiwoom source before order validation can rely on them
+for this venue.
 
-`supports_modify=False`/`supports_cancel="UNVERIFIED"`/`supports_ws_orders=
-False` — this leaf (step (b): auth + market data) implements no trading or
-websocket path at all (account_mixin/trading_mixin/websocket.py are sibling
-leaves task-7570/7571/7572), so the profile must not claim capabilities this
-leaf provides no code for.
+`supports_modify=True`/`supports_cancel="YES"`/`supports_ws_orders=True` —
+`account_mixin.py`/`trading_mixin.py`/`websocket.py` (task-7570/7571/7572,
+now on main) give real, non-`_unsupported()` implementations of
+`modify_order`/`cancel_order`/`subscribe_order_stream`, so the profile
+declares what the assembled `KiwoomAdapter` (`factory.py`) actually does.
 """
 from __future__ import annotations
 
@@ -43,10 +44,9 @@ KIWOOM_CAPABILITY = ExchangeCapability(
     supports_futures=False,
     supports_options=False,
     supports_leverage=False,
-    # websocket.py (task-7572) is a sibling leaf, not present here yet —
-    # subscribe_ticker_stream() stays an explicit `_unsupported()` signal
-    # (factory.py), so this must not claim True ahead of that leaf.
-    supports_websocket=False,
+    # websocket.py (task-7572) gives a real subscribe_ticker_stream/
+    # subscribe_order_stream implementation, wired into KiwoomAdapter.
+    supports_websocket=True,
     max_leverage=Decimal("1"),
     reference_feed_coverage="low",
     # Kiwoom publishes a separate mock/paper trading endpoint (see auth.py's
@@ -63,9 +63,9 @@ KIWOOM_KR_EQUITY_PROFILE = VenueCapabilityProfile(
     client_order_id_max_len=0,
     client_order_id_charset="",
     id_policy="DAILY_SEQUENCE",
-    supports_modify=False,
-    supports_cancel="UNVERIFIED",
-    supports_ws_orders=False,
+    supports_modify=True,
+    supports_cancel="YES",
+    supports_ws_orders=True,
     supports_batch=False,
     price_tick={},
     qty_lot={},

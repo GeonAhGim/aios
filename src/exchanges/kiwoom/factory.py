@@ -1,19 +1,16 @@
-"""BR-23(task-7569) — KiwoomAdapter assembly (auth + market data mixins) and
-the BR-9 factory function, per `docs/exchanges/ADDING_AN_EXCHANGE.md` §1/§3.
+"""BR-23(task-7569) — KiwoomAdapter assembly (auth/market-data/account/
+trading/websocket mixins) and the BR-9 factory function, per
+`docs/exchanges/ADDING_AN_EXCHANGE.md` §1/§3.
 
 Spec: ADR-2026-09-06-I Decision 5, docs/specs/L4_execution_oms_and_exchange_v1.0.md
-§2-B(factory.py 행), §9 L4-13.
+§2-B (factory.py row), §9 L4-13.
 
-Scope — this leaf covers only auth + market data (step (b)). Account
-(task-7570), trading (task-7571), and websocket (task-7572) are sibling
-leaves and are not touched. `KiwoomAdapter` is nonetheless a concrete
-`ExchangeAdapter` (all 14 abstract methods implemented, so ABCMeta allows
-instantiation) — the methods those sibling leaves own raise
-`self._unsupported(...)`, the ABC's own explicit "not supported" signal
-(never a silent `[]`/`None`, per `common/adapter.py`'s module docstring) —
-this is the "leave those SPI methods raising `self._unsupported(...)`"
-option the task explicitly allows instead of leaving adapter assembly out of
-scope entirely.
+`KiwoomAdapter` assembles every Kiwoom leaf now on main: auth (this leaf,
+`auth.py`) + market data (this leaf, `market_data_mixin.py`) + account
+(task-7570, `account_mixin.py`) + trading (task-7571, `trading_mixin.py`) +
+websocket (task-7572, `websocket.py`). `place_order`/`cancel_order`/
+`modify_order` carry `@require_paper_sandbox` (`common/live_guard.py`,
+red-team #2026-09-02-32) inside `trading_mixin.py` itself, not here.
 
 Registration itself happens in `src/exchanges/factory.py` (the "registration
 only" file in this leaf's scope) via `register_exchange_adapter_factory` —
@@ -23,14 +20,18 @@ here) and creating a cycle.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.common.types import ExchangeCapability, TickerCallback
+from src.exchanges.kiwoom.account_mixin import KiwoomAccountMixin
 from src.exchanges.kiwoom.auth import KiwoomAuthClient
 from src.exchanges.kiwoom.capabilities import KIWOOM_CAPABILITY, KIWOOM_KR_EQUITY_PROFILE
 from src.exchanges.kiwoom.market_data_mixin import KiwoomMarketDataMixin
+from src.exchanges.kiwoom.trading_mixin import KiwoomTradingMixin
+from src.exchanges.kiwoom.websocket import KiwoomWebSocketMixin
+from src.exchanges.kiwoom.websocket_connection import ConnectFn, ReconnectHook, connect
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -42,11 +43,22 @@ if TYPE_CHECKING:
     from src.services.oms.domain.venue_profile import VenueCapabilityProfile
 
 
-class KiwoomAdapter(KiwoomMarketDataMixin, KiwoomAuthClient, ExchangeAdapter):
-    """Foundation-only adapter (BR-23 step (b)). `get_ticker`/`get_orderbook`/
-    `get_ohlcv` come from `KiwoomMarketDataMixin`; auth/transport come from
-    `KiwoomAuthClient`. Account/trading/websocket SPI methods raise
-    `_unsupported()` until their sibling leaves land."""
+class KiwoomAdapter(
+    KiwoomWebSocketMixin,
+    KiwoomTradingMixin,
+    KiwoomAccountMixin,
+    KiwoomMarketDataMixin,
+    KiwoomAuthClient,
+    ExchangeAdapter,
+):
+    """Full BR-23 adapter assembly. Every `ExchangeAdapter`-abstract method
+    below is explicitly redeclared in this class's own body (a thin
+    passthrough into the mixin that actually implements it) rather than left
+    to plain MRO inheritance -- `scripts/consistency/wiring.py`'s
+    `port_method_unimplemented` check reads only a class's own AST body, not
+    its MRO, so an ABC method only provided by a mixin would otherwise read
+    as "missing" (the same architectural gap bitget/kis/nh's own market-data
+    mixins already have, baselined in `consistency-baseline.json`)."""
 
     def __init__(
         self,
@@ -74,10 +86,10 @@ class KiwoomAdapter(KiwoomMarketDataMixin, KiwoomAuthClient, ExchangeAdapter):
 
     @property
     def is_sandboxed(self) -> bool:
-        """레드팀 감사(2026-09-01-08) — independent of `is_paper_trading` in
-        principle, but this adapter has no separate sandbox-binding signal of
-        its own (same as every other concrete adapter today), so it mirrors
-        the constructor flag, same as bitget/kis/nh."""
+        """Red-team audit #2026-09-01-08 — independent of `is_paper_trading`
+        in principle, but this adapter has no separate sandbox-binding signal
+        of its own (same as every other concrete adapter today), so it
+        mirrors the constructor flag, same as bitget/kis/nh."""
         return self._is_paper_trading
 
     def get_capabilities(self) -> ExchangeCapability:
@@ -86,14 +98,16 @@ class KiwoomAdapter(KiwoomMarketDataMixin, KiwoomAuthClient, ExchangeAdapter):
     def venue_profile(self) -> VenueCapabilityProfile:
         return KIWOOM_KR_EQUITY_PROFILE
 
-    # Explicit pass-throughs (not just relying on MRO inheritance from
-    # KiwoomMarketDataMixin) -- scripts/consistency/wiring.py's
-    # `port_method_unimplemented` check reads each ExchangeAdapter subclass's
-    # own AST body and does not resolve mixin MRO, so an ABC method only
-    # provided by a mixin reads as "missing" (the same architectural gap is
-    # already present, and already baselined, for bitget/kis/nh's own
-    # market-data mixins). Redeclaring here keeps this leaf from adding new
-    # hits without editing `consistency-baseline.json`.
+    async def health_check(self) -> bool:
+        """Uses token issuance as the liveness probe (a lighter call than a
+        real balance query, same "light call" spirit as the ABC docstring
+        asks for)."""
+        try:
+            await self._ensure_token()
+        except Exception:  # noqa: BLE001 — any transport/auth failure means "not healthy"
+            return False
+        return True
+
     async def get_ticker(self, symbol: str) -> Ticker:
         return await KiwoomMarketDataMixin.get_ticker(self, symbol)
 
@@ -103,43 +117,58 @@ class KiwoomAdapter(KiwoomMarketDataMixin, KiwoomAuthClient, ExchangeAdapter):
     async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
         return await KiwoomMarketDataMixin.get_ohlcv(self, symbol, timeframe, limit)
 
-    async def health_check(self) -> bool:
-        """Uses token issuance as the liveness probe (no account/balance
-        endpoint is in scope for this leaf yet)."""
-        try:
-            await self._ensure_token()
-        except Exception:  # noqa: BLE001 — any transport/auth failure means "not healthy"
-            return False
-        return True
+    async def subscribe_ticker_stream(
+        self,
+        symbol: str,
+        callback: TickerCallback,
+        *,
+        on_reconnecting: ReconnectHook | None = None,
+        on_reconnected: ReconnectHook | None = None,
+        connect_fn: ConnectFn = connect,
+    ) -> None:
+        # `cast` (not `# type: ignore`) works around a mypy Protocol-matching
+        # quirk: `KiwoomWsAuthClient` (websocket_connection.py, sibling leaf)
+        # declares `is_paper_trading` as a plain (implicitly settable)
+        # attribute, but this class only ever exposes it as a read-only
+        # `@property` (as ABCMeta requires to clear the abstract property) --
+        # the mixin only ever reads it, never assigns it, so this is safe.
+        await KiwoomWebSocketMixin.subscribe_ticker_stream(
+            cast(Any, self),
+            symbol,
+            callback,
+            on_reconnecting=on_reconnecting,
+            on_reconnected=on_reconnected,
+            connect_fn=connect_fn,
+        )
 
-    async def subscribe_ticker_stream(self, symbol: str, callback: TickerCallback) -> None:  # noqa: ARG002
-        raise self._unsupported("subscribe_ticker_stream")
+    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]:
+        return await KiwoomAccountMixin.get_balance(self, asset)
 
-    async def get_balance(self, asset: str | None = None) -> list[AccountBalance]:  # noqa: ARG002
-        raise self._unsupported("get_balance")
+    async def get_positions(self, symbol: str | None = None) -> list[Position]:
+        return await KiwoomAccountMixin.get_positions(self, symbol)
 
-    async def get_positions(self, symbol: str | None = None) -> list[Position]:  # noqa: ARG002
-        raise self._unsupported("get_positions")
+    async def get_order(self, order_id: str) -> Order:
+        return await KiwoomAccountMixin.get_order(self, order_id)
 
-    async def get_order(self, order_id: str) -> Order:  # noqa: ARG002
-        raise self._unsupported("get_order")
-
-    # place_order/cancel_order/modify_order carry `@require_paper_sandbox`
-    # (`common/live_guard.py`, red-team #2026-09-02-32) even though they
-    # currently only raise `_unsupported()` -- these are the fund-moving SPI
-    # methods, and the guard is this leaf's defense-in-depth regardless of
-    # whether a sibling leaf (task-7571) later gives them a real body.
+    # `@require_paper_sandbox` here is a deliberate second guard on top of
+    # `trading_mixin.py`'s own decorator on the methods below -- the repo's
+    # AST-based `tests/unit/exchanges/test_live_guard_coverage.py` scans
+    # every class's own fund-moving methods for the decorator directly (same
+    # "own AST body, not MRO" limitation as the consistency checker above),
+    # so this class needs its own copy regardless of the mixin already
+    # carrying one (harmless: `is_paper_trading and is_sandboxed` is checked
+    # twice, not a behavior change).
     @require_paper_sandbox
-    async def place_order(self, order: Order) -> Order:  # noqa: ARG002
-        raise self._unsupported("place_order")
+    async def place_order(self, order: Order) -> Order:
+        return await KiwoomTradingMixin.place_order(self, order)
 
     @require_paper_sandbox
-    async def cancel_order(self, order_id: str) -> bool:  # noqa: ARG002
-        raise self._unsupported("cancel_order")
+    async def cancel_order(self, order_id: str) -> bool:
+        return await KiwoomTradingMixin.cancel_order(self, order_id)
 
     @require_paper_sandbox
-    async def modify_order(self, order_id: str, **kwargs: Any) -> Order:  # noqa: ARG002
-        raise self._unsupported("modify_order")
+    async def modify_order(self, order_id: str, **kwargs: Any) -> Order:
+        return await KiwoomTradingMixin.modify_order(self, order_id, **kwargs)
 
 
 class KiwoomFactoryConfigError(ValueError):
@@ -157,5 +186,5 @@ def kiwoom_factory(
     try:
         account_no = extra["account_no"]
     except KeyError as exc:
-        raise KiwoomFactoryConfigError("Kiwoom은 account_no가 필요합니다.") from exc
+        raise KiwoomFactoryConfigError("Kiwoom requires account_no in extra") from exc
     return KiwoomAdapter(api_key, api_secret, account_no, is_paper_trading=demo_mode)

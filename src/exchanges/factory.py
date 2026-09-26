@@ -170,8 +170,7 @@ def build_adapter(
 # BR-23(task-7569) — Kiwoom Securities REST API adapter, opened through the
 # BR-9 extension point (D5) rather than a new `if exchange == "kiwoom"`
 # branch above (ADDING_AN_EXCHANGE.md §3). This is the file's "registration
-# only" scope for task-7569 — adapter assembly itself lives in
-# `src/exchanges/kiwoom/factory.py`. This leaf covers auth + market data only
-# (step (b)); account/trading/websocket are sibling leaves (task-7570/7571/
-# 7572) that `KiwoomAdapter` signals as unsupported until they land.
+# only" scope for task-7569 — adapter assembly (auth + market data +
+# account + trading + websocket, task-7569/7570/7571/7572) lives in
+# `src/exchanges/kiwoom/factory.py::KiwoomAdapter`.
 register_exchange_adapter_factory("kiwoom", kiwoom_factory)

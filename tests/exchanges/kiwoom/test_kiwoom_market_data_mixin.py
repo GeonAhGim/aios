@@ -4,7 +4,9 @@ market-data models, incl. Decimal precision.
 BR-23(task-7569), exchange onboarding step (b). Uses a hand-written fake
 `_request` (no HTTP layer involved) since this mixin only needs the
 `_KiwoomHTTPClient` structural contract -- same isolation as
-`kis/market_data_mixin.py`'s own unit-test style.
+`kis/market_data_mixin.py`'s own unit-test style. Endpoint/field names match
+`market_data_mixin.py`'s module docstring (ka10007/ka10081, verified via
+WebFetch against github.com/Kiwoom-Securities/Kiwoom-REST-API).
 """
 from __future__ import annotations
 
@@ -15,6 +17,20 @@ import pytest
 
 from src.core.exceptions import FatalExchangeError
 from src.exchanges.kiwoom.market_data_mixin import KiwoomMarketDataMixin
+
+_MARKET_COND_RESPONSE: dict[str, Any] = {
+    "return_code": 0,
+    "cur_prc": "71000",
+    "trde_qty": "1234567",
+    "buy_1bid": "70900",
+    "buy_1bid_req": "10",
+    "buy_2bid": "70800",
+    "buy_2bid_req": "20",
+    "sel_1bid": "71100",
+    "sel_1bid_req": "5",
+    "sel_2bid": "71200",
+    "sel_2bid_req": "15",
+}
 
 
 class _FakeKiwoomClient(KiwoomMarketDataMixin):
@@ -28,10 +44,9 @@ class _FakeKiwoomClient(KiwoomMarketDataMixin):
         path: str,
         api_id: str,
         *,
-        params: dict[str, Any] | None = None,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self.calls.append((method, path, api_id, params))
+        self.calls.append((method, path, api_id, body))
         return self._responses[api_id]
 
 
@@ -39,19 +54,7 @@ class _FakeKiwoomClient(KiwoomMarketDataMixin):
 
 
 async def test_get_ticker_maps_fields_as_decimal():
-    client = _FakeKiwoomClient(
-        {
-            "KW_TICKER": {
-                "return_code": 0,
-                "output": {
-                    "current_price": "71000",
-                    "bid_price": "70900",
-                    "ask_price": "71100",
-                    "volume": "1234567",
-                },
-            }
-        }
-    )
+    client = _FakeKiwoomClient({"ka10007": _MARKET_COND_RESPONSE})
 
     ticker = await client.get_ticker("005930")
 
@@ -62,7 +65,8 @@ async def test_get_ticker_maps_fields_as_decimal():
     assert ticker.bid == Decimal("70900")
     assert ticker.ask == Decimal("71100")
     assert ticker.volume_24h == Decimal("1234567")
-    assert client.calls[0][2] == "KW_TICKER"
+    assert client.calls[0][2] == "ka10007"
+    assert client.calls[0][3] == {"stk_cd": "005930"}
 
 
 async def test_get_ticker_rejects_malformed_symbol_without_calling_request():
@@ -73,9 +77,9 @@ async def test_get_ticker_rejects_malformed_symbol_without_calling_request():
 
 
 async def test_get_ticker_rejects_malformed_payload():
-    """Negative -- a response missing the expected `output` fields must not
-    silently produce a half-populated Ticker (fail-closed)."""
-    client = _FakeKiwoomClient({"KW_TICKER": {"return_code": 0, "output": {}}})
+    """Negative -- a response missing the expected fields must not silently
+    produce a half-populated Ticker (fail-closed)."""
+    client = _FakeKiwoomClient({"ka10007": {"return_code": 0}})
     with pytest.raises(FatalExchangeError):
         await client.get_ticker("005930")
 
@@ -84,36 +88,21 @@ async def test_get_ticker_rejects_malformed_payload():
 
 
 async def test_get_orderbook_maps_levels_as_decimal_and_respects_depth():
-    client = _FakeKiwoomClient(
-        {
-            "KW_ORDERBOOK": {
-                "return_code": 0,
-                "output": {
-                    "bids": [
-                        {"price": "70900", "quantity": "10"},
-                        {"price": "70800", "quantity": "20"},
-                        {"price": "70700", "quantity": "30"},
-                    ],
-                    "asks": [
-                        {"price": "71000", "quantity": "5"},
-                        {"price": "71100", "quantity": "15"},
-                    ],
-                },
-            }
-        }
-    )
+    client = _FakeKiwoomClient({"ka10007": _MARKET_COND_RESPONSE})
 
-    book = await client.get_orderbook("005930", depth=2)
+    book = await client.get_orderbook("005930", depth=1)
 
-    assert len(book.bids) == 2
+    assert len(book.bids) == 1
     assert book.bids[0].price == Decimal("70900")
     assert isinstance(book.bids[0].quantity, Decimal)
-    assert book.asks[0].price == Decimal("71000")
+    assert book.asks[0].price == Decimal("71100")
     assert book.asks[0].quantity == Decimal("5")
 
 
 async def test_get_orderbook_rejects_malformed_payload():
-    client = _FakeKiwoomClient({"KW_ORDERBOOK": {"return_code": 0, "output": {"bids": [{}]}}})
+    """A level price present without its matching quantity field is a
+    malformed payload, not a partially-filled book."""
+    client = _FakeKiwoomClient({"ka10007": {"return_code": 0, "buy_1bid": "70900"}})
     with pytest.raises(FatalExchangeError):
         await client.get_orderbook("005930")
 
@@ -124,24 +113,24 @@ async def test_get_orderbook_rejects_malformed_payload():
 async def test_get_ohlcv_maps_candles_as_decimal():
     client = _FakeKiwoomClient(
         {
-            "KW_OHLCV_DAY": {
+            "ka10081": {
                 "return_code": 0,
-                "output": [
+                "stk_dt_pole_chart_qry": [
                     {
-                        "date": "20260101",
-                        "open": "70000",
-                        "high": "71500",
-                        "low": "69800",
-                        "close": "71000",
-                        "volume": "1000000",
+                        "dt": "20260101",
+                        "open_pric": "70000",
+                        "high_pric": "71500",
+                        "low_pric": "69800",
+                        "cur_prc": "71000",
+                        "trde_qty": "1000000",
                     },
                     {
-                        "date": "20251231",
-                        "open": "69000",
-                        "high": "70200",
-                        "low": "68900",
-                        "close": "70000",
-                        "volume": "900000",
+                        "dt": "20251231",
+                        "open_pric": "69000",
+                        "high_pric": "70200",
+                        "low_pric": "68900",
+                        "cur_prc": "70000",
+                        "trde_qty": "900000",
                     },
                 ],
             }
@@ -170,7 +159,15 @@ async def test_get_ohlcv_rejects_unsupported_timeframe():
 
 async def test_get_ohlcv_rejects_malformed_payload():
     client = _FakeKiwoomClient(
-        {"KW_OHLCV_DAY": {"return_code": 0, "output": [{"date": "20260101"}]}}
+        {"ka10081": {"return_code": 0, "stk_dt_pole_chart_qry": [{"dt": "20260101"}]}}
     )
     with pytest.raises(FatalExchangeError):
         await client.get_ohlcv("005930", "1d")
+
+
+async def test_get_ohlcv_empty_page_returns_no_candles():
+    """A response with no rows key at all is not malformed -- some symbols
+    genuinely have no chart history yet (e.g. freshly listed)."""
+    client = _FakeKiwoomClient({"ka10081": {"return_code": 0}})
+    candles = await client.get_ohlcv("005930", "1d")
+    assert candles == []

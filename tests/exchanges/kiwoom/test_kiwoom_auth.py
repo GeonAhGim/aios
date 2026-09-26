@@ -47,8 +47,10 @@ def _clean_bucket_registry():
     reset_token_bucket_registry_for_test()
 
 
-def _token_response(token: str = "tok-1", expires: float = 7200) -> httpx.Response:  # noqa: S107
-    return httpx.Response(200, json={"token": token, "expires_dt_seconds": expires})
+def _token_response(
+    token: str = "tok-1", expires_dt: str = "99991231235959"  # noqa: S107
+) -> httpx.Response:
+    return httpx.Response(200, json={"token": token, "expires_dt": expires_dt})
 
 
 # ---- token cache: hit / miss / refresh-on-expiry ----
@@ -123,7 +125,7 @@ async def test_request_retries_once_after_401_then_succeeds():
 
     client = _client(handler)
     result = await client._request(
-        "GET", "/uapi/domestic-stock/v1/market-data/ticker", "KW_TICKER"
+        "POST", "/api/dostk/mrkcond", "ka10007", body={"stk_cd": "005930"}
     )
 
     assert result == {"return_code": 0, "output": {}}
@@ -141,7 +143,7 @@ async def test_request_surfaces_second_401_as_fatal_without_looping_forever():
     # A second consecutive 401 (after the one auth-retry already used) is not
     # retried again -- AUTH is not a retryable kind, so it surfaces fatally.
     with pytest.raises(FatalExchangeError):
-        await client._request("GET", "/x", "KW_TICKER")
+        await client._request("POST", "/api/dostk/mrkcond", "ka10007")
 
 
 # ---- negative (2/3): HTTP 5xx -> typed error ----
@@ -155,7 +157,7 @@ async def test_request_5xx_exhausts_retries_and_raises_retryable():
 
     client = _client(handler)
     with pytest.raises(RetryableExchangeError):
-        await client._request("GET", "/x", "KW_TICKER")
+        await client._request("POST", "/api/dostk/mrkcond", "ka10007")
 
 
 # ---- negative (3/3): malformed payload rejected ----
@@ -172,7 +174,16 @@ async def test_fetch_token_rejects_non_json_body():
 
 async def test_fetch_token_rejects_missing_token_field():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"expires_dt_seconds": 3600})
+        return httpx.Response(200, json={"expires_dt": "99991231235959"})
+
+    client = _client(handler)
+    with pytest.raises(FatalExchangeError):
+        await client._ensure_token()
+
+
+async def test_fetch_token_rejects_malformed_expires_dt():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"token": "tok-1", "expires_dt": "not-a-date"})
 
     client = _client(handler)
     with pytest.raises(FatalExchangeError):
@@ -193,6 +204,63 @@ def test_classify_body_rejects_non_object_body():
     error = client._classify_body(response)
     assert error is not None
     assert error.kind is ExchangeErrorKind.UNKNOWN_RESPONSE
+
+
+def test_classify_body_recognizes_top_level_auth_expiry_code():
+    """Kiwoom's own client treats top-level return_code in {8005, 8031,
+    8103} as an expired/invalid token -- confirmed via WebFetch against
+    github.com/Kiwoom-Securities/Kiwoom-REST-API (kiwoom/core/errors.py)."""
+    client = _client(lambda request: httpx.Response(200, json={}))
+    response = httpx.Response(200, json={"return_code": 8005, "return_msg": "token expired"})
+    error = client._classify_body(response)
+    assert error is not None
+    assert error.kind is ExchangeErrorKind.AUTH
+
+
+def test_classify_body_recognizes_embedded_auth_expiry_code():
+    """Kiwoom sometimes returns a generic top-level return_code (e.g. 3)
+    with the real code embedded in return_msg as "[8005:...]"."""
+    client = _client(lambda request: httpx.Response(200, json={}))
+    response = httpx.Response(
+        200, json={"return_code": 3, "return_msg": "[8005:Token이 유효하지 않습니다]"}
+    )
+    error = client._classify_body(response)
+    assert error is not None
+    assert error.kind is ExchangeErrorKind.AUTH
+
+
+def test_classify_body_recognizes_rate_limit_code():
+    client = _client(lambda request: httpx.Response(200, json={}))
+    response = httpx.Response(200, json={"return_code": 1701, "return_msg": "rate limited"})
+    error = client._classify_body(response)
+    assert error is not None
+    assert error.kind is ExchangeErrorKind.RATE_LIMITED
+
+
+async def test_request_retries_once_after_body_level_auth_expiry_then_succeeds():
+    """A body-level auth-expiry signal (HTTP 200 + return_code=8005) must
+    trigger the same invalidate-and-retry-once path as an HTTP 401 --
+    Kiwoom's real client surfaces expired tokens this way at least as often
+    as via HTTP status (module docstring)."""
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/token":
+            calls.append("token")
+            return _token_response(f"tok-{calls.count('token')}")
+        calls.append("api")
+        if calls.count("api") == 1:
+            return httpx.Response(200, json={"return_code": 8005, "return_msg": "expired"})
+        return httpx.Response(200, json={"return_code": 0})
+
+    client = _client(handler)
+    result = await client._request(
+        "POST", "/api/dostk/mrkcond", "ka10007", body={"stk_cd": "005930"}
+    )
+
+    assert result == {"return_code": 0}
+    assert calls.count("token") == 2
+    assert calls.count("api") == 2
 
 
 # ---- rate limit exceeded: waits / raises ----
@@ -234,4 +302,4 @@ async def test_request_wraps_transport_connect_error_as_retryable():
 
     client = _client(handler)
     with pytest.raises(RetryableExchangeError):
-        await client._request("GET", "/x", "KW_TICKER")
+        await client._request("POST", "/api/dostk/mrkcond", "ka10007")
