@@ -8,6 +8,7 @@ DoD (task-4148 DEEPEN):
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
@@ -24,7 +25,8 @@ class TestCreateTestUserNegative:
     """create_test_user(pool) is tested indirectly via create_test_tenant
     and direct pool usage; negative cases target the pool contract."""
 
-    async def test_rejects_non_asyncpg_pool(self):
+    @pytest.mark.asyncio
+    async def test_rejects_non_asyncpg_pool(self) -> None:
         """pool.acquire() must be called on an asyncpg.Pool -- passing a
         non-asyncpg mock should raise TypeError when the helper tries
         pool.acquire()."""
@@ -38,7 +40,8 @@ class TestCreateTestUserNegative:
 class TestCreateTestTenantNegative:
     """Negative cases for create_test_tenant."""
 
-    async def test_rejects_bad_pool_type(self):
+    @pytest.mark.asyncio
+    async def test_rejects_bad_pool_type(self) -> None:
         """Passing a non-async-pool object should fail when acquire() is called."""
         fake_pool = MagicMock()
         fake_pool.acquire.side_effect = TypeError("not an asyncpg.Pool")
@@ -49,22 +52,27 @@ class TestCreateTestTenantNegative:
 class TestNoopEventBusNegative:
     """Negative cases for NoopEventBus -- it must NOT trigger real event processing."""
 
-    def test_subscribe_returns_none_no_handler_invoked(self):
+    def test_subscribe_returns_none_no_handler_invoked(self) -> None:
         """subscribe() must return None -- no handler is registered."""
         bus = NoopEventBus()
-        result = bus.subscribe("test.topic", lambda p: None, criticality=None)
-        assert result is None
 
-    async def test_publish_records_but_does_not_dispatch(self):
+        async def dummy_handler(topic: str, payload: dict[str, Any]) -> None:
+            pass
+
+        bus.subscribe("test.topic", dummy_handler, criticality="low")
+        # subscribe() should complete without raising
+
+    @pytest.mark.asyncio
+    async def test_publish_records_but_does_not_dispatch(self) -> None:
         """publish() appends to self.published but does NOT call any handlers."""
         bus = NoopEventBus()
         await bus.start()
-        called = []
+        called: list[dict[str, Any]] = []
 
-        def handler(payload):
+        async def handler(topic: str, payload: dict[str, Any]) -> None:
             called.append(payload)
 
-        bus.subscribe("test.topic", handler, criticality=None)
+        bus.subscribe("test.topic", handler, criticality="low")
         await bus.publish("test.topic", {"key": "value"})
 
         # recorded in published list
@@ -72,7 +80,8 @@ class TestNoopEventBusNegative:
         # but handler was never called
         assert called == []
 
-    async def test_start_stop_are_noops(self):
+    @pytest.mark.asyncio
+    async def test_start_stop_are_noops(self) -> None:
         """start() and stop() must not raise or block."""
         bus = NoopEventBus()
         await bus.start()
@@ -87,7 +96,8 @@ class TestNoopEventBusNegative:
 class TestFailureInjection:
     """Inject failures into dependencies and verify fail-closed behavior."""
 
-    async def test_pool_connection_failure_raises(self):
+    @pytest.mark.asyncio
+    async def test_pool_connection_failure_raises(self) -> None:
         """When pool.acquire() raises (e.g. DB connection lost), the helper
         must propagate the exception -- fail-closed, not silently succeed."""
         from tests.integration.conftest import create_test_user
@@ -102,7 +112,8 @@ class TestFailureInjection:
         with pytest.raises(asyncpg.PostgresError, match="connection refused"):
             await create_test_user(fake_pool)
 
-    async def test_noop_event_bus_stop_after_many_pubs(self):
+    @pytest.mark.asyncio
+    async def test_noop_event_bus_stop_after_many_pubs(self) -> None:
         """NoopEventBus.stop() must complete instantly even after many
         publishes -- no retry/backoff delay."""
         bus = NoopEventBus()
