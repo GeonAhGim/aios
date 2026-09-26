@@ -126,12 +126,13 @@ class KiwoomAdapter(
         on_reconnected: ReconnectHook | None = None,
         connect_fn: ConnectFn = connect,
     ) -> None:
-        # `cast` (not `# type: ignore`) works around a mypy Protocol-matching
-        # quirk: `KiwoomWsAuthClient` (websocket_connection.py, sibling leaf)
-        # declares `is_paper_trading` as a plain (implicitly settable)
-        # attribute, but this class only ever exposes it as a read-only
-        # `@property` (as ABCMeta requires to clear the abstract property) --
-        # the mixin only ever reads it, never assigns it, so this is safe.
+        # `cast` (a runtime no-op, not a suppression pragma) works around a
+        # mypy Protocol-matching quirk: `KiwoomWsAuthClient`
+        # (websocket_connection.py, sibling leaf) declares `is_paper_trading`
+        # as a plain (implicitly settable) attribute, but this class only
+        # ever exposes it as a read-only `@property` (as ABCMeta requires to
+        # clear the abstract property) -- the mixin only ever reads it, never
+        # assigns it, so this is safe.
         await KiwoomWebSocketMixin.subscribe_ticker_stream(
             cast(Any, self),
             symbol,
