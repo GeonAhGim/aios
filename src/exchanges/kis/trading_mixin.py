@@ -28,6 +28,8 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.foundation.market_data.contracts.v1 import Venue
+from src.foundation.market_data.domain.reference.symbol_normalizer import to_venue as _to_venue
 from src.services.oms.domain.errors import OrderValidationError
 from src.services.oms.domain.rounding import check_notional
 from src.services.oms.domain.venue_profile import VenueCapabilityProfile
@@ -126,11 +128,17 @@ class _OrderSubmittingClient(KISHTTPClient, Protocol):
 class KISTradingMixin:
     @require_paper_sandbox
     async def place_order(self: _OrderSubmittingClient, order: Order) -> Order:
+        # F5(task-8077) — route order.symbol through the LA-7 single rule
+        # (symbol_normalizer) before it becomes PDNO; an unregistered or
+        # malformed symbol is rejected fail-closed with
+        # SymbolNormalizationError before the exchange is ever called
+        # (same uncaught-propagation contract as Bitget's _to_bitget_symbol).
+        pdno = _to_venue(Venue.KIS_KRX, order.symbol)
         _precheck_order(order, self.venue_profile())
         body: dict[str, Any] = {
             "CANO": self._cano,
             "ACNT_PRDT_CD": self._acnt_prdt_cd,
-            "PDNO": order.symbol,
+            "PDNO": pdno,
             "ORD_DVSN": _order_division(order.order_type),
             "ORD_QTY": str(order.quantity),
             "ORD_UNPR": str(order.price.amount) if order.price is not None else "0",
