@@ -40,6 +40,17 @@ value reaching this mixin is rejected fail-closed (see `_to_okx_ord_type`).
 Spot-only, cash trade mode (`tdMode="cash"`, Phase 1 scope per 06 doc
 §6.1) -- margin/futures trade modes are a separate leaf.
 
+F4-OKX (task-8076, `docs/audits/AUDIT_2026-09-26_order_path.md` §1/F4) --
+`_validate_order` used to only check quantity/price `>0`, delegating
+tick/lot/min_notional enforcement entirely to OKX's own rejection (a live
+round trip per bad order, and a silent no-op if the exchange's rejection
+reason ever changes shape). `_validate_tick_lot_min_notional` now rejects
+fail-closed, before any exchange call, using `_SYMBOL_LIMITS` -- ESTIMATED
+values (§10 honest-labeling; no live `GET /api/v5/public/instruments`
+round trip performed for this leaf), not a live-measured `SymbolSnapshot`
+(contrast `bitget/venue_profile.py`). A symbol absent from `_SYMBOL_LIMITS`
+is rejected rather than silently skipping the check.
+
 Every method in this file moves funds, so every one carries
 `@require_paper_sandbox` with no exceptions (same convention as
 bitget/kis/nh/kiwoom trading_mixin.py; the AST scanner in
@@ -53,6 +64,7 @@ guard applies to OKX with no exception once factory registration
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Protocol
 
 from src.core.exceptions import FatalExchangeError
@@ -67,6 +79,23 @@ _TRADE_MODE_CASH = "cash"  # spot-only Phase 1 scope (module docstring)
 _ORDER_PATH = "/api/v5/trade/order"
 _CANCEL_PATH = "/api/v5/trade/cancel-order"
 _AMEND_PATH = "/api/v5/trade/amend-order"
+
+# F4-OKX (task-8076, audit AUDIT_2026-09-26_order_path.md §1/F4) -- per-symbol
+# (tick, lot, min_notional), keyed by canonical "BASE/QUOTE" (same key space
+# `_validate_order` already receives `order.symbol` in). ESTIMATED, not
+# LIVE_VERIFIED (§10 honest-labeling convention, same as
+# `bitget/venue_profile.py`'s `rate_limits` provenance note) -- no
+# `GET /api/v5/public/instruments` round trip has been made for this leaf,
+# so these are conservative placeholders pending a live snapshot leaf, not a
+# measured `SymbolSnapshot` (contrast `bitget/venue_profile.py`'s
+# `BITGET_SYMBOL_SNAPSHOTS`, which *is* live-measured). Only two symbols are
+# declared -- any other canonical symbol reaching `place_order` is rejected
+# fail-closed by `_validate_tick_lot_min_notional` below (repo default
+# posture, CLAUDE.md §3) rather than silently skipping the check.
+_SYMBOL_LIMITS: dict[str, tuple[Decimal, Decimal, Decimal]] = {
+    "BTC/USDT": (Decimal("0.1"), Decimal("0.00000001"), Decimal("1")),
+    "ETH/USDT": (Decimal("0.01"), Decimal("0.000001"), Decimal("1")),
+}
 
 
 def _to_okx_side(side: OrderSide) -> str:
@@ -92,6 +121,30 @@ def _validate_order(order: Order) -> None:
         raise FatalExchangeError(
             f"OKX 지정가(limit) 주문은 0보다 큰 가격이 필요함: {order.price!r}"
         )
+    _validate_tick_lot_min_notional(order)
+
+
+def _validate_tick_lot_min_notional(order: Order) -> None:
+    """F4-OKX (task-8076) -- reject before the exchange call, not delegate
+    to OKX's own rejection (audit finding: `place_order` used to only check
+    `>0`). Fail-closed for any symbol not in `_SYMBOL_LIMITS` -- a missing
+    entry means we have no venue limits to check against, so submitting
+    anyway would silently skip the very validation this leaf adds."""
+    limits = _SYMBOL_LIMITS.get(order.symbol)
+    if limits is None:
+        raise FatalExchangeError(
+            f"OKX tick/lot/min_notional 한도가 등록되지 않은 심볼: {order.symbol!r}"
+        )
+    tick, lot, min_notional = limits
+    if order.quantity % lot != 0:
+        raise FatalExchangeError(f"OKX lot size({lot})에 정렬되지 않은 수량: {order.quantity!r}")
+    if order.order_type == OrderType.LIMIT and order.price is not None:
+        price = order.price.amount
+        if price % tick != 0:
+            raise FatalExchangeError(f"OKX tick size({tick})에 정렬되지 않은 가격: {price!r}")
+        notional = price * order.quantity
+        if notional < min_notional:
+            raise FatalExchangeError(f"OKX 최소 주문금액({min_notional}) 미달: {notional!r}")
 
 
 def _to_inst_id(symbol: str) -> str:

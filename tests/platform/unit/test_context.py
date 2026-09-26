@@ -156,6 +156,28 @@ def test_request_context_rejects_invalid_schema_version():
         )
 
 
+def test_request_context_rejects_invalid_trace_id_type():
+    """negative — trace_id는 UUID 타입이어야 한다. 문자열 또는 다른 타입을
+    전달하면 검증이 실패해야 한다. trace_id는 로그 상관관계의 기본이므로
+    타입 검증이 실패하면 옵저빌리티 파이프라인 전체가 깨진다."""
+    with pytest.raises(ValidationError):
+        RequestContext(
+            trace_id="not-a-uuid",
+            request_id="test",
+        )
+
+
+def test_request_context_rejects_invalid_command_id_type():
+    """negative — command_id가 제공될 때는 UUID 타입이어야 한다.
+    문자열을 전달하면 ValidationError를 던진다."""
+    with pytest.raises(ValidationError):
+        RequestContext(
+            trace_id=uuid.uuid4(),
+            request_id="test",
+            command_id="not-a-uuid",
+        )
+
+
 def test_bind_failure_in_component_copy_does_not_leak_partial_context():
     """실패 주입 — bind() 내부에서 model_copy(update=overrides)가 예외를
     던지면 _context_var/request_id_var 어느 쪽도 set되지 않아야 한다.

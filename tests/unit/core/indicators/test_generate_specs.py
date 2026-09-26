@@ -299,6 +299,7 @@ def _p95(samples: list[float]) -> float:
 _FULL_CATALOG_BUDGET_MS = 50.0
 
 
+@pytest.mark.perf
 def test_full_catalog_generation_p95_latency_within_self_declared_budget() -> None:
     """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 "전종 생성 지연"
     전용 항목이 없다(가장 가까운 항목은 "지표 증분=일괄 동일", 지연 예산이

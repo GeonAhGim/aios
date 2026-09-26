@@ -15,6 +15,15 @@ the same `_CRYPTO_QUOTES` table as the BITGET branch (symmetric precedent).
 A raw/canonical string using the wrong venue's separator (e.g. "BTC-USDT"
 where a canonical "BTC/USDT" is expected) is rejected, not silently
 normalized -- fail-closed per the module's existing contract.
+
+task-8078 (AUDIT_2026-09-26_order_path.md F5/§1) — BINANCE's raw symbol
+("BTCUSDT") has the same concatenated-no-separator shape as BITGET's, so
+`Venue.BINANCE` reuses `_crypto_raw_to_canonical`/`_crypto_canonical_to_raw`
+directly (no separate `_binance_*` helpers needed, unlike OKX's dash
+variant). Previously this venue had no branch here at all, so
+`src/exchanges/binance/trading_mixin.py` had nothing to delegate to and
+submitted `order.symbol` unconverted/unvalidated (the audit's finding: not
+a missing implementation, a missing design).
 """
 
 from __future__ import annotations
@@ -42,6 +51,8 @@ def to_canonical(venue: Venue, raw: str) -> str:
         return _crypto_raw_to_canonical(raw)
     if venue is Venue.OKX:
         return _okx_raw_to_canonical(raw)
+    if venue is Venue.BINANCE:
+        return _crypto_raw_to_canonical(raw)
     if venue is Venue.KIS_KRX:
         return _krx_validate(raw)
     if venue is Venue.NH_KRX:
@@ -57,6 +68,8 @@ def to_venue(venue: Venue, canonical: str) -> str:
         return _crypto_canonical_to_raw(canonical)
     if venue is Venue.OKX:
         return _okx_canonical_to_raw(canonical)
+    if venue is Venue.BINANCE:
+        return _crypto_canonical_to_raw(canonical)
     if venue is Venue.KIS_KRX:
         return _krx_validate(canonical)
     if venue is Venue.NH_KRX:

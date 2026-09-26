@@ -15,7 +15,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §7.1(측정 지점
 반영"까지의 전체 경로다.
 
 `ingest()` 1회(부분체결, 신규 이벤트)의 왕복 수 구성(실측, task-2323
-`_discover_round_trips.py`로 확인, task-8046이 task-7998/F3 반영분 갱신):
+`_discover_round_trips.py`로 확인, task-8053이 task-7998/F3 반영분 정리):
   BEGIN 1 + `provider_event_inbox` INSERT(`insert_if_absent`) 1 + 방금 넣은
   행 id SELECT 1 + `_resolve_order_id` SELECT 1 + `get_for_update`(venue
   확인) 1 + `fills` INSERT(`insert_if_absent`) 1 + orders.filled_quantity
@@ -23,12 +23,14 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §7.1(측정 지점
   재조회 `get_for_update` 1 + `fills.list_for_order` SELECT 1 +
   `orders.transition`(get_for_update 1 + set_config 1 + order_events
   INSERT 1 + conditional UPDATE 1 + audit_bridge.emit[4]) 8 +
-  `mark_processed` conditional UPDATE 1 + COMMIT 1 + 세션 리셋 1 = 21,
-  + PARTIALLY_FILLED도 `ledger_effects.apply_position_ledger`를 타 그
-  별도 acquire에서 `legacy_order_repository.get_by_order_id` 1 + 그
-  acquire/release 자체의 세션 리셋 1 = 23 (이 테스트 fixture의 주문은
-  `execution_id`가 없어 `record_fill_in_position_ledger` 본체는 조기
-  no-op으로 리턴 — 왕복이 늘지 않는다).
+  `mark_processed` conditional UPDATE 1 + COMMIT 1 + 세션 리셋 1 = 21.
+  PARTIALLY_FILLED도 `ledger_effects.apply_position_ledger`의 게이트
+  대상이지만, 이 테스트 fixture의 주문은 `execution_id`가 없다(FD-8
+  FROZEN decision layer가 execution 컨텍스트 없이 제출하는 경로와 동형) —
+  `_process_row`가 `fresh.execution_id is None`을 미리 확인해 `LedgerUpdate`
+  자체를 만들지 않으므로(task-8053), `legacy_order_repository.
+  get_by_order_id` 조회 + 그 별도 acquire/release의 세션 리셋이 애초에
+  발생하지 않는다 — 21에서 늘지 않는다.
 
 negative test(I-10): `fills_repo.insert_if_absent`(ingest 1회당 정확히 1번만
 호출)가 왕복을 하나 더 내면 계수가 예산과 정확히 1 어긋난다(`InboxProcessor`는
@@ -72,7 +74,7 @@ from tests.performance.oms.conftest import (
 _SAMPLE_COUNT = 100
 _P99_TARGET_MS = 300.0  # §7.1 운영 목표 — 비차단(print), task-1038/1521 decision
 _ROUND_TRIP_MULTIPLIER = 9
-_INGEST_PARTIAL_ROUND_TRIPS = 23  # 모듈 docstring 구성표 — 정확 단언(==, task-8046)
+_INGEST_PARTIAL_ROUND_TRIPS = 21  # 모듈 docstring 구성표 — 정확 단언(==, task-8053)
 
 
 class _ChattyFillsRepo(FillsRepository):

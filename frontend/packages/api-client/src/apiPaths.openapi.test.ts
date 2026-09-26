@@ -54,9 +54,6 @@ const snapshotPathSet = new Set(snapshotPathList);
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.sessions.list",
   "auth.sessions.revoke",
-  // task-2428(BT-18): backtests.sweep — apiRoutes.ts의 등록 주석 참조(실행 라우터
-  // 자체가 아직 없음, sessions.*와 동일 사유).
-  "backtests.sweep",
   // task-2699(UX-15): follow.subscriptions.* 3건 — apiRoutes.ts의 등록 주석 참조
   // (src/foundation/follow 모듈·src/api/routers/follow.py 자체가 아직 없음,
   // sessions.*와 동일 사유).
@@ -71,11 +68,9 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "ai.proposals.promoteTicket",
   "ai.proposals.promote",
   "ai.experiments.base",
-  // task-2692(UX-8): screener.run — apiRoutes.ts의 등록 주석 참조(src/foundation/
-  // screener 모듈·src/api/routers/screener.py 자체가 아직 없음, ai.*와 동일 사유).
-  "screener.run",
   // task-2696(UX-12): whatif.* 2건 — apiRoutes.ts의 등록 주석 참조(src/foundation/
-  // whatif 모듈·src/api/routers/whatif.py 자체가 아직 없음, screener.run과 동일 사유).
+  // whatif 모듈·src/api/routers/whatif.py 자체가 아직 없음, task-7773 이전의
+  // screener.run과 동일 사유).
   "whatif.previewOrder",
   "whatif.rebalancePlan",
   // task-2718(RD-17): researchData.* 2건 — apiRoutes.ts의 등록 주석 참조

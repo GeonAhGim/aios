@@ -23,12 +23,13 @@ tx(BEGIN+UPDATE...RETURNING+COMMIT+리셋=4)뿐이고, 그 뒤 N개 행은 각�
 
 inbox: `process_once(limit=N)`은 행마다 별도로 `claim_unprocessed`(FOR
 UPDATE SKIP LOCKED 단건)를 부르므로(모듈 docstring "배치를 한 트랜잭션에
-몰아넣지 않는다") 고정 오버헤드가 없다 — 총 왕복 = N * 22(부분체결 1행당
-실측치, `ingest()`의 23에서 `insert_if_absent`+행 id 재조회 2회분을
-`claim_unprocessed` 단건 조회 1회로 줄인 차이 — task-7998/F3 이후 `ingest()`
-자체가 21→23으로 늘었다: PARTIALLY_FILLED도 `position_ledger` 분기를 타
-`legacy_order_repository.get_by_order_id` 1회 + 그 별도 acquire/release의
-세션 리셋 1회가 매 행마다 추가된다, task-8046 재확인).
+몰아넣지 않는다") 고정 오버헤드가 없다 — 총 왕복 = N * 20(부분체결 1행당
+실측치, `ingest()`의 21에서 `insert_if_absent`+행 id 재조회 2회분을
+`claim_unprocessed` 단건 조회 1회로 줄인 차이). PARTIALLY_FILLED도
+`position_ledger` 분기의 게이트 대상이지만, 이 fixture 주문은 execution_id가
+없어 `_process_row`가 조기 no-op 반환한다(task-8053) — `legacy_order_
+repository.get_by_order_id` 조회 자체가 발생하지 않아 행당 왕복은 늘지
+않는다.
 
 DEEPEN(task-2802) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md#2323)
 근거 보강: (1) 절대 처리량(cmd/s·ev/s)은 여전히 비차단 print지만, 이 환경의
@@ -71,7 +72,9 @@ _OUTBOX_PER_ROW_ROUND_TRIPS = 24  # test_outbox_dispatch_latency.py 실측(28-4)
 
 _INBOX_TARGET_EV_PER_SEC = 500.0  # §7.1 운영 목표 — 비차단(print)
 _INBOX_BATCH_SIZE = 500
-_INBOX_PER_ROW_ROUND_TRIPS = 22  # process_once 부분체결 1행당 실측(task-8046)
+_INBOX_PER_ROW_ROUND_TRIPS = 20  # process_once 부분체결 1행당 실측 — fixture
+# 주문에 execution_id가 없어 position_ledger 분기는 `_process_row`에서 조기
+# no-op 반환된다(task-8053, `get_by_order_id` 조회 자체가 발생하지 않음)
 
 # DEEPEN(task-2802) — 배치 총 소요시간의 정규화 상한(왕복 수 * 기준 왕복비용 *
 # 안전배수). 실 왕복은 바닥값 `SELECT 1`보다 페이로드/도메인 로직이 더 들어가므로
