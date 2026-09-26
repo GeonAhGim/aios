@@ -30,7 +30,7 @@ dependencies = [
     "pandas>=2.0",
     "TA-Lib==0.7.1",
     "pyarrow>=17.0",
-    "email-validator>=2.0",
+    "email-validator>=2.3.0",
     "prometheus-client>=0.20",
     # task-3577: Windows has no IANA tz db bundled; zoneinfo (src/foundation/
     # market_data/domain/calendar/**, src/exchanges/kis/**) needs tzdata there.
