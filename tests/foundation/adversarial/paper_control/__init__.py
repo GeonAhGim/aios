@@ -67,7 +67,7 @@ class _FakeLiveCredentialClass:
 def test_validate_provenance_rejects_non_paper_credential_class():
     provenance = AdapterProvenance(
         adapter_type="fake-paper-v1",
-        credential_class=_FakeLiveCredentialClass(),  # type: ignore[arg-type]
+        credential_class=_FakeLiveCredentialClass(),
         endpoint_classification="SANDBOX",
         provider_sandbox_account_ref="sandbox-acct-1",
     )
