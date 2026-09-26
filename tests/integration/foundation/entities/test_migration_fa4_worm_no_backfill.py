@@ -1,4 +1,4 @@
-"""FA-4(963d5f3cfb1b) 마이그레이션 — pos_journal WORM 테이블(백필 없음) 회귀.
+"""FA-4(963d5f3cfb1b) 마이그레이션 — WORM 테이블(백필 없음) + guard UPDATE/DELETE 거부 회귀.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-4 DoD.
 decision(task-1794): `pos_journal`·`ledger_journal_entry`·`ledger_posting_line`은
@@ -6,77 +6,33 @@ decision(task-1794): `pos_journal`·`ledger_journal_entry`·`ledger_posting_line
 재기록 불가하다 — 컬럼/FK/인덱스만 추가하고 백필은 하지 않는다(영구 NULL).
 `pos_journal`은 FA-3 `fills` 테스트와 동일 패턴으로 "부트스트랩된 tenant라도
 백필되지 않음"을 증명한다(eligible한 데이터가 있어도 WORM이라 스킵됨을
-분명히 하기 위해). `ledger_journal_entry`/`ledger_posting_line`의 동일 회귀 +
-원장 대차 불변/실패주입 회귀는 `test_migration_fa4_worm_ledger_journal.py`에
-있다(이 파일과 함께 5xx줄 file-policy 관측선을 넘지 않도록 분리, ADR-2026-09-10-C
-§7)."""
+분명히 하기 위해). `ledger_journal_entry`/`ledger_posting_line`은 tenant_id
+컬럼 자체가 없어 이 마이그레이션의 백필 대상 목록에 애초에 들어가지 않는다
+— 컬럼 추가 후에도 NULL로 남는지만 확인한다.
+
+balance invariant 회귀·실패주입·롤백 테스트는
+`test_migration_fa4_worm_failure_injection.py`로 분리했다(task-7810,
+782e05f9/task-7707가 이 파일을 524줄로 키운 것을 관심사별로 재분할).
+공용 픽스처/헬퍼는 `_fa4_worm_support.py`에 있다."""
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
 import pytest
 
 from tests.integration.conftest import create_test_tenant
+from tests.integration.foundation.entities._fa4_worm_support import (
+    _DOWN_REVISION,
+    _ensure_head,  # noqa: F401 -- re-exported autouse fixture
+    _insert_pre_fa4_ledger_entry,
+    _run_alembic,
+    pool,  # noqa: F401 -- re-exported fixture
+)
 from tests.support.deep_downgrade import purge_position_snapshots
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-_DOWN_REVISION = "789c138f13fe"
-
-
-def _asyncpg_dsn() -> str:
-    return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-
-
-def _run_alembic(*args: str) -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
-        cwd=_PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=100,
-    )
-    assert result.returncode == 0, (
-        f"alembic {' '.join(args)} 실패:\n{result.stdout}\n{result.stderr}"
-    )
-
-
-@pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
-    yield p
-    await p.close()
-
-
-def _sweep_synthetic_snapshots(prefix: str) -> None:
-    """FA-0d-fix (task-771991202): rows this module inserts below FA-4 carry
-    synthetic non-5-part keys that `cdb114b6903f` (FA-0d) refuses fail-closed,
-    so they are removed before the schema is brought back to head."""
-    import asyncio
-
-    async def _sweep() -> None:
-        conn = await asyncpg.connect(_asyncpg_dsn())
-        try:
-            await conn.execute("DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%")
-        finally:
-            await conn.close()
-
-    asyncio.run(_sweep())
-
-
-@pytest.fixture(autouse=True)
-def _ensure_head():
-    _run_alembic("upgrade", "head")
-    yield
-    _sweep_synthetic_snapshots("fa4-worm-test-")
-    _run_alembic("upgrade", "head")
+__all__ = ["pool", "_ensure_head"]
 
 
 async def test_pos_journal_never_backfilled_because_worm_blocks_update(pool):
@@ -208,3 +164,41 @@ async def test_pos_journal_worm_guard_rejects_delete(pool):
             "SELECT count(*) FROM pos_journal WHERE id = $1", journal_id
         )
     assert still_there == 1
+
+
+async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
+    await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
+    _run_alembic("downgrade", _DOWN_REVISION)
+    entry_id = await _insert_pre_fa4_ledger_entry(pool, f"fa4-worm-test:{uuid4().hex}", uuid4())
+
+    _run_alembic("upgrade", "head")
+
+    async with pool.acquire() as conn:
+        entry_row = await conn.fetchrow(
+            "SELECT fund_id, portfolio_id FROM ledger_journal_entry WHERE entry_id = $1",
+            entry_id,
+        )
+        line_rows = await conn.fetch(
+            "SELECT fund_id, portfolio_id FROM ledger_posting_line WHERE entry_id = $1",
+            entry_id,
+        )
+        entry_backfilled = await conn.fetchval(
+            "SELECT count(*) FROM ledger_journal_entry WHERE entry_id = $1 AND fund_id IS NOT NULL",
+            entry_id,
+        )
+        line_backfilled = await conn.fetchval(
+            "SELECT count(*) FROM ledger_posting_line WHERE entry_id = $1 AND fund_id IS NOT NULL",
+            entry_id,
+        )
+        line_null = await conn.fetchval(
+            "SELECT count(*) FROM ledger_posting_line WHERE entry_id = $1 AND fund_id IS NULL",
+            entry_id,
+        )
+
+    assert entry_row["fund_id"] is None
+    assert entry_row["portfolio_id"] is None
+    assert entry_backfilled == 0
+    assert len(line_rows) == 2
+    assert all(row["fund_id"] is None and row["portfolio_id"] is None for row in line_rows)
+    assert line_backfilled == 0
+    assert line_null == 2
