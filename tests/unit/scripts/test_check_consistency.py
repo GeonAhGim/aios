@@ -155,8 +155,7 @@ def test_protocol_port_flags_missing_method(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "src/ctx/adapters/postgres_repository.py",
-        "class PostgresWidgetRepository:\n"
-        "    async def get(self) -> None:\n        return None\n",
+        "class PostgresWidgetRepository:\n    async def get(self) -> None:\n        return None\n",
     )
     hits = cc.check_port_protocol_implementations(tmp_path)
     assert hits == [("src/ctx/adapters/postgres_repository.py", 1)]
@@ -440,6 +439,29 @@ def test_openapi_removing_a_registered_non_allowlisted_path_is_still_flagged(
     )
     hits = cc.check_openapi_frontend(tmp_path)
     assert hits == [("contracts/openapi/v1.json#/foo/{id}", 0)]
+
+
+def test_openapi_allowlist_partial_spelling_mismatch_still_flagged(tmp_path: Path) -> None:
+    """task-4089 ND-21 경계 negative #3: allowlist는 정밀 일치만 적용된다.
+    트레일링 슬래시(/livez/), 대소문자(/LIVEZ), 오타(/livezz)는 허용되지
+    않아야 한다 — whitelist 철자가 살짝 달라도 무단 통과하면 안 된다."""
+    # /livez 는 allowlist에 있지만, /livez/ 와 /LIVEZ 는 아님
+    _write(
+        tmp_path,
+        "contracts/openapi/v1.json",
+        json.dumps({"paths": {"/livez": {}, "/livez/": {}, "/LIVEZ": {}}}),
+    )
+    _write(
+        tmp_path,
+        "frontend/packages/api-client/src/apiRoutes.ts",
+        "export const API_ROUTES = {};\n",
+    )
+    hits = cc.check_openapi_frontend(tmp_path)
+    # /livez 만 allowlist 면제 — /livez/ 와 /LIVEZ 는 적색
+    assert len(hits) == 2
+    hit_keys = {key for key, _ in hits}
+    assert any("livez/" in k for k in hit_keys)
+    assert any("/LIVEZ" in k for k in hit_keys)
 
 
 def test_openapi_passes_for_compound_colon_verb_segment(tmp_path: Path) -> None:

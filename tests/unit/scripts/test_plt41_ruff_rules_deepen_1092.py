@@ -15,12 +15,25 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
+from tests._perf.relative_budget import RelativeBudget
+
 ROOT = Path(__file__).resolve().parents[3]
+
+# task-7741(esc-ci-coverage): a fixed 5s wall-clock budget around a real ruff
+# subprocess invocation is the same false-red shape scripts/coverage_ratchet.py
+# documents for the local CI coverage step (pytest --cov=src line-tracer
+# overhead in *this* process + shared-host contention on the ruff child
+# process) -- local measurement showed the op itself already spending
+# 2.5-4.1s of the 5s budget with no contention at all. Switched to
+# RelativeBudget (task-7631 pattern, mode="wall" since the measured op is an
+# external subprocess whose CPU time this process's time.process_time()
+# cannot see) -- a ratio against a same-process calibration loop instead of
+# an absolute second figure, so it self-corrects for host speed/load.
+_RUFF_CHECK_MAX_RATIO = 150.0
 PYPROJECT = ROOT / "pyproject.toml"
 
 # task-1092가 추가한 select 확장 + 같은 커밋이 넓힌 두 블랭킷 per-file-ignores
@@ -173,14 +186,25 @@ def test_tests_zone_blanket_ignore_does_not_leak_into_unlisted_rule(tmp_path: Pa
 @pytest.mark.perf
 def test_ruff_check_repo_perf_budget() -> None:
     """CLAUDE.md 게이트 커맨드(`ruff check src tests scripts`)를 실제로 돌려
-    5초 예산 안에 끝나는지 확인한다(로컬 실측 ~0.3s, 스캔 결과는 exit 0 --
-    이 리프가 정리한 위반이 회귀하지 않았다는 뜻이기도 하다)."""
-    start = time.perf_counter()
-    result = _run_ruff(ROOT, "src", "tests", "scripts")
-    elapsed = time.perf_counter() - start
+    자기보정 예산 안에 끝나는지 확인한다(스캔 결과는 exit 0 -- 이 리프가 정리한
+    위반이 회귀하지 않았다는 뜻이기도 하다)."""
+    result: subprocess.CompletedProcess[str] | None = None
 
+    def run() -> None:
+        nonlocal result
+        result = _run_ruff(ROOT, "src", "tests", "scripts")
+
+    RelativeBudget().assert_within(
+        run,
+        max_ratio=_RUFF_CHECK_MAX_RATIO,
+        mode="wall",
+        n=1,
+        warmup=0,
+        label="ruff check src tests scripts",
+    )
+
+    assert result is not None
     assert result.returncode == 0, result.stdout
-    assert elapsed < 5.0, f"ruff check took {elapsed:.2f}s (budget 5.0s)"
 
 
 # ---------------------------------------------------------------------------

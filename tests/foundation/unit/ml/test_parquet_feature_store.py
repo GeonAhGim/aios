@@ -11,7 +11,6 @@ adapter's `root`, no custom fixtures or filesystem mocking.
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from src.foundation.ml.adapters.parquet_feature_store import ParquetFeatureStore
 from src.foundation.ml.contracts.v1 import FeatureSpec
 from src.foundation.ml.domain.feature_values import InvalidFeatureValueError
 from src.foundation.ml.ports.feature_store import FeatureValue
+from tests._perf.relative_budget import RelativeBudget
 
 _DAY = date(2026, 1, 15)
 _SPEC = FeatureSpec(feature_id="rsi_14", dtype="float", source_ref="src://x")
@@ -122,12 +122,16 @@ def test_gate_red_plain_overwrite_would_silently_replace_content(tmp_path: Path)
 
 # --- numeric performance assertion ---
 
-_READ_P95_BUDGET_MS = 50.0
-
-
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+# task-7674: the original absolute 50ms p95 budget measured this CI runner's
+# clock+disk speed, not read_batch(), and went red on a busy/shared host with
+# nothing in the adapter changed (same class of failure as task-7631, GitHub
+# run 36193686857). read_batch() does real file I/O, so this stays on
+# wall-clock (RelativeBudget's `mode="wall"`) rather than process_time, which
+# would not see the I/O wait. Ratio derivation: locally measured warm-cache
+# (1 discarded warmup pass) p95 ~0.76ms against a ~80ms calibration (~0.0095x);
+# 0.05 keeps ~5x headroom for host/disk variance while still catching an
+# O(n) -> O(n^2) style regression in the reader.
+_READ_P95_MAX_RATIO = 0.05
 
 
 @pytest.mark.perf
@@ -136,12 +140,10 @@ def test_read_batch_p95_within_budget(tmp_path: Path) -> None:
     rows = [_row(f"E{i}", 10, str(float(i))) for i in range(500)]
     store.write_batch(_SPEC, _DAY, rows)
 
-    samples: list[float] = []
-    for _ in range(20):
-        started = time.perf_counter()
-        list(store.read_batch(_SPEC, _DAY))
-        samples.append((time.perf_counter() - started) * 1000)
-
-    p95_ms = _p95(samples)
-    print(f"[AI-19 read_batch] p95={p95_ms:.2f}ms budget<{_READ_P95_BUDGET_MS:.1f}ms")
-    assert p95_ms < _READ_P95_BUDGET_MS
+    RelativeBudget().p95_wall_seconds_within(
+        lambda: list(store.read_batch(_SPEC, _DAY)),
+        max_ratio=_READ_P95_MAX_RATIO,
+        n=20,
+        warmup=1,
+        label="read_batch(500 rows) p95",
+    )

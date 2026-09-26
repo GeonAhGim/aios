@@ -20,7 +20,7 @@ import pytest
 from src.data.models.trading import OrderStatus
 from src.services.oms.application import order_query
 from src.services.oms.ports.repository import OrderQueryPort
-from tests.integration.oms.conftest import create_test_user, insert_order
+from tests.integration.oms.conftest import create_test_user, insert_event, insert_order
 
 
 def _raw_cursor(created_at_str: str, order_id: str) -> str:
@@ -218,19 +218,26 @@ async def test_list_order_events_returns_timeline_in_seq_order(pool) -> None:
     user_id = await create_test_user(pool)
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id, status="CREATED")
-        await conn.execute(
-            """
-            INSERT INTO order_events (
-                order_id, from_status, to_status, event, actor_subject_id, trace_id,
-                occurred_at, payload_hash
-            ) VALUES
-                ($1, 'CREATED', 'VALIDATED', 'VALIDATED', 'system', $2, now(), $3),
-                ($1, 'VALIDATED', 'SUBMITTED', 'SENT', 'system', $2, now(), $3)
-            """,
-            order_id,
-            uuid4(),
-            "e" * 64,
+        # `order_events`는 append-only(DB가 DELETE를 거부) -- 이 이벤트들을 남긴 채
+        # `orders.status`를 'CREATED'에 방치하면 실제 전이(`transition()`이 남겼을
+        # companion UPDATE) 없이 이벤트만 존재하는 영구 orphan이 돼
+        # `scripts/replay_verify.py`가 공유 TEST_DATABASE_URL에서 나중에 도는 어떤
+        # run에서도 계속 MISMATCH를 낸다(task-7675). §5.1 순서(SET LOCAL ->
+        # order_events INSERT -> UPDATE)를 이벤트마다 반복해 `oms_enforce_order_
+        # transition_trg`의 I5(version := OLD+1)/I6(companion event 필수) 그대로
+        # 실제 write path와 같은 최종 상태(SUBMITTED/v2)를 남긴다 -- 이 조회
+        # 테스트가 검증하려는 건 이벤트 순서뿐이라도, `orders` 행은 replay가
+        # 재구성하는 상태와 일치해야 한다.
+        await conn.execute("SELECT set_config('oms.event_written', '1', true)")
+        await insert_event(
+            conn, order_id, from_status="CREATED", to_status="VALIDATED", event="VALIDATED"
         )
+        await conn.execute("UPDATE orders SET status = 'VALIDATED' WHERE order_id = $1", order_id)
+        await conn.execute("SELECT set_config('oms.event_written', '1', true)")
+        await insert_event(
+            conn, order_id, from_status="VALIDATED", to_status="SUBMITTED", event="SENT"
+        )
+        await conn.execute("UPDATE orders SET status = 'SUBMITTED' WHERE order_id = $1", order_id)
 
     events = await order_query.list_order_events(pool, order_id, tenant_id=user_id)
 

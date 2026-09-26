@@ -40,6 +40,8 @@ export interface MockBackendOptions {
   createExecutionResponse?: MockResponseOverride;
   /** POST /v1/backtests/quick 응답을 통째로 바꾼다. */
   quickBacktestResponse?: MockResponseOverride;
+  /** GET /notifications/history 응답 목록. 기본값은 빈 배열(대시보드 알림 위젯 빈 상태). */
+  notificationHistory?: Record<string, unknown>[];
 }
 
 function buildCandleSeries(instrumentId: string, venue: string, timeframe: string) {
@@ -120,6 +122,10 @@ export async function mockBackend(page: Page, options: MockBackendOptions = {}):
 
     if (pathname === "/executions" && method === "GET") {
       return json(route, 200, state.executions);
+    }
+
+    if (pathname === "/notifications/history" && method === "GET") {
+      return json(route, 200, options.notificationHistory ?? []);
     }
 
     if (pathname === "/executions" && method === "POST") {
