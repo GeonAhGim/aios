@@ -14,7 +14,16 @@ vi.mock("@aios/shared-hooks", () => ({
   apiClient: { compileScript: vi.fn() },
 }));
 
-afterEach(cleanup);
+const navigateSpy = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useNavigate: () => navigateSpy };
+});
+
+afterEach(() => {
+  cleanup();
+  navigateSpy.mockClear();
+});
 
 function renderPage(compileScript: CompileScript) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -259,5 +268,37 @@ describe("ScriptEditorPage", () => {
 
     await waitFor(() => expect(screen.queryByTestId("script-preview-pane-1")).not.toBeInTheDocument());
     expect(screen.getByTestId("script-preview-pane-0")).toBeInTheDocument();
+  });
+
+  // G-3(UX_JOURNEYS.md 갭, task-7785): 컴파일 성공 후 "즉시 백테스트"로 이어지는
+  // 연결이 이 화면 안에 전혀 없었다 — CTA가 scriptHash를 실어 /chart로 이동시키는지 확인한다.
+  it("G-3: 컴파일 성공 시 나타나는 CTA를 누르면 scriptHash를 실어 /chart로 이동한다", async () => {
+    const compileScript = vi.fn(async () => COMPILE_RESULT);
+    renderPage(compileScript);
+
+    fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
+    await waitFor(() => expect(screen.getByTestId("compile-open-chart")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("compile-open-chart"));
+
+    expect(navigateSpy).toHaveBeenCalledWith(`/chart?script_hash=${COMPILE_RESULT.scriptHash}`);
+  });
+
+  // negative: 컴파일이 실패하면 CTA 자체가 렌더되지 않고, 당연히 navigate도 호출되지 않는다.
+  it("negative: 컴파일 실패 시 백테스트 CTA가 뜨지 않고 navigate도 호출되지 않는다", async () => {
+    const compileScript = vi.fn(async () => {
+      throw new ApiError(400, "SCRIPT_SYNTAX: unexpected end of input", "trace-400", "VALIDATION_INVALID_FIELD", undefined, {
+        code: "SCRIPT_SYNTAX",
+        line: 1,
+        col: 12,
+      });
+    });
+    renderPage(compileScript);
+
+    fireEvent.click(screen.getByRole("button", { name: "컴파일" }));
+
+    await waitFor(() => expect(screen.getByTestId("script-editor-marker-0")).toBeInTheDocument());
+    expect(screen.queryByTestId("compile-open-chart")).not.toBeInTheDocument();
+    expect(navigateSpy).not.toHaveBeenCalled();
   });
 });

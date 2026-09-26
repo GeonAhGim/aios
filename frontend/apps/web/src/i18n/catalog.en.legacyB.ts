@@ -118,6 +118,8 @@ export const catalogEnLegacyB = {
     "label6": "Allocated executions",
     "t7": "Running strategies",
     "t8": "No running strategies.",
+    "t9": "Recent alerts",
+    "t10": "No recent alerts to display.",
   },
   "registerCredentialForm": {
     "t1": "New exchange connection",

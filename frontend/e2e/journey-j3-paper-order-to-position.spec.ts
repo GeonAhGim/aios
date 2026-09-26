@@ -9,13 +9,12 @@ import { mockBackend } from "./support/mockBackend";
 // route를 먼저 검사하므로 mockBackend(page) 호출 뒤에 추가해야 mockBackend의 폴백
 // (catch-all)과 충돌하지 않는다.
 //
-// 갭 노트(문서 UX_JOURNEYS.md §2 J3 단계표 기준, 코드로 재확인): 2단계 "리스크/
-// 컴플라이언스 판정 표시"는 G-4(부분 갭) — ExecutionCard.tsx/ExecutionControlPage.tsx
-// 어디에도 riskGate/verdict/reasonCode 전용 패널이 없다(grep 0건, PortfolioPage.tsx의
-// RebalanceError와 동일하게 BadRequestNotice/ForbiddenNotice/ErrorMessage 일반 오류
-// 배너로만 판정 결과가 표면화된다). 전용 판정 패널이 생기기 전까지 "승인/거부 사유가
-// 별도 패널로 표시"라는 원 성공 조건은 test.fixme로 남기고, 실제로 동작하는 일반
-// 오류 배너 경로를 별도의 실패 주입 테스트로 대신 검증한다 — 우회하지 않는다.
+// 갭 노트(문서 UX_JOURNEYS.md §2 J3 단계표 기준): 2단계 "리스크/컴플라이언스 판정
+// 표시"는 G-4(부분 갭)였으나 task-7504(ExecutionCardResponse.last_risk_verdict 노출)
+// + task-7505(ExecutionCard.tsx 전용 패널)로 해소됐다 — 아래 2단계 테스트가 실제
+// 패널 렌더를 검증한다. 리스크 게이트 자체가 403으로 거부하는 경로(예: 위임장 한도
+// 초과로 주문 생성 자체가 막히는 경우)는 여전히 일반 오류 배너로만 표면화되므로 그
+// 경로는 별도의 실패 주입 테스트로 계속 검증한다 — 두 경로는 서로 다른 계약이다.
 //
 // sw.js(서비스 워커)의 fetch 핸들러는 "/v1/"로 시작하지 않는 GET(예: /executions,
 // /portfolio, /alerts, /notifications/history)을 캐시 우선(cache-first)으로 처리하며
@@ -86,17 +85,41 @@ test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판�
     await expect(page.getByText("e2e-paper-order-strategy")).toBeVisible();
   });
 
-  // 갭 G-4(부분 갭): "판정 결과(승인/거부 사유)가 별도 패널로 표시"는 아직 재현 대상이
-  // 없다 — ExecutionCard.tsx/ExecutionControlPage.tsx를 읽어 확인했다. 전용 판정 UI가
-  // 생기기 전까지 채우지 않는다.
-  test.fixme(
-    "2단계 [부분 갭 G-4] 주문 제출 시 리스크/컴플라이언스 판정이 전용 패널로 승인/거부 사유와 함께 표시된다",
+  // task-7505(G-4 해소): task-7504가 ExecutionCardResponse.last_risk_verdict를
+  // 노출한 뒤 ExecutionCard.tsx가 전용 패널로 렌더한다 — GET /executions을
+  // last_risk_verdict가 담긴 카드로 고정해 DENY 사유 코드 표시를 재현한다.
+  test(
+    "2단계 주문 제출 시 리스크/컴플라이언스 판정이 전용 패널로 승인/거부 사유와 함께 표시된다",
     async ({ page }) => {
-      // 갭 G-4: ExecutionControlPage.tsx/ExecutionCard.tsx 어디에도 riskGate/verdict/
-      // reasonCode 패턴이 없다(grep 0건) — 거부는 일반 오류 배너로만 표면화된다.
-      // 전용 판정 패널이 추가되면 이 테스트를 채운다.
       await mockBackend(page);
+      await page.route(`${API_BASE}/executions`, (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        return json(route, 200, [
+          {
+            execution_id: 1,
+            strategy_id: "e2e-risk-verdict-strategy",
+            strategy_version: "1.0.0",
+            status: "PENDING",
+            mode: "PAPER",
+            exchange: "bitget",
+            allocated_capital: "500",
+            days_since_start: 0,
+            realized_pnl: "0",
+            unrealized_pnl: "0",
+            max_drawdown_pct: null,
+            last_risk_verdict: {
+              outcome: "DENY",
+              reason_codes: ["RSK-007"],
+              evaluated_at: "2026-01-01T00:00:00Z",
+            },
+          },
+        ]);
+      });
       await page.goto("/executions");
+
+      await expect(page.getByText("e2e-risk-verdict-strategy")).toBeVisible();
+      await expect(page.getByText("리스크/컴플라이언스 판정: 거부")).toBeVisible();
+      await expect(page.getByText("사유: RSK-007")).toBeVisible();
     },
   );
 
