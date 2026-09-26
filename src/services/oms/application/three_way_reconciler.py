@@ -28,34 +28,24 @@ DENY assertion in `test_three_way_reconciler.py` (proof of wiring).
 
 Self-heal (task-7978 F1, liveness fix): a venue-confirmed cancel (no fill, the
 order simply drops out of `get_open_orders()`) was never wired to
-`OrderEvent.VENUE_CANCELLED` anywhere in OMS — `inbox_processor.py` only
-transitions on fills and drops no-fill provider events as IGNORED. That made
-this reconciler classify a perfectly normal cancel as
-`ORDER_MISSING_AT_PROVIDER`/`MATERIAL_MISMATCH` forever, since nothing ever
-updates `orders.status` to make the discrepancy go away — permanently DENYing
-every new SUBMIT for the tenant (`_apply_account_gate` keeps the ACCOUNT
-control ACTIVE). `_self_heal_confirmed_cancels` closes that loop narrowly,
-here only: an order classified `ORDER_MISSING_AT_PROVIDER` that also has a
-`CANCEL_REQUESTED` event in its `order_events` history is transitioned to
-`VENUE_CANCELLED` and dropped from the discrepancy list before the gate
-decision, instead of adding a new inbox-event consumption path. Orders missing
-at the provider with no `CANCEL_REQUESTED` history (real loss, e.g. a missed
-fill) are left as `MATERIAL_MISMATCH` — "missing" alone is never treated as
-"cancelled".
+`OrderEvent.VENUE_CANCELLED` anywhere in OMS. That made this reconciler
+classify a perfectly normal cancel as `ORDER_MISSING_AT_PROVIDER`/
+`MATERIAL_MISMATCH` forever, permanently DENYing every new SUBMIT for the
+tenant (`_apply_account_gate` keeps the ACCOUNT control ACTIVE). The actual
+self-heal logic lives in `reconcile_self_heal.py` (split out to stay under the
+architecture guard's line cap); see that module's docstring for the narrow
+scope rationale.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import asyncpg
 
-from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.trading import Order as ProviderOrder
 from src.data.models.trading import OrderStatus
 from src.exchanges.common.adapter import ExchangeAdapter
@@ -69,14 +59,11 @@ from src.foundation.risk_gate.application.deactivate_safety_control import (
 )
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
-from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
-from src.services.oms.adapters.order_repository import OrderNotFoundError, PostgresOrderRepository
 from src.services.oms.application.order_query import list_orders
-from src.services.oms.contracts.v1_events import Discrepancy, OrderTransitionEvent
+from src.services.oms.application.reconcile_self_heal import self_heal_confirmed_cancels
+from src.services.oms.contracts.v1_events import Discrepancy
 from src.services.oms.contracts.v1_views import OrderView, ReconcileSummaryView
-from src.services.oms.domain.errors import InvalidOrderTransitionError
 from src.services.oms.domain.reconcile_rules import compare_triple
-from src.services.oms.domain.state_machine import OrderEvent, next_status
 
 logger = logging.getLogger(__name__)
 
@@ -147,103 +134,6 @@ async def _connection_unavailable(pool: asyncpg.Pool, connection_id: UUID | None
         return False
     health = await PostgresConnectionRepository(pool).get_latest_health(connection_id)
     return health is None or health.state.value != "HEALTHY"
-
-
-_orders_repo = PostgresOrderRepository()
-_order_events_repo = PostgresOrderEventRepository()
-_SELF_HEAL_REASON = "RECONCILE_SELF_HEAL_VENUE_CANCELLED"
-
-
-def _venue_cancel_event_hash(order_id: UUID, occurred_at: datetime) -> str:
-    canonical = json.dumps(
-        {
-            "order_id": str(order_id),
-            "event": OrderEvent.VENUE_CANCELLED.value,
-            "occurred_at": occurred_at.isoformat(),
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(canonical.encode()).hexdigest()
-
-
-async def _heal_confirmed_cancel(conn: asyncpg.Connection, order_id: UUID) -> bool:
-    """`order_id`가 `ORDER_MISSING_AT_PROVIDER`인데 실제로는 정상 취소(거래소가
-    확정한 취소라 open-orders에서 사라짐)라면 `VENUE_CANCELLED`로 전이시킨다.
-
-    `CANCEL_REQUESTED` 이력이 없는 주문은 건드리지 않는다 — 임의의 missing
-    주문을 전부 CANCELLED로 세탁하면 실제 유실(체결 누락 등)을 숨기게 된다
-    (task-7978 F1, 좁은 자기치유 범위)."""
-    timeline = await _order_events_repo.timeline(conn, order_id)
-    if not any(ev.event == OrderEvent.CANCEL_REQUESTED.value for ev in timeline):
-        return False
-
-    tx = conn.transaction()
-    await tx.start()
-    healed = False
-    try:
-        order = await _orders_repo.get_for_update(conn, order_id)
-        new_status = next_status(order.status, OrderEvent.VENUE_CANCELLED)
-        occurred_at = datetime.now(timezone.utc)
-        event = OrderTransitionEvent(
-            order_id=order_id,
-            from_status=order.status,
-            to_status=new_status,
-            event=OrderEvent.VENUE_CANCELLED.value,
-            reason_code=_SELF_HEAL_REASON,
-            actor_subject_id="system",
-            trace_id=uuid4(),
-            command_id=None,
-            provider_event_id=None,
-            occurred_at=occurred_at,
-            payload_hash=_venue_cancel_event_hash(order_id, occurred_at),
-        )
-        await _orders_repo.transition(
-            conn,
-            order_id=order_id,
-            expected_status=order.status,
-            expected_version=order.version,
-            new_status=new_status,
-            patch={},
-            event=event,
-        )
-        healed = True
-    except (InvalidOrderTransitionError, ConcurrencyConflictError, OrderNotFoundError):
-        logger.warning(
-            "reconcile self-heal: skipping VENUE_CANCELLED transition for order_id=%s",
-            order_id,
-            exc_info=True,
-        )
-    finally:
-        if healed:
-            await tx.commit()
-        else:
-            await tx.rollback()
-    return healed
-
-
-async def _self_heal_confirmed_cancels(
-    pool: asyncpg.Pool, discrepancies: list[Discrepancy]
-) -> list[Discrepancy]:
-    """`ORDER_MISSING_AT_PROVIDER`로 분류된 항목 중 `CANCEL_REQUESTED` 이력이
-    있는 것만 `VENUE_CANCELLED`로 전이시키고, 치유된 항목은 결과에서 제거해
-    이번 판정(및 그에 따른 ACCOUNT 게이트)에 반영한다(task-7978 F1)."""
-    missing_ids = {d.entity_key for d in discrepancies if d.kind == "ORDER_MISSING_AT_PROVIDER"}
-    if not missing_ids:
-        return discrepancies
-
-    healed: set[str] = set()
-    for order_id_str in missing_ids:
-        async with pool.acquire() as conn:
-            if await _heal_confirmed_cancel(conn, UUID(order_id_str)):
-                healed.add(order_id_str)
-
-    if not healed:
-        return discrepancies
-    return [
-        d
-        for d in discrepancies
-        if not (d.kind == "ORDER_MISSING_AT_PROVIDER" and d.entity_key in healed)
-    ]
 
 
 async def _apply_account_gate(
@@ -318,7 +208,7 @@ async def reconcile_account(
                 if internal.client_order_id in by_client_id
             ]
             discrepancies = compare_triple(internal_orders, provider_views, [], {}, {}, policy)
-            discrepancies = await _self_heal_confirmed_cancels(pool, discrepancies)
+            discrepancies = await self_heal_confirmed_cancels(pool, discrepancies)
 
     if provider_unavailable:
         targets: list[OrderView | None] = list(internal_orders) or [None]
