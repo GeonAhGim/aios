@@ -19,7 +19,12 @@ import {
   type DrawingStyle,
   type FibonacciDrawing,
   type HorizontalLineDrawing,
+  type ParallelChannelDrawing,
+  type PriceChannelDrawing,
+  type PriceLineDrawing,
+  type RayLineDrawing,
   type RectangleDrawing,
+  type SegmentDrawing,
   type TrendLineDrawing,
   type TwoPointDrawing,
   type VerticalLineDrawing,
@@ -88,6 +93,50 @@ export function createFibonacci(
   );
 }
 
+export function createSegment(
+  id: string,
+  p1: DrawingPoint,
+  p2: DrawingPoint,
+  options: DrawingOptions = {},
+): SegmentDrawing {
+  return withOptions({ id, kind: "segment", points: [clonePoint(p1), clonePoint(p2)] }, options);
+}
+
+export function createRayLine(
+  id: string,
+  p1: DrawingPoint,
+  p2: DrawingPoint,
+  options: DrawingOptions = {},
+): RayLineDrawing {
+  return withOptions({ id, kind: "ray-line", points: [clonePoint(p1), clonePoint(p2)] }, options);
+}
+
+export function createParallelChannel(
+  id: string,
+  p1: DrawingPoint,
+  p2: DrawingPoint,
+  p3: DrawingPoint,
+  options: DrawingOptions = {},
+): ParallelChannelDrawing {
+  return withOptions(
+    { id, kind: "parallel-channel", points: [clonePoint(p1), clonePoint(p2), clonePoint(p3)] },
+    options,
+  );
+}
+
+export function createPriceChannel(
+  id: string,
+  p1: DrawingPoint,
+  p2: DrawingPoint,
+  options: DrawingOptions = {},
+): PriceChannelDrawing {
+  return withOptions({ id, kind: "price-channel", points: [clonePoint(p1), clonePoint(p2)] }, options);
+}
+
+export function createPriceLine(id: string, price: number, options: DrawingOptions = {}): PriceLineDrawing {
+  return withOptions({ id, kind: "price-line", price }, options);
+}
+
 // ── editing ─────────────────────────────────────────────────────────────────
 
 function shiftPoint(p: DrawingPoint, delta: DrawingDelta): DrawingPoint {
@@ -100,6 +149,7 @@ export function moveDrawing<T extends Drawing>(drawing: T, delta: DrawingDelta):
   let next: Drawing;
   switch (drawing.kind) {
     case "horizontal-line":
+    case "price-line":
       next = { ...drawing, price: drawing.price + delta.price };
       break;
     case "vertical-line":
@@ -108,8 +158,8 @@ export function moveDrawing<T extends Drawing>(drawing: T, delta: DrawingDelta):
     default:
       next = {
         ...drawing,
-        points: [shiftPoint(drawing.points[0], delta), shiftPoint(drawing.points[1], delta)],
-      };
+        points: drawing.points.map((p) => shiftPoint(p, delta)),
+      } as unknown as Drawing;
   }
   assertValidDrawing(next);
   return next as T;
@@ -132,15 +182,15 @@ export function moveAnchor<T extends Drawing>(drawing: T, anchorIndex: number, p
   let next: Drawing;
   switch (drawing.kind) {
     case "horizontal-line":
+    case "price-line":
       next = { ...drawing, price: point.price };
       break;
     case "vertical-line":
       next = { ...drawing, time: point.time };
       break;
     default: {
-      const points: [DrawingPoint, DrawingPoint] = [drawing.points[0], drawing.points[1]];
-      points[anchorIndex] = clonePoint(point);
-      next = { ...drawing, points };
+      const points = drawing.points.map((p, i) => (i === anchorIndex ? clonePoint(point) : p));
+      next = { ...drawing, points } as unknown as Drawing;
     }
   }
   assertValidDrawing(next);
@@ -148,7 +198,7 @@ export function moveAnchor<T extends Drawing>(drawing: T, anchorIndex: number, p
 }
 
 export function anchorCount(drawing: Drawing): number {
-  return hasPoints(drawing) ? 2 : 1;
+  return hasPoints(drawing) ? drawing.points.length : 1;
 }
 
 export function setLocked<T extends Drawing>(drawing: T, locked: boolean): T {

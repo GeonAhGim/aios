@@ -15,6 +15,7 @@ downgrade/upgrade 왕복이 이전엔 `_run_alembic`에 `database_url`을 넘기
 모든 alembic 서브프로세스 호출과 단언을 그 DB에서만 돌리는 것 --
 `test_migration_tenant_membership.py`(task-5795)가 같은 문제에 적용한 패턴과
 동일하다."""
+
 from __future__ import annotations
 
 import os
@@ -22,16 +23,23 @@ import subprocess
 import sys
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
-from typing import Any
+from uuid import uuid4
 
 import asyncpg
 import pytest
 
+from tests._perf.relative_budget import RelativeBudget
 from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c1f4a9e7b3d6"
+# task-6560/task-7434 계열 근거와 동일 -- 절대 예산이 아니라 같은 프로세스
+# 안에서 잰 순수 파이썬 보정 루프 대비 배율로 표현해 호스트 속도 의존을
+# 없앤다. 100행 왕복 마이그레이션은 alembic 서브프로세스 2회(downgrade +
+# upgrade)를 포함하므로 best-of-N 반복 대신 단발(n=1) 측정을 쓴다
+# (test_migration_fa3_deepen.py의 _PERF_MAX_RATIO 산정과 같은 이유).
+_PERF_MAX_RATIO = 400.0
 
 
 def _asyncpg_dsn(url: str) -> str:
@@ -136,7 +144,6 @@ async def test_fa2a_migration_preserves_valid_tenant_references(
 ) -> None:
     """FA-2a negative test: valid tenant references are preserved through
     upgrade/downgrade cycle, maintaining referential integrity."""
-    from uuid import uuid4
 
     from tests.integration.conftest import create_test_tenant
 
@@ -179,30 +186,96 @@ async def test_fa2a_migration_preserves_valid_tenant_references(
     assert fk_target == "tenant", "FK target is not tenant table after upgrade"
 
 
-async def test_fa2a_no_legal_entity_rows_reference_users_fk(pool: asyncpg.Pool) -> None:
-    """FA-2a negative test: after migration, zero legal_entity rows can have
-    tenant_id pointing to users (FK constraint prevents it)."""
-    # This is runtime validation of the gate check
+async def test_negative_insert_legal_entity_with_nonexistent_tenant_id_rejected_by_fk(
+    pool: asyncpg.Pool,
+) -> None:
+    # FA-2a negative — post-migration, legal_entity.tenant_id FKs `tenant`,
+    # not `users`; a tenant_id absent from `tenant` must be rejected.
     assert await _legal_entity_tenant_fk_target(pool) == "tenant"
 
-    # Try to insert a row with invalid tenant_id (not in tenant table)
-    from uuid import uuid4
-
-    invalid_tenant_id = uuid4()
-
     async with pool.acquire() as conn:
-        try:
+        with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
             await conn.execute(
                 """
                 INSERT INTO legal_entity (entity_id, tenant_id, name, jurisdiction, region_tag)
                 VALUES ($1, $2, 'bad-entity', 'US', 'US-East-1')
                 """,
                 uuid4(),
-                invalid_tenant_id,
+                uuid4(),
             )
-            raise AssertionError("should have raised FK constraint violation")
-        except asyncpg.exceptions.IntegrityConstraintViolationError:
-            pass  # Expected: FK constraint violation
+
+
+async def test_negative_insert_fund_with_nonexistent_entity_id_rejected_by_fk(
+    pool: asyncpg.Pool,
+) -> None:
+    # FA-2 negative — fund.entity_id must FK an existing legal_entity row.
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
+            await conn.execute(
+                """
+                INSERT INTO fund (fund_id, entity_id, base_currency, inception)
+                VALUES ($1, $2, 'USDT', '2026-01-01')
+                """,
+                uuid4(),
+                uuid4(),
+            )
+
+
+async def test_negative_insert_portfolio_with_nonexistent_fund_id_rejected_by_fk(
+    pool: asyncpg.Pool,
+) -> None:
+    # FA-2 negative — portfolio.fund_id must FK an existing fund row.
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
+            await conn.execute(
+                """
+                INSERT INTO portfolio (portfolio_id, fund_id, venue_account_ref)
+                VALUES ($1, $2, 'roundtrip-deepen-venue')
+                """,
+                uuid4(),
+                uuid4(),
+            )
+
+
+async def test_negative_insert_sub_account_with_nonexistent_portfolio_id_rejected_by_fk(
+    pool: asyncpg.Pool,
+) -> None:
+    # FA-2 negative — sub_account.portfolio_id must FK an existing portfolio row.
+    from tests.integration.conftest import create_test_user
+
+    owner_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
+            await conn.execute(
+                """
+                INSERT INTO sub_account (sub_account_id, portfolio_id, owner_ref)
+                VALUES ($1, $2, $3)
+                """,
+                uuid4(),
+                uuid4(),
+                owner_id,
+            )
+
+
+def test_run_alembic_propagates_alembic_subprocess_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 실패주입(fail-closed) — `_run_alembic`이 실패한 alembic 서브프로세스를
+    # 조용히 삼키지 않고 그대로 전파하는지 확인한다(§3 "쓰기는 fail-closed
+    # 기본"). 실제 DB/alembic 없이 `subprocess.run`을 스텁으로 교체해
+    # returncode != 0 을 흉내낸다.
+    class _FailingCompletedProcess:
+        returncode = 1
+        stdout = "simulated alembic failure: relation does not exist"
+        stderr = "simulated alembic stderr"
+
+    def _fake_run(*args: object, **kwargs: object) -> _FailingCompletedProcess:
+        return _FailingCompletedProcess()
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    with pytest.raises(AssertionError, match="simulated alembic failure"):
+        _run_alembic("upgrade", "head", database_url="postgresql://unused/unused")
 
 
 async def test_fa2a_migration_downgrade_maintains_foreign_key_integrity(
@@ -233,18 +306,17 @@ async def test_fa2a_migration_downgrade_maintains_foreign_key_integrity(
     assert count > 0, "legal_entity rows were lost during downgrade"
 
 
+@pytest.mark.perf
 async def test_fa2a_migration_performance_under_load(
-    pool: asyncpg.Pool, migration_db_url: str, benchmark: Any
+    pool: asyncpg.Pool, migration_db_url: str
 ) -> None:
-    """FA-2a performance assertion: migration completes within budget.
-    Simulate moderate data volume (100 legal entities) and verify p95.
-
-    ADR-2026-09-09-C budget: D2 migration on 100 rows should complete < 5s p95."""
-    from uuid import uuid4
-
+    # 성능단언 — 100개 legal_entity 행이 있는 상태에서 FA-2a downgrade/upgrade
+    # 왕복이 예산 안에서 끝나는지 확인한다. RelativeBudget으로 같은 프로세스
+    # 안의 순수 파이썬 보정 루프 대비 배율을 재 host-speed 의존을 없앤다
+    # (test_migration_fa3_deepen.py와 동일 근거) — 이전의 pytest-benchmark
+    # 호출은 어떤 assert도 없이 "출력이 예산 안"이라는 주석뿐이었다(성능단언 부재).
     from tests.integration.conftest import create_test_tenant
 
-    # Setup: create tenant + 100 legal_entity rows
     tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=True)
 
     async with pool.acquire() as conn:
@@ -260,14 +332,14 @@ async def test_fa2a_migration_performance_under_load(
                 "US-East-1" if i % 2 == 0 else "US-West-2",
             )
 
-    # Downgrade to pre-FA-2a state
     await purge_position_snapshots(pool)
 
     def time_migration() -> None:
         _run_alembic("downgrade", "e6b1d94a7c3f", database_url=migration_db_url)
         _run_alembic("upgrade", "head", database_url=migration_db_url)
 
-    # Benchmark the round-trip migration (includes both downgrade and upgrade)
-    benchmark(time_migration)
-    # pytest-benchmark automatically asserts the operation completes;
-    # the output shows Mean ~4.0s for 100 rows, within 5s budget
+    budget = RelativeBudget()
+    sample = budget.measure(time_migration, mode="wall", n=1, warmup=0)
+    assert sample.ratio < _PERF_MAX_RATIO, (
+        f"100행 FA-2a 왕복: {budget.describe(sample, max_ratio=_PERF_MAX_RATIO)}"
+    )

@@ -25,7 +25,11 @@ inbox: `process_once(limit=N)`은 행마다 별도로 `claim_unprocessed`(FOR
 UPDATE SKIP LOCKED 단건)를 부르므로(모듈 docstring "배치를 한 트랜잭션에
 몰아넣지 않는다") 고정 오버헤드가 없다 — 총 왕복 = N * 20(부분체결 1행당
 실측치, `ingest()`의 21에서 `insert_if_absent`+행 id 재조회 2회분을
-`claim_unprocessed` 단건 조회 1회로 줄인 차이).
+`claim_unprocessed` 단건 조회 1회로 줄인 차이). PARTIALLY_FILLED도
+`position_ledger` 분기의 게이트 대상이지만, 이 fixture 주문은 execution_id가
+없어 `_process_row`가 조기 no-op 반환한다(task-8053) — `legacy_order_
+repository.get_by_order_id` 조회 자체가 발생하지 않아 행당 왕복은 늘지
+않는다.
 
 DEEPEN(task-2802) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md#2323)
 근거 보강: (1) 절대 처리량(cmd/s·ev/s)은 여전히 비차단 print지만, 이 환경의
@@ -37,6 +41,7 @@ DEEPEN(task-2802) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md#2323)
 행은 정상 처리된다는 §5.1 행별 try/except 격리(`OutboxDispatcher.
 dispatch_once`)의 증명이다.
 """
+
 from __future__ import annotations
 
 import time
@@ -67,7 +72,9 @@ _OUTBOX_PER_ROW_ROUND_TRIPS = 24  # test_outbox_dispatch_latency.py 실측(28-4)
 
 _INBOX_TARGET_EV_PER_SEC = 500.0  # §7.1 운영 목표 — 비차단(print)
 _INBOX_BATCH_SIZE = 500
-_INBOX_PER_ROW_ROUND_TRIPS = 20  # process_once 부분체결 1행당 실측
+_INBOX_PER_ROW_ROUND_TRIPS = 20  # process_once 부분체결 1행당 실측 — fixture
+# 주문에 execution_id가 없어 position_ledger 분기는 `_process_row`에서 조기
+# no-op 반환된다(task-8053, `get_by_order_id` 조회 자체가 발생하지 않음)
 
 # DEEPEN(task-2802) — 배치 총 소요시간의 정규화 상한(왕복 수 * 기준 왕복비용 *
 # 안전배수). 실 왕복은 바닥값 `SELECT 1`보다 페이로드/도메인 로직이 더 들어가므로
@@ -83,7 +90,10 @@ async def _seed_outbox_batch(pool: asyncpg.Pool, n: int) -> None:
             order_id = await insert_order(conn, user_id, status="VALIDATED")
             view = await order_repo.get_for_update(conn, order_id)
             await outbox_repo.enqueue(
-                conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
+                conn,
+                order_id=order_id,
+                command_type="SUBMIT",
+                payload=submit_payload(view),
                 not_before=datetime.now(timezone.utc),
             )
 
@@ -99,8 +109,12 @@ async def test_outbox_single_worker_throughput_measured_and_round_trips_exact(
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=OutboxRepository(), order_repo=PostgresOrderRepository(),
-        resolve_adapter=resolve, pre_send_gate=allow_gate, worker_id="w-throughput",
+        pool,
+        outbox_repo=OutboxRepository(),
+        order_repo=PostgresOrderRepository(),
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-throughput",
     )
     baseline_p95_ms = await measure_baseline_round_trip_p95_ms(pool)
     queries = await attach_round_trip_logger(pool)
@@ -203,8 +217,11 @@ async def test_outbox_batch_dispatch_survives_one_row_adapter_failure(pool: asyn
         failing_order_id = await insert_order(conn, user_id, status="VALIDATED")
         view = await order_repo.get_for_update(conn, failing_order_id)
         await outbox_repo.enqueue(
-            conn, order_id=failing_order_id, command_type="SUBMIT",
-            payload=submit_payload(view), not_before=datetime.now(timezone.utc),
+            conn,
+            order_id=failing_order_id,
+            command_type="SUBMIT",
+            payload=submit_payload(view),
+            not_before=datetime.now(timezone.utc),
         )
 
     async def _flaky_place_order(order: Order) -> Order:
@@ -220,8 +237,12 @@ async def test_outbox_batch_dispatch_survives_one_row_adapter_failure(pool: asyn
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="w-batch-failure",
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-batch-failure",
     )
 
     report = await dispatcher.dispatch_once(limit=_BATCH_WITH_FAILURE_SIZE)
