@@ -329,9 +329,7 @@ def check_08_data(repo_root: Path) -> CheckResult:
     )
     spi_dirs = ("tests/exchanges", "tests/unit/exchanges", "tests/integration/exchanges")
     spi_hits = _grep(repo_root, spi_dirs, r"def test_.*(contract|spi)", re.I)
-    passed = (
-        not bench_missing and bool(passed_bench) and bool(coverage_hits) and len(spi_hits) > 0
-    )
+    passed = not bench_missing and bool(passed_bench) and bool(coverage_hits) and len(spi_hits) > 0
     evidence = [
         *bench_present,
         *bench_missing,
@@ -375,15 +373,20 @@ def check_10_ops(
 ) -> CheckResult:
     """기준10 — 로컬 CI 녹색 + Guard veto 0 + INVARIANTS 위반 0 + RED_TEAM P0 미해결 0.
 
-    ci_report 키(`"ok"`)·guard_report 키(`"vetoed"`)는 실제 산출 스크립트의
-    스키마를 그대로 따른다 — `pm/local_ci.py`(top-level `"ok": bool`)와
-    `meta/guards/run_guards.py --json out.json`(`Report.to_json()`의
-    `"vetoed": bool`). 이전에는 `{"passed": bool}`/`{"veto_count": int}`를
-    기대했는데, 두 산출 스크립트 어디에도 그런 키를 쓰는 곳이 없어 리포트를
-    넘겨도 항상 FAIL로 오판정했다(task-6497 근본 원인).
+    ci_report/guard_report는 이 저장소에 실제로 존재하는 두 산출 경로 모두를
+    지원한다(task-7857 근본 원인) — `pm/local_ci.py`(top-level `"ok": bool`)/
+    `meta/guards/run_guards.py --json`(`"vetoed": bool`)를 직접 넘기는 경로와,
+    `pm/healthcheck.py`의 `mvp1_gate` 자동 배선(`_write_closeout_ci_report`/
+    `_write_closeout_guard_report`)이 그 값을 옮겨 쓰는 `{"passed": bool}`/
+    `{"veto_count": int}` 경로. task-6497은 전자만 지원하도록 고쳤는데, 실제
+    운영에서 mvp1_gate는 항상 후자 스키마로 리포트를 넘겨 이 항목이 로컬 CI
+    실제 결과와 무관하게 항상 FAIL로 고정됐다(재현: `_load_ci_report_ok`에
+    `{"passed": true}`만 있는 리포트를 넘기면, 구현이 `"ok"` 키만 보던 시절에는
+    `data.get("ok")`가 `None`이라 항상 FAIL — 아래 `test_ops_check_passes_when_...
+    _healthcheck_wrapper_schema` 참고).
     """
-    ci_ok, ci_note = _load_bool_report(ci_report, "ok")
-    guard_ok, guard_note = _load_bool_report(guard_report, "vetoed", invert=True)
+    ci_ok, ci_note = _load_ci_report_ok(ci_report)
+    guard_ok, guard_note = _load_guard_report_ok(guard_report)
     invariants_ok, invariants_note = _check_invariants(repo_root)
     red_team_ok, red_team_note = _check_red_team_open(repo_root)
 
@@ -391,6 +394,50 @@ def check_10_ops(
     evidence = [ci_note, guard_note, invariants_note, red_team_note]
     detail = "운영 기준 통과" if passed else "; ".join(e for e in evidence if "OK" not in e[:2])
     return CheckResult("10_ops", "운영", passed, tuple(evidence), detail)
+
+
+def _load_ci_report_ok(path: Path | None) -> tuple[bool, str]:
+    """ci_report의 통과 여부 — `"ok"`(`pm/local_ci.py` 원본) 또는 `"passed"`
+    (`pm/healthcheck.py` mvp1_gate 배선) 중 실제로 있는 키를 읽는다."""
+    if path is None:
+        return False, UNVERIFIED
+    if not path.is_file():
+        return False, f"리포트 없음: {path}"
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return False, f"리포트 JSON 파싱 실패: {path}"
+    if "ok" in data:
+        key, value = "ok", data.get("ok")
+    elif "passed" in data:
+        key, value = "passed", data.get("passed")
+    else:
+        return False, f"ok/passed 키 없음: {path}"
+    ok = bool(value)
+    return ok, f"OK {key}=True" if ok else f"{key}={value!r}: {path}"
+
+
+def _load_guard_report_ok(path: Path | None) -> tuple[bool, str]:
+    """guard_report의 통과 여부 — `"vetoed"`(`meta/guards/run_guards.py` 원본,
+    False가 통과) 또는 `"veto_count"`(`pm/healthcheck.py` mvp1_gate 배선, 0이
+    통과) 중 실제로 있는 키를 읽는다."""
+    if path is None:
+        return False, UNVERIFIED
+    if not path.is_file():
+        return False, f"리포트 없음: {path}"
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return False, f"리포트 JSON 파싱 실패: {path}"
+    if "vetoed" in data:
+        value = data.get("vetoed")
+        ok = not bool(value)
+        return ok, "OK vetoed=False" if ok else f"vetoed={value!r} (False여야 함): {path}"
+    if "veto_count" in data:
+        value = data.get("veto_count")
+        ok = isinstance(value, int) and value == 0
+        return ok, "OK veto_count=0" if ok else f"veto_count={value!r} (0이어야 함): {path}"
+    return False, f"vetoed/veto_count 키 없음: {path}"
 
 
 def _load_bool_report(
