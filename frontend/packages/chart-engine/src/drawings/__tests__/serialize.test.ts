@@ -7,8 +7,18 @@ import {
   serializeDrawings,
   toDrawingsDocument,
 } from "../serialize";
-import { createFibonacci, createHorizontalLine, createTrendLine, createVerticalLine } from "../tools";
-import { corruptDocument, createRng, genCollection, genDrawing } from "./arbitraries";
+import {
+  createFibonacci,
+  createHorizontalLine,
+  createParallelChannel,
+  createPriceChannel,
+  createPriceLine,
+  createRayLine,
+  createSegment,
+  createTrendLine,
+  createVerticalLine,
+} from "../tools";
+import { corruptDocument, createRng, genCollection, genDrawing, genNumber, genPoint } from "./arbitraries";
 import { expectDrawingError } from "./helpers";
 
 const sample: readonly Drawing[] = [
@@ -16,6 +26,11 @@ const sample: readonly Drawing[] = [
   createHorizontalLine("h", 100.5, { locked: true }),
   createVerticalLine("v", 1_700_000_000_000),
   createFibonacci("f", { time: 0, price: 0 }, { time: 10, price: 10 }, [0, 0.5, 1], { style: { lineWidth: 2 } }),
+  createSegment("s", { time: 1, price: 2 }, { time: 3, price: 4 }),
+  createRayLine("r", { time: 5, price: 6 }, { time: 7, price: 8 }, { locked: true }),
+  createParallelChannel("pc", { time: 0, price: 0 }, { time: 10, price: 10 }, { time: 5, price: 20 }),
+  createPriceChannel("ch", { time: 1, price: 1 }, { time: 2, price: 2 }),
+  createPriceLine("pl", 123.5, { style: { color: "#0f0" } }),
 ];
 
 describe("document shape", () => {
@@ -60,6 +75,23 @@ describe("round trip", () => {
       expect(back, `case ${i}`).toStrictEqual(collection);
       expect(serializeDrawings(back), `case ${i} fixed point`).toBe(text);
       expect(fromDrawingsDocument(JSON.parse(text)), `case ${i} object form`).toStrictEqual(collection);
+    }
+  });
+
+  it("property: lossless for >=100 seeded collections built only from the 5 new M2-6 step-1 kinds", () => {
+    const rng = createRng(0xa11ce);
+    for (let i = 0; i < 120; i++) {
+      const collection: DrawingCollection = [
+        createSegment(`seg-${i}`, genPoint(rng), genPoint(rng)),
+        createRayLine(`ray-${i}`, genPoint(rng), genPoint(rng)),
+        createParallelChannel(`pch-${i}`, genPoint(rng), genPoint(rng), genPoint(rng)),
+        createPriceChannel(`chn-${i}`, genPoint(rng), genPoint(rng)),
+        createPriceLine(`pl-${i}`, genNumber(rng)),
+      ];
+      const text = serializeDrawings(collection);
+      const back = deserializeDrawings(text);
+      expect(back, `case ${i}`).toStrictEqual(collection);
+      expect(serializeDrawings(back), `case ${i} fixed point`).toBe(text);
     }
   });
 });
@@ -122,6 +154,13 @@ describe("negative: per-drawing fields (no silent drop, no coercion)", () => {
     ["point with extra field", { ...trend, points: [{ time: 1, price: 2, z: 3 }, trend.points[1]] }, "CHART_DRAWING_FIELD_UNKNOWN"],
     ["unknown drawing field", { ...trend, colour: "red" }, "CHART_DRAWING_FIELD_UNKNOWN"],
     ["field from another kind", { ...trend, price: 1 }, "CHART_DRAWING_FIELD_UNKNOWN"],
+    ["segment: one point", { ...trend, kind: "segment", points: [trend.points[0]] }, "CHART_DRAWING_FIELD_INVALID"],
+    ["ray-line: three points", { ...trend, kind: "ray-line", points: [...trend.points, trend.points[0]] }, "CHART_DRAWING_FIELD_INVALID"],
+    ["parallel-channel: two points (needs three)", { ...trend, kind: "parallel-channel" }, "CHART_DRAWING_FIELD_INVALID"],
+    ["parallel-channel: missing points", { id: "pc", kind: "parallel-channel" }, "CHART_DRAWING_FIELD_MISSING"],
+    ["price-channel: zero points", { id: "ch", kind: "price-channel", points: [] }, "CHART_DRAWING_FIELD_INVALID"],
+    ["price-line: missing price", { id: "pl", kind: "price-line" }, "CHART_DRAWING_FIELD_MISSING"],
+    ["price-line: string price (no coercion)", { id: "pl", kind: "price-line", price: "1" }, "CHART_DRAWING_FIELD_INVALID"],
     ["fibonacci missing levels", { ...trend, kind: "fibonacci" }, "CHART_DRAWING_FIELD_MISSING"],
     ["fibonacci empty levels", { ...trend, kind: "fibonacci", levels: [] }, "CHART_DRAWING_FIELD_INVALID"],
     ["fibonacci string level", { ...trend, kind: "fibonacci", levels: ["0.5"] }, "CHART_DRAWING_FIELD_INVALID"],
