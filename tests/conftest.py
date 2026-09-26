@@ -294,6 +294,26 @@ def _reset_rate_limiter_singleton():
 
 
 @pytest.fixture(autouse=True)
+def _reset_talib_metadata_cache():
+    """task-8279 — IND-10 `generate_talib_specs`는 monkeypatch 테스트를 지원하기
+    위해 TA-Lib 메타데이터를 lazy하게 캐시한다. 각 테스트 전에 캐시를 reset해야
+    monkeypatch가 효과를 본다."""
+    try:
+        from src.core.indicators import generate_specs
+
+        generate_specs._TALIB_METADATA_CACHE = None
+    except ImportError:
+        pass
+    yield
+    try:
+        from src.core.indicators import generate_specs
+
+        generate_specs._TALIB_METADATA_CACHE = None
+    except ImportError:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _isolate_root_logger_state():
     """task-6371/task-6392 — `configure_logging()`(src/core/logging/schema.py)는
     앱 lifespan 시작마다 `root.handlers.clear()` + `root.setLevel(...)`로

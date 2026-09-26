@@ -23,6 +23,7 @@ the deviation side is implemented only as a pure function `_deviation_range()`
 (the rule itself exists in the decision note), and is not yet wired into
 `ParamSpec` — wire it later if needed after IND-12 (registry three-layering).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -57,6 +58,7 @@ class OutputStyle(TypedDict, total=False):
     color_rule: str
     precision: int
     legend_format: str
+
 
 _CANDLESTICK_FLAG = "Output is a candlestick"
 _SAME_SCALE_FLAG = "Output scale same as input"
@@ -199,16 +201,61 @@ def _make_lookback(talib_name: str) -> Callable[[dict[str, int]], int]:
     return _lookback
 
 
-def _talib_group(name: str) -> str:
-    info = talib_abstract.Function(name).info  # type: ignore[attr-defined]
-    return str(info["group"])
-
-
 def _all_talib_functions() -> list[str]:
     return list(talib.get_functions())  # type: ignore[no-untyped-call]
 
 
-TALIB_GROUPS: dict[str, str] = {name: _talib_group(name) for name in sorted(_all_talib_functions())}
+def _build_talib_metadata_cache() -> dict[str, dict[str, Any]]:
+    """Build cache of all TA-Lib function info to avoid repeated introspection."""
+    cache: dict[str, dict[str, Any]] = {}
+    for name in sorted(_all_talib_functions()):
+        cache[name] = talib_abstract.Function(name).info  # type: ignore[attr-defined]
+    return cache
+
+
+_TALIB_METADATA_CACHE: dict[str, dict[str, Any]] | None = None
+
+
+def _get_talib_metadata_cache() -> dict[str, dict[str, Any]]:
+    """Get or lazily build the TA-Lib metadata cache (allows monkeypatch in tests)."""
+    global _TALIB_METADATA_CACHE
+    if _TALIB_METADATA_CACHE is None:
+        _TALIB_METADATA_CACHE = _build_talib_metadata_cache()
+    return _TALIB_METADATA_CACHE
+
+
+class _LazyTalibGroups(dict[str, str]):
+    """Dict-like object that lazily computes TALIB_GROUPS on first access."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._initialized = False
+
+    def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            cache = _get_talib_metadata_cache()
+            for name, info in cache.items():
+                super().__setitem__(name, str(info["group"]))
+            self._initialized = True
+
+    def __getitem__(self, key: str) -> str:
+        self._ensure_initialized()
+        return super().__getitem__(key)
+
+    def __iter__(self) -> Any:
+        self._ensure_initialized()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._ensure_initialized()
+        return super().__len__()
+
+    def items(self) -> Any:
+        self._ensure_initialized()
+        return super().items()
+
+
+TALIB_GROUPS: dict[str, str] = _LazyTalibGroups()
 
 
 def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, IndicatorSpec]:
@@ -220,7 +267,8 @@ def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, Indica
     must be byte-identical for overlapping names (DoD). Reject unknown function
     names (fail-closed).
     """
-    known = set(_all_talib_functions())
+    cache = _get_talib_metadata_cache()
+    known = set(cache.keys())
     selected = sorted(known) if names is None else sorted(names)
     unknown = [name for name in selected if name not in known]
     if unknown:
@@ -228,7 +276,7 @@ def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, Indica
 
     specs: dict[str, IndicatorSpec] = {}
     for name in selected:
-        info = talib_abstract.Function(name).info  # type: ignore[attr-defined]
+        info = cache[name]
         inputs = _flatten_inputs(info["input_names"])
         params = int_param_specs(info["parameters"])
         outputs = tuple(info["output_names"])
