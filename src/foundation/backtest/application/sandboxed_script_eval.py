@@ -14,6 +14,16 @@ ceiling via a polling watcher thread that reads `psutil.Process(pid).memory_info
 (the same mechanism on Windows and POSIX — no platform-specific rlimit/cgroup
 call, since Windows has neither).
 
+The worker is started with the `spawn` start method on every platform. With
+POSIX's default `fork`, the child is a copy of the caller's address space and
+its RSS at birth equals the caller's RSS, so the ceiling would measure the host
+process (a long-running API worker, or a pytest-xdist worker after thousands of
+tests) instead of the script: a caller above `rss_mb` could never run any
+script at all (CI run 36237321056 killed a 5-bar script under a 512MB limit for
+exactly this reason). `spawn` gives the child a fresh interpreter (~100MB with
+the DSL runtime imported), and is also what Windows uses anyway, so the limit
+means the same thing everywhere. Cost: ~0.5-1s interpreter startup per call.
+
 Both violations kill the child process and raise instead of returning a
 partial or guessed result. A child that dies for any other reason (crash,
 OS-level OOM kill) also raises rather than silently propagating whatever
@@ -28,6 +38,7 @@ overlap avoidance; see task-7616 note).
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import threading
 import time
@@ -43,6 +54,7 @@ DEFAULT_WALLCLOCK_LIMIT_SEC: float = float(os.environ.get("SCRIPT_WALLCLOCK_LIMI
 DEFAULT_RSS_LIMIT_MB: float = float(os.environ.get("SCRIPT_RSS_LIMIT_MB", "512"))
 _PID_POLL_INTERVAL_SEC = 0.02
 _RSS_POLL_INTERVAL_SEC = 0.02
+_MP_CONTEXT = multiprocessing.get_context("spawn")
 
 _T = TypeVar("_T")
 
@@ -82,7 +94,7 @@ def run_sandboxed(
     """Run `fn(*args, **kwargs)` in a single-worker `ProcessPoolExecutor`
     under `limits`. `fn` and its arguments/return value must be picklable
     (standard `multiprocessing` constraint)."""
-    with ProcessPoolExecutor(max_workers=1) as executor:
+    with ProcessPoolExecutor(max_workers=1, mp_context=_MP_CONTEXT) as executor:
         future = executor.submit(fn, *args, **kwargs)
         pid = _wait_for_worker_pid(executor, limits.wallclock_sec)
         exceeded = threading.Event()
