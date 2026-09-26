@@ -133,7 +133,15 @@ class KiwoomTradingMixin:
             "cncl_qty": "0",  # cancel full remaining quantity (documented sample convention)
         }
         raw = await self._request("POST", _ORDER_PATH, _API_ID_CANCEL, body=body)
-        return raw.get("return_code") in (None, 0)
+        try:
+            return_code = raw["return_code"]
+        except KeyError as exc:
+            raise FatalExchangeError(
+                f"Kiwoom cancel-order response missing expected field: {exc}"
+            ) from exc
+        if return_code not in (0, "0"):
+            raise FatalExchangeError(f"Kiwoom cancel-order failed with return_code={return_code!r}")
+        return True
 
     @require_paper_sandbox
     async def modify_order(self: _OrderMutatingClient, order_id: str, **kwargs: Any) -> Order:
