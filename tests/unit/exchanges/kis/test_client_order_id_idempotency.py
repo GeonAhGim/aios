@@ -22,11 +22,32 @@ from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.trading_mixin import ClientOrderIdNotMappedError
+from src.services.oms.domain.symbol_registry import SymbolRegistry
 
 _TOKEN_PATH = "/oauth2/tokenP"
 _TOKEN_RESPONSE = {"access_token": "t", "access_token_token_expired": "2099-01-01 00:00:00"}
 _ORDER_CASH_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 _DAILY_CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+
+
+def _verified_registry() -> SymbolRegistry:
+    """task-8337 -- the production 005930.KS snapshot is `verified=False`
+    (see test_trading_mixin_precheck.py); this file's concern is
+    client_order_id correlation, not tick/lot verification-gating, so it
+    needs an explicit `verified=True` test double to reach `place_order()`'s
+    HTTP call at all."""
+    registry = SymbolRegistry()
+    registry.register(
+        "005930.KS",
+        "kis",
+        "005930",
+        tick=Decimal("100"),
+        lot=Decimal("1"),
+        min_notional=Decimal("0"),
+        quote_ccy="KRW",
+        verified=True,
+    )
+    return registry
 
 
 @pytest.fixture(autouse=True)
@@ -112,6 +133,7 @@ async def test_place_order_retry_returns_existing_odno_without_resubmitting() ->
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
     order = _order(client_order_id="retry-1")
 
     first = await adapter.place_order(order)
@@ -146,6 +168,7 @@ async def test_resolve_client_order_id_raises_for_different_id_after_a_real_subm
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
     await adapter.place_order(_order(client_order_id="c-1"))
 
     with pytest.raises(ClientOrderIdNotMappedError) as exc_info:
@@ -161,6 +184,7 @@ async def test_place_order_with_empty_client_order_id_never_dedupes() -> None:
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
     order = _order(client_order_id="")
 
     await adapter.place_order(order)
@@ -180,6 +204,7 @@ async def test_different_client_order_ids_map_to_distinct_entries_both_submitted
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls, orgno="01234", odno="0000001"))
+    adapter.symbol_registry = _verified_registry
 
     await adapter.place_order(_order(client_order_id="c-1"))
     await adapter.place_order(_order(client_order_id="c-2"))

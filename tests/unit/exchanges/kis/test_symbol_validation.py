@@ -21,8 +21,28 @@ from src.foundation.market_data.domain.reference.symbol_normalizer import (
     SymbolNormalizationError,
     to_venue,
 )
+from src.services.oms.domain.symbol_registry import SymbolRegistry
 
 _ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
+
+
+def _verified_registry() -> SymbolRegistry:
+    """task-8337 -- the production 005930.KS snapshot is `verified=False`
+    (see test_trading_mixin_precheck.py); this file's concern is symbol
+    format normalization, not tick/lot verification-gating, so it needs an
+    explicit `verified=True` test double to reach the exchange call."""
+    registry = SymbolRegistry()
+    registry.register(
+        "005930.KS",
+        "kis",
+        "005930",
+        tick=Decimal("100"),
+        lot=Decimal("1"),
+        min_notional=Decimal("0"),
+        quote_ccy="KRW",
+        verified=True,
+    )
+    return registry
 
 
 def _make_paper_adapter(captured: list[httpx.Request]) -> KISAdapter:
@@ -61,6 +81,7 @@ async def test_place_order_accepts_valid_krx_code():
     """회귀 없음 — 정상 6자리 KRX 코드는 그대로 통과하고 PDNO에 실린다."""
     captured: list[httpx.Request] = []
     adapter = _make_paper_adapter(captured)
+    adapter.symbol_registry = _verified_registry
 
     order = await adapter.place_order(_stock_order(symbol="005930"))
 

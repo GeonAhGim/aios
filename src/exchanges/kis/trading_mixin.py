@@ -28,63 +28,90 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.exchanges.kis.venue_profile import VENUE as _KIS_VENUE
+from src.exchanges.kis.venue_profile import register_symbols as _register_kis_symbols
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.domain.reference.symbol_normalizer import to_venue as _to_venue
-from src.services.oms.domain.errors import OrderValidationError
-from src.services.oms.domain.rounding import check_notional
-from src.services.oms.domain.venue_profile import VenueCapabilityProfile
+from src.services.oms.domain.errors import OrderValidationError, UnknownSymbolError
+from src.services.oms.domain.rounding import check_notional, require_verified
+from src.services.oms.domain.symbol_registry import SymbolRegistry, SymbolSpec
 
 _EXCHANGE_ID = "KRX"  # Phase 1 대상(06번 §6.1)
+
+
+def _build_kis_symbol_registry() -> SymbolRegistry:
+    registry = SymbolRegistry()
+    _register_kis_symbols(registry)
+    return registry
+
+
+# task-8337(리뷰 task-8182 REJECT 후속) -- 이전에는 `_precheck_order`가
+# `VenueCapabilityProfile.price_tick`/`qty_lot`/`min_notional` 딕셔너리를 직접
+# 읽어 `SymbolRegistry.spec()`/`require_verified`를 완전히 우회했다 --
+# `SymbolSnapshot.verified=False`(가격대별 step table 미재확인, 005930.KS가
+# 그 예)로 명시 경고된 심볼도 검증 없이 고정 tick을 그대로 적용해 저가/고가
+# 구간에서 오탐 거부 또는 실제 tick 위반 누락이 가능했다. 이 모듈 전용
+# 싱글턴으로 KIS 심볼만 등록한 `SymbolRegistry`를 만들어 그 경로를 강제한다
+# -- OMS 계층의 프로덕션 레지스트리(`wiring.build_production_symbol_registry`)
+# 와 별개 인스턴스이지만 같은 스냅샷 소스(`venue_profile.register_symbols`)를
+# 쓰므로 등록 내용은 동일하다.
+_KIS_SYMBOL_REGISTRY = _build_kis_symbol_registry()
 
 
 def _order_division(order_type: OrderType) -> str:
     return "01" if order_type == OrderType.MARKET else "00"
 
 
-def _lookup_symbol_spec(table: dict[str, Decimal], symbol: str) -> Decimal:
-    """`order.symbol` is the bare KRX code (e.g. "005930") passed through
-    as-is by `order_dispatch.py`, but `venue_profile.py`'s `price_tick`/
-    `qty_lot`/`min_notional` are registered under the `SymbolRegistry`
-    canonical key ("005930.KS") -- BR-4/L4-04: canonical<->venue symbol
-    translation is the OMS layer's `SymbolRegistry.to_venue` job, and this
-    exchange adapter already receives the venue symbol. Try both spellings
-    so the lookup succeeds regardless of which key format is registered --
-    if neither is found, treat it as an unregistered symbol and return 0
-    (not subject to the check)."""
-    if symbol in table:
-        return table[symbol]
-    return table.get(f"{symbol}.KS", Decimal("0"))
+def _resolve_symbol_spec(registry: SymbolRegistry, venue_symbol: str) -> SymbolSpec | None:
+    """`order.symbol`은 `order_dispatch.py`가 그대로 넘기는 KRX venue 표기
+    ("005930")다 -- canonical 표기("005930.KS")로 역변환해 `SymbolRegistry`에서
+    조회한다. 등록되지 않은 심볼은 `None`을 반환해 검사 대상에서 뺀다(기존
+    `_lookup_symbol_spec`과 동일한 "미등록=검사 제외" 관례, task-8074) --
+    OMS `submit_order()`가 이미 `registry.to_venue()`로 미등록 심볼을
+    fail-closed 거부하므로, 이 어댑터에 미등록 심볼이 도달하는 경로는
+    어댑터를 OMS 밖에서 직접 호출하는 테스트/운영 우회뿐이다."""
+    try:
+        canonical = registry.to_canonical(venue_symbol, _KIS_VENUE)
+    except UnknownSymbolError:
+        return None
+    return registry.spec(canonical, _KIS_VENUE)
 
 
-def _precheck_order(order: Order, profile: VenueCapabilityProfile) -> None:
+def _precheck_order(order: Order, registry: SymbolRegistry) -> None:
     """task-8074(AUDIT F4) -- validates tick/lot/min_notional before
     place_order() submits to the exchange (audit finding: this check was
     entirely missing, so orders the exchange would reject were sent
-    anyway). Skips the check for a symbol missing from the snapshot -- same
-    convention as `rounding.round_price`/`check_notional` treating
-    tick<=0/min_notional<=0 as "not subject to the check" (spec §2-A):
-    only registered symbols are checked, rather than rejecting unregistered
-    ones."""
-    lot = _lookup_symbol_spec(profile.qty_lot, order.symbol)
-    if lot > 0 and order.quantity % lot != 0:
+    anyway). task-8337(리뷰 task-8182 REJECT 후속) -- 이제 반드시
+    `SymbolRegistry.spec()`을 거치고, `verified=False` 스냅샷(가격대별
+    확인 안 된 값)은 `rounding.require_verified()`가 거부한다(fail-closed,
+    §9 L4-04 DoD c) -- 미검증 tick으로 조용히 통과/거부를 판정하지 않는다.
+    Skips the check entirely for a symbol missing from the registry -- same
+    convention as before (spec §2-A): only registered symbols are checked,
+    rather than rejecting unregistered ones."""
+    spec = _resolve_symbol_spec(registry, order.symbol)
+    if spec is None:
+        return
+    verified_spec = require_verified(spec)
+
+    if verified_spec.lot > 0 and order.quantity % verified_spec.lot != 0:
         raise OrderValidationError(
             "LOT_MISALIGNED",
-            f"수량({order.quantity})이 lot 단위({lot})에 맞지 않습니다: {order.symbol}",
+            f"수량({order.quantity})이 lot 단위({verified_spec.lot})에 맞지 않습니다: "
+            f"{order.symbol}",
         )
 
     if order.price is None:  # market order -- no tick/min_notional check applies
         return
 
     price_amount = order.price.amount
-    tick = _lookup_symbol_spec(profile.price_tick, order.symbol)
-    if tick > 0 and price_amount % tick != 0:
+    if verified_spec.tick > 0 and price_amount % verified_spec.tick != 0:
         raise OrderValidationError(
             "TICK_MISALIGNED",
-            f"가격({price_amount})이 tick 단위({tick})에 맞지 않습니다: {order.symbol}",
+            f"가격({price_amount})이 tick 단위({verified_spec.tick})에 맞지 않습니다: "
+            f"{order.symbol}",
         )
 
-    min_notional = _lookup_symbol_spec(profile.min_notional, order.symbol)
-    check_notional(price_amount, order.quantity, min_notional)
+    check_notional(price_amount, order.quantity, verified_spec.min_notional)
 
 
 class ClientOrderIdNotMappedError(FatalExchangeError):
@@ -136,14 +163,15 @@ class _OrderMutatingClient(KISHTTPClient, Protocol):
 
 
 class _OrderSubmittingClient(KISHTTPClient, Protocol):
-    """place_order() calls KISAdapter.venue_profile(), assembled onto the
-    same adapter, for tick/lot/min_notional pre-validation (task-8074,
-    AUDIT F4) -- included explicitly in the contract for the same reason
-    as the two Protocols above. task-8079(F6) adds get_order() -- a retried
-    client_order_id resolves to an existing ODNO mapping and re-fetches its
-    current state instead of resubmitting."""
+    """place_order() calls KISTradingMixin.symbol_registry(), assembled onto
+    the same adapter, for tick/lot/min_notional pre-validation via
+    `SymbolRegistry`/`require_verified` (task-8074 AUDIT F4, task-8337 리뷰
+    task-8182 REJECT 후속) -- included explicitly in the contract for the
+    same reason as the two Protocols above. task-8079(F6) adds get_order() --
+    a retried client_order_id resolves to an existing ODNO mapping and
+    re-fetches its current state instead of resubmitting."""
 
-    def venue_profile(self) -> VenueCapabilityProfile: ...
+    def symbol_registry(self) -> SymbolRegistry: ...
 
     async def get_order(self, order_id: str) -> Order: ...
 
@@ -151,6 +179,14 @@ class _OrderSubmittingClient(KISHTTPClient, Protocol):
 
 
 class KISTradingMixin:
+    def symbol_registry(self) -> SymbolRegistry:
+        """task-8337(리뷰 task-8182 REJECT 후속) -- `_precheck_order`가
+        `VenueCapabilityProfile`의 원시 딕셔너리 대신 이 `SymbolRegistry`를
+        거치도록 한다(모듈 싱글턴, `_build_kis_symbol_registry`). 테스트는
+        인스턴스 속성으로 덮어써 다른 등록 내용(예: verified=True 픽스처)을
+        주입할 수 있다(`adapter.venue_profile = lambda: ...`와 동일 패턴)."""
+        return _KIS_SYMBOL_REGISTRY
+
     def _kis_order_id_map(self) -> dict[str, str]:
         """task-8079(F6) -- per-adapter-instance client_order_id -> KIS
         'orgno:odno' correlation table. This is NOT a new idempotency
@@ -185,7 +221,7 @@ class KISTradingMixin:
         # SymbolNormalizationError before the exchange is ever called
         # (same uncaught-propagation contract as Bitget's _to_bitget_symbol).
         pdno = _to_venue(Venue.KIS_KRX, order.symbol)
-        _precheck_order(order, self.venue_profile())
+        _precheck_order(order, self.symbol_registry())
         if order.client_order_id:
             mapped = self._kis_order_id_map().get(order.client_order_id)
             if mapped is not None:
