@@ -4,11 +4,14 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.3 IND-7
 DoD: 3자 일치 지표만 노출(스냅샷 대상), 불일치 지표는 제외되고 그 상세가
 `VerificationReport.mismatches`에 남는다(무음 통과 금지).
 
-`test_full_verification_matches_known_state`는 BBANDS가 `timeperiod=2`(파라미터
-최솟값) 경계에서 실제로 제외됨을 고정한다 — 이는 우리 구현 버그가 아니라 TA-Lib
-BBANDS의 분산 계산(`E[X^2]-E[X]^2` 방식)이 표본이 2개뿐일 때 우리 구현(`E[(X-평균)^2]`,
-증분·벡터 엔진이 공유하는 산식)보다 상쇄오차에 더 취약해서 생기는 실측 결과다 —
-정확히 IND-7g가 잡아내야 하는 종류의 불일치라 스킵하지 않고 명시적으로 고정한다.
+`test_full_verification_matches_known_state`의 기대 제외 집합은 설치된 TA-Lib에서
+직접 도출한다(`_expected_exclusions()`): BBANDS는 `timeperiod=2`(파라미터 최솟값)
+경계에서 TA-Lib 0.4.x의 분산 계산(`E[X^2]-E[X]^2` 방식)이 표본 2개일 때 우리 구현
+(`E[(X-평균)^2]`, 증분·벡터 엔진이 공유하는 산식)보다 상쇄오차에 취약해 실제로
+제외되고, TA-Lib 0.6.x(파이썬 래퍼 0.8.x)는 이 차이가 없어 통과한다. 어느 쪽인지는
+TA-Lib C 함수 출력과 닫힌 형식 numpy 산식(엔진 코드 미사용)을 직접 비교해 정하므로
+엔진 결과를 되풀이 단언하는 tautology가 아니며, 버전 리터럴도 두지 않는다 —
+정확히 IND-7g가 잡아내야 하는 종류의 불일치라 스킵하지 않고 두 버전 모두 단언한다.
 """
 
 from __future__ import annotations
@@ -38,13 +41,36 @@ def test_verifiable_names_require_all_three_implementations() -> None:
         assert name in incremental._STATES
 
 
+def _bbands_min_boundary_disagrees_with_closed_form() -> bool:
+    """Independent oracle: TA-Lib BBANDS at the minimum window vs. the closed-form
+    population-stddev band on the same datasets — no engine code involved."""
+    spec = TALIB_SPECS["BBANDS"]
+    window = next(p.min for p in spec.params if p.name == "timeperiod")
+    worst = 0.0
+    for dataset in verify_all.default_datasets():
+        close = dataset.columns["close"]
+        upper, _middle, _lower = talib.BBANDS(close, timeperiod=window)
+        frames = np.lib.stride_tricks.sliding_window_view(close, window)
+        mean = frames.mean(axis=1)
+        std = np.sqrt(((frames - mean[:, None]) ** 2).mean(axis=1))
+        closed_form = np.full(len(close), np.nan)
+        closed_form[window - 1 :] = mean + 2.0 * std
+        finite = ~np.isnan(upper)
+        scale = np.maximum(1.0, np.maximum(np.abs(upper[finite]), np.abs(closed_form[finite])))
+        worst = max(worst, float(np.max(np.abs(upper[finite] - closed_form[finite]) / scale)))
+    return worst > verify_all.REFERENCE_TOLERANCE
+
+
+def _expected_exclusions() -> tuple[str, ...]:
+    return ("BBANDS",) if _bbands_min_boundary_disagrees_with_closed_form() else ()
+
+
 def test_full_verification_matches_known_state() -> None:
     report = verify_all.run_verification()
     assert set(report.verified) | set(report.excluded) == set(verify_all.VERIFIABLE_NAMES)
     assert set(report.verified) & set(report.excluded) == set()
-    assert report.excluded == ("BBANDS",)
-    assert report.mismatches
-    assert {m.name for m in report.mismatches} == {"BBANDS"}
+    assert report.excluded == _expected_exclusions()
+    assert {m.name for m in report.mismatches} == set(report.excluded)
     for mismatch in report.mismatches:
         assert mismatch.worst_rel_error > verify_all.REFERENCE_TOLERANCE
 
@@ -140,16 +166,33 @@ def test_injected_nan_prefix_disagreement_is_caught(monkeypatch: pytest.MonkeyPa
 def test_main_exits_nonzero_when_any_indicator_excluded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """제외가 하나라도 있으면 종료 코드 1 — 어떤 TA-Lib 버전이 깔려 있든 성립해야
+    하므로 실측 불일치에 의존하지 않고 OBV 참조값을 변조해 제외를 주입한다."""
     monkeypatch.setattr(verify_all, "VECTORS_DIR", tmp_path)
+    original = verify_all._talib_direct
+
+    def tampered(
+        name: str,
+        spec: IndicatorSpec,
+        columns: Mapping[str, FloatArray],
+        params: dict[str, int],
+    ) -> dict[str, FloatArray]:
+        result = original(name, spec, columns, params)
+        if name != "OBV":
+            return result
+        return {k: np.where(np.arange(len(v)) == 0, np.nan, v) for k, v in result.items()}
+
+    monkeypatch.setattr(verify_all, "_talib_direct", tampered)
     code = verify_all.main(["--mode", "nightly"])
-    assert code == 1  # BBANDS는 항상 제외되므로(위 known-state 테스트) 0이 아니어야 한다
+    assert code == 1
 
 
 def test_main_exits_zero_when_scope_excludes_the_known_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(verify_all, "VECTORS_DIR", tmp_path)
-    passing = [n for n in verify_all.VERIFIABLE_NAMES if n != "BBANDS"]
+    passing = [n for n in verify_all.VERIFIABLE_NAMES if n not in _expected_exclusions()]
+    assert passing
     monkeypatch.setattr(verify_all, "sample_names", lambda k, **_: tuple(passing))
     code = verify_all.main(["--mode", "ci", "--sample", "10"])
     assert code == 0
