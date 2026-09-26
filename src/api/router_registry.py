@@ -91,6 +91,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(charting.router)  # CH-5(task-1557) /v1/foundation/charting
     app.include_router(market_data.router)  # LA-24(task-1376) /v1/foundation/market-data
     app.include_router(research_data.router)  # RD-8(task-2709) /v1/foundation/research
+    app.include_router(research_data.search_router)  # RD-17(task-7775) /v1/foundation/research-data
     app.include_router(screener.router)  # UX-8(task-7773) /v1/foundation/screener/run
     app.include_router(options_chain.router)  # DC-26(task-2663) option chain
     app.include_router(scripts.router)  # DSL-12(task-1535) /v1/scripts/compile

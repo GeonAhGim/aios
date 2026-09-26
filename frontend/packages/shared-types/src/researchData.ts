@@ -1,10 +1,10 @@
 // spec docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §2.1
 // contracts/v1.py(ResearchItem/SourceMeta)·§2.1 domain/entity_link.py
-// (EntityLinkResult/UnmappedReason) 1:1 대응 — RD-17(task-2718)은 그 계약을
-// 감싸는 API 라우터(src/api/routers/research_data.py, RD-8)·조회 응용
-// (application/query.py, RD-7)보다 앞서가는 선행 프론트다(screener.ts와 동일
-// 관용, apiRoutes.ts의 researchData.* implemented=false 참조). 라우터가
-// 생기면 실제 응답 스키마와 대조해 고친다.
+// (EntityLinkResult/UnmappedReason) 1:1 대응 — RD-17(task-2718)이 앞서
+// 정의한 뷰를 task-7775가 실제 라우터(src/api/routers/research_data.py의
+// search_router, POST /v1/foundation/research-data/search·GET .../sources)
+// 응답 스키마(src/api/schemas/research_data.py ResearchItemView/
+// ResearchSearchResponseView)와 맞췄다.
 export type ResearchItemKind = "filing" | "news" | "macro" | "alt";
 
 export type RedistributionPolicy = "store_full" | "store_excerpt" | "link_only";

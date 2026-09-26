@@ -1463,6 +1463,22 @@
         "title": "ApiResponse[ResearchItem]",
         "type": "object"
       },
+      "ApiResponse_ResearchSearchResponseView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ResearchSearchResponseView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ResearchSearchResponseView]",
+        "type": "object"
+      },
       "ApiResponse_RiskEvaluationView_": {
         "properties": {
           "data": {
@@ -1557,6 +1573,22 @@
           "meta"
         ],
         "title": "ApiResponse[SellerSuspensionResult]",
+        "type": "object"
+      },
+      "ApiResponse_SizingResult_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SizingResult"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[SizingResult]",
         "type": "object"
       },
       "ApiResponse_StrategyProposal_": {
@@ -1953,6 +1985,26 @@
           "meta"
         ],
         "title": "ApiResponse[list[ResearchItem]]",
+        "type": "object"
+      },
+      "ApiResponse_list_SourceMeta__": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SourceMeta"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[list[SourceMeta]]",
         "type": "object"
       },
       "ApiResponse_list_SymbolAliasRef__": {
@@ -3642,6 +3694,25 @@
         ],
         "title": "CostMethod",
         "type": "string"
+      },
+      "CostModelRef": {
+        "description": "A reference key, not a reimplementation of\n`foundation.backtest.domain.models.CostModel` — carries only the model\nidentifier plus that instance's `cost_model_hash` (§C: no duplicate\ncontext). Consumers that need the actual cost model values look it up\nby `model_id` in the module that owns it.",
+        "properties": {
+          "cost_model_hash": {
+            "title": "Cost Model Hash",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "cost_model_hash"
+        ],
+        "title": "CostModelRef",
+        "type": "object"
       },
       "CostsConfig": {
         "description": "`borrow_apr` only applies to borrowed positions such as short sales,\nso a strategy without borrowing must explicitly leave it as `None`\n(not applied) — it is not silently filled with 0%.",
@@ -7656,6 +7727,92 @@
         "title": "PolicyOutcome",
         "type": "string"
       },
+      "PortfolioAggregate": {
+        "description": "8.2-C cross-execution exposure aggregate. §2 assigns this type to\n`aggregation.py` (L18), but L18 is only assigned after this leaf (L17)\nlands, and `state_input.py` needs to reference it right now for the\n`exposures` field. So the value type is owned here; L18's\n`aggregation.py` will add only `aggregate()` and import this type\nrather than redefining it.",
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "cash_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Cash Pct"
+          },
+          "per_strategy_pct": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Per Strategy Pct",
+            "type": "object"
+          },
+          "per_symbol_pct": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Per Symbol Pct",
+            "type": "object"
+          },
+          "total_equity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total Equity"
+          },
+          "total_exposure_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total Exposure Pct"
+          }
+        },
+        "required": [
+          "total_equity",
+          "per_symbol_pct",
+          "per_strategy_pct",
+          "total_exposure_pct",
+          "cash_pct",
+          "as_of"
+        ],
+        "title": "PortfolioAggregate",
+        "type": "object"
+      },
       "PortfolioAllocation": {
         "properties": {
           "allocated_capital": {
@@ -7716,6 +7873,243 @@
           "weight_pct"
         ],
         "title": "PortfolioAllocation",
+        "type": "object"
+      },
+      "PortfolioConfig": {
+        "properties": {
+          "cost_model": {
+            "$ref": "#/components/schemas/CostModelRef"
+          },
+          "fraction_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "100",
+            "title": "Fraction Pct"
+          },
+          "kelly_cap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kelly Cap Pct"
+          },
+          "method": {
+            "$ref": "#/components/schemas/SizingMethod"
+          },
+          "min_trade_notional": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Min Trade Notional"
+          },
+          "rebalance_band_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "5",
+            "title": "Rebalance Band Pct"
+          },
+          "schema_version": {
+            "default": "pcfg-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "target_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Vol Pct"
+          }
+        },
+        "required": [
+          "method",
+          "min_trade_notional",
+          "cost_model"
+        ],
+        "title": "PortfolioConfig",
+        "type": "object"
+      },
+      "PortfolioStateInput": {
+        "properties": {
+          "allocated_capital": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Allocated Capital"
+          },
+          "avg_win_loss_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Win Loss Ratio"
+          },
+          "cash_available": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Cash Available"
+          },
+          "current_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Current Price"
+          },
+          "exposures": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PortfolioAggregate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mandate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MandateRevisionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "portfolio_config": {
+            "$ref": "#/components/schemas/PortfolioConfig"
+          },
+          "position_quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Position Quantity"
+          },
+          "realized_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Vol Pct"
+          },
+          "schema_version": {
+            "default": "psi-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "total_equity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total Equity"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate"
+          }
+        },
+        "required": [
+          "allocated_capital",
+          "position_quantity",
+          "current_price",
+          "total_equity",
+          "cash_available",
+          "portfolio_config"
+        ],
+        "title": "PortfolioStateInput",
         "type": "object"
       },
       "PortfolioView": {
@@ -8068,6 +8462,22 @@
           "items"
         ],
         "title": "PositionListResponse",
+        "type": "object"
+      },
+      "PositionSizeRequest": {
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/PortfolioConfig"
+          },
+          "state_input": {
+            "$ref": "#/components/schemas/PortfolioStateInput"
+          }
+        },
+        "required": [
+          "config",
+          "state_input"
+        ],
+        "title": "PositionSizeRequest",
         "type": "object"
       },
       "PositionSnapshotView": {
@@ -9669,6 +10079,158 @@
         "title": "ResearchItem",
         "type": "object"
       },
+      "ResearchItemView": {
+        "properties": {
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "item_id": {
+            "format": "uuid",
+            "title": "Item Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "filing",
+              "news",
+              "macro",
+              "alt"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unmapped_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnmappedReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "source_id",
+          "kind",
+          "title",
+          "url",
+          "published_at",
+          "known_at",
+          "instrument_id",
+          "unmapped_reason"
+        ],
+        "title": "ResearchItemView",
+        "type": "object"
+      },
+      "ResearchSearchRequest": {
+        "description": "1:1 with frontend/packages/shared-types/src/researchData.ts\n`ResearchSearchInput` (camelCase already converted to these field names by\nhttp.ts's keysToSnake before arrival).",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "kinds": {
+            "default": [],
+            "items": {
+              "enum": [
+                "filing",
+                "news",
+                "macro",
+                "alt"
+              ],
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ResearchSearchRequest",
+        "type": "object"
+      },
+      "ResearchSearchResponseView": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchItemView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "truncated"
+        ],
+        "title": "ResearchSearchResponseView",
+        "type": "object"
+      },
       "ResolveReconciliationRequest": {
         "properties": {
           "reason": {
@@ -10614,6 +11176,50 @@
         "title": "SignupRequest",
         "type": "object"
       },
+      "SizingMethod": {
+        "enum": [
+          "FIXED_FRACTIONAL",
+          "VOLATILITY_TARGET",
+          "KELLY_CAPPED",
+          "RISK_PARITY"
+        ],
+        "title": "SizingMethod",
+        "type": "string"
+      },
+      "SizingResult": {
+        "properties": {
+          "inputs_hash": {
+            "title": "Inputs Hash",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/SizingMethod"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "schema_version": {
+            "default": "sizing-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "weight_pct": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Weight Pct",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "weight_pct",
+          "method",
+          "inputs_hash"
+        ],
+        "title": "SizingResult",
+        "type": "object"
+      },
       "SnapshotValueView": {
         "properties": {
           "entity_key": {
@@ -10658,6 +11264,56 @@
           "direction"
         ],
         "title": "SortSpec",
+        "type": "object"
+      },
+      "SourceMeta": {
+        "description": "Per-source metadata -- the basis for enforcing license/collection\npolicy (RD-A3, input to RD-3).\n\n`rate_limit` is the allowed requests per minute (a declared token-bucket\nparameter; the actual limiting is the collector adapter's\nresponsibility -- the same principle as `RateLimitSpec` in\n`market_data/ports/provider.py`). `coverage` is a human-readable\ncoverage description (e.g. \"2015-01-01~present, 5 min delay\") --\nstructured coverage determination is DC-19 through 22's job.",
+        "properties": {
+          "coverage": {
+            "title": "Coverage",
+            "type": "string"
+          },
+          "license_ref": {
+            "title": "License Ref",
+            "type": "string"
+          },
+          "publisher": {
+            "title": "Publisher",
+            "type": "string"
+          },
+          "rate_limit": {
+            "title": "Rate Limit",
+            "type": "integer"
+          },
+          "redistribution": {
+            "enum": [
+              "store_full",
+              "store_excerpt",
+              "link_only"
+            ],
+            "title": "Redistribution",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "publisher",
+          "redistribution",
+          "license_ref",
+          "rate_limit",
+          "coverage"
+        ],
+        "title": "SourceMeta",
         "type": "object"
       },
       "StartValidationRequest": {
@@ -11651,6 +12307,14 @@
         ],
         "title": "TrustStatusResponse",
         "type": "object"
+      },
+      "UnmappedReason": {
+        "enum": [
+          "no_deterministic_key",
+          "not_found"
+        ],
+        "title": "UnmappedReason",
+        "type": "string"
       },
       "UpdateChartLayoutRequest": {
         "description": "부분 갱신 — `name`/`layout_state` 중 최소 하나는 있어야 한다.",
@@ -15420,6 +16084,53 @@
         "summary": "Generate Report",
         "tags": [
           "reports"
+        ]
+      }
+    },
+    "/risk-coach/position-size": {
+      "post": {
+        "operationId": "post_position_size_risk_coach_position_size_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PositionSizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_SizingResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Post Position Size",
+        "tags": [
+          "risk-coach",
+          "risk-coach"
         ]
       }
     },
@@ -19881,6 +20592,75 @@
         "summary": "Post Resolve Reconciliation",
         "tags": [
           "foundation:reconciliation"
+        ]
+      }
+    },
+    "/v1/foundation/research-data/search": {
+      "post": {
+        "description": "RD-17(task-7775) -- the cross-source search that ResearchPage.tsx's\nsearch button calls. Unlike RD-8 (`/items`), does not require `source_id`\n-- instead it gathers candidates first as (tenant, all sources), then runs\n`authorize_source_read` individually for each distinct `source_id` that\nactually appears, silently filtering out items from unauthorized sources\n(the denial itself is never disclosed -- unlike the single-source lookup's\n403, here a denial is just part of the search result).",
+        "operationId": "search_research_data_endpoint_v1_foundation_research_data_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ResearchSearchResponseView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Search Research Data Endpoint",
+        "tags": [
+          "foundation:research-data"
+        ]
+      }
+    },
+    "/v1/foundation/research-data/sources": {
+      "get": {
+        "description": "RD-17(task-7775) -- source status panel. `research_sources` is a shared\ncatalog with no tenant scope (see the adapter module's docstring), so it\nis exposed as-is without any entitlement check -- only actual content\naccess (`/search`, `/items`) is gated by per-source contracts.",
+        "operationId": "list_research_sources_endpoint_v1_foundation_research_data_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_list_SourceMeta__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Research Sources Endpoint",
+        "tags": [
+          "foundation:research-data"
         ]
       }
     },
