@@ -7,18 +7,7 @@ import { mockBackend } from "./support/mockBackend";
 // Playwright는 나중에 등록한 route를 먼저 검사하므로 mockBackend(page) 호출 뒤에
 // 추가해야 mockBackend의 폴백(catch-all)과 충돌하지 않는다.
 //
-// 갭 노트(문서 UX_JOURNEYS.md의 "있음" 표기와 실제 코드가 어긋나는 지점, apiRoutes.ts
-// 기준): 1단계 screener.run, 7단계 researchData.search·researchData.sources.list는
-// implemented:false 유령 경로다. 각 클라이언트가 fetch 이전에
-// *RouteNotImplementedError를 던지므로 page.route 목으로도 성공 응답을 만들 수
-// 없다 — 이 단계들은 test.fixme로 남기고 우회하지 않는다. 6단계 backtests.sweep은
-// task-7774(BT-18)로 implemented:true가 됐지만, 이 저널니 안에는 여전히
-// /backtest/sweep-results로 들어가는 CTA가 없어(location.state 진입만 가능) 별도
-// 사유로 fixme다.
-// G-3(문서 §2 J2 5→6단계 단절, 스크립트 컴파일이 백테스트로 자동 연결되지 않음)도
-// ScriptEditorPage.tsx 전체를 읽어 재확인했다. "즉시 백테스트" 단계는 실제로 동작하는
-// /chart의 quick-backtest(POST /v1/backtests/quick, backtest-run.spec.ts와 동일 패턴)로
-// 충족한다 — 유령 경로인 sweep-results로 우회 성공을 흉내내지 않는다.
+// task-8252: 스크리너 결과 링크와 차트 스윕 CTA를 실제 클릭해 검증한다.
 
 const API_BASE = "http://localhost:8000";
 
@@ -86,27 +75,30 @@ async function mockScriptCompile(page: Page, override?: { status: number; body: 
 }
 
 test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크립트→즉시 백테스트→결과 해석", () => {
-  test("1단계 [유령경로] 스크리너 실행은 실행 API 미구현 오류를 그대로 보여준다", async ({ page }) => {
+  test("1단계 스크리너 실행 실패를 표시한다", async ({ page }) => {
     await mockBackend(page);
+    await page.route(`${API_BASE}/v1/foundation/screener/run`, (route) => json(route, 500, { error_code: "INTERNAL_ERROR", message: "screener failed", trace_id: "screener-500" }));
     await page.goto("/screener");
-
     await page.getByTestId("screener-universe").fill("KRX");
     await page.getByTestId("screener-filter-0-field").fill("rsi_14");
     await page.getByTestId("screener-filter-0-value").fill("30");
     await page.getByTestId("screener-run").click();
-
-    await expect(page.getByText("스크리너 실행 API가 아직 제공되지 않습니다.")).toBeVisible();
+    await expect(page.getByText("지원코드: screener-500")).toBeVisible();
   });
 
-  // 갭: screener.run이 유령 경로라 결과 행이 생기지 않으므로 "결과 행 클릭 → /chart
-  // 이동"은 이 상태에서 재현할 수 없다. apiRoutes.ts에서 screener.run이
-  // implemented:true로 바뀌기 전까지는 우회 없이 fixme로 남긴다.
-  test.fixme("1→2단계 [유령경로] 스크리너 결과 행을 클릭하면 /chart로 이동한다", async ({ page }) => {
-    // 갭: screener.run이 implemented:false라 ScreenerClient.runScreen()이 fetch 전에
-    // ScreenerRouteNotImplementedError를 던진다 — 결과 행 자체가 생기지 않아 이동 경로를
-    // 재현할 수 없다. apiRoutes.ts에서 실제 구현되면 이 테스트를 채운다.
+  test("1→2단계 스크리너 결과 행을 클릭하면 /chart로 이동한다", async ({ page }) => {
     await mockBackend(page);
+    await page.route(`${API_BASE}/v1/foundation/screener/run`, (route) => json(route, 200, envelope({
+      rows: [{ instrument_id: "BTCUSDT", symbol: "BTC-USDT", venue: "BITGET", values: { rsi_14: "25" } }], total: 1, truncated: false,
+    })));
     await page.goto("/screener");
+    await page.getByTestId("screener-universe").fill("KRX");
+    await page.getByTestId("screener-filter-0-field").fill("rsi_14");
+    await page.getByTestId("screener-filter-0-value").fill("30");
+    await page.getByTestId("screener-run").click();
+    await page.getByTestId("screener-row-BTCUSDT").getByRole("link").click();
+    await expect(page).toHaveURL(/\/chart\?instrument_id=BTCUSDT$/);
+    await expect(page.getByTestId("chart-instrument-id")).toContainText("BTCUSDT");
   });
 
   test("2→3단계 심볼/캔들 조회 후 차트·지표 화면에서 상태가 표시된다", async ({ page }) => {
@@ -206,17 +198,28 @@ test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크�
     await expect(page.getByTestId("backtest-summary")).toContainText("10500");
   });
 
-  // 갭(task-7774 BT-18로 절반 해소): backtests.sweep은 이제 implemented:true고
-  // 서버 엔드포인트(POST /v1/backtests/sweep)도 배선됐다 — 더 이상 유령 경로가
-  // 아니다(SweepResultsPage.test.tsx의 단위 테스트가 실제 응답 렌더링을 이미
-  // 검증한다). 남은 갭은 이 저널니 안에 /backtest/sweep-results로 들어가는
-  // 진입점(스윕 구성→실행 CTA)이 아직 없다는 것 — SweepResultsPage는
-  // react-router location.state.sweepRequest로만 요청을 받는데, Playwright의
-  // page.goto는 그 state를 주입할 수 없다. CTA 배선은 이 리프(API 계층만)의
-  // 범위 밖이라 우회하지 않고 fixme로 남긴다.
-  test.fixme("6단계 [유령경로 절반 해소, CTA 미배선] 파라미터 스윕 결과 화면이 스윕 실행 결과를 보여준다", async ({ page }) => {
+  test("6단계 파라미터 스윕 CTA로 실행 결과 화면에 진입한다", async ({ page }) => {
     await mockBackend(page);
-    await page.goto("/backtest/sweep-results");
+    await mockScriptCompile(page);
+    let calls = 0;
+    await page.route(`${API_BASE}/v1/backtests/sweep`, (route) => {
+      calls += 1;
+      const request = route.request().postDataJSON();
+      expect(request.axes).toEqual([{ name: "length", values: [7, 14] }]);
+      expect(request.combos).toHaveLength(2);
+      expect(request.combos[0].script_source).toContain("input length: int = 7");
+      return json(route, 200, envelope({ axes: request.axes, metric: "final_equity", stability: null, warnings: [], points: [
+        { combo_key: "length=7", combo_index: 0, axis_values: { length: 7 }, metric_value: "10500", reproducibility_key: "sweep-repro-8252", seed: 0 },
+      ] }));
+    });
+    await page.goto("/chart?instrument_id=BTCUSDT");
+    await page.getByTestId("sweep-grid").fill('{"length":[7,14]}');
+    await page.getByTestId("sweep-lineage").fill("lineage-e2e");
+    await page.getByTestId("sweep-rollup").fill("rollup-e2e");
+    await page.getByTestId("backtest-sweep-run").click();
+    await expect(page).toHaveURL(/\/backtest\/sweep-results$/);
+    await expect(page.getByText("sweep-repro-8252")).toBeVisible();
+    expect(calls).toBe(1);
   });
 
   // 갭: researchData.search·researchData.sources.list 모두 implemented:false

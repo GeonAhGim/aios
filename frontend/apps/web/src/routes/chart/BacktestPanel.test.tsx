@@ -8,6 +8,12 @@ import type { BacktestFillView, QuickBacktestResultView } from "@aios/api-client
 import type { CandlestickPoint } from "@aios/ui-web";
 import { BacktestPanel, type RunQuickBacktest } from "./BacktestPanel";
 import { perfBudgetMs } from "../../test/perfBudget";
+import { apiClient } from "@aios/shared-hooks";
+import type { BacktestPanelProps } from "./BacktestPanel";
+import { materializeSweepGrid } from "./sweepGrid";
+
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async (original) => ({ ...await original<typeof import("react-router-dom")>(), useNavigate: () => navigate }));
 
 const T0 = Math.floor(Date.parse("2026-09-06T00:00:00Z") / 1000);
 const T1 = T0 + 3600;
@@ -16,7 +22,7 @@ const POINTS: CandlestickPoint[] = [
   { time: T1, open: 100, high: 120, low: 95, close: 105 },
 ];
 
-function renderPanel(runQuickBacktest: RunQuickBacktest, points: readonly CandlestickPoint[] = POINTS) {
+function renderPanel(runQuickBacktest: RunQuickBacktest, points: readonly CandlestickPoint[] = POINTS, runSweep?: BacktestPanelProps["runSweep"]) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
@@ -28,6 +34,7 @@ function renderPanel(runQuickBacktest: RunQuickBacktest, points: readonly Candle
         end="2026-09-06T01:00:00Z"
         points={points}
         runQuickBacktest={runQuickBacktest}
+        runSweep={runSweep}
       />
     </QueryClientProvider>,
   );
@@ -61,6 +68,100 @@ function okResult(): QuickBacktestResultView {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  navigate.mockClear();
+});
+
+function fillSweep() {
+  fireEvent.change(screen.getByTestId("sweep-lineage"), { target: { value: "lineage-1" } });
+  fireEvent.change(screen.getByTestId("sweep-rollup"), { target: { value: "rollup-1" } });
+}
+
+describe("스윕 CTA", () => {
+  function mockCompile() {
+    return vi.spyOn(apiClient, "compileScript").mockResolvedValue({ scriptHash: "compiled-hash" } as Awaited<ReturnType<typeof apiClient.compileScript>>);
+  }
+
+  it("각 그리드 조합을 컴파일하고 성공한 요청을 결과 화면에 전달한다", async () => {
+    const compile = mockCompile();
+    const runSweep = vi.fn().mockResolvedValue({ axes: [], points: [], warnings: [], stability: null, metric: "final_equity" });
+    renderPanel(vi.fn(), POINTS, runSweep);
+    fillSweep();
+    fireEvent.click(screen.getByTestId("backtest-sweep-run"));
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+    expect(compile).toHaveBeenCalledTimes(3);
+    expect(compile.mock.calls[0][0]).toContain("input length: int = 7");
+    const request = runSweep.mock.calls[0][0];
+    expect(request).toMatchObject({ instrumentId: "instr-1", initialCash: "10000", dataLineageHash: "lineage-1", axes: [{ name: "length", values: [7,14,21] }] });
+    expect(request.combos[0]).toMatchObject({ scriptHash: "compiled-hash", axisValues: { length: 7 } });
+    expect(navigate).toHaveBeenCalledWith("/backtest/sweep-results", { state: { sweepRequest: request } });
+  });
+
+  it("실패주입: HTTP 500이면 에러를 표시하고 이동하지 않는다", async () => {
+    mockCompile();
+    const runSweep = vi.fn().mockRejectedValue(buildApiError(500, { error_code: "INTERNAL_ERROR", message: "sweep failed", trace_id: "sweep-500" }, undefined, undefined));
+    renderPanel(vi.fn(), POINTS, runSweep);
+    fillSweep();
+    fireEvent.click(screen.getByTestId("backtest-sweep-run"));
+    expect(await screen.findByText("지원코드: sweep-500")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it.each(['{}', '{"length":[7,7]}', '{"missing":[7]}', '{"length":[1.5]}', JSON.stringify({ length: Array.from({length: 65}, (_, i) => i) })])("negative: 잘못된 그리드 %s는 API 전에 거부한다", async (grid) => {
+    const compile = mockCompile();
+    const runSweep = vi.fn();
+    renderPanel(vi.fn(), POINTS, runSweep);
+    fillSweep();
+    fireEvent.change(screen.getByTestId("sweep-grid"), { target: { value: grid } });
+    fireEvent.click(screen.getByTestId("backtest-sweep-run"));
+    expect(await screen.findByText(/그리드와 데이터 이력 정보를 확인하세요/)).toBeInTheDocument();
+    expect(compile).not.toHaveBeenCalled();
+    expect(runSweep).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("negative: 컴파일 실패 시 스윕을 제출하지 않는다", async () => {
+    mockCompile().mockRejectedValue(new Error("compile failed"));
+    const runSweep = vi.fn();
+    renderPanel(vi.fn(), POINTS, runSweep);
+    fillSweep();
+    fireEvent.click(screen.getByTestId("backtest-sweep-run"));
+    expect(await screen.findByText("compile failed")).toBeInTheDocument();
+    expect(runSweep).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("negative: 데이터 이력이 없으면 컴파일과 제출을 막는다", async () => {
+    const compile = mockCompile();
+    const runSweep = vi.fn();
+    renderPanel(vi.fn(), POINTS, runSweep);
+    fireEvent.click(screen.getByTestId("backtest-sweep-run"));
+    expect(await screen.findByText(/그리드와 데이터 이력 정보를 확인하세요/)).toBeInTheDocument();
+    expect(compile).not.toHaveBeenCalled();
+    expect(runSweep).not.toHaveBeenCalled();
+  });
+
+  it("negative: 스윕 처리 중 중복 실행을 막는다", async () => {
+    mockCompile();
+    const runSweep = vi.fn().mockReturnValue(new Promise(() => {}));
+    renderPanel(vi.fn(), POINTS, runSweep);
+    fillSweep();
+    fireEvent.click(screen.getByTestId("backtest-sweep-run"));
+    await waitFor(() => expect(runSweep).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("backtest-sweep-run")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("backtest-sweep-run"));
+    expect(runSweep).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("성능/경계: 2축 64조합을 100ms 예산 안에 생성하고 각 소스에 두 값을 반영한다", () => {
+    const values = Array.from({ length: 8 }, (_, i) => i + 1);
+    const startedAt = performance.now();
+    const result = materializeSweepGrid(JSON.stringify({ length: values, exit: values }), "input length: int = 14\ninput exit: int = 20\n");
+    expect(performance.now() - startedAt).toBeLessThan(perfBudgetMs(100));
+    expect(result.combos).toHaveLength(64);
+    expect(result.combos[63]).toMatchObject({ axisValues: { length: 8, exit: 8 }, scriptSource: "input length: int = 8\ninput exit: int = 8\n" });
+  });
 });
 
 describe("BacktestPanel", () => {

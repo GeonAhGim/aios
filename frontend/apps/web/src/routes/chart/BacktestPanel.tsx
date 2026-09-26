@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { apiClient, useAuthStore } from "@aios/shared-hooks";
+import { materializeSweepGrid } from "./sweepGrid";
+import { createBacktestsClient, type SweepRequestInput, type SweepResultView } from "@aios/api-client";
 import type {
   BacktestConfigV2Input,
   BacktestFillView,
@@ -46,6 +50,7 @@ export interface BacktestPanelProps {
   points: readonly CandlestickPoint[];
   runQuickBacktest: RunQuickBacktest;
   height?: number;
+  runSweep?: (input: SweepRequestInput) => Promise<SweepResultView>;
 }
 
 // TooManyBarsError(BT-10, quick_backtest.py) — details.bars/max는 라우터
@@ -105,11 +110,44 @@ export function BacktestPanel({
   points,
   runQuickBacktest,
   height = DEFAULT_HEIGHT,
+  runSweep = (input) => createBacktestsClient(import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000", () => useAuthStore.getState().token).runSweep(input),
 }: BacktestPanelProps) {
   const { t } = useTranslation();
   const [source, setSource] = useState(DEFAULT_SCRIPT);
   const [initialCash, setInitialCash] = useState(DEFAULT_INITIAL_CASH);
   const mutation = useMutation({ mutationFn: runQuickBacktest });
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [grid, setGrid] = useState('{"length":[7,14,21]}');
+  const [dataLineageHash, setDataLineageHash] = useState("");
+  const [rollupVersion, setRollupVersion] = useState("");
+  const sweep = useMutation({
+    mutationFn: async () => {
+      let materialized: ReturnType<typeof materializeSweepGrid>;
+      try {
+        materialized = materializeSweepGrid(grid, source);
+        if (!dataLineageHash.trim() || !rollupVersion.trim()) throw new Error("Missing provenance");
+      } catch {
+        throw new Error(t("sweepPanel.invalid"));
+      }
+      const combos = [];
+      for (const combo of materialized.combos) {
+        const compiled = await apiClient.compileScript(combo.scriptSource);
+        combos.push({ ...combo, scriptHash: compiled.scriptHash });
+      }
+      const sweepRequest: SweepRequestInput = {
+        venue, instrumentId, timeframe, start, end, initialCash,
+        config: buildQuickConfig(venue), axes: materialized.axes, combos,
+        metric: "final_equity", dataLineageHash: dataLineageHash.trim(), rollupVersion: rollupVersion.trim(), seed: 0,
+      };
+      const result = await runSweep(sweepRequest);
+      return { sweepRequest, result };
+    },
+    onSuccess: ({ sweepRequest, result }) => {
+      queryClient.setQueryData(["backtest-sweep-results", sweepRequest], result);
+      navigate("/backtest/sweep-results", { state: { sweepRequest } });
+    },
+  });
 
   const compileErrorDetails =
     mutation.error instanceof ApiError && isScriptCompileErrorDetails(mutation.error.details)
@@ -139,7 +177,7 @@ export function BacktestPanel({
   }
 
   const noCandles = points.length === 0;
-  const runDisabled = noCandles || mutation.isPending || source.trim().length === 0;
+  const runDisabled = noCandles || mutation.isPending || sweep.isPending || source.trim().length === 0;
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(600);
@@ -195,7 +233,7 @@ export function BacktestPanel({
     <section aria-label={t("legacy.backtestPanel.ariaLabel2")} className="space-y-3">
       <h2 className="text-sm font-medium text-fg-secondary">{t("legacy.backtestPanel.t3")}</h2>
 
-      <ScriptEditor value={source} onChange={handleSourceChange} markers={markers} disabled={mutation.isPending} rows={8} />
+      <ScriptEditor value={source} onChange={handleSourceChange} markers={markers} disabled={mutation.isPending || sweep.isPending} rows={8} />
 
       <div className="flex items-end gap-3">
         <Field label={t("legacy.backtestPanel.label4")}>
@@ -204,7 +242,7 @@ export function BacktestPanel({
             min="0"
             value={initialCash}
             onChange={(e) => setInitialCash(e.target.value)}
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || sweep.isPending}
             data-testid="backtest-initial-cash"
           />
         </Field>
@@ -217,6 +255,20 @@ export function BacktestPanel({
       </div>
 
       {noCandles && <EmptyState>{t("legacy.backtestPanel.t7")}</EmptyState>}
+      <div className="space-y-2">
+        <Field label={t("sweepPanel.grid")}>
+          <Input aria-label={t("sweepPanel.grid")} value={grid} onChange={(e) => setGrid(e.target.value)} disabled={sweep.isPending} data-testid="sweep-grid" />
+        </Field>
+        <p className="text-xs text-fg-muted">{t("sweepPanel.help")}</p>
+        <Field label={t("sweepPanel.lineage")}>
+          <Input aria-label={t("sweepPanel.lineage")} value={dataLineageHash} onChange={(e) => setDataLineageHash(e.target.value)} disabled={sweep.isPending} data-testid="sweep-lineage" />
+        </Field>
+        <Field label={t("sweepPanel.rollup")}>
+          <Input aria-label={t("sweepPanel.rollup")} value={rollupVersion} onChange={(e) => setRollupVersion(e.target.value)} disabled={sweep.isPending} data-testid="sweep-rollup" />
+        </Field>
+        <Button onClick={() => sweep.mutate()} disabled={runDisabled} loading={sweep.isPending} data-testid="backtest-sweep-run">{t("sweepPanel.run")}</Button>
+        {sweep.isError && <BacktestRunError error={sweep.error} />}
+      </div>
       {showGenericError && <BacktestRunError error={mutation.error} />}
 
       {mutation.data && (
