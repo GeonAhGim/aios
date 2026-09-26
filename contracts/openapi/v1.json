@@ -4580,6 +4580,16 @@
             "title": "Execution Id",
             "type": "integer"
           },
+          "last_risk_verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LastRiskVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "max_drawdown_pct": {
             "anyOf": [
               {
@@ -4630,7 +4640,8 @@
           "days_since_start",
           "realized_pnl",
           "unrealized_pnl",
-          "max_drawdown_pct"
+          "max_drawdown_pct",
+          "last_risk_verdict"
         ],
         "title": "ExecutionCardResponse",
         "type": "object"
@@ -5748,6 +5759,33 @@
           "engaged"
         ],
         "title": "KillSwitchView",
+        "type": "object"
+      },
+      "LastRiskVerdict": {
+        "properties": {
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason_codes",
+          "evaluated_at"
+        ],
+        "title": "LastRiskVerdict",
         "type": "object"
       },
       "LiquidityNeed": {

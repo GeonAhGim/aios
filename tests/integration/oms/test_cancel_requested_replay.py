@@ -8,8 +8,13 @@ docs/specs/ibor_fund_accounting_and_resilience.md#§9 FA-16.
 """
 from __future__ import annotations
 
+import os
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
+
+import asyncpg
+import pytest
 
 from scripts import replay_verify
 from src.core.eventstore import replay
@@ -21,6 +26,24 @@ from src.services.safety.open_order_sweeper import sweep_open_orders
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.oms.conftest import insert_order
+from tests.support.db import _asyncpg_dsn, ensure_worker_database
+
+
+@pytest.fixture
+async def pool() -> AsyncIterator[asyncpg.Pool]:
+    """Dedicated database for this module. `replay_verify.verify()` digests *every*
+    ledger account touched inside the window, so leftovers from other files that ran
+    earlier in the same xdist worker DB (PLATFORM:CASH_CLEARING postings written by
+    tests that bypass the event path) make the replay digest diverge (main run
+    36188908953). Cloning the template per module keeps the assertion about this
+    module's own writes."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
+    url = await ensure_worker_database(os.environ["TEST_DATABASE_URL"], f"{worker}_replay")
+    p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=4)
+    try:
+        yield p
+    finally:
+        await p.close()
 
 
 def _clock() -> datetime:

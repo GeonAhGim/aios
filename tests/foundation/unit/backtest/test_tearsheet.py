@@ -305,3 +305,26 @@ def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     p95_ms = _p95_ms(samples)
     with pytest.raises(AssertionError):
         assert p95_ms < _BUDGET_MS
+
+
+# ---- DEEPEN(task-7698): negative test 추가 ----
+
+
+def test_equity_curve_with_negative_values_raises() -> None:
+    """부정적 equity 값은 불변식 위반 — build_tearsheet가 명시적으로 거부해야 한다.
+    (negative test)
+
+    백테스트 결과에서 equity가 0 미만으로 떨어지는 것은 자본 손실이
+    초기 투자액을 초과했음을 의미하므로, 리포트 생성 전에 검증이 필요하다.
+    """
+    curve = [
+        _point(0, "100"),
+        _point(1, "90"),
+        _point(2, "-10"),  # 음수 equity — 불변식 위반
+    ]
+    config = _config()
+    result = _result(curve, config=config)
+
+    # build_tearsheet가 음수 equity 값을 가진 equity_curve를 거부해야 한다.
+    with pytest.raises(ValueError):
+        build_tearsheet(result)

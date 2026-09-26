@@ -17,7 +17,7 @@ from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
-from tests.integration.mfa_clock import mfa_clock_frozen, mfa_clock_shifted, totp_at
+from tests.integration.mfa_clock import mfa_clock_frozen, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -159,8 +159,6 @@ async def test_get_me_rejects_invalid_token(client: AsyncClient) -> None:
 
 
 async def test_mfa_setup_and_verify_round_trip(client: AsyncClient) -> None:
-    import pyotp
-
     email = _unique_email()
     register_response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
@@ -172,11 +170,14 @@ async def test_mfa_setup_and_verify_round_trip(client: AsyncClient) -> None:
     assert setup_response.status_code == 200
     secret = setup_response.json()["data"]["secret"]
 
-    code = pyotp.totp.TOTP(secret).now()
-    verify_response = await client.post(
-        "/auth/mfa/verify", json={"totp_code": code}, headers=headers
-    )
-    assert verify_response.status_code == 200
+    # esc-ci-cbb8b9c62497 — 실시간 코드는 서버 검증과의 30초 구간 경계 레이스가
+    # 있어(valid_window=0) 시계를 고정한다.
+    frozen_now = datetime.now(timezone.utc)
+    with mfa_clock_frozen(app, frozen_now):
+        verify_response = await client.post(
+            "/auth/mfa/verify", json={"totp_code": totp_at(secret, frozen_now)}, headers=headers
+        )
+    assert verify_response.status_code == 200, verify_response.text
     assert verify_response.json()["data"]["mfa_enabled"] is True
 
     login_without_code = await client.post(
@@ -186,14 +187,19 @@ async def test_mfa_setup_and_verify_round_trip(client: AsyncClient) -> None:
 
     # docs/RED_TEAM_FINDINGS.md #13 반영 — 같은 30초 구간의 코드는 재사용
     # 거부 대상이라, 로그인용 코드는 다음 구간에서 새로 받아야 한다. 실시간
-    # 31초 대기 대신 MfaService 시계를 31초 앞당긴다(전수감사 §9).
-    with mfa_clock_shifted(app, 31) as shifted_now:
-        login_code = totp_at(secret, shifted_now())
+    # 31초 대기 대신 MfaService 시계를 다음 구간의 한 시각으로 고정한다
+    # (shifted는 실시간을 다시 읽어 경계 레이스가 남는다).
+    login_at = frozen_now + timedelta(seconds=31)
+    with mfa_clock_frozen(app, login_at):
         login_with_code = await client.post(
             "/auth/login",
-            json={"email": email, "password": STRONG_PASSWORD, "totp_code": login_code},
+            json={
+                "email": email,
+                "password": STRONG_PASSWORD,
+                "totp_code": totp_at(secret, login_at),
+            },
         )
-    assert login_with_code.status_code == 200
+    assert login_with_code.status_code == 200, login_with_code.text
 
 
 async def test_mfa_resetup_without_password_rejected_when_already_enabled(
@@ -492,3 +498,43 @@ async def test_login_latency_within_budget(client: AsyncClient) -> None:
     elapsed = time.perf_counter() - started
 
     assert elapsed < latency_budget, f"20회 로그인 {elapsed:.3f}s — 예산 {latency_budget}s 초과"
+
+
+async def test_mfa_code_from_previous_timestep_is_rejected_at_frozen_clock(
+    client: AsyncClient,
+) -> None:
+    """negative -- esc-ci-cbb8b9c62497 회귀 가드. `MfaService`는 `valid_window=0`
+    이라 서버 시계 기준 현재 30초 구간의 코드만 받는다. 코드를 "지금" 만들고
+    서버가 다음 구간에서 검증하면(실시간 `pyotp...now()`/`mfa_clock_shifted`가
+    경계에서 겪는 레이스) 거부되어야 한다 — 그래서 라우터 테스트는 클라이언트
+    코드와 서버 시계를 같은 고정 시각으로 맞춘다."""
+    email = _unique_email()
+    register_response = await client.post(
+        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {register_response.json()['data']['access_token']}"}
+    setup_response = await client.post("/auth/mfa/setup", headers=headers)
+    secret = setup_response.json()["data"]["secret"]
+
+    # Server clock sits 1s past a 30s step boundary; the code was minted 2s earlier
+    # (previous step) -- exactly the boundary crossing the race produces.
+    base = datetime.now(timezone.utc).replace(microsecond=0)
+    server_now = base - timedelta(seconds=base.second % 30) + timedelta(seconds=1)
+    stale_code = totp_at(secret, server_now - timedelta(seconds=2))
+    with mfa_clock_frozen(app, server_now):
+        stale = await client.post(
+            "/auth/mfa/verify", json={"totp_code": stale_code}, headers=headers
+        )
+        # RED_TEAM #11 / FD-11.2: a failed *initial* verify discards the pending
+        # secret, so the race does not merely "retry later" -- it silently leaves
+        # the account without MFA. Re-run setup, then a clock-aligned code passes.
+        resetup_response = await client.post("/auth/mfa/setup", headers=headers)
+        fresh_secret = resetup_response.json()["data"]["secret"]
+        fresh = await client.post(
+            "/auth/mfa/verify",
+            json={"totp_code": totp_at(fresh_secret, server_now)},
+            headers=headers,
+        )
+    assert stale.status_code == 400, stale.text
+    assert stale.json()["error_code"] == "AUTH_MFA_INVALID"
+    assert fresh.status_code == 200, fresh.text
