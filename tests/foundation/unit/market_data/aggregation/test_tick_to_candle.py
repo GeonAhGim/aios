@@ -9,6 +9,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 캔들은 LA-2 `align_open`/`expected_opens` 위임(로컬 산식 재구현 금지)으로
 정확히 세션 종료에 클립된다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -30,6 +31,7 @@ from src.foundation.market_data.domain.aggregation.tick_to_candle import (
 )
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
 
 UTC = timezone.utc
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -141,6 +143,14 @@ def test_ticks_to_candles_empty_input_returns_empty_result() -> None:
     assert len(result.columns) == 0
     assert result.lineage == ()
     assert result.source_kind == SourceKind.TICK_DERIVED
+
+
+def test_ticks_to_candles_empty_input_still_validates_timeframe() -> None:
+    """XREV(task-3723): an unregistered `tf` must raise even with `ticks=[]`
+    — the empty-input short-circuit is not a license to skip validating the
+    caller's other arguments (§9.10 XREV, task-7850)."""
+    with pytest.raises(UnknownTimeframeError):
+        ticks_to_candles([], object(), _bitget_calendar())
 
 
 # ---- (a) 결정론: 같은 입력 = 바이트 동일 직렬화 sha256 ----
