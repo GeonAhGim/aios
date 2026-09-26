@@ -5,6 +5,7 @@ revoke_consent)를 통해 어댑터를 간접 호출한다. 그 경로로는 닿
 고유 분기(list_active_consents, insert_consent의 UniqueViolation 변환, revoke_consent의
 LookupError/PermissionError)를 이 파일에서 직접 repo를 호출해 커버한다.
 """
+# loc-allow: comprehensive single-adapter test suite covering all CRUD methods + failure injection
 
 from __future__ import annotations
 
