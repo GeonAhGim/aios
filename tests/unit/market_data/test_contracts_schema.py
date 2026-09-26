@@ -368,7 +368,7 @@ def _sample_ingest_batch_result(**overrides: object) -> v1.IngestBatchResult:
         stored_range=None,
     )
     base.update(overrides)
-    return v1.IngestBatchResult(**base)  # type: ignore[arg-type]
+    return v1.IngestBatchResult.model_validate(base)
 
 
 def _sample_lifecycle_event(**overrides: object) -> v1.LifecycleEventCommand:
@@ -381,7 +381,7 @@ def _sample_lifecycle_event(**overrides: object) -> v1.LifecycleEventCommand:
         trace_id=uuid4(),
     )
     base.update(overrides)
-    return v1.LifecycleEventCommand(**base)  # type: ignore[arg-type]
+    return v1.LifecycleEventCommand.model_validate(base)
 
 
 def test_candle_record_quote_volume_none_and_omission_roundtrip() -> None:
