@@ -45,16 +45,18 @@ def _build_kis_symbol_registry() -> SymbolRegistry:
     return registry
 
 
-# task-8337(리뷰 task-8182 REJECT 후속) -- 이전에는 `_precheck_order`가
-# `VenueCapabilityProfile.price_tick`/`qty_lot`/`min_notional` 딕셔너리를 직접
-# 읽어 `SymbolRegistry.spec()`/`require_verified`를 완전히 우회했다 --
-# `SymbolSnapshot.verified=False`(가격대별 step table 미재확인, 005930.KS가
-# 그 예)로 명시 경고된 심볼도 검증 없이 고정 tick을 그대로 적용해 저가/고가
-# 구간에서 오탐 거부 또는 실제 tick 위반 누락이 가능했다. 이 모듈 전용
-# 싱글턴으로 KIS 심볼만 등록한 `SymbolRegistry`를 만들어 그 경로를 강제한다
-# -- OMS 계층의 프로덕션 레지스트리(`wiring.build_production_symbol_registry`)
-# 와 별개 인스턴스이지만 같은 스냅샷 소스(`venue_profile.register_symbols`)를
-# 쓰므로 등록 내용은 동일하다.
+# task-8337(review task-8182 REJECT follow-up) -- `_precheck_order` used to
+# read `VenueCapabilityProfile.price_tick`/`qty_lot`/`min_notional` dicts
+# directly, bypassing `SymbolRegistry.spec()`/`require_verified` entirely --
+# a symbol explicitly flagged `SymbolSnapshot.verified=False` (step table not
+# reconfirmed per price band, e.g. 005930.KS) was still checked against its
+# fixed tick with no gate, risking false-positive rejections or missed real
+# tick violations in other price bands. Building a module-scoped singleton
+# `SymbolRegistry` registered with only KIS symbols forces that path -- it is
+# a separate instance from the OMS layer's production registry
+# (`wiring.build_production_symbol_registry`), but shares the same snapshot
+# source (`venue_profile.register_symbols`), so registered content is
+# identical.
 _KIS_SYMBOL_REGISTRY = _build_kis_symbol_registry()
 
 
@@ -63,13 +65,15 @@ def _order_division(order_type: OrderType) -> str:
 
 
 def _resolve_symbol_spec(registry: SymbolRegistry, venue_symbol: str) -> SymbolSpec | None:
-    """`order.symbol`은 `order_dispatch.py`가 그대로 넘기는 KRX venue 표기
-    ("005930")다 -- canonical 표기("005930.KS")로 역변환해 `SymbolRegistry`에서
-    조회한다. 등록되지 않은 심볼은 `None`을 반환해 검사 대상에서 뺀다(기존
-    `_lookup_symbol_spec`과 동일한 "미등록=검사 제외" 관례, task-8074) --
-    OMS `submit_order()`가 이미 `registry.to_venue()`로 미등록 심볼을
-    fail-closed 거부하므로, 이 어댑터에 미등록 심볼이 도달하는 경로는
-    어댑터를 OMS 밖에서 직접 호출하는 테스트/운영 우회뿐이다."""
+    """`order.symbol` is the bare KRX venue spelling ("005930") passed
+    through as-is by `order_dispatch.py` -- translate it back to the
+    canonical spelling ("005930.KS") and look it up in `SymbolRegistry`.
+    An unregistered symbol returns `None`, exempting it from the check
+    (same "unregistered = not subject to the check" convention as the old
+    `_lookup_symbol_spec`, task-8074) -- OMS `submit_order()` already
+    fail-closed rejects unregistered symbols via `registry.to_venue()`, so
+    the only way an unregistered symbol reaches this adapter is a test or an
+    operational bypass calling the adapter directly outside the OMS."""
     try:
         canonical = registry.to_canonical(venue_symbol, _KIS_VENUE)
     except UnknownSymbolError:
@@ -81,10 +85,11 @@ def _precheck_order(order: Order, registry: SymbolRegistry) -> None:
     """task-8074(AUDIT F4) -- validates tick/lot/min_notional before
     place_order() submits to the exchange (audit finding: this check was
     entirely missing, so orders the exchange would reject were sent
-    anyway). task-8337(리뷰 task-8182 REJECT 후속) -- 이제 반드시
-    `SymbolRegistry.spec()`을 거치고, `verified=False` 스냅샷(가격대별
-    확인 안 된 값)은 `rounding.require_verified()`가 거부한다(fail-closed,
-    §9 L4-04 DoD c) -- 미검증 tick으로 조용히 통과/거부를 판정하지 않는다.
+    anyway). task-8337(review task-8182 REJECT follow-up) -- now always
+    goes through `SymbolRegistry.spec()`, and a `verified=False` snapshot
+    (a value not reconfirmed per price band) is rejected by
+    `rounding.require_verified()` (fail-closed, §9 L4-04 DoD c) -- an
+    unverified tick is never silently used to allow or deny.
     Skips the check entirely for a symbol missing from the registry -- same
     convention as before (spec §2-A): only registered symbols are checked,
     rather than rejecting unregistered ones."""
@@ -165,8 +170,8 @@ class _OrderMutatingClient(KISHTTPClient, Protocol):
 class _OrderSubmittingClient(KISHTTPClient, Protocol):
     """place_order() calls KISTradingMixin.symbol_registry(), assembled onto
     the same adapter, for tick/lot/min_notional pre-validation via
-    `SymbolRegistry`/`require_verified` (task-8074 AUDIT F4, task-8337 리뷰
-    task-8182 REJECT 후속) -- included explicitly in the contract for the
+    `SymbolRegistry`/`require_verified` (task-8074 AUDIT F4, task-8337
+    review task-8182 REJECT follow-up) -- included explicitly in the contract for the
     same reason as the two Protocols above. task-8079(F6) adds get_order() --
     a retried client_order_id resolves to an existing ODNO mapping and
     re-fetches its current state instead of resubmitting."""
@@ -180,11 +185,13 @@ class _OrderSubmittingClient(KISHTTPClient, Protocol):
 
 class KISTradingMixin:
     def symbol_registry(self) -> SymbolRegistry:
-        """task-8337(리뷰 task-8182 REJECT 후속) -- `_precheck_order`가
-        `VenueCapabilityProfile`의 원시 딕셔너리 대신 이 `SymbolRegistry`를
-        거치도록 한다(모듈 싱글턴, `_build_kis_symbol_registry`). 테스트는
-        인스턴스 속성으로 덮어써 다른 등록 내용(예: verified=True 픽스처)을
-        주입할 수 있다(`adapter.venue_profile = lambda: ...`와 동일 패턴)."""
+        """task-8337(review task-8182 REJECT follow-up) -- makes
+        `_precheck_order` go through this `SymbolRegistry` instead of
+        `VenueCapabilityProfile`'s raw dicts (module singleton,
+        `_build_kis_symbol_registry`). Tests can override this as an
+        instance attribute to inject different registered content (e.g. a
+        `verified=True` fixture) -- same pattern as
+        `adapter.venue_profile = lambda: ...`."""
         return _KIS_SYMBOL_REGISTRY
 
     def _kis_order_id_map(self) -> dict[str, str]:
