@@ -52,9 +52,8 @@ class ScriptNode(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-# ---- type := "int" | "float" | "bool" | "series<float>" | "series<bool>" ----
-
-TypeName = Literal["int", "float", "bool", "series<float>", "series<bool>"]
+# ---- type := "int"|"float"|"bool"|"string"|"series<float>"|"series<bool>" ----
+TypeName = Literal["int", "float", "bool", "string", "series<float>", "series<bool>"]
 
 
 class TypeNode(ScriptNode):
@@ -74,6 +73,11 @@ class NumberLiteral(ScriptNode):
     @classmethod
     def _check_value(cls, value: Any) -> Any:
         return _reject_bool(value)
+
+
+class StringLiteral(ScriptNode):
+    kind: Literal["string"] = "string"  # never numeric/bool (M2-3 step 1)
+    value: str
 
 
 class Identifier(ScriptNode):
@@ -184,8 +188,7 @@ class RequestExpr(ScriptNode):
 
 Expr = Annotated[
     NumberLiteral
-    | Identifier
-    | CallExpr
+    | StringLiteral | Identifier | CallExpr
     | UnaryExpr
     | PostfixExpr
     | NotExpr
