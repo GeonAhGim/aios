@@ -84,12 +84,27 @@ def _asyncpg_dsn(database_url: str) -> str:
 # Postgres, so widening a budget or adding an ignore would not address the
 # transient reset itself (DECISION_GUIDELINES B-2) -- retrying here mirrors
 # the already-established fix instead.
+#
+# task-8284 (QA of task-8259): the ported retryable set only covered
+# OSError/ConnectionDoesNotExistError -- the *pre*-task-6267 snapshot of
+# scripts/replay_verify.py's pattern. task-6267/6284 (esc-ci-replay_verify)
+# found that a sibling worktree's `setup_test_db.py --reset` does
+# `pg_terminate_backend` -> `DROP DATABASE` -> `CREATE DATABASE` against the
+# same shared local Postgres, and a connect landing inside that drop/create
+# window fails with `InvalidCatalogNameError` / `CannotConnectNowError`
+# (both `asyncpg.exceptions.PostgresError`, not `OSError` and not
+# `ConnectionDoesNotExistError`) -- so the narrower set here would let that
+# same shared-Postgres race reproduce the exact esc-ci-pytest symptom this
+# task exists to close. Matching replay_verify.py's current
+# `_RETRYABLE_CONNECT_ERRORS` (not its outdated snapshot) closes the gap.
 _POOL_CONNECT_ATTEMPTS = 5
 _POOL_CONNECT_RETRY_BASE_DELAY = 0.5
 _POOL_CONNECT_RETRY_MAX_DELAY = 8.0
 _RETRYABLE_POOL_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
     OSError,
     asyncpg.exceptions.ConnectionDoesNotExistError,
+    asyncpg.exceptions.InvalidCatalogNameError,
+    asyncpg.exceptions.CannotConnectNowError,
 )
 
 

@@ -28,6 +28,9 @@ from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.rate_limit.limiter import UnlimitedRateLimiter, set_limiter
 from tests.support.db import TEMPLATE_DATABASE_URL_ENV, ensure_worker_database
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
+from tests.support.talib_cache import (
+    reset_talib_metadata_cache as reset_talib_metadata_cache,  # noqa: F401 -- re-exported fixture
+)
 
 try:
     import psutil
@@ -291,26 +294,6 @@ def _reset_rate_limiter_singleton():
     set_limiter(UnlimitedRateLimiter())
     yield
     set_limiter(UnlimitedRateLimiter())
-
-
-@pytest.fixture(autouse=True)
-def _reset_talib_metadata_cache():
-    """task-8279 — IND-10 `generate_talib_specs`는 monkeypatch 테스트를 지원하기
-    위해 TA-Lib 메타데이터를 lazy하게 캐시한다. 각 테스트 전에 캐시를 reset해야
-    monkeypatch가 효과를 본다."""
-    try:
-        from src.core.indicators import generate_specs
-
-        generate_specs._TALIB_METADATA_CACHE = None
-    except ImportError:
-        pass
-    yield
-    try:
-        from src.core.indicators import generate_specs
-
-        generate_specs._TALIB_METADATA_CACHE = None
-    except ImportError:
-        pass
 
 
 @pytest.fixture(autouse=True)

@@ -16,8 +16,9 @@ import pytest
 
 class _FakeAsyncpgError(OSError):
     """`OSError` 서브클래스 — `_create_pool_with_retry`가 잡는
-    `_RETRYABLE_POOL_CONNECT_ERRORS`(OSError | ConnectionDoesNotExistError)
-    중 OSError 경로를 실제 asyncpg 예외 타입 없이 재현한다."""
+    `_RETRYABLE_POOL_CONNECT_ERRORS`(OSError | ConnectionDoesNotExistError |
+    InvalidCatalogNameError | CannotConnectNowError) 중 OSError 경로를 실제
+    asyncpg 예외 타입 없이 재현한다."""
 
 
 async def test_create_pool_with_retry_recovers_after_transient_reset() -> None:
@@ -139,6 +140,69 @@ async def test_create_pool_with_retry_does_not_retry_non_retryable_error() -> No
             await main_module._create_pool_with_retry("postgresql://x")
 
     assert len(attempts) == 1
+
+
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda: __import__("asyncpg").exceptions.InvalidCatalogNameError(
+            'database "aios_test_qa_4" does not exist'
+        ),
+        lambda: __import__("asyncpg").exceptions.CannotConnectNowError(
+            "the database system is starting up"
+        ),
+    ],
+)
+async def test_create_pool_with_retry_retries_drop_create_race_errors(
+    exc_factory: Any,
+) -> None:
+    """실패주입(task-8284, QA of task-8259): `scripts/replay_verify.py`의
+    `_RETRYABLE_CONNECT_ERRORS`가 task-6267/6284에서 넓힌 대로,
+    `InvalidCatalogNameError`/`CannotConnectNowError`(둘 다
+    `asyncpg.exceptions.PostgresError` — 다른 워크트리의
+    `setup_test_db.py --reset`이 만드는 DROP/CREATE DATABASE 경합 창)도
+    `OSError`/`ConnectionDoesNotExistError`와 동일하게 재시도 대상이어야
+    한다 — 그렇지 않으면 같은 공유 로컬 Postgres 경합이 lifespan에서
+    esc-ci-pytest 증상을 그대로 재현한다."""
+    import src.main as main_module
+
+    attempts: list[int] = []
+    fake_pool = object()
+
+    class _FailingPool:
+        def __init__(self, exc: BaseException) -> None:
+            self._exc = exc
+
+        def __await__(self) -> Generator[Any, None, object]:
+            async def _raise() -> object:
+                raise self._exc
+
+            return _raise().__await__()
+
+        def terminate(self) -> None:
+            pass
+
+    def _fake_create_pool(dsn: str, **kwargs: object) -> object:
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            return _FailingPool(exc_factory())
+
+        async def _succeed() -> object:
+            return fake_pool
+
+        return _succeed()
+
+    async def _no_sleep(attempt: int) -> None:
+        return None
+
+    with (
+        patch.object(main_module.asyncpg, "create_pool", _fake_create_pool),
+        patch.object(main_module, "_sleep_before_pool_retry", _no_sleep),
+    ):
+        result = await main_module._create_pool_with_retry("postgresql://x")
+
+    assert result is fake_pool
+    assert len(attempts) == 2
 
 
 def test_pool_retry_delay_grows_exponentially_and_caps() -> None:
