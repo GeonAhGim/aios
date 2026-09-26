@@ -6,6 +6,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5 §9 DoD
 "fund/portfolio 컨텍스트 없이 submit_order를 호출하면 도메인 예외로 거부되는
 negative test 1건(어댑터 INSERT 호출 0회를 카운터로 단언)".
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ import pytest
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
 from src.foundation.entities.application.resolve_context import EntityContextResolutionError
+from src.foundation.entities.contracts.v1 import EntityContext
 from src.services.oms.application.submit_order import submit_order
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
@@ -25,14 +27,25 @@ from src.services.order_service.gate import GateDecision, GateOutcome, OrderCont
 def _command() -> SubmitOrderCommand:
     user_id = uuid4()
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=1, intent_seq=1,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=1,
+        intent_seq=1,
         window_start=datetime.now(timezone.utc),
     )
     return SubmitOrderCommand(
-        command_id=uuid4(), trace_id=uuid4(), scope=scope, symbol="BTC/USDT",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-        asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+        command_id=uuid4(),
+        trace_id=uuid4(),
+        scope=scope,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
     )
 
@@ -59,6 +72,35 @@ class _PoolSpy:
         )
 
 
+def _entity_context(*, tenant_id) -> EntityContext:
+    return EntityContext(
+        tenant_id=tenant_id,
+        legal_entity_id=uuid4(),
+        fund_id=uuid4(),
+        portfolio_id=uuid4(),
+        sub_account_id=uuid4(),
+    )
+
+
+class _RaisingEntityRepo:
+    """실패주입 대역 — `verify_entity_context`가 부르는 4개 조회 중 첫
+    호출(`get_legal_entity`)에서 의존성 장애(예: DB 커넥션 단절)를 흉내
+    낸다. entity_context 가드는 이 예외를 삼키지 않고 그대로 전파해야
+    한다 — INSERT 시도(`pool.acquire()`)는 여전히 0회여야 fail-closed다."""
+
+    async def get_legal_entity(self, tenant_id, entity_id):
+        raise ConnectionError("entity_repo 의존성 장애 주입 — DB 커넥션 단절 시뮬레이션")
+
+    async def get_fund(self, tenant_id, fund_id):
+        raise AssertionError("get_legal_entity에서 이미 실패했어야 합니다 — 도달 불가")
+
+    async def get_portfolio(self, tenant_id, portfolio_id):
+        raise AssertionError("get_legal_entity에서 이미 실패했어야 합니다 — 도달 불가")
+
+    async def get_sub_account(self, tenant_id, sub_account_id):
+        raise AssertionError("get_legal_entity에서 이미 실패했어야 합니다 — 도달 불가")
+
+
 async def test_submit_order_rejects_missing_entity_context_without_touching_adapter():
     pool = _PoolSpy()
 
@@ -71,6 +113,73 @@ async def test_submit_order_rejects_missing_entity_context_without_touching_adap
             pre_submit_gate=_allow_gate,
             entity_context=None,  # type: ignore[arg-type]
             entity_repo=None,  # type: ignore[arg-type]  # negative test: 의도적으로 잘못된 타입을 넣어 fail-closed 가드를 검증
+        )
+
+    assert pool.acquire_calls == 0
+
+
+async def test_submit_order_rejects_cross_tenant_entity_context_without_touching_adapter():
+    """negative test 2 — `entity_context.tenant_id`가 `cmd.scope.tenant_id`와
+    다르면(교차 테넌트 위조 시도) INSERT 이전에 거부돼야 한다."""
+    pool = _PoolSpy()
+    cmd = _command()
+    foreign_context = _entity_context(tenant_id=uuid4())
+    assert foreign_context.tenant_id != cmd.scope.tenant_id
+
+    with pytest.raises(EntityContextResolutionError):
+        await submit_order(
+            cmd,
+            pool=pool,  # type: ignore[arg-type]
+            profile=None,  # type: ignore[arg-type]
+            registry=None,  # type: ignore[arg-type]
+            pre_submit_gate=_allow_gate,
+            entity_context=foreign_context,
+            entity_repo=None,  # type: ignore[arg-type]
+        )
+
+    assert pool.acquire_calls == 0
+
+
+async def test_submit_order_rejects_missing_entity_repo_without_touching_adapter():
+    """negative test 3 — task-1925: `entity_context`가 유효(같은 테넌트)해도
+    `entity_repo`가 없으면 위조 재확인(`verify_entity_context`)을 할 수 없어
+    거부돼야 한다."""
+    pool = _PoolSpy()
+    cmd = _command()
+    context = _entity_context(tenant_id=cmd.scope.tenant_id)
+
+    with pytest.raises(EntityContextResolutionError):
+        await submit_order(
+            cmd,
+            pool=pool,  # type: ignore[arg-type]
+            profile=None,  # type: ignore[arg-type]
+            registry=None,  # type: ignore[arg-type]
+            pre_submit_gate=_allow_gate,
+            entity_context=context,
+            entity_repo=None,  # type: ignore[arg-type]
+        )
+
+    assert pool.acquire_calls == 0
+
+
+async def test_submit_order_propagates_entity_repo_failure_without_touching_adapter():
+    """실패주입 — `entity_repo`가 (DB 커넥션 단절 등으로) 예외를 던지면
+    `submit_order`는 이를 삼켜 성공으로 위장하지 않고 그대로 전파해야
+    하며, 그 시점에 `pool.acquire()`는 아직 호출되지 않아야 한다(fail-closed
+    가드가 INSERT보다 먼저 걸린다)."""
+    pool = _PoolSpy()
+    cmd = _command()
+    context = _entity_context(tenant_id=cmd.scope.tenant_id)
+
+    with pytest.raises(ConnectionError):
+        await submit_order(
+            cmd,
+            pool=pool,  # type: ignore[arg-type]
+            profile=None,  # type: ignore[arg-type]
+            registry=None,  # type: ignore[arg-type]
+            pre_submit_gate=_allow_gate,
+            entity_context=context,
+            entity_repo=_RaisingEntityRepo(),
         )
 
     assert pool.acquire_calls == 0
