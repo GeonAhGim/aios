@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+import src.foundation.backtest.domain.snapshot as snapshot_module
 from scripts.check_import_linter import ROOT as LINTER_ROOT
 from scripts.check_import_linter import _eval_forbidden_suffix, _imports_of, parse_contracts
 from src.data.models.market_data import Candle
@@ -224,3 +225,37 @@ def test_import_linter_domain_no_adapters_catches_backtest_domain_regression() -
         for filename in _CHECKED_FILES
     }
     assert _eval_forbidden_suffix(real_graph, domain_no_adapters) == []
+
+
+# --------------------------------------------------------------------------
+# negative -- 불변식 위반 입력 명시 거부 (R1: naive datetime은 시간대를 잃어
+# 재생 불가능하므로 canonical_json이 이미 거부하지만, 그 거부가
+# compute_bar_snapshot_hash 경계에서도 실제로 전파되는지 이 leaf가 직접 증명한다)
+# --------------------------------------------------------------------------
+
+
+def test_bar_snapshot_hash_rejects_naive_as_of() -> None:
+    bars = [_bar(index=0, volume=Decimal("10"))]
+    naive_as_of = datetime(2026, 1, 1)  # tzinfo 없음 -- I-0x tz-aware UTC 불변식 위반
+
+    with pytest.raises(ValueError, match="naive datetime"):
+        compute_bar_snapshot_hash(bars, source="binance", as_of=naive_as_of)
+
+
+# --------------------------------------------------------------------------
+# 실패주입 -- canonical_json이 예외를 던지면 compute_bar_snapshot_hash가 삼키지
+# 않고 그대로 전파해야 한다(fail-closed 기본 정책)
+# --------------------------------------------------------------------------
+
+
+def test_bar_snapshot_hash_propagates_canonical_json_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(_: object) -> bytes:
+        raise RuntimeError("canonical_json dependency failure (injected)")
+
+    monkeypatch.setattr(snapshot_module, "canonical_json", _boom)
+    bars = [_bar(index=0, volume=Decimal("10"))]
+
+    with pytest.raises(RuntimeError, match="injected"):
+        compute_bar_snapshot_hash(bars, source="binance", as_of=_T0)

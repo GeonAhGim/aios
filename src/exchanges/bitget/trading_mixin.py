@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from src.core.exceptions import RetryableExchangeError
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.bitget.account_mode import (
     AccountModeAwareClient,
@@ -103,7 +104,18 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
         returns 40085, this closure re-invokes in UNIFIED mode and
         reassembles the request with the correct field names (see
         account_mode.account_aware_request — why the retry does not create
-        a duplicate order is explained in that docstring)."""
+        a duplicate order is explained in that docstring).
+
+        F8 audit fix (task-8081, docs/audits/AUDIT_2026-09-26_order_path.md) —
+        a `RetryableExchangeError` here means the transport exhausted its
+        retries on a 5xx/timeout: the response is lost, but the exchange may
+        already have accepted the order before that happened. Resubmitting
+        blindly would risk a duplicate order, so this self-reconfirms via
+        `find_order_by_client_id` before giving up. If the exchange already
+        knows this `client_order_id`, its real state is trusted and nothing
+        is resent. If it still doesn't, the original error is re-raised
+        unchanged — still genuinely UNKNOWN, and the external
+        `unknown_resolver` (L4-16) keeps retrying that case as before."""
         _reject_if_unsubmittable(order)
 
         def build(mode: BitgetAccountMode) -> RequestSpec:
@@ -125,7 +137,17 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
                 path = "/api/v2/spot/trade/place-order"
             return "POST", path, None, body
 
-        raw = await account_aware_request(self, build)
+        try:
+            raw = await account_aware_request(self, build)
+        except RetryableExchangeError:
+            found = await BitgetTradingQueryMixin.find_order_by_client_id(
+                self, order.client_order_id
+            )
+            if found is None:
+                raise
+            return order.model_copy(
+                update={"exchange_order_id": found.exchange_order_id, "status": found.status}
+            )
         data = raw["data"]
         return order.model_copy(
             update={"exchange_order_id": data["orderId"], "status": OrderStatus.SUBMITTED}
@@ -133,6 +155,17 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
 
     @require_paper_sandbox
     async def cancel_order(self: _AccountModeClient, order_id: str) -> bool:
+        """F8 audit fix (task-8081) — same ambiguous-response risk as
+        `place_order`: a `RetryableExchangeError` here does not prove the
+        cancel never reached the exchange. Unlike `place_order`, this method
+        only receives the exchange `order_id` (not `client_order_id`), so the
+        self-reconfirmation uses `get_order(order_id)` instead of
+        `find_order_by_client_id` — same intent (do not treat an ambiguous
+        transport failure as a hard "cancel failed"), different lookup key.
+        If the order is confirmed CANCELLED, this returns True without
+        resending the cancel request; otherwise the original error is
+        re-raised unchanged."""
+
         def build(mode: BitgetAccountMode) -> RequestSpec:
             body: dict[str, Any] = {"orderId": order_id}
             if mode is BitgetAccountMode.UNIFIED:
@@ -142,7 +175,13 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
                 path = "/api/v2/spot/trade/cancel-order"
             return "POST", path, None, body
 
-        raw = await account_aware_request(self, build)
+        try:
+            raw = await account_aware_request(self, build)
+        except RetryableExchangeError:
+            current = await BitgetTradingQueryMixin.get_order(self, order_id)
+            if current.status is OrderStatus.CANCELLED:
+                return True
+            raise
         return bool(raw.get("code") == "00000")
 
     @require_paper_sandbox

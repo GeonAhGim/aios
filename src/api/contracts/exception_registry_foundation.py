@@ -134,6 +134,14 @@ from src.foundation.risk_gate.application.evaluate_risk_gate import (
     CrossTenantConnectionReferenceError,
 )
 from src.foundation.risk_gate.application.recovery_gate import RecoveryDeniedError
+from src.foundation.screener.application.run_screen import (
+    ScreenCursorError,
+    ScreenLimitExceededError,
+    ScreenTimeoutError,
+    ScreenUniverseError,
+)
+from src.foundation.screener.domain.evaluate import ScreenerEvaluationError
+from src.foundation.screener.domain.query_plan import ScreenerConditionError
 from src.foundation.trust.application.accept_disclosure import (
     ConsentAlreadyActiveError,
     DisclosureNotFoundError,
@@ -293,10 +301,25 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     *EXCEPTION_MAP_FOUNDATION_PERSONAL,
     # task-2630 U-3a — assistant.py, split out (P6.line_cap).
     *EXCEPTION_MAP_AI_ASSISTANT,
+    # UX-8(task-7773) — screener.py `/v1/foundation/screener/run`. Bad universe/
+    # cursor/page_size and an unsupported/uncompilable filter condition are all
+    # transport-shape problems the client can fix, so they fold into the same
+    # 400 bucket as backtests.py's TooManyBarsError/QuickBacktestInputError above.
+    (ScreenUniverseError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenCursorError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenLimitExceededError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenerConditionError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenerEvaluationError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # ScreenTimeoutError is retryable (the scan itself, not the request shape,
+    # timed out) — DEPENDENCY_NOT_READY is the closest existing taxonomy entry
+    # (§3.3 retryable column), with STATUS_OVERRIDE below keeping the spec's
+    # 408 instead of that code's default 503.
+    (ScreenTimeoutError, ErrorCode.DEPENDENCY_NOT_READY),
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [
     (MethodologyNotFoundError, status.HTTP_422_UNPROCESSABLE_ENTITY),
     (DisclosureRetiredError, status.HTTP_422_UNPROCESSABLE_ENTITY),
     (BacktestRunError, status.HTTP_422_UNPROCESSABLE_ENTITY),
+    (ScreenTimeoutError, status.HTTP_408_REQUEST_TIMEOUT),
 ]

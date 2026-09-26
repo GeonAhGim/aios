@@ -1527,6 +1527,22 @@
         "title": "ApiResponse[SafetyControlView]",
         "type": "object"
       },
+      "ApiResponse_ScreenRunResultView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScreenRunResultView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ScreenRunResultView]",
+        "type": "object"
+      },
       "ApiResponse_SellerSuspensionResult_": {
         "properties": {
           "data": {
@@ -2593,6 +2609,25 @@
           "calendar"
         ],
         "title": "BacktestConfigV2",
+        "type": "object"
+      },
+      "BacktestStatFilter": {
+        "properties": {
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "backtest_stat",
+            "default": "backtest_stat",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition"
+        ],
+        "title": "BacktestStatFilter",
         "type": "object"
       },
       "BeginConnectionRequest": {
@@ -5169,6 +5204,25 @@
         "title": "FixedSlippage",
         "type": "object"
       },
+      "FundamentalFilter": {
+        "properties": {
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "fundamental",
+            "default": "fundamental",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition"
+        ],
+        "title": "FundamentalFilter",
+        "type": "object"
+      },
       "GateKind": {
         "description": "L4_risk_and_safety_v1.0.md §3.1/§6(`f4b9d6e5a7c8`) 6종 그대로.",
         "enum": [
@@ -5412,6 +5466,25 @@
           "params"
         ],
         "title": "IndicatorComputeResponse",
+        "type": "object"
+      },
+      "IndicatorFilter": {
+        "properties": {
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "indicator",
+            "default": "indicator",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition"
+        ],
+        "title": "IndicatorFilter",
         "type": "object"
       },
       "IndicatorListItemView": {
@@ -9468,6 +9541,32 @@
         "title": "RequestDeploymentRequest",
         "type": "object"
       },
+      "ResearchFilter": {
+        "description": "Inherits the RD-A1 leak guard: an instance cannot be constructed at\nall without `as_of` (§3 \"a ResearchFilter cannot run without as_of\").",
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "research",
+            "default": "research",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition",
+          "as_of"
+        ],
+        "title": "ResearchFilter",
+        "type": "object"
+      },
       "ResearchItem": {
         "description": "A single research item (the common envelope for filings, news, macro,\nand alt data).\n\n`known_at` is when the system could have known this fact -- backtests\nand strategies only ever read `known_at <= bar_ts` (§1 point-in-time\nintegrity, RD-A1). The check itself is\n`domain/known_at.assert_point_in_time`'s job (this file only defines the\ncontract). When `revision_of` is set, this item is a correction of that\n`item_id` (input for RD-3; this leaf does not enforce chain rules).",
         "properties": {
@@ -10284,6 +10383,142 @@
         "title": "Scope",
         "type": "string"
       },
+      "ScreenDefinition": {
+        "properties": {
+          "columns": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "filters": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "backtest_stat": "#/components/schemas/BacktestStatFilter",
+                  "fundamental": "#/components/schemas/FundamentalFilter",
+                  "indicator": "#/components/schemas/IndicatorFilter",
+                  "research": "#/components/schemas/ResearchFilter"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/IndicatorFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/FundamentalFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/ResearchFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/BacktestStatFilter"
+                }
+              ]
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SortSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "universe": {
+            "title": "Universe",
+            "type": "string"
+          }
+        },
+        "required": [
+          "universe",
+          "filters"
+        ],
+        "title": "ScreenDefinition",
+        "type": "object"
+      },
+      "ScreenResultRowView": {
+        "properties": {
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            "title": "Values",
+            "type": "object"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "symbol",
+          "venue",
+          "values"
+        ],
+        "title": "ScreenResultRowView",
+        "type": "object"
+      },
+      "ScreenRunResultView": {
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ScreenResultRowView"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rows",
+          "total",
+          "truncated",
+          "next_cursor"
+        ],
+        "title": "ScreenRunResultView",
+        "type": "object"
+      },
       "SellerSuspensionResult": {
         "properties": {
           "seller_suspended": {
@@ -10401,6 +10636,28 @@
           "value"
         ],
         "title": "SnapshotValueView",
+        "type": "object"
+      },
+      "SortSpec": {
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "direction"
+        ],
+        "title": "SortSpec",
         "type": "object"
       },
       "StartValidationRequest": {
@@ -20189,6 +20446,80 @@
         "summary": "Post Evaluate Recovery",
         "tags": [
           "foundation:risk-gate"
+        ]
+      }
+    },
+    "/v1/foundation/screener/run": {
+      "post": {
+        "operationId": "run_screen_endpoint_v1_foundation_screener_run_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ScreenRunResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Run Screen Endpoint",
+        "tags": [
+          "screener"
         ]
       }
     },
