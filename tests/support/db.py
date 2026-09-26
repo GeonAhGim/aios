@@ -190,6 +190,30 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
     return target_url
 
 
+async def drop_worker_database(template_url: str, worker_id: str) -> None:
+    """`ensure_worker_database`가 만든 워커 DB를 즉시 지운다(세션 종료 정리용).
+
+    이름 규칙은 `session_database_url`과 동일하다. 살아있는 커넥션은 강제 종료
+    후 DROP 한다 — 이 DB는 호출 프로세스가 배타적으로 소유한다는 전제는
+    `ensure_worker_database`와 같다. template_url 자체(worker_id == "master")는
+    절대 지우지 않는다.
+    """
+    target_url = session_database_url(template_url, worker_id)
+    if target_url == template_url:
+        return
+    target_db = _db_name(target_url)
+    admin = await _admin_connect_with_retry(_asyncpg_dsn(_with_database(template_url, "postgres")))
+    try:
+        await admin.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = $1 AND pid <> pg_backend_pid()",
+            target_db,
+        )
+        await admin.execute(f'DROP DATABASE IF EXISTS "{target_db}"')
+    finally:
+        await admin.close()
+
+
 def _pool_retry_delay(attempt: int) -> float:
     return _POOL_CONNECT_RETRY_BASE_DELAY * (attempt + 1)
 

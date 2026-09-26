@@ -9,8 +9,6 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#9 FA-15 DoD.
 
 from __future__ import annotations
 
-import os
-from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -25,28 +23,12 @@ from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.conftest import create_test_user
 from tests.integration.oms.conftest import insert_order
-from tests.support.db import _asyncpg_dsn, ensure_worker_database, template_database_url
 
 
 @pytest.fixture
-async def pool() -> AsyncIterator[asyncpg.Pool]:
-    """Dedicated database for this module (same pattern as
-    tests/integration/oms/test_cancel_requested_replay.py, fe50dcd4).
-    `replay_verify.verify(hours=1)` digests *every* order stream touched inside
-    the window, so an order another file left in the shared xdist worker DB
-    with a status changed outside the event trail (the very shape
-    test_replay_flags_order_status_changed_without_event_as_mismatch seeds)
-    shows up as a mismatch here (PR #91 run 36222175795: StreamDiff on an
-    order this module never created). Cloning from the untouched template keeps
-    the assertion about this module's own writes; the template URL (not the live
-    worker DB) avoids ObjectInUseError while other sessions are open."""
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
-    url = await ensure_worker_database(template_database_url(), f"{worker}_replay_chain")
-    p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=4)
-    try:
-        yield p
-    finally:
-        await p.close()
+async def pool(isolated_replay_pool: asyncpg.Pool) -> asyncpg.Pool:
+    """Module-isolated clone -- see `isolated_replay_db_url` in conftest.py."""
+    return isolated_replay_pool
 
 
 def _clock() -> datetime:

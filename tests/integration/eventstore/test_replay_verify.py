@@ -18,9 +18,7 @@ when 7e9cc090/task-7695 pushed this file to 583 lines
 
 from __future__ import annotations
 
-import os
 import time
-from collections.abc import AsyncIterator
 from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -41,27 +39,14 @@ from tests.integration.eventstore._replay_verify_support import (
     _seed_ledger_account,
     _seed_ledger_entry,
     _seed_order,
+    assert_no_replay_window_leftovers,
 )
-from tests.support.db import _asyncpg_dsn, ensure_worker_database, template_database_url
 
 
 @pytest.fixture
-async def pool() -> AsyncIterator[asyncpg.Pool]:
-    """Dedicated database for this module (same pattern as
-    test_replay_verify_order_chain.py and oms/test_cancel_requested_replay.py).
-    Every test here asserts `verify(hours=1)` is *clean* over the whole window,
-    so any order another file left in the shared xdist worker DB with a status
-    changed outside the event trail (e.g. `sweep_open_orders()`'s deliberate
-    single-statement UPDATE) shows up as a StreamDiff on an order this module
-    never created (PR #91 run 36225868874). Cloning from the untouched template
-    keeps the assertion about this module's own writes."""
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
-    url = await ensure_worker_database(template_database_url(), f"{worker}_replay_verify")
-    p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=8)
-    try:
-        yield p
-    finally:
-        await p.close()
+async def pool(isolated_replay_pool: asyncpg.Pool) -> asyncpg.Pool:
+    """Module-isolated clone -- see `isolated_replay_db_url` in conftest.py."""
+    return isolated_replay_pool
 
 
 async def test_replay_matches_current_tables_for_orders_and_ledger(pool):
@@ -189,3 +174,23 @@ async def test_replay_verify_completes_within_latency_budget_for_fifty_streams(p
         f"replay_verify.verify over {report.streams_checked} streams took "
         f"{elapsed_s:.3f}s (budget 5.0s)"
     )
+
+
+async def test_leftover_guard_names_the_foreign_order_and_ledger_keys(pool):
+    """negative -- the clone starts clean (the fixture already asserted so);
+    once this module seeds an order and a ledger entry, the same guard must
+    fail and carry their keys, proving it would have caught the shared-DB
+    leftovers that produced the StreamDiff failures instead of letting them
+    surface later on a key this module never created."""
+    await _seed_order(pool)
+    debit_code = await _seed_ledger_entry(pool)
+
+    with pytest.raises(AssertionError) as excinfo:
+        await assert_no_replay_window_leftovers(
+            pool, as_of=_clock() + timedelta(minutes=1), hours=1
+        )
+
+    message = str(excinfo.value)
+    assert "order_events order_ids=" in message
+    assert debit_code in message
+    assert "written outside this module" in message
