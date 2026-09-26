@@ -31,6 +31,18 @@ def test_known_value_matches_hand_computed_cf_quantile():
     assert float(result.var_pct) == pytest.approx(expected_var, rel=1e-6)
 
 
+def test_known_value_90_confidence_horizon_1():
+    result = cornish_fisher_var_es(_SKEWED, confidence=0.90, horizon_days=1, bars_per_day=1)
+    assert float(result.var_pct) == pytest.approx(0.06581113511976482, rel=1e-6)
+    assert float(result.es_pct) == pytest.approx(0.08565114780464643, rel=1e-6)
+
+
+def test_known_value_99_confidence_horizon_1():
+    result = cornish_fisher_var_es(_SKEWED, confidence=0.99, horizon_days=1, bars_per_day=1)
+    assert float(result.var_pct) == pytest.approx(0.10809641886611922, rel=1e-6)
+    assert float(result.es_pct) == pytest.approx(0.11526435839923063, rel=1e-6)
+
+
 def test_known_value_horizon_scaling():
     result_h1 = cornish_fisher_var_es(_SKEWED, confidence=0.95, horizon_days=1, bars_per_day=1)
     result_h4 = cornish_fisher_var_es(_SKEWED, confidence=0.95, horizon_days=4, bars_per_day=1)

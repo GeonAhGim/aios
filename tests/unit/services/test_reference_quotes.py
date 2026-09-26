@@ -12,9 +12,16 @@ from src.services.safety.reference_quotes import (
 
 
 class _FakeBitgetAdapter:
-    def __init__(self, *, price: str | None = None, raises: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        price: str | None = None,
+        raises: bool = False,
+        exception: type[BaseException] = RuntimeError,
+    ) -> None:
         self._price = price
         self._raises = raises
+        self._exception = exception
 
     async def get_futures_ticker(self, symbol: str):
         from datetime import datetime, timezone
@@ -22,7 +29,7 @@ class _FakeBitgetAdapter:
         from src.data.models.market_data import Ticker
 
         if self._raises:
-            raise RuntimeError("bitget futures ticker 조회 실패")
+            raise self._exception("bitget futures ticker 조회 실패")
         return Ticker(
             symbol=symbol,
             exchange="bitget",
@@ -47,6 +54,16 @@ async def test_bitget_futures_reference_returns_ticker_marked_as_reference():
 
 async def test_bitget_futures_reference_returns_none_on_failure():
     provider = BitgetFuturesMarkPriceReference(_FakeBitgetAdapter(raises=True))
+
+    ticker = await provider.get_reference_ticker("BTC/USDT")
+
+    assert ticker is None
+
+
+async def test_bitget_futures_reference_returns_none_on_timeout():
+    provider = BitgetFuturesMarkPriceReference(
+        _FakeBitgetAdapter(raises=True, exception=TimeoutError)
+    )
 
     ticker = await provider.get_reference_ticker("BTC/USDT")
 
