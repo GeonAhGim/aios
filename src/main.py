@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import random
 from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -71,6 +72,75 @@ def _asyncpg_dsn(database_url: str) -> str:
     return database_url.replace("postgresql+asyncpg://", "postgresql://")
 
 
+# esc-ci-pytest (task-8259): local Windows CI intermittently resets the TCP
+# socket to Postgres mid-connect (asyncpg ConnectionDoesNotExistError,
+# "connection was closed in the middle of operation" / bare OSError) while
+# this lifespan's own `asyncpg.create_pool` call is in flight -- the exact
+# shape scripts/replay_verify.py::_create_pool_with_retry and
+# tests/support/db.py::create_pool_with_retry already root-caused and fixed
+# with bounded retry-with-jitter on the initial connect (task-6212/6627),
+# but this call site never got the same treatment. Every retry attempt
+# lands on a *new* test worker/app instance racing the same shared local
+# Postgres, so widening a budget or adding an ignore would not address the
+# transient reset itself (DECISION_GUIDELINES B-2) -- retrying here mirrors
+# the already-established fix instead.
+_POOL_CONNECT_ATTEMPTS = 5
+_POOL_CONNECT_RETRY_BASE_DELAY = 0.5
+_POOL_CONNECT_RETRY_MAX_DELAY = 8.0
+_RETRYABLE_POOL_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    asyncpg.exceptions.ConnectionDoesNotExistError,
+)
+
+
+def _pool_retry_delay(attempt: int) -> float:
+    """Exponential backoff schedule for the `attempt`-th retry (0-indexed),
+    capped at `_POOL_CONNECT_RETRY_MAX_DELAY` -- a pure function so the
+    schedule is unit-testable without sleeping (mirrors
+    scripts/replay_verify.py::_retry_delay)."""
+    delay: float = _POOL_CONNECT_RETRY_BASE_DELAY * (2**attempt)
+    return min(delay, _POOL_CONNECT_RETRY_MAX_DELAY)
+
+
+async def _sleep_before_pool_retry(attempt: int) -> None:
+    """Full-jitter sleep before the next retry: uniform over
+    `[0, _pool_retry_delay(attempt)]` rather than the deterministic delay
+    itself, so concurrent processes computing the same schedule do not
+    retry in lockstep against the same shared local Postgres."""
+    await asyncio.sleep(random.uniform(0, _pool_retry_delay(attempt)))  # noqa: S311 -- retry jitter, not crypto
+
+
+async def _create_pool_with_retry(dsn: str) -> asyncpg.Pool:
+    """`asyncpg.create_pool` with retry on the initial connection only --
+    fail-closed still applies: after `_POOL_CONNECT_ATTEMPTS` the original
+    exception propagates unchanged, it is never swallowed into a false
+    green.
+
+    Deliberately awaits the `asyncpg.create_pool(dsn)` call expression
+    directly (rather than binding the unawaited `Pool` first, as
+    tests/support/db.py's variant does) so this also works when a test
+    replaces `asyncpg.create_pool` with a plain async function returning an
+    unrelated fake object -- binding first and returning that name would
+    return the exhausted coroutine instead of the awaited value in that
+    case. The real `asyncpg.Pool.__await__` returns `self`, so this is
+    equivalent for production use; on a retryable failure the failed
+    `Pool`/coroutine is asked to `terminate()` (if it supports it) before
+    retrying, to avoid leaking a partially-initialized pool's connections.
+    """
+    for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        maybe_pool = asyncpg.create_pool(dsn)
+        try:
+            return await maybe_pool
+        except _RETRYABLE_POOL_CONNECT_ERRORS:
+            terminate = getattr(maybe_pool, "terminate", None)
+            if callable(terminate):
+                terminate()
+            if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
+                raise
+            await _sleep_before_pool_retry(attempt)
+    raise AssertionError("unreachable -- loop always returns or raises")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 07번 §7.1 — JSON Lines 구조화 로깅. 스키마는 있었으나 호출자가 없어
@@ -99,7 +169,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         secrets = load_env_secrets()
         policy = load_risk_policy()
-        pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
+        pool = await _create_pool_with_retry(_asyncpg_dsn(secrets.database_url.get_secret_value()))
 
         async def _event_bus_audit_sink(record: dict[str, Any]) -> None:
             """§5.5 "모든 handler 예외는 audit_log에 자동 기록"을 실제 audit_log

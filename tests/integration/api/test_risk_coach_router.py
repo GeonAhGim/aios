@@ -67,9 +67,14 @@ async def client(monkeypatch):
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
     app.dependency_overrides[deps.get_pool] = lambda: pool
     user = User(
-        user_id=USER_ID, email="risk-coach@example.test", display_name=None,
-        mfa_enabled=False, mfa_verified_at=None, status="ACTIVE",
-        is_verifier=False, is_platform_admin=False,
+        user_id=USER_ID,
+        email="risk-coach@example.test",
+        display_name=None,
+        mfa_enabled=False,
+        mfa_verified_at=None,
+        status="ACTIVE",
+        is_verifier=False,
+        is_platform_admin=False,
     )
     monkeypatch.setattr(deps, "get_user_by_id", AsyncMock(return_value=user))
     monkeypatch.setattr(deps.session_repository, "get_active", AsyncMock(return_value=object()))
@@ -259,7 +264,8 @@ async def test_selector_failure_is_closed(client, monkeypatch):
     monkeypatch.setattr(risk_coach, "size_for", fail)
     config = _config("FIXED_FRACTIONAL")
     response = await client.post(
-        PATH, json={"config": config, "state_input": _state_input(config)},
+        PATH,
+        json={"config": config, "state_input": _state_input(config)},
         headers=await _auth(client),
     )
     assert response.status_code == 500
@@ -273,13 +279,15 @@ async def test_disabled_flag_never_calls_selector(client, monkeypatch):
     monkeypatch.setattr(risk_coach, "size_for", selector)
     config = _config("FIXED_FRACTIONAL")
     response = await client.post(
-        PATH, json={"config": config, "state_input": _state_input(config)},
+        PATH,
+        json={"config": config, "state_input": _state_input(config)},
         headers=await _auth(client),
     )
     assert response.status_code == 404
     selector.assert_not_called()
 
 
+@pytest.mark.perf
 async def test_position_size_p95_budget(client):
     # U-8 has no dedicated ADR budget; borrow the 200 ms read-query budget.
     # This measures the in-memory API, not production network latency.
@@ -289,7 +297,9 @@ async def test_position_size_p95_budget(client):
     for _ in range(30):
         start = perf_counter()
         response = await client.post(
-            PATH, json={"config": config, "state_input": _state_input(config)}, headers=headers,
+            PATH,
+            json={"config": config, "state_input": _state_input(config)},
+            headers=headers,
         )
         samples.append((perf_counter() - start) * 1000)
         assert response.status_code == 200
