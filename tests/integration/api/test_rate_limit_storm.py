@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from collections.abc import AsyncGenerator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -44,7 +45,7 @@ class _BrokenLimiter:
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[AsyncClient, None]:
     # 고정 시계 — `/openapi.json`은 프로세스 전체에서 최초 1회만 스키마를 만들고
     # 캐시하므로(FastAPI 내부) 이후 호출은 빠르지만, 이 파일이 그 최초 호출을
     # 트리거하는 첫 테스트가 되면 스키마 생성 자체가 초 단위로 걸릴 수 있다 —
@@ -60,7 +61,9 @@ async def client():
             yield ac
 
 
-async def test_121st_read_request_is_rejected_with_429_envelope(client):
+async def test_121st_read_request_is_rejected_with_429_envelope(
+    client: AsyncClient,
+) -> None:
     limit = POLICIES["read"].limit
 
     for _ in range(limit):
@@ -80,7 +83,9 @@ async def test_121st_read_request_is_rejected_with_429_envelope(client):
     assert response.headers["X-Trace-Id"]
 
 
-async def test_concurrent_storm_admits_exactly_limit_requests_no_partial_overrun(client):
+async def test_concurrent_storm_admits_exactly_limit_requests_no_partial_overrun(
+    client: AsyncClient,
+) -> None:
     """동시에 `limit + 5`개를 던져도(gather — 순차가 아니라 동시 도착) 정확히
     `limit`개만 200이고 나머지 5개는 429다. 버킷 갱신이 락 없이 read-modify-write
     였다면 경합으로 `limit`개보다 더 많이 새어나갈 수 있었다(§9 PLT-25가
@@ -97,7 +102,9 @@ async def test_concurrent_storm_admits_exactly_limit_requests_no_partial_overrun
     assert statuses.count(429) == overflow
 
 
-async def test_rate_limited_response_does_not_reach_route_handler(client):
+async def test_rate_limited_response_does_not_reach_route_handler(
+    client: AsyncClient,
+) -> None:
     """미들웨어가 라우팅보다 먼저 거절하므로, 존재하지 않는 경로라도 한도
     소진 전에는 404(라우팅까지 도달), 소진 후에는 429(라우팅에 닿지 못함)다
     — "부분 변경 없음"이 라우팅 도달 여부로도 관찰 가능함을 보인다."""
@@ -112,7 +119,7 @@ async def test_rate_limited_response_does_not_reach_route_handler(client):
     assert response.status_code == 429
 
 
-async def test_bucket_refills_after_window_elapses():
+async def test_bucket_refills_after_window_elapses() -> None:
     """`InMemoryTokenBucket`은 시계를 주입받으므로(exchanges/common/rate_limiter.py
     와 동일 패턴) 실제 대기 없이 결정론적으로 리필을 검증한다 — 한도 소진 직후
     거절되고, window_seconds만큼 시간이 흐르면 다시 허용된다."""
@@ -137,7 +144,7 @@ async def test_bucket_refills_after_window_elapses():
     assert recovered.allowed
 
 
-async def test_distinct_keys_have_independent_buckets():
+async def test_distinct_keys_have_independent_buckets() -> None:
     """같은 정책이라도 키(IP)가 다르면 서로의 한도를 침범하지 않는다 — 한
     IP의 폭주가 다른 IP의 예산을 갉아먹으면 안 된다."""
     bucket = InMemoryTokenBucket(clock=time.monotonic)
@@ -150,7 +157,9 @@ async def test_distinct_keys_have_independent_buckets():
     assert (await bucket.acquire(policy, "ip:2.2.2.2")).allowed
 
 
-async def test_broken_limiter_backend_fails_closed_not_silently_allowed(client):
+async def test_broken_limiter_backend_fails_closed_not_silently_allowed(
+    client: AsyncClient,
+) -> None:
     """limiter() 백엔드가 예외를 던지면(예: §10.4가 미확정으로 남긴 Redis
     어댑터 전환 이후의 네트워크 장애) 미들웨어가 그 예외를 삼켜 "제한 없음"
     으로 위장하면 안 된다 — CLAUDE.md §3 fail-closed 기본 위반. `RateLimitMiddleware`
@@ -168,7 +177,7 @@ async def test_broken_limiter_backend_fails_closed_not_silently_allowed(client):
 
 
 @pytest.mark.perf
-async def test_acquire_p99_latency_within_budget():
+async def test_acquire_p99_latency_within_budget() -> None:
     """`InMemoryTokenBucket.acquire()`는 I/O 없이 dict 조회 + 락만 쓰므로
     ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
     차용해 반복 호출 p99가 그 안에 드는지 단언한다."""
@@ -217,7 +226,9 @@ async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regre
 # ---------------------------------------------------------------------------
 
 
-async def test_malformed_jwt_falls_back_to_ip_key_not_crash(client):
+async def test_malformed_jwt_falls_back_to_ip_key_not_crash(
+    client: AsyncClient,
+) -> None:
     """_resolve_key() 가 유효하지 않은 JWT(잘못된 서명/만료) 를 받으면
     JWT 디코딩 실패를 잡아 IP 키로 폴백한다 — 예외가 상위로 전파되어
     5xx 를 반환하면 안 된다. PLT-25 불변식: 키_resolve 는 항상 문자열
@@ -231,14 +242,18 @@ async def test_malformed_jwt_falls_back_to_ip_key_not_crash(client):
     assert response.status_code == 200
 
 
-async def test_missing_client_ip_uses_unknown_key_not_crash(monkeypatch: pytest.MonkeyPatch):
+async def test_missing_client_ip_uses_unknown_key_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_client_ip() 가 request.client == None 을 받으면 "unknown" 을
     반환한다 — None 이 그대로 키에 들어가서 버킷 충돌을 일으키지 않는다.
     InMemoryTokenBucket 자체는 "unknown" 키를 정상적으로接受하므로,
     이 테스트는 키_resolve 경로가 None 을 통과하지 않음을 검증한다."""
+    from starlette.requests import Request
+
     from src.api.middleware import rate_limit as rl_module
 
-    def fake_client_ip(_request) -> str:
+    def fake_client_ip(_request: Request) -> str:
         return "unknown"
 
     monkeypatch.setattr(rl_module, "_client_ip", fake_client_ip)
@@ -259,7 +274,9 @@ async def test_missing_client_ip_uses_unknown_key_not_crash(monkeypatch: pytest.
     assert denied.remaining == 0
 
 
-async def test_unknown_policy_route_bypasses_rate_limit_safely(client):
+async def test_unknown_policy_route_bypasses_rate_limit_safely(
+    client: AsyncClient,
+) -> None:
     """resolve_policy() 가 None 을 반환하는 경로(매칭되는 정책 없음) 는
     rate limit 을 우회한다 — PLT-25 의 의도적 동작이지만, 이 우회가
     5xx 로 이어지지 않고 정상적인 라우팅 결과(404 등) 를 반환함을
@@ -274,8 +291,8 @@ async def test_unknown_policy_route_bypasses_rate_limit_safely(client):
 
 
 async def test_limiter_backend_raises_during_dispatch_returns_5xx(
-    client, monkeypatch: pytest.MonkeyPatch
-):
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """실패주입: limiter() 싱글턴이 매 요청 시 RuntimeError 를 던지면,
     미들웨어가 그 예외를 삼키지 않고 5xx 로 끝난다 — fail-closed
      (CLAUDE.md §3) 위반 방지. `test_broken_limiter_backend_fails_closed` 가
@@ -292,7 +309,9 @@ async def test_limiter_backend_raises_during_dispatch_returns_5xx(
     assert response.status_code >= 500
 
 
-async def test_different_policies_have_independent_limits(client):
+async def test_different_policies_have_independent_limits(
+    client: AsyncClient,
+) -> None:
     """read(120개/60s) 와 mutation(10개/60s) 는 서로 다른 버킷을 사용한다 —
     read 한도를 모두 소진해도 mutation 요청은 여전히 허용되어야 한다.
     PLT-25: 정책별 독립 버킷 불변식."""
