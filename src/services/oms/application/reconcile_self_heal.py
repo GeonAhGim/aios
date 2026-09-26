@@ -57,12 +57,13 @@ def _venue_cancel_event_hash(order_id: UUID, occurred_at: datetime) -> str:
 
 
 async def _heal_confirmed_cancel(conn: asyncpg.Connection, order_id: UUID) -> bool:
-    """`order_id`가 `ORDER_MISSING_AT_PROVIDER`인데 실제로는 정상 취소(거래소가
-    확정한 취소라 open-orders에서 사라짐)라면 `VENUE_CANCELLED`로 전이시킨다.
+    """Transitions `order_id` to `VENUE_CANCELLED` when it is classified
+    `ORDER_MISSING_AT_PROVIDER` but is actually a normal venue-confirmed cancel
+    (dropped out of open-orders because the venue confirmed the cancel).
 
-    `CANCEL_REQUESTED` 이력이 없는 주문은 건드리지 않는다 — 임의의 missing
-    주문을 전부 CANCELLED로 세탁하면 실제 유실(체결 누락 등)을 숨기게 된다
-    (task-7978 F1, 좁은 자기치유 범위)."""
+    Orders without a `CANCEL_REQUESTED` history are left untouched — treating
+    every missing order as CANCELLED would launder real losses (e.g. a missed
+    fill) into a benign cancel (task-7978 F1, narrow self-heal scope)."""
     timeline = await _order_events_repo.timeline(conn, order_id)
     if not any(ev.event == OrderEvent.CANCEL_REQUESTED.value for ev in timeline):
         return False
@@ -114,9 +115,10 @@ async def _heal_confirmed_cancel(conn: asyncpg.Connection, order_id: UUID) -> bo
 async def self_heal_confirmed_cancels(
     pool: asyncpg.Pool, discrepancies: list[Discrepancy]
 ) -> list[Discrepancy]:
-    """`ORDER_MISSING_AT_PROVIDER`로 분류된 항목 중 `CANCEL_REQUESTED` 이력이
-    있는 것만 `VENUE_CANCELLED`로 전이시키고, 치유된 항목은 결과에서 제거해
-    이번 판정(및 그에 따른 ACCOUNT 게이트)에 반영한다(task-7978 F1)."""
+    """Among discrepancies classified `ORDER_MISSING_AT_PROVIDER`, transitions
+    only the ones with a `CANCEL_REQUESTED` history to `VENUE_CANCELLED`, and
+    drops the healed entries from the result so this run's classification
+    (and the resulting ACCOUNT gate decision) reflects the heal (task-7978 F1)."""
     missing_ids = {d.entity_key for d in discrepancies if d.kind == "ORDER_MISSING_AT_PROVIDER"}
     if not missing_ids:
         return discrepancies
