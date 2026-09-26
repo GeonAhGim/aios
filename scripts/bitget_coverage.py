@@ -49,6 +49,7 @@ books/trade/account/positions/orders/orders-algo)은 Method/Path 열이
 사용: `python scripts/bitget_coverage.py`(저장소 루트에서).
 종료코드 0=통과, 1=하락/오류.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -213,20 +214,30 @@ def scan_adapter_source(adapter_dir: Path) -> str:
     return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in files)
 
 
+_PATH_BOUNDARY = r"(?<![A-Za-z0-9_-])"
+_PATH_BOUNDARY_END = r"(?![A-Za-z0-9_-])"
+
+
 def _path_implemented(path: str, adapter_source: str) -> bool:
     if "{" not in path:
-        return path in adapter_source
-    # `{marginType}` 같은 자리표시자는 소스의 실제 변수명(`{margin_type}`)과
-    # 이름이 달라도 "중괄호로 둘러싸인 식별자"로만 대조한다. re.escape가
-    # 중괄호까지 이스케이프하므로 템플릿 세그먼트로 미리 잘라서 조립한다.
-    segments = _TEMPLATE_SEGMENT_RE.split(path)
-    placeholders = _TEMPLATE_SEGMENT_RE.findall(path)
-    regex_parts = [re.escape(segments[0])]
-    for seg, _ph in zip(segments[1:], placeholders, strict=True):
-        regex_parts.append(r"\{[^}/]+\}")
-        regex_parts.append(re.escape(seg))
-    pattern = "".join(regex_parts)
-    return re.search(pattern, adapter_source) is not None
+        pattern = re.escape(path)
+    else:
+        # `{marginType}` 같은 자리표시자는 소스의 실제 변수명(`{margin_type}`)과
+        # 이름이 달라도 "중괄호로 둘러싸인 식별자"로만 대조한다. re.escape가
+        # 중괄호까지 이스케이프하므로 템플릿 세그먼트로 미리 잘라서 조립한다.
+        segments = _TEMPLATE_SEGMENT_RE.split(path)
+        placeholders = _TEMPLATE_SEGMENT_RE.findall(path)
+        regex_parts = [re.escape(segments[0])]
+        for seg, _ph in zip(segments[1:], placeholders, strict=True):
+            regex_parts.append(r"\{[^}/]+\}")
+            regex_parts.append(re.escape(seg))
+        pattern = "".join(regex_parts)
+    # 경계 없는 substring 매칭은 `/api/v2/spot/wallet/withdrawal`(정책금지)을
+    # `/api/v2/spot/wallet/withdrawal-records`(구현됨, 별개 엔드포인트)의
+    # 부분 문자열로 오분류한다 — 양끝에 경로 토큰 경계를 강제해 앞/뒤로
+    # 세그먼트가 이어지면 매칭하지 않는다.
+    bounded = _PATH_BOUNDARY + pattern + _PATH_BOUNDARY_END
+    return re.search(bounded, adapter_source) is not None
 
 
 def classify(row: EndpointRow, implemented: bool) -> Reason:
@@ -271,8 +282,7 @@ def render_markdown(matrix: MatrixResult) -> str:
     lines = [
         "# 비트겟 API 엔드포인트 커버리지 매트릭스",
         "",
-        "BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`"
-        "(오프라인, 결정적).",
+        "BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라인, 결정적).",
         "기준 목록: `docs/design/02b_bitget_api_v2_full_spec_v1.md` + "
         "`02c_bitget_api_v2_extended_spec_v1.md`의 Method/Path 표.",
         "",

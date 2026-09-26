@@ -101,9 +101,7 @@ async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatc
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     with pytest.raises(OSError):
-        await replay_verify._verify_with_retry(
-            object(), as_of=datetime.now(timezone.utc), hours=24
-        )
+        await replay_verify._verify_with_retry(object(), as_of=datetime.now(timezone.utc), hours=24)
 
     assert attempts == replay_verify._POOL_CONNECT_ATTEMPTS
 
@@ -204,8 +202,12 @@ async def test_run_propagates_real_failure_even_if_close_also_resets(monkeypatch
     ) -> replay.ReplayReport:
         raise OSError(64, "지정된 네트워크 이름을 더 이상 사용할 수 없습니다")
 
+    async def _no_sleep(delay: float) -> None:
+        return None
+
     monkeypatch.setattr(replay_verify, "_create_pool_with_retry", _fake_create_pool_with_retry)
     monkeypatch.setattr(replay_verify, "_verify_with_retry", _fake_verify_with_retry)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     with pytest.raises(OSError):
         await replay_verify._run(hours=24, as_of=datetime.now(timezone.utc))

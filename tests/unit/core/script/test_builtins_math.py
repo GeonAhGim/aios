@@ -243,13 +243,18 @@ def test_series_builtin_call_latency_p95_within_backtest_budget_slice(
     캐스트하는 `apply_elementwise` 경로) 몫을 5ms로 상한한다 — DSL-8 인터프리터
     실행 예산(250ms/30-let 체인, task-2917)에서 빌트인 호출 1개가 차지할 몫에
     넉넉한 여유를 둔 수치다. 20회 반복 실행해 p95로 잰다. task-7434:
-    process_time 기반 perf_budget으로 측정한다(coverage tracer 정지 포함)."""
+    process_time 기반 perf_budget으로 측정한다(coverage tracer 정지 포함).
+    task-7673: Windows `GetProcessTimes` 해상도(15.625ms/64Hz)가 batch=4에서는
+    호출당 ~3.9ms의 양자화 오차를 남겨 5ms 예산과 거의 맞닿는다 — CI 부하가
+    조금만 높아도 우연히 한 틱 더 올라간 샘플이 p95를 예산 밖으로 밀어낸다.
+    batch=8로 오차를 ~2ms로 더 줄여(conftest.py의 PerfBudget.sample 주석 참고,
+    task-6774/task-7360과 동일 기법) 예산 대비 여유를 확보한다."""
     bar_count = 1440
     series = Series.of_floats([float(i % 97) - 48.0 for i in range(bar_count)])
     site = CallSite("math", "abs", "series<float>", bar_count)
     fn = MATH_BUILTINS[("math", "abs")]
 
-    samples = perf_budget.samples(lambda: fn((series,), site), n=20)
+    samples = perf_budget.samples(lambda: fn((series,), site), n=20, batch=8)
     cpu_values_ms = sorted(s.cpu_ms for s in samples)
     p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
 

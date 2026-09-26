@@ -11,6 +11,7 @@ guarantees the *code* path reconnects to a writable host within the FA-18
 ceiling once one exists, via an injectable `connect` port so tests can drive
 a simulated failover without a real Postgres cluster.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -88,20 +89,36 @@ class FailoverConnectionManager:
         backoff: BackoffPolicy | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        recovery_window_seconds: float = 60.0,
     ) -> None:
         if not hosts:
             raise ValueError("at least one host is required")
+        if recovery_window_seconds <= 0:
+            raise ValueError("recovery_window_seconds must be positive")
         self._hosts = sorted(hosts, key=lambda h: h.priority)
         self._connect = connect
         self._backoff = backoff or BackoffPolicy()
         self._clock = clock
         self._sleep = sleep
+        self._recovery_window_seconds = recovery_window_seconds
         self._conn: DbConnection | None = None
         self._current_host: str | None = None
+        self._last_failover_at: float | None = None
 
     @property
     def current_host(self) -> str | None:
         return self._current_host
+
+    def write_available(self) -> bool:
+        """FA-18 SS7 gate: writes are blocked for `recovery_window_seconds`
+        after a *host switch* (a real failover, not the first connect),
+        since a just-promoted replica may still be settling. Returns True
+        once the window has fully elapsed (>=), False while it is still
+        running. A manager that has never failed over always allows writes.
+        """
+        if self._last_failover_at is None:
+            return True
+        return (self._clock() - self._last_failover_at) >= self._recovery_window_seconds
 
     async def get_writable_connection(self) -> DbConnection:
         """Return a connection confirmed writable (`is_read_only()` False).
@@ -133,14 +150,15 @@ class FailoverConnectionManager:
                 if read_only:
                     await conn.close()
                     continue
+                if self._current_host is not None and self._current_host != host.host:
+                    self._last_failover_at = self._clock()
                 self._conn = conn
                 self._current_host = host.host
                 return conn
             if self._clock() >= deadline:
                 tried = [h.host for h in self._hosts]
                 raise FailoverExhaustedError(
-                    f"no writable host among {tried} within "
-                    f"{self._backoff.ceiling_seconds:.0f}s"
+                    f"no writable host among {tried} within {self._backoff.ceiling_seconds:.0f}s"
                 ) from last_error
             await self._sleep(next(delays))
 

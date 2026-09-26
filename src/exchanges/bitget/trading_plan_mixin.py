@@ -127,9 +127,14 @@ class BitgetTradingPlanMixin:
     async def batch_cancel_replace_orders(
         self: SignedRequestClient, order_ids: list[str], *, symbol: str | None = None
     ) -> dict[str, Any]:
-        """02b spec §3.2(P2) — batch cancel and replace orders.
-
-        Allows canceling specified orders and submitting new order information."""
+        """02b spec §3.2(P2) — calls Bitget's batch-cancel-replace-order
+        endpoint, but this method only cancels the given order ids; it does
+        NOT submit replacement order fields (price/size). The batch
+        endpoint's replace-parameter schema is undocumented (unlike the
+        single-order cancel-replace-order used by `modify_order()`), so no
+        replacement fields are guessed here. Callers needing an actual price/
+        size correction must cancel via this method and resubmit a new order
+        with `place_order()`."""
         body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)

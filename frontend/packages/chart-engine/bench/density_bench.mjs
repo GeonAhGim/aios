@@ -118,12 +118,58 @@ const WARMUP_SWEEPS = 3;
  * p95 was 40-90% above its sweep-siblings -- host-load normalization had
  * nothing to normalize because the spike never reached either probe. Slicing
  * the same measurement into `PAN_ZOOM_CALIB_CHUNKS` pieces, each bracketed by
- * its own calib pair, narrows that blind window proportionally (4 chunks ->
- * ~1/4 the miss window of a single whole-measurement bracket) without
+ * its own calib pair, narrows that blind window proportionally (8 chunks ->
+ * ~1/8 the miss window of a single whole-measurement bracket) without
  * touching the tolerance, baseline, or absolute targets themselves --
  * DECISION_GUIDELINES B-2.
+ *
+ * task-7559 (esc-ci-frontend.json recurrence): the previous 4-chunk split
+ * still lets a short contention burst confined to a few frames inside a
+ * ~15-frame chunk get diluted by that chunk's other unaffected frames before
+ * the chunk-wide ratio is computed, so the correction under-corrects the
+ * burst. Reproduced directly on this shared multi-worktree host: one sweep's
+ * raw panZoomFrameMsP95 spiked to 11.358ms against ~3.2-3.7ms siblings while
+ * both calib probes bracketing that sweep's chunks read ~1.0 (no host-wide
+ * signal), pushing the pooled p95 from a 3.127ms baseline to 3.946ms (a 26%
+ * "regression" that self-resolved on the very next unmodified rerun,
+ * 3.489ms). Doubling the chunk count halves each chunk's frame span, the
+ * same "more, narrower brackets" fix as the 1->4 change above -- still no
+ * change to tolerance, baseline, or absolute targets.
+ *
+ * task-7671 (esc-ci-frontend.json recurrence): the 8-chunk split (15 frames
+ * each) still missed a burst -- CI's failure log showed panZoomFrameMsP95 at
+ * 3.803ms (a 22% "regression" against the 3.127ms baseline) while the chunk
+ * bracketing the offending frames read ratio exactly 1.000, even though the
+ * same run's calib samples elsewhere spiked to 24.933ms against a 12.5ms
+ * base (up to ~2x host load) and every tickUpdate calib ratio that sweep sat
+ * at 1.24-1.82 -- i.e. real, sustained host contention that the 15-frame
+ * chunk straddled without either of its own bracket probes landing inside
+ * the burst. Bisect (8be8b17, unrelated python-only test file) came back
+ * exhausted with no plausible frontend-side culprit, and a local rerun of
+ * this exact bench passed clean (panZoomFrameMsP95 3.45ms, "OK: within
+ * baseline tolerance") with zero code changes -- consistent with measurement
+ * blind-spot noise, not a real regression. Halving chunk size again (8->16,
+ * ~7-8 frames each) shrinks the window any single bracket pair can miss by
+ * another half, the same fix already applied twice before at 1->4 and 4->8.
+ *
+ * task-7742 (esc-ci-frontend.json recurrence): the 16-chunk split (~7-8
+ * frames each) still missed a burst -- CI's failure log showed
+ * panZoomFrameMsP95 at 4.149ms (a 32% "regression" against the 3.127ms
+ * baseline) at calib ratio exactly 1.000, while the same run's calib samples
+ * spiked to 132.465ms against a 12.5ms base (~10.6x host load, far worse
+ * than any prior recurrence) with dozens of other samples in the 18-40ms
+ * range -- i.e. severe, sustained host contention that the ~7-8-frame chunk
+ * straddled without either of its own bracket probes landing inside the
+ * burst. Bisect (b5390c20, unrelated python-only test file) again came back
+ * with no plausible frontend-side culprit, and an immediate local rerun of
+ * this exact bench passed clean (panZoomFrameMsP95 3.276ms, calib peak back
+ * down to 27.260ms, "OK: within baseline tolerance") with zero code changes
+ * -- consistent with measurement blind-spot noise, not a real regression.
+ * Halving chunk size again (16->32, ~3-4 frames each) shrinks the window any
+ * single bracket pair can miss by another half, the same fix already
+ * applied three times before at 1->4, 4->8, and 8->16.
  */
-const PAN_ZOOM_CALIB_CHUNKS = 4;
+const PAN_ZOOM_CALIB_CHUNKS = 32;
 /**
  * task-6744: same blind-window problem for indicatorAddMs -- one calib pair
  * bracketing all `INDICATOR_ADD_RUNS` runs missed contention confined to a

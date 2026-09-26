@@ -1,4 +1,5 @@
-import { useExecutions, usePortfolio, useRiskProfile } from "@aios/shared-hooks";
+import { useExecutions, useNotificationHistory, usePortfolio, useRiskProfile } from "@aios/shared-hooks";
+import { ApiError } from "@aios/api-client";
 import {
   AllocationBarChart,
   Badge,
@@ -14,6 +15,7 @@ import {
 import { Link } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { DataFreshness } from "../../components/DataFreshness";
+import { ErrorMessage } from "../../components/ErrorMessage";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 import { useTranslation } from "react-i18next";
 
@@ -22,6 +24,12 @@ export function DashboardPage() {
   const { data: riskProfile } = useRiskProfile();
   const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
   const { data: executions, isLoading: executionsLoading } = useExecutions();
+  const {
+    data: recentNotifications,
+    isLoading: notificationsLoading,
+    isError: notificationsError,
+    error: notificationsErrorObj,
+  } = useNotificationHistory();
 
   return (
     <AppShell>
@@ -93,6 +101,29 @@ export function DashboardPage() {
             >
               {t("legacy.dashboardPage.t8")}
             </EmptyState>
+          )}
+        </Card>
+
+        <Card>
+          <CardTitle>{t("legacy.dashboardPage.t9")}</CardTitle>
+          {notificationsError ? (
+            <ErrorMessage
+              errorCode={notificationsErrorObj instanceof ApiError ? notificationsErrorObj.errorCode : undefined}
+              message={notificationsErrorObj instanceof Error ? notificationsErrorObj.message : undefined}
+            />
+          ) : notificationsLoading || !recentNotifications ? (
+            <LoadingState />
+          ) : recentNotifications.length === 0 ? (
+            <EmptyState>{t("legacy.dashboardPage.t10")}</EmptyState>
+          ) : (
+            <ul className="divide-y divide-border">
+              {recentNotifications.slice(0, 5).map((notification, i) => (
+                <li key={i} className="flex items-center justify-between py-3">
+                  <p className="font-medium text-fg">{notification.eventType}</p>
+                  <StatusBadge status={notification.status} />
+                </li>
+              ))}
+            </ul>
           )}
         </Card>
       </div>
