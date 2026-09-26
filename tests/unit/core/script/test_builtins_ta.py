@@ -225,10 +225,14 @@ def test_bad_calls_are_rejected_with_error_code_not_fallback(body: str, reason: 
 
 
 def test_unknown_indicator_is_unregistered_not_guessed() -> None:
+    # The probe name must be absent from every TA-Lib version's catalog: a real
+    # indicator name (e.g. supertrend) can become registered after a library
+    # upgrade and silently invert this test.
+    assert "NOT_AN_INDICATOR" not in TALIB_SPECS
     with pytest.raises(ScriptRuntimeError, match="미등록"):
-        run("let m = ta.supertrend(close, 5)")
+        run("let m = ta.not_an_indicator(close, 5)")
     table = TaBuiltins().table
-    assert ("ta", "supertrend") not in table and ("math", "abs") not in table
+    assert ("ta", "not_an_indicator") not in table and ("math", "abs") not in table
 
 
 def test_interior_na_bool_and_length_mismatch_inputs_are_rejected() -> None:

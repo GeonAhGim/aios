@@ -5,14 +5,16 @@ ADR-2026-09-09-A (명세 원안 pandas-ta 0.4.71b0은 Python>=3.12·저장소 40
 고정으로 탈락, 대체 패키지 `pandas-ta-classic`(MIT, `xgboosted/pandas-ta-classic`)
 채택), docs/design/INDICATOR_OSS_EVAL.md §5·§6.
 
-이 파일은 `pandas-ta-classic`의 ~190종 카탈로그 중 TA-Lib 161종(`specs_talib.
-TALIB_SPECS`)과 겹치지 않는 지표만 골라 `IndicatorSpec`으로 등록한다
-(ADR-2026-09-06-F: 중복 계산 경로를 두 벌 두지 않는다 -- 이미 TA-Lib으로 계산
-되는 지표는 여기서 재등록하지 않는다).
+This module registers, as `IndicatorSpec`, only those entries of the ~190-name
+`pandas-ta-classic` catalog that the installed TA-Lib does not already provide
+(`specs_talib.TALIB_SPECS`; 161 names on TA-Lib 0.4.x, 201 on 0.6.x) --
+ADR-2026-09-06-F: never keep two computation paths for one indicator, so
+anything TA-Lib already computes is not re-registered here.
 
-중복 판정은 이름 기반이다: pandas-ta-classic 소문자 이름을 대문자로 올려
-TA-Lib 161종과 정확히 일치하면 중복, 아니면 `ALIAS_TO_TALIB`(TA-Lib이 다른
-철자를 쓰는 알려진 동의어)까지 확인한다. 이것은 ~190종 전체에 대한 완전한
+Overlap detection is name based: a pandas-ta-classic lowercase name upper-cased
+that equals an installed TA-Lib function name is an overlap; otherwise
+`ALIAS_TO_TALIB` (known synonyms where TA-Lib uses a different spelling) is
+consulted. 이것은 ~190종 전체에 대한 완전한
 의미론적 동치 검증이 아니다 -- 이름도 안 겹치고 별칭 표에도 없는 지표는
 순증분으로 분류한다(안전한 방향: 놓친 중복은 카탈로그 항목 하나가 여분으로
 남을 뿐이지만, 놓친 순증분을 중복으로 오판하면 실제로 있는 계산 경로를 조용히
@@ -22,7 +24,12 @@ TA-Lib 161종과 정확히 일치하면 중복, 아니면 `ALIAS_TO_TALIB`(TA-Li
 순증분 카탈로그(`NET_INCREMENTAL_NAMES`, 현재 268종 중 TA-Lib과 안 겹치는
 158종 수준 -- 정확한 수는 `report_net_incremental_count()`가 실행 시점 라이브러리
 버전으로 계산해 보고한다) 중 실제로 `IndicatorSpec`을 등록해 계산 가능하게
-만든 것은 `REGISTERED_INDICATORS`의 3종(DPO, MASSI, COPPOCK)뿐이다. 이 3종은
+만든 후보는 `CANDIDATE_INDICATORS`의 3종(DPO, MASSI, COPPOCK)이다.
+Candidates whose name the installed TA-Lib provides are classified as
+`SUPERSEDED_BY_TALIB` and not registered (TA-Lib 0.6.x ships all three, so on
+that version `REGISTERED_INDICATORS` is empty and TA-Lib is the only path);
+which side wins is decided by `talib.get_functions()` at import -- this module
+holds no TA-Lib version literal. 이 3종은
 전부 (a) 단일 출력 (b) 순수 OHLC 입력 (c) look-ahead 없는 인과적(causal) 계산
 이라는 세 조건을 모두 만족해 IND-7g 방식 3자 교차검증(§ tests/*)이 성립하는
 지표로 선택했다 -- 나머지 순증분 지표(ichimoku/vwap/kc 등 §2.2 후속 확장
@@ -31,7 +38,7 @@ TA-Lib 161종과 정확히 일치하면 중복, 아니면 `ALIAS_TO_TALIB`(TA-Li
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -47,14 +54,19 @@ from src.data.models.market_data import Candle
 __all__ = [
     "ALIAS_TO_TALIB",
     "ALL_PANDAS_TA_NAMES",
+    "CANDIDATE_INDICATORS",
+    "CANDIDATE_REGISTRY",
+    "CANDIDATE_SPECS",
     "NET_INCREMENTAL_NAMES",
     "PANDAS_TA_REGISTRY",
     "PANDAS_TA_SPECS",
     "REGISTERED_INDICATORS",
+    "SUPERSEDED_BY_TALIB",
     "PandasTaBridgeService",
     "PandasTaResult",
     "is_talib_overlap",
     "report_net_incremental_count",
+    "select_registered",
 ]
 
 _TALIB_NAMES: frozenset[str] = frozenset(TALIB_SPECS)
@@ -174,7 +186,7 @@ def _osc_plot(precision: int) -> PlotSpec:
     return PlotSpec(kind="line", scale="own", default_pane="separate", precision=precision)
 
 
-PANDAS_TA_SPECS: dict[str, IndicatorSpec] = {
+CANDIDATE_SPECS: dict[str, IndicatorSpec] = {
     "dpo": IndicatorSpec(
         name="dpo",
         inputs=("close",),
@@ -214,12 +226,32 @@ _CALCULATORS: dict[str, Any] = {
     "coppock": _calc_coppock,
 }
 
+CANDIDATE_INDICATORS: tuple[str, ...] = tuple(sorted(CANDIDATE_SPECS))
+
+
+def select_registered(
+    candidates: Mapping[str, IndicatorSpec], net_incremental: frozenset[str]
+) -> tuple[dict[str, IndicatorSpec], tuple[str, ...]]:
+    """Split candidates into (registered, superseded_by_talib).
+
+    A candidate is registered only while it is net-incremental against the
+    installed TA-Lib (ADR-2026-09-06-F: one computation path per indicator).
+    Pure function so the split can be tested against any TA-Lib name set
+    without reinstalling the library.
+    """
+    registered = {name: spec for name, spec in candidates.items() if name in net_incremental}
+    superseded = tuple(sorted(set(candidates) - set(registered)))
+    return registered, superseded
+
+
+PANDAS_TA_SPECS, SUPERSEDED_BY_TALIB = select_registered(CANDIDATE_SPECS, NET_INCREMENTAL_NAMES)
 REGISTERED_INDICATORS: tuple[str, ...] = tuple(sorted(PANDAS_TA_SPECS))
 
-if not set(REGISTERED_INDICATORS) <= NET_INCREMENTAL_NAMES:
-    raise IndicatorError("PANDAS_TA_REGISTERED_NOT_NET_INCREMENTAL")
-
 PANDAS_TA_REGISTRY = IndicatorRegistry(PANDAS_TA_SPECS)
+# Every candidate, regardless of the installed TA-Lib -- lets the formula
+# cross-verification tests exercise a calculator even where the default
+# service refuses it as superseded.
+CANDIDATE_REGISTRY = IndicatorRegistry(CANDIDATE_SPECS)
 
 
 class PandasTaResult(BaseModel):
@@ -245,13 +277,22 @@ class PandasTaBridgeService:
     `PANDAS_TA_REGISTRY`(L02와 동일 계약)에 위임하고, 여기서는 pandas-ta-classic
     호출과 결과 포장만 한다 (`talib_adapter.IndicatorService`와 같은 형태)."""
 
+    def __init__(self, registry: IndicatorRegistry = PANDAS_TA_REGISTRY) -> None:
+        self._registry = registry
+
     def calculate(
         self, indicator: str, candles: Sequence[Candle], **params: int
     ) -> PandasTaResult:
         if indicator not in _CALCULATORS:
             raise IndicatorError("STRATEGY_INDICATOR_UNKNOWN")
-        resolved_params = PANDAS_TA_REGISTRY.validate_params(indicator, params)
-        min_required = PANDAS_TA_REGISTRY.lookback(indicator, resolved_params) + 1
+        try:
+            self._registry.get(indicator)
+        except IndicatorError:
+            # A known calculator whose name the installed TA-Lib now provides:
+            # refuse explicitly rather than run a second computation path.
+            raise IndicatorError("PANDAS_TA_SUPERSEDED_BY_TALIB") from None
+        resolved_params = self._registry.validate_params(indicator, params)
+        min_required = self._registry.lookback(indicator, resolved_params) + 1
 
         if len(candles) < min_required:
             return PandasTaResult(

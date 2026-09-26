@@ -1,14 +1,14 @@
-"""IND-10 — Auto-generate `IndicatorSpec` metadata for 161 TA-Lib functions.
+"""IND-10 — Auto-generate `IndicatorSpec` metadata for every installed TA-Lib function.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 IND-10
 (Precedes IND-9·IND-1, ADR-2026-09-06-F D1).
 
-Iterates `talib.get_functions()` (161 types) x `abstract.Function(name).info` to
+Iterates `talib.get_functions()` x `abstract.Function(name).info` to
 **generate** specs (manual writing prohibited) — group→category (`TALIB_GROUPS`),
 parameters(defaults)→integer parameter range rules, `.lookback`→measured lookback,
 output_names→output contract, output_flags/function_flags→`PlotSpec` defaults.
 
-Floating-point parameters (nbdevup, acceleration, penetration, etc., 14 of 161 types)
+Floating-point parameters (nbdevup, acceleration, penetration, etc.)
 are not exposed as `ParamSpec` at this generation stage — `IndicatorRegistry`/`engine/
 incremental.py`·`engine/vectorized.py` (IND-1, outside this leaf) share parameters
 as a single type `dict[str, int]`, so exposing float as a first-class type would
@@ -60,7 +60,30 @@ class OutputStyle(TypedDict, total=False):
 _PERIOD_MIN = 1
 _PERIOD_MAX = 2000
 _MATYPE_MIN = 0
-_MATYPE_MAX = 8  # talib.MA_Type: SMA(0)..MAMA(8)
+
+
+def _matype_max() -> int:
+    """Largest `talib.MA_Type` ordinal of the installed library.
+
+    The MA type catalog grows with the C library (0.4: SMA(0)..T3(8); 0.6 adds
+    HMA(9)..RMA(13), which KDJ uses as its default). Hard-coding the upper bound
+    would reject a newer function's own default (`STRATEGY_PARAM_OUT_OF_RANGE`),
+    so it is derived from the enum members TA-Lib actually exposes.
+    """
+    # talib's stubs do not re-export `MA_Type` from the package root (the same
+    # stub limitation as `abstract.Function` below) -- it exists at runtime.
+    ma_type = talib.MA_Type  # type: ignore[attr-defined]
+    ordinals = [
+        value
+        for attr in dir(ma_type)
+        if not attr.startswith("_") and isinstance(value := getattr(ma_type, attr), int)
+    ]
+    if not ordinals:
+        raise ValueError("talib.MA_Type exposes no integer members")
+    return max(ordinals)
+
+
+_MATYPE_MAX = _matype_max()
 _DEVIATION_MIN = 0.1
 _DEVIATION_MAX = 10.0
 
@@ -115,7 +138,8 @@ def _flatten_inputs(input_names: Mapping[str, object]) -> tuple[str, ...]:
 def _int_param_specs(parameters: Mapping[str, object]) -> tuple[ParamSpec, ...]:
     """Expose only integer parameters as `ParamSpec` (floats — see module docstring).
 
-    matype family: 0~8 (talib.MA_Type ordinal); other integers: period rule 1~2000.
+    matype family: 0~max(talib.MA_Type) of the installed library; other integers:
+    period rule 1~2000.
     """
     specs: list[ParamSpec] = []
     for name, default in parameters.items():
@@ -262,7 +286,8 @@ TALIB_GROUPS: dict[str, str] = {name: _talib_group(name) for name in sorted(_all
 def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, IndicatorSpec]:
     """Generate `IndicatorSpec` dict from TA-Lib metadata.
 
-    If `names` is None, generate all `talib.get_functions()` (161 types); otherwise
+    If `names` is None, generate all `talib.get_functions()` of the installed
+    library (161 on TA-Lib 0.4.x / 201 on 0.6.x); otherwise
     generate only the given names — incremental (subset) and batch (full) results
     must be byte-identical for overlapping names (DoD). Reject unknown function
     names (fail-closed).

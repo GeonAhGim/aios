@@ -57,10 +57,11 @@ def test_specs_registry_version_is_ind_v1() -> None:
     assert REGISTRY_VERSION == "ind-v1"
 
 
-def test_specs_cover_all_161_talib_indicators_including_the_eleven_overrides() -> None:
-    """IND-10(task-1729)이 161종 자동 생성으로 확장했다 — 수기 오버라이드 11개는
+def test_specs_cover_every_installed_talib_indicator_including_the_eleven_overrides() -> None:
+    """IND-10(task-1729)이 `talib.get_functions()` 전량 자동 생성으로 확장했다 —
+    종수는 설치된 TA-Lib 버전이 정한다(리터럴 고정 금지). 수기 오버라이드 11개는
     부분집합으로 여전히 남아 있어야 한다(정밀도·색상 등 표시 세부 보존)."""
-    assert len(TALIB_SPECS) == 161
+    assert set(TALIB_SPECS) == set(talib.get_functions())
     assert EXPECTED_INDICATORS.issubset(set(TALIB_SPECS))
 
 
