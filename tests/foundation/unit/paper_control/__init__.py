@@ -2,6 +2,7 @@
 
 Explicitly collected by task-8405's pytest command. No external I/O is used.
 """
+
 from dataclasses import replace
 from importlib import import_module
 from time import perf_counter
@@ -25,10 +26,14 @@ _submission = import_module("src.foundation.paper_control.application.submit_pap
 @pytest.fixture
 def submission_case(monkeypatch):
     deployment = PaperDeployment(
-        id=uuid4(), tenant_id=uuid4(), connection_id=None, package_ref="pkg-test",
+        id=uuid4(),
+        tenant_id=uuid4(),
+        connection_id=None,
+        package_ref="pkg-test",
         mandate_revision_id=uuid4(),
         provenance=AdapterProvenance("fake-paper-v1", CredentialClass.PAPER, "SANDBOX", "test"),
-        state=DeploymentState.RUNNING, fence_token=7,
+        state=DeploymentState.RUNNING,
+        fence_token=7,
     )
     repo = SimpleNamespace(
         get_deployment=AsyncMock(return_value=deployment),
@@ -49,8 +54,14 @@ def submission_case(monkeypatch):
 async def _submit(case, fence=7):
     deployment, repo, adapter, _ = case
     return await _submission.submit_paper_intent(
-        repo, adapter, object(), object(), object(),
-        deployment_id=deployment.id, expected_fence_token=fence, sequence=1,
+        repo,
+        adapter,
+        object(),
+        object(),
+        object(),
+        deployment_id=deployment.id,
+        expected_fence_token=fence,
+        sequence=1,
     )
 
 
@@ -69,8 +80,9 @@ async def test_negative_stale_fence_never_reaches_adapter(submission_case):
     submission_case[3].assert_not_awaited()
 
 
-@pytest.mark.parametrize("state", [DeploymentState.PAUSED, DeploymentState.STOPPED,
-                                    DeploymentState.RECOVERY_REVIEW])
+@pytest.mark.parametrize(
+    "state", [DeploymentState.PAUSED, DeploymentState.STOPPED, DeploymentState.RECOVERY_REVIEW]
+)
 async def test_negative_non_running_deployment_rejects_intent(submission_case, state):
     deployment, repo, _, gate = submission_case
     repo.get_deployment.return_value = replace(deployment, state=state)
@@ -107,7 +119,9 @@ async def test_failure_injection_provider_timeout_degrades_without_intent(submis
         await _submit(submission_case)
     assert error.value.__cause__ is failure
     repo.transition_deployment_state.assert_awaited_once_with(
-        deployment.id, expected_state="RUNNING", new_state="DEGRADED",
+        deployment.id,
+        expected_state="RUNNING",
+        new_state="DEGRADED",
     )
     repo.insert_order_intent.assert_not_awaited()
     adapter.cancel_paper_order.assert_not_awaited()
@@ -126,6 +140,7 @@ async def test_adversarial_fence_change_during_ack_cancels_order(submission_case
     repo.insert_order_intent.assert_not_awaited()
 
 
+@pytest.mark.perf
 async def test_paper_submission_p95_under_50ms_with_in_memory_dependencies(submission_case):
     """ADR-2026-09-09-C: local orchestration budget; excludes provider/network latency."""
     samples = []
