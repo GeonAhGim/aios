@@ -97,6 +97,7 @@ async def test_place_order_rejects_lowercase_code() -> None:
     assert captured == []
 
 
+@pytest.mark.perf
 def test_krx_symbol_validation_meets_pretrade_gate_budget() -> None:
     """성능 단언(D2) — ADR-2026-09-09-C Decision 1의 사전거래 게이트 예산은
     p99 5ms. `to_venue(KIS_KRX, ...)`는 place_order()가 PDNO 조립 전에 매
