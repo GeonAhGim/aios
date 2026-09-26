@@ -17,13 +17,19 @@ task-7868(BR-21 정정, 리뷰 REJECT 7802) — `order.symbol`은 canonical
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 import pytest
 
-from src.core.exceptions import FatalExchangeError, FrozenZonePaperAdapterBlockedError
+from src.core.exceptions import (
+    ExchangeAPIError,
+    FatalExchangeError,
+    FrozenZonePaperAdapterBlockedError,
+)
 from src.data.models.base import AssetClass, Currency, Money
+from src.data.models.market_data import Ticker
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.okx.trading_mixin import OKXTradingMixin, _to_okx_ord_type
 
@@ -37,12 +43,17 @@ class _StubClient(OKXTradingMixin):
         demo_mode: bool,
         responses: dict[str, dict[str, Any]] | None = None,
         raise_path: str | None = None,
+        ticker_price: Decimal | None = Decimal("50000"),
+        ticker_error: Exception | None = None,
     ) -> None:
         self.is_paper_trading = demo_mode
         self.is_sandboxed = demo_mode
         self._responses = responses or {}
         self._raise_path = raise_path
+        self._ticker_price = ticker_price
+        self._ticker_error = ticker_error
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
+        self.ticker_calls: list[str] = []
 
     async def _request(
         self, method: str, path: str, *, body: dict[str, Any] | None = None
@@ -57,6 +68,22 @@ class _StubClient(OKXTradingMixin):
     async def get_order(self, order_id: str) -> Order:
         return _order().model_copy(
             update={"exchange_order_id": order_id, "status": OrderStatus.ACKNOWLEDGED}
+        )
+
+    async def get_ticker(self, symbol: str) -> Ticker:
+        self.ticker_calls.append(symbol)
+        if self._ticker_error is not None:
+            raise self._ticker_error
+        assert self._ticker_price is not None
+        return Ticker(
+            symbol=symbol,
+            exchange="okx",
+            price=self._ticker_price,
+            bid=self._ticker_price,
+            ask=self._ticker_price,
+            volume_24h=Decimal("0"),
+            timestamp=datetime.now(timezone.utc),
+            source_type="reference",
         )
 
 
@@ -286,33 +313,81 @@ async def test_place_order_rejects_below_min_notional():
 
 
 async def test_place_order_rejects_below_min_notional_market_order():
-    """task-8336(리뷰 REJECT task-8179 후속): MARKET 주문은 price가 없어
-    기존 가드(order_type==LIMIT 조건)가 완전히 스킵됐다 -- min_notional
-    미달 MARKET 주문도 거래소 호출 전에 거부해야 한다(quantity를 notional
-    근사치로 사용, BTC/USDT min_notional=1)."""
-    client = _paper_client()
-    bad_order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.5")})
+    """task-8336(리뷰 REJECT task-8179 후속), task-8357(CTO 결정으로 재작성):
+    MARKET 주문은 price가 없어 기존 가드(order_type==LIMIT 조건)가 완전히
+    스킵됐었다 -- 이제 참조가(get_ticker)*quantity로 실제 notional을 계산해
+    BTC/USDT min_notional(1) 미달이면 거래소 호출 전에 거부한다. 참조가
+    50000일 때 quantity=0.00001 -> notional=0.5 < 1."""
+    client = _paper_client(ticker_price=Decimal("50000"))
+    bad_order = _order(order_type=OrderType.MARKET).model_copy(
+        update={"quantity": Decimal("0.00001")}
+    )
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(bad_order)
+    assert client.calls == []
+    assert client.ticker_calls == ["BTC/USDT"]
+
+
+async def test_place_order_rejects_finding_223_large_quantity_low_real_notional():
+    """finding#223(QA task-8357) 재현: task-8336의 절대값 비교
+    (quantity>=min_notional)는 quantity=1(=min_notional)이면 무조건 통과시켜,
+    실제 notional이 낮은 저가 코인 대량 주문을 놓쳤다. 참조가 0.5일 때
+    quantity=1 -> 실제 notional=0.5 < min_notional(1)이므로 이제는 거부돼야
+    한다 -- 절대값 비교였다면 이 케이스는 (구현 결함으로) 통과했었다."""
+    client = _paper_client(ticker_price=Decimal("0.5"))
+    bad_order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
     with pytest.raises(FatalExchangeError):
         await client.place_order(bad_order)
     assert client.calls == []
 
 
-async def test_place_order_accepts_market_order_at_min_notional_boundary():
-    """회귀 방지: 기존 해피 패스(MARKET, quantity=1)가 새 가드로 인해
-    거부되지 않아야 한다 -- BTC/USDT min_notional(1)과 동일한 경계값은
-    통과(엄격한 `<` 비교, `<=` 아님)."""
+async def test_place_order_accepts_small_quantity_market_order_with_sufficient_real_notional():
+    """finding#223(QA task-8357) 재현: task-8336의 절대값 비교는 quantity가
+    min_notional(1)보다 작으면(예: 0.1 BTC) 실제 notional이 충분해도 거부해,
+    검증 목적과 반대로 동작했다. 참조가 50000일 때 quantity=0.1 ->
+    실제 notional=5000 >= min_notional(1)이므로 이제는 통과해야 한다."""
     client = _paper_client(
+        ticker_price=Decimal("50000"),
         responses={
             "/api/v5/trade/order": {
                 "code": "0",
                 "msg": "",
                 "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
             }
-        }
+        },
+    )
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})
+    result = await client.place_order(order)
+    assert result.exchange_order_id == "BTC-USDT:1234567"
+
+
+async def test_place_order_accepts_market_order_at_min_notional_boundary():
+    """회귀 방지: 참조가*quantity가 min_notional(1)과 정확히 같은 경계값은
+    통과한다(엄격한 `<` 비교, `<=` 아님) -- 참조가 1, quantity 1 -> notional 1."""
+    client = _paper_client(
+        ticker_price=Decimal("1"),
+        responses={
+            "/api/v5/trade/order": {
+                "code": "0",
+                "msg": "",
+                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
+            }
+        },
     )
     order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
     result = await client.place_order(order)
     assert result.exchange_order_id == "BTC-USDT:1234567"
+
+
+async def test_place_order_rejects_market_order_when_reference_price_fetch_fails():
+    """부정 테스트 + 장애주입(task-8357, CTO 결정): 참조가 조회
+    (get_ticker)가 실패하면 근사치로 되돌아가거나 검증을 건너뛰지 않고
+    fail-closed로 주문 자체를 거부해야 한다."""
+    client = _paper_client(ticker_error=ExchangeAPIError("price feed 장애"))
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
 
 
 async def test_place_order_rejects_symbol_without_registered_limits():

@@ -54,10 +54,20 @@ is rejected rather than silently skipping the check.
 Review REJECT (task-8179, follow-up task-8336) -- the F4-OKX min_notional
 guard above only ran for `order_type == LIMIT`, so a MARKET order skipped
 min_notional validation entirely (no price to multiply against quantity).
-`_validate_tick_lot_min_notional` now also checks MARKET orders, comparing
-`order.quantity` directly against `min_notional` as an honest approximation
-(no live price feed exists in this leaf to compute a real quote-currency
-notional) rather than skipping the check.
+
+Review REJECT (task-8336, follow-up task-8357, CTO decision) -- task-8336's
+first fix compared `order.quantity` (a base-currency amount, e.g. BTC)
+directly against `min_notional` (a quote-currency threshold, e.g. USDT) as
+an "approximation." That comparison is inverted from its purpose: a small
+order with sufficient real notional could be rejected while a
+large-quantity order with insufficient real notional could pass.
+`_validate_tick_lot_min_notional` now fetches a reference price via
+`self.get_ticker(order.symbol)` (same contract `ExchangeAdapter.get_ticker`
+already exposes, mirrored by `bitget/account_mixin.py`'s
+`_TickerReadingClient`) and computes the real notional as
+`ticker.price * order.quantity`. A ticker fetch failure rejects the order
+fail-closed (`FatalExchangeError`) instead of falling back to the
+quantity-only approximation or skipping the check.
 
 Every method in this file moves funds, so every one carries
 `@require_paper_sandbox` with no exceptions (same convention as
@@ -75,7 +85,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Protocol
 
-from src.core.exceptions import FatalExchangeError
+from src.core.exceptions import ExchangeAPIError, FatalExchangeError
+from src.data.models.market_data import Ticker
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.live_guard import require_paper_sandbox
 from src.exchanges.okx.symbols import to_okx_symbol as _to_okx_symbol
@@ -122,17 +133,17 @@ def _to_okx_ord_type(order_type: OrderType) -> str:
     raise FatalExchangeError(f"OKX가 지원하지 않는 주문 타입: {order_type!r}")
 
 
-def _validate_order(order: Order) -> None:
+async def _validate_order(order: Order, client: _TickerReadingOrderClient) -> None:
     if order.quantity <= 0:
         raise FatalExchangeError(f"OKX 주문 수량은 0보다 커야 함: {order.quantity!r}")
     if order.order_type == OrderType.LIMIT and (order.price is None or order.price.amount <= 0):
         raise FatalExchangeError(
             f"OKX 지정가(limit) 주문은 0보다 큰 가격이 필요함: {order.price!r}"
         )
-    _validate_tick_lot_min_notional(order)
+    await _validate_tick_lot_min_notional(order, client)
 
 
-def _validate_tick_lot_min_notional(order: Order) -> None:
+async def _validate_tick_lot_min_notional(order: Order, client: _TickerReadingOrderClient) -> None:
     """F4-OKX (task-8076) -- reject before the exchange call, not delegate
     to OKX's own rejection (audit finding: `place_order` used to only check
     `>0`). Fail-closed for any symbol not in `_SYMBOL_LIMITS` -- a missing
@@ -154,15 +165,25 @@ def _validate_tick_lot_min_notional(order: Order) -> None:
         if notional < min_notional:
             raise FatalExchangeError(f"OKX 최소 주문금액({min_notional}) 미달: {notional!r}")
     elif order.order_type == OrderType.MARKET:
-        # Follow-up to review REJECT (task-8179): `order.price` is always
-        # None for MARKET orders (contract), so a real quote-currency
-        # notional (price*quantity) cannot be computed. Compare
-        # `order.quantity` directly against `min_notional` as a fail-closed
-        # approximation instead of skipping the check entirely -- honest
-        # about being an approximation, not a measured quote notional (§10).
-        if order.quantity < min_notional:
+        # CTO decision (task-8357, follow-up to review REJECT task-8336):
+        # `order.price` is always None for MARKET orders (contract), so the
+        # real quote-currency notional needs a reference price from a
+        # market-data source -- comparing `order.quantity` (base currency)
+        # directly against `min_notional` (quote currency) is inverted from
+        # the check's purpose. Fetch a reference price via `get_ticker` and
+        # reject fail-closed if the fetch fails -- never fall back to the
+        # quantity-only approximation or skip the check.
+        try:
+            ticker = await client.get_ticker(order.symbol)
+        except ExchangeAPIError as exc:
             raise FatalExchangeError(
-                f"OKX 최소 주문금액({min_notional}) 미달(MARKET 근사치): {order.quantity!r}"
+                f"OKX MARKET 주문 min_notional 검증용 참조가 조회 실패: {order.symbol!r}"
+            ) from exc
+        notional = ticker.price * order.quantity
+        if notional < min_notional:
+            raise FatalExchangeError(
+                f"OKX 최소 주문금액({min_notional}) 미달(MARKET, 참조가={ticker.price!r}): "
+                f"{notional!r}"
             )
 
 
@@ -236,10 +257,20 @@ class _OrderMutatingClient(_OKXOrderClient, Protocol):
     async def get_order(self, order_id: str) -> Order: ...
 
 
+class _TickerReadingOrderClient(_OKXOrderClient, Protocol):
+    """place_order() needs a reference price to validate MARKET-order
+    min_notional (task-8357, CTO decision) -- included explicitly in the
+    contract for the same reason as bitget/account_mixin.py's
+    `_TickerReadingClient` (get_ticker lives in market_data_mixin.py, task
+    BR-21c, not yet assembled for OKX)."""
+
+    async def get_ticker(self, symbol: str) -> Ticker: ...
+
+
 class OKXTradingMixin:
     @require_paper_sandbox
-    async def place_order(self: _OKXOrderClient, order: Order) -> Order:
-        _validate_order(order)
+    async def place_order(self: _TickerReadingOrderClient, order: Order) -> Order:
+        await _validate_order(order, self)
         inst_id = _to_inst_id(order.symbol)
         body: dict[str, Any] = {
             "instId": inst_id,
