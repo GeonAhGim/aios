@@ -51,6 +51,14 @@ round trip performed for this leaf), not a live-measured `SymbolSnapshot`
 (contrast `bitget/venue_profile.py`). A symbol absent from `_SYMBOL_LIMITS`
 is rejected rather than silently skipping the check.
 
+Review REJECT (task-8179, follow-up task-8336) -- the F4-OKX min_notional
+guard above only ran for `order_type == LIMIT`, so a MARKET order skipped
+min_notional validation entirely (no price to multiply against quantity).
+`_validate_tick_lot_min_notional` now also checks MARKET orders, comparing
+`order.quantity` directly against `min_notional` as an honest approximation
+(no live price feed exists in this leaf to compute a real quote-currency
+notional) rather than skipping the check.
+
 Every method in this file moves funds, so every one carries
 `@require_paper_sandbox` with no exceptions (same convention as
 bitget/kis/nh/kiwoom trading_mixin.py; the AST scanner in
@@ -145,6 +153,17 @@ def _validate_tick_lot_min_notional(order: Order) -> None:
         notional = price * order.quantity
         if notional < min_notional:
             raise FatalExchangeError(f"OKX 최소 주문금액({min_notional}) 미달: {notional!r}")
+    elif order.order_type == OrderType.MARKET:
+        # 리뷰 REJECT(task-8179) 후속 -- MARKET 주문은 `order.price`가 항상
+        # None(계약)이라 실제 quote 통화 notional(price*quantity)을 계산할
+        # 방법이 없다. 사전검증을 완전히 건너뛰는 대신, `order.quantity`를
+        # notional 근사치로 삼아 fail-closed 비교한다 -- 실거래소 왕복 없이
+        # 최소 주문금액 미달을 걸러내기 위한 근사치이지, 실측 quote
+        # notional이 아니다(정직한 한계 표기, §10).
+        if order.quantity < min_notional:
+            raise FatalExchangeError(
+                f"OKX 최소 주문금액({min_notional}) 미달(MARKET 근사치): {order.quantity!r}"
+            )
 
 
 def _to_inst_id(symbol: str) -> str:

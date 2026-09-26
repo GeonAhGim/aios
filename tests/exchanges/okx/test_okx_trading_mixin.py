@@ -285,6 +285,36 @@ async def test_place_order_rejects_below_min_notional():
     assert client.calls == []
 
 
+async def test_place_order_rejects_below_min_notional_market_order():
+    """task-8336(리뷰 REJECT task-8179 후속): MARKET 주문은 price가 없어
+    기존 가드(order_type==LIMIT 조건)가 완전히 스킵됐다 -- min_notional
+    미달 MARKET 주문도 거래소 호출 전에 거부해야 한다(quantity를 notional
+    근사치로 사용, BTC/USDT min_notional=1)."""
+    client = _paper_client()
+    bad_order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.5")})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(bad_order)
+    assert client.calls == []
+
+
+async def test_place_order_accepts_market_order_at_min_notional_boundary():
+    """회귀 방지: 기존 해피 패스(MARKET, quantity=1)가 새 가드로 인해
+    거부되지 않아야 한다 -- BTC/USDT min_notional(1)과 동일한 경계값은
+    통과(엄격한 `<` 비교, `<=` 아님)."""
+    client = _paper_client(
+        responses={
+            "/api/v5/trade/order": {
+                "code": "0",
+                "msg": "",
+                "data": [{"ordId": "1234567", "sCode": "0", "sMsg": ""}],
+            }
+        }
+    )
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
+    result = await client.place_order(order)
+    assert result.exchange_order_id == "BTC-USDT:1234567"
+
+
 async def test_place_order_rejects_symbol_without_registered_limits():
     """task-8076(F4-OKX): tick/lot/min_notional 한도가 없는 심볼은 검증을
     건너뛰지 않고 fail-closed로 거부한다."""
