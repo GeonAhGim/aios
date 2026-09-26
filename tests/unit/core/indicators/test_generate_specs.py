@@ -1,4 +1,4 @@
-"""IND-10 — 설치된 TA-Lib 전 함수 자동 생성 계약 테스트.
+"""IND-2g / IND-10 — 설치된 TA-Lib 전 함수 자동 생성 계약 테스트.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 IND-10
 
@@ -24,6 +24,8 @@ task-1729(commit 45b4ce4)에 실패 주입·수치 성능 단언·게이트 적�
 from __future__ import annotations
 
 import dataclasses
+import subprocess
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -367,3 +369,27 @@ def test_gate_turns_red_when_a_generated_only_spec_is_hand_tampered() -> None:
 
     with pytest.raises(AssertionError):
         assert canonical_spec_dict("ADX", hand_written) == canonical_spec_dict("ADX", fresh["ADX"])
+
+
+@pytest.mark.parametrize(
+    "module",
+    ["src.core.indicators.generate_specs", "src.core.indicators.specs_talib"],
+)
+def test_catalog_import_fails_closed_without_talib(module: str) -> None:
+    """IND-2g: missing TA-Lib must not publish an empty or partial catalog."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib, sys; sys.modules['talib'] = None; "
+            "importlib.import_module(sys.argv[1])",
+            module,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "ModuleNotFoundError" in result.stderr
+    assert "talib" in result.stderr
