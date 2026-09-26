@@ -15,8 +15,11 @@ coverage.xml
 /mutation-report.json
 # task-3878: OPS-45/46 git hooks (commit-msg, pre-commit) are regenerated per
 # worktree by worker_runner.ensure_bom_hooks() (core.hooksPath=.claude/hooks) --
-# local-only, never committed.
-/.claude/hooks/
+# local-only, never committed. task-7981: session-start.sh is a committed
+# Claude Code SessionStart hook (a different "hooks" concept that happens to
+# share this directory name), not one of those generated git hooks.
+/.claude/hooks/*
+!/.claude/hooks/session-start.sh
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
