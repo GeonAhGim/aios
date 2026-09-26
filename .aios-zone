@@ -53,3 +53,4 @@ scaffold_reasons:
   marketplace: "ports, adapters: 리스팅 가시성·검증 로직이 domain에만 있고 저장소 연동 포트/어댑터가 아직 구현되지 않음"
   reporting: "domain, ports, adapters: account_summary가 application에서 다른 컨텍스트의 domain을 조합하는 리포팅 전용 컨텍스트 — 자체 도메인 모델·포트·어댑터가 아직 없음"
   whatif: "ports, adapters, contracts: impact/preview_order가 domain·application 계층에만 있는 순수 계산 스캐폴드 — 외부 I/O 연동 시점에 추가 예정"
+  tax_report: "application, ports, adapters, contracts: U-9 1단계는 순수 집계만 제공; 저널 조회와 입력 매핑은 후속 리프"
