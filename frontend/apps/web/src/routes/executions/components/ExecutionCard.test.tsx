@@ -48,6 +48,7 @@ function execution(overrides: Partial<ExecutionCardResponse> = {}): ExecutionCar
     realizedPnl: "10.00",
     unrealizedPnl: "-5.00",
     maxDrawdownPct: null,
+    lastRiskVerdict: null,
     ...overrides,
   };
 }
@@ -63,6 +64,41 @@ describe("ExecutionCard 기본 표시", () => {
     expect(screen.getByText("실현 손익 10.00")).toBeInTheDocument();
     expect(screen.getByText("미실현 손익 -5.00")).toBeInTheDocument();
     expect(screen.getByText("PENDING")).toBeInTheDocument();
+  });
+
+  it("lastRiskVerdict가 없으면 판정 패널을 보여주지 않는다", () => {
+    render(<ExecutionCard execution={execution({ lastRiskVerdict: null })} />);
+
+    expect(screen.queryByText("리스크/컴플라이언스 판정")).not.toBeInTheDocument();
+  });
+
+  it("lastRiskVerdict.outcome이 ALLOW면 판정 패널을 생략한다", () => {
+    render(
+      <ExecutionCard
+        execution={execution({
+          lastRiskVerdict: { outcome: "ALLOW", reasonCodes: [], evaluatedAt: "2026-01-01T00:00:00Z" },
+        })}
+      />,
+    );
+
+    expect(screen.queryByText("리스크/컴플라이언스 판정: 승인")).not.toBeInTheDocument();
+  });
+
+  it("lastRiskVerdict.outcome이 DENY면 사유 코드와 함께 danger 톤 판정 패널을 보여준다", () => {
+    render(
+      <ExecutionCard
+        execution={execution({
+          lastRiskVerdict: {
+            outcome: "DENY",
+            reasonCodes: ["RSK-007"],
+            evaluatedAt: "2026-01-01T00:00:00Z",
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("리스크/컴플라이언스 판정: 거부")).toBeInTheDocument();
+    expect(screen.getByText("사유: RSK-007")).toBeInTheDocument();
   });
 
   it("RUNNING이 아니고 RETIRED가 아니면 시작 버튼만 보여준다", () => {

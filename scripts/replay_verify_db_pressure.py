@@ -32,8 +32,10 @@ fail-open once that budget is exhausted (this is contention mitigation, not a
 correctness gate; `replay_verify`'s own fail-closed digest comparison is
 untouched by this module either way).
 """
+
 from __future__ import annotations
 
+import random
 import sys
 from collections.abc import Awaitable, Callable
 
@@ -43,7 +45,39 @@ DB_PRESSURE_THRESHOLD = 0.7
 DB_PRESSURE_MAX_RETRIES = 3
 DB_PRESSURE_BACKOFF_SEC: tuple[float, ...] = (5.0, 10.0, 20.0)
 
+# task-7648 (esc-ci-replay_verify.json, 14th+ recurrence, first_seen 2026-09-22):
+# the traceback moved from `proactor_events.py` (task-6522's target) to
+# `selector_events.py`'s own `_read_ready__data_received` -- the exact reset shape
+# task-6522 set out to eliminate by switching event-loop policy still happens, just
+# surfaced through the *other* loop backend's read path. That proves the reset is
+# not an artifact of which asyncio loop backend drives the socket -- it is a real
+# external TCP RST landing during the initial connect handshake itself, which
+# `await_db_capacity` cannot see: every sibling `replay_verify.py` process
+# pm/local_ci.py spawns (one per xdist worker DB, task-6743's registration site)
+# probes `pg_stat_activity` and dials out at effectively the same instant they were
+# all launched, so N processes can each observe "under threshold" independently and
+# then all open new sockets in the same instant regardless of what the gate
+# measured a moment earlier -- a thundering herd `await_db_capacity`'s own TOCTOU
+# cannot close (it guards against *sustained* pressure, not a *simultaneous burst*
+# from processes that all checked before any of them connected).
+_STARTUP_JITTER_MAX_SEC = 2.0
+
 _PROBE_ERRORS: tuple[type[BaseException], ...] = (OSError, asyncpg.PostgresError)
+
+
+async def stagger_startup(*, sleep: Callable[[float], Awaitable[None]]) -> None:
+    """Sleeps `random.uniform(0, _STARTUP_JITTER_MAX_SEC)` before a
+    `replay_verify.py` process makes its first connect attempt -- spreads
+    sibling processes launched near-simultaneously (see module docstring)
+    across a few hundred ms to a couple of seconds, turning their lockstep
+    connect burst into the same trickle the retry backoff already tolerates
+    one connection at a time. Randomized (not a fixed delay) so concurrent
+    processes computing the same schedule do not just move the herd to a new
+    fixed instant -- mirrors `replay_verify._sleep_before_retry`'s identical
+    decorrelation rationale (task-6627). No budget or threshold moved here
+    (DECISION_GUIDELINES B-2) -- this only changes *when* the existing,
+    unchanged retry budget starts spending itself."""
+    await sleep(random.uniform(0, _STARTUP_JITTER_MAX_SEC))  # noqa: S311 -- startup jitter, not crypto
 
 
 async def connection_pressure(dsn: str) -> tuple[int, int] | None:

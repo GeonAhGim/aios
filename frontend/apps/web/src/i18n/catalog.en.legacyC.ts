@@ -150,6 +150,10 @@ export const catalogEnLegacyC = {
     "t7": "Start",
     "t8": "Pause",
     "t9": "Stop",
+    "riskVerdictTitle": "Risk/compliance verdict",
+    "riskVerdictAllow": "Allowed",
+    "riskVerdictDeny": "Denied",
+    "riskVerdictReasonCodes": "Reasons: {{reasonCodes}}",
   },
   "mandateRuleForm": {
     "label1": "Total exposure limit (%)",

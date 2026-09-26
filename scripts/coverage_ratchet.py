@@ -12,6 +12,7 @@ CI·GitHub Actions 양쪽에서 그대로 재사용된다.
 사용: `python scripts/coverage_ratchet.py` (저장소 루트에서, coverage.xml이
 이미 생성돼 있어야 함). 종료코드 0=통과(하락 없음), 1=하락 또는 입력 오류.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,6 +24,14 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_COVERAGE_XML = ROOT / "coverage.xml"
 DEFAULT_BASELINE = ROOT / "coverage-baseline.txt"
 DEFAULT_TOLERANCE_PP = 0.5
+# coverage.py only reports files it actually imported during the measured run
+# (no `[tool.coverage.run] source = src` forcing full discovery here), so a
+# pytest stage that dies partway through (timeout/resource contention) leaves
+# `lines-valid` far smaller than a full run's -- that shrunk denominator is
+# what produces the 59~81%p false-red swings documented in ci_recheck.py. A
+# ratio below this floor means the report itself is not trustworthy, so we
+# refuse the comparison instead of ratcheting off a partial measurement.
+DEFAULT_MIN_LINES_VALID_RATIO = 0.5
 
 
 class CoverageRatchetError(ValueError):
@@ -59,6 +68,20 @@ def read_current_coverage_percent(coverage_xml: Path) -> float:
         ) from exc
 
 
+def read_current_lines_valid(coverage_xml: Path) -> int | None:
+    """Cobertura 루트의 `lines-valid`(측정된 전체 라인 수)를 반환한다. 속성이
+    없거나 숫자가 아니면 None — 이 값은 부분 리포트 감지용 보조 신호일 뿐이라
+    없다고 FAIL하지 않는다(그 자체는 `read_current_coverage_percent`가 검증)."""
+    root = ET.parse(coverage_xml).getroot()
+    raw = root.attrib.get("lines-valid")
+    if raw is None:
+        return None
+    try:
+        return int(float(raw))
+    except ValueError:
+        return None
+
+
 def read_baseline_percent(baseline_path: Path) -> float | None:
     """baseline 파일이 없으면 None(최초 실행), 있으면 백분율 값을 반환한다."""
     if not baseline_path.exists():
@@ -66,14 +89,34 @@ def read_baseline_percent(baseline_path: Path) -> float | None:
     text = baseline_path.read_text(encoding="utf-8").strip()
     if not text:
         raise CoverageRatchetError(f"baseline 파일이 비어 있음: {baseline_path}")
+    first_line = text.splitlines()[0]
     try:
-        return round(float(text), 2)
+        return round(float(first_line), 2)
     except ValueError as exc:
-        raise CoverageRatchetError(f"baseline 값이 숫자가 아님: {text!r}") from exc
+        raise CoverageRatchetError(f"baseline 값이 숫자가 아님: {first_line!r}") from exc
 
 
-def write_baseline_percent(baseline_path: Path, percent: float) -> None:
-    baseline_path.write_text(f"{percent:.2f}\n", encoding="utf-8")
+def read_baseline_lines_valid(baseline_path: Path) -> int | None:
+    """baseline 파일 2번째 줄에 적힌 `lines-valid` 스냅샷. 없으면(구버전 baseline
+    또는 최초 실행) None — 이 경우 부분 리포트 검사는 건너뛴다(비교 대상 부재)."""
+    if not baseline_path.exists():
+        return None
+    lines = baseline_path.read_text(encoding="utf-8").strip().splitlines()
+    if len(lines) < 2:
+        return None
+    try:
+        return int(lines[1].strip())
+    except ValueError:
+        return None
+
+
+def write_baseline_percent(
+    baseline_path: Path, percent: float, lines_valid: int | None = None
+) -> None:
+    body = f"{percent:.2f}\n"
+    if lines_valid is not None:
+        body += f"{lines_valid}\n"
+    baseline_path.write_text(body, encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,19 +126,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--coverage-xml", type=Path, default=DEFAULT_COVERAGE_XML)
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     parser.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE_PP)
+    parser.add_argument(
+        "--min-lines-valid-ratio",
+        type=float,
+        default=DEFAULT_MIN_LINES_VALID_RATIO,
+        help="baseline 대비 이 비율 미만으로 lines-valid가 줄면 부분 리포트로 보고 비교를 거부한다",
+    )
     args = parser.parse_args(argv)
 
     try:
         current = read_current_coverage_percent(args.coverage_xml)
+        current_lines_valid = read_current_lines_valid(args.coverage_xml)
         baseline = read_baseline_percent(args.baseline)
+        baseline_lines_valid = read_baseline_lines_valid(args.baseline)
     except CoverageRatchetError as exc:
         print(f"FAIL: {exc}")
         return 1
 
     if baseline is None:
-        write_baseline_percent(args.baseline, current)
+        write_baseline_percent(args.baseline, current, current_lines_valid)
         print(f"BASELINE 초기화: {current:.2f}% -> {args.baseline}")
         return 0
+
+    if (
+        baseline_lines_valid is not None
+        and current_lines_valid is not None
+        and current_lines_valid < baseline_lines_valid * args.min_lines_valid_ratio
+    ):
+        print(
+            f"FAIL: 부분 커버리지 리포트로 보임(측정 라인 수 lines-valid "
+            f"{baseline_lines_valid} -> {current_lines_valid}, 최소 비율 "
+            f"{args.min_lines_valid_ratio:.2f} 미달) — 비교를 거부한다(상류 pytest 조기중단 의심)"
+        )
+        return 1
 
     delta = current - baseline
     if delta < -args.tolerance:
@@ -106,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if current > baseline:
-        write_baseline_percent(args.baseline, current)
+        write_baseline_percent(args.baseline, current, current_lines_valid)
         print(f"OK: 커버리지 상승, baseline 갱신 {baseline:.2f}% -> {current:.2f}%")
         return 0
 

@@ -43,3 +43,4 @@
 | ADR-2026-09-10-C | 개발정책 3단계 전환 — 파일 길이에서 도메인 응집·불변식 지역성으로, 변경 거버넌스는 closeout 시점에 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-C-development-policy-phase3.md |
 | ADR-2026-09-24-A | MVP-1 종료 순서(CI 녹색+종결 게이트 우선, QA 부채 로컬 소진, D?→E2E 5종, 함대 개선 범위 축소) + 함대 조직 재사용 kit(DevEngine 기초) | Accepted | 2026-09-24 |  |  |  | design/ADR-2026-09-24-A-mvp1-exit-order-and-fleet-kit.md |
 | ADR-2026-09-26-A | MVP-2 우선 2의 클라우드 전용 조건부 선착수(독립 모듈만·플래그 off·hold cloud_session·QA는 S만·main 적색 시 머지 중단) — ADR-2026-09-24-A D1-1 개정 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-A-mvp2-priority2-cloud-early.md |
+| ADR-2026-09-26-B | 전략 런타임 격리(SBX)·IR-only 소스 보호(SRC)·AI/LIVE 분리 불변식 I-12(AIS)·import-linter 도메인 계약(DOM) | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-B-strategy-sandbox-source-protection-ai-separation-domain-boundaries.md |

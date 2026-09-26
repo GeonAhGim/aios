@@ -47,6 +47,7 @@ green-check로 쓰이는 E2E 시나리오. 이 파일의 각 테스트가 실제
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from decimal import Decimal
 from uuid import UUID
 
@@ -213,6 +214,17 @@ async def test_exchange_rejection_is_fail_closed_and_propagates_not_swallowed(
     assert order["status"] == "UNKNOWN"
     assert order["quantity"] == Decimal("20.0000000000")
     assert position is None
+
+
+@pytest.fixture(autouse=True)
+async def _clear_outbox_leftovers(pool: asyncpg.Pool) -> AsyncIterator[None]:
+    """`order_command_outbox` is shared by every test in this xdist worker DB and
+    `claim_batch(limit=10)` takes PENDING rows in queue order, so leftovers from
+    earlier files can crowd out this test's own CANCEL row (main run #36187016384:
+    claimed == 0). Same remedy as test_stale_worker_late_write.py (#89)."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox")
+    yield
 
 
 async def test_cancel_request_crosses_real_outbox_boundary_to_exchange_adapter(
