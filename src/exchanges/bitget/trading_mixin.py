@@ -22,6 +22,7 @@ get_order_history/get_fills + 신규 find_order_by_client_id)과 행 파서
 이 파일의 모든 메서드는 자금을 움직이므로 예외 없이
 `@require_paper_sandbox`(task-1045/1356 AST 게이트가 강제)를 갖는다.
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -36,8 +37,11 @@ from src.exchanges.bitget.account_mode import (
 from src.exchanges.bitget.symbols import to_bitget_symbol as _to_bitget_symbol
 from src.exchanges.bitget.trading_query_mixin import BitgetTradingQueryMixin
 from src.exchanges.bitget.trading_query_mixin import _row_to_order as _row_to_order
+from src.exchanges.bitget.venue_profile import BITGET_SPOT_PROFILE
 from src.exchanges.common.http_client import SignedRequestClient
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.services.oms.domain.errors import OrderValidationError
+from src.services.oms.domain.rounding import check_notional
 
 __all__ = ["BitgetTradingMixin", "_row_to_order"]
 
@@ -61,6 +65,35 @@ class _AccountModeClient(SignedRequestClient, AccountModeAwareClient, Protocol):
     SignedRequestClient does not know it)."""
 
 
+def _reject_if_unsubmittable(order: Order) -> None:
+    """FD-4.1 사전검증(task-8073, F4 감사 정정) — BITGET_SPOT_PROFILE의
+    tick/lot/min_notional을 거래소 호출 전에 확인한다. 위반 시 거래소를
+    부르지 않고 즉시 `OrderValidationError`로 거부한다(fail-closed, §3.4
+    `OMS_VALIDATION_{TICK,LOT,MIN_NOTIONAL}`). 심볼이 프로필에 없으면
+    (未등록 심볼) 검사를 건너뛴다 — 거래소 응답으로 거부하는 기존 동작을
+    그대로 둔다. MARKET 주문(`order.price is None`)은 가격이 없어 tick/
+    min_notional 검사 대상이 아니다."""
+    tick = BITGET_SPOT_PROFILE.price_tick.get(order.symbol)
+    if tick is not None and order.price is not None:
+        price = order.price.amount
+        if price % tick != 0:
+            raise OrderValidationError(
+                "TICK",
+                f"{order.symbol}: 가격({price})이 tick 단위({tick})에 맞지 않습니다.",
+            )
+
+    lot = BITGET_SPOT_PROFILE.qty_lot.get(order.symbol)
+    if lot is not None and order.quantity % lot != 0:
+        raise OrderValidationError(
+            "LOT",
+            f"{order.symbol}: 수량({order.quantity})이 lot 단위({lot})에 맞지 않습니다.",
+        )
+
+    min_notional = BITGET_SPOT_PROFILE.min_notional.get(order.symbol)
+    if min_notional is not None and order.price is not None:
+        check_notional(order.price.amount, order.quantity, min_notional)
+
+
 class BitgetTradingMixin(BitgetTradingQueryMixin):
     @require_paper_sandbox
     async def place_order(self: _AccountModeClient, order: Order) -> Order:
@@ -71,6 +104,7 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
         reassembles the request with the correct field names (see
         account_mode.account_aware_request — why the retry does not create
         a duplicate order is explained in that docstring)."""
+        _reject_if_unsubmittable(order)
 
         def build(mode: BitgetAccountMode) -> RequestSpec:
             body: dict[str, Any] = {
@@ -112,9 +146,7 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
         return bool(raw.get("code") == "00000")
 
     @require_paper_sandbox
-    async def modify_order(
-        self: _OrderReadingClient, order_id: str, **kwargs: Any
-    ) -> Order:
+    async def modify_order(self: _OrderReadingClient, order_id: str, **kwargs: Any) -> Order:
         """02b 스펙 §3.2(FD-4.4 실제 구현) — cancel-replace-order로 지정가
         주문의 가격/수량을 정정한다. 시장가 주문 정정 시도는 FD-4.1(사전
         검증)에서 이미 거래소 호출 전에 차단되므로 여기 도달하는 건 항상
@@ -125,16 +157,12 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
         if "size" in kwargs:
             body["size"] = str(kwargs["size"])
 
-        raw = await self._request(
-            "POST", "/api/v2/spot/trade/cancel-replace-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/spot/trade/cancel-replace-order", body=body)
         data = raw["data"]
         return await self.get_order(data["orderId"])
 
     @require_paper_sandbox
-    async def place_batch_orders(
-        self: SignedRequestClient, orders: list[Order]
-    ) -> list[Order]:
+    async def place_batch_orders(self: SignedRequestClient, orders: list[Order]) -> list[Order]:
         """02b 스펙 §3.2(P1) — FD-19(포트폴리오) 다중 실행 동시 진입용.
         Bitget V2 batch-orders는 한 심볼 안에서만 배치를 허용한다(커뮤니티
         SDK 레퍼런스 기준, 라이브 검증 필요) — 여러 심볼을 섞으면 호출부가
@@ -190,7 +218,5 @@ class BitgetTradingMixin(BitgetTradingQueryMixin):
         body: dict[str, Any] = {"orderIdList": [{"orderId": oid} for oid in order_ids]}
         if symbol is not None:
             body["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "POST", "/api/v2/spot/trade/batch-cancel-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/spot/trade/batch-cancel-order", body=body)
         return bool(raw.get("code") == "00000")

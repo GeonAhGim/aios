@@ -6,8 +6,13 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §7.1(측정 지점
 "inbox"), §9 L4-28. 원 리프(task-2323, `tests/performance/oms/
 test_inbox_lag.py`, commit `034fed00`)와 동일하게 `InboxProcessor.ingest()`
 (L4-15)를 부분체결로 대상 삼는다 — task-7998/F3부터는 부분체결도
-`ledger_effects.apply_position_ledger` 후속 호출을 타므로(원 리프 docstring
-참조, task-8046 갱신) 그 왕복까지 포함해 잰다:
+`ledger_effects.apply_position_ledger` 게이트 대상이지만, 이 테스트 픽스처의
+주문(`insert_open_order`)은 execution_id 없이 만들어져 `record_fill_in_
+position_ledger`가 즉시 no-op한다(FD-8 FROZEN decision layer가 execution
+컨텍스트 없이 제출하는 경로와 동형). task-8046이 이 no-op 조회 왕복까지
+예산에 반영해(23) CI를 녹색으로 만들었으나, task-8053이 `_process_row`가
+이미 쥔 `fresh.execution_id`로 no-op을 미리 걸러 그 낭비 왕복 자체를
+없앴다 — 예산은 task-2804 원값 21로 되돌아간다.
 
 1. `test_inbox_ingest_latency_within_environment_normalized_bound` — 원 리프가
    계산만 하고 print했던 환경 정규화 목표를 **실제로 단언**한다.
@@ -19,11 +24,8 @@ test_inbox_lag.py`, commit `034fed00`)와 동일하게 `InboxProcessor.ingest()`
    중복 전달 흡수 계약(F9, "같은 키는 한 번만 처리")을 깨므로 fail-closed
    증명이다.
 
-왕복 수 예산(23)은 task-2804 작업 중 재확인한 21에서, task-7998/F3(부분체결
-도 `position_ledger` 분기를 타게 완화)이 매 부분체결마다 더한
-`legacy_order_repository.get_by_order_id` 1회 + 그 별도 acquire/release의
-세션 리셋 1회를 반영해 task-8046이 갱신했다(`tests/performance/oms/
-test_inbox_lag.py` 모듈 docstring에 전체 구성표).
+왕복 수 예산(21)은 원 리프 산출과 동일 — task-2804 작업 중 재확인했고,
+task-8053이 no-op 조회 제거 후 다시 확인했다.
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ _P99_TARGET_MS = 300.0  # §7.1 운영 목표
 # 게이팅 배수 — p95 기준(test_perf_submit_internal.py와 동일 근거: p99는 표본
 # 100개의 사실상 최댓값이라 단일 OS 스케줄링 튐에도 흔들린다).
 _GATE_MULTIPLIER = 30
-_INGEST_PARTIAL_ROUND_TRIPS = 23  # task-2804 재확인 21 + task-7998/F3 반영(task-8046)
+_INGEST_PARTIAL_ROUND_TRIPS = 21  # 원 리프 실측 구성표 그대로(task-2804/task-8053 재확인)
 
 
 class _FailingFillsRepo(FillsRepository):

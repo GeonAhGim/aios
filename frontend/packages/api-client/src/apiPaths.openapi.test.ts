@@ -54,9 +54,6 @@ const snapshotPathSet = new Set(snapshotPathList);
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.sessions.list",
   "auth.sessions.revoke",
-  // task-2428(BT-18): backtests.sweep — apiRoutes.ts의 등록 주석 참조(실행 라우터
-  // 자체가 아직 없음, sessions.*와 동일 사유).
-  "backtests.sweep",
   // task-2699(UX-15): follow.subscriptions.* 3건 — apiRoutes.ts의 등록 주석 참조
   // (src/foundation/follow 모듈·src/api/routers/follow.py 자체가 아직 없음,
   // sessions.*와 동일 사유).

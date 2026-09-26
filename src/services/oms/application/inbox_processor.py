@@ -254,6 +254,12 @@ class InboxProcessor:
         await self._inbox.mark_processed(conn, row_id)
         if new_status not in (OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED):
             return None
+        if fresh.execution_id is None:
+            # `record_fill_in_position_ledger` no-ops without an execution
+            # context anyway (FD-8 FROZEN decision layer may submit without
+            # one) — skip the round trip to `_apply_position_ledger` rather
+            # than pay for a fetch that can only ever be discarded.
+            return None
         # `fills_for_order` was fetched after this fill's own insert, so it
         # includes this fill — its venue_ts-ordered position is this order's
         # real fill count so far (replaces F7's hardcoded fill_seq=1, task-7998).

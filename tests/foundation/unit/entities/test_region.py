@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -34,8 +35,12 @@ from src.foundation.entities.domain.region import (
 NOW = datetime(2026, 9, 26, tzinfo=timezone.utc)
 
 
-def _entity(**overrides: object) -> LegalEntity:
-    defaults: dict[str, object] = dict(
+def _entity(**overrides: Any) -> LegalEntity:
+    # pydantic's mypy plugin synthesizes a keyword-specific `__init__` for
+    # `LegalEntity`, so unpacking a `dict[str, object]` here fails arg-type
+    # (`object` doesn't match each field's declared type); `dict[str, Any]`
+    # satisfies it without an ignore-comment suppression (PLT-40 budget is a ratchet).
+    defaults: dict[str, Any] = dict(
         entity_id=uuid4(),
         tenant_id=uuid4(),
         name="Acme KR",
@@ -43,7 +48,7 @@ def _entity(**overrides: object) -> LegalEntity:
         region_tag="kr-seoul",
     )
     defaults.update(overrides)
-    return LegalEntity(**defaults)  # type: ignore[arg-type]
+    return LegalEntity(**defaults)
 
 
 # ---- happy path ----

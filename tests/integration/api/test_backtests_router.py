@@ -16,6 +16,7 @@ DC-28(ADR-2026-09-06-H D2) — `source_contract`의 `source_id` PK를 실DB에
 심으면 test_market_data_router.py와 공유돼 오염된다(그 파일 모듈 docstring
 참조). 같은 이유로 `get_source_contract_repository`를 페이크로 덮어쓴다.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -54,11 +55,17 @@ from src.main import app
 def _source_contract(scope: RedistributionScope, *, source_id: str = "BITGET") -> SourceContract:
     now = datetime.now(timezone.utc)
     return SourceContract(
-        source_id=source_id, tier=SourceContractTier.ENTERPRISE, credential_ref="test:none",
-        redistribution_scope=scope, rate_limit=1000, quota=1_000_000,
-        valid_from=now - timedelta(days=365), valid_to=None,
+        source_id=source_id,
+        tier=SourceContractTier.ENTERPRISE,
+        credential_ref="test:none",
+        redistribution_scope=scope,
+        rate_limit=1000,
+        quota=1_000_000,
+        valid_from=now - timedelta(days=365),
+        valid_to=None,
         capability=SourceCapability(
-            asset_classes=frozenset({"CRYPTO"}), resolutions=frozenset({"1m"}),
+            asset_classes=frozenset({"CRYPTO"}),
+            resolutions=frozenset({"1m"}),
         ),
     )
 
@@ -69,6 +76,7 @@ class _FakeSourceContractRepository:
 
     async def get(self, conn: asyncpg.Connection, source_id: str) -> SourceContract | None:
         return self._contract
+
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 PATH = "/v1/backtests/quick"
@@ -177,9 +185,14 @@ async def _audit_event_id(conn: asyncpg.Connection) -> uuid.UUID:
 
 def _candle(key: SeriesKey, open_time: datetime, price: int) -> CandleRecord:
     return CandleRecord(
-        key=key, open_time=open_time, close_time=open_time + timedelta(minutes=1),
-        open=Decimal(price), high=Decimal(price + 10), low=Decimal(price - 10),
-        close=Decimal(price + 5), volume=Decimal(10),
+        key=key,
+        open_time=open_time,
+        close_time=open_time + timedelta(minutes=1),
+        open=Decimal(price),
+        high=Decimal(price + 10),
+        low=Decimal(price - 10),
+        close=Decimal(price + 5),
+        volume=Decimal(10),
     )
 
 
@@ -188,12 +201,19 @@ async def _seed_candles(
 ) -> SeriesKey:
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
     batch = IngestBatchResult(
-        batch_id=uuid.uuid4(), source="test", venue=Venue.BITGET, instrument_id=instrument_id,
-        timeframe=Timeframe.M1, range_start=t0, range_end=t0 + timedelta(minutes=n),
+        batch_id=uuid.uuid4(),
+        source="test",
+        venue=Venue.BITGET,
+        instrument_id=instrument_id,
+        timeframe=Timeframe.M1,
+        range_start=t0,
+        range_end=t0 + timedelta(minutes=n),
         request_fingerprint=f"fp-{uuid.uuid4().hex}",
-        verdict=QualityVerdict(verdict=Verdict.ACCEPT, accepted=n, quarantined=0, rejected=0,
-                               issues=[]),
-        batch_hash=f"hash-{uuid.uuid4().hex}", audit_event_id=await _audit_event_id(conn),
+        verdict=QualityVerdict(
+            verdict=Verdict.ACCEPT, accepted=n, quarantined=0, rejected=0, issues=[]
+        ),
+        batch_hash=f"hash-{uuid.uuid4().hex}",
+        audit_event_id=await _audit_event_id(conn),
         stored_range=None,
     )
     await PostgresBatchRepository(pool).create(conn, batch)
@@ -211,7 +231,10 @@ async def seeded(client: AsyncClient) -> dict:
         instrument_id, symbol = await _seed_instrument(conn, t0 - timedelta(days=1))
         await _seed_candles(conn, pool, instrument_id, t0, 10)
     return {
-        "a": headers_a, "tenant_a": tenant_a, "instrument_id": instrument_id, "symbol": symbol,
+        "a": headers_a,
+        "tenant_a": tenant_a,
+        "instrument_id": instrument_id,
+        "symbol": symbol,
         "t0": t0,
     }
 
@@ -243,9 +266,9 @@ def test_router_has_zero_raw_http_exception() -> None:
     import ast
     from pathlib import Path
 
-    source = (
-        Path(__file__).resolve().parents[3] / "src/api/routers/backtests.py"
-    ).read_text("utf-8")
+    source = (Path(__file__).resolve().parents[3] / "src/api/routers/backtests.py").read_text(
+        "utf-8"
+    )
     calls = [
         n
         for n in ast.walk(ast.parse(source))
@@ -354,3 +377,73 @@ async def test_none_scope_source_denies_backtest(
     assert response.status_code == 404, response.text
     assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
     assert candle_store.read_calls == 0
+
+
+# ---- BT-18(task-7774) POST /v1/backtests/sweep ----
+
+
+SWEEP_PATH = "/v1/backtests/sweep"
+
+
+def _sweep_body(
+    seeded: dict, *, axes: list[dict] | None = None, combos: list[dict] | None = None
+) -> dict:
+    if axes is None:
+        # `ParamGrid` MIN_GRID_SIZE=4 -- 2x2 그리드가 최소 충족 크기다.
+        axes = [{"name": "x", "values": [1, 2]}, {"name": "y", "values": [1, 2]}]
+    if combos is None:
+        combos = [
+            {
+                "combo_key": "x=1,y=1",
+                "axis_values": {"x": 1, "y": 1},
+                "script_hash": "hash-x1y1",
+                "script_source": _SOURCE,
+            }
+        ]
+    return {
+        **_body(seeded),
+        "axes": axes,
+        "combos": combos,
+        "metric": "final_equity",
+        "data_lineage_hash": "lineage-1",
+        "rollup_version": "v1",
+        "seed": 1,
+    }
+
+
+def test_sweep_route_is_mounted_on_app() -> None:
+    paths = app.openapi()["paths"]
+    assert SWEEP_PATH in paths
+    assert "post" in paths[SWEEP_PATH]
+
+
+async def test_sweep_success_returns_one_point_per_combo(client: AsyncClient, seeded: dict) -> None:
+    response = await client.post(SWEEP_PATH, json=_sweep_body(seeded), headers=seeded["a"])
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert len(data["points"]) == 1
+    point = data["points"][0]
+    assert point["combo_key"] == "x=1,y=1"
+    assert point["axis_values"] == {"x": 1, "y": 1}
+    assert isinstance(point["metric_value"], str)
+    assert point["reproducibility_key"]
+    # 콤보 1개만 실행해 그리드(2x2=4점) 전체를 못 채운다 -- fail-closed 대신
+    # `stability_score`가 던지는 `ParamStabilityError`를 경고로 완화한다.
+    assert data["stability"] is None
+    assert data["warnings"]
+
+
+async def test_sweep_empty_axes_is_400(client: AsyncClient, seeded: dict) -> None:
+    """DoD negative — 빈 파라미터 그리드는 `ParamGrid` 생성 시점에
+    fail-closed로 거부된다(`ParamStabilityError` -> VALIDATION_INVALID_FIELD)."""
+    response = await client.post(
+        SWEEP_PATH, json=_sweep_body(seeded, axes=[], combos=[]), headers=seeded["a"]
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_sweep_unauthenticated_is_401(client: AsyncClient, seeded: dict) -> None:
+    response = await client.post(SWEEP_PATH, json=_sweep_body(seeded))
+    assert response.status_code == 401
+    assert "error_code" in response.json()
