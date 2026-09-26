@@ -200,6 +200,7 @@ async def test_pool_acquire_failure_propagates_fail_closed() -> None:
         await service.list_for_user(uuid4())
 
 
+@pytest.mark.perf
 async def test_verdict_mapping_throughput_for_large_result_set() -> None:
     """수치 성능 단언 — 500개 실행 행을 LastRiskVerdict로 매핑하는 순수
     파이썬 경로(네트워크/DB 왕복 제외)는 100ms 미만이어야 한다(회귀 감지용
