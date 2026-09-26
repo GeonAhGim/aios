@@ -6,9 +6,9 @@ Endpoints (verified 2026-09-26 against the official Binance Spot API
 documentation, github.com/binance/binance-spot-api-docs, `rest-api.md`
 §"Trading endpoints"):
 - POST /api/v3/order -- place order. Required: symbol, side (BUY/SELL),
-  type (MARKET/LIMIT), quantity. LIMIT additionally requires
-  timeInForce (GTC here) + price. Response: orderId (int), status
-  ("NEW" on acceptance).
+  type (MARKET/LIMIT), quantity, newClientOrderId. LIMIT additionally
+  requires timeInForce (GTC here) + price. Response: orderId (int),
+  status ("NEW" on acceptance).
 - DELETE /api/v3/order -- cancel order. Required: symbol, orderId.
   Response: status ("CANCELED" on success).
 - PUT /api/v3/order/cancelReplace -- Binance spot has no in-place
@@ -16,7 +16,18 @@ documentation, github.com/binance/binance-spot-api-docs, `rest-api.md`
   cancelReplaceMode="STOP_ON_FAILURE" (same "modify == cancel-replace"
   convention as Bitget's cancel-replace-order, trading_mixin.py).
   Required: symbol, side, type, cancelReplaceMode, cancelOrderId,
-  quantity; LIMIT additionally requires timeInForce + price.
+  quantity, newClientOrderId; LIMIT additionally requires timeInForce +
+  price.
+
+`newClientOrderId` is Binance's idempotency key (same contract as
+Bitget's clientOid, common/adapter.py's `supports_client_order_id`) --
+retransmitting a request with the same key does not create a duplicate
+order. `place_order` always sends `order.client_order_id`; `modify_order`
+requires a `client_order_id` kwarg for the same reason (the cancelReplace
+call places a brand-new order, so it needs its own idempotency key) and
+fails closed if it is missing or empty. quantity/price are rejected
+before the exchange call if they are <= 0, NaN, or infinite (same
+pre-validation convention as `okx/trading_mixin.py`'s `_validate_order`).
 
 Deviation: `ExchangeAdapter.cancel_order(order_id)`/`modify_order(order_id)`
 only accept a single string, but Binance's cancel/cancelReplace endpoints
@@ -39,6 +50,7 @@ wires this adapter in; nothing in this mixin bypasses it.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Protocol
 
 from src.core.exceptions import FatalExchangeError
@@ -58,6 +70,27 @@ def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
         )
     symbol, order_id = exchange_order_id.split(":", 1)
     return symbol, order_id
+
+
+def _validate_quantity(quantity: Decimal) -> None:
+    if quantity.is_nan() or quantity.is_infinite() or quantity <= 0:
+        raise FatalExchangeError(f"Binance order quantity must be finite and > 0: {quantity!r}")
+
+
+def _validate_price(price: Decimal) -> None:
+    if price.is_nan() or price.is_infinite() or price <= 0:
+        raise FatalExchangeError(f"Binance LIMIT order price must be finite and > 0: {price!r}")
+
+
+def _validate_client_order_id(client_order_id: str) -> None:
+    """Binance's newClientOrderId is the idempotency key that prevents a
+    retried request from creating a duplicate order (same contract as
+    Bitget's clientOid) -- a missing/empty key fails closed instead of
+    letting the request go out unkeyed."""
+    if not client_order_id:
+        raise FatalExchangeError(
+            "Binance order requires a non-empty client_order_id (newClientOrderId)"
+        )
 
 
 class _BinanceOrderClient(Protocol):
@@ -87,15 +120,19 @@ class _OrderMutatingClient(_BinanceOrderClient, Protocol):
 class BinanceTradingMixin:
     @require_paper_sandbox
     async def place_order(self: _BinanceOrderClient, order: Order) -> Order:
+        _validate_client_order_id(order.client_order_id)
+        _validate_quantity(order.quantity)
         params: dict[str, Any] = {
             "symbol": order.symbol,
             "side": order.side.value,
             "type": order.order_type.value,
             "quantity": str(order.quantity),
+            "newClientOrderId": order.client_order_id,
         }
         if order.order_type == OrderType.LIMIT:
             if order.price is None:
                 raise FatalExchangeError("Binance LIMIT order requires a price")
+            _validate_price(order.price.amount)
             params["timeInForce"] = _TIME_IN_FORCE_GTC
             params["price"] = str(order.price.amount)
         raw = await self._request("POST", _ORDER_PATH, params=params)
@@ -122,10 +159,13 @@ class BinanceTradingMixin:
         """Binance spot has no in-place amend endpoint -- `cancelReplace`
         cancels the existing order and atomically places a new one, so a
         modify here requires the full replacement order shape (symbol,
-        side, type, quantity), not just the changed field (same
-        fail-closed pre-validation style as KiwoomTradingMixin.modify_order
-        rejecting a price-less modify)."""
-        for required in ("side", "order_type", "quantity"):
+        side, type, quantity, client_order_id), not just the changed field
+        (same fail-closed pre-validation style as
+        KiwoomTradingMixin.modify_order rejecting a price-less modify).
+        `client_order_id` is sent as cancelReplace's `newClientOrderId` --
+        the idempotency key for the replacement order, same contract as
+        place_order's `newClientOrderId`."""
+        for required in ("side", "order_type", "quantity", "client_order_id"):
             if required not in kwargs:
                 raise FatalExchangeError(
                     f"Binance modify_order (cancelReplace) requires '{required}' -- "
@@ -134,19 +174,25 @@ class BinanceTradingMixin:
         symbol, binance_order_id = _split_exchange_order_id(order_id)
         side: OrderSide = kwargs["side"]
         order_type: OrderType = kwargs["order_type"]
+        quantity: Decimal = kwargs["quantity"]
+        _validate_client_order_id(kwargs["client_order_id"])
+        _validate_quantity(quantity)
         params: dict[str, Any] = {
             "symbol": symbol,
             "side": side.value,
             "type": order_type.value,
             "cancelReplaceMode": _CANCEL_REPLACE_MODE,
             "cancelOrderId": binance_order_id,
-            "quantity": str(kwargs["quantity"]),
+            "quantity": str(quantity),
+            "newClientOrderId": kwargs["client_order_id"],
         }
         if order_type == OrderType.LIMIT:
             if "price" not in kwargs:
                 raise FatalExchangeError("Binance LIMIT modify_order requires a price")
+            price: Decimal = kwargs["price"]
+            _validate_price(price)
             params["timeInForce"] = _TIME_IN_FORCE_GTC
-            params["price"] = str(kwargs["price"])
+            params["price"] = str(price)
         raw = await self._request("PUT", _CANCEL_REPLACE_PATH, params=params)
         try:
             new_order_id = raw["newOrderResponse"]["orderId"]
