@@ -69,6 +69,37 @@ already exposes, mirrored by `bitget/account_mixin.py`'s
 fail-closed (`FatalExchangeError`) instead of falling back to the
 quantity-only approximation or skipping the check.
 
+Follow-up (task-8374, QA task-8357 D3 finding#223) -- the merged fix above
+(commit d2183fea) covered the real-notional computation but left two gaps
+still explicit in the task spec: a stale reference price (ticker fetched
+long before this validation runs, e.g. a cached/delayed feed) and a
+zero/negative/non-finite reference price were both accepted uncritically.
+`_fetch_market_reference_price` now also rejects fail-closed when
+`ticker.price` is not finite/positive, or when `ticker.timestamp` is older
+than `_MARKET_REF_PRICE_MAX_STALENESS` (5 seconds) -- neither case falls
+back to the quantity-only approximation or a silent pass.
+
+Same-defect audit (task-8374 requirement) -- checked whether Bitget/
+Binance/KIS/NH have an analogous MARKET min_notional gap. None share OKX's
+specific "backwards approximation" bug (comparing base-currency quantity
+directly against a quote-currency threshold), but all four skip MARKET
+min_notional validation entirely rather than computing a real notional:
+- Bitget (`trading_mixin.py::_reject_if_unsubmittable`): the min_notional
+  branch is gated on `order.price is not None`, so `check_notional` never
+  runs for MARKET (`order.price` is always None for MARKET per the domain
+  contract) -- no reference-price lookup exists in this path at all.
+- Binance (`trading_mixin.py`): its pre-validation returns early when
+  `price is None`, before the min_notional comparison -- same skip.
+- KIS (`trading_mixin.py`): `if order.price is None: return  # market order`
+  precedes the tick/min_notional checks -- same skip.
+- NH (`trading_mixin.py`): has no tick/lot/min_notional validator at all
+  (no `_SYMBOL_LIMITS`-equivalent table or pre-exchange-call check), so
+  neither LIMIT nor MARKET orders are validated pre-flight for any of
+  tick/lot/min_notional.
+None of these are fixed in this leaf (task-8374 scope is OKX only) -- each
+is a distinct defect (silent skip, not inversion) and, if judged worth
+fixing, is a separate leaf per exchange.
+
 Every method in this file moves funds, so every one carries
 `@require_paper_sandbox` with no exceptions (same convention as
 bitget/kis/nh/kiwoom trading_mixin.py; the AST scanner in
@@ -82,6 +113,7 @@ guard applies to OKX with no exception once factory registration
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -115,6 +147,11 @@ _SYMBOL_LIMITS: dict[str, tuple[Decimal, Decimal, Decimal]] = {
     "BTC/USDT": (Decimal("0.1"), Decimal("0.00000001"), Decimal("1")),
     "ETH/USDT": (Decimal("0.01"), Decimal("0.000001"), Decimal("1")),
 }
+
+# task-8374 (QA task-8357 D3 finding#223 follow-up) -- a reference price
+# older than this is treated the same as no price at all (fail-closed
+# reject), not used to compute a stale notional.
+_MARKET_REF_PRICE_MAX_STALENESS = timedelta(seconds=5)
 
 
 def _to_okx_side(side: OrderSide) -> str:
@@ -173,12 +210,27 @@ async def _validate_tick_lot_min_notional(order: Order, client: _TickerReadingOr
         # the check's purpose. Fetch a reference price via `get_ticker` and
         # reject fail-closed if the fetch fails -- never fall back to the
         # quantity-only approximation or skip the check.
+        #
+        # task-8374 follow-up: a fetched price is also rejected fail-closed
+        # if it is stale (>5s old) or not a usable positive number (0/NaN) --
+        # neither case falls back to the quantity-only approximation.
         try:
             ticker = await client.get_ticker(order.symbol)
         except ExchangeAPIError as exc:
             raise FatalExchangeError(
                 f"OKX MARKET 주문 min_notional 검증용 참조가 조회 실패: {order.symbol!r}"
             ) from exc
+        if not ticker.price.is_finite() or ticker.price <= 0:
+            raise FatalExchangeError(
+                f"OKX MARKET 주문 min_notional 검증용 참조가가 유효하지 않음"
+                f"(price={ticker.price!r}): {order.symbol!r}"
+            )
+        age = datetime.now(timezone.utc) - ticker.timestamp
+        if age > _MARKET_REF_PRICE_MAX_STALENESS:
+            raise FatalExchangeError(
+                f"OKX MARKET 주문 min_notional 검증용 참조가가 스테일함"
+                f"(age={age!r} > {_MARKET_REF_PRICE_MAX_STALENESS!r}): {order.symbol!r}"
+            )
         notional = ticker.price * order.quantity
         if notional < min_notional:
             raise FatalExchangeError(

@@ -17,7 +17,7 @@ task-7868(BR-21 정정, 리뷰 REJECT 7802) — `order.symbol`은 canonical
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -45,6 +45,7 @@ class _StubClient(OKXTradingMixin):
         raise_path: str | None = None,
         ticker_price: Decimal | None = Decimal("50000"),
         ticker_error: Exception | None = None,
+        ticker_age: timedelta | None = None,
     ) -> None:
         self.is_paper_trading = demo_mode
         self.is_sandboxed = demo_mode
@@ -52,6 +53,7 @@ class _StubClient(OKXTradingMixin):
         self._raise_path = raise_path
         self._ticker_price = ticker_price
         self._ticker_error = ticker_error
+        self._ticker_age = ticker_age if ticker_age is not None else timedelta(seconds=0)
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
         self.ticker_calls: list[str] = []
 
@@ -82,7 +84,7 @@ class _StubClient(OKXTradingMixin):
             bid=self._ticker_price,
             ask=self._ticker_price,
             volume_24h=Decimal("0"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(timezone.utc) - self._ticker_age,
             source_type="reference",
         )
 
@@ -384,6 +386,36 @@ async def test_place_order_rejects_market_order_when_reference_price_fetch_fails
     (get_ticker)가 실패하면 근사치로 되돌아가거나 검증을 건너뛰지 않고
     fail-closed로 주문 자체를 거부해야 한다."""
     client = _paper_client(ticker_error=ExchangeAPIError("price feed 장애"))
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_market_order_with_stale_reference_price():
+    """부정 테스트(task-8374, finding#223 후속): 5초 초과로 스테일한
+    참조가는 notional이 충분해도(50000*0.1=5000) 신뢰하지 않고 거부."""
+    client = _paper_client(ticker_price=Decimal("50000"), ticker_age=timedelta(seconds=6))
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_market_order_with_zero_reference_price():
+    """부정 테스트(task-8374): 참조가 0은 notional을 무조건 0으로 만들어
+    min_notional 검증을 무의미하게 통과시키므로 계산 전에 거부."""
+    client = _paper_client(ticker_price=Decimal("0"))
+    order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_market_order_with_negative_reference_price():
+    """부정 테스트(task-8374): 음수 참조가(데이터 소스 이상)도 거부 --
+    0 검사만으로는 걸러지지 않는 별도 경로."""
+    client = _paper_client(ticker_price=Decimal("-1"))
     order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("1")})
     with pytest.raises(FatalExchangeError):
         await client.place_order(order)
