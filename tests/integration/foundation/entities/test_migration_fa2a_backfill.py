@@ -59,7 +59,7 @@ import pytest
 
 from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant, create_test_user
-from tests.support.db import ensure_worker_database
+from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -120,7 +120,7 @@ def _run_alembic(*args: str, database_url: str) -> None:
 @pytest.fixture
 async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str, None]:
     worker_id = f"fa2abf{abs(hash(request.node.name)) % 10_000_000}"
-    url = await ensure_worker_database(os.environ["DATABASE_URL"], worker_id)
+    url = await ensure_worker_database(template_database_url(), worker_id)
     yield url
 
 

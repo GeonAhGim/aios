@@ -93,10 +93,12 @@ def test_p95_wall_seconds_within_warmup_calls_are_not_counted_in_samples() -> No
     otherwise a slow first (e.g. cold-cache) call would dominate a small
     sample set regardless of steady-state latency."""
     budget = RelativeBudget()
-    calls: list[float] = []
+    calls: list[int] = []
 
     def _op() -> None:
-        calls.append(time.perf_counter())
+        # A plain counter: this test asserts call *count*, not timing, so it
+        # must not read a wall clock (perf marker guard, task-7434).
+        calls.append(1)
 
     budget.p95_wall_seconds_within(_op, max_ratio=1_000_000.0, n=3, warmup=2, calibration_n=1)
     assert len(calls) == 5

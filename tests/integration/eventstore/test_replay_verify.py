@@ -23,6 +23,7 @@ from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
 
+import asyncpg
 import pytest
 
 from scripts import replay_verify
@@ -38,7 +39,14 @@ from tests.integration.eventstore._replay_verify_support import (
     _seed_ledger_account,
     _seed_ledger_entry,
     _seed_order,
+    assert_no_replay_window_leftovers,
 )
+
+
+@pytest.fixture
+async def pool(isolated_replay_pool: asyncpg.Pool) -> asyncpg.Pool:
+    """Module-isolated clone -- see `isolated_replay_db_url` in conftest.py."""
+    return isolated_replay_pool
 
 
 async def test_replay_matches_current_tables_for_orders_and_ledger(pool):
@@ -166,3 +174,23 @@ async def test_replay_verify_completes_within_latency_budget_for_fifty_streams(p
         f"replay_verify.verify over {report.streams_checked} streams took "
         f"{elapsed_s:.3f}s (budget 5.0s)"
     )
+
+
+async def test_leftover_guard_names_the_foreign_order_and_ledger_keys(pool):
+    """negative -- the clone starts clean (the fixture already asserted so);
+    once this module seeds an order and a ledger entry, the same guard must
+    fail and carry their keys, proving it would have caught the shared-DB
+    leftovers that produced the StreamDiff failures instead of letting them
+    surface later on a key this module never created."""
+    await _seed_order(pool)
+    debit_code = await _seed_ledger_entry(pool)
+
+    with pytest.raises(AssertionError) as excinfo:
+        await assert_no_replay_window_leftovers(
+            pool, as_of=_clock() + timedelta(minutes=1), hours=1
+        )
+
+    message = str(excinfo.value)
+    assert "order_events order_ids=" in message
+    assert debit_code in message
+    assert "written outside this module" in message
