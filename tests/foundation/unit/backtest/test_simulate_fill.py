@@ -143,6 +143,7 @@ def test_underlying_simulator_failure_propagates(monkeypatch: pytest.MonkeyPatch
         )
 
 
+@pytest.mark.perf
 def test_simulate_fill_completes_within_latency_budget() -> None:
     """단일 체결 계산은 순수 산술이라 p95 1ms 예산을 크게 밑돌아야
     한다 -- 숫자 성능 단언(D2 floor)."""
