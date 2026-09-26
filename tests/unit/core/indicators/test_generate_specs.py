@@ -78,6 +78,7 @@ def test_every_installed_talib_function_is_generated() -> None:
     specs = generate_talib_specs()
     assert len(specs) == len(talib.get_functions())
     assert set(specs) == set(ALL_TALIB_NAMES)
+    assert set(TALIB_SPECS) == set(ALL_TALIB_NAMES)
 
 
 def test_pattern_recognition_group_matches_installed_candle_functions() -> None:
