@@ -4,19 +4,22 @@
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §7.1(측정 지점
 "inbox"), §9 L4-28. 대상은 `InboxProcessor.ingest()`(L4-15) 단독 호출.
 
-**부분체결만 쓰는 이유** — §7.1의 측정 지점은 "전이 commit"까지다.
-`ingest()`가 새로 `FILLED`를 확정하면 커밋 *이후* 별도 커넥션으로
-`position_ledger.record_fill_in_position_ledger`를 1회 더 부르는데
-(`inbox_processor.py` 모듈 docstring 참조 — 원장 반영은 이 리프가 아니라
-L4-15가 재사용하는 별도 모듈 소유), 이 호출까지 포함하면 이 파일이 소유하지
-않는 코드 경로의 왕복까지 회귀 가드에 걸린다. **부분체결**(주문 수량보다
-적게 채움)은 `next_status()`가 `PARTIALLY_FILLED`를 돌려줘
-`_process_row`가 `position_ledger` 분기를 타지 않으므로(§4.2 "체결이 새로
-FILLED를 만들면"만 그 분기를 탄다), "received_at → 전이 commit" 구간을
-정확히 이 함수 하나로 격리해 잰다.
+**측정 창은 `COMMIT`까지다** — §7.1의 측정 지점은 "전이 commit"까지다.
+`ingest()`는 커밋 *이후* 별도 커넥션으로 `position_ledger.
+record_fill_in_position_ledger`를 1회 더 부르는데(`inbox_processor.py` 모듈
+docstring 참조 — 원장 반영은 이 리프가 아니라 L4-15가 재사용하는 별도 모듈
+소유), 이 호출의 왕복까지 세면 이 파일이 소유하지 않는 코드 경로가 회귀
+가드에 걸린다. 예전에는 **부분체결** 이벤트가 그 분기를 타지 않는다는 사실에
+기대어 격리했지만, task-7998(F3)부터 부분체결도 체결이 새로 삽입될 때마다
+원장 호출을 내므로 그 전제가 깨졌다(main 639c6591에서 계수 21→24 적색,
+run 36238570606). 이제 `_count_ingest_round_trips`는 ingest 커넥션의 첫
+`COMMIT`까지만 센다 — §7.1 창을 코드로 고정한 것이고, 커밋 이후 경로의
+왕복 수가 원장 상태에 따라 달라져도(실측 2~3) 게이트가 흔들리지 않는다.
+커밋 이후 경로의 회귀는 `tests/integration/oms/test_inbox_processor.py`
+(F3 테스트)와 position_ledger 소유 테스트가 맡는다.
 
-`ingest()` 1회(부분체결, 신규 이벤트)의 왕복 수 구성(실측, task-2323
-`_discover_round_trips.py`로 확인):
+`ingest()` 1회(부분체결, 신규 이벤트)의 `COMMIT`까지 왕복 수 구성(실측
+2026-09-26, 아래 `_count_ingest_round_trips` 로거로 재확인 가능):
   BEGIN 1 + `provider_event_inbox` INSERT(`insert_if_absent`) 1 + 방금 넣은
   행 id SELECT 1 + `_resolve_order_id` SELECT 1 + `get_for_update`(venue
   확인) 1 + `fills` INSERT(`insert_if_absent`) 1 + orders.filled_quantity
@@ -24,7 +27,8 @@ FILLED를 만들면"만 그 분기를 탄다), "received_at → 전이 commit" �
   재조회 `get_for_update` 1 + `fills.list_for_order` SELECT 1 +
   `orders.transition`(get_for_update 1 + set_config 1 + order_events
   INSERT 1 + conditional UPDATE 1 + audit_bridge.emit[4]) 8 +
-  `mark_processed` conditional UPDATE 1 + COMMIT 1 + 세션 리셋 1 = 21
+  `mark_processed` conditional UPDATE 1 + COMMIT 1 = 20
+  (풀 커넥션 반환 시 세션 리셋 1과 커밋 이후 원장 경로는 창 밖 — 세지 않는다)
 
 negative test(I-10): `fills_repo.insert_if_absent`(ingest 1회당 정확히 1번만
 호출)가 왕복을 하나 더 내면 계수가 예산과 정확히 1 어긋난다(`InboxProcessor`는
@@ -67,7 +71,7 @@ from tests.performance.oms.conftest import (
 _SAMPLE_COUNT = 100
 _P99_TARGET_MS = 300.0  # §7.1 운영 목표 — 비차단(print), task-1038/1521 decision
 _ROUND_TRIP_MULTIPLIER = 9
-_INGEST_PARTIAL_ROUND_TRIPS = 21  # 모듈 docstring 구성표 — 정확 단언(==)
+_INGEST_PARTIAL_ROUND_TRIPS = 20  # 모듈 docstring 구성표(COMMIT까지) — 정확 단언(==)
 
 
 class _ChattyFillsRepo(FillsRepository):
@@ -111,7 +115,19 @@ async def _count_ingest_round_trips(
     ev = partial_fill_event(exchange_order_id=exoid, client_order_id=cid)
     result = await processor.ingest(ev)
     assert result is True
-    return len(queries)
+    return _round_trips_until_commit(queries)
+
+
+def _round_trips_until_commit(queries: list[str]) -> int:
+    """§7.1 window: everything the ingest connection sent up to and including
+    its first COMMIT. Fail-closed — an ingest that never committed is not
+    "zero round trips", it is a broken measurement."""
+    for index, query in enumerate(queries):
+        if query.strip().upper().startswith("COMMIT"):
+            return index + 1
+    raise AssertionError(
+        f"no COMMIT observed in {len(queries)} logged queries — ingest did not commit"
+    )
 
 
 @pytest.mark.perf
@@ -165,6 +181,30 @@ async def test_inbox_round_trip_gate_detects_extra_query(pool: asyncpg.Pool) -> 
     round_trips = await _count_ingest_round_trips(pool, fills_repo_cls=_ChattyFillsRepo)
     assert round_trips == _INGEST_PARTIAL_ROUND_TRIPS + 1
     assert round_trips != _INGEST_PARTIAL_ROUND_TRIPS
+
+
+async def test_inbox_round_trip_gate_ignores_post_commit_ledger_work(
+    pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(main 639c6591): 커밋 이후 원장 경로가 왕복을 더 내도
+    §7.1 창(COMMIT까지)의 계수는 변하지 않아야 한다 — 창을 COMMIT에서 끊지
+    않으면(예전 `len(queries)`) 이 테스트는 예산 초과로 적색이 된다."""
+    original = InboxProcessor._apply_position_ledger
+
+    async def chatty_ledger(self: InboxProcessor, update: Any) -> None:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+            await conn.fetchval("SELECT 2")
+        await original(self, update)
+
+    monkeypatch.setattr(InboxProcessor, "_apply_position_ledger", chatty_ledger)
+    round_trips = await _count_ingest_round_trips(pool)
+    assert round_trips == _INGEST_PARTIAL_ROUND_TRIPS
+
+
+def test_round_trips_until_commit_fails_closed_without_commit() -> None:
+    with pytest.raises(AssertionError, match="no COMMIT"):
+        _round_trips_until_commit(["BEGIN;", "SELECT 1", "ROLLBACK;"])
 
 
 async def test_ingest_rolls_back_fully_on_order_repo_failure(pool: asyncpg.Pool) -> None:
