@@ -259,6 +259,7 @@ async def test_field_source_failure_mid_scan_is_500_not_swallowed(client: AsyncC
 # ---- 성능 수치 단언 1건 ----
 
 
+@pytest.mark.perf
 async def test_screen_run_completes_well_within_scan_timeout_budget(client: AsyncClient) -> None:
     headers = await _register(client)
     instruments = [_instrument(f"SYM{i}") for i in range(50)]
