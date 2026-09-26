@@ -63,7 +63,11 @@ from uuid import UUID
 
 import asyncpg
 
-from scripts.replay_verify_db_pressure import await_db_capacity, stagger_startup
+from scripts.replay_verify_db_pressure import (
+    await_db_capacity,
+    await_reset_lock_clear,
+    stagger_startup,
+)
 from src.core.eventstore import replay
 from src.core.eventstore.projections import orders as orders_projection
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
@@ -440,6 +444,12 @@ async def _run(*, hours: int, as_of: datetime) -> int:
     dsn = _asyncpg_dsn()
     await stagger_startup(sleep=asyncio.sleep)
     await await_db_capacity(dsn, sleep=asyncio.sleep)
+    # task-7877 (esc-ci-replay_verify.json, 16th+ recurrence): the connection
+    # pressure gate above cannot see a `setup_test_db.py --reset` in progress
+    # against this exact database (see replay_verify_db_pressure.py's own
+    # docstring) -- wait for that specific advisory lock to clear before ever
+    # dialing `dsn`, closing the exact race this escalation's traceback shows.
+    await await_reset_lock_clear(dsn, sleep=asyncio.sleep)
     pool = await _create_pool_with_retry(dsn)
     try:
         report = await _verify_with_retry(pool, as_of=as_of, hours=hours)
