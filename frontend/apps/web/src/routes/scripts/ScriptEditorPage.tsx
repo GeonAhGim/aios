@@ -10,6 +10,7 @@ import { apiClient } from "@aios/shared-hooks";
 import { isScriptCompileErrorDetails, type CompileScriptView } from "@aios/shared-types";
 import { Alert, Button, PageHeader } from "@aios/ui-web";
 import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ScriptEditor, type ScriptEditorMarker } from "../../components/ScriptEditor";
@@ -79,7 +80,7 @@ function ScriptPreviewPanes({ registry }: { registry: IndicatorPluginRegistry })
   );
 }
 
-function CompilePreview({ result }: { result: CompileScriptView }) {
+function CompilePreview({ result, onOpenChart }: { result: CompileScriptView; onOpenChart: () => void }) {
   const { t } = useTranslation();
   return (
     <Alert tone="success">
@@ -98,15 +99,28 @@ function CompilePreview({ result }: { result: CompileScriptView }) {
         <dt className="text-fg-muted">{t("legacy.scriptEditorPage.t8")}</dt>
         <dd data-testid="compile-preview-elapsed">{result.elapsedMs}ms</dd>
       </dl>
+      <Button data-testid="compile-open-chart" className="mt-2" onClick={onOpenChart}>
+        차트에서 백테스트
+      </Button>
     </Alert>
   );
 }
 
 export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(apiClient) }: ScriptEditorPageProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [source, setSource] = useState(DEFAULT_SOURCE);
   const mutation = useMutation({ mutationFn: compileScript });
   const [preview, setPreview] = useState<ScriptPreviewState>(createInitialPreviewState);
+
+  // G-3(UX_JOURNEYS.md 갭): 컴파일 성공 직후 사용자가 미리보기(해시·산정치)를
+  // 볼 새도 없이 화면을 옮기면 결과를 확인할 수 없다 — CTA 버튼으로 연결해
+  // "컴파일→백테스트" 단절만 없앤다. /chart는 script_hash로 아무것도 조회하지
+  // 않는다(스크립트 컴파일 응답에 instrument 개념이 없다, script.ts 참고) —
+  // 컨텍스트로 실어 보내는 값은 scriptHash뿐이다.
+  function handleOpenChart(result: CompileScriptView) {
+    navigate(`/chart?script_hash=${encodeURIComponent(result.scriptHash)}`);
+  }
 
   // CH-12: 컴파일이 성공할 때마다 그 결과(스크립트 해시 + plot 개수)만으로
   // 서브패널 자리를 다시 맞춘다. mutation.data는 새 컴파일이 성공할 때만
@@ -163,7 +177,9 @@ export function ScriptEditorPage({ compileScript = apiClient.compileScript.bind(
           />
         )}
 
-        {mutation.isSuccess && <CompilePreview result={mutation.data} />}
+        {mutation.isSuccess && (
+          <CompilePreview result={mutation.data} onOpenChart={() => handleOpenChart(mutation.data)} />
+        )}
         <ScriptPreviewPanes registry={preview.registry} />
       </div>
     </AppShell>

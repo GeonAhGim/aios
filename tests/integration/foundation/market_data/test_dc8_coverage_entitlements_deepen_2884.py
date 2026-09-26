@@ -367,6 +367,14 @@ async def test_concurrent_overlapping_upsert_span_exactly_one_winner(coverage_re
             return True
         except CoverageSpanOverlapError:
             return False
+        except asyncpg.exceptions.DeadlockDetectedError:
+            # EXCLUDE 검사에서 서로의 미확정 삽입을 기다리는 트랜잭션이 3개 이상
+            # 겹치면 PostgreSQL이 대기 사이클을 데드락으로 판정해 한쪽을 롤백한다
+            # (CI run 36191114294: "Process 2809 waits for ShareLock on transaction
+            # 5837; blocked by process 2810 ..."). 롤백된 쪽은 삽입에 실패한 것이므로
+            # "정확히 1개 승자" 불변식 관점에서는 겹침 거부와 같은 결과다 — 승자는
+            # 아무도 기다리지 않아 사이클에 들지 않으므로 희생자가 되지 않는다.
+            return False
 
     results = await asyncio.gather(*(_attempt(i) for i in range(n)))
 

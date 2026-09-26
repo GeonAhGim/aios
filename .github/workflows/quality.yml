@@ -81,6 +81,25 @@ jobs:
       - name: Supply chain audit (pip)
         run: python scripts/run_pip_audit.py
 
+      # 2026-09-26: postgres:16 서비스 컨테이너 기본 max_connections=100. xdist(-n auto, 4 vCPU)
+      # 워커가 파일 단위(loadfile)로 분산되므로 max_size=64 풀을 여는 통합 conftest
+      # (ledger·positions·risk) 여러 개가 동시에 살아 있으면 요구 커넥션이 100을 넘어
+      # TooManyConnectionsError(ledger test_queries 동시 커밋 90태스크 등)가 난다.
+      # 서비스 컨테이너는 command를 받지 않으므로 ALTER SYSTEM 후 컨테이너를 재시작한다
+      # (job.services.<id>.id 는 이 용도로 문서화된 공식 출력). 상한은 워커 4×64 + 앱
+      # lifespan 풀 + 헤드룸으로 400.
+      - name: Raise Postgres max_connections for xdist
+        env:
+          PGPASSWORD: password
+        run: |
+          psql -h localhost -U user -d aios_test -c "ALTER SYSTEM SET max_connections = 400;"
+          docker restart ${{ job.services.postgres.id }}
+          for _ in $(seq 1 30); do
+            pg_isready -h localhost -U user -d aios_test && break
+            sleep 1
+          done
+          psql -h localhost -U user -d aios_test -tAc "SHOW max_connections;" | grep -qx 400
+
       - name: Apply test database migrations
         run: alembic upgrade head
 
@@ -121,7 +140,13 @@ jobs:
       # 완전히 대체하므로 nightly/live_demo/redis 제외를 여기서 다시 쓴다.
       - name: Test
         run: pytest -q -n auto --dist loadfile -m "not perf and not nightly and not live_demo and not redis" --cov=src --cov-report=term --cov-report=xml
+      # 2026-09-26(사용자 승인, PR #91): perf 예산표(ADR-2026-09-09-C)는 로컬 기준이라 GitHub 4 vCPU
+      # 러너에서는 process_time best-of-5·p95를 써도 7~23% 초과가 계통적으로 난다(run 36188973131·
+      # 36187517934 동일 3건). 예산 수치는 CTO 결정 사항(DECISION_GUIDELINES B-2)이므로 이 단계는
+      # Actions에서 warn으로 두고 로컬 게이트(pm/local_ci)를 perf 정본으로 유지한다. 러너 배수 도입은
+      # 별도 ADR. 결과는 로그·step summary로 계속 남는다.
       - name: Test (perf, serial)
+        continue-on-error: true
         run: pytest -q -m "perf and not nightly and not live_demo and not redis" --cov=src --cov-append --cov-report=term --cov-report=xml
 
       # PLT-37 — 절대 임계치(--cov-fail-under) 대신 coverage.xml 대비 직전
