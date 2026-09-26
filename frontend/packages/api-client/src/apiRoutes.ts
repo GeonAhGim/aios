@@ -419,18 +419,13 @@ export const API_ROUTES = defineApiRoutes({
   "ai.proposals.promote": route("/v1/ai/proposals/:proposalId:promote", true, null, false),
   "ai.experiments.base": route("/v1/ai/experiments", true, null, false),
 
-  // task-2692(UX-8): ScreenerPage.tsx(필터 빌더·결과 표·차트/백테스트 연결)는 spec
-  // L4_product_experience_and_discovery_v1.0.md §2.2/UX-5/UX-6이 정의하는
-  // `src/foundation/screener/` 모듈을 앞서가는 선행 프론트다 — contracts/v1.py
-  // (UX-5)·application/run_screen.py(UX-6)·이를 감싸는 API 라우터
-  // (src/api/routers/screener.py) 모두 아직 없다(src/api/routers 디렉터리에
-  // screener.py 부재, src/foundation/screener 디렉터리 자체가 없음 — grep으로 직접
-  // 확인). follow.subscriptions.*(task-2699)·ai.*(task-2657)와 동일한 유령 경로
-  // 사유로 implemented=false 등록 — ScreenerPage.tsx는 라우터가 생기기 전까지
-  // 네트워크 호출 대신 ScreenerRouteNotImplementedError(typed)로 단락한다. v1Path는
-  // 마운트 경로 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도
-  // 함께 추가할 것.
-  "screener.run": route("/v1/foundation/screener/run", true, null, false),
+  // task-7773(UX-8): src/api/routers/screener.py가 실재하게 됐다(POST
+  // /v1/foundation/screener/run, contracts/openapi/v1.json에 실재 — python으로
+  // paths 키 직접 확인, router_registry.py에 include_router 배선 완료) —
+  // implemented=true로 바꾼다. apiPaths.openapi.test.ts의 GHOST_PATH_WHITELIST
+  // 에서도 이 항목을 제거했다. v1Path는 mount_v1이 아직 배선되지 않아(PLT-16이
+  // PLT-17~21로 미룸, 다른 라우트와 동일) 여전히 null이다.
+  "screener.run": route("/v1/foundation/screener/run", true, null, true),
 
   // task-2696(UX-12): WhatIfPanel.tsx·RebalancePage.tsx는 spec
   // L4_product_experience_and_discovery_v1.0.md §2.3/UX-9/UX-10/UX-11이 정의하는
