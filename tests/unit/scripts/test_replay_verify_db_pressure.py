@@ -107,6 +107,58 @@ async def test_await_db_capacity_treats_zero_max_connections_as_proceed() -> Non
     assert delays == []
 
 
+async def test_stagger_startup_jitters_within_jitter_max_bound(monkeypatch) -> None:
+    """task-7648 (esc-ci-replay_verify.json, 14th+ recurrence): mirrors
+    `replay_verify._sleep_before_retry`'s decorrelation proof (task-6627), but
+    for the *first* connect attempt -- pm/local_ci.py spawns one
+    `replay_verify.py` subprocess per xdist worker DB at effectively the same
+    instant, so a deterministic (non-random) startup delay would just move
+    the thundering herd to a fixed offset instead of spreading it. Asserts
+    `stagger_startup` draws `random.uniform(0, _STARTUP_JITTER_MAX_SEC)`, not
+    the bound itself."""
+    captured: list[float] = []
+
+    async def _capture_sleep(delay: float) -> None:
+        captured.append(delay)
+
+    monkeypatch.setattr(pressure.random, "uniform", lambda lo, hi: lo + (hi - lo) * 0.25)
+
+    await pressure.stagger_startup(sleep=_capture_sleep)
+
+    assert captured == [pressure._STARTUP_JITTER_MAX_SEC * 0.25]
+
+
+async def test_stagger_startup_never_exceeds_jitter_max_bound() -> None:
+    """Negative test: across many real draws, the jittered startup delay must
+    never leave `[0, _STARTUP_JITTER_MAX_SEC]` -- a broken jitter call could
+    silently turn this into an unbounded (or negative) sleep."""
+    captured: list[float] = []
+
+    async def _capture_sleep(delay: float) -> None:
+        captured.append(delay)
+
+    for _ in range(50):
+        await pressure.stagger_startup(sleep=_capture_sleep)
+
+    assert all(0.0 <= delay <= pressure._STARTUP_JITTER_MAX_SEC for delay in captured)
+
+
+async def test_stagger_startup_always_sleeps_exactly_once() -> None:
+    """Failure-injection-adjacent negative test: `stagger_startup` must call
+    `sleep` exactly once per invocation -- calling it zero times would silently
+    drop the decorrelation this function exists to provide, and more than once
+    would double-pay the jitter budget."""
+    calls = 0
+
+    async def _counting_sleep(delay: float) -> None:
+        nonlocal calls
+        calls += 1
+
+    await pressure.stagger_startup(sleep=_counting_sleep)
+
+    assert calls == 1
+
+
 async def test_connection_pressure_returns_none_on_connect_failure(monkeypatch) -> None:
     """Failure-injection test: `connection_pressure` itself must swallow a
     connect-time OSError/PostgresError into `None`, not propagate it -- a

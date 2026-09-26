@@ -311,6 +311,13 @@ def _isolate_root_logger_state():
     original_handlers = list(root.handlers)
     original_level = root.level
     original_propagate = root.propagate
+    # task-7439 — `logging.disable(level)`은 로거별 상태가 아니라
+    # `logging.Logger.manager.disable`이라는 프로세스 전역 정수다. 위
+    # 핸들러/레벨/propagate/disabled 스냅샷은 로거별 상태만 다뤄 이 값은
+    # 놓친다 — 어떤 테스트가 `logging.disable(logging.CRITICAL)`을 호출하고
+    # 복원하지 않으면, 같은 xdist 워커에서 그 뒤에 도는 모든 caplog 단언이
+    # (레벨/핸들러가 멀쩡해 보여도) 전역 게이트에 막혀 빈 records를 본다.
+    original_manager_disable = logging.Logger.manager.disable
     # 모든 활성 로거의 핸들러 상태를 스냅샷 (getLogger()는 이미 생성된 로거만 반환)
     original_logger_states = {}
     for name in list(logging.Logger.manager.loggerDict.keys()):
@@ -335,6 +342,7 @@ def _isolate_root_logger_state():
     root.handlers[:] = original_handlers
     root.setLevel(original_level)
     root.propagate = original_propagate
+    logging.Logger.manager.disable = original_manager_disable
     for name, state in original_logger_states.items():
         try:
             logger = logging.getLogger(name)

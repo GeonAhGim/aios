@@ -81,23 +81,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 누적되며 관측된 flaky(esc-ci-pytest: 매번 다른 테스트가 걸리는 asyncpg/Windows
     # 커넥션 오류)의 근본 원인이 된다(schema.py의 configure_logging docstring 경고).
     log_listener = configure_logging(os.environ.get("LOG_LEVEL", "INFO"))
-    secrets = load_env_secrets()
-    policy = load_risk_policy()
-    pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
 
-    # I-01(실패 닫힘) — pool 생성 이후의 모든 단계(event_bus 시작, credential
-    # 배선, background_loops 시작 등)는 실패할 수 있다. 이전에는 이 구간이
-    # try/finally 바깥이라 여기서 raise하면 pool이 한 번도 close()되지 않고
-    # 새는 결함이 있었다(회귀: tests/integration/test_app_lifespan.py::
-    # test_lifespan_shutdown_clean_when_background_loops_raises). 이제 pool
-    # 생성 직후부터 try로 감싸 어느 단계에서 실패해도 finally가 pool을 닫는다.
+    # I-01(실패 닫힘) — load_env_secrets/load_risk_policy/create_pool을 포함해
+    # pool 생성 이후의 모든 단계(event_bus 시작, credential 배선, background_loops
+    # 시작 등)는 실패할 수 있다. 이전에는 이 세 호출이 try/finally 바깥이라 여기서
+    # raise하면 pool이 한 번도 close()되지 않고(회귀: tests/integration/
+    # test_app_lifespan.py::test_lifespan_shutdown_clean_when_background_loops_raises)
+    # log_listener도 stop()되지 않는 결함이 있었다. 이제 그 세 호출까지 try로
+    # 감싸 어느 단계에서 실패해도 finally가 pool을 닫고 listener를 멈춘다.
     event_bus: InProcessEventBus | None = None
     loops = None
     ledger_tasks: list[asyncio.Task[None]] = []
     market_data_tasks: list[asyncio.Task[None]] = []
     positions_tasks: list[asyncio.Task[None]] = []
     algo_tasks: list[asyncio.Task[None]] = []
+    pool: asyncpg.Pool | None = None
     try:
+        secrets = load_env_secrets()
+        policy = load_risk_policy()
+        pool = await asyncpg.create_pool(_asyncpg_dsn(secrets.database_url.get_secret_value()))
 
         async def _event_bus_audit_sink(record: dict[str, Any]) -> None:
             """§5.5 "모든 handler 예외는 audit_log에 자동 기록"을 실제 audit_log
@@ -257,7 +259,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await loops.stop()
         if event_bus is not None:
             await event_bus.stop()
-        await pool.close()
+        if pool is not None:
+            await pool.close()
         log_listener.stop()
 
 
