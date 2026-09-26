@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#R-19 — var_parametric.py known-value + ES>=VaR."""
+
 import json
 from decimal import Decimal
 from time import perf_counter
@@ -63,21 +64,18 @@ def test_var_pct_is_decimal():
 def test_adversarial_invalid_confidence_fails_closed(confidence):
     """I-07/I-10: invalid risk inputs must reach the real domain rejection path."""
     with pytest.raises(ValueError):
-        parametric_var_es(
-            _R, confidence=confidence, horizon_days=1, bars_per_day=1
-        )
+        parametric_var_es(_R, confidence=confidence, horizon_days=1, bars_per_day=1)
 
 
 def test_numeric_failure_is_not_replaced_by_zero_risk(monkeypatch):
     """I-07: a failed numeric dependency cannot manufacture a successful result."""
+
     def fail(*args, **kwargs):
         raise ArithmeticError("injected numeric failure")
 
     monkeypatch.setattr(np, "std", fail)
     with pytest.raises(ArithmeticError, match="injected numeric failure"):
-        parametric_var_es(
-            _R, confidence=0.95, horizon_days=1, bars_per_day=1
-        )
+        parametric_var_es(_R, confidence=0.95, horizon_days=1, bars_per_day=1)
 
 
 def test_replay_verify_serialized_inputs_and_tampered_result():
@@ -87,8 +85,7 @@ def test_replay_verify_serialized_inputs_and_tampered_result():
     use its actual verify_replay core on all result fields after input reload.
     Tampering is the red-gate reproduction: the verifier must return not ok.
     """
-    payload = {"r": _R.tolist(), "confidence": 0.95,
-               "horizon_days": 2, "bars_per_day": 1}
+    payload = {"r": _R.tolist(), "confidence": 0.95, "horizon_days": 2, "bars_per_day": 1}
     actual = parametric_var_es(**payload).model_dump()
     restored = json.loads(json.dumps(payload))
     replayed = parametric_var_es(**restored).model_dump()
@@ -107,6 +104,7 @@ def test_replay_verify_serialized_inputs_and_tampered_result():
     assert rejected.combined_digest != report.combined_digest
 
 
+@pytest.mark.perf
 def test_default_250_bar_calculation_p95_under_5ms():
     """ADR-2026-09-09-C D1: component ceiling within the 5ms risk-gate budget.
 
