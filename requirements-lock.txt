@@ -115,7 +115,7 @@ six==1.17.0
 sortedcontainers==2.4.0
 SQLAlchemy==2.0.53
 starlette==1.6.0
-TA-Lib==0.7.1
+TA-Lib==0.8.1
 tomli==2.4.1
 tomli_w==1.2.0
 types-PyYAML==6.0.12.20260906
