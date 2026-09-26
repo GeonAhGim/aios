@@ -114,7 +114,7 @@ setuptools==84.0.0
 six==1.17.0
 sortedcontainers==2.4.0
 SQLAlchemy==2.0.54
-starlette==1.6.0
+starlette==1.7.0
 TA-Lib==0.7.1
 tomli==2.4.1
 tomli_w==1.2.0
