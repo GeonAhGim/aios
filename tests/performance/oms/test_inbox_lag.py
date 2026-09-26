@@ -4,19 +4,18 @@
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §7.1(측정 지점
 "inbox"), §9 L4-28. 대상은 `InboxProcessor.ingest()`(L4-15) 단독 호출.
 
-**부분체결만 쓰는 이유** — §7.1의 측정 지점은 "전이 commit"까지다.
-`ingest()`가 새로 `FILLED`를 확정하면 커밋 *이후* 별도 커넥션으로
-`position_ledger.record_fill_in_position_ledger`를 1회 더 부르는데
-(`inbox_processor.py` 모듈 docstring 참조 — 원장 반영은 이 리프가 아니라
-L4-15가 재사용하는 별도 모듈 소유), 이 호출까지 포함하면 이 파일이 소유하지
-않는 코드 경로의 왕복까지 회귀 가드에 걸린다. **부분체결**(주문 수량보다
-적게 채움)은 `next_status()`가 `PARTIALLY_FILLED`를 돌려줘
-`_process_row`가 `position_ledger` 분기를 타지 않으므로(§4.2 "체결이 새로
-FILLED를 만들면"만 그 분기를 탄다), "received_at → 전이 commit" 구간을
-정확히 이 함수 하나로 격리해 잰다.
+**부분체결을 쓰는 이유** — §7.1의 측정 지점은 "전이 commit"까지지만, 이
+파일은 그 이후 후속 효과(`ledger_effects.apply_position_ledger`, task-8046
+이전 `inbox_processor._apply_position_ledger`)까지 포함해 잰다. task-7998
+(F3)부터 `next_status()`가 `PARTIALLY_FILLED`를 돌려줘도(부분체결이라
+`FILLED`가 아니어도) `_process_row`가 `position_ledger` 분기를 타므로(§4.2
+"체결이 새로 PARTIALLY_FILLED/FILLED를 만들면" — 이전엔 FILLED 전용이라
+부분체결로는 이 분기를 피해 격리할 수 있었으나 이제는 더 이상 그렇지
+않다), 아래 예산은 "받은 부분체결 1건 → 전이 commit → 그 fill의 ledger
+반영"까지의 전체 경로다.
 
 `ingest()` 1회(부분체결, 신규 이벤트)의 왕복 수 구성(실측, task-2323
-`_discover_round_trips.py`로 확인):
+`_discover_round_trips.py`로 확인, task-8046이 task-7998/F3 반영분 갱신):
   BEGIN 1 + `provider_event_inbox` INSERT(`insert_if_absent`) 1 + 방금 넣은
   행 id SELECT 1 + `_resolve_order_id` SELECT 1 + `get_for_update`(venue
   확인) 1 + `fills` INSERT(`insert_if_absent`) 1 + orders.filled_quantity
@@ -24,7 +23,12 @@ FILLED를 만들면"만 그 분기를 탄다), "received_at → 전이 commit" �
   재조회 `get_for_update` 1 + `fills.list_for_order` SELECT 1 +
   `orders.transition`(get_for_update 1 + set_config 1 + order_events
   INSERT 1 + conditional UPDATE 1 + audit_bridge.emit[4]) 8 +
-  `mark_processed` conditional UPDATE 1 + COMMIT 1 + 세션 리셋 1 = 21
+  `mark_processed` conditional UPDATE 1 + COMMIT 1 + 세션 리셋 1 = 21,
+  + PARTIALLY_FILLED도 `ledger_effects.apply_position_ledger`를 타 그
+  별도 acquire에서 `legacy_order_repository.get_by_order_id` 1 + 그
+  acquire/release 자체의 세션 리셋 1 = 23 (이 테스트 fixture의 주문은
+  `execution_id`가 없어 `record_fill_in_position_ledger` 본체는 조기
+  no-op으로 리턴 — 왕복이 늘지 않는다).
 
 negative test(I-10): `fills_repo.insert_if_absent`(ingest 1회당 정확히 1번만
 호출)가 왕복을 하나 더 내면 계수가 예산과 정확히 1 어긋난다(`InboxProcessor`는
@@ -41,6 +45,7 @@ transition`이 tx 안에서(fills INSERT 이후, `mark_processed` 이전) 인프
 같은 이벤트를 나중에 재전달해도(F9 중복 흡수 전제가 깨지지 않음) 다시
 처리될 수 있다는 불변식의 증명이다.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -67,7 +72,7 @@ from tests.performance.oms.conftest import (
 _SAMPLE_COUNT = 100
 _P99_TARGET_MS = 300.0  # §7.1 운영 목표 — 비차단(print), task-1038/1521 decision
 _ROUND_TRIP_MULTIPLIER = 9
-_INGEST_PARTIAL_ROUND_TRIPS = 21  # 모듈 docstring 구성표 — 정확 단언(==)
+_INGEST_PARTIAL_ROUND_TRIPS = 23  # 모듈 docstring 구성표 — 정확 단언(==, task-8046)
 
 
 class _ChattyFillsRepo(FillsRepository):
@@ -183,11 +188,13 @@ async def test_ingest_rolls_back_fully_on_order_repo_failure(pool: asyncpg.Pool)
     async with pool.acquire() as conn:
         inbox_row = await conn.fetchrow(
             "SELECT 1 FROM provider_event_inbox WHERE venue = $1 AND provider_event_id = $2",
-            ev.venue, ev.provider_event_id,
+            ev.venue,
+            ev.provider_event_id,
         )
         fill_row = await conn.fetchrow(
             "SELECT 1 FROM fills WHERE venue = $1 AND provider_fill_id = $2",
-            ev.venue, ev.last_fill.provider_fill_id,
+            ev.venue,
+            ev.last_fill.provider_fill_id,
         )
         order_status = await conn.fetchval(
             "SELECT status FROM orders WHERE exchange_order_id = $1", exoid

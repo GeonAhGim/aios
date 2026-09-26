@@ -1,4 +1,8 @@
-"""L4_risk_and_safety_v1.0.md#2.2 — 정렬된 수익률의 Pearson 상관(옵션 EWMA), 최소 겹침 미달=None."""
+"""L4_risk_and_safety_v1.0.md#2.2 (R-20) — 정렬된 수익률의 Pearson 상관(옵션 EWMA),
+
+최소 겹침 미달=None.
+"""
+
 from __future__ import annotations
 
 import math
