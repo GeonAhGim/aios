@@ -15,6 +15,7 @@ red-gate reproduction 1.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import sys
 import time
@@ -88,20 +89,42 @@ def test_pyproject_declares_four_dom1_contracts() -> None:
     }
 
 
-def test_import_linter_and_grimp_resolve_as_declared_dependencies() -> None:
+def test_import_linter_and_grimp_are_declared_and_importable() -> None:
     """Negative test: guards against the dependency declaration silently
     regressing to only being trivially satisfied because nothing in src/
     imports `importlinter`/`grimp` yet (check_deps_declared.py would still
-    pass in that case even if the distribution mapping were broken)."""
+    pass in that case even if the declaration were removed).
+
+    This deliberately does NOT go through
+    `check_deps_declared.declared_import_names()`'s
+    `importlib.metadata.packages_distributions()`-based name mapping:
+    empirically, that stdlib API returns no top-level-module mapping at all
+    for `import-linter`/`grimp` on Python 3.10 (this repo's CI/local_ci
+    floor -- both wheels ship no `top_level.txt`), while it works on 3.11+.
+    Asserting through that mapping would make this test itself
+    version-flaky, not a real regression signal. Checking the raw
+    dependency-name specs plus `find_spec` covers the same intent
+    (declared AND actually resolvable) without depending on that stdlib
+    quirk.
+    """
     sys.path.insert(0, str(ROOT / "scripts"))
     try:
         check_deps_declared = importlib.import_module("check_deps_declared")
-        declared = check_deps_declared.declared_import_names(
-            PYPROJECT, ROOT / "requirements-lock.txt"
-        )
+        specs = [
+            *check_deps_declared.read_pyproject_dependency_specs(PYPROJECT),
+            *check_deps_declared.read_lockfile_dependency_specs(ROOT / "requirements-lock.txt"),
+        ]
+        declared_dist_names = {
+            check_deps_declared._normalize(name)
+            for spec in specs
+            if (name := check_deps_declared._dependency_name(spec)) is not None
+        }
     finally:
         sys.path.remove(str(ROOT / "scripts"))
-    assert {"importlinter", "grimp"} <= declared
+
+    assert {"import_linter", "grimp"} <= declared_dist_names
+    assert importlib.util.find_spec("importlinter") is not None
+    assert importlib.util.find_spec("grimp") is not None
 
 
 # ---------------------------------------------------------------------------
