@@ -30,7 +30,11 @@ Every method in this file moves funds, so every one carries
 `@require_paper_sandbox` with no exceptions (same convention as
 bitget/kis/kiwoom trading_mixin.py; the AST scanner in
 `tests/unit/exchanges/test_live_guard_coverage.py` enforces this
-repo-wide).
+repo-wide). This is independent of, and in addition to, the
+`AIOS_ALLOW_LIVE_ADAPTER` fail-closed construction-time guard in
+`src/exchanges/factory.py` (§6 of the adding-an-exchange doc) -- that
+guard will apply to Binance with no exception once factory registration
+wires this adapter in; nothing in this mixin bypasses it.
 """
 
 from __future__ import annotations

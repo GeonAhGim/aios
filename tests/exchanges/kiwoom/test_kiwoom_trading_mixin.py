@@ -9,7 +9,7 @@ replay_verify 통과 — 근거는 각 테스트 docstring/모듈 하단 참고)
 
 from __future__ import annotations
 
-import time
+import asyncio
 from decimal import Decimal
 from typing import Any
 
@@ -19,6 +19,7 @@ from src.core.exceptions import FatalExchangeError, FrozenZonePaperAdapterBlocke
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.kiwoom.trading_mixin import KiwoomTradingMixin
+from tests._perf.relative_budget import RelativeBudget
 
 pytestmark = pytest.mark.asyncio
 
@@ -193,17 +194,31 @@ async def test_get_order_raises_on_still_malformed_id_after_modify_delegation():
 
 
 @pytest.mark.perf
-async def test_place_order_latency_budget():
-    """숫자 성능 단언: place_order는 순수 스텁 클라이언트(네트워크 없음)
-    기준 100회 호출 평균 1ms 미만이어야 한다 — 실제 거래소 왕복 시간이
-    아니라, 믹스인 자체의 오버헤드(바디 조립·응답 파싱)에 대한 회귀
-    가드다. 실거래소 p95/p99 레이턴시 예산은 조립체(adapter.py, 미구현)
-    단계에서 계약 테스트로 별도 측정한다 — N/A(HTTP 클라이언트 미존재,
-    task-7569 선행 필요)."""
+@pytest.mark.filterwarnings("ignore::pytest.PytestWarning")
+def test_place_order_latency_budget() -> None:
+    """숫자 성능 단언(자기보정 비율, task-7631/task-7674 RelativeBudget
+    관례): 원래 절대 wall-clock 임계값(1ms/call)은 CI 러너의 클럭 속도를
+    재는 것이지 믹스인 코드를 재는 게 아니다 — 부하가 걸린 공유 호스트에서
+    코드 변경 없이도 적색이 될 수 있다(esc-ci-coverage count_tree/get_ohlcv
+    파싱 perf 예산이 같은 이유로 절대치에서 비율로 전환된 전례, task-7741/
+    task-7674). 같은 프로세스 안 보정 루프 대비 배수로 예산을 표현해
+    호스트 속도 의존성을 제거한다. place_order 5000회를 자체 asyncio.run()
+    으로 감싸(Windows ~15.6ms time.process_time() 양자화 위로 올리기 위해)
+    pytest.mark.asyncio 대신 RelativeBudget의 동기 best-of-N이 직접 호출할
+    수 있게 한다. 순수 스텁 클라이언트(네트워크 없음) 기준 실측 best-of-5
+    비율은 0.17~0.2x — max_ratio=1.0은 ~5배 여유를 둔다. 실거래소 p95/p99
+    레이턴시 예산은 조립체(adapter.py, 미구현) 단계에서 계약 테스트로 별도
+    측정한다 — N/A(HTTP 클라이언트 미존재, task-7569 선행 필요)."""
     client = _paper_client(responses={"kt10000": {"return_code": 0, "ord_no": "1234567"}})
     order = _order()
-    start = time.perf_counter()
-    for _ in range(100):
-        await client.place_order(order)
-    elapsed = time.perf_counter() - start
-    assert elapsed / 100 < 0.001
+
+    async def _place_many() -> None:
+        for _ in range(5000):
+            await client.place_order(order)
+
+    def _run_once() -> None:
+        asyncio.run(_place_many())
+
+    RelativeBudget().assert_within(
+        _run_once, max_ratio=1.0, mode="cpu", label="place_order x5000 (best of 5)"
+    )

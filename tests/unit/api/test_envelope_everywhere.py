@@ -16,9 +16,13 @@ EXCEPTION_MAP으로 이관했을 뿐(또는 이관 예정일 뿐) `ApiResponse[.
 된다. `src.main`을 통째로 import하지 않는 이유는 `tests/unit/api/contracts/
 test_handlers.py`와 동일(lifespan에 실제 secrets/DB pool 필요).
 """
+
 from __future__ import annotations
 
+import pytest
+from fastapi import APIRouter
 from fastapi.routing import APIRoute
+from pydantic import BaseModel
 
 from src.api.contracts.envelope import ApiResponse
 from src.api.routers import admin, health, metrics
@@ -93,3 +97,53 @@ def test_healthz_and_metrics_routes_stay_exempt_from_envelope():
     assert metrics_paths == {"/metrics"}
     for route in [*_api_routes(health), *_api_routes(metrics)]:
         assert not _wraps_api_response(route)
+
+
+class _PlainPayload(BaseModel):
+    """봉투로 감싸지 않은 도메인 모델 -- 위반 케이스를 만드는 용도."""
+
+    value: str
+
+
+def _fake_route(**route_kwargs) -> APIRoute:
+    router = APIRouter()
+
+    async def _endpoint():
+        return None
+
+    router.add_api_route("/fake", _endpoint, methods=["GET"], **route_kwargs)
+    return next(route for route in router.routes if isinstance(route, APIRoute))
+
+
+def test_wraps_api_response_rejects_plain_basemodel_response_model():
+    route = _fake_route(response_model=_PlainPayload)
+    assert not _wraps_api_response(route)
+
+
+def test_wraps_api_response_rejects_route_with_no_response_model():
+    route = _fake_route(response_model=None)
+    assert not _wraps_api_response(route)
+
+
+def test_wraps_api_response_rejects_dict_response_model():
+    route = _fake_route(response_model=dict)
+    assert not _wraps_api_response(route)
+
+
+def test_admin_router_offender_scan_fails_closed_when_response_model_stripped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입: admin 라우터의 한 라우트에서 response_model이 사라지는
+    상황(의존성/미들웨어가 런타임에 이를 건드리는 경우 등)을 monkeypatch로
+    유발해도, 봉투 가드가 이를 조용히 통과시키지 않고 offender로 잡아내야
+    한다 -- fail-closed."""
+    routes = _api_routes(admin)
+    assert routes, "admin router must expose at least one route to inject the failure into"
+    monkeypatch.setattr(routes[0], "response_model", None)
+
+    offenders = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in routes
+        if not _wraps_api_response(route)
+    ]
+    assert offenders == [f"{sorted(routes[0].methods)} {routes[0].path}"]

@@ -130,6 +130,29 @@ async def run_kiwoom_ws_subscription(
     """
     backoff = 1.0
     first_attempt = True
+    logged_in = False
+    registered = False
+
+    async def handle_frame(raw: str, ws: WsConnection) -> None:
+        nonlocal logged_in, registered
+        message = json.loads(raw)
+        if _is_ping(message):
+            await ws.send(raw)
+            return
+        if _is_login_ack(message):
+            if _login_failed(message):
+                raise FatalExchangeError(f"Kiwoom WS login failed: {message.get('return_msg')}")
+            logged_in = True
+            if not registered:
+                await ws.send(json.dumps(register_msg))
+                registered = True
+            return
+        if not logged_in:
+            # A data frame arriving before the login ack would violate the
+            # documented handshake order -- ignore it defensively rather than
+            # dispatching unauthenticated data.
+            return
+        await on_message(message)
 
     while True:
         if not first_attempt and on_reconnecting is not None:
@@ -144,27 +167,7 @@ async def run_kiwoom_ws_subscription(
                     await on_reconnected()
                 backoff = 1.0
                 async for raw in ws:
-                    message = json.loads(raw)
-                    if _is_ping(message):
-                        await ws.send(raw)
-                        continue
-                    if _is_login_ack(message):
-                        if _login_failed(message):
-                            raise FatalExchangeError(
-                                f"Kiwoom WS login failed: {message.get('return_msg')}"
-                            )
-                        logged_in = True
-                        if not registered:
-                            await ws.send(json.dumps(register_msg))
-                            registered = True
-                        continue
-                    if not logged_in:
-                        # A data frame arriving before the login ack would
-                        # violate the documented handshake order -- ignore
-                        # it defensively rather than dispatching unauthenticated
-                        # data.
-                        continue
-                    await on_message(message)
+                    await handle_frame(raw, ws)
         except (ConnectionClosed, OSError) as exc:
             logger.warning("Kiwoom WS connection lost: %s -- reconnecting in %.1fs", exc, backoff)
             await sleep_fn(backoff)

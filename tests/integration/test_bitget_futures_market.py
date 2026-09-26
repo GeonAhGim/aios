@@ -8,7 +8,10 @@
 from decimal import Decimal
 
 import httpx
+import pytest
 
+from src.core.exceptions import RetryableExchangeError
+from src.exchanges.bitget.adapter import BitgetAdapter
 from tests.integration.bitget_futures_doubles import json_response, make_adapter
 
 
@@ -327,3 +330,38 @@ async def test_get_public_announcements_handles_null_ann_list():
         )
     )
     assert await adapter.get_public_announcements() == []
+
+
+async def test_get_futures_candles_rejects_unsupported_timeframe():
+    """지원하지 않는 timeframe은 네트워크 요청을 보내기 전에 ValueError로
+    fail-closed 거부한다(_GRANULARITY_MAP에 없는 값을 임의로 통과시키지
+    않는다 — review-exchange 체크리스트 #3과 동일 원칙)."""
+    adapter = make_adapter(
+        lambda request: (_ for _ in ()).throw(
+            AssertionError("지원하지 않는 timeframe은 요청을 보내면 안 됩니다.")
+        )
+    )
+    with pytest.raises(ValueError):
+        await adapter.get_futures_candles("BTC/USDT", "3m")
+
+
+async def test_get_futures_ticker_propagates_retryable_on_connection_failure():
+    """네트워크 연결 자체가 끊기면(httpx.ConnectError) 응답을 조용히
+    삼키거나 기본값으로 얼버무리지 않고 RetryableExchangeError로 전파한다
+    (L4-12 ResilientTransport 계약, transport.py의 TRANSIENT_NETWORK 분류
+    경로 실패주입)."""
+
+    async def sleep_noop(_delay: float) -> None:
+        return None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
+    adapter = BitgetAdapter(
+        "key", "secret", "passphrase", demo_mode=True, http_client=client, sleep_fn=sleep_noop
+    )
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.get_futures_ticker("BTC/USDT")

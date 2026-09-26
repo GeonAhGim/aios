@@ -120,6 +120,8 @@ export const catalogKoLegacyB = {
     "label6": "배분된 실행 수",
     "t7": "실행 중인 전략",
     "t8": "실행 중인 전략이 없습니다.",
+    "t9": "최근 알림",
+    "t10": "표시할 최근 알림이 없습니다.",
   },
   "registerCredentialForm": {
     "t1": "새 거래소 연동",

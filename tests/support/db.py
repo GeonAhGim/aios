@@ -127,7 +127,16 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
 
     target_db = _db_name(target_url)
     template_db = _db_name(template_url)
-    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(template_url, "postgres")))
+    # esc-ci-pytest_latency_serial: this admin connect is a plain
+    # `asyncpg.connect` with no retry, unlike `create_pool_with_retry` below --
+    # it can hit the same transient Windows TCP reset documented at
+    # `_POOL_CONNECT_ATTEMPTS` above (ConnectionDoesNotExistError/OSError) and,
+    # because `ensure_worker_database` runs at conftest.py *import* time
+    # (module-level `asyncio.run`, not inside a test), an unretried failure
+    # here surfaces as "ImportError while loading conftest" instead of a
+    # single test failure. Retry with the same bounded backoff instead of
+    # widening a budget or adding an ignore (DECISION_GUIDELINES B-2).
+    admin = await _admin_connect_with_retry(_asyncpg_dsn(_with_database(template_url, "postgres")))
     try:
         last_exc: (
             asyncpg.exceptions.ObjectInUseError | asyncpg.exceptions.UniqueViolationError | None
@@ -199,6 +208,22 @@ def _pool_retry_delay(attempt: int) -> float:
 # mirroring replay_verify.py's `_sleep_before_retry`.
 async def _sleep_before_pool_retry(attempt: int) -> None:
     await asyncio.sleep(random.uniform(0, _pool_retry_delay(attempt)))  # noqa: S311 -- retry jitter, not crypto
+
+
+async def _admin_connect_with_retry(dsn: str) -> asyncpg.Connection:
+    """`asyncpg.connect` with retry on the initial connection only, mirroring
+    `create_pool_with_retry`'s handling of the same transient reset shape."""
+    last_exc: OSError | asyncpg.exceptions.ConnectionDoesNotExistError | None = None
+    for attempt in range(_POOL_CONNECT_ATTEMPTS):
+        try:
+            return await asyncpg.connect(dsn)
+        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError) as exc:
+            last_exc = exc
+            if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
+                raise
+            await _sleep_before_pool_retry(attempt)
+    assert last_exc is not None
+    raise last_exc
 
 
 async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:

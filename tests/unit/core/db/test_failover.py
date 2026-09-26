@@ -4,6 +4,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-18.
 All ports (connect/clock/sleep) are faked -- no real Postgres cluster --
 so failover/backoff/ceiling behavior is deterministic and instant.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -248,6 +249,119 @@ async def test_failover_recovers_write_within_60s_ceiling_wired_end_to_end() -> 
     assert isinstance(conn, FakeConnection)
     assert conn.host == "primary"
     assert len(real_sleep_calls) >= 1
+
+
+class _MutableClock:
+    """A clock that can be advanced arbitrarily, unlike `_fake_clock`'s
+    fixed-length iterator -- needed here because `write_available()` polls
+    the clock independently of `get_writable_connection()`'s own reads."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def test_write_available_true_before_any_failover() -> None:
+    """A manager that has never switched hosts always allows writes."""
+    primary = FakeConnection("primary")
+
+    async def connect(host: str) -> FakeConnection:
+        return primary
+
+    clock = _MutableClock(0.0)
+    mgr = FailoverConnectionManager([HostEndpoint("primary")], connect=connect, clock=clock)
+    await mgr.get_writable_connection()
+    assert mgr.write_available() is True
+
+
+async def test_write_available_blocked_immediately_after_failover() -> None:
+    """Boundary 1: right after a host switch, writes are blocked -- a
+    freshly promoted replica may still be settling."""
+    conns = {
+        "primary": FakeConnection("primary", read_only=False),
+        "replica": FakeConnection("replica", read_only=False),
+    }
+
+    async def connect(host: str) -> FakeConnection:
+        return conns[host]
+
+    clock = _MutableClock(0.0)
+    mgr = FailoverConnectionManager(
+        [HostEndpoint("primary", priority=0), HostEndpoint("replica", priority=1)],
+        connect=connect,
+        clock=clock,
+    )
+    await mgr.get_writable_connection()
+    assert mgr.write_available() is True  # first connect is not a failover
+
+    conns["primary"] = FakeConnection("primary", read_only=True)
+    await mgr.get_writable_connection()  # switches primary -> replica: a failover
+    assert mgr.current_host == "replica"
+    assert mgr.write_available() is False
+
+
+async def test_write_available_still_blocked_at_59_seconds() -> None:
+    """Boundary 2: 59s after failover, the 60s recovery window has not yet
+    elapsed -- writes stay blocked."""
+    conns = {
+        "primary": FakeConnection("primary", read_only=False),
+        "replica": FakeConnection("replica", read_only=False),
+    }
+
+    async def connect(host: str) -> FakeConnection:
+        return conns[host]
+
+    clock = _MutableClock(0.0)
+    mgr = FailoverConnectionManager(
+        [HostEndpoint("primary", priority=0), HostEndpoint("replica", priority=1)],
+        connect=connect,
+        clock=clock,
+        recovery_window_seconds=60.0,
+    )
+    await mgr.get_writable_connection()
+    conns["primary"] = FakeConnection("primary", read_only=True)
+    clock.now = 100.0
+    await mgr.get_writable_connection()  # failover recorded at t=100.0
+    clock.now = 100.0 + 59.0
+    assert mgr.write_available() is False
+
+
+async def test_write_available_allowed_at_60_seconds() -> None:
+    """Boundary 3: exactly 60s after failover, the recovery window has fully
+    elapsed -- writes are allowed again."""
+    conns = {
+        "primary": FakeConnection("primary", read_only=False),
+        "replica": FakeConnection("replica", read_only=False),
+    }
+
+    async def connect(host: str) -> FakeConnection:
+        return conns[host]
+
+    clock = _MutableClock(0.0)
+    mgr = FailoverConnectionManager(
+        [HostEndpoint("primary", priority=0), HostEndpoint("replica", priority=1)],
+        connect=connect,
+        clock=clock,
+        recovery_window_seconds=60.0,
+    )
+    await mgr.get_writable_connection()
+    conns["primary"] = FakeConnection("primary", read_only=True)
+    clock.now = 100.0
+    await mgr.get_writable_connection()  # failover recorded at t=100.0
+    clock.now = 100.0 + 60.0
+    assert mgr.write_available() is True
+
+
+def test_recovery_window_seconds_rejects_non_positive() -> None:
+    async def connect(host: str) -> FakeConnection:
+        raise AssertionError("should never be called")
+
+    with pytest.raises(ValueError):
+        FailoverConnectionManager(
+            [HostEndpoint("primary")], connect=connect, recovery_window_seconds=0
+        )
 
 
 def test_backoff_delays_grow_and_cap_at_max() -> None:

@@ -15,6 +15,7 @@ A pure function — no I/O, clock, or randomness access. The same
 DoD "report snapshot determinism"). HTTP routing and DB storage (report
 persistence) are out of scope for this leaf (a follow-up leaf).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -60,6 +61,14 @@ def build_tearsheet(result: BacktestResult) -> TearsheetView:
     compute_metrics.py)."""
     if not result.equity_curve:
         raise ValueError("빈 equity_curve로는 리포트를 만들 수 없습니다.")
+
+    # Validate: equity must never be negative (capital loss cannot exceed initial investment)
+    for i, point in enumerate(result.equity_curve):
+        if point.equity < 0:
+            raise ValueError(
+                f"equity_curve[{i}] has negative equity ({point.equity}): "
+                "capital loss cannot exceed initial investment"
+            )
 
     metrics = result.metrics
     config = result.config
