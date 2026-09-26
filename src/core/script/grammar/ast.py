@@ -188,8 +188,7 @@ class RequestExpr(ScriptNode):
 
 Expr = Annotated[
     NumberLiteral
-    | StringLiteral | Identifier
-    | CallExpr
+    | StringLiteral | Identifier | CallExpr
     | UnaryExpr
     | PostfixExpr
     | NotExpr
