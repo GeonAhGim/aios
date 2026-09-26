@@ -27,7 +27,7 @@ from typing import Any
 import asyncpg
 import pytest
 
-from tests.support.db import ensure_worker_database
+from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -60,7 +60,7 @@ async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str
     # 테스트별 고유 접미사 -- 이 파일 안의 다른 왕복 테스트와도 DB를
     # 공유하지 않는다(각자 자기 downgrade 창을 스스로만 겪는다).
     worker_id = f"entmrt{abs(hash(request.node.name)) % 10_000_000}"
-    url = await ensure_worker_database(os.environ["DATABASE_URL"], worker_id)
+    url = await ensure_worker_database(template_database_url(), worker_id)
     yield url
 
 

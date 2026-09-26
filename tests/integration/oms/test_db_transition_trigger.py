@@ -47,7 +47,7 @@ from tests.integration.oms.conftest import (
     insert_event,
     insert_order,
 )
-from tests.support.db import ensure_worker_database
+from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -88,7 +88,7 @@ async def _table_exists(pool: asyncpg.Pool, table_name: str) -> bool:
 async def test_downgrade_then_upgrade_round_trip():
     """Disposable DB clone (task-5783) -- never the shared session DB other
     tests and `scripts/replay_verify.py` depend on. See module docstring."""
-    migration_db_url = await ensure_worker_database(os.environ["DATABASE_URL"], "migrationrt")
+    migration_db_url = await ensure_worker_database(template_database_url(), "migrationrt")
     migration_pool = await asyncpg.create_pool(
         migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
         min_size=1,

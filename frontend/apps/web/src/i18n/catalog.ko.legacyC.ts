@@ -152,6 +152,10 @@ export const catalogKoLegacyC = {
     "t7": "시작",
     "t8": "일시정지",
     "t9": "중지",
+    "riskVerdictTitle": "리스크/컴플라이언스 판정",
+    "riskVerdictAllow": "승인",
+    "riskVerdictDeny": "거부",
+    "riskVerdictReasonCodes": "사유: {{reasonCodes}}",
   },
   "mandateRuleForm": {
     "label1": "총 노출 한도(%)",

@@ -308,19 +308,25 @@ test.describe("J1 여정: 온보딩 → 계좌/거래소 연결(데모 키) → 
     await expect(page.getByText("RUNNING", { exact: true })).toBeVisible();
   });
 
-  // 갭 노트(UX_JOURNEYS.md §2 G-2, 코드로 재확인): DashboardPage.tsx는 useMyAlerts/
-  // useNotificationHistory 등 알림 관련 훅을 전혀 호출하지 않는다(grep 0건) — J1 8단계
-  // 성공 조건 "포지션·현금·알림 표시" 중 알림은 대시보드에 직접 노출되지 않고 별도
-  // /alerts, /notifications 화면으로 분리돼 있다. 전용 위젯이 생기기 전까지 이 단계는
-  // 채우지 않는다 — 우회하지 않는다.
-  test.fixme(
-    "8단계 [갭 G-2] 대시보드에 최근 알림이 위젯으로 함께 표시된다",
-    async ({ page }) => {
-      await mockBackend(page);
-      await page.goto("/dashboard");
-      // 갭 G-2: DashboardPage.tsx에 알림 위젯이 추가되면 이 테스트를 채운다.
-    },
-  );
+  // G-2(UX_JOURNEYS.md §2, task-7776로 해소): DashboardPage.tsx가 useNotificationHistory로
+  // 최근 알림 위젯을 함께 렌더한다 — J1 8단계 성공 조건 "포지션·현금·알림 표시"를 채운다.
+  test("8단계 대시보드에 최근 알림이 위젯으로 함께 표시된다", async ({ page }) => {
+    await mockBackend(page, {
+      notificationHistory: [
+        {
+          event_type: "e2e-j1-risk-mismatch",
+          channel: "EMAIL",
+          status: "SENT",
+          created_at: "2026-09-15T10:00:00.000Z",
+        },
+      ],
+    });
+    await page.goto("/dashboard");
+
+    await expect(page.getByRole("heading", { name: "대시보드" })).toBeVisible();
+    await expect(page.getByText("최근 알림")).toBeVisible();
+    await expect(page.getByText("e2e-j1-risk-mismatch")).toBeVisible();
+  });
 
   test("[실패 주입] 8단계 포트폴리오 조회 5xx 시 대시보드가 빈 요약을 보여주고 크래시하지 않는다", async ({
     page,

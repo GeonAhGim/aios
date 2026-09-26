@@ -38,3 +38,18 @@ zones:
     - "config/**"
     - "scripts/**"
     - ".github/**"
+
+# ADR-2026-09-26-B Decision 4(DOM-2) — src/foundation/<ctx>/의 도메인/애플리케이션/
+# 포트/어댑터/계약 5계층 중 하나 이상이 비어 있는 컨텍스트는 여기에 사유를 명시한다.
+# scripts/check_zone_manifest.py의 check_scaffold_reasons()가 실측 스캔 결과와 이
+# 맵을 대조한다(현재는 warn 모드 — main()이 실패로 집계하지 않는다; gate 승격과
+# pyproject/CI 배선은 별도 ops 후속 리프).
+scaffold_reasons:
+  ai: "domain, application, ports, adapters, contracts: gateway/providers/assistant/factory 4개 하위 서비스가 각자 5계층을 갖는 중첩 구조 — ai/ 최상위에는 계층 디렉터리를 두지 않는다(설계상)"
+  allocation: "ports, adapters, contracts: policy/allocate_fills/average_price가 순수 함수 도메인 로직만 노출 — 영속화·조회 연동이 붙기 전까지 포트/어댑터/계약이 필요 없음"
+  entities: "ports: repository 구현이 adapters에 바로 있고 별도 포트 인터페이스로 분리되지 않음 — DOM-1 import-linter 계약 적용 시 분리 예정"
+  execution_ownership: "application, contracts: rules/models가 domain에, repository가 adapters에 바로 있어 별도 유스케이스 오케스트레이션 계층과 외부 계약 스키마가 아직 없음"
+  follow: "ports, adapters: mirror_rules/mirror_signal이 domain에만 있고 저장·조회를 위한 포트/어댑터가 아직 구현되지 않은 PAPER 단계 스캐폴드"
+  marketplace: "ports, adapters: 리스팅 가시성·검증 로직이 domain에만 있고 저장소 연동 포트/어댑터가 아직 구현되지 않음"
+  reporting: "domain, ports, adapters: account_summary가 application에서 다른 컨텍스트의 domain을 조합하는 리포팅 전용 컨텍스트 — 자체 도메인 모델·포트·어댑터가 아직 없음"
+  whatif: "ports, adapters, contracts: impact/preview_order가 domain·application 계층에만 있는 순수 계산 스캐폴드 — 외부 I/O 연동 시점에 추가 예정"
