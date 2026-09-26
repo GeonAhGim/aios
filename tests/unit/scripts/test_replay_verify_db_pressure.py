@@ -10,7 +10,9 @@ no real socket or TEST_DATABASE_URL needed.
 
 from __future__ import annotations
 
+import asyncio
 import time
+from typing import Any
 
 import pytest
 
@@ -174,3 +176,155 @@ async def test_connection_pressure_returns_none_on_connect_failure(monkeypatch) 
     result = await pressure.connection_pressure("postgresql://u:p@localhost/db")
 
     assert result is None
+
+
+def test_target_database_name_strips_leading_slash() -> None:
+    assert pressure.target_database_name("postgresql://u:p@localhost/aios_test_ci") == (
+        "aios_test_ci"
+    )
+
+
+def test_maintenance_dsn_swaps_database_to_postgres() -> None:
+    """`maintenance_dsn` must point at the stable `postgres` database, not the
+    target database that may itself be mid-`DROP`/`CREATE` -- probing the
+    target directly is exactly the gap this module's `reset_lock_held` exists
+    to avoid."""
+    assert pressure.maintenance_dsn("postgresql://u:p@localhost:5432/aios_test_ci") == (
+        "postgresql://u:p@localhost:5432/postgres"
+    )
+
+
+def _make_reset_probe(sequence: list[bool | None]):
+    calls: list[tuple[str, str]] = []
+
+    async def _probe(dsn: str, database: str) -> bool | None:
+        result = sequence[min(len(calls), len(sequence) - 1)]
+        calls.append((dsn, database))
+        return result
+
+    return _probe, calls
+
+
+def test_await_reset_lock_clear_returns_immediately_when_free(perf_budget: Any) -> None:
+    """Perf assertion: the lock already free on the first probe means zero
+    sleeps and the call returns without paying any of the backoff schedule.
+
+    `sleep`/`probe` are fakes, so "immediately" is proven structurally
+    (`delays == []`, one probe) and the cost bound is measured with
+    `perf_budget` (process_time) rather than a wall-clock `perf_counter`
+    delta, which the perf-marker guard (task-7434) rejects in the xdist stage."""
+    probe, calls = _make_reset_probe([False])
+    sleep, delays = _make_sleep()
+
+    asyncio.run(
+        pressure.await_reset_lock_clear(
+            "postgresql://u:p@localhost/aios_test_ci", sleep=sleep, probe=probe
+        )
+    )
+
+    assert len(calls) == 1
+    assert calls[0] == ("postgresql://u:p@localhost/postgres", "aios_test_ci")
+    assert delays == []
+
+    def _free_call() -> None:
+        fresh_probe, _ = _make_reset_probe([False])
+        fresh_sleep, _ = _make_sleep()
+        asyncio.run(
+            pressure.await_reset_lock_clear(
+                "postgresql://u:p@localhost/aios_test_ci", sleep=fresh_sleep, probe=fresh_probe
+            )
+        )
+
+    perf_budget.assert_within(_free_call, budget_ms=50.0, label="reset lock free path")
+
+
+async def test_await_reset_lock_clear_waits_out_transient_reset() -> None:
+    """Negative test: the lock held on the first probe, cleared by the second
+    -- the gate must wait (not fail, not proceed immediately)."""
+    probe, calls = _make_reset_probe([True, False])
+    sleep, delays = _make_sleep()
+
+    await pressure.await_reset_lock_clear(
+        "postgresql://u:p@localhost/aios_test_ci", sleep=sleep, probe=probe
+    )
+
+    assert len(calls) == 2
+    assert delays == [pressure.RESET_LOCK_BACKOFF_SEC[0]]
+
+
+async def test_await_reset_lock_clear_exhausts_budget_and_proceeds_anyway() -> None:
+    """Negative test / fail-open: a lock that never clears must not block
+    forever -- the fixed retry budget (DECISION_GUIDELINES B-2: never
+    unbounded) runs out and the function returns regardless."""
+    probe, calls = _make_reset_probe([True])
+    sleep, delays = _make_sleep()
+
+    await pressure.await_reset_lock_clear(
+        "postgresql://u:p@localhost/aios_test_ci", sleep=sleep, probe=probe
+    )
+
+    assert len(calls) == pressure.RESET_LOCK_MAX_RETRIES + 1
+    assert delays == list(pressure.RESET_LOCK_BACKOFF_SEC)
+
+
+async def test_await_reset_lock_clear_treats_unreadable_probe_as_proceed() -> None:
+    """Negative test: a probe failure (network blip, maintenance DB
+    unreachable) must be treated as unknown, not as held -- it must not block
+    a legitimate run."""
+    probe, calls = _make_reset_probe([None])
+    sleep, delays = _make_sleep()
+
+    await pressure.await_reset_lock_clear(
+        "postgresql://u:p@localhost/aios_test_ci", sleep=sleep, probe=probe
+    )
+
+    assert len(calls) == 1
+    assert delays == []
+
+
+async def test_reset_lock_held_returns_none_on_connect_failure(monkeypatch) -> None:
+    """Failure-injection test: `reset_lock_held` itself must swallow a
+    connect-time OSError/PostgresError into `None`, not propagate it -- a
+    propagating exception here would crash `replay_verify.py` on the reset
+    probe alone, before it ever reaches the actual verification."""
+    import asyncpg
+
+    async def _boom(*, dsn: str, timeout: float) -> None:
+        raise OSError(64, "network name no longer available")
+
+    monkeypatch.setattr(asyncpg, "connect", _boom)
+
+    result = await pressure.reset_lock_held("postgresql://u:p@localhost/postgres", "aios_test_ci")
+
+    assert result is None
+
+
+async def test_reset_lock_held_releases_lock_when_acquired(monkeypatch) -> None:
+    """`reset_lock_held` must release the advisory lock it just took to probe
+    -- a probe that leaks a held lock would itself become the contention the
+    next real `setup_test_db.py --reset` blocks on."""
+    import asyncpg
+
+    executed: list[tuple[str, tuple]] = []
+
+    class _FakeConn:
+        async def fetchval(self, query: str, *args):
+            executed.append((query, args))
+            return True
+
+        async def execute(self, query: str, *args):
+            executed.append((query, args))
+
+        async def close(self):
+            pass
+
+    async def _fake_connect(*, dsn: str, timeout: float):
+        return _FakeConn()
+
+    monkeypatch.setattr(asyncpg, "connect", _fake_connect)
+
+    result = await pressure.reset_lock_held("postgresql://u:p@localhost/postgres", "aios_test_ci")
+
+    assert result is False
+    assert any("pg_try_advisory_lock" in q for q, _ in executed)
+    assert any("pg_advisory_unlock" in q for q, _ in executed)
