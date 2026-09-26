@@ -152,9 +152,10 @@ def tokenize(source: str) -> list[Token]:
         start_line, start_col = line, col
 
         if ch == '"':
-            # M2-2a: string literal for constant args of request(symbol, timeframe, expr).
-            # §3.3 source grammar table has no STRING — minimal grammar with no
-            # escapes or newlines (unverified; widen only this point if other uses arise).
+            # M2-2a introduced STRING for request(symbol, timeframe, expr); M2-3 step 1
+            # (task-7847) reuses the same token for the `string` constant type. §3.3's
+            # grammar table has no STRING — minimal grammar with no escapes or newlines
+            # (unverified; widen only this point if other uses arise).
             pos += 1
             col += 1
             begin = pos

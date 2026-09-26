@@ -32,8 +32,19 @@ Errors carry no (line, col) — the DSL-1 `ScriptNode` has no position field
 ad hoc; see decision). §3.3 "position info included" is the final response
 contract for `POST /scripts/compile` (DSL-12), and we do not pre-empt how that
 leaf restores (line, col) mappings here.
+
+M2-3 step 1 (task-7847): a `StringLiteral` infers to the `string` type, which
+`types.py` places in neither `NUMERIC_TYPES` nor `BOOL_TYPES` -- every existing
+operator branch below already rejects it via that same membership check, no
+new rejection code needed. Because a bare `string` constant is new language
+surface (previously any STRING token outside `request()` was `SCRIPT_SYNTAX`),
+it stays behind `AIOS_SCRIPT_STRING_TYPE_ENABLED` (default OFF, exact-match
+gate mirroring `AIOS_ALLOW_LIVE_ADAPTER` in `src/exchanges/factory.py`) until a
+real consumer (alertcondition message, plot title) lands in a later step.
 """
 from __future__ import annotations
+
+import os
 
 from src.core.script.grammar.ast import (
     BinaryExpr,
@@ -51,6 +62,7 @@ from src.core.script.grammar.ast import (
     Program,
     RequestExpr,
     SignalDecl,
+    StringLiteral,
     UnaryExpr,
 )
 from src.core.script.typing.types import (
@@ -63,6 +75,8 @@ from src.core.script.typing.types import (
     promote_bool,
     promote_numeric,
 )
+
+STRING_TYPE_ENV_VAR = "AIOS_SCRIPT_STRING_TYPE_ENABLED"
 
 _CMP_AND_CROSS_OPS = frozenset(
     {"<", "<=", "==", ">=", ">", "crosses_above", "crosses_below"}
@@ -93,6 +107,11 @@ def check_program(program: Program) -> TypeEnv:
     for decl in program.decls:
         _check_decl(decl, env)
     return env
+
+
+def _string_type_enabled() -> bool:
+    """Fail-closed default OFF -- only the exact string "1" turns it on."""
+    return os.environ.get(STRING_TYPE_ENV_VAR) == "1"
 
 
 def _declare(env: TypeEnv, name: str, type_: Type) -> None:
@@ -139,6 +158,13 @@ def infer_type(expr: Expr, env: TypeEnv) -> Type:
     """Infer the static type of an Expr. Raises `ScriptTypeError` on violation."""
     if isinstance(expr, NumberLiteral):
         return "int" if isinstance(expr.value, int) else "float"
+    if isinstance(expr, StringLiteral):
+        if not _string_type_enabled():
+            raise ScriptTypeError(
+                f"string 타입은 feature flag({STRING_TYPE_ENV_VAR}=1)가 꺼져 있어 "
+                "사용할 수 없습니다"
+            )
+        return "string"
     if isinstance(expr, Identifier):
         if expr.name not in env:
             raise ScriptTypeError(f"정의되지 않은 식별자입니다: {expr.name!r}")
