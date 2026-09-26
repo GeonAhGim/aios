@@ -132,7 +132,7 @@ async def test_place_order_rejects_below_min_notional_without_calling_exchange()
     patched_profile = original_profile.model_copy(
         update={"min_notional": {"005930.KS": Decimal("1000000")}}
     )
-    adapter.venue_profile = lambda: patched_profile  # type: ignore[method-assign]
+    adapter.venue_profile = lambda: patched_profile
 
     order = _order(price=Decimal("70000"), quantity=Decimal("1"))  # notional=70000 < 1,000,000
 

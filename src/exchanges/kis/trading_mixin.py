@@ -40,26 +40,29 @@ def _order_division(order_type: OrderType) -> str:
 
 
 def _lookup_symbol_spec(table: dict[str, Decimal], symbol: str) -> Decimal:
-    """`order.symbol`은 `order_dispatch.py`가 그대로 넘기는 KRX 종목코드
-    (예: "005930")지만, `venue_profile.py`의 `price_tick`/`qty_lot`/
-    `min_notional`은 `SymbolRegistry` 캐노니컬 키("005930.KS")로 등록돼
-    있다(BR-4/L4-04 — 캐노니컬↔venue 심볼 변환은 OMS 계층의
-    `SymbolRegistry.to_venue`가 하고, 여기(exchange adapter)는 이미 venue
-    심볼을 받는다). 두 표기를 모두 시도해 등록 여부와 무관하게 실제 값을
-    찾는다 — 어느 쪽에도 없으면 미등록 심볼로 보고 0(검사 대상 아님)을
-    반환한다."""
+    """`order.symbol` is the bare KRX code (e.g. "005930") passed through
+    as-is by `order_dispatch.py`, but `venue_profile.py`'s `price_tick`/
+    `qty_lot`/`min_notional` are registered under the `SymbolRegistry`
+    canonical key ("005930.KS") -- BR-4/L4-04: canonical<->venue symbol
+    translation is the OMS layer's `SymbolRegistry.to_venue` job, and this
+    exchange adapter already receives the venue symbol. Try both spellings
+    so the lookup succeeds regardless of which key format is registered --
+    if neither is found, treat it as an unregistered symbol and return 0
+    (not subject to the check)."""
     if symbol in table:
         return table[symbol]
     return table.get(f"{symbol}.KS", Decimal("0"))
 
 
 def _precheck_order(order: Order, profile: VenueCapabilityProfile) -> None:
-    """task-8074(AUDIT F4) — place_order()가 거래소에 제출하기 전에
-    tick/lot/min_notional을 검증한다(감사 발견: 기존에는 검증이 전혀 없어
-    거래소가 거부할 주문도 그대로 나갔다). 심볼이 스냅샷에 없으면 검사하지
-    않는다 — `rounding.round_price`/`check_notional`이 tick<=0/
-    min_notional<=0을 "검사 대상 아님"으로 취급하는 것과 같은 규약(§2-A)이라,
-    미등록 심볼을 거부하는 대신 등록된 심볼만 검사한다."""
+    """task-8074(AUDIT F4) -- validates tick/lot/min_notional before
+    place_order() submits to the exchange (audit finding: this check was
+    entirely missing, so orders the exchange would reject were sent
+    anyway). Skips the check for a symbol missing from the snapshot -- same
+    convention as `rounding.round_price`/`check_notional` treating
+    tick<=0/min_notional<=0 as "not subject to the check" (spec §2-A):
+    only registered symbols are checked, rather than rejecting unregistered
+    ones."""
     lot = _lookup_symbol_spec(profile.qty_lot, order.symbol)
     if lot > 0 and order.quantity % lot != 0:
         raise OrderValidationError(
@@ -67,7 +70,7 @@ def _precheck_order(order: Order, profile: VenueCapabilityProfile) -> None:
             f"수량({order.quantity})이 lot 단위({lot})에 맞지 않습니다: {order.symbol}",
         )
 
-    if order.price is None:  # 시장가 — tick/min_notional 검사 대상 없음
+    if order.price is None:  # market order -- no tick/min_notional check applies
         return
 
     price_amount = order.price.amount
@@ -112,9 +115,10 @@ class _OrderMutatingClient(KISHTTPClient, Protocol):
 
 
 class _OrderSubmittingClient(KISHTTPClient, Protocol):
-    """place_order()가 같은 어댑터에 조립되는 KISAdapter.venue_profile()을
-    호출해 tick/lot/min_notional 사전검증(task-8074, AUDIT F4)에 쓴다 —
-    위 두 Protocol과 동일 이유로 명시적으로 계약에 포함한다."""
+    """place_order() calls KISAdapter.venue_profile(), assembled onto the
+    same adapter, for tick/lot/min_notional pre-validation (task-8074,
+    AUDIT F4) -- included explicitly in the contract for the same reason
+    as the two Protocols above."""
 
     def venue_profile(self) -> VenueCapabilityProfile: ...
 
