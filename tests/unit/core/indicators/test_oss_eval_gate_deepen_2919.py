@@ -154,9 +154,16 @@ def test_gate_red_cli_rejects_mutated_document(eval_text: str, tmp_path: Path) -
 
 
 def test_gate_red_cli_rejects_poisoned_pyproject(eval_text: str, tmp_path: Path) -> None:
-    poisoned = _PYPROJECT_PATH.read_text(encoding="utf-8").replace(
-        '"TA-Lib==0.7.1",', '"TA-Lib==0.7.1",\n    "nautilus_trader>=1.231",', 1
+    # Anchor on the TA-Lib requirement whatever version it pins (same as the
+    # in-process negative above) -- a version literal made this a silent no-op
+    # on the TA-Lib 0.8.1 bump (dependabot #118: gate exit 0 instead of 1).
+    poisoned, replaced = re.subn(
+        r'("TA-Lib==[^"]+",)',
+        r'\1\n    "nautilus_trader>=1.231",',
+        _PYPROJECT_PATH.read_text(encoding="utf-8"),
+        count=1,
     )
+    assert replaced == 1
     doc_path = tmp_path / "eval.md"
     pyproject_path = tmp_path / "pyproject.toml"
     doc_path.write_text(eval_text, encoding="utf-8")
