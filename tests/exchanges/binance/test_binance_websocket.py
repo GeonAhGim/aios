@@ -215,7 +215,7 @@ async def test_subscribe_ticker_stream_delivers_parsed_ticker_to_callback():
     async def callback(ticker: Any) -> None:
         received.append(ticker)
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(
             client.subscribe_ticker_stream(
                 "BTCUSDT", callback, connect_fn=_fake_connect_fn([frame])
@@ -234,7 +234,7 @@ async def test_subscribe_order_stream_fetches_listen_key_and_uses_it_in_url():
     async def callback(order: Any) -> None:
         received.append(order)
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(
             client.subscribe_order_stream(callback, connect_fn=_fake_connect_fn([frame])),
             timeout=_WIRING_TIMEOUT_SEC,
