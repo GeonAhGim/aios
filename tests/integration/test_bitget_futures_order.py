@@ -53,6 +53,7 @@ async def test_place_futures_order_blocked_on_live_configured_adapter():
         await live_adapter.place_futures_order(make_order())
 
 
+@pytest.mark.perf
 async def test_place_futures_order_completes_within_ack_budget():
     """ADR-2026-09-09-C 성능예산 — 주문 제출→ACK p95 50ms(paper) 이내."""
 

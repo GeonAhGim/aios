@@ -78,6 +78,7 @@ def test_fast_script_matches_direct_call_byte_identical() -> None:
     assert sandboxed.orders == direct.orders
 
 
+@pytest.mark.perf
 def test_wallclock_limit_exceeded_raises_timeout_error() -> None:
     limit = 1.0
     started = time.monotonic()
@@ -96,6 +97,7 @@ def test_rss_limit_exceeded_raises_memory_error() -> None:
         )
 
 
+@pytest.mark.perf
 def test_child_crash_does_not_hang_parent() -> None:
     # Bound is generous (well under the 30s wallclock_sec limit) -- this only
     # asserts the parent does not hang on an unrelated crash, it does not
