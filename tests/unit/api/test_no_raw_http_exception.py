@@ -16,10 +16,14 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-17~21
   (PLT-09가 만든 fail-closed 토큰 체크)이라 이 이관 시리즈의 스콥이 아니다
   — 영구 화이트리스트.
 """
+
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
+
+import pytest
 
 ROUTERS_ROOT = Path(__file__).resolve().parents[3] / "src" / "api" / "routers"
 
@@ -65,3 +69,54 @@ def test_whitelist_entries_still_exist():
     막는다 — 사라진 항목은 화이트리스트에서도 지워야 한다."""
     missing = [rel for rel in WHITELIST if not (ROUTERS_ROOT / rel).exists()]
     assert missing == []
+
+
+def test_call_count_detects_single_raw_http_exception():
+    """불변식 위반: 라우터 함수 안에 raw HTTPException 호출 1건 —
+    스캐너는 이를 명시적으로 거부(count>=1)해야 한다."""
+    source = (
+        "from fastapi import HTTPException\n\n"
+        "def handler():\n"
+        "    raise HTTPException(404, 'not found')\n"
+    )
+    assert _raw_http_exception_call_count(source) == 1
+
+
+def test_call_count_detects_multiple_raw_http_exception_across_functions():
+    """불변식 위반: 서로 다른 함수 두 곳에 raw HTTPException 호출 —
+    AST 스캔이 함수 스코프 경계를 넘어 전부 집계해야 한다(부분 누락 거부)."""
+    source = (
+        "from fastapi import HTTPException\n\n"
+        "def handler_a():\n"
+        "    raise HTTPException(status_code=400, detail='bad request')\n\n"
+        "def handler_b():\n"
+        "    raise HTTPException(status_code=403, detail='forbidden')\n"
+    )
+    assert _raw_http_exception_call_count(source) == 2
+
+
+def test_call_count_detects_raw_http_exception_nested_in_try_except():
+    """불변식 위반: try/except 블록 안에 중첩된 raw HTTPException 호출 —
+    최상위 문(statement)만 훑는 얕은 스캔이면 놓치는 위치라 별도로 거부해야 한다."""
+    source = (
+        "from fastapi import HTTPException\n\n"
+        "def handler():\n"
+        "    try:\n"
+        "        do_work()\n"
+        "    except ValueError:\n"
+        "        raise HTTPException(status_code=422, detail='invalid')\n"
+    )
+    assert _raw_http_exception_call_count(source) == 1
+
+
+def test_whitelist_gate_fails_closed_when_entry_missing(monkeypatch, tmp_path):
+    """실패주입: 화이트리스트 항목(metrics.py)이 파일 삭제/리네임으로 사라진
+    상태를 흉내낸다 — 게이트는 조용히 통과하지 말고 AssertionError로
+    fail-closed 해야 한다."""
+    empty_root = tmp_path / "routers"
+    empty_root.mkdir()
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "ROUTERS_ROOT", empty_root)
+
+    with pytest.raises(AssertionError):
+        test_whitelist_entries_still_exist()

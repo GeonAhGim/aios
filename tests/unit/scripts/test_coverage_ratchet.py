@@ -4,6 +4,7 @@ DoD: 첫 측정치를 baseline으로 커밋하고, 인위로 낮춘 coverage.xml
 exit=1로 FAIL한다. coverage.xml을 읽기만 하는 순수 파서이므로 DB·네트워크
 접근 없이 합성 Cobertura XML(tmp_path)만으로 검증한다.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -30,18 +31,33 @@ def _load_module(name: str, path: Path) -> ModuleType:
 coverage_ratchet = _load_module("coverage_ratchet", SCRIPTS_DIR / "coverage_ratchet.py")
 
 
-def _write_coverage_xml(tmp_path: Path, line_rate: float, name: str = "coverage.xml") -> Path:
+def _write_coverage_xml(
+    tmp_path: Path,
+    line_rate: float,
+    name: str = "coverage.xml",
+    lines_valid: int | None = None,
+) -> Path:
     path = tmp_path / name
+    lines_valid_attr = f' lines-valid="{lines_valid}"' if lines_valid is not None else ""
     path.write_text(
-        f'<?xml version="1.0" ?><coverage line-rate="{line_rate}" branch-rate="0"></coverage>',
+        f'<?xml version="1.0" ?><coverage line-rate="{line_rate}" branch-rate="0"'
+        f"{lines_valid_attr}></coverage>",
         encoding="utf-8",
     )
     return path
 
 
-def _write_baseline(tmp_path: Path, percent: float, name: str = "coverage-baseline.txt") -> Path:
+def _write_baseline(
+    tmp_path: Path,
+    percent: float,
+    name: str = "coverage-baseline.txt",
+    lines_valid: int | None = None,
+) -> Path:
     path = tmp_path / name
-    path.write_text(f"{percent:.2f}\n", encoding="utf-8")
+    body = f"{percent:.2f}\n"
+    if lines_valid is not None:
+        body += f"{lines_valid}\n"
+    path.write_text(body, encoding="utf-8")
     return path
 
 
@@ -222,6 +238,114 @@ def test_custom_tolerance_is_respected(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 부분 리포트 감지(task-7644) — pytest 조기중단으로 lines-valid가 급감하면
+# line-rate가 우연히 baseline 이내여도 비교 자체를 fail-closed로 거부한다
+# ---------------------------------------------------------------------------
+
+
+def test_partial_report_below_min_lines_valid_ratio_fails_closed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DoD: coverage.xml의 line-rate 자체는 baseline 이내로 보여도, lines-valid가
+    baseline 대비 최소 비율(기본 0.5) 밑으로 떨어지면 pytest 조기중단으로 인한
+    부분 리포트로 간주해 비교를 거부한다(기준선 미달 메시지와 구분되는 메시지)."""
+    xml_path = _write_coverage_xml(tmp_path, 0.95, lines_valid=2000)  # 20% of baseline's lines
+    baseline_path = _write_baseline(tmp_path, 80.00, lines_valid=10000)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "부분 커버리지 리포트" in out
+    assert "기준선 미달" not in out
+    assert baseline_path.read_text(encoding="utf-8") == "80.00\n10000\n"
+
+
+def test_partial_report_guard_also_blocks_a_spurious_ratchet_up(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DoD: 부분 리포트가 우연히 baseline보다 높은 line-rate를 보고해도(예: 소수
+    파일만 임포트돼 그 파일들의 커버리지가 높음) lines-valid 급감을 감지하면
+    baseline을 올리지 않는다 — 조용한 하향 래칫 재발보다 더 위험한, 잘못된
+    상향 래칫을 막는다."""
+    xml_path = _write_coverage_xml(tmp_path, 0.99, lines_valid=1500)
+    baseline_path = _write_baseline(tmp_path, 80.00, lines_valid=10000)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+    assert baseline_path.read_text(encoding="utf-8") == "80.00\n10000\n"
+
+
+def test_lines_valid_drop_within_min_ratio_still_compares_normally(
+    tmp_path: Path,
+) -> None:
+    """DoD: lines-valid가 baseline 대비 살짝만 줄어(최소 비율 이상) 정상 범위면
+    부분 리포트로 오판하지 않고 평소대로 line-rate 비교를 계속한다."""
+    xml_path = _write_coverage_xml(tmp_path, 0.80, lines_valid=6000)  # 60% of baseline's lines
+    baseline_path = _write_baseline(tmp_path, 80.00, lines_valid=10000)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 0
+
+
+def test_missing_lines_valid_data_skips_partial_report_guard(tmp_path: Path) -> None:
+    """DoD: 구버전 baseline(2번째 줄 없음)이나 lines-valid 속성이 없는
+    coverage.xml에서는 비교 대상이 없어 부분 리포트 검사를 건너뛰고 기존
+    line-rate 비교만 수행한다 — 하위호환."""
+    xml_path = _write_coverage_xml(tmp_path, 0.70)  # no lines_valid attribute
+    baseline_path = _write_baseline(tmp_path, 80.00)  # no second line
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1  # falls through to the normal baseline-miss check
+    out = coverage_ratchet.read_baseline_percent(baseline_path)
+    assert out == 80.00
+
+
+def test_custom_min_lines_valid_ratio_is_respected(tmp_path: Path) -> None:
+    xml_path = _write_coverage_xml(tmp_path, 0.95, lines_valid=2000)
+    baseline_path = _write_baseline(tmp_path, 80.00, lines_valid=10000)
+
+    exit_code = coverage_ratchet.main(
+        [
+            "--coverage-xml",
+            str(xml_path),
+            "--baseline",
+            str(baseline_path),
+            "--min-lines-valid-ratio",
+            "0.1",
+        ]
+    )
+
+    assert exit_code == 0  # 2000/10000 = 0.2 >= 0.1 floor -> guard does not trip
+
+
+def test_baseline_initialized_with_lines_valid_persists_second_line(
+    tmp_path: Path,
+) -> None:
+    xml_path = _write_coverage_xml(tmp_path, 0.75, lines_valid=12345)
+    baseline_path = tmp_path / "coverage-baseline.txt"
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 0
+    lines = baseline_path.read_text(encoding="utf-8").strip().splitlines()
+    assert lines == ["75.00", "12345"]
+
+
+# ---------------------------------------------------------------------------
 # 실패 주입 — baseline 갱신 쓰기가 중간에 실패해도 조용히 통과 보고하지 않는다
 # ---------------------------------------------------------------------------
 
@@ -244,9 +368,7 @@ def test_baseline_write_failure_propagates_instead_of_silent_pass(
     monkeypatch.setattr(Path, "write_text", _raise_disk_full)
 
     with pytest.raises(OSError, match="No space left on device"):
-        coverage_ratchet.main(
-            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
-        )
+        coverage_ratchet.main(["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)])
 
 
 # ---------------------------------------------------------------------------

@@ -157,16 +157,41 @@ test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크�
     await expect(page.getByTestId("compile-preview-hash")).toContainText("스크립트 해시:");
   });
 
-  // 갭 G-3(UX_JOURNEYS.md §2 J2 5→6단계 단절): 컴파일 성공 후에도 ScriptEditorPage.tsx는
-  // 백테스트 화면으로의 Link/navigate를 전혀 갖고 있지 않다(직접 읽어 확인). 명시적
-  // 연결이 생기기 전까지 이 단계는 재현 대상이 없으므로 fixme로 남긴다.
-  test.fixme("5→6단계 [갭 G-3] 스크립트 컴파일 성공 시 즉시 백테스트로 자동 연결된다", async ({ page }) => {
-    // 갭 G-3(UX_JOURNEYS.md §2 J2 5→6단계 단절): ScriptEditorPage.tsx 전체를 읽어
-    // 확인했다 — 백테스트/sweep-results로의 Link·navigate가 전혀 없다. 명시적 연결이
-    // 생기기 전까지 재현 대상이 없다.
+  // G-3(UX_JOURNEYS.md §2 J2 5→6단계 단절, task-7785로 해소): 컴파일 성공 시 CTA
+  // ("차트에서 백테스트")가 나타나고, 누르면 scriptHash를 실어 /chart(quick-backtest가
+  // 실제로 동작하는 화면, 6단계 테스트와 동일 경로)로 이동한다.
+  test("5→6단계 [G-3 해소] 스크립트 컴파일 성공 시 CTA로 즉시 백테스트 화면에 연결된다", async ({ page }) => {
     await mockBackend(page);
     await mockScriptCompile(page);
     await page.goto("/scripts/editor");
+
+    await page.getByRole("button", { name: "컴파일" }).click();
+    await expect(page.getByTestId("compile-preview-hash")).toBeVisible();
+
+    await page.getByTestId("compile-open-chart").click();
+
+    await expect(page).toHaveURL(/\/chart\?script_hash=e2e-hash-0+$/);
+  });
+
+  // 실패주입(negative): 컴파일이 실패하면 CTA 자체가 뜨지 않아 사용자가 잘못된
+  // 컴파일 결과로 백테스트 화면에 진입할 수 없다.
+  test("negative: 컴파일 실패 시 백테스트 CTA가 뜨지 않는다", async ({ page }) => {
+    await mockBackend(page);
+    await mockScriptCompile(page, {
+      status: 400,
+      body: {
+        error_code: "VALIDATION_INVALID_FIELD",
+        message: "SCRIPT_SYNTAX: unexpected end of input",
+        details: { code: "SCRIPT_SYNTAX", line: 1, col: 1 },
+        trace_id: "e2e-trace-400",
+      },
+    });
+    await page.goto("/scripts/editor");
+
+    await page.getByRole("button", { name: "컴파일" }).click();
+
+    await expect(page.getByTestId("script-editor-marker-0")).toBeVisible();
+    await expect(page.getByTestId("compile-open-chart")).toHaveCount(0);
   });
 
   test("6단계 즉시 백테스트: 컴파일된 전략을 /chart의 quick-backtest로 바로 실행한다", async ({ page }) => {

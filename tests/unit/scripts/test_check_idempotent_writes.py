@@ -4,6 +4,7 @@ baseline-ratchet contract + perf budget + gate-red reproduction.
 Loads the script as a module the same way `test_check_consistency.py`/
 `test_check_position_key_central.py` do (``scripts/`` is not a package).
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -15,15 +16,31 @@ from types import ModuleType
 
 import pytest
 
+from tests._perf.relative_budget import RelativeBudget
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
-# Measured full-repo scan (src/ + scripts/, ~800 files) is ~2.5s on a dev
-# machine (no ADR-2026-09-09-C budget-table row fits a build-time AST scan --
-# nearest comparable one-off batch job is "백테스트 1개월 M1 1심볼 3초"). This
-# gate runs once per commit, not on a request hot path, so the budget below
-# keeps ~2.4x headroom over the measured p95 for slower CI runners.
-_SCAN_P95_BUDGET_SECONDS = 6.0
+# Measured full-repo scan (src/ + scripts/, ~800 files) is ~2.5-4.7s warm-cache
+# on a dev machine (no ADR-2026-09-09-C budget-table row fits a build-time
+# AST scan -- nearest comparable one-off batch job is "백테스트 1개월 M1
+# 1심볼 3초"). This gate runs once per commit, not on a request hot path.
+#
+# task-7631: the absolute 6.0s p95 budget below was still tied to this CI
+# runner's clock+disk speed and went red on slower/busier runners (GitHub
+# run 36193686857). scan_tree() does real disk I/O, so time.process_time()
+# would not see the wait time -- RelativeBudget's wall-clock mode calibrates
+# against a same-process, fixed-size pure-Python loop instead, so the ratio
+# stays stable across hosts. The very first scan_tree() call also pays a
+# cold OS-file-cache penalty unrelated to the code (observed locally:
+# ~14-16s cold vs ~8-9s warm on the same host/run), so the test below runs
+# one untimed warmup pass first (`warmup=1`) -- otherwise a 3-sample p95 is
+# just "was the cache cold," not a code-latency signal. Ratio derivation:
+# locally measured warm-cache p95 was ~9s against a ~0.095s calibration
+# (~95x); 150x keeps ~1.6x headroom above that (similar spirit to the
+# original budget's headroom over its measured baseline, comment above)
+# while still catching an O(n) -> O(n^2) style regression in the scanner.
+_SCAN_P95_MAX_RATIO = 150.0
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -82,7 +99,7 @@ def test_ignores_insert_with_on_conflict():
     """negative -- an upsert is retry-safe by construction."""
     source = (
         "async def upsert(conn, key):\n"
-        '    await conn.execute(\n'
+        "    await conn.execute(\n"
         '        "INSERT INTO widgets (key) VALUES ($1) "\n'
         '        "ON CONFLICT (key) DO NOTHING",\n'
         "        key,\n"
@@ -135,7 +152,7 @@ def test_exclusion_skips_migrations_directory(tmp_path: Path):
     migrations_file = tmp_path / "src" / "db" / "migrations" / "versions" / "abc_x.py"
     migrations_file.parent.mkdir(parents=True)
     migrations_file.write_text(
-        'op.execute("INSERT INTO widgets (key) VALUES (\'seed\')")\n', encoding="utf-8"
+        "op.execute(\"INSERT INTO widgets (key) VALUES ('seed')\")\n", encoding="utf-8"
     )
     hits = civ.scan_tree(tmp_path)
     assert hits == []
@@ -178,7 +195,7 @@ def test_main_red_gate_reproduction_fails_when_hits_exceed_baseline(tmp_path: Pa
     src = tmp_path / "src"
     src.mkdir()
     (src / "writer.py").write_text(
-        'async def create(conn, key):\n'
+        "async def create(conn, key):\n"
         '    await conn.execute("INSERT INTO widgets (key) VALUES ($1)", key)\n',
         encoding="utf-8",
     )
@@ -190,8 +207,8 @@ def test_main_red_gate_reproduction_fails_when_hits_exceed_baseline(tmp_path: Pa
 
     # Fixing the file (adding ON CONFLICT) turns the same gate green again.
     (src / "writer.py").write_text(
-        'async def create(conn, key):\n'
-        '    await conn.execute(\n'
+        "async def create(conn, key):\n"
+        "    await conn.execute(\n"
         '        "INSERT INTO widgets (key) VALUES ($1) ON CONFLICT (key) DO NOTHING", key\n'
         "    )\n",
         encoding="utf-8",
@@ -203,7 +220,7 @@ def test_main_initializes_baseline_when_absent(tmp_path: Path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "writer.py").write_text(
-        'async def create(conn, key):\n'
+        "async def create(conn, key):\n"
         '    await conn.execute("INSERT INTO widgets (key) VALUES ($1)", key)\n',
         encoding="utf-8",
     )
@@ -230,23 +247,23 @@ def test_main_persists_decrease_only_with_update_flag(tmp_path: Path):
 # --- performance budget ------------------------------------------------
 
 
-def _p95(samples: list[float]) -> float:
-    ordered = sorted(samples)
-    index = max(0, -(-95 * len(ordered) // 100) - 1)
-    return ordered[index]
-
-
 @pytest.mark.perf
 def test_scan_tree_p95_latency_within_budget_for_real_repo():
     # task-7434: scan_tree() walks the real repo tree (disk I/O), so this
     # stays on raw wall-clock perf_counter() -- process_time would not
-    # capture I/O wait and would understate real scan latency.
-    samples = []
-    for _ in range(3):
-        started = time.perf_counter()
-        civ.scan_tree(ROOT)
-        samples.append(time.perf_counter() - started)
-    assert _p95(samples) < _SCAN_P95_BUDGET_SECONDS
+    # capture I/O wait and would understate real scan latency. task-7631:
+    # the budget itself is now a ratio against a same-process calibration
+    # loop (see _SCAN_P95_MAX_RATIO above) instead of an absolute second
+    # figure, so it self-corrects for host speed; warmup=1 discards the
+    # cold-cache first pass so the p95 measures code latency, not cache
+    # state.
+    RelativeBudget().p95_wall_seconds_within(
+        lambda: civ.scan_tree(ROOT),
+        max_ratio=_SCAN_P95_MAX_RATIO,
+        n=3,
+        warmup=1,
+        label="scan_tree(ROOT) p95",
+    )
 
 
 @pytest.mark.perf
