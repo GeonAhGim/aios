@@ -151,8 +151,25 @@ const WARMUP_SWEEPS = 3;
  * blind-spot noise, not a real regression. Halving chunk size again (8->16,
  * ~7-8 frames each) shrinks the window any single bracket pair can miss by
  * another half, the same fix already applied twice before at 1->4 and 4->8.
+ *
+ * task-7742 (esc-ci-frontend.json recurrence): the 16-chunk split (~7-8
+ * frames each) still missed a burst -- CI's failure log showed
+ * panZoomFrameMsP95 at 4.149ms (a 32% "regression" against the 3.127ms
+ * baseline) at calib ratio exactly 1.000, while the same run's calib samples
+ * spiked to 132.465ms against a 12.5ms base (~10.6x host load, far worse
+ * than any prior recurrence) with dozens of other samples in the 18-40ms
+ * range -- i.e. severe, sustained host contention that the ~7-8-frame chunk
+ * straddled without either of its own bracket probes landing inside the
+ * burst. Bisect (b5390c20, unrelated python-only test file) again came back
+ * with no plausible frontend-side culprit, and an immediate local rerun of
+ * this exact bench passed clean (panZoomFrameMsP95 3.276ms, calib peak back
+ * down to 27.260ms, "OK: within baseline tolerance") with zero code changes
+ * -- consistent with measurement blind-spot noise, not a real regression.
+ * Halving chunk size again (16->32, ~3-4 frames each) shrinks the window any
+ * single bracket pair can miss by another half, the same fix already
+ * applied three times before at 1->4, 4->8, and 8->16.
  */
-const PAN_ZOOM_CALIB_CHUNKS = 16;
+const PAN_ZOOM_CALIB_CHUNKS = 32;
 /**
  * task-6744: same blind-window problem for indicatorAddMs -- one calib pair
  * bracketing all `INDICATOR_ADD_RUNS` runs missed contention confined to a

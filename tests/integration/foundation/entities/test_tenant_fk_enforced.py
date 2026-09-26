@@ -150,6 +150,40 @@ async def test_update_tenant_id_to_nonexistent_value_raises_fk_violation(pool, r
             )
 
 
+async def test_create_legal_entity_propagates_pool_acquire_failure(pool, repo, monkeypatch):
+    # 실패주입(DEEPEN task-4084 잔여 항목) — DB 연결 자체가 끊긴 경우
+    # (pool 소진/네트워크 단절 등)에도 create_legal_entity가 예외를 삼키지
+    # 않고 그대로 전파하는지 확인한다. §3의 fail-closed 기본 정책상, FK
+    # 위반이 아닌 하위 의존성 실패(asyncpg.UniqueViolationError 외의 다른
+    # 예외)는 `ConcurrencyConflictError`로 둔갑하지 않고 호출자에게
+    # 그대로 올라가야 한다.
+    class _FailingAcquire:
+        async def __aenter__(self):
+            raise asyncpg.exceptions.ConnectionDoesNotExistError("connection lost")
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+    class _FailingPool:
+        def acquire(self, *args, **kwargs):
+            return _FailingAcquire()
+
+    # asyncpg.Pool.acquire은 읽기 전용 속성이라 인스턴스에 직접 monkeypatch할
+    # 수 없다 — repo._pool 자체를 스텁으로 교체해 acquire() 실패를 흉내낸다.
+    monkeypatch.setattr(repo, "_pool", _FailingPool())
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await repo.create_legal_entity(
+            LegalEntity(
+                entity_id=uuid4(),
+                tenant_id=uuid4(),
+                name="Connection Failure Probe",
+                jurisdiction="KR",
+                region_tag="kr-seoul",
+            )
+        )
+
+
 @pytest.mark.perf
 async def test_fk_violation_round_trip_p95_latency_within_local_budget(pool, repo):
     # ADR-2026-09-09-C Decision 1의 축별 성능 예산 표는 사전거래 게이트/

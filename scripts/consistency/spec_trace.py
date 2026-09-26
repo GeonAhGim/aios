@@ -71,14 +71,27 @@ def _git_commit_subjects(root: Path) -> str:
         return ""
 
 
-def _leaf_referenced(leaf: str, *blobs: str) -> bool:
-    """leaf가 blob 안에 온전한 토큰으로 등장하는지 검사한다.
+def _referenced_leaf_ids(leaf_ids: set[str], *blobs: str) -> set[str]:
+    """leaf_ids 중 blob들 안에 온전한 토큰으로 등장하는 것들을 모아 반환한다.
 
-    plain substring(`leaf in blob`)은 AI-2가 AI-22/AI-20의 접두라서 그 커밋/코드만
-    보고도 "추적됨"으로 오판한다 -- 양옆이 영숫자가 아닐 때만 일치로 센다.
+    leaf마다 blob 전체를 다시 search하면 O(len(leaf_ids) * len(blob))이 되어
+    tests/가 커질 때마다(DEEPEN 커밋 누적) check_consistency의 CI 120s 타임아웃에
+    가까워진다(esc-ci-consistency). alternation 하나로 blob을 leaf당 한 번씩이
+    아니라 전체 한 번만 순회해 O(len(blob))로 낮춘다. plain substring(`leaf in
+    blob`)은 AI-2가 AI-22/AI-20의 접두라서 오판하므로, 양옆이 영숫자가 아닐 때만
+    일치로 센다(경계는 alternation 후보 순서와 무관하게 lookaround가 강제한다).
     """
-    pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(leaf) + r"(?![A-Za-z0-9])")
-    return any(pattern.search(blob) for blob in blobs)
+    if not leaf_ids:
+        return set()
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9])("
+        + "|".join(re.escape(leaf) for leaf in sorted(leaf_ids, key=len, reverse=True))
+        + r")(?![A-Za-z0-9])"
+    )
+    found: set[str] = set()
+    for blob in blobs:
+        found.update(m.group(1) for m in pattern.finditer(blob))
+    return found
 
 
 def check_spec_leaf_traceability(root: Path) -> list[Hit]:
@@ -98,11 +111,8 @@ def check_spec_leaf_traceability(root: Path) -> list[Hit]:
                 blobs.append(path.read_text(encoding="utf-8", errors="replace"))
     code_blob = "\n".join(blobs)
     commit_blob = _git_commit_subjects(root)
-    return [
-        (f"docs/specs#{leaf}", 0)
-        for leaf in sorted(leaf_ids)
-        if not _leaf_referenced(leaf, code_blob, commit_blob)
-    ]
+    referenced = _referenced_leaf_ids(leaf_ids, code_blob, commit_blob)
+    return [(f"docs/specs#{leaf}", 0) for leaf in sorted(leaf_ids) if leaf not in referenced]
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,15 @@ accept a single string -- same reason as KIS's "orgno:odno" and Kiwoom's
 `exchange_order_id` as "{instId}:{ordId}" and `cancel_order`/
 `modify_order` expect that same format.
 
+Review REJECT (task-7868, review 7802) -- `place_order` used to send
+`order.symbol` (canonical "BASE/QUOTE", e.g. "BTC/USDT") to OKX unconverted
+instead of its `instId` format ("BASE-QUOTE", e.g. "BTC-USDT"), which would
+have failed 100% of live orders. `_to_inst_id` now delegates the conversion
+to `symbol_normalizer` (LA-7, via `src/exchanges/okx/symbols.py`); an
+already-raw OKX symbol ("BTC-USDT") passed directly is rejected with
+`FatalExchangeError` because the canonical parser finds no "/" separator --
+reject, not silently normalize (contract).
+
 Unverified scope (ratchet note): `order.order_type` currently only has
 MARKET/LIMIT (src/data/models/trading.py), so `_to_okx_ord_type` only maps
 those two -- OKX's `post_only`/`fok`/`ioc` order types are out of this
@@ -49,6 +58,10 @@ from typing import Any, Protocol
 from src.core.exceptions import FatalExchangeError
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.exchanges.okx.symbols import to_okx_symbol as _to_okx_symbol
+from src.foundation.market_data.domain.reference.symbol_normalizer import (
+    SymbolNormalizationError,
+)
 
 _TRADE_MODE_CASH = "cash"  # spot-only Phase 1 scope (module docstring)
 _ORDER_PATH = "/api/v5/trade/order"
@@ -79,6 +92,20 @@ def _validate_order(order: Order) -> None:
         raise FatalExchangeError(
             f"OKX 지정가(limit) 주문은 0보다 큰 가격이 필요함: {order.price!r}"
         )
+
+
+def _to_inst_id(symbol: str) -> str:
+    """Canonical "BASE/QUOTE" (e.g. "BTC/USDT") -> OKX `instId`
+    "BASE-QUOTE" (e.g. "BTC-USDT"), delegating to `symbol_normalizer` (LA-7)
+    via `okx/symbols.py` (task-7868, review REJECT 7802). An already-raw
+    OKX symbol ("BTC-USDT") has no "/" and is rejected here rather than
+    silently normalized -- callers must pass canonical symbols."""
+    try:
+        return _to_okx_symbol(symbol)
+    except SymbolNormalizationError as exc:
+        raise FatalExchangeError(
+            f"OKX instId 변환 실패 -- canonical 'BASE/QUOTE' 형식이 필요함: {symbol!r}"
+        ) from exc
 
 
 def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
@@ -141,8 +168,9 @@ class OKXTradingMixin:
     @require_paper_sandbox
     async def place_order(self: _OKXOrderClient, order: Order) -> Order:
         _validate_order(order)
+        inst_id = _to_inst_id(order.symbol)
         body: dict[str, Any] = {
-            "instId": order.symbol,
+            "instId": inst_id,
             "tdMode": _TRADE_MODE_CASH,
             "side": _to_okx_side(order.side),
             "ordType": _to_okx_ord_type(order.order_type),
@@ -157,7 +185,7 @@ class OKXTradingMixin:
             ord_id = row["ordId"]
         except KeyError as exc:
             raise FatalExchangeError(f"OKX 주문 응답에 ordId 필드 없음: {row!r}") from exc
-        exchange_order_id = f"{order.symbol}:{ord_id}"
+        exchange_order_id = f"{inst_id}:{ord_id}"
         return order.model_copy(
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )
