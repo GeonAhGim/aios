@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from logging.handlers import QueueListener
 from unittest.mock import patch
 
 import pytest
@@ -142,8 +143,11 @@ async def test_lifespan_rejects_invalid_database_url() -> None:
     거부해야 한다. pool/event_bus/루프가 부분 조립된 상태로 방치되지
     않음을 확인한다.
 
-    P6 위반 해소: src/main.py(79-81) — load_env_secrets가 raise하면
-    create_pool이 호출되지 않으므로 event_bus가 등록되지 않는다.
+    P6 위반 해소: src/main.py — load_env_secrets가 raise하면 create_pool이
+    호출되지 않으므로 event_bus가 등록되지 않는다. task-7633: load_env_secrets
+    호출 자체가 try/finally 범위 안으로 옮겨졌으므로, 이 실패 경로에서도
+    finally가 실행되어 log_listener.stop()이 호출됨을 관측 가능하게 확인한다
+    (회귀 시 QueueListener 스레드가 절대 멈추지 않는다).
     """
     import src.main as main_module
 
@@ -156,9 +160,22 @@ async def test_lifespan_rejects_invalid_database_url() -> None:
         from src.main import lifespan as _lifespan
 
         test_app = FastAPI(lifespan=_lifespan)
-        with pytest.raises(ValueError):
-            async with test_app.router.lifespan_context(test_app):
-                pass
+        captured_listeners: list[QueueListener] = []
+        original_configure_logging = main_module.configure_logging
+
+        def _capturing_configure_logging(
+            level: str = "INFO", *, redact: bool = True
+        ) -> QueueListener:
+            listener = original_configure_logging(level, redact=redact)
+            captured_listeners.append(listener)
+            return listener
+
+        with patch.object(main_module, "configure_logging", _capturing_configure_logging):
+            with pytest.raises(ValueError):
+                async with test_app.router.lifespan_context(test_app):
+                    pass
+            assert len(captured_listeners) == 1
+            assert captured_listeners[0]._thread is None
         # secrets 로딩 실패 → create_pool 미호출 → event_bus/pool 미등록.
         assert not hasattr(test_app.state, "event_bus")
         assert not hasattr(test_app.state, "pool")
@@ -166,8 +183,15 @@ async def test_lifespan_rejects_invalid_database_url() -> None:
 
 async def test_lifespan_rejects_pool_creation_failure() -> None:
     """실패주입: asyncpg.create_pool 이 raised하면 lifespan이 전체를
-    롤백하고 app.state에 부분 상태를 남기지 않는다. — I-01(실패 닫힘)."""
+    롤백하고 app.state에 부분 상태를 남기지 않는다. — I-01(실패 닫힘).
+
+    task-7633: create_pool 호출 자체가 try/finally 범위 안으로 옮겨졌으므로,
+    이 실패 경로에서도 finally가 실행되어 log_listener.stop()이 호출됨을
+    관측 가능하게 확인한다(회귀 시 QueueListener 스레드가 절대 멈추지 않는다).
+    """
     import asyncpg
+
+    import src.main as main_module
 
     def _fail_pool(*args: object, **kwargs: object) -> None:
         # asyncpg.create_pool는 regular function (coroutine function 아님) —
@@ -179,10 +203,21 @@ async def test_lifespan_rejects_pool_creation_failure() -> None:
     from src.main import lifespan as _lifespan
 
     test_app = FastAPI(lifespan=_lifespan)
-    with patch.object(asyncpg, "create_pool", _fail_pool):
-        with pytest.raises(asyncpg.PostgresError):
-            async with test_app.router.lifespan_context(test_app):
-                pass
+    captured_listeners: list[QueueListener] = []
+    original_configure_logging = main_module.configure_logging
+
+    def _capturing_configure_logging(level: str = "INFO", *, redact: bool = True) -> QueueListener:
+        listener = original_configure_logging(level, redact=redact)
+        captured_listeners.append(listener)
+        return listener
+
+    with patch.object(main_module, "configure_logging", _capturing_configure_logging):
+        with patch.object(asyncpg, "create_pool", _fail_pool):
+            with pytest.raises(asyncpg.PostgresError):
+                async with test_app.router.lifespan_context(test_app):
+                    pass
+        assert len(captured_listeners) == 1
+        assert captured_listeners[0]._thread is None
     # 롤백됐으므로 state에 pool/event_bus가 없어야 한다.
     assert not hasattr(test_app.state, "pool")
     assert not hasattr(test_app.state, "event_bus")

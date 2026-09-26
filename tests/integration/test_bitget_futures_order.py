@@ -6,6 +6,7 @@
 """
 
 import json
+import time
 from decimal import Decimal
 
 import httpx
@@ -50,6 +51,28 @@ async def test_place_futures_order_blocked_on_live_configured_adapter():
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_futures_order(make_order())
+
+
+async def test_place_futures_order_completes_within_ack_budget():
+    """ADR-2026-09-09-C 성능예산 — 주문 제출→ACK p95 50ms(paper) 이내."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {
+                "code": "00000",
+                "msg": "success",
+                "requestTime": 1,
+                "data": {"orderId": "777", "clientOid": "c-1"},
+            }
+        )
+
+    adapter = make_adapter(handler)
+    start = time.perf_counter()
+    result = await adapter.place_futures_order(make_order())
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    assert result.status == OrderStatus.SUBMITTED
+    assert elapsed_ms < 50
 
 
 async def test_cancel_futures_order():

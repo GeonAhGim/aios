@@ -11,6 +11,10 @@ checker actually fail, both as a pure `verify()` call and as the real
 `scripts/replay_verify.py` subprocess exit code -- an always-exit-0 checker
 would pass DoD(1) alone but not this. DoD(3) replaying the same window twice
 yields the same `combined_digest` (no clock/dict-order dependence).
+
+Order-event-chain-specific mismatch/cutover regressions (task-2394/task-2173)
+are in `test_replay_verify_order_chain.py` (split to stay under the 500-line
+file-policy observation line, ADR-2026-09-10-C §7).
 """
 
 from __future__ import annotations
@@ -22,13 +26,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
 from scripts import replay_verify
-from src.core.eventstore import replay
-from src.core.eventstore.projections.orders import EventChainBrokenError
 from src.data.models.base import Currency
 from src.data.models.trading import OrderStatus
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
@@ -37,6 +39,7 @@ from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJ
 from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
 from src.foundation.ledger.domain.chart_of_accounts import user_account
+from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.conftest import create_test_user
@@ -243,6 +246,28 @@ async def test_replay_detects_ledger_balance_tampered_outside_the_event_trail(po
         await _bump_balance(-1)
 
 
+async def test_replay_raises_when_a_dependency_fails_instead_of_reporting_false_ok(
+    pool, monkeypatch
+):
+    """Failure-injection test (DoD checklist item, task-4084 기준) -- if a
+    dependency `verify()` relies on (here, the fills lookup `_order_pair`
+    calls for every touched order) raises, the report must never come back
+    `ok=True` by silently treating the failed stream as a non-mismatch.
+    `verify()`/`_order_pair` have no `try/except` around this call (by
+    design -- FA-15 is fail-closed), so the injected exception must
+    propagate out of `verify()` unchanged rather than being swallowed."""
+    await _seed_order(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    async def _raise_dependency_error(self, conn, order_id):
+        raise RuntimeError("injected dependency failure -- fills lookup unavailable")
+
+    monkeypatch.setattr(FillsRepository, "list_for_order", _raise_dependency_error)
+
+    with pytest.raises(RuntimeError, match="injected dependency failure"):
+        await replay_verify.verify(pool, as_of=as_of, hours=1)
+
+
 async def test_replay_digest_differs_between_accounts_with_different_balances(pool):
     """DoD(b), task-2394 -- falsifies the ci:77871f678ce2 symptom directly:
     every `USER:*:AVAILABLE` key reported the exact same two digests
@@ -282,6 +307,8 @@ async def test_replay_digest_differs_between_accounts_with_different_balances(po
     code_a = await _seed(Decimal("10.00"))
     code_b = await _seed(Decimal("25.00"))
 
+    from src.core.eventstore import replay
+
     async with pool.acquire() as conn:
         pairs = await replay_verify._ledger_pairs(conn, journal, [code_a, code_b])
 
@@ -292,174 +319,6 @@ async def test_replay_digest_differs_between_accounts_with_different_balances(po
     assert replay.digest_state(actual_a) != replay.digest_state(actual_b)
     assert replay.digest_state(replayed_a) == replay.digest_state(actual_a)
     assert replay.digest_state(replayed_b) == replay.digest_state(actual_b)
-
-
-class _DiscardTransaction(Exception):
-    """Sentinel to force `conn.transaction()` to roll back on a clean pass."""
-
-
-async def test_replay_flags_order_status_changed_without_event_as_mismatch(pool):
-    """task-2394 -- reproduces the write-path gap behind ci:77871f678ce2's
-    'orders 1건' mismatch: `src/services/safety/open_order_sweeper.py`'s
-    `sweep_open_orders()` does `UPDATE orders SET status = 'CANCEL_REQUESTED'
-    ...` directly, with no matching `order_events` row (its docstring's
-    single-statement-UPDATE design is deliberate -- see task note). The
-    order's event chain is not *broken* (task-2173's pre-cutover carve-out
-    doesn't apply here -- every recorded event is complete and in order,
-    unlike `_seed_broken_chain_order`'s mid-chain gap); it is *incomplete*:
-    replay stops at SUBMITTED while `orders.status` silently moved on.
-    replay_verify must report that as a real mismatch, not silently pass --
-    fail-closed is the entire point of FA-15/FA-16.
-
-    Everything after `order_id` runs inside one explicit transaction that is
-    always rolled back (`_DiscardTransaction`), never committed -- `orders`
-    has no WORM guard but `073beca589d5`'s I5 trigger unconditionally
-    auto-increments `version` on *every* UPDATE (cutover or not), so even a
-    "restore status" cleanup UPDATE desyncs `version` from what replay would
-    fold and leaves the row permanently mismatching. A first version of this
-    test tried exactly that revert-via-UPDATE cleanup and it visibly poisoned
-    three sibling tests' `hours=1` windows in the same run (all started
-    failing on the leftover order) -- a live, small-scale rerun of this same
-    task's CI symptom. Rollback is the only cleanup that actually leaves zero
-    trace, so `replay_verify._order_pair` is called directly on this
-    transaction's own connection (not `verify()`/`pool.acquire()`, which
-    would open a second connection and never see the uncommitted rows)."""
-    user_id = await create_test_user(pool)
-    repo = PostgresOrderRepository()
-    async with pool.acquire() as conn:
-        try:
-            async with conn.transaction():
-                order_id = await insert_order(conn, user_id, status="CREATED")
-                await repo.transition(
-                    conn,
-                    order_id=order_id,
-                    expected_status=OrderStatus.CREATED,
-                    expected_version=0,
-                    new_status=OrderStatus.VALIDATED,
-                    patch={},
-                    event=_order_event(
-                        order_id,
-                        from_status=OrderStatus.CREATED,
-                        to_status=OrderStatus.VALIDATED,
-                        event="VALIDATED",
-                    ),
-                )
-                await repo.transition(
-                    conn,
-                    order_id=order_id,
-                    expected_status=OrderStatus.VALIDATED,
-                    expected_version=1,
-                    new_status=OrderStatus.SUBMITTED,
-                    patch={},
-                    event=_order_event(
-                        order_id,
-                        from_status=OrderStatus.VALIDATED,
-                        to_status=OrderStatus.SUBMITTED,
-                        event="SENT",
-                    ),
-                )
-                # Mirrors open_order_sweeper.sweep_open_orders()'s bulk cancel
-                # UPDATE exactly -- no SET LOCAL oms.event_written, no
-                # order_events row.
-                await conn.execute(
-                    "UPDATE orders SET status = 'CANCEL_REQUESTED', updated_at = now() "
-                    "WHERE order_id = $1",
-                    order_id,
-                )
-
-                cutover_at = await replay_verify._cutover_at(conn)
-                pair = await replay_verify._order_pair(conn, order_id, cutover_at=cutover_at)
-
-                assert pair is not None, "chain is complete, not broken -- must not be skipped"
-                replayed, actual = pair
-                assert replayed["status"] != actual["status"]
-                assert replay.digest_state(replayed) != replay.digest_state(actual)
-
-                raise _DiscardTransaction
-        except _DiscardTransaction:
-            pass
-
-
-async def _seed_broken_chain_order(pool) -> UUID:
-    """A raw-seeded order (status set directly at INSERT, bypassing
-    order_events entirely -- the pattern several OMS test fixtures use to
-    start a test mid-lifecycle) plus one real transition. The resulting
-    `order_events` timeline has exactly one row whose `from_status` is
-    VALIDATED, not CREATED -- the same shape 753a88c6aeb5's CI run hit
-    (order 70d76b11-..., seq=21, from_status=VALIDATED)."""
-    user_id = await create_test_user(pool)
-    async with pool.acquire() as conn:
-        order_id = await insert_order(conn, user_id, status="VALIDATED")
-        async with conn.transaction():
-            # `SET LOCAL` is transaction-scoped -- I6 (073beca589d5) only sees
-            # `oms.event_written='1'` if the append and the UPDATE share the
-            # same tx, exactly like every real `transition()` caller wraps it
-            # (submit_order.py/outbox_dispatcher.py, `conn.transaction()`).
-            await PostgresOrderRepository().transition(
-                conn,
-                order_id=order_id,
-                expected_status=OrderStatus.VALIDATED,
-                expected_version=0,
-                new_status=OrderStatus.SUBMITTED,
-                patch={},
-                event=_order_event(
-                    order_id,
-                    from_status=OrderStatus.VALIDATED,
-                    to_status=OrderStatus.SUBMITTED,
-                    event="SENT",
-                ),
-            )
-    return order_id
-
-
-async def test_replay_skips_pre_cutover_order_with_broken_event_chain(pool):
-    """task-2173 -- `oms_order_transition_cutover.cutover_at` is NULL
-    (unarmed) by default in this test DB, so 073beca589d5's I6 trigger never
-    required this order to carry a complete `order_events` trail. Before the
-    fix, `orders_projection.project()`'s `EventChainBrokenError` propagated
-    all the way out of `verify()` and crashed the script; now `_order_pair`
-    recognizes the order predates any armed cutover and skips it instead of
-    crashing or reporting a false mismatch."""
-    order_id = await _seed_broken_chain_order(pool)
-    as_of = _clock() + timedelta(minutes=1)
-
-    report = await replay_verify.verify(pool, as_of=as_of, hours=1)
-
-    assert report.ok, report.mismatches
-    assert not any(d.key == str(order_id) for d in report.mismatches)
-
-
-async def test_replay_still_raises_for_post_cutover_broken_event_chain(pool):
-    """Negative test for the task-2173 fix itself -- once cutover is armed,
-    073beca589d5's I6 trigger makes a broken chain structurally impossible
-    for any real write path, so a broken chain on an order created at/after
-    the armed cutover must still fail closed (not be silently skipped the
-    way a pre-cutover order is)."""
-    async with pool.acquire() as conn:
-        # `cutover_at = now()` (not further back) so this only pulls *this*
-        # test's own order into I6 scope -- other tests in this same
-        # session may have left pre-cutover broken-chain orders committed
-        # in the last hour (test_replay_skips_pre_cutover_..._chain does),
-        # and those must stay out of scope or this test would catch the
-        # wrong order's EventChainBrokenError.
-        armed = await conn.fetchval(
-            "UPDATE oms_order_transition_cutover SET cutover_at = now(), "
-            "armed_by = 'test-2173' WHERE id = 1 AND cutover_at IS NULL RETURNING cutover_at"
-        )
-    assert armed is not None, "cutover already armed by another test run -- refusing to clobber it"
-    try:
-        order_id = await _seed_broken_chain_order(pool)
-        as_of = _clock() + timedelta(minutes=1)
-
-        with pytest.raises(EventChainBrokenError) as excinfo:
-            await replay_verify.verify(pool, as_of=as_of, hours=1)
-        assert excinfo.value.order_id == order_id
-    finally:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE oms_order_transition_cutover SET cutover_at = NULL, armed_by = NULL "
-                "WHERE id = 1"
-            )
 
 
 @pytest.mark.perf

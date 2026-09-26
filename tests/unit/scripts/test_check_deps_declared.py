@@ -13,11 +13,20 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from tests._perf.relative_budget import RelativeBudget
+
+# task-7741(esc-ci-coverage): fixed 5s wall-clock budget for a 300-file disk
+# scan is the same false-red shape as scripts/coverage_ratchet.py documents
+# for the local CI coverage step (pytest --cov=src line-tracer overhead +
+# shared-host contention). Switched to RelativeBudget (task-7631 pattern) --
+# a ratio against a same-process calibration loop instead of an absolute
+# second figure, so it self-corrects for host speed/load.
+_SCAN_IMPORTS_MAX_RATIO = 60.0
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -305,8 +314,8 @@ def test_main_exits_1_on_missing_pyproject(
 
 @pytest.mark.perf
 def test_scan_imports_throughput_budget(tmp_path: Path) -> None:
-    """300 synthetic modules scan within a 5s budget (D2 DoD numeric
-    performance assertion)."""
+    """300 synthetic modules scan within a self-calibrating budget (D2 DoD
+    numeric performance assertion)."""
     for i in range(300):
         _write(
             tmp_path,
@@ -314,12 +323,21 @@ def test_scan_imports_throughput_budget(tmp_path: Path) -> None:
             f"import json\nimport redis\nimport pkg_{i}\n",
         )
 
-    start = time.perf_counter()
-    hits = cdd.scan_imports(tmp_path)
-    elapsed = time.perf_counter() - start
+    hits: list[object] = []
+
+    def run() -> None:
+        hits[:] = cdd.scan_imports(tmp_path)
+
+    RelativeBudget().assert_within(
+        run,
+        max_ratio=_SCAN_IMPORTS_MAX_RATIO,
+        mode="wall",
+        n=3,
+        warmup=1,
+        label="scan_imports(300 modules)",
+    )
 
     assert len(hits) == 300 * 3
-    assert elapsed < 5.0, f"scan_imports took {elapsed:.2f}s for 300 modules (budget 5.0s)"
 
 
 # ---------------------------------------------------------------------------

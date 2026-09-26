@@ -32,6 +32,7 @@ cutover가 무장되면 I2(전이표)에서 먼저 막혀 I6까지 도달하지 
 플래그를 한 번만 세우면(원래 코드가 이랬다면) 두 번째 행부터 이 트리거에
 막혔을 것이라는 근거다.
 """
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -46,6 +47,16 @@ from src.services.safety.open_order_sweeper import sweep_open_orders
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.oms.conftest import arm_cutover_sql, insert_event, insert_order
+
+
+class _RaisingCancelAdapter(FakeExchangeAdapter):
+    """실패주입 대역 — 어댑터 `cancel_order`가 항상 예외를 던진다. 모듈
+    docstring이 주장하는 "adapter 예외는 개별 주문 실패로만 기록되고, 같은
+    트랜잭션에서 이미 커밋된 order_events/status 는 롤백되지 않는다"는 계약을
+    증명한다."""
+
+    async def cancel_order(self, order_id: str) -> bool:
+        raise ConnectionError("bitget: 취소 요청 중 연결 끊김(실패주입)")
 
 
 async def _seed_order(pool: asyncpg.Pool, user_id: UUID) -> UUID:
@@ -151,9 +162,7 @@ async def test_trigger_blocks_update_without_flag_and_flag_is_consumed_per_row(p
             await conn.execute(
                 "UPDATE orders SET status = 'VALIDATED' WHERE order_id = $1", order_a
             )
-            status_a = await conn.fetchval(
-                "SELECT status FROM orders WHERE order_id = $1", order_a
-            )
+            status_a = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_a)
             assert status_a == "VALIDATED"
 
             # 같은 트랜잭션의 두 번째 행 — 플래그를 다시 세우지 않으면 막힌다
@@ -165,3 +174,107 @@ async def test_trigger_blocks_update_without_flag_and_flag_is_consumed_per_row(p
                     )
         finally:
             await tr.rollback()
+
+
+async def test_sweep_open_orders_skips_non_cancelable_status_and_writes_no_event(pool):
+    """negative — CREATED 상태 주문은 후보 조건(§3.8, `_CANCELABLE_STATUSES`=
+    SUBMITTED/PARTIALLY_FILLED)을 만족하지 않는다. sweep이 이 주문을 건드리면
+    안 된다: status 불변 + order_events 0건이 불변식이다(잘못 건드리면 I-10과
+    무관하게 §3.8 스코프 조건 자체가 깨졌다는 뜻)."""
+    async with pool.acquire() as conn:
+        user_id = await create_test_user(pool)
+        order_id = await insert_order(conn, user_id, status="CREATED")
+
+    report = await sweep_open_orders(
+        pool,
+        {"bitget": FakeExchangeAdapter(exchange_name="bitget")},
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
+        scope_ref=str(user_id),
+    )
+    assert order_id in report.skipped
+    assert order_id not in report.cancel_requested
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+        event_count = await conn.fetchval(
+            "SELECT count(*) FROM order_events WHERE order_id = $1", order_id
+        )
+    assert status == "CREATED"
+    assert event_count == 0, (
+        f"order {order_id}: CREATED 상태(비대상)인데 order_events {event_count}건 — "
+        "sweep이 §3.8 후보 조건 밖의 주문까지 건드렸다."
+    )
+
+
+async def test_sweep_open_orders_reinvoked_with_same_control_id_writes_no_duplicate_event(pool):
+    """negative + idempotency — 모듈 docstring이 주장하는 "같은 control_id로
+    재호출해도 이미 CANCEL_REQUESTED로 전이된 행은 후보 조건에 다시 걸리지
+    않으니 자연스럽게 멱등"을 증명한다. 두 번째 호출은 이 주문에 대해
+    cancel_requested/order_events 어느 쪽도 늘리면 안 된다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+    control_id = uuid4()
+    adapter = FakeExchangeAdapter(exchange_name="bitget")
+
+    first = await sweep_open_orders(
+        pool,
+        {"bitget": adapter},
+        control_id=control_id,
+        scope=SafetyScope.TENANT,
+        scope_ref=str(user_id),
+    )
+    assert first.cancel_requested == (order_id,)
+
+    second = await sweep_open_orders(
+        pool,
+        {"bitget": adapter},
+        control_id=control_id,
+        scope=SafetyScope.TENANT,
+        scope_ref=str(user_id),
+    )
+    assert order_id not in second.cancel_requested
+    assert order_id not in second.raced
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+        event_count = await conn.fetchval(
+            "SELECT count(*) FROM order_events WHERE order_id = $1", order_id
+        )
+    assert status == "CANCEL_REQUESTED"
+    assert event_count == 1, (
+        f"order {order_id}: 같은 control_id로 재호출했는데 order_events "
+        f"{event_count}건 — 재호출이 멱등하지 않고 중복 이벤트를 썼다."
+    )
+
+
+async def test_sweep_open_orders_adapter_cancel_failure_does_not_rollback_event_or_status(pool):
+    """실패주입 — 거래소 어댑터 `cancel_order`가 예외를 던져도(네트워크 단절 등)
+    이미 같은 트랜잭션에서 커밋된 `order_events`/`orders.status` 전이는 그대로
+    남아야 한다(모듈 docstring: "reconcile이 최종 진실을 소유하니 여기서
+    롤백하지 않는다"). 어댑터 실패는 `adapter_failed`에만 기록된다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+
+    report = await sweep_open_orders(
+        pool,
+        {"bitget": _RaisingCancelAdapter(exchange_name="bitget")},
+        control_id=uuid4(),
+        scope=SafetyScope.TENANT,
+        scope_ref=str(user_id),
+    )
+    assert report.cancel_requested == (order_id,)
+    assert report.adapter_failed == (order_id,)
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+        event_count = await conn.fetchval(
+            "SELECT count(*) FROM order_events WHERE order_id = $1", order_id
+        )
+    assert status == "CANCEL_REQUESTED", (
+        "어댑터 cancel 실패가 이미 커밋된 상태전이까지 되돌렸다 — reconcile 소유권 위반."
+    )
+    assert event_count == 1, (
+        f"order {order_id}: 어댑터 실패 후 order_events {event_count}건 — 실패주입이 "
+        "무이벤트 상태변경(I-10)을 유발했다."
+    )

@@ -169,7 +169,9 @@ def test_aggregate_p99_latency_within_pretrade_gate_budget(perf_budget: PerfBudg
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
     `aggregate()`는 L17 `PortfolioStateInput.exposures` 조립 경로에서 사이징
     직전에 호출된다(모듈 docstring). task-7434: process_time 기반
-    perf_budget으로 측정해 xdist 코어 경합 노이즈를 배제한다."""
+    perf_budget으로 측정해 xdist 코어 경합 노이즈를 배제한다.
+    task-7360: Windows process_time 해상도(~15.6ms) 양자화 오차를 줄이기 위해
+    batch=8 추가 — 측정 구간이 125ms+ 될 때까지 여러 호출을 축적."""
     exposures = [
         ExecutionExposure(
             execution_id=i,
@@ -181,7 +183,7 @@ def test_aggregate_p99_latency_within_pretrade_gate_budget(perf_budget: PerfBudg
     ]
 
     samples = perf_budget.samples(
-        lambda: aggregate(exposures, cash=Decimal("5000"), as_of=_AS_OF), n=200
+        lambda: aggregate(exposures, cash=Decimal("5000"), as_of=_AS_OF), n=200, batch=8
     )
     cpu_values_ms = sorted(s.cpu_ms for s in samples)
     p99_ms = cpu_values_ms[int(len(cpu_values_ms) * 0.99)]
