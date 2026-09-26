@@ -27,6 +27,9 @@ vi.mock("@aios/shared-hooks", async (importOriginal) => {
     useRiskProfile: () => riskResult,
     usePortfolio: () => ({ data: undefined, isLoading: false }),
     useExecutions: () => ({ data: undefined, isLoading: false }),
+    // task-7776 G-2 최근 알림 위젯 — DashboardPage가 새로 쓰는 훅. 목이 없으면 실제
+    // useQuery가 QueryClientProvider 없는 이 렌더에서 "No QueryClient set"으로 죽는다.
+    useNotificationHistory: () => ({ data: undefined, isLoading: false, isError: false, error: null }),
     useLogout: () => vi.fn(),
     useLogin: () => ({ mutateAsync: vi.fn(), isPending: false }),
   };
