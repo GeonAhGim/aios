@@ -181,14 +181,13 @@ def ticks_to_candles(
     candles. Same input always produces byte-identical output — no wall
     clock, no randomness, no float, no set/dict iteration order dependence
     (dedup/tie-break keys are `(int, int)` tuples, never string-hashed)."""
+    step = duration(tf)
     if not ticks:
         return _empty_result()
 
     _validate_series(ticks, calendar)
     deduped = _dedupe_sorted(ticks)
     tick_dt = [_ts_event_to_utc(t.ts_event) for t in deduped]
-
-    step = duration(tf)
     # tick_dt[0] itself is almost never grid-aligned (a trade can print at any
     # second). Using it as range_start would make expected_opens's `start <=
     # cursor` filter exclude the (grid-aligned, earlier) open of the window
