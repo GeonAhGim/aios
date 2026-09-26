@@ -152,14 +152,12 @@ def test_children_pending_cancellation_failure_injection_terminal_status_guard()
     )
     assert len(normal_result) == 1  # OPEN만 통과
 
-    # Failure injection: parent_child 모듈에서 TERMINAL_ORDER_STATUSES 를 빈 리스트로 우회
+    # Failure injection: parent_child 모듈에서 TERMINAL_ORDER_STATUSES 를 빈 frozenset으로 우회
     # → filtering 이 no-op 이 되어 모든 child 가 반환됨
     import src.foundation.ems.domain.parent_child as pc_module
 
-    original = pc_module.TERMINAL_ORDER_STATUSES
-    try:
-        pc_module.TERMINAL_ORDER_STATUSES = []
-        # FILLED child 도 no-op filtering 에 통과
+    # FILLED child 도 no-op filtering 에 통과
+    with patch.object(pc_module, "TERMINAL_ORDER_STATUSES", frozenset()):
         result = children_pending_cancellation(
             [
                 ChildFillState(uuid4(), Decimal("100"), OrderStatus.FILLED),
@@ -167,8 +165,6 @@ def test_children_pending_cancellation_failure_injection_terminal_status_guard()
             ]
         )
         assert len(result) == 2  # 정상なら 1 → 2=all children (filtering broken)
-    finally:
-        pc_module.TERMINAL_ORDER_STATUSES = original
 
 
 # Task-3114: failure-injection 1건, 수치 성능 단언 1건, 게이트 적색 재현 1건

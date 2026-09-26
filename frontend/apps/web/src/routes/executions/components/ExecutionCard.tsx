@@ -81,6 +81,18 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
         </p>
       </div>
       {start.isError && <StartExecutionError error={start.error} />}
+      {execution.lastRiskVerdict && execution.lastRiskVerdict.outcome !== "ALLOW" && (
+        <div className="mt-3 rounded border border-danger bg-danger/10 p-2 text-xs text-danger">
+          <p className="font-medium">
+            {t("legacy.executionCard.riskVerdictTitle")}: {t("legacy.executionCard.riskVerdictDeny")}
+          </p>
+          <p>
+            {t("legacy.executionCard.riskVerdictReasonCodes", {
+              reasonCodes: execution.lastRiskVerdict.reasonCodes.join(", "),
+            })}
+          </p>
+        </div>
+      )}
       {execution.status !== "RETIRED" && (
         <div className="mt-3 flex items-center gap-2 text-xs">
           <span className="text-fg-muted">{t("legacy.executionCard.t4")}</span>
