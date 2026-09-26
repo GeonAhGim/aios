@@ -13,6 +13,7 @@ ETF/ETN은 별도 주문 엔드포인트가 없다(etf_mixin.py 참조 — KRX �
 조용히 국내주식 파라미터로 잘못된 시장에 나갈 뻔했다 — 이 모듈이 그 실제
 분기를 채운다(BR-8 핵심 수정).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, cast
@@ -20,15 +21,12 @@ from typing import Protocol, cast
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order
-from src.exchanges.common.http_client import KISHTTPClient
-from src.exchanges.kis.trading_mixin import KISTradingMixin
+from src.exchanges.kis.trading_mixin import KISTradingMixin, _OrderSubmittingClient
 
 _DOMESTIC_CASH_ASSET_CLASSES = frozenset(
     {AssetClass.KR_EQUITY, AssetClass.KR_ETF, AssetClass.KR_ETN}
 )
-_DOMESTIC_DERIVATIVE_ASSET_CLASSES = frozenset(
-    {AssetClass.KR_FUTURES, AssetClass.KR_OPTION}
-)
+_DOMESTIC_DERIVATIVE_ASSET_CLASSES = frozenset({AssetClass.KR_FUTURES, AssetClass.KR_OPTION})
 _OVERSEAS_DERIVATIVE_ASSET_CLASSES = frozenset(
     {AssetClass.OVERSEAS_FUTURES, AssetClass.OVERSEAS_OPTION}
 )
@@ -72,7 +70,7 @@ async def dispatch_place_order(adapter: _DispatchableAdapter, order: Order) -> O
     if order.asset_class in _DOMESTIC_CASH_ASSET_CLASSES:
         # Unbound call is deliberate: it pins the mixin implementation regardless of
         # subclass overrides. `cast` states the nominal type the Protocol cannot express.
-        return await KISTradingMixin.place_order(cast(KISHTTPClient, adapter), order)
+        return await KISTradingMixin.place_order(cast(_OrderSubmittingClient, adapter), order)
     if order.asset_class in _DOMESTIC_DERIVATIVE_ASSET_CLASSES:
         return await adapter.place_futureoption_order(order)
     if order.asset_class in _OVERSEAS_DERIVATIVE_ASSET_CLASSES:
