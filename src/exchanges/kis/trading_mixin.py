@@ -15,6 +15,7 @@ ORGN_ODNO(원주문번호)가 모두 필요하지만 Order.exchange_order_id는 
 문자열이다 — place_order()가 "{orgno}:{odno}" 형식으로 합쳐 저장하고,
 cancel_order/modify_order가 그 형식을 기대한다(문서화된 편의 규약).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -27,12 +28,82 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.foundation.market_data.contracts.v1 import Venue
+from src.foundation.market_data.domain.reference.symbol_normalizer import to_venue as _to_venue
+from src.services.oms.domain.errors import OrderValidationError
+from src.services.oms.domain.rounding import check_notional
+from src.services.oms.domain.venue_profile import VenueCapabilityProfile
 
 _EXCHANGE_ID = "KRX"  # Phase 1 대상(06번 §6.1)
 
 
 def _order_division(order_type: OrderType) -> str:
     return "01" if order_type == OrderType.MARKET else "00"
+
+
+def _lookup_symbol_spec(table: dict[str, Decimal], symbol: str) -> Decimal:
+    """`order.symbol` is the bare KRX code (e.g. "005930") passed through
+    as-is by `order_dispatch.py`, but `venue_profile.py`'s `price_tick`/
+    `qty_lot`/`min_notional` are registered under the `SymbolRegistry`
+    canonical key ("005930.KS") -- BR-4/L4-04: canonical<->venue symbol
+    translation is the OMS layer's `SymbolRegistry.to_venue` job, and this
+    exchange adapter already receives the venue symbol. Try both spellings
+    so the lookup succeeds regardless of which key format is registered --
+    if neither is found, treat it as an unregistered symbol and return 0
+    (not subject to the check)."""
+    if symbol in table:
+        return table[symbol]
+    return table.get(f"{symbol}.KS", Decimal("0"))
+
+
+def _precheck_order(order: Order, profile: VenueCapabilityProfile) -> None:
+    """task-8074(AUDIT F4) -- validates tick/lot/min_notional before
+    place_order() submits to the exchange (audit finding: this check was
+    entirely missing, so orders the exchange would reject were sent
+    anyway). Skips the check for a symbol missing from the snapshot -- same
+    convention as `rounding.round_price`/`check_notional` treating
+    tick<=0/min_notional<=0 as "not subject to the check" (spec §2-A):
+    only registered symbols are checked, rather than rejecting unregistered
+    ones."""
+    lot = _lookup_symbol_spec(profile.qty_lot, order.symbol)
+    if lot > 0 and order.quantity % lot != 0:
+        raise OrderValidationError(
+            "LOT_MISALIGNED",
+            f"수량({order.quantity})이 lot 단위({lot})에 맞지 않습니다: {order.symbol}",
+        )
+
+    if order.price is None:  # market order -- no tick/min_notional check applies
+        return
+
+    price_amount = order.price.amount
+    tick = _lookup_symbol_spec(profile.price_tick, order.symbol)
+    if tick > 0 and price_amount % tick != 0:
+        raise OrderValidationError(
+            "TICK_MISALIGNED",
+            f"가격({price_amount})이 tick 단위({tick})에 맞지 않습니다: {order.symbol}",
+        )
+
+    min_notional = _lookup_symbol_spec(profile.min_notional, order.symbol)
+    check_notional(price_amount, order.quantity, min_notional)
+
+
+class ClientOrderIdNotMappedError(FatalExchangeError):
+    """task-8079(AUDIT F6) -- raised when a `client_order_id` has no recorded
+    KIS ODNO mapping. KIS's REST API has no client_order_id concept at all
+    (see the module docstring's ORGNO:ODNO convention), so this adapter
+    cannot ask KIS "have you seen this client_order_id before" the way
+    Bitget's `find_order_by_client_id` does -- it can only recall what *this
+    adapter instance* itself submitted and recorded in `_kis_order_id_map`.
+    A missing mapping means one of: the id was never submitted through this
+    adapter instance, or it was submitted before a process restart. Either
+    way, silently treating it as "new" would resubmit an order that may
+    already be live -- fail-closed instead of guessing (DoD 2)."""
+
+    def __init__(self, client_order_id: str) -> None:
+        self.client_order_id = client_order_id
+        super().__init__(
+            f"KIS client_order_id 매핑 없음(신규 주문 아님 보장 불가): {client_order_id!r}"
+        )
 
 
 def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
@@ -64,13 +135,69 @@ class _OrderMutatingClient(KISHTTPClient, Protocol):
     async def get_order(self, order_id: str) -> Order: ...
 
 
+class _OrderSubmittingClient(KISHTTPClient, Protocol):
+    """place_order() calls KISAdapter.venue_profile(), assembled onto the
+    same adapter, for tick/lot/min_notional pre-validation (task-8074,
+    AUDIT F4) -- included explicitly in the contract for the same reason
+    as the two Protocols above. task-8079(F6) adds get_order() -- a retried
+    client_order_id resolves to an existing ODNO mapping and re-fetches its
+    current state instead of resubmitting."""
+
+    def venue_profile(self) -> VenueCapabilityProfile: ...
+
+    async def get_order(self, order_id: str) -> Order: ...
+
+    def _kis_order_id_map(self) -> dict[str, str]: ...
+
+
 class KISTradingMixin:
+    def _kis_order_id_map(self) -> dict[str, str]:
+        """task-8079(F6) -- per-adapter-instance client_order_id -> KIS
+        'orgno:odno' correlation table. This is NOT a new idempotency
+        guarantee (KIS's REST API has no client_order_id field to send) --
+        it only lets *this adapter instance* recognize a retried
+        client_order_id it already saw and recall the ODNO KIS assigned,
+        instead of KIS's own OMS-level dedup logic (which does not exist)
+        stopping a duplicate submission."""
+        store: dict[str, str] | None = getattr(self, "_kis_client_order_id_map", None)
+        if store is None:
+            store = {}
+            self._kis_client_order_id_map = store
+        return store
+
+    def resolve_client_order_id(self, client_order_id: str) -> str:
+        """task-8079(F6) -- looks up the KIS 'orgno:odno' this adapter
+        instance recorded for `client_order_id`. Raises
+        `ClientOrderIdNotMappedError` instead of returning `None`/`""` on a
+        miss (DoD 2) -- unlike Bitget's `find_order_by_client_id`, a miss
+        here does not mean "KIS confirms no such order exists" (KIS was
+        never asked), so silently treating it as absent would be a guess."""
+        try:
+            return self._kis_order_id_map()[client_order_id]
+        except KeyError:
+            raise ClientOrderIdNotMappedError(client_order_id) from None
+
     @require_paper_sandbox
-    async def place_order(self: KISHTTPClient, order: Order) -> Order:
+    async def place_order(self: _OrderSubmittingClient, order: Order) -> Order:
+        # F5(task-8077) — route order.symbol through the LA-7 single rule
+        # (symbol_normalizer) before it becomes PDNO; an unregistered or
+        # malformed symbol is rejected fail-closed with
+        # SymbolNormalizationError before the exchange is ever called
+        # (same uncaught-propagation contract as Bitget's _to_bitget_symbol).
+        pdno = _to_venue(Venue.KIS_KRX, order.symbol)
+        _precheck_order(order, self.venue_profile())
+        if order.client_order_id:
+            mapped = self._kis_order_id_map().get(order.client_order_id)
+            if mapped is not None:
+                # task-8079(F6) DoD 1 -- retry of an already-mapped
+                # client_order_id re-fetches the existing order instead of
+                # submitting a new one to KIS.
+                existing = await self.get_order(mapped)
+                return existing.model_copy(update={"client_order_id": order.client_order_id})
         body: dict[str, Any] = {
             "CANO": self._cano,
             "ACNT_PRDT_CD": self._acnt_prdt_cd,
-            "PDNO": order.symbol,
+            "PDNO": pdno,
             "ORD_DVSN": _order_division(order.order_type),
             "ORD_QTY": str(order.quantity),
             "ORD_UNPR": str(order.price.amount) if order.price is not None else "0",
@@ -90,6 +217,8 @@ class KISTradingMixin:
             exchange_order_id = f"{output['KRX_FWDG_ORD_ORGNO']}:{output['ODNO']}"
         except KeyError as exc:
             raise FatalExchangeError(f"KIS 주문 응답에 예상 필드 없음: {exc}") from exc
+        if order.client_order_id:
+            self._kis_order_id_map()[order.client_order_id] = exchange_order_id
         return order.model_copy(
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )

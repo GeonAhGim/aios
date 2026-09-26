@@ -27,6 +27,7 @@ from src.foundation.backtest.application.quick_backtest import (
     TooManyBarsError,
 )
 from src.foundation.backtest.application.run_backtest import BacktestRunError
+from src.foundation.backtest.domain.param_stability import ParamStabilityError
 from src.foundation.charting.application.errors import (
     ChartIndicatorTemplateNotFoundError,
     ChartLayoutNotFoundError,
@@ -133,6 +134,14 @@ from src.foundation.risk_gate.application.evaluate_risk_gate import (
     CrossTenantConnectionReferenceError,
 )
 from src.foundation.risk_gate.application.recovery_gate import RecoveryDeniedError
+from src.foundation.screener.application.run_screen import (
+    ScreenCursorError,
+    ScreenLimitExceededError,
+    ScreenTimeoutError,
+    ScreenUniverseError,
+)
+from src.foundation.screener.domain.evaluate import ScreenerEvaluationError
+from src.foundation.screener.domain.query_plan import ScreenerConditionError
 from src.foundation.trust.application.accept_disclosure import (
     ConsentAlreadyActiveError,
     DisclosureNotFoundError,
@@ -244,6 +253,10 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (TooManyBarsError, ErrorCode.VALIDATION_INVALID_FIELD),
     (QuickBacktestInputError, ErrorCode.VALIDATION_INVALID_FIELD),
     (ScriptRuntimeError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # BT-18(task-7774) -- backtests.py `/v1/backtests/sweep`. The representative
+    # case is an empty axis list (`ParamGrid` construction itself rejects it
+    # fail-closed).
+    (ParamStabilityError, ErrorCode.VALIDATION_INVALID_FIELD),
     # LB-19(task-1377) — positions 읽기 API(queries.py). 타 테넌트·미존재 동형 404.
     (PositionNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
     (PositionAccountNotFoundError, ErrorCode.RESOURCE_NOT_FOUND),
@@ -263,7 +276,8 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     (ReplayIncompleteError, ErrorCode.DATA_COVERAGE_MISSING),
     (MarketDataQueryError, ErrorCode.VALIDATION_INVALID_FIELD),
     (AsOfInFutureError, ErrorCode.VALIDATION_INVALID_FIELD),
-    (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD), *EXCEPTION_MAP_RESEARCH,
+    (QuarantinedViewUnsupportedError, ErrorCode.VALIDATION_INVALID_FIELD),
+    *EXCEPTION_MAP_RESEARCH,
     # CH-5(task-1557) — foundation/charting. 타 테넌트도 미존재와 동형 404
     # (§9.6 DoD "타 테넌트 404") — ConcurrencyConflictError(409)는 이미
     # exception_registry.py에 전역 등록돼 있어 여기 새로 추가하지 않는다.
@@ -287,10 +301,25 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     *EXCEPTION_MAP_FOUNDATION_PERSONAL,
     # task-2630 U-3a — assistant.py, split out (P6.line_cap).
     *EXCEPTION_MAP_AI_ASSISTANT,
+    # UX-8(task-7773) — screener.py `/v1/foundation/screener/run`. Bad universe/
+    # cursor/page_size and an unsupported/uncompilable filter condition are all
+    # transport-shape problems the client can fix, so they fold into the same
+    # 400 bucket as backtests.py's TooManyBarsError/QuickBacktestInputError above.
+    (ScreenUniverseError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenCursorError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenLimitExceededError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenerConditionError, ErrorCode.VALIDATION_INVALID_FIELD),
+    (ScreenerEvaluationError, ErrorCode.VALIDATION_INVALID_FIELD),
+    # ScreenTimeoutError is retryable (the scan itself, not the request shape,
+    # timed out) — DEPENDENCY_NOT_READY is the closest existing taxonomy entry
+    # (§3.3 retryable column), with STATUS_OVERRIDE below keeping the spec's
+    # 408 instead of that code's default 503.
+    (ScreenTimeoutError, ErrorCode.DEPENDENCY_NOT_READY),
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [
     (MethodologyNotFoundError, status.HTTP_422_UNPROCESSABLE_ENTITY),
     (DisclosureRetiredError, status.HTTP_422_UNPROCESSABLE_ENTITY),
     (BacktestRunError, status.HTTP_422_UNPROCESSABLE_ENTITY),
+    (ScreenTimeoutError, status.HTTP_408_REQUEST_TIMEOUT),
 ]

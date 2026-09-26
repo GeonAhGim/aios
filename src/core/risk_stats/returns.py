@@ -1,9 +1,10 @@
-"""L4_risk_and_safety_v1.0.md#2.2 — 캔들→log 수익률, timeframe→bars_per_day, horizon 스케일.
+"""L4_risk_and_safety_v1.0.md#2.2 (R-18) — 캔들→log 수익률, timeframe→bars_per_day, horizon 스케일.
 
 R4 버그 근거: 기존 구현은 1분봉 표준편차에 √days만 곱해 봉 단위 환산이
 빠진 채(단위 불일치) horizon을 스케일했다. scale_sigma가 bars_per_day를
 필수 인자로 받게 해 호출부가 이 환산을 건너뛸 수 없게 한다.
 """
+
 from __future__ import annotations
 
 import math

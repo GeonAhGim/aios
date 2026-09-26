@@ -361,7 +361,7 @@
         "type": "string"
       },
       "AdjustmentsConfig": {
-        "description": "분할·배당 조정을 각각 켜고 끈다(§3.4 `adjustments{splits, dividends}`).",
+        "description": "Toggles split and dividend adjustments independently\n(§3.4 `adjustments{splits, dividends}`).",
         "properties": {
           "dividends": {
             "title": "Dividends",
@@ -1527,6 +1527,22 @@
         "title": "ApiResponse[SafetyControlView]",
         "type": "object"
       },
+      "ApiResponse_ScreenRunResultView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ScreenRunResultView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[ScreenRunResultView]",
+        "type": "object"
+      },
       "ApiResponse_SellerSuspensionResult_": {
         "properties": {
           "data": {
@@ -1557,6 +1573,22 @@
           "meta"
         ],
         "title": "ApiResponse[StrategyProposal]",
+        "type": "object"
+      },
+      "ApiResponse_SweepResultView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SweepResultView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiResponse[SweepResultView]",
         "type": "object"
       },
       "ApiResponse_TcaResultView_": {
@@ -2452,7 +2484,7 @@
         "type": "object"
       },
       "AuditTimelinePage": {
-        "description": "79번 §3 \"opaque cursor, time range, aggregate/action filter and\nmaximum bounded page\" — `next_cursor`가 None이면 더 없음.",
+        "description": "79th §3 \"opaque cursor, time range, aggregate/action filter and\nmaximum bounded page\" — if `next_cursor` is None, there are no more pages.",
         "properties": {
           "as_of": {
             "format": "date-time",
@@ -2496,7 +2528,7 @@
         "type": "string"
       },
       "BacktestConfigV2": {
-        "description": "§3.4 백테스트 현실성 계약. 재생 1회 실행에 필요한 체결 현실성\n입력 전체를 고정(pin)한다 — 실행 도중 값을 바꾸지 않는다(105번 원칙).",
+        "description": "§3.4 backtest realism contract. Pins the full set of fill-realism\ninputs needed for a single replay run — values are not changed during\nthe run (standard-105 principle).",
         "properties": {
           "adjustments": {
             "$ref": "#/components/schemas/AdjustmentsConfig"
@@ -2577,6 +2609,25 @@
           "calendar"
         ],
         "title": "BacktestConfigV2",
+        "type": "object"
+      },
+      "BacktestStatFilter": {
+        "properties": {
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "backtest_stat",
+            "default": "backtest_stat",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition"
+        ],
+        "title": "BacktestStatFilter",
         "type": "object"
       },
       "BeginConnectionRequest": {
@@ -3178,7 +3229,7 @@
         "type": "string"
       },
       "ComponentBreakdown": {
-        "description": "§3.4 회계 항등식(domain/identity.py)의 입력이자 출력 —\n`gross_pnl - fees - slippage - funding ± fx - estimated_tax = net_pnl`.",
+        "description": "§3.4 Input and output of the accounting identity (domain/identity.py):\n`gross_pnl - fees - slippage - funding ± fx - estimated_tax = net_pnl`.",
         "properties": {
           "cashflows_net": {
             "$ref": "#/components/schemas/MoneyValue"
@@ -3593,7 +3644,7 @@
         "type": "string"
       },
       "CostsConfig": {
-        "description": "`borrow_apr`은 공매도 등 차입 포지션에만 적용되므로 무차입 전략은\n`None`(적용 안 함)을 명시적으로 남긴다 — 0%로 조용히 채우지 않는다.",
+        "description": "`borrow_apr` only applies to borrowed positions such as short sales,\nso a strategy without borrowing must explicitly leave it as `None`\n(not applied) — it is not silently filled with 0%.",
         "properties": {
           "borrow_apr": {
             "anyOf": [
@@ -3627,7 +3678,7 @@
         "type": "object"
       },
       "CoverageSpan": {
-        "description": "`[start_at, end_at)` 반개구간(half-open) — `end_at`은 배타적 상한.\n\n같은 (instrument_id, venue, asset_class, timeframe, quality_grade) 축\n안에서 두 span이 겹치는 것은 DB EXCLUDE 제약(§4.1)이 거부하는\n상태다 — `domain/coverage/registry.py`의 병합을 거치지 않은 원본\n선언 목록에는 일시적으로 존재할 수 있지만, 저장 직전에는 반드시\n병합돼야 한다.",
+        "description": "`[start_at, end_at)` half-open interval — `end_at` is the exclusive\nupper bound.\n\nTwo spans overlapping within the same (instrument_id, venue,\nasset_class, timeframe, quality_grade) axis is a state the DB EXCLUDE\nconstraint (§4.1) rejects — it may transiently exist in a raw\ndeclaration list that hasn't gone through `domain/coverage/registry.py`\nmerging, but it must be merged before persisting.",
         "properties": {
           "asset_class": {
             "$ref": "#/components/schemas/AssetClass"
@@ -4395,7 +4446,7 @@
         "type": "object"
       },
       "EntitySnapshot": {
-        "description": "80번 §1 \"typed snapshots\" — entity_key(예: \"USDT_BALANCE\",\n\"BTCUSDT_POSITION\")별 내부/provider 값 한 쌍. provider_value가 없으면\n(None) provider가 그 항목을 아예 반환하지 않은 것 — 0으로 해석하지\n않는다(§2).",
+        "description": "Per §80 §1 \"typed snapshots\" — one pair of internal/provider values\nper entity_key (e.g. \"USDT_BALANCE\", \"BTCUSDT_POSITION\"). A missing\nprovider_value (None) means the provider did not return that item at all\n— do not interpret it as zero (§2).",
         "properties": {
           "entity_key": {
             "title": "Entity Key",
@@ -5125,7 +5176,7 @@
         "type": "object"
       },
       "FixedSlippage": {
-        "description": "봉마다 고정 bps만큼 불리한 체결가를 가정한다.",
+        "description": "Assumes a fill price worse by a fixed bps on every bar.",
         "properties": {
           "bps": {
             "anyOf": [
@@ -5151,6 +5202,25 @@
           "bps"
         ],
         "title": "FixedSlippage",
+        "type": "object"
+      },
+      "FundamentalFilter": {
+        "properties": {
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "fundamental",
+            "default": "fundamental",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition"
+        ],
+        "title": "FundamentalFilter",
         "type": "object"
       },
       "GateKind": {
@@ -5396,6 +5466,25 @@
           "params"
         ],
         "title": "IndicatorComputeResponse",
+        "type": "object"
+      },
+      "IndicatorFilter": {
+        "properties": {
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "indicator",
+            "default": "indicator",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition"
+        ],
+        "title": "IndicatorFilter",
         "type": "object"
       },
       "IndicatorListItemView": {
@@ -5762,6 +5851,7 @@
         "type": "object"
       },
       "LastRiskVerdict": {
+        "description": "Most recent risk gate verdict for this execution, from risk_decision\n(R-24 WORM ledger). risk_decision.execution_ref is already populated as\n'exec:' || orders.execution_id (format enforced by the\na7c3d9e1f2b4_orders_risk_decision_intent_guard.py trigger), so this\nread-only join needs no new column or migration.",
         "properties": {
           "evaluated_at": {
             "format": "date-time",
@@ -6023,7 +6113,7 @@
         "type": "object"
       },
       "Lot": {
-        "description": "원가법 로트 하나(FIFO/WEIGHTED 공통 표현, LB-2/LB-3 소비).",
+        "description": "A single cost-basis lot (shared FIFO/WEIGHTED representation, consumed by LB-2/LB-3).",
         "properties": {
           "opened_at": {
             "format": "date-time",
@@ -6388,7 +6478,7 @@
         "type": "object"
       },
       "MfaSetupRequest": {
-        "description": "최초 설정(mfa_enabled=false)은 재인증 없이 그대로 허용한다 — 로그인\n자체가 이미 인증 증명이다. 이미 켜진 MFA를 다시 설정(재발급)하는\n경우에만 password가 필요하다(레드팀 감사 #11 — Bearer 토큰 탈취만으로\n기존 secret을 덮어써 2FA를 탈취하는 경로를 막는다).",
+        "description": "Initial setup (mfa_enabled=false) is allowed without re-authentication —\nthe login itself already serves as proof of identity. password is only\nrequired when reconfiguring (reissuing) an already-enabled MFA\n(Red Team audit #11 — prevents an attacker who stole a Bearer token from\noverwriting the existing secret and hijacking 2FA).",
         "properties": {
           "password": {
             "anyOf": [
@@ -6467,7 +6557,7 @@
         "type": "object"
       },
       "MoneyValue": {
-        "description": "§3.4 — `amount=None`은 PENDING(아직 리컨실 전이라 값을 낼 수 없음)을\n뜻한다. 0으로 대체하지 않는다(reconciliation의 \"never assume zero\"와\n같은 원칙).",
+        "description": "§3.4 — `amount=None` means PENDING (reconciliation not yet complete,\nvalue unavailable). Do not substitute zero (principle: \"never assume zero\"\nfrom reconciliation).",
         "properties": {
           "amount": {
             "anyOf": [
@@ -6514,7 +6604,7 @@
         "type": "object"
       },
       "NAVSnapshot": {
-        "description": "일별 NAV 체인 한 행(§4.3 \"전일 NAV + 손익 + 자금흐름 = 당일 NAV\",\nDB `CHECK(closing_nav = cash + positions_mv)`).",
+        "description": "One row of the daily NAV chain (§4.3 \"prior-day NAV + PnL + cash\nflows = current-day NAV\", DB `CHECK(closing_nav = cash + positions_mv)`).",
         "properties": {
           "account_id": {
             "format": "uuid",
@@ -6612,7 +6702,7 @@
         "type": "object"
       },
       "NavSeriesResponse": {
-        "description": "`missing_dates`는 범위 안에서 아직 NAV가 산출되지 않은 날 — 0으로\n채우지 않고 빠졌다는 사실을 그대로 드러낸다(FD-3.3 \"never assume zero\").",
+        "description": "`missing_dates` are days within the range where NAV has not yet been\ncalculated — we expose the absence directly instead of filling with zeros\n(FD-3.3 \"never assume zero\").",
         "properties": {
           "account_id": {
             "format": "uuid",
@@ -6827,7 +6917,7 @@
         "type": "string"
       },
       "OrderTypesConfig": {
-        "description": "엔진이 허용하는 주문유형 스위치. 꺼진 유형으로 들어온 주문은 체결\n모델(BT-6)이 거부한다.",
+        "description": "Switches for order types the engine allows. An order of a disabled\ntype is rejected by the fill model (BT-6).",
         "properties": {
           "limit": {
             "title": "Limit",
@@ -6974,7 +7064,7 @@
         "type": "object"
       },
       "PartialFillConfig": {
-        "description": "한 봉에서 채울 수 있는 최대 참여율(0 초과 1 이하) — 초과 주문은\n체결 모델(BT-5)이 부분체결로 처리한다.",
+        "description": "Max participation rate fillable in a single bar (greater than 0, at\nmost 1) — orders exceeding it are handled as partial fills by the fill\nmodel (BT-5).",
         "properties": {
           "max_participation_pct": {
             "anyOf": [
@@ -7088,7 +7178,7 @@
         "type": "object"
       },
       "PercentSlippage": {
-        "description": "체결가 대비 고정 비율(%)만큼 불리한 체결가를 가정한다.",
+        "description": "Assumes a fill price worse by a fixed percentage of the fill price.",
         "properties": {
           "kind": {
             "const": "percent",
@@ -7807,7 +7897,7 @@
         "type": "object"
       },
       "PositionJournalEntryView": {
-        "description": "append-only `pos_journal` 행 하나의 뷰(§4.3 저널 불변조건).",
+        "description": "View of a single append-only `pos_journal` row (§4.3 journal invariants).",
         "properties": {
           "entry_hash": {
             "title": "Entry Hash",
@@ -7981,7 +8071,7 @@
         "type": "object"
       },
       "PositionSnapshotView": {
-        "description": "저널의 fold 결과(§4.3 \"스냅샷 = fold(저널)\"). 미실현 PnL은 마크\n없으면 `None`(0 아님).",
+        "description": "The fold result of the journal (§4.3 \"snapshot = fold(journal)\").\nUnrealized PnL is `None` (not 0) when there is no mark.",
         "properties": {
           "account_id": {
             "format": "uuid",
@@ -8530,7 +8620,7 @@
         "type": "object"
       },
       "QualityGrade": {
-        "description": "선언된 커버리지 구간의 신뢰 등급. 미검증: 거래소·벤더별 실제 등급\n구분 기준은 외부 계약서에 근거하지 않았다 — 이 3단계는 이 프로젝트가\n자체 정의한 내부 등급이다.",
+        "description": "Trust grade of a declared coverage span. Unverified: the actual\ngrading criteria per exchange/vendor are not based on any external\ncontract — these three tiers are an internal grading scheme this\nproject defines on its own.",
         "enum": [
           "RAW",
           "VALIDATED",
@@ -9202,7 +9292,7 @@
         "type": "object"
       },
       "RefreshRequest": {
-        "description": "PLT-24 — `session_id`를 함께 보내야 하는 이유는\n`src/services/auth/refresh.py` 모듈 docstring 참조: refresh_hash만으로는\n회전된 옛 토큰을 역참조할 수 없다.",
+        "description": "PLT-24 — Why `session_id` must be sent alongside the refresh token:\nsee `src/services/auth/refresh.py` module docstring — a refresh_hash alone\ncannot reverse-reference a rotated (compromised) token.",
         "properties": {
           "refresh_token": {
             "title": "Refresh Token",
@@ -9449,6 +9539,32 @@
           "idempotency_key"
         ],
         "title": "RequestDeploymentRequest",
+        "type": "object"
+      },
+      "ResearchFilter": {
+        "description": "Inherits the RD-A1 leak guard: an instance cannot be constructed at\nall without `as_of` (§3 \"a ResearchFilter cannot run without as_of\").",
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "kind": {
+            "const": "research",
+            "default": "research",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition",
+          "as_of"
+        ],
+        "title": "ResearchFilter",
         "type": "object"
       },
       "ResearchItem": {
@@ -10267,6 +10383,142 @@
         "title": "Scope",
         "type": "string"
       },
+      "ScreenDefinition": {
+        "properties": {
+          "columns": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "filters": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "backtest_stat": "#/components/schemas/BacktestStatFilter",
+                  "fundamental": "#/components/schemas/FundamentalFilter",
+                  "indicator": "#/components/schemas/IndicatorFilter",
+                  "research": "#/components/schemas/ResearchFilter"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/IndicatorFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/FundamentalFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/ResearchFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/BacktestStatFilter"
+                }
+              ]
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "schema_version": {
+            "default": "v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SortSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "universe": {
+            "title": "Universe",
+            "type": "string"
+          }
+        },
+        "required": [
+          "universe",
+          "filters"
+        ],
+        "title": "ScreenDefinition",
+        "type": "object"
+      },
+      "ScreenResultRowView": {
+        "properties": {
+          "instrument_id": {
+            "format": "uuid",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
+            },
+            "title": "Values",
+            "type": "object"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "symbol",
+          "venue",
+          "values"
+        ],
+        "title": "ScreenResultRowView",
+        "type": "object"
+      },
+      "ScreenRunResultView": {
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ScreenResultRowView"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rows",
+          "total",
+          "truncated",
+          "next_cursor"
+        ],
+        "title": "ScreenRunResultView",
+        "type": "object"
+      },
       "SellerSuspensionResult": {
         "properties": {
           "seller_suspended": {
@@ -10384,6 +10636,28 @@
           "value"
         ],
         "title": "SnapshotValueView",
+        "type": "object"
+      },
+      "SortSpec": {
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "direction"
+        ],
+        "title": "SortSpec",
         "type": "object"
       },
       "StartValidationRequest": {
@@ -10814,8 +11088,330 @@
         "title": "SuspendSellerRequest",
         "type": "object"
       },
+      "SweepAxis": {
+        "description": "One axis of `param_stability.ParamGrid.axes` -- `values` must be\nascending and duplicate-free (`ParamGrid.__post_init__` invariant, which\nthe router delegates to as-is).",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "values"
+        ],
+        "title": "SweepAxis",
+        "type": "object"
+      },
+      "SweepCombo": {
+        "description": "One grid point already materialized as a compilable script --\n`axis_values` holds one value per name from a subset of `SweepRequest.axes`\n(a named representation of `param_stability.Point`). `script_hash` is\ntrusted as given by the caller (the frontend's own compilation result) --\nsame contract as `vector/experiment_ledger.py::record_grid_entry`; we do\nnot recompute a hash here.",
+        "properties": {
+          "axis_values": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Axis Values",
+            "type": "object"
+          },
+          "combo_key": {
+            "minLength": 1,
+            "title": "Combo Key",
+            "type": "string"
+          },
+          "script_hash": {
+            "minLength": 1,
+            "title": "Script Hash",
+            "type": "string"
+          },
+          "script_source": {
+            "maxLength": 64000,
+            "minLength": 1,
+            "title": "Script Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "combo_key",
+          "axis_values",
+          "script_hash",
+          "script_source"
+        ],
+        "title": "SweepCombo",
+        "type": "object"
+      },
+      "SweepPointResultView": {
+        "properties": {
+          "axis_values": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Axis Values",
+            "type": "object"
+          },
+          "combo_index": {
+            "title": "Combo Index",
+            "type": "integer"
+          },
+          "combo_key": {
+            "title": "Combo Key",
+            "type": "string"
+          },
+          "metric_value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Metric Value",
+            "type": "string"
+          },
+          "reproducibility_key": {
+            "title": "Reproducibility Key",
+            "type": "string"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "combo_key",
+          "combo_index",
+          "axis_values",
+          "metric_value",
+          "reproducibility_key",
+          "seed"
+        ],
+        "title": "SweepPointResultView",
+        "type": "object"
+      },
+      "SweepRequest": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "axes": {
+            "items": {
+              "$ref": "#/components/schemas/SweepAxis"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
+          "combos": {
+            "items": {
+              "$ref": "#/components/schemas/SweepCombo"
+            },
+            "title": "Combos",
+            "type": "array"
+          },
+          "config": {
+            "$ref": "#/components/schemas/BacktestConfigV2"
+          },
+          "data_lineage_hash": {
+            "minLength": 1,
+            "title": "Data Lineage Hash",
+            "type": "string"
+          },
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "funding_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Funding Rate"
+          },
+          "initial_cash": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Initial Cash"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "metric": {
+            "enum": [
+              "final_equity",
+              "cash",
+              "position_quantity",
+              "funding_cost",
+              "borrow_cost"
+            ],
+            "title": "Metric",
+            "type": "string"
+          },
+          "rollup_version": {
+            "minLength": 1,
+            "title": "Rollup Version",
+            "type": "string"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "timeframe": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "venue": {
+            "$ref": "#/components/schemas/Venue"
+          }
+        },
+        "required": [
+          "venue",
+          "timeframe",
+          "start",
+          "end",
+          "initial_cash",
+          "config",
+          "axes",
+          "combos",
+          "metric",
+          "data_lineage_hash",
+          "rollup_version",
+          "seed"
+        ],
+        "title": "SweepRequest",
+        "type": "object"
+      },
+      "SweepResultView": {
+        "properties": {
+          "axes": {
+            "items": {
+              "$ref": "#/components/schemas/SweepAxis"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/SweepPointResultView"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "stability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SweepStabilityView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "axes",
+          "metric",
+          "points",
+          "stability",
+          "warnings"
+        ],
+        "title": "SweepResultView",
+        "type": "object"
+      },
+      "SweepStabilityView": {
+        "properties": {
+          "best_axis_values": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Best Axis Values",
+            "type": "object"
+          },
+          "isolated": {
+            "title": "Isolated",
+            "type": "boolean"
+          },
+          "neighbor_mean": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Neighbor Mean",
+            "type": "string"
+          },
+          "neighbor_std": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Neighbor Std",
+            "type": "string"
+          }
+        },
+        "required": [
+          "best_axis_values",
+          "neighbor_mean",
+          "neighbor_std",
+          "isolated"
+        ],
+        "title": "SweepStabilityView",
+        "type": "object"
+      },
       "SymbolAliasRef": {
-        "description": "LA-24 — `md_symbol_alias` 1행의 읽기 표현. `contracts/v1.py`가 이미\n300줄 상한(P6.line_cap)에 닿아 있어 `ports/coverage_repository.CoverageSpan`\n과 같은 방식으로 포트가 읽기 계약을 직접 정의한다.",
+        "description": "LA-24 — Read representation of one `md_symbol_alias` row. `contracts/v1.py` already\nhits the 300-line cap (P6.line_cap), so the port defines the read contract directly,\nsame pattern as `ports/coverage_repository.CoverageSpan`.",
         "properties": {
           "alias_id": {
             "format": "uuid",
@@ -11028,7 +11624,7 @@
         "type": "object"
       },
       "TrustStatusResponse": {
-        "description": "73번 §5 GET /v1/trust/status — TrustStatusView 프로젝션.",
+        "description": "Item 73 §5 GET /v1/trust/status — TrustStatusView projection.",
         "properties": {
           "as_of": {
             "format": "date-time",
@@ -11371,6 +11967,7 @@
           "BITGET",
           "KIS_KRX",
           "KIS_US",
+          "NH_KRX",
           "BINANCE",
           "BYBIT",
           "OKX",
@@ -11380,7 +11977,7 @@
         "type": "string"
       },
       "VenueTierCommission": {
-        "description": "거래소·등급별 메이커/테이커 수수료 + 최소 수수료(정액).",
+        "description": "Maker/taker commission per venue/tier + minimum fee (flat amount).",
         "properties": {
           "maker_bps": {
             "anyOf": [
@@ -11460,7 +12057,7 @@
         "type": "object"
       },
       "VolumeImpactSlippage": {
-        "description": "주문량이 봉 거래량에서 차지하는 참여율(participation)에 비례해\n시장충격을 가한다. `participation_cap`은 한 봉에서 소화 가능한 최대\n참여율(0 초과 1 이하) — 초과분 이월 처리는 체결 모델(BT-2~7)의 책임.",
+        "description": "Applies market impact proportional to the order's participation rate\nin the bar's volume. `participation_cap` is the max participation rate\na single bar can absorb (greater than 0, at most 1) — carrying over the\nexcess is the fill model's (BT-2~7) responsibility.",
         "properties": {
           "k": {
             "anyOf": [
@@ -13882,7 +14479,7 @@
     },
     "/livez": {
       "get": {
-        "description": "DB 미접촉 liveness — 프로세스가 요청에 응답할 수 있는지만 확인한다.",
+        "description": "Liveness without DB contact — confirms the process can still respond to requests.",
         "operationId": "livez_livez_get",
         "responses": {
           "200": {
@@ -16326,6 +16923,53 @@
         ]
       }
     },
+    "/v1/backtests/sweep": {
+      "post": {
+        "description": "BT-18(task-7774) -- parameter grid sweep. Building `ParamGrid` rejects\nan empty axis list fail-closed (`ParamStabilityError` -> 400, `axes must\nnot be empty`) -- a request with no axes stops here without running any\ncombo. Each combo repeats the same compile/run pattern as `/quick` (see\nmodule docstring -- no new domain logic).",
+        "operationId": "sweep_backtest_endpoint_v1_backtests_sweep_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SweepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_SweepResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Sweep Backtest Endpoint",
+        "tags": [
+          "backtests"
+        ]
+      }
+    },
     "/v1/foundation/charting/indicator-templates": {
       "get": {
         "operationId": "get_list_indicator_templates_v1_foundation_charting_indicator_templates_get",
@@ -17301,7 +17945,7 @@
     },
     "/v1/foundation/evidence/chain:verify": {
       "post": {
-        "description": "AUD-003 운영 도구 — 79번 §4. 관리자 전용(체인 전체 또는 특정\ntenant를 조회할 수 있어 일반 사용자에게는 열지 않는다). `tenant_id`를\n생략하면 system 이벤트(tenant_id IS NULL) 체인만 검증한다 — 전체\ntenant 순회는 이 리프의 스콥 밖(운영 배치 작업 대상).",
+        "description": "AUD-003 operational tool — Rule 79 §4. Admin-only (not exposed to\nregular users since it can query the full chain or a specific tenant).\nOmitting `tenant_id` verifies only the system event chain (tenant_id IS\nNULL) — iterating all tenants is out of scope for this leaf (operational\nbatch task target).",
         "operationId": "post_verify_chain_v1_foundation_evidence_chain_verify_post",
         "parameters": [
           {
@@ -19802,6 +20446,80 @@
         "summary": "Post Evaluate Recovery",
         "tags": [
           "foundation:risk-gate"
+        ]
+      }
+    },
+    "/v1/foundation/screener/run": {
+      "post": {
+        "operationId": "run_screen_endpoint_v1_foundation_screener_run_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse_ScreenRunResultView_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Run Screen Endpoint",
+        "tags": [
+          "screener"
         ]
       }
     },

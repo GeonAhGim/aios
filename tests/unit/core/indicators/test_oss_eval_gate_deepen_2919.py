@@ -19,6 +19,7 @@ INDICATOR_OSS_EVAL.md, commit da52f3c)을 D2 미달로 판정했다 — 순수 �
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -103,9 +104,12 @@ def test_negative_banned_license_package_declared_in_pyproject(
     # This is the core machine-verifiable regression the leaf was missing:
     # if a future change adds a GPL/LGPL package as a real dependency, the
     # gate must fail even though the document text itself is untouched.
-    poisoned = pyproject_text.replace(
-        '"TA-Lib==0.7.1",', '"TA-Lib==0.7.1",\n    "backtrader>=1.9",', 1
+    # Anchor on the TA-Lib requirement line whatever version it pins -- a
+    # version literal here would make the poisoning a silent no-op after a bump.
+    poisoned, replaced = re.subn(
+        r'("TA-Lib==[^"]+",)', r'\1\n    "backtrader>=1.9",', pyproject_text, count=1
     )
+    assert replaced == 1
     assert poisoned != pyproject_text
     with pytest.raises(OssEvalGateError, match="BANNED_LICENSE_DEPENDENCY"):
         assert_oss_eval_gate(eval_text, poisoned)
@@ -150,9 +154,16 @@ def test_gate_red_cli_rejects_mutated_document(eval_text: str, tmp_path: Path) -
 
 
 def test_gate_red_cli_rejects_poisoned_pyproject(eval_text: str, tmp_path: Path) -> None:
-    poisoned = _PYPROJECT_PATH.read_text(encoding="utf-8").replace(
-        '"TA-Lib==0.7.1",', '"TA-Lib==0.7.1",\n    "nautilus_trader>=1.231",', 1
+    # Anchor on the TA-Lib requirement whatever version it pins (same as the
+    # in-process negative above) -- a version literal made this a silent no-op
+    # on the TA-Lib 0.8.1 bump (dependabot #118: gate exit 0 instead of 1).
+    poisoned, replaced = re.subn(
+        r'("TA-Lib==[^"]+",)',
+        r'\1\n    "nautilus_trader>=1.231",',
+        _PYPROJECT_PATH.read_text(encoding="utf-8"),
+        count=1,
     )
+    assert replaced == 1
     doc_path = tmp_path / "eval.md"
     pyproject_path = tmp_path / "pyproject.toml"
     doc_path.write_text(eval_text, encoding="utf-8")

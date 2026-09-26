@@ -248,6 +248,53 @@ async def test_cancel_order_rejects_malformed_exchange_order_id():
     assert client.calls == []
 
 
+async def test_place_order_rejects_tick_misaligned_price():
+    """task-8076(F4-OKX, DoD 1): 지정가 가격이 BTC/USDT tick size(0.1)에
+    정렬되지 않으면 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    bad_order = _order(order_type=OrderType.LIMIT).model_copy(
+        update={"price": Money(amount=Decimal("50000.05"), currency=Currency.USDT)}
+    )
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(bad_order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_lot_misaligned_quantity():
+    """task-8076(F4-OKX): 수량이 BTC/USDT lot size(0.00000001)에 정렬되지
+    않으면 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    bad_order = _order().model_copy(update={"quantity": Decimal("1.000000001")})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(bad_order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_below_min_notional():
+    """task-8076(F4-OKX, DoD 2): 가격*수량이 BTC/USDT min_notional(1)
+    미만이면 거래소 호출 전에 거부한다."""
+    client = _paper_client()
+    bad_order = _order(order_type=OrderType.LIMIT).model_copy(
+        update={
+            "price": Money(amount=Decimal("0.1"), currency=Currency.USDT),
+            "quantity": Decimal("1"),
+        }
+    )
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(bad_order)
+    assert client.calls == []
+
+
+async def test_place_order_rejects_symbol_without_registered_limits():
+    """task-8076(F4-OKX): tick/lot/min_notional 한도가 없는 심볼은 검증을
+    건너뛰지 않고 fail-closed로 거부한다."""
+    client = _paper_client()
+    bad_order = _order().model_copy(update={"symbol": "SOL/USDT"})
+    with pytest.raises(FatalExchangeError):
+        await client.place_order(bad_order)
+    assert client.calls == []
+
+
 async def test_place_order_rejects_non_canonical_symbol():
     """부정 테스트(task-7868, 리뷰 REJECT 7802): `order.symbol`이 이미 OKX
     raw 형식("BTC-USDT", "/" 없음)이면 canonical 파서가 구분자를 찾지 못해

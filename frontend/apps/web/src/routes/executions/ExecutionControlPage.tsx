@@ -1,4 +1,4 @@
-import { useCreateExecution, useExecutions } from "@aios/shared-hooks";
+import { useCreateExecution, useEvaluateRiskGate, useExecutions } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import {
   classifyBadRequest,
@@ -27,7 +27,9 @@ import { ForbiddenNotice } from "../../components/ForbiddenNotice";
 import { NotFoundState } from "../../components/NotFoundState";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
+import { isFeatureEnabled } from "../../lib/featureFlags";
 import { ExecutionCard } from "./components/ExecutionCard";
+import { RiskVerdictPanel } from "./components/RiskVerdictPanel";
 import { useTranslation } from "react-i18next";
 
 // spec §3.3 에러 taxonomy: 실행 생성 실패는 err.message를 직접 노출하지 않고
@@ -88,6 +90,7 @@ export function ExecutionControlPage() {
     isError: executionsIsError,
   } = useExecutions();
   const createExecution = useCreateExecution();
+  const evaluateRiskGate = useEvaluateRiskGate();
   const { submit } = useIdempotentSubmit("executions.create");
   const [strategyId, setStrategyId] = useState("");
   const [strategyVersion, setStrategyVersion] = useState("1.0.0");
@@ -120,6 +123,12 @@ export function ExecutionControlPage() {
 
   async function submitExecution() {
     setError(null);
+    // task-7500(J3 G-4): RiskVerdictPanel이 evaluateRiskGate(PRE_SUBMIT)의 실제
+    // RiskEvaluationView를 그대로 보여준다 — 플래그가 꺼져 있으면(기본값) 부가
+    // 네트워크 호출 자체를 내지 않는다(FeatureFlagGate와 동일 "부작용 없음" 원칙).
+    if (isFeatureEnabled("FF_J3_RISK_PANEL")) {
+      evaluateRiskGate.mutate({ gateKind: "PRE_SUBMIT" });
+    }
     try {
       await createExecutionWithRetry();
       setStrategyId("");
@@ -188,6 +197,12 @@ export function ExecutionControlPage() {
             </div>
           )}
         </Card>
+
+        <RiskVerdictPanel
+          status={evaluateRiskGate.status}
+          data={evaluateRiskGate.data}
+          error={evaluateRiskGate.error}
+        />
 
         <section className="space-y-4">
           <h2 className="text-lg font-medium text-fg">{t("legacy.executionControlPage.t13")}</h2>
