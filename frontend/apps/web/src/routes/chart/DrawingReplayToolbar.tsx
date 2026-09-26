@@ -10,6 +10,11 @@ const DRAWING_LABELS: Record<DrawingKind, string> = {
   "vertical-line": "수직선",
   rectangle: "사각형",
   fibonacci: "피보나치",
+  segment: "선분",
+  "ray-line": "추세반선",
+  "parallel-channel": "평행채널",
+  "price-channel": "가격채널",
+  "price-line": "가격선",
 };
 
 interface DrawingReplayToolbarProps {
