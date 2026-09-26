@@ -1,19 +1,4 @@
 {
-  "generated_at": "2026-09-26T10:53:48+00:00",
-  "tasks": [
-    {
-      "id": 7622,
-      "title": "BR-23 키움증권 거래소 추가 (b) — 인증/HTTP/서명·rate-limit 클라이언트 + market_data_mixin + capabilities/venue_profile + factory 등록",
-      "spec": "docs/specs/execution_oms_and_exchange.md#BR-23; docs/exchanges/ADDING_AN_EXCHANGE.md 6단계 (b)",
-      "files": [
-        "new:src/exchanges/kiwoom/auth.py",
-        "new:src/exchanges/kiwoom/market_data_mixin.py",
-        "new:src/exchanges/kiwoom/venue_profile.py",
-        "new:src/exchanges/kiwoom/factory.py"
-      ],
-      "tier": "",
-      "role": "backend",
-      "hold_note": "[cloud_session] 클라우드 적합: 저장소만으로 완결(fake 전송, 실키 불필요), 주문경로 아님"
-    }
-  ]
+  "generated_at": "2026-09-26T11:01:20+00:00",
+  "tasks": []
 }
