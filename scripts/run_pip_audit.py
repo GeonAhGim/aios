@@ -150,7 +150,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     cmd = build_pip_audit_command(args.python)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # encoding을 명시하지 않으면 Windows에서 locale.getpreferredencoding()(cp949 등)로
+    # 디코딩되는데, pip-audit --format json은 UTF-8을 낸다 — 로케일이 cp949인 CI
+    # 러너에서 UnicodeDecodeError로 죽는다(task-8362). pip-audit 출력은 항상 UTF-8이므로
+    # 고정한다.
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
 
     if is_network_error(proc.stdout) or is_network_error(proc.stderr):
         print(
