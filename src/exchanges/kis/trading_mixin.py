@@ -15,6 +15,7 @@ ORGN_ODNO(원주문번호)가 모두 필요하지만 Order.exchange_order_id는 
 문자열이다 — place_order()가 "{orgno}:{odno}" 형식으로 합쳐 저장하고,
 cancel_order/modify_order가 그 형식을 기대한다(문서화된 편의 규약).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -27,12 +28,58 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import AccountBalance, Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.http_client import KISHTTPClient
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.services.oms.domain.errors import OrderValidationError
+from src.services.oms.domain.rounding import check_notional
+from src.services.oms.domain.venue_profile import VenueCapabilityProfile
 
 _EXCHANGE_ID = "KRX"  # Phase 1 대상(06번 §6.1)
 
 
 def _order_division(order_type: OrderType) -> str:
     return "01" if order_type == OrderType.MARKET else "00"
+
+
+def _lookup_symbol_spec(table: dict[str, Decimal], symbol: str) -> Decimal:
+    """`order.symbol`은 `order_dispatch.py`가 그대로 넘기는 KRX 종목코드
+    (예: "005930")지만, `venue_profile.py`의 `price_tick`/`qty_lot`/
+    `min_notional`은 `SymbolRegistry` 캐노니컬 키("005930.KS")로 등록돼
+    있다(BR-4/L4-04 — 캐노니컬↔venue 심볼 변환은 OMS 계층의
+    `SymbolRegistry.to_venue`가 하고, 여기(exchange adapter)는 이미 venue
+    심볼을 받는다). 두 표기를 모두 시도해 등록 여부와 무관하게 실제 값을
+    찾는다 — 어느 쪽에도 없으면 미등록 심볼로 보고 0(검사 대상 아님)을
+    반환한다."""
+    if symbol in table:
+        return table[symbol]
+    return table.get(f"{symbol}.KS", Decimal("0"))
+
+
+def _precheck_order(order: Order, profile: VenueCapabilityProfile) -> None:
+    """task-8074(AUDIT F4) — place_order()가 거래소에 제출하기 전에
+    tick/lot/min_notional을 검증한다(감사 발견: 기존에는 검증이 전혀 없어
+    거래소가 거부할 주문도 그대로 나갔다). 심볼이 스냅샷에 없으면 검사하지
+    않는다 — `rounding.round_price`/`check_notional`이 tick<=0/
+    min_notional<=0을 "검사 대상 아님"으로 취급하는 것과 같은 규약(§2-A)이라,
+    미등록 심볼을 거부하는 대신 등록된 심볼만 검사한다."""
+    lot = _lookup_symbol_spec(profile.qty_lot, order.symbol)
+    if lot > 0 and order.quantity % lot != 0:
+        raise OrderValidationError(
+            "LOT_MISALIGNED",
+            f"수량({order.quantity})이 lot 단위({lot})에 맞지 않습니다: {order.symbol}",
+        )
+
+    if order.price is None:  # 시장가 — tick/min_notional 검사 대상 없음
+        return
+
+    price_amount = order.price.amount
+    tick = _lookup_symbol_spec(profile.price_tick, order.symbol)
+    if tick > 0 and price_amount % tick != 0:
+        raise OrderValidationError(
+            "TICK_MISALIGNED",
+            f"가격({price_amount})이 tick 단위({tick})에 맞지 않습니다: {order.symbol}",
+        )
+
+    min_notional = _lookup_symbol_spec(profile.min_notional, order.symbol)
+    check_notional(price_amount, order.quantity, min_notional)
 
 
 def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
@@ -64,9 +111,18 @@ class _OrderMutatingClient(KISHTTPClient, Protocol):
     async def get_order(self, order_id: str) -> Order: ...
 
 
+class _OrderSubmittingClient(KISHTTPClient, Protocol):
+    """place_order()가 같은 어댑터에 조립되는 KISAdapter.venue_profile()을
+    호출해 tick/lot/min_notional 사전검증(task-8074, AUDIT F4)에 쓴다 —
+    위 두 Protocol과 동일 이유로 명시적으로 계약에 포함한다."""
+
+    def venue_profile(self) -> VenueCapabilityProfile: ...
+
+
 class KISTradingMixin:
     @require_paper_sandbox
-    async def place_order(self: KISHTTPClient, order: Order) -> Order:
+    async def place_order(self: _OrderSubmittingClient, order: Order) -> Order:
+        _precheck_order(order, self.venue_profile())
         body: dict[str, Any] = {
             "CANO": self._cano,
             "ACNT_PRDT_CD": self._acnt_prdt_cd,
