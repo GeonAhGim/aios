@@ -58,11 +58,13 @@ from src.core.script.ir.ops import (
     verify_stack,
 )
 from src.core.script.runtime.interpreter_types import (
+    SCRIPT_RUNTIME_LIMIT,
     BuiltinRegistry,
     CallSite,
     ExecutionResult,
     OrderOutput,
     PlotOutput,
+    ScriptRuntimeLimitError,
 )
 from src.core.script.runtime.series import (
     ArithOp,
@@ -96,6 +98,7 @@ def execute(
     builtins: BuiltinRegistry | None = None,
     symbol: str | None = None,
     base_timeframe: str | None = None,
+    runtime_limit: int = SCRIPT_RUNTIME_LIMIT,
 ) -> ExecutionResult:
     """IR을 실행한다. 실패는 전부 `ScriptRuntimeError`(또는 IR 자체 결함이면 `IRStackError`).
 
@@ -107,7 +110,7 @@ def execute(
         raise ScriptRuntimeError(f"bar_count는 0 이상 정수여야 합니다: {bar_count!r}")
     verify_stack(ir)
     machine = _Machine(bar_count, dict(inputs or {}), builtins or {}, symbol, base_timeframe)
-    machine.run(ir)
+    machine.run(ir, runtime_limit=runtime_limit)
     return machine.result()
 
 
@@ -150,15 +153,17 @@ class _Machine:
             "request": self._request,
         }
 
-    def run(self, ir: IRProgram) -> None:
+    def run(self, ir: IRProgram, *, runtime_limit: int = SCRIPT_RUNTIME_LIMIT) -> None:
         declared = {i.name for i in ir.instrs if isinstance(i, DeclareInput)}
         unknown = sorted(set(self._inputs) - declared)
         if unknown:
             raise ScriptRuntimeError(f"선언되지 않은 입력 이름: {unknown}")
-        for pos, instr in enumerate(ir.instrs):
+        for executed, instr in enumerate(ir.instrs, start=1):
+            if executed > runtime_limit:  # SBX-1 budget, not DSL-6's static op-count cap
+                raise ScriptRuntimeLimitError(f"#{executed} 실행 명령 수>{runtime_limit}")
             handler = self._ops.get(instr.op)
             if handler is None:
-                raise ScriptRuntimeError(f"#{pos} 알 수 없는 IR 명령: {instr.op!r}")
+                raise ScriptRuntimeError(f"#{executed - 1} 알 수 없는 IR 명령: {instr.op!r}")
             handler(instr)
         if self._stack:
             raise ScriptRuntimeError(f"실행 종료 시 스택 잔여값 {len(self._stack)}개")
