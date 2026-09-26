@@ -204,6 +204,7 @@ def test_run_backtest_failure_propagates_without_partial_result(monkeypatch) -> 
         )
 
 
+@pytest.mark.perf
 def test_sweep_throughput_meets_minimum_points_per_second() -> None:
     """Numeric performance assertion (D2 floor, ADR-2026-09-09-C): a 4-point grid over
     7 bars with a fake indicator service must clear a generous throughput floor -- this
