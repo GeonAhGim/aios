@@ -55,6 +55,47 @@ async def test_place_order_rejects_min_notional_shortfall_without_calling_exchan
     assert exc_info.value.reason == "MIN_NOTIONAL"
 
 
+async def test_place_order_rejects_lot_misaligned_quantity_without_calling_exchange(
+    make_adapter, new_order
+):
+    """negative: BTC/USDT qty_lot=0.000001 (market order, so tick/min_notional
+    are out of scope) — a quantity that is not an integer multiple of the lot
+    unit must be rejected fail-closed, before any HTTP call reaches the
+    exchange."""
+    adapter = make_adapter(_fail_if_called)
+    order = new_order(
+        order_type=OrderType.MARKET,
+        price=None,
+        quantity=Decimal("0.0000015"),
+    )
+
+    with pytest.raises(OrderValidationError) as exc_info:
+        await adapter.place_order(order)
+
+    assert exc_info.value.reason == "LOT"
+
+
+async def test_place_order_precheck_failure_does_not_return_a_submitted_order(
+    make_adapter, new_order
+):
+    """failure-injection: a pre-check rejection must propagate as
+    OrderValidationError, not be swallowed into a fake SUBMITTED result
+    (KIS test_trading_mixin_precheck.py precedent for the same audit item)."""
+    adapter = make_adapter(_fail_if_called)
+    order = new_order(
+        order_type=OrderType.LIMIT,
+        price=Money(amount=Decimal("80000.005"), currency=Currency.USDT),
+        quantity=Decimal("0.01"),
+    )
+
+    try:
+        result = await adapter.place_order(order)
+    except OrderValidationError:
+        result = None
+
+    assert result is None
+
+
 async def test_place_order_accepts_tick_and_notional_aligned_limit_order(
     make_adapter, json_response, new_order
 ):
