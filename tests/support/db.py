@@ -107,52 +107,63 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
 
     target_db = _db_name(target_url)
     template_db = _db_name(template_url)
-    # esc-ci-pytest_latency_serial: this admin connect is a plain
-    # `asyncpg.connect` with no retry, unlike `create_pool_with_retry` below --
-    # it can hit the same transient Windows TCP reset documented at
-    # `_POOL_CONNECT_ATTEMPTS` above (ConnectionDoesNotExistError/OSError) and,
-    # because `ensure_worker_database` runs at conftest.py *import* time
-    # (module-level `asyncio.run`, not inside a test), an unretried failure
-    # here surfaces as "ImportError while loading conftest" instead of a
-    # single test failure. Retry with the same bounded backoff instead of
-    # widening a budget or adding an ignore (DECISION_GUIDELINES B-2).
-    admin = await _admin_connect_with_retry(_asyncpg_dsn(_with_database(template_url, "postgres")))
+    admin_dsn = _asyncpg_dsn(_with_database(template_url, "postgres"))
+    # esc-ci-pytest_latency_serial: the initial `asyncpg.connect` below retries
+    # the same transient Windows TCP reset documented at `_POOL_CONNECT_ATTEMPTS`
+    # above (ConnectionDoesNotExistError/OSError), and because
+    # `ensure_worker_database` runs at conftest.py *import* time (module-level
+    # `asyncio.run`, not inside a test), an unretried failure here surfaces as
+    # "ImportError while loading conftest" instead of a single test failure.
+    # esc-ci-pytest_latency_serial reopened after that fix landed: the same
+    # reset shape also hits the `admin.execute(...)` calls below, which reuse
+    # this one connection across the whole DROP+CREATE loop (up to
+    # `_CLONE_ATTEMPTS` iterations with backoff sleeps in between) -- a reset
+    # mid-loop kills the connection and every subsequent `execute()` on it
+    # raises the identical `ConnectionDoesNotExistError`, unretried, propagating
+    # the same way. Treat that shape as reconnect-and-retry too, not just the
+    # initial connect, instead of widening a budget or adding an ignore
+    # (DECISION_GUIDELINES B-2).
+    admin = await _admin_connect_with_retry(admin_dsn)
     try:
         last_exc: (
-            asyncpg.exceptions.ObjectInUseError | asyncpg.exceptions.UniqueViolationError | None
+            asyncpg.exceptions.ObjectInUseError
+            | asyncpg.exceptions.UniqueViolationError
+            | OSError
+            | asyncpg.exceptions.ConnectionDoesNotExistError
+            | None
         ) = None
         for attempt in range(_CLONE_ATTEMPTS):
-            # 워커 DB(target_db)는 이 프로세스가 배타적으로 소유하므로, 크래시로
-            # 죽은 이전 프로세스가 남긴 idle 커넥션을 강제 종료해도 안전하다
-            # (pg_terminate_backend는 비동기 SIGTERM이라 즉시 반영되지 않을 수
-            # 있어 지수 백오프로 재시도). template_db는 절대 여기서 건드리지
-            # 않는다 — template_db는 이 세션 전체(다른 테스트의 살아있는
-            # 커넥션 포함)가 공유하는 `TEST_DATABASE_URL` 그 자체일 수 있고,
-            # 거기 강제 종료를 걸면 마침 쿼리 중이던 다른 테스트가
-            # `asyncpg.exceptions.ConnectionDoesNotExistError`로 깨진다
-            # (esc-ci-pytest.json, task-6176 — task-6005가 실 DB로
-            # `ensure_worker_database`를 직접 호출하며 처음 노출됐다). template_db에
-            # 살아있는 커넥션이 남아 있으면 CREATE DATABASE ... TEMPLATE가
-            # ObjectInUseError로 거부되고, 아래에서 그대로 전파한다(모듈
-            # docstring의 "조용히 폴백하지 않는다" 계약과 일치).
-            #
-            # task-7375(esc-ci-pytest_perf): 같은 worker_id(예: "gw0")를 쓰는 두
-            # 프로세스(로컬 CI의 `pytest_perf`/`pytest` 단계가 겹쳐 돌 때 등)가 이
-            # 루프에 동시에 들어오면, 한쪽의 DROP 이후 다른 쪽의 DROP은 이미 없는
-            # 이름이라 조용히 지나가고, 두 CREATE DATABASE가 거의 동시에 실행돼
-            # 먼저 커밋된 쪽만 성공하고 나머지는 `ObjectInUseError`가 아니라
-            # `pg_database_datname_index`(이름 UNIQUE 인덱스) 위반인
-            # `UniqueViolationError`로 거부된다(관측: `conftest.py` 임포트 단계에서
-            # 그대로 전파돼 `pytest_perf` 전체가 ImportError로 적색). ObjectInUseError와
-            # 동일하게 재시도 대상에 포함한다 — DROP+CREATE 루프가 다음 회차에
-            # 승자의 DB를 그대로 재사용하거나 다시 만들어 준다.
-            await admin.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = $1 AND pid <> pg_backend_pid()",
-                target_db,
-            )
-            await admin.execute(f'DROP DATABASE IF EXISTS "{target_db}"')
             try:
+                # 워커 DB(target_db)는 이 프로세스가 배타적으로 소유하므로, 크래시로
+                # 죽은 이전 프로세스가 남긴 idle 커넥션을 강제 종료해도 안전하다
+                # (pg_terminate_backend는 비동기 SIGTERM이라 즉시 반영되지 않을 수
+                # 있어 지수 백오프로 재시도). template_db는 절대 여기서 건드리지
+                # 않는다 — template_db는 이 세션 전체(다른 테스트의 살아있는
+                # 커넥션 포함)가 공유하는 `TEST_DATABASE_URL` 그 자체일 수 있고,
+                # 거기 강제 종료를 걸면 마침 쿼리 중이던 다른 테스트가
+                # `asyncpg.exceptions.ConnectionDoesNotExistError`로 깨진다
+                # (esc-ci-pytest.json, task-6176 — task-6005가 실 DB로
+                # `ensure_worker_database`를 직접 호출하며 처음 노출됐다). template_db에
+                # 살아있는 커넥션이 남아 있으면 CREATE DATABASE ... TEMPLATE가
+                # ObjectInUseError로 거부되고, 아래에서 그대로 전파한다(모듈
+                # docstring의 "조용히 폴백하지 않는다" 계약과 일치).
+                #
+                # task-7375(esc-ci-pytest_perf): 같은 worker_id(예: "gw0")를 쓰는 두
+                # 프로세스(로컬 CI의 `pytest_perf`/`pytest` 단계가 겹쳐 돌 때 등)가 이
+                # 루프에 동시에 들어오면, 한쪽의 DROP 이후 다른 쪽의 DROP은 이미 없는
+                # 이름이라 조용히 지나가고, 두 CREATE DATABASE가 거의 동시에 실행돼
+                # 먼저 커밋된 쪽만 성공하고 나머지는 `ObjectInUseError`가 아니라
+                # `pg_database_datname_index`(이름 UNIQUE 인덱스) 위반인
+                # `UniqueViolationError`로 거부된다(관측: `conftest.py` 임포트 단계에서
+                # 그대로 전파돼 `pytest_perf` 전체가 ImportError로 적색). ObjectInUseError와
+                # 동일하게 재시도 대상에 포함한다 — DROP+CREATE 루프가 다음 회차에
+                # 승자의 DB를 그대로 재사용하거나 다시 만들어 준다.
+                await admin.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = $1 AND pid <> pg_backend_pid()",
+                    target_db,
+                )
+                await admin.execute(f'DROP DATABASE IF EXISTS "{target_db}"')
                 await admin.execute(f'CREATE DATABASE "{target_db}" TEMPLATE "{template_db}"')
                 break
             except (
@@ -162,6 +173,22 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
                 last_exc = exc
                 if attempt + 1 < _CLONE_ATTEMPTS:
                     await asyncio.sleep(_CLONE_RETRY_BASE_DELAY * (attempt + 1))
+            except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError) as exc:
+                # The connection this loop reuses just died mid-statement (the
+                # same transient reset `_admin_connect_with_retry` absorbs at
+                # connect time). It cannot serve any further `execute()` calls,
+                # so close it defensively (best-effort -- it may already be
+                # gone) and reconnect with the same bounded retry before
+                # retrying the DROP+CREATE body.
+                last_exc = exc
+                try:
+                    await admin.close()
+                except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+                    pass
+                if attempt + 1 >= _CLONE_ATTEMPTS:
+                    raise
+                await asyncio.sleep(_CLONE_RETRY_BASE_DELAY * (attempt + 1))
+                admin = await _admin_connect_with_retry(admin_dsn)
         else:
             assert last_exc is not None
             raise last_exc
