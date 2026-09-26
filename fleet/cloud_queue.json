@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-26T07:24:48+00:00",
+  "generated_at": "2026-09-26T07:35:05+00:00",
   "tasks": [
     {
       "id": 7619,
@@ -53,6 +53,22 @@
       "tier": "",
       "role": "backend",
       "hold_note": "[cloud_session] 클라우드 적합: MVP-2 우선2 M2-3 DSL string 타입, GitHub 저장소만으로 완결, fake pytest 검증 가능, 주문경로 미접촉(ADR-2026-09-26-A)"
+    },
+    {
+      "id": 7880,
+      "title": "[CA P0] replay_verify 테스트군 공유 DB 오염 근본 격리 — GitHub·로컬 commit CI 모두에서 4일째 적색(esc-ci-pytest 09-22~)",
+      "spec": "증거(CTO 2026-09-26): tests/integration/eventstore/test_replay_verify.py(2건)·test_replay_verify_order_chain.py(1건)·test_replay_verify_tamper_detection.py(2건)가 실행마다 다른 조합으로 실패한다 — GitHub run 36224598728(#96)·36224649315(#98)·36224563460(#94)·36224508886(#95), 로컬 commit CI 5a2c774a(esc-ci-pytest, 09-22부터 열림). 실패 내용은 항상 ledger PLATFORM:CASH_CLEARING 등 시스템 계정 StreamDiff(replayed_digest != actual_digest): 같은 xdist 워커 DB(loadfile 분산)에서 앞서 돈 다른 모듈(ledger/positions/risk 통합 테스트)이 PLATFORM 원장에 커밋한 행이 replay 대상 테이블에 남아 replay 결과와 어긋난다.\n선행: PR #91(claude/sleepy-newton-ocvjmd)에 order_chain 모듈 전용 클론 DB·replay_verify 클론 DB 수정이 들어 있다 — 머지되면 그 위에서 시작하고, 머지 전이면 그 diff를 참고하되 충돌 없이 별도 커밋으로.\n정석 조치(완화 금지: retry·skip·xfail·순서 고정 금지):\n1) replay_verify 3개 모듈이 공유하는 픽스처(_replay_verify_support.py)를 '모듈별 템플릿 복제 DB + 세션 종료 시 DROP'으로 통일 — fe50dcd4(per-module cloned DB)가 tests/integration/eventstore 전체에 적용되는지, conftest 계층에서 덮여 무효화되는 경로가 있는지 확인.\n2) replay가 읽는 테이블(orders/fills/ledger_journal/ledger_balance)에 대해 테스트 시작 시 '외부 잔재 0건'을 단언하는 가드 픽스처를 넣어, 오염이 있으면 그 원인 모듈 이름을 실패 메시지에 남긴다(재발 시 즉시 원인 특정).\n3) 로컬 commit 모드(local_ci CI_PYTEST_WORKER_ID=localci)와 GitHub xdist 4워커 양쪽에서 3회 연속 녹색 증빙을 note에.\nDoD: 위 3개 모듈 GitHub·로컬 3회 연속 녹색, 가드 픽스처 단위 테스트, meta guards 통과.",
+      "files": [
+        "tests/integration/eventstore/_replay_verify_support.py",
+        "tests/integration/eventstore/conftest.py",
+        "tests/integration/eventstore/test_replay_verify.py",
+        "tests/integration/eventstore/test_replay_verify_order_chain.py",
+        "tests/integration/eventstore/test_replay_verify_tamper_detection.py",
+        "tests/support/db.py"
+      ],
+      "tier": "C",
+      "role": "backend",
+      "hold_note": "[CTO] 같은 범위를 클라우드 PR #91 세션이 진행 중(원인 모듈 특정·03d44f43) — 중복 방지 hold. #91 녹색 머지 시 noop 종료, 적색 지속 시 release."
     }
   ]
 }
