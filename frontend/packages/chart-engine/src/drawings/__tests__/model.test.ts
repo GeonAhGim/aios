@@ -14,8 +14,19 @@ import {
 import { expectDrawingError } from "./helpers";
 
 describe("drawing kinds", () => {
-  it("exposes exactly the five CH-4 tools", () => {
-    expect(DRAWING_KINDS).toEqual(["trendline", "horizontal-line", "vertical-line", "rectangle", "fibonacci"]);
+  it("exposes the original five CH-4 tools plus the M2-6 step-1 extension", () => {
+    expect(DRAWING_KINDS).toEqual([
+      "trendline",
+      "horizontal-line",
+      "vertical-line",
+      "rectangle",
+      "fibonacci",
+      "segment",
+      "ray-line",
+      "parallel-channel",
+      "price-channel",
+      "price-line",
+    ]);
     for (const kind of DRAWING_KINDS) expect(isDrawingKind(kind)).toBe(true);
     expect(isDrawingKind("ellipse")).toBe(false);
     expect(isDrawingKind(undefined)).toBe(false);
@@ -111,6 +122,54 @@ describe("assertValidDrawing", () => {
     ["horizontal without price", { id: "h", kind: "horizontal-line" }],
     ["vertical with NaN time", { id: "v", kind: "vertical-line", time: Number.NaN }],
   ])("rejects %s with CHART_DRAWING_INVALID", (_label, drawing) => {
+    expectDrawingError(() => assertValidDrawing(drawing as Drawing), "CHART_DRAWING_INVALID");
+  });
+
+  it.each<[string, Drawing]>([
+    ["segment", { id: "s", kind: "segment", points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] }],
+    ["ray-line", { id: "r", kind: "ray-line", points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] }],
+    [
+      "parallel-channel",
+      {
+        id: "p",
+        kind: "parallel-channel",
+        points: [{ time: 1, price: 2 }, { time: 3, price: 4 }, { time: 5, price: 6 }],
+      },
+    ],
+    ["price-channel", { id: "c", kind: "price-channel", points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] }],
+    ["price-line", { id: "l", kind: "price-line", price: 100 }],
+  ])("accepts a well-formed %s (M2-6 step 1)", (_label, drawing) => {
+    expect(() => assertValidDrawing(drawing)).not.toThrow();
+  });
+
+  it.each<[string, unknown]>([
+    ["segment: one point", { id: "s", kind: "segment", points: [{ time: 1, price: 2 }] }],
+    [
+      "segment: three points",
+      { id: "s", kind: "segment", points: [{ time: 1, price: 2 }, { time: 3, price: 4 }, { time: 5, price: 6 }] },
+    ],
+    ["ray-line: zero points", { id: "r", kind: "ray-line", points: [] }],
+    [
+      "parallel-channel: two points (needs three)",
+      { id: "p", kind: "parallel-channel", points: [{ time: 1, price: 2 }, { time: 3, price: 4 }] },
+    ],
+    [
+      "parallel-channel: four points",
+      {
+        id: "p",
+        kind: "parallel-channel",
+        points: [
+          { time: 1, price: 2 },
+          { time: 3, price: 4 },
+          { time: 5, price: 6 },
+          { time: 7, price: 8 },
+        ],
+      },
+    ],
+    ["price-channel: one point", { id: "c", kind: "price-channel", points: [{ time: 1, price: 2 }] }],
+    ["price-line: NaN price", { id: "l", kind: "price-line", price: Number.NaN }],
+    ["price-line: missing price", { id: "l", kind: "price-line" }],
+  ])("rejects %s with CHART_DRAWING_INVALID (M2-6 step 1 negative)", (_label, drawing) => {
     expectDrawingError(() => assertValidDrawing(drawing as Drawing), "CHART_DRAWING_INVALID");
   });
 

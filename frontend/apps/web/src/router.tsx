@@ -177,5 +177,15 @@ export const router = createBrowserRouter(
   { path: "/admin/trust", element: protectAdmin(<TrustPage />) },
   { path: "/admin/audit-log", element: protectAdmin(<AuditLogPage />) },
   ],
-  { future: { v7_relativeSplatPath: true } },
+  {
+    // task-7869: v7_startTransition is a RouterProvider render-future flag
+    // (see main.tsx), not a data-router future flag -- it does not belong here.
+    future: {
+      v7_relativeSplatPath: true,
+      v7_fetcherPersist: true,
+      v7_normalizeFormMethod: true,
+      v7_partialHydration: true,
+      v7_skipActionErrorRevalidation: true,
+    },
+  },
 );

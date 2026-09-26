@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#R-19 — var_cornish_fisher.py known-value + ES>=VaR."""
+
 import numpy as np
 import pytest
 
@@ -63,3 +64,8 @@ def test_requires_at_least_three_observations():
         cornish_fisher_var_es(
             np.array([0.01, 0.02]), confidence=0.95, horizon_days=1, bars_per_day=1
         )
+
+
+def test_empty_observations_raises():
+    with pytest.raises(ValueError):
+        cornish_fisher_var_es(np.array([]), confidence=0.95, horizon_days=1, bars_per_day=1)

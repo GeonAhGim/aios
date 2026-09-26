@@ -159,3 +159,15 @@ def test_all_registered_names_pass_to_prom_and_regex() -> None:
         # Prometheus 이름은 `_`만 허용, 숫자로 시작 불가
         assert prom_name.startswith("aios_"), f"to_prom 결과 prefix 위반: {prom_name}"
         assert not prom_name[5:].startswith("_"), f"to_prom 결과 세그먼트가 `_`로 시작: {prom_name}"
+
+
+def test_invalid_metric_name_injection_detected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실패주입: 무효한 메트릭 이름이 ALL_METRIC_NAMES에 주입되면,
+    정규식 검증이 그것을 즉시 거부해야 한다(게이트 검증).
+    """
+    invalid_names = metric_names.ALL_METRIC_NAMES | {"aios.invalid."}
+    monkeypatch.setattr(metric_names, "ALL_METRIC_NAMES", invalid_names)
+
+    violations = [name for name in metric_names.ALL_METRIC_NAMES if not _METRIC_NAME_RE.match(name)]
+    assert len(violations) > 0, "정규식이 무효한 메트릭 이름을 감지하지 못함"
+    assert "aios.invalid." in violations

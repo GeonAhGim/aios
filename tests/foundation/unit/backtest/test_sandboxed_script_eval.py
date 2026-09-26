@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import time
 
+import psutil
 import pytest
 
 from src.core.script.grammar.parser import parse
@@ -53,8 +54,12 @@ def _hang_forever() -> None:
 
 
 def _allocate_and_hold(mb: int) -> None:
-    block = bytearray(mb * 1024 * 1024)
-    block[0] = 1  # force the pages to actually commit, not just be reserved
+    # A zero-filled bytearray is lazily committed page by page on Linux, so
+    # only a non-zero fill actually raises RSS by `mb` -- touching one byte
+    # would commit a single page and the test would pass only because the
+    # child inherited a large heap from its parent.
+    block = b"\x01" * (mb * 1024 * 1024)
+    assert block[-1] == 1
     time.sleep(10)
 
 
@@ -89,12 +94,42 @@ def test_wallclock_limit_exceeded_raises_timeout_error() -> None:
 
 
 def test_rss_limit_exceeded_raises_memory_error() -> None:
+    # Limit sits well above a fresh spawned child's baseline (~100MB with the
+    # DSL runtime imported) so the kill is caused by the allocation, not by
+    # interpreter startup.
     with pytest.raises(ScriptSandboxMemoryExceededError):
         run_sandboxed(
             _allocate_and_hold,
-            200,
-            limits=SandboxLimits(wallclock_sec=15, rss_mb=50),
+            400,
+            limits=SandboxLimits(wallclock_sec=15, rss_mb=256),
         )
+
+
+def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
+    """Gate-red reproduction (CI run 36237321056, main 16063c7a): a pytest-xdist
+    worker whose own RSS had grown past 512MB ran the 5-bar sample script and
+    the sandbox killed the child at birth. With the `fork` start method the
+    child's RSS is the parent's RSS, so the ceiling measured the host. Hold a
+    committed ballast larger than the limit in this process and require the
+    tiny script to still run: fails under `fork`, passes under `spawn`."""
+    limit_mb = 256
+    ballast = b"\x01" * ((limit_mb + 128) * 1024 * 1024)
+    try:
+        assert ballast[-1] == 1
+        parent_rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+        assert parent_rss_mb > limit_mb, parent_rss_mb  # precondition of the reproduction
+        ir = lower_program(parse(_SAMPLE))
+        direct = _execute_ir(ir, bar_count=5, inputs={"close": _CLOSE})
+        sandboxed = run_sandboxed(
+            _execute_ir,
+            ir,
+            bar_count=5,
+            inputs={"close": _CLOSE},
+            limits=SandboxLimits(wallclock_sec=30, rss_mb=limit_mb),
+        )
+    finally:
+        del ballast
+    assert sandboxed == direct
 
 
 @pytest.mark.perf

@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#9 R-01 — hashing.py canonical JSON 결정론 테스트."""
+
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -45,6 +46,19 @@ def test_aware_datetime_normalized_to_utc_iso():
 def test_naive_datetime_rejected():
     with pytest.raises(ValueError):
         canonical_json({"t": datetime(2026, 9, 3, 0, 0)})
+
+
+def test_non_serializable_type_raises_type_error():
+    class _Unsupported:
+        pass
+
+    with pytest.raises(TypeError):
+        canonical_json({"x": _Unsupported()})
+
+
+def test_naive_datetime_rejected_when_nested_in_list():
+    with pytest.raises(ValueError):
+        canonical_json({"ts": [datetime(2026, 9, 3, 0, 0)]})
 
 
 def test_uuid_normalized_to_str():

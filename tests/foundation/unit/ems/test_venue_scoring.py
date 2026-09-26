@@ -189,15 +189,19 @@ def test_numerical_performance_assertion_500_venues_ratio() -> None:
     rank_venues(single_candidates)
     rank_venues(large_candidates)
 
-    start = time.perf_counter()
-    for _ in range(100):
-        rank_venues(single_candidates)
-    single_elapsed = time.perf_counter() - start
+    # Take the minimum of several trials, not a single sample: a single
+    # 100-iteration sum is vulnerable to one GC pause or scheduler
+    # preemption inflating either side and swinging the ratio: the
+    # minimum is the only statistic that isolates steady-state cost from
+    # transient host noise (noise only ever adds delay, never subtracts).
+    def _timed_run(candidates: list[VenueCandidate]) -> float:
+        start = time.perf_counter()
+        for _ in range(100):
+            rank_venues(candidates)
+        return time.perf_counter() - start
 
-    start = time.perf_counter()
-    for _ in range(100):
-        rank_venues(large_candidates)
-    large_elapsed = time.perf_counter() - start
+    single_elapsed = min(_timed_run(single_candidates) for _ in range(5))
+    large_elapsed = min(_timed_run(large_candidates) for _ in range(5))
 
     ratio = large_elapsed / single_elapsed if single_elapsed > 0 else 0
     assert ratio < 500, (

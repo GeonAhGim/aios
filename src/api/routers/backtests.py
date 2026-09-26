@@ -23,10 +23,12 @@ application 호출만 한다. 이 라우터는 `compile_source`(DSL-12)로 컴�
 동기 실행·무저장(decision) — 백테스트 결과를 어디에도 쓰지 않는다. LIVE
 경로와 무관하며 주문을 실제로 내지 않는다.
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import asyncpg
 from fastapi import APIRouter, Depends
@@ -39,7 +41,14 @@ from src.api.foundation_deps import (
     get_market_reference_repository,
     get_tenant_context,
 )
-from src.api.schemas.backtests import QuickBacktestRequest, QuickBacktestResultView
+from src.api.schemas.backtests import (
+    QuickBacktestRequest,
+    QuickBacktestResultView,
+    SweepPointResultView,
+    SweepRequest,
+    SweepResultView,
+    SweepStabilityView,
+)
 from src.core.indicators.registry import DEFAULT_REGISTRY, IndicatorRegistry
 from src.core.script.artifact.compile import compile_source
 from src.foundation.backtest.application.quick_backtest import (
@@ -48,6 +57,12 @@ from src.foundation.backtest.application.quick_backtest import (
     run_quick_backtest,
 )
 from src.foundation.backtest.application.script_signal_source import build_script_signal_source
+from src.foundation.backtest.domain.param_stability import (
+    ParamGrid,
+    ParamStabilityError,
+    stability_score,
+)
+from src.foundation.backtest.vector.experiment_ledger import record_grid_entry
 from src.foundation.market_data.adapters.postgres_source_contract import (
     PostgresSourceContractRepository,
 )
@@ -98,15 +113,23 @@ async def quick_backtest_endpoint(
     async with pool.acquire() as conn:
         now = datetime.now(timezone.utc)
         inst = await resolve_instrument(
-            conn, refs=refs, reader=reader, venue=body.venue, symbol=body.symbol,
-            instrument_id=body.instrument_id, now=now,
+            conn,
+            refs=refs,
+            reader=reader,
+            venue=body.venue,
+            symbol=body.symbol,
+            instrument_id=body.instrument_id,
+            now=now,
         )
         # DC-28 (ADR-2026-09-06-H D2) — a backtest never displays raw
         # candles on screen as-is, only uses them for internal computation
         # (fills/P&L) — `INTERNAL_CALC` is the lowest threshold, permitted
         # even by `INTERNAL` scope.
         await authorize_redistribution(
-            conn, inst.venue.value, repo=source_contracts, clock=lambda: now,
+            conn,
+            inst.venue.value,
+            repo=source_contracts,
+            clock=lambda: now,
             use=DataUse.INTERNAL_CALC,
         )
         key = SeriesKey(
@@ -119,8 +142,13 @@ async def quick_backtest_endpoint(
 
     try:
         result = run_quick_backtest(
-            body.config, columns, timeframe=body.timeframe, strategy=strategy,
-            initial_cash=body.initial_cash, funding_rate=body.funding_rate, max_bars=MAX_QUICK_BARS,
+            body.config,
+            columns,
+            timeframe=body.timeframe,
+            strategy=strategy,
+            initial_cash=body.initial_cash,
+            funding_rate=body.funding_rate,
+            max_bars=MAX_QUICK_BARS,
         )
     except TooManyBarsError as exc:
         exc.details = {"bars": len(columns), "max": MAX_QUICK_BARS}
@@ -136,6 +164,130 @@ async def quick_backtest_endpoint(
         },
     )
     return ok(QuickBacktestResultView.from_result(result))
+
+
+@router.post("/sweep", response_model=ApiResponse[SweepResultView])
+async def sweep_backtest_endpoint(
+    body: SweepRequest,
+    tenant: TenantContext = Depends(get_tenant_context),
+    pool: asyncpg.Pool = Depends(get_pool),
+    store: CandleStore = Depends(get_candle_store),
+    refs: ReferenceRepository = Depends(get_market_reference_repository),
+    reader: ReferenceReadRepository = Depends(get_market_reference_reader),
+    registry: IndicatorRegistry = Depends(get_indicator_registry),
+    source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
+) -> ApiResponse[SweepResultView]:
+    """BT-18(task-7774) -- parameter grid sweep. Building `ParamGrid` rejects
+    an empty axis list fail-closed (`ParamStabilityError` -> 400, `axes must
+    not be empty`) -- a request with no axes stops here without running any
+    combo. Each combo repeats the same compile/run pattern as `/quick` (see
+    module docstring -- no new domain logic)."""
+    axis_names = [axis.name for axis in body.axes]
+    grid = ParamGrid(axes={axis.name: axis.values for axis in body.axes})
+
+    async with pool.acquire() as conn:
+        now = datetime.now(timezone.utc)
+        inst = await resolve_instrument(
+            conn,
+            refs=refs,
+            reader=reader,
+            venue=body.venue,
+            symbol=body.symbol,
+            instrument_id=body.instrument_id,
+            now=now,
+        )
+        await authorize_redistribution(
+            conn,
+            inst.venue.value,
+            repo=source_contracts,
+            clock=lambda: now,
+            use=DataUse.INTERNAL_CALC,
+        )
+        key = SeriesKey(
+            venue=inst.venue, instrument_id=inst.instrument_id, timeframe=body.timeframe
+        )
+        columns = await store.read_candles_columnar(conn, key, body.start, body.end, body.as_of)
+
+    points: list[SweepPointResultView] = []
+    metric_by_point: dict[tuple[int, ...], Decimal] = {}
+    for index, combo in enumerate(body.combos):
+        compiled = compile_source(combo.script_source, registry_version=registry.registry_hash())
+        strategy = build_script_signal_source(compiled.ir, bar_count=len(columns), columns=columns)
+        try:
+            result = run_quick_backtest(
+                body.config,
+                columns,
+                timeframe=body.timeframe,
+                strategy=strategy,
+                initial_cash=body.initial_cash,
+                funding_rate=body.funding_rate,
+                max_bars=MAX_QUICK_BARS,
+            )
+        except TooManyBarsError as exc:
+            exc.details = {"bars": len(columns), "max": MAX_QUICK_BARS}
+            raise
+
+        entry = record_grid_entry(
+            combo_key=combo.combo_key,
+            combo_index=index,
+            script_hash=combo.script_hash,
+            data_lineage_hash=body.data_lineage_hash,
+            rollup_version=body.rollup_version,
+            config=body.config,
+            seed=body.seed,
+        )
+        metric_value = getattr(result, body.metric)
+        point = tuple(combo.axis_values[name] for name in axis_names)
+        metric_by_point[point] = metric_value
+        points.append(
+            SweepPointResultView(
+                combo_key=combo.combo_key,
+                combo_index=index,
+                axis_values=combo.axis_values,
+                metric_value=metric_value,
+                reproducibility_key=entry.reproducibility_key,
+                seed=body.seed,
+            )
+        )
+
+    # SweepResultsPage.tsx (BT-18) only renders a heatmap when there are
+    # exactly 2 axes -- `stability_score` uses the same threshold. If
+    # `metric_by_point` doesn't cover the whole grid (only a subset of grid
+    # points were run as combos), we degrade to a warning instead of
+    # fail-closed -- no reason to discard combo results already computed.
+    stability: SweepStabilityView | None = None
+    warnings: list[str] = []
+    if len(axis_names) == 2:
+        try:
+            report = stability_score(grid, metric_by_point)
+        except ParamStabilityError as exc:
+            warnings.append(str(exc))
+        else:
+            stability = SweepStabilityView(
+                best_axis_values=dict(zip(axis_names, report.best, strict=True)),
+                neighbor_mean=report.neighbor_mean,
+                neighbor_std=report.neighbor_std,
+                isolated=report.isolated,
+            )
+
+    logger.info(
+        "backtest.sweep",
+        extra={
+            "event_type": "backtest.sweep",
+            "tenant_id": str(tenant.tenant_id),
+            "combos": len(body.combos),
+            "metric": body.metric,
+        },
+    )
+    return ok(
+        SweepResultView(
+            axes=body.axes,
+            metric=body.metric,
+            points=points,
+            stability=stability,
+            warnings=warnings,
+        )
+    )
 
 
 __all__ = ["get_indicator_registry", "router"]

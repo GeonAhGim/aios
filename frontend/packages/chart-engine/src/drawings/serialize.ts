@@ -51,6 +51,10 @@ function encodeDrawing(drawing: Drawing): Json {
   switch (drawing.kind) {
     case "trendline":
     case "rectangle":
+    case "segment":
+    case "ray-line":
+    case "parallel-channel":
+    case "price-channel":
       out.points = drawing.points.map(encodePoint);
       break;
     case "fibonacci":
@@ -62,6 +66,9 @@ function encodeDrawing(drawing: Drawing): Json {
       break;
     case "vertical-line":
       out.time = drawing.time;
+      break;
+    case "price-line":
+      out.price = drawing.price;
       break;
   }
   if (drawing.locked !== undefined) out.locked = drawing.locked;
@@ -94,6 +101,11 @@ const KIND_FIELDS: Readonly<Record<DrawingKind, readonly string[]>> = {
   fibonacci: ["points", "levels"],
   "horizontal-line": ["price"],
   "vertical-line": ["time"],
+  segment: ["points"],
+  "ray-line": ["points"],
+  "parallel-channel": ["points"],
+  "price-channel": ["points"],
+  "price-line": ["price"],
 };
 const STYLE_FIELDS: readonly string[] = ["color", "lineWidth"];
 const DOC_FIELDS: readonly string[] = ["schema_version", "drawings"];
@@ -142,6 +154,17 @@ function decodePoints(id: string, value: unknown): [DrawingPoint, DrawingPoint] 
   return [decodePoint(id, "points[0]", value[0]), decodePoint(id, "points[1]", value[1])];
 }
 
+function decodePoints3(id: string, value: unknown): [DrawingPoint, DrawingPoint, DrawingPoint] {
+  if (!Array.isArray(value) || value.length !== 3) {
+    throw fieldError("CHART_DRAWING_FIELD_INVALID", id, "points", "must be an array of exactly three points");
+  }
+  return [
+    decodePoint(id, "points[0]", value[0]),
+    decodePoint(id, "points[1]", value[1]),
+    decodePoint(id, "points[2]", value[2]),
+  ];
+}
+
 function decodeLevels(id: string, value: unknown): number[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw fieldError("CHART_DRAWING_FIELD_INVALID", id, "levels", "must be a non-empty array");
@@ -185,7 +208,13 @@ function decodeDrawing(value: unknown, index: number): Drawing {
   switch (kind) {
     case "trendline":
     case "rectangle":
+    case "segment":
+    case "ray-line":
+    case "price-channel":
       drawing = { id, kind, points: decodePoints(id, requireField(id, value, "points")) };
+      break;
+    case "parallel-channel":
+      drawing = { id, kind, points: decodePoints3(id, requireField(id, value, "points")) };
       break;
     case "fibonacci":
       drawing = {
@@ -200,6 +229,9 @@ function decodeDrawing(value: unknown, index: number): Drawing {
       break;
     case "vertical-line":
       drawing = { id, kind, time: decodeNumber(id, "time", requireField(id, value, "time")) };
+      break;
+    case "price-line":
+      drawing = { id, kind, price: decodeNumber(id, "price", requireField(id, value, "price")) };
       break;
   }
   if (Object.hasOwn(value, "locked")) {
