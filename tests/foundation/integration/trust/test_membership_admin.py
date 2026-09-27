@@ -23,6 +23,7 @@ import math
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -163,7 +164,7 @@ async def test_grant_membership_without_mfa_raises():
             None,
             owner_ctx,
             subject_id=uuid4(),
-            role=MembershipRole.MEMBER,  # type: ignore[arg-type]
+            role=cast(Any, MembershipRole.MEMBER),
         )
 
 
@@ -309,7 +310,7 @@ async def test_cross_tenant_header_is_rejected_before_membership_commands_run(po
 
     with pytest.raises(HTTPException) as excinfo:
         await get_tenant_context(
-            request,  # type: ignore[arg-type]
+            cast(Any, request),
             user=_auth_user(attacker_id),
             pool=pool,
             membership_repo=repo,

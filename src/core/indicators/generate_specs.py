@@ -27,7 +27,7 @@ the deviation side is implemented only as a pure function `_deviation_range()`
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 import talib
 from talib import abstract as talib_abstract
@@ -209,7 +209,7 @@ def _build_talib_metadata_cache() -> dict[str, dict[str, Any]]:
     """Build cache of all TA-Lib function info to avoid repeated introspection."""
     cache: dict[str, dict[str, Any]] = {}
     for name in sorted(_all_talib_functions()):
-        cache[name] = talib_abstract.Function(name).info  # type: ignore[attr-defined]
+        cache[name] = cast(Any, talib_abstract.Function(name)).info
     return cache
 
 
