@@ -1,18 +1,18 @@
-"""task-1718 P0-E — c9f4e2a1b6d7이 foundation 8 테이블에 건 `FORCE ROW LEVEL
-SECURITY`가 실제로 켜져 있는지 확인한다.
+"""PLT-30 foundation RLS: enabled/FORCE flags, denied app-role DDL, and recovery.
 
-`pg_class.relforcerowsecurity`는 PostgreSQL이 그 테이블에 FORCE 플래그가
-서 있는지를 직접 보여주는 카탈로그 컬럼이다 — 이 테스트는 그 플래그의
-존재만 확인한다. 이 환경의 DATABASE_URL 롤이 슈퍼유저(rolbypassrls=true)라
-FORCE가 서 있어도 이 세션 자체의 쿼리 결과는 전혀 달라지지 않는다(PG는
-슈퍼유저에 행 보안을 아예 적용하지 않는다, FORCE 여부와 무관) — 그래서
-"FORCE가 실제로 교차 테넌트 접근을 막는다"는 동작 증명은 여기서 하지 않는다
-(운영 DSN이 비슈퍼유저로 전환된 뒤에야 의미가 생긴다, task note 참조).
+Catalog checks use the migrator connection; authorization checks explicitly switch
+into the non-superuser, NOBYPASSRLS aios_app role. Fault injection is transactional
+and always rolled back. These tests do not claim cross-tenant row filtering proof.
 """
 
 from __future__ import annotations
 
+import time
+
 import asyncpg
+import pytest
+
+from tests.integration.core.db.conftest import AppRoleTx
 
 _FOUNDATION_TABLES = (
     "consent_record",
@@ -26,13 +26,76 @@ _FOUNDATION_TABLES = (
 )
 
 
+async def _assert_foundation_security(conn: asyncpg.Connection) -> None:
+    rows = await conn.fetch(
+        "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
+        "WHERE relnamespace = 'public'::regnamespace "
+        "AND relkind = 'r' AND relname = ANY($1::text[])",
+        list(_FOUNDATION_TABLES),
+    )
+    flags = {
+        row["relname"]: (row["relrowsecurity"], row["relforcerowsecurity"])
+        for row in rows
+    }
+    assert set(flags) == set(_FOUNDATION_TABLES), flags
+    for table, (enabled, forced) in flags.items():
+        assert enabled and forced, f"{table}: enabled={enabled}, forced={forced}"
+
+
 async def test_foundation_tables_have_force_row_level_security(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT relname, relforcerowsecurity FROM pg_class "
-            "WHERE relname = ANY($1::text[])",
-            list(_FOUNDATION_TABLES),
-        )
-    flags = {row["relname"]: row["relforcerowsecurity"] for row in rows}
-    assert set(flags) == set(_FOUNDATION_TABLES)
-    assert all(flags.values()), flags
+        await _assert_foundation_security(conn)
+
+
+@pytest.mark.parametrize("table", _FOUNDATION_TABLES)
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "NO FORCE ROW LEVEL SECURITY",
+        "DISABLE ROW LEVEL SECURITY",
+        "OWNER TO aios_app",
+    ],
+    ids=["negative-unforce", "negative-disable", "negative-take-ownership"],
+)
+async def test_negative_app_cannot_weaken_foundation_security(pool, table, operation):
+    """I-10: exercise real PostgreSQL authorization for every protected table."""
+    async with pool.acquire() as conn:
+        await _assert_foundation_security(conn)
+        async with AppRoleTx(conn):
+            role = await conn.fetchrow(
+                "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+            )
+            assert role is not None
+            assert not role["rolsuper"] and not role["rolbypassrls"]
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                # Both identifiers and operations come exclusively from fixed test tuples.
+                await conn.execute(f'ALTER TABLE public."{table}" {operation}')
+        await _assert_foundation_security(conn)
+
+
+@pytest.mark.parametrize("table", _FOUNDATION_TABLES)
+async def test_failure_injection_unforce_trips_red_gate_and_rolls_back(pool, table):
+    """Inject actual catalog regression; the normal gate must fail, then recover."""
+    async with pool.acquire() as conn:
+        await _assert_foundation_security(conn)
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute(f'ALTER TABLE public."{table}" NO FORCE ROW LEVEL SECURITY')
+            with pytest.raises(AssertionError, match=table):
+                await _assert_foundation_security(conn)
+        finally:
+            await tx.rollback()
+        await _assert_foundation_security(conn)
+
+
+async def test_catalog_security_check_p95_under_borrowed_ack_budget(pool):
+    """Borrow ADR-2026-09-09-C's paper ACK p95 50ms budget for catalog reads."""
+    durations = []
+    async with pool.acquire() as conn:
+        await _assert_foundation_security(conn)
+        for _ in range(30):
+            start = time.perf_counter()
+            await _assert_foundation_security(conn)
+            durations.append((time.perf_counter() - start) * 1000)
+    assert sorted(durations)[28] < 50.0, durations
