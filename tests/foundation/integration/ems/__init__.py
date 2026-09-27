@@ -10,7 +10,6 @@ Tests the EMS ``domain/parent_child.py`` functions:
 - ``compute_child_state``
 """
 
-from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -220,30 +219,23 @@ class TestNegativeCases:
 class TestFailureInjection:
     """Failure injection — monkeypatch dependency to provoke exceptions."""
 
-    def test_injection_1_validate_aggregate_with_decimal_error(self):
-        """Inject Decimal overflow during aggregate sum."""
+    def test_injection_1_validate_aggregate_with_decimal_error(self, monkeypatch):
+        """Inject Decimal overflow only in the aggregate module's sum lookup."""
         from decimal import Overflow
 
-        # Save original sum
-        original_sum = __builtins__["sum"] if isinstance(__builtins__, dict) else __builtins__.sum  # type: ignore
+        from src.foundation.ems.domain import parent_child
 
         def failing_sum(iterable, start=0):
             raise Overflow("decimal overflow")
 
-        if isinstance(__builtins__, dict):
-            __builtins__["sum"] = failing_sum  # type: ignore[assignment]
-        else:
-            __builtins__.sum = failing_sum  # type: ignore[assignment]
-
-        try:
-            children = [_child_fill(filled_qty=Decimal("50"))]
-            with pytest.raises((Overflow, AlgoConstraintError)):
+        children = [_child_fill(filled_qty=Decimal("50"))]
+        with monkeypatch.context() as patch:
+            patch.setattr(parent_child, "sum", failing_sum, raising=False)
+            with pytest.raises(Overflow, match="decimal overflow"):
                 aggregate_parent_state(Decimal("100"), OrderStatus.CREATED, children)
-        finally:
-            if isinstance(__builtins__, dict):
-                __builtins__["sum"] = original_sum  # type: ignore[assignment]
-            else:
-                __builtins__.sum = original_sum  # type: ignore[assignment]
+        assert aggregate_parent_state(Decimal("100"), OrderStatus.CREATED, children) == (
+            Decimal("50"), OrderStatus.PARTIALLY_FILLED
+        )
 
     def test_injection_2_compute_child_state_triggers_validation_error(self):
         """compute_child_state delegates to validate_aggregate_fills."""

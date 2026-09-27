@@ -11,16 +11,24 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from typing import NoReturn, cast
+from unittest.mock import NonCallableMagicMock, create_autospec
+from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass
 from src.data.models.trading import OrderSide, OrderType
-from src.foundation.entities.application.resolve_context import EntityContextResolutionError
+from src.exchanges.bitget.venue_profile import BITGET_SPOT_PROFILE
+from src.foundation.entities.application.resolve_context import (
+    EntityContextResolutionError,
+    EntityRepository,
+)
 from src.foundation.entities.contracts.v1 import EntityContext
 from src.services.oms.application.submit_order import submit_order
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
+from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
 
 
@@ -56,23 +64,14 @@ async def _allow_gate(context: OrderContext) -> GateDecision:
     )
 
 
-class _PoolSpy:
-    """`asyncpg.Pool`의 최소 대역 — `acquire()`가 한 번이라도 불리면 orders
-    INSERT를 시도했다는 뜻이므로 즉시 실패시킨다. 카운터는 그 전에
-    entity_context 가드가 막았음을 단언하는 데 쓴다(DoD "INSERT 호출 0회")."""
-
-    def __init__(self) -> None:
-        self.acquire_calls = 0
-
-    def acquire(self):  # noqa: ANN201 - 테스트 대역, 호출되면 즉시 실패해야 한다
-        self.acquire_calls += 1
-        raise AssertionError(
-            "entity_context 가드보다 먼저 pool.acquire()가 호출됐습니다 — "
-            "orders INSERT 시도는 fail-closed 가드 이후에만 일어나야 합니다."
-        )
+def _pool_spy() -> NonCallableMagicMock:
+    """Pool-compatible spy: every acquisition fails before any database I/O."""
+    pool: NonCallableMagicMock = create_autospec(asyncpg.Pool, instance=True, spec_set=True)
+    pool.acquire.side_effect = AssertionError("entity guard must precede pool.acquire")
+    return pool
 
 
-def _entity_context(*, tenant_id) -> EntityContext:
+def _entity_context(*, tenant_id: UUID) -> EntityContext:
     return EntityContext(
         tenant_id=tenant_id,
         legal_entity_id=uuid4(),
@@ -88,40 +87,40 @@ class _RaisingEntityRepo:
     낸다. entity_context 가드는 이 예외를 삼키지 않고 그대로 전파해야
     한다 — INSERT 시도(`pool.acquire()`)는 여전히 0회여야 fail-closed다."""
 
-    async def get_legal_entity(self, tenant_id, entity_id):
+    async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID) -> NoReturn:
         raise ConnectionError("entity_repo 의존성 장애 주입 — DB 커넥션 단절 시뮬레이션")
 
-    async def get_fund(self, tenant_id, fund_id):
+    async def get_fund(self, tenant_id: UUID, fund_id: UUID) -> NoReturn:
         raise AssertionError("get_legal_entity에서 이미 실패했어야 합니다 — 도달 불가")
 
-    async def get_portfolio(self, tenant_id, portfolio_id):
+    async def get_portfolio(self, tenant_id: UUID, portfolio_id: UUID) -> NoReturn:
         raise AssertionError("get_legal_entity에서 이미 실패했어야 합니다 — 도달 불가")
 
-    async def get_sub_account(self, tenant_id, sub_account_id):
+    async def get_sub_account(self, tenant_id: UUID, sub_account_id: UUID) -> NoReturn:
         raise AssertionError("get_legal_entity에서 이미 실패했어야 합니다 — 도달 불가")
 
 
-async def test_submit_order_rejects_missing_entity_context_without_touching_adapter():
-    pool = _PoolSpy()
+async def test_submit_order_rejects_missing_entity_context_without_touching_adapter() -> None:
+    pool = _pool_spy()
 
     with pytest.raises(EntityContextResolutionError):
         await submit_order(
             _command(),
-            pool=pool,  # type: ignore[arg-type]
-            profile=None,  # type: ignore[arg-type]
-            registry=None,  # type: ignore[arg-type]
+            pool=pool,
+            profile=BITGET_SPOT_PROFILE,
+            registry=SymbolRegistry(),
             pre_submit_gate=_allow_gate,
-            entity_context=None,  # type: ignore[arg-type]
-            entity_repo=None,  # type: ignore[arg-type]  # negative test: 의도적으로 잘못된 타입을 넣어 fail-closed 가드를 검증
+            entity_context=cast(EntityContext, None),
+            entity_repo=cast(EntityRepository, None),
         )
 
-    assert pool.acquire_calls == 0
+    pool.acquire.assert_not_called()
 
 
-async def test_submit_order_rejects_cross_tenant_entity_context_without_touching_adapter():
+async def test_submit_order_rejects_cross_tenant_entity_context_without_touching_adapter() -> None:
     """negative test 2 — `entity_context.tenant_id`가 `cmd.scope.tenant_id`와
     다르면(교차 테넌트 위조 시도) INSERT 이전에 거부돼야 한다."""
-    pool = _PoolSpy()
+    pool = _pool_spy()
     cmd = _command()
     foreign_context = _entity_context(tenant_id=uuid4())
     assert foreign_context.tenant_id != cmd.scope.tenant_id
@@ -129,57 +128,57 @@ async def test_submit_order_rejects_cross_tenant_entity_context_without_touching
     with pytest.raises(EntityContextResolutionError):
         await submit_order(
             cmd,
-            pool=pool,  # type: ignore[arg-type]
-            profile=None,  # type: ignore[arg-type]
-            registry=None,  # type: ignore[arg-type]
+            pool=pool,
+            profile=BITGET_SPOT_PROFILE,
+            registry=SymbolRegistry(),
             pre_submit_gate=_allow_gate,
             entity_context=foreign_context,
-            entity_repo=None,  # type: ignore[arg-type]
+            entity_repo=cast(EntityRepository, None),
         )
 
-    assert pool.acquire_calls == 0
+    pool.acquire.assert_not_called()
 
 
-async def test_submit_order_rejects_missing_entity_repo_without_touching_adapter():
+async def test_submit_order_rejects_missing_entity_repo_without_touching_adapter() -> None:
     """negative test 3 — task-1925: `entity_context`가 유효(같은 테넌트)해도
     `entity_repo`가 없으면 위조 재확인(`verify_entity_context`)을 할 수 없어
     거부돼야 한다."""
-    pool = _PoolSpy()
+    pool = _pool_spy()
     cmd = _command()
     context = _entity_context(tenant_id=cmd.scope.tenant_id)
 
     with pytest.raises(EntityContextResolutionError):
         await submit_order(
             cmd,
-            pool=pool,  # type: ignore[arg-type]
-            profile=None,  # type: ignore[arg-type]
-            registry=None,  # type: ignore[arg-type]
+            pool=pool,
+            profile=BITGET_SPOT_PROFILE,
+            registry=SymbolRegistry(),
             pre_submit_gate=_allow_gate,
             entity_context=context,
-            entity_repo=None,  # type: ignore[arg-type]
+            entity_repo=cast(EntityRepository, None),
         )
 
-    assert pool.acquire_calls == 0
+    pool.acquire.assert_not_called()
 
 
-async def test_submit_order_propagates_entity_repo_failure_without_touching_adapter():
+async def test_submit_order_propagates_entity_repo_failure_without_touching_adapter() -> None:
     """실패주입 — `entity_repo`가 (DB 커넥션 단절 등으로) 예외를 던지면
     `submit_order`는 이를 삼켜 성공으로 위장하지 않고 그대로 전파해야
     하며, 그 시점에 `pool.acquire()`는 아직 호출되지 않아야 한다(fail-closed
     가드가 INSERT보다 먼저 걸린다)."""
-    pool = _PoolSpy()
+    pool = _pool_spy()
     cmd = _command()
     context = _entity_context(tenant_id=cmd.scope.tenant_id)
 
     with pytest.raises(ConnectionError):
         await submit_order(
             cmd,
-            pool=pool,  # type: ignore[arg-type]
-            profile=None,  # type: ignore[arg-type]
-            registry=None,  # type: ignore[arg-type]
+            pool=pool,
+            profile=BITGET_SPOT_PROFILE,
+            registry=SymbolRegistry(),
             pre_submit_gate=_allow_gate,
             entity_context=context,
             entity_repo=_RaisingEntityRepo(),
         )
 
-    assert pool.acquire_calls == 0
+    pool.acquire.assert_not_called()
