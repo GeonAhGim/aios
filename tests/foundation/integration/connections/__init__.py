@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -59,13 +60,13 @@ def test_capability_scope_unknown_value_rejected():
     READ_ACTIVITY are valid. Passing a raw string like 'TRADE' to a
     CapabilityScope constructor raises ValueError."""
     with pytest.raises(ValueError):
-        CapabilityScope("TRADE")  # type: ignore[arg-type]
+        CapabilityScope(cast(Any, "TRADE"))
 
     with pytest.raises(ValueError):
-        CapabilityScope("WITHDRAW")  # type: ignore[arg-type]
+        CapabilityScope(cast(Any, "WITHDRAW"))
 
     with pytest.raises(ValueError):
-        CapabilityScope("SIGN_TX")  # type: ignore[arg-type]
+        CapabilityScope(cast(Any, "SIGN_TX"))
 
 
 def test_capability_profile_typed_as_tuple_enforced():
@@ -100,10 +101,10 @@ def test_capability_profile_typed_as_tuple_enforced():
 def test_credential_class_rejects_trade():
     """CredentialClass is a closed enum — TRADE, WITHDRAW, etc. are invalid."""
     with pytest.raises(ValueError):
-        CredentialClass("TRADE")  # type: ignore[arg-type]
+        CredentialClass(cast(Any, "TRADE"))
 
     with pytest.raises(ValueError):
-        CredentialClass("WITHDRAW")  # type: ignore[arg-type]
+        CredentialClass(cast(Any, "WITHDRAW"))
 
 
 # ---------------------------------------------------------------------------
@@ -115,10 +116,10 @@ def test_credential_class_rejects_trade():
 def test_connection_state_unknown_rejected():
     """ConnectionState is a str enum — unknown states raise ValueError."""
     with pytest.raises(ValueError):
-        ConnectionState("UNKNOWN_STATE")  # type: ignore[arg-type]
+        ConnectionState(cast(Any, "UNKNOWN_STATE"))
 
     with pytest.raises(ValueError):
-        ConnectionState("DELETED")  # type: ignore[arg-type]
+        ConnectionState(cast(Any, "DELETED"))
 
 
 # ---------------------------------------------------------------------------
@@ -141,10 +142,10 @@ def test_account_connection_frozen_immutability():
         created_at=_utcnow(),
     )
     with pytest.raises(FrozenInstanceError):
-        conn.provider_code = "KRAKEN"  # type: ignore[misc]
+        cast(Any, conn).provider_code = "KRAKEN"
 
     with pytest.raises(FrozenInstanceError):
-        conn.state = ConnectionState.DISCONNECTED  # type: ignore[misc]
+        cast(Any, conn).state = ConnectionState.DISCONNECTED
 
 
 def test_credential_binding_frozen_immutability():
@@ -158,7 +159,7 @@ def test_credential_binding_frozen_immutability():
         expires_at=_utcnow(),
     )
     with pytest.raises(FrozenInstanceError):
-        binding.rotation_state = "ROTATED"  # type: ignore[misc]
+        cast(Any, binding).rotation_state = "ROTATED"
 
 
 # ---------------------------------------------------------------------------

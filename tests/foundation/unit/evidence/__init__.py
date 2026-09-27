@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import time
 from datetime import datetime, timezone
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -41,7 +42,7 @@ def _event(**overrides: object) -> AuditEvent:
         occurred_at=NOW,
     )
     defaults.update(overrides)
-    return AuditEvent(**defaults)  # type: ignore[arg-type]
+    return cast(Any, AuditEvent)(**defaults)
 
 
 # --- negative tests (모델 불변식 위반 입력 거부) ------------------------------
@@ -52,7 +53,7 @@ def test_audit_event_is_frozen_and_rejects_field_mutation():
     제자리 수정하려 하면 즉시 막혀야 한다(WORM 우회 방지)."""
     event = _event()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        event.action = "mandate_deactivated"  # type: ignore[misc]
+        cast(Any, event).action = "mandate_deactivated"
 
 
 def test_outcome_enum_rejects_unknown_value():
@@ -81,7 +82,7 @@ def test_compute_event_hash_rejects_outcome_missing_value_attribute():
             aggregate_type="mandate_revision",
             aggregate_id=uuid4(),
             action="mandate_activated",
-            outcome="SUCCESS",  # type: ignore[arg-type]  # Outcome이 아닌 평범한 str
+            outcome=cast(Any, "SUCCESS"),  # Outcome이 아닌 평범한 str
             payload_hash="deadbeef",
             classification=Classification.INTERNAL,
             occurred_at=NOW,
