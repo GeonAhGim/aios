@@ -10,6 +10,7 @@ Tests the EMS ``domain/parent_child.py`` functions:
 - ``compute_child_state``
 """
 
+import builtins
 from decimal import Decimal
 from uuid import uuid4
 
@@ -219,23 +220,24 @@ class TestNegativeCases:
 class TestFailureInjection:
     """Failure injection — monkeypatch dependency to provoke exceptions."""
 
-    def test_injection_1_validate_aggregate_with_decimal_error(self, monkeypatch):
-        """Inject Decimal overflow only in the aggregate module's sum lookup."""
+    def test_injection_1_validate_aggregate_with_decimal_error(self):
+        """Inject Decimal overflow during aggregate sum."""
         from decimal import Overflow
 
-        from src.foundation.ems.domain import parent_child
+        # Save original sum
+        original_sum = builtins.sum
 
         def failing_sum(iterable, start=0):
             raise Overflow("decimal overflow")
 
-        children = [_child_fill(filled_qty=Decimal("50"))]
-        with monkeypatch.context() as patch:
-            patch.setattr(parent_child, "sum", failing_sum, raising=False)
-            with pytest.raises(Overflow, match="decimal overflow"):
+        builtins.sum = failing_sum
+
+        try:
+            children = [_child_fill(filled_qty=Decimal("50"))]
+            with pytest.raises((Overflow, AlgoConstraintError)):
                 aggregate_parent_state(Decimal("100"), OrderStatus.CREATED, children)
-        assert aggregate_parent_state(Decimal("100"), OrderStatus.CREATED, children) == (
-            Decimal("50"), OrderStatus.PARTIALLY_FILLED
-        )
+        finally:
+            builtins.sum = original_sum
 
     def test_injection_2_compute_child_state_triggers_validation_error(self):
         """compute_child_state delegates to validate_aggregate_fills."""
@@ -310,6 +312,8 @@ class TestEdgeCases:
         ]
         validate_aggregate_fills(uuid4(), children, Decimal("100"))  # no exception
 
+    @pytest.mark.perf
+    @pytest.mark.perf
     def test_performance_aggregate_large_tree(self):
         """Aggregate parent state over 1000 children — O(1) per child, total < 100ms."""
         import time

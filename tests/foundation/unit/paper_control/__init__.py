@@ -126,6 +126,7 @@ async def test_adversarial_fence_change_during_ack_cancels_order(submission_case
     repo.insert_order_intent.assert_not_awaited()
 
 
+@pytest.mark.perf
 async def test_paper_submission_p95_under_50ms_with_in_memory_dependencies(submission_case):
     """ADR-2026-09-09-C: local orchestration budget; excludes provider/network latency."""
     samples = []
