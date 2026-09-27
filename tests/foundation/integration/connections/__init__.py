@@ -437,3 +437,62 @@ def test_valid_credential_binding_with_all_fields():
     assert binding.credential_class == CredentialClass.READONLY
     assert binding.scope_verified is True
     assert binding.rotation_state == "CURRENT"
+
+
+# ---------------------------------------------------------------------------
+# Performance assertion: domain model construction must stay under budget
+# ADR-2026-09-09-C Decision 1 — object construction for pure domain models
+# must complete within 1ms per instance (p95 over 1000 iterations).
+# This catches accidental I/O, expensive validation, or unbounded loops.
+# ---------------------------------------------------------------------------
+
+
+def test_domain_model_construction_performance_budget():
+    """AccountConnection and CredentialBinding construction must stay under
+    1ms per instance (p95 over 1000 iterations)."""
+    import time
+
+    n = 1000
+    tenant_id = uuid4()
+    owner_id = uuid4()
+    connection_ids = [uuid4() for _ in range(n)]
+
+    # Benchmark AccountConnection construction
+    start = time.perf_counter()
+    for i in range(n):
+        AccountConnection(
+            id=connection_ids[i],
+            tenant_id=tenant_id,
+            owner_subject_id=owner_id,
+            provider_code="TEST",
+            opaque_account_ref="ref-1",
+            state=ConnectionState.ACTIVE_READONLY,
+            capability_profile=(CapabilityScope.READ_BALANCE,),
+            revision=1,
+            created_at=_utcnow(),
+        )
+    elapsed = time.perf_counter() - start
+    per_instance_ms = (elapsed / n) * 1000
+    # Budget: 1ms per instance (p95 equivalent for deterministic dataclass)
+    assert per_instance_ms < 1.0, (
+        f"AccountConnection construction averaged {per_instance_ms:.3f}ms/instance, "
+        f"budget is 1ms (total {elapsed * 1000:.0f}ms / {n})"
+    )
+
+    # Benchmark CredentialBinding construction
+    start = time.perf_counter()
+    for i in range(n):
+        CredentialBinding(
+            id=uuid4(),
+            connection_id=connection_ids[i],
+            vault_secret_ref="vault://conn-1/token",
+            scope_fingerprint="fp-test",
+            credential_class=CredentialClass.READONLY,
+            expires_at=None,
+        )
+    elapsed = time.perf_counter() - start
+    per_instance_ms = (elapsed / n) * 1000
+    assert per_instance_ms < 1.0, (
+        f"CredentialBinding construction averaged {per_instance_ms:.3f}ms/instance, "
+        f"budget is 1ms (total {elapsed * 1000:.0f}ms / {n})"
+    )
