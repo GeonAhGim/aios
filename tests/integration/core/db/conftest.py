@@ -12,7 +12,9 @@ tests/adversarial/ledger/test_role_bypass.py·test_db_roles.py와 동일하게,
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
 import asyncpg
@@ -47,6 +49,10 @@ class AppRoleTx:
         tenant_id: UUID | None = None,
         system: bool = False,
     ) -> None:
+        if tenant_id is not None and not isinstance(tenant_id, UUID):
+            raise TypeError("tenant_id must be UUID or None")
+        if not isinstance(system, bool):
+            raise TypeError("system must be bool")
         self._conn = conn
         self._tenant_id = tenant_id
         self._system = system
@@ -54,14 +60,86 @@ class AppRoleTx:
 
     async def __aenter__(self) -> asyncpg.Connection:
         await self._tx.start()
-        await self._conn.execute("SET ROLE aios_app")
-        await self._conn.execute(
-            "SELECT set_config('app.tenant_id', $1, true)",
-            "" if self._tenant_id is None else str(self._tenant_id),
-        )
-        if self._system:
-            await self._conn.execute("SELECT set_config('app.role', 'system', true)")
+        try:
+            await self._conn.execute("SET ROLE aios_app")
+            await self._conn.execute(
+                "SELECT set_config('app.tenant_id', $1, true)",
+                "" if self._tenant_id is None else str(self._tenant_id),
+            )
+            if self._system:
+                await self._conn.execute("SELECT set_config('app.role', 'system', true)")
+        except BaseException:
+            # __aexit__ is not called when entry fails, including cancellation.
+            await self._tx.rollback()
+            raise
         return self._conn
 
     async def __aexit__(self, *exc_info: object) -> None:
         await self._tx.rollback()
+
+
+class TestAppRoleTx:
+    """task-8441: fixture isolation and fail-closed regression tests (PLT-30)."""
+
+    @staticmethod
+    def connection():
+        tx = Mock(start=AsyncMock(), rollback=AsyncMock(), commit=AsyncMock())
+        return Mock(transaction=Mock(return_value=tx), execute=AsyncMock()), tx
+
+    @pytest.mark.parametrize("tenant_id", ["not-a-uuid", "'; SET ROLE postgres; --", 42])
+    def test_negative_invalid_tenant_rejected_before_transaction(self, tenant_id):
+        conn, _ = self.connection()
+        with pytest.raises(TypeError, match="tenant_id"):
+            AppRoleTx(conn, tenant_id=tenant_id)
+        conn.transaction.assert_not_called()
+        conn.execute.assert_not_called()
+
+    @pytest.mark.parametrize("system", ["false", 1, None])
+    def test_negative_non_boolean_system_rejected(self, system):
+        conn, _ = self.connection()
+        with pytest.raises(TypeError, match="system"):
+            AppRoleTx(conn, system=system)
+        conn.transaction.assert_not_called()
+
+    @pytest.mark.parametrize("step", [0, 1, 2])
+    @pytest.mark.parametrize("cancelled", [False, True])
+    async def test_failure_injection_setup_rolls_back(self, monkeypatch, step, cancelled):
+        conn, tx = self.connection()
+        error = asyncio.CancelledError() if cancelled else RuntimeError("injected setup failure")
+        execute = AsyncMock(side_effect=[None] * step + [error])
+        monkeypatch.setattr(conn, "execute", execute)
+        entered = False
+        with pytest.raises(type(error)) as caught:
+            async with AppRoleTx(conn, system=True):
+                entered = True
+        assert caught.value is error
+        assert not entered
+        assert execute.await_count == step + 1
+        tx.start.assert_awaited_once_with()
+        tx.rollback.assert_awaited_once_with()
+        tx.commit.assert_not_called()
+
+    @pytest.mark.parametrize("fail_body", [False, True])
+    async def test_exit_always_rolls_back(self, fail_body):
+        conn, tx = self.connection()
+        tenant = UUID("00000000-0000-0000-0000-000000000001")
+        error = RuntimeError("injected body failure")
+        try:
+            async with AppRoleTx(conn, tenant_id=tenant) as active:
+                assert active is conn
+                if fail_body:
+                    raise error
+        except RuntimeError as caught:
+            assert fail_body and caught is error
+        conn.execute.assert_any_await("SET ROLE aios_app")
+        conn.execute.assert_any_await("SELECT set_config('app.tenant_id', $1, true)", str(tenant))
+        tx.rollback.assert_awaited_once_with()
+        tx.commit.assert_not_called()
+
+    async def test_missing_tenant_binds_empty_scope(self):
+        conn, tx = self.connection()
+        async with AppRoleTx(conn):
+            pass
+        conn.execute.assert_any_await("SELECT set_config('app.tenant_id', $1, true)", "")
+        assert conn.execute.await_count == 2
+        tx.rollback.assert_awaited_once_with()
