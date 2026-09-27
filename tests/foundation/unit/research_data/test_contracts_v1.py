@@ -140,3 +140,64 @@ def test_research_item_construction_hot_path_performance() -> None:
     elapsed = perf_counter() - started
 
     assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
+
+
+@pytest.mark.parametrize("field", ["known_at", "item_id", "revision_of"])
+def test_negative_invalid_item_fields_rejected(field: str) -> None:
+    payload = _sample_item().model_dump(mode="json")
+    payload[field] = "invalid-contract-value"
+    with pytest.raises(ValidationError) as caught:
+        v1.ResearchItem.model_validate(payload)
+    assert [error["loc"] for error in caught.value.errors()] == [(field,)]
+
+
+@pytest.mark.parametrize(
+    ("model", "field"),
+    [
+        ("ResearchItem", "known_at"),
+        ("ResearchItem", "revision_of"),
+        ("SourceMeta", "redistribution"),
+    ],
+)
+def test_negative_snapshot_field_removal_triggers_red_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    field: str,
+) -> None:
+    original = FIXTURE.read_text(encoding="utf-8")
+    corrupted = json.loads(original)
+    del corrupted[model]["properties"][field]
+    original_read = Path.read_text
+
+    def read_corrupted(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == FIXTURE:
+            return json.dumps(corrupted)
+        return original_read(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", read_corrupted)
+        with pytest.raises(AssertionError):
+            test_schema_snapshot_matches_fixture()
+    test_schema_snapshot_matches_fixture()
+
+
+def test_failure_injection_snapshot_read_error_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = OSError("injected snapshot read failure")
+    original_read = Path.read_text
+    calls = []
+
+    def fail_read(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == FIXTURE:
+            calls.append(path)
+            raise failure
+        return original_read(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_text", fail_read)
+        with pytest.raises(OSError) as caught:
+            test_schema_snapshot_matches_fixture()
+        assert caught.value is failure
+        assert calls == [FIXTURE]
+    test_schema_snapshot_matches_fixture()
