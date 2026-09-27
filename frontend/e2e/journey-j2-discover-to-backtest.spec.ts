@@ -77,13 +77,21 @@ async function mockScriptCompile(page: Page, override?: { status: number; body: 
 test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크립트→즉시 백테스트→결과 해석", () => {
   test("1단계 스크리너 실행 실패를 표시한다", async ({ page }) => {
     await mockBackend(page);
-    await page.route(`${API_BASE}/v1/foundation/screener/run`, (route) => json(route, 500, { error_code: "INTERNAL_ERROR", message: "screener failed", trace_id: "screener-500" }));
+    let runCalls = 0;
+    await page.route(`${API_BASE}/v1/foundation/screener/run`, (route) => {
+      runCalls += 1;
+      expect(route.request().method()).toBe("POST");
+      return json(route, 500, { error_code: "INTERNAL_ERROR", message: "screener failed", trace_id: "screener-500" });
+    });
     await page.goto("/screener");
     await page.getByTestId("screener-universe").fill("KRX");
     await page.getByTestId("screener-filter-0-field").fill("rsi_14");
     await page.getByTestId("screener-filter-0-value").fill("30");
     await page.getByTestId("screener-run").click();
     await expect(page.getByText("지원코드: screener-500")).toBeVisible();
+    expect(runCalls).toBeGreaterThan(0);
+    await expect(page.getByTestId(/^screener-row-/)).toHaveCount(0);
+    await expect(page.getByText("screener failed", { exact: true })).toHaveCount(0);
   });
 
   test("1→2단계 스크리너 결과 행을 클릭하면 /chart로 이동한다", async ({ page }) => {
@@ -128,18 +136,24 @@ test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크�
     page,
   }) => {
     await mockBackend(page);
+    await mockStrategyBuilder(page);
     let createCalled = false;
     await page.route(`${API_BASE}/strategy-builder/strategies`, (route) => {
       createCalled = true;
       return json(route, 200, { strategy_id: "should-not-be-called", version: "1.0.0", status: "draft" });
     });
-    await mockStrategyBuilder(page);
     await page.goto("/strategy-builder");
 
     await page.getByRole("button", { name: "전략 저장" }).click();
 
     await expect(page.getByText("전략 ID를 입력해주세요.")).toBeVisible();
     expect(createCalled).toBe(false);
+
+    // Prove that the observer intercepts a valid save instead of being shadowed.
+    await page.getByPlaceholder("my-rsi-strategy").fill("e2e-observer-control");
+    await page.getByRole("button", { name: "전략 저장" }).click();
+    await expect(page.getByText(/전략이 저장됐습니다/)).toBeVisible();
+    expect(createCalled).toBe(true);
   });
 
   test("5단계 스크립트 편집기에서 컴파일 결과를 확인한다", async ({ page }) => {
