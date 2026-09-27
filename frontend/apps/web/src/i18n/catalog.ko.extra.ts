@@ -3,6 +3,14 @@
 // 네임스페이스를 분리했다 -- catalog.ko.legacyA..D와 동일한 분할 관용, 내용은
 // 이동만 했을 뿐 변경 없음.
 export const catalogKoExtra = {
+  sweepPanel: {
+    grid: "파라미터 그리드 (JSON)",
+    help: '스크립트의 정수 input 이름과 값 배열을 입력하세요. 예: {"length":[7,14,21]}. 최대 2개 축, 64개 조합입니다.',
+    lineage: "데이터 이력 해시",
+    rollup: "데이터 집계 버전",
+    run: "파라미터 스윕 실행",
+    invalid: "그리드와 데이터 이력 정보를 확인하세요. 중복 없는 정수 값과 스크립트에 선언된 input 이름이 필요합니다.",
+  },
   executionAlgoPage: {
     pageTitle: "알고리즘 집행 진행률",
     missingOrderId: "주문 ID가 없습니다.",

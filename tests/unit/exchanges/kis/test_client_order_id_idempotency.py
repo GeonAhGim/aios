@@ -11,7 +11,8 @@ Spec: docs/audits/AUDIT_2026-09-26_order_path.md F6/§1.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+import asyncio
+from collections.abc import Awaitable, Callable, Generator
 from decimal import Decimal
 
 import httpx
@@ -19,14 +20,38 @@ import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderType
+from src.exchanges.common.adapter import UnsupportedCapabilityError
 from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.trading_mixin import ClientOrderIdNotMappedError
+from src.services.oms.application.dispatch_outcome import OutcomeKind
+from src.services.oms.application.outbox_submit import call_submit
+from src.services.oms.domain.symbol_registry import SymbolRegistry
 
 _TOKEN_PATH = "/oauth2/tokenP"
 _TOKEN_RESPONSE = {"access_token": "t", "access_token_token_expired": "2099-01-01 00:00:00"}
 _ORDER_CASH_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 _DAILY_CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+
+
+def _verified_registry() -> SymbolRegistry:
+    """task-8337 -- the production 005930.KS snapshot is `verified=False`
+    (see test_trading_mixin_precheck.py); this file's concern is
+    client_order_id correlation, not tick/lot verification-gating, so it
+    needs an explicit `verified=True` test double to reach `place_order()`'s
+    HTTP call at all."""
+    registry = SymbolRegistry()
+    registry.register(
+        "005930.KS",
+        "kis",
+        "005930",
+        tick=Decimal("100"),
+        lot=Decimal("1"),
+        min_notional=Decimal("0"),
+        quote_ccy="KRW",
+        verified=True,
+    )
+    return registry
 
 
 @pytest.fixture(autouse=True)
@@ -112,6 +137,7 @@ async def test_place_order_retry_returns_existing_odno_without_resubmitting() ->
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
     order = _order(client_order_id="retry-1")
 
     first = await adapter.place_order(order)
@@ -146,6 +172,7 @@ async def test_resolve_client_order_id_raises_for_different_id_after_a_real_subm
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
     await adapter.place_order(_order(client_order_id="c-1"))
 
     with pytest.raises(ClientOrderIdNotMappedError) as exc_info:
@@ -161,6 +188,7 @@ async def test_place_order_with_empty_client_order_id_never_dedupes() -> None:
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
     order = _order(client_order_id="")
 
     await adapter.place_order(order)
@@ -180,6 +208,7 @@ async def test_different_client_order_ids_map_to_distinct_entries_both_submitted
     order_calls: list[httpx.Request] = []
     ccld_calls: list[httpx.Request] = []
     adapter = _make_adapter(_handler(order_calls, ccld_calls, orgno="01234", odno="0000001"))
+    adapter.symbol_registry = _verified_registry
 
     await adapter.place_order(_order(client_order_id="c-1"))
     await adapter.place_order(_order(client_order_id="c-2"))
@@ -187,3 +216,143 @@ async def test_different_client_order_ids_map_to_distinct_entries_both_submitted
     assert len(order_calls) == 2  # 서로 다른 id는 재시도로 취급되지 않는다
     assert adapter.resolve_client_order_id("c-1") == "01234:0000001"
     assert adapter.resolve_client_order_id("c-2") == "01234:0000001"
+
+
+# ---------------------------------------------------------------------------
+# task-8338(review task-8184 REJECT follow-up) -- find_order_by_client_id
+# wiring: a never-seen id still fail-closed raises (F5-b, supports_client_
+# order_id=False unchanged); a previously-submitted id resolves via the map.
+# ---------------------------------------------------------------------------
+
+
+async def test_find_order_by_client_id_raises_for_unmapped_id() -> None:
+    order_calls: list[httpx.Request] = []
+    ccld_calls: list[httpx.Request] = []
+    adapter = _make_adapter(_handler(order_calls, ccld_calls))
+
+    with pytest.raises(UnsupportedCapabilityError):
+        await adapter.find_order_by_client_id("never-seen")
+
+
+async def test_find_order_by_client_id_resolves_a_previously_submitted_id() -> None:
+    order_calls: list[httpx.Request] = []
+    ccld_calls: list[httpx.Request] = []
+    adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
+    submitted = await adapter.place_order(_order(client_order_id="c-1"))
+
+    found = await adapter.find_order_by_client_id("c-1")
+
+    assert found is not None
+    assert found.exchange_order_id == submitted.exchange_order_id
+    assert len(order_calls) == 1  # 조회만 했다 -- 재제출 아님
+
+
+# ---------------------------------------------------------------------------
+# task-8338(review task-8184 REJECT follow-up) DoD 1 -- the actual outbox
+# reclaim/retry path (outbox_submit.call_submit) now really dedupes, not
+# just place_order() called directly.
+# ---------------------------------------------------------------------------
+
+
+async def test_call_submit_reclaim_retry_adopts_existing_order_without_resubmitting() -> None:
+    """First dispatch (verify_first=False, fresh VALIDATED->SUBMITTED order)
+    calls place_order(). A reclaimed retry of the same outbox row
+    (verify_first=True, per outbox_dispatcher._send_submit) must resolve via
+    `find_order_by_client_id` and adopt the existing order -- *not* silently
+    fall through to UNKNOWN("RESEND_UNVERIFIABLE") without ever reaching the
+    dedup map (review task-8184 finding)."""
+    order_calls: list[httpx.Request] = []
+    ccld_calls: list[httpx.Request] = []
+    adapter = _make_adapter(_handler(order_calls, ccld_calls))
+    adapter.symbol_registry = _verified_registry
+    order = _order(client_order_id="reclaim-1")
+
+    first_outcome = await call_submit(adapter, order, verify_first=False)
+    assert first_outcome.kind is OutcomeKind.ACK
+    assert len(order_calls) == 1
+
+    second_outcome = await call_submit(adapter, order, verify_first=True)
+
+    assert second_outcome.kind is OutcomeKind.ACK
+    assert second_outcome.reason == "RESEND_ADOPTED"
+    assert second_outcome.exchange_order_id == first_outcome.exchange_order_id
+    assert len(order_calls) == 1  # 재조회로 해소 -- order-cash로 재전송하지 않았다
+    assert len(ccld_calls) == 1  # 대신 정확히 한 번 조회했다
+
+
+# ---------------------------------------------------------------------------
+# task-8338(review task-8184 REJECT follow-up) DoD 2 -- concurrent retries of
+# the same client_order_id must not both reach the exchange (TOCTOU fix).
+# ---------------------------------------------------------------------------
+
+
+def _blocking_handler(
+    order_calls: list[httpx.Request],
+    ccld_calls: list[httpx.Request],
+    *,
+    entered: asyncio.Event,
+    release: asyncio.Event,
+    orgno: str = "01234",
+    odno: str = "0000001",
+) -> Callable[[httpx.Request], Awaitable[httpx.Response]]:
+    """order-cash 응답을 `release`가 set될 때까지 보류해, 두 place_order()
+    호출이 실제로 동시에 in-flight인 구간을 만든다."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == _TOKEN_PATH:
+            return httpx.Response(200, json=_TOKEN_RESPONSE)
+        if request.url.path == _ORDER_CASH_PATH:
+            order_calls.append(request)
+            entered.set()
+            await release.wait()
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg1": "ok",
+                    "output": {"KRX_FWDG_ORD_ORGNO": orgno, "ODNO": odno},
+                },
+            )
+        assert request.url.path == _DAILY_CCLD_PATH
+        ccld_calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "rt_cd": "0",
+                "output1": [
+                    {
+                        "pdno": "005930",
+                        "sll_buy_dvsn_cd": "02",
+                        "ord_qty": "10",
+                        "tot_ccld_qty": "0",
+                    }
+                ],
+            },
+        )
+
+    return handler
+
+
+async def test_concurrent_retries_with_same_client_order_id_do_not_double_submit() -> None:
+    order_calls: list[httpx.Request] = []
+    ccld_calls: list[httpx.Request] = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    adapter = _make_adapter(
+        _blocking_handler(order_calls, ccld_calls, entered=entered, release=release)
+    )
+    adapter.symbol_registry = _verified_registry
+    order = _order(client_order_id="concurrent-1")
+
+    task1 = asyncio.create_task(adapter.place_order(order))
+    await entered.wait()  # task1이 지금 order-cash 안에서 블록돼 있다
+    task2 = asyncio.create_task(adapter.place_order(order))
+    await asyncio.sleep(0.05)  # task2가 락 대기 상태로 들어갈 시간을 준다
+    release.set()
+
+    first, second = await asyncio.gather(task1, task2)
+
+    assert len(order_calls) == 1  # 락이 두 번째 진입의 재제출을 막았다
+    assert first.exchange_order_id == "01234:0000001"
+    assert second.exchange_order_id == first.exchange_order_id

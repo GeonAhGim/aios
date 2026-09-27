@@ -7,6 +7,7 @@ fail-closed 거부돼야 한다(Bitget _to_bitget_symbol 선례와 동일 계약
 from __future__ import annotations
 
 import json
+import time
 from decimal import Decimal
 
 import httpx
@@ -15,11 +16,33 @@ import pytest
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.kis.adapter import KISAdapter
+from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.domain.reference.symbol_normalizer import (
     SymbolNormalizationError,
+    to_venue,
 )
+from src.services.oms.domain.symbol_registry import SymbolRegistry
 
 _ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
+
+
+def _verified_registry() -> SymbolRegistry:
+    """task-8337 -- the production 005930.KS snapshot is `verified=False`
+    (see test_trading_mixin_precheck.py); this file's concern is symbol
+    format normalization, not tick/lot verification-gating, so it needs an
+    explicit `verified=True` test double to reach the exchange call."""
+    registry = SymbolRegistry()
+    registry.register(
+        "005930.KS",
+        "kis",
+        "005930",
+        tick=Decimal("100"),
+        lot=Decimal("1"),
+        min_notional=Decimal("0"),
+        quote_ccy="KRW",
+        verified=True,
+    )
+    return registry
 
 
 def _make_paper_adapter(captured: list[httpx.Request]) -> KISAdapter:
@@ -58,6 +81,7 @@ async def test_place_order_accepts_valid_krx_code():
     """회귀 없음 — 정상 6자리 KRX 코드는 그대로 통과하고 PDNO에 실린다."""
     captured: list[httpx.Request] = []
     adapter = _make_paper_adapter(captured)
+    adapter.symbol_registry = _verified_registry
 
     order = await adapter.place_order(_stock_order(symbol="005930"))
 
@@ -92,3 +116,19 @@ async def test_place_order_rejects_lowercase_code() -> None:
         await adapter.place_order(_stock_order(symbol="00593a"))
 
     assert captured == []
+
+
+@pytest.mark.perf
+def test_krx_symbol_validation_meets_pretrade_gate_budget() -> None:
+    """성능 단언(D2) — ADR-2026-09-09-C Decision 1의 사전거래 게이트 예산은
+    p99 5ms. `to_venue(KIS_KRX, ...)`는 place_order()가 PDNO 조립 전에 매
+    주문마다 거치는 사전거래 게이트이므로 그 예산 안에 들어야 한다."""
+    samples: list[float] = []
+    for _ in range(200):
+        start = time.perf_counter()
+        to_venue(Venue.KIS_KRX, "005930")
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p99 = samples[int(len(samples) * 0.99) - 1]
+    assert p99 < 0.005

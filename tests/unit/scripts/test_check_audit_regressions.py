@@ -18,6 +18,8 @@ from types import ModuleType
 
 import pytest
 
+from tests.conftest import PerfBudget
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -205,9 +207,21 @@ def test_current_repository_has_zero_duplicate_idempotency_scope_type_names() ->
 
 
 @pytest.mark.perf
-def test_check_ledger_balance_raw_seed_completes_within_time_budget(tmp_path, monkeypatch) -> None:
+def test_check_ledger_balance_raw_seed_completes_within_time_budget(
+    tmp_path, monkeypatch, perf_budget: PerfBudget
+) -> None:
     """성능단언: 대규모 저장소(수천 개 테스트 파일)에서도 raw seed 스캔이 예산
-    내에 끝나는지, 그리고 그 규모 속에서도 유일한 위반을 정확히 찾는지 확인한다."""
+    내에 끝나는지, 그리고 그 규모 속에서도 유일한 위반을 정확히 찾는지 확인한다.
+
+    task-8356(esc-ci-pytest_perf) — 이전에는 `time.perf_counter()` wall-clock으로
+    500개 파일을 실제로 디스크에 써 놓고 그 디스크 I/O까지 포함해 재는 형태였다.
+    스캔 자체(`check_ledger_balance_raw_seed`)는 0.5~1.1s로 예산 안에 여유 있게
+    들지만, Windows 디스크 I/O(백신 스캔 등)가 끼어들면 같은 5.0s 예산을 넘겨
+    `pytest_perf` 게이트가 간헐적으로 적색이 됐다(task-6774/7253이 이미 다른
+    perf 테스트에서 고친 것과 같은 근본 원인). `perf_budget`(process_time 기반,
+    tests/conftest.py `PerfBudget`)으로 재는 대상을 스캔 함수 호출 자체로
+    좁혀 디스크 I/O 대기시간이 계측에 섞이지 않게 한다 — 예산 수치(5.0s)는
+    그대로 유지."""
     monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
     generated_dir = tmp_path / "tests" / "generated"
     for i in range(500):
@@ -231,13 +245,15 @@ def test_check_ledger_balance_raw_seed_completes_within_time_budget(tmp_path, mo
         len(list(generated_dir.rglob("*.py"))) > 300
     )  # 벤치마크가 무의미해지지 않도록 규모를 보장
 
-    start = time.perf_counter()
+    perf_budget.assert_within(
+        check_audit_regressions.check_ledger_balance_raw_seed,
+        budget_ms=5000.0,
+        label="raw seed 스캔(500+ 파일)",
+    )
     finding = check_audit_regressions.check_ledger_balance_raw_seed()
-    elapsed = time.perf_counter() - start
 
     assert finding is not None
     assert any("conftest.py" in e for e in finding.evidence)
-    assert elapsed < 5.0, f"raw seed 스캔이 {elapsed:.3f}s — 예산(5.0s) 초과"
 
 
 def _marker_check():

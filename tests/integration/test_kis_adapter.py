@@ -13,6 +13,7 @@ import pytest
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass
 from src.exchanges.kis.adapter import KISAdapter
+from tests.support.kis_registry import verified_kr_equity_registry
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 
@@ -22,7 +23,13 @@ def _make_adapter(handler) -> KISAdapter:
     client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
-    return KISAdapter("app", "secret", "12345678", "01", is_paper_trading=True, http_client=client)
+    adapter = KISAdapter(
+        "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
+    )
+    # task-8337: production 005930.KS snapshot is verified=False and would stop
+    # place_order() before the HTTP call this module asserts on.
+    adapter.symbol_registry = verified_kr_equity_registry  # type: ignore[method-assign]
+    return adapter
 
 
 def _route(request: httpx.Request, routes: dict) -> httpx.Response:

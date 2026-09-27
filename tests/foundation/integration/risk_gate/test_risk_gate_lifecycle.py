@@ -45,7 +45,7 @@ from src.foundation.risk_gate.domain.models import GateKind, SafetyScope
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_tenant
-from tests.support.db import ensure_worker_database
+from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 
@@ -746,7 +746,7 @@ async def test_migration_round_trip_restores_gate_kinds_and_new_columns():
     (task-5783) -- never the shared session DB other tests and
     `scripts/replay_verify.py` depend on. An interrupted downgrade can only
     corrupt its own throwaway DB."""
-    migration_db_url = await ensure_worker_database(os.environ["DATABASE_URL"], "migrationrt_fnd06")
+    migration_db_url = await ensure_worker_database(template_database_url(), "migrationrt_fnd06")
     migration_pool = await asyncpg.create_pool(
         migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
         min_size=1,

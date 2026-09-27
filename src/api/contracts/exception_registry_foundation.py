@@ -20,6 +20,7 @@ from src.api.contracts.exception_registry_foundation_personal import (
     EXCEPTION_MAP_FOUNDATION_PERSONAL,
 )
 from src.api.contracts.exception_registry_foundation_research import EXCEPTION_MAP_RESEARCH
+from src.api.contracts.exception_registry_foundation_risk_coach import EXCEPTION_MAP_RISK_COACH
 from src.api.schemas.positions import InvalidCursorError
 from src.core.script.runtime.series import ScriptRuntimeError
 from src.foundation.backtest.application.quick_backtest import (
@@ -301,6 +302,8 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
     *EXCEPTION_MAP_FOUNDATION_PERSONAL,
     # task-2630 U-3a — assistant.py, split out (P6.line_cap).
     *EXCEPTION_MAP_AI_ASSISTANT,
+    # task-8105 U-8 — risk_coach.py, split out (P6.line_cap).
+    *EXCEPTION_MAP_RISK_COACH,
     # UX-8(task-7773) — screener.py `/v1/foundation/screener/run`. Bad universe/
     # cursor/page_size and an unsupported/uncompilable filter condition are all
     # transport-shape problems the client can fix, so they fold into the same

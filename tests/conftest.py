@@ -28,6 +28,9 @@ from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.rate_limit.limiter import UnlimitedRateLimiter, set_limiter
 from tests.support.db import TEMPLATE_DATABASE_URL_ENV, ensure_worker_database
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
+from tests.support.talib_cache import (
+    reset_talib_metadata_cache as reset_talib_metadata_cache,  # noqa: F401 -- re-exported fixture
+)
 
 try:
     import psutil

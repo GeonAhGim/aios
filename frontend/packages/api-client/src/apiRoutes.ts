@@ -454,8 +454,8 @@ export const API_ROUTES = defineApiRoutes({
   // ResearchDataRouteNotImplementedError(typed)로 단락한다. v1Path는 마운트
   // 경로 확정 전이라 null. apiPaths.openapi.test.ts GHOST_PATH_WHITELIST에도
   // 함께 추가할 것.
-  "researchData.search": route("/v1/foundation/research-data/search", true, null, false),
-  "researchData.sources.list": route("/v1/foundation/research-data/sources", true, null, false),
+  "researchData.search": route("/v1/foundation/research-data/search", true, null, true),
+  "researchData.sources.list": route("/v1/foundation/research-data/sources", true, null, true),
 
   // task-5998(SIG-6): SignalSourcesPage.tsx(시크릿 발급·회전·최근 수신 로그)는 spec
   // L4_analytics_authoring_backtest_marketplace_v1.0.md §9.1(source line 264)이

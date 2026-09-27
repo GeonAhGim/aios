@@ -29,9 +29,34 @@ from src.exchanges.kis import rate_profile
 from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.order_dispatch import dispatch_place_order
 from src.services.oms.domain.errors import OrderValidationError
+from src.services.oms.domain.symbol_registry import SymbolRegistry
 
 _TOKEN_PATH = "/oauth2/tokenP"
 _TOKEN_RESPONSE = {"access_token": "t", "access_token_token_expired": "2099-01-01 00:00:00"}
+
+
+def _verified_registry(
+    *,
+    tick: Decimal = Decimal("100"),
+    lot: Decimal = Decimal("1"),
+    min_notional: Decimal = Decimal("0"),
+) -> SymbolRegistry:
+    """task-8337 -- the production 005930.KS snapshot is `verified=False`
+    (see test_trading_mixin_precheck.py), so exercising the tick/lot/
+    min_notional decision logic itself (this file's concern, not
+    verification-gating) needs an explicit `verified=True` test double."""
+    registry = SymbolRegistry()
+    registry.register(
+        "005930.KS",
+        "kis",
+        "005930",
+        tick=tick,
+        lot=lot,
+        min_notional=min_notional,
+        quote_ccy="KRW",
+        verified=True,
+    )
+    return registry
 
 
 @pytest.fixture(autouse=True)
@@ -94,6 +119,7 @@ def _order_cash_handler(calls: list[httpx.Request]) -> Callable[[httpx.Request],
 async def test_dispatch_rejects_tick_misaligned_price_without_calling_exchange() -> None:
     calls: list[httpx.Request] = []
     adapter = _make_adapter(_order_cash_handler(calls))
+    adapter.symbol_registry = _verified_registry
     order = _order(price=Decimal("70050"), quantity=Decimal("10"))  # tick=100 배수 아님
 
     with pytest.raises(OrderValidationError) as exc_info:
@@ -106,6 +132,7 @@ async def test_dispatch_rejects_tick_misaligned_price_without_calling_exchange()
 async def test_dispatch_rejects_lot_misaligned_quantity_without_calling_exchange() -> None:
     calls: list[httpx.Request] = []
     adapter = _make_adapter(_order_cash_handler(calls))
+    adapter.symbol_registry = _verified_registry
     order = _order(price=Decimal("70000"), quantity=Decimal("1.5"))  # lot=1 배수 아님
 
     with pytest.raises(OrderValidationError) as exc_info:
@@ -118,11 +145,7 @@ async def test_dispatch_rejects_lot_misaligned_quantity_without_calling_exchange
 async def test_dispatch_rejects_below_min_notional_without_calling_exchange() -> None:
     calls: list[httpx.Request] = []
     adapter = _make_adapter(_order_cash_handler(calls))
-    original_profile = adapter.venue_profile()
-    patched_profile = original_profile.model_copy(
-        update={"min_notional": {"005930.KS": Decimal("1000000")}}
-    )
-    adapter.venue_profile = lambda: patched_profile
+    adapter.symbol_registry = lambda: _verified_registry(min_notional=Decimal("1000000"))
     order = _order(price=Decimal("70000"), quantity=Decimal("1"))  # notional=70000 < 1,000,000
 
     with pytest.raises(OrderValidationError) as exc_info:
@@ -161,6 +184,7 @@ async def test_dispatch_precheck_failure_does_not_return_a_submitted_order() -> 
 async def test_dispatch_accepts_aligned_order_and_calls_exchange() -> None:
     calls: list[httpx.Request] = []
     adapter = _make_adapter(_order_cash_handler(calls))
+    adapter.symbol_registry = _verified_registry
     order = _order(price=Decimal("70000"), quantity=Decimal("10"))
 
     result = await dispatch_place_order(adapter, order)

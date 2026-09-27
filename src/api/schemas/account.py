@@ -1,4 +1,5 @@
 """11.4/11.5/11.6 — 승인설정/화이트리스트/탈퇴 API 요청·응답 스키마."""
+
 from __future__ import annotations
 
 from datetime import datetime
