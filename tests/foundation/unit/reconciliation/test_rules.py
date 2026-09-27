@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal, InvalidOperation, localcontext
-from time import perf_counter
 from typing import cast
 from unittest.mock import Mock
 
@@ -16,6 +15,7 @@ from src.foundation.reconciliation.domain.rules import (
     classify_item,
     compute_input_hash,
 )
+from tests.conftest import PerfBudget
 
 _POLICY = MaterialityPolicy(
     absolute_tolerance=Decimal("0.01"), relative_tolerance_pct=Decimal("0.1")
@@ -209,13 +209,18 @@ def test_adversarial_material_mismatch_cannot_be_diluted_by_healthy_items():
     assert aggregate_classification(items) == Classification.MATERIAL_MISMATCH
 
 
-def test_classification_performance_p99_within_gate_budget():
-    """ADR-2026-09-09-C: this pure-rule portion stays within the 5ms gate budget."""
+def test_classification_performance_p99_within_gate_budget(perf_budget: PerfBudget) -> None:
+    """ADR-2026-09-09-C: this pure-rule portion stays within the 5ms gate budget.
+
+    Measured with `perf_budget` (process_time, task-7434 guard) rather than raw
+    `perf_counter()`: pure CPU rule evaluation, so wall-clock samples under xdist
+    core contention would measure the host, not this code.
+    """
     internal, provider = Decimal("100"), Decimal("99")
-    samples = []
-    for _ in range(200):
-        started = perf_counter()
-        result = aggregate_classification((classify_item(internal, provider, _POLICY),))
-        samples.append(perf_counter() - started)
-        assert result == Classification.MATERIAL_MISMATCH
-    assert sorted(samples)[197] < 0.005
+
+    def classify_once() -> Classification:
+        return aggregate_classification((classify_item(internal, provider, _POLICY),))
+
+    samples = perf_budget.samples(classify_once, n=200)
+    assert all(s.result == Classification.MATERIAL_MISMATCH for s in samples)
+    assert sorted(s.cpu_ms for s in samples)[197] < 5.0
