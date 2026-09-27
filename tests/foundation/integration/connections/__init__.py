@@ -34,6 +34,7 @@ from src.foundation.connections.domain.models import (
     ProviderSnapshot,
     SnapshotValue,
 )
+from tests.conftest import PerfBudget
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -447,20 +448,25 @@ def test_valid_credential_binding_with_all_fields():
 # ---------------------------------------------------------------------------
 
 
-def test_domain_model_construction_performance_budget():
+def test_domain_model_construction_performance_budget(perf_budget: PerfBudget) -> None:
     """AccountConnection and CredentialBinding construction must stay under
-    1ms per instance (p95 over 1000 iterations)."""
-    import time
+    1ms per instance (1000 instances per batch).
 
+    Measured with `perf_budget` (process_time, task-7434 guard) instead of raw
+    `time.perf_counter()`: construction is pure CPU work, and wall-clock samples
+    under xdist core contention would measure the host, not this code.
+    """
     n = 1000
     tenant_id = uuid4()
     owner_id = uuid4()
     connection_ids = [uuid4() for _ in range(n)]
+    created_at = _utcnow()
+    cursor = {"i": 0}
 
-    # Benchmark AccountConnection construction
-    start = time.perf_counter()
-    for i in range(n):
-        AccountConnection(
+    def build_connection() -> AccountConnection:
+        i = cursor["i"] % n
+        cursor["i"] += 1
+        return AccountConnection(
             id=connection_ids[i],
             tenant_id=tenant_id,
             owner_subject_id=owner_id,
@@ -469,20 +475,13 @@ def test_domain_model_construction_performance_budget():
             state=ConnectionState.ACTIVE_READONLY,
             capability_profile=(CapabilityScope.READ_BALANCE,),
             revision=1,
-            created_at=_utcnow(),
+            created_at=created_at,
         )
-    elapsed = time.perf_counter() - start
-    per_instance_ms = (elapsed / n) * 1000
-    # Budget: 1ms per instance (p95 equivalent for deterministic dataclass)
-    assert per_instance_ms < 1.0, (
-        f"AccountConnection construction averaged {per_instance_ms:.3f}ms/instance, "
-        f"budget is 1ms (total {elapsed * 1000:.0f}ms / {n})"
-    )
 
-    # Benchmark CredentialBinding construction
-    start = time.perf_counter()
-    for i in range(n):
-        CredentialBinding(
+    def build_binding() -> CredentialBinding:
+        i = cursor["i"] % n
+        cursor["i"] += 1
+        return CredentialBinding(
             id=uuid4(),
             connection_id=connection_ids[i],
             vault_secret_ref="vault://conn-1/token",
@@ -490,9 +489,7 @@ def test_domain_model_construction_performance_budget():
             credential_class=CredentialClass.READONLY,
             expires_at=None,
         )
-    elapsed = time.perf_counter() - start
-    per_instance_ms = (elapsed / n) * 1000
-    assert per_instance_ms < 1.0, (
-        f"CredentialBinding construction averaged {per_instance_ms:.3f}ms/instance, "
-        f"budget is 1ms (total {elapsed * 1000:.0f}ms / {n})"
-    )
+
+    # Budget: 1ms per instance (cpu_ms is reported per call when batch=n)
+    perf_budget.assert_within(build_connection, budget_ms=1.0, batch=n, label="AccountConnection")
+    perf_budget.assert_within(build_binding, budget_ms=1.0, batch=n, label="CredentialBinding")
