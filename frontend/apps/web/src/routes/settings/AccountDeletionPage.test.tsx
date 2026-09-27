@@ -59,6 +59,22 @@ describe("AccountDeletionPage 화이트리스트 등록 에러 표시", () => {
     );
   });
 
+  it("negative: 미지 error_code의 서버 상세 메시지도 화면에 노출하지 않는다", async () => {
+    registerWhitelistMutateAsync.mockRejectedValue(
+      new ApiError(402, "internal whitelist detail", "trace-wl-unknown", "X_UNMAPPED_CODE"),
+    );
+    renderPage();
+
+    submitWhitelistForm();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요."),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("internal whitelist detail")).not.toBeInTheDocument();
+  });
+
   it("negative: AUTH_INVALID_CREDENTIALS(401)는 매핑된 안내 문구를 보여주고 서버 원문은 노출하지 않는다", async () => {
     registerWhitelistMutateAsync.mockRejectedValue(
       new ApiError(401, "raw server detail", "trace-wl-2", "AUTH_INVALID_CREDENTIALS"),
