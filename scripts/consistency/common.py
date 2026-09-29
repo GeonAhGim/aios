@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import ast
 import re
+from concurrent.futures import ThreadPoolExecutor
 from functools import cache
 from pathlib import Path
+
+_PRIME_MAX_WORKERS = 32
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BASELINE = ROOT / "consistency-baseline.json"
@@ -68,6 +71,25 @@ def _safe_parse(path: Path) -> ast.Module | None:
         return ast.parse(_read_text_cached(path), filename=str(path))
     except SyntaxError:
         return None
+
+
+def _prime_py_file_cache(root: Path, subdir: str) -> None:
+    """`subdir` 아래 모든 `.py` 파일을 스레드로 겹쳐 읽어 `_safe_parse`/
+    `_read_text_cached` 캐시를 미리 채운다.
+
+    blocking `open()`/`read()` 중에는 GIL이 풀리므로, 파일마다 순차로 열던
+    것을 스레드풀로 겹치면 Windows I/O 지연(파일당 관측된 dominant cost,
+    부하 시 편차가 큼)이 벽시계 시간에서 상당 부분 겹쳐진다(task-8949,
+    esc-ci-consistency의 120s 타임아웃 재발 완화). `_safe_parse`는 내부에서
+    `_read_text_cached`를 호출하므로 이거 하나만 미리 돌리면 두 캐시가 함께
+    채워진다. `functools.cache`는 실제 함수 호출을 락 밖에서 수행하므로 다른
+    인자에 대한 동시 호출은 참으로 겹쳐 실행된다.
+    """
+    paths = _iter_py_files(root, subdir)
+    if not paths:
+        return
+    with ThreadPoolExecutor(max_workers=_PRIME_MAX_WORKERS) as pool:
+        list(pool.map(_safe_parse, paths))
 
 
 def _ratchet_allow_reason(text: str) -> str | None:

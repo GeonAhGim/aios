@@ -605,6 +605,66 @@ def test_spec_leaf_passes_when_status_block_duplicates_unpadded_id(tmp_path: Pat
     assert cc.check_spec_leaf_traceability(tmp_path) == []
 
 
+def test_git_grep_leaf_candidate_lines_returns_none_outside_git_repo(tmp_path: Path) -> None:
+    # task-8949: `tmp_path`는 git 저장소가 아니다 -- `tests/`가 실존해야 git
+    # 호출까지 도달하고, 거기서 128(not a git repository)로 실패해야 한다.
+    # 그 실패는 spec_leaf_untraced가 조용히 삼켜 예전 rglob 경로로 후퇴한다
+    # (아래 fallback 테스트가 그 경로를 검증한다).
+    _write(tmp_path, "tests/test_z.py", "x = 1\n")
+    assert spec_trace._git_grep_leaf_candidate_lines(tmp_path, ("tests", "scripts")) is None
+
+
+def test_spec_leaf_falls_back_to_full_scan_when_git_grep_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # git grep이 실패해도(비-git 디렉터리, git 미설치 등) 결과가 달라지면 안
+    # 된다 -- fallback 경로가 여전히 tests/의 파일을 직접 읽어 참조를 찾는다.
+    monkeypatch.setattr(spec_trace, "_git_grep_leaf_candidate_lines", lambda root, subdirs: None)
+    _write(
+        tmp_path,
+        "docs/specs/L4_x_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| Z-99 | tests/test_z.py |\n",
+    )
+    _write(tmp_path, "tests/test_z.py", "# Z-99 회귀 테스트\nx = 1\n")
+    assert cc.check_spec_leaf_traceability(tmp_path) == []
+
+
+def test_spec_leaf_finds_reference_via_git_grep_in_tests_dir(tmp_path: Path) -> None:
+    # git-grep 경로 자체를 실제 git 저장소에서 검증한다 -- tmp_path가 git repo가
+    # 아니면 위 fallback 경로만 타므로, 이 테스트에서만 별도로 `git init`한다.
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _write(
+        tmp_path,
+        "docs/specs/L4_x_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| Z-99 | tests/test_z.py |\n",
+    )
+    _write(tmp_path, "tests/test_z.py", "# Z-99 회귀 테스트\nx = 1\n")
+    subprocess.run(["git", "add", "tests/test_z.py"], cwd=tmp_path, check=True)
+    lines = spec_trace._git_grep_leaf_candidate_lines(tmp_path, ("tests", "scripts"))
+    assert lines is not None
+    assert "Z-99" in lines
+    assert cc.check_spec_leaf_traceability(tmp_path) == []
+
+
+def test_spec_leaf_still_flags_untraced_id_with_real_git_repo(tmp_path: Path) -> None:
+    # git-grep 경로에서도 "아무 데도 없으면 미추적으로 남는다"는 판정 자체는
+    # 그대로다 -- 후보 줄만 골라올 뿐 판정 로직은 바꾸지 않았다.
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _write(
+        tmp_path,
+        "docs/specs/L4_x_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| Z-99 | tests/test_z.py |\n",
+    )
+    _write(tmp_path, "tests/test_other.py", "# 무관한 파일\nx = 1\n")
+    subprocess.run(["git", "add", "tests/test_other.py"], cwd=tmp_path, check=True)
+    hits = cc.check_spec_leaf_traceability(tmp_path)
+    assert hits == [("docs/specs#Z-99", 0)]
+
+
 # ---------------------------------------------------------------------------
 # 9. naive_datetime
 # ---------------------------------------------------------------------------

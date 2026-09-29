@@ -8,7 +8,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from scripts.consistency.common import Hit
+from scripts.consistency.common import Hit, _prime_py_file_cache
 from scripts.consistency.contracts import (
     check_env_keys,
     check_event_consumers,
@@ -52,6 +52,10 @@ class ConsistencyError(ValueError):
 
 
 def scan_all(root: Path) -> dict[str, list[Hit]]:
+    # src/ 파일들을 스레드로 미리 읽어 캐시를 채운다 -- wiring/contracts/
+    # time_money/spec_trace가 순차로 각자 첫 접근에서 파일을 여는 것보다
+    # I/O 대기가 겹쳐 벽시계 시간이 줄어든다(task-8949).
+    _prime_py_file_cache(root, "src")
     return {name: sorted(fn(root)) for name, fn in METRICS.items()}
 
 

@@ -71,6 +71,41 @@ def _git_commit_subjects(root: Path) -> str:
         return ""
 
 
+def _git_grep_leaf_candidate_lines(root: Path, subdirs: tuple[str, ...]) -> str | None:
+    """`tests/`, `scripts/` 아래 leaf-token 모양(`PREFIX-123X`)이 하나라도 있는
+    줄만 `git grep` 한 번으로 뽑아온다.
+
+    이전에는 `rglob("*.py")`로 ~1,580개 파일을 각각 `Path.read_text()`로 열었다
+    -- 파일당 파이썬 레벨 `open()`/`close()` 오버헤드(이 저장소 환경에서
+    관측된 dominant cost)가 파일 수에 비례해 쌓여 `tests/`가 커질 때마다(task
+    -8000/-8041과 같은 DEEPEN 커밋 누적) 다시 120s 타임아웃에 근접한다
+    (esc-ci-consistency). `git grep`은 같은 파일들을 git 프로세스 하나 안에서
+    네이티브로 열어 매칭되는 줄만 반환하므로 파이썬 쪽 파일 오픈 횟수를
+    0으로 줄인다. 매치되지 않는 줄은 토큰이 있을 수 없으니 버려도 결과가
+    같다 -- `-h`로 파일명 접두어를 빼서 파일명 자체의 숫자·하이픈이 토큰으로
+    잘못 섞이는 것도 막는다."""
+    existing = [s for s in subdirs if (root / s).is_dir()]
+    if not existing:
+        return ""
+    try:
+        r = subprocess.run(
+            ["git", "grep", "-h", "-I", "-E", r"[A-Za-z]{1,6}-[0-9]+[A-Za-z]?", "--", *existing],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # 0 = 매치 있음, 1 = 매치 없음(정상) -- 그 외는 git 자체 오류라 신뢰 불가.
+    if r.returncode not in (0, 1):
+        return None
+    return r.stdout or ""
+
+
 _LEAF_TOKEN_SCAN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]{1,6}-\d+[A-Za-z]?(?![A-Za-z0-9])")
 
 
@@ -105,18 +140,23 @@ def check_spec_leaf_traceability(root: Path) -> list[Hit]:
     leaf_ids = _collect_spec_leaf_ids(specs_dir)
     if not leaf_ids:
         return []
-    blobs = []
+    blobs: list[str] = []
     # "src" is already walked+read by wiring/contracts/time_money via the
     # shared caches -- reuse them instead of a second rglob+read pass
     # (task-8000: check_consistency.py's local CI 120s timeout).
     blobs.extend(_read_text_cached(path) for path in _iter_py_files(root, "src"))
-    for sub in ("tests", "scripts"):
-        base = root / sub
-        if base.is_dir():
-            for path in base.rglob("*.py"):
-                if "__pycache__" in path.parts:
-                    continue
-                blobs.append(path.read_text(encoding="utf-8", errors="replace"))
+    grep_lines = _git_grep_leaf_candidate_lines(root, ("tests", "scripts"))
+    if grep_lines is not None:
+        blobs.append(grep_lines)
+    else:
+        # git 사용 불가 시에만 예전 방식(전체 파일 오픈)으로 후퇴한다.
+        for sub in ("tests", "scripts"):
+            base = root / sub
+            if base.is_dir():
+                for path in base.rglob("*.py"):
+                    if "__pycache__" in path.parts:
+                        continue
+                    blobs.append(path.read_text(encoding="utf-8", errors="replace"))
     code_blob = "\n".join(blobs)
     commit_blob = _git_commit_subjects(root)
     referenced = _referenced_leaf_ids(leaf_ids, code_blob, commit_blob)
