@@ -1,14 +1,20 @@
 """L48/L49 통합테스트 공용 픽스처 — pool + 최소 strategy_executions/orders/
 positions/reconciliation_state 삽입 헬퍼(tests/integration/test_metrics_collector.py의
-`_create_running_execution` 패턴을 이 디렉터리로 옮겨온다)."""
+`_create_running_execution` 패턴을 이 디렉터리로 옮겨온다).
+
+task-7950 DEEPEN: 위 헬퍼들은 실DB에 직접 쓰는 fail-closed 경로다 — 불변식
+위반 입력(FK 없는 tenant, CHECK 밖 aggregate_status, 중복 UNIQUE 키)이
+조용히 통과하지 않고 asyncpg 예외로 거부되는지, 그리고 pool 획득 실패가
+삼켜지지 않고 그대로 전파되는지를 아래 테스트로 고정한다."""
+
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -137,3 +143,63 @@ async def set_reconciliation_state(
             user_id,
             aggregate_status,
         )
+
+
+async def test_set_reconciliation_state_rejects_unknown_aggregate_status(
+    pool: asyncpg.Pool,
+) -> None:
+    """reconciliation_state.aggregate_status는 f2b8e5d1a734 마이그레이션의
+    CHECK(aggregate_status IN (...)) 밖 값을 거부한다 — 집계 상태 오타가
+    조용히 저장되면 재조정 게이트가 잘못된 상태를 건강으로 취급한다."""
+    from tests.integration.conftest import create_test_tenant
+
+    user_id = await create_test_tenant(pool)
+    with pytest.raises(asyncpg.CheckViolationError):
+        await set_reconciliation_state(pool, user_id, aggregate_status="NOT_A_REAL_STATUS")
+
+
+async def test_set_reconciliation_state_rejects_unknown_tenant(pool: asyncpg.Pool) -> None:
+    """reconciliation_state.tenant_id는 users(user_id)를 FK 참조한다(f2b8e5d1a734) —
+    존재하지 않는 tenant로는 재조정 상태를 만들 수 없다."""
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await set_reconciliation_state(pool, uuid4(), aggregate_status="HEALTHY")
+
+
+async def test_insert_filled_order_rejects_unknown_execution(pool: asyncpg.Pool) -> None:
+    """orders.execution_id는 strategy_executions(id)를 FK 참조한다 — 존재하지
+    않는 실행에 체결을 붙이면 포지션/원장 계산이 고아 체결을 조용히 집계한다."""
+    from tests.integration.conftest import create_test_tenant
+
+    user_id = await create_test_tenant(pool)
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await insert_filled_order(pool, user_id, execution_id=999_999_999)
+
+
+async def test_insert_position_rejects_duplicate_entry_time(pool: asyncpg.Pool) -> None:
+    """positions는 UNIQUE(symbol, exchange, strategy_id, entry_time)다(c8ead41fd624) —
+    같은 진입 시각으로 같은 포지션을 두 번 기록하면 이중 계상이 된다."""
+    from tests.integration.conftest import create_test_tenant
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await create_paper_execution(pool, user_id)
+    entry_time = datetime.now(timezone.utc)
+    await insert_position(pool, user_id, execution_id, entry_time=entry_time)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await insert_position(pool, user_id, execution_id, entry_time=entry_time)
+
+
+async def test_create_paper_execution_propagates_pool_acquire_failure(
+    pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """의존성 실패 주입 — pool.acquire()가 예외를 내면 create_paper_execution은
+    그 예외를 삼키지 않고 그대로 전파해야 한다(fail-closed, 105번 표준)."""
+    from tests.integration.conftest import create_test_tenant
+
+    user_id = await create_test_tenant(pool)
+
+    def _broken_acquire(self: asyncpg.Pool, *args: object, **kwargs: object) -> None:
+        raise ConnectionError("simulated pool exhaustion")
+
+    monkeypatch.setattr(type(pool), "acquire", _broken_acquire)
+    with pytest.raises(ConnectionError, match="simulated pool exhaustion"):
+        await create_paper_execution(pool, user_id)
