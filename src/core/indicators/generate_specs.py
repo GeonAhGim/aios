@@ -49,9 +49,9 @@ __all__ = [
 
 
 class OutputStyle(TypedDict, total=False):
-    """`_plots_from_info`/`_plots_from_talib`의 output별 표시 스타일 오버레이 —
-    `PlotSpec`의 표시 전용 필드(color_rule/precision/legend_format)만 담는다.
-    `scale`/`default_pane`은 필수, 나머지는 선택."""
+    """Output style overlay for each output of `_plots_from_info`/`_plots_from_talib` —
+    contains only display-related fields of `PlotSpec` (color_rule/precision/legend_format).
+    `scale` and `default_pane` are required; the rest are optional."""
 
     scale: ScaleHint
     default_pane: DefaultPane
