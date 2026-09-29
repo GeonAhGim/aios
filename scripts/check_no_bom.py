@@ -45,9 +45,21 @@ SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "cover
 # STATUS_DLL_INIT_FAILED, a process-create-time failure, not a git/network error). Falling back
 # to ThreadPoolExecutor's own default (min(32, cpu_count+4), the same formula the standard
 # library uses for I/O-bound pools) keeps per-root overlap without hard-coding an oversized,
-# unbounded-relative-to-the-shared-box thread count. No budget/baseline change (DECISION_GUIDELINES
-# B-2) -- this only lowers this step's own concurrency footprint.
-SCAN_WORKERS = None
+# unbounded-relative-to-the-shared-box thread count.
+#
+# 2026-09-29(task-8657/esc-ci-prepare): the same head_sha() STATUS_DLL_INIT_FAILED kept firing
+# (identical esc-ci-prepare detail_hash) after the task-8639 fix landed and passed QA (task-8590)
+# -- library default on this 24-core box is min(32, 24+4)=28, still per-lane, and this fleet runs
+# several worker lanes' local_ci prepare concurrently on one shared box, so 28-wide bursts x N
+# concurrent lanes reproduced the same antivirus-scan-starves-sibling-process-create symptom the
+# 64-wide fix was meant to fix. A local benchmark (this file's files, warm cache) showed workers=8
+# vs the library default (28) costs ~0.8s extra wall-clock on ~4.3k files -- negligible against the
+# 60s step budget even on the documented ~60-70s cold-checkout case -- while cutting this step's
+# peak concurrent OS-thread/file-handle footprint by >3x fleet-wide. Fixed at 8 rather than a
+# cpu_count-derived formula because the constraint is shared-box aggregate concurrency across
+# lanes, not this box's own core count. No budget/baseline change (DECISION_GUIDELINES B-2) --
+# this only lowers this step's own concurrency footprint.
+SCAN_WORKERS = 8
 
 
 def has_bom(path: Path) -> bool:
