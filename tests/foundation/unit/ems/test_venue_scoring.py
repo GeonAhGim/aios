@@ -164,21 +164,37 @@ def test_failure_injection_extreme_fee_bps_still_ranks() -> None:
 
 @pytest.mark.perf
 def test_numerical_performance_assertion_500_venues_ratio() -> None:
-    """Numerical performance assertion: 500 venues must not take more
-    than 500× the time of a single-venue ranking — a ratio bound that
-    is stable across environments.
+    """Numerical performance assertion: a 50x growth in candidate count
+    (10 -> 500) must not blow up the ranking time by more than a
+    generous linear-ish multiple -- catching an accidental O(n^2)
+    regression while tolerating normal per-call constant-factor noise.
 
     This is a D2 numerical assertion per DEPTH_R_EO §D2-01:
     '수치 성능 단언 1건' — assert a performance ratio, not absolute
     milliseconds, so CI runners with different CPU speeds agree.
+
+    UNVERIFIED (measured, task-8757): the baseline previously used a
+    single-venue (n=1) reference. At n=1, `rank_venues`'s total cost
+    *is* its one-item marginal cost (RouteDecision/pydantic validation,
+    ~2.7us measured), so the 500-venue/1-venue ratio is mathematically
+    pinned at ~n_large (no headroom for the O(n log n) sort or ordinary
+    process jitter) instead of bounding actual algorithmic complexity --
+    it was failing 480-1050x on unmodified code across repeated local
+    runs, not from any src regression (see task-8757 note). Comparing
+    two sizes that are both far above the fixed-overhead floor (10 vs
+    500) gives a stable ~50-55x ratio in practice with 100x headroom
+    before the assertion below trips, while still catching real
+    quadratic blowups (which would land near 50*50=2500x for the same
+    size jump).
     """
     import time
 
-    n_single = 1
+    n_small = 10
     n_large = 500
 
-    single_candidates = [
-        VenueCandidate(f"venue-{i}", Decimal("1"), Decimal("0.9")) for i in range(n_single)
+    small_candidates = [
+        VenueCandidate(f"venue-{i}", Decimal("1"), Decimal(f"{0.9 - i * 0.01}"))
+        for i in range(n_small)
     ]
     large_candidates = [
         VenueCandidate(f"venue-{i}", Decimal("1"), Decimal(f"{0.9 - i * 0.001}"))
@@ -186,7 +202,7 @@ def test_numerical_performance_assertion_500_venues_ratio() -> None:
     ]
 
     # Warm-up: first call may have import/cache overhead.
-    rank_venues(single_candidates)
+    rank_venues(small_candidates)
     rank_venues(large_candidates)
 
     # Take the minimum of several trials, not a single sample: a single
@@ -200,13 +216,13 @@ def test_numerical_performance_assertion_500_venues_ratio() -> None:
             rank_venues(candidates)
         return time.perf_counter() - start
 
-    single_elapsed = min(_timed_run(single_candidates) for _ in range(5))
+    small_elapsed = min(_timed_run(small_candidates) for _ in range(5))
     large_elapsed = min(_timed_run(large_candidates) for _ in range(5))
 
-    ratio = large_elapsed / single_elapsed if single_elapsed > 0 else 0
-    assert ratio < 500, (
+    ratio = large_elapsed / small_elapsed if small_elapsed > 0 else 0
+    assert ratio < 150, (
         f"Performance regression: {n_large} venues took {ratio:.1f}× "
-        f"the time of {n_single} venue (single={single_elapsed:.4f}s, "
+        f"the time of {n_small} venues (small={small_elapsed:.4f}s, "
         f"large={large_elapsed:.4f}s)"
     )
 
