@@ -4,6 +4,7 @@ Spec: 01_data_models_v1.4.md#§1.4, 11_implementation_rules_v1.2.md#§11.1
 (Money type replaces amount fields to prevent multi-exchange/currency summation errors),
 01_data_models_v1.4.md#§1.0 (multi-asset-class expansion, ADR-2026-08-28)
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -17,7 +18,7 @@ from src.data.models.base import AssetClass, Money, OptionType
 
 
 class OrderStatus(str, Enum):
-    """8.3 Order State Machine 1:1 구현"""
+    """8.3 Order State Machine 1:1 implementation"""
 
     CREATED = "CREATED"
     VALIDATED = "VALIDATED"
@@ -51,7 +52,9 @@ class OrderType(str, Enum):
 
 class Order(BaseModel):
     order_id: UUID = Field(default_factory=uuid4)
-    exchange_order_id: str | None = None  # 7.5 주문 멱등성 — 거래소측 ID 별도 추적
+    exchange_order_id: str | None = (
+        None  # 7.5 order idempotency — separate exchange order ID tracking
+    )
     client_order_id: str  # Idempotency key — use the same value on retransmission
     strategy_id: str
     strategy_version: str
@@ -65,7 +68,7 @@ class Order(BaseModel):
     side: OrderSide
     order_type: OrderType
     quantity: Decimal
-    price: Money | None = None  # MARKET 주문은 None
+    price: Money | None = None  # MARKET orders have None
     status: OrderStatus = OrderStatus.CREATED
     filled_quantity: Decimal = Decimal("0")
     average_fill_price: Money | None = None
@@ -91,7 +94,7 @@ class Position(BaseModel):
     symbol: str
     exchange: str
     strategy_id: str
-    execution_id: int | None = None  # ADR-2026-08-10-C, Order와 동일 근거
+    execution_id: int | None = None  # ADR-2026-08-10-C, same rationale as Order
     quantity: Decimal
     average_entry_price: Money
     current_price: Money
