@@ -7,6 +7,10 @@ DoD: 갭 계획→백필→커버리지 갱신 왕복이 실제로 갭을 없애
 실패) 후 재실행이 이미 저장된 구간을 다시 채우지 않고 남은 갭만 처리하는
 것("중단 후 재개"), 빈 provider 응답이 커버리지로 조용히 둔갑하지 않는 것
 (§4.1), venue 축이 어긋난 요청이 fail-closed 거부되는 것을 검증한다.
+
+# ratchet-allow: 인메모리 가짜 provider/store가 이 파일의 테스트가 쓰지
+# 않는 인터페이스 메서드에 대해 fail-closed 스텁으로 NotImplementedError를
+# 낸다.
 """
 
 from __future__ import annotations

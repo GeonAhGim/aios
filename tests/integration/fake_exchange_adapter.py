@@ -5,7 +5,12 @@
 과제로 이연됨) 실거래소 왕복 자체는 검증할 수 없지만, ExchangeAdapter
 인터페이스 계약을 지키는 한 이 대역으로 FD-4/FD-8 파이프라인 전체(멱등성,
 DB 영속화, 이벤트 발행, FSM 전이)는 그대로 검증 가능하다.
+
+# ratchet-allow: ExchangeAdapter 인터페이스 중 이 테스트 대역이 쓰지 않는
+# 메서드는 fail-closed 스텁으로 NotImplementedError를 낸다(과제 의도 밖
+# 호출을 조용히 성공시키지 않기 위함).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -159,9 +164,7 @@ class FakeExchangeAdapter(ExchangeAdapter):
         상태로 매칭해 돌려준다."""
         if self._get_order_status == OrderStatus.UNKNOWN:
             return None
-        match = next(
-            (o for o in self.placed_orders if o.client_order_id == client_order_id), None
-        )
+        match = next((o for o in self.placed_orders if o.client_order_id == client_order_id), None)
         if match is None:
             return None
         is_filled = self._get_order_status == OrderStatus.FILLED

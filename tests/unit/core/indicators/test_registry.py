@@ -407,33 +407,21 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
-# task-8582(리뷰 task-8459): 이전에는 `time.perf_counter()` 절대 wall-clock
-# p95 < 50ms로 쟀다 — 공유 개발 플릿에서 다른 워크트리들이 동시에 pytest를
-# 돌리는 부하만으로 코드 회귀 없이 50ms를 넘길 수 있다(같은 근본 원인을
-# task-7631이 도입하고 task-8455/task-8356이 다른 perf 테스트에 적용한 패턴).
-# `RelativeBudget`으로 교체해 같은 프로세스·같은 순간에 잰 보정(calibration)
-# 루프 대비 비율로 판정한다 — 호스트가 2배 느려지면 보정도 2배 느려지므로
-# 비율은 안정적이지만, 실제 회귀(예: `canonical_spec_dict` 중복 순회)는 연산
-# 시간만 움직이므로 여전히 잡힌다. `registry_hash()`는 sha256 해시라 pure CPU
-# 지만 서브밀리초 단위라 Windows `time.process_time()`의 ~15.6ms 클럭 분해능
-# 아래로 묻힌다(로컬 실측 `op_ms=0.0`) — 그래서 mode="wall"을 쓴다(계측 대상이
-# 디스크·네트워크 I/O를 전혀 하지 않으므로 wall과 CPU 시간이 사실상 같다).
-# 로컬 실측 비율 ~0.0073~0.0077x에 60배 이상 여유를 둔 max_ratio=0.5.
+# task-8582(리뷰 task-8459): 절대 wall-clock p95<50ms는 공유 플릿 부하만으로
+# 회귀 없이 적색이 될 수 있어(task-7631/8455/8356과 동일 패턴) 같은 프로세스
+# 보정 루프 대비 비율(`RelativeBudget`)로 교체했다. sha256 순수 CPU라
+# mode="wall"이 process_time 클럭 분해능 문제를 피한다(로컬 실측 비율
+# ~0.0075x에 60배 이상 여유를 둔 max_ratio=0.5). tests/_perf/relative_budget.py 참고.
 _REGISTRY_HASH_MAX_RATIO = 0.5
 
 
 def test_registry_hash_p95_latency_within_self_declared_budget() -> None:
-    """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 `registry_hash()`
-    전용 항목이 없다(가장 가까운 항목은 "지표 증분=일괄 동일", 지연 예산가
-    아님) — 161종 스펙을 정준 JSON 직렬화 + sha256 하는 순수 CPU 경로(디스크·
-    네트워크 I/O 없음)라는 사실 위에 자체 예산을 건다. `registry_hash()`는
-    strategy_artifact 해시 계산의 입력이라 아티팩트 빌드 경로를 막으면 안
-    된다 — 벗어나면 회귀(예: `canonical_spec_dict` 중복 순회)로 본다.
-
-    task-8582(리뷰 task-8459): 절대 wall-clock 50ms 예산은 공유 플릿 부하로
-    회귀 없이 적색이 될 수 있어(task-8455/task-8356과 동일 패턴)
-    `RelativeBudget`(같은 프로세스 보정 루프 대비 비율)으로 교체했다 —
-    `tests/_perf/relative_budget.py` 참고."""
+    """수치 성능 단언: 161종 스펙을 정준 JSON 직렬화 + sha256 하는 순수 CPU
+    경로(디스크·네트워크 I/O 없음) 위에 자체 예산을 건다(ADR-2026-09-09-C
+    Decision 1 예산표에 전용 항목 없음). `registry_hash()`는 strategy_artifact
+    해시 계산의 입력이라 아티팩트 빌드 경로를 막으면 안 된다 — 벗어나면
+    회귀(예: `canonical_spec_dict` 중복 순회)로 본다. task-8582: 공유 플릿
+    부하로 회귀 없이 적색이 될 수 있어 보정 루프 대비 비율로 판정한다."""
     sample = RelativeBudget().assert_within(
         lambda: IndicatorRegistry().registry_hash(),
         max_ratio=_REGISTRY_HASH_MAX_RATIO,
