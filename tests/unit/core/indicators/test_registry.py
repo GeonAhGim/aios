@@ -29,6 +29,7 @@ from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec, ParamSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 from src.core.indicators.talib_adapter import IndicatorService
 from src.data.models.market_data import Candle
+from tests._perf.relative_budget import RelativeBudget
 
 EXPECTED_INDICATORS = frozenset(
     {"SMA", "EMA", "RSI", "ATR", "CCI", "WILLR", "MFI", "MACD", "BBANDS", "STOCH", "OBV"}
@@ -402,38 +403,46 @@ def test_calculate_propagates_talib_runtime_failure_instead_of_masking_it(
 # --- DEEPEN(task-3198): 수치 성능 단언 — registry_hash() 지연 ---------------
 
 
-def _hash_latencies_ms(iterations: int = 20) -> list[float]:
-    samples = []
-    for _ in range(iterations):
-        started = time.perf_counter()
-        IndicatorRegistry().registry_hash()
-        samples.append((time.perf_counter() - started) * 1000)
-    samples.sort()
-    return samples
-
-
 def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
-_REGISTRY_HASH_BUDGET_MS = 50.0
+# task-8582(리뷰 task-8459): 이전에는 `time.perf_counter()` 절대 wall-clock
+# p95 < 50ms로 쟀다 — 공유 개발 플릿에서 다른 워크트리들이 동시에 pytest를
+# 돌리는 부하만으로 코드 회귀 없이 50ms를 넘길 수 있다(같은 근본 원인을
+# task-7631이 도입하고 task-8455/task-8356이 다른 perf 테스트에 적용한 패턴).
+# `RelativeBudget`으로 교체해 같은 프로세스·같은 순간에 잰 보정(calibration)
+# 루프 대비 비율로 판정한다 — 호스트가 2배 느려지면 보정도 2배 느려지므로
+# 비율은 안정적이지만, 실제 회귀(예: `canonical_spec_dict` 중복 순회)는 연산
+# 시간만 움직이므로 여전히 잡힌다. `registry_hash()`는 sha256 해시라 pure CPU
+# 지만 서브밀리초 단위라 Windows `time.process_time()`의 ~15.6ms 클럭 분해능
+# 아래로 묻힌다(로컬 실측 `op_ms=0.0`) — 그래서 mode="wall"을 쓴다(계측 대상이
+# 디스크·네트워크 I/O를 전혀 하지 않으므로 wall과 CPU 시간이 사실상 같다).
+# 로컬 실측 비율 ~0.0073~0.0077x에 60배 이상 여유를 둔 max_ratio=0.5.
+_REGISTRY_HASH_MAX_RATIO = 0.5
 
 
 def test_registry_hash_p95_latency_within_self_declared_budget() -> None:
     """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 `registry_hash()`
     전용 항목이 없다(가장 가까운 항목은 "지표 증분=일괄 동일", 지연 예산가
     아님) — 161종 스펙을 정준 JSON 직렬화 + sha256 하는 순수 CPU 경로(디스크·
-    네트워크 I/O 없음)라는 사실 위에 자체 예산을 건다: 로컬 실측 p95 대비
-    넉넉한 여유를 둔 50ms. `registry_hash()`는 strategy_artifact 해시 계산의
-    입력이라 아티팩트 빌드 경로를 막으면 안 된다 — 벗어나면 회귀(예:
-    `canonical_spec_dict` 중복 순회)로 본다."""
-    samples = _hash_latencies_ms(iterations=20)
-    p95_ms = _p95(samples)
-    print(
-        f"[L02 registry] registry_hash() p95={p95_ms:.2f}ms "
-        f"budget<{_REGISTRY_HASH_BUDGET_MS:.0f}ms (n={len(samples)})"
+    네트워크 I/O 없음)라는 사실 위에 자체 예산을 건다. `registry_hash()`는
+    strategy_artifact 해시 계산의 입력이라 아티팩트 빌드 경로를 막으면 안
+    된다 — 벗어나면 회귀(예: `canonical_spec_dict` 중복 순회)로 본다.
+
+    task-8582(리뷰 task-8459): 절대 wall-clock 50ms 예산은 공유 플릿 부하로
+    회귀 없이 적색이 될 수 있어(task-8455/task-8356과 동일 패턴)
+    `RelativeBudget`(같은 프로세스 보정 루프 대비 비율)으로 교체했다 —
+    `tests/_perf/relative_budget.py` 참고."""
+    sample = RelativeBudget().assert_within(
+        lambda: IndicatorRegistry().registry_hash(),
+        max_ratio=_REGISTRY_HASH_MAX_RATIO,
+        mode="wall",
+        n=20,
+        warmup=1,
+        label="registry_hash()",
     )
-    assert p95_ms < _REGISTRY_HASH_BUDGET_MS
+    print(f"[L02 registry] {RelativeBudget().describe(sample, max_ratio=_REGISTRY_HASH_MAX_RATIO)}")
 
 
 def test_registry_hash_budget_gate_actually_fails_past_budget(
@@ -442,19 +451,28 @@ def test_registry_hash_budget_gate_actually_fails_past_budget(
     """게이트 적색 재현: 위 단언식이, 해시 계산 경로 한 곳이 예산을 실제로
     넘기도록 지연을 주입했을 때 진짜로 `AssertionError`를 내는지(= CI가
     실제로 빨간불이 되는지) 확인한다. 이 테스트가 없으면 위 단언이 항상
-    통과하는 tautology인지 아무도 검증하지 못한다."""
+    통과하는 tautology인지 아무도 검증하지 못한다.
+
+    task-8582: 보정 루프 대비 비율(`max_ratio`)로 판정하므로, 주입한 지연이
+    보정 루프 자체보다 훨씬 길어야 확실히 넘긴다 — sha256 호출마다 200ms를
+    강제해(보정 루프 ~90ms의 2배 이상) `max_ratio=0.5`를 확실히 넘긴다."""
     original_sha256 = hashlib.sha256
 
     def _stalled_sha256(data: bytes, **kwargs: object) -> object:
-        time.sleep(_REGISTRY_HASH_BUDGET_MS / 1000.0)
+        time.sleep(0.2)
         return original_sha256(data)
 
     monkeypatch.setattr("src.core.indicators.registry.hashlib.sha256", _stalled_sha256)
 
-    samples = _hash_latencies_ms(iterations=3)
-    p95_ms = _p95(samples)
     with pytest.raises(AssertionError):
-        assert p95_ms < _REGISTRY_HASH_BUDGET_MS
+        RelativeBudget().assert_within(
+            lambda: IndicatorRegistry().registry_hash(),
+            max_ratio=_REGISTRY_HASH_MAX_RATIO,
+            mode="wall",
+            n=3,
+            warmup=0,
+            label="registry_hash() stalled sha256",
+        )
 
 
 # --- DEEPEN(task-3198): 게이트 적색 재현 — lookback 오지정 시 실측 대조 실패 ---
