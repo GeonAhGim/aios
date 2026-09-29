@@ -221,6 +221,10 @@ async def post_entry(
     audit: AuditAppender,
     clock: Clock,
 ) -> JournalEntryView:
+    # Invariant: _assert_extra_safe must run before the idempotency lookup, not after.
+    # extra-safety is a gate on first insertion only, so it must see every attempt
+    # before the idempotency short-circuit can suppress a resend; the DB UNIQUE
+    # constraint on idempotency_key is what protects resends afterward, not this check.
     await _assert_not_frozen(conn)
     await _assert_extra_safe(conn, audit, event)
 
