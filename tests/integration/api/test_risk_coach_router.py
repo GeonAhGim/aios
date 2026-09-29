@@ -9,7 +9,6 @@ D3 replay_verify N/A(주문/원장 이벤트를 생성하지 않는 U-8 계산 A
 from __future__ import annotations
 
 import uuid
-from time import perf_counter
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -289,6 +288,8 @@ async def test_disabled_flag_never_calls_selector(client, monkeypatch):
 
 @pytest.mark.perf
 async def test_position_size_p95_budget(client):
+    from time import perf_counter
+
     # U-8 has no dedicated ADR budget; borrow the 200 ms read-query budget.
     # This measures the in-memory API, not production network latency.
     config = _config("FIXED_FRACTIONAL")
