@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -27,8 +27,28 @@ from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.conftest import create_test_user
 from tests.integration.oms.conftest import insert_order
+from tests.support.db_isolation import WindowCheck, assert_window_clean
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+_REPLAY_WINDOW_CHECKS = (
+    WindowCheck(
+        label="order_events order_ids",
+        query=(
+            "SELECT DISTINCT order_id AS key FROM order_events "
+            "WHERE occurred_at >= $1 AND occurred_at < $2"
+        ),
+    ),
+    WindowCheck(
+        label="ledger account_codes",
+        query=(
+            "SELECT DISTINCT la.account_code AS key FROM ledger_posting_line lpl "
+            "JOIN ledger_journal_entry lje ON lje.entry_id = lpl.entry_id "
+            "JOIN ledger_account la ON la.account_id = lpl.account_id "
+            "WHERE lje.posted_at >= $1 AND lje.posted_at < $2"
+        ),
+    ),
+)
 
 
 async def assert_no_replay_window_leftovers(pool, *, as_of: datetime, hours: int) -> None:
@@ -37,35 +57,13 @@ async def assert_no_replay_window_leftovers(pool, *, as_of: datetime, hours: int
     anything. Such rows were written outside this module (another test file
     that shares the worker DB, or a dirty local template) and would surface
     later as a StreamDiff on a key this module never created (PR #91 runs
-    36224833535 / 36225868874). The message carries sample keys so the
-    polluting writer can be traced (`grep -rn <order_id-or-account_code>`),
-    since the database does not record which test module wrote a row."""
-    start = as_of - timedelta(hours=hours)
-    async with pool.acquire() as conn:
-        orders = await conn.fetch(
-            "SELECT DISTINCT order_id FROM order_events "
-            "WHERE occurred_at >= $1 AND occurred_at < $2 LIMIT 5",
-            start,
-            as_of,
-        )
-        accounts = await conn.fetch(
-            "SELECT DISTINCT la.account_code FROM ledger_posting_line lpl "
-            "JOIN ledger_journal_entry lje ON lje.entry_id = lpl.entry_id "
-            "JOIN ledger_account la ON la.account_id = lpl.account_id "
-            "WHERE lje.posted_at >= $1 AND lje.posted_at < $2 LIMIT 5",
-            start,
-            as_of,
-        )
-    if orders or accounts:
-        raise AssertionError(
-            "replay_verify window is not clean before this module ran: "
-            f"order_events order_ids={[str(r['order_id']) for r in orders]} "
-            f"ledger account_codes={[r['account_code'] for r in accounts]} "
-            f"(window {start.isoformat()} .. {as_of.isoformat()}). These rows were written "
-            "outside this module -- another test module sharing the worker DB, or a dirty "
-            "template database -- and replay_verify would report them as StreamDiff. Trace "
-            "the writer by grepping the sample keys' fixtures/seeders."
-        )
+    36224833535 / 36225868874; PR #104 run 36527542962 -- tamper_detection was
+    not yet on the shared clone at that point). Delegates to the ADR-2026-
+    09-26-D Decision 2 promoted guard (`tests/support/db_isolation.py`) so
+    every replay module reports leftovers the same way."""
+    await assert_window_clean(
+        pool, checks=_REPLAY_WINDOW_CHECKS, as_of=as_of, hours=hours, subject="module"
+    )
 
 
 def _clock() -> datetime:

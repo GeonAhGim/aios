@@ -22,13 +22,13 @@ from tests.integration.eventstore._replay_verify_support import (
 )
 from tests.support.db import (
     TEMPLATE_DATABASE_URL_ENV,
-    drop_worker_database,
     ensure_worker_database,
     template_database_url,
 )
 from tests.support.db import (
     _asyncpg_dsn as _clone_dsn,
 )
+from tests.support.db_isolation import clone_isolated_db, drop_isolated_db
 
 
 def _asyncpg_dsn() -> str:
@@ -117,7 +117,7 @@ async def isolated_replay_db_url(request: pytest.FixtureRequest) -> AsyncIterato
     StreamDiff later."""
     clone_id = _replay_clone_id(request)
     template = _PRISTINE_REPLAY_TEMPLATE_URL
-    url = await ensure_worker_database(template, clone_id)
+    url = await clone_isolated_db(template, clone_id)
     try:
         guard_pool = await asyncpg.create_pool(_clone_dsn(url), min_size=1, max_size=2)
         try:
@@ -128,7 +128,7 @@ async def isolated_replay_db_url(request: pytest.FixtureRequest) -> AsyncIterato
             await guard_pool.close()
         yield url
     finally:
-        await drop_worker_database(template, clone_id)
+        await drop_isolated_db(template, clone_id)
 
 
 @pytest.fixture
