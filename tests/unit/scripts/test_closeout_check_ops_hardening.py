@@ -159,6 +159,71 @@ def test_ops_check_fails_when_real_schema_reports_ci_red_or_guard_vetoed(tmp_pat
     assert not result.passed
 
 
+def test_ops_check_passes_when_healthcheck_wrapper_schema_is_green(tmp_path: Path) -> None:
+    """task-7857 근본 원인 재현/수정 확인: `pm/healthcheck.py`의 `mvp1_gate` 자동 배선
+    (`_write_closeout_ci_report`/`_write_closeout_guard_report`)은 `"ok"`/`"vetoed"`가
+    아니라 `"passed"`/`"veto_count"`로 리포트를 쓴다 — 실제 로컬 CI가 전부 녹색이고
+    Guard veto가 0건이어도 이 스키마를 못 읽으면 10항이 항상 FAIL로 고정된다."""
+    _write(tmp_path / "scripts/check_audit_regressions.py", "import sys\nsys.exit(0)\n")
+    _write(tmp_path / "audit-baseline.json", json.dumps({"open": {}}))
+    _write(tmp_path / "docs/RED_TEAM_FINDINGS.md", "no open findings")
+    ci_report = tmp_path / "ci.json"
+    ci_report.write_text(json.dumps({"passed": True}), encoding="utf-8")
+    guard_report = tmp_path / "guard.json"
+    guard_report.write_text(json.dumps({"veto_count": 0}), encoding="utf-8")
+
+    result = cc.check_10_ops(tmp_path, ci_report=ci_report, guard_report=guard_report)
+
+    assert result.passed
+
+
+def test_ops_check_fails_when_healthcheck_wrapper_schema_reports_red(tmp_path: Path) -> None:
+    _write(tmp_path / "scripts/check_audit_regressions.py", "import sys\nsys.exit(0)\n")
+    _write(tmp_path / "audit-baseline.json", json.dumps({"open": {}}))
+    _write(tmp_path / "docs/RED_TEAM_FINDINGS.md", "no open findings")
+    ci_report = tmp_path / "ci.json"
+    ci_report.write_text(json.dumps({"passed": False}), encoding="utf-8")
+    guard_report = tmp_path / "guard.json"
+    guard_report.write_text(json.dumps({"veto_count": 2}), encoding="utf-8")
+
+    result = cc.check_10_ops(tmp_path, ci_report=ci_report, guard_report=guard_report)
+
+    assert not result.passed
+    assert any("veto_count=2" in e for e in result.evidence)
+
+
+def test_load_ci_report_ok_fails_when_neither_key_present(tmp_path: Path) -> None:
+    path = tmp_path / "ci.json"
+    path.write_text(json.dumps({"unrelated": True}), encoding="utf-8")
+
+    ok, note = cc._load_ci_report_ok(path)
+
+    assert not ok
+    assert "ok/passed" in note
+
+
+def test_load_guard_report_ok_fails_when_neither_key_present(tmp_path: Path) -> None:
+    path = tmp_path / "guard.json"
+    path.write_text(json.dumps({"unrelated": True}), encoding="utf-8")
+
+    ok, note = cc._load_guard_report_ok(path)
+
+    assert not ok
+    assert "vetoed/veto_count" in note
+
+
+def test_load_ci_report_ok_fails_on_corrupt_json(tmp_path: Path) -> None:
+    """실패 주입: 리포트 파일이 손상된 JSON이면(healthcheck.py 쓰기 중 프로세스가
+    죽는 경우 등) 파싱 예외를 삼키지 않고 명시적 FAIL로 처리한다."""
+    path = tmp_path / "ci.json"
+    path.write_text("{not valid json", encoding="utf-8")
+
+    ok, note = cc._load_ci_report_ok(path)
+
+    assert not ok
+    assert "파싱 실패" in note
+
+
 # --------------------------------------------------------------------------- 11: 하드닝 집계 로직
 
 

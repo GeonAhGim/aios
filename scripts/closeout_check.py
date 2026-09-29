@@ -36,9 +36,7 @@ from __future__ import annotations
 # 임포트를 가능하게 함)이 다른 임포트보다 먼저 실행돼야 한다.
 import argparse
 import importlib
-import json
 import re
-import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -81,6 +79,16 @@ from scripts.closeout.head_actions import (
     trigger_head_workflow_dispatch,
     wait_for_head_green,
 )
+from scripts.closeout.ops import (
+    JOURNEY_SPECS,
+    _check_invariants,
+    _check_red_team_open,
+    _load_bool_report,
+    _load_ci_report_ok,
+    _load_guard_report_ok,
+    check_10_ops,
+    check_13_user_journeys,
+)
 from scripts.closeout.report import render_markdown, write_closeout_doc
 
 ROOT = _REPO_ROOT
@@ -120,6 +128,8 @@ __all__ = [
     "run_all",
     "main",
     "_load_bool_report",
+    "_load_ci_report_ok",
+    "_load_guard_report_ok",
     "_check_invariants",
     "_check_red_team_open",
     "_h1_mandate_required",
@@ -329,9 +339,7 @@ def check_08_data(repo_root: Path) -> CheckResult:
     )
     spi_dirs = ("tests/exchanges", "tests/unit/exchanges", "tests/integration/exchanges")
     spi_hits = _grep(repo_root, spi_dirs, r"def test_.*(contract|spi)", re.I)
-    passed = (
-        not bench_missing and bool(passed_bench) and bool(coverage_hits) and len(spi_hits) > 0
-    )
+    passed = not bench_missing and bool(passed_bench) and bool(coverage_hits) and len(spi_hits) > 0
     evidence = [
         *bench_present,
         *bench_missing,
@@ -368,147 +376,6 @@ def check_09_chart(repo_root: Path) -> CheckResult:
         parts.append(f"vitest/frontend 설정 없음: {', '.join(vitest_missing)}")
     detail = "차트 기준 통과(정적)" if passed else "; ".join(parts)
     return CheckResult("09_chart", "차트", passed, tuple(evidence), detail)
-
-
-def check_10_ops(
-    repo_root: Path, *, ci_report: Path | None, guard_report: Path | None
-) -> CheckResult:
-    """기준10 — 로컬 CI 녹색 + Guard veto 0 + INVARIANTS 위반 0 + RED_TEAM P0 미해결 0.
-
-    ci_report 키(`"ok"`)·guard_report 키(`"vetoed"`)는 실제 산출 스크립트의
-    스키마를 그대로 따른다 — `pm/local_ci.py`(top-level `"ok": bool`)와
-    `meta/guards/run_guards.py --json out.json`(`Report.to_json()`의
-    `"vetoed": bool`). 이전에는 `{"passed": bool}`/`{"veto_count": int}`를
-    기대했는데, 두 산출 스크립트 어디에도 그런 키를 쓰는 곳이 없어 리포트를
-    넘겨도 항상 FAIL로 오판정했다(task-6497 근본 원인).
-    """
-    ci_ok, ci_note = _load_bool_report(ci_report, "ok")
-    guard_ok, guard_note = _load_bool_report(guard_report, "vetoed", invert=True)
-    invariants_ok, invariants_note = _check_invariants(repo_root)
-    red_team_ok, red_team_note = _check_red_team_open(repo_root)
-
-    passed = ci_ok and guard_ok and invariants_ok and red_team_ok
-    evidence = [ci_note, guard_note, invariants_note, red_team_note]
-    detail = "운영 기준 통과" if passed else "; ".join(e for e in evidence if "OK" not in e[:2])
-    return CheckResult("10_ops", "운영", passed, tuple(evidence), detail)
-
-
-def _load_bool_report(
-    path: Path | None, key: str, *, expect_zero: bool = False, invert: bool = False
-) -> tuple[bool, str]:
-    """`key`가 가리키는 값을 읽어 PASS 여부를 판정한다.
-
-    `expect_zero`: 값이 정수 0이어야 PASS(레거시 카운터 스키마용).
-    `invert`: 값이 falsy여야 PASS(예: `"vetoed": false` — veto 없음이 통과).
-    기본은 값이 truthy여야 PASS.
-    """
-    if path is None:
-        return False, UNVERIFIED
-    if not path.is_file():
-        return False, f"리포트 없음: {path}"
-    try:
-        data = json.loads(_read(path))
-    except json.JSONDecodeError:
-        return False, f"리포트 JSON 파싱 실패: {path}"
-    value = data.get(key)
-    if expect_zero:
-        ok = isinstance(value, int) and value == 0
-        return ok, f"OK {key}=0" if ok else f"{key}={value!r} (0이어야 함): {path}"
-    if invert:
-        ok = not bool(value)
-        return ok, f"OK {key}=False" if ok else f"{key}={value!r} (False여야 함): {path}"
-    ok = bool(value)
-    return ok, f"OK {key}=True" if ok else f"{key}={value!r}: {path}"
-
-
-def _check_invariants(repo_root: Path) -> tuple[bool, str]:
-    script = repo_root / "scripts" / "check_audit_regressions.py"
-    if not script.is_file():
-        return False, "scripts/check_audit_regressions.py 없음"
-    baseline = repo_root / "audit-baseline.json"
-    try:
-        open_findings = json.loads(_read(baseline)).get("open", {})
-    except json.JSONDecodeError:
-        open_findings = {}
-    result = subprocess.run(  # noqa: S603 - 저장소 내 고정 경로 스크립트, 사용자 입력 없음
-        [sys.executable, str(script)],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-    )
-    ok = result.returncode == 0 and not open_findings
-    if not ok and result.returncode != 0:
-        return False, "check_audit_regressions.py FAIL(신규/미해소 회귀 있음)"
-    if open_findings:
-        names = ", ".join(open_findings)
-        return False, f"audit-baseline.json에 열린 항목 {len(open_findings)}건: {names}"
-    return True, "OK INVARIANTS 위반 0"
-
-
-def _check_red_team_open(repo_root: Path) -> tuple[bool, str]:
-    path = repo_root / "docs" / "RED_TEAM_FINDINGS.md"
-    text = _read(path)
-    open_count = text.count("⏳ OPEN")
-    ok = open_count == 0
-    return ok, "OK RED_TEAM 미해결 0" if ok else f"RED_TEAM_FINDINGS.md 미해결(OPEN) {open_count}건"
-
-
-JOURNEY_SPECS: tuple[str, ...] = (
-    "frontend/e2e/journey-j1-onboarding-to-dashboard.spec.ts",
-    "frontend/e2e/journey-j2-discover-to-backtest.spec.ts",
-    "frontend/e2e/journey-j3-paper-order-to-position.spec.ts",
-)
-
-
-def _load_ci_step_ok(path: Path | None, step: str) -> tuple[bool, str]:
-    """`--ci-report`의 `steps.<step>.ok`를 읽는다(`_load_bool_report`는 top-level
-    키만 보므로 별도 헬퍼 -- `pm/local_ci.py` 산출 `pm/ci/latest.json`은
-    `{"steps": {"frontend": {"ok": bool, ...}, ...}}` 형태다)."""
-    if path is None:
-        return False, UNVERIFIED
-    if not path.is_file():
-        return False, f"리포트 없음: {path}"
-    try:
-        data = json.loads(_read(path))
-    except json.JSONDecodeError:
-        return False, f"리포트 JSON 파싱 실패: {path}"
-    steps = data.get("steps")
-    step_data = steps.get(step) if isinstance(steps, dict) else None
-    if not isinstance(step_data, dict):
-        return False, f"steps.{step} 없음: {path}"
-    ok = bool(step_data.get("ok"))
-    if ok:
-        return True, f"OK steps.{step}.ok=True"
-    return False, f"steps.{step}.ok={step_data.get('ok')!r}: {path}"
-
-
-def check_13_user_journeys(repo_root: Path, *, ci_report: Path | None) -> CheckResult:
-    """기준13(ADR-2026-09-24-A Decision 4) — J1~J3 Playwright 여정 테스트 존재 +
-    `test.fixme` 0건 + `--ci-report`의 `steps.journeys.ok` 녹색
-    (pm/local_ci full 모드 J1~J3 단계, task-7145).
-
-    리포트를 넘기지 않으면(다른 항목들과 같은 ADR-D 원칙) "미검증(외부 리포트
-    미지정)"으로 FAIL 처리한다 — 모른다=통과 아님.
-    """
-    present, missing = _present_missing(repo_root, *JOURNEY_SPECS)
-    fixme_hits = [p for p in present if "test.fixme" in _read(repo_root / p)]
-    # task-7145: pm/local_ci full 모드가 J1~J3만 따로 돌려 steps.journeys에 기록한다 —
-    # steps.frontend.ok(lint/build/vitest)는 여정을 실제로 실행했다는 증거가 아니었다.
-    journeys_ok, journeys_note = _load_ci_step_ok(ci_report, "journeys")
-    passed = not missing and not fixme_hits and journeys_ok
-    evidence = [*present, *missing, *(f"FIXME:{p}" for p in fixme_hits), journeys_note]
-    parts = []
-    if missing:
-        parts.append(f"여정 테스트 파일 누락: {', '.join(missing)}")
-    if fixme_hits:
-        parts.append(f"test.fixme 존재: {', '.join(fixme_hits)}")
-    if not journeys_ok:
-        parts.append(f"여정 CI 단계(steps.journeys) 미확인/적색: {journeys_note}")
-    detail = "J1~J3 여정 테스트 기준 통과" if passed else "; ".join(parts)
-    return CheckResult("13_user_journeys", "사용자 여정(J1~J3)", passed, tuple(evidence), detail)
 
 
 CHECKS_1_10: tuple[Callable[..., CheckResult], ...] = (

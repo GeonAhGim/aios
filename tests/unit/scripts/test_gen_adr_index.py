@@ -13,11 +13,18 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from tests._perf.relative_budget import RelativeBudget
+
+# task-8455(esc-ci-pytest_perf) -- observed op/calibration ratio ~0.48x on an
+# idle host; 5.0x leaves ~10x headroom for a busier host without masking a
+# real regression (ratio moves with the op, not with host speed -- see
+# tests/_perf/relative_budget.py).
+_THROUGHPUT_MAX_RATIO = 5.0
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -222,7 +229,20 @@ def test_main_check_fails_when_index_file_missing(tmp_path):
 def test_collect_and_render_throughput_budget(tmp_path):
     """Numeric performance assertion: this repo currently has ~35 ADR files; assert
     collect_adrs+render_table stays well under budget for a corpus an order of
-    magnitude larger (300 files) so the gate stays cheap as the corpus grows."""
+    magnitude larger (300 files) so the gate stays cheap as the corpus grows.
+
+    task-8455(esc-ci-pytest_perf): this used to assert `elapsed < 2.0` off a raw
+    `time.perf_counter()` wall-clock read. `collect_adrs` does real disk I/O (300
+    file reads), so `time.process_time()` (as used elsewhere by `PerfBudget`)
+    would hide read-wait time entirely -- but the absolute wall-clock number is
+    tied to host speed/load, and this shared dev fleet host regularly has many
+    worktrees running pytest concurrently. That contention pushed a ~36ms local
+    operation to 2.005s in CI, an intermittent red with no code regression
+    (same root cause task-7631/task-8356 already fixed elsewhere).
+    `RelativeBudget` in `mode="wall"` normalizes against an in-process
+    calibration loop measured at the same moment, so the ratio stays stable
+    even when the whole host is slow.
+    """
     design = tmp_path / "docs" / "design"
     for i in range(300):
         _write(
@@ -231,10 +251,17 @@ def test_collect_and_render_throughput_budget(tmp_path):
             f"## Status\nAccepted (2026-01-{i % 28 + 1:02d})\n\n## Context\n본문\n",
         )
 
-    start = time.perf_counter()
-    records = gen_adr_index.collect_adrs(design)
-    gen_adr_index.render_table(records)
-    elapsed = time.perf_counter() - start
+    records: list[object] = []
+
+    def _run() -> None:
+        records[:] = gen_adr_index.collect_adrs(design)
+        gen_adr_index.render_table(records)
+
+    RelativeBudget().assert_within(
+        _run,
+        max_ratio=_THROUGHPUT_MAX_RATIO,
+        mode="wall",
+        label="collect_adrs+render_table(300 files)",
+    )
 
     assert len(records) == 300
-    assert elapsed < 2.0

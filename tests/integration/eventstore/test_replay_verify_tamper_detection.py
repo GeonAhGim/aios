@@ -15,10 +15,10 @@ fixtures/helpers are in `_replay_verify_support.py`.
 
 from __future__ import annotations
 
-import os
 from datetime import timedelta
 from uuid import UUID
 
+import asyncpg
 import pytest
 
 from scripts import replay_verify
@@ -37,8 +37,16 @@ from tests.integration.oms.conftest import insert_order
 
 
 @pytest.fixture
-def database_url() -> str:
-    return os.environ["DATABASE_URL"]
+async def pool(isolated_replay_pool: asyncpg.Pool) -> asyncpg.Pool:
+    """Module-isolated clone -- see `isolated_replay_db_url` in conftest.py."""
+    return isolated_replay_pool
+
+
+@pytest.fixture
+def database_url(isolated_replay_db_url: str) -> str:
+    """The `scripts/replay_verify.py` subprocess must verify the same clone the
+    in-process assertions use, not the shared worker DB."""
+    return isolated_replay_db_url
 
 
 class _DiscardTransaction(Exception):

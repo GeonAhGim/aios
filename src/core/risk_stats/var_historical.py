@@ -1,8 +1,9 @@
-"""L4_risk_and_safety_v1.0.md#2.2 — 경험 분위(선형보간) VaR/ES. h>1은 겹침 합산 수익률.
+"""L4_risk_and_safety_v1.0.md#2.2 (R-19) — 경험 분위(선형보간) VaR/ES. h>1은 겹침 합산 수익률.
 
 정규성을 가정하지 않고 관측된 표본 분위수를 직접 쓴다. horizon>1봉이면
 겹치는(overlapping) h봉 합산 수익률로 재표본해 다봉 손실을 근사한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

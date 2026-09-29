@@ -15,7 +15,12 @@ export type DrawingKind =
   | "horizontal-line"
   | "vertical-line"
   | "rectangle"
-  | "fibonacci";
+  | "fibonacci"
+  | "segment"
+  | "ray-line"
+  | "parallel-channel"
+  | "price-channel"
+  | "price-line";
 
 export const DRAWING_KINDS: readonly DrawingKind[] = [
   "trendline",
@@ -23,6 +28,11 @@ export const DRAWING_KINDS: readonly DrawingKind[] = [
   "vertical-line",
   "rectangle",
   "fibonacci",
+  "segment",
+  "ray-line",
+  "parallel-channel",
+  "price-channel",
+  "price-line",
 ];
 
 const KIND_SET: ReadonlySet<string> = new Set<string>(DRAWING_KINDS);
@@ -84,15 +94,54 @@ export interface FibonacciDrawing extends DrawingBase<"fibonacci"> {
   readonly levels: readonly number[];
 }
 
+/** Bounded two-anchor line segment; unlike `TrendLineDrawing` it does not extend past its anchors. */
+export interface SegmentDrawing extends DrawingBase<"segment"> {
+  readonly points: readonly [DrawingPoint, DrawingPoint];
+}
+
+/** Two anchors; the ray extends from p1 through p2 and onward, unbounded on that side. */
+export interface RayLineDrawing extends DrawingBase<"ray-line"> {
+  readonly points: readonly [DrawingPoint, DrawingPoint];
+}
+
+/** p1→p2 is the baseline; p3 is the offset anchor the parallel line passes through. */
+export interface ParallelChannelDrawing extends DrawingBase<"parallel-channel"> {
+  readonly points: readonly [DrawingPoint, DrawingPoint, DrawingPoint];
+}
+
+/** Two anchors defining the channel's primary trend line. */
+export interface PriceChannelDrawing extends DrawingBase<"price-channel"> {
+  readonly points: readonly [DrawingPoint, DrawingPoint];
+}
+
+/** Single fixed price level (kept distinct from horizontal-line for tool identity/styling). */
+export interface PriceLineDrawing extends DrawingBase<"price-line"> {
+  readonly price: number;
+}
+
 export type Drawing =
   | TrendLineDrawing
   | HorizontalLineDrawing
   | VerticalLineDrawing
   | RectangleDrawing
-  | FibonacciDrawing;
+  | FibonacciDrawing
+  | SegmentDrawing
+  | RayLineDrawing
+  | ParallelChannelDrawing
+  | PriceChannelDrawing
+  | PriceLineDrawing;
 
 /** Drawings that carry a two-anchor `points` tuple. */
-export type TwoPointDrawing = TrendLineDrawing | RectangleDrawing | FibonacciDrawing;
+export type TwoPointDrawing =
+  | TrendLineDrawing
+  | RectangleDrawing
+  | FibonacciDrawing
+  | SegmentDrawing
+  | RayLineDrawing
+  | PriceChannelDrawing;
+
+/** Drawings that carry a `points` tuple of any arity (two or three anchors). */
+export type PointsDrawing = TwoPointDrawing | ParallelChannelDrawing;
 
 /** Ordered, immutable collection. Ids are unique within a collection. */
 export type DrawingCollection = readonly Drawing[];
@@ -142,8 +191,16 @@ export function isDrawingKind(value: unknown): value is DrawingKind {
   return typeof value === "string" && KIND_SET.has(value);
 }
 
-export function hasPoints(drawing: Drawing): drawing is TwoPointDrawing {
-  return drawing.kind === "trendline" || drawing.kind === "rectangle" || drawing.kind === "fibonacci";
+export function hasPoints(drawing: Drawing): drawing is PointsDrawing {
+  return (
+    drawing.kind === "trendline" ||
+    drawing.kind === "rectangle" ||
+    drawing.kind === "fibonacci" ||
+    drawing.kind === "segment" ||
+    drawing.kind === "ray-line" ||
+    drawing.kind === "parallel-channel" ||
+    drawing.kind === "price-channel"
+  );
 }
 
 function invalid(id: string, detail: string): DrawingError {
@@ -173,12 +230,21 @@ function assertValidStyle(id: string, style: DrawingStyle): void {
   }
 }
 
-function assertValidPoints(id: string, points: readonly DrawingPoint[]): void {
-  if (!Array.isArray(points) || points.length !== 2) {
-    throw invalid(id, "points must contain exactly two anchors");
+const ANCHOR_COUNT_WORD: Readonly<Record<number, string>> = { 2: "two", 3: "three" };
+
+function assertValidPointsN(id: string, points: readonly DrawingPoint[], count: number): void {
+  if (!Array.isArray(points) || points.length !== count) {
+    throw invalid(id, `points must contain exactly ${ANCHOR_COUNT_WORD[count] ?? count} anchors`);
   }
-  assertValidPoint(id, "points[0]", points[0]);
-  assertValidPoint(id, "points[1]", points[1]);
+  points.forEach((point, i) => assertValidPoint(id, `points[${i}]`, point));
+}
+
+function assertValidPoints(id: string, points: readonly DrawingPoint[]): void {
+  assertValidPointsN(id, points, 2);
+}
+
+function assertValidPoints3(id: string, points: readonly DrawingPoint[]): void {
+  assertValidPointsN(id, points, 3);
 }
 
 /**
@@ -199,13 +265,22 @@ export function assertValidDrawing(drawing: Drawing): void {
   switch (drawing.kind) {
     case "trendline":
     case "rectangle":
+    case "segment":
+    case "ray-line":
+    case "price-channel":
       assertValidPoints(id, drawing.points);
+      return;
+    case "parallel-channel":
+      assertValidPoints3(id, drawing.points);
       return;
     case "horizontal-line":
       assertFinite(id, "price", drawing.price);
       return;
     case "vertical-line":
       assertFinite(id, "time", drawing.time);
+      return;
+    case "price-line":
+      assertFinite(id, "price", drawing.price);
       return;
     case "fibonacci": {
       assertValidPoints(id, drawing.points);

@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -14,6 +15,7 @@ from src.foundation.reconciliation.domain.rules import (
     classify_item,
     compute_input_hash,
 )
+from tests.conftest import PerfBudget
 
 _POLICY = MaterialityPolicy(
     absolute_tolerance=Decimal("0.01"), relative_tolerance_pct=Decimal("0.1")
@@ -145,3 +147,80 @@ def test_compute_input_hash_payload_matches_expected_json_shape():
     import hashlib as real_hashlib
 
     assert compute_input_hash("t", entities) == real_hashlib.sha256(expected_payload).hexdigest()
+
+
+@pytest.mark.parametrize("invalid", [Decimal("NaN"), Decimal("sNaN")])
+@pytest.mark.parametrize("side", ["internal", "provider"])
+def test_negative_classify_item_rejects_nan(invalid, side):
+    """Non-numeric balances must not yield a successful reconciliation grade."""
+    internal = invalid if side == "internal" else Decimal("100")
+    provider = invalid if side == "provider" else Decimal("100")
+    with localcontext() as context:
+        context.traps[InvalidOperation] = True
+        with pytest.raises(InvalidOperation):
+            classify_item(internal, provider, _POLICY)
+
+
+@pytest.mark.parametrize("side", ["internal", "provider"])
+def test_negative_classify_item_rejects_float_amount(side):
+    """Money uses Decimal; mixing binary floats must fail closed."""
+    invalid = cast(Decimal, 100.0)
+    internal = invalid if side == "internal" else Decimal("100")
+    provider = invalid if side == "provider" else Decimal("100")
+    with pytest.raises(TypeError):
+        classify_item(internal, provider, _POLICY)
+
+
+def test_negative_compute_input_hash_rejects_unconverted_decimal():
+    """REC-004/006 requires explicit string amounts in the dedup payload."""
+    entities = cast("dict[str, tuple[str, str]]", {"USDT": (Decimal("1.01"), "1.01")})
+    with pytest.raises(TypeError, match="Decimal.*not JSON serializable"):
+        compute_input_hash("target-1", entities)
+
+
+def test_failure_injection_serialization_error_prevents_hashing(monkeypatch):
+    """A serialization failure must never produce a dedup hash for partial input."""
+    failure = RuntimeError("injected serialization failure")
+    serialize = Mock(side_effect=failure)
+    hash_backend = Mock()
+    monkeypatch.setattr(rules_module.json, "dumps", serialize)
+    monkeypatch.setattr(rules_module.hashlib, "sha256", hash_backend)
+    with pytest.raises(RuntimeError, match="injected serialization failure") as caught:
+        compute_input_hash("target-1", {"USDT": ("100", "99")})
+    assert caught.value is failure
+    serialize.assert_called_once()
+    hash_backend.assert_not_called()
+
+
+def test_adversarial_missing_zero_balance_cannot_aggregate_as_healthy():
+    """REC-003 / I-07: missing external evidence must not become a zero match."""
+    unavailable = classify_item(Decimal("0"), None, _POLICY)
+    assert unavailable == Classification.PROVIDER_UNAVAILABLE
+    assert aggregate_classification((Classification.HEALTHY,) * 100 + (unavailable,)) == (
+        Classification.PROVIDER_UNAVAILABLE
+    )
+
+
+def test_adversarial_material_mismatch_cannot_be_diluted_by_healthy_items():
+    """I-07: a single material discrepancy survives healthy and unavailable items."""
+    mismatch = classify_item(Decimal("100"), Decimal("99"), _POLICY)
+    assert mismatch == Classification.MATERIAL_MISMATCH
+    items = (Classification.HEALTHY,) * 100 + (Classification.PROVIDER_UNAVAILABLE, mismatch)
+    assert aggregate_classification(items) == Classification.MATERIAL_MISMATCH
+
+
+def test_classification_performance_p99_within_gate_budget(perf_budget: PerfBudget) -> None:
+    """ADR-2026-09-09-C: this pure-rule portion stays within the 5ms gate budget.
+
+    Measured with `perf_budget` (process_time, task-7434 guard) rather than raw
+    `perf_counter()`: pure CPU rule evaluation, so wall-clock samples under xdist
+    core contention would measure the host, not this code.
+    """
+    internal, provider = Decimal("100"), Decimal("99")
+
+    def classify_once() -> Classification:
+        return aggregate_classification((classify_item(internal, provider, _POLICY),))
+
+    samples = perf_budget.samples(classify_once, n=200)
+    assert all(s.result == Classification.MATERIAL_MISMATCH for s in samples)
+    assert sorted(s.cpu_ms for s in samples)[197] < 5.0

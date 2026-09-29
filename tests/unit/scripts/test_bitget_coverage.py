@@ -6,6 +6,7 @@ DoD: (1) 커버리지 하락 시 FAIL, (2) 분류는 항상 3종 중 하나만 �
 매칭, (5) 같은 입력에 같은 바이트. 전부 합성 데이터(tmp_path)로 검증 —
 네트워크 접근 없음.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -64,7 +65,7 @@ def test_parse_spec_doc_extracts_simple_row(tmp_path: Path) -> None:
 
 
 def test_parse_spec_doc_expands_suffix_from_previous_path(tmp_path: Path) -> None:
-    """"`/api/v2/mix/market/ticker`, `/tickers`" -> 두 번째는 첫 경로의
+    """ "`/api/v2/mix/market/ticker`, `/tickers`" -> 두 번째는 첫 경로의
     마지막 세그먼트를 대체한 접미사(문서 관례, 02b §5.1)."""
     doc = _write_doc(
         tmp_path,
@@ -118,14 +119,12 @@ def test_load_reference_empty_raises(tmp_path: Path) -> None:
 def test_load_reference_dedupes_across_docs_keeping_first(tmp_path: Path) -> None:
     doc1 = _write_doc(
         tmp_path,
-        "### A\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n"
-        "| x | GET | `/api/v2/dup` |\n",
+        "### A\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n| x | GET | `/api/v2/dup` |\n",
         name="doc1.md",
     )
     doc2 = _write_doc(
         tmp_path,
-        "### B\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n"
-        "| y | GET | `/api/v2/dup` |\n",
+        "### B\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n| y | GET | `/api/v2/dup` |\n",
         name="doc2.md",
     )
     rows = bitget_coverage.load_reference((doc1, doc2))
@@ -153,8 +152,7 @@ def test_path_implemented_template_matches_different_variable_name() -> None:
     달라도 중괄호 자리표시자로 대조해야 매칭된다."""
     source = 'f"/api/v2/margin/{margin_type}/place-order"\n'
     assert (
-        bitget_coverage._path_implemented("/api/v2/margin/{marginType}/place-order", source)
-        is True
+        bitget_coverage._path_implemented("/api/v2/margin/{marginType}/place-order", source) is True
     )
 
 
@@ -164,6 +162,42 @@ def test_path_implemented_template_rejects_wrong_literal_segment() -> None:
         bitget_coverage._path_implemented("/api/v2/margin/{marginType}/place-order", source)
         is False
     )
+
+
+def test_path_implemented_rejects_substring_of_longer_sibling_path() -> None:
+    """리뷰 발견(task-7296 reviewer-2): 정책금지 출금 엔드포인트
+    `/api/v2/spot/wallet/withdrawal`이 별개 엔드포인트인
+    `/api/v2/spot/wallet/withdrawal-records`(구현됨, 조회 전용)의 substring이라
+    예전 구현은 "구현됨"으로 오분류했다 — 경계 있는 매칭이면 False여야 한다."""
+    source = 'await self._request("GET", "/api/v2/spot/wallet/withdrawal-records")\n'
+    assert bitget_coverage._path_implemented("/api/v2/spot/wallet/withdrawal", source) is False
+
+
+def test_path_implemented_rejects_substring_of_longer_prefix_path() -> None:
+    source = 'await self._request("GET", "/api/v2/spot/wallet/deposit-address")\n'
+    assert bitget_coverage._path_implemented("/api/v2/spot/wallet/deposit", source) is False
+
+
+def test_build_matrix_forbidden_row_not_misclassified_by_sibling_endpoint(
+    tmp_path: Path,
+) -> None:
+    """실제 회귀 재현: 기준 문서에 출금 신청(금지) + 출금 이력(구현됨)이 함께
+    있을 때, 출금 신청 행은 반드시 `범위밖`으로 남아야 한다(`구현됨` 아님)."""
+    doc = _write_doc(
+        tmp_path,
+        "### 3.3 Account\n\n"
+        "| 함수 목적 | Method | Path | 우선순위 |\n"
+        "|---|---|---|---|\n"
+        "| 출금 신청 | POST | `/api/v2/spot/wallet/withdrawal` | **금지** |\n"
+        "| 출금 이력 조회 | GET | `/api/v2/spot/wallet/withdrawal-records` | P2 |\n",
+    )
+    reference = bitget_coverage.load_reference((doc,))
+    adapter_source = 'await self._request("GET", "/api/v2/spot/wallet/withdrawal-records")\n'
+    matrix = bitget_coverage.build_matrix(reference, adapter_source)
+
+    reasons = {r.path: r.reason for r in matrix.rows}
+    assert reasons["/api/v2/spot/wallet/withdrawal"] == "범위밖"
+    assert reasons["/api/v2/spot/wallet/withdrawal-records"] == "구현됨"
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +274,7 @@ def test_build_matrix_percent_rounds_to_two_decimals(tmp_path: Path) -> None:
 def test_render_markdown_is_byte_identical_for_same_input(tmp_path: Path) -> None:
     doc = _write_doc(
         tmp_path,
-        "### A\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n"
-        "| a | GET | `/api/v2/a` |\n",
+        "### A\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n| a | GET | `/api/v2/a` |\n",
     )
     reference = bitget_coverage.load_reference((doc,))
     matrix = bitget_coverage.build_matrix(reference, adapter_source="")
@@ -255,8 +288,7 @@ def test_render_markdown_is_byte_identical_for_same_input(tmp_path: Path) -> Non
 def test_render_coverage_txt_is_byte_identical_for_same_input(tmp_path: Path) -> None:
     doc = _write_doc(
         tmp_path,
-        "### A\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n"
-        "| a | GET | `/api/v2/a` |\n",
+        "### A\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n| a | GET | `/api/v2/a` |\n",
     )
     reference = bitget_coverage.load_reference((doc,))
     matrix = bitget_coverage.build_matrix(reference, adapter_source="")

@@ -67,13 +67,22 @@ export function createClientIncrementalIndicator(
   const inputs = entry.inputs;
   return {
     name,
+    // task-7910 (esc-ci-frontend.json density-bench indicatorAddMs regression):
+    // the previous `Object.fromEntries(outputs.map(...))` allocated two
+    // throwaway arrays (the map result plus one [key, value] pair per output)
+    // on every single bar update, on top of the object fromEntries itself
+    // builds -- multiplied by 100k candles x 9 bench runs, that is ~1.8M+
+    // extra short-lived arrays feeding GC pressure the loop below avoids by
+    // writing straight into one result object. Same values, same null
+    // handling, no numeric recipe change.
     update(bar: Bar): IndicatorOutputs {
       assertBarInputs(name, inputs, bar);
       const values = state.update(bar);
-      if (values === null) {
-        return Object.fromEntries(outputs.map((output) => [output, null]));
+      const result: Record<string, number | null> = {};
+      for (let i = 0; i < outputs.length; i++) {
+        result[outputs[i]!] = values === null ? null : values[i]!;
       }
-      return Object.fromEntries(outputs.map((output, index) => [output, values[index]!]));
+      return result;
     },
   };
 }

@@ -55,8 +55,10 @@ NETWORK_ERROR_MARKERS = ("ENOTFOUND", "NameResolutionError", "ConnectionError", 
 NETWORK_ERROR_RC = 3
 
 
-def is_network_error(text: str) -> bool:
-    return any(marker in text for marker in NETWORK_ERROR_MARKERS)
+def is_network_error(text: str | None) -> bool:
+    """`text`가 None이어도(예: subprocess 캡처 실패) TypeError 없이 False를 낸다."""
+    normalized = text or ""
+    return any(marker in normalized for marker in NETWORK_ERROR_MARKERS)
 
 
 def load_ignored_vuln_ids(ignore_file: Path, *, today: dt.date) -> list[str]:
@@ -150,20 +152,41 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     cmd = build_pip_audit_command(args.python)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # encoding을 명시하지 않으면 Windows에서 locale.getpreferredencoding()(cp949 등)로
+    # 디코딩되는데, pip-audit --format json은 UTF-8을 낸다 — 로케일이 cp949인 CI
+    # 러너에서 UnicodeDecodeError로 죽는다(task-8362). pip-audit 출력은 항상 UTF-8이므로
+    # 고정한다.
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    # capture_output=True/text=True는 정상 경로에서 stdout/stderr를 항상 str로 채우지만,
+    # subprocess가 캡처 자체에 실패하는 경로(예: 예외적인 파이프 처리)에서는 None이 나올 수
+    # 있다 -- is_network_error가 None을 받아도 죽지 않게 여기서도 빈 문자열로 정규화해
+    # 아래 판정 전체가 이 값 하나만 신뢰하면 되게 한다.
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
 
-    if is_network_error(proc.stdout) or is_network_error(proc.stderr):
+    if is_network_error(stdout) or is_network_error(stderr):
         print(
             "pip-audit 네트워크 오류(pypi.org DNS/연결 실패) -- 취약점 판정 불가:", file=sys.stderr
         )
-        print(proc.stderr, file=sys.stderr)
+        print(stderr, file=sys.stderr)
         return NETWORK_ERROR_RC
 
+    if not stdout.strip():
+        # 네트워크 오류 마커도 없이 stdout이 비어 있으면 취약점 판정이 아니라 감사 실행
+        # 자체가 실패한 것(예: capture 실패, pip_audit 프로세스가 조기 종료) -- "취약점
+        # 발견"으로 오판하지 않도록 별도 사유로 fail-closed 처리한다.
+        print(
+            "pip-audit 감사 실행 자체가 실패했다(stdout 비어있음, 네트워크 오류 아님):",
+            file=sys.stderr,
+        )
+        print(stderr, file=sys.stderr)
+        return 1
+
     try:
-        failures = evaluate_pip_audit_json(proc.stdout, set(ignored_ids))
+        failures = evaluate_pip_audit_json(stdout, set(ignored_ids))
     except AuditFailure as exc:
         print(str(exc), file=sys.stderr)
-        print(proc.stderr, file=sys.stderr)
+        print(stderr, file=sys.stderr)
         return 1
 
     if failures:

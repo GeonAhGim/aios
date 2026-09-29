@@ -396,6 +396,7 @@ async def _suspend_membership_p95_ms(pool, repo, admin_ctx, tenant_id, *, n: int
     return durations_ms[math.ceil(0.95 * len(durations_ms)) - 1]
 
 
+@pytest.mark.perf
 async def test_suspend_membership_p95_under_borrowed_order_ack_budget(pool, repo):
     """수치 성능 단언 1건 — ADR-2026-09-09-C Decision 1 예산표에 멤버십
     상태전이 전용 항목은 없다. `suspend_membership`은 조회+FOR UPDATE

@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.deps import get_pool
 from src.api.service_deps import get_credential_resolver
+from src.core.indicators.specs_talib import TALIB_SPECS
 from src.data.models.market_data import Candle
 from src.main import app
 
@@ -140,9 +141,12 @@ async def test_get_candles_requires_authentication(client):
 
 async def test_compute_indicator_unsupported_returns_400(client):
     headers = await _register(client)
+    # Must be a name no TA-Lib version provides — VWAP became a real function
+    # in TA-Lib 0.6.x and would turn this negative test into a 200.
+    assert "NOT_AN_INDICATOR" not in TALIB_SPECS
 
     response = await client.get(
-        "/strategy-builder/indicators/VWAP/compute",
+        "/strategy-builder/indicators/NOT_AN_INDICATOR/compute",
         params={"exchange": "bitget", "symbol": "BTC/USDT"},
         headers=headers,
     )
