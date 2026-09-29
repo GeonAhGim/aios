@@ -1,4 +1,29 @@
 {
-  "generated_at": "2026-09-29T07:54:26+00:00",
-  "tasks": []
+  "generated_at": "2026-09-29T08:05:25+00:00",
+  "tasks": [
+    {
+      "id": 8683,
+      "title": "[cloud-early] M2-5 웹훅 액션 엔진 1단계 — 전송 포트+어댑터(서명·재시도)",
+      "spec": "ADR-2026-09-09-B Decision B M2-5(알림 웹훅/다채널 액션 엔진)의 1단계. 현재 src/services/alert_service.py는 가격 알림만 발생시키고 웹훅 전송 경로가 전무하다(git grep 'webhook' src/ 0건, git ls-files로 확인됨). 범용 웹훅 전송 포트+어댑터를 신설한다: 페이로드 HMAC-SHA256 서명, 지수 백오프 재시도(최대 3회), 타임아웃 5s, 재시도 소진 실패 시 dead-letter 기록. 기존 alert_service.py 배선은 다음 리프(2단계) 몫이며 이 리프는 신설 모듈만 다룬다. 사용자 노출 기능이 아니라 백엔드 전송 모듈이라 FF 불필요(2단계 배선 시 결정).\n\nDoD 체크리스트:\n- [ ] `WebhookDeliveryPort`(추상)와 `httpx` 기반 어댑터 1종(fake 없이 실제 구현)\n- [ ] 서명: payload를 공유 secret으로 HMAC-SHA256, 헤더 X-Signature 첨부\n- [ ] 재시도: 5xx/timeout만 재시도, 4xx는 즉시 실패(재시도 안 함) — negative 테스트로 구분 확인\n- [ ] `python -m pytest tests/unit/services/test_webhook_delivery.py -q` 전부 통과, negative>=3건(서명불일치·권한/4xx 즉시실패·3회 재시도 후 dead-letter)\n- [ ] 실키 불필요 — httpx MockTransport로 fake 전송만",
+      "files": [
+        "new:src/services/webhook_delivery.py",
+        "new:tests/unit/services/test_webhook_delivery.py"
+      ],
+      "tier": "M",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 웹훅 전송 신규 모듈, GitHub 저장소만으로 완결(httpx MockTransport fake), 주문/돈 경로 아님"
+    },
+    {
+      "id": 8684,
+      "title": "[cloud-early] U-5 거래 일지 성과 지표 1단계 — 승률·기대값·MAE/MFE 순수함수",
+      "spec": "ADR-2026-09-09-B Decision C U-5(거래 일지·성과 분석)의 1단계. 기존 src/foundation/positions/domain/journal_rules.py는 회계 저널(처리 기록)이고, 승률/기대값/MAE(Maximum Adverse Excursion)/MFE(Maximum Favorable Excursion) 계산 모듈은 저장소 전체에 0건(git grep 'win_rate\\|expectancy\\|MFE' src/ 0건). 종료된 거래 기록 목록(진입가·청산가·수량·방향·보유 중 최저/최고 미실현손익)을 입력받아 승률/기대값/평균 MAE/평균 MFE를 계산하는 순수 함수를 src/foundation/positions/domain/에 신설한다. DB/API 배선은 다음 리프 몫이며 이 리프는 순수 도메인 계산만 다룬다.\n\nDoD 체크리스트:\n- [ ] `ClosedTrade` 데이터클래스(entry_price, exit_price, qty, side, mae, mfe: 모두 Decimal)\n- [ ] `win_rate(trades: Sequence[ClosedTrade]) -> Decimal`(승리 거래 비율, 빈 시퀀스는 ValueError)\n- [ ] `expectancy(trades) -> Decimal`(평균 손익 × 승률 - 평균 손실 × 패률 공식)\n- [ ] `average_mae(trades) -> Decimal`, `average_mfe(trades) -> Decimal`\n- [ ] `python -m pytest tests/foundation/unit/positions/test_trade_stats.py -q` 전부 통과, negative>=3건(빈 리스트·음수 qty·mae<0)\n- [ ] Decimal만 사용(float 금지, 프로젝트 전체 관습)",
+      "files": [
+        "new:src/foundation/positions/domain/trade_stats.py",
+        "new:tests/foundation/unit/positions/test_trade_stats.py"
+      ],
+      "tier": "M",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 거래 일지 성과 지표 순수함수, DB/API 미배선, fake 불필요(순수 계산)"
+    }
+  ]
 }
