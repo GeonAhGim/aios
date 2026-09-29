@@ -715,3 +715,52 @@ async def test_concurrent_rebuild_snapshot_serialised_by_advisory_lock(pool, por
         "최종 스냅샷은 저널이 fold한 값과 일치해야 한다"
     )
     assert snapshot_row["last_journal_seq"] == 1
+
+
+async def test_concurrent_record_fill_same_order_and_fill_seq_applies_once(pool, ports):
+    """task-8812/task-8675 F2(L) — advisory lock(`_acquire_position_lock`,
+    record_fill.py:168)이 같은 order_id+fill_seq의 동시 REPLAY 경쟁을 실제로
+    직렬화하는지 확인하는 회귀망. 순차 REPLAY는 이미 커버되고(위
+    `test_replay_skips_realized_pnl_recompute_and_single_upsert`,
+    `test_replay_same_fill_returns_existing_without_duplicate`), 동시
+    rebuild_snapshot도 이미 커버되지만(`test_concurrent_rebuild_snapshot_
+    serialised_by_advisory_lock`), 같은 command를 `asyncio.gather`로 진짜
+    동시에 2회 `record_fill`하는 경로는 아직 아무 테스트도 재현하지 않았다
+    — 각 호출이 독립된 커넥션/트랜잭션을 쓰므로 advisory lock이 없다면 두
+    트랜잭션이 동시에 `is_replay_candidate=False`를 보고 원가법을 두 번
+    계산할 수 있다."""
+    tenant_id, account_id, position_key = await _open(pool)
+    command = _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+    )
+
+    results = await asyncio.gather(
+        _record(pool, ports, command),
+        _record(pool, ports, command),
+    )
+
+    assert {r.quantity for r in results} == {Decimal("10")}
+    assert {r.last_journal_seq for r in results} == {1}
+    assert {tuple(lot.quantity for lot in r.lots) for r in results} == {(Decimal("10"),)}
+
+    async with pool.acquire() as conn:
+        journal_count = await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
+        )
+        sequence_nos = await conn.fetch(
+            "SELECT sequence_no FROM pos_journal WHERE position_key = $1", position_key
+        )
+        snapshot_row = await conn.fetchrow(
+            "SELECT quantity, last_journal_seq FROM pos_snapshot WHERE position_key = $1",
+            position_key,
+        )
+    assert journal_count == 1
+    assert [row["sequence_no"] for row in sequence_nos] == [1]
+    assert snapshot_row["quantity"] == Decimal("10")
+    assert snapshot_row["last_journal_seq"] == 1
+    assert snapshot_row["last_journal_seq"] == 1
