@@ -52,13 +52,15 @@ def test_extract_implemented_pairs_matches_real_adapter() -> None:
     assert ("POST", "/api/v5/trade/amend-order") in pairs
 
 
-def test_get_order_query_not_marked_implemented() -> None:
-    """Contract (this is the gate this leaf closes): `GET /api/v5/trade/order`
-    (order lookup) shares its path with the implemented `POST` place-order
-    endpoint but must not be reported as implemented -- no query/lookup
-    endpoint exists yet on `main`."""
+def test_get_order_query_now_marked_implemented() -> None:
+    """Contract: `GET /api/v5/trade/order` (order lookup) shares its path with
+    the `POST` place-order endpoint but is a distinct (method, path) pair.
+    `account_mixin.py::get_order` (task-7596/BR-21c) implements it, so it must
+    be reported as implemented alongside the `POST` place-order pair -- not
+    conflated with, nor hidden by, the shared path string."""
     pairs = okx_coverage.extract_implemented_pairs(okx_coverage.DEFAULT_ADAPTER_DIR)
-    assert ("GET", "/api/v5/trade/order") not in pairs
+    assert ("GET", "/api/v5/trade/order") in pairs
+    assert ("POST", "/api/v5/trade/order") in pairs
 
 
 def test_build_matrix_classifies_known_endpoints() -> None:
@@ -70,9 +72,9 @@ def test_build_matrix_classifies_known_endpoints() -> None:
 
     by_key = {(row.method, row.path): row.reason for row in matrix.rows}
     assert by_key[("POST", "/api/v5/trade/order")] == "implemented"
-    assert by_key[("GET", "/api/v5/trade/order")] == "not_started"
-    assert by_key[("GET", "/api/v5/market/ticker")] == "not_started"
-    assert matrix.implemented == 3
+    assert by_key[("GET", "/api/v5/trade/order")] == "implemented"
+    assert by_key[("GET", "/api/v5/account/positions")] == "not_started"
+    assert matrix.implemented == 9
     assert matrix.total == len(reference["endpoints"])
 
 
@@ -124,18 +126,29 @@ def test_no_network_calls_in_coverage_script() -> None:
 def test_naive_substring_matching_would_falsely_report_implemented_red_gate() -> None:
     """Red-gate reproduction: the sibling scripts (bitget/nh/upbit coverage)
     classify by path-substring alone, ignoring HTTP method. Reproduce that
-    naive approach directly against the real adapter source to show it would
-    misreport the unimplemented `GET /api/v5/trade/order` as done -- exactly
-    the gate `extract_implemented_pairs()`'s method-aware matching closes."""
-    adapter_source = "\n".join(
-        p.read_text(encoding="utf-8")
-        for p in sorted(okx_coverage.DEFAULT_ADAPTER_DIR.rglob("*.py"))
+    naive approach against a synthetic adapter source that implements only
+    `POST` on a shared path, to show it would misreport the unimplemented
+    `GET` variant as done -- exactly the false positive
+    `extract_implemented_pairs()`'s method-aware (method, path) pairing
+    closes.
+
+    (As of task-7596/BR-21c, `account_mixin.py::get_order` genuinely
+    implements `GET /api/v5/trade/order` alongside `trading_mixin.py`'s
+    `POST /api/v5/trade/order`, so the real adapter source no longer has a
+    method mismatch on that path to reproduce against -- a synthetic source
+    isolates the same mechanism instead.)"""
+    synthetic_source = (
+        '_ORDER_PATH = "/api/v5/example/order"\n'
+        "class C:\n"
+        "    async def place_order(self):\n"
+        '        await self._request("POST", _ORDER_PATH, body={})\n'
     )
-    naive_would_report_implemented = "/api/v5/trade/order" in adapter_source
+    naive_would_report_implemented = "/api/v5/example/order" in synthetic_source
     assert naive_would_report_implemented is True
 
-    precise_pairs = okx_coverage.extract_implemented_pairs(okx_coverage.DEFAULT_ADAPTER_DIR)
-    assert ("GET", "/api/v5/trade/order") not in precise_pairs
+    precise_pairs = okx_coverage._pairs_from_file(synthetic_source)
+    assert ("GET", "/api/v5/example/order") not in precise_pairs
+    assert ("POST", "/api/v5/example/order") in precise_pairs
 
 
 # ============================================================================
@@ -254,6 +267,4 @@ def test_build_matrix_performance() -> None:
             matrix = okx_coverage.build_matrix(reference, pairs)
             assert matrix.total == len(reference["endpoints"])
 
-    RelativeBudget().assert_within(
-        _run_fifty, max_ratio=2.0, mode="cpu", label="build_matrix x50"
-    )
+    RelativeBudget().assert_within(_run_fifty, max_ratio=2.0, mode="cpu", label="build_matrix x50")

@@ -246,8 +246,10 @@ def render_markdown(reference: dict[str, Any], matrix: MatrixResult) -> str:
         "",
         "Evidence for `implemented` rows: `src/exchanges/okx/trading_mixin.py` (task "
         "BR-21d, already on `main`) implements `place_order`/`cancel_order`/`modify_order` "
-        "via `POST /api/v5/trade/{order,cancel-order,amend-order}`. This leaf (task-7594, "
-        "BR-21a) adds only the matrix generator, not any endpoint.",
+        "via `POST /api/v5/trade/{order,cancel-order,amend-order}`; "
+        "`src/exchanges/okx/market_data_mixin.py` and `account_mixin.py` (task-7595/7596, "
+        "BR-21c) add the market-data and account/order-query endpoints. This leaf "
+        "(task-7594, BR-21a) adds only the matrix generator, not any endpoint.",
         "",
         "## Summary",
         "",
