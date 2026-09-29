@@ -25,7 +25,9 @@ import argparse
 import ast
 import configparser
 import json
+import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,16 @@ _EXCLUDE_DIR_NAMES = frozenset(
     }
 )
 
+# esc-ci-import_linter([import_linter] timeout 120s): bisect landed on 2dd74ce9, the same
+# DEEPEN commit that grew tests/ file counts enough to tip check_code_ratchets.py's serial
+# path.read_text() scan over its 180s budget (task-8746, commit 638dca50). This script's
+# build_graph() has the identical shape -- a serial read_text() per file under src/ -- so a
+# cold-cache checkout pays full disk latency per open() the same way. Same fix as there and
+# as check_no_bom.py's SCAN_WORKERS saga: I/O-bound reads release the GIL, so a shared
+# thread pool overlaps the per-file wait instead of paying it serially. 16 matches those
+# scripts' fleet-tuned value.
+SCAN_WORKERS = 16
+
 Hit = tuple[str, int, str]  # (rel_path, lineno, detail)
 
 
@@ -62,14 +74,18 @@ class ImportLinterError(ValueError):
 
 
 def _iter_python_files(root: Path, subdir: str) -> list[Path]:
+    """os.walk with in-place pruning so excluded directories are never descended into --
+    rglob("*.py") lists everything first and filters afterward, still paying the traversal
+    cost of every pruned subtree."""
     base = root / subdir
     if not base.is_dir():
         return []
-    out = []
-    for path in base.rglob("*.py"):
-        if _EXCLUDE_DIR_NAMES & set(path.relative_to(root).parts[:-1]):
-            continue
-        out.append(path)
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDE_DIR_NAMES]
+        for name in filenames:
+            if name.endswith(".py"):
+                out.append(Path(dirpath) / name)
     return sorted(out)
 
 
@@ -121,9 +137,13 @@ def _importfrom_targets(node: ast.ImportFrom, module_dotted: str, is_package: bo
     return _absolute_import_targets(node)
 
 
-def _imports_of(path: Path, module_dotted: str, is_package: bool) -> set[str]:
+def _read_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _imports_of_text(text: str, path: Path, module_dotted: str, is_package: bool) -> set[str]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
+        tree = ast.parse(text, filename=str(path))
     except SyntaxError:
         return set()
     targets: set[str] = set()
@@ -137,10 +157,16 @@ def _imports_of(path: Path, module_dotted: str, is_package: bool) -> set[str]:
 
 def build_graph(root: Path, subdir: str = SCAN_SUBDIR) -> dict[str, set[str]]:
     """모듈 dotted name -> 그 모듈이 직접 임포트하는 dotted name 집합."""
+    files = _iter_python_files(root, subdir)
+    # I/O-bound: a serial path.read_text() per file paid full disk latency on every open()
+    # on a cold checkout (esc-ci-import_linter timeout 120s). A shared thread pool overlaps
+    # that wait the same way check_code_ratchets.py's/check_no_bom.py's pools do.
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        texts = pool.map(_read_file, files)
     graph: dict[str, set[str]] = {}
-    for path in _iter_python_files(root, subdir):
+    for path, text in zip(files, texts, strict=True):
         module_dotted, is_package = _module_name(root, path)
-        graph[module_dotted] = _imports_of(path, module_dotted, is_package)
+        graph[module_dotted] = _imports_of_text(text, path, module_dotted, is_package)
     return graph
 
 
