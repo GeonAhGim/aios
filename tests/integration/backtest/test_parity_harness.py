@@ -11,6 +11,7 @@ BT-19, docs/design/INVARIANTS.md I-05. DoD: 고정 PAPER 추적 1건에 대해
 자체가 맞는지 증명한다(단위 테스트가 아니라 integration으로 분류한
 이유: OMS 계약 타입 + 백테스트 도메인 타입을 함께 다룬다).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -59,8 +60,7 @@ def _backtest_fill(
         bar_index=bar_index,
         # 리플레이 타임스탬프는 PAPER venue_ts와 구조적으로 다른 시계열
         # (봉 종가 시각)이다 — 비교에서 제외되는 필드임을 픽스처로도 보여준다.
-        timestamp=datetime(2026, 9, 1, 1, bar_index, tzinfo=timezone.utc)
-        + timedelta(seconds=1),
+        timestamp=datetime(2026, 9, 1, 1, bar_index, tzinfo=timezone.utc) + timedelta(seconds=1),
         symbol=_SYMBOL,
         side=side,
         price=price,
@@ -73,15 +73,24 @@ def _backtest_fill(
 # 고정 PAPER 추적 1건(§DoD "고정 PAPER 추적 1건") — 3개 체결, 매수 2 + 매도 1.
 _PAPER_TRACE = [
     _paper_fill(
-        seq=0, side=OrderSide.BUY, quantity=Decimal("1"), price=Decimal("100.00"),
+        seq=0,
+        side=OrderSide.BUY,
+        quantity=Decimal("1"),
+        price=Decimal("100.00"),
         fee=Decimal("0.10"),
     ),
     _paper_fill(
-        seq=1, side=OrderSide.BUY, quantity=Decimal("2"), price=Decimal("101.50"),
+        seq=1,
+        side=OrderSide.BUY,
+        quantity=Decimal("2"),
+        price=Decimal("101.50"),
         fee=Decimal("0.20"),
     ),
     _paper_fill(
-        seq=2, side=OrderSide.SELL, quantity=Decimal("3"), price=Decimal("103.25"),
+        seq=2,
+        side=OrderSide.SELL,
+        quantity=Decimal("3"),
+        price=Decimal("103.25"),
         fee=Decimal("0.30"),
     ),
 ]
@@ -91,15 +100,24 @@ def _matching_backtest_fills() -> list[SimulatedFill]:
     """같은 아티팩트·구간을 재생했다고 가정한, PAPER 추적과 값이 일치하는 리플레이."""
     return [
         _backtest_fill(
-            bar_index=0, side=OrderSide.BUY, quantity=Decimal("1"), price=Decimal("100.00"),
+            bar_index=0,
+            side=OrderSide.BUY,
+            quantity=Decimal("1"),
+            price=Decimal("100.00"),
             fee=Decimal("0.10"),
         ),
         _backtest_fill(
-            bar_index=1, side=OrderSide.BUY, quantity=Decimal("2"), price=Decimal("101.50"),
+            bar_index=1,
+            side=OrderSide.BUY,
+            quantity=Decimal("2"),
+            price=Decimal("101.50"),
             fee=Decimal("0.20"),
         ),
         _backtest_fill(
-            bar_index=2, side=OrderSide.SELL, quantity=Decimal("3"), price=Decimal("103.25"),
+            bar_index=2,
+            side=OrderSide.SELL,
+            quantity=Decimal("3"),
+            price=Decimal("103.25"),
             fee=Decimal("0.30"),
         ),
     ]
@@ -117,7 +135,10 @@ def test_decimal_representation_difference_alone_does_not_break_parity() -> None
     """같은 값이면 `Decimal` 지수 표현이 달라도(예: "3" vs "3.00") 일치로 본다."""
     backtest = _matching_backtest_fills()
     backtest[0] = _backtest_fill(
-        bar_index=0, side=OrderSide.BUY, quantity=Decimal("1.00"), price=Decimal("100.0000"),
+        bar_index=0,
+        side=OrderSide.BUY,
+        quantity=Decimal("1.00"),
+        price=Decimal("100.0000"),
         fee=Decimal("0.10"),
     )
     report = check_parity(_PAPER_TRACE, backtest)
@@ -153,11 +174,17 @@ def test_divergence_at_earlier_index_reported_even_if_later_also_diverges() -> N
     """뒤쪽에도 발산이 있어도 리포트는 항상 '첫' 발산 지점만 낸다."""
     backtest = _matching_backtest_fills()
     backtest[0] = _backtest_fill(
-        bar_index=0, side=OrderSide.BUY, quantity=Decimal("999"), price=Decimal("100.00"),
+        bar_index=0,
+        side=OrderSide.BUY,
+        quantity=Decimal("999"),
+        price=Decimal("100.00"),
         fee=Decimal("0.10"),
     )
     backtest[2] = _backtest_fill(
-        bar_index=2, side=OrderSide.SELL, quantity=Decimal("3"), price=Decimal("999.99"),
+        bar_index=2,
+        side=OrderSide.SELL,
+        quantity=Decimal("3"),
+        price=Decimal("999.99"),
         fee=Decimal("0.30"),
     )
 
@@ -177,9 +204,7 @@ def test_divergence_at_earlier_index_reported_even_if_later_also_diverges() -> N
         ("fee", {"fee": Decimal("0.11")}),
     ],
 )
-def test_each_compared_field_can_trigger_divergence(
-    field: str, update: dict[str, object]
-) -> None:
+def test_each_compared_field_can_trigger_divergence(field: str, update: dict[str, object]) -> None:
     backtest = _matching_backtest_fills()
     backtest[0] = backtest[0].model_copy(update=update)
 
@@ -290,6 +315,7 @@ def test_failure_injection_conversion_error_propagates_without_partial_success(
     check_parity(_PAPER_TRACE, _matching_backtest_fills()).raise_if_mismatch()
 
 
+@pytest.mark.perf
 def test_parity_throughput_within_monthly_backtest_budget() -> None:
     """ADR-2026-09-09-C: comparison alone must fit the 3s monthly M1 budget."""
     repetitions = 30 * 24 * 60 // len(_PAPER_TRACE)

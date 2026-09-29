@@ -33,10 +33,7 @@ async def _assert_foundation_security(conn: asyncpg.Connection) -> None:
         "AND relkind = 'r' AND relname = ANY($1::text[])",
         list(_FOUNDATION_TABLES),
     )
-    flags = {
-        row["relname"]: (row["relrowsecurity"], row["relforcerowsecurity"])
-        for row in rows
-    }
+    flags = {row["relname"]: (row["relrowsecurity"], row["relforcerowsecurity"]) for row in rows}
     assert set(flags) == set(_FOUNDATION_TABLES), flags
     for table, (enabled, forced) in flags.items():
         assert enabled and forced, f"{table}: enabled={enabled}, forced={forced}"
@@ -89,6 +86,7 @@ async def test_failure_injection_unforce_trips_red_gate_and_rolls_back(pool, tab
         await _assert_foundation_security(conn)
 
 
+@pytest.mark.perf
 async def test_catalog_security_check_p95_under_borrowed_ack_budget(pool):
     """Borrow ADR-2026-09-09-C's paper ACK p95 50ms budget for catalog reads."""
     durations = []
