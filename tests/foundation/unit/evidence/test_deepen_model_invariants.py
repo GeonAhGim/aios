@@ -10,12 +10,17 @@ task-8658 정정: 이전에는 이 내용이 패키지 `__init__.py`에 있었�
 (`tests/unit/meta/test_perf_marker_guard.py` 등 다른 __init__.py 선례도 같은 결함을
 공유한다) 여기 있던 negative/실패주입/성능 테스트 5건이 한 번도 실행되지 않았다
 (`pytest --collect-only`로 실측 확인). `test_*.py`로 옮겨 실제로 수집·실행되게 한다.
+
+task-8660 정정: 위 이동으로 `test_compute_payload_hash_throughput_budget`가 실제로
+수집·실행되게 되면서, 그 테스트의 raw `time.perf_counter()` 예산 단언이 `pytest_perf`
+단계(`--cov=src --cov-append`)에서 coverage line-tracer 오버헤드를 그대로 측정에
+섞는 문제가 살아난다 — task-7253/7250이 `PerfBudget`에 도입한 coverage 일시정지 +
+`time.process_time()` 측정을 재사용해 근본 정정한다.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -23,6 +28,7 @@ import pytest
 
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 from src.foundation.evidence.domain.rules import compute_event_hash, compute_payload_hash
+from tests.conftest import PerfBudget
 
 NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
 
@@ -116,15 +122,19 @@ def test_compute_payload_hash_propagates_json_serialization_failure(
 
 
 @pytest.mark.perf
-def test_compute_payload_hash_throughput_budget():
-    """D2 성능 단언 — 순수 CPU 해시 연산이므로 5,000회 호출이 500ms 예산(=
-    10k ops/sec 이상) 안에 들어야 한다. 회귀 시(예: 매 호출마다 불필요한 딥카피
-    추가) 여기서 잡힌다."""
+def test_compute_payload_hash_throughput_budget(perf_budget: PerfBudget):
+    """D2 성능 단언 — 순수 CPU 해시 연산이므로 1회 호출이 100us(=10k ops/sec
+    이상) 예산 안에 들어야 한다. 회귀 시(예: 매 호출마다 불필요한 딥카피 추가)
+    여기서 잡힌다. `perf_budget`(task-6774)로 측정해 `time.process_time()`
+    기준(다른 워커에 코어를 뺏겨도 왜곡되지 않음) + coverage line-tracer
+    구간 제외(task-7253/7250, `pytest --cov=src`가 이 CI 단계 기본값이라 raw
+    `time.perf_counter()`는 트레이서 오버헤드까지 측정에 섞여 flaky해진다)를
+    재사용한다."""
     payload = {"purpose": "trading_risk", "revision": 1, "nested": {"a": 1, "b": 2}}
 
-    started = time.perf_counter()
-    for _ in range(5000):
-        compute_payload_hash(payload)
-    elapsed = time.perf_counter() - started
-
-    assert elapsed < 0.5, f"compute_payload_hash 5000회 처리 {elapsed:.4f}s가 500ms 예산 초과"
+    perf_budget.assert_within(
+        lambda: compute_payload_hash(payload),
+        budget_ms=0.1,
+        batch=5000,
+        label="compute_payload_hash",
+    )
