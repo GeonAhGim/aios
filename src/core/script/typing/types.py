@@ -14,7 +14,15 @@ AST 순회·decl별 검사는 `checker.py`(같은 리프)의 몫이라 이 모�
 M2-3 step 1 (task-7847): `string` belongs to neither lattice above -- it is
 only in `STRING_TYPES`, has no series form, and every arithmetic/comparison/
 logical promotion function rejects it on either side.
+
+M2-3 step 2 (task-8694): `array<float>` is a third, separate scalar-adjacent
+type -- a constant-length vector literal. It deliberately is NOT a member of
+`NUMERIC_TYPES` (arithmetic/comparison/logical promotion all key off that
+frozenset membership, so leaving it out is what makes `arr + 1.0` a rejection
+without any new branch in `promote_numeric`/`cmp_result`), and it has no
+implicit conversion to/from `series<float>` for the same reason.
 """
+
 from __future__ import annotations
 
 from src.core.script.grammar.ast import TypeName
@@ -24,9 +32,11 @@ Type = TypeName
 NUMERIC_TYPES: frozenset[Type] = frozenset({"int", "float", "series<float>"})
 BOOL_TYPES: frozenset[Type] = frozenset({"bool", "series<bool>"})
 STRING_TYPES: frozenset[Type] = frozenset({"string"})
+ARRAY_TYPES: frozenset[Type] = frozenset({"array<float>"})
 
 _SERIES_TYPES: frozenset[Type] = frozenset({"series<float>", "series<bool>"})
 _SERIES_ELEMENT: dict[Type, Type] = {"series<float>": "float", "series<bool>": "bool"}
+_ARRAY_ELEMENT: dict[Type, Type] = {"array<float>": "float"}
 
 
 def is_series(type_: Type) -> bool:
@@ -39,13 +49,20 @@ def is_string(type_: Type) -> bool:
     return type_ in STRING_TYPES
 
 
-def element_type(type_: Type) -> Type:
-    """시리즈 타입의 원소 타입(series<float> -> float, series<bool> -> bool).
+def is_array(type_: Type) -> bool:
+    """Whether `type_` is an array type (currently only `array<float>`)."""
+    return type_ in ARRAY_TYPES
 
-    스칼라 타입이 들어오면 그대로 반환한다(호출자가 `is_series`로 먼저
-    분기하는 것이 기본이지만, 이 함수 자체는 부분함수로 만들지 않는다).
+
+def element_type(type_: Type) -> Type:
+    """시리즈/배열 타입의 원소 타입(series<float> -> float, array<float> -> float).
+
+    스칼라 타입이 들어오면 그대로 반환한다(호출자가 `is_series`/`is_array`로
+    먼저 분기하는 것이 기본이지만, 이 함수 자체는 부분함수로 만들지 않는다).
     """
-    return _SERIES_ELEMENT.get(type_, type_)
+    if type_ in _SERIES_ELEMENT:
+        return _SERIES_ELEMENT[type_]
+    return _ARRAY_ELEMENT.get(type_, type_)
 
 
 def promote_numeric(left: Type, right: Type) -> Type | None:

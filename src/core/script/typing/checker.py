@@ -42,11 +42,13 @@ it stays behind `AIOS_SCRIPT_STRING_TYPE_ENABLED` (default OFF, exact-match
 gate mirroring `AIOS_ALLOW_LIVE_ADAPTER` in `src/exchanges/factory.py`) until a
 real consumer (alertcondition message, plot title) lands in a later step.
 """
+
 from __future__ import annotations
 
 import os
 
 from src.core.script.grammar.ast import (
+    ArrayLiteral,
     BinaryExpr,
     CallExpr,
     Decl,
@@ -78,9 +80,7 @@ from src.core.script.typing.types import (
 
 STRING_TYPE_ENV_VAR = "AIOS_SCRIPT_STRING_TYPE_ENABLED"
 
-_CMP_AND_CROSS_OPS = frozenset(
-    {"<", "<=", "==", ">=", ">", "crosses_above", "crosses_below"}
-)
+_CMP_AND_CROSS_OPS = frozenset({"<", "<=", "==", ">=", ">", "crosses_above", "crosses_below"})
 _ARITH_TERM_OPS = frozenset({"+", "-", "*", "/"})
 _LOGICAL_OPS = frozenset({"or", "and"})
 
@@ -131,8 +131,7 @@ def _check_decl(decl: Decl, env: TypeEnv) -> None:
         result = infer_type(decl.expr, env)
         if result not in NUMERIC_TYPES:
             raise ScriptTypeError(
-                f"plot()은 수치 계열(int/float/series<float>)만 그릴 수 있습니다"
-                f"(받음: {result})"
+                f"plot()은 수치 계열(int/float/series<float>)만 그릴 수 있습니다(받음: {result})"
             )
         return
     if isinstance(decl, SignalDecl):
@@ -147,8 +146,7 @@ def _check_decl(decl: Decl, env: TypeEnv) -> None:
         result = infer_type(decl.when, env)
         if result not in BOOL_TYPES:
             raise ScriptTypeError(
-                f"order(...) when 조건은 bool 계열(bool/series<bool>)이어야 합니다"
-                f"(받음: {result})"
+                f"order(...) when 조건은 bool 계열(bool/series<bool>)이어야 합니다(받음: {result})"
             )
         return
     raise AssertionError(f"알 수 없는 decl kind: {decl!r}")  # pragma: no cover
@@ -165,6 +163,8 @@ def infer_type(expr: Expr, env: TypeEnv) -> Type:
                 "사용할 수 없습니다"
             )
         return "string"
+    if isinstance(expr, ArrayLiteral):
+        return _infer_array(expr, env)
     if isinstance(expr, Identifier):
         if expr.name not in env:
             raise ScriptTypeError(f"정의되지 않은 식별자입니다: {expr.name!r}")
@@ -236,10 +236,28 @@ def _infer_request(expr: RequestExpr, env: TypeEnv) -> Type:
     context is M2-2b's responsibility)."""
     inner = infer_type(expr.expr, env)
     if inner not in NUMERIC_TYPES:
-        raise ScriptTypeError(
-            f"request(...)의 expr 인자는 수치 계열이어야 합니다(받음: {inner})"
-        )
+        raise ScriptTypeError(f"request(...)의 expr 인자는 수치 계열이어야 합니다(받음: {inner})")
     return "series<float>"
+
+
+def _infer_array(expr: ArrayLiteral, env: TypeEnv) -> Type:
+    """`array<float>` literal -- every element must be an `int`/`float` scalar.
+
+    A `series<float>` element is rejected (no implicit series->array
+    conversion: an array is a compile-time constant vector, a series is a
+    per-bar runtime buffer -- collapsing one into the other silently would
+    hide which one a given value actually is). A nested array element is
+    rejected for the same reason `array<float>` is absent from
+    `NUMERIC_TYPES` (not a scalar).
+    """
+    for i, element in enumerate(expr.elements):
+        element_t = infer_type(element, env)
+        if element_t not in ("int", "float"):
+            raise ScriptTypeError(
+                f"array<float> 리터럴의 {i + 1}번째 원소는 int/float 스칼라여야 합니다"
+                f"(받음: {element_t})"
+            )
+    return "array<float>"
 
 
 def _infer_call(expr: CallExpr, env: TypeEnv) -> Type:
@@ -247,7 +265,6 @@ def _infer_call(expr: CallExpr, env: TypeEnv) -> Type:
     for i, t in enumerate(arg_types):
         if t not in NUMERIC_TYPES:
             raise ScriptTypeError(
-                f"{expr.ns}.{expr.ident}()의 {i + 1}번째 인자는 수치 계열이어야 합니다"
-                f"(받음: {t})"
+                f"{expr.ns}.{expr.ident}()의 {i + 1}번째 인자는 수치 계열이어야 합니다(받음: {t})"
             )
     return "series<float>" if any(is_series(t) for t in arg_types) else "float"

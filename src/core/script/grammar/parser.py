@@ -12,6 +12,7 @@ Spec: L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3(문법 전
 postfix/primary/call/request)은 §2.4 상한을 지키기 위해 `parser_expr.py`
 의 `_ExprParser`로 분리했다 — 이 클래스는 그 위에 decl 파싱만 얹는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -112,7 +113,7 @@ class _Parser(_ExprParser):
         self._expect(TokenKind.KEYWORD, "when", "order(...) 뒤에는 'when'이 필요합니다")
         return OrderDecl(side=side, qty_expr=qty_expr, opts=opts, when=self._expr())
 
-    # type := "int" | "float" | "bool" | "series<float>" | "series<bool>"
+    # type := "int" | "float" | "bool" | "series<float>" | "series<bool>" | "array<float>"
     def _type(self) -> TypeNode:
         tok = self._peek()
         if tok.kind is TokenKind.TYPE:
@@ -129,6 +130,19 @@ class _Parser(_ExprParser):
             raise ScriptSyntaxError(
                 "series<...>의 내부 타입은 float 또는 bool이어야 합니다", inner.line, inner.col
             )
+        if tok.kind is TokenKind.IDENT and tok.value == "array":
+            self._advance()
+            self._expect(TokenKind.OP, "<", "array 뒤에는 '<'가 필요합니다")
+            inner = self._peek()
+            if inner.kind is TokenKind.TYPE and inner.value == "float":
+                self._advance()
+                self._expect(TokenKind.OP, ">", "array<...> 뒤에는 '>'가 필요합니다")
+                return TypeNode(name="array<float>")
+            raise ScriptSyntaxError(
+                "array<...>의 내부 타입은 float만 허용됩니다", inner.line, inner.col
+            )
         raise ScriptSyntaxError(
-            "타입이 필요합니다(int/float/bool/series<float>/series<bool>)", tok.line, tok.col
+            "타입이 필요합니다(int/float/bool/series<float>/series<bool>/array<float>)",
+            tok.line,
+            tok.col,
         )

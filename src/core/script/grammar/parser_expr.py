@@ -5,12 +5,14 @@ arith/term/unary/postfix/primary/call/request)과 토큰 커서 원시 연산을
 이 파일로 분리했다. `_Parser`(parser.py)가 이 클래스를 상속해 decl 파싱을
 얹는다 — 문법표·의미는 그대로, 파일 경계만 나눈다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import cast
 
 from src.core.script.grammar.ast import (
+    ArrayLiteral,
     BinaryExpr,
     BinaryOp,
     CallExpr,
@@ -131,9 +133,11 @@ class _ExprParser:
         self._expect(TokenKind.DELIM, "]", "postfix 인덱스 뒤에는 ']'가 필요합니다")
         return PostfixExpr(base=base, index=int(idx_tok.value))
 
-    # primary := NUMBER | STRING | ident | call | request | "(" expr ")"
+    # primary := NUMBER | STRING | array_literal | ident | call | request | "(" expr ")"
     # STRING here yields the `string` constant type (M2-3 step 1, task-7847) --
     # DSL-4 (checker.py) is what actually rejects it from the numeric/bool lattice.
+    # array_literal := "[" (expr ("," expr)*)? "]" (M2-3 step 2, task-8694) -- same
+    # deferral: DSL-4 rejects non-numeric-scalar elements, not this parser.
     def _primary(self) -> Expr:
         tok = self._peek()
         if tok.kind is TokenKind.NUMBER:
@@ -154,7 +158,20 @@ class _ExprParser:
             expr = self._expr()
             self._expect(TokenKind.DELIM, ")", "'(' 뒤 표현식은 ')'로 닫아야 합니다")
             return expr
+        if tok.kind is TokenKind.DELIM and tok.value == "[":
+            return self._array_literal()
         raise ScriptSyntaxError(f"예상치 못한 토큰 {tok.value!r}", tok.line, tok.col)
+
+    def _array_literal(self) -> ArrayLiteral:
+        self._advance()  # "["
+        elements: list[Expr] = []
+        if not self._check(TokenKind.DELIM, "]"):
+            elements.append(self._expr())
+            while self._check(TokenKind.DELIM, ","):
+                self._advance()
+                elements.append(self._expr())
+        self._expect(TokenKind.DELIM, "]", "배열 리터럴 인자 뒤에는 ']'가 필요합니다")
+        return ArrayLiteral(elements=tuple(elements))
 
     def _call(self) -> CallExpr:
         """call := ns "." ident "(" args ")" — ns ∈ {ta, math, series, strategy}."""

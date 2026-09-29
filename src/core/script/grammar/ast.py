@@ -14,6 +14,7 @@ discriminated union이라 `model_dump(mode="json")`/`model_validate` 왕복이
 수준 불변식이다(decision 참조). `side`/`qty_expr`/`opts`/`style`처럼
 §3.3에 별도 프로덕션이 없는 논터미널은 전부 일반 `Expr`로만 받는다.
 """
+
 from __future__ import annotations
 
 import re
@@ -52,8 +53,10 @@ class ScriptNode(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-# ---- type := "int"|"float"|"bool"|"string"|"series<float>"|"series<bool>" ----
-TypeName = Literal["int", "float", "bool", "string", "series<float>", "series<bool>"]
+# ---- type := "int"|"float"|"bool"|"string"|"series<float>"|"series<bool>"|"array<float>" ----
+TypeName = Literal[
+    "int", "float", "bool", "string", "series<float>", "series<bool>", "array<float>"
+]
 
 
 class TypeNode(ScriptNode):
@@ -78,6 +81,17 @@ class NumberLiteral(ScriptNode):
 class StringLiteral(ScriptNode):
     kind: Literal["string"] = "string"  # never numeric/bool (M2-3 step 1)
     value: str
+
+
+# ---- array_literal := "[" (expr ("," expr)*)? "]" — M2-3 step 2 (task-8694) ----
+# constant-length vector literal, typed `array<float>`. Elements are checked
+# numeric-scalar (not series, not nested array) by DSL-4 (`typing/checker.py`);
+# this node only fixes the shape.
+
+
+class ArrayLiteral(ScriptNode):
+    kind: Literal["array"] = "array"
+    elements: tuple[Expr, ...] = ()
 
 
 class Identifier(ScriptNode):
@@ -188,7 +202,10 @@ class RequestExpr(ScriptNode):
 
 Expr = Annotated[
     NumberLiteral
-    | StringLiteral | Identifier | CallExpr
+    | StringLiteral
+    | ArrayLiteral
+    | Identifier
+    | CallExpr
     | UnaryExpr
     | PostfixExpr
     | NotExpr
@@ -274,6 +291,7 @@ class Program(ScriptNode):
 
 
 for _cls in (
+    ArrayLiteral,
     CallExpr,
     UnaryExpr,
     PostfixExpr,

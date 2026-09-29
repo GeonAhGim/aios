@@ -26,6 +26,12 @@ DSL-4(`typing/checker.py`)가 통과시킨 `Program`(DSL-1 AST)만 입력으로
                    (DSL-4) 이를 담는 decl의 series_count에는 그 경로로 이미
                    반영되므로, 여기서는 이중 계상하지 않고 `max_requests`로
                    별도 상한만 건다(§상한 근거).
+- array_length   : total element count summed over every `array<float>`
+                   literal (M2-3 step 2, task-8694). Unlike a series it is not
+                   refreshed per bar -- it is a constant vector baked into the
+                   compiled artifact -- but the interpreter (DSL-8) still
+                   allocates this much memory once per compile, so it gets its
+                   own limit.
 
 Fail-closed(산정 불가 = 거부): 타입 추론이 실패하는 AST(DSL-4를 거치지
 않았거나 env가 어긋남), 음수 기간 인자, bool 리터럴로 선언된 int input을
@@ -46,16 +52,24 @@ Fail-closed(산정 불가 = 거부): 타입 추론이 실패하는 AST(DSL-4를 
   binding보다 훨씬 무겁다 — `max_calls`(100)의 1/10 미만으로 별도 상한을
   둔다. MTF 런타임 비용의 실측치는 M2-2b가 붙기 전까지 없어 보수적 기본값
   (§미검증).
+- max_array_length 4096 (M2-3 step 2): an `array<float>` literal is fully
+  baked into memory at compile time, so it is sized the same order of
+  magnitude as `max_lookback_total` (5000), but gets its own constant because
+  its accounting purpose differs from a series buffer (which grows with bar
+  count) (unverified -- conservative default until the interpreter's actual
+  cost is measured).
 
 미검증: 호출별 실제 lookback은 IND 레지스트리(DSL-9 `builtins_ta.py`)가
 붙어야 정확히 알 수 있다. 그때까지 "정적 정수 인자 최댓값"은 보수적
 추정치이며, 기간 인자가 하나도 없는 호출(`math.abs(x)` 등)은 0으로 본다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from src.core.script.grammar.ast import (
+    ArrayLiteral,
     BinaryExpr,
     CallExpr,
     Expr,
@@ -99,6 +113,7 @@ class ResourceLimits:
     max_call_depth: int = 8
     max_plots: int = 32
     max_requests: int = 8
+    max_array_length: int = 4096
 
 
 DEFAULT_LIMITS = ResourceLimits()
@@ -113,6 +128,7 @@ class ResourceEstimate:
     call_depth: int = 0
     plot_count: int = 0
     request_count: int = 0
+    array_length: int = 0
 
 
 # (산정 항목, 상한 항목) — 검사 순서가 곧 오류 메시지 우선순위다.
@@ -124,12 +140,11 @@ _CHECKS: tuple[tuple[str, str], ...] = (
     ("call_depth", "max_call_depth"),
     ("plot_count", "max_plots"),
     ("request_count", "max_requests"),
+    ("array_length", "max_array_length"),
 )
 
 
-def check_resources(
-    program: Program, limits: ResourceLimits = DEFAULT_LIMITS
-) -> ResourceEstimate:
+def check_resources(program: Program, limits: ResourceLimits = DEFAULT_LIMITS) -> ResourceEstimate:
     """DSL-4 타입 검사를 다시 적용해 env를 얻은 뒤 산정·상한 검사한다.
 
     DSL-4를 통과하지 못하는 AST는 산정 불가이므로 `SCRIPT_RESOURCE_LIMIT`로
@@ -191,6 +206,7 @@ def estimate_resources(program: Program, env: TypeEnv) -> ResourceEstimate:
         call_depth=acc.call_depth,
         plot_count=acc.plots,
         request_count=acc.requests,
+        array_length=acc.array_length,
     )
 
 
@@ -207,6 +223,7 @@ class _Acc:
         self.call_depth = 0
         self.plots = 0
         self.requests = 0
+        self.array_length = 0
 
     def type_of(self, expr: Expr) -> Type:
         try:
@@ -237,6 +254,14 @@ class _Acc:
             self.lookback += self._call_period(expr)
             for arg in expr.args:
                 self.visit(arg, depth + 1)
+            return
+        if isinstance(expr, ArrayLiteral):
+            # array<float> literal: length contributes to the array_length
+            # budget (constant vector materialised once at compile time, not
+            # per-bar -- see module docstring's array_length item).
+            self.array_length += len(expr.elements)
+            for element in expr.elements:
+                self.visit(element, depth)
             return
         if isinstance(expr, RequestExpr):
             # request(...) 자체는 항상 series<float>로 타입 추론되므로(DSL-4

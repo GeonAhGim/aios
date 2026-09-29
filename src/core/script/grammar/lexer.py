@@ -13,6 +13,7 @@ Python, we adopt `#` line comments as convention — if DSL-3/the parser leaf la
 chooses a different marker, only this file needs updating (comment scanning is
 isolated to `_skip_trivia` alone).
 """
+
 from __future__ import annotations
 
 import enum
@@ -38,11 +39,11 @@ KEYWORDS = frozenset(
     }
 )
 
-# type := "int" | "float" | "bool" | "series<float>" | "series<bool>" —
+# type := "int" | "float" | "bool" | "series<float>" | "series<bool>" | "array<float>" —
 # only the 3 scalar atoms are reserved words. Compound notations like
-# "series<float>" remain as 4 tokens: IDENT("series") LT IDENT("float") GT,
-# letting the parser assemble them (the lexer sees characters only, without
-# context — identical token stream to a comparison like "series < a").
+# "series<float>"/"array<float>" remain as 4 tokens: IDENT("series"|"array") LT
+# IDENT("float") GT, letting the parser assemble them (the lexer sees characters
+# only, without context — identical token stream to a comparison like "series < a").
 TYPE_WORDS = frozenset({"int", "float", "bool"})
 
 _TWO_CHAR_OPS = {"<=": "LE", "==": "EQEQ", ">=": "GE"}
@@ -197,12 +198,8 @@ def tokenize(source: str) -> list[Token]:
                         pos += 1
                         col += 1
                 else:
-                    raise ScriptSyntaxError(
-                        "미종결 숫자 리터럴(소수점 뒤 숫자 없음)", line, col
-                    )
-            tokens.append(
-                Token(TokenKind.NUMBER, source[begin:pos], "", start_line, start_col)
-            )
+                    raise ScriptSyntaxError("미종결 숫자 리터럴(소수점 뒤 숫자 없음)", line, col)
+            tokens.append(Token(TokenKind.NUMBER, source[begin:pos], "", start_line, start_col))
             continue
 
         two = ch + peek(1)
