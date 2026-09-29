@@ -73,6 +73,12 @@ dev = [
     # version that surfaced isolation failures under `-n` not seen serially.
     "pytest-xdist==3.8.0",
     "pip-audit>=2.7",
+    # task-7608 DOM-1 (ADR-2026-09-26-B Decision 4): the real `import-linter`
+    # CLI backing [tool.importlinter] below. task-3256's `.importlinter`
+    # comment declined this install for lack of an ADR authorizing it --
+    # ADR-2026-09-26-B is that ADR. Pulls in `grimp` (its Rust-backed import
+    # graph builder) as a transitive dependency.
+    "import-linter>=2.15",
 ]
 mutation = [
     # task-2851 MUT-1: scripts/run_mutation.py driver. mutmut is intentionally not
@@ -371,3 +377,48 @@ ignore_missing_imports = true
 # type: ignore[import-not-found] in the code (to keep type: ignore budget clean).
 module = "tomllib"
 ignore_missing_imports = true
+
+# task-7608 DOM-1 (ADR-2026-09-26-B Decision 4): domain-boundary import
+# contracts, checked with `lint-imports --config pyproject.toml`. This is
+# separate from -- and does not replace -- the pre-existing hand-rolled
+# `.importlinter`/`scripts/check_import_linter.py` (RATCHET-2, task-3256),
+# which stays wired into local CI as-is. Current violations are recorded as
+# a first-time baseline in docs/design/import_linter_baseline.json (warn
+# only); registering this as a gated local-CI step is a separate ops leaf
+# (see that file's `note`).
+[tool.importlinter]
+root_packages = ["src"]
+
+[[tool.importlinter.contracts]]
+id = "DOM-1a"
+name = "foundation domains stay independent except via contracts/ports"
+type = "independence"
+modules = ["src.foundation.*"]
+ignore_imports = [
+    "src.foundation.** -> src.foundation.*.contracts",
+    "src.foundation.** -> src.foundation.*.contracts.**",
+    "src.foundation.** -> src.foundation.*.ports",
+    "src.foundation.** -> src.foundation.*.ports.**",
+]
+unmatched_ignore_imports_alerting = "none"
+
+[[tool.importlinter.contracts]]
+id = "DOM-1b"
+name = "services may depend on foundation, not the other way round"
+type = "layers"
+containers = ["src"]
+layers = ["services", "foundation"]
+
+[[tool.importlinter.contracts]]
+id = "DOM-1c"
+name = "foundation domain layer must not import its own adapters layer"
+type = "layers"
+containers = ["src.foundation.*"]
+layers = ["(adapters)", "(domain)"]
+
+[[tool.importlinter.contracts]]
+id = "DOM-1d"
+name = "core does not depend on foundation"
+type = "forbidden"
+source_modules = ["src.core"]
+forbidden_modules = ["src.foundation"]
