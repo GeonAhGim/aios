@@ -35,7 +35,19 @@ SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "cover
 # Windows workers, cold per-file open() latency pushed the still-serialized total past 60s again
 # (esc-ci-no_bom kept firing for 4 days after the threading fix merged). Scanning every root's
 # files through one shared pool lets all of that I/O-bound waiting overlap across roots too.
-SCAN_WORKERS = 64
+#
+# 2026-09-29(task-8639/esc-ci-prepare): a fixed SCAN_WORKERS=64 fired 64 real OS threads from
+# this one step regardless of how many other lanes were doing the same thing on this shared,
+# single-box Windows fleet at once -- concurrent lanes each opening 64 files at a time drove a
+# burst of antivirus real-time scanning big enough to starve sibling processes' startup, and a
+# git.exe spawned by another lane's local_ci prepare (head_sha()) failed mid-init
+# (RuntimeError: "head_sha: origin/main 해석 실패 rc=3221225794"; rc=0xC0000142
+# STATUS_DLL_INIT_FAILED, a process-create-time failure, not a git/network error). Falling back
+# to ThreadPoolExecutor's own default (min(32, cpu_count+4), the same formula the standard
+# library uses for I/O-bound pools) keeps per-root overlap without hard-coding an oversized,
+# unbounded-relative-to-the-shared-box thread count. No budget/baseline change (DECISION_GUIDELINES
+# B-2) -- this only lowers this step's own concurrency footprint.
+SCAN_WORKERS = None
 
 
 def has_bom(path: Path) -> bool:
@@ -66,7 +78,7 @@ def _scan_all(files: list[Path]) -> list[Path]:
     cold checkout overlap across scan roots, not just within a single root's files."""
     if not files:
         return []
-    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:  # None -> library default
         flags = pool.map(has_bom, files)
     return [path for path, is_bom in zip(files, flags, strict=True) if is_bom]
 
