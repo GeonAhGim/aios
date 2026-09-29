@@ -2,7 +2,7 @@
 
 이 문서는 `scripts/gen_adr_index.py`가 `docs/design/ADR-*.md`에서 자동 생성한다(ADR-2026-09-09-F). 직접 수정하지 말 것 — 스크립트를 다시 실행해 갱신하고 커밋한다.
 
-전체 35건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 2건: ADR-2026-08-28, ADR-2026-08-29.
+전체 43건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 2건: ADR-2026-08-28, ADR-2026-08-29.
 
 | ID | Title | Status | Date | Supersedes | Superseded By | Amended | File |
 |---|---|---|---|---|---|---|---|
@@ -41,7 +41,11 @@
 | ADR-2026-09-10-A | 상황 인식 검토 — 검토 컨텍스트 MCP 서버 + 영역별 검토 스킬 + 발견 기억 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-A-context-aware-review.md |
 | ADR-2026-09-10-B | 워커 효율 커넥터 — 저장소 CLAUDE.md·결정론 훅을 먼저, MCP는 측정하며 붙인다 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-B-efficiency-connectors.md |
 | ADR-2026-09-10-C | 개발정책 3단계 전환 — 파일 길이에서 도메인 응집·불변식 지역성으로, 변경 거버넌스는 closeout 시점에 | Accepted | 2026-09-10 |  |  |  | ADR-2026-09-10-C-development-policy-phase3.md |
-| ADR-2026-09-24-A | MVP-1 종료 순서(CI 녹색+종결 게이트 우선, QA 부채 로컬 소진, D?→E2E 5종, 함대 개선 범위 축소) + 함대 조직 재사용 kit(DevEngine 기초) | Accepted | 2026-09-24 |  |  |  | design/ADR-2026-09-24-A-mvp1-exit-order-and-fleet-kit.md |
-| ADR-2026-09-26-A | MVP-2 우선 2의 클라우드 전용 조건부 선착수(독립 모듈만·플래그 off·hold cloud_session·QA는 S만·main 적색 시 머지 중단) — ADR-2026-09-24-A D1-1 개정 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-A-mvp2-priority2-cloud-early.md |
-| ADR-2026-09-26-B | 전략 런타임 격리(SBX)·IR-only 소스 보호(SRC)·AI/LIVE 분리 불변식 I-12(AIS)·import-linter 도메인 계약(DOM) | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-B-strategy-sandbox-source-protection-ai-separation-domain-boundaries.md |
-| ADR-2026-09-26-C | MVP-1 안정화 단계 — 지표로 종결(CI 3일 연속 녹색·재오픈 0·자기조치 ≤10%·J1~J3 녹색·D? 0), 도메인별 적대적 감사 6종(발견 0 두 번 연속으로 통과), 새 명세 발행 중지 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-C-stabilization-phase-exit-by-metrics.md |
+| ADR-2026-09-17-A | BYOAI 에이전트 커넥터 — capability scope·Proposal 구조·보안 검토 | Proposed | 2026-09-17 |  |  |  | ADR-2026-09-17-A-BYOAI-connector.md |
+| ADR-2026-09-24-A | MVP-1 종료 순서(검증 우선)와 함대 조직의 재사용 자산화(DevEngine 기초) | Accepted | 2026-09-24 |  |  |  | ADR-2026-09-24-A-mvp1-exit-order-and-fleet-kit.md |
+| ADR-2026-09-26-A | MVP-2 우선 2의 클라우드 전용 조건부 선착수 (ADR-2026-09-24-A Decision 1-1 개정) | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-A-mvp2-priority2-cloud-early.md |
+| ADR-2026-09-26-B | 전략 실행 격리·소스 보호·AI/매매 분리 명문화·도메인 경계 계약 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-B-strategy-sandbox-source-protection-ai-separation-domain-boundaries.md |
+| ADR-2026-09-26-C | MVP-1 안정화 단계 — 리프 수가 아니라 지표로 종결한다 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-C-stabilization-phase-exit-by-metrics.md |
+| ADR-2026-09-26-D | 통합테스트 DB 격리 — 창(window) 스캔·전역 상태 테스트는 모듈별 템플릿 클론에서 돈다 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-D-test-db-isolation-per-module-clone.md |
+| ADR-2026-09-26-E | 지표 플랫폼 통합 — TA-Lib WASM 클라이언트 계산 · OSS 계층 확장 · 검증 폭 확장 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-E-indicator-platform-wasm-oss-verification.md |
+| ADR-2026-09-29-A | MVP-2 내장 전략 지능 엔진(분석·생성·고도화·자가학습) — 무료 벤더만, 가상자산 우선 프로덕션 수준 | Proposed | 2026-09-29 |  |  |  | ADR-2026-09-29-A-mvp2-builtin-strategy-intelligence-engine.md |
