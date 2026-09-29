@@ -1,6 +1,8 @@
 """FND-03 Audit Event 통합테스트 — 실제 dev DB 대상. 71번 §7 "정상 흐름 +
 negative test"."""
+
 import asyncio
+import dataclasses
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,7 +15,11 @@ from src.foundation.evidence.application.append_audit_event import append_audit_
 from src.foundation.evidence.application.get_audit_timeline import get_audit_timeline
 from src.foundation.evidence.application.verify_audit_chain import verify_audit_chain
 from src.foundation.evidence.contracts.v1 import Classification, Outcome, RecordAuditEventCommand
-from src.foundation.evidence.domain.rules import UnsafePayloadError
+from src.foundation.evidence.domain.rules import (
+    ChainIntegrityError,
+    UnsafePayloadError,
+    verify_chain,
+)
 from tests.integration.conftest import create_test_tenant
 
 
@@ -86,6 +92,42 @@ async def test_unsafe_payload_key_is_rejected_end_to_end(pool, repo):
         )
 
 
+async def test_nested_unsafe_payload_key_is_rejected_end_to_end(pool, repo):
+    """AUD-004는 재귀적으로 중첩 dict도 검사해야 한다 — 1단계 키만 방어하면
+    호출자가 `{"meta": {"api_key": ...}}`처럼 한 단계만 감싸서 우회할 수 있다."""
+    tenant_id = await create_test_tenant(pool)
+    with pytest.raises(UnsafePayloadError):
+        await append_audit_event(
+            repo,
+            _command(tenant_id, payload={"meta": {"api_key": "should-not-be-here"}}),
+        )
+
+
+async def test_append_never_writes_a_row_when_payload_is_unsafe(pool, repo):
+    """UnsafePayloadError는 repo.append_event 호출 전에 raise돼야 한다 — 불안전한
+    payload가 먼저 검사 없이 커밋되면 체인에 비밀값이 영구히 남는다(fail-closed)."""
+    tenant_id = await create_test_tenant(pool)
+    with pytest.raises(UnsafePayloadError):
+        await append_audit_event(repo, _command(tenant_id, payload={"token": "should-not-be-here"}))
+    events = await repo.list_chain_for_verification(tenant_id)
+    assert events == []
+
+
+async def test_append_event_failure_propagates_without_being_swallowed(pool, repo, monkeypatch):
+    """실패주입 — repo.append_event가 예외를 던지면(예: DB 연결 끊김)
+    append_audit_event은 그 예외를 삼키지 않고 그대로 전파해야 한다
+    (fail-closed 기본 원칙, CLAUDE.md §3)."""
+    tenant_id = await create_test_tenant(pool)
+
+    async def _boom(**kwargs):
+        raise asyncpg.PostgresConnectionError("simulated connection loss")
+
+    monkeypatch.setattr(repo, "append_event", _boom)
+
+    with pytest.raises(asyncpg.PostgresConnectionError):
+        await append_audit_event(repo, _command(tenant_id))
+
+
 async def test_concurrent_appends_for_same_tenant_form_one_unbroken_chain(pool, repo):
     """AUD-003과 직결 — advisory lock이 없으면 동시 append가 같은
     previous_hash를 보고 분기(fork)할 수 있다. N개를 동시에 보내고 나서
@@ -126,3 +168,21 @@ async def test_timeline_pagination_and_filters(pool, repo):
 
     filtered = await get_audit_timeline(repo, tenant_id=tenant_id, action="a")
     assert {i.sequence_no for i in filtered.items} == {1, 3}
+
+
+async def test_verify_chain_detects_tampered_event_hash(pool, repo):
+    """AUD-003 negative — 저장된 event_hash가 필드로부터 재계산한 값과 다르면
+    (변조 의심) verify_chain은 조용히 통과하지 않고 ChainIntegrityError를 던져야
+    한다. 실 DB는 append-only라 직접 변조할 수 없으므로, DB에서 읽은 체인을
+    메모리에서 한 건 손상시켜 순수 함수 verify_chain에 전달한다."""
+
+    tenant_id = await create_test_tenant(pool)
+    await append_audit_event(repo, _command(tenant_id))
+    await append_audit_event(repo, _command(tenant_id))
+
+    events = await repo.list_chain_for_verification(tenant_id)
+    tampered = list(events)
+    tampered[1] = dataclasses.replace(tampered[1], payload_hash="0" * 64)
+
+    with pytest.raises(ChainIntegrityError):
+        verify_chain(tampered)
