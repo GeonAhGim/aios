@@ -38,10 +38,20 @@ export default defineConfig({
   // 이유 없이 10초 안에 안 끝나는 산발적 CI 적색이 났다(esc-ci-e2e.json 이력 —
   // bisect가 무관한 커밋에 착지할 만큼 원인이 코드가 아니라 dev 서버 JIT 경합이었다).
   // 빌드된 정적 산출물을 preview로 서빙하면 테스트 실행 중 컴파일이 전혀 없어
-  // 이 경합 자체가 사라진다 — 빌드 1회 비용(약 1분)을 webServer 기동에 선불로 낸다.
+  // 이 경합 자체가 사라진다 — 빌드 1회 비용을 webServer 기동에 선불로 낸다.
+  //
+  // task-8952 근본 정정: 이 선불 빌드가 `npm run build`(tsc -b 프로젝트 참조
+  // 타입체크 + vite build)를 쓰고 있었다 — tsc -b는 이 저장소 규모에서 콜드
+  // 캐시 시 80~150s가 걸리고, 여러 worktree가 동시에 local_ci를 도는 동안은
+  // CPU 경합으로 더 늘어나 webServer.timeout(180s)을 넘겨 "Timed out waiting
+  // 180000ms from config.webServer"가 났다(esc-ci-e2e.json). 타입체크는 이미
+  // 별도 게이트(`npm run build --workspace=apps/web`, 커밋 전 프론트 게이트
+  // 시퀀스)가 e2e 스테이지보다 먼저 수행한다 — 여기서 또 tsc -b를 반복하는
+  // 것은 중복이었다. e2e 전용 빌드는 타입체크 없이 `vite build`만 돌려(5~15s)
+  // webServer 기동 시간을 크게 줄인다. 타임아웃 예산(180s) 자체는 그대로 둔다.
   webServer: {
     command:
-      "npm run build --workspace=apps/web && npm run preview --workspace=apps/web -- " +
+      "npm run build:e2e --workspace=apps/web && npm run preview --workspace=apps/web -- " +
       `--strictPort --port ${WORKTREE_PORT}`,
     url: BASE_URL,
     // task-8753: 항상 이 worktree 전용 서버를 새로 띄운다 -- reuseExistingServer(로컬은
