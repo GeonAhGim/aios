@@ -57,9 +57,15 @@ _EXCLUDE_DIR_NAMES = frozenset(
 # build_graph() has the identical shape -- a serial read_text() per file under src/ -- so a
 # cold-cache checkout pays full disk latency per open() the same way. Same fix as there and
 # as check_no_bom.py's SCAN_WORKERS saga: I/O-bound reads release the GIL, so a shared
-# thread pool overlaps the per-file wait instead of paying it serially. 16 matches those
-# scripts' fleet-tuned value.
-SCAN_WORKERS = 16
+# thread pool overlaps the per-file wait instead of paying it serially.
+#
+# 2026-09-30(task-8930/esc-ci-import_linter reopen): the initial parallelize-only fix
+# (3d0dc888) kept re-triggering the same timeout on cold checkout -- check_no_bom.py hit the
+# identical margin-compression problem at 16 workers (task-8667) and was retuned to 24, still
+# below the library default (28) that caused STATUS_DLL_INIT_FAILED (task-8657). Mirroring
+# that fleet-tuned value here. No budget/baseline change (DECISION_GUIDELINES B-2) -- this
+# only retunes this step's own concurrency footprint.
+SCAN_WORKERS = 24
 
 Hit = tuple[str, int, str]  # (rel_path, lineno, detail)
 

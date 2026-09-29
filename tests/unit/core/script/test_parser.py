@@ -9,15 +9,14 @@
 DEEPEN(task-2911, 원 task-1337 DEPTH 감사 부족분, docs/audit/DEPTH_DSL_IND.md
 행 1337): negative는 이미 9건(문법표 밖 구문 전부 SCRIPT_SYNTAX 거부)으로
 충분하다고 판단하고 추가하지 않는다. 새 기능은 추가하지 않고 깊이만
-올린다 — 대신 (1) 실패 주입 1건(재귀 한도를 인위적으로 낮춰 파서 스택
-고갈을 결정론적으로 재현하고, 얕은 입력은 여전히 성공하며 깊은 중첩은
-조용히 잘못된 결과를 내지 않고 `RecursionError`로 fail-closed함을 확인),
-(2) 수치 성능 단언 1건(ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산
-300ms 대비 파서 단계 지연이 예산의 절반 안에 머무는지 확인 — 선형 이상의
-회귀를 조기에 드러낸다), (3) 게이트 적색 재현 1건(`_call`의 `_NAMESPACES`
-화이트리스트가 무력화되면 임의 네임스페이스가 조용히 성공하는 레드 상태를
-먼저 재현하고, 실장 코드는 그 화이트리스트 덕분에 SCRIPT_SYNTAX로
-fail-closed함을 대조)을 추가한다.
+올린다 — 대신 (1) 실패 주입 1건(재귀 한도를 인위적으로 낮춰 파서 스택 고갈을
+결정론적으로 재현하고, 얕은 입력은 여전히 성공하며 깊은 중첩은 조용히
+잘못된 결과를 내지 않고 `RecursionError`로 fail-closed함을 확인), (2) 수치
+성능 단언 1건(ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산 300ms 대비 파서
+단계 지연이 예산의 절반 안에 머무는지 확인 — 선형 이상의 회귀를 조기에
+드러낸다), (3) 게이트 적색 재현 1건(`_call`의 `_NAMESPACES` 화이트리스트가
+무력화되면 임의 네임스페이스가 조용히 성공하는 레드 상태를 먼저 재현하고,
+실장 코드는 그 화이트리스트 덕분에 SCRIPT_SYNTAX로 fail-closed함을 대조)을 추가한다.
 """
 
 from __future__ import annotations
@@ -444,27 +443,16 @@ def test_parse_latency_stays_within_half_of_dsl_compile_budget() -> None:
     decl짜리 스크립트를 파싱해, 파서 단계 지연이 예산의 절반 안에 머무름을
     확인한다 — 선형 이상(이차 이상)의 성능 저하를 조기에 드러낸다.
 
-    task-7434가 옮긴 process_time 기반 `perf_budget`(coverage tracer 정지
-    포함, `tests/conftest.py`)도 여전히 절대 150ms라 CI 러너 클록 속도에
-    매여 느린 러너에서 반복 적색이었다(task-7631/GitHub run 36193686857).
-    `RelativeBudget`(`tests/_perf/relative_budget.py`)으로 옮겨 같은
-    프로세스에서 잰 고정 크기 순수 파이썬 루프 대비 배수로 예산을
-    표현한다. 배수 산출: 기존 절대 예산 150ms / 로컬 실측 calibration 약
-    94ms ≈ 1.6배, 실측 op/calibration 비율은 약 0.83배(op 약 78ms) — 원래
-    예산의 headroom 비율(약 1.9배)에 가깝게 1.6배로 잡는다.
-
-    esc-ci-pytest_latency_serial(재발, task-8851): 로컬 CPU 경합(다른 워커 함대
-    프로세스)을 8개 코어-포화 프로세스로 재현하면 기본 n=5/calibration_n=3은
-    5회 중 1회 `op=140.625ms calibration=31.250ms ratio=4.500x budget<1.600x`로
-    실패했다 — `time.process_time()`의 Windows ~15.6ms 클록 틱 양자화 아래서
-    calibration 루프가 우연히 짧은 틱 수에 걸리면 ratio가 급등한다. `max_ratio`는
-    ADR-2026-09-09-C 결정치라 손대지 않고, best-of 표본 수만 늘려(5->9, 3->7)
-    경합 중에도 운 좋은(경합 없는) 순간의 샘플을 잡을 확률을 높인다 — 같은
-    8-프로세스 경합 재현에서 3회 연속 green 확인(개별 26~49s) 후 반영. 20개
-    코어-포화 프로세스(실제 함대보다 훨씬 가혹한 부하)로는 n=9/calibration_n=7도
-    3회 중 1회(ratio=1.750x) 재현 실패했다 — best-of-N은 확률적 완화이지 임의
-    극한 부하에 대한 보장이 아니며, 이는 `RelativeBudget`/`PerfBudget`의 기존
-    설계 전제와 동일하다."""
+    task-7434가 옮긴 process_time 기반 절대 150ms `perf_budget`도 CI 러너
+    클록 속도에 매여 느린 러너에서 반복 적색이었다(task-7631). `RelativeBudget`
+    으로 옮겨 같은 프로세스 calibration 루프 대비 배수(기존 예산/calibration
+    ≈1.6배)로 표현한다. esc-ci-pytest_latency_serial(재발, task-8851): 8코어
+    포화 경합 재현에서 기본 n=5/calibration_n=3은 `process_time()`의 Windows
+    ~15.6ms 클록 틱 양자화로 ratio가 급등해 5회 중 1회 실패했다 —
+    `max_ratio`(ADR-2026-09-09-C 결정치)는 그대로 두고 best-of 표본 수만
+    늘려(5->9, 3->7) 경합 없는 순간을 잡을 확률을 높인다(같은 재현에서 3회
+    연속 green 확인 후 반영). best-of-N은 확률적 완화일 뿐 임의 극한 부하의
+    보장은 아니다."""
     lines = [
         f"let v{i} = ta.rsi(close[{i % 5}], 14) + v{i - 1} * 2 - 1 and v{i - 1} > 0"
         for i in range(1, 1000)

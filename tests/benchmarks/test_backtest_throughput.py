@@ -17,12 +17,14 @@ deepen, task-3356) — 중복 대신 여기서는 교차 참조만 남긴다."""
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
+from src.core.indicators.talib_adapter import IndicatorResult, IndicatorService
 from src.core.observability.metric_names import (
     BACKTEST_RUN_COUNT_TOTAL,
     BACKTEST_RUN_DURATION_SECONDS,
@@ -58,21 +60,18 @@ class _SpyMetrics:
         return None
 
 
-@dataclass
-class _FakeIndicatorResult:
-    values: list[float | None]
-
-
-class _FakePriceIndicatorService:
+class _FakePriceIndicatorService(IndicatorService):
     """실제 TA-Lib 대신 "PRICE"=마지막 종가만 제공 — 이 벤치마크가 재는 건
     지표 계산 비용이 아니라 재생 루프 오케스트레이션 처리량이다
     (test_run_backtest.py와 동일 원칙, 모듈 docstring 참조)."""
 
     def calculate(
-        self, indicator: str, candles: list[Candle], **params: int
-    ) -> _FakeIndicatorResult:
+        self, indicator: str, candles: Sequence[Candle], **params: int
+    ) -> IndicatorResult:
         assert indicator == "PRICE"
-        return _FakeIndicatorResult(values=[float(candles[-1].close)])
+        return IndicatorResult(
+            indicator=indicator, values=[float(candles[-1].close)], params=params
+        )
 
 
 def _synthetic_bars(n: int) -> list[Candle]:
@@ -138,7 +137,7 @@ def test_throughput_meets_local_budget_floor_and_metric_matches_wall_clock() -> 
     spy = _SpyMetrics()
 
     wall_start = time.perf_counter()
-    run_backtest(_config(), fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)  # type: ignore[arg-type]
+    run_backtest(_config(), fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)
     wall_elapsed = time.perf_counter() - wall_start
 
     assert wall_elapsed < 1.0, f"2,000 bar 처리에 {wall_elapsed:.3f}s — 1.0s 예산 초과"
@@ -166,7 +165,7 @@ def test_insufficient_bars_raises_backtest_run_error_with_metrics_counter() -> N
     spy = _SpyMetrics()
 
     with pytest.raises(BacktestRunError):
-        run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)  # type: ignore[arg-type]
+        run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)
 
     counters = [(name, labels) for name, labels in spy.counters]
     assert len(counters) == 1
@@ -189,7 +188,7 @@ def test_throughput_linear_scaling_1k_vs_10k_bars() -> None:
         base_cfg,
         base_fsm,
         _synthetic_bars(1000),
-        indicator_service=_FakePriceIndicatorService(),  # type: ignore[arg-type]
+        indicator_service=_FakePriceIndicatorService(),
         metrics=base_spy,
     )
     wall_1k = time.perf_counter() - wall_1k
@@ -199,7 +198,7 @@ def test_throughput_linear_scaling_1k_vs_10k_bars() -> None:
         base_cfg,
         base_fsm,
         _synthetic_bars(10000),
-        indicator_service=_FakePriceIndicatorService(),  # type: ignore[arg-type]
+        indicator_service=_FakePriceIndicatorService(),
         metrics=base_spy,
     )
     wall_10k = time.perf_counter() - wall_10k
@@ -221,7 +220,7 @@ def test_metric_labels_snapshot_completed_and_failed() -> None:
     spy = _SpyMetrics()
 
     # 성공 경로
-    run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)  # type: ignore[arg-type]
+    run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)
 
     outcome_labels = {
         frozenset(lbl.items())
@@ -236,7 +235,7 @@ def test_metric_labels_snapshot_completed_and_failed() -> None:
     cfg.warmup_bars = 9999
     spy2 = _SpyMetrics()
     with pytest.raises(BacktestRunError):
-        run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy2)  # type: ignore[arg-type]
+        run_backtest(cfg, fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy2)
 
     # counter() 기록은 counters에, observe() 기록은 observations에 별도
     # outcome="insufficient_warmup"은 counter로 기록되므로 counters 확인

@@ -10,6 +10,9 @@ application/run_reconciliation.py — connection-health-forced PROVIDER_UNAVAILA
 (REC-003), safety-control activation on a blocking classification (ticket 80 §1),
 dedup by input hash (REC-004/006), and fail-closed propagation when a dependency
 (repository insert/upsert, safety-control activation) fails.
+
+# ratchet-allow: fake 리포지토리가 이 파일의 테스트가 쓰지 않는 인터페이스
+# 메서드에 대해 fail-closed 스텁으로 NotImplementedError를 낸다.
 """
 
 from __future__ import annotations
