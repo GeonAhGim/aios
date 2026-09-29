@@ -12,11 +12,12 @@ portfolio|risk|executor`)는 이 스크립트의 차단 대상이 아니다 — 
 사용: `python scripts/check_zone_diff.py --base origin/main --head HEAD`.
 종료코드 0=통과(FROZEN diff 없음).
 """
+
 from __future__ import annotations
 
 import argparse
 import fnmatch
-import subprocess
+import subprocess  # noqa: S404
 import sys
 from pathlib import Path
 
@@ -41,13 +42,20 @@ def load_frozen_patterns(manifest_path: Path) -> list[str]:
 
 
 def git_diff_files(base: str, head: str, repo: Path) -> list[str]:
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603, S607
         ["git", "diff", "--name-only", f"{base}..{head}"],
         cwd=repo,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
@@ -75,7 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         changed_files = git_diff_files(args.base, args.head, args.repo)
     except subprocess.CalledProcessError as exc:
-        print(f"FAIL: git diff 실행 실패 ({args.base}..{args.head}): {exc.stderr.strip()}")
+        stderr_msg = (exc.stderr or "").strip() or f"exit code {exc.returncode}"
+        print(f"FAIL: git diff 실행 실패 ({args.base}..{args.head}): {stderr_msg}")
         return 1
 
     violations = find_frozen_violations(changed_files, frozen_patterns)
