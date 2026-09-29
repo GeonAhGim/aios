@@ -17,6 +17,21 @@ slower CI runner produces a 2x slower calibration *and* a 2x slower op --
 the ratio stays stable. A real regression (e.g. O(n) -> O(n^2)) moves the op
 time but not the calibration time, so the ratio still moves and the budget
 still catches it.
+
+esc-ci-pytest_latency_serial -- the ``pytest_latency_serial`` CI step runs
+with ``--cov=src --cov-append``. coverage.py's global line tracer
+(``sys.settrace``) does not distribute its per-line overhead evenly: the
+calibration loop is one line executed 2,000,000 times (low trace overhead
+per unit of work), while the measured op (e.g. a 1000-decl parse) touches
+many distinct lines and call frames (high trace overhead per unit of work).
+Measured locally, this alone inflates ``op_ms/calibration_ms`` from 0.80x to
+1.27x with no code change -- on a slower/busier CI runner that inflation
+pushes real ``max_ratio`` budgets over the edge (esc-ci-pytest_latency_serial
+partial output ``.FFF``, bisect landed on an unrelated commit because the
+failure is host-load-dependent, not code-dependent). ``_best_of`` pauses the
+active ``coverage.Coverage`` instance (same helper ``tests/conftest.py``
+``PerfBudget.sample`` already uses for task-7253/7250) around every timed
+call so neither side of the ratio carries tracer overhead.
 """
 
 from __future__ import annotations
@@ -25,6 +40,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
+
+from tests.conftest import paused_coverage
 
 _T = TypeVar("_T")
 
@@ -70,9 +87,10 @@ class RelativeBudget:
     def _best_of(self, fn: Callable[[], object], *, clock: Callable[[], float], n: int) -> float:
         best: float | None = None
         for _ in range(n):
-            start = clock()
-            fn()
-            elapsed = (clock() - start) * 1000
+            with paused_coverage():
+                start = clock()
+                fn()
+                elapsed = (clock() - start) * 1000
             if best is None or elapsed < best:
                 best = elapsed
         assert best is not None
