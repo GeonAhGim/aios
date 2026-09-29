@@ -58,7 +58,7 @@ def _event(**overrides: object) -> AuditEvent:
 # --- negative tests (모델 불변식 위반 입력 거부) ------------------------------
 
 
-def test_audit_event_is_frozen_and_rejects_field_mutation():
+def test_audit_event_is_frozen_and_rejects_field_mutation() -> None:
     """79번 §1: audit_event는 append-only다 — 이미 만든 이벤트를 코드가 실수로
     제자리 수정하려 하면 즉시 막혀야 한다(WORM 우회 방지)."""
     event = _event()
@@ -66,21 +66,21 @@ def test_audit_event_is_frozen_and_rejects_field_mutation():
         event.action = "mandate_deactivated"  # type: ignore[misc]
 
 
-def test_outcome_enum_rejects_unknown_value():
+def test_outcome_enum_rejects_unknown_value() -> None:
     """DB나 외부 입력에서 온 값이 79번 §1이 정의한 SUCCESS/DENIED/ERROR 밖이면
     조용히 통과시키지 않고 명시적으로 거부한다."""
     with pytest.raises(ValueError):
         Outcome("PARTIALLY_SUCCESSFUL")
 
 
-def test_classification_enum_rejects_unknown_value():
+def test_classification_enum_rejects_unknown_value() -> None:
     """분류 값도 같은 이유로 닫힌 집합이어야 한다 — 임의 문자열이 들어오면
     거부되어야 컴플라이언스 분류가 조용히 깨지지 않는다."""
     with pytest.raises(ValueError):
         Classification("TOP_SECRET")
 
 
-def test_compute_event_hash_rejects_outcome_missing_value_attribute():
+def test_compute_event_hash_rejects_outcome_missing_value_attribute() -> None:
     """`outcome`은 반드시 `Outcome` 열거형이어야 한다 — 호출자가 실수로 평범한
     문자열을 넘기면 `.value` 접근에서 즉시 실패해야 한다(위조된 문자열을
     해시 체인에 조용히 섞어 넣는 경로를 막는다)."""
@@ -107,12 +107,11 @@ def test_compute_payload_hash_propagates_json_serialization_failure(
 ) -> None:
     """`json.dumps`가 실패하면(예: 순환 참조·직렬화 불가 객체) payload_hash를
     조작해 성공으로 위장하지 않고 예외를 그대로 전파해야 한다(fail-closed)."""
-    import src.foundation.evidence.domain.rules as rules_module
 
     def _boom(*args: object, **kwargs: object) -> str:
         raise TypeError("injected json serialization failure")
 
-    monkeypatch.setattr(rules_module.json, "dumps", _boom)
+    monkeypatch.setattr(json, "dumps", _boom)
 
     with pytest.raises(TypeError, match="injected json serialization failure"):
         compute_payload_hash({"purpose": "trading_risk"})
@@ -122,7 +121,7 @@ def test_compute_payload_hash_propagates_json_serialization_failure(
 
 
 @pytest.mark.perf
-def test_compute_payload_hash_throughput_budget(perf_budget: PerfBudget):
+def test_compute_payload_hash_throughput_budget(perf_budget: PerfBudget) -> None:
     """D2 성능 단언 — 순수 CPU 해시 연산이므로 1회 호출이 100us(=10k ops/sec
     이상) 예산 안에 들어야 한다. 회귀 시(예: 매 호출마다 불필요한 딥카피 추가)
     여기서 잡힌다. `perf_budget`(task-6774)로 측정해 `time.process_time()`
