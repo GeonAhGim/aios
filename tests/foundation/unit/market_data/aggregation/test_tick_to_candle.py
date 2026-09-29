@@ -16,22 +16,31 @@ import hashlib
 import json
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.foundation.market_data.contracts.v1 import Timeframe, Venue
+from src.foundation.market_data.contracts.v1 import SessionWindow, Timeframe, Venue
 from src.foundation.market_data.contracts.v2.candle_lineage import SourceKind
 from src.foundation.market_data.contracts.v2.microstructure import Aggressor, TradeTick
+from src.foundation.market_data.domain.aggregation import tick_to_candle as tick_to_candle_module
 from src.foundation.market_data.domain.aggregation.tick_to_candle import (
     MixedSeriesError,
+    SessionNotFoundError,
     TickToCandleResult,
     UnsortedTicksError,
+    VenueMismatchError,
     ticks_to_candles,
 )
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
-from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
+from src.foundation.market_data.domain.timeframe import (
+    UnknownTimeframeError,
+)
+from src.foundation.market_data.domain.timeframe import (
+    expected_opens as timeframe_expected_opens,
+)
 
 UTC = timezone.utc
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -150,7 +159,7 @@ def test_ticks_to_candles_empty_input_still_validates_timeframe() -> None:
     — the empty-input short-circuit is not a license to skip validating the
     caller's other arguments (§9.10 XREV, task-7850)."""
     with pytest.raises(UnknownTimeframeError):
-        ticks_to_candles([], object(), _bitget_calendar())
+        ticks_to_candles([], cast(Timeframe, object()), _bitget_calendar())
 
 
 # ---- (a) 결정론: 같은 입력 = 바이트 동일 직렬화 sha256 ----
@@ -281,4 +290,55 @@ def test_ticks_to_candles_rejects_mixed_instrument_series() -> None:
         _tick(1, seq=2, price="101", size="1", instrument_id="01BX5ZZKBKACTAV9WEVGEMMVRZ"),
     ]
     with pytest.raises(MixedSeriesError):
+        ticks_to_candles(ticks, Timeframe.M1, _bitget_calendar())
+
+
+def test_ticks_to_candles_rejects_venue_calendar_mismatch() -> None:
+    """XREV(task-3723): BITGET (24x7) ticks aggregated against a KIS_KRX
+    (weekday, exchange-hours) calendar must raise instead of silently
+    excluding every tick outside KRX's session windows — a wrong-calendar
+    caller bug should surface, not produce a quietly empty result."""
+    ticks = [_tick(0, seq=1, price="100", size="1")]
+    with pytest.raises(VenueMismatchError):
+        ticks_to_candles(ticks, Timeframe.M1, _krx_calendar())
+
+
+# ---- 실패주입: 내부 위임(expected_opens) 예외를 감추지 않고 전파한다 ----
+
+
+def test_ticks_to_candles_propagates_expected_opens_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입: `expected_opens`(LA-2 위임 지점)이 예외를 던지면 그 예외가
+    그대로 호출자에게 전파되어야 한다 — 집계 루프가 이를 삼키고 빈 결과나
+    부분 결과로 위장하면 안 된다(fail-closed)."""
+
+    def _boom(*_args: object, **_kwargs: object) -> list[datetime]:
+        raise RuntimeError("expected_opens dependency failure (injected)")
+
+    monkeypatch.setattr(tick_to_candle_module, "expected_opens", _boom)
+
+    ticks = [_tick(0, seq=1, price="100", size="1")]
+    with pytest.raises(RuntimeError, match="injected"):
+        ticks_to_candles(ticks, Timeframe.M1, _bitget_calendar())
+
+
+def test_ticks_to_candles_raises_session_not_found_when_open_outside_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입: `expected_opens`이 (내부 불변식 위반으로) 세션 목록에 없는
+    open을 반환하면 `_session_containing`이 이를 삼키지 않고
+    `SessionNotFoundError`로 거부해야 한다."""
+
+    def _inject_bogus_open(
+        range_start: datetime, range_end: datetime, tf: Timeframe, sessions: list[SessionWindow]
+    ) -> list[datetime]:
+        opens = timeframe_expected_opens(range_start, range_end, tf, sessions)
+        bogus = datetime(1999, 1, 1, tzinfo=UTC)
+        return [bogus, *opens]
+
+    monkeypatch.setattr(tick_to_candle_module, "expected_opens", _inject_bogus_open)
+
+    ticks = [_tick(0, seq=1, price="100", size="1")]
+    with pytest.raises(SessionNotFoundError):
         ticks_to_candles(ticks, Timeframe.M1, _bitget_calendar())

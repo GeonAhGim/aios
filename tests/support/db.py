@@ -35,6 +35,7 @@ import pytest
 __all__ = [
     "session_database_url",
     "ensure_worker_database",
+    "drop_worker_database",
     "create_pool_with_retry",
     "tx_conn",
     "_db_name",
@@ -60,6 +61,26 @@ _CLONE_RETRY_BASE_DELAY = 0.2
 # widening a budget or adding an ignore (DECISION_GUIDELINES B-2).
 _POOL_CONNECT_ATTEMPTS = 5
 _POOL_CONNECT_RETRY_BASE_DELAY = 0.5
+
+# task-8284/esc-ci-coverage: this module's retry sites only caught
+# (OSError, ConnectionDoesNotExistError) -- the same outdated snapshot
+# src/main.py::_RETRYABLE_POOL_CONNECT_ERRORS carried before task-8284, and
+# narrower than scripts/replay_verify.py::_RETRYABLE_CONNECT_ERRORS since
+# task-6267/6284 widened it. task-6267/6284 root-caused that a connect
+# landing inside a sibling worktree's `setup_test_db.py --reset`
+# (pg_terminate_backend -> DROP DATABASE -> CREATE DATABASE) window fails
+# with `InvalidCatalogNameError` / `CannotConnectNowError` -- both
+# `asyncpg.exceptions.PostgresError`, not `OSError`/`ConnectionDoesNotExistError`
+# -- and this module's `ensure_worker_database`/`drop_worker_database` dial
+# that exact template DB, so it hits the identical shape. Closing the gap
+# here mirrors the already-established pattern instead of widening a budget
+# or adding an ignore (DECISION_GUIDELINES B-2).
+_RETRYABLE_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    asyncpg.exceptions.ConnectionDoesNotExistError,
+    asyncpg.exceptions.InvalidCatalogNameError,
+    asyncpg.exceptions.CannotConnectNowError,
+)
 
 
 def _db_name(url: str) -> str:
@@ -150,6 +171,8 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
             | asyncpg.exceptions.UniqueViolationError
             | OSError
             | asyncpg.exceptions.ConnectionDoesNotExistError
+            | asyncpg.exceptions.InvalidCatalogNameError
+            | asyncpg.exceptions.CannotConnectNowError
             | None
         ) = None
         for attempt in range(_CLONE_ATTEMPTS):
@@ -193,7 +216,7 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
                 last_exc = exc
                 if attempt + 1 < _CLONE_ATTEMPTS:
                     await asyncio.sleep(_CLONE_RETRY_BASE_DELAY * (attempt + 1))
-            except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError) as exc:
+            except _RETRYABLE_CONNECT_ERRORS as exc:
                 # The connection this loop reuses just died mid-statement (the
                 # same transient reset `_admin_connect_with_retry` absorbs at
                 # connect time). It cannot serve any further `execute()` calls,
@@ -203,7 +226,7 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
                 last_exc = exc
                 try:
                     await admin.close()
-                except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+                except _RETRYABLE_CONNECT_ERRORS:
                     pass
                 if attempt + 1 >= _CLONE_ATTEMPTS:
                     raise
@@ -264,11 +287,17 @@ async def _sleep_before_pool_retry(attempt: int) -> None:
 async def _admin_connect_with_retry(dsn: str) -> asyncpg.Connection:
     """`asyncpg.connect` with retry on the initial connection only, mirroring
     `create_pool_with_retry`'s handling of the same transient reset shape."""
-    last_exc: OSError | asyncpg.exceptions.ConnectionDoesNotExistError | None = None
+    last_exc: (
+        OSError
+        | asyncpg.exceptions.ConnectionDoesNotExistError
+        | asyncpg.exceptions.InvalidCatalogNameError
+        | asyncpg.exceptions.CannotConnectNowError
+        | None
+    ) = None
     for attempt in range(_POOL_CONNECT_ATTEMPTS):
         try:
             return await asyncpg.connect(dsn)
-        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError) as exc:
+        except _RETRYABLE_CONNECT_ERRORS as exc:
             last_exc = exc
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise
@@ -303,7 +332,7 @@ async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:
         try:
             await pool
             return pool
-        except (OSError, asyncpg.exceptions.ConnectionDoesNotExistError):
+        except _RETRYABLE_CONNECT_ERRORS:
             pool.terminate()
             if attempt + 1 >= _POOL_CONNECT_ATTEMPTS:
                 raise

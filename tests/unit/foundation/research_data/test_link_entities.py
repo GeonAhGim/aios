@@ -11,10 +11,12 @@ entry point.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
+import asyncpg
 import pytest
 
 from src.foundation.research_data.application.link_entities import link_entities
@@ -71,11 +73,13 @@ class _FakeEntityLinkRepository:
         self.save_calls: list[list[EntityLinkResult]] = []
 
     async def list_unlinked(
-        self, conn: object, *, tenant_id: UUID, limit: int
+        self, conn: asyncpg.Connection, *, tenant_id: UUID, limit: int
     ) -> list[ResearchItem]:
         return list(self._pool.values())[:limit]
 
-    async def save_links(self, conn: object, results: list[EntityLinkResult]) -> None:
+    async def save_links(
+        self, conn: asyncpg.Connection, results: Sequence[EntityLinkResult]
+    ) -> None:
         self.save_calls.append(list(results))
         for result in results:
             if result.instrument_id is not None:
@@ -234,8 +238,13 @@ async def test_link_item_propagates_resolver_exception() -> None:
 
 class _CrashingRepository:
     async def list_unlinked(
-        self, conn: object, *, tenant_id: UUID, limit: int
+        self, conn: asyncpg.Connection, *, tenant_id: UUID, limit: int
     ) -> list[ResearchItem]:
+        raise ConnectionError("db_down")
+
+    async def save_links(
+        self, conn: asyncpg.Connection, results: Sequence[EntityLinkResult]
+    ) -> None:
         raise ConnectionError("db_down")
 
 

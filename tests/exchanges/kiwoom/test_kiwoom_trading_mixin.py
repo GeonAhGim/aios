@@ -180,6 +180,23 @@ async def test_place_order_raises_fatal_exchange_error_on_missing_ord_no():
         await client.place_order(_order())
 
 
+async def test_cancel_order_raises_fatal_exchange_error_on_missing_return_code():
+    """부정 테스트 5(리뷰 task-7882 REJECT 반영): 취소 응답에 return_code
+    필드가 아예 없는 경우(스키마 변경/장애) place_order와 대칭적으로
+    fail-closed -- 예전에는 키 부재를 성공(True)으로 오인했다(fail-open)."""
+    client = _paper_client(responses={"kt10003": {}})
+    with pytest.raises(FatalExchangeError):
+        await client.cancel_order("005930:1234567")
+
+
+async def test_cancel_order_raises_fatal_exchange_error_on_failure_return_code():
+    """부정 테스트 6: 취소 응답이 실패 return_code(0이 아님)를 회신하면
+    True로 눙치지 않고 FatalExchangeError로 승격한다."""
+    client = _paper_client(responses={"kt10003": {"return_code": 1, "return_msg": "실패"}})
+    with pytest.raises(FatalExchangeError):
+        await client.cancel_order("005930:1234567")
+
+
 async def test_modify_order_rejects_malformed_exchange_order_id_even_with_price():
     """부정 테스트 4: modify_order도 price가 있어도 합성 ID가 ':' 구분자
     없이 잘못된 형식이면 거래소 요청 전에 FatalExchangeError로 거부한다

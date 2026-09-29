@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -16,6 +17,7 @@ from dotenv import dotenv_values
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
+from src.foundation.backtest.application.run_backtest import BacktestRunError
 from src.foundation.validation.adapters.postgres_repository import PostgresValidationRepository
 from src.foundation.validation.application.start_validation import (
     StrategyNotEligibleForValidationError,
@@ -349,5 +351,73 @@ async def test_backtest_engine_error_fails_validation_and_blocks_lifecycle(
     assert view.outcome == Outcome.FAIL
     assert view.hard_fail_reasons != []
 
+    detail = await strategy_service.get_strategy(owner_id, strategy_id, version)
+    assert detail.lifecycle_status == "BACKTESTING"
+
+
+@pytest.mark.parametrize("invalid_request", ["wrong_owner", "missing_version"])
+async def test_negative_validation_rejects_unauthorized_or_missing_strategy(
+    pool, validation_repo, strategy_service, monkeypatch, invalid_request
+):
+    """I-10: rejected requests must not create runs or invoke the engine."""
+    owner_id, strategy_id, version = await _strategy_in_backtesting(pool, strategy_service)
+    caller = await create_test_user(pool) if invalid_request == "wrong_owner" else owner_id
+    requested_version = "9.9.9" if invalid_request == "missing_version" else version
+    engine = Mock(side_effect=AssertionError("rejected request reached backtest"))
+    monkeypatch.setattr(
+        "src.foundation.validation.application.start_validation.run_backtest", engine
+    )
+
+    with pytest.raises(StrategyNotEligibleForValidationError):
+        await start_validation(
+            validation_repo,
+            strategy_service,
+            owner_user_id=caller,
+            command=_command(strategy_id, requested_version),
+            bars=_bars(),
+            indicator_service=_FakePriceIndicatorService(),
+        )
+
+    engine.assert_not_called()
+    async with pool.acquire() as conn:
+        assert await conn.fetchval(
+            "SELECT count(*) FROM strategy_validation_run WHERE strategy_id = $1", strategy_id
+        ) == 0
+    detail = await strategy_service.get_strategy(owner_id, strategy_id, version)
+    assert detail.lifecycle_status == "BACKTESTING"
+
+
+async def test_failure_injection_backtest_exception_persists_failed_without_result(
+    pool, validation_repo, strategy_service, monkeypatch
+):
+    """I-07/I-10: engine failure cannot publish success or advance lifecycle."""
+    owner_id, strategy_id, version = await _strategy_in_backtesting(pool, strategy_service)
+    failure = BacktestRunError("injected backtest failure")
+    engine = Mock(side_effect=failure)
+    monkeypatch.setattr(
+        "src.foundation.validation.application.start_validation.run_backtest", engine
+    )
+
+    with pytest.raises(BacktestRunError, match="injected backtest failure") as caught:
+        await start_validation(
+            validation_repo,
+            strategy_service,
+            owner_user_id=owner_id,
+            command=_command(strategy_id, version),
+            bars=_bars(),
+            indicator_service=_FakePriceIndicatorService(),
+        )
+
+    assert caught.value is failure
+    engine.assert_called_once()
+    async with pool.acquire() as conn:
+        runs = await conn.fetch(
+            "SELECT id, state, completed_at FROM strategy_validation_run WHERE strategy_id = $1",
+            strategy_id,
+        )
+    assert len(runs) == 1
+    assert runs[0]["state"] == RunState.FAILED.value
+    assert runs[0]["completed_at"] is not None
+    assert await validation_repo.get_result_for_run(runs[0]["id"]) is None
     detail = await strategy_service.get_strategy(owner_id, strategy_id, version)
     assert detail.lifecycle_status == "BACKTESTING"

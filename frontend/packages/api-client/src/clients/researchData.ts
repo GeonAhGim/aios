@@ -1,11 +1,11 @@
 // task-2718(RD-17): ResearchPage.tsx(검색·소스 상태·종목 연결 표시)가 쓰는
-// 클라이언트. screener.ts(task-2692 UX-8)와 동일 관용 — apiRoutes.ts의
-// researchData.*가 유령 경로(implemented=false)라 실제 fetch를 시도하기 전에
-// typed 오류로 단락한다. AiosApiClient 합성(client.ts)에는 얹지 않고
-// (positions.ts/marketData.ts/screener.ts와 동일 관용) 화면이
-// createResearchDataClient로 직접 만든다 — 라우터가 생기면
-// (src/api/routers/research_data.py, RD-8) apiRoutes.ts의 implemented만
-// true로 바꾸면 이 단락 없이 그대로 배선된다.
+// 클라이언트. task-7775로 apiRoutes.ts의 researchData.*가 implemented=true로
+// 바뀌었다(src/api/routers/research_data.py의 search_router,
+// POST /v1/foundation/research-data/search·GET .../sources) — 아래
+// isRouteImplemented 분기는 라우트가 다시 내려가는 배포 순서 사고를 막는
+// 방어선으로 유지한다(screener.ts와 동일 관용). AiosApiClient 합성
+// (client.ts)에는 얹지 않고(positions.ts/marketData.ts/screener.ts와 동일
+// 관용) 화면이 createResearchDataClient로 직접 만든다.
 import type {
   ResearchSearchInput,
   ResearchSearchResponse,

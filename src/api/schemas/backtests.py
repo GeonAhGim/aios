@@ -1,7 +1,7 @@
-"""BT-10c — `POST /v1/backtests/quick` 요청·응답 스키마.
+"""BT-10c/BT-18 — `POST /v1/backtests/{quick,sweep}` 요청·응답 스키마.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.5 BT-10,
-§3.4(`BacktestConfigV2`).
+§9.9 BT-16/BT-18, §3.4(`BacktestConfigV2`).
 
 식별자 규칙은 LA-24(`src/api/schemas/market_data.py`/`application/read_api.
 resolve_instrument`)와 같다 — `instrument_id`가 있으면 우선, 없으면
@@ -17,11 +17,26 @@ resolve_instrument`)와 같다 — `instrument_id`가 있으면 우선, 없으�
 pydantic v2 JSON 모드 기본 동작(문자열 직렬화)을 그대로 쓴다 — 별도
 인코더가 필요 없다. `fills`는 원본 튜플 순서(체결 시각 순, 결정론)를
 그대로 유지하고 재정렬하지 않는다.
+
+`Sweep*` schemas (BT-18, task-7774) map 1:1 to `SweepRequestInput`/
+`SweepResultView` in frontend/packages/api-client/src/clients/backtests.ts
+(camelCase<->snake_case conversion is automatic via http.ts
+`keysToSnake`/`keysToCamel`). The server-side sweep execution introduces no
+new domain logic: each combo repeats the exact `/quick` pattern
+(`compile_source`+`build_script_signal_source`+`run_quick_backtest`, BT-10c),
+and reproducibility keys come from the existing
+`vector/experiment_ledger.py::record_grid_entry` (BT-16b). We do not call
+`vector/grid.py::sweep_grid_and_record` because it takes a pre-built
+`VectorSignal` array, not a script — no DSL-script-to-`VectorSignal`
+compilation bridge exists yet, and building one is out of this leaf's scope
+(API layer only; see task-7774 attempt-3 note "scope must be reduced").
 """
+
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, Field
@@ -37,6 +52,13 @@ __all__ = [
     "FillView",
     "QuickBacktestRequest",
     "QuickBacktestResultView",
+    "SweepAxis",
+    "SweepCombo",
+    "SweepMetric",
+    "SweepPointResultView",
+    "SweepRequest",
+    "SweepResultView",
+    "SweepStabilityView",
 ]
 
 
@@ -104,3 +126,77 @@ class QuickBacktestResultView(BaseModel):
             expired_orders=result.expired_orders,
             warnings=list(result.warnings),
         )
+
+
+# BT-18(task-7774) parameter grid sweep. `SweepMetric` is the subset of
+# `QuickBacktestResultView`'s Decimal fields usable for heatmap/stability
+# comparison; the name is used verbatim as the attribute name for
+# `getattr(QuickBacktestResult, metric)`, so the router needs no separate
+# mapping table.
+SweepMetric = Literal["final_equity", "cash", "position_quantity", "funding_cost", "borrow_cost"]
+
+
+class SweepAxis(BaseModel):
+    """One axis of `param_stability.ParamGrid.axes` -- `values` must be
+    ascending and duplicate-free (`ParamGrid.__post_init__` invariant, which
+    the router delegates to as-is)."""
+
+    name: str
+    values: list[int]
+
+
+class SweepCombo(BaseModel):
+    """One grid point already materialized as a compilable script --
+    `axis_values` holds one value per name from a subset of `SweepRequest.axes`
+    (a named representation of `param_stability.Point`). `script_hash` is
+    trusted as given by the caller (the frontend's own compilation result) --
+    same contract as `vector/experiment_ledger.py::record_grid_entry`; we do
+    not recompute a hash here."""
+
+    combo_key: str = Field(min_length=1)
+    axis_values: dict[str, int]
+    script_hash: str = Field(min_length=1)
+    script_source: str = Field(min_length=1, max_length=MAX_SOURCE_CHARS)
+
+
+class SweepRequest(BaseModel):
+    venue: Venue
+    symbol: str | None = None
+    instrument_id: UUID | None = None
+    timeframe: Timeframe
+    start: AwareDatetime
+    end: AwareDatetime
+    as_of: AwareDatetime | None = None
+    initial_cash: Decimal = Field(gt=0)
+    funding_rate: Decimal | None = None
+    config: BacktestConfigV2
+    axes: list[SweepAxis]
+    combos: list[SweepCombo]
+    metric: SweepMetric
+    data_lineage_hash: str = Field(min_length=1)
+    rollup_version: str = Field(min_length=1)
+    seed: int
+
+
+class SweepPointResultView(BaseModel):
+    combo_key: str
+    combo_index: int
+    axis_values: dict[str, int]
+    metric_value: Decimal
+    reproducibility_key: str
+    seed: int
+
+
+class SweepStabilityView(BaseModel):
+    best_axis_values: dict[str, int]
+    neighbor_mean: Decimal
+    neighbor_std: Decimal
+    isolated: bool
+
+
+class SweepResultView(BaseModel):
+    axes: list[SweepAxis]
+    metric: str
+    points: list[SweepPointResultView]
+    stability: SweepStabilityView | None
+    warnings: list[str]

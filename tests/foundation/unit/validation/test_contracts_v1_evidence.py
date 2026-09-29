@@ -14,8 +14,8 @@ D2 evidence: negative >=3, failure-injection 1, perf 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -443,7 +443,7 @@ def test_record_audit_event_command_with_invalid_outcome_monkeypatch(
             aggregate_type="Test",
             aggregate_id=uuid4(),
             action="TEST",
-            outcome="INVALID",  # type: ignore[arg-type]
+            outcome=cast(Outcome, "INVALID"),
             trace_id=uuid4(),
         )
 
@@ -451,33 +451,30 @@ def test_record_audit_event_command_with_invalid_outcome_monkeypatch(
 # ── Performance tests ──────────────────────────────────────────────────────
 
 
-def test_model_creation_performance() -> None:
-    """Performance: Model creation within spec (< 1ms cmd, < 2ms event, < 10ms page)."""
+def test_model_creation_performance(perf_budget: Any) -> None:
+    """Performance: Model creation within spec (< 1ms cmd, < 2ms event, < 10ms page).
+
+    Pure in-process pydantic construction, so it is measured with `perf_budget`
+    (process_time, best-of-5): a wall-clock budget is meaningless under xdist
+    core contention and the perf-marker guard (task-7434) rejects it."""
     cmd_kwargs = _valid_cmd_kwargs()
     event_kwargs = _valid_event_kwargs()
     events = [AuditEventView(**event_kwargs) for _ in range(100)]
 
-    start = time.perf_counter()
-    for _ in range(100):
-        RecordAuditEventCommand(**cmd_kwargs)
-    cmd_time = (time.perf_counter() - start) / 100 * 1000
-    assert cmd_time < 1.0, f"Command: {cmd_time:.3f}ms > 1.0ms"
-
-    start = time.perf_counter()
-    for _ in range(50):
-        AuditEventView(**event_kwargs)
-    event_time = (time.perf_counter() - start) / 50 * 1000
-    assert event_time < 2.0, f"Event: {event_time:.3f}ms > 2.0ms"
-
-    start = time.perf_counter()
-    for _ in range(10):
-        AuditTimelinePage(
-            items=events,
-            next_cursor="cursor",
-            as_of=datetime.now(timezone.utc),
-        )
-    page_time = (time.perf_counter() - start) / 10 * 1000
-    assert page_time < 10.0, f"Page: {page_time:.3f}ms > 10ms"
+    perf_budget.assert_within(
+        lambda: RecordAuditEventCommand(**cmd_kwargs), budget_ms=1.0, batch=100, label="Command"
+    )
+    perf_budget.assert_within(
+        lambda: AuditEventView(**event_kwargs), budget_ms=2.0, batch=50, label="Event"
+    )
+    perf_budget.assert_within(
+        lambda: AuditTimelinePage(
+            items=events, next_cursor="cursor", as_of=datetime.now(timezone.utc)
+        ),
+        budget_ms=10.0,
+        batch=10,
+        label="Page",
+    )
 
 
 # ── Gate-red reproduction tests ────────────────────────────────────────────

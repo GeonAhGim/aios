@@ -3,7 +3,12 @@
 import {
   createFibonacci,
   createHorizontalLine,
+  createParallelChannel,
+  createPriceChannel,
+  createPriceLine,
+  createRayLine,
   createRectangle,
+  createSegment,
   createTrendLine,
   createVerticalLine,
 } from "@aios/chart-engine/src/drawings/tools";
@@ -61,6 +66,16 @@ export function drawingLabel(d: Drawing): string {
       return `사각형 (${d.points[0].time}→${d.points[1].time})`;
     case "fibonacci":
       return `피보나치 (${d.points[0].time}→${d.points[1].time})`;
+    case "segment":
+      return `선분 (${d.points[0].time}→${d.points[1].time})`;
+    case "ray-line":
+      return `추세반선 (${d.points[0].time}→${d.points[1].time})`;
+    case "parallel-channel":
+      return `평행채널 (${d.points[0].time}→${d.points[1].time})`;
+    case "price-channel":
+      return `가격채널 (${d.points[0].time}→${d.points[1].time})`;
+    case "price-line":
+      return `가격선 @${d.price}`;
   }
 }
 
@@ -76,6 +91,21 @@ export function createDrawing(id: string, kind: DrawingKind, time: number, price
       return createRectangle(id, { time: time - 1, price: price * 0.99 }, { time, price: price * 1.01 });
     case "fibonacci":
       return createFibonacci(id, { time: time - 1, price: price * 0.99 }, { time, price });
+    case "segment":
+      return createSegment(id, { time: time - 1, price }, { time, price });
+    case "ray-line":
+      return createRayLine(id, { time: time - 1, price }, { time, price });
+    case "parallel-channel":
+      return createParallelChannel(
+        id,
+        { time: time - 1, price },
+        { time, price },
+        { time: time - 1, price: price * 1.01 },
+      );
+    case "price-channel":
+      return createPriceChannel(id, { time: time - 1, price: price * 0.99 }, { time, price: price * 1.01 });
+    case "price-line":
+      return createPriceLine(id, price);
   }
 }
 
