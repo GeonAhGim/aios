@@ -28,7 +28,14 @@ SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "cover
 # physical I/O; a serial walk over ~6-7k tracked files took 60-70s and blew the 60s CI step
 # budget (esc-ci-no_bom, 2026-09-26 probe). Threads overlap that I/O latency -- this is I/O-bound
 # so the GIL is released during read(), and wall-clock drops well under budget even cold.
-SCAN_WORKERS = 32
+#
+# 2026-09-29(task-8600): that fix still left find_bom_files() running one ThreadPoolExecutor
+# *per root* sequentially (src's pool must fully drain before tests's pool even starts listing),
+# so the per-root pools never overlapped each other -- on this fleet's shared, antivirus-scanned
+# Windows workers, cold per-file open() latency pushed the still-serialized total past 60s again
+# (esc-ci-no_bom kept firing for 4 days after the threading fix merged). Scanning every root's
+# files through one shared pool lets all of that I/O-bound waiting overlap across roots too.
+SCAN_WORKERS = 64
 
 
 def has_bom(path: Path) -> bool:
@@ -54,8 +61,9 @@ def _iter_files(base: Path) -> list[Path]:
     return found
 
 
-def _scan(base: Path) -> list[Path]:
-    files = _iter_files(base)
+def _scan_all(files: list[Path]) -> list[Path]:
+    """Scans every listed file through one shared thread pool so I/O-bound waits on a
+    cold checkout overlap across scan roots, not just within a single root's files."""
     if not files:
         return []
     with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
@@ -85,10 +93,10 @@ def find_bom_files(repo_root: Path) -> list[Path]:
     시작하는 파일 경로를 정렬해 돌려준다."""
     roots = [repo_root / name for name in SCAN_ROOT_NAMES]
     roots += frontend_src_dirs(repo_root)
-    found: list[Path] = []
+    files: list[Path] = []
     for root in roots:
-        found.extend(_scan(root))
-    return sorted(set(found))
+        files.extend(_iter_files(root))
+    return sorted(set(_scan_all(files)))
 
 
 def main(argv: list[str] | None = None) -> int:
