@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from src.core.approval.panic_prompt import WhitelistEntry
 from src.services.approval_settings_service import ApprovalSettings
 from src.services.withdrawal_whitelist_service import WithdrawalWhitelistEntry
 
@@ -40,7 +41,7 @@ class WhitelistEntryRequest(BaseModel):
     totp_code: str | None = None
 
 
-class WhitelistEntryResponse(BaseModel):
+class WhitelistEntryResponse(WhitelistEntry):
     id: int
     exchange: str
     destination_address: str
