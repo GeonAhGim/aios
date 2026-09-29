@@ -1,5 +1,6 @@
 """FND-08 Reconciliation & Resilience 통합테스트 — 실제 dev DB 대상. 80번 §4
 중 실 스케줄러/내부 원장 없이 재현 가능한 범위(REC-001~004, 006~007)."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -225,6 +226,139 @@ async def test_resolve_does_not_reactivate_or_clear_safety_control(
         )
 
 
+def _minor_difference_entities() -> list[EntitySnapshot]:
+    """diff=0.50, relative=0.05% — both within policy tolerance
+    (absolute_tolerance=0.01 OR relative_tolerance_pct=0.1%) so
+    classify_item() returns MINOR_DIFFERENCE, not HEALTHY (diff != 0)."""
+    return [
+        EntitySnapshot(
+            entity_type="BALANCE",
+            entity_key="USDT",
+            internal_value=Decimal("1000.00"),
+            provider_value=Decimal("999.50"),
+        )
+    ]
+
+
+async def test_minor_difference_does_not_activate_safety_control(
+    pool, repo, connection_repo, risk_repo
+):
+    """F3 case 1 — a within-tolerance gap classifies MINOR_DIFFERENCE and must
+    not trip the kill switch: MINOR_DIFFERENCE sits outside
+    `_BLOCKING_CLASSIFICATIONS` (only MATERIAL_MISMATCH/PROVIDER_UNAVAILABLE
+    activate a safety control, run_reconciliation.py)."""
+    tenant_id = await _tenant(pool)
+    target_ref = tenant_id
+
+    run = await run_reconciliation(
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=target_ref,
+        connection_id=None,
+        entities=_minor_difference_entities(),
+    )
+    assert run.aggregate_classification.value == "MINOR_DIFFERENCE"
+
+    state = await repo.get_state(target_ref)
+    assert state.aggregate_status.value == "MINOR_DIFFERENCE"
+    assert state.safety_control_id is None
+    assert state.blocking_reason is None
+
+
+async def test_minor_difference_worsening_to_material_mismatch_activates_control(
+    pool, repo, connection_repo, risk_repo
+):
+    """F3 case 2 — a target already at MINOR_DIFFERENCE that later widens past
+    tolerance must transition to MATERIAL_MISMATCH and newly activate a
+    safety control (it had none before)."""
+    tenant_id = await _tenant(pool)
+    target_ref = tenant_id
+
+    await run_reconciliation(
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=target_ref,
+        connection_id=None,
+        entities=_minor_difference_entities(),
+    )
+    before = await repo.get_state(target_ref)
+    assert before.safety_control_id is None
+
+    run = await run_reconciliation(
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=target_ref,
+        connection_id=None,
+        entities=_mismatched_entities(),
+    )
+    assert run.aggregate_classification.value == "MATERIAL_MISMATCH"
+
+    after = await repo.get_state(target_ref)
+    assert after.aggregate_status.value == "MATERIAL_MISMATCH"
+    assert after.safety_control_id is not None
+    assert after.blocking_reason is not None
+
+    control = await risk_repo.get_safety_control(after.safety_control_id)
+    assert control is not None
+    assert control.state.value == "ACTIVE"
+
+
+async def test_material_mismatch_easing_to_minor_difference_keeps_control_active(
+    pool, repo, connection_repo, risk_repo
+):
+    """F3 case 3 — a target easing back from MATERIAL_MISMATCH into tolerance
+    updates `aggregate_status` to MINOR_DIFFERENCE, but the previously
+    activated safety control must stay ACTIVE and attached
+    (`upsert_state()`'s COALESCE keeps the old `safety_control_id` since the
+    new run activates none) — only `evaluate_recovery` (not covered here)
+    is allowed to clear it."""
+    tenant_id = await _tenant(pool)
+    target_ref = tenant_id
+
+    await run_reconciliation(
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=target_ref,
+        connection_id=None,
+        entities=_mismatched_entities(),
+    )
+    before = await repo.get_state(target_ref)
+    assert before.safety_control_id is not None
+    control_before = await risk_repo.get_safety_control(before.safety_control_id)
+    assert control_before.state.value == "ACTIVE"
+
+    run = await run_reconciliation(
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=target_ref,
+        connection_id=None,
+        entities=_minor_difference_entities(),
+    )
+    assert run.aggregate_classification.value == "MINOR_DIFFERENCE"
+
+    after = await repo.get_state(target_ref)
+    assert after.aggregate_status.value == "MINOR_DIFFERENCE"
+    assert after.safety_control_id == before.safety_control_id
+
+    control_after = await risk_repo.get_safety_control(after.safety_control_id)
+    assert control_after.state.value == "ACTIVE"
+
+
 async def test_connection_unavailable_marks_all_items_unavailable(
     pool, repo, connection_repo, risk_repo
 ):
@@ -268,8 +402,11 @@ async def test_resolve_rejects_missing_target_without_writing(pool, repo, monkey
 
     with pytest.raises(ReconciliationStateNotFoundError, match=str(target_ref)):
         await resolve_reconciliation(
-            repo, tenant_id=tenant_id, actor_subject_id=tenant_id,
-            target_ref=target_ref, reason="missing target",
+            repo,
+            tenant_id=tenant_id,
+            actor_subject_id=tenant_id,
+            target_ref=target_ref,
+            reason="missing target",
         )
 
     transition.assert_not_awaited()
@@ -285,27 +422,35 @@ async def test_resolve_rejects_invalid_request_without_mutation(
     caller_id = await _tenant(pool) if rejection == "cross_tenant" else tenant_id
     entities = _mismatched_entities() if rejection == "cross_tenant" else _matching_entities()
     await run_reconciliation(
-        repo, connection_repo, risk_repo, tenant_id=tenant_id,
-        target_type="PAPER_DEPLOYMENT", target_ref=tenant_id,
-        connection_id=None, entities=entities,
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=tenant_id,
+        connection_id=None,
+        entities=entities,
     )
     before = await repo.get_state(tenant_id)
     control_before = (
         await risk_repo.get_safety_control(before.safety_control_id)
-        if before.safety_control_id else None
+        if before.safety_control_id
+        else None
     )
     transition = AsyncMock(wraps=repo.transition_state_status)
     monkeypatch.setattr(repo, "transition_state_status", transition)
     error = (
-        CrossTenantReconciliationAccessError
-        if rejection == "cross_tenant" else NotResolvableError
+        CrossTenantReconciliationAccessError if rejection == "cross_tenant" else NotResolvableError
     )
     message = str(tenant_id) if rejection == "cross_tenant" else "HEALTHY status"
 
     with pytest.raises(error, match=message):
         await resolve_reconciliation(
-            repo, tenant_id=caller_id, actor_subject_id=caller_id,
-            target_ref=tenant_id, reason="invalid resolve request",
+            repo,
+            tenant_id=caller_id,
+            actor_subject_id=caller_id,
+            target_ref=tenant_id,
+            reason="invalid resolve request",
         )
 
     transition.assert_not_awaited()
@@ -321,9 +466,14 @@ async def test_resolve_failure_injection_preserves_block_and_retry(
     """REC-007/I-10: persistence failure propagates; retry never disarms safety."""
     tenant_id = await _tenant(pool)
     await run_reconciliation(
-        repo, connection_repo, risk_repo, tenant_id=tenant_id,
-        target_type="PAPER_DEPLOYMENT", target_ref=tenant_id,
-        connection_id=None, entities=_mismatched_entities(),
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=tenant_id,
+        connection_id=None,
+        entities=_mismatched_entities(),
     )
     before = await repo.get_state(tenant_id)
     control_before = await risk_repo.get_safety_control(before.safety_control_id)
@@ -333,8 +483,11 @@ async def test_resolve_failure_injection_preserves_block_and_retry(
         patch.setattr(repo, "transition_state_status", transition)
         with pytest.raises(RuntimeError, match="injected transition storage failure") as caught:
             await resolve_reconciliation(
-                repo, tenant_id=tenant_id, actor_subject_id=tenant_id,
-                target_ref=tenant_id, reason="first attempt",
+                repo,
+                tenant_id=tenant_id,
+                actor_subject_id=tenant_id,
+                target_ref=tenant_id,
+                reason="first attempt",
             )
         assert caught.value is failure
         transition.assert_awaited_once()
@@ -345,8 +498,11 @@ async def test_resolve_failure_injection_preserves_block_and_retry(
     assert await risk_repo.get_safety_control(before.safety_control_id) == control_before
 
     resolved = await resolve_reconciliation(
-        repo, tenant_id=tenant_id, actor_subject_id=tenant_id,
-        target_ref=tenant_id, reason="retry after storage recovery",
+        repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        target_ref=tenant_id,
+        reason="retry after storage recovery",
     )
     assert resolved.aggregate_status.value == "RESOLVED"
     after = await repo.get_state(tenant_id)
@@ -373,8 +529,11 @@ async def test_resolve_missing_target_rejection_p95_budget(pool, repo):
         started = perf_counter()
         with pytest.raises(ReconciliationStateNotFoundError):
             await resolve_reconciliation(
-                repo, tenant_id=tenant_id, actor_subject_id=tenant_id,
-                target_ref=uuid4(), reason="rejection latency probe",
+                repo,
+                tenant_id=tenant_id,
+                actor_subject_id=tenant_id,
+                target_ref=uuid4(),
+                reason="rejection latency probe",
             )
         durations.append(perf_counter() - started)
     p95 = sorted(durations)[18]
