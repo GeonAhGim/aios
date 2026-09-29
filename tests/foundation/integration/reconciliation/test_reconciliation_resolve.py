@@ -1,23 +1,18 @@
-"""FND-08 Reconciliation & Resilience 통합테스트 — REC-007 resolve 부정/
-실패주입/성능 케이스. test_reconciliation_lifecycle.py의 REC-001~004 lifecycle
-분류 케이스에서 분리했다(loc_over_500, task-8905)."""
+"""FND-08 Reconciliation resolve lifecycle test (L4_*#FND-08, REC-007).
+
+Split from `test_reconciliation_lifecycle.py` (500-LOC policy,
+ADR-2026-09-10-C §7) — shares fixtures/entity-snapshot helpers via
+`_reconciliation_test_support.py`.
+"""
 
 from __future__ import annotations
 
-from decimal import Decimal
-from pathlib import Path
 from time import perf_counter
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import asyncpg
 import pytest
-from dotenv import dotenv_values
 
-from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
-from src.foundation.reconciliation.adapters.postgres_repository import (
-    PostgresReconciliationRepository,
-)
 from src.foundation.reconciliation.application.resolve_reconciliation import (
     CrossTenantReconciliationAccessError,
     NotResolvableError,
@@ -25,69 +20,64 @@ from src.foundation.reconciliation.application.resolve_reconciliation import (
     resolve_reconciliation,
 )
 from src.foundation.reconciliation.application.run_reconciliation import run_reconciliation
-from src.foundation.reconciliation.contracts.v1 import EntitySnapshot
-from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
-from tests.integration.conftest import create_test_tenant
+from tests.foundation.integration.reconciliation._reconciliation_test_support import (
+    connection_repo,
+    matching_entities,
+    mismatched_entities,
+    pool,
+    repo,
+    risk_repo,
+    tenant,
+)
+
+__all__ = ["pool", "repo", "connection_repo", "risk_repo"]
 
 
-def _asyncpg_dsn() -> str:
-    env = dotenv_values(Path(__file__).resolve().parents[4] / ".env")
-    url = env.get("DATABASE_URL")
-    assert url
-    return url.replace("postgresql+asyncpg://", "postgresql://")
+async def test_resolve_does_not_reactivate_or_clear_safety_control(
+    pool, repo, connection_repo, risk_repo
+):
+    """REC-007 — resolve alone cannot resume; safety_control은 resolve로
+    건드리지 않는다(별도 deactivate_safety_control 호출이 필요)."""
+    tenant_id = await tenant(pool)
+    target_ref = tenant_id
 
+    await run_reconciliation(
+        repo,
+        connection_repo,
+        risk_repo,
+        tenant_id=tenant_id,
+        target_type="PAPER_DEPLOYMENT",
+        target_ref=target_ref,
+        connection_id=None,
+        entities=mismatched_entities(),
+    )
+    state_before = await repo.get_state(target_ref)
 
-@pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=8)
-    yield p
-    await p.close()
+    resolved = await resolve_reconciliation(
+        repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        target_ref=target_ref,
+        reason="원인 파악 완료, 수동 정정함",
+    )
+    assert resolved.aggregate_status.value == "RESOLVED"
 
+    control = await risk_repo.get_safety_control(state_before.safety_control_id)
+    assert control.state.value == "ACTIVE"
 
-@pytest.fixture
-def repo(pool):
-    return PostgresReconciliationRepository(pool)
-
-
-@pytest.fixture
-def connection_repo(pool):
-    return PostgresConnectionRepository(pool)
-
-
-@pytest.fixture
-def risk_repo(pool):
-    return PostgresRiskGateRepository(pool)
-
-
-async def _tenant(pool):
-    return await create_test_tenant(pool)
-
-
-def _matching_entities() -> list[EntitySnapshot]:
-    return [
-        EntitySnapshot(
-            entity_type="BALANCE",
-            entity_key="USDT",
-            internal_value=Decimal("1000.00"),
-            provider_value=Decimal("1000.00"),
+    with pytest.raises(NotResolvableError):
+        await resolve_reconciliation(
+            repo,
+            tenant_id=tenant_id,
+            actor_subject_id=tenant_id,
+            target_ref=target_ref,
+            reason="다시 resolve 시도",
         )
-    ]
-
-
-def _mismatched_entities() -> list[EntitySnapshot]:
-    return [
-        EntitySnapshot(
-            entity_type="BALANCE",
-            entity_key="USDT",
-            internal_value=Decimal("1000.00"),
-            provider_value=Decimal("400.00"),
-        )
-    ]
 
 
 async def test_resolve_rejects_missing_target_without_writing(pool, repo, monkeypatch):
     """REC-007 negative: a missing target cannot become RESOLVED."""
-    tenant_id = await _tenant(pool)
+    tenant_id = await tenant(pool)
     target_ref = uuid4()
     transition = AsyncMock(wraps=repo.transition_state_status)
     monkeypatch.setattr(repo, "transition_state_status", transition)
@@ -110,9 +100,9 @@ async def test_resolve_rejects_invalid_request_without_mutation(
     pool, repo, connection_repo, risk_repo, monkeypatch, rejection
 ):
     """REC-007 negative/adversarial: tenant and lifecycle gates precede writes (I-10)."""
-    tenant_id = await _tenant(pool)
-    caller_id = await _tenant(pool) if rejection == "cross_tenant" else tenant_id
-    entities = _mismatched_entities() if rejection == "cross_tenant" else _matching_entities()
+    tenant_id = await tenant(pool)
+    caller_id = await tenant(pool) if rejection == "cross_tenant" else tenant_id
+    entities = mismatched_entities() if rejection == "cross_tenant" else matching_entities()
     await run_reconciliation(
         repo,
         connection_repo,
@@ -156,7 +146,7 @@ async def test_resolve_failure_injection_preserves_block_and_retry(
     pool, repo, connection_repo, risk_repo, monkeypatch
 ):
     """REC-007/I-10: persistence failure propagates; retry never disarms safety."""
-    tenant_id = await _tenant(pool)
+    tenant_id = await tenant(pool)
     await run_reconciliation(
         repo,
         connection_repo,
@@ -165,7 +155,7 @@ async def test_resolve_failure_injection_preserves_block_and_retry(
         target_type="PAPER_DEPLOYMENT",
         target_ref=tenant_id,
         connection_id=None,
-        entities=_mismatched_entities(),
+        entities=mismatched_entities(),
     )
     before = await repo.get_state(tenant_id)
     control_before = await risk_repo.get_safety_control(before.safety_control_id)
@@ -215,7 +205,7 @@ async def test_resolve_missing_target_rejection_p95_budget(pool, repo):
     This measures the command, not the full HTTP route; the route budget is
     defined in L4_platform_observability_tenancy_api_v1.0.md section 7.
     """
-    tenant_id = await _tenant(pool)
+    tenant_id = await tenant(pool)
     durations = []
     for _ in range(20):
         started = perf_counter()
