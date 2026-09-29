@@ -17,6 +17,7 @@ deepen, task-3356) — 중복 대신 여기서는 교차 참조만 남긴다."""
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
