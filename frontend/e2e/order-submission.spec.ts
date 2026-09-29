@@ -16,7 +16,20 @@ test.describe("주문 제출", () => {
     await fieldControl(page, "전략 ID").fill("e2e-momentum-strategy");
     await fieldControl(page, "버전").fill("1.0.0");
     await fieldControl(page, "배분 자본(USDT)").fill("500");
+    // CI에서 간헐 적색(esc-ci-e2e.json)이 났던 지점 — 제출 클릭 직후 바로
+    // toBeVisible(10s)로 넘어가면 POST /executions 응답 + invalidateQueries가
+    // 트리거한 GET /executions 재조회 왕복(부하가 큰 CI 러너에서 page.route
+    // IPC가 느려질 때 수 초 소요)까지 같은 10초 예산을 나눠 써야 했다. 목록이
+    // 실제로 새로고침되는 시점(재조회 GET 응답)까지 먼저 명시적으로 기다려
+    // 네트워크 왕복 시간을 시각화 어서션의 타임아웃 예산에서 분리한다.
+    const executionsRefetched = page.waitForResponse(
+      (res) =>
+        res.url().endsWith("/executions") &&
+        res.request().method() === "GET" &&
+        res.status() === 200,
+    );
     await page.getByRole("button", { name: "실행 생성" }).click();
+    await executionsRefetched;
 
     await expect(page.getByText("e2e-momentum-strategy")).toBeVisible();
     // 성공 후 폼의 전략 ID 입력은 비워진다(ExecutionControlPage.submitExecution).
