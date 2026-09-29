@@ -49,6 +49,7 @@ export default defineConfig({
     // 잘못 붙잡을 여지가 있다. 포트가 worktree별로 이미 고유해졌으니 재사용 이점보다
     // 교차 오염 방지가 우선이다.
     reuseExistingServer: false,
+    startServerIfRequired: true,
     timeout: 180_000,
   },
 });
