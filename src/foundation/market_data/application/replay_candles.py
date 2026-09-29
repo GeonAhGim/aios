@@ -1,15 +1,18 @@
-"""LA-17 — 백테스트용 결정론 리플레이(strict 갭, 해시 결정론).
+"""LA-17 — deterministic replay for backtesting (strict gap check, hash determinism).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §9.2 LA-17, A5.
 
-조회·조정·갭 판정 코어는 `application/get_candles.load_series`(같은 리프)로
-위임한다 — 재구현하지 않는다. 이 파일이 얹는 것은 strict 판단 하나뿐이다:
-기대 open_time 대비 결측이 하나라도 있으면 `ReplaySeries`를 반환하지 않고
-`ReplayIncompleteError`(`MD_REPLAY_INCOMPLETE`)를 던진다. `series_hash`는
-`domain/lineage.batch_hash`(LA-8)가 정렬된 canonical JSON을 해시하므로,
-저장 행 삽입 순서·파티션 분포가 달라도 같은 캔들 집합이면 항상 같은 값이
-나온다(A5 "같은 as_of+같은 범위 → 같은 바이트").
+Query/adjustment/gap-detection core is delegated to
+`application/get_candles.load_series` (same leaf) — not reimplemented here.
+The only thing this file adds is the strict judgment: if even one candle is
+missing against the expected open_time, it does not return a `ReplaySeries`
+and instead raises `ReplayIncompleteError` (`MD_REPLAY_INCOMPLETE`).
+`series_hash` always comes out the same for the same candle set regardless of
+storage-row insertion order or partition distribution, because
+`domain/lineage.batch_hash` (LA-8) hashes sorted canonical JSON
+(A5 "same as_of + same range -> same bytes").
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -37,9 +40,7 @@ class ReplayIncompleteError(Exception):
     must refill the gap and re-run."""
 
     def __init__(self, *, expected_count: int, missing_count: int) -> None:
-        super().__init__(
-            f"리플레이 불완전: expected={expected_count} missing={missing_count}"
-        )
+        super().__init__(f"리플레이 불완전: expected={expected_count} missing={missing_count}")
         self.expected_count = expected_count
         self.missing_count = missing_count
 
