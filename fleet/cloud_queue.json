@@ -1,4 +1,54 @@
 {
-  "generated_at": "2026-09-29T08:39:57+00:00",
-  "tasks": []
+  "generated_at": "2026-09-29T08:51:05+00:00",
+  "tasks": [
+    {
+      "id": 8721,
+      "title": "[cloud-early] U-6 1단계 -- 배당/공모주/실적 캘린더 이벤트 마커 도메인 모델(소스 어댑터는 후속)",
+      "spec": "ADR-2026-09-09-B Decision C U-6(\"한국 시장 특화 데이터: 배당,공모주,실적 캘린더, 차트 이벤트 마커\"), ADR-2026-09-26-A(클라우드전용 조건부착수). 근거: src/foundation/research_data/ports/corporate_action_filing_repository.py + src/foundation/market_data/contracts/v1.py CorporateAction(action_type: SPLIT/REVERSE_SPLIT/CASH_DIVIDEND/MERGER)은 이미 있지만 EARNINGS(실적발표)/IPO(공모주) 유형과 차트에 마커로 올릴 경량 이벤트 뷰는 없다. 이 리프는 기존 CorporateAction 계약(v1)을 건드리지 않고 별도 도메인 타입 MarketEventMarker(event_type: Literal[DIVIDEND,EARNINGS,IPO], instrument_id, event_date, known_at, source_ref)를 신설한다(외부 API 연동은 후속 리프). DoD 체크리스트(전부 반증 가능): 1) new:src/foundation/research_data/domain/market_event_marker.py -- MarketEventMarker(frozen dataclass or pydantic BaseModel), normalize_markers(raw: list[dict]) -> list[MarketEventMarker] 순수 함수(중복 source_ref 제거, event_date 오름차순 정렬). 2) 잘못된 event_type 문자열은 ValueError로 거부(negative test). 3) 같은 (instrument_id, event_type, event_date)에 source_ref만 다른 두 건이 들어오면 known_at이 더 최신인 것으로 대체(정정 반영, corpus action 패턴과 동일 -- negative test로 오래된 것이 대체되지 않음을 검증). 4) event_date가 미래라도 known_at <= 오늘이면 유지, known_at이 미래인 입력은 ValueError(negative test). 5) new:tests/foundation/unit/research_data/test_market_event_marker.py -- negative >=3건, 실행 커맨드: python -m pytest tests/foundation/unit/research_data/test_market_event_marker.py -q 통과. 6) docs/design/INVARIANTS.md 위반 없음, DB/API 미배선(순수 함수).",
+      "files": [
+        "new:src/foundation/research_data/domain/market_event_marker.py",
+        "new:tests/foundation/unit/research_data/test_market_event_marker.py"
+      ],
+      "tier": "M",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 캘린더 이벤트 마커 도메인 모델(순수함수), 기존 CorporateAction v1 계약 미변경, DB/API 미배선"
+    },
+    {
+      "id": 8722,
+      "title": "[cloud-early] U-11 1단계 -- GIPS 준거 복합계정(composite) 자산가중 수익률/분산 집계 순수함수(계정-복합계정 매핑은 후속)",
+      "spec": "ADR-2026-09-09-B Decision C U-11(\"다계좌/고객 계정 관리: 고객별 성과/수수료/보고서, GIPS 준거 성과 표기, FA 포트 위\"), ADR-2026-09-26-A(클라우드전용 조건부착수). 근거: src/foundation/performance/domain/twr.py, mwr.py가 개별 포트폴리오의 TWR/MWR은 계산하지만, GIPS(Global Investment Performance Standards) composite(동일 전략/위임의 계정 묶음) 단위 자산가중 수익률과 내부 분산(dispersion)을 계산하는 계층은 없다. 이 리프는 개별 포트폴리오의 (portfolio_id, period_return, beginning_market_value) 목록을 입력받아 순수 함수로 composite 자산가중 수익률과 분산만 계산한다(계정->composite 매핑 저장/조회는 후속 리프, 돈 이동/주문 없음). DoD 체크리스트(전부 반증 가능): 1) new:src/foundation/performance/domain/gips_composite.py -- CompositeConstituent(portfolio_id, period_return: Decimal, beginning_market_value: Decimal), compute_composite_return(constituents) -> Decimal(자산가중평균, sum(return*weight)), compute_composite_dispersion(constituents) -> Decimal(자산가중 표준편차, GIPS asset-weighted standard deviation 공식). 2) beginning_market_value<=0인 constituent가 섞이면 ValueError(negative test). 3) constituents가 1건뿐이면 dispersion은 정의상 0(GIPS 규정, 단일계정은 분산 없음 -- 별도 테스트). 4) constituents가 빈 리스트면 ValueError(negative test, 존재하지 않는 composite에 수익률을 매길 수 없음). 5) 자산가중평균 계산 시 Decimal만 사용(float 금지, money_float 래칫 위반 방지). 6) new:tests/foundation/unit/performance/test_gips_composite.py -- negative >=3건, 실행 커맨드: python -m pytest tests/foundation/unit/performance/test_gips_composite.py -q 통과. 7) docs/design/INVARIANTS.md 위반 없음, DB/API/주문 경로 미배선(순수 함수).",
+      "files": [
+        "new:src/foundation/performance/domain/gips_composite.py",
+        "new:tests/foundation/unit/performance/test_gips_composite.py"
+      ],
+      "tier": "M",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: GIPS composite 자산가중 수익률/분산 순수함수, 계정 매핑/주문/돈경로 미배선"
+    },
+    {
+      "id": 8723,
+      "title": "[cloud-early] M2-13 무중단 배포 1단계 — 마이그레이션 expand/contract 규칙 검사기",
+      "spec": "docs/design/ADR-2026-09-09-B-mvp1-hardening-and-mvp2-scope.md#M2-13. 1단계만(blue/green/자동 롤백은 후속 리프 범위 밖). scripts/check_migration_expand_contract.py 신설: 단일 alembic 리비전 안에서 (a) server_default 없는 NOT NULL 컬럼 추가, (b) 컬럼/테이블 DROP을 함께 수행하면 rc=1로 위반 판정. DoD: tests/unit/scripts/test_check_migration_expand_contract.py에 negative>=3(NOT NULL 위반 리비전 rc=1, DROP 위반 리비전 rc=1, 정상 expand-only 리비전 rc=0) 통과, pytest tests/unit/scripts/test_check_migration_expand_contract.py -q 전부 통과.",
+      "files": [
+        "new:scripts/check_migration_expand_contract.py",
+        "new:tests/unit/scripts/test_check_migration_expand_contract.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[health:local_candidate_supply][cloud_session] 클라우드 적합: MVP-2 우선 2(ADR-2026-09-26-A) M2-13 1단계(마이그레이션 expand/contract 검사기), 저장소만으로 완결, 돈경로 아님"
+    },
+    {
+      "id": 8724,
+      "title": "[cloud-early] U-6 한국 시장 특화 데이터 1단계 — 투자자별 매매동향(KIS TR) 파서+도메인 모델",
+      "spec": "docs/specs/L4_product_experience_and_discovery_v1.0.md#U-6. 1단계만(배당/공모주/실적 캘린더·공매도/대차·차트 마커는 후속 리프). KIS TR 투자자별 매매동향(기관/외국인/개인 순매수 수량·금액) 오프라인 고정 샘플 응답을 파싱하는 순수 함수. research_data/domain의 as_of_binding·known_at 패턴 재사용, 라이브 API 호출 금지(fixture만). DoD: tests/unit/foundation/research_data/test_investor_flow.py에 negative>=3(빈 응답 거부, 필수 필드 누락 거부, 순매수 금액이 음수 불가 필드에 음수면 거부) 통과, pytest tests/unit/foundation/research_data/test_investor_flow.py -q 전부 통과.",
+      "files": [
+        "new:src/foundation/research_data/domain/investor_flow.py",
+        "new:src/foundation/research_data/adapters/sources/kis_investor_flow.py",
+        "new:tests/unit/foundation/research_data/test_investor_flow.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[health:local_candidate_supply][cloud_session] 클라우드 적합: MVP-2 우선 2(ADR-2026-09-26-A) U-6 1단계(KIS TR 투자자별 매매동향 파서), RD 컨텍스트 확장, 돈경로 아님"
+    }
+  ]
 }
