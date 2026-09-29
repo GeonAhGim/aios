@@ -54,9 +54,6 @@ const snapshotPathSet = new Set(snapshotPathList);
 const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "auth.sessions.list",
   "auth.sessions.revoke",
-  // task-2428(BT-18): backtests.sweep — apiRoutes.ts의 등록 주석 참조(실행 라우터
-  // 자체가 아직 없음, sessions.*와 동일 사유).
-  "backtests.sweep",
   // task-2699(UX-15): follow.subscriptions.* 3건 — apiRoutes.ts의 등록 주석 참조
   // (src/foundation/follow 모듈·src/api/routers/follow.py 자체가 아직 없음,
   // sessions.*와 동일 사유).
@@ -71,21 +68,16 @@ const GHOST_PATH_WHITELIST: ReadonlySet<ApiRouteName> = new Set<ApiRouteName>([
   "ai.proposals.promoteTicket",
   "ai.proposals.promote",
   "ai.experiments.base",
-  // task-2692(UX-8): screener.run — apiRoutes.ts의 등록 주석 참조(src/foundation/
-  // screener 모듈·src/api/routers/screener.py 자체가 아직 없음, ai.*와 동일 사유).
-  "screener.run",
   // task-2696(UX-12): whatif.* 2건 — apiRoutes.ts의 등록 주석 참조(src/foundation/
-  // whatif 모듈·src/api/routers/whatif.py 자체가 아직 없음, screener.run과 동일 사유).
+  // whatif 모듈·src/api/routers/whatif.py 자체가 아직 없음, task-7773 이전의
+  // screener.run과 동일 사유).
   "whatif.previewOrder",
   "whatif.rebalancePlan",
-  // task-2718(RD-17): researchData.* 2건 — apiRoutes.ts의 등록 주석 참조
-  // (src/foundation/research_data에는 API 라우터가 아직 없음, whatif.*와
-  // 동일 사유).
-  "researchData.search",
-  "researchData.sources.list",
   // task-5998(SIG-6): signals.sources.* 4건 — apiRoutes.ts의 등록 주석 참조
   // (src/foundation/signals 모듈·src/api/routers/signals.py 자체가 아직 없음,
-  // researchData.*와 동일 사유).
+  // whatif.*와 동일 사유). researchData.*는 task-7775(RD-17)로 실제 라우터
+  // (src/api/routers/research_data.py의 search_router)가 생겨 이 화이트리스트
+  // 에서 빠졌다.
   "signals.sources.base",
   "signals.sources.rotate",
   "signals.sources.disable",
@@ -160,6 +152,10 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
   "/metrics": "인프라 메트릭 엔드포인트다(모니터링 전용) — 앱 API 표면이 아니다",
   "/readyz": "인프라 헬스체크 프로브다(k8s readiness) — 앱 API 표면이 아니다",
+  // task-7775(RD-17)가 contracts/openapi/v1.json을 재생성하며 드러난 기존 격차 —
+  // U-8 risk-coach 라우터(3c4cec9b)는 이 leaf 이전에 이미 머지됐지만 스냅샷이 그
+  // 시점부터 갱신되지 않아 여기 없었다. apiRoutes.ts 배선은 U-8 후속 리프 소관.
+  "/risk-coach/position-size": "U-8 risk-coach position sizing 화면 배선이 아직 없다",
   // task-2346(FE-OPS-5): ConnectionsPage가 목록·생성·confirm·sync·revoke 5건 전부를
   // connections.*로 등록했다 — 여기 있던 4개 항목(task-2168 원 목록, 목록·생성은
   // connections.base 하나로 등록되므로 legacyPath 4개가 아니라 3개 route명)을 제거한다.

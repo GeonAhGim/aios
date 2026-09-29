@@ -58,6 +58,31 @@ export const REGRESSION_FLOOR_MS = 0.05;
  */
 export const IMPROVEMENT_TOLERANCE = REGRESSION_TOLERANCE / 2;
 
+/**
+ * task-7910 (esc-ci-frontend.json): REGRESSION_TOLERANCE_OVERRIDES widens
+ * indicatorAddMs's *regression* side to 30% because it is inherently noisier
+ * than the other two metrics (see that constant's docstring), but
+ * IMPROVEMENT_TOLERANCE stayed shared at the generic 10% -- so the same
+ * noisy metric could ratchet its own baseline *down* on an ordinary lucky
+ * run (any dip past 10%) even though its accepted noise band on the other
+ * side is documented as needing 30%. Reproduced directly from this baseline
+ * file's own history: three consecutive auto-"improved" persists in two days
+ * (11.031 -> 9.841, -10.8%; then 9.841 -> 8.415, -14.5%), each individually
+ * clearing the generic 10% floor, walked the baseline down to a level where
+ * this metric's ordinary ~9-12ms noise band (the same range documented in
+ * REGRESSION_TOLERANCE_OVERRIDES's docstring) now sits right at its own 30%
+ * regression ceiling -- exactly the asymmetric-hysteresis bug task-6414
+ * fixed for the generic case, just missing this metric's override. Mirroring
+ * IMPROVEMENT_TOLERANCE's own derivation (half of the regression tolerance)
+ * against indicatorAddMs's wider 30% regression override keeps the
+ * improvement side proportionally as conservative as the regression side is
+ * lenient, instead of drifting the baseline down faster than the metric's
+ * own accepted noise band can stay stable against.
+ */
+export const IMPROVEMENT_TOLERANCE_OVERRIDES = {
+  indicatorAddMs: REGRESSION_TOLERANCE_OVERRIDES.indicatorAddMs / 2,
+};
+
 export function loadBaseline(path) {
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf-8")) : null;
 }
@@ -92,6 +117,7 @@ export function checkRatchet(
   floorMs = REGRESSION_FLOOR_MS,
   toleranceOverrides = REGRESSION_TOLERANCE_OVERRIDES,
   improvementTolerance = IMPROVEMENT_TOLERANCE,
+  improvementToleranceOverrides = IMPROVEMENT_TOLERANCE_OVERRIDES,
 ) {
   const failures = [];
   const improved = {};
@@ -99,12 +125,13 @@ export function checkRatchet(
     const base = baselineMetrics[key];
     if (typeof base !== "number") continue;
     const effectiveTolerance = toleranceOverrides[key] ?? tolerance;
+    const effectiveImprovementTolerance = improvementToleranceOverrides[key] ?? improvementTolerance;
     const normalized = value / calibRatio;
     if (normalized > base * (1 + effectiveTolerance) && normalized - base > floorMs) {
       failures.push(
         `${key}: ${value}ms (host-load normalized ${normalized.toFixed(3)}ms @ calib ratio ${calibRatio.toFixed(3)}) is >${effectiveTolerance * 100}% slower than baseline ${base}ms`,
       );
-    } else if (normalized < base * (1 - improvementTolerance) && base - normalized > floorMs) {
+    } else if (normalized < base * (1 - effectiveImprovementTolerance) && base - normalized > floorMs) {
       improved[key] = normalized;
     }
   }

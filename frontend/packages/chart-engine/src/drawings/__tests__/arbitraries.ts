@@ -8,7 +8,12 @@ import { DRAWING_KINDS } from "../model";
 import {
   createFibonacci,
   createHorizontalLine,
+  createParallelChannel,
+  createPriceChannel,
+  createPriceLine,
+  createRayLine,
   createRectangle,
+  createSegment,
   createTrendLine,
   createVerticalLine,
   type DrawingOptions,
@@ -98,6 +103,16 @@ export function genDrawing(rng: Rng, id: string): Drawing {
         : Array.from({ length: rng.int(1, 6) }, () => Number((rng.next() * 2 - 0.5).toFixed(3)) || 0);
       return createFibonacci(id, genPoint(rng), genPoint(rng), levels, options);
     }
+    case "segment":
+      return createSegment(id, genPoint(rng), genPoint(rng), options);
+    case "ray-line":
+      return createRayLine(id, genPoint(rng), genPoint(rng), options);
+    case "parallel-channel":
+      return createParallelChannel(id, genPoint(rng), genPoint(rng), genPoint(rng), options);
+    case "price-channel":
+      return createPriceChannel(id, genPoint(rng), genPoint(rng), options);
+    case "price-line":
+      return createPriceLine(id, genNumber(rng), options);
   }
 }
 
@@ -125,6 +140,11 @@ const REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>> = {
   fibonacci: ["points", "levels"],
   "horizontal-line": ["price"],
   "vertical-line": ["time"],
+  segment: ["points"],
+  "ray-line": ["points"],
+  "parallel-channel": ["points"],
+  "price-channel": ["points"],
+  "price-line": ["price"],
 };
 
 export type WireCorruption =

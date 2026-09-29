@@ -310,6 +310,33 @@ async def test_cli_reports_decision_corrupt_and_still_checks_the_rest(
     assert str(corrupt.decision_id) in captured.err
 
 
+async def test_cli_reports_decision_corrupt_for_empty_inputs_snapshot_and_still_checks_the_rest(
+    pool, decision_repo, bundle_repo, capsys
+):
+    """negative -- PR #91 run 36224833535: a `--since` batch crashed with
+    `ValidationError: 11 validation errors for RiskInputs` because another test
+    file (test_risk_limits_db.py `_insert_minimal_risk_decision`) leaves a row
+    with `inputs_snapshot = '{}'` in the shared xdist worker DB. A snapshot that
+    fails the RiskInputs contract must be reported as DECISION_CORRUPT (exit 2)
+    while the clean row still replays as MATCH -- same contract as the NULL
+    latency_us case above."""
+    tenant_id = await create_test_tenant(pool)
+    since = NOW.replace(year=NOW.year - 1)
+    clean = await _seed_decision(pool, decision_repo, bundle_repo, tenant_id=tenant_id)
+    # Same rule_hash as `clean` (bundle exists) so replay reaches the inputs
+    # validation instead of stopping at BUNDLE_NOT_FOUND.
+    corrupt = clean.model_copy(update={"decision_id": uuid4()})
+    await decision_repo.insert(corrupt, {})
+
+    exit_code = await risk_replay._run(decision_id=None, since=since)
+
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert f"MATCH {clean.decision_id}" in captured.out
+    assert f"DECISION_CORRUPT {corrupt.decision_id}" in captured.err
+    assert "inputs_snapshot fails the RiskInputs contract" in captured.err
+
+
 def test_replay_decision_has_no_reimplemented_thresholds():
     """DoD(d) — 판정(임계값 비교) 재구현 0. `Decimal` 미사용 = 수치 임계를
     다룰 능력 자체가 없다는 뜻이고, evaluator 호출 결과만 대조함을 보증한다."""

@@ -11,7 +11,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 
 | 구현됨 | 범위밖 | 미착수 | 합계 | 구현률 |
 |---|---|---|---|---|
-| 156 | 0 | 0 | 156 | 100.00% |
+| 155 | 1 | 0 | 156 | 99.36% |
 
 완료 정의(D5): `미착수` 0건 또는 우선순위(P0/P1/P2)로 사유가 남아있음. `범위밖`은 문서가 명시한 정책 배제(7.9 원칙, 출금)만 해당한다.
 
@@ -32,7 +32,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | 1.9 Grid(그리드봇) — `grid_mixin.py` | 6 | 6 | 100.00% |
 | 3.1 Market(공개 시세) — `src/exchanges/bitget/market_data_mixin.py` 확장 | 10 | 10 | 100.00% |
 | 3.2 Trade(주문) — FD-4 주문 전송 계층과 직결 | 17 | 17 | 100.00% |
-| 3.3 Account(계좌·입출금) | 8 | 8 | 100.00% |
+| 3.3 Account(계좌·입출금) | 7 | 8 | 87.50% |
 | 4. Margin(마진) 엔드포인트 체크리스트 | 18 | 18 | 100.00% |
 | 5.1 Market | 13 | 13 | 100.00% |
 | 5.2 Account | 9 | 9 | 100.00% |
@@ -186,7 +186,7 @@ BR-9(ADR-2026-09-06-I D5). 생성: `python scripts/bitget_coverage.py`(오프라
 | GET | `/api/v2/spot/wallet/deposit-records` | 3.3 Account(계좌·입출금) | 구현됨 | P2 | 입금 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | POST | `/api/v2/spot/wallet/subaccount-transfer` | 1.2 Subaccount(서브계정 관리) — `subaccount_mixin.py` | 구현됨 | - | 서브계정 간 이체 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | POST | `/api/v2/spot/wallet/transfer` | 3.3 Account(계좌·입출금) | 구현됨 | P1 | 이체(현물↔선물 등) | `02b_bitget_api_v2_full_spec_v1.md` |
-| POST | `/api/v2/spot/wallet/withdrawal` | 3.3 Account(계좌·입출금) | 구현됨 | 금지 | 출금 신청 | `02b_bitget_api_v2_full_spec_v1.md` |
+| POST | `/api/v2/spot/wallet/withdrawal` | 3.3 Account(계좌·입출금) | 범위밖 | 금지 | 출금 신청 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/spot/wallet/withdrawal-records` | 3.3 Account(계좌·입출금) | 구현됨 | P2 | 출금 이력 조회 | `02b_bitget_api_v2_full_spec_v1.md` |
 | GET | `/api/v2/tax/future-record` | 1.6 Tax(세금 신고용 원본 데이터) — `tax_mixin.py` | 구현됨 | - | 선물 세금 기록 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |
 | GET | `/api/v2/tax/margin-record` | 1.6 Tax(세금 신고용 원본 데이터) — `tax_mixin.py` | 구현됨 | - | 마진 세금 기록 조회 | `02c_bitget_api_v2_extended_spec_v1.md` |

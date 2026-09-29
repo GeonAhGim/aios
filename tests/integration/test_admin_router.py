@@ -2,11 +2,11 @@
 
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import asyncpg
-import pyotp
 import pytest
 from dotenv import dotenv_values
 from fastapi import Depends
@@ -18,7 +18,7 @@ from src.api.service_deps import get_credential_resolver
 from src.data.models.trading import AccountBalance
 from src.main import app
 from tests.integration.conftest import NoopEventBus
-from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
+from tests.integration.mfa_clock import mfa_clock_frozen, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -115,17 +115,29 @@ async def _mfa_verified_admin_headers(client, pool) -> dict:
     me = await client.get("/users/me", headers=headers)
     await _make_admin(pool, me.json()["data"]["user_id"])
 
-    setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    secret = setup_response.json()["data"]["secret"]
-    verify_code = pyotp.totp.TOTP(secret).now()
-    await client.post("/auth/mfa/verify", json={"totp_code": verify_code}, headers=headers)
+    # esc-ci-cbb8b9c62497 -- 실시간 코드 생성은 서버 검증과의 30초 구간 경계 레이스가
+    # 있어(valid_window=0) 시계를 고정한다. 로그인 코드는 재사용 거부(RED_TEAM #13)
+    # 때문에 다음 구간(+31s)으로 고정한다.
+    frozen_now = datetime.now(timezone.utc)
+    with mfa_clock_frozen(app, frozen_now):
+        setup_response = await client.post("/auth/mfa/setup", headers=headers)
+        secret = setup_response.json()["data"]["secret"]
+        verify_response = await client.post(
+            "/auth/mfa/verify", json={"totp_code": totp_at(secret, frozen_now)}, headers=headers
+        )
+    assert verify_response.status_code == 200, verify_response.text
 
-    with mfa_clock_shifted(app, 31) as shifted_now:
-        login_code = totp_at(secret, shifted_now())
+    login_at = frozen_now + timedelta(seconds=31)
+    with mfa_clock_frozen(app, login_at):
         login_response = await client.post(
             "/auth/login",
-            json={"email": email, "password": STRONG_PASSWORD, "totp_code": login_code},
+            json={
+                "email": email,
+                "password": STRONG_PASSWORD,
+                "totp_code": totp_at(secret, login_at),
+            },
         )
+    assert login_response.status_code == 200, login_response.text
     mfa_token = login_response.json()["data"]["access_token"]
     return {"Authorization": f"Bearer {mfa_token}"}
 

@@ -7,6 +7,7 @@ D1/D2/D7. task-1764 DoD 3종을 여기서 증명한다:
 3) `credential_ref`로 키 원문이 새어나오지 않음(직렬화 스냅샷).
 docs/design/INVARIANTS.md I-10 — 이 테스트가 그 증명이다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     SourceCapability,
     SourceContract,
     SourceContractDenialReason,
+    SourceContractGrant,
     SourceContractTier,
     authorize_source,
     permits_use,
@@ -59,7 +61,7 @@ def _contract(
 
 
 def _adapter_capability(source_id: str, row: SourceContract | None) -> frozenset[str] | None:
-    """"어댑터는 source_id만 알고 등급을 모른다"를 흉내낸 헬퍼 — 시그니처가
+    """ "어댑터는 source_id만 알고 등급을 모른다"를 흉내낸 헬퍼 — 시그니처가
     `source_id`와 게이트 판정 결과만 받고, 등급 자체는 갖고 있지 않다.
     아래 테스트에서 이 함수의 코드는 승격 전/후 단 한 번도 바뀌지 않는다."""
     grant = authorize_source(row, _NOW)
@@ -187,3 +189,49 @@ def test_credential_ref_snapshot_does_not_leak_raw_secret() -> None:
 )
 def test_permits_use_matrix(scope: RedistributionScope, use: DataUse, expected: bool) -> None:
     assert permits_use(scope, use) is expected
+
+
+def test_grant_rejects_allowed_true_with_denial_reason_set() -> None:
+    """negative: I-10 fail-closed 불변식은 `authorize_source()` 호출부가 아니라
+    `SourceContractGrant` 생성 자체에서 강제된다 — allow와 deny 필드를 동시에
+    채운 그랜트는 만들 수조차 없다."""
+    with pytest.raises(ValidationError):
+        SourceContractGrant(
+            allowed=True,
+            tier=SourceContractTier.PERSONAL,
+            redistribution_scope=RedistributionScope.INTERNAL,
+            rate_limit=100,
+            quota=1000,
+            capability=SourceCapability(
+                asset_classes=frozenset({"EQUITY_KR"}), resolutions=frozenset({"1d"})
+            ),
+            denial_reason=SourceContractDenialReason.EXPIRED,
+        )
+
+
+def test_grant_rejects_allowed_false_with_grant_fields_populated() -> None:
+    """negative: 반대 방향도 막힌다 — denial_reason과 함께 계약 필드가 하나라도
+    채워진 거부 그랜트는 만들 수 없다(정보 누출 방지)."""
+    with pytest.raises(ValidationError):
+        SourceContractGrant(
+            allowed=False,
+            tier=SourceContractTier.PERSONAL,
+            redistribution_scope=None,
+            rate_limit=None,
+            quota=None,
+            capability=None,
+            denial_reason=SourceContractDenialReason.NOT_FOUND,
+        )
+
+
+def test_authorize_source_raises_on_tampered_naive_valid_from() -> None:
+    """실패주입: `SourceContract`는 frozen이라 정상 경로로는 tz 정보를 잃을 수
+    없지만, 저장소 어댑터 버그로 `object.__setattr__`을 통해 `valid_from`이
+    naive datetime으로 오염됐다고 가정한다. `authorize_source()`는 이를 조용히
+    허용/거부로 삼키지 않고 비교 시점에 예외로 드러내야 한다(fail-closed —
+    침묵하는 허용보다 소란스러운 실패가 낫다)."""
+    contract = _contract()
+    object.__setattr__(contract, "valid_from", datetime(2026, 8, 1, 0, 0))
+
+    with pytest.raises(TypeError):
+        authorize_source(contract, _NOW)

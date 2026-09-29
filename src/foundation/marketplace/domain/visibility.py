@@ -17,13 +17,34 @@ indicator or strategy code) -- a listing carrying that fact can never be
 requested at `PUBLIC` visibility, regardless of what the seller intends.
 `validate_visibility_grade` enforces this at the input boundary so a bad
 request never reaches `resolve_visibility`.
+
+ADR-2026-09-26-B Decision 2 (SRC-1) adds a fourth, independent axis:
+`source_retention` -- whether the server keeps only the signed IR
+(`artifact`) or the original source. `validate_source_retention` is this
+leaf's policy-judgment slice of SRC-1 only: which `(visibility,
+retention)` pairs are legal. Encryption-key management and the at-rest
+encrypted-column storage that `SOURCE_STORED` would actually require are
+OUT OF SCOPE for this leaf and land in a follow-up tier-S leaf; this
+function never touches key material, it only decides whether the pair is
+allowed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from src.foundation.marketplace.contracts.v1 import ListingVisibility, MarketplaceErrorCode
+
+SourceRetention = Literal["IR_ONLY", "SOURCE_STORED"]
+
+_SOURCE_RETENTION_VALUES: frozenset[str] = frozenset({"IR_ONLY", "SOURCE_STORED"})
+
+_SOURCE_STORED_RESTRICTED_GRADES: tuple[ListingVisibility, ...] = (
+    ListingVisibility.PROTECTED,
+    ListingVisibility.INVITE,
+    ListingVisibility.PRIVATE,
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +90,45 @@ def validate_visibility_grade(
             f"{MarketplaceErrorCode.VISIBILITY_DENIED.value}: "
             "a listing with protected source material cannot be requested "
             "at PUBLIC visibility"
+        )
+
+
+def validate_source_retention(
+    visibility: ListingVisibility, retention: SourceRetention = "IR_ONLY"
+) -> None:
+    """Reject `source_retention="SOURCE_STORED"` on any grade other than
+    `PUBLIC`.
+
+    `PROTECTED`/`INVITE`/`PRIVATE` gate script source to a subset of
+    viewers (or nobody but the owner) precisely because the server never
+    hands out anything but the signed IR (`artifact`) at request time --
+    persisting the original source at rest at any of those grades would
+    defeat that boundary the moment retention outlives one request, so it
+    is explicitly denied rather than left to depend on encryption
+    (encryption-key management is a separate, out-of-scope follow-up
+    tier-S leaf). `PUBLIC` already grants source to everyone, so storing
+    it changes no exposure and is permitted. Default is `"IR_ONLY"`,
+    matching the spec's PROTECTED-and-above default.
+
+    This check is independent of `validate_visibility_grade`: that one
+    judges `(visibility, has_protected_source)`, this one judges
+    `(visibility, retention)`. A listing can violate either, both, or
+    neither -- callers should call both before persisting a listing.
+
+    Raises `ValueError` for a disallowed `(visibility, retention)` pair,
+    or for a `retention` value outside the known two (fail-closed on a
+    corrupted value that reached this boundary from outside the enum).
+    """
+    if retention not in _SOURCE_RETENTION_VALUES:
+        raise ValueError(
+            f"{MarketplaceErrorCode.VISIBILITY_DENIED.value}: "
+            f"unknown source_retention {retention!r}"
+        )
+    if retention == "SOURCE_STORED" and visibility in _SOURCE_STORED_RESTRICTED_GRADES:
+        raise ValueError(
+            f"{MarketplaceErrorCode.VISIBILITY_DENIED.value}: "
+            f"{visibility!r} listings cannot set source_retention=SOURCE_STORED "
+            "-- only IR_ONLY is permitted below PUBLIC"
         )
 
 

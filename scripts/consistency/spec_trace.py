@@ -9,7 +9,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from scripts.consistency.common import Hit
+from scripts.consistency.common import Hit, _iter_py_files, _read_text_cached
 
 # ---------------------------------------------------------------------------
 # 8. spec_leaf_untraced
@@ -71,14 +71,31 @@ def _git_commit_subjects(root: Path) -> str:
         return ""
 
 
-def _leaf_referenced(leaf: str, *blobs: str) -> bool:
-    """leaf가 blob 안에 온전한 토큰으로 등장하는지 검사한다.
+_LEAF_TOKEN_SCAN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]{1,6}-\d+[A-Za-z]?(?![A-Za-z0-9])")
 
-    plain substring(`leaf in blob`)은 AI-2가 AI-22/AI-20의 접두라서 그 커밋/코드만
-    보고도 "추적됨"으로 오판한다 -- 양옆이 영숫자가 아닐 때만 일치로 센다.
+
+def _referenced_leaf_ids(leaf_ids: set[str], *blobs: str) -> set[str]:
+    """leaf_ids 중 blob들 안에 온전한 토큰으로 등장하는 것들을 모아 반환한다.
+
+    leaf마다 blob 전체를 다시 search하면 O(len(leaf_ids) * len(blob))이 되어
+    tests/가 커질 때마다(DEEPEN 커밋 누적) check_consistency의 CI 120s 타임아웃에
+    가까워진다(esc-ci-consistency). 이전 시도는 leaf_ids를 alternation
+    하나로 묶어 blob을 leaf당 한 번씩이 아니라 전체 한 번만 순회했지만,
+    leaf_ids가 수백 개로 늘면서(task-8041 기준 409개) alternation 자체의
+    backtracking 비용이 blob 크기(17MB+)에 비례해 다시 타임아웃에 근접했다
+    (409 leaf, 17MB blob에서 5.5s). 같은 형태(`PREFIX-123X`)를 갖는 토큰을
+    범용 패턴 하나로 한 번만 추출한 뒤 leaf_ids와의 set 조회(O(1))로 걸러내면
+    alternation 없이 O(len(blob))로 끝난다(같은 조건에서 0.3s로 축소).
     """
-    pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(leaf) + r"(?![A-Za-z0-9])")
-    return any(pattern.search(blob) for blob in blobs)
+    if not leaf_ids:
+        return set()
+    found: set[str] = set()
+    for blob in blobs:
+        for m in _LEAF_TOKEN_SCAN_RE.finditer(blob):
+            token = m.group(0)
+            if token in leaf_ids:
+                found.add(token)
+    return found
 
 
 def check_spec_leaf_traceability(root: Path) -> list[Hit]:
@@ -89,7 +106,11 @@ def check_spec_leaf_traceability(root: Path) -> list[Hit]:
     if not leaf_ids:
         return []
     blobs = []
-    for sub in ("src", "tests", "scripts"):
+    # "src" is already walked+read by wiring/contracts/time_money via the
+    # shared caches -- reuse them instead of a second rglob+read pass
+    # (task-8000: check_consistency.py's local CI 120s timeout).
+    blobs.extend(_read_text_cached(path) for path in _iter_py_files(root, "src"))
+    for sub in ("tests", "scripts"):
         base = root / sub
         if base.is_dir():
             for path in base.rglob("*.py"):
@@ -98,11 +119,8 @@ def check_spec_leaf_traceability(root: Path) -> list[Hit]:
                 blobs.append(path.read_text(encoding="utf-8", errors="replace"))
     code_blob = "\n".join(blobs)
     commit_blob = _git_commit_subjects(root)
-    return [
-        (f"docs/specs#{leaf}", 0)
-        for leaf in sorted(leaf_ids)
-        if not _leaf_referenced(leaf, code_blob, commit_blob)
-    ]
+    referenced = _referenced_leaf_ids(leaf_ids, code_blob, commit_blob)
+    return [(f"docs/specs#{leaf}", 0) for leaf in sorted(leaf_ids) if leaf not in referenced]
 
 
 # ---------------------------------------------------------------------------

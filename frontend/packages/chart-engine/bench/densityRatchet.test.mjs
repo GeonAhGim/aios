@@ -102,6 +102,37 @@ describe("checkRatchet — per-metric tolerance overrides (task-3311)", () => {
   });
 });
 
+// task-7910 (esc-ci-frontend.json): indicatorAddMs's REGRESSION_TOLERANCE
+// widens to 30% because it is noisier than the other metrics, but the
+// improvement side stayed at the generic 10% -- so an ordinary lucky-low run
+// (any dip >10%) could ratchet the baseline down repeatedly until the
+// metric's own accepted ~9-12ms noise band sat right at its 30% regression
+// ceiling. This is exactly what happened to density-baseline.json's
+// indicatorAddMs over two days (11.031 -> 9.841 -> 8.415, each individual
+// drop clearing only the generic 10% floor).
+describe("checkRatchet — per-metric improvement tolerance overrides (task-7910)", () => {
+  it("does not ratchet indicatorAddMs down on an 11% dip, which the shared 10% improvement tolerance would have accepted", () => {
+    const current = { indicatorAddMs: 11.031 * 0.89 };
+    const baseline = { indicatorAddMs: 11.031 };
+    const { improved } = checkRatchet(current, baseline, 1);
+    expect(improved).toEqual({});
+  });
+
+  it("still ratchets indicatorAddMs down once a dip clears its own wider 15% override", () => {
+    const current = { indicatorAddMs: 11.031 * 0.8 };
+    const baseline = { indicatorAddMs: 11.031 };
+    const { improved } = checkRatchet(current, baseline, 1);
+    expect(improved.indicatorAddMs).toBeCloseTo(11.031 * 0.8, 5);
+  });
+
+  it("still ratchets other metrics down on an 11% dip, unaffected by the indicatorAddMs-only override", () => {
+    const current = { panZoomFrameMsP95: 3.307 * 0.89 };
+    const baseline = { panZoomFrameMsP95: 3.307 };
+    const { improved } = checkRatchet(current, baseline, 1);
+    expect(improved.panZoomFrameMsP95).toBeCloseTo(3.307 * 0.89, 5);
+  });
+});
+
 // DEPTH_CH(task-2729) audit of task-1959 (4226858): checkRatchet had no unit
 // tests at all at audit time, negative<3, and no gate-red reproduction using
 // the spec's own fixed ms/fps absolute targets (CH19_ABSOLUTE_TARGET_MS) —

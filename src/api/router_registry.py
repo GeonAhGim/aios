@@ -41,6 +41,8 @@ def register_routers(app: FastAPI) -> None:
         positions,
         reports,
         research_data,
+        risk_coach,
+        screener,
         scripts,
         strategy_builder,
         suitability,
@@ -89,11 +91,14 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(charting.router)  # CH-5(task-1557) /v1/foundation/charting
     app.include_router(market_data.router)  # LA-24(task-1376) /v1/foundation/market-data
     app.include_router(research_data.router)  # RD-8(task-2709) /v1/foundation/research
+    app.include_router(research_data.search_router)  # RD-17(task-7775) /v1/foundation/research-data
+    app.include_router(screener.router)  # UX-8(task-7773) /v1/foundation/screener/run
     app.include_router(options_chain.router)  # DC-26(task-2663) option chain
     app.include_router(scripts.router)  # DSL-12(task-1535) /v1/scripts/compile
     app.include_router(indicators.router)  # IND-12(task-1730) /v1/indicators
     app.include_router(backtests.router)  # BT-10c(task-1619) /v1/backtests/quick
     app.include_router(assistant.router)  # U-3a(task-2630) /v1/assistant
+    app.include_router(risk_coach.router, prefix="/risk-coach", tags=["risk-coach"])
     app.include_router(ai.router)  # AI-17(task-2652) /v1/ai
     app.include_router(positions.router)
     app.include_router(dashboard.router)  # U-2a(task-2629) /v1/accounts/summary

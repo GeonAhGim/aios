@@ -1,6 +1,9 @@
 """Trust Core domain/rules.py 단위테스트 — DB 없이 순수 함수만 검증."""
 from datetime import datetime, timedelta, timezone
+from time import perf_counter_ns
 from uuid import uuid4
+
+import pytest
 
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 from src.foundation.trust.domain.rules import (
@@ -128,3 +131,62 @@ def test_consent_for_different_purpose_is_not_fresh():
     consent = _consent(disclosure=other_purpose_disclosure)
 
     assert is_consent_fresh(consent, required_disclosure=disclosure, now=NOW) is False
+
+
+def test_negative_disclosure_retired_exactly_now_is_rejected():
+    disclosure = _disclosure(retired_at=NOW)
+    assert is_disclosure_acceptable(disclosure, now=NOW) is False
+    assert is_disclosure_acceptable(disclosure, now=NOW - timedelta(microseconds=1)) is True
+
+
+def test_negative_future_revision_consent_is_rejected():
+    disclosure = _disclosure(revision=1)
+    consent = _consent(disclosure=_disclosure(revision=2))
+    assert is_consent_fresh(consent, required_disclosure=disclosure, now=NOW) is False
+    assert freshness_denial_reason(consent, required_disclosure=disclosure, now=NOW) == (
+        "POLICY_CONSENT_STALE_REVISION"
+    )
+
+
+def test_negative_revoked_stale_expired_consent_preserves_revocation_reason():
+    disclosure = _disclosure(revision=2)
+    consent = _consent(
+        disclosure=_disclosure(revision=1),
+        state=ConsentState.REVOKED,
+        expires_at=NOW - timedelta(seconds=1),
+    )
+    # I-07: multiple failures must never turn a domain denial into approval.
+    assert is_consent_fresh(consent, required_disclosure=disclosure, now=NOW) is False
+    assert freshness_denial_reason(consent, required_disclosure=disclosure, now=NOW) == (
+        "POLICY_CONSENT_REVOKED"
+    )
+
+
+@pytest.mark.parametrize("evaluate", [is_consent_fresh, freshness_denial_reason])
+def test_failure_injection_expiry_access_error_propagates(monkeypatch, evaluate):
+    disclosure = _disclosure()
+    consent = _consent(disclosure=disclosure)
+    failure = RuntimeError("injected expiry access failure")
+
+    def fail_expiry_access(self):
+        raise failure
+
+    monkeypatch.setattr(Consent, "expires_at", property(fail_expiry_access), raising=False)
+    with pytest.raises(RuntimeError, match="injected expiry access failure") as caught:
+        evaluate(consent, required_disclosure=disclosure, now=NOW)
+    assert caught.value is failure
+
+
+def test_consent_gate_performance_p99_under_five_ms():
+    """ADR-2026-09-09-C D1: pre-trade policy gate p99 budget is 5 ms."""
+    disclosure = _disclosure()
+    consent = _consent(disclosure=disclosure, expires_at=NOW)
+    samples = []
+    for _ in range(1000):
+        started = perf_counter_ns()
+        fresh = is_consent_fresh(consent, required_disclosure=disclosure, now=NOW)
+        reason = freshness_denial_reason(consent, required_disclosure=disclosure, now=NOW)
+        samples.append(perf_counter_ns() - started)
+        assert fresh is False
+        assert reason == "POLICY_CONSENT_EXPIRED"
+    assert sorted(samples)[989] < 5_000_000

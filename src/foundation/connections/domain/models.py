@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 74_connected_asset_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,6 +10,8 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID
+
+ConnectionId = UUID
 
 
 class ConnectionState(str, Enum):

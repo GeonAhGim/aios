@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import re
+from functools import cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,7 +35,12 @@ _RATCHET_ALLOW_RE = re.compile(r"#\s*ratchet-allow:\s*(\S.*)")
 _HEADER_SCAN_LINES = 20
 
 
+@cache
 def _iter_py_files(root: Path, subdir: str) -> list[Path]:
+    # Nine call sites across wiring/contracts/time_money re-scan the same
+    # "src" tree per run; caching turns the repeated rglob+scandir walk
+    # (dominant cost of check_consistency.py) into a single walk (task-8000,
+    # local CI "consistency" step timing out at 120s under load).
     base = root / subdir
     if not base.is_dir():
         return []
@@ -46,9 +52,20 @@ def _iter_py_files(root: Path, subdir: str) -> list[Path]:
     return sorted(out)
 
 
+@cache
+def _read_text_cached(path: Path) -> str:
+    # spec_trace also needs the raw source of every "src" file; sharing this
+    # cache with _safe_parse avoids reading each src file a second time.
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+@cache
 def _safe_parse(path: Path) -> ast.Module | None:
+    # Same file is read+parsed by multiple independent checks (see above);
+    # caching by path is safe because the working tree is not mutated during
+    # a single check_consistency.py run.
     try:
-        return ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
+        return ast.parse(_read_text_cached(path), filename=str(path))
     except SyntaxError:
         return None
 

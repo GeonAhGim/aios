@@ -2,11 +2,18 @@
 // 로컬 스토리지 오버라이드 + 하드코딩 기본값만으로 최소 게이트를 둔다. 서버
 // 발급 플래그가 생기면 이 모듈의 isFeatureEnabled 시그니처만 유지한 채 내부를
 // API 조회로 바꾸면 되고, 호출부(FeatureFlagGate)는 변경할 필요가 없다.
-export type FeatureFlagKey = "onboarding_connection_wizard" | "onboarding_demo_mode";
+// task-7500(J3 G-4): 리스크/컴플라이언스 판정 전용 패널(RiskVerdictPanel) 게이트.
+// 기본 OFF — 실행 생성 폼이 evaluateRiskGate를 부가로 호출하는 새 네트워크 경로라
+// 검증 전까지는 꺼둔다.
+export type FeatureFlagKey =
+  | "onboarding_connection_wizard"
+  | "onboarding_demo_mode"
+  | "FF_J3_RISK_PANEL";
 
 const DEFAULT_FLAGS: Record<FeatureFlagKey, boolean> = {
   onboarding_connection_wizard: true,
   onboarding_demo_mode: true,
+  FF_J3_RISK_PANEL: false,
 };
 
 const STORAGE_PREFIX = "aios_feature_flag:";
