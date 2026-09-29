@@ -1,4 +1,20 @@
 {
-  "generated_at": "2026-09-29T07:33:01+00:00",
-  "tasks": []
+  "generated_at": "2026-09-29T07:44:09+00:00",
+  "tasks": [
+    {
+      "id": 8675,
+      "title": "[안정화 감사 2/6] 원장·회계 적대적 감사 — ledger/positions/reconciliation 계약 대조·실패주입·동시성",
+      "spec": "ADR-2026-09-26-C(안정화 단계, 사용자 승인). 코드를 고치는 리프가 아니라 발견을 만드는 리프다 — 발견마다 정정 리프는 CTO/PM이 발행한다. 선행 도메인(주문 경로, task-7978)의 발견 F1~F8이 전부 착지했으므로 (task-7996/7997/7998/8072~8081 및 후속 전부 done/superseded) §B -2(a) 순서에 따라 2번째 도메인을 연다.\n\n범위: src/foundation/ledger/** (application/post_entry.py·backfill.py·chargeback.py·refund.py·payouts.py·resync_drift.py·verify_integrity.py, domain/hash_chain.py·idempotency.py·posting_rules.py·balance_rules.py·trial_balance.py·rounding.py·correction.py), src/foundation/positions/** (application/record_fill.py·record_funding_fee.py·rebuild_snapshot.py·reconcile_provider.py·compute_daily_nav.py, domain/journal_rules.py·nav.py·pnl.py·cost_basis/*·reconciliation_rules.py·restatement.py), src/foundation/reconciliation/**.\n\n방법(각 항목에 근거 파일:줄을 남긴다):\n1) 계약 대조: contracts/v1(ledger·positions)과 실제 구현이 일치하는지 — 이중분개(post_entry가 항상 차/대변 합이 0인지), 멱등키(idempotency.py)가 실제 애플리케이션 경로 전부(post_entry·backfill·chargeback·refund·topup·payouts)에서 강제되는지, hash_chain(WORM 불변식)이 정정(correction.py) 경로에서도 깨지지 않는지, position 재구성(rebuild_snapshot)이 결정론적인지 표로 정리(모듈×항목, O/X/미검증).\n2) 선례 대조: task-7978(주문 경로 감사)에서 확인된 패턴(멱등키 미배선, fail-open 사전검증 부재)이 원장·포지션 경로에도 반복되는지 — 특히 F1과 같은 유형(이벤트가 상태 전이를 트리거하지 못해 무기한 불일치가 남는 경로)이 reconciliation_rules.py/resync_drift.py에도 있는지.\n3) 실패 주입: 중복 이벤트 재처리, 부분 실패(post_entry 중간 실패 후 재시도), 동시 정정(correction.py)·동시 스냅샷 재구성이 fail-closed인지 — 테스트 실행 결과로 증명(있으면 테스트 이름, 없으면 재현 스크립트).\n4) 동시성: 같은 계좌에 대한 동시 post_entry·동시 reconcile_provider·동시 backfill 경합.\n\n산출물: docs/audits/AUDIT_2026-09-29_ledger_accounting.md (발견 목록: 심각도 S/M/L, 파일:줄, 재현, 제안 조치, 예상 리프 크기, task-7978과 같은 문서 구조: 0.요약표 1.계약대조표 2.선례대조 3.실패주입 4.동시성 5.결론).\n코드 변경은 하지 않는다(테스트 추가는 재현용으로만, 커밋 가능). DoD: 감사 문서 착지 + 발견 0건이면 그 근거(대조표 전부 O) 명시. tier S — 로컬 LLM 금지, Claude 전용.",
+      "files": [
+        "new:docs/audits/AUDIT_2026-09-29_ledger_accounting.md",
+        "src/foundation/ledger/application/post_entry.py",
+        "src/foundation/ledger/domain/idempotency.py",
+        "src/foundation/positions/application/record_fill.py",
+        "src/foundation/reconciliation/application/run_reconciliation.py"
+      ],
+      "tier": "",
+      "role": "backend",
+      "hold_note": "[cloud_session] 클라우드 적합: 저장소(aios)만으로 완결되는 감사 전용 리프(코드 변경 없음, docs/audits/*.md 산출), 돈경로 판단이라 Claude 전용, 진행 중 리프와 파일 겹침 없음"
+    }
+  ]
 }
