@@ -451,7 +451,20 @@ def test_parse_latency_stays_within_half_of_dsl_compile_budget() -> None:
     프로세스에서 잰 고정 크기 순수 파이썬 루프 대비 배수로 예산을
     표현한다. 배수 산출: 기존 절대 예산 150ms / 로컬 실측 calibration 약
     94ms ≈ 1.6배, 실측 op/calibration 비율은 약 0.83배(op 약 78ms) — 원래
-    예산의 headroom 비율(약 1.9배)에 가깝게 1.6배로 잡는다."""
+    예산의 headroom 비율(약 1.9배)에 가깝게 1.6배로 잡는다.
+
+    esc-ci-pytest_latency_serial(재발, task-8851): 로컬 CPU 경합(다른 워커 함대
+    프로세스)을 8개 코어-포화 프로세스로 재현하면 기본 n=5/calibration_n=3은
+    5회 중 1회 `op=140.625ms calibration=31.250ms ratio=4.500x budget<1.600x`로
+    실패했다 — `time.process_time()`의 Windows ~15.6ms 클록 틱 양자화 아래서
+    calibration 루프가 우연히 짧은 틱 수에 걸리면 ratio가 급등한다. `max_ratio`는
+    ADR-2026-09-09-C 결정치라 손대지 않고, best-of 표본 수만 늘려(5->9, 3->7)
+    경합 중에도 운 좋은(경합 없는) 순간의 샘플을 잡을 확률을 높인다 — 같은
+    8-프로세스 경합 재현에서 3회 연속 green 확인(개별 26~49s) 후 반영. 20개
+    코어-포화 프로세스(실제 함대보다 훨씬 가혹한 부하)로는 n=9/calibration_n=7도
+    3회 중 1회(ratio=1.750x) 재현 실패했다 — best-of-N은 확률적 완화이지 임의
+    극한 부하에 대한 보장이 아니며, 이는 `RelativeBudget`/`PerfBudget`의 기존
+    설계 전제와 동일하다."""
     lines = [
         f"let v{i} = ta.rsi(close[{i % 5}], 14) + v{i - 1} * 2 - 1 and v{i - 1} > 0"
         for i in range(1, 1000)
@@ -463,7 +476,9 @@ def test_parse_latency_stays_within_half_of_dsl_compile_budget() -> None:
         nonlocal program
         program = parse(source)
 
-    RelativeBudget().assert_within(_run_once, max_ratio=1.6, mode="cpu", label="1000-decl parse")
+    RelativeBudget().assert_within(
+        _run_once, max_ratio=1.6, mode="cpu", n=9, calibration_n=7, label="1000-decl parse"
+    )
     assert len(program.decls) == 1000
 
 
