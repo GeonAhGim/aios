@@ -334,6 +334,9 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 "src/services/safety/reference_quotes.py" = ["BLE001"]
 "src/services/strategy_prompt_service.py" = ["ARG002"]
 "src/services/wallet_service.py" = ["S101"]
+# E501 — src/exchanges/kis/generated/는 KIS API 문서에서 자동 생성되는 파일이므로
+# line-length 조정을 통한 정리는 불가능하다. 자동 생성 구조이므로 E501 무시.
+"src/exchanges/kis/generated/**" = ["E501"]
 
 [tool.mypy]
 strict = true
