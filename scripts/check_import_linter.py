@@ -155,6 +155,12 @@ def _imports_of_text(text: str, path: Path, module_dotted: str, is_package: bool
     return targets
 
 
+def _imports_of(path: Path, module_dotted: str, is_package: bool) -> set[str]:
+    """Single-file convenience wrapper around `_imports_of_text` for callers (tests) that
+    check one module's imports directly instead of via `build_graph`'s batched read."""
+    return _imports_of_text(_read_file(path), path, module_dotted, is_package)
+
+
 def build_graph(root: Path, subdir: str = SCAN_SUBDIR) -> dict[str, set[str]]:
     """모듈 dotted name -> 그 모듈이 직접 임포트하는 dotted name 집합."""
     files = _iter_python_files(root, subdir)
