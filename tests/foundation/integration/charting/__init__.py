@@ -197,6 +197,7 @@ async def test_create_layout_propagates_repository_dependency_failure(
 # ── Performance assertion ───────────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_validate_drawings_document_scales_linearly_within_budget() -> None:
     """D2 numeric perf assertion: validating 500 drawings must stay well under
     the pure-CPU budget (no I/O in this path) — budget picked generously

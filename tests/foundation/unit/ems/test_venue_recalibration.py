@@ -196,6 +196,7 @@ class TestFailureInjection:
 class TestPerformance:
     """1000 samples must complete in reasonable time."""
 
+    @pytest.mark.perf
     def test_1000_samples_under_one_second(self) -> None:
         """Large sample set should finish quickly (< 1 s)."""
         import time

@@ -269,6 +269,7 @@ async def test_pause_deployment_propagates_repository_dependency_failure(
 # ── Performance assertion ───────────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_validate_provenance_scales_within_budget() -> None:
     """D2 numeric perf assertion: validating 2000 provenance records must
     stay well under the pure-CPU budget (no I/O in this path) — budget
