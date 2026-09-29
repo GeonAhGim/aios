@@ -11,11 +11,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from tests._perf.relative_budget import RelativeBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -338,7 +339,7 @@ def test_decrease_without_update_leaves_baseline_unchanged(tmp_path: Path) -> No
 
 @pytest.mark.perf
 def test_build_graph_throughput_budget(tmp_path: Path) -> None:
-    """300개 모듈 임포트 그래프 구성이 5초 예산 안에 끝난다(D2 DoD 성능 단언)."""
+    """300개 모듈 임포트 그래프 구성이 상대 CPU 예산 안에 끝난다."""
     _touch_pkg(tmp_path, "src", "foundation")
     for i in range(300):
         _write(
@@ -347,9 +348,18 @@ def test_build_graph_throughput_budget(tmp_path: Path) -> None:
             f"import json\nimport src.foundation.mod_{(i + 1) % 300}\n",
         )
 
-    start = time.perf_counter()
-    graph = cil.build_graph(tmp_path)
-    elapsed = time.perf_counter() - start
+    budget = RelativeBudget()
+    graph_holder: dict[str, dict[str, set[str]]] = {}
+
+    def _build() -> None:
+        graph_holder["graph"] = cil.build_graph(tmp_path)
+
+    # The old 5-second wall-clock limit failed on slower CI hosts (7.61s)
+    # without a graph-builder regression.  100x calibration is the equivalent
+    # of the historical 5s budget on the observed ~50ms calibration sample,
+    # with enough margin for normal runner variance while retaining a hard cap.
+    sample = budget.measure(_build, mode="cpu", n=3, warmup=1)
+    graph = graph_holder["graph"]
 
     assert len(graph) >= 300
-    assert elapsed < 5.0, f"build_graph took {elapsed:.2f}s for 300 modules (budget 5.0s)"
+    assert sample.ratio < 100.0, budget.describe(sample, max_ratio=100.0)
