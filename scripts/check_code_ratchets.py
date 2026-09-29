@@ -74,20 +74,6 @@ _EXCLUDE_DIR_NAMES = frozenset(
 # (DECISION_GUIDELINES B-2) -- this only retunes this step's own I/O concurrency.
 SCAN_WORKERS = 16
 
-# esc-ci-code_ratchets ([code_ratchets] timeout 180s, bisect culprit 2dd74ce9 -- a DEEPEN
-# commit that grew the tracked-file count under tests/): a serial path.read_text() over
-# ~3,100 src/tests/scripts .py files took ~117s wall-clock on a cold-cache checkout even
-# though ast.parse itself is near-instant (user time ~0.06s of that) -- almost all of it was
-# blocking disk I/O per open(). Same root cause and fix as check_no_bom.py's SCAN_WORKERS
-# saga: I/O-bound reads release the GIL, so a shared thread pool overlaps that per-file
-# latency instead of paying it serially. 16 matches check_no_bom.py's fleet-tuned value
-# (half the ThreadPoolExecutor library default of min(32, cpu_count+4)) -- that value was
-# chosen there to give cold-checkout headroom without the burst of concurrent OS threads
-# that starved sibling process-creation under this fleet's antivirus scanning when every
-# worker lane's step used the library default at once. No baseline/threshold change
-# (DECISION_GUIDELINES B-2) -- this only retunes this step's own I/O concurrency.
-SCAN_WORKERS = 16
-
 _TODO_RE = re.compile(r"\b(?:TODO|FIXME|XXX)\b")
 _RATCHET_ALLOW_RE = re.compile(r"#\s*ratchet-allow:\s*(\S.*)")
 _LOC_ALLOW_RE = re.compile(r"#\s*loc-allow:\s*(\S.*)")
