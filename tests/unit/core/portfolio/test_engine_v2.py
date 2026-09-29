@@ -80,20 +80,20 @@ class TestAllocationDecisionV2Contract:
         assert decision.capital_pct == Decimal("10")
 
     def test_v2_decision_extra_fields_accepted_pydantic_v2(self) -> None:
-        """v2 optional 필드는 Pydantic v2 extra='allow'로 인해 현재 허용된다.
+        """v2 optional 필드는 Pydantic v2에서 현재 허용되지 않는다.
 
-        AllocationDecision이 Pydantic BaseModel을 상속하므로 extra 필드는
-        현재 시점에서 거부되지 않는다. 이는 v2 스키마가 정식 도입될 때까지
-        extra 필드가 silently 통과되는 사실을 문서화한다.
+        AllocationDecision이 Pydantic BaseModel을 상속하고 extra 필드를
+        정의하지 않으면, 현재 기본 동작에 따라 정의되지 않은 필드는
+        거부된다. v2 스키마 정식 도입 시 optional 필드가 추가될 것이다.
         """
+        # 현재 AllocationDecision은 4개 필드만 정의되어 있음
         decision = AllocationDecision(
-            model_config={"extra": "allow"},
             symbol="BTC-USDT",
             strategy_id="strat-1",
             approved_quantity=Decimal("0.02"),
             capital_pct=Decimal("10"),
         )
-        # extra 필드가 model_dump에 포함되지 않음 (Pydantic 기본 동작)
+        # 정의된 필드만 model_dump에 포함됨
         d = decision.model_dump()
         assert "sizing_method" not in d
 
@@ -225,7 +225,7 @@ def test_negative_total_equity_silently_yields_nonsensical_capital_pct() -> None
 # --- 실패 주입 (1) ----------------------------------------------------------
 
 
-class _CorruptedPortfolioState(dict):
+class _CorruptedPortfolioState(dict[str, Any]):
     """상류(FD-16.1 자본배분 조회) 하이드레이션이 부분적으로 깨진 상황을
     흉내낸다 — total_equity 조회가 실패한 손상된 상태."""
 
