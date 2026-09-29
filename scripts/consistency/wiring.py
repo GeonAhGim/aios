@@ -185,42 +185,123 @@ def _matched_port_method_sets(
     return [ports[n] for n in base_names if n in ports]
 
 
+_AbcImpl = tuple[ast.FunctionDef | ast.AsyncFunctionDef, Path]
+
+
+def _import_module_of_name(tree: ast.Module, name: str) -> str | None:
+    """`from a.b.c import Name [as alias]`이 정의한 `Name`(또는 alias)의
+    원본 모듈 dotted path("a.b.c")를 찾는다 -- `_alias_module_map`은 이
+    값에 `.Name`을 이어붙여 반환하므로(router 서브모듈 매칭용) 여기서는
+    재사용하지 않고 직접 ImportFrom을 훑는다."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                if (alias.asname or alias.name) == name:
+                    return node.module
+    return None
+
+
+def _own_method_impls(node: ast.ClassDef, path: Path) -> dict[str, _AbcImpl]:
+    return {
+        item.name: (item, path)
+        for item in node.body
+        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+
+
+def _resolve_mixin_methods(
+    class_name: str,
+    module_dotted: str,
+    module_index: dict[str, Path],
+    seen: set[str],
+) -> dict[str, _AbcImpl]:
+    """Follows a same-repo mixin base class one import-hop at a time so
+    adapters composed from ~20 mixins (Bitget/KIS/NH/OKX) aren't flagged as
+    missing every port method their own class body doesn't define directly
+    (task-8748: OKXAdapter's mixin composition hit the same false-positive
+    pattern the baseline already tolerated for the other three adapters --
+    the Protocol-port check (`_resolve_local_methods` above) already solves
+    this for ports/-adapters/ pairs; this mirrors it for ABC ports whose
+    mixins live in separate files)."""
+    key = f"{module_dotted}.{class_name}"
+    if key in seen:
+        return {}
+    seen.add(key)
+    path = module_index.get(module_dotted)
+    if path is None:
+        return {}
+    tree = _safe_parse(path)
+    if tree is None:
+        return {}
+    node = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == class_name),
+        None,
+    )
+    if node is None:
+        return {}
+    methods = dict(_own_method_impls(node, path))
+    for base in node.bases:
+        base_name = _callee_name(base)
+        if base_name is None:
+            continue
+        base_module = _import_module_of_name(tree, base_name)
+        if base_module is None:
+            continue
+        for name, entry in _resolve_mixin_methods(
+            base_name, base_module, module_index, seen
+        ).items():
+            methods.setdefault(name, entry)
+    return methods
+
+
 def _method_impl_hits(
     node: ast.ClassDef,
     method_names: frozenset[str],
-    by_name: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    by_name: dict[str, _AbcImpl],
     rel: str,
-    path: Path,
 ) -> list[Hit]:
     hits: list[Hit] = []
-    text: str | None = None
+    texts: dict[Path, str] = {}
     for method_name in sorted(method_names):
-        impl = by_name.get(method_name)
-        if impl is None:
+        entry = by_name.get(method_name)
+        if entry is None:
             hits.append((rel, node.lineno))
             continue
+        impl, impl_path = entry
         if _is_raise_not_implemented_body(impl):
-            if text is None:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            if _ratchet_allow_reason(text) is None:
+            if impl_path not in texts:
+                texts[impl_path] = impl_path.read_text(encoding="utf-8", errors="replace")
+            if _ratchet_allow_reason(texts[impl_path]) is None:
                 hits.append((rel, impl.lineno))
     return hits
 
 
 def _port_class_hits(
-    node: ast.ClassDef, ports: dict[str, frozenset[str]], rel: str, path: Path
+    node: ast.ClassDef,
+    ports: dict[str, frozenset[str]],
+    rel: str,
+    path: Path,
+    tree: ast.Module,
+    module_index: dict[str, Path],
 ) -> list[Hit]:
     matched = _matched_port_method_sets(node, ports)
     if not matched or _abstract_methods_of(node):
         return []  # 대조 대상이 없거나 아직 abstract인 중간 계층 -- 위반 아님
-    by_name = {
-        item.name: item
-        for item in node.body
-        if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
-    }
+    by_name: dict[str, _AbcImpl] = dict(_own_method_impls(node, path))
+    for base in node.bases:
+        base_name = _callee_name(base)
+        if base_name is None or base_name in ports:
+            continue  # ABC 포트 자신 -- 이미 matched로 반영됨
+        base_module = _import_module_of_name(tree, base_name)
+        if base_module is None:
+            continue
+        for name, entry in _resolve_mixin_methods(
+            base_name, base_module, module_index, set()
+        ).items():
+            by_name.setdefault(name, entry)
     hits: list[Hit] = []
     for method_names in matched:
-        hits.extend(_method_impl_hits(node, method_names, by_name, rel, path))
+        hits.extend(_method_impl_hits(node, method_names, by_name, rel))
     return hits
 
 
@@ -229,6 +310,7 @@ def check_port_implementations(root: Path) -> list[Hit]:
     ports = _collect_abc_ports(files)
     if not ports:
         return []
+    module_index = {_dotted_module_name(p, root): p for p in files}
     hits: list[Hit] = []
     for path in files:
         tree = _safe_parse(path)
@@ -237,7 +319,7 @@ def check_port_implementations(root: Path) -> list[Hit]:
         rel = path.relative_to(root).as_posix()
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
-                hits.extend(_port_class_hits(node, ports, rel, path))
+                hits.extend(_port_class_hits(node, ports, rel, path, tree, module_index))
     return hits
 
 
@@ -336,9 +418,7 @@ def check_port_protocol_implementations(root: Path) -> list[Hit]:
             continue
         # 긴 이름부터 매칭해 접미사 부분 충돌(예: "...Source" vs "...MarkPriceSource")을 피한다.
         protocol_names = sorted(protocols, key=len, reverse=True)
-        adapter_files = [
-            p for p in sorted(adapters_dir.rglob("*.py")) if p.name != "__init__.py"
-        ]
+        adapter_files = [p for p in sorted(adapters_dir.rglob("*.py")) if p.name != "__init__.py"]
         adapter_texts: dict[Path, str] = {}
         local_classes: dict[str, _AdapterClass] = {}
         adapter_trees: dict[Path, ast.Module] = {}
