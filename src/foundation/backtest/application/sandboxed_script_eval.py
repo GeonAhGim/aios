@@ -44,6 +44,13 @@ DEFAULT_WALLCLOCK_LIMIT_SEC: float = float(os.environ.get("SCRIPT_WALLCLOCK_LIMI
 DEFAULT_RSS_LIMIT_MB: float = float(os.environ.get("SCRIPT_RSS_LIMIT_MB", "512"))
 _PID_POLL_INTERVAL_SEC = 0.02
 _RSS_POLL_INTERVAL_SEC = 0.02
+# Grace window to keep polling for the worker pid after `future.result()` has
+# already timed out, independent of `limits.wallclock_sec`. Process creation
+# (not `fn`'s own execution) can lag past a tight caller-supplied deadline on
+# a cold spawn (see the module comments on Windows cold-spawn cost elsewhere
+# in this file); without this, a pid that never registered within
+# `wallclock_sec` was permanently un-killable (task-8928).
+_PID_CAPTURE_GRACE_SEC = 10.0
 
 _T = TypeVar("_T")
 
@@ -83,7 +90,8 @@ def run_sandboxed(
     """Run `fn(*args, **kwargs)` in a single-worker `ProcessPoolExecutor`
     under `limits`. `fn` and its arguments/return value must be picklable
     (standard `multiprocessing` constraint)."""
-    with ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn")) as executor:
+    executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+    try:
         future = executor.submit(fn, *args, **kwargs)
         pid = _wait_for_worker_pid(executor, limits.wallclock_sec)
         exceeded = threading.Event()
@@ -98,6 +106,11 @@ def run_sandboxed(
             result = future.result(timeout=limits.wallclock_sec)
         except FutureTimeoutError:
             future.cancel()
+            if pid is None:
+                # The worker hadn't registered its pid within `wallclock_sec` --
+                # keep looking past that deadline so we can still kill it instead
+                # of leaving it running (see `_PID_CAPTURE_GRACE_SEC`).
+                pid = _wait_for_worker_pid(executor, _PID_CAPTURE_GRACE_SEC)
             _kill_pid(pid)
             raise ScriptSandboxTimeoutError(
                 f"script sandbox exceeded wall-clock limit ({limits.wallclock_sec}s)"
@@ -118,6 +131,14 @@ def run_sandboxed(
         finally:
             stop_watching.set()
             watcher.join(timeout=1.0)
+    finally:
+        # `wait=False`: we've already killed anything we could find a pid for
+        # above. Blocking here on `shutdown(wait=True)` (the `with` statement's
+        # default `__exit__`) turned a failed/racy kill into an indefinite hang
+        # -- the child process (e.g. a test fixture sleeping 3600s) would keep
+        # this call from ever returning, which is how one bad kill took down an
+        # entire CI run's coverage measurement (task-8928).
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _wait_for_worker_pid(executor: ProcessPoolExecutor, deadline_sec: float) -> int | None:
