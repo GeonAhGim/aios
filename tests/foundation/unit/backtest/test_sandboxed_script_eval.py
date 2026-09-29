@@ -67,7 +67,20 @@ def _crash_immediately() -> None:
     os._exit(1)  # noqa: SLF001 -- deliberate hard-crash fixture, not a real callsite
 
 
+@pytest.mark.perf
 def test_fast_script_matches_direct_call_byte_identical() -> None:
+    # wallclock_sec is generous (not tight): a `spawn` child re-imports the
+    # whole DSL runtime tree from scratch every call (no fork copy-on-write),
+    # and on a cold Windows CI checkout (no persisted __pycache__) that
+    # bytecode-compile-from-source cost alone can run past a minute --
+    # observed ~89s cold vs ~11s warm on the same machine. A tight budget
+    # here (originally 10s) turned pure import-speed variance into a
+    # `ScriptSandboxTimeoutError` before the equality assertion below ever
+    # ran, which is what made this test flaky red on Windows CI while
+    # green on Linux (task-8732). This is a correctness test, not a
+    # timeout-enforcement test (that is `test_wallclock_limit_exceeded_
+    # raises_timeout_error`), so a large budget does not weaken what it
+    # verifies.
     ir = lower_program(parse(_SAMPLE))
     direct = _execute_ir(ir, bar_count=5, inputs={"close": _CLOSE})
     sandboxed = run_sandboxed(
@@ -75,7 +88,7 @@ def test_fast_script_matches_direct_call_byte_identical() -> None:
         ir,
         bar_count=5,
         inputs={"close": _CLOSE},
-        limits=SandboxLimits(wallclock_sec=10, rss_mb=512),
+        limits=SandboxLimits(wallclock_sec=120, rss_mb=512),
     )
     assert sandboxed == direct
     assert sandboxed.bindings == direct.bindings
@@ -93,18 +106,25 @@ def test_wallclock_limit_exceeded_raises_timeout_error() -> None:
     assert elapsed <= limit + 2.0
 
 
+@pytest.mark.perf
 def test_rss_limit_exceeded_raises_memory_error() -> None:
     # Limit sits well above a fresh spawned child's baseline (~100MB with the
     # DSL runtime imported) so the kill is caused by the allocation, not by
-    # interpreter startup.
+    # interpreter startup. wallclock_sec is generous for the same reason as
+    # `test_fast_script_matches_direct_call_byte_identical` -- the spawned
+    # child re-imports this whole test module (including the DSL runtime
+    # imports at module scope) before `_allocate_and_hold` ever runs, and a
+    # cold Windows CI checkout pays the full bytecode-compile cost every
+    # single spawn.
     with pytest.raises(ScriptSandboxMemoryExceededError):
         run_sandboxed(
             _allocate_and_hold,
             400,
-            limits=SandboxLimits(wallclock_sec=15, rss_mb=256),
+            limits=SandboxLimits(wallclock_sec=120, rss_mb=256),
         )
 
 
+@pytest.mark.perf
 def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
     """Gate-red reproduction (CI run 36237321056, main 16063c7a): a pytest-xdist
     worker whose own RSS had grown past 512MB ran the 5-bar sample script and
@@ -125,7 +145,7 @@ def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
             ir,
             bar_count=5,
             inputs={"close": _CLOSE},
-            limits=SandboxLimits(wallclock_sec=30, rss_mb=limit_mb),
+            limits=SandboxLimits(wallclock_sec=120, rss_mb=limit_mb),
         )
     finally:
         del ballast
@@ -134,12 +154,16 @@ def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
 
 @pytest.mark.perf
 def test_child_crash_does_not_hang_parent() -> None:
-    # Bound is generous (well under the 30s wallclock_sec limit) -- this only
+    # Bound is generous (well under the wallclock_sec limit) -- this only
     # asserts the parent does not hang on an unrelated crash, it does not
-    # pin down exact process-teardown timing (which varies under pytest's
-    # own multiprocessing spawn overhead on Windows).
+    # pin down exact process-teardown timing. The spawned child still
+    # re-imports the whole test module (DSL runtime included) before
+    # `_crash_immediately` runs, so a cold Windows CI checkout's
+    # bytecode-compile-from-source cost applies here too even though the
+    # fixture itself does nothing (observed 22.3s > a previous 20.0s bound
+    # on a cold run -- task-8732); both bounds now carry headroom for that.
     started = time.monotonic()
     with pytest.raises(ScriptSandboxCrashError):
-        run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=30, rss_mb=512))
+        run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
     elapsed = time.monotonic() - started
-    assert elapsed <= 20.0
+    assert elapsed <= 90.0
