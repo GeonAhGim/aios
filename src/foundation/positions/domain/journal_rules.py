@@ -26,6 +26,7 @@ currency-rate lookup itself is the responsibility of [[fx.convert]]/
 
 Pure domain (0 DB/HTTP imports) — timestamps are always passed as arguments.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -51,9 +52,7 @@ class SequenceConflictError(Exception):
     code = PositionErrorCode.SEQUENCE_CONFLICT
 
     def __init__(self, position_key: str, expected: int, actual: int) -> None:
-        super().__init__(
-            f"{position_key}: sequence_no should be {expected} but got {actual}"
-        )
+        super().__init__(f"{position_key}: sequence_no should be {expected} but got {actual}")
         self.position_key = position_key
         self.expected = expected
         self.actual = actual
@@ -113,15 +112,15 @@ class ChainIntegrityError(Exception):
 
 
 def verify_chain(position_key: str, entries: Sequence[PositionJournalEntryView]) -> None:
-    """`sequence_no` 오름차순으로 정렬된 저널 목록의 해시 체인을 검증한다.
-    문제 없으면 조용히 반환하고, 있으면 `ChainIntegrityError`를 던진다."""
+    """Verify the hash chain of journal entries sorted by ascending `sequence_no`.
+    Returns silently if all entries are valid; otherwise, raises `ChainIntegrityError`."""
     expected_prev: str | None = None
     for entry in entries:
         if entry.prev_hash != expected_prev:
             raise ChainIntegrityError(
                 position_key,
                 entry.sequence_no,
-                "prev_hash가 이전 엔트리의 entry_hash와 일치하지 않습니다(체인 단절 또는 변조).",
+                "prev_hash mismatch (chain break or tampering suspected).",
             )
         digest = digest_for(entry.qty_delta, entry.price, entry.fee, entry.occurred_at)
         recomputed = entry_hash_for(
