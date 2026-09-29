@@ -17,6 +17,7 @@ the `closed_at: datetime | None` convention from the positions module
 means it was closed at that timestamp, and no new child entity can be attached
 afterward (FA_HIERARCHY_VIOLATION).
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -40,6 +41,9 @@ class EntityErrorCode(str, Enum):
     HIERARCHY_VIOLATION = "FA_HIERARCHY_VIOLATION"  # 400, no parent / closed parent / cycle
     ALREADY_CLOSED = "FA_ALREADY_CLOSED"  # 409, attempt to re-close an already-closed entity
     CLOSE_BLOCKED_BY_CHILD = "FA_CLOSE_BLOCKED_BY_CHILD"  # 409, active child remains, close blocked
+    REGION_DENIED = (
+        "FA_REGION_DENIED"  # 403, write targets a region the entity's region_tag disallows
+    )
 
 
 class LegalEntity(BaseModel):

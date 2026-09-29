@@ -8,6 +8,7 @@ ledger/conftest.py`).
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from datetime import timedelta
@@ -20,18 +21,54 @@ from tests.integration.eventstore._replay_verify_support import (
     assert_no_replay_window_leftovers,
 )
 from tests.support.db import (
-    _asyncpg_dsn as _clone_dsn,
-)
-from tests.support.db import (
+    TEMPLATE_DATABASE_URL_ENV,
     drop_worker_database,
     ensure_worker_database,
     template_database_url,
+)
+from tests.support.db import (
+    _asyncpg_dsn as _clone_dsn,
 )
 
 
 def _asyncpg_dsn() -> str:
     url = os.environ["DATABASE_URL"]
     return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+# `session_database_url` caps the composed clone name at 40 chars, and this
+# suffix stacks with `_REPLAY_CLONE_SUFFIX` (e.g. `..._p_master_rv_tamper`), so
+# it stays a single character to leave room for longer per-worktree base names
+# (e.g. `aios_test_backend_1`) plus the longest registered replay suffix.
+_PRISTINE_CLONE_WORKER_ID = "p"
+
+
+def _pristine_replay_template_url() -> str:
+    """Untouched template for `isolated_replay_db_url`, valid under both xdist
+    and master (serial, `-n`-less) runs.
+
+    Under xdist, `tests/conftest.py` sets `AIOS_TEST_TEMPLATE_DATABASE_URL` to
+    the pre-swap `TEST_DATABASE_URL` before any worker mutates its own clone,
+    so `template_database_url()` alone is safe there. Under master mode (the
+    `.github/workflows/quality.yml` "Test (perf, serial)" step / local_ci
+    `pytest_perf` stage), that env var is never set (`tests/conftest.py`'s
+    `_WORKER_ID != "master"` guard) and `template_database_url()` falls back to
+    the live `DATABASE_URL` -- the same connection every other perf test ahead
+    of this module in collection order keeps writing `order_events`/ledger rows
+    to (esc-ci-pytest_perf: `assert_no_replay_window_leftovers` found 5000+
+    recent rows there). Clone once here, at *module import time*: pytest fully
+    collects every test (importing every conftest.py along the way) before
+    executing any of them, so this capture happens before the first perf test
+    runs -- the same ordering guarantee `tests/conftest.py` itself relies on
+    for its per-worker clone.
+    """
+    inherited = os.environ.get(TEMPLATE_DATABASE_URL_ENV)
+    if inherited:
+        return inherited
+    return asyncio.run(ensure_worker_database(template_database_url(), _PRISTINE_CLONE_WORKER_ID))
+
+
+_PRISTINE_REPLAY_TEMPLATE_URL = _pristine_replay_template_url()
 
 
 @pytest.fixture
@@ -79,7 +116,7 @@ async def isolated_replay_db_url(request: pytest.FixtureRequest) -> AsyncIterato
     dirty template is reported at the source with sample keys instead of as a
     StreamDiff later."""
     clone_id = _replay_clone_id(request)
-    template = template_database_url()
+    template = _PRISTINE_REPLAY_TEMPLATE_URL
     url = await ensure_worker_database(template, clone_id)
     try:
         guard_pool = await asyncpg.create_pool(_clone_dsn(url), min_size=1, max_size=2)

@@ -16,6 +16,9 @@ import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.foundation.trust.adapters.postgres_membership_repository import (
+    PostgresMembershipRepository,
+)
 from src.main import app
 from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
 
@@ -88,3 +91,57 @@ async def test_concurrent_signup_different_emails_both_succeed(client):
     assert [r.status_code for r in responses] == [201, 201], [
         (r.status_code, r.text) for r in responses
     ]
+
+
+@pytest.mark.parametrize(
+    "password",
+    [
+        pytest.param("lowercase123!", id="negative-missing-uppercase"),
+        pytest.param("UPPERCASE123!", id="negative-missing-lowercase"),
+        pytest.param("NoDigitsHere!", id="negative-missing-digit"),
+    ],
+)
+async def test_negative_signup_rejects_weak_password_without_user(client, pool, password):
+    """I-10: HTTP wiring must enforce each independent password strength rule."""
+    email = f"test-{uuid.uuid4().hex}@example.com"
+    response = await client.post(
+        "/auth/register", json={"email": email, "password": password}
+    )
+    assert response.status_code == 401, response.text
+    assert response.json()["error_code"] == "AUTH_INVALID_CREDENTIALS"
+    async with pool.acquire() as conn:
+        assert await conn.fetchval("SELECT count(*) FROM users WHERE email = $1", email) == 0
+
+
+async def test_failure_injection_tenant_insert_rolls_back_signup(client, pool, monkeypatch):
+    """A failure after both INSERTs must leave neither a user nor an orphan tenant."""
+    email = f"test-{uuid.uuid4().hex}@example.com"
+    original = PostgresMembershipRepository.insert_tenant
+    inserted_ids = []
+
+    async def insert_then_fail(self, conn, *, tenant_id, kind):
+        await original(self, conn, tenant_id=tenant_id, kind=kind)
+        assert await conn.fetchval("SELECT count(*) FROM users WHERE user_id = $1", tenant_id) == 1
+        assert await conn.fetchval("SELECT count(*) FROM tenant WHERE id = $1", tenant_id) == 1
+        inserted_ids.append(tenant_id)
+        raise RuntimeError("injected tenant persistence failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(PostgresMembershipRepository, "insert_tenant", insert_then_fail)
+        response = await _register(client, email)
+
+    assert response.status_code == 500, response.text
+    assert len(inserted_ids) == 1, "The failure must occur after the real database writes."
+    async with pool.acquire() as conn:
+        assert await conn.fetchval("SELECT count(*) FROM users WHERE email = $1", email) == 0
+        assert await conn.fetchval(
+            "SELECT count(*) FROM tenant WHERE id = $1", inserted_ids[0]
+        ) == 0
+
+    retry = await _register(client, email)
+    assert retry.status_code == 201, retry.text
+    async with pool.acquire() as conn:
+        assert await conn.fetchval(
+            "SELECT count(*) FROM users u JOIN tenant t ON t.id = u.user_id "
+            "WHERE u.email = $1 AND t.kind = 'PERSONAL'", email,
+        ) == 1

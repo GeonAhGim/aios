@@ -275,3 +275,99 @@ async def test_adapter_written_snapshot_survives_fa0d_downgrade_upgrade_round_tr
                 "DELETE FROM pos_snapshot WHERE position_key = ANY($1::varchar[])",
                 [position_key, legacy_key],
             )
+
+
+@pytest.mark.parametrize("part_count", [1, 3, 6], ids=["one-part", "missing-part", "extra-parts"])
+async def test_negative_rejects_malformed_legacy_key_without_partial_backfill(pool, part_count):
+    """I-07/I-10: malformed persisted input must stop the real migration."""
+    tenant_id = await create_test_tenant(pool)
+    portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
+    _run_alembic_ok("downgrade", _DOWN_REVISION)
+    account_id = await _insert_pos_account(pool, tenant_id)
+    # Deliberately invalid legacy fixtures cannot use the current key constructor.
+    malformed_key = ":".join([uuid4().hex] * part_count)
+    valid_key = f"TESTVENUE:INST{uuid4().hex[:8]}:default:paper"
+    keys = [valid_key, malformed_key]
+    try:
+        for key in keys:
+            await _insert_legacy_pos_snapshot(
+                pool, position_key=key, tenant_id=tenant_id,
+                account_id=account_id, portfolio_id=portfolio_id,
+            )
+        async with pool.acquire() as conn:
+            before = await conn.fetch(
+                "SELECT * FROM pos_snapshot WHERE account_id = $1 ORDER BY position_key",
+                account_id,
+            )
+        result = _run_alembic("upgrade", "head")
+        assert result.returncode != 0
+        assert "UnbackfillablePositionKeyError" in result.stdout + result.stderr
+        async with pool.acquire() as conn:
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == _DOWN_REVISION
+            after = await conn.fetch(
+                "SELECT * FROM pos_snapshot WHERE account_id = $1 ORDER BY position_key",
+                account_id,
+            )
+        assert after == before
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM pos_snapshot WHERE account_id = $1", account_id)
+            await conn.execute("DELETE FROM pos_account WHERE account_id = $1", account_id)
+
+
+async def test_failure_injection_insert_error_rolls_back_deleted_snapshot(pool):
+    """I-07/I-10: an INSERT failure must not lose the DELETE ... RETURNING row."""
+    tenant_id = await create_test_tenant(pool)
+    portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
+    _run_alembic_ok("downgrade", _DOWN_REVISION)
+    account_id = await _insert_pos_account(pool, tenant_id)
+    old_key = f"TESTVENUE:INST{uuid4().hex[:8]}:default:paper"
+    trigger_name = "fa0d_inject_" + uuid4().hex
+    try:
+        await _insert_legacy_pos_snapshot(
+            pool, position_key=old_key, tenant_id=tenant_id,
+            account_id=account_id, portfolio_id=portfolio_id,
+        )
+        async with pool.acquire() as conn:
+            before = await conn.fetchrow(
+                "SELECT * FROM pos_snapshot WHERE account_id = $1", account_id,
+            )
+            # Generated identifiers and UUID literals are test-owned, never user input.
+            await conn.execute(
+                f"CREATE FUNCTION {trigger_name}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                f"BEGIN IF NEW.account_id = '{account_id}'::uuid THEN "
+                "RAISE EXCEPTION 'fa0d_injected_insert_failure'; END IF; RETURN NEW; END $$"
+            )
+            await conn.execute(
+                f"CREATE TRIGGER {trigger_name} BEFORE INSERT ON pos_snapshot "
+                f"FOR EACH ROW EXECUTE FUNCTION {trigger_name}()"
+            )
+        result = _run_alembic("upgrade", "head")
+        assert result.returncode != 0
+        assert "fa0d_injected_insert_failure" in result.stdout + result.stderr
+        async with pool.acquire() as conn:
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == _DOWN_REVISION
+            after = await conn.fetch(
+                "SELECT * FROM pos_snapshot WHERE account_id = $1", account_id,
+            )
+            assert after == [before]
+            await conn.execute(f"DROP TRIGGER {trigger_name} ON pos_snapshot")
+            await conn.execute(f"DROP FUNCTION {trigger_name}()")
+        # Removing the fault must make exactly the same row migratable again.
+        _run_alembic_ok("upgrade", "head")
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM pos_snapshot WHERE account_id = $1", account_id,
+            )
+        assert len(rows) == 1
+        restored = dict(rows[0])
+        assert PositionKey.parse(restored.pop("position_key")).portfolio_id == portfolio_id
+        original = dict(before)
+        original.pop("position_key")
+        assert restored == original
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON pos_snapshot")
+            await conn.execute(f"DROP FUNCTION IF EXISTS {trigger_name}()")
+            await conn.execute("DELETE FROM pos_snapshot WHERE account_id = $1", account_id)
+            await conn.execute("DELETE FROM pos_account WHERE account_id = $1", account_id)

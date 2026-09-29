@@ -52,4 +52,6 @@ scaffold_reasons:
   follow: "ports, adapters: mirror_rules/mirror_signal이 domain에만 있고 저장·조회를 위한 포트/어댑터가 아직 구현되지 않은 PAPER 단계 스캐폴드"
   marketplace: "ports, adapters: 리스팅 가시성·검증 로직이 domain에만 있고 저장소 연동 포트/어댑터가 아직 구현되지 않음"
   reporting: "domain, ports, adapters: account_summary가 application에서 다른 컨텍스트의 domain을 조합하는 리포팅 전용 컨텍스트 — 자체 도메인 모델·포트·어댑터가 아직 없음"
+  risk_coach: "domain, application, ports, adapters, contracts: U-8 1단계(task-8105) — flags.py의 기능 플래그(FF_U8_RISK_COACH)와 core.portfolio.sizing.selector 읽기 전용 위임 진입점만 있는 스캐폴드(ADR-2026-09-26-A 단계적 롤아웃) — 자체 계층은 2단계 착수 시 추가"
   whatif: "ports, adapters, contracts: impact/preview_order가 domain·application 계층에만 있는 순수 계산 스캐폴드 — 외부 I/O 연동 시점에 추가 예정"
+  tax_report: "application, ports, adapters, contracts: U-9 1단계는 순수 집계만 제공; 저널 조회와 입력 매핑은 후속 리프"

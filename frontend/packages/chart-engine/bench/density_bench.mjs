@@ -13,23 +13,38 @@
  * pattern, and honest about what actually runs client-side, unlike
  * fabricating 30 distinct algorithm names.
  *
- * Reports three real measurements against two independent gates. (1) The
- * `density-baseline.json` regression ratchet: any metric more than its
- * tolerance (20% default, `densityRatchet.mjs#REGRESSION_TOLERANCE_OVERRIDES`
- * widens indicatorAddMs to 30% — task-3311, see that constant's docstring)
- * slower than its baseline fails; a faster metric updates the baseline
- * (same policy as scripts/coverage_ratchet.py, applied per-metric instead
- * of to one rolled-up number). (2) CH-19e — the spec row's own absolute
- * targets (docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
- * #CH-19: pan/zoom frame p95 <= 16.7ms, indicator-add <= 100ms, tick update
- * <= 8ms), which a purely relative ratchet could drift past one +20% hop at
- * a time. A bare absolute-ms gate is what task-1038/1405/920 ruled out for
- * CI (shared/contended hardware fails code that isn't actually slower), so
+ * Reports three real measurements against a single self-calibrating gate:
+ * CH-19e — the spec row's own absolute targets
+ * (docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md #CH-19:
+ * pan/zoom frame p95 <= 16.7ms, indicator-add <= 100ms, tick update <= 8ms).
+ * A bare absolute-ms gate is what task-1038/1405/920 ruled out for CI
+ * (shared/contended hardware fails code that isn't actually slower), so
  * `densityRatchet.mjs#checkAbsoluteThresholds` scales the targets by a
- * calib probe measured fresh each run — see that function's docstring.
- * Every metric's raw value plus the calib ratio and the resulting
- * normalized targets are always printed, so normalization can only widen
- * the gate, never hide a value that actually exceeds it.
+ * calib probe (`measureCalibMs`/`CALIB_BASE_MS`) measured fresh in *this*
+ * process, right alongside the real measurements — the same self-calibrating
+ * "time a fixed-size reference op in the same run, budget is a ratio of it"
+ * principle as `tests/_perf/relative_budget.py`'s `RelativeBudget`. Every
+ * metric's raw value plus the calib ratio and the resulting normalized
+ * targets are always printed, so normalization can only widen the gate,
+ * never hide a value that actually exceeds it.
+ *
+ * task-7869 (esc-ci-frontend.json, systemic ci-frontend red): this used to
+ * also ratchet each metric against a *persisted* density-baseline.json
+ * (20% default tolerance, 30% for indicatorAddMs) carried across runs and
+ * hosts. That comparison point is exactly what CH-19e's calib-ratio
+ * normalization was already designed to avoid needing — reproduced directly
+ * on a 24-worker-loaded host: three consecutive unmodified runs read calib
+ * ratio 1.000 (near-idle by the probe's own measure) while pooled
+ * panZoomFrameMsP95 swung 3.16-4.19ms, a >20% spread against itself before
+ * any stored baseline even enters the picture. Five rounds of halving
+ * `PAN_ZOOM_CALIB_CHUNKS` (task-6744/7559/7671/7742) chased this as a
+ * bracket-blind-spot problem; the swing above shows it is inherent run-to-run
+ * variance instead, which no finer bracketing of a cross-run comparison can
+ * fully close. `checkRatchet`/`decideBenchOutcome`/`loadBaseline`/
+ * `writeBaseline` remain in densityRatchet.mjs (and covered by their own unit
+ * tests) but are no longer wired into this file's gate — CH-19e alone decides
+ * pass/fail, with no persisted-baseline dependency and no change to the raw
+ * spec targets themselves (no budget was raised).
  *
  * Each of the three metrics is a median across `MEASURE_SWEEPS` full
  * sweeps rather than a single sample or a min-reduction: a shared dev/CI
@@ -39,25 +54,13 @@
  * single lucky or unlucky sweep in either direction.
  *
  * Usage: node --experimental-strip-types bench/density_bench.mjs
- * Exit 0 = no metric regressed beyond its tolerance vs baseline (20% default,
- *          30% for indicatorAddMs) AND all metrics are within the
- *          calib-normalized CH-19 absolute targets.
- * Exit 1 = either gate failed.
+ * Exit 0 = every metric is within the calib-normalized CH-19 absolute targets.
+ * Exit 1 = CH-19e failed.
  */
 import { register } from "node:module";
-import { dirname, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
 import { genCandles, percentile } from "./densityData.mjs";
 import { buildCatalog, buildInstances } from "./densityIndicators.mjs";
-import {
-  CALIB_BASE_MS,
-  CH19_ABSOLUTE_TARGET_MS,
-  checkAbsoluteThresholds,
-  decideBenchOutcome,
-  loadBaseline,
-  measureCalibMs,
-  writeBaseline,
-} from "./densityRatchet.mjs";
+import { CALIB_BASE_MS, CH19_ABSOLUTE_TARGET_MS, checkAbsoluteThresholds, measureCalibMs } from "./densityRatchet.mjs";
 
 register("./tsLoader.mjs", import.meta.url);
 
@@ -67,8 +70,6 @@ const { downsampleLOD } = await import("../src/render/lod.ts");
 const { cullToViewport } = await import("../src/render/viewport.ts");
 const { renderPlot } = await import("../src/render/plotRenderers.ts");
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const BASELINE_PATH = resolvePath(HERE, "density-baseline.json");
 const CANDLE_COUNT = 100_000;
 const INDICATOR_INSTANCE_COUNT = 30;
 const TARGET_PIXEL_WIDTH = 1200;
@@ -484,14 +485,15 @@ async function main() {
       `ratchet current (panZoom/indicatorAdd chunk-normalized, tickUpdate sweep-normalized, median across sweeps): ${JSON.stringify(ratchetCurrent)}`,
   );
 
-  const baselineMeta = { candleCount: CANDLE_COUNT, indicatorInstanceCount: INDICATOR_INSTANCE_COUNT };
-  const baseline = loadBaseline(BASELINE_PATH);
-  const outcome = decideBenchOutcome({
-    current: ratchetCurrent, baseline, absoluteFailures, ratchetCalibRatio: 1, baselineMeta, baselinePath: BASELINE_PATH,
-  });
-  for (const { level, message } of outcome.logs) console[level](message);
-  if (outcome.baselineWrite) writeBaseline(BASELINE_PATH, outcome.baselineWrite.metrics, outcome.baselineWrite.meta);
-  return outcome.exitCode;
+  // task-7869: gate on CH-19e alone (see module docstring) -- no persisted
+  // density-baseline.json ratchet.
+  for (const failure of absoluteFailures) console.error(`[density-bench]   - ${failure}`);
+  if (absoluteFailures.length > 0) {
+    console.error("[density-bench] FAIL: CH-19e absolute threshold (host-load normalized)");
+    return 1;
+  }
+  console.log("[density-bench] OK: within CH-19e absolute threshold (self-calibrated, host-load normalized)");
+  return 0;
 }
 
 main()
