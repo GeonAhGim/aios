@@ -4,6 +4,7 @@
 httpx.MockTransport로 조사한 실제 응답 형태를 재현해 검증한다. 실제
 모의투자 계좌 왕복 테스트는 사용자가 앱키를 채운 뒤 별도로 수행해야 한다.
 """
+
 import json
 from decimal import Decimal
 
@@ -28,7 +29,7 @@ def _make_adapter(handler) -> KISAdapter:
     )
     # task-8337: production 005930.KS snapshot is verified=False and would stop
     # place_order() before the HTTP call this module asserts on.
-    adapter.symbol_registry = verified_kr_equity_registry  # type: ignore[method-assign]
+    adapter.symbol_registry = verified_kr_equity_registry
     return adapter
 
 
@@ -277,9 +278,7 @@ async def test_get_ohlcv_rejects_unsupported_timeframe():
 async def test_is_market_holiday_true_when_closed():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["tr_id"] == "VTCA0903R"  # 모의투자 치환 확인
-        return httpx.Response(
-            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"opnd_yn": "N"}]}
-        )
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output": [{"opnd_yn": "N"}]})
 
     adapter = _make_adapter(
         lambda request: _route(request, {"/uapi/domestic-stock/v1/quotations/chk-holiday": handler})
@@ -329,9 +328,7 @@ async def test_get_sellable_quantity_parses_qty():
 async def test_get_cancelable_orders_returns_raw_rows():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["tr_id"] == "VTTC0084R"  # 모의투자 치환 확인
-        return httpx.Response(
-            200, json={"rt_cd": "0", "msg1": "ok", "output": [{"odno": "999"}]}
-        )
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output": [{"odno": "999"}]})
 
     adapter = _make_adapter(
         lambda request: _route(
