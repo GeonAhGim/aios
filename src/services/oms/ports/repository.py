@@ -9,6 +9,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C, §5.1.
 마이그레이션 미착수)는 task-111 note 참조 — 이 리프는 마이그레이션 없이도
 정의 가능한 경계만 담는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -82,6 +83,7 @@ class OrderRepoPort(Protocol):
         conn: asyncpg.Connection,
         *,
         parent_order_id: UUID,
+        status: OrderStatus,
         expected_version: int,
         committed_child_qty: Decimal,
     ) -> OrderView: ...
@@ -150,9 +152,7 @@ class OutboxRepoPort(Protocol):
 
 @runtime_checkable
 class InboxRepoPort(Protocol):
-    async def insert_if_absent(
-        self, conn: asyncpg.Connection, ev: ProviderOrderEvent
-    ) -> bool: ...
+    async def insert_if_absent(self, conn: asyncpg.Connection, ev: ProviderOrderEvent) -> bool: ...
 
     async def claim_unprocessed(
         self, conn: asyncpg.Connection, *, limit: int

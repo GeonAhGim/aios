@@ -218,6 +218,7 @@ async def test_reserve_child_slice_accepts_boundary_and_commits_exact_sum() -> N
     repo.set_committed_child_qty.assert_awaited_once_with(
         conn,
         parent_order_id=parent.order_id,
+        status=parent.status,
         expected_version=parent.version,
         committed_child_qty=Decimal("10"),
     )

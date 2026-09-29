@@ -21,6 +21,7 @@ ACKNOWLEDGED"만 `from`), 부분체결 주문이 추가로 더 부분체결되�
 당연한 경로다(30%→60%→100%). `ALLOWED[PARTIALLY_FILLED]`에
 `PARTIALLY_FILLED` 자신을 포함시켜 이 경로를 명시적으로 허용한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -54,6 +55,13 @@ class OrderEvent(str, Enum):
     # 이 상태기계는 관여하지 않는다. 그래도 order_events 기록을 위해
     # 이벤트 이름 자체는 상수로 남겨둔다.
     SUBMIT_ACCEPTED = "SUBMIT_ACCEPTED"
+    # task-8661 — EM-3 `committed_child_qty` self-loop (no status change),
+    # paired with the silent `orders.version` bump `set_committed_child_qty`
+    # causes via the unconditional I5 trigger (073beca589d5 `_GUARD_FN_SQL`),
+    # the same class of "version moves without an event" gap already solved
+    # for FILL in `core/eventstore/projections/orders.py` (see that module's
+    # docstring) but left open for EM-3 until now.
+    CHILD_QTY_COMMITTED = "CHILD_QTY_COMMITTED"
 
 
 _TERMINAL_STATES = frozenset(

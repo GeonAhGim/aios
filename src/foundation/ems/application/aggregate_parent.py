@@ -32,6 +32,7 @@ scope per the module table) wires around `submit_order`:
 `children_awaiting_cancel` exposes EM-2's cancel-propagation list (EM-A4)
 for EM-15's `cancel_algo` to consume.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -86,6 +87,7 @@ async def reserve_child_slice(
     return await orders_repo.set_committed_child_qty(
         conn,
         parent_order_id=parent_order_id,
+        status=parent.status,
         expected_version=parent.version,
         committed_child_qty=parent.committed_child_qty + new_slice_qty,
     )
@@ -111,6 +113,7 @@ async def release_reserved_slice(
     return await orders_repo.set_committed_child_qty(
         conn,
         parent_order_id=parent_order_id,
+        status=parent.status,
         expected_version=parent.version,
         committed_child_qty=released,
     )

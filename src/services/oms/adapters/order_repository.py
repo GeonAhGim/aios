@@ -23,12 +23,15 @@ application 방향이라 이례적) — I-10 "배선·우회불가": `transition
 유일한 전이 경로가 되면(L4-09 cutover), 감사 기록이 호출부의 기억에 의존하지
 않고 이 경로를 쓰는 모든 곳에서 항상 같이 남는다.
 """
+
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 
@@ -39,7 +42,21 @@ from src.services.oms.application import audit_bridge
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from src.services.oms.contracts.v1_views import OrderView
 from src.services.oms.domain.errors import InvalidOrderTransitionError
-from src.services.oms.domain.state_machine import ALLOWED
+from src.services.oms.domain.state_machine import ALLOWED, OrderEvent
+
+
+def _child_qty_committed_payload_hash(
+    order_id: UUID, expected_version: int, committed_child_qty: Decimal
+) -> str:
+    canonical = json.dumps(
+        {
+            "order_id": str(order_id),
+            "expected_version": expected_version,
+            "committed_child_qty": str(committed_child_qty),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 class OrderNotFoundError(Exception):
@@ -88,9 +105,7 @@ class PostgresOrderRepository:
         self._events = PostgresOrderEventRepository()
 
     async def get_for_update(self, conn: asyncpg.Connection, order_id: UUID) -> OrderView:
-        row = await conn.fetchrow(
-            "SELECT * FROM orders WHERE order_id = $1 FOR UPDATE", order_id
-        )
+        row = await conn.fetchrow("SELECT * FROM orders WHERE order_id = $1 FOR UPDATE", order_id)
         if row is None:
             raise OrderNotFoundError(str(order_id))
         return _row_to_view(row)
@@ -123,15 +138,39 @@ class PostgresOrderRepository:
         conn: asyncpg.Connection,
         *,
         parent_order_id: UUID,
+        status: OrderStatus,
         expected_version: int,
         committed_child_qty: Decimal,
     ) -> OrderView:
         """EM-3 -- materialize EM-A1's running commitment onto the parent row.
 
         No `status` change here (the caller already holds the parent locked
-        via `get_for_update`, EM-A1/EM-A4 already checked) -- ordinary
-        version-guarded `conditional_update`, no `order_events` row (I6 only
-        gates `status` changes, not this column)."""
+        via `get_for_update`, EM-A1/EM-A4 already checked) -- I6 does not gate
+        this column, so the DB trigger never demands a companion event for
+        it. It still bumps `orders.version` unconditionally though (I5), the
+        same silent-bump gap `core/eventstore/projections/orders.py` already
+        works around for FILL -- so this method writes a self-loop
+        `CHILD_QTY_COMMITTED` `order_events` row (task-8661) purely so
+        `replay_verify` can account for that bump; it does not go through
+        `set_config('oms.event_written', ...)` because the trigger's I6
+        check is scoped to actual status changes only and never looks at
+        that flag here."""
+        event = OrderTransitionEvent(
+            order_id=parent_order_id,
+            from_status=status,
+            to_status=status,
+            event=OrderEvent.CHILD_QTY_COMMITTED.value,
+            reason_code="EM3_CHILD_SLICE_COMMIT",
+            actor_subject_id="system",
+            trace_id=uuid4(),
+            command_id=None,
+            provider_event_id=None,
+            occurred_at=datetime.now(timezone.utc),
+            payload_hash=_child_qty_committed_payload_hash(
+                parent_order_id, expected_version, committed_child_qty
+            ),
+        )
+        await self._events.append(conn, event)
         row = await conditional_update(
             conn,
             table="orders",
