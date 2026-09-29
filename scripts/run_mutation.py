@@ -1,31 +1,6 @@
-"""MUT-1 mutation testing driver for ledger/risk/oms domain logic.
-
-Engine choice: cosmic-ray, not mutmut. mutmut>=3 refuses to run on native Windows
-("please use the WSL" -- github.com/boxed/mutmut#397) and this repo's CI runners are
-native Windows (`C:\\aios\\pm\\local_ci.py`, per pyproject.toml's pytest-timeout
-comment). cosmic-ray has no such restriction and was verified end-to-end on this
-machine before writing this script. Both are already present in the dev venv;
-`[project.optional-dependencies].mutation` below pins cosmic-ray as the declared one.
-
-Operator scope: cosmic-ray's full operator catalog is a pairwise matrix (every
-binary operator can become any of the other ~10), which explodes mutant counts on
-files with many arithmetic/comparison sites without adding much signal beyond a
-smaller, well-established "did you get sign/boundary/branch logic right" subset.
-ALLOWED_OPERATORS below is that subset (number literals, comparison-boundary swaps,
-arithmetic sign swaps, boolean logic, break/continue, unary sign flip, empty-loop).
-Unlisted operators are marked SKIPPED via cosmic-ray's operators-filter and excluded
-from the score denominator (see compute_score) -- this keeps a domain run inside a
-single foreground command's timeout budget (measured ~1.5-2.5s per mutant on this
-repo's unit suites; see docstring of DOMAINS below for the counts this produced).
-
-Usage:
-    python scripts/run_mutation.py --domain all
-    python scripts/run_mutation.py --domain oms --top 30
-
-Exit codes: 0 = no domain regressed past --tolerance against the baseline file
-(mutation-score-baseline.json, ratchets upward like scripts/coverage_ratchet.py).
-1 = a domain's score dropped, or a domain's own test suite fails unmutated (can't
-measure a red baseline -- fail-closed). 2 = usage/config error.
+"""MUT-1 mutation testing (cosmic-ray, src/foundation/{ledger,risk,oms}/domain).
+Exit 0: no domain regressed past --tolerance; 1: score dropped or test fails; 2: config error.
+See ALLOWED_OPERATORS for operator scope, DOMAINS for domain specs/timeouts.
 """
 
 from __future__ import annotations

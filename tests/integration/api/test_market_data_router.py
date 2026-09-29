@@ -1,22 +1,6 @@
-"""LA-24 — market_data HTTP 읽기 API 통합테스트(실제 FastAPI 앱 + TEST_DATABASE_URL).
-
-Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24.
-DoD: 4 엔드포인트 통합 테스트 + 교차 테넌트 404(동형) + 커버리지 밖 span →
-`DATA_COVERAGE_MISSING` 409.
-
-시드는 test_get_candles.py(LA-17)와 같은 방식(md_instrument 직접 INSERT +
-LA-13 어댑터로 배치·캔들 저장)에 `md_symbol_alias`(심볼 해석 경로)와 DC-8
-`entitlements`(테넌트 A의 BITGET 등록)를 더한다. 테넌트 B는 아무 등록도
-없다 — 같은 인스트루먼트가 B에게는 "없는 것"이어야 한다.
-BITGET(연속 세션)만 쓴다 — 캘린더 시드가 필요 없다(LA-17 테스트와 동일 근거).
-
-DC-28(ADR-2026-09-06-H D2) — `source_contract`는 `source_id`가 PK인 전역
-테이블이라 실DB에 `BITGET` 행을 심으면 이 파일의 다른 테스트와 공유돼
-버린다(순서 의존 오염). 그래서 `get_source_contract_repository` 의존성을
-`_FakeSourceContractRepository`로 덮어써 각 테스트가 자기만의 스코프를
-갖는다(test_backtests_router.py가 `get_candle_store`를 덮어쓰는 것과 동일
-패턴) — 기본은 DISPLAY(기존 동작과 동치: 우리 사용자에게 표시는 하되
-재판매는 안 함), 재배포 거부 테스트만 개별적으로 재정의한다.
+"""LA-24 market_data HTTP read API (L4_market_data_positions_ledger_v1.0#LA-24).
+4 endpoints + cross-tenant 404 + coverage-gap DATA_COVERAGE_MISSING 409.
+DC-28: source_contract PK isolation via _FakeSourceContractRepository override.
 """
 
 from __future__ import annotations

@@ -1,5 +1,4 @@
-"""FND-08 Reconciliation & Resilience 통합테스트 — 실제 dev DB 대상. 80번 §4
-중 실 스케줄러/내부 원장 없이 재현 가능한 범위(REC-001~004, 006~007)."""
+"""FND-08 Reconciliation lifecycle test (L4_*#FND-08, REC-001~004/006~007, no scheduler)."""
 
 from __future__ import annotations
 

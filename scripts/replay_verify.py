@@ -1,53 +1,6 @@
-"""FA-15 -- 1-day replay-vs-current-table verification, wired into local CI.
-
-Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#9 FA-15.
-
-Usage:
-    python scripts/replay_verify.py                     # last 24h, DATABASE_URL
-    python scripts/replay_verify.py --hours 24 --as-of 2026-09-07T00:00:00+00:00
-
-Exits 0 if every order/ledger-account touched in the window replays to
-exactly the current table row (byte-identical digest, `src.core.eventstore.
-replay.digest_state`); exits 1 and prints every mismatch to stderr
-otherwise. Fail-closed by construction -- DoD(2) is that this checker can
-actually fail, not just report OK (proven in
-tests/integration/eventstore/test_replay_verify.py by tampering with a
-`ledger_balance` row directly and asserting this script's own exit code).
-
-The window is fixed at 1 day by default (task-2060 decision): the ledger
-side folds the *entire* journal from sequence 1 every run (a stream's
-current balance can only be known by folding its whole history -- there is
-no cheaper "since yesterday" fold), so if journal volume ever makes this
-exceed the local-CI budget, move this step to a nightly job with a longer
-`--hours` rather than widening the per-commit window (see local_ci.py
-registration site for the current wiring).
-
-Positions are intentionally out of scope here (documented gap, not an
-oversight): `projections/positions.py` (`snapshot_builder.fold`) needs an
-`asset_class` per position that no table stores --
-`application/rebuild_snapshot.py`'s docstring carries the identical gap in
-production. Wiring it needs an instrument registry this leaf does not have.
-
-Orders' and ledger's projection logic is reused as-is from FA-14
-(src/core/eventstore/projections/orders.py,
-src/foundation/ledger/domain/eventstore_projection.py -- the latter moved
-out of src/core in task-6495 to fix a core-no-io violation -- task-2050
-decision) -- not re-implemented here, so "byte-identical" actually proves
-the projection and the write path agree.
-
-task-2173 fix: orders whose `order_events` chain does not start at CREATED
-are skipped (not counted a mismatch, not a crash) when they predate
-`oms_order_transition_cutover.cutover_at` -- 073beca589d5's I6 trigger (`no
-status change without an order_events row`) only enforces completeness for
-orders created at/after an armed cutover; its own docstring says enforcing
-it unconditionally would immediately break order_service/repository.py's
-pre-cutover legacy writers. Replaying a pre-cutover order byte-identical is
-therefore not a promise this checker can make -- `_order_pair` mirrors the
-exact same cutover_at boundary the write-path guard already uses, so this
-is not a lenient fold (src/core/eventstore/projections/orders.py's
-`EventChainBrokenError` still fires and still fails closed for any order at
-or after an armed cutover, where I6 makes a broken chain structurally
-impossible).
+"""FA-15 replay-vs-current-table verification (L4_ibor_fund_accounting...#FA-15).
+Exit 0: all order/ledger accounts replayed byte-identical; 1: mismatches to stderr.
+1-day window (task-2060). Positions out of scope. task-2173: pre-cutover orders skipped.
 """
 
 from __future__ import annotations

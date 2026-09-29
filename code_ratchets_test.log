@@ -1,0 +1,22 @@
+FAIL: not_implemented_error 33개 -> 36개 (증가)
+    tests/api/mcp/test_tools_research_data.py:299
+    tests/foundation/unit/market_data/test_backfill_job.py:99
+    tests/foundation/unit/market_data/test_backfill_job.py:113
+    tests/foundation/unit/market_data/test_backfill_job.py:135
+    tests/foundation/unit/market_data/test_backfill_job.py:155
+    tests/foundation/unit/reconciliation/__init__.py:75
+    tests/foundation/unit/reconciliation/__init__.py:78
+    tests/foundation/unit/reconciliation/__init__.py:87
+    tests/integration/fake_exchange_adapter.py:97
+    tests/integration/fake_exchange_adapter.py:118
+FAIL: loc_over_500 42개 -> 46개 (증가)
+    scripts/canary_bitget.py:703
+    scripts/replay_verify.py:511
+    scripts/run_mutation.py:554
+    tests/adversarial/compliance/test_rule_purity.py:580
+    tests/foundation/integration/reconciliation/test_reconciliation_lifecycle.py:540
+    tests/foundation/integration/risk_gate/test_recovery_gate.py:669
+    tests/foundation/integration/risk_gate/test_risk_gate_lifecycle.py:904
+    tests/foundation/unit/connections/contracts/test_v1.py:648
+    tests/integration/api/test_market_data_router.py:575
+    tests/integration/api/test_positions_router.py:728
