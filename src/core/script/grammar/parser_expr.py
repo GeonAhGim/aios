@@ -20,6 +20,7 @@ from src.core.script.grammar.ast import (
     NumberLiteral,
     PostfixExpr,
     RequestExpr,
+    StringLiteral,
     UnaryExpr,
 )
 from src.core.script.grammar.lexer import ScriptSyntaxError, Token, TokenKind
@@ -130,12 +131,17 @@ class _ExprParser:
         self._expect(TokenKind.DELIM, "]", "postfix 인덱스 뒤에는 ']'가 필요합니다")
         return PostfixExpr(base=base, index=int(idx_tok.value))
 
-    # primary := NUMBER | ident | call | request | "(" expr ")"
+    # primary := NUMBER | STRING | ident | call | request | "(" expr ")"
+    # STRING here yields the `string` constant type (M2-3 step 1, task-7847) --
+    # DSL-4 (checker.py) is what actually rejects it from the numeric/bool lattice.
     def _primary(self) -> Expr:
         tok = self._peek()
         if tok.kind is TokenKind.NUMBER:
             self._advance()
             return NumberLiteral(value=_number_value(tok.value))
+        if tok.kind is TokenKind.STRING:
+            self._advance()
+            return StringLiteral(value=tok.value)
         if tok.kind is TokenKind.KEYWORD and tok.value == "request":
             return self._request_expr()
         if tok.kind is TokenKind.IDENT:

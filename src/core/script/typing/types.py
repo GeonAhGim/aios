@@ -10,6 +10,10 @@ AST 순회·decl별 검사는 `checker.py`(같은 리프)의 몫이라 이 모�
     int ≤ float ≤ series<float>   (수치 계열 — 산술·비교 피연산자)
     bool ≤ series<bool>            (불리언 계열 — 논리 연산 피연산자)
 두 계열은 서로 섞이지 않는다(bool과 수치 사이 암묵적 변환 없음 — "거부").
+
+M2-3 step 1 (task-7847): `string` belongs to neither lattice above -- it is
+only in `STRING_TYPES`, has no series form, and every arithmetic/comparison/
+logical promotion function rejects it on either side.
 """
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ Type = TypeName
 
 NUMERIC_TYPES: frozenset[Type] = frozenset({"int", "float", "series<float>"})
 BOOL_TYPES: frozenset[Type] = frozenset({"bool", "series<bool>"})
+STRING_TYPES: frozenset[Type] = frozenset({"string"})
 
 _SERIES_TYPES: frozenset[Type] = frozenset({"series<float>", "series<bool>"})
 _SERIES_ELEMENT: dict[Type, Type] = {"series<float>": "float", "series<bool>": "bool"}
@@ -27,6 +32,11 @@ _SERIES_ELEMENT: dict[Type, Type] = {"series<float>": "float", "series<bool>": "
 def is_series(type_: Type) -> bool:
     """`type_`이 시리즈 계열(series<float>/series<bool>)인지."""
     return type_ in _SERIES_TYPES
+
+
+def is_string(type_: Type) -> bool:
+    """Whether `type_` is `string` (an independent scalar, not numeric/bool)."""
+    return type_ in STRING_TYPES
 
 
 def element_type(type_: Type) -> Type:
