@@ -3,7 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ResearchSourceStatusView } from "@aios/shared-types";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -157,12 +158,28 @@ describe("[gate-red repro] CoverageFreshnessPanel.tsx 같은 i18n 0-리터럴 �
     return { root, src };
   }
 
+  // task-8751: process.cwd() is the vitest CLI's invocation directory, not this
+  // file's location -- it was `apps/web` under `npm test --workspace=apps/web`
+  // but became `frontend/` once vitest.config.ts's root `test.projects` (CI-GREEN-2)
+  // started invoking this project from the monorepo root, off by one directory
+  // and resolving to a nonexistent `<repo>/scripts/check_i18n_literals.mjs`.
+  // Deriving from import.meta.url is invocation-cwd independent.
+  const CHECK_I18N_LITERALS_SCRIPT = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "..",
+    "scripts",
+    "check_i18n_literals.mjs",
+  );
+
   function run(root: string, src: string, baselinePath: string) {
     try {
       const stdout = execFileSync(
         process.execPath,
         [
-          join(process.cwd(), "..", "..", "scripts", "check_i18n_literals.mjs"),
+          CHECK_I18N_LITERALS_SCRIPT,
           "--root",
           src,
           "--base",

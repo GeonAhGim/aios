@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { catalogKo } from "./catalog.ko";
 import { catalogEn } from "./catalog.en";
@@ -119,11 +120,27 @@ describe("[gate-red repro] a file UX-2 cleaned up regresses immediately, unlike 
     return { root, src };
   }
 
+  // task-8751: process.cwd() is the vitest CLI's invocation directory, not this
+  // file's location -- it was `apps/web` under `npm test --workspace=apps/web`
+  // but became `frontend/` once vitest.config.ts's root `test.projects` (CI-GREEN-2)
+  // started invoking this project from the monorepo root, off by one directory
+  // and resolving to a nonexistent `<repo>/scripts/check_i18n_literals.mjs`.
+  // Deriving from import.meta.url is invocation-cwd independent.
+  const CHECK_I18N_LITERALS_SCRIPT = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "..",
+    "scripts",
+    "check_i18n_literals.mjs",
+  );
+
   function run(root: string, src: string, baselinePath: string) {
     try {
       const stdout = execFileSync(
         process.execPath,
-        [join(process.cwd(), "..", "..", "scripts", "check_i18n_literals.mjs"), "--root", src, "--base", root, "--baseline", baselinePath],
+        [CHECK_I18N_LITERALS_SCRIPT, "--root", src, "--base", root, "--baseline", baselinePath],
         { encoding: "utf-8" },
       );
       return { status: 0, stdout };
