@@ -12,6 +12,7 @@ import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -247,34 +248,36 @@ def test_record_fill_command_wrong_schema_version_rejected() -> None:
 
 
 def test_nav_snapshot_wrong_schema_version_rejected() -> None:
+    kwargs: dict[str, Any] = dict(
+        account_id=uuid4(),
+        nav_date=date(2026, 9, 3),
+        base_currency=Currency.USDT,
+        opening_nav=Decimal("1000"),
+        cash=Decimal("400"),
+        positions_mv=Decimal("620"),
+        realized=Decimal("10"),
+        unrealized_delta=Decimal("5"),
+        funding=Decimal("0"),
+        fees=Decimal("-1"),
+        flows=Decimal("6"),
+        closing_nav=Decimal("1020"),
+        fx_rates=[],
+        source_hash="h" * 64,
+        schema_version="v2",
+    )
     with pytest.raises(ValidationError):
-        v1.NAVSnapshot(
-            account_id=uuid4(),
-            nav_date=date(2026, 9, 3),
-            base_currency=Currency.USDT,
-            opening_nav=Decimal("1000"),
-            cash=Decimal("400"),
-            positions_mv=Decimal("620"),
-            realized=Decimal("10"),
-            unrealized_delta=Decimal("5"),
-            funding=Decimal("0"),
-            fees=Decimal("-1"),
-            flows=Decimal("6"),
-            closing_nav=Decimal("1020"),
-            fx_rates=[],
-            source_hash="h" * 64,
-            schema_version="v2",  # type: ignore[arg-type]
-        )
+        v1.NAVSnapshot(**kwargs)
 
 
 def test_rebuild_report_non_decimal_drift_rejected() -> None:
+    kwargs: dict[str, Any] = dict(
+        position_key="acct-1:BTC/USDT",
+        entries=42,
+        drift={"quantity": ("not-a-decimal", Decimal("0.5"))},
+        applied=False,
+    )
     with pytest.raises(ValidationError):
-        v1.RebuildReport(
-            position_key="acct-1:BTC/USDT",
-            entries=42,
-            drift={"quantity": ("not-a-decimal", Decimal("0.5"))},  # type: ignore[dict-item]
-            applied=False,
-        )
+        v1.RebuildReport(**kwargs)
 
 
 def test_fixture_read_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
