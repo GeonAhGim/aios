@@ -128,8 +128,10 @@ def _validate_entry(entry: dict[str, Any]) -> tuple[str, str, str, str]:
 
 
 def load_reference(path: Path | None) -> dict[str, Any]:
-    data = _default_reference() if path is None or not path.exists() else json.loads(
-        path.read_text(encoding="utf-8")
+    data = (
+        _default_reference()
+        if path is None or not path.exists()
+        else json.loads(path.read_text(encoding="utf-8"))
     )
     endpoints = data.get("endpoints")
     if not isinstance(endpoints, list) or not endpoints:
@@ -139,13 +141,8 @@ def load_reference(path: Path | None) -> dict[str, Any]:
     return data
 
 
-def _pairs_from_file(source: str) -> set[tuple[str, str]]:
-    """(method, path) pairs passed to `self._request(...)` call sites in one file.
-    Resolves a named constant argument (e.g. `_ORDER_PATH`) to its string value."""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return set()
+def _string_constants(tree: ast.AST) -> dict[str, str]:
+    """Module-level `NAME = "literal"` assignments, by name."""
     constants: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
@@ -153,12 +150,17 @@ def _pairs_from_file(source: str) -> set[tuple[str, str]]:
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         constants[target.id] = node.value.value
+    return constants
 
-    def resolve(arg: ast.expr) -> str | None:
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            return arg.value
-        return constants.get(arg.id) if isinstance(arg, ast.Name) else None
 
+def _resolve_str(arg: ast.expr, constants: dict[str, str]) -> str | None:
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return arg.value
+    return constants.get(arg.id) if isinstance(arg, ast.Name) else None
+
+
+def _request_pairs(tree: ast.AST, constants: dict[str, str]) -> set[tuple[str, str]]:
+    """(method, path) pairs passed to `self._request(...)` call sites."""
     pairs: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -167,10 +169,21 @@ def _pairs_from_file(source: str) -> set[tuple[str, str]]:
         is_request_call = isinstance(func, ast.Attribute) and func.attr == "_request"
         if not is_request_call or len(node.args) < 2:
             continue
-        method, path = resolve(node.args[0]), resolve(node.args[1])
+        method = _resolve_str(node.args[0], constants)
+        path = _resolve_str(node.args[1], constants)
         if method is not None and path is not None:
             pairs.add((method, path))
     return pairs
+
+
+def _pairs_from_file(source: str) -> set[tuple[str, str]]:
+    """(method, path) pairs passed to `self._request(...)` call sites in one file.
+    Resolves a named constant argument (e.g. `_ORDER_PATH`) to its string value."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    return _request_pairs(tree, _string_constants(tree))
 
 
 def extract_implemented_pairs(adapter_dir: Path) -> set[tuple[str, str]]:
