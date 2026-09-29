@@ -59,6 +59,14 @@ READINESS_CHECK_STATUS = "aios.readiness.check.status"
 
 POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL = "aios.positions.reconciliation.mismatch_count_total"
 
+# F1 (task-8808): self-healing resync attempted after MATERIAL_MISMATCH detection.
+POSITIONS_RECONCILIATION_RESYNC_SUCCESS_COUNT_TOTAL = (
+    "aios.positions.reconciliation.resync_success_count_total"
+)
+POSITIONS_RECONCILIATION_RESYNC_FAILURE_COUNT_TOTAL = (
+    "aios.positions.reconciliation.resync_failure_count_total"
+)
+
 POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL = "aios.positions.scheduler.cycle_failure_count_total"
 POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE = "aios.positions.scheduler_cycle_success.gauge"
 
