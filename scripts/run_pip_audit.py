@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -156,7 +157,17 @@ def main(argv: list[str] | None = None) -> int:
     # 디코딩되는데, pip-audit --format json은 UTF-8을 낸다 — 로케일이 cp949인 CI
     # 러너에서 UnicodeDecodeError로 죽는다(task-8362). pip-audit 출력은 항상 UTF-8이므로
     # 고정한다.
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    #
+    # 이것만으로는 부족하다: pip-audit(자식 python 프로세스) 자신도 venv 부트스트랩용
+    # pip를 별도 subprocess로 띄우는데, 그 내부 호출은 text 모드이면서 encoding을
+    # 지정하지 않는다 — 이 프로세스가 cp949 로케일로 뜨면 그 안쪽 subprocess의
+    # reader thread가 UTF-8 바이트를 cp949로 디코딩하다 죽는다(task-8662, 이 스크립트의
+    # encoding="utf-8" 한 겹 아래에서 발생하므로 여기서 고쳐도 안 잡혔다). PYTHONUTF8=1을
+    # 자식 프로세스 환경에 넣어 그 안의 모든 text-mode subprocess가 로케일과 무관하게
+    # UTF-8을 기본값으로 쓰게 한다(PEP 540).
+    child_env = dict(os.environ)
+    child_env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=child_env)
     # capture_output=True/text=True는 정상 경로에서 stdout/stderr를 항상 str로 채우지만,
     # subprocess가 캡처 자체에 실패하는 경로(예: 예외적인 파이프 처리)에서는 None이 나올 수
     # 있다 -- is_network_error가 None을 받아도 죽지 않게 여기서도 빈 문자열로 정규화해
