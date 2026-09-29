@@ -15,7 +15,7 @@ tests/integration/test_execution_monitoring_service.py가 실 DB로 검증한다
 
 from __future__ import annotations
 
-import time
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, cast
@@ -200,10 +200,13 @@ async def test_pool_acquire_failure_propagates_fail_closed() -> None:
         await service.list_for_user(uuid4())
 
 
-async def test_verdict_mapping_throughput_for_large_result_set() -> None:
+def test_verdict_mapping_throughput_for_large_result_set(perf_budget: Any) -> None:
     """수치 성능 단언 — 500개 실행 행을 LastRiskVerdict로 매핑하는 순수
     파이썬 경로(네트워크/DB 왕복 제외)는 100ms 미만이어야 한다(회귀 감지용
-    관대한 예산, 실 서비스 SLA가 아니라 매핑 로직 자체의 선형성 확인)."""
+    관대한 예산, 실 서비스 SLA가 아니라 매핑 로직 자체의 선형성 확인).
+
+    `perf_budget`(process_time 기반)으로 측정한다 — wall-clock 예산은 xdist
+    코어 경합에서 무의미해 perf 마커 가드(task-7434)가 금지한다."""
     rows = [
         _base_row(
             execution_id=i,
@@ -215,9 +218,9 @@ async def test_verdict_mapping_throughput_for_large_result_set() -> None:
     ]
     service = _service(rows)
 
-    start = time.perf_counter()
-    cards = await service.list_for_user(uuid4())
-    elapsed = time.perf_counter() - start
+    def _list() -> list[Any]:
+        return asyncio.run(service.list_for_user(uuid4()))
 
+    cards = _list()
     assert len(cards) == 500
-    assert elapsed < 0.1
+    perf_budget.assert_within(_list, budget_ms=100.0, label="verdict mapping x500")

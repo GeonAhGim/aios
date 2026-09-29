@@ -23,6 +23,15 @@ accept a single string -- same reason as KIS's "orgno:odno" and Kiwoom's
 `exchange_order_id` as "{instId}:{ordId}" and `cancel_order`/
 `modify_order` expect that same format.
 
+Review REJECT (task-7868, review 7802) -- `place_order` used to send
+`order.symbol` (canonical "BASE/QUOTE", e.g. "BTC/USDT") to OKX unconverted
+instead of its `instId` format ("BASE-QUOTE", e.g. "BTC-USDT"), which would
+have failed 100% of live orders. `_to_inst_id` now delegates the conversion
+to `symbol_normalizer` (LA-7, via `src/exchanges/okx/symbols.py`); an
+already-raw OKX symbol ("BTC-USDT") passed directly is rejected with
+`FatalExchangeError` because the canonical parser finds no "/" separator --
+reject, not silently normalize (contract).
+
 Unverified scope (ratchet note): `order.order_type` currently only has
 MARKET/LIMIT (src/data/models/trading.py), so `_to_okx_ord_type` only maps
 those two -- OKX's `post_only`/`fok`/`ioc` order types are out of this
@@ -30,6 +39,66 @@ leaf's domain-model scope and are not guessed at; any other order_type
 value reaching this mixin is rejected fail-closed (see `_to_okx_ord_type`).
 Spot-only, cash trade mode (`tdMode="cash"`, Phase 1 scope per 06 doc
 §6.1) -- margin/futures trade modes are a separate leaf.
+
+F4-OKX (task-8076, `docs/audits/AUDIT_2026-09-26_order_path.md` §1/F4) --
+`_validate_order` used to only check quantity/price `>0`, delegating
+tick/lot/min_notional enforcement entirely to OKX's own rejection (a live
+round trip per bad order, and a silent no-op if the exchange's rejection
+reason ever changes shape). `_validate_tick_lot_min_notional` now rejects
+fail-closed, before any exchange call, using `_SYMBOL_LIMITS` -- ESTIMATED
+values (§10 honest-labeling; no live `GET /api/v5/public/instruments`
+round trip performed for this leaf), not a live-measured `SymbolSnapshot`
+(contrast `bitget/venue_profile.py`). A symbol absent from `_SYMBOL_LIMITS`
+is rejected rather than silently skipping the check.
+
+Review REJECT (task-8179, follow-up task-8336) -- the F4-OKX min_notional
+guard above only ran for `order_type == LIMIT`, so a MARKET order skipped
+min_notional validation entirely (no price to multiply against quantity).
+
+Review REJECT (task-8336, follow-up task-8357, CTO decision) -- task-8336's
+first fix compared `order.quantity` (a base-currency amount, e.g. BTC)
+directly against `min_notional` (a quote-currency threshold, e.g. USDT) as
+an "approximation." That comparison is inverted from its purpose: a small
+order with sufficient real notional could be rejected while a
+large-quantity order with insufficient real notional could pass.
+`_validate_tick_lot_min_notional` now fetches a reference price via
+`self.get_ticker(order.symbol)` (same contract `ExchangeAdapter.get_ticker`
+already exposes, mirrored by `bitget/account_mixin.py`'s
+`_TickerReadingClient`) and computes the real notional as
+`ticker.price * order.quantity`. A ticker fetch failure rejects the order
+fail-closed (`FatalExchangeError`) instead of falling back to the
+quantity-only approximation or skipping the check.
+
+Follow-up (task-8374, QA task-8357 D3 finding#223) -- the merged fix above
+(commit d2183fea) covered the real-notional computation but left two gaps
+still explicit in the task spec: a stale reference price (ticker fetched
+long before this validation runs, e.g. a cached/delayed feed) and a
+zero/negative/non-finite reference price were both accepted uncritically.
+`_fetch_market_reference_price` now also rejects fail-closed when
+`ticker.price` is not finite/positive, or when `ticker.timestamp` is older
+than `_MARKET_REF_PRICE_MAX_STALENESS` (5 seconds) -- neither case falls
+back to the quantity-only approximation or a silent pass.
+
+Same-defect audit (task-8374 requirement) -- checked whether Bitget/
+Binance/KIS/NH have an analogous MARKET min_notional gap. None share OKX's
+specific "backwards approximation" bug (comparing base-currency quantity
+directly against a quote-currency threshold), but all four skip MARKET
+min_notional validation entirely rather than computing a real notional:
+- Bitget (`trading_mixin.py::_reject_if_unsubmittable`): the min_notional
+  branch is gated on `order.price is not None`, so `check_notional` never
+  runs for MARKET (`order.price` is always None for MARKET per the domain
+  contract) -- no reference-price lookup exists in this path at all.
+- Binance (`trading_mixin.py`): its pre-validation returns early when
+  `price is None`, before the min_notional comparison -- same skip.
+- KIS (`trading_mixin.py`): `if order.price is None: return  # market order`
+  precedes the tick/min_notional checks -- same skip.
+- NH (`trading_mixin.py`): has no tick/lot/min_notional validator at all
+  (no `_SYMBOL_LIMITS`-equivalent table or pre-exchange-call check), so
+  neither LIMIT nor MARKET orders are validated pre-flight for any of
+  tick/lot/min_notional.
+None of these are fixed in this leaf (task-8374 scope is OKX only) -- each
+is a distinct defect (silent skip, not inversion) and, if judged worth
+fixing, is a separate leaf per exchange.
 
 Every method in this file moves funds, so every one carries
 `@require_paper_sandbox` with no exceptions (same convention as
@@ -44,16 +113,59 @@ guard applies to OKX with no exception once factory registration
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Protocol
 
-from src.core.exceptions import FatalExchangeError
+from src.core.exceptions import ExchangeAPIError, FatalExchangeError
+from src.data.models.market_data import Ticker
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.live_guard import require_paper_sandbox
+from src.exchanges.okx.symbols import to_okx_symbol as _to_okx_symbol
+from src.foundation.market_data.domain.reference.symbol_normalizer import (
+    SymbolNormalizationError,
+)
 
 _TRADE_MODE_CASH = "cash"  # spot-only Phase 1 scope (module docstring)
 _ORDER_PATH = "/api/v5/trade/order"
 _CANCEL_PATH = "/api/v5/trade/cancel-order"
 _AMEND_PATH = "/api/v5/trade/amend-order"
+
+# F4-OKX (task-8076, audit AUDIT_2026-09-26_order_path.md §1/F4) -- per-symbol
+# (tick, lot, min_notional), keyed by canonical "BASE/QUOTE" (same key space
+# `_validate_order` already receives `order.symbol` in). ESTIMATED, not
+# LIVE_VERIFIED (§10 honest-labeling convention, same as
+# `bitget/venue_profile.py`'s `rate_limits` provenance note) -- no
+# `GET /api/v5/public/instruments` round trip has been made for this leaf,
+# so these are conservative placeholders pending a live snapshot leaf, not a
+# measured `SymbolSnapshot` (contrast `bitget/venue_profile.py`'s
+# `BITGET_SYMBOL_SNAPSHOTS`, which *is* live-measured). Only two symbols are
+# declared -- any other canonical symbol reaching `place_order` is rejected
+# fail-closed by `_validate_tick_lot_min_notional` below (repo default
+# posture, CLAUDE.md §3) rather than silently skipping the check.
+_SYMBOL_LIMITS: dict[str, tuple[Decimal, Decimal, Decimal]] = {
+    "BTC/USDT": (Decimal("0.1"), Decimal("0.00000001"), Decimal("1")),
+    "ETH/USDT": (Decimal("0.01"), Decimal("0.000001"), Decimal("1")),
+}
+
+# task-8374 (QA task-8357 D3 finding#223 follow-up) -- a reference price
+# older than this is treated the same as no price at all (fail-closed
+# reject), not used to compute a stale notional.
+_MARKET_REF_PRICE_MAX_STALENESS = timedelta(seconds=5)
+
+
+def _utcnow() -> datetime:
+    """task-8454 (CI-red root cause) -- module-level indirection so tests can
+    monkeypatch the clock instead of relying on real wall-clock elapsed time.
+    Every other freshness/staleness check in this repo takes an injectable
+    `now`/`clock` argument (e.g. `core/security/break_glass.py:mfa_step_up_fresh`,
+    `foundation/ai/factory/application/promote_to_paper.py`'s `clock` param) --
+    the inline `datetime.now(timezone.utc)` this replaced was the only
+    staleness check reading the real clock directly, which made the
+    staleness comparison below sensitive to scheduling delays between the
+    ticker fetch and this check (observed as intermittent CI failures on a
+    shared, contended machine, not a real 5s-old price)."""
+    return datetime.now(timezone.utc)
 
 
 def _to_okx_side(side: OrderSide) -> str:
@@ -72,13 +184,87 @@ def _to_okx_ord_type(order_type: OrderType) -> str:
     raise FatalExchangeError(f"OKX가 지원하지 않는 주문 타입: {order_type!r}")
 
 
-def _validate_order(order: Order) -> None:
+async def _validate_order(order: Order, client: _TickerReadingOrderClient) -> None:
     if order.quantity <= 0:
         raise FatalExchangeError(f"OKX 주문 수량은 0보다 커야 함: {order.quantity!r}")
     if order.order_type == OrderType.LIMIT and (order.price is None or order.price.amount <= 0):
         raise FatalExchangeError(
             f"OKX 지정가(limit) 주문은 0보다 큰 가격이 필요함: {order.price!r}"
         )
+    await _validate_tick_lot_min_notional(order, client)
+
+
+async def _validate_tick_lot_min_notional(order: Order, client: _TickerReadingOrderClient) -> None:
+    """F4-OKX (task-8076) -- reject before the exchange call, not delegate
+    to OKX's own rejection (audit finding: `place_order` used to only check
+    `>0`). Fail-closed for any symbol not in `_SYMBOL_LIMITS` -- a missing
+    entry means we have no venue limits to check against, so submitting
+    anyway would silently skip the very validation this leaf adds."""
+    limits = _SYMBOL_LIMITS.get(order.symbol)
+    if limits is None:
+        raise FatalExchangeError(
+            f"OKX tick/lot/min_notional 한도가 등록되지 않은 심볼: {order.symbol!r}"
+        )
+    tick, lot, min_notional = limits
+    if order.quantity % lot != 0:
+        raise FatalExchangeError(f"OKX lot size({lot})에 정렬되지 않은 수량: {order.quantity!r}")
+    if order.order_type == OrderType.LIMIT and order.price is not None:
+        price = order.price.amount
+        if price % tick != 0:
+            raise FatalExchangeError(f"OKX tick size({tick})에 정렬되지 않은 가격: {price!r}")
+        notional = price * order.quantity
+        if notional < min_notional:
+            raise FatalExchangeError(f"OKX 최소 주문금액({min_notional}) 미달: {notional!r}")
+    elif order.order_type == OrderType.MARKET:
+        # CTO decision (task-8357, follow-up to review REJECT task-8336):
+        # `order.price` is always None for MARKET orders (contract), so the
+        # real quote-currency notional needs a reference price from a
+        # market-data source -- comparing `order.quantity` (base currency)
+        # directly against `min_notional` (quote currency) is inverted from
+        # the check's purpose. Fetch a reference price via `get_ticker` and
+        # reject fail-closed if the fetch fails -- never fall back to the
+        # quantity-only approximation or skip the check.
+        #
+        # task-8374 follow-up: a fetched price is also rejected fail-closed
+        # if it is stale (>5s old) or not a usable positive number (0/NaN) --
+        # neither case falls back to the quantity-only approximation.
+        try:
+            ticker = await client.get_ticker(order.symbol)
+        except ExchangeAPIError as exc:
+            raise FatalExchangeError(
+                f"OKX MARKET 주문 min_notional 검증용 참조가 조회 실패: {order.symbol!r}"
+            ) from exc
+        if not ticker.price.is_finite() or ticker.price <= 0:
+            raise FatalExchangeError(
+                f"OKX MARKET 주문 min_notional 검증용 참조가가 유효하지 않음"
+                f"(price={ticker.price!r}): {order.symbol!r}"
+            )
+        age = _utcnow() - ticker.timestamp
+        if age > _MARKET_REF_PRICE_MAX_STALENESS:
+            raise FatalExchangeError(
+                f"OKX MARKET 주문 min_notional 검증용 참조가가 스테일함"
+                f"(age={age!r} > {_MARKET_REF_PRICE_MAX_STALENESS!r}): {order.symbol!r}"
+            )
+        notional = ticker.price * order.quantity
+        if notional < min_notional:
+            raise FatalExchangeError(
+                f"OKX 최소 주문금액({min_notional}) 미달(MARKET, 참조가={ticker.price!r}): "
+                f"{notional!r}"
+            )
+
+
+def _to_inst_id(symbol: str) -> str:
+    """Canonical "BASE/QUOTE" (e.g. "BTC/USDT") -> OKX `instId`
+    "BASE-QUOTE" (e.g. "BTC-USDT"), delegating to `symbol_normalizer` (LA-7)
+    via `okx/symbols.py` (task-7868, review REJECT 7802). An already-raw
+    OKX symbol ("BTC-USDT") has no "/" and is rejected here rather than
+    silently normalized -- callers must pass canonical symbols."""
+    try:
+        return _to_okx_symbol(symbol)
+    except SymbolNormalizationError as exc:
+        raise FatalExchangeError(
+            f"OKX instId 변환 실패 -- canonical 'BASE/QUOTE' 형식이 필요함: {symbol!r}"
+        ) from exc
 
 
 def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
@@ -137,12 +323,23 @@ class _OrderMutatingClient(_OKXOrderClient, Protocol):
     async def get_order(self, order_id: str) -> Order: ...
 
 
+class _TickerReadingOrderClient(_OKXOrderClient, Protocol):
+    """place_order() needs a reference price to validate MARKET-order
+    min_notional (task-8357, CTO decision) -- included explicitly in the
+    contract for the same reason as bitget/account_mixin.py's
+    `_TickerReadingClient` (get_ticker lives in market_data_mixin.py, task
+    BR-21c, not yet assembled for OKX)."""
+
+    async def get_ticker(self, symbol: str) -> Ticker: ...
+
+
 class OKXTradingMixin:
     @require_paper_sandbox
-    async def place_order(self: _OKXOrderClient, order: Order) -> Order:
-        _validate_order(order)
+    async def place_order(self: _TickerReadingOrderClient, order: Order) -> Order:
+        await _validate_order(order, self)
+        inst_id = _to_inst_id(order.symbol)
         body: dict[str, Any] = {
-            "instId": order.symbol,
+            "instId": inst_id,
             "tdMode": _TRADE_MODE_CASH,
             "side": _to_okx_side(order.side),
             "ordType": _to_okx_ord_type(order.order_type),
@@ -157,7 +354,7 @@ class OKXTradingMixin:
             ord_id = row["ordId"]
         except KeyError as exc:
             raise FatalExchangeError(f"OKX 주문 응답에 ordId 필드 없음: {row!r}") from exc
-        exchange_order_id = f"{order.symbol}:{ord_id}"
+        exchange_order_id = f"{inst_id}:{ord_id}"
         return order.model_copy(
             update={"exchange_order_id": exchange_order_id, "status": OrderStatus.SUBMITTED}
         )

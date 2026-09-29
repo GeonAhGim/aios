@@ -3,6 +3,14 @@
 // 네임스페이스를 분리했다 -- catalog.ko.legacyA..D와 동일한 분할 관용, 내용은
 // 이동만 했을 뿐 변경 없음.
 export const catalogKoExtra = {
+  sweepPanel: {
+    grid: "파라미터 그리드 (JSON)",
+    help: '스크립트의 정수 input 이름과 값 배열을 입력하세요. 예: {"length":[7,14,21]}. 최대 2개 축, 64개 조합입니다.',
+    lineage: "데이터 이력 해시",
+    rollup: "데이터 집계 버전",
+    run: "파라미터 스윕 실행",
+    invalid: "그리드와 데이터 이력 정보를 확인하세요. 중복 없는 정수 값과 스크립트에 선언된 input 이름이 필요합니다.",
+  },
   executionAlgoPage: {
     pageTitle: "알고리즘 집행 진행률",
     missingOrderId: "주문 ID가 없습니다.",
@@ -83,5 +91,18 @@ export const catalogKoExtra = {
     noneLabel: "없음",
     draftSubmitLabel: "초안 작성",
     amendSubmitLabel: "개정안 제안",
+  },
+  // task-7500(J3 G-4): 실행 생성 시 리스크/컴플라이언스 판정을 전용 패널로 보여준다
+  // (ExecutionControlPage.tsx, FF_J3_RISK_PANEL 뒤).
+  riskVerdictPanel: {
+    title: "리스크/컴플라이언스 판정",
+    noVerdict: "아직 판정 결과가 없습니다.",
+    pending: "판정을 확인하는 중입니다...",
+    outcomeLabel: "판정 결과",
+    reasonCodesLabel: "거부 사유",
+    reasonCodesEmpty: "제공된 사유 코드가 없습니다.",
+    ruleBasisLabel: "규칙 근거",
+    evaluatedAtLabel: "판정 시각",
+    failClosed: "판정 결과를 확인할 수 없습니다. 안전을 위해 허용되지 않은 것으로 처리합니다.",
   },
 } as const;

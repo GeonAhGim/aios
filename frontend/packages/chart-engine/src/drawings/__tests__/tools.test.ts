@@ -5,7 +5,12 @@ import {
   anchorCount,
   createFibonacci,
   createHorizontalLine,
+  createParallelChannel,
+  createPriceChannel,
+  createPriceLine,
+  createRayLine,
   createRectangle,
+  createSegment,
   createTrendLine,
   createVerticalLine,
   fibonacciLevelPrices,
@@ -58,6 +63,39 @@ describe("creation (5 tools)", () => {
   });
 });
 
+describe("creation (M2-6 step 1: 5 new tools)", () => {
+  const p3 = { time: 30, price: 90 };
+
+  it("creates each new kind with only the fields that were given", () => {
+    expect(createSegment("s", p1, p2)).toEqual({ id: "s", kind: "segment", points: [p1, p2] });
+    expect(createRayLine("r", p1, p2)).toEqual({ id: "r", kind: "ray-line", points: [p1, p2] });
+    expect(createParallelChannel("pc", p1, p2, p3)).toEqual({
+      id: "pc",
+      kind: "parallel-channel",
+      points: [p1, p2, p3],
+    });
+    expect(createPriceChannel("ch", p1, p2)).toEqual({ id: "ch", kind: "price-channel", points: [p1, p2] });
+    expect(createPriceLine("pl", 42)).toEqual({ id: "pl", kind: "price-line", price: 42 });
+  });
+
+  it("applies locked/style options and validates them", () => {
+    const seg = createSegment("s", p1, p2, { locked: true, style: { color: "blue" } });
+    expect(seg).toEqual({ id: "s", kind: "segment", points: [p1, p2], locked: true, style: { color: "blue" } });
+    expectDrawingError(() => createPriceLine("pl", Number.NaN), "CHART_DRAWING_INVALID", "pl");
+    expectDrawingError(() => createRayLine("r", p1, p2, { style: { lineWidth: -1 } }), "CHART_DRAWING_INVALID", "r");
+  });
+
+  it.each<[string, () => unknown]>([
+    ["segment: NaN anchor", () => createSegment("s", { time: Number.NaN, price: 0 }, p2)],
+    ["ray-line: NaN anchor", () => createRayLine("r", { time: Number.NaN, price: 0 }, p2)],
+    ["parallel-channel: NaN offset anchor", () => createParallelChannel("pc", p1, p2, { time: 0, price: Number.NaN })],
+    ["price-channel: NaN anchor", () => createPriceChannel("ch", p1, { time: Number.NaN, price: 0 })],
+    ["price-line: Infinity price", () => createPriceLine("pl", Number.POSITIVE_INFINITY)],
+  ])("rejects %s with CHART_DRAWING_INVALID", (_label, thunk) => {
+    expectDrawingError(thunk, "CHART_DRAWING_INVALID");
+  });
+});
+
 describe("moveDrawing", () => {
   const delta = { time: 5, price: -10 };
 
@@ -72,6 +110,12 @@ describe("moveDrawing", () => {
     const fib = moveDrawing(createFibonacci("f", p1, p2), delta);
     expect(fib.points[0]).toEqual({ time: 15, price: 90 });
     expect(fib.levels).toEqual(DEFAULT_FIBONACCI_LEVELS);
+    expect(moveDrawing(createPriceLine("pl", 100), delta).price).toBe(90);
+    // Regression guard: the offset anchor (points[2]) must not be dropped when a
+    // 3-anchor drawing is moved (a fixed-size [0]/[1] shift would silently lose it).
+    const p3 = { time: 30, price: 90 };
+    const movedChannel = moveDrawing(createParallelChannel("pc", p1, p2, p3), delta);
+    expect(movedChannel.points).toEqual([{ time: 15, price: 90 }, { time: 25, price: 110 }, { time: 35, price: 80 }]);
   });
 
   it("ignores the irrelevant axis for single-axis lines", () => {
@@ -104,11 +148,17 @@ describe("moveAnchor", () => {
     expect(moveAnchor(trend, 0, { time: 0, price: 0 }).points).toEqual([{ time: 0, price: 0 }, p2]);
     expect(moveAnchor(createHorizontalLine("h", 1), 0, { time: 99, price: 2 }).price).toBe(2);
     expect(moveAnchor(createVerticalLine("v", 1), 0, { time: 99, price: 2 }).time).toBe(99);
+    expect(moveAnchor(createPriceLine("pl", 1), 0, { time: 0, price: 5 }).price).toBe(5);
+    const p3 = { time: 30, price: 90 };
+    const moved = moveAnchor(createParallelChannel("pc", p1, p2, p3), 2, { time: 40, price: 95 });
+    expect(moved.points).toEqual([p1, p2, { time: 40, price: 95 }]);
   });
 
   it("reports anchor count per kind and rejects out-of-range indices", () => {
     expect(anchorCount(createTrendLine("t", p1, p2))).toBe(2);
     expect(anchorCount(createHorizontalLine("h", 1))).toBe(1);
+    expect(anchorCount(createPriceLine("pl", 1))).toBe(1);
+    expect(anchorCount(createParallelChannel("pc", p1, p2, { time: 30, price: 90 }))).toBe(3);
     expectDrawingError(() => moveAnchor(createTrendLine("t", p1, p2), 2, p1), "CHART_DRAWING_ANCHOR_OUT_OF_RANGE", "t");
     expectDrawingError(() => moveAnchor(createHorizontalLine("h", 1), 1, p1), "CHART_DRAWING_ANCHOR_OUT_OF_RANGE", "h");
     expectDrawingError(() => moveAnchor(createHorizontalLine("h", 1), -1, p1), "CHART_DRAWING_ANCHOR_OUT_OF_RANGE");

@@ -142,6 +142,7 @@ async def test_open_position_rejects_duplicate_first_creation_call(pool: asyncpg
         )
 
 
+@pytest.mark.perf
 async def test_open_position_round_trip_stays_within_local_budget(pool: asyncpg.Pool) -> None:
     """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1, n=20, 워밍업
     3회 버림)을 이 환경에서 직접 재고, `open_position`의 절대 시간이 그

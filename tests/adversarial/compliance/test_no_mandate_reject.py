@@ -21,6 +21,7 @@ RISK_MANDATE_REVISION_STALE)이므로 각각 독립적으로 REJECT를 재현해
 from __future__ import annotations
 
 import asyncio
+import secrets
 
 from src.foundation.mandates.application.activate_revision import (
     activate_revision as activate_revision_command,
@@ -34,10 +35,19 @@ from tests.foundation.integration.risk_gate.conftest import activate_mandate_wit
 from tests.integration.conftest import create_test_tenant
 
 
-def _context(user_id, mandate_revision_id=None):
+def _unique_execution_id() -> int:
+    """테스트마다 새 execution_id. 고정값 1을 쓰면 게이트가 읽는 kill switch
+    scope_ref `exec:1`이 워커 DB 전체에서 공유돼, 같은 xdist 워커에서 앞서 돈
+    적대 테스트(test_fenced_submit·test_fence_race 등)가 `exec:1`에 활성화한
+    STRATEGY_DEPLOYMENT 컨트롤이 그대로 보여 RISK_KILL_SWITCH_ACTIVE_* DENY로
+    적색이 된다(CI run 36187517816 실측). 이 파일의 관심사는 mandate 분기뿐이다."""
+    return secrets.randbelow(2**31 - 1) + 1
+
+
+def _context(user_id, mandate_revision_id=None, *, execution_id: int):
     return OrderContext(
         user_id=user_id,
-        execution_id=1,
+        execution_id=execution_id,
         exchange="bitget",
         mandate_revision_id=mandate_revision_id,
     )
@@ -47,9 +57,10 @@ async def test_no_mandate_at_all_rejects(pool):
     """무 mandate — tenant에 `portfolio_mandate` 행 자체가 없으면(H-1a
     resolver도 채울 게 없다) RISK_MANDATE_REQUIRED DENY."""
     user_id = await create_test_tenant(pool)
+    execution_id = _unique_execution_id()
     gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
 
-    decision = await gate(_context(user_id))
+    decision = await gate(_context(user_id, execution_id=execution_id))
 
     assert decision.outcome == GateOutcome.DENY
     assert decision.reason_codes == ("RISK_MANDATE_REQUIRED",)
@@ -58,7 +69,7 @@ async def test_no_mandate_at_all_rejects(pool):
         audit_row = await conn.fetchrow(
             "SELECT * FROM audit_log WHERE action_type = 'risk_gate.unmandated_submit' "
             "AND target_id = $1",
-            "1",
+            str(execution_id),
         )
     assert audit_row is not None  # DENY 이전에도 감사 기록은 남는다
 
@@ -73,7 +84,9 @@ async def test_paused_mandate_rejects(pool, repo, trust_repo):
     await pause_mandate(repo, tenant_id=user_id)
 
     gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
-    decision = await gate(_context(user_id, mandate.active_revision_id))
+    decision = await gate(
+        _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
+    )
 
     assert decision.outcome == GateOutcome.DENY
     assert "STATE_MANDATE_PAUSED" in decision.reason_codes
@@ -98,7 +111,9 @@ async def test_expired_revision_rejects(pool, repo, trust_repo):
     )
 
     gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
-    decision = await gate(_context(user_id, expired_revision_id))
+    decision = await gate(
+        _context(user_id, expired_revision_id, execution_id=_unique_execution_id())
+    )
 
     assert decision.outcome == GateOutcome.DENY
     assert decision.reason_codes == ("RISK_MANDATE_REVISION_STALE",)
@@ -115,7 +130,7 @@ async def test_concurrent_pause_and_submit_denies_race(pool, repo, trust_repo):
     await activate_mandate_with_defaults(repo, trust_repo, tenant_id=user_id)
     mandate = await repo.get_mandate(user_id)
     gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
-    context = _context(user_id, mandate.active_revision_id)
+    context = _context(user_id, mandate.active_revision_id, execution_id=_unique_execution_id())
 
     warm = await gate(context)
     assert warm.outcome == GateOutcome.ALLOW  # pause 전 캐시를 실제로 데운다

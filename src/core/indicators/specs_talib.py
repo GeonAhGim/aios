@@ -1,9 +1,10 @@
-"""L01 — TA-Lib 161-category catalog: auto-generated + 11 manual overrides.
+"""L01 — TA-Lib catalog (every installed function): auto-generated + 11 manual overrides.
 
 Spec: L4_strategy_portfolio_backtest_v1_0.md §2.2 L01,
 L4_analytics_authoring_backtest_marketplace_v1_0.md §9.9 IND-10, §9.11 IND-15.
 
-{TALIB_SPECS} overlays on top of `generate_talib_specs()` (161 auto-generated types),
+{TALIB_SPECS} overlays on top of `generate_talib_specs()` (one auto-generated spec per
+`talib.get_functions()` entry of the installed TA-Lib version),
 with `_MANUAL_OVERRIDES` (11 — SMA/EMA/RSI/ATR/CCI/WILLR/MFI/MACD/BBANDS/STOCH/OBV)
 applied on top. Overrides only adjust display details such as scale, precision,
 and histogram sign color.

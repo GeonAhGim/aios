@@ -249,47 +249,25 @@ async def test_resync_raises_for_account_missing_its_balance_row(pool):
     balances = PostgresBalanceRepository(pool)
     debit_code = await _seed_ledger_entry(pool)
 
-    # Deleting the only `ledger_balance` row for a real, journal-backed
-    # account is itself a permanent write against the shared, never-reset
-    # TEST_DATABASE_URL (same caveat `_bump_balance_outside_event_trail`
-    # carries) -- capture it and restore in `finally` so this test cannot
-    # wedge a later `replay_verify` run the way the tampered-balance test
-    # already guards against.
+    before = await _row(pool, debit_code)
+    # Keep the fault private to this connection and roll it back even when
+    # the assertion fails. No raw balance INSERT or committed orphan remains.
     async with pool.acquire() as conn:
-        saved = await conn.fetchrow(
-            "DELETE FROM ledger_balance WHERE account_id = "
-            "(SELECT account_id FROM ledger_account WHERE account_code = $1) "
-            "RETURNING account_id, balance, held, pending_payout, allow_negative,"
-            " last_entry_seq, updated_at",
-            debit_code,
-        )
-    assert saved is not None
-    try:
-        async with pool.acquire() as conn, conn.transaction():
+        transaction = conn.transaction()
+        await transaction.start()
+        try:
+            deleted = await conn.execute(
+                "DELETE FROM ledger_balance WHERE account_id = "
+                "(SELECT account_id FROM ledger_account WHERE account_code = $1)",
+                debit_code,
+            )
+            assert deleted == "DELETE 1"
             with pytest.raises(UnknownAccountError):
                 await resync_account_balance(conn, debit_code, journal=journal, balances=balances)
-    finally:
-        # audit-allow: ledger_balance_raw_seed -- this restores the exact row
-        # this same test deleted above (`saved` is that `DELETE ... RETURNING`),
-        # not a fabricated balance. It is cleanup for a white-box test of the
-        # repository/resync layer itself against the shared TEST_DATABASE_URL,
-        # not account provisioning -- the values come from the prior real
-        # journal-backed state, so there is no event-less balance left behind
-        # for `replay_verify` to trip on.
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO ledger_balance ("
-                " account_id, balance, held, pending_payout, allow_negative,"
-                " last_entry_seq, updated_at"
-                ") VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                saved["account_id"],
-                saved["balance"],
-                saved["held"],
-                saved["pending_payout"],
-                saved["allow_negative"],
-                saved["last_entry_seq"],
-                saved["updated_at"],
-            )
+        finally:
+            await transaction.rollback()
+
+    assert await _row(pool, debit_code) == before
 
 
 @pytest.mark.perf
