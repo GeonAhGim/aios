@@ -7,6 +7,7 @@ DoD(task-412): "record_fill 전 케이스(신규·추가매수·부분청산·�
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_EVEN, Decimal
 from uuid import UUID, uuid4
@@ -24,12 +25,17 @@ from src.foundation.positions.adapters.postgres_journal_repository import (
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
 )
+from src.foundation.positions.application.rebuild_snapshot import rebuild_snapshot
 from src.foundation.positions.application.record_fill import record_fill
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.cost_basis.fifo import NegativeQuantityError
 from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
-from tests.integration.foundation.positions.conftest import create_pos_account, open_position
+from tests.integration.foundation.positions.conftest import (
+    create_pos_account,
+    force_row_replace,
+    open_position,
+)
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -554,3 +560,158 @@ async def test_audit_failure_rolls_back_journal_and_snapshot(pool, ports):
     assert journal_count == 0
     assert snapshot_row["quantity"] == Decimal("0")
     assert snapshot_row["last_journal_seq"] == 0
+
+
+# ====================================================================
+# task-8809/F2(L) — REPLAY 멱등성 및 동시 rebuild_snapshot 회귀 테스트
+# ====================================================================
+#
+# 감사(docs/audits/AUDIT_2026-09-29_ledger_accounting.md F2(L))가 지적한
+# 두 안전장치(REPLAY가 원가법을 재계산하지 않는 것, rebuild_snapshot의
+# advisory lock이 동시 재구성을 직렬화하는 것)는 이미 코드에 구현돼 있으나
+# ([[record_fill]]의 `is_replay_candidate`, [[rebuild_snapshot]]의
+# `pg_advisory_xact_lock(hashtext('pos_journal'), hashtext(position_key))`),
+# 그 사실을 실 DB로 증명하는 통합테스트가 없었다 -- 아래 2케이스로 채운다.
+
+
+async def test_replay_skips_realized_pnl_recompute_and_single_upsert(pool, ports):
+    """F2(1) REPLAY -- 동일 order_id+fill_seq를 2회 `record_fill`하면
+    두 번째 호출은 원가법을 다시 계산하지 않고(realized_pnl_base 불변) 저널/
+    스냅샷/감사이벤트 모두 최초 1회분만 남아야 한다. `snapshots.upsert` 호출
+    횟수를 직접 세어 REPLAY가 두 번째 upsert를 만들지 않는다는 것까지 증명한다
+    -- 최종 DB 상태만 보면 "우연히 같은 값으로 덮어썼다"와 "애초에 쓰지
+    않았다"를 구분할 수 없기 때문이다."""
+    tenant_id, account_id, position_key = await _open(pool)
+    order_id = uuid4()
+
+    await _record(
+        pool,
+        ports,
+        _command(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
+            side=OrderSide.BUY,
+            quantity=Decimal("10"),
+            price=Decimal("100"),
+            order_id=order_id,
+            fill_seq=1,
+        ),
+    )
+    sell_command = _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.SELL,
+        quantity=Decimal("4"),
+        price=Decimal("120"),
+        order_id=order_id,
+        fill_seq=2,
+    )
+    first = await _record(pool, ports, sell_command)
+    assert first.realized_pnl_base == (Decimal("120") - Decimal("100")) * Decimal("4")
+
+    upsert_calls = 0
+    real_upsert = PostgresSnapshotRepository.upsert
+
+    async def _counting_upsert(self, conn, snapshot, expected_seq):
+        nonlocal upsert_calls
+        upsert_calls += 1
+        return await real_upsert(self, conn, snapshot, expected_seq=expected_seq)
+
+    ports.snapshots.upsert = _counting_upsert.__get__(ports.snapshots, PostgresSnapshotRepository)
+
+    # REPLAY -- 같은 order_id+fill_seq를 그대로 재전송
+    replayed = await _record(pool, ports, sell_command)
+
+    assert upsert_calls == 0, "REPLAY 경로는 스냅샷 upsert를 다시 호출하면 안 된다"
+    assert replayed.realized_pnl_base == first.realized_pnl_base
+    assert replayed.quantity == first.quantity
+    assert replayed.last_journal_seq == first.last_journal_seq
+
+    async with pool.acquire() as conn:
+        journal_count = await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
+        )
+        snapshot_count = await conn.fetchval(
+            "SELECT count(*) FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+        audit_count = await conn.fetchval(
+            "SELECT count(*) FROM foundation_audit_event WHERE aggregate_id = $1", order_id
+        )
+        snapshot_row = await conn.fetchrow(
+            "SELECT realized_pnl_base FROM pos_snapshot WHERE position_key = $1",
+            position_key,
+        )
+    assert journal_count == 2, "REPLAY는 새 저널 행을 만들면 안 된다(신규매수 1 + 청산 1)"
+    assert snapshot_count == 1, "REPLAY는 스냅샷 행을 중복 생성하면 안 된다"
+    assert audit_count == 2, "REPLAY는 새 감사이벤트를 만들면 안 된다(체결 2건분만)"
+    assert snapshot_row["realized_pnl_base"] == (Decimal("120") - Decimal("100")) * Decimal("4")
+
+
+async def test_concurrent_rebuild_snapshot_serialised_by_advisory_lock(pool, ports):
+    """F2(2) 동시 rebuild_snapshot -- 스냅샷이 저널과 어긋난(drift) 상태에서
+    `rebuild_snapshot(dry_run=False)`를 동시에 2회 호출하면, 두 호출 모두
+    같은 네임스페이스의 `pg_advisory_xact_lock`을 잡으려 하므로 직렬화된다:
+    먼저 락을 잡은 호출이 drift를 고쳐 커밋하고, 뒤이어 락을 잡은 호출은 이미
+    고쳐진 스냅샷을 다시 읽어 drift가 없다는 것을 확인하고 스킵(applied=False)
+    한다. 어느 쪽도 `ConcurrencyConflictError`로 실패하지 않고, 최종
+    스냅샷은 정확히 1개 행에 올바른 값만 남아야 한다(락이 없었다면
+    `test_bypassing_position_lock_causes_concurrent_rebuild_conflict_gate_red`
+    가 재현하는 경합으로 인해 둘 중 하나가 conflict로 죽거나 stale 값을
+    덮어쓸 수 있다)."""
+    tenant_id, account_id, position_key = await _open(pool)
+    await _record(
+        pool,
+        ports,
+        _command(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
+            side=OrderSide.BUY,
+            quantity=Decimal("10"),
+            price=Decimal("100"),
+        ),
+    )
+
+    # 스냅샷을 강제로 저널과 어긋나게 만든다(변조/버그 시뮬레이션) -- drift 발생.
+    await force_row_replace(
+        pool,
+        table="pos_snapshot",
+        id_column="position_key",
+        id_value=position_key,
+        quantity=Decimal("0"),
+    )
+
+    async def _rebuild():
+        return await rebuild_snapshot(
+            position_key,
+            tenant_id=tenant_id,
+            asset_class=AssetClass.CRYPTO,
+            journal=ports.journal,
+            snapshots=ports.snapshots,
+            pool=pool,
+            clock=_clock,
+            dry_run=False,
+        )
+
+    reports = await asyncio.gather(_rebuild(), _rebuild())
+
+    applied_count = sum(1 for r in reports if r.applied)
+    assert applied_count == 1, (
+        f"advisory lock으로 직렬화되면 정확히 한쪽만 drift를 실제로 적용해야 한다: {reports}"
+    )
+
+    async with pool.acquire() as conn:
+        snapshot_count = await conn.fetchval(
+            "SELECT count(*) FROM pos_snapshot WHERE position_key = $1", position_key
+        )
+        snapshot_row = await conn.fetchrow(
+            "SELECT quantity, last_journal_seq FROM pos_snapshot WHERE position_key = $1",
+            position_key,
+        )
+    assert snapshot_count == 1, "동시 rebuild_snapshot 이후에도 스냅샷 행은 1개여야 한다"
+    assert snapshot_row["quantity"] == Decimal("10"), (
+        "최종 스냅샷은 저널이 fold한 값과 일치해야 한다"
+    )
+    assert snapshot_row["last_journal_seq"] == 1
