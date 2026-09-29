@@ -441,13 +441,29 @@ def test_registry_hash_budget_gate_actually_fails_past_budget(
     실제로 빨간불이 되는지) 확인한다. 이 테스트가 없으면 위 단언이 항상
     통과하는 tautology인지 아무도 검증하지 못한다.
 
-    task-8582: 보정 루프 대비 비율(`max_ratio`)로 판정하므로, 주입한 지연이
-    보정 루프 자체보다 훨씬 길어야 확실히 넘긴다 — sha256 호출마다 200ms를
-    강제해(보정 루프 ~90ms의 2배 이상) `max_ratio=0.5`를 확실히 넘긴다."""
+    GitHub run 36588511473: 이 테스트가 "DID NOT RAISE"로 적색이었다 — 이전
+    구현은 `time.sleep(0.2)`로 실제 벽시계 200ms를 주입했는데, 이는 호스트
+    속도와 무관한 고정 시간이다. 반면 비교 대상인 보정 루프(순수 파이썬
+    반복)는 호스트가 느려지면 함께 느려진다. 느리거나 부하가 큰 CI 러너에서
+    보정 루프 자체가 200ms를 넘기면 `op_ms/calibration_ms` 비율이 오히려
+    줄어들어 `max_ratio=0.5`를 넘기지 못하고 조용히 통과해버린다(회귀
+    주입이 통과하는 지연이 아니라 host-load-dependent 실패). 고정 시간
+    대신 보정 루프와 동일한 형태의 순수 CPU 반복(정수 연산)을 그 10배
+    규모로 주입하면, 두 값이 같은 방식으로 호스트 속도에 비례해 움직여서
+    비율이 호스트 속도와 무관하게 ~10x로 안정된다 — 어떤 CI 러너에서도
+    `max_ratio=0.5`를 확실히 넘긴다."""
     original_sha256 = hashlib.sha256
+    # 보정 루프(tests/_perf/relative_budget.py `_calibration_loop`)와 같은
+    # 모양의 순수 CPU 반복을 그 10배(2,000,000 * 10) 규모로 돌려 host-speed
+    # 비례 지연을 만든다 — `time.sleep`과 달리 호스트가 느려지면 이 반복도
+    # 똑같이 느려지므로 비율이 무너지지 않는다.
+    _STALL_ITERATIONS = 20_000_000
 
     def _stalled_sha256(data: bytes, **kwargs: object) -> object:
-        time.sleep(0.2)
+        total = 0
+        for i in range(_STALL_ITERATIONS):
+            total += i * i % 7
+        assert total >= 0  # 최적화로 반복이 제거되지 않도록 결과를 소비한다
         return original_sha256(data)
 
     monkeypatch.setattr("src.core.indicators.registry.hashlib.sha256", _stalled_sha256)
