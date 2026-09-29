@@ -18,6 +18,7 @@ from tests.support.db import (
     _asyncpg_dsn,
     _db_name,
     _with_database,
+    drop_worker_database,
     ensure_worker_database,
     session_database_url,
 )
@@ -354,17 +355,15 @@ async def test_ensure_worker_database_clone_meets_latency_budget() -> None:
     elapsed = time.perf_counter() - start
     print(f"[PLT-36 clone] ensure_worker_database elapsed={elapsed:.3f}s (budget<{budget_sec}s)")
 
-    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(template_url, "postgres")))
-    try:
-        worker_db = _db_name(worker_url)
-        await admin.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = $1 AND pid <> pg_backend_pid()",
-            worker_db,
-        )
-        await admin.execute(f'DROP DATABASE IF EXISTS "{worker_db}"')
-    finally:
-        await admin.close()
+    # `drop_worker_database` reuses `_admin_connect_with_retry` for its admin
+    # connection instead of a raw `asyncpg.connect` -- this cleanup used to open
+    # its own unretried connection here, which hit the same Windows TCP
+    # mid-connect reset (ConnectionResetError 10054) that
+    # `_admin_connect_with_retry` exists to absorb everywhere else in this
+    # module (esc-ci-pytest_perf). Route through it instead of re-adding an
+    # unretried connect.
+    assert _db_name(worker_url) == _db_name(session_database_url(template_url, worker_id))
+    await drop_worker_database(template_url, worker_id)
 
     assert elapsed < budget_sec, f"워커 DB 복제가 예산({budget_sec}s)을 초과: {elapsed:.3f}s"
 

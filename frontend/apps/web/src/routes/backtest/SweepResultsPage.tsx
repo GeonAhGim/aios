@@ -3,6 +3,7 @@ import {
   createBacktestsClient,
   SweepRouteNotImplementedError,
   type SweepAxisInput,
+  type SweepMetric,
   type SweepPointResultView,
   type SweepRequestInput,
   type SweepResultView,
@@ -17,13 +18,11 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 import { AppShell } from "../../components/layout/AppShell";
 import { useTranslation } from "react-i18next";
 
-// BT-18(task-2428) — BT-16(task-2371 f76a07ee grid.sweep_grid, task-2426 e9be3488
-// sweep_grid_and_record + experiment_ledger.py)이 만든 그리드 스윕 결과를 히트맵·
-// 안정성 표면(param_stability.py stability_score)·재현 키로 보여준다. 실행 라우터
-// 자체는 아직 없다(apiRoutes.ts "backtests.sweep" 등록 주석) — 이 화면은 결과
-// "표시"만 맡고, 스윕 구성/실행 화면은 범위 밖(BT-16의 프론트 짝은 이 리프 하나뿐)
-// 이라 실행된 스윕의 요청 페이로드를 라우터 state로 전달받는다(ListingDetailPage
-// 등과 동일하게 location.state 관용).
+// BT-18(task-7774) — 그리드 스윕 결과(POST /v1/backtests/sweep,
+// src/api/routers/backtests.py)를 히트맵·안정성 표면(param_stability.py
+// stability_score)·재현 키로 보여준다. 이 화면은 결과 "표시"만 맡고, 스윕 구성/실행
+// 화면(BacktestPanel CTA)이 실행한 결과는 Query 캐시로, 요청 페이로드는
+// 라우터 state로 전달받는다. 캐시가 없는 진입에서만 서버에 요청한다.
 export interface SweepResultsLocationState {
   sweepRequest?: SweepRequestInput;
 }
@@ -79,7 +78,7 @@ function SweepHeatmap({
   points,
 }: {
   axes: SweepAxisInput[];
-  metric: string;
+  metric: SweepMetric;
   points: SweepPointResultView[];
 }) {
   const { t } = useTranslation();
@@ -204,6 +203,7 @@ export function SweepResultsPage({ runSweep = defaultRunSweep }: SweepResultsPag
 
   const query = useQuery({
     queryKey: ["backtest-sweep-results", request],
+    staleTime: Infinity,
     queryFn: () => runSweep(request as SweepRequestInput),
     enabled: request !== null,
   });

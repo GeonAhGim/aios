@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.1 DC-6, §4.1, §9.2 DC-6.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -73,6 +74,18 @@ def test_coverage_span_rejects_end_before_start() -> None:
 def test_coverage_span_rejects_zero_length() -> None:
     with pytest.raises(ValidationError):
         _span(start_at=_dt(1), end_at=_dt(1))
+
+
+def test_coverage_span_rejects_naive_datetime() -> None:
+    """tz-naive datetime은 `AwareDatetime` 계약 위반 — CLAUDE.md tz-aware UTC 불변식."""
+    with pytest.raises(ValidationError):
+        _span(start_at=datetime(2026, 1, 1), end_at=_dt(5))
+
+
+def test_coverage_span_rejects_malformed_instrument_id() -> None:
+    """instrument_id는 `ULID` 포맷만 허용 — 임의 문자열은 명시적으로 거부되어야 한다."""
+    with pytest.raises(ValidationError):
+        _span(instrument_id="not-a-valid-ulid", start_at=_dt(1), end_at=_dt(5))
 
 
 # ---- merge_spans ----
@@ -156,6 +169,21 @@ def test_merge_different_instrument_not_merged_even_if_period_overlaps() -> None
 
 def test_merge_empty_input_returns_empty() -> None:
     assert merge_spans([]) == []
+
+
+def test_merge_propagates_exception_when_model_copy_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실패주입 — `CoverageSpan.model_copy`가 예외를 던지면 `merge_spans`는
+    이를 삼키지 않고 그대로 전파해야 한다(fail-closed, 병합 결과를 조용히
+    누락시키지 않음)."""
+
+    def _boom(self: CoverageSpan, *, update: dict[str, object]) -> CoverageSpan:
+        raise RuntimeError("model_copy failure injection")
+
+    monkeypatch.setattr(CoverageSpan, "model_copy", _boom)
+    a = _span(start_at=_dt(1), end_at=_dt(5))
+    b = _span(start_at=_dt(3), end_at=_dt(8))
+    with pytest.raises(RuntimeError, match="model_copy failure injection"):
+        merge_spans([a, b])
 
 
 # ---- coverage_for ----

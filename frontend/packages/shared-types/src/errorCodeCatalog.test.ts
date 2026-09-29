@@ -79,4 +79,10 @@ describe("정확 매핑이 접두 폴백보다 우선한다(DoD c, task-2194)", 
     expect(exactMessage).toBe(EXACT_MESSAGES.POLICY_DENIED);
     expect(exactMessage).not.toBe(prefixFallbackMessage);
   });
+
+  it("미지 error_code에 서버 상세 message가 있어도 안전한 기본 문구로 수렴한다", () => {
+    expect(getApiErrorMessage("FUTURE_UNTRUSTED_CODE", "raw server detail")).toBe(
+      "요청을 처리할 수 없습니다. 잠시 후 다시 시도해주세요.",
+    );
+  });
 });

@@ -1,14 +1,15 @@
-"""IND-10 — Auto-generate `IndicatorSpec` metadata for 161 TA-Lib functions.
+"""IND-10 — Auto-generate `IndicatorSpec` metadata for every installed TA-Lib function.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9 IND-10
 (Precedes IND-9·IND-1, ADR-2026-09-06-F D1).
 
-Iterates `talib.get_functions()` (161 types) x `abstract.Function(name).info` to
+Iterates `talib.get_functions()` x `abstract.Function(name).info` to
 **generate** specs (manual writing prohibited) — group→category (`TALIB_GROUPS`),
-parameters(defaults)→integer parameter range rules, `.lookback`→measured lookback,
+parameters(defaults)→integer parameter range rules
+(`param_rules.py`), `.lookback`→measured lookback,
 output_names→output contract, output_flags/function_flags→`PlotSpec` defaults.
 
-Floating-point parameters (nbdevup, acceleration, penetration, etc., 14 of 161 types)
+Floating-point parameters (nbdevup, acceleration, penetration, etc.)
 are not exposed as `ParamSpec` at this generation stage — `IndicatorRegistry`/`engine/
 incremental.py`·`engine/vectorized.py` (IND-1, outside this leaf) share parameters
 as a single type `dict[str, int]`, so exposing float as a first-class type would
@@ -22,6 +23,7 @@ the deviation side is implemented only as a pure function `_deviation_range()`
 (the rule itself exists in the decision note), and is not yet wired into
 `ParamSpec` — wire it later if needed after IND-12 (registry three-layering).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -30,10 +32,10 @@ from typing import Any, TypedDict
 import talib
 from talib import abstract as talib_abstract
 
+from src.core.indicators.param_rules import int_param_specs
 from src.core.indicators.spec import (
     DefaultPane,
     IndicatorSpec,
-    ParamSpec,
     PlotKind,
     PlotSpec,
     ScaleHint,
@@ -57,42 +59,12 @@ class OutputStyle(TypedDict, total=False):
     precision: int
     legend_format: str
 
-_PERIOD_MIN = 1
-_PERIOD_MAX = 2000
-_MATYPE_MIN = 0
-_MATYPE_MAX = 8  # talib.MA_Type: SMA(0)..MAMA(8)
-_DEVIATION_MIN = 0.1
-_DEVIATION_MAX = 10.0
-
-_MATYPE_PARAM_NAMES = frozenset(
-    {
-        "matype",
-        "fastmatype",
-        "slowmatype",
-        "signalmatype",
-        "slowk_matype",
-        "slowd_matype",
-        "fastd_matype",
-    }
-)
 
 _CANDLESTICK_FLAG = "Output is a candlestick"
 _SAME_SCALE_FLAG = "Output scale same as input"
 _HISTOGRAM_FLAG = "Histogram"
 _UPPER_LIMIT_FLAG = "Values represent an upper limit"
 _LOWER_LIMIT_FLAG = "Values represent a lower limit"
-
-
-def _deviation_range(default: float) -> tuple[float, float]:
-    """Decision note rule "deviation 0.1~10" (pure function). Not yet wired into
-    `ParamSpec` — see module docstring. If the default falls outside the rule range
-    (e.g. SAR acceleration), symmetrically expand to include the default
-    (always guarantees min <= default <= max)."""
-    if _DEVIATION_MIN <= default <= _DEVIATION_MAX:
-        return _DEVIATION_MIN, _DEVIATION_MAX
-    if default <= 0:
-        return 0.0, _DEVIATION_MAX
-    return min(_DEVIATION_MIN, default), max(_DEVIATION_MAX, default)
 
 
 def _flatten_inputs(input_names: Mapping[str, object]) -> tuple[str, ...]:
@@ -110,24 +82,6 @@ def _flatten_inputs(input_names: Mapping[str, object]) -> tuple[str, ...]:
         else:
             flat.append(str(value))
     return tuple(flat)
-
-
-def _int_param_specs(parameters: Mapping[str, object]) -> tuple[ParamSpec, ...]:
-    """Expose only integer parameters as `ParamSpec` (floats — see module docstring).
-
-    matype family: 0~8 (talib.MA_Type ordinal); other integers: period rule 1~2000.
-    """
-    specs: list[ParamSpec] = []
-    for name, default in parameters.items():
-        if isinstance(default, float):
-            continue
-        if not isinstance(default, int):
-            continue
-        if name in _MATYPE_PARAM_NAMES:
-            specs.append(ParamSpec(name=name, min=_MATYPE_MIN, max=_MATYPE_MAX, default=default))
-        else:
-            specs.append(ParamSpec(name=name, min=_PERIOD_MIN, max=_PERIOD_MAX, default=default))
-    return tuple(specs)
 
 
 def _style_for_function(function_flags: Sequence[str] | None) -> tuple[ScaleHint, DefaultPane]:
@@ -247,27 +201,74 @@ def _make_lookback(talib_name: str) -> Callable[[dict[str, int]], int]:
     return _lookback
 
 
-def _talib_group(name: str) -> str:
-    info = talib_abstract.Function(name).info  # type: ignore[attr-defined]
-    return str(info["group"])
-
-
 def _all_talib_functions() -> list[str]:
     return list(talib.get_functions())  # type: ignore[no-untyped-call]
 
 
-TALIB_GROUPS: dict[str, str] = {name: _talib_group(name) for name in sorted(_all_talib_functions())}
+def _build_talib_metadata_cache() -> dict[str, dict[str, Any]]:
+    """Build cache of all TA-Lib function info to avoid repeated introspection."""
+    cache: dict[str, dict[str, Any]] = {}
+    for name in sorted(_all_talib_functions()):
+        cache[name] = talib_abstract.Function(name).info  # type: ignore[attr-defined]
+    return cache
+
+
+_TALIB_METADATA_CACHE: dict[str, dict[str, Any]] | None = None
+
+
+def _get_talib_metadata_cache() -> dict[str, dict[str, Any]]:
+    """Get or lazily build the TA-Lib metadata cache (allows monkeypatch in tests)."""
+    global _TALIB_METADATA_CACHE
+    if _TALIB_METADATA_CACHE is None:
+        _TALIB_METADATA_CACHE = _build_talib_metadata_cache()
+    return _TALIB_METADATA_CACHE
+
+
+class _LazyTalibGroups(dict[str, str]):
+    """Dict-like object that lazily computes TALIB_GROUPS on first access."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._initialized = False
+
+    def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            cache = _get_talib_metadata_cache()
+            for name, info in cache.items():
+                super().__setitem__(name, str(info["group"]))
+            self._initialized = True
+
+    def __getitem__(self, key: str) -> str:
+        self._ensure_initialized()
+        return super().__getitem__(key)
+
+    def __iter__(self) -> Any:
+        self._ensure_initialized()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._ensure_initialized()
+        return super().__len__()
+
+    def items(self) -> Any:
+        self._ensure_initialized()
+        return super().items()
+
+
+TALIB_GROUPS: dict[str, str] = _LazyTalibGroups()
 
 
 def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, IndicatorSpec]:
     """Generate `IndicatorSpec` dict from TA-Lib metadata.
 
-    If `names` is None, generate all `talib.get_functions()` (161 types); otherwise
+    If `names` is None, generate all `talib.get_functions()` of the installed
+    library (161 on TA-Lib 0.4.x / 201 on 0.6.x); otherwise
     generate only the given names — incremental (subset) and batch (full) results
     must be byte-identical for overlapping names (DoD). Reject unknown function
     names (fail-closed).
     """
-    known = set(_all_talib_functions())
+    cache = _get_talib_metadata_cache()
+    known = set(cache.keys())
     selected = sorted(known) if names is None else sorted(names)
     unknown = [name for name in selected if name not in known]
     if unknown:
@@ -275,9 +276,9 @@ def generate_talib_specs(names: Iterable[str] | None = None) -> dict[str, Indica
 
     specs: dict[str, IndicatorSpec] = {}
     for name in selected:
-        info = talib_abstract.Function(name).info  # type: ignore[attr-defined]
+        info = cache[name]
         inputs = _flatten_inputs(info["input_names"])
-        params = _int_param_specs(info["parameters"])
+        params = int_param_specs(info["parameters"])
         outputs = tuple(info["output_names"])
         scale, default_pane = _style_for_function(info["function_flags"])
         style: dict[str, OutputStyle] = {

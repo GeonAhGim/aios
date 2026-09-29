@@ -1,8 +1,9 @@
-"""L4_risk_and_safety_v1.0.md#2.2 — 포트폴리오 수익률·VaR/ES.
+"""L4_risk_and_safety_v1.0.md#2.2 (R-20) — 포트폴리오 수익률·VaR/ES.
 
 파라메트릭은 √(wᵀΣw)(공분산 행렬), 역사적은 가중 합산 수익률 시계열을
 그대로 var_historical에 넘긴다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

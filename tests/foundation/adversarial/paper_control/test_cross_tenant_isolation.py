@@ -1,5 +1,6 @@
 """Paper Execution & Control adversarial 테스트 — 73번 TRU-006과 동일 원칙:
 다른 tenant의 deployment를 조회/제어/참조할 수 없어야 한다."""
+
 from pathlib import Path
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from src.foundation.paper_control.application.pause_deployment import (
     CrossTenantDeploymentAccessError,
     DeploymentNotFoundError,
     pause_deployment,
+    stop_deployment,
 )
 from src.foundation.paper_control.application.request_deployment import request_deployment
 from src.foundation.paper_control.projections import build_deployment_list_view
@@ -108,3 +110,47 @@ async def test_pausing_nonexistent_deployment_raises_not_found(pool, repo):
             deployment_id=uuid4(),
             idempotency_key="ghost",
         )
+
+
+async def test_cannot_stop_another_tenants_deployment(pool, repo, mandate_repo, trust_repo):
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
+    deployment = await _owned_deployment(pool, repo, mandate_repo, trust_repo, owner_id)
+
+    with pytest.raises(CrossTenantDeploymentAccessError):
+        await stop_deployment(
+            repo,
+            tenant_id=attacker_id,
+            actor_subject_id=attacker_id,
+            deployment_id=deployment.id,
+            idempotency_key="attacker-stop",
+        )
+
+    still_ready = await repo.get_deployment(deployment.id)
+    assert still_ready.state.value == "READY"
+
+
+async def test_pause_fails_closed_when_repository_lookup_raises(
+    monkeypatch, pool, repo, mandate_repo, trust_repo
+):
+    """Dependency 예외가 나도 tenant 격리 체크를 우회해 상태를 바꾸면 안 된다(fail-closed)."""
+    owner_id = await create_test_tenant(pool)
+    deployment = await _owned_deployment(pool, repo, mandate_repo, trust_repo, owner_id)
+
+    async def _boom(_deployment_id):
+        raise RuntimeError("simulated repository outage")
+
+    monkeypatch.setattr(repo, "get_deployment", _boom)
+
+    with pytest.raises(RuntimeError, match="simulated repository outage"):
+        await pause_deployment(
+            repo,
+            tenant_id=owner_id,
+            actor_subject_id=owner_id,
+            deployment_id=deployment.id,
+            idempotency_key="owner-pause-during-outage",
+        )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT state FROM paper_deployment WHERE id = $1", deployment.id)
+    assert row["state"] == "READY"

@@ -1,4 +1,4 @@
-"""L4_risk_and_safety_v1.0.md#2.2 — Cornish-Fisher VaR/ES.
+"""L4_risk_and_safety_v1.0.md#2.2 (R-19) — Cornish-Fisher VaR/ES.
 
 z_cf = z + (z²−1)S/6 + (z³−3z)K/24 − (2z³−5z)S²/36 (S=왜도, K=초과첨도).
 closed-form ES가 없어 CF 분위함수를 tail 확률 구간(confidence~1)에서
@@ -9,6 +9,7 @@ closed-form ES가 없어 CF 분위함수를 tail 확률 구간(confidence~1)에�
 var_pct로 clamp해 방향을 보정할 뿐, 분위함수 자체의 비단조성을 감지하거나
 거부하지는 않는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

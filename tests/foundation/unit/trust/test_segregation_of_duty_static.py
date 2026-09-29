@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import io
 import re
+import sys
 import tokenize
 from pathlib import Path
 
@@ -200,3 +201,78 @@ def test_unrelated_equality_comparisons_are_not_flagged(tmp_path: Path) -> None:
     )
 
     assert _find_offenders(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "comparison",
+    [
+        "actor_id == requester_id",
+        "signer_id != proposed_by",
+        "existing['requester_id'] == approver_id",
+    ],
+    ids=["actor-requester", "signer-proposer", "reversed-subscript"],
+)
+def test_negative_gate_rejects_inline_reinvention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, comparison: str
+) -> None:
+    """I-10: 위반 소스가 실제 저장소 검사에서 적색을 만드는지 확인한다."""
+    source = f"if {comparison}:\n    pass\n"
+    (tmp_path / "feature.py").write_text(source, encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "SRC_ROOT", tmp_path)
+
+    assert _find_offenders(tmp_path) == [f"feature.py:1: if {comparison}:"]
+    with pytest.raises(AssertionError, match="재발명 발견"):
+        test_no_inline_reinvention_outside_segregation_of_duty_module()
+
+
+@pytest.mark.parametrize("relative_path,expected_import", _KNOWN_CALL_SITES)
+def test_negative_gate_rejects_missing_primitive_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative_path: str,
+    expected_import: str,
+) -> None:
+    """I-10: 함수 이름만 남기고 필수 import를 제거한 배선을 거부한다."""
+    path = tmp_path / relative_path
+    path.parent.mkdir(parents=True)
+    path.write_text("assert_actor_not_counterparty(actor, requester)\n", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "SRC_ROOT", tmp_path)
+
+    with pytest.raises(AssertionError):
+        test_known_call_site_imports_segregation_of_duty(relative_path, expected_import)
+
+
+def test_failure_injection_unreadable_source_does_not_pass_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """파일 읽기 실패를 빈 위반 목록으로 숨기지 않는다."""
+    path = tmp_path / "feature.py"
+    path.write_text("if actor_id == requester_id: pass\n", encoding="utf-8")
+    original_read = Path.read_text
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> str:
+        if self == path:
+            raise PermissionError("injected source read failure")
+        return original_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_read)
+    monkeypatch.setattr(sys.modules[__name__], "SRC_ROOT", tmp_path)
+    with pytest.raises(PermissionError, match="injected source read failure"):
+        test_no_inline_reinvention_outside_segregation_of_duty_module()
+
+
+def test_failure_injection_tokenizer_error_preserves_violation_detection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """토큰화 실패 후에도 원문 비교를 검사하여 위반을 거부한다."""
+    (tmp_path / "feature.py").write_text(
+        "if actor_id == requester_id: pass\n", encoding="utf-8"
+    )
+
+    def fail_tokenize(*args: object, **kwargs: object) -> None:
+        raise tokenize.TokenError("injected tokenizer failure", (1, 0))
+
+    monkeypatch.setattr(tokenize, "generate_tokens", fail_tokenize)
+    monkeypatch.setattr(sys.modules[__name__], "SRC_ROOT", tmp_path)
+    with pytest.raises(AssertionError, match="재발명 발견"):
+        test_no_inline_reinvention_outside_segregation_of_duty_module()

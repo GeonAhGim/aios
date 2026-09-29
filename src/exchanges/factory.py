@@ -38,6 +38,7 @@ from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 from src.exchanges.bitget.adapter import BitgetAdapter
 from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.kis.adapter import KISAdapter
+from src.exchanges.kiwoom.factory import kiwoom_factory
 from src.exchanges.nh.adapter import NHAdapter
 
 SUPPORTED_EXCHANGES = ("bitget", "kis", "nh", "paper_sim")
@@ -164,3 +165,12 @@ def build_adapter(
         return _registered_adapter_factories[exchange](api_key, api_secret, extra, demo_mode)
 
     raise UnsupportedExchangeError(f"지원하지 않는 거래소입니다: {exchange}")
+
+
+# BR-23(task-7569) — Kiwoom Securities REST API adapter, opened through the
+# BR-9 extension point (D5) rather than a new `if exchange == "kiwoom"`
+# branch above (ADDING_AN_EXCHANGE.md §3). This is the file's "registration
+# only" scope for task-7569 — adapter assembly (auth + market data +
+# account + trading + websocket, task-7569/7570/7571/7572) lives in
+# `src/exchanges/kiwoom/factory.py::KiwoomAdapter`.
+register_exchange_adapter_factory("kiwoom", kiwoom_factory)

@@ -25,7 +25,18 @@ and DENYs if any control is ACTIVE (I-01, reused unchanged) — the wiring this
 file does is only to create and remove the control rows that existing gate
 reads. Removing this file's `activate_safety_control` call would fail the
 DENY assertion in `test_three_way_reconciler.py` (proof of wiring).
+
+Self-heal (task-7978 F1, liveness fix): a venue-confirmed cancel (no fill, the
+order simply drops out of `get_open_orders()`) was never wired to
+`OrderEvent.VENUE_CANCELLED` anywhere in OMS. That made this reconciler
+classify a perfectly normal cancel as `ORDER_MISSING_AT_PROVIDER`/
+`MATERIAL_MISMATCH` forever, permanently DENYing every new SUBMIT for the
+tenant (`_apply_account_gate` keeps the ACCOUNT control ACTIVE). The actual
+self-heal logic lives in `reconcile_self_heal.py` (split out to stay under the
+architecture guard's line cap); see that module's docstring for the narrow
+scope rationale.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,6 +60,7 @@ from src.foundation.risk_gate.application.deactivate_safety_control import (
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.services.oms.application.order_query import list_orders
+from src.services.oms.application.reconcile_self_heal import self_heal_confirmed_cancels
 from src.services.oms.contracts.v1_events import Discrepancy
 from src.services.oms.contracts.v1_views import OrderView, ReconcileSummaryView
 from src.services.oms.domain.reconcile_rules import compare_triple
@@ -196,6 +208,7 @@ async def reconcile_account(
                 if internal.client_order_id in by_client_id
             ]
             discrepancies = compare_triple(internal_orders, provider_views, [], {}, {}, policy)
+            discrepancies = await self_heal_confirmed_cancels(pool, discrepancies)
 
     if provider_unavailable:
         targets: list[OrderView | None] = list(internal_orders) or [None]

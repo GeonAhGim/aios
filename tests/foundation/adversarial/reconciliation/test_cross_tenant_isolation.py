@@ -1,6 +1,7 @@
 """Reconciliation & Resilience adversarial 테스트 — REC-008 "tenant/operator
 isolation ... hold": 다른 tenant의 reconciliation state를 조회/resolve할 수
 없어야 한다."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from src.foundation.reconciliation.adapters.postgres_repository import (
 )
 from src.foundation.reconciliation.application.resolve_reconciliation import (
     CrossTenantReconciliationAccessError,
+    ReconciliationStateNotFoundError,
     resolve_reconciliation,
 )
 from src.foundation.reconciliation.domain.models import Classification as DomainClassification
@@ -112,3 +114,65 @@ async def test_state_list_view_never_includes_another_tenants_state(pool, repo):
     view_b = await build_reconciliation_state_list_view(repo, tenant_b)
 
     assert tenant_a not in [s.target_ref for s in view_b.states]
+
+
+# ── negative 1: resolve_reconciliation rejects cross-tenant get ──────────
+async def test_resolve_reconciliation_rejects_cross_tenant_get(pool, repo):
+    """get_reconciliation must raise CrossTenantReconciliationAccessError when
+    the caller's tenant_id differs from the reconciliation's tenant_id."""
+    owner_id = await create_test_tenant(pool)
+    attacker_id = await create_test_tenant(pool)
+    await _seed_material_mismatch(repo, owner_id)
+
+    with pytest.raises(CrossTenantReconciliationAccessError):
+        await resolve_reconciliation(
+            repo,
+            tenant_id=attacker_id,
+            actor_subject_id=attacker_id,
+            target_ref=owner_id,
+            reason="cross-tenant read",
+        )
+
+
+# ── negative 2: resolve_reconciliation rejects non-existent target ──────
+async def test_resolve_reconciliation_rejects_missing_target(pool, repo):
+    """resolve_reconciliation must raise ReconciliationStateNotFoundError
+    for a target_ref that does not exist (safe fail-closed)."""
+    fake_id = uuid4()
+    with pytest.raises(ReconciliationStateNotFoundError):
+        await resolve_reconciliation(
+            repo,
+            tenant_id=fake_id,
+            actor_subject_id=fake_id,
+            target_ref=fake_id,
+            reason="missing target",
+        )
+
+
+# ── failure injection: repository layer raises integrity error ──────────
+async def test_resolve_reconciliation_propagates_repo_integrity_error(pool, repo):
+    """When the DB raises an integrity constraint error inside
+    resolve_reconciliation(), the exception must propagate unchanged."""
+    owner_id = await create_test_tenant(pool)
+    await _seed_material_mismatch(repo, owner_id)
+
+    original_get_state = repo.get_state
+
+    async def fake_get_state(*args: object, **kwargs: object) -> object:
+        raise asyncpg.UniqueViolationError(
+            {"constraint_name": "uq_reconciliation_period"},
+            "duplicate key",
+        )
+
+    repo.get_state = fake_get_state
+    try:
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await resolve_reconciliation(
+                repo,
+                tenant_id=owner_id,
+                actor_subject_id=owner_id,
+                target_ref=owner_id,
+                reason="injected error",
+            )
+    finally:
+        repo.get_state = original_get_state
