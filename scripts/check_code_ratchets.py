@@ -34,9 +34,11 @@ import argparse
 import ast
 import io
 import json
+import os
 import re
 import sys
 import tokenize
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +59,34 @@ _EXCLUDE_DIR_NAMES = frozenset(
         "build",
     }
 )
+
+# esc-ci-code_ratchets ([code_ratchets] timeout 180s, bisect culprit 2dd74ce9 -- a DEEPEN
+# commit that grew the tracked-file count under tests/): a serial path.read_text() over
+# ~3,100 src/tests/scripts .py files took ~117s wall-clock on a cold-cache checkout even
+# though ast.parse itself is near-instant (user time ~0.06s of that) -- almost all of it was
+# blocking disk I/O per open(). Same root cause and fix as check_no_bom.py's SCAN_WORKERS
+# saga: I/O-bound reads release the GIL, so a shared thread pool overlaps that per-file
+# latency instead of paying it serially. 16 matches check_no_bom.py's fleet-tuned value
+# (half the ThreadPoolExecutor library default of min(32, cpu_count+4)) -- that value was
+# chosen there to give cold-checkout headroom without the burst of concurrent OS threads
+# that starved sibling process-creation under this fleet's antivirus scanning when every
+# worker lane's step used the library default at once. No baseline/threshold change
+# (DECISION_GUIDELINES B-2) -- this only retunes this step's own I/O concurrency.
+SCAN_WORKERS = 16
+
+# esc-ci-code_ratchets ([code_ratchets] timeout 180s, bisect culprit 2dd74ce9 -- a DEEPEN
+# commit that grew the tracked-file count under tests/): a serial path.read_text() over
+# ~3,100 src/tests/scripts .py files took ~117s wall-clock on a cold-cache checkout even
+# though ast.parse itself is near-instant (user time ~0.06s of that) -- almost all of it was
+# blocking disk I/O per open(). Same root cause and fix as check_no_bom.py's SCAN_WORKERS
+# saga: I/O-bound reads release the GIL, so a shared thread pool overlaps that per-file
+# latency instead of paying it serially. 16 matches check_no_bom.py's fleet-tuned value
+# (half the ThreadPoolExecutor library default of min(32, cpu_count+4)) -- that value was
+# chosen there to give cold-checkout headroom without the burst of concurrent OS threads
+# that starved sibling process-creation under this fleet's antivirus scanning when every
+# worker lane's step used the library default at once. No baseline/threshold change
+# (DECISION_GUIDELINES B-2) -- this only retunes this step's own I/O concurrency.
+SCAN_WORKERS = 16
 
 _TODO_RE = re.compile(r"\b(?:TODO|FIXME|XXX)\b")
 _RATCHET_ALLOW_RE = re.compile(r"#\s*ratchet-allow:\s*(\S.*)")
@@ -85,15 +115,19 @@ class CodeRatchetsError(ValueError):
 
 
 def _iter_python_files(root: Path, subdirs: tuple[str, ...]) -> list[Path]:
+    """os.walk with in-place pruning so excluded directories (__pycache__, .venv, ...) are
+    never descended into -- rglob("*.py") lists everything first and filters afterward,
+    which still pays the traversal cost of every pruned subtree."""
     files: list[Path] = []
     for sub in subdirs:
         base = root / sub
         if not base.exists():
             continue
-        for path in base.rglob("*.py"):
-            if _EXCLUDE_DIR_NAMES & set(path.relative_to(root).parts[:-1]):
-                continue
-            files.append(path)
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d not in _EXCLUDE_DIR_NAMES]
+            for name in filenames:
+                if name.endswith(".py"):
+                    files.append(Path(dirpath) / name)
     return sorted(files)
 
 
@@ -186,11 +220,20 @@ def _scan_file(rel: str, text: str) -> dict[str, list[Hit]]:
     return hits
 
 
+def _read_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
 def scan_tree(root: Path, subdirs: tuple[str, ...] = DEFAULT_SUBDIRS) -> dict[str, list[Hit]]:
     combined: dict[str, list[Hit]] = {m: [] for m in METRICS}
-    for path in _iter_python_files(root, subdirs):
+    files = _iter_python_files(root, subdirs)
+    # I/O-bound: a serial path.read_text() per file over ~3,100 files paid full disk latency
+    # on every open() on a cold checkout (esc-ci-code_ratchets timeout 180s). A shared thread
+    # pool overlaps that wait the same way check_no_bom.py's SCAN_WORKERS pool does.
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        texts = pool.map(_read_file, files)
+    for path, text in zip(files, texts, strict=True):
         rel = path.relative_to(root).as_posix()
-        text = path.read_text(encoding="utf-8", errors="replace")
         per_file = _scan_file(rel, text)
         for metric in METRICS:
             combined[metric].extend(per_file[metric])
