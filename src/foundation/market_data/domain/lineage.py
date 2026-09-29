@@ -49,6 +49,7 @@ pins the digest value itself). Larger savings like `model_dump_json()` or
 (former) or may desync from `model_dump()` by serializing subclass
 instances as declared types (latter).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -112,6 +113,6 @@ def batch_hash(records: Sequence[Any]) -> str:
 
 
 def request_fingerprint(source: str, params: Mapping[str, Any]) -> str:
-    """요청 지문: source + 정렬된 파라미터의 canonical JSON sha256."""
+    """SHA256 fingerprint of source and sorted request parameters as canonical JSON."""
     payload = _canonical_json({"source": source, "params": dict(params)})
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
