@@ -21,6 +21,7 @@ task-8660 정정: 위 이동으로 `test_compute_payload_hash_throughput_budget`
 from __future__ import annotations
 
 import dataclasses
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
