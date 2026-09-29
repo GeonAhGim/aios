@@ -11,10 +11,12 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 사례, (2) 메서드는 다 갖췄지만 DTO 대신 dict를 돌려주는 구현은 isinstance()를
 통과해도 그 결과가 계약 DTO 검증은 통과하지 못한다는 사례.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -38,10 +40,12 @@ from src.foundation.market_data.ports.provider import (
     DataProviderError,
     DataProviderErrorCode,
     MarketDataProvider,
+    MicrostructureNotSupportedError,
     ProviderCapabilities,
     ProviderTick,
     RateLimitSpec,
     TimeSpan,
+    require_microstructure,
 )
 
 _IID = "0" * 25 + "1"
@@ -75,6 +79,19 @@ class _MissingSubscribeProvider:
     def capabilities(self): ...
     async def list_instruments(self, asset_class): ...
     async def fetch_candles(self, listing, tf, span): ...
+
+
+class _NoMicrostructureProvider:
+    """`MarketDataProvider`는 만족하지만 `MicrostructureProvider`(DC-24
+    선택 확장)의 3개 메서드는 없는, 실제 DC-12 어댑터와 같은 모양의
+    구현체."""
+
+    def capabilities(self):
+        return SimpleNamespace(provider_id="acme")
+
+    async def list_instruments(self, asset_class): ...
+    async def fetch_candles(self, listing, tf, span): ...
+    async def subscribe(self, listings): ...
 
 
 class _FullInstrumentRepository:
@@ -198,9 +215,7 @@ def test_data_provider_error_coverage_missing_is_not_a_silent_empty_result() -> 
     """§4.1 "조용한 0 채움 금지" — 커버리지 없음은 예외지, 빈 리스트가
     아니다."""
     with pytest.raises(DataProviderError) as exc_info:
-        raise DataProviderError(
-            DataProviderErrorCode.DATA_COVERAGE_MISSING, provider_id="bitget"
-        )
+        raise DataProviderError(DataProviderErrorCode.DATA_COVERAGE_MISSING, provider_id="bitget")
     assert exc_info.value.code is DataProviderErrorCode.DATA_COVERAGE_MISSING
     assert exc_info.value.retryable is False
 
@@ -234,3 +249,31 @@ def test_coverage_span_quality_enum() -> None:
         end=_now(),
     )
     assert span.quality is CoverageQuality.VALIDATED
+
+
+def test_require_microstructure_rejects_provider_without_support() -> None:
+    """§9.11 DC-24 fail-closed capability gate — `MicrostructureProvider`의
+    3개 메서드가 없는 provider는 `isinstance()`가 아니라 `require_microstructure()`
+    호출 시점에 명시적으로 거부돼야 한다(무음 `AttributeError` 폴백 금지)."""
+    provider = _NoMicrostructureProvider()
+    with pytest.raises(MicrostructureNotSupportedError) as exc_info:
+        require_microstructure(provider, "fetch_trades")
+    assert exc_info.value.provider_id == "acme"
+    assert exc_info.value.capability == "fetch_trades"
+
+
+def test_require_microstructure_propagates_capabilities_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입: `capabilities()`가 예외를 던지면(예: 벤더 설정 조회 실패)
+    fail-closed 게이트는 그 예외를 그대로 전파해야 한다 — `MicrostructureNotSupportedError`로
+    뭉개거나 조용히 삼키지 않는다."""
+
+    def _boom(self: _NoMicrostructureProvider) -> SimpleNamespace:
+        raise RuntimeError("capabilities backend unavailable")
+
+    monkeypatch.setattr(_NoMicrostructureProvider, "capabilities", _boom)
+    provider = _NoMicrostructureProvider()
+
+    with pytest.raises(RuntimeError, match="capabilities backend unavailable"):
+        require_microstructure(provider, "fetch_trades")
