@@ -28,6 +28,7 @@ DIGEST_MISMATCH 시 `append_event_in`으로 DENIED 감사 이벤트를 남긴 *�
 경계 **안에서** 잡아 흡수하고 커밋해야 DENIED 감사가 남는다(105번 §5.1과 동일한 "커넥션은 호출자
 것" 계약 — 이 함수가 스스로 커밋/롤백을 결정하지 않는다).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -151,7 +152,16 @@ async def _assert_extra_safe(
     """LC-17 결함 A 수정. §8.3 DoD: `event.extra`에 secret류 키나 이 사건
     타입이 실제로 읽지 않는(비화이트리스트) 키가 실리면 저장 전에 거부한다.
     `event.extra`가 아직 journal entry로 이어지기 전이라 `aggregate_id`로
-    삼을 entry_id가 없으므로 요청과 1:1인 `trace_id`를 대신 쓴다."""
+    삼을 entry_id가 없으므로 요청과 1:1인 `trace_id`를 대신 쓴다.
+
+    Ordering invariant (task-8675 F4): `post_entry` must call this check
+    before the idempotency lookup (`journal.find_by_idempotency_key`) —
+    the secret/non-whitelisted key rejection is only ever checked on the
+    first insert; a replay of the same event never runs this check again
+    and instead is blocked from bypassing it by the `idempotency_key`
+    UNIQUE constraint on the lookup path. Swapping the two calls would
+    silently defeat this check without any compile-time or type-check
+    signal."""
     try:
         assert_safe_payload(event.extra)
     except UnsafePayloadError as exc:
@@ -239,9 +249,9 @@ async def post_entry(
 
     deltas: dict[str, Decimal] = {}
     for line in lines:
-        deltas[line.account_code] = deltas.get(
-            line.account_code, Decimal("0")
-        ) + _signed_delta(line.side, line.account_code, line.amount)
+        deltas[line.account_code] = deltas.get(line.account_code, Decimal("0")) + _signed_delta(
+            line.side, line.account_code, line.amount
+        )
 
     for code, delta in deltas.items():
         view = current[code]
