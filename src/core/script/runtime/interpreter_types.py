@@ -6,11 +6,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Final, Protocol
 
 from src.core.script.grammar.ast import Expr
-from src.core.script.runtime.series import Value
+from src.core.script.runtime.series import ScriptRuntimeError, Value
 from src.core.script.typing.types import Type
+
+# ADR-2026-09-26-B SBX-1: dynamic runtime op-count budget for `_Machine.run` -- separate
+# fail-closed path from DSL-6's static compile-time cap (`ScriptResourceLimitError`,
+# analysis/resources.py), which cannot see an instruction count only known at run time.
+SCRIPT_RUNTIME_LIMIT: Final[int] = 1_000_000
+
+
+class ScriptRuntimeLimitError(ScriptRuntimeError):
+    """`_Machine.run`'s executed-instruction count exceeded `SCRIPT_RUNTIME_LIMIT`."""
 
 
 @dataclass(frozen=True)
