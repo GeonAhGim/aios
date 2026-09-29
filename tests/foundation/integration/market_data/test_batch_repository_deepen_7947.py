@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 import asyncpg
 import pytest
@@ -136,10 +137,10 @@ class _BoomOnExecuteConn:
 async def test_create_does_not_mask_non_duplicate_db_errors_as_duplicate(deps):
     repo = PostgresBatchRepository(deps.pool)
     batch = _batch(audit_event_id=uuid.uuid4())
-    conn = _BoomOnExecuteConn()
+    conn = cast(asyncpg.Connection, _BoomOnExecuteConn())
 
     with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-        await repo.create(conn, batch)  # type: ignore[arg-type]
+        await repo.create(conn, batch)
 
 
 async def test_create_raises_duplicate_batch_error_on_pk_collision(deps):

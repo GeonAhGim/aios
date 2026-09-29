@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -134,7 +135,7 @@ def test_validate_provenance_rejects_non_paper_credential_class() -> None:
         endpoint_classification="SANDBOX",
         provider_sandbox_account_ref="sandbox-acct-1",
     )
-    tampered = replace(provenance, credential_class=_LiveCredentialClass())  # type: ignore[arg-type]
+    tampered = replace(provenance, credential_class=cast(CredentialClass, _LiveCredentialClass()))
     with pytest.raises(InvalidProvenanceError, match="PAPER"):
         validate_provenance(tampered)
 
