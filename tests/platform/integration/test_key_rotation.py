@@ -310,10 +310,16 @@ async def _rotate_one_row_p95_ms(pool: asyncpg.Pool, *, n: int) -> float:
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
+@pytest.mark.perf
 async def test_single_row_rotation_p95_under_borrowed_order_ack_budget(pool):
     """수치 성능 단언: 행 하나 회전(SELECT FOR UPDATE + 복호 2~3회 + 재암호화
     2~3회 + 조건부 UPDATE + 감사 INSERT, 단일 트랜잭션) p95를 차용 예산
-    안으로 단언한다."""
+    안으로 단언한다.
+
+    `perf` 마커(task-7434): DB 왕복 벽시계 p95라 직렬 perf 단계에서 돈다 —
+    xdist 코어 경합 아래에서 p95 169ms(예산 50ms)로 적색(PR #131 run 36333991005).
+    타이머가 헬퍼(`_rotate_one_row_p95_ms`) 안에 있어 정적 가드가 잡지 못하는
+    사각지대였다."""
     p95_ms = await _rotate_one_row_p95_ms(pool, n=_PERF_ITERATIONS)
 
     assert p95_ms < _PERF_BUDGET_MS

@@ -49,7 +49,10 @@ _OUTBOX_PER_ROW_ROUND_TRIPS = 24  # test_perf_outbox_dispatch.py 실측(28-4)
 
 _INBOX_TARGET_EV_PER_SEC = 500.0  # §7.1 운영 목표 — 비차단(print)
 _INBOX_BATCH_SIZE = 500
-_INBOX_PER_ROW_ROUND_TRIPS = 20  # process_once 부분체결 1행당 실측
+_INBOX_PER_ROW_ROUND_TRIPS = 20  # process_once 부분체결 1행당 실측 — 이
+# fixture 주문은 execution_id가 없어 task-7998/F3의 PARTIALLY_FILLED
+# position_ledger 분기는 `_process_row`에서 조기 no-op 반환되고(task-8053),
+# `legacy_order_repository.get_by_order_id` 조회 자체가 발생하지 않는다.
 
 # 배치 총 소요시간의 환경 정규화 상한 = (왕복 수 예산 × 기준 왕복 p95) × 이
 # 배수. 순차 단일 커넥션이라 "왕복 수 × 기준 비용"이 자연스러운 하한이고,

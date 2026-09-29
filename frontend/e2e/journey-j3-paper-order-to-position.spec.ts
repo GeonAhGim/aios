@@ -15,6 +15,9 @@ import { mockBackend } from "./support/mockBackend";
 // 패널 렌더를 검증한다. 리스크 게이트 자체가 403으로 거부하는 경로(예: 위임장 한도
 // 초과로 주문 생성 자체가 막히는 경우)는 여전히 일반 오류 배너로만 표면화되므로 그
 // 경로는 별도의 실패 주입 테스트로 계속 검증한다 — 두 경로는 서로 다른 계약이다.
+// 별도로 task-7500이 제출 직후 사전 평가(evaluateRiskGate PRE_SUBMIT) 결과를
+// RiskVerdictPanel(FF_J3_RISK_PANEL, 기본 OFF)로 보여준다 — 카드 패널(저장된
+// last_risk_verdict)과 서로 다른 계약이며 아래에서 각각 검증한다.
 //
 // sw.js(서비스 워커)의 fetch 핸들러는 "/v1/"로 시작하지 않는 GET(예: /executions,
 // /portfolio, /alerts, /notifications/history)을 캐시 우선(cache-first)으로 처리하며
@@ -70,6 +73,21 @@ async function mockNotificationHistory(page: Page, entries: Record<string, unkno
   await page.route(`${API_BASE}/notifications/history**`, (route) => json(route, 200, entries));
 }
 
+// RiskEvaluationView(riskGate.ts) 1:1 대응 — snake_case 그대로 응답하면 postEnvelope가
+// camelCase로 옮긴다(packages/api-client/src/clients/riskGate.test.ts RISK_EVALUATION
+// 픽스처와 동일 관용).
+async function mockRiskGateEvaluate(page: Page, view: Record<string, unknown>) {
+  await page.route(`${API_BASE}/v1/foundation/risk-gate/evaluate`, (route) =>
+    json(route, 200, envelope(view)),
+  );
+}
+
+async function enableRiskVerdictPanel(page: Page) {
+  await page.addInitScript(() =>
+    window.localStorage.setItem("aios_feature_flag:FF_J3_RISK_PANEL", "true"),
+  );
+}
+
 test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판정 → 체결·취소·거부 → 포지션 반영 → 알림", () => {
   test("1단계 주문 제출 시 실행 목록에 새 카드가 나타난다", async ({ page }) => {
     await mockBackend(page);
@@ -122,6 +140,42 @@ test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판�
       await expect(page.getByText("사유: RSK-007")).toBeVisible();
     },
   );
+
+  // task-7500(사전 평가 패널): FF_J3_RISK_PANEL을 켠 상태에서 RiskVerdictPanel이 실제로
+  // evaluateRiskGate(PRE_SUBMIT)의 outcome/reason_codes/rule_version/evaluated_at을
+  // 그대로 보여주는지 검증한다. createExecution 자체는 평소처럼 성공(201)하고,
+  // 리스크 게이트 evaluate만 DENY를 돌려준다 — 두 경로(생성 성공 여부 vs 판정 결과)가
+  // 서로 독립적임을 함께 보여준다.
+  test("2단계 [FF_J3_RISK_PANEL] 제출 직후 사전 평가 판정이 RiskVerdictPanel로 규칙 근거·판정 시각과 함께 표시된다", async ({
+    page,
+  }) => {
+    await enableRiskVerdictPanel(page);
+    await mockBackend(page);
+    await mockRiskGateEvaluate(page, {
+      id: "e2e-risk-eval-1",
+      gate_kind: "PRE_SUBMIT",
+      outcome: "DENY",
+      reason_codes: ["RISK_MAX_DRAWDOWN_EXCEEDED"],
+      obligations: [],
+      rule_version: "risk-rules-v3",
+      evaluated_at: "2026-01-01T00:00:00Z",
+      expires_at: null,
+      trace_id: "e2e-risk-eval-trace",
+      schema_version: "v1",
+    });
+    await page.goto("/executions");
+
+    await fieldControl(page, "전략 ID").fill("e2e-verdict-panel-strategy");
+    await fieldControl(page, "버전").fill("1.0.0");
+    await fieldControl(page, "배분 자본(USDT)").fill("500");
+    await page.getByRole("button", { name: "실행 생성" }).click();
+
+    await expect(page.getByRole("region", { name: "리스크/컴플라이언스 판정" })).toBeVisible();
+    await expect(page.getByText("DENY", { exact: true })).toBeVisible();
+    await expect(page.getByText("최대 손실 한도를 초과하여 거부되었습니다.")).toBeVisible();
+    await expect(page.getByText("risk-rules-v3")).toBeVisible();
+    await expect(page.getByText("2026-01-01T00:00:00Z")).toBeVisible();
+  });
 
   test("[실패 주입] 2단계 리스크 게이트 거부(403)는 전용 판정 패널 대신 일반 권한 오류 배너로 표면화되고 목록에 반영되지 않는다", async ({
     page,

@@ -82,13 +82,10 @@ export interface QuickBacktestResultView {
   warnings: string[];
 }
 
-// BT-18(task-2428) — 파라미터 그리드 스윕 결과 조회. 서버 SSOT는 아직 순수 함수뿐이다
-// (src/foundation/backtest/vector/grid.py::sweep_grid_and_record, domain/param_stability.py
-// ::stability_score) — apiRoutes.ts의 "backtests.sweep" 등록 주석대로 이를 감싸는 API
-// 라우터가 없어 implemented=false(유령 경로)다. 아래 타입은 그 두 순수 함수의 반환 모양을
-// 그대로 옮긴 것: GridSweepResult(combo_key -> QuickBacktestResult) + ExperimentLedgerEntry
-// (combo_key/combo_index/seed/reproducibility_key) + ParameterStabilityReport(best/
-// neighbor_mean/neighbor_std/isolated). 라우터가 생기면 실제 응답 스키마와 대조해 고친다.
+// BT-18(task-7774) — 파라미터 그리드 스윕 결과 조회. 서버 SSOT는
+// src/api/routers/backtests.py `POST /v1/backtests/sweep`(sweep_backtest_endpoint) ->
+// `ApiResponse[SweepResultView]`. 아래 타입은 src/api/schemas/backtests.py의
+// Sweep* 스키마 1:1 대응이다.
 export interface SweepAxisInput {
   /** param_stability.py ParamGrid.axes의 키 — 축 이름(예: "rsi_len"). */
   name: string;
@@ -106,6 +103,17 @@ export interface SweepComboInput {
   scriptSource: string;
 }
 
+// src/api/schemas/backtests.py::SweepMetric과 1:1 -- 필드 *키*는 http.ts의
+// keysToSnake/keysToCamel이 자동 변환하지만, 이 필드는 값 자체가 서버 Literal과
+// 축자 비교되는 문자열이라 자동 변환 대상이 아니다(camelCase로 보내면
+// VALIDATION_INVALID_FIELD 422). snake_case 그대로 써야 한다.
+export type SweepMetric =
+  | "final_equity"
+  | "cash"
+  | "position_quantity"
+  | "funding_cost"
+  | "borrow_cost";
+
 export interface SweepRequestInput {
   venue: Venue;
   symbol?: string;
@@ -119,8 +127,8 @@ export interface SweepRequestInput {
   config: BacktestConfigV2Input;
   axes: SweepAxisInput[];
   combos: SweepComboInput[];
-  /** 히트맵·안정성 표면이 비교할 스칼라 지표(예: "finalEquity"). */
-  metric: string;
+  /** 히트맵·안정성 표면이 비교할 스칼라 지표(예: "final_equity") -- SweepMetric 참고. */
+  metric: SweepMetric;
   dataLineageHash: string;
   rollupVersion: string;
   seed: number;
@@ -146,7 +154,7 @@ export interface SweepStabilityView {
 
 export interface SweepResultView {
   axes: SweepAxisInput[];
-  metric: string;
+  metric: SweepMetric;
   points: SweepPointResultView[];
   /** 축이 정확히 2개이고 그리드가 param_stability.py MIN_GRID_SIZE(4) 이상일 때만 채워진다. */
   stability: SweepStabilityView | null;

@@ -31,12 +31,15 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from src.core.observability.metric_names import CORE_RISK_REPLAY_MISMATCH_COUNT_TOTAL
 from src.core.observability.metrics_registry import get_registry
 from src.core.risk.decision import RiskDecision
 from src.core.risk.evaluator import evaluate
 from src.core.risk.inputs import RiskInputs
 from src.core.risk.policy_bundle import RiskRuleBundle
+from src.foundation.risk_gate.adapters.postgres_decision_repository import DecisionCorruptError
 
 INTEGRITY_RISK_REPLAY_MISMATCH = "INTEGRITY_RISK_REPLAY_MISMATCH"
 
@@ -92,7 +95,19 @@ async def replay(
     if bundle is None:
         raise BundleNotFoundError(decision.rule_hash)
 
-    inputs = RiskInputs.model_validate(inputs_snapshot)
+    try:
+        inputs = RiskInputs.model_validate(inputs_snapshot)
+    except ValidationError as exc:
+        # Same contract as task-2395's NULL latency_us: a stored row whose
+        # inputs_snapshot no longer satisfies RiskInputs (e.g. '{}' written by a
+        # raw INSERT that bypassed the repository) is *unreproducible*. Report it
+        # as DECISION_CORRUPT so a --since batch keeps checking the other rows
+        # instead of crashing on the first bad snapshot.
+        raise DecisionCorruptError(
+            decision_id,
+            "inputs_snapshot",
+            f"fails the RiskInputs contract ({exc.error_count()} validation errors)",
+        ) from exc
     ttl_seconds = (decision.expires_at - decision.evaluated_at).total_seconds()
     recomputed = evaluate(
         inputs,

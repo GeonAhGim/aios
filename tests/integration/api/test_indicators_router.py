@@ -12,6 +12,8 @@ from __future__ import annotations
 import ast
 import uuid
 from pathlib import Path
+from time import perf_counter
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -213,3 +215,76 @@ async def test_script_indicator_yields_to_core_name_conflict(client: AsyncClient
     items = [item for item in response.json()["data"]["items"] if item["name"] == "SMA"]
     assert len(items) == 1
     assert items[0]["tier"] == "core"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("limit", "0"), ("limit", "201"), ("limit", "abc"),
+     ("q", "x" * 101), ("category", "x" * 101)],
+    ids=["zero-limit", "oversize-limit", "noninteger-limit", "long-query", "long-category"],
+)
+async def test_negative_invalid_query_rejected_before_source_read(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, field: str, value: str,
+) -> None:
+    """I-10: transport bounds reject invalid requests before catalog access."""
+    headers, _ = await _register(client)
+    source = _FakeScriptSource([])
+    read = Mock(return_value=[])
+    monkeypatch.setattr(source, "list_for_tenant", read)
+    app.dependency_overrides[get_script_indicator_source] = lambda: source
+
+    response = await client.get(PATH, params={field: value}, headers=headers)
+
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["error_code"] == "VALIDATION_INVALID_FIELD"
+    assert body["details"]["fields"] == [f"query.{field}"]
+    assert body["trace_id"]
+    assert "data" not in body
+    read.assert_not_called()
+
+
+async def test_failure_injection_source_error_is_closed_and_recovers(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """I-10: storage failure cannot become a successful partial core catalog."""
+    headers, tenant_id = await _register(client)
+    source = _FakeScriptSource([])
+    marker = "injected-indicator-storage-failure"
+    read = Mock(side_effect=[RuntimeError(marker), []])
+    monkeypatch.setattr(source, "list_for_tenant", read)
+    app.dependency_overrides[get_script_indicator_source] = lambda: source
+
+    response = await client.get(PATH, headers=headers)
+
+    assert response.status_code == 500, response.text
+    body = response.json()
+    assert body["error_code"] == "INTERNAL_ERROR"
+    assert body["trace_id"]
+    assert body["details"] == {}
+    assert "data" not in body
+    assert marker not in response.text
+    read.assert_called_once_with(tenant_id)
+
+    recovered = await client.get(PATH, params={"q": "SMA"}, headers=headers)
+    assert recovered.status_code == 200, recovered.text
+    assert any(item["name"] == "SMA" for item in recovered.json()["data"]["items"])
+    assert read.call_count == 2
+    read.assert_called_with(tenant_id)
+
+
+@pytest.mark.perf
+async def test_catalog_list_p95_budget(client: AsyncClient) -> None:
+    """IND-12: authenticated list API p95 <= 200ms, excluding registration/warmup."""
+    headers, _ = await _register(client)
+    warmup = await client.get(PATH, params={"limit": 200}, headers=headers)
+    assert warmup.status_code == 200, warmup.text
+    samples = []
+    for _ in range(20):
+        start = perf_counter()
+        response = await client.get(PATH, params={"limit": 200}, headers=headers)
+        samples.append((perf_counter() - start) * 1000)
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["items"]
+    p95_ms = sorted(samples)[18]
+    assert p95_ms <= 200, f"IND-12 list API p95={p95_ms:.2f}ms > 200ms"

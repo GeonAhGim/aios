@@ -229,3 +229,63 @@ def test_annualization_field_echoes_periods_per_year() -> None:
         equity_curve=curve, fills=[], initial_equity=Decimal("100"), periods_per_year=365
     )
     assert metrics.annualization == 365
+
+
+# --- task-7964 DEEPEN: negative/실패주입 보강 -------------------------------
+
+
+def test_negative_periods_per_year_raises_instead_of_silent_nan() -> None:
+    """불변식 위반 입력 거부 — `periods_per_year`는 호출자 계약상 항상
+    양수(BacktestConfig.periods_per_year: int = Field(gt=0))다. compute_metrics
+    자체는 이를 재검증하지 않으므로, 음수가 들어오면 `mean/stdev *
+    periods_per_year**0.5`가 복소수를 낳고 `Decimal(str(...))` 변환이 실패해야
+    한다 — 조용히 NaN이나 틀린 실수를 내면 안 된다(76번 "bare float 성과값
+    금지" 원칙과 동일하게, 계산 불가 상태를 감추지 않는다)."""
+    equities = ["100", "101", "99", "103", "100"]
+    curve = [_point(i, e, "0") for i, e in enumerate(equities)]
+    with pytest.raises(Exception, match="ConversionSyntax|InvalidOperation"):
+        compute_metrics(
+            equity_curve=curve, fills=[], initial_equity=Decimal("100"), periods_per_year=-1
+        )
+
+
+def test_orphan_sell_without_entry_is_ignored_not_miscounted() -> None:
+    """불변식 위반 입력 거부 — Phase 1은 "BUY 다음 SELL"만 유효한 라운드
+    트립으로 인정한다(_round_trips 방어 주석). 열린 포지션 없이 등장하는
+    SELL은 상위 계층 버그 신호이므로, round trip으로 잘못 집계돼 win_rate를
+    오염시키는 대신 조용히 무시돼야 한다."""
+    curve = [_point(0, "100", "0"), _point(1, "100", "0")]
+    fills = [
+        _fill(OrderSide.SELL, "999", qty="1"),  # 대응하는 BUY 없음 — 무시돼야 함
+        _fill(OrderSide.BUY, "100", qty="1", fee="1"),
+        _fill(OrderSide.SELL, "110", qty="1", fee="1"),
+    ]
+    metrics = compute_metrics(
+        equity_curve=curve, fills=fills, initial_equity=Decimal("100"), periods_per_year=252
+    )
+    assert metrics.total_trades == 1
+    assert metrics.win_rate_pct == Decimal("100")
+
+
+def test_calmar_dependency_failure_propagates_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입 — `calmar()`(src.foundation.performance.api)가 예외를 던지면
+    compute_metrics는 이를 흡수해 조용히 None/기본값으로 넘기지 않고 그대로
+    전파해야 한다(fail-closed 기본 원칙, CLAUDE.md §3)."""
+    import src.foundation.backtest.application.compute_metrics as module
+
+    def _boom(*_args: object, **_kwargs: object) -> Decimal:
+        raise RuntimeError("calmar dependency exploded")
+
+    monkeypatch.setattr(module, "calmar", _boom)
+
+    curve = [
+        _point(0, "100", "0"),
+        _point(1, "130", "0"),
+        _point(2, "110", "15.38"),
+    ]
+    with pytest.raises(RuntimeError, match="calmar dependency exploded"):
+        compute_metrics(
+            equity_curve=curve, fills=[], initial_equity=Decimal("100"), periods_per_year=252
+        )

@@ -19,7 +19,8 @@ test_handlers.py`와 동일(lifespan에 실제 secrets/DB pool 필요).
 
 from __future__ import annotations
 
-import pytest
+import copy
+
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
@@ -130,20 +131,23 @@ def test_wraps_api_response_rejects_dict_response_model():
     assert not _wraps_api_response(route)
 
 
-def test_admin_router_offender_scan_fails_closed_when_response_model_stripped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_admin_router_offender_scan_fails_closed_when_response_model_stripped() -> None:
     """실패주입: admin 라우터의 한 라우트에서 response_model이 사라지는
-    상황(의존성/미들웨어가 런타임에 이를 건드리는 경우 등)을 monkeypatch로
-    유발해도, 봉투 가드가 이를 조용히 통과시키지 않고 offender로 잡아내야
-    한다 -- fail-closed."""
+    상황(의존성/미들웨어가 런타임에 이를 건드리는 경우 등)을 흉내 내도,
+    봉투 가드가 이를 조용히 통과시키지 않고 offender로 잡아내야 한다 --
+    fail-closed. 프로세스 전역 싱글턴인 실제 admin 라우터 객체를 직접
+    monkeypatch하면(이전 구현) 테스트 격리가 깨져 같은 워커에서 뒤에 도는
+    다른 테스트/커버리지 계측에 영향을 줄 수 있으므로, 같은 구조의 복사본만
+    변형한다(task-7873: coverage_ratchet 회귀 근본 정정)."""
     routes = _api_routes(admin)
     assert routes, "admin router must expose at least one route to inject the failure into"
-    monkeypatch.setattr(routes[0], "response_model", None)
+    stripped = copy.copy(routes[0])
+    stripped.response_model = None
+    candidate_routes = [stripped, *routes[1:]]
 
     offenders = [
         f"{sorted(route.methods)} {route.path}"
-        for route in routes
+        for route in candidate_routes
         if not _wraps_api_response(route)
     ]
-    assert offenders == [f"{sorted(routes[0].methods)} {routes[0].path}"]
+    assert offenders == [f"{sorted(stripped.methods)} {stripped.path}"]
