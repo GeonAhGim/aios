@@ -7,6 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.2 (B), §9 LB-1.
 실패"). 필드 추가는 minor 변경이므로 허용되고, 그 경우에만 fixture를
 함께 갱신한다.
 """
+
 import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -238,3 +239,51 @@ def test_rebuild_report_drift_tuple_roundtrip() -> None:
     )
     assert report.drift["quantity"] == (Decimal("0.5"), Decimal("0.5"))
     assert report.applied is False
+
+
+def test_record_fill_command_wrong_schema_version_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _sample_fill_command(schema_version="v2")
+
+
+def test_nav_snapshot_wrong_schema_version_rejected() -> None:
+    with pytest.raises(ValidationError):
+        v1.NAVSnapshot(
+            account_id=uuid4(),
+            nav_date=date(2026, 9, 3),
+            base_currency=Currency.USDT,
+            opening_nav=Decimal("1000"),
+            cash=Decimal("400"),
+            positions_mv=Decimal("620"),
+            realized=Decimal("10"),
+            unrealized_delta=Decimal("5"),
+            funding=Decimal("0"),
+            fees=Decimal("-1"),
+            flows=Decimal("6"),
+            closing_nav=Decimal("1020"),
+            fx_rates=[],
+            source_hash="h" * 64,
+            schema_version="v2",  # type: ignore[arg-type]
+        )
+
+
+def test_rebuild_report_non_decimal_drift_rejected() -> None:
+    with pytest.raises(ValidationError):
+        v1.RebuildReport(
+            position_key="acct-1:BTC/USDT",
+            entries=42,
+            drift={"quantity": ("not-a-decimal", Decimal("0.5"))},  # type: ignore[dict-item]
+            applied=False,
+        )
+
+
+def test_fixture_read_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실패주입: fixture 파일 I/O가 실패하면 스냅샷 테스트는 조용히 통과하지
+    않고 예외를 그대로 전파해야 한다(fail-closed, §5 CLAUDE.md)."""
+
+    def _boom(*args: object, **kwargs: object) -> str:
+        raise OSError("simulated fixture read failure")
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    with pytest.raises(OSError):
+        FIXTURE.read_text(encoding="utf-8")
