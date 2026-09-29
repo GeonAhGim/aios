@@ -198,6 +198,34 @@ async def test_create_pool_with_retry_succeeds_after_drop_create_race(monkeypatc
     assert attempts == 3
 
 
+async def test_create_pool_with_retry_succeeds_after_connection_rejection(monkeypatch) -> None:
+    """task-8556: a connect attempt landing while the shared Postgres
+    container's `max_connections` is transiently saturated by a sibling
+    worktree raises `asyncpg.exceptions.ConnectionRejectionError`
+    (SQLSTATE 08004, "sorry, too many clients already") -- a
+    `PostgresConnectionError`, not an `OSError` and not one of the
+    drop/create shapes already retried, so it must be retried too, not
+    propagate on the first attempt."""
+    attempts = 0
+
+    def _fake_create_pool(dsn: str, **kwargs: object) -> _FakePool:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return _FakePool(
+                asyncpg.exceptions.ConnectionRejectionError("sorry, too many clients already")
+            )
+        return _FakePool()
+
+    monkeypatch.setattr(replay_verify.asyncpg, "create_pool", _fake_create_pool)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    pool = await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
+
+    assert isinstance(pool, _FakePool)
+    assert attempts == 2
+
+
 async def test_create_pool_with_retry_terminates_failed_attempt_before_retrying(
     monkeypatch,
 ) -> None:

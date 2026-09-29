@@ -87,6 +87,33 @@ async def test_verify_with_retry_succeeds_after_drop_create_race(monkeypatch) ->
     assert attempts == 3
 
 
+async def test_verify_with_retry_succeeds_after_connection_rejection(monkeypatch) -> None:
+    """task-8556: `pool.acquire()` inside `verify()`'s scan can dial a new
+    physical connection that lands while the shared Postgres container's
+    `max_connections` is transiently saturated by a sibling worktree,
+    raising `asyncpg.exceptions.ConnectionRejectionError` (SQLSTATE 08004)
+    -- the same shape `_create_pool_with_retry` now retries for the initial
+    connect. `_verify_with_retry` must retry it too."""
+    attempts = 0
+
+    async def _fake_verify(pool: object, *, as_of: object, hours: object) -> replay.ReplayReport:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise asyncpg.exceptions.ConnectionRejectionError("sorry, too many clients already")
+        return replay.ReplayReport(streams_checked=5, combined_digest="feed", mismatches=())
+
+    monkeypatch.setattr(replay_verify, "verify", _fake_verify)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
+
+    report = await replay_verify._verify_with_retry(
+        object(), as_of=datetime.now(timezone.utc), hours=24
+    )
+
+    assert report.streams_checked == 5
+    assert attempts == 2
+
+
 async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatch) -> None:
     """Fail-closed: a reset on every attempt must still raise, not report a
     false green."""
@@ -170,6 +197,21 @@ async def test_close_pool_ignoring_reset_swallows_drop_create_race() -> None:
 
     await replay_verify._close_pool_ignoring_reset(_InvalidCatalogOnClosePool())  # must not raise
     await replay_verify._close_pool_ignoring_reset(_CannotConnectNowOnClosePool())  # must not raise
+
+
+async def test_close_pool_ignoring_reset_swallows_connection_rejection() -> None:
+    """task-8556: `pool.close()` can dial out too and land inside the same
+    `max_connections` saturation window `_create_pool_with_retry` /
+    `_verify_with_retry` now retry (`ConnectionRejectionError`, SQLSTATE
+    08004). No retry here either -- swallow it like the other three
+    `_RETRYABLE_CONNECT_ERRORS` shapes, matching
+    `test_close_pool_ignoring_reset_swallows_drop_create_race` above."""
+
+    class _RejectedOnClosePool:
+        async def close(self) -> None:
+            raise asyncpg.exceptions.ConnectionRejectionError("sorry, too many clients already")
+
+    await replay_verify._close_pool_ignoring_reset(_RejectedOnClosePool())  # must not raise
 
 
 async def test_close_pool_ignoring_reset_propagates_unrelated_exceptions() -> None:

@@ -133,11 +133,24 @@ _POOL_CONNECT_RETRY_MAX_DELAY: float = 8.0
 # shapes lets the existing backoff actually reach the attempt after the
 # sibling worktree's `CREATE DATABASE` lands, instead of aborting early on
 # whichever attempt happens to land mid-recreate.
+# task-8556: esc-ci-replay_verify.json recurred with the connect landing
+# during a burst where the shared Postgres container's `max_connections` was
+# transiently saturated by concurrent sibling worktrees (the same contention
+# task-6256/6267 already documented, just hitting the connection-limit path
+# instead of the drop/create one) -- Postgres rejects that as SQLSTATE 08004
+# ("sorry, too many clients already"), which asyncpg raises as
+# `ConnectionRejectionError`. That is a `PostgresConnectionError`, not an
+# `OSError` and not one of the three shapes already listed, so it propagated
+# uncaught exactly like `InvalidCatalogNameError`/`CannotConnectNowError` did
+# before task-6267 -- the same asymmetry, one more shape. tests/support/db.py
+# only lists the drop/create pair too; this file stays the wider set on
+# purpose (see the task-6714/6754 docstrings above).
 _RETRYABLE_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
     OSError,
     asyncpg.exceptions.ConnectionDoesNotExistError,
     asyncpg.exceptions.InvalidCatalogNameError,
     asyncpg.exceptions.CannotConnectNowError,
+    asyncpg.exceptions.ConnectionRejectionError,
 )
 
 
