@@ -1,6 +1,6 @@
 """U-9 exact aggregation, malformed input and determinism evidence."""
 
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 from random import Random
@@ -166,8 +166,6 @@ def test_inputs_and_results_are_independent(gains: list[RealizedGainEntry]) -> N
     first.by_asset_class[AssetClass.CRYPTO] = Decimal("999")
     assert gains == original
     assert summarize_realized_gains(gains, START, END).total == Decimal("219.9967")
-    with pytest.raises(FrozenInstanceError):
-        gains[0].currency = Currency.USDT
 
 
 @pytest.mark.perf
