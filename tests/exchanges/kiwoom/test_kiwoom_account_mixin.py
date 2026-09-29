@@ -65,7 +65,7 @@ _ORDER_FILL_STATUS_RESPONSE = {
 # ---- get_balance happy path ----
 
 
-async def test_get_balance_merges_holdings_and_cash():
+async def test_get_balance_merges_holdings_and_cash() -> None:
     client = _StubClient(responses={"kt00018": _BALANCE_RESPONSE, "kt00001": _DEPOSIT_RESPONSE})
     balances = await client.get_balance()
     by_asset = {b.asset: b for b in balances}
@@ -75,7 +75,7 @@ async def test_get_balance_merges_holdings_and_cash():
     assert "000660" not in by_asset  # zero-quantity row is dropped
 
 
-async def test_get_balance_filters_by_asset_and_skips_cash_call():
+async def test_get_balance_filters_by_asset_and_skips_cash_call() -> None:
     client = _StubClient(responses={"kt00018": _BALANCE_RESPONSE})
     balances = await client.get_balance(asset="005930")
     assert [b.asset for b in balances] == ["005930"]
@@ -83,7 +83,7 @@ async def test_get_balance_filters_by_asset_and_skips_cash_call():
     assert "kt00001" not in api_ids  # non-KRW asset filter must not query deposit
 
 
-async def test_get_positions_always_empty():
+async def test_get_positions_always_empty() -> None:
     """Cash-equity venue has no native per-strategy position concept (same
     convention as Bitget/KIS/NH account_mixin.py)."""
     client = _StubClient()
@@ -94,7 +94,7 @@ async def test_get_positions_always_empty():
 # ---- get_order happy path ----
 
 
-async def test_get_order_partial_fill_and_buy_side():
+async def test_get_order_partial_fill_and_buy_side() -> None:
     client = _StubClient(responses={"kt00009": _ORDER_FILL_STATUS_RESPONSE})
     order = await client.get_order("005930:1234567")
     assert order.status == OrderStatus.PARTIALLY_FILLED
@@ -104,11 +104,12 @@ async def test_get_order_partial_fill_and_buy_side():
     assert order.symbol == "005930"
     _, _, api_id, body = client.calls[0]
     assert api_id == "kt00009"
+    assert body is not None
     assert body["stk_cd"] == "005930"
     assert body["fr_ord_no"] == "1234567"
 
 
-async def test_get_order_full_fill_and_sell_side():
+async def test_get_order_full_fill_and_sell_side() -> None:
     client = _StubClient(responses={"kt00009": _ORDER_FILL_STATUS_RESPONSE})
     order = await client.get_order("005930:7654321")
     assert order.status == OrderStatus.FILLED
@@ -118,7 +119,7 @@ async def test_get_order_full_fill_and_sell_side():
 # ---- negative / failure-injection tests (D2 floor >= 3 negative + 1 injection) ----
 
 
-async def test_get_order_rejects_malformed_exchange_order_id():
+async def test_get_order_rejects_malformed_exchange_order_id() -> None:
     """Negative test 1: an exchange_order_id without ':' must fail before
     any request is made -- same parsing contract as KiwoomTradingMixin."""
     client = _StubClient()
@@ -127,7 +128,7 @@ async def test_get_order_rejects_malformed_exchange_order_id():
     assert client.calls == []
 
 
-async def test_get_order_raises_when_order_not_found_in_response():
+async def test_get_order_raises_when_order_not_found_in_response() -> None:
     """Negative test 2: fr_ord_no is a 'from this order onward' filter, not
     an exact match -- if the exact ord_no is absent from the returned rows
     (e.g. a stale/unknown order id), fail loudly instead of returning a
@@ -145,7 +146,7 @@ async def test_get_order_raises_when_order_not_found_in_response():
         await client.get_order("005930:1234567")
 
 
-async def test_get_balance_raises_on_missing_holdings_key():
+async def test_get_balance_raises_on_missing_holdings_key() -> None:
     """Negative test 3 + failure-injection: a schema-drifted/broken response
     missing acnt_evlt_remn_indv_tot must not be silently treated as an empty
     portfolio."""
@@ -154,7 +155,7 @@ async def test_get_balance_raises_on_missing_holdings_key():
         await client.get_balance()
 
 
-async def test_get_balance_raises_on_missing_deposit_field():
+async def test_get_balance_raises_on_missing_deposit_field() -> None:
     """Negative test 4: the deposit TR responding without `entr` (field
     renamed/removed) must not be silently treated as zero cash."""
     client = _StubClient(responses={"kt00018": _BALANCE_RESPONSE, "kt00001": {}})
@@ -162,7 +163,7 @@ async def test_get_balance_raises_on_missing_deposit_field():
         await client.get_balance()
 
 
-async def test_get_order_raises_on_row_missing_quantity_fields():
+async def test_get_order_raises_on_row_missing_quantity_fields() -> None:
     """Negative test 5: a matched row missing ord_qty/cntr_qty (schema
     drift) must raise instead of crashing with a bare KeyError."""
     client = _StubClient(
@@ -175,7 +176,7 @@ async def test_get_order_raises_on_row_missing_quantity_fields():
 # ---- adversarial test (D3 -- cross-checked against INVARIANTS) ----
 
 
-async def test_get_balance_zero_quantity_row_never_reported_as_a_holding():
+async def test_get_balance_zero_quantity_row_never_reported_as_a_holding() -> None:
     """Adversarial/D3: INVARIANTS I-02 (fail-closed, no phantom state) --
     a same-day fully-sold position (rmnd_qty=0, still present in the raw
     response per Kiwoom's own docstring precedent) must never surface as a
@@ -190,7 +191,7 @@ async def test_get_balance_zero_quantity_row_never_reported_as_a_holding():
 
 
 @pytest.mark.perf
-async def test_get_balance_latency_budget():
+async def test_get_balance_latency_budget() -> None:
     """Numeric performance assertion: get_balance() against a pure stub
     client (no network) must average under 1ms/call over 100 calls -- a
     regression guard on the mixin's own body-assembly/parsing overhead, not
