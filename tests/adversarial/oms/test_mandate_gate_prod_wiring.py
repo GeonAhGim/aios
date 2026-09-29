@@ -178,13 +178,13 @@ def _scan_violations(*, today: date) -> list[Finding]:
 # --- 스캐너 자체의 정확성 검증 (negative test 포함) -------------------------
 
 
-def test_scanner_accepts_require_mandate_true():
+def test_scanner_accepts_require_mandate_true() -> None:
     source = "make_foundation_pre_submit_gate(pool, require_mandate=True)\n"
     violations = [f for f in _scan_source(source, "fixture.py", today=date(2026, 1, 1)) if not f.ok]
     assert violations == []
 
 
-def test_scanner_flags_require_mandate_false_without_exception():
+def test_scanner_flags_require_mandate_false_without_exception() -> None:
     """negative 1 — 예외 주석 없이 `require_mandate=False`면 위반이다."""
     source = "make_foundation_pre_submit_gate(pool, require_mandate=False)\n"
     findings = _scan_source(source, "fixture.py", today=date(2026, 1, 1))
@@ -193,7 +193,7 @@ def test_scanner_flags_require_mandate_false_without_exception():
     ]
 
 
-def test_scanner_flags_missing_gate_call_entirely():
+def test_scanner_flags_missing_gate_call_entirely() -> None:
     """negative 2 — 조립 지점 자체가 사라지면(리팩터로 호출부 삭제/이동) 조용히
     "위반 0건"을 내는 대신 시끄럽게 실패해야 한다 — fail-open의 또 다른 형태다."""
     source = "def unrelated() -> None:\n    pass\n"
@@ -203,7 +203,7 @@ def test_scanner_flags_missing_gate_call_entirely():
     assert "호출을 찾지 못함" in findings[0].reason
 
 
-def test_scanner_accepts_unexpired_adr_exception():
+def test_scanner_accepts_unexpired_adr_exception() -> None:
     source = (
         "gate = make_foundation_pre_submit_gate(\n"
         "    pool,\n"
@@ -215,7 +215,7 @@ def test_scanner_accepts_unexpired_adr_exception():
     assert violations == []
 
 
-def test_scanner_rejects_expired_adr_exception():
+def test_scanner_rejects_expired_adr_exception() -> None:
     """negative 3 — 만료일이 지난 ADR 예외는 더 이상 우회 근거가 아니다. 이게
     바로 DoD의 핵심: "무기한 우회"가 아니라 "만료 추적되는 우회"여야 한다."""
     source = (
@@ -231,7 +231,7 @@ def test_scanner_rejects_expired_adr_exception():
     assert "만료됨" in violations[0].reason
 
 
-def test_scanner_adr_exception_does_not_leak_to_unrelated_later_call():
+def test_scanner_adr_exception_does_not_leak_to_unrelated_later_call() -> None:
     """adversarial — ADR 예외 주석이 앞선 호출 바로 위에 있을 때, 그 주석이
     파일 뒤쪽의 **무관한** 다른 `require_mandate=False` 호출까지 정당화해
     주면 안 된다(스코프 누수 = 사실상 전역 우회 면허)."""
@@ -250,7 +250,7 @@ def test_scanner_adr_exception_does_not_leak_to_unrelated_later_call():
 # --- 회귀 방지 증명: task-1715류 원 결함 형태(게이트 적색 재현) ---------------
 
 
-def test_regression_flags_original_i09_bug_shape():
+def test_regression_flags_original_i09_bug_shape() -> None:
     """ADR-2026-09-06-G §8이 지적한 시점의 실제 형태 —
     `background_loops.py:252`가 `require_mandate=False`로 감싸 조립했다.
     H-1b(task-3369)가 고치지 않았다면 이 스캐너가 지금도 잡아야 함을
@@ -266,7 +266,7 @@ def test_regression_flags_original_i09_bug_shape():
     assert "이중 권위 우회" in violations[0].reason
 
 
-def test_regression_flags_third_assembly_point_wiring_py_bug_shape():
+def test_regression_flags_third_assembly_point_wiring_py_bug_shape() -> None:
     """task-2836 — task-1568 재대조가 찾아낸 실드리프트(RTF-04 2→3 지점)의
     게이트 적색 재현. `_TARGET_FILES`가 두 파일만 담고 있었다면 이 시나리오
     (`build_outbox_dispatcher`가 `require_mandate=False`로 퇴행)를 스캐너가
@@ -286,7 +286,7 @@ def test_regression_flags_third_assembly_point_wiring_py_bug_shape():
     assert "이중 권위 우회" in violations[0].reason
 
 
-def test_third_assembly_point_is_registered_in_target_files():
+def test_third_assembly_point_is_registered_in_target_files() -> None:
     """negative 4 — `_TARGET_FILES`에서 세 번째 조립 지점이 다시 빠지는
     회귀(예: 리스트 재정렬 실수)를 직접 잡는다. 위 두 테스트는 스캐너 함수
     자체의 정확성만 증명하고, 실제로 하드 게이트(`_scan_violations`)가 그
@@ -297,7 +297,7 @@ def test_third_assembly_point_is_registered_in_target_files():
 # --- 실제 배선 코드 검사(하드 게이트) ----------------------------------------
 
 
-def test_prod_assembly_points_require_mandate_true_or_valid_adr_exception():
+def test_prod_assembly_points_require_mandate_true_or_valid_adr_exception() -> None:
     """하드 게이트 — xfail 없음. 두 운영 조립 지점 중 하나라도
     `require_mandate=True`가 아니고 유효한 ADR 예외도 없으면 CI가 빨간불이
     된다(R-59 DoD)."""
@@ -308,7 +308,7 @@ def test_prod_assembly_points_require_mandate_true_or_valid_adr_exception():
 # --- 실패 주입: I/O 실패가 조용히 fail-open으로 넘어가지 않는지 -------------
 
 
-def test_scan_file_fails_closed_when_target_file_vanishes(tmp_path):
+def test_scan_file_fails_closed_when_target_file_vanishes(tmp_path: Path) -> None:
     """실패 주입 — 스캔 도중 대상 파일이 사라지면(파일시스템 경합) 예외로
     시끄럽게 실패해야 한다. 조용히 "위반 0건"으로 넘어가면 그 자체가
     fail-open이다."""
@@ -317,7 +317,7 @@ def test_scan_file_fails_closed_when_target_file_vanishes(tmp_path):
         _scan_file(vanished, today=date.today())
 
 
-def test_scan_file_fails_closed_on_undecodable_file(tmp_path):
+def test_scan_file_fails_closed_on_undecodable_file(tmp_path: Path) -> None:
     """실패 주입 2 — 대상 파일이 UTF-8로 디코딩되지 않으면(손상된 배포본 등)
     역시 예외로 실패해야 한다. `errors="ignore"` 같은 관용적 디코딩으로 조용히
     넘어가면 손상된 파일의 실제 내용을 검사하지 못한 채 초록불을 낼 수 있다."""
@@ -331,7 +331,7 @@ def test_scan_file_fails_closed_on_undecodable_file(tmp_path):
 
 
 @pytest.mark.perf
-def test_scan_source_perf_bound_for_large_synthetic_file():
+def test_scan_source_perf_bound_for_large_synthetic_file() -> None:
     """성능 단언 — 3000개의 무관한 호출 사이에 대상 호출 1개를 섞은 합성
     대형 소스에서도 스캔이 선형 시간 안에 끝나야 한다. `_scan_source`가
     파일 전체를 `ast.walk`로 훑는데, 회귀로 줄 단위 재스캔(이차식)이
@@ -348,7 +348,7 @@ def test_scan_source_perf_bound_for_large_synthetic_file():
 # --- 다중 인스턴스(동시 실행) 증명 -------------------------------------------
 
 
-def test_scan_source_consistent_across_concurrent_instances():
+def test_scan_source_consistent_across_concurrent_instances() -> None:
     """다중 인스턴스 증거 — CI가 여러 워커/스레드에서 동시에 이 스캐너를
     돌릴 수 있다. 모듈 전역 가변 상태가 없으므로 동시 실행에서도 항상 같은
     결과가 나와야 한다(경합으로 위반을 놓치는 거짓 초록불 방지)."""
