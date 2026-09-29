@@ -11,6 +11,7 @@
 
 사용: `python scripts/check_zone_manifest.py` (저장소 루트에서). 종료코드 0=통과.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -47,9 +48,7 @@ def foundation_context_dirs(root: Path) -> list[Path]:
     base = root / FOUNDATION_ROOT
     if not base.is_dir():
         return []
-    return sorted(
-        p for p in base.iterdir() if p.is_dir() and p.name != "__pycache__"
-    )
+    return sorted(p for p in base.iterdir() if p.is_dir() and p.name != "__pycache__")
 
 
 def missing_layers(ctx_dir: Path) -> list[str]:
@@ -72,8 +71,7 @@ def check_scaffold_reasons(root: Path, manifest: dict[str, object]) -> list[str]
         reason = reasons.get(ctx)
         if not isinstance(reason, str) or not reason.strip():
             problems.append(
-                f"{ctx}: missing layer(s) {', '.join(missing)} "
-                "but no scaffold_reasons entry"
+                f"{ctx}: missing layer(s) {', '.join(missing)} but no scaffold_reasons entry"
             )
     return problems
 
@@ -81,7 +79,23 @@ def check_scaffold_reasons(root: Path, manifest: dict[str, object]) -> list[str]
 # 2026-09-26(CTO, esc-ci-zone timeout 120s): ROOT.rglob("*")는 .venv/node_modules/.git까지
 # 전부 걷고 나서 걸러내 부하 시 2분을 넘겼다(check_no_bom b89c0260와 같은 결함). os.walk로
 # 내려가면서 제외 디렉터리는 아예 들어가지 않는다.
-PRUNED_DIRS = frozenset({".git", ".venv", "__pycache__", "node_modules"})
+# 2026-09-29(task-8945, esc-ci-zone timeout 120s 재발): local_ci 머신은 워커 leaf마다 새로
+# checkout하지 않고 캐시가 누적된다. .hypothesis(task-2613 로컬 전용 예제 DB)가 수천 개의
+# 작은 파일로 쌓이면서(관측: 1606개, 전체 tracked 6623개 중 24%) os.walk 시간이 11s+로
+# 늘어 부하 시 다시 120s를 넘겼다. .ruff_cache/.mypy_cache/.pytest_cache도 같은 이유로
+# 소스가 아니라 도구 캐시이므로 동일하게 제외한다.
+PRUNED_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        ".hypothesis",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".pytest_cache",
+    }
+)
 
 
 def _tracked_files(root: Path) -> list[str]:

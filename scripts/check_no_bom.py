@@ -64,9 +64,13 @@ SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "cover
 # measured after the files were already warm and does not reflect the cold-checkout case this step
 # actually runs under in CI. Raised to 16 -- still half the library default (28) that caused the
 # esc-ci-prepare storm, so it does not reintroduce that regression, but doubling the prior value
-# gives back most of the cold-checkout margin this step needs. No budget/baseline change
+# gives back most of the cold-checkout margin this step needs.
+#
+# 2026-09-30(task-8667/esc-ci-no_bom): 16 workers still took ~51s wall-clock on cold checkout --
+# further margin compression within 60s budget. Raised to 24, staying below library default (28)
+# that caused STATUS_DLL_INIT_FAILED (task-8657 detail). No budget/baseline change
 # (DECISION_GUIDELINES B-2) -- this only retunes this step's own concurrency footprint.
-SCAN_WORKERS = 16
+SCAN_WORKERS = 24
 
 
 def has_bom(path: Path) -> bool:
