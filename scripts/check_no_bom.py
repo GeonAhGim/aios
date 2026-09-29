@@ -52,14 +52,21 @@ SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "cover
 # -- library default on this 24-core box is min(32, 24+4)=28, still per-lane, and this fleet runs
 # several worker lanes' local_ci prepare concurrently on one shared box, so 28-wide bursts x N
 # concurrent lanes reproduced the same antivirus-scan-starves-sibling-process-create symptom the
-# 64-wide fix was meant to fix. A local benchmark (this file's files, warm cache) showed workers=8
-# vs the library default (28) costs ~0.8s extra wall-clock on ~4.3k files -- negligible against the
-# 60s step budget even on the documented ~60-70s cold-checkout case -- while cutting this step's
-# peak concurrent OS-thread/file-handle footprint by >3x fleet-wide. Fixed at 8 rather than a
-# cpu_count-derived formula because the constraint is shared-box aggregate concurrency across
-# lanes, not this box's own core count. No budget/baseline change (DECISION_GUIDELINES B-2) --
-# this only lowers this step's own concurrency footprint.
-SCAN_WORKERS = 8
+# 64-wide fix was meant to fix. That change dropped this constant to 8 on the assumption -- based
+# on a *warm-cache* local benchmark -- that 8 vs the library default (28) cost only ~0.8s extra on
+# ~4.3k files.
+#
+# 2026-09-29(task-8692/esc-ci-no_bom): that assumption did not hold on a genuinely cold checkout --
+# this step itself started timing out again (esc-ci-no_bom, [no_bom] timeout 60s) within minutes of
+# the task-8657 commit landing. A cold-cache measurement (first touch of this worktree's ~4.3k
+# files, no warmup) showed 8 workers takes ~42s wall-clock -- 70% of the 60s step budget with no
+# margin for fleet load, versus <1s once the OS page cache is warm; the earlier "0.8s" delta was
+# measured after the files were already warm and does not reflect the cold-checkout case this step
+# actually runs under in CI. Raised to 16 -- still half the library default (28) that caused the
+# esc-ci-prepare storm, so it does not reintroduce that regression, but doubling the prior value
+# gives back most of the cold-checkout margin this step needs. No budget/baseline change
+# (DECISION_GUIDELINES B-2) -- this only retunes this step's own concurrency footprint.
+SCAN_WORKERS = 16
 
 
 def has_bom(path: Path) -> bool:
