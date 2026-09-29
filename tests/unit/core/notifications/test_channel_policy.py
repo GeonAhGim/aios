@@ -23,6 +23,7 @@ from src.core.notifications.channel_policy import (
 # Fixtures
 # ------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _clear_table():
     """Each test starts with a clean _POLICY_TABLE."""
@@ -34,11 +35,12 @@ def _clear_table():
 
 
 # ------------------------------------------------------------------
-# NotificationChannel enum 직접 테스트
+# NotificationChannel enum direct tests
 # ------------------------------------------------------------------
 
+
 class TestNotificationChannelEnum:
-    """NotificationChannel enum이 세 개 상수를 가지는지 확인."""
+    """Verify NotificationChannel enum has three constants."""
 
     def test_email_member(self):
         assert NotificationChannel.EMAIL.value == "EMAIL"
@@ -61,6 +63,7 @@ class TestNotificationChannelEnum:
 # ChannelRule / ChannelPolicy 모델 인스턴스화
 # ------------------------------------------------------------------
 
+
 class TestChannelRuleModel:
     """ChannelRule 생성 및 user_overridable 속성."""
 
@@ -79,13 +82,13 @@ class TestChannelRuleModel:
         assert rule.user_overridable is False
 
     def test_missing_user_overridable_raises_validation(self):
-        """user_overridable은 필수 필드 — 생성 시 ValidationError."""
+        """user_overridable is required — raises ValidationError on creation."""
         with pytest.raises(Exception):  # noqa: B017 pydantic ValidationError
             ChannelRule(channel=NotificationChannel.EMAIL)
 
 
 class TestChannelPolicyModel:
-    """ChannelPolicy 생성 검증."""
+    """Verify ChannelPolicy instantiation."""
 
     def test_create_with_rules(self):
         rules = [
@@ -105,11 +108,12 @@ class TestChannelPolicyModel:
 
 
 # ------------------------------------------------------------------
-# ChannelPolicy.forced_channels 프로퍼티
+# ChannelPolicy.forced_channels property
 # ------------------------------------------------------------------
 
+
 class TestForcedChannels:
-    """forced_channels: user_overridable=False인 채널만 반환."""
+    """forced_channels returns only channels where user_overridable=False."""
 
     def test_all_user_overridable_false(self):
         rules = [
@@ -148,11 +152,12 @@ class TestForcedChannels:
 
 
 # ------------------------------------------------------------------
-# get_channel_policy() 경계값 · negative
+# get_channel_policy() boundary values and negatives
 # ------------------------------------------------------------------
 
+
 class TestGetChannelPolicyEdgeCases:
-    """get_channel_policy() 잘못된 입력·경계값."""
+    """get_channel_policy() with invalid inputs and boundary values."""
 
     def test_known_event_returns_table_entry(self):
         result = get_channel_policy("approval.request.created")
@@ -164,27 +169,27 @@ class TestGetChannelPolicyEdgeCases:
         assert result == _DEFAULT_POLICY
 
     def test_empty_string_event_type(self):
-        """빈 문자열은 테이블에 없으므로 _DEFAULT_POLICY."""
+        """Empty string is not in the table, so returns _DEFAULT_POLICY."""
         result = get_channel_policy("")
         assert result == _DEFAULT_POLICY
 
     def test_none_event_type_returns_default(self):
-        """None은 dict.get(None) → None → _DEFAULT_POLICY."""
+        """None in dict.get(None) → None → _DEFAULT_POLICY."""
         result = get_channel_policy(None)
         assert result == _DEFAULT_POLICY
 
     def test_special_characters_event_type(self):
-        """특수문자 이벤트 타입은 테이블 미매칭 → _DEFAULT_POLICY."""
+        """Special character event type does not match table → _DEFAULT_POLICY."""
         result = get_channel_policy("event;DROP TABLE;--")
         assert result == _DEFAULT_POLICY
 
     def test_numeric_event_type(self):
-        """숫자 이벤트 타입도 테이블 미매칭 → _DEFAULT_POLICY."""
+        """Numeric event type does not match table → _DEFAULT_POLICY."""
         result = get_channel_policy("12345")
         assert result == _DEFAULT_POLICY
 
     def test_all_table_events_return_channel_policy(self):
-        """테이블에 등록된 모든 이벤트가 ChannelPolicy 반환."""
+        """All events registered in table return ChannelPolicy."""
         for event_type in _POLICY_TABLE:
             result = get_channel_policy(event_type)
             assert isinstance(result, ChannelPolicy)
@@ -194,12 +199,14 @@ class TestGetChannelPolicyEdgeCases:
 # Failure injection (monkeypatch)
 # ------------------------------------------------------------------
 
+
 class TestFailureInjection:
-    """의존성 예외 유발 테스트."""
+    """Exception injection tests for dependency failures."""
 
     def test_policy_table_get_raises_key_error_propagates(self, monkeypatch):
-        """_POLICY_TABLE.get() 가 KeyError를 raise하면 get_channel_policy가
-        예외를 전파한다 (try/except 없음)."""
+        """When _POLICY_TABLE.get() raises KeyError, get_channel_policy
+        propagates it (no try/except)."""
+
         # Replace the module-level _POLICY_TABLE entirely with a wrapper dict
         class FailingDict(dict):
             def get(self, key, default=None):
@@ -210,12 +217,13 @@ class TestFailureInjection:
             FailingDict(),
         )
 
-        # try/except 없는 get_channel_policy는 KeyError를 전파
+        # get_channel_policy without try/except propagates KeyError
         with pytest.raises(KeyError):
             get_channel_policy("boom_event")
 
     def test_policy_table_raises_type_error(self, monkeypatch):
-        """_POLICY_TABLE.get() 가 TypeError를 raise하면 예외가 전파된다."""
+        """When _POLICY_TABLE.get() raises TypeError, exception is propagated."""
+
         class RaisingDict(dict):
             def get(self, key, default=None):
                 raise TypeError("simulated storage failure")
