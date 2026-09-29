@@ -1,5 +1,6 @@
 import { defineConfig, mergeConfig } from "vitest/config";
 import viteConfig from "./vite.config.ts";
+import { COVERAGE_SCALE } from "./src/test/perfBudget.ts";
 
 // task-1968: CI/공유 머신에서 병행 실행되는 다른 워커(백엔드 pytest 등)와의 CPU 경합으로
 // 개별 테스트가 기본 5000ms 안에 못 끝나 무관한 스위트 전반에서 동시다발로 timeout
@@ -15,14 +16,26 @@ import viteConfig from "./vite.config.ts";
 const coverageRequested = process.argv.some(
   (arg) => arg === "--coverage" || arg === "--coverage.enabled" || arg === "--coverage.enabled=true",
 );
+// task-8950: perfBudget.ts already widens the *perf-assertion* tests' own
+// budgets by COVERAGE_SCALE under `--coverage` (task-3460), but the global
+// testTimeout/hookTimeout below stayed fixed at the plain-run value. V8
+// coverage instrumentation slows every test, not just the perf-assertion
+// ones, so ordinary tests (e.g. useAuthStore.localStorageGuard,
+// tableOverflow.guard) can hit the un-widened 20s ceiling under coverage +
+// shared-host contention (task-1968) and fail on timeout alone -- reproduced
+// locally: both suites above ran ~20-21s and were killed at the 20000ms
+// testTimeout during a `vitest run --coverage` pass. Widening these by the
+// same factor the perf tests already use closes that gap without touching
+// any ratchet baseline.
+const testTimeoutMs = coverageRequested ? 20000 * COVERAGE_SCALE : 20000;
 
 export default mergeConfig(
   viteConfig,
   defineConfig({
     test: {
       setupFiles: ["./src/test/setup.ts"],
-      testTimeout: 20000,
-      hookTimeout: 20000,
+      testTimeout: testTimeoutMs,
+      hookTimeout: testTimeoutMs,
       maxWorkers: 4,
       env: { VITEST_COVERAGE: coverageRequested ? "1" : "0" },
       // task-3460 CI-GREEN-2 (b): the new root frontend/vitest.config.ts
