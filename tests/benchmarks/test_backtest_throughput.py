@@ -64,7 +64,9 @@ class _FakePriceIndicatorService(IndicatorService):
     지표 계산 비용이 아니라 재생 루프 오케스트레이션 처리량이다
     (test_run_backtest.py와 동일 원칙, 모듈 docstring 참조)."""
 
-    def calculate(self, indicator: str, candles: list[Candle], **params: int) -> IndicatorResult:
+    def calculate(
+        self, indicator: str, candles: Sequence[Candle], **params: int
+    ) -> IndicatorResult:
         assert indicator == "PRICE"
         return IndicatorResult(
             indicator=indicator, values=[float(candles[-1].close)], params=params
