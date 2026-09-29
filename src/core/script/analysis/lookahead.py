@@ -42,6 +42,7 @@ unconfirmed bars from other symbols/timeframes, causing repaint), but is
 not a list confirmed by the AIOS Script own registry (DSL-9, not yet
 existent).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -102,18 +103,20 @@ def _check_index(tokens: Sequence[Token], bracket_idx: int) -> None:
         return
     if inner.kind is TokenKind.OP and inner.value == "-":
         raise ScriptLookaheadError(
-            "시리즈 오프셋에 음수 인덱스(미래 참조)는 금지합니다", inner.line, inner.col
+            "Series offset does not accept negative index (future reference is forbidden)",
+            inner.line,
+            inner.col,
         )
     if inner.kind is TokenKind.IDENT:
         raise ScriptLookaheadError(
-            "시리즈 오프셋은 상수만 허용합니다"
-            "(변수 인덱스는 정적으로 미래 참조가 아님을 증명할 수 없어 거부)",
+            "Series offset accepts only constants "
+            "(variable index cannot be statically proven to avoid future reference, rejected)",
             inner.line,
             inner.col,
         )
     raise ScriptLookaheadError(
-        "시리즈 오프셋이 0 이상 정수 상수 하나가 아닙니다"
-        "(정적으로 안전함을 증명할 수 없어 fail-closed 거부)",
+        "Series offset is not a single non-negative integer constant "
+        "(cannot prove safety statically, fail-closed rejection)",
         inner.line,
         inner.col,
     )
@@ -124,7 +127,7 @@ def _check_future_call(tokens: Sequence[Token], ident_idx: int) -> None:
     if nxt.kind is TokenKind.DELIM and nxt.value in ("(", "."):
         tok = tokens[ident_idx]
         raise ScriptLookaheadError(
-            f"미래 데이터 접근 함수 {tok.value!r} 호출은 금지합니다(security()류)",
+            f"Call to future data access function {tok.value!r} is forbidden (security()-like)",
             tok.line,
             tok.col,
         )
