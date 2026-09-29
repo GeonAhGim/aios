@@ -100,7 +100,9 @@ const PREFIX_MESSAGES: Array<[string, string]> = [
 ];
 
 // error_code가 알려진 값이면 고정 한국어 메시지를, 모르는 값이면 접두 계열
-// 안내를, 그마저 없으면 서버가 준 message나 기본 문구를 반환한다.
+// 안내를, 그마저 없으면 안전한 기본 문구를 반환한다. 서버 message는 error_code가
+// 없는 레거시/비정형 오류에서만 fallback으로 사용한다 — 미지 코드는 서버가 의도한
+// 사용자 노출 문구인지 검증할 수 없으므로 원문을 화면에 흘리지 않는다.
 export function getApiErrorMessage(
   errorCode?: string | null,
   fallbackMessage?: string | null,
@@ -110,6 +112,7 @@ export function getApiErrorMessage(
     if (exact) return exact;
     const prefixHit = PREFIX_MESSAGES.find(([prefix]) => errorCode.startsWith(prefix));
     if (prefixHit) return prefixHit[1];
+    return DEFAULT_API_ERROR_MESSAGE;
   }
   return fallbackMessage || DEFAULT_API_ERROR_MESSAGE;
 }

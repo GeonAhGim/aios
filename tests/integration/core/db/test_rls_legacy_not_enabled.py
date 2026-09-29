@@ -37,7 +37,7 @@ import pytest
 
 from tests.integration.conftest import create_test_user
 from tests.integration.core.db.conftest import AppRoleTx
-from tests.support.db import ensure_worker_database
+from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -192,7 +192,7 @@ def test_run_alembic_raises_on_nonzero_returncode(monkeypatch: pytest.MonkeyPatc
 async def test_upgrade_downgrade_round_trip():
     """Disposable DB clone (task-5823) -- never the shared session DB other
     tests and `scripts/replay_verify.py` depend on. See module docstring."""
-    migration_db_url = await ensure_worker_database(os.environ["DATABASE_URL"], "rlslegacyrt")
+    migration_db_url = await ensure_worker_database(template_database_url(), "rlslegacyrt")
     migration_pool = await asyncpg.create_pool(
         migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
         min_size=1,

@@ -46,7 +46,7 @@ function sweepRequest(overrides: Partial<SweepRequestInput> = {}): SweepRequestI
       { name: "exit", values: [20, 30] },
     ],
     combos: [],
-    metric: "finalEquity",
+    metric: "final_equity",
     dataLineageHash: "hash",
     rollupVersion: "v1",
     seed: 1,
@@ -60,7 +60,7 @@ function sweepResult(overrides: Partial<SweepResultView> = {}): SweepResultView 
       { name: "rsi_len", values: [10, 14] },
       { name: "exit", values: [20, 30] },
     ],
-    metric: "finalEquity",
+    metric: "final_equity",
     points: [
       {
         comboKey: "rsi_len=10,exit=20",
@@ -117,7 +117,7 @@ describe("SweepResultsPage", () => {
     expect(screen.getByTestId("sweep-cell-14-30")).toHaveTextContent("10900");
     expect(screen.getByText("repro-1")).toBeInTheDocument();
     expect(screen.getByText("안정적")).toBeInTheDocument();
-    expect(runSweep).toHaveBeenCalledWith(expect.objectContaining({ metric: "finalEquity" }));
+    expect(runSweep).toHaveBeenCalledWith(expect.objectContaining({ metric: "final_equity" }));
   });
 
   it("축이 2개가 아니면 히트맵 대신 안내를 보여준다", async () => {
@@ -270,7 +270,7 @@ describe("SweepResultsPage", () => {
         { name: "x", values: axisValues },
         { name: "y", values: axisValues },
       ],
-      metric: "finalEquity",
+      metric: "final_equity",
       points,
       stability: null,
       warnings: [],

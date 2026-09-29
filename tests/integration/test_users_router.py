@@ -2,10 +2,10 @@
 /users/me/delete 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import asyncpg
-import pyotp
 import pytest
 from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
@@ -16,7 +16,7 @@ from src.core.approval.service import create_request
 from src.main import app
 from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
 from tests.integration.conftest import NoopEventBus
-from tests.integration.mfa_clock import mfa_clock_shifted, totp_at
+from tests.integration.mfa_clock import mfa_clock_frozen, totp_at
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -169,10 +169,16 @@ async def test_register_and_list_whitelist_entry(client, event_bus):
 async def test_register_whitelist_entry_with_mfa_requires_totp(client):
     email, headers = await _register(client)
 
-    setup_response = await client.post("/auth/mfa/setup", headers=headers)
-    secret = setup_response.json()["data"]["secret"]
-    code = pyotp.totp.TOTP(secret).now()
-    await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
+    # esc-ci-cbb8b9c62497 — 실시간 코드는 서버 검증과의 30초 구간 경계 레이스가
+    # 있어(valid_window=0) 시계를 고정한다.
+    frozen_now = datetime.now(timezone.utc)
+    with mfa_clock_frozen(app, frozen_now):
+        setup_response = await client.post("/auth/mfa/setup", headers=headers)
+        secret = setup_response.json()["data"]["secret"]
+        verify_response = await client.post(
+            "/auth/mfa/verify", json={"totp_code": totp_at(secret, frozen_now)}, headers=headers
+        )
+    assert verify_response.status_code == 200, verify_response.text
 
     without_totp = await client.post(
         "/users/me/withdrawal-whitelist",
@@ -187,7 +193,8 @@ async def test_register_whitelist_entry_with_mfa_requires_totp(client):
 
     # docs/RED_TEAM_FINDINGS.md #13 반영 — 위 verify()가 이미 이 구간의
     # 코드를 소비했으므로 재인증용 코드는 다음 구간에서 새로 받아야 한다.
-    # 실시간 31초 대기 대신 MfaService 시계를 31초 앞당긴다(전수감사 §9).
+    # 실시간 31초 대기 대신 MfaService 시계를 다음 구간의 한 시각으로 고정한다
+    # (전수감사 §9; shifted는 실시간을 다시 읽어 경계 레이스가 남는다).
     # system_safety_state(전역 싱글톤 행)는 공유 DB의 다른 세션이 바꿔놨을 수
     # 있어 어서션 직전에 리셋한다.
     async with app.state.pool.acquire() as conn:
@@ -195,8 +202,9 @@ async def test_register_whitelist_entry_with_mfa_requires_totp(client):
             "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
             "reactivation_approval_id = NULL WHERE id = 1"
         )
-    with mfa_clock_shifted(app, 31) as shifted_now:
-        login_code = totp_at(secret, shifted_now())
+    login_at = frozen_now + timedelta(seconds=31)
+    with mfa_clock_frozen(app, login_at):
+        login_code = totp_at(secret, login_at)
         with_totp = await client.post(
             "/users/me/withdrawal-whitelist",
             json={

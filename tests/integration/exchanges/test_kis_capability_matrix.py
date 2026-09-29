@@ -13,6 +13,7 @@ DoD 셋을 각각 다른 각도에서 증명한다:
    자산군 전부가 `assert_supported`를 통과해 그 다음 게이트로 넘어감을
    증명한다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from src.services.oms.domain.venue_profile import (
     VenueCapabilityProfile,
     assert_supported,
 )
+from tests.support.kis_registry import verified_kr_equity_registry
 
 _DOMESTIC_ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 _DOMESTIC_FO_ORDER_PATH = "/uapi/domestic-futureoption/v1/trading/order"
@@ -96,9 +98,13 @@ def _make_paper_adapter(captured: list[httpx.Request]) -> KISAdapter:
     http_client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
-    return KISAdapter(
+    adapter = KISAdapter(
         "app", "secret", "12345678", "01", is_paper_trading=True, http_client=http_client
     )
+    # task-8337: production 005930.KS snapshot is verified=False and would stop
+    # the KR_EQUITY routing case before it reaches the order endpoint.
+    adapter.symbol_registry = verified_kr_equity_registry
+    return adapter
 
 
 def _order(asset_class: AssetClass, symbol: str) -> Order:

@@ -103,8 +103,8 @@ export type {
 } from "./clients/charting";
 // task-1607(BT-13): §9.5 BT-10 quick_backtest 클라이언트(charting.ts와 동일 관용 —
 // AiosApiClient 합성에는 얹지 않고 화면이 createBacktestsClient로 직접 만든다).
-// task-2428(BT-18): sweep 결과 조회(런타임에는 유령 경로 — SweepRouteNotImplementedError
-// 참조) 타입·에러도 같은 파일에서 재수출한다.
+// task-7774(BT-18): sweep 실행(POST /v1/backtests/sweep) 타입·에러도 같은 파일에서
+// 재수출한다.
 export { createBacktestsClient, SweepRouteNotImplementedError } from "./clients/backtests";
 export type {
   BacktestsClient,
@@ -116,6 +116,7 @@ export type {
   QuickBacktestResultView,
   SweepAxisInput,
   SweepComboInput,
+  SweepMetric,
   SweepRequestInput,
   SweepPointResultView,
   SweepStabilityView,

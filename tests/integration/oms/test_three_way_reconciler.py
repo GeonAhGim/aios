@@ -18,6 +18,7 @@ replay 증명 없음(단일 pool, 동시 reconciler 없음, DENY 우회 시도 �
 정확히 같은 시각에 경합해도(DENY 우회 레이스 시도) 단 하나도 통과하지
 못함.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -100,6 +101,58 @@ async def _insert_open_order(
         )
 
 
+async def _insert_order_with_status(
+    pool,
+    tenant_id: uuid.UUID,
+    *,
+    client_order_id: str,
+    quantity: Decimal,
+    filled_quantity: Decimal,
+    status: str,
+) -> uuid.UUID:
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            """
+            INSERT INTO orders (
+                user_id, client_order_id, strategy_id, strategy_version, symbol,
+                exchange, side, order_type, quantity, status, filled_quantity
+            ) VALUES ($1, $2, 'oms-recon-test', '1.0.0', 'BTC/USDT', 'bitget', 'BUY',
+                      'LIMIT', $3, $5, $4)
+            RETURNING order_id
+            """,
+            tenant_id,
+            client_order_id,
+            quantity,
+            filled_quantity,
+            status,
+        )
+
+
+async def _record_cancel_requested(pool, order_id: uuid.UUID, status: str) -> None:
+    """`cancel_order.py`가 남기는 자기루프 `CANCEL_REQUESTED` 이력을 흉내낸다
+    (`order_events`에 직접 기록 — API를 거치지 않는 테스트 전용 단축 경로)."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO order_events (
+                order_id, from_status, to_status, event, reason_code,
+                actor_subject_id, trace_id, command_id, provider_event_id,
+                occurred_at, payload_hash
+            ) VALUES ($1, $2, $2, 'CANCEL_REQUESTED', 'user_requested', 'system',
+                      $3, NULL, NULL, now(), $4)
+            """,
+            order_id,
+            status,
+            uuid.uuid4(),
+            "a" * 64,
+        )
+
+
+async def _order_status(pool, order_id: uuid.UUID) -> str:
+    async with pool.acquire() as conn:
+        return await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+
+
 async def _active_account_controls(pool, tenant_id: uuid.UUID) -> int:
     async with pool.acquire() as conn:
         return await conn.fetchval(
@@ -138,8 +191,13 @@ def _profile() -> VenueCapabilityProfile:
 def _registry() -> SymbolRegistry:
     reg = SymbolRegistry()
     reg.register(
-        "BTC/USDT", "bitget", "BTCUSDT",
-        tick=Decimal("0.1"), lot=Decimal("0.0001"), min_notional=Decimal("5"), quote_ccy="USDT",
+        "BTC/USDT",
+        "bitget",
+        "BTCUSDT",
+        tick=Decimal("0.1"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("5"),
+        quote_ccy="USDT",
     )
     return reg
 
@@ -155,7 +213,8 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', '{}'::jsonb,
                     'test-author', 'APPROVED')
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
         row = await conn.fetchrow(
             """
@@ -165,21 +224,33 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING')
             RETURNING id
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return row["id"]
 
 
 def _submit_cmd(user_id: uuid.UUID, execution_id: int) -> SubmitOrderCommand:
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=1,
         window_start=datetime.now(timezone.utc),
     )
     return SubmitOrderCommand(
-        command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol="BTC/USDT",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-        asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+        command_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        scope=scope,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
     )
 
@@ -189,16 +260,21 @@ async def test_reconcile_healthy_reports_zero_discrepancies(pool):
     user_id = await create_test_tenant(pool)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await _insert_open_order(
-        pool, user_id, client_order_id=client_id,
-        quantity=Decimal("5"), filled_quantity=Decimal("2"),
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("5"),
+        filled_quantity=Decimal("2"),
     )
-    adapter = _ScriptedAdapter(
-        open_orders=[_provider_order(client_id, Decimal("5"), Decimal("2"))]
-    )
+    adapter = _ScriptedAdapter(open_orders=[_provider_order(client_id, Decimal("5"), Decimal("2"))])
 
     summary = await reconcile_account(
-        pool=pool, adapter=adapter, tenant_id=user_id, connection_id=None,
-        account_ref=str(user_id), window=timedelta(minutes=5),
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
     )
 
     assert summary.overall_classification == "HEALTHY"
@@ -214,16 +290,23 @@ async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(po
     entity_context = await seed_entity_context(pool, user_id)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await _insert_open_order(
-        pool, user_id, client_order_id=client_id,
-        quantity=Decimal("10"), filled_quantity=Decimal("3"),
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("10"),
+        filled_quantity=Decimal("3"),
     )
     mismatched_adapter = _ScriptedAdapter(
         open_orders=[_provider_order(client_id, Decimal("10"), Decimal("7"))]
     )
 
     summary = await reconcile_account(
-        pool=pool, adapter=mismatched_adapter, tenant_id=user_id, connection_id=None,
-        account_ref=str(user_id), window=timedelta(minutes=5),
+        pool=pool,
+        adapter=mismatched_adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
     )
 
     assert summary.overall_classification == "MATERIAL_MISMATCH"
@@ -238,8 +321,13 @@ async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(po
     gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
     with pytest.raises(OrderSubmitDeniedError) as exc_info:
         await submit_order(
-            submit_cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=gate,
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            submit_cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
     assert any(code.startswith("RISK_KILL_SWITCH_ACTIVE_") for code in exc_info.value.reason_codes)
     async with pool.acquire() as conn:
@@ -252,17 +340,111 @@ async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(po
         open_orders=[_provider_order(client_id, Decimal("10"), Decimal("3"))]
     )
     resolved_summary = await reconcile_account(
-        pool=pool, adapter=resolved_adapter, tenant_id=user_id, connection_id=None,
-        account_ref=str(user_id), window=timedelta(minutes=5),
+        pool=pool,
+        adapter=resolved_adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
     )
     assert resolved_summary.overall_classification == "HEALTHY"
     assert await _active_account_controls(pool, user_id) == 0
 
     allowed = await submit_order(
-        submit_cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=gate,
-        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+        submit_cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry(),
+        pre_submit_gate=gate,
+        entity_context=entity_context,
+        entity_repo=PostgresEntityRepository(pool),
     )
     assert allowed.status == OrderStatus.VALIDATED
+
+
+async def test_reconcile_confirmed_cancel_self_heals_and_reopens_gate(pool):
+    """task-7978 F1 — 거래소가 실제로 취소를 확정한 주문(체결 없이 open-orders
+    에서 사라짐)이 `CANCEL_REQUESTED` 이력을 갖고 있으면 대사가 스스로
+    `VENUE_CANCELLED`로 전이시켜야 한다. 그러지 않으면 이 주문 하나가
+    ORDER_MISSING_AT_PROVIDER/MATERIAL_MISMATCH로 영원히 고정돼 ACCOUNT
+    게이트가 계속 ACTIVE로 남고, 같은 테넌트의 신규 submit_order가 무기한
+    DENY된다(라이브니스 버그, task-7978 발견)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    entity_context = await seed_entity_context(pool, user_id)
+    client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
+    order_id = await _insert_order_with_status(
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("5"),
+        filled_quantity=Decimal("2"),
+        status="ACKNOWLEDGED",
+    )
+    await _record_cancel_requested(pool, order_id, "ACKNOWLEDGED")
+    # provider 쪽 open-orders에는 이 client_id가 없다 — 정상 취소가 확정돼
+    # 사라진 상태를 흉내낸다.
+    adapter = _ScriptedAdapter(open_orders=[])
+
+    summary = await reconcile_account(
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
+    )
+
+    assert summary.overall_classification == "HEALTHY"
+    assert summary.discrepancies == []
+    assert await _order_status(pool, order_id) == "CANCELLED"
+    assert await _active_account_controls(pool, user_id) == 0
+
+    submit_cmd = _submit_cmd(user_id, execution_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    allowed = await submit_order(
+        submit_cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry(),
+        pre_submit_gate=gate,
+        entity_context=entity_context,
+        entity_repo=PostgresEntityRepository(pool),
+    )
+    assert allowed.status == OrderStatus.VALIDATED
+
+
+async def test_reconcile_missing_without_cancel_history_stays_material_mismatch(pool):
+    """negative — `CANCEL_REQUESTED` 이력이 없는 missing 주문은 자기치유
+    대상이 아니다(임의의 missing 주문을 전부 CANCELLED로 세탁하지 않는다).
+    실제 유실(체결 누락 등)일 수 있으므로 MATERIAL_MISMATCH로 남아 게이트가
+    계속 ACTIVE여야 한다."""
+    user_id = await create_test_tenant(pool)
+    client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
+    order_id = await _insert_order_with_status(
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("5"),
+        filled_quantity=Decimal("2"),
+        status="ACKNOWLEDGED",
+    )
+    adapter = _ScriptedAdapter(open_orders=[])
+
+    summary = await reconcile_account(
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
+    )
+
+    assert summary.overall_classification == "MATERIAL_MISMATCH"
+    assert len(summary.discrepancies) == 1
+    assert summary.discrepancies[0].kind == "ORDER_MISSING_AT_PROVIDER"
+    assert await _order_status(pool, order_id) == "ACKNOWLEDGED"
+    assert await _active_account_controls(pool, user_id) == 1
 
 
 async def test_reconcile_provider_unavailable_never_assumes_zero(pool):
@@ -271,14 +453,21 @@ async def test_reconcile_provider_unavailable_never_assumes_zero(pool):
     user_id = await create_test_tenant(pool)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await _insert_open_order(
-        pool, user_id, client_order_id=client_id,
-        quantity=Decimal("4"), filled_quantity=Decimal("1"),
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("4"),
+        filled_quantity=Decimal("1"),
     )
     adapter = _ScriptedAdapter(fail=True)
 
     summary = await reconcile_account(
-        pool=pool, adapter=adapter, tenant_id=user_id, connection_id=None,
-        account_ref=str(user_id), window=timedelta(minutes=5),
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
     )
 
     assert summary.overall_classification == "PROVIDER_UNAVAILABLE"
@@ -295,20 +484,29 @@ async def test_reconcile_rerun_dedupe_does_not_duplicate_safety_control(pool):
     user_id = await create_test_tenant(pool)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await _insert_open_order(
-        pool, user_id, client_order_id=client_id,
-        quantity=Decimal("6"), filled_quantity=Decimal("1"),
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("6"),
+        filled_quantity=Decimal("1"),
     )
-    adapter = _ScriptedAdapter(
-        open_orders=[_provider_order(client_id, Decimal("6"), Decimal("5"))]
-    )
+    adapter = _ScriptedAdapter(open_orders=[_provider_order(client_id, Decimal("6"), Decimal("5"))])
 
     first = await reconcile_account(
-        pool=pool, adapter=adapter, tenant_id=user_id, connection_id=None,
-        account_ref=str(user_id), window=timedelta(minutes=5),
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
     )
     second = await reconcile_account(
-        pool=pool, adapter=adapter, tenant_id=user_id, connection_id=None,
-        account_ref=str(user_id), window=timedelta(minutes=5),
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
     )
 
     assert first.overall_classification == "MATERIAL_MISMATCH"
@@ -329,12 +527,13 @@ async def test_reconcile_account_latency_within_normalized_throughput_budget(poo
     user_id = await create_test_tenant(pool)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await _insert_open_order(
-        pool, user_id, client_order_id=client_id,
-        quantity=Decimal("5"), filled_quantity=Decimal("2"),
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("5"),
+        filled_quantity=Decimal("2"),
     )
-    adapter = _ScriptedAdapter(
-        open_orders=[_provider_order(client_id, Decimal("5"), Decimal("2"))]
-    )
+    adapter = _ScriptedAdapter(open_orders=[_provider_order(client_id, Decimal("5"), Decimal("2"))])
 
     async with pool.acquire() as conn:
         baseline_reps = 20
@@ -347,8 +546,12 @@ async def test_reconcile_account_latency_within_normalized_throughput_budget(poo
     t0 = time.perf_counter()
     for _ in range(reps):
         summary = await reconcile_account(
-            pool=pool, adapter=adapter, tenant_id=user_id, connection_id=None,
-            account_ref=str(user_id), window=timedelta(minutes=5),
+            pool=pool,
+            adapter=adapter,
+            tenant_id=user_id,
+            connection_id=None,
+            account_ref=str(user_id),
+            window=timedelta(minutes=5),
         )
     elapsed = time.perf_counter() - t0
     per_call = elapsed / reps
@@ -382,8 +585,11 @@ async def test_concurrent_reconciler_instances_only_one_reconciles_same_account(
     user_id = await create_test_tenant(pool)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await _insert_open_order(
-        pool, user_id, client_order_id=client_id,
-        quantity=Decimal("5"), filled_quantity=Decimal("2"),
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("5"),
+        filled_quantity=Decimal("2"),
     )
     account_ref = str(user_id)
 
@@ -391,9 +597,7 @@ async def test_concurrent_reconciler_instances_only_one_reconciles_same_account(
         return []
 
     n_instances = 5
-    scheduler_pool = await asyncpg.create_pool(
-        _asyncpg_dsn(), min_size=1, max_size=4 * n_instances
-    )
+    scheduler_pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4 * n_instances)
     try:
         schedulers = [
             ReconcileScheduler(scheduler_pool, targets=_no_targets) for _ in range(n_instances)
@@ -428,15 +632,22 @@ async def test_adversarial_concurrent_submit_race_all_denied_during_material_mis
     entity_context = await seed_entity_context(pool, user_id)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await _insert_open_order(
-        pool, user_id, client_order_id=client_id,
-        quantity=Decimal("10"), filled_quantity=Decimal("3"),
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("10"),
+        filled_quantity=Decimal("3"),
     )
     mismatched_adapter = _ScriptedAdapter(
         open_orders=[_provider_order(client_id, Decimal("10"), Decimal("7"))]
     )
     summary = await reconcile_account(
-        pool=pool, adapter=mismatched_adapter, tenant_id=user_id, connection_id=None,
-        account_ref=str(user_id), window=timedelta(minutes=5),
+        pool=pool,
+        adapter=mismatched_adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
     )
     assert summary.overall_classification == "MATERIAL_MISMATCH"
 
@@ -453,20 +664,35 @@ async def test_adversarial_concurrent_submit_race_all_denied_during_material_mis
 
         async def attempt(seq: int) -> str:
             scope = OrderIdempotencyScope(
-                tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-                strategy_version="1.0.0", execution_id=execution_id, intent_seq=seq,
+                tenant_id=user_id,
+                account_ref="acct-1",
+                provider="bitget",
+                strategy_id="s1",
+                strategy_version="1.0.0",
+                execution_id=execution_id,
+                intent_seq=seq,
                 window_start=datetime.now(timezone.utc),
             )
             cmd = SubmitOrderCommand(
-                command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol="BTC/USDT",
-                side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-                asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+                command_id=uuid.uuid4(),
+                trace_id=uuid.uuid4(),
+                scope=scope,
+                symbol="BTC/USDT",
+                side=OrderSide.BUY,
+                order_type=OrderType.MARKET,
+                quantity=Decimal("0.01"),
+                asset_class=AssetClass.CRYPTO,
+                actor_subject_id=user_id,
                 issued_at=datetime.now(timezone.utc),
             )
             try:
                 await submit_order(
-                    cmd, pool=submit_pool, profile=_profile(), registry=_registry(),
-                    pre_submit_gate=gate, entity_context=entity_context,
+                    cmd,
+                    pool=submit_pool,
+                    profile=_profile(),
+                    registry=_registry(),
+                    pre_submit_gate=gate,
+                    entity_context=entity_context,
                     entity_repo=PostgresEntityRepository(submit_pool),
                 )
             except OrderSubmitDeniedError:

@@ -11,10 +11,13 @@ BT-19, docs/design/INVARIANTS.md I-05. DoD: 고정 PAPER 추적 1건에 대해
 자체가 맞는지 증명한다(단위 테스트가 아니라 integration으로 분류한
 이유: OMS 계약 타입 + 백테스트 도메인 타입을 함께 다룬다).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from time import perf_counter
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -57,8 +60,7 @@ def _backtest_fill(
         bar_index=bar_index,
         # 리플레이 타임스탬프는 PAPER venue_ts와 구조적으로 다른 시계열
         # (봉 종가 시각)이다 — 비교에서 제외되는 필드임을 픽스처로도 보여준다.
-        timestamp=datetime(2026, 9, 1, 1, bar_index, tzinfo=timezone.utc)
-        + timedelta(seconds=1),
+        timestamp=datetime(2026, 9, 1, 1, bar_index, tzinfo=timezone.utc) + timedelta(seconds=1),
         symbol=_SYMBOL,
         side=side,
         price=price,
@@ -71,15 +73,24 @@ def _backtest_fill(
 # 고정 PAPER 추적 1건(§DoD "고정 PAPER 추적 1건") — 3개 체결, 매수 2 + 매도 1.
 _PAPER_TRACE = [
     _paper_fill(
-        seq=0, side=OrderSide.BUY, quantity=Decimal("1"), price=Decimal("100.00"),
+        seq=0,
+        side=OrderSide.BUY,
+        quantity=Decimal("1"),
+        price=Decimal("100.00"),
         fee=Decimal("0.10"),
     ),
     _paper_fill(
-        seq=1, side=OrderSide.BUY, quantity=Decimal("2"), price=Decimal("101.50"),
+        seq=1,
+        side=OrderSide.BUY,
+        quantity=Decimal("2"),
+        price=Decimal("101.50"),
         fee=Decimal("0.20"),
     ),
     _paper_fill(
-        seq=2, side=OrderSide.SELL, quantity=Decimal("3"), price=Decimal("103.25"),
+        seq=2,
+        side=OrderSide.SELL,
+        quantity=Decimal("3"),
+        price=Decimal("103.25"),
         fee=Decimal("0.30"),
     ),
 ]
@@ -89,15 +100,24 @@ def _matching_backtest_fills() -> list[SimulatedFill]:
     """같은 아티팩트·구간을 재생했다고 가정한, PAPER 추적과 값이 일치하는 리플레이."""
     return [
         _backtest_fill(
-            bar_index=0, side=OrderSide.BUY, quantity=Decimal("1"), price=Decimal("100.00"),
+            bar_index=0,
+            side=OrderSide.BUY,
+            quantity=Decimal("1"),
+            price=Decimal("100.00"),
             fee=Decimal("0.10"),
         ),
         _backtest_fill(
-            bar_index=1, side=OrderSide.BUY, quantity=Decimal("2"), price=Decimal("101.50"),
+            bar_index=1,
+            side=OrderSide.BUY,
+            quantity=Decimal("2"),
+            price=Decimal("101.50"),
             fee=Decimal("0.20"),
         ),
         _backtest_fill(
-            bar_index=2, side=OrderSide.SELL, quantity=Decimal("3"), price=Decimal("103.25"),
+            bar_index=2,
+            side=OrderSide.SELL,
+            quantity=Decimal("3"),
+            price=Decimal("103.25"),
             fee=Decimal("0.30"),
         ),
     ]
@@ -115,7 +135,10 @@ def test_decimal_representation_difference_alone_does_not_break_parity() -> None
     """같은 값이면 `Decimal` 지수 표현이 달라도(예: "3" vs "3.00") 일치로 본다."""
     backtest = _matching_backtest_fills()
     backtest[0] = _backtest_fill(
-        bar_index=0, side=OrderSide.BUY, quantity=Decimal("1.00"), price=Decimal("100.0000"),
+        bar_index=0,
+        side=OrderSide.BUY,
+        quantity=Decimal("1.00"),
+        price=Decimal("100.0000"),
         fee=Decimal("0.10"),
     )
     report = check_parity(_PAPER_TRACE, backtest)
@@ -151,11 +174,17 @@ def test_divergence_at_earlier_index_reported_even_if_later_also_diverges() -> N
     """뒤쪽에도 발산이 있어도 리포트는 항상 '첫' 발산 지점만 낸다."""
     backtest = _matching_backtest_fills()
     backtest[0] = _backtest_fill(
-        bar_index=0, side=OrderSide.BUY, quantity=Decimal("999"), price=Decimal("100.00"),
+        bar_index=0,
+        side=OrderSide.BUY,
+        quantity=Decimal("999"),
+        price=Decimal("100.00"),
         fee=Decimal("0.10"),
     )
     backtest[2] = _backtest_fill(
-        bar_index=2, side=OrderSide.SELL, quantity=Decimal("3"), price=Decimal("999.99"),
+        bar_index=2,
+        side=OrderSide.SELL,
+        quantity=Decimal("3"),
+        price=Decimal("999.99"),
         fee=Decimal("0.30"),
     )
 
@@ -175,9 +204,7 @@ def test_divergence_at_earlier_index_reported_even_if_later_also_diverges() -> N
         ("fee", {"fee": Decimal("0.11")}),
     ],
 )
-def test_each_compared_field_can_trigger_divergence(
-    field: str, update: dict[str, object]
-) -> None:
+def test_each_compared_field_can_trigger_divergence(field: str, update: dict[str, object]) -> None:
     backtest = _matching_backtest_fills()
     backtest[0] = backtest[0].model_copy(update=update)
 
@@ -208,3 +235,97 @@ def test_empty_sequences_match() -> None:
     report = check_parity([], [])
     assert report.is_match is True
     assert report.paper_fill_count == report.backtest_fill_count == 0
+
+
+def test_negative_reordered_fills_rejected_even_with_same_totals() -> None:
+    """I-05/I-07: identical totals cannot hide a changed execution sequence."""
+    backtest = _matching_backtest_fills()
+    backtest[0], backtest[1] = backtest[1], backtest[0]
+
+    report = check_parity(_PAPER_TRACE, backtest)
+
+    with pytest.raises(ParityMismatchError, match="index 0") as exc_info:
+        report.raise_if_mismatch()
+    assert exc_info.value.report is report
+    assert report.first_divergence is not None
+    assert report.first_divergence.field == "quantity"
+    assert report.first_divergence.paper_value == "1"
+    assert report.first_divergence.backtest_value == "2"
+
+
+@pytest.mark.parametrize("empty_paper", [True, False])
+def test_negative_one_empty_trace_rejected(empty_paper: bool) -> None:
+    report = check_parity(
+        [] if empty_paper else _PAPER_TRACE,
+        _matching_backtest_fills() if empty_paper else [],
+    )
+
+    with pytest.raises(ParityMismatchError, match="index 0"):
+        report.raise_if_mismatch()
+    assert report.first_divergence is not None
+    assert report.first_divergence.field == "__length__"
+    assert (report.paper_fill_count, report.backtest_fill_count) == (
+        (0, 3) if empty_paper else (3, 0)
+    )
+
+
+def test_negative_extra_replay_fill_rejected() -> None:
+    backtest = _matching_backtest_fills()
+    backtest.append(backtest[-1])
+
+    report = check_parity(_PAPER_TRACE, backtest)
+
+    with pytest.raises(ParityMismatchError, match="index 3"):
+        report.raise_if_mismatch()
+    assert report.first_divergence is not None
+    assert report.first_divergence.field == "__length__"
+    assert report.first_divergence.paper_value == "3"
+    assert report.first_divergence.backtest_value == "4"
+
+
+@pytest.mark.parametrize(
+    "converter_name", ["paper_fill_to_comparable", "backtest_fill_to_comparable"]
+)
+def test_failure_injection_conversion_error_propagates_without_partial_success(
+    monkeypatch: pytest.MonkeyPatch, converter_name: str
+) -> None:
+    from src.foundation.backtest.application import parity_harness
+
+    original = getattr(parity_harness, converter_name)
+    failure = RuntimeError("injected conversion failure on second fill")
+    calls = 0
+
+    def fail_second(fill: FillEvent | SimulatedFill) -> parity_harness.ComparableFill:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise failure
+        return original(fill)
+
+    comparison = Mock(wraps=parity_harness._first_field_divergence)
+    with monkeypatch.context() as patch:
+        patch.setattr(parity_harness, converter_name, fail_second)
+        patch.setattr(parity_harness, "_first_field_divergence", comparison)
+        with pytest.raises(RuntimeError, match="injected conversion failure") as exc_info:
+            check_parity(_PAPER_TRACE, _matching_backtest_fills())
+        assert exc_info.value is failure
+        assert calls == 2
+        comparison.assert_not_called()
+
+    check_parity(_PAPER_TRACE, _matching_backtest_fills()).raise_if_mismatch()
+
+
+@pytest.mark.perf
+def test_parity_throughput_within_monthly_backtest_budget() -> None:
+    """ADR-2026-09-09-C: comparison alone must fit the 3s monthly M1 budget."""
+    repetitions = 30 * 24 * 60 // len(_PAPER_TRACE)
+    paper = _PAPER_TRACE * repetitions
+    backtest = _matching_backtest_fills() * repetitions
+
+    started = perf_counter()
+    report = check_parity(paper, backtest)
+    elapsed = perf_counter() - started
+
+    report.raise_if_mismatch()
+    assert report.paper_fill_count == report.backtest_fill_count == 43_200
+    assert elapsed < 3.0, f"43,200 fill pairs took {elapsed:.3f}s (budget 3s)"
