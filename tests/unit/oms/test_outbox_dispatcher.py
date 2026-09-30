@@ -9,6 +9,7 @@ DEAD(어댑터 호출 0회) → `FAILED(SEND_ABANDONED)`, 전송 후 DEAD → `U
 (CA 2026-09-06); F14 채택; CANCEL/MODIFY; run_forever 생존; wiring이 foundation
 게이트를 쓰는지(I-10).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -226,9 +227,7 @@ async def test_retry_exhaustion_is_dead_then_unknown(outbox, orders, clock):
     view = orders.add(make_order_view())
     row_id = await enqueue(outbox, view)
     adapter = ScriptedAdapter(on_place=_raising(ExchangeError(ExchangeErrorKind.SERVER_ERROR)))
-    d = make_dispatcher(
-        outbox=outbox, orders=orders, adapter=adapter, clock=clock, max_attempts=3
-    )
+    d = make_dispatcher(outbox=outbox, orders=orders, adapter=adapter, clock=clock, max_attempts=3)
 
     outcomes = []
     for _ in range(3):
@@ -297,10 +296,11 @@ async def test_gate_is_required_and_none_is_rejected(outbox, orders):
     assert gate_param_has_no_default()
     with pytest.raises(ValueError, match="I-01"):
         OutboxDispatcher(
-            FakePool(),  # type: ignore[arg-type]
-            outbox_repo=outbox, order_repo=orders,
-            resolve_adapter=None,  # type: ignore[arg-type]
-            pre_send_gate=None,  # type: ignore[arg-type]
+            FakePool(),
+            outbox_repo=outbox,
+            order_repo=orders,
+            resolve_adapter=None,
+            pre_send_gate=None,
             worker_id="w",
         )
 
@@ -330,9 +330,7 @@ async def test_progressed_order_consumes_command_without_send(outbox, orders, cl
 
 # ---- CANCEL / MODIFY ----------------------------------------------------------------
 async def test_cancel_is_done_without_order_transition(outbox, orders, clock):
-    view = orders.add(
-        make_order_view(status=OrderStatus.ACKNOWLEDGED, exchange_order_id="ex-1")
-    )
+    view = orders.add(make_order_view(status=OrderStatus.ACKNOWLEDGED, exchange_order_id="ex-1"))
     row_id = await enqueue(outbox, view, command_type="CANCEL", payload={})
     adapter = ScriptedAdapter()
     report = await _run(outbox, orders, adapter, clock)
@@ -352,9 +350,7 @@ async def test_cancel_before_ack_waits_and_not_found_is_done(outbox, orders, clo
     async def not_found(order_id: str) -> bool:
         raise ExchangeError(ExchangeErrorKind.ORDER_NOT_FOUND)
 
-    acked = orders.add(
-        make_order_view(status=OrderStatus.ACKNOWLEDGED, exchange_order_id="ex-2")
-    )
+    acked = orders.add(make_order_view(status=OrderStatus.ACKNOWLEDGED, exchange_order_id="ex-2"))
     row2 = await enqueue(outbox, acked, command_type="CANCEL", payload={})
     adapter = ScriptedAdapter(on_cancel=not_found)
     report = await _run(outbox, orders, adapter, clock)
@@ -362,18 +358,19 @@ async def test_cancel_before_ack_waits_and_not_found_is_done(outbox, orders, clo
 
 
 async def test_modify_applies_venue_price_and_quantity(outbox, orders, clock):
-    view = orders.add(
-        make_order_view(status=OrderStatus.ACKNOWLEDGED, exchange_order_id="ex-3")
-    )
+    view = orders.add(make_order_view(status=OrderStatus.ACKNOWLEDGED, exchange_order_id="ex-3"))
     changes = {"price": "101", "quantity": "2"}
     await enqueue(outbox, view, command_type="MODIFY", payload={"changes": changes})
 
     async def modify(order_id: str, **kwargs: Any) -> Order:
         base = Order.model_validate(submit_payload(view)["order"])
-        return base.model_copy(update={
-            "exchange_order_id": order_id, "quantity": Decimal("2"),
-            "price": Money(amount=Decimal("101"), currency=Currency.USDT),
-        })
+        return base.model_copy(
+            update={
+                "exchange_order_id": order_id,
+                "quantity": Decimal("2"),
+                "price": Money(amount=Decimal("101"), currency=Currency.USDT),
+            }
+        )
 
     adapter = ScriptedAdapter(on_modify=modify)
     report = await _run(outbox, orders, adapter, clock)
@@ -432,7 +429,7 @@ async def test_run_forever_survives_claim_failure_and_polls(outbox, orders, cloc
             raise RuntimeError("db hiccup")
         return await original(conn, **kw)
 
-    outbox.claim_batch = flaky_claim  # type: ignore[method-assign]
+    outbox.claim_batch = flaky_claim
 
     async def counting_sleep(seconds: float) -> None:
         sleeps.append(seconds)
@@ -464,8 +461,10 @@ async def test_wiring_uses_foundation_gate(monkeypatch, outbox, orders):
         raise AssertionError("호출되면 안 됨")
 
     d = wiring.build_outbox_dispatcher(
-        pool,  # type: ignore[arg-type]
-        resolve_adapter=resolve, outbox_repo=outbox, order_repo=orders,
+        pool,
+        resolve_adapter=resolve,
+        outbox_repo=outbox,
+        order_repo=orders,
     )
     assert seen == {"pool": pool, "require_mandate": True}
     assert d._gate is allow_gate

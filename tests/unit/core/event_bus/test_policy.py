@@ -96,7 +96,7 @@ class TestPolicyNegative:
         """Accessing a key not in ON_HANDLER_ERROR should raise KeyError."""
         # Use a custom object that won't hash/equal any enum member
         with pytest.raises(KeyError):
-            EventBusPolicy.ON_HANDLER_ERROR[object()]  # type: ignore[dict-item]
+            EventBusPolicy.ON_HANDLER_ERROR[object()]
 
     def test_none_key_raises_key_error(self):
         with pytest.raises(KeyError):

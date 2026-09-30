@@ -16,6 +16,7 @@ Postgres 어댑터(L4-08)와 `order_command_outbox`/`order_events` 스키마(L4-
 실DB 변형(3워커 SKIP LOCKED·늦은 쓰기 RETURNING 0행)은 L4-06/08 이후
 `tests/integration/oms/`에 같은 케이스로 추가한다.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -131,9 +132,18 @@ class InMemoryOutboxRepo:
         self._put(
             conn,
             OutboxRow(
-                id=row_id, order_id=order_id, command_type=command_type, payload=payload,
-                state="PENDING", attempt=0, not_before=not_before, lease_until=None,
-                worker_id=None, last_error=None, created_at=now, updated_at=now,
+                id=row_id,
+                order_id=order_id,
+                command_type=command_type,
+                payload=payload,
+                state="PENDING",
+                attempt=0,
+                not_before=not_before,
+                lease_until=None,
+                worker_id=None,
+                last_error=None,
+                created_at=now,
+                updated_at=now,
             ),
         )
         return row_id
@@ -152,8 +162,10 @@ class InMemoryOutboxRepo:
         for row in candidates:
             new = row.model_copy(
                 update={
-                    "state": "SENDING", "worker_id": worker_id,
-                    "lease_until": now + timedelta(seconds=lease_sec), "updated_at": now,
+                    "state": "SENDING",
+                    "worker_id": worker_id,
+                    "lease_until": now + timedelta(seconds=lease_sec),
+                    "updated_at": now,
                 }
             )
             self._put(conn, new)
@@ -176,7 +188,8 @@ class InMemoryOutboxRepo:
         for row in candidates:
             new = row.model_copy(
                 update={
-                    "worker_id": worker_id, "lease_until": now + timedelta(seconds=lease_sec),
+                    "worker_id": worker_id,
+                    "lease_until": now + timedelta(seconds=lease_sec),
                     "updated_at": now,
                 }
             )
@@ -189,16 +202,26 @@ class InMemoryOutboxRepo:
         self._put(conn, row.model_copy(update={"state": "DONE", "updated_at": self._clock()}))
 
     async def mark_retry(
-        self, conn: FakeConn, id: UUID, *, attempt: int, not_before: datetime,
-        last_error: str, expected_worker: str,
+        self,
+        conn: FakeConn,
+        id: UUID,
+        *,
+        attempt: int,
+        not_before: datetime,
+        last_error: str,
+        expected_worker: str,
     ) -> None:
         row = self._fenced(id, expected_worker)
         self._put(
             conn,
             row.model_copy(
                 update={
-                    "state": "PENDING", "attempt": attempt, "not_before": not_before,
-                    "last_error": last_error, "worker_id": None, "lease_until": None,
+                    "state": "PENDING",
+                    "attempt": attempt,
+                    "not_before": not_before,
+                    "last_error": last_error,
+                    "worker_id": None,
+                    "lease_until": None,
                     "updated_at": self._clock(),
                 }
             ),
@@ -363,24 +386,49 @@ def make_order_view(
 ) -> OrderView:
     now = utcnow()
     return OrderView(
-        order_id=uuid4(), tenant_id=tenant_id or uuid4(), execution_id=7,
+        order_id=uuid4(),
+        tenant_id=tenant_id or uuid4(),
+        execution_id=7,
         client_order_id=client_order_id or f"a{uuid4().hex[:20]}",
-        exchange_order_id=exchange_order_id, symbol="BTC/USDT", venue_symbol="BTCUSDT",
-        exchange=exchange, side=OrderSide.BUY, order_type=OrderType.MARKET,
-        time_in_force="GTC", quantity=Decimal("0.5"), price=None, status=status,
-        filled_quantity=Decimal("0"), average_fill_price=None, fee_total=None,
-        fee_currency=None, version=version, parent_order_id=None, algo_run_id=None,
-        unknown_since=None, provider_order_date=None, created_at=now, updated_at=now,
+        exchange_order_id=exchange_order_id,
+        symbol="BTC/USDT",
+        venue_symbol="BTCUSDT",
+        exchange=exchange,
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        time_in_force="GTC",
+        quantity=Decimal("0.5"),
+        price=None,
+        status=status,
+        filled_quantity=Decimal("0"),
+        average_fill_price=None,
+        fee_total=None,
+        fee_currency=None,
+        version=version,
+        parent_order_id=None,
+        algo_run_id=None,
+        unknown_since=None,
+        provider_order_date=None,
+        created_at=now,
+        updated_at=now,
     )
 
 
 def make_venue_order(view: OrderView, *, client_order_id: str | None = None) -> Order:
     return Order(
-        order_id=view.order_id, client_order_id=client_order_id or view.client_order_id,
-        strategy_id="s1", strategy_version="1.0.0", execution_id=view.execution_id,
-        symbol=view.symbol, exchange=view.exchange, side=view.side,
-        order_type=view.order_type, quantity=view.quantity, price=None,
-        status=OrderStatus.VALIDATED, asset_class=AssetClass.CRYPTO,
+        order_id=view.order_id,
+        client_order_id=client_order_id or view.client_order_id,
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=view.execution_id,
+        symbol=view.symbol,
+        exchange=view.exchange,
+        side=view.side,
+        order_type=view.order_type,
+        quantity=view.quantity,
+        price=None,
+        status=OrderStatus.VALIDATED,
+        asset_class=AssetClass.CRYPTO,
     )
 
 
@@ -402,7 +450,10 @@ async def enqueue(
 ) -> UUID:
     body = payload if payload is not None else submit_payload(view)
     return await outbox.enqueue(
-        FakeConn(), order_id=view.order_id, command_type=command_type, payload=body,
+        FakeConn(),
+        order_id=view.order_id,
+        command_type=command_type,
+        payload=body,
         not_before=not_before or datetime(2000, 1, 1, tzinfo=timezone.utc),
     )
 
@@ -436,9 +487,14 @@ def make_dispatcher(
 
     kwargs.setdefault("sleep", _no_sleep)
     return OutboxDispatcher(
-        FakePool(),  # type: ignore[arg-type]
-        outbox_repo=outbox, order_repo=orders, resolve_adapter=resolve,
-        pre_send_gate=gate, worker_id=worker_id, clock=clock, rng=lambda: 0.5,
+        FakePool(),
+        outbox_repo=outbox,
+        order_repo=orders,
+        resolve_adapter=resolve,
+        pre_send_gate=gate,
+        worker_id=worker_id,
+        clock=clock,
+        rng=lambda: 0.5,
         **kwargs,
     )
 
