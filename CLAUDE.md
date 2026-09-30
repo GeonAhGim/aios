@@ -697,6 +697,38 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     baseline/budget relief made (DECISION_GUIDELINES B-2) — task-9269's `RelativeBudget`
     migration is the actual fix and is already in place.
 
+30. A third `journeys` `[health:ci_red_systemic]` leaf (task-9484) on a question two prior
+    systemic leaves already closed — task-9124 (first systemic leaf, commit `67d00202`) found no
+    design defect in `frontend/playwright.config.ts`/the journeys suite itself: the 4 cited
+    repeats (task-8572, task-8753, task-8952, task-9054) were each a real, correctly diagnosed fix
+    at the time (vite dev JIT contention, cross-worktree port collision, redundant `tsc -b` in the
+    e2e build, webServer worker-count overrun respectively — see #13 above), and re-running
+    `npm run build:e2e --workspace=apps/web && npx playwright test journey-j1 journey-j2 journey-j3
+    --project=chromium` on a synced worktree was green (27 passed/1 skipped, ~26s). task-9124's own
+    note identified the actual repeat driver as process, not code: task-8931 re-bisected from a
+    worktree that was already behind the latest landed fix, and task-9068 re-ran the same bisect
+    on the same stale checkout and died with `error_max_turns` before reaching that conclusion —
+    both are the #13 stale-worktree pattern, not new violations. task-9151 (second systemic leaf)
+    reconfirmed this against the same repeat set plus task-9068, re-ran green (27 passed/1
+    skipped, 56.3s), and closed noop citing task-9124. This leaf (task-9484) reconfirms it a third
+    time against a newer repeat set (task-8931, task-9054, task-9068, task-9284): task-9284 itself
+    already found the bisect culprit `d21e3e68` innocent (a stale-worktree false positive) and
+    closed green (27 passed/1 skipped, 37.4s, commit `0c6f4ff5` = task-9054's real fix) before this
+    leaf was even created; a fresh run on this worktree today is green (27 passed/1 skipped, 3.6m).
+    `esc-ci-journeys.json` shows `status: "resolved"`/`closed_at: "2026-09-30T00:53:50Z"` yet kept
+    logging `"3x-repeat CI red"` for the same `detail_hash: "87721bbd92c5"` every 15-25 min from
+    06:34Z through 10:25Z — nearly 4 hours after task-9284 (06:28:45Z) had already re-confirmed
+    green — without creating a further fix task in that window. This is the identical fleet-code
+    defect already named for seven other gates (#17-#26): `pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule logging/reopening off a stale escalation snapshot instead of re-checking current
+    HEAD, out of a repo worker's edit scope (§4). Before working a future `journeys` leaf
+    (individual or systemic): run `git log --oneline -5 -- frontend/playwright.config.ts` and
+    `git status` first (per #13), then the plain re-run above — if green, and a systemic leaf
+    (task-9124 or task-9151) already closed the same question, close as noop citing both plus this
+    entry rather than re-investigating a third time. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2) — script/config design is sound and already fixed; the remaining
+    defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
