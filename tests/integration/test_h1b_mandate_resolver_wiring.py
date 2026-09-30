@@ -9,10 +9,18 @@ UI 경로가 아직 없기 때문(module docstring 참고, task-1806). H-1b 이�
 프로덕션 조립부(`src/api/execution_deps.py::get_execution_service`)를 통해
 동작하는지 확인한다(직접 `make_foundation_pre_submit_gate`를 호출하는
 `test_execution_service_risk_gate.py`/`test_order_service_risk_gate.py`와
-달리, 이 파일은 조립 함수 자체를 부른다)."""
+달리, 이 파일은 조립 함수 자체를 부른다).
+
+DEEPEN(task-9557, qa-2 고아 산출물 회수) — negative test 2건(PAUSED/비-ACTIVE
+mandate revision) + 실패주입 1건(mandate repo 예외 전파) + 성능단언 1건
+(resolve_mandate_revision, 기존 `test_order_service_risk_gate.py`
+`test_gate_latency_within_normalized_budget`와 동일한 SELECT-1-정규화 관례)을
+보강한다."""
+
 from __future__ import annotations
 
 import json
+import time
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -23,7 +31,9 @@ from dotenv import dotenv_values
 
 from src.api.execution_deps import get_execution_service
 from src.core.loader.risk_policy_loader import load_risk_policy
+from src.foundation.entities.domain.defaults import default_portfolio_id
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.mandates.application.resolve_binding import resolve_mandate_revision
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.services.execution_service import ExecutionControlError
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
@@ -147,3 +157,121 @@ async def test_mandated_tenant_start_still_allowed_via_resolver(
     result = await production_service.start(created.id, user_id)
 
     assert result.status == "RUNNING"
+
+
+async def test_paused_mandate_revision_rejected_via_production_wiring(
+    production_service, pool, mandate_repo, trust_repo
+):
+    """negative test #2 — resolver가 채운 revision이 PAUSED면 게이트는
+    ALLOW하지 않는다(`evaluate_policy.py` PAUSED -> PAUSE_REQUIRED, gate는
+    outcome != ALLOW를 모두 DENY로 취급). mandate가 "있다"는 사실만으로
+    자동 통과하지 않음을 증명한다(fail-closed 기본 태세, CLAUDE.md §3)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
+    mandate = await mandate_repo.get_mandate(user_id)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE mandate_revision SET state = 'PAUSED' WHERE id = $1",
+            mandate.active_revision_id,
+        )
+    created = await _create_execution(production_service, pool, user_id)
+
+    with pytest.raises(ExecutionControlError, match="STATE_MANDATE_PAUSED"):
+        await production_service.start(created.id, user_id)
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM strategy_executions WHERE id = $1", created.id
+        )
+    assert status != "RUNNING"
+
+
+async def test_non_active_mandate_revision_rejected_via_production_wiring(
+    production_service, pool, mandate_repo, trust_repo
+):
+    """negative test #3 — resolver가 채운 revision이 PAUSED도 ACTIVE도 아니면
+    (`CANCELLED` 등) `evaluate_policy.py`의 STATE_NO_ACTIVE_MANDATE DENY
+    분기를 탄다. `portfolio_mandate.active_revision_id`가 더 이상 유효하지
+    않은 revision을 가리키는 상태(취소/만료된 mandate)에서도 fail-closed로
+    거부되는지 확인한다."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
+    mandate = await mandate_repo.get_mandate(user_id)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE mandate_revision SET state = 'CANCELLED' WHERE id = $1",
+            mandate.active_revision_id,
+        )
+    created = await _create_execution(production_service, pool, user_id)
+
+    with pytest.raises(ExecutionControlError, match="STATE_NO_ACTIVE_MANDATE"):
+        await production_service.start(created.id, user_id)
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM strategy_executions WHERE id = $1", created.id
+        )
+    assert status != "RUNNING"
+
+
+async def test_mandate_repository_failure_propagates_not_silently_allowed(
+    production_service, pool, mandate_repo, trust_repo, monkeypatch
+):
+    """실패주입 — production 조립부가 내부에서 만드는
+    `PostgresMandateRepository` 인스턴스는 이 테스트의 `mandate_repo` fixture
+    와 별개 객체라(각자 `make_foundation_pre_submit_gate` 호출 시점에 새로
+    생성) 인스턴스 monkeypatch로는 닿지 않는다 — 클래스 메서드를 패치해야
+    production 경로에도 적용된다. `get_mandate`가 예외를 던지면 게이트가
+    이를 삼켜 조용히 ALLOW로 진행하지 않고 그대로 전파해야 한다(fail-closed:
+    의존성 장애 시 크래시가 잘못된 ALLOW보다 안전하다)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
+    created = await _create_execution(production_service, pool, user_id)
+
+    async def _raise(self, tenant_id, portfolio_id=None):
+        raise RuntimeError("mandate repository unavailable")
+
+    monkeypatch.setattr(PostgresMandateRepository, "get_mandate", _raise)
+
+    with pytest.raises(RuntimeError, match="mandate repository unavailable"):
+        await production_service.start(created.id, user_id)
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM strategy_executions WHERE id = $1", created.id
+        )
+    assert status != "RUNNING"
+
+
+@pytest.mark.perf
+async def test_resolve_mandate_revision_latency_within_normalized_budget(
+    pool, mandate_repo, trust_repo
+):
+    """성능단언 — H-1a resolver 단독 조회 1회의 p95 지연을 같은 연결의 기준
+    왕복비용(`SELECT 1`)에 정규화한 임계와 비교한다(`test_order_service_
+    risk_gate.py::test_gate_latency_within_normalized_budget`와 동일 관례 —
+    절대 ms 상수는 공유 CI 환경에서 흔들려 상시 적색을 낳은 전례가 있다)."""
+    user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
+    portfolio_id = default_portfolio_id(user_id)
+    reps = 20
+
+    async def _p95_ms(step) -> float:
+        samples = []
+        for _ in range(reps):
+            t0 = time.perf_counter()
+            await step()
+            samples.append((time.perf_counter() - t0) * 1000)
+        samples.sort()
+        return samples[int(len(samples) * 0.95) - 1]
+
+    async with pool.acquire() as conn:
+        baseline_p95 = await _p95_ms(lambda: conn.fetchval("SELECT 1"))
+    resolve_p95 = await _p95_ms(lambda: resolve_mandate_revision(pool, portfolio_id))
+
+    budget_ms = max(200.0, 40.0 * baseline_p95)
+    print(  # noqa: T201 — 실측치는 비차단 기록, 게이트는 아래 assert.
+        f"resolve_mandate_revision p95={resolve_p95:.3f}ms "
+        f"baseline(SELECT 1) p95={baseline_p95:.3f}ms budget={budget_ms:.3f}ms"
+    )
+    assert resolve_p95 < budget_ms
