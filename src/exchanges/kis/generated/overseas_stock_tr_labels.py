@@ -6,6 +6,13 @@ overseas_stock.
 overwrites it). ADR-2026-09-07-A only requires English comments/docstrings under
 `src/`; plain string/dict literals may stay Korean, so the labels live here
 instead of in the generated mixins' docstrings.
+
+DO NOT DELETE for having zero import/string references -- that is expected: this
+module is read by humans, not imported by code. Deleting it (or any sibling
+*_tr_labels.py) regresses test_committed_generated_dir_matches_fresh_regeneration
+in tests/unit/scripts/test_kis_generate_adapters.py (task-8850, task-9055 both
+reverted this exact deletion). Run `python scripts/kis_generate_adapters.py` to
+regenerate instead of hand-editing or removing.
 """
 from __future__ import annotations
 

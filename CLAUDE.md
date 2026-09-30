@@ -105,6 +105,16 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
    `decision`, unless one is already recorded.
 10. `git show <sha>` on a wide commit "to see what changed" — use `--stat` then target specific
     paths instead.
+11. Deleting a file under `src/**/generated/` (e.g. `src/exchanges/kis/generated/*_tr_labels.py`)
+    because it has zero import/string references — for these specific generator outputs that is
+    expected (BR-12/ADR-2026-09-06-I D7 moves Korean labels out of docstrings into plain dict
+    literals nothing imports by name). Read the target file's own module docstring before
+    deleting anything that looks unreferenced; a generated-artifact docstring says so explicitly.
+    This exact deletion regressed twice in one day (task-8850, then task-9055 re-deleted what
+    task-8850 had just restored) — CI's pytest stage catches it, but only after the commit lands,
+    so treat "looks like dead code, nothing imports it" as insufficient justification for deleting
+    anything under a `generated/` directory; regenerate via the sibling `*_generate_*.py` script
+    instead, and check its docstring for the rationale first.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
