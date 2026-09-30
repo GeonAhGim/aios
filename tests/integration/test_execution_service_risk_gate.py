@@ -9,6 +9,7 @@ order_service.foundation_gate.make_foundation_pre_submit_gate()를 그대로
 수 없는 상태라 제거했다 — `tests/integration/test_execution_control.py`를
 포함한 다른 모든 ExecutionService 생성부도 이 리프에서 실제 게이트를
 주입하도록 함께 바뀌었다."""
+
 from __future__ import annotations
 
 import json
@@ -44,6 +45,14 @@ def _asyncpg_dsn() -> str:
 @pytest.fixture
 async def pool():
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    # system_safety_state는 전역 싱글톤 행 — 다른 테스트 파일(예:
+    # test_execution_scheduler.py의 halted/restricted 시나리오)이 남긴 값과
+    # 섞이지 않도록 매 테스트 시작 전 normal로 되돌린다(test_execution_tick.py 관례).
+    async with p.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
     yield p
     await p.close()
 

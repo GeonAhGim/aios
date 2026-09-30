@@ -3,6 +3,7 @@
 실제 Bitget/KIS Demo 키가 없어 잔고 조회는 FastAPI dependency_overrides로
 가짜 CredentialResolver를 주입한다(strategy_builder 라우터 테스트와 동일
 패턴)."""
+
 import json
 import uuid
 from decimal import Decimal
@@ -36,6 +37,14 @@ def _asyncpg_dsn() -> str:
 @pytest.fixture
 async def pool():
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    # system_safety_state는 전역 싱글톤 행 — 다른 테스트 파일(예:
+    # test_execution_scheduler.py의 halted/restricted 시나리오)이 남긴 값과
+    # 섞이지 않도록 매 테스트 시작 전 normal로 되돌린다(test_execution_tick.py 관례).
+    async with p.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
     yield p
     await p.close()
 

@@ -1,4 +1,5 @@
 """16.6 통합테스트 — 실제 dev DB 대상."""
+
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -24,6 +25,14 @@ def _asyncpg_dsn() -> str:
 @pytest.fixture
 async def pool():
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    # system_safety_state는 전역 싱글톤 행 — 다른 테스트 파일(예:
+    # test_execution_scheduler.py의 halted/restricted 시나리오)이 남긴 값과
+    # 섞이지 않도록 매 테스트 시작 전 normal로 되돌린다(test_execution_tick.py 관례).
+    async with p.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
     yield p
     await p.close()
 
