@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.api.contracts.envelope import ApiResponse, ok
@@ -216,11 +216,14 @@ async def search_research_data_endpoint(
             if authorized_sources[item.source_id]:
                 allowed_candidates.append(item)
 
-    matched = search_items(
-        allowed_candidates,
-        kinds=body.kinds or None,
-        as_of=body.as_of,
-    )
+    try:
+        matched = search_items(
+            allowed_candidates,
+            kinds=body.kinds or None,
+            as_of=body.as_of,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid as_of: {exc}") from exc
 
     query = body.query.strip().lower()
     if query:

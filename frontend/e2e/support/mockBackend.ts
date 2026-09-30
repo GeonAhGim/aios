@@ -215,6 +215,67 @@ export async function mockBackend(page: Page, options: MockBackendOptions = {}):
       );
     }
 
+    if (pathname === "/v1/foundation/research-data/search" && method === "POST") {
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      const kinds = body.kinds as string[] | undefined;
+      const query = (body.query as string) || "";
+      const items = [
+        {
+          itemId: "item-001",
+          sourceId: "coinmarketcap",
+          kind: "news",
+          title: query ? `${query} 분석 리포트` : "BTC/USDT 시장 분석",
+          url: "https://example.com/item-001",
+          publishedAt: "2024-06-15T10:00:00Z",
+          knownAt: "2024-06-15T10:05:00Z",
+          instrumentId: null,
+          unmappedReason: "not_found",
+        },
+        {
+          itemId: "item-002",
+          sourceId: "defillama",
+          kind: "alt",
+          title: "DeFi 트렌드 2024",
+          url: "https://example.com/item-002",
+          publishedAt: "2024-05-20T08:30:00Z",
+          knownAt: "2024-05-20T08:35:00Z",
+          instrumentId: null,
+          unmappedReason: "not_found",
+        },
+      ].filter((item) => !kinds || kinds.length === 0 || kinds.includes(item.kind));
+      return json(
+        route,
+        200,
+        envelope({ items, total: items.length, truncated: false }),
+      );
+    }
+
+    if (pathname === "/v1/foundation/research-data/sources" && method === "GET") {
+      const sources = [
+        {
+          sourceId: "coinmarketcap",
+          publisher: "CoinMarketCap",
+          redistribution: "store_full",
+          licenseRef: "cmc-tos-v1",
+          rateLimit: 60,
+          coverage: "market_data",
+          lastIngestedAt: "2024-06-15T09:00:00Z",
+          health: "ok",
+        },
+        {
+          sourceId: "defillama",
+          publisher: "DefiLlama",
+          redistribution: "link_only",
+          licenseRef: "defillama-tos-v1",
+          rateLimit: 30,
+          coverage: "defi_metrics",
+          lastIngestedAt: "2024-06-14T09:00:00Z",
+          health: "ok",
+        },
+      ];
+      return json(route, 200, envelope(sources));
+    }
+
     return route.fallback();
   });
 

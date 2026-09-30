@@ -222,6 +222,28 @@ async def test_sources_endpoint_returns_catalog(client, seeded):
     assert {SOURCE_A, SOURCE_B} <= {s["source_id"] for s in body}
 
 
+# --- naive as_of → 4xx (not 500) ---
+
+
+async def test_search_naive_as_of_returns_422_not_500(client, seeded):
+    """naive(as_of, tzinfo 없는) datetime을 보낼 때 500이 아니라 4xx(422)를 반환한다.
+
+    root cause: query.py search_items()가 naive as_of에 대해 ValueError를
+    던지는데 exception_registry_foundation_research.py가 매핑하지 않아
+    라우터에서 미처리 500으로 새었다(task-10120).
+    """
+    naive_as_of = datetime(2024, 1, 1, 0, 0, 0)  # tzinfo 없음
+    response = await client.post(
+        f"{BASE}/search",
+        json={"query": "BTC", "as_of": naive_as_of.isoformat(), "kinds": []},
+        headers=seeded["a"],
+    )
+    assert response.status_code == 422, f"Expected 422, got {response.status_code}: {response.text}"
+    body = response.json()
+    assert "error_code" in body
+    assert "data" not in body
+
+
 # --- D2 floor: failure-injection / numeric perf assertion / gate-red repro ---
 
 

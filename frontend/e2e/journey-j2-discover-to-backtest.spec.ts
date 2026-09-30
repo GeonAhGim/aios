@@ -236,15 +236,24 @@ test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크�
     expect(calls).toBe(1);
   });
 
-  // 갭: researchData.search·researchData.sources.list 모두 implemented:false
-  // 유령 경로다. ResearchPage.tsx는 마운트 시 sourcesQuery를 무조건 실행하므로
-  // 검색 버튼을 누르기도 전에 소스 카드가 이미 미구현 오류 배너를 보여준다.
-  test.fixme("7단계 [유령경로] 리서치 검색으로 결과를 해석한다", async ({ page }) => {
-    // 갭: researchData.search·researchData.sources.list 모두 implemented:false —
-    // ResearchDataClient가 fetch 전에 ResearchDataRouteNotImplementedError를 던진다.
-    // ResearchPage.tsx는 마운트 시 sourcesQuery를 무조건 실행하므로 검색 버튼을
-    // 누르기도 전에 소스 카드가 이미 미구현 오류 배너를 보여준다 — 목으로도 재현 불가.
+  // ─── 7단계: 리서치 검색 — 실제 테스트 (mockBackend에 search/sources 목 추가 완료) ──
+  test("7단계 리서치 검색으로 결과를 해석한다", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/research");
+
+    // 1) 리서치 페이지 헤더 확인
+    await expect(page.getByRole("heading", { name: "리서치 데이터" })).toBeVisible();
+
+    // 2) 검색어 입력 후 검색 실행
+    await page.getByTestId("research-query").fill("BTC");
+    await page.getByTestId("research-search-run").click();
+
+    // 3) 결과 카드 렌더링 확인 (mockBackend research-data/search 응답)
+    await expect(page.getByTestId("research-item-item-001")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId("research-item-item-001")).toContainText("BTC 분석 리포트");
+
+    // 4) 소스 상태 카드 렌더링 확인 (mockBackend research-data/sources 응답)
+    await expect(page.getByTestId("research-source-coinmarketcap")).toBeVisible();
+    await expect(page.getByTestId("research-source-coinmarketcap")).toContainText("CoinMarketCap");
   });
 });
