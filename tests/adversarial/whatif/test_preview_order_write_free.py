@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ast
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -206,7 +207,7 @@ def test_runtime_execution_touches_no_db_primitive(monkeypatch: pytest.MonkeyPat
 
     calls: list[str] = []
 
-    def _trap(name: str):
+    def _trap(name: str) -> Callable[..., object]:
         def _raise(*_args: object, **_kwargs: object) -> object:
             calls.append(name)
             raise _DbAccessError(f"UX-A2 violation: {name} invoked during preview_order")
@@ -391,3 +392,39 @@ def test_gate_turns_red_when_a_write_call_is_injected_into_the_real_file(
     violations = find_direct_violations(ast.parse(poisoned))
     assert violations, "게이트 적색 재현 실패 — 주입된 쓰기 호출을 체커가 놓침"
     assert ("write_call", "insert_policy_decision") in violations
+
+
+# ---------------------------------------------------------------------------
+# D2 성능 단언: AST 스캔 + import graph 스캔이 실제 파일 크기에 대해
+# O(n) 이내로 완료되어야 한다 (성능 예산: 10ms).
+# ---------------------------------------------------------------------------
+
+
+def test_performance_ast_scan_under_10ms() -> None:
+    """AST 스캔 성능: 10ms 이내 완료 (성능 예산)."""
+    import time
+
+    source = TARGET.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    # Warm-up
+    find_direct_violations(tree)
+
+    start = time.perf_counter_ns()
+    for _ in range(100):
+        find_direct_violations(tree)
+    elapsed_ms = (time.perf_counter_ns() - start) / 1e6 / 100
+
+    assert elapsed_ms < 10, f"AST 스캔 성능 예산 초과: {elapsed_ms:.2f}ms (예산 10ms)"
+
+
+def test_performance_import_scan_under_50ms() -> None:
+    """import graph 스캔 성능: 50ms 이내 완료 (성능 예산)."""
+    import time
+
+    start = time.perf_counter_ns()
+    for _ in range(100):
+        scan_import_graph(TARGET, TARGET.parent, BANNED_MODULES)
+    elapsed_ms = (time.perf_counter_ns() - start) / 1e6 / 100
+
+    assert elapsed_ms < 50, f"import graph 스캔 성능 예산 초과: {elapsed_ms:.2f}ms (예산 50ms)"
