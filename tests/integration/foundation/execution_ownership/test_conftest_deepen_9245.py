@@ -142,6 +142,7 @@ async def test_gate_red_unknown_user_id_regression_is_caught(pool: asyncpg.Pool)
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 async def test_pool_creation_performance_within_budget() -> None:
     """Pool creation (including retry loop) must complete within a reasonable
     latency budget (ADR-2026-09-09-C). This prevents accidental O(n) blocking
