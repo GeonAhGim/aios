@@ -2350,3 +2350,39 @@ the numbering they had in CLAUDE.md section 6.
     task-9703/#62, or this entry), close as noop citing them rather than re-fixing already-fixed
     code for a fifth round. No baseline/rule relief made (DECISION_GUIDELINES B-2) — none was
     warranted.
+
+93. A tenth `pytest_latency_serial` 24h 5-repeat systemic leaf (task-9762) citing a repeat set
+    (task-9286, task-9465, task-9534, task-9701) *identical* to #82 (task-9721)'s already-closed
+    set — task-9762's spec names task-8993 as the flagging investigation and lists task-9286,
+    task-9465, task-9534, task-9701 verbatim, the same four leaves #82 already root-caused: no
+    design defect, task-9269's `eaa83bbd1` `RelativeBudget` migration (`tests/_perf/
+    relative_budget.py`) is the fix and was already in place, and the residual single-run
+    `parser` overshoot task-9701 saw was ordinary shared-host variance that did not reproduce on
+    reruns. Reconfirmed on this worktree (`git status` clean, HEAD `b4e0e3b53`): `git log
+    --oneline -3 -- tests/_perf/relative_budget.py tests/unit/core/script/test_parser.py
+    tests/unit/core/script/test_builtins_math.py tests/unit/core/script/test_lower.py
+    tests/unit/core/script/test_interpreter.py` still shows `eaa83bbd1`/task-9269 as the latest
+    touch to the budget module, all four latency test files still `grep`-confirm `RelativeBudget`
+    usage, and a serial run of the exact `pm/ci_recheck.py:199-204`
+    `FULL_PYTEST_SERIAL_LATENCY_NODEIDS` (`test_parser.py::
+    test_parse_latency_stays_within_half_of_dsl_compile_budget`, `test_builtins_math.py::
+    test_series_builtin_call_latency_p95_within_backtest_budget_slice`, `test_lower.py::
+    test_lowering_latency_p95_within_compile_budget_slice`, `test_interpreter.py::
+    test_execution_latency_p95_within_backtest_budget_slice`) with the step's own flags
+    (`-p no:cacheprovider -p no:xdist --benchmark-disable --maxfail=5`) gives `4 passed in 8.36s`,
+    nearly two orders of magnitude under the step's 300s budget. There is no
+    `scripts/check_pytest_latency_serial.py` in this repo (confirmed again here) — as with #20/
+    #29/#42/#65/#73/#76/#79/#82, the check lives in fleet code (`pm/ci_recheck.py`'s
+    `FULL_PYTEST_SERIAL_LATENCY_NODEIDS`/build_steps), so the repeat is the same
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off a
+    stale/overlapping repeat set instead of checking whether a prior systemic leaf already closed
+    the identical question — the same fleet-code pattern named twenty-two+ times now (#17-#26,
+    #30-#31, #33-#36, #38, #40-#42, #48, #50, #56, #59, #61, #65, #73, #76, #79, #82), out of a
+    repo worker's edit scope (§4). No script/test/budget change made — task-9269's
+    `RelativeBudget` migration is still the actual fix and is already in place; no residual
+    overshoot reproduced this time either. No baseline/budget relief made (DECISION_GUIDELINES
+    B-2) — the same rule as #82. Before working a future `pytest_latency_serial` leaf: run the 4
+    nodeids serially and grep them for `RelativeBudget` first — if both hold, and the cited
+    repeat leaf ids overlap an already-closed systemic leaf's set (task-9298/#20, task-9483/#29,
+    task-9550/#42, task-9668/#65, task-9694/#73, task-9591/#76, task-9616/#79, task-9721/#82, or
+    this entry), close as noop citing all of them rather than re-diagnosing an eleventh time.
