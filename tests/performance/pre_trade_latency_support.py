@@ -47,6 +47,7 @@ from src.services.execution_loop.tick_risk_phase import RiskPhaseOutcome, run_pr
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 from tests.integration.conftest import NoopEventBus, create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.integration.risk.conftest import NoOpenSignalsRepo
 
 PROVIDER = "bitget"
 SYMBOL = "BTC/USDT"
@@ -273,6 +274,7 @@ async def count_pre_submit_round_trips(
             return await evaluate_pre_submit(
                 risk_repo,
                 connection_repo,
+                NoOpenSignalsRepo(),
                 recorder,
                 tenant_id=tenant_id,  # type: ignore[arg-type]  # risk_repo가 pinned 대역이라 프로토콜 타입을 정적으로 못 좁힘
                 execution_ref="exec:perf",
