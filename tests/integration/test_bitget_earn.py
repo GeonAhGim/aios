@@ -181,7 +181,7 @@ async def test_subscribe_earn_request_dependency_failure_propagates():
     ) -> dict:
         raise FatalExchangeError("network failure")
 
-    adapter._request = broken_request  # type: ignore[method-assign]
+    adapter._request = broken_request
 
     with pytest.raises(FatalExchangeError, match="network failure"):
         await adapter.subscribe_earn_product("p-1", Decimal("100"))
