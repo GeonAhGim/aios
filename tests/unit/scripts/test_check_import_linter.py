@@ -4,6 +4,14 @@
 `src/` 트리 + `.importlinter`로 각각 검증하고, baseline 래칫(증가=exit 2)을
 재현한다. D2 DoD: negative test 3건 이상, 실패주입 1건(계약 파일 파싱 오류),
 성능 단언 1건, 게이트 적색 재현 1건.
+
+task-9114 ([health:ci_red_systemic] import_linter 24h 4회 반복 조사): 반복된
+task-8752/8845/8930은 서로 다른 위반이 아니라 같은 콜드체크아웃 디스크 I/O
+타임아웃 회귀였다 -- `test_build_graph_throughput_budget`이 캐시된(즉시
+반환되는) tmp_path 파일만 CPU 모드로 측정해 실제 병목(블로킹 디스크 read)을
+전혀 재현하지 못했기 때문에 매번 production CI에서만 발견됐다.
+`test_build_graph_overlaps_io_bound_reads`가 그 격차를 인위적 read 지연으로
+메운다.
 """
 
 from __future__ import annotations
@@ -11,6 +19,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -363,3 +372,53 @@ def test_build_graph_throughput_budget(tmp_path: Path) -> None:
 
     assert len(graph) >= 300
     assert sample.ratio < 100.0, budget.describe(sample, max_ratio=100.0)
+
+
+@pytest.mark.perf
+def test_build_graph_overlaps_io_bound_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실제 병목 재현: `_read_file`에 인위적 디스크 latency를 주입해 build_graph의
+    ThreadPoolExecutor가 그 대기를 실제로 겹쳐 처리하는지 검증한다.
+
+    task-8752/8845/8930이 3회 재발한 근본 원인은 위의 `test_build_graph_throughput_budget`이
+    tmp_path의 캐시된(즉시 반환) 파일만 CPU 모드로 재고, 콜드체크아웃의 블로킹 disk read
+    자체는 전혀 흉내내지 않았다는 것 -- 그래서 이 병목군의 회귀(SCAN_WORKERS 축소나
+    직렬화로의 회귀 포함)가 로컬 게이트를 항상 통과하고 production CI에서만 드러났다.
+    이 테스트는 SCAN_WORKERS=1(직렬)과 실제 설정값을 같은 인위 지연 하에서 비교해,
+    스레드풀이 I/O 대기를 겹치지 못하는 회귀를 로컬에서 즉시 잡는다.
+    """
+    n_files = 60
+    _touch_pkg(tmp_path, "src", "foundation")
+    for i in range(n_files):
+        _write(tmp_path, f"src/foundation/mod_{i}.py", "import json\n")
+
+    delay_s = 0.01
+    real_read_file = cil._read_file
+
+    def _slow_read_file(path: Path) -> str:
+        time.sleep(delay_s)
+        return real_read_file(path)
+
+    monkeypatch.setattr(cil, "_read_file", _slow_read_file)
+
+    def _timed(workers: int) -> float:
+        monkeypatch.setattr(cil, "SCAN_WORKERS", workers)
+        start = time.perf_counter()
+        graph = cil.build_graph(tmp_path)
+        elapsed = time.perf_counter() - start
+        assert len(graph) >= n_files
+        return elapsed
+
+    serial_elapsed = _timed(workers=1)
+    parallel_elapsed = _timed(workers=24)
+
+    # Serial pays ~n_files * delay_s (0.6s here); a working pool overlaps that wait so
+    # parallel should land well under half of it -- generous enough margin for CI jitter
+    # while still catching a de-parallelization regression (e.g. SCAN_WORKERS silently
+    # dropped to 1, or a future refactor back to a plain serial loop).
+    assert parallel_elapsed < serial_elapsed / 2, (
+        f"parallel={parallel_elapsed:.3f}s serial={serial_elapsed:.3f}s -- "
+        "I/O reads are not overlapping (this is the exact defect class that reopened "
+        "esc-ci-import_linter three times: task-8752/8845/8930)"
+    )

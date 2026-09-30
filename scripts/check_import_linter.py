@@ -65,6 +65,21 @@ _EXCLUDE_DIR_NAMES = frozenset(
 # below the library default (28) that caused STATUS_DLL_INIT_FAILED (task-8657). Mirroring
 # that fleet-tuned value here. No budget/baseline change (DECISION_GUIDELINES B-2) -- this
 # only retunes this step's own concurrency footprint.
+#
+# 2026-09-30(task-9114, [health:ci_red_systemic] 24h 4-leaf recurrence root cause): the
+# repeated leaves (task-8752/8845/8930) were never four different violations -- every one was
+# the same disk-I/O-bound timeout class, only discovered via production CI red + bisect each
+# time. `tests/unit/scripts/test_check_import_linter.py`'s only perf assertion
+# (test_build_graph_throughput_budget) measures graph-construction CPU cost against
+# tmp_path files that are already OS-page-cache-resident the instant they're written --
+# it can never exercise the actual failure mode (blocking disk reads under a cold checkout,
+# compounded by this fleet's shared-disk/antivirus contention across concurrent worker
+# lanes), so a regression in the I/O-parallelization mechanism itself (e.g. task-8845's
+# collateral break of the `_read_file`/`_imports_of` split) has no local signal before merge.
+# `test_build_graph_overlaps_io_bound_reads` below closes that gap by injecting an
+# artificial per-file read delay and asserting the thread pool actually overlaps it --
+# the first local test in this suite that would have caught this failure class before any
+# of the three production incidents.
 SCAN_WORKERS = 24
 
 Hit = tuple[str, int, str]  # (rel_path, lineno, detail)
