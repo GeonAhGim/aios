@@ -133,3 +133,51 @@ async def test_two_users_concurrent_lookup_never_mix_credentials(
 
     assert adapter_a.api_key == "key-a"
     assert adapter_b.api_key == "key-b"
+
+
+async def test_raises_for_revoked_credential(resolver, credential_service, pool):
+    """negative: is_active=false credential(해지됨)은 CredentialNotFoundError 를 던진다."""
+    user_id = await create_test_user(pool)
+    await credential_service.register(user_id, "bitget", "key-a", "secret-a")
+
+    # isActive를 false로 설정 — 해지된 자격증명
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE exchange_credentials SET is_active = false "
+            "WHERE user_id = $1 AND exchange = $2",
+            user_id,
+            "bitget",
+        )
+
+    with pytest.raises(CredentialNotFoundError):
+        await resolver.get_adapter(user_id, "bitget")
+
+
+async def test_raises_for_empty_exchange_name(resolver, pool):
+    """negative: 빈 exchange 문자열은 즉시 CredentialNotFoundError 를 던진다."""
+    user_id = await create_test_user(pool)
+
+    with pytest.raises(CredentialNotFoundError):
+        await resolver.get_adapter(user_id, "")
+
+
+async def test_handles_credential_service_database_error(
+    resolver, credential_service, pool, factory
+):
+    """failure-injection: get_decrypted 가 예외를 던지면 CredentialResolver 는
+    그 예외를 그대로 전달한다(내부 캐시/로직이 개입하지 않음).
+    CredentialNotFoundError 는 이미 resolver 가 던지는 예외이므로 그대로 확인한다."""
+    user_id = await create_test_user(pool)
+
+    original_get_decrypted = credential_service.get_decrypted
+
+    async def raise_credential_error(*args, **kwargs):
+        raise CredentialNotFoundError("credential lookup failed")
+
+    credential_service.get_decrypted = raise_credential_error  # type: ignore[assignment]
+
+    try:
+        with pytest.raises(CredentialNotFoundError):
+            await resolver.get_adapter(user_id, "bitget")
+    finally:
+        credential_service.get_decrypted = original_get_decrypted
