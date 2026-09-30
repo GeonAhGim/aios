@@ -2169,8 +2169,6 @@ the numbering they had in CLAUDE.md section 6.
     twelfth time. No baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES B-2) — the
     ratchet design is sound; the remaining defect is fleet code, not this repo.
 
-
-
 87. A ninth `consistency` 24h 5-repeat systemic leaf (task-9759) citing the identical repeat
     set #22 (task-9011/9281/9460), #31 (task-9301/9460), #35 (task-9537), #54 (task-9620), #61
     (task-9665), #71 (task-9691), #78 (task-9595), and #80 (task-9718) already closed eight
@@ -2293,3 +2291,32 @@ the numbering they had in CLAUDE.md section 6.
     working a future `pytest_perf` leaf: check whether the cited repeat leaf ids match #43/#63/
     #72's set (task-8934, task-9056, task-9287, task-9520) or this entry's — if so, close as noop
     citing all four rather than re-deriving the same three failure classes a fifth time.
+
+91. A seventh `pytest` 24h 4-repeat systemic leaf (task-9757) citing the *identical* repeat set
+    #81 (task-9716) already closed — task-9757's spec names task-8933, task-9055, task-9464,
+    task-9653 verbatim, the same four leaves #81 already root-caused into three independent,
+    already-fixed classes: the `generated/` deletion regression (#11, fixed twice, commits
+    `62005ec2`/`9c4a176a`), correctly-classified shared-host DB migration/reset wall-clock
+    contention (task-8933, no code change per DECISION_GUIDELINES B-2), and the
+    `perf_measurement_guard` offender-count D2/D3 collision (task-9464, commit `7ad655e6`, same
+    pattern as #14) plus task-9653's own noop closure (truncated 28%-progress escalation detail
+    against sha `7ad655e6`, cross-checked against sibling `esc-ci-prepare`/task-9519 and
+    `esc-ci-pm_pytest`/task-9442 escalations showing the same host-contention signature — a
+    transient Windows subprocess spawn fault and shared-host CPU pressure from concurrent
+    orchestrator/worker_runner/local_ci processes, unrelated to any diff). As all six prior
+    systemic leaves (#28/#34/#40/#48/#77/#81) already established, `scripts/check_pytest.py`
+    does not exist in this repo (confirmed again here) — `pytest` is a container name for the
+    ~2700s full suite in `pm/ci_recheck.py`, not a shared check script with its own design, so
+    "the pytest gate repeating" is N unrelated single-test failures sharing one stage name, not a
+    design defect. Reconfirmed on this worktree (`git status` clean):
+    `tests/unit/scripts/test_kis_generate_adapters.py` and
+    `tests/unit/meta/test_perf_measurement_guard.py` both pass (32 passed, 13.9s). No new root
+    cause found and none expected — this is the same escalation/orchestrator pattern named in
+    #17-#26/#30-#31/#33-#36/#38/#40/#48/#77/#81 (`pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule spawning a fresh systemic leaf off an already-closed repeat set instead of
+    checking whether a prior systemic leaf closed the identical question), fleet code out of a
+    repo worker's edit scope (§4). Before working a future `pytest` systemic leaf: check whether
+    the cited repeat leaf ids match #28/#34/#40/#48/#77/#81/this entry's sets first — if so,
+    close as noop citing them rather than re-deriving the same failure classes a seventh time.
+    No script/baseline exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to
+    fix; the repeat is fleet-code re-escalation, not this repo.
