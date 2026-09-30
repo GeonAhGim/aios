@@ -9,6 +9,7 @@ boundary (FND-04 package lifecycle and FND-08 reconciliation are not yet
 in place; see migration docstring) — this leaf actually re-verifies only
 the risk_gate (FND-06) DEPLOYMENT gate (mandate + safety control composite)
 and, if a connection is specified, its freshness alone."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -91,7 +92,10 @@ async def _start_or_resume(
         raise RiskGateDeniedError(risk_result.reason_codes)
 
     updated = await repo.transition_deployment_state(
-        deployment_id, expected_state=expected_state.value, new_state=DeploymentState.RUNNING.value
+        deployment_id,
+        tenant_id=tenant_id,
+        expected_state=expected_state.value,
+        new_state=DeploymentState.RUNNING.value,
     )
     await repo.insert_command(
         deployment_id=deployment_id,

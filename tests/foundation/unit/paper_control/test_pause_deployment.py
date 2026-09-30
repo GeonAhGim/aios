@@ -3,6 +3,7 @@
 pause_deployment/stop_deployment의 커버되지 않은 분기(멱등 캐시 히트,
 미존재/타테넌트/잘못된 상태, ConcurrencyConflictError 실패주입과 STOP의
 재시도 경로 3가지)를 fake PaperControlRepository로 검증한다."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -78,7 +79,7 @@ class FakeRepo:
         return self.commands.get(idempotency_key)
 
     async def increment_fence(
-        self, deployment_id: UUID, *, expected_state: str, new_state: str
+        self, deployment_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
     ) -> PaperDeployment:
         self.increment_fence_calls.append((expected_state, new_state))
         if self.increment_fence_side_effects:

@@ -25,6 +25,7 @@ risk_gate의 repository/port는 전혀 모른다 — paper_control -> risk_gate
 단방향 의존(submit_paper_intent.py가 이미 risk_gate.domain을 참조하는
 것과 같은 방향, 반대 방향은 없다).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -67,6 +68,7 @@ async def apply_safety_control_to_deployments(
         try:
             updated = await repo.increment_fence(
                 deployment.id,
+                tenant_id=deployment.tenant_id,
                 expected_state=DeploymentState.RUNNING.value,
                 new_state=DeploymentState.PAUSED.value,
             )

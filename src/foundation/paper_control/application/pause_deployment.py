@@ -7,6 +7,7 @@ PAUSE take precedence over START/RESUME" (§2) is implemented only up to the
 point where idempotency_key uniqueness guarantees ordering, since this
 codebase lacks a true concurrent command scheduler (full "concurrent start/stop"
 reproduction in PAP-003 is verified via 105 §4 Form A tests)."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -88,6 +89,7 @@ async def pause_deployment(
     try:
         updated = await repo.increment_fence(
             deployment_id,
+            tenant_id=tenant_id,
             expected_state=DeploymentState.RUNNING.value,
             new_state=DeploymentState.PAUSED.value,
         )
@@ -126,6 +128,7 @@ async def stop_deployment(
     try:
         updated = await repo.increment_fence(
             deployment_id,
+            tenant_id=tenant_id,
             expected_state=deployment.state.value,
             new_state=DeploymentState.STOPPED.value,
         )
@@ -145,6 +148,7 @@ async def stop_deployment(
             ) from None
         updated = await repo.increment_fence(
             deployment_id,
+            tenant_id=tenant_id,
             expected_state=refreshed.state.value,
             new_state=DeploymentState.STOPPED.value,
         )

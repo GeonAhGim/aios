@@ -3,15 +3,26 @@
 
 DoD: negative test >=3, failure-injection >=1, docs/design/INVARIANTS.md 위반 없음
 (105번 표준 conditional_update/increment_fence의 fail-closed 재확인일 뿐, 새 불변식
-추가는 없다)."""
+추가는 없다).
+
+AUDIT_2026-09-30_auth_rls.md F1 (task-9455) 절 — tests/foundation/trust/
+test_postgres_repository.py의 task-9453 패턴(aios_app_pool/aios_app_repo +
+GUC 미바인딩 몽키패치)을 동일하게 적용한다."""
+
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
 import pytest
+from dotenv import dotenv_values
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.foundation.paper_control.adapters.postgres_repository import (
+    PostgresPaperControlRepository,
+)
 from src.foundation.paper_control.domain.models import (
     AdapterProvenance,
     CommandOutcome,
@@ -23,6 +34,34 @@ from src.foundation.paper_control.domain.models import (
 )
 from tests.foundation.integration.paper_control.conftest import request, tenant_with_mandate
 from tests.integration.conftest import create_test_tenant
+
+
+def _asyncpg_dsn() -> str:
+    env = dotenv_values(Path(__file__).resolve().parents[4] / ".env")
+    url = env.get("DATABASE_URL")
+    assert url
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+async def _run_as_aios_app(conn: asyncpg.Connection) -> None:
+    """asyncpg pool `setup` hook: every connection handed out by this pool runs
+    as the non-superuser `aios_app` role (task-9453/task-9455, AUDIT F1) so RLS
+    is actually enforced — the module-level `pool` fixture (conftest.py)
+    connects as the migrator/owner account, which PostgreSQL never subjects to
+    RLS regardless of GUC binding."""
+    await conn.execute("SET ROLE aios_app")
+
+
+@pytest.fixture
+async def aios_app_pool() -> asyncpg.Pool:
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2, setup=_run_as_aios_app)
+    yield p
+    await p.close()
+
+
+@pytest.fixture
+def aios_app_repo(aios_app_pool: asyncpg.Pool) -> PostgresPaperControlRepository:
+    return PostgresPaperControlRepository(aios_app_pool)
 
 
 def _deployment(
@@ -88,7 +127,7 @@ async def test_transition_deployment_state_wrong_expected_state_raises(
 
     with pytest.raises(ConcurrencyConflictError):
         await repo.transition_deployment_state(
-            deployment.id, expected_state="RUNNING", new_state="STOPPED"
+            deployment.id, tenant_id=tenant_id, expected_state="RUNNING", new_state="STOPPED"
         )
     # state untouched by the rejected write
     unchanged = await repo.get_deployment(deployment.id)
@@ -101,7 +140,7 @@ async def test_increment_fence_wrong_expected_state_raises(pool, repo, mandate_r
 
     with pytest.raises(ConcurrencyConflictError):
         await repo.increment_fence(
-            deployment.id, expected_state="RUNNING", new_state="PAUSED"
+            deployment.id, tenant_id=tenant_id, expected_state="RUNNING", new_state="PAUSED"
         )
     unchanged = await repo.get_deployment(deployment.id)
     assert unchanged is not None and unchanged.fence_token == 0
@@ -191,3 +230,88 @@ async def test_get_deployment_propagates_pool_connection_error(repo, monkeypatch
     monkeypatch.setattr(repo, "_pool", _BoomPool())
     with pytest.raises(asyncpg.PostgresConnectionError):
         await repo.get_deployment(uuid4())
+
+
+# ============================================================================
+# AUDIT_2026-09-30_auth_rls.md F1 (task-9455) — tenant_transaction/GUC binding
+# real repository call path (get_deployment_by_request_key), not the
+# AppRoleTx-direct-SQL route test_rls_foundation.py uses.
+# ============================================================================
+
+
+async def test_get_deployment_by_request_key_returns_none_under_aios_app_role_when_guc_unbound(
+    pool, repo, aios_app_repo, mandate_repo, trust_repo, monkeypatch
+):
+    """negative / F1 재현: 감사가 지적한 정정 전 상태(GUC 미바인딩)를 회귀
+    테스트로 고정한다. tenant_transaction을 GUC를 세팅하지 않는
+    `pool.acquire()` 동급 버전으로 몽키패치해 정정 전 어댑터를 재현하면,
+    비-superuser `aios_app` role 아래에서는 소유 tenant 자신의 배포조차
+    0행(None)으로 막힌다 — RLS 정책이 SQL의 tenant 조건이 아니라 이 GUC로
+    판정하기 때문이다."""
+    tenant_id = await tenant_with_mandate(pool, mandate_repo, trust_repo)
+    revision_id = await _active_revision_id(mandate_repo, tenant_id)
+    await repo.insert_deployment(
+        _deployment(
+            tenant_id=tenant_id,
+            mandate_revision_id=revision_id,
+            idempotency_key="f1-guc-unbound",
+        )
+    )
+
+    @asynccontextmanager
+    async def _unbound_transaction(pool, tenant_id):
+        # F1 정정 전 어댑터와 동급: 연결은 열지만 app.tenant_id GUC를 세팅하지 않는다.
+        async with pool.acquire() as conn, conn.transaction():
+            yield conn
+
+    monkeypatch.setattr(
+        "src.foundation.paper_control.adapters.postgres_repository.tenant_transaction",
+        _unbound_transaction,
+    )
+
+    result = await aios_app_repo.get_deployment_by_request_key(tenant_id, "f1-guc-unbound")
+
+    assert result is None  # F1: GUC 미바인딩이면 자기 행도 0행
+
+
+async def test_get_deployment_by_request_key_returns_row_under_aios_app_role_once_guc_bound(
+    pool, repo, aios_app_repo, mandate_repo, trust_repo
+):
+    """감사 재현의 나머지 절반: 몽키패치 없이(즉 정정된 어댑터로) 같은 조회를
+    같은 aios_app role에서 실행하면 GUC가 바인딩되어 1행이 돌아온다 — F1이
+    실제로 고쳐졌다는 양성 증거."""
+    tenant_id = await tenant_with_mandate(pool, mandate_repo, trust_repo)
+    revision_id = await _active_revision_id(mandate_repo, tenant_id)
+    inserted = await repo.insert_deployment(
+        _deployment(
+            tenant_id=tenant_id,
+            mandate_revision_id=revision_id,
+            idempotency_key="f1-guc-bound",
+        )
+    )
+
+    result = await aios_app_repo.get_deployment_by_request_key(tenant_id, "f1-guc-bound")
+
+    assert result is not None
+    assert result.id == inserted.id
+
+
+async def test_get_deployment_by_request_key_cross_tenant_returns_none_under_aios_app_role(
+    pool, repo, aios_app_repo, mandate_repo, trust_repo
+):
+    """negative: tenant A GUC로 tenant B의 행을 조회하면 0행이어야 한다
+    (교차 테넌트 격리) — WHERE tenant_id 조건과 RLS 정책이 이중으로 막는다."""
+    tenant_a = await tenant_with_mandate(pool, mandate_repo, trust_repo)
+    tenant_b = await tenant_with_mandate(pool, mandate_repo, trust_repo)
+    revision_id = await _active_revision_id(mandate_repo, tenant_a)
+    await repo.insert_deployment(
+        _deployment(
+            tenant_id=tenant_a,
+            mandate_revision_id=revision_id,
+            idempotency_key="f1-cross-tenant",
+        )
+    )
+
+    result = await aios_app_repo.get_deployment_by_request_key(tenant_b, "f1-cross-tenant")
+
+    assert result is None

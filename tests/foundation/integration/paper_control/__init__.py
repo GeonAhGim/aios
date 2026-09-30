@@ -84,7 +84,7 @@ class _FakePaperControlRepository:
         return command
 
     async def increment_fence(
-        self, deployment_id: UUID, *, expected_state: str, new_state: str
+        self, deployment_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
     ) -> PaperDeployment:
         current = self.deployments[deployment_id]
         assert current.state.value == expected_state

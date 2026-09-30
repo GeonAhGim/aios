@@ -18,6 +18,7 @@ fence 재확인만으로는 이 경로를 못 막는다. GateKind.PRE_INTENT로 
 risk_gate를 다시 확인해 이 틈을 막는다 — evaluate_risk_gate()는 10초
 TTL로 자체 캐시하므로(78번 §2) 매 tick마다 전체 재계산을 강제하지는 않는다.
 """
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -129,6 +130,7 @@ async def submit_paper_intent(
         try:
             await repo.transition_deployment_state(
                 deployment_id,
+                tenant_id=deployment.tenant_id,
                 expected_state=DeploymentState.RUNNING.value,
                 new_state=DeploymentState.DEGRADED.value,
             )

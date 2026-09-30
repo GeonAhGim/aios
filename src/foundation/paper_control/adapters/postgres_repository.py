@@ -6,7 +6,29 @@ increment_fence() bundles state transition and fence increment into a single UPD
 conditional_update() in conditional_write.py only supports "SET to new value" and
 does not support relative expressions like "current value + 1", so we write raw SQL here
 (standard #105 §2.2 exception — this query already carries a `WHERE state = $2` guard,
-so it fully satisfies the core principle of the standard)."""
+so it fully satisfies the core principle of the standard).
+
+AUDIT_2026-09-30_auth_rls.md F1 (task-9455) — `paper_deployment` is one of the 8
+FORCE RLS tables (b3c7f19ad2e6/c9f4e2a1b6d7); the RLS policy is judged by the
+`app.tenant_id` GUC, not by any tenant condition present in the SQL. Every method
+below that already has a `tenant_id` in scope opens its connection via
+[[tenant_transaction]] (same contract as connections/adapters/postgres_repository.py)
+and keeps the explicit `tenant_id` WHERE/CAS condition as the first line of defense
+while this environment's DATABASE_URL role remains a superuser (RLS is not applied to
+superusers) — tenant_transaction() is the second line of defense for once the
+production DSN switches to a non-superuser role (e.g. `aios_app`).
+`get_deployment(deployment_id)`/`list_running_deployments()` are deliberately left on
+plain `pool.acquire()`: both are called before any tenant_id is known (ownership is
+verified by the *caller* only after the row comes back — see
+`pause_deployment._load_owned_deployment`, `start_deployment._start_or_resume`,
+`submit_paper_intent.submit_paper_intent`; `list_running_deployments()` is the
+documented all-tenant GLOBAL kill-switch scan), so there is no tenant_id to bind a GUC
+with at that call site (same rationale as `PostgresConnectionRepository.get_connection`).
+`deployment_command`/`paper_order_intent` are child tables excluded from the RLS
+rollout (parent FK isolation, b3c7f19ad2e6 docstring), so their methods
+(`insert_command`/`get_command_by_idempotency_key`/`insert_order_intent`) are unaffected
+by F1 and stay on `pool.acquire()`."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -15,6 +37,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
+from src.core.db.tenant_scope import tenant_transaction
 from src.foundation.paper_control.domain.models import (
     AdapterProvenance,
     CommandOutcome,
@@ -79,13 +102,11 @@ class PostgresPaperControlRepository:
 
     async def get_deployment(self, deployment_id: UUID) -> PaperDeployment | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM paper_deployment WHERE id = $1", deployment_id
-            )
+            row = await conn.fetchrow("SELECT * FROM paper_deployment WHERE id = $1", deployment_id)
         return _row_to_deployment(row) if row is not None else None
 
     async def list_deployments(self, tenant_id: UUID) -> list[PaperDeployment]:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM paper_deployment WHERE tenant_id = $1 ORDER BY created_at",
                 tenant_id,
@@ -102,7 +123,7 @@ class PostgresPaperControlRepository:
     async def get_deployment_by_request_key(
         self, tenant_id: UUID, request_idempotency_key: str
     ) -> PaperDeployment | None:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM paper_deployment "
                 "WHERE tenant_id = $1 AND request_idempotency_key = $2",
@@ -112,7 +133,7 @@ class PostgresPaperControlRepository:
         return _row_to_deployment(row) if row is not None else None
 
     async def insert_deployment(self, deployment: PaperDeployment) -> PaperDeployment:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, deployment.tenant_id) as conn:
             row = await conn.fetchrow(
                 "INSERT INTO paper_deployment "
                 "(tenant_id, connection_id, package_ref, mandate_revision_id, adapter_type, "
@@ -189,10 +210,11 @@ class PostgresPaperControlRepository:
         self,
         deployment_id: UUID,
         *,
+        tenant_id: UUID,
         expected_state: str,
         new_state: str,
     ) -> PaperDeployment:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conditional_update(
                 conn,
                 table="paper_deployment",
@@ -201,19 +223,21 @@ class PostgresPaperControlRepository:
                 expected_state_column="state",
                 expected_state_value=expected_state,
                 set_values={"state": new_state, "updated_at": datetime.now(timezone.utc)},
+                extra_conditions={"tenant_id": tenant_id},
             )
         return _row_to_deployment(row)
 
     async def increment_fence(
-        self, deployment_id: UUID, *, expected_state: str, new_state: str
+        self, deployment_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
     ) -> PaperDeployment:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "UPDATE paper_deployment "
-                "SET state = $3, fence_token = fence_token + 1, updated_at = now() "
-                "WHERE id = $1 AND state = $2 "
+                "SET state = $4, fence_token = fence_token + 1, updated_at = now() "
+                "WHERE id = $1 AND tenant_id = $2 AND state = $3 "
                 "RETURNING *",
                 deployment_id,
+                tenant_id,
                 expected_state,
                 new_state,
             )

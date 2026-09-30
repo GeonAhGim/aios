@@ -1,5 +1,6 @@
 """Paper Execution & Control repository port. The domain knows only this
 Protocol; actual implementations (adapters/) remain opaque to it (71 §4)."""
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -65,14 +66,20 @@ class PaperControlRepository(Protocol):
         self,
         deployment_id: UUID,
         *,
+        tenant_id: UUID,
         expected_state: str,
         new_state: str,
     ) -> PaperDeployment:
-        """State transition via conditional_update from the standard-105 pattern."""
+        """State transition via conditional_update from the standard-105 pattern.
+
+        `tenant_id` binds the RLS GUC (AUDIT_2026-09-30_auth_rls.md F1) and is also
+        asserted as an explicit CAS condition — the caller must already know the
+        deployment's owning tenant (it always does: every call site re-reads the
+        deployment and checks `deployment.tenant_id` before transitioning)."""
         ...
 
     async def increment_fence(
-        self, deployment_id: UUID, *, expected_state: str, new_state: str
+        self, deployment_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
     ) -> PaperDeployment:
         """77 §3 "Pause ... fence token increments" — dedicated to transitions
         that must invalidate in-flight work, such as pause/stop. Binds state

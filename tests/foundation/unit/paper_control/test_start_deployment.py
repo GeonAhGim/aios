@@ -4,6 +4,7 @@ start_deployment(READY→RUNNING)/resume_deployment(PAUSED→RUNNING)의
 공유 게이트 재평가 경로(멱등 캐시 히트, 미존재/타테넌트/잘못된 상태,
 risk_gate DENY 실패주입)를 fake PaperControlRepository + patched
 evaluate_risk_gate로 검증한다."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -88,7 +89,7 @@ class FakeRepo:
         return self.commands.get(idempotency_key)
 
     async def transition_deployment_state(
-        self, deployment_id: UUID, *, expected_state: str, new_state: str
+        self, deployment_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
     ) -> PaperDeployment:
         self.transition_calls.append((expected_state, new_state))
         if self.transition_side_effect is not None:
