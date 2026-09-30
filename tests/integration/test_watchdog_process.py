@@ -6,6 +6,7 @@
 동일한 감지→판정→실제 DB 조치 경로를 검증한다(watchdog.py 기존
 단위테스트도 실제 프로세스 kill 대신 파일 조작으로 검증하는 것과 동일
 패턴)."""
+
 import asyncio
 import json
 import time
@@ -103,6 +104,39 @@ async def _create_running_execution(pool: asyncpg.Pool, user_id) -> int:
     return row["id"]
 
 
+def _make_cycle_deps(heartbeat: Path, compute_equity, *, fast_hysteresis: bool = False):
+    """run_one_cycle 호출에 필요한 service/split_brain/exchange_health_cache 세 쌍을
+    묶어준다 — 아래 여러 테스트가 health_check=exchange_health_cache.get 연결만 다른
+    채 반복하던 보일러플레이트를 제거."""
+    exchange_health_cache = _LatestExchangeHealth()
+    service = WatchdogService(
+        compute_equity=compute_equity,
+        health_check=exchange_health_cache.get,
+        heartbeat_path=heartbeat,
+    )
+    split_brain = (
+        SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
+        if fast_hysteresis
+        else SplitBrainDiagnostics()
+    )
+    return service, split_brain, exchange_health_cache
+
+
+async def _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db):
+    service, split_brain, exchange_health_cache = deps
+    await run_one_cycle(
+        pool,
+        service,
+        split_brain,
+        check_exchange=check_exchange,
+        check_db=check_db,
+        exchange_health_cache=exchange_health_cache,
+        kill_switch=kill_switch,
+        last_action=last_action,
+        get_basket_returns=_empty_basket_returns,
+    )
+
+
 async def test_apply_decision_pauses_running_executions(pool, kill_switch):
     user_id = await create_test_user(pool)
     execution_id = await _create_running_execution(pool, user_id)
@@ -198,39 +232,13 @@ async def test_run_one_cycle_suppresses_action_on_db_isolated_failure(pool, kill
     async def check_db() -> bool:
         return False  # DB만 끊긴 것으로 진단 유도
 
-    exchange_health_cache = _LatestExchangeHealth()
-    service = WatchdogService(
-        compute_equity=compute_equity,
-        health_check=exchange_health_cache.get,
-        heartbeat_path=heartbeat,
-    )
     # 실제 5분 대신 즉시 히스테리시스가 확정되도록 임계값을 짧게.
-    split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
+    deps = _make_cycle_deps(heartbeat, compute_equity, fast_hysteresis=True)
     last_action = _LastAppliedAction()
 
-    await run_one_cycle(
-        pool,
-        service,
-        split_brain,
-        check_exchange=check_exchange,
-        check_db=check_db,
-        exchange_health_cache=exchange_health_cache,
-        kill_switch=kill_switch,
-        last_action=last_action,
-        get_basket_returns=_empty_basket_returns,
-    )
+    await _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db)
     await asyncio.sleep(0.02)  # entry_confirm_seconds 경과시켜 히스테리시스 확정
-    await run_one_cycle(
-        pool,
-        service,
-        split_brain,
-        check_exchange=check_exchange,
-        check_db=check_db,
-        exchange_health_cache=exchange_health_cache,
-        kill_switch=kill_switch,
-        last_action=last_action,
-        get_basket_returns=_empty_basket_returns,
-    )
+    await _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db)
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -257,38 +265,12 @@ async def test_run_one_cycle_applies_action_when_not_db_isolated(pool, kill_swit
     async def check_db() -> bool:
         return True
 
-    exchange_health_cache = _LatestExchangeHealth()
-    service = WatchdogService(
-        compute_equity=compute_equity,
-        health_check=exchange_health_cache.get,
-        heartbeat_path=heartbeat,
-    )
-    split_brain = SplitBrainDiagnostics(entry_confirm_seconds=0.01, recovery_confirm_seconds=0.01)
+    deps = _make_cycle_deps(heartbeat, compute_equity, fast_hysteresis=True)
     last_action = _LastAppliedAction()
 
-    await run_one_cycle(
-        pool,
-        service,
-        split_brain,
-        check_exchange=check_exchange,
-        check_db=check_db,
-        exchange_health_cache=exchange_health_cache,
-        kill_switch=kill_switch,
-        last_action=last_action,
-        get_basket_returns=_empty_basket_returns,
-    )
+    await _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db)
     await asyncio.sleep(0.02)
-    await run_one_cycle(
-        pool,
-        service,
-        split_brain,
-        check_exchange=check_exchange,
-        check_db=check_db,
-        exchange_health_cache=exchange_health_cache,
-        kill_switch=kill_switch,
-        last_action=last_action,
-        get_basket_returns=_empty_basket_returns,
-    )
+    await _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db)
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -318,25 +300,9 @@ async def test_run_one_cycle_calls_check_exchange_exactly_once(pool, kill_switch
     async def check_db() -> bool:
         return True
 
-    exchange_health_cache = _LatestExchangeHealth()
-    service = WatchdogService(
-        compute_equity=compute_equity,
-        health_check=exchange_health_cache.get,
-        heartbeat_path=heartbeat,
-    )
-    split_brain = SplitBrainDiagnostics()
+    deps = _make_cycle_deps(heartbeat, compute_equity)
 
-    await run_one_cycle(
-        pool,
-        service,
-        split_brain,
-        check_exchange=check_exchange,
-        check_db=check_db,
-        exchange_health_cache=exchange_health_cache,
-        kill_switch=kill_switch,
-        last_action=_LastAppliedAction(),
-        get_basket_returns=_empty_basket_returns,
-    )
+    await _run_cycle(pool, deps, kill_switch, _LastAppliedAction(), check_exchange, check_db)
 
     assert call_count == 1
 
@@ -393,3 +359,125 @@ async def test_compute_system_equity_sums_running_allocated_capital_and_realized
     # 두 RUNNING 실행의 allocated_capital(100+100) + realized_pnl 합(10+5).
     # PAUSED 실행의 allocated_capital(100)은 제외돼야 한다.
     assert equity - baseline == Decimal("215")
+
+
+async def test_compute_system_equity_excludes_retired_and_pending_approval_executions(pool):
+    """불변식 — compute_system_equity는 status='RUNNING'인 실행만 집계해야 한다.
+    RETIRED/PENDING_APPROVAL 실행의 allocated_capital이 섞여 들어가면 실제보다 큰
+    계좌 규모를 기준으로 손실률(peak-to-current)을 계산해 손실을 과소평가하고
+    HALT/LIQUIDATE 판정을 놓칠 수 있다(FD-9.1)."""
+    baseline = await compute_system_equity(pool)
+
+    user_id = await create_test_user(pool)
+    retired_execution = await _create_running_execution(pool, user_id)
+    pending_execution = await _create_running_execution(pool, user_id)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_executions SET status = 'RETIRED' WHERE id = $1", retired_execution
+        )
+        await conn.execute(
+            "UPDATE strategy_executions SET status = 'PENDING_APPROVAL' WHERE id = $1",
+            pending_execution,
+        )
+
+    equity = await compute_system_equity(pool)
+
+    assert equity == baseline
+
+
+async def test_run_one_cycle_leaves_execution_running_when_healthy_and_within_thresholds(
+    pool, kill_switch, tmp_path
+):
+    """불변식 — 손실률·응답성·거래소 헬스 모두 정상이면 run_one_cycle은 RUNNING
+    실행에 어떤 조치도 적용하면 안 된다(신호 없이 PAUSE되는 거짓양성 방지,
+    FD-9.2)."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    heartbeat = tmp_path / "hb"
+    write_heartbeat(heartbeat)
+
+    async def compute_equity() -> Decimal:
+        return Decimal("10000")
+
+    async def check_exchange() -> bool:
+        return True
+
+    async def check_db() -> bool:
+        return True
+
+    deps = _make_cycle_deps(heartbeat, compute_equity)
+    last_action = _LastAppliedAction()
+
+    await _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, paused_by FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert row["status"] == "RUNNING"
+    assert row["paused_by"] is None
+
+
+async def test_run_one_cycle_halt_creates_no_liquidation_request(pool, kill_switch, tmp_path):
+    """불변식 — HALT(응답불능, 손실 없음)는 신규진입 차단일 뿐 강제청산이 아니다.
+    apply_decision이 action 분기를 잘못 짜면 HALT에도 liquidation_request가
+    생겨 하류 슬라이서에 존재해선 안 될 청산 요청이 노출된다(watchdog_apply.py
+    DoD(f) — LIQUIDATE만 liquidation_request를 만든다)."""
+    user_id = await create_test_user(pool)
+    await _create_running_execution(pool, user_id)
+    heartbeat = tmp_path / "hb"
+    heartbeat.write_text(str(time.time() - 60))  # 응답불능 시뮬레이션, 손실은 0
+
+    async def compute_equity() -> Decimal:
+        return Decimal("10000")
+
+    async def check_exchange() -> bool:
+        return True
+
+    async def check_db() -> bool:
+        return True
+
+    deps = _make_cycle_deps(heartbeat, compute_equity)
+    last_action = _LastAppliedAction()
+
+    async with pool.acquire() as conn:
+        baseline_count = await conn.fetchval("SELECT count(*) FROM liquidation_request")
+
+    await _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db)
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval("SELECT count(*) FROM liquidation_request")
+    assert count == baseline_count
+
+
+async def test_run_one_cycle_survives_check_db_raising_exception(pool, kill_switch, tmp_path):
+    """실패주입 — check_db 콜백이 (커넥션 풀 고갈 등으로) 예외를 던지면
+    Split-Brain._safe_check이 이를 삼켜 False로 처리해야 한다. run_one_cycle이
+    이 경로에서 예외를 그대로 전파시켜 죽으면 5초 폴링 루프 전체가 재시도
+    기회 없이 프로세스째로 죽는다 — 예외가 전파되지 않고, 단발성 실패만으로는
+    (히스테리시스 3초 미만) 아직 조치가 발동하지 않는지 함께 확인한다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    heartbeat = tmp_path / "hb"
+    write_heartbeat(heartbeat)
+
+    async def compute_equity() -> Decimal:
+        return Decimal("10000")
+
+    async def check_exchange() -> bool:
+        return True
+
+    async def check_db_raises() -> bool:
+        raise ConnectionError("simulated pool exhaustion")
+
+    deps = _make_cycle_deps(heartbeat, compute_equity)
+    last_action = _LastAppliedAction()
+
+    await _run_cycle(pool, deps, kill_switch, last_action, check_exchange, check_db_raises)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, paused_by FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert row["status"] == "RUNNING"
+    assert row["paused_by"] is None
