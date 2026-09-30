@@ -7,6 +7,7 @@ upsert_state()는 매 reconciliation run의 "최신 계산 결과가 항상 이�
 반면 transition_state_status()(resolve 등 사람이 트리거하는 개별 전이)는
 동시에 새 run이 상태를 이미 바꿨을 수 있어 105번 표준대로 revision을
 조건으로 건다."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -18,6 +19,7 @@ from src.foundation.reconciliation.domain.models import (
     Classification,
     ReconciliationItem,
     ReconciliationRun,
+    ReconciliationRunAlreadyExists,
     ReconciliationState,
     RunState,
 )
@@ -87,35 +89,51 @@ class PostgresReconciliationRepository:
     async def insert_run_with_items(
         self, run: ReconciliationRun, items: tuple[ReconciliationItem, ...]
     ) -> ReconciliationRun:
-        async with self._pool.acquire() as conn, conn.transaction():
-            run_row = await conn.fetchrow(
-                "INSERT INTO reconciliation_run "
-                "(tenant_id, target_type, target_ref, connection_id, input_hash, state, "
-                " rule_version) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
-                run.tenant_id,
-                run.target_type,
-                run.target_ref,
-                run.connection_id,
-                run.input_hash,
-                run.state.value,
-                run.rule_version,
-            )
-            inserted_items = []
-            for item in items:
-                item_row = await conn.fetchrow(
-                    "INSERT INTO reconciliation_item "
-                    "(run_id, entity_type, entity_key, internal_value, provider_value, "
-                    " classification) "
-                    "VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
-                    run_row["id"],
-                    item.entity_type,
-                    item.entity_key,
-                    item.internal_value,
-                    item.provider_value,
-                    item.classification.value,
+        # REC-004 dedupe relies on `UNIQUE(target_ref, input_hash)` (migration
+        # f2b8e5d1a734 docstring: "두 번째 삽입 시도는 기존 행을 반환") — the
+        # caller's own `get_run_by_input_hash` pre-check only closes the common
+        # case; two concurrent callers with the same input can both pass that
+        # check before either commits (task-8955: this is exactly what
+        # `test_concurrent_resync_is_serialized_by_position_lock` hit as a raw
+        # `UniqueViolationError`). Raising `ReconciliationRunAlreadyExists` with
+        # the row the other transaction already committed lets the caller
+        # (`run_reconciliation`) reuse it instead of crashing or re-running the
+        # winner's side effects a second time.
+        try:
+            async with self._pool.acquire() as conn, conn.transaction():
+                run_row = await conn.fetchrow(
+                    "INSERT INTO reconciliation_run "
+                    "(tenant_id, target_type, target_ref, connection_id, input_hash, state, "
+                    " rule_version) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *",
+                    run.tenant_id,
+                    run.target_type,
+                    run.target_ref,
+                    run.connection_id,
+                    run.input_hash,
+                    run.state.value,
+                    run.rule_version,
                 )
-                inserted_items.append(_row_to_item(item_row))
+                inserted_items = []
+                for item in items:
+                    item_row = await conn.fetchrow(
+                        "INSERT INTO reconciliation_item "
+                        "(run_id, entity_type, entity_key, internal_value, provider_value, "
+                        " classification) "
+                        "VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+                        run_row["id"],
+                        item.entity_type,
+                        item.entity_key,
+                        item.internal_value,
+                        item.provider_value,
+                        item.classification.value,
+                    )
+                    inserted_items.append(_row_to_item(item_row))
+        except asyncpg.UniqueViolationError as exc:
+            existing = await self.get_run_by_input_hash(run.target_ref, run.input_hash)
+            if existing is None:
+                raise
+            raise ReconciliationRunAlreadyExists(existing) from exc
         return ReconciliationRun(
             id=run_row["id"],
             tenant_id=run_row["tenant_id"],

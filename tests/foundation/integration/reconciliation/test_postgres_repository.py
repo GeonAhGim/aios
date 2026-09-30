@@ -8,6 +8,7 @@ lifecycle.py`는 application 계층(run_reconciliation/resolve_reconciliation)�
 (worker 전용 DB로 격리된 conftest 경로를 안 씀). 이 파일은 어댑터를 직접
 호출해 TEST_DATABASE_URL 경로로 커버리지를 확보한다.
 """
+
 from __future__ import annotations
 
 import os
@@ -26,6 +27,7 @@ from src.foundation.reconciliation.domain.models import (
     Classification,
     ReconciliationItem,
     ReconciliationRun,
+    ReconciliationRunAlreadyExists,
     ReconciliationState,
     RunState,
 )
@@ -78,9 +80,9 @@ def _item(classification: Classification = Classification.HEALTHY) -> Reconcilia
     )
 
 
-def _state(tenant_id, target_ref, status: Classification = Classification.HEALTHY) -> (
-    ReconciliationState
-):
+def _state(
+    tenant_id, target_ref, status: Classification = Classification.HEALTHY
+) -> ReconciliationState:
     return ReconciliationState(
         target_ref=target_ref,
         target_type="PAPER_DEPLOYMENT",
@@ -139,17 +141,23 @@ async def test_get_run_by_input_hash_not_found_returns_none(pool, repo):
     assert found is None
 
 
-async def test_insert_run_with_items_duplicate_input_hash_raises(pool, repo):
-    """실패주입 — UNIQUE(target_ref, input_hash) 제약 위반은 그대로 전파된다
-    (REC-004 dedupe는 application 계층이 get_run_by_input_hash로 먼저 조회해
-    회피하는 책임이고, 어댑터 자체는 그 제약을 그대로 드러낸다)."""
+async def test_insert_run_with_items_duplicate_input_hash_returns_existing(pool, repo):
+    """실패주입(task-8955) — UNIQUE(target_ref, input_hash) 위반은 raw
+    `asyncpg.UniqueViolationError`로 새지 않는다. REC-004 dedupe는 application
+    계층의 `get_run_by_input_hash` 사전조회로 흔한 경로만 회피하고, 두
+    `reconcile_account` 호출이 동시에 그 사전조회를 통과하는 경쟁(CI에서 실측된
+    `test_concurrent_resync_is_serialized_by_position_lock` 실패)은 어댑터가
+    `ReconciliationRunAlreadyExists`로 승자의 행을 실어 알려야 한다 — 마이그레이션
+    f2b8e5d1a734 docstring이 약속한 "두 번째 삽입 시도는 기존 행을 반환"."""
     tenant_id = await _tenant(pool)
     target_ref = uuid4()
-    run = _run(tenant_id, target_ref, input_hash="dup-hash")
-    await repo.insert_run_with_items(run, ())
+    first = await repo.insert_run_with_items(_run(tenant_id, target_ref, input_hash="dup-hash"), ())
 
-    with pytest.raises(asyncpg.UniqueViolationError):
+    with pytest.raises(ReconciliationRunAlreadyExists) as exc_info:
         await repo.insert_run_with_items(_run(tenant_id, target_ref, input_hash="dup-hash"), ())
+
+    assert exc_info.value.existing.id == first.id
+    assert exc_info.value.existing.input_hash == "dup-hash"
 
 
 async def test_get_state_not_found_returns_none(pool, repo):

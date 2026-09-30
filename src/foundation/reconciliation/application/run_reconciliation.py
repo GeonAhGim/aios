@@ -16,6 +16,7 @@ SafetyControl request and block new submissions") — the trigger is the
 reconciliation engine itself, not a person, so it calls with
 `actor_is_admin=True` (separate path from the person's self-service ACCOUNT
 scope restriction)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -34,6 +35,7 @@ from src.foundation.reconciliation.domain.models import (
     MaterialityPolicy,
     ReconciliationItem,
     ReconciliationRun,
+    ReconciliationRunAlreadyExists,
     ReconciliationState,
     RunState,
 )
@@ -93,10 +95,7 @@ async def run_reconciliation(
 ) -> ReconciliationRunView:
     input_hash = compute_input_hash(
         str(target_ref),
-        {
-            e.entity_key: (str(e.internal_value), str(e.provider_value))
-            for e in entities
-        },
+        {e.entity_key: (str(e.internal_value), str(e.provider_value)) for e in entities},
     )
 
     existing = await repo.get_run_by_input_hash(target_ref, input_hash)
@@ -133,19 +132,30 @@ async def run_reconciliation(
 
     aggregate = aggregate_classification(tuple(i.classification for i in items))
 
-    run = await repo.insert_run_with_items(
-        ReconciliationRun(
-            id=uuid4(),
-            tenant_id=tenant_id,
-            target_type=target_type,
-            target_ref=target_ref,
-            connection_id=connection_id,
-            input_hash=input_hash,
-            state=RunState.COMPLETED,
-            rule_version=RULE_VERSION,
-        ),
-        tuple(items),
-    )
+    try:
+        run = await repo.insert_run_with_items(
+            ReconciliationRun(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                target_type=target_type,
+                target_ref=target_ref,
+                connection_id=connection_id,
+                input_hash=input_hash,
+                state=RunState.COMPLETED,
+                rule_version=RULE_VERSION,
+            ),
+            tuple(items),
+        )
+    except ReconciliationRunAlreadyExists as exc:
+        # `UNIQUE(target_ref, input_hash)` raced with a concurrent caller
+        # that had the same input and committed first — that caller has
+        # already run (or is running) the blocking side effects below for
+        # this exact input; running them again here would double-activate
+        # the safety control and redo the state upsert for a run this call
+        # didn't actually create.
+        existing = exc.existing
+        aggregate = aggregate_classification(tuple(i.classification for i in existing.items))
+        return run_to_view(existing, aggregate)
 
     now = datetime.now(timezone.utc)
     safety_control_id: UUID | None = None

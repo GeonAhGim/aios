@@ -30,7 +30,13 @@ class ReconciliationRepository(Protocol):
     async def insert_run_with_items(
         self, run: ReconciliationRun, items: tuple[ReconciliationItem, ...]
     ) -> ReconciliationRun:
-        """Persist run and items atomically in a single transaction (§2, page 80)."""
+        """Persist run and items atomically in a single transaction (§2, page 80).
+
+        Raises `ReconciliationRunAlreadyExists` (domain/models.py) if
+        `UNIQUE(target_ref, input_hash)` already holds a row a concurrent
+        caller with the same input committed first — the exception carries
+        that row so the caller can reuse it (REC-004).
+        """
         ...
 
     async def get_state(self, target_ref: UUID) -> ReconciliationState | None: ...

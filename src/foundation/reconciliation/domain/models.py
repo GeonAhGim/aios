@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 80_reconciliation_resilience_l3_build_and_operational_specification_v1.0.md §1.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -68,6 +69,23 @@ class ReconciliationRun:
     rule_version: str
     items: tuple[ReconciliationItem, ...] = field(default_factory=tuple)
     created_at: datetime | None = None
+
+
+class ReconciliationRunAlreadyExists(Exception):
+    """`insert_run_with_items` hit `UNIQUE(target_ref, input_hash)` — a
+    concurrent caller with the same input already committed first (task-8955:
+    two `reconcile_account` calls racing the same `input_hash` produced a raw
+    `asyncpg.UniqueViolationError` instead of this). Carries the row the
+    winner committed so the loser can reuse it instead of recomputing/
+    re-running the winner's side effects (safety-control activation, state
+    upsert) a second time."""
+
+    def __init__(self, existing: ReconciliationRun) -> None:
+        super().__init__(
+            f"reconciliation_run already exists for target_ref={existing.target_ref}, "
+            f"input_hash={existing.input_hash}"
+        )
+        self.existing = existing
 
 
 @dataclass(frozen=True)
