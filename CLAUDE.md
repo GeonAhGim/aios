@@ -198,6 +198,42 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     worktree (or the escalation) is just behind an already-landed fix, and the leaf should close
     as `noop` with that ancestor commit cited, not re-fix code that's already fixed. No baseline/
     rule relief made (DECISION_GUIDELINES B-2) — none was warranted.
+16. Treating every `[health:ci_red]` frontend leaf as a defect in the named test file it cites —
+    task-8993 flagged `frontend` at 4+ correction leaves in 24h (task-9053/9089 both titled
+    "AccountDeletionPage ... 화이트리스트 등록 에러 표시", task-9283 "SellStrategyPage ... 리스팅
+    생성 에러 표시", plus earlier WriteReviewPage/DisputeSubmitPage/AdminApprovalRequestPage/
+    ApprovalSettingsPage instances recorded in `esc-ci-frontend.json`) and none of the cited test
+    files had a real defect — task-9053 closed noop ("이미 fixed upstream"), task-9089 closed noop
+    ("cto 결정 ... noop done"), task-9283 died mid-run without finding anything to fix. Root cause
+    is upstream of any file this repo owns: `pm/local_ci.py`'s `frontend` step runs plain `npm
+    test` under a wall-clock subprocess timeout; under the same shared-host contention already
+    documented for this suite (task-1968, task-2479, task-8950), the whole vitest run occasionally
+    fails to finish inside that budget and gets killed (`rc=124`), and only a truncated tail of
+    partial output survives. `pm/auto_decision.py`'s `_stage_tail()`/`_FAIL_LINE_MARKERS` then
+    picks "the line that explains the failure" by a bare substring match (`"FAIL"`, `"Error"`,
+    `"error"`, ...) with no case for `rc=124`/`timeout <n>s` — so the one line that actually
+    explains what happened gets filtered out (it matches no marker), and the generic `"error"`
+    marker instead matches whichever `stderr | <file>.test.tsx > ... > negative: ... error_code...`
+    diagnostic passthrough line happened to be printed last before the kill. Those `stderr | ...`
+    lines are normal Vitest console passthrough from the app's own error-handling code during
+    *passing* D2/D3 negative tests (this repo's own DoD, §5, mandates ≥3 negative tests per leaf,
+    and their describe/test names routinely contain the literal substring `error` via identifiers
+    like `error_code`) — they carry no information about which test, if any, actually failed.
+    `_build_ci_fix_leaf()` then titles the leaf off line 1 of that misleading tail, so every
+    timeout picks a different, innocent test file as "the culprit" (confirmed in task-9053's own
+    spec: its bisect step even attached unrelated backend Python commit candidates touching
+    `tests/foundation/unit/market_data/test_backfill_job.py` etc. to a frontend vitest timeout —
+    the same garbage-in classification cascading into bisect). This is a classification bug in
+    `pm/auto_decision.py` (`_stage_tail`/`_FAIL_LINE_MARKERS`/`_build_ci_fix_leaf`), which is fleet
+    code under `C:\aios\pm` — out of a repo worker's edit scope (§4 prohibits touching it directly;
+    a fix needs an ops task with the exact diff: add a `timeout`/`rc=124` marker checked *before*
+    the generic `error` substring, and stop matching bare `stderr | ... > ...` passthrough lines as
+    fail evidence). Before working a new `frontend` correction leaf whose title looks like
+    `stderr | <file>.test.tsx > ... > negative: ...`: run that exact test file alone
+    (`npm run test --workspace=apps/web -- <file>`) first — if it's green, the leaf is this
+    misclassification pattern, not a real defect; close it noop and cite this entry rather than
+    reinvestigating the same innocent file again. No baseline/threshold/marker-list relief made
+    from this leaf (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
