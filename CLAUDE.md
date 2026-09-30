@@ -1401,6 +1401,31 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/baseline design is sound; the remaining defect is fleet
     code, not this repo.
 
+55. A fifth `journeys` `[health:ci_red_systemic]` leaf (task-9618) citing the identical repeat
+    set #30 (task-9484) and #51 (task-9593) already closed twice — task-9618's spec names
+    task-8931, task-9054, task-9068, task-9284 verbatim, the exact same four leaves task-9124
+    (first systemic leaf) and task-9151 (second systemic leaf) already root-caused: task-8572/
+    task-8753/task-8952/task-9054 (see #13) were each a real, correctly diagnosed fix at the time
+    (vite dev JIT contention, cross-worktree port collision, redundant `tsc -b` in the e2e build,
+    webServer worker-count overrun); task-8931/task-9068 were stale-worktree false positives that
+    re-bisected from a checkout already behind the landed fixes; task-9284 itself already found
+    the bisect culprit `d21e3e68` innocent and closed green before task-9484 (#30) was created.
+    Reconfirmed on this worktree (HEAD `48f5cb28`, `git log --oneline -5 --
+    frontend/playwright.config.ts` shows no commits since task-9054's `0c6f4ff5`, already covered
+    by #13/#30/#51): `npm run build:e2e --workspace=apps/web` succeeds in ~2.2s, and
+    `npx playwright test journey-j1 journey-j2 journey-j3 --project=chromium` passes 27/1 skipped
+    in 34.3s. No script/config change made — this is the identical fleet-code defect already named
+    for sixteen other gates (#17-#26, #30-#31, #33-#35, #37-#38, #40, #51-#54): `pm/auto_decision.py`/
+    `orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off the same stale repeat set
+    instead of checking whether a prior systemic leaf (task-9124, task-9151/#30, or task-9593/#51)
+    already closed the identical question, out of a repo worker's edit scope (§4). Before working
+    a future `journeys` leaf (individual or systemic): run `git log --oneline -5 --
+    frontend/playwright.config.ts` and the plain re-run above first — if green, and the cited
+    repeat leaf ids match an already-closed systemic leaf's set (task-9124, task-9151/#30,
+    task-9593/#51, or this entry), close as noop citing all of them rather than re-investigating a
+    fifth time. No baseline/timeout relief made (DECISION_GUIDELINES B-2) — design is sound and
+    already fixed; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
