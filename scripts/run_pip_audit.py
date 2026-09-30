@@ -167,7 +167,10 @@ def main(argv: list[str] | None = None) -> int:
     # UTF-8을 기본값으로 쓰게 한다(PEP 540).
     child_env = dict(os.environ)
     child_env["PYTHONUTF8"] = "1"
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=child_env)
+    child_env["PYTHONIOENCODING"] = "utf-8"
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=child_env
+    )
     # capture_output=True/text=True는 정상 경로에서 stdout/stderr를 항상 str로 채우지만,
     # subprocess가 캡처 자체에 실패하는 경로(예: 예외적인 파이프 처리)에서는 None이 나올 수
     # 있다 -- is_network_error가 None을 받아도 죽지 않게 여기서도 빈 문자열로 정규화해
