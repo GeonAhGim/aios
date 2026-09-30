@@ -1,6 +1,7 @@
 """FND-04 통합테스트 — /v1/foundation/validation-runs 라우터. 실제 FastAPI 앱
 + 실제 dev DB. 실제 거래소 키가 없어 캔들 조회는 fake CredentialResolver로
 주입한다(test_strategy_builder_router.py와 동일 패턴)."""
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -197,3 +198,94 @@ async def test_start_validation_succeeds_and_advances_lifecycle(client, pool):
         f"/strategy-builder/strategies/{strategy_id}/1.0.0", headers=headers
     )
     assert strategy_response.json()["status"] == "VALIDATING"
+
+
+# ── Negative tests (3건 이상: 불변식 위반 입력을 명시적으로 거부) ──────────────
+
+
+async def test_start_validation_rejects_missing_exchange_field(client):
+    """StartValidationRequest.exchange는 필수 필드 — 누락 시 pydantic
+    RequestValidationError가 VALIDATION_INVALID_FIELD -> 400으로 매핑된다
+    (handlers.py _handle_validation_error, error_codes.py HTTP_STATUS)."""
+    headers, owner_id = await _register(client)
+    strategy_id = f"test-strategy-{uuid.uuid4().hex[:8]}"
+
+    body_without_exchange = {k: v for k, v in _REQUEST_BODY.items() if k != "exchange"}
+    response = await client.post(
+        f"/v1/foundation/validation-runs/{strategy_id}/1.0.0",
+        json=body_without_exchange,
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_start_validation_rejects_non_numeric_cost_model_fee_bps(client):
+    """cost_model_fee_bps는 Decimal 파싱 가능한 값이어야 한다 — 숫자로
+    변환 불가능한 문자열이면 같은 400/VALIDATION_INVALID_FIELD 경로를 탄다."""
+    headers, owner_id = await _register(client)
+    strategy_id = f"test-strategy-{uuid.uuid4().hex[:8]}"
+
+    body_with_invalid_fee = {**_REQUEST_BODY, "cost_model_fee_bps": "not-a-number"}
+    response = await client.post(
+        f"/v1/foundation/validation-runs/{strategy_id}/1.0.0",
+        json=body_with_invalid_fee,
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_start_validation_rejects_nonexistent_strategy(client):
+    """존재하지 않는 strategy_id/version 조합은 StrategyBuilderService.get_strategy가
+    StrategyLifecycleError를 던지고, start_validation()이 이를
+    StrategyNotEligibleForValidationError로 감싼다 —
+    STATE_INVALID_TRANSITION -> 409(exception_registry_foundation.py:247).
+    9.9 절대원칙: 없는 전략은 아예 BACKTESTING 상태가 아니므로 같은 상태
+    불변식 위반 경로로 거부된다."""
+    headers, owner_id = await _register(client)
+    strategy_id = f"test-strategy-never-created-{uuid.uuid4().hex[:8]}"
+
+    response = await client.post(
+        f"/v1/foundation/validation-runs/{strategy_id}/1.0.0",
+        json=_REQUEST_BODY,
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert response.json()["error_code"] == "STATE_INVALID_TRANSITION"
+
+
+# ── Failure injection test (1건 이상: 의존성 예외 유발) ──────────────────────
+
+
+async def test_start_validation_credential_lookup_failure_returns_404_not_500(client, pool):
+    """CredentialResolver.get_adapter가 CredentialNotFoundError를 던지면
+    (예: 저장된 거래소 자격증명이 없거나 해지된 경우), 라우터가 이를 삼켜
+    500으로 누수시키지 않고 EXCEPTION_MAP(RESOURCE_NOT_FOUND -> 404)을 통해
+    정상적으로 변환해야 한다(exception_registry.py:109)."""
+    from src.services.credential_resolver import CredentialNotFoundError
+
+    headers, owner_id = await _register(client)
+    strategy_id = f"test-strategy-{uuid.uuid4().hex[:8]}"
+    await _create_strategy_in_backtesting(pool, owner_id, strategy_id)
+
+    class _FailingResolver:
+        async def get_adapter(self, user_id, exchange):
+            raise CredentialNotFoundError(f"{exchange} 자격증명이 없거나 해지되었습니다.")
+
+    async def _override_failing_resolver():
+        return _FailingResolver()
+
+    app.dependency_overrides[get_credential_resolver] = _override_failing_resolver
+    try:
+        response = await client.post(
+            f"/v1/foundation/validation-runs/{strategy_id}/1.0.0",
+            json=_REQUEST_BODY,
+            headers=headers,
+        )
+    finally:
+        app.dependency_overrides[get_credential_resolver] = _override_resolver
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error_code"] == "RESOURCE_NOT_FOUND"
