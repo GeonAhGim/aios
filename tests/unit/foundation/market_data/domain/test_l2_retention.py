@@ -4,6 +4,7 @@ Spec: docs/design/ADR-2026-09-06-H-data-sourcing-self-build-and-contract-tiers.m
 D5 "전체 깊이는 단기 보존, 상위 N호가·집계는 장기 보존" + 디스크 상한
 초과 시 축소본부터 삭제하되 단기 전체 깊이 보존은 절대 건드리지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -114,3 +115,68 @@ def test_policy_rejects_non_positive_top_n_or_cap():
             disk_cap_bytes=1,
             aggregate_size_bytes_estimate=1,
         )
+
+
+def test_policy_rejects_negative_top_n():
+    """negative — top_n=0뿐 아니라 음수도 명시적으로 거부한다."""
+    with pytest.raises(ValueError):
+        RetentionPolicy(
+            full_depth_ttl=timedelta(days=1),
+            aggregate_ttl=timedelta(days=2),
+            top_n=-1,
+            disk_cap_bytes=1,
+            aggregate_size_bytes_estimate=1,
+        )
+
+
+def test_policy_rejects_negative_disk_cap_bytes():
+    """negative — disk_cap_bytes가 음수면 상한 계산 자체가 무의미해지므로
+    거부한다."""
+    with pytest.raises(ValueError):
+        RetentionPolicy(
+            full_depth_ttl=timedelta(days=1),
+            aggregate_ttl=timedelta(days=2),
+            top_n=10,
+            disk_cap_bytes=-100,
+            aggregate_size_bytes_estimate=1,
+        )
+
+
+def test_policy_rejects_aggregate_ttl_not_longer_than_full_depth_ttl():
+    """negative — D5 약속(단기 전체 깊이 < 장기 집계)을 위반하는 순서의
+    ttl 조합(aggregate_ttl <= full_depth_ttl)은 정책 생성 시점에 거부한다."""
+    with pytest.raises(ValueError):
+        RetentionPolicy(
+            full_depth_ttl=timedelta(days=5),
+            aggregate_ttl=timedelta(days=5),
+            top_n=10,
+            disk_cap_bytes=1_000,
+            aggregate_size_bytes_estimate=1,
+        )
+
+
+def test_records_source_raising_mid_iteration_propagates_not_swallowed():
+    """실패주입 — records를 공급하는 제공자(예: DB 커서/페이지네이터)가 순회
+    도중 예외를 던지면 plan_retention은 이를 삼켜 부분 결과를 조용히
+    반환하지 않고 그대로 전파한다(fail-closed)."""
+
+    def _flaky_source():
+        yield _rec("a", days_old=1)
+        raise RuntimeError("record source failed mid-iteration")
+
+    with pytest.raises(RuntimeError, match="record source failed mid-iteration"):
+        plan_retention(_flaky_source(), _NOW, _POLICY)
+
+
+@pytest.mark.perf
+def test_plan_retention_perf_budget_for_large_record_set():
+    """`plan_retention`은 순수 in-memory 계산(I/O 없음) — 5000건 레코드에
+    대해서도 100ms budget(ADR-2026-09-09-C Decision 1, pure-function tier)
+    안에서 끝나야 한다."""
+    import time
+
+    records = [_rec(f"r-{i}", days_old=i % 60, size=1_000) for i in range(5_000)]
+    start = time.perf_counter()
+    plan_retention(records, _NOW, _POLICY)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.1
