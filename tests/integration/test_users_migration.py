@@ -1,7 +1,9 @@
 """11.1 통합테스트 — users/user_approval_settings 마이그레이션 + 미뤄둔
 user_id FK 전체 연결 검증. 실제 dev DB(alembic upgrade head 적용 후) 대상.
 """
+
 from pathlib import Path
+from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -106,3 +108,43 @@ async def test_user_approval_settings_upsert_succeeds_for_real_user(pool):
             user_id,
         )
     assert row["mandatory_wait_seconds"] == 60
+
+
+async def test_duplicate_email_violates_unique_constraint(pool):
+    email = f"dup-{uuid4().hex}@example.com"
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO users (email, password_hash) VALUES ($1, $2)",
+            email,
+            "hash-1",
+        )
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                "INSERT INTO users (email, password_hash) VALUES ($1, $2)",
+                email,
+                "hash-2",
+            )
+
+
+async def test_user_approval_settings_rejects_invalid_mode(pool):
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "INSERT INTO user_approval_settings (user_id, mode) VALUES ($1, 'INVALID')",
+                user_id,
+            )
+
+
+async def test_create_test_user_propagates_pool_acquire_failure(pool, monkeypatch):
+    """실패주입: pool.acquire()가 예외를 던지면 create_test_user는 이를 삼키지
+    않고 그대로 전파해야 한다(fail-closed) — 조용히 None을 반환하는 등의
+    실패 은폐는 호출자가 존재하지 않는 user_id로 이후 INSERT를 계속하게
+    만들어 FK 무결성 검증을 무력화한다."""
+
+    def _boom(self):
+        raise RuntimeError("simulated pool exhaustion")
+
+    monkeypatch.setattr(type(pool), "acquire", _boom)
+    with pytest.raises(RuntimeError, match="simulated pool exhaustion"):
+        await create_test_user(pool)
