@@ -5,6 +5,7 @@ D1. DoD(task-1764): 등급 승격이 `source_contract` 행의 UPDATE만으로
 반영되고(같은 source_id, 새 PK 아님), 미등록 source_id 조회는 fail-closed
 판정의 근거가 되도록 `None`을 정확히 반환함을 실 DB로 증명한다.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
+from pydantic import ValidationError
 
 from src.foundation.market_data.adapters.postgres_source_contract import (
     PostgresSourceContractRepository,
@@ -135,3 +137,100 @@ async def test_expired_row_is_denied_via_authorize_source(pool, repo) -> None:
 
     assert grant.allowed is False
     assert grant.denial_reason == SourceContractDenialReason.EXPIRED
+
+
+async def test_not_yet_valid_row_is_denied_via_authorize_source(pool, repo) -> None:
+    """negative: valid_from이 아직 오지 않은 계약은 실 DB 왕복 후에도
+    fail-closed로 거부된다(EXPIRED와는 다른 사유)."""
+    source_id = f"TEST_NOT_YET_VALID_{_NOW.timestamp()}"
+    await pool.execute(
+        """
+        INSERT INTO source_contract
+            (source_id, tier, credential_ref, redistribution_scope,
+             rate_limit, quota, valid_from, valid_to, capability)
+        VALUES ($1, $2, 'vault:test:v1', 'INTERNAL', $3, 1000, $4, $5, $6)
+        """,
+        source_id,
+        SourceContractTier.PERSONAL.value,
+        10,
+        _NOW + timedelta(days=1),
+        None,
+        json.dumps(
+            {"asset_classes": ["EQUITY_KR"], "resolutions": ["1d"], "corporate_actions": False}
+        ),
+    )
+
+    async with pool.acquire() as conn:
+        contract = await repo.get(conn, source_id)
+    assert contract is not None
+
+    grant = authorize_source(contract, _NOW)
+
+    assert grant.allowed is False
+    assert grant.denial_reason == SourceContractDenialReason.NOT_YET_VALID
+
+
+async def test_insert_invalid_tier_rejected_by_check_constraint(pool) -> None:
+    """negative: DB의 tier CHECK 제약을 우회한 값은 삽입 자체가 거부된다
+    (도메인 enum 밖의 값이 조용히 저장되지 않음, fail-closed)."""
+    source_id = f"TEST_INVALID_TIER_{_NOW.timestamp()}"
+    with pytest.raises(asyncpg.CheckViolationError):
+        await _insert_contract(
+            pool,
+            source_id=source_id,
+            tier="NOT_A_REAL_TIER",
+            rate_limit=10,
+            capability={
+                "asset_classes": ["EQUITY_KR"],
+                "resolutions": ["1d"],
+                "corporate_actions": False,
+            },
+        )
+
+
+async def test_insert_valid_to_before_valid_from_rejected_by_check_constraint(pool) -> None:
+    """negative: valid_to <= valid_from인 행은 DB CHECK 제약이 거부한다
+    (불변식 위반 입력이 저장되지 않음)."""
+    source_id = f"TEST_BAD_RANGE_{_NOW.timestamp()}"
+    with pytest.raises(asyncpg.CheckViolationError):
+        await _insert_contract(
+            pool,
+            source_id=source_id,
+            tier=SourceContractTier.PERSONAL.value,
+            rate_limit=10,
+            capability={
+                "asset_classes": ["EQUITY_KR"],
+                "resolutions": ["1d"],
+                "corporate_actions": False,
+            },
+            valid_to=_NOW - timedelta(days=31),
+        )
+
+
+async def test_get_malformed_capability_raises_instead_of_silently_parsing(pool, repo) -> None:
+    """negative: capability JSONB에 필수 키(asset_classes)가 빠지면 repo.get()이
+    조용히 기본값을 채우지 않고 예외로 실패한다(fail-closed)."""
+    source_id = f"TEST_MALFORMED_CAP_{_NOW.timestamp()}"
+    await _insert_contract(
+        pool,
+        source_id=source_id,
+        tier=SourceContractTier.PERSONAL.value,
+        rate_limit=10,
+        capability={"resolutions": ["1d"], "corporate_actions": False},
+    )
+
+    async with pool.acquire() as conn:
+        with pytest.raises((KeyError, ValidationError)):
+            await repo.get(conn, source_id)
+
+
+async def test_get_propagates_connection_failure_instead_of_swallowing_it(repo) -> None:
+    """실패주입: 하위 conn.fetchrow가 예외를 던지면 repo.get()은 이를
+    삼키거나 None으로 위장하지 않고 그대로 전파한다(fail-closed)."""
+
+    class _FailingConn:
+        async def fetchrow(self, *_args: object, **_kwargs: object) -> None:
+            raise asyncpg.PostgresConnectionError("simulated connection drop")
+
+    with pytest.raises(asyncpg.PostgresConnectionError):
+        await repo.get(_FailingConn(), "ANY_SOURCE")
