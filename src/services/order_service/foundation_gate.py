@@ -5,12 +5,21 @@
 R-36 — 원자적 fence+control 읽기(`fence_pairs_for` + `read_fence_and_controls`,
 같은 REPEATABLE READ 트랜잭션)에 위임해 GLOBAL/TENANT/ACCOUNT/PROVIDER/
 STRATEGY_DEPLOYMENT 5쌍 전부를 보고, F0을 `GateDecision.fence_snapshot`으로
-관통시킨다(R-33). `evaluate_pre_submit`(CB/data-distrust/connection-freshness)
-은 아직 위임하지 않는다 — Foundation onboarding을 거치지 않은 legacy PAPER
+관통시킨다(R-33). `evaluate_pre_submit`(data-distrust/connection-freshness)은
+아직 위임하지 않는다 — Foundation onboarding을 거치지 않은 legacy PAPER
 실행이 즉시 fail-closed DENY로 막히기 때문(별도 리프, 미검증 스코프 밖).
 
+task-9063 (audit F1, S-tier) -- escalating the circuit breaker to HALTED/
+EMERGENCY does not itself write a `safety_control` row, so layer 1's
+active_control check alone could not see it. PRE_TRADE
+(tick_risk_phase.py) already blocks on this, but this gate (PRE_SUBMIT)
+did not re-check it, leaving a TOCTOU window between PRE_TRADE passing
+and the adapter call -- layer 1 now adds a `read_safety_state()`
+re-check to close it. WARNING/RESTRICTED (auto-downgradable,
+`CircuitBreakerLevel` 8.6-B) are out of scope -- unchanged behavior.
+
 3단 게이트(순서대로 평가, 먼저 DENY가 나오면 그 자리에서 반환):
-1층: fence stale(§3.6) 또는 활성 control → 즉시 DENY.
+1층: fence stale(§3.6) 또는 활성 control 또는 CB HALTED/EMERGENCY → 즉시 DENY.
 2층(CM-8/CM-A5): `evaluate_compliance_gate` — mandate 위임장 규칙(CM-6/7)
    위반은 리스크·수치정책이 ALLOW여도 DENY(권위 분리). `require_compliance_
    mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 False — 아래
@@ -133,6 +142,33 @@ def make_foundation_pre_submit_gate(
             reason_codes = tuple(
                 f"RISK_KILL_SWITCH_ACTIVE_{c.scope.value}" for c in active_controls
             )
+            decision_id = await record_decision(
+                recorder,
+                context=context,
+                outcome=GateOutcome.DENY,
+                reason_codes=reason_codes,
+                fence=fence,
+                start_ns=start_ns,
+            )
+            return GateDecision(
+                outcome=GateOutcome.DENY,
+                reason_codes=reason_codes,
+                fence_snapshot=fence,
+                decision_id=decision_id,
+            )
+
+        # task-9063 (audit F1, S-tier) -- CB escalation to HALTED/EMERGENCY
+        # does not itself write a `safety_control` row, so the
+        # `active_controls` check above cannot see it; PRE_TRADE
+        # (tick_risk_phase.py) already blocks on this, but nothing re-checked
+        # it here, leaving a TOCTOU window between PRE_TRADE passing and the
+        # adapter call. warning/restricted stay out of scope (auto-downgradable,
+        # CircuitBreakerLevel 8.6-B) -- unchanged behavior for those levels.
+        cb_level, _distrust_level = await risk_repo.read_safety_state(
+            provider_code=context.exchange, symbol=context.symbol or ""
+        )
+        if cb_level in ("halted", "emergency"):
+            reason_codes = (f"RISK_CIRCUIT_BREAKER_{cb_level.upper()}",)
             decision_id = await record_decision(
                 recorder,
                 context=context,
