@@ -174,7 +174,7 @@ async def test_handles_credential_service_database_error(
     async def raise_credential_error(*args, **kwargs):
         raise CredentialNotFoundError("credential lookup failed")
 
-    credential_service.get_decrypted = raise_credential_error  # type: ignore[assignment]
+    credential_service.get_decrypted = raise_credential_error
 
     try:
         with pytest.raises(CredentialNotFoundError):
