@@ -139,7 +139,7 @@ async def test_malformed_verifier_id_raises_instead_of_silently_matching(service
     반환하면 "queue가 비어 있다"는 신호와 "verifier id가 틀렸다"는 신호가
     구분되지 않아 위험하다)."""
     with pytest.raises(asyncpg.exceptions.DataError):
-        await service.list_pending("not-a-valid-uuid")  # type: ignore[arg-type]
+        await service.list_pending("not-a-valid-uuid")
 
 
 async def test_list_pending_propagates_db_failure_instead_of_returning_empty(service, monkeypatch):
