@@ -1714,6 +1714,29 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     rather than re-investigating a seventh time. No baseline/marker-list relief made
     (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
 
+67. A seventh `code_ratchets` `[health:ci_red_systemic]` leaf (task-9684, split 1/3 of
+    task-9683) citing the identical repeat set #25/#38/#45/#60 already closed four times —
+    task-9684's spec names task-9010, task-9069, task-9252, task-9459 verbatim, the same four
+    leaves every prior systemic leaf already resolved: task-9010 (commit `195b36a8`) is the real
+    fix that brought `loc_over_500`/`not_implemented_error` back to baseline; task-9069/
+    task-9252/task-9459 are all noop closures whose own notes already say the escalation was
+    stale. Reconfirmed on this worktree (HEAD synced past origin/main, `git status` clean):
+    `python scripts/check_code_ratchets.py` prints `OK` and matches
+    `code-ratchets-baseline.json` exactly on all 5 metrics (`skip_xfail=3 todo_fixme_xxx=0
+    not_implemented_error=27 loc_over_500=42 loc_over_800=3 loc_over_1000=0`). No script/
+    baseline change made — task-9010's fix and task-9145's `--near` early-warning tool (#12/#25)
+    are both still in place and sufficient. This is the same fleet-code pattern named 15+ times
+    (#17-#26, #30-#31, #33-#36, #38, #40, #45, #48, #50, #53, #56, #60): `pm/auto_decision.py`/
+    `orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off an already-resolved
+    escalation snapshot instead of checking whether a prior systemic leaf (task-9010, #25, #38,
+    #45, #60) already closed the identical question, out of a repo worker's edit scope (§4).
+    Before working a future `code_ratchets` leaf: run `python scripts/check_code_ratchets.py`
+    locally first — if `OK` and baseline-matching, and the escalation's cited repeat set matches
+    an already-closed leaf verbatim (task-9010, #25, #38, #45, #60, or this entry), close as
+    noop citing them rather than re-diagnosing a sixth time. No baseline/threshold relief made
+    (DECISION_GUIDELINES B-2) — script/baseline design is sound; the remaining defect is fleet
+    code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
