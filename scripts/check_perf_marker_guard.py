@@ -91,9 +91,14 @@ def _contains_assert(node: ast.AST) -> bool:
 
 def _find_violations(tree: ast.Module) -> list[str]:
     """Return the names of unmarked test functions/methods in `tree` that
-    compare a `perf_counter()`/`monotonic()` difference inside an `assert`."""
+    compare a `perf_counter()`/`monotonic()` difference inside an `assert`.
+
+    Tests marked with skip, skipif, or xfail are excluded — they don't run,
+    so perf markers are not required.
+    """
     module_marks = _pytestmark_assign_mark_names(tree.body)
     violations: list[str] = []
+    _SKIP_MARKERS = frozenset({"skip", "skipif", "xfail"})
 
     def visit(body: list[ast.stmt], inherited_marks: set[str]) -> None:
         for node in body:
@@ -111,6 +116,9 @@ def _find_violations(tree: ast.Module) -> list[str]:
                     and _contains_assert(node)
                 ):
                     own_marks = inherited_marks | _decorator_mark_names(node.decorator_list)
+                    # Skip tests that are marked skip, skipif, or xfail — they don't run
+                    if own_marks & _SKIP_MARKERS or module_marks & _SKIP_MARKERS:
+                        continue
                     if "perf" not in own_marks and "perf" not in module_marks:
                         violations.append(node.name)
 

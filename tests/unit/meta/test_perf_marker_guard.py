@@ -156,6 +156,57 @@ def test_scan_ignores_non_test_helper_functions() -> None:
     assert _find_violations(tree) == []
 
 
+def test_scan_ignores_skip_marked_perf_assertions() -> None:
+    """Tests marked with skip/skipif/xfail don't run, so perf markers
+    are not required. They should not be flagged as violations."""
+    skip_source = (
+        "import time\n"
+        "import pytest\n"
+        "\n"
+        "@pytest.mark.skip\n"
+        "def test_skipped():\n"
+        "    start = time.perf_counter()\n"
+        "    do_work()\n"
+        "    assert time.perf_counter() - start < 1.0\n"
+    )
+    tree = ast.parse(skip_source)
+    assert _find_violations(tree) == []
+
+
+def test_scan_ignores_xfail_marked_perf_assertions() -> None:
+    """Tests marked with xfail don't run in the normal suite, so perf
+    markers are not required."""
+    xfail_source = (
+        "import time\n"
+        "import pytest\n"
+        "\n"
+        "@pytest.mark.xfail\n"
+        "def test_expected_failure():\n"
+        "    start = time.perf_counter()\n"
+        "    do_work()\n"
+        "    assert time.perf_counter() - start < 1.0\n"
+    )
+    tree = ast.parse(xfail_source)
+    assert _find_violations(tree) == []
+
+
+def test_scan_ignores_skipif_marked_perf_assertions() -> None:
+    """Tests marked with skipif are conditionally skipped, so perf
+    markers are not required."""
+    skipif_source = (
+        "import time\n"
+        "import pytest\n"
+        "\n"
+        "@pytest.mark.skipif(True, reason='condition')\n"
+        "def test_conditionally_skipped():\n"
+        "    start = time.perf_counter()\n"
+        "    do_work()\n"
+        "    assert time.perf_counter() - start < 1.0\n"
+    )
+    tree = ast.parse(skipif_source)
+    assert _find_violations(tree) == []
+
+
 # --- script entry point (local gate / Actions) shares the scan ---------------
 
 
