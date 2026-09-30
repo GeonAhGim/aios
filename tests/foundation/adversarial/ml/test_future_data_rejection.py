@@ -76,3 +76,40 @@ def test_rejects_lineage_end_matching_backtest_start_to_the_microsecond() -> Non
 
     with pytest.raises(FutureDataLeakageError):
         check_point_in_time(card, backtest_start=backtest_start)
+
+
+def test_rejects_naive_backtest_start_instead_of_silently_comparing() -> None:
+    """A caller passes a naive `backtest_start` (e.g. a local-clock mistake
+    upstream, or an attacker hoping a naive/aware comparison quietly
+    succeeds via an implicit assumption). The guard must fail closed with a
+    plain `ValueError` about tz-awareness -- and this must NOT be
+    misreported as `FutureDataLeakageError`, since that would mislead a
+    caller into thinking the model itself was rejected for leakage rather
+    than the call being malformed."""
+    card = _card(_UTC_NOW - timedelta(days=1))
+    naive_start = datetime(2026, 1, 1)  # no tzinfo
+
+    with pytest.raises(ValueError, match="timezone-aware") as exc_info:
+        check_point_in_time(card, backtest_start=naive_start)
+
+    assert not isinstance(exc_info.value, FutureDataLeakageError)
+
+
+def test_propagates_error_construction_failure_instead_of_masking_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure injection: simulate `FutureDataLeakageError` itself being
+    broken (e.g. a bad deploy, or a corrupted dependency that raises while
+    building the rejection error). The guard must stay fail-closed -- it
+    must propagate whatever exception surfaces rather than swallowing it
+    and letting the call through as if it had been approved."""
+    backtest_start = _UTC_NOW
+    card = _card(backtest_start)  # tie -> would normally raise FutureDataLeakageError
+
+    def _broken_init(self: FutureDataLeakageError, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("injected failure: error construction is broken")
+
+    monkeypatch.setattr(FutureDataLeakageError, "__init__", _broken_init)
+
+    with pytest.raises(RuntimeError, match="injected failure"):
+        check_point_in_time(card, backtest_start=backtest_start)
