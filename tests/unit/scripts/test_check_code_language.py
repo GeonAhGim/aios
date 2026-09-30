@@ -121,6 +121,84 @@ def test_count_file_syntax_error_returns_zero_not_crash(tmp_path: Path) -> None:
     assert check_code_language.count_file(p) == 0
 
 
+def test_count_file_oserror_returns_zero(tmp_path: Path) -> None:
+    """read_text()가 OSError를 raise하면(권한 없음, 마운트 손실),
+    count_file은 0을 반환하고 예외를 던지지 않는다."""
+    p = tmp_path / "noaccess.py"
+    p.write_text("x = 1  # 한글\n", encoding="utf-8")
+
+    # Path.read_text를 monkeypatch해 OSError 유발
+    original_read_text = Path.read_text
+
+    def raise_oserror(self, *args, **kwargs) -> str:
+        raise OSError("Permission denied")
+
+    try:
+        Path.read_text = raise_oserror  # type: ignore[assignment]
+        assert check_code_language.count_file(p) == 0
+    finally:
+        Path.read_text = original_read_text  # type: ignore[assignment]
+
+
+def test_count_file_ast_parse_non_syntax_error_propagates(
+    tmp_path: Path,
+) -> None:
+    """ast.parse()가 SyntaxError以外的 예외를 던지면 count_file은 그 예외를
+    전파한다 — count_file은 SyntaxError만 catch하고, 다른 예외는 그대로
+    던진다. (count_tree가 이를 처리한다.)"""
+    p = _write_py(tmp_path / "ok.py", "x = 1  # english\n")
+
+    original_parse = check_code_language.ast.parse
+
+    def fake_parse(*args, **kwargs) -> None:
+        raise RuntimeError("simulated AST failure")
+
+    try:
+        check_code_language.ast.parse = fake_parse  # type: ignore[assignment]
+        with pytest.raises(RuntimeError, match="simulated AST failure"):
+            check_code_language.count_file(p)
+    finally:
+        check_code_language.ast.parse = original_parse  # type: ignore[assignment]
+
+
+# ---------------------------------------------------------------------------
+# negative tests — 대상이 아닌 것을 세지 않는다
+# ---------------------------------------------------------------------------
+
+
+def test_count_file_korean_variable_name_not_counted(tmp_path: Path) -> None:
+    """한글 변수명(식별자)은 코드 언어 위반이 아니다 — 주석/독스트링만 카운트한다.
+    ADR-2026-09-07-A는 주석과 독스트링의 언어만 제한한다."""
+    p = _write_py(
+        tmp_path / "a.py",
+        "한글변수 = 1\n다른변수 = 'hello'\nprint(한글변수)\n",
+    )
+
+    assert check_code_language.count_file(p) == 0
+
+
+def test_count_file_korean_class_name_not_counted(tmp_path: Path) -> None:
+    """한글 클래스명은 코드 심볼이지 주석이 아니다 — count_file은 0을 반환해야 한다."""
+    p = _write_py(
+        tmp_path / "a.py",
+        "class 주문서:\n    def __init__(self):\n        self.상태 = '신규'\n",
+    )
+
+    assert check_code_language.count_file(p) == 0
+
+
+def test_count_file_korean_string_literals_complex(tmp_path: Path) -> None:
+    """한글 string literal 복합 케이스 — f-string, 삼중따옴표, 바이트가 아닌
+    일반 문자열 모두 제품 텍스트(i18n 대상)이므로 카운트하지 않는다."""
+    p = _write_py(
+        tmp_path / "a.py",
+        'name = "사용자"\nmsg = f"안녕 {name}님"\ndoc = """\n이 함수는 주문을 생성합니다.\n"""\n'
+        "label = '상태 표시'\n",
+    )
+
+    assert check_code_language.count_file(p) == 0
+
+
 # ---------------------------------------------------------------------------
 # count_tree — scanned==0 회귀 방지 (task-4966 핵심)
 # ---------------------------------------------------------------------------
@@ -141,6 +219,42 @@ def test_count_tree_reports_zero_scanned_for_missing_dir(tmp_path: Path) -> None
     total, per_file, scanned = check_code_language.count_tree(missing)
 
     assert (total, per_file, scanned) == (0, [], 0)
+
+
+def test_count_tree_continues_after_one_file_fails(
+    in_repo_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """count_tree()는 한 파일의 count_file()이 0을 반환해도(예: parse 실패,
+    OSError), 다른 파일을 계속 스캔해야 한다 — 전체 스캔이 중단되면 안 된다.
+    monkeypatch로 중간 파일이 항상 0을 반환하게 해도 violations가 있는 파일을
+    찾아야 한다."""
+    target = in_repo_dir / "src"
+    # 위반 파일 2개 생성
+    _write_py(target / "violation_a.py", "x = 1  # 한글 위반 A\n")
+    _write_py(target / "violation_b.py", "y = 2  # 한글 위반 B\n")
+    # 중간 파일: count_file이 항상 0을 반환하도록 monkeypatch
+    original_count_file = check_code_language.count_file
+    call_order: list[str] = []
+
+    def zero_every_other(path: Path) -> int:
+        call_order.append(path.name)
+        return 0
+
+    try:
+        check_code_language.count_file = zero_every_other  # type: ignore[assignment]
+        total, per_file, scanned = check_code_language.count_tree(target)
+
+        # scanned은 실제 .py 파일 수여야 함 (monkeypatch와 무관)
+        assert scanned > 0
+        # total은 monkeypatch로 모든 파일이 0을 반환하므로 0
+        assert total == 0
+        # 하지만 per_file은 violation이 있는 파일만 표시해야 함
+        # (monkeypatch가 0을 반환하므로 비어 있어야 함)
+        assert per_file == []
+        # call_order에 여러 파일이 포함되어야 함 (중단 없음)
+        assert len(call_order) >= 2
+    finally:
+        check_code_language.count_file = original_count_file  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
