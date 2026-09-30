@@ -1,4 +1,5 @@
 """17.4 통합테스트 — 실제 dev DB 대상."""
+
 from pathlib import Path
 from uuid import uuid4
 
@@ -67,3 +68,77 @@ async def test_update_partial_upsert_preserves_other_fields(pool):
     )
     assert result.applied["risk_mismatch_email"] is False  # 이전 변경 유지
     assert result.applied["marketplace_purchase_email"] is False
+
+
+# --- negative tests (DoD: ≥3 건) ---
+
+
+async def test_update_rejects_unknown_field_name(pool):
+    """불 whitelist 밖의 필드명 — 명시적으로 거부되어야 함."""
+    user_id = await create_test_user(pool)
+    result = await update_notification_preferences(pool, user_id, {"unknown_field": True})
+    assert result.rejected_fields == ["unknown_field"]
+    # applied는 DB에서 읽은 전체 preferences (변경 없음 = 기본값 유지)
+    assert result.applied == {
+        "marketplace_purchase_email": True,
+        "verification_result_email": True,
+        "risk_mismatch_email": True,
+    }
+
+
+async def test_update_all_unknown_fields_returns_empty_applied(pool):
+    """전체 입력이 whitelist 밖일 때 applied는 DB 현재값, rejected는 전체."""
+    user_id = await create_test_user(pool)
+    result = await update_notification_preferences(
+        pool,
+        user_id,
+        {
+            "human_approval_requested_email": False,
+            "some_other_channel": True,
+        },
+    )
+    assert set(result.rejected_fields) == {
+        "human_approval_requested_email",
+        "some_other_channel",
+    }
+    # allowed가 비어 있으므로 DB에서 읽은 값은 기본값
+    assert result.applied == {
+        "marketplace_purchase_email": True,
+        "verification_result_email": True,
+        "risk_mismatch_email": True,
+    }
+
+
+async def test_update_empty_changes_does_nothing(pool):
+    """빈 변경 요청 — rejected도 applied 변경도 없음."""
+    user_id = await create_test_user(pool)
+    result = await update_notification_preferences(pool, user_id, {})
+    assert result.rejected_fields == []
+    # applied는 DB 현재값 (변경 전 기본값)
+    assert result.applied == {
+        "marketplace_purchase_email": True,
+        "verification_result_email": True,
+        "risk_mismatch_email": True,
+    }
+
+
+# --- failure injection test ---
+
+
+async def test_update_handles_db_connection_error(pool, monkeypatch):
+    """DB 연결 실패 시 예외가 상위 레이어로 전파되어야 함."""
+    user_id = await create_test_user(pool)
+    from unittest.mock import AsyncMock, patch
+
+    import asyncpg
+
+    async def failing_execute(*args, **kwargs):
+        raise asyncpg.exceptions.ConnectionDoesNotExistError("connection does not exist")
+
+    with patch.object(
+        asyncpg.connection.Connection, "execute", new=AsyncMock(side_effect=failing_execute)
+    ):
+        with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+            await update_notification_preferences(
+                pool, user_id, {"marketplace_purchase_email": False}
+            )
