@@ -1210,6 +1210,30 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     baseline/timeout relief made (DECISION_GUIDELINES B-2) — script/docs design is sound; the
     remaining defect is fleet code, not this repo.
 
+48. A fourth `pytest` 24h 4-repeat systemic leaf (task-9590) citing the *identical* repeat set
+    #28 (task-9482), #34 (task-9511), and #40 (task-9549) already closed verbatim (task-8850,
+    task-8933, task-9055, task-9464). As all three prior systemic leaves already established,
+    `scripts/check_pytest.py` does not exist (confirmed again here) — `pytest` is a container
+    name for the ~2700s full suite in `pm/ci_recheck.py`, not a shared check script with its own
+    design, so "the pytest gate repeating" is N unrelated single-test failures sharing one stage
+    name, not a design defect. The 4 cited leaves are the same three independent, already-fixed
+    classes #28 first named: the `generated/` deletion regression (#11, fixed twice, commits
+    `62005ec2`/`9c4a176a`), correctly-classified shared-host perf-budget contention noise
+    (task-8933, no code change per DECISION_GUIDELINES B-2), and the `perf_measurement_guard`
+    offender-count D2/D3 collision (task-9464, commit `7ad655e6`, same pattern as #14).
+    Reconfirmed on this worktree (HEAD `38f334ab`, `git status` clean):
+    `tests/unit/scripts/test_kis_generate_adapters.py` and
+    `tests/unit/meta/test_perf_measurement_guard.py` both pass (32 passed, 35.6s). No new root
+    cause found and none expected — this is the same escalation/orchestrator pattern named in
+    #17-#26/#30-#31/#33-#36/#38/#40 (`pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule
+    spawning a fresh systemic leaf off an already-closed repeat set instead of checking whether
+    a prior systemic leaf closed the identical question), fleet code out of a repo worker's edit
+    scope (§4). Before working a future `pytest` systemic leaf: check whether the cited repeat
+    leaf ids match #28/#34/#40/this entry's set first — if so, close as noop citing all four
+    rather than re-deriving the same three failure classes a fourth time. No script/baseline
+    exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to fix; the repeat is
+    fleet-code re-escalation, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
