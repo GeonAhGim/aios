@@ -9,7 +9,6 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -201,18 +200,22 @@ def test_lookalike_directory_named_generated_something_is_not_falsely_flagged(
 
 
 @pytest.mark.perf
-def test_find_deleted_generated_files_completes_within_time_budget() -> None:
+def test_find_deleted_generated_files_completes_within_time_budget(perf_budget) -> None:
     """성능단언: 대규모 PR(수천 개 삭제 파일)에서도 generated/ 스캔이 예산 내에 끝나는지."""
     deleted_files = [f"docs/generated/report_{i}.py" for i in range(4000)]
     deleted_files += [f"tests/unit/fixtures/case_{i}.py" for i in range(4000)]
     deleted_files.append("src/exchanges/kis/generated/account_tr_labels.py")
     assert len(deleted_files) > 1000
 
-    start = time.perf_counter()
-    violations = check_generated_dir_integrity.find_deleted_generated_files(deleted_files)
-    elapsed = time.perf_counter() - start
+    violations = None
+
+    def _run() -> None:
+        nonlocal violations
+        violations = check_generated_dir_integrity.find_deleted_generated_files(deleted_files)
+
+    sample = perf_budget.assert_within(_run, budget_ms=1000.0, label="generated/ 삭제 스캔")
+    print(f"[generated_dir_integrity scan] {perf_budget.describe(sample, budget_ms=1000.0)}")
 
     assert violations == ["docs/generated/report_" + str(i) + ".py" for i in range(4000)] + [
         "src/exchanges/kis/generated/account_tr_labels.py"
     ]
-    assert elapsed < 1.0, f"generated/ 삭제 스캔이 {elapsed:.3f}s -- 예산(1.0s) 초과"

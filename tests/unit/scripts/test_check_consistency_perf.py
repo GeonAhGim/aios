@@ -18,7 +18,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -100,7 +99,7 @@ def test_port_protocol_implementations_skips_unparseable_adapter_file(tmp_path: 
 
 
 @pytest.mark.perf
-def test_port_protocol_implementations_perf_budget(tmp_path: Path) -> None:
+def test_port_protocol_implementations_perf_budget(tmp_path: Path, perf_budget) -> None:
     """numeric perf assertion: 60 adapter 파일 x 20 클래스(1,200 클래스,
     구현 완전)를 5초 안에 처리한다 -- esc-ci-consistency의 120s 예산에
     비해 넉넉한 여유를 두면서도, 파일당 이중 walk가 재발하면 이 크기에서도
@@ -115,13 +114,18 @@ def test_port_protocol_implementations_perf_budget(tmp_path: Path) -> None:
         )
         _write(tmp_path, f"src/ctx/adapters/mod_{i}.py", body)
 
-    start = time.perf_counter()
-    hits = cc.check_port_protocol_implementations(tmp_path)
-    elapsed = time.perf_counter() - start
+    hits = None
+
+    def _run() -> None:
+        nonlocal hits
+        hits = cc.check_port_protocol_implementations(tmp_path)
+
+    sample = perf_budget.assert_within(
+        _run,
+        budget_ms=5000.0,
+        label="check_port_protocol_implementations 1,200 synthetic classes "
+        "(task-8949/task-9011 redundant full-tree scan pattern)",
+    )
+    print(f"[check_consistency perf] {perf_budget.describe(sample, budget_ms=5000.0)}")
 
     assert hits == []
-    assert elapsed < 5.0, (
-        f"check_port_protocol_implementations took {elapsed:.2f}s for 1,200 "
-        "synthetic classes, budget is 5.0s -- possible redundant full-tree scan "
-        "regression (task-8949/task-9011 pattern)"
-    )

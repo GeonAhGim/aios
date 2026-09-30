@@ -27,6 +27,7 @@ import pytest
 from src.data.models.base import Currency
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
+from tests.conftest import PerfBudget, paused_coverage
 from tests.integration.conftest import create_test_tenant, create_test_user
 
 
@@ -157,26 +158,36 @@ async def test_build_hierarchy_propagates_mid_chain_failure_without_swallowing(
 
 
 @pytest.mark.perf
-async def test_build_hierarchy_p95_latency_stays_within_normalized_ceiling(pool, repo):
+async def test_build_hierarchy_p95_latency_stays_within_normalized_ceiling(
+    pool, repo, perf_budget: PerfBudget
+):
     # 성능단언(D2 하한) — build_hierarchy는 거의 모든 FA-2 통합테스트가
     # setup으로 호출하는 4단 INSERT 체인이다. baseline 1회 대비 정규화한
     # 상한만 게이트로 쓰는 이유는 test_postgres_entity_repository.py의
     # 동일 패턴과 같다(공유 TEST_DATABASE_URL의 절대 지연 변동성).
-    baseline_start = time.perf_counter()
-    await build_hierarchy(pool, repo)
-    baseline_elapsed = time.perf_counter() - baseline_start
-
-    samples: list[float] = []
-    for _ in range(10):
-        start = time.perf_counter()
+    # I/O 대기(DB round trip)가 대부분이라 `PerfBudget.sample`의
+    # process_time() 기반 측정은 부적합하다 — wall-clock을 쓰되
+    # `paused_coverage()`로 `--cov=src` 라인 트레이서 오버헤드만 제거한다
+    # (tests/_perf/relative_budget.py의 mode="wall"과 같은 근거, task-9121).
+    with paused_coverage():
+        baseline_start = time.perf_counter()
         await build_hierarchy(pool, repo)
-        samples.append(time.perf_counter() - start)
+        baseline_elapsed = time.perf_counter() - baseline_start
+
+        samples: list[float] = []
+        for _ in range(10):
+            start = time.perf_counter()
+            await build_hierarchy(pool, repo)
+            samples.append(time.perf_counter() - start)
 
     samples.sort()
     p95 = samples[-1]
 
     ceiling = baseline_elapsed * 5 + 0.5
+    load = perf_budget.load_percent()
+    load_str = f"{load:.0f}%" if load is not None else "n/a"
     assert p95 <= ceiling, (
         f"build_hierarchy p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s"
-        f"(baseline {baseline_elapsed:.4f}s)를 초과했습니다 — 4단 INSERT 체인 회귀 의심"
+        f"(baseline {baseline_elapsed:.4f}s, load={load_str})를 "
+        "초과했습니다 — 4단 INSERT 체인 회귀 의심"
     )

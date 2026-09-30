@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from time import perf_counter
 from uuid import UUID
 
 import pytest
@@ -20,6 +19,7 @@ from src.foundation.research_data.adapters import dsl_query
 from src.foundation.research_data.application.query import search
 from src.foundation.research_data.contracts.v1 import ResearchItem
 from src.foundation.research_data.domain.as_of_binding import AsOfBindingError, bind_as_of
+from tests.conftest import PerfBudget
 
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _INSTRUMENT = "test-instrument"
@@ -140,20 +140,22 @@ def test_red_gate_reproduction_detects_future_clock_mutation(
 
 
 @pytest.mark.perf
-def test_dsl_5000_bar_query_p95_latency_budget() -> None:
+def test_dsl_5000_bar_query_p95_latency_budget(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C Decision 1: 5k-bar query p95 below 200ms."""
     columns = _columns(5000)
     builtin = dsl_query.research_builtins(_items(), columns, instrument=_INSTRUMENT)[
         ("research", "filing_count")
     ]
     site = CallSite("research", "filing_count", "series<float>", 5000)
-    builtin((), site)
-    samples = []
-    for _ in range(20):
-        start = perf_counter()
-        result = builtin((), site)
-        samples.append(perf_counter() - start)
-        assert isinstance(result, Series)
-        assert result.at(0) == 1.0
-        assert result.at(4999) == 3.0
-    assert sorted(samples)[18] < 0.2
+    result_holder: list[object] = []
+
+    def _call() -> None:
+        result_holder.append(builtin((), site))
+
+    samples = perf_budget.samples(_call, n=20, warmup=1)
+    result = result_holder[-1]
+    assert isinstance(result, Series)
+    assert result.at(0) == 1.0
+    assert result.at(4999) == 3.0
+    p95_ms = sorted(s.cpu_ms for s in samples)[18]
+    assert p95_ms < 200.0, f"dsl 5k-bar query p95 {p95_ms:.3f}ms -- budget 200ms 초과"
