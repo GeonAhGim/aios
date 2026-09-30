@@ -1473,6 +1473,30 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/docs design is sound; the remaining defect is fleet code,
     not this repo.
 
+58. An eighth `coverage` `[health:ci_red_systemic]` leaf (task-9661) citing the *identical*
+    repeat set (task-9052, task-9282, task-9461, task-9575) #49 (task-9586) already closed.
+    `coverage-baseline.txt` (`94.83`/`52977`) and `scripts/coverage_ratchet.py` are unchanged
+    since task-9120's trusted-write gate fix (commit `3bbf20326`) — reconfirmed on this worktree
+    (HEAD `98d2bee1`, `git status` clean, `git log --oneline -3 -- scripts/coverage_ratchet.py
+    coverage-baseline.txt` shows no commits since `3bbf20326`). No new evidence, no new repeat —
+    this leaf's spec names exactly the same four task ids #49 already resolved via the two-part
+    answer #21/#26/#32/#44/#49 already gave: (a) a local partial `pytest --cov=src` run dying
+    under shared-host DB-fixture contention shrinks the *numerator* (lines executed) while
+    `lines-valid` (the ratio-floor's own denominator, counting only *importable* statements)
+    stays high enough to slip past the 0.5 floor — not independently fixable from `coverage.xml`
+    alone since Cobertura carries no pytest pass/fail signal; the real fix (correlating a
+    coverage swing with pytest's own exit summary) belongs to fleet CI wiring
+    (`pm/local_ci.py` / `.github/workflows/quality.yml`), out of a repo worker's edit scope (§4);
+    (b) `esc-ci-coverage.json` re-polling and re-spawning systemic leaves off the same stale
+    repeat-set snapshot after a prior systemic leaf already closed the identical question — the
+    same fleet-code pattern named 15+ times (#17-#26, #30-#41, #44, #48-#50, #53, #57) in
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule. No script/baseline change made.
+    Before working a future `coverage` leaf: check whether the cited repeat leaf ids match an
+    already-closed systemic leaf's set (task-9052/#21, task-9508/#32, task-9575/#44,
+    task-9586/#49, or this entry) first — if so, close as noop citing all of them rather than
+    re-diagnosing. No baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES B-2) — the
+    ratchet design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
