@@ -1103,6 +1103,41 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     predates one of the three commits above, in which case close as noop citing the matching
     commit and this entry.
 
+44. A sixth `coverage` `[health:ci_red]` leaf (task-9575) on the same pattern #21/#26/#32
+    already named, with the escalation's own `sha` field now pointing at a commit already known
+    to be test-only. `esc-ci-coverage.json` attached this round to sha
+    `7ad655e691b4443bf3fdd105f7926406fcb4466d` with detail `FAIL: 기준선 미달 94.83% -> 50.73%
+    (-44.10%p, 허용 오차 0.50%p 초과)` — that exact commit is task-9464's own fix (already cited
+    in #28/#40), which only touches `tests/unit/meta/test_perf_measurement_guard.py` and 4
+    unrelated perf-marked test files to correct a `raw_timer_perf_asserts` offender-count ratchet
+    (544->548); it makes no `src/` change and has nothing to do with coverage. This worktree
+    (`git merge-base --is-ancestor 7ad655e6... HEAD` confirms ancestry, `git status` clean) is
+    already past that commit. `coverage-baseline.txt` is unchanged (`94.83`/`52977`, task-9052's
+    real-GH-Actions-verified value) and `scripts/coverage_ratchet.py` is unchanged since
+    task-9120's trusted-write gate (`GITHUB_ACTIONS=true`/`--allow-baseline-write` restriction) —
+    both already verified sound in #21/#26/#32. The escalation's `auto_actions` log shows the
+    same fleet-code mechanism named in #17-#26/#30-#41: five entries between `10:25:23Z` and
+    `11:39:32Z` alone, including a `stage_recheck` at `11:24:07Z` that re-failed against a
+    *different* sha (`8003202b10d8`, the same lightweight `mode: "commit"` gate run #26 already
+    showed has no `coverage`/`test` step at all) and then spawned this leaf off yet another
+    stale detail hash rather than checking whether task-9508 (#32, closed 5 hours earlier citing
+    the identical root cause) had already answered the question. As #26/#32 already conclude, a
+    large swing from a test-only commit is not independently fixable from `coverage.xml` alone
+    (no pytest pass/fail signal in Cobertura output) and the real fix — correlating a coverage
+    swing with pytest's own exit summary, or having the `ci_red` rule check prior resolution
+    before re-spawning — belongs to fleet code under `C:\aios\pm` (`pm/local_ci.py` /
+    `.github/workflows/quality.yml` / `pm/auto_decision.py`), out of a repo worker's edit scope
+    (§4). No script/baseline change made — regenerating a full `coverage.xml` to reprove the
+    ratchet script's own arithmetic would require a full local `pytest --cov=src` run, which §4
+    already prohibits, and the escalation's own cited commit is sufficient to establish this is
+    the same stale/test-only-commit pattern, not a fresh `src/` regression. Before working a
+    future `coverage` leaf: check whether the escalation's `sha` is a test-only commit (as it has
+    been every time so far: `4d5ebed5` in #21/#22, `27b5fe61` in #26/#32, `7ad655e6` here) and
+    whether `coverage-baseline.txt` is still `94.83`/`52977` — if both hold, close as noop citing
+    task-9052, task-9508 (#32), and this entry rather than re-diagnosing. No baseline/threshold/
+    ratio-floor relief made (DECISION_GUIDELINES B-2) — the ratchet design is sound; the remaining
+    defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
