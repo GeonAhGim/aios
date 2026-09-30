@@ -2451,3 +2451,29 @@ the numbering they had in CLAUDE.md section 6.
     if all hold, close as noop citing task-9052/#21, task-9508/#32, task-9575/#44, task-9586/#49,
     task-9661/#58, task-9687/#69, task-9611/#83, task-9755/#86, and this entry rather than
     re-diagnosing a thirteenth time.
+
+96. A fifth `pytest_perf` `[health:ci_red]` leaf (task-9812) cites `esc-ci-pytest_perf.json`
+    (sha `01afca607`) with an 11,950-char `detail.pytest_perf` field — but the field contains zero
+    `FAILED`/`Error`/`Traceback`/`assert`/`p95`/`p99`/`budget`/`threshold` tokens; every line is an
+    `INFO`-level `GET /readyz 200` request-context / httpx log pair (structured `log.unstructured`
+    events from `src.api.middleware.request_context` and the `httpx` client), i.e. captured stdout
+    noise from a healthcheck loop during test setup, not a failure signature. As #43 (task-9552),
+    #63 (task-9664), #72 (task-9594), and #90 (task-9758) already established, there is no
+    `scripts/check_pytest_perf.py` in this repo (confirmed again here) — `pytest_perf` is a
+    full-mode-only CI stage (`pm/ci_recheck.py:467-486`, confirmed present at those lines: `pytest
+    -m "perf and not nightly and not live_demo" --cov=src --cov-append --cov-report=xml`), not a
+    shared check script with its own design defect (DECISION_GUIDELINES B-2 n/a). Reconfirmed on
+    this worktree (`git status` clean, HEAD `56d8702d0`): running that exact stage's marker
+    expression with `--collect-only` completed in 119.09s with **exit code 0**, collecting
+    `637/15026 tests` (14389 deselected) with zero collection errors — only pre-existing
+    `PytestUnknownMarkWarning`/`DeprecationWarning` noise unrelated to `perf`. Unlike #43/#63/#72/
+    #90, this leaf's spec does not even name specific regressed leaf ids to bisect — it is the raw
+    escalation log dump itself, reconfirming the same fleet-code pattern named twenty-four+ times
+    now for other gates (#17-#26, #30-#31, #33-#42, #48, #50, #56, #59, #61, #63, #65, #72, #73,
+    #76, #79, #82, #90, #92-#94): `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule
+    re-spawning a fix task off a cached/noisy escalation detail instead of re-measuring current
+    HEAD first, out of a repo worker's edit scope (§4). No baseline/marker-list relief made
+    (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo. Before working a
+    future `pytest_perf` leaf: check whether `detail.pytest_perf` contains any actual
+    `FAILED`/`Error`/`Traceback` line — if it is pure `INFO`/httpx log noise like this one, close as
+    noop citing #43/#63/#72/#90 and this entry rather than re-investigating a sixth time.
