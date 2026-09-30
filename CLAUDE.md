@@ -1776,6 +1776,20 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     relief made (DECISION_GUIDELINES B-2) — the ratchet design is sound; the remaining defect is
     fleet code, not this repo.
 
+70. task-9686 (split 3/3 of the same parent task-9683) reached the identical conclusion as #67
+    (task-9684, split 1/3) and #68 (task-9685, split 2/3) independently: `python
+    scripts/check_code_ratchets.py` on this worktree also prints `OK`, matching
+    `code-ratchets-baseline.json` exactly on all 5 metrics (`skip_xfail=3 todo_fixme_xxx=0
+    not_implemented_error=27 loc_over_500=42 loc_over_800=3 loc_over_1000=0`). Same cited repeat
+    set (task-9010, task-9069, task-9252, task-9459), same root cause: task-9010 (commit
+    `195b36a8`) is the real fix; the remaining repeat is `pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule re-spawning off an already-`resolved` `esc-ci-code_ratchets.json` snapshot
+    instead of checking a prior systemic leaf's resolution first — fleet code, out of a repo
+    worker's edit scope (§4). Recorded here only to avoid re-merging duplicate prose; #67's
+    analysis and citation list apply verbatim to this leaf too. No baseline/threshold relief made
+    (DECISION_GUIDELINES B-2) — script/baseline design is sound; the remaining defect is fleet
+    code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
