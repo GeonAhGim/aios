@@ -17,6 +17,25 @@ def test_non_decimal_raises_type_error():
         json.dumps({"value": object()}, cls=DecimalSafeEncoder)
 
 
+def test_plain_json_dumps_rejects_decimal_without_encoder():
+    """negative: stdlib json.dumps without DecimalSafeEncoder must reject
+    Decimal — this is the invariant (monetary amounts are Decimal, never
+    float) that the encoder exists to satisfy without a silent float cast."""
+    with pytest.raises(TypeError):
+        json.dumps({"amount": Decimal("1.23")})
+
+
+def test_custom_object_nested_in_dict_value_raises_type_error():
+    """negative: a non-Decimal, non-JSON-native object nested as a dict
+    value must still raise TypeError, not be silently dropped or stringified."""
+
+    class Unserializable:
+        pass
+
+    with pytest.raises(TypeError):
+        json.dumps({"amount": Decimal("1"), "extra": Unserializable()}, cls=DecimalSafeEncoder)
+
+
 def test_nested_decimal_in_list():
     """boundary: Decimal inside a list — json.dumps calls default() for
     nested objects too, so this should succeed."""
@@ -85,6 +104,19 @@ def test_encoder_default_non_decimal_passes_through(monkeypatch):
     # datetime is handled by json module internals before default() — should raise
     with pytest.raises(TypeError):
         json.dumps({"ts": object()}, cls=DecimalSafeEncoder)
+
+
+def test_encoder_propagates_superclass_failure(monkeypatch):
+    """failure injection: if the json module's internal fallback raises a
+    different error than the stock TypeError (e.g. a dependency misbehaving),
+    DecimalSafeEncoder must not swallow it — fail-closed, not fail-open."""
+
+    def broken_super_default(self, obj):
+        raise ValueError("simulated downstream failure")
+
+    monkeypatch.setattr(json.JSONEncoder, "default", broken_super_default)
+    with pytest.raises(ValueError):
+        json.dumps({"extra": object()}, cls=DecimalSafeEncoder)
 
 
 @pytest.mark.perf
