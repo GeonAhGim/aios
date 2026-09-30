@@ -234,3 +234,38 @@ async def test_get_propagates_connection_failure_instead_of_swallowing_it(repo) 
 
     with pytest.raises(asyncpg.PostgresConnectionError):
         await repo.get(_FailingConn(), "ANY_SOURCE")
+
+
+@pytest.mark.perf
+async def test_get_performance_under_200ms_p95(
+    pool: asyncpg.Pool,
+    repo: PostgresSourceContractRepository,
+) -> None:
+    """성능단언: 계약 행이 존재할 때 repo.get()은 p95 200ms 이내에 반환된다
+    (5k봉 조회 성능 예산, ADR-2026-09-09-C Decision 1)."""
+    import time
+
+    source_id = f"TEST_PERF_{_NOW.timestamp()}"
+    await _insert_contract(
+        pool,
+        source_id=source_id,
+        tier=SourceContractTier.PERSONAL.value,
+        rate_limit=10,
+        capability={
+            "asset_classes": ["EQUITY_KR"],
+            "resolutions": ["1d"],
+            "corporate_actions": False,
+        },
+    )
+
+    timings_ms = []
+    for _ in range(10):
+        async with pool.acquire() as conn:
+            start = time.perf_counter()
+            await repo.get(conn, source_id)
+            elapsed = (time.perf_counter() - start) * 1000
+            timings_ms.append(elapsed)
+
+    timings_ms.sort()
+    p95 = timings_ms[int(len(timings_ms) * 0.95)]
+    assert p95 < 200, f"get() p95 {p95:.2f}ms exceeds 200ms budget"
