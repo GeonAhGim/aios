@@ -588,7 +588,7 @@ def test_copy_backup_tree_windows_uses_robocopy_and_succeeds_on_low_returncode(
     class _FakeCompleted:
         returncode = 1  # robocopy: 파일이 복사됨
 
-    def fake_run(cmd, stdout, stderr, timeout, check):
+    def fake_run(cmd, stdout, stderr, timeout, check, cwd=None):
         assert cmd[0] == "robocopy"
         return _FakeCompleted()
 
@@ -607,7 +607,7 @@ def test_copy_backup_tree_windows_high_returncode_is_failure(tmp_path: Path, mon
     class _FakeCompleted:
         returncode = 16  # robocopy: 심각한 오류(예: 소스 접근 실패)
 
-    def fake_run(cmd, stdout, stderr, timeout, check):
+    def fake_run(cmd, stdout, stderr, timeout, check, cwd=None):
         return _FakeCompleted()
 
     monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
@@ -624,7 +624,7 @@ def test_copy_backup_tree_windows_timeout_returns_diagnostic_instead_of_hanging(
     멈췄는지조차 관측 못 했다. 이제 timeout이 있으면 진단 가능한 실패로 끝난다."""
     monkeypatch.setattr(restore_drill.os, "name", "nt")
 
-    def fake_run(cmd, stdout, stderr, timeout, check):
+    def fake_run(cmd, stdout, stderr, timeout, check, cwd=None):
         raise restore_drill.subprocess.TimeoutExpired(cmd, timeout)
 
     monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
@@ -638,7 +638,7 @@ def test_copy_backup_tree_windows_timeout_returns_diagnostic_instead_of_hanging(
 def test_extract_tar_backup_fails_when_tar_binary_missing(tmp_path: Path, monkeypatch):
     """esc-health-backup_drill_failed: tar가 PATH에 없는 환경에서는 추출 시도 전에
     진단 가능한 실패로 끝나야 한다(무기한 대기/모호한 스택트레이스 대신)."""
-    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: None)
+    monkeypatch.setattr(restore_drill, "_tar_binary", lambda: (None, []))
 
     ok, detail = restore_drill._extract_tar_backup(tmp_path / "src", tmp_path / "dst", 30.0)
 
@@ -649,7 +649,7 @@ def test_extract_tar_backup_fails_when_tar_binary_missing(tmp_path: Path, monkey
 def test_extract_tar_backup_fails_when_base_tar_missing(tmp_path: Path, monkeypatch):
     """base.tar(.gz)가 없는 디렉터리(예: 이미 손상된 백업)를 조용히 빈 복구본으로
     넘기지 않고 즉시 실패시킨다."""
-    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    monkeypatch.setattr(restore_drill, "_tar_binary", lambda: ("/usr/bin/tar", ["--force-local"]))
     src = tmp_path / "src"
     src.mkdir()
 
@@ -662,7 +662,7 @@ def test_extract_tar_backup_fails_when_base_tar_missing(tmp_path: Path, monkeypa
 def test_extract_tar_backup_extracts_base_and_wal_tar(tmp_path: Path, monkeypatch):
     """base.tar.gz + pg_wal.tar.gz 둘 다 있으면 각각 dst/, dst/pg_wal/로 풀린다
     (-Ft -z pg_basebackup 산출물 레이아웃과 일치해야 restore가 정상 기동한다)."""
-    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    monkeypatch.setattr(restore_drill, "_tar_binary", lambda: ("/usr/bin/tar", ["--force-local"]))
     src = tmp_path / "src"
     src.mkdir()
     (src / "base.tar.gz").write_bytes(b"fake-tar")
@@ -671,8 +671,8 @@ def test_extract_tar_backup_extracts_base_and_wal_tar(tmp_path: Path, monkeypatc
 
     calls = []
 
-    def fake_run(cmd, stdout, stderr, timeout, check):
-        calls.append(cmd)
+    def fake_run(cmd, stdout, stderr, timeout, check, cwd=None):
+        calls.append([*cmd, f"cwd={cwd}"])
 
         class _FakeCompleted:
             returncode = 0
@@ -686,22 +686,23 @@ def test_extract_tar_backup_extracts_base_and_wal_tar(tmp_path: Path, monkeypatc
     assert ok is True
     assert detail == str(dst)
     assert len(calls) == 2
-    assert calls[0][:2] == ["/usr/bin/tar", "-xf"]
+    # task-9469: -C 대신 cwd로 추출 위치를 넘긴다(드라이브 문자 인자를 tar가 원격 호스트로 오인)
+    assert calls[0][:3] == ["/usr/bin/tar", "--force-local", "-xf"]
     assert str(src / "base.tar.gz") in calls[0]
-    assert str(dst) in calls[0]
+    assert f"cwd={dst}" in calls[0]
     assert str(src / "pg_wal.tar.gz") in calls[1]
-    assert str(dst / "pg_wal") in calls[1]
+    assert f"cwd={dst / 'pg_wal'}" in calls[1]
 
 
 def test_extract_tar_backup_reports_extraction_failure(tmp_path: Path, monkeypatch):
     """tar 추출이 0이 아닌 코드로 끝나면(손상된 아카이브 등) 실패로 보고하고 뒤 단계로
     넘어가지 않는다."""
-    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    monkeypatch.setattr(restore_drill, "_tar_binary", lambda: ("/usr/bin/tar", ["--force-local"]))
     src = tmp_path / "src"
     src.mkdir()
     (src / "base.tar").write_bytes(b"corrupt")
 
-    def fake_run(cmd, stdout, stderr, timeout, check):
+    def fake_run(cmd, stdout, stderr, timeout, check, cwd=None):
         class _FakeCompleted:
             returncode = 2
 
@@ -718,12 +719,12 @@ def test_extract_tar_backup_reports_extraction_failure(tmp_path: Path, monkeypat
 def test_extract_tar_backup_timeout_returns_diagnostic(tmp_path: Path, monkeypatch):
     """추출 단계도 복사 단계와 동일하게 timeout이 있어야 한다 -- 무기한 대기가
     esc-health-backup_drill_failed의 근본 실패 패턴이었다."""
-    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    monkeypatch.setattr(restore_drill, "_tar_binary", lambda: ("/usr/bin/tar", ["--force-local"]))
     src = tmp_path / "src"
     src.mkdir()
     (src / "base.tar.gz").write_bytes(b"fake-tar")
 
-    def fake_run(cmd, stdout, stderr, timeout, check):
+    def fake_run(cmd, stdout, stderr, timeout, check, cwd=None):
         raise restore_drill.subprocess.TimeoutExpired(cmd, timeout)
 
     monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
@@ -795,3 +796,16 @@ def test_run_drill_fails_fast_when_copy_tree_fails(tmp_path: Path):
     assert result["steps"]["restore_files"]["ok"] is False
     assert result["steps"]["restore_files"]["detail"] == "디스크 공간 부족(시뮬레이션)"
     assert "start_postgres" not in result["steps"]
+
+
+def test_write_recovery_config_isolates_scratch_instance(tmp_path: Path):
+    """CTO 2026-09-30(task-9469): 리허설 사본은 운영 아카이브에 쓰지 않고(archive_mode=off),
+    백업의 타임라인만 재생하며(recovery_target_timeline=current), 기동 fsync를 건너뛴다."""
+    data_dir = tmp_path / "pgdata"
+    data_dir.mkdir()
+    (data_dir / "postgresql.auto.conf").write_text("archive_mode = on\n", encoding="utf-8")
+    restore_drill.write_recovery_config(data_dir, tmp_path / "archive")
+    lines = (data_dir / "postgresql.auto.conf").read_text(encoding="utf-8").splitlines()
+    # postgresql.auto.conf는 같은 키의 마지막 값이 이긴다 — 원본의 on 뒤에 off가 와야 한다
+    assert [x for x in lines if x.startswith("archive_mode")][-1] == "archive_mode = off"
+    assert "recovery_target_timeline = 'current'" in lines and "fsync = off" in lines

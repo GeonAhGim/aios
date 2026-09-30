@@ -109,7 +109,20 @@ def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
     restore_command = f'{restore_cmd} "{safe_archive}/%f" "%p"'
     conf = data_dir / "postgresql.auto.conf"
     existing = conf.read_text(encoding="utf-8") if conf.exists() else ""
-    conf.write_text(existing + f"\nrestore_command = '{restore_command}'\n", encoding="utf-8")
+    # CTO 2026-09-30(task-9469): 리허설 인스턴스는 버리는 사본이다.
+    # - archive_mode=off: 원본의 archive_command를 물려받아 운영 WAL 아카이브에 자기 타임라인
+    #   기록(00000002.history)을 써 넣던 결함 차단 — 남으면 이후 복구가 엉뚱한 타임라인을 쫓는다.
+    # - recovery_target_timeline=current: 아카이브에 다른 타임라인 기록이 있어도
+    #   백업의 타임라인만 재생한다.
+    # - fsync=off: 기동 시 데이터 디렉터리 전체 fsync(파일 10만 개 기준 수 분, 09-23 로그 실측)를
+    #   건너뛴다. 사본의 내구성은 검증 대상이 아니다(복구 가능성·재생 일치가 대상).
+    scratch = (
+        f"\nrestore_command = '{restore_command}'\n"
+        "archive_mode = off\n"
+        "recovery_target_timeline = 'current'\n"
+        "fsync = off\n"
+    )
+    conf.write_text(existing + scratch, encoding="utf-8")
 
 
 def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
@@ -154,6 +167,17 @@ def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _tar_binary() -> tuple[str | None, list[str]]:
+    """(tar 경로, 드라이브 문자 경로용 추가 인자). Windows는 시스템 bsdtar를 우선한다 — PATH 순서
+    (Git Bash에서 띄우면 MSYS GNU tar)에 따라 결과가 달라지지 않게 한다.
+    GNU tar만 --force-local이 필요하다."""
+    sys_tar = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
+    if os.name == "nt" and sys_tar.exists():
+        return str(sys_tar), []
+    found = shutil.which("tar")
+    return found, (["--force-local"] if found else [])
+
+
 def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
     """esc-health-backup_drill_failed 근본 원인(2026-09-29 조사): 이 클러스터가 쌓은 고아
     aios_test_* DB 474개가 base/ 아래 오브젝트 디렉터리당 파일 ~1,000개씩, 총 47만개+를
@@ -168,7 +192,7 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
     오인해 "Cannot open"으로 죽는다(실측 확인) -- 그래서 -C 자체를 아예 안 쓰고
     subprocess의 cwd로 추출 대상 디렉터리를 바꿔 넘긴다(드라이브 문자가 인자 문자열에
     안 섞이므로 두 문제 모두 피한다). base.tar 추출이 한 번도 성공한 적이 없던 이유였다."""
-    tar_bin = shutil.which("tar")
+    tar_bin, local = _tar_binary()
     if tar_bin is None:
         return False, "tar 실행 파일을 찾을 수 없다(Windows 10+/bsdtar 또는 GNU tar 필요)"
     base_tar = next((p for p in (src / "base.tar.gz", src / "base.tar") if p.exists()), None)
@@ -197,7 +221,7 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
             return 1, f"{type(exc).__name__}: {exc}"
 
     dst.mkdir(parents=True, exist_ok=True)
-    rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(base_tar)], cwd=dst)
+    rc, tail = _run_tar([tar_bin, *local, "-xf", str(base_tar)], cwd=dst)
     if rc != 0:
         return False, f"base.tar 추출 실패(rc={rc}): {tail}"
 
@@ -205,7 +229,7 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
     if wal_tar is not None:
         wal_dir = dst / "pg_wal"
         wal_dir.mkdir(parents=True, exist_ok=True)
-        rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(wal_tar)], cwd=wal_dir)
+        rc, tail = _run_tar([tar_bin, *local, "-xf", str(wal_tar)], cwd=wal_dir)
         if rc != 0:
             return False, f"pg_wal.tar 추출 실패(rc={rc}): {tail}"
 
