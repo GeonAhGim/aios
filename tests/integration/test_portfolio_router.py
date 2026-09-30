@@ -3,6 +3,7 @@
 실제 Bitget Demo 키가 없어 FastAPI dependency_overrides로 가짜
 adapter_factory/resolver를 주입한다(exchange_credentials 라우터 테스트와
 동일 패턴)."""
+
 import json
 import uuid
 from decimal import Decimal
@@ -262,11 +263,7 @@ async def test_rebalance_over_cash_balance_rejected(client, pool):
 
     response = await client.post(
         "/portfolio/rebalance",
-        json={
-            "adjustments": [
-                {"execution_id": execution_id, "new_allocated_capital": "999999"}
-            ]
-        },
+        json={"adjustments": [{"execution_id": execution_id, "new_allocated_capital": "999999"}]},
         headers=headers,
     )
 
@@ -277,3 +274,135 @@ async def test_portfolio_requires_authentication(client):
     response = await client.get("/portfolio")
 
     assert response.status_code == 401
+
+
+async def _create_started_execution(
+    client, headers, strategy_id, version, *, allocated_capital="500"
+):
+    create_response = await client.post(
+        "/executions",
+        json={
+            "strategy_id": strategy_id,
+            "strategy_version": version,
+            "allocated_capital": allocated_capital,
+            "currency": "USDT",
+            "exchange": "bitget",
+            "mode": "PAPER",
+        },
+        headers=headers,
+    )
+    execution_id = create_response.json()["id"]
+    await client.post(f"/executions/{execution_id}/start", headers=headers)
+    return execution_id
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# negative tests — invariant-violating rebalance inputs must be rejected
+# (FD-19.2 — atomic, no partial updates)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+async def test_rebalance_rejects_empty_adjustments(client):
+    """조정 목록이 비어 있으면 최소 1개 필요 불변식 위반으로 400이어야 한다."""
+    headers, _ = await _register(client)
+
+    response = await client.post("/portfolio/rebalance", json={"adjustments": []}, headers=headers)
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_rebalance_rejects_nonexistent_execution(client, pool):
+    """존재하지 않는 execution_id를 조정 대상으로 넘기면 400으로 거부해야 한다."""
+    headers, user_id = await _register(client)
+    await _link_credential(client, headers)
+    await _activate_mandate(pool, user_id)
+    strategy_id, version = await _create_approved_strategy(pool, user_id)
+    execution_id = await _create_started_execution(client, headers, strategy_id, version)
+
+    response = await client.post(
+        "/portfolio/rebalance",
+        json={
+            "adjustments": [{"execution_id": execution_id + 999999, "new_allocated_capital": "100"}]
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_rebalance_rejects_other_users_execution(client, pool):
+    """타인의 execution_id로 재구성을 시도하면 본인 소유 불변식 위반으로 400이어야 한다."""
+    headers_a, user_a = await _register(client)
+    await _link_credential(client, headers_a)
+    await _activate_mandate(pool, user_a)
+    strategy_id, version = await _create_approved_strategy(pool, user_a)
+    execution_id = await _create_started_execution(client, headers_a, strategy_id, version)
+
+    headers_b, user_b = await _register(client)
+    await _link_credential(client, headers_b)
+    await _activate_mandate(pool, user_b)
+
+    response = await client.post(
+        "/portfolio/rebalance",
+        json={"adjustments": [{"execution_id": execution_id, "new_allocated_capital": "100"}]},
+        headers=headers_b,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_rebalance_rejects_combined_adjustments_exceeding_balance(client, pool):
+    """개별로는 잔고 이내여도 합산이 계좌 잔고를 넘기면 원자적으로 전부 거부해야 한다."""
+    headers, user_id = await _register(client)
+    await _link_credential(client, headers)
+    await _activate_mandate(pool, user_id)
+    strategy_id_1, version_1 = await _create_approved_strategy(pool, user_id)
+    execution_id_1 = await _create_started_execution(client, headers, strategy_id_1, version_1)
+    strategy_id_2, version_2 = await _create_approved_strategy(pool, user_id)
+    execution_id_2 = await _create_started_execution(client, headers, strategy_id_2, version_2)
+
+    # fake adapter는 총 현금 잔고를 고정 10000 USDT로 보고한다 — 6000+6000은
+    # 개별 조정은 통과하지만 합산(12000)이 잔고를 넘어선다.
+    response = await client.post(
+        "/portfolio/rebalance",
+        json={
+            "adjustments": [
+                {"execution_id": execution_id_1, "new_allocated_capital": "6000"},
+                {"execution_id": execution_id_2, "new_allocated_capital": "6000"},
+            ]
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# failure injection — an unexpected (non-domain) service exception must
+# surface as 500 INTERNAL_ERROR, not leak or silently succeed
+# ──────────────────────────────────────────────────────────────────────────
+
+
+async def test_rebalance_handles_unexpected_service_error(client, pool, monkeypatch):
+    from src.services import portfolio_service
+
+    async def _boom(self, user_id, adjustments, *, total_cash_balance):
+        raise RuntimeError("의도된 예외 주입")
+
+    monkeypatch.setattr(portfolio_service.PortfolioService, "rebalance", _boom)
+
+    headers, user_id = await _register(client)
+    await _link_credential(client, headers)
+    await _activate_mandate(pool, user_id)
+    strategy_id, version = await _create_approved_strategy(pool, user_id)
+    execution_id = await _create_started_execution(client, headers, strategy_id, version)
+
+    response = await client.post(
+        "/portfolio/rebalance",
+        json={"adjustments": [{"execution_id": execution_id, "new_allocated_capital": "600"}]},
+        headers=headers,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "INTERNAL_ERROR"
