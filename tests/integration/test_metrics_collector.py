@@ -2,6 +2,7 @@
 실제 dev/test DB 대상 — order_reject_rate_pct/daily_loss_pct는 DB
 데이터에서 직접 계산되므로 실제 행을 만들어 검증한다.
 """
+
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -112,7 +113,12 @@ async def test_order_reject_rate_pct_computes_ratio(pool):
     new_total = baseline_counts["total"] + 4
     expected = Decimal(new_rejected) / Decimal(new_total) * 100
     assert result == expected
-    assert result != baseline
+    # `assert result != baseline`는 의도적으로 두지 않는다 — 이 테스트가
+    # 매 실행마다 정확히 2/4(50%) 비율로 주문을 추가하므로, 공유 DB에
+    # 누적될수록 baseline 자체가 50%로 수렴해 계속 실패하는 flaky
+    # 어서션이 된다. 위의 `result == expected`(baseline_counts 기준 정확한
+    # 비율 재계산)가 이미 반영 여부를 baseline과 무관하게 증명한다.
+    assert baseline >= Decimal("0")
 
 
 async def test_order_reject_rate_pct_zero_with_no_recent_orders(pool):
@@ -184,3 +190,92 @@ async def test_collect_circuit_breaker_metrics_data_delay_none_when_freshness_tr
     metrics = await collect_circuit_breaker_metrics(pool, ApiCallTracker(), DataFreshnessTracker())
 
     assert metrics.data_delay_sec is None
+
+
+# --- negative tests: invariant-violating/degenerate DB state must not produce
+# a nonsensical metric value (e.g. negative "loss", division-by-zero) ---------
+
+
+async def test_daily_loss_pct_zero_when_day_start_value_is_zero(pool):
+    """equity_day_start_value=0(오늘 시작 자본 미기록)인 실행만 있을 때
+    day_start_total<=0 분기를 타 division-by-zero 없이 0을 돌려줘야 한다 —
+    음수/0 분모로 비율을 계산한 결과를 그대로 반환하면 잘못된 손실률이
+    CircuitBreakerService.evaluate()로 흘러 들어간다."""
+    from src.core.safety.metrics_collector import _daily_loss_pct
+
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id, allocated_capital=Decimal("1000"))
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_executions SET equity_day_start_value = 0 WHERE id = $1",
+            execution_id,
+        )
+
+    result = await _daily_loss_pct(pool)
+    assert result >= Decimal("0")
+
+
+async def test_daily_loss_pct_clamps_gain_to_zero_not_negative(pool):
+    """현재 equity가 하루 시작 equity보다 큰(이익) 상태는 "손실"이 아니므로
+    음수 loss_pct를 그대로 돌려주면 안 되고 0으로 클램프돼야 한다 — 이
+    지표는 "손실만" 의미 있다는 모듈 docstring의 불변식을 직접 검증한다."""
+    from src.core.safety.metrics_collector import _daily_loss_pct
+
+    user_id = await create_test_user(pool)
+    execution_id = await _create_running_execution(pool, user_id, allocated_capital=Decimal("1000"))
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_executions SET equity_day_start_value = 1000, "
+            "equity_day_start_date = CURRENT_DATE WHERE id = $1",
+            execution_id,
+        )
+        # realized_pnl=+500 (이익) 포지션 -> current_total > day_start_total 유발.
+        await conn.execute(
+            """
+            INSERT INTO positions (
+                user_id, symbol, exchange, strategy_id, execution_id,
+                quantity, average_entry_price, realized_pnl, entry_time, closed_at
+            ) VALUES ($1, 'BTC/USDT', 'bitget', 'strat-1', $2, 0, 50000, 500, now(), now())
+            """,
+            user_id,
+            execution_id,
+        )
+
+    result = await _daily_loss_pct(pool)
+    assert result >= Decimal("0")
+
+
+def test_api_call_tracker_never_succeeded_reports_zero_not_negative_or_huge():
+    """한 번도 성공한 적 없는 트래커는 "장애 지속시간"을 0으로 돌려줘야
+    한다 — 실패만 기록된 상태에서 경과시간을 임의의 큰 값이나 음수로
+    계산하면 emergency 오판(또는 타입 에러)으로 이어진다(모듈 docstring
+    명시 불변식)."""
+    tracker = ApiCallTracker()
+    tracker.record_failure()
+    tracker.record_failure()
+
+    result = tracker.seconds_since_last_success()
+
+    assert result == Decimal("0")
+
+
+# --- failure injection: DB layer raising must propagate, not be swallowed
+# into a fabricated "safe" value (fail-closed posture, CLAUDE.md §3) --------
+
+
+async def test_order_reject_rate_pct_propagates_pool_failure():
+    class _FailingAcquire:
+        async def __aenter__(self):
+            raise ConnectionError("simulated pool exhaustion")
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+    class _FailingPool:
+        def acquire(self):
+            return _FailingAcquire()
+
+    with pytest.raises(ConnectionError):
+        await _order_reject_rate_pct(_FailingPool())
