@@ -1260,6 +1260,34 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     rather than re-diagnosing. No baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES
     B-2) — the ratchet design is sound; the remaining defect is fleet code, not this repo.
 
+50. `ruff` `[health:ci_red_systemic]` 24h 4-repeat leaf (task-9596) reconfirms #15/#39's diagnosis
+    for a fifth+ round rather than finding a new rule/baseline defect. `pyproject.toml`'s
+    `[tool.ruff]`/`per-file-ignores` config is unchanged and sound: a plain
+    `python -m ruff check src tests scripts` on this worktree (HEAD synced past all four cited
+    leaves) prints `All checks passed!`. The 4 cited repeats (task-9157, task-9288, task-9466,
+    task-9576) are not four independent design gaps — each closed noop citing the exact same
+    already-fixed regression: an `E501` line-length violation in `ingest_candles.py` (task-9056's
+    commit `50c6a348`, the same commit already named in #15/#43) and a `B017` blind-exception
+    assert in `tests/foundation/adversarial/paper_control/test_cross_tenant_isolation.py:209`
+    (task-9501's commit `9e1555f2`, which replaced `pytest.raises(Exception)` with
+    `pytest.raises(InvalidDeploymentStateError)` — confirmed still in place at current HEAD, line
+    210 reads exactly that). `esc-ci-ruff.json` itself shows the mechanism directly: `status:
+    "open"`, `reopen_count: 5`, `owner.leaf_ids: [9576]`, and an `auto_actions` log whose last
+    entry (`12:24:13Z`) already reads `"fix task-9576 done — 다음 CI 평가 대기(새 리프 발행
+    보류)"` — i.e. the escalation's own record already deferred further leaf creation pending a
+    fresh CI recheck, and this systemic leaf was filed against that same still-`"open"` snapshot
+    before that recheck happened. This is the identical fleet-code pattern already named twelve+
+    times (#17-#26, #30-#31, #33-#36, #38, #40, #48): `pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule not distinguishing "escalation open because the fix hasn't landed yet" from
+    "escalation open because the resolution snapshot hasn't been re-evaluated yet," out of a repo
+    worker's edit scope (§4). No script/baseline change made — `pyproject.toml`'s ruff config is
+    unchanged since task-9056/task-9501, and both real fixes are still in place. Before working a
+    future `ruff` correction leaf: run `ruff check <the exact path:line from the esc detail>`
+    first — if it's already clean and the cited repeat leaf ids match an already-closed leaf's set
+    (task-9157/task-9288/#15, task-9466, task-9576/#39, or this entry), close as noop citing them
+    rather than re-fixing already-fixed code. No baseline/rule relief made (DECISION_GUIDELINES
+    B-2) — none was warranted.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
