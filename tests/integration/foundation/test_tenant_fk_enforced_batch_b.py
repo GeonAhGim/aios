@@ -136,3 +136,37 @@ async def test_ledger_account_null_tenant_id_still_allowed(pool):
         )
 
     assert row["tenant_id"] is None
+
+
+async def test_pos_account_insert_with_null_tenant_id_raises_not_null_violation(pool):
+    # pos_account.tenant_id는 NOT NULL(docstring 참조) — ledger_account와
+    # 달리 NULL로 FK 체크를 우회할 수 없다는 것을 대조군으로 확인한다.
+    with pytest.raises(asyncpg.NotNullViolationError):
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method)
+                VALUES (NULL, 'binance', 'KRW', 'FIFO')
+                """
+            )
+
+
+class _FailingAcquire:
+    """`pool.acquire()`가 연결 장애로 실패하는 상황을 주입하는 컨텍스트 매니저."""
+
+    async def __aenter__(self) -> None:
+        raise asyncpg.exceptions.ConnectionDoesNotExistError("simulated connection loss (injected)")
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+async def test_fk_ref_propagates_injected_connection_failure(pool, monkeypatch):
+    # `_fk_ref`는 연결 실패를 삼켜 "제약 없음"(None)으로 되돌리면 안 된다 —
+    # 그러면 실제 FK가 없는 경우와 DB가 응답하지 않는 경우를 구분할 수 없어
+    # fail-closed 원칙(§3)이 깨진다. pool.acquire를 실패로 주입해 예외가
+    # 그대로 전파되는지 확인한다.
+    monkeypatch.setattr(type(pool), "acquire", lambda self: _FailingAcquire())
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await _fk_ref(pool, "pos_account", "pos_account_tenant_id_fkey")
