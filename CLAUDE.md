@@ -147,6 +147,28 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     `git status` first to confirm the worktree isn't simply behind an already-landed fix, and try a
     plain re-run (`npm run build:e2e --workspace=apps/web && npx playwright test journey-j1
     journey-j2 journey-j3 --project=chromium`) before spending turns on a fresh bisect.
+14. Treating every `type_ignore` (PLT-40 `check_type_ignore_budget.py`) red as a script defect —
+    task-8993 flagged 11 correction leaves in 24h (task-8920, 9014, 9070, 9113, 9136, ...) and the
+    ratchet mechanism itself is sound (task-9140 reverified: 142/142, ~8s runtime, well under the
+    180s gate timeout). The 11 leaves are two unrelated failure classes wearing the same gate name:
+    (a) a real perf bug in `_iter_python_files` (rglob walked into `.mypy_cache`/`.hypothesis`
+    before filtering, 180s timeout) — root-caused once in task-9014, patched again in task-9113 for
+    a missed `.import_linter_cache` entry, and done since; task-9070/9136 then re-reported the same
+    180s symptom from worktrees that simply hadn't pulled the fix yet — the journeys pattern (#13)
+    repeating under a different gate name. (b) genuine budget increases (task-8891, 8920) from D2/D3
+    negative-test leaves (§5) that inject a wrong-typed value into a typed function/dataclass to
+    prove fail-closed behavior — mypy then requires `# type: ignore` on that exact injection line,
+    which the ratchet (correctly) counts as a regression. That is a structural collision between two
+    enforced policies (D2/D3 negative-test mandate vs. "budget never grows"), not a bug in either
+    check; task-8891's fix demonstrates the workaround (build the invalid payload as
+    `dict[str, Any]` and `**`-unpack it so mypy widens to `object` and needs no ignore) but there is
+    no way to eliminate the underlying tension in general. Before filing a new `type_ignore`
+    correction leaf: confirm the worktree is synced past the latest fix on
+    `scripts/check_type_ignore_budget.py`/`type-ignore-budget.txt` first: if the symptom is a 180s
+    timeout, `git log --oneline -5 -- scripts/check_type_ignore_budget.py` and a plain re-run settle
+    it; if it's a budget increase, look for a D2/D3 negative-test leaf in the same window before
+    assuming a fresh design defect, and prefer the `dict[str, Any]` unpack pattern over adding a new
+    ignore. Budget/threshold relief is still forbidden either way (DECISION_GUIDELINES B-2).
 
 ## 7. File policy (ADR-2026-09-10-C)
 
