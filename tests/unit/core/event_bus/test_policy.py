@@ -100,11 +100,11 @@ class TestPolicyNegative:
 
     def test_none_key_raises_key_error(self):
         with pytest.raises(KeyError):
-            EventBusPolicy.ON_HANDLER_ERROR[None]  # type: ignore[dict-item]
+            EventBusPolicy.ON_HANDLER_ERROR[None]
 
     def test_int_key_raises_key_error(self):
         with pytest.raises(KeyError):
-            EventBusPolicy.ON_HANDLER_ERROR[0]  # type: ignore[dict-item]
+            EventBusPolicy.ON_HANDLER_ERROR[0]
 
     def test_string_key_matches_enum_by_value(self):
         """Python enum uses value-based __eq__: 'SAFE' == HandlerCriticality.SAFE.
