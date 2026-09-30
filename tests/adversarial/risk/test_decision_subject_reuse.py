@@ -15,6 +15,7 @@ task-1520(51be3c7, repro 774a0a0)이 재현한 두 결함 — 트리거는 tenan
 (a) 거래소 어댑터 호출 0, (b) `orders` 행 0(claim 없음), (c) 감사 행
 `risk_decision_integrity_rejected`를 단언한다.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -52,9 +53,10 @@ from tests.adversarial.risk.conftest import (
     seed_execution,
 )
 from tests.integration.conftest import NoopEventBus, create_test_tenant
-from tests.integration.risk.test_pre_submit_gate import (
-    _FakeConnectionRepo,
-    _RiskRepoWithFixedSafetyState,
+from tests.integration.risk.conftest import (
+    FakeConnectionRepo,
+    NoOpenSignalsRepo,
+    RiskRepoWithFixedSafetyState,
 )
 
 
@@ -77,7 +79,11 @@ async def _reject(
     audits_before = await audit_count(pool, AUDIT_DECISION_INTEGRITY_REJECTED, gate.decision_id)
     with pytest.raises(RiskDecisionIntegrityError) as exc_info:
         await submit_with_fence(
-            pool, adapter, order, user_id=user_id, gate_decision=gate,
+            pool,
+            adapter,
+            order,
+            user_id=user_id,
+            gate_decision=gate,
             read_fences=fence_reader(pool, user_id, execution_id),
             decision_reader=PostgresDecisionRepository(pool),
         )
@@ -96,8 +102,13 @@ async def victim(pool: asyncpg.Pool) -> dict[str, Any]:
     decision = await insert_decision(pool, user_id, execution_ref=f"exec:{execution_id}")
     read = fence_reader(pool, user_id, execution_id)
     f0 = dict(await read())
-    return {"user_id": user_id, "execution_id": execution_id, "decision": decision,
-            "f0": f0, "read": read}
+    return {
+        "user_id": user_id,
+        "execution_id": execution_id,
+        "decision": decision,
+        "f0": f0,
+        "read": read,
+    }
 
 
 # --- I10: 한 subject의 ALLOW는 다른 subject로 이전되지 않는다 -----------------
@@ -112,7 +123,10 @@ async def test_i10_allow_for_execution_x_cannot_be_transferred_to_execution_y(po
     )
     f0_for_y = dict(await fence_reader(pool, victim["user_id"], exec_y)())
     error = await _reject(
-        pool, user_id=victim["user_id"], execution_id=exec_y, order=foreign,
+        pool,
+        user_id=victim["user_id"],
+        execution_id=exec_y,
+        order=foreign,
         gate=_allow(victim["decision"].decision_id, f0_for_y),
     )
     assert set(error.mismatches) >= {"execution_ref", "symbol", "quantity"}
@@ -133,7 +147,10 @@ async def test_i10_same_execution_different_intent_field_is_rejected(
     """execution·tenant·F0는 전부 맞고 intent 한 필드만 다르다 — 그 한 필드만으로 거부."""
     order = make_order(victim["execution_id"]).model_copy(update=update)
     error = await _reject(
-        pool, user_id=victim["user_id"], execution_id=victim["execution_id"], order=order,
+        pool,
+        user_id=victim["user_id"],
+        execution_id=victim["execution_id"],
+        order=order,
         gate=_allow(victim["decision"].decision_id, victim["f0"]),
     )
     assert error.mismatches == expected
@@ -157,8 +174,11 @@ async def test_decision_without_binding_keys_in_worm_is_fail_closed(pool, victim
         pool, victim["user_id"], execution_ref=ref, inputs_snapshot=snapshot
     )
     error = await _reject(
-        pool, user_id=victim["user_id"], execution_id=victim["execution_id"],
-        order=make_order(victim["execution_id"]), gate=_allow(legacy.decision_id, victim["f0"]),
+        pool,
+        user_id=victim["user_id"],
+        execution_id=victim["execution_id"],
+        order=make_order(victim["execution_id"]),
+        gate=_allow(legacy.decision_id, victim["f0"]),
     )
     assert error.mismatches == expected
 
@@ -168,10 +188,14 @@ async def test_decision_without_binding_keys_in_worm_is_fail_closed(pool, victim
 
 async def _kill_switch(pool: asyncpg.Pool, victim: dict[str, Any]) -> None:
     await activate_safety_control(
-        PostgresRiskGateRepository(pool), tenant_id=victim["user_id"],
-        actor_subject_id=victim["user_id"], actor_is_admin=True,
-        scope=SafetyScope.STRATEGY_DEPLOYMENT, scope_ref=f"exec:{victim['execution_id']}",
-        reason="i4-repro", trace_id=uuid4(),
+        PostgresRiskGateRepository(pool),
+        tenant_id=victim["user_id"],
+        actor_subject_id=victim["user_id"],
+        actor_is_admin=True,
+        scope=SafetyScope.STRATEGY_DEPLOYMENT,
+        scope_ref=f"exec:{victim['execution_id']}",
+        reason="i4-repro",
+        trace_id=uuid4(),
     )
 
 
@@ -183,7 +207,9 @@ async def test_i4_forged_f0_cannot_bypass_fence_after_kill_switch(pool, victim):
     assert dict(await victim["read"]()) != victim["f0"]  # fence는 실제로 움직였다
     forged = {k: 2**40 for k in victim["f0"]}
     error = await _reject(
-        pool, user_id=victim["user_id"], execution_id=victim["execution_id"],
+        pool,
+        user_id=victim["user_id"],
+        execution_id=victim["execution_id"],
         order=make_order(victim["execution_id"]),
         gate=_allow(victim["decision"].decision_id, forged),
     )
@@ -195,7 +221,9 @@ async def test_i4_understated_f0_is_also_rejected_not_silently_replaced(pool, vi
     understated = dict(victim["f0"])
     understated[f"STRATEGY_DEPLOYMENT:exec:{victim['execution_id']}"] = -1
     error = await _reject(
-        pool, user_id=victim["user_id"], execution_id=victim["execution_id"],
+        pool,
+        user_id=victim["user_id"],
+        execution_id=victim["execution_id"],
         order=make_order(victim["execution_id"]),
         gate=_allow(victim["decision"].decision_id, understated),
     )
@@ -208,9 +236,13 @@ async def test_i4_control_honest_f0_after_kill_switch_is_fence_stale(pool, victi
     adapter = RecordingAdapter()
     with pytest.raises(FenceStaleError):
         await submit_with_fence(
-            pool, adapter, make_order(victim["execution_id"]), user_id=victim["user_id"],
+            pool,
+            adapter,
+            make_order(victim["execution_id"]),
+            user_id=victim["user_id"],
             gate_decision=_allow(victim["decision"].decision_id, victim["f0"]),
-            read_fences=victim["read"], decision_reader=PostgresDecisionRepository(pool),
+            read_fences=victim["read"],
+            decision_reader=PostgresDecisionRepository(pool),
         )
     assert adapter.place_order_call_count == 0
 
@@ -236,13 +268,19 @@ async def test_i10_wiring_real_pre_submit_decision_binds_only_to_its_order(pool)
     execution_id = await seed_execution(pool, user_id)
     order = make_order(execution_id)
     decision, fence = await evaluate_pre_submit(
-        _RiskRepoWithFixedSafetyState(
+        RiskRepoWithFixedSafetyState(
             PostgresRiskGateRepository(pool), cb_level="normal", distrust_level="NORMAL"
         ),
-        _FakeConnectionRepo(tenant_id=user_id, provider_code="bitget", health=HealthState.HEALTHY),
+        FakeConnectionRepo(tenant_id=user_id, provider_code="bitget", health=HealthState.HEALTHY),
+        NoOpenSignalsRepo(),
         RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus()),
-        tenant_id=user_id, execution_ref=f"exec:{execution_id}", provider_code="bitget",
-        symbol=order.symbol, side=order.side.value, quantity=order.quantity, trace_id=uuid4(),
+        tenant_id=user_id,
+        execution_ref=f"exec:{execution_id}",
+        provider_code="bitget",
+        symbol=order.symbol,
+        side=order.side.value,
+        quantity=order.quantity,
+        trace_id=uuid4(),
     )
     assert decision.outcome == RiskOutcome.ALLOW
     f0 = {f"{scope.value}:{ref}": token for (scope, ref), token in fence.tokens.items()}
@@ -254,7 +292,11 @@ async def test_i10_wiring_real_pre_submit_decision_binds_only_to_its_order(pool)
 
     adapter = RecordingAdapter()
     submitted = await submit_with_fence(
-        pool, adapter, order, user_id=user_id, gate_decision=gate,
+        pool,
+        adapter,
+        order,
+        user_id=user_id,
+        gate_decision=gate,
         read_fences=fence_reader(pool, user_id, execution_id),
         decision_reader=PostgresDecisionRepository(pool),
     )

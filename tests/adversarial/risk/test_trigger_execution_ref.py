@@ -8,6 +8,7 @@ UPDATE해서 재현한다 — `fenced_submit`(task-1532)을 우회해도 마이�
 `a7c3d9e1f2b4`의 트리거만으로 거부돼야 한다. 모든 negative는 즉시 단언
 (xfail/skip 없음)이고 통과하는 대조군을 함께 둔다.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -27,9 +28,10 @@ from src.foundation.risk_gate.application.evaluate_pre_submit import evaluate_pr
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 from tests.adversarial.risk.conftest import insert_decision, recorded_inputs, seed_execution
 from tests.integration.conftest import NoopEventBus, create_test_tenant
-from tests.integration.risk.test_pre_submit_gate import (
-    _FakeConnectionRepo,
-    _RiskRepoWithFixedSafetyState,
+from tests.integration.risk.conftest import (
+    FakeConnectionRepo,
+    NoOpenSignalsRepo,
+    RiskRepoWithFixedSafetyState,
 )
 
 _MISMATCH = "INTEGRITY_RISK_FINGERPRINT_MISMATCH"
@@ -57,7 +59,13 @@ async def _insert(
 ) -> UUID:
     """앱층(`fenced_submit`)을 완전히 우회한 직접 INSERT — 트리거만이 방어선이다."""
     return await conn.fetchval(
-        _INSERT_SQL, user_id, f"ref-{uuid4().hex}", execution_id, symbol, side, quantity,
+        _INSERT_SQL,
+        user_id,
+        f"ref-{uuid4().hex}",
+        execution_id,
+        symbol,
+        side,
+        quantity,
         decision_id,
     )
 
@@ -102,8 +110,12 @@ async def test_i10_db_layer_rejects_allow_transferred_to_other_execution_symbol_
     async with pool.acquire() as conn:
         with _rejected("execution_ref"):
             await _insert(
-                conn, victim["user_id"], victim["decision_id"], execution_id=exec_y,
-                symbol="ETH/USDT", quantity=Decimal("100"),
+                conn,
+                victim["user_id"],
+                victim["decision_id"],
+                execution_id=exec_y,
+                symbol="ETH/USDT",
+                quantity=Decimal("100"),
             )
         count_sql = "SELECT count(*) FROM orders WHERE user_id = $1"
         assert await conn.fetchval(count_sql, victim["user_id"]) == 0
@@ -142,7 +154,10 @@ async def test_decision_with_null_execution_ref_is_never_actionable(pool, victim
     ref = f"exec:{victim['execution_id']}"
     snapshot = await recorded_inputs(pool, victim["user_id"], execution_ref=ref)
     unbound = await insert_decision(
-        pool, victim["user_id"], execution_ref=None, inputs_snapshot=snapshot,
+        pool,
+        victim["user_id"],
+        execution_ref=None,
+        inputs_snapshot=snapshot,
     )
     async with pool.acquire() as conn:
         with _rejected("execution_ref"):
@@ -222,7 +237,9 @@ async def test_update_of_binding_columns_after_valid_insert_is_rejected(
         )
         with _rejected(field):
             await conn.execute(
-                f"UPDATE orders SET {column} = $2 WHERE order_id = $1", order_id, value  # noqa: S608
+                f"UPDATE orders SET {column} = $2 WHERE order_id = $1",  # noqa: S608
+                order_id,
+                value,
             )
         row = await conn.fetchrow(
             "SELECT symbol, side, quantity, execution_id FROM orders WHERE order_id = $1", order_id
@@ -239,7 +256,9 @@ async def test_prior_checks_still_fire_before_binding_checks(pool, victim):
     exec_other = await seed_execution(pool, other)
     foreign = await insert_decision(pool, other, execution_ref=f"exec:{exec_other}")
     deny = await insert_decision(
-        pool, victim["user_id"], outcome=RiskOutcome.DENY,
+        pool,
+        victim["user_id"],
+        outcome=RiskOutcome.DENY,
         execution_ref=f"exec:{victim['execution_id']}",
     )
     async with pool.acquire() as conn:
@@ -277,13 +296,19 @@ async def test_i10_wiring_real_pre_submit_snapshot_is_what_the_trigger_reads(poo
     user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id)
     decision, _fence = await evaluate_pre_submit(
-        _RiskRepoWithFixedSafetyState(
+        RiskRepoWithFixedSafetyState(
             PostgresRiskGateRepository(pool), cb_level="normal", distrust_level="NORMAL"
         ),
-        _FakeConnectionRepo(tenant_id=user_id, provider_code="bitget", health=HealthState.HEALTHY),
+        FakeConnectionRepo(tenant_id=user_id, provider_code="bitget", health=HealthState.HEALTHY),
+        NoOpenSignalsRepo(),
         RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus()),
-        tenant_id=user_id, execution_ref=f"exec:{execution_id}", provider_code="bitget",
-        symbol="BTC/USDT", side="BUY", quantity=Decimal("0.01"), trace_id=uuid4(),
+        tenant_id=user_id,
+        execution_ref=f"exec:{execution_id}",
+        provider_code="bitget",
+        symbol="BTC/USDT",
+        side="BUY",
+        quantity=Decimal("0.01"),
+        trace_id=uuid4(),
     )
     assert decision.outcome == RiskOutcome.ALLOW
     did = decision.decision_id
