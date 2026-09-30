@@ -130,6 +130,23 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     instead of adding first and trimming docstrings after `code_ratchets` goes red. Same applies to
     a new intentional fail-closed `raise NotImplementedError` stub: add the `# ratchet-allow:
     <reason>` comment (§3) in the same commit that introduces it, not as a follow-up fix.
+13. Re-diagnosing a `journeys` (Playwright J1-J3) red from scratch without first checking whether
+    the assigned worktree is already synced past the commit that fixed it — `frontend/playwright.
+    config.ts` accumulated four independent root-cause fixes in one day (task-8572 vite dev JIT
+    contention, task-8753 cross-worktree port collision, task-8952 redundant `tsc -b` in the e2e
+    build, task-9054 webServer overrun from unbounded Playwright worker count) and each one was a
+    real defect at the time. But task-8931 then reported the same `Timed out waiting 180000ms`
+    symptom again, and its actual finding was that the assigned worktree just hadn't pulled
+    origin/main yet — task-8952 and a later fix were already merged, the suite was green as soon as
+    the worktree synced (27 passed/1 skipped, ~26s locally), and no source change was needed. The
+    ND-17 retry of that same leaf (task-9068) then burned its full turn budget re-running the same
+    bisect on a still-stale checkout and died with `error_max_turns` before it could commit or even
+    reach that conclusion, which is what pushed the 24h repeat counter over the systemic threshold
+    (task-9124). The check script and thresholds were not the defect either time. Before bisecting
+    a `journeys` red: run `git -C <worktree> log --oneline -5 -- frontend/playwright.config.ts` and
+    `git status` first to confirm the worktree isn't simply behind an already-landed fix, and try a
+    plain re-run (`npm run build:e2e --workspace=apps/web && npx playwright test journey-j1
+    journey-j2 journey-j3 --project=chromium`) before spending turns on a fresh bisect.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
