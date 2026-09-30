@@ -9,6 +9,7 @@ D3 replay_verify N/A(주문/원장 이벤트를 생성하지 않는 U-8 계산 A
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,6 +22,7 @@ from src.api.routers import risk_coach
 from src.core.portfolio.config import PortfolioConfig
 from src.core.portfolio.sizing.selector import SizingResultTamperedError, size_for
 from src.core.portfolio.state_input import PortfolioStateInput
+from src.services.auth.session_repository import Session
 from src.services.auth.tokens import TokenIssuer
 from src.services.auth_service import User
 
@@ -76,7 +78,20 @@ async def client(monkeypatch):
         is_platform_admin=False,
     )
     monkeypatch.setattr(deps, "get_user_by_id", AsyncMock(return_value=user))
-    monkeypatch.setattr(deps.session_repository, "get_active", AsyncMock(return_value=object()))
+    now = datetime.now(timezone.utc)
+    session = Session(
+        id=SESSION_ID,
+        user_id=USER_ID,
+        tenant_id=USER_ID,
+        refresh_hash="0" * 64,
+        auth_level="PASSWORD",
+        issued_at=now,
+        rotated_at=None,
+        expires_at=now + timedelta(hours=1),
+        revoked_at=None,
+        revoke_reason=None,
+    )
+    monkeypatch.setattr(deps.session_repository, "get_active", AsyncMock(return_value=session))
     # Any accidental real database connection is a test failure.
     monkeypatch.setattr("asyncpg.connect", MagicMock(side_effect=AssertionError("real DB")))
     monkeypatch.setattr("asyncpg.create_pool", MagicMock(side_effect=AssertionError("real DB")))
