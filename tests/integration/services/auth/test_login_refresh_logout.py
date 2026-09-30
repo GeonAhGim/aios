@@ -15,6 +15,7 @@ import os
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 import asyncpg
 import pytest
@@ -257,6 +258,74 @@ async def test_concurrent_refresh_with_same_token_revokes_session_fail_closed(po
         session = await session_repository.get_active(conn, pair.session_id)
     assert session is None, (
         "fail-closed: 레이스가 감지되면 방금 이긴 쪽의 새 토큰도 세션과 함께 revoke돼야 한다"
+    )
+
+
+async def test_logout_completed_between_active_check_and_rotate_is_rejected_not_relabeled_as_reuse(
+    pool,
+):
+    """barrier 기반 재현 — task-9420 F4 감사가 지적한 경쟁을 실제 asyncio 동시성으로
+    재현한다: `refresh()`가 `get_active()`로 세션이 활성임을 확인한 "직후", 별도
+    연결에서 `logout()`이 완료되고, 그 다음에야 `rotate_refresh()`의 UPDATE가
+    실행되도록 barrier(`asyncio.Event`)로 순서를 강제한다.
+
+    `test_concurrent_refresh_with_same_token_revokes_session_fail_closed`(기존)는
+    동일 토큰으로의 경합만 검증한다 — 이 테스트는 그와 달리 회전 자체가 아니라
+    "활성 확인 이후 완료된 logout"이 회전 WHERE에서 걸러지는지, 그리고 그 실패가
+    재사용(reuse)으로 오분류되어 revoke_reason이 "refresh_reuse"로 덮어써지지
+    않는지를 검증한다."""
+    auth = _auth(pool)
+    email = await _signup(auth)
+    pair = await login_usecase.login(pool, auth, _issuer(), email=email, password=STRONG_PASSWORD)
+    async with pool.acquire() as conn:
+        user_id = (await session_repository.get_active(conn, pair.session_id)).user_id
+
+    active_checked = asyncio.Event()
+    logout_done = asyncio.Event()
+    real_get_active = session_repository.get_active
+    refresh_read_done = False
+
+    async def get_active_then_wait_for_logout(conn, session_id):
+        nonlocal refresh_read_done
+        result = await real_get_active(conn, session_id)
+        # `logout_usecase.logout()`도 내부에서 get_active()를 호출한다 — 오직
+        # refresh()의 첫 읽기(barrier 트리거 대상)만 대기시키고, logout() 자신의
+        # 읽기까지 대기시키면 logout_done을 영원히 set할 수 없어 교착된다.
+        if session_id == pair.session_id and not refresh_read_done:
+            refresh_read_done = True
+            active_checked.set()
+            await logout_done.wait()
+        return result
+
+    async def do_logout():
+        await active_checked.wait()
+        await logout_usecase.logout(pool, session_id=pair.session_id, user_id=user_id)
+        logout_done.set()
+
+    with mock.patch.object(
+        session_repository, "get_active", side_effect=get_active_then_wait_for_logout
+    ):
+        results = await asyncio.gather(
+            refresh_usecase.refresh(
+                pool, _issuer(), session_id=pair.session_id, refresh_token=pair.refresh_token
+            ),
+            do_logout(),
+            return_exceptions=True,
+        )
+
+    refresh_result, _logout_result = results
+    assert isinstance(refresh_result, refresh_usecase.RefreshSessionNotFoundError), (
+        f"활성 확인 직후 완료된 logout은 회전을 거부해야 한다: {refresh_result!r}"
+    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT revoked_at, revoke_reason FROM auth_session WHERE id = $1", pair.session_id
+        )
+    assert row["revoked_at"] is not None
+    assert row["revoke_reason"] == "logout", (
+        "logout-vs-rotate 경합 실패는 재사용(reuse)과 다른 원인이므로 "
+        f"revoke_reason이 원래의 'logout'을 유지해야 한다 (실제: {row['revoke_reason']!r})"
     )
 
 

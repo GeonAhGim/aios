@@ -7,6 +7,17 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2 M3 DDL, §3.4
 `expected_hash`로 넘기면, 그 사이 다른 요청이 이미 회전시켰을 경우 0행이 RETURNING
 되어 `ConcurrencyConflictError`가 난다. 이 리프에서는 그 신호를 "동시성 충돌"이
 아니라 "탈취된 refresh 토큰의 재사용"으로 해석해 세션을 즉시 revoke한다(§3.4).
+
+task-9420 F4 audit fix — the WHERE now also checks `revoked_at IS NULL` (active)
+and `expires_at > now()` (not expired), not just `refresh_hash` equality. If a
+logout (revoke) on another connection completes, or the absolute expiry passes,
+after `get_active()` read the session but before this rotation UPDATE runs, the
+hash can still match yet the row no longer satisfies the condition, so 0 rows
+come back RETURNING and rotation is rejected. That race has a different root
+cause than "stolen token replay" (the session owner may simply have logged out
+elsewhere), so it is surfaced as `RefreshSessionRevokedError` /
+`RefreshSessionExpiredMidRotationError` instead of being folded into
+`RefreshReuseDetected`.
 """
 
 from __future__ import annotations
@@ -53,6 +64,23 @@ class PrincipalMismatchError(Exception):
     not signature forgery, but a session-ownership contract gap. The caller
     (`deps.py` `get_current_user`) should map this the same as
     `SessionRevokedError` (401 AUTH_SESSION_REVOKED) and require re-login."""
+
+
+class RefreshSessionRevokedError(Exception):
+    """task-9420 F4 — another connection's logout (revoke) landed between the
+    `get_active()` read and this rotation UPDATE. `refresh_hash` itself can
+    still match, so the root cause differs from `RefreshReuseDetected` (token
+    theft suspicion) — the session was already revoked by that other request,
+    so we do not revoke it again here (to avoid overwriting its original
+    `revoke_reason`; `revoke()` is idempotent and safe to re-call, but
+    preserving the reason means skipping the re-call)."""
+
+
+class RefreshSessionExpiredMidRotationError(Exception):
+    """task-9420 F4 — the absolute expiry (`expires_at`) passed between the
+    `get_active()` read and this rotation UPDATE. Distinguished from
+    `RefreshReuseDetected` for the same reason, and the session is revoked
+    with reason="expired" (matching §3.4's normal expiry handling)."""
 
 
 def _row_to_session(row: asyncpg.Record) -> Session:
@@ -131,6 +159,7 @@ async def rotate_refresh(
     expected_hash: str,
     new_hash: str,
 ) -> Session:
+    now = datetime.now(timezone.utc)
     try:
         row = await conditional_update(
             conn,
@@ -139,10 +168,24 @@ async def rotate_refresh(
             id_value=session_id,
             expected_state_column="refresh_hash",
             expected_state_value=expected_hash,
-            set_values={"refresh_hash": new_hash, "rotated_at": datetime.now(timezone.utc)},
+            set_values={"refresh_hash": new_hash, "rotated_at": now},
             returning="*",
+            extra_conditions={"revoked_at": None},
+            extra_gt_conditions={"expires_at": now},
         )
     except ConcurrencyConflictError as exc:
+        current = await conn.fetchrow(
+            "SELECT revoked_at, expires_at FROM auth_session WHERE id = $1", session_id
+        )
+        if current is not None and current["revoked_at"] is not None:
+            raise RefreshSessionRevokedError(
+                f"session_id={session_id}: 회전 시도 중 다른 요청이 먼저 세션을 revoke했습니다"
+            ) from exc
+        if current is not None and current["expires_at"] <= now:
+            await revoke(conn, session_id, reason="expired")
+            raise RefreshSessionExpiredMidRotationError(
+                f"session_id={session_id}: 회전 시도 중 절대 만료 시각을 넘겼습니다"
+            ) from exc
         await revoke(conn, session_id, reason="refresh_reuse")
         raise RefreshReuseDetected(
             f"session_id={session_id}: refresh_hash 재사용 감지 — 세션을 revoke했습니다"

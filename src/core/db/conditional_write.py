@@ -10,6 +10,7 @@ migration of existing services (their behavior is already correct), but new boun
 contexts created after FND-01 (src/foundation/) must perform conditional writes only
 through this helper.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -36,6 +37,7 @@ async def conditional_update(
     set_values: dict[str, Any],
     returning: str = "*",
     extra_conditions: dict[str, Any] | None = None,
+    extra_gt_conditions: dict[str, Any] | None = None,
 ) -> asyncpg.Record:
     """Conditional UPDATE with
     `WHERE <id_column> = $1 AND <expected_state_column> IS NOT DISTINCT FROM $2`,
@@ -49,10 +51,10 @@ async def conditional_update(
     that bypass.
 
     The **keys** (column names) of `table`/`id_column`/`expected_state_column`/`returning`
-    and `set_values`/`extra_conditions` must be hardcoded in the caller's code
-    (never pass user input directly). Values are bound as positional parameters by this
-    function, so the caller never needs to count `$N` numbers themselves — this prevents
-    errors from miscounting column order.
+    and `set_values`/`extra_conditions`/`extra_gt_conditions` must be hardcoded in the
+    caller's code (never pass user input directly). Values are bound as positional
+    parameters by this function, so the caller never needs to count `$N` numbers
+    themselves — this prevents errors from miscounting column order.
 
     `extra_conditions` (default None, no impact on existing callers) — additional
     (column->expected_value) pairs to append to the WHERE clause beyond the main condition
@@ -60,12 +62,26 @@ async def conditional_update(
     both `status` match and `version = $expected_version` (optimistic lock, I5) in a
     single UPDATE statement — if RETURNING returns 0 rows without a separate SELECT,
     it means either the state or the version has drifted.
+
+    `extra_gt_conditions` (default None, no impact on existing callers) — additional
+    (column->threshold) pairs appended as `column > $value` (strict greater-than, not
+    equality). Used when the transition must also assert a still-valid deadline (e.g.
+    PLT-23 `auth_session.expires_at > now()`) that `extra_conditions`'s equality check
+    cannot express.
     """
     extra_items = list((extra_conditions or {}).items())
-    base_params = [id_value, expected_state_value, *(v for _, v in extra_items)]
+    gt_items = list((extra_gt_conditions or {}).items())
+    base_params = [
+        id_value,
+        expected_state_value,
+        *(v for _, v in extra_items),
+        *(v for _, v in gt_items),
+    ]
     extra_clause = "".join(
         f" AND {col} IS NOT DISTINCT FROM ${i + 3}" for i, (col, _) in enumerate(extra_items)
     )
+    gt_start = 3 + len(extra_items)
+    gt_clause = "".join(f" AND {col} > ${gt_start + i}" for i, (col, _) in enumerate(gt_items))
 
     set_columns = list(set_values.keys())
     set_start = len(base_params) + 1
@@ -73,7 +89,7 @@ async def conditional_update(
     sql = (
         f"UPDATE {table} SET {set_clause} "  # noqa: S608 — column names are caller constants (see docstring)
         f"WHERE {id_column} = $1 AND {expected_state_column} IS NOT DISTINCT FROM $2"
-        f"{extra_clause} "
+        f"{extra_clause}{gt_clause} "
         f"RETURNING {returning}"
     )
     params = [*base_params, *(set_values[col] for col in set_columns)]

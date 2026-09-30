@@ -11,7 +11,16 @@ Rotation itself is delegated to
 if `expected_hash` differs from the current DB value (reuse of an already-
 rotated old token, or guessing a wrong token), that function revokes the
 session and raises `RefreshReuseDetected`, so we simply propagate it.
+
+task-9420 F4 — the `get_active()` read above and the rotation UPDATE below are
+separate statements, so a logout completed on another connection in between
+must not let rotation still succeed (the WHERE clause in `rotate_refresh()`
+now re-checks active/unexpired). We translate that repository-level race
+signal back into the same `RefreshSessionNotFoundError`/`RefreshTokenExpiredError`
+this use case already raises for the non-racy case, keeping it distinct from
+`RefreshReuseDetected` (reuse implies possible token compromise; this does not).
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -61,12 +70,21 @@ async def refresh(
             raise RefreshTokenExpiredError(f"session_id={session_id}: refresh expired")
 
         new_plaintext, new_hash = TokenIssuer.issue_refresh()
-        rotated = await session_repository.rotate_refresh(
-            conn,
-            session_id,
-            expected_hash=hash_refresh_token(refresh_token),
-            new_hash=new_hash,
-        )
+        try:
+            rotated = await session_repository.rotate_refresh(
+                conn,
+                session_id,
+                expected_hash=hash_refresh_token(refresh_token),
+                new_hash=new_hash,
+            )
+        except session_repository.RefreshSessionRevokedError as exc:
+            raise RefreshSessionNotFoundError(
+                f"session_id={session_id}: 회전 시도 중 세션이 이미 revoke됨"
+            ) from exc
+        except session_repository.RefreshSessionExpiredMidRotationError as exc:
+            raise RefreshTokenExpiredError(
+                f"session_id={session_id}: 회전 시도 중 refresh 만료"
+            ) from exc
 
     access_token = issuer.issue_access(
         user_id=rotated.user_id,
