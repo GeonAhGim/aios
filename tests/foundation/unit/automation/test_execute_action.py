@@ -183,6 +183,7 @@ async def test_notifier_raising_exception_is_not_swallowed(tenant_id) -> None:
         )
 
 
+@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_order_action_latency_budget(tenant_id) -> None:
     """성능 단언: fake 의존성만 쓰는 execute_action 1회 호출은 50ms 예산 내에서
