@@ -1576,6 +1576,33 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/baseline design is
     sound; the remaining defect is fleet code, not this repo.
 
+62. A second `ruff` `[health:ci_red_systemic]` leaf (task-9667) citing the identical repeat set
+    #50 (task-9596) already closed — task-9667's spec names task-9157, task-9288, task-9466,
+    task-9576 verbatim, the same four leaves #50 already resolved: `pyproject.toml`'s
+    `[tool.ruff]`/`per-file-ignores` config is unchanged and sound (`python -m ruff check src
+    tests scripts` on this worktree prints `All checks passed!`), and both real underlying fixes
+    are confirmed still in place — task-9056's `ingest_candles.py` E501 rewrap (commit
+    `50c6a348b`) and task-9501's `B017` blind-exception fix in
+    `tests/foundation/adversarial/paper_control/test_cross_tenant_isolation.py` (commit
+    `9e1555f24`, replacing `pytest.raises(Exception)` with
+    `pytest.raises(InvalidDeploymentStateError)` — confirmed present at line 18/79-146 today).
+    `esc-ci-ruff.json` itself shows the mechanism directly: `status: "resolved"`, but
+    `reopen_count: 5` and `owner.leaf_ids: [9703]` — its `auto_actions` log shows three
+    consecutive `"fix task-9576 done — 다음 CI 평가 대기(새 리프 발행 보류)"` entries
+    (`12:24:13Z`, `12:44:47Z`, `12:57:50Z`) followed immediately by `"created fix task-9703"`
+    at `13:08:37Z` off a new `detail_hash` — i.e. the escalation resolved the prior fix, then
+    spawned yet another fix task nine minutes later without any intervening code regression.
+    This is the identical fleet-code pattern already named for `ruff` in #50 and for fourteen+
+    other gates (#17-#26, #30-#31, #33-#36, #38, #40, #45, #48, #56, #60):
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule not distinguishing "escalation
+    resolved, awaiting next CI recheck" from "time to spawn another fix task regardless," out of
+    a repo worker's edit scope (§4). No script/baseline change made. Before working a future
+    `ruff` correction leaf: run `ruff check <the exact path:line from the esc detail>` first —
+    if it's already clean and the cited repeat leaf ids match an already-closed leaf's set
+    (task-9157/task-9288/#15, task-9466, task-9576/#39/#50, or this entry), close as noop citing
+    them rather than re-fixing already-fixed code. No baseline/rule relief made
+    (DECISION_GUIDELINES B-2) — none was warranted.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
