@@ -1549,6 +1549,33 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/baseline design is
     sound; the remaining defect is fleet code, not this repo.
 
+61. A fifth `consistency` 24h 5-repeat systemic leaf (task-9665) citing the identical repeat
+    set #22 (task-9011/9281/9460), #31 (task-9301/9460), #35 (task-9537), and #54 (task-9620)
+    already closed four times — task-9665's spec names task-9011, task-9281, task-9460,
+    task-9574 verbatim. `scripts/consistency/*`/`consistency-baseline.json` are unchanged since
+    task-9122's fix (commit `693fa98a`, deduping `check_port_protocol_implementations`'s
+    redundant double `ast.walk()` via `common.py`'s cached `_walked_nodes(path)`, plus a
+    structural AST-count regression-guard test). A local run on this worktree (`git status`
+    clean, HEAD past `693fa98a`) confirms `OK` in ~8.1s — well under the 120s budget — and
+    matches every one of the 13 tracked metrics in `consistency-baseline.json` exactly. The
+    escalation record (`esc-ci-consistency.json`) shows `status: "resolved"`, `resolved_sha:
+    "12e7bd738c392c2bd8b5c8dd0af15dcdd06c15b6"`, `closed_at: "2026-09-30T00:53:50+00:00"`,
+    `bisect.bisect_culprit: "4d5ebed5b621..."` — the same docstring-only translation commit
+    (task-4424) #21/#22/#31/#35/#54 already named as unrelated to this gate's logic — yet its
+    `auto_actions` log kept appending `"fix task-9011/9149/9301 done — 다음 CI 평가 대기"` and
+    `"3x-repeat CI red"` entries for hours after `closed_at`, eventually spawning task-9574 and
+    now this leaf off the same stale `detail_hash`. This is the same fleet-code pattern already
+    named for fourteen+ gates (#17-#26, #30-#31, #33-#36, #38, #40, #48, #50, #56, #59): `pm/
+    auto_decision.py`/`orchestrator.py`'s `ci_red` rule not checking `status == "resolved"`
+    before re-spawning a leaf against an already-closed escalation, out of a repo worker's edit
+    scope (§4). No script/baseline change made — task-9122's fix is still in place and
+    sufficient. Before working a future `consistency` leaf: run
+    `python scripts/check_consistency.py` locally first — if `OK` and baseline-matching, and the
+    escalation's `bisect_culprit` is `4d5ebed5` (or cites an already-closed leaf verbatim), close
+    as noop citing task-9122, #22/#31/#35/#54, and this entry rather than re-diagnosing a sixth
+    time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/baseline design is
+    sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
