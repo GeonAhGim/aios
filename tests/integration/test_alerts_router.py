@@ -1,4 +1,5 @@
 """FD-14 통합테스트 — /alerts 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -166,3 +167,137 @@ async def test_alerts_require_authentication(client):
     response = await client.get("/alerts")
 
     assert response.status_code == 401
+
+
+async def test_create_alert_invalid_operator_rejected(client):
+    headers = await _register(client)
+
+    response = await client.post(
+        "/alerts",
+        json={
+            "exchange": "bitget",
+            "symbol": "BTC/USDT",
+            "indicator": "RSI",
+            "operator": "!=",  # not in condition_evaluation.Operator
+            "threshold": 30,
+        },
+        headers=headers,
+    )
+
+    # RequestValidationError -> VALIDATION_INVALID_FIELD(400), not FastAPI's
+    # default 422 (src/api/contracts/handlers.py::_handle_validation_error).
+    assert response.status_code == 400
+
+
+async def test_create_alert_missing_required_field_rejected(client):
+    headers = await _register(client)
+
+    response = await client.post(
+        "/alerts",
+        json={
+            "exchange": "bitget",
+            "symbol": "BTC/USDT",
+            # indicator omitted
+            "operator": "<",
+            "threshold": 30,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_create_alert_non_integer_params_rejected(client):
+    headers = await _register(client)
+
+    response = await client.post(
+        "/alerts",
+        json={
+            "exchange": "bitget",
+            "symbol": "BTC/USDT",
+            "indicator": "RSI",
+            "params": {"timeperiod": "not-an-int"},
+            "operator": "<",
+            "threshold": 30,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_cancel_other_users_alert_returns_404(client):
+    """소유권 불변식 — 다른 사용자의 알림은 취소할 수 없다(price_alerts의
+    user_id 조건부 UPDATE가 0행을 반환해야 한다, standard-105)."""
+    headers_owner = await _register(client)
+    headers_attacker = await _register(client)
+    create_response = await client.post(
+        "/alerts",
+        json={
+            "exchange": "bitget",
+            "symbol": "BTC/USDT",
+            "indicator": "RSI",
+            "operator": "<",
+            "threshold": 30,
+        },
+        headers=headers_owner,
+    )
+    alert_id = create_response.json()["id"]
+
+    response = await client.post(f"/alerts/{alert_id}/cancel", headers=headers_attacker)
+
+    assert response.status_code == 404
+    # invariant: the alert must still be ACTIVE for its real owner, not silently cancelled
+    list_response = await client.get("/alerts", headers=headers_owner)
+    owned = next(a for a in list_response.json() if a["id"] == alert_id)
+    assert owned["status"] == "ACTIVE"
+
+
+async def test_create_alert_active_limit_exceeded_rejected(client, monkeypatch):
+    """실패주입 — Red team #24 상한(MAX_ACTIVE_ALERTS_PER_USER)을 0으로
+    낮춰 DB에 50개를 실제로 만들지 않고 한도 초과 경로를 강제한다."""
+    import src.services.alert_service as alert_service_module
+
+    monkeypatch.setattr(alert_service_module, "MAX_ACTIVE_ALERTS_PER_USER", 0)
+    headers = await _register(client)
+
+    response = await client.post(
+        "/alerts",
+        json={
+            "exchange": "bitget",
+            "symbol": "BTC/USDT",
+            "indicator": "RSI",
+            "operator": "<",
+            "threshold": 30,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 400
+
+
+async def test_create_alert_dependency_failure_returns_500_not_silent_success(client, monkeypatch):
+    """실패주입 — AlertService.create_alert이 예기치 못한 예외를 던지면
+    500으로 표면화되어야 한다(fail-closed). 조용히 성공을 가장하거나
+    빈 응답을 돌려주면 안 된다."""
+    import src.services.alert_service as alert_service_module
+
+    async def _boom(self, *args, **kwargs):
+        raise RuntimeError("simulated dependency failure")
+
+    monkeypatch.setattr(alert_service_module.AlertService, "create_alert", _boom)
+    headers = await _register(client)
+
+    response = await client.post(
+        "/alerts",
+        json={
+            "exchange": "bitget",
+            "symbol": "BTC/USDT",
+            "indicator": "RSI",
+            "operator": "<",
+            "threshold": 30,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 500
