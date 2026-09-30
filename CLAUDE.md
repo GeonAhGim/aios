@@ -1737,6 +1737,15 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/baseline design is sound; the remaining defect is fleet
     code, not this repo.
 
+68. task-9685 (split 2/3 of the same parent task-9683) reached the identical conclusion as #67
+    (task-9684, split 1/3) independently: `python scripts/check_code_ratchets.py` on this
+    worktree also prints `OK`, matching `code-ratchets-baseline.json` exactly on all 5 metrics,
+    and `esc-ci-code_ratchets.json` shows `status: "resolved"` (`resolved_sha:
+    "0871f0422b1077560390c572ba866157ee0d7d83"`, `closed_at: "2026-09-30T02:22:23+00:00"`,
+    `owner.leaf_ids: [9459]`) with `auto_actions` still appending `"3x-repeat CI red"` through
+    `13:08:35Z` — nearly 11 hours post-closure, no further fix task. Recorded here only to avoid
+    re-merging duplicate prose; #67's analysis and citation list apply verbatim to this leaf too.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
