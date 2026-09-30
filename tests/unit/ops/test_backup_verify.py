@@ -121,6 +121,34 @@ def test_base_backup_failure_halts_before_wal_archive_and_drill(tmp_path: Path) 
     assert wal_called is False
 
 
+def test_base_backup_empty_tail_never_yields_empty_detail(tmp_path: Path) -> None:
+    """task-9469: 2026-09-16부터 재발한 관측 사고 재현 -- pg_basebackup이 강제 종료돼
+    stdout/stderr을 하나도 못 남기면 base_backup.py의 manifest["tail"]이 ""가 된다.
+    이 케이스에서 detail이 빈 문자열로 새어나가면 esc-health-backup_drill_failed를
+    사람이 진단할 근거가 하나도 남지 않는다 -- rc·타임아웃 여부·소요 시간을 대신 채워
+    detail이 절대 비지 않게 한다."""
+
+    def _empty_tail_timeout_base_backup(dest_dir: Path, dsn: str) -> dict:
+        return {
+            "ok": False,
+            "dest": "",
+            "returncode": 124,
+            "tail": "",
+            "started_at": "2026-09-30T01:04:03+00:00",
+            "finished_at": "2026-09-30T01:31:05+00:00",
+        }
+
+    result = backup_verify.run_backup_verify(
+        **_common_kwargs(tmp_path, base_backup=_empty_tail_timeout_base_backup)
+    )
+
+    detail = result["steps"]["base_backup"]["detail"]
+    assert detail != ""
+    assert "rc=124" in detail
+    assert "timeout" in detail
+    assert "1622s" in detail  # 27분 = 1622초, 소요 시간이 남아야 진단 가능하다
+
+
 def test_base_backup_raising_runtime_error_is_caught_and_halts(tmp_path: Path) -> None:
     """pg_basebackup 바이너리가 PATH에 없으면 run_base_backup은 RuntimeError를 던진다
     (base_backup.py의 which() 체크) -- 이 예외가 오케스트레이터 밖으로 새면 스케줄

@@ -61,6 +61,27 @@ def _finish(steps: dict[str, dict[str, Any]], started: dt.datetime) -> dict[str,
     }
 
 
+def _base_backup_detail(manifest: dict[str, Any]) -> str:
+    """task-9469: pg_basebackup이 아무 stdout/stderr도 남기지 않고(예: OS가 강제 종료)
+    비정상 종료하면 manifest["tail"]이 ""가 되고, 그대로 detail에 옮기면
+    drill_latest.json에 원인 문자열이 하나도 안 남아 esc-health-backup_drill_failed를
+    사람이 진단할 수 없었다(2026-09-16부터 재발). tail이 비어 있어도 rc·소요 시간·
+    타임아웃 여부는 manifest에 이미 있으므로 항상 같이 남긴다 -- 이 경로는 빈 문자열을
+    반환하지 않는다."""
+    rc = manifest.get("returncode")
+    tail = manifest.get("tail") or "(pg_basebackup이 stdout/stderr을 남기지 않고 종료했다)"
+    elapsed = ""
+    started_raw, finished_raw = manifest.get("started_at"), manifest.get("finished_at")
+    if started_raw and finished_raw:
+        try:
+            delta = dt.datetime.fromisoformat(finished_raw) - dt.datetime.fromisoformat(started_raw)
+            elapsed = f", 소요 {delta.total_seconds():.0f}s"
+        except ValueError:
+            pass
+    timeout_flag = " timeout" if rc == 124 else ""
+    return f"rc={rc}{timeout_flag}{elapsed}: {tail}"
+
+
 def run_backup_verify(
     *,
     backup_dest_dir: Path,
@@ -88,7 +109,7 @@ def run_backup_verify(
     except RuntimeError as e:
         steps["base_backup"] = {"ok": False, "detail": str(e)}
         return _finish(steps, started)
-    steps["base_backup"] = {"ok": bool(manifest["ok"]), "detail": manifest.get("tail", "")}
+    steps["base_backup"] = {"ok": bool(manifest["ok"]), "detail": _base_backup_detail(manifest)}
     if not manifest["ok"]:
         return _finish(steps, started)
 
