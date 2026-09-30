@@ -9,6 +9,22 @@
 읽기만 한다 — 테스트를 재실행하지 않으므로 DB·네트워크 접근이 없고 로컬
 CI·GitHub Actions 양쪽에서 그대로 재사용된다.
 
+baseline 쓰기(초기화·상향 래칫)는 신뢰 가능한 측정에서만 일어난다(task-9120):
+`pm/local_ci.py`의 full 모드는 프론트엔드 coverage 스텝과 달리 이 backend
+스텝을 직렬화하는 락이 없어, 여러 워크트리 인스턴스가 같은 공유 호스트에서
+`pytest --cov=src`를 동시에 돌리면 자원 경합으로 pytest가 중도에 죽는다 —
+`lines-valid`는 최소비율 가드(0.5)를 넘길 만큼만 줄어 부분 리포트 감지는
+피하면서도 line-rate가 실제와 다른 값으로 왜곡된다. 이 왜곡된 값이 그대로
+baseline에 쓰이면(로컬은 write 기본 허용이었음) 다음 실제 GitHub Actions
+완주 run과 어긋나 회귀 오탐(esc-ci-coverage)이 나고, `gh run download`로
+진짜 값을 받아와 baseline을 손으로 되돌리는 "coverage baseline 재검증" 리프가
+반복 발행됐다(task-7644/7670, task-8680, task-9052 — 24시간 안에 5회).
+이제 baseline 쓰기는 `GITHUB_ACTIONS=true`(GitHub Actions가 자동 설정) 환경이거나
+`--allow-baseline-write`를 명시한 호출에서만 일어난다 — 그 외(로컬 `local_ci`
+자동 실행 등)는 비교만 하고 통과/실패 판정은 그대로 내리되 baseline 파일은
+절대 건드리지 않는다. 기존 "gh run download 후 로컬 재검증" 교정 절차는
+`--allow-baseline-write`를 붙이면 그대로 동작한다.
+
 사용: `python scripts/coverage_ratchet.py` (저장소 루트에서, coverage.xml이
 이미 생성돼 있어야 함). 종료코드 0=통과(하락 없음), 1=하락 또는 입력 오류.
 """
@@ -16,6 +32,7 @@ CI·GitHub Actions 양쪽에서 그대로 재사용된다.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -119,6 +136,16 @@ def write_baseline_percent(
     baseline_path.write_text(body, encoding="utf-8")
 
 
+def baseline_write_is_trusted(allow_baseline_write: bool, environ: dict[str, str]) -> bool:
+    """baseline 파일에 쓸 수 있는 컨텍스트인지 판정한다(task-9120).
+
+    GitHub Actions는 모든 워크플로 실행에 `GITHUB_ACTIONS=true`를 자동 주입하므로
+    그 환경은 신뢰한다. 그 외(로컬 `local_ci`의 자동 full 모드 등)는 명시적으로
+    `--allow-baseline-write`를 준 경우에만 쓴다 — 공유 호스트 자원 경합으로 죽은
+    로컬 pytest가 만든 부분 리포트가 조용히 baseline을 오염시키는 경로를 막는다."""
+    return allow_baseline_write or environ.get("GITHUB_ACTIONS") == "true"
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows 콘솔(cp949)에서 한글 깨짐 방지
@@ -132,7 +159,17 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_MIN_LINES_VALID_RATIO,
         help="baseline 대비 이 비율 미만으로 lines-valid가 줄면 부분 리포트로 보고 비교를 거부한다",
     )
+    parser.add_argument(
+        "--allow-baseline-write",
+        action="store_true",
+        help=(
+            "로컬 실행에서도 baseline 파일 쓰기를 허용한다(기본은 GITHUB_ACTIONS=true"
+            " 환경에서만 씀) -- gh run download로 받은 진짜 GH Actions coverage.xml로"
+            " 수동 재검증할 때만 명시적으로 켠다"
+        ),
+    )
     args = parser.parse_args(argv)
+    write_allowed = baseline_write_is_trusted(args.allow_baseline_write, dict(os.environ))
 
     try:
         current = read_current_coverage_percent(args.coverage_xml)
@@ -144,6 +181,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if baseline is None:
+        if not write_allowed:
+            print(
+                f"SKIP: baseline 없음, 신뢰 불가 컨텍스트라 초기화하지 않는다"
+                f"(측정치 {current:.2f}%, GITHUB_ACTIONS 또는 --allow-baseline-write 필요)"
+            )
+            return 0
         write_baseline_percent(args.baseline, current, current_lines_valid)
         print(f"BASELINE 초기화: {current:.2f}% -> {args.baseline}")
         return 0
@@ -169,6 +212,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if current > baseline:
+        if not write_allowed:
+            print(
+                f"OK: 커버리지 상승 감지 {baseline:.2f}% -> {current:.2f}% 하지만 신뢰 불가"
+                f" 컨텍스트라 baseline을 갱신하지 않는다(GITHUB_ACTIONS 또는"
+                f" --allow-baseline-write 필요)"
+            )
+            return 0
         write_baseline_percent(args.baseline, current, current_lines_valid)
         print(f"OK: 커버리지 상승, baseline 갱신 {baseline:.2f}% -> {current:.2f}%")
         return 0

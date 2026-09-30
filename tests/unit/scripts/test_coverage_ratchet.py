@@ -112,12 +112,21 @@ def test_read_baseline_percent_malformed_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_first_run_initializes_baseline_from_measurement(tmp_path: Path) -> None:
+def test_first_run_initializes_baseline_from_measurement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     xml_path = _write_coverage_xml(tmp_path, 0.75)
     baseline_path = tmp_path / "coverage-baseline.txt"
 
     exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        [
+            "--coverage-xml",
+            str(xml_path),
+            "--baseline",
+            str(baseline_path),
+            "--allow-baseline-write",
+        ]
     )
 
     assert exit_code == 0
@@ -153,12 +162,21 @@ def test_drop_within_tolerance_passes_and_keeps_baseline(tmp_path: Path) -> None
     assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"
 
 
-def test_risen_coverage_ratchets_baseline_up(tmp_path: Path) -> None:
+def test_risen_coverage_ratchets_baseline_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     xml_path = _write_coverage_xml(tmp_path, 0.85)
     baseline_path = _write_baseline(tmp_path, 80.00)
 
     exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        [
+            "--coverage-xml",
+            str(xml_path),
+            "--baseline",
+            str(baseline_path),
+            "--allow-baseline-write",
+        ]
     )
 
     assert exit_code == 0
@@ -331,13 +349,20 @@ def test_custom_min_lines_valid_ratio_is_respected(tmp_path: Path) -> None:
 
 
 def test_baseline_initialized_with_lines_valid_persists_second_line(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     xml_path = _write_coverage_xml(tmp_path, 0.75, lines_valid=12345)
     baseline_path = tmp_path / "coverage-baseline.txt"
 
     exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        [
+            "--coverage-xml",
+            str(xml_path),
+            "--baseline",
+            str(baseline_path),
+            "--allow-baseline-write",
+        ]
     )
 
     assert exit_code == 0
@@ -368,12 +393,124 @@ def test_baseline_write_failure_propagates_instead_of_silent_pass(
     monkeypatch.setattr(Path, "write_text", _raise_disk_full)
 
     with pytest.raises(OSError, match="No space left on device"):
-        coverage_ratchet.main(["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)])
+        coverage_ratchet.main(
+            [
+                "--coverage-xml",
+                str(xml_path),
+                "--baseline",
+                str(baseline_path),
+                "--allow-baseline-write",
+            ]
+        )
 
 
 # ---------------------------------------------------------------------------
 # 수치 성능 단언 — 순수 파서/비교 경로는 CI 스텝에서 매 커밋 실행되므로 저지연이어야 한다
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# baseline 쓰기 신뢰 게이팅(task-9120) — 공유 호스트 자원 경합으로 죽은 로컬
+# pytest가 만든 부분 리포트가 조용히 baseline을 오염시키던 반복 사고(24h 5회)를
+# 막는다: GITHUB_ACTIONS=true이거나 --allow-baseline-write가 없으면 baseline
+# 파일을 절대 건드리지 않는다.
+# ---------------------------------------------------------------------------
+
+
+def test_baseline_write_is_trusted_defaults_to_untrusted() -> None:
+    assert coverage_ratchet.baseline_write_is_trusted(False, {}) is False
+
+
+def test_baseline_write_is_trusted_via_github_actions_env() -> None:
+    assert coverage_ratchet.baseline_write_is_trusted(False, {"GITHUB_ACTIONS": "true"}) is True
+
+
+def test_baseline_write_is_trusted_via_explicit_flag() -> None:
+    assert coverage_ratchet.baseline_write_is_trusted(True, {}) is True
+
+
+def test_baseline_write_is_trusted_rejects_falsy_github_actions_value() -> None:
+    """DoD 부정 테스트: `GITHUB_ACTIONS`가 설정만 돼 있고 값이 `"true"`가 아니면
+    (예: 잘못 전파된 `"false"`나 빈 문자열) 신뢰하지 않는다 — 존재 여부가 아니라
+    정확한 값만 신뢰 신호로 취급한다."""
+    assert coverage_ratchet.baseline_write_is_trusted(False, {"GITHUB_ACTIONS": "false"}) is False
+    assert coverage_ratchet.baseline_write_is_trusted(False, {"GITHUB_ACTIONS": ""}) is False
+
+
+def test_local_run_without_flag_does_not_initialize_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DoD 부정 테스트: baseline이 아직 없는 상태에서 신뢰 불가 컨텍스트(로컬,
+    GITHUB_ACTIONS 미설정, 플래그 없음)로 실행하면 baseline 파일을 새로 만들지
+    않는다 — exit 0(측정 자체는 유효하니 로컬 게이트를 막지 않는다)이지만 파일은
+    생성되지 않는다."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    xml_path = _write_coverage_xml(tmp_path, 0.75)
+    baseline_path = tmp_path / "coverage-baseline.txt"
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 0
+    assert not baseline_path.exists()
+    assert "SKIP" in capsys.readouterr().out
+
+
+def test_local_run_without_flag_does_not_ratchet_baseline_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DoD 부정 테스트: 이 반복 사고의 핵심 경로 -- 공유 호스트 자원 경합으로
+    부분 리포트가 나더라도(여기선 정상 리포트로 시뮬레이션, 핵심은 '로컬이라
+    안 쓴다') line-rate가 baseline보다 높게 나와도 신뢰 불가 컨텍스트에서는
+    baseline 파일을 갱신하지 않는다 -- exit 0(회귀 아님)은 유지하되 파일은
+    그대로 둔다."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    xml_path = _write_coverage_xml(tmp_path, 0.85)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 0
+    assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"  # 갱신되지 않음
+
+
+def test_github_actions_env_ratchets_baseline_up_without_explicit_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DoD: GitHub Actions가 자동 주입하는 GITHUB_ACTIONS=true만으로도(플래그 없이)
+    신뢰 컨텍스트로 인정해 baseline을 정상적으로 상향 래칫한다 -- 실제 워크플로가
+    --allow-baseline-write를 몰라도 그대로 동작해야 한다."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    xml_path = _write_coverage_xml(tmp_path, 0.85)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 0
+    assert baseline_path.read_text(encoding="utf-8").strip() == "85.00"
+
+
+def test_local_run_still_fails_on_real_regression_without_touching_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DoD: 쓰기 게이팅은 '상향' 경로만 막는다 -- 신뢰 불가 컨텍스트에서도
+    실제 회귀(허용 오차 초과 하락)는 여전히 FAIL로 잡아 로컬 게이트가 무력화되지
+    않는다."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    xml_path = _write_coverage_xml(tmp_path, 0.70)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    exit_code = coverage_ratchet.main(
+        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+    assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"
 
 
 @pytest.mark.perf
