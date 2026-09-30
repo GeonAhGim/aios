@@ -1,4 +1,5 @@
 """15번대 통합테스트 — /users/me/risk-* 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import json
 import uuid
 from pathlib import Path
@@ -89,9 +90,7 @@ async def test_risk_profile_missing_before_assessment(client):
 async def test_submit_assessment_returns_risk_profile(client):
     headers = await _register(client)
 
-    response = await client.post(
-        "/users/me/risk-assessment", json=_STABLE_ANSWERS, headers=headers
-    )
+    response = await client.post("/users/me/risk-assessment", json=_STABLE_ANSWERS, headers=headers)
 
     assert response.status_code == 201
     assert response.json()["risk_profile"] == "안정형"
@@ -161,9 +160,7 @@ async def _create_running_execution(pool, user_id: str, risk_level: str) -> None
         )
 
 
-async def test_reassessment_warns_on_running_execution_still_mismatched(
-    client, pool, event_bus
-):
+async def test_reassessment_warns_on_running_execution_still_mismatched(client, pool, event_bus):
     headers = await _register(client)
     me = await client.get("/users/me", headers=headers)
     user_id = me.json()["data"]["user_id"]
@@ -179,9 +176,7 @@ async def test_reassessment_warns_on_running_execution_still_mismatched(
     assert response.status_code == 201
     assert response.json()["risk_profile"] == "중립형"
     assert response.json()["is_higher_risk_than_previous"] is True
-    assert any(
-        topic == "risk_profile.match.warned" for topic, _ in event_bus.published
-    )
+    assert any(topic == "risk_profile.match.warned" for topic, _ in event_bus.published)
 
 
 async def test_reassessment_to_still_mismatched_neutral_does_not_warn_for_matching_execution(
@@ -199,12 +194,79 @@ async def test_reassessment_to_still_mismatched_neutral_does_not_warn_for_matchi
     )
 
     assert response.status_code == 201
-    assert not any(
-        topic == "risk_profile.match.warned" for topic, _ in event_bus.published
-    )
+    assert not any(topic == "risk_profile.match.warned" for topic, _ in event_bus.published)
 
 
 async def test_suitability_requires_authentication(client):
     response = await client.get("/users/me/risk-profile")
 
     assert response.status_code == 401
+
+
+async def test_submit_assessment_rejects_missing_required_field(client):
+    headers = await _register(client)
+    answers = dict(_STABLE_ANSWERS)
+    del answers["investment_goal"]
+
+    response = await client.post("/users/me/risk-assessment", json=answers, headers=headers)
+
+    assert response.status_code == 400
+
+
+async def test_submit_assessment_rejects_invalid_investment_goal_enum(client):
+    headers = await _register(client)
+    answers = dict(_STABLE_ANSWERS)
+    answers["investment_goal"] = "NOT_A_REAL_GOAL"
+
+    response = await client.post("/users/me/risk-assessment", json=answers, headers=headers)
+
+    assert response.status_code == 400
+
+
+async def test_submit_assessment_rejects_invalid_liquidity_need_enum(client):
+    headers = await _register(client)
+    answers = dict(_STABLE_ANSWERS)
+    answers["liquidity_need"] = "WHENEVER"
+
+    response = await client.post("/users/me/risk-assessment", json=answers, headers=headers)
+
+    assert response.status_code == 400
+
+
+async def test_submit_assessment_rejects_non_integer_years_of_experience(client):
+    headers = await _register(client)
+    answers = dict(_STABLE_ANSWERS)
+    answers["years_of_experience"] = "many years"
+
+    response = await client.post("/users/me/risk-assessment", json=answers, headers=headers)
+
+    assert response.status_code == 400
+
+
+async def test_risk_profile_history_requires_authentication(client):
+    response = await client.get("/users/me/risk-profile/history")
+
+    assert response.status_code == 401
+
+
+async def test_submit_assessment_requires_authentication(client):
+    response = await client.post("/users/me/risk-assessment", json=_STABLE_ANSWERS)
+
+    assert response.status_code == 401
+
+
+async def test_submit_assessment_surfaces_save_assessment_dependency_failure(client, monkeypatch):
+    """실패주입 — RiskProfileService.save_assessment()가 예외를 던지면
+    전역 핸들러가 이를 삼키지 않고 500/INTERNAL_ERROR로 fail-closed 해야 한다."""
+    import src.services.risk_profile_service as risk_profile_service_module
+
+    async def _raise(self, user_id, result):
+        raise RuntimeError("DB 커넥션 장애(주입됨)")
+
+    monkeypatch.setattr(risk_profile_service_module.RiskProfileService, "save_assessment", _raise)
+
+    headers = await _register(client)
+    response = await client.post("/users/me/risk-assessment", json=_STABLE_ANSWERS, headers=headers)
+
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "INTERNAL_ERROR"
