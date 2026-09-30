@@ -11,8 +11,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    pass
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import AssetClass
@@ -225,28 +228,31 @@ async def _no_sleep(seconds: float) -> None:
 
 
 async def enqueue(
-    outbox: InMemoryOutboxRepo,  # type: ignore
+    outbox: InMemoryOutboxRepo,  # noqa: F821
     view: OrderView,
     *,
     command_type: str = "SUBMIT",
     payload: dict[str, Any] | None = None,
     not_before: datetime | None = None,
 ) -> UUID:
+    from typing import cast
+
     from tests.support.oms_outbox_fakes import FakeConn
 
     body = payload if payload is not None else submit_payload(view)
-    return await outbox.enqueue(  # type: ignore[no-any-return]
+    result = await outbox.enqueue(
         FakeConn(),
         order_id=view.order_id,
         command_type=command_type,
         payload=body,
         not_before=not_before or datetime(2000, 1, 1, tzinfo=timezone.utc),
     )
+    return cast(UUID, result)
 
 
 def make_dispatcher(
     *,
-    outbox: InMemoryOutboxRepo,  # type: ignore
+    outbox: InMemoryOutboxRepo,  # noqa: F821
     orders: InMemoryOrderRepo,
     adapter: FakeExchangeAdapter,
     worker_id: str = "w1",
@@ -254,6 +260,8 @@ def make_dispatcher(
     clock: Callable[[], datetime] = utcnow,
     **kwargs: Any,
 ) -> OutboxDispatcher:
+    from typing import cast
+
     async def resolve(tenant_id: UUID, exchange: str) -> FakeExchangeAdapter:
         return adapter
 
@@ -261,7 +269,7 @@ def make_dispatcher(
     return OutboxDispatcher(
         FakePool(),
         outbox_repo=outbox,
-        order_repo=orders,  # type: ignore[arg-type]
+        order_repo=cast(object, orders),
         resolve_adapter=resolve,
         pre_send_gate=gate,
         worker_id=worker_id,
