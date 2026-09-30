@@ -14,6 +14,7 @@ from src.data.models.task import AIOSTask, TaskStatus
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def valid_task_kwargs():
     """Return a minimal valid kwargs dict for AIOSTask creation."""
@@ -40,6 +41,7 @@ def minimal_kwargs():
 # ---------------------------------------------------------------------------
 # 1. Basic construction — default values & lambda fields
 # ---------------------------------------------------------------------------
+
 
 class TestTaskConstruction:
     """Default-value paths (task_id via uuid4, created_at via datetime.now)."""
@@ -119,6 +121,7 @@ class TestTaskConstruction:
 # 2. Negative tests — boundary & type validation
 # ---------------------------------------------------------------------------
 
+
 class TestNegativeTests:
     """Negative tests: 3+ required (boundary + type checks)."""
 
@@ -195,10 +198,26 @@ class TestNegativeTests:
         with pytest.raises(ValidationError):
             AIOSTask(**valid_task_kwargs)
 
+    def test_objective_non_string_raises(self, valid_task_kwargs):
+        valid_task_kwargs["objective"] = {"not": "a string"}
+        with pytest.raises(ValidationError):
+            AIOSTask(**valid_task_kwargs)
+
+    def test_assigned_agent_non_string_raises(self, valid_task_kwargs):
+        valid_task_kwargs["assigned_agent"] = ["agent-1"]
+        with pytest.raises(ValidationError):
+            AIOSTask(**valid_task_kwargs)
+
+    def test_required_permission_level_non_numeric_string_raises(self, valid_task_kwargs):
+        valid_task_kwargs["required_permission_level"] = "not-a-number"
+        with pytest.raises(ValidationError):
+            AIOSTask(**valid_task_kwargs)
+
 
 # ---------------------------------------------------------------------------
 # 3. Failure injection tests — dependency exception
 # ---------------------------------------------------------------------------
+
 
 class TestFailureInjection:
     """Failure injection: 1+ monkeypatch dependency exception."""
@@ -229,10 +248,48 @@ class TestFailureInjection:
         # UTC offset should be 0 (timezone.utc)
         assert task.created_at.utcoffset().total_seconds() == 0
 
+    def test_uuid4_dependency_exception_propagates(self, valid_task_kwargs):
+        """Swap the task_id field's default_factory (bound to uuid4 at
+        class-definition time, so pydantic-core's compiled schema must be
+        force-rebuilt to pick it up) to raise, and confirm the exception
+        propagates instead of being swallowed. Restored in a finally block
+        since this mutates shared class state that monkeypatch cannot revert."""
+        field = AIOSTask.model_fields["task_id"]
+        original_factory = field.default_factory
+
+        def _boom():
+            raise RuntimeError("uuid4 backend unavailable")
+
+        field.default_factory = _boom
+        AIOSTask.model_rebuild(force=True)
+        try:
+            kwargs = {k: v for k, v in valid_task_kwargs.items() if k != "task_id"}
+            with pytest.raises(RuntimeError, match="uuid4 backend unavailable"):
+                AIOSTask(**kwargs)
+        finally:
+            field.default_factory = original_factory
+            AIOSTask.model_rebuild(force=True)
+
+    def test_datetime_now_dependency_exception_propagates(self, monkeypatch, valid_task_kwargs):
+        """Monkeypatch datetime.now (the created_at default_factory dependency)
+        to raise, and confirm the exception propagates."""
+        import src.data.models.task as task_module
+
+        class _BoomDatetime(task_module.datetime):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ARG003 — must match datetime.now signature
+                raise RuntimeError("clock unavailable")
+
+        monkeypatch.setattr(task_module, "datetime", _BoomDatetime)
+        kwargs = {k: v for k, v in valid_task_kwargs.items() if k != "created_at"}
+        with pytest.raises(RuntimeError, match="clock unavailable"):
+            AIOSTask(**kwargs)
+
 
 # ---------------------------------------------------------------------------
 # 4. Enum value serialization (use_enum_values = True)
 # ---------------------------------------------------------------------------
+
 
 class TestEnumSerialization:
     """use_enum_values=True means .model_dump() returns strings, not enum members."""
@@ -245,6 +302,7 @@ class TestEnumSerialization:
 
     def test_model_dump_json_parses_to_string(self, valid_task_kwargs):
         import json
+
         task = AIOSTask(**valid_task_kwargs)
         raw = task.model_dump_json()
         parsed = json.loads(raw)
@@ -252,6 +310,7 @@ class TestEnumSerialization:
 
     def test_all_statuses_serialise_to_uppercase(self, valid_task_kwargs):
         import json
+
         for status in TaskStatus:
             valid_task_kwargs["status"] = status
             task = AIOSTask(**valid_task_kwargs)
@@ -263,6 +322,7 @@ class TestEnumSerialization:
 # ---------------------------------------------------------------------------
 # 5. Edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     def test_empty_dict_input_payload(self, valid_task_kwargs):
@@ -288,3 +348,27 @@ class TestEdgeCases:
         valid_task_kwargs["completed_at"] = datetime(2025, 6, 1, tzinfo=timezone.utc)
         task = AIOSTask(**valid_task_kwargs)
         assert task.completed_at is not None
+
+
+# ---------------------------------------------------------------------------
+# 6. Performance assertion
+# ---------------------------------------------------------------------------
+
+
+class TestPerformance:
+    """Numeric throughput budget for pure in-memory model construction."""
+
+    @pytest.mark.perf
+    def test_construction_throughput_budget(self, valid_task_kwargs):
+        """Pydantic validation for this model has no I/O, so 2000
+        constructions must complete well under 1 second (budget: 1000/s)."""
+        import time
+
+        iterations = 2000
+        start = time.perf_counter()
+        for _ in range(iterations):
+            AIOSTask(**valid_task_kwargs)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 1.0, (
+            f"construction of {iterations} tasks took {elapsed:.3f}s (budget 1.0s)"
+        )
