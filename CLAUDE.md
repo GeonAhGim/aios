@@ -109,6 +109,16 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
    every worker's context: on 2026-09-30 it grew 8KB -> 199KB and every local-lane request
    blew the 41k-token budget. Record such findings in `docs/CI_SYSTEMIC_LOG.md` (append-only)
    and keep this list to short, general rules only.
+12. Adding D2/D3 evidence (negative/failure-injection/perf/adversarial tests, §5 rationale prose)
+   to a `tests/` file that is already near 500/800 lines without checking available headroom first
+   — the same handful of near-threshold files regress this way repeatedly (task-8905, task-9010,
+   task-9069, task-9252, task-9459, task-9675, CI_SYSTEMIC_LOG.md #12/#25) — **before adding D2/D3
+   evidence anywhere under `tests/`, run `python scripts/check_code_ratchets.py --near 30` and
+   check the NEAR output; if a file you are about to edit is listed there (0-30 lines below a
+   500/800/1000 threshold), split it into a sibling `_<aspect>.py` test file by responsibility
+   before the commit, not as a follow-up red-gate fix**. Same applies to a new intentional
+   fail-closed `raise NotImplementedError` stub: add the `# ratchet-allow: <reason>` comment (§3)
+   in the same commit that introduces it, not as a follow-up fix.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
