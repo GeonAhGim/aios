@@ -13,6 +13,7 @@ task-1814 DoD(b). `tests/integration/foundation/entities/test_tenant_fk_enforced
 from __future__ import annotations
 
 import os
+from typing import Any
 from uuid import uuid4
 
 import asyncpg
@@ -26,7 +27,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool():  # type: ignore[no-untyped-def]
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
@@ -48,12 +49,14 @@ async def _fk_ref(pool: asyncpg.Pool, table: str, constraint: str) -> tuple[str,
     return (row["ref_table"], row["ref_column"]) if row is not None else None
 
 
-async def test_account_connection_tenant_id_fk_references_tenant_table(pool):
+async def test_account_connection_tenant_id_fk_references_tenant_table(pool: asyncpg.Pool) -> None:
     ref = await _fk_ref(pool, "account_connection", "account_connection_tenant_id_fkey")
     assert ref == ("tenant", "id")
 
 
-async def test_account_connection_insert_with_nonexistent_tenant_id_raises_fk_violation(pool):
+async def test_account_connection_insert_with_nonexistent_tenant_id_raises_fk_violation(
+    pool: asyncpg.Pool,
+) -> None:
     missing_tenant_id = uuid4()
 
     with pytest.raises(asyncpg.ForeignKeyViolationError):
@@ -69,7 +72,7 @@ async def test_account_connection_insert_with_nonexistent_tenant_id_raises_fk_vi
             )
 
 
-async def _insert_account_connection(pool: asyncpg.Pool, tenant_id: object, ref: str) -> None:
+async def _insert_account_connection(pool: Any, tenant_id: Any, ref: str) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             """
@@ -83,7 +86,9 @@ async def _insert_account_connection(pool: asyncpg.Pool, tenant_id: object, ref:
         )
 
 
-async def test_account_connection_insert_with_null_tenant_id_raises_not_null_violation(pool):
+async def test_account_connection_insert_with_null_tenant_id_raises_not_null_violation(
+    pool: asyncpg.Pool,
+) -> None:
     # negative 3번째 케이스 — account_connection.tenant_id는 NOT NULL이다
     # (foundation_audit_event와 달리 system 이벤트 예외가 없다). FK
     # 위반뿐 아니라 이 불변식도 실DB에서 실제로 거부되는지 확인한다.
@@ -91,27 +96,29 @@ async def test_account_connection_insert_with_null_tenant_id_raises_not_null_vio
         await _insert_account_connection(pool, None, "ACCT-null-tenant")
 
 
-async def test_account_connection_insert_propagates_pool_acquire_failure():
+async def test_account_connection_insert_propagates_pool_acquire_failure() -> None:
     # 실패주입 — DB 연결 자체가 끊긴 경우(pool 소진/네트워크 단절 등)에도
     # 삽입 경로가 예외를 삼키지 않고 그대로 전파하는지 확인한다. §3의
     # fail-closed 기본 정책상, FK/NOT NULL 위반이 아닌 하위 의존성 실패는
     # 조용히 무시되거나 다른 예외로 둔갑해서는 안 된다.
     class _FailingAcquire:
-        async def __aenter__(self):
+        async def __aenter__(self) -> None:
             raise asyncpg.exceptions.ConnectionDoesNotExistError("connection lost")
 
-        async def __aexit__(self, *exc_info):
+        async def __aexit__(self, *exc_info: object) -> bool:
             return False
 
     class _FailingPool:
-        def acquire(self, *args, **kwargs):
+        def acquire(self, *args: object, **kwargs: object) -> _FailingAcquire:
             return _FailingAcquire()
 
     with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
         await _insert_account_connection(_FailingPool(), uuid4(), "ACCT-conn-fail")
 
 
-async def test_account_connection_insert_with_existing_tenant_id_succeeds(pool):
+async def test_account_connection_insert_with_existing_tenant_id_succeeds(
+    pool: asyncpg.Pool,
+) -> None:
     tenant_id = await create_test_tenant(pool)
 
     async with pool.acquire() as conn:
@@ -129,14 +136,16 @@ async def test_account_connection_insert_with_existing_tenant_id_succeeds(pool):
     assert row["tenant_id"] == tenant_id
 
 
-async def test_foundation_audit_event_tenant_id_fk_references_tenant_table(pool):
+async def test_foundation_audit_event_tenant_id_fk_references_tenant_table(
+    pool: asyncpg.Pool,
+) -> None:
     ref = await _fk_ref(pool, "foundation_audit_event", "foundation_audit_event_tenant_id_fkey")
     assert ref == ("tenant", "id")
 
 
 async def test_foundation_audit_event_insert_with_nonexistent_tenant_id_raises_fk_violation(
-    pool,
-):
+    pool: asyncpg.Pool,
+) -> None:
     missing_tenant_id = uuid4()
 
     with pytest.raises(asyncpg.ForeignKeyViolationError):
@@ -154,7 +163,7 @@ async def test_foundation_audit_event_insert_with_nonexistent_tenant_id_raises_f
             )
 
 
-async def test_foundation_audit_event_null_tenant_id_still_allowed(pool):
+async def test_foundation_audit_event_null_tenant_id_still_allowed(pool: asyncpg.Pool) -> None:
     # NULL은 FK 체크 대상이 아니다(system 이벤트, 4453afe74725 §1) — FK를
     # tenant(id)로 옮긴 뒤에도 이 예외가 유지되는지 대조군으로 확인한다.
     async with pool.acquire() as conn:
