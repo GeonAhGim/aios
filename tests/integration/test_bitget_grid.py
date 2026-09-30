@@ -2,6 +2,7 @@
 
 httpx.MockTransport 기반 검증(test_bitget_adapter.py와 동일 원칙).
 """
+
 import json
 from decimal import Decimal
 
@@ -130,9 +131,7 @@ async def test_place_spot_grid_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_spot_grid(
@@ -150,4 +149,60 @@ async def test_place_spot_grid_rejects_inverted_price_range():
     with pytest.raises(ValueError):
         await adapter.place_spot_grid(
             "BTC/USDT", Decimal("90000"), Decimal("70000"), 10, Decimal("1000")
+        )
+
+
+async def test_place_spot_grid_rejects_zero_lower_price():
+    """불변식 위반: lower_price가 0이면 거부해야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.place_spot_grid(
+            "BTC/USDT", Decimal("0"), Decimal("90000"), 10, Decimal("1000")
+        )
+
+
+async def test_place_spot_grid_rejects_negative_investment():
+    """불변식 위반: investment가 0 이하이면 거부해야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.place_spot_grid(
+            "BTC/USDT", Decimal("70000"), Decimal("90000"), 10, Decimal("-100")
+        )
+
+
+async def test_place_futures_grid_rejects_zero_grid_count():
+    """불변식 위반: grid_count가 0이면 거부해야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.place_futures_grid(
+            "BTC/USDT", Decimal("70000"), Decimal("90000"), 0, Decimal("1000")
+        )
+
+
+async def test_place_spot_grid_raises_on_api_error(monkeypatch):
+    """실패주입: _request가 RetryableExchangeError를 raise하면 전파된다."""
+    from src.core.exceptions import RetryableExchangeError
+
+    adapter = _make_adapter(lambda request: _json_response({"code": "500000"}))
+
+    async def fake_request(*args, **kwargs):
+        raise RetryableExchangeError("500 error from upstream")
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+
+    with pytest.raises(RetryableExchangeError, match="500 error from upstream"):
+        await adapter.place_spot_grid(
+            "BTC/USDT", Decimal("70000"), Decimal("90000"), 10, Decimal("1000")
         )
