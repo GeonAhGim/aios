@@ -6,6 +6,7 @@ bypassable by the table owner; (d) upgrade/downgrade/upgrade round trip.
 `subprocess`-driven alembic + DSN handling follow the same pattern as
 `tests/integration/foundation/entities/test_migration_fa4_columns.py`.
 """
+
 from __future__ import annotations
 
 import os
@@ -129,6 +130,75 @@ async def test_worm_rejects_delete(pool):
                 instrument_id,
                 known_at,
             )
+
+
+async def test_insert_rejects_unknown_instrument_id(pool):
+    """Negative test: the FK on `instrument_id` rejects a correction for an
+    instrument that was never seeded -- the join key is invariant, not
+    advisory (§9.10 DC-21 depends on DC-4 `instruments`)."""
+    unknown_id = _instrument_id()
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await conn.execute(
+                "INSERT INTO instrument_attributes "
+                "(instrument_id, attr_key, attr_value, known_at) "
+                "VALUES ($1, 'lot_size', '10', $2)",
+                unknown_id,
+                datetime.now(timezone.utc),
+            )
+
+
+async def test_insert_rejects_duplicate_primary_key(pool):
+    """Negative test: two corrections landing on the exact same instant for
+    the same key are rejected -- otherwise "the latest row" the point-in-time
+    reduction picks would be ambiguous."""
+    instrument_id = _instrument_id()
+    await _seed_instrument(pool, instrument_id)
+    known_at = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO instrument_attributes "
+            "(instrument_id, attr_key, attr_value, known_at) "
+            "VALUES ($1, 'lot_size', '10', $2)",
+            instrument_id,
+            known_at,
+        )
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                "INSERT INTO instrument_attributes "
+                "(instrument_id, attr_key, attr_value, known_at) "
+                "VALUES ($1, 'lot_size', '999', $2)",
+                instrument_id,
+                known_at,
+            )
+
+
+async def test_record_propagates_connection_failure_fail_closed(pool):
+    """Failure injection: a dropped connection during `record()` must fail
+    closed -- the repository must propagate the exception, not swallow it or
+    pretend the correction landed."""
+    instrument_id = _instrument_id()
+    await _seed_instrument(pool, instrument_id)
+    repo = PostgresInstrumentAttributesRepository(pool)
+
+    original_execute = asyncpg.connection.Connection.execute
+
+    async def _boom(*args, **kwargs):
+        raise asyncpg.PostgresConnectionError("simulated connection drop")
+
+    async with pool.acquire() as conn:
+        asyncpg.connection.Connection.execute = _boom
+        try:
+            with pytest.raises(asyncpg.PostgresConnectionError, match="simulated connection drop"):
+                await repo.record(
+                    conn,
+                    instrument_id=instrument_id,
+                    attr_key="lot_size",
+                    attr_value="10",
+                    known_at=datetime.now(timezone.utc),
+                )
+        finally:
+            asyncpg.connection.Connection.execute = original_execute
 
 
 async def test_repository_query_returns_value_known_at_or_before_as_of(pool):
