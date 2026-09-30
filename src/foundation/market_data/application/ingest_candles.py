@@ -186,11 +186,11 @@ async def ingest_candles(
         instrument = await refs.get_instrument(read_conn, cmd.venue, lookup_symbol, now)
         if instrument is None:
             raise SymbolUnknownError(
-                f"참조데이터 없음: venue={cmd.venue.value} canonical={cmd.canonical_symbol!r}"
+                f"Reference data not found: venue={cmd.venue.value} canonical={cmd.canonical_symbol!r}"
             )
         if instrument.status in _NOT_TRADABLE:
             raise SymbolNotTradableError(
-                f"ingest 불가 상태: instrument_id={instrument.instrument_id} "
+                f"Symbol not tradable: instrument_id={instrument.instrument_id} "
                 f"status={instrument.status.value}"
             )
         sessions = await _sessions_in_range(
