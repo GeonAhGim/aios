@@ -2386,3 +2386,33 @@ the numbering they had in CLAUDE.md section 6.
     repeat leaf ids overlap an already-closed systemic leaf's set (task-9298/#20, task-9483/#29,
     task-9550/#42, task-9668/#65, task-9694/#73, task-9591/#76, task-9616/#79, task-9721/#82, or
     this entry), close as noop citing all of them rather than re-diagnosing an eleventh time.
+
+94. A `code_language` `[health:ci_red]` leaf (task-9809) cites `esc-ci-code_language.json`'s
+    bisect culprit `bc75d7a1` ("coverage 0% -> 100% for channel_policy.py") for a "Hangul lines
+    8678 -> 8682" failure, but `git show --stat bc75d7a1` touches exactly one file,
+    `tests/unit/core/notifications/test_channel_policy.py` — and `scripts/check_code_language.py`
+    only ever scans `--target src` (`DEFAULT_TARGET = ROOT / "src"`, both here and in
+    `check_baseline_raise.py`'s push guard). A tests-only commit cannot move the src-scoped
+    Hangul count at all, so the cited commit is not and never was the actual cause. Reconfirmed
+    on this worktree (`git status` clean, HEAD fast-forwarded to `aa740bede`, `bc75d7a1` and the
+    escalation's own `resolved_sha` `ef46c98f085c` both ancestors of HEAD): `python
+    scripts/check_code_language.py --top 20` prints `OK: Hangul comment/docstring lines reduced
+    8595 -> 8561` against the committed `code-language-baseline.txt` (8595) — 34 lines of margin,
+    not a failure. The escalation JSON itself shows the real story: `status: "resolved"`,
+    `resolution: "최신 CI 녹색 ef46c98f085c"`, `closed_at: "2026-09-24T15:30:21Z"`, then three
+    separate `ci_red` rule cycles (task-8513, task-8745, task-8842, each `detail_hash
+    53540785e5f4` — byte-identical to the original 2026-09-22 failure, same exact top-10 file/line
+    list down to `nh/trading_mixin.py 71`, `resources.py 64`, `bitget/adapter.py 62`) each
+    "fixed" and closed, followed by 100+ `"3x-repeat CI red"` auto_actions through
+    2026-09-30T14:56 before finally spawning task-9809 off the *same* stale snapshot. This is the
+    identical fleet-code pattern named twenty-three+ times now for other gates (#17-#26, #30-#31,
+    #33-#36, #38, #40-#42, #48, #50, #56, #59, #61, #65, #73, #76, #79, #82, #92, #93):
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a fix task off a
+    resolved/stale escalation snapshot instead of re-measuring current HEAD first, out of a repo
+    worker's edit scope (§4). No baseline/rule relief made (DECISION_GUIDELINES B-2) — the
+    ratchet is sound and currently green with real margin; nothing needed fixing in `src/`. Before
+    working a future `code_language` leaf: run `python scripts/check_code_language.py --top 20` on
+    a fresh `git fetch origin && git merge --ff-only origin/main` first — if it prints `OK` against
+    the committed baseline and the escalation's cited bisect commit only touches paths outside
+    `--target src` (tests/docs/scripts), close as noop citing this entry rather than trusting the
+    bisect culprit or the cached failure detail.
