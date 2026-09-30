@@ -414,6 +414,44 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     baseline/tolerance/ratio-floor relief made from this leaf (DECISION_GUIDELINES B-2) — the
     ratchet design is sound; the remaining defect is fleet code, not this repo.
 
+22. Treating every `consistency` `[health:ci_red]` correction leaf as still-unfixed code —
+    task-8993 flagged `consistency` at 6+ leaves in 24h (task-8949, task-9011, task-9281,
+    task-9460, plus earlier ones) and `scripts/check_consistency.py` (now split into
+    `scripts/consistency/*` by check group, commit `0d691b7e`) has no remaining design defect:
+    a plain `python scripts/check_consistency.py` on a synced worktree finishes in a few
+    seconds and matches `consistency-baseline` on all 13 metrics
+    (`router_unregistered`/`port_method_unimplemented`/`port_protocol_unimplemented`/
+    `env_key_undocumented`/`feature_flag_undocumented`/`event_type_unconsumed`/
+    `migration_hygiene`/`openapi_client_mismatch`/`spec_leaf_untraced`/`naive_datetime`/
+    `money_float`/`symbol_id_assembly`/`spec_template_incomplete`/`authority_duplication`).
+    The 6 leaves are two different things wearing the same gate name: (a) task-8949 and
+    task-9011 were real, correctly diagnosed perf fixes for the step's 120s subprocess
+    timeout — task-8949 deduped `spec_leaf_untraced`'s per-file `open()`/`read_text()` calls
+    across ~1579 `tests/`+`scripts/` files via `git grep` candidate extraction plus overlapped
+    `src/` cache warming (commit `39e7ec5e`, 86.9s/126.8s/112.6s -> 15.4s/21.2s/28.1s across 3
+    reproductions); task-9011 then found the *next* bottleneck — 8 independent full
+    `ast.walk()` passes over the same ~1600 `src/` files, one per check — and added a
+    `functools.cache`-backed `_walked_nodes(path)` in `scripts/consistency/common.py` shared by
+    all consuming checks (commit `3f690175`, 30.8s/5.5s/5.6s -> 3.4s/3.5s/4.1s A/B benchmark,
+    byte-identical metric counts before/after). Both fixes are real, are already in place, and
+    are the reason a local run today finishes in seconds against a 120s budget. (b) task-9281
+    and task-9460 are the journeys/ruff/frontend/type_ignore/complexity/perf_marker_guard/
+    pytest_latency_serial/coverage pattern (#13/#15/#16/#17/#18/#19/#20/#21) repeating under
+    `consistency`: both report a local reproduction already green and baseline-matching, and
+    both trace the escalation's cited "culprit" back to the *same* `4d5ebed5` — a docstring-only
+    commit (task-4424, Korean->English docstring translation) already on record in #21
+    (coverage) as unrelated to that gate's own logic, let alone this one's. This is the same
+    fleet-code defect as #17-#21: `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule
+    re-triggering (or reusing) a fix leaf off a stale `esc-ci-consistency.json` snapshot instead
+    of re-running the stage's own check at current HEAD first, out of a repo worker's edit scope
+    (§4). Before working a new `consistency` correction leaf: run
+    `python scripts/check_consistency.py` locally first (a few seconds on a synced worktree) —
+    if it prints `OK` and every metric matches `consistency-baseline`, close the leaf noop citing
+    task-9011/task-9460 and this entry rather than re-diagnosing the same stale `4d5ebed5`
+    commit or re-optimizing an already-fixed timeout. No baseline/threshold relief made from this
+    leaf (DECISION_GUIDELINES B-2) — the script design and perf are sound; the remaining defect
+    is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
