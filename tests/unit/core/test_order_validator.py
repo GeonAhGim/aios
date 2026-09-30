@@ -8,6 +8,8 @@ DoD (task-4671):
 
 from decimal import Decimal
 
+import pytest
+
 from src.core.validator.order_validator import validate_order_params
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderType
@@ -217,6 +219,7 @@ def test_zero_tick_size_skips_multiple_check():
 # ── performance assertion ────────────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_validate_order_params_perf_budget():
     """validate_order_params is a pure in-memory check — 1000 calls must stay
     well under 100ms (budget table ADR-2026-09-09-C Decision 1, pure-function
