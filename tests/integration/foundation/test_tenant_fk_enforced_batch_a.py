@@ -13,6 +13,7 @@ task-1814 DoD(b). `tests/integration/foundation/entities/test_tenant_fk_enforced
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
@@ -27,7 +28,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():  # type: ignore[no-untyped-def]
+async def pool() -> AsyncIterator[asyncpg.Pool]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()

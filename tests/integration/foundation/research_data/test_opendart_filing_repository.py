@@ -13,6 +13,7 @@ import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import asyncpg
 import pytest
@@ -221,17 +222,17 @@ class _FlakyOnceConnection:
     append()가 "이미 있는지" 확인하는 첫 fetchrow에서 터지므로 INSERT는
     아예 시도되지 않는다(부분 행 없음을 증명)."""
 
-    def __init__(self, real_conn) -> None:
+    def __init__(self, real_conn: asyncpg.Connection) -> None:
         self._real_conn = real_conn
         self._armed = True
 
-    async def fetchrow(self, *args, **kwargs):
+    async def fetchrow(self, *args: Any, **kwargs: Any) -> Any:
         if self._armed:
             self._armed = False
             raise asyncpg.PostgresConnectionError("simulated transient outage")
         return await self._real_conn.fetchrow(*args, **kwargs)
 
-    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._real_conn, name)
 
 
