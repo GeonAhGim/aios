@@ -1,19 +1,20 @@
-"""LA-8 — corporate action 조정계수 체인, RAW→ADJUSTED 캔들 변환.
+"""LA-8 — corporate action adjustment coefficient chain, RAW→ADJUSTED candle conversion.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-8, §9.2 LA-8.
 
-`ex_date` 이전 캔들에는 그 날짜(및 그 이후) 발생한 모든 조정을 누적 곱한
-계수를 적용한다 — 같은 종목에 분할이 연속 2회 이상 있어도 각 캔들은 자기
-날짜보다 뒤에 일어난 조정만 반영해야 하므로, `ex_date` 내림차순으로 계수를
-누적한다. Decimal 곱셈만 사용한다(부동소수 금지, 사양 §9.2 LA-8).
+Candles before `ex_date` are adjusted by the cumulative product of all adjustments
+that occurred on that date and after — even if the same instrument has 2+ splits,
+each candle must reflect only adjustments that occur after its own date, so we
+accumulate coefficients in descending `ex_date` order. Decimal multiplication only
+(no floats, per spec §9.2 LA-8).
 
-`CorporateAction.ratio`는 SPLIT/REVERSE_SPLIT/MERGER에 대해 "2:1 분할이면
-2"(계약 docstring) 규칙을 따른다. CASH_DIVIDEND는 계약상 `ratio=1`이 강제되지
-않으므로, 배당의 가격 조정(종가 대비 배당락)은 이 리프에서 다루지 않는다 —
-**미검증**: 배당 조정에는 ex_date 전일 종가가 필요하며 `factor_chain`은 캔들을
-받지 않으므로 여기서는 배당을 가격·거래량 계수에 반영하지 않는다(계수=1).
-MERGER의 정확한 전환 비율 관례도 **미검증**이며 SPLIT과 동일한 공식을 쓴다.
-I/O 없음 — 순수 함수만 담는다.
+`CorporateAction.ratio` follows the rule "for 2:1 split, ratio=2" (contract docstring)
+for SPLIT/REVERSE_SPLIT/MERGER. CASH_DIVIDEND does not mandate `ratio=1` by contract,
+so dividend price adjustments (ex-dividend vs. close) are not handled in this leaf —
+**unverified**: dividend adjustments require prior-day close, and `factor_chain` does
+not receive candles, so we do not reflect dividends in price/volume coefficients (factor=1).
+MERGER's exact conversion-ratio convention is also **unverified** and uses the same
+formula as SPLIT. No I/O — pure functions only.
 """
 
 from __future__ import annotations
@@ -38,12 +39,12 @@ _ONE = Decimal(1)
 
 
 class InvalidRatioError(ValueError):
-    """`ratio <= 0`인 corporate action이 들어왔다 — 계보를 신뢰할 수 없다."""
+    """Corporate action with `ratio <= 0` received — cannot trust lineage."""
 
     def __init__(self, action: CorporateAction) -> None:
         super().__init__(
             f"instrument_id={action.instrument_id} ex_date={action.ex_date}: "
-            f"ratio={action.ratio}는 양수여야 합니다."
+            f"ratio={action.ratio} must be positive."
         )
         self.action = action
 
@@ -65,9 +66,9 @@ class InvalidActionTypeError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class AdjustmentFactor:
-    """`effective_date` **미만**(strictly before)의 캔들에 곱해야 하는 누적 계수.
+    """Cumulative coefficient to multiply candles strictly before `effective_date`.
 
-    `effective_date` 및 그 이후에 일어난 모든 조정이 이미 누적되어 있다."""
+    All adjustments from `effective_date` onwards are already accumulated."""
 
     instrument_id: UUID
     effective_date: date
@@ -76,8 +77,8 @@ class AdjustmentFactor:
 
 
 def _action_factors(action: CorporateAction) -> tuple[Decimal, Decimal]:
-    """(가격 계수, 거래량 계수) — 과거 캔들에 곱할 값. 분할 2:1(ratio=2)이면
-    과거 가격은 1/2로, 과거 거래량은 2배로 환산한다."""
+    """(price factor, volume factor) — values to multiply past candles by.
+    For 2:1 split (ratio=2), past prices scale by 1/2, past volumes scale by 2x."""
     if action.ratio <= 0:
         raise InvalidRatioError(action)
     if action.action_type == "REVERSE_SPLIT":
@@ -89,10 +90,10 @@ def _action_factors(action: CorporateAction) -> tuple[Decimal, Decimal]:
 
 
 def factor_chain(actions: list[CorporateAction], as_of: datetime) -> list[AdjustmentFactor]:
-    """`as_of` 시점까지 발효된 조정만 모아 종목별 누적 계수 목록을 만든다.
+    """Collect adjustments effective up to `as_of` and return cumulative factors per instrument.
 
-    반환 목록은 `ex_date` 오름차순이며, 각 원소는 해당 `ex_date` 미만 캔들에
-    적용할 누적 계수다(자신 및 이후 조정 전부 포함)."""
+    Returned list is sorted by `ex_date` ascending; each element is the cumulative
+    coefficient to apply to candles before that `ex_date` (including itself and all later adjustments)."""
     as_of_date = as_of.date()
     by_instrument: dict[UUID, list[CorporateAction]] = defaultdict(list)
     for action in actions:
@@ -137,10 +138,10 @@ def _factor_for(
 
 
 def adjust(candles: list[CandleRecord], factors: list[AdjustmentFactor]) -> list[CandleRecord]:
-    """RAW 캔들에 `factor_chain` 결과를 적용해 ADJUSTED 캔들을 만든다.
+    """Apply `factor_chain` results to RAW candles to create ADJUSTED candles.
 
-    캔들 날짜보다 늦게(effective_date 이후) 일어난 조정만 반영하도록, 종목별
-    `effective_date` 오름차순에서 처음으로 캔들 날짜를 초과하는 계수를 쓴다."""
+    To reflect only adjustments that occur after the candle date, use the first
+    coefficient (per instrument, in ascending `effective_date` order) that exceeds the candle date."""
     by_instrument: dict[UUID, list[AdjustmentFactor]] = defaultdict(list)
     for f in factors:
         by_instrument[f.instrument_id].append(f)
