@@ -2170,6 +2170,7 @@ the numbering they had in CLAUDE.md section 6.
     ratchet design is sound; the remaining defect is fleet code, not this repo.
 
 
+
 87. A ninth `consistency` 24h 5-repeat systemic leaf (task-9759) citing the identical repeat
     set #22 (task-9011/9281/9460), #31 (task-9301/9460), #35 (task-9537), #54 (task-9620), #61
     (task-9665), #71 (task-9691), #78 (task-9595), and #80 (task-9718) already closed eight
@@ -2203,3 +2204,26 @@ the numbering they had in CLAUDE.md section 6.
     as noop citing task-9122, #22/#31/#35/#54/#61/#71/#78/#80, and this entry rather than
     re-diagnosing a tenth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) —
     script/baseline design is sound; the remaining defect is fleet code, not this repo.
+
+88. A sixth `type_ignore` `[health:ci_red_systemic]` leaf (task-9617) citing the identical
+    repeat set (task-9014/task-9070/task-9136/task-9255) already root-caused by #23
+    (task-9474), #37 (task-9539), #56 (task-9656), and #17/#23-earlier (task-9140/task-9261).
+    Reconfirmed on this worktree: `python scripts/check_type_ignore_budget.py` prints
+    `OK: type: ignore 142개 (budget 142개 이내)`, exactly matching `type-ignore-budget.txt`
+    (142). `git log --oneline -5 -- scripts/check_type_ignore_budget.py
+    type-ignore-budget.txt` shows `0baf11447`/`729e1569e` (task-9113/task-9014) as the latest
+    touches — no commits since, i.e. the perf fix (os.walk pruning tool-cache dirs before
+    descending) and the cache-exclusion patch (`.import_linter_cache`) are unchanged and still
+    hold. `esc-ci-type_ignore.json` (`C:\aios\pm\escalations\esc-ci-type_ignore.json`) shows
+    `status: "resolved"`, `resolved_sha: "43fa7af7b8ac..."`, `closed_at:
+    "2026-09-30T14:16:13+00:00"`, yet `auto_actions` records the `ci_red` rule re-owning the
+    stage under systemic task-9750 three more times after that resolution
+    (`14:12:29`/`14:29:18`) — the same reuse-a-resolved-escalation-snapshot-instead-of-
+    rechecking-current-HEAD fleet-code pattern named in #17/#23/#37/#56 (`pm/auto_decision.py`
+    / `orchestrator.py`'s `ci_red` rule), out of a repo worker's edit scope (§4). No
+    script/baseline change made. Before working a future `type_ignore` leaf: run `python
+    scripts/check_type_ignore_budget.py` locally first — if `OK` and 142/142, and the cited
+    repeat leaf ids match an already-closed systemic leaf's set (task-9474/#23,
+    task-9539/#37, task-9656/#56, or this entry), close as noop citing all of them rather than
+    re-investigating a seventh time. No baseline/threshold relief made (DECISION_GUIDELINES
+    B-2) — the ratchet design is sound; the remaining defect is fleet code, not this repo.
