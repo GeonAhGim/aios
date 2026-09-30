@@ -1,6 +1,14 @@
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Any
+from unittest.mock import patch
 
+import pytest
+from pydantic import ValidationError
+
+from src.core.exceptions import CurrencyMismatchError
+from src.data.models import trading as trading_module
 from src.data.models.base import AssetClass, Currency, Money, OptionType
 from src.data.models.trading import (
     AccountBalance,
@@ -15,6 +23,72 @@ from src.data.models.trading import (
 
 def _money(amount: str, currency: Currency = Currency.USDT) -> Money:
     return Money(amount=Decimal(amount), currency=currency)
+
+
+def _order_kwargs(**overrides: Any) -> dict[str, Any]:
+    kwargs: dict[str, Any] = dict(
+        client_order_id="c-neg",
+        strategy_id="strat-1",
+        strategy_version="v1.0",
+        symbol="BTC/USDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_order_missing_required_asset_class_raises() -> None:
+    kwargs = _order_kwargs()
+    del kwargs["asset_class"]
+    with pytest.raises(ValidationError):
+        Order(**kwargs)
+
+
+def test_order_invalid_side_enum_value_raises() -> None:
+    with pytest.raises(ValidationError):
+        Order(**_order_kwargs(side="NOT_A_SIDE"))
+
+
+def test_order_non_decimal_quantity_raises() -> None:
+    with pytest.raises(ValidationError):
+        Order(**_order_kwargs(quantity="not-a-number"))
+
+
+def test_money_add_currency_mismatch_raises() -> None:
+    usdt = _money("100", Currency.USDT)
+    krw = _money("100", Currency.KRW)
+    with pytest.raises(CurrencyMismatchError):
+        usdt + krw
+
+
+def test_order_construction_fails_when_clock_raises() -> None:
+    """실패주입: created_at default_factory가 의존하는 datetime.now가 예외를
+    던지면 생성 자체가 실패해야 한다 — 부분 초기화된 Order가 조용히 반환되면
+    안 된다."""
+
+    class _BoomDatetime:
+        @staticmethod
+        def now(_tz: object = None) -> None:
+            raise RuntimeError("clock unavailable")
+
+    with patch.object(trading_module, "datetime", _BoomDatetime):
+        with pytest.raises(RuntimeError):
+            Order(**_order_kwargs())
+
+
+@pytest.mark.perf
+def test_order_construction_perf_under_budget() -> None:
+    """성능단언: Order 생성 1000회가 1초 예산 내에 끝나야 한다
+    (pydantic validation 회귀로 인한 급격한 저하 탐지)."""
+    start = time.perf_counter()
+    for i in range(1000):
+        Order(**_order_kwargs(client_order_id=f"c-perf-{i}"))
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
 
 
 def test_order_defaults_and_market_price_none():
