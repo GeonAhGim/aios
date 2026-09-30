@@ -65,6 +65,27 @@ TEST_DATABASE_URL에 다른 테스트가 남긴 PENDING outbox 행을 lifespan
 `test_key_ring.py`·`test_tokens.py`·`test_health_endpoints.py`·`test_db_roles.py`가
 이 네 변수의 정상/거부 경로를 각각 검증한다(§8 단위/통합 표 대응).
 
+## 성능(wall-clock) 예산 테스트 작성 규칙 (task-9138)
+
+테스트 안에서 `time.perf_counter()`/`time.monotonic()` 차이를 `assert`하면(예산선
+검증 등), 반드시 `@pytest.mark.perf`(또는 모듈 `pytestmark`)를 달아야 한다 —
+`scripts/check_perf_marker_guard.py`가 AST로 전수 스캔해 누락 시 CI를 적색으로
+만든다(task-7434). 마커 없이 CI 기본 스테이지(`pytest -n auto`)에서 돌면 xdist
+코어 경합 때문에 wall-clock 예산이 불안정해져서다. 로컬에서 미리 확인하려면:
+
+```bash
+.venv/Scripts/python.exe scripts/check_perf_marker_guard.py
+```
+
+가능하면 `time.perf_counter()`를 직접 쓰지 말고 `tests/conftest.py`의
+`perf_budget` 픽스처(`PerfBudget`)를 쓴다 — `perf_budget.assert_within(fn,
+budget_ms=...)` 한 줄로 CPU 시간(`process_time`) 측정·워밍업·최선값 선택을
+대신하고, 이 가드가 잡는 종류의 raw wall-clock assert 자체를 만들지 않는다.
+분포가 필요하면 `perf_budget.samples(fn, n=...)`. 이 문단이 없어서 새 perf
+테스트가 마커 없이 반복 유입돼 2026-09-29 하루에만 정정 리프가 4건 발행됐다
+(task-8849/8889/8932/9135) — 조사 결론은 검사 로직·기준선(threshold)이 아니라
+이 안내 문서의 부재였다.
+
 ## 게이트 (CI와 동일)
 
 ```bash
