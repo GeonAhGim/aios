@@ -197,6 +197,7 @@ async def test_get_elw_price_injects_token_refresh_failure():
 # ─── performance assertion (task-4084 DEEPEN 기준) ──────────────────────────
 
 
+@pytest.mark.perf
 async def test_get_elw_price_completes_within_budget():
     """시세 조회 1회당 평균 < 1500ms (모의 transport + 실제 TR 그룹
     rate-limit 버킷 기준). rate_profile.py의 토큰 버킷이 실거래소 제한을
@@ -227,6 +228,7 @@ async def test_get_elw_price_completes_within_budget():
     assert elapsed_ms < 1500, f"avg {elapsed_ms:.1f}ms exceeds 1500ms budget"
 
 
+@pytest.mark.perf
 async def test_get_etf_price_completes_within_budget():
     """시세 조회 1회당 평균 < 1500ms (모의 transport + 실제 TR 그룹
     rate-limit 버킷 기준, 근거는 test_get_elw_price_completes_within_budget
