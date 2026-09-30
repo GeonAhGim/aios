@@ -4,11 +4,13 @@ Spec: 01_data_models_v1.3.md#§1.2 (9.11 FSMStrategyConfig)
       + strategy_validator.py invariant checks
 """
 
+import pytest
 
 from src.core.validator.strategy_validator import validate_strategy_config
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig
 
 # ── Positive / happy-path ──────────────────────────────────────────────
+
 
 def test_valid_config_passes_all_validators():
     config = FSMStrategyConfig(
@@ -39,6 +41,7 @@ def test_valid_config_passes_all_validators():
 
 
 # ── Negative tests (boundary / bad input) ─────────────────────────────
+
 
 def test_duplicate_transition_rejected():
     """Negative: identical from+to+condition pairs in transitions."""
@@ -179,6 +182,7 @@ def test_orphan_state_detected():
 
 # ── Failure-injection test ────────────────────────────────────────────
 
+
 def test_validate_config_logs_on_error(monkeypatch):
     """Failure injection: mock logger.error and verify it is called on error."""
     config = FSMStrategyConfig(
@@ -220,3 +224,33 @@ def test_multiple_errors_accumulated():
     error_text = " ".join(result.errors)
     assert "initial_state" in error_text
     assert "자기순환" in error_text
+
+
+def test_validation_result_dependency_failure_propagates(monkeypatch):
+    """Failure injection: ValidationResult constructor raising must not be
+
+    swallowed — fail-closed means the caller sees the exception rather than
+    a falsely "valid" result.
+    """
+    import src.core.validator.strategy_validator as strategy_validator
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("ValidationResult dependency failure")
+
+    monkeypatch.setattr(strategy_validator, "ValidationResult", boom)
+
+    config = FSMStrategyConfig(
+        strategy_id="test-011",
+        version="v1",
+        target_asset="BTC/KRW",
+        market="crypto",
+        exchange="Bithumb",
+        initial_state=FSMState.IDLE,
+        states=[FSMState.IDLE, FSMState.HOLDING],
+        transitions=[
+            {"from_state": FSMState.IDLE, "to_state": FSMState.HOLDING, "condition": "a"},
+        ],
+        author_agent="researcher-1",
+    )
+    with pytest.raises(RuntimeError, match="ValidationResult dependency failure"):
+        validate_strategy_config(config)
