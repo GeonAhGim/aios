@@ -42,7 +42,7 @@ from src.core.script.runtime import (
     broadcast,
     execute,
 )
-from tests.conftest import PerfBudget
+from tests._perf.relative_budget import RelativeBudget
 
 _RUNTIME_DIR = Path(__file__).resolve().parents[4] / "src" / "core" / "script" / "runtime"
 
@@ -300,29 +300,36 @@ def test_builtin_dispatch_exception_propagates_unmasked_and_leaves_no_residue() 
 
 
 @pytest.mark.perf
-def test_execution_latency_p95_within_backtest_budget_slice(perf_budget: PerfBudget) -> None:
+def test_execution_latency_p95_within_backtest_budget_slice() -> None:
     """ADR-2026-09-09-C Decision 1의 백테스트 예산(로컬 기준, 1개월 M1 1심볼
     3초) 중 인터프리터 1회 실행(스택 머신이 명령열을 한 번 훑는 것) 몫을
     하루치 단위(bar_count=1440, 1일치 1분봉)로 쪼개 250ms로 상한한다. 30개
-    let 체인을 20회 반복 실행해 p95로 잰다. 파싱·로우어링(DSL-3/DSL-7의
-    몫, 각자 성능 단언을 이미 잼)은 루프 밖에서 한 번만 수행해 이중으로
-    재지 않는다. task-7434: process_time 기반 perf_budget으로 측정한다
-    (coverage tracer 정지 포함)."""
+    let 체인을 반복 실행해 잰다. 파싱·로우어링(DSL-3/DSL-7의 몫, 각자 성능
+    단언을 이미 잼)은 루프 밖에서 한 번만 수행해 이중으로 재지 않는다.
+
+    task-9269: 절대 ms 예산(`PerfBudget`)은 CI 러너 클록 속도에 매여 있어
+    (`RelativeBudget` 모듈 docstring), 같은 `pytest_latency_serial` 단계의
+    `test_parser.py`가 이미 같은 부류로 반복 적색이었던 것을 `RelativeBudget`
+    으로 옮겨 해결했다(task-7631/task-8659/task-8851). 이 테스트도 같은
+    방식으로 옮긴다 — 호스트 속도와 무관하게 같은 프로세스 calibration 루프
+    대비 배수로 표현하므로 CI가 느려져도 ratio는 그대로다. max_ratio=2.7은
+    기존 절대 예산(250ms) / 이 저장소에서 실측한 calibration(~93.75ms)을
+    그대로 옮긴 값이다(task-8851과 동일 기법, n=9/calibration_n=7은
+    8-process 경합 재현에서도 안정적임을 확인)."""
     lines = [f"let v{i} = v{i - 1} * 1.0001 + 1 - 1" for i in range(1, 30)]
     source = "input close: series<float> = 0\nlet v0 = close\n" + "\n".join(lines)
     ir = lower_program(parse(source))
     bar_count = 1440
     close = Series.of_floats([float(i % 100) for i in range(bar_count)])
 
-    samples = perf_budget.samples(
-        lambda: execute(ir, bar_count=bar_count, inputs={"close": close}), n=20
+    RelativeBudget().assert_within(
+        lambda: execute(ir, bar_count=bar_count, inputs={"close": close}),
+        max_ratio=2.7,
+        mode="cpu",
+        n=9,
+        calibration_n=7,
+        label="30-let execute",
     )
-    cpu_values_ms = sorted(s.cpu_ms for s in samples)
-    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
-
-    budget_ms = 250.0
-    print(f"[DSL-8 execute] p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
-    assert p95_ms < budget_ms
 
 
 # ---- DEEPEN(task-2917): 게이트 적색 재현(빌트인 반환값 검사 무력화) ----

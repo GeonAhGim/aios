@@ -58,7 +58,7 @@ from src.core.script.ir import (
     verify_stack,
 )
 from src.core.script.typing.checker import ScriptTypeError, check_program
-from tests.conftest import PerfBudget
+from tests._perf.relative_budget import RelativeBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -334,15 +334,24 @@ def test_deeply_nested_unary_chain_fails_closed_under_low_recursion_limit() -> N
 
 
 @pytest.mark.perf
-def test_lowering_latency_p95_within_compile_budget_slice(perf_budget: PerfBudget) -> None:
+def test_lowering_latency_p95_within_compile_budget_slice() -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산(로컬 기준 300ms) 중
     로우어링(`_emit_expr` 트리 순회) 단계 몫을 40ms로 상한한다. `lower_program`은
     호출마다 `check_program`을 다시 돌려 환경 불일치를 fail-closed로 잡는데
     (모듈 docstring), 그 비용은 DSL-4 자체 성능 단언(test_checker.py)이 이미
     잰다 — 여기서는 이중으로 재지 않도록 env를 미리 한 번만 계산해 두고
-    `lower_expr`만 500개 표현식에 30회 반복해 p95로 로우어링 트리 순회
-    자체의 지연만 분리해서 잰다. task-7434: process_time 기반 perf_budget으로
-    측정한다(coverage tracer 정지 포함)."""
+    `lower_expr`만 500개 표현식에 반복해 로우어링 트리 순회 자체의 지연만
+    분리해서 잰다.
+
+    task-9269: 절대 ms 예산(`PerfBudget`)은 CI 러너 클록 속도에 매여 있어
+    (`RelativeBudget` 모듈 docstring), 같은 `pytest_latency_serial` 단계의
+    `test_parser.py`가 이미 같은 부류로 반복 적색이었던 것을 `RelativeBudget`
+    으로 옮겨 해결했다(task-7631/task-8659/task-8851). 이 테스트도 같은
+    방식으로 옮긴다 — 호스트 속도와 무관하게 같은 프로세스 calibration 루프
+    대비 배수로 표현하므로 CI가 느려져도 ratio는 그대로다. max_ratio=0.45는
+    기존 절대 예산(40ms) / 이 저장소에서 실측한 calibration(~93.75ms)을 그대로
+    옮긴 값이다(task-8851과 동일 기법, n=9/calibration_n=7은 8-process 경합
+    재현에서도 안정적임을 확인)."""
     lines = [f"let v{i} = ta.rsi(close[{i % 5}], length) + v{i - 1} * 2 - 1" for i in range(1, 500)]
     source = "input length: int = 14\ninput close: series<float> = 0\nlet v0 = close\n" + "\n".join(
         lines
@@ -356,13 +365,9 @@ def test_lowering_latency_p95_within_compile_budget_slice(perf_budget: PerfBudge
         for expr in exprs:
             lower_expr(expr, env)
 
-    samples = perf_budget.samples(_run_once, n=30)
-    cpu_values_ms = sorted(s.cpu_ms for s in samples)
-    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
-
-    budget_ms = 40.0
-    print(f"[DSL-7 lower] 500-expr p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
-    assert p95_ms < budget_ms
+    RelativeBudget().assert_within(
+        _run_once, max_ratio=0.45, mode="cpu", n=9, calibration_n=7, label="500-expr lower"
+    )
 
 
 # ---- DEEPEN(task-2915): 게이트 적색 재현(decl 경계 잔여값 가드) ----

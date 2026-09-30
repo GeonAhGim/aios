@@ -33,7 +33,7 @@ from src.core.script.runtime import (
     default_builtins,
     execute,
 )
-from tests.conftest import PerfBudget
+from tests._perf.relative_budget import RelativeBudget
 
 SITE = CallSite("math", "x", "float", 4)
 S = Series.of_floats([1.5, -2.5, None, 4.0])
@@ -235,32 +235,36 @@ def test_wired_through_interpreter_with_default_builtins() -> None:
 
 
 @pytest.mark.perf
-def test_series_builtin_call_latency_p95_within_backtest_budget_slice(
-    perf_budget: PerfBudget,
-) -> None:
+def test_series_builtin_call_latency_p95_within_backtest_budget_slice() -> None:
     """ADR-2026-09-09-C Decision 1의 백테스트 예산(로컬 기준, 1개월 M1 1심볼 3초)
     중 빌트인 호출 1회(하루치 bar_count=1440, 1일치 1분봉에 시리즈 인자를 브로드
     캐스트하는 `apply_elementwise` 경로) 몫을 5ms로 상한한다 — DSL-8 인터프리터
     실행 예산(250ms/30-let 체인, task-2917)에서 빌트인 호출 1개가 차지할 몫에
-    넉넉한 여유를 둔 수치다. 20회 반복 실행해 p95로 잰다. task-7434:
-    process_time 기반 perf_budget으로 측정한다(coverage tracer 정지 포함).
-    task-7673: Windows `GetProcessTimes` 해상도(15.625ms/64Hz)가 batch=4에서는
-    호출당 ~3.9ms의 양자화 오차를 남겨 5ms 예산과 거의 맞닿는다 — CI 부하가
-    조금만 높아도 우연히 한 틱 더 올라간 샘플이 p95를 예산 밖으로 밀어낸다.
-    batch=8로 오차를 ~2ms로 더 줄여(conftest.py의 PerfBudget.sample 주석 참고,
-    task-6774/task-7360과 동일 기법) 예산 대비 여유를 확보한다."""
+    넉넉한 여유를 둔 수치다.
+
+    task-9269: batch=4->8(task-7673)->16(task-9196)으로 두 차례 늘려도 CI가
+    한 단계씩 더 느려질 때마다 같은 증상(양자화 오차가 5ms 절대 예산에 맞닿음)이
+    재발했다 — 절대 ms 예산이 CI 러너 클록 속도에 근본적으로 매여 있기 때문
+    (`RelativeBudget` 모듈 docstring, task-7631/task-8659가 `test_parser.py`의
+    동일 부류를 이미 이 방식으로 고침). `RelativeBudget`으로 옮겨 같은 프로세스
+    calibration 루프 대비 배수로 표현한다 — 호스트가 2배 느려지면 op·calibration
+    둘 다 2배 느려져 ratio는 그대로다. batch=16은 그대로 유지(양자화 오차 완화,
+    `RelativeBudget`과 무관하게 여전히 필요). max_ratio=0.85는 기존 절대 예산
+    (16회분 80ms) / 이 저장소에서 실측한 calibration(~93.75ms)을 그대로 옮긴
+    값이다(task-8851과 동일 기법, n=9/calibration_n=7은 8-process 경합 재현에서도
+    안정적임을 확인)."""
     bar_count = 1440
     series = Series.of_floats([float(i % 97) - 48.0 for i in range(bar_count)])
     site = CallSite("math", "abs", "series<float>", bar_count)
     fn = MATH_BUILTINS[("math", "abs")]
 
-    samples = perf_budget.samples(lambda: fn((series,), site), n=20, batch=16)
-    cpu_values_ms = sorted(s.cpu_ms for s in samples)
-    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    def _run_batch() -> None:
+        for _ in range(16):
+            fn((series,), site)
 
-    budget_ms = 5.0
-    print(f"[math.abs] bar_count={bar_count} p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
-    assert p95_ms < budget_ms
+    RelativeBudget().assert_within(
+        _run_batch, max_ratio=0.85, mode="cpu", n=9, calibration_n=7, label="math.abs x16"
+    )
 
 
 # ---- DEEPEN(task-2920): 게이트 적색 재현(bool 도메인 거부 무력화) ----
