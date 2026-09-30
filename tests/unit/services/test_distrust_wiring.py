@@ -5,6 +5,7 @@ migration 9744695fa220(data_distrust_state)가 아직 origin/main에 없어
 대신 fake pool로 UPSERT에 넘기는 값과 gather 동시성만 검증한다. 실 DB
 통합테스트는 마이그레이션 적용 후 별도 리프에서 추가한다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -164,7 +165,55 @@ async def test_restore_distrust_state_restores_each_row_into_monitor():
     # 복원된 타이머가 exit_sustain_seconds(60s)를 이미 넘겼으므로 다음
     # check()에서 바로 NORMAL로 빠져나가야 한다(90초 전부터 낮은 편차였다고
     # 복원했으므로).
-    level = await monitor.check(
-        "BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], []
-    )
+    level = await monitor.check("BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], [])
     assert level == DataDistrustLevel.NORMAL
+
+
+async def test_restore_distrust_state_rejects_unknown_level_value():
+    """DB 행에 DataDistrustLevel enum에 없는 값이 들어있으면(스키마 드리프트,
+    수동 DML 오염 등 불변식 위반) 조용히 무시하거나 임의 기본값으로 복원하지
+    않고 ValueError로 즉시 실패해야 한다 — fail-closed."""
+    since = datetime.now(timezone.utc) - timedelta(seconds=10)
+    rows = [{"symbol": "BTC/USDT", "level": "NOT_A_REAL_LEVEL", "since": since}]
+    pool = _FakePool(fetch_rows=rows)
+    monitor = DataDistrustMonitor()
+
+    with pytest.raises(ValueError):
+        await restore_distrust_state(pool, monitor)
+
+
+async def test_restore_distrust_state_rejects_malformed_row_missing_since():
+    """행에 `since` 컬럼이 없는 경우(마이그레이션 불일치 등) KeyError를 그대로
+    전파해야 한다 — 타임스탬프를 임의로 0/now로 대체해 잘못된 경과시간을
+    조용히 복원하면 exit_sustain_seconds 판정이 틀어진다."""
+    rows = [{"symbol": "BTC/USDT", "level": "NORMAL"}]  # since 누락
+    pool = _FakePool(fetch_rows=rows)
+    monitor = DataDistrustMonitor()
+
+    with pytest.raises(KeyError):
+        await restore_distrust_state(pool, monitor)
+
+
+class _FailingExecuteConn(_FakeConn):
+    async def execute(self, query: str, *args) -> None:
+        raise ConnectionError("DB 커넥션 끊김(장애 주입)")
+
+
+async def test_check_and_persist_propagates_db_write_failure():
+    """실패주입: UPSERT 도중 DB 커넥션이 끊기면 예외를 삼켜 레벨만 반환하고
+    끝내는 대신(다음 틱이 상태 불일치를 못 알아챔) 그대로 전파해야 한다."""
+    pool = _FakePool()
+    pool.conn = _FailingExecuteConn()
+    monitor = DataDistrustMonitor()
+    providers = [_FakeProvider(_ticker("100.1"))]
+
+    with pytest.raises(ConnectionError):
+        await check_and_persist_distrust(
+            pool,
+            monitor,
+            providers,
+            exchange="bitget",
+            symbol="BTC/USDT",
+            primary=_ticker("100"),
+            candles=[],
+        )
