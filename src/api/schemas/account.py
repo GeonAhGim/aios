@@ -42,9 +42,9 @@ class WhitelistEntryRequest(BaseModel):
 
 
 class WhitelistEntryResponse(WhitelistEntry):
-    id: int
-    exchange: str
-    destination_address: str
+    # id/exchange/destination_address are identical to the parent WhitelistEntry
+    # fields; only label is redeclared here to make it required (the parent
+    # defaults it to None for the panic-prompt use case).
     label: str | None
 
 
