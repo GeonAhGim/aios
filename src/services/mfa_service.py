@@ -1,22 +1,24 @@
-"""11.3 — MFA(TOTP) 설정 (필수 게이트).
+"""11.3 — MFA (TOTP) configuration (mandatory gate).
 
-Spec: 기능설계문서_v1.20.md#FD-11.2, 13_multi_tenancy_auth_v1.4.md#§13.2
+Spec: functional_design_v1.20.md#FD-11.2, 13_multi_tenancy_auth_v1.4.md#§13.2
 
-정책문서 §4.10 교차테넌트 리스크3 — MFA는 사용자 레벨에서도 예외 없이
-강제한다(자율화 대상은 '승인자 수'이지 '인증 강도'가 아니다). TOTP
-secret은 절대 평문 저장하지 않고 AES-256-GCM으로 암호화한다(07번 §7.3
-CREDENTIAL_ENCRYPTION_KEY 재사용, src/core/security/encryption.py 공용
-유틸).
+Policy document §4.10 cross-tenant risk 3 — MFA is enforced at user level
+without exception (the autonomy target is 'approver count', not 'auth
+strength'). TOTP secret is never stored in plaintext; it is encrypted with
+AES-256-GCM (reuse CREDENTIAL_ENCRYPTION_KEY from 07 §7.3, via the shared
+utility at src/core/security/encryption.py).
 
-편차(해석): FD-11.2 원문은 "코드 검증 → mfa_secret 암호화 저장" 순서로
-서술하지만, MfaVerifyRequest(15/16번 문서)에는 secret을 다시 실어보낼
-필드가 없다 — 즉 verify 시점에 서버가 secret을 어디선가 이미 기억하고
-있어야 한다. 여기서는 setup() 시점에 암호화된 secret을 즉시
-users.mfa_secret에 저장하되 mfa_enabled=false로 "검증 대기" 상태를
-표현하고, verify()가 성공하면 mfa_enabled=true로 확정, 실패하면
-mfa_secret을 NULL로 되돌려 폐기한다(반쯤 활성화된 상태로 남기지
-않는다는 FD-11.2 예외상황 원칙은 그대로 지킨다).
+Deviation (interpretation): FD-11.2 describes the order as "verify code
+→ encrypt and store mfa_secret", but MfaVerifyRequest (docs 15/16) has
+no field to resend the secret — meaning the server must already remember
+the secret from somewhere at verify time. Here we encrypt and store the
+secret immediately at setup() into users.mfa_secret with mfa_enabled=false
+to represent a "pending verification" state. verify() confirms with
+mfa_enabled=true on success, or nulls out mfa_secret to destroy it on
+failure (we still honour the FD-11.2 exception-principle of never leaving
+a half-activated state).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -34,13 +36,14 @@ ISSUER_NAME = "AIOS"
 
 
 class MfaError(Exception):
-    """FD-11.2 실패 — 검증 코드 불일치 등. 라우터가 400으로 변환."""
+    """FD-11.2 failure — verification code mismatch, etc. Router converts to 400."""
 
 
 class MfaReauthenticationRequiredError(Exception):
-    """이미 활성화된 MFA를 비밀번호 재인증 없이 재설정하려는 시도(레드팀 감사
-    #11) — AUTH_MFA_REQUIRED(403)로 매핑. MfaError와 사유가 달라(코드
-    불일치가 아니라 재인증 누락) 독립 클래스로 둔다."""
+    """Attempt to reset already-enabled MFA without password re-authentication
+    (Red Team audit #11) — mapped to AUTH_MFA_REQUIRED (403). Placed in an
+    independent class because the reason differs from MfaError (missing
+    re-authentication, not code mismatch)."""
 
 
 class MfaSetupResult(BaseModel):
@@ -58,9 +61,9 @@ class MfaService:
     ) -> None:
         self._pool = pool
         self._encryption_key = encryption_key
-        # #13 재사용 방지 테스트가 실제로 30초를 기다리지 않고도 "다음
-        # 구간"을 결정적으로 재현할 수 있도록 시계를 주입 가능하게 둔다
-        # (watchdog.py의 clock 주입과 동일 원칙, 운영 동작은 기본값 그대로).
+        # Allow #13 reuse-prevention tests to deterministically reproduce
+        # "next interval" without actually waiting 30 seconds
+        # (same principle as clock injection in watchdog.py; runtime uses default).
         self._now = now
 
     async def setup(self, user_id: UUID, email: str) -> MfaSetupResult:
@@ -76,11 +79,14 @@ class MfaService:
                 user_id,
                 encrypted_secret,
             )
-            # secret/provisioning_uri은 여기 절대 남기지 않는다 — 설정을
-            # 시도했다는 사실 자체만 기록.
+            # Never emit secret/provisioning_uri here — record only that a
+            # setup attempt occurred.
             await record_audit_log(
-                conn, actor_agent=str(user_id), action_type="mfa.setup",
-                user_id=user_id, decision_data={},
+                conn,
+                actor_agent=str(user_id),
+                action_type="mfa.setup",
+                user_id=user_id,
+                decision_data={},
             )
 
         return MfaSetupResult(secret=secret, provisioning_uri=provisioning_uri)
@@ -95,20 +101,18 @@ class MfaService:
 
             valid = False
             replayed = False
-            if encrypted_secret is not None and self._totp_code_valid(
-                encrypted_secret, totp_code
-            ):
-                # 레드팀 감사(#13) — 코드 자체가 유효해도 이미 한 번 성공한
-                # 타임코드와 같으면(재사용) 거부한다.
+            if encrypted_secret is not None and self._totp_code_valid(encrypted_secret, totp_code):
+                # Red Team audit (#13) — reject if the timecode was already
+                # used once (replay attack prevention).
                 timecode = self._current_timecode(encrypted_secret)
                 valid = await self._consume_timecode(conn, user_id, timecode)
                 replayed = not valid
 
             if not valid:
                 if not already_enabled:
-                    # 레드팀 감사(#11) — 최초 설정(mfa_enabled=false, 검증
-                    # 대기 중) 실패만 secret을 폐기한다("반쯤 활성화된 상태로
-                    # 남기지 않는다"는 FD-11.2 원칙은 이 경우에만 적용된다.
+                    # Red Team audit (#11) — discard secret only on first-setup
+                    # failure (mfa_enabled=false, pending verification).
+                    # ("never leave half-activated" FD-11.2 principle applies here.)
                     await conn.execute(
                         "UPDATE users SET mfa_secret = NULL, mfa_enabled = false "
                         "WHERE user_id = $1",
@@ -116,40 +120,44 @@ class MfaService:
                     )
                     reset_reason = "replayed" if replayed else "invalid_code"
                     await record_audit_log(
-                        conn, actor_agent=str(user_id), action_type="mfa.reset",
+                        conn,
+                        actor_agent=str(user_id),
+                        action_type="mfa.reset",
                         user_id=user_id,
                         decision_data={"reason": reset_reason, "stage": "initial_setup"},
                     )
                 else:
-                    # already_enabled=true일 때는 행을 절대 건드리지 않는다 —
-                    # 탈취한 Bearer 토큰만으로(비밀번호 없이) 아무 틀린 코드나
-                    # 보내 이미 켜진 MFA를 원격으로 영구 비활성화시킬 수 있던
-                    # 인증 우회 구멍을 막는다.
+                    # Never touch the row when already_enabled=true — closes
+                    # an auth-bypass hole where a stolen Bearer token (without
+                    # password) could send any wrong code and permanently
+                    # disable already-enabled MFA remotely.
                     pass
                 await record_audit_log(
-                    conn, actor_agent=str(user_id), action_type="mfa.verify_failed",
+                    conn,
+                    actor_agent=str(user_id),
+                    action_type="mfa.verify_failed",
                     user_id=user_id,
                     decision_data={"reason": "replayed" if replayed else "invalid_code"},
                 )
-                # 이 엔드포인트(/auth/mfa/verify)는 이미 Bearer 토큰으로 인증된
-                # 사용자만 호출하므로(#12의 로그인 타이밍 사이드채널과 무관),
-                # "재사용"과 "코드 자체가 틀림"을 구분해줘도 계정 존재 여부 등이
-                # 새어나가지 않는다 — 오히려 구분 없이 뭉뚱그리면 사용자가 (특히
-                # 방금 전송이 실패해 같은 코드로 재시도했을 때) 정상 코드인데도
-                # "코드가 틀렸다"고 오인해 2단계 인증이 고장난 것처럼 보인다.
+                # This endpoint (/auth/mfa/verify) is callable only by users
+                # already authenticated via Bearer token (unrelated to #12
+                # login-timing side-channel), so distinguishing "replay" from
+                # "wrong code" leaks no account-existence info. Blending them
+                # would instead make users think 2FA is broken when they
+                # retry with the same code after a failed delivery.
                 if replayed:
                     raise MfaError(
-                        "이미 사용한 코드입니다. 인증 앱에 새로 표시되는 코드로 "
-                        "다시 시도해주세요."
+                        "이미 사용한 코드입니다. 인증 앱에 새로 표시되는 코드로 다시 시도해주세요."
                     )
                 raise MfaError("인증 코드가 올바르지 않습니다.")
 
-            await conn.execute(
-                "UPDATE users SET mfa_enabled = true WHERE user_id = $1", user_id
-            )
+            await conn.execute("UPDATE users SET mfa_enabled = true WHERE user_id = $1", user_id)
             await record_audit_log(
-                conn, actor_agent=str(user_id), action_type="mfa.verify_success",
-                user_id=user_id, decision_data={"already_enabled": already_enabled},
+                conn,
+                actor_agent=str(user_id),
+                action_type="mfa.verify_success",
+                user_id=user_id,
+                decision_data={"already_enabled": already_enabled},
             )
 
     def _totp_code_valid(self, encrypted_secret: str, totp_code: str) -> bool:
@@ -163,9 +171,9 @@ class MfaService:
     async def _consume_timecode(
         self, conn: asyncpg.Connection, user_id: UUID, timecode: int
     ) -> bool:
-        """레드팀 감사(docs/RED_TEAM_FINDINGS.md #13) — 이 타임코드가 이미
-        사용된 적이 있으면(재사용) False. 원자적 조건부 UPDATE라 동시에
-        같은 코드로 두 번 요청해도 하나만 통과한다."""
+        """Red Team audit (docs/RED_TEAM_FINDINGS.md #13) — returns False if
+        this timecode has already been used (replay). Atomic conditional
+        UPDATE ensures only one concurrent request with the same code passes."""
         row = await conn.fetchrow(
             "UPDATE users SET mfa_last_used_timecode = $2 "
             "WHERE user_id = $1 "
@@ -179,8 +187,8 @@ class MfaService:
     async def verify_totp_for_login(
         self, user_id: UUID, encrypted_secret: str, totp_code: str
     ) -> bool:
-        """AuthService.authenticate()의 verify_totp DI 콜백으로 그대로 주입되는
-        진입점."""
+        """Entry point injected as the verify_totp DI callback in
+        AuthService.authenticate()."""
         if not self._totp_code_valid(encrypted_secret, totp_code):
             return False
         timecode = self._current_timecode(encrypted_secret)
