@@ -18,6 +18,7 @@ If preconditions for determination (mixed request timeframe/axis, naive
 datetimes, reversed interval) are violated, do NOT return "no gaps" — surface
 as `IndeterminateCoverageError` with fail-closed semantics.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -61,17 +62,19 @@ def _validate_axis(spans: Sequence[CoverageSpan], tf: Timeframe, calendar: Venue
     venue matches `calendar` (fail-closed)."""
     if any(s.timeframe != tf for s in spans):
         raise IndeterminateCoverageError(
-            f"spans에 요청 timeframe({tf.value})과 다른 timeframe이 섞였다(fail-closed)."
+            f"spans contains mixed timeframes — request {tf.value} differs "
+            "from span timeframes (fail-closed)."
         )
     if any(s.venue.value != calendar.venue for s in spans):
         raise IndeterminateCoverageError(
-            f"spans에 calendar venue({calendar.venue})와 다른 venue가 섞였다(fail-closed)."
+            f"spans contains mixed venues — calendar venue {calendar.venue} "
+            "differs from span venues (fail-closed)."
         )
     axes = {(s.instrument_id, s.asset_class, s.quality_grade) for s in spans}
     if len(axes) > 1:
         raise IndeterminateCoverageError(
-            f"spans에 서로 다른 (instrument_id, asset_class, quality_grade) 축: "
-            f"{sorted(axes)}(fail-closed)."
+            f"spans contain mixed (instrument_id, asset_class, quality_grade) axes: "
+            f"{sorted(axes)} (fail-closed)."
         )
 
 
@@ -108,8 +111,8 @@ def _intersect_windows(
 
 def _coalesce(points: Sequence[datetime], step: timedelta, reason: GapReason) -> list[CoverageGap]:
     """Merge consecutive missing time-points into continuous `CoverageGap`
-    segments (fail-closed)."""
-    """연속한(간격이 정확히 `step`인) open_time들을 하나의 `CoverageGap`으로 묶는다."""
+    segments (fail-closed). Combines sequential open_time entries with gaps
+    exactly equal to `step` into a single segment."""
     if not points:
         return []
     ordered = sorted(points)
@@ -141,11 +144,12 @@ def plan_fetch(
     deterministically sorted gap list by `start_at` (input order irrelevant)."""
     if range_start.tzinfo is None or range_end.tzinfo is None:
         raise IndeterminateCoverageError(
-            "range_start/range_end는 tz-aware datetime이어야 한다(fail-closed)."
+            "range_start/range_end must be tz-aware datetimes (fail-closed)."
         )
     if range_end < range_start:
         raise IndeterminateCoverageError(
-            f"range_start > range_end: {range_start!r} > {range_end!r}(fail-closed 구간 역전)."
+            f"range_start > range_end: {range_start!r} > {range_end!r} "
+            "(fail-closed: interval reversed)."
         )
     _validate_axis(spans, tf, calendar)
     sessions = _sessions_in_range(calendar, range_start, range_end)
