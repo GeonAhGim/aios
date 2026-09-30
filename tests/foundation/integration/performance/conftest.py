@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -29,7 +30,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
@@ -69,7 +70,8 @@ async def create_paper_execution(
             allocated_capital,
             started_at,
         )
-    return row["id"]
+    assert row is not None
+    return int(row["id"])
 
 
 async def insert_filled_order(
