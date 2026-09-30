@@ -729,6 +729,37 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/config design is sound and already fixed; the remaining
     defect is fleet code, not this repo.
 
+31. `consistency` 24h 6-repeat systemic leaf (task-9500) reconfirms #22 with the escalation's own
+    `auto_actions` log now showing the mechanism directly. `esc-ci-consistency.json` marked itself
+    `status: "resolved"` at `2026-09-30T00:53:50Z` (`resolved_sha: "12e7bd738c39..."`) after
+    task-9011 landed, yet kept polling every ~15-20 min for the next 9+ hours and spawned two more
+    systemic leaves (task-9149 at 03:13Z, task-9301 at 08:27Z) plus two more individual fix leaves
+    (task-9281 at 06:17Z, task-9460 at 09:42Z) off the *same* `detail_hash: "50292dca66ac"` and the
+    *same* `bisect_culprit 4d5ebed5b621...` — the identical docstring-only commit (task-4424,
+    Korean->English translation) #21/#22 already named as unrelated to this gate's logic. Between
+    task-9011 and this leaf, task-9122 (commit `693fa98a`) found and fixed the one remaining real
+    gap #22 missed: `check_port_protocol_implementations` in `scripts/consistency/wiring.py` still
+    ran `ast.walk()` twice per adapter file (once for the class-presence check, once for the
+    method-presence check) instead of reusing `common.py`'s cached `_walked_nodes(path)` — merged
+    to a single walk, plus a new `tests/unit/scripts/test_check_consistency_perf.py` with a
+    structural AST-count guard, a failure-injection test, and a numeric perf budget so the same gap
+    can't silently reopen. task-9149/task-9301/task-9281/task-9460 each independently reverified
+    both fixes are in place and found nothing further to change (task-9301's note explicitly says
+    of task-9122: "회귀 방지용 구조 가드 테스트까지 추가함... 스크립트/기준선에 남은 설계 결함
+    없음"). Reconfirmed on this worktree: `python scripts/check_consistency.py` finishes in ~28s
+    (well under the 120s budget) and matches `consistency-baseline.json` exactly on all 13 metrics.
+    This is the same fleet-code defect as #17-#23/#25/#27 (`pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule not checking `status: "resolved"` / an already-landed systemic fix before
+    re-polling and spawning further leaves off a stale escalation snapshot), out of a repo worker's
+    edit scope (§4) — the same ops fix already specified in #23/#25 (skip repeat/spawn once
+    `status == "resolved"` and the current-HEAD check is confirmed green) applies here too. Before
+    working a new `consistency` leaf: run `python scripts/check_consistency.py` locally first — if
+    `OK` and baseline-matching, and the escalation's `bisect_culprit` is `4d5ebed5` (or the note of
+    an already-closed leaf matches verbatim), close as noop citing task-9122, task-9301/task-9460,
+    and this entry rather than re-diagnosing. No baseline/threshold relief made (DECISION_GUIDELINES
+    B-2) — script/baseline design is sound (including task-9122's fix); the remaining defect is
+    fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
