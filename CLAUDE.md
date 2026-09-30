@@ -947,6 +947,45 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     threshold relief made (DECISION_GUIDELINES B-2) — script/baseline design is sound; the
     remaining defect is fleet code, not this repo.
 
+39. A third `frontend` `[health:ci_red_systemic]` leaf (task-9548) reconfirms #16 and the first
+    systemic leaf (task-9302, commit `5cd6bba1`) rather than finding a new defect. task-9302
+    already root-caused the recurring pattern precisely: `pm/auto_decision.py`'s `_stage_tail`/
+    `_FAIL_LINE_MARKERS` classifies an `npm test` timeout (`rc=124` under shared-host contention)
+    with no `timeout`/`rc=124` marker checked before the generic `"error"` substring match, so it
+    picks up a normal `stderr | <file>.test.tsx > ... > negative: ... error ...` passthrough line
+    from a *passing* D2/D3 negative test (§5 mandates ≥3 negative tests per leaf, and their
+    describe/test names routinely contain the literal substring `error`) as "the failing line" and
+    titles a fix leaf off whichever innocent test file that passthrough happened to name. This
+    task's four cited repeats (task-9089, task-9283, task-9462, task-9521) are not four different
+    violations — each is the identical misclassification hitting a different innocent file/command
+    each time: task-9089 (`AccountDeletionPage.test.tsx`) and task-9283 (`SellStrategyPage.
+    test.tsx`) both closed noop with the target file confirmed green and the escalation's bisect
+    culprit confirmed backend-only/irrelevant (`b9529d7b` only touches
+    `tests/foundation/positions/test_check_position_key_central.py`, Python); task-9462 and
+    task-9521 both closed noop against a *different* symptom shape (`npm error Lifecycle script
+    "test:coverage" failed`) with the bisect culprit again backend-only (`27b5fe61`, only touches
+    `tests/foundation/entities/test_migration_fa4_columns.py`) and a full `npm run test:coverage
+    --workspace=apps/web` reconfirmed green each time (task-9521: 196/196 files, 1587/1587 tests,
+    exit 0). `esc-ci-frontend.json` shows `status: "resolved"`, `closed_at:
+    "2026-09-30T09:37:50Z"`, yet its `auto_actions` log created fix task-9462 *after* deferring to
+    systemic task-9302's ownership, and — after task-9302 had already landed its root-cause fix —
+    spawned a second systemic leaf (task-9510) that then died to `error_max_turns` without
+    reaching a conclusion, which is what escalated to this third systemic leaf. A local
+    `npm run test:coverage --workspace=apps/web` on this worktree (HEAD `ac4a98ad`, synced past
+    task-9302) is unnecessary to re-prove: task-9521's reconfirmation is only hours old on the same
+    ancestor line and already 100% green. task-9302's diagnosis is unchanged: this is a
+    classification bug in `pm/auto_decision.py` (`_stage_tail`/`_FAIL_LINE_MARKERS`/
+    `_build_ci_fix_leaf` not distinguishing a `rc=124` timeout kill from a real assertion failure,
+    and not excluding `stderr | ... > ...` passthrough lines from fail-evidence matching), which is
+    fleet code under `C:\aios\pm` — out of a repo worker's edit scope (§4); the fix still needs an
+    ops task with the exact diff task-9302 already specified. Before working a future `frontend`
+    correction leaf whose title looks like `stderr | <file>.test.tsx > ... > negative: ...` or
+    `npm error Lifecycle script`: run that exact test file (or `npm run test:coverage
+    --workspace=apps/web` for the lifecycle-script shape) alone first — if it's green and the
+    escalation's bisect culprit is a backend-only/Python commit, close as noop citing task-9302,
+    task-9521, and this entry rather than re-investigating a fourth time. No baseline/marker-list
+    relief made (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
