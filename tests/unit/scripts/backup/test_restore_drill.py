@@ -7,6 +7,7 @@ DoD: 실패 주입 시(각 단계별) ok=False가 나오고, 성공 경로에서
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import shutil
@@ -80,7 +81,7 @@ def _common_kwargs(tmp_path: Path, **overrides):
         which=lambda _b: "/usr/bin/" + _b,
         find_backup=lambda _d: _fake_backup_dir(tmp_path),
         sleep=lambda s: None,
-        clock=iter([0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).__next__,
+        clock=itertools.count(0.0, 1.0).__next__,
         pg_ctl_bin="pg_ctl",
         psql_bin="psql",
         python_bin="python",
@@ -632,6 +633,153 @@ def test_copy_backup_tree_windows_timeout_returns_diagnostic_instead_of_hanging(
 
     assert ok is False
     assert detail == "timeout 5s"
+
+
+def test_extract_tar_backup_fails_when_tar_binary_missing(tmp_path: Path, monkeypatch):
+    """esc-health-backup_drill_failed: tar가 PATH에 없는 환경에서는 추출 시도 전에
+    진단 가능한 실패로 끝나야 한다(무기한 대기/모호한 스택트레이스 대신)."""
+    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: None)
+
+    ok, detail = restore_drill._extract_tar_backup(tmp_path / "src", tmp_path / "dst", 30.0)
+
+    assert ok is False
+    assert "tar" in detail
+
+
+def test_extract_tar_backup_fails_when_base_tar_missing(tmp_path: Path, monkeypatch):
+    """base.tar(.gz)가 없는 디렉터리(예: 이미 손상된 백업)를 조용히 빈 복구본으로
+    넘기지 않고 즉시 실패시킨다."""
+    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    src = tmp_path / "src"
+    src.mkdir()
+
+    ok, detail = restore_drill._extract_tar_backup(src, tmp_path / "dst", 30.0)
+
+    assert ok is False
+    assert "base.tar" in detail
+
+
+def test_extract_tar_backup_extracts_base_and_wal_tar(tmp_path: Path, monkeypatch):
+    """base.tar.gz + pg_wal.tar.gz 둘 다 있으면 각각 dst/, dst/pg_wal/로 풀린다
+    (-Ft -z pg_basebackup 산출물 레이아웃과 일치해야 restore가 정상 기동한다)."""
+    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "base.tar.gz").write_bytes(b"fake-tar")
+    (src / "pg_wal.tar.gz").write_bytes(b"fake-wal-tar")
+    dst = tmp_path / "dst"
+
+    calls = []
+
+    def fake_run(cmd, stdout, stderr, timeout, check):
+        calls.append(cmd)
+
+        class _FakeCompleted:
+            returncode = 0
+
+        return _FakeCompleted()
+
+    monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
+
+    ok, detail = restore_drill._extract_tar_backup(src, dst, 30.0)
+
+    assert ok is True
+    assert detail == str(dst)
+    assert len(calls) == 2
+    assert calls[0][:2] == ["/usr/bin/tar", "-xf"]
+    assert str(src / "base.tar.gz") in calls[0]
+    assert str(dst) in calls[0]
+    assert str(src / "pg_wal.tar.gz") in calls[1]
+    assert str(dst / "pg_wal") in calls[1]
+
+
+def test_extract_tar_backup_reports_extraction_failure(tmp_path: Path, monkeypatch):
+    """tar 추출이 0이 아닌 코드로 끝나면(손상된 아카이브 등) 실패로 보고하고 뒤 단계로
+    넘어가지 않는다."""
+    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "base.tar").write_bytes(b"corrupt")
+
+    def fake_run(cmd, stdout, stderr, timeout, check):
+        class _FakeCompleted:
+            returncode = 2
+
+        return _FakeCompleted()
+
+    monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
+
+    ok, detail = restore_drill._extract_tar_backup(src, tmp_path / "dst", 30.0)
+
+    assert ok is False
+    assert "rc=2" in detail
+
+
+def test_extract_tar_backup_timeout_returns_diagnostic(tmp_path: Path, monkeypatch):
+    """추출 단계도 복사 단계와 동일하게 timeout이 있어야 한다 -- 무기한 대기가
+    esc-health-backup_drill_failed의 근본 실패 패턴이었다."""
+    monkeypatch.setattr(restore_drill.shutil, "which", lambda _b: "/usr/bin/tar")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "base.tar.gz").write_bytes(b"fake-tar")
+
+    def fake_run(cmd, stdout, stderr, timeout, check):
+        raise restore_drill.subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(restore_drill.subprocess, "run", fake_run)
+
+    ok, detail = restore_drill._extract_tar_backup(src, tmp_path / "dst", 5.0)
+
+    assert ok is False
+    assert "timeout 5s" in detail
+
+
+def test_restore_backup_files_dispatches_to_tar_extraction_when_base_tar_present(
+    tmp_path: Path, monkeypatch
+):
+    """run_drill()이 새 -Ft(tar) 포맷 백업을 만나면 robocopy/copytree가 아니라
+    tar 추출 경로로 간다(esc-health-backup_drill_failed 근본 수정: base_backup.py가
+    -Fp에서 -Ft -z로 바뀌었으므로 복구 쪽도 같이 바뀌어야 한다)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "base.tar.gz").write_bytes(b"fake-tar")
+
+    called = {}
+
+    def fake_extract(s, d, t):
+        called["args"] = (s, d, t)
+        return True, str(d)
+
+    monkeypatch.setattr(restore_drill, "_extract_tar_backup", fake_extract)
+
+    ok, detail = restore_drill._restore_backup_files(src, tmp_path / "dst", 30.0)
+
+    assert ok is True
+    assert called["args"][0] == src
+
+
+def test_restore_backup_files_falls_back_to_copytree_for_plain_format_backup(
+    tmp_path: Path, monkeypatch
+):
+    """디스크에 남아있는 과거 -Fp(plain) 백업(기존 로직 대상)은 여전히
+    _copy_backup_tree로 복구된다 -- tar 포맷으로 전환됐다고 예전 백업이 못 쓰게 되면
+    안 된다(하위 호환)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "PG_VERSION").write_text("16", encoding="utf-8")
+
+    called = {}
+
+    def fake_copytree(s, d, t):
+        called["args"] = (s, d, t)
+        return True, str(d)
+
+    monkeypatch.setattr(restore_drill, "_copy_backup_tree", fake_copytree)
+
+    ok, detail = restore_drill._restore_backup_files(src, tmp_path / "dst", 30.0)
+
+    assert ok is True
+    assert called["args"][0] == src
 
 
 def test_run_drill_fails_fast_when_copy_tree_fails(tmp_path: Path):

@@ -105,7 +105,15 @@ def run_base_backup(
         *pg_conn_args(dsn),
         "-D",
         str(target),
-        "-Fp",
+        # esc-health-backup_drill_failed(2026-09-29 조사): 이 클러스터에 누적된 고아
+        # aios_test_* DB가 474개(base/ 아래 오브젝트 디렉터리당 ~1,000개 파일, 총
+        # 47만개+)에 달해 -Fp(파일당 개별 복사)가 파일 수 자체로 병목이었다 — 같은
+        # PC에서 이미 확인된 패턴(restore_drill._copy_backup_tree의 robocopy 전환 사유,
+        # 110,830개 파일 사례)과 동일 계열. -Ft(tar)+압축으로 파일 수를 base.tar(.gz)
+        # 소수 개로 접어 pg_basebackup 자체의 실제 소요를 줄인다(타임아웃 상향이 아니라
+        # 원인 제거 — B-2).
+        "-Ft",
+        "-z",
         "-Xs",
         "-P",
         "-l",
@@ -129,6 +137,7 @@ def run_base_backup(
         "returncode": rc,
         "dest": str(target),
         "label": backup_label,
+        "format": "tar-gzip",
         "tail": tail,
     }
     payload = json.dumps(manifest, ensure_ascii=False, indent=2)

@@ -154,6 +154,61 @@ def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
+    """esc-health-backup_drill_failed 근본 원인(2026-09-29 조사): 이 클러스터가 쌓은 고아
+    aios_test_* DB 474개가 base/ 아래 오브젝트 디렉터리당 파일 ~1,000개씩, 총 47만개+를
+    만들어 -Fp(파일별 복사) pg_basebackup 자체가 nightly 1200s 예산을 다 태웠다(steps={}로
+    아무 단계도 못 남기고 죽음 -- copy 단계 이전, pg_basebackup 자체가 병목). base_backup.py를
+    -Ft(+gzip)로 바꿔 base.tar(.gz) 1~2개 파일로 접었으니, 여기서는 그걸 풀기만 한다(진짜
+    "불필요 데이터 정리"가 아니라 파일 수 자체를 줄이는 정정 -- 타임아웃 상향 금지 B-2)."""
+    tar_bin = shutil.which("tar")
+    if tar_bin is None:
+        return False, "tar 실행 파일을 찾을 수 없다(Windows 10+/bsdtar 또는 GNU tar 필요)"
+    base_tar = next((p for p in (src / "base.tar.gz", src / "base.tar") if p.exists()), None)
+    if base_tar is None:
+        return False, f"{src}에 base.tar(.gz)가 없다"
+
+    import tempfile
+
+    def _run_tar(cmd: list[str]) -> tuple[int, str]:
+        try:
+            with tempfile.TemporaryFile(mode="w+b") as out:
+                try:
+                    r = subprocess.run(
+                        cmd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, check=False
+                    )
+                except subprocess.TimeoutExpired:
+                    return 124, f"timeout {timeout:.0f}s"
+                out.seek(0)
+                return r.returncode, out.read().decode("utf-8", errors="replace")[-2000:]
+        except OSError as exc:
+            return 1, f"{type(exc).__name__}: {exc}"
+
+    dst.mkdir(parents=True, exist_ok=True)
+    rc, tail = _run_tar([tar_bin, "-xf", str(base_tar), "-C", str(dst)])
+    if rc != 0:
+        return False, f"base.tar 추출 실패(rc={rc}): {tail}"
+
+    wal_tar = next((p for p in (src / "pg_wal.tar.gz", src / "pg_wal.tar") if p.exists()), None)
+    if wal_tar is not None:
+        wal_dir = dst / "pg_wal"
+        wal_dir.mkdir(parents=True, exist_ok=True)
+        rc, tail = _run_tar([tar_bin, "-xf", str(wal_tar), "-C", str(wal_dir)])
+        if rc != 0:
+            return False, f"pg_wal.tar 추출 실패(rc={rc}): {tail}"
+
+    return True, str(dst)
+
+
+def _restore_backup_files(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
+    """pg_basebackup 산출물이 tar 포맷(-Ft, base.tar[.gz])이면 추출하고, 예전 plain 포맷
+    (-Fp, 디렉터리 통째)이면 기존 robocopy/copytree 경로를 그대로 쓴다 -- 디스크에 남아있는
+    과거 plain 백업과도 호환된다."""
+    if (src / "base.tar.gz").exists() or (src / "base.tar").exists():
+        return _extract_tar_backup(src, dst, timeout)
+    return _copy_backup_tree(src, dst, timeout)
+
+
 def _tail_lines(text: str, n: int) -> str:
     return "\n".join(text.splitlines()[-n:])
 
@@ -280,7 +335,7 @@ def run_drill(
     process_start_timeout: float = 30.0,
     process_start_poll_interval: float = 1.0,
     last_failed_restore_dir: Path = LAST_FAILED_RESTORE_DIR,
-    copy_tree: Callable[[Path, Path, float], tuple[bool, str]] = _copy_backup_tree,
+    copy_tree: Callable[[Path, Path, float], tuple[bool, str]] = _restore_backup_files,
     copy_timeout: float = 300.0,
 ) -> dict:
     """복구 리허설 1회. 어느 단계에서 멈추든(백업 없음/기동 실패/복구 타임아웃/replay_verify
@@ -302,8 +357,17 @@ def run_drill(
 
     if restore_data_dir.exists():
         shutil.rmtree(restore_data_dir, ignore_errors=True)
+    phase_start = clock()
     copy_ok, copy_detail = copy_tree(backup, restore_data_dir, copy_timeout)
-    steps["restore_files"] = {"ok": copy_ok, "detail": copy_detail or str(restore_data_dir)}
+    copy_elapsed = round(clock() - phase_start, 1)
+    steps["restore_files"] = {
+        "ok": copy_ok,
+        "detail": copy_detail or str(restore_data_dir),
+        "elapsed_s": copy_elapsed,
+    }
+    print(
+        f"[drill] restore_files {'ok' if copy_ok else 'FAILED'} in {copy_elapsed}s", file=sys.stderr
+    )
     if not copy_ok:
         return _finish(steps, started)
 
@@ -331,6 +395,7 @@ def run_drill(
         # 비동기로 기동만 시키고, wait_for_process_start로 프로세스 기동만, wait_for_recovery로
         # replay 완료만 각각 따로 기다린다.
         log_path = restore_data_dir / "pg_ctl_start.log"
+        phase_start = clock()
         launch_rc, launch_tail = run_cmd(
             [
                 pg_ctl_bin,
@@ -373,11 +438,19 @@ def run_drill(
                 "tail": start_reason or launch_tail,
             }
 
+        steps["start_postgres"]["elapsed_s"] = round(clock() - phase_start, 1)
+        print(
+            f"[drill] start_postgres {'ok' if started_server else 'FAILED'} "
+            f"in {steps['start_postgres']['elapsed_s']}s",
+            file=sys.stderr,
+        )
+
         if not started_server:
             steps["start_postgres"]["detail"] = collect_start_failure_logs(restore_data_dir)
             preserve_failed_restore_logs(restore_data_dir, last_failed_restore_dir)
 
         if started_server:
+            recovery_phase_start = clock()
             reason = wait_for_recovery(
                 restore_dsn,
                 psql_bin=psql_bin,
@@ -389,12 +462,33 @@ def run_drill(
                 sleep=sleep,
                 clock=clock,
             )
-            steps["wait_recovery"] = {"ok": reason is None, "detail": reason or "recovery complete"}
+            recovery_elapsed = round(clock() - recovery_phase_start, 1)
+            steps["wait_recovery"] = {
+                "ok": reason is None,
+                "detail": reason or "recovery complete",
+                "elapsed_s": recovery_elapsed,
+            }
+            print(
+                f"[drill] wait_recovery {'ok' if reason is None else 'FAILED'} "
+                f"in {recovery_elapsed}s",
+                file=sys.stderr,
+            )
 
             if reason is None:
                 env = {**pg_env, "DATABASE_URL": restore_dsn, "TEST_DATABASE_URL": restore_dsn}
+                replay_phase_start = clock()
                 rc, tail = run_cmd([python_bin, "scripts/replay_verify.py"], repo_root, env, 300)
-                steps["replay_verify"] = {"ok": rc == 0, "rc": rc, "tail": tail}
+                replay_elapsed = round(clock() - replay_phase_start, 1)
+                steps["replay_verify"] = {
+                    "ok": rc == 0,
+                    "rc": rc,
+                    "tail": tail,
+                    "elapsed_s": replay_elapsed,
+                }
+                print(
+                    f"[drill] replay_verify {'ok' if rc == 0 else 'FAILED'} in {replay_elapsed}s",
+                    file=sys.stderr,
+                )
     finally:
         # --- 서버 중지 (실행 중이었으면) ---
         if started_server:
