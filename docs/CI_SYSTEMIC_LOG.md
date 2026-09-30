@@ -2477,3 +2477,38 @@ the numbering they had in CLAUDE.md section 6.
     future `pytest_perf` leaf: check whether `detail.pytest_perf` contains any actual
     `FAILED`/`Error`/`Traceback` line — if it is pure `INFO`/httpx log noise like this one, close as
     noop citing #43/#63/#72/#90 and this entry rather than re-investigating a sixth time.
+
+97. A ninth `frontend` `[health:ci_red]` leaf (task-9854) reconfirms #16/#39/#52/#64/#66/#84/#89
+    for an eighth+ round with a fresh bisect culprit but the identical failure shape.
+    `esc-ci-frontend.json`'s stored `detail.frontend` for this round (`reopen_count: 4`,
+    `bisect_culprit: ef1855b5dcaeaa71fcd59dfeaa7e70cae953f791`, `bisect_probes: 3`) is, end to
+    end, eleven `stderr | <file>.test.tsx > ... negative: ...` lines each immediately followed by
+    the same two React Router v7 future-flag `console.warn` lines
+    (`v7_startTransition`/`v7_relativeSplatPath`) — zero `FAIL`/`✗`/`AssertionError` tokens
+    anywhere in the captured text, i.e. normal negative-test `console.error`/warning noise
+    mislabeled as the failure body, not an actual assertion failure. `git show ef1855b5d --stat`
+    confirms the cited culprit only touches `tests/integration/test_bitget_grid.py` (task-9388,
+    "test(bitget): DEEPEN negative/failure-injection for test_bitget_grid"), a backend Python
+    test file with zero `frontend/` change — the same misattribution shape as #39/#52/#66/#84/#89
+    (there `27b5fe61`, here `ef1855b5`, both backend-only DEEPEN test commits). Reconfirmed on
+    this worktree (`git status` clean, HEAD `83bc3eff` five commits behind `origin/main`'s
+    `6171fe04c`, none of the five touching `frontend/`): `npm run test --workspaces --if-present`
+    from `frontend/` passed clean end to end — `apps/web` 196 files/1587 tests, `@aios/api-client`
+    42/501, `@aios/chart-engine` 50/718, `@aios/shared-hooks` 1/7, `@aios/shared-types` 24/421,
+    `@aios/ui-web` 4/55 — all green, exit 0, and each of the four `*.test.tsx` files individually
+    named in the escalation detail (`AdminApprovalRequestPage`, `LoginPage`,
+    `AppShell.mobileNav`, `StrategyBuilderPage`) passes in isolation too. This is the same
+    fleet-code classification bug already named in #16/#39/#52/#64/#66/#84/#89:
+    `pm/auto_decision.py`'s `_stage_tail`/`_FAIL_LINE_MARKERS` treats captured `stderr`
+    console-warning noise (negative-test error-boundary logging plus React Router future-flag
+    warnings) as if it were the failure body and pins the blame on a backend-only bisect commit,
+    out of a repo worker's edit scope (§4). No script/test/baseline change made — no `frontend/`
+    change at all. Before working a future `frontend` correction leaf whose detail is dominated by
+    `stderr | *.test.tsx > ... negative:` lines followed only by React Router future-flag
+    `console.warn` noise and zero `FAIL`/`AssertionError` tokens: rerun `npm run test
+    --workspaces --if-present` from `frontend/` locally first — if green and the cited bisect
+    culprit is a backend-only/Python commit (as it has been every time so far: `27b5fe61` in
+    #39/#52/#66/#84/#89, `ef1855b5` here), close as noop citing task-9302 (#16), task-9548 (#39),
+    task-9588 (#52), task-9666 (#64), task-9678 (#66), task-9778 (#84), task-9760 (#89), and this
+    entry rather than re-investigating a tenth time. No baseline/marker-list relief made
+    (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
