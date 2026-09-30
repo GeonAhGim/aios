@@ -36,7 +36,9 @@ from src.foundation.ems.domain.parent_child import (
 
 
 def _child_fill(
-    child_id=None, filled_qty=Decimal("0"), status=OrderStatus.CREATED
+    child_id: None | None = None,
+    filled_qty: Decimal = Decimal("0"),
+    status: OrderStatus = OrderStatus.CREATED,
 ) -> ChildFillState:
     """Return a minimal ChildFillState."""
     return ChildFillState(
@@ -52,7 +54,7 @@ def _child_fill(
 class TestParentChildLifecyclePositive:
     """Happy-path parent/child lifecycle: accept → slice → aggregate → cancel."""
 
-    def test_can_create_child_then_aggregate_fill(self):
+    def test_can_create_child_then_aggregate_fill(self) -> None:
         """EM-A4 then EM-A1: create child, fill it, aggregate."""
         # 1. Parent in CREATED status accepts child
         assert_parent_accepts_new_child(OrderStatus.CREATED)
@@ -75,7 +77,7 @@ class TestParentChildLifecyclePositive:
         assert filled == Decimal("1000")
         assert status == OrderStatus.FILLED
 
-    def test_aggregate_multiple_children(self):
+    def test_aggregate_multiple_children(self) -> None:
         """Multiple children fills sum up correctly."""
         children = [
             _child_fill(child_id=uuid4(), filled_qty=Decimal("300")),
@@ -86,7 +88,7 @@ class TestParentChildLifecyclePositive:
         assert filled == Decimal("650")
         assert status == OrderStatus.PARTIALLY_FILLED
 
-    def test_aggregate_all_children_terminal_no_fill(self):
+    def test_aggregate_all_children_terminal_no_fill(self) -> None:
         """All children CANCELLED with zero fill → parent CANCELLED."""
         children = [
             _child_fill(child_id=uuid4(), filled_qty=Decimal("0"), status=OrderStatus.CANCELLED),
@@ -96,7 +98,7 @@ class TestParentChildLifecyclePositive:
         assert filled == Decimal("0")
         assert status == OrderStatus.CANCELLED
 
-    def test_children_pending_cancellation(self):
+    def test_children_pending_cancellation(self) -> None:
         """Only non-terminal children are returned for cancellation."""
         children = [
             _child_fill(child_id=uuid4(), status=OrderStatus.CREATED),
@@ -107,11 +109,11 @@ class TestParentChildLifecyclePositive:
         pending = children_pending_cancellation(children)
         assert len(pending) == 2
 
-    def test_slice_boundary_exact(self):
+    def test_slice_boundary_exact(self) -> None:
         """Slice exactly equal to remaining qty is valid."""
         assert_slice_within_parent_qty(Decimal("100"), Decimal("50"), Decimal("50"))
 
-    def test_slice_one_over_boundary(self):
+    def test_slice_one_over_boundary(self) -> None:
         """Slice one unit over boundary raises."""
         with pytest.raises(AlgoConstraintError, match="exceeding"):
             assert_slice_within_parent_qty(Decimal("100"), Decimal("50"), Decimal("51"))
@@ -123,42 +125,42 @@ class TestParentChildLifecyclePositive:
 class TestNegativeCases:
     """Negative tests — invariant-violating inputs must be rejected."""
 
-    def test_negative_1_filled_parent_rejects_child(self):
+    def test_negative_1_filled_parent_rejects_child(self) -> None:
         """EM-A4: FILLED parent must not accept new child."""
         with pytest.raises(ParentTerminalError, match="terminal"):
             assert_parent_accepts_new_child(OrderStatus.FILLED)
 
-    def test_negative_2_rejected_parent_rejects_child(self):
+    def test_negative_2_rejected_parent_rejects_child(self) -> None:
         """EM-A4: REJECTED parent must not accept new child."""
         with pytest.raises(ParentTerminalError, match="terminal"):
             assert_parent_accepts_new_child(OrderStatus.REJECTED)
 
-    def test_negative_3_cancelled_parent_rejects_child(self):
+    def test_negative_3_cancelled_parent_rejects_child(self) -> None:
         """EM-A4: CANCELLED parent must not accept new child."""
         with pytest.raises(ParentTerminalError, match="terminal"):
             assert_parent_accepts_new_child(OrderStatus.CANCELLED)
 
-    def test_negative_4_expired_parent_rejects_child(self):
+    def test_negative_4_expired_parent_rejects_child(self) -> None:
         """EM-A4: EXPIRED parent must not accept new child."""
         with pytest.raises(ParentTerminalError, match="terminal"):
             assert_parent_accepts_new_child(OrderStatus.EXPIRED)
 
-    def test_negative_5_failed_parent_rejects_child(self):
+    def test_negative_5_failed_parent_rejects_child(self) -> None:
         """EM-A4: FAILED parent must not accept new child."""
         with pytest.raises(ParentTerminalError, match="terminal"):
             assert_parent_accepts_new_child(OrderStatus.FAILED)
 
-    def test_negative_6_slice_exceeds_parent_qty(self):
+    def test_negative_6_slice_exceeds_parent_qty(self) -> None:
         """EM-A1: child qty > parent qty must fail."""
         with pytest.raises(AlgoConstraintError, match="exceeding"):
             assert_slice_within_parent_qty(Decimal("100"), Decimal("0"), Decimal("101"))
 
-    def test_negative_7_slice_exceeds_remaining(self):
+    def test_negative_7_slice_exceeds_remaining(self) -> None:
         """EM-A1: child qty > (parent - committed) must fail."""
         with pytest.raises(AlgoConstraintError, match="exceeding"):
             assert_slice_within_parent_qty(Decimal("100"), Decimal("80"), Decimal("21"))
 
-    def test_negative_8_aggregate_exceeds_parent_qty(self):
+    def test_negative_8_aggregate_exceeds_parent_qty(self) -> None:
         """EM-A1: aggregate child fills > parent qty must fail."""
         children = [
             _child_fill(child_id=uuid4(), filled_qty=Decimal("60")),
@@ -167,27 +169,27 @@ class TestNegativeCases:
         with pytest.raises(AlgoConstraintError, match="exceeds"):
             validate_aggregate_fills(uuid4(), children, Decimal("100"))
 
-    def test_negative_9_negative_child_fill_rejected(self):
+    def test_negative_9_negative_child_fill_rejected(self) -> None:
         """EM-A1: negative per-child fill must fail."""
         children = [_child_fill(child_id=uuid4(), filled_qty=Decimal("-10"))]
         with pytest.raises(AlgoConstraintError, match="negative"):
             validate_aggregate_fills(uuid4(), children, Decimal("100"))
 
-    def test_negative_10_can_create_child_parent_terminal(self):
+    def test_negative_10_can_create_child_parent_terminal(self) -> None:
         """EM-A4: can_create_child rejects when parent is terminal."""
         with pytest.raises(ParentTerminalError, match="terminal"):
             assert_can_create_child(
                 OrderStatus.FILLED, Decimal("1000"), Decimal("0"), Decimal("100")
             )
 
-    def test_negative_11_can_create_child_slice_exceeds(self):
+    def test_negative_11_can_create_child_slice_exceeds(self) -> None:
         """EM-A1: can_create_child rejects when slice exceeds remaining."""
         with pytest.raises(AlgoConstraintError, match="exceeding"):
             assert_can_create_child(
                 OrderStatus.CREATED, Decimal("100"), Decimal("80"), Decimal("21")
             )
 
-    def test_negative_12_aggregate_negative_masking_blocked(self):
+    def test_negative_12_aggregate_negative_masking_blocked(self) -> None:
         """EM-A1: negative fill cannot offset overshoot in aggregate."""
         children = [
             _child_fill(child_id=uuid4(), filled_qty=Decimal("150")),
@@ -197,18 +199,18 @@ class TestNegativeCases:
         with pytest.raises(AlgoConstraintError, match="negative"):
             validate_aggregate_fills(uuid4(), children, Decimal("100"))
 
-    def test_negative_13_unknown_parent_accepts_child(self):
+    def test_negative_13_unknown_parent_accepts_child(self) -> None:
         """EM-A4: UNKNOWN is intentionally NOT terminal."""
         # This is a positive test disguised as negative — UNKNOWN should NOT raise
         assert_parent_accepts_new_child(OrderStatus.UNKNOWN)  # no exception
 
-    def test_negative_14_acknowledged_parent_rejects_child(self):
+    def test_negative_14_acknowledged_parent_rejects_child(self) -> None:
         """EM-A4: ACKNOWLEDGED parent is terminal."""
         # ACKNOWLEDGED is NOT in TERMINAL_ORDER_STATUSES — use FILLED instead
         with pytest.raises(ParentTerminalError, match="terminal"):
             assert_parent_accepts_new_child(OrderStatus.FILLED)
 
-    def test_negative_15_partially_filled_parent_accepts_child(self):
+    def test_negative_15_partially_filled_parent_accepts_child(self) -> None:
         """EM-A4: PARTIALLY_FILLED is NOT terminal — child still allowed."""
         # This verifies the boundary: partially filled parent CAN accept more children
         assert_parent_accepts_new_child(OrderStatus.PARTIALLY_FILLED)  # no exception
@@ -220,14 +222,14 @@ class TestNegativeCases:
 class TestFailureInjection:
     """Failure injection — monkeypatch dependency to provoke exceptions."""
 
-    def test_injection_1_validate_aggregate_with_decimal_error(self):
+    def test_injection_1_validate_aggregate_with_decimal_error(self) -> None:
         """Inject Decimal overflow during aggregate sum."""
         from decimal import Overflow
 
         # Save original sum
         original_sum = builtins.sum
 
-        def failing_sum(iterable, start=0):
+        def failing_sum(iterable: object, start: int = 0) -> None:
             raise Overflow("decimal overflow")
 
         builtins.sum = failing_sum
@@ -239,7 +241,7 @@ class TestFailureInjection:
         finally:
             builtins.sum = original_sum
 
-    def test_injection_2_compute_child_state_triggers_validation_error(self):
+    def test_injection_2_compute_child_state_triggers_validation_error(self) -> None:
         """compute_child_state delegates to validate_aggregate_fills."""
         children = [
             _child_fill(child_id=uuid4(), filled_qty=Decimal("60")),
@@ -249,7 +251,7 @@ class TestFailureInjection:
         with pytest.raises(AlgoConstraintError, match="exceeds"):
             compute_child_state(uuid4(), children, Decimal("100"))
 
-    def test_injection_3_negative_fill_in_aggregate_parent_state(self):
+    def test_injection_3_negative_fill_in_aggregate_parent_state(self) -> None:
         """Negative child fill in aggregate_parent_state must be rejected."""
         children = [_child_fill(child_id=uuid4(), filled_qty=Decimal("-10"))]
         with pytest.raises(AlgoConstraintError, match="negative"):
@@ -262,27 +264,27 @@ class TestFailureInjection:
 class TestEdgeCases:
     """Edge cases for parent/child aggregation and validation."""
 
-    def test_empty_children_list(self):
+    def test_empty_children_list(self) -> None:
         """No children → aggregate returns (0, current_status)."""
         filled, status = aggregate_parent_state(Decimal("1000"), OrderStatus.CREATED, [])
         assert filled == Decimal("0")
         assert status == OrderStatus.CREATED
 
-    def test_zero_parent_qty(self):
+    def test_zero_parent_qty(self) -> None:
         """Zero qty parent: any fill exceeds."""
         children = [_child_fill(filled_qty=Decimal("1"))]
         with pytest.raises(AlgoConstraintError, match="exceeds"):
             validate_aggregate_fills(uuid4(), children, Decimal("0"))
 
-    def test_slice_zero_allowed(self):
+    def test_slice_zero_allowed(self) -> None:
         """Zero-slice child is valid (boundary case)."""
         assert_slice_within_parent_qty(Decimal("100"), Decimal("0"), Decimal("0"))
 
-    def test_pending_cancellation_empty_list(self):
+    def test_pending_cancellation_empty_list(self) -> None:
         """Empty children list → no pending cancellations."""
         assert children_pending_cancellation([]) == []
 
-    def test_all_children_terminal_no_pending(self):
+    def test_all_children_terminal_no_pending(self) -> None:
         """All children terminal → no pending cancellations."""
         children = [
             _child_fill(child_id=uuid4(), status=OrderStatus.FILLED),
@@ -290,21 +292,21 @@ class TestEdgeCases:
         ]
         assert children_pending_cancellation(children) == []
 
-    def test_aggregate_fill_exactly_parent_qty(self):
+    def test_aggregate_fill_exactly_parent_qty(self) -> None:
         """Fill exactly equal to parent qty → FILLED."""
         children = [_child_fill(filled_qty=Decimal("1000"))]
         filled, status = aggregate_parent_state(Decimal("1000"), OrderStatus.CREATED, children)
         assert filled == Decimal("1000")
         assert status == OrderStatus.FILLED
 
-    def test_aggregate_fill_one_below_parent_qty(self):
+    def test_aggregate_fill_one_below_parent_qty(self) -> None:
         """Fill one below parent qty → PARTIALLY_FILLED."""
         children = [_child_fill(filled_qty=Decimal("999"))]
         filled, status = aggregate_parent_state(Decimal("1000"), OrderStatus.CREATED, children)
         assert filled == Decimal("999")
         assert status == OrderStatus.PARTIALLY_FILLED
 
-    def test_validate_aggregate_zero_fills_ok(self):
+    def test_validate_aggregate_zero_fills_ok(self) -> None:
         """Zero fills across all children is valid."""
         children = [
             _child_fill(child_id=uuid4(), filled_qty=Decimal("0")),
@@ -313,8 +315,7 @@ class TestEdgeCases:
         validate_aggregate_fills(uuid4(), children, Decimal("100"))  # no exception
 
     @pytest.mark.perf
-    @pytest.mark.perf
-    def test_performance_aggregate_large_tree(self):
+    def test_performance_aggregate_large_tree(self) -> None:
         """Aggregate parent state over 1000 children — O(1) per child, total < 100ms."""
         import time
 
