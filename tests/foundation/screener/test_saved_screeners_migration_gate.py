@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.check_migration_chain import find_chain_issues
+from scripts.check_migration_chain import find_chain_issues, parse_revision_file
 
 _REAL_VERSIONS_DIR = Path(__file__).resolve().parents[3] / "src" / "db" / "migrations" / "versions"
 
@@ -49,3 +49,75 @@ def test_gate_catches_duplicate_head_at_saved_screeners_parent(tmp_path: Path) -
     issues = find_chain_issues(tmp_path)
 
     assert any("다중 head" in issue for issue in issues)
+
+
+def test_gate_catches_broken_down_revision_chain(tmp_path: Path) -> None:
+    """부정 테스트: 052b26dfb97b가 존재하지 않는 부모를 가리키면(오타 등)
+    체인 끊김으로 거부한다 — alembic이 upgrade 시 그 부모를 찾지 못해 실패하는
+    상황을 정적 검사 단계에서 미리 잡아낸다."""
+    _write_revision(
+        tmp_path,
+        filename="052b26dfb97b_saved_screeners.py",
+        revision="052b26dfb97b",
+        down_revision="ffffffffffff",
+    )
+
+    issues = find_chain_issues(tmp_path)
+
+    assert any("down_revision 끊김" in issue for issue in issues)
+
+
+def test_gate_catches_cycle_at_saved_screeners_revision(tmp_path: Path) -> None:
+    """부정 테스트: 052b26dfb97b와 그 부모가 서로를 가리키는 순환이 생기면
+    거부한다 — 순환 체인은 alembic이 어떤 순서로도 적용할 수 없다."""
+    _write_revision(
+        tmp_path,
+        filename="052b26dfb97b_saved_screeners.py",
+        revision="052b26dfb97b",
+        down_revision="b4bb1b750621",
+    )
+    _write_revision(
+        tmp_path,
+        filename="b4bb1b750621_parent.py",
+        revision="b4bb1b750621",
+        down_revision="052b26dfb97b",
+    )
+
+    issues = find_chain_issues(tmp_path)
+
+    assert any("순환 참조" in issue for issue in issues)
+
+
+def test_gate_catches_duplicate_revision_id(tmp_path: Path) -> None:
+    """부정 테스트: 같은 revision id(052b26dfb97b)를 가진 두 파일이 동시에
+    존재하면(머지 충돌 잔재 등) 중복으로 거부한다."""
+    _write_revision(
+        tmp_path,
+        filename="052b26dfb97b_saved_screeners.py",
+        revision="052b26dfb97b",
+        down_revision="b4bb1b750621",
+    )
+    _write_revision(
+        tmp_path,
+        filename="052b26dfb97b_duplicate_copy.py",
+        revision="052b26dfb97b",
+        down_revision="b4bb1b750621",
+    )
+
+    issues = find_chain_issues(tmp_path)
+
+    assert any("중복 revision id" in issue for issue in issues)
+
+
+def test_parse_revision_file_rejects_unparseable_syntax(tmp_path: Path) -> None:
+    """실패주입: 052b26dfb97b 리비전 파일이 문법 오류로 깨져 있으면(예: 저장 중
+    잘림) `parse_revision_file`이 예외로 죽지 않고 `None`을 반환해 fail-closed로
+    처리하며, `find_chain_issues`는 이를 '식별 불가'로 보고한다."""
+    broken = tmp_path / "052b26dfb97b_saved_screeners.py"
+    broken.write_text("revision: str = 'unterminated\n", encoding="utf-8")
+
+    assert parse_revision_file(broken) is None
+
+    issues = find_chain_issues(tmp_path)
+
+    assert any("식별 불가" in issue for issue in issues)
