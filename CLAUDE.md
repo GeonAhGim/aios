@@ -2056,6 +2056,40 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     re-diagnosing a ninth time. No baseline/budget relief made (DECISION_GUIDELINES B-2) —
     task-9269's `RelativeBudget` migration is the actual fix and is already in place.
 
+80. An eighth `consistency` 24h 5-repeat systemic leaf (task-9718) citing the identical repeat
+    set #22 (task-9011/9281/9460), #31 (task-9301/9460), #35 (task-9537), #54 (task-9620), #61
+    (task-9665), #71 (task-9691), and #78 (task-9595) already closed seven times —
+    task-9718's spec names task-9011, task-9281, task-9460, task-9574 verbatim, the same set
+    every prior systemic leaf already root-caused. `scripts/consistency/*`/
+    `consistency-baseline.json` are unchanged since task-9122's fix (commit `693fa98a`, deduping
+    `check_port_protocol_implementations`'s redundant double `ast.walk()` via `common.py`'s
+    cached `_walked_nodes(path)`, plus a structural AST-count regression-guard test) — `git log
+    --oneline -3 -- scripts/consistency/ scripts/check_consistency.py consistency-baseline.json`
+    confirms `693fa98a` as the latest touch, no commits since. A local run on this worktree
+    (`git status` clean) confirms `OK` and matches every one of the 13 tracked metrics in
+    `consistency-baseline.json` exactly (`router_unregistered=0 port_method_unimplemented=0
+    port_protocol_unimplemented=0 env_key_undocumented=4 feature_flag_undocumented=0
+    event_type_unconsumed=4 migration_hygiene=0 openapi_client_mismatch=34 spec_leaf_untraced=32
+    naive_datetime=0 money_float=0 symbol_id_assembly=1 spec_template_incomplete=0
+    authority_duplication=4`). `esc-ci-consistency.json` itself confirms the mechanism directly:
+    `status: "resolved"`, `resolved_sha: "12e7bd738c392c2bd8b5c8dd0af15dcdd06c15b6"`,
+    `closed_at: "2026-09-30T00:53:50+00:00"`, `bisect.bisect_culprit:
+    "4d5ebed5b621a5e92c18eca2aa8d654e195577d8"` (the same docstring-only translation commit,
+    task-4424, #21/#22/#31/#35/#54/#61/#71/#78 already named as unrelated to this gate's logic)
+    — yet its `auto_actions` log (46 entries) kept appending `"3x-repeat CI red"` every 12-25 min
+    through `2026-09-30T14:12:28+00:00`, over 13 hours after `closed_at`, with no further fix
+    task created recently. This is the same fleet-code pattern already named for eighteen+ gates
+    (#17-#26, #30-#31, #33-#36, #38, #40, #48, #50, #56, #59, #61, #71, #78): `pm/
+    auto_decision.py`/`orchestrator.py`'s `ci_red` rule not checking `status == "resolved"`
+    before appending further repeat-count entries against an already-closed escalation, out of a
+    repo worker's edit scope (§4). No script/baseline change made — task-9122's fix is still in
+    place and sufficient. Before working a future `consistency` leaf: run
+    `python scripts/check_consistency.py` locally first — if `OK` and baseline-matching, and the
+    escalation's `bisect_culprit` is `4d5ebed5` (or cites an already-closed leaf verbatim), close
+    as noop citing task-9122, #22/#31/#35/#54/#61/#71/#78, and this entry rather than
+    re-diagnosing a ninth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) —
+    script/baseline design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
