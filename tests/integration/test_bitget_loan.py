@@ -2,6 +2,7 @@
 
 httpx.MockTransport 기반 검증(test_bitget_adapter.py와 동일 원칙).
 """
+
 import json
 from decimal import Decimal
 
@@ -82,9 +83,7 @@ async def test_borrow_loan_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.borrow_loan("usdt", "btc", Decimal("0.5"))
@@ -183,3 +182,52 @@ async def test_get_loan_liquidation_records_returns_raw_rows():
     records = await adapter.get_loan_liquidation_records()
 
     assert records == [{"orderId": "l-1", "liquidatedAmount": "0.5"}]
+
+
+# --- negative / 실패주입 보강 (task-9390 DEEPEN) ---
+
+
+async def test_repay_loan_rejects_non_positive_amount():
+    """레드팀 #2026-09-02-33 회귀 — repay 금액도 0 이하 검증."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.repay_loan("l-1", Decimal("0"))
+
+
+async def test_borrow_loan_rejects_negative_pledge_amount():
+    """레드팀 #2026-09-02-33 회귀 — 음수 금액도 거부."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.borrow_loan("usdt", "btc", Decimal("-1"))
+
+
+async def test_repay_loan_rejects_negative_amount():
+    """레드팀 #2026-09-02-33 회귀 — repay 음수 금액도 거부."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("검증에 걸렸어야 할 요청이 실제로 나갔습니다.")
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ValueError):
+        await adapter.repay_loan("l-1", Decimal("-100"))
+
+
+async def test_borrow_loan_propagates_request_error():
+    """실패주입: HTTP 200 + 실패 코드가 반환되면 ExchangeError(또는 래핑)가 전파된다."""
+    adapter = _make_adapter(
+        lambda req: _json_response(
+            {"code": "50021", "msg": "system error", "requestTime": 1, "data": None}
+        )
+    )
+    # HTTP 200로 돌아오지만 code가 00000이 아닌 경우 — 에러 코드 분류 게이트가 예외를 raise해야 함
+    # 50021은 retryable이므로 RetryableExchangeError로 래핑될 수 있음
+    with pytest.raises(Exception):
+        await adapter.borrow_loan("usdt", "btc", Decimal("0.5"))
