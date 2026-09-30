@@ -6,6 +6,7 @@ negative/실패주입 케이스. DB 없이 도는 단위 테스트라 이 패키
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import pytest
 
@@ -23,14 +24,14 @@ from src.foundation.paper_control.domain.rules import (
 
 
 def _paper_provenance(**overrides: str) -> AdapterProvenance:
-    fields: dict[str, str | CredentialClass] = {
+    defaults: dict[str, Any] = {
         "adapter_type": "fake-paper-v1",
         "credential_class": CredentialClass.PAPER,
         "endpoint_classification": "SANDBOX",
         "provider_sandbox_account_ref": "sandbox-acct-1",
     }
-    fields.update(overrides)
-    return AdapterProvenance(**fields)  # type: ignore[arg-type]
+    defaults.update(overrides)
+    return AdapterProvenance(**defaults)
 
 
 # --- negative tests (77 §2 상태 전이표) --------------------------------------
@@ -65,12 +66,13 @@ class _FakeLiveCredentialClass:
 
 
 def test_validate_provenance_rejects_non_paper_credential_class() -> None:
-    provenance = AdapterProvenance(
-        adapter_type="fake-paper-v1",
-        credential_class=_FakeLiveCredentialClass(),  # type: ignore[arg-type]
-        endpoint_classification="SANDBOX",
-        provider_sandbox_account_ref="sandbox-acct-1",
-    )
+    provenance_dict: dict[str, Any] = {
+        "adapter_type": "fake-paper-v1",
+        "credential_class": _FakeLiveCredentialClass(),
+        "endpoint_classification": "SANDBOX",
+        "provider_sandbox_account_ref": "sandbox-acct-1",
+    }
+    provenance = AdapterProvenance(**provenance_dict)
     with pytest.raises(InvalidProvenanceError):
         validate_provenance(provenance)
 
