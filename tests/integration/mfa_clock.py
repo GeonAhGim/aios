@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pyotp
+import pytest
 from fastapi import Depends, FastAPI, Request
 
 from src.api.deps import get_mfa_service, get_pool
@@ -84,3 +85,88 @@ def mfa_clock_frozen(app: FastAPI, when: datetime) -> Iterator[None]:
             app.dependency_overrides.pop(get_mfa_service, None)
         else:
             app.dependency_overrides[get_mfa_service] = previous
+
+
+# task-9375: helper contracts are exercised without a database or real-time sleep.
+@pytest.mark.parametrize("seconds", ["31", float("nan"), float("inf")])
+def test_negative_invalid_shift_preserves_override(seconds: object) -> None:
+    """Invalid offsets must fail before modifying application dependencies."""
+    app = FastAPI()
+    app.dependency_overrides[get_mfa_service] = get_mfa_service
+    before = app.dependency_overrides.copy()
+    with pytest.raises((TypeError, ValueError, OverflowError)):
+        with mfa_clock_shifted(app, seconds):
+            pytest.fail("invalid clock offset was accepted")
+    assert app.dependency_overrides == before
+
+
+def test_negative_invalid_totp_secret() -> None:
+    """Malformed base32 material must never produce an authentication code."""
+    from binascii import Error
+
+    with pytest.raises(Error, match="Non-base32"):
+        totp_at("!invalid!", datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+@pytest.mark.parametrize("existing", [False, True])
+async def test_failure_injection_dependency_restores_override(
+    monkeypatch: pytest.MonkeyPatch, frozen: bool, existing: bool,
+) -> None:
+    """A failed secret provider must propagate and leave no clock override behind."""
+    from types import SimpleNamespace
+
+    app = FastAPI()
+    if existing:
+        app.dependency_overrides[get_mfa_service] = get_mfa_service
+    before = app.dependency_overrides.copy()
+    secret = SimpleNamespace(get_secret_value=lambda: "unused")
+    app.state.secrets = SimpleNamespace(credential_encryption_key=secret)
+    failure = RuntimeError("injected secret provider outage")
+
+    def fail_secret() -> str:
+        raise failure
+
+    monkeypatch.setattr(secret, "get_secret_value", fail_secret)
+    when = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    context = mfa_clock_frozen(app, when) if frozen else mfa_clock_shifted(app, 31)
+    with pytest.raises(RuntimeError, match="injected secret provider outage") as caught:
+        with context:
+            factory = app.dependency_overrides[get_mfa_service]
+            await factory(Request({"type": "http", "app": app}), pool=None)
+    assert caught.value is failure
+    assert app.dependency_overrides == before
+
+
+async def test_nested_clock_wiring_restores_outer_service() -> None:
+    """I-10: resolve the real dependency factory and verify its injected clock."""
+    from types import SimpleNamespace
+
+    app = FastAPI()
+    app.state.secrets = SimpleNamespace(
+        credential_encryption_key=SimpleNamespace(get_secret_value=lambda: "test-only")
+    )
+    request = Request({"type": "http", "app": app})
+    when = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with mfa_clock_shifted(app, 31) as now:
+        outer = app.dependency_overrides[get_mfa_service]
+        shifted = await outer(request, pool=None)
+        assert shifted._now is now
+        before = datetime.now(timezone.utc) + timedelta(seconds=31)
+        assert before <= now() <= datetime.now(timezone.utc) + timedelta(seconds=31)
+        with mfa_clock_frozen(app, when):
+            inner = app.dependency_overrides[get_mfa_service]
+            service = await inner(request, pool=None)
+            assert service._now() == when
+            assert service._now().tzinfo is timezone.utc
+        assert app.dependency_overrides[get_mfa_service] is outer
+    assert get_mfa_service not in app.dependency_overrides
+
+
+def test_totp_known_vector_and_step_boundary() -> None:
+    """RFC 6238 SHA1 vector (six digits), including the next 30-second boundary."""
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    when = datetime.fromtimestamp(59, tz=timezone.utc)
+    assert totp_at(secret, when) == "287082"
+    assert totp_at(secret, when - timedelta(seconds=29)) == "287082"
+    assert totp_at(secret, when + timedelta(seconds=1)) == "359152"
