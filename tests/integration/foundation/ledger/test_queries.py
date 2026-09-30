@@ -3,33 +3,17 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.4, §4.4, §9 LC-16.
 DoD: "프론트 무변경으로 기존 지갑 테스트 전부 통과" — `get_balance`가
 `balance`(레거시)를 그대로 두고 `available`/`held`/`pending_payout`을
-정확히 보고하는지, 그리고 레거시·원장 잔액이 어긋나면 500이 아니라
-명시적 `WalletLedgerDriftError`로 표면화하는지(negative case)를 검증한다.
+정확히 보고하는지, 레거시·원장 잔액이 어긋나면 명시적
+`WalletLedgerDriftError`로 표면화하는지(negative)를 검증한다.
 
-DEEPEN(task-2969, docs/audit/DEPTH_LA_LB_LC.md#613) — 원 task-613(D1)은
-negative 1건(레거시>원장 드리프트)뿐이고 실패주입·성능단언·게이트적색
-재현이 없었다. 아래를 추가해 D3로 올린다: negative 2건 추가(원장 계정이
-아예 생성된 적 없는 경우, 레거시<원장 반대 방향 드리프트) + 실패주입
-1건(스냅샷 SQL 왕복 중 커넥션 단절 시 조용한 기본값 대신 예외 전파) +
-성능 단언 1건(p95 지연 예산) + 게이트 적색 재현 1건(task-951이 고친
-"4개 독립 SELECT" 방식을 이 테스트 안에서 재현해 통제된 인터리빙으로
-위양성 드리프트를 결정론적으로 발생시키고, 같은 최종 상태에서 수정된
-단일 SQL 왕복 `get_balance`는 위양성이 없음을 대조). 코드 변경 없음
-(`queries.py`는 task-951에서 이미 고쳐진 그대로).
-
-DEEPEN(task-2989, docs/audit/DEPTH_LA_LB_LC.md#951) — 같은 파일을 다시
-가리키는 별도 축 항목(원 task-951, D1)이 위 task-2969 증적으로도 채워지지
-않는 요건 하나를 남겼다: "실패주입(드리프트가 실 SQL 데이터 손상으로
-생성되어 모의/시뮬레이션 예외 아님)"였다 — task-2969가 추가한 실패주입은
-`monkeypatch.setattr(asyncpg.connection.Connection, "fetch", ...)`로 커넥션
-예외를 시뮬레이션한 것이라 이 항목을 채우지 못한다. 아래 1건을 추가한다:
-`ledger_balance`(원장 진실)를 애플리케이션 계층(저널·감사 이중기록)을
-완전히 우회해 테스트 코드가 직접 DELETE+INSERT(WORM 트리거가 막는 건
-리터럴 UPDATE뿐 — FA-10, `a2c4f9e1b3d5_fa10_bitemporal_projections.py`)로
-손상시켜, 진짜 SQL 데이터 손상만으로 드리프트가 발생하고 `get_balance`가
-그 손상된 값을 진실로 오인하지 않고 fail-closed로 실패하는지 검증한다.
-negative≥3·성능 단언·게이트 적색 재현은 task-2969가 이미 채워 그대로
-유효하다. 코드 변경 없음.
+DEEPEN(task-2969/2989, docs/audit/DEPTH_LA_LB_LC.md#613,#951): D1(negative
+1건)을 D3로 올린다 — negative 3건(레거시>원장, 계정 미생성, 레거시<원장),
+실패주입 2건(커넥션 단절 시뮬레이션 + `ledger_balance`를 애플리케이션
+계층을 우회해 직접 DELETE+INSERT로 손상시키는 실 SQL 데이터 손상),
+성능 단언 1건(p95), 게이트 적색 재현 1건("4개 독립 SELECT" 위양성
+드리프트를 통제된 인터리빙으로 재현하고 단일 SQL 왕복 `get_balance`는
+위양성 없음을 대조). 코드 변경 없음(`queries.py`는 task-951에서 고쳐진
+그대로).
 """
 
 from __future__ import annotations

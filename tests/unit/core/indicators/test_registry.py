@@ -223,11 +223,9 @@ def test_registry_hash_unaffected_by_dict_construction_order() -> None:
 
 
 def test_validate_params_fails_closed_when_spec_default_is_corrupted_out_of_range() -> None:
-    """실패 주입: L01 스펙 데이터가 손상되어(배포 사고·수기 오버라이드 실수 등)
-    `default`가 선언된 [min, max] 밖에 있는 상태로 레지스트리에 실리면, L02는
-    그 손상된 기본값을 조용히 통과시키지 않고 fail-closed로 거부해야 한다
-    (CLAUDE.md §3 "Default posture is fail-closed") — 호출자가 override를
-    전혀 주지 않아도(=default 그대로 채택되는 경로) 거부되는지 확인한다."""
+    """실패 주입: 손상된 `default`가 [min, max] 밖에 있어도 L02는 fail-closed로
+    거부해야 한다(CLAUDE.md §3) — override 없이 default가 그대로 채택되는
+    경로에서도 거부되는지 확인한다."""
     original = TALIB_SPECS["SMA"]
     corrupted_spec = IndicatorSpec(
         name=original.name,
@@ -284,12 +282,9 @@ def test_registry_get_validate_lookback_p95_latency_within_self_declared_budget(
 def test_registry_validate_params_boundary_gate_turns_red_on_off_by_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현: `test_registry_validate_params_accepts_in_range_override`류
-    경계값 negative test가 실제로 min/max 경계 하나 밖 버그를 잡아내는지
-    확인한다 — `validate_params`의 범위 비교를 폐구간(`<=`)에서 개구간(`<`)으로
-    바꿔치기한 손상된 구현을 흉내 내, max 경계값(500) 자체가 부당하게
-    거부되는지 재현한다. 이 테스트가 없으면 경계값 검사가 우연히 항상
-    통과하는 tautology인지 아무도 검증하지 못한다."""
+    """게이트 적색 재현: `validate_params`의 범위 비교를 폐구간(`<=`)에서
+    개구간(`<`)으로 바꿔치기해 max 경계값(500)이 부당하게 거부되는지
+    재현한다(경계값 negative test가 tautology가 아님을 증명)."""
 
     def _broken_validate_params(
         self: IndicatorRegistry, name: str, params: dict[str, int]
@@ -348,22 +343,15 @@ def test_registry_hash_p95_latency_within_self_declared_budget() -> None:
 def test_registry_hash_budget_gate_actually_fails_past_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현: 위 단언식이, 해시 계산 경로 한 곳이 예산을 실제로
-    넘기도록 지연을 주입했을 때 진짜로 `AssertionError`를 내는지(= CI가
-    실제로 빨간불이 되는지) 확인한다. 이 테스트가 없으면 위 단언이 항상
-    통과하는 tautology인지 아무도 검증하지 못한다.
+    """게이트 적색 재현: 해시 계산 경로가 예산을 실제로 넘기도록 지연을
+    주입했을 때 진짜로 `AssertionError`를 내는지 확인한다(tautology 방지).
 
-    GitHub run 36588511473: 이 테스트가 "DID NOT RAISE"로 적색이었다 — 이전
-    구현은 `time.sleep(0.2)`로 실제 벽시계 200ms를 주입했는데, 이는 호스트
-    속도와 무관한 고정 시간이다. 반면 비교 대상인 보정 루프(순수 파이썬
-    반복)는 호스트가 느려지면 함께 느려진다. 느리거나 부하가 큰 CI 러너에서
-    보정 루프 자체가 200ms를 넘기면 `op_ms/calibration_ms` 비율이 오히려
-    줄어들어 `max_ratio=0.5`를 넘기지 못하고 조용히 통과해버린다(회귀
-    주입이 통과하는 지연이 아니라 host-load-dependent 실패). 고정 시간
-    대신 보정 루프와 동일한 형태의 순수 CPU 반복(정수 연산)을 그 10배
-    규모로 주입하면, 두 값이 같은 방식으로 호스트 속도에 비례해 움직여서
-    비율이 호스트 속도와 무관하게 ~10x로 안정된다 — 어떤 CI 러너에서도
-    `max_ratio=0.5`를 확실히 넘긴다."""
+    GitHub run 36588511473: `time.sleep(0.2)` 고정 지연은 호스트 속도와
+    무관해, 호스트 속도에 비례해 느려지는 보정 루프 대비 비율이 느린
+    러너에서 오히려 줄어 조용히 통과했다(host-load-dependent 실패). 대신
+    보정 루프와 같은 형태의 순수 CPU 반복을 10배 규모로 주입해 두 값이
+    같은 방식으로 호스트 속도에 비례하게 만들면 비율이 ~10x로 안정되어
+    어떤 러너에서도 `max_ratio=0.5`를 확실히 넘긴다."""
     original_sha256 = hashlib.sha256
     # 보정 루프(tests/_perf/relative_budget.py `_calibration_loop`)와 같은
     # 모양의 순수 CPU 반복을 그 10배(2,000,000 * 10) 규모로 돌려 host-speed
