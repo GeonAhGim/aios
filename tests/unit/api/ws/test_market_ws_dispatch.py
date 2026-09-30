@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
-from src.api.ws import market_ws
+from src.api.ws import market_ws, market_ws_dispatch
 from src.core.observability.metrics import NullMetrics
 from src.data.models.base import AssetClass
 from src.foundation.market_data.application.realtime_fanout import RealtimeFanout
@@ -27,6 +28,9 @@ from src.foundation.market_data.domain.entitlement.policy import (
     EntitlementSubject,
     FeedRequest,
 )
+from src.services.auth import session_repository
+from src.services.auth.tokens import AccessClaims, AuthLevel
+from src.services.auth_service import User
 
 _TENANT = UUID("22222222-2222-2222-2222-222222222222")
 _SUBJECT = UUID("44444444-4444-4444-4444-444444444444")
@@ -183,3 +187,140 @@ def test_json_default_rejects_unserializable_type() -> None:
 
     with pytest.raises(TypeError, match="not JSON serializable"):
         market_ws._json_default(_Opaque())
+
+
+class _FakeAcquireCtx:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *exc_info: Any) -> bool:
+        return False
+
+
+class _FakePool:
+    """DB/네트워크 없이 `authenticate()`의 `async with pool.acquire()` 패턴만
+    충족하는 가짜 풀 — `session_repository.get_active`는 monkeypatch로 대체되어
+    실제 conn을 쓰지 않는다."""
+
+    def acquire(self) -> _FakeAcquireCtx:
+        return _FakeAcquireCtx()
+
+
+class _AuthFakeWebSocket:
+    def __init__(self, *, token: str | None, pool: _FakePool) -> None:
+        self.query_params: dict[str, str] = {} if token is None else {"token": token}
+        self.app = SimpleNamespace(state=SimpleNamespace(pool=pool))
+
+
+def _claims(
+    *, user_id: UUID, tenant_id: UUID, session_id: UUID, auth_level: AuthLevel
+) -> AccessClaims:
+    now = int(time.time())
+    return AccessClaims(
+        sub=user_id,
+        tid=tenant_id,
+        sid=session_id,
+        jti=uuid4(),
+        iat=now,
+        exp=now + 900,
+        nbf=now,
+        auth_level=auth_level,
+    )
+
+
+def _active_user(user_id: UUID) -> User:
+    return User(
+        user_id=user_id,
+        email="owner@example.com",
+        display_name=None,
+        mfa_enabled=False,
+        mfa_verified_at=None,
+        status="ACTIVE",
+        is_verifier=False,
+        is_platform_admin=False,
+    )
+
+
+def _active_session(
+    *, session_id: UUID, user_id: UUID, tenant_id: UUID, auth_level: AuthLevel
+) -> session_repository.Session:
+    now = datetime.now(timezone.utc)
+    return session_repository.Session(
+        id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        refresh_hash="deadbeef",
+        auth_level=auth_level,
+        issued_at=now,
+        rotated_at=None,
+        expires_at=now + timedelta(days=14),
+        revoked_at=None,
+        revoke_reason=None,
+    )
+
+
+async def test_authenticate_rejects_mixed_session_and_claims_principal(monkeypatch) -> None:
+    """F3-WS(AUDIT_2026-09-30) 재현: 세션 A의 sid + 사용자 B의 sub/tid로 서명된
+    "혼합" 토큰은 REST(F3, task-9449)와 동일하게 WS 연결에서도 거부돼야 한다."""
+    session_id = uuid4()
+    user_a = uuid4()
+    tenant_a = user_a
+    user_b = uuid4()
+    tenant_b = user_b
+
+    session_a = _active_session(
+        session_id=session_id, user_id=user_a, tenant_id=tenant_a, auth_level="PASSWORD"
+    )
+    mixed_claims = _claims(
+        user_id=user_b, tenant_id=tenant_b, session_id=session_id, auth_level="PASSWORD"
+    )
+
+    monkeypatch.setattr(
+        market_ws_dispatch,
+        "get_token_verifier",
+        lambda: SimpleNamespace(verify=lambda _t: mixed_claims),
+    )
+    monkeypatch.setattr(market_ws_dispatch, "get_user_by_id", _async_return(_active_user(user_b)))
+    monkeypatch.setattr(session_repository, "get_active", _async_return(session_a))
+
+    result = await market_ws_dispatch.authenticate(
+        _AuthFakeWebSocket(token="irrelevant", pool=_FakePool())
+    )
+
+    assert result is None, "세션 소유자와 다른 sub/tid claims는 연결을 거부해야 한다"
+
+
+async def test_authenticate_accepts_matching_session_and_claims(monkeypatch) -> None:
+    """회귀 없음: 세션 자신의 소유자(sub/tid/auth_level 모두 일치)로 서명된
+    정상 토큰은 기존대로 WS 연결이 수립돼야 한다."""
+    session_id = uuid4()
+    user_id = uuid4()
+    tenant_id = user_id
+
+    session = _active_session(
+        session_id=session_id, user_id=user_id, tenant_id=tenant_id, auth_level="PASSWORD"
+    )
+    legit_claims = _claims(
+        user_id=user_id, tenant_id=tenant_id, session_id=session_id, auth_level="PASSWORD"
+    )
+
+    monkeypatch.setattr(
+        market_ws_dispatch,
+        "get_token_verifier",
+        lambda: SimpleNamespace(verify=lambda _t: legit_claims),
+    )
+    monkeypatch.setattr(market_ws_dispatch, "get_user_by_id", _async_return(_active_user(user_id)))
+    monkeypatch.setattr(session_repository, "get_active", _async_return(session))
+
+    result = await market_ws_dispatch.authenticate(
+        _AuthFakeWebSocket(token="irrelevant", pool=_FakePool())
+    )
+
+    assert result == (tenant_id, user_id)
+
+
+def _async_return(value: Any):
+    async def _fn(*_args: Any, **_kwargs: Any) -> Any:
+        return value
+
+    return _fn

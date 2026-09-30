@@ -115,6 +115,20 @@ async def authenticate(websocket: WebSocket) -> tuple[UUID, UUID] | None:
     if session is None:
         return None
 
+    # F3-WS(AUDIT_2026-09-30) — same gap as deps.py::get_current_user: checking
+    # only whether `sid` is active does not catch a mixed token (session A's
+    # sid signed with user B's sub/tid/auth_level). Reject on mismatch instead
+    # of trusting claims.tid/sub as-is.
+    try:
+        session_repository.verify_principal_binding(
+            session,
+            user_id=claims.sub,
+            tenant_id=claims.tid,
+            auth_level=claims.auth_level,
+        )
+    except session_repository.PrincipalMismatchError:
+        return None
+
     return claims.tid, claims.sub
 
 
