@@ -3,6 +3,7 @@
 users.status 컬럼을 대상으로 실제 조건부 UPDATE를 검증한다 — 별도 스크래치
 테이블을 만들지 않고 이미 존재하는 테이블로 헬퍼 자체의 동작을 확인한다.
 """
+
 import asyncio
 from pathlib import Path
 
@@ -165,3 +166,55 @@ async def test_set_values_column_order_does_not_affect_binding(pool):
         )
     assert row["status"] == "SUSPENDED"
     assert row["display_name"] == "renamed"
+
+
+async def test_empty_table_name_raises_syntax_error(pool):
+    """불변식 I-10 위반 — 테이블/컬럼 이름에 사용자 입력을 직접 넣으면 SQL 인젝션
+    취약점이 된다. 이 헬퍼는 column/table 이름을 상수로만 받도록 설계되었으므로,
+    빈 문자열이나 이상한 값을 전달하면 즉시 거부해야 한다.
+
+    conditional_update 내부에서 f-string으로 테이블/컬럼 이름을 삽입하므로,
+    빈 테이블 이름은 문법 오류를 일으킨다 — 이것이 바로 방어적 검사가
+    필요한 이유다. (105번 §3: column names are caller constants)
+    """
+    user_id = await create_test_user(pool)
+
+    with pytest.raises(asyncpg.PostgresSyntaxError):
+        await conditional_update(
+            conn=pool,
+            table="",  # 빈 테이블 이름 — 문법 오류 유발
+            id_column="user_id",
+            id_value=user_id,
+            expected_state_column="status",
+            expected_state_value="ACTIVE",
+            set_values={"status": "SUSPENDED"},
+        )
+
+
+async def test_dependency_failure_injected_raises(pool, monkeypatch):
+    """실패주입 — 연결이 갑자기 끊긴 상황을 monkeypatch로 재현한다.
+
+    conditional_update 가 conn.fetchrow() 호출 시 예외를 던지면,
+    ConcurrencyConflictError 로 감싸지 않고 원본 예외를 그대로 전파해야
+    한다(105번 §4: "do not swallow this exception").
+    """
+    user_id = await create_test_user(pool)
+
+    # conditional_update 의 conn.fetchrow 를 전역적으로 monkeypatch 한다.
+    # PoolConnectionProxy 의 속성은 직접 설정할 수 없으므로
+    # conditional_write 모듈의 fetchrow 호출 자체를 가로채야 한다.
+    async def broken_fetchrow(self, *args, **kwargs):
+        raise asyncpg.InterfaceError("connection pool closed")
+
+    monkeypatch.setattr(asyncpg.pool.Pool, "fetchrow", broken_fetchrow)
+
+    with pytest.raises(asyncpg.InterfaceError, match="connection pool closed"):
+        await conditional_update(
+            pool,
+            table="users",
+            id_column="user_id",
+            id_value=user_id,
+            expected_state_column="status",
+            expected_state_value="ACTIVE",
+            set_values={"status": "SUSPENDED"},
+        )
