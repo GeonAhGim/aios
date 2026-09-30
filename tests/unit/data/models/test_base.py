@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -105,3 +106,58 @@ def test_money_add_failure_injection_propagates_arithmetic_error():
     b = Money(amount=Decimal("2"), currency=Currency.USDT)
     with pytest.raises(ArithmeticError):
         a + b
+
+
+def test_fxrate_invalid_rate_type_raises_validation_error():
+    with pytest.raises(ValidationError):
+        FXRate(
+            base=Currency.KRW,
+            quote=Currency.USDT,
+            rate="not-a-number",
+            timestamp=datetime.now(timezone.utc),
+            source="test",
+        )
+
+
+def test_fxrate_missing_source_raises_validation_error():
+    with pytest.raises(ValidationError):
+        FXRate(
+            base=Currency.KRW,
+            quote=Currency.USDT,
+            rate=Decimal("1350.5"),
+            timestamp=datetime.now(timezone.utc),
+        )
+
+
+def test_fxrate_construction_failure_injection_propagates(monkeypatch):
+    """105 fail-closed: 의존 라이브러리(pydantic validator)가 예기치 않게
+    실패해도 FXRate는 이를 삼키지 않고 그대로 전파해야 한다."""
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("injected validator failure")
+
+    monkeypatch.setattr(
+        "src.data.models.base.FXRate.__init__",
+        _boom,
+    )
+    with pytest.raises(RuntimeError):
+        FXRate(
+            base=Currency.KRW,
+            quote=Currency.USDT,
+            rate=Decimal("1350.5"),
+            timestamp=datetime.now(timezone.utc),
+            source="test",
+        )
+
+
+@pytest.mark.perf
+def test_money_add_perf_budget_many_iterations():
+    """성능 단언(D2) — Money.__add__ 1,000회 반복이 100ms 예산 내에
+    끝나야 한다 (ADR-2026-09-09-C Decision 1, 비-실행축 로컬 CPU 연산)."""
+    a = Money(amount=Decimal("1.5"), currency=Currency.USDT)
+    b = Money(amount=Decimal("2.5"), currency=Currency.USDT)
+    start = time.perf_counter()
+    for _ in range(1000):
+        a + b
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.1
