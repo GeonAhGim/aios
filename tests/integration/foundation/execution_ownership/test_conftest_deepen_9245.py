@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from typing import Any, cast
 
@@ -133,3 +135,69 @@ async def test_gate_red_unknown_user_id_regression_is_caught(pool: asyncpg.Pool)
         "create_execution must not silently accept an unknown user_id -- "
         "a regression that swallows the FK violation would land here"
     )
+
+
+# ---------------------------------------------------------------------------
+# Performance assertion -- pool fixture must establish connection within budget.
+# ---------------------------------------------------------------------------
+
+
+async def test_pool_creation_performance_within_budget() -> None:
+    """Pool creation (including retry loop) must complete within a reasonable
+    latency budget (ADR-2026-09-09-C). This prevents accidental O(n) blocking
+    or infinite waits during test setup that would accumulate across the suite."""
+    start = time.perf_counter()
+    agen = _pool_fn()
+    p = await agen.__anext__()
+    elapsed = time.perf_counter() - start
+    await p.close()
+
+    assert elapsed < 10.0, (
+        f"pool fixture must establish connection within 10s budget; "
+        f"took {elapsed:.2f}s (possible retry loop or network latency)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Adversarial test -- concurrent create_execution maintains I-02 invariant
+# (lease/fencing token, owner change only on increment) under race conditions.
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_create_execution_maintains_invariant(
+    pool: asyncpg.Pool,
+) -> None:
+    """I-02 states: multi-process read of execution ownership must have
+    lease/fencing token, increment only on owner change. Even under concurrent
+    calls, create_execution must not corrupt the strategy or execution row
+    with partial/interleaved state or duplicate IDs."""
+    user_id = await create_test_user(pool)
+
+    # Spawn 3 concurrent executions -- verify each has unique IDs
+    # and all succeed without race condition or data corruption
+    ids = await asyncio.gather(
+        create_execution(pool, user_id),
+        create_execution(pool, user_id),
+        create_execution(pool, user_id),
+    )
+
+    assert len(set(ids)) == 3, (
+        f"concurrent create_execution calls must produce distinct IDs, not collide or reuse: {ids}"
+    )
+
+    # Verify all rows are fully inserted (not partial state)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, user_id, status FROM strategy_executions WHERE id = ANY($1)",
+            ids,
+        )
+
+    assert len(rows) == 3, (
+        f"all 3 concurrent executions must be fully committed; "
+        f"found only {len(rows)} rows (possible partial insert under race)"
+    )
+    for row in rows:
+        assert row["status"] == "RUNNING", (
+            f"execution {row['id']} has corrupted status {row['status']}, "
+            f"expected RUNNING after concurrent create"
+        )

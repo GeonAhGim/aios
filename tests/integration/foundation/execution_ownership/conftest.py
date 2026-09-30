@@ -4,6 +4,7 @@
 옮겨 두므로, 여기서는 asyncpg DSN 변환과 `execution_leases`의 FK 대상인
 `strategy_executions` 행을 만드는 최소 헬퍼만 둔다(FSM/조건 컴파일은
 이 리프 범위 밖 — 리스 저장소는 execution_id 존재만 필요하다)."""
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> object:  # pytest fixture yields asyncpg.Pool
     # esc-ci-pytest.json/task-6283: bounded retry absorbs the transient Windows
     # TCP reset (WinError 64 / asyncpg.ConnectionDoesNotExistError) that can hit
     # the initial connect -- see tests/support/db.py's create_pool_with_retry
@@ -67,7 +68,8 @@ async def create_execution(
             user_id,
             allocated_capital,
         )
-    return row["id"]
+        execution_id: int = row["id"]  # asyncpg.Record[str] returns Any
+    return execution_id
 
 
 @pytest.fixture
