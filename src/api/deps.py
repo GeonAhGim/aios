@@ -11,10 +11,15 @@ checks that the `auth_session` referenced by `sid` is still active
 (`revoked_at IS NULL`) (§3.4 "Check revoked_at on every request").
 Unlike the legacy JWT verifier that only checked signature and claims,
 a revoked session (logout / reuse detection) is rejected immediately
-even if the access token has not expired. get_current_verifier/
+even if the access token has not expired. It also cross-checks that
+the session's user_id/tenant_id/auth_level match the JWT's sub/tid/
+auth_level claims (F3, AUDIT_2026-09-30 §auth_rls) — a signature-valid
+token whose claims were signed for a different session owner is
+rejected rather than silently accepted as that owner. get_current_verifier/
 get_current_admin enforce RBAC flags from §15.6 of the auth doc
 (is_verifier / is_platform_admin).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -94,6 +99,20 @@ async def get_current_user(
     if session is None:
         raise SessionRevokedError(f"session_id={claims.sid}: 세션이 폐기되었습니다")
 
+    # F3(AUDIT_2026-09-30) — checking only whether `sid` is active does not
+    # catch a mixed token (session A's sid signed with user B's sub/tid).
+    # Cross-check the session row against these claims and reject on mismatch
+    # (same 401 AUTH_SESSION_REVOKED mapping as §3.4).
+    try:
+        session_repository.verify_principal_binding(
+            session,
+            user_id=claims.sub,
+            tenant_id=claims.tid,
+            auth_level=claims.auth_level,
+        )
+    except session_repository.PrincipalMismatchError as exc:
+        raise SessionRevokedError(str(exc)) from exc
+
     return AuthenticatedUser(
         **user.model_dump(), session_id=claims.sid, auth_level=claims.auth_level
     )
@@ -126,9 +145,7 @@ async def get_current_admin(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-def get_mfa_service(
-    request: Request, pool: asyncpg.Pool = Depends(get_pool)
-) -> MfaService:
+def get_mfa_service(request: Request, pool: asyncpg.Pool = Depends(get_pool)) -> MfaService:
     secrets = request.app.state.secrets
     return MfaService(pool, encryption_key=secrets.credential_encryption_key.get_secret_value())
 

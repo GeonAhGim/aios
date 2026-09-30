@@ -8,6 +8,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2 M3 DDL, §3.4
 되어 `ConcurrencyConflictError`가 난다. 이 리프에서는 그 신호를 "동시성 충돌"이
 아니라 "탈취된 refresh 토큰의 재사용"으로 해석해 세션을 즉시 revoke한다(§3.4).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -39,6 +40,19 @@ class RefreshReuseDetected(Exception):
 
     호출자(§9 PLT-24 `refresh.py`)는 이 예외를 401로 매핑하고 재로그인을
     요구해야 한다 — 세션은 이미 이 함수 안에서 revoke됐다."""
+
+
+class PrincipalMismatchError(Exception):
+    """Signature-valid access token whose JWT claims (`sub`/`tid`/`auth_level`)
+    don't match the actual owner/tenant/auth level of the session `sid` points
+    to (F3, AUDIT_2026-09-30 §auth_rls).
+
+    `get_active()` only checks whether `sid` is active, so a "mixed" token —
+    session A's `sid` combined with user B's `sub`/`tid`, signed by someone who
+    holds a valid signing key — passes the session lookup unchanged. This is
+    not signature forgery, but a session-ownership contract gap. The caller
+    (`deps.py` `get_current_user`) should map this the same as
+    `SessionRevokedError` (401 AUTH_SESSION_REVOKED) and require re-login."""
 
 
 def _row_to_session(row: asyncpg.Record) -> Session:
@@ -88,6 +102,26 @@ async def get_active(conn: asyncpg.Connection, session_id: UUID) -> Session | No
         "SELECT * FROM auth_session WHERE id = $1 AND revoked_at IS NULL", session_id
     )
     return None if row is None else _row_to_session(row)
+
+
+def verify_principal_binding(
+    session: Session, *, user_id: UUID, tenant_id: UUID, auth_level: AuthLevel
+) -> None:
+    """F3(AUDIT_2026-09-30) — Checks that `session` actually matches the JWT
+    claims' `sub`/`tid`/`auth_level`. A legitimate tenant switch (membership-
+    based tenant selection; pre-PLT-26 always has `tenant_id == user_id`)
+    always matches, because every login/refresh issues a fresh access token
+    straight from the session row itself — a mismatch can only happen for a
+    token signed with claims that don't belong to the session's owner."""
+    if (
+        session.user_id != user_id
+        or session.tenant_id != tenant_id
+        or session.auth_level != auth_level
+    ):
+        raise PrincipalMismatchError(
+            f"session_id={session.id}: claims(sub={user_id}, tid={tenant_id}, "
+            f"auth_level={auth_level})가 세션 소유자와 일치하지 않습니다"
+        )
 
 
 async def rotate_refresh(
