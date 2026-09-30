@@ -90,7 +90,8 @@ class PostgresReconciliationRepository:
         self, run: ReconciliationRun, items: tuple[ReconciliationItem, ...]
     ) -> ReconciliationRun:
         # REC-004 dedupe relies on `UNIQUE(target_ref, input_hash)` (migration
-        # f2b8e5d1a734 docstring: "두 번째 삽입 시도는 기존 행을 반환") — the
+        # f2b8e5d1a734 docstring: "the second insert attempt returns the
+        # existing row") — the
         # caller's own `get_run_by_input_hash` pre-check only closes the common
         # case; two concurrent callers with the same input can both pass that
         # check before either commits (task-8955: this is exactly what
