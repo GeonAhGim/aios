@@ -131,6 +131,12 @@ class _DictReturningCoverageRepository:
         return [{"instrument_id": instrument_id}]
 
 
+class _MissingListSpansCoverageRepository:
+    """`list_spans` 메서드가 빠진 불완전한 CoverageRepository 구현."""
+
+    async def upsert_span(self, conn: Any, span: Any) -> Any: ...
+
+
 def test_full_implementations_satisfy_their_ports() -> None:
     assert isinstance(_FullMarketDataProvider(), MarketDataProvider)
     assert isinstance(_FullInstrumentRepository(), InstrumentRepository)
@@ -141,6 +147,7 @@ def test_incomplete_implementations_fail_port_check() -> None:
     """포트 메서드 하나 누락 → isinstance() False(fail-closed 구조 증명)."""
     assert not isinstance(_MissingSubscribeProvider(), MarketDataProvider)
     assert not isinstance(_MissingCreateInstrumentRepository(), InstrumentRepository)
+    assert not isinstance(_MissingListSpansCoverageRepository(), CoverageRepository)
 
 
 async def test_dict_returning_fake_satisfies_isinstance_but_not_the_dto() -> None:
@@ -284,3 +291,32 @@ def test_require_microstructure_propagates_capabilities_failure(
 
     with pytest.raises(RuntimeError, match="capabilities backend unavailable"):
         require_microstructure(provider, "fetch_trades")
+
+
+def test_data_provider_error_retryable_by_code_negative_cases() -> None:
+    """negative test: DataProviderError의 retryable 필드는 code에 따라
+    결정된다. 모든 코드에서 값이 명확하게 정해져 있어야 한다."""
+    err_denied = DataProviderError(
+        DataProviderErrorCode.DATA_ENTITLEMENT_DENIED, provider_id="bitget"
+    )
+    assert err_denied.retryable is False
+    err_rate_limit = DataProviderError(
+        DataProviderErrorCode.DATA_PROVIDER_RATE_LIMITED, provider_id="bitget"
+    )
+    assert err_rate_limit.retryable is True
+
+
+async def test_list_instruments_exception_propagates_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입: MarketDataProvider의 list_instruments가 예외를 던지면
+    그 예외가 swallow되거나 조용히 빈 결과로 대체되지 않고 그대로 전파돼야 한다."""
+
+    async def _boom(self: _FullMarketDataProvider, asset_class: AssetClass) -> list[VenueListing]:
+        raise RuntimeError("vendor backend unreachable")
+
+    provider = _FullMarketDataProvider()
+    monkeypatch.setattr(provider.__class__, "list_instruments", _boom)
+
+    with pytest.raises(RuntimeError, match="vendor backend unreachable"):
+        await provider.list_instruments(AssetClass.CRYPTO)
