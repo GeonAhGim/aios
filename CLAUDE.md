@@ -2124,6 +2124,42 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     the repeat is fleet-code re-escalation plus ordinary shared-host CI capacity variance, not a
     gate design flaw.
 
+82. A ninth `pytest_latency_serial` systemic leaf (task-9721) citing a repeat set
+    (task-9286, task-9465, task-9534, task-9701) that overlaps #76 (task-9591) and #79
+    (task-9616) almost entirely, with task-9701 swapped in for task-9196 — reconfirms rather
+    than contradicts: task-9701 itself already closed noop, its own note stating the
+    `50c6a348` diff it was pointed at is only an `ingest_candles` error-string line-wrap
+    (unrelated to any DSL/perf-budget code), that the original lowering `PerfBudget` defect was
+    already fixed by task-9269's `eaa83bbd1`, that a full reproduction of `ci_recheck.py`'s own
+    4-nodeid `no:xdist` step passed in 29.66s (<300s budget) with every `RelativeBudget` ratio
+    comfortably under its ceiling (parser 1.200<1.600, builtins 0.200<0.850, lower
+    0.167<0.450, interpreter 0.833<2.700), and that a single earlier `parser` overshoot
+    (2.000>1.600) did not reproduce on two subsequent no-change reruns — ordinary shared-host
+    variance, not a design defect, and task-9701 explicitly declined to claim permanent
+    resolution of that residual flake rather than touching the budget. Reconfirmed on this
+    worktree (`git status` clean, `git log --oneline -3` on all 4 test files plus
+    `tests/_perf/relative_budget.py` still shows `eaa83bbd1` as the latest touch): all 4 files
+    `grep`-confirm `RelativeBudget` usage, and a serial run of the 4
+    `FULL_PYTEST_SERIAL_LATENCY_NODEIDS` gives `150 passed in 9.96s`, an order of magnitude
+    under the step's 300s budget. There is no `scripts/check_pytest_latency_serial.py` in this
+    repo — the check lives in fleet code (`pm/ci_recheck.py`'s
+    `FULL_PYTEST_SERIAL_LATENCY_NODEIDS`/build_steps), so the repeat is the same
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off a
+    stale/overlapping repeat set instead of checking whether a prior systemic leaf (task-9298/#20,
+    task-9483/#29, task-9550/#42, task-9668/#65, task-9694/#73, task-9591/#76, or task-9616/#79)
+    already closed the identical question — the same fleet-code pattern named twenty-one+ times
+    (#17-#26, #30-#31, #33-#36, #38, #40-#42, #48, #50, #56, #59, #61, #65, #73, #76, #79), out
+    of a repo worker's edit scope (§4). No script/test/budget change made — task-9269's
+    `RelativeBudget` migration is still the actual fix and is already in place; the residual
+    single-run `parser` overshoot task-9701 saw is shared-host variance, not something a
+    budget/threshold change should absorb (DECISION_GUIDELINES B-2). Before working a future
+    `pytest_latency_serial` leaf: run the 4 nodeids serially and grep them for `RelativeBudget`
+    first — if both hold, and the cited repeat leaf ids overlap an already-closed systemic leaf's
+    set (task-9298/#20, task-9483/#29, task-9550/#42, task-9668/#65, task-9694/#73, task-9591/#76,
+    task-9616/#79, or this entry), close as noop citing all of them rather than re-diagnosing a
+    tenth time. No baseline/budget relief made (DECISION_GUIDELINES B-2) — task-9269's
+    `RelativeBudget` migration is the actual fix and is already in place.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
