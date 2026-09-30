@@ -18,8 +18,16 @@ and the adapter call -- layer 1 now adds a `read_safety_state()`
 re-check to close it. WARNING/RESTRICTED (auto-downgradable,
 `CircuitBreakerLevel` 8.6-B) are out of scope -- unchanged behavior.
 
+task-9224 (audit F5 follow-up, task-9066) -- RECON_MISMATCH was only ever
+appended OPEN to `risk_signal` by `intraday_monitor.py`; no order path read
+it (unwired, confirmed by task-9066). Layer 1 now re-checks, only when
+`context.symbol` is set, whether that symbol has an OPEN RECON_MISMATCH via
+`PostgresSignalRepository.has_open_signal` and DENYs if so -- symbol-scoped
+isolation, not an account-wide PAUSE (other symbols/accounts are unaffected).
+
 3단 게이트(순서대로 평가, 먼저 DENY가 나오면 그 자리에서 반환):
-1층: fence stale(§3.6) 또는 활성 control 또는 CB HALTED/EMERGENCY → 즉시 DENY.
+1층: fence stale(§3.6) 또는 활성 control 또는 CB HALTED/EMERGENCY 또는 symbol 단위
+   OPEN RECON_MISMATCH → 즉시 DENY.
 2층(CM-8/CM-A5): `evaluate_compliance_gate` — mandate 위임장 규칙(CM-6/7)
    위반은 리스크·수치정책이 ALLOW여도 DENY(권위 분리). `require_compliance_
    mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 False — 아래
@@ -75,7 +83,9 @@ from src.foundation.risk_gate.adapters.postgres_decision_repository import (
     PostgresDecisionRepository,
 )
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
+from src.foundation.risk_gate.adapters.postgres_signal_repository import PostgresSignalRepository
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
+from src.foundation.risk_gate.domain.models import RiskSignalType
 from src.services.order_service.foundation_compliance import evaluate_compliance_gate
 from src.services.order_service.foundation_gate_decision import (
     flatten_fence,
@@ -110,6 +120,7 @@ def make_foundation_pre_submit_gate(
     personal_notifier: PersonalNotifierPort | None = None,
 ) -> PreSubmitGate:
     risk_repo = PostgresRiskGateRepository(pool)
+    signal_repo = PostgresSignalRepository(pool)
     mandate_repo = PostgresMandateRepository(pool)
     recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), InProcessEventBus())
     p_state = personal_state if personal_state is not None else JsonPersonalStateStore()
@@ -183,6 +194,35 @@ def make_foundation_pre_submit_gate(
                 fence_snapshot=fence,
                 decision_id=decision_id,
             )
+
+        # task-9224 (audit F5 follow-up, task-9066) -- RECON_MISMATCH has so
+        # far only been appended to `risk_signal` as a signal, unread by any
+        # order path (unwired, see module docstring). DENY only this symbol
+        # when `context.symbol` is set -- other symbols/accounts stay
+        # unaffected (symbol-scoped isolation, distinct from an account-wide
+        # PAUSE).
+        if context.symbol:
+            recon_mismatch_open = await signal_repo.has_open_signal(
+                tenant_id=context.user_id,
+                signal_type=RiskSignalType.RECON_MISMATCH,
+                scope_ref=context.symbol,
+            )
+            if recon_mismatch_open:
+                reason_codes = ("RISK_RECON_MISMATCH_SYMBOL",)
+                decision_id = await record_decision(
+                    recorder,
+                    context=context,
+                    outcome=GateOutcome.DENY,
+                    reason_codes=reason_codes,
+                    fence=fence,
+                    start_ns=start_ns,
+                )
+                return GateDecision(
+                    outcome=GateOutcome.DENY,
+                    reason_codes=reason_codes,
+                    fence_snapshot=fence,
+                    decision_id=decision_id,
+                )
 
         # CM-8/CM-A5 — evaluated here but only consumed at the two ALLOW
         # points below, so existing risk/numeric-mandate DENY reason codes

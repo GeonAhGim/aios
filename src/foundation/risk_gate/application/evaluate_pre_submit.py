@@ -22,6 +22,7 @@ recorder의 `inputs: BaseModel` 계약에 맞춰 `_PreSubmitInputs`(안전 상�
 스냅샷만 담는다 — 가짜 주문 데이터로 `RiskInputs.intent`를 채우지
 않는다)를 넘긴다.
 """
+
 from __future__ import annotations
 
 import time
@@ -37,16 +38,26 @@ from src.core.risk.hashing import canonical_json, sha256_hex
 from src.foundation.connections.api import ConnectionState, HealthState
 from src.foundation.connections.ports.repository import ConnectionRepository
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
-from src.foundation.risk_gate.domain.models import FenceSnapshot, SafetyControl
-from src.foundation.risk_gate.ports.repository import RiskGateRepository
+from src.foundation.risk_gate.domain.models import FenceSnapshot, RiskSignalType, SafetyControl
+from src.foundation.risk_gate.ports.repository import RiskGateRepository, RiskSignalRepository
 from src.services.risk_decision_recorder import RiskDecisionRecorder
 
 TTL_SECONDS = 2.0
 """§3.3 `decision_ttl.pre_submit_sec` — §3.6 2단계 `now < gate.expires_at`."""
 
-_RULE_VERSION = "risk_gate.pre_submit/1"
-_ENGINE_VERSION = "risk_gate.pre_submit/1"
-_RULE_IDS = ("active_control", "circuit_breaker", "data_distrust", "connection_fresh")
+_RULE_VERSION = "risk_gate.pre_submit/2"
+_ENGINE_VERSION = "risk_gate.pre_submit/2"
+_RULE_IDS = (
+    "active_control",
+    "circuit_breaker",
+    "data_distrust",
+    "recon_mismatch",
+    "connection_fresh",
+)
+# I2 fail-closed missing-value check targets -- unlike cb_level/
+# distrust_level/connection_fresh, recon_mismatch is always a determinate
+# bool query result, so it has no "missing (None)" state.
+_NULLABLE_RULE_IDS = ("circuit_breaker", "data_distrust", "connection_fresh")
 _RULE_HASH = sha256_hex(
     canonical_json({"gate_kind": "PRE_SUBMIT", "rule_version": _RULE_VERSION, "rules": _RULE_IDS})
 )
@@ -70,6 +81,7 @@ class _PreSubmitInputs(BaseModel, frozen=True):
     quantity: Decimal | None = None
     circuit_breaker_level: str | None
     data_distrust_level: str | None
+    recon_mismatch_open: bool
     connection_fresh: bool | None
     active_control_scopes: tuple[str, ...]
     fence_snapshot: dict[str, int]
@@ -93,6 +105,7 @@ def _compose(
     active_controls: tuple[SafetyControl, ...],
     cb_level: str | None,
     distrust_level: str | None,
+    recon_mismatch_open: bool,
     connection_fresh: bool | None,
 ) -> tuple[RiskOutcome, tuple[str, ...], tuple[RuleResult, ...]]:
     # I2 fail-closed — None을 "문제없음"으로 읽지 않는다. 하나라도 결손이면
@@ -100,7 +113,7 @@ def _compose(
     missing = [
         (rule_id, field, value)
         for rule_id, field, value in zip(
-            _RULE_IDS[1:],
+            _NULLABLE_RULE_IDS,
             ("cb_level", "distrust_level", "connection_fresh"),
             (cb_level, distrust_level, connection_fresh),
             strict=True,
@@ -126,6 +139,10 @@ def _compose(
         reason = f"RISK_DATA_DISTRUST_{distrust_level}"
         return RiskOutcome.DENY, (reason,), (_result("data_distrust", RiskOutcome.DENY, reason),)
 
+    if recon_mismatch_open:
+        reason = "RISK_RECON_MISMATCH_SYMBOL"
+        return RiskOutcome.DENY, (reason,), (_result("recon_mismatch", RiskOutcome.DENY, reason),)
+
     if not connection_fresh:
         reason = "RISK_INPUT_STALE"
         pause_result = _result("connection_fresh", RiskOutcome.PAUSE, reason)
@@ -140,9 +157,7 @@ async def _read_connection_fresh(
 ) -> bool | None:
     connections = await connection_repo.list_connections(tenant_id)
     matching = (
-        c
-        for c in connections
-        if c.provider_code == provider_code and c.state in _CONNECTED_STATES
+        c for c in connections if c.provider_code == provider_code and c.state in _CONNECTED_STATES
     )
     connection = next(matching, None)
     if connection is None:
@@ -154,6 +169,7 @@ async def _read_connection_fresh(
 async def evaluate_pre_submit(
     risk_repo: RiskGateRepository,
     connection_repo: ConnectionRepository,
+    signal_repo: RiskSignalRepository,
     decision_recorder: RiskDecisionRecorder,
     *,
     tenant_id: UUID,
@@ -173,11 +189,15 @@ async def evaluate_pre_submit(
     connection_fresh = await _read_connection_fresh(
         connection_repo, tenant_id=tenant_id, provider_code=provider_code
     )
+    recon_mismatch_open = await signal_repo.has_open_signal(
+        tenant_id=tenant_id, signal_type=RiskSignalType.RECON_MISMATCH, scope_ref=symbol
+    )
 
     outcome, reason_codes, rule_results = _compose(
         active_controls=active_controls,
         cb_level=cb_level,
         distrust_level=distrust_level,
+        recon_mismatch_open=recon_mismatch_open,
         connection_fresh=connection_fresh,
     )
 
@@ -191,6 +211,7 @@ async def evaluate_pre_submit(
         quantity=quantity,
         circuit_breaker_level=cb_level,
         data_distrust_level=distrust_level,
+        recon_mismatch_open=recon_mismatch_open,
         connection_fresh=connection_fresh,
         active_control_scopes=tuple(c.scope.value for c in active_controls),
         fence_snapshot={

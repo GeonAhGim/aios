@@ -4,186 +4,56 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §9 R-35.
 DoD: (1) 4개 입력(control/CB/distrust/connection) 각각 단독 DENY·PAUSE +
 None 입력 fail-closed DENY(I2). (2) TTL 2s 정확 + is_actionable. (3) F0가
 control 조회와 같은 스냅샷에서 읽힌 값(5쌍 모두 포함). (4) 교차 tenant
-격리. (5) recorder(R-25)로 WORM 기록(DENY 포함). (6) 동시성(D3) — kill
-switch 활성화와 경합하는 동시 호출들 사이에서 dirty/stale read 없이 커밋
-전/후로 정확히 갈린다(tests/adversarial/risk/test_fence_race.py 단계형
-gather 패턴을 evaluate_pre_submit 자신의 control 조회에 적용).
+격리. (5) recorder(R-25)로 WORM 기록(DENY 포함).
+
+공유 fixture/fake(`pool`, `risk_repo`, `signal_repo`, ...)는
+`conftest.py`에 있다 — 동시성(D3) 시나리오는
+`test_pre_submit_gate_concurrency.py`, RECON_MISMATCH 심볼단위 DENY(task
+-9224)는 `test_pre_submit_gate_recon_mismatch.py`로 분리했다(loc_over_500
+분리, CLAUDE.md §7).
 """
+
 from __future__ import annotations
 
-import asyncio
-import os
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from decimal import Decimal
-from uuid import UUID, uuid4
-
-import asyncpg
-import pytest
+from uuid import uuid4
 
 from src.core.risk.decision import GateKind, RiskOutcome
-from src.foundation.connections.domain.models import (
-    AccountConnection,
-    ConnectionHealth,
-    ConnectionState,
-    HealthState,
-)
-from src.foundation.risk_gate.adapters.postgres_decision_repository import (
-    PostgresDecisionRepository,
-)
-from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
+from src.foundation.connections.domain.models import HealthState
 from src.foundation.risk_gate.application.evaluate_pre_submit import evaluate_pre_submit
 from src.foundation.risk_gate.domain.fence import fence_pairs_for
 from src.foundation.risk_gate.domain.models import SafetyScope
-from src.services.risk_decision_recorder import RiskDecisionRecorder
-from tests.integration.conftest import NoopEventBus, create_test_tenant
-
-_PROVIDER = "bitget"
-_SYMBOL = "BTC/USDT"
-_SIDE = "BUY"
-_QTY = Decimal("0.01")
-
-
-class _FakeConnectionRepo:
-    """provider_code별 connection 유무·health만 흉내내는 최소 fake — 실제
-    connection lifecycle 없이 freshness 전달 경로만 검증한다
-    (test_risk_gate_lifecycle.py의 `_FakeHealthyConnectionRepo`와 동일 취지)."""
-
-    def __init__(self, *, tenant_id: UUID, provider_code: str, health: HealthState | None) -> None:
-        self._tenant_id = tenant_id
-        self._provider_code = provider_code
-        self._health = health
-        self._connection_id = uuid4()
-
-    async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
-        if tenant_id != self._tenant_id:
-            return []
-        return [
-            AccountConnection(
-                id=self._connection_id,
-                tenant_id=self._tenant_id,
-                owner_subject_id=self._tenant_id,
-                provider_code=self._provider_code,
-                opaque_account_ref="ACCT-TEST",
-                state=ConnectionState.ACTIVE_READONLY,
-                capability_profile=(),
-                revision=1,
-            )
-        ]
-
-    async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
-        if self._health is None:
-            return None
-        return ConnectionHealth(
-            connection_id=connection_id, evaluated_at=datetime.now(timezone.utc), state=self._health
-        )
+from tests.integration.conftest import create_test_tenant
+from tests.integration.risk.conftest import (
+    PROVIDER,
+    QTY,
+    SIDE,
+    SYMBOL,
+    FakeConnectionRepo,
+    NoConnectionRepo,
+    RiskRepoWithFixedSafetyState,
+    healthy_connection_repo,
+    normal_risk_repo,
+)
 
 
-class _NoConnectionRepo:
-    """이 provider에 connection 자체가 없는 경우 — connection_fresh=None."""
-
-    async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
-        return []
-
-    async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
-        return None
-
-
-class _RiskRepoWithFixedSafetyState:
-    """fence/control은 실 DB(`PostgresRiskGateRepository`)에 그대로 위임하고
-    circuit breaker/distrust level만 테스트가 원하는 값으로 고정한다 —
-    `system_safety_state`는 프로세스 전역 단일 행이라 직접 UPDATE하면 같은
-    DB를 공유하는 다른 테스트를 오염시킨다."""
-
-    def __init__(
-        self, inner: PostgresRiskGateRepository, *, cb_level: str | None, distrust_level: str | None
-    ) -> None:
-        self._inner = inner
-        self._cb_level = cb_level
-        self._distrust_level = distrust_level
-
-    async def read_fence_and_controls(self, pairs):  # noqa: ANN001, ANN201
-        return await self._inner.read_fence_and_controls(pairs)
-
-    async def read_safety_state(self, *, provider_code: str, symbol: str):  # noqa: ANN201
-        return self._cb_level, self._distrust_level
-
-
-def _asyncpg_dsn() -> str:
-    return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-
-
-@pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=8)
-    yield p
-    await p.close()
-
-
-@pytest.fixture
-def risk_repo(pool: asyncpg.Pool) -> PostgresRiskGateRepository:
-    return PostgresRiskGateRepository(pool)
-
-
-@pytest.fixture
-def decision_repo(pool: asyncpg.Pool) -> PostgresDecisionRepository:
-    return PostgresDecisionRepository(pool)
-
-
-@pytest.fixture
-def recorder(pool: asyncpg.Pool, decision_repo: PostgresDecisionRepository) -> RiskDecisionRecorder:
-    return RiskDecisionRecorder(pool, decision_repo, NoopEventBus())
-
-
-def _healthy_connection_repo(tenant_id: UUID) -> _FakeConnectionRepo:
-    return _FakeConnectionRepo(
-        tenant_id=tenant_id, provider_code=_PROVIDER, health=HealthState.HEALTHY
-    )
-
-
-def _normal_risk_repo(risk_repo: PostgresRiskGateRepository) -> _RiskRepoWithFixedSafetyState:
-    return _RiskRepoWithFixedSafetyState(risk_repo, cb_level="normal", distrust_level="NORMAL")
-
-
-class _BarrierGatedRiskRepo:
-    """`read_fence_and_controls` 직전에 barrier에서 기다린 뒤 실 DB(`inner`)에
-    위임한다 — kill switch 활성화 commit이 그 barrier를 여는 시점보다 앞섬을
-    보장해, 이 호출의 control 조회가 항상 활성화 *이후* 스냅샷을 보도록
-    결정론적으로 고정한다(test_fence_race.py 단계형 gather와 동일 취지)."""
-
-    def __init__(
-        self,
-        inner: PostgresRiskGateRepository,
-        *,
-        cb_level: str | None,
-        distrust_level: str | None,
-        barrier: asyncio.Event,
-    ) -> None:
-        self._inner = inner
-        self._cb_level = cb_level
-        self._distrust_level = distrust_level
-        self._barrier = barrier
-
-    async def read_fence_and_controls(self, pairs):  # noqa: ANN001, ANN201
-        await self._barrier.wait()
-        return await self._inner.read_fence_and_controls(pairs)
-
-    async def read_safety_state(self, *, provider_code: str, symbol: str):  # noqa: ANN201
-        return self._cb_level, self._distrust_level
-
-
-async def test_baseline_allow_and_ttl_is_exactly_two_seconds(pool, risk_repo, recorder):
+async def test_baseline_allow_and_ttl_is_exactly_two_seconds(
+    pool, risk_repo, signal_repo, recorder
+):
     tenant_id = await create_test_tenant(pool)
     execution_ref = f"exec:{uuid4().hex[:8]}"
     decision, fence = await evaluate_pre_submit(
-        _normal_risk_repo(risk_repo),
-        _healthy_connection_repo(tenant_id),
+        normal_risk_repo(risk_repo),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=execution_ref,
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
@@ -192,11 +62,11 @@ async def test_baseline_allow_and_ttl_is_exactly_two_seconds(pool, risk_repo, re
     assert decision.expires_at == decision.evaluated_at + timedelta(seconds=2)
     assert decision.is_actionable(decision.evaluated_at) is True
     assert decision.is_actionable(decision.evaluated_at + timedelta(seconds=2.1)) is False
-    assert set(fence.tokens) == set(fence_pairs_for(tenant_id, _PROVIDER, execution_ref))
+    assert set(fence.tokens) == set(fence_pairs_for(tenant_id, PROVIDER, execution_ref))
 
 
 async def test_active_control_alone_denies_and_fence_matches_same_snapshot(
-    pool, risk_repo, recorder
+    pool, risk_repo, signal_repo, recorder
 ):
     tenant_id = await create_test_tenant(pool)
     control = await risk_repo.insert_safety_control(
@@ -207,15 +77,16 @@ async def test_active_control_alone_denies_and_fence_matches_same_snapshot(
     )
 
     decision, fence = await evaluate_pre_submit(
-        _normal_risk_repo(risk_repo),
-        _healthy_connection_repo(tenant_id),
+        normal_risk_repo(risk_repo),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
@@ -226,20 +97,21 @@ async def test_active_control_alone_denies_and_fence_matches_same_snapshot(
     assert fence.tokens[(SafetyScope.ACCOUNT, str(tenant_id))] == control.fence_token
 
 
-async def test_circuit_breaker_alone_denies(pool, risk_repo, recorder):
+async def test_circuit_breaker_alone_denies(pool, risk_repo, signal_repo, recorder):
     tenant_id = await create_test_tenant(pool)
-    repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level="halted", distrust_level="NORMAL")
+    repo = RiskRepoWithFixedSafetyState(risk_repo, cb_level="halted", distrust_level="NORMAL")
 
     decision, _ = await evaluate_pre_submit(
         repo,
-        _healthy_connection_repo(tenant_id),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
@@ -247,20 +119,21 @@ async def test_circuit_breaker_alone_denies(pool, risk_repo, recorder):
     assert "RISK_CIRCUIT_BREAKER_HALTED" in decision.reason_codes
 
 
-async def test_data_distrust_alone_denies(pool, risk_repo, recorder):
+async def test_data_distrust_alone_denies(pool, risk_repo, signal_repo, recorder):
     tenant_id = await create_test_tenant(pool)
-    repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level="normal", distrust_level="DISTRUSTED")
+    repo = RiskRepoWithFixedSafetyState(risk_repo, cb_level="normal", distrust_level="DISTRUSTED")
 
     decision, _ = await evaluate_pre_submit(
         repo,
-        _healthy_connection_repo(tenant_id),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
@@ -268,22 +141,23 @@ async def test_data_distrust_alone_denies(pool, risk_repo, recorder):
     assert "RISK_DATA_DISTRUST_DISTRUSTED" in decision.reason_codes
 
 
-async def test_connection_stale_alone_pauses(pool, risk_repo, recorder):
+async def test_connection_stale_alone_pauses(pool, risk_repo, signal_repo, recorder):
     tenant_id = await create_test_tenant(pool)
-    stale_connection = _FakeConnectionRepo(
-        tenant_id=tenant_id, provider_code=_PROVIDER, health=HealthState.DEGRADED
+    stale_connection = FakeConnectionRepo(
+        tenant_id=tenant_id, provider_code=PROVIDER, health=HealthState.DEGRADED
     )
 
     decision, _ = await evaluate_pre_submit(
-        _normal_risk_repo(risk_repo),
+        normal_risk_repo(risk_repo),
         stale_connection,
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
@@ -291,21 +165,24 @@ async def test_connection_stale_alone_pauses(pool, risk_repo, recorder):
     assert "RISK_INPUT_STALE" in decision.reason_codes
 
 
-async def test_missing_circuit_breaker_level_is_fail_closed_deny(pool, risk_repo, recorder):
+async def test_missing_circuit_breaker_level_is_fail_closed_deny(
+    pool, risk_repo, signal_repo, recorder
+):
     """I2 negative test — None을 '문제없음'으로 읽지 않는다."""
     tenant_id = await create_test_tenant(pool)
-    repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level=None, distrust_level="NORMAL")
+    repo = RiskRepoWithFixedSafetyState(risk_repo, cb_level=None, distrust_level="NORMAL")
 
     decision, _ = await evaluate_pre_submit(
         repo,
-        _healthy_connection_repo(tenant_id),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
@@ -313,21 +190,22 @@ async def test_missing_circuit_breaker_level_is_fail_closed_deny(pool, risk_repo
     assert "RISK_INPUT_MISSING:cb_level" in decision.reason_codes
 
 
-async def test_missing_connection_is_fail_closed_deny(pool, risk_repo, recorder):
+async def test_missing_connection_is_fail_closed_deny(pool, risk_repo, signal_repo, recorder):
     """I2 negative test — 이 provider에 connection 자체가 없으면 '건강함'이
     아니라 결손으로 취급해 DENY한다."""
     tenant_id = await create_test_tenant(pool)
 
     decision, _ = await evaluate_pre_submit(
-        _normal_risk_repo(risk_repo),
-        _NoConnectionRepo(),
+        normal_risk_repo(risk_repo),
+        NoConnectionRepo(),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
@@ -336,7 +214,7 @@ async def test_missing_connection_is_fail_closed_deny(pool, risk_repo, recorder)
 
 
 async def test_other_tenants_control_does_not_leak_into_this_tenants_decision(
-    pool, risk_repo, recorder
+    pool, risk_repo, signal_repo, recorder
 ):
     tenant_id = await create_test_tenant(pool)
     other_tenant_id = await create_test_tenant(pool)
@@ -348,36 +226,40 @@ async def test_other_tenants_control_does_not_leak_into_this_tenants_decision(
     )
 
     decision, _ = await evaluate_pre_submit(
-        _normal_risk_repo(risk_repo),
-        _healthy_connection_repo(tenant_id),
+        normal_risk_repo(risk_repo),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
     assert decision.outcome == RiskOutcome.ALLOW
 
 
-async def test_denied_decision_is_recorded_in_worm_table(pool, risk_repo, recorder, decision_repo):
+async def test_denied_decision_is_recorded_in_worm_table(
+    pool, risk_repo, signal_repo, recorder, decision_repo
+):
     """DoD(5) — 거부도 recorder(R-25)로 WORM 기록된다."""
     tenant_id = await create_test_tenant(pool)
-    repo = _RiskRepoWithFixedSafetyState(risk_repo, cb_level="emergency", distrust_level="NORMAL")
+    repo = RiskRepoWithFixedSafetyState(risk_repo, cb_level="emergency", distrust_level="NORMAL")
 
     decision, _ = await evaluate_pre_submit(
         repo,
-        _healthy_connection_repo(tenant_id),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=f"exec:{uuid4().hex[:8]}",
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
     assert decision.outcome == RiskOutcome.DENY
@@ -389,108 +271,30 @@ async def test_denied_decision_is_recorded_in_worm_table(pool, risk_repo, record
     assert stored_decision.gate_kind == GateKind.PRE_SUBMIT
     assert inputs_snapshot["circuit_breaker_level"] == "emergency"
     # task-1532 I10 binding keys are recorded next to the fence (fenced_submit compares them)
-    assert (inputs_snapshot["symbol"], inputs_snapshot["side"]) == (_SYMBOL, _SIDE)
-    assert Decimal(inputs_snapshot["quantity"]) == _QTY
-    pairs = fence_pairs_for(tenant_id, _PROVIDER, decision.execution_ref)
+    assert (inputs_snapshot["symbol"], inputs_snapshot["side"]) == (SYMBOL, SIDE)
+    assert Decimal(inputs_snapshot["quantity"]) == QTY
+    pairs = fence_pairs_for(tenant_id, PROVIDER, decision.execution_ref)
     assert set(inputs_snapshot["fence_snapshot"]) == {f"{s.value}:{ref}" for s, ref in pairs}
 
 
-async def test_fence_snapshot_covers_exactly_the_five_pairs(pool, risk_repo, recorder):
+async def test_fence_snapshot_covers_exactly_the_five_pairs(pool, risk_repo, signal_repo, recorder):
     """DoD(3) — R-33 `fence_pairs_for`를 재구현하지 않고 그대로 5쌍 확인."""
     tenant_id = await create_test_tenant(pool)
     execution_ref = f"exec:{uuid4().hex[:8]}"
 
     _, fence = await evaluate_pre_submit(
-        _normal_risk_repo(risk_repo),
-        _healthy_connection_repo(tenant_id),
+        normal_risk_repo(risk_repo),
+        healthy_connection_repo(tenant_id),
+        signal_repo,
         recorder,
         tenant_id=tenant_id,
         execution_ref=execution_ref,
-        provider_code=_PROVIDER,
-        symbol=_SYMBOL,
-        side=_SIDE,
-        quantity=_QTY,
+        provider_code=PROVIDER,
+        symbol=SYMBOL,
+        side=SIDE,
+        quantity=QTY,
         trace_id=uuid4(),
     )
 
-    expected = fence_pairs_for(tenant_id, _PROVIDER, execution_ref)
+    expected = fence_pairs_for(tenant_id, PROVIDER, execution_ref)
     assert set(fence.tokens) == set(expected)
-
-
-_N_EARLY = 3
-_N_LATE = 3
-
-
-async def test_staged_gather_kill_switch_activation_vs_concurrent_evaluations(
-    pool, risk_repo, recorder
-):
-    """동시성 증명(D3) — kill switch 활성화와 경합하는 `_N_EARLY` + `_N_LATE`
-    동시 `evaluate_pre_submit` 호출. early 그룹은 activator가 시작되기 전에
-    이미 자신의 control 조회를 마쳤고, late 그룹은 activation commit이 연
-    barrier가 열려야만 자신의 control 조회를 한다 — 그 사이 어떤 인터리빙도
-    없다. 기대: early 전부 ALLOW(활성화 전 스냅샷), late 전부 DENY(활성화 후
-    스냅샷) — dirty read(활성화 전인데 DENY로 새는 경우)도 stale
-    read(활성화가 커밋됐는데 여전히 ALLOW로 새는 경우)도 없다."""
-    tenant_id = await create_test_tenant(pool)
-    execution_ref = f"exec:{uuid4().hex[:8]}"
-    early_done = asyncio.Event()
-    activated = asyncio.Event()
-    finished = 0
-
-    async def early():
-        nonlocal finished
-        try:
-            decision, _ = await evaluate_pre_submit(
-                _normal_risk_repo(risk_repo),
-                _healthy_connection_repo(tenant_id),
-                recorder,
-                tenant_id=tenant_id,
-                execution_ref=execution_ref,
-                provider_code=_PROVIDER,
-                symbol=_SYMBOL,
-                side=_SIDE,
-                quantity=_QTY,
-                trace_id=uuid4(),
-            )
-            return decision
-        finally:
-            finished += 1
-            if finished == _N_EARLY:
-                early_done.set()
-
-    async def activator():
-        await early_done.wait()
-        await risk_repo.insert_safety_control(
-            scope=SafetyScope.ACCOUNT,
-            scope_ref=str(tenant_id),
-            reason="pre-submit-race",
-            actor_subject_id=tenant_id,
-        )
-        activated.set()
-
-    async def late():
-        gated = _BarrierGatedRiskRepo(
-            risk_repo, cb_level="normal", distrust_level="NORMAL", barrier=activated
-        )
-        decision, _ = await evaluate_pre_submit(
-            gated,
-            _healthy_connection_repo(tenant_id),
-            recorder,
-            tenant_id=tenant_id,
-            execution_ref=execution_ref,
-            provider_code=_PROVIDER,
-            symbol=_SYMBOL,
-            side=_SIDE,
-            quantity=_QTY,
-            trace_id=uuid4(),
-        )
-        return decision
-
-    results = await asyncio.gather(
-        *(early() for _ in range(_N_EARLY)), activator(), *(late() for _ in range(_N_LATE))
-    )
-    early_results, late_results = results[:_N_EARLY], results[_N_EARLY + 1 :]
-
-    assert all(d.outcome == RiskOutcome.ALLOW for d in early_results)
-    assert all(d.outcome == RiskOutcome.DENY for d in late_results)
-    assert all("RISK_KILL_SWITCH_ACTIVE_ACCOUNT" in d.reason_codes for d in late_results)

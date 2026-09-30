@@ -13,6 +13,7 @@ per call site, the DoD(b) boundary assertions (04:59:59 vs 05:00:00 vs
 05:04:59) could drift between caller and repository. Keeping it in one
 place rules that out.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -97,6 +98,23 @@ class PostgresSignalRepository:
                 tenant_id,
             )
         return tuple(_row_to_signal(row) for row in rows)
+
+    async def has_open_signal(
+        self, *, tenant_id: UUID, signal_type: RiskSignalType, scope_ref: str
+    ) -> bool:
+        # `risk_signal` has no scope_ref column -- extract and compare via
+        # the dedupe_key prefix (`f"{type}:{scope_ref}:{floor(as_of,5min)}"`,
+        # symmetric with dedupe_key_for). Only OPEN rows narrowed by the
+        # tenant_state index are scanned, so the Python-side filter is cheap.
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT dedupe_key FROM risk_signal "
+                "WHERE tenant_id = $1 AND type = $2 AND state = 'OPEN'",
+                tenant_id,
+                signal_type.value,
+            )
+        prefix = f"{signal_type.value}:{scope_ref}:"
+        return any(row["dedupe_key"].startswith(prefix) for row in rows)
 
 
 __all__ = ["PostgresSignalRepository", "dedupe_key_for"]

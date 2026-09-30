@@ -15,6 +15,7 @@ from src.foundation.risk_gate.domain.models import (
     RiskEvaluation,
     RiskLimit,
     RiskSignal,
+    RiskSignalType,
     SafetyControl,
     SafetyScope,
 )
@@ -214,4 +215,13 @@ class RiskSignalRepository(Protocol):
     async def list_open(self, tenant_id: UUID) -> tuple[RiskSignal, ...]:
         """Returns only this tenant's `state='OPEN'` rows -- zero rows for
         any other tenant (implementation's responsibility)."""
+        ...
+
+    async def has_open_signal(
+        self, *, tenant_id: UUID, signal_type: RiskSignalType, scope_ref: str
+    ) -> bool:
+        """task-9224 (F5 follow-up) -- whether this tenant has any OPEN
+        signal matching `signal_type` and `scope_ref`. `risk_signal` has no
+        separate `scope_ref` column (only `dedupe_key`, §6 row 453), so the
+        implementation extracts and compares from `dedupe_key`."""
         ...
