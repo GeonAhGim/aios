@@ -30,12 +30,15 @@ pyproject.toml `timeout_method = "thread"`)이 실제로 어디까지 보호하�
 배선하면 안 된다(단언 약화 금지: 타임아웃 회피가 새로운 거짓-빨강을 만들면
 순손실이다).
 """
+
 from __future__ import annotations
 
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+import pytest
 
 _HANGING_MODULE = textwrap.dedent(
     """
@@ -57,10 +60,18 @@ def _run_synthetic_hang(tmp_path: Path) -> subprocess.CompletedProcess[str]:
     module.write_text(_HANGING_MODULE, encoding="utf-8")
     return subprocess.run(
         [
-            sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-v",
-            "--timeout-method=thread", str(module),
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-v",
+            "--timeout-method=thread",
+            str(module),
         ],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -88,3 +99,154 @@ def test_hang_past_per_test_timeout_still_kills_the_whole_process(
 
     assert "test_sibling_would_run_next_if_the_process_survived" not in result.stdout
     assert "1 passed" not in result.stdout
+
+
+def test_non_numeric_timeout_marker_value_is_rejected_not_silently_ignored(
+    tmp_path: Path,
+) -> None:
+    """부정 케이스 — `@pytest.mark.timeout("abc")`처럼 불변식(타임아웃 값은
+    숫자여야 한다)을 위반한 입력은 pytest_timeout이 `_validate_timeout`에서
+    명시적으로 거부한다(INTERNALERROR, exit code 3) — 조용히 무시하고
+    타임아웃 없이 테스트를 통과시키는 fail-open이 아니다."""
+    module = tmp_path / "test_bad_marker_value.py"
+    module.write_text(
+        textwrap.dedent(
+            """
+            import pytest
+
+            @pytest.mark.timeout("abc")
+            def test_would_never_time_out_if_silently_ignored():
+                assert True
+            """
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-v",
+            "--timeout-method=thread",
+            str(module),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 3
+    assert "INTERNALERROR" in result.stdout
+    assert "Invalid timeout" in result.stdout
+    assert "1 passed" not in result.stdout
+
+
+def test_negative_timeout_marker_value_disables_enforcement_instead_of_erroring(
+    tmp_path: Path,
+) -> None:
+    """부정 케이스 — 음수 타임아웃(`@pytest.mark.timeout(-1)`)은
+    `_validate_timeout`이 숫자형이라는 이유만으로 통과시켜 타임아웃이 꺼진
+    채로 조용히 성공한다. `test_non_numeric_timeout_marker_value_is_rejected_*`
+    와 대비해 "숫자형이면 부호는 검증하지 않는다"는 이 플러그인의 실제 계약을
+    고정한다 — 음수 타임아웃을 실수로 설정해도 CI가 이를 걸러주지 않는다는
+    한계를 문서화된 가정이 아니라 관측된 사실로 남긴다."""
+    module = tmp_path / "test_negative_marker_value.py"
+    module.write_text(
+        textwrap.dedent(
+            """
+            import pytest
+
+            @pytest.mark.timeout(-1)
+            def test_passes_because_negative_timeout_is_not_rejected():
+                assert True
+            """
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-v",
+            "--timeout-method=thread",
+            str(module),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0
+    assert "1 passed" in result.stdout
+    assert "INTERNALERROR" not in result.stdout
+
+
+def test_signal_timeout_method_is_rejected_on_windows(tmp_path: Path) -> None:
+    """부정 케이스 — 이 파일의 docstring이 주장하는 "SIGALRM이 없는
+    Windows에서는 signal 방식을 쓸 수 없다"를 실측으로 고정한다.
+    `--timeout-method=signal`을 이 플랫폼에서 강제하면 조용히 무시되고
+    thread 방식으로 폴백하는 것이 아니라 `AttributeError`로 INTERNALERROR가
+    나며 죽는다 — 이 저장소가 `timeout_method = "thread"`를 고정한 이유가
+    "선호"가 아니라 "그 외에는 동작하지 않기 때문"임을 증명한다.
+    이 저장소의 실제 CI 러너(`C:\\aios\\pm\\local_ci.py`)와 모든 worktree는
+    Windows에서만 돈다(파일 상단 docstring과 동일 가정) — 조건부
+    skip/skipif를 쓰지 않는 이유는 `check_code_ratchets.py`의 `skip_xfail`
+    기준선을 늘리지 않기 위해서다."""
+    assert sys.platform == "win32", "이 테스트는 Windows CI 가정을 검증한다"
+    module = tmp_path / "test_signal_method.py"
+    module.write_text(
+        textwrap.dedent(
+            """
+            import time
+            import pytest
+
+            @pytest.mark.timeout(1)
+            def test_would_hang():
+                time.sleep(2)
+            """
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-v",
+            "--timeout-method=signal",
+            str(module),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 3
+    assert "INTERNALERROR" in result.stdout
+    assert "SIGALRM" in result.stdout
+
+
+def test_missing_synthetic_module_path_fails_closed_instead_of_reporting_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입 — `_run_synthetic_hang`이 대상 모듈을 실제로 쓰지 못하는
+    상황(디스크 쓰기 실패를 모사해 `Path.write_text`가 예외를 던지도록
+    monkeypatch)에서도 예외가 조용히 삼켜져 "성공"으로 보고되지 않고
+    그대로 전파되는지 확인한다 — 스캐폴딩(synthetic hang 모듈 생성)이
+    깨지면 진단 테스트 자체가 거짓-초록으로 통과해서는 안 된다."""
+
+    def _boom(self: Path, data: str, encoding: str) -> None:
+        raise OSError("simulated disk failure while writing synthetic hang module")
+
+    monkeypatch.setattr(Path, "write_text", _boom)
+
+    with pytest.raises(OSError, match="simulated disk failure"):
+        _run_synthetic_hang(tmp_path)
