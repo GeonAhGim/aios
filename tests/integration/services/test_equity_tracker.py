@@ -8,6 +8,7 @@ R-30(task-1220) 추가분. SQL 자체가 검증 대상이라 asyncpg로 붙어 1
 tests/unit/services/test_equity_tracker.py 쪽에 있다(task-1615, PLT-36 —
 tests/unit 아래는 실DB에 접속하지 않는다).
 """
+
 import asyncio
 import json
 import uuid
@@ -78,20 +79,29 @@ async def test_save_equity_baseline_peak_never_regresses(pool) -> None:
     today = date(2026, 9, 4)
 
     await save_equity_baseline(
-        pool, execution_id, day_start_date=today,
-        day_start_value=Decimal("1000"), peak_value=Decimal("1000"),
+        pool,
+        execution_id,
+        day_start_date=today,
+        day_start_value=Decimal("1000"),
+        peak_value=Decimal("1000"),
     )
     await save_equity_baseline(
-        pool, execution_id, day_start_date=today,
-        day_start_value=Decimal("1000"), peak_value=Decimal("1100"),
+        pool,
+        execution_id,
+        day_start_date=today,
+        day_start_value=Decimal("1000"),
+        peak_value=Decimal("1100"),
     )
 
     # 뒤늦게 커밋되는 다른 tick이 자신이 관측한(더 낮은) peak·다른
     # day_start_value로 저장을 시도한다 — 이전 read-modify-write
     # 구현이면 peak가 1100 → 900으로 역행하고 day_start도 덮였다.
     await save_equity_baseline(
-        pool, execution_id, day_start_date=today,
-        day_start_value=Decimal("777"), peak_value=Decimal("900"),
+        pool,
+        execution_id,
+        day_start_date=today,
+        day_start_value=Decimal("777"),
+        peak_value=Decimal("900"),
     )
 
     async with pool.acquire() as conn:
@@ -111,12 +121,18 @@ async def test_save_equity_baseline_day_rollover_resets_day_start(pool) -> None:
     execution_id = await _create_execution(pool, user_id)
 
     await save_equity_baseline(
-        pool, execution_id, day_start_date=date(2026, 9, 3),
-        day_start_value=Decimal("500"), peak_value=Decimal("500"),
+        pool,
+        execution_id,
+        day_start_date=date(2026, 9, 3),
+        day_start_value=Decimal("500"),
+        peak_value=Decimal("500"),
     )
     await save_equity_baseline(
-        pool, execution_id, day_start_date=date(2026, 9, 4),
-        day_start_value=Decimal("620"), peak_value=Decimal("620"),
+        pool,
+        execution_id,
+        day_start_date=date(2026, 9, 4),
+        day_start_value=Decimal("620"),
+        peak_value=Decimal("620"),
     )
 
     async with pool.acquire() as conn:
@@ -132,8 +148,11 @@ async def test_save_equity_baseline_day_rollover_resets_day_start(pool) -> None:
 async def test_save_equity_baseline_missing_execution_fails_closed(pool) -> None:
     with pytest.raises(LookupError):
         await save_equity_baseline(
-            pool, -1, day_start_date=date(2026, 9, 4),
-            day_start_value=Decimal("1"), peak_value=Decimal("1"),
+            pool,
+            -1,
+            day_start_date=date(2026, 9, 4),
+            day_start_value=Decimal("1"),
+            peak_value=Decimal("1"),
         )
 
 
@@ -153,8 +172,11 @@ async def test_save_equity_baseline_concurrent_writes_never_lose_the_max_peak(po
     await asyncio.gather(
         *[
             save_equity_baseline(
-                pool, execution_id, day_start_date=today,
-                day_start_value=Decimal("1000"), peak_value=p,
+                pool,
+                execution_id,
+                day_start_date=today,
+                day_start_value=Decimal("1000"),
+                peak_value=p,
             )
             for p in peaks
         ]
@@ -185,8 +207,31 @@ async def test_save_equity_baseline_propagates_connection_failure_fail_closed(
 
     with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
         await save_equity_baseline(
-            pool, execution_id, day_start_date=date(2026, 9, 7),
-            day_start_value=Decimal("500"), peak_value=Decimal("500"),
+            pool,
+            execution_id,
+            day_start_date=date(2026, 9, 7),
+            day_start_value=Decimal("500"),
+            peak_value=Decimal("500"),
+        )
+
+
+async def test_save_equity_baseline_rejects_out_of_range_peak_value(pool) -> None:
+    """negative test — `equity_peak_value NUMERIC(30,10)`는 정수부 20자리가
+    한계다. 그보다 큰 값을 넣으면 조용히 잘리거나 성공한 것처럼 보이면
+    안 되고, asyncpg가 `NumericValueOutOfRangeError`로 거부한 채 그대로
+    전파돼야 한다(silent truncation은 peak 역행 방지 불변식을 무의미하게
+    만든다)."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id)
+    out_of_range = Decimal("1" + "0" * 25)
+
+    with pytest.raises(asyncpg.exceptions.NumericValueOutOfRangeError):
+        await save_equity_baseline(
+            pool,
+            execution_id,
+            day_start_date=date(2026, 9, 9),
+            day_start_value=Decimal("100"),
+            peak_value=out_of_range,
         )
 
 
@@ -208,8 +253,11 @@ async def test_save_equity_baseline_single_round_trip(pool, monkeypatch) -> None
     monkeypatch.setattr(asyncpg.Connection, "fetchrow", counting_fetchrow)
 
     await save_equity_baseline(
-        pool, execution_id, day_start_date=date(2026, 9, 8),
-        day_start_value=Decimal("100"), peak_value=Decimal("100"),
+        pool,
+        execution_id,
+        day_start_date=date(2026, 9, 8),
+        day_start_value=Decimal("100"),
+        peak_value=Decimal("100"),
     )
 
     assert call_count == 1
