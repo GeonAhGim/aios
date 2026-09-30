@@ -12,7 +12,7 @@ Tests the EMS ``domain/parent_child.py`` functions:
 
 import builtins
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -36,7 +36,7 @@ from src.foundation.ems.domain.parent_child import (
 
 
 def _child_fill(
-    child_id: None | None = None,
+    child_id: UUID | None = None,
     filled_qty: Decimal = Decimal("0"),
     status: OrderStatus = OrderStatus.CREATED,
 ) -> ChildFillState:
@@ -229,7 +229,7 @@ class TestFailureInjection:
         # Save original sum
         original_sum = builtins.sum
 
-        def failing_sum(iterable: object, start: int = 0) -> None:
+        def failing_sum(iterable, start=0):
             raise Overflow("decimal overflow")
 
         builtins.sum = failing_sum
