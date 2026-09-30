@@ -115,6 +115,21 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     so treat "looks like dead code, nothing imports it" as insufficient justification for deleting
     anything under a `generated/` directory; regenerate via the sibling `*_generate_*.py` script
     instead, and check its docstring for the rationale first.
+12. Adding D3 evidence (negative/failure-injection/perf/adversarial/replay tests, §5) to a test or
+    foundation file that is already near 500 lines, then only noticing the `code_ratchets`
+    `loc_over_500` regression after the commit — the same handful of near-threshold files
+    (`test_registry.py`, `test_queries.py`, reconciliation lifecycle tests, ...) regressed this way
+    three separate times in 24h (task-8627, task-8905, task-9010), each fixed by condensing
+    Korean rationale prose that a prior DEEPEN pass had already written instead of referencing it.
+    The check script/baseline are not the defect here: `--update` requiring an explicit call before
+    a decrease is persisted is intentional (a ratchet that silently rewrites itself on every green
+    run would hide a shrink nobody reviewed), and the 500/800/1000 thresholds are ADR-2026-09-10-C
+    §7 observation aids, not something to raise (DECISION_GUIDELINES B-2, task-3936). Before adding
+    D3 evidence to a file, check its current line count first — if it is already past ~400 lines,
+    split it into a sibling `_<aspect>.py` test file by responsibility before adding evidence,
+    instead of adding first and trimming docstrings after `code_ratchets` goes red. Same applies to
+    a new intentional fail-closed `raise NotImplementedError` stub: add the `# ratchet-allow:
+    <reason>` comment (§3) in the same commit that introduces it, not as a follow-up fix.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
