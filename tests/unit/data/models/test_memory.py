@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -13,6 +14,9 @@ def _valid_kwargs(**overrides):
         content={"action": "buy"},
         source_agent="strategy-agent",
     )
+    # Default timestamps for override-friendly base
+    base_created = datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
+    kwargs["created_at"] = base_created
     kwargs.update(overrides)
     return kwargs
 
@@ -58,6 +62,52 @@ def test_memory_entry_dependency_failure_propagates_fail_closed(monkeypatch):
     monkeypatch.setattr(MemoryEntry, "__init__", boom)
     with pytest.raises(RuntimeError):
         MemoryEntry(**_valid_kwargs())
+
+
+def test_memory_verified_at_before_created_at_raises():
+    """negative: verified_at cannot precede created_at (provenance ordering invariant)."""
+    created = datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
+    verified = datetime(2026, 9, 30, 11, 59, 59, tzinfo=timezone.utc)  # 1s earlier
+    with pytest.raises(ValidationError):
+        MemoryEntry(
+            **_valid_kwargs(created_at=created, verified_at=verified),
+        )
+
+
+def test_memory_verified_by_requires_verified_status():
+    """negative: setting verified_by without VERIFIED status is rejected."""
+    with pytest.raises(ValidationError):
+        MemoryEntry(
+            **_valid_kwargs(verified_by="auditor-agent", status=ProvenanceStatus.UNVERIFIED),
+        )
+
+
+def test_memory_uuid4_failure_propagates(monkeypatch):
+    """failure-injection: uuid4() exception propagates instead of being swallowed.
+
+    Pydantic v2's compiled validator captures default_factory at class-definition
+    time, so we can't patch it after import. Instead we run a subprocess with
+    uuid4 patched before the model is imported.
+    """
+
+    import subprocess
+    import sys
+
+    code = """
+import uuid
+uuid.uuid4 = lambda *a, **k: (_ for _ in ()).throw(OSError("UUID generation service unavailable"))
+from src.data.models.memory import MemoryEntry
+MemoryEntry(memory_type="DECISION", content={"action": "buy"}, source_agent="test")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "Expected OSError from uuid4 failure"
+    assert "UUID generation service unavailable" in result.stderr, (
+        f"Expected error message not found in stderr: {result.stderr}"
+    )
 
 
 @pytest.mark.perf
