@@ -15,6 +15,7 @@ from src.foundation.paper_control.adapters.postgres_repository import (
 from src.foundation.paper_control.application.pause_deployment import (
     CrossTenantDeploymentAccessError,
     DeploymentNotFoundError,
+    InvalidDeploymentStateError,
     pause_deployment,
     stop_deployment,
 )
@@ -206,7 +207,7 @@ async def test_cannot_modify_deployment_with_unauthorized_actor(
         idempotency_key=f"req-authz-{tenant_id}",
     )
 
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidDeploymentStateError):
         await pause_deployment(
             repo,
             tenant_id=tenant_id,
