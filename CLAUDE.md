@@ -616,6 +616,55 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     `test.timeout=90s` design is sound (task-9152's own conclusion, reconfirmed here); the
     remaining defect is fleet code, not this repo.
 
+28. `pytest` 24h 4-repeat systemic investigation (task-9482) — there is no `scripts/check_pytest.py`;
+    unlike every other named gate in this list, `pytest` in `ci_recheck.py`'s `build_steps` (and
+    `esc-ci-pytest.json`) *is* the full test suite (`pytest -n <workers> --dist loadfile -m "not
+    perf and not nightly and not live_demo"`, ~2712s standalone per `ci_recheck.py:4`), so the
+    "same gate repeating" signal is actually N unrelated single-test failures sharing one stage
+    name — the `ruff`/`frontend` pattern (#15/#16) at suite scale. The 4 cited leaves are three
+    distinct failure classes, none a design defect in a shared check script (there isn't one):
+    (a) task-8850 and task-9055 are the *same* real regression happening twice — #11's
+    `generated/` deletion mistake (`src/exchanges/kis/generated/*_tr_labels.py`, BR-12/
+    ADR-2026-09-06-I D7) breaking
+    `tests/unit/scripts/test_kis_generate_adapters.py::test_committed_generated_dir_matches_fresh_
+    regeneration` — task-8850 fixed it once (commit `62005ec2`, root-caused task-8735/task-8770's
+    hand-edits), then task-8543's later "janitor" cleanup re-deleted the same 7 files on the
+    identical "zero references" premise and task-9055 restored them again (commit `9c4a176a`);
+    this is #11's own regression counter, not a fresh design gap. (b) task-8933 investigated 3
+    perf-marked probe tests and correctly classified them as runner noise: all 3 already carry
+    `@pytest.mark.perf`, and reproducing on `HEAD==origin/main` (no code delta) reproduced the same
+    budget overshoot (`train_step` p95 8-10.3s vs 5s budget, db-reset race 271s vs 90s budget)
+    while `tasklist` showed 30+ concurrent `python.exe` processes from sibling fleet workers on the
+    shared host — DECISION_GUIDELINES B-2 correctly bars a budget change for this (ci-red-triage
+    class C), so task-8933 closed noop with no code change, which is the *correct* outcome, not an
+    unresolved defect. (c) task-9464 found a single-test failure
+    (`tests/unit/meta/test_perf_measurement_guard.py::test_current_offender_count_matches_baseline`)
+    failing the pytest stage's collection-wide exit code even though the other ~2000+ tests passed
+    — root cause was 4 unrelated D2/D3 leaves adding raw `time.perf_counter()`/`monotonic()`
+    asserts inside `@pytest.mark.perf` tests without the `perf_budget` fixture, pushing the
+    ratchet's own offender count 544->548 (commit `7ad655e6`), the same D2/D3-mandate-vs-ratchet
+    collision already documented in #14 for `type_ignore`, just for `perf_measurement_guard`'s
+    offender count instead of the type-ignore budget. `esc-ci-pytest.json`'s own detail confirms
+    the compounding effect: its stored failure tail ends mid-run with `[gw3] node down: Not
+    properly terminated` — an xdist worker crash unrelated to any of the 3 fixes above, consistent
+    with the same shared-host resource contention task-8933 already diagnosed (worker death under
+    concurrent-process pressure, not a collection or assertion bug). Verified on this worktree:
+    both `tests/unit/scripts/test_kis_generate_adapters.py` and
+    `tests/unit/meta/test_perf_measurement_guard.py` pass (32 passed) confirming (a) and (c) are
+    both still fixed; `scripts/check_pytest.py` does not exist to have a baseline/threshold to
+    relieve. No script/baseline change made — there is no `pytest`-specific check script, the 4
+    leaves are 3 already-closed unrelated root causes (one true regression counted twice, one
+    correctly-classified noop, one D2/D3-ratchet collision) plus ordinary shared-host flakiness,
+    not a fourth new design defect. Before working a future `pytest` correction leaf: run only the
+    specific failing nodeid(s) from the stage tail in isolation first (not the full suite, §4
+    prohibits `pytest tests/`) — if they pass standalone and the tail shows a `node down`/xdist
+    crash line, treat it as shared-host contention (cite task-8933) rather than bisecting a source
+    regression; if a specific test fails standalone, root-cause that one test/file, since "pytest"
+    is a container name for the whole suite and each occurrence is independent until proven
+    otherwise. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — there is nothing to
+    relieve; the remaining variance is real per-leaf failures plus shared-host CI capacity, not a
+    gate design flaw.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
