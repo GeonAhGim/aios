@@ -318,6 +318,31 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     at current HEAD before opening/reusing a `ci_red` fix task off `esc-ci-complexity.json`),
     not this repo.
 
+19. Re-running a `perf_marker_guard` systemic investigation that a prior systemic leaf already
+    closed with the right root cause — task-8993 flagged this stage at 10+ leaves in 24h
+    (task-8849, 8889, 8932, 9135, 9254, plus the two systemic leaves) and the first systemic
+    leaf, task-9138, already found the real cause: the AST scan and the 60s budget (tuned in
+    task-9135's `_test_files`/substring-prefilter fix, `scripts/check_perf_marker_guard.py:121-151`)
+    are both correct — the repeated correction leaves were unrelated new tests each adding a
+    wall-clock `perf_counter()`/`monotonic()` assert without `@pytest.mark.perf`, because
+    `docs/TESTING.md` had no section telling authors the marker was required until task-9138
+    added one (commit `a2cafe7b`, "성능(wall-clock) 예산 테스트 작성 규칙"). That fix was correct
+    and is still in place — a local run confirms `OK` in ~2s, an order of magnitude under the
+    60s budget. But `esc-ci-perf_marker_guard.json` kept the escalation open after task-9135's
+    fix landed (`03:13:11Z`) and re-created fix task-9254 at `05:57:08Z` off the *same*
+    `detail_hash: "dbd3aa2db6c7"` — task-9254 confirmed noop (already fixed, stale timeout
+    escalation), yet the escalation still spawned a second `ci_red_systemic` leaf (this one,
+    task-9289) afterward instead of recognizing task-9138 had already closed the systemic
+    question with a landed doc fix. This is the same fleet-code defect as #17
+    (`pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule reusing a stale escalation record
+    instead of re-checking current HEAD and prior systemic-leaf resolution before opening
+    another leaf) applied to a second gate. Before working a new `perf_marker_guard` leaf
+    (individual or systemic): run `python scripts/check_perf_marker_guard.py` locally first — if
+    it's `OK` and fast, and a systemic leaf already exists with a landed fix commit in its note,
+    close as noop citing that leaf and this entry rather than re-investigating the same design.
+    No baseline/timeout relief made (DECISION_GUIDELINES B-2) — script/docs design is sound; the
+    remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
