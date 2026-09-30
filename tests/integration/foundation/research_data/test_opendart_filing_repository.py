@@ -41,7 +41,7 @@ def _krx_symbol() -> str:
     return f"{uuid.uuid4().int % 900000 + 100000:06d}"
 
 
-async def _make_instrument(pool) -> uuid.UUID:
+async def _make_instrument(pool: asyncpg.AsyncioMCDSN) -> uuid.UUID:
     repo = PostgresReferenceRepository(pool)
     async with pool.acquire() as conn, conn.transaction():
         instrument = await repo.register(
@@ -60,7 +60,9 @@ async def _make_instrument(pool) -> uuid.UUID:
     return instrument.instrument_id
 
 
-def _split(instrument_id, *, ratio: str, known_at: datetime, source_ref: str) -> CorporateAction:
+def _split(
+    instrument_id: uuid.UUID, *, ratio: str, known_at: datetime, source_ref: str
+) -> CorporateAction:
     return CorporateAction(
         action_type="SPLIT",
         instrument_id=instrument_id,
@@ -82,7 +84,7 @@ def queue() -> PostgresUnprocessedFilingQueue:
 
 
 async def test_correction_appends_new_row_and_pit_query_preserves_pre_correction_value(
-    pool, filing_repo
+    pool: asyncpg.AsyncioMCDSN, filing_repo: PostgresCorporateActionFilingRepository
 ) -> None:
     instrument_id = await _make_instrument(pool)
     original = _split(
@@ -117,7 +119,9 @@ async def test_correction_appends_new_row_and_pit_query_preserves_pre_correction
     assert [a.ratio for a in after] == [Decimal("5")]
 
 
-async def test_append_is_idempotent_on_source_ref(pool, filing_repo) -> None:
+async def test_append_is_idempotent_on_source_ref(
+    pool: asyncpg.AsyncioMCDSN, filing_repo: PostgresCorporateActionFilingRepository
+) -> None:
     instrument_id = await _make_instrument(pool)
     action = _split(
         instrument_id,
@@ -139,7 +143,9 @@ async def test_append_is_idempotent_on_source_ref(pool, filing_repo) -> None:
     assert row_count == 1
 
 
-async def test_append_without_known_at_is_rejected(pool, filing_repo) -> None:
+async def test_append_without_known_at_is_rejected(
+    pool: asyncpg.AsyncioMCDSN, filing_repo: PostgresCorporateActionFilingRepository
+) -> None:
     instrument_id = await _make_instrument(pool)
     legacy_action = CorporateAction(
         action_type="SPLIT",
@@ -154,7 +160,9 @@ async def test_append_without_known_at_is_rejected(pool, filing_repo) -> None:
             await filing_repo.append(conn, legacy_action)
 
 
-async def test_parse_failure_lands_in_unprocessed_queue_table(pool, queue) -> None:
+async def test_parse_failure_lands_in_unprocessed_queue_table(
+    pool: asyncpg.AsyncioMCDSN, queue: PostgresUnprocessedFilingQueue
+) -> None:
     async with pool.acquire() as conn, conn.transaction():
         await queue.enqueue(
             conn,
@@ -174,7 +182,9 @@ async def test_parse_failure_lands_in_unprocessed_queue_table(pool, queue) -> No
     assert payload["rcept_no"] == "bad-filing"
 
 
-async def test_append_rejects_unknown_instrument_id(pool, filing_repo) -> None:
+async def test_append_rejects_unknown_instrument_id(
+    pool: asyncpg.AsyncioMCDSN, filing_repo: PostgresCorporateActionFilingRepository
+) -> None:
     """`instrument_id`가 `md_instrument`에 없으면 FK 제약으로 거부돼야 한다."""
     action = _split(
         uuid.uuid4(),
@@ -188,7 +198,9 @@ async def test_append_rejects_unknown_instrument_id(pool, filing_repo) -> None:
             await filing_repo.append(conn, action)
 
 
-async def test_append_rejects_non_positive_ratio(pool, filing_repo) -> None:
+async def test_append_rejects_non_positive_ratio(
+    pool: asyncpg.AsyncioMCDSN, filing_repo: PostgresCorporateActionFilingRepository
+) -> None:
     """`ratio <= 0`은 애플리케이션 검증을 우회해도 DB CHECK로 거부돼야 한다
     (`ck_...`: `ratio > 0`)."""
     instrument_id = await _make_instrument(pool)
@@ -219,12 +231,12 @@ class _FlakyOnceConnection:
             raise asyncpg.PostgresConnectionError("simulated transient outage")
         return await self._real_conn.fetchrow(*args, **kwargs)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
         return getattr(self._real_conn, name)
 
 
 async def test_append_failure_injection_leaves_no_partial_row_and_retry_succeeds(
-    pool, filing_repo
+    pool: asyncpg.AsyncioMCDSN, filing_repo: PostgresCorporateActionFilingRepository
 ) -> None:
     """append 도중 커넥션 장애(실패주입)가 나면 부분 행이 남지 않고,
     장애가 사라진 뒤 같은 source_ref로 재시도하면 정상 반영돼야 한다."""
