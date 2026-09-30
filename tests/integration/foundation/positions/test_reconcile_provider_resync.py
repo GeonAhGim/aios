@@ -292,75 +292,96 @@ async def test_resync_disabled_by_default_preserves_prior_behavior(pool):
     assert registry.counter(POSITIONS_RECONCILIATION_RESYNC_FAILURE_COUNT_TOTAL).samples() == {}
 
 
+_CONCURRENCY_REPEAT = 100
+
+
 async def test_concurrent_resync_is_serialized_by_position_lock(pool):
     """Case 3 — two concurrent `reconcile_account` calls against the same
     `position_key` must not corrupt each other: `rebuild_snapshot`'s
     `pos_journal` advisory lock serializes the writes, so both calls finish
-    HEALTHY and the final snapshot is the journal truth, not a torn write."""
-    registry_a = MetricsRegistry()
-    registry_b = MetricsRegistry()
+    HEALTHY and the final snapshot is the journal truth, not a torn write.
+
+    task-9086 QA finding: a single `gather` pass only proves the race is
+    *not observed once*, not that the lock actually serializes it — repeat
+    the race 100x with a fresh account/asset/position_key per iteration (so
+    iterations cannot cross-contaminate each other's rows — reusing one
+    account would leave every prior iteration's now-open position in view of
+    `reconcile_account`'s account-wide scan, which reports PROVIDER_UNAVAILABLE
+    for assets the current iteration's fake provider doesn't know about) and
+    require 0 UniqueViolationError plus journal-truth convergence on every
+    iteration.
+    """
     tenant_id = await create_test_tenant(pool)
-    account_id = await create_pos_account(
-        pool, tenant_id, venue="bitget", base_currency=Currency.USDT
-    )
-    asset = f"COIN{uuid4().hex[:8]}"
-    position_key = _key(tenant_id, asset)
-    await _open_with_fill(
-        pool,
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=position_key,
-        quantity=Decimal("100"),
-    )
-    await force_row_replace(
-        pool,
-        table="pos_snapshot",
-        id_column="position_key",
-        id_value=position_key,
-        quantity=Decimal("777"),
-    )
 
-    connection_id_a = uuid4()
-    connection_id_b = uuid4()
-    provider_a = ExchangeBalanceSource(
-        {connection_id_a: FakeAdapter([_balance(asset, Decimal("100"))])}
-    )
-    provider_b = ExchangeBalanceSource(
-        {connection_id_b: FakeAdapter([_balance(asset, Decimal("100"))])}
-    )
-
-    results = await asyncio.gather(
-        reconcile_account(
-            tenant_id,
-            account_id,
-            connection_id=connection_id_a,
-            snapshots=PostgresSnapshotRepository(pool),
-            provider=provider_a,
-            recon=_recon(pool),
-            pool=pool,
-            registry=registry_a,
-            journal=PostgresJournalRepository(pool),
-            clock=_clock,
-        ),
-        reconcile_account(
-            tenant_id,
-            account_id,
-            connection_id=connection_id_b,
-            snapshots=PostgresSnapshotRepository(pool),
-            provider=provider_b,
-            recon=_recon(pool),
-            pool=pool,
-            registry=registry_b,
-            journal=PostgresJournalRepository(pool),
-            clock=_clock,
-        ),
-    )
-
-    assert results[0].aggregate_classification == Classification.HEALTHY
-    assert results[1].aggregate_classification == Classification.HEALTHY
-
-    async with pool.acquire() as conn:
-        quantity = await conn.fetchval(
-            "SELECT quantity FROM pos_snapshot WHERE position_key = $1", position_key
+    for _ in range(_CONCURRENCY_REPEAT):
+        registry_a = MetricsRegistry()
+        registry_b = MetricsRegistry()
+        account_id = await create_pos_account(
+            pool, tenant_id, venue="bitget", base_currency=Currency.USDT
         )
-    assert quantity == Decimal("100"), "동시 재동기화 후에도 저널 진실값으로 수렴해야 한다"
+        asset = f"COIN{uuid4().hex[:8]}"
+        position_key = _key(tenant_id, asset)
+        await _open_with_fill(
+            pool,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
+            quantity=Decimal("100"),
+        )
+        await force_row_replace(
+            pool,
+            table="pos_snapshot",
+            id_column="position_key",
+            id_value=position_key,
+            quantity=Decimal("777"),
+        )
+
+        connection_id_a = uuid4()
+        connection_id_b = uuid4()
+        provider_a = ExchangeBalanceSource(
+            {connection_id_a: FakeAdapter([_balance(asset, Decimal("100"))])}
+        )
+        provider_b = ExchangeBalanceSource(
+            {connection_id_b: FakeAdapter([_balance(asset, Decimal("100"))])}
+        )
+
+        results = await asyncio.gather(
+            reconcile_account(
+                tenant_id,
+                account_id,
+                connection_id=connection_id_a,
+                snapshots=PostgresSnapshotRepository(pool),
+                provider=provider_a,
+                recon=_recon(pool),
+                pool=pool,
+                registry=registry_a,
+                journal=PostgresJournalRepository(pool),
+                clock=_clock,
+            ),
+            reconcile_account(
+                tenant_id,
+                account_id,
+                connection_id=connection_id_b,
+                snapshots=PostgresSnapshotRepository(pool),
+                provider=provider_b,
+                recon=_recon(pool),
+                pool=pool,
+                registry=registry_b,
+                journal=PostgresJournalRepository(pool),
+                clock=_clock,
+            ),
+            return_exceptions=True,
+        )
+
+        for outcome in results:
+            if isinstance(outcome, BaseException):
+                raise outcome
+
+        assert results[0].aggregate_classification == Classification.HEALTHY
+        assert results[1].aggregate_classification == Classification.HEALTHY
+
+        async with pool.acquire() as conn:
+            quantity = await conn.fetchval(
+                "SELECT quantity FROM pos_snapshot WHERE position_key = $1", position_key
+            )
+        assert quantity == Decimal("100"), "동시 재동기화 후에도 저널 진실값으로 수렴해야 한다"
