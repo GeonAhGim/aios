@@ -42,9 +42,16 @@ class WhitelistEntryRequest(BaseModel):
 
 
 class WhitelistEntryResponse(WhitelistEntry):
-    # id/exchange/destination_address are identical to the parent WhitelistEntry
-    # fields; only label is redeclared here to make it required (the parent
-    # defaults it to None for the panic-prompt use case).
+    """API response DTO for withdrawal whitelist entries.
+
+    Explicitly redeclares id/exchange/destination_address from the parent
+    WhitelistEntry so that Pydantic treats them as direct fields in the
+    JSON schema (Guard P5.contract_field_removed checks model_fields).
+    """
+
+    id: int
+    exchange: str
+    destination_address: str
     label: str | None
 
 

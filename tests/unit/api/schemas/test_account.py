@@ -1,4 +1,5 @@
 """FD-11.4/11.5/11.6 account 스키마 — 요청/응답 모델 및 변환 함수 커버리지."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -139,3 +140,17 @@ def test_deletion_response_valid_construction() -> None:
     resp = DeletionResponse(status="scheduled", deletion_effective_at=now)
     assert resp.status == "scheduled"
     assert resp.deletion_effective_at == now
+
+
+def test_whitelist_entry_response_contains_all_contract_fields() -> None:
+    """Regression: WhitelistEntryResponse must expose id/exchange/destination_address/label
+    as direct model_fields so Guard P5.contract_field_removed does not veto."""
+    fields = set(WhitelistEntryResponse.model_fields.keys())
+    assert fields >= {"id", "exchange", "destination_address", "label"}
+
+
+def test_whitelist_entry_response_schema_contains_all_contract_fields() -> None:
+    """Secondary check: Pydantic JSON schema must list all four fields."""
+    schema = WhitelistEntryResponse.model_json_schema()
+    props = set(schema.get("properties", {}))
+    assert props >= {"id", "exchange", "destination_address", "label"}
