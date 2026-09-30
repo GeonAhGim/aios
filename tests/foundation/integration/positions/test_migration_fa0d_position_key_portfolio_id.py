@@ -17,6 +17,7 @@ subprocess로 alembic을 띄우는 이유·DSN 해석은 FA-4
    백필 가능한 다른 행도 함께 롤백됨), `pos_snapshot`은 옛 형식 그대로
    남는다.
 """
+
 from __future__ import annotations
 
 import os
@@ -59,6 +60,24 @@ def _run_alembic_ok(*args: str) -> None:
     assert result.returncode == 0, (
         f"alembic {' '.join(args)} 실패:\n{result.stdout}\n{result.stderr}"
     )
+
+
+# task-8890(d4e8f1a29c37, EM3 committed_child_qty backfill)이 head 위에 얹히면서
+# `downgrade()`가 무조건 raise하도록(WORM I-07 -- 진짜 롤백은 불가능하다는 설계,
+# `test_migration_d4e8f1a29c37_child_qty_committed_backfill.py`의
+# test_negative_downgrade_always_raises_irreversible_error가 그 동작을 고정한다)
+# 고정됐다 -- 그 함수를 건드리지 않고도, head에서 FA-0d 아래로 실제 downgrade를
+# 계속 태우려면 d4e8f1a29c37 한 리비전만 `stamp`로 건너뛴다. d4e8f1a29c37는
+# 스키마를 건드리지 않는 순수 데이터 백필(INSERT-only)이라 이 건너뛰기는 실제
+# 스키마 상태와 어긋나지 않는다 -- stamp는 alembic_version 포인터만 바꾸고
+# 마이그레이션 코드를 실행하지 않으므로, 그다음 real downgrade가 되짚는
+# 리비전들의 downgrade()는 여전히 실제로 실행돼 스키마를 정확히 원복한다.
+_EM3_BACKFILL_DOWN_REVISION = "6e2b5965124e"
+
+
+def _downgrade_past_fa0d(target_revision: str) -> None:
+    _run_alembic_ok("stamp", _EM3_BACKFILL_DOWN_REVISION)
+    _run_alembic_ok("downgrade", target_revision)
 
 
 @pytest.fixture
@@ -120,11 +139,14 @@ async def test_backfill_rewrites_snapshot_key_but_leaves_worm_journal_untouched(
     tenant_id = await create_test_tenant(pool)
     portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
 
-    _run_alembic_ok("downgrade", _DOWN_REVISION)
+    _downgrade_past_fa0d(_DOWN_REVISION)
     account_id = await _insert_pos_account(pool, tenant_id)
     old_key = f"TESTVENUE:INST{uuid4().hex[:8]}:default:paper"
     await _insert_legacy_pos_snapshot(
-        pool, position_key=old_key, tenant_id=tenant_id, account_id=account_id,
+        pool,
+        position_key=old_key,
+        tenant_id=tenant_id,
+        account_id=account_id,
         portfolio_id=portfolio_id,
     )
     journal_id = await _insert_legacy_pos_journal(
@@ -164,9 +186,7 @@ async def test_backfill_rewrites_snapshot_key_but_leaves_worm_journal_untouched(
         # 합성 행의 portfolio_id는 이 테스트 안에서만 부트스트랩된 것이라
         # 다른 테스트가 그 사이 entity 테이블을 왕복시키면 재현되지 않는다.
         async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM pos_snapshot WHERE position_key = $1", expected_new_key
-            )
+            await conn.execute("DELETE FROM pos_snapshot WHERE position_key = $1", expected_new_key)
 
 
 async def test_backfill_fails_closed_and_rolls_back_whole_migration_when_portfolio_id_null(
@@ -176,17 +196,23 @@ async def test_backfill_fails_closed_and_rolls_back_whole_migration_when_portfol
     resolvable_portfolio_id = await bootstrap_default_portfolio(pool, resolvable_tenant)
     bare_tenant = await create_test_tenant(pool)
 
-    _run_alembic_ok("downgrade", _DOWN_REVISION)
+    _downgrade_past_fa0d(_DOWN_REVISION)
     resolvable_account_id = await _insert_pos_account(pool, resolvable_tenant)
     bare_account_id = await _insert_pos_account(pool, bare_tenant)
     resolvable_key = f"TESTVENUE:INST{uuid4().hex[:8]}:default:paper"
     bare_key = f"TESTVENUE:INST{uuid4().hex[:8]}:default:paper"
     await _insert_legacy_pos_snapshot(
-        pool, position_key=resolvable_key, tenant_id=resolvable_tenant,
-        account_id=resolvable_account_id, portfolio_id=resolvable_portfolio_id,
+        pool,
+        position_key=resolvable_key,
+        tenant_id=resolvable_tenant,
+        account_id=resolvable_account_id,
+        portfolio_id=resolvable_portfolio_id,
     )
     await _insert_legacy_pos_snapshot(
-        pool, position_key=bare_key, tenant_id=bare_tenant, account_id=bare_account_id,
+        pool,
+        position_key=bare_key,
+        tenant_id=bare_tenant,
+        account_id=bare_account_id,
         portfolio_id=None,
     )
 
@@ -234,13 +260,14 @@ async def test_adapter_written_snapshot_survives_fa0d_downgrade_upgrade_round_tr
     portfolio_id = default_portfolio_id(tenant_id)
     position_key = str(
         PositionKey(
-            venue="TESTVENUE", instrument_id=f"INST{uuid4().hex[:8]}", strategy_id="default",
-            execution_id="paper", portfolio_id=portfolio_id,
+            venue="TESTVENUE",
+            instrument_id=f"INST{uuid4().hex[:8]}",
+            strategy_id="default",
+            execution_id="paper",
+            portfolio_id=portfolio_id,
         )
     )
-    await open_position(
-        pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
-    )
+    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     legacy_key = ":".join(position_key.split(":")[:4])
     try:
         async with pool.acquire() as conn:
@@ -249,7 +276,7 @@ async def test_adapter_written_snapshot_survives_fa0d_downgrade_upgrade_round_tr
             )
         assert column_value == portfolio_id, "adapter left pos_snapshot.portfolio_id NULL"
 
-        _run_alembic_ok("downgrade", _DOWN_REVISION)
+        _downgrade_past_fa0d(_DOWN_REVISION)
         async with pool.acquire() as conn:
             downgraded = await conn.fetchrow(
                 "SELECT portfolio_id FROM pos_snapshot WHERE position_key = $1", legacy_key
@@ -282,7 +309,7 @@ async def test_negative_rejects_malformed_legacy_key_without_partial_backfill(po
     """I-07/I-10: malformed persisted input must stop the real migration."""
     tenant_id = await create_test_tenant(pool)
     portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
-    _run_alembic_ok("downgrade", _DOWN_REVISION)
+    _downgrade_past_fa0d(_DOWN_REVISION)
     account_id = await _insert_pos_account(pool, tenant_id)
     # Deliberately invalid legacy fixtures cannot use the current key constructor.
     malformed_key = ":".join([uuid4().hex] * part_count)
@@ -291,8 +318,11 @@ async def test_negative_rejects_malformed_legacy_key_without_partial_backfill(po
     try:
         for key in keys:
             await _insert_legacy_pos_snapshot(
-                pool, position_key=key, tenant_id=tenant_id,
-                account_id=account_id, portfolio_id=portfolio_id,
+                pool,
+                position_key=key,
+                tenant_id=tenant_id,
+                account_id=account_id,
+                portfolio_id=portfolio_id,
             )
         async with pool.acquire() as conn:
             before = await conn.fetch(
@@ -319,18 +349,22 @@ async def test_failure_injection_insert_error_rolls_back_deleted_snapshot(pool):
     """I-07/I-10: an INSERT failure must not lose the DELETE ... RETURNING row."""
     tenant_id = await create_test_tenant(pool)
     portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
-    _run_alembic_ok("downgrade", _DOWN_REVISION)
+    _downgrade_past_fa0d(_DOWN_REVISION)
     account_id = await _insert_pos_account(pool, tenant_id)
     old_key = f"TESTVENUE:INST{uuid4().hex[:8]}:default:paper"
     trigger_name = "fa0d_inject_" + uuid4().hex
     try:
         await _insert_legacy_pos_snapshot(
-            pool, position_key=old_key, tenant_id=tenant_id,
-            account_id=account_id, portfolio_id=portfolio_id,
+            pool,
+            position_key=old_key,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            portfolio_id=portfolio_id,
         )
         async with pool.acquire() as conn:
             before = await conn.fetchrow(
-                "SELECT * FROM pos_snapshot WHERE account_id = $1", account_id,
+                "SELECT * FROM pos_snapshot WHERE account_id = $1",
+                account_id,
             )
             # Generated identifiers and UUID literals are test-owned, never user input.
             await conn.execute(
@@ -348,7 +382,8 @@ async def test_failure_injection_insert_error_rolls_back_deleted_snapshot(pool):
         async with pool.acquire() as conn:
             assert await conn.fetchval("SELECT version_num FROM alembic_version") == _DOWN_REVISION
             after = await conn.fetch(
-                "SELECT * FROM pos_snapshot WHERE account_id = $1", account_id,
+                "SELECT * FROM pos_snapshot WHERE account_id = $1",
+                account_id,
             )
             assert after == [before]
             await conn.execute(f"DROP TRIGGER {trigger_name} ON pos_snapshot")
@@ -357,7 +392,8 @@ async def test_failure_injection_insert_error_rolls_back_deleted_snapshot(pool):
         _run_alembic_ok("upgrade", "head")
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM pos_snapshot WHERE account_id = $1", account_id,
+                "SELECT * FROM pos_snapshot WHERE account_id = $1",
+                account_id,
             )
         assert len(rows) == 1
         restored = dict(rows[0])
