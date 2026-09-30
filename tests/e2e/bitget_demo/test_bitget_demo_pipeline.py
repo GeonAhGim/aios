@@ -35,6 +35,7 @@ pool, 재시도 없음)이 아예 열리지 않는다. 원래 순서(`pool` 먼�
 으로 지목한 근거) -- 재시도 예산을 더 키우는 대신 불필요한 커넥션 자체를
 없앤다(DECISION_GUIDELINES B-2).
 """
+
 from __future__ import annotations
 
 import os
@@ -171,6 +172,80 @@ async def test_below_min_notional_rejected_no_position_written(
     )
 
     with pytest.raises(ExchangeAPIError):
+        await submit_order(
+            order, user_id=user_id, adapter=demo_adapter, pool=pool, pre_submit_gate=gate
+        )
+
+    async with pool.acquire() as conn:
+        db_status = await conn.fetchval(
+            "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
+        )
+        position = await conn.fetchval(
+            "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
+        )
+    assert db_status == "UNKNOWN"
+    assert position is None
+
+
+async def test_lot_size_violation_fails_closed_no_position_written(
+    demo_adapter: BitgetAdapter, pool: asyncpg.Pool
+) -> None:
+    """negative #3 — `qty_lot`(venue_profile.py 실측, BTC/USDT는
+    0.000001) 단위에 맞지 않는 수량은 거래소가 거부한다. tick/
+    min_notional 위반과 다른 세 번째 독립 거부 사유를 실제로 재현해,
+    `submit_order()`가 어떤 거부 경로든 fail-closed로 일관되게 처리한다는
+    계약을 고정한다(U4, DoD "불변식 위반 입력을 명시적으로 거부")."""
+    lot = BITGET_SPOT_PROFILE.qty_lot[_SYMBOL]
+    assert lot == Decimal("0.000001"), "이 테스트는 실측 qty_lot=0.000001 가정 위에 서 있다."
+    violating_quantity = _SAFE_QUANTITY + (lot / Decimal("10"))
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await create_execution(pool, user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    order = _order(
+        execution_id, price=_SAFE_PRICE, quantity=violating_quantity, tag="lot-violation"
+    )
+
+    with pytest.raises(ExchangeAPIError):
+        await submit_order(
+            order, user_id=user_id, adapter=demo_adapter, pool=pool, pre_submit_gate=gate
+        )
+
+    async with pool.acquire() as conn:
+        db_status = await conn.fetchval(
+            "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
+        )
+        position = await conn.fetchval(
+            "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
+        )
+    assert db_status == "UNKNOWN"
+    assert position is None
+
+
+async def test_place_order_transport_failure_marks_claim_unknown_no_position(
+    demo_adapter: BitgetAdapter, pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실패주입 — `place_order`가 거래소 응답 대신 네트워크 예외로 끝나는
+    경우(연결 끊김 등)를 monkeypatch로 직접 유발한다. 실 거래소가 이 경로를
+    안정적으로 재현해주지 않으므로, 여기서만은 의존성(어댑터)을 강제로
+    실패시켜 `classify_submit_failure`의 "응답 유실 = UNKNOWN" 분류
+    (dispatch_outcome.py, fail-closed I10)가 `submit_order()` 경로 전체에서
+    실제로 지켜지는지 확인한다 — claim 행은 CREATED에 머물지 않고 UNKNOWN
+    으로 전이되며, positions에는 아무것도 쓰이지 않는다."""
+
+    async def _boom(order: Order) -> Order:
+        raise ConnectionError("aios-test-only: simulated transport failure")
+
+    monkeypatch.setattr(demo_adapter, "place_order", _boom)
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await create_execution(pool, user_id)
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    order = _order(
+        execution_id, price=_SAFE_PRICE, quantity=_SAFE_QUANTITY, tag="transport-failure"
+    )
+
+    with pytest.raises(ConnectionError):
         await submit_order(
             order, user_id=user_id, adapter=demo_adapter, pool=pool, pre_submit_gate=gate
         )
