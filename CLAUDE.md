@@ -839,7 +839,6 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     classes. No script/baseline exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing
     new to fix; the repeat is fleet-code re-escalation, not this repo.
 
-<<<<<<< HEAD
 35. A third `consistency` 24h 5-repeat systemic leaf (task-9537) on the identical question
     #22 and #31 already closed. `scripts/check_consistency.py` (split into
     `scripts/consistency/*`) and `consistency-baseline.json` are unchanged since task-9122's fix
