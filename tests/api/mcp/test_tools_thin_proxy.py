@@ -26,6 +26,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.mcp.server import AGENT_TOKEN_HEADER, create_mcp_app
 from src.core.indicators.engine.vectorized import compute as compute_indicator_direct
+from src.foundation.ai.factory.application import research_tools
 from src.foundation.ai.gateway.adapters.postgres_token_repository import (
     PostgresAgentTokenRepository,
 )
@@ -193,3 +194,38 @@ async def test_compare_experiment_reproductions_tool_none_found_is_404(
         headers={AGENT_TOKEN_HEADER: issued.secret},
     )
     assert response.status_code == 404
+
+
+# --- research negative: experiment_id가 UUID가 아니면 위임 전에 422(위임 대상까지 안 감) ---
+
+
+async def test_get_experiment_context_tool_malformed_id_is_422(
+    client, token_repo: PostgresAgentTokenRepository
+):
+    issued = await issue(token_repo, tenant_id=uuid4(), scopes=frozenset({Scope.RESEARCH}))
+    response = await client.post(
+        "/mcp/tools/get_experiment_context",
+        json={"experiment_id": "not-a-uuid"},
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert response.status_code == 422
+
+
+# --- 실패 주입: AI-14 위임 대상이 예외를 내면 200/404로 위장하지 않고 500으로 전파 ---
+
+
+async def test_get_experiment_context_tool_delegate_failure_is_not_swallowed(
+    client, token_repo: PostgresAgentTokenRepository, monkeypatch: pytest.MonkeyPatch
+):
+    async def _boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("experiment ledger unreachable")
+
+    monkeypatch.setattr(research_tools, "get_experiment_context", _boom)
+    issued = await issue(token_repo, tenant_id=uuid4(), scopes=frozenset({Scope.RESEARCH}))
+
+    response = await client.post(
+        "/mcp/tools/get_experiment_context",
+        json={"experiment_id": str(uuid4())},
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
+    assert response.status_code == 500  # not 404/200 -- delegate failure is not disguised
