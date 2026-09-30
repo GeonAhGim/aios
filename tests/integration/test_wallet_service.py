@@ -1,4 +1,5 @@
 """FD-13.11 통합테스트 — 실제 dev DB 대상 (WalletService)."""
+
 import asyncio
 from decimal import Decimal
 from pathlib import Path
@@ -94,6 +95,43 @@ async def test_confirm_topup_rejects_nonexistent_request(service, pool):
 
     with pytest.raises(WalletTopupError):
         await service.confirm_topup(999999999, admin, idempotency_key="key-1")
+
+
+async def test_request_topup_rejects_negative_amount(service, pool):
+    """Negative test — the ``amount <= 0`` guard (wallet_service.py L180) must also
+    reject a strictly negative amount, not just zero (distinct boundary from
+    test_request_topup_rejects_non_positive_amount)."""
+    user = await create_test_user(pool)
+
+    with pytest.raises(WalletTopupError):
+        await service.request_topup(user, Decimal("-100"))
+
+
+async def test_confirm_topup_rolls_back_on_post_topup_failure(service, pool, monkeypatch):
+    """Failure injection — if the ledger write (post_topup) raises mid-transaction,
+    the whole `confirm_topup` transaction must roll back (fail-closed): the top-up
+    request must stay PENDING and the user's balance must stay untouched, instead of
+    being left CONFIRMED with no credited balance."""
+    user = await create_test_user(pool)
+    admin = await create_test_user(pool)
+    topup = await service.request_topup(user, Decimal("7000"))
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("ledger write failed")
+
+    monkeypatch.setattr("src.services.wallet_service.post_topup", _boom)
+
+    with pytest.raises(RuntimeError):
+        await service.confirm_topup(topup.id, admin, idempotency_key="key-fail")
+
+    balance = await service.get_balance(user)
+    assert balance.balance == Decimal("0")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status FROM wallet_topup_requests WHERE id = $1", topup.id
+        )
+    assert row["status"] == "PENDING"
 
 
 async def test_concurrent_confirm_only_one_succeeds(service, pool, monkeypatch):
