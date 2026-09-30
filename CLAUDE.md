@@ -343,6 +343,35 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     No baseline/timeout relief made (DECISION_GUIDELINES B-2) — script/docs design is sound; the
     remaining defect is fleet code, not this repo.
 
+20. Re-investigating a `pytest_latency_serial` systemic escalation whose root fix landed one
+    commit before the investigation was picked up — task-8993 flagged this stage (defined by
+    `FULL_PYTEST_SERIAL_LATENCY_NODEIDS`/`ci_recheck.py:199`, 4 nodeids run serially outside xdist
+    because they lose the CPU-time race under parallel workers) at 5 correction leaves in 24h
+    (task-8659, task-8756, task-8851, task-9196, task-9286) and the design was already fixed by the
+    time this systemic leaf (task-9298) was created. task-8659/task-8851 had already migrated
+    `test_parser.py` off an absolute-ms `PerfBudget` (host-clock-speed-dependent) onto
+    `tests/_perf/relative_budget.py`'s `RelativeBudget` (self-calibrating ratio, clock-speed
+    independent), but 3 sibling nodeids (`test_builtins_math.py`, `test_lower.py`,
+    `test_interpreter.py`) still used the absolute-ms budget — each CI runner slowdown pushed
+    whichever of those 3 was closest to its ms ceiling into red, and the recurring "fix" each time
+    (task-7673: batch 4->8, task-9196: batch 8->16) only bought headroom, leaving the same absolute
+    budget to fail again at the next slowdown. task-9269 (commit `eaa83bbd`, landed
+    `2026-09-30T07:15:01+09:00` = `06:15:01Z`) finished the migration all 3 remaining nodeids onto
+    `RelativeBudget`, closing the actual design gap. This systemic escalation's suppression record
+    (`esc-ci-pytest_latency_serial` / `ci_step_repeat_state.json`) was created at `06:19:41Z` — only
+    ~4.5 minutes after task-9269's fix landed — so the escalation counted the pre-fix repeat leaves
+    without re-checking whether the fix that closed them had already merged. A local serial run of
+    all 4 nodeids on this worktree (which already has `eaa83bbd`) confirms `4 passed in ~9s`. This
+    is the same fleet-code pattern as #17/#18/#19 (`pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule opening a systemic leaf off a stale escalation snapshot instead of re-checking
+    current HEAD first), not a remaining design defect in the test budgets themselves. Before
+    working a new `pytest_latency_serial` leaf: run the 4 nodeids from `FULL_PYTEST_SERIAL_LATENCY_
+    NODEIDS` (`ci_recheck.py:199-204`) serially and confirm they all use `RelativeBudget` (`grep -l
+    RelativeBudget` on the 4 files) — if both hold, close as noop citing task-9269 and this entry
+    rather than re-diagnosing already-migrated budgets. No baseline/budget relief made
+    (DECISION_GUIDELINES B-2) — task-9269's `RelativeBudget` migration is the actual fix and is
+    already in place.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
