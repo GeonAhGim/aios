@@ -1632,6 +1632,32 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (task-8934, task-9056, task-9287, task-9520) or this entry's — if so, close as noop citing
     both rather than re-deriving the same three failure classes a third time.
 
+64. A fifth `frontend` `[health:ci_red_systemic]` leaf (task-9666) citing the identical repeat
+    set #39 (task-9548) and #52 (task-9588) already closed twice — task-9666's spec names
+    task-9283, task-9462, task-9521, task-9563 verbatim, the same four leaves both prior systemic
+    leaves already root-caused as a classification bug in `pm/auto_decision.py`'s `_stage_tail`/
+    `_FAIL_LINE_MARKERS`: an `npm test` timeout (`rc=124`) or host-level process crash
+    (`0xC0000005` access violation, per #52) under shared-host CI-lane contention gets misread as
+    a real assertion failure because the marker list checks the generic substring `"error"` before
+    any `timeout`/`rc=124`/crash-code marker, so it latches onto whichever innocent
+    `stderr | <file>.test.tsx > ... > negative: ... error ...` passthrough line (a *passing* D2/D3
+    negative test, §5) happened to print last, and titles a fix leaf off that innocent file.
+    Reconfirmed on this worktree (HEAD synced, `git status` clean): `node --test
+    frontend/scripts/check_frontend_file_size.test.mjs` passes all 6 cases in ~460ms, and a full
+    `npm run test:coverage --workspace=apps/web` passes clean (196/196 files, 1587/1587 tests,
+    exit 0, statements 89.71%). No script/test/baseline change made — this is fleet code under
+    `C:\aios\pm` (`pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a systemic
+    leaf off the same stale repeat set instead of checking whether a prior systemic leaf
+    (task-9302, task-9548/#39, task-9588/#52) already closed the identical question), out of a
+    repo worker's edit scope (§4). Before working a future `frontend` correction leaf whose title
+    looks like `stderr | <file>.test.tsx > ... > negative: ...`, `npm error Lifecycle script`, or
+    cites an `0xC000...` exit code: rerun the exact target file (or
+    `npm run test:coverage --workspace=apps/web` for a lifecycle-script/crash-code shape) locally
+    first — if green, and the cited repeat leaf ids match an already-closed systemic leaf's set
+    (task-9302, #39, #52, or this entry), close as noop citing all of them rather than
+    re-investigating a sixth time. No baseline/marker-list relief made (DECISION_GUIDELINES B-2)
+    — the fix belongs to fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
