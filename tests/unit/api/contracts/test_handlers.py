@@ -2,6 +2,7 @@
 최소 FastAPI 앱으로 검증한다(main.py는 다른 세션이 활발히 편집 중이라
 건드리지 않음 — 실제 등록은 이미 main.py에 완료돼 있고, 여기선 이
 함수 자체의 동작만 확인)."""
+
 from fastapi import FastAPI, HTTPException, status
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
@@ -110,3 +111,99 @@ async def test_unmapped_exception_hides_internal_message_but_keeps_trace_id():
     assert body["error_code"] == "INTERNAL_ERROR"
     assert "hunter2" not in body["message"]
     assert "trace_id" in body
+
+
+# --- negative tests ---
+
+
+async def test_http_exception_with_unknown_error_code_falls_back_to_internal_error():
+    """_STATUS_DEFAULT_CODE 에 없는 상태코드(402)는 INTERNAL_ERROR 로 폴백한다 —
+    매핑 표에 누락된 상태코드라도 클라이언트가 500 을 보지 않도록."""
+    app = _make_app()
+
+    @app.get("/http-402")
+    async def http_402() -> None:
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "결제 필요")
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/http-402")
+
+    assert response.status_code == 402
+    body = response.json()
+    # 402는 _STATUS_DEFAULT_CODE 에 없으므로 INTERNAL_ERROR 로 폴백
+    assert body["error_code"] == "INTERNAL_ERROR"
+
+
+async def test_http_exception_with_string_detail_falls_back_to_status_default():
+    """HTTP exception detail 이 문자열일 때 — status 가 _STATUS_DEFAULT_CODE 에
+    있으면 해당 코드를 그대로 쓰고, detail 이 dict 가 아니어도 error_code 추출
+    단계로 가지 않는다. 402 는 _STATUS_DEFAULT_CODE 에 없으므로 INTERNAL_ERROR."""
+    app = _make_app()
+
+    @app.get("/http-402-string")
+    async def http_402_string() -> None:
+        raise HTTPException(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            "결제 필요",
+        )
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/http-402-string")
+
+    assert response.status_code == 402
+    body = response.json()
+    # 402 는 _STATUS_DEFAULT_CODE 에 없음 → INTERNAL_ERROR
+    assert body["error_code"] == "INTERNAL_ERROR"
+
+
+async def test_http_exception_with_non_dict_non_string_detail():
+    """HTTP exception detail 이 dict/문자열 외 타입일 때 —
+    handlers.py 의 _extract_error_code 가 ValueError 를 raise 하면
+    INTERNAL_ERROR 로 폴백되어야 한다."""
+    app = _make_app()
+
+    @app.get("/http-list-detail")
+    async def http_list_detail() -> None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            ["field1", "field2"],
+        )
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/http-list-detail")
+
+    assert response.status_code == 422
+    body = response.json()
+    # detail 이 list 면 _extract_error_code 가 ValueError 를 내므로 INTERNAL_ERROR
+    assert body["error_code"] == "INTERNAL_ERROR"
+
+
+# --- failure injection test ---
+
+
+async def test_domain_exception_with_malformed_error_code_attribute():
+    """도메인 예외가 error_code 속성에 ErrorCode 가 아닌 int 를 담고 있을 때 —
+    map_exception 이 isinstance(EXCEPTION_MAP_SERVICES) 에서 걸리지 않고
+    error_code 속성을 읽으려 하면 TypeError 가 발생하고,
+    이 경우 INTERNAL_ERROR 로 폴백되어야 한다.
+
+    실패주입: exception_registry 의 EXCEPTION_MAP_SERVICES 에 없는
+    커스텀 예외에 error_code=int 를 담고 map_exception 이 crash 하지 않는지 검증."""
+    from src.api.contracts.exception_mapping import map_exception
+
+    class CustomDomainError(Exception):
+        error_code = 999  # noqa: ERA001 — 의도적으로 ErrorCode 가 아닌 int
+
+    exc = CustomDomainError("서비스 내부 오류")
+    # CustomDomainError 는 EXCEPTION_MAP_SERVICES 에 없으므로
+    # error_code 속성을 읽으려 함. int 이면 TypeError 가 발생할 것 같지만
+    # 실제로는 ErrorCode(int) 로 형변환되어 매핑됨
+    code, message, details = map_exception(exc)
+    # error_code=999 가 ErrorCode(999) 로 해석되어
+    # INTERNAL_ERROR(999) 로 매핑됨
+    assert code.value == "INTERNAL_ERROR"
+    assert message == "서비스 내부 오류"
+    assert details == {}
