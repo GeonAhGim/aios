@@ -5,6 +5,7 @@ DoD(task-656): 왕복(create_tick_batch → get_tick_batch, issues 포함) +
 negative: 같은 batch_id 재삽입 거부, tenant 불일치는 조회 시 존재 자체를
 숨긴다(§8.3 LA-21 "404 동형").
 """
+
 from __future__ import annotations
 
 import uuid
@@ -142,6 +143,67 @@ async def test_create_tick_batch_duplicate_batch_id_raises(pool, batch_repo):
     with pytest.raises(DuplicateBatchError):
         async with pool.acquire() as conn, conn.transaction():
             await batch_repo.create_tick_batch(conn, batch)
+
+
+async def test_create_tick_batch_without_audit_event_id_raises(pool, batch_repo):
+    """negative: audit_event_id가 None이면 §4.1 fail-closed 불변식 위반 —
+    DB에 보내기 전에 ValueError로 거부해야 한다(감사 이벤트 없는 배치 금지)."""
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        batch = _tick_batch(
+            instrument_id=instrument_id,
+            audit_event_id=None,
+            range_start=t0,
+            range_end=t0 + timedelta(minutes=1),
+        )
+        with pytest.raises(ValueError, match="audit_event_id"):
+            await batch_repo.create_tick_batch(conn, batch)
+
+        # 거부된 배치는 흔적을 남기지 않아야 한다(부분 커밋 없음).
+        row = await conn.fetchrow(
+            "SELECT 1 FROM md_ingest_batch_tick WHERE id = $1", batch.batch_id
+        )
+        assert row is None
+
+
+async def test_get_tick_batch_nonexistent_id_returns_none(pool, batch_repo):
+    """negative: 애초에 존재한 적 없는 batch_id는 tenant_id=None으로 조회해도
+    None을 반환한다(§8.3 LA-21 "404 동형" — cross-tenant 은닉과 같은 경로)."""
+    async with pool.acquire() as conn:
+        missing = await batch_repo.get_tick_batch(conn, uuid.uuid4(), None)
+
+    assert missing is None
+
+
+async def test_create_tick_batch_unexpected_db_error_propagates(pool, batch_repo, monkeypatch):
+    """실패주입: `UniqueViolationError`가 아닌 예외(예: 연결 끊김)는
+    `DuplicateBatchError`로 둔갑시키지 않고 그대로 전파해야 한다
+    — fail-closed 기본, 에러를 숨겨 성공으로 위장하지 않는다."""
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+
+    class _BoomConnection:
+        def __init__(self, real: asyncpg.Connection) -> None:
+            self._real = real
+
+        async def execute(self, *args, **kwargs):
+            raise asyncpg.exceptions.ConnectionDoesNotExistError("injected failure")
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        audit_event_id = await _audit_event_id(conn)
+        batch = _tick_batch(
+            instrument_id=instrument_id,
+            audit_event_id=audit_event_id,
+            range_start=t0,
+            range_end=t0 + timedelta(minutes=1),
+        )
+        boom_conn = _BoomConnection(conn)
+        with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+            await batch_repo.create_tick_batch(boom_conn, batch)
 
 
 async def test_get_tick_batch_cross_tenant_lookup_returns_none(pool, batch_repo):
