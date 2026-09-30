@@ -7,6 +7,7 @@ Watchdog은 메인 프로세스와 완전히 격리된 별도 프로세스로 �
 (정책문서 8.6-A), 공유 메모리가 아니라 파일 타임스탬프로 통신한다 — 가장
 단순하고 프로세스 경계를 명확히 넘는 방식(과잉설계 방지, 17.9-A).
 """
+
 from __future__ import annotations
 
 import os
@@ -58,6 +59,8 @@ def read_heartbeat_age_seconds(path: Path) -> float:
         return float("inf")
     try:
         last = float(path.read_text(encoding="utf-8"))
-    except ValueError:
+    except (ValueError, OSError):
+        # OSError covers e.g. the path being a directory or a transient
+        # read race with a concurrent writer -- fail closed, not fresh.
         return float("inf")
     return time.time() - last
