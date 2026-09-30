@@ -22,33 +22,33 @@ from src.foundation.paper_control.domain.rules import (
 )
 
 
-def _paper_provenance(**overrides) -> AdapterProvenance:
-    fields = {
+def _paper_provenance(**overrides: str) -> AdapterProvenance:
+    fields: dict[str, str | CredentialClass] = {
         "adapter_type": "fake-paper-v1",
         "credential_class": CredentialClass.PAPER,
         "endpoint_classification": "SANDBOX",
         "provider_sandbox_account_ref": "sandbox-acct-1",
     }
     fields.update(overrides)
-    return AdapterProvenance(**fields)
+    return AdapterProvenance(**fields)  # type: ignore[arg-type]
 
 
 # --- negative tests (77 §2 상태 전이표) --------------------------------------
 
 
-def test_require_transition_allowed_rejects_recovery_review_to_running():
+def test_require_transition_allowed_rejects_recovery_review_to_running() -> None:
     """RECOVERY_REVIEW -> RUNNING은 표에 없다 — 자동 복귀를 금지하는 77 §2
     불변식이 전이표 부재만으로 실제 거부까지 이어지는지 검증한다."""
     with pytest.raises(InvalidDeploymentTransitionError):
         require_transition_allowed(DeploymentState.RECOVERY_REVIEW, DeploymentState.RUNNING)
 
 
-def test_require_transition_allowed_rejects_transition_from_terminal_stopped():
+def test_require_transition_allowed_rejects_transition_from_terminal_stopped() -> None:
     with pytest.raises(InvalidDeploymentTransitionError):
         require_transition_allowed(DeploymentState.STOPPED, DeploymentState.RUNNING)
 
 
-def test_require_transition_allowed_rejects_transition_from_terminal_failed():
+def test_require_transition_allowed_rejects_transition_from_terminal_failed() -> None:
     with pytest.raises(InvalidDeploymentTransitionError):
         require_transition_allowed(DeploymentState.FAILED, DeploymentState.READY)
 
@@ -64,10 +64,10 @@ class _FakeLiveCredentialClass:
     value = "LIVE"
 
 
-def test_validate_provenance_rejects_non_paper_credential_class():
+def test_validate_provenance_rejects_non_paper_credential_class() -> None:
     provenance = AdapterProvenance(
         adapter_type="fake-paper-v1",
-        credential_class=_FakeLiveCredentialClass(),
+        credential_class=_FakeLiveCredentialClass(),  # type: ignore[arg-type]
         endpoint_classification="SANDBOX",
         provider_sandbox_account_ref="sandbox-acct-1",
     )
@@ -75,17 +75,17 @@ def test_validate_provenance_rejects_non_paper_credential_class():
         validate_provenance(provenance)
 
 
-def test_validate_provenance_rejects_blank_adapter_type():
+def test_validate_provenance_rejects_blank_adapter_type() -> None:
     with pytest.raises(InvalidProvenanceError):
         validate_provenance(_paper_provenance(adapter_type="   "))
 
 
-def test_validate_provenance_rejects_blank_provider_sandbox_account_ref():
+def test_validate_provenance_rejects_blank_provider_sandbox_account_ref() -> None:
     with pytest.raises(InvalidProvenanceError):
         validate_provenance(_paper_provenance(provider_sandbox_account_ref=""))
 
 
-def test_validate_provenance_rejects_case_insensitive_live_endpoint():
+def test_validate_provenance_rejects_case_insensitive_live_endpoint() -> None:
     with pytest.raises(InvalidProvenanceError):
         validate_provenance(_paper_provenance(endpoint_classification="Live-Prod"))
 
@@ -93,12 +93,14 @@ def test_validate_provenance_rejects_case_insensitive_live_endpoint():
 # --- failure injection -------------------------------------------------------
 
 
-def test_require_transition_allowed_propagates_lookup_failure(monkeypatch):
+def test_require_transition_allowed_propagates_lookup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """전이 허용 여부 조회 자체가 깨지면(예: 상태표 손상) 조용히 통과시키지
     않고 예외를 그대로 전파해야 한다(fail-closed) — 77 §2."""
     import src.foundation.paper_control.domain.rules as rules_module
 
-    def _boom(current, target):
+    def _boom(current: DeploymentState, target: DeploymentState) -> bool:
         raise RuntimeError("injected transition table failure")
 
     monkeypatch.setattr(rules_module, "is_transition_allowed", _boom)
@@ -111,12 +113,12 @@ def test_require_transition_allowed_propagates_lookup_failure(monkeypatch):
 
 
 @pytest.mark.perf
-def test_validate_provenance_p95_latency_budget_for_1000_calls():
+def test_validate_provenance_p95_latency_budget_for_1000_calls() -> None:
     """1,000회 provenance 검증(성공 경로)이 p95 50ms 예산 안에 들어야 한다
     (순수 문자열 비교, I/O 없음 — ADR-2026-09-09-C 성능 예산표 기준 로컬 상한)."""
     provenance = _paper_provenance()
 
-    samples = []
+    samples: list[float] = []
     for _ in range(5):
         start = time.perf_counter()
         for _ in range(1000):
