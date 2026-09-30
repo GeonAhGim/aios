@@ -9,7 +9,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+from src.core.exceptions import ExchangeAPIError, FrozenZonePaperAdapterBlockedError
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -229,5 +229,5 @@ async def test_borrow_loan_propagates_request_error():
     )
     # HTTP 200로 돌아오지만 code가 00000이 아닌 경우 — 에러 코드 분류 게이트가 예외를 raise해야 함
     # 50021은 retryable이므로 RetryableExchangeError로 래핑될 수 있음
-    with pytest.raises(Exception):
+    with pytest.raises(ExchangeAPIError):
         await adapter.borrow_loan("usdt", "btc", Decimal("0.5"))
