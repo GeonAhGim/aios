@@ -9,7 +9,29 @@ targets UPDATE-only workflows and there is no "existing row" to guard
 against when every call inserts a new row. Instead, a Postgres advisory
 lock serializes appends to the same tenant (or system) chain across
 transactions, preventing concurrent requests from each appending a
-different new event based on a stale view of the "last event"."""
+different new event based on a stale view of the "last event".
+
+F1(task-9420/task-9458) — `foundation_audit_event` has RLS ENABLE+FORCE
+(b3c7f19ad2e6/c9f4e2a1b6d7); `append_event`/`list_timeline`/
+`list_chain_for_verification` used `pool.acquire()` directly and never bound
+`app.tenant_id` — harmless while DATABASE_URL is a superuser
+(rolbypassrls=true), but once it switches to a non-superuser role
+(`aios_app`) a correct tenant would see zero rows of its own audit trail.
+Following the `connections`/`mandates`/`reconciliation` adapters' precedent,
+those three methods now open their connection through
+`tenant_transaction()`/`system_transaction()` (PLT-30,
+[[src/core/db/tenant_scope.py]]) instead of a bare `pool.acquire()`; the
+explicit `tenant_id = ...`/`tenant_id IS NULL` SQL conditions stay as the
+real defense while the role is still a superuser. `append_event_in()` is
+deliberately left untouched — it takes an already-open `conn` from callers
+across `ledger`/`market_data`/`positions`/`services/oms` that manage their
+own transaction scope; changing its contract is out of this leaf's scope.
+`get_latest_event()` has no `tenant_id` parameter (its only caller,
+`mandates/application/activate_revision.py`, looks up by
+aggregate_type/aggregate_id/action only) and is left out of scope for the
+same reason `connections/adapters/postgres_repository.py`'s
+`get_connection()` was."""
+
 from __future__ import annotations
 
 import json
@@ -18,6 +40,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from src.core.db.tenant_scope import system_transaction, tenant_transaction
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 from src.foundation.evidence.domain.rules import compute_event_hash
 
@@ -62,7 +85,15 @@ class PostgresAuditEventRepository:
         payload: dict[str, object],
         classification: Classification,
     ) -> AuditEvent:
-        async with self._pool.acquire() as conn, conn.transaction():
+        # F1(task-9458) — binds app.tenant_id (or app.role='system' when
+        # tenant_id is None) before append_event_in's INSERT/SELECT run, so
+        # the RLS policy on foundation_audit_event sees the right GUC.
+        cm = (
+            system_transaction(self._pool)
+            if tenant_id is None
+            else tenant_transaction(self._pool, tenant_id)
+        )
+        async with cm as conn:
             return await self.append_event_in(
                 conn,
                 tenant_id=tenant_id,
@@ -108,8 +139,7 @@ class PostgresAuditEventRepository:
         # (e.g., when another bounded context also uses tenant_id-based
         # locks) — standard Postgres idiom.
         await conn.execute(
-            "SELECT pg_advisory_xact_lock(hashtext('foundation_audit_event'), "
-            "hashtext($1))",
+            "SELECT pg_advisory_xact_lock(hashtext('foundation_audit_event'), hashtext($1))",
             str(tenant_id) if tenant_id is not None else "system",
         )
 
@@ -192,7 +222,9 @@ class PostgresAuditEventRepository:
         where_clause = " AND ".join(conditions)
         params.append(limit + 1)
 
-        async with self._pool.acquire() as conn:
+        # F1(task-9458) — tenant_id is mandatory here (unlike append_event's
+        # system-chain branch), so this is always a tenant_transaction.
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             rows = await conn.fetch(
                 f"SELECT * FROM foundation_audit_event WHERE {where_clause} "  # noqa: S608
                 f"ORDER BY sequence_no DESC LIMIT ${len(params)}",
@@ -220,14 +252,16 @@ class PostgresAuditEventRepository:
         return _row_to_event(row) if row is not None else None
 
     async def list_chain_for_verification(self, tenant_id: UUID | None) -> list[AuditEvent]:
-        async with self._pool.acquire() as conn:
-            if tenant_id is not None:
+        # F1(task-9458) — same system/tenant split as append_event.
+        if tenant_id is not None:
+            async with tenant_transaction(self._pool, tenant_id) as conn:
                 rows = await conn.fetch(
                     "SELECT * FROM foundation_audit_event WHERE tenant_id = $1 "
                     "ORDER BY sequence_no ASC",
                     tenant_id,
                 )
-            else:
+        else:
+            async with system_transaction(self._pool) as conn:
                 rows = await conn.fetch(
                     "SELECT * FROM foundation_audit_event WHERE tenant_id IS NULL "
                     "ORDER BY sequence_no ASC"
