@@ -23,7 +23,6 @@ INVARIANTS.md 점검: I-01~I-11은 주문 제출/실행-소유권/멱등키/전�
 from __future__ import annotations
 
 import os
-import time
 from typing import Any, cast
 
 import asyncpg
@@ -169,15 +168,19 @@ class TestPoolFixtureFailureInjection:
 
 
 @pytest.mark.perf
-async def test_pool_creation_performance_within_budget() -> None:
+async def test_pool_creation_performance_within_budget(perf_budget) -> None:
     """Pool creation(including retry loop) must complete within a reasonable
     latency budget. This prevents accidental O(n) blocking or infinite waits
     during test setup that would accumulate across the suite."""
-    start = time.perf_counter()
-    agen = _pool_fn()
-    p = await agen.__anext__()
-    elapsed = time.perf_counter() - start
-    await p.close()
+
+    async def _create_pool():
+        agen = _pool_fn()
+        p = await agen.__anext__()
+        await p.close()
+        return p
+
+    measured = await perf_budget.sample_async(_create_pool)
+    elapsed = measured.wall_ms / 1000
 
     assert elapsed < 10.0, (
         f"pool fixture must establish connection within 10s budget; "

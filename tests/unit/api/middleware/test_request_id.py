@@ -3,7 +3,6 @@
 세션이 활발히 편집 중이라 건드리지 않음 — 등록 자체는 PM이 처리)."""
 
 import asyncio
-import time
 
 import pytest
 from fastapi import FastAPI
@@ -129,7 +128,7 @@ async def test_request_id_context_is_reset_after_downstream_exception():
 
 
 @pytest.mark.perf
-async def test_middleware_overhead_stays_within_budget():
+async def test_middleware_overhead_stays_within_budget(perf_budget):
     """The middleware only sets a contextvar and echoes a header, so its
     per-request overhead must stay well under a generous 50ms/request
     budget even for a small burst — a regression here (e.g. a blocking
@@ -137,12 +136,13 @@ async def test_middleware_overhead_stays_within_budget():
     the process."""
     transport = ASGITransport(app=_make_app())
     request_count = 20
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        start = time.perf_counter()
-        for _ in range(request_count):
-            response = await client.get("/echo-request-id")
-            assert response.status_code == 200
-        elapsed = time.perf_counter() - start
 
-    per_request_seconds = elapsed / request_count
+    async def _make_requests():
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            for _ in range(request_count):
+                response = await client.get("/echo-request-id")
+                assert response.status_code == 200
+
+    measured = await perf_budget.sample_async(_make_requests)
+    per_request_seconds = measured.wall_ms / 1000 / request_count
     assert per_request_seconds < 0.05

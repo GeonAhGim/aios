@@ -12,7 +12,6 @@ guards (`pause_deployment.py`) that the DB-backed tests don't isolate."""
 
 from __future__ import annotations
 
-import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import cast
@@ -271,7 +270,7 @@ async def test_pause_deployment_propagates_repository_dependency_failure(
 
 
 @pytest.mark.perf
-def test_validate_provenance_scales_within_budget() -> None:
+def test_validate_provenance_scales_within_budget(perf_budget) -> None:
     """D2 numeric perf assertion: validating 2000 provenance records must
     stay well under the pure-CPU budget (no I/O in this path) — budget
     picked generously above observed local runtime to avoid flakiness while
@@ -286,9 +285,11 @@ def test_validate_provenance_scales_within_budget() -> None:
         for i in range(2000)
     ]
 
-    start = time.perf_counter()
-    for provenance in provenances:
-        validate_provenance(provenance)
-    elapsed = time.perf_counter() - start
+    def _validate_all():
+        for provenance in provenances:
+            validate_provenance(provenance)
+
+    measured = perf_budget.sample(_validate_all)
+    elapsed = measured.cpu_ms / 1000
 
     assert elapsed < 1.0, f"validating 2000 provenance records took {elapsed:.3f}s (budget: 1.0s)"

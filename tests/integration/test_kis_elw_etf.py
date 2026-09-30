@@ -3,7 +3,6 @@
 httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙).
 """
 
-import time
 from decimal import Decimal
 
 import httpx
@@ -198,7 +197,7 @@ async def test_get_elw_price_injects_token_refresh_failure():
 
 
 @pytest.mark.perf
-async def test_get_elw_price_completes_within_budget():
+async def test_get_elw_price_completes_within_budget(perf_budget):
     """시세 조회 1회당 평균 < 1500ms (모의 transport + 실제 TR 그룹
     rate-limit 버킷 기준). rate_profile.py의 토큰 버킷이 실거래소 제한을
     지키려고 호출 사이에 실제 asyncio.sleep 대기를 넣으므로(관측 시
@@ -220,16 +219,17 @@ async def test_get_elw_price_completes_within_budget():
     )
 
     iterations = 5
-    t0 = time.perf_counter()
+    timings_ms = []
     for _ in range(iterations):
-        await adapter.get_elw_price("58J300")
-    elapsed_ms = (time.perf_counter() - t0) / iterations * 1000
+        measured = await perf_budget.sample_async(lambda: adapter.get_elw_price("58J300"))
+        timings_ms.append(measured.wall_ms)
+    elapsed_ms = sum(timings_ms) / len(timings_ms)
 
     assert elapsed_ms < 1500, f"avg {elapsed_ms:.1f}ms exceeds 1500ms budget"
 
 
 @pytest.mark.perf
-async def test_get_etf_price_completes_within_budget():
+async def test_get_etf_price_completes_within_budget(perf_budget):
     """시세 조회 1회당 평균 < 1500ms (모의 transport + 실제 TR 그룹
     rate-limit 버킷 기준, 근거는 test_get_elw_price_completes_within_budget
     참고)."""
@@ -245,9 +245,10 @@ async def test_get_etf_price_completes_within_budget():
     )
 
     iterations = 5
-    t0 = time.perf_counter()
+    timings_ms = []
     for _ in range(iterations):
-        await adapter.get_etf_price("069500")
-    elapsed_ms = (time.perf_counter() - t0) / iterations * 1000
+        measured = await perf_budget.sample_async(lambda: adapter.get_etf_price("069500"))
+        timings_ms.append(measured.wall_ms)
+    elapsed_ms = sum(timings_ms) / len(timings_ms)
 
     assert elapsed_ms < 1500, f"avg {elapsed_ms:.1f}ms exceeds 1500ms budget"

@@ -17,7 +17,6 @@ dedup by input hash (REC-004/006), and fail-closed propagation when a dependency
 
 from __future__ import annotations
 
-import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -310,20 +309,22 @@ async def test_run_reconciliation_dedup_returns_cached_run_without_reinserting()
 
 
 @pytest.mark.perf
-async def test_run_reconciliation_meets_latency_budget():
+async def test_run_reconciliation_meets_latency_budget(perf_budget):
     """500 sequential runs against in-memory fakes stay well under 1s p50
     budget for pure orchestration logic with no real I/O (ADR-2026-09-09-C
     Decision 1 default)."""
     repo = _FakeReconciliationRepo()
     conn_repo = _FakeConnectionRepo(health=_health(HealthState.HEALTHY))
 
-    start = time.perf_counter()
-    for _ in range(500):
-        await _run(
-            repo,
-            conn_repo,
-            entities=[_entity(internal_value=Decimal("100"), provider_value=Decimal("100"))],
-            connection_id=uuid4(),
-        )
-    elapsed = time.perf_counter() - start
+    async def _run_all():
+        for _ in range(500):
+            await _run(
+                repo,
+                conn_repo,
+                entities=[_entity(internal_value=Decimal("100"), provider_value=Decimal("100"))],
+                connection_id=uuid4(),
+            )
+
+    measured = await perf_budget.sample_async(_run_all)
+    elapsed = measured.cpu_ms / 1000
     assert elapsed < 1.0

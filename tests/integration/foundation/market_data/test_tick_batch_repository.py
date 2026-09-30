@@ -8,7 +8,6 @@ negative: 같은 batch_id 재삽입 거부, tenant 불일치는 조회 시 존�
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -237,7 +236,7 @@ async def test_get_tick_batch_cross_tenant_lookup_returns_none(pool, batch_repo)
 
 
 @pytest.mark.perf
-async def test_tick_batch_operations_within_performance_budget(pool, batch_repo):
+async def test_tick_batch_operations_within_performance_budget(pool, batch_repo, perf_budget):
     """성능단언: create_tick_batch + get_tick_batch의 합산 p95는 50ms 이내
     (§4.2 performance budget LA-16a, ADR-2026-09-09-C Decision 1)."""
     t0 = datetime.now(timezone.utc).replace(microsecond=0)
@@ -245,8 +244,7 @@ async def test_tick_batch_operations_within_performance_budget(pool, batch_repo)
         instrument_id = await _instrument_id(conn)
         audit_event_id = await _audit_event_id(conn)
 
-    timings_ms = []
-    for _ in range(10):
+    async def _create_and_get():
         async with pool.acquire() as conn, conn.transaction():
             batch = _tick_batch(
                 instrument_id=instrument_id,
@@ -254,12 +252,15 @@ async def test_tick_batch_operations_within_performance_budget(pool, batch_repo)
                 range_start=t0,
                 range_end=t0 + timedelta(minutes=1),
             )
-            start = time.perf_counter()
             created = await batch_repo.create_tick_batch(conn, batch)
             fetched = await batch_repo.get_tick_batch(conn, created.batch_id, None)
-            elapsed = (time.perf_counter() - start) * 1000
-            timings_ms.append(elapsed)
             assert fetched is not None
+            return fetched
+
+    timings_ms = []
+    for _ in range(10):
+        measured = await perf_budget.sample_async(_create_and_get)
+        timings_ms.append(measured.wall_ms)
 
     timings_ms.sort()
     p95 = timings_ms[int(len(timings_ms) * 0.95)]
