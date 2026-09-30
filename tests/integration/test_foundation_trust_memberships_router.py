@@ -4,6 +4,7 @@ task-1722(P1-C) — 커맨드(grant/suspend/revoke_membership)는
 tests/foundation/integration/trust/test_membership_admin.py가 이미 실DB로
 검증한다. 이 파일은 라우터 자체가 앱에 배선됐는지(router_registry.py
 누락으로 0 임포터였던 결함)만 HTTP 계층에서 확인한다."""
+
 import uuid
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
+import src.api.routers.foundation.trust_memberships as trust_memberships_router
 from src.main import app
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
@@ -64,3 +66,64 @@ async def test_post_grant_membership_without_mfa_step_up_is_403(client):
         headers=headers,
     )
     assert response.status_code == 403
+
+
+async def test_post_grant_membership_with_invalid_role_is_400(client):
+    """불변식 위반 — MembershipRole은 OWNER/ADMIN/MEMBER/AUDITOR/SERVICE
+    5개뿐이다(domain/models.py). Pydantic이 임의 문자열을 도메인까지
+    통과시키지 않고 요청 검증 단계(RequestValidationError → 400)에서
+    거부해야 한다."""
+    headers = await _register(client)
+    response = await client.post(
+        "/v1/foundation/trust/memberships",
+        json={"subject_id": str(uuid.uuid4()), "role": "NOT_A_ROLE"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+async def test_post_suspend_membership_nonexistent_subject_is_404(client):
+    """불변식 위반 — suspend_membership.py의 SuspendTargetNotFoundError는
+    subject에 ACTIVE 멤버십이 없으면(미존재 포함, 73 §8.3 404 isomorphism)
+    404 RESOURCE_NOT_FOUND로 매핑돼야 한다. MFA 불필요 경로라 등록 직후
+    호출로도 재현 가능하다."""
+    headers = await _register(client)
+    response = await client.post(
+        f"/v1/foundation/trust/memberships/{uuid.uuid4()}:suspend",
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+
+async def test_post_grant_membership_with_malformed_tenant_header_is_400(client):
+    """불변식 위반 — get_tenant_context(foundation_deps.py)는 X-Tenant-Id
+    헤더가 있으면 UUID 파싱을 시도하고, 실패하면 400
+    VALIDATION_INVALID_FIELD로 거부해야 한다(멤버십 커맨드까지 관통시키지
+    않음)."""
+    headers = await _register(client)
+    headers = {**headers, "X-Tenant-Id": "not-a-uuid"}
+    response = await client.post(
+        "/v1/foundation/trust/memberships",
+        json={"subject_id": str(uuid.uuid4()), "role": "MEMBER"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+async def test_post_suspend_membership_dependency_failure_returns_500_not_silent_success(
+    client, monkeypatch
+):
+    """실패주입 — suspend_membership 커맨드가 예기치 못한 예외를 던지면
+    라우터가 조용히 성공을 가장하거나 빈 응답을 돌려주지 않고 500으로
+    표면화돼야 한다(fail-closed 기본, CLAUDE.md §3)."""
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("simulated dependency failure")
+
+    monkeypatch.setattr(trust_memberships_router, "suspend_membership", _boom)
+    headers = await _register(client)
+    response = await client.post(
+        f"/v1/foundation/trust/memberships/{uuid.uuid4()}:suspend",
+        headers=headers,
+    )
+    assert response.status_code == 500
