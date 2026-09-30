@@ -5,6 +5,7 @@ DoD (task-4671):
 - failure-injection ≥ 1  ✓
 - coverage target ≥ 70%  ✓
 """
+
 from decimal import Decimal
 
 from src.core.validator.order_validator import validate_order_params
@@ -12,6 +13,7 @@ from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderType
 
 # ── helpers ─────────────────────────────────────────────────────────────────
+
 
 def _order(**overrides) -> Order:
     """Return a minimal valid Order, merged with *overrides*."""
@@ -31,6 +33,7 @@ def _order(**overrides) -> Order:
 
 
 # ── positive paths ──────────────────────────────────────────────────────────
+
 
 def test_valid_market_order_passes():
     """MARKET order with no price — success path."""
@@ -70,6 +73,7 @@ def test_supported_asset_class_passes():
 
 # ── negative tests (boundary / invalid input) ───────────────────────────────
 
+
 def test_quantity_zero_rejected():
     """Quantity must be > 0."""
     result = validate_order_params(_order(quantity=Decimal("0")))
@@ -94,9 +98,7 @@ def test_limit_order_without_price_rejected():
 def test_market_order_with_price_rejected():
     """MARKET order must not have a price — exercises the MARKET price guard."""
     price = Money(amount=Decimal("100"), currency=Currency.USDT)
-    result = validate_order_params(
-        _order(order_type=OrderType.MARKET, price=price)
-    )
+    result = validate_order_params(_order(order_type=OrderType.MARKET, price=price))
     assert result.is_valid is False
     assert any("MARKET" in e for e in result.errors)
 
@@ -123,6 +125,7 @@ def test_no_supported_asset_classes_all_rejected():
 
 # ── failure-injection test (monkeypatch) ────────────────────────────────────
 
+
 def test_validate_order_params_monkeypatch_asset_class_rejection():
     """Inject failure by monkeypatching ValidationResult to always return
     is_valid=False, forcing the failure-return path at line 61.
@@ -133,6 +136,7 @@ def test_validate_order_params_monkeypatch_asset_class_rejection():
 
     class FakeValidationResult:
         """Replacement that always reports invalid regardless of arguments."""
+
         def __init__(self, is_valid, errors):
             self.is_valid = False
             self.errors = errors
@@ -148,6 +152,7 @@ def test_validate_order_params_monkeypatch_asset_class_rejection():
 
 
 # ── edge cases ──────────────────────────────────────────────────────────────
+
 
 def test_empty_errors_list_on_success():
     """Verify errors is an empty list, not None, on success."""
@@ -170,3 +175,60 @@ def test_both_price_and_asset_class_errors():
     assert result.is_valid is False
     assert any("MARKET" in e for e in result.errors)
     assert any("UNSUPPORTED_ASSET_CLASS" in e for e in result.errors)
+
+
+# ── additional negative tests (tick_size boundary) ──────────────────────────
+
+
+def test_price_not_multiple_of_tick_size_rejected():
+    """LIMIT order price that is not an exact multiple of tick_size is rejected."""
+    price = Money(amount=Decimal("100.017"), currency=Currency.USDT)
+    result = validate_order_params(
+        _order(order_type=OrderType.LIMIT, price=price),
+        tick_size=Decimal("0.01"),
+    )
+    assert result.is_valid is False
+    assert any("tick_size" in e for e in result.errors)
+
+
+def test_price_multiple_of_tick_size_passes():
+    """LIMIT order price that IS an exact multiple of tick_size passes."""
+    price = Money(amount=Decimal("100.02"), currency=Currency.USDT)
+    result = validate_order_params(
+        _order(order_type=OrderType.LIMIT, price=price),
+        tick_size=Decimal("0.01"),
+    )
+    assert result.is_valid is True
+    assert result.errors == []
+
+
+def test_zero_tick_size_skips_multiple_check():
+    """tick_size=0 must not trigger a modulo-by-zero error — the check is
+    guarded by `tick_size > 0` and should simply be skipped."""
+    price = Money(amount=Decimal("100.017"), currency=Currency.USDT)
+    result = validate_order_params(
+        _order(order_type=OrderType.LIMIT, price=price),
+        tick_size=Decimal("0"),
+    )
+    assert result.is_valid is True
+    assert result.errors == []
+
+
+# ── performance assertion ────────────────────────────────────────────────────
+
+
+def test_validate_order_params_perf_budget():
+    """validate_order_params is a pure in-memory check — 1000 calls must stay
+    well under 100ms (budget table ADR-2026-09-09-C Decision 1, pure-function
+    tier), guarding against an accidental I/O or heavy-validation regression.
+    """
+    import time
+
+    order = _order(
+        order_type=OrderType.LIMIT, price=Money(amount=Decimal("100.00"), currency=Currency.USDT)
+    )
+    start = time.perf_counter()
+    for _ in range(1000):
+        validate_order_params(order, tick_size=Decimal("0.01"))
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.1, f"1000 calls took {elapsed:.4f}s, expected < 0.1s"
