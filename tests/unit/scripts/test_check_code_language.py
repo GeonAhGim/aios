@@ -134,10 +134,10 @@ def test_count_file_oserror_returns_zero(tmp_path: Path) -> None:
         raise OSError("Permission denied")
 
     try:
-        Path.read_text = raise_oserror  # type: ignore[assignment]
+        Path.read_text = raise_oserror
         assert check_code_language.count_file(p) == 0
     finally:
-        Path.read_text = original_read_text  # type: ignore[assignment]
+        Path.read_text = original_read_text
 
 
 def test_count_file_ast_parse_non_syntax_error_propagates(
@@ -154,11 +154,11 @@ def test_count_file_ast_parse_non_syntax_error_propagates(
         raise RuntimeError("simulated AST failure")
 
     try:
-        check_code_language.ast.parse = fake_parse  # type: ignore[assignment]
+        check_code_language.ast.parse = fake_parse
         with pytest.raises(RuntimeError, match="simulated AST failure"):
             check_code_language.count_file(p)
     finally:
-        check_code_language.ast.parse = original_parse  # type: ignore[assignment]
+        check_code_language.ast.parse = original_parse
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ def test_count_tree_continues_after_one_file_fails(
         return 0
 
     try:
-        check_code_language.count_file = zero_every_other  # type: ignore[assignment]
+        check_code_language.count_file = zero_every_other
         total, per_file, scanned = check_code_language.count_tree(target)
 
         # scanned은 실제 .py 파일 수여야 함 (monkeypatch와 무관)
@@ -254,7 +254,7 @@ def test_count_tree_continues_after_one_file_fails(
         # call_order에 여러 파일이 포함되어야 함 (중단 없음)
         assert len(call_order) >= 2
     finally:
-        check_code_language.count_file = original_count_file  # type: ignore[assignment]
+        check_code_language.count_file = original_count_file
 
 
 # ---------------------------------------------------------------------------
