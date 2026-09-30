@@ -258,3 +258,94 @@ async def test_pool_acquire_failure_propagates_fail_closed(monitoring_service, m
 
     with pytest.raises(RuntimeError, match="connection pool exhausted"):
         await monitoring_service.list_for_user(uuid4())
+
+
+# --- negative tests (3건 이상: 불변식 위반 입력 명시적 거부) ---
+
+
+async def test_list_for_user_rejects_invalid_uuid_string(monitoring_service):
+    """잘못된 형식의 문자열 user_id를 전달하면 asyncpg가 DataError를
+    일으킨다 — 타입 위반은 명시적 거부(I-01)."""
+    with pytest.raises(asyncpg.exceptions.DataError):
+        await monitoring_service.list_for_user("not-a-uuid")
+
+
+async def test_pnl_aggregation_handles_zero_pnl_in_positions(
+    execution_service, monitoring_service, pool
+):
+    """positions 테이블에 realized_pnl/unrealized_pnl이 0인 행이 섞여 있어도
+    COALESCE(SUM(...), 0)가 정상 동작한다.
+    LEFT JOIN → NULL position 행이 섞일 때 Decimal("0")로 안정화되는지 확인."""
+    user_id = await create_test_tenant(pool)
+    execution_id, strategy_id = await _create_running_execution(execution_service, pool, user_id)
+
+    # 0 PnL 필드로 직접 삽입
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO positions
+                (user_id, symbol, exchange, strategy_id, execution_id, quantity,
+                 average_entry_price, unrealized_pnl, realized_pnl, entry_time)
+            VALUES ($1, 'ETH/USDT', 'bitget', $2, $3, 0.5, 3000, 0, 0, now())
+            """,
+            user_id,
+            strategy_id,
+            execution_id,
+        )
+
+    cards = await monitoring_service.list_for_user(user_id)
+    card = next(c for c in cards if c.execution_id == execution_id)
+    assert card.realized_pnl == Decimal("0")
+    assert card.unrealized_pnl == Decimal("0")
+    assert isinstance(card.realized_pnl, Decimal)
+    assert isinstance(card.unrealized_pnl, Decimal)
+
+
+async def test_monitoring_with_no_positions_table_rows_returns_empty_pnl(
+    execution_service, monitoring_service, pool
+):
+    """positions 테이블에 해당 execution_id의 행이 전혀 없으면
+    SUM(NULL)=NULL → COALESCE(…, 0) → Decimal("0")로 집계되어야 한다.
+    LEFT JOIN이 행을 찾지 못해도 서비스는 예외 없이 0 PnL을 반환한다."""
+    user_id = await create_test_tenant(pool)
+    execution_id, _ = await _create_running_execution(execution_service, pool, user_id)
+
+    # positions 테이블에 아무 행도 삽입하지 않음 — LEFT JOIN이 NULL을 반환
+    cards = await monitoring_service.list_for_user(user_id)
+    card = next(c for c in cards if c.execution_id == execution_id)
+    assert card.realized_pnl == Decimal("0")
+    assert card.unrealized_pnl == Decimal("0")
+
+
+# --- failure-injection tests (1건 이상: 의존성 예외 유발) ---
+
+
+async def test_query_error_propagates_fail_closed(monitoring_service, monkeypatch, caplog):
+    """DB 쿼리 실행 중 예외 발생 시 빈 목록을 반환하지 않고 예외를 전파한다.
+    fail-closed 원칙 (INVARIANTS I-10: 안전 컴포넌트는 배선 증명 테스트 필수)."""
+    import asyncpg as _asyncpg
+
+    class _QueryFailingPool:
+        def acquire(self):
+            raise _asyncpg.PostgresError('relation "risk_decision" does not exist')
+
+    monkeypatch.setattr(monitoring_service, "_pool", _QueryFailingPool())
+
+    with pytest.raises(_asyncpg.PostgresError):
+        await monitoring_service.list_for_user(uuid4())
+
+    # 빈 목록이 반환되지 않았는지 확인 (fail-closed 검증)
+    # 예외가 전파되었으므로 이 줄은 도달하지 않음
+
+
+async def test_connection_reset_during_fetch_propagates(monitoring_service, monkeypatch):
+    """fetch 중 connection reset 발생 시 fail-closed — 예외 전파."""
+
+    class _ResetPool:
+        def acquire(self):
+            raise RuntimeError("connection reset by peer")
+
+    monkeypatch.setattr(monitoring_service, "_pool", _ResetPool())
+
+    with pytest.raises(RuntimeError, match="connection reset by peer"):
+        await monitoring_service.list_for_user(uuid4())
