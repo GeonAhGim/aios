@@ -160,7 +160,12 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
     만들어 -Fp(파일별 복사) pg_basebackup 자체가 nightly 1200s 예산을 다 태웠다(steps={}로
     아무 단계도 못 남기고 죽음 -- copy 단계 이전, pg_basebackup 자체가 병목). base_backup.py를
     -Ft(+gzip)로 바꿔 base.tar(.gz) 1~2개 파일로 접었으니, 여기서는 그걸 풀기만 한다(진짜
-    "불필요 데이터 정리"가 아니라 파일 수 자체를 줄이는 정정 -- 타임아웃 상향 금지 B-2)."""
+    "불필요 데이터 정리"가 아니라 파일 수 자체를 줄이는 정정 -- 타임아웃 상향 금지 B-2).
+    task-9469(2026-09-30): 이 PC의 PATH에 걸리는 tar가 Git for Windows의 MSYS GNU tar라,
+    `-C <드라이브문자:\...>` 인자의 콜론을 rmt(원격 테이프) host:path 문법으로 오인해
+    "Cannot connect to C: resolve failed"(rc=128)로 매번 죽었다 -- base.tar 추출이 한
+    번도 성공한 적이 없던 이유. `--force-local`은 GNU tar가 이 원격 추론을 끄고 인자를
+    항상 로컬 경로로만 다루게 하는 표준 플래그다(추출 대상이 always local이므로 안전)."""
     tar_bin = shutil.which("tar")
     if tar_bin is None:
         return False, "tar 실행 파일을 찾을 수 없다(Windows 10+/bsdtar 또는 GNU tar 필요)"
@@ -185,7 +190,7 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
             return 1, f"{type(exc).__name__}: {exc}"
 
     dst.mkdir(parents=True, exist_ok=True)
-    rc, tail = _run_tar([tar_bin, "-xf", str(base_tar), "-C", str(dst)])
+    rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(base_tar), "-C", str(dst)])
     if rc != 0:
         return False, f"base.tar 추출 실패(rc={rc}): {tail}"
 
@@ -193,7 +198,7 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
     if wal_tar is not None:
         wal_dir = dst / "pg_wal"
         wal_dir.mkdir(parents=True, exist_ok=True)
-        rc, tail = _run_tar([tar_bin, "-xf", str(wal_tar), "-C", str(wal_dir)])
+        rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(wal_tar), "-C", str(wal_dir)])
         if rc != 0:
             return False, f"pg_wal.tar 추출 실패(rc={rc}): {tail}"
 
