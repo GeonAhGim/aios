@@ -162,10 +162,12 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
     -Ft(+gzip)로 바꿔 base.tar(.gz) 1~2개 파일로 접었으니, 여기서는 그걸 풀기만 한다(진짜
     "불필요 데이터 정리"가 아니라 파일 수 자체를 줄이는 정정 -- 타임아웃 상향 금지 B-2).
     task-9469(2026-09-30): 이 PC의 PATH에 걸리는 tar가 Git for Windows의 MSYS GNU tar라,
-    `-C <드라이브문자:\...>` 인자의 콜론을 rmt(원격 테이프) host:path 문법으로 오인해
-    "Cannot connect to C: resolve failed"(rc=128)로 매번 죽었다 -- base.tar 추출이 한
-    번도 성공한 적이 없던 이유. `--force-local`은 GNU tar가 이 원격 추론을 끄고 인자를
-    항상 로컬 경로로만 다루게 하는 표준 플래그다(추출 대상이 always local이므로 안전)."""
+    드라이브 문자 뒤 콜론이 있는 인자를 rmt(원격 테이프) host:path 문법으로 오인한다.
+    `-f <경로>`는 `--force-local`을 붙이면 이 오인을 피하지만, 같은 tar 빌드에서
+    `-C <드라이브문자:\...>`는 --force-local을 붙여도 그 인자를 또 다른 archive로
+    오인해 "Cannot open"으로 죽는다(실측 확인) -- 그래서 -C 자체를 아예 안 쓰고
+    subprocess의 cwd로 추출 대상 디렉터리를 바꿔 넘긴다(드라이브 문자가 인자 문자열에
+    안 섞이므로 두 문제 모두 피한다). base.tar 추출이 한 번도 성공한 적이 없던 이유였다."""
     tar_bin = shutil.which("tar")
     if tar_bin is None:
         return False, "tar 실행 파일을 찾을 수 없다(Windows 10+/bsdtar 또는 GNU tar 필요)"
@@ -175,12 +177,17 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
 
     import tempfile
 
-    def _run_tar(cmd: list[str]) -> tuple[int, str]:
+    def _run_tar(cmd: list[str], cwd: Path) -> tuple[int, str]:
         try:
             with tempfile.TemporaryFile(mode="w+b") as out:
                 try:
                     r = subprocess.run(
-                        cmd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, check=False
+                        cmd,
+                        cwd=cwd,
+                        stdout=out,
+                        stderr=subprocess.STDOUT,
+                        timeout=timeout,
+                        check=False,
                     )
                 except subprocess.TimeoutExpired:
                     return 124, f"timeout {timeout:.0f}s"
@@ -190,7 +197,7 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
             return 1, f"{type(exc).__name__}: {exc}"
 
     dst.mkdir(parents=True, exist_ok=True)
-    rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(base_tar), "-C", str(dst)])
+    rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(base_tar)], cwd=dst)
     if rc != 0:
         return False, f"base.tar 추출 실패(rc={rc}): {tail}"
 
@@ -198,7 +205,7 @@ def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str
     if wal_tar is not None:
         wal_dir = dst / "pg_wal"
         wal_dir.mkdir(parents=True, exist_ok=True)
-        rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(wal_tar), "-C", str(wal_dir)])
+        rc, tail = _run_tar([tar_bin, "--force-local", "-xf", str(wal_tar)], cwd=wal_dir)
         if rc != 0:
             return False, f"pg_wal.tar 추출 실패(rc={rc}): {tail}"
 
