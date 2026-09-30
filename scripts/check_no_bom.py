@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 BOM = b"\xef\xbb\xbf"
 SCAN_ROOT_NAMES = ("src", "tests", "scripts", "docs")
 SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "coverage", ".venv"}
+
+
 # Cold checkout (fresh CI runner / worktree reset) has no page cache, so each open() blocks on
 # physical I/O; a serial walk over ~6-7k tracked files took 60-70s and blew the 60s CI step
 # budget (esc-ci-no_bom, 2026-09-26 probe). Threads overlap that I/O latency -- this is I/O-bound
@@ -81,7 +83,33 @@ SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "cover
 # incident against it. Do not raise this again for cold-checkout margin alone -- that reasoning
 # already caused this exact regression twice (28 at task-8639, 24 at task-8667/task-9156). Any
 # future raise needs a concurrent-multi-lane measurement, not just single-lane wall-clock.
-SCAN_WORKERS = 16
+#
+# 2026-09-30(task-9259/[health:ci_red_systemic] prepare 24h 4-leaf repeat, task-8602/8639/8657/
+# 9156): those four leaves were never four different violations -- every one retuned this exact
+# constant back and forth between two constraints that pull in opposite directions and that this
+# single-lane script has no way to observe: raising SCAN_WORKERS buys cold-checkout wall-clock
+# margin *for this lane*, lowering it buys antivirus-scan headroom *for sibling lanes sharing this
+# box*. The value that is safe right now depends on how many other local_ci lanes happen to be
+# running concurrently at the moment this step executes -- only the fleet scheduler
+# (pm/local_ci.py, ops-owned, out of this repo's reach) has that information. Hardcoding either
+# number as a source constant guarantees it eventually becomes wrong in one direction again, and
+# every correction has cost a full commit+leaf cycle just to change one number ops could otherwise
+# tune directly per fleet load. AIOS_CI_SCAN_WORKERS lets ops override this without a source
+# change; the hardcoded default stays 16, the last value with no STATUS_DLL_INIT_FAILED report
+# against it. No budget/baseline relief (DECISION_GUIDELINES B-2) -- this only changes how the
+# constant is sourced.
+def _resolve_scan_workers(default: int) -> int:
+    raw = os.environ.get("AIOS_CI_SCAN_WORKERS")
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+SCAN_WORKERS = _resolve_scan_workers(16)
 
 
 def has_bom(path: Path) -> bool:

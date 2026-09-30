@@ -422,3 +422,29 @@ def test_build_graph_overlaps_io_bound_reads(
         "I/O reads are not overlapping (this is the exact defect class that reopened "
         "esc-ci-import_linter three times: task-8752/8845/8930)"
     )
+
+
+def test_resolve_scan_workers_uses_default_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AIOS_CI_SCAN_WORKERS", raising=False)
+    assert cil._resolve_scan_workers(16) == 16
+
+
+def test_resolve_scan_workers_honors_positive_int_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOS_CI_SCAN_WORKERS", "4")
+    assert cil._resolve_scan_workers(16) == 4
+
+
+def test_resolve_scan_workers_falls_back_on_non_int_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOS_CI_SCAN_WORKERS", "not-a-number")
+    assert cil._resolve_scan_workers(16) == 16
+
+
+def test_resolve_scan_workers_falls_back_on_non_positive_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOS_CI_SCAN_WORKERS", "0")
+    assert cil._resolve_scan_workers(16) == 16

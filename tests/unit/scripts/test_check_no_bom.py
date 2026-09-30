@@ -89,3 +89,22 @@ def test_main_passes_after_bom_stripped(tmp_path, capsys):
 
 def test_main_passes_on_empty_repo(tmp_path):
     assert check_no_bom.main(["--repo", str(tmp_path)]) == 0
+
+
+def test_resolve_scan_workers_uses_default_without_env():
+    assert check_no_bom._resolve_scan_workers(16) == 16
+
+
+def test_resolve_scan_workers_honors_positive_int_override(monkeypatch):
+    monkeypatch.setenv("AIOS_CI_SCAN_WORKERS", "4")
+    assert check_no_bom._resolve_scan_workers(16) == 4
+
+
+def test_resolve_scan_workers_falls_back_on_non_int_override(monkeypatch):
+    monkeypatch.setenv("AIOS_CI_SCAN_WORKERS", "not-a-number")
+    assert check_no_bom._resolve_scan_workers(16) == 16
+
+
+def test_resolve_scan_workers_falls_back_on_non_positive_override(monkeypatch):
+    monkeypatch.setenv("AIOS_CI_SCAN_WORKERS", "0")
+    assert check_no_bom._resolve_scan_workers(16) == 16

@@ -51,6 +51,7 @@ _EXCLUDE_DIR_NAMES = frozenset(
     }
 )
 
+
 # esc-ci-import_linter([import_linter] timeout 120s): bisect landed on 2dd74ce9, the same
 # DEEPEN commit that grew tests/ file counts enough to tip check_code_ratchets.py's serial
 # path.read_text() scan over its 180s budget (task-8746, commit 638dca50). This script's
@@ -80,7 +81,25 @@ _EXCLUDE_DIR_NAMES = frozenset(
 # artificial per-file read delay and asserting the thread pool actually overlaps it --
 # the first local test in this suite that would have caught this failure class before any
 # of the three production incidents.
-SCAN_WORKERS = 24
+#
+# 2026-09-30(task-9259/[health:ci_red_systemic] prepare 4-leaf repeat): 24 mirrored the
+# check_no_bom.py value task-9156 reverted to 16 after reproducing STATUS_DLL_INIT_FAILED
+# (task-8657) -- see that file's SCAN_WORKERS comment for the full history of this constant
+# trading per-lane wall-clock margin against fleet-wide AV-scan headroom neither script can
+# observe. AIOS_CI_SCAN_WORKERS lets ops retune without a source change; default drops to 16
+# to match the one value with no incident against it. No budget/baseline relief (B-2).
+def _resolve_scan_workers(default: int) -> int:
+    raw = os.environ.get("AIOS_CI_SCAN_WORKERS")
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+SCAN_WORKERS = _resolve_scan_workers(16)
 
 Hit = tuple[str, int, str]  # (rel_path, lineno, detail)
 
