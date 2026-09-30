@@ -8,7 +8,6 @@ instrument/timeframe의 coverage를 반환하지 않으며, 커버리지가 없�
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -219,7 +218,7 @@ async def test_upsert_span_unexpected_db_error_propagates_unmapped(pool, repo, m
 
 @pytest.mark.perf
 @pytest.mark.nightly
-async def test_list_spans_p95_latency_within_budget(pool, repo):
+async def test_list_spans_p95_latency_within_budget(pool, repo, perf_budget):
     """성능 단언: 커버리지 조회는 market_data 읽기 경로 예산(ADR-2026-09-09-C
     Decision 1, "5k봉 조회 p95 200ms")을 상한으로 삼는다 — coverage_spans는
     캔들보다 훨씬 가벼운 행 수이므로 같은 예산 안에서 p95가 나워야 한다.
@@ -238,13 +237,15 @@ async def test_list_spans_p95_latency_within_budget(pool, repo):
                 _span(instrument_id=instrument_id, start=start, end=start + timedelta(days=1)),
             )
 
+    async def list_spans():
+        async with pool.acquire() as conn, conn.transaction():
+            return await repo.list_spans(conn, instrument_id, Timeframe.M1)
+
     samples: list[float] = []
     for _ in range(20):
-        t_start = time.perf_counter()
-        async with pool.acquire() as conn, conn.transaction():
-            spans = await repo.list_spans(conn, instrument_id, Timeframe.M1)
-        samples.append(time.perf_counter() - t_start)
-    assert len(spans) == 50
+        measured = await perf_budget.sample_async(list_spans)
+        samples.append(measured.wall_ms / 1000)
+    assert len(measured.result) == 50
 
     samples.sort()
     p95_ms = samples[int(len(samples) * 0.95) - 1] * 1000

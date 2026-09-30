@@ -13,11 +13,9 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
 from typing import TypeVar
 
 import asyncpg
@@ -26,6 +24,7 @@ import pytest
 
 from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.rate_limit.limiter import UnlimitedRateLimiter, set_limiter
+from tests.support.coverage_pause import paused_coverage as paused_coverage
 from tests.support.db import TEMPLATE_DATABASE_URL_ENV, ensure_worker_database
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
 from tests.support.talib_cache import (
@@ -39,14 +38,6 @@ except ImportError:  # pragma: no cover -- psutil is not a declared hard
     # tool dependency); load reporting degrades to "n/a" without it instead
     # of failing perf tests over a missing optional import.
     psutil = None
-
-coverage: ModuleType | None
-try:
-    import coverage
-except ImportError:  # pragma: no cover -- coverage.py ships with pytest-cov
-    # (dev dependency); guard the import so PerfBudget still works in a venv
-    # that lacks it instead of failing perf tests over a missing optional dep.
-    coverage = None
 
 _T = TypeVar("_T")
 
@@ -357,27 +348,6 @@ def _isolate_root_logger_state():
             pass
 
 
-@contextmanager
-def paused_coverage() -> Iterator[None]:
-    """task-7250(esc-ci-coverage) — `pytest --cov=src`가 걸어 둔 전역
-    line-tracer(`sys.settrace`)는 감싼 구간의 모든 CPU/wall 시간 측정에
-    실제 오버헤드로 섞여 들어간다. perf 예산 단언은 이 구간에서만 활성
-    `coverage.Coverage`를 멈췄다 재개해 트레이서 오버헤드를 측정에서
-    제외한다 — `coverage`가 설치돼 있지 않거나 현재 활성 인스턴스가 없으면
-    (예: coverage 없이 단독 실행) 아무 것도 하지 않는다. 감싼 코드는
-    그대로 실행되므로(트레이싱만 잠시 꺼질 뿐) 라인 자체는 여전히
-    실행되고, 다른 테스트가 같은 경로를 exercising하는 한 커버리지에
-    영향이 없다."""
-    active_cov = coverage.Coverage.current() if coverage is not None else None
-    if active_cov is not None:
-        active_cov.stop()
-    try:
-        yield
-    finally:
-        if active_cov is not None:
-            active_cov.start()
-
-
 @dataclass(frozen=True)
 class PerfSample:
     """단일 1회 호출의 측정값. `cpu_ms`가 예산 판정 기준이고, `wall_ms`는
@@ -437,6 +407,17 @@ class PerfBudget:
         cpu_ms = (time.process_time() - cpu_start) * 1000 / batch
         wall_ms = (time.perf_counter() - wall_start) * 1000 / batch
         return PerfSample(cpu_ms=cpu_ms, wall_ms=wall_ms, result=result)
+
+    async def sample_async(self, fn: Callable[[], Awaitable[_T]]) -> PerfSample:
+        """비동기 I/O는 커버리지 계측 없이 wall_ms로 왕복 지연을 보존한다."""
+        with paused_coverage():
+            wall, cpu = time.perf_counter(), time.process_time()
+            result = await fn()
+            return PerfSample(
+                cpu_ms=(time.process_time() - cpu) * 1000,
+                wall_ms=(time.perf_counter() - wall) * 1000,
+                result=result,
+            )
 
     def samples(
         self, fn: Callable[[], _T], *, n: int, warmup: int = 1, batch: int = 1

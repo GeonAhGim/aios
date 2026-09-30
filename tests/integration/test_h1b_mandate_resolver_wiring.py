@@ -20,7 +20,6 @@ mandate revision) + 실패주입 1건(mandate repo 예외 전파) + 성능단언
 from __future__ import annotations
 
 import json
-import time
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -245,7 +244,7 @@ async def test_mandate_repository_failure_propagates_not_silently_allowed(
 
 @pytest.mark.perf
 async def test_resolve_mandate_revision_latency_within_normalized_budget(
-    pool, mandate_repo, trust_repo
+    pool, mandate_repo, trust_repo, perf_budget
 ):
     """성능단언 — H-1a resolver 단독 조회 1회의 p95 지연을 같은 연결의 기준
     왕복비용(`SELECT 1`)에 정규화한 임계와 비교한다(`test_order_service_
@@ -259,9 +258,8 @@ async def test_resolve_mandate_revision_latency_within_normalized_budget(
     async def _p95_ms(step) -> float:
         samples = []
         for _ in range(reps):
-            t0 = time.perf_counter()
-            await step()
-            samples.append((time.perf_counter() - t0) * 1000)
+            measured = await perf_budget.sample_async(step)
+            samples.append(measured.wall_ms)
         samples.sort()
         return samples[int(len(samples) * 0.95) - 1]
 

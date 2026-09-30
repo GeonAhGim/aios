@@ -10,7 +10,6 @@ task-8658 선례: pytest 기본 `python_files`(=`test_*.py`)는 `__init__.py`를
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 from typing import cast
 
@@ -78,14 +77,13 @@ def test_query_logger_propagates_append_failure(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.perf
-def test_percentile_throughput_budget() -> None:
+def test_percentile_throughput_budget(perf_budget) -> None:
     """D2 성능 단언 — 순수 CPU 정렬/인덱싱 연산이므로 10,000개 표본에 대한
     200회 p99 계산이 1초 예산 안에 들어야 한다(회귀 시 여기서 잡힌다)."""
     samples = [float(i) for i in range(10_000)]
 
-    started = time.perf_counter()
-    for _ in range(200):
-        percentile(samples, 99)
-    elapsed = time.perf_counter() - started
+    def run_batch():
+        for _ in range(200):
+            percentile(samples, 99)
 
-    assert elapsed < 1.0, f"percentile 200회 처리 {elapsed:.4f}s가 1s 예산 초과"
+    perf_budget.assert_within(run_batch, budget_ms=1000, n=1, warmup=0)

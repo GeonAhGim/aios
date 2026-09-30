@@ -144,7 +144,7 @@ def test_rebind_tenant_meets_pretrade_gate_budget() -> None:
 
 
 @pytest.mark.perf
-def test_rebind_tenant_budget_assertion_catches_regression() -> None:
+def test_rebind_tenant_budget_assertion_catches_regression(perf_budget) -> None:
     """게이트 적색 재현 -- `RequestContext.model_copy`(rebind_tenant 내부에서
     새 컨텍스트를 만드는 데 쓰는 호출)에 인위 지연을 주입해 위 p99 예산 단언이
     실제로 AssertionError를 내는지 확인한다(타우톨로지 아님을 증명).
@@ -163,11 +163,10 @@ def test_rebind_tenant_budget_assertion_catches_regression() -> None:
     with context.bind():
         samples = []
         for _ in range(20):
-            start = time.perf_counter()
             with pytest.MonkeyPatch.context() as mp:
                 mp.setattr(context.RequestContext, "model_copy", _slow_model_copy)
-                rebind_tenant(ctx)
-            samples.append(time.perf_counter() - start)
+                measured = perf_budget.sample(lambda: rebind_tenant(ctx))
+            samples.append(measured.wall_ms / 1000)
 
     p99 = sorted(samples)[int(len(samples) * 0.99)]
     with pytest.raises(AssertionError):

@@ -60,35 +60,30 @@ def test_percentile_negative_pct_clamped_to_minimum() -> None:
 
 
 @pytest.mark.perf
-def test_percentile_p99_over_10k_samples_within_budget() -> None:
+def test_percentile_p99_over_10k_samples_within_budget(perf_budget) -> None:
     """성능단언(D2): 1만 포인트 규모에서도 nearest-rank 계산은 sort 1회
     (O(n log n))로 끝나야 한다 — 공유 CI 편차를 감안해 500ms 상한(여유
     수십 배)만 건다."""
-    import time
-
     samples = [float(i % 997) for i in range(10_000)]
-    started = time.perf_counter()
-    result = percentile(samples, 99)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    assert elapsed_ms < 500, f"percentile(10k) took {elapsed_ms:.1f}ms (budget 500ms)"
-    assert result == 986.0
+    measured = perf_budget.assert_within(
+        lambda: percentile(samples, 99), budget_ms=500, n=1, warmup=0
+    )
+    assert measured.result == 986.0
 
 
 @pytest.mark.perf
-def test_percentile_perf_assertion_actually_catches_regression() -> None:
+def test_percentile_perf_assertion_actually_catches_regression(perf_budget) -> None:
     """적색 재현(tautology 방지): 위 성능 단언이 실제로 실패할 수 있음을
-    busy-loop 지연 주입으로 확인한다 — 항상 통과하는 장식 단언이 아니다."""
+    sleep 지연 주입으로 확인한다 — 항상 통과하는 장식 단언이 아니다."""
     import time
 
     def _slow_percentile(samples_ms: list[float], pct: float) -> float:
         time.sleep(0.6)  # 500ms 예산을 의도적으로 초과시키는 실패 주입
         return percentile(samples_ms, pct)
 
-    started = time.perf_counter()
-    _slow_percentile([1.0, 2.0, 3.0], 99)
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    measured = perf_budget.sample(lambda: _slow_percentile([1.0, 2.0, 3.0], 99))
     with pytest.raises(AssertionError):
-        assert elapsed_ms < 500, f"took {elapsed_ms:.1f}ms (budget 500ms)"
+        assert measured.wall_ms < 500, f"took {measured.wall_ms:.1f}ms (budget 500ms)"
 
 
 # ---------------------------------------------------------------------------
