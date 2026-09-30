@@ -8,6 +8,7 @@
 (3) 감사 INSERT가 실제 DB 오류로 실패하면 outcome=failure 메트릭이 집계되고 행은 롤백.
 시드·조회 헬퍼는 `test_key_rotation.py`의 것을 재사용한다(파일 300줄 상한으로 분리).
 """
+
 from __future__ import annotations
 
 import logging
@@ -137,6 +138,41 @@ async def test_encrypt_failure_after_decrypt_never_exposes_plaintext(
         assert secret not in captured.out + captured.err
     assert err.__cause__ is None and err.__context__ is None
     assert str(err) == f"id={row_id} reencrypt 실패(kid='k1', cause=RuntimeError)"
+    assert (await _row(pool, row_id))["key_version"] == "k1"
+    assert _failures(spy_metrics) == [
+        (SECURITY_KEY_ROTATION_COUNT_TOTAL, {"scope": "PAPER", "outcome": "failure"})
+    ]
+
+
+async def test_cli_rejects_non_positive_batch_size_without_touching_rows(pool):
+    """`--batch-size 0`은 `_positive_int`가 명시적으로 거부 — argparse가 exit 2로
+    종료하고 어떤 행도 조회·회전되지 않는다(불변식 위반 입력 거부 증명)."""
+    ids = await _seed_rows(pool, 2)
+
+    rejected = _run_cli("--batch-size", "0")
+
+    assert rejected.returncode == 2
+    assert "1 이상의 정수여야 합니다" in rejected.stderr
+    for row_id in ids:
+        assert (await _row(pool, row_id))["key_version"] == "k1"
+
+
+async def test_decrypt_failure_never_touches_row_and_counts_failure_metric(
+    pool, monkeypatch, spy_metrics
+):
+    """복호(`decrypt`) 단계 자체가 의존성 예외로 실패 — encrypt는 호출되지 않고,
+    행은 손대지 않은 채(key_version 그대로) 실패 메트릭만 집계된다."""
+    [row_id] = await _seed_rows(pool, 1)
+
+    def failing_decrypt(token: str, ring: KeyRing) -> str:
+        raise RuntimeError("kms unavailable")
+
+    monkeypatch.setattr(rck, "decrypt", failing_decrypt)
+
+    with pytest.raises(CredentialRotationError) as exc_info:
+        await rotate_paper_credentials(pool, NEW_RING, batch_size=100)
+
+    assert str(exc_info.value) == f"id={row_id} reencrypt 실패(kid='k1', cause=RuntimeError)"
     assert (await _row(pool, row_id))["key_version"] == "k1"
     assert _failures(spy_metrics) == [
         (SECURITY_KEY_ROTATION_COUNT_TOTAL, {"scope": "PAPER", "outcome": "failure"})
