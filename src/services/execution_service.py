@@ -1,34 +1,37 @@
-"""16.2 — 실행 거래소·모드(PAPER/LIVE) 선택 (ExecutionService.create_execution).
+"""16.2 — Select execution exchange and mode (PAPER/LIVE) (ExecutionService.create_execution).
 
 Spec: 기능설계문서_v1.20.md#FD-16.2, 9.10, FD-10.1, FD-12, 06번 §6.1, 02번 §2.2
 
-Zone 경계 — 이 서비스는 자본배분·거래소·모드를 지정해 strategy_executions
-행을 만들 뿐이다. 실제로 "사고 팔지" 판단하는 로직은 여전히 FD-8
-(FROZEN)의 배타적 책임이며 이 경계는 넘지 않는다.
+Zone boundary — This service only creates strategy_executions rows by specifying
+capital allocation, exchange, and mode. The logic for actually deciding "buy/sell"
+remains the exclusive responsibility of FD-8 (FROZEN), and this boundary is not crossed.
 
-mode=LIVE인 경우 자동화 수준(9.10)과 무관하게 항상 FD-10.1 Critical Risk
-승인을 요구한다 — "9.10 자동화 수준이 Level 1~3인 경우"라는 조건부
-트리거를 판정할 자동화 수준 추적 자체가 이 시스템에 아직 없다(별도
-leaf 없음) — 안전 원칙상 더 보수적인 "항상 승인 필요"로 처리한다
-(과소 안전장치보다 과잉 승인 요구가 안전한 방향).
+For mode=LIVE, Critical Risk approval (FD-10.1) is always required regardless of
+automation level (9.10) — the automation level tracking itself needed to evaluate the
+conditional trigger "if automation level is 1-3" does not yet exist in this system
+(no separate leaf) — on safety grounds, we handle this more conservatively as "always
+requires approval" (excessive approval requirements are safer than insufficient
+safeguards).
 
-승인 요청과 실행 행을 연결할 전용 컬럼이 strategy_executions에 없어
-(설계 누락) approval_requests.context에 execution_id를 담아 연결한다 —
-16.3(시작 제어)이 이 값으로 역참조해 승인 상태를 확인한다.
+There is no dedicated column in strategy_executions to link approval requests and
+execution rows (design gap), so we embed execution_id in approval_requests.context
+to establish the connection — 16.3 (execution control) reverse-references using this
+value to check approval status.
 
-16.3 — 시작/일시정지/손실한도/중지(start/pause/set_max_drawdown/retire)는
-P6(파일당 300줄 상한) 준수를 위해 `execution_control.py`로 옮겼다 — 이
-클래스의 각 메서드는 거기 함수에 `self._pool` 등을 그대로 넘기는 얇은
-위임이라 공개 계약(`ExecutionService.start()` 등)은 바뀌지 않는다.
+16.3 — start/pause/set_max_drawdown/retire were moved to `execution_control.py`
+to comply with P6 (300-line-per-file limit) — each method of this class is a thin
+delegation that passes `self._pool` etc. to its counterpart function, so the public
+contract (`ExecutionService.start()` etc.) remains unchanged.
 
-16.6 — PAPER→LIVE 전환(convert_to_live): 기존 PAPER 실행은 종료하지
-않고 그대로 이력 보존(성과 비교 근거), 신규 LIVE 실행을 별도 행으로
-생성한다(converted_from_execution_id로 연결) — 가상 포지션이 실제
-포지션으로 "마법처럼" 전환되는 경로 자체를 만들지 않는다(오해·오류
-소지 원천 차단). create_execution()을 그대로 재사용해 16.1/16.2 절차
-(자본배분·거래소·모드 검증, LIVE 승인)를 다시 거친다 — 승인 절차
-생략 불가.
+16.6 — PAPER→LIVE conversion (convert_to_live): existing PAPER executions are not
+terminated; history is preserved as-is (as basis for performance comparison), and a
+new LIVE execution is created as a separate row (linked via converted_from_execution_id)
+— we do not create a path where virtual positions magically convert to real positions
+(preventing misunderstanding and errors at their source). We reuse create_execution()
+directly to go through the 16.1/16.2 procedure again (capital allocation, exchange,
+mode validation, LIVE approval) — approval cannot be skipped.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -72,12 +75,12 @@ class ExecutionService:
         self._pool = pool
         self._risk_policy = risk_policy
         self._publish = publish
-        # 전수감사 §6 배선 — order_service.gate의 타입을 그대로 재사용한다
-        # (이름은 "주문"이지만 모양(tenant/execution/exchange/mandate 하나
-        # 평가해 ALLOW/DENY)이 완전히 같다 — order_service.foundation_gate.
-        # make_foundation_pre_submit_gate()가 만든 콜러블을 여기 그대로
-        # 주입해도 동작한다. 새 타입을 또 만들지 않는다). EO-05(I-01) —
-        # 기본값을 없애 컴파일/타입체크 시점에 게이트 누락을 막는다.
+        # Comprehensive audit §6 wiring — reuse the type from order_service.gate as-is.
+        # (Despite the name "order", the shape (evaluates one of tenant/execution/exchange/mandate
+        # to yield ALLOW/DENY) is identical — order_service.foundation_gate.
+        # make_foundation_pre_submit_gate() can create a callable and inject it directly here
+        # and it will work. We do not create a new type again). EO-05(I-01) —
+        # Remove default value to block gate omission at compile/type-check time.
         self._pre_start_gate = pre_start_gate
 
     async def create_execution(
@@ -189,10 +192,10 @@ class ExecutionService:
     async def set_max_drawdown(
         self, execution_id: int, user_id: UUID, max_drawdown_pct: Decimal | None
     ) -> ExecutionSummary:
-        """ZuluTrade식 "위험 관리"(ZuluGuard) — 실행별 손실 한도(%)를 설정하면
-        risk_guard_service.py::evaluate_all_running()이 주기적으로 실현+
-        미실현 손익을 이 한도와 비교해 초과 시 paused_by='SAFETY_LAYER'로
-        자동 정지시킨다. None으로 설정하면 가드를 끈다(기본값)."""
+        """ZuluTrade-style "risk management" (ZuluGuard) — when a per-execution loss limit (%)
+        is set, risk_guard_service.py::evaluate_all_running() periodically compares realized +
+        unrealized P&L to this limit and automatically pauses with paused_by='SAFETY_LAYER' if
+        exceeded. Set to None to disable the guard (default behavior)."""
         return await execution_control.set_max_drawdown(
             self._pool, execution_id, user_id, max_drawdown_pct
         )
