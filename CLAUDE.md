@@ -110,42 +110,6 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
    blew the 41k-token budget. Record such findings in `docs/CI_SYSTEMIC_LOG.md` (append-only)
    and keep this list to short, general rules only.
 
-86. An eighth `frontend` `[health:ci_red_systemic]` leaf (task-9760) reconfirms #16/#39/#52/
-    #64/#66/#84 for a seventh+ round with the same bisect culprit and a sharper capture of #52's
-    crash-code signature. This task's own cited repeat set (task-9521, task-9563, task-9678,
-    task-9745) is the exact same set #66/#84 already resolved: all four closed noop, all four
-    independently traced the escalation's `bisect_culprit` to `27b5fe61e1d0f33aaa0ad006fdaab6c
-    597d6f426` (task-9242, "FA-4 pos_account/pos_snapshot 마이그레이션 테스트 DEEPEN") — a commit
-    that only touches `tests/foundation/unit/entities/test_migration_fa4_columns.py`, a backend
-    Python D2/D3 test file, no `frontend/` change at all. `esc-ci-frontend.json`'s own stored
-    detail for this round is the sharpest evidence yet of #52's root cause: it shows
-    `check_frontend_file_size.test.mjs` failing 3 of 6 `node:test` cases with the exact literal
-    `actual: 3221225794` (`0xC0000005`, Windows `STATUS_ACCESS_VIOLATION`) recorded as if it were
-    the test's own returned exit code, where the assertion expects `1` — alongside a separately
-    truncated `npm error Lifecycle script "test:coverage" failed` with no assertion detail
-    surviving in the tail. Both are host-level process-crash/truncation artifacts under
-    concurrent CI-lane contention, not script defects. Reconfirmed on this worktree (`git status`
-    clean, ancestor-confirmed descendant of `27b5fe61`): `node --test
-    scripts/check_frontend_file_size.test.mjs` passes all 6 cases cleanly in ~470ms (no access
-    violation), and `npm run test:coverage --workspace=apps/web` passes clean — `Test Files 196
-    passed (196)`, `Tests 1587 passed (1587)`, Statements 89.71%/Branches 83.74%/Functions
-    84.1%/Lines 91.36%. This is the same fleet-code classification bug already named in #16/#39/
-    #52/#64/#66/#84: `pm/auto_decision.py`'s `_stage_tail`/`_FAIL_LINE_MARKERS` records a
-    spawned-subprocess crash exit code or a timeout-truncated tail as if it were a real assertion
-    failure and pins the blame on whichever file the truncated log happened to mention, instead of
-    recognizing a `0xC0000005`/`rc=124`-class signature as host contention — fleet code under
-    `C:\aios\pm`, out of a repo worker's edit scope (§4). No script/test/baseline change made.
-    Before working a future `frontend` correction leaf whose detail cites
-    `check_frontend_file_size.test.mjs`, an `0xC000...`/`3221225794`-class exit code, or an
-    `npm error Lifecycle script` truncation: rerun `node --test
-    scripts/check_frontend_file_size.test.mjs` and/or `npm run test:coverage --workspace=apps/web`
-    locally first — if both are green and the escalation's bisect culprit is a backend-only/
-    Python commit (as it has been every time so far: `27b5fe61` in #39/#52/#66/#84 and here),
-    close as noop citing task-9302 (#16), task-9548 (#39), task-9588 (#52), task-9666 (#64),
-    task-9678 (#66), task-9778 (#84), and this entry rather than re-investigating a ninth time.
-    No baseline/marker-list relief made (DECISION_GUIDELINES B-2) — the fix belongs to fleet
-    code, not this repo.
-
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
