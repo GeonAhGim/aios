@@ -2,13 +2,14 @@
 
 httpx.MockTransport 기반 검증(test_bitget_adapter.py와 동일 원칙).
 """
+
 import json
 from decimal import Decimal
 
 import httpx
 import pytest
 
-from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+from src.core.exceptions import FrozenZonePaperAdapterBlockedError, RetryableExchangeError
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -48,9 +49,7 @@ async def test_place_strategy_order_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.place_strategy_order("BTC/USDT", "buy", "twap", Decimal("1"))
@@ -99,3 +98,55 @@ async def test_get_strategy_order_history_returns_raw_rows():
     history = await adapter.get_strategy_order_history()
 
     assert history == [{"orderId": "s-1", "status": "completed"}]
+
+
+async def test_place_strategy_order_rejects_nonpositive_total_amount():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("불변식 위반 입력은 요청을 보내기 전에 거부돼야 합니다.")
+
+    adapter = _make_adapter(handler)
+
+    with pytest.raises(ValueError, match="total_amount"):
+        await adapter.place_strategy_order("BTC/USDT", "buy", "twap", Decimal("0"))
+
+
+async def test_place_strategy_order_rejects_nonpositive_price():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("불변식 위반 입력은 요청을 보내기 전에 거부돼야 합니다.")
+
+    adapter = _make_adapter(handler)
+
+    with pytest.raises(ValueError, match="price"):
+        await adapter.place_strategy_order(
+            "BTC/USDT", "buy", "twap", Decimal("1"), price=Decimal("-1")
+        )
+
+
+async def test_place_strategy_order_rejects_nonpositive_duration():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("불변식 위반 입력은 요청을 보내기 전에 거부돼야 합니다.")
+
+    adapter = _make_adapter(handler)
+
+    with pytest.raises(ValueError, match="duration_seconds"):
+        await adapter.place_strategy_order(
+            "BTC/USDT", "buy", "twap", Decimal("1"), duration_seconds=0
+        )
+
+
+async def test_place_strategy_order_raises_retryable_on_api_error():
+    """의존성(거래소 응답) 실패주입 — body code != 00000 이면 재시도 가능 예외로
+    전파돼야 한다(test_bitget_adapter.py::
+    test_api_error_response_raises_retryable_by_default와 동일 계약)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {"code": "99999", "msg": "internal error", "requestTime": 1, "data": {}}
+        )
+
+    adapter = _make_adapter(handler)
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.place_strategy_order(
+            "BTC/USDT", "buy", "twap", Decimal("1"), duration_seconds=3600
+        )
