@@ -116,6 +116,30 @@ def test_load_reference_empty_raises(tmp_path: Path) -> None:
         bitget_coverage.load_reference((doc,))
 
 
+# ---------------------------------------------------------------------------
+# scan_adapter_source / read_baseline_percent — fail-closed 입력 거부 (negative)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_adapter_source_missing_dir_raises(tmp_path: Path) -> None:
+    with pytest.raises(bitget_coverage.BitgetCoverageError):
+        bitget_coverage.scan_adapter_source(tmp_path / "does-not-exist-adapter")
+
+
+def test_read_baseline_percent_empty_file_raises(tmp_path: Path) -> None:
+    baseline = tmp_path / "bitget-coverage.txt"
+    baseline.write_text("", encoding="utf-8")
+    with pytest.raises(bitget_coverage.BitgetCoverageError):
+        bitget_coverage.read_baseline_percent(baseline)
+
+
+def test_read_baseline_percent_non_numeric_raises(tmp_path: Path) -> None:
+    baseline = tmp_path / "bitget-coverage.txt"
+    baseline.write_text("이상함\n", encoding="utf-8")
+    with pytest.raises(bitget_coverage.BitgetCoverageError):
+        bitget_coverage.read_baseline_percent(baseline)
+
+
 def test_load_reference_dedupes_across_docs_keeping_first(tmp_path: Path) -> None:
     doc1 = _write_doc(
         tmp_path,
@@ -226,6 +250,23 @@ def test_classify_forbidden_priority_is_out_of_scope() -> None:
 
 def test_classify_low_priority_defaults_to_not_started() -> None:
     assert bitget_coverage.classify(_row(priority="P2"), implemented=False) == "미착수"
+
+
+def test_build_matrix_rejects_invalid_reason_from_classify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실패주입: `classify()`가 의존성 변경(회귀/오배포)으로 3종 밖의
+    값을 반환하면 `build_matrix`는 그 값을 침묵 통과시키지 않고 즉시
+    거부해야 한다(D5 계약, `_VALID_REASONS` 회귀 방지 가드)."""
+    doc = _write_doc(
+        tmp_path,
+        "### A\n\n| 함수 목적 | Method | Path |\n|---|---|---|\n| a | GET | `/api/v2/a` |\n",
+    )
+    reference = bitget_coverage.load_reference((doc,))
+    monkeypatch.setattr(bitget_coverage, "classify", lambda row, implemented: "알수없음")
+
+    with pytest.raises(bitget_coverage.BitgetCoverageError):
+        bitget_coverage.build_matrix(reference, adapter_source="")
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +413,17 @@ def test_main_missing_spec_doc_fails(tmp_path: Path, capsys: pytest.CaptureFixtu
     adapter_dir.mkdir()
 
     exit_code = _run_main(tmp_path, tmp_path / "missing.md", adapter_dir, tmp_path / "cov.txt")
+
+    assert exit_code == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_main_missing_adapter_dir_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """실패주입: 어댑터 디렉터리가 사라진 상태(예: 배포/체크아웃 오류)에서도
+    `main()`은 예외를 흘리지 않고 FAIL + exit=1로 fail-closed 종료해야 한다."""
+    doc = _write_doc(tmp_path, _SAMPLE_DOC_BODY)
+
+    exit_code = _run_main(tmp_path, doc, tmp_path / "missing-adapter", tmp_path / "cov.txt")
 
     assert exit_code == 1
     assert "FAIL" in capsys.readouterr().out
