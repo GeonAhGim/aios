@@ -372,6 +372,48 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — task-9269's `RelativeBudget` migration is the actual fix and is
     already in place.
 
+21. Treating every `coverage` `[health:ci_red_systemic]` correction leaf as a fresh
+    `coverage_ratchet.py` design defect — task-8993 flagged `coverage` at 6+ leaves in 24h
+    (task-8845, task-8928, task-9052, task-9147, task-9282) and `scripts/coverage_ratchet.py` /
+    `coverage-baseline.txt` have no remaining design defect: the ratio-floor guard for partial
+    reports (task-7644/7670) and the trusted-write gate (`GITHUB_ACTIONS=true` or
+    `--allow-baseline-write`, task-9120) were both added specifically to close this failure
+    class, and a plain `python scripts/coverage_ratchet.py` against the current
+    `coverage-baseline.txt` (`94.83`/`52977`, landed by task-9052's commit `fd30dd2e`) behaves
+    correctly. The 6 leaves are three different things wearing the same gate name: (a)
+    task-8845 was a real defect — an import rename (`_imports_of` -> `_imports_of_text`,
+    commit `3d0dc888`) broke 7 test modules' collection, so pytest never reached
+    `coverage_ratchet.py` at all and the reported "94.89% -> 82.03%" was collection failure
+    fallout, not a ratchet bug; fixed by restoring `_imports_of` as a thin wrapper. (b)
+    task-8928 was a real defect — `run_sandboxed()`
+    (`src/foundation/backtest/application/sandboxed_script_eval.py`) could hang on a cold
+    `ProcessPoolExecutor` spawn when `_kill_pid(None)` no-opped, killing the CI pytest run
+    mid-flight and producing a genuinely truncated `coverage.xml` (`94.89% -> 81.55%`); fixed
+    with a pid-capture grace window and a non-blocking executor shutdown — unrelated to the
+    ratchet script. (c) task-9052, task-9147, and the still-open task-9282 are the journeys/
+    ruff/frontend/type_ignore/complexity/perf_marker_guard pattern (#13/#15/#16/#17/#18/#19)
+    repeating under `coverage`: all three report the *identical* stale detail
+    ("기준선 미달 94.89% -> 50.77%", the exact same numbers every time) traced back to sha
+    `4d5ebed5`, a docstring-only commit that was never the regression — task-9052 root-caused it
+    as local pytest resource contention producing a partial `coverage.xml` (the very pattern
+    task-7670/8680 already documented) and re-baselined from a real GH Actions run
+    (`94.78% -> 94.83%`); task-9147 independently reconfirmed task-9120's fix was already the
+    systemic answer and found no 24h repeat; yet `esc-ci-coverage.json` — `first_seen`
+    2026-09-22T15:23:36Z, still showing `status: "resolved"` but `last_seen` 2026-09-30T03:26:49Z
+    — created task-9282 afterward (06:17:19Z) off that same ancient `4d5ebed5` detail, and
+    task-9282 then burned its turn budget on context thrashing without resolving anything. This
+    is the same class of defect as #17/#18/#19: fleet code under `C:\aios\pm`
+    (`pm/auto_decision.py` / `orchestrator.py`'s `ci_red` rule) re-triggering a fix leaf off a
+    stale escalation record instead of re-running the stage's own check at current HEAD first,
+    out of a repo worker's edit scope (§4). Before working a new `coverage` correction leaf:
+    run `python scripts/coverage_ratchet.py` locally against the checked-in
+    `coverage-baseline.txt` first (needs a real, complete `coverage.xml` — a partial local
+    `pytest --cov` run will itself look like a regression, per the script's own documented
+    caveat) — if the FAIL detail text matches an already-closed leaf's note verbatim, close as
+    noop citing that leaf and this entry rather than re-diagnosing the same stale sha. No
+    baseline/tolerance/ratio-floor relief made from this leaf (DECISION_GUIDELINES B-2) — the
+    ratchet design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
