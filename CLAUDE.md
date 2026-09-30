@@ -1313,6 +1313,39 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     baseline/timeout relief made (DECISION_GUIDELINES B-2) — design is sound and already fixed;
     the remaining defect is fleet code, not this repo.
 
+52. A fourth `frontend` `[health:ci_red_systemic]` leaf (task-9588) reconfirms #16/#39 with a
+    new, more concrete data point. `esc-ci-frontend.json`'s stored failure detail for this round
+    is not the usual stale-bisect shape — it shows `check_frontend_file_size.test.mjs` failing 3
+    of its 6 `node:test` cases with `err.status` recorded as `3221225794` (`0xC0000005`, Windows
+    `STATUS_ACCESS_VIOLATION`) where the test asserts `status === 1`, alongside a separately
+    truncated `test:coverage`/`vitest run --coverage` `npm error` with no assertion detail
+    surviving in the stored tail. `0xC0000005` on a spawned `execFileSync(process.execPath, ...)`
+    child is a host-level process crash (OOM/AV/handle-exhaustion under concurrent CI-lane
+    contention), not a script defect — `scripts/check_frontend_file_size.mjs` and its test file
+    are unchanged and, reproduced on this worktree (`git status` clean), all 6
+    `node --test check_frontend_file_size.test.mjs` cases pass in ~470ms; a full
+    `npm run test:coverage --workspace=apps/web` also passes clean (196/196 files, 1587/1587
+    tests, exit 0), matching what task-9521/task-9462/task-9563 already reported for the prior
+    three repeats in this same 24h window. This task's cited repeat set (task-9283, task-9462,
+    task-9521, task-9563) overlaps three of the four leaves #39 (task-9548) already closed
+    (task-9089, task-9283, task-9462, task-9521) — task-9548 already root-caused the recurring
+    pattern as a classification bug in `pm/auto_decision.py`'s `_stage_tail`/`_FAIL_LINE_MARKERS`
+    (misreading an `npm test` timeout/crash tail and pinning the blame on whichever innocent file
+    the truncated log happened to mention last), which is fleet code under `C:\aios\pm`, out of a
+    repo worker's edit scope (§4). This leaf's own evidence (a literal Windows access-violation
+    exit code recorded as if it were the test's asserted value) is a second, independent
+    confirmation that the underlying instability is host/process-level, not a defect in the
+    frontend test file, the coverage ratchet, or their baselines. task-9563 itself is still
+    sitting at `status: "needs_decision"`/`commit: "none"` despite its note describing a completed
+    noop investigation — a write that never finished, not evidence of unresolved code. No
+    script/test/baseline change made. Before working a future `frontend` correction leaf whose
+    detail cites `check_frontend_file_size.test.mjs`, an `0xC000...` exit code, or an `npm error
+    Lifecycle script` truncation: rerun `node --test scripts/check_frontend_file_size.test.mjs`
+    and/or `npm run test:coverage --workspace=apps/web` locally first — if both are green, close
+    as noop citing task-9548 (#39), task-9521/task-9563, and this entry rather than
+    re-investigating a fifth time. No baseline/marker-list relief made (DECISION_GUIDELINES B-2)
+    — the fix belongs to fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
