@@ -1790,7 +1790,6 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/baseline design is sound; the remaining defect is fleet
     code, not this repo.
 
-<<<<<<< HEAD
 71. A sixth `consistency` 24h 5-repeat systemic leaf (task-9691) citing the identical repeat
     set #22 (task-9011/9281/9460), #31 (task-9301/9460), #35 (task-9537), #54 (task-9620), and
     #61 (task-9665) already closed five times — task-9691's spec names task-9011, task-9281,
