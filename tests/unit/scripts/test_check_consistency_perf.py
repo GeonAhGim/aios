@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 WIRING_PATH = SCRIPTS_DIR / "consistency" / "wiring.py"
@@ -97,6 +99,7 @@ def test_port_protocol_implementations_skips_unparseable_adapter_file(tmp_path: 
     assert hits == [("src/ctx/adapters/postgres_repository.py", 1)]
 
 
+@pytest.mark.perf
 def test_port_protocol_implementations_perf_budget(tmp_path: Path) -> None:
     """numeric perf assertion: 60 adapter 파일 x 20 클래스(1,200 클래스,
     구현 완전)를 5초 안에 처리한다 -- esc-ci-consistency의 120s 예산에
