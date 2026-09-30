@@ -22,6 +22,7 @@ import asyncpg
 import pytest
 
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
+from tests.conftest import PerfBudget, paused_coverage
 from tests.integration.conftest import create_test_user
 from tests.integration.foundation.allocation.conftest import (
     _asyncpg_dsn,
@@ -127,33 +128,41 @@ async def test_wallet_available_balance_propagates_connection_failure() -> None:
 @pytest.mark.perf
 async def test_create_order_with_fills_round_trip_stays_within_local_budget(
     pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
 ) -> None:
     """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1, n=20, 워밍업
     3회 버림)을 이 환경에서 직접 재고, `create_order_with_fills`의 절대
     시간이 그 기준의 12배(연속 DB 왕복 여유, `test_conftest_deepen.py`
     (positions, task-7706)와 같은 정규화 방식) 이내인지 단언한다 -- 절대 ms
-    임계는 실행환경마다 흔들려 회귀 게이트로 못 쓴다."""
-    samples: list[float] = []
-    for _ in range(23):
+    임계는 실행환경마다 흔들려 회귀 게이트로 못 쓴다.
+    I/O 대기(DB round trip)가 대부분이라 `PerfBudget.sample`의
+    process_time() 기반 측정은 부적합하다 -- wall-clock을 쓰되
+    `paused_coverage()`로 `--cov=src` 라인 트레이서 오버헤드만 제거한다
+    (entities/conftest.py의 `test_build_hierarchy_p95_latency_stays_within_normalized_ceiling`,
+    task-9464와 같은 근거)."""
+    del perf_budget  # 서명만 사용 -- I/O 바운드라 paused_coverage() wall-clock을 쓴다
+    with paused_coverage():
+        samples: list[float] = []
+        for _ in range(23):
+            start = time.perf_counter()
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            samples.append(time.perf_counter() - start)
+        baseline_rt = sorted(samples[3:])[-1]  # 워밍업 3회 버리고 최댓값(보수적 rt)
+
+        entities = PostgresEntityRepository(pool)
+        hierarchy = await build_hierarchy(pool, entities)
+
         start = time.perf_counter()
-        async with pool.acquire() as conn:
-            await conn.fetchval("SELECT 1")
-        samples.append(time.perf_counter() - start)
-    baseline_rt = sorted(samples[3:])[-1]  # 워밍업 3회 버리고 최댓값(보수적 rt)
-
-    entities = PostgresEntityRepository(pool)
-    hierarchy = await build_hierarchy(pool, entities)
-
-    start = time.perf_counter()
-    await create_order_with_fills(
-        pool,
-        user_id=hierarchy.tenant_id,
-        fund_id=hierarchy.fund.fund_id,
-        portfolio_id=hierarchy.portfolio.portfolio_id,
-        side="BUY",
-        fills=[(Decimal("1"), Decimal("100.00"))],
-    )
-    elapsed = time.perf_counter() - start
+        await create_order_with_fills(
+            pool,
+            user_id=hierarchy.tenant_id,
+            fund_id=hierarchy.fund.fund_id,
+            portfolio_id=hierarchy.portfolio.portfolio_id,
+            side="BUY",
+            fills=[(Decimal("1"), Decimal("100.00"))],
+        )
+        elapsed = time.perf_counter() - start
 
     # `create_order_with_fills`는 order 1건 + fill 1건, 총 2회의 순차 INSERT
     # 왕복을 한 커넥션에서 수행한다(단일 SELECT 왕복인 baseline보다 본질적으로
