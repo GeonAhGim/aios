@@ -53,17 +53,30 @@ average_fill_price, fee_total, fee_currency}` (`_ORDER_FIELDS`), never over
 `payload_hash`; the backfilled hash only needs to satisfy the `CHAR(64) NOT
 NULL` column, not match any specific runtime value.
 
-Irreversible by design (`downgrade()` raises, does not silently no-op or
-`pass`): `order_events` is WORM (`073beca589d5`'s `worm_sql("order_events")`
--- `BEFORE UPDATE OR DELETE ... RAISE EXCEPTION`, fires unconditionally, even
-for the table owner, per that migration's own docstring). Deleting the rows
-this migration appends on downgrade would require temporarily dropping that
-trigger, which is the exact anti-pattern `docs design` review guidance (and
-the FA-4/FA-0d precedent, `963d5f3cfb1b`/`cdb114b6903f`, which instead leaves
-`pos_journal` permanently on the old key format) already rules out for WORM
-tables. An audit trail that can be revoked on `downgrade` is not actually an
-audit trail -- the correct WORM-consistent behavior is to refuse the fake
-rollback outright, the same tradeoff FA-0d already accepted for `pos_journal`.
+Conditionally irreversible (`downgrade()` raises only when it would need to
+undo something): `order_events` is WORM (`073beca589d5`'s
+`worm_sql("order_events")` -- `BEFORE UPDATE OR DELETE ... RAISE EXCEPTION`,
+fires unconditionally, even for the table owner, per that migration's own
+docstring). Deleting the rows this migration appends on downgrade would
+require temporarily dropping that trigger, which is the exact anti-pattern
+`docs design` review guidance (and the FA-4/FA-0d precedent,
+`963d5f3cfb1b`/`cdb114b6903f`, which instead leaves `pos_journal` permanently
+on the old key format) already rules out for WORM tables. An audit trail that
+can be revoked on `downgrade` is not actually an audit trail -- the correct
+WORM-consistent behavior is to refuse the fake rollback outright, the same
+tradeoff FA-0d already accepted for `pos_journal`.
+
+`downgrade()` first checks whether `upgrade()` actually inserted any
+`reason_code = EM3_CHILD_SLICE_COMMIT_BACKFILL_TASK8890` rows. If none exist
+(e.g. an empty dev/test DB with no `committed_child_qty > 0` order -- the
+structural no-op case this file's docstring already calls out above), there
+is nothing to protect and downgrade is a true no-op. Only when compensating
+rows are actually present does it raise -- deep-downgrade migration round-trip
+tests (`tests/integration/foundation/entities/test_migration_fa3_deepen.py`)
+start from an empty DB and must be able to pass through this revision on the
+way to an older target; a migration that unconditionally refuses to downgrade
+even when it changed nothing would make every such round trip permanently
+red the moment this revision became head (task-9287).
 """
 
 from collections.abc import Sequence
@@ -124,6 +137,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    inserted = bind.execute(
+        text("SELECT count(*) FROM order_events WHERE reason_code = :reason_code"),
+        {"reason_code": _REASON_CODE},
+    ).scalar_one()
+    if not inserted:
+        # Structural no-op: upgrade() found no `committed_child_qty > 0` order
+        # to compensate (empty dev/test DB, per the module docstring), so
+        # there is nothing WORM to protect -- downgrade has nothing to undo.
+        return
     raise Em3ChildQtyBackfillIrreversibleError(
         "d4e8f1a29c37: order_events is WORM (I7) -- the compensating "
         "CHILD_QTY_COMMITTED self-loop rows this revision inserted cannot be "
