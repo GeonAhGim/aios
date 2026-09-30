@@ -353,6 +353,78 @@ def test_loc_allow_only_exempts_loc_metrics_not_others(tmp_path: Path) -> None:
     assert len(hits["todo_fixme_xxx"]) == 1
 
 
+def test_near_threshold_files_reports_file_below_threshold_within_window() -> None:
+    result = check_code_ratchets.near_threshold_files([("src/a.py", 480)], within=30)
+
+    assert result[500] == [("src/a.py", 480)]
+    assert result[800] == []
+    assert result[1000] == []
+
+
+def test_near_threshold_files_excludes_file_outside_window() -> None:
+    result = check_code_ratchets.near_threshold_files([("src/a.py", 400)], within=30)
+
+    assert result[500] == []
+
+
+def test_near_threshold_files_excludes_file_already_over_threshold() -> None:
+    """--near is for files *approaching* a threshold, not ones already past it --
+    those are already covered by the normal loc_over_500 regression check."""
+    result = check_code_ratchets.near_threshold_files([("src/a.py", 520)], within=30)
+
+    assert result[500] == []
+
+
+def test_near_threshold_files_sorts_closest_to_crossing_first() -> None:
+    result = check_code_ratchets.near_threshold_files(
+        [("src/a.py", 470), ("src/b.py", 499)], within=30
+    )
+
+    assert result[500] == [("src/b.py", 499), ("src/a.py", 470)]
+
+
+def test_scan_locs_excludes_loc_allow_files(tmp_path: Path) -> None:
+    _write_py(tmp_path, "src/a.py", "# loc-allow: generated table\n" + "x = 1\n" * 600)
+    _write_py(tmp_path, "src/b.py", "x = 1\n" * 10)
+
+    locs = check_code_ratchets.scan_locs(tmp_path, subdirs=("src",))
+
+    assert dict(locs) == {"src/b.py": 10}
+
+
+def test_main_near_flag_does_not_change_exit_code_or_baseline(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--near is advisory-only: a passing run stays green and the baseline file is
+    untouched even when it reports near-threshold files."""
+    _write_py(tmp_path, "src/a.py", "x = 1\n" * 490)
+    baseline_path = _write_baseline(tmp_path, _empty_baseline())
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path), "--near", "30"]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "src/a.py:490" in out
+    assert json.loads(baseline_path.read_text(encoding="utf-8")) == _empty_baseline()
+
+
+def test_main_near_flag_zero_prints_no_near_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_py(tmp_path, "src/a.py", "x = 1\n" * 490)
+    baseline_path = _write_baseline(tmp_path, _empty_baseline())
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    )
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "NEAR" not in out
+
+
 def test_increase_in_loc_over_500_fails_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -24,8 +24,18 @@ A legitimate ``raise NotImplementedError`` (a fail-closed adapter stub) is
 excluded from the ``not_implemented_error`` count for a whole file if that
 file's first 20 lines contain a comment ``# ratchet-allow: <reason>``.
 
-Usage: `python scripts/check_code_ratchets.py [--update]` (repo root).
+Usage: `python scripts/check_code_ratchets.py [--update] [--near N]` (repo root).
 Exit code: 0 = pass, 2 = a count increased beyond baseline, 1 = input error.
+
+``--near N`` is an advisory-only report (does not affect exit code) listing files
+that are under a loc_over_500/800/1000 threshold but within N lines of crossing it.
+Run this *before* adding D2/D3 evidence (rationale prose, negative tests, ...) to a
+file, since that prose is exactly what has repeatedly tipped near-threshold files
+over the line after the fact (task-8905, task-9010, task-9118) -- CLAUDE.md mistake
+#12 already tells a worker to "check line count first," but nothing made that check
+easy to run, so it kept being skipped. This does not change loc_over_* accounting or
+touch the baseline (DECISION_GUIDELINES B-2) -- it just surfaces risk before a commit
+instead of after a red gate.
 """
 
 from __future__ import annotations
@@ -232,6 +242,37 @@ def counts_of(hits: dict[str, list[Hit]]) -> dict[str, int]:
     return {metric: len(hits[metric]) for metric in METRICS}
 
 
+def scan_locs(root: Path, subdirs: tuple[str, ...] = DEFAULT_SUBDIRS) -> list[Hit]:
+    """Per-file line counts for every tracked file, excluding ``loc-allow`` files --
+    used by ``--near`` to warn about files approaching a threshold *before* a commit
+    pushes them over it, instead of discovering the loc_over_500 regression only after
+    it already failed the gate (task-8905/task-9010/task-9118: mandatory D2/D3 rationale
+    prose repeatedly tipped files that were already close to 500 lines)."""
+    files = _iter_python_files(root, subdirs)
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        texts = pool.map(_read_file, files)
+    out: list[Hit] = []
+    for path, text in zip(files, texts, strict=True):
+        if _loc_allow_reason(text) is not None:
+            continue
+        rel = path.relative_to(root).as_posix()
+        out.append((rel, len(text.splitlines())))
+    return out
+
+
+def near_threshold_files(locs: list[Hit], within: int) -> dict[int, list[Hit]]:
+    """Files under a threshold but within ``within`` lines of crossing it, per
+    threshold, sorted closest-to-crossing first."""
+    result: dict[int, list[Hit]] = {t: [] for t in _LOC_THRESHOLDS}
+    for rel, loc in locs:
+        for threshold in _LOC_THRESHOLDS:
+            if threshold - within <= loc <= threshold:
+                result[threshold].append((rel, loc))
+    for threshold in _LOC_THRESHOLDS:
+        result[threshold].sort(key=lambda item: -item[1])
+    return result
+
+
 def read_baseline(path: Path) -> dict[str, int] | None:
     """baseline 파일이 없으면 None(최초 실행), 있으면 세 지표 값을 반환한다."""
     if not path.exists():
@@ -267,6 +308,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     parser.add_argument("--update", action="store_true", help="감소분을 baseline 파일에 반영")
     parser.add_argument("--top", type=int, default=10, help="증가한 지표별로 보여줄 목록 개수")
+    parser.add_argument(
+        "--near",
+        type=int,
+        default=0,
+        help=(
+            "0보다 크면, 아직 위반이 아니지만 그 줄 수 안으로 임계값(500/800/1000)에 "
+            "근접한 파일을 함께 보고한다(D3 증빙 추가 전에 먼저 실행할 것). "
+            "종료 코드에는 영향 없음."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -277,6 +328,16 @@ def main(argv: list[str] | None = None) -> int:
 
     hits = scan_tree(args.root)
     current = counts_of(hits)
+
+    if args.near > 0:
+        near = near_threshold_files(scan_locs(args.root), args.near)
+        for threshold in _LOC_THRESHOLDS:
+            files = near[threshold]
+            if not files:
+                continue
+            print(f"NEAR loc_over_{threshold} (임계값 {args.near}줄 이내, 아직 위반 아님):")
+            for rel, loc in files[: args.top]:
+                print(f"    {rel}:{loc} ({threshold - loc}줄 남음)")
 
     if baseline is None:
         write_baseline(args.baseline, current)

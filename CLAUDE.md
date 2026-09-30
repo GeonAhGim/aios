@@ -119,17 +119,21 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     foundation file that is already near 500 lines, then only noticing the `code_ratchets`
     `loc_over_500` regression after the commit — the same handful of near-threshold files
     (`test_registry.py`, `test_queries.py`, reconciliation lifecycle tests, ...) regressed this way
-    three separate times in 24h (task-8627, task-8905, task-9010), each fixed by condensing
-    Korean rationale prose that a prior DEEPEN pass had already written instead of referencing it.
-    The check script/baseline are not the defect here: `--update` requiring an explicit call before
-    a decrease is persisted is intentional (a ratchet that silently rewrites itself on every green
-    run would hide a shrink nobody reviewed), and the 500/800/1000 thresholds are ADR-2026-09-10-C
-    §7 observation aids, not something to raise (DECISION_GUIDELINES B-2, task-3936). Before adding
-    D3 evidence to a file, check its current line count first — if it is already past ~400 lines,
-    split it into a sibling `_<aspect>.py` test file by responsibility before adding evidence,
-    instead of adding first and trimming docstrings after `code_ratchets` goes red. Same applies to
-    a new intentional fail-closed `raise NotImplementedError` stub: add the `# ratchet-allow:
-    <reason>` comment (§3) in the same commit that introduces it, not as a follow-up fix.
+    at least six times across 24h (task-8627, task-8905, task-9010, task-9069, plus the two this
+    note originally cited) — telling workers in prose to "check line count first" (task-9118) did
+    not stop the recurrence, because nothing made that check quick enough to actually run before
+    every edit. The check script/baseline were never the defect: `--update` requiring an explicit
+    call before a decrease is persisted is intentional (a ratchet that silently rewrites itself on
+    every green run would hide a shrink nobody reviewed), and the 500/800/1000 thresholds are
+    ADR-2026-09-10-C §7 observation aids, not something to raise (DECISION_GUIDELINES B-2,
+    task-3936). task-9145 added `scripts/check_code_ratchets.py --near 30` (advisory only, does not
+    touch the baseline or exit code) — run it before adding D3 evidence anywhere under `tests/` or
+    `src/`; it lists every file within 30 lines of a 500/800/1000 crossing so the split happens
+    before the commit, not as a follow-up red-gate fix. If a file it flags is already past ~400
+    lines, split it into a sibling `_<aspect>.py` test file by responsibility before adding
+    evidence. Same applies to a new intentional fail-closed `raise NotImplementedError` stub: add
+    the `# ratchet-allow: <reason>` comment (§3) in the same commit that introduces it, not as a
+    follow-up fix.
 13. Re-diagnosing a `journeys` (Playwright J1-J3) red from scratch without first checking whether
     the assigned worktree is already synced past the commit that fixed it — `frontend/playwright.
     config.ts` accumulated four independent root-cause fixes in one day (task-8572 vite dev JIT
