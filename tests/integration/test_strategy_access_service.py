@@ -5,6 +5,7 @@ ADR-2026-08-29 §1 반영 — 구매는 지갑 차감으로 즉시 CONFIRMED되�
 더 이상 재현 불가능해 제거했다. 구매 성공 = 실행 접근권한 즉시 부여를
 직접 검증한다.
 """
+
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -72,6 +73,31 @@ async def _listed_strategy(pool, seller):
     verifier = await create_test_user(pool)
     approved = await verification_service.decide(submitted.id, verifier, "APPROVE")
     return strategy_id, version, approved.listing_id
+
+
+async def _unconfirmed_purchase(pool, strategy_id, version, seller, buyer) -> None:
+    """payment_status 기본값('PENDING_PAYMENT')인 구매 레코드를 직접 삽입한다.
+
+    ADR-2026-08-29 §1 이후 PurchaseService는 항상 CONFIRMED로 즉시 확정하므로
+    이 상태는 서비스 경로로는 재현 불가능하지만, DB 제약(CHECK) 자체는 여전히
+    PENDING_PAYMENT를 허용한다 — 마이그레이션 이전 잔존 데이터나 수동 조작으로
+    이런 행이 존재해도 접근권한이 새지 않아야 한다는 불변식을 검증한다.
+    """
+    async with pool.acquire() as conn:
+        listing_id = await conn.fetchval(
+            "INSERT INTO strategy_listings "
+            "(strategy_id, strategy_version, seller_user_id, price, status) "
+            "VALUES ($1, $2, $3, 10, 'LISTED') RETURNING id",
+            strategy_id,
+            version,
+            seller,
+        )
+        await conn.execute(
+            "INSERT INTO strategy_purchases (listing_id, buyer_user_id, price_paid) "
+            "VALUES ($1, $2, 10)",
+            listing_id,
+            buyer,
+        )
 
 
 async def _fund_wallet(pool, user_id, amount) -> None:
@@ -170,3 +196,54 @@ async def test_seller_never_receives_buyer_identifying_data(service, pool):
         "fsm_definition",
     }
     assert definition.owner_user_id == seller
+
+
+async def test_can_access_returns_false_for_nonexistent_strategy(service, pool):
+    stranger = await create_test_user(pool)
+
+    assert await service.can_access(stranger, "does-not-exist", "9.9.9") is False
+
+
+async def test_get_strategy_for_execution_raises_for_nonexistent_strategy(service, pool):
+    stranger = await create_test_user(pool)
+
+    with pytest.raises(StrategyAccessError):
+        await service.get_strategy_for_execution(stranger, "does-not-exist", "9.9.9")
+
+
+async def test_buyer_with_unconfirmed_payment_cannot_access(service, pool):
+    seller = await create_test_user(pool)
+    buyer = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, seller)
+    await _unconfirmed_purchase(pool, strategy_id, version, seller, buyer)
+
+    assert await service.can_access(buyer, strategy_id, version) is False
+
+
+async def test_get_strategy_for_execution_raises_for_unconfirmed_payment(service, pool):
+    seller = await create_test_user(pool)
+    buyer = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, seller)
+    await _unconfirmed_purchase(pool, strategy_id, version, seller, buyer)
+
+    with pytest.raises(StrategyAccessError):
+        await service.get_strategy_for_execution(buyer, strategy_id, version)
+
+
+async def test_can_access_propagates_db_failure_instead_of_granting_access(
+    service, pool, monkeypatch
+):
+    """실패주입 — pool.acquire()가 예외를 던지면(연결 장애 등) can_access는
+    그 예외를 그대로 전파해야 한다. 여기서 예외를 삼키고 True/False 중 아무
+    값이나 반환하면 fail-closed 기본 태세(CLAUDE.md §3) 위반이다."""
+    owner = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, owner)
+
+    class _BoomAcquire:
+        def acquire(self):
+            raise ConnectionError("simulated pool exhaustion")
+
+    monkeypatch.setattr(service, "_pool", _BoomAcquire())
+
+    with pytest.raises(ConnectionError):
+        await service.can_access(owner, strategy_id, version)
