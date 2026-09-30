@@ -9,6 +9,11 @@ unaccepted-evaluation cases below).
 Setup helpers (`_instrument`/`_span`/`_grant_entitlement`) are copied from
 `tests/integration/foundation/market_data/test_get_coverage.py` -- the same
 DC-1/DC-8 rows `submit_proposal`'s coverage lookup reads.
+
+Failure injection + performance (task-10072): moved to the sibling
+`test_tools_propose_paper_reliability.py` to keep this file under the
+500-line ratchet warn threshold (CLAUDE.md §6 mistake #12) -- see that
+file's docstring for what it covers.
 """
 
 from __future__ import annotations
