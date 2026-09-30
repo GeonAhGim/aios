@@ -194,6 +194,7 @@ def test_test_dotenv_values_uses_env_var_when_file_missing(tmp_path: Any) -> Non
 # ── performance assertion ─────────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_assign_attr_overhead_is_negligible() -> None:
     """성능 단언: assign_attr는 setattr 래퍼일 뿐이므로 10만 회 호출에
     1초 미만이어야 한다 — 테스트 헬퍼가 실행 시간을먹으면 perf 예산을
