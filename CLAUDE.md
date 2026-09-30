@@ -839,6 +839,7 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     classes. No script/baseline exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing
     new to fix; the repeat is fleet-code re-escalation, not this repo.
 
+<<<<<<< HEAD
 35. A third `consistency` 24h 5-repeat systemic leaf (task-9537) on the identical question
     #22 and #31 already closed. `scripts/check_consistency.py` (split into
     `scripts/consistency/*`) and `consistency-baseline.json` are unchanged since task-9122's fix
@@ -870,6 +871,28 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     already-closed leaf verbatim), close as noop citing task-9122, task-9301/task-9460 (#31), and
     this entry rather than re-diagnosing. No baseline/threshold relief made (DECISION_GUIDELINES
     B-2) — script/baseline design is sound; the remaining defect is fleet code, not this repo.
+
+36. A third `perf_marker_guard` `[health:ci_red_systemic]` leaf (task-9538) citing the identical
+    repeat set #24 (task-9473) already closed — task-9538's spec names task-8932, task-9135,
+    task-9254, task-9463 verbatim, the same four leaves #24 already resolved: task-9135 is the
+    real design fix (60s budget re-tuned for I/O/parsing cost, commit `23a9d9b4`), and task-8932/
+    task-9254 are noop closures citing that same fix with a local `OK` rerun each. This leaf adds
+    one more data point rather than a new root cause: `esc-ci-perf_marker_guard.json`'s own
+    `auto_actions` log shows the exact fleet-code mechanism #17-#26/#30/#34 already name —
+    `03:13:11Z` "fix task-9135 done — 다음 CI 평가 대기", `03:30:34Z`-`05:38:15Z` five consecutive
+    "stage systemic — 개별 발행 억제, systemic task-9138로 owner" entries (correctly deferring to
+    the systemic leaf), then `05:57:08Z` "created fix task-9254" off the *same*
+    `detail_hash: "dbd3aa2db6c7"` anyway — reopening individual-leaf churn on a question task-9138
+    (docs fix, commit `a2cafe7b`) had already closed at `04:36:00Z`. Reconfirmed on this worktree:
+    `python scripts/check_perf_marker_guard.py` prints `OK` (well under the 60s budget), and
+    `git log --oneline -- scripts/check_perf_marker_guard.py docs/TESTING.md` shows no commits
+    since task-9135/task-9138 (`23a9d9b4`, `a2cafe7b`) — both fixes are unchanged and still in
+    place. No script/docs change made. Before working a future `perf_marker_guard` leaf: run the
+    script locally first; if `OK`, and the cited repeat leaf ids match an already-closed systemic
+    leaf's set (task-9138, task-9289/#19, task-9473/#24, or this entry), close as noop citing all
+    of them rather than re-investigating a fourth time. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2) — script/docs design is sound; the remaining defect is fleet code,
+    not this repo.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
