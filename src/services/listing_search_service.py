@@ -71,7 +71,13 @@ class ListingSearchService:
         page: int = 1,
         page_size: int = DEFAULT_PAGE_SIZE,
     ) -> ListingSearchResult:
-        order_by = _ORDER_BY_SQL.get(sort_by, _ORDER_BY_SQL["RECOMMENDED"])
+        if max_price is not None and max_price < 0:
+            raise ValueError("max_price must be non-negative")
+        if page_size < 1:
+            raise ValueError("page_size must be >= 1")
+        if sort_by not in _ORDER_BY_SQL:
+            raise ValueError(f"sort_by must be one of {list(_ORDER_BY_SQL.keys())}")
+        order_by = _ORDER_BY_SQL[sort_by]
         conditions = ["l.status = 'LISTED'"]
         params: list[object] = []
 

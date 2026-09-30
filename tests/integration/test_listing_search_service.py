@@ -1,4 +1,5 @@
 """13.8 통합테스트 — 실제 dev DB 대상."""
+
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -61,9 +62,7 @@ async def _always_eligible(strategy_id, version, seller_user_id=None):
 async def _listed_listing(pool, seller, *, price=None, market="crypto", exchange="bitget"):
     listing_service = ListingService(pool, verify_paper_trading_eligibility=_always_eligible)
     verification_service = VerificationService(pool)
-    strategy_id, version = await _create_strategy(
-        pool, seller, market=market, exchange=exchange
-    )
+    strategy_id, version = await _create_strategy(pool, seller, market=market, exchange=exchange)
     listing = await listing_service.create_listing(seller, strategy_id, version, price)
     submitted = await listing_service.submit_for_verification(listing.id, seller)
     verifier = await create_test_user(pool)
@@ -162,3 +161,57 @@ async def test_pagination_limits_and_offsets(service, pool):
     assert page1.total >= 3
     overlap = {item.id for item in page1.items} & {item.id for item in page2.items}
     assert overlap == set()
+
+
+# --- negative tests (parameter validation) ---
+
+
+async def test_search_rejects_invalid_max_price_below_zero(service, pool):
+    """max_price가 음수일 때 ValueError를.raise 한다."""
+    seller = await create_test_user(pool)
+    await _listed_listing(pool, seller, price=Decimal("10.00"))
+
+    with pytest.raises(ValueError, match="max_price"):
+        await service.search(max_price=Decimal("-1.00"))
+
+
+async def test_search_rejects_invalid_page_size_below_one(service, pool):
+    """page_size가 1 미만일 때 ValueError를.raise 한다."""
+    seller = await create_test_user(pool)
+    await _listed_listing(pool, seller)
+
+    with pytest.raises(ValueError, match="page_size"):
+        await service.search(page_size=0)
+
+
+async def test_search_rejects_invalid_sort_by_value(service, pool):
+    """sort_by가 허용된 값(RECOMMENDED, SHARPE_RATIO) 외일 때 ValueError를.raise 한다."""
+    seller = await create_test_user(pool)
+    await _listed_listing(pool, seller)
+
+    with pytest.raises(ValueError, match="sort_by"):
+        await service.search(sort_by="INVALID_VALUE")
+
+
+# --- failure injection test ---
+
+
+async def test_search_handles_pool_acquire_exception(service, monkeypatch):
+    """pool.acquire()가 예외 발생 시 서비스가 예외를 적절히 전파한다."""
+
+    class _FailingConnection:
+        async def __aenter__(self):
+            raise asyncpg.ConnectionDoesNotExistError({"T": "error", "m": "connection lost"})
+
+        async def __aexit__(self, *exc):
+            pass
+
+    class _FailingPool:
+        @staticmethod
+        def acquire(*_args, **_kwargs):
+            return _FailingConnection()
+
+    object.__setattr__(service, "_pool", _FailingPool())
+
+    with pytest.raises(asyncpg.ConnectionDoesNotExistError):
+        await service.search()
