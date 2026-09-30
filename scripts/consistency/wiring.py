@@ -419,24 +419,26 @@ def check_port_protocol_implementations(root: Path) -> list[Hit]:
         adapter_files = [p for p in sorted(adapters_dir.rglob("*.py")) if p.name != "__init__.py"]
         adapter_texts: dict[Path, str] = {}
         local_classes: dict[str, _AdapterClass] = {}
-        adapter_trees: dict[Path, ast.Module] = {}
+        # walk each adapter file's tree once and keep the ClassDef nodes for the
+        # second pass below instead of re-walking the same tree a second time
+        # (task-8949/task-9011: repeated full-tree ast.walk passes over the same
+        # files were the dominant cost behind esc-ci-consistency's recurring
+        # 120s timeout; this function still had two independent walks per file).
+        adapter_class_nodes: dict[Path, list[ast.ClassDef]] = {}
         for path in adapter_files:
             tree = _safe_parse(path)
             if tree is None:
                 continue
-            adapter_trees[path] = tree
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.ClassDef):
-                    continue
+            class_nodes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
+            adapter_class_nodes[path] = class_nodes
+            for node in class_nodes:
                 base_names: set[str] = {
                     name for b in node.bases if (name := _base_type_name(b)) is not None
                 }
                 local_classes.setdefault(node.name, (node, path, base_names))
-        for path, tree in adapter_trees.items():
+        for path, class_nodes in adapter_class_nodes.items():
             rel = path.relative_to(root).as_posix()
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.ClassDef):
-                    continue
+            for node in class_nodes:
                 matched_protocol = next(
                     (name for name in protocol_names if node.name.endswith(name)),
                     None,
