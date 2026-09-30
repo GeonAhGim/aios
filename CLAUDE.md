@@ -258,6 +258,39 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     B-2) — the fix belongs to fleet code (re-run the check at current HEAD before opening/reusing a
     `ci_red` fix task), not this repo.
 
+17. Treating a new `import_linter` `[health:ci_red]`/`[health:ci_red_systemic]` correction
+    leaf as still-unfixed code every time — task-8993 flagged `import_linter` at 4+ leaves in
+    24h (task-8606, task-8752, task-8848, task-8930) and each one *was* a real, correctly
+    diagnosed fix at the time: task-8752 parallelized `build_graph()`'s serial
+    `path.read_text()` with a `ThreadPoolExecutor` (root cause: cold-checkout/fleet disk
+    contention pushing the scan past the step's 120s subprocess timeout, same class as
+    `check_code_ratchets.py`'s task-638dca50 fix), task-8930 tuned `SCAN_WORKERS` 16->24,
+    task-9114 added `test_build_graph_overlaps_io_bound_reads` (the first local test that
+    actually exercises overlapped I/O instead of tmp_path's page-cache-resident reads), and
+    task-9259 reverted the default to 16 plus an `AIOS_CI_SCAN_WORKERS` env override so ops
+    can retune without a new commit. None of those leaves were wasted or wrong. But
+    escalation `esc-ci-import_linter.json` kept logging `"3x-repeat CI red"` every ~15-20 min
+    through 2026-09-30T06:45:57Z — 8 minutes *after* task-9259's fix (commit `57963866`)
+    landed at 06:37:04Z — while the very next polled CI run (sha `28561950`, started
+    06:31:24Z, before 9259 even landed) shows `import_linter` green in 1.29s, and a local
+    warm-cache run of the script takes ~1-2.5s. That combination (green one poll, red the
+    next, same code, order-of-magnitude margin under the 120s budget when it does pass) is
+    the signature of intermittent fleet-wide disk/AV contention across concurrent CI worker
+    lanes, not a defect in this script's own I/O parallelization — SCAN_WORKERS controls only
+    this one lane's own thread pool, it cannot see or compensate for sibling lanes on the same
+    host saturating disk/AV at the same moment. The actual lever left is the flat 120s
+    subprocess timeout hardcoded per-step in `pm/ci_recheck.py`'s `build_steps` (shared by
+    `complexity` and `import_linter`, both single-lane AST/graph scanners of `src/`) — that is
+    fleet code (`C:\aios\pm`), out of a repo worker's edit scope (§4); a fix needs an ops task
+    with the exact diff (e.g. raise the timeout for these two steps, or throttle concurrent
+    CI lane count) rather than another `scripts/check_import_linter.py` tuning pass. Before
+    filing or working a new `import_linter` correction leaf: run the script locally
+    (`python scripts/check_import_linter.py`) first — if it's green and fast, and
+    `ci/<sha>.json` around the flagged time shows it passing on at least one poll, the leaf is
+    this intermittent-contention pattern, not a fresh code defect; close it noop citing this
+    entry instead of re-tuning `SCAN_WORKERS` again. No baseline/timeout relief made from this
+    leaf (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
