@@ -2263,3 +2263,33 @@ the numbering they had in CLAUDE.md section 6.
     task-9678 (#66), task-9778 (#84), and this entry rather than re-investigating a ninth time.
     No baseline/marker-list relief made (DECISION_GUIDELINES B-2) — the fix belongs to fleet
     code, not this repo.
+
+90. A fourth `pytest_perf` 24h 4-repeat investigation (task-9758) citing the *identical* repeat
+    set #43 (task-9552), #63 (task-9664), and #72 (task-9594) already closed three times —
+    task-9758's spec names task-8934, task-9056, task-9287, task-9520 verbatim, the same four
+    leaves all three prior investigations already root-caused into three independent,
+    already-fixed classes: task-8934 correctly classified shared-host DB migration/reset
+    wall-clock contention as noop (no code change, per DECISION_GUIDELINES B-2); task-9056 fixed
+    a real ruff E501 regression in `ingest_candles.py` from a Korean->English docstring
+    translation (commit `50c6a348b`); task-9287 fixed a real migration bug (a task-8890
+    revision's `downgrade()` unconditionally raising `Em3ChildQtyBackfillIrreversibleError` on an
+    empty dev/test DB, commit `7b31cd088`); task-9520 fixed a real collection-time regression
+    (task-9224's `loc_over_500` split renamed fixtures without updating two adversarial test
+    files' imports/call sites, commit `65b85ff28`). As #43/#63/#72 already established, there is
+    no `scripts/check_pytest_perf.py` in this repo (confirmed again here) — `pytest_perf` is a
+    full-mode-only CI stage name (`pm/ci_recheck.py:467-486`, confirmed present at those lines),
+    not a shared check script with its own design; "the stage repeating" is N independent
+    single-test/single-file failures, not a design gap. Reconfirmed on this worktree (`git
+    status` clean, HEAD `c66ac9b94`): `git log --oneline -3 --
+    tests/adversarial/risk/test_decision_subject_reuse.py
+    tests/adversarial/risk/test_trigger_execution_ref.py` shows `65b85ff28` as the latest touch,
+    and both files collect cleanly (36 tests, no errors), confirming task-9520's fix is still in
+    place. This is the same fleet-code re-escalation pattern already named for nineteen+ other
+    gates (#17-#26, #30-#31, #33-#41, #48, #50, #56, #59, #63, #72): `pm/auto_decision.py`/
+    `orchestrator.py`'s `ci_red` rule spawning a fresh investigation off an already-closed repeat
+    set instead of checking whether a prior systemic leaf (task-9552/#43, task-9664/#63, or
+    task-9594/#72) already answered the identical question, out of a repo worker's edit scope
+    (§4). No script/baseline exists in this repo to relieve (DECISION_GUIDELINES B-2 n/a). Before
+    working a future `pytest_perf` leaf: check whether the cited repeat leaf ids match #43/#63/
+    #72's set (task-8934, task-9056, task-9287, task-9520) or this entry's — if so, close as noop
+    citing all four rather than re-deriving the same three failure classes a fifth time.
