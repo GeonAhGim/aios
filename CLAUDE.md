@@ -574,6 +574,48 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     summary alongside `coverage.xml` in the CI step that invokes `coverage_ratchet.py`, which is
     fleet CI wiring (`pm/local_ci.py` / `.github/workflows/quality.yml`), not this script.
 
+27. `e2e` (H-7b smoke: `frontend/e2e/*.spec.ts` minus `journey-*`, `local_ci.py:1913-1957`,
+    distinct from the `journeys` J1-J3 gate but sharing the same `playwright.config.ts`) 24h
+    4-repeat systemic leaf (task-9480) reconfirms a systemic investigation that already ran one
+    cycle earlier (task-9152, closed noop) rather than finding a new defect. task-9152 already
+    root-caused every leaf in its window: two were real regressions, both already fixed and
+    merged — task-8846 (`order-submission.spec.ts` missing `waitForResponse`, test-level
+    synchronization gap) and task-8952 (webServer prebuild ran `npm run build`'s `tsc -b`, which
+    on a cold cache under concurrent worktree load exceeded the 180s `webServer.timeout`; split
+    into a `build:e2e` script that is vite-build-only, commit `ee5d3007`) — and two were
+    contaminated leads with no frontend defect at all: task-8929 (transient `git fetch` network
+    outage, unrelated to the gate) and task-9132 (bisect surfaced a backend-only commit,
+    `1a580317`, touching only `src/foundation/backtest/`, as a false candidate; the worktree was
+    simply lagging the two already-merged fixes `ee5d3007`/task-8952 and `0c6f4ff5`/task-9054).
+    task-9152's note explicitly named this the same mechanism as CLAUDE.md #13 (`journeys`, same
+    shared `playwright.config.ts`): bisect can hand back a frontend-irrelevant commit after its
+    probe budget runs out, and nothing checks "has this worktree already merged the latest fix"
+    before a new leaf is filed. This task's four cited repeats (task-8929, task-8952, task-9132,
+    task-9253) are the *same four* task-9152 already investigated, plus task-9253, which never
+    reached a conclusion — it died to repeated context-window thrashing
+    ("Autocompact is thrashing", `error_max_turns`-style abort) with no status update and no
+    commit, contributing no new evidence either way. `esc-ci-e2e.json`'s own `auto_actions` log
+    shows the escalation marked itself `stage systemic — owner task-9152` at `04:15:26Z` through
+    `05:38:15Z`, then created task-9253 anyway at `05:57:07Z` off the identical `detail_hash:
+    "f0a17e6ae363"` it had just deferred to task-9152 — reopening individual-leaf churn on a
+    question a systemic leaf had already closed one cycle earlier, then escalating *that* into a
+    second systemic leaf (this one) instead of checking task-9152's resolution first. A local
+    reproduction of the exact `local_ci.py` e2e step command on this worktree's current HEAD
+    (`npm exec -- playwright test e2e/backtest-run.spec.ts e2e/chart-indicator-overlay.spec.ts
+    e2e/demo-onboarding-flow.spec.ts e2e/order-submission.spec.ts --retries=1
+    --trace=on-first-retry --project=chromium`) confirms `5 passed (55.6s)`, well inside the 180s
+    `webServer.timeout` and the step's 600s subprocess budget — no violation exists at current
+    HEAD. This is the same class of defect as #13/#17-#21/#24: fleet code under `C:\aios\pm`
+    (`pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule not checking whether a systemic leaf
+    already resolved the same `detail_hash` before spawning another individual or systemic leaf),
+    out of a repo worker's edit scope (§4). Before working a future `e2e` correction leaf: run the
+    four smoke specs with the exact command above first — if green, and a systemic leaf
+    (task-9152 or this one) already closed the same `detail_hash`, close as noop citing task-9152
+    and this entry rather than re-bisecting. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2) — `playwright.config.ts`'s `workers=4`/`webServer.timeout=180s`/
+    `test.timeout=90s` design is sound (task-9152's own conclusion, reconfirmed here); the
+    remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
