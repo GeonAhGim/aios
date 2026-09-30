@@ -729,6 +729,94 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/config design is sound and already fixed; the remaining
     defect is fleet code, not this repo.
 
+31. `consistency` 24h 6-repeat systemic leaf (task-9500) reconfirms #22 with the escalation's own
+    `auto_actions` log now showing the mechanism directly. `esc-ci-consistency.json` marked itself
+    `status: "resolved"` at `2026-09-30T00:53:50Z` (`resolved_sha: "12e7bd738c39..."`) after
+    task-9011 landed, yet kept polling every ~15-20 min for the next 9+ hours and spawned two more
+    systemic leaves (task-9149 at 03:13Z, task-9301 at 08:27Z) plus two more individual fix leaves
+    (task-9281 at 06:17Z, task-9460 at 09:42Z) off the *same* `detail_hash: "50292dca66ac"` and the
+    *same* `bisect_culprit 4d5ebed5b621...` — the identical docstring-only commit (task-4424,
+    Korean->English translation) #21/#22 already named as unrelated to this gate's logic. Between
+    task-9011 and this leaf, task-9122 (commit `693fa98a`) found and fixed the one remaining real
+    gap #22 missed: `check_port_protocol_implementations` in `scripts/consistency/wiring.py` still
+    ran `ast.walk()` twice per adapter file (once for the class-presence check, once for the
+    method-presence check) instead of reusing `common.py`'s cached `_walked_nodes(path)` — merged
+    to a single walk, plus a new `tests/unit/scripts/test_check_consistency_perf.py` with a
+    structural AST-count guard, a failure-injection test, and a numeric perf budget so the same gap
+    can't silently reopen. task-9149/task-9301/task-9281/task-9460 each independently reverified
+    both fixes are in place and found nothing further to change (task-9301's note explicitly says
+    of task-9122: "회귀 방지용 구조 가드 테스트까지 추가함... 스크립트/기준선에 남은 설계 결함
+    없음"). Reconfirmed on this worktree: `python scripts/check_consistency.py` finishes in ~28s
+    (well under the 120s budget) and matches `consistency-baseline.json` exactly on all 13 metrics.
+    This is the same fleet-code defect as #17-#23/#25/#27 (`pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule not checking `status: "resolved"` / an already-landed systemic fix before
+    re-polling and spawning further leaves off a stale escalation snapshot), out of a repo worker's
+    edit scope (§4) — the same ops fix already specified in #23/#25 (skip repeat/spawn once
+    `status == "resolved"` and the current-HEAD check is confirmed green) applies here too. Before
+    working a new `consistency` leaf: run `python scripts/check_consistency.py` locally first — if
+    `OK` and baseline-matching, and the escalation's `bisect_culprit` is `4d5ebed5` (or the note of
+    an already-closed leaf matches verbatim), close as noop citing task-9122, task-9301/task-9460,
+    and this entry rather than re-diagnosing. No baseline/threshold relief made (DECISION_GUIDELINES
+    B-2) — script/baseline design is sound (including task-9122's fix); the remaining defect is
+    fleet code, not this repo.
+
+32. A fifth `coverage` `[health:ci_red_systemic]` leaf (task-9508) reconfirms #21/#26 rather
+    than finding a new design defect. `scripts/coverage_ratchet.py` and `coverage-baseline.txt`
+    are unchanged since task-9052/task-9120 (`94.83`/`52977`; ratio-floor partial-report guard
+    from task-7644/7670; trusted baseline-write gate restricted to `GITHUB_ACTIONS=true` or
+    `--allow-baseline-write` from task-9120). `esc-ci-coverage.json` (`first_seen`
+    2026-09-22T15:23:36Z, still `status: "open"`, `reopen_count: 2`) attached this round to sha
+    `8003202b10d8` with detail `FAIL: 기준선 미달 94.83% -> 3.01%` and `bisect_culprit
+    27b5fe61e1d0f33aaa0ad006fdaab6c597d6f426` — that commit (task-9242) only touches
+    `tests/foundation/unit/entities/test_migration_fa4_columns.py` (adding negative/
+    failure-injection tests per §5's D2/D3 mandate), unrelated to any `src/` coverage change; this
+    worktree is an ancestor-confirmed descendant of it with `git status` clean. A -91.82pp swing
+    from a test-only commit is the same class #26 already named: a local `pytest --cov=src` dying
+    under shared-host resource contention (DB-dependent fixtures failing en masse) shrinks the
+    *numerator* (lines executed) while `lines-valid` (the ratio-floor's own denominator, counting
+    only *importable* statements) stays high enough to slip past the 0.5 floor if the failing
+    tests error out only after their target modules import cleanly. This gap is real but not
+    fixable from `coverage.xml` alone (Cobertura carries no pytest pass/fail-count signal); a real
+    fix would mean capturing pytest's own exit summary alongside the coverage step, which is fleet
+    CI wiring (`pm/local_ci.py` / `.github/workflows/quality.yml`), out of a repo worker's edit
+    scope (§4). Before working a future `coverage` leaf: confirm `coverage-baseline.txt` still
+    reads `94.83`/`52977` and the escalation's bisect culprit is a test-only/docstring-only commit
+    (as it has been every time so far: `4d5ebed5` in #21/#22, `27b5fe61` in #26 and here) — if so,
+    close as noop citing task-9052, task-9479 (#26), and this entry rather than re-diagnosing the
+    same partial-run artifact. No baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES
+    B-2) — the remaining fix scope (correlating coverage swings with pytest's own exit summary,
+    not just `coverage.xml`'s denominator) belongs to fleet CI wiring, not this script.
+
+33. A fourth `e2e` (H-7b smoke) `[health:ci_red_systemic]` leaf (task-9509) on a question two
+    prior systemic leaves already closed — task-9152 (first systemic leaf) root-caused every
+    repeat in its window (task-8846 test-sync gap, task-8952 webServer prebuild timeout, both
+    fixed and merged; task-8929/task-9132 were contaminated leads — a transient network outage and
+    a worktree lagging an already-merged fix, respectively) and task-9480 (second systemic leaf,
+    recorded as #27 above) reconfirmed the design sound against a newer repeat set
+    (task-8929, task-8952, task-9132, task-9253) with a fresh green run (5 passed, 55.6s). This
+    leaf (task-9509) was asked to investigate the *same* four leaves task-9480 already closed.
+    `esc-ci-e2e.json` itself shows `status: "resolved"`, `last_seen: "2026-09-29T21:48:12Z"`, and
+    its `owner`/`parent` point at task-9253 (the last real fix task, done ~00:08Z) — yet
+    `auto_actions` kept appending `"3x-repeat CI red"` every 15-30 min from `06:17:19Z` through
+    `10:56:51Z` (54 entries total), more than 4 hours after task-9480/task-9284 had already
+    reconfirmed green (06:28-06:34Z), without creating any further fix task in that window. A
+    fresh reproduction on this worktree (synced to `9583f950`) confirms the design is still
+    unchanged and sound: `frontend/playwright.config.ts` has no commits since task-9054
+    (`0c6f4ff5`, already covered by #27/#30), `npm run build:e2e --workspace=apps/web` succeeds in
+    ~4.7s, and the exact H-7b smoke command
+    (`npm exec -- playwright test e2e/backtest-run.spec.ts e2e/chart-indicator-overlay.spec.ts
+    e2e/demo-onboarding-flow.spec.ts e2e/order-submission.spec.ts --retries=1
+    --trace=on-first-retry --project=chromium`) passes 5/5 in 1.4m, well under the 180s
+    `webServer.timeout`. This is the identical fleet-code defect already named for eight other
+    gates (#17-#26, #30): `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule logging repeat
+    events (and previously, spawning fix tasks) off a stale/already-`resolved` escalation snapshot
+    instead of re-checking current HEAD or a prior systemic leaf's resolution first, out of a repo
+    worker's edit scope (§4). Before working a future `e2e` correction leaf: run the H-7b smoke
+    command above first — if green, and a systemic leaf (task-9152 or task-9480) already closed
+    the same repeat set, close as noop citing both plus this entry rather than re-investigating a
+    third time. No baseline/timeout relief made (DECISION_GUIDELINES B-2) — design is sound and
+    already fixed; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
