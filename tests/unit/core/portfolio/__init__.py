@@ -69,14 +69,15 @@ def test_portfolio_aggregate_missing_as_of_raises() -> None:
 def test_portfolio_state_input_missing_portfolio_config_raises() -> None:
     """`portfolio_config` has no default -- a caller that forgets to attach
     a sizing config must be rejected, not silently proceed without one."""
+    data: dict[str, Any] = {
+        "allocated_capital": Decimal("1000"),
+        "position_quantity": Decimal("0"),
+        "current_price": Decimal("50000"),
+        "total_equity": Decimal("10000"),
+        "cash_available": Decimal("9000"),
+    }
     with pytest.raises(ValidationError):
-        PortfolioStateInput(  # type: ignore[call-arg]
-            allocated_capital=Decimal("1000"),
-            position_quantity=Decimal("0"),
-            current_price=Decimal("50000"),
-            total_equity=Decimal("10000"),
-            cash_available=Decimal("9000"),
-        )
+        PortfolioStateInput.model_validate(data)
 
 
 class _Signal:
@@ -111,11 +112,21 @@ class _BrokenAllocatedCapitalState(Mapping[str, Any]):
         return len(self._KEYS)
 
 
+def _signal(symbol: str, strategy_id: str, direction: OrderSide) -> Any:
+    """Untyped return -- `Signal` has no publicly constructible stand-in
+    here, mirroring the same duck-typing helper in test_engine_v2.py."""
+    return _Signal(symbol, strategy_id, direction)
+
+
+def _broken_allocated_capital_state() -> Any:
+    return _BrokenAllocatedCapitalState()
+
+
 def test_failure_injection_engine_allocate_corrupted_allocated_capital_propagates() -> None:
     """A corrupted `allocated_capital` read must propagate (fail-closed),
     not be swallowed into a zero/None allocation decision."""
     engine = PortfolioEngine()
-    signal = _Signal("BTC-USDT", "strat-1", OrderSide.BUY)
+    signal = _signal("BTC-USDT", "strat-1", OrderSide.BUY)
 
     with pytest.raises(RuntimeError, match="allocated_capital limit lookup corrupted"):
-        engine.allocate(signal, _BrokenAllocatedCapitalState())  # type: ignore[arg-type]
+        engine.allocate(signal, _broken_allocated_capital_state())
