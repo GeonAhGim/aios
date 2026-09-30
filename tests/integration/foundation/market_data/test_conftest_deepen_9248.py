@@ -23,6 +23,7 @@ INVARIANTS.md 점검: I-01~I-11은 주문 제출/실행-소유권/멱등키/전�
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, cast
 
 import asyncpg
@@ -159,6 +160,29 @@ class TestPoolFixtureFailureInjection:
         fake_pool = object()
         repo = cast(PostgresBatchRepository, _batch_repo_fn(cast(Any, fake_pool)))
         assert repo._pool is fake_pool  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# Performance assertion -- pool fixture must establish connection within
+# budget (ADR-2026-09-09-C).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_pool_creation_performance_within_budget() -> None:
+    """Pool creation(including retry loop) must complete within a reasonable
+    latency budget. This prevents accidental O(n) blocking or infinite waits
+    during test setup that would accumulate across the suite."""
+    start = time.perf_counter()
+    agen = _pool_fn()
+    p = await agen.__anext__()
+    elapsed = time.perf_counter() - start
+    await p.close()
+
+    assert elapsed < 10.0, (
+        f"pool fixture must establish connection within 10s budget; "
+        f"took {elapsed:.2f}s (possible retry loop or network latency)"
+    )
 
 
 # ---------------------------------------------------------------------------
