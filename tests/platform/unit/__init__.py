@@ -319,6 +319,7 @@ class TestPerformance:
     MFA 검증(순수 함수) p95 ≤ 0.1 ms.
     """
 
+    @pytest.mark.perf
     def test_mfa_step_up_fresh_within_budget(self):
         """mfa_step_up_fresh() 호출 10만 건이 1초 미만이어야 한다
         (p95 ≤ 0.1 ms 가정)."""
