@@ -4,12 +4,14 @@ from decimal import Decimal
 
 import pytest
 
+from src.foundation.automation.application import preview_rule as preview_rule_module
 from src.foundation.automation.application.preview_rule import preview_rule
 from src.foundation.automation.contracts.v1 import (
     InvalidRuleDefinitionError,
     PriceCondition,
     TimeCondition,
 )
+from src.foundation.automation.flags import FEATURE_FLAG_NAME, RuleEngineFeatureDisabledError
 
 from .conftest import make_candle
 
@@ -61,3 +63,27 @@ def test_preview_rejects_misaligned_symbol_bar_counts() -> None:
     }
     with pytest.raises(InvalidRuleDefinitionError, match="심볼별 봉 개수"):
         preview_rule(condition, bars_by_symbol)
+
+
+def test_preview_rejects_when_feature_flag_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """U-4a: FF_U4A_RULE_ENGINE이 꺼지면 미리보기도 즉시 거부한다(fail-closed)."""
+    monkeypatch.delenv(FEATURE_FLAG_NAME, raising=False)
+    bars = _bars(["90", "110"])
+    condition = (PriceCondition(symbol="005930", operator=">", threshold=Decimal("100")),)
+
+    with pytest.raises(RuleEngineFeatureDisabledError):
+        preview_rule(condition, {"005930": bars})
+
+
+def test_preview_propagates_evaluation_dependency_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실패주입: 조건 평가 의존성이 예외를 내면 위장 성공 없이 그대로 전파한다."""
+
+    def _boom(*_args: object, **_kwargs: object) -> bool:
+        raise RuntimeError("evaluate_conditions dependency failure (injected)")
+
+    monkeypatch.setattr(preview_rule_module, "evaluate_conditions", _boom)
+    bars = _bars(["90", "110"])
+    condition = (PriceCondition(symbol="005930", operator=">", threshold=Decimal("100")),)
+
+    with pytest.raises(RuntimeError, match="injected"):
+        preview_rule(condition, {"005930": bars})
