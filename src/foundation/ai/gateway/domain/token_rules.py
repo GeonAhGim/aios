@@ -53,7 +53,11 @@ class ScopeEscalationError(TokenRuleError):
     def __init__(self, requested: frozenset[Scope], grantable: frozenset[Scope]) -> None:
         self.requested = requested
         self.grantable = grantable
-        overflow = sorted(s.value for s in requested - grantable)
+        # `requested` is typed `frozenset[Scope]`, but this is the boundary that
+        # judges untrusted external input (AI-4 callers may pass raw strings/garbage
+        # before validation) -- fail-closed means formatting the error message must
+        # never itself crash with an unrelated AttributeError on a non-Scope member.
+        overflow = sorted(str(getattr(s, "value", s)) for s in requested - grantable)
         super().__init__(
             f"scope escalation: requested {overflow} exceeds grantable "
             f"{sorted(s.value for s in grantable)}"
