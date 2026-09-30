@@ -33,6 +33,13 @@ _IGNORE_COMMENT_RE = re.compile(r"#\s*type:\s*ignore\b")
 # 뒤에야 필터링해, local_ci의 누적 캐시(.hypothesis/.mypy_cache 등, 관측:
 # .mypy_cache 115MB)에서 부하 시 180s를 넘겼다. os.walk로 내려가면서 제외
 # 디렉터리는 아예 들어가지 않도록 바꾸고, 빠졌던 .hypothesis도 추가한다.
+# 2026-09-30(task-9113, 24h 반복 조사): 같은 누락 패턴이 task-9070으로 재발
+# 했다 — 이 목록은 각 check_*.py가 사고 이후에 하나씩 따로 덧붙이는 구조라
+# 구조적으로 불완전하다(check_audit_regressions.py 등 다른 스크립트는 여전히
+# 제외 없는 rglob을 쓴다, 이 리프의 files 범위 밖이라 여기서는 불건드림).
+# 이 스크립트가 도는 워크트리에서 실측된 도구 캐시(.import_linter_cache)를
+# 추가하고, 흔한 캐시류(.tox/.turbo/htmlcov)도 선제적으로 넣어 다음 재발을
+# 줄인다 — budget 값 자체는 바꾸지 않는다(DECISION_GUIDELINES B-2).
 _EXCLUDE_DIR_NAMES = frozenset(
     {
         ".git",
@@ -43,6 +50,10 @@ _EXCLUDE_DIR_NAMES = frozenset(
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
+        ".import_linter_cache",
+        ".tox",
+        ".turbo",
+        "htmlcov",
         "node_modules",
         "dist",
         "build",

@@ -52,6 +52,20 @@ def _write_budget(tmp_path: Path, value: str, name: str = "type-ignore-budget.tx
 # ---------------------------------------------------------------------------
 
 
+def test_gate_red_reproduction_import_linter_cache_excluded(tmp_path: Path) -> None:
+    """task-9113: task-9014(rglob이 캐시 디렉터리까지 걸어 내려가 180s 타임아웃)와
+    같은 결함 클래스가 task-9070으로 재발했다 — 이번에 실측된 원인은
+    `.import_linter_cache`가 제외 목록에 없었던 것이다. 이 디렉터리 안의
+    `.py`가 스캔에 잡히면(=집계·시간 둘 다에 영향) 같은 사고가 세 번째로
+    재발한다는 뜻이므로, 제외되는지 회귀 재현으로 고정한다."""
+    _write_py(tmp_path, "a.py", "x = 1  # type: ignore\n")
+    _write_py(
+        tmp_path, ".import_linter_cache/stale.py", "y = 2  # type: ignore\nz = 3  # type: ignore\n"
+    )
+
+    assert check_type_ignore_budget.count_type_ignores(tmp_path) == 1
+
+
 def test_negative_empty_budget_file_raises(tmp_path: Path) -> None:
     """budget 파일이 존재하지만 내용이 비어 있으면(0바이트) '최초 실행'과
     구분해 명시적으로 거부한다 — 빈 파일을 0으로 조용히 해석하면 실제로는
