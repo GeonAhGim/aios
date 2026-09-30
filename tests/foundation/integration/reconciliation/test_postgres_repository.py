@@ -12,9 +12,12 @@ lifecycle.py`는 application 계층(run_reconciliation/resolve_reconciliation)�
 from __future__ import annotations
 
 import os
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -33,10 +36,35 @@ from src.foundation.reconciliation.domain.models import (
 )
 from tests.integration.conftest import create_test_tenant
 
+# task-9456 F1 DEEPEN(mandates test_postgres_repository_rls.py와 동일 차용
+# 근거)과 같은 예산 — 전용 예산 항목이 없는 단일 실DB 왕복에 "주문 제출->ACK
+# p95 50ms(paper)"를 차용한다.
+_RLS_SELECT_P95_BUDGET_MS = 50.0
+
 
 def _asyncpg_dsn() -> str:
     url = os.environ["DATABASE_URL"]
     return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+class _AppRolePool:
+    """실제 `pool`을 감싸, `acquire()`가 내주는 커넥션의 역할만 `aios_app`으로
+    낮춘다 — `tests/foundation/integration/mandates/test_postgres_repository_rls.py`
+    의 동일 클래스와 같은 이유(`aios_app`은 LOGIN 권한이 없어 별도 자격증명으로
+    접속할 수 없다)로, 슈퍼유저 커넥션 안에서 매 acquire마다 `SET ROLE aios_app`을
+    걸고 반환 전 `RESET ROLE`로 되돌린다."""
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    @asynccontextmanager
+    async def acquire(self) -> AsyncIterator[asyncpg.Connection]:
+        async with self._pool.acquire() as conn:
+            await conn.execute("SET ROLE aios_app")
+            try:
+                yield conn
+            finally:
+                await conn.execute("RESET ROLE")
 
 
 @pytest.fixture
@@ -127,7 +155,7 @@ async def test_get_run_by_input_hash_found(pool, repo):
     run = _run(tenant_id, target_ref, input_hash="hash-found")
     inserted = await repo.insert_run_with_items(run, (_item(),))
 
-    found = await repo.get_run_by_input_hash(target_ref, "hash-found")
+    found = await repo.get_run_by_input_hash(target_ref, "hash-found", tenant_id)
 
     assert found is not None
     assert found.id == inserted.id
@@ -136,7 +164,7 @@ async def test_get_run_by_input_hash_found(pool, repo):
 
 async def test_get_run_by_input_hash_not_found_returns_none(pool, repo):
     """negative — 존재하지 않는 (target_ref, input_hash) 조합."""
-    found = await repo.get_run_by_input_hash(uuid4(), "no-such-hash")
+    found = await repo.get_run_by_input_hash(uuid4(), "no-such-hash", uuid4())
 
     assert found is None
 
@@ -285,3 +313,139 @@ async def test_transition_state_status_unknown_target_ref_raises_concurrency_con
             new_status=Classification.INVESTIGATING,
             blocking_reason="no such row",
         )
+
+
+# --- F1(task-9456) RLS tenant GUC 바인딩 — `reconciliation_run`은 RLS
+# ENABLE+FORCE(b3c7f19ad2e6/c9f4e2a1b6d7)가 걸려 있다. 아래 테스트들은
+# `tests/foundation/integration/mandates/test_postgres_repository_rls.py`와
+# 동일하게 `test_rls_foundation.py`처럼 AppRoleTx로 SQL을 직접 실행해 우회하지
+# 않고, 실제 `PostgresReconciliationRepository` 메서드 호출 경로를 `aios_app`
+# 역할 아래에서 그대로 태운다. ----------------------------------------------
+
+
+async def test_get_run_by_input_hash_returns_row_when_tenant_guc_is_bound(pool, repo):
+    """감사 재현 후반부("GUC 주입 후 동일 조회 1행") — 이 리프의 수정
+    (`tenant_transaction` 경유)이 `aios_app` 롤 아래에서도 정상 테넌트의
+    조회를 1행으로 되돌리는지 확인한다."""
+    tenant_id = await _tenant(pool)
+    target_ref = uuid4()
+    inserted = await repo.insert_run_with_items(
+        _run(tenant_id, target_ref, input_hash="app-role-hash"), (_item(),)
+    )
+    app_role_repo = PostgresReconciliationRepository(_AppRolePool(pool))
+
+    found = await app_role_repo.get_run_by_input_hash(target_ref, "app-role-hash", tenant_id)
+
+    assert found is not None
+    assert found.id == inserted.id
+
+
+async def test_get_run_by_input_hash_fails_closed_when_guc_binding_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, pool, repo
+):
+    """실패주입 + 적색 게이트 재현: F1이 수정 전에 실제로 겪던 증상을 그대로
+    재현한다 — `tenant_transaction`이 걸리지 않으면(`SET ROLE aios_app`만 걸린
+    평범한 `pool.acquire()`와 동일한 상태), 정상 테넌트가 자기 run을 조회해도
+    None이어야 한다(0행/거부). `tenant_transaction`만 GUC를 걸지 않는 가짜로
+    바꿔치기해 고쳐진 코드가 이 몽키패치 없이는 통과하지 못했던 상태
+    (fail-open이 아니라 fail-closed)를 회귀로 잠근다."""
+    tenant_id = await _tenant(pool)
+    target_ref = uuid4()
+    await repo.insert_run_with_items(
+        _run(tenant_id, target_ref, input_hash="unbound-hash"), (_item(),)
+    )
+
+    @asynccontextmanager
+    async def _unbound_tenant_transaction(
+        pool_arg: asyncpg.Pool, _tenant_id: UUID | None
+    ) -> AsyncIterator[asyncpg.Connection]:
+        async with pool_arg.acquire() as conn, conn.transaction():
+            yield conn
+
+    monkeypatch.setattr(
+        "src.foundation.reconciliation.adapters.postgres_repository.tenant_transaction",
+        _unbound_tenant_transaction,
+    )
+    app_role_repo = PostgresReconciliationRepository(_AppRolePool(pool))
+
+    found = await app_role_repo.get_run_by_input_hash(target_ref, "unbound-hash", tenant_id)
+
+    assert found is None
+
+
+async def test_get_run_by_input_hash_cross_tenant_returns_nothing(pool, repo):
+    """negative(교차 테넌트): tenant A의 GUC로 tenant B의 run을 조회해도
+    0행이어야 한다 — WHERE의 tenant_id=A와 GUC로 바인딩된 app.tenant_id=A가
+    이중으로 B의 행을 걸러낸다."""
+    tenant_a = await _tenant(pool)
+    tenant_b = await _tenant(pool)
+    target_ref = uuid4()
+    await repo.insert_run_with_items(
+        _run(tenant_b, target_ref, input_hash="cross-tenant-hash"), (_item(),)
+    )
+    app_role_repo = PostgresReconciliationRepository(_AppRolePool(pool))
+
+    found = await app_role_repo.get_run_by_input_hash(target_ref, "cross-tenant-hash", tenant_a)
+
+    assert found is None
+
+
+async def test_insert_run_with_items_fails_closed_without_tenant_guc(
+    monkeypatch: pytest.MonkeyPatch, pool
+):
+    """실패주입(쓰기 경로): `tenant_transaction`이 걸리지 않으면 `aios_app`
+    롤 아래의 INSERT는 `reconciliation_run`의 RLS `WITH CHECK`를 통과하지
+    못해 예외로 fail-closed 되어야 한다 — 조용히 다른 테넌트 소유로 잘못
+    쓰이거나 성공한 척하지 않는다."""
+
+    @asynccontextmanager
+    async def _unbound_tenant_transaction(
+        pool_arg: asyncpg.Pool, _tenant_id: UUID | None
+    ) -> AsyncIterator[asyncpg.Connection]:
+        async with pool_arg.acquire() as conn, conn.transaction():
+            yield conn
+
+    monkeypatch.setattr(
+        "src.foundation.reconciliation.adapters.postgres_repository.tenant_transaction",
+        _unbound_tenant_transaction,
+    )
+    tenant_id = await _tenant(pool)
+    app_role_repo = PostgresReconciliationRepository(_AppRolePool(pool))
+
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        await app_role_repo.insert_run_with_items(_run(tenant_id, uuid4()), ())
+
+
+async def _get_run_by_input_hash_p95_ms(
+    app_role_repo: PostgresReconciliationRepository,
+    target_ref: UUID,
+    input_hash: str,
+    tenant_id: UUID,
+    *,
+    n: int,
+) -> float:
+    durations_ms: list[float] = []
+    for _ in range(n):
+        start = time.perf_counter()
+        await app_role_repo.get_run_by_input_hash(target_ref, input_hash, tenant_id)
+        durations_ms.append((time.perf_counter() - start) * 1000)
+    durations_ms.sort()
+    return durations_ms[int(len(durations_ms) * 0.95)]
+
+
+async def test_get_run_by_input_hash_under_app_role_p95_under_borrowed_order_ack_budget(pool, repo):
+    """수치 성능 단언: `tenant_transaction` + `SET ROLE aios_app` + RLS 정책
+    평가를 포함한 단일 실DB 왕복의 p95가 예산(위 상수) 이내인지 30회 반복으로
+    확인한다."""
+    tenant_id = await _tenant(pool)
+    target_ref = uuid4()
+    await repo.insert_run_with_items(
+        _run(tenant_id, target_ref, input_hash="perf-hash"), (_item(),)
+    )
+    app_role_repo = PostgresReconciliationRepository(_AppRolePool(pool))
+
+    p95_ms = await _get_run_by_input_hash_p95_ms(
+        app_role_repo, target_ref, "perf-hash", tenant_id, n=30
+    )
+
+    assert p95_ms < _RLS_SELECT_P95_BUDGET_MS

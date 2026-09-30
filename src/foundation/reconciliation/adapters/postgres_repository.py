@@ -6,7 +6,23 @@ upsert_state()는 매 reconciliation run의 "최신 계산 결과가 항상 이�
 원칙이라 조건부(expected_revision) 없이 revision을 무조건 증가시킨다 —
 반면 transition_state_status()(resolve 등 사람이 트리거하는 개별 전이)는
 동시에 새 run이 상태를 이미 바꿨을 수 있어 105번 표준대로 revision을
-조건으로 건다."""
+조건으로 건다.
+
+F1(task-9456) — `reconciliation_run`은 RLS ENABLE+FORCE(b3c7f19ad2e6/
+c9f4e2a1b6d7)가 걸려 있는데, `get_run_by_input_hash`/`insert_run_with_items`가
+`pool.acquire()`만 쓰고 `tenant_transaction()`(GUC 바인딩)을 거치지 않아 —
+이 환경의 DATABASE_URL 롤은 슈퍼유저(rolbypassrls=true)라 지금은 드러나지
+않지만 — 운영에서 non-superuser 롤(`aios_app`)로 전환되는 순간 정상
+테넌트도 자기 run을 조회/삽입하지 못하게 된다. 두 메서드 모두 이미
+tenant_id를 갖고 있어(`get_run_by_input_hash`는 REC-004/006 dedupe 호출자가,
+`insert_run_with_items`는 `run.tenant_id`가) `connections/adapters/
+postgres_repository.py`/`mandates/adapters/postgres_repository.py`의
+`get_mandate` 선례와 동일하게 `tenant_transaction()`으로 옮긴다. 명시적
+`tenant_id = $N` WHERE/컬럼 조건은 그대로 남긴다 — 슈퍼유저인 동안의 실제
+방어선이고, `tenant_transaction()`은 롤 전환 이후의 두 번째 방어선이다.
+`reconciliation_item`/`reconciliation_state`는 RLS가 걸려 있지 않아(선례
+마이그레이션 docstring — 부모 FK로 간접 격리되는 자식 테이블/상태 테이블은
+제외) 이 리프의 범위 밖이다."""
 
 from __future__ import annotations
 
@@ -15,6 +31,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.core.db.tenant_scope import tenant_transaction
 from src.foundation.reconciliation.domain.models import (
     Classification,
     ReconciliationItem,
@@ -60,13 +77,18 @@ class PostgresReconciliationRepository:
         self._pool = pool
 
     async def get_run_by_input_hash(
-        self, target_ref: UUID, input_hash: str
+        self, target_ref: UUID, input_hash: str, tenant_id: UUID
     ) -> ReconciliationRun | None:
-        async with self._pool.acquire() as conn:
+        # F1(task-9456) — see module docstring. Explicit tenant_id stays in
+        # the WHERE (real line of defense while DATABASE_URL is a superuser);
+        # tenant_transaction() binds app.tenant_id for once the role is not.
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             run_row = await conn.fetchrow(
-                "SELECT * FROM reconciliation_run WHERE target_ref = $1 AND input_hash = $2",
+                "SELECT * FROM reconciliation_run "
+                "WHERE target_ref = $1 AND input_hash = $2 AND tenant_id = $3",
                 target_ref,
                 input_hash,
+                tenant_id,
             )
             if run_row is None:
                 return None
@@ -101,7 +123,7 @@ class PostgresReconciliationRepository:
         # (`run_reconciliation`) reuse it instead of crashing or re-running the
         # winner's side effects a second time.
         try:
-            async with self._pool.acquire() as conn, conn.transaction():
+            async with tenant_transaction(self._pool, run.tenant_id) as conn:
                 run_row = await conn.fetchrow(
                     "INSERT INTO reconciliation_run "
                     "(tenant_id, target_type, target_ref, connection_id, input_hash, state, "
@@ -131,7 +153,9 @@ class PostgresReconciliationRepository:
                     )
                     inserted_items.append(_row_to_item(item_row))
         except asyncpg.UniqueViolationError as exc:
-            existing = await self.get_run_by_input_hash(run.target_ref, run.input_hash)
+            existing = await self.get_run_by_input_hash(
+                run.target_ref, run.input_hash, run.tenant_id
+            )
             if existing is None:
                 raise
             raise ReconciliationRunAlreadyExists(existing) from exc

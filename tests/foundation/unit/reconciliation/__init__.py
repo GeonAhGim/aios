@@ -63,7 +63,7 @@ class _FakeReconciliationRepo:
         self.insert_error: Exception | None = None
         self.upsert_error: Exception | None = None
 
-    async def get_run_by_input_hash(self, target_ref, input_hash):
+    async def get_run_by_input_hash(self, target_ref, input_hash, tenant_id):
         return self.runs_by_hash.get((target_ref, input_hash))
 
     async def insert_run_with_items(self, run, items):

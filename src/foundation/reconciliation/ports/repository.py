@@ -20,10 +20,13 @@ from src.foundation.reconciliation.domain.models import (
 @runtime_checkable
 class ReconciliationRepository(Protocol):
     async def get_run_by_input_hash(
-        self, target_ref: UUID, input_hash: str
+        self, target_ref: UUID, input_hash: str, tenant_id: UUID
     ) -> ReconciliationRun | None:
         """REC-004/006 — For the same target+input, return this run instead of
         recomputing; implementation must populate items.
+
+        `tenant_id` scopes the read against `reconciliation_run`'s RLS policy
+        (F1, task-9456) — every call site already knows the caller's tenant.
         """
         ...
 

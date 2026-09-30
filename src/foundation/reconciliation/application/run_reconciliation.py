@@ -98,7 +98,7 @@ async def run_reconciliation(
         {e.entity_key: (str(e.internal_value), str(e.provider_value)) for e in entities},
     )
 
-    existing = await repo.get_run_by_input_hash(target_ref, input_hash)
+    existing = await repo.get_run_by_input_hash(target_ref, input_hash, tenant_id)
     if existing is not None:
         aggregate = aggregate_classification(tuple(i.classification for i in existing.items))
         return run_to_view(existing, aggregate)
