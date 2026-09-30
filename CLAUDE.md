@@ -893,6 +893,30 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/docs design is sound; the remaining defect is fleet code,
     not this repo.
 
+37. A fourth `type_ignore` 24h 8-repeat systemic leaf (task-9539) reconfirms #23 with the
+    escalation record now showing the mechanism run even longer unchecked. `esc-ci-
+    type_ignore.json` still reads `status: "resolved"`, `resolved_sha: "12e7bd738c39..."`,
+    `closed_at: "2026-09-30T00:21:59Z"` — the same record #23 already inspected — but its
+    `auto_actions` log kept appending `"3x-repeat CI red"` every 15-30 min all the way through
+    `2026-09-30T11:39:41Z`, over 11 hours after the escalation's own `closed_at`, with the last
+    actual fix task (task-9255, `detail_hash: "42ef1e7acc80"`, bisect culprit
+    `deacc374b0ed34d59cf2e4e0401ee053bd01127a` — the same stale-worktree false positive #17/#23
+    already named) created at `05:57:08Z` and nothing since. A local run on this worktree (HEAD
+    `36acf173`, `git status` clean) confirms `OK: type: ignore 142개 (budget 142개 이내)` in a few
+    seconds, matching `type-ignore-budget.txt` exactly — no violation exists at current HEAD. No
+    script/baseline change made — `scripts/check_type_ignore_budget.py` and `type-ignore-
+    budget.txt` are unchanged since task-9140/task-9269, and the two failure classes #14 already
+    documented (perf timeout, now fixed; D2/D3 negative-test `# type: ignore` collisions, mitigated
+    via the `dict[str, Any]` unpack pattern) remain the only ways a real budget increase can occur.
+    This is the same fleet-code defect as #17-#26/#30-#31/#33-#35: `pm/auto_decision.py`/
+    `orchestrator.py`'s `ci_red` rule not checking `status == "resolved"` before appending further
+    repeat-count entries against an already-closed escalation, out of a repo worker's edit scope
+    (§4). Before working a future `type_ignore` leaf: run `python scripts/check_type_ignore_
+    budget.py` locally first — if `OK` and 142/142, and the escalation already shows
+    `status: "resolved"`, close as noop citing task-9140, task-9474 (#23), and this entry rather
+    than re-investigating a fourth time. No baseline/threshold relief made (DECISION_GUIDELINES
+    B-2) — script/baseline design is sound and already fixed; the remaining defect is fleet code.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
