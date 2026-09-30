@@ -189,3 +189,99 @@ async def test_full_pipeline_resumes_after_simulated_crash(pool: asyncpg.Pool, t
     )
     assert resumed.checkpoint == partial.checkpoint
     assert resumed.rounds_completed == 2
+
+
+# --- negative: empty samples must be rejected (AI-20 invariant) ---
+
+
+async def test_train_job_rejects_empty_samples(pool: asyncpg.Pool, tmp_path) -> None:
+    """Empty sample list must raise ValueError -- training with zero rows
+    violates the invariant that every model must have at least one training
+    observation (AI-20 invariant)."""
+    job_id = f"neg-empty-{id(tmp_path)}"
+    trainer = LocalTrainer(tmp_path / "artifacts")
+    train_job_repo = PostgresTrainJobRepository(pool)
+
+    with pytest.raises(ValueError, match="samples must not be empty"):
+        await run_train_job(
+            job_id=job_id,
+            model_id="empty-samples-model",
+            trainer=trainer,
+            repository=train_job_repo,
+            samples=[],
+            target_rounds=6,
+            params=_PARAMS,
+            checkpoint_every=2,
+        )
+
+
+# --- negative: target_rounds <= 0 must be rejected (invariant guard) ---
+
+
+async def test_train_job_rejects_zero_target_rounds(pool: asyncpg.Pool, tmp_path) -> None:
+    """target_rounds=0 must raise ValueError -- training for zero rounds
+    is an invariant violation (no model produced)."""
+    job_id = f"neg-zero-rounds-{id(tmp_path)}"
+    trainer = LocalTrainer(tmp_path / "artifacts")
+    train_job_repo = PostgresTrainJobRepository(pool)
+
+    with pytest.raises(ValueError, match="target_rounds must be positive"):
+        await run_train_job(
+            job_id=job_id,
+            model_id="zero-rounds-model",
+            trainer=trainer,
+            repository=train_job_repo,
+            samples=_samples(),
+            target_rounds=0,
+            params=_PARAMS,
+            checkpoint_every=2,
+        )
+
+
+# --- failure injection: trainer.train_step() raises mid-training ---
+
+
+async def test_train_job_leaves_resumable_state_after_trainer_failure(
+    pool: asyncpg.Pool, tmp_path
+) -> None:
+    """When the trainer raises during a training step, the job must NOT be
+    marked 'completed' and its checkpoint progress must be left untouched
+    -- so a retry can resume rather than silently losing the crashed
+    round's progress (failure-injection on the checkpoint conditional
+    UPDATE path, standard-105)."""
+    job_id = f"fail-trainer-{id(tmp_path)}"
+    trainer = LocalTrainer(tmp_path / "artifacts")
+    train_job_repo = PostgresTrainJobRepository(pool)
+
+    original_train_step = trainer.train_step
+    call_count = 0
+
+    def failing_train_step(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("simulated trainer crash")
+        return original_train_step(*args, **kwargs)
+
+    trainer.train_step = failing_train_step  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="simulated trainer crash"):
+        await run_train_job(
+            job_id=job_id,
+            model_id="failing-model",
+            trainer=trainer,
+            repository=train_job_repo,
+            samples=_samples(),
+            target_rounds=6,
+            params=_PARAMS,
+            checkpoint_every=2,
+        )
+
+    # No checkpoint row was ever written -- the crash happened before the
+    # first checkpoint UPDATE, so the job stays at round 0 and 'running',
+    # resumable by a retry rather than left completed or half-advanced.
+    job = await train_job_repo.get(job_id)
+    assert job is not None
+    assert job.status == "running"
+    assert job.rounds_completed == 0
+    assert job.checkpoint is None
