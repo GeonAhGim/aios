@@ -2320,3 +2320,33 @@ the numbering they had in CLAUDE.md section 6.
     close as noop citing them rather than re-deriving the same failure classes a seventh time.
     No script/baseline exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to
     fix; the repeat is fleet-code re-escalation, not this repo.
+
+92. A third `ruff` `[health:ci_red_systemic]` leaf (task-9761) reconfirms #15/#39/#50/#62 for a
+    fourth+ round off the exact same escalation snapshot, `esc-ci-ruff.json`
+    (`C:\aios\pm\escalations\esc-ci-ruff.json`), never a new violation. Its cited repeat set
+    (task-9288, task-9466, task-9576, task-9703) is the same B017 blind-exception detail as
+    #50/#62 (`detail_hash: "af6a4dceddae"`, `tests/foundation/adversarial/paper_control/
+    test_cross_tenant_isolation.py:209`), already fixed by task-9501's commit `9e1555f24`
+    (`pytest.raises(Exception)` → `pytest.raises(InvalidDeploymentStateError)`) and confirmed
+    still in place at current HEAD. `pyproject.toml`'s `[tool.ruff]`/`per-file-ignores` config is
+    unchanged since #50/#62, and `python -m ruff check src tests scripts` on this worktree prints
+    `All checks passed!`. The escalation JSON is the sharpest evidence yet: `status: "resolved"`,
+    `resolved_sha: "6437ac748a64..."`, `closed_at: "2026-09-30T12:58:59Z"` — the fix genuinely
+    landed and CI genuinely went green — but `auto_actions` shows the `ci_red` rule spawning
+    task-9703 off the *same* `detail_hash` nine minutes later (`13:08:37Z`), then escalating to
+    this systemic leaf (`14:12:29Z`) once task-9703 also closed noop, all without any intervening
+    regression: the rule re-fires from the stale pre-resolution snapshot instead of re-evaluating
+    current HEAD before deciding to spawn another fix task. This is the identical fleet-code
+    pattern already named for `ruff` in #50/#62 and for fifteen+ other gates (#17-#26, #30-#31,
+    #33-#36, #38, #40, #45, #48, #56, #60, #88): `pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule not distinguishing "escalation resolved, awaiting next CI recheck" from "time
+    to spawn another fix task regardless," out of a repo worker's edit scope (§4). No
+    script/baseline change made — the ratchet design is sound; the remaining defect is fleet
+    code, not this repo. Before working a future `ruff` correction leaf: run `ruff check <the
+    exact path:line from the esc detail>` first, and check `esc-ci-ruff.json`'s
+    `owner_detail_hash` against its own `auto_actions` log for a `"resolved"`/`closed_at` entry
+    that postdates the cited leaf's creation — if the config is clean and the cited repeat leaf
+    ids match an already-closed set (task-9157/task-9288/#15, task-9466, task-9576/#39/#50,
+    task-9703/#62, or this entry), close as noop citing them rather than re-fixing already-fixed
+    code for a fifth round. No baseline/rule relief made (DECISION_GUIDELINES B-2) — none was
+    warranted.
