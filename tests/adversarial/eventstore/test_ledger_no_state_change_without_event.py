@@ -51,7 +51,7 @@ from src.foundation.ledger.contracts.v1 import (
     LedgerEventType,
     UserSub,
 )
-from src.foundation.ledger.domain.chart_of_accounts import user_account
+from src.foundation.ledger.domain.chart_of_accounts import PLATFORM_CASH_CLEARING, user_account
 
 _MAX_POST_ENTRY_ROUND_TRIPS = 23
 
@@ -246,36 +246,114 @@ async def test_ledger_bypassed_journal_write_leaves_balance_changed_with_no_entr
     돌려주면?")을 소스 변경 없이 항상 재현한다 — `post_entry`는
     `entry_view`가 존재하기만 하면 계속 진행해 `ledger_balance`를 갱신하므로
     `ledger_journal_entry`에는 행이 하나도 없는데 잔액은 바뀐다(I-10이
-    금지하는 "이벤트 없는 상태 변경")."""
+    금지하는 "이벤트 없는 상태 변경").
+
+    task-9702/esc-ci-replay_verify: TOPUP_CONFIRMED는 `posting_rules.
+    _topup_confirmed`가 `PLATFORM_CASH_CLEARING`(전 테스트 공유 계정)을
+    차변 상대로 고정한다 — 이 테스트가 시뮬레이트하는 "저널 없이 잔액만
+    바뀜"은 사용자 계정뿐 아니라 CASH_CLEARING에도 그대로 일어나는데,
+    사용자 계정은 매 실행마다 새 `uuid4()`라 버려져도 무해하지만
+    CASH_CLEARING은 공유 계정이라 복원하지 않으면 손상이 공유 테스트 DB에
+    영구히 남는다 — 이후 실행에서 FA-15 `replay_verify`가 이 계정을 거짓
+    MISMATCH로 표면화한다(정확히 이 증상이 esc-ci-replay_verify로 관측됨).
+    `test_queries.py::test_get_balance_raises_drift_when_ledger_balance_row_
+    directly_corrupted`의 task-5687 finally 복원과 같은 이유로 같은 패턴을
+    적용한다."""
     user_id = uuid4()
     user_code = await _create_user_available_account(pool, user_id)
     balances = PostgresBalanceRepository(pool)
     audit = PostgresAuditEventRepository(pool)
     ref = f"fa16-adv-topup-lying:{uuid4().hex}"
 
-    async with pool.acquire() as conn, conn.transaction():
-        await post_entry(
-            conn,
-            _topup_event(event_ref=ref, user_id=user_id, amount=Decimal("10.00")),
-            journal=_LyingLedgerJournal(),
-            balances=balances,
-            audit=audit,
-            clock=_clock,
+    async with pool.acquire() as conn:
+        cash_clearing_before = await conn.fetchrow(
+            "SELECT lb.account_id, lb.balance, lb.held, lb.pending_payout, "
+            "lb.allow_negative, lb.last_entry_seq FROM ledger_balance lb "
+            "JOIN ledger_account la ON la.account_id = lb.account_id "
+            "WHERE la.account_code = $1",
+            PLATFORM_CASH_CLEARING,
         )
 
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            await post_entry(
+                conn,
+                _topup_event(event_ref=ref, user_id=user_id, amount=Decimal("10.00")),
+                journal=_LyingLedgerJournal(),
+                balances=balances,
+                audit=audit,
+                clock=_clock,
+            )
+
+        async with pool.acquire() as conn:
+            entry_count = await conn.fetchval(
+                "SELECT count(*) FROM ledger_journal_entry WHERE event_ref = $1", ref
+            )
+            balance = await conn.fetchval(
+                "SELECT balance FROM ledger_balance WHERE account_id = "
+                "(SELECT account_id FROM ledger_account WHERE account_code = $1)",
+                user_code,
+            )
+        assert balance == Decimal("10.00"), "이중체가 돌려준 entry_view로 잔액은 갱신됐어야 한다"
+        assert entry_count == 0, (
+            f"FA-16/I-10 위반 재현: ledger_balance가 10.00 늘었는데 ledger_journal_entry는 "
+            f"{entry_count}행 — 이벤트 없는 잔액 변경."
+        )
+    finally:
+        # audit-allow: ledger_balance_raw_seed -- 위 docstring이 설명하는 대로
+        # 공유 계정(PLATFORM:CASH_CLEARING)에 이 테스트가 남긴 저널 없는 손상을
+        # 원상복구하는 것이지 초기 잔액 시드가 아니다(FA-10 WORM 트리거 때문에
+        # 복원도 DELETE+INSERT여야 한다, postgres_balance_repository.apply와 동일 패턴).
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "DELETE FROM ledger_balance WHERE account_id = $1",
+                cash_clearing_before["account_id"],
+            )
+            await conn.execute(
+                "INSERT INTO ledger_balance (account_id, balance, held, pending_payout, "
+                "allow_negative, last_entry_seq, updated_at) "
+                "VALUES ($1, $2, $3, $4, $5, $6, now())",
+                cash_clearing_before["account_id"],
+                cash_clearing_before["balance"],
+                cash_clearing_before["held"],
+                cash_clearing_before["pending_payout"],
+                cash_clearing_before["allow_negative"],
+                cash_clearing_before["last_entry_seq"],
+            )
+
+
+async def test_ledger_bypassed_journal_write_restores_shared_cash_clearing_after_run(pool):
+    """회귀 가드(task-9702/esc-ci-replay_verify) — DoD 부정 테스트. 위
+    `test_ledger_bypassed_journal_write_leaves_balance_changed_with_no_entry`가
+    `finally`로 `PLATFORM:CASH_CLEARING`을 복원하지 않으면(예: 그 finally 블록이
+    다시 삭제되면) 이 테스트가 즉시 FAIL해 공유 계정 손상이 재발한 것을
+    잡아낸다 — 위 테스트를 직접 호출해 실행 전/후 CASH_CLEARING 잔액·
+    last_entry_seq가 정확히 같은지 확인한다."""
     async with pool.acquire() as conn:
-        entry_count = await conn.fetchval(
-            "SELECT count(*) FROM ledger_journal_entry WHERE event_ref = $1", ref
+        before = await conn.fetchrow(
+            "SELECT lb.balance, lb.last_entry_seq FROM ledger_balance lb "
+            "JOIN ledger_account la ON la.account_id = lb.account_id "
+            "WHERE la.account_code = $1",
+            PLATFORM_CASH_CLEARING,
         )
-        balance = await conn.fetchval(
-            "SELECT balance FROM ledger_balance WHERE account_id = "
-            "(SELECT account_id FROM ledger_account WHERE account_code = $1)",
-            user_code,
+
+    await test_ledger_bypassed_journal_write_leaves_balance_changed_with_no_entry(pool)
+
+    async with pool.acquire() as conn:
+        after = await conn.fetchrow(
+            "SELECT lb.balance, lb.last_entry_seq FROM ledger_balance lb "
+            "JOIN ledger_account la ON la.account_id = lb.account_id "
+            "WHERE la.account_code = $1",
+            PLATFORM_CASH_CLEARING,
         )
-    assert balance == Decimal("10.00"), "이중체가 돌려준 entry_view로 잔액은 갱신됐어야 한다"
-    assert entry_count == 0, (
-        f"FA-16/I-10 위반 재현: ledger_balance가 10.00 늘었는데 ledger_journal_entry는 "
-        f"{entry_count}행 — 이벤트 없는 잔액 변경."
+
+    assert after["balance"] == before["balance"], (
+        "PLATFORM:CASH_CLEARING 잔액이 복원되지 않았다 — 공유 테스트 DB에 저널 없는 "
+        "드리프트가 남아 replay_verify가 이후 실행에서 거짓 MISMATCH를 낸다."
+    )
+    assert after["last_entry_seq"] == before["last_entry_seq"], (
+        "PLATFORM:CASH_CLEARING last_entry_seq가 복원되지 않았다 — 동시성 카운터가 "
+        "저널 없이 증가한 채로 남았다."
     )
 
 
