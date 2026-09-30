@@ -1603,6 +1603,35 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     them rather than re-fixing already-fixed code. No baseline/rule relief made
     (DECISION_GUIDELINES B-2) — none was warranted.
 
+63. A second `pytest_perf` 24h 4-repeat investigation (task-9664) citing the *identical* repeat
+    set #43 (task-9552) already closed — task-9664's spec names task-8934, task-9056,
+    task-9287, task-9520 verbatim, the same four leaves task-9552 already root-caused into
+    three independent, already-fixed classes: task-8934 correctly classified shared-host DB
+    migration/reset wall-clock contention as noop (no code change, per DECISION_GUIDELINES B-2);
+    task-9056 fixed a real ruff E501 regression in `ingest_candles.py` from a Korean->English
+    docstring translation (commit `50c6a348b`); task-9287 fixed a real migration bug (a
+    task-8890 revision's `downgrade()` unconditionally raising
+    `Em3ChildQtyBackfillIrreversibleError` on an empty dev/test DB, commit `7b31cd088`); task-9520
+    fixed a real collection-time regression (task-9224's `loc_over_500` split renamed fixtures
+    without updating two adversarial test files' imports/call sites, commit `65b85ff28`). Like
+    `pytest`/`pytest_latency_serial` (#28/#34/#40/#20/#29/#42), there is no
+    `scripts/check_pytest_perf.py` — confirmed again here — so `pytest_perf` is a full-mode-only
+    CI stage name (`pm/ci_recheck.py:467-486`), not a shared check script with its own design;
+    "the stage repeating" is N independent single-test/single-file failures, not a design gap.
+    Reconfirmed on this worktree (`git status` clean, `git log --oneline -3 --
+    scripts/check_pytest_perf.py` — file does not exist; `50c6a348b`/`7b31cd088`/`65b85ff28` all
+    present in history): `tests/adversarial/risk/test_decision_subject_reuse.py` and
+    `test_trigger_execution_ref.py` collect cleanly (36 tests, no errors), confirming task-9520's
+    fix is still in place. This is the same fleet-code re-escalation pattern already named for
+    fourteen+ other gates (#17-#26, #30-#31, #33-#41, #48, #50, #56, #59):
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule spawning a fresh investigation off an
+    already-closed repeat set instead of checking whether a prior systemic leaf (task-9552/#43)
+    already answered the identical question, out of a repo worker's edit scope (§4). No
+    script/baseline exists in this repo to relieve (DECISION_GUIDELINES B-2 n/a). Before working a
+    future `pytest_perf` leaf: check whether the cited repeat leaf ids match #43's set
+    (task-8934, task-9056, task-9287, task-9520) or this entry's — if so, close as noop citing
+    both rather than re-deriving the same three failure classes a third time.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
