@@ -186,8 +186,19 @@ def test_tests_zone_blanket_ignore_does_not_leak_into_unlisted_rule(tmp_path: Pa
 @pytest.mark.perf
 def test_ruff_check_repo_perf_budget() -> None:
     """CLAUDE.md 게이트 커맨드(`ruff check src tests scripts`)를 실제로 돌려
-    자기보정 예산 안에 끝나는지 확인한다(스캔 결과는 exit 0 -- 이 리프가 정리한
-    위반이 회귀하지 않았다는 뜻이기도 하다)."""
+    자기보정 예산 안에 끝나는지 확인한다.
+
+    task-9270: 이 테스트는 실행 시간만 단언한다 -- 반환 코드(위반 유무)는 채점하지
+    않는다. 실제 저장소의 린트 위반 유무는 이미 별도 `ruff` CI 단계
+    (`ruff check src tests scripts`, ci_recheck.build_steps)가 전담한다. 예전에는
+    여기서도 `returncode == 0`을 단언했는데, 그러면 저장소 어디서든 새로 생긴
+    ruff 위반(perf와 무관한 파일)이 이 `perf` 마커 테스트를 통해 `pytest_perf`
+    CI 단계까지 적색으로 만들어, 이미 `ruff` 단계가 잡은 것과 같은 위반을 두 개의
+    단계 이름으로 중복 보고했다(task-9056이 겪은 실제 사고: ingest_candles.py의
+    E501 하나가 `pytest_perf` 적색으로 잘못 분류됨). exit 2(설정 오류로 ruff
+    자체가 실행조차 안 됨)만 이 테스트 실패로 남기고, exit 0/1(정상 실행, 위반
+    유무 무관)은 모두 허용한다.
+    """
     result: subprocess.CompletedProcess[str] | None = None
 
     def run() -> None:
@@ -204,7 +215,7 @@ def test_ruff_check_repo_perf_budget() -> None:
     )
 
     assert result is not None
-    assert result.returncode == 0, result.stdout
+    assert result.returncode in (0, 1), result.stdout
 
 
 # ---------------------------------------------------------------------------
