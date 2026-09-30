@@ -26,6 +26,17 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
+  // task-9054 근본 정정: webServer는 vite preview 단일 프로세스(단일 스레드) 하나다.
+  // fullyParallel + workers 미지정은 CPU 코어 수만큼(이 호스트에서 7개) chromium을
+  // 동시에 띄워 이 preview 프로세스 하나에 몰아치고, 여러 worktree가 동시에
+  // local_ci를 도는 동안(이 저장소의 상시 운용 방식) CPU가 이미 포화 상태라 응답이
+  // 늘어져 개별 goto가 테스트 타임아웃(90s)을 넘기거나 webServer 자체가
+  // config.webServer.timeout(180s) 안에 못 뜬다(esc-ci-journeys.json). 코드 결함이
+  // 아니라 이 스위트가 자기 자신의 단일 서버를 과도한 동시성으로 압사시키는
+  // 자해성 경합이었다 — worker 수를 고정 상한으로 낮춰 서버가 감당할 수 있는
+  // 동시 요청 수로 되돌린다(기준선/타임아웃 값 자체는 그대로 — DECISION_GUIDELINES
+  // B-2, 병렬도만 조정).
+  workers: 4,
   reporter: [["list"]],
   use: {
     baseURL: BASE_URL,
