@@ -480,6 +480,28 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/baseline design is sound and already fixed; the remaining
     defect is fleet code.
 
+24. A third `perf_marker_guard` `[health:ci_red_systemic]` leaf (task-9473) on the identical
+    root cause already closed twice — task-9138 (first systemic leaf) found the real defect
+    (missing developer guidance in `docs/TESTING.md`, fixed by commit `a2cafe7b`) and task-9289
+    (second systemic leaf, already recorded as #19 above) reverified the script/budget design
+    sound and traced the repeat to fleet code (`pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule reopening fix leaves off a stale `esc-ci-perf_marker_guard.json` snapshot
+    instead of re-checking current HEAD). This leaf's four cited "repeats"
+    (task-8932, task-9135, task-9254, task-9463) reconfirm that pattern rather than adding a new
+    one: task-8932 and task-9254 are noop closures citing the exact same already-landed fix
+    commits (`6940e665`/task-8754, `23a9d9b4`/task-9135) with a local `OK` rerun in each note;
+    task-9135 *is* the real design fix already cited above; task-9463 never actually
+    investigated — it died from a repeated hook-denial loop (`error_max_turns` at 45 turns) and
+    left `status: "assigned"`, so it contributes no new evidence either way. A local run on this
+    worktree today (`python scripts/check_perf_marker_guard.py`) is still `OK` in ~4.5s against
+    the 60s budget. No script/docs change made — task-9138's `docs/TESTING.md` guidance and
+    task-9135's budget tuning are both still in place and sufficient. Before working a future
+    `perf_marker_guard` leaf: run the script locally first; if it's `OK` and fast, check whether
+    a systemic leaf (task-9138, task-9289, or this one) already closed the same question before
+    re-investigating — the remaining repeats are fleet code re-triggering off stale escalation
+    state, not this repo's script or test suite. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2).
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
