@@ -760,6 +760,33 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     B-2) — script/baseline design is sound (including task-9122's fix); the remaining defect is
     fleet code, not this repo.
 
+32. A fifth `coverage` `[health:ci_red_systemic]` leaf (task-9508) reconfirms #21/#26 rather
+    than finding a new design defect. `scripts/coverage_ratchet.py` and `coverage-baseline.txt`
+    are unchanged since task-9052/task-9120 (`94.83`/`52977`; ratio-floor partial-report guard
+    from task-7644/7670; trusted baseline-write gate restricted to `GITHUB_ACTIONS=true` or
+    `--allow-baseline-write` from task-9120). `esc-ci-coverage.json` (`first_seen`
+    2026-09-22T15:23:36Z, still `status: "open"`, `reopen_count: 2`) attached this round to sha
+    `8003202b10d8` with detail `FAIL: 기준선 미달 94.83% -> 3.01%` and `bisect_culprit
+    27b5fe61e1d0f33aaa0ad006fdaab6c597d6f426` — that commit (task-9242) only touches
+    `tests/foundation/unit/entities/test_migration_fa4_columns.py` (adding negative/
+    failure-injection tests per §5's D2/D3 mandate), unrelated to any `src/` coverage change; this
+    worktree is an ancestor-confirmed descendant of it with `git status` clean. A -91.82pp swing
+    from a test-only commit is the same class #26 already named: a local `pytest --cov=src` dying
+    under shared-host resource contention (DB-dependent fixtures failing en masse) shrinks the
+    *numerator* (lines executed) while `lines-valid` (the ratio-floor's own denominator, counting
+    only *importable* statements) stays high enough to slip past the 0.5 floor if the failing
+    tests error out only after their target modules import cleanly. This gap is real but not
+    fixable from `coverage.xml` alone (Cobertura carries no pytest pass/fail-count signal); a real
+    fix would mean capturing pytest's own exit summary alongside the coverage step, which is fleet
+    CI wiring (`pm/local_ci.py` / `.github/workflows/quality.yml`), out of a repo worker's edit
+    scope (§4). Before working a future `coverage` leaf: confirm `coverage-baseline.txt` still
+    reads `94.83`/`52977` and the escalation's bisect culprit is a test-only/docstring-only commit
+    (as it has been every time so far: `4d5ebed5` in #21/#22, `27b5fe61` in #26 and here) — if so,
+    close as noop citing task-9052, task-9479 (#26), and this entry rather than re-diagnosing the
+    same partial-run artifact. No baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES
+    B-2) — the remaining fix scope (correlating coverage swings with pytest's own exit summary,
+    not just `coverage.xml`'s denominator) belongs to fleet CI wiring, not this script.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
