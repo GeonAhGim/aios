@@ -5,8 +5,10 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 instrument/timeframe의 coverage를 반환하지 않으며, 커버리지가 없는 구간
 질의가 빈 리스트로 정확히 구분됨(0/NaN으로 채우지 않음, §4.1/§6).
 """
+
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -128,16 +130,20 @@ async def test_list_spans_does_not_return_other_timeframes_coverage(pool, repo):
         await repo.upsert_span(
             conn,
             _span(
-                instrument_id=instrument_id, timeframe=Timeframe.M1,
-                start=t0, end=t0 + timedelta(days=5),
+                instrument_id=instrument_id,
+                timeframe=Timeframe.M1,
+                start=t0,
+                end=t0 + timedelta(days=5),
             ),
         )
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert_span(
             conn,
             _span(
-                instrument_id=instrument_id, timeframe=Timeframe.H1,
-                start=t0, end=t0 + timedelta(days=5),
+                instrument_id=instrument_id,
+                timeframe=Timeframe.H1,
+                start=t0,
+                end=t0 + timedelta(days=5),
             ),
         )
 
@@ -159,3 +165,83 @@ async def test_list_spans_for_uncovered_instrument_returns_empty_not_full_covera
         spans = await repo.list_spans(conn, uncovered_instrument, Timeframe.M1)
 
     assert spans == []
+
+
+async def test_upsert_span_with_end_before_start_raises(pool, repo):
+    """negative: `end <= start`인 구간은 DB CHECK(end_at > start_at)로
+    거부되어야 한다 — 어댑터가 파이썬에서 먼저 걸러내지 않아도 fail-closed
+    로 DB가 막는다(9049e2b6b0b7 마이그레이션 CHECK 제약)."""
+    instrument_id = _fake_ulid()
+    await _insert_instrument(pool, instrument_id)
+    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+
+    with pytest.raises(asyncpg.exceptions.CheckViolationError):
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.upsert_span(
+                conn, _span(instrument_id=instrument_id, start=t0, end=t0 - timedelta(hours=1))
+            )
+
+
+async def test_upsert_span_with_unknown_instrument_raises(pool, repo):
+    """negative: `instruments`에 존재하지 않는 instrument_id로 커버리지를
+    선언하면 FK 위반으로 거부되어야 한다 — 존재하지 않는 종목의 커버리지가
+    조용히 저장되면 안 된다."""
+    unknown_instrument = _fake_ulid()
+    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+
+    with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.upsert_span(
+                conn,
+                _span(instrument_id=unknown_instrument, start=t0, end=t0 + timedelta(days=5)),
+            )
+
+
+async def test_upsert_span_unexpected_db_error_propagates_unmapped(pool, repo, monkeypatch):
+    """실패주입: `ExclusionViolationError`가 아닌 예상치 못한 DB 에러(예:
+    커넥션 단절)는 `CoverageSpanOverlapError`로 오분류되지 않고 원본 그대로
+    전파되어야 한다 — 겹침이 아닌 장애를 겹침으로 잘못 보고하면 호출자가
+    잘못된 복구 경로(재병합)를 타게 된다."""
+    instrument_id = _fake_ulid()
+    await _insert_instrument(pool, instrument_id)
+    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+
+    async def _boom(*args, **kwargs):
+        raise asyncpg.exceptions.ConnectionDoesNotExistError("simulated connection loss")
+
+    monkeypatch.setattr(asyncpg.connection.Connection, "fetchrow", _boom)
+    async with pool.acquire() as conn, conn.transaction():
+        with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+            await repo.upsert_span(
+                conn, _span(instrument_id=instrument_id, start=t0, end=t0 + timedelta(days=5))
+            )
+
+
+@pytest.mark.perf
+async def test_list_spans_p95_latency_within_budget(pool, repo):
+    """성능 단언: 커버리지 조회는 market_data 읽기 경로 예산(ADR-2026-09-09-C
+    Decision 1, "5k봉 조회 p95 200ms")을 상한으로 삼는다 — coverage_spans는
+    캔들보다 훨씬 가벼운 행 수이므로 같은 예산 안에서 p95가 나와야 한다."""
+    instrument_id = _fake_ulid()
+    await _insert_instrument(pool, instrument_id)
+    base = datetime.now(timezone.utc) - timedelta(days=400)
+
+    async with pool.acquire() as conn, conn.transaction():
+        for i in range(50):
+            start = base + timedelta(days=i * 2)
+            await repo.upsert_span(
+                conn,
+                _span(instrument_id=instrument_id, start=start, end=start + timedelta(days=1)),
+            )
+
+    samples: list[float] = []
+    for _ in range(20):
+        t_start = time.perf_counter()
+        async with pool.acquire() as conn, conn.transaction():
+            spans = await repo.list_spans(conn, instrument_id, Timeframe.M1)
+        samples.append(time.perf_counter() - t_start)
+    assert len(spans) == 50
+
+    samples.sort()
+    p95_ms = samples[int(len(samples) * 0.95) - 1] * 1000
+    assert p95_ms < 200, f"list_spans p95={p95_ms:.1f}ms exceeds 200ms budget"
