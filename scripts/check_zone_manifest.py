@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import fnmatch
-import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -78,35 +78,26 @@ def check_scaffold_reasons(root: Path, manifest: dict[str, object]) -> list[str]
 
 # 2026-09-26(CTO, esc-ci-zone timeout 120s): ROOT.rglob("*")는 .venv/node_modules/.git까지
 # 전부 걷고 나서 걸러내 부하 시 2분을 넘겼다(check_no_bom b89c0260와 같은 결함). os.walk로
-# 내려가면서 제외 디렉터리는 아예 들어가지 않는다.
+# 내려가면서 제외 디렉터리는 아예 들어가지 않게 고쳤었다.
 # 2026-09-29(task-8945, esc-ci-zone timeout 120s 재발): local_ci 머신은 워커 leaf마다 새로
 # checkout하지 않고 캐시가 누적된다. .hypothesis(task-2613 로컬 전용 예제 DB)가 수천 개의
 # 작은 파일로 쌓이면서(관측: 1606개, 전체 tracked 6623개 중 24%) os.walk 시간이 11s+로
-# 늘어 부하 시 다시 120s를 넘겼다. .ruff_cache/.mypy_cache/.pytest_cache도 같은 이유로
-# 소스가 아니라 도구 캐시이므로 동일하게 제외한다.
-PRUNED_DIRS = frozenset(
-    {
-        ".git",
-        ".venv",
-        "__pycache__",
-        "node_modules",
-        ".hypothesis",
-        ".ruff_cache",
-        ".mypy_cache",
-        ".pytest_cache",
-    }
-)
-
-
+# 늘어 부하 시 다시 120s를 넘겼다. .ruff_cache/.mypy_cache/.pytest_cache를 추가로 제외했으나
+# task-9057(2026-09-30)에서 다시 재발: 어떤 도구가 만드는 캐시 디렉터리든 새로 생기면 이
+# 제외 목록에 하나씩 추가해야 하는 구조 자체가 결함이었다(whack-a-mole). 이 검사가 원하는
+# 대상은 애초에 "추적 파일"(zone 선언 대상)이지 워킹 트리의 모든 파일이 아니므로,
+# 디스크 전체를 stat하는 os.walk 대신 git 인덱스 조회(`git ls-files`) 하나로 대체한다 —
+# 콜드 디스크 캐시에서도 os.walk처럼 파일마다 stat이 필요 없어 부하 시 지연이 사라지고,
+# 새 캐시 디렉터리가 미추적 상태인 한 목록을 늘릴 필요도 없다.
 def _tracked_files(root: Path) -> list[str]:
-    """Repo files as posix paths relative to root, never descending into PRUNED_DIRS."""
-    out: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in PRUNED_DIRS)
-        rel_dir = Path(dirpath).relative_to(root)
-        for f in filenames:
-            out.append((rel_dir / f).as_posix() if rel_dir.parts else f)
-    return out
+    """Git-tracked files as posix paths relative to root."""
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True,
+        check=True,
+    )
+    raw = result.stdout.decode("utf-8")
+    return [p for p in raw.split("\0") if p]
 
 
 def main() -> int:
