@@ -1,38 +1,44 @@
 # ratchet-allow: out-of-DC-12-scope SPI methods raise NotImplementedError (fail-closed stub)
-"""DC-12 — Bitget `MarketDataProvider` SPI 위임 어댑터.
+"""DC-12 — Bitget `MarketDataProvider` SPI delegation adapter.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2 모듈표 50행, §9.2 DC-12(선행 DC-11, task-1187 b0b8bed 머지 완료).
+§2 module table row 50, §9.2 DC-12 (prerequisite DC-11, task-1187 b0b8bed merged).
 
-이 파일은 새 거래소 클라이언트를 만들지 않는다 — 기존 `src.exchanges.bitget.
-BitgetAdapter`(REST 인증·서명·재시도는 그쪽 소관)를 생성자로 주입받아
-`MarketDataProvider` Protocol(DC-5 `ports/provider.py`, 554f078) 호출로
-위임만 한다. `src/exchanges/**`는 이 리프에서 한 줄도 고치지 않는다
-(task-1211 decision).
+This file does not create a new exchange client — it receives an existing
+`src.exchanges.bitget.BitgetAdapter` (REST auth/signature/retry is its
+responsibility) via constructor and delegates only to
+`MarketDataProvider` Protocol calls (DC-5 `ports/provider.py`, 554f078).
+`src/exchanges/**` is not touched by this leaf (task-1211 decision).
 
-`capabilities()`가 선언하는 값은 `BitgetAdapter.get_capabilities()`
-(`ExchangeCapability`, Phase 1 capability-gated 선언)와 어긋나지 않는다 —
-거래(trading) 능력 선언과 데이터(data) 능력 선언은 별개 축이지만, 이
-어댑터가 실제로 호출할 수 있는 범위(`BitgetMarketDataMixin.get_ohlcv`/
-`get_history_candles`가 지원하는 timeframe)를 넘어서는 값은 선언하지 않는다.
+Values declared in `capabilities()` do not conflict with
+`BitgetAdapter.get_capabilities()` (`ExchangeCapability`, Phase 1
+capability-gated declaration). Trading and data capability declarations are
+independent axes, but this adapter does not declare values beyond the
+range it can actually call (timeframes supported by
+`BitgetMarketDataMixin.get_ohlcv`/`get_history_candles`).
 
-미검증(외부 문서 대조 전, 성공으로 위장하지 않음):
-- `history_from`: Bitget 캔들 API의 실제 과거 데이터 보존 시작점은 공식
-  문서로 확인하지 않았다. 임의 날짜를 채우면 §4.1 "조용한 채움 금지"
-  정신에 반하므로 `None`(모름)으로 둔다.
-- `rate_limit`: Bitget v2 spot public 엔드포인트의 초당 요청 한도는
-  라이브 검증 전까지 보수적 추정치(10 req/s, burst 20)를 쓴다.
-- `_MAX_CANDLES_PER_REQUEST`: 문서상 상한 미확인, 보수적으로 200개로 제한.
+Unverified (do not fabricate success prior to external doc comparison):
+- `history_from`: The actual retention start point of Bitget candle API
+  history has not been confirmed against official docs. Filling with an
+  arbitrary date would violate the spirit of §4.1 "no silent fill", so it
+  is left as `None` (unknown).
+- `rate_limit`: The per-request-second limit for Bitget v2 spot public
+  endpoints uses a conservative estimate (10 req/s, burst 20) until live
+  verification.
+- `_MAX_CANDLES_PER_REQUEST`: Documented upper limit unconfirmed;
+  conservatively capped at 200.
 
-`list_instruments`/`subscribe`는 이 리프의 구현 대상이 아니다(task-1211
-decision — "구현 대상 Protocol은 ... capabilities()... fetch_candles()...").
-`list_instruments`이 반환할 `VenueListing.instrument_id`는 DC-2 심볼
-마스터가 발급하는 ULID인데, 이 SPI 계층은 그 저장소(DC-5
-`ports/instrument_repository.py`)에 접근하지 않으므로 여기서 임의로
-지어내면 §4.1 불변조건(`instrument_id` 불변·유일)을 어길 위험이 있다.
-`subscribe`(실시간 스트림 배선)는 DC-17(`realtime_fanout`) 선행 리프
-몫이다. 둘 다 `NotImplementedError`로 fail-closed 한다 — 조용히 빈
-결과를 돌려주면 "지원하지 않음"과 "아직 안 함"이 구분되지 않는다.
+`list_instruments`/`subscribe` are not implementation targets of this leaf
+(task-1211 decision — "the Protocol to implement is ... capabilities()...
+fetch_candles()..."). `VenueListing.instrument_id` returned by
+`list_instruments` is a ULID issued by the DC-2 symbol master, and this SPI
+layer does not access that store (DC-5
+`ports/instrument_repository.py`), so fabricating one here risks violating
+the §4.1 invariant (`instrument_id` immutable & unique).
+`subscribe` (real-time stream wiring) is the prerogative of the DC-17
+(`realtime_fanout`) prerequisite leaf. Both raise `NotImplementedError` for
+fail-closed behavior — returning a silent empty result would make "not
+supported" and "not yet done" indistinguishable.
 """
 
 from __future__ import annotations
@@ -62,7 +68,7 @@ from src.foundation.market_data.ports.provider import (
 
 __all__ = ["BitgetProvider"]
 
-_MAX_CANDLES_PER_REQUEST = 200  # 미검증(문서 미대조), 페이지네이션은 스콥 밖.
+_MAX_CANDLES_PER_REQUEST = 200  # Unverified (no doc cross-check); pagination out of scope.
 
 _CAPABILITIES = ProviderCapabilities(
     provider_id="bitget",
@@ -78,17 +84,17 @@ _CAPABILITIES = ProviderCapabilities(
             Timeframe.D1,
         }
     ),
-    history_from=None,  # 미검증(문서 미대조) — 임의 날짜로 채우지 않는다.
+    history_from=None,  # Unverified (no doc cross-check) — do not fill with an arbitrary date.
     realtime=True,  # BitgetAdapter.get_capabilities().supports_websocket
     delayed_seconds=0,
-    max_symbols_per_request=1,  # REST candles 엔드포인트는 심볼 1개씩만 조회.
-    rate_limit=RateLimitSpec(requests_per_second=Decimal(10), burst=20),  # 미검증
+    max_symbols_per_request=1,  # REST candles endpoint accepts only one symbol at a time.
+    rate_limit=RateLimitSpec(requests_per_second=Decimal(10), burst=20),  # Unverified
 )
 
 
 class BitgetProvider(BaseProviderAdapter):
-    """`BitgetAdapter`(기존 `src/exchanges/bitget`)에 위임하는
-    `MarketDataProvider`(DC-5) 구현체."""
+    """`MarketDataProvider`(DC-5) implementation delegating to
+    `BitgetAdapter`(existing `src/exchanges/bitget`)."""
 
     def __init__(
         self,
@@ -109,16 +115,20 @@ class BitgetProvider(BaseProviderAdapter):
 
     async def list_instruments(self, asset_class: AssetClass) -> list[VenueListing]:
         raise NotImplementedError(
-            "BitgetProvider.list_instruments: DC-12 스콥 밖 — instrument_id(ULID) "
-            "발급은 DC-2 심볼 마스터 소관이며 이 SPI 계층은 그 저장소를 참조하지 "
-            "않는다(task-1211 decision)."
+            "BitgetProvider.list_instruments: out of DC-12 scope — instrument_id(ULID) "
+            "issuance is DC-2 symbol master responsibility"
         )
 
     async def fetch_candles(
-        self, listing: VenueListing, tf: Timeframe, span: TimeSpan
+        self,
+        listing: VenueListing,
+        tf: Timeframe,
+        span: TimeSpan,
     ) -> CandleColumns:
         if listing.venue is not Venue.BITGET:
-            raise ValueError(f"BitgetProvider는 Venue.BITGET listing만 처리한다: {listing.venue!r}")
+            raise ValueError(
+                f"BitgetProvider handles only Venue.BITGET listings: {listing.venue!r}"
+            )
         symbol = to_canonical(Venue.BITGET, listing.venue_symbol)
 
         async def _op() -> CandleColumns:
@@ -134,9 +144,7 @@ class BitgetProvider(BaseProviderAdapter):
                 raise DataProviderError(
                     DataProviderErrorCode.DATA_COVERAGE_MISSING,
                     provider_id=self._provider_id,
-                    message=(
-                        f"bitget: {symbol} {tf.value} 구간 [{span.start}, {span.end}) 데이터 없음"
-                    ),
+                    message=(f"bitget: {symbol} {tf.value} no data in [{span.start}, {span.end})"),
                 )
             return CandleColumns(
                 ts=[c.open_time for c in in_span],
@@ -152,7 +160,7 @@ class BitgetProvider(BaseProviderAdapter):
 
     async def subscribe(self, _listings: Sequence[VenueListing]) -> AsyncIterator[TickOrCandle]:
         raise NotImplementedError(
-            "BitgetProvider.subscribe: DC-12 스콥 밖 — 실시간 스트림 배선은 "
-            "DC-17(realtime_fanout) 선행 리프 몫이다(task-1211 decision)."
+            "BitgetProvider.subscribe: out of DC-12 scope — real-time stream wiring "
+            "is DC-17(realtime_fanout) prerequisite responsibility(task-1211 decision)."
         )
-        yield  # pragma: no cover — mypy가 AsyncIterator 반환형을 추론하도록 하는 도달 불가 표식
+        yield  # pragma: no cover — unreachable marker for mypy AsyncIterator type inference
