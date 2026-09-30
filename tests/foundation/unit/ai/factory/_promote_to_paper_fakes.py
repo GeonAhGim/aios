@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
+import pytest
+
 from src.foundation.ai.factory.contracts.v1 import (
     DataScope,
     ProposalEvaluation,
@@ -27,9 +29,12 @@ from src.foundation.mandates.domain.models import (
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.paper_control.domain.models import (
+    AdapterProvenance,
     CommandOutcome,
     CommandType,
+    CredentialClass,
     DeploymentCommand,
+    DeploymentState,
     PaperDeployment,
 )
 from src.foundation.risk_gate.domain.models import RiskEvaluation, SafetyControl
@@ -261,3 +266,99 @@ class Deps:
         self.mandate_repo = FakeMandateRepository()
         self.connection_repo = UnusedConnectionRepository()
         self.tenant_id = uuid4()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# DEEPEN (task-10110, 원 리프 task-6704) -- 이 파일의 fakes 자체가
+# `promote_to_paper` 계약(불변식)을 정확히 흉내 내는지 검증. 개별 fake의
+# 상태 전이/거부 로직이 틀리면 `test_promote_to_paper.py`의 모든 assertion이
+# 거짓 양성(false positive)으로 통과할 수 있으므로, fakes를 직접 겨냥한
+# negative/실패주입 테스트를 여기 둔다 (test_promote_to_paper.py는 real
+# leaf의 동작만 검증하고 fakes 내부 로직은 검증하지 않는다).
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_negative_mark_consumed_rejects_already_consumed_ticket() -> None:
+    """부정: 이미 consumed_at이 찍힌 티켓을 다시 소비하려 하면 None을 돌려주고
+    재소비를 허용하지 않는다 -- 실제 저장소의 조건부 UPDATE(표준-105) 실패를
+    흉내 낸다."""
+    repo = FakeConfirmTicketRepository()
+    ticket = make_ticket()
+    repo.seed(ticket)
+    first = await repo.mark_consumed(ticket.ticket_id, execute_digest=DIGEST, now=NOW)
+    assert first is not None
+    second = await repo.mark_consumed(ticket.ticket_id, execute_digest=DIGEST, now=NOW)
+    assert second is None
+
+
+@pytest.mark.asyncio
+async def test_negative_mark_consumed_rejects_digest_mismatch() -> None:
+    """부정: action_digest가 요청한 execute_digest와 다르면 소비를 거부한다."""
+    repo = FakeConfirmTicketRepository()
+    ticket = make_ticket(digest=DIGEST)
+    repo.seed(ticket)
+    result = await repo.mark_consumed(ticket.ticket_id, execute_digest="b" * 64, now=NOW)
+    assert result is None
+    assert repo._tickets[ticket.ticket_id].consumed_at is None
+
+
+@pytest.mark.asyncio
+async def test_negative_mark_consumed_rejects_expired_ticket() -> None:
+    """부정: now가 expires_at 이상이면(경계 포함) 만료로 간주해 소비를 거부한다."""
+    repo = FakeConfirmTicketRepository()
+    ticket = make_ticket(expires_at=NOW)
+    repo.seed(ticket)
+    result = await repo.mark_consumed(ticket.ticket_id, execute_digest=DIGEST, now=NOW)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_negative_mark_consumed_rejects_unknown_ticket_id() -> None:
+    """부정: seed되지 않은 ticket_id는 조회 자체가 실패해 None을 돌려준다."""
+    repo = FakeConfirmTicketRepository()
+    result = await repo.mark_consumed(uuid4(), execute_digest=DIGEST, now=NOW)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_negative_unused_connection_repository_raises_on_any_call() -> None:
+    """부정/적대적: `connection_id=None` 경로에서 connection_repo는 절대 호출되지
+    않아야 한다는 계약(docstring)을 이 fake 스스로가 강제하는지 확인 -- 호출되면
+    AssertionError로 즉시 드러나야 하며 조용히 성공해서는 안 된다."""
+    repo = UnusedConnectionRepository()
+    with pytest.raises(AssertionError):
+        await repo.get_connection(uuid4())
+    with pytest.raises(AssertionError):
+        await repo.get_latest_health(uuid4())
+
+
+@pytest.mark.asyncio
+async def test_failure_injection_insert_deployment_propagates_configured_exception() -> None:
+    """실패주입: `fail_insert_deployment`가 설정되면 저장을 시도했다는 흔적
+    (`insert_deployment_calls`)은 남기되 예외를 그대로 전파해야 한다 -- 실패를
+    삼키고 성공으로 위장하면 `test_promote_to_paper_propagates_deployment_insert_failure`
+    같은 상위 테스트가 실제로는 아무것도 검증하지 못하게 된다."""
+    repo = FakePaperControlRepository()
+    repo.fail_insert_deployment = ConnectionError("injected: paper_deployment write failure")
+    proposal = make_proposal()
+    deployment = PaperDeployment(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        connection_id=None,
+        package_ref=str(proposal.proposal_id),
+        mandate_revision_id=uuid4(),
+        provenance=AdapterProvenance(
+            adapter_type="paper_sim",
+            credential_class=CredentialClass.PAPER,
+            endpoint_classification="sandbox",
+            provider_sandbox_account_ref="acct-1",
+        ),
+        state=DeploymentState.REQUESTED,
+        fence_token=0,
+        request_idempotency_key=str(uuid4()),
+    )
+    with pytest.raises(ConnectionError, match="injected: paper_deployment write failure"):
+        await repo.insert_deployment(deployment)
+    assert repo.insert_deployment_calls == 1
+    assert repo._by_id == {}  # the failed write must not land in state
