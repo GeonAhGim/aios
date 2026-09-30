@@ -9,7 +9,7 @@ import ast
 import re
 from pathlib import Path
 
-from scripts.consistency.common import Hit, _iter_py_files, _safe_parse
+from scripts.consistency.common import Hit, _iter_py_files, _walked_nodes
 
 # ---------------------------------------------------------------------------
 # 9. naive_datetime
@@ -30,11 +30,11 @@ def _dotted_chain(func: ast.expr) -> str:
 def check_naive_datetime(root: Path) -> list[Hit]:
     hits: list[Hit] = []
     for path in _iter_py_files(root, "src"):
-        tree = _safe_parse(path)
-        if tree is None:
+        nodes = _walked_nodes(path)
+        if not nodes:
             continue
         rel = path.relative_to(root).as_posix()
-        for node in ast.walk(tree):
+        for node in nodes:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
@@ -119,12 +119,12 @@ def _is_wire_boundary_allowed(source_lines: list[str], lineno: int) -> bool:
 def check_money_float(root: Path) -> list[Hit]:
     hits: list[Hit] = []
     for path in _iter_py_files(root, "src"):
-        tree = _safe_parse(path)
-        if tree is None:
+        nodes = _walked_nodes(path)
+        if not nodes:
             continue
         rel = path.relative_to(root).as_posix()
         source_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        for node in ast.walk(tree):
+        for node in nodes:
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                 if (
                     _is_float_annotation(node.annotation)
@@ -201,11 +201,11 @@ def check_symbol_id_assembly(root: Path) -> list[Hit]:
         rel_parts = path.relative_to(root).parts
         if any(rel_parts[: len(prefix)] == prefix for prefix in _EXEMPT_DIR_PARTS):
             continue
-        tree = _safe_parse(path)
-        if tree is None:
+        nodes = _walked_nodes(path)
+        if not nodes:
             continue
         rel = path.relative_to(root).as_posix()
-        for node in ast.walk(tree):
+        for node in nodes:
             for _name, lineno in _assembly_matches(node, _ASSEMBLY_TARGET_NAMES):
                 hits.append((rel, lineno))
     return hits
@@ -243,11 +243,11 @@ def check_authority_duplication(root: Path) -> list[Hit]:
         context = _bounded_context(rel_parts)
         if context is None:
             continue
-        tree = _safe_parse(path)
-        if tree is None:
+        nodes = _walked_nodes(path)
+        if not nodes:
             continue
         rel = path.relative_to(root).as_posix()
-        for node in ast.walk(tree):
+        for node in nodes:
             for name, lineno in _assembly_matches(node, _AUTHORITY_TARGET_NAMES):
                 key = (context, name)
                 by_context_target.setdefault(key, []).append((rel, lineno))

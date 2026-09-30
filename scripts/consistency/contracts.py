@@ -19,6 +19,7 @@ from scripts.consistency.common import (
     _resolve_seq,
     _resolve_str,
     _safe_parse,
+    _walked_nodes,
 )
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ def check_env_keys(root: Path) -> list[Hit]:
             continue
         consts = _module_level_literal_consts(tree)
         rel = path.relative_to(root).as_posix()
-        for node in ast.walk(tree):
+        for node in _walked_nodes(path):
             if not isinstance(node, ast.Subscript | ast.Call):
                 continue
             key = _extract_environ_key(node, consts)
@@ -88,7 +89,7 @@ def check_feature_flags(root: Path) -> list[Hit]:
             continue
         consts = _module_level_literal_consts(tree)
         rel = path.relative_to(root).as_posix()
-        for node in ast.walk(tree):
+        for node in _walked_nodes(path):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)

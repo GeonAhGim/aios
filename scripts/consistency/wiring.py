@@ -16,6 +16,7 @@ from scripts.consistency.common import (
     _iter_py_files,
     _ratchet_allow_reason,
     _safe_parse,
+    _walked_nodes,
 )
 
 # ---------------------------------------------------------------------------
@@ -163,10 +164,7 @@ def _abstract_methods_of(node: ast.ClassDef) -> frozenset[str]:
 def _collect_abc_ports(files: list[Path]) -> dict[str, frozenset[str]]:
     ports: dict[str, frozenset[str]] = {}
     for path in files:
-        tree = _safe_parse(path)
-        if tree is None:
-            continue
-        for node in ast.walk(tree):
+        for node in _walked_nodes(path):
             if not isinstance(node, ast.ClassDef):
                 continue
             base_names = {_callee_name(b) for b in node.bases}
@@ -317,7 +315,7 @@ def check_port_implementations(root: Path) -> list[Hit]:
         if tree is None:
             continue
         rel = path.relative_to(root).as_posix()
-        for node in ast.walk(tree):
+        for node in _walked_nodes(path):
             if isinstance(node, ast.ClassDef):
                 hits.extend(_port_class_hits(node, ports, rel, path, tree, module_index))
     return hits

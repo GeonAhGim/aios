@@ -73,6 +73,23 @@ def _safe_parse(path: Path) -> ast.Module | None:
         return None
 
 
+@cache
+def _walked_nodes(path: Path) -> tuple[ast.AST, ...]:
+    # naive_datetime/money_float/symbol_id_assembly/authority_duplication
+    # (time_money.py), env_key/feature_flag (contracts.py) and
+    # port_method_unimplemented (wiring.py) each ran their own full
+    # `ast.walk(tree)` over every "src" file -- 8 independent BFS walks of the
+    # same ~1,600 files per run. Profiling esc-ci-consistency's recurring
+    # 120s-timeout locally showed ast.walk/iter_child_nodes as the dominant
+    # cost once file I/O was already deduped by _safe_parse/_read_text_cached
+    # (task-8949). Walking once per file and caching the flattened node list
+    # lets every later check reuse it instead of re-walking the same tree.
+    tree = _safe_parse(path)
+    if tree is None:
+        return ()
+    return tuple(ast.walk(tree))
+
+
 def _prime_py_file_cache(root: Path, subdir: str) -> None:
     """`subdir` 아래 모든 `.py` 파일을 스레드로 겹쳐 읽어 `_safe_parse`/
     `_read_text_cached` 캐시를 미리 채운다.
