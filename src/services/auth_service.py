@@ -24,6 +24,7 @@ PLT-22 연동 — 로그인 실패 카운터 증가는 `src/services/auth/lockou
 아직 이관되지 않아(§9 PLT-24) 지금은 AuthError 서브클래스로 기존 401
 매핑을 그대로 탄다.
 """
+
 from __future__ import annotations
 
 import re
@@ -191,7 +192,9 @@ class AuthService:
                 # 비밀번호/TOTP 값은 절대 기록하지 않는다 — 시도한 이메일과
                 # 결과 사유만 남긴다(계정이 없어 user_id 자체가 없음).
                 await record_audit_log(
-                    conn, actor_agent="unknown", action_type="auth.login_failed",
+                    conn,
+                    actor_agent="unknown",
+                    action_type="auth.login_failed",
                     decision_data={"email": email, "reason": "account_not_found"},
                 )
                 raise AuthError(_GENERIC_AUTH_ERROR)
@@ -199,10 +202,13 @@ class AuthService:
             if row["status"] in ("SUSPENDED", "DELETED"):
                 _consume_verify_timing(password)
                 await record_audit_log(
-                    conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
+                    conn,
+                    actor_agent=str(row["user_id"]),
+                    action_type="auth.login_failed",
                     user_id=row["user_id"],
                     decision_data={
-                        "reason": "account_suspended_or_deleted", "status": row["status"]
+                        "reason": "account_suspended_or_deleted",
+                        "status": row["status"],
                     },
                 )
                 raise AuthError(_GENERIC_AUTH_ERROR)
@@ -210,8 +216,11 @@ class AuthService:
             if row["locked_until"] is not None and now < row["locked_until"]:
                 _consume_verify_timing(password)
                 await record_audit_log(
-                    conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
-                    user_id=row["user_id"], decision_data={"reason": "account_locked"},
+                    conn,
+                    actor_agent=str(row["user_id"]),
+                    action_type="auth.login_failed",
+                    user_id=row["user_id"],
+                    decision_data={"reason": "account_locked"},
                 )
                 locked_state = await lockout.register_failed_attempt(conn, row["user_id"], now=now)
                 raise AccountLockedError(locked_state.retry_after_seconds)
@@ -220,8 +229,11 @@ class AuthService:
                 _hasher.verify(row["password_hash"], password)
             except VerifyMismatchError:
                 await record_audit_log(
-                    conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
-                    user_id=row["user_id"], decision_data={"reason": "wrong_password"},
+                    conn,
+                    actor_agent=str(row["user_id"]),
+                    action_type="auth.login_failed",
+                    user_id=row["user_id"],
+                    decision_data={"reason": "wrong_password"},
                 )
                 raise await self._fail_login(conn, row["user_id"], now) from None
 
@@ -234,36 +246,69 @@ class AuthService:
                 )
                 if not totp_ok:
                     await record_audit_log(
-                        conn, actor_agent=str(row["user_id"]), action_type="auth.login_failed",
-                        user_id=row["user_id"], decision_data={"reason": "mfa_failed"},
+                        conn,
+                        actor_agent=str(row["user_id"]),
+                        action_type="auth.login_failed",
+                        user_id=row["user_id"],
+                        decision_data={"reason": "mfa_failed"},
                     )
                     raise await self._fail_login(conn, row["user_id"], now)
                 totp_verified_now = True
 
-            await record_audit_log(
-                conn, actor_agent=str(row["user_id"]), action_type="auth.login_success",
-                user_id=row["user_id"], decision_data={"mfa_verified_now": totp_verified_now},
-            )
-
             cancels_deletion = row["status"] == "PENDING_DELETION"
             if cancels_deletion:
-                await conn.execute(
+                success_row = await conn.fetchrow(
                     "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, "
                     "last_login_at = now(), status = 'ACTIVE', deletion_requested_at = NULL, "
                     "mfa_verified_at = CASE WHEN $2 THEN now() ELSE mfa_verified_at END "
-                    "WHERE user_id = $1",
+                    "WHERE user_id = $1 "
+                    "AND (locked_until IS NULL OR locked_until <= clock_timestamp()) "
+                    "RETURNING user_id",
                     row["user_id"],
                     totp_verified_now,
                 )
             else:
-                await conn.execute(
+                success_row = await conn.fetchrow(
                     "UPDATE users SET failed_login_attempts = 0, locked_until = NULL, "
                     "last_login_at = now(), "
                     "mfa_verified_at = CASE WHEN $2 THEN now() ELSE mfa_verified_at END "
-                    "WHERE user_id = $1",
+                    "WHERE user_id = $1 "
+                    "AND (locked_until IS NULL OR locked_until <= clock_timestamp()) "
+                    "RETURNING user_id",
                     row["user_id"],
                     totp_verified_now,
                 )
+
+            if success_row is None:
+                # standard-105 conditional UPDATE: if a separate connection
+                # committed 5 failures and set the lock after the initial
+                # SELECT, this UPDATE's WHERE (re-checking locked_until)
+                # matches 0 rows even though the password is correct — refetch
+                # the latest lock state and reject (AUDIT_2026-09-30_auth_rls.md
+                # F2 fix; not a wrong-credentials case, a lockout race).
+                lock_row = await conn.fetchrow(
+                    "SELECT locked_until, clock_timestamp() AS server_now "
+                    "FROM users WHERE user_id = $1",
+                    row["user_id"],
+                )
+                await record_audit_log(
+                    conn,
+                    actor_agent=str(row["user_id"]),
+                    action_type="auth.login_failed",
+                    user_id=row["user_id"],
+                    decision_data={"reason": "account_locked_race"},
+                )
+                raise AccountLockedError(
+                    lockout.retry_after_seconds(lock_row["locked_until"], lock_row["server_now"])
+                )
+
+            await record_audit_log(
+                conn,
+                actor_agent=str(row["user_id"]),
+                action_type="auth.login_success",
+                user_id=row["user_id"],
+                decision_data={"mfa_verified_now": totp_verified_now},
+            )
         final_status = "ACTIVE" if cancels_deletion else row["status"]
         final_mfa_verified_at = now if totp_verified_now else row["mfa_verified_at"]
         return _row_to_user(
@@ -288,7 +333,9 @@ class AuthService:
             # 실패 시도 자체와는 별개의 이벤트 — 잠금이 "지금 막 걸렸다"는
             # 사실 자체가 운영자에게 알림/모니터링 대상이 되는 신호다.
             await record_audit_log(
-                conn, actor_agent=str(user_id), action_type="auth.account_locked",
+                conn,
+                actor_agent=str(user_id),
+                action_type="auth.account_locked",
                 user_id=user_id,
                 decision_data={
                     "failed_attempts": state.failed_attempts,

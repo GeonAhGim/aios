@@ -171,6 +171,63 @@ async def test_successful_login_resets_failed_attempts_and_lock(auth, pool):
     assert row["locked_until"] is None
 
 
+# --- F2 정정(task-9448): 성공 UPDATE가 최신 잠금 상태를 재검증하는지 -------
+
+
+async def test_success_login_update_rejects_when_concurrent_failures_lock_first(
+    auth, pool, monkeypatch
+):
+    """감사 재현(AUDIT_2026-09-30_auth_rls.md F2, tier M): 성공 로그인이
+    SELECT + 비밀번호 검증까지 마친 뒤(barrier), 그 사이 별도 연결에서
+    실패 5회가 먼저 커밋되어 계정을 잠그면, 성공 UPDATE는 최신
+    locked_until을 조건으로 재검증해 거부해야 한다 — 무조건 해제하면
+    (정정 전 결함) 비밀번호가 맞다는 이유만으로 방금 막 성립된 잠금을
+    뚫고 로그인이 성공해버린다. 비밀번호는 올바르다 — 이 테스트는
+    무자격 로그인 증명이 아니라 barrier 뒤 정책(잠금) 경합 증명이다."""
+    email, user_id = await _signed_up_user_id(auth, pool)
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def _paused_fetchrow(self, query, *args, **kwargs):
+        if "locked_until = NULL" in query and "RETURNING user_id" in query:
+            started.set()
+            await release.wait()
+        return await original_fetchrow(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _paused_fetchrow)
+
+    success_task = asyncio.create_task(auth.authenticate(email, STRONG_PASSWORD))
+    await started.wait()
+
+    for _ in range(lockout.MAX_FAILED_ATTEMPTS):
+        with pytest.raises(AuthError):
+            await auth.authenticate(email, "WrongPassword1!")
+
+    async with pool.acquire() as conn:
+        locked_until = await conn.fetchval(
+            "SELECT locked_until FROM users WHERE user_id = $1", user_id
+        )
+    assert locked_until is not None, "5회 실패 후 잠금이 먼저 성립해 있어야 한다"
+
+    release.set()
+
+    with pytest.raises(AccountLockedError) as exc_info:
+        await success_task
+    assert exc_info.value.retry_after_seconds is not None
+    assert exc_info.value.retry_after_seconds > 0
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT failed_login_attempts, locked_until FROM users WHERE user_id = $1", user_id
+        )
+    # 성공 UPDATE가 거부됐으므로 잠금 성립 시점의 카운터/잠금이 그대로
+    # 남아야 한다 — barrier 뒤 성공 경로가 조용히 해제하지 않았음을 증명.
+    assert row["failed_login_attempts"] == lockout.MAX_FAILED_ATTEMPTS
+    assert row["locked_until"] is not None
+
+
 # --- 순수 함수 retry_after_seconds — 경계값 ---------------------------------
 
 
