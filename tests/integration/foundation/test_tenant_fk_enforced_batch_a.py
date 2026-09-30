@@ -69,6 +69,48 @@ async def test_account_connection_insert_with_nonexistent_tenant_id_raises_fk_vi
             )
 
 
+async def _insert_account_connection(pool: asyncpg.Pool, tenant_id: object, ref: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO account_connection
+                (tenant_id, owner_subject_id, provider_code, opaque_account_ref,
+                 capability_profile)
+            VALUES ($1, $1, 'fake-broker', $2, ARRAY['READ_BALANCE'])
+            """,
+            tenant_id,
+            ref,
+        )
+
+
+async def test_account_connection_insert_with_null_tenant_id_raises_not_null_violation(pool):
+    # negative 3번째 케이스 — account_connection.tenant_id는 NOT NULL이다
+    # (foundation_audit_event와 달리 system 이벤트 예외가 없다). FK
+    # 위반뿐 아니라 이 불변식도 실DB에서 실제로 거부되는지 확인한다.
+    with pytest.raises(asyncpg.NotNullViolationError):
+        await _insert_account_connection(pool, None, "ACCT-null-tenant")
+
+
+async def test_account_connection_insert_propagates_pool_acquire_failure():
+    # 실패주입 — DB 연결 자체가 끊긴 경우(pool 소진/네트워크 단절 등)에도
+    # 삽입 경로가 예외를 삼키지 않고 그대로 전파하는지 확인한다. §3의
+    # fail-closed 기본 정책상, FK/NOT NULL 위반이 아닌 하위 의존성 실패는
+    # 조용히 무시되거나 다른 예외로 둔갑해서는 안 된다.
+    class _FailingAcquire:
+        async def __aenter__(self):
+            raise asyncpg.exceptions.ConnectionDoesNotExistError("connection lost")
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+    class _FailingPool:
+        def acquire(self, *args, **kwargs):
+            return _FailingAcquire()
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await _insert_account_connection(_FailingPool(), uuid4(), "ACCT-conn-fail")
+
+
 async def test_account_connection_insert_with_existing_tenant_id_succeeds(pool):
     tenant_id = await create_test_tenant(pool)
 
