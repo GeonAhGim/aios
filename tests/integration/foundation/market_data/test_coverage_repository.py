@@ -218,10 +218,14 @@ async def test_upsert_span_unexpected_db_error_propagates_unmapped(pool, repo, m
 
 
 @pytest.mark.perf
+@pytest.mark.nightly
 async def test_list_spans_p95_latency_within_budget(pool, repo):
     """성능 단언: 커버리지 조회는 market_data 읽기 경로 예산(ADR-2026-09-09-C
     Decision 1, "5k봉 조회 p95 200ms")을 상한으로 삼는다 — coverage_spans는
-    캔들보다 훨씬 가벼운 행 수이므로 같은 예산 안에서 p95가 나와야 한다."""
+    캔들보다 훨씬 가벼운 행 수이므로 같은 예산 안에서 p95가 나워야 한다.
+
+    task-9249 추적(task-9629): perf 테스트는 CI 공유 환경에서 커버리지 측정 오버헤드로
+    인해 예상 소요 시간을 초과할 수 있으므로 nightly로 표시하여 기본 실행에서 제외한다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
     base = datetime.now(timezone.utc) - timedelta(days=400)
