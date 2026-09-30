@@ -1138,6 +1138,30 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     ratio-floor relief made (DECISION_GUIDELINES B-2) — the ratchet design is sound; the remaining
     defect is fleet code, not this repo.
 
+45. A fifth `code_ratchets` `[health:ci_red_systemic]` leaf (task-9585, split 3/3 of task-9582)
+    citing the identical repeat set #25/#38 already closed twice — task-9010, task-9069,
+    task-9252, task-9459. `scripts/check_code_ratchets.py`/`code-ratchets-baseline.json` are
+    unchanged since task-9010's fix (commit `195b36a8`): a local run on this worktree (HEAD
+    `1e361e33`, `git status` clean) prints `OK` and matches baseline exactly on all 5 metrics
+    (`skip_xfail=3 todo_fixme_xxx=0 not_implemented_error=27 loc_over_500=42 loc_over_800=3
+    loc_over_1000=0`). `esc-ci-code_ratchets.json` itself confirms the mechanism directly:
+    `status: "resolved"`, `resolved_sha: "0871f0422b1077560390c572ba866157ee0d7d83"`,
+    `closed_at: "2026-09-30T02:22:23+00:00"`, `owner.leaf_ids: [9459]` — yet its `auto_actions`
+    log (68 entries) kept appending `"3x-repeat CI red"` every 15-25 min all the way through
+    `2026-09-30T12:09:43+00:00`, nearly 10 hours after the escalation's own `closed_at`, with no
+    further fix task created in that window (the last real fix, task-9459, already closed noop
+    citing the stale-escalation pattern). This is the identical fleet-code defect already named
+    eleven times (#17-#26, #30-#31, #33-#36, #38, #40): `pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule not checking `status == "resolved"` before appending further repeat-count
+    entries against an already-closed escalation, out of a repo worker's edit scope (§4). No
+    script/baseline change made — task-9010's fix and task-9145's `--near` early-warning tool
+    (#12/#25) are both still in place and sufficient. Before working a future `code_ratchets`
+    leaf: run `python scripts/check_code_ratchets.py` locally first — if `OK` and
+    baseline-matching, and the escalation's cited repeat set matches an already-closed leaf
+    verbatim (task-9010, #25, #38, or this entry), close as noop citing them rather than
+    re-diagnosing. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/baseline
+    design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
