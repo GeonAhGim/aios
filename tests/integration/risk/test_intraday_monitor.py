@@ -451,8 +451,15 @@ async def test_recon_mismatch_breach_creates_signal_only_never_triggers_pause(
     pool, signal_repo, kill_switch_service
 ):
     """negative test -- §9 설계 결정: RECON_MISMATCH는 signal만 남기고 PAUSE를
-    만들지 않는다(§6 473행이 이미 symbol-level DENY로 처리). `_PAUSE_SCOPE`에
-    실수로 RECON_MISMATCH가 추가되는 회귀를 이 테스트가 잡는다."""
+    만들지 않는다. `_PAUSE_SCOPE`에 실수로 RECON_MISMATCH가 추가되는 회귀를
+    이 테스트가 잡는다.
+
+    task-9066(감사 F5) 확인 결과: §6 473행이 주장하는 "symbol-level DENY로
+    이미 처리된다"는 이 저장소 어디에도 실제로 배선돼 있지 않다(전체 grep
+    결과 RECON_MISMATCH의 유일한 소비자는 이 모듈 자신의 insert뿐).
+    `AccountMetrics`도 symbol 필드가 없어 애초에 심볼단위 사실을 표현할 수
+    없다 -- 이 모듈의 파일 범위를 벗어나는 별도 아키텍처 리프가 필요한
+    확인된 결함으로 기록한다(모듈 docstring 참조)."""
     tenant_id = await create_test_tenant(pool)
     metrics = _metrics(tenant_id, str(tenant_id), recon_mismatch=True)
     spy = mock.AsyncMock(wraps=kill_switch_service.activate)

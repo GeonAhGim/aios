@@ -18,9 +18,26 @@ Design decisions the spec leaves open (this leaf's judgment calls):
   so it is not guessed at.
 - Only DRAWDOWN/STALE_DATA (scope=ACCOUNT) and PROVIDER_OUTAGE
   (scope=PROVIDER) trigger a PAUSE control (spec §9 line 559 "stale ->
-  PAUSE ACCOUNT control"). RECON_MISMATCH is signal-only -- §6 line 473
-  already routes that failure through a symbol-level DENY, and its
-  stated recovery path is "reconcile confirmed", not a PAUSE.
+  PAUSE ACCOUNT control"). RECON_MISMATCH is signal-only here on
+  purpose -- its stated recovery path (spec §6 line 473) is "reconcile
+  confirmed", not a PAUSE, so this module never attaches a kill-switch
+  control to it.
+  CONFIRMED GAP (audit F5, task-9066): §6 line 473's claim that
+  RECON_MISMATCH "already routes to a symbol-level DENY" elsewhere does
+  not hold -- a full-repo trace found no reader of the `risk_signal`
+  RECON_MISMATCH row anywhere (`grep -rn RECON_MISMATCH src` only shows
+  this file's own insert, the CHECK-constraint migration, and the enum
+  member). The one symbol-scoped DENY gate that does exist,
+  `evaluate_pre_submit._compose`'s `_DISTRUST_DENY_LEVELS` check, reads
+  `data_distrust_state` (the DISTRUST signal, driven by
+  `services/safety/distrust_wiring.py` comparing reference market-data
+  quotes) -- an unrelated mechanism, not order-reconcile SENT_UNKNOWN.
+  `AccountMetrics` also carries no `symbol` field (only `account_ref`),
+  so this module cannot represent a symbol-scoped fact even if it
+  wanted to. Wiring the real "SENT_UNKNOWN -> symbol DENY" path needs a
+  new leaf that touches `evaluate_pre_submit.py`/`RiskGateRepository`
+  and the OMS reconcile path (`unknown_resolver.py` et al.) -- out of
+  this leaf's file scope, tracked for PM decision.
 - The PAUSE control's `actor_subject_id` is `metrics.tenant_id` --
   `KillSwitchService.activate`'s own docstring establishes "every
   caller uses tenant_id == actor_subject_id" as this codebase's
@@ -38,6 +55,7 @@ Design decisions the spec leaves open (this leaf's judgment calls):
   `KillSwitchService._fan_out` already applies) -- the `risk_signal`
   row is already committed even if the pause itself fails.
 """
+
 from __future__ import annotations
 
 import logging
