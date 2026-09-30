@@ -4,6 +4,7 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md
 §8 통합 — 서로 다른 owner_id 동시 acquire는 정확히 1개만 성공, 만료 후
 재획득은 fencing_token +1, 동일 소유자 갱신은 토큰 불변. §7 — 배치는
 1회 왕복으로 끝나야 한다."""
+
 from __future__ import annotations
 
 import asyncio
@@ -171,4 +172,38 @@ async def test_unknown_execution_id_raises_fk_violation_for_whole_batch(pool, ex
         await repo.acquire_or_renew_many(
             [execution_id, 10**12], owner_id=_owner_id(), ttl_seconds=30
         )
+    assert await _fetch_lease(pool, execution_id) is None
+
+
+async def test_null_owner_id_rejected_by_not_null_constraint(pool, execution_id):
+    # execution_leases.owner_id는 NOT NULL(d0ff9ff2ec9c) — 리스 소유자를
+    # 특정할 수 없는 행이 저장되는 상태는 불변식 위반이므로 DB가 거부해야 한다.
+    repo = PostgresExecutionLeaseRepository(pool)
+    with pytest.raises(asyncpg.NotNullViolationError):
+        await repo.acquire_or_renew_many([execution_id], owner_id=None, ttl_seconds=30)
+    assert await _fetch_lease(pool, execution_id) is None
+
+
+async def test_non_numeric_ttl_seconds_rejected(pool, execution_id):
+    # ttl_seconds는 `$3 * interval '1 second'`로 바인딩된다 — 숫자로 변환할
+    # 수 없는 값은 리스를 절대 만들지 않고 거부돼야 한다(fail-closed).
+    repo = PostgresExecutionLeaseRepository(pool)
+    with pytest.raises((asyncpg.DataError, asyncpg.PostgresSyntaxError, TypeError)):
+        await repo.acquire_or_renew_many(
+            [execution_id], owner_id=_owner_id(), ttl_seconds="not-a-number"
+        )
+    assert await _fetch_lease(pool, execution_id) is None
+
+
+async def test_acquire_propagates_connection_failure_without_swallowing(pool, execution_id):
+    # 의존성(asyncpg 커넥션) 장애 시 조용히 삼키지 않고 그대로 전파해야
+    # 호출자(EO-03 스케줄러)가 이번 tick을 건너뛰지 않고 실패로 인지한다.
+    repo = PostgresExecutionLeaseRepository(pool)
+
+    async def raising_fetch(self, *args, **kwargs):
+        raise asyncpg.ConnectionDoesNotExistError("simulated connection loss")
+
+    with mock.patch.object(asyncpg.Connection, "fetch", raising_fetch):
+        with pytest.raises(asyncpg.ConnectionDoesNotExistError):
+            await repo.acquire_or_renew_many([execution_id], owner_id=_owner_id(), ttl_seconds=30)
     assert await _fetch_lease(pool, execution_id) is None
