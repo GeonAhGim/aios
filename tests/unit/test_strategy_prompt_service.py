@@ -1,7 +1,10 @@
 """FD-14.2 단위테스트 — 자연어 프롬프트 전략 생성(현재 비활성화 상태)."""
 
+import time
+
 import pytest
 
+from src.services import strategy_prompt_service as strategy_prompt_service_module
 from src.services.strategy_prompt_service import (
     PromptGenerationUnavailableError,
     StrategyPromptService,
@@ -68,3 +71,38 @@ async def test_multiple_calls_all_raise_unavailable():
     for _ in range(3):
         with pytest.raises(PromptGenerationUnavailableError):
             await service.generate("different prompt each time")
+
+
+async def test_generate_propagates_unexpected_exception_from_dependency(monkeypatch):
+    """실패주입: 예외 생성 경로 자체가 깨져도(RuntimeError) fail-closed로
+    전파되어야 한다 — PromptGenerationUnavailableError로 위장해 삼키면 안 된다."""
+
+    def _broken_init(self, *args, **kwargs):
+        raise RuntimeError("injected dependency failure")
+
+    monkeypatch.setattr(
+        strategy_prompt_service_module.PromptGenerationUnavailableError,
+        "__init__",
+        _broken_init,
+    )
+    service = StrategyPromptService()
+
+    with pytest.raises(RuntimeError, match="injected dependency failure"):
+        await service.generate("실패주입 테스트")
+
+
+async def test_generate_p95_latency_within_budget():
+    """성능단언: generate()는 의존성 호출 없이 즉시 예외를 발생시키므로
+    p95 지연은 10ms 예산 이내여야 한다 (ADR-2026-09-09-C 결정1 준용)."""
+    service = StrategyPromptService()
+    samples = []
+
+    for _ in range(50):
+        start = time.perf_counter()
+        with pytest.raises(PromptGenerationUnavailableError):
+            await service.generate("성능 측정용 프롬프트")
+        samples.append(time.perf_counter() - start)
+
+    samples.sort()
+    p95 = samples[int(len(samples) * 0.95) - 1]
+    assert p95 < 0.01, f"p95 latency {p95:.4f}s exceeded 10ms budget"
