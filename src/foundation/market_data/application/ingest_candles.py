@@ -186,7 +186,8 @@ async def ingest_candles(
         instrument = await refs.get_instrument(read_conn, cmd.venue, lookup_symbol, now)
         if instrument is None:
             raise SymbolUnknownError(
-                f"Reference data not found: venue={cmd.venue.value} canonical={cmd.canonical_symbol!r}"
+                f"Reference data not found: venue={cmd.venue.value} "
+                f"canonical={cmd.canonical_symbol!r}"
             )
         if instrument.status in _NOT_TRADABLE:
             raise SymbolNotTradableError(
