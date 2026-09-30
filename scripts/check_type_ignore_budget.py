@@ -10,10 +10,12 @@ DB 접속·모듈 import 없이 텍스트 스캔만 하므로 어떤 실행 환�
 사용: `python scripts/check_type_ignore_budget.py` (저장소 루트에서).
 종료코드 0=통과(예산 이내), 1=예산 초과 또는 입력 오류.
 """
+
 from __future__ import annotations
 
 import argparse
 import io
+import os
 import re
 import sys
 import tokenize
@@ -26,12 +28,18 @@ _IGNORE_COMMENT_RE = re.compile(r"#\s*type:\s*ignore\b")
 
 # scripts/coverage_ratchet.py와 동일한 판단 — 실행 산출물·의존성 디렉터리는
 # 소스가 아니므로 스캔 대상에서 제외한다.
+# 2026-09-30(task-9014, esc-ci-type_ignore timeout 180s): check_zone_manifest.py의
+# 2026-09-26/09-29 결함과 동일 — rglob("*.py")는 제외 디렉터리도 전부 걸어 내려간
+# 뒤에야 필터링해, local_ci의 누적 캐시(.hypothesis/.mypy_cache 등, 관측:
+# .mypy_cache 115MB)에서 부하 시 180s를 넘겼다. os.walk로 내려가면서 제외
+# 디렉터리는 아예 들어가지 않도록 바꾸고, 빠졌던 .hypothesis도 추가한다.
 _EXCLUDE_DIR_NAMES = frozenset(
     {
         ".git",
         ".venv",
         "venv",
         "__pycache__",
+        ".hypothesis",
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
@@ -47,11 +55,11 @@ class TypeIgnoreBudgetError(ValueError):
 
 
 def _iter_python_files(root: Path) -> list[Path]:
-    return [
-        path
-        for path in root.rglob("*.py")
-        if not _EXCLUDE_DIR_NAMES & set(path.relative_to(root).parts[:-1])
-    ]
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDE_DIR_NAMES]
+        out.extend(Path(dirpath) / f for f in filenames if f.endswith(".py"))
+    return out
 
 
 def _count_ignore_comments(text: str) -> int:
