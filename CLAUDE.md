@@ -173,6 +173,31 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     it; if it's a budget increase, look for a D2/D3 negative-test leaf in the same window before
     assuming a fresh design defect, and prefer the `dict[str, Any]` unpack pattern over adding a new
     ignore. Budget/threshold relief is still forbidden either way (DECISION_GUIDELINES B-2).
+15. Treating every `ruff` `[health:ci_red]` correction leaf as a fresh violation to hunt down —
+    task-8993 flagged the `ruff` stage at 4+ leaves in 24h (task-8718, 8766, 8799, 9157) and
+    `pyproject.toml`'s `[tool.ruff]`/`per-file-ignores` config has no defect: a plain
+    `ruff check src tests scripts` on a synced worktree is green (`All checks passed!`). The
+    `ruff` gate name is unlike `type_ignore`/`code_ratchets` (one narrow metric each) — it's a
+    single CI step wrapping ~15 active rule categories (F401, E501, S1xx, BLE001, ARG00x, TID251,
+    PLW1510, ...) across the entire `src/`+`tests/`+`scripts/` tree, so unrelated one-line
+    regressions from otherwise-unrelated leaves land under the same stage name and look like
+    "repetition" in the 24h counter even when no two leaves touch the same rule or file. Three of
+    the four sampled leaves (task-8718, 8766, and 9157) turned out to already be fixed by an
+    earlier commit by the time they were picked up — task-8718's own note confirms the unused
+    `datetime` import in `tests/foundation/integration/ems/__init__.py` was gone as of
+    `7a857ce3` (task-8490) before task-8718 started; task-9157's flagged line
+    (`ingest_candles.py:189`, E501 103>100) was already rewrapped by task-9056's commit
+    `50c6a348` before task-9157 was assigned — the same journeys-style (#13) stale-escalation
+    pattern, just under the `ruff` gate name instead of Playwright's. task-8799's recorded commit
+    (`2d1c48bd6201`) is also a mismatch — that hash is actually task-8758's unrelated
+    `type_ignore` fix, not an F401 fix, meaning the task's `commit` field was filled from a stale
+    HEAD at push time rather than the leaf's own (empty) diff; harmless here since the note
+    correctly says "커밋/푸시 불필요", but a reminder that `commit` on a noop-done ruff leaf isn't
+    proof of a matching source change. Before filing or working a new `ruff` correction leaf: run
+    `ruff check <the exact path:line from the esc detail>` first — if it's already clean, the
+    worktree (or the escalation) is just behind an already-landed fix, and the leaf should close
+    as `noop` with that ancestor commit cited, not re-fix code that's already fixed. No baseline/
+    rule relief made (DECISION_GUIDELINES B-2) — none was warranted.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
