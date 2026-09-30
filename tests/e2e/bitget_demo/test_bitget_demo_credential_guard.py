@@ -15,12 +15,15 @@ without_a_live_pass_on_record`는 이 규칙을 어기고 값만 올린 커밋�
 done으로 표기"와 같은 종류의 사고(여기서는 검증 없이 verified만 올리는
 사고)를 이 leaf 안에서 재현·차단한다.
 """
+
 from __future__ import annotations
 
 import pytest
 
+from src.exchanges.bitget.adapter import BitgetAdapter
 from src.exchanges.bitget.venue_profile import BITGET_SPOT_PROFILE
 from tests.e2e.bitget_demo.conftest import CREDENTIAL_ENV_VARS, missing_demo_credentials
+from tests.support.bitget_demo_credentials import skip_if_missing_demo_credentials
 
 
 def test_missing_all_credentials_reports_every_variable_name(
@@ -56,6 +59,77 @@ def test_all_credentials_present_reports_no_missing(monkeypatch: pytest.MonkeyPa
         monkeypatch.setenv(name, "aios-test-only-value")
 
     assert missing_demo_credentials() == []
+
+
+def test_empty_string_credential_still_reports_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative — 빈 문자열("")로 세팅된 환경변수는 "설정됨"이 아니라
+    누락으로 잡혀야 한다. 셸 스크립트나 CI 시크릿 주입이 값 없이 변수만
+    선언하는 사고(`export BITGET_DEMO_API_KEY=`)가 나면, falsy 체크가
+    아니라 `is None` 같은 존재 여부만 보는 구현이었다면 빈 문자열을
+    "준비됨"으로 잘못 통과시켜 실서명 요청이 빈 키로 나갈 수 있다."""
+    key, secret, passphrase = CREDENTIAL_ENV_VARS
+    monkeypatch.setenv(key, "")
+    monkeypatch.setenv(secret, "aios-test-only-secret")
+    monkeypatch.setenv(passphrase, "aios-test-only-passphrase")
+
+    missing = missing_demo_credentials()
+
+    assert missing == [key]
+
+
+def test_skip_if_missing_demo_credentials_raises_skip_without_leaking_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative — 크리덴셜이 없으면 `skip_if_missing_demo_credentials()`는
+    반드시 `pytest.skip`으로 중단해야 하고(조용히 통과해서는 안 됨), skip
+    사유 메시지는 변수 이름만 담아야지 값을 담아서는 안 된다(redaction
+    원칙, conftest.py 주석 §16-18)."""
+    key, secret, passphrase = CREDENTIAL_ENV_VARS
+    monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(secret, "aios-test-only-secret-value")
+    monkeypatch.setenv(passphrase, "aios-test-only-passphrase-value")
+
+    try:
+        skip_if_missing_demo_credentials()
+    except BaseException as exc:  # noqa: BLE001 — pytest's skip outcome is a BaseException
+        raised = exc
+    else:
+        pytest.fail("skip_if_missing_demo_credentials() did not stop execution")
+
+    assert type(raised).__name__ == "Skipped"
+    message = str(raised)
+    assert key in message
+    assert "aios-test-only-secret-value" not in message
+    assert "aios-test-only-passphrase-value" not in message
+
+
+def test_adapter_construction_propagates_http_client_init_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패주입 — 크리덴셜 가드(`missing_demo_credentials`)를 통과한 뒤에도
+    `BitgetAdapter`가 의존하는 `httpx.AsyncClient` 초기화 자체가 실패하면
+    그 예외는 그대로 전파되어야 한다(fail-closed 기본 정책, CLAUDE.md §3).
+    삼켜서 절반만 초기화된 어댑터를 "준비됨"으로 계속 진행시키면 이후
+    demo_adapter 픽스처를 쓰는 왕복 테스트가 검증 안 된 클라이언트로
+    서명 요청을 보내는 사고로 이어진다."""
+    for name in CREDENTIAL_ENV_VARS:
+        monkeypatch.setenv(name, "aios-test-only-value")
+    assert missing_demo_credentials() == []
+
+    def _raise_on_init(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated http client init failure")
+
+    monkeypatch.setattr("src.exchanges.bitget.adapter.httpx.AsyncClient", _raise_on_init)
+
+    with pytest.raises(RuntimeError, match="simulated http client init failure"):
+        BitgetAdapter(
+            "aios-test-only-value",
+            "aios-test-only-value",
+            "aios-test-only-value",
+            demo_mode=True,
+        )
 
 
 def test_verified_flag_stays_doc_only_without_a_live_pass_on_record() -> None:
