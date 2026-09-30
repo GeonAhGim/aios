@@ -1451,6 +1451,28 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     re-investigating a sixth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) —
     script/baseline design is sound and already fixed; the remaining defect is fleet code.
 
+57. A sixth `perf_marker_guard` `[health:ci_red_systemic]` leaf (task-9655) citing the identical
+    repeat set #19 (task-9289), #24 (task-9473), #36 (task-9538), #47 (task-9589), and #53
+    (task-9614) already closed five times — task-9655's spec names task-8932, task-9135,
+    task-9254, task-9463 verbatim, the same four leaves every prior systemic leaf already
+    resolved: task-9135 is the real design fix (60s budget re-tuned for I/O/parsing cost, commit
+    `23a9d9b4`), task-9138 added the missing `docs/TESTING.md` developer guidance (commit
+    `a2cafe7b`), and task-8932/task-9254 are noop closures citing that same fix with a local `OK`
+    rerun each. Reconfirmed on this worktree (`git status` clean, `git log --oneline -5 --
+    scripts/check_perf_marker_guard.py docs/TESTING.md` shows no commits since `23a9d9b4`/
+    `a2cafe7b`): `python scripts/check_perf_marker_guard.py` prints `OK` in well under the 60s
+    budget. No script/docs change made — this is the same fleet-code pattern named thirteen+
+    times (#17-#26, #30-#31, #33-#36, #38, #40, #47-#48, #50, #53): `pm/auto_decision.py`/
+    `orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off an already-resolved
+    `esc-ci-perf_marker_guard.json` snapshot instead of checking whether a prior systemic leaf
+    (task-9138, #19, #24, #36, #47, #53) already closed the identical question, out of a repo
+    worker's edit scope (§4). Before working a future `perf_marker_guard` leaf: run the script
+    locally first; if `OK`, and the cited repeat leaf ids match an already-closed systemic leaf's
+    set (task-9138, #19, #24, #36, #47, #53, or this entry), close as noop citing all of them
+    rather than re-investigating a seventh time. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2) — script/docs design is sound; the remaining defect is fleet code,
+    not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
