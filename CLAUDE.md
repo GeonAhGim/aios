@@ -234,6 +234,29 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     misclassification pattern, not a real defect; close it noop and cite this entry rather than
     reinvestigating the same innocent file again. No baseline/threshold/marker-list relief made
     from this leaf (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
+17. Re-bisecting a `type_ignore` escalation that has already been reverified green — task-8993's
+    counter reached 12 leaves in 24h for this stage (task-8920, 9014, 9070, 9113, 9136, 9140, 9255,
+    ...) and task-9140 (the 11th-repeat systemic investigation) already reverified the ratchet
+    itself sound (142/142, ~8s) and filed the two-failure-class breakdown that is now #14 above.
+    task-9261 (the 12th-repeat systemic leaf) re-ran that same investigation and found the design
+    still sound (142/142, ~18s) — the new evidence is in `esc-ci-type_ignore.json` itself:
+    task-9014, task-9136, and task-9255 were all created by the fleet's `ci_red` auto-action off
+    the *same* `detail_hash: "42ef1e7acc80"` and the same original bisect culprit
+    (`deacc374b0ed34d59cf2e4e0401ee053bd01127a`) recorded on 2026-09-22 — task-9255's own
+    noop_reason concluded that commit was never the actual regression, just a worktree that was one
+    `git pull` behind. task-9255 was created at 05:57, a full hour *after* task-9140's fix/doc
+    commit (`29cf3622`, 04:41) had already landed and been reverified green — so the repeat is not
+    new violations reaching the gate, it is the escalation/orchestrator `ci_red` rule creating (or
+    reusing, see the `"reused open fix task-9070"` action) another fix leaf off the stored
+    escalation record without re-running the stage's own check at current HEAD first. This is the
+    same class of defect as #13 (journeys)/#15 (ruff)/#16 (frontend): fleet code under `C:\aios\pm`
+    (`pm/auto_decision.py` / `orchestrator.py`'s `ci_red` rule) re-triggering a leaf from stale
+    state, out of a repo worker's edit scope (§4). Before working a new `type_ignore` leaf: run
+    `python scripts/check_type_ignore_budget.py` locally first (a few seconds) — if it prints `OK`,
+    close the leaf noop citing this entry and task-9140/task-9255 rather than re-bisecting the same
+    already-resolved `deacc374` commit again. No baseline/threshold relief made (DECISION_GUIDELINES
+    B-2) — the fix belongs to fleet code (re-run the check at current HEAD before opening/reusing a
+    `ci_red` fix task), not this repo.
 
 ## 7. File policy (ADR-2026-09-10-C)
 
