@@ -1057,6 +1057,52 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — task-9269's `RelativeBudget` migration is the actual fix and is
     already in place.
 
+43. `pytest_perf` 24h 4-repeat investigation (task-9552) — like `pytest`/`pytest_latency_serial`
+    (#28/#34/#40/#20/#29), there is no `scripts/check_pytest_perf.py`; `pytest_perf` is a
+    full-mode-only CI stage in `pm/ci_recheck.py:467-486` (`pytest -m "perf and not nightly and
+    not live_demo" -p no:xdist --cov-append --cov-report=xml`, 1800s budget, serial by design per
+    task-6775/6774 to avoid perf-marked wall-clock assertions racing the parallel default stage).
+    The 4 cited repeats (task-8934, task-9056, task-9287, task-9520) are four independent,
+    already-fixed/correctly-classified root causes, not four rounds of the same design gap:
+    task-8934 correctly classified shared-host DB migration/reset wall-clock contention as noop
+    (no code change, per DECISION_GUIDELINES B-2 — same class as task-8933 in #28); task-9056
+    found a real regression (a Korean->English docstring translation, task-9071, widened an
+    f-string in `ingest_candles.py` past ruff's 100-char E501 limit, which `pytest_perf`'s own
+    `test_ruff_check_repo_perf_budget` asserts against — fixed by rewrapping, commit `50c6a348`);
+    task-9287 found a real migration bug (`downgrade()` in a task-8890 revision unconditionally
+    raised `Em3ChildQtyBackfillIrreversibleError` regardless of whether backfill rows existed,
+    breaking a deep-downgrade round trip on an empty dev/test DB — fixed to check row existence
+    first, commit `7b31cd08`); task-9520 found a real collection-time regression (task-9224's
+    `loc_over_500` split renamed `test_pre_submit_gate.py`'s `_FakeConnectionRepo`/
+    `_RiskRepoWithFixedSafetyState` to `conftest.py`'s `FakeConnectionRepo`/
+    `RiskRepoWithFixedSafetyState` without updating two adversarial test files that imported the
+    old names, and `evaluate_pre_submit()` gained a new positional `signal_repo` argument the
+    adversarial tests' call sites didn't pass — fixed by updating both imports and call sites,
+    commit `65b85ff2`). All three real fixes are still in place: reconfirmed on this worktree
+    (HEAD `0ec16a56`, an ancestor-confirmed descendant of `7ad655e6`, the escalation's cited sha)
+    that `tests/adversarial/risk/test_decision_subject_reuse.py`/`test_trigger_execution_ref.py`
+    collect cleanly (36 tests, no `_FakeConnectionRepo` references remain in either file), and a
+    full `-m "perf and not nightly and not live_demo" --collect-only` run collects 636/14988 tests
+    with zero collection errors in ~91s. `esc-ci-pytest_perf.json` itself still shows
+    `status: "open"` (unlike most other gates' escalations by this point) because its `owner`
+    rule reassigned the follow-up fix leaf to task-9442 — which is titled `pm_pytest` (a
+    *different* stage, `C:\aios\pm`'s own test suite, not this repo's `pytest_perf`) and reports
+    an unrelated `fleet_deploy.py` timeout — an apparent owner-misassignment in
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule connecting a stage's escalation to a
+    fix task for a same-prefixed but distinct stage name; that mechanism is fleet code under
+    `C:\aios\pm`, out of a repo worker's edit scope (§4), and is a variant of the same
+    stale/mismatched-escalation-state pattern already named for eight other gates (#17-#26,
+    #30-#31, #33-#36, #38, #40). No script/baseline exists in this repo to relieve
+    (DECISION_GUIDELINES B-2 n/a) — `pytest_perf` has no shared design defect; each of the 4
+    repeats was an independent, already-fixed real bug or correctly-classified contention noop,
+    and the current HEAD is clean. Before working a future `pytest_perf` leaf: collect just the
+    stage's own test set (`pytest -m "perf and not nightly and not live_demo" --collect-only -q`)
+    and run the specific failing nodeid(s) from the stage tail in isolation first — if collection
+    is clean and the specific test(s) pass standalone, treat it as a fresh independent failure
+    needing its own root-cause (not a recurring design gap) unless the escalation's cited sha
+    predates one of the three commits above, in which case close as noop citing the matching
+    commit and this entry.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
