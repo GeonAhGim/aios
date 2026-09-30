@@ -291,6 +291,33 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     entry instead of re-tuning `SCAN_WORKERS` again. No baseline/timeout relief made from this
     leaf (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
 
+18. Treating every `complexity` `[health:ci_red_systemic]` correction leaf as still-unfixed
+    code — task-8993 flagged `complexity` at 4+ leaves in 24h (task-8653, task-8747, task-8844,
+    task-8887) and `scripts/check_complexity.py`/`complexity-baseline.json` have no design
+    defect: a plain `python scripts/check_complexity.py` on a synced worktree prints
+    `OK: {'over_cap_count': 9} (baseline {'over_cap_count': 9}, CAP=25)` — the ratchet, the CAP,
+    and the ast-based scorer all behave as specified. task-8653 was the real, correctly
+    diagnosed fix (split `okx_endpoint_coverage.py`'s `_pairs_from_file()` to bring
+    `over_cap_count` back to baseline, commit `098df234`, landed 2026-09-29T07:51:12Z). Every
+    leaf after that was the same journeys/ruff/frontend/type_ignore pattern (#13/#15/#16/#17)
+    repeating under the `complexity` gate name: task-8747's own note already says so verbatim
+    ("현재 HEAD/origin/main에서 게이트 green, 회귀 이미 해소됨", 09:38:19Z, commit `e5f5df7b`),
+    yet `esc-ci-complexity.json` kept reusing the same `detail_hash` (`8ec0d05e7688`, itself
+    from `sha 41c47310`) to spawn task-8844 (12:10Z) and task-8887 (14:23Z) — both closed noop,
+    both commit `none`/`None` — and then logged `"3x-repeat CI red"` on the *same* stale
+    escalation every ~15-30 min for the next ~17 hours (14:43Z through 07:07Z the next day)
+    without ever re-running the check at current HEAD or creating a further fix task. This is
+    the same class of defect as #13 (journeys) / #15 (ruff) / #16 (frontend) / #17
+    (type_ignore): fleet code under `C:\aios\pm` (`pm/auto_decision.py` / `orchestrator.py`'s
+    `ci_red` rule) re-triggering off a stale escalation record instead of re-checking current
+    HEAD, out of a repo worker's edit scope (§4). Before filing or working a new `complexity`
+    correction leaf: run `python scripts/check_complexity.py` locally first (a couple seconds)
+    — if it prints `OK` and matches baseline, close the leaf noop citing this entry and
+    task-8747 rather than re-diagnosing already-fixed violations. No baseline/CAP relief made
+    from this leaf (DECISION_GUIDELINES B-2) — the fix belongs to fleet code (re-run the check
+    at current HEAD before opening/reusing a `ci_red` fix task off `esc-ci-complexity.json`),
+    not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
