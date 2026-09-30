@@ -1,6 +1,6 @@
 """16.2 — Select execution exchange and mode (PAPER/LIVE) (ExecutionService.create_execution).
 
-Spec: 기능설계문서_v1.20.md#FD-16.2, 9.10, FD-10.1, FD-12, 06번 §6.1, 02번 §2.2
+Spec: FD-16.2, 9.10, FD-10.1, FD-12, Section 06 §6.1, Section 02 §2.2
 
 Zone boundary — This service only creates strategy_executions rows by specifying
 capital allocation, exchange, and mode. The logic for actually deciding "buy/sell"
