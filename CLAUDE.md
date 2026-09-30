@@ -1881,6 +1881,30 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     seventh time. No baseline/budget relief made (DECISION_GUIDELINES B-2) — task-9269's
     `RelativeBudget` migration is the actual fix and is already in place.
 
+74. An eighth `code_ratchets` `[health:ci_red_systemic]` leaf (task-9713, split 3/3 of parent
+    task-9710) citing the identical repeat set #25/#38/#45/#60/#67/#68/#70 already closed
+    seven times — task-9713's spec names task-9010, task-9069, task-9252, task-9459 verbatim,
+    the same four leaves every prior systemic leaf already resolved: task-9010 (commit
+    `195b36a8`) is the real fix that brought `loc_over_500`/`not_implemented_error` back to
+    baseline; task-9069/task-9252/task-9459 are all noop closures whose own notes already say
+    the escalation was stale. Reconfirmed on this worktree (`git status` clean, `git log
+    --oneline -3 -- scripts/check_code_ratchets.py code-ratchets-baseline.json` shows
+    task-9145's `--near` tool commit `5ff6858bf` as the latest touch, no commits since):
+    `python scripts/check_code_ratchets.py` prints `OK` and matches
+    `code-ratchets-baseline.json` exactly on all 5 metrics (`skip_xfail=3 todo_fixme_xxx=0
+    not_implemented_error=27 loc_over_500=42 loc_over_800=3 loc_over_1000=0`). No
+    script/baseline change made. This is the same fleet-code pattern named 16+ times
+    (#17-#26, #30-#31, #33-#36, #38, #40, #45, #48, #50, #53, #56, #60, #67-#68, #70): `pm/
+    auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf (in this
+    case even a same-parent sibling split) off an already-resolved escalation snapshot instead
+    of checking whether a prior systemic leaf already closed the identical question, out of a
+    repo worker's edit scope (§4). Before working a future `code_ratchets` leaf: run `python
+    scripts/check_code_ratchets.py` locally first — if `OK` and baseline-matching, and the
+    escalation's cited repeat set matches an already-closed leaf verbatim (task-9010, #25, #38,
+    #45, #60, #67-#68, #70, or this entry), close as noop citing them rather than re-diagnosing
+    an eighth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/
+    baseline design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
