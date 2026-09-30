@@ -3,6 +3,7 @@
 실제 Bitget/KIS Demo 키가 없어 캔들 조회는 FastAPI dependency_overrides로
 가짜 CredentialResolver를 주입해 검증한다(exchange_credentials 라우터
 테스트와 동일 패턴)."""
+
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -92,6 +93,19 @@ async def _register(client) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+_VALID_STRATEGY_BODY = {
+    "version": "1.0.0",
+    "target_asset": "BTC/USDT",
+    "market": "crypto",
+    "exchange": "bitget",
+    "entry_conditions": [{"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}],
+    "exit_conditions": [{"indicator": "RSI", "params": {}, "operator": ">", "threshold": 70}],
+    "stop_loss_conditions": [
+        {"indicator": "close", "params": {}, "operator": "<", "threshold": 90}
+    ],
+}
+
+
 async def test_list_indicators(client):
     response = await client.get("/strategy-builder/indicators")
 
@@ -160,22 +174,7 @@ async def test_create_strategy_compiles_and_saves(client):
 
     response = await client.post(
         "/strategy-builder/strategies",
-        json={
-            "strategy_id": strategy_id,
-            "version": "1.0.0",
-            "target_asset": "BTC/USDT",
-            "market": "crypto",
-            "exchange": "bitget",
-            "entry_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}
-            ],
-            "exit_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": ">", "threshold": 70}
-            ],
-            "stop_loss_conditions": [
-                {"indicator": "close", "params": {}, "operator": "<", "threshold": 90}
-            ],
-        },
+        json={**_VALID_STRATEGY_BODY, "strategy_id": strategy_id},
         headers=headers,
     )
 
@@ -191,20 +190,9 @@ async def test_create_strategy_rejects_non_whitelisted_asset(client):
     response = await client.post(
         "/strategy-builder/strategies",
         json={
+            **_VALID_STRATEGY_BODY,
             "strategy_id": f"editor-strategy-{uuid.uuid4().hex[:8]}",
-            "version": "1.0.0",
             "target_asset": "NOT/REAL",
-            "market": "crypto",
-            "exchange": "bitget",
-            "entry_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}
-            ],
-            "exit_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": ">", "threshold": 70}
-            ],
-            "stop_loss_conditions": [
-                {"indicator": "close", "params": {}, "operator": "<", "threshold": 90}
-            ],
         },
         headers=headers,
     )
@@ -217,22 +205,7 @@ async def test_get_strategy_owner_can_view(client):
     strategy_id = f"editor-strategy-{uuid.uuid4().hex[:8]}"
     await client.post(
         "/strategy-builder/strategies",
-        json={
-            "strategy_id": strategy_id,
-            "version": "1.0.0",
-            "target_asset": "BTC/USDT",
-            "market": "crypto",
-            "exchange": "bitget",
-            "entry_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}
-            ],
-            "exit_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": ">", "threshold": 70}
-            ],
-            "stop_loss_conditions": [
-                {"indicator": "close", "params": {}, "operator": "<", "threshold": 90}
-            ],
-        },
+        json={**_VALID_STRATEGY_BODY, "strategy_id": strategy_id},
         headers=headers,
     )
 
@@ -250,22 +223,7 @@ async def test_get_strategy_stranger_gets_404(client):
     strategy_id = f"editor-strategy-{uuid.uuid4().hex[:8]}"
     await client.post(
         "/strategy-builder/strategies",
-        json={
-            "strategy_id": strategy_id,
-            "version": "1.0.0",
-            "target_asset": "BTC/USDT",
-            "market": "crypto",
-            "exchange": "bitget",
-            "entry_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}
-            ],
-            "exit_conditions": [
-                {"indicator": "RSI", "params": {}, "operator": ">", "threshold": 70}
-            ],
-            "stop_loss_conditions": [
-                {"indicator": "close", "params": {}, "operator": "<", "threshold": 90}
-            ],
-        },
+        json={**_VALID_STRATEGY_BODY, "strategy_id": strategy_id},
         headers=owner_headers,
     )
 
@@ -304,29 +262,14 @@ async def test_list_strategies_returns_only_own_strategies(client):
     other_headers = await _register(client)
     strategy_id = f"editor-strategy-{uuid.uuid4().hex[:8]}"
     other_strategy_id = f"editor-strategy-{uuid.uuid4().hex[:8]}"
-    body_template = {
-        "version": "1.0.0",
-        "target_asset": "BTC/USDT",
-        "market": "crypto",
-        "exchange": "bitget",
-        "entry_conditions": [
-            {"indicator": "RSI", "params": {}, "operator": "<", "threshold": 30}
-        ],
-        "exit_conditions": [
-            {"indicator": "RSI", "params": {}, "operator": ">", "threshold": 70}
-        ],
-        "stop_loss_conditions": [
-            {"indicator": "close", "params": {}, "operator": "<", "threshold": 90}
-        ],
-    }
     await client.post(
         "/strategy-builder/strategies",
-        json={**body_template, "strategy_id": strategy_id},
+        json={**_VALID_STRATEGY_BODY, "strategy_id": strategy_id},
         headers=owner_headers,
     )
     await client.post(
         "/strategy-builder/strategies",
-        json={**body_template, "strategy_id": other_strategy_id},
+        json={**_VALID_STRATEGY_BODY, "strategy_id": other_strategy_id},
         headers=other_headers,
     )
 
@@ -382,11 +325,8 @@ async def test_wizard_output_can_be_saved_as_a_strategy(client):
     response = await client.post(
         "/strategy-builder/strategies",
         json={
+            **_VALID_STRATEGY_BODY,
             "strategy_id": strategy_id,
-            "version": "1.0.0",
-            "target_asset": "BTC/USDT",
-            "market": "crypto",
-            "exchange": "bitget",
             "entry_conditions": generated["entry_conditions"],
             "exit_conditions": generated["exit_conditions"],
             "stop_loss_conditions": generated["stop_loss_conditions"],
@@ -420,3 +360,80 @@ async def test_strategy_builder_requires_authentication(client):
     )
 
     assert response.status_code == 401
+
+
+async def test_create_strategy_rejects_duplicate_strategy_version(client):
+    """StrategyBuilderService.save_strategy — 같은 (strategy_id, version)을
+    두 번 저장하려 하면 StrategyLifecycleError(400)로 거부돼야 한다
+    (strategy_builder_service.py: "이미 존재하는 strategy_id/version입니다")."""
+    headers = await _register(client)
+    strategy_id = f"editor-strategy-{uuid.uuid4().hex[:8]}"
+    body = {**_VALID_STRATEGY_BODY, "strategy_id": strategy_id}
+
+    first = await client.post("/strategy-builder/strategies", json=body, headers=headers)
+    assert first.status_code == 201
+
+    second = await client.post("/strategy-builder/strategies", json=body, headers=headers)
+
+    assert second.status_code == 400
+
+
+async def test_create_strategy_rejects_empty_condition_group(client):
+    """ConditionCompiler._compile_condition_group — 조건 그룹이 비어 있으면
+    ConditionCompileError("조건이 최소 1개 이상 필요합니다")로 거부돼야 한다."""
+    headers = await _register(client)
+    body = {
+        **_VALID_STRATEGY_BODY,
+        "strategy_id": f"editor-strategy-{uuid.uuid4().hex[:8]}",
+        "entry_conditions": [],
+    }
+
+    response = await client.post("/strategy-builder/strategies", json=body, headers=headers)
+
+    assert response.status_code == 400
+
+
+async def test_create_strategy_rejects_unsupported_combine_mode(client):
+    """ConditionCompiler._compile_condition_group — "AND"/"OR" 외 결합 방식은
+    ConditionCompileError("지원하지 않는 결합 방식입니다")로 거부돼야 한다."""
+    headers = await _register(client)
+    body = {
+        **_VALID_STRATEGY_BODY,
+        "strategy_id": f"editor-strategy-{uuid.uuid4().hex[:8]}",
+        "entry_combine": "XOR",
+    }
+
+    response = await client.post("/strategy-builder/strategies", json=body, headers=headers)
+
+    assert response.status_code == 400
+
+
+async def test_get_candles_upstream_failure_returns_generic_500(client):
+    """실패주입 — CredentialResolver가 반환한 어댑터가 get_ohlcv에서
+    ConnectionError를 던지면(자격증명 문제가 아닌 거래소 장애), 전역
+    Exception 핸들러(src/api/contracts/handlers.py)가 이를 INTERNAL_ERROR(500)
+    로 매핑하고 원본 예외 메시지는 응답에 노출하지 않아야 한다."""
+    headers = await _register(client)
+
+    class _BrokenAdapter:
+        async def get_ohlcv(self, symbol, timeframe, limit=100):
+            raise ConnectionError("bitget unreachable: connection reset")
+
+    class _BrokenResolver:
+        async def get_adapter(self, user_id, exchange):
+            return _BrokenAdapter()
+
+    app.dependency_overrides[get_credential_resolver] = lambda: _BrokenResolver()
+    try:
+        response = await client.get(
+            "/strategy-builder/candles",
+            params={"exchange": "bitget", "symbol": "BTC/USDT", "timeframe": "1h", "limit": 10},
+            headers=headers,
+        )
+    finally:
+        app.dependency_overrides[get_credential_resolver] = _override_resolver
+
+    assert response.status_code == 500
+    body = response.json()
+    assert "bitget unreachable" not in body["message"]
+    assert "connection reset" not in body["message"]
