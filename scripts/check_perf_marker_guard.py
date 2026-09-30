@@ -13,10 +13,12 @@ one day because only the pytest form existed and the local gate did not run it).
 Exit 0: no offenders. Exit 1: offenders listed as `path:function`. Exit 2: bad
 `--tests-root`.
 """
+
 from __future__ import annotations
 
 import argparse
 import ast
+import os
 import sys
 from pathlib import Path
 
@@ -117,13 +119,28 @@ def _find_violations(tree: ast.Module) -> list[str]:
 
 
 def _test_files(tests_root: Path = TESTS_ROOT) -> list[Path]:
-    return sorted(tests_root.rglob("*.py"))
+    # os.walk beats Path.rglob for a tree this size (task-9135: rglob's recursive
+    # generator overhead was a measurable slice of the 60s CI budget on its own).
+    paths = [
+        Path(dirpath) / name
+        for dirpath, _dirnames, filenames in os.walk(tests_root)
+        for name in filenames
+        if name.endswith(".py")
+    ]
+    return sorted(paths)
 
 
 def _scan_all(tests_root: Path = TESTS_ROOT) -> dict[str, list[str]]:
     offenders: dict[str, list[str]] = {}
     for path in _test_files(tests_root):
         source = path.read_text(encoding="utf-8")
+        # A violation requires a `perf_counter()`/`monotonic()` call somewhere in the
+        # file, so a plain substring check (no parse) rules out most files up front —
+        # ast.parse + the full tree walk in _find_violations only run on the rest.
+        # Cuts wall time as tests/ grows (task-9135: 60s CI budget was being approached
+        # by suite growth alone, not by a single offending commit).
+        if not any(attr in source for attr in _TIMER_ATTRS):
+            continue
         try:
             tree = ast.parse(source, filename=str(path))
         except SyntaxError:
@@ -154,8 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         print("FAIL: " + format_offenders(offenders))
         return 1
     print(
-        "OK: perf marker guard — no unmarked wall-clock budget assertion under "
-        f"{args.tests_root}"
+        f"OK: perf marker guard — no unmarked wall-clock budget assertion under {args.tests_root}"
     )
     return 0
 
