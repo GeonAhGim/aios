@@ -1960,6 +1960,35 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     baseline/budget relief made (DECISION_GUIDELINES B-2) — task-9269's `RelativeBudget`
     migration is the actual fix and is already in place.
 
+77. A fifth `pytest` 24h 4-repeat systemic leaf (task-9615) citing the *identical* repeat set
+    #28 (task-9482), #34 (task-9511), #40 (task-9549), and #48 (task-9590) already closed four
+    times — task-9615's spec names task-8850, task-8933, task-9055, task-9464 verbatim. As all
+    four prior systemic leaves already established, `scripts/check_pytest.py` does not exist
+    (confirmed again here) — `pytest` is a container name for the ~2700s full suite in
+    `pm/ci_recheck.py`, not a shared check script with its own design, so "the pytest gate
+    repeating" is N unrelated single-test failures sharing one stage name, not a design defect.
+    The 4 cited leaves are the same three independent, already-fixed classes #28 first named:
+    the `generated/` deletion regression (#11, fixed twice, commits `62005ec2`/`9c4a176a`),
+    correctly-classified shared-host perf-budget contention noise (task-8933, no code change per
+    DECISION_GUIDELINES B-2), and the `perf_measurement_guard` offender-count D2/D3 collision
+    (task-9464, commit `7ad655e6`, same pattern as #14). This leaf also stalled twice on a local
+    (`claude-local`) engine hitting a 400 context-budget error before any investigation ran
+    (`attempts=2`, `decision_class: "ND-28"`) and was reassigned to a full backend worker, not a
+    sign of a new defect — the same `claude-local` context-budget reassignment already seen in
+    #76. Reconfirmed on this worktree (`git status` clean, `git log --oneline -3` on both cited
+    test files shows no commits since the fixes above): `tests/unit/scripts/
+    test_kis_generate_adapters.py` and `tests/unit/meta/test_perf_measurement_guard.py` both
+    pass (32 passed, 24.5s). No new root cause found and none expected — this is the same
+    escalation/orchestrator pattern named in #17-#26/#30-#31/#33-#36/#38/#40/#48 (`pm/
+    auto_decision.py`/`orchestrator.py`'s `ci_red` rule spawning a fresh systemic leaf off an
+    already-closed repeat set instead of checking whether a prior systemic leaf closed the
+    identical question), fleet code out of a repo worker's edit scope (§4). Before working a
+    future `pytest` systemic leaf: check whether the cited repeat leaf ids match
+    #28/#34/#40/#48/this entry's set first — if so, close as noop citing all five rather than
+    re-deriving the same three failure classes a fifth time. No script/baseline exists to
+    relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to fix; the repeat is
+    fleet-code re-escalation, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
