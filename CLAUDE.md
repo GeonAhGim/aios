@@ -1162,6 +1162,32 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     re-diagnosing. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/baseline
     design is sound; the remaining defect is fleet code, not this repo.
 
+46. A sixth `e2e` (H-7b smoke) `[health:ci_red_systemic]` leaf (task-9587) citing the identical
+    repeat set #27 (task-9480), #33 (task-9509), and #41 (task-9547) already closed three times —
+    task-9587's spec names task-8929, task-8952, task-9132, task-9253 verbatim, the exact same
+    four leaves all three prior systemic leaves already root-caused: task-8846/task-8952 were
+    real, already-merged fixes (test-level `waitForResponse` sync gap; webServer prebuild running
+    a redundant `tsc -b` under cold-cache/concurrent-worktree load, split into a vite-only
+    `build:e2e` script, commit `ee5d3007`); task-8929/task-9132 were contaminated leads (a
+    transient `git fetch` network outage and a worktree lagging an already-merged fix,
+    respectively). Reconfirmed on this worktree (`git log --oneline -5 --
+    frontend/playwright.config.ts` shows no commits since task-9054's `0c6f4ff5`, already covered
+    by #27/#30/#33/#41): `npm run build:e2e --workspace=apps/web` succeeds in 2.58s, and the exact
+    H-7b smoke command (`npm exec -- playwright test e2e/backtest-run.spec.ts
+    e2e/chart-indicator-overlay.spec.ts e2e/demo-onboarding-flow.spec.ts
+    e2e/order-submission.spec.ts --retries=1 --trace=on-first-retry --project=chromium`) passes
+    5/5 in 28.3s, well under the 180s `webServer.timeout`. No script/config change made — this is
+    the identical fleet-code defect already named for eleven other gates (#17-#26, #30-#31,
+    #33-#35, #37-#38): `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a
+    systemic leaf off the same stale repeat set instead of checking whether a prior systemic leaf
+    (task-9152, task-9480/#27, task-9509/#33, or task-9547/#41) already closed the identical
+    question, out of a repo worker's edit scope (§4). Before working a future `e2e` correction
+    leaf: run the H-7b smoke command above first — if green, and the cited repeat leaf ids match
+    an already-closed systemic leaf's set (task-9152, #27, #33, #41, or this entry), close as noop
+    citing all of them rather than re-investigating a fifth time. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2) — design is sound and already fixed; the remaining defect is fleet
+    code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
