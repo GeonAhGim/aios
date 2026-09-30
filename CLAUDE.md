@@ -2187,6 +2187,37 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES B-2) — the ratchet design is
     sound; the remaining defect is fleet code, not this repo.
 
+84. A seventh `frontend` `[health:ci_red]` leaf (task-9778, an ND-17 re-issue of task-9745 whose
+    recorded commit was unreachable from `origin/main` per `esc-phantom-done-commits`)
+    reconfirms #16/#39/#52/#64/#66 rather than finding a new defect. The task's own spec names
+    the bisect culprit, `27b5fe61e1d0f33aaa0ad006fdaab6c597d6f426` — `git show --stat` confirms
+    that commit (task-9242, "FA-4 pos_account/pos_snapshot 마이그레이션 테스트 DEEPEN") only
+    touches `tests/foundation/unit/entities/test_migration_fa4_columns.py`, a backend Python
+    D2/D3 negative-test/failure-injection addition (§5) — no `frontend/` change at all, the exact
+    same innocent bisect culprit already named in #52/#66. This worktree is an ancestor-confirmed
+    descendant of that commit (`git merge-base --is-ancestor` confirms). Reproduced the exact
+    failing step, `npm run test:coverage --workspace=apps/web` (`vitest run --coverage`), on this
+    worktree: it passes clean — `Test Files 196 passed (196)`, `Tests 1587 passed (1587)`,
+    coverage summary Statements 89.71%/Branches 83.74%/Functions 84.1%/Lines 91.36%, no
+    `AssertionError` anywhere in the output (~144.5s). This reconfirms task-9302's root cause
+    (#16): `pm/auto_decision.py`'s `_stage_tail`/`_FAIL_LINE_MARKERS` misclassifies an `npm test`
+    timeout/crash tail (here surfacing as a truncated `npm error Lifecycle script "test:coverage"
+    failed`/`AssertionError [ERR_ASSERTION]` fragment with no file/line surviving in the escalation
+    detail) and attaches a backend-only bisect commit to a frontend stage instead — a
+    classification bug in fleet code under `C:\aios\pm`, out of a repo worker's edit scope (§4).
+    Separately, this leaf's own `nd17_generation`/`esc-phantom-done-commits` history is a second,
+    independent fleet-code symptom: task-9745's `commit` field pointed at a sha not reachable from
+    `origin/main`, meaning the fix/push step of a prior worker's run either failed silently or
+    never happened, yet the task was marked done — worth flagging to ops separately from the
+    `ci_red` misclassification pattern, but likewise not fixable from this repo. No
+    script/test/baseline change made. Before working a future `frontend` correction leaf: run
+    `npm run test:coverage --workspace=apps/web` locally first — if it passes clean and the
+    escalation's bisect culprit is a backend-only/Python commit (as it has been every time so far:
+    `b9529d7b`, `27b5fe61` in #39, `7ad655e6`-adjacent in #52, `27b5fe61` again in #66 and here),
+    close as noop citing task-9302 (#16), task-9548 (#39), task-9588 (#52), task-9678 (#66), and
+    this entry rather than re-investigating an eighth time. No baseline/marker-list relief made
+    (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
