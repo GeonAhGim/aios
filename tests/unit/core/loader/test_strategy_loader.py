@@ -75,3 +75,43 @@ def test_load_strategy_file_read_failure_propagates(
 
     with pytest.raises(OSError):
         load_strategy_file(strategy_file)
+
+
+def test_load_strategy_file_invalid_transition_state_raises(tmp_path: Path):
+    invalid = dict(VALID_STRATEGY)
+    invalid["transitions"] = [
+        {"from_state": "IDLE", "to_state": "NOT_A_REAL_STATE", "condition": "rsi < 30"}
+    ]
+    strategy_file = tmp_path / "invalid_transition.json"
+    strategy_file.write_text(json.dumps(invalid), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_strategy_file(strategy_file)
+
+
+def test_load_strategy_file_invalid_memory_provenance_uuid_raises(tmp_path: Path):
+    invalid = dict(VALID_STRATEGY)
+    invalid["memory_provenance"] = ["not-a-valid-uuid"]
+    strategy_file = tmp_path / "invalid_provenance.json"
+    strategy_file.write_text(json.dumps(invalid), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_strategy_file(strategy_file)
+
+
+def test_load_strategy_file_validation_failure_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """모델 검증 단계의 예상치 못한 예외도 기본값 대체 없이 그대로 전파해야 한다."""
+    strategy_file = tmp_path / "strategy.json"
+    strategy_file.write_text(json.dumps(VALID_STRATEGY), encoding="utf-8")
+
+    from src.data.models.strategy_fsm import FSMStrategyConfig
+
+    def _raise_runtime_error(payload: str) -> FSMStrategyConfig:
+        raise RuntimeError("simulated validation failure")
+
+    monkeypatch.setattr(FSMStrategyConfig, "model_validate_json", _raise_runtime_error)
+
+    with pytest.raises(RuntimeError):
+        load_strategy_file(strategy_file)
