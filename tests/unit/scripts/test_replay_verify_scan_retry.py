@@ -22,9 +22,8 @@ import pytest
 from scripts import replay_verify
 from src.core.eventstore import replay
 
-pytestmark = pytest.mark.asyncio
 
-
+@pytest.mark.asyncio
 async def test_verify_with_retry_succeeds_after_mid_scan_reset(monkeypatch) -> None:
     """task-6213: the reset lands *after* the pool connected, inside
     `verify()`'s read-only scan -- the exact
@@ -57,6 +56,7 @@ async def test_verify_with_retry_succeeds_after_mid_scan_reset(monkeypatch) -> N
     assert attempts == 3
 
 
+@pytest.mark.asyncio
 async def test_verify_with_retry_succeeds_after_drop_create_race(monkeypatch) -> None:
     """task-6284: `pool.acquire()` inside `verify()`'s scan can dial a new
     physical connection (pool growth / replacing a discarded one) that lands
@@ -87,6 +87,7 @@ async def test_verify_with_retry_succeeds_after_drop_create_race(monkeypatch) ->
     assert attempts == 3
 
 
+@pytest.mark.asyncio
 async def test_verify_with_retry_succeeds_after_connection_rejection(monkeypatch) -> None:
     """task-8556: `pool.acquire()` inside `verify()`'s scan can dial a new
     physical connection that lands while the shared Postgres container's
@@ -114,6 +115,7 @@ async def test_verify_with_retry_succeeds_after_connection_rejection(monkeypatch
     assert attempts == 2
 
 
+@pytest.mark.asyncio
 async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatch) -> None:
     """Fail-closed: a reset on every attempt must still raise, not report a
     false green."""
@@ -133,6 +135,7 @@ async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatc
     assert attempts == replay_verify._POOL_CONNECT_ATTEMPTS
 
 
+@pytest.mark.asyncio
 async def test_verify_with_retry_does_not_retry_a_real_mismatch_report(monkeypatch) -> None:
     """A genuine replay mismatch is a return value (`report.ok is False`),
     not an exception -- it must surface on the first attempt, not be masked
@@ -162,6 +165,7 @@ async def test_verify_with_retry_does_not_retry_a_real_mismatch_report(monkeypat
     assert attempts == 1
 
 
+@pytest.mark.asyncio
 async def test_close_pool_ignoring_reset_swallows_connection_reset() -> None:
     """task-6236: a reset hitting an idle pooled connection during teardown
     must not raise -- `verify()`'s result is already final by the time
@@ -176,6 +180,7 @@ async def test_close_pool_ignoring_reset_swallows_connection_reset() -> None:
     await replay_verify._close_pool_ignoring_reset(_ResetOnClosePool())  # must not raise
 
 
+@pytest.mark.asyncio
 async def test_close_pool_ignoring_reset_swallows_drop_create_race() -> None:
     """task-6302: `pool.close()` can itself dial out to close pooled
     connections and land inside the same `setup_test_db.py --reset`
@@ -199,6 +204,7 @@ async def test_close_pool_ignoring_reset_swallows_drop_create_race() -> None:
     await replay_verify._close_pool_ignoring_reset(_CannotConnectNowOnClosePool())  # must not raise
 
 
+@pytest.mark.asyncio
 async def test_close_pool_ignoring_reset_swallows_connection_rejection() -> None:
     """task-8556: `pool.close()` can dial out too and land inside the same
     `max_connections` saturation window `_create_pool_with_retry` /
@@ -214,6 +220,7 @@ async def test_close_pool_ignoring_reset_swallows_connection_rejection() -> None
     await replay_verify._close_pool_ignoring_reset(_RejectedOnClosePool())  # must not raise
 
 
+@pytest.mark.asyncio
 async def test_close_pool_ignoring_reset_propagates_unrelated_exceptions() -> None:
     """Only the transient connection-reset shape is swallowed -- a real bug
     in `pool.close()` must still surface, not be silently hidden."""
@@ -226,6 +233,7 @@ async def test_close_pool_ignoring_reset_propagates_unrelated_exceptions() -> No
         await replay_verify._close_pool_ignoring_reset(_BrokenPool())
 
 
+@pytest.mark.asyncio
 async def test_run_propagates_real_failure_even_if_close_also_resets(monkeypatch) -> None:
     """A genuine fail-closed exception from the scan (reset on every retry
     attempt, i.e. not absorbed) must still propagate as the process's
@@ -255,6 +263,7 @@ async def test_run_propagates_real_failure_even_if_close_also_resets(monkeypatch
         await replay_verify._run(hours=24, as_of=datetime.now(timezone.utc))
 
 
+@pytest.mark.asyncio
 async def test_sleep_before_retry_jitters_within_retry_delay_cap(monkeypatch) -> None:
     """task-6627: `_sleep_before_retry` must sleep `random.uniform(0, _retry_delay(attempt))`,
     not the deterministic `_retry_delay(attempt)` itself -- concurrent worktrees computing the
@@ -273,6 +282,7 @@ async def test_sleep_before_retry_jitters_within_retry_delay_cap(monkeypatch) ->
     assert captured == [replay_verify._retry_delay(3) * 0.25]
 
 
+@pytest.mark.asyncio
 async def test_sleep_before_retry_never_exceeds_retry_delay_cap(monkeypatch) -> None:
     """Negative test: across many draws, the jittered sleep must never exceed (or go below zero
     of) the deterministic `_retry_delay(attempt)` it is jittering under -- a broken jitter

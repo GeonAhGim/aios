@@ -46,8 +46,6 @@ import pytest
 
 from scripts import replay_verify
 
-pytestmark = pytest.mark.asyncio
-
 
 class _FakePool:
     """`asyncpg.create_pool`의 실제 계약을 흉내낸다: 호출은 동기적으로 `Pool`류
@@ -109,6 +107,7 @@ def test_retry_delay_total_budget_exceeds_prior_5s_window() -> None:
     assert total > 5.0
 
 
+@pytest.mark.asyncio
 async def test_create_pool_with_retry_succeeds_after_transient_reset(monkeypatch) -> None:
     """First two attempts raise the exact esc-ci-replay_verify.json exception
     shape (OSError-derived ConnectionResetError surfacing through asyncpg as
@@ -143,6 +142,7 @@ async def test_create_pool_with_retry_succeeds_after_transient_reset(monkeypatch
     )
 
 
+@pytest.mark.asyncio
 async def test_create_pool_with_retry_propagates_oserror_after_exhausting_attempts(
     monkeypatch,
 ) -> None:
@@ -168,6 +168,7 @@ async def test_create_pool_with_retry_propagates_oserror_after_exhausting_attemp
     assert all(p.terminated for p in made_pools), "실패한 시도는 전부 terminate돼야 한다"
 
 
+@pytest.mark.asyncio
 async def test_create_pool_with_retry_succeeds_after_drop_create_race(monkeypatch) -> None:
     """task-6267: a connect attempt landing inside `setup_test_db.py
     --reset`'s `DROP DATABASE` -> `CREATE DATABASE` window (not just the
@@ -198,6 +199,7 @@ async def test_create_pool_with_retry_succeeds_after_drop_create_race(monkeypatc
     assert attempts == 3
 
 
+@pytest.mark.asyncio
 async def test_create_pool_with_retry_succeeds_after_connection_rejection(monkeypatch) -> None:
     """task-8556: a connect attempt landing while the shared Postgres
     container's `max_connections` is transiently saturated by a sibling
@@ -226,6 +228,7 @@ async def test_create_pool_with_retry_succeeds_after_connection_rejection(monkey
     assert attempts == 2
 
 
+@pytest.mark.asyncio
 async def test_create_pool_with_retry_terminates_failed_attempt_before_retrying(
     monkeypatch,
 ) -> None:
@@ -259,6 +262,7 @@ async def test_create_pool_with_retry_terminates_failed_attempt_before_retrying(
     assert not made_pools[1].terminated, "성공한 Pool은 그대로 반환되고 건드리지 않는다"
 
 
+@pytest.mark.asyncio
 async def test_create_pool_with_retry_does_not_retry_unrelated_exceptions(monkeypatch) -> None:
     """Only the transient connect-reset shape is retried -- a real
     programming error (e.g. a bad DSN raising ValueError) must surface on the
@@ -280,6 +284,7 @@ async def test_create_pool_with_retry_does_not_retry_unrelated_exceptions(monkey
 
 
 @pytest.mark.perf
+@pytest.mark.asyncio
 async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(monkeypatch) -> None:
     """Perf assertion: the happy path (first attempt succeeds) must not pay
     any backoff delay -- `asyncio.sleep` is only reached on a retry."""
