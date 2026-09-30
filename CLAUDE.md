@@ -452,6 +452,34 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     leaf (DECISION_GUIDELINES B-2) — the script design and perf are sound; the remaining defect
     is fleet code, not this repo.
 
+23. `type_ignore` 24h 8-repeat systemic leaf (task-9474) reconfirms #17's diagnosis with sharper
+    evidence — `esc-ci-type_ignore.json` itself shows `status: "resolved"`,
+    `resolved_sha: "12e7bd7..."`, `closed_at: "2026-09-30T00:21:59Z"`, yet its `auto_actions` log
+    kept appending `"3x-repeat CI red"` every ~15-25 min from `06:17:20Z` through `10:07:27Z` —
+    nearly 4 more hours *after* the escalation's own record says it was resolved, with no new fix
+    task created in that window (the last one, task-9255, was created at `05:57:08Z`, also off the
+    same `detail_hash: "42ef1e7acc80"` traced to `bisect_culprit deacc374b0` — the identical stale
+    bisect target #17 already showed was never the real regression, just a worktree lagging
+    task-9140's `29cf3622` fix). A local run on this worktree (HEAD `82b94c3a`, synced past
+    task-9140/9255/9269) confirms `OK: type: ignore 142개 (budget 142개 이내)` in ~10s, matching
+    `type-ignore-budget.txt` exactly — no violation exists at current HEAD. So the "8 repeats in
+    24h" this leaf was filed to investigate are not 8 rounds of fresh violations or even 8 rounds
+    of stale-worktree fix tasks (#17's story) — the majority are the escalation/orchestrator
+    logging repeat-events against an already-`resolved` record with no fix task attached at all.
+    This narrows #17's fleet-code diagnosis further: `pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule doesn't check `status`/`resolved_sha` on its own escalation record before
+    appending another repeat-count entry, so a resolved escalation can keep incrementing the 24h
+    counter indefinitely with nothing left to fix. Still fleet code under `C:\aios\pm`, still out
+    of a repo worker's edit scope (§4) — an ops task needs the exact diff (skip repeat-count
+    increments once `status == "resolved"` and `last_seen` sha's stage check is confirmed green,
+    or close the escalation outright on resolution instead of leaving it open for further
+    `auto_actions` appends). Before working a future `type_ignore` leaf: run
+    `python scripts/check_type_ignore_budget.py` locally first — if `OK` and 142/142, and the
+    escalation record already shows `status: "resolved"`, close as noop citing task-9140,
+    task-9255, and this entry rather than re-investigating. No baseline/threshold relief made
+    (DECISION_GUIDELINES B-2) — script/baseline design is sound and already fixed; the remaining
+    defect is fleet code.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
