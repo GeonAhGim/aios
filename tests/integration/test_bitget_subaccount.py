@@ -2,6 +2,7 @@
 
 httpx.MockTransport 기반 검증(test_bitget_adapter.py와 동일 원칙).
 """
+
 import json
 from decimal import Decimal
 
@@ -160,9 +161,69 @@ async def test_transfer_to_subaccount_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.transfer_to_subaccount("u-1", "usdt", Decimal("50"))
+
+
+# --- negative tests (불변식 위반 입력 거부) ---
+
+
+async def test_transfer_to_subaccount_rejects_zero_amount():
+    """불변식: amount는 0보다 커야 한다(I-07 검증/승인 게이트 hard-fail).
+    0원을 전달하면 ValueError를 반환한다."""
+
+    adapter = _make_adapter(lambda req: _json_response({}))
+
+    with pytest.raises(ValueError, match="amount는 0보다 커야 합니다"):
+        await adapter.transfer_to_subaccount("u-1", "usdt", Decimal("0"))
+
+
+async def test_transfer_to_subaccount_rejects_negative_amount():
+    """불변식: amount는 0보다 커야 한다(I-07 검증/승인 게이트 hard-fail).
+    음수액을 전달하면 ValueError를 반환한다."""
+
+    adapter = _make_adapter(lambda req: _json_response({}))
+
+    with pytest.raises(ValueError, match="amount는 0보다 커야 합니다"):
+        await adapter.transfer_to_subaccount("u-1", "usdt", Decimal("-10"))
+
+
+# --- failure injection tests (의존성 예외 유발) ---
+
+
+async def test_transfer_to_subaccount_raises_on_api_error_code():
+    """실패주입: 거래소 API가 오류 코드(00000 아님)를 반환하면
+    _classify_body가 ExchangeError를 raise한다 — 호출부는 False를
+    반환하지 않고 예외로 실패한다(실패 시 fail-closed)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {"code": "50000", "msg": "insufficient balance", "requestTime": 1, "data": {}}
+        )
+
+    adapter = _make_adapter(handler)
+
+    with pytest.raises(Exception) as exc_info:
+        await adapter.transfer_to_subaccount("u-1", "usdt", Decimal("50"))
+
+    # ExchangeError 또는 RetryableExchangeError가 올라와야 함
+    assert "Bitget API 오류" in str(exc_info.value)
+
+
+async def test_create_subaccount_raises_on_api_error_code():
+    """실패주입: create_subaccount도 _classify_body를 통해 동일하게
+    ExchangeError를 던진다 — API 오류는 예외로 전달된다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {"code": "50000", "msg": "subaccount name already exists", "requestTime": 1, "data": {}}
+        )
+
+    adapter = _make_adapter(handler)
+
+    with pytest.raises(Exception) as exc_info:
+        await adapter.create_subaccount("duplicate-name")
+
+    assert "Bitget API 오류" in str(exc_info.value)
