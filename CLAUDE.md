@@ -1426,6 +1426,31 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     fifth time. No baseline/timeout relief made (DECISION_GUIDELINES B-2) — design is sound and
     already fixed; the remaining defect is fleet code, not this repo.
 
+56. A fifth `type_ignore` 24h 6-repeat systemic leaf (task-9656) citing the identical repeat set
+    #23 (task-9474) and #37 (task-9539) already closed twice — task-9656's spec names task-9014,
+    task-9070, task-9136, task-9255 verbatim, the same four leaves both prior systemic leaves
+    already resolved: task-9014 fixed the real perf defect (`_iter_python_files` rglob walking
+    into `.mypy_cache`/`.hypothesis` before filtering, 180s timeout, commit `729e1569e`),
+    task-9113 patched a missed `.import_linter_cache` exclusion (commit `0baf11447`), and
+    task-9070/task-9136/task-9255 were all the journeys-style (#13) stale-worktree pattern —
+    re-reporting the same 180s symptom from a worktree that simply hadn't pulled the fix yet.
+    Reconfirmed on this worktree (`git status` clean, `git log --oneline -5 --
+    scripts/check_type_ignore_budget.py type-ignore-budget.txt` shows `0baf11447`/`729e1569e` as
+    the latest touches, no commits since): `python scripts/check_type_ignore_budget.py` prints
+    `OK: type: ignore 142개 (budget 142개 이내)` in a few seconds, matching
+    `type-ignore-budget.txt` exactly. `esc-ci-type_ignore.json` (per #23/#37) already shows
+    `status: "resolved"`, `resolved_sha: "12e7bd738c39..."` — this is the same fleet-code pattern
+    named 15+ times (#17-#26, #30-#31, #33-#41, #47-#48, #50, #53): `pm/auto_decision.py`/
+    `orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off an already-`resolved`
+    escalation snapshot instead of checking whether a prior systemic leaf (task-9474/#23 or
+    task-9539/#37) already closed the identical question, out of a repo worker's edit scope (§4).
+    No script/baseline change made. Before working a future `type_ignore` leaf: run
+    `python scripts/check_type_ignore_budget.py` locally first — if `OK` and 142/142, and the
+    cited repeat leaf ids match an already-closed systemic leaf's set (task-9474/#23,
+    task-9539/#37, or this entry), close as noop citing all of them rather than
+    re-investigating a sixth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) —
+    script/baseline design is sound and already fixed; the remaining defect is fleet code.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
