@@ -70,7 +70,18 @@ SKIP_DIR_NAMES = {"__pycache__", "node_modules", ".git", "dist", "build", "cover
 # further margin compression within 60s budget. Raised to 24, staying below library default (28)
 # that caused STATUS_DLL_INIT_FAILED (task-8657 detail). No budget/baseline change
 # (DECISION_GUIDELINES B-2) -- this only retunes this step's own concurrency footprint.
-SCAN_WORKERS = 24
+#
+# 2026-09-30(task-9156/esc-ci-prepare): the task-8667 raise to 24 was speculative -- justified by
+# cold-checkout margin on a single lane, with no concurrent-lane measurement -- and it reproduced
+# the exact task-8657 failure it cited as the ceiling to stay under: another lane's local_ci
+# prepare hit `head_sha: origin/main 해석 실패 rc=3221225794` (STATUS_DLL_INIT_FAILED) while this
+# step's 24-wide burst was running. 24 sits close enough to the library default (28) that already
+# caused the same antivirus-scan-starves-sibling-process-create failure once; it was never actually
+# a safe margin below it. Reverted to 16, the last value with no reported STATUS_DLL_INIT_FAILED
+# incident against it. Do not raise this again for cold-checkout margin alone -- that reasoning
+# already caused this exact regression twice (28 at task-8639, 24 at task-8667/task-9156). Any
+# future raise needs a concurrent-multi-lane measurement, not just single-lane wall-clock.
+SCAN_WORKERS = 16
 
 
 def has_bom(path: Path) -> bool:
