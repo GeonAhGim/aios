@@ -1905,6 +1905,26 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     an eighth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/
     baseline design is sound; the remaining defect is fleet code, not this repo.
 
+75. A ninth `code_ratchets` `[health:ci_red_systemic]` leaf (task-9711, split 1/3 of the same
+    parent task-9710) reaching the identical conclusion as #74 (task-9713, split 3/3)
+    independently, for the identical repeat set #25/#38/#45/#60/#67/#68/#70/#74 already closed
+    eight times: task-9711's spec also names task-9010, task-9069, task-9252, task-9459
+    verbatim. Reconfirmed on this worktree (HEAD `ad9beb893`, `git status` clean): `python
+    scripts/check_code_ratchets.py` prints `OK` and matches `code-ratchets-baseline.json`
+    exactly on all 5 metrics (`skip_xfail=3 todo_fixme_xxx=0 not_implemented_error=27
+    loc_over_500=42 loc_over_800=3 loc_over_1000=0`). No script/baseline change made —
+    task-9010's fix and task-9145's `--near` early-warning tool (#12/#25) are both still in
+    place and sufficient. Same fleet-code pattern as #74 and 16+ prior gates: `pm/
+    auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning multiple systemic leaves
+    (including same-parent sibling splits) off an already-resolved escalation snapshot instead
+    of checking whether a prior systemic leaf already closed the identical question, out of a
+    repo worker's edit scope (§4). Before working a future `code_ratchets` leaf: run `python
+    scripts/check_code_ratchets.py` locally first — if `OK` and baseline-matching, and the
+    escalation's cited repeat set matches an already-closed leaf verbatim (task-9010, #25, #38,
+    #45, #60, #67, #68, #70, #74, or this entry), close as noop citing them rather than
+    re-diagnosing a ninth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) —
+    script/baseline design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
