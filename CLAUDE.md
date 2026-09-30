@@ -1031,6 +1031,32 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — design is sound and already fixed; the remaining defect is fleet
     code, not this repo.
 
+42. A fourth `pytest_latency_serial` systemic leaf (task-9550) on the identical already-closed
+    root cause — #20 (task-9298, first systemic leaf) and #29 (task-9483, second systemic leaf)
+    both already confirmed task-9269's `RelativeBudget` migration (commit `eaa83bbd`, landed
+    2026-09-30T06:15:01Z) is the real fix and that all 4
+    `FULL_PYTEST_SERIAL_LATENCY_NODEIDS` (`test_builtins_math.py`, `test_lower.py`,
+    `test_interpreter.py`, `test_parser.py`) already use it. This leaf's cited repeat set
+    (task-9196, task-9286, task-9465, task-9534) overlaps #29's set (task-9196, task-9286,
+    task-9465) plus one new entry, task-9534, which reconfirms rather than contradicts: no
+    commit to any of the 4 test files or `tests/_perf/relative_budget.py` exists after
+    `eaa83bbd` (`git log --oneline -3` on all 5 paths shows `eaa83bbd` as the latest touch).
+    Reconfirmed on this worktree: `grep -l RelativeBudget` on all 4 files matches, and a serial
+    run (`pytest -p no:xdist tests/unit/core/script/test_builtins_math.py
+    tests/unit/core/script/test_lower.py tests/unit/core/script/test_interpreter.py
+    tests/unit/core/script/test_parser.py`) gives `150 passed in 13.20s`, an order of magnitude
+    under the step's budget. There is no `scripts/check_pytest_latency_serial.py` in this repo —
+    the check lives in fleet code (`pm/ci_recheck.py`'s `FULL_PYTEST_SERIAL_LATENCY_NODEIDS`/
+    build_steps), so, as with `pytest` (#28/#34), "the stage repeating" is fleet-side
+    escalation/orchestrator behavior (`pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule
+    re-triggering off a stale detail snapshot instead of re-checking current HEAD, the same
+    pattern as #17-#26/#29-#39), not a design gap a repo worker can touch (§4). Before working a
+    future `pytest_latency_serial` leaf: run the 4 nodeids serially and grep them for
+    `RelativeBudget` first — if both hold, close as noop citing task-9269, task-9298 (#20),
+    task-9483 (#29), and this entry rather than re-diagnosing. No baseline/budget relief made
+    (DECISION_GUIDELINES B-2) — task-9269's `RelativeBudget` migration is the actual fix and is
+    already in place.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
