@@ -19,7 +19,7 @@
     "@aios/shared-hooks": "*",
     "@aios/shared-types": "*",
     "@aios/ui-web": "*",
-    "@tanstack/react-query": "^5.103.1",
+    "@tanstack/react-query": "^5.104.0",
     "i18next": "^26.4.2",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
