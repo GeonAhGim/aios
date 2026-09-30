@@ -817,6 +817,28 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     third time. No baseline/timeout relief made (DECISION_GUIDELINES B-2) — design is sound and
     already fixed; the remaining defect is fleet code, not this repo.
 
+34. A second `pytest` 24h 4-repeat systemic leaf (task-9511) citing the *identical* repeat set
+    #28 (task-9482) already closed — task-9511's spec names task-8850, task-8933, task-9055,
+    task-9464 verbatim, the same four leaves #28 already root-caused into three independent,
+    already-fixed classes (the `generated/` deletion regression #11, shared-host perf-budget
+    noise correctly left unchanged per DECISION_GUIDELINES B-2, and the `perf_measurement_guard`
+    offender-count D2/D3 collision already documented in #14's pattern). As #28 already notes,
+    `pytest` is not a named check script — `scripts/check_pytest.py` does not exist (confirmed
+    again here) — so "the pytest gate repeating" is a container name for whichever single test in
+    the ~2700s full suite happened to fail, not a shared design defect. Reconfirmed on this
+    worktree (HEAD `9583f950`, synced past task-9482's commit `c68d8b06`):
+    `tests/unit/scripts/test_kis_generate_adapters.py` and
+    `tests/unit/meta/test_perf_measurement_guard.py` both still pass (32 passed, 44.8s). No new
+    root cause found and none expected — this is the same escalation/orchestrator pattern named in
+    #17-#26/#30 (`pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule spawning a fresh
+    systemic leaf off the same stale repeat set instead of checking whether a prior systemic leaf,
+    task-9482, already closed the identical question), fleet code out of a repo worker's edit
+    scope (§4). Before working a future `pytest` systemic leaf: check whether the cited repeat
+    leaf ids match an already-closed systemic leaf's cited set (task-9482/#28 or this entry)
+    first — if so, close as noop citing both rather than re-deriving the same three failure
+    classes. No script/baseline exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing
+    new to fix; the repeat is fleet-code re-escalation, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
