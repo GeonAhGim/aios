@@ -1,4 +1,5 @@
 import re
+import time
 
 import pytest
 
@@ -41,12 +42,8 @@ def test_or_combination_requires_any(evaluator: ConditionEvaluator):
 def test_crosses_above_requires_prev_tick(evaluator: ConditionEvaluator):
     # 직전 틱 캐시가 없으면(첫 틱) 항상 False — 안전한 기본값.
     assert evaluator.evaluate("RSI CROSSES_ABOVE 30", {"RSI": 31.0}, None) is False
-    assert (
-        evaluator.evaluate("RSI CROSSES_ABOVE 30", {"RSI": 31.0}, {"RSI": 29.0}) is True
-    )
-    assert (
-        evaluator.evaluate("RSI CROSSES_ABOVE 30", {"RSI": 31.0}, {"RSI": 32.0}) is False
-    )
+    assert evaluator.evaluate("RSI CROSSES_ABOVE 30", {"RSI": 31.0}, {"RSI": 29.0}) is True
+    assert evaluator.evaluate("RSI CROSSES_ABOVE 30", {"RSI": 31.0}, {"RSI": 32.0}) is False
 
 
 def test_crosses_below_requires_prev_tick(evaluator: ConditionEvaluator):
@@ -110,10 +107,54 @@ def test_unsupported_operator_raises_evaluation_error(
     # _ATOMIC_RE가 실제로는 알려진 연산자만 매칭시키므로, 공개 API로는
     # 도달할 수 없는 방어 분기(라인 107) — 컴파일러 문법이 확장돼도
     # ConditionEvaluator가 조용히 틀린 값을 반환하지 않고 실패해야 함을 검증.
-    permissive_re = re.compile(
-        r"^(?P<key>\S+)\s+(?P<op>\S+)\s+(?P<threshold>-?\d+(?:\.\d+)?)$"
-    )
+    permissive_re = re.compile(r"^(?P<key>\S+)\s+(?P<op>\S+)\s+(?P<threshold>-?\d+(?:\.\d+)?)$")
     monkeypatch.setattr(condition_evaluator_module, "_ATOMIC_RE", permissive_re)
 
     with pytest.raises(ConditionEvaluationError):
         evaluator.evaluate("RSI XOR 30", {"RSI": 31.0}, None)
+
+
+def test_and_combination_missing_second_key_raises_data_missing(
+    evaluator: ConditionEvaluator,
+):
+    # AND는 좌항이 참이어도 우항 지표가 없으면 조용히 넘어가지 않고
+    # IndicatorDataMissingError로 실패해야 한다(fail-closed) — `all()`의
+    # 제너레이터 단축평가가 두 번째 atomic 평가를 건너뛰지 않는지 검증.
+    market_state = {"RSI": 31.0}
+    with pytest.raises(IndicatorDataMissingError) as exc_info:
+        evaluator.evaluate("RSI > 30 AND SMA_timeperiod20 < 46000", market_state, None)
+    assert exc_info.value.args[0] == "SMA_timeperiod20"
+
+
+def test_crosses_above_prev_state_get_failure_propagates(
+    evaluator: ConditionEvaluator,
+):
+    # prev_market_state가 dict 계약을 어기는 의존성(예: 캐시 계층 예외)일 때
+    # 조용히 삼키지 말고 그대로 전파해야 한다(fail-closed 실패주입).
+    class _BoomDict(dict):
+        def get(self, *_args, **_kwargs):
+            raise RuntimeError("injected prev-tick cache failure")
+
+    with pytest.raises(RuntimeError, match="injected prev-tick cache failure"):
+        evaluator.evaluate("RSI CROSSES_ABOVE 30", {"RSI": 31.0}, _BoomDict())
+
+
+@pytest.mark.perf
+def test_evaluate_stays_within_budget_for_repeated_calls(evaluator: ConditionEvaluator):
+    """수치 성능 단언(D2) — 조건식 재컴파일 없이 반복 평가되는 실행 루프
+    경로이므로 호출당 비용이 정규식 매칭 수준에 머물러야 한다. O(n^2) 등으로
+    회귀하면 이 단언이 실패한다."""
+    market_state = {"RSI": 31.0, "SMA_timeperiod20": 45000.0}
+    prev_state = {"RSI": 29.0, "SMA_timeperiod20": 44000.0}
+    repeats = 500
+    start = time.perf_counter()
+    for _ in range(repeats):
+        evaluator.evaluate("RSI > 30 AND SMA_timeperiod20 < 46000", market_state, prev_state)
+        evaluator.evaluate("RSI CROSSES_ABOVE 30", market_state, prev_state)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    per_call_ms = elapsed_ms / (repeats * 2)
+    budget_ms = 1.0  # 순수 정규식 매칭 + dict 조회 — 1ms/call이면 넉넉한 여유치
+    assert per_call_ms < budget_ms, (
+        f"evaluate() averaged {per_call_ms:.4f}ms/call over {repeats * 2} calls, "
+        f"budget is {budget_ms}ms/call"
+    )
