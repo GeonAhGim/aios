@@ -1,4 +1,5 @@
 """FD-7.2 통합테스트 — audit_log 조회, 실제 dev DB 대상."""
+
 from pathlib import Path
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -102,6 +103,42 @@ async def test_list_entries_rejects_page_zero(service, pool):
 
     with pytest.raises(asyncpg.exceptions.InvalidRowCountInResultOffsetClauseError):
         await service.list_entries(action_type=action_type, page=0)
+
+
+async def test_list_entries_rejects_negative_page(service, pool):
+    marker = uuid4().hex[:8]
+    action_type = f"test.negpage.{marker}"
+    await _record(pool, action_type=action_type, target_type="widget", target_id=marker)
+
+    with pytest.raises(asyncpg.exceptions.InvalidRowCountInResultOffsetClauseError):
+        await service.list_entries(action_type=action_type, page=-1)
+
+
+async def test_list_entries_rejects_negative_page_size(service, pool):
+    marker = uuid4().hex[:8]
+    action_type = f"test.negpagesize.{marker}"
+    await _record(pool, action_type=action_type, target_type="widget", target_id=marker)
+
+    with pytest.raises(asyncpg.exceptions.InvalidRowCountInLimitClauseError):
+        await service.list_entries(action_type=action_type, page=1, page_size=-1)
+
+
+async def test_record_audit_log_rejects_action_type_over_varchar_limit(pool):
+    """negative -- `audit_log.action_type`은 VARCHAR(50)(9ec8a1ee28d7). 이
+    한계를 넘는 값은 read service가 아니라 DB 제약이 직접 거부해야 한다 —
+    list_entries가 애초에 조회할 수 없는 부정 상태가 쓰기 시점에 fail-closed로
+    막힌다는 것을 확인한다."""
+    marker = uuid4().hex[:8]
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.exceptions.StringDataRightTruncationError):
+            await record_audit_log(
+                conn,
+                actor_agent="test-actor",
+                action_type=f"test.overflow.{marker}." + "x" * 60,
+                decision_data={"note": "test"},
+                target_type="test",
+                target_id=marker,
+            )
 
 
 async def test_list_entries_page_size_zero_returns_no_items(service, pool):
