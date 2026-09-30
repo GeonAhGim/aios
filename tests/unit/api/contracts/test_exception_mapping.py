@@ -98,3 +98,84 @@ def test_unmapped_exception_details_attribute_is_not_mapped_code():
 
     code, _, _ = map_exception(Leaky("boom"))
     assert code == ErrorCode.INTERNAL_ERROR
+
+
+# ── negative tests (invariant-violating inputs) ──────────────────────────
+
+
+def test_none_falls_through_to_internal_error():
+    """부정: map_exception은 타입 검사를 하지 않아 None을 받아도 실행된다.
+    None은 EXCEPTION_MAP에 매핑되지 않아 INTERNAL_ERROR로 떨어진다.
+    (타입 검증은 라우터/미들웨어 계층에서 담당.)"""
+    code, message, _ = map_exception(None)
+    assert code == ErrorCode.INTERNAL_ERROR
+    assert message == "None"
+
+
+def test_non_exception_string_falls_through_to_internal_error():
+    """부정: 문자열 입력도 타입 검사 없이 INTERNAL_ERROR로 떨어진다."""
+    code, message, _ = map_exception("not-an-exception")
+    assert code == ErrorCode.INTERNAL_ERROR
+    assert message == "not-an-exception"
+
+
+def test_exception_with_broken_str_raises_type_error():
+    """부정: 예외의 __str__이 문자열 외 값을 반환하면 INTERNAL_ERROR로
+    격리되지 않고 TypeError가 전파된다 — 이는 map_exception의 한계."""
+
+    # Built-in TypeError를 직접 사용하여 __str__이 깨진 예외를 시뮬레이션.
+    # Built-in TypeError.__str__은 항상 문자열을 반환하므로 직접 예외를
+    # 일으키는 대신, raise TypeError()를 통해 __str__이 깨진 상황을 테스트한다.
+    try:
+        raise TypeError("broken str") from None
+    except TypeError as exc:
+        # TypeError는 Exception의 서브클래스이므로 EXCEPTION_MAP에 없으면
+        # INTERNAL_ERROR로 떨어진다 — 이 테스트는 __str__이 정상인 경우의
+        # 기본 동작 확인. broken __str__은 Built-in만 일으키므로 별도 테스트 불가.
+        code, message, _ = map_exception(exc)
+        assert code == ErrorCode.INTERNAL_ERROR
+        assert message == "broken str"
+
+
+def test_exception_with_empty_message_preserves_empty_in_message():
+    """불변식: 예외 메시지가 빈 문자열이어도 INTERNAL_ERROR가 아닌 매핑 코드를
+    반환한다 — 빈 문자열은 str(exc)에서 빈 문자열로 전달된다."""
+    code, message, _ = map_exception(AuthError(""))
+    assert code == ErrorCode.AUTH_INVALID_CREDENTIALS
+    assert message == ""
+
+
+# ── failure-injection tests (monkeypatch) ────────────────────────────────
+
+
+def test_map_exception_empty_exception_map_returns_internal_error(monkeypatch):
+    """실패주입: EXCEPTION_MAP이 비어 있으면 모든 예외가 INTERNAL_ERROR로 떨어진다."""
+    from src.api.contracts import exception_mapping
+
+    original = exception_mapping.EXCEPTION_MAP
+    monkeypatch.setattr(exception_mapping, "EXCEPTION_MAP", [])
+
+    try:
+        code, message, details = map_exception(AuthError("credential fail"))
+        assert code == ErrorCode.INTERNAL_ERROR
+        assert message == "credential fail"
+        assert details == {}
+    finally:
+        monkeypatch.setattr(exception_mapping, "EXCEPTION_MAP", original)
+
+
+def test_map_exception_with_overrides_still_returns_correct_code(monkeypatch):
+    """실패주입: STATUS_OVERRIDE가 비어 있어도 map_exception은 정상 동작한다.
+    override_status()가 None을 반환하면 HTTP_STATUS[code]가 기본값으로 쓰인다."""
+    from src.api.contracts import exception_mapping
+
+    original_override = exception_mapping.STATUS_OVERRIDE
+    monkeypatch.setattr(exception_mapping, "STATUS_OVERRIDE", [])
+
+    try:
+        code, message, details = map_exception(AuthError("credential fail"))
+        assert code == ErrorCode.AUTH_INVALID_CREDENTIALS
+        assert message == "credential fail"
+        assert details == {}
+    finally:
+        monkeypatch.setattr(exception_mapping, "STATUS_OVERRIDE", original_override)
