@@ -27,7 +27,10 @@ import asyncio
 import functools
 from datetime import datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from typing import Any, cast
+from uuid import UUID, uuid4
+
+import asyncpg
 
 from src.core.observability.metric_names import (
     POSITIONS_RECONCILIATION_RESYNC_FAILURE_COUNT_TOTAL,
@@ -54,7 +57,7 @@ from src.foundation.reconciliation.adapters.postgres_repository import (
     PostgresReconciliationRepository,
 )
 from src.foundation.reconciliation.application.run_reconciliation import run_reconciliation
-from src.foundation.reconciliation.contracts.v1 import Classification
+from src.foundation.reconciliation.contracts.v1 import Classification, ReconciliationRunView
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import (
@@ -70,7 +73,7 @@ def _clock() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _recon(pool):
+def _recon(pool: asyncpg.Pool) -> Any:
     return functools.partial(
         run_reconciliation,
         PostgresReconciliationRepository(pool),
@@ -91,7 +94,7 @@ class FakeAdapter:
         return self._balances
 
 
-def _key(tenant_id, asset: str) -> str:
+def _key(tenant_id: UUID, asset: str) -> str:
     return str(
         PositionKey(
             portfolio_id=default_portfolio_id(tenant_id),
@@ -103,7 +106,9 @@ def _key(tenant_id, asset: str) -> str:
     )
 
 
-async def _open_with_fill(pool, *, tenant_id, account_id, position_key: str, quantity: Decimal):
+async def _open_with_fill(
+    pool: asyncpg.Pool, *, tenant_id: UUID, account_id: UUID, position_key: str, quantity: Decimal
+) -> None:
     await open_position(
         pool,
         tenant_id=tenant_id,
@@ -138,7 +143,7 @@ async def _open_with_fill(pool, *, tenant_id, account_id, position_key: str, qua
         )
 
 
-async def test_resync_heals_stale_snapshot_cache(pool):
+async def test_resync_heals_stale_snapshot_cache(pool: asyncpg.Pool) -> None:
     """Case 1 — a corrupted `pos_snapshot` cache (drifted from the journal)
     disagrees with the provider; re-folding from the journal heals it and the
     account re-verifies HEALTHY."""
@@ -167,7 +172,7 @@ async def test_resync_heals_stale_snapshot_cache(pool):
 
     connection_id = uuid4()
     provider = ExchangeBalanceSource(
-        {connection_id: FakeAdapter([_balance(asset, Decimal("100"))])}
+        cast(dict[UUID, Any], {connection_id: FakeAdapter([_balance(asset, Decimal("100"))])})
     )
 
     result = await reconcile_account(
@@ -196,7 +201,9 @@ async def test_resync_heals_stale_snapshot_cache(pool):
     assert quantity == Decimal("100"), "재동기화 후 내부 스냅샷은 저널이 접은 값이어야 한다"
 
 
-async def test_resync_failure_keeps_material_mismatch_for_manual_intervention(pool):
+async def test_resync_failure_keeps_material_mismatch_for_manual_intervention(
+    pool: asyncpg.Pool,
+) -> None:
     """Case 2 — the journal genuinely lacks the exchange's fill (a real break,
     not a cache bug). Re-folding cannot manufacture the missing entry, so the
     resync fails and the existing MATERIAL_MISMATCH / manual path survives."""
@@ -217,7 +224,9 @@ async def test_resync_failure_keeps_material_mismatch_for_manual_intervention(po
 
     connection_id = uuid4()
     # Provider reports 50 — the journal (truth) says 100, so no re-fold heals this.
-    provider = ExchangeBalanceSource({connection_id: FakeAdapter([_balance(asset, Decimal("50"))])})
+    provider = ExchangeBalanceSource(
+        cast(dict[UUID, Any], {connection_id: FakeAdapter([_balance(asset, Decimal("50"))])})
+    )
 
     result = await reconcile_account(
         tenant_id,
@@ -245,7 +254,7 @@ async def test_resync_failure_keeps_material_mismatch_for_manual_intervention(po
     assert quantity == Decimal("100"), "저널 진실값 그대로 남아야 한다(날조 금지)"
 
 
-async def test_resync_disabled_by_default_preserves_prior_behavior(pool):
+async def test_resync_disabled_by_default_preserves_prior_behavior(pool: asyncpg.Pool) -> None:
     """Negative — omitting `journal`/`clock` (existing callers: scheduler.py,
     pre-F1 tests) must not attempt any resync; MATERIAL_MISMATCH is returned
     exactly as before this leaf, with neither resync metric touched."""
@@ -273,7 +282,7 @@ async def test_resync_disabled_by_default_preserves_prior_behavior(pool):
 
     connection_id = uuid4()
     provider = ExchangeBalanceSource(
-        {connection_id: FakeAdapter([_balance(asset, Decimal("100"))])}
+        cast(dict[UUID, Any], {connection_id: FakeAdapter([_balance(asset, Decimal("100"))])})
     )
 
     result = await reconcile_account(
@@ -295,7 +304,7 @@ async def test_resync_disabled_by_default_preserves_prior_behavior(pool):
 _CONCURRENCY_REPEAT = 100
 
 
-async def test_concurrent_resync_is_serialized_by_position_lock(pool):
+async def test_concurrent_resync_is_serialized_by_position_lock(pool: asyncpg.Pool) -> None:
     """Case 3 — two concurrent `reconcile_account` calls against the same
     `position_key` must not corrupt each other: `rebuild_snapshot`'s
     `pos_journal` advisory lock serializes the writes, so both calls finish
@@ -339,10 +348,10 @@ async def test_concurrent_resync_is_serialized_by_position_lock(pool):
         connection_id_a = uuid4()
         connection_id_b = uuid4()
         provider_a = ExchangeBalanceSource(
-            {connection_id_a: FakeAdapter([_balance(asset, Decimal("100"))])}
+            cast(dict[UUID, Any], {connection_id_a: FakeAdapter([_balance(asset, Decimal("100"))])})
         )
         provider_b = ExchangeBalanceSource(
-            {connection_id_b: FakeAdapter([_balance(asset, Decimal("100"))])}
+            cast(dict[UUID, Any], {connection_id_b: FakeAdapter([_balance(asset, Decimal("100"))])})
         )
 
         results = await asyncio.gather(
@@ -377,8 +386,14 @@ async def test_concurrent_resync_is_serialized_by_position_lock(pool):
             if isinstance(outcome, BaseException):
                 raise outcome
 
-        assert results[0].aggregate_classification == Classification.HEALTHY
-        assert results[1].aggregate_classification == Classification.HEALTHY
+        assert (
+            isinstance(results[0], ReconciliationRunView)
+            and results[0].aggregate_classification == Classification.HEALTHY
+        )
+        assert (
+            isinstance(results[1], ReconciliationRunView)
+            and results[1].aggregate_classification == Classification.HEALTHY
+        )
 
         async with pool.acquire() as conn:
             quantity = await conn.fetchval(
