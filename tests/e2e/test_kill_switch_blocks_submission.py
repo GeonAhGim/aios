@@ -99,6 +99,80 @@ async def test_active_kill_switch_denies_order_submission_end_to_end(pool: async
     assert exists is None  # 거부된 시도는 orders에 흔적을 남기지 않는다
 
 
+async def test_tenant_scoped_kill_switch_denies_order_submission(pool: asyncpg.Pool) -> None:
+    """부정 테스트 #2 — ACCOUNT가 아니라 TENANT 스코프로 활성화된 kill
+    switch도 같은 제출을 거부해야 한다(§3.6 5쌍 fence 중 TENANT 항목이
+    실제로 평가되는지 증명 — ACCOUNT 하나만 보고 있다면 이 테스트가
+    FAIL한다)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await create_execution(pool, user_id)
+    adapter = _make_adapter()
+
+    risk_repo = PostgresRiskGateRepository(pool)
+    await activate_safety_control(
+        risk_repo,
+        tenant_id=user_id,
+        actor_subject_id=user_id,
+        actor_is_admin=True,  # TENANT는 self-service 불가(운영자 전용, activate_safety_control.py)
+        scope=SafetyScope.TENANT,
+        scope_ref=str(user_id),
+        reason="H-7a e2e — TENANT 스코프 kill switch 제출 거부",
+    )
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    order = _make_order(execution_id, "kill-switch-deny-tenant")
+
+    with pytest.raises(OrderDeniedByRiskGateError) as exc_info:
+        await submit_order(order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate)
+
+    assert exc_info.value.reason_codes == ("RISK_KILL_SWITCH_ACTIVE_TENANT",)
+    assert adapter.place_order_call_count == 0
+
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM orders WHERE client_order_id = $1", order.client_order_id
+        )
+    assert exists is None
+
+
+async def test_strategy_deployment_scoped_kill_switch_denies_order_submission(
+    pool: asyncpg.Pool,
+) -> None:
+    """부정 테스트 #3 — 이 execution 하나만 겨냥한 STRATEGY_DEPLOYMENT
+    스코프 kill switch(scope_ref=f"exec:{execution_id}")도 제출을
+    거부해야 한다(§3.6 fence_pairs_for의 5번째 쌍이 실제로 평가되는지
+    증명)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await create_execution(pool, user_id)
+    adapter = _make_adapter()
+
+    risk_repo = PostgresRiskGateRepository(pool)
+    await activate_safety_control(
+        risk_repo,
+        tenant_id=user_id,
+        actor_subject_id=user_id,
+        actor_is_admin=True,  # STRATEGY_DEPLOYMENT는 self-service 불가(운영자 전용)
+        scope=SafetyScope.STRATEGY_DEPLOYMENT,
+        scope_ref=f"exec:{execution_id}",
+        reason="H-7a e2e — STRATEGY_DEPLOYMENT 스코프 kill switch 제출 거부",
+    )
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    order = _make_order(execution_id, "kill-switch-deny-strategy")
+
+    with pytest.raises(OrderDeniedByRiskGateError) as exc_info:
+        await submit_order(order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate)
+
+    assert exc_info.value.reason_codes == ("RISK_KILL_SWITCH_ACTIVE_STRATEGY_DEPLOYMENT",)
+    assert adapter.place_order_call_count == 0
+
+    async with pool.acquire() as conn:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM orders WHERE client_order_id = $1", order.client_order_id
+        )
+    assert exists is None
+
+
 async def test_without_active_kill_switch_same_order_is_allowed_and_fills(
     pool: asyncpg.Pool,
 ) -> None:
