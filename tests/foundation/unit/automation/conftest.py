@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
 import pydantic
@@ -190,7 +191,7 @@ def test_make_candle_rejects_non_numeric_close() -> None:
             open=Decimal("1"),
             high=Decimal("1"),
             low=Decimal("1"),
-            close="not-a-number",  # type: ignore[arg-type]
+            close=cast(Decimal, "not-a-number"),
             volume=Decimal("1"),
             open_time=_EPOCH,
             close_time=_EPOCH + timedelta(days=1),
