@@ -1008,6 +1008,29 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to fix; the repeat is
     fleet-code re-escalation, not this repo.
 
+41. A fifth `e2e` (H-7b smoke) `[health:ci_red_systemic]` leaf (task-9547) citing the identical
+    repeat set #27 (task-9480) and #33 (task-9509) already closed — task-9547's spec names
+    task-8929, task-8952, task-9132, task-9253 verbatim, the same four leaves both prior systemic
+    leaves already root-caused: task-8846/task-8952 were real, already-merged fixes (test-sync gap,
+    webServer prebuild timeout); task-8929/task-9132 were contaminated leads (a transient network
+    outage and a worktree lagging an already-merged fix). Reconfirmed on this worktree (HEAD synced
+    past task-9054's `0c6f4ff5`, `git log --oneline -5 -- frontend/playwright.config.ts` shows no
+    commits since): `npm run build:e2e --workspace=apps/web` succeeds in ~6s, and the exact H-7b
+    smoke command (`npm exec -- playwright test e2e/backtest-run.spec.ts
+    e2e/chart-indicator-overlay.spec.ts e2e/demo-onboarding-flow.spec.ts
+    e2e/order-submission.spec.ts --retries=1 --trace=on-first-retry --project=chromium`) passes
+    5/5 in 25.5s, well under the 180s `webServer.timeout`. No script/config change made — this is
+    the identical fleet-code defect already named for ten other gates (#17-#26, #30-#31, #33-#35,
+    #37): `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off
+    the same stale repeat set instead of checking whether a prior systemic leaf (task-9152 or
+    task-9480/#27/#33) already closed the identical question, out of a repo worker's edit scope
+    (§4). Before working a future `e2e` correction leaf: run the H-7b smoke command above first —
+    if green, and the cited repeat leaf ids match an already-closed systemic leaf's set
+    (task-9152, task-9480/#27, task-9509/#33, or this entry), close as noop citing all of them
+    rather than re-investigating a fourth time. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2) — design is sound and already fixed; the remaining defect is fleet
+    code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
