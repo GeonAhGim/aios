@@ -787,6 +787,36 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     B-2) — the remaining fix scope (correlating coverage swings with pytest's own exit summary,
     not just `coverage.xml`'s denominator) belongs to fleet CI wiring, not this script.
 
+33. A fourth `e2e` (H-7b smoke) `[health:ci_red_systemic]` leaf (task-9509) on a question two
+    prior systemic leaves already closed — task-9152 (first systemic leaf) root-caused every
+    repeat in its window (task-8846 test-sync gap, task-8952 webServer prebuild timeout, both
+    fixed and merged; task-8929/task-9132 were contaminated leads — a transient network outage and
+    a worktree lagging an already-merged fix, respectively) and task-9480 (second systemic leaf,
+    recorded as #27 above) reconfirmed the design sound against a newer repeat set
+    (task-8929, task-8952, task-9132, task-9253) with a fresh green run (5 passed, 55.6s). This
+    leaf (task-9509) was asked to investigate the *same* four leaves task-9480 already closed.
+    `esc-ci-e2e.json` itself shows `status: "resolved"`, `last_seen: "2026-09-29T21:48:12Z"`, and
+    its `owner`/`parent` point at task-9253 (the last real fix task, done ~00:08Z) — yet
+    `auto_actions` kept appending `"3x-repeat CI red"` every 15-30 min from `06:17:19Z` through
+    `10:56:51Z` (54 entries total), more than 4 hours after task-9480/task-9284 had already
+    reconfirmed green (06:28-06:34Z), without creating any further fix task in that window. A
+    fresh reproduction on this worktree (synced to `9583f950`) confirms the design is still
+    unchanged and sound: `frontend/playwright.config.ts` has no commits since task-9054
+    (`0c6f4ff5`, already covered by #27/#30), `npm run build:e2e --workspace=apps/web` succeeds in
+    ~4.7s, and the exact H-7b smoke command
+    (`npm exec -- playwright test e2e/backtest-run.spec.ts e2e/chart-indicator-overlay.spec.ts
+    e2e/demo-onboarding-flow.spec.ts e2e/order-submission.spec.ts --retries=1
+    --trace=on-first-retry --project=chromium`) passes 5/5 in 1.4m, well under the 180s
+    `webServer.timeout`. This is the identical fleet-code defect already named for eight other
+    gates (#17-#26, #30): `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule logging repeat
+    events (and previously, spawning fix tasks) off a stale/already-`resolved` escalation snapshot
+    instead of re-checking current HEAD or a prior systemic leaf's resolution first, out of a repo
+    worker's edit scope (§4). Before working a future `e2e` correction leaf: run the H-7b smoke
+    command above first — if green, and a systemic leaf (task-9152 or task-9480) already closed
+    the same repeat set, close as noop citing both plus this entry rather than re-investigating a
+    third time. No baseline/timeout relief made (DECISION_GUIDELINES B-2) — design is sound and
+    already fixed; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
