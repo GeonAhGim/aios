@@ -22,6 +22,7 @@ elsewhere), so it is surfaced as `RefreshSessionRevokedError` /
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
@@ -29,7 +30,10 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
+from src.core.logging.audit_log import record_audit_log
 from src.services.auth.tokens import AuthLevel
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -152,6 +156,37 @@ def verify_principal_binding(
         )
 
 
+async def _record_reuse_detected_audit(
+    conn: asyncpg.Connection, session_id: UUID, current: asyncpg.Record | None
+) -> None:
+    """Records the named audit event (`auth.refresh_reuse_detected`) required by
+    L4 §3.4 — best-effort. The session is already revoked by the time this
+    runs, so a backend write failure here (WORM outage, etc.) must not undo
+    the revoke or block `RefreshReuseDetected` propagation (CLAUDE.md
+    fail-closed: revoke first, audit is best-effort). `refresh_hash`/plaintext
+    tokens never go into `decision_data` — only `session_id` identifies the
+    target."""
+    try:
+        await record_audit_log(
+            conn,
+            actor_agent=str(current["user_id"]) if current is not None else "unknown",
+            action_type="auth.refresh_reuse_detected",
+            user_id=current["user_id"] if current is not None else None,
+            target_type="auth_session",
+            target_id=str(session_id),
+            decision_data={
+                "reason": "refresh_reuse",
+                "tenant_id": str(current["tenant_id"]) if current is not None else None,
+            },
+        )
+    except Exception:  # noqa: BLE001 — best-effort, revoke already completed
+        logger.exception(
+            "session_id=%s: failed to record auth.refresh_reuse_detected audit "
+            "event (revoke already completed, not re-raising)",
+            session_id,
+        )
+
+
 async def rotate_refresh(
     conn: asyncpg.Connection,
     session_id: UUID,
@@ -175,7 +210,8 @@ async def rotate_refresh(
         )
     except ConcurrencyConflictError as exc:
         current = await conn.fetchrow(
-            "SELECT revoked_at, expires_at FROM auth_session WHERE id = $1", session_id
+            "SELECT user_id, tenant_id, revoked_at, expires_at FROM auth_session WHERE id = $1",
+            session_id,
         )
         if current is not None and current["revoked_at"] is not None:
             raise RefreshSessionRevokedError(
@@ -187,6 +223,7 @@ async def rotate_refresh(
                 f"session_id={session_id}: 회전 시도 중 절대 만료 시각을 넘겼습니다"
             ) from exc
         await revoke(conn, session_id, reason="refresh_reuse")
+        await _record_reuse_detected_audit(conn, session_id, current)
         raise RefreshReuseDetected(
             f"session_id={session_id}: refresh_hash 재사용 감지 — 세션을 revoke했습니다"
         ) from exc
