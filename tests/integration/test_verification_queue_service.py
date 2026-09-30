@@ -1,4 +1,5 @@
 """18.1 통합테스트 — 실제 dev DB 대상."""
+
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -98,3 +99,60 @@ async def test_no_pending_listings_returns_empty_not_error(service, pool):
     queue = await service.list_pending(verifier)
 
     assert isinstance(queue, list)
+
+
+async def test_listed_listing_excluded_from_queue(service, pool):
+    """negative — 이미 승인되어 status='LISTED'가 된 리스팅은 대기열
+    불변식(PENDING_VERIFICATION만 노출) 위반이므로 다시 노출되면 안 된다."""
+    seller = await create_test_user(pool)
+    verifier = await create_test_user(pool)
+    listing = await _submit_for_verification(pool, seller)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_listings SET status = 'LISTED' WHERE id = $1", listing.id
+        )
+
+    queue = await service.list_pending(verifier)
+
+    assert all(item.listing_id != listing.id for item in queue)
+
+
+async def test_delisted_listing_excluded_from_queue(service, pool):
+    """negative — status='DELISTED'인 리스팅은 대기열에 노출되면 안 된다."""
+    seller = await create_test_user(pool)
+    verifier = await create_test_user(pool)
+    listing = await _submit_for_verification(pool, seller)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_listings SET status = 'DELISTED' WHERE id = $1", listing.id
+        )
+
+    queue = await service.list_pending(verifier)
+
+    assert all(item.listing_id != listing.id for item in queue)
+
+
+async def test_malformed_verifier_id_raises_instead_of_silently_matching(service, pool):
+    """negative — verifier_user_id는 UUID 컬럼과 비교되는 불변식을 갖는다.
+    형식이 깨진 값(uuid로 캐스팅 불가한 문자열)을 넣으면 조용히 빈 목록을
+    반환하는 대신 예외를 던져야 한다(잘못된 verifier로 오탐 없이 빈 큐를
+    반환하면 "queue가 비어 있다"는 신호와 "verifier id가 틀렸다"는 신호가
+    구분되지 않아 위험하다)."""
+    with pytest.raises(asyncpg.exceptions.DataError):
+        await service.list_pending("not-a-valid-uuid")  # type: ignore[arg-type]
+
+
+async def test_list_pending_propagates_db_failure_instead_of_returning_empty(service, monkeypatch):
+    """실패주입 — pool.acquire()가 예외를 던지면(연결 장애 등) list_pending은
+    그 예외를 그대로 전파해야 한다. 여기서 예외를 삼키고 빈 리스트를 반환하면
+    "검증 대기열이 비었다"와 "DB 장애로 조회 실패"가 구분되지 않아
+    fail-closed 기본 태세(CLAUDE.md §3) 위반이다."""
+
+    class _BoomAcquire:
+        def acquire(self):
+            raise ConnectionError("simulated pool exhaustion")
+
+    monkeypatch.setattr(service, "_pool", _BoomAcquire())
+
+    with pytest.raises(ConnectionError):
+        await service.list_pending(uuid4())
