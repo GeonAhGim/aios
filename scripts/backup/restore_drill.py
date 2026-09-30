@@ -513,7 +513,7 @@ def run_drill(
             if reason is None:
                 env = {**pg_env, "DATABASE_URL": restore_dsn, "TEST_DATABASE_URL": restore_dsn}
                 replay_phase_start = clock()
-                rc, tail = run_cmd([python_bin, "scripts/replay_verify.py"], repo_root, env, 300)
+                rc, tail = run_cmd([python_bin, "-m", "scripts.replay_verify"], repo_root, env, 300)
                 replay_elapsed = round(clock() - replay_phase_start, 1)
                 steps["replay_verify"] = {
                     "ok": rc == 0,

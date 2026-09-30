@@ -67,7 +67,7 @@ def _dispatching_run_cmd(
             if "pg_drop_replication_slot" in cmd[-1]:
                 return drop_slot_rc, "DROP SLOT"
             return recovery_rc, recovery_out
-        if cmd[0] == "python" and "replay_verify.py" in cmd[-1]:
+        if cmd[0] == "python" and "scripts.replay_verify" in cmd[-1]:
             return replay_rc, "replay done"
         raise AssertionError(f"unexpected cmd {cmd}")
 
@@ -262,7 +262,7 @@ def test_recovery_slower_than_old_60s_process_start_timeout_still_succeeds(tmp_p
             return 0, next(recovery_outputs)
         if cmd[0] == "psql":
             return 0, ""  # 복제 슬롯 정리 쿼리
-        if cmd[0] == "python" and "replay_verify.py" in cmd[-1]:
+        if cmd[0] == "python" and "scripts.replay_verify" in cmd[-1]:
             return 0, "replay done"
         raise AssertionError(f"unexpected cmd {cmd}")
 
@@ -306,6 +306,45 @@ def test_replay_verify_mismatch_fails_drill_and_still_cleans_up(tmp_path: Path):
     assert result["ok"] is False
     assert result["steps"]["replay_verify"]["ok"] is False
     assert any(c[0] == "pg_ctl" and c[1] == "stop" for c in calls)
+
+
+def test_replay_verify_invoked_as_module_not_bare_script(tmp_path: Path):
+    """task-9912 근본 원인 재현: task-7877(replay_verify.py LOC 압축)이 `from scripts import
+    replay_verify_db_pressure`를 도입한 뒤로, `python scripts/replay_verify.py`처럼 파일
+    경로로 직접 실행하면 sys.path[0]이 scripts/ 자신이 돼 `scripts` 패키지를 못 찾고
+    ImportError로 죽는다(실제 드릴 재현: rc=1, "cannot import name 'replay_verify_db_pressure'
+    from 'scripts'"). `-m scripts.replay_verify`로 모듈 실행해야 repo_root가 sys.path에
+    남아 패키지 임포트가 깨지지 않는다 -- 이 테스트는 바로 그 잘못된 호출 형태로
+    되돌아가면 실패 주입으로 잡는다."""
+
+    def run_cmd(cmd, cwd, env, timeout):
+        if cmd[0] == "pg_ctl" and cmd[1] == "start":
+            return 0, "server started"
+        if cmd[0] == "pg_ctl" and cmd[1] == "status":
+            return 0, "server is running"
+        if cmd[0] == "pg_ctl" and cmd[1] == "stop":
+            return 0, "server stopped"
+        if cmd[0] == "psql" and "pg_is_in_recovery" in cmd[-1]:
+            return 0, "f"
+        if cmd[0] == "psql":
+            return 0, ""  # 복제 슬롯 정리 쿼리
+        if cmd[0] == "python":
+            # 실제 replay_verify.py의 회귀 재현: 파일 경로 직접 실행(bare .py)이면
+            # ImportError, 모듈 형태(-m scripts.replay_verify)면 성공.
+            if cmd[1:] == ["scripts/replay_verify.py"]:
+                return (
+                    1,
+                    "ImportError: cannot import name 'replay_verify_db_pressure' "
+                    "from 'scripts' (unknown location)",
+                )
+            if cmd[1:] == ["-m", "scripts.replay_verify"]:
+                return 0, "replay done"
+        raise AssertionError(f"unexpected cmd {cmd}")
+
+    result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
+
+    assert result["ok"] is True, result["steps"]
+    assert result["steps"]["replay_verify"]["ok"] is True
 
 
 # --- 순수 헬퍼 ------------------------------------------------------------------
