@@ -2,11 +2,14 @@
 
 httpx.MockTransport 기반 검증(test_bitget_adapter.py와 동일 원칙).
 """
+
 import json
 from decimal import Decimal
 
 import httpx
+import pytest
 
+from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -148,3 +151,72 @@ async def test_get_copy_trading_profit_summary_returns_dict():
     summary = await adapter.get_copy_trading_profit_summary()
 
     assert summary == {"totalProfit": "500"}
+
+
+# ── Negative tests (불변식 위반 입력 거부) ──────────────────────────────────
+
+
+async def test_follow_copy_trader_rejects_unknown_error_code_as_retryable():
+    """00000이 아닌 미지의 바디 코드는 SERVER_ERROR로 분류돼 RetryableExchangeError를 raise한다
+    (classify_body_code의 기본 fail-closed 정책, error_codes.py 문서화 참조)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/copy/mix-follower/setting"
+        return _json_response(
+            {"code": "99999", "msg": "internal error", "requestTime": 1, "data": None}
+        )
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(RetryableExchangeError):
+        await adapter.follow_copy_trader("t-1")
+
+
+async def test_follow_copy_trader_rejects_signature_error_as_fatal():
+    """서명 오류 코드(40012)는 AUTH로 분류돼 FatalExchangeError를 raise한다 — 재시도해도
+    영구히 실패하므로 RetryableExchangeError로 잘못 승격되면 안 된다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/copy/mix-follower/setting"
+        return _json_response(
+            {"code": "40012", "msg": "invalid sign", "requestTime": 1, "data": None}
+        )
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(FatalExchangeError):
+        await adapter.follow_copy_trader("t-1")
+
+
+async def test_unfollow_copy_trader_rejects_api_error_instead_of_returning_false():
+    """언팔로우 요청이 에러 코드를 반환하면 `_request` 단계에서 예외가 나야 한다 — 불변식
+    위반(에러 응답)을 조용히 False로 삼켜서는 안 된다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v2/copy/mix-follower/close-settings"
+        return _json_response(
+            {"code": "99999", "msg": "internal error", "requestTime": 1, "data": None}
+        )
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(RetryableExchangeError):
+        await adapter.unfollow_copy_trader("t-1")
+
+
+# ── 실패주입(failure injection) ──────────────────────────────────────────────
+
+
+async def test_follow_copy_trader_propagates_retryable_error_from_request(monkeypatch):
+    """`_request`가 의존성 계층에서 RetryableExchangeError를 raise하면 copy trading
+    메서드는 이를 삼키지 않고 그대로 전파해야 한다."""
+    adapter = _make_adapter(
+        lambda request: _json_response(
+            {"code": "00000", "msg": "success", "requestTime": 1, "data": {}}
+        )
+    )
+
+    async def fake_request(*args, **kwargs):
+        raise RetryableExchangeError("injected upstream failure")
+
+    monkeypatch.setattr(adapter, "_request", fake_request)
+
+    with pytest.raises(RetryableExchangeError, match="injected upstream failure"):
+        await adapter.follow_copy_trader("t-1")
