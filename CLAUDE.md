@@ -502,6 +502,36 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     state, not this repo's script or test suite. No baseline/timeout relief made
     (DECISION_GUIDELINES B-2).
 
+25. `code_ratchets` 24h 6-repeat systemic investigation (task-9475, split into task-9476/9477/9478)
+    reconfirms #17-#23's diagnosis for a seventh gate. `scripts/check_code_ratchets.py` /
+    `code-ratchets-baseline.json` have no design defect: a plain
+    `python scripts/check_code_ratchets.py` on this worktree (synced past task-9145's `--near`
+    tool) prints `OK` and matches baseline exactly on all 5 metrics
+    (`skip_xfail=3 todo_fixme_xxx=0 not_implemented_error=27 loc_over_500=42 loc_over_800=3
+    loc_over_1000=0`). `esc-ci-code_ratchets.json` itself shows `status: "resolved"`,
+    `resolved_sha: "0871f0422b10..."`, `closed_at: "2026-09-30T02:22:23Z"` (after task-9010/9011
+    fixed the violation) — yet its `auto_actions` log kept creating further fix tasks off the
+    *same* `detail_hash: "1cf5248487b4"` (task-9010's original hash) hours later: task-9252 at
+    05:57:07Z and task-9459 at 09:42:04Z, both confirmed noop by their own investigation, followed
+    by another `"3x-repeat CI red"` log at 10:07:20Z — the exact #17/#18/#19/#20/#21/#22/#23
+    pattern of `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-triggering off a stale/
+    already-resolved escalation snapshot instead of re-checking current HEAD first. Separately,
+    the *reason* real violations recur this often (unlike a one-off design bug) is #12's
+    near-threshold churn: `--near 30` on this worktree lists 10 test files sitting 0-6 lines below
+    the `loc_over_500` cap — any D2/D3 evidence addition (§5, ≥3 negative tests per leaf) tips one
+    over, which is process churn from the DoD mandate colliding with the file-size ratchet, not a
+    threshold or measurement-logic defect (task-9145's `--near` tool already mitigates this by
+    surfacing it pre-commit). Both root causes were already independently reached by sibling split
+    leaves task-9476 and task-9477. Fleet code under `C:\aios\pm` is out of a repo worker's edit
+    scope (§4); an ops task would need the same fix #23 already specifies (skip repeat-count
+    increments / further fix-task creation once `status == "resolved"`, or close the escalation
+    outright on resolution). Before working a new `code_ratchets` leaf: run
+    `python scripts/check_code_ratchets.py` locally first — if `OK` and matching baseline, and the
+    escalation record already shows `status: "resolved"`, close as noop citing task-9010/9011,
+    task-9476/9477, and this entry rather than re-investigating. No baseline/threshold relief made
+    (DECISION_GUIDELINES B-2) — script/baseline design is sound; the remaining defect is fleet
+    code.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
