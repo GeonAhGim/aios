@@ -1234,6 +1234,32 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to fix; the repeat is
     fleet-code re-escalation, not this repo.
 
+49. A seventh `coverage` `[health:ci_red_systemic]` leaf (task-9586) citing a repeat set
+    (task-9052, task-9282, task-9461, task-9575) entirely covered by four prior systemic leaves
+    — #21 (task-9052/task-9147/task-9282), #26 (task-9479, citing task-9461), #32 (task-9508,
+    reconfirming the same `27b5fe61` bisect culprit), and #44 (task-9575, sha `7ad655e6`, also a
+    test-only commit). `coverage-baseline.txt` (`94.83`/`52977`) and `scripts/coverage_ratchet.py`
+    are unchanged since task-9120's trusted-write gate fix (commit `3bbf20326`) — reconfirmed on
+    this worktree (HEAD `7219ef479`, `git status` clean, `git log --oneline -3 --
+    scripts/coverage_ratchet.py coverage-baseline.txt` shows no commits since `3bbf20326`). The
+    root cause remains the two-part answer #21/#26/#32/#44 already gave: (a) a local partial
+    `pytest --cov=src` run dying under shared-host DB-fixture contention shrinks the *numerator*
+    (lines executed) while `lines-valid` (the ratio-floor's own denominator, counting only
+    *importable* statements) stays high enough to slip past the 0.5 floor — not independently
+    fixable from `coverage.xml` alone since Cobertura carries no pytest pass/fail signal, and the
+    real fix (correlating a coverage swing with pytest's own exit summary) belongs to fleet CI
+    wiring (`pm/local_ci.py` / `.github/workflows/quality.yml`), out of a repo worker's edit scope
+    (§4); (b) `esc-ci-coverage.json` re-polling and re-spawning fix/systemic leaves off a stale
+    detail hash after a prior systemic leaf already closed the identical question — the same
+    fleet-code pattern named 10+ times (#17-#26, #30-#41, #44, #48) in
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule. No script/baseline change made. Before
+    working a future `coverage` leaf: check whether the escalation's cited sha is a test-only
+    commit (as it has been every time: `4d5ebed5` in #21/#22, `27b5fe61` in #26/#32, `7ad655e6` in
+    #44, and this entry's set) and whether `coverage-baseline.txt` is still `94.83`/`52977` — if
+    both hold, close as noop citing task-9052, task-9508 (#32), task-9575 (#44), and this entry
+    rather than re-diagnosing. No baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES
+    B-2) — the ratchet design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
