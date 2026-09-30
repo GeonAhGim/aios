@@ -128,6 +128,7 @@ async def test_request_id_context_is_reset_after_downstream_exception():
 # ------------------------------------------------------------------ #
 
 
+@pytest.mark.perf
 async def test_middleware_overhead_stays_within_budget():
     """The middleware only sets a contextvar and echoes a header, so its
     per-request overhead must stay well under a generous 50ms/request
