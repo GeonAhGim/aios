@@ -1,5 +1,6 @@
 """Risk & Safety Gate repository port. domain은 이 Protocol만 알고, 실제 구현
 (adapters/)은 모른다(71번 §4)."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -26,17 +27,24 @@ class RiskGateRepository(Protocol):
         tenant_id: UUID,
         provider_code: str | None = None,
         include_all_providers: bool = False,
+        strategy_deployment_id: UUID | None = None,
     ) -> tuple[SafetyControl, ...]:
         """78번 §2 "active controls compose by most restrictive outcome" —
-        GLOBAL + 이 tenant + (지정 시) 이 provider에 해당하는 ACTIVE 행만
-        반환한다. 다른 tenant/provider의 control은 반환하지 않는다.
+        GLOBAL + 이 tenant + (지정 시) 이 provider + (지정 시) 이
+        strategy_deployment에 해당하는 ACTIVE 행만 반환한다. 다른 tenant/
+        provider/deployment의 control은 반환하지 않는다.
 
         `include_all_providers=True`면 특정 provider_code로 좁히지 않고
         PROVIDER 범위 전체를 반환한다 — 레드팀 #2026-09-02-27 반영. 평가
         시점(evaluate_risk_gate)에는 특정 connection의 provider_code만
         알면 되지만, 운영자 Control Center 목록(projections.py)은 "지금
         걸려있는 모든 통제"를 보여줘야 하므로 특정 provider로 좁히면 안
-        된다."""
+        된다.
+
+        If `strategy_deployment_id` is given, this also includes that
+        deployment's `STRATEGY_DEPLOYMENT`-scope controls as candidates --
+        audit F3 (#2026-09-02-28) fix. If `None` (every existing caller),
+        STRATEGY_DEPLOYMENT is not queried."""
         ...
 
     async def insert_safety_control(
@@ -71,9 +79,7 @@ class RiskGateRepository(Protocol):
         """75번 mandates의 get_cached_decision과 동일 원칙 — 짧은 TTL 캐시."""
         ...
 
-    async def read_fences(
-        self, pairs: tuple[tuple[SafetyScope, str], ...]
-    ) -> FenceSnapshot:
+    async def read_fences(self, pairs: tuple[tuple[SafetyScope, str], ...]) -> FenceSnapshot:
         """78번 §3.6 — 지정된 (scope, scope_ref) 쌍들의 현재 fence 토큰을
         `WHERE (scope,scope_ref) IN (...)` 단일 쿼리로 조회한다(쌍마다 왕복
         하지 않는다). 아직 한 번도 activate되지 않아 행이 없는 쌍은 토큰

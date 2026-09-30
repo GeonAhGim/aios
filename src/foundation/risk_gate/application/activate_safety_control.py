@@ -4,13 +4,18 @@ Spec: AIOSproject 48번 §4, 78번 §3/§4.
 
 78번 §4 "Only authorized operator/risk policy routes may create scoped
 safety controls; user Control Center can invoke permitted pause scope." —
-GLOBAL/PROVIDER/TENANT는 운영자 권한이 필요하고, ACCOUNT(자기 자신 계좌
-정지)만 일반 사용자에게 열려 있다. STRATEGY_DEPLOYMENT는 FND-07(아직 없음)
-없이는 의미 있는 scope_ref가 없어 이 리프에서는 운영자 전용으로 취급한다
-(향후 FND-07이 생기면 배포 소유자에게도 열 수 있다) — 지금 생성해도
-`evaluate_risk_gate()`가 이 범위를 조회하지 않아(#2026-09-02-28) 아직
-어떤 평가에도 영향을 주지 못한다. 의도된 선반영이지 버그는 아니지만,
-호출자는 "생성 성공 = 즉시 집행" 으로 오해하면 안 된다.
+GLOBAL/PROVIDER/TENANT require operator privilege, and only ACCOUNT (pausing
+one's own account) is open to a regular user. STRATEGY_DEPLOYMENT has no
+meaningful scope_ref without FND-07 (not yet built), so this leaf treats it
+as operator-only (once FND-07 exists, it can also open to the deployment's
+owner) -- `evaluate_risk_gate()` now queries this scope when given a
+`strategy_deployment_id` (#2026-09-02-28 / audit F3 fix), but creating one
+today still has no effect on any evaluation: real production callers
+(`start_deployment.py`, `submit_paper_intent.py`) do not pass that argument
+yet (deployment ownership, FND-07, does not exist yet, so a caller has no
+basis to decide "which deployment should this control block"). This is
+intentional groundwork, not a bug, but a caller must not assume "created
+successfully" means "enforced immediately".
 
 레드팀 #2026-09-02-30 — 이 모듈이 만드는 킬스위치는 현재 신규 배포
 시작(`paper_control.start_deployment`/`resume_deployment`)만 막는다.
@@ -36,6 +41,7 @@ import하지 않는다(응용 계층 → 서비스 계층 역방향 의존 금�
 `KillSwitchService`(services/safety/kill_switch_service.py)가 이 훅을 통해
 주입한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -119,9 +125,7 @@ async def activate_safety_control(
                 f"{scope.value} 범위의 안전 통제는 운영자만 걸 수 있습니다."
             )
         if resolved_ref != str(tenant_id):
-            raise UnauthorizedSafetyControlScopeError(
-                "본인 계좌 외의 범위는 지정할 수 없습니다."
-            )
+            raise UnauthorizedSafetyControlScopeError("본인 계좌 외의 범위는 지정할 수 없습니다.")
 
     with bind(trace_id=trace_id) if trace_id is not None else nullcontext():
         control = await repo.insert_safety_control(

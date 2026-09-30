@@ -8,6 +8,7 @@ mandates.evaluate_policy() as-is is the design intent mandates' own
 docstring states ("other bounded contexts (risk_gate, ...) consume mandate
 judgment only through this function").
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -87,10 +88,12 @@ async def evaluate_risk_gate(
     gate_kind: GateKind,
     connection_id: UUID | None = None,
     plan: PolicyEvaluationSubject | None = None,
+    strategy_deployment_id: UUID | None = None,
 ) -> RiskEvaluationView:
     mandate_state_marker = await _mandate_state_marker(mandate_repo, tenant_id)
     fingerprint_payload = (
-        f"{connection_id}|{plan.model_dump_json() if plan is not None else ''}"
+        f"{connection_id}|{strategy_deployment_id}"
+        f"|{plan.model_dump_json() if plan is not None else ''}"
         f"|{mandate_state_marker}"
     )
     fingerprint = compute_subject_fingerprint(str(tenant_id), gate_kind.value, fingerprint_payload)
@@ -125,9 +128,21 @@ async def evaluate_risk_gate(
     # safety control would never be looked up here (referencing
     # list_active_controls' provider_code=None default) -- if a connection
     # exists, its provider's controls must also be checked.
-    active_controls = await repo.list_active_controls(
-        tenant_id=tenant_id, provider_code=provider_code
-    )
+    #
+    # Audit F3 (#2026-09-02-28) — the same applies to strategy_deployment_id:
+    # passed only conditionally (not as a plain kwarg=None) so existing
+    # RiskGateRepository fakes that don't accept this kwarg keep working
+    # unmodified when no deployment is in scope.
+    if strategy_deployment_id is not None:
+        active_controls = await repo.list_active_controls(
+            tenant_id=tenant_id,
+            provider_code=provider_code,
+            strategy_deployment_id=strategy_deployment_id,
+        )
+    else:
+        active_controls = await repo.list_active_controls(
+            tenant_id=tenant_id, provider_code=provider_code
+        )
 
     outcome, reasons, obligations = evaluate_risk(
         RiskEvaluationInput(

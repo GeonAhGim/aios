@@ -9,6 +9,7 @@ insert_safety_control()의 fence 증가는 105번 표준의 conditional_update�
 때문(78번 §3 "increments target fence token" — 여러 요청이 동시에 kill
 switch를 걸어도 전부 성공해야 하고, 각자 서로 다른 토큰을 받아야 한다).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -58,9 +59,7 @@ def _row_to_evaluation(row: asyncpg.Record) -> RiskEvaluation:
     )
 
 
-def _fence_query_parts(
-    pairs: tuple[tuple[SafetyScope, str], ...]
-) -> tuple[str, list[object]]:
+def _fence_query_parts(pairs: tuple[tuple[SafetyScope, str], ...]) -> tuple[str, list[object]]:
     row_values = ", ".join(f"(${i * 2 + 1}, ${i * 2 + 2})" for i in range(len(pairs)))
     flat_params: list[object] = []
     for scope, scope_ref in pairs:
@@ -77,9 +76,7 @@ async def _fetch_fence_snapshot(
         f"WHERE (scope, scope_ref) IN ({row_values})",
         *flat_params,
     )
-    found = {
-        (SafetyScope(row["scope"]), row["scope_ref"]): row["current_token"] for row in rows
-    }
+    found = {(SafetyScope(row["scope"]), row["scope_ref"]): row["current_token"] for row in rows}
     # 한 번도 activate된 적 없는 (scope, scope_ref)는 행이 없다 — 토큰
     # 0(기준선)으로 채운다.
     return FenceSnapshot(tokens={pair: found.get(pair, 0) for pair in pairs})
@@ -95,6 +92,7 @@ class PostgresRiskGateRepository:
         tenant_id: UUID,
         provider_code: str | None = None,
         include_all_providers: bool = False,
+        strategy_deployment_id: UUID | None = None,
     ) -> tuple[SafetyControl, ...]:
         refs: list[tuple[str, str]] = [
             ("GLOBAL", ""),
@@ -103,6 +101,8 @@ class PostgresRiskGateRepository:
         ]
         if provider_code is not None:
             refs.append(("PROVIDER", provider_code))
+        if strategy_deployment_id is not None:
+            refs.append(("STRATEGY_DEPLOYMENT", str(strategy_deployment_id)))
 
         # asyncpg는 "튜플의 리스트"를 그대로 배열 파라미터로 바인딩하지
         # 못하므로(record[] 캐스팅이 드라이버 버전에 따라 불안정), 각 (scope,
@@ -210,9 +210,7 @@ class PostgresRiskGateRepository:
             )
         return _row_to_evaluation(row) if row is not None else None
 
-    async def read_fences(
-        self, pairs: tuple[tuple[SafetyScope, str], ...]
-    ) -> FenceSnapshot:
+    async def read_fences(self, pairs: tuple[tuple[SafetyScope, str], ...]) -> FenceSnapshot:
         # 78번 §3.6 — row-constructor IN 리스트는 스칼라 파라미터만 바인딩
         # 하므로(배열 타입이 아니다) asyncpg의 튜플-리스트 바인딩 제약을
         # 피하면서도 단일 쿼리(1 round trip)로 여러 쌍을 조회할 수 있다.
@@ -256,6 +254,4 @@ class PostgresRiskGateRepository:
             if tenant_id is None:
                 await conn.execute("DELETE FROM risk_evaluation")
             else:
-                await conn.execute(
-                    "DELETE FROM risk_evaluation WHERE tenant_id = $1", tenant_id
-                )
+                await conn.execute("DELETE FROM risk_evaluation WHERE tenant_id = $1", tenant_id)

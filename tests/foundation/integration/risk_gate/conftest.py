@@ -1,14 +1,62 @@
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
 
+import asyncpg
+import pytest
+from dotenv import dotenv_values
+
+from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
+from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.application.activate_revision import (
     activate_revision as activate_revision_command,
 )
 from src.foundation.mandates.application.create_draft_mandate import create_draft_mandate
 from src.foundation.mandates.contracts.v1 import Autonomy, MandateRuleInput
 from src.foundation.mandates.ports.repository import MandateRepository
+from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
+from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.foundation.trust.ports.repository import TrustRepository
+from tests.integration.conftest import create_test_tenant
+
+
+def _asyncpg_dsn() -> str:
+    env = dotenv_values(Path(__file__).resolve().parents[4] / ".env")
+    url = env.get("DATABASE_URL")
+    assert url
+    return url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+@pytest.fixture
+async def pool():
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=8)
+    yield p
+    await p.close()
+
+
+@pytest.fixture
+def repo(pool):
+    return PostgresRiskGateRepository(pool)
+
+
+@pytest.fixture
+def mandate_repo(pool):
+    return PostgresMandateRepository(pool)
+
+
+@pytest.fixture
+def trust_repo(pool):
+    return PostgresTrustRepository(pool)
+
+
+@pytest.fixture
+def connection_repo(pool):
+    return PostgresConnectionRepository(pool)
+
+
+async def _tenant(pool):
+    return await create_test_tenant(pool)
 
 
 async def activate_mandate_with_defaults(
