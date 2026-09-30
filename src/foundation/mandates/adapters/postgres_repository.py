@@ -25,6 +25,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
+from src.core.db.tenant_scope import tenant_transaction
 from src.foundation.entities.api import default_portfolio_id
 from src.foundation.mandates.adapters.postgres_policy_repository import (
     PostgresPolicyRepositoryMixin,
@@ -74,8 +75,17 @@ class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
     async def get_mandate(
         self, tenant_id: UUID, portfolio_id: UUID | None = None
     ) -> PortfolioMandate | None:
+        # F1(task-9454) — `portfolio_mandate` is RLS-ENABLE+FORCEd
+        # (b3c7f19ad2e6/c9f4e2a1b6d7); the policy judges by the `app.tenant_id`
+        # GUC, not by this WHERE clause. `pool.acquire()` alone never binds
+        # that GUC, so once the DATABASE_URL role stops being a superuser a
+        # legitimate tenant would read back zero rows here. The explicit
+        # `tenant_id = $1` condition stays too (connections/postgres_repository.py
+        # precedent) — it is the real line of defense while the role is still
+        # a superuser (rolbypassrls=true) and tenant_transaction() is the
+        # second line of defense for after that switch.
         resolved_portfolio_id = portfolio_id or default_portfolio_id(tenant_id)
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM portfolio_mandate WHERE tenant_id = $1 AND portfolio_id = $2",
                 tenant_id,
@@ -90,7 +100,7 @@ class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
         existing = await self.get_mandate(tenant_id, resolved_portfolio_id)
         if existing is not None:
             return existing
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             try:
                 row = await conn.fetchrow(
                     "INSERT INTO portfolio_mandate (tenant_id, subject_id, portfolio_id) "
@@ -188,6 +198,19 @@ class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
         *,
         expected_active_revision_id: UUID | None,
     ) -> MandateRevision:
+        # F1(task-9454) note: this UPDATE on `portfolio_mandate` does not open
+        # a `tenant_transaction` because this method is keyed by
+        # `mandate_id`/`revision_id` only — the Protocol
+        # ([[src/foundation/mandates/ports/repository.py]]) has no tenant_id
+        # parameter, and adding one would also change every existing caller
+        # (application/activate_revision.py plus the unit/adversarial test
+        # call sites). Same deferral the connections adapter already
+        # documents for `get_connection(connection_id)`. The application
+        # layer (`activate_revision.py`) already resolves and authorizes
+        # `mandate_id` via a tenant-scoped `get_mandate(tenant_id)` call
+        # before reaching here, so this WHERE-by-id write cannot cross a
+        # tenant boundary today; binding the GUC here is left to a follow-up
+        # leaf that also updates the Protocol signature.
         async with self._pool.acquire() as conn, conn.transaction():
             # 진짜 직렬화 지점(모듈 docstring 참조) — expected_active_revision_id를
             # 트랜잭션 내부에서 다시 읽지 않는다.
