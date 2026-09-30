@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -52,6 +53,27 @@ def purpose() -> str:
 
 async def _make_tenant(pool: asyncpg.Pool) -> UUID:
     return await create_test_tenant(pool)
+
+
+async def _run_as_aios_app(conn: asyncpg.Connection) -> None:
+    """asyncpg pool `setup` hook: every connection handed out by this pool
+    runs as the non-superuser `aios_app` role (task-9453 / F1) so RLS is
+    actually enforced for the repo methods under test — the module-level
+    `pool` fixture above connects as the migrator/owner account, which
+    PostgreSQL never subjects to RLS regardless of GUC binding."""
+    await conn.execute("SET ROLE aios_app")
+
+
+@pytest.fixture
+async def aios_app_pool() -> asyncpg.Pool:
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2, setup=_run_as_aios_app)
+    yield p
+    await p.close()
+
+
+@pytest.fixture
+def aios_app_repo(aios_app_pool: asyncpg.Pool) -> PostgresTrustRepository:
+    return PostgresTrustRepository(aios_app_pool)
 
 
 # ============================================================================
@@ -513,6 +535,97 @@ async def test_insert_consent_propagates_concurrency_conflict_when_duplicate(
             disclosure_revision=1,
             expires_at=None,
         )
+
+
+# ============================================================================
+# AUDIT_2026-09-30_auth_rls.md F1 (task-9453) — tenant_transaction/GUC binding
+# ============================================================================
+
+
+async def test_get_active_consent_returns_none_under_aios_app_role_when_guc_unbound(
+    pool: asyncpg.Pool,
+    aios_app_repo: PostgresTrustRepository,
+    purpose: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative / F1 재현: 감사가 지적한 정정 전 상태(GUC 미바인딩)를 회귀
+    테스트로 고정한다. tenant_transaction을 GUC를 세팅하지 않는 `pool.acquire()`
+    동급 버전으로 몽키패치해 정정 전 어댑터를 재현하면, 비-superuser `aios_app`
+    role 아래에서는 소유 tenant 자신의 ACTIVE 동의조차 0행(None)으로 막힌다 —
+    RLS 정책이 SQL의 tenant 조건이 아니라 이 GUC로 판정하기 때문이다."""
+    tenant_id = await _make_tenant(pool)
+    disclosure_id = await create_disclosure(pool, purpose=purpose, revision=1)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO consent_record "
+            "(tenant_id, subject_id, purpose, disclosure_id, disclosure_revision) "
+            "VALUES ($1, $1, $2, $3, 1)",
+            tenant_id,
+            purpose,
+            disclosure_id,
+        )
+
+    @asynccontextmanager
+    async def _unbound_transaction(pool: asyncpg.Pool, tenant_id: UUID | None):
+        # F1 정정 전 어댑터와 동급: 연결은 열지만 app.tenant_id GUC를 세팅하지 않는다.
+        async with pool.acquire() as conn, conn.transaction():
+            yield conn
+
+    monkeypatch.setattr(
+        "src.foundation.trust.adapters.postgres_repository.tenant_transaction",
+        _unbound_transaction,
+    )
+
+    result = await aios_app_repo.get_active_consent(tenant_id, purpose)
+
+    assert result is None  # F1: GUC 미바인딩이면 자기 행도 0행
+
+
+async def test_get_active_consent_returns_row_under_aios_app_role_once_guc_bound(
+    pool: asyncpg.Pool, aios_app_repo: PostgresTrustRepository, purpose: str
+) -> None:
+    """감사 재현의 나머지 절반: 몽키패치 없이(즉 정정된 어댑터로) 같은 조회를
+    같은 aios_app role에서 실행하면 GUC가 바인딩되어 1행이 돌아온다 — F1이
+    실제로 고쳐졌다는 양성 증거."""
+    tenant_id = await _make_tenant(pool)
+    disclosure_id = await create_disclosure(pool, purpose=purpose, revision=1)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO consent_record "
+            "(tenant_id, subject_id, purpose, disclosure_id, disclosure_revision) "
+            "VALUES ($1, $1, $2, $3, 1)",
+            tenant_id,
+            purpose,
+            disclosure_id,
+        )
+
+    result = await aios_app_repo.get_active_consent(tenant_id, purpose)
+
+    assert result is not None
+    assert result.tenant_id == tenant_id
+
+
+async def test_get_active_consent_cross_tenant_returns_none_under_aios_app_role(
+    pool: asyncpg.Pool, aios_app_repo: PostgresTrustRepository, purpose: str
+) -> None:
+    """negative: tenant A GUC로 tenant B의 행을 조회하면 0행이어야 한다
+    (교차 테넌트 격리) — WHERE tenant_id 조건과 RLS 정책이 이중으로 막는다."""
+    tenant_a = await _make_tenant(pool)
+    tenant_b = await _make_tenant(pool)
+    disclosure_id = await create_disclosure(pool, purpose=purpose, revision=1)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO consent_record "
+            "(tenant_id, subject_id, purpose, disclosure_id, disclosure_revision) "
+            "VALUES ($1, $1, $2, $3, 1)",
+            tenant_a,
+            purpose,
+            disclosure_id,
+        )
+
+    result = await aios_app_repo.get_active_consent(tenant_b, purpose)
+
+    assert result is None
 
 
 @pytest.mark.perf

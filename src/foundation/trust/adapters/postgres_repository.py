@@ -2,7 +2,24 @@
 
 Spec: AIOSproject #73 §2.1/§7, #105 (concurrency standard) — revoke_consent()
 changes state only through conditional_update().
+
+AUDIT_2026-09-30_auth_rls.md F1 (task-9453): `consent_record` is one of the
+M5-enabled RLS tables (b3c7f19ad2e6) whose policy predicate is decided by the
+`app.tenant_id` GUC, not by any WHERE clause in the SQL text. Every method
+that reads or writes `consent_record` for a known tenant must open its
+connection via [[tenant_transaction]] (same contract as
+`src/foundation/connections/adapters/postgres_repository.py`) — a bare
+`pool.acquire()` leaves the GUC unbound, and under the non-superuser `aios_app`
+production role that makes the policy predicate false for every row,
+including the owning tenant's own rows (0 rows, not an error). The explicit
+`tenant_id = $1` condition in each query stays as the first line of defense
+for as long as `DATABASE_URL` remains a superuser role in some environments
+(RLS is not applied to superusers) — `tenant_transaction()` is the second line
+that also holds once the role is non-superuser. `disclosure` has no
+`tenant_id` column and is outside the M5 RLS scope, so its methods keep plain
+`pool.acquire()`.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -11,6 +28,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError, conditional_update
+from src.core.db.tenant_scope import tenant_transaction
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 
 
@@ -66,7 +84,10 @@ class PostgresTrustRepository:
         return (_row_to_disclosure(row), row["server_now"]) if row is not None else None
 
     async def get_active_consent(self, tenant_id: UUID, purpose: str) -> Consent | None:
-        async with self._pool.acquire() as conn:
+        # WHERE tenant_id = $1 stays as the first line of defense (see module
+        # docstring) — tenant_transaction() binds app.tenant_id so the RLS
+        # policy also holds once DATABASE_URL is a non-superuser role.
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM consent_record WHERE tenant_id = $1 AND purpose = $2 "
                 "AND state = 'ACTIVE'",
@@ -76,7 +97,7 @@ class PostgresTrustRepository:
         return _row_to_consent(row) if row is not None else None
 
     async def get_latest_consent(self, tenant_id: UUID, purpose: str) -> Consent | None:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM consent_record WHERE tenant_id = $1 AND purpose = $2 "
                 "ORDER BY accepted_at DESC LIMIT 1",
@@ -86,7 +107,7 @@ class PostgresTrustRepository:
         return _row_to_consent(row) if row is not None else None
 
     async def list_active_consents(self, tenant_id: UUID) -> list[Consent]:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             rows = await conn.fetch(
                 "SELECT * FROM consent_record WHERE tenant_id = $1 AND state = 'ACTIVE' "
                 "ORDER BY accepted_at DESC",
@@ -109,7 +130,7 @@ class PostgresTrustRepository:
         # this is the concurrency guard for this append-only insert path, matching
         # the 105 standard §2.2 exception: "cases where a single owner is guaranteed
         # by a schema-level UNIQUE constraint".
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             try:
                 row = await conn.fetchrow(
                     "INSERT INTO consent_record "
@@ -137,7 +158,14 @@ class PostgresTrustRepository:
         return _row_to_consent(row)
 
     async def revoke_consent(self, consent_id: UUID, *, tenant_id: UUID) -> Consent:
-        async with self._pool.acquire() as conn:
+        # pre_check runs inside the caller's own tenant_transaction scope, so
+        # under a non-superuser role RLS already narrows "SELECT ... WHERE
+        # id = $1" to rows owned by tenant_id — a row that belongs to another
+        # tenant comes back as 0 rows (LookupError), not a tenant mismatch
+        # (PermissionError). The explicit comparison below still raises
+        # PermissionError in environments where DATABASE_URL is a superuser
+        # (RLS not applied) and the row is visible regardless of tenant_id.
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             pre_check = await conn.fetchrow(
                 "SELECT tenant_id FROM consent_record WHERE id = $1", consent_id
             )
@@ -157,5 +185,6 @@ class PostgresTrustRepository:
                     "state": ConsentState.REVOKED.value,
                     "revoked_at": datetime.now(timezone.utc),
                 },
+                extra_conditions={"tenant_id": tenant_id},
             )
         return _row_to_consent(row)
