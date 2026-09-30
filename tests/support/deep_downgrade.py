@@ -27,7 +27,7 @@ import asyncpg
 import pytest
 
 
-async def purge_position_snapshots(pool: asyncpg.Pool) -> int:
+async def purge_position_snapshots(pool: object) -> int:
     """Delete every `pos_snapshot` row; returns how many were removed."""
     async with pool.acquire() as conn:
         status = await conn.execute("DELETE FROM pos_snapshot")
@@ -45,8 +45,11 @@ class TestPurgePositionSnapshotsNegative:
     async def test_rejects_none_pool(self) -> None:
         """purge_position_snapshots must raise when pool is None."""
         with pytest.raises((AttributeError, TypeError)):
-            await purge_position_snapshots(None)  # type: ignore[arg-type]
+            await purge_position_snapshots(None)
 
+    @pytest.mark.filterwarnings(
+        "ignore:coroutine 'AsyncMockMixin._execute_mock_call' was never awaited"
+    )
     async def test_rejects_sync_pool_mock(self) -> None:
         """A plain MagicMock (not asyncpg.Pool) must not silently succeed."""
         fake_pool = MagicMock()
@@ -54,14 +57,14 @@ class TestPurgePositionSnapshotsNegative:
         # but asyncpg.Pool.acquire() returns an async context manager.
         # Passing a non-async pool should raise AttributeError or TypeError.
         with pytest.raises((AttributeError, TypeError, ValueError)):
-            await purge_position_snapshots(fake_pool)  # type: ignore[arg-type]
+            await purge_position_snapshots(fake_pool)
 
     async def test_rejects_non_context_manager_pool(self) -> None:
         """Pool.acquire() returning a non-context-manager must fail."""
         fake_pool = MagicMock()
         fake_pool.acquire.return_value = "not_a_context_manager"
         with pytest.raises((TypeError, AttributeError)):
-            await purge_position_snapshots(fake_pool)  # type: ignore[arg-type]
+            await purge_position_snapshots(fake_pool)
 
     async def test_returns_zero_when_table_empty(self) -> None:
         """When pos_snapshot has no rows, return 0 (not an error)."""
@@ -73,7 +76,7 @@ class TestPurgePositionSnapshotsNegative:
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=mock_cm)
 
-        result = await purge_position_snapshots(mock_pool)  # type: ignore[arg-type]
+        result = await purge_position_snapshots(mock_pool)
 
         assert result == 0
         mock_conn.execute.assert_called_once_with("DELETE FROM pos_snapshot")
@@ -98,7 +101,7 @@ class TestPurgePositionSnapshotsFailureInjection:
         mock_pool.acquire = MagicMock(return_value=mock_cm)
 
         with pytest.raises(asyncpg.PostgresError, match="connection refused"):
-            await purge_position_snapshots(mock_pool)  # type: ignore[arg-type]
+            await purge_position_snapshots(mock_pool)
 
     async def test_asyncpg_foreign_key_violation_propagates(self) -> None:
         """ForeignKeyViolation must propagate — we do not swallow DB errors."""
@@ -113,7 +116,7 @@ class TestPurgePositionSnapshotsFailureInjection:
         mock_pool.acquire = MagicMock(return_value=mock_cm)
 
         with pytest.raises(asyncpg.ForeignKeyViolationError):
-            await purge_position_snapshots(mock_pool)  # type: ignore[arg-type]
+            await purge_position_snapshots(mock_pool)
 
     async def test_pool_acquire_raises_on_bootstrap_failure(self) -> None:
         """Pool.acquire() failing during DB bootstrap must propagate."""
@@ -124,7 +127,7 @@ class TestPurgePositionSnapshotsFailureInjection:
         mock_pool.acquire = MagicMock(return_value=mock_cm)
 
         with pytest.raises(asyncpg.PostgresError, match="pool exhausted"):
-            await purge_position_snapshots(mock_pool)  # type: ignore[arg-type]
+            await purge_position_snapshots(mock_pool)
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +148,7 @@ class TestPurgePositionSnapshotsPositive:
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=mock_cm)
 
-        result = await purge_position_snapshots(mock_pool)  # type: ignore[arg-type]
+        result = await purge_position_snapshots(mock_pool)
 
         assert result == 42
 
@@ -159,7 +162,7 @@ class TestPurgePositionSnapshotsPositive:
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=mock_cm)
 
-        result = await purge_position_snapshots(mock_pool)  # type: ignore[arg-type]
+        result = await purge_position_snapshots(mock_pool)
 
         assert result == 1000000
 
@@ -173,7 +176,7 @@ class TestPurgePositionSnapshotsPositive:
         mock_pool = MagicMock()
         mock_pool.acquire = MagicMock(return_value=mock_cm)
 
-        await purge_position_snapshots(mock_pool)  # type: ignore[arg-type]
+        await purge_position_snapshots(mock_pool)
 
         assert mock_conn.execute.call_count == 1
         mock_conn.execute.assert_called_once_with("DELETE FROM pos_snapshot")
