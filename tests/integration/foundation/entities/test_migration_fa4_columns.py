@@ -10,6 +10,7 @@ negative test 1건 + 테이블별 백필 행수/NULL 잔여 행수를 각각 수
 검증은 `test_migration_fa4_worm_no_backfill.py`가 담당한다 — 이 파일은
 컬럼 왕복(5개 테이블 전부)과 `pos_account`·`pos_snapshot`(비-WORM, 백필
 대상)만 다룬다."""
+
 from __future__ import annotations
 
 import os
@@ -80,9 +81,7 @@ def _sweep_synthetic_snapshots(prefix: str) -> None:
     async def _sweep() -> None:
         conn = await asyncpg.connect(_asyncpg_dsn())
         try:
-            await conn.execute(
-                "DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%"
-            )
+            await conn.execute("DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%")
         finally:
             await conn.close()
 
@@ -100,8 +99,7 @@ def _ensure_head():
 async def _column_exists(pool: asyncpg.Pool, table: str, column: str) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchval(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = $1 AND column_name = $2",
+            "SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2",
             table,
             column,
         )
@@ -163,6 +161,60 @@ async def test_negative_insert_with_nonexistent_fund_id_rejected_by_fk(pool):
                 tenant_id,
                 uuid4(),
             )
+
+
+async def test_negative_insert_with_nonexistent_portfolio_id_rejected_by_fk(pool):
+    tenant_id = await create_test_tenant(pool)
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await conn.execute(
+                "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method, "
+                "portfolio_id) VALUES ($1, 'TESTVENUE', 'KRW', 'FIFO', $2)",
+                tenant_id,
+                uuid4(),
+            )
+
+
+async def test_negative_snapshot_insert_with_nonexistent_fund_id_rejected_by_fk(pool):
+    tenant_id = await create_test_tenant(pool)
+    async with pool.acquire() as conn:
+        account_id = await conn.fetchval(
+            "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method) "
+            "VALUES ($1, 'TESTVENUE', 'KRW', 'FIFO') RETURNING account_id",
+            tenant_id,
+        )
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await conn.execute(
+                "INSERT INTO pos_snapshot (position_key, tenant_id, account_id, "
+                "instrument_id, quantity, cost_method, fund_id) "
+                "VALUES ($1, $2, $3, $4, 0, 'FIFO', $5)",
+                f"fa4-test-{uuid4().hex}",
+                tenant_id,
+                account_id,
+                uuid4(),
+                uuid4(),
+            )
+
+
+async def test_failure_injection_pool_acquire_error_propagates_without_silent_success(pool):
+    """의존성(연결 풀) 장애를 monkeypatch로 유발했을 때 리포지토리가 예외를
+    삼키지 않고 그대로 전파하는지 확인한다 — fail-closed 기본 자세."""
+
+    class _ExplodingPool:
+        def acquire(self):
+            raise ConnectionError("simulated pool acquire failure")
+
+    repo = PostgresEntityRepository(_ExplodingPool())
+    with pytest.raises(ConnectionError, match="simulated pool acquire failure"):
+        await repo.create_legal_entity(
+            LegalEntity(
+                entity_id=default_entity_id(uuid4()),
+                tenant_id=uuid4(),
+                name="FA-4 Failure Injection Entity",
+                jurisdiction="KR",
+                region_tag="kr-seoul",
+            )
+        )
 
 
 async def test_backfill_computes_default_ids_for_bootstrapped_user_and_nulls_the_rest(pool):
