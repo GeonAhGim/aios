@@ -330,7 +330,14 @@ async def test_concurrent_activations_never_lose_a_fence_token(pool, repo):
     """RSK-005 — activate control races with submit and fence prevents
     post-control side effect. 여기서는 그 전제조건(fence 증가 자체가
     동시 요청에서도 유실 없이 유일해야 한다)을 105번 §4 형태 A로
-    검증한다 — 실제 pre-submit 게이트 배선은 FND-07 이후."""
+    검증한다 — 실제 pre-submit 게이트 배선은 FND-07 이후.
+
+    task-9065(F4(L)) — 같은 (scope, scope_ref)에 대한 동시 activate는 이제
+    `insert_safety_control()`의 `SELECT ... FOR UPDATE` 사전 검사에 걸려,
+    커밋 순서상 앞선 것만 성공하고 나머지는 `ConcurrencyConflictError`로
+    거부된다(이전에는 5개 모두 성공해 ACTIVE 행이 중복 생성됐다 — 그게 이
+    리프가 고치는 버그였다). 성공한 것들의 fence_token이 유일한지, 그리고
+    거부된 시도가 fence를 오염시키지 않았는지를 확인한다."""
     tenant_id = await _tenant(pool)
 
     async def _activate():
@@ -344,10 +351,13 @@ async def test_concurrent_activations_never_lose_a_fence_token(pool, repo):
             reason="동시성 테스트",
         )
 
-    results = await asyncio.gather(*[_activate() for _ in range(5)])
-    tokens = sorted(r.fence_token for r in results)
+    results = await asyncio.gather(*[_activate() for _ in range(5)], return_exceptions=True)
+    successes = [r for r in results if not isinstance(r, BaseException)]
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert len(successes) >= 1, "적어도 하나는 성공해야 한다"
+    assert all(isinstance(f, ConcurrencyConflictError) for f in failures)
+    tokens = sorted(r.fence_token for r in successes)
     assert tokens == sorted(set(tokens)), "fence token이 중복됐다 — 유실된 증가가 있다"
-    assert len(tokens) == 5
 
 
 async def test_kill_switch_after_cached_allow_takes_effect_immediately(

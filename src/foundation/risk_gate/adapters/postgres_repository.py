@@ -137,6 +137,25 @@ class PostgresRiskGateRepository:
         actor_subject_id: UUID,
     ) -> SafetyControl:
         async with self._pool.acquire() as conn, conn.transaction():
+            # F4(L) 안정화 감사(task-8882/9065) — 이 존재 확인 없이 그냥
+            # INSERT하면 같은 (scope, scope_ref)에 ACTIVE 행이 중복 생성돼
+            # fence-token/감사 정합성이 오염된다. FOR UPDATE로 동시 activate
+            # 시도끼리 이 행을 두고 직렬화하고, 이미 ACTIVE면 fence를
+            # 건드리기 전에 거부해 거부되는 요청이 fence token을 낭비하지
+            # 않게 한다.
+            existing = await conn.fetchrow(
+                "SELECT id FROM safety_control "
+                "WHERE scope = $1 AND scope_ref = $2 AND state = 'ACTIVE' "
+                "FOR UPDATE",
+                scope.value,
+                scope_ref,
+            )
+            if existing is not None:
+                raise ConcurrencyConflictError(
+                    f"safety_control scope={scope.value} scope_ref={scope_ref}: "
+                    f"이미 ACTIVE 상태인 control(id={existing['id']})이 있습니다."
+                )
+
             fence_row = await conn.fetchrow(
                 "INSERT INTO safety_fence (scope, scope_ref, current_token) "
                 "VALUES ($1, $2, 1) "

@@ -157,10 +157,19 @@ def _repos(risk_gate_repo, cb, pool, recorder, **overrides) -> RecoveryGateRepos
 async def _make_halted_control(pool, risk_gate_repo, *, actor_id: UUID, elapsed_sec: int) -> UUID:
     """PROVIDER scope 'cb:halted' kill switch — R-45 배선과 같은 컨벤션.
     `created_at`을 뒤로 돌려 "마지막 트립 이후 경과 시간"을 결정론으로
-    고정한다(실시간 대기 없음, test_circuit_breaker_loop.py와 동일 기법)."""
+    고정한다(실시간 대기 없음, test_circuit_breaker_loop.py와 동일 기법).
+
+    task-9065(F4(L)) — insert_safety_control()이 이제 같은 (scope,
+    scope_ref)에 이미 ACTIVE인 행이 있으면 거부한다. 이 헬퍼는 예전에
+    scope_ref를 "test-exch"로 고정했는데, 이 파일의 여러 테스트가
+    control_stays_active인 채로 끝나거나(cooldown/승인 거부 케이스)
+    지연 측정 테스트가 여러 개를 미리 만들어 두므로, 고정 문자열이면
+    같은 테스트 실행 안에서도 충돌한다. evaluate_recovery(control_id=...)는
+    scope_ref 값 자체를 보지 않으므로, 매 호출마다 고유한 scope_ref를 써서
+    충돌 가능성을 근본적으로 없앤다."""
     control = await risk_gate_repo.insert_safety_control(
         scope=SafetyScope.PROVIDER,
-        scope_ref="test-exch",
+        scope_ref=f"test-exch-{uuid4()}",
         reason="cb:halted",
         actor_subject_id=actor_id,
     )
