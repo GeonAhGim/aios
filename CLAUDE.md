@@ -532,6 +532,48 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     (DECISION_GUIDELINES B-2) — script/baseline design is sound; the remaining defect is fleet
     code.
 
+26. `coverage` 24h 5-repeat systemic leaf (task-9479) reconfirms #21 with a sharper data point —
+    `esc-ci-coverage.json` (`first_seen` 2026-09-22T15:23:36Z, still `status: "open"`,
+    `reopen_count: 2`) attached this round to sha `8003202b10d8` with detail
+    `FAIL: 기준선 미달 94.83% -> 3.01% (-91.82%p, ...)` and `bisect_culprit
+    27b5fe61e1d0f33aaa0ad006fdaab6c597d6f426` — that commit only touches
+    `tests/foundation/unit/entities/test_migration_fa4_columns.py` (task-9242, adding negative/
+    failure-injection tests), unrelated to any `src/` coverage regression; this worktree is
+    already an ancestor-confirmed descendant of it. `pm/ci/8003202b10d8.json` for that exact sha
+    is a `mode: "commit"` (lightweight) gate run whose `steps` dict has no `coverage`/`test` key
+    at all — every listed gate (ruff/mypy/zone/type_ignore/code_ratchets/complexity/
+    import_linter/consistency/guards/e2e/...) is green, yet the run's own top-level `ok` is
+    `false` purely from the separately-tracked `coverage` FAIL the escalation cites, confirming
+    the 3.01% figure came from a different (`mode: "full"`) local pytest+coverage pass on shared
+    CI infra, not from re-running against this commit's actual `src/` diff. `coverage-baseline.txt`
+    is unchanged at `94.83`/`52977` (task-9052's real-GH-Actions-verified value, per #21).
+    `coverage_ratchet.py` itself is unchanged and still carries both fixes #21 already verified
+    (task-9120 trusted-write gate restricting baseline writes to `GITHUB_ACTIONS=true`/
+    `--allow-baseline-write`; the `min-lines-valid-ratio` partial-report floor). A -91.82pp swing
+    (94.83% -> 3.01%) is a more extreme instance of the exact class #21 already named (local
+    `pytest --cov=src` dying under shared-host resource contention, e.g. Postgres/DB-dependent
+    fixtures failing en masse so only a sliver of tests actually execute) — plausible because
+    `lines-valid` (the ratio-floor's own denominator) is the *count of statements coverage.py
+    parsed as importable*, which can stay near-unchanged even when almost none of those lines are
+    *exercised*, if the failing tests error out in a DB-fixture after their target modules already
+    imported cleanly; the ratio-floor guard was designed to catch a shrinking *denominator*
+    (fewer files reached) and does not claim to catch a cratering *numerator* (fewer lines
+    executed) from mass fixture failures with the same import surface. That gap is real but is not
+    independently fixable from `coverage.xml` alone — Cobertura carries no pass/fail-count signal,
+    so there is no additional field in the report to gate on without re-running pytest (which
+    `coverage_ratchet.py`'s own docstring says by design it does not do). Reproducing this
+    correctly requires a trusted (`GITHUB_ACTIONS=true`) full-suite run, which is out of scope for
+    a single leaf (§4 prohibits `pytest tests/`). Before working a new `coverage` correction leaf:
+    confirm `coverage-baseline.txt` still reads `94.83`/`52977` and `coverage_ratchet.py` still has
+    the task-9120 trusted-write gate — if both hold, and the escalation's bisect culprit is a
+    test-only/docstring-only commit (as it has been every time so far: `4d5ebed5` in #21/#22,
+    `27b5fe61` here), close as noop citing task-9052, task-9461, and this entry rather than
+    re-diagnosing the same partial-run artifact. No baseline/threshold/ratio-floor relief made
+    (DECISION_GUIDELINES B-2) — the fix scope (correlating coverage swings with pytest pass/fail
+    counts, not just `coverage.xml`'s own denominator) would require capturing pytest's own exit
+    summary alongside `coverage.xml` in the CI step that invokes `coverage_ratchet.py`, which is
+    fleet CI wiring (`pm/local_ci.py` / `.github/workflows/quality.yml`), not this script.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
