@@ -1,4 +1,5 @@
 """17.1/17.5 통합테스트 — EventBus 연동 + 실제 dev DB 기록 검증."""
+
 import asyncio
 from pathlib import Path
 
@@ -98,3 +99,72 @@ async def test_channel_send_failure_escalates_via_event_bus_critical_path(pool):
     assert len(escalated) == 1
     rows = await _history(pool, user_id)
     assert all(r["status"] == "FAILED" for r in rows)
+
+
+async def test_missing_user_id_raises_event_handler_error(pool):
+    """negative test: user_id 누락 이벤트는 EventHandlerError를 던진다(I-10 배선 증명)."""
+    from src.core.exceptions import EventHandlerError
+
+    gateway = NotificationGateway(pool)
+    bus = InProcessEventBus(max_retries=0)
+    gateway.register(bus)
+    await bus.start()
+
+    with pytest.raises(EventHandlerError, match="user_id 없는 알림 이벤트"):
+        await gateway.handle_event({"event_type": "approval.request.created"})
+
+    await bus.stop()
+
+
+async def test_invalid_user_id_type_raises(pool):
+    """negative test: user_id가 정수 등 비문자열 타입이면 UUID 생성 오류 발생."""
+    gateway = NotificationGateway(pool)
+    bus = InProcessEventBus(max_retries=0)
+    gateway.register(bus)
+    await bus.start()
+
+    with pytest.raises((AttributeError, TypeError, ValueError)):
+        await gateway.handle_event({"event_type": "alert.triggered", "user_id": 12345})
+
+    await bus.stop()
+
+
+async def test_no_sender_for_channel_records_failure(pool):
+    """negative test: 채널 발송기 미등록 시 FAILED 기록 + EventHandlerError."""
+    from src.core.exceptions import EventHandlerError
+
+    # senders={} — 아무 발송기도 등록하지 않음
+    gateway = NotificationGateway(pool, senders={})
+    bus = InProcessEventBus(max_retries=0)
+    gateway.register(bus)
+    await bus.start()
+
+    with pytest.raises(EventHandlerError, match="알림 발송 실패 채널"):
+        await gateway.handle_event(
+            {"event_type": "alert.triggered", "user_id": str(await create_test_user(pool))}
+        )
+
+    await bus.stop()
+
+
+async def test_database_error_propagates_via_pool_acquire(pool):
+    """실패주입: _record에서 DB 오류 발생 시 예외가 전파된다."""
+    import asyncpg
+
+    user_id = await create_test_user(pool)
+
+    async def dummy_sender(uid, event_type, payload):
+        return True
+
+    gateway = NotificationGateway(pool, senders={NotificationChannel.IN_APP: dummy_sender})
+    bus = InProcessEventBus(max_retries=0)
+    gateway.register(bus)
+    await bus.start()
+
+    # pool을 닫아 _record의 conn.execute()가 오류를 던지도록 유도
+    await pool.close()
+
+    with pytest.raises((asyncpg.PostgresSyntaxError, asyncpg.InterfaceError, OSError, Exception)):
+        await gateway.handle_event({"event_type": "alert.triggered", "user_id": str(user_id)})
+
+    await bus.stop()
