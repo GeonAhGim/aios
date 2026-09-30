@@ -1138,6 +1138,78 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     ratio-floor relief made (DECISION_GUIDELINES B-2) — the ratchet design is sound; the remaining
     defect is fleet code, not this repo.
 
+45. A fifth `code_ratchets` `[health:ci_red_systemic]` leaf (task-9585, split 3/3 of task-9582)
+    citing the identical repeat set #25/#38 already closed twice — task-9010, task-9069,
+    task-9252, task-9459. `scripts/check_code_ratchets.py`/`code-ratchets-baseline.json` are
+    unchanged since task-9010's fix (commit `195b36a8`): a local run on this worktree (HEAD
+    `1e361e33`, `git status` clean) prints `OK` and matches baseline exactly on all 5 metrics
+    (`skip_xfail=3 todo_fixme_xxx=0 not_implemented_error=27 loc_over_500=42 loc_over_800=3
+    loc_over_1000=0`). `esc-ci-code_ratchets.json` itself confirms the mechanism directly:
+    `status: "resolved"`, `resolved_sha: "0871f0422b1077560390c572ba866157ee0d7d83"`,
+    `closed_at: "2026-09-30T02:22:23+00:00"`, `owner.leaf_ids: [9459]` — yet its `auto_actions`
+    log (68 entries) kept appending `"3x-repeat CI red"` every 15-25 min all the way through
+    `2026-09-30T12:09:43+00:00`, nearly 10 hours after the escalation's own `closed_at`, with no
+    further fix task created in that window (the last real fix, task-9459, already closed noop
+    citing the stale-escalation pattern). This is the identical fleet-code defect already named
+    eleven times (#17-#26, #30-#31, #33-#36, #38, #40): `pm/auto_decision.py`/`orchestrator.py`'s
+    `ci_red` rule not checking `status == "resolved"` before appending further repeat-count
+    entries against an already-closed escalation, out of a repo worker's edit scope (§4). No
+    script/baseline change made — task-9010's fix and task-9145's `--near` early-warning tool
+    (#12/#25) are both still in place and sufficient. Before working a future `code_ratchets`
+    leaf: run `python scripts/check_code_ratchets.py` locally first — if `OK` and
+    baseline-matching, and the escalation's cited repeat set matches an already-closed leaf
+    verbatim (task-9010, #25, #38, or this entry), close as noop citing them rather than
+    re-diagnosing. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/baseline
+    design is sound; the remaining defect is fleet code, not this repo.
+
+46. A sixth `e2e` (H-7b smoke) `[health:ci_red_systemic]` leaf (task-9587) citing the identical
+    repeat set #27 (task-9480), #33 (task-9509), and #41 (task-9547) already closed three times —
+    task-9587's spec names task-8929, task-8952, task-9132, task-9253 verbatim, the exact same
+    four leaves all three prior systemic leaves already root-caused: task-8846/task-8952 were
+    real, already-merged fixes (test-level `waitForResponse` sync gap; webServer prebuild running
+    a redundant `tsc -b` under cold-cache/concurrent-worktree load, split into a vite-only
+    `build:e2e` script, commit `ee5d3007`); task-8929/task-9132 were contaminated leads (a
+    transient `git fetch` network outage and a worktree lagging an already-merged fix,
+    respectively). Reconfirmed on this worktree (`git log --oneline -5 --
+    frontend/playwright.config.ts` shows no commits since task-9054's `0c6f4ff5`, already covered
+    by #27/#30/#33/#41): `npm run build:e2e --workspace=apps/web` succeeds in 2.58s, and the exact
+    H-7b smoke command (`npm exec -- playwright test e2e/backtest-run.spec.ts
+    e2e/chart-indicator-overlay.spec.ts e2e/demo-onboarding-flow.spec.ts
+    e2e/order-submission.spec.ts --retries=1 --trace=on-first-retry --project=chromium`) passes
+    5/5 in 28.3s, well under the 180s `webServer.timeout`. No script/config change made — this is
+    the identical fleet-code defect already named for eleven other gates (#17-#26, #30-#31,
+    #33-#35, #37-#38): `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a
+    systemic leaf off the same stale repeat set instead of checking whether a prior systemic leaf
+    (task-9152, task-9480/#27, task-9509/#33, or task-9547/#41) already closed the identical
+    question, out of a repo worker's edit scope (§4). Before working a future `e2e` correction
+    leaf: run the H-7b smoke command above first — if green, and the cited repeat leaf ids match
+    an already-closed systemic leaf's set (task-9152, #27, #33, #41, or this entry), close as noop
+    citing all of them rather than re-investigating a fifth time. No baseline/timeout relief made
+    (DECISION_GUIDELINES B-2) — design is sound and already fixed; the remaining defect is fleet
+    code, not this repo.
+
+47. A fourth `perf_marker_guard` `[health:ci_red_systemic]` leaf (task-9589) citing the
+    identical repeat set #24 (task-9473) and #36 (task-9538) already closed — task-9589's spec
+    names task-8932, task-9135, task-9254, task-9463 verbatim, the same four leaves both prior
+    systemic leaves already resolved: task-9135 is the real design fix (60s budget re-tuned for
+    I/O/parsing cost, commit `23a9d9b4`), task-9138 added the missing `docs/TESTING.md` developer
+    guidance (commit `a2cafe7b`), and task-8932/task-9254 are noop closures citing that same fix
+    with a local `OK` rerun each. Reconfirmed on this worktree (`git status` clean, no commits to
+    `scripts/check_perf_marker_guard.py` or `docs/TESTING.md` since `23a9d9b4`/`a2cafe7b`):
+    `python scripts/check_perf_marker_guard.py` prints `OK` in ~3.8s, well under the 60s budget.
+    `esc-ci-perf_marker_guard.json` itself shows `status: "resolved"`, `owner.leaf_ids: [9463]`,
+    `reopen_count: 2` — the same record #24/#36 already inspected, confirming this is another
+    instance of the fleet-code pattern named ten+ times (#17-#26, #30-#31, #33-#36, #38-#41):
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a systemic leaf off an
+    already-`resolved` escalation snapshot instead of checking whether a prior systemic leaf
+    (task-9138, task-9289/#19, task-9473/#24, task-9538/#36) already closed the identical
+    question, out of a repo worker's edit scope (§4). No script/docs change made. Before working
+    a future `perf_marker_guard` leaf: run the script locally first; if `OK`, and the cited repeat
+    leaf ids match an already-closed systemic leaf's set (task-9138, #19, #24, #36, or this
+    entry), close as noop citing all of them rather than re-investigating a fifth time. No
+    baseline/timeout relief made (DECISION_GUIDELINES B-2) — script/docs design is sound; the
+    remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
