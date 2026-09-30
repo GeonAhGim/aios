@@ -2160,6 +2160,33 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     tenth time. No baseline/budget relief made (DECISION_GUIDELINES B-2) — task-9269's
     `RelativeBudget` migration is the actual fix and is already in place.
 
+83. A tenth `coverage` `[health:ci_red_systemic]` leaf (task-9611) citing the identical repeat
+    set #49 (task-9586) and #58/#69 (task-9661/task-9687) already closed twice — task-9611's
+    spec names task-9052, task-9282, task-9461, task-9575 verbatim. `coverage-baseline.txt`
+    (`94.83`/`52977`) and `scripts/coverage_ratchet.py` are unchanged since task-9120's
+    trusted-write gate fix (commit `3bbf20326`) — reconfirmed on this worktree (`git status`
+    clean, `git log --oneline -3 -- scripts/coverage_ratchet.py coverage-baseline.txt` shows no
+    commits since `3bbf20326`). This task itself already carries the same `ND-28` local
+    context-budget stall noted for #76-#79/#81 (`decision_class: "ND-28"`, "로컬 컨텍스트 예산
+    초과 반복" — a `claude-local` engine retry failure, not evidence of a new defect) and was
+    reassigned to a full backend worker. No new evidence, no new repeat — root cause is unchanged
+    from #21/#26/#32/#44/#49/#58/#61/#69's two-part answer: (a) a local partial
+    `pytest --cov=src` run dying under shared-host DB-fixture contention shrinks the *numerator*
+    (lines executed) while `lines-valid` (the ratio-floor's own denominator, counting only
+    *importable* statements) stays high enough to slip past the 0.5 floor — not independently
+    fixable from `coverage.xml` alone since Cobertura carries no pytest pass/fail signal; the real
+    fix (correlating a coverage swing with pytest's own exit summary) belongs to fleet CI wiring
+    (`pm/local_ci.py` / `.github/workflows/quality.yml`), out of a repo worker's edit scope (§4);
+    (b) `esc-ci-coverage.json` re-polling and re-spawning systemic leaves off a stale repeat-set
+    snapshot without checking whether a prior systemic leaf already closed the identical
+    question — the same fleet-code pattern named 20+ times (#17-#26, #30-#41, #44, #48-#50, #53,
+    #57-#58, #61, #69). No script/baseline change made. Before working a future `coverage` leaf:
+    check whether the cited repeat leaf ids match an already-closed systemic leaf's set
+    (task-9052/#21, task-9508/#32, task-9575/#44, task-9586/#49, task-9661/#58, task-9687/#69, or
+    this entry) first — if so, close as noop citing all of them rather than re-diagnosing. No
+    baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES B-2) — the ratchet design is
+    sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
