@@ -8,6 +8,7 @@ Spec: docs/specs/L4_product_experience_and_discovery_v1.0.md §8("테넌트 격�
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -98,6 +99,7 @@ async def _write_daily_candle(
     close: Decimal,
 ) -> None:
     async with pool.acquire() as conn, conn.transaction():
+        await hot_storage.ensure_partitions(conn, months_ahead=3)
         audit_event_id = await _audit_event_id(conn)
         batch = IngestBatchResult(
             batch_id=uuid.uuid4(),
@@ -160,7 +162,10 @@ async def test_universe_page_empty_venues_returns_empty(pool, field_source) -> N
 async def test_read_fields_returns_latest_close_grouped_by_venue(
     pool, field_source, batch_repo, hot_storage
 ) -> None:
-    t0 = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # UTC-midnight truncation used to land on the wrong side of md_candle's
+    # KST-anchored monthly partition boundary near month-end; use the actual
+    # instant so it always matches whatever ensure_partitions() just created.
+    t0 = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         krx_id = await _instrument_id(conn, Venue.KIS_KRX)
         bitget_id = await _instrument_id(conn, Venue.BITGET)
@@ -215,7 +220,10 @@ async def test_read_fields_excludes_instrument_with_no_candle(pool, field_source
 async def test_run_saved_screen_cross_tenant_is_404_end_to_end(
     pool, field_source, batch_repo, hot_storage
 ) -> None:
-    t0 = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # UTC-midnight truncation used to land on the wrong side of md_candle's
+    # KST-anchored monthly partition boundary near month-end; use the actual
+    # instant so it always matches whatever ensure_partitions() just created.
+    t0 = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, Venue.KIS_KRX)
     await _write_daily_candle(
@@ -254,3 +262,122 @@ async def test_run_saved_screen_cross_tenant_is_404_end_to_end(
     matched = {r.instrument_id: r for r in owner_result.rows}
     assert instrument_id in matched
     assert matched[instrument_id].values["close"] == Decimal("60000")
+
+
+# ---- negative/fail-closed: no requested field survives the allowlist -> {} ----
+
+
+async def test_read_fields_unknown_field_names_returns_empty(pool, field_source) -> None:
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn, Venue.KIS_KRX)
+
+    result = await field_source.read_fields(
+        instrument_ids_by_venue={Venue.KIS_KRX: [instrument_id]},
+        field_names=frozenset({"not_a_real_column", "; DROP TABLE md_candle"}),
+        as_of=datetime.now(timezone.utc),
+    )
+
+    assert result == {}
+
+
+# ---- negative: empty instrument_ids_by_venue mapping is fail-closed, not an error ----
+
+
+async def test_read_fields_empty_instrument_map_returns_empty(pool, field_source) -> None:
+    result = await field_source.read_fields(
+        instrument_ids_by_venue={},
+        field_names=frozenset({"close"}),
+        as_of=datetime.now(timezone.utc),
+    )
+
+    assert result == {}
+
+
+# ---- negative/fail-closed: a candle after the as_of cutoff must not leak in ----
+
+
+async def test_read_fields_as_of_before_candle_excludes_future_bar(
+    pool, field_source, batch_repo, hot_storage
+) -> None:
+    # UTC-midnight truncation used to land on the wrong side of md_candle's
+    # KST-anchored monthly partition boundary near month-end; use the actual
+    # instant so it always matches whatever ensure_partitions() just created.
+    t0 = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn, Venue.KIS_KRX)
+    await _write_daily_candle(
+        pool,
+        batch_repo,
+        hot_storage,
+        instrument_id=instrument_id,
+        venue=Venue.KIS_KRX,
+        open_time=t0,
+        close=Decimal("70000"),
+    )
+
+    result = await field_source.read_fields(
+        instrument_ids_by_venue={Venue.KIS_KRX: [instrument_id]},
+        field_names=frozenset({"close"}),
+        as_of=t0 - timedelta(days=1),
+    )
+
+    assert instrument_id not in result
+
+
+# ---- failure injection: pool acquisition failures propagate, not swallowed ----
+
+
+async def test_read_fields_pool_failure_propagates_fail_closed(
+    pool, field_source, monkeypatch
+) -> None:
+    class _ExplodingPool:
+        def acquire(self):
+            raise RuntimeError("simulated connection pool exhaustion")
+
+    monkeypatch.setattr(field_source, "_pool", _ExplodingPool())
+
+    with pytest.raises(RuntimeError, match="simulated connection pool exhaustion"):
+        await field_source.read_fields(
+            instrument_ids_by_venue={Venue.KIS_KRX: [uuid.uuid4()]},
+            field_names=frozenset({"close"}),
+            as_of=datetime.now(timezone.utc),
+        )
+
+
+# ---- perf: batched per-venue DISTINCT ON lookup stays within the UX-6 budget ----
+
+
+async def test_read_fields_batched_lookup_perf_budget(
+    pool, field_source, batch_repo, hot_storage
+) -> None:
+    # UTC-midnight truncation used to land on the wrong side of md_candle's
+    # KST-anchored monthly partition boundary near month-end; use the actual
+    # instant so it always matches whatever ensure_partitions() just created.
+    t0 = datetime.now(timezone.utc)
+    instrument_ids: list[uuid.UUID] = []
+    async with pool.acquire() as conn:
+        for _ in range(50):
+            instrument_ids.append(await _instrument_id(conn, Venue.KIS_KRX))
+    for instrument_id in instrument_ids:
+        await _write_daily_candle(
+            pool,
+            batch_repo,
+            hot_storage,
+            instrument_id=instrument_id,
+            venue=Venue.KIS_KRX,
+            open_time=t0,
+            close=Decimal("12345.67"),
+        )
+
+    started = time.perf_counter()
+    result = await field_source.read_fields(
+        instrument_ids_by_venue={Venue.KIS_KRX: instrument_ids},
+        field_names=frozenset({"close"}),
+        as_of=t0 + timedelta(days=1),
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000
+
+    assert len(result) == 50
+    # UX-6 batched-query budget (ADR-2026-09-09-C): one grouped DISTINCT ON
+    # scan for 50 instruments must stay well under a per-request second.
+    assert elapsed_ms < 1000
