@@ -26,6 +26,7 @@ chain on the journal row itself — a relationship analogous to LC-8b
 file (no domain module exists for this purpose under LB-1~7 — the §9 LB-9
 table lists only 3 adapters as this leaf's deliverable).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,7 +48,7 @@ class UnknownPositionError(Exception):
     must be opened before appending to journal (POS_ACCOUNT_UNKNOWN, non-retryable)."""
 
     def __init__(self, position_key: str) -> None:
-        super().__init__(f"Unknown position_key (no snapshot): {position_key!r}")
+        super().__init__(f"알 수 없는 position_key(스냅샷 없음): {position_key!r}")
         self.position_key = position_key
 
 
@@ -56,7 +57,7 @@ class IdempotencyDigestMismatchError(Exception):
     (non-retryable, POS_IDEMPOTENCY_DIGEST_MISMATCH)."""
 
     def __init__(self, key: str) -> None:
-        super().__init__(f"idempotency_key={key!r}: retransmission digest differs from existing.")
+        super().__init__(f"idempotency_key={key!r}: 재전송 다이제스트가 기존과 다릅니다.")
         self.key = key
 
 
