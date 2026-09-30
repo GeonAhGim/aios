@@ -2416,3 +2416,38 @@ the numbering they had in CLAUDE.md section 6.
     the committed baseline and the escalation's cited bisect commit only touches paths outside
     `--target src` (tests/docs/scripts), close as noop citing this entry rather than trusting the
     bisect culprit or the cached failure detail.
+
+95. A twelfth `coverage` `[health:ci_red]` leaf (task-9810) reconfirms #21/#26/#32/#44/#49/#58/
+    #61/#69/#83/#86 rather than finding a new design defect. `esc-ci-coverage.json` shows
+    `resolved_sha` `6437ac748a` with `resolution: "단계 재검사 통과"` (`closed_at` 13:36:17Z) *and*
+    a further chain of `ci_red` auto_actions after that close (task-9508 -> task-9575 ->
+    task-9677 -> task-9755 -> this leaf), each re-flagging the same stage off a stale
+    `esc-ci-coverage.json` re-poll rather than a fresh regression — the same
+    `pm/auto_decision.py`/`orchestrator.py` re-spawn pattern named at #21/#26/#32/#44/#49/#58/
+    #61/#69/#83/#86 (12 occurrences now). Reconfirmed on this worktree (`git status` clean, HEAD
+    `aa740bede`): `git log --oneline -3 -- scripts/coverage_ratchet.py coverage-baseline.txt`
+    still shows `3bbf20326` (task-9120's trusted-write gate fix) as the latest touch to either
+    file, and `coverage-baseline.txt` still reads `94.83`/`52977` (task-9052's real-GH-Actions
+    value). `git show 6437ac748a --stat` (the escalation's cited `sha`) is a one-line
+    `CLAUDE.md` stray-rebase-marker fix (task-9538) with zero `src/` change, and the ten commits
+    on this worktree since (`ef1855b5d` through `aa740bede`) are `docs(ci-log)`/`DEEPEN` test-only
+    commits plus one Korean-message revert confined to a single exception string in
+    `src/foundation/positions/adapters/postgres_journal_repository.py` — none plausibly drop
+    line coverage 21.62 points. The only `coverage.xml` present on this worktree is a stale
+    (2026-09-26, 4 days old) partial artifact reading `line-rate=0.03002`/`lines-valid=46435` —
+    an order of magnitude below the `52977` baseline denominator, i.e. exactly the "local partial
+    `pytest --cov=src` run dying under shared-host DB-fixture contention" failure mode #21/#26/
+    #32/#44/#49/#58/#61/#69/#83/#86 already root-caused; regenerating a trustworthy one would
+    require a full `pytest --cov=src` run this repo's own rules forbid inside a single leaf (§4).
+    No script/baseline change made — `coverage_ratchet.py`'s `--min-lines-valid-ratio` floor and
+    the `GITHUB_ACTIONS`-gated baseline-write trust boundary (task-9120) are sound and unchanged;
+    the remaining defect (re-polling a closed escalation and re-spawning off a stale repeat-set
+    snapshot) is fleet code (`pm/auto_decision.py`/`orchestrator.py`), out of a repo worker's edit
+    scope. No baseline/threshold/ratio-floor relief made (DECISION_GUIDELINES B-2). Before working
+    a future `coverage` leaf: check `esc-ci-coverage.json`'s `resolved_sha`/`resolution` fields for
+    a prior close first, confirm `coverage-baseline.txt` still reads `94.83`/`52977` and
+    `scripts/coverage_ratchet.py` is unchanged since `3bbf20326`, and check whether the cited sha
+    is a test-only/docs-only commit (as it has been in #44/#49/#58/#61/#69/#83/#86/this entry) —
+    if all hold, close as noop citing task-9052/#21, task-9508/#32, task-9575/#44, task-9586/#49,
+    task-9661/#58, task-9687/#69, task-9611/#83, task-9755/#86, and this entry rather than
+    re-diagnosing a thirteenth time.
