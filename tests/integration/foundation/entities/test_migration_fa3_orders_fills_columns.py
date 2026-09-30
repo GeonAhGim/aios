@@ -5,6 +5,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-3 DoD
 FK로 거부되는 negative test, 백필된 행 수와 NULL 잔여 행 수를 각각 수치로
 단언하는 테스트"). subprocess로 alembic을 띄우는 이유·DSN 해석은
 `test_migration_roundtrip.py`(FA-2)와 동일 패턴을 따른다."""
+
 from __future__ import annotations
 
 import os
@@ -68,8 +69,7 @@ def _ensure_head():
 async def _column_exists(pool: asyncpg.Pool, table: str, column: str) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchval(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = $1 AND column_name = $2",
+            "SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2",
             table,
             column,
         )
@@ -126,6 +126,65 @@ async def test_negative_insert_with_nonexistent_fund_id_rejected_by_fk(pool):
                 f"fa3-test-{uuid4().hex}",
                 uuid4(),
             )
+
+
+async def test_negative_insert_with_nonexistent_portfolio_id_rejected_by_fk(pool):
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await conn.execute(
+                """
+                INSERT INTO orders (
+                    user_id, client_order_id, strategy_id, strategy_version, symbol,
+                    exchange, side, order_type, quantity, status, filled_quantity,
+                    portfolio_id
+                ) VALUES ($1, $2, 'fa3-test', '1.0.0', 'BTC/USDT', 'bitget', 'BUY',
+                          'MARKET', 1, 'CREATED', 0, $3)
+                """,
+                user_id,
+                f"fa3-test-{uuid4().hex}",
+                uuid4(),
+            )
+
+
+async def test_negative_fills_insert_with_nonexistent_fund_id_rejected_by_fk(pool):
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await _insert_bare_order(conn, user_id)
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            await conn.execute(
+                """
+                INSERT INTO fills (
+                    provider_fill_id, venue, order_id, exchange_order_id, symbol, side,
+                    quantity, price, fee, fee_currency, liquidity, venue_ts, fund_id
+                ) VALUES ($1, 'bitget', $2, 'ext-2', 'BTC/USDT', 'BUY', 1, 10000, 1,
+                          'USDT', 'TAKER', now(), $3)
+                """,
+                f"fa3-fill-{uuid4().hex}",
+                order_id,
+                uuid4(),
+            )
+
+
+async def test_failure_injection_pool_acquire_error_propagates_without_silent_success(pool):
+    """의존성(연결 풀) 장애를 monkeypatch로 유발했을 때 리포지토리가 예외를
+    삼키지 않고 그대로 전파하는지 확인한다 — fail-closed 기본 자세."""
+
+    class _ExplodingPool:
+        def acquire(self):
+            raise ConnectionError("simulated pool acquire failure")
+
+    repo = PostgresEntityRepository(_ExplodingPool())
+    with pytest.raises(ConnectionError, match="simulated pool acquire failure"):
+        await repo.create_legal_entity(
+            LegalEntity(
+                entity_id=default_entity_id(uuid4()),
+                tenant_id=uuid4(),
+                name="FA-3 Failure Injection Entity",
+                jurisdiction="KR",
+                region_tag="kr-seoul",
+            )
+        )
 
 
 async def test_fills_are_never_backfilled_because_worm_blocks_update(pool):
