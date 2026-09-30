@@ -2550,3 +2550,38 @@ the numbering they had in CLAUDE.md section 6.
     or bumped in `pyproject.toml`/`requirements-lock.txt` — needs its own version-bump leaf, or
     (b) an encoding/subprocess-capture error in `run_pip_audit.py` itself — if so, diff against
     `aad66d131` first since that commit already closed every encoding layer found so far.
+
+99. A `guards` 24h 4-repeat `[health:ci_red_systemic]` leaf (task-10029, parent task-8993) cites
+    repeat set task-10026, task-8974, task-9013, task-9134. There is no `scripts/check_guards.py`
+    in this repo — the `guards` CI stage (`ci_recheck.py:381-394`) shells out to the fleet-owned
+    `C:\aios\meta\guards\run_guards.py --repo <wt> --base <sha>~1 --head <sha>`, which merges
+    `architecture_guard.py` (contract/line-cap/etc. AST rules) and `security_guard.py` findings and
+    exits 2 on any `veto`-severity finding. Reading the four cited leaves' own notes shows two
+    distinct, unrelated real violations, not one recurring design flaw: (a) task-9013's chain
+    traces to commit `639c6591`'s `P6.line_cap` veto on `inbox_processor.py` (319 > 300 lines),
+    genuinely fixed same-day by `79a32a5c` (task-8046, split into `inbox_processor.py`=287 +
+    new `ledger_effects.py`) and `982deabf` (task-8053, budget-bump rollback); and (b) task-9013/
+    task-10026's chain traces to a separate `P5.contract_field_removed` veto on
+    `src/api/schemas/account.py` (`WhitelistEntryResponse.id/exchange/destination_address`),
+    fixed by `ff856c1cb`. The systemic part is that **task-8974 and task-9134 are duplicate fix
+    leaves for the already-closed (a) regression** — both notes are near-identical restatements
+    ("639c6591 회귀는... 79a32a5c/982deabf로 이미 해결돼 origin/main에 반영됨... 변경할 코드
+    없음"), i.e. the same already-resolved violation got re-escalated into two separate individual
+    correction leaves instead of one. This matches the fleet-code stale-resolved-snapshot
+    duplicate-leaf pattern already documented for other stages (`code_ratchets` #12/#25,
+    `perf_marker_guard` #24/#36/#47/#53/#57, frontend #23) — `esc-ci-guards.json` itself is
+    currently `status: "resolved"`, `resolved_sha: ff856c1cbafb...` (an ancestor of this
+    worktree's HEAD per `git merge-base --is-ancestor`), `reopen_count: 3`, `owner.leaf_ids:
+    [10026]` — i.e. the escalation record is healthy and de-duplicated *now*; the duplication
+    happened upstream in the orchestrator's re-trigger logic across the (a)/(b) reopen history,
+    not in `run_guards.py`'s rule set or veto threshold. Confirmed on this worktree (`git status`
+    clean, HEAD past `ff856c1cb`): `python C:\aios\meta\guards\run_guards.py --repo <wt> --base
+    origin/main --head HEAD` prints `{"vetoed": false, "flagged": false, "findings": []}`. No
+    script/baseline change made (DECISION_GUIDELINES B-2 n/a — no defect found in
+    `architecture_guard.py`/`security_guard.py`): the four-leaf cluster is two independently-fixed
+    real contract/line-cap regressions plus one duplicate-leaf artifact of the same fleet-code
+    stale-snapshot re-trigger gap already tracked for other stages. Before working a future
+    `guards` leaf: run `run_guards.py --base origin/main --head HEAD` locally first — if
+    `vetoed: false` and the cited commit's fix is already an ancestor of HEAD, check
+    `esc-ci-guards.json`'s `status`/`resolved_sha` before creating a new individual leaf, since a
+    second leaf for an already-`resolved` sha is the duplicate-leaf pattern, not a new violation.
