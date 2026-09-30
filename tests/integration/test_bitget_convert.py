@@ -4,13 +4,18 @@
 형태를 재현해 검증한다(test_bitget_adapter.py와 동일 원칙) — 필드명은
 커뮤니티 SDK 레퍼런스 기준 최선 추정치라 라이브 검증 전까지는 확정 아님.
 """
+
 import json
 from decimal import Decimal
 
 import httpx
 import pytest
 
-from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+from src.core.exceptions import (
+    ExchangeAPIError,
+    FrozenZonePaperAdapterBlockedError,
+    RetryableExchangeError,
+)
 from src.exchanges.bitget.adapter import BitgetAdapter
 
 
@@ -73,9 +78,7 @@ async def test_execute_convert_sends_trace_id():
         )
 
     adapter = _make_adapter(handler)
-    result = await adapter.execute_convert(
-        "t-1", "usdt", "btc", Decimal("100"), Decimal("0.001")
-    )
+    result = await adapter.execute_convert("t-1", "usdt", "btc", Decimal("100"), Decimal("0.001"))
 
     assert result == {"cnvtId": "c-1"}
 
@@ -90,14 +93,10 @@ async def test_execute_convert_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
-        await live_adapter.execute_convert(
-            "t-1", "usdt", "btc", Decimal("100"), Decimal("0.001")
-        )
+        await live_adapter.execute_convert("t-1", "usdt", "btc", Decimal("100"), Decimal("0.001"))
 
 
 async def test_execute_convert_rejects_non_positive_amount():
@@ -127,3 +126,41 @@ async def test_get_convert_history_returns_raw_rows():
     history = await adapter.get_convert_history()
 
     assert history == [{"cnvtId": "c-1", "fromCoin": "USDT", "toCoin": "BTC"}]
+
+
+async def test_get_convert_quote_raises_on_error_code_body():
+    """불변식 위반 입력 거부 — 거래소가 에러 바디(code != 00000)를 주면
+    raw dict를 그대로 반환하지 말고 fail-closed로 예외를 던져야 한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            {
+                "code": "40915",
+                "msg": "invalid coin pair",
+                "requestTime": 1,
+                "data": {},
+            }
+        )
+
+    adapter = _make_adapter(handler)
+    with pytest.raises(ExchangeAPIError):
+        await adapter.get_convert_quote("usdt", "btc", Decimal("100"))
+
+
+async def test_execute_convert_propagates_request_failure_injection():
+    """실패주입 — 하위 `_request` 의존성이 예외를 던지면 흡수하지 않고
+    그대로 전파해야 한다(견적-실행 2단계 흐름에서 부분 실행을 조용히
+    성공으로 위장하지 않는다)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("모킹된 _request가 먼저 실패했어야 합니다.")
+
+    adapter = _make_adapter(handler)
+
+    async def _boom(*args, **kwargs):
+        raise RetryableExchangeError("bitget 연결 실패(주입된 실패)")
+
+    adapter._request = _boom
+
+    with pytest.raises(RetryableExchangeError):
+        await adapter.execute_convert("t-1", "usdt", "btc", Decimal("100"), Decimal("0.001"))
