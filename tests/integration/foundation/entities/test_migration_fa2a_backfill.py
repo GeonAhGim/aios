@@ -50,6 +50,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import zlib
 from collections.abc import AsyncGenerator, Iterator
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -119,7 +120,10 @@ def _run_alembic(*args: str, database_url: str) -> None:
 
 @pytest.fixture
 async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str, None]:
-    worker_id = f"fa2abf{abs(hash(request.node.name)) % 10_000_000}"
+    # CTO 2026-09-30: hash()는 프로세스마다 시드가 달라(PYTHONHASHSEED) 실행할 때마다 DB 이름이
+    # 바뀌었고, 같은 이름만 DROP 후 재생성하는 ensure_worker_database가 옛 DB를 못 지워 CI 한 번에
+    # 수십 개씩 누적됐다(클러스터 460개 → 복구 리허설 실패). crc32로 이름을 고정해 재사용한다.
+    worker_id = f"fa2abf{zlib.crc32(request.node.name.encode()) % 10_000_000}"
     url = await ensure_worker_database(template_database_url(), worker_id)
     yield url
 
