@@ -138,7 +138,7 @@ async def test_notify_result_is_immutable_against_post_hoc_ok_override():
     result = NotifyResult(ok=False, status_code=500, error="boom")
 
     with pytest.raises(AttributeError):
-        result.ok = True  # type: ignore[misc]
+        result.ok = True
 
 
 async def test_send_timeout_exception_is_not_ok(monkeypatch: pytest.MonkeyPatch):
@@ -158,6 +158,7 @@ async def test_send_timeout_exception_is_not_ok(monkeypatch: pytest.MonkeyPatch)
     assert "timed out" in (result.error or "")
 
 
+@pytest.mark.perf
 async def test_send_success_latency_stays_under_budget(monkeypatch: pytest.MonkeyPatch):
     """성능 단언: 로컬 MockTransport 왕복은 네트워크 I/O가 없으므로 500ms 예산 내에
     끝나야 한다 -- 어댑터가 불필요한 재시도/블로킹 대기를 추가하지 않았는지 감시한다."""
