@@ -8,6 +8,7 @@ coverage_spans에 결손으로 기록됨(조용한 보간 금지)". 단위테스
 EXCLUDE 제약까지 통과하는지, 그리고 `Venue.BINANCE`/`Timeframe.L2`가
 DB CHECK 제약(마이그레이션 4b19195124bb)을 실제로 통과하는지 증명한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,10 +24,12 @@ from websockets.exceptions import ConnectionClosed
 from src.exchanges.common.ws_session import NOT_ACK
 from src.foundation.market_data.adapters.ingest.l2_ingest_session import L2IngestSession
 from src.foundation.market_data.adapters.postgres_coverage_repository import (
+    CoverageSpanOverlapError,
     PostgresCoverageRepository,
 )
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.domain.l2_orderbook import L2Diff, L2Snapshot
+from src.foundation.market_data.ports.coverage_repository import CoverageQuality, CoverageSpan
 
 
 class _Stop(Exception):
@@ -110,8 +113,10 @@ class _FakeBinanceAdapter:
 
     def parse_event(self, message: dict[str, Any]) -> L2Diff | None:
         return L2Diff(
-            sequence=int(message["seq"]), as_of=datetime.now(timezone.utc),
-            bid_updates=(), ask_updates=(),
+            sequence=int(message["seq"]),
+            as_of=datetime.now(timezone.utc),
+            bid_updates=(),
+            ask_updates=(),
         )
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
@@ -166,7 +171,9 @@ async def test_gap_produces_two_non_overlapping_spans_with_a_real_hole_between(p
         coverage_repo=repo,
         clock=clock,
         ws_session_kwargs={
-            "connect_fn": connect_fn, "sleep_fn": _no_sleep, "ping_sleep_fn": _never,
+            "connect_fn": connect_fn,
+            "sleep_fn": _no_sleep,
+            "ping_sleep_fn": _never,
         },
     )
 
@@ -182,3 +189,118 @@ async def test_gap_produces_two_non_overlapping_spans_with_a_real_hole_between(p
     assert ordered[0].timeframe is Timeframe.L2
     # 손실 구간이 실제로 존재 — 두 span이 이어붙지 않는다(조용한 보간 금지).
     assert ordered[0].end < ordered[1].start
+
+
+async def test_overlapping_span_insert_rejected_fail_closed(pool: asyncpg.Pool):
+    """EXCLUDE 제약 위반 시 `CoverageSpanOverlapError`로 표면화한다 — 겹치는 손실
+    구간이 조용히 병합/무시되지 않고 fail-closed로 거부되는지, L2IngestSession이
+    의존하는 이 DB invariant를 직접 증명한다(§4.1)."""
+    instrument_id = _fake_ulid()
+    await _insert_instrument(pool, instrument_id)
+    repo = PostgresCoverageRepository(pool)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    span_a = CoverageSpan(
+        instrument_id=instrument_id,
+        venue=Venue.BINANCE,
+        timeframe=Timeframe.L2,
+        quality=CoverageQuality.PROVISIONAL,
+        start=base,
+        end=base + timedelta(minutes=10),
+    )
+    span_b = CoverageSpan(
+        instrument_id=instrument_id,
+        venue=Venue.BINANCE,
+        timeframe=Timeframe.L2,
+        quality=CoverageQuality.PROVISIONAL,
+        start=base + timedelta(minutes=5),
+        end=base + timedelta(minutes=15),
+    )
+
+    async with pool.acquire() as db_conn, db_conn.transaction():
+        await repo.upsert_span(db_conn, span_a)
+
+    with pytest.raises(CoverageSpanOverlapError):
+        async with pool.acquire() as db_conn, db_conn.transaction():
+            await repo.upsert_span(db_conn, span_b)
+
+
+async def test_zero_duration_gap_records_no_phantom_span(pool: asyncpg.Pool):
+    """clock이 멈춘 순간(재연결/재동기화가 시간 경과 없이 즉시 일어난 경우)에는
+    `_close_span`의 `end_at <= start` 가드가 길이 0인 유령 span을 막아야 한다 —
+    빈 구간을 span으로 기록하면 실제로는 관측하지 못한 시각을 커버리지로
+    주장하게 되어 §4.1 금지사항을 어긴다."""
+    instrument_id = _fake_ulid()
+    await _insert_instrument(pool, instrument_id)
+    repo = PostgresCoverageRepository(pool)
+    adapter = _FakeBinanceAdapter()
+    frozen = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def clock() -> datetime:
+        return frozen
+
+    frames = [json.dumps({"seq": s}) for s in (1, 3)]  # 즉시 갭 — 시계는 멈춘 채로
+    conn = _FakeConnection(frames, raise_after=_Stop())
+    connect_fn = _connect_sequence([conn])
+
+    session = L2IngestSession(
+        adapter=adapter,
+        instrument_id=instrument_id,
+        instrument_symbol="BTCUSDT",
+        pool=pool,
+        coverage_repo=repo,
+        clock=clock,
+        ws_session_kwargs={
+            "connect_fn": connect_fn,
+            "sleep_fn": _no_sleep,
+            "ping_sleep_fn": _never,
+        },
+    )
+
+    with pytest.raises(_Stop):
+        await session.run()
+
+    async with pool.acquire() as db_conn, db_conn.transaction():
+        spans = await repo.list_spans(db_conn, instrument_id, Timeframe.L2)
+
+    assert spans == []
+
+
+async def test_coverage_write_failure_propagates_not_swallowed(
+    pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+):
+    """`coverage_repo.upsert_span`이 실패하면 `L2IngestSession`은 예외를 삼키지
+    않고 그대로 다시 던진다 — 손실 구간 기록 실패가 조용히 사라지지 않도록 하는
+    fail-closed 경로(§4.1)를 의존성 예외 주입으로 증명한다."""
+    instrument_id = _fake_ulid()
+    await _insert_instrument(pool, instrument_id)
+    repo = PostgresCoverageRepository(pool)
+
+    async def _boom(conn: asyncpg.Connection, span: CoverageSpan) -> CoverageSpan:
+        raise RuntimeError("주입된 커버리지 기록 실패")
+
+    monkeypatch.setattr(repo, "upsert_span", _boom)
+
+    adapter = _FakeBinanceAdapter()
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    frames = [
+        json.dumps({"seq": s}) for s in (1, 2, 4)
+    ]  # 갭 → on_resync → _close_span → upsert_span
+    conn = _FakeConnection(frames, raise_after=_Stop())
+    connect_fn = _connect_sequence([conn])
+
+    session = L2IngestSession(
+        adapter=adapter,
+        instrument_id=instrument_id,
+        instrument_symbol="BTCUSDT",
+        pool=pool,
+        coverage_repo=repo,
+        clock=clock,
+        ws_session_kwargs={
+            "connect_fn": connect_fn,
+            "sleep_fn": _no_sleep,
+            "ping_sleep_fn": _never,
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="주입된 커버리지 기록 실패"):
+        await session.run()
