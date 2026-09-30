@@ -2090,6 +2090,40 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     re-diagnosing a ninth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) —
     script/baseline design is sound; the remaining defect is fleet code, not this repo.
 
+81. A sixth `pytest` 24h 4-repeat systemic leaf (task-9716) citing a repeat set (task-8933,
+    task-9055, task-9464, task-9653) already covered by #28/#34/#40/#48/#77 for three of the
+    four ids, plus task-9653 as one new data point. As all five prior systemic leaves already
+    established, `scripts/check_pytest.py` does not exist (confirmed again here) — `pytest` is a
+    container name for the ~2700s full suite in `pm/ci_recheck.py`, not a shared check script
+    with its own design, so "the pytest gate repeating" is N unrelated single-test failures
+    sharing one stage name, not a design defect. task-9653 itself already closed noop with a
+    complete root-cause: its escalation's detail tail was truncated mid-run (28%, no failure line,
+    only progress dots) against sha `7ad655e6` — task-9464's own commit (the
+    `perf_measurement_guard` offender-count fix, 544->548, already named in #28/#34/#40/#48),
+    already an ancestor of that worktree — and task-9653 additionally cross-checked two sibling
+    escalations from the same time window showing the same host-contention signature:
+    `esc-ci-prepare`/task-9519 (`rc=3221225794`/`STATUS_ACCESS_VIOLATION` on a spawned git
+    subprocess, immediately fine on retry — a transient Windows spawn fault, the same class as
+    #52's frontend `0xC0000005`) and `esc-ci-pm_pytest`/task-9442 (the full suite not finishing
+    inside its 900-1200s budget because the host was concurrently running the orchestrator plus
+    ~20 worker_runners plus multiple local_ci instances — unrelated to any diff). Reconfirmed on
+    this worktree (`git status` clean, HEAD past `1df7bc8f5`/task-9121):
+    `tests/unit/scripts/test_kis_generate_adapters.py` and
+    `tests/unit/meta/test_perf_measurement_guard.py` both pass (32 passed, 94.7s — the slower
+    wall-clock itself another data point for shared-host contention, still nowhere near the pytest
+    stage's own budget). No new root cause found and none expected — this is the same
+    escalation/orchestrator pattern named in #17-#26/#30-#31/#33-#36/#38/#40/#48/#77 (`pm/
+    auto_decision.py`/`orchestrator.py`'s `ci_red` rule spawning a fresh systemic leaf off a
+    repeat set that overlaps an already-closed one instead of checking prior resolution first),
+    fleet code out of a repo worker's edit scope (§4). Before working a future `pytest` systemic
+    leaf: check whether the cited repeat leaf ids overlap #28/#34/#40/#48/#77/this entry's sets
+    first — if so, close as noop citing them rather than re-deriving the same failure classes a
+    sixth time; if a leaf reports a truncated/dot-only detail tail with no failure line, treat it
+    as the host-contention signature (cite task-9653 and this entry) rather than bisecting. No
+    script/baseline exists to relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to fix;
+    the repeat is fleet-code re-escalation plus ordinary shared-host CI capacity variance, not a
+    gate design flaw.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
