@@ -1989,6 +1989,38 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     relieve (DECISION_GUIDELINES B-2 n/a) — there is nothing new to fix; the repeat is
     fleet-code re-escalation, not this repo.
 
+78. A seventh `consistency` 24h 5-repeat systemic leaf (task-9595) citing the identical repeat
+    set #22 (task-9011/9281/9460), #31 (task-9301/9460), #35 (task-9537), #54 (task-9620), #61
+    (task-9665), and #71 (task-9691) already closed six times — task-9595's spec names
+    task-9011, task-9281, task-9460, task-9574 verbatim, the same set every prior systemic leaf
+    already root-caused. `scripts/consistency/*`/`consistency-baseline.json` are unchanged since
+    task-9122's fix (commit `693fa98a`, deduping `check_port_protocol_implementations`'s
+    redundant double `ast.walk()` via `common.py`'s cached `_walked_nodes(path)`, plus a
+    structural AST-count regression-guard test) — `git log --oneline -3 --
+    scripts/consistency/ consistency-baseline.json` confirms `693fa98a` as the latest touch, no
+    commits since. A local run on this worktree (`git status` clean) confirms `OK` and matches
+    every one of the 13 tracked metrics in `consistency-baseline.json` exactly
+    (`router_unregistered=0 port_method_unimplemented=0 port_protocol_unimplemented=0
+    env_key_undocumented=4 feature_flag_undocumented=0 event_type_unconsumed=4
+    migration_hygiene=0 openapi_client_mismatch=34 spec_leaf_untraced=32 naive_datetime=0
+    money_float=0 symbol_id_assembly=1 spec_template_incomplete=0 authority_duplication=4`).
+    This task's own resume-state shows it burned two prior local-engine attempts on a 400
+    context-budget error before ever reaching an investigation step (`decision`:
+    "로컬 컨텍스트 예산 초과 반복(ND-28) — claude-local 부적합, backend로 재배정") — an engine/
+    infra retry failure, not evidence of a new code defect. This is the same fleet-code pattern
+    already named for seventeen+ gates (#17-#26, #30-#31, #33-#36, #38, #40, #48, #50, #56, #59,
+    #61, #71): `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule re-spawning a leaf off an
+    already-resolved `esc-ci-consistency.json` snapshot (`bisect_culprit 4d5ebed5`, the same
+    docstring-only translation commit named unrelated to this gate's logic since #21) instead of
+    checking whether a prior systemic leaf already closed the identical question, out of a repo
+    worker's edit scope (§4). No script/baseline change made — task-9122's fix is still in place
+    and sufficient. Before working a future `consistency` leaf: run
+    `python scripts/check_consistency.py` locally first — if `OK` and baseline-matching, and the
+    escalation's `bisect_culprit` is `4d5ebed5` (or cites an already-closed leaf verbatim), close
+    as noop citing task-9122, #22/#31/#35/#54/#61/#71, and this entry rather than re-diagnosing
+    an eighth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) — script/baseline
+    design is sound; the remaining defect is fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
