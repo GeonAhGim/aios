@@ -1,8 +1,10 @@
 """11.7 통합테스트 — 실제 dev DB 대상."""
+
 from pathlib import Path
 
 import asyncpg
 import pytest
+from cryptography.exceptions import InvalidTag
 from dotenv import dotenv_values
 
 from src.core.approval.panic_prompt import CorroborationSignal, PanicPromptGenerator
@@ -134,3 +136,69 @@ async def test_fetch_for_panic_prompt_connects_to_panic_prompt_generator(whiteli
 
     assert result.fast_path_activated is True
     assert [d.destination_address for d in result.destinations] == ["bc1qcoldwallet"]
+
+
+async def test_registration_blocked_at_halted_level(whitelist, pool):
+    """불변식 위반 입력 거부 — HALTED도 RESTRICTED와 동일하게 위기 상태로 취급돼야 한다."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'halted' WHERE id = 1"
+        )
+
+    with pytest.raises(WithdrawalWhitelistError):
+        await whitelist.register(user_id, exchange="bitget", destination_address="bc1qattacker")
+
+    entries = await whitelist.list_for_user(user_id)
+    assert entries == []
+
+
+async def test_registration_blocked_at_emergency_level(whitelist, pool):
+    """불변식 위반 입력 거부 — EMERGENCY 레벨에서도 신규 등록은 절대 통과하면 안 된다."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'emergency' WHERE id = 1"
+        )
+
+    with pytest.raises(WithdrawalWhitelistError):
+        await whitelist.register(user_id, exchange="bitget", destination_address="bc1qattacker")
+
+    entries = await whitelist.list_for_user(user_id)
+    assert entries == []
+
+
+async def test_list_fails_to_decrypt_with_wrong_encryption_key(whitelist, pool):
+    """불변식 위반 입력 거부 — 등록 시 쓰인 키가 아니면 destination_address를 복호화할 수
+    없어야 한다(암호화 자체가 무의미해지는 것을 방지)."""
+    user_id = await create_test_user(pool)
+    await whitelist.register(user_id, exchange="bitget", destination_address="bc1qcoldwallet")
+
+    wrong_key_service = WithdrawalWhitelistService(
+        pool, whitelist._circuit_breaker, encryption_key="22" * 32
+    )
+
+    with pytest.raises(InvalidTag):
+        await wrong_key_service.list_for_user(user_id)
+
+
+async def test_register_fails_closed_when_circuit_breaker_check_raises(
+    whitelist, pool, monkeypatch
+):
+    """실패주입 — CircuitBreakerService.get_state()가 인프라 오류로 예외를 던지면
+    등록 시도는 fail-closed로 실패해야 하고, 부분 기록이 DB에 남으면 안 된다."""
+
+    async def _boom():
+        raise RuntimeError("circuit breaker state unavailable")
+
+    monkeypatch.setattr(whitelist._circuit_breaker, "get_state", _boom)
+    user_id = await create_test_user(pool)
+
+    with pytest.raises(RuntimeError):
+        await whitelist.register(user_id, exchange="bitget", destination_address="bc1qcoldwallet")
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM withdrawal_whitelist WHERE user_id = $1", user_id
+        )
+    assert count == 0
