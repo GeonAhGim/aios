@@ -2512,3 +2512,41 @@ the numbering they had in CLAUDE.md section 6.
     task-9588 (#52), task-9666 (#64), task-9678 (#66), task-9778 (#84), task-9760 (#89), and this
     entry rather than re-investigating a tenth time. No baseline/marker-list relief made
     (DECISION_GUIDELINES B-2) — the fix belongs to fleet code, not this repo.
+
+98. A `supply_chain` 24h 4-repeat systemic leaf (task-9892, parent task-8993) cites repeat set
+    task-9337, task-9443, task-9874, task-9888. There is no `scripts/check_supply_chain.py` in
+    this repo — the `supply_chain` CI stage is `scripts/run_pip_audit.py`, a `pip-audit
+    --skip-editable --format json` wrapper that re-implements `--strict` judgement itself because
+    `--strict` treats this repo's own editable self-install as a fatal "skipped dependency"
+    (see the file's own docstring, ADR-2026-09-09-B H-5). Of the four cited leaves, only two have
+    a corresponding commit on `origin/main`: `aad66d131` (task-9337, "pip-audit subprocess cp949
+    디코딩 에러 근본 정정") and `8c5326310` (task-9874, "bump pyjwt 2.14.0 -> 2.15.1 to clear
+    pip-audit CVE-2026-101918"); task-9443 and task-9888 have no matching commit anywhere in
+    `git log --all` (by path or by grep on the task id), so they were very likely closed as
+    noop/blocked rather than landing a code change. `git log` on `scripts/run_pip_audit.py` shows
+    task-9337 was the fourth commit in an onion-layered Windows cp949-decoding bug fixed one layer
+    at a time — task-8362 (outer `subprocess.run` encoding), task-8375 (`is_network_error` None
+    crash when capture fails), task-8662 (the *inner* child subprocess pip-audit itself spawns to
+    bootstrap venv pip, one layer below the outer fix), task-9337 (`PYTHONIOENCODING=utf-8` +
+    `errors="replace"`, the actual root fix — matches the code comment already documenting this
+    chain at the time of that commit). That multi-commit history is not a design defect in
+    `run_pip_audit.py`/its baseline (`.pip-audit-ignore`, currently `{"ignore": []}`, no stale
+    exceptions) — it is a real Windows-CI-runner encoding bug that took four iterations to find
+    every layer, now closed as of task-9337 (confirmed: current file state already has both
+    fixes). task-9874 (pyjwt CVE-2026-101918) is a separate, legitimate cause: a new CVE was
+    published upstream for a pinned dependency and pip-audit correctly flagged it — this is
+    expected gate behavior, not a bug, and each such leaf will need its own targeted version bump
+    (there is no way to "fix the script" to stop new upstream CVE disclosures). Reconfirmed on
+    this worktree (`git status` clean, HEAD `4382fd9d3`): `python scripts/run_pip_audit.py` exits
+    0 with `pip-audit 게이트 통과 (ignored=[])`, and `tests/unit/scripts/test_run_pip_audit.py`
+    (11 tests) already covers the encoding chain (`test_utf8_korean_bytes_no_longer_crash_...`,
+    `test_red_gate_reproduction_cp949_decode_...`), the None-capture crash
+    (`test_main_reports_audit_execution_failure_when_capture_yields_none`), and ignore-file
+    expiry (`test_expired_ignore_entry_is_fatal`). No script/baseline change made
+    (DECISION_GUIDELINES B-2 n/a — no defect found): the four-leaf cluster is the tail of an
+    already-resolved multi-layer encoding bug (task-8362/8375/8662/9337) plus one ordinary
+    upstream-CVE dependency bump (task-9874), not a single recurring design flaw. Before working a
+    future `supply_chain` leaf: check whether it's (a) a new CVE ID not yet in `.pip-audit-ignore`
+    or bumped in `pyproject.toml`/`requirements-lock.txt` — needs its own version-bump leaf, or
+    (b) an encoding/subprocess-capture error in `run_pip_audit.py` itself — if so, diff against
+    `aad66d131` first since that commit already closed every encoding layer found so far.
