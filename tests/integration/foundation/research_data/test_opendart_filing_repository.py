@@ -6,6 +6,7 @@ DoD: 정정 공시는 UPDATE가 아니라 새 행(실 DB 행 수로 증명) + �
 정정 전 시점 질의가 정정 전 값을 돌려줌(point-in-time) + 파싱 실패 공시는
 미처리 큐 테이블에 실제로 남음.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass
@@ -170,3 +172,87 @@ async def test_parse_failure_lands_in_unprocessed_queue_table(pool, queue) -> No
     assert row["resolved"] is False
     payload = json.loads(row["raw_payload"])
     assert payload["rcept_no"] == "bad-filing"
+
+
+async def test_append_rejects_unknown_instrument_id(pool, filing_repo) -> None:
+    """`instrument_id`가 `md_instrument`에 없으면 FK 제약으로 거부돼야 한다."""
+    action = _split(
+        uuid.uuid4(),
+        ratio="10",
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        source_ref=f"rcept-unknown-instrument-{uuid.uuid4()}",
+    )
+
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        async with pool.acquire() as conn, conn.transaction():
+            await filing_repo.append(conn, action)
+
+
+async def test_append_rejects_non_positive_ratio(pool, filing_repo) -> None:
+    """`ratio <= 0`은 애플리케이션 검증을 우회해도 DB CHECK로 거부돼야 한다
+    (`ck_...`: `ratio > 0`)."""
+    instrument_id = await _make_instrument(pool)
+    action = _split(
+        instrument_id,
+        ratio="0",
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        source_ref=f"rcept-zero-ratio-{instrument_id}",
+    )
+
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with pool.acquire() as conn, conn.transaction():
+            await filing_repo.append(conn, action)
+
+
+class _FlakyOnceConnection:
+    """실 커넥션을 감싸 `fetchrow` 최초 1회만 장애를 주입하는 래퍼 —
+    append()가 "이미 있는지" 확인하는 첫 fetchrow에서 터지므로 INSERT는
+    아예 시도되지 않는다(부분 행 없음을 증명)."""
+
+    def __init__(self, real_conn) -> None:
+        self._real_conn = real_conn
+        self._armed = True
+
+    async def fetchrow(self, *args, **kwargs):
+        if self._armed:
+            self._armed = False
+            raise asyncpg.PostgresConnectionError("simulated transient outage")
+        return await self._real_conn.fetchrow(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real_conn, name)
+
+
+async def test_append_failure_injection_leaves_no_partial_row_and_retry_succeeds(
+    pool, filing_repo
+) -> None:
+    """append 도중 커넥션 장애(실패주입)가 나면 부분 행이 남지 않고,
+    장애가 사라진 뒤 같은 source_ref로 재시도하면 정상 반영돼야 한다."""
+    instrument_id = await _make_instrument(pool)
+    action = _split(
+        instrument_id,
+        ratio="10",
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        source_ref=f"rcept-retry-{instrument_id}",
+    )
+
+    async with pool.acquire() as real_conn, real_conn.transaction():
+        flaky = _FlakyOnceConnection(real_conn)
+        with pytest.raises(asyncpg.PostgresConnectionError):
+            await filing_repo.append(flaky, action)
+
+    row_count_after_failure = await pool.fetchval(
+        "SELECT count(*) FROM md_corporate_action_filing WHERE source_ref = $1",
+        action.source_ref,
+    )
+    assert row_count_after_failure == 0
+
+    async with pool.acquire() as conn, conn.transaction():
+        result = await filing_repo.append(conn, action)
+
+    assert result.ratio == Decimal("10")
+    row_count_after_retry = await pool.fetchval(
+        "SELECT count(*) FROM md_corporate_action_filing WHERE source_ref = $1",
+        action.source_ref,
+    )
+    assert row_count_after_retry == 1
