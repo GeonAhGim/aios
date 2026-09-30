@@ -37,6 +37,7 @@ renamed and looks up `cmd.canonical_symbol` converted to venue raw format via
 `symbol_normalizer.to_venue` — lookups after RENAME are outside this leaf's scope
 (LA-12/LA-14 alias format consistency must be addressed first).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -94,7 +95,7 @@ _NOT_TRADABLE = frozenset({SymbolStatus.SUSPENDED, SymbolStatus.DELISTED})
 
 
 class SymbolUnknownError(Exception):
-    """`MD_SYMBOL_UNKNOWN` — `(venue, canonical_symbol)`이 참조데이터에 없음."""
+    """`MD_SYMBOL_UNKNOWN` — `(venue, canonical_symbol)` not found in reference data."""
 
 
 class SymbolNotTradableError(Exception):
@@ -145,8 +146,10 @@ async def _sessions_in_range(
     while day <= last_day:
         calendar = calendars.get(day.year)
         if calendar is None:
-            calendar = _bitget_calendar() if venue is Venue.BITGET else await cal.load(
-                conn, venue, day.year
+            calendar = (
+                _bitget_calendar()
+                if venue is Venue.BITGET
+                else await cal.load(conn, venue, day.year)
             )
             calendars[day.year] = calendar
         for window in calendar.sessions_for(day):
