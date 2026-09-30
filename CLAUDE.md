@@ -1746,6 +1746,36 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     `13:08:35Z` — nearly 11 hours post-closure, no further fix task. Recorded here only to avoid
     re-merging duplicate prose; #67's analysis and citation list apply verbatim to this leaf too.
 
+69. A ninth `coverage` `[health:ci_red_systemic]` leaf (task-9687) citing the identical repeat
+    set #58 (task-9661) already closed — task-9687's spec names task-9282, task-9461,
+    task-9575, task-9677 verbatim, the same set task-9661 (#58) resolved just ~15 minutes before
+    this leaf was created (task-9661 `updated_at: "2026-09-30T13:02:17+00:00"`, this leaf
+    `created_at: "2026-09-30T13:00:21+00:00"` — near-simultaneous spawn, not a post-resolution
+    repeat check). `coverage-baseline.txt` (`94.83`/`52977`) and `scripts/coverage_ratchet.py`
+    are unchanged since task-9120's trusted-write gate fix (commit `3bbf20326`) — reconfirmed on
+    this worktree (`git status` clean, `git log --oneline -3 -- scripts/coverage_ratchet.py
+    coverage-baseline.txt` shows no commits since `3bbf20326`). task-9677 (the individual fix leaf
+    in the cited set) itself already closed noop, tracing its escalation's sha (`7ad655e6`,
+    task-9464's own commit) to the identical test-only-commit pattern named in #21/#26/#32/#44/
+    #49/#58/#61: that commit only touches `tests/unit/meta/test_perf_measurement_guard.py` plus
+    perf-marked test files, no `src/` change, and this worktree is a confirmed ancestor descendant
+    of it. Root cause is unchanged from #21/#26/#32/#44/#49/#58/#61's two-part answer: (a) a local
+    partial `pytest --cov=src` run dying under shared-host DB-fixture contention shrinks the
+    *numerator* (lines executed) while `lines-valid` (the ratio-floor's own denominator, counting
+    only *importable* statements) stays high enough to slip past the 0.5 floor — not independently
+    fixable from `coverage.xml` alone since Cobertura carries no pytest pass/fail signal; the real
+    fix (correlating a coverage swing with pytest's own exit summary) belongs to fleet CI wiring
+    (`pm/local_ci.py` / `.github/workflows/quality.yml`), out of a repo worker's edit scope (§4);
+    (b) `esc-ci-coverage.json` re-polling and re-spawning systemic leaves off a stale repeat-set
+    snapshot without checking whether a prior systemic leaf already closed the identical
+    question — the same fleet-code pattern named 16+ times (#17-#26, #30-#41, #44, #48-#50, #53,
+    #57-#58, #61). No script/baseline change made. Before working a future `coverage` leaf: check
+    whether the cited repeat leaf ids match an already-closed systemic leaf's set (task-9052/#21,
+    task-9508/#32, task-9575/#44, task-9586/#49, task-9661/#58, or this entry) first — if so,
+    close as noop citing all of them rather than re-diagnosing. No baseline/threshold/ratio-floor
+    relief made (DECISION_GUIDELINES B-2) — the ratchet design is sound; the remaining defect is
+    fleet code, not this repo.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
