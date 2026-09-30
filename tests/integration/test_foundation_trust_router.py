@@ -1,4 +1,5 @@
 """FND-01 통합테스트 — /v1/foundation/trust 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import uuid
 from pathlib import Path
 
@@ -131,3 +132,89 @@ async def test_cannot_revoke_another_users_consent_via_api(client, pool):
         f"/v1/foundation/trust/consents/{consent_id}:revoke", headers=attacker_headers
     )
     assert attack_response.status_code == 403
+
+
+# ── negative tests (DoD: negative >= 3) ─────────────────────────────────────
+
+
+async def test_accept_disclosure_empty_purpose_is_rejected(client):
+    """purpose가 빈 문자열이면 매칭되는 disclosure가 없어 404로 거부된다
+    (DisclosureNotFoundError -> RESOURCE_NOT_FOUND, accept_disclosure.py)."""
+    headers = await _register(client)
+    response = await client.post(
+        "/v1/foundation/trust/consents",
+        json={"purpose": "", "disclosure_revision": 1},
+        headers=headers,
+    )
+    assert response.status_code == 404
+    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_accept_disclosure_missing_revision_is_rejected(client):
+    """disclosure_revision 필드가 누락되면 스키마 검증에서 거부된다
+    (AcceptDisclosureRequest는 필수 필드, handlers.py의 RequestValidationError
+    핸들러는 VALIDATION_INVALID_FIELD -> HTTP 400으로 매핑한다)."""
+    headers = await _register(client)
+    response = await client.post(
+        "/v1/foundation/trust/consents",
+        json={"purpose": _unique_purpose()},
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_INVALID_FIELD"
+
+
+async def test_accept_disclosure_duplicate_purpose_is_rejected(client, pool):
+    """동일 tenant가 같은 purpose/revision에 대해 이미 ACTIVE 동의를 가진 상태로
+    다시 수락을 시도하면 거부된다(ConsentAlreadyActiveError ->
+    STATE_INVALID_TRANSITION -> HTTP 409, accept_disclosure.py)."""
+    headers = await _register(client)
+    purpose = _unique_purpose()
+    await _create_disclosure(pool, purpose)
+
+    first_response = await client.post(
+        "/v1/foundation/trust/consents",
+        json={"purpose": purpose, "disclosure_revision": 1},
+        headers=headers,
+    )
+    assert first_response.status_code == 201
+
+    dup_response = await client.post(
+        "/v1/foundation/trust/consents",
+        json={"purpose": purpose, "disclosure_revision": 1},
+        headers=headers,
+    )
+    assert dup_response.status_code == 409
+    assert dup_response.json()["error_code"] == "STATE_INVALID_TRANSITION"
+
+
+# ── failure injection (DoD: >= 1) ───────────────────────────────────────────
+
+
+async def test_accept_disclosure_repository_failure_returns_internal_error(
+    client, pool, monkeypatch
+):
+    """repository.insert_consent이 매핑되지 않은 예외를 던지면 전역 핸들러가
+    INTERNAL_ERROR/500으로 fail-closed 처리해야 한다(handlers.py
+    _handle_domain_or_unknown_exception, exception_mapping.map_exception
+    fallback)."""
+    from src.foundation.trust.adapters.postgres_repository import (
+        PostgresTrustRepository,
+    )
+
+    async def _raise_on_insert(self, **kwargs):
+        raise RuntimeError("repository simulated failure")
+
+    monkeypatch.setattr(PostgresTrustRepository, "insert_consent", _raise_on_insert)
+
+    headers = await _register(client)
+    purpose = _unique_purpose()
+    await _create_disclosure(pool, purpose)
+
+    response = await client.post(
+        "/v1/foundation/trust/consents",
+        json={"purpose": purpose, "disclosure_revision": 1},
+        headers=headers,
+    )
+    assert response.status_code == 500
+    assert response.json()["error_code"] == "INTERNAL_ERROR"
