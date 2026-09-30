@@ -1925,6 +1925,41 @@ Decision 1), and one red-gate reproduction. Safety/execution/ledger/compliance/d
     re-diagnosing a ninth time. No baseline/threshold relief made (DECISION_GUIDELINES B-2) —
     script/baseline design is sound; the remaining defect is fleet code, not this repo.
 
+76. A seventh `pytest_latency_serial` systemic leaf (task-9591) citing the *identical* repeat
+    set #42 (task-9550), #65 (task-9668), and #73 (task-9694) already closed three times —
+    task-9591's spec names task-9196, task-9286, task-9465, task-9534 verbatim, the same four
+    leaves #20 (task-9298, first systemic leaf), #29 (task-9483, second), #42 (task-9550,
+    third), #65 (task-9668, fourth), and #73 (task-9694, fifth) already root-caused: task-9269's
+    `RelativeBudget` migration (commit `eaa83bbd1`, landed 2026-09-30T06:15:01Z) replaced the
+    last absolute-ms `PerfBudget` assertions across all 4 `FULL_PYTEST_SERIAL_LATENCY_NODEIDS`
+    (`test_builtins_math.py`, `test_lower.py`, `test_interpreter.py`, `test_parser.py`) with the
+    self-calibrating, clock-speed-independent `RelativeBudget` — the real design gap that made
+    the stage repeat under CI-runner speed variance. This leaf itself stalled twice on a local
+    (`claude-local`) engine hitting a 400 context-budget error before any investigation ran
+    (`attempts=2`, `decision_class: "ND-28"`) and was reassigned to a full backend worker, not a
+    sign of a new defect. Reconfirmed on this worktree (`git status` clean, `git log --oneline -3`
+    on all 4 test files plus `tests/_perf/relative_budget.py` shows `eaa83bbd1` as the latest
+    touch, no commits since): all 4 files still `grep`-confirm `RelativeBudget` usage, and a
+    serial run (`pytest -p no:xdist tests/unit/core/script/test_builtins_math.py
+    tests/unit/core/script/test_lower.py tests/unit/core/script/test_interpreter.py
+    tests/unit/core/script/test_parser.py`) gives `150 passed in 7.85s`, an order of magnitude
+    under the step's 300s budget. There is no `scripts/check_pytest_latency_serial.py` in this
+    repo (confirmed again here) — as with `pytest`/`pytest_perf` (#28/#34/#40/#43/#48/#63/#72),
+    the check lives in fleet code (`pm/ci_recheck.py`'s `FULL_PYTEST_SERIAL_LATENCY_NODEIDS`/
+    build_steps), so the repeat is `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule
+    re-spawning a systemic leaf off the same stale repeat set instead of checking whether a prior
+    systemic leaf (task-9298/#20, task-9483/#29, task-9550/#42, task-9668/#65, or task-9694/#73)
+    already closed the identical question — the same fleet-code pattern named nineteen+ times
+    (#17-#26, #30-#31, #33-#36, #38, #40-#42, #48, #50, #56, #59, #61, #65, #73), out of a repo
+    worker's edit scope (§4). No script/test change made — task-9269's `RelativeBudget` migration
+    is still the actual fix and is already in place. Before working a future
+    `pytest_latency_serial` leaf: run the 4 nodeids serially and grep them for `RelativeBudget`
+    first — if both hold, and the cited repeat leaf ids match an already-closed systemic leaf's
+    set (task-9298/#20, task-9483/#29, task-9550/#42, task-9668/#65, task-9694/#73, or this
+    entry), close as noop citing all of them rather than re-diagnosing an eighth time. No
+    baseline/budget relief made (DECISION_GUIDELINES B-2) — task-9269's `RelativeBudget`
+    migration is the actual fix and is already in place.
+
 ## 7. File policy (ADR-2026-09-10-C)
 
 Split files by bounded context / aggregate / invariant ownership, not by line count. Thresholds
