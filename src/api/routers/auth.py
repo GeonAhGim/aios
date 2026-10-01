@@ -1,21 +1,22 @@
-"""11.2/11.3 + PLT-24 — 인증 API 라우터.
+"""11.2/11.3 + PLT-24 — Auth API router.
 
 Spec: 기능설계문서_v1.20.md#FD-11.1/FD-11.2, 16_backend_signatures.md,
 docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§3.4, §9 PLT-24
 
-앱 조립 단계 — 이미 구현된 AuthService(11.2)/MfaService(11.3)와
-`src/services/auth/{login,refresh,logout}.py`(PLT-24) 유스케이스를
-실제 HTTP로 노출한다. 로직은 여기서 새로 만들지 않는다 — 실패 경로도
-도메인 예외를 그대로 raise해 `exception_mapping.py`가 매핑하게 둔다
-(§3.3 "신규 코드에서 raw HTTPException 금지", `test_no_raw_http_exception.py`
-가 이 파일을 이미 검사 대상으로 강제한다).
+App-assembly layer — exposes the already-implemented AuthService(11.2)/
+MfaService(11.3) and the `src/services/auth/{login,refresh,logout}.py`
+(PLT-24) use cases over real HTTP. No new logic is created here — failure
+paths also raise the domain exception as-is and let `exception_mapping.py`
+map it (§3.3 "no raw HTTPException in new code"; `test_no_raw_http_exception.py`
+already enforces this file as a check target).
 
-`/register`도 `login.issue_token_pair()`를 재사용해 세션+토큰 쌍을
-발급한다 — 가입 직후에도 `get_current_user()`(PLT-23 TokenVerifier +
-세션 활성 확인 기반)로 인증되는 토큰이어야 하므로, 레거시
-`AuthService.issue_token()`(단일 비회전 JWT)로는 더 이상 로그인 상태를
-유지할 수 없다.
+`/register` also reuses `login.issue_token_pair()` to issue a session+token
+pair — immediately after signup the token must still be one that
+`get_current_user()` (based on PLT-23 TokenVerifier + active-session check)
+can authenticate, so the legacy `AuthService.issue_token()` (a single
+non-rotating JWT) can no longer keep the user logged in.
 """
+
 from __future__ import annotations
 
 import asyncpg
@@ -127,11 +128,12 @@ async def setup_mfa(
 ) -> ApiResponse[MfaSetupResult]:
     body = body or MfaSetupRequest()
     if user.mfa_enabled:
-        # 레드팀 감사 #11 — 이미 MFA가 켜진 계정이 다시 이 엔드포인트를
-        # 호출하면 기존 secret을 조용히 덮어쓸 수 있었다(Bearer 토큰만
-        # 있으면 비밀번호 없이도 공격자가 자신의 secret으로 재설정 가능).
-        # 최초 설정(mfa_enabled=false)은 로그인 자체가 이미 증명이라
-        # 재인증을 요구하지 않는다.
+        # Red-team audit #11 — if an account that already has MFA enabled
+        # called this endpoint again, it could silently overwrite the
+        # existing secret (an attacker holding only the Bearer token could
+        # reset it to their own secret without the password). Initial setup
+        # (mfa_enabled=false) does not require reauthentication because
+        # login itself is already proof.
         if not body.password:
             raise MfaReauthenticationRequiredError(
                 "이미 활성화된 MFA를 재설정하려면 비밀번호 재인증이 필요합니다."
