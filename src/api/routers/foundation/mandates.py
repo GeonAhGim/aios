@@ -1,9 +1,11 @@
-"""Portfolio Mandate API — 71번 §6 규칙: router는 auth/주입/transport
-validation/command invocation만 담당한다.
+"""Portfolio Mandate API — §6: router handles auth, injection, transport
+validation, and command invocation only.
 
-도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
-`EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(§9 PLT-21 decision, task-1108).
+Domain exceptions are not caught here — ``src/api/contracts/exception_mapping.py``
+``EXCEPTION_MAP`` translates them via the global handler as an envelope
+(§9 PLT-21 decision, task-1108).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -114,13 +116,14 @@ async def post_activate_revision(
         audit_repo=audit_repo,
     )
 
-    # 레드팀 지적(agent-platform-12) — evaluate_policy.py의 fingerprint 수정만으로
-    # mandates 자신의 30초 캐시는 즉시 무효화되지만, risk_gate가 그 위에 얹은
-    # 별도 10초 캐시(risk_evaluation)는 mandate 변경을 알 방법이 없어 그대로
-    # stale ALLOW를 돌려줄 수 있다 — mandates 도메인이 risk_gate를 직접 알면
-    # 안 되므로(71번 §4 방향성 위반), 이미 두 저장소를 다 아는 이 라우터가
-    # orchestration만 담당한다(risk_gate.evaluate_risk_gate 라우터가 이미
-    # mandates+connections+risk_gate 셋을 함께 의존하는 것과 동일한 패턴).
+    # Red-team feedback (agent-platform-12) — modifying the fingerprint in
+    # evaluate_policy.py immediately invalidates mandates' own 30-second cache,
+    # but the risk_gate's separate 10-second cache (risk_evaluation) has no way
+    # to learn about mandate changes and may return a stale ALLOW — since the
+    # mandates domain must not know about risk_gate directly (§4 directionality
+    # rule), this router which already knows both repositories handles only the
+    # orchestration (same pattern as risk_gate.evaluate_risk_gate router which
+    # already depends on mandates+connections+risk_gate together).
     await risk_gate_repo.invalidate_evaluations(tenant_id=user.user_id)
     return ok(result)
 
