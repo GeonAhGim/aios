@@ -20,6 +20,8 @@ import asyncio
 import contextlib
 from decimal import Decimal
 
+import pytest
+
 from src.core.observability.metric_names import (
     POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL,
     POSITIONS_SCHEDULER_CYCLE_SUCCESS_GAUGE,
@@ -29,7 +31,11 @@ from src.data.models.base import Currency, Money
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
 )
-from src.foundation.positions.application.scheduler import PositionsScheduler, TrackedAccount
+from src.foundation.positions.application.scheduler import (
+    CycleReport,
+    PositionsScheduler,
+    TrackedAccount,
+)
 from tests.integration.foundation.positions.scheduler_test_doubles import (
     BITGET,
     NOW,
@@ -141,3 +147,89 @@ async def test_one_account_mark_failure_does_not_block_another(pool):
             conn, healthy_tenant, healthy_account
         )
     assert healthy_snapshot.mark_price == Money(amount=Decimal("70000"), currency=Currency.USDT)
+
+
+async def test_run_mark_cycle_without_tracked_accounts_skips_wiring_assertion(pool):
+    """negative: `tracked=()`면 `marks`/`fx`가 둘 다 배선되지 않아도
+    (scheduler.py 모듈독스트링 "tracked=()면 어느 사이클도 이 값들을
+    참조하지 않는다") 예외 없이 빈 리포트를 반환한다."""
+    registry = MetricsRegistry()
+    scheduler = PositionsScheduler(
+        pool,
+        snapshots=PostgresSnapshotRepository(pool),
+        registry=registry,
+        tracked=(),
+        clock=clock,
+    )
+
+    report = await scheduler.run_mark_cycle()
+
+    assert report.succeeded == []
+    assert report.failed == {}
+
+
+async def test_run_mark_cycle_with_tracked_accounts_but_unwired_marks_fails_closed(pool):
+    """negative: `tracked`가 채워졌는데 `marks`가 배선되지 않으면 조용한
+    `AttributeError` 대신 즉시 `AssertionError`로 fail-closed한다
+    (scheduler.py 모듈독스트링 "각 사이클 진입 시 assert로 필요한 의존성이
+    빠졌는지 바로 드러난다")."""
+    tenant_id, account_id = await setup_account(pool)
+
+    registry = MetricsRegistry()
+    scheduler = PositionsScheduler(
+        pool,
+        snapshots=PostgresSnapshotRepository(pool),
+        registry=registry,
+        fx=FakeFxRateSource(),
+        tracked=[
+            TrackedAccount(
+                tenant_id=tenant_id,
+                account_id=account_id,
+                base_currency=Currency.USDT,
+                calendar=BITGET,
+            )
+        ],
+        clock=clock,
+    )
+
+    with pytest.raises(AssertionError, match="marks/fx"):
+        await scheduler.run_mark_cycle()
+
+
+async def test_run_mark_forever_survives_cycle_exception_and_retries_next_interval(
+    pool, monkeypatch
+):
+    """실패주입: `run_mark_cycle`이 1회차에 예외를 던져도
+    `run_mark_forever`의 try/except가 삼키고 다음 주기에 재시도한다 — 사이클
+    전체가 죽지 않고 2회차가 실제로 실행됨을 `asyncio.Event`로 결정론적으로
+    증명한다(sleep 폴링 대신, task-409 선례)."""
+    registry = MetricsRegistry()
+    scheduler = PositionsScheduler(
+        pool,
+        snapshots=PostgresSnapshotRepository(pool),
+        registry=registry,
+        tracked=(),
+        mark_interval_seconds=0.01,
+        clock=clock,
+    )
+
+    calls = 0
+    second_call = asyncio.Event()
+
+    async def _flaky_cycle(self: PositionsScheduler) -> CycleReport:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionError("boom")
+        second_call.set()
+        return CycleReport()
+
+    monkeypatch.setattr(PositionsScheduler, "run_mark_cycle", _flaky_cycle)
+
+    task = asyncio.create_task(scheduler.run_mark_forever())
+    await asyncio.wait_for(second_call.wait(), timeout=5)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert calls >= 2
