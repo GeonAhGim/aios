@@ -19,7 +19,6 @@ research_data RD-2 DEEPEN(task-2905)과 동일하게, 여기서 "실패주입"�
 from __future__ import annotations
 
 import json
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -212,22 +211,19 @@ def test_gate_red_progressive_field_corruption_flips_pass_fail_at_each_stage() -
 
 
 @pytest.mark.perf
-def test_gate_red_budget_actually_fails_past_budget() -> None:
+def test_gate_red_budget_actually_fails_past_budget(perf_budget: PerfBudget) -> None:
     """위 성능 단언이 실제로 예산 초과를 잡아내는지(tautology 아님) 확인한다
     -- 예산을 실측치보다 훨씬 낮게 걸면 동일 검증 루프가 진짜로
     `AssertionError`를 내야, CI가 언젠가 실제로 느려졌을 때 빨간불이
     된다는 것을 증명한다."""
     n = 200
-    absurdly_low_budget_sec = 1e-9
+    absurdly_low_budget_ms = 1e-6  # 1 microsecond in ms (was 1e-9 sec)
     payloads = [_token_kwargs(token_id=uuid4()) for _ in range(n)]
 
-    start = time.perf_counter()
-    for payload in payloads:
-        v1.AgentToken(**payload)
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.sample(lambda: [v1.AgentToken(**p) for p in payloads])
 
     with pytest.raises(AssertionError):
-        assert elapsed < absurdly_low_budget_sec
+        assert sample.cpu_ms < absurdly_low_budget_ms
 
 
 @pytest.mark.parametrize("mode", ["validation", "serialization"])
