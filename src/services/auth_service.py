@@ -1,28 +1,30 @@
-"""11.2 — 회원가입/로그인 서비스 (AuthService).
+"""11.2 — Sign-up/sign-in service (AuthService).
 
-Spec: 기능설계문서_v1.20.md#FD-11.1, 13_multi_tenancy_auth_v1.4.md#§13.2
+Spec: functional_spec_v1.20.md#FD-11.1, 13_multi_tenancy_auth_v1.4.md#§13.2
 
-FastAPI 라우터(작업트리 16번, API 조립 단계)는 아직 없다 — 이 세션의 다른
-안전장치·승인 서비스(ApprovalService, ReconciliationService 등)와 동일하게
-순수 서비스 계층만 지금 구현하고, 라우터는 조립 단계에서 이 클래스를
-그대로 호출한다.
+No FastAPI router yet (worktree #16, API wiring phase) — as with other
+safety/approval services in this session (ApprovalService,
+ReconciliationService, etc.), only the pure service layer is implemented now;
+the router will call this class directly during the wiring phase.
 
-편차: 13번 §13.2 users DDL에 로그인 실패 잠금 상태를 저장할 컬럼이 없어
-failed_login_attempts/locked_until을 신설했다(문서 v1.4, 마이그레이션
-b2c3d4e5f6a7 참조).
+Deviation: §13.2 users DDL lacks columns for login-failure lockout state,
+so we added failed_login_attempts/locked_until (doc v1.4, migration
+b2c3d4e5f6a7).
 
-MFA(TOTP) 검증은 FD-11.2(작업트리 11.3)에서 별도 구현 예정 — 아직 없어
-verify_totp DI 콜백으로 주입받는다. 콜백을 넘기지 않았는데 mfa_enabled=true인
-계정이 로그인을 시도하면 안전하게 실패 처리한다(fail-safe).
+MFA (TOTP) verification is planned for FD-11.2 (worktree 11.3) — not yet
+implemented. We inject verify_totp as a DI callback. If an account with
+mfa_enabled=True attempts login without a callback, we fail safely.
 
-11.6 연동 — PENDING_DELETION(FD-11.4 탈퇴 유예기간) 상태에서 로그인에
-성공하면 탈퇴가 자동 취소된다(ACTIVE로 복귀, deletion_requested_at 초기화).
+11.6 integration — successful login while in PENDING_DELETION state
+(FD-11.4 withdrawal grace period) automatically cancels the deletion
+(returns to ACTIVE, resets deletion_requested_at).
 
-PLT-22 연동 — 로그인 실패 카운터 증가는 `src/services/auth/lockout.py`의
-원자 UPDATE에 위임한다(TOCTOU 제거, task-852). 잠금 판정을 받으면
-`AccountLockedError`(§3.3 AUTH_ACCOUNT_LOCKED·423 계약)를 던진다 — 라우터가
-아직 이관되지 않아(§9 PLT-24) 지금은 AuthError 서브클래스로 기존 401
-매핑을 그대로 탄다.
+PLT-22 integration — login-failure counter increments are delegated to an
+atomic UPDATE in `src/services/auth/lockout.py` (removes TOCTOU, task-852).
+When a lock decision fires, we raise `AccountLockedError` (§3.3
+AUTH_ACCOUNT_LOCKED · 423 contract) — the router is not yet wired
+(§9 PLT-24), so for now the AuthError subclass inherits the existing 401
+mapping.
 """
 
 from __future__ import annotations
@@ -51,10 +53,11 @@ MIN_PASSWORD_LENGTH = 12
 _GENERIC_AUTH_ERROR = "이메일 또는 비밀번호가 올바르지 않습니다."
 
 _hasher = PasswordHasher()
-# 레드팀 감사(docs/RED_TEAM_FINDINGS.md #12) — 계정 미존재/정지/잠김 경로가
-# Argon2 verify()를 안 타 더 빨리 응답하면 그 처리시간 차이 자체가 계정
-# 존재 여부를 드러내는 타이밍 사이드채널이 된다. 모든 실패 경로에서 고정
-# 더미 해시를 검증해 처리시간을 맞춘다.
+# Red-team audit (docs/RED_TEAM_FINDINGS.md #12) — if the account-not-found/
+# suspended/locked paths skip Argon2 verify() and respond faster, that
+# timing difference itself becomes a timing side-channel that reveals account
+# existence. Verify a fixed dummy hash on every failure path to normalise
+# response time.
 _DUMMY_PASSWORD_HASH = _hasher.hash("timing-normalization-dummy-password")
 
 VerifyTotpFn = Callable[[UUID, str, str], Awaitable[bool]]
@@ -68,13 +71,13 @@ def _consume_verify_timing(password: str) -> None:
 
 
 class AuthError(Exception):
-    """FD-11.1 인증/가입 실패 — 라우터가 적절한 HTTP 상태코드로 변환."""
+    """FD-11.1 Auth/signup failure — router maps to appropriate HTTP status code."""
 
 
 class AccountLockedError(AuthError):
-    """PLT-22 — 잠금 상태 로그인 시도. §3.3 AUTH_ACCOUNT_LOCKED(423) 계약대로
-    `error_code`/`retry_after_seconds` 이름을 고정한다(프론트 deriveLockout,
-    task-387이 이 이름으로 읽는다)."""
+    """PLT-22 — Login attempt on a locked account. §3.3 AUTH_ACCOUNT_LOCKED(423)
+    contract — fixes `error_code`/`retry_after_seconds` names (frontend
+    deriveLockout, task-387 reads these names)."""
 
     error_code = "AUTH_ACCOUNT_LOCKED"
     http_status = 423
@@ -96,7 +99,7 @@ class User(BaseModel):
 
 
 def _password_strong_enough(password: str) -> bool:
-    """Draft 강도 규칙(FD-11.1): 최소 12자 + 대소문자·숫자·특수문자."""
+    """Draft strength rules (FD-11.1): min 12 chars + upper/lower/digit/special."""
     if len(password) < MIN_PASSWORD_LENGTH:
         return False
     return bool(
@@ -121,7 +124,8 @@ def _row_to_user(row: asyncpg.Record) -> User:
 
 
 async def get_user_by_id(pool: asyncpg.Pool, user_id: UUID) -> User | None:
-    """앱 조립 단계(get_current_user JWT 검증)가 사용하는 공개 조회 함수."""
+    """Public lookup used by the app wiring phase (get_current_user JWT
+    validation)."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE user_id = $1", user_id)
     return _row_to_user(row) if row is not None else None
@@ -183,14 +187,15 @@ class AuthService:
     async def authenticate(
         self, email: str, password: str, *, totp_code: str | None = None
     ) -> User:
-        """FD-11.1 예외상황 3종(계정 미존재/잠금/SUSPENDED·DELETED) 전부 여기서
-        처리, 전부 동일한 일반화 메시지로 라우터에 전달 — 계정열거 공격 차단."""
+        """FD-11.1 All 3 exception cases (account not found / locked /
+        SUSPENDED·DELETED) handled here, all forwarded to router with the same
+        generic message — prevents account enumeration attacks."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
             if row is None:
                 _consume_verify_timing(password)
-                # 비밀번호/TOTP 값은 절대 기록하지 않는다 — 시도한 이메일과
-                # 결과 사유만 남긴다(계정이 없어 user_id 자체가 없음).
+                # Never log password/TOTP values — only record the attempted email
+                # and reason (no user_id exists when the account is absent).
                 await record_audit_log(
                     conn,
                     actor_agent="unknown",
@@ -325,13 +330,15 @@ class AuthService:
     async def _fail_login(
         self, conn: asyncpg.Connection, user_id: UUID, now: datetime
     ) -> AuthError:
-        """실패 카운터를 원자적으로 증가시키고, 반환된 예외를 호출자가 `raise`한다
-        (호출부의 `except ... from None` 체이닝 유지 목적). lockout의 단일
-        UPDATE ... RETURNING 덕에 TOCTOU 없이 최신 카운트로 잠금을 판정한다."""
+        """Atomically increment the failure counter; the caller raises the
+        returned exception (to preserve the `except ... from None` chain in the
+        caller). A single UPDATE ... RETURNING in lockout lets us decide lockout
+        with the latest count, without TOCTOU."""
         state = await lockout.register_failed_attempt(conn, user_id, now=now)
         if state.locked:
-            # 실패 시도 자체와는 별개의 이벤트 — 잠금이 "지금 막 걸렸다"는
-            # 사실 자체가 운영자에게 알림/모니터링 대상이 되는 신호다.
+            # Separate event from the failed attempt itself — the fact that a lock
+            # "just got applied" is a signal worthy of alerting/monitoring for
+            # operators.
             await record_audit_log(
                 conn,
                 actor_agent=str(user_id),
