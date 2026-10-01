@@ -190,3 +190,90 @@ P0-1·P0-2·P0-3는 각각 "거짓 녹색으로 적색을 놓침", "결함이 �
 4. (P1) 킬스위치 활성화/비활성화에 멱등키 적용 — backend 풀.
 5. (P1) MVP-1 지표③④⑦의 "프로세스 증빙 vs 사용자 가치" 재가중 — PM/ops 결정 필요.
 6. (P1) perf-measurement-baseline.json 잔여 519건 단계적 자기보정 전환 — backend 풀, 별도 task 분할.
+7. (P1) `execution_control.retire(liquidation="IMMEDIATE_MARKET")`가 실제 청산 주문을 내도록 구현하거나, 미구현 상태를 API 응답/문서에 명시 — backend 풀(§10-5 참조).
+8. (P1) `/v1/foundation/evidence/timeline` 읽기 경로에 해시체인 검증 결합 여부 결정(매 읽기 비용 vs 주기적 배치) — backend 풀 결정 필요(§10-4 참조).
+9. (P2) `open_order_sweeper`의 `adapter_failed` 목록을 로그 전용에서 알림/재시도 큐로 승격 — backend 풀(§10-2 참조).
+
+---
+
+## §10 보충: task-10782 — 미점검 5항목(출금·킬스위치 전파·원장 동시성·해시체인 읽기 검증·retire 롤백)
+
+- **날짜:** 2026-10-01
+- **작업:** task-10782 (parent: task-10665 §8 미점검 목록 보충)
+- **성격:** §8 미점검 목록 중 자금 관련 5항목만 보충 점검. 코드 수정 없음.
+
+### §10 요약
+
+5항목 중 신규 P0는 없음(기존 P0-3/G5-1은 task-10779·task-10780에서 이미 수정 커밋됨 — 아래 (a)(b)에서 재확인). 신규 P1 2건((d) 해시체인 읽기 미결합, (e) retire IMMEDIATE_MARKET 미구현), P2 1건((b) 스윕 실패 무알림). (c) 원장 동시 포스팅은 점검 결과 **문제 없음**(기존 메커니즘이 견고).
+
+### (a) 출금/정산(payout·withdrawal) 쓰기 경로
+
+**점검 방법:** `출금|withdraw|payout` 전수 grep → 실제 쓰기 경로를 `src/foundation/ledger/application/payouts.py`(LC-15a)와 라우터 `src/api/routers/foundation/ledger_admin.py`로 추림. 확인/권한/멱등/감사/되돌리기를 코드로 직접 대조.
+
+| 항목 | 내용 |
+|------|------|
+| 소재 | `schedule_payouts()`(정산배치 생성, PENDING_PAYOUT→AVAILABLE) / `mark_payout_paid()`(오프플랫폼 송금 확정, AVAILABLE→PLATFORM:PAYOUT_CLEARING) — `src/foundation/ledger/application/payouts.py:64-166`. API는 `POST /admin/ledger/payouts/{batch_id}/paid`(`ledger_admin.py:59-80`)만 존재 |
+| 확인단계 | `mark_payout_paid`는 `external_ref`(수동 송금 증빙 문자열)를 바디로 받되 그 값 자체의 진위는 검증하지 않음 — "실제 돈이 플랫폼 밖에서 이미 이동했다"는 사실은 admin의 수동 입력을 신뢰 |
+| 권한 | `get_current_admin` + `require_break_glass("tenant_read")`(break-glass scope). 주석(`ledger_admin.py:22-24`)이 "정확한 4번째 scope(`payout_confirm`)가 없어 가장 가까운 기존 scope로 근사"라고 명시 — **권한 세분화 미흡**(tenant_read는 원래 읽기 권한인데 쓰기에 재사용) |
+| 멱등(105) | 생성(`create_batch`)은 `(seller_user_id, period_end)` UNIQUE + `ON CONFLICT DO NOTHING`(진짜 멱등 — 재호출 시 기존 배치 반환). 확정(`mark_paid`)은 `conditional_update`로 `RELEASED→PAID` 1회만 전이 — 이미 PAID면 `ConcurrencyConflictError`를 던짐(캐시된 성공 응답을 재반환하지 않음). 105 표준의 "조건부 UPDATE"는 충족하지만, 네트워크 재시도로 응답을 놓친 admin이 재호출하면 실패로 보여 혼란 가능(실제로는 이미 성공) |
+| 감사 | `post_entry`가 같은 트랜잭션에서 `AuditAppender`로 분개를 남김(`payouts.py:108-110,160-162`) — 자금 이동은 전부 감사됨 |
+| 되돌리기 | 없음 — `PAID`는 터미널 상태, 되돌리는 API/경로 미발견. 오류 송금 시 역분개(reversal entry)를 수동으로 새로 포스팅해야 함(해당 경로도 코드상 확인 못함) |
+
+**결론:** 실제 "거래소로의 출금"(예: Bitget/KIS 계좌에서 은행으로 인출) 자동화 경로는 `src/` 전수에서 **발견되지 않음** — 이 플랫폼의 "출금"은 마켓플레이스 판매자 정산(셀러 수익금)이 전부이고, 그조차 실제 송금은 플랫폼 밖(수동/은행)에서 이뤄진 뒤 `mark_payout_paid`로 사후 확정만 한다. 따라서 "자동화된 자금 유출 경로"라는 의미의 공격면은 이 경로에 없음. 다만 권한 scope 근사(`tenant_read`)와 되돌리기 부재는 기존 소견 패턴(G5류)과 같은 유형의 개선 여지.
+
+**근거:** `src/foundation/ledger/application/payouts.py:1-166`, `src/api/routers/foundation/ledger_admin.py:48-80`, `src/foundation/ledger/adapters/postgres_payout_repository.py:149-167`.
+**재현/반증 테스트 위치:** `tests/integration/foundation/ledger/`(payout 관련 테스트 파일) — 이번 조사에서 실행은 안 함, 소재만 확인.
+**심각도:** P2(권한 scope 근사), 자금 유출 자동화 경로 자체는 **해당 없음(N/A)**.
+**담당 풀:** backend(scope 세분화 시).
+
+### (b) 킬스위치 발동의 거래소 어댑터 fail-closed 전파
+
+**점검 방법:** `src/exchanges/{bitget,kis,nh}`에서 kill switch 직접 참조 여부 grep(무결과 확인) → 신규 주문 제출 경로(`evaluate_pre_submit.py`, `outbox_dispatcher.py`)와 기존 미체결 정리 경로(`open_order_sweeper.py`) 각각의 호출 체인 추적.
+
+**결론:**
+- **신규 주문 제출(미래 방향):** 거래소 어댑터(Bitget/KIS/NH) 자체는 kill switch를 전혀 모름 — fail-closed는 어댑터가 아니라 **제출 전 단일 관문**(`PreSubmitGate`)에서 구현됨. `evaluate_pre_submit.py:105-131`이 `active_controls`(활성 safety_control)를 보고 `RISK_KILL_SWITCH_ACTIVE_{scope}` 사유로 거부한다. `outbox_dispatcher.py:97-115`는 `pre_send_gate`가 `None`이면 생성자에서 즉시 `ValueError`(I-01, 기본값 없음) — 게이트를 건너뛰고 어댑터를 호출할 수 있는 코드 경로가 구조적으로 막혀 있음(`_gate_allows()` 호출 후에만 `resolve_adapter`→`call_submit`, `outbox_dispatcher.py:191-205`). **설계상 fail-closed 확인됨.**
+- **이미 제출된 미체결 주문(과거 방향):** `KillSwitchService.activate()`의 fan-out 중 `sweep_open_orders()`(`open_order_sweeper.py`)가 거래소별 `adapter.cancel_order()`를 호출하지만, 개별 어댑터 실패는 `adapter_failed` 리스트에 담겨 **로그(`logger.exception`)로만** 남고 알림/재시도로 이어지지 않음(`open_order_sweeper.py:243-249`, `kill_switch_service.py:177-198`의 `except Exception: logger.exception`도 동일 패턴). 즉 "킬스위치 활성화" 자체는 성공 처리되지만, 거래소에 실제로 취소 요청이 도달했는지는 개별 주문 단위로 확인되지 않고 운영자가 로그를 봐야만 안다 — §2 유형(2) "무음 실패" 패턴과 동일 계열의 갭.
+
+**근거:** `src/foundation/risk_gate/application/evaluate_pre_submit.py:105-131`, `src/services/oms/application/outbox_dispatcher.py:97-115,191-205`, `src/services/safety/open_order_sweeper.py:174-271`, `src/services/safety/kill_switch_service.py:132-198`.
+**재현/반증 테스트 위치:** `tests/integration/risk/test_pre_submit_gate_concurrency.py`(신규 제출 차단 측), `tests/unit/services/test_open_order_sweeper.py`(스윕 실패 처리 측 — adapter_failed가 로그 외 후속 조치로 이어지는지 확인 가능한 지점).
+**심각도:** 신규 제출 차단은 문제 없음(N/A). 기존 미체결 정리 실패 무알림은 P2(이미 §2 G2-4/G2-5와 같은 유형, 신규 소견 번호는 부여하지 않고 동일 패턴으로 묶음).
+**담당 풀:** backend.
+
+### (c) 원장 동시 체결 포스팅의 원자성
+
+**점검 방법:** `post_entry.py`가 호출하는 `BalanceRepository.get_for_update`/`apply`(`postgres_balance_repository.py`)의 락 전략을 코드와 docstring으로 대조. FA-10(no-UPDATE 트리거)으로 물리 행 락이 깨진 배경과 대체 메커니즘을 확인.
+
+**결론:** 동일 계정에 대한 동시 포스팅은 **원자적으로 직렬화됨** — `get_for_update()`가 관련 `account_code`를 정렬(오름차순)된 순서로 `pg_advisory_xact_lock(hashtextextended(account_code, 0))`로 잠근 뒤(트랜잭션 종료 시 자동 해제, 데드락 회피를 위해 항상 같은 순서로 잠금), `apply()`는 `DELETE ... WHERE last_entry_seq = $expected` → `INSERT ... RETURNING`을 한 SQL 문으로 묶어 낙관적 버전 체크까지 수행한다(`postgres_balance_repository.py:85-156`). FA-10이 `ledger_balance`에 no-UPDATE 트리거를 건 이유로 물리 행 락(`SELECT ... FOR UPDATE`)이 DELETE+INSERT 체인에서 깨지는 실제 장애(`UnknownAccountError` 오탐)가 있었고, 이를 advisory lock으로 교체해 고쳤다는 과정이 docstring(`postgres_balance_repository.py:18-43`)과 회귀 테스트로 남아 있음. 두 계좌 간 이체처럼 여러 계정을 동시에 잠그는 경우도 정렬 순서 덕에 교착 없이 직렬화된다.
+
+**근거:** `src/foundation/ledger/adapters/postgres_balance_repository.py:1-156`(특히 18-43, 85-156).
+**재현/반증 테스트 위치:** `tests/integration/foundation/ledger/test_queries.py`의 `test_get_balance_no_false_positive_drift_under_concurrent_commits`(advisory lock 도입의 회귀 재현 테스트로 추정 — 이번 조사에서 실행은 안 함, grep으로 소재만 확인).
+**심각도:** 문제 없음(관찰, 조치 불요).
+**담당 풀:** 해당 없음.
+
+### (d) 감사 테이블 해시체인의 읽기 시점 검증
+
+**점검 방법:** `src/foundation/evidence/application/verify_audit_chain.py`와 그 호출부를 추적, 일반 감사 로그 열람 API(`GET /v1/foundation/evidence/timeline`)와 체인 검증 API가 같은 요청 경로인지 확인.
+
+**결론:** 일반 열람(`GET /v1/foundation/evidence/timeline`, `evidence.py:25-42`, `get_current_user`로 아무 사용자나 호출 가능)은 해시체인을 **검증하지 않는다** — `get_audit_timeline()`은 단순 커서 페이지네이션 조회만 한다. 체인 검증은 완전히 별도의 관리자 전용 엔드포인트(`POST /v1/foundation/evidence/chain:verify`, `evidence.py:45-57`, `get_current_admin` + 명시적 `tenant_id` 쿼리)로만 존재하고, 코드 전수에서 이 함수를 주기적으로 호출하는 스케줄러/크론은 발견되지 않음(`verify_audit_chain` 호출부는 이 라우터 1곳뿐). 즉 변조된 감사 로그를 일반 사용자가 열람해도 변조 사실이 그 응답에 드러나지 않으며, 관리자가 명시적으로 `chain:verify`를 호출하지 않는 한 변조는 발견되지 않는다(배치/주기 실행도 미배선). 모듈 docstring의 "AUD-003 operational tool ... API not yet wired"는 **낡은 설명**이다 — 실제로는 라우터에 배선돼 있으나(`evidence.py:18,56`), "읽기 경로와 결합되지 않은 수동 관리자 도구"라는 실질은 그대로다.
+
+**근거:** `src/api/routers/foundation/evidence.py:1-58`, `src/foundation/evidence/application/verify_audit_chain.py:1-19`.
+**재현/반증 테스트 위치:** `tests/foundation/integration/evidence/test_audit_event_lifecycle.py` — 체인 검증과 timeline 열람이 분리돼 있음을 보이는 테스트가 있는지는 미확인(소재만 확인, 실행 안 함).
+**심각도:** P1 — WORM 감사 테이블(해시체인)의 가치는 "변조 시 반드시 발견됨"인데, 상시 결합된 검증 없이 수동 호출에만 의존하면 변조 창이 "다음 관리자 수동 실행까지" 벌어진다.
+**담당 풀:** backend(주기적 배치 결합 또는 읽기 경로 결합 여부는 성능 트레이드오프 결정 필요 — PM/backend 결정).
+
+### (e) Paper 배포 / Execution retire 롤백 의미론
+
+**점검 방법:** 저장소 전수에서 `retire` grep → `src/services/execution_control.py`(실제 구현 위치, `paper_control`에는 `retire` 개념 자체가 없음을 먼저 확인) → `retire_liquidation` 컬럼의 쓰기/읽기 지점 전수 추적 → 관련 테스트(`test_retire_*`) 존재 여부 확인.
+
+**결론:**
+- "Paper 배포 retire"라는 명칭의 핸들러는 `src/foundation/paper_control/`에 **존재하지 않는다**(§8 미점검 항목의 표현이 부정확 — 실제로는 `execution_control.retire()`가 PAPER/LIVE 공통 실행 종료 경로다. paper_control에는 start/pause/stop만 있고 별도 retire 개념이 없음).
+- `execution_control.retire()`(`execution_control.py:253-319`)는 `status IN ('RUNNING','PAUSED')` 조건부 UPDATE로 `RETIRED`(터미널 상태)로 전이하고, 같은 트랜잭션에서 `record_audit_log()`를 호출한다(task-10779, G5-1 수정 반영 확인됨 — §0 P0-3는 이 커밋으로 해소된 것으로 보임, 코드 재확인 결과 일치).
+- **"되돌리기"는 없다** — `RETIRED`에서 복귀하는 API/상태전이가 코드상 발견되지 않음(`status_machine` 류 재확인은 범위 밖). 의도적 터미널 상태로 보임(§6 FD-16 docstring과 일치).
+- **`liquidation="IMMEDIATE_MARKET"` 옵션이 실제로 청산 주문을 제출하지 않는다** — `retire_liquidation` 컬럼은 `UPDATE ... SET retire_liquidation = $2`로 DB에 기록될 뿐(`execution_control.py:278-285`), 이 값을 읽어서 실제 시장가 청산 주문을 내는 코드 경로가 `src/` 전수에서 **발견되지 않는다**(`retire_liquidation`을 쓰는 곳은 이 UPDATE 한 곳, 읽는 곳은 마이그레이션의 CHECK 제약뿐). `tests/unit/api/schemas/test_execution.py`의 `test_retire_request_accepts_explicit_liquidation`도 스키마 기본값/파싱만 검증하고 실제 청산 실행은 검증하지 않는다. 사용자가 "즉시 시장가 청산"을 선택해도 포지션은 그대로 남을 수 있다 — 사용자 기대와 실제 동작의 불일치.
+
+**근거:** `src/services/execution_control.py:253-319`, `src/db/migrations/versions/f2a3b4c5d6e7_strategy_executions.py:37-38`(CHECK 제약, 유일한 다른 참조), `tests/unit/api/schemas/test_execution.py:85-96`.
+**재현/반증 테스트 위치:** `tests/integration/test_execution_control.py::test_retire_running_execution`(현재 통과하지만 liquidation 실행 자체는 단언하지 않음 — 반증 재현은 "`liquidation=IMMEDIATE_MARKET`으로 retire 후 거래소에 청산 주문이 제출됐는지" 단언을 추가하면 실패로 드러날 것으로 예상, 이번 조사에서 실제 실행은 안 함).
+**심각도:** P1 — 롤백(되돌리기) 부재는 설계 의도로 보여 문제 아님(N/A)이지만, IMMEDIATE_MARKET 미구현은 자금 손실로 이어질 수 있는 기대-동작 불일치.
+**담당 풀:** backend.
+
+**미점검(§10 범위 내에서도 확인 못한 것):** 거래소 어댑터(Bitget/KIS/NH) 각각의 `cancel_order` 실패 시 거래소 측 실제 상태(진짜로 미체결로 남았는지)를 reconcile 루프가 몇 주기 안에 바로잡는지는 코드 소재만 확인했고 수렴 시간 실측은 하지 않음. `ledger_payout_batch`의 "되돌리기"(역분개) 경로가 코드상 전무한지 아니면 범용 정정(correction) 경로(`src/foundation/ledger/application/refund.py`, `chargeback.py` 등)로 흡수되는지는 이번 조사에서 교차 확인하지 못함.
