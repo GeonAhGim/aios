@@ -219,42 +219,35 @@ async def test_get_methodology_returns_none_when_missing(repo):
     assert await repo.get_methodology("nonexistent-version") is None
 
 
-# --- gate-red reproduction: the PUBLIC-privilege catalog check above does
-# not guarantee WORM on this table ---
+# --- WORM trigger enforcement: task-10620 retrofitted performance_statement
+# with the same guard trigger as the other WORM tables (fa25b1c9d340) ---
 
 
-async def test_gate_red_owner_update_succeeds_despite_public_revoke(pool, repo):
-    """`test_public_role_has_no_update_or_delete_grant_on_statement` only
-    checks the `information_schema` catalog for PUBLIC -- it says nothing
-    about the connection the migration itself runs as. Per
-    `src/core/db/append_only.py`'s own docstring, PostgreSQL always treats a
-    table's owner as a full-privilege principal regardless of GRANT/REVOKE;
-    only a `BEFORE UPDATE OR DELETE` trigger (as used for
-    `market_bar_snapshot`, `audit_log`, `foundation_audit_event`,
-    `wallet_transactions` -- see `tests/foundation/integration/backtest/
-    test_postgres_snapshot_repository.py::test_worm_trigger_blocks_table_
-    owner_update`) actually enforces append-only for the owner.
-    `performance_statement`'s migration (6e5baa1c7a55) only runs `REVOKE
-    UPDATE, DELETE ... FROM PUBLIC` and was never retrofitted with a guard
-    trigger by 4a1d0c0de001 (that leaf scoped the retrofit to exactly three
-    tables by task-165 decision). `pool` connects as the same role the
-    migration ran as (no `SET ROLE`), so this UPDATE is expected to
-    *succeed* -- proving the catalog-only check is not sufficient evidence
-    of WORM for this table. This is a real coverage gap, not a test bug:
-    reported via task note, product code intentionally left unchanged."""
+async def test_worm_trigger_blocks_table_owner_update(pool, repo):
+    """REVOKE does not bind the table owner (PostgreSQL rule) -- `pool`
+    connects without `SET ROLE` and owns `performance_statement` (the
+    migration ran as this account), so if UPDATE is blocked here it is the
+    `BEFORE UPDATE OR DELETE` guard trigger (fa25b1c9d340, retrofitted after
+    task-10542 found the gap -- this table had only `REVOKE UPDATE, DELETE
+    ... FROM PUBLIC` from 6e5baa1c7a55 and no trigger), not the REVOKE,
+    doing the blocking."""
     tenant_id = await create_test_tenant(pool)
     await repo.insert_methodology(DEFAULT_METHODOLOGY)
     statement = await repo.insert_statement(await _statement(tenant_id))
 
-    async with pool.acquire() as conn, conn.transaction():
-        tag = await conn.execute(
-            "UPDATE performance_statement SET state = 'CORRECTED' WHERE id = $1",
-            statement.id,
-        )
-        await conn.execute(
-            "UPDATE performance_statement SET state = $1 WHERE id = $2",
-            statement.state.value,
-            statement.id,
-        )
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "UPDATE performance_statement SET state = 'CORRECTED' WHERE id = $1",
+                statement.id,
+            )
 
-    assert tag == "UPDATE 1"  # red: catalog-only REVOKE did not block this
+
+async def test_worm_trigger_blocks_table_owner_delete(pool, repo):
+    tenant_id = await create_test_tenant(pool)
+    await repo.insert_methodology(DEFAULT_METHODOLOGY)
+    statement = await repo.insert_statement(await _statement(tenant_id))
+
+    with pytest.raises(asyncpg.RaiseError, match="append-only violation"):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM performance_statement WHERE id = $1", statement.id)
