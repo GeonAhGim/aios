@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -410,7 +409,7 @@ async def test_concurrent_boundary_reservation_with_gate_deny_releases_under_loa
 
 
 @pytest.mark.perf
-async def test_many_concurrent_algo_runs_stay_within_latency_budget(pool):
+async def test_many_concurrent_algo_runs_stay_within_latency_budget(pool, perf_budget):
     """Performance assertion -- an adversarial flood of `_CONCURRENT_RUNS`
     distinct algo runs ticking simultaneously (each its own parent, no lock
     contention between them) must not blow up super-linearly. Threshold is
@@ -424,11 +423,14 @@ async def test_many_concurrent_algo_runs_stay_within_latency_budget(pool):
     ]
     plans = [_plan_with_one_slice(pid, Decimal("10")) for pid in parent_ids]
 
-    started = time.perf_counter()
-    results = await asyncio.gather(*[_tick(plan, pool, repo, _Submitter(), now) for plan in plans])
-    elapsed = time.perf_counter() - started
+    sample = await perf_budget.sample_async(
+        lambda: asyncio.gather(*[_tick(plan, pool, repo, _Submitter(), now) for plan in plans])
+    )
+    results = sample.result  # type: ignore[misc]
 
     assert all(r.outcomes[0].order is not None for r in results)
-    assert elapsed < 20.0, (
-        f"{_CONCURRENT_RUNS} concurrent algo ticks took {elapsed:.2f}s -- looks superlinear"
+    budget_ms = 20_000  # 20 s wall-clock, same threshold as before
+    assert sample.wall_ms < budget_ms, (
+        f"{_CONCURRENT_RUNS} concurrent algo ticks took {sample.wall_ms / 1000:.2f}s "
+        f"-- looks superlinear"
     )
