@@ -326,6 +326,62 @@ def test_non_string_path_rejected_at_load(
 
 
 # ---------------------------------------------------------------------------
+# 게이트 적색 재현 — 실제 production config 구조에 결함을 주입해 게이트가
+# 실제로 막는지 확인한다(합성 tmp_path config가 아니라 실제 release_gates.yaml의
+# stage/evidence 형태를 그대로 쓰되 evidence 경로 하나만 주입으로 깨뜨린다).
+# ---------------------------------------------------------------------------
+
+
+def test_gate_red_fails_on_injected_missing_evidence_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """게이트 적색 재현: 운영 config에서 internal_development의 evidence 경로 하나가
+    (예: 파일 이동/삭제 후 config 미갱신으로) 더 이상 존재하지 않는 경로를 가리키게
+    되는 결함을 주입한다. 이전까지의 테스트는 합성 tmp_path config(이미 비어있는
+    증거)나 실제 저장소의 기존 통과 stage(internal_development, 항상 그린)만
+    다뤘다 — 여기서는 실제 production stage 구조를 복제해 "원래는 통과하던
+    stage가 하나의 evidence 결함으로 실제 적색이 되는" 전이를 직접 재현한다.
+    """
+    real_stages = check_release_gate.load_stages(REAL_CONFIG)
+    target = real_stages["internal_development"]
+    assert len(target.required_evidence) > 0  # 주입 전제: 깨뜨릴 evidence가 있어야 함
+
+    broken_evidence = [
+        {
+            "description": item.description,
+            "path": item.path if i != 0 else "this-path-does-not-exist-injected-fault.txt",
+        }
+        for i, item in enumerate(target.required_evidence)
+    ]
+    config_path = _write_config(
+        tmp_path,
+        [
+            {
+                "name": target.name,
+                "depends_on": list(target.depends_on),
+                "required_evidence": broken_evidence,
+            }
+        ],
+    )
+
+    exit_code = check_release_gate.main(
+        [
+            "--stage",
+            target.name,
+            "--config",
+            str(config_path),
+            "--repo-root",
+            str(ROOT),
+        ]
+    )
+
+    assert exit_code == 1
+    out = capsys.readouterr().out
+    assert "미충족 항목" in out
+    assert "this-path-does-not-exist-injected-fault.txt" in out
+
+
+# ---------------------------------------------------------------------------
 # 성능 단언 — 실제 저장소 5-stage 체인 전수 해석이 예산 내에 끝나는지.
 # ---------------------------------------------------------------------------
 
