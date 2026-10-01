@@ -1,8 +1,10 @@
-"""109번 §5 compute_metrics() — Sharpe/Sortino/MDD/승률/turnover/gross-net/calmar/exposure.
+"""compute_metrics() — Sharpe/Sortino/MDD/win-rate/turnover/gross-net/calmar/exposure.
 
-76번 "bare float 성과값 금지" 원칙에 따라, 계산 불가능한 경우(표본 부족,
-표준편차 0)는 조용히 0을 내지 않고 None을 반환한다 — 호출자가 그 한계를
-그대로 사용자에게 보여줘야 한다(46번 §2 ValidationResult "한계·가정" 요구).
+Per task-76 "no bare-float metric values" principle: when a metric cannot
+be computed (insufficient samples, zero stdev), this module returns None
+instead of silently yielding 0 — the caller must surface that limitation
+to the user, as required by task-46 §2 ValidationResult "limits &
+assumptions".
 
 L31 (spec §2.4 DoD "gross/net split"): docs/specs/L4_strategy_portfolio_
 backtest_v1.0.md §2.4 row 121 defines `compute_metrics` as taking a
@@ -38,7 +40,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.backtest.domain.models import BacktestMetrics, EquityPoint, SimulatedFill
 from src.foundation.performance.api import calmar
 
-_ANNUALIZATION_MIN_SAMPLES = 2  # stdev 계산에 필요한 최소 수익률 표본 수
+_ANNUALIZATION_MIN_SAMPLES = 2  # minimum return samples required for stdev calculation
 
 
 def _bar_returns(equity_curve: list[EquityPoint]) -> list[float]:
@@ -65,7 +67,7 @@ def _sortino(returns: list[float], *, periods_per_year: int) -> Decimal | None:
         return None
     downside = [r for r in returns if r < 0]
     if len(downside) < _ANNUALIZATION_MIN_SAMPLES:
-        return None  # 하락 구간 표본 부족 — downside deviation을 신뢰할 수 없다
+        return None  # insufficient downside samples — cannot trust downside deviation
     downside_stdev = statistics.stdev(downside)
     if downside_stdev == 0:
         return None
@@ -79,9 +81,10 @@ class _RoundTrip(NamedTuple):
 
 
 def _round_trips(fills: list[SimulatedFill]) -> list[_RoundTrip]:
-    """Phase 1(단일 종목, 분할청산 없음) 가정 — BUY 다음 SELL이 항상 한
-    거래를 닫는다(position.py/portfolio/engine.py와 동일 가정, 08번 §3.6
-    PortfolioEngine이 이미 이 조합만 만들도록 강제한다).
+    """Phase 1 assumption (single instrument, no partial fills) — a SELL
+    following a BUY always closes one round-trip (same assumption as
+    position.py/portfolio/engine.py; task-08 §3.6 PortfolioEngine already
+    enforces this pair-only pattern).
 
     A trailing BUY with no matching SELL is kept with `exit=None`:
     `_round_trip_pnls` skips it (no realized pnl yet), but
@@ -94,7 +97,7 @@ def _round_trips(fills: list[SimulatedFill]) -> list[_RoundTrip]:
             entry = fill
             continue
         if entry is None:
-            continue  # 열린 포지션 없이 SELL — 방어적으로 무시(상위 계층 버그 신호)
+            continue  # SELL without open position — defensively ignore (upper-layer bug signal)
         trips.append(_RoundTrip(entry=entry, exit=fill))
         entry = None
     if entry is not None:
