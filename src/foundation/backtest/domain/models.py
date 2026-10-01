@@ -1,4 +1,4 @@
-"""Backtest Simulation Engine 도메인 모델 — DB/HTTP 없이 순수 데이터.
+"""Domain model for backtest simulation engine — pure data without DB/HTTP.
 
 Spec: AIOSproject 109_backtest_simulation_engine_l3_build_and_operational_
 specification_v1.0.md §3, §5; docs/specs/L4_strategy_portfolio_backtest_v1.0.md
@@ -19,11 +19,12 @@ from src.data.models.trading import OrderSide
 
 
 class CostModel(BaseModel):
-    """46번 §2 "Backtest" 행 — 비용모델 없는 백테스트는 거부 대상이라
-    기본값을 두지 않는다(호출자가 반드시 명시적으로 선택하게 강제).
+    """§46 "Backtest" row — backtests without a cost model are rejected,
+    so no default is provided (forcing the caller to choose explicitly).
 
-    v1은 선형 모델(고정 bps)만 지원한다 — 호가창 깊이/시장충격 기반
-    비선형 슬리피지는 후속 revision 대상(46번 §2 Capacity 행).
+    v1 supports only a linear model (fixed bps) — non-linear slippage
+    based on order-book depth / market impact is a future revision target
+    (§46 "Capacity" row).
 
     v2 (MINOR, §2.4): adds maker/taker split, spread, a non-linear slippage
     choice (`SQRT_IMPACT`), a market-impact coefficient and funding cost.
@@ -62,9 +63,10 @@ class CostModel(BaseModel):
 
 
 class BacktestConfig(BaseModel):
-    """재생 1회 실행에 필요한 모든 입력 — 105번 원칙에 따라 실행 전
-    고정(pinned)된다. `warmup_bars`는 지표가 유효해지기 전 구간을
-    신호평가에서 제외하는 데 쓴다(예: SMA(20)이면 최소 20).
+    """All inputs needed for one playback run — pinned (fixed) before
+    execution per the standard-105 rule. `warmup_bars` excludes the
+    pre-stable period of indicators from signal evaluation
+    (e.g. SMA(20) requires at least 20).
 
     v2 (MINOR): adds reproducibility inputs (`seed`, `timeframe`,
     `data_snapshot_hash`) and fill/survivorship policy switches. All get
@@ -77,10 +79,11 @@ class BacktestConfig(BaseModel):
     cost_model: CostModel
     warmup_bars: int = Field(ge=0)
     periods_per_year: int = Field(gt=0)
-    """Sharpe/Sortino 연환산 계수 — bar timeframe에 맞춰 호출자가 지정한다
-    (예: 일봉이면 252, 1시간봉이면 365*24). 엔진이 timeframe 문자열을
-    파싱해 추측하지 않는다 — 추측이 틀리면 조용히 틀린 지표를 만들기
-    때문에(46번 §2 "unit/annualization convention" 필수 표기 원칙)."""
+    """Sharpe/Sortino annualization factor — caller sets it to match the
+    bar timeframe (e.g. 252 for daily bars, 365*24 for 1-hour bars). The
+    engine must not parse the timeframe string to guess — a wrong guess
+    silently produces wrong metrics (§46 "unit/annualization convention"
+    must be documented principle)."""
     seed: int = 0
     timeframe: str | None = None
     data_snapshot_hash: str | None = None
@@ -111,10 +114,11 @@ class EquityPoint(BaseModel):
 
 
 class BacktestMetrics(BaseModel):
-    """76번 "bare float 성과값 금지" 원칙 — 모든 값에 단위/기간을
-    필드명으로 명시한다. `sharpe_ratio`/`sortino_ratio`는 표본이 2개
-    미만이거나 표준편차가 0이면 계산 불가라 None(46번이 요구하는
-    "한계·가정"의 최소 구현 — 조용히 0을 내지 않는다).
+    """§76 "no bare float metrics" rule — every value must carry its unit
+    and period in the field name. `sharpe_ratio`/`sortino_ratio` are
+    `None` when the sample has fewer than 2 observations or the standard
+    deviation is zero (minimum implementation of the "boundaries /
+    assumptions" required by §46 — never silently returns 0).
 
     v2 (MINOR): adds gross/net split, cost totals, calmar, exposure time,
     annualization factor and the reporting `basis` -- filled in by L31
