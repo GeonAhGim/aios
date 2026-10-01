@@ -26,6 +26,7 @@ no DB, #71 §4) — fill with a placeholder UUID (nil). `ingest_candles` will
 always re-key with the real `instrument_id` looked up from reference data, so
 callers must not depend on this value.
 """
+
 from __future__ import annotations
 
 import math
@@ -86,13 +87,11 @@ class BitgetIngestSource:
         end: AwareDatetime,
     ) -> list[CandleRecord]:
         if venue is not Venue.BITGET:
-            raise UnsupportedVenueError(f"BitgetIngestSource is BITGET-only: {venue!r}")
+            raise UnsupportedVenueError(f"BitgetIngestSource는 BITGET 전용: {venue!r}")
         if start.tzinfo is None or end.tzinfo is None:
-            raise ValueError("fetch_candles accepts tz-aware datetime only")
+            raise ValueError("fetch_candles는 tz-aware datetime만 받는다")
 
         canonical = to_canonical(venue, raw_symbol)
         limit = _limit_for_range(start, end, tf, self._max_limit)
         raw = await self._adapter.get_ohlcv(canonical, tf.value, limit=limit)
-        return [
-            _to_candle_record(candle, tf) for candle in raw if start <= candle.open_time < end
-        ]
+        return [_to_candle_record(candle, tf) for candle in raw if start <= candle.open_time < end]
