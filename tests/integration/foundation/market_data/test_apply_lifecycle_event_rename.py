@@ -15,6 +15,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.2, §9.2 LA-14.
 그대로 넘기도록 고쳐 `register()`와 형식을 맞췄다 — `to_canonical` 호출은
 형식 검증(`SymbolNormalizationError`) 용도로만 남긴다.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -92,8 +93,11 @@ async def _listed(pool, refs, audit, *, venue_symbol: str):
         pool, _register_cmd(venue_symbol=venue_symbol), refs=refs, audit=audit
     )
     return await apply_lifecycle_event(
-        pool, _lifecycle_cmd(instrument.instrument_id, "LIST"),
-        current=instrument, refs=refs, audit=audit,
+        pool,
+        _lifecycle_cmd(instrument.instrument_id, "LIST"),
+        current=instrument,
+        refs=refs,
+        audit=audit,
     )
 
 
@@ -104,7 +108,9 @@ async def test_rename_writes_alias_and_audits_once(pool, refs, audit):
     renamed = await apply_lifecycle_event(
         pool,
         _lifecycle_cmd(listed.instrument_id, "RENAME", new_venue_symbol=new_symbol),
-        current=listed, refs=refs, audit=audit,
+        current=listed,
+        refs=refs,
+        audit=audit,
     )
     assert renamed.status == SymbolStatus.LISTED
     assert await _event_count(pool, listed.instrument_id) == 3  # registered + listed + renamed
@@ -124,7 +130,9 @@ async def test_rename_without_new_venue_symbol_denied_and_audited(pool, refs, au
         await apply_lifecycle_event(
             pool,
             _lifecycle_cmd(listed.instrument_id, "RENAME", new_venue_symbol=None),
-            current=listed, refs=refs, audit=audit,
+            current=listed,
+            refs=refs,
+            audit=audit,
         )
 
     assert await _event_count(pool, listed.instrument_id) == 3  # registered + listed + denied
@@ -148,10 +156,43 @@ async def test_rename_rejects_symbol_already_in_use_by_another_instrument(pool, 
         await apply_lifecycle_event(
             pool,
             _lifecycle_cmd(other.instrument_id, "RENAME", new_venue_symbol=taken_symbol),
-            current=other, refs=refs, audit=audit,
+            current=other,
+            refs=refs,
+            audit=audit,
         )
 
     assert await _event_count(pool, other.instrument_id) == 3  # registered + listed + denied
+
+
+@pytest.mark.perf
+async def test_rename_p95_latency_within_budget(pool, refs, audit, perf_budget):
+    """성능 단언: RENAME 쓰기 경로(가드 조회 + 별칭 저장 + 감사 기록)는
+    market_data/ledger 쓰기 계열 예산(ADR-2026-09-09-C Decision 1, C 포스팅
+    p95 < 50ms; §7 B 저널 append p95 < 30ms)과 동급 규모의 작업이므로 같은
+    상한 50ms를 p95 예산으로 삼는다."""
+    listed = await _listed(pool, refs, audit, venue_symbol=_bitget_symbol())
+
+    samples: list[float] = []
+    current = listed
+    for _ in range(20):
+        new_symbol = _bitget_symbol()
+
+        async def _call(current=current, new_symbol=new_symbol):
+            return await apply_lifecycle_event(
+                pool,
+                _lifecycle_cmd(current.instrument_id, "RENAME", new_venue_symbol=new_symbol),
+                current=current,
+                refs=refs,
+                audit=audit,
+            )
+
+        measured = await perf_budget.sample_async(_call)
+        samples.append(measured.wall_ms)
+        current = measured.result
+
+    samples.sort()
+    p95_ms = samples[int(len(samples) * 0.95) - 1]
+    assert p95_ms < 50, f"RENAME p95={p95_ms:.1f}ms exceeds 50ms budget"
 
 
 async def test_apply_lifecycle_event_instrument_id_mismatch_rejected(pool, refs, audit):
@@ -160,5 +201,9 @@ async def test_apply_lifecycle_event_instrument_id_mismatch_rejected(pool, refs,
 
     with pytest.raises(ValueError, match="instrument_id"):
         await apply_lifecycle_event(
-            pool, mismatched_cmd, current=listed, refs=refs, audit=audit,
+            pool,
+            mismatched_cmd,
+            current=listed,
+            refs=refs,
+            audit=audit,
         )
