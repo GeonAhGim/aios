@@ -13,6 +13,8 @@ import time
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import pytest
+
 from src.core.indicators.registry import DEFAULT_REGISTRY
 from src.foundation.ai.assistant.application.compile_pass_rate import build_pass_rate_report
 from src.foundation.ai.assistant.application.generate_script import generate_script
@@ -166,6 +168,8 @@ async def test_generate_script_provider_raises_exception() -> None:
 # ---------------------------------------------------------------------------
 
 
+# perf: 1000개 항목 집계 성능 — xdist core contention 하에서도 <100ms 보장
+@pytest.mark.perf
 async def test_large_outcome_list_performance() -> None:
     """1000 개 항목 처리 → 시간 측정 및 성능 단언."""
     statuses = ["compiled", "compile_failed"] * 500
