@@ -42,12 +42,24 @@ raises, gaps 1..N-1 are already persisted. Calling this function again makes
 re-flag ranges that are already filled as gaps — that alone is the resume
 mechanism; no separate checkpoint table is needed.
 
+Concurrent backfill vs. realtime ingest (docs/audits/AUDIT_2026-10-01_data_ingest_replay.md
+§2 F2) — `store.upsert_batch` is `PostgresCandleStore.upsert_batch`, which has used
+`ON CONFLICT (venue, instrument_id, timeframe, open_time) DO NOTHING` on the PK since
+its first version (not `DO UPDATE`); whichever writer's row lands first for a given
+`open_time` wins and the later one is silently skipped (reflected in the returned
+insert count). So if realtime ingest (`ingest_candles.py`) writes a candle for an
+`open_time` inside a gap this job is about to fill, this job's `upsert_batch` call for
+that same `open_time` is a no-op — it never overwrites realtime data. No extra `WHERE`
+clause is needed here; see `test_concurrent_realtime_write_is_not_overwritten_by_backfill`
+in `tests/foundation/unit/market_data/test_backfill_job_resilience.py` for the regression guard.
+
 No silent zero-fill (§4.1) — if the provider returns zero candles for a gap
 (a genuine absence of data, not an error), that gap is left with
 `stored=0`/`span=None` and no coverage span is created. The next run's
 `plan_fetch` will report the same range as a gap again, so "empty response =
 covered" is never silently assumed.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -154,8 +166,7 @@ async def run_backfill_job(
     re-planning)."""
     if listing.venue is not series_key.venue:
         raise VenueMismatchError(
-            f"listing.venue({listing.venue.value}) != series_key.venue"
-            f"({series_key.venue.value})"
+            f"listing.venue({listing.venue.value}) != series_key.venue({series_key.venue.value})"
         )
 
     stored_spans = [
@@ -187,35 +198,45 @@ async def run_backfill_job(
 
         stored_count = await store.upsert_batch(conn, uuid4(), candles)
         # Delegate adjacency/ordering to the registry; never bridge absent candles.
-        returned_spans = merge_spans([
-            MergeCoverageSpan(
-                instrument_id=listing.instrument_id,
-                venue=listing.venue,
-                asset_class=asset_class,
-                timeframe=tf,
-                quality_grade=_QUALITY_TO_GRADE[quality],
-                start_at=candle.open_time,
-                end_at=candle.open_time + duration(tf),
-            )
-            for candle in candles
-        ])
+        returned_spans = merge_spans(
+            [
+                MergeCoverageSpan(
+                    instrument_id=listing.instrument_id,
+                    venue=listing.venue,
+                    asset_class=asset_class,
+                    timeframe=tf,
+                    quality_grade=_QUALITY_TO_GRADE[quality],
+                    start_at=candle.open_time,
+                    end_at=candle.open_time + duration(tf),
+                )
+                for candle in candles
+            ]
+        )
         saved_spans: list[StoredCoverageSpan] = []
         for span in returned_spans:
-            saved_spans.append(await coverage_repo.upsert_span(conn, StoredCoverageSpan(
-                instrument_id=listing.instrument_id,
-                venue=listing.venue,
-                timeframe=tf,
-                quality=quality,
-                start=span.start_at,
-                end=span.end_at,
-            )))
-        merged = merge_spans([
-            *merged, *(_to_merge_span(s, asset_class=asset_class) for s in saved_spans)
-        ])
-        segments.append(BackfillSegmentResult(
-            gap=gap, stored=stored_count,
-            span=saved_spans[0] if len(saved_spans) == 1 else None,
-            spans=tuple(saved_spans),
-        ))
+            saved_spans.append(
+                await coverage_repo.upsert_span(
+                    conn,
+                    StoredCoverageSpan(
+                        instrument_id=listing.instrument_id,
+                        venue=listing.venue,
+                        timeframe=tf,
+                        quality=quality,
+                        start=span.start_at,
+                        end=span.end_at,
+                    ),
+                )
+            )
+        merged = merge_spans(
+            [*merged, *(_to_merge_span(s, asset_class=asset_class) for s in saved_spans)]
+        )
+        segments.append(
+            BackfillSegmentResult(
+                gap=gap,
+                stored=stored_count,
+                span=saved_spans[0] if len(saved_spans) == 1 else None,
+                spans=tuple(saved_spans),
+            )
+        )
 
     return BackfillJobResult(gaps_planned=len(gaps), segments=segments, merged_coverage=merged)
