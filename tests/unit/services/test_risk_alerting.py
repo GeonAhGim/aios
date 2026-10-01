@@ -300,6 +300,7 @@ async def test_same_tenant_different_user_still_suppresses() -> None:
     assert gateway.calls[0]["user_id"] == str(USER_A)
 
 
+@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_suppressed_path_dispatch_overhead_stays_under_5ms_p99() -> None:
     """Performance assertion: `on_breach` is called inline in the
