@@ -1,22 +1,25 @@
-"""15번 — 투자자 적합성평가 API 라우터 (FD-15.1/FD-15.2).
+"""Leaf 15 — Investor Suitability Assessment API Router (FD-15.1/FD-15.2).
 
 Spec: 기능설계문서_v1.20.md#FD-15.1/FD-15.2, 16_backend_signatures.md §16.5
 
-FD-15.3(위험등급-전략 매칭 경고)은 별도 엔드포인트가 없다 — 마켓플레이스
-구매(FD-13.3, 이미 배선됨)와 전략 배포 승인(FD-14.3, 자동 파이프라인
-전용으로 미노출) 두 지점에서 훅으로만 작동하는 것이 원문 설계다. 단,
-재평가로 등급이 나빠진 경우(FD-15.2 예외상황)만은 예외로 이 라우터가
-직접 처리한다 — RiskProfileService.save_assessment() 작성 당시엔 FD-16
-(strategy_executions)이 없어 대조 자체가 불가능했지만, 이제 있으므로
-is_higher_risk_than_previous일 때 RUNNING 실행을 대조해 즉시 경고를
-발행한다("다음 화면 진입 시가 아니라 즉시" — FD-15.2 원문).
+FD-15.3 (risk-grade strategy matching warning) has no dedicated endpoint — the
+original design hooks into only two call sites: marketplace purchase (FD-13.3,
+already wired) and strategy deployment approval (FD-14.3, hidden behind an
+auto-pipeline).  Exception: when a re-assessment downgrades the risk grade
+(FD-15.2 edge case), this router handles it directly.  At the time
+RiskProfileService.save_assessment() was written, FD-16 (strategy_executions)
+did not yet exist, making cross-checking impossible; now that it does, we
+compare against RUNNING executions when
+is_higher_risk_than_previous is true and issue an immediate warning
+("immediately, not on next screen entry" — FD-15.2 original text).
 
-PLT-18 — raw `HTTPException` raise를 도메인 예외(RiskProfileNotFoundError,
-risk_profile_service.py)로 이관했다(§9 PLT-17~21). `RiskProfileService.
-get_current()`는 `None`을 반환하는 기존 계약을 그대로 유지하고(호출부가
-없는 다른 테스트가 이를 가정한다), 이 라우터가 `None`일 때 직접 예외를
-던진다.
+PLT-18 — Migrated raw ``HTTPException`` raises to domain exceptions
+(RiskProfileNotFoundError in risk_profile_service.py) (§9 PLT-17~21).
+``RiskProfileService.get_current()`` retains its existing contract of returning
+``None`` (other tests without callers assume this), and this router raises the
+domain exception directly when ``None`` is returned.
 """
+
 from __future__ import annotations
 
 import asyncpg
