@@ -30,6 +30,7 @@ task-8053이 no-op 조회 제거 후 다시 확인했다.
 
 from __future__ import annotations
 
+import asyncio
 import statistics
 import time
 from decimal import Decimal
@@ -151,3 +152,88 @@ async def test_inbox_ingest_fails_closed_when_fills_repo_connection_drops(
         partial_fill_event(exchange_order_id=exoid, client_order_id=cid)
     )
     assert retried is True
+
+
+# ── D3 축: 동시성 + 리플레이 증빙 ──────────────────────────────────────────
+# L4-28 DoD(D3): 안전/실행/리플레이 축 — INVARIANTS I-09(중복 전달),
+# I-06(부분 커밋 금지), I-11(주문 상태 전이 단방향) 검증.
+
+
+async def test_concurrent_processors_dont_double_process(pool: asyncpg.Pool) -> None:
+    """동시성 증빙(DEPTH 감사 D3 보강) — 여러 InboxProcessor가 같은 이벤트를
+    동시에 처리해도 한 번만 처리된다(I-09 중복 전달, F9).
+
+    `insert_if_absent`는 `ON CONFLICT (venue, provider_event_id) DO NOTHING`로
+    구현돼 있어, 같은 키를 동시에 넣는 트랜잭션 중 Postgres UNIQUE 인덱스가
+    승자 하나만 커밋시키고 나머지는 0행(False)으로 안전히 종료된다.
+    """
+    user_id = await create_test_user(pool)
+    order_id, cid, exoid = await insert_open_order(pool, user_id)
+    ev = partial_fill_event(exchange_order_id=exoid, client_order_id=cid)
+
+    processors = [InboxProcessor(pool) for _ in range(5)]
+    results = await asyncio.gather(*[p.ingest(ev) for p in processors], return_exceptions=True)
+
+    successes = sum(1 for r in results if r is True)
+    assert successes == 1, (
+        f"동시 ingest 5개 중 {successes}개가 성공 — "
+        "동일 provider_event_id는 한 번만 처리되어야 합니다(I-09)."
+    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, filled_quantity FROM orders WHERE order_id = $1", order_id
+        )
+    assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
+    assert row["filled_quantity"] == Decimal("1")  # partial_fill_event qty=1
+
+
+async def test_replay_same_event_produces_identical_state(pool: asyncpg.Pool) -> None:
+    """리플레이 증빙(DEPTH 감사 D3 보강) — 같은 이벤트를 두 번 ingest하면
+    두 번째는 완전히 no-op이어야 한다(I-09, F9).
+
+    첫 번째 ingest는 True, 두 번째 ingest는 False(중복 키)여야 하고,
+    두 번째 ingest 후 주문 상태가 전혀 변하지 않음을 확인한다.
+    """
+    user_id = await create_test_user(pool)
+    order_id, cid, exoid = await insert_open_order(pool, user_id)
+    ev = partial_fill_event(exchange_order_id=exoid, client_order_id=cid)
+
+    result1 = await InboxProcessor(pool).ingest(ev)
+    assert result1 is True
+
+    result2 = await InboxProcessor(pool).ingest(ev)
+    assert result2 is False, "같은 provider_event_id 재 ingest는 False여야 합니다(이미 처리됨)."
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, filled_quantity FROM orders WHERE order_id = $1", order_id
+        )
+    assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
+    assert row["filled_quantity"] == Decimal("1")
+
+
+async def test_concurrent_replay_stress(pool: asyncpg.Pool) -> None:
+    """동시성 + 리플레이 결합 증빙(DEPTH 감사 D3 보강) — 10개 프로세서가
+    같은 이벤트를 각각 3회씩 재전송해도 최종 상태는 동일하다(I-09, F9).
+    """
+    user_id = await create_test_user(pool)
+    order_id, cid, exoid = await insert_open_order(pool, user_id)
+    ev = partial_fill_event(exchange_order_id=exoid, client_order_id=cid)
+
+    processors = [InboxProcessor(pool) for _ in range(10)]
+    tasks = [p.ingest(ev) for p in processors for _ in range(3)]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    successes = sum(1 for r in results if r is True)
+    failures = sum(1 for r in results if r is False)
+    assert successes == 1, f"30개 시도 중 {successes}개 성공 — 정확히 1개만 성공해야 합니다(I-09)."
+    assert failures == 29, f"30개 시도 중 {failures}개 실패 — 나머지는 중복으로 처리되어야 합니다."
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status, filled_quantity FROM orders WHERE order_id = $1", order_id
+        )
+    assert row["status"] == OrderStatus.PARTIALLY_FILLED.value
+    assert row["filled_quantity"] == Decimal("1")
