@@ -1,8 +1,19 @@
-"""L4_analytics_authoring_backtest_marketplace_v1.0.md#IND-2g — specs_talib catalog generation."""
+"""L4_analytics_authoring_backtest_marketplace_v1.0.md#IND-2g — specs_talib catalog generation.
+
+DoD: negative test ≥3, failure-injection ≥1, perf assertion with perf_budget fixture.
+"""
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+import talib
+
+from src.core.indicators.generate_specs import generate_talib_specs
+from src.core.indicators.spec import IndicatorSpec, PlotSpec
 from src.core.indicators.specs_talib import TALIB_GROUPS, TALIB_SPECS
+from tests.conftest import PerfBudget
 
 
 def test_talib_specs_catalog_is_not_empty():
@@ -77,3 +88,104 @@ def test_generated_specs_have_lookback_function():
             result = spec.lookback(sample_params)
             assert isinstance(result, int)
             assert result >= 0, f"{name}: lookback이 음수"
+
+
+# ── Negative tests (DoD: ≥3 건) ──────────────────────────────────────────────
+
+
+def test_generate_talib_specs_unknown_name_raises_valueerror() -> None:
+    """unknown TA-Lib 함수명: ValueError 발생 (fail-closed)."""
+    with pytest.raises(ValueError, match="unknown talib function"):
+        generate_talib_specs(["nonexistent_indicator_xyz"])
+
+
+def test_generate_talib_specs_mixed_unknown_raises_valueerror() -> None:
+    """유효+무효 혼합: 부분 생성 없이 전체 거부."""
+    with pytest.raises(ValueError, match="unknown talib function"):
+        generate_talib_specs(["sma", "also_fake"])
+
+
+def test_indicator_spec_plots_mismatch_outputs_raises_valueerror() -> None:
+    """plots 수와 outputs 수가 다르면 ValueError (IND-15)."""
+    with pytest.raises(ValueError, match="PlotSpec count.*!= outputs count"):
+        IndicatorSpec(
+            name="fake",
+            inputs=("close",),
+            params=(),
+            outputs=("out1", "out2"),
+            lookback=lambda _: 0,
+            plots=(PlotSpec(kind="line", scale="own", default_pane="separate"),),
+        )
+
+
+def test_indicator_spec_fill_between_unknown_output_raises_valueerror() -> None:
+    """fill_between이 알려지지 않은 output를 참조하면 ValueError (IND-15)."""
+    with pytest.raises(ValueError, match="fill_between.*not in outputs"):
+        IndicatorSpec(
+            name="fake",
+            inputs=("close",),
+            params=(),
+            outputs=("out1",),
+            lookback=lambda _: 0,
+            plots=(
+                PlotSpec(
+                    kind="band",
+                    scale="own",
+                    default_pane="separate",
+                    fill_between="unknown",
+                ),
+            ),
+        )
+
+
+def test_indicator_spec_causal_default_is_true() -> None:
+    """causal 미지정 시 True (IND-16)."""
+    spec = IndicatorSpec(
+        name="fake",
+        inputs=("close",),
+        params=(),
+        outputs=("out",),
+        lookback=lambda _: 0,
+        plots=(PlotSpec(kind="line", scale="own", default_pane="separate"),),
+    )
+    assert spec.causal is True
+
+
+def test_indicator_spec_causal_explicit_false_accepted() -> None:
+    """causal=False 명시 허용 (IND-16)."""
+    spec = IndicatorSpec(
+        name="fake",
+        inputs=("close",),
+        params=(),
+        outputs=("out",),
+        lookback=lambda _: 0,
+        plots=(PlotSpec(kind="line", scale="own", default_pane="separate"),),
+        causal=False,
+    )
+    assert spec.causal is False
+
+
+# ── Failure-injection test (DoD: ≥1 건) ──────────────────────────────────────
+
+
+def test_generate_talib_specs_talib_crash_raises_exception() -> None:
+    """talib.get_functions()가 예외를 raise하면 그 예외가 전파된다."""
+    with patch.object(
+        talib, "get_functions", side_effect=RuntimeError("simulated TA-Lib C-library crash")
+    ):
+        with pytest.raises(RuntimeError, match="simulated TA-Lib C-library crash"):
+            generate_talib_specs()
+
+
+# ── Performance assertion (DoD: perf_budget fixture 사용) ────────────────────
+
+
+def test_generate_talib_specs_subset_performance(perf_budget: PerfBudget) -> None:
+    """generate_talib_specs subset 호출은 100ms 이내에 완료된다."""
+    # 실제 설치된 TA-Lib 함수명 사용 (0.4.x: AC, BBANDS, ADX 등)
+    installed = sorted(talib.get_functions())[:10]
+    perf_budget.assert_within(
+        lambda: generate_talib_specs(installed),
+        budget_ms=100.0,
+        label=f"generate_talib_specs({len(installed)} names)",
+    )
