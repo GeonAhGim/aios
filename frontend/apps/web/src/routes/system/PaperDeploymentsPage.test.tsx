@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { AiosApiClient, ApiError } from "@aios/api-client";
 import type { PaperDeploymentView, RequestPaperDeploymentBody } from "@aios/api-client";
-import { PaperDeploymentsPage } from "./PaperDeploymentsPage";
+import { PaperDeploymentsPage, type PaperDeploymentsLocationState } from "./PaperDeploymentsPage";
 
 const requestMutateAsync = vi.fn();
 const startMutateAsync = vi.fn();
@@ -92,9 +92,11 @@ function delegateRequestToRealClient() {
   );
 }
 
-function renderPage() {
+function renderPage(locationState?: PaperDeploymentsLocationState) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter
+      initialEntries={[{ pathname: "/system/paper-deployments", state: locationState ?? null }]}
+    >
       <PaperDeploymentsPage />
     </MemoryRouter>,
   );
@@ -215,5 +217,38 @@ describe("PaperDeploymentsPage 배포 요청 Idempotency-Key(§3.7) 실제 헤�
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(idempotencyKeyOf(fetchMock)).toMatch(IDEMPOTENCY_KEY_RE);
+  });
+});
+
+// J7(docs/specs/UX_JOURNEYS.md §6.2/§6.3) — 백테스트 결과 화면에서 이 화면으로
+// navigate(state)로 넘어왔을 때 재입력 없이 이어지는지, 배포 요청 성공 시 상태를
+// 볼 곳을 같은 화면에서 안내하는지를 검증한다.
+describe("PaperDeploymentsPage J7 전략->백테스트->모의 운용 연결", () => {
+  it("navigate state로 넘어온 packageRef가 폼에 미리 채워진다", () => {
+    const { container } = renderPage({ packageRef: "pkg-from-backtest" });
+
+    const inputs = container.querySelectorAll("input");
+    expect(inputs[0]).toHaveValue("pkg-from-backtest");
+    expect(screen.getByText(/pkg-from-backtest/)).toBeInTheDocument();
+  });
+
+  it("navigate state가 없으면 패키지 참조 입력은 비어 있다", () => {
+    const { container } = renderPage();
+
+    const inputs = container.querySelectorAll("input");
+    expect(inputs[0]).toHaveValue("");
+  });
+
+  it("배포 요청이 성공하면 같은 화면에서 배포 목록으로 안내한다", async () => {
+    requestMutateAsync.mockResolvedValue(deploymentFixture({ id: "dep-99" }));
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    await waitFor(() => expect(requestMutateAsync).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("link", { name: "배포 목록" })).toHaveAttribute(
+      "href",
+      "#paper-deployments-list",
+    );
   });
 });

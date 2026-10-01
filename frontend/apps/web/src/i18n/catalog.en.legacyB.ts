@@ -224,6 +224,8 @@ export const catalogEnLegacyB = {
     "t14": "Deployment list",
     "t15": "No paper deployments.",
     "t16": "Failed to request deployment.",
+    "t17": "Continued from a strategy backtest. Package reference ({{packageRef}}) was filled in automatically.",
+    "t18": "Deployment requested. Check its status in the",
   },
   "walletPage": {
     "title1": "Wallet",

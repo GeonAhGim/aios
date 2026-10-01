@@ -26,6 +26,7 @@ import {
   StatusBadge,
 } from "@aios/ui-web";
 import { useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
@@ -78,6 +79,12 @@ const STOPPABLE_STATES: ReadonlySet<PaperDeploymentState> = new Set([
   "DEGRADED",
   "RECOVERY_REVIEW",
 ]);
+
+// J7(docs/specs/UX_JOURNEYS.md §6.2/§6.3) — 백테스트 결과 화면이 이 state로
+// navigate하면 패키지 참조를 다시 입력하지 않고 이어서 배포를 요청할 수 있다.
+export interface PaperDeploymentsLocationState {
+  packageRef?: string;
+}
 
 interface DeploymentRowProps {
   deployment: PaperDeploymentView;
@@ -167,14 +174,17 @@ function DeploymentRow({ deployment }: DeploymentRowProps) {
 
 export function PaperDeploymentsPage() {
   const { t } = useTranslation();
+  const location = useLocation();
+  const incomingPackageRef = (location.state as PaperDeploymentsLocationState | null)?.packageRef ?? "";
   const { data, isLoading, refetch, error: listError, isError: listIsError } = usePaperDeployments();
   const requestDeployment = useRequestPaperDeployment();
   const { submit } = useIdempotentSubmit("paperDeployments.request");
-  const [packageRef, setPackageRef] = useState("");
+  const [packageRef, setPackageRef] = useState(incomingPackageRef);
   const [connectionId, setConnectionId] = useState("");
   const [adapterType, setAdapterType] = useState("bitget-sandbox");
   const [providerSandboxAccountRef, setProviderSandboxAccountRef] = useState("");
   const [error, setError] = useState<unknown>(null);
+  const [lastRequestedId, setLastRequestedId] = useState<string | null>(null);
 
   // §3.3 STATE_CONCURRENCY_CONFLICT(409)는 목록을 refetch한 뒤 1회 재제출한다
   // (ExecutionControlPage task-937과 동일 패턴).
@@ -197,10 +207,11 @@ export function PaperDeploymentsPage() {
   async function submitRequest() {
     setError(null);
     try {
-      await requestWithRetry();
+      const deployment = await requestWithRetry();
       setPackageRef("");
       setConnectionId("");
       setProviderSandboxAccountRef("");
+      setLastRequestedId(deployment.id);
     } catch (err) {
       if (err instanceof DuplicateSubmitError) return;
       setError(err instanceof ApiError ? err : new Error(t("legacy.paperDeploymentsPage.t16")));
@@ -221,6 +232,9 @@ export function PaperDeploymentsPage() {
 
         <Card>
           <CardTitle>{t("legacy.paperDeploymentsPage.t8")}</CardTitle>
+          {incomingPackageRef !== "" && (
+            <p className="text-sm text-fg-muted">{t("legacy.paperDeploymentsPage.t17", { packageRef: incomingPackageRef })}</p>
+          )}
           <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 md:grid-cols-5">
             <Field label={t("legacy.paperDeploymentsPage.label9")}>
               <Input required value={packageRef} onChange={(e) => setPackageRef(e.target.value)} />
@@ -248,9 +262,17 @@ export function PaperDeploymentsPage() {
               <CommandError error={error} onRetry={() => void submitRequest()} />
             </div>
           )}
+          {lastRequestedId !== null && (
+            <p className="mt-3 text-sm text-fg">
+              {t("legacy.paperDeploymentsPage.t18")}{" "}
+              <a href="#paper-deployments-list" className="underline">
+                {t("legacy.paperDeploymentsPage.t14")}
+              </a>
+            </p>
+          )}
         </Card>
 
-        <section className="space-y-4">
+        <section className="space-y-4" id="paper-deployments-list">
           <h2 className="text-lg font-medium text-fg">{t("legacy.paperDeploymentsPage.t14")}</h2>
           {listIsError ? (
             <DeploymentsListError error={listError} onRetry={() => void refetch()} />
