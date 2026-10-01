@@ -1,12 +1,13 @@
-"""02b_bitget_api_v2_full_spec_v1.md §5.1 — BitgetAdapter Futures Market(공개 시세) 메서드군.
+"""02b_bitget_api_v2_full_spec_v1.md §5.1 — BitgetAdapter Futures Market
+(public market data) methods.
 
-Spec: 02b_bitget_api_v2_full_spec_v1.md §5.1(P0), §9(작업 분해 3번)
+Spec: 02b_bitget_api_v2_full_spec_v1.md §5.1(P0), §9 (work breakdown #3)
 
-`ExchangeAdapter` ABC에는 아직 없는 Bitget 전용 확장 메서드다(margin_mixin.py
-모듈 docstring과 동일 원칙). `productType` 기본값은 `USDT-FUTURES` —
-다른 상품(COIN-FUTURES/USDC-FUTURES)은 필요해지면 파라미터로 전달.
+Bitget-specific extension methods not yet in the `ExchangeAdapter` ABC
+(same principle as margin_mixin.py module docstring). Default `productType` is `USDT-FUTURES` —
+other products (COIN-FUTURES/USDC-FUTURES) can be passed as a parameter when needed.
 
-엔드포인트(커뮤니티 SDK 레퍼런스 기준, 라이브 검증 필요):
+Endpoints (based on community SDK reference, live verification required):
 - GET /api/v2/mix/market/{contracts,ticker,merge-depth,candles,current-fund-rate}
 
 2026-09-25 task-6797(P6.line_cap) — remaining 4 GET methods moved to
@@ -33,7 +34,7 @@ from src.exchanges.common.http_client import SignedRequestClient
 
 DEFAULT_PRODUCT_TYPE = "USDT-FUTURES"
 
-# market_data_mixin.py의 _GRANULARITY_MAP과 값 동기화 필요(순환 임포트 방지 위해 복제).
+# Sync values with _GRANULARITY_MAP in market_data_mixin.py (copied to avoid circular import).
 _GRANULARITY_MAP = {
     "1m": "1m",
     "5m": "5m",
@@ -46,7 +47,7 @@ _GRANULARITY_MAP = {
 
 
 def _rows_to_candles(rows: list[list[str]], symbol: str, timeframe: str) -> list[Candle]:
-    """candles/history-candles 2개 엔드포인트가 공유하는 행 형태
+    """Row format shared by candles/history-candles two endpoints
     ([ts, open, high, low, close, baseVolume, ...])."""
     candles = []
     for row in rows:
@@ -113,8 +114,8 @@ class BitgetFuturesMarketMixin:
     async def get_futures_tickers(
         self: SignedRequestClient, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[Ticker]:
-        """02b 스펙 §5.1(P0) — 전체 심볼 현재가. get_futures_ticker()의
-        단일 심볼 조회와 짝을 이루는 전체 조회(문서상 별도 엔드포인트)."""
+        """02b spec §5.1(P0) — All-symbol ticker. Bulk query paired with
+        get_futures_ticker() single-symbol lookup (separate endpoint in docs)."""
         raw = await self._request(
             "GET", "/api/v2/mix/market/tickers", params={"productType": product_type}
         )
@@ -167,7 +168,7 @@ class BitgetFuturesMarketMixin:
     ) -> list[Candle]:
         granularity = _GRANULARITY_MAP.get(timeframe)
         if granularity is None:
-            raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
         raw = await self._request(
             "GET",
             "/api/v2/mix/market/candles",
@@ -189,10 +190,10 @@ class BitgetFuturesMarketMixin:
         end_time: str | None = None,
         product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[Candle]:
-        """02b 스펙 §5.1(P0) — get_futures_candles()의 과거 캔들 버전(FD-2.3)."""
+        """02b spec §5.1(P0) — Historical candles version of get_futures_candles() (FD-2.3)."""
         granularity = _GRANULARITY_MAP.get(timeframe)
         if granularity is None:
-            raise ValueError(f"지원하지 않는 timeframe: {timeframe}")
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
         params: dict[str, Any] = {
             "symbol": _to_bitget_symbol(symbol),
             "productType": product_type,
@@ -211,7 +212,7 @@ class BitgetFuturesMarketMixin:
         limit: int = 100,
         product_type: str = DEFAULT_PRODUCT_TYPE,
     ) -> list[FundingRate]:
-        """02b 스펙 §5.1(P1)."""
+        """02b spec §5.1(P1)."""
         raw = await self._request(
             "GET",
             "/api/v2/mix/market/history-fund-rate",
@@ -237,7 +238,7 @@ class BitgetFuturesMarketMixin:
     async def get_futures_funding_time(
         self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> datetime:
-        """02b 스펙 §5.1(P1) — 다음 펀딩 정산 시각 단독 조회."""
+        """02b spec §5.1(P1) — Next funding settlement time lookup only."""
         raw = await self._request(
             "GET",
             "/api/v2/mix/market/funding-time",
@@ -249,7 +250,7 @@ class BitgetFuturesMarketMixin:
     async def get_futures_open_interest(
         self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> Decimal:
-        """02b 스펙 §5.1(P1) — FD-2.6류 시장 전체 신호 보강."""
+        """02b spec §5.1(P1) — FD-2.6 class market-wide signal enrichment."""
         raw = await self._request(
             "GET",
             "/api/v2/mix/market/open-interest",
@@ -263,7 +264,7 @@ class BitgetFuturesMarketMixin:
     async def get_futures_position_lever_tiers(
         self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
     ) -> list[dict[str, Any]]:
-        """02b 스펙 §5.1(P1) — 레버리지 구간표. 필드가 제각각이라 raw dict 유지."""
+        """02b spec §5.1(P1) — Leverage tier table. Fields vary, keep raw dict."""
         raw = await self._request(
             "GET",
             "/api/v2/mix/market/query-position-lever",
