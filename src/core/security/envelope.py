@@ -15,6 +15,7 @@ not needed for the payload — `rewrap` changes only the kid and leaves
 the payload nonce/ciphertext untouched, so binding payload AAD to kid
 would break decryption immediately after rotation.
 """
+
 from __future__ import annotations
 
 import os
@@ -24,7 +25,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.core.security.key_ring import KeyRing
 
-_NONCE_SIZE = 12  # AES-GCM 표준 96비트 nonce
+_NONCE_SIZE = 12  # AES-GCM standard 96-bit nonce
 _DEK_SIZE = 32  # AES-256
 
 
