@@ -123,3 +123,39 @@ def test_mwr_returns_none_when_root_is_outside_bracket():
 def test_mwr_returns_none_when_iteration_budget_is_exhausted(monkeypatch):
     monkeypatch.setattr(mwr_module, "MWR_MAX_ITERATIONS", 1)
     assert mwr([], Decimal("1000"), Decimal("1100"), _T0, _T1) is None
+
+
+def test_mwr_returns_none_when_end_value_is_negative():
+    """종료값이 음수이면 현금흐름 부호가 모두 같아져 이분법 괄호 밖에서
+    시작한다 — 수렴 불가. start_value>0, end_value<0일 때 NPV의 부호가
+    low/high에서 모두 양수이므로 None을 반환해야 한다."""
+    assert mwr([], Decimal("1000"), Decimal("-500"), _T0, _T1) is None
+
+
+def test_mwr_skips_cashflow_before_period_start():
+    """기간 시작 전 현금흐름은 silently skip된다 — elapsed<0 조건.
+    이 테스트가 없으면 skip되지 않을 때 디버깅이 어려워진다."""
+    early_cf = Cashflow(
+        at=_T0 - timedelta(days=10),
+        amount=Decimal("100"),
+        kind=CashflowKind.DEPOSIT,
+    )
+    # early cashflow이 skip되더라도 start_value/end_value만 남으므로
+    # 정상 수렴(단순수익률)이 나와야 한다.
+    result = mwr([early_cf], Decimal("1000"), Decimal("1100"), _T0, _T1)
+    assert result is not None
+    # skip되었으므로 단순수익률 10%와 같아야 함
+    assert abs(result - Decimal("0.1")) < Decimal("1E-8")
+
+
+def test_mwr_skips_cashflow_after_period_end():
+    """기간 종료 후 현금흐름은 silently skip된다 — elapsed>total_seconds
+    조건. 시작 전 테스트와 대칭 케이스."""
+    late_cf = Cashflow(
+        at=_T1 + timedelta(days=10),
+        amount=Decimal("100"),
+        kind=CashflowKind.DEPOSIT,
+    )
+    result = mwr([late_cf], Decimal("1000"), Decimal("1100"), _T0, _T1)
+    assert result is not None
+    assert abs(result - Decimal("0.1")) < Decimal("1E-8")
