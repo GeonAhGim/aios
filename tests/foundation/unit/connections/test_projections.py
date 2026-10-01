@@ -20,7 +20,6 @@ Connections is not itself a safety/execution/ledger/compliance/data axis
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -40,6 +39,7 @@ from src.foundation.connections.projections import (
     ConnectionListView,
     build_connection_list_view,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 
@@ -249,25 +249,26 @@ def test_connection_list_view_constructor_stores_fields_verbatim() -> None:
 
 
 @pytest.mark.perf
-async def test_build_connection_list_view_perf_budget_p95_latency() -> None:
+async def test_build_connection_list_view_perf_budget_p95_latency(perf_budget: PerfBudget) -> None:
     """No published per-axis budget covers FND-05 read-model projections
     specifically (ADR-2026-09-09-C Decision 1's table); pin the same order
     of magnitude as the closest published read budget ("read model query
     p95 100ms") since this is a single list read plus a small in-memory
-    fan-out, all served in-memory here."""
-    tenant_id = uuid4()
-    samples = 50
-    durations_ms: list[float] = []
+    fan-out, all served in-memory here.
 
-    for _ in range(samples):
+    raw time.perf_counter() -> perf_budget.samples_async (task-10961):
+    process_time 기반 측정 + coverage tracer-pause로 부하 민감 호스트에서의
+    오탐을 줄인다. 예산 값(100ms)은 그대로 유지한다."""
+    tenant_id = uuid4()
+    sample_count = 50
+
+    async def _build() -> None:
         connections = [_connection(tenant_id) for _ in range(5)]
         bindings: dict[UUID, CredentialBinding | None] = {c.id: _binding(c.id) for c in connections}
         repo = FakeConnectionRepository(connections=connections, bindings=bindings)
-
-        start = time.perf_counter()
         await build_connection_list_view(repo, tenant_id)
-        durations_ms.append((time.perf_counter() - start) * 1000)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
+    samples = await perf_budget.samples_async(_build, n=sample_count)
+    durations_ms = sorted(s.cpu_ms for s in samples)
+    p95 = durations_ms[int(sample_count * 0.95) - 1]
     assert p95 < 100.0, f"build_connection_list_view p95 latency {p95:.3f}ms exceeded 100ms budget"
