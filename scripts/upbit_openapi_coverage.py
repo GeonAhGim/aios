@@ -69,7 +69,10 @@ def load_reference(path: Path) -> dict[str, Any]:
         raise UpbitCoverageError(
             f"기준 목록 없음: {path} — 먼저 `python scripts/upbit_openapi_fetch.py`로 생성"
         )
-    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise UpbitCoverageError(f"기준 목록 읽기 실패: {path} — {exc}") from exc
     endpoints = data.get("endpoints")
     if not isinstance(endpoints, list) or not endpoints:
         raise UpbitCoverageError(f"기준 목록이 비어있거나 형식이 잘못됨: {path}")
@@ -80,7 +83,10 @@ def scan_adapter_source(adapter_dir: Path) -> str:
     """Missing adapter dir is a valid state here (no Upbit adapter exists yet)."""
     if not adapter_dir.exists():
         return ""
-    files = sorted(adapter_dir.rglob("*.py"))
+    try:
+        files = sorted(adapter_dir.rglob("*.py"))
+    except OSError:
+        return ""
     return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in files)
 
 

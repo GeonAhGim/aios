@@ -198,3 +198,108 @@ def test_main_fails_on_coverage_drop(tmp_path: Path) -> None:
 
     assert exit_code == 1
     assert coverage_txt.read_text(encoding="utf-8") == "50.00\n"
+
+
+# --- negative tests: 불변식 위반 입력 ---
+
+
+def test_classify_empty_path_returns_not_started() -> None:
+    """classify에 빈 문자열 path를 넣어도 예외 없이 미착수 반환해야 한다."""
+    assert classify("", "GET", implemented=False) == "미착수"
+
+
+def test_classify_empty_method_returns_not_started() -> None:
+    """classify에 빈 문자열 method를 넣어도 예외 없이 미착수 반환해야 한다."""
+    assert classify("/v1/orders", "", implemented=False) == "미착수"
+
+
+def test_load_reference_invalid_json_raises(tmp_path: Path) -> None:
+    """잘못된 JSON 내용을 가진 reference 파일은 UpbitCoverageError를 던져야 한다."""
+
+    ref_path = tmp_path / "reference.json"
+    ref_path.write_text("{not valid json!!!", encoding="utf-8")
+
+    try:
+        load_reference(ref_path)
+    except UpbitCoverageError as exc:
+        assert "JSON" in str(exc) or "parse" in str(exc).lower() or "invalid" in str(exc).lower()
+    else:
+        raise AssertionError("UpbitCoverageError를 기대했지만 발생하지 않음")
+
+
+def test_scan_adapter_source_binary_file_handles_gracefully(tmp_path: Path) -> None:
+    """바이너리 내용을 가진 파일이 adapter 디렉토리에 있어도 scan_adapter_source가
+    예외 없이 빈 문자열 또는 정상 텍스트를 반환해야 한다."""
+    adapter_dir = tmp_path / "upbit"
+    adapter_dir.mkdir()
+    # Python .py 파일이지만 실제 내용은 바이너리
+    (adapter_dir / "corrupted.py").write_bytes(b"\x00\x01\x02\xff\xfe\xfd")
+
+    # 예외 없이 반환해야 함
+    source = scan_adapter_source(adapter_dir)
+    assert isinstance(source, str)
+
+
+# --- failure-injection tests: 의존성 예외 ---
+
+
+def test_load_reference_read_error_raises(tmp_path: Path, monkeypatch) -> None:
+    """reference 파일 읽기 실패 시 UpbitCoverageError를 던져야 한다."""
+    import json
+
+    ref_path = tmp_path / "reference.json"
+    ref_path.write_text(json.dumps(_REFERENCE_FIXTURE), encoding="utf-8")
+
+    import upbit_openapi_coverage as module
+
+    def fake_read_text(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(module.Path, "read_text", fake_read_text)
+
+    try:
+        load_reference(ref_path)
+    except UpbitCoverageError:
+        pass
+    else:
+        raise AssertionError("UpbitCoverageError를 기대했지만 발생하지 않음")
+
+
+def test_scan_adapter_source_rglob_error_returns_empty(tmp_path: Path, monkeypatch) -> None:
+    """adapter 디렉토리에서 rglob 실패 시 빈 문자열을 반환해야 한다."""
+    adapter_dir = tmp_path / "upbit"
+    adapter_dir.mkdir()
+
+    import upbit_openapi_coverage as module
+
+    def fake_rglob(*a, **kw):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(module.Path, "rglob", fake_rglob)
+
+    source = scan_adapter_source(adapter_dir)
+    assert source == ""
+
+
+# --- perf_budget 성능 단언 ---
+
+
+def test_build_matrix_1000_endpoints_within_100ms(perf_budget) -> None:
+    """build_matrix가 1000개 엔드포인트를 0.1초 내에 처리해야 한다."""
+    large_reference = {
+        "source_url": "https://docs.upbit.com/kr/reference",
+        "extraction_method": "test",
+        "fetched_at": "2026-09-25T00:00:00+00:00",
+        "spec_version": "test",
+        "spec_title": "Test",
+        "endpoint_count": 1000,
+        "endpoints": [
+            {"path": f"/v1/endpoint/{i}", "method": "GET", "summary": f"Endpoint {i}"}
+            for i in range(1000)
+        ],
+    }
+
+    def work():
+        return build_matrix(large_reference, adapter_source="")
+
+    perf_budget.assert_within(work, budget_ms=100, n=5, label="build_matrix/1000ep")
