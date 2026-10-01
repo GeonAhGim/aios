@@ -1,5 +1,5 @@
 """79번 §1/§2 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
-import time
+
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -124,11 +124,14 @@ def test_missing_middle_event_breaks_chain():
 
 
 @pytest.mark.perf
-def test_verify_chain_throughput_budget():
+def test_verify_chain_throughput_budget(perf_budget):
     """D2 성능 단언 — 79번 스펙에 축별 예산표가 아직 없는 신규 모듈이라, 5k
     이벤트/500ms(=10k events/sec 이상 처리량)를 로컬 기준으로 고정한다. 순수
     해시 계산이므로 CI 러너에서도 여유 있게 통과해야 하고, 회귀 시(예: 매
-    이벤트마다 불필요한 재직렬화 추가) 여기서 잡힌다."""
+    이벤트마다 불필요한 재직렬화 추가) 여기서 잡힌다.
+
+    raw perf_counter → PerfBudget.assert_within 전환 (task-10974).
+    """
     events: list[AuditEvent] = []
     previous_hash: str | None = None
     for sequence_no in range(1, 5001):
@@ -136,11 +139,12 @@ def test_verify_chain_throughput_budget():
         events.append(event)
         previous_hash = event.event_hash
 
-    started = time.perf_counter()
-    verify_chain(events)
-    elapsed = time.perf_counter() - started
-
-    assert elapsed < 0.5
+    perf_budget.assert_within(
+        lambda: verify_chain(events),
+        budget_ms=500,
+        n=5,
+        label="verify_chain(5k events)",
+    )
 
 
 def test_replayed_stale_event_breaks_chain_red_gate_repro():
