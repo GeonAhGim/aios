@@ -12,9 +12,9 @@ generator).
 from __future__ import annotations
 
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import asyncpg
 import pytest
@@ -207,8 +207,7 @@ async def test_gate_red_check_constraint_actually_fails_without_it(pool: asyncpg
     `market_bar_snapshot.bar_count` rejects."""
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
-            "CREATE TEMP TABLE market_bar_snapshot_no_check (bar_count INT NOT NULL) "
-            "ON COMMIT DROP"
+            "CREATE TEMP TABLE market_bar_snapshot_no_check (bar_count INT NOT NULL) ON COMMIT DROP"
         )
         await conn.execute("INSERT INTO market_bar_snapshot_no_check (bar_count) VALUES (0)")
         row = await conn.fetchrow("SELECT bar_count FROM market_bar_snapshot_no_check")
@@ -230,14 +229,20 @@ def _p95(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-async def test_save_db_roundtrip_p95_within_budget(repo: PostgresSnapshotRepository) -> None:
+async def test_save_db_roundtrip_p95_within_budget(
+    repo: PostgresSnapshotRepository, perf_budget: Any
+) -> None:
+    """raw time.perf_counter() → perf_budget.sample_async 전환(task-10886).
+
+     DB 왕복은 I/O 바운드이므로 wall_ms를 쓴다 — process_time는 대기 시간을
+    계량하지 못한다. 절대 ms 예산(_SAVE_DB_ROUNDTRIP_P95_BUDGET_MS)을 유지하며
+    측정 방식만 process_time-기반으로 통일한다(task-10775)."""
     samples: list[float] = []
     for i in range(30):
         bars = _bars(symbol=f"PERF{i}USDT")
         ref = _ref(bars)
-        started = time.perf_counter()
-        await repo.save(ref, bars)
-        samples.append((time.perf_counter() - started) * 1000)
+        sample = await perf_budget.sample_async(lambda r=ref, b=bars: repo.save(r, b))
+        samples.append(sample.wall_ms)
 
     p95_ms = _p95(samples)
     print(
