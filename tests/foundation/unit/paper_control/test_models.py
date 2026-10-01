@@ -3,10 +3,10 @@
 Spec: AIOSproject 77_paper_execution_control_l3_build_and_operational_specification_v1.0.md §1/§2.
 task-4617.
 """
+
 from __future__ import annotations
 
 import dataclasses
-import time
 from typing import Any
 from uuid import uuid4
 
@@ -22,6 +22,7 @@ from src.foundation.paper_control.domain.models import (
     PaperDeployment,
     PaperOrderIntent,
 )
+from tests.conftest import PerfBudget
 
 
 def _provenance(**overrides: Any) -> AdapterProvenance:
@@ -184,13 +185,22 @@ def test_state_mapping_fails_closed_on_corrupted_repository_row(monkeypatch):
 
 
 @pytest.mark.perf
-def test_paper_deployment_construction_throughput():
+def test_paper_deployment_construction_throughput(perf_budget: PerfBudget):
     """Pure value-object construction has no I/O; 20k instances must build in
     well under 1s (budget: >= 20k ops/sec) — regression guard against someone
-    later adding hidden validation/I/O to this frozen dataclass."""
+    later adding hidden validation/I/O to this frozen dataclass.
+
+    raw time.perf_counter() 단언을 perf_budget.assert_within() 경유로 전환
+    (task-10997, L4-DC-2)."""
     iterations = 20_000
-    started = time.perf_counter()
-    for _ in range(iterations):
-        _deployment()
-    elapsed = time.perf_counter() - started
-    assert elapsed < 1.0, f"expected < 1.0s for {iterations} constructions, took {elapsed:.3f}s"
+
+    def _build_batch() -> None:
+        for _ in range(iterations):
+            _deployment()
+
+    perf_budget.assert_within(
+        _build_batch,
+        budget_ms=1000,
+        n=3,
+        label="paper_deployment_construction",
+    )
