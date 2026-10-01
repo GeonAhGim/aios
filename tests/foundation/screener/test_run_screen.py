@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import time
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -24,6 +23,7 @@ from src.foundation.screener.application.run_screen import (
     MAX_RESULT_ROWS,
     ScreenLimitExceededError,
     ScreenResultCache,
+    ScreenRunPage,
     ScreenTimeoutError,
     ScreenUniverseError,
     run_saved_screen,
@@ -35,6 +35,7 @@ from src.foundation.screener.contracts.v1 import (
     SortSpec,
 )
 from src.foundation.screener.domain.evaluate import ScreenerEvaluationError
+from tests.conftest import PerfBudget
 
 _LISTED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
@@ -315,7 +316,7 @@ async def test_run_screen_times_out_on_slow_field_source() -> None:
 
 
 @pytest.mark.perf
-async def test_run_screen_scans_5000_symbols_within_adr_budget() -> None:
+async def test_run_screen_scans_5000_symbols_within_adr_budget(perf_budget: PerfBudget) -> None:
     # No row matches ("close" always 50 <= 100) so the scan must walk the full
     # 5,000-symbol universe end to end instead of stopping early at the
     # MAX_RESULT_ROWS cap — that is what actually exercises the ADR throughput
@@ -324,18 +325,21 @@ async def test_run_screen_scans_5000_symbols_within_adr_budget() -> None:
     fields = {i.instrument_id: {"close": Decimal("50")} for i in instruments}
     field_source = FakeFieldSource(instruments, fields)
 
-    start = time.perf_counter()
-    page = await run_screen(
-        _definition(),
-        field_source=field_source,
-        cache=ScreenResultCache(),
-        page_size=MAX_RESULT_ROWS,
-    )
-    elapsed = time.perf_counter() - start
+    async def _scan() -> ScreenRunPage:
+        return await run_screen(
+            _definition(),
+            field_source=field_source,
+            cache=ScreenResultCache(),
+            page_size=MAX_RESULT_ROWS,
+        )
+
+    budget_ms = 2000.0  # ADR-2026-09-09-C: "스크리너 5k 심볼 2초"
+    sample = await perf_budget.sample_async(_scan)
+    page = sample.result
 
     assert page.total == 0
     assert page.truncated is False
-    assert elapsed < 2.0  # ADR-2026-09-09-C: "스크리너 5k 심볼 2초"
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
 
 # ---- gate-red repro: prove the "no float() coercion" scanner used below would
