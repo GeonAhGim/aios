@@ -20,7 +20,6 @@ Connections is not itself the safety/execution/ledger/compliance/data axis
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -89,18 +88,24 @@ class FakeConnectionRepository:
     # Unused Protocol members -- not exercised by begin_connection().
     async def get_connection(self, connection_id: UUID) -> AccountConnection | None:
         raise NotImplementedError
+
     async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
         raise NotImplementedError
+
     async def transition_connection_state(
         self, connection_id: UUID, *, tenant_id: UUID, expected_state: str, new_state: str
     ) -> AccountConnection:
         raise NotImplementedError
+
     async def insert_credential_binding(self, binding: CredentialBinding) -> CredentialBinding:
         raise NotImplementedError
+
     async def get_credential_binding(self, connection_id: UUID) -> CredentialBinding | None:
         raise NotImplementedError
+
     async def revoke_credential_binding(self, connection_id: UUID) -> None:
         raise NotImplementedError
+
     async def persist_snapshot_if_syncable(
         self,
         connection_id: UUID,
@@ -109,10 +114,13 @@ class FakeConnectionRepository:
         health: ConnectionHealth,
     ) -> AccountSnapshot:
         raise NotImplementedError
+
     async def get_latest_snapshot(self, connection_id: UUID) -> AccountSnapshot | None:
         raise NotImplementedError
+
     async def insert_health_record(self, health: ConnectionHealth) -> ConnectionHealth:
         raise NotImplementedError
+
     async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
         raise NotImplementedError
 
@@ -142,8 +150,10 @@ class FakeTrustRepository:
         self, purpose: str, revision: int
     ) -> tuple[Disclosure, datetime] | None:
         raise NotImplementedError
+
     async def list_active_consents(self, tenant_id: UUID) -> list[Consent]:
         raise NotImplementedError
+
     async def insert_consent(
         self,
         *,
@@ -155,6 +165,7 @@ class FakeTrustRepository:
         expires_at: datetime | None,
     ) -> Consent:
         raise NotImplementedError
+
     async def revoke_consent(self, consent_id: UUID, *, tenant_id: UUID) -> Consent:
         raise NotImplementedError
 
@@ -226,9 +237,7 @@ async def test_begin_connection_rejects_when_mfa_not_verified() -> None:
     trust_repo = _fresh_trust_repo(tenant_id)
 
     with pytest.raises(MfaRequiredError):
-        await begin_connection(
-            conn_repo, trust_repo, **_kwargs(tenant_id, mfa_verified=False)
-        )
+        await begin_connection(conn_repo, trust_repo, **_kwargs(tenant_id, mfa_verified=False))
 
     assert conn_repo.insert_pending_calls == 0
     assert trust_repo.get_active_consent_calls == 0
@@ -461,28 +470,30 @@ async def test_gate_red_repro_freshness_check_is_load_bearing(
 
 
 @pytest.mark.perf
-async def test_begin_connection_perf_budget_p95_latency() -> None:
+async def test_begin_connection_perf_budget_p95_latency(
+    perf_budget: Any,
+) -> None:
     """No published per-axis budget covers FND-05 specifically (ADR-2026-09-09-C
     Decision 1's table); pin the same order of magnitude as the closest
     published command-write budget ("order submit -> ACK p95 50ms, paper")
     since this command is also a single fail-closed write plus one
-    dependent-context round trip, all served in-memory here."""
-    tenant_id = uuid4()
-    samples = 50
-    durations_ms: list[float] = []
+    dependent-context round trip, all served in-memory here.
 
-    for _ in range(samples):
+    raw time.perf_counter() -> perf_budget.samples_async (task-10958):
+    process_time 기반 측정 + coverage tracer-pause로 부하 민감 호스트에서의
+    오탐을 줄인다. 예산 값(50ms)은 그대로 유지한다."""
+    tenant_id = uuid4()
+
+    async def _run() -> None:
         disclosure = _disclosure()
         consent = _consent(tenant_id=tenant_id, disclosure_id=disclosure.id)
         trust_repo = FakeTrustRepository(
             disclosure=disclosure, latest_consent=consent, active_consent=consent
         )
         conn_repo = FakeConnectionRepository()
-
-        start = time.perf_counter()
         await begin_connection(conn_repo, trust_repo, **_kwargs(tenant_id))
-        durations_ms.append((time.perf_counter() - start) * 1000)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
+    samples = await perf_budget.samples_async(_run, n=50)
+    durations_ms = sorted(s.cpu_ms for s in samples)
+    p95 = durations_ms[int(50 * 0.95) - 1]
     assert p95 < 50.0, f"begin_connection p95 latency {p95:.3f}ms exceeded 50ms budget"
