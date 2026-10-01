@@ -10,7 +10,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from src.core.exceptions import RetryableExchangeError
+from src.core.exceptions import FatalExchangeError, RetryableExchangeError
 from src.exchanges.bitget.adapter import BitgetAdapter
 from tests.integration.bitget_futures_doubles import json_response, make_adapter
 
@@ -364,4 +364,37 @@ async def test_get_futures_ticker_propagates_retryable_on_connection_failure():
     )
 
     with pytest.raises(RetryableExchangeError):
+        await adapter.get_futures_ticker("BTC/USDT")
+
+
+async def test_get_futures_history_candles_rejects_unsupported_timeframe():
+    """get_futures_candles와 동일한 _GRANULARITY_MAP 가드가
+    history-candles 경로에도 독립적으로 적용된다 — 네트워크 요청을
+    보내기 전에 ValueError로 fail-closed 거부한다(두 메서드가 각자
+    checked-in된 별도 코드 경로라 한쪽만 검증하면 회귀를 놓친다)."""
+    adapter = make_adapter(
+        lambda request: (_ for _ in ()).throw(
+            AssertionError("지원하지 않는 timeframe은 요청을 보내면 안 됩니다.")
+        )
+    )
+    with pytest.raises(ValueError):
+        await adapter.get_futures_history_candles("BTC/USDT", "3m")
+
+
+async def test_get_futures_ticker_raises_fatal_on_auth_error_code():
+    """Bitget이 HTTP 200과 함께 서명 오류 코드(40012, `_AUTH_CODES`)를
+    돌려주는 경우를 성공으로 오인해 KeyError로 죽거나 재시도로 흘려보내지
+    않고 FatalExchangeError로 명시 분류한다(_classify_body →
+    classify_body_code의 AUTH/retryable=False 경로 실패주입 — 재시도해도
+    같은 자격증명으로는 영구히 같은 결과이므로 fail-closed 즉시 중단이
+    맞는 동작이다)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return json_response(
+            {"code": "40012", "msg": "invalid sign", "requestTime": 1, "data": None}
+        )
+
+    adapter = make_adapter(handler)
+
+    with pytest.raises(FatalExchangeError):
         await adapter.get_futures_ticker("BTC/USDT")
