@@ -110,6 +110,8 @@ export const catalogEnLegacyD = {
     "t10": "Reproduction key",
     "title11": "Parameter sweep results",
     "t12": "Configure and run a parameter sweep first. This screen only shows results of a sweep that has already run.",
+    "t19": "Ready to deploy this result to paper trading?",
+    "t20": "Deploy to paper trading",
   },
   "chartPage": {
     "title1": "Chart",

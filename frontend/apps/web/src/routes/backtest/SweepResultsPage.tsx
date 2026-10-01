@@ -11,9 +11,10 @@ import {
 } from "@aios/api-client";
 import { routeApiError } from "@aios/shared-types";
 import { useAuthStore } from "@aios/shared-hooks";
-import { Alert, Badge, Card, CardTitle, DIVERGING_DOWN, DIVERGING_UP, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
+import { Alert, Badge, Button, Card, CardTitle, DIVERGING_DOWN, DIVERGING_UP, EmptyState, LoadingState, PageHeader } from "@aios/ui-web";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import type { PaperDeploymentsLocationState } from "../system/PaperDeploymentsPage";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { AppShell } from "../../components/layout/AppShell";
 import { useTranslation } from "react-i18next";
@@ -176,6 +177,23 @@ function SweepStabilityCard({ stability }: { stability: SweepStabilityView | nul
   );
 }
 
+// J7(docs/specs/UX_JOURNEYS.md §6.2/§6.3) — 모의 운용으로 넘길 때 사용자가
+// 콤보를 다시 고르지 않도록, stability.bestAxisValues가 가리키는 콤보(없으면
+// 첫 콤보)의 재현 키를 기본 packageRef로 넘긴다. 사용자는 다음 화면에서 이
+// 값을 그대로 쓰거나 고쳐 쓸 수 있다(PaperDeploymentsPage의 입력은 required지만
+// 편집 가능).
+function bestReproducibilityKey(result: SweepResultView): string {
+  if (result.points.length === 0) return "";
+  if (result.stability) {
+    const best = result.stability;
+    const match = result.points.find((p) =>
+      Object.entries(best.bestAxisValues).every(([axis, value]) => p.axisValues[axis] === value),
+    );
+    if (match) return match.reproducibilityKey;
+  }
+  return result.points[0]!.reproducibilityKey;
+}
+
 function SweepReproducibilityTable({ points }: { points: SweepPointResultView[] }) {
   const { t } = useTranslation();
   if (points.length === 0) return null;
@@ -199,6 +217,7 @@ function SweepReproducibilityTable({ points }: { points: SweepPointResultView[] 
 export function SweepResultsPage({ runSweep = defaultRunSweep }: SweepResultsPageProps) {
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
   const request = (location.state as SweepResultsLocationState | null)?.sweepRequest ?? null;
 
   const query = useQuery({
@@ -207,6 +226,7 @@ export function SweepResultsPage({ runSweep = defaultRunSweep }: SweepResultsPag
     queryFn: () => runSweep(request as SweepRequestInput),
     enabled: request !== null,
   });
+  const result = query.data;
 
   return (
     <AppShell>
@@ -222,15 +242,32 @@ export function SweepResultsPage({ runSweep = defaultRunSweep }: SweepResultsPag
           <SweepErrorBanner error={query.error} onRetry={() => query.refetch()} />
         )}
 
-        {query.data && (
+        {result && (
           <>
-            <SweepHeatmap axes={query.data.axes} metric={query.data.metric} points={query.data.points} />
-            <SweepStabilityCard stability={query.data.stability} />
-            <SweepReproducibilityTable points={query.data.points} />
-            {query.data.warnings.length > 0 && (
+            <Card>
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm text-fg-muted">{t("legacy.sweepResultsPage.t19")}</p>
+                <Button
+                  type="button"
+                  onClick={() =>
+                    navigate("/system/paper-deployments", {
+                      state: {
+                        packageRef: bestReproducibilityKey(result),
+                      } satisfies PaperDeploymentsLocationState,
+                    })
+                  }
+                >
+                  {t("legacy.sweepResultsPage.t20")}
+                </Button>
+              </div>
+            </Card>
+            <SweepHeatmap axes={result.axes} metric={result.metric} points={result.points} />
+            <SweepStabilityCard stability={result.stability} />
+            <SweepReproducibilityTable points={result.points} />
+            {result.warnings.length > 0 && (
               <Alert tone="warning">
                 <ul className="list-disc space-y-1 pl-4">
-                  {query.data.warnings.map((warning) => (
+                  {result.warnings.map((warning) => (
                     <li key={warning}>{warning}</li>
                   ))}
                 </ul>

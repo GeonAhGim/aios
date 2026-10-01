@@ -20,7 +20,16 @@ vi.mock("@aios/shared-hooks", () => ({
   useAuthStore: { getState: () => ({ token: null }) },
 }));
 
-afterEach(cleanup);
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock("react-router-dom", async (original) => ({
+  ...(await original<typeof import("react-router-dom")>()),
+  useNavigate: () => navigate,
+}));
+
+afterEach(() => {
+  cleanup();
+  navigate.mockClear();
+});
 
 function sweepRequest(overrides: Partial<SweepRequestInput> = {}): SweepRequestInput {
   return {
@@ -285,5 +294,35 @@ describe("SweepResultsPage", () => {
     expect(elapsedMs).toBeLessThan(perfBudgetMs(4000));
     expect(screen.getByTestId("sweep-cell-0-0")).toHaveTextContent("0");
     expect(document.querySelectorAll('td[data-testid^="sweep-cell-"]')).toHaveLength(size * size);
+  });
+
+  // J7(docs/specs/UX_JOURNEYS.md §6.2/§6.3) — 결과 화면에서 모의 운용 배포
+  // 화면까지 URL을 직접 치지 않고 1클릭으로 이동하며, 최적점(stability.
+  // bestAxisValues)의 재현 키를 packageRef로 넘겨 다음 화면에서 재입력하지
+  // 않게 한다.
+  it("J7: 안정적인 최적점이 있으면 그 콤보의 재현 키를 packageRef로 넘겨 모의 운용 배포 화면으로 이동한다", async () => {
+    const runSweep = vi.fn().mockResolvedValue(sweepResult());
+    renderPage({ runSweep }, { sweepRequest: sweepRequest() });
+
+    const button = await screen.findByText("모의 운용 배포하러 가기");
+    fireEvent.click(button);
+
+    expect(navigate).toHaveBeenCalledWith("/system/paper-deployments", {
+      state: { packageRef: "repro-2" },
+    });
+  });
+
+  it("J7: 안정성 표면이 없으면(축 2개 미만) 첫 콤보의 재현 키를 packageRef로 넘긴다", async () => {
+    const runSweep = vi.fn().mockResolvedValue(
+      sweepResult({ axes: [{ name: "rsi_len", values: [10, 14] }], stability: null }),
+    );
+    renderPage({ runSweep }, { sweepRequest: sweepRequest() });
+
+    const button = await screen.findByText("모의 운용 배포하러 가기");
+    fireEvent.click(button);
+
+    expect(navigate).toHaveBeenCalledWith("/system/paper-deployments", {
+      state: { packageRef: "repro-1" },
+    });
   });
 });
