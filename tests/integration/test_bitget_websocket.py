@@ -1,6 +1,7 @@
 """02b_bitget_api_v2_full_spec_v1.md §6/§9-4 — _run_ws_subscription()의
 연결관리/재연결/백오프 루프. 실제 소켓 대신 가짜 connect_fn/sleep_fn을
 주입해 결정적으로 재현한다(market_data_mixin.py 리팩터링 목적 그 자체)."""
+
 import json
 
 import httpx
@@ -208,9 +209,7 @@ async def test_reconnect_resends_login_with_fresh_timestamp_not_stale_one(monkey
         fake_now[0] += 1.0
         return fake_now[0]
 
-    monkeypatch.setattr(
-        "src.exchanges.bitget.market_data_mixin.time.time", fake_time
-    )
+    monkeypatch.setattr("src.exchanges.bitget.market_data_mixin.time.time", fake_time)
 
     first_connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
     second_connection = _FakeConnection([], raise_after=ConnectionClosed(None, None))
@@ -397,3 +396,49 @@ async def test_subscribe_ticker_stream_resyncs_via_rest_after_reconnect():
 
     assert len(received) == 1
     assert received[0].symbol == "BTC/USDT"
+
+
+async def test_gate_red_broken_ack_classifier_lets_error_event_leak_to_handler(monkeypatch):
+    """게이트 적색 재현 — `classify_bitget_ack`(ws_parsers.py)가 `event":"error"`를
+    `WsAckError`로 분류하는 것이 바로
+    `test_run_ws_subscription_raises_on_error_event_and_does_not_forward_it`이 지키는
+    불변식의 근거다. 이 분류기를 task-105 이전 동작(모든 프레임을 데이터로 취급 =
+    `NOT_ACK`)으로 깨뜨리면, 같은 입력에 대해 그 테스트가 요구하는 "예외로 표면화하고
+    핸들러에 전달하지 않는다"가 둘 다 뒤집힘을 보여, 검사가 실제로 뭔가를 막고
+    있음을 증명한다(단순히 항상 통과하는 테스트가 아님)."""
+    import src.exchanges.bitget.market_ws_connection as market_ws_connection
+    from src.exchanges.common.ws_session import NOT_ACK
+
+    def broken_classify_always_not_ack(message: dict) -> object:
+        return NOT_ACK
+
+    monkeypatch.setattr(market_ws_connection, "classify_bitget_ack", broken_classify_always_not_ack)
+
+    connection = _FakeConnection(
+        ['{"event":"error","code":"30001","msg":"channel does not exist"}'],
+        raise_after=ConnectionClosed(None, None),
+    )
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _FakeConnectCtx(connection)
+        raise _StopTest
+
+    received: list[dict] = []
+
+    async def on_message(message: dict) -> None:
+        received.append(message)
+
+    with pytest.raises(_StopTest):
+        await _run_ws_subscription(
+            "wss://fake", {"op": "subscribe", "args": []}, on_message, connect_fn=connect_fn
+        )
+
+    # 깨진 분류기 아래에서는 WsAckError가 나지 않고(재연결 루프를 계속 돌다가
+    # _StopTest로 끝남) error 이벤트가 그대로 핸들러에 새어나간다 — 이것이
+    # task-105가 고친 결함이고, classify_bitget_ack의 ok=False 분기가 없으면
+    # 즉시 재현된다.
+    assert received == [{"event": "error", "code": "30001", "msg": "channel does not exist"}]
+    assert call_count["n"] == 2
