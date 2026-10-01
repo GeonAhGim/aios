@@ -1,21 +1,25 @@
-"""LB-17 — positions 조회 전용 애플리케이션 계층(pos_snapshot/pos_journal/pos_nav).
+"""LB-17 — read-only application layer for positions (pos_snapshot/pos_journal/pos_nav).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.3, §9.3 LB-17, LB-19.
 
-읽기 전용: 이 모듈은 `SnapshotRepository`/`PositionJournalRepository`/
-`NavRepository`에 위임만 하고 어떤 쓰기도 하지 않는다(71번 §6). LB-1
-`contracts/v1.py`의 `PositionSnapshotView`/`PositionJournalEntryView`/
-`NAVSnapshot`을 그대로(필드명 변경 없이) 반환한다 — 프론트 파싱(task-628
-decision, `frontend/packages/shared-types/src/positionView.ts`)이 SSOT로
-쓰는 필드명이 이 계약과 1:1이므로, 여기서 별도 뷰 모델로 감싸면 그 계약이
-두 곳에서 따로 진화한다.
+Read-only: this module only delegates to `SnapshotRepository`/
+`PositionJournalRepository`/`NavRepository` and performs no writes itself
+(standard-71 §6). It returns LB-1 `contracts/v1.py`'s
+`PositionSnapshotView`/`PositionJournalEntryView`/`NAVSnapshot` as-is
+(field names unchanged) — the field names the frontend parser uses as SSOT
+(task-628 decision, `frontend/packages/shared-types/src/positionView.ts`)
+map 1:1 to this contract, so wrapping it in a separate view model here would
+let the contract evolve independently in two places.
 
-테넌트 스코프(LB-19, PLT §3): `pos_journal.list_for`·`pos_nav_daily.get`은
-포트 계약상 tenant를 받지 않으므로, 이 계층이 먼저 소유를 확인한다 —
-스냅샷은 `SnapshotRepository.get(tenant_id, key)`(LB-18 cross_tenant 수정),
-계정은 `pos_account.tenant_id`로. 없음과 타 테넌트 소유를 구분하지 않고 같은
-예외를 던진다(존재 비노출, 404 동형). `pos_account` 조회 포트는 §2 표에
-없어 여기서 SQL 한 줄로 읽는다 — 계정 저장소 포트가 생기면 그리로 옮긴다.
+Tenant scoping (LB-19, PLT §3): `pos_journal.list_for` and
+`pos_nav_daily.get` do not accept a tenant in their port contracts, so this
+layer verifies ownership first — snapshots via
+`SnapshotRepository.get(tenant_id, key)` (LB-18 cross_tenant fix), accounts
+via `pos_account.tenant_id`. "Not found" and "owned by another tenant" are
+not distinguished; both raise the same exception (no existence disclosure,
+isomorphic to a 404). The `pos_account` lookup has no port in the §2 table,
+so it is read here with a single SQL line — move it to an account
+repository port if one is ever introduced.
 
 FA-6 (docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-6, §9
 table row 120): `list_positions` accepts an optional `portfolio_id` filter —
@@ -24,6 +28,7 @@ reuses `resolve_portfolio_scope` from FA-5's
 `entities/application/resolve_context.py` (no reimplementation). Calls that
 do not supply `portfolio_id` behave byte-identically to before this
 leaf."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -58,28 +63,32 @@ __all__ = [
     "list_positions",
 ]
 
-# 일별 NAV 체인 한 번의 조회 상한(윤년 포함 1년). 하루 한 행이라 366회
-# `get` 왕복이 최악 — 그 이상은 클라이언트가 범위를 나눠 부른다.
+# Upper bound on a single NAV-range query (one year, leap years included). One
+# row per day, so 366 `get` round trips is the worst case — beyond that the
+# client splits the range itself.
 MAX_NAV_RANGE_DAYS = 366
 
 
 class PositionNotFoundError(Exception):
-    """`position_key`가 없거나 다른 tenant 소유 — 구분하지 않는다(존재 비노출)."""
+    """`position_key` does not exist or is owned by another tenant — not
+    distinguished (no existence disclosure)."""
 
 
 class PositionAccountNotFoundError(Exception):
-    """`account_id`가 없거나 다른 tenant 소유 — 구분하지 않는다(존재 비노출)."""
+    """`account_id` does not exist or is owned by another tenant — not
+    distinguished (no existence disclosure)."""
 
 
 class NavRangeInvalidError(ValueError):
-    """`end_date < start_date`이거나 범위가 `MAX_NAV_RANGE_DAYS`를 넘는다."""
+    """`end_date < start_date`, or the range exceeds `MAX_NAV_RANGE_DAYS`."""
 
 
 async def _owned_account_ids(
     conn: asyncpg.Connection, tenant_id: UUID, account_id: UUID | None
 ) -> list[UUID]:
-    """tenant 소유 `pos_account` id 목록. `account_id`를 주면 그 하나만(소유가
-    아니면 빈 리스트 — 호출자가 not-found로 번역)."""
+    """List of `pos_account` ids owned by the tenant. If `account_id` is given,
+    only that one (an empty list if not owned — the caller translates this to
+    not-found)."""
     if account_id is None:
         rows = await conn.fetch(
             "SELECT account_id FROM pos_account WHERE tenant_id = $1 ORDER BY created_at",
@@ -97,8 +106,8 @@ async def _owned_account_ids(
 async def list_open_positions(
     pool: asyncpg.Pool, tenant_id: UUID, account_id: UUID, *, snapshots: SnapshotRepository
 ) -> list[PositionSnapshotView]:
-    """`quantity != 0`인 열린 포지션 전체. 없으면 빈 리스트
-    (`SnapshotRepository.list_open` 계약 그대로)."""
+    """All open positions with `quantity != 0`. An empty list if none
+    (unchanged `SnapshotRepository.list_open` contract)."""
     async with pool.acquire() as conn:
         return await snapshots.list_open(conn, tenant_id, account_id)
 
@@ -168,9 +177,10 @@ async def list_journal(
     snapshots: SnapshotRepository,
     journal: PositionJournalRepository,
 ) -> tuple[list[PositionJournalEntryView], int | None]:
-    """LB-19 `GET /positions/{key}/journal` — `sequence_no > after_seq`부터
-    최대 `limit`건과, 더 있으면 다음 커서(마지막 `sequence_no`), 없으면 None.
-    스냅샷 소유 확인이 먼저다(저널 포트는 tenant를 모른다)."""
+    """LB-19 `GET /positions/{key}/journal` — up to `limit` entries starting
+    from `sequence_no > after_seq`, plus the next cursor (last `sequence_no`)
+    if there are more, or None otherwise. Snapshot ownership is verified
+    first (the journal port does not know about tenants)."""
     if limit < 1:
         raise ValueError("limit는 1 이상이어야 합니다.")
     async with pool.acquire() as conn:
@@ -185,8 +195,8 @@ async def list_journal(
 async def get_nav(
     pool: asyncpg.Pool, account_id: UUID, nav_date: date, *, nav_repo: NavRepository
 ) -> NAVSnapshot | None:
-    """해당 일자 NAV. 아직 산출되지 않았으면 `None`
-    (`NavRepository.get` 계약 그대로)."""
+    """NAV for the given date. `None` if not yet computed (unchanged
+    `NavRepository.get` contract)."""
     async with pool.acquire() as conn:
         return await nav_repo.get(conn, account_id, nav_date)
 
@@ -200,9 +210,9 @@ async def list_nav_range(
     end_date: date,
     nav_repo: NavRepository,
 ) -> list[NAVSnapshot]:
-    """LB-19 `GET /positions/nav` — `[start_date, end_date]` 일별 NAV 체인을
-    오름차순으로. 아직 산출되지 않은 날은 행이 없다(0으로 채우지 않는다 —
-    호출자가 빠진 날짜를 그대로 드러낸다)."""
+    """LB-19 `GET /positions/nav` — the daily NAV chain over
+    `[start_date, end_date]`, ascending. A day not yet computed has no row
+    (not zero-filled — the caller sees the missing date as-is)."""
     if end_date < start_date:
         raise NavRangeInvalidError("end_date가 start_date보다 앞섭니다.")
     if (end_date - start_date).days + 1 > MAX_NAV_RANGE_DAYS:
