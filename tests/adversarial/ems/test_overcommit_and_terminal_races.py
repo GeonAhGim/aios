@@ -426,7 +426,7 @@ async def test_many_concurrent_algo_runs_stay_within_latency_budget(pool, perf_b
     sample = await perf_budget.sample_async(
         lambda: asyncio.gather(*[_tick(plan, pool, repo, _Submitter(), now) for plan in plans])
     )
-    results = sample.result  # type: ignore[misc]
+    results: list = sample.result  # pyright: reportAny
 
     assert all(r.outcomes[0].order is not None for r in results)
     budget_ms = 20_000  # 20 s wall-clock, same threshold as before
