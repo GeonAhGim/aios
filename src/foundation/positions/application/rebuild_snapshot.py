@@ -1,33 +1,38 @@
-"""LB-13 — 저널 전체 fold로 스냅샷을 재구축하는 운영 도구(application/rebuild_snapshot).
+"""LB-13 — Operational tool to rebuild the snapshot by folding the entire journal (application/rebuild_snapshot).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §9 LB-13,
-§4.3 "스냅샷 = fold(저널)" 불변.
+§4.3 invariant "snapshot = fold(journal)".
 
-`record_fill`/`record_funding_fee`(LB-11/13)와 달리 이미 열린 트랜잭션
-`conn`을 받지 않는다 — 이 함수 자체가 하나의 독립된 운영 작업(스펙 §9
-표의 시그니처가 `conn` 대신 `pool`을 받는 이유)이라 자기 트랜잭션을 연다.
-`position_key` advisory lock([[record_fill]]과 같은 네임스페이스)을 잡아
-그 사이 `record_fill`/`record_funding_fee`가 같은 포지션에 새 엔트리를
-append하지 못하게 막은 채로 읽는다 — 그래야 "저널 전체를 읽는 시점"과
-"fold 결과를 쓰는 시점" 사이에 락이 없어 생기는 경쟁(그 사이 도착한 새
-엔트리가 재빌드 결과에 반영되지 않거나, 반대로 재빌드가 새 엔트리를
-덮어쓰는 것)이 없다.
+Unlike `record_fill`/`record_funding_fee`(LB-11/13), this function does not
+accept an already-open transaction `conn` — it opens its own transaction
+because the function itself is a self-contained operational task (the reason
+the signature in §9 table takes `pool` instead of `conn`). It acquires a
+`position_key` advisory lock (same namespace as [[record_fill]]) and reads
+while preventing `record_fill`/`record_funding_fee` from appending new
+entries for the same position — eliminating the race condition that would
+arise without the lock between "the point of reading the full journal" and
+"the point of writing the fold result" (new entries arriving in between
+would not be reflected in the rebuild result, or the rebuild would
+overwrite new entries).
 
-`pos_journal`은 절대 쓰지 않는다(WORM) — 이 리프가 만지는 테이블은
-`pos_snapshot` 하나뿐이고, 그마저도 `snapshots.upsert`의 조건부
-UPDATE(`expected_seq`)로만 쓴다. `dry_run=True`(기본값)면 drift만 보고하고
-쓰지 않는다 — 운영자가 먼저 dry-run으로 drift를 확인한 뒤에만 실제로
-반영하라는 §9 DoD("재빌드 drift ∅") 의도를 그대로 따른다. drift가 없으면
-`dry_run=False`라도 쓰지 않는다(불필요한 쓰기·`updated_at` 갱신을 피한다).
+`pos_journal` is never written to (WORM) — this leaf touches only the
+`pos_snapshot` table, and even then only via conditional UPDATE on
+`snapshots.upsert` (`expected_seq`). When `dry_run=True` (default), it
+reports drift without writing — following the §9 DoD ("rebuild drift ∅")
+intent that operators first verify drift via dry-run before applying it
+for real. When there is no drift, it does not write even if `dry_run=False`
+(to avoid unnecessary writes and `updated_at` refresh).
 
-`asset_class`는 [[record_fill]]과 같은 이유로 인자다 — `pos_snapshot`에
-저장할 곳이 없어 호출자가 넘겨야 한다(스펙 §9 표의 축약 시그니처에는
-없지만, `record_fill`이 이미 같은 이유로 벗어난 전례를 따른다).
+`asset_class` is an argument for the same reason as [[record_fill]] — there
+is no place to store it in `pos_snapshot`, so the caller must pass it
+(not absent from the abbreviated signature in §9 table, but following the
+precedent that `record_fill` already broke for the same reason).
 
-원가법 재적용·펀딩/수수료 누적 규칙은 재구현하지 않는다 —
-`snapshot_builder.fold`(LB-5, `functools.reduce(apply_one, ...)`)가 유일한
-"진실 계산" 경로다.
+Cost-method recalculation and funding/fee accumulation rules are not
+re-implemented — `snapshot_builder.fold`(LB-5, `functools.reduce(apply_one,
+...)`) is the sole "truth computation" path.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -50,14 +55,15 @@ _LOCK_NAMESPACE = "pos_journal"
 
 
 class UnknownPositionError(Exception):
-    """`POS_ACCOUNT_UNKNOWN` — `position_key`에 대응하는 `pos_snapshot` 행이
-    없다. 저널만으로는 `tenant_id`/`account_id`/`instrument_id`/`base_currency`
-    같은 계좌 정적 컨텍스트를 복원할 수 없으므로([[snapshot_builder.
-    SnapshotFold]] docstring) 재빌드도 기존 스냅샷 행을 전제한다. 호출자가
-    넘긴 `tenant_id`가 실제 소유자와 다를 때도 이 예외를 재사용한다
-    ([[record_fill.UnknownPositionError]]와 같은 이유, task-489/LB-18 —
-    `SnapshotRepository.get`이 tenant-scoped로 바뀌며 이 운영 도구도 호출자가
-    `tenant_id`를 알고 있어야 한다는 전제가 새로 생겼다)."""
+    """`POS_ACCOUNT_UNKNOWN` — no `pos_snapshot` row corresponds to the
+    `position_key`. Journal entries alone cannot restore account static
+    context such as `tenant_id`/`account_id`/`instrument_id`/`base_currency`
+    ([[snapshot_builder.SnapshotFold]] docstring), so rebuild also assumes
+    an existing snapshot row. This exception is also reused when the
+    `tenant_id` passed by the caller differs from the actual owner
+    (same reason as [[record_fill.UnknownPositionError]], task-489/LB-18 —
+    `SnapshotRepository.get` became tenant-scoped, imposing a new premise
+    that the caller must know the `tenant_id`)."""
 
     def __init__(self, position_key: str) -> None:
         super().__init__(f"알 수 없는 position_key(스냅샷 없음): {position_key!r}")
