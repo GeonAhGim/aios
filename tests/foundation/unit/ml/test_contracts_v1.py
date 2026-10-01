@@ -98,3 +98,39 @@ def test_model_card_rejects_unknown_field() -> None:
 def test_feature_spec_rejects_blank_feature_id() -> None:
     with pytest.raises(ValidationError):
         FeatureSpec(feature_id="  ", dtype="float", source_ref="parquet://features/v1")
+
+
+# --- failure injection ---
+
+
+def test_model_card_validates_hash_via_mocked_validator_raises_error() -> None:
+    """Inject a dependency exception inside the model_hash validator to confirm
+    the test harness can surface unexpected errors from pydantic field validators.
+
+    We patch ``src.foundation.ml.contracts.v1._validate_sha256_hex`` so it raises
+    ``RuntimeError`` instead of returning the string; ``ModelCard`` construction
+    must propagate that exception (not swallow it into ``ValidationError``).
+    """
+    from unittest.mock import patch
+
+    def _inject_error(value: str) -> str:
+        raise RuntimeError("mocked validator failure")
+
+    with patch("src.foundation.ml.contracts.v1._validate_sha256_hex", side_effect=_inject_error):
+        with pytest.raises(RuntimeError, match="mocked validator failure"):
+            _model_card(model_hash="a" * 64)
+
+
+# --- performance ---
+
+
+@pytest.mark.perf
+def test_model_card_construction_throughput(perf_budget) -> None:
+    """ModelCard construction (valid path) must stay under 1 ms CPU per call
+    at batch=100, confirming that the Pydantic v1 schema does not regress
+    into O(n) validation loops."""
+
+    def construct() -> ModelCard:
+        return _model_card()
+
+    perf_budget.assert_within(construct, budget_ms=1.0, n=5, batch=100)
