@@ -5,7 +5,6 @@ Spec: AIOSproject #79 §3."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -177,17 +176,23 @@ async def test_repo_failure_propagates_without_being_swallowed():
 
 
 @pytest.mark.perf
-async def test_get_audit_timeline_orchestration_throughput():
+async def test_get_audit_timeline_orchestration_throughput(perf_budget):
     """Pure orchestration overhead (limit clamp + view mapping, repo I/O
     excluded via in-memory fake) for 500 sequential calls stays well under a
-    1s budget — guards against an accidental regression on the read path."""
+    1s budget — guards against an accidental regression on the read path.
+
+    task-10972: raw time.perf_counter() 단언 -> perf_budget.sample_async()로 전환."""
     repo = FakeAuditEventRepository(events=[_event()])
     tenant_id = uuid4()
 
-    start = time.perf_counter()
-    for _ in range(500):
-        await get_audit_timeline(repo, tenant_id=tenant_id)
-    elapsed = time.perf_counter() - start
+    async def _run_500() -> None:
+        for _ in range(500):
+            await get_audit_timeline(repo, tenant_id=tenant_id)
 
-    assert elapsed < 1.0
+    sample = await perf_budget.sample_async(_run_500)
+
+    assert sample.wall_ms < 1000, (
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<1000ms "
+        f"500 sequential get_audit_timeline calls"
+    )
     assert len(repo.calls) == 500
