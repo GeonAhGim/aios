@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-import time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
@@ -80,9 +79,11 @@ def _checkerboard(
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_backfill_job_meets_latency_budget_with_many_disjoint_gaps() -> None:
+async def test_backfill_job_meets_latency_budget_with_many_disjoint_gaps(
+    perf_budget,
+) -> None:
     n_gaps = 250
-    budget_sec = 5.0  # 실측 로컬 <1s, CI 편차 감안
+    budget_ms = 5_000.0  # 실측 로컬 <1s, CI 편차 감안 — PerfBudget은 ms 기준
 
     async def _run_once() -> None:
         start, end, covered_spans, answers = _checkerboard(n_gaps)
@@ -96,13 +97,9 @@ async def test_backfill_job_meets_latency_budget_with_many_disjoint_gaps() -> No
     # Warmup iteration (not counted)
     await _run_once()
 
-    samples = []
-    for _ in range(7):
-        t0 = time.perf_counter()
-        await _run_once()
-        samples.append(time.perf_counter() - t0)
-    samples.sort()
-    elapsed = samples[len(samples) // 2]
+    samples = [await perf_budget.sample_async(_run_once) for _ in range(7)]
+    samples.sort(key=lambda s: s.wall_ms)
+    elapsed_ms = samples[len(samples) // 2].wall_ms
 
     # Final run to capture result for assertions
     start, end, covered_spans, answers = _checkerboard(n_gaps)
@@ -113,17 +110,21 @@ async def test_backfill_job_meets_latency_budget_with_many_disjoint_gaps() -> No
     provider = _FakeProvider(answers)
     result = await _run(provider, store, coverage_repo, range_start=start, range_end=end)
 
-    print(f"[DC-16 backfill_job] {n_gaps}개 분리 갭 처리 {elapsed:.4f}s (budget<{budget_sec}s)")
+    elapsed_sec = elapsed_ms / 1000
+    budget_sec = budget_ms / 1000
+    print(f"[DC-16 backfill_job] {n_gaps}개 분리 갭 처리 {elapsed_sec:.4f}s (budget<{budget_sec}s)")
     assert result.gaps_planned == n_gaps
     assert len(provider.calls) == n_gaps  # 갭당 정확히 한 번 -- 재조회/중복fetch 없음
-    assert elapsed < budget_sec, (
-        f"{n_gaps}개 갭 처리가 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    assert elapsed_ms < budget_ms, (
+        f"{n_gaps}개 갭 처리가 예산({budget_sec:.1f}s)을 넘었습니다({elapsed_sec:.4f}s)."
     )
 
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_backfill_job_scales_sub_quadratically_with_gap_count() -> None:
+async def test_backfill_job_scales_sub_quadratically_with_gap_count(
+    perf_budget,
+) -> None:
     """`merged` 커버리지 재계산(`merge_spans([*merged, new])`)가 갭마다
     이미 합쳐진 전체 목록을 다시 스캔하므로 이론상 O(갭^2)로 퇴화할 수
     있다. 갭 수를 4배로 늘렸을 때 처리 시간이 넉넉한 여유배수(12배)를
@@ -142,22 +143,22 @@ async def test_backfill_job_scales_sub_quadratically_with_gap_count() -> None:
 
         # Warmup and median of 7 samples
         await _run_once()
-        samples = []
-        for _ in range(7):
-            t0 = time.perf_counter()
-            await _run_once()
-            samples.append(time.perf_counter() - t0)
-        samples.sort()
-        return samples[len(samples) // 2]
+        samples = [await perf_budget.sample_async(_run_once) for _ in range(7)]
+        samples.sort(key=lambda s: s.wall_ms)
+        return samples[len(samples) // 2].wall_ms
 
     small = await _time_for(60)
     large = await _time_for(240)  # 4배
 
-    print(f"[DC-16 backfill_job] scaling: 60 gaps={small:.4f}s, 240 gaps={large:.4f}s")
-    ratio_budget = max(small * 12.0, 0.5)
+    small_sec = small / 1000
+    large_sec = large / 1000
+    ratio_budget = max(small * 12.0, 500.0)
+    ratio_budget_sec = ratio_budget / 1000
+    print(f"[DC-16 backfill_job] scaling: 60 gaps={small_sec:.4f}s, 240 gaps={large_sec:.4f}s")
     assert large < ratio_budget, (
         f"gap 4배 증가에 처리시간이 {large / max(small, 1e-6):.1f}배로 늘었습니다"
-        f"(이차 퇴화 의심: small={small:.4f}s, large={large:.4f}s, budget<{ratio_budget:.4f}s)."
+        f"(이차 퇴화 의심: small={small_sec:.4f}s, "
+        f"large={large_sec:.4f}s, budget<{ratio_budget_sec:.4f}s)."
     )
 
 
