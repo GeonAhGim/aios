@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import AsyncMock
+
+import pytest
 
 from src.core.observability.metrics_registry import MetricsRegistry
-from src.foundation.market_data.application.quality_metrics import export_quality_metrics
+from src.foundation.market_data.application.quality_metrics import _ratio, export_quality_metrics
 from src.foundation.market_data.application.scheduler import (
     MarketDataQualityScheduler,
     WatchedSeries,
@@ -20,6 +23,7 @@ from src.foundation.market_data.contracts.v1 import (
     Timeframe,
     Venue,
 )
+from tests.conftest import PerfBudget
 from tests.foundation.integration.market_data.quality_metrics_helpers import (
     _candle,
     _clock,
@@ -195,3 +199,128 @@ async def test_scheduler_run_once_isolates_ingest_failure_and_exports_metrics(de
 # 적색 재현 없음; 적대적/replay/동시성 증명 없음)을 채운다. ---
 
 
+# --- DEEPEN task-10513 — D3 하한 미달(negative>=3/실패주입/성능) 보강.
+# 새 기능 없음, 기존 동작의 깊이 증빙만 추가한다. ---
+
+
+def test_ratio_zero_denominator_returns_zero_instead_of_raising():
+    """negative: `record_count`가 0인(이번 주기 batch가 전혀 없는) 시계열에
+    대해 `_ratio`가 `ZeroDivisionError`를 던지지 않고 안전하게 0을 반환해야
+    한다 — `_export_one`은 `latest is None`일 때 바로 이 경로를 탄다."""
+    assert _ratio(0, 0) == Decimal("0")
+
+
+def test_ratio_negative_denominator_returns_zero_instead_of_negative_ratio():
+    """negative: 입력 모델상 음수 분모는 나와서는 안 되는 값이지만, 방어적
+    분기(`denominator <= 0`)가 음수 분모에도 음수/예외 대신 0을 반환함을
+    고정한다(0 분모 분기와 다른 코드 경로)."""
+    assert _ratio(3, -1) == Decimal("0")
+
+
+def test_ratio_positive_denominator_still_divides_normally():
+    """negative 대조군: 방어적 분기가 정상 분모 경로를 건드리지 않는지
+    확인한다 — 0/음수 분모 전용 분기가 아니라면 있는 그대로 나눠야 한다."""
+    assert _ratio(1, 4) == Decimal("1") / Decimal("4")
+
+
+def test_scheduler_rejects_watched_series_without_ingest_source():
+    """negative: `watched`가 비어있지 않은데 `source`가 없으면 ingest를 할
+    방법이 없다 — 생성자가 즉시 `ValueError`로 막아야 한다(조용히 받아들여
+    `run_once()`에서 `AssertionError`로 늦게 터지면 안 된다)."""
+    with pytest.raises(ValueError, match="source"):
+        MarketDataQualityScheduler(
+            AsyncMock(),
+            store=AsyncMock(),
+            refs=AsyncMock(),
+            cal=AsyncMock(),
+            batches=AsyncMock(),
+            registry=MetricsRegistry(),
+            source=None,
+            audit=AsyncMock(),
+            watched=[
+                WatchedSeries(venue=Venue.BITGET, canonical_symbol="X", timeframe=Timeframe.M1)
+            ],
+        )
+
+
+def test_scheduler_rejects_watched_series_without_audit_appender():
+    """negative: `source`는 있지만 `audit`이 없는 조합도 같은 생성자 가드가
+    막아야 한다 — 두 의존성이 함께(AND) 필요하다는 불변식의 다른 경로."""
+    with pytest.raises(ValueError, match="audit"):
+        MarketDataQualityScheduler(
+            AsyncMock(),
+            store=AsyncMock(),
+            refs=AsyncMock(),
+            cal=AsyncMock(),
+            batches=AsyncMock(),
+            registry=MetricsRegistry(),
+            source=AsyncMock(),
+            audit=None,
+            watched=[
+                WatchedSeries(venue=Venue.BITGET, canonical_symbol="X", timeframe=Timeframe.M1)
+            ],
+        )
+
+
+async def test_export_quality_metrics_isolates_batches_get_dependency_failure(deps):
+    """실패 주입: `batches.get()`(의존 포트) 호출이 예외를 던져도
+    `export_quality_metrics`는 크래시하지 않고 해당 시계열만 스킵해야 한다
+    (§9 LA-18 DoD "실패가 나머지를 막지 않는다"를 store가 아니라 batches
+    의존성 경로에서 재현 — 기존 `_FlakyCandleStore`는 store 경로만 다룬다)."""
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    candles = [_candle(t0, "100", "110", "90", "105", "10")]
+    await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
+
+    original_get = deps.batches.get
+    deps.batches.get = AsyncMock(side_effect=ConnectionError("injected batches.get failure"))
+    try:
+        registry = MetricsRegistry()
+        results = await export_quality_metrics(
+            batches=deps.batches,
+            store=deps.store,
+            cal=deps.cal,
+            pool=deps.pool,
+            registry=registry,
+            clock=_clock(t0 + timedelta(minutes=5)),
+        )
+    finally:
+        deps.batches.get = original_get
+
+    result_ids = {m.key.instrument_id for m in results}
+    assert instrument.instrument_id not in result_ids, (
+        "batches.get() 의존성 예외는 해당 시계열을 결과에서 제외해야 한다(크래시 아님)"
+    )
+
+
+@pytest.mark.perf
+async def test_export_quality_metrics_single_series_meets_latency_budget(
+    deps, perf_budget: PerfBudget
+) -> None:
+    """성능 단언(raw 타이머 금지, `perf_budget` 픽스처만 사용): 활성 시계열
+    1건에 대한 `export_quality_metrics` 1회 왕복이 넉넉한 절대 예산 내여야
+    한다 — 공유 TEST_DATABASE_URL이 자라도 안정적인 상한을 위해 느슨한
+    예산(여러 쿼리 round-trip 감안 1건당 1s)을 쓴다."""
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    candles = [_candle(t0, "100", "110", "90", "105", "10")]
+    await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
+
+    later = t0 + timedelta(minutes=5)
+    registry = MetricsRegistry()
+
+    sample = await perf_budget.sample_async(
+        lambda: export_quality_metrics(
+            batches=deps.batches,
+            store=deps.store,
+            cal=deps.cal,
+            pool=deps.pool,
+            registry=registry,
+            clock=_clock(later),
+        )
+    )
+
+    budget_ms = 1000.0
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+    result_ids = {m.key.instrument_id for m in sample.result}
+    assert instrument.instrument_id in result_ids
