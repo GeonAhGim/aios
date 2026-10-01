@@ -1,10 +1,10 @@
-"""StartValidation 커맨드 — 76번 §4. `strategy_builder.py` 라우터 편차 3
-주석이 예고한 "백테스트/검증 파이프라인이 생기면 내부 호출 경로로
-transition_lifecycle()에 연결"을 실제로 구현한다.
+"""StartValidation command — spec #76 §4. Implements what the `strategy_builder.py`
+router-deviation-3 comment foretold: "once a backtest/validation pipeline exists,
+wire it to transition_lifecycle() via an internal call path."
 
-이 함수가 유일하게 BACKTESTING -> VALIDATING 전이를 트리거할 수 있는
-경로다 — 사용자가 그 전이를 직접 호출할 방법은 여전히 없다(라우터
-편차 3 그대로 유지, 이 커맨드가 대신 내부에서 호출).
+This function is the only path that can trigger the BACKTESTING -> VALIDATING
+transition — there is still no way for a user to call that transition directly
+(router deviation 3 stays as-is; this command invokes it internally instead).
 """
 
 from __future__ import annotations
@@ -44,27 +44,28 @@ from src.services.strategy_builder_service import (
 logger = logging.getLogger(__name__)
 
 CHECK_TYPE = "backtest"
-"""76번 §3의 6개 체크 중 지금 FND-10이 실제로 계산 가능한 것 하나만 —
-migration 3b244535b311 docstring 참조."""
+"""Of the 6 checks in spec #76 §3, only the one FND-10 can actually compute
+right now — see migration 3b244535b311's docstring."""
 
 
 class StrategyNotEligibleForValidationError(Exception):
-    """전략이 BACKTESTING 상태가 아니거나(9.9 절대원칙 순서 위반), 소유자가
-    아니다."""
+    """Raised when the strategy is not in BACKTESTING state (violates the
+    9.9 absolute-principle ordering), or the caller is not the owner."""
 
 
 class ValidationAlreadyInProgressError(Exception):
-    """STR-007 "duplicate StartValidation uses one operation" — 동시에 들어온
-    같은 정확한 요청 중 하나만 실제로 실행되고, 나머지는 그 실행이 아직
-    끝나지 않은 상태에서 이 예외를 받는다(호출부가 409로 안내, 잠시 후
-    재시도하면 완료된 결과를 그대로 받는다)."""
+    """STR-007 "duplicate StartValidation uses one operation" — of concurrent
+    requests with the exact same input, only one actually executes; the
+    others receive this exception while that execution is still in flight
+    (the caller surfaces it as a 409; retrying shortly after returns the
+    completed result as-is)."""
 
 
 def _run_to_view(
     run: ValidationRun,
     result: ValidationResult | None,
 ) -> ValidationResultView:
-    assert run.created_at is not None  # DB에서 온 run은 항상 NOT NULL(마이그레이션 보장)
+    assert run.created_at is not None  # run from DB is always NOT NULL (migration-guaranteed)
     return ValidationResultView(
         run_id=run.id,
         strategy_id=run.strategy_id,
@@ -116,12 +117,13 @@ async def start_validation(
         bars=bars,
     )
 
-    # STR-001/STR-007 — 같은 정확한 입력이면 재실행하지 않고 기존 결과를 그대로
-    # 반환한다(멱등성). 이 조회를 아래 BACKTESTING 상태 검사보다 먼저 하는 게
-    # 중요하다 — 이미 성공해서 전략이 VALIDATING으로 넘어간 뒤에 같은 요청이
-    # 다시 오면(네트워크 재시도 등), 상태 검사를 먼저 하면 "이제 BACKTESTING이
-    # 아니다"로 거부돼버려 진짜 멱등성이 깨진다. 캐시를 못 찾았을 때만
-    # "새로 만들려는 시도"로 보고 상태를 검사한다.
+    # STR-001/STR-007 — for the exact same input, don't re-run; return the existing
+    # result instead (idempotency). It matters that this lookup happens before the
+    # BACKTESTING state check below — if the same request arrives again after the
+    # strategy already succeeded and moved to VALIDATING (e.g. a network retry),
+    # checking state first would reject it as "no longer BACKTESTING", breaking
+    # true idempotency. Only when the cache lookup misses do we treat this as a
+    # genuine new attempt and check state.
     existing_run = await validation_repo.get_run_by_snapshot(
         command.strategy_id, command.strategy_version, CHECK_TYPE, snapshot_hash
     )
@@ -147,14 +149,15 @@ async def start_validation(
             initial_equity=command.initial_equity,
         )
     except ConcurrencyConflictError as exc:
-        # 위 get_run_by_snapshot 조회와 이 create_run 사이에 다른 요청이 먼저
-        # 같은 입력으로 run을 만들었다(105번 §2.2 "스키마 UNIQUE 제약이 단일
-        # 소유자를 보장"). 그 run이 이미 끝났으면 결과를 그대로 돌려주고,
-        # 아직 진행 중이면 "잠시 후 다시 시도" 신호를 준다.
+        # Between the get_run_by_snapshot lookup above and this create_run, another
+        # request already created a run with the same input (spec #105 §2.2 "the
+        # schema's UNIQUE constraint guarantees a single owner"). If that run has
+        # already finished, return its result as-is; if it's still in progress,
+        # signal "retry shortly".
         winner = await validation_repo.get_run_by_snapshot(
             command.strategy_id, command.strategy_version, CHECK_TYPE, snapshot_hash
         )
-        if winner is None:  # pragma: no cover — UNIQUE 위반이 났다면 반드시 존재해야 함
+        if winner is None:  # pragma: no cover — must exist if a UNIQUE violation occurred
             raise
         winner_result = await validation_repo.get_result_for_run(winner.id)
         if winner_result is None:
@@ -219,9 +222,10 @@ async def start_validation(
     completed_run, saved_result = await validation_repo.complete_with_result(run.id, result)
 
     if outcome in (DomainOutcome.PASS, DomainOutcome.PASS_WITH_OBLIGATIONS):
-        # 76번 §2 "Only a successful required validation bundle can create
-        # PAPER_ELIGIBLE" — 지금 스콥에선 그 다음 생애주기 단계(VALIDATING)로
-        # 전이시키는 것으로 대체한다(마이그레이션 docstring 참조).
+        # spec #76 §2 "Only a successful required validation bundle can create
+        # PAPER_ELIGIBLE" — within the current scope, this is replaced by
+        # transitioning to the next lifecycle stage (VALIDATING) instead (see
+        # the migration docstring).
         await strategy_service.transition_lifecycle(
             command.strategy_id, command.strategy_version, "VALIDATING"
         )
