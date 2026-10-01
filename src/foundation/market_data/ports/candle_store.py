@@ -34,7 +34,14 @@ class CandleStore(Protocol):
         NOTHING` — returns the count of actually inserted rows (0 on retry
         is not an error). `tenant_id` (F1(M), task-10465) is stored alongside
         each row since `md_candle` is WORM and cannot be updated afterward;
-        `None` means platform-shared data, not "unknown"."""
+        `None` means platform-shared data, not "unknown".
+
+        F8(M): callers MUST compare this return value against the number of
+        candles they attempted to insert — a lower count means some rows
+        already existed (e.g. a concurrently committed batch for the same
+        key) and were silently skipped by `DO NOTHING`. Discarding this
+        value lets the caller's audit trail claim a store outcome that never
+        happened (see `application/ingest_candles.py` F8 fix)."""
         ...
 
     async def quarantine(

@@ -296,7 +296,40 @@ async def ingest_candles(
             # UPDATE after INSERT, so tenant_id must be set here. `tenant_id` is an
             # optional kwarg defaulting to None, so existing direct callers of
             # `upsert_batch` (~15 test/backfill call sites) are unaffected.
-            await store.upsert_batch(conn, batch_id, good, tenant_id=cmd.tenant_id)
+            inserted_count = await store.upsert_batch(conn, batch_id, good, tenant_id=cmd.tenant_id)
+            # F8(M) -- `upsert_batch` uses `ON CONFLICT DO NOTHING`, so a candle
+            # that already exists (written by a concurrently committed batch for
+            # the same (venue, instrument_id, timeframe, open_time)) is silently
+            # skipped. The verdict computed above only reflects this batch's own
+            # quality gate, not what actually landed in `md_candle` -- without
+            # this check the audit event and `IngestBatchResult.verdict.accepted`
+            # would claim every "good" candle was stored even when some were
+            # dropped. The first audit event stays WORM-intact; a second,
+            # additive event records the real outcome when it diverges, and the
+            # returned result is corrected to the actual inserted count.
+            if inserted_count != len(good):
+                conflict_payload: dict[str, object] = {
+                    "batch_id": str(batch_id),
+                    "accepted_planned": len(good),
+                    "accepted_actual": inserted_count,
+                    "conflicted": len(good) - inserted_count,
+                }
+                assert_safe_payload(conflict_payload)
+                await audit.append_event_in(
+                    conn,
+                    tenant_id=cmd.tenant_id,
+                    aggregate_type="md_ingest_batch",
+                    aggregate_id=batch_id,
+                    aggregate_revision=None,
+                    action="market_data.candles_ingest_conflict",
+                    outcome=Outcome.DENIED,
+                    actor_subject_id=None,
+                    trace_id=cmd.trace_id,
+                    payload_hash=compute_payload_hash(conflict_payload),
+                    payload=conflict_payload,
+                    classification=Classification.INTERNAL,
+                )
+            created.verdict.accepted = inserted_count
         if quarantine_candles:
             await store.quarantine(conn, batch_id, quarantine_candles, all_issues)
         await batches.add_issues(conn, batch_id, all_issues)

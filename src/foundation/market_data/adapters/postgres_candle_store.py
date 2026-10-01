@@ -136,6 +136,9 @@ class PostgresCandleStore:
             "RETURNING open_time",
             *params,
         )
+        # F8(M) -- this count is the only signal a caller has that some of
+        # `candles` already existed and were dropped by `DO NOTHING`; see the
+        # docstring above and `application/ingest_candles.py`'s use of it.
         return len(rows)
 
     async def quarantine(

@@ -127,6 +127,55 @@ async def test_ingest_quarantines_duplicate_conflict_candles(pool, deps):
     assert quarantined >= 1
 
 
+async def test_ingest_cross_batch_conflict_corrects_accepted_and_audits_it(pool, deps):
+    """[health:audit_correction] task-10568 F8(M) — AUDIT_2026-10-01_data_ingest_replay.md
+    §4 F8. 같은 (venue, instrument_id, timeframe, open_time)을 두 ingest 호출이 건드리면
+    (백필·실시간 경쟁 상황 재현), 늦게 들어오는 호출은 `upsert_batch`의
+    `ON CONFLICT DO NOTHING`에 의해 실제로는 0행 삽입이다. 수정 전에는 이 반환값이
+    버려져 `IngestBatchResult.verdict.accepted`가 자기 배치의 품질 판정(1)만 보고
+    ACCEPT/accepted=1로 기록됐다 — 실제 저장 결과(0행)와 감사 기록이 어긋났다(negative
+    재현). 수정 후에는 `accepted`가 실제 삽입 행수(0)와 일치해야 하고, 그 불일치를
+    별도의 추가 감사 이벤트(`market_data.candles_ingest_conflict`)로 사실대로 남겨야
+    한다(원래 이벤트는 WORM이라 그대로 두고, 추가 이벤트로 진실을 보강한다).
+    """
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    candle = _candle(t0, "100", "110", "90", "105", "10")
+    cmd = _cmd(instrument, t0, t0 + timedelta(minutes=1))
+
+    first = await _run(deps, cmd, _FakeIngestSource([candle]), clock_at=t0)
+    assert first.verdict.verdict == Verdict.ACCEPT
+    assert first.verdict.accepted == 1
+
+    second = await _run(deps, cmd, _FakeIngestSource([candle]), clock_at=t0)
+
+    assert second.batch_id != first.batch_id
+    assert second.verdict.accepted == 0, (
+        "두 번째 호출의 캔들은 자기 배치 품질 판정만 보면 ACCEPT·accepted=1이지만, "
+        "DB에는 첫 번째 배치가 이미 같은 키로 저장해 둔 행이 있어 실제 삽입은 0행이다 "
+        "-- 보고되는 accepted는 실제 삽입 결과와 일치해야 한다"
+    )
+    async with pool.acquire() as conn:
+        stored_for_second_batch = await conn.fetchval(
+            "SELECT COUNT(*) FROM md_candle WHERE batch_id = $1", second.batch_id
+        )
+        conflict_events = await conn.fetchval(
+            "SELECT COUNT(*) FROM foundation_audit_event "
+            "WHERE aggregate_id = $1 AND action = 'market_data.candles_ingest_conflict'",
+            second.batch_id,
+        )
+        original_events = await conn.fetchval(
+            "SELECT COUNT(*) FROM foundation_audit_event "
+            "WHERE aggregate_id = $1 AND action = 'market_data.candles_ingested'",
+            second.batch_id,
+        )
+    assert stored_for_second_batch == 0
+    assert conflict_events == 1, (
+        "실제 저장 결과와 품질 판정이 어긋나면 보강 감사 이벤트가 남아야 한다"
+    )
+    assert original_events == 1, "원래 WORM 감사 이벤트는 그대로 유지된다(사후 수정 아님)"
+
+
 async def test_ingest_quarantines_ohlc_violation_candle_and_stores_rest(pool, deps):
     instrument = await _listed_instrument(deps)
     t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
