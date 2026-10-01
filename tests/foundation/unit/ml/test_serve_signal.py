@@ -12,7 +12,6 @@ is scoped to `serve_signal`'s own composition/guard logic.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Iterable, Iterator, Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -25,6 +24,7 @@ from src.foundation.ml.application import serve_signal_batch as ssb
 from src.foundation.ml.contracts.v1 import FeatureSpec, ModelCard, TrainDataLineage
 from src.foundation.ml.domain.point_in_time import FutureDataLeakageError
 from src.foundation.ml.ports.feature_store import FeatureValue
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -368,17 +368,18 @@ async def test_check_signal_equivalence_raises_when_the_cache_returns_a_stale_da
 
 
 @pytest.mark.perf
-async def test_serve_signal_latency_p99_within_budget() -> None:
+async def test_serve_signal_latency_p99_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1's per-axis performance budget table has
     no ML-signal-serving row -- mirrors `tests/unit/core/indicators/
     test_engine_equivalence.py::test_incremental_update_latency_p99_within_
     streaming_budget`'s approach of setting a local budget from a real
-    measurement with generous CI headroom. `serve_signal` here does one
-    dict lookup (fake registry), one list scan of a single-row partition
-    (fake store), and one multiply-add (linear predictor) -- no real disk
-    or network I/O -- so 1ms is ~50x the observed local per-call latency
-    (~20us), leaving headroom for slower CI hardware and asyncio scheduling
-    jitter."""
+    measurement with generous CI headroom.
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환 (task-10995).
+    비동기 I/O 전용 (coverage tracer-pause + wall_ms 보존). 예산 값(1ms)은
+    그대로 유지한다."""
     registry = _FakeModelRegistry({("momentum-lgbm", "v1"): _card()})
     store = _FakeFeatureStore()
     n = 2000
@@ -391,22 +392,25 @@ async def test_serve_signal_latency_p99_within_budget() -> None:
         )
     predictor = _LinearPredictor({"rsi_14": 1.0})
 
-    samples = [0.0] * n
-    for i, as_of in enumerate(as_of_dates):
-        start = time.perf_counter()
+    _state: list[int] = [0]
+
+    async def _serve_once() -> None:
+        i = _state[0]
         await ss.serve_signal(
             model_id="momentum-lgbm",
             version="v1",
             entity_id="BTC-USD",
-            as_of=as_of,
+            as_of=as_of_dates[i],
             feature_specs=[_spec("rsi_14")],
             registry=registry,
             feature_store=store,
             predictor=predictor,
         )
-        samples[i] = time.perf_counter() - start
-    samples.sort()
-    p99 = samples[int(n * 0.99)]
-    budget_sec = 1e-3
-    print(f"[AI-21 serve_signal] n={n} p99={p99 * 1e6:.2f}us budget<{budget_sec * 1e6:.0f}us")
-    assert p99 < budget_sec
+        _state[0] += 1
+
+    samples = await perf_budget.samples_async(_serve_once, n=n)
+    wall_us_list = sorted(s.wall_ms * 1000 for s in samples)
+    p99_us = wall_us_list[min(int(n * 0.99), len(wall_us_list) - 1)]
+    budget_us = 1000.0  # 1 ms
+    print(f"[AI-21 serve_signal] n={n} p99={p99_us:.2f}us budget<{budget_us:.0f}us")
+    assert p99_us < budget_us, f"p99 latency {p99_us:.2f}us exceeded {budget_us:.0f}us budget"
