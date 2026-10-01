@@ -1,11 +1,12 @@
 """FD-8.2 — Portfolio allocation decision (PortfolioEngine).
 
-Spec: 기능설계문서_v1.21.md#FD-8.2, 03_core_modules_v1.1.md#§3.6
+Spec: functional_design_doc_v1.21.md#FD-8.2, 03_core_modules_v1.1.md#§3.6
 
 The capital allocation limit is already fixed at FD-16.1 (execution creation time) — this
 class only computes "how much to allocate for this signal" within that limit (not a limit
 reassessment). Phase 1 does not support partial liquidation — SELL always closes the full position.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
