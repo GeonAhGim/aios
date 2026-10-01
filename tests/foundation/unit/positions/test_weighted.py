@@ -133,18 +133,21 @@ def test_apply_lot_model_copy_failure_propagates() -> None:
 
 
 @pytest.mark.perf
-def test_weighted_average_10k_fills_within_budget() -> None:
-    """성능 단언: 10,000회 연속 매수+매도 사이클이 5초 이내야 한다."""
-    import time
+def test_weighted_average_10k_fills_within_budget(perf_budget) -> None:
+    """성능 단언: 10,000회 연속 매수+매도 사이클이 5초 이내야 한다.
 
-    wavg = WeightedAverage()
-    n = 10_000
-    start = time.monotonic()
-    for i in range(n):
-        price = Decimal("100") + Decimal(str(i % 100))
-        wavg.apply(_fill(OrderSide.BUY, "1", str(price)))
-        wavg.apply(_fill(OrderSide.SELL, "1", str(price)))
-    elapsed = time.monotonic() - start
+    raw time.monotonic() → perf_budget.assert_within() 전환(task-11005).
+    """
+
+    def _run() -> None:
+        wavg = WeightedAverage()
+        n = 10_000
+        for i in range(n):
+            price = Decimal("100") + Decimal(str(i % 100))
+            wavg.apply(_fill(OrderSide.BUY, "1", str(price)))
+            wavg.apply(_fill(OrderSide.SELL, "1", str(price)))
+
+    sample = perf_budget.assert_within(_run, budget_ms=5000.0, label="10k_fills")
 
     # D2: 10k 사이클 ≤ 5초 (≈2,000 ops/s)
-    assert elapsed < 5.0, f"10k 사이클이 {elapsed:.2f}초 — 예산 5초 초과"
+    print(f"[weighted] 10k 사이클 {sample.cpu_ms:.0f}ms (budget<5000ms)")
