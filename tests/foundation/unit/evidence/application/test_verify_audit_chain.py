@@ -5,7 +5,6 @@ Spec: AIOSproject #79 §4 SLI "chain verification success"."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -217,13 +216,17 @@ async def test_repository_failure_propagates_without_being_swallowed():
 
 
 @pytest.mark.perf
-async def test_verify_audit_chain_throughput_for_large_chain():
+async def test_verify_audit_chain_throughput_for_large_chain(perf_budget):
     """A 500-link valid chain verifies well under a 1s budget — guards the
-    AUD-003 verification path against an accidental quadratic regression."""
+    AUD-003 verification path against an accidental quadratic regression.
+
+    task-10973: raw time.perf_counter() 단언 → perf_budget.sample_async() 전환.
+    """
     repo = FakeAuditEventRepository(events=_valid_chain(500))
 
-    start = time.perf_counter()
-    await verify_audit_chain(repo, uuid4())
-    elapsed = time.perf_counter() - start
+    sample = await perf_budget.sample_async(lambda: verify_audit_chain(repo, uuid4()))
 
-    assert elapsed < 1.0
+    # budget 1초 = 1000ms (process_time 기준; wall_ms도 함께 기록)
+    assert sample.cpu_ms < 1000, (
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<1000ms"
+    )
