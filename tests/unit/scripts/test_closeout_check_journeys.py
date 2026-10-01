@@ -127,17 +127,18 @@ def test_journeys_pass_when_specs_present_no_fixme_and_journeys_green(tmp_path: 
 # --------------------------------------------------------------------------- real repo
 
 
-def test_journeys_present_against_real_repo_but_fixme_still_open() -> None:
-    """실측 고정: J1~J3 spec 파일 3개는 이미 존재하지만(task-6664/6665/6666
-    선행 작업), 각 파일에 `test.fixme`가 아직 남아 있어 --ci-report 없이도
-    13항은 현재 FAIL이다 -- 회귀 감지용 스냅샷(다른 항목들과 동일한 관례,
-    `test_closeout_check.py`의 "실측 그대로 고정" 원칙)."""
+def test_journeys_present_against_real_repo_without_fixme_but_ci_unverified() -> None:
+    """실측 고정(2026-10-01 갱신): J1~J3 spec 파일 3개가 존재하고 `test.fixme`도 전부
+    제거됐다(J2 실제화 afdd3b758이 마지막). 그래도 --ci-report 없이는 여정 CI 단계
+    (steps.journeys)를 확인할 수 없어 13항은 FAIL이다 -- fixme가 다시 생기면 detail에
+    나타나 이 스냅샷이 깨진다(회귀 감지)."""
     result = cc.check_13_user_journeys(ROOT, ci_report=None)
 
     assert not result.passed
     present, missing = cc._present_missing(ROOT, *cc.JOURNEY_SPECS)
     assert not missing
-    assert "test.fixme" in result.detail
+    assert "test.fixme" not in result.detail
+    assert cc.UNVERIFIED in result.detail
 
 
 def test_run_all_includes_13th_item_last(tmp_path: Path, monkeypatch) -> None:

@@ -223,6 +223,35 @@ async def test_get_candles_adjustment_ignores_action_after_as_of(
     assert series.candles[0].open == Decimal("100"), "as_of보다 미래인 ex_date는 미반영"
 
 
+async def _candle_open_time_before_today(conn, as_of: datetime) -> datetime:
+    """A candle whose (UTC) date is strictly earlier than `as_of`'s date.
+
+    Normally that is the first of the current month. On the 1st itself the month start IS
+    today, so `ex_date == candle date` and no adjustment applies -- this test went red on every
+    first day of a month (CI 2026-10-01). Then use yesterday instead, creating the previous
+    month's `md_candle` partition (the schema only pre-creates current and future months).
+    """
+    month_start = as_of.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if as_of.day > 1:
+        return month_start
+    await conn.execute(
+        """
+        DO $$
+        DECLARE
+            part_end TIMESTAMPTZ := date_trunc('month', now());
+            part_start TIMESTAMPTZ := part_end - interval '1 month';
+        BEGIN
+            EXECUTE format(
+                'CREATE TABLE IF NOT EXISTS md_candle_%s PARTITION OF md_candle '
+                'FOR VALUES FROM (%L) TO (%L)',
+                to_char(part_start, 'YYYY_MM'), part_start, part_end
+            );
+        END $$;
+        """
+    )
+    return month_start - timedelta(days=1)
+
+
 async def test_get_candles_adjustment_applies_action_before_as_of(
     pool, candle_store, batch_repo, reference_repo, calendar_repo
 ):
@@ -232,7 +261,7 @@ async def test_get_candles_adjustment_applies_action_before_as_of(
         as_of = (await conn.fetchval("SELECT now()")).astimezone(timezone.utc)
         # 월초로 고정(위 테스트와 같은 이유) — ex_date는 캔들(월초)보다는
         # 늦고 as_of(오늘)보다는 이르거나 같아야 하므로 오늘 날짜를 쓴다.
-        t0 = as_of.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        t0 = await _candle_open_time_before_today(conn, as_of)
         key = await _seed_candle(
             conn, batch_repo, candle_store, instrument_id=instrument_id, open_time=t0
         )
