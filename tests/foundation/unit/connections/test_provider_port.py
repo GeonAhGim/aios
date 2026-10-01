@@ -9,7 +9,6 @@ ADR-2026-09-10-C Decision 4.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 
 import pytest
@@ -20,6 +19,7 @@ from src.foundation.connections.ports.provider import (
     ReadonlyAccountProvider,
     SecretLease,
 )
+from tests.conftest import PerfBudget
 
 
 def test_secret_lease_stores_lease_ref():
@@ -85,14 +85,16 @@ async def test_readonly_account_provider_fetch_snapshot_conforms_to_protocol_sig
 
 
 @pytest.mark.perf
-def test_secret_lease_and_opaque_ref_construction_perf_budget():
+def test_secret_lease_and_opaque_ref_construction_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """순수 속성 대입뿐인 값 객체 생성 비용 — 10,000회 생성이 50ms 예산을
     넘지 않는지 확인한다(가장 가까운 발행 예산인 command-write p95 50ms와
     같은 자릿수, ADR-2026-09-09-C Decision 1)."""
-    start = time.perf_counter()
-    for i in range(10_000):
-        SecretLease(lease_ref=f"lease-{i}")
-        OpaqueRef(f"ACCT-{i}")
-    elapsed_ms = (time.perf_counter() - start) * 1000
 
-    assert elapsed_ms < 50.0, f"construction of 20,000 value objects took {elapsed_ms:.3f}ms"
+    def _build() -> None:
+        for i in range(10_000):
+            SecretLease(lease_ref=f"lease-{i}")
+            OpaqueRef(f"ACCT-{i}")
+
+    perf_budget.assert_within(_build, budget_ms=50.0)
