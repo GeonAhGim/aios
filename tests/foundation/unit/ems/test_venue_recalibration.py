@@ -14,6 +14,7 @@ from src.foundation.ems.domain.route.venue_recalibration import (
     recalibrate_weights,
 )
 from src.foundation.ems.domain.route.venue_scoring import VenueScoreWeights
+from tests.conftest import PerfBudget
 
 _DEFAULT_CURRENT = VenueScoreWeights(
     fee_weight=Decimal("0.5"),
@@ -197,10 +198,8 @@ class TestPerformance:
     """1000 samples must complete in reasonable time."""
 
     @pytest.mark.perf
-    def test_1000_samples_under_one_second(self) -> None:
+    def test_1000_samples_under_one_second(self, perf_budget: PerfBudget) -> None:
         """Large sample set should finish quickly (< 1 s)."""
-        import time
-
         samples = [
             VenueCostSample(
                 f"V{i % 50}",
@@ -209,11 +208,13 @@ class TestPerformance:
             )
             for i in range(1000)
         ]
-        start = time.perf_counter()
-        for _ in range(100):
-            recalibrate_weights(samples, _DEFAULT_CURRENT)
-        elapsed = time.perf_counter() - start
-        assert elapsed < 1.0, f"100 recalibrations took {elapsed:.2f}s"
+        # 100회 호출 총 1.0s → 호출당 10ms 예산
+        perf_budget.assert_within(
+            lambda: recalibrate_weights(samples, _DEFAULT_CURRENT),
+            budget_ms=10.0,
+            n=5,
+            batch=100,
+        )
 
 
 # ---------------------------------------------------------------------------
