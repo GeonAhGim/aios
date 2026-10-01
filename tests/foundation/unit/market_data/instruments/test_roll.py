@@ -1,7 +1,9 @@
 """DC-25 exact adjustment, calendar delegation, and fail-closed evidence."""
+
 from datetime import date, datetime, time, timezone
 from decimal import Decimal, localcontext
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -22,21 +24,34 @@ D = Decimal
 @pytest.fixture
 def calendar() -> VenueCalendar:
     tz = ZoneInfo("UTC")
-    return VenueCalendar("TEST", tz, SessionSpec(tz, time(9), time(16), frozenset(range(5))),
-                         frozenset({date(2026, 9, 11)}))
+    return VenueCalendar(
+        "TEST",
+        tz,
+        SessionSpec(tz, time(9), time(16), frozenset(range(5))),
+        frozenset({date(2026, 9, 11)}),
+    )
 
 
 def contract(index: int, expiry_day: int = 18) -> Instrument:
-    return Instrument.model_validate({
-        "instrument_id": f"01ARZ3NDEKTSV4RRFFQ69G5FA{index}",
-        "asset_class": "CRYPTO", "base": "BTC", "quote": "USD", "isin": None,
-        "figi": None, "tick_size": D("0.01"), "lot_size": D(1),
-        "calendar_id": "TEST", "lifecycle_state": "ACTIVE",
-        "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc), "kind": "FUTURE",
-        "underlying_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-        "expiry": datetime(2026, 9, expiry_day, 16, tzinfo=timezone.utc),
-        "contract_multiplier": D(1),
-    })
+    return Instrument.model_validate(
+        {
+            "instrument_id": f"01ARZ3NDEKTSV4RRFFQ69G5FA{index}",
+            "asset_class": "CRYPTO",
+            "base": "BTC",
+            "quote": "USD",
+            "isin": None,
+            "figi": None,
+            "tick_size": D("0.01"),
+            "lot_size": D(1),
+            "calendar_id": "TEST",
+            "lifecycle_state": "ACTIVE",
+            "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "kind": "FUTURE",
+            "underlying_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "expiry": datetime(2026, 9, expiry_day, 16, tzinfo=timezone.utc),
+            "contract_multiplier": D(1),
+        }
+    )
 
 
 def test_roll_date_deterministic_and_holiday(calendar: VenueCalendar) -> None:
@@ -45,29 +60,48 @@ def test_roll_date_deterministic_and_holiday(calendar: VenueCalendar) -> None:
     assert roll_date(datetime(2026, 9, 11, tzinfo=timezone.utc), calendar, 0) == date(2026, 9, 10)
 
 
-@pytest.mark.parametrize("method,expected", [
-    (Adjustment.NONE, D(80)), (Adjustment.RATIO, D(84)), (Adjustment.DIFFERENCE, D(85)),
-])
+@pytest.mark.parametrize(
+    "method,expected",
+    [
+        (Adjustment.NONE, D(80)),
+        (Adjustment.RATIO, D(84)),
+        (Adjustment.DIFFERENCE, D(85)),
+    ],
+)
 def test_exact_adjustment(calendar: VenueCalendar, method: Adjustment, expected: Decimal) -> None:
     near, far = contract(0), contract(1, 25)
     before, boundary, after = date(2026, 9, 9), date(2026, 9, 10), date(2026, 9, 14)
-    prices = {near.instrument_id: {before: D(80), boundary: D(100)},
-              far.instrument_id: {boundary: D(105), after: D(110)}}
-    result = continuous_futures([near, far], prices, [before, boundary, after], calendar,
-                                adjustment=method)
+    prices = {
+        near.instrument_id: {before: D(80), boundary: D(100)},
+        far.instrument_id: {boundary: D(105), after: D(110)},
+    }
+    result = continuous_futures(
+        [near, far], prices, [before, boundary, after], calendar, adjustment=method
+    )
     assert [b.close for b in result] == [expected, D(105), D(110)]
     assert result[1].instrument_id == far.instrument_id
     assert prices[near.instrument_id][before] == D(80)
     with localcontext() as ctx:
         ctx.prec = 2
-        assert continuous_futures([near, far], prices, [before, boundary, after], calendar,
-                                  adjustment=method) == result
+        assert (
+            continuous_futures(
+                [near, far], prices, [before, boundary, after], calendar, adjustment=method
+            )
+            == result
+        )
 
 
-@pytest.mark.parametrize("changes", [
-    {"kind": "SPOT"}, {"kind": None}, {"expiry": None}, {"underlying_id": None},
-    {"contract_multiplier": D(0)}, {"calendar_id": "OTHER"},
-])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"kind": "SPOT"},
+        {"kind": None},
+        {"expiry": None},
+        {"underlying_id": None},
+        {"contract_multiplier": D(0)},
+        {"calendar_id": "OTHER"},
+    ],
+)
 def test_invalid_contract_rejected(calendar: VenueCalendar, changes: dict[str, object]) -> None:
     bad = contract(0).model_copy(update=changes)
     with pytest.raises(RollError):
@@ -77,8 +111,9 @@ def test_invalid_contract_rejected(calendar: VenueCalendar, changes: dict[str, o
 @pytest.mark.parametrize("expiries", [(25, 18), (18, 18)])
 def test_expiry_order_rejected(calendar: VenueCalendar, expiries: tuple[int, int]) -> None:
     with pytest.raises(RollError, match="strictly increasing"):
-        continuous_futures([contract(i, e) for i, e in enumerate(expiries)], {},
-                           [date(2026, 9, 9)], calendar)
+        continuous_futures(
+            [contract(i, e) for i, e in enumerate(expiries)], {}, [date(2026, 9, 9)], calendar
+        )
 
 
 @pytest.mark.parametrize("offset", [-1, 367, True])
@@ -88,8 +123,9 @@ def test_invalid_offset(calendar: VenueCalendar, offset: int) -> None:
 
 
 def test_calendar_exhaustion_and_naive_expiry(calendar: VenueCalendar) -> None:
-    empty = VenueCalendar("TEST", calendar.tz,
-                          SessionSpec(calendar.tz, time(9), time(16), frozenset()))
+    empty = VenueCalendar(
+        "TEST", calendar.tz, SessionSpec(calendar.tz, time(9), time(16), frozenset())
+    )
     with pytest.raises(RollError, match="insufficient"):
         roll_date(datetime(2026, 9, 18, tzinfo=timezone.utc), empty)
     with pytest.raises(RollError, match="timezone"):
@@ -116,19 +152,30 @@ def test_ratio_rejects_nonpositive_anchor(calendar: VenueCalendar, near_price: D
 def test_multiple_rolls_and_missing_anchor(calendar: VenueCalendar) -> None:
     a, b, c = contract(0, 10), contract(1, 18), contract(2, 25)
     d1, d2, d3 = date(2026, 9, 9), date(2026, 9, 10), date(2026, 9, 18)
-    prices = {a.instrument_id: {d1: D(80), d2: D(100)},
-              b.instrument_id: {d2: D(105), d3: D(100)}, c.instrument_id: {d3: D(110)}}
-    assert [b.close for b in continuous_futures([a, b, c], prices, [d1, d2, d3], calendar,
-                                               0)] == [D("92.4"), D("115.5"), D(110)]
-    assert [b.close for b in continuous_futures([a, b, c], prices, [d1, d2, d3], calendar,
-                                               0, Adjustment.DIFFERENCE)] == [D(95), D(115), D(110)]
+    prices = {
+        a.instrument_id: {d1: D(80), d2: D(100)},
+        b.instrument_id: {d2: D(105), d3: D(100)},
+        c.instrument_id: {d3: D(110)},
+    }
+    assert [b.close for b in continuous_futures([a, b, c], prices, [d1, d2, d3], calendar, 0)] == [
+        D("92.4"),
+        D("115.5"),
+        D(110),
+    ]
+    assert [
+        b.close
+        for b in continuous_futures(
+            [a, b, c], prices, [d1, d2, d3], calendar, 0, Adjustment.DIFFERENCE
+        )
+    ] == [D(95), D(115), D(110)]
     del prices[b.instrument_id][d3]
     with pytest.raises(RollError, match="Missing"):
         continuous_futures([a, b, c], prices, [d1, d2, d3], calendar, 0)
 
 
-@pytest.mark.parametrize("days", [[], [date(2026, 9, 11)], [date(2026, 9, 28)],
-                                  [date(2026, 9, 9), date(2026, 9, 9)]])
+@pytest.mark.parametrize(
+    "days", [[], [date(2026, 9, 11)], [date(2026, 9, 28)], [date(2026, 9, 9), date(2026, 9, 9)]]
+)
 def test_invalid_history(calendar: VenueCalendar, days: list[date]) -> None:
     with pytest.raises(RollError):
         continuous_futures([contract(0)], {}, days, calendar)
@@ -143,16 +190,24 @@ def test_source_constraints() -> None:
     assert "calendar.trading_day_of(" in source
 
 
-
-@pytest.mark.parametrize("changes", [
-    {"underlying_id": "01ARZ3NDEKTSV4RRFFQ69G5FAZ"},
-    {"contract_multiplier": D(2)}, {"quote": "EUR"}, {"currency": "EUR"},
-    {"contract_multiplier": D("NaN")},
-])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"underlying_id": "01ARZ3NDEKTSV4RRFFQ69G5FAZ"},
+        {"contract_multiplier": D(2)},
+        {"quote": "EUR"},
+        {"currency": "EUR"},
+        {"contract_multiplier": D("NaN")},
+    ],
+)
 def test_incompatible_chain(calendar: VenueCalendar, changes: dict[str, object]) -> None:
     with pytest.raises(RollError):
-        continuous_futures([contract(0), contract(1, 25).model_copy(update=changes)],
-                           {}, [date(2026, 9, 9)], calendar)
+        continuous_futures(
+            [contract(0), contract(1, 25).model_copy(update=changes)],
+            {},
+            [date(2026, 9, 9)],
+            calendar,
+        )
 
 
 def test_local_expiry_date_and_continuous_calendar() -> None:
@@ -163,20 +218,99 @@ def test_local_expiry_date_and_continuous_calendar() -> None:
     assert roll_date(expiry, cal, 1) == date(2026, 9, 11)
 
 
-@pytest.mark.parametrize("method,expected", [
-    (Adjustment.RATIO, D("92.4")), (Adjustment.DIFFERENCE, D(95)),
-])
+@pytest.mark.parametrize(
+    "method,expected",
+    [
+        (Adjustment.RATIO, D("92.4")),
+        (Adjustment.DIFFERENCE, D(95)),
+    ],
+)
 def test_sparse_history_crosses_two_rolls(
-    calendar: VenueCalendar, method: Adjustment, expected: Decimal,
+    calendar: VenueCalendar,
+    method: Adjustment,
+    expected: Decimal,
 ) -> None:
     a, b, c = contract(0, 10), contract(1, 18), contract(2, 25)
     start, end = date(2026, 9, 9), date(2026, 9, 21)
-    prices = {a.instrument_id: {start: D(80), date(2026, 9, 10): D(100)},
-              b.instrument_id: {date(2026, 9, 10): D(105), date(2026, 9, 18): D(100)},
-              c.instrument_id: {date(2026, 9, 18): D(110), end: D(120)}}
+    prices = {
+        a.instrument_id: {start: D(80), date(2026, 9, 10): D(100)},
+        b.instrument_id: {date(2026, 9, 10): D(105), date(2026, 9, 18): D(100)},
+        c.instrument_id: {date(2026, 9, 18): D(110), end: D(120)},
+    }
     result = continuous_futures([a, b, c], prices, [start, end], calendar, 0, method)
     assert [bar.close for bar in result] == [expected, D(120)]
     assert [bar.instrument_id for bar in result] == [a.instrument_id, c.instrument_id]
+
+
+def test_failure_injection_dependency_error_propagates(calendar: VenueCalendar) -> None:
+    """DC-25 D3 실패 주입: calendar 의존성이 예외를 던지면 삼키지 않고 그대로
+    전파한다(fail-closed) — roll.py는 DecimalException만 RollError로 감싼다."""
+    near, far = contract(0), contract(1, 25)
+    d1, d2 = date(2026, 9, 9), date(2026, 9, 10)
+    prices = {near.instrument_id: {d1: D(80), d2: D(100)}, far.instrument_id: {d2: D(105)}}
+    with patch.object(VenueCalendar, "trading_day_of", side_effect=RuntimeError("db down")):
+        with pytest.raises(RuntimeError, match="db down"):
+            continuous_futures([near, far], prices, [d1, d2], calendar)
+
+
+def test_gate_red_calendar_failure_injection(calendar: VenueCalendar) -> None:
+    """DC-25 gate_red: 주입 없이는 green, calendar.sessions_for 예외 주입 시 red로
+    전환됨을 같은 입력으로 증명한다."""
+    near, far = contract(0), contract(1, 25)
+    d1, d2 = date(2026, 9, 9), date(2026, 9, 10)
+    prices = {near.instrument_id: {d1: D(80), d2: D(100)}, far.instrument_id: {d2: D(105)}}
+
+    assert len(continuous_futures([near, far], prices, [d1, d2], calendar)) == 2
+
+    with patch.object(VenueCalendar, "sessions_for", side_effect=RuntimeError("db down")):
+        with pytest.raises(RuntimeError, match="db down"):
+            continuous_futures([near, far], prices, [d1, d2], calendar)
+
+
+@pytest.mark.perf
+def test_perf_continuous_futures_budget(calendar: VenueCalendar, perf_budget) -> None:
+    """DC-25 D3 성능: 3개 계약 체인(2회 롤) 조정이 예산 안에서 끝난다."""
+    a, b, c = contract(0, 10), contract(1, 18), contract(2, 25)
+    d1, d2, d3 = date(2026, 9, 9), date(2026, 9, 10), date(2026, 9, 18)
+    prices = {
+        a.instrument_id: {d1: D(80), d2: D(100)},
+        b.instrument_id: {d2: D(105), d3: D(100)},
+        c.instrument_id: {d3: D(110)},
+    }
+    perf_budget.assert_within(
+        lambda: continuous_futures([a, b, c], prices, [d1, d2, d3], calendar, 0),
+        budget_ms=20,
+        n=10,
+    )
+
+
+@pytest.mark.perf
+def test_perf_roll_date_budget(calendar: VenueCalendar, perf_budget) -> None:
+    """DC-25 D3 성능: roll_date 단건 호출이 예산 안에서 끝난다."""
+    expiry = datetime(2026, 9, 18, 16, tzinfo=timezone.utc)
+    perf_budget.assert_within(
+        lambda: roll_date(expiry, calendar, 5),
+        budget_ms=5,
+        n=50,
+    )
+
+
+def test_adversarial_concurrent_chains_do_not_share_state(calendar: VenueCalendar) -> None:
+    """DC-25 D3 동시성/적대: 같은 calendar로 두 독립적인 체인을 번갈아 구성해도
+    한쪽의 price 딕셔너리 변형이 다른 쪽 결과에 섞이지 않는다."""
+    a1, b1 = contract(0), contract(1, 25)
+    a2, b2 = contract(2), contract(3, 25)
+    d1, d2 = date(2026, 9, 9), date(2026, 9, 10)
+    prices1 = {a1.instrument_id: {d1: D(80), d2: D(100)}, b1.instrument_id: {d2: D(105)}}
+    prices2 = {a2.instrument_id: {d1: D(10), d2: D(20)}, b2.instrument_id: {d2: D(40)}}
+
+    result1 = continuous_futures([a1, b1], prices1, [d1, d2], calendar)
+    result2 = continuous_futures([a2, b2], prices2, [d1, d2], calendar)
+    result1_again = continuous_futures([a1, b1], prices1, [d1, d2], calendar)
+
+    assert [bar.close for bar in result1] == [D(84), D(105)]
+    assert [bar.close for bar in result2] == [D(20), D(40)]
+    assert result1 == result1_again
 
 
 def test_history_start_after_roll_needs_no_past_anchors(calendar: VenueCalendar) -> None:
@@ -190,8 +324,11 @@ def test_history_start_after_roll_needs_no_past_anchors(calendar: VenueCalendar)
 def test_difference_supports_negative_prices(calendar: VenueCalendar) -> None:
     a, b = contract(0), contract(1, 25)
     before, boundary = date(2026, 9, 9), date(2026, 9, 10)
-    prices = {a.instrument_id: {before: D(-40), boundary: D(-30)},
-              b.instrument_id: {boundary: D(10)}}
-    result = continuous_futures([a, b], prices, [before, boundary], calendar,
-                                adjustment=Adjustment.DIFFERENCE)
+    prices = {
+        a.instrument_id: {before: D(-40), boundary: D(-30)},
+        b.instrument_id: {boundary: D(10)},
+    }
+    result = continuous_futures(
+        [a, b], prices, [before, boundary], calendar, adjustment=Adjustment.DIFFERENCE
+    )
     assert [bar.close for bar in result] == [D(0), D(10)]
