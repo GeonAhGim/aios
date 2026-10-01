@@ -18,6 +18,7 @@ DoD checklist (task-10245, orphan leaf task-6704 "고아 산출물 회수 5828 (
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -67,11 +68,13 @@ class TestCheckRunnersNegative:
         거부해야 한다 -- 그래야 잘못된 타입 하나가 QUEUED 행을 만들고 버려지는
         고아 run을 남기지 않는다. repo를 `None`으로 넘겨도 통과한다는 사실 자체가
         '레포 접근 이전에 거부'를 증명한다."""
+        no_repo: Any = None
+        no_ctx: Any = None
         with pytest.raises(UnknownCheckTypeError, match="nonexistent_check"):
             await run_check(
-                validation_repo=None,  # type: ignore[arg-type]
+                validation_repo=no_repo,
                 check_type="nonexistent_check",
-                ctx=None,  # type: ignore[arg-type]
+                ctx=no_ctx,
                 owner_user_id=uuid4(),
             )
 
@@ -86,13 +89,13 @@ class TestRunCheckFailureInjection:
         -- 삼키면 호출자가 성공으로 착각하는 거짓 양성이 생긴다."""
         run_id = uuid4()
         fake_run = SimpleNamespace(id=run_id)
-        fake_repo = SimpleNamespace(
+        fake_repo: Any = SimpleNamespace(
             get_run_by_snapshot=AsyncMock(return_value=None),
             create_run=AsyncMock(return_value=fake_run),
             mark_running=AsyncMock(return_value=fake_run),
             mark_failed=AsyncMock(return_value=fake_run),
         )
-        ctx = SimpleNamespace(
+        ctx: Any = SimpleNamespace(
             artifact=SimpleNamespace(strategy_id="strat-1", version="v1", artifact_hash="a" * 64),
             policy=SimpleNamespace(policy_hash=lambda: "p" * 64),
             snapshot_ref=SimpleNamespace(snapshot_hash="s" * 64),
@@ -113,7 +116,7 @@ class TestRunCheckFailureInjection:
                 await run_check(
                     validation_repo=fake_repo,
                     check_type="backtest",
-                    ctx=ctx,  # type: ignore[arg-type]
+                    ctx=ctx,
                     owner_user_id=uuid4(),
                 )
 
