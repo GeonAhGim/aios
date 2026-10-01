@@ -11,7 +11,6 @@ this file is scoped to `run_train_job`'s own orchestration logic.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping, Sequence
 
 import pytest
@@ -20,6 +19,7 @@ from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.ml.application.train_job import JobModelMismatchError, run_train_job
 from src.foundation.ml.ports.train_job_repository import TrainJobState
 from src.foundation.ml.ports.trainer import TrainingSample
+from tests.conftest import PerfBudget
 
 
 class _FakeRepository:
@@ -276,14 +276,21 @@ def _p95(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-async def test_run_train_job_orchestration_overhead_within_budget() -> None:
-    repo = _FakeRepository()
-    durations: list[float] = []
-    for i in range(20):
+async def test_run_train_job_orchestration_overhead_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """raw time.perf_counter() → perf_budget.samples_async() 전환 (task-10994).
+
+    process_time 기반 측정 + coverage tracer-pause로 부하 민감 호스트에서의
+    오탐을 줄인다. I/O 지연은 wall_ms로 판정한다. 예산 값(50ms)은 그대로 유지한다.
+    """
+    n_samples = 20
+
+    async def _fn() -> None:
+        repo = _FakeRepository()
         trainer = _FakeTrainer()
-        started = time.perf_counter()
         await run_train_job(
-            job_id=f"perf-{i}",
+            job_id=f"perf-{id(_fn)}",
             model_id="m1",
             trainer=trainer,
             repository=repo,
@@ -292,9 +299,11 @@ async def test_run_train_job_orchestration_overhead_within_budget() -> None:
             params={},
             checkpoint_every=1,
         )
-        durations.append((time.perf_counter() - started) * 1000)
 
-    p95_ms = _p95(durations)
+    samples = await perf_budget.samples_async(_fn, n=n_samples)
+
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
     print(
         f"[AI-20 run_train_job] p95={p95_ms:.2f}ms budget<{_ORCHESTRATION_STEP_P95_BUDGET_MS:.1f}ms"
     )
