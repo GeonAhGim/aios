@@ -29,6 +29,10 @@
 | F5   | L      | get_candles.py:123   | as_of==close_time 경계       | 경계값 테스트                 | spec 명시 또는 ≤로 변경  |
 | F6   | L      | backfill_job.py:148  | partition 중복 생성 오버헤드  | 짧은 구간 여러 번 백필        | skip_if_exists 옵션      |
 | F7   | L      | replay_candles.py:83 | 시계·난수 시드 의존 누락      | CI hash-seed 환경에서 재생    | seed 주입 계약 추가      |
+| F8   | M      | ingest_candles.py:294-298, postgres_candle_store.py:125-132 | upsert conflict 시 silent drop이 감사 이벤트에 반영 안 됨 | 동시 백필+실시간 중 conflict 재현 | upsert 반환행수 검증·불일치 기록 |
+| F9   | L      | ingest_candles.py:185-204 | 심볼 상태 확인-fetch-쓰기 TOCTOU | fetch 중 상태 변경 주입 테스트 | 쓰기 트랜잭션 내 재확인 |
+
+(F8~F9는 분할 2/5(task-10438)에서 `ingest_candles.py` 재검사로 추가됨. 상세는 §4.)
 
 ## §1 선례 대조
 
@@ -282,9 +286,94 @@ python ingest_candles.py --same-data  # 다른 batch_hash 생성
 
 ---
 
-## §4 결론
+## §4 분할 2/5 추가 발견 (task-10438, `ingest_candles.py` 집중 재검사)
 
-- **발견 7건** (S: 0건, M: 4건, L: 3건)
-- 가장 심각한 것은 **F1 (tenant_id 누락)** — 멀티테넌트 보안에 직접적인 영향
-- 두 번째로 **F7 (hash() 시드 의존)** — 2026-10-01 CI에서 이미 확인된 부류의 결정성 문제
+task-10439(분할 3/5)가 5개 파일 전체를 훑은 뒤, 본 분할은 task files에 지정된
+`src/foundation/market_data/application/ingest_candles.py` 한 파일을 정밀 재검사했다.
+F7의 전제("ingest_candles.py:66에 `hash(json.dumps(...))`가 있다")는 현재 코드에서
+재현되지 않는다 — `batch_hash`는 `domain/lineage.py`의 `hashlib.sha256` 기반 구현을
+그대로 import해서 쓰고 있고(lineage.py:97-112), 결정적 프로퍼티 테스트도 이미 존재한다
+(`test_lineage.py`, task-10471 commit 0b5d13d4a). F7은 당시 다른 버전의 코드 또는 다른
+파일을 가리킨 것으로 보이며, 본 파일 범위에서는 **재확인되지 않음**으로 정정한다.
+
+대신 이 파일 자체에서 두 개의 새 결함을 발견했다.
+
+### F8: `upsert_batch`의 conflict 시 silent drop이 배치 결과/감사 이벤트에 반영되지 않음 [M]
+
+**위치:** `ingest_candles.py:294-298`, `adapters/postgres_candle_store.py:125-132`
+
+**문제:**
+- `PostgresCandleStore.upsert_batch`은 `INSERT ... ON CONFLICT (venue, instrument_id,
+  timeframe, open_time) DO NOTHING RETURNING open_time`을 쓴다 — 즉 **첫 기록자가 이긴다**
+  (F2가 가정한 "나중 기록자가 덮어쓴다" DO UPDATE 전제와 반대: candle 저장 경로는 DO
+  NOTHING이고, DO UPDATE 전제는 backfill_job.py/ingest_ticks.py 등 다른 파일의 경로다).
+- `upsert_batch`은 실제 삽입된 행 수(`len(rows)`)를 반환하지만, `ingest_candles`는
+  이 반환값을 받지 않고 버린다(`await store.upsert_batch(conn, batch_id, good)` — 결과
+  미사용). `good`의 개수와 실제 삽입된 개수가 다를 수 있는데 아무도 비교하지 않는다.
+- 동시에 같은 `(venue, instrument_id, timeframe, open_time)` 구간을 백필과 실시간 수집이
+  건드리면, 늦게 도착한 쪽의 "good" 캔들은 DB에 전혀 쓰이지 않고 조용히 버려지지만,
+  해당 배치의 `IngestBatchResult`/감사 이벤트는 여전히 `verdict=ACCEPT`(또는 PARTIAL),
+  `accepted=N`으로 기록된다 — **"N개를 저장했다"는 감사 기록이 실제 저장 결과와 어긋날
+  수 있다.**
+- 주문/원장 경로(§1.1~1.2)는 조건부 UPDATE/FOR UPDATE의 영향 받은 행 수를 확인해
+  불일치 시 거부·재시도한다(표준-105 패턴). 데이터 수집 경로는 이 확인이 없다.
+
+**재현:**
+```python
+# 두 ingest_candles 호출이 같은 (venue, instrument_id, timeframe, open_time)을
+# 동시에 좋은 캔들로 분류해 store.upsert_batch를 호출
+# 먼저 커밋한 쪽만 실제로 INSERT되고, 나중 쪽은 DO NOTHING으로 0행 삽입
+# 그러나 나중 쪽의 IngestBatchResult.verdict는 ACCEPT, accepted=len(good)으로 기록됨
+# → 감사 이벤트만 보면 데이터가 저장된 것처럼 보이지만 실제로는 저장되지 않았다
+```
+
+**조치 제안:**
+1. `upsert_batch`의 반환값(삽입된 행 수)을 받아 `len(good)`과 비교
+2. 불일치 시 `IngestBatchResult`에 `conflicted`/`skipped` 필드를 추가해 감사 이벤트에
+   사실대로 기록(표준-105 "영향받은 행 수 확인" 패턴과 동일)
+3. 또는 멱등 재수집이 기대되는 경로라면 DO NOTHING이 의도된 것임을 spec에 명시하고,
+   skip된 open_time 목록을 로그/이벤트에 남긴다
+
+---
+
+### F9: 심볼 상태(tradable) 확인이 외부 fetch 이전 별도 커넥션에서만 수행되고 쓰기 시점에 재확인되지 않음 (TOCTOU) [L]
+
+**위치:** `ingest_candles.py:185-204`
+
+**문제:**
+- `instrument.status`(`SUSPENDED`/`DELISTED` 여부)는 `read_conn`(185-197줄, 별도
+  read-only 커넥션)에서 한 번만 확인된다.
+- 그 직후 `source.fetch_candles(...)`(202줄)로 외부 HTTP 호출이 일어나고(모듈 docstring
+  §"Transaction boundary"가 의도적으로 트랜잭션 밖에 둔 구간), 이 호출은 느릴 수 있다.
+- 외부 fetch가 진행되는 동안 corporate action/상장폐지 등으로 `instrument.status`가
+  `DELISTED`로 바뀌어도, 이후 쓰기 트랜잭션(235줄)에서 상태를 재확인하지 않는다 —
+  이미 "tradable"로 판정된 instrument_id로 그대로 `md_candle`에 저장한다.
+- 영향은 제한적(막 상장폐지된 종목의 캔들이 한 번 더 저장되는 정도)이지만, 계약상
+  "NOT_TRADABLE은 수집 거부"(`SymbolNotTradableError`)가 전제하는 fail-closed 보장이
+  쓰기 시점 기준이 아니라 fetch 시작 시점 기준이라는 간극이 있다.
+
+**재현:**
+```python
+# t0: get_instrument() → status=ACTIVE 확인, SymbolNotTradableError 없음
+# t0~t1: source.fetch_candles() 진행 중 다른 트랜잭션이 instrument.status를 DELISTED로 변경
+# t1: 쓰기 트랜잭션에서 상태 재확인 없이 good 캔들을 md_candle에 그대로 저장
+```
+
+**조치 제안:**
+1. 쓰기 트랜잭션 내부(235줄 이후)에서 `refs.get_instrument`를 동일 `conn`으로 재조회해
+   상태를 재확인
+2. 또는 상태 전이(`apply_lifecycle_event`, LA-14)가 진행 중인 instrument_id에 대해
+   advisory lock을 걸어 ingest와 상태 변경이 서로 배타적으로 실행되게 한다
+
+---
+
+## §5 결론
+
+- **발견 9건** (S: 0건, M: 5건, L: 4건) — F1~F7(분할 3/5, task-10439) + F8~F9(분할 2/5,
+  task-10438)
+- 가장 심각한 것은 여전히 **F1 (tenant_id 누락)** — 멀티테넌트 보안에 직접적인 영향
+- F7(hash() 시드 의존)은 `ingest_candles.py` 범위에서 재확인되지 않음(§4 정정) — 이미
+  `hashlib.sha256` 기반으로 수정되어 있고 결정성 테스트도 존재한다(task-10471)
+- F8(upsert 시 silent drop과 감사 불일치)이 새로 발견된 가장 중요한 항목 — 표준-105의
+  "영향받은 행 수 확인" 패턴이 데이터 수집 경로에 없다는 것을 구체적으로 보여준다
 - 코드 변경 없음(기존 코드 감사만). 정정 리프는 CTO/PM이 발행.
