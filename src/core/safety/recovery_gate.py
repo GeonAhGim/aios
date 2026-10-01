@@ -1,21 +1,25 @@
-"""L4_risk_and_safety_v1.0.md#4.3(CB 상태 전이표), §9 R-44 — 재가동 순수 규칙.
+"""L4_risk_and_safety_v1.0.md#4.3 (CB state transition table), §9 R-44 — pure reactivation rule.
 
-정책문서 8.6-B·불변식 I5: halted/emergency는 자동 하향 불가하고, 재가동은
-`evidence_ref 존재 ∧ metrics 이력이 cooldown 동안 warning 미만 ∧ RECOVERY
-결정 ALLOW ∧ 승인 TTL 이내`(§4.3 CB 표 행 4)를 전부 만족해야 한다.
+Policy doc 8.6-B · invariant I5: HALTED/EMERGENCY cannot auto-downgrade;
+reactivation requires all of:
+`evidence_ref present ∧ metrics history below warning throughout cooldown
+∧ RECOVERY decision ALLOW ∗ approval within TTL` (§4.3 CB table row 4).
 
-이 함수는 순수 규칙이다 — I/O·DB·시계를 직접 호출하지 않는다. 시계가
-필요한 판단(승인 TTL 만료 여부)은 이미 상태로 해소된 `approval_status`
-문자열(호출자가 `now`로 미리 계산한 `ApprovalRequest.status`, 예:
-"APPROVED"/"EXPIRED")로 주입받는다 — 여기서 다시 시계를 보지 않는다.
+This module is pure rules — it calls no I/O, DB, or clock directly.
+Judgments that require a clock (e.g. approval TTL expiry) are pre-resolved
+into the `approval_status` string injected by the caller
+(`ApprovalRequest.status` pre-computed by the caller with `now`, e.g.
+"APPROVED"/"EXPIRED") — this module never consults the clock itself.
 
-`metrics_history`는 정책 임계치(policy)를 받지 않고도 "warning 미만"을
-판정해야 하므로, 어떤 정책 설정에서도 항상 안전한 유일한 기준 —
-"이력 전체가 완전히 기준값(0)" — 을 쓴다(모든 CB 지표는 0이 상한이며
-0보다 큰 임계치를 가지므로 0은 항상 모든 정책의 warning 미만이다). 이력
-길이는 `cooldown_sec`와 1:1 대응한다는 계약을 호출자(R-45 배선)에게
-지운다 — 매 초 1개 표본을 이어붙이는 것이 그 계약이다.
+`metrics_history` must judge "below warning" without receiving the policy
+thresholds, so the only criterion that is always safe under any policy
+setting is used — "the entire history is exactly at the baseline value (0)":
+all CB indicators have 0 as their upper bound, and since all thresholds are
+greater than 0, a value of 0 is always below every policy's warning level.
+The caller (R-45 wiring) contracts that the history length maps 1:1 to
+`cooldown_sec` — one sample per second appended in order.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -39,7 +43,7 @@ class RecoveryDecision(BaseModel, frozen=True):
 
     @model_validator(mode="after")
     def _reason_matches_outcome(self) -> RecoveryDecision:
-        # I2와 동일한 fail-closed 계약 — DENY는 사유 없이 존재할 수 없다.
+        # Same fail-closed contract as I2 — DENY cannot exist without a reason.
         if self.outcome == RiskOutcome.DENY and self.reason_code is None:
             raise ValueError("DENY는 reason_code가 필요하다")
         if self.outcome == RiskOutcome.ALLOW and self.reason_code is not None:
@@ -76,7 +80,7 @@ def can_reactivate(
     fresh_risk_outcome: RiskOutcome,
     policy: CircuitBreakerPolicy,
 ) -> RecoveryDecision:
-    """§4.3 CB 표 행 4 — 4가지 조건을 전부 만족해야 ALLOW, 그 외 전부 DENY.
+    """§4.3 CB table row 4 — ALLOW only when all 4 conditions are met, DENY otherwise.
 
     ``policy`` supplies the thresholds that define a baseline sample (row 4:
     "metrics history below warning for the whole cooldown").
