@@ -2,7 +2,7 @@
 
 이 문서는 `scripts/gen_adr_index.py`가 `docs/design/ADR-*.md`에서 자동 생성한다(ADR-2026-09-09-F). 직접 수정하지 말 것 — 스크립트를 다시 실행해 갱신하고 커밋한다.
 
-전체 45건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 2건: ADR-2026-08-28, ADR-2026-08-29.
+전체 46건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 2건: ADR-2026-08-28, ADR-2026-08-29.
 
 | ID | Title | Status | Date | Supersedes | Superseded By | Amended | File |
 |---|---|---|---|---|---|---|---|
@@ -51,3 +51,4 @@
 | ADR-2026-09-29-A | MVP-2 내장 전략 지능 엔진(분석·생성·고도화·자가학습) — 무료 벤더만, 가상자산 우선 프로덕션 수준 | Proposed | 2026-09-29 |  |  |  | ADR-2026-09-29-A-mvp2-builtin-strategy-intelligence-engine.md |
 | ADR-2026-09-30-A | 로컬 PM 대리 임무 — 대시보드 호출·로컬 워커풀 자가복구 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-A-local-pm-delegate-and-self-recovery.md |
 | ADR-2026-09-30-B | 머지 큐·기계 검증 정정·게이트 캐시 — 함대 처리 효율 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-B-merge-queue-and-throughput.md |
+| ADR-2026-10-01-A | 사용자 관점 1등급 지표 축 — 체감 성능·기능 범위·편리함·전략 성과 (MVP-2 종결 조건 보강) | Proposed | 2026-10-01 |  |  |  | ADR-2026-10-01-A-user-facing-tier1-metrics.md |
