@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-import time
 from collections.abc import Callable
 from decimal import Decimal
 
@@ -42,6 +41,7 @@ from src.foundation.market_data.ports.provider import (
     ProviderCapabilities,
     RateLimitSpec,
 )
+from tests._perf.relative_budget import RelativeBudget
 
 
 class _FakeClock:
@@ -107,12 +107,13 @@ async def test_many_successful_calls_stay_within_wall_clock_budget() -> None:
     async def op() -> int:
         return 1
 
-    started = time.perf_counter()
-    for _ in range(2000):
-        assert await adapter.call_with_retry(op) == 1
-    elapsed = time.perf_counter() - started
+    async def batch() -> None:
+        for _ in range(2000):
+            assert await adapter.call_with_retry(op) == 1
 
-    assert elapsed < 2.0, f"2000회 호출에 {elapsed:.3f}s 소요 -- 예산(2.0s) 초과"
+    sample = await RelativeBudget().measure_async(batch, n=1, warmup=0, calibration_n=1)
+
+    assert sample.op_ms < 2_000, f"2000회 호출에 {sample.op_ms:.1f}ms 소요 -- 예산(2.0s) 초과"
     assert sleeper.calls == []  # 버킷 고갈 없음 -- 대기 없이 전부 즉시 통과
 
 
@@ -125,12 +126,18 @@ async def test_concurrent_calls_stay_within_wall_clock_budget() -> None:
     async def op() -> int:
         return 1
 
-    started = time.perf_counter()
-    results = await asyncio.gather(*[adapter.call_with_retry(op) for _ in range(500)])
-    elapsed = time.perf_counter() - started
+    async def concurrent_batch() -> list[int]:
+        return await asyncio.gather(*[adapter.call_with_retry(op) for _ in range(500)])
 
-    assert results == [1] * 500
-    assert elapsed < 2.0, f"500개 동시 호출에 {elapsed:.3f}s 소요 -- 예산(2.0s) 초과"
+    results_holder: list[list[int]] = []
+
+    async def measured() -> None:
+        results_holder.append(await concurrent_batch())
+
+    sample = await RelativeBudget().measure_async(measured, n=1, warmup=0, calibration_n=1)
+
+    assert results_holder[0] == [1] * 500
+    assert sample.op_ms < 2_000, f"500개 동시 호출에 {sample.op_ms:.1f}ms 소요 -- 예산(2.0s) 초과"
     assert sleeper.calls == []
 
 
