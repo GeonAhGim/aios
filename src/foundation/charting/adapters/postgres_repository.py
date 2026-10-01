@@ -136,8 +136,8 @@ class PostgresChartingRepository:
             )
         if row is None:
             raise ConcurrencyConflictError(
-                f"chart_layout.id={layout_id}: revision {expected_revision}은 "
-                "더 이상 최신이 아닙니다 — 다시 조회 후 시도하세요."
+                f"chart_layout.id={layout_id}: revision {expected_revision} is "
+                "no longer the latest — reload and retry."
             )
         return _row_to_layout(row)
 
@@ -181,8 +181,8 @@ class PostgresChartingRepository:
             )
         if row is None:
             raise ConcurrencyConflictError(
-                f"chart_drawing_set.layout_id={layout_id}: revision {expected_revision}은 "
-                "더 이상 최신이 아닙니다 — 다시 조회 후 시도하세요."
+                f"chart_drawing_set.layout_id={layout_id}: revision {expected_revision} is "
+                "no longer the latest — reload and retry."
             )
         return _row_to_drawing_set(row)
 
@@ -210,7 +210,7 @@ class PostgresChartingRepository:
                 # a template with the same name already exists for this tenant.
                 raise ConcurrencyConflictError(
                     f"chart_indicator_template: tenant_id={tenant_id} name={name!r} "
-                    "템플릿이 이미 존재합니다."
+                    "template already exists."
                 ) from exc
         return _row_to_indicator_template(row)
 
