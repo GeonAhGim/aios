@@ -7,8 +7,6 @@ performance assertion 1, gate-red reproduction 1.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from src.foundation.ml.contracts.v1 import FeatureSpec
@@ -16,6 +14,7 @@ from src.foundation.ml.domain.feature_values import (
     InvalidFeatureValueError,
     validate_feature_value,
 )
+from tests.conftest import PerfBudget
 
 
 def _spec(dtype: str) -> FeatureSpec:
@@ -93,21 +92,12 @@ def test_gate_red_float_without_isfinite_check_would_accept_nan() -> None:
 _VALIDATE_P95_BUDGET_MS = 1.0
 
 
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
-
-
 @pytest.mark.perf
-def test_validate_feature_value_p95_within_budget() -> None:
+def test_validate_feature_value_p95_within_budget(perf_budget: PerfBudget) -> None:
     spec = _spec("float")
-    samples: list[float] = []
-    for i in range(200):
-        started = time.perf_counter()
-        validate_feature_value(spec, str(float(i)))
-        samples.append((time.perf_counter() - started) * 1000)
-
-    p95_ms = _p95(samples)
+    samples = perf_budget.samples(lambda: validate_feature_value(spec, str(float(0))), n=200)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
     print(
         f"[AI-19 validate_feature_value] p95={p95_ms:.4f}ms budget<{_VALIDATE_P95_BUDGET_MS:.1f}ms"
     )
