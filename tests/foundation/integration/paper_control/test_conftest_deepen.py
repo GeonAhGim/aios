@@ -23,6 +23,7 @@ from src.foundation.paper_control.application.request_deployment import (
     NoActiveMandateError,
 )
 from src.foundation.paper_control.domain.rules import InvalidProvenanceError
+from tests._perf.relative_budget import RelativeBudget
 from tests.foundation.integration.paper_control.conftest import (
     _asyncpg_dsn,
     request,
@@ -133,29 +134,43 @@ async def test_repo_get_deployment_by_request_key_propagates_connection_failure(
 
 @pytest.mark.perf
 async def test_tenant_with_mandate_setup_stays_within_local_budget(
-    pool: asyncpg.Pool, mandate_repo, trust_repo, perf_budget
+    pool: asyncpg.Pool, mandate_repo, trust_repo
 ) -> None:
-    """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1, n=20, 워밍업
-    3회 버림)을 이 환경에서 직접 재고, `tenant_with_mandate`(tenant 생성 +
-    mandate 활성화, 여러 순차 INSERT/UPDATE 왕복)의 절대 시간이 그 기준의
-    40배(연속 DB 왕복 여유) 이내인지 단언한다 -- 절대 ms 임계는 실행환경마다
-    흔들려 회귀 게이트로 못 쓴다."""
+    """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1)과 `tenant_with_
+    mandate`(tenant 생성 + mandate 활성화, 여러 순차 INSERT/UPDATE 왕복)를
+    같은 `RelativeBudget`가 best-of-N(최솟값)으로 재, 절대 시간이 그 기준의
+    40배(연속 DB 왕복 여유, 바닥선 100ms) 이내인지 단언한다 -- 절대 ms 임계는
+    실행환경마다 흔들려 회귀 게이트로 못 쓴다. 예산 값(40배/100ms 바닥선)은
+    그대로다.
+
+    task-11078(`-n 8` 부하 재현): 이전 구현은 baseline을 23회 연속 측정해
+    *최댓값*을 기준으로 삼은 "뒤" op을 단 1회만 측정했다 -- baseline 구간이
+    한가한 순간에 걸리고 op 측정 1회가 그 직후 다른 xdist 워커의 부하 버스트와
+    겹치면(측정 시점이 떨어져 있어 구조적으로 가능) op만 느려져 적색이 된다
+    (관측: baseline p95=0.4ms→budget=100ms인데 op=130.7ms). `RelativeBudget.
+    measure_async`는 op/calibration 모두 best-of-N(최솟값, `tests/unit/scripts/
+    test_setup_test_db.py`의 동일 기법)을 쓰고 서로 가까운 시점에 측정해, 가장
+    덜 간섭받은 표본으로 수렴한다."""
 
     async def _baseline_round_trip() -> None:
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
 
-    samples_ms: list[float] = []
-    for _ in range(23):
-        samples_ms.append((await perf_budget.sample_async(_baseline_round_trip)).wall_ms)
-    baseline_rt_ms = sorted(samples_ms[3:])[-1]  # 워밍업 3회 버리고 최댓값(보수적 rt)
-
-    sample = await perf_budget.sample_async(
-        lambda: tenant_with_mandate(pool, mandate_repo, trust_repo)
+    budget = RelativeBudget()
+    sample = await budget.measure_async(
+        lambda: tenant_with_mandate(pool, mandate_repo, trust_repo),
+        n=3,
+        warmup=1,
+        calibration_n=5,
+        calibration_fn=_baseline_round_trip,
     )
 
-    budget_ms = max(100.0, 40 * baseline_rt_ms)
-    assert sample.wall_ms < budget_ms, (
-        f"tenant_with_mandate took {sample.wall_ms:.1f}ms, budget {budget_ms:.1f}ms "
-        f"(baseline rt {baseline_rt_ms:.1f}ms)"
+    budget_ms = max(100.0, 40 * sample.calibration_ms)
+    print(
+        f"\ntenant_with_mandate wall={sample.op_ms:.1f}ms "
+        f"baseline(SELECT 1)={sample.calibration_ms:.1f}ms budget={budget_ms:.1f}ms"
+    )
+    assert sample.op_ms < budget_ms, (
+        f"tenant_with_mandate took {sample.op_ms:.1f}ms, budget {budget_ms:.1f}ms "
+        f"(baseline rt {sample.calibration_ms:.1f}ms)"
     )

@@ -174,17 +174,29 @@ class RelativeBudget:
         n: int = 3,
         warmup: int = 1,
         calibration_n: int = 3,
+        calibration_fn: Callable[[], Awaitable[object]] | None = None,
     ) -> RelativeSample:
         """`measure()`의 async 변형 — 네트워크/DB 왕복처럼 `await`가 필요한
         작업을 ``time.perf_counter()`` 벽시계로 재되, 같은 프로세스에서 같은
         순간에 돈 CPU 보정 루프와의 비율로 호스트 부하를 상쇄한다(모듈
         docstring 참고). 보정 루프 자체는 동기 CPU 작업이라 `await`가 필요
-        없다."""
+        없다.
+
+        `calibration_fn`(task-11078): 측정 대상이 CPU가 아니라 DB 서버 부하에
+        묶여 있을 때(`measure()`의 동기 버전과 동일 근거, task-10652) 같은
+        프로세스·같은 순간에 돈 async 기준 작업(예: 단일 DB round-trip)을
+        넘긴다 — 기본 CPU 보정 루프로는 Postgres 서버 측 경합을 정규화하지
+        못한다."""
         clock = self._clock("wall")
         for _ in range(warmup):
             await fn()
         op_ms = await self._best_of_async(fn, clock=clock, n=n)
-        calibration_ms = self._best_of(lambda: _calibration_loop(), clock=clock, n=calibration_n)
+        if calibration_fn is not None:
+            calibration_ms = await self._best_of_async(calibration_fn, clock=clock, n=calibration_n)
+        else:
+            calibration_ms = self._best_of(
+                lambda: _calibration_loop(), clock=clock, n=calibration_n
+            )
         ratio = op_ms / calibration_ms if calibration_ms else float("inf")
         return RelativeSample(op_ms=op_ms, calibration_ms=calibration_ms, ratio=ratio)
 
@@ -196,9 +208,16 @@ class RelativeBudget:
         n: int = 3,
         warmup: int = 1,
         calibration_n: int = 3,
+        calibration_fn: Callable[[], Awaitable[object]] | None = None,
         label: str = "",
     ) -> RelativeSample:
-        sample = await self.measure_async(fn, n=n, warmup=warmup, calibration_n=calibration_n)
+        sample = await self.measure_async(
+            fn,
+            n=n,
+            warmup=warmup,
+            calibration_n=calibration_n,
+            calibration_fn=calibration_fn,
+        )
         prefix = f"{label}: " if label else ""
         assert sample.ratio < max_ratio, prefix + self.describe(sample, max_ratio=max_ratio)
         return sample
