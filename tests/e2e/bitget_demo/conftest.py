@@ -68,7 +68,7 @@ def test_demo_adapter_fixture_skips_when_credentials_missing(
     monkeypatch.delenv(passphrase, raising=False)
 
     # fixture를 직접 호출하면 skip이 발생한다.
-    with pytest.raises(Exception):  # skip.Exception is raised; exact type varies by pytest version
+    with pytest.raises(pytest.skip.Exception):
         skip_if_missing_demo_credentials()
 
 
@@ -163,7 +163,7 @@ async def test_demo_adapter_fixture_closes_on_setup_failure(
     # finally 블록이 aclose를 호출하는지 확인
     try:
         raise RuntimeError("simulated yield-phase failure")
-    except Exception:
+    except RuntimeError:
         await adapter.aclose()
         assert closed, "finally 블록이 aclose()를 호출하지 않음"
 
@@ -183,5 +183,5 @@ def test_demo_adapter_fixture_empty_string_credentials_skip(
 
     assert sorted(missing) == sorted(CREDENTIAL_ENV_VARS)
     # 빈 문자열이 있어도 skip이 발생해야 함
-    with pytest.raises(Exception):  # skip.Exception is raised; exact type varies by pytest version
+    with pytest.raises(pytest.skip.Exception):
         skip_if_missing_demo_credentials()

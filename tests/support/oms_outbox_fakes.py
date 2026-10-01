@@ -261,6 +261,7 @@ from tests.support.oms_outbox_fakes_orders import (  # noqa: F401, E402
     allow_gate,
     deny_gate,
     enqueue,
+    gate_param_has_no_default,
     make_dispatcher,
     make_order_view,
     make_venue_order,

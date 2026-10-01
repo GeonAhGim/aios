@@ -23,8 +23,8 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
+from pydantic import AwareDatetime, BaseModel
 
 from src.api.contracts.envelope import ApiResponse, ok
 from src.api.deps import get_pool
@@ -147,7 +147,9 @@ class ResearchSearchRequest(BaseModel):
     query: str
     kinds: list[ResearchItemKind] = []
     instrument_id: str | None = None
-    as_of: datetime | None = None
+    # tz-aware only: a naive datetime is rejected at the schema boundary, so it surfaces as the
+    # standard VALIDATION_INVALID_FIELD envelope instead of a raw HTTPException (PLT-21) or a 500.
+    as_of: AwareDatetime | None = None
 
 
 def _unmapped_reason(item: ResearchItem) -> UnmappedReason:
@@ -216,14 +218,11 @@ async def search_research_data_endpoint(
             if authorized_sources[item.source_id]:
                 allowed_candidates.append(item)
 
-    try:
-        matched = search_items(
-            allowed_candidates,
-            kinds=body.kinds or None,
-            as_of=body.as_of,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid as_of: {exc}") from exc
+    matched = search_items(
+        allowed_candidates,
+        kinds=body.kinds or None,
+        as_of=body.as_of,
+    )
 
     query = body.query.strip().lower()
     if query:

@@ -225,7 +225,7 @@ async def test_sources_endpoint_returns_catalog(client, seeded):
 # --- naive as_of → 4xx (not 500) ---
 
 
-async def test_search_naive_as_of_returns_422_not_500(client, seeded):
+async def test_search_naive_as_of_returns_validation_error_not_500(client, seeded):
     """naive(as_of, tzinfo 없는) datetime을 보낼 때 500이 아니라 4xx(422)를 반환한다.
 
     root cause: query.py search_items()가 naive as_of에 대해 ValueError를
@@ -238,9 +238,11 @@ async def test_search_naive_as_of_returns_422_not_500(client, seeded):
         json={"query": "BTC", "as_of": naive_as_of.isoformat(), "kinds": []},
         headers=seeded["a"],
     )
-    assert response.status_code == 422, f"Expected 422, got {response.status_code}: {response.text}"
+    # L4 section 2.3: VALIDATION_INVALID_FIELD maps to 400 in the standard envelope.
+    assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
     body = response.json()
-    assert "error_code" in body
+    assert body["error_code"] == "VALIDATION_INVALID_FIELD"
+    assert "body.as_of" in body["details"]["fields"]
     assert "data" not in body
 
 

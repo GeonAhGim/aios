@@ -93,7 +93,8 @@ def factor_chain(actions: list[CorporateAction], as_of: datetime) -> list[Adjust
     """Collect adjustments effective up to `as_of` and return cumulative factors per instrument.
 
     Returned list is sorted by `ex_date` ascending; each element is the cumulative
-    coefficient to apply to candles before that `ex_date` (including itself and all later adjustments)."""
+    coefficient to apply to candles before that `ex_date` (including itself and all later
+    adjustments)."""
     as_of_date = as_of.date()
     by_instrument: dict[UUID, list[CorporateAction]] = defaultdict(list)
     for action in actions:
@@ -141,7 +142,8 @@ def adjust(candles: list[CandleRecord], factors: list[AdjustmentFactor]) -> list
     """Apply `factor_chain` results to RAW candles to create ADJUSTED candles.
 
     To reflect only adjustments that occur after the candle date, use the first
-    coefficient (per instrument, in ascending `effective_date` order) that exceeds the candle date."""
+    coefficient (per instrument, in ascending `effective_date` order) that exceeds the candle
+    date."""
     by_instrument: dict[UUID, list[AdjustmentFactor]] = defaultdict(list)
     for f in factors:
         by_instrument[f.instrument_id].append(f)

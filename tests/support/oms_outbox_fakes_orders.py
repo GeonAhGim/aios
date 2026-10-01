@@ -8,6 +8,7 @@ This module contains fake implementations for:
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -277,3 +278,9 @@ def make_dispatcher(
         rng=lambda: 0.5,
         **kwargs,
     )
+
+
+def gate_param_has_no_default() -> bool:
+    """I-01 — `pre_send_gate`는 기본값이 없어야 한다(정적 검사와 같은 판정)."""
+    param = inspect.signature(OutboxDispatcher.__init__).parameters["pre_send_gate"]
+    return param.default is inspect.Parameter.empty
