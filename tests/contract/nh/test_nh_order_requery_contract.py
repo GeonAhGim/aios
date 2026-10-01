@@ -35,6 +35,7 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.nh.adapter import NHAdapter
 from src.exchanges.nh.websocket_parsing import parse_mc_ticker_frame
+from tests.conftest import PerfBudget
 from tests.integration._nh_adapter_helpers import (
     _unguarded_cancel_order,
     _unguarded_modify_order,
@@ -312,32 +313,23 @@ def test_parse_mc_ticker_frame_fails_closed_on_non_json():
 
 
 @pytest.mark.perf
-def test_parse_mc_ticker_frame_meets_ws_fanout_latency_budget():
+def test_parse_mc_ticker_frame_meets_ws_fanout_latency_budget(perf_budget: PerfBudget):
     """수치 성능 단언 -- ADR-2026-09-09-C Decision 1 예산표에 WS 프레임
     파싱 전용 항목이 없어 가장 가까운 유사 항목("WS 팬아웃 p95 500ms")을
     자체 예산으로 차용한다(task-3167/ecc08318, task-3165/1bf6c043
     DEEPEN과 동일 차용 근거) -- parse_mc_ticker_frame()은 그 팬아웃
     파이프라인의 첫 단계이므로 반복 호출의 p95 지연이 그 예산 안에
     들어와야 한다."""
-    import time
-
     raw = json.dumps({"header": {"tr_cd": "mc", "tr_key": "005940"}, "body": _MC_PUSH_EXAMPLE})
-    samples = 500
-    budget_sec = 0.5  # WS 팬아웃 p95 500ms 예산(ADR Decision 1) 차용
+    n = 500
+    budget_ms = 500.0  # WS 팬아웃 p95 500ms 예산(ADR Decision 1) 차용
 
-    latencies: list[float] = []
-    for _ in range(samples):
-        start = time.perf_counter()
-        parse_mc_ticker_frame(raw)
-        latencies.append(time.perf_counter() - start)
-    latencies.sort()
-    p95 = latencies[int(samples * 0.95) - 1]
+    samples = perf_budget.samples(lambda: parse_mc_ticker_frame(raw), n=n, warmup=1)
+    wall_ms = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms[int(n * 0.95) - 1]
 
-    print(
-        f"[H-3 nh ws] parse_mc_ticker_frame x{samples} p95={p95 * 1000:.4f}ms "
-        f"(budget<{budget_sec * 1000:.0f}ms)"
-    )
-    assert p95 < budget_sec, f"WS 팬아웃 p95 예산({budget_sec}s) 초과: {p95:.6f}s"
+    print(f"[H-3 nh ws] parse_mc_ticker_frame x{n} p95={p95_ms:.4f}ms (budget<{budget_ms:.0f}ms)")
+    assert p95_ms < budget_ms, f"WS 팬아웃 p95 예산({budget_ms}ms) 초과: {p95_ms:.4f}ms"
 
 
 async def test_get_order_field_missing_injection_confirms_fail_closed_reasoning():
