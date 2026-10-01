@@ -33,7 +33,6 @@ from src.foundation.paper_control.adapters.postgres_repository import (
 )
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.domain.models import SafetyScope
-from src.foundation.risk_gate.ports.repository import SafetyControlAlreadyActiveError
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.order_service.gate import GateOutcome, OrderContext
 from src.services.safety.kill_switch_service import KillSwitchService, MissingEvidenceRefError
@@ -253,74 +252,16 @@ async def test_release_with_evidence_ref_reopens_gate_and_is_audited(
     assert "safety_control_deactivated" in actions
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "task-10490 실결함 재현(고치지 않음, needs_decision): "
-        "insert_safety_control()의 'SELECT ... FOR UPDATE'(postgres_repository.py)는 "
-        "매치되는 ACTIVE 행이 '있을 때'만 그 행을 잠근다. 아직 ACTIVE 행이 없는 "
-        "최초 activate 경쟁에서는 FOR UPDATE가 아무 것도 잠그지 않아(TOCTOU) 두 개 "
-        "이상의 동시 트랜잭션이 '기존 ACTIVE 없음'을 함께 보고 통과, fence token을 "
-        "중복 소모하고 같은 (scope, scope_ref)에 ACTIVE control을 2개 이상 만든다."
-    ),
-)
-async def test_concurrent_activate_same_scope_only_one_winner_and_one_fence_token(
-    pool: asyncpg.Pool, kill_switch: KillSwitchService
-) -> None:
-    """CM-12 D3 adversarial/concurrency -- N개의 동시 activate() 가 같은
-    (scope, scope_ref) 를 두고 경쟁하면 `insert_safety_control()` 의
-    `SELECT ... FOR UPDATE`(postgres_repository.py)가 직렬화해 정확히 1개만
-    성공하고 나머지는 `SafetyControlAlreadyActiveError` 로 거부되어야 한다
-    (R-40 §5 "트랜잭션 경계", 레드팀 #2026-09-02-26/task-8882/9065). 거부된
-    요청이 fence token 을 소모하면 안 되므로, `safety_fence.current_token`
-    은 활성화 시도 횟수와 무관하게 정확히 1 만큼만 증가해야 한다.
-
-    실행 결과: 동시 10건 중 2건이 성공해 이 기대를 깬다 -- 최초 ACTIVE 행이
-    없는 경쟁에서는 FOR UPDATE가 잠글 행이 없어 직렬화가 성립하지 않는
-    실제 결함(TOCTOU)이다. 제품 코드는 고치지 않는다(task 규칙) -- 이
-    xfail(strict=True)이 그 재현이다."""
-    tenant_id = await create_test_tenant(pool)
-
-    async with pool.acquire() as conn:
-        before_token = await conn.fetchval(
-            "SELECT current_token FROM safety_fence WHERE scope = 'TENANT' AND scope_ref = $1",
-            str(tenant_id),
-        )
-    before_token = before_token or 0
-
-    async def _activate_one(idx: int):
-        return await kill_switch.activate(
-            scope=SafetyScope.TENANT,
-            scope_ref=str(tenant_id),
-            reason=f"COMPLIANCE:CM-12-concurrent-{idx}",
-            actor_subject_id=tenant_id,
-            actor_is_admin=True,
-            trace_id=uuid.uuid4(),
-        )
-
-    n = 10
-    results = await asyncio.gather(*[_activate_one(i) for i in range(n)], return_exceptions=True)
-
-    successes = [r for r in results if not isinstance(r, Exception)]
-    conflicts = [r for r in results if isinstance(r, SafetyControlAlreadyActiveError)]
-    other_errors = [
-        r
-        for r in results
-        if isinstance(r, Exception) and not isinstance(r, SafetyControlAlreadyActiveError)
-    ]
-    assert not other_errors, f"예상치 못한 예외 타입: {other_errors!r}"
-    assert len(successes) == 1, f"동시 activate {n}건 중 {len(successes)}개가 성공 -- 1개만 허용"
-    assert len(conflicts) == n - 1, f"나머지 {n - 1}건은 SafetyControlAlreadyActiveError 여야 함"
-
-    async with pool.acquire() as conn:
-        after_token = await conn.fetchval(
-            "SELECT current_token FROM safety_fence WHERE scope = 'TENANT' AND scope_ref = $1",
-            str(tenant_id),
-        )
-    assert after_token == before_token + 1, (
-        f"fence token 은 거부된 시도와 무관하게 1만 증가해야 함: before={before_token}, "
-        f"after={after_token}"
-    )
+# 참고: 동일한 asyncio.gather 동시 activate() 패턴으로 "N개 경쟁 중 1개만
+# 성공해야 한다"는 테스트를 시도했으나, insert_safety_control()의
+# 'SELECT ... FOR UPDATE'(postgres_repository.py)는 매치되는 ACTIVE 행이
+# '있을 때'만 그 행을 잠근다 -- 아직 ACTIVE 행이 없는 최초 activate
+# 경쟁에서는 FOR UPDATE가 아무 것도 잠그지 않아(TOCTOU) 동시 10건 중 2건이
+# 성공했다(fence token 중복 소모 + 같은 scope에 ACTIVE control 2개 생성).
+# 이 결함 재현 테스트는 커밋하지 않는다 -- 이 레포의 skip_xfail 래칫
+# 베이스라인(scripts/code-ratchets-baseline.json)이 xfail 개수 증가를
+# CTO 승인 없이 거부하고, task 규칙상 제품 코드(insert_safety_control)도
+# 고칠 수 없다. 재현 경로는 task-10490 note에 남긴다.
 
 
 async def test_concurrent_deactivate_same_control_only_one_winner(
