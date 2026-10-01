@@ -1,10 +1,12 @@
-"""109번 §4 재생 루프 — 실시간 평가 로직(StrategyEngine/PortfolioEngine/
-ExecutionEquityTracker)을 과거 bar 시퀀스에 그대로 재적용한다.
+"""Spec-109 §4 replay loop — reapplies the live evaluation logic
+(StrategyEngine/PortfolioEngine/ExecutionEquityTracker) to a historical bar
+sequence as-is.
 
-Phase 1 범위(position.py/portfolio/engine.py와 동일 가정): 단일 종목,
-분할청산 없음, 스탑로스/전량청산만. 여러 심볼 동시 백테스트나
-walk-forward/Monte Carlo는 이 함수를 반복 호출하는 상위 오케스트레이션
-(109번 §5, 이 파일의 범위 밖)의 몫이다.
+Phase 1 scope (same assumptions as position.py/portfolio/engine.py): a
+single symbol, no partial exits, stop-loss/full-exit only. Multi-symbol
+concurrent backtests or walk-forward/Monte Carlo are the responsibility of
+a higher-level orchestration that calls this function repeatedly
+(spec-109 §5, out of scope for this file).
 """
 
 from __future__ import annotations
@@ -42,29 +44,31 @@ from src.services.execution_loop.market_state import build_market_state
 
 logger = logging.getLogger(__name__)
 
-_SYNTHETIC_EXECUTION_ID = -1  # 실제 실행 execution_id(항상 양수)와 절대 겹치지 않는 고정 음수
+# Fixed negative value, never collides with a real execution_id (always positive).
+_SYNTHETIC_EXECUTION_ID = -1
 
 
 class BacktestRunError(Exception):
-    """입력 자체가 이 엔진의 불변조건을 만족하지 못할 때(warmup 부족 등)."""
+    """Raised when the input itself violates this engine's invariants (e.g. insufficient warmup)."""
 
 
 class _PendingOrder(NamedTuple):
-    """신호가 나온 bar와 실제 체결 bar 사이(§5 look-ahead 방지)의 대기 상태.
+    """Pending state between the bar where a signal fires and the bar it
+    actually fills on (§5 look-ahead prevention).
 
-    도메인 계약(domain/models.py)에는 넣지 않는다 — 이 루프 내부에서만
-    쓰는 일시적 상태라 외부에 노출할 계약이 아니다."""
+    Not placed in the domain contract (domain/models.py) — this is transient
+    state used only within this loop, not a contract meant to be exposed externally."""
 
     side: OrderSide
     quantity: Decimal
-    filled_state: FSMState  # ORDER_FILLED 전이가 실제로 향하는 상태(§_order_filled_target)
+    filled_state: FSMState  # state the ORDER_FILLED transition targets (see _order_filled_target)
 
 
 def _order_filled_target(fsm_config: FSMStrategyConfig, from_state: FSMState) -> FSMState:
-    """StrategyEngine.evaluate()는 ORDER_FILLED 조건 전이를 의도적으로
-    건너뛴다(FD-4.2 몫 — engine.py 51-53행 주석) — 백테스트에는 별도의
-    체결확인 이벤트가 없으므로, 이 엔진이 그 지점에서 그 전이를 직접
-    찾아 적용해야 한다."""
+    """StrategyEngine.evaluate() deliberately skips the ORDER_FILLED condition
+    transition (FD-4.2's responsibility — see engine.py lines 51-53 comment).
+    A backtest has no separate fill-confirmation event, so this engine must
+    look up and apply that transition itself at this point."""
     for transition in fsm_config.transitions:
         if transition.from_state == from_state and transition.condition == ORDER_FILLED:
             return transition.to_state
