@@ -11,8 +11,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
+
+import scripts.closeout.ops as ops_module
 from tests.unit.scripts.closeout_check_loader import ROOT, TEST_DEF, _write, cc
 
 # --------------------------------------------------------------------------- 10: 운영
@@ -222,6 +226,92 @@ def test_load_ci_report_ok_fails_on_corrupt_json(tmp_path: Path) -> None:
 
     assert not ok
     assert "파싱 실패" in note
+
+
+def test_check_invariants_fails_when_script_exits_nonzero(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "scripts/check_audit_regressions.py",
+        "import sys\nsys.exit(1)\n",
+    )
+    _write(tmp_path / "audit-baseline.json", json.dumps({"open": {}}))
+
+    ok, note = cc._check_invariants(tmp_path)
+
+    assert not ok
+    assert "FAIL" in note
+
+
+def test_check_invariants_propagates_when_subprocess_crashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실패 주입: `check_audit_regressions.py` 서브프로세스 호출 자체가(타임아웃 등)
+    예외를 던지면 삼키지 않고 그대로 전파한다 — 거짓 PASS로 위장하지 않는다
+    (fail-closed: 예외가 전파되면 closeout_check 전체가 비정상 종료해 종료코드
+    0이 될 수 없다)."""
+    _write(
+        tmp_path / "scripts/check_audit_regressions.py",
+        "import sys\nsys.exit(0)\n",
+    )
+    _write(tmp_path / "audit-baseline.json", json.dumps({"open": {}}))
+
+    def _raise(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd="check_audit_regressions.py", timeout=120)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        cc._check_invariants(tmp_path)
+
+
+def test_load_ci_step_ok_fails_when_steps_key_missing(tmp_path: Path) -> None:
+    path = tmp_path / "ci.json"
+    path.write_text(json.dumps({"unrelated": True}), encoding="utf-8")
+
+    ok, note = ops_module._load_ci_step_ok(path, "journeys")
+
+    assert not ok
+    assert "steps.journeys" in note
+
+
+def test_load_ci_step_ok_fails_when_step_not_dict(tmp_path: Path) -> None:
+    path = tmp_path / "ci.json"
+    path.write_text(json.dumps({"steps": {"journeys": "not-a-dict"}}), encoding="utf-8")
+
+    ok, note = ops_module._load_ci_step_ok(path, "journeys")
+
+    assert not ok
+    assert "steps.journeys" in note
+
+
+def test_check_13_user_journeys_fails_when_spec_files_missing(tmp_path: Path) -> None:
+    result = cc.check_13_user_journeys(tmp_path, ci_report=None)
+
+    assert not result.passed
+    assert any("여정 테스트 파일 누락" in e or "journey" in e for e in [result.detail])
+
+
+def test_check_13_user_journeys_fails_when_fixme_present(tmp_path: Path) -> None:
+    for spec in cc.JOURNEY_SPECS:
+        _write(tmp_path / spec, "test.fixme('todo', async () => {})\n")
+    ci_report = tmp_path / "ci.json"
+    ci_report.write_text(json.dumps({"steps": {"journeys": {"ok": True}}}), encoding="utf-8")
+
+    result = cc.check_13_user_journeys(tmp_path, ci_report=ci_report)
+
+    assert not result.passed
+    assert "test.fixme" in result.detail
+
+
+def test_check_13_user_journeys_fails_when_journeys_step_not_ok(tmp_path: Path) -> None:
+    for spec in cc.JOURNEY_SPECS:
+        _write(tmp_path / spec, "test('ok', async () => {})\n")
+    ci_report = tmp_path / "ci.json"
+    ci_report.write_text(json.dumps({"steps": {"journeys": {"ok": False}}}), encoding="utf-8")
+
+    result = cc.check_13_user_journeys(tmp_path, ci_report=ci_report)
+
+    assert not result.passed
+    assert "steps.journeys" in result.detail
 
 
 # --------------------------------------------------------------------------- 11: 하드닝 집계 로직
