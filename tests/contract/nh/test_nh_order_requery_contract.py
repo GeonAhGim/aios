@@ -15,7 +15,8 @@ openapi-docs/krstock/openapi.json`, 도메인이 정본)에서 2026-09-16
    `push_example`(공식 스펙 예시 값 그대로) 왕복.
 
 핸드라이팅 mixin의 나머지 동작(에러 매핑, 페이퍼 가드 등)은 범위 밖 --
-이미 tests/integration/test_nh_adapter.py가 다룬다(KIS BR-13,
+이미 tests/integration/test_nh_adapter*.py(RATCHET-split, task-10196)가
+다룬다(KIS BR-13,
 tests/contract/exchanges/kis/test_generated_contract.py와 동일 원칙:
 생성기가 없는 NH는 "생성 코드 대 BR-11 참조표" 대신 "핸드라이팅 코드
 대 openapi.json 직접 파싱 결과"를 대조한다).
@@ -34,7 +35,7 @@ from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderType
 from src.exchanges.nh.adapter import NHAdapter
 from src.exchanges.nh.websocket_parsing import parse_mc_ticker_frame
-from tests.integration.test_nh_adapter import (
+from tests.integration._nh_adapter_helpers import (
     _unguarded_cancel_order,
     _unguarded_modify_order,
     _unguarded_place_order,
