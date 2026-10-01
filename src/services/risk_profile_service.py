@@ -1,17 +1,19 @@
-"""15.2 — 위험등급 저장 및 재평가 (RiskProfileService).
+"""15.2 — Risk profile save and reassessment (RiskProfileService).
 
-Spec: 기능설계문서_v1.20.md#FD-15.2, 04번 DB스키마, FD-17.2
+Spec: 기능설계문서_v1.20.md#FD-15.2, DB schema #04, FD-17.2
 
-이전 값을 덮어쓰지 않고 risk_profile_history에 이력행을 추가한다(4.6-A
-Memory 버전관리 원칙과 동일 정신 — 사후 조사 대비). 재평가 주기는
-Draft 12개월.
+Appends history rows to risk_profile_history rather than overwriting previous
+values (same spirit as 4.6-A Memory version-control principle — for post-hoc
+audit). Reassessment interval is Draft: 12 months.
 
-FD-15.2 예외상황("재응시로 등급이 나빠지면 RUNNING 실행 중 새 등급과
-불일치하는 것에 즉시 경고")은 FD-16(실행 제어판, strategy_executions)이
-아직 없어 실제로 확인할 대상이 없다 — save_assessment()는 등급이
-나빠졌는지(is_higher_risk) 여부만 반환하고, 기존 실행 대조·경고 발송은
-FD-16 착수 시 이 반환값을 소비하는 쪽에서 연결해야 한다.
+FD-15.2 exception ("if re-suitability yields a worse risk grade, immediately
+alert that it conflicts with the currently RUNNING grade") cannot be verified
+in practice yet because FD-16 (execution controller, strategy_executions) does
+not exist — save_assessment() only returns whether the grade worsened
++(is_higher_risk). Wiring the existing-execution comparison and alert dispatch
+to this return value must be done when FD-16 is implemented.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -28,20 +30,21 @@ from src.services.suitability_questionnaire import (
     SuitabilityResult,
 )
 
-REASSESSMENT_INTERVAL_DAYS = 365  # Draft — 12개월
+REASSESSMENT_INTERVAL_DAYS = 365  # Draft — 12 months
 
 _SEVERITY = {RISK_PROFILE_STABLE: 0, RISK_PROFILE_NEUTRAL: 1, RISK_PROFILE_AGGRESSIVE: 2}
 
 
 class RiskProfileError(Exception):
-    """FD-15.2 실패 — VALIDATION_INVALID_FIELD(400)."""
+    """FD-15.2 failure — VALIDATION_INVALID_FIELD(400)."""
 
 
 class RiskProfileNotFoundError(RiskProfileError):
-    """`GET /users/me/risk-profile` 조회 시점에 아직 적합성평가를 완료하지
-    않음 — RESOURCE_NOT_FOUND(404). `get_current()`는 그대로 `None`을
-    반환하는 기존 계약을 유지하고(tests/integration/test_risk_profile_service.py
-    무수정), 라우터(suitability.py)가 `None`일 때 이 예외를 직접 던진다."""
+    """`GET /users/me/risk-profile` — suitability assessment not yet completed
+    at the time of lookup — RESOURCE_NOT_FOUND(404). `get_current()` preserves
+    the existing contract of returning `None` as-is (tests/integration/
+    test_risk_profile_service.py, no changes), and the router (suitability.py)
+    raises this exception directly when it receives `None`."""
 
 
 class RiskProfileRecord(BaseModel):
@@ -55,9 +58,7 @@ class RiskProfileService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    async def save_assessment(
-        self, user_id: UUID, result: SuitabilityResult
-    ) -> RiskProfileRecord:
+    async def save_assessment(self, user_id: UUID, result: SuitabilityResult) -> RiskProfileRecord:
         async with self._pool.acquire() as conn:
             existing = await conn.fetchrow(
                 "SELECT risk_profile FROM users WHERE user_id = $1", user_id
