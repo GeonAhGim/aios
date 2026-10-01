@@ -272,6 +272,34 @@ def test_result_hash_is_deterministic_for_same_inputs(monkeypatch: pytest.Monkey
     assert first.result_hash == second.result_hash
 
 
+def test_hard_fail_when_splits_below_min_oos_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative test: `len(splits) < policy.min_oos_windows` → hard fail
+    (`VALIDATION_OOS_INSUFFICIENT`).
+
+    This exercises the explicit split-count guard at ``run()`` lines 89–93,
+    which is a different code path from the ``MinTrainUnsatisfiableError``
+    catch (lines 82–85) and the generic ``WalkForwardError`` catch
+    (lines 97–99).
+    """
+    from src.foundation.backtest.domain.splits import Split
+    from src.foundation.validation.domain.policy import ValidationPolicy
+
+    # Provide exactly 1 split while policy.min_oos_windows defaults to 3
+    # → triggers the split-count guard.
+    splits: list[Split] = [Split(train=range(0, 100), test=range(100, 150), purge=0, embargo=0)]
+    monkeypatch.setattr(
+        check_mod,
+        "run_walk_forward",
+        lambda *args, **kwargs: splits,
+    )
+    policy = ValidationPolicy(min_oos_windows=3)
+    result = check_mod.run(_ctx(_bars(50), policy=policy))
+    assert result.outcome == Outcome.FAIL
+    assert result.hard_fail_reasons == ["VALIDATION_OOS_INSUFFICIENT"]
+
+
 def _p95_ms(samples: list[float]) -> float:
     ordered = sorted(samples)
     return ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)] * 1000
