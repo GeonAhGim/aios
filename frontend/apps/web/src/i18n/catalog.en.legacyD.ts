@@ -178,6 +178,11 @@ export const catalogEnLegacyD = {
     "t13": "Execution list",
     "t14": "No running strategies.",
     "t15": "Failed to create the execution.",
+    "t16": "LIVE mode — real funds will be used from now on.",
+    "t17": "Confirm LIVE order",
+    "t18": "This will submit a real-funds order with the details above. It cannot be undone — please review carefully.",
+    "t19": "Confirm live order",
+    "t20": "Cancel",
   },
   "mandatesPage": {
     "t1": "Total exposure limit: {{maxTotalExposurePct}}%",

@@ -18,8 +18,9 @@ import {
   LoadingState,
   PageHeader,
   Select,
+  useDialogFocusTrap,
 } from "@aios/ui-web";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
@@ -80,6 +81,70 @@ function ExecutionsListError({ error, onRetry }: { error: unknown; onRetry: () =
   );
 }
 
+const LIVE_CONFIRM_TITLE_ID = "live-order-confirm-title";
+
+// task-10635(J8): LIVE 실자금 주문의 1회 확인 단계(UX_JOURNEYS.md §6.3). RiskWarningModal
+// (위험등급 불일치용, "참고용 경고"라 취소 없이도 넘어갈 수 있다는 문구)과 문구 의미가 달라
+// 재사용하지 않는다 — 여기는 필수 관문이므로 포커스 트랩 훅만 공유하고 문구는 전용으로 둔다.
+function LiveOrderConfirmDialog({
+  strategyId,
+  allocatedCapital,
+  exchange,
+  isPending,
+  onConfirm,
+  onCancel,
+}: {
+  strategyId: string;
+  allocatedCapital: string;
+  exchange: string;
+  isPending: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocusTrap({ isOpen: true, onClose: onCancel, containerRef: dialogRef });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={LIVE_CONFIRM_TITLE_ID}
+        className="w-full max-w-md space-y-4 rounded-xl border border-warning/30 bg-surface p-6"
+      >
+        <div className="flex items-center gap-2 text-warning">
+          <span aria-hidden>⚠</span>
+          <h2 id={LIVE_CONFIRM_TITLE_ID} className="text-lg font-semibold">
+            {t("legacy.executionControlPage.t17")}
+          </h2>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+          <dt className="text-fg-muted">{t("legacy.executionControlPage.label4")}</dt>
+          <dd>{strategyId}</dd>
+          <dt className="text-fg-muted">{t("legacy.executionControlPage.label6")}</dt>
+          <dd>{allocatedCapital} USDT</dd>
+          <dt className="text-fg-muted">{t("legacy.executionControlPage.label7")}</dt>
+          <dd>{exchange}</dd>
+        </dl>
+        <p className="text-xs text-fg-muted">{t("legacy.executionControlPage.t18")}</p>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onCancel}>
+            {t("legacy.executionControlPage.t20")}</Button>
+          <Button
+            type="button"
+            onClick={onConfirm}
+            loading={isPending}
+            className="!bg-warning !text-slate-950 hover:!bg-warning/90"
+          >
+            {t("legacy.executionControlPage.t19")}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ExecutionControlPage() {
   const { t } = useTranslation();
   const {
@@ -98,6 +163,15 @@ export function ExecutionControlPage() {
   const [exchange, setExchange] = useState("bitget");
   const [mode, setMode] = useState<"PAPER" | "LIVE">("PAPER");
   const [error, setError] = useState<unknown>(null);
+  // task-10635(J8): LIVE 실자금 주문은 1회 확인 단계를 거친다 — "form"(입력) ->
+  // "confirm"(요약 확인) -> submitExecution. PAPER는 단계 수를 늘리지 않고 "form"에서
+  // 바로 submitExecution으로 간다(요구사항 e). mode를 바꾸면 보류 중인 확인을 취소한다.
+  const [step, setStep] = useState<"form" | "confirm">("form");
+
+  function handleModeChange(next: "PAPER" | "LIVE") {
+    setMode(next);
+    setStep("form");
+  }
 
   // §3.3 STATE_CONCURRENCY_CONFLICT(409)는 useConflictRetry(task-937)로 실행 목록을
   // 재조회한 뒤 1회 재제출한다. submit()을 다시 호출하므로(useIdempotentSubmit이 409를
@@ -123,6 +197,7 @@ export function ExecutionControlPage() {
 
   async function submitExecution() {
     setError(null);
+    setStep("form");
     // task-7500(J3 G-4): RiskVerdictPanel이 evaluateRiskGate(PRE_SUBMIT)의 실제
     // RiskEvaluationView를 그대로 보여준다 — 플래그가 꺼져 있으면(기본값) 부가
     // 네트워크 호출 자체를 내지 않는다(FeatureFlagGate와 동일 "부작용 없음" 원칙).
@@ -140,7 +215,16 @@ export function ExecutionControlPage() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (mode === "LIVE" && step === "form") {
+      // LIVE 첫 제출은 실제 주문을 내지 않고 요약 확인 단계로만 넘어간다(요구사항 b).
+      setStep("confirm");
+      return;
+    }
     void submitExecution();
+  }
+
+  function cancelLiveConfirm() {
+    setStep("form");
   }
 
   return (
@@ -175,16 +259,36 @@ export function ExecutionControlPage() {
               </Select>
             </Field>
             <Field label={t("legacy.executionControlPage.label8")}>
-              <Select value={mode} onChange={(e) => setMode(e.target.value as "PAPER" | "LIVE")}>
+              <Select
+                value={mode}
+                onChange={(e) => handleModeChange(e.target.value as "PAPER" | "LIVE")}
+              >
                 <option value="PAPER">{t("legacy.executionControlPage.t9")}</option>
                 <option value="LIVE">{t("legacy.executionControlPage.t10")}</option>
               </Select>
             </Field>
             <div className="col-span-2 flex items-end md:col-span-1">
-              <Button type="submit" loading={createExecution.isPending} className="w-full">
-                {t("legacy.executionControlPage.t11")}</Button>
+              {step === "form" && (
+                <Button type="submit" loading={createExecution.isPending} className="w-full">
+                  {t("legacy.executionControlPage.t11")}</Button>
+              )}
             </div>
           </form>
+          {mode === "LIVE" && (
+            <div className="mt-3">
+              <Alert tone="warning">{t("legacy.executionControlPage.t16")}</Alert>
+            </div>
+          )}
+          {mode === "LIVE" && step === "confirm" && (
+            <LiveOrderConfirmDialog
+              strategyId={strategyId}
+              allocatedCapital={allocatedCapital}
+              exchange={exchange}
+              isPending={createExecution.isPending}
+              onConfirm={() => void submitExecution()}
+              onCancel={cancelLiveConfirm}
+            />
+          )}
           {error !== null && (
             <div className="mt-3">
               <CreateExecutionError error={error} onRetry={() => void submitExecution()} />

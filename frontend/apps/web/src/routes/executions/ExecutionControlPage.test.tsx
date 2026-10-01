@@ -102,6 +102,12 @@ function submitCreateForm(container: HTMLElement) {
   fireEvent.click(screen.getByRole("button", { name: "실행 생성" }));
 }
 
+function switchModeToLive(container: HTMLElement) {
+  const strategyIdInput = container.querySelector("input") as HTMLInputElement;
+  fireEvent.change(strategyIdInput, { target: { value: "strat-1" } });
+  fireEvent.change(screen.getByLabelText("모드"), { target: { value: "LIVE" } });
+}
+
 // task-901 §3.3: 실행 생성 실패는 err.message를 직접 노출하지 않고 routeApiError로
 // 판정해 BadRequestNotice/ForbiddenNotice/ErrorMessage 경로로만 보여준다.
 describe("ExecutionControlPage 실행 생성 에러 표시", () => {
@@ -298,6 +304,70 @@ describe("ExecutionControlPage 실행 생성 Idempotency-Key(§3.7) 실제 헤�
     submitCreateForm(container);
     await waitFor(() => expect(secondFetch).toHaveBeenCalledTimes(1));
     expect(idempotencyKeyOf(secondFetch)).not.toBe(firstKey);
+  });
+});
+
+// task-10635(J8): LIVE 모드는 실자금이 걸린 행동이라 상시 고지 + 1회 확인 단계를
+// 거쳐야 한다(UX_JOURNEYS.md §6.3). PAPER는 기존 단계 수(1회 클릭 제출) 그대로다 —
+// 그 경로는 위 describe들이 이미 잠그고 있다.
+describe("ExecutionControlPage LIVE 2단계 확인(task-10635)", () => {
+  it("LIVE를 고르면 실제 자금이 사용된다는 고지를 상시 표시한다", () => {
+    const { container } = renderPage();
+
+    switchModeToLive(container);
+
+    expect(
+      screen.getByText("LIVE 모드입니다 — 지금부터 실제 자금이 사용됩니다."),
+    ).toBeInTheDocument();
+  });
+
+  it("negative: LIVE는 확인 단계 없이 제출 버튼 1회 클릭만으로 주문이 나가지 않는다", () => {
+    const { container } = renderPage();
+
+    switchModeToLive(container);
+    fireEvent.click(screen.getByRole("button", { name: "실행 생성" }));
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "LIVE 주문 확인" })).toBeInTheDocument();
+  });
+
+  it("negative: LIVE 확인 단계에서 취소하면 주문이 생성되지 않고 확인 창이 닫힌다", () => {
+    const { container } = renderPage();
+
+    switchModeToLive(container);
+    fireEvent.click(screen.getByRole("button", { name: "실행 생성" }));
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "LIVE 주문 확인" })).not.toBeInTheDocument();
+  });
+
+  it("LIVE 확인 단계에서 대상·금액·거래소 요약을 다시 보여주고, 확정해야 실제 주문이 나간다", async () => {
+    mutateAsync.mockResolvedValue({ executionId: 1 });
+    const { container } = renderPage();
+
+    switchModeToLive(container);
+    fireEvent.click(screen.getByRole("button", { name: "실행 생성" }));
+
+    const dialog = screen.getByRole("dialog", { name: "LIVE 주문 확인" });
+    expect(dialog).toHaveTextContent("strat-1");
+    expect(dialog).toHaveTextContent("100 USDT");
+    expect(dialog).toHaveTextContent("bitget");
+
+    fireEvent.click(screen.getByRole("button", { name: "실거래 주문 확정" }));
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    expect(mutateAsync.mock.calls[0][0].body.mode).toBe("LIVE");
+  });
+
+  it("PAPER는 확인 단계 없이 기존 1회 클릭 제출 단계 수를 유지한다", async () => {
+    mutateAsync.mockResolvedValue({ executionId: 1 });
+    const { container } = renderPage();
+
+    submitCreateForm(container);
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
 
