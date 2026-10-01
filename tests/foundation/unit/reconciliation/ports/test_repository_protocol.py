@@ -28,6 +28,7 @@ from src.foundation.reconciliation.domain.models import (
     RunState,
 )
 from src.foundation.reconciliation.ports.repository import ReconciliationRepository
+from tests.conftest import PerfBudget
 
 
 class _FullReconciliationRepo:
@@ -288,3 +289,53 @@ def test_reconciliation_item_uses_decimal_for_monetary_values() -> None:
 
     assert isinstance(item.internal_value, Decimal)
     assert item.provider_value is None
+
+
+# ── DEEPEN task-10840: additional negative / failure-injection / perf ──
+
+
+@pytest.mark.negative
+def test_none_fails_port_check() -> None:
+    """`None`은 메서드가 전혀 없다 — fail-closed 경계값."""
+    assert not isinstance(None, ReconciliationRepository)
+
+
+@pytest.mark.negative
+def test_plain_string_fails_port_check() -> None:
+    """repository가 아닌 임의 타입(문자열)도 거부돼야 한다."""
+    assert not isinstance("not-a-repository", ReconciliationRepository)
+
+
+@pytest.mark.failure_injection
+async def test_get_run_by_input_hash_monkeypatched_failure_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """monkeypatch로 의존성(get_run_by_input_hash)이 커넥션 장애를 던지도록
+    강제해도 포트는 예외를 삼키지 않고 그대로 전파한다."""
+    repo = _FullReconciliationRepo()
+
+    async def _raise_connection_error(self, target_ref, input_hash, tenant_id):
+        raise ConnectionError("provider unreachable")
+
+    monkeypatch.setattr(_FullReconciliationRepo, "get_run_by_input_hash", _raise_connection_error)
+
+    with pytest.raises(ConnectionError, match="provider unreachable"):
+        await repo.get_run_by_input_hash(uuid4(), "deadbeef", uuid4())
+
+
+@pytest.mark.perf
+def test_isinstance_check_stays_under_budget(perf_budget: PerfBudget) -> None:
+    """`isinstance()` 포트 체크는 @runtime_checkable의 이름 조회만 하므로
+    1,000회 반복해도 여유 있는 예산 안에 끝나야 한다 — 회귀가 생기면(예: 체크
+    경로에 무거운 연산이 섞여 들어가면) 이 예산을 넘는다. task-7434: 공유
+    process_time 기반 `perf_budget` 픽스처만 쓰고 raw perf_counter는 쓰지
+    않는다."""
+    repo = _FullReconciliationRepo()
+
+    def _run_once() -> None:
+        for _ in range(1000):
+            isinstance(repo, ReconciliationRepository)
+
+    perf_budget.assert_within(
+        _run_once, budget_ms=200.0, label="1000x isinstance(repo, ReconciliationRepository)"
+    )
