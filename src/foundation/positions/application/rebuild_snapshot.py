@@ -1,4 +1,5 @@
-"""LB-13 — Operational tool to rebuild the snapshot by folding the entire journal (application/rebuild_snapshot).
+"""LB-13 — Operational tool to rebuild the snapshot by folding the entire journal
+(application/rebuild_snapshot).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §9 LB-13,
 §4.3 invariant "snapshot = fold(journal)".

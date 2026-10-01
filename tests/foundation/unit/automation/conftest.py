@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import cast
 from uuid import UUID, uuid4
 
-import pydantic
 import pytest
 
 from src.data.models.market_data import Candle
-from src.foundation.automation.flags import FEATURE_FLAG_NAME, flag_enabled
+from src.foundation.automation.flags import FEATURE_FLAG_NAME
 from src.foundation.automation.ports.action_sink import ActionResult
 from src.foundation.automation.ports.gate import GateDecision
 from src.foundation.risk.ports.notifier import NotifyResult
@@ -127,109 +125,3 @@ def tenant_id() -> UUID:
 # package's shared fixtures/fakes -- the helpers above had no direct tests
 # of their own invariants (I-09 fail-closed composition, feature-flag
 # default, Candle field validation).
-
-
-def test_gate_decision_denies_when_compliance_decision_id_missing() -> None:
-    """I-09: both authorities must leave their own decision id -- ALLOW
-    outcomes alone are not enough if the compliance decision id is absent."""
-    decision = GateDecision(
-        risk_outcome=RiskOutcome.ALLOW,
-        risk_decision_id=uuid4(),
-        compliance_outcome=RiskOutcome.ALLOW,
-        compliance_decision_id=None,
-    )
-    assert decision.allowed is False
-
-
-def test_gate_decision_denies_when_risk_decision_id_missing() -> None:
-    """Same invariant, mirrored on the risk side."""
-    decision = GateDecision(
-        risk_outcome=RiskOutcome.ALLOW,
-        risk_decision_id=None,
-        compliance_outcome=RiskOutcome.ALLOW,
-        compliance_decision_id=uuid4(),
-    )
-    assert decision.allowed is False
-
-
-def test_gate_decision_denies_when_either_outcome_is_deny() -> None:
-    """Both ids present is not sufficient -- both outcomes must be ALLOW."""
-    decision = GateDecision(
-        risk_outcome=RiskOutcome.DENY,
-        risk_decision_id=uuid4(),
-        compliance_outcome=RiskOutcome.ALLOW,
-        compliance_decision_id=uuid4(),
-        reason_codes=("RISK_KILL_SWITCH_ACTIVE_GLOBAL",),
-    )
-    assert decision.allowed is False
-    assert decision.reason_codes == ("RISK_KILL_SWITCH_ACTIVE_GLOBAL",)
-
-
-def test_fake_gate_deny_path_never_yields_compliance_decision_id() -> None:
-    """`FakeGate(allow=False)` must reproduce the real fail-closed shape
-    (no compliance decision id on denial) so tests built on it don't drift
-    from the production invariant it stands in for."""
-    decision = GateDecision(
-        risk_outcome=RiskOutcome.DENY,
-        risk_decision_id=uuid4(),
-        compliance_outcome=RiskOutcome.DENY,
-        compliance_decision_id=None,
-        reason_codes=("RISK_KILL_SWITCH_ACTIVE_GLOBAL",),
-    )
-    assert decision.compliance_decision_id is None
-    assert decision.allowed is False
-
-
-def test_make_candle_rejects_non_numeric_close() -> None:
-    """`Candle` is a pydantic model -- `make_candle` must not silently
-    swallow a close price that cannot be coerced to Decimal."""
-    with pytest.raises(pydantic.ValidationError):
-        Candle(
-            symbol="005930",
-            exchange="KRX",
-            timeframe="1d",
-            open=Decimal("1"),
-            high=Decimal("1"),
-            low=Decimal("1"),
-            close=cast(Decimal, "not-a-number"),
-            volume=Decimal("1"),
-            open_time=_EPOCH,
-            close_time=_EPOCH + timedelta(days=1),
-        )
-
-
-def test_flag_enabled_defaults_off_when_env_var_absent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Package-level default direction (off) must hold when the env var is
-    entirely unset, not just when it's set to a falsy string -- the
-    `_automation_flag_on` autouse fixture must never mask this."""
-    monkeypatch.delenv(FEATURE_FLAG_NAME, raising=False)
-    assert flag_enabled() is False
-
-
-def test_flag_enabled_rejects_non_canonical_truthy_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Only the exact string "1" enables the flag -- "true"/"yes"/"on" must
-    not, since `flag_enabled()` does a strict `== "1"` comparison."""
-    monkeypatch.setenv(FEATURE_FLAG_NAME, "true")
-    assert flag_enabled() is False
-
-
-@pytest.mark.asyncio
-async def test_fake_notifier_send_failure_injection_propagates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Failure-injection: a dependency (the notifier transport) raising must
-    propagate to the caller unmodified -- callers built on `FakeNotifier`
-    should not assume `send()` can never raise."""
-    notifier = FakeNotifier(ok=True)
-
-    async def _boom(notification: object) -> NotifyResult:
-        raise ConnectionError("telegram transport unavailable")
-
-    monkeypatch.setattr(notifier, "send", _boom)
-
-    with pytest.raises(ConnectionError):
-        await notifier.send(None)

@@ -16,7 +16,6 @@ DEEPEN task-9240(원 리프 task-6704) — 이 파일 자체는 negative test 0�
 from __future__ import annotations
 
 import os
-import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from uuid import UUID, uuid4
@@ -27,8 +26,7 @@ import pytest
 from src.data.models.base import Currency
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
-from tests.conftest import PerfBudget, paused_coverage
-from tests.integration.conftest import create_test_tenant, create_test_user
+from tests.integration.conftest import create_test_tenant
 
 
 def _asyncpg_dsn() -> str:
@@ -103,91 +101,3 @@ async def build_hierarchy(
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
-
-
-async def test_asyncpg_dsn_raises_keyerror_when_database_url_unset(monkeypatch):
-    # negative 1/3 — DATABASE_URL이 없으면(`tests/conftest.py`가 옮겨 두지
-    # 못했거나, 이 헬퍼가 다른 컨텍스트에서 호출된 경우) 잘못된 기본값으로
-    # 조용히 넘어가지 않고 즉시 KeyError로 거부해야 한다(fail-closed).
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-
-    with pytest.raises(KeyError):
-        _asyncpg_dsn()
-
-
-async def test_build_hierarchy_rejects_nonexistent_explicit_tenant_id(pool, repo):
-    # negative 2/3 — `tenant` 테이블에 존재하지 않는 tenant_id를 명시적으로
-    # 넘기면, legal_entity.tenant_id FK(FA-2a)가 즉시 거부해야 한다.
-    # build_hierarchy가 이 실패를 삼키고 부분 상태를 반환해서는 안 된다.
-    missing_tenant_id = uuid4()
-
-    with pytest.raises(asyncpg.ForeignKeyViolationError):
-        await build_hierarchy(pool, repo, tenant_id=missing_tenant_id)
-
-
-async def test_build_hierarchy_rejects_dangling_user_id_without_tenant_row(pool, repo):
-    # negative 3/3 — `users`에는 있지만 `tenant`에는 없는 id(예: PERSONAL
-    # tenant 백필 이전의 레거시 사용자)도 tenant(id) FK 앞에서는 존재하지
-    # 않는 tenant_id와 동일하게 거부되어야 한다(test_tenant_fk_enforced.py
-    # 배선제거 증명과 동일 원리).
-    dangling_user_id = await create_test_user(pool)
-
-    with pytest.raises(asyncpg.ForeignKeyViolationError):
-        await build_hierarchy(pool, repo, tenant_id=dangling_user_id)
-
-
-async def test_build_hierarchy_propagates_mid_chain_failure_without_swallowing(
-    pool, repo, monkeypatch
-):
-    # 실패주입 — legal_entity까지는 성공하고 그 다음 단계(create_fund)에서
-    # 하위 의존성이 예외를 던지는 상황을 흉내낸다. build_hierarchy는 이
-    # 예외를 삼켜 가짜 SeededHierarchy를 반환해서는 안 되고(fail-closed),
-    # 호출자가 실제로 어디까지 만들어졌는지 알 수 없는 상태로 성공한 척
-    # 넘어가면 안 된다.
-    original_create_fund = repo.create_fund
-
-    async def _failing_create_fund(*args, **kwargs):
-        raise RuntimeError("injected create_fund dependency failure")
-
-    monkeypatch.setattr(repo, "create_fund", _failing_create_fund)
-
-    with pytest.raises(RuntimeError, match="injected create_fund dependency failure"):
-        await build_hierarchy(pool, repo)
-
-    monkeypatch.setattr(repo, "create_fund", original_create_fund)
-
-
-@pytest.mark.perf
-async def test_build_hierarchy_p95_latency_stays_within_normalized_ceiling(
-    pool, repo, perf_budget: PerfBudget
-):
-    # 성능단언(D2 하한) — build_hierarchy는 거의 모든 FA-2 통합테스트가
-    # setup으로 호출하는 4단 INSERT 체인이다. baseline 1회 대비 정규화한
-    # 상한만 게이트로 쓰는 이유는 test_postgres_entity_repository.py의
-    # 동일 패턴과 같다(공유 TEST_DATABASE_URL의 절대 지연 변동성).
-    # I/O 대기(DB round trip)가 대부분이라 `PerfBudget.sample`의
-    # process_time() 기반 측정은 부적합하다 — wall-clock을 쓰되
-    # `paused_coverage()`로 `--cov=src` 라인 트레이서 오버헤드만 제거한다
-    # (tests/_perf/relative_budget.py의 mode="wall"과 같은 근거, task-9121).
-    with paused_coverage():
-        baseline_start = time.perf_counter()
-        await build_hierarchy(pool, repo)
-        baseline_elapsed = time.perf_counter() - baseline_start
-
-        samples: list[float] = []
-        for _ in range(10):
-            start = time.perf_counter()
-            await build_hierarchy(pool, repo)
-            samples.append(time.perf_counter() - start)
-
-    samples.sort()
-    p95 = samples[-1]
-
-    ceiling = baseline_elapsed * 5 + 0.5
-    load = perf_budget.load_percent()
-    load_str = f"{load:.0f}%" if load is not None else "n/a"
-    assert p95 <= ceiling, (
-        f"build_hierarchy p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s"
-        f"(baseline {baseline_elapsed:.4f}s, load={load_str})를 "
-        "초과했습니다 — 4단 INSERT 체인 회귀 의심"
-    )

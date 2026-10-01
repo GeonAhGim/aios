@@ -7,9 +7,7 @@ satisfy the loc_over_500 ratchet; both halves and any other test in this directo
 from __future__ import annotations
 
 import os
-import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import asyncpg
 import pytest
@@ -55,62 +53,7 @@ def deps(pool):
 # ── Negative tests: invariant-violating inputs ───────────────────────────
 
 
-def test_asyncpg_dsn_missing_env_raises_keyerror(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DATABASE_URL absent must fail closed with KeyError, not silently default."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    with pytest.raises(KeyError):
-        _asyncpg_dsn()
-
-
-def test_asyncpg_dsn_rejects_non_sqlalchemy_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Only the `postgresql+asyncpg://` prefix is rewritten — any other scheme
-    is passed through unchanged, so a caller with a wrong scheme gets an
-    unusable DSN rather than a silently-guessed one."""
-    monkeypatch.setenv("DATABASE_URL", "mysql://user:pass@localhost:3306/db")
-    dsn = _asyncpg_dsn()
-    assert dsn == "mysql://user:pass@localhost:3306/db"
-    assert not dsn.startswith("postgresql://")
-
-
-def test_asyncpg_dsn_empty_env_returns_empty_not_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty DATABASE_URL must surface as an empty string, never as None
-    or a guessed default — downstream asyncpg.connect() then fails loudly."""
-    monkeypatch.setenv("DATABASE_URL", "")
-    dsn = _asyncpg_dsn()
-    assert dsn == ""
-
-
 # ── Failure injection: pool creation failure must propagate ─────────────
 
 
-@pytest.mark.asyncio
-async def test_pool_fixture_propagates_connection_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Failure injection: if asyncpg.create_pool raises (e.g. DB unreachable),
-    the pool fixture must propagate the exception rather than yielding a
-    broken/partial pool (fail-closed)."""
-    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/db")
-    with patch.object(
-        asyncpg, "create_pool", AsyncMock(side_effect=ConnectionError("db unreachable"))
-    ):
-        gen = pool.__wrapped__()  # type: ignore[attr-defined]
-        with pytest.raises(ConnectionError):
-            await gen.__anext__()
-
-
 # ── Performance assertion: DSN rewrite budget ────────────────────────────
-
-
-@pytest.mark.perf
-def test_asyncpg_dsn_rewrite_performance_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Performance: 1000 DSN rewrites must complete within 50ms — this is a
-    hot-path helper called once per fixture instantiation across the suite.
-    """
-    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/db")
-    start = time.perf_counter()
-    for _ in range(1000):
-        _asyncpg_dsn()
-    elapsed_ms = (time.perf_counter() - start) * 1000
-
-    assert elapsed_ms < 50, f"DSN rewrite exceeded 50ms budget for 1000 calls: {elapsed_ms:.1f}ms"

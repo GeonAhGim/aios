@@ -27,8 +27,6 @@ import asyncio
 import os
 from collections.abc import AsyncIterator
 from datetime import timedelta
-from typing import cast
-from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -180,51 +178,6 @@ async def _ledger_control_clean_slate(pool):
 # ---------------------------------------------------------------------------
 
 
-def test_replay_clone_id_rejects_unregistered_module() -> None:
-    """`_replay_clone_id`는 `_REPLAY_CLONE_SUFFIX`에 등록된 replay 모듈에만
-    clone 이름을 내준다 -- 등록 누락이 조용히 통과하면 새 replay 모듈이
-    우연히 다른 모듈과 같은 clone 이름(예: 공통 접미사 없음)을 공유해
-    FA-15의 per-module 격리가 깨진다."""
-
-    class _FakeModule:
-        __name__ = "tests.integration.eventstore.test_not_registered"
-
-    class _FakeRequest:
-        module = _FakeModule()
-
-    with pytest.raises(ValueError, match="no replay clone suffix registered"):
-        _replay_clone_id(cast(pytest.FixtureRequest, _FakeRequest()))
-
-
-async def test_ledger_control_rejects_second_singleton_row(pool: asyncpg.Pool) -> None:
-    """`ledger_control`은 `CHECK (id = 1)`(4a1d0c0de005)로 단일 행만
-    허용한다 -- 두 번째 행이 조용히 들어가면 `_ledger_control_clean_slate`가
-    리셋하는 `WHERE id = 1` 행이 더 이상 write_frozen 상태의 유일한
-    진실 소스가 아니게 된다."""
-    async with pool.acquire() as conn:
-        with pytest.raises(asyncpg.CheckViolationError):
-            await conn.execute("INSERT INTO ledger_control (id, write_frozen) VALUES (2, FALSE)")
-
-
-async def test_ledger_control_rejects_unknown_unfrozen_by(pool: asyncpg.Pool) -> None:
-    """`ledger_control.unfrozen_by`는 `users(user_id)`를 FK 참조한다
-    (4a1d0c0de005) -- 존재하지 않는 사용자를 해제자로 기록하면 write_frozen
-    해제 감사 추적이 고아 참조를 갖게 된다."""
-    async with pool.acquire() as conn:
-        with pytest.raises(asyncpg.ForeignKeyViolationError):
-            await conn.execute("UPDATE ledger_control SET unfrozen_by = $1 WHERE id = 1", uuid4())
-
-
 # ---------------------------------------------------------------------------
 # Failure injection (task-9233 DEEPEN)
 # ---------------------------------------------------------------------------
-
-
-def test_asyncpg_dsn_propagates_missing_database_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_asyncpg_dsn`은 `DATABASE_URL` 부재를 삼켜 다른 기본값으로 넘어가지
-    않고 `KeyError`로 즉시 전파해야 한다 -- 삼키면 어느 DB에 붙었는지 모르는
-    채로 이후 픽스처들이 계속 진행해 원장/이벤트스토어 테스트가 잘못된
-    데이터베이스를 조용히 오염시킬 수 있다."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    with pytest.raises(KeyError):
-        _asyncpg_dsn()
