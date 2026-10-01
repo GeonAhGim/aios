@@ -281,6 +281,46 @@ def test_digest_detects_single_field_corruption_in_every_column(tmp_path: Path):
         assert _digest(corrupted) != base_digest
 
 
+class _DeleteFailsWarm:
+    """`WarmParquetStorage`를 감싸 `write_year`는 정상이지만 `read_columns`
+    후 `hot.delete_year` 호출에서 `OSError`를 던진다(write+verify는 통과한
+    상태에서 delete가 실패하는 시나리오)."""
+
+    def __init__(self, inner: WarmParquetStorage, hot: _FakeHot) -> None:
+        self._inner = inner
+        self._hot = hot
+
+    def write_year(self, key: SeriesKey, year: int, columns: CandleColumns) -> Path:
+        return self._inner.write_year(key, year, columns)
+
+    def read_columns(self, key: SeriesKey, start: datetime, end: datetime):
+        return self._inner.read_columns(key, start, end)
+
+
+def test_delete_year_failure_after_verify_keeps_hot_data_and_raises(tmp_path: Path):
+    """실패 주입: write+verify 통과 후 hot.delete_year 가 OSError 를 던지면
+    promote_year 는 예외를 전파하고 hot 데이터는 삭제되지 않는다(fail-closed).
+    warm 에는 파일이 남아있지만 lineage 는 기록되지 않는다."""
+    inner_warm = WarmParquetStorage(tmp_path)
+
+    class _FailingHot(_FakeHot):
+        async def delete_year(self, key: SeriesKey, year: int) -> int:
+            raise OSError("disk full during hot delete")
+
+    failing_hot = _FailingHot(by_year={2026: _daily_columns(2026, [0, 1, 2])})
+
+    with pytest.raises(OSError, match="disk full"):
+        asyncio.run(promote_year(failing_hot, inner_warm, tmp_path, _KEY, 2026))
+
+    # hot 데이터는 삭제되지 않아야 함
+    assert 2026 in failing_hot.by_year
+    assert len(failing_hot.by_year[2026]) == 3
+    assert failing_hot.delete_calls == []
+
+    # lineage 는 기록되지 않음
+    assert read_lineage(tmp_path, _KEY) == []
+
+
 @pytest.mark.perf
 def test_promote_year_completes_within_budget_for_twenty_thousand_minute_bars(tmp_path: Path):
     """수치 성능 단언: 실측상 M1 1년치에 근접한 20,000행 승격(read+write+
