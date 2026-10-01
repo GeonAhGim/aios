@@ -5,10 +5,12 @@ ADR-2026-09-06-H D3 DoD: KRX·미국 당해·익년 휴장일이 출처 URL과 �
 등재되고 UNVERIFIED 0건, 임의 날짜 개장 여부가 공시 원문과 일치, 미수집
 연도는 추측하지 않고 거부한다.
 """
+
 from __future__ import annotations
 
 from datetime import date, time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -102,3 +104,73 @@ def test_forged_holiday_not_matching_primary_source_would_fail_assertion() -> No
     days = {d.trade_date: d for d in load_calendar(_KRX_2026)}
     fabricated_holiday = date(2026, 4, 1)  # KRX가 공시하지 않은 날짜
     assert fabricated_holiday not in days
+
+
+def test_invalid_date_format_in_holidays_raises(tmp_path: Path) -> None:
+    """YAML holidays 목록에 잘못된 날짜 형식(월/일이 범위를 벗어난 값)을
+     입력했을 때 로더가 예외를 던짐을 단언 — 날짜 파싱 실패는 ValueError
+    로 전파된다(현재 구현). 로더가 조용히 통과시키지 않음을 확인."""
+    bad = tmp_path / "bad_date.yaml"
+    bad.write_text(
+        "source: https://example.com/notice\n"
+        "collected_at: 2026-09-07\n"
+        "venue: KIS_KRX\n"
+        "holidays: ['2026-13-40']\n"  # 월 13, 일 40 — 모두 범위를 벗어남
+        "early_closes: []\n",
+        encoding="utf-8",
+    )
+    # 현재 구현: _parse_date가 date.fromisoformat 실패 시 ValueError 던짐
+    with pytest.raises(ValueError):
+        load_calendar(bad)
+
+
+def test_missing_venue_field_raises(tmp_path: Path) -> None:
+    """스키마상 필수 키 'venue'가 누락되면 로더가 CalendarSourceError를 던짐."""
+    bad = tmp_path / "bad_venue.yaml"
+    bad.write_text(
+        "source: https://example.com/notice\n"
+        "collected_at: 2026-09-07\n"
+        "holidays: [2026-01-01]\n"
+        "early_closes: []\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CalendarSourceError):
+        load_calendar(bad)
+
+
+def test_file_read_failure_propagates_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """실패주입: yaml.safe_load 의존성이 예외를 던지도록 monkeypatch하면
+    호출부(load_calendar)가 이를 삼키지 않고 전파(또는 래핑)됨을 확인."""
+    import yaml as _yaml_module
+
+    def _fake_safe_load(*args: Any, **kwargs: Any) -> None:
+        raise OSError("device or resource busy")
+
+    monkeypatch.setattr(_yaml_module, "safe_load", _fake_safe_load)
+
+    good = tmp_path / "good.yaml"
+    good.write_text(
+        "source: https://example.com/notice\n"
+        "collected_at: 2026-09-07\n"
+        "venue: KIS_KRX\n"
+        "holidays: [2026-01-01]\n"
+        "early_closes: []\n",
+        encoding="utf-8",
+    )
+    # safe_load가 OSError를 던지면 load_calendar는 이를 caught하지 않고 그대로 전파해야 함.
+    with pytest.raises(OSError):
+        load_calendar(good)
+
+
+def test_load_calendar_performance_under_10ms() -> None:
+    """성능 단언: 전체 config 파일(최대 4개)을 로드하는 데 10ms 미만이어야 한다.
+    캘린더 로더는 I/O 바운드가 아니므로 마이크로초 단위가 목표."""
+    import time
+
+    start = time.perf_counter_ns()
+    for p in [_KRX_2026, _KRX_2027, _US_2026, _US_2027]:
+        load_calendar(p)
+    elapsed_ms = (time.perf_counter_ns() - start) / 1e6
+    assert elapsed_ms < 10, f"4개 파일 로드 총소요 {elapsed_ms:.1f}ms — 예산 10ms 초과"
