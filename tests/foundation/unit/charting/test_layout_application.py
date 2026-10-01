@@ -24,7 +24,6 @@ ledger, or capital-allocation state for `replay_verify` to reconcile)."""
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -45,6 +44,7 @@ from src.foundation.charting.application.list_layouts import list_layouts
 from src.foundation.charting.application.put_drawings import put_drawings
 from src.foundation.charting.application.update_layout import update_layout
 from src.foundation.charting.domain.models import ChartDrawingSet, ChartLayout
+from tests.conftest import PerfBudget
 
 
 class _OutOfScopeError(Exception):
@@ -308,10 +308,12 @@ async def test_gate_red_repro_tenant_ownership_guard_is_load_bearing(
 
 
 @pytest.mark.perf
-def test_layout_and_drawing_set_to_view_perf_budget() -> None:
+def test_layout_and_drawing_set_to_view_perf_budget(perf_budget: PerfBudget) -> None:
     """응답 경로는 조회된 각 행을 매번 뷰로 변환한다 — 그 변환 자체가 서버
     지연을 지배하지 않는다는 상한을 고정한다(2,000회 <300ms, 로컬 CI 잡음
-    여유 포함, test_indicator_template_application.py의 동일 예산과 대칭)."""
+    여유 포함, test_indicator_template_application.py의 동일 예산과 대칭).
+
+    raw time.perf_counter() → perf_budget.assert_within() 전환(task-10957)."""
     now = datetime.now(timezone.utc)
     layout = ChartLayout(
         id=uuid4(),
@@ -334,12 +336,14 @@ def test_layout_and_drawing_set_to_view_perf_budget() -> None:
         updated_at=now,
     )
 
-    start = time.perf_counter()
-    for _ in range(2_000):
-        layout_to_view(layout)
-        drawing_set_to_view(drawing_set)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    def _run_2000() -> None:
+        for _ in range(2_000):
+            layout_to_view(layout)
+            drawing_set_to_view(drawing_set)
 
-    assert elapsed_ms < 300, (
-        f"layout_to_view()+drawing_set_to_view() too slow: {elapsed_ms:.1f}ms/2000 calls"
+    _sample = perf_budget.assert_within(
+        _run_2000,
+        budget_ms=300,
+        label="layout_to_view()+drawing_set_to_view() 2000 calls",
     )
+    # best-of-5 최소값이 300ms 미만이면 충분 — describe()가 cpu/wall 요약 출력
