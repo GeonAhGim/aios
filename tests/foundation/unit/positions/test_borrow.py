@@ -14,7 +14,6 @@ task-3000(DEEPEN, docs/audit/DEPTH_LA_LB_LC.md task-1752 행): 순수 도메인
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -23,6 +22,7 @@ import pytest
 from src.data.models.base import Currency, Money
 from src.data.models.trading import OrderSide
 from src.foundation.positions.domain import borrow
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
 
@@ -378,22 +378,26 @@ def test_margin_call_rejects_currency_mismatch_on_collateral() -> None:
 
 
 @pytest.mark.perf
-def test_check_locate_gate_hot_path_performance() -> None:
+def test_check_locate_gate_hot_path_performance(
+    perf_budget: PerfBudget,
+) -> None:
     """`check_locate_gate`는 매 매도 주문마다 호출되는 순수 계산 게이트다
     — 10,000회 호출이 1초 내에 끝나야 한다(회귀 감시, task-3003
     `test_bitemporal.py::test_as_of_hot_path_performance` 선례와 동일
     판단)."""
     locates = [_locate(quantity="30")]
 
-    start = time.monotonic()
-    for _ in range(10_000):
-        borrow.check_locate_gate(
-            side=OrderSide.SELL,
-            quantity=Decimal("80"),
-            current_position_quantity=Decimal("50"),
-            locates=locates,
-            as_of=_NOW,
-        )
-    elapsed = time.monotonic() - start
+    def batch() -> None:
+        for _ in range(10_000):
+            borrow.check_locate_gate(
+                side=OrderSide.SELL,
+                quantity=Decimal("80"),
+                current_position_quantity=Decimal("50"),
+                locates=locates,
+                as_of=_NOW,
+            )
 
-    assert elapsed < 1.0, f"10,000회 호출이 1초 예산을 초과: {elapsed:.3f}s"
+    sample = perf_budget.sample(batch, batch=1)
+    cpu_ms = sample.cpu_ms
+
+    assert cpu_ms < 1000.0, f"10,000회 호출이 1초 예산을 초과: {cpu_ms:.3f}ms"
