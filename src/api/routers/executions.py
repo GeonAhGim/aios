@@ -1,22 +1,22 @@
-"""16번 — 실행 제어판 API 라우터 (FD-16.1/16.2/16.3/16.4/16.6).
+"""Module 16 — Execution dashboard API router (FD-16.1/16.2/16.3/16.4/16.6).
 
-Spec: 기능설계문서_v1.20.md#FD-16.1~FD-16.4/FD-16.6
+Spec: functional_design_v1.20.md#FD-16.1~FD-16.4/FD-16.6
 
-FD-16.1 처리단계 ①"사용자 계좌 잔고(FD-3.2) 대비 배분 가능 여부 확인"에
-따라 available_balance를 클라이언트가 보내지 않고 CredentialResolver로
-실제 거래소 잔고(FD-3.2)를 조회해 서버가 직접 계산한다.
+FD-16.1 processing step ① ("verify allocatable balance relative to user account balance (FD-3.2)"):
+the client does not send available_balance; the server computes it directly by querying
+the actual exchange balance (FD-3.2) via CredentialResolver.
 
-편차: LIVE 실행의 승인(FD-10.1 패턴 재사용)을 실제로 승인/거절하는
-HTTP 엔드포인트는 이 leaf에 없다 — 승인 결정은 관리자 액션이라
-18번(관리자 도구) 스콥이며, 여기서는 승인 대기 상태를 정직하게
-노출(approval_request_id, PENDING_APPROVAL)만 한다.
+Deviation: this leaf has no HTTP endpoint that actually approves/rejects
+LIVE execution approval (FD-10.1 pattern reuse) — approval decisions are admin actions
+scoped to module 18 (admin tools); here we only honestly expose
+the pending-approval state (approval_request_id, PENDING_APPROVAL).
 
-PLT-19(task-1016): raw HTTPException을 전부 제거했다 — ExecutionCreateError/
-ExecutionControlError/CapitalAllocationError/CredentialNotFoundError는
-전역 핸들러(src/api/contracts/handlers.py)가 exception_mapping.py의
-EXCEPTION_MAP을 통해 동일한 상태코드(400/404)로 변환한다. 이 라우터의
-성공 응답 봉투화는 PLT-17 decision과 동일 사유로 보류한다(exchange_credentials.py
-모듈 docstring 참조).
+PLT-19(task-1016): all raw HTTPException usages removed — ExecutionCreateError/
+ExecutionControlError/CapitalAllocationError/CredentialNotFoundError are
+transformed by the global handler (src/api/contracts/handlers.py) through
+EXCEPTION_MAP in exception_mapping.py to the same status codes (400/404). Deferred:
+wrapping this router's success responses follows the same rationale as PLT-17 decision
+(see exchange_credentials.py module docstring).
 """
 from __future__ import annotations
 
