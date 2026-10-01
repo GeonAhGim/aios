@@ -1,18 +1,22 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3/§9.4 DSL-1 —
-AIOS Script 문법 v1(`GRAMMAR_VERSION`)의 불변 AST.
+the immutable AST for AIOS Script grammar v1 (`GRAMMAR_VERSION`).
 
-이 모듈은 파서(DSL-3)가 만들어 내는 산출물의 "형태"만 고정한다 — 실제
-파싱·정적 타입 검사·미래참조 검출은 각각 DSL-3/4/5의 책임이다. 노드는
-pydantic `frozen=True`(이 코드베이스의 값 객체 관례, 예:
-`src/core/risk/decision.py`)로 정의하고, `kind` 판별 필드로 태그된
-discriminated union이라 `model_dump(mode="json")`/`model_validate` 왕복이
-항등이다 — DSL-7(IR 저작)·DSL-12(script_hash)가 이 성질에 의존한다.
+This module fixes only the "shape" of what the parser (DSL-3) produces —
+actual parsing, static type checking, and look-ahead detection are each
+the responsibility of DSL-3/4/5. Nodes are defined with pydantic
+`frozen=True` (this codebase's value-object convention, e.g.
+`src/core/risk/decision.py`), and are a discriminated union tagged by the
+`kind` field, so a `model_dump(mode="json")`/`model_validate` round trip
+is an identity — DSL-7 (IR authoring) and DSL-12 (script_hash) depend on
+this property.
 
-§3.3 문법표 밖의 프로덕션(반복문·재귀·`security()`류, 원시 bool 리터럴 등
-`primary`에 없는 토큰)은 노드조차 두지 않는다 — 결정론·미래참조 금지는
-"만들 수 없다"로 강제하는 편이 정적 검출기(DSL-5)보다 먼저 성립하는 문법
-수준 불변식이다(decision 참조). `side`/`qty_expr`/`opts`/`style`처럼
-§3.3에 별도 프로덕션이 없는 논터미널은 전부 일반 `Expr`로만 받는다.
+Productions outside the §3.3 grammar table (loops, recursion,
+`security()`-style calls, raw bool literals — tokens not in `primary`)
+get no node at all — enforcing determinism and the look-ahead ban via
+"cannot be constructed" is a grammar-level invariant that holds even
+before the static detector (DSL-5) runs (see decision). Nonterminals
+without a dedicated §3.3 production, like `side`/`qty_expr`/`opts`/
+`style`, are all taken as plain `Expr`.
 """
 
 from __future__ import annotations
@@ -44,10 +48,12 @@ def _reject_bool(value: Any) -> Any:
 
 
 class ScriptNode(BaseModel):
-    """모든 AST 노드의 공통 베이스 — 불변(frozen)·미지 필드 거부(extra=forbid).
+    """Common base for all AST nodes — immutable (frozen), rejects unknown
+    fields (extra=forbid).
 
-    `extra="forbid"`가 없으면 알 수 없는 필드가 조용히 버려져 직렬화
-    왕복이 "우연히" 항등처럼 보일 뿐 실제로는 정보 손실을 감추게 된다.
+    Without `extra="forbid"`, unknown fields would be silently dropped,
+    making the serialization round trip look identity-preserving "by
+    accident" while actually hiding information loss.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -65,7 +71,8 @@ class TypeNode(ScriptNode):
 
 
 # ---- primary := NUMBER | ident | call | "(" expr ")" ----
-# 괄호 그룹핑은 우선순위 표현일 뿐 별도 노드가 필요 없다.
+# Parenthesized grouping is only a precedence expression and needs no
+# dedicated node.
 
 
 class NumberLiteral(ScriptNode):
@@ -105,7 +112,7 @@ class Identifier(ScriptNode):
 
 
 class CallExpr(ScriptNode):
-    """call := ns "." ident "(" args ")" — ta.*, math.*, series.* 등."""
+    """call := ns "." ident "(" args ")" — e.g. ta.*, math.*, series.*."""
 
     kind: Literal["call"] = "call"
     ns: str
@@ -127,9 +134,10 @@ class UnaryExpr(ScriptNode):
     operand: Expr
 
 
-# ---- postfix := primary ("[" INT "]")?  — 과거참조만 허용(상수 n>=0). ----
-# 인덱스 타입 자체를 `int`로 고정해 "변수 인덱스"는 구조적으로 표현 불가능하게
-# 하고, `ge=0`로 "음수(미래참조)"를 값 수준에서 거부한다.
+# ---- postfix := primary ("[" INT "]")?  — only past references are allowed (constant n>=0). ----
+# Fixing the index type itself to `int` makes a "variable index"
+# structurally impossible to express, and `ge=0` rejects "negative
+# (look-ahead)" at the value level.
 
 
 class PostfixExpr(ScriptNode):
@@ -151,7 +159,7 @@ class NotExpr(ScriptNode):
     operand: Expr
 
 
-# ---- or/and/cmp/arith/term: 전부 좌결합 이항 연산으로 통일 표현 ----
+# ---- or/and/cmp/arith/term: all uniformly expressed as left-associative binary operations ----
 
 BinaryOp = Literal[
     "or",
@@ -178,12 +186,14 @@ class BinaryExpr(ScriptNode):
 
 
 # ---- request "(" STRING "," STRING "," expr ")" ----
-# §3.3 원문 문법표 밖 확장(M2-2a, ADR-2026-09-09-B) — 다른 심볼/타임프레임의
-# 시리즈를 요청한다. symbol/timeframe은 파서(DSL-3)가 STRING 토큰으로만
-# 받아들여 컴파일 시 상수로 고정한다(동적 심볼 금지): 이 필드를 `str`로
-# 선언해 AST 수준에서도 "리터럴이 아닌 값"이 애초에 조립 불가능하게 한다.
-# MTF 런타임 평가·미래참조 검출은 M2-2b(후속 리프) 몫이라 여기서는 구조만
-# 고정한다.
+# An extension beyond the original §3.3 grammar table (M2-2a,
+# ADR-2026-09-09-B) — requests a series from another symbol/timeframe.
+# The parser (DSL-3) only accepts symbol/timeframe as STRING tokens,
+# fixing them as compile-time constants (dynamic symbols are banned):
+# declaring this field as `str` makes a "non-literal value" impossible
+# to construct even at the AST level. MTF runtime evaluation and
+# look-ahead detection belong to M2-2b (a follow-up leaf), so only the
+# structure is fixed here.
 
 
 class RequestExpr(ScriptNode):
@@ -244,7 +254,8 @@ class LetDecl(ScriptNode):
 
 
 class PlotDecl(ScriptNode):
-    """plot "(" expr ("," style)? ")" — style은 §3.3에 별도 정의 없어 Expr."""
+    """plot "(" expr ("," style)? ")" — `style` has no dedicated §3.3
+    definition, so it is `Expr`."""
 
     kind: Literal["plot"] = "plot"
     expr: Expr
@@ -265,8 +276,8 @@ class SignalDecl(ScriptNode):
 class OrderDecl(ScriptNode):
     """order "(" side "," qty_expr ("," opts)? ")" "when" expr
 
-    `side`/`qty_expr`/`opts`는 §3.3에 별도 프로덕션이 없어 모두 `Expr`로만
-    받는다(문법표 밖 확장 금지).
+    `side`/`qty_expr`/`opts` have no dedicated §3.3 production, so they
+    are all taken as `Expr` only (no extension beyond the grammar table).
     """
 
     kind: Literal["order"] = "order"
@@ -308,10 +319,10 @@ for _cls in (
 
 
 def to_dict(node: ScriptNode) -> dict[str, Any]:
-    """임의 AST 노드 → JSON 호환 dict. 직렬화 왕복의 절반(encode)."""
+    """Any AST node → JSON-compatible dict. Half of the serialization round trip (encode)."""
     return node.model_dump(mode="json")
 
 
 def program_from_dict(data: Mapping[str, Any]) -> Program:
-    """dict → `Program`. `grammar_version` 불일치·미지 필드는 거부(fail-closed)."""
+    """dict → `Program`. A `grammar_version` mismatch or unknown field is rejected (fail-closed)."""
     return Program.model_validate(data)
