@@ -13,7 +13,6 @@ FA/CM/EO/DC, so D3 does not apply).
 from __future__ import annotations
 
 import os
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -409,7 +408,7 @@ async def test_evaluate_screen_alerts_skips_failing_alert_and_continues(
 
 @pytest.mark.perf
 async def test_evaluate_screen_alerts_5000_symbol_scan_within_adr_budget(
-    pool, saved_repo, alert_repo
+    pool, saved_repo, alert_repo, perf_budget
 ) -> None:
     await _clear_active_alerts(alert_repo)
     tenant_id = await create_test_tenant(pool)
@@ -432,18 +431,18 @@ async def test_evaluate_screen_alerts_5000_symbol_scan_within_adr_budget(
     fields = {i.instrument_id: {"close": Decimal("0")} for i in instruments}
     field_source = FakeFieldSource(instruments, fields)
 
-    start = time.perf_counter()
-    triggers = await evaluate_screen_alerts(
-        alert_repo=alert_repo,
-        saved_repo=saved_repo,
-        field_source=field_source,
-        cache=ScreenResultCache(),
+    sample = await perf_budget.sample_async(
+        lambda: evaluate_screen_alerts(
+            alert_repo=alert_repo,
+            saved_repo=saved_repo,
+            field_source=field_source,
+            cache=ScreenResultCache(),
+        )
     )
-    elapsed = time.perf_counter() - start
 
-    assert len(triggers) == 1
-    assert triggers[0].matched_count == 0
-    assert elapsed < 2.0  # ADR-2026-09-09-C: "스크리너 5k 심볼 2초"
+    assert len(sample.result) == 1
+    assert sample.result[0].matched_count == 0
+    assert sample.cpu_ms < 2000  # ADR-2026-09-09-C: "스크리너 5k 심볼 2초"
 
 
 # ---- gate-red repro: prove `check_migration_chain.py` actually catches a
