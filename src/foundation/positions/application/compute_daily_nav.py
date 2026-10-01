@@ -1,41 +1,47 @@
-"""LB-15 — 세션 마감 기준 일별 NAV 산출·체인 검증·저장
-(application/compute_daily_nav.py).
+"""LB-15 — End-of-session daily NAV computation, chain verification, and
+storage (application/compute_daily_nav.py).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.3, §9.3 LB-15.
 
-이 함수는 LB-6 `domain/nav.compute_daily_nav`/`verify_chain`을 호출만 하고
-NAV 수식을 재구현하지 않는다(task-714 DoD 1). 이 리프가 실제로 하는 일은
-입력 조립과 저장 위임뿐이다.
+This function only calls LB-6 `domain/nav.compute_daily_nav`/`verify_chain`
+and does not reimplement the NAV formula (task-714 DoD 1). All this leaf
+actually does is assemble inputs and delegate storage.
 
-대차대조 쪽(`cash`/`position_mvs`)은 라이브 소스에서 이 함수가 직접
-채운다 — `cash`는 `CashSource`, 포지션 시가평가는 `SnapshotRepository.
-list_open`이 돌려주는 `mark_price`(LB-14 `mark_positions`가 이미 채워 둔
-값)를 `fx`로 기준통화 환산한다. 이 함수는 `MarkPriceSource`를 다시
-호출하지 않는다(시그니처에 없음, §2.3 표 그대로) — "마크·환율은 LB-14
-소스를 통해서만 얻는다"는 task-714 DoD 2는 이 캐시된 값이 LB-14 경로를
-거쳐서만 채워진다는 사실로 이미 성립한다. 열린 포지션 중 하나라도
-`mark_price`가 `None`(스테일 포함, task-654 decision)이면 그 계좌 전체
-NAV 산출을 거부한다 — 나머지를 추정치로 메우지 않는다. `fx.rate`가 없거나
-스테일해도 동일하게 거부한다(`domain/fx.FxRateMissingError`/
-`FxRateStaleError`를 그대로 전파).
+The balance-sheet side (`cash`/`position_mvs`) is populated directly by this
+function from live sources — `cash` comes from `CashSource`, and position
+mark-to-market uses the `mark_price` returned by `SnapshotRepository.
+list_open` (already populated by LB-14 `mark_positions`), converted to the
+base currency via `fx`. This function does not call `MarkPriceSource` again
+(it is not in the signature, per the §2.3 table) — task-714 DoD 2 ("marks and
+FX rates come only through the LB-14 source") already holds because this
+cached value is only ever populated via the LB-14 path. If any open position
+has `mark_price` of `None` (including stale, per task-654 decision), the
+entire account's NAV computation is rejected — the rest is never backfilled
+with estimates. The same rejection applies if `fx.rate` is missing or stale
+(`domain/fx.FxRateMissingError`/`FxRateStaleError` propagate as-is).
 
-롤포워드 쪽(`realized`/`unrealized_delta`/`funding`/`fees`/`flows`)은
-`cmd`가 이미 계산된 일별 값으로 받는다. 미검증: 이 값들을 저널에서 집계해
-채우는 호출부(스케줄러, LB-17)는 이 리프 범위 밖이라 아직 없다 —
-task-654처럼 다음 리프가 발명하지 않도록 여기 남겨 둔다.
+The roll-forward side (`realized`/`unrealized_delta`/`funding`/`fees`/
+`flows`) is received from `cmd` as already-computed daily values.
+Unverified: the caller that aggregates these from the journal (scheduler,
+LB-17) is out of scope for this leaf and does not exist yet — left as a note
+here so the next leaf doesn't invent it ad hoc, as happened in task-654.
 
-전일 NAV(`opening_nav`)는 LA-3 `VenueCalendar`로 전 영업일을 판정한 뒤
-그 날짜로 `nav_repo.get`을 조회한다(DoD 5). 전일 행이 없으면(계좌 첫 NAV)
-`opening_nav=0`인 "genesis" 스냅샷을 만들어 `verify_chain`에 그대로
-통과시킨다 — 첫날만 다른 코드 경로를 타지 않는다.
+The previous day's NAV (`opening_nav`) is determined via LA-3 `VenueCalendar`
+to find the prior trading day, then looked up with `nav_repo.get` for that
+date (DoD 5). If there is no prior-day row (the account's first NAV), a
+"genesis" snapshot with `opening_nav=0` is constructed and passed through to
+`verify_chain` as-is — only the first day takes a different code path.
 
-저장은 `nav_repo.insert`(LB-9 `PostgresNavRepository`)에 위임한다 —
-`(account_id, nav_date)` UNIQUE + `source_hash` 비교로 재실행 멱등과 체인
-위반 거부(다른 `source_hash`)를 어댑터가 이미 구현해 뒀다(task-714 DoD 3).
-`verify_chain`은 그와 별개로 저장 *전에* 롤포워드 등식 자체(이번 계산이
-내적으로 일관적인가)를 검증한다(DoD 4) — 어댑터의 `source_hash` 비교(이전
-계산과 지금 계산이 같은가)와는 잡아내는 실패가 다르다.
+Storage is delegated to `nav_repo.insert` (LB-9 `PostgresNavRepository`) —
+the adapter already implements rerun idempotency via `(account_id,
+nav_date)` UNIQUE + `source_hash` comparison, and rejects chain violations
+(a different `source_hash`) (task-714 DoD 3). Separately, `verify_chain`
+checks the roll-forward equality itself (is this computation internally
+consistent) *before* storage (DoD 4) — this catches different failures than
+the adapter's `source_hash` comparison (is this computation the same as the
+previous one).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -68,39 +74,43 @@ _LOOKBACK_DAYS = 30
 
 
 class NavCashUnavailableError(Exception):
-    """`cash` 소스가 값을 못 주면(연결 끊김·미초기화) `0`으로 대체하지
-    않고 NAV 산출 자체를 거부한다."""
+    """If the `cash` source cannot provide a value (disconnected /
+    uninitialized), reject NAV computation outright instead of
+    substituting `0`."""
 
     def __init__(self, account_id: UUID) -> None:
-        super().__init__(f"{account_id}: 현금 잔고를 가져올 수 없습니다 — NAV 산출 거부")
+        super().__init__(f"{account_id}: cannot fetch cash balance — NAV computation rejected")
         self.account_id = account_id
 
 
 class NavMarkUnavailableError(Exception):
-    """열린 포지션 중 하나라도 `mark_price`가 없으면(스테일 포함) 그
-    포지션 하나 때문에 계좌 전체 NAV 산출을 거부한다(추정치 대입 금지,
-    task-714 DoD 2)."""
+    """If any open position lacks a `mark_price` (including stale), reject
+    NAV computation for the entire account because of that single position
+    (no estimate substitution, task-714 DoD 2)."""
 
     def __init__(self, position_key: str) -> None:
         super().__init__(
-            f"{position_key}: mark_price가 없습니다(스테일/미수신) — NAV 산출 거부"
+            f"{position_key}: mark_price is missing (stale/not received) — NAV computation rejected"
         )
         self.position_key = position_key
 
 
 @runtime_checkable
 class CashSource(Protocol):
-    """계좌의 기준통화 표시 현금 잔고. 값이 없으면 `0`으로 대체하지 않고
-    `None`을 돌려준다 — 다른 LB-14 계열 포트와 같은 계약. 미검증: 실제
-    어댑터(거래소/원장 잔고를 래핑)는 아직 없다(이 리프 범위 밖)."""
+    """The account's cash balance denominated in the base currency. Returns
+    `None` instead of substituting `0` when the value is unavailable — the
+    same contract as other LB-14-family ports. Unverified: no real adapter
+    (wrapping an exchange/ledger balance) exists yet (out of scope for this
+    leaf)."""
 
     async def cash(self, account_id: UUID, at: AwareDatetime) -> Decimal | None: ...
 
 
 class ComputeDailyNavCommand(BaseModel):
-    """`compute_daily_nav`의 입력. `cash`/`position_mvs`는 라이브 소스에서
-    이 함수가 직접 채우므로 커맨드에 없다 — 롤포워드 쪽(`realized`~
-    `flows`)만 이미 계산된 일별 값으로 받는다(모듈독스트링 참고)."""
+    """Input for `compute_daily_nav`. `cash`/`position_mvs` are not part of
+    the command because this function populates them directly from live
+    sources — only the roll-forward side (`realized` through `flows`) is
+    received as already-computed daily values (see module docstring)."""
 
     tenant_id: UUID
     account_id: UUID
@@ -123,9 +133,10 @@ def _previous_trading_day(calendar: VenueCalendar, day: date) -> date | None:
 
 
 def _genesis(account_id: UUID, nav_date: date, base_currency: Currency) -> NAVSnapshot:
-    """전일 NAV 행이 없을 때(계좌 첫 NAV) `verify_chain`에 넘길 자리
-    표시자 — `closing_nav=0`이라 연속성 검사(`cur.opening_nav==prev.
-    closing_nav`)가 `opening_nav=0`인 첫날과 그대로 맞는다."""
+    """Placeholder passed to `verify_chain` when there is no prior-day NAV
+    row (the account's first NAV) — with `closing_nav=0`, the continuity
+    check (`cur.opening_nav==prev.closing_nav`) lines up exactly with a
+    first day whose `opening_nav=0`."""
 
     zero = Decimal("0")
     return NAVSnapshot(
