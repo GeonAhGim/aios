@@ -7,7 +7,6 @@ ADR-2026-09-10-C §7) — shares fixtures/entity-snapshot helpers via
 
 from __future__ import annotations
 
-from time import perf_counter
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -196,7 +195,7 @@ async def test_resolve_failure_injection_preserves_block_and_retry(
 
 
 @pytest.mark.perf
-async def test_resolve_missing_target_rejection_p95_budget(pool, repo):
+async def test_resolve_missing_target_rejection_p95_budget(pool, repo, perf_budget):
     """PLT mutation budget: DB-backed rejection alone must fit p95 < 800ms.
 
     `perf` marker (task-7434 guard): this is a wall-clock budget over DB round
@@ -206,9 +205,8 @@ async def test_resolve_missing_target_rejection_p95_budget(pool, repo):
     defined in L4_platform_observability_tenancy_api_v1.0.md section 7.
     """
     tenant_id = await tenant(pool)
-    durations = []
-    for _ in range(20):
-        started = perf_counter()
+
+    async def _probe_once() -> None:
         with pytest.raises(ReconciliationStateNotFoundError):
             await resolve_reconciliation(
                 repo,
@@ -217,6 +215,10 @@ async def test_resolve_missing_target_rejection_p95_budget(pool, repo):
                 target_ref=uuid4(),
                 reason="rejection latency probe",
             )
-        durations.append(perf_counter() - started)
-    p95 = sorted(durations)[18]
-    assert p95 < 0.8, f"resolve rejection p95={p95:.3f}s exceeds 800ms mutation budget"
+
+    samples = [await perf_budget.sample_async(_probe_once) for _ in range(20)]
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
+    budget_ms = 800.0
+    print(f"[REC-007 resolve rejection] p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms, f"resolve rejection p95={p95_ms:.3f}s exceeds 800ms mutation budget"
