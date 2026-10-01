@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.unit.scripts.closeout_check_loader import ROOT, cc
 
 # --------------------------------------------------------------------------- 12: HEAD Actions 녹색
@@ -231,6 +233,88 @@ def test_wait_for_head_green_polls_then_succeeds(tmp_path: Path) -> None:
 
     assert result.passed
     assert call_count["run"] >= 2
+
+
+def test_head_actions_green_fails_on_malformed_json_from_gh(tmp_path: Path) -> None:
+    """`gh run list`가 returncode=0인데 JSON이 깨져 있으면 조용히 통과시키지 않고 FAIL."""
+    fake = _FakeGhRun({"run": (0, "{not valid json")})
+
+    result = cc.check_12_head_actions_green(
+        tmp_path, gh_run=fake, git_head=lambda _root: "current-head-sha"
+    )
+
+    assert not result.passed
+    assert "gh run list 실패" in result.detail
+
+
+def test_head_actions_green_fails_when_head_run_still_in_progress(tmp_path: Path) -> None:
+    """conclusion이 아직 없는(진행 중) 실행은 success로 간주하지 않고 FAIL."""
+    rows = _runs_json(
+        [
+            {
+                "headSha": "current-head-sha",
+                "conclusion": "",
+                "status": "in_progress",
+                "url": "https://example/run/6",
+            }
+        ]
+    )
+    fake = _FakeGhRun({"run": (0, rows)})
+
+    result = cc.check_12_head_actions_green(
+        tmp_path, gh_run=fake, git_head=lambda _root: "current-head-sha"
+    )
+
+    assert not result.passed
+    assert "conclusion=None" in result.detail
+
+
+def test_wait_for_head_green_skips_dispatch_when_head_sha_unavailable(tmp_path: Path) -> None:
+    """git_head가 None이면 check_12 결과를 그대로 반환하고 workflow_dispatch를 트리거하지 않는다."""
+    fake = _FakeGhRun({"workflow": (0, "")})
+
+    result = cc.wait_for_head_green(
+        tmp_path, gh_run=fake, git_head=lambda _root: None, sleep=lambda _s: None
+    )
+
+    assert not result.passed
+    assert "git rev-parse" in result.detail
+    assert fake.calls == []
+
+
+def test_trigger_head_workflow_dispatch_propagates_gh_executable_missing() -> None:
+    """`gh` 바이너리 자체가 없을 때(FileNotFoundError) 조용히 삼키지 않고 전파한다(fail-closed)."""
+
+    def _missing_gh(_args: list[str]) -> object:
+        raise FileNotFoundError("gh executable not found")
+
+    with pytest.raises(FileNotFoundError):
+        cc.trigger_head_workflow_dispatch(_missing_gh)
+
+
+def test_wait_for_head_green_poll_count_bounded_by_timeout_budget(tmp_path: Path) -> None:
+    """timeout_sec/poll_sec 예산을 넘는 과도한 폴링을 하지 않는다(성능 예산 단언)."""
+    fake = _FakeGhRun({"run": (0, _runs_json([])), "workflow": (0, "")})
+    timeout_sec = 100.0
+    poll_sec = 10.0
+    # 0.0에서 시작해 poll_sec만큼 전진하는 시계 — 최대 budget_polls + 1회만 now()가 호출돼야 한다.
+    budget_polls = int(timeout_sec // poll_sec)
+    clock = iter(float(i) * poll_sec for i in range(budget_polls + 2))
+
+    result = cc.wait_for_head_green(
+        tmp_path,
+        gh_run=fake,
+        git_head=lambda _root: "current-head-sha",
+        sleep=lambda _s: None,
+        now=lambda: next(clock),
+        timeout_sec=timeout_sec,
+        poll_sec=poll_sec,
+    )
+
+    assert not result.passed
+    run_calls = [c for c in fake.calls if c[0] == "run"]
+    # 최초 1회(check_12) + 폴링 루프(최대 budget_polls)를 넘지 않는다.
+    assert len(run_calls) <= budget_polls + 1
 
 
 def test_wait_for_head_green_times_out_when_never_completes(tmp_path: Path) -> None:
