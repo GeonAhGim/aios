@@ -3,8 +3,6 @@ task-2639 AI-5 ("재현 키 구성 요소")."""
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from src.foundation.ai.providers.domain.prompt_registry import (
@@ -15,6 +13,7 @@ from src.foundation.ai.providers.domain.prompt_registry import (
     PromptVersionNotFoundError,
     prompt_hash,
 )
+from tests.conftest import PerfBudget
 
 
 def _template(
@@ -142,15 +141,17 @@ _PROMPT_HASH_BUDGET_MS = 1.0
 
 
 @pytest.mark.perf
-def test_prompt_hash_p95_latency_within_self_declared_budget() -> None:
+def test_prompt_hash_p95_latency_within_self_declared_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """task-10940: process_time 기반 perf_budget으로 측정해 부하 민감(워커
+    다수·로컬 LLM 동시 실행) 호스트에서 다른 프로세스에 코어를 뺏겨 대기한
+    시간이 wall-clock에 섞이지 않게 한다. Windows process_time 해상도(~15.6ms)
+    양자화 오차를 줄이기 위해 batch=8을 묶는다(task-7360과 동일 수법)."""
     template = _template(template="x" * 2000)
-    samples: list[float] = []
-    for _ in range(200):
-        started = time.perf_counter()
-        prompt_hash(template)
-        samples.append((time.perf_counter() - started) * 1000)
-    samples.sort()
-    p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    samples = perf_budget.samples(lambda: prompt_hash(template), n=200, batch=8)
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
     print(
         f"[AI-5 prompt_registry] prompt_hash p95={p95_ms:.4f}ms "
         f"budget<{_PROMPT_HASH_BUDGET_MS:.1f}ms"
