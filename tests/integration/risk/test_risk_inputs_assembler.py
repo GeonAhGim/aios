@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §3.2, §3.5, §9 R-31.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -76,14 +77,25 @@ async def _create_execution(pool: asyncpg.Pool, user_id: UUID, *, exchange: str 
 
 
 async def _insert_position(
-    pool: asyncpg.Pool, *, user_id: UUID, symbol: str, exchange: str, strategy_id: str,
-    quantity: Decimal, average_entry_price: Decimal,
+    pool: asyncpg.Pool,
+    *,
+    user_id: UUID,
+    symbol: str,
+    exchange: str,
+    strategy_id: str,
+    quantity: Decimal,
+    average_entry_price: Decimal,
 ) -> None:
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO positions (user_id, symbol, exchange, strategy_id, quantity, "
             "average_entry_price, entry_time) VALUES ($1, $2, $3, $4, $5, $6, now())",
-            user_id, symbol, exchange, strategy_id, quantity, average_entry_price,
+            user_id,
+            symbol,
+            exchange,
+            strategy_id,
+            quantity,
+            average_entry_price,
         )
 
 
@@ -91,9 +103,15 @@ def _candles(symbol: str, exchange: str, n: int) -> list[Candle]:
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     return [
         Candle(
-            symbol=symbol, exchange=exchange, timeframe="1d",
-            open=Decimal("100"), high=Decimal("101"), low=Decimal("99"), close=Decimal("100"),
-            volume=Decimal("1"), open_time=base + timedelta(days=i),
+            symbol=symbol,
+            exchange=exchange,
+            timeframe="1d",
+            open=Decimal("100"),
+            high=Decimal("101"),
+            low=Decimal("99"),
+            close=Decimal("100"),
+            volume=Decimal("1"),
+            open_time=base + timedelta(days=i),
             close_time=base + timedelta(days=i, hours=1),
         )
         for i in range(n)
@@ -102,9 +120,16 @@ def _candles(symbol: str, exchange: str, n: int) -> list[Candle]:
 
 def _intent(symbol: str, strategy_id: str) -> OrderIntent:
     return OrderIntent(
-        symbol=symbol, asset_class="CRYPTO_SPOT", side="BUY", quantity=Decimal("1"),
-        ref_price=Decimal("100"), notional=Decimal("100"), reduce_only=False,
-        strategy_id=strategy_id, strategy_version="1.0.0", capital_pct=Decimal("10"),
+        symbol=symbol,
+        asset_class="CRYPTO_SPOT",
+        side="BUY",
+        quantity=Decimal("1"),
+        ref_price=Decimal("100"),
+        notional=Decimal("100"),
+        reduce_only=False,
+        strategy_id=strategy_id,
+        strategy_version="1.0.0",
+        capital_pct=Decimal("10"),
     )
 
 
@@ -138,16 +163,27 @@ async def test_two_select_round_trips(pool, monkeypatch):
 
     caches = _caches()
     caches.equity_tracker.seed(
-        execution_id, day_start_date=date(2026, 1, 1), day_start_equity=Decimal("1000"),
+        execution_id,
+        day_start_date=date(2026, 1, 1),
+        day_start_equity=Decimal("1000"),
         peak_equity=Decimal("1000"),
     )
-    balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                available=Decimal("900"))]
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
 
     await assemble_risk_inputs(
-        pool, caches, execution_id=execution_id, user_id=user_id,
-        intent=_intent(symbol, "strat-count"), balances=balances,
-        candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=_intent(symbol, "strat-count"),
+        balances=balances,
+        candles=_candles(symbol, "bitget", 3),
+        policy=_POLICY,
+        now=_NOW,
     )
 
     select_count = sum(1 for q in queries if q.strip().upper().startswith(("SELECT", "WITH")))
@@ -164,13 +200,22 @@ async def test_fields_filled_or_none_not_defaulted(pool):
     # 행을 남기면 아래 None 단언이 실행 순서에 따라 깨진다(재현 확인됨).
     symbol = f"FIELDS-{uuid.uuid4().hex[:8]}/USDT"
     caches = _caches()
-    balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                available=Decimal("900"))]
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
 
     inputs = await assemble_risk_inputs(
-        pool, caches, execution_id=execution_id, user_id=user_id,
-        intent=_intent(symbol, "strat-fields"), balances=balances,
-        candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=_intent(symbol, "strat-fields"),
+        balances=balances,
+        candles=_candles(symbol, "bitget", 3),
+        policy=_POLICY,
+        now=_NOW,
     )
 
     # 실제로 계산되는 값 — 0/False로 뭉개지지 않았다.
@@ -196,22 +241,33 @@ async def test_missing_distrust_level_denies_via_safety_state_rule(pool):
     execution_id = await _create_execution(pool, user_id)
     symbol = "ETH/USDT"
     caches = _caches()
-    balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                available=Decimal("900"))]
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
 
     inputs = await assemble_risk_inputs(
-        pool, caches, execution_id=execution_id, user_id=user_id,
-        intent=_intent(symbol, "strat-distrust"), balances=balances,
-        candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=_intent(symbol, "strat-distrust"),
+        balances=balances,
+        candles=_candles(symbol, "bitget", 3),
+        policy=_POLICY,
+        now=_NOW,
     )
     assert inputs.safety.data_distrust_level is None
 
     # active_control_scopes는 이 조립기 예산 밖이라 항상 None이다 — safety_state
     # 규칙이 그 필드보다 먼저 결손 처리해버리면 distrust_level 경로를 가릴 수
     # 있으므로, 이 테스트가 검증하려는 필드(data_distrust_level)만 격리한다.
-    isolated = inputs.model_copy(update={
-        "safety": inputs.safety.model_copy(update={"active_control_scopes": ()}),
-    })
+    isolated = inputs.model_copy(
+        update={
+            "safety": inputs.safety.model_copy(update={"active_control_scopes": ()}),
+        }
+    )
 
     result = safety_state.safety_state(isolated, _POLICY)
     assert result.outcome == RiskOutcome.DENY
@@ -228,21 +284,40 @@ async def test_other_tenants_positions_excluded(pool):
     strategy_id = "strat-isolated"
 
     await _insert_position(
-        pool, user_id=user_a, symbol=symbol, exchange="bitget", strategy_id=strategy_id,
-        quantity=Decimal("2"), average_entry_price=Decimal("100"),
+        pool,
+        user_id=user_a,
+        symbol=symbol,
+        exchange="bitget",
+        strategy_id=strategy_id,
+        quantity=Decimal("2"),
+        average_entry_price=Decimal("100"),
     )
     await _insert_position(
-        pool, user_id=user_b, symbol=symbol, exchange="bitget", strategy_id=strategy_id,
-        quantity=Decimal("999"), average_entry_price=Decimal("100"),
+        pool,
+        user_id=user_b,
+        symbol=symbol,
+        exchange="bitget",
+        strategy_id=strategy_id,
+        quantity=Decimal("999"),
+        average_entry_price=Decimal("100"),
     )
 
     caches = _caches()
-    balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                available=Decimal("900"))]
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
     inputs = await assemble_risk_inputs(
-        pool, caches, execution_id=execution_a, user_id=user_a,
-        intent=_intent(symbol, strategy_id), balances=balances,
-        candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+        pool,
+        caches,
+        execution_id=execution_a,
+        user_id=user_a,
+        intent=_intent(symbol, strategy_id),
+        balances=balances,
+        candles=_candles(symbol, "bitget", 3),
+        policy=_POLICY,
+        now=_NOW,
     )
 
     assert inputs.exposure.position_quantity == Decimal("2")
@@ -255,21 +330,40 @@ async def test_to_legacy_dict_round_trips_fourteen_keys(pool):
     execution_id = await _create_execution(pool, user_id)
     symbol = "BTC/USDT"
     caches = _caches()
-    balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                available=Decimal("900"))]
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
 
     inputs = await assemble_risk_inputs(
-        pool, caches, execution_id=execution_id, user_id=user_id,
-        intent=_intent(symbol, "strat-legacy"), balances=balances,
-        candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=_intent(symbol, "strat-legacy"),
+        balances=balances,
+        candles=_candles(symbol, "bitget", 3),
+        policy=_POLICY,
+        now=_NOW,
     )
     legacy = to_legacy_dict(inputs)
 
     assert set(legacy) == {
-        "daily_pnl_pct", "drawdown_pct", "position_quantity", "total_equity",
-        "certified_badge", "allocated_capital", "available_balance", "var_pct",
-        "correlated_exposure_pct", "recent_trade_count_1h", "avg_trade_count_24h",
-        "circuit_breaker_level", "execution_paused_by_safety", "leverage",
+        "daily_pnl_pct",
+        "drawdown_pct",
+        "position_quantity",
+        "total_equity",
+        "certified_badge",
+        "allocated_capital",
+        "available_balance",
+        "var_pct",
+        "correlated_exposure_pct",
+        "recent_trade_count_1h",
+        "avg_trade_count_24h",
+        "circuit_breaker_level",
+        "execution_paused_by_safety",
+        "leverage",
     }
     assert legacy["leverage"] == Decimal("1")  # 열린 포지션 없음 — 무레버리지 기본값
     assert legacy["total_equity"] == Decimal("1000")
@@ -289,18 +383,29 @@ async def test_circuit_breaker_halted_denies_via_safety_state_rule(pool):
         )
     try:
         caches = _caches()
-        balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                    available=Decimal("900"))]
+        balances = [
+            AccountBalance(
+                exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+            )
+        ]
         inputs = await assemble_risk_inputs(
-            pool, caches, execution_id=execution_id, user_id=user_id,
-            intent=_intent(symbol, "strat-cb-halted"), balances=balances,
-            candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+            pool,
+            caches,
+            execution_id=execution_id,
+            user_id=user_id,
+            intent=_intent(symbol, "strat-cb-halted"),
+            balances=balances,
+            candles=_candles(symbol, "bitget", 3),
+            policy=_POLICY,
+            now=_NOW,
         )
         assert inputs.safety.circuit_breaker_level == "halted"
 
-        isolated = inputs.model_copy(update={
-            "safety": inputs.safety.model_copy(update={"active_control_scopes": ()}),
-        })
+        isolated = inputs.model_copy(
+            update={
+                "safety": inputs.safety.model_copy(update={"active_control_scopes": ()}),
+            }
+        )
         result = safety_state.safety_state(isolated, _POLICY)
         assert result.outcome == RiskOutcome.DENY
         assert result.reason_code == "RISK_CIRCUIT_BREAKER_HALTED"
@@ -322,17 +427,31 @@ async def test_cross_symbol_exposure_denies_via_correlation_rule(pool):
     strategy_id = "strat-cross-symbol"
 
     await _insert_position(
-        pool, user_id=user_id, symbol=other_symbol, exchange="bitget", strategy_id=strategy_id,
-        quantity=Decimal("1"), average_entry_price=Decimal("100"),
+        pool,
+        user_id=user_id,
+        symbol=other_symbol,
+        exchange="bitget",
+        strategy_id=strategy_id,
+        quantity=Decimal("1"),
+        average_entry_price=Decimal("100"),
     )
 
     caches = _caches()
-    balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                available=Decimal("900"))]
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
     inputs = await assemble_risk_inputs(
-        pool, caches, execution_id=execution_id, user_id=user_id,
-        intent=_intent(symbol, strategy_id), balances=balances,
-        candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=_intent(symbol, strategy_id),
+        balances=balances,
+        candles=_candles(symbol, "bitget", 3),
+        policy=_POLICY,
+        now=_NOW,
     )
     assert inputs.stats.missing_pairs == ("exposure:other_symbols_unresolved",)
     assert inputs.stats.correlated_exposure_pct is None
@@ -350,8 +469,11 @@ async def test_exposure_query_failure_propagates_not_swallowed(pool, monkeypatch
     execution_id = await _create_execution(pool, user_id)
     symbol = "BTC/USDT"
     caches = _caches()
-    balances = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                available=Decimal("900"))]
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
 
     original_fetchrow = asyncpg.Connection.fetchrow
 
@@ -364,10 +486,173 @@ async def test_exposure_query_failure_propagates_not_swallowed(pool, monkeypatch
 
     with pytest.raises(asyncpg.PostgresConnectionError):
         await assemble_risk_inputs(
-            pool, caches, execution_id=execution_id, user_id=user_id,
-            intent=_intent(symbol, "strat-query-failure"), balances=balances,
-            candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+            pool,
+            caches,
+            execution_id=execution_id,
+            user_id=user_id,
+            intent=_intent(symbol, "strat-query-failure"),
+            balances=balances,
+            candles=_candles(symbol, "bitget", 3),
+            policy=_POLICY,
+            now=_NOW,
         )
+
+
+async def test_missing_usdt_balance_fields_become_none_not_zero(pool):
+    """negative(D2) — balances에 USDT 행이 없으면(거래소가 그 자산을 아직
+    보고하지 않음 등) `total_equity`/`available_balance`뿐 아니라 그로부터
+    파생되는 `daily_pnl_pct`/`drawdown_pct`/`day_start_equity`/`peak_equity`/
+    `correlated_exposure_pct`가 모두 명시적 None이 된다 — 0으로 뭉개져
+    "자산 0"(알려진 값)과 "자산 모름"(결손)을 혼동하지 않는다(I2)."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id)
+    symbol = "BTC/USDT"
+    caches = _caches()
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="KRW", total=Decimal("100000"), available=Decimal("90000")
+        )
+    ]
+
+    inputs = await assemble_risk_inputs(
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=_intent(symbol, "strat-no-usdt"),
+        balances=balances,
+        candles=_candles(symbol, "bitget", 3),
+        policy=_POLICY,
+        now=_NOW,
+    )
+
+    assert inputs.equity.total_equity is None
+    assert inputs.equity.available_balance is None
+    assert inputs.equity.daily_pnl_pct is None
+    assert inputs.equity.drawdown_pct is None
+    assert inputs.equity.day_start_equity is None
+    assert inputs.equity.peak_equity is None
+    assert inputs.stats.correlated_exposure_pct is None
+
+
+async def test_empty_candles_var_and_price_fields_none(pool):
+    """negative(D2) — 캔들이 없으면(신규 상장 심볼, 피드 중단 등) VAR/ES/
+    상관 관련 필드가 0.0/NORMAL로 암묵 치환되지 않고 명시적 None이 된다
+    (R-28 candle_history.py가 stale 데이터를 돌려주지 않는 것과 같은
+    fail-closed 원칙 — 이 조립기는 candle_history를 거치지 않고 호출부가
+    넘긴 candles를 그대로 쓰므로, 빈 리스트가 들어오면 '측정 불가'를
+    '정상 0'으로 둔갑시키지 않아야 한다)."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id)
+    symbol = "NEWLIST/USDT"
+    caches = _caches()
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+
+    inputs = await assemble_risk_inputs(
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=_intent(symbol, "strat-no-candles"),
+        balances=balances,
+        candles=[],
+        policy=_POLICY,
+        now=_NOW,
+    )
+
+    assert inputs.stats.var_pct is None
+    assert inputs.stats.es_pct is None
+    assert inputs.stats.var_method is None
+    assert inputs.stats.lookback_bars is None
+    assert inputs.stats.bars_used is None
+
+
+async def test_fence_query_failure_propagates_not_swallowed(pool, monkeypatch):
+    """negative + 실패주입(D2) — §3.5 read_fence 왕복(2회 중 두 번째)이 DB
+    레벨에서 실패하면 예외가 그대로 전파된다. 첫 번째 왕복(노출 스냅샷)만
+    성공했다고 해서 조립 결과를 절반만 채운 채 통과시키면 뒤이은 risk
+    게이트가 fence_snapshot 없이 ALLOW로 샐 수 있다(I2, R-30과 동일하게
+    read_fence 책임 경로이지만 이 조립기가 그 실패를 가리지 않음을
+    증명한다)."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id)
+    symbol = "BTC/USDT"
+    caches = _caches()
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+
+    original_fetch = asyncpg.Connection.fetch
+
+    async def failing_fetch(self, query, *args, **kwargs):
+        if "read_fence" in query.lower() or "fence" in query.lower():
+            raise asyncpg.PostgresConnectionError("simulated fence query failure")
+        return await original_fetch(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetch", failing_fetch)
+
+    with pytest.raises(asyncpg.PostgresConnectionError):
+        await assemble_risk_inputs(
+            pool,
+            caches,
+            execution_id=execution_id,
+            user_id=user_id,
+            intent=_intent(symbol, "strat-fence-failure"),
+            balances=balances,
+            candles=_candles(symbol, "bitget", 3),
+            policy=_POLICY,
+            now=_NOW,
+        )
+
+
+@pytest.mark.perf
+async def test_assemble_risk_inputs_latency_within_order_submission_budget(pool, perf_budget):
+    """수치 성능 단언(D2) — `assemble_risk_inputs`는 주문 제출 경로의
+    일부다. ADR-2026-09-09-C §축별 예산표의 "주문 제출→ACK p95 50ms(paper)"
+    전체 예산 중, 이 조립기 자체(2회 SELECT)가 그 예산의 대부분을 혼자
+    쓰면 안 된다 — 동일 예산을 서브단계 상한으로 그대로 쓴다."""
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id)
+    symbol = "BTC/USDT"
+    caches = _caches()
+    balances = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+
+    budget_ms = 50.0
+    latencies_ms: list[float] = []
+    for _ in range(10):
+        sample = await perf_budget.sample_async(
+            lambda: assemble_risk_inputs(
+                pool,
+                caches,
+                execution_id=execution_id,
+                user_id=user_id,
+                intent=_intent(symbol, "strat-perf"),
+                balances=balances,
+                candles=_candles(symbol, "bitget", 3),
+                policy=_POLICY,
+                now=_NOW,
+            )
+        )
+        latencies_ms.append(sample.wall_ms)
+
+    latencies_ms.sort()
+    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95) - 1]
+    print(f"\nassemble_risk_inputs latency p95={p95_ms:.3f}ms (n=10, budget<{budget_ms}ms)")
+
+    assert p95_ms < budget_ms, (
+        f"assemble_risk_inputs p95 지연({p95_ms:.3f}ms)이 주문 제출→ACK 예산"
+        f"({budget_ms}ms) 서브단계 상한을 초과했습니다 — 성능 회귀입니다."
+    )
 
 
 async def test_two_instances_concurrent_equity_peak_converges(pool):
@@ -382,21 +667,39 @@ async def test_two_instances_concurrent_equity_peak_converges(pool):
 
     caches_a = _caches()
     caches_b = _caches()
-    balances_low = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1000"),
-                                    available=Decimal("900"))]
-    balances_high = [AccountBalance(exchange="bitget", asset="USDT", total=Decimal("1500"),
-                                     available=Decimal("1400"))]
+    balances_low = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1000"), available=Decimal("900")
+        )
+    ]
+    balances_high = [
+        AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("1500"), available=Decimal("1400")
+        )
+    ]
 
     results = await asyncio.gather(
         assemble_risk_inputs(
-            pool, caches_a, execution_id=execution_id, user_id=user_id,
-            intent=_intent(symbol, "strat-multi-a"), balances=balances_low,
-            candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+            pool,
+            caches_a,
+            execution_id=execution_id,
+            user_id=user_id,
+            intent=_intent(symbol, "strat-multi-a"),
+            balances=balances_low,
+            candles=_candles(symbol, "bitget", 3),
+            policy=_POLICY,
+            now=_NOW,
         ),
         assemble_risk_inputs(
-            pool, caches_b, execution_id=execution_id, user_id=user_id,
-            intent=_intent(symbol, "strat-multi-b"), balances=balances_high,
-            candles=_candles(symbol, "bitget", 3), policy=_POLICY, now=_NOW,
+            pool,
+            caches_b,
+            execution_id=execution_id,
+            user_id=user_id,
+            intent=_intent(symbol, "strat-multi-b"),
+            balances=balances_high,
+            candles=_candles(symbol, "bitget", 3),
+            policy=_POLICY,
+            now=_NOW,
         ),
         return_exceptions=True,
     )
