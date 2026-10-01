@@ -20,6 +20,7 @@ from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from src.foundation.backtest.domain.param_stability import ParamGrid
 from src.foundation.backtest.domain.splits import OosLeakageError, Split, make_splits
 from src.services.condition_compiler import ORDER_FILLED
+from tests.conftest import PerfBudget
 
 # DEEPEN(task-3204): 그리드 4점 x 스플릿 2개(anchored, n_bars=50/min_train=20) =
 # IS 8회 + OOS 2회 = run_backtest 10회. bar-call 합계(train 20*4 + test 15*1 +
@@ -37,10 +38,10 @@ def _p95_ms(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_run_walk_forward_p95_latency_within_backtest_budget_slice() -> None:
-    samples: list[float] = []
-    for _ in range(_ITERATIONS):
-        started = time.perf_counter()
+def test_run_walk_forward_p95_latency_within_backtest_budget_slice(
+    perf_budget: PerfBudget,
+) -> None:
+    def _one_run() -> None:
         run_walk_forward(
             _config(),
             _fsm_config(),
@@ -49,8 +50,11 @@ def test_run_walk_forward_p95_latency_within_backtest_budget_slice() -> None:
             _splits(),
             indicator_service=_FakePriceIndicatorService(),
         )
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
+
+    perf_samples = perf_budget.samples(_one_run, n=_ITERATIONS)
+    cpu_samples = [s.cpu_ms for s in perf_samples]
+    ordered = sorted(cpu_samples)
+    p95_ms = ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)]
     print(f"[L35] run_walk_forward p95={p95_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
     assert p95_ms < _BUDGET_MS
 
@@ -58,6 +62,7 @@ def test_run_walk_forward_p95_latency_within_backtest_budget_slice() -> None:
 @pytest.mark.perf
 def test_run_walk_forward_still_correct_when_run_backtest_stalls(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """DEEPEN(task-3204) 실패 주입: run_backtest가 실제로 느려져도(회귀로
     체결 시뮬레이션에 무거운 단계가 끼어드는 상황) run_walk_forward가 그
@@ -73,16 +78,18 @@ def test_run_walk_forward_still_correct_when_run_backtest_stalls(
 
     monkeypatch.setattr(walk_forward_mod, "run_backtest", _stalled_run_backtest)
 
-    started = time.perf_counter()
-    stalled_report = run_walk_forward(
-        _config(),
-        _fsm_config(),
-        _bars(50),
-        _grid(),
-        _splits(),
-        indicator_service=_FakePriceIndicatorService(),
-    )
-    elapsed_s = time.perf_counter() - started
+    def _stalled_run() -> object:
+        return run_walk_forward(
+            _config(),
+            _fsm_config(),
+            _bars(50),
+            _grid(),
+            _splits(),
+            indicator_service=_FakePriceIndicatorService(),
+        )
+
+    stall_sample = perf_budget.sample(_stalled_run)
+    stalled_report = stall_sample.result
 
     monkeypatch.undo()
     baseline_report = run_walk_forward(
@@ -94,7 +101,7 @@ def test_run_walk_forward_still_correct_when_run_backtest_stalls(
         indicator_service=_FakePriceIndicatorService(),
     )
 
-    assert elapsed_s >= delay_s * _RUN_BACKTEST_CALLS
+    assert stall_sample.wall_ms >= delay_s * _RUN_BACKTEST_CALLS * 1000
     assert [w.selected_params for w in stalled_report.windows] == [
         w.selected_params for w in baseline_report.windows
     ]
@@ -104,6 +111,7 @@ def test_run_walk_forward_still_correct_when_run_backtest_stalls(
 @pytest.mark.perf
 def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """DEEPEN(task-3204) 게이트 적색 재현: run_backtest가 200ms 예산을
     실제로 넘기도록 지연을 주입하면, 위 p95 단언과 동일한 단언식이 실제로
@@ -117,9 +125,7 @@ def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
 
     monkeypatch.setattr(walk_forward_mod, "run_backtest", _stalled_run_backtest)
 
-    samples: list[float] = []
-    for _ in range(2):
-        started = time.perf_counter()
+    def _one_run() -> None:
         run_walk_forward(
             _config(),
             _fsm_config(),
@@ -128,8 +134,11 @@ def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
             _splits(),
             indicator_service=_FakePriceIndicatorService(),
         )
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
+
+    perf_samples = perf_budget.samples(_one_run, n=2)
+    wall_samples = [s.wall_ms for s in perf_samples]
+    ordered = sorted(wall_samples)
+    p95_ms = ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)]
     with pytest.raises(AssertionError):
         assert p95_ms < _BUDGET_MS
 
