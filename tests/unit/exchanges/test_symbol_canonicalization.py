@@ -340,7 +340,25 @@ def _run_pytest_node(
 ) -> subprocess.CompletedProcess[str]:
     repo_root = str(Path.cwd())
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", target_test]
-    env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
+    # `-n 8` 부하에서는 이 프로세스 자신이 이미 xdist 워커(`PYTEST_XDIST_WORKER`,
+    # 예: "gw3")라 `os.environ["DATABASE_URL"]`이 그 워커 전용 클론
+    # (`tests/support/db.py::ensure_worker_database`가 만든 `..._gw3`)이다. 자식
+    # subprocess가 `PYTEST_XDIST_WORKER`를 그대로 물려받으면 `tests/conftest.py`
+    # 임포트 시점에 *같은 worker_id*로 다시 `ensure_worker_database`를 불러
+    # 지금 이 부모 프로세스가 붙어 있는 바로 그 `..._gw3` DB를 DROP+CREATE로
+    # 갈아치운다(부모의 `pool` 커넥션이 강제 종료돼 워커가 죽는다 — `-n 8`
+    # 재현 관측, task-11078 동일 결함). 자식은 부모가 이미 격리해 둔 DB를 그대로
+    # 재사용하면 충분하므로 `PYTEST_XDIST_WORKER`를 지워 "master" 모드로
+    # 돌리고, `TEST_DATABASE_URL`을 부모의 현재 워커 DB로 못박아 추가 클론
+    # 자체를 건너뛴다.
+    env = dict(
+        os.environ,
+        PYTHONPATH=repo_root,
+        PYTEST_ADDOPTS="",
+        PYTHONIOENCODING="utf-8",
+        TEST_DATABASE_URL=os.environ["DATABASE_URL"],
+    )
+    env.pop("PYTEST_XDIST_WORKER", None)
     if plugin_name is not None:
         assert plugin_dir is not None
         command = [*command[:-1], "-p", plugin_name, command[-1]]

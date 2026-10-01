@@ -217,13 +217,18 @@ def test_gate_red_budget_actually_fails_past_budget(perf_budget: PerfBudget) -> 
     `AssertionError`를 내야, CI가 언젠가 실제로 느려졌을 때 빨간불이
     된다는 것을 증명한다."""
     n = 200
-    absurdly_low_budget_ms = 1e-6  # 1 microsecond in ms (was 1e-9 sec)
+    absurdly_low_budget_ms = 1e-9
     payloads = [_token_kwargs(token_id=uuid4()) for _ in range(n)]
 
+    # `cpu_ms`(`time.process_time()`)는 Windows에서 ~15.6ms 틱으로 양자화돼
+    # 이 루프처럼 짧은 호출은 0.0으로 읽힐 수 있다(0.0 < 1e-6도 참이라
+    # red-gate가 거꾸로 통과해 버린다) — 저장소의 다른 모든
+    # `..._actually_fails_past_budget` 테스트와 동일하게 해상도가 충분한
+    # `wall_ms`(`time.perf_counter()`)로 측정한다.
     sample = perf_budget.sample(lambda: [v1.AgentToken(**p) for p in payloads])
 
     with pytest.raises(AssertionError):
-        assert sample.cpu_ms < absurdly_low_budget_ms
+        assert sample.wall_ms < absurdly_low_budget_ms
 
 
 @pytest.mark.parametrize("mode", ["validation", "serialization"])
