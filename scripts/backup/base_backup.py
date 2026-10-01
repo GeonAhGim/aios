@@ -127,8 +127,17 @@ def run_base_backup(
         "aios_drill",
     ]
     env = {**os.environ}
-    rc, tail = run_cmd(cmd, env, timeout)
-    finished = _now()
+    try:
+        rc, tail = run_cmd(cmd, env, timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # run_cmd 주입 시 예외 전파 방지 — 실패로 간주하고 정리
+        if isinstance(exc, subprocess.TimeoutExpired):
+            rc, tail = 124, f"timeout {exc.timeout}s"
+        else:
+            rc, tail = 1, f"{type(exc).__name__}: {exc}"
+        finished = _now()
+    else:
+        finished = _now()
 
     manifest = {
         "started_at": started.isoformat(timespec="seconds"),

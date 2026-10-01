@@ -89,6 +89,48 @@ def test_latest_backup_dir_ignores_corrupt_manifest(tmp_path: Path):
     assert base_backup.latest_backup_dir(tmp_path) is None
 
 
+def test_run_base_backup_dest_write_failure_cleans_up(tmp_path: Path):
+    """run_cmd가 OSError를 던질 때 run_base_backup이 FAILED 마커를 남기고 dest를 정리하는지 검증."""
+    # run_cmd가 OSError를 던지면: target 디렉터리는 이미 생성됨 → cleanup 필요
+    manifest = base_backup.run_base_backup(
+        tmp_path,
+        "postgresql://x/y",
+        which=lambda _b: "/usr/bin/pg_basebackup",
+        run_cmd=lambda cmd, env, timeout: (_ for _ in ()).throw(OSError("disk full", "/dev/sda1")),
+    )
+    assert manifest["ok"] is False
+    # target 디렉터리는 rmtree로 정리됨
+    assert not Path(manifest["dest"]).exists()
+    # FAILED marker가 남음
+    failed_markers = list(tmp_path.glob("*-FAILED.json"))
+    assert len(failed_markers) == 1
+    saved = json.loads(failed_markers[0].read_text(encoding="utf-8"))
+    assert saved["ok"] is False
+    assert "disk full" in saved["tail"]
+
+
+def test_run_base_backup_timeout_error_leaves_failed_marker(tmp_path: Path):
+    """run_cmd가 TimeoutExpired를 던질 때 FAILED 마커를 남기고 dest를 정리하는지 검증."""
+    import subprocess
+
+    manifest = base_backup.run_base_backup(
+        tmp_path,
+        "postgresql://x/y",
+        which=lambda _b: "/usr/bin/pg_basebackup",
+        run_cmd=lambda cmd, env, timeout: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(cmd, timeout)
+        ),
+    )
+    assert manifest["ok"] is False
+    assert manifest["returncode"] == 124
+    assert not Path(manifest["dest"]).exists()
+    failed_markers = list(tmp_path.glob("*-FAILED.json"))
+    assert len(failed_markers) == 1
+    saved = json.loads(failed_markers[0].read_text(encoding="utf-8"))
+    assert saved["ok"] is False
+    assert "timeout" in saved["tail"]
+
+
 def test_pg_basebackup_command_includes_wal_method_stream_and_replication_slot(
     tmp_path: Path,
 ) -> None:
