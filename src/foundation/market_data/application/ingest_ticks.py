@@ -28,12 +28,22 @@ The transaction boundary bundles storage, batch recording, and audit events into
 on audit failure, everything rolls back (same as LA-15). To prevent concurrent calls for
 the same (venue, instrument_id) from reading the same "last stored" value and both
 passing, we serialize with `pg_advisory_xact_lock` until the transaction ends.
+
+`_store_ticks`'s `ON CONFLICT (venue, instrument_id, trade_id, traded_at) DO NOTHING`
+already never overwrites a stored row - but a resend that reuses the same trade_id/
+traded_at with a genuinely different price/quantity (two different fills colliding on
+the same key, not a re-fetch) used to vanish into that `DO NOTHING` with no trace. We
+now diff the incoming content against the stored row for every "known" key and record
+a mismatch as a `DUPLICATE_CONFLICT` issue (audit F3, task-10467) instead of silently
+dropping it - the original row is still never overwritten, only now the collision is
+visible on `md_ingest_batch_tick.issues`/`verdict.quarantined`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -113,20 +123,28 @@ async def _last_stored(
 
 async def _known_ticks(
     conn: asyncpg.Connection, venue: Venue, instrument_id: UUID, ticks: list[TickRecord]
-) -> set[tuple[str, datetime]]:
+) -> dict[tuple[str, datetime], tuple[Decimal, Decimal]]:
     """Determines "already stored" by the composite key matching
     `md_tick` UNIQUE(venue, instrument_id, trade_id, traded_at). Judging by
     trade_id alone would misclassify re-fetches with the same trade_id but a
     different traded_at as duplicates, causing them to skip the regression check
-    and letting regressive batches bypass rejection (review REJECT, task-1302)."""
+    and letting regressive batches bypass rejection (review REJECT, task-1302).
+
+    Also returns the stored `(price, quantity)` per key so the caller can tell a
+    genuine re-fetch (identical content) apart from two different fills that
+    collided on the same `trade_id`/`traded_at` (audit F3, task-10467) - both are
+    "known" and skip the regression check and `_store_ticks` insert the same way
+    (`ON CONFLICT DO NOTHING` already keeps the original row either way), but only
+    the latter should surface as a `DUPLICATE_CONFLICT` issue instead of silently
+    vanishing with no trace."""
     rows = await conn.fetch(
-        "SELECT trade_id, traded_at FROM md_tick WHERE venue = $1 AND instrument_id = $2 "
-        "AND trade_id = ANY($3::text[])",
+        "SELECT trade_id, traded_at, price, quantity FROM md_tick "
+        "WHERE venue = $1 AND instrument_id = $2 AND trade_id = ANY($3::text[])",
         venue.value,
         instrument_id,
         [t.trade_id for t in ticks],
     )
-    return {(row["trade_id"], row["traded_at"]) for row in rows}
+    return {(row["trade_id"], row["traded_at"]): (row["price"], row["quantity"]) for row in rows}
 
 
 def _first_regression(
@@ -224,12 +242,34 @@ async def ingest_ticks(
         regression = _first_regression(new_ticks, baseline_trade_id, baseline_traded_at)
         is_stored = regression is None
 
+        # Among the "known" (already-stored) keys, tell a genuine re-fetch (identical
+        # price/quantity) apart from two different fills that collided on the same
+        # trade_id/traded_at (audit F3, task-10467). `_store_ticks`'s `ON CONFLICT DO
+        # NOTHING` already keeps the original row in both cases - this only decides
+        # whether the collision gets a `DUPLICATE_CONFLICT` issue (persisted on
+        # `md_ingest_batch_tick.issues`) instead of vanishing with no trace.
+        conflicts = [
+            t
+            for t in cmd.ticks
+            if (stored := known.get((t.trade_id, t.traded_at))) is not None
+            and stored != (t.price, t.quantity)
+        ]
+        conflict_issues = [
+            QualityIssue(
+                type=QualityIssueType.DUPLICATE_CONFLICT,
+                severity=Severity.WARN,
+                open_time=t.traded_at,
+                detail={"reason": "trade_id_content_mismatch", "trade_id": t.trade_id},
+            )
+            for t in conflicts
+        ]
+
         verdict = QualityVerdict(
             verdict=Verdict.ACCEPT if is_stored else Verdict.REJECT,
-            accepted=len(cmd.ticks) if is_stored else 0,
-            quarantined=0,
+            accepted=(len(cmd.ticks) - len(conflicts)) if is_stored else 0,
+            quarantined=len(conflicts) if is_stored else 0,
             rejected=0 if is_stored else len(cmd.ticks),
-            issues=[] if regression is None else [regression],
+            issues=([] if regression is None else [regression]) + conflict_issues,
         )
 
         payload: dict[str, object] = {

@@ -27,7 +27,12 @@ import pytest
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
 from src.foundation.market_data.application.ingest_ticks import IngestTicksCommand, ingest_ticks
-from src.foundation.market_data.contracts.v1 import TickRecord, Venue, Verdict
+from src.foundation.market_data.contracts.v1 import (
+    QualityIssueType,
+    TickRecord,
+    Venue,
+    Verdict,
+)
 from tests.integration.conftest import create_test_tenant
 
 
@@ -246,6 +251,42 @@ async def test_ingest_rejects_regression_when_same_trade_id_reused_at_earlier_ti
         )
     assert row_count == 1, "역행 배치는 새 행을 남기지 않아야 한다(기존 1행만 존재)"
     assert outcome == "DENIED"
+
+
+async def test_ingest_preserves_original_row_on_colliding_trade_id_content_mismatch(pool, deps):
+    """Audit F3(task-10467, ingest_ticks.py:106 original line number, M등급): a
+    resend that reuses the same (trade_id, traded_at) with a genuinely different
+    price is not a re-fetch but two different fills colliding on the same key.
+    `_store_ticks`'s `ON CONFLICT DO NOTHING` already never overwrites the stored
+    row, but used to drop the colliding record with no trace - this asserts both
+    that the original row is untouched AND that the collision surfaces as a
+    `DUPLICATE_CONFLICT` issue (quarantined, not silently accepted)."""
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn)
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    original = _tick(instrument_id, "1", t0, price="100")
+    first = await _run(deps, [original])
+    assert first.verdict.verdict == Verdict.ACCEPT
+
+    colliding = _tick(instrument_id, "1", t0, price="999")
+    result = await _run(deps, [colliding])
+
+    assert result.verdict.verdict == Verdict.ACCEPT, (
+        "충돌 1건이 배치 전체를 REJECT시키면 안 된다 — 원본 보존 후 격리로 충분하다"
+    )
+    assert result.verdict.accepted == 0
+    assert result.verdict.quarantined == 1
+    conflict_issues = [
+        i for i in result.verdict.issues if i.type == QualityIssueType.DUPLICATE_CONFLICT
+    ]
+    assert len(conflict_issues) == 1
+    assert conflict_issues[0].detail["trade_id"] == "1"
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT price FROM md_tick WHERE instrument_id = $1 AND trade_id = '1'", instrument_id
+        )
+    assert len(rows) == 1, "같은 복합키로 두 번째 행이 추가로 생기면 안 된다"
+    assert rows[0]["price"] == Decimal("100"), "충돌한 신규 체결이 원본 가격을 덮어쓰면 안 된다"
 
 
 async def test_ingest_rolls_back_md_tick_on_audit_failure(pool, deps):
