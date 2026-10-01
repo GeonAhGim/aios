@@ -52,6 +52,17 @@ tamper events, using the same `single_conn_pool` + query-logger technique
 as `test_duplicate_delivery_gate.py` (absolute wall-clock is print-only,
 per-call round-trip count is the CI-safe gate -- esc-826/task-1038/1521
 decision, same rationale as that file's docstring).
+
+Part E (DEEPEN task-10499, D2->D3) -- gate-red reproduction: this file's
+own Part A/D perf assertions rely on `scripts/check_perf_marker_guard.py`
+(the CI static gate that fails a build when a `tests/` function asserts on
+a raw `perf_counter()`/`monotonic()` diff without the `perf` marker, task-
+7434) to keep running in the serial perf stage instead of under xdist core
+contention. Proves `check_perf_marker_guard.main()` actually flips from
+exit 0 to exit 1 when an unmarked wall-clock assertion is introduced, using
+a throwaway fake tests root (same `tmp_path` + attribute-swap technique as
+`test_bypass_attempts_deepen.py`'s CM-8 gate-red test) so the real
+repository tree is never touched.
 """
 
 from __future__ import annotations
@@ -435,3 +446,51 @@ async def test_forged_reference_rejection_throughput_and_round_trip_budget(
         f"measured budget ({expected_round_trips}) -- _process_row's no-match branch "
         "no longer does the same fixed amount of work per event."
     )
+
+
+# ---------------------------------------------------------------------------
+# Part E -- gate-red reproduction: check_perf_marker_guard.py on this file's
+# own perf-assertion pattern.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_red_repro_check_perf_marker_guard_flags_unmarked_perf_counter_assert(
+    tmp_path,
+):
+    """Gate-red reproduction -- `scripts/check_perf_marker_guard.py`(CI에서
+    `python scripts/check_perf_marker_guard.py`로 실행되는 task-7434 정적
+    검사, main() 종료코드 0=통과)가 이 파일의 Part A/D 두 테스트처럼
+    `time.perf_counter()` 차이를 `assert`로 검증하는 함수에 `@pytest.
+    mark.perf`가 없으면 실제로 적색 처리하는지, 개별 내부 함수가 아니라
+    CI가 직접 호출하는 `main()` 자체의 종료코드로 증명한다. 가짜 tests
+    루트를 만들어 `--tests-root`만 바꿔치기하므로 실제 저장소 파일은
+    건드리지 않는다."""
+    import scripts.check_perf_marker_guard as guard
+
+    marked = tmp_path / "test_marked_ok.py"
+    marked.write_text(
+        "import time\n"
+        "import pytest\n"
+        "\n"
+        "@pytest.mark.perf\n"
+        "def test_something_fast():\n"
+        "    started = time.perf_counter()\n"
+        "    elapsed = time.perf_counter() - started\n"
+        "    assert elapsed < 5.0\n",
+        encoding="utf-8",
+    )
+
+    assert guard.main(["--tests-root", str(tmp_path)]) == 0  # 대조군 -- marker 있으면 통과
+
+    unmarked = tmp_path / "test_unmarked_regression.py"
+    unmarked.write_text(
+        "import time\n"
+        "\n"
+        "def test_something_fast_but_unmarked():\n"
+        "    started = time.perf_counter()\n"
+        "    elapsed = time.perf_counter() - started\n"
+        "    assert elapsed < 5.0\n",
+        encoding="utf-8",
+    )
+
+    assert guard.main(["--tests-root", str(tmp_path)]) == 1  # marker 누락 시 적색으로 뒤집힘
