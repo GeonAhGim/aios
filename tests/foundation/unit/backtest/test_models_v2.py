@@ -15,7 +15,6 @@ DEEPEN(task-3036, ADR-2026-09-09-C D2): depth=D2 evidence below.
   the failure-injection test above exercises the runtime guard directly).
 """
 
-import time
 from decimal import Decimal
 
 import pytest
@@ -34,6 +33,7 @@ from src.foundation.backtest.domain.models_v2 import (
     VolumeImpactSlippage,
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
+from tests.conftest import PerfBudget
 
 
 def _base_kwargs(**overrides: object) -> dict[str, object]:
@@ -217,15 +217,18 @@ def test_float_input_is_rejected_on_every_decimal_field(
 
 
 @pytest.mark.perf
-def test_canonical_json_perf_budget() -> None:
+def test_canonical_json_perf_budget(perf_budget: PerfBudget) -> None:
     """perf assertion(D2): `canonical_json()` is called at high volume on
     the reproducibility-key (BT-9) path — pin a quantified upper bound so
     it never regresses past O(n) serialization (1,000 calls <= 200ms,
-    with headroom for local CI noise)."""
+    with headroom for local CI noise).
+
+    raw time.perf_counter() → perf_budget.assert_within(process_time 기반) 전환(task-10946)."""
 
     cfg = BacktestConfigV2(**_base_kwargs())
-    start = time.perf_counter()
-    for _ in range(1_000):
-        cfg.canonical_json()
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 200, f"canonical_json() too slow: {elapsed_ms:.1f}ms/1000 calls"
+
+    def run_batch() -> None:
+        for _ in range(1_000):
+            cfg.canonical_json()
+
+    perf_budget.assert_within(run_batch, budget_ms=200, label="canonical_json x1k")
