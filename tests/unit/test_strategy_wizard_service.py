@@ -67,3 +67,54 @@ def test_rejects_unknown_goal(service):
 def test_rejects_unknown_risk_tolerance(service):
     with pytest.raises(WizardError):
         service.generate("STEADY_GROWTH", "UNKNOWN_RISK")
+
+
+# ── negative tests (empty / type / case mismatch) ──────────────────
+
+
+def test_rejects_empty_goal(service):
+    """빈 문자열 goal 전달 시 WizardError 발생 — I-07 hard-fail 검증."""
+    with pytest.raises(WizardError):
+        service.generate("", "LOW")
+
+
+def test_rejects_case_mismatch_goal(service):
+    """소문자 goal("hedge") 전달 시 WizardError 발생 — GOALS는 대문자만 허용."""
+    with pytest.raises(WizardError):
+        service.generate("hedge", "LOW")
+
+
+def test_rejects_int_goal(service):
+    """int 타입 goal 전달 시 TypeError 발생 — 명시적 타입 검증."""
+    with pytest.raises((TypeError, WizardError)):
+        service.generate(123, "LOW")
+
+
+def test_rejects_extreme_risk_tolerance(service):
+    """범위 밖 risk_tolerance("EXTREME") 전달 시 WizardError 발생 — I-07."""
+    with pytest.raises(WizardError):
+        service.generate("STEADY_GROWTH", "EXTREME")
+
+
+# ── failure-injection test ─────────────────────────────────────────
+
+
+def test_handles_preview_condition_creation_failure(service):
+    """_rsi 호출이 예외를 던지도록 monkeypatch — 서비스가 예외를
+    삼키지 않고 전파함을 확인 (I-07 fail-closed)."""
+    import src.services.strategy_wizard_service as mod
+
+    original_rsi = mod._rsi
+    call_log: list[int] = []
+
+    def failing_rsi(threshold, operator):
+        call_log.append(1)
+        raise ValueError("indicator service unavailable")
+
+    mod._rsi = failing_rsi
+    try:
+        with pytest.raises(ValueError, match="indicator service unavailable"):
+            service.generate("STEADY_GROWTH", "LOW")
+        assert call_log, "_rsi가 호출되었으나 예외가 던져지지 않음"
+    finally:
+        mod._rsi = original_rsi
