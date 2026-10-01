@@ -1,26 +1,29 @@
-"""FA-5 — `application/resolve_context.py`: 주문·포지션·원장 쓰기의 단일
-컨텍스트 해석 진입점.
+"""FA-5 — `application/resolve_context.py`: single context-resolution entry
+point for order/position/ledger writes.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-5
-(§9 FA-5 DoD, §2.1 application 행 "resolve_context(request)가 모든 쓰기의
-단일 진입").
+(§9 FA-5 DoD, §2.1 application row "resolve_context(request) is the single
+entry for all writes").
 
-새 해석 규칙을 만들지 않는다(PM decision) — id 산출은 FA-1
-`domain/defaults.py`의 결정론 규칙(user_id 단일 인자 UUIDv5)을 그대로
-재사용하고, 존재·폐쇄 확인은 FA-2 `adapters/postgres_repository.py`(또는
-같은 부분 계약을 만족하는 어떤 저장소)의 조회 메서드를 그대로 쓴다. 이
-모듈이 새로 정의하는 것은 "그 결과들을 fail-closed로 묶어 하나의
-`EntityContext`로 돌려준다"는 조합 규칙뿐이다.
+No new resolution rules are defined (PM decision) — id derivation reuses the
+deterministic rule from FA-1 `domain/defaults.py` (UUIDv5 keyed only on
+user_id) verbatim, and existence/closedness checks reuse the lookup methods
+from FA-2 `adapters/postgres_repository.py` (or any repository satisfying the
+same partial contract). The only thing this module defines new is the
+composition rule: "wrap those results fail-closed into one
+`EntityContext`".
 
-지금은 `tenant_id == user_id`인 FA-1 기본 계층(개인 단일계좌 UX) 해석만
-지원한다 — 사용자가 명시적으로 fund/portfolio를 고르는 다법인 UX는
-FA-6 이후 별도 요청 shape(`ResolveContextRequest`에 필드 추가, MINOR)로
-확장한다.
+Only the FA-1 default layer (personal single-account UX) where
+`tenant_id == user_id` is supported now — multi-fund UX where the user
+explicitly selects fund/portfolio will be added later as a separate request
+shape (field addition to `ResolveContextRequest`, MINOR bump).
 
-해석 실패(부트스트랩 안 됨·폐쇄됨·교차 테넌트)는 값을 추측하거나 기본값으로
-메우지 않고 `EntityContextResolutionError`를 던진다 — 이 예외를 받은
-호출자(주문·포지션·원장 쓰기 진입점)는 그 쓰기를 계속 진행해서는 안 된다.
+On resolution failure (not bootstrapped / closed / cross-tenant), the module
+raises `EntityContextResolutionError` instead of guessing or defaulting — the
+caller (order/position/ledger write entry points) must not proceed with that
+write once it receives this exception.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -43,12 +46,13 @@ from src.foundation.entities.domain.defaults import (
 
 
 class EntityContextResolutionError(ValueError):
-    """FA-5 fail-closed — 엔티티 계층 4단 중 하나라도 없거나(부트스트랩
-    안 됨) 폐쇄됐으면 값을 추측하지 않고 이 예외로 거부한다. 주문·포지션·
-    원장 쓰기 진입점이 `entity_context`를 받지 못했을 때(예: 정적 검사
-    우회 시도로 리터럴 `None`이 넘어온 경우)도 같은 예외를 재사용한다 —
-    "컨텍스트가 없다"는 실패 모드는 해석 실패든 누락 전달이든 호출자
-    입장에서 같은 조치(쓰기 거부)로 이어져야 하기 때문이다."""
+    """FA-5 fail-closed — raises this exception (without guessing a value)
+    when any of the 4 entity hierarchy layers is missing (not bootstrapped)
+    or closed. Reuses the same exception when a write entry point (order,
+    position, ledger) receives no `entity_context` at all (e.g., someone
+    passed a literal `None` to bypass static checks) — because "no context"
+    always leads to the same caller action (reject the write), regardless of
+    whether the root cause is resolution failure or missing propagation."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -56,8 +60,9 @@ class EntityContextResolutionError(ValueError):
 
 
 class EntityRepository(Protocol):
-    """`PostgresEntityRepository`(FA-2)가 만족하는 부분 계약 — 조회 4종만
-    필요하다(생성·폐쇄는 이 유스케이스의 책임이 아니다)."""
+    """Partial contract that `PostgresEntityRepository` (FA-2) satisfies —
+    only 4 lookup methods are needed (creation/closure is not this use case's
+    responsibility)."""
 
     async def get_legal_entity(self, tenant_id: UUID, entity_id: UUID) -> LegalEntity | None: ...
 
@@ -65,15 +70,14 @@ class EntityRepository(Protocol):
 
     async def get_portfolio(self, tenant_id: UUID, portfolio_id: UUID) -> Portfolio | None: ...
 
-    async def get_sub_account(
-        self, tenant_id: UUID, sub_account_id: UUID
-    ) -> SubAccount | None: ...
+    async def get_sub_account(self, tenant_id: UUID, sub_account_id: UUID) -> SubAccount | None: ...
 
 
 @dataclass(frozen=True)
 class ResolveContextRequest:
-    """개인 사용자 기본 계층(FA-1) 전용 요청 — `tenant_id`/`user_id`만
-    있으면 4단 계층 id 전부가 결정론(UUIDv5)으로 정해진다."""
+    """Request for the personal-user default layer (FA-1) — given only
+    `tenant_id`/`user_id`, all 4 hierarchy ids are deterministically derived
+    (UUIDv5)."""
 
     tenant_id: UUID
     user_id: UUID
@@ -95,11 +99,10 @@ def _require_open(
         )
 
 
-async def resolve_context(
-    repo: EntityRepository, request: ResolveContextRequest
-) -> EntityContext:
-    """모든 주문·포지션·원장 쓰기의 단일 진입점. 결정론 id(FA-1)로 4단
-    계층을 조회하고, 하나라도 없거나 폐쇄됐으면 fail-closed로 거부한다."""
+async def resolve_context(repo: EntityRepository, request: ResolveContextRequest) -> EntityContext:
+    """Single entry point for all order/position/ledger writes. Looks up the
+    4-layer hierarchy using deterministic ids (FA-1), and fail-closes (raises
+    `EntityContextResolutionError`) if any layer is missing or closed."""
     entity_id = default_entity_id(request.user_id)
     fund_id = default_fund_id(request.user_id)
     portfolio_id = default_portfolio_id(request.user_id)
