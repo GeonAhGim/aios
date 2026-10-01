@@ -14,7 +14,6 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md §8
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from decimal import Decimal
 from uuid import UUID
@@ -239,11 +238,14 @@ async def test_lease_repo_failure_is_fail_closed_and_does_not_block_other_owner(
 
 
 @pytest.mark.perf
-async def test_five_schedulers_race_completes_within_budget(pool):
+async def test_five_schedulers_race_completes_within_budget(pool, perf_budget):
     """성능 단언 — 경쟁자를 5개로 늘려도 tick_all_running()이 로컬 budget
     5초 안에 끝난다(§7 "1회 왕복" 배치 UPSERT 설계가 경쟁자 수에 선형으로
     지연을 만들지 않음을 수치로 고정 — split_brain DEEPEN(task-4114)과
-    동일한 자체 정의 budget 관례)."""
+    동일한 자체 정의 budget 관례).
+
+    task-10875: raw time.monotonic() 단언 → perf_budget.sample_async()로 전환.
+    """
     user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     shared_adapter = _filled_adapter()
@@ -255,11 +257,16 @@ async def test_five_schedulers_race_completes_within_budget(pool):
         for i in range(5)
     ]
 
-    started = time.monotonic()
-    reports = await asyncio.gather(*(s.tick_all_running() for s in schedulers))
-    elapsed = time.monotonic() - started
+    sample = await perf_budget.sample_async(
+        lambda: asyncio.gather(*(s.tick_all_running() for s in schedulers))
+    )
 
-    assert elapsed < 5.0
+    # budget 5초 = 5000ms (process_time 기준; wall_ms도 함께 기록)
+    assert sample.cpu_ms < 5000, (
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<5000ms"
+    )
     assert shared_adapter.place_order_call_count == 1
+
+    reports = sample.result
     ticked_count = sum(1 for r in reports if execution_id in r.ticked)
     assert ticked_count == 1
