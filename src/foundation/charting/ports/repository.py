@@ -1,5 +1,5 @@
-"""ChartingRepository port. domain은 이 Protocol만 알고, 실제 구현(adapters/)은
-모른다(71번 §4)."""
+"""ChartingRepository port. The domain knows only this Protocol; actual
+implementations (adapters/) remain opaque (71 §4)."""
 
 from __future__ import annotations
 
@@ -22,10 +22,11 @@ class ChartingRepository(Protocol):
         name: str,
         layout_state: dict[str, Any],
     ) -> ChartLayout:
-        """`chart_layout`과 빈(`revision=0`) `chart_drawing_set`을 한
-        트랜잭션으로 함께 만든다 — 레이아웃이 존재하는데 드로잉 문서가 아직
-        없는 상태를 만들지 않아, `put_drawings()`가 조건부 UPDATE 하나만으로
-        충분하다(INSERT 분기·그로 인한 first-write 경합을 원천 제거)."""
+        """Create `chart_layout` and an empty (`revision=0`)
+        `chart_drawing_set` in a single transaction — so that a layout
+        existing without a drawing document is never left in an
+        inconsistent state, and `put_drawings()` needs only a conditional
+        UPDATE (eliminating the INSERT branch and its first-write contention)."""
         ...
 
     async def get_layout(self, layout_id: UUID) -> ChartLayout | None: ...
@@ -41,14 +42,14 @@ class ChartingRepository(Protocol):
         name: str | None,
         layout_state: dict[str, Any] | None,
     ) -> ChartLayout:
-        """105번 표준 조건부 UPDATE — `expected_revision` 불일치는
-        `ConcurrencyConflictError`(409). `tenant_id` is also carried in the
-        WHERE clause, defending again at this layer independent of the
-        caller's ownership check."""
+        """Standard-105 conditional UPDATE — a mismatched
+        `expected_revision` raises `ConcurrencyConflictError` (409).
+        `tenant_id` is also carried in the WHERE clause, defending again at
+        this layer independent of the caller's ownership check."""
         ...
 
     async def delete_layout(self, layout_id: UUID, *, tenant_id: UUID) -> None:
-        """`chart_drawing_set`은 FK `ON DELETE CASCADE`로 함께 지워진다.
+        """`chart_drawing_set` is removed together by FK `ON DELETE CASCADE`.
         `tenant_id` is also carried in the WHERE clause, defending again at
         this layer."""
         ...
@@ -63,9 +64,10 @@ class ChartingRepository(Protocol):
         schema_version: int,
         drawings: tuple[dict[str, Any], ...],
     ) -> ChartDrawingSet:
-        """105번 표준 조건부 UPDATE — `expected_revision` 불일치는
-        `ConcurrencyConflictError`(409). `create_layout()`이 항상 먼저
-        빈 문서를 만들어 두므로 이 메서드는 INSERT를 하지 않는다."""
+        """Standard-105 conditional UPDATE — a mismatched
+        `expected_revision` raises `ConcurrencyConflictError` (409).
+        `create_layout()` always creates the empty document first, so this
+        method never issues an INSERT."""
         ...
 
     async def create_indicator_template(
@@ -76,8 +78,9 @@ class ChartingRepository(Protocol):
         name: str,
         template: dict[str, Any],
     ) -> ChartIndicatorTemplate:
-        """`(tenant_id, name)` UNIQUE 위반은 `ConcurrencyConflictError`(409,
-        CH-5 chart_layout 경로와 동일하게 새 taxonomy 없이 재사용)."""
+        """`(tenant_id, name)` UNIQUE violation raises
+        `ConcurrencyConflictError` (409, reused without a new taxonomy,
+        same as the CH-5 chart_layout path)."""
         ...
 
     async def get_indicator_template(self, template_id: UUID) -> ChartIndicatorTemplate | None: ...
