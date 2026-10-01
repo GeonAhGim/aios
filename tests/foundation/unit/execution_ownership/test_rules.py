@@ -8,9 +8,9 @@ DEPTH 감사(docs/audit/DEPTH_R_EO.md, task-2721/task-2812) — D2 미달분
 보강: 실패 주입(적대적으로 조작된 tzinfo가 naive 검사를 우회해 제어되지
 않은 TypeError로 새는 경로) + 성능 단언 + 결정론적 재현(replay) 증명.
 """
+
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone, tzinfo
 
 import pytest
@@ -134,17 +134,22 @@ def test_execution_lease_rejects_adversarial_tzinfo_with_none_utcoffset():
 
 
 @pytest.mark.perf
-def test_is_lease_available_hot_path_performance():
+def test_is_lease_available_hot_path_performance(perf_budget):
     # 성능 단언: EO-03 스케줄러가 매 tick마다 후보군 전체에 대해 이 순수
     # 함수를 호출할 수 있어야 하므로(§4.1), 10,000회 호출이 100ms 내로
     # 끝나야 한다 — I/O 없는 순수 비교 연산이라는 계약의 실측 증명.
+    # task-10975: raw time.perf_counter() 루프 대신 perf_budget(process_time
+    # 기반 + coverage tracer-pause + batch 양자화 보정)으로 측정한다. 예산
+    # 값(10,000회/100ms)은 그대로 두고, batch=iterations로 호출당 환산한다.
     existing = _lease("worker-b", expires_at=_NOW + timedelta(seconds=30))
     iterations = 10_000
-    started = time.perf_counter()
-    for _ in range(iterations):
-        is_lease_available(existing, now=_NOW, requesting_owner="worker-a")
-    elapsed = time.perf_counter() - started
-    assert elapsed < 0.1, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
+    perf_budget.assert_within(
+        lambda: is_lease_available(existing, now=_NOW, requesting_owner="worker-a"),
+        budget_ms=100.0 / iterations,
+        n=1,
+        batch=iterations,
+        label=f"{iterations}회 호출",
+    )
 
 
 def test_is_lease_available_is_deterministic_across_repeated_calls():
