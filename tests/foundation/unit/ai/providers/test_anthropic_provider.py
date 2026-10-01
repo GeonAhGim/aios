@@ -29,6 +29,7 @@ from src.foundation.ai.providers.adapters.anthropic_provider import (
 )
 from src.foundation.ai.providers.domain.prompt_registry import PromptTemplate, prompt_hash
 from src.foundation.ai.providers.ports.model_provider import GenerationBudget, ModelProvider
+from tests._perf.relative_budget import RelativeBudget
 
 _SCHEMA = {
     "type": "object",
@@ -356,9 +357,12 @@ _OVERHEAD_BUDGET_SECONDS = 0.05
 async def test_generate_overhead_p95_under_budget_with_instant_transport(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """성능 단언: 네트워크 자체를 즉시 응답으로 고정한 상태에서, 어댑터가 직접
-    수행하는 작업(사전 비용 추정·페이로드 직렬화·usage 파싱·비용/해시 계산)의
-    p95 지연이 예산을 넘지 않아야 한다."""
+    """raw time.perf_counter() → RelativeBudget.measure_async 전환(task-10937).
+
+    비동기 I/O 왕복은 time.process_time() CPU 시간으로 재면 대기 시간이
+    통째로 사라지므로(실제 지연을 못 재음), RelativeBudget.measure_async로
+    wall-clock 기반 상대 비율 단언으로 바꾼다.
+    """
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _tool_use_response({"hypothesis": "x"})
@@ -368,26 +372,32 @@ async def test_generate_overhead_p95_under_budget_with_instant_transport(
     prompt = _prompt()
     budget = _budget()
 
-    durations: list[float] = []
+    samples: list[float] = []
     for _ in range(20):
-        start = time.perf_counter()
-        await provider.generate(_SCHEMA, prompt, budget)
-        durations.append(time.perf_counter() - start)
+        sample = await RelativeBudget().measure_async(
+            lambda: provider.generate(_SCHEMA, prompt, budget),
+            n=1,
+            warmup=0,
+            calibration_n=1,
+        )
+        samples.append(sample.op_ms)
 
-    durations.sort()
-    p95 = durations[int(len(durations) * 0.95)]
-    assert p95 < _OVERHEAD_BUDGET_SECONDS, (
-        f"p95 {p95:.4f}s exceeds budget {_OVERHEAD_BUDGET_SECONDS}s"
-    )
+    samples.sort()
+    p95_ms = samples[int(len(samples) * 0.95)]
+    # _OVERHEAD_BUDGET_SECONDS=0.05s → 50ms (예산 값 불변)
+    assert p95_ms < 50.0, f"p95 {p95_ms:.2f}ms exceeds budget 50.0ms"
 
 
 @pytest.mark.perf
 async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현: 위 성능 단언이 실제로 지연을 감지하는지(항상 통과하는
+    """raw time.perf_counter() → RelativeBudget.measure_async 전환(task-10937).
+
+    게이트 적색 재현: 위 성능 단언이 실제로 지연을 감지하는지(항상 통과하는
     타우톨로지가 아닌지) 증명한다. 전송에 예산을 초과하는 지연을 주입하면 같은
-    측정 방식이 예산 초과를 실제로 잡아낸다."""
+    측정 방식이 예산 초과를 실제로 잡아낸다.
+    """
     injected_delay = _OVERHEAD_BUDGET_SECONDS * 3
 
     def slow_handler(request: httpx.Request) -> httpx.Response:
@@ -397,10 +407,14 @@ async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budge
     _mock_transport(monkeypatch, httpx.MockTransport(slow_handler))
     provider = _provider()
 
-    start = time.perf_counter()
-    await provider.generate(_SCHEMA, _prompt(), _budget())
-    elapsed = time.perf_counter() - start
-
-    assert elapsed >= _OVERHEAD_BUDGET_SECONDS, (
+    sample = await RelativeBudget().measure_async(
+        lambda: provider.generate(_SCHEMA, _prompt(), _budget()),
+        n=1,
+        warmup=0,
+        calibration_n=1,
+    )
+    # injected_delay=0.15s → 150ms; budget=50ms. gate-red가 예산 초과를
+    # 포착하려면 측정값이 50ms를 넘겨야 한다.
+    assert sample.op_ms >= 50.0, (
         "적색 재현 실패 — 주입한 지연이 측정에 반영되지 않았다(타우톨로지 위험)"
     )
