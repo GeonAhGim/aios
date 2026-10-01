@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -221,17 +220,23 @@ async def test_insert_or_get_propagates_connection_failure_without_partial_write
 
 
 @pytest.mark.perf
-async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo):
+async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo, perf_budget):
     """50 sequential `insert_or_get` calls (distinct parent_ids) each pay
     one advisory-lock acquisition + one existence-check SELECT + one
     insert -- pins an upper bound so a regression that turns this into
     several round trips per call (e.g. losing the single-transaction
     scoping) shows up here instead of only in production latency."""
-    start = time.perf_counter()
-    for _ in range(50):
-        await repo.insert_or_get(
-            parent_id=uuid4(), revision=1, result=_result(), computed_at=datetime.now(timezone.utc)
-        )
-    elapsed_ms = (time.perf_counter() - start) * 1000
 
-    assert elapsed_ms < 5000, f"insert_or_get() too slow: {elapsed_ms:.1f}ms/50 calls"
+    async def _batch():
+        for _ in range(50):
+            await repo.insert_or_get(
+                parent_id=uuid4(),
+                revision=1,
+                result=_result(),
+                computed_at=datetime.now(timezone.utc),
+            )
+
+    sample = await perf_budget.sample_async(_batch)
+    elapsed = sample.wall_ms / 1000
+
+    assert elapsed < 5.0, f"50건 직렬 삽입이 {elapsed:.3f}s 걸림 (예산 5s 초과)"
