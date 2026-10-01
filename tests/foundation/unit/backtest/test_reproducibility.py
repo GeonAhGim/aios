@@ -40,6 +40,7 @@ from src.foundation.backtest.domain.reproducibility import (
     reproducibility_key_payload,
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
+from tests.conftest import PerfBudget
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -198,15 +199,18 @@ def _p95_ms(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_reproducibility_key_p95_latency_within_backtest_budget_slice() -> None:
+def test_reproducibility_key_p95_latency_within_backtest_budget_slice(
+    perf_budget: PerfBudget,
+) -> None:
     """DEEPEN(task-3041): ADR-2026-09-09-C Decision 1 예산 중 재현 키 조립
-    몫(2ms)을 실제로 단언한다."""
-    samples: list[float] = []
+    몫(2ms)을 실제로 단언한다. raw perf_counter 대신 process_time 기반
+    PerfBudget.samples()로 측정 — 병렬 워커가 코어를 다툴 때도 wall-clock
+    잡음이 cpu_ms 측정에 섞이지 않는다."""
+    raw_samples: list[float] = []
     for _ in range(_ITERATIONS):
-        started = time.perf_counter()
-        _key()
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
+        sample = perf_budget.sample(_key)
+        raw_samples.append(sample.cpu_ms)
+    p95_ms = _p95_ms(raw_samples)
     print(f"[BT-9] reproducibility_key p95={p95_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
     assert p95_ms < _BUDGET_MS
 
@@ -253,6 +257,7 @@ def test_reproducibility_key_still_correct_when_config_hash_stalls(
 @pytest.mark.perf
 def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """게이트 적색 재현: `config_hash`가 2ms 예산을 실제로 넘기도록 지연을
     주입하면, `test_reproducibility_key_p95_latency_within_backtest_budget_slice`
@@ -269,9 +274,8 @@ def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
 
     samples: list[float] = []
     for _ in range(5):
-        started = time.perf_counter()
-        _key()
-        samples.append(time.perf_counter() - started)
+        sample = perf_budget.sample(_key)
+        samples.append(sample.wall_ms)
     p95_ms = _p95_ms(samples)
     with pytest.raises(AssertionError):
         assert p95_ms < _BUDGET_MS
