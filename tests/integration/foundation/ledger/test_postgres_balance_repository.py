@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-8.
 DoD(task-320): "expected_seq 불일치 negative" 필수.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -53,9 +54,7 @@ async def test_apply_updates_balance_and_advances_seq(pool, repo):
     code = await create_ledger_account(pool, initial_balance=Decimal("50.00"))
 
     async with pool.acquire() as conn, conn.transaction():
-        view = await repo.apply(
-            conn, code, Decimal("25.00"), Decimal("0.00"), expected_seq=0
-        )
+        view = await repo.apply(conn, code, Decimal("25.00"), Decimal("0.00"), expected_seq=0)
 
     assert view.balance == Decimal("75.00")
     assert view.last_entry_seq == 1
@@ -92,3 +91,30 @@ async def test_apply_raises_on_unknown_account(pool, repo):
             await repo.apply(
                 conn, "PLATFORM:DOES_NOT_EXIST", Decimal("1.00"), Decimal("0.00"), expected_seq=0
             )
+
+
+@pytest.mark.perf
+async def test_apply_p95_latency_within_budget(pool, repo, perf_budget):
+    """성능 단언: `apply`(조건부 UPDATE + seq 전진, 105 표준 쓰기 경로)는
+    ADR-2026-09-09-C Decision 1 원장 포스팅 계열 예산과 동급 규모의 단일
+    행 쓰기이므로 같은 p95 < 50ms 상한을 쓴다."""
+    code = await create_ledger_account(pool, initial_balance=Decimal("1000.00"))
+
+    samples: list[float] = []
+    seq = 0
+    for _ in range(20):
+        expected_seq = seq
+
+        async def _call(expected_seq=expected_seq):
+            async with pool.acquire() as conn, conn.transaction():
+                return await repo.apply(
+                    conn, code, Decimal("1.00"), Decimal("0.00"), expected_seq=expected_seq
+                )
+
+        measured = await perf_budget.sample_async(_call)
+        samples.append(measured.wall_ms)
+        seq = measured.result.last_entry_seq
+
+    samples.sort()
+    p95_ms = samples[int(len(samples) * 0.95) - 1]
+    assert p95_ms < 50, f"apply p95={p95_ms:.1f}ms exceeds 50ms budget"
