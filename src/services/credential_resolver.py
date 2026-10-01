@@ -18,6 +18,7 @@ to interpret only PAPER credentials without modification — LIVE rows in the
 DB are never exposed through this path
 (`tests/integration/exchange/test_secret_scope_isolation.py`).
 """
+
 from __future__ import annotations
 
 import time
@@ -27,7 +28,7 @@ from src.exchanges.common.adapter import ExchangeAdapter
 from src.exchanges.factory import build_adapter
 from src.services.exchange_credential_service import AdapterFactory, ExchangeCredentialService
 
-DEFAULT_TTL_SECONDS = 300.0  # Draft — 5분
+DEFAULT_TTL_SECONDS = 300.0  # Draft — 5 minutes
 
 
 class CredentialNotFoundError(Exception):
