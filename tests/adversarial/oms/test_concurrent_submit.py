@@ -13,6 +13,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import asyncpg
@@ -237,3 +238,48 @@ async def test_kill_switch_active_denies_with_zero_rows(pool):
             "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
         )
     assert order_count == 0
+
+
+def test_gate_red_repro_check_entity_context_flags_missing_entity_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Gate-red repro for FA-5 — proves `check_entity_context.py` exits
+    nonzero when a target file has a write call without entity_context,
+    and exits zero when the file is clean.
+
+    Uses a fake repo root (not the real ``src/``) so this test never
+    writes into the actual repository tree.
+    """
+    from scripts import check_entity_context as gate
+
+    # --- red: write call without entity_context → gate must go red ---
+    bad_dir = tmp_path / "src" / "services" / "oms" / "application"
+    bad_dir.mkdir(parents=True)
+    bad_file = bad_dir / "submit_order.py"
+    bad_file.write_text(
+        "async def submit_order_bad(cmd, pool):\n"
+        "    await pool.execute('INSERT INTO orders VALUES (1)')\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_TARGET_FILES", ("src/services/oms/application/submit_order.py",))
+
+    exit_code = gate.main()
+    assert exit_code == 1
+    out1 = capsys.readouterr().out
+    assert "submit_order.py" in out1
+    assert "entity_context" in out1
+
+    # --- green: same file but with entity_context param → gate passes ---
+    good_file = bad_dir / "submit_order.py"
+    good_file.write_text(
+        "async def submit_order_good(cmd, pool, entity_context):\n"
+        "    await pool.execute('INSERT INTO orders VALUES (1)')\n",
+        encoding="utf-8",
+    )
+
+    exit_code = gate.main()
+    assert exit_code == 0
+    out2 = capsys.readouterr().out
+    assert "위반 0건" in out2
