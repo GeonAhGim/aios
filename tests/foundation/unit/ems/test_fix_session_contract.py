@@ -4,7 +4,6 @@ import socket
 from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
-from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -13,6 +12,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.ems.contracts.v1 import ChildOrder
 from src.foundation.ems.ports.fix_session import FixSessionPort
 from src.services.oms.contracts.v1_events import ProviderOrderEvent
+from tests.conftest import PerfBudget
 
 
 class FakeFixSession:
@@ -49,9 +49,14 @@ class FakeFixSession:
 @pytest.fixture
 def order() -> ChildOrder:
     return ChildOrder(
-        child_id=uuid4(), parent_id=uuid4(), slice_seq=0,
-        instrument_id="BTC-USDT", side=OrderSide.BUY, planned_qty=Decimal("1"),
-        scheduled_at=datetime(2026, 9, 9, tzinfo=timezone.utc), order_id=uuid4(),
+        child_id=uuid4(),
+        parent_id=uuid4(),
+        slice_seq=0,
+        instrument_id="BTC-USDT",
+        side=OrderSide.BUY,
+        planned_qty=Decimal("1"),
+        scheduled_at=datetime(2026, 9, 9, tzinfo=timezone.utc),
+        order_id=uuid4(),
     )
 
 
@@ -117,6 +122,7 @@ def test_partial_implementation_is_rejected() -> None:
 @pytest.mark.asyncio
 async def test_tcp_eof_before_acceptance_preserves_state(order: ChildOrder) -> None:
     """Real TCP EOF, test-only transport probe; production FIX remains 미검증."""
+
     class TcpProbeSession(FakeFixSession):
         async def send_order(self, order: ChildOrder, *, cl_ord_id: str) -> int:
             if client.recv(1) == b"":
@@ -143,21 +149,28 @@ async def test_tcp_eof_before_acceptance_preserves_state(order: ChildOrder) -> N
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_local_acceptance_performance(order: ChildOrder) -> None:
-    """Local contract budget only, not network or venue throughput."""
+async def test_local_acceptance_performance(order: ChildOrder, perf_budget: PerfBudget) -> None:
+    """Local contract budget only, not network or venue throughput.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-10965).
+    """
     session = FakeFixSession()
     await session.logon()
-    started = perf_counter()
-    for number in range(10_000):
-        assert await session.send_order(order, cl_ord_id=str(number)) == number + 1
-    elapsed = perf_counter() - started
-    assert elapsed < 1.0, f"10000 local accepts took {elapsed:.3f}s (budget 1s)"
+
+    async def _run_10000() -> None:
+        for number in range(10_000):
+            assert await session.send_order(order, cl_ord_id=str(number)) == number + 1
+
+    sample = await perf_budget.sample_async(_run_10000)
+
+    assert sample.wall_ms < 1000, f"10000 local accepts took {sample.wall_ms:.1f}ms (budget 1000ms)"
     assert len(session.sent) == 10_000
 
 
 @pytest.mark.asyncio
 async def test_contract_gate_rejects_duplicate_bypass_mutant(order: ChildOrder) -> None:
     """The unchanged reusable contract turns red when duplicate defense is bypassed."""
+
     class DuplicateBypassSession(FakeFixSession):
         async def send_order(self, order: ChildOrder, *, cl_ord_id: str) -> int:
             self.sent.discard(cl_ord_id)
