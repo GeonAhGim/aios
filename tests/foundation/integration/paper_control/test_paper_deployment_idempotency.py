@@ -1,12 +1,17 @@
 """FND-07 Paper Execution & Control 통합테스트 — request_deployment()
 idempotency key 처리(중복 요청 재현, 충돌, FAILED replay)."""
+
 from __future__ import annotations
+
+import asyncio
 
 import pytest
 
+from src.foundation.paper_control.application.pause_deployment import pause_deployment
 from src.foundation.paper_control.application.request_deployment import (
     IdempotencyKeyConflictError,
 )
+from src.foundation.paper_control.application.start_deployment import start_deployment
 from src.foundation.paper_control.domain.rules import InvalidProvenanceError
 from tests.foundation.integration.paper_control.conftest import request, tenant_with_mandate
 
@@ -70,3 +75,45 @@ async def test_failed_request_replay_reraises_same_error_without_duplicating(
     all_deployments = await repo.list_deployments(tenant_id)
     assert len(all_deployments) == 1
     assert all_deployments[0].state.value == "FAILED"
+
+
+async def test_concurrent_pause_with_same_idempotency_key_is_idempotent(
+    pool, repo, risk_repo, mandate_repo, trust_repo, connection_repo
+):
+    """안정화 감사 A6-G5-4(task-10780) 재현 — 같은 idempotency_key로 두 PAUSE
+    요청이 동시에(같은 RUNNING 배포에) 들어오면, 경합에서 이긴 쪽만 실제
+    전이를 하고 진 쪽은 에러 대신 같은 결과를 그대로 받아야 한다(PAP-006
+    "duplicate command is idempotent"가 동시 재시도에도 성립해야 한다)."""
+    tenant_id = await tenant_with_mandate(pool, mandate_repo, trust_repo)
+    deployment = await request(repo, mandate_repo, tenant_id)
+    await start_deployment(
+        repo,
+        risk_repo,
+        mandate_repo,
+        connection_repo,
+        tenant_id=tenant_id,
+        actor_subject_id=tenant_id,
+        deployment_id=deployment.id,
+        idempotency_key="start-concurrent-pause",
+    )
+
+    async def attempt():
+        return await pause_deployment(
+            repo,
+            tenant_id=tenant_id,
+            actor_subject_id=tenant_id,
+            deployment_id=deployment.id,
+            idempotency_key="pause-concurrent-same-key",
+        )
+
+    results = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert failures == [], f"동일 키 동시 PAUSE가 에러를 내면 안 된다: {failures}"
+
+    views = [r for r in results if not isinstance(r, BaseException)]
+    assert all(v.state.value == "PAUSED" for v in views)
+    assert views[0].fence_token == views[1].fence_token == 1
+
+    all_deployments = await repo.list_deployments(tenant_id)
+    assert len(all_deployments) == 1
+    assert all_deployments[0].fence_token == 1, "경합에서 진 쪽이 fence를 한 번 더 늘리면 안 된다"

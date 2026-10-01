@@ -209,3 +209,62 @@ async def test_ten_concurrent_first_activations_produce_exactly_one_active_contr
             scope_ref,
         )
     assert count == 1, "동시 최초-activate 경합 후에도 ACTIVE 행은 정확히 1개여야 한다"
+
+
+async def test_two_concurrent_deactivations_of_the_same_control_leave_exactly_one_winner(
+    pool, repo
+):
+    """task-10780 A6-G5(audit §5 G5-2) 재현 — 킬스위치 비활성화에 별도의
+    멱등키가 없는 것이 중복 control 행을 만들 위험으로 지적됐다.
+    `deactivate_safety_control()`은 INSERT가 아니라 조건부 UPDATE(`WHERE
+    id=$1 AND state='ACTIVE'`)라 애초에 새 행을 만들지 않는다 — 두 재시도가
+    동시에 같은 control_id를 해제해도 Postgres 행 잠금이 자연히 직렬화해
+    정확히 한 번만 성공하고, 나머지는 명시적으로 거부돼야 한다(조용한 중복
+    처리나 두 번째 행 생성은 없어야 한다) — 결과: 오탐 아님/사실이지만 이미
+    표준-105 조건부 UPDATE가 막고 있다(코드 변경 불필요, 이 테스트는 그
+    사실의 재현 증빙)."""
+    tenant_id = await _tenant(pool)
+    control = await repo.insert_safety_control(
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        reason="동시 해제 재현",
+        actor_subject_id=tenant_id,
+    )
+
+    async def attempt():
+        return await repo.deactivate_safety_control(control.id)
+
+    results = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
+
+    successes = [r for r in results if not isinstance(r, BaseException)]
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert len(successes) == 1, f"정확히 1건만 성공해야 하는데 {len(successes)}건 성공했다"
+    assert len(failures) == 1
+    assert isinstance(failures[0], ConcurrencyConflictError)
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval("SELECT count(*) FROM safety_control WHERE id = $1", control.id)
+    assert count == 1, "해제 경합이 새 control 행을 만들면 안 된다(UPDATE이지 INSERT가 아님)"
+
+
+async def test_deactivating_an_already_inactive_control_is_explicitly_rejected(pool, repo):
+    """task-10780 A6-G5(audit §5 G5-3) 재현 — "이미 INACTIVE인 통제에 대한
+    비활성화 요청이 명시적으로 거부되는지" 확인. 결과: 오탐 아님/사실이지만
+    이미 올바르게 동작한다 — `activate_safety_control()`의
+    `SafetyControlAlreadyActiveError`(이미 ACTIVE인데 다시 activate)와
+    대칭으로, `deactivate_safety_control()`도 이미 INACTIVE인 control을
+    다시 해제하려 하면 조용히 성공을 가장하지 않고 `ConcurrencyConflictError`
+    로 명시적으로 거부한다(코드 변경 불필요, 이 테스트는 그 사실의 재현
+    증빙)."""
+    tenant_id = await _tenant(pool)
+    control = await repo.insert_safety_control(
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        reason="이미 비활성 재현",
+        actor_subject_id=tenant_id,
+    )
+    first = await repo.deactivate_safety_control(control.id)
+    assert first.state.value == "INACTIVE"
+
+    with pytest.raises(ConcurrencyConflictError):
+        await repo.deactivate_safety_control(control.id)

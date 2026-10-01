@@ -210,11 +210,16 @@ async def test_pause_deployment_raises_on_non_running_state(state: DeploymentSta
         )
 
 
-async def test_pause_deployment_raises_on_concurrent_conflict():
-    """실패주입 — increment_fence가 ConcurrencyConflictError를 던지면
-    pause는 재시도 없이 InvalidDeploymentStateError로 변환한다."""
+async def test_pause_deployment_raises_on_concurrent_conflict_when_not_paused():
+    """실패주입 — increment_fence가 ConcurrencyConflictError를 던지고
+    재조회한 상태가 PAUSED가 아니면(예: STOP이 선점) InvalidDeploymentStateError로
+    변환한다 — PAUSE 의도가 달성되지 않았으므로 그대로 실패."""
     repo = FakeRepo(_deployment(DeploymentState.RUNNING))
     repo.increment_fence_side_effects = [ConcurrencyConflictError()]
+    repo.get_deployment_queue = [
+        _deployment(DeploymentState.RUNNING),  # _load_owned_deployment
+        _deployment(DeploymentState.STOPPED, fence_token=1),  # refreshed after conflict
+    ]
     with pytest.raises(InvalidDeploymentStateError):
         await pause_deployment(
             repo,
@@ -223,6 +228,29 @@ async def test_pause_deployment_raises_on_concurrent_conflict():
             deployment_id=_DEPLOYMENT_ID,
             idempotency_key="pause-1",
         )
+    assert repo.insert_command_calls == []
+
+
+async def test_pause_deployment_conflict_then_already_paused_is_idempotent():
+    """task-10780 A6-G5-4 — 동일 idempotency_key로 동시에 들어온 PAUSE 요청이
+    경합에서 졌을 때, 먼저 도착한 요청이 이미 PAUSED로 전이시켰다면 재시도
+    없이 그 결과를 그대로 반환하고 insert_command는 다시 하지 않는다(stop의
+    conflict-then-already-stopped 경로와 대칭)."""
+    repo = FakeRepo(_deployment(DeploymentState.RUNNING, fence_token=5))
+    repo.increment_fence_side_effects = [ConcurrencyConflictError()]
+    repo.get_deployment_queue = [
+        _deployment(DeploymentState.RUNNING, fence_token=5),  # _load_owned_deployment
+        _deployment(DeploymentState.PAUSED, fence_token=6),  # refreshed after conflict
+    ]
+    view = await pause_deployment(
+        repo,
+        tenant_id=_TENANT_ID,
+        actor_subject_id=_ACTOR_ID,
+        deployment_id=_DEPLOYMENT_ID,
+        idempotency_key="pause-1",
+    )
+    assert view.state.value == "PAUSED"
+    assert view.fence_token == 6
     assert repo.insert_command_calls == []
 
 

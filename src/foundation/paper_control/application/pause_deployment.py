@@ -10,6 +10,7 @@ reproduction in PAP-003 is verified via 105 §4 Form A tests)."""
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from src.core.db.conditional_write import ConcurrencyConflictError
@@ -57,6 +58,28 @@ async def _idempotent_or_none(
     return deployment_to_view(current)
 
 
+_IDEMPOTENCY_LOOKUP_ATTEMPTS = 10
+_IDEMPOTENCY_LOOKUP_DELAY_SEC = 0.005
+
+
+async def _idempotent_or_none_awaiting_concurrent_winner(
+    repo: PaperControlRepository, deployment_id: UUID, idempotency_key: str
+) -> PaperDeploymentView | None:
+    """`increment_fence()` and `insert_command()` are two sequential writes, not one
+    atomic transaction, so a concurrent same-`idempotency_key` request can observe the
+    deployment already in the post-pause state before the winner's command row is
+    visible yet. A short bounded retry closes that microsecond-scale window instead of
+    surfacing a spurious conflict to a caller that is simply retrying its own request
+    (task-10780 A6-G5-4)."""
+    for attempt in range(_IDEMPOTENCY_LOOKUP_ATTEMPTS):
+        cached = await _idempotent_or_none(repo, deployment_id, idempotency_key)
+        if cached is not None:
+            return cached
+        if attempt < _IDEMPOTENCY_LOOKUP_ATTEMPTS - 1:
+            await asyncio.sleep(_IDEMPOTENCY_LOOKUP_DELAY_SEC)
+    return None
+
+
 async def _load_owned_deployment(
     repo: PaperControlRepository, *, tenant_id: UUID, deployment_id: UUID
 ) -> PaperDeployment:
@@ -84,6 +107,16 @@ async def pause_deployment(
         repo, tenant_id=tenant_id, deployment_id=deployment_id
     )
     if deployment.state != DeploymentState.RUNNING:
+        if deployment.state == DeploymentState.PAUSED:
+            # A concurrent same-key PAUSE may have already won before this call even
+            # reached `increment_fence()` -- check for its command row (with the
+            # bounded wait above) before concluding this is a genuine non-RUNNING
+            # rejection rather than this request's own retry.
+            cached = await _idempotent_or_none_awaiting_concurrent_winner(
+                repo, deployment_id, idempotency_key
+            )
+            if cached is not None:
+                return cached
         raise InvalidDeploymentStateError(f"{deployment.state.value}에서는 정지할 수 없습니다.")
 
     try:
@@ -94,6 +127,19 @@ async def pause_deployment(
             new_state=DeploymentState.PAUSED.value,
         )
     except ConcurrencyConflictError:
+        # 안정화 감사 A6-G5-4(task-10780) — stop_deployment의 재시도-후-확인
+        # 경로(§2 "STOP and risk/emergency PAUSE take precedence")와 비대칭
+        # 이었다: 동일 idempotency_key로 재시도한 PAUSE가 경합에서 졌을 때
+        # 바로 실패로 변환하면, 먼저 도착한 요청이 이미 PAUSED로 전이시킨
+        # 경우에도 재시도는 에러를 받는다 — "같은 요청의 중복은 idempotent"
+        # 원칙(PAP-006)에 반한다. 재조회해 이미 PAUSED면 그 결과를 그대로
+        # 반환한다(새 커맨드 행을 또 만들지 않는다 — 처음 성공한 요청이
+        # 이미 기록했다). PAUSED가 아니면(예: STOP이 먼저 와서 선점한
+        # 경우) 이 PAUSE 의도는 달성되지 않았으므로 그대로 실패로 남긴다.
+        refreshed = await repo.get_deployment(deployment_id)
+        assert refreshed is not None
+        if refreshed.state == DeploymentState.PAUSED:
+            return deployment_to_view(refreshed)
         raise InvalidDeploymentStateError("다른 요청이 먼저 상태를 바꿨습니다.") from None
 
     await repo.insert_command(
