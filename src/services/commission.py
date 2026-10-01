@@ -1,6 +1,7 @@
-"""13.7 — P2P 중개수수료 계산.
+"""13.7 — P2P Brokerage Commission Calculation.
 
-Spec: 기능설계문서_v1.20.md#FD-13.7, docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-2.
+Spec: Functional Design Document_v1.20.md#FD-13.7,
+docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-2.
 
 Core distinction (2026-08-10 confirmed): This is not a performance fee tied to
 trading results (excluded from capital markets law investment advisory licensing
