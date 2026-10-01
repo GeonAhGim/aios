@@ -38,3 +38,41 @@ def test_enforce_raises_with_used_and_cap() -> None:
 def test_enforce_passes_through_decision_when_allowed() -> None:
     decision = enforce_daily_budget(used_today=0, daily_cap=1)
     assert decision.allowed is True
+
+
+def test_negative_daily_cap_is_fail_closed() -> None:
+    """A negative cap (misconfiguration) must never be read as unlimited."""
+    decision = check_daily_budget(used_today=0, daily_cap=-5)
+    assert decision.allowed is False
+    assert decision.remaining == 0
+
+
+def test_used_above_cap_is_denied_with_zero_remaining() -> None:
+    """Usage already past the cap (e.g. cap lowered mid-day) must deny, not
+    report a negative `remaining`."""
+    decision = check_daily_budget(used_today=60, daily_cap=50)
+    assert decision.allowed is False
+    assert decision.remaining == 0
+
+
+def test_enforce_raises_for_negative_cap() -> None:
+    with pytest.raises(BudgetExceededError) as exc_info:
+        enforce_daily_budget(used_today=0, daily_cap=-1)
+    assert exc_info.value.used == 0
+    assert exc_info.value.cap == -1
+
+
+def test_enforce_propagates_decision_construction_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Failure injection: if the underlying decision object cannot be built
+    (e.g. a future field-validation change in `BudgetDecision`), the
+    judgment must surface that failure rather than silently allowing the
+    request through."""
+    import src.foundation.ai.assistant.domain.budget as budget_module
+
+    def _broken_decision(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("decision construction failed")
+
+    monkeypatch.setattr(budget_module, "BudgetDecision", _broken_decision)
+
+    with pytest.raises(RuntimeError, match="decision construction failed"):
+        enforce_daily_budget(used_today=0, daily_cap=10)
