@@ -325,6 +325,7 @@ def test_main_export_current_subprocess_failure_propagates(tmp_path, monkeypatch
 # --- 성능 단언 ---------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_identical_v1_snapshot_perf_budget():
     """실 스냅샷 자기비교가 예산(1초) 내에 끝나야 한다 — PLT-16 CI 핫패스."""
     from pathlib import Path
