@@ -19,7 +19,10 @@ import pytest
 
 from src.api.routers.foundation.ems import get_algo_run_progress
 from src.data.models.trading import OrderSide, OrderStatus
-from src.foundation.ems.application.get_algo_progress import AlgoRunNotFoundError
+from src.foundation.ems.application.get_algo_progress import (
+    AlgoRunNotFoundError,
+    get_algo_progress,
+)
 from src.foundation.ems.application.start_algo import AlgoRunPlan
 from src.foundation.ems.contracts.v1 import (
     AlgoKind,
@@ -139,3 +142,51 @@ async def test_get_algo_run_progress_404s_for_a_different_registered_parent_id()
 
     with pytest.raises(AlgoRunNotFoundError):
         await get_algo_run_progress(requested_id, _user=_user(), scheduler=scheduler)
+
+
+def test_get_algo_progress_rejects_none_plan_with_the_requested_parent_id() -> None:
+    """Negative -- `get_algo_progress` itself must reject a `None` plan (the
+    `AlgoScheduler.active_plan` miss case) rather than let a `None` leak into
+    the progress computation, and the raised error must identify which
+    `parent_id` was requested so a 404 response body/log stays debuggable."""
+    parent_id = uuid4()
+
+    with pytest.raises(AlgoRunNotFoundError, match=str(parent_id)):
+        get_algo_progress(None, parent_id=parent_id)
+
+
+async def test_get_algo_run_progress_propagates_scheduler_failures_fail_closed() -> None:
+    """Failure injection -- if `AlgoScheduler.active_plan` blows up (e.g. a
+    lock/connection error in a future non-in-memory implementation), the
+    router must let the exception propagate (-> 500) instead of swallowing it
+    into a false 404 or an empty 200, per the fail-closed default (CLAUDE.md
+    §3)."""
+
+    @dataclass
+    class _ExplodingScheduler:
+        def active_plan(self, parent_order_id: UUID) -> AlgoRunPlan | None:
+            raise RuntimeError("simulated scheduler lookup failure")
+
+    with pytest.raises(RuntimeError, match="simulated scheduler lookup failure"):
+        await get_algo_run_progress(uuid4(), _user=_user(), scheduler=_ExplodingScheduler())
+
+
+async def test_get_algo_run_progress_completes_within_latency_budget() -> None:
+    """Perf -- the handler is a pure in-memory read (no I/O per the module
+    docstring), so a single call must complete well under a generous 50ms
+    budget; a regression here would indicate an accidental I/O call creeping
+    into this read path."""
+    import time
+
+    parent_id = uuid4()
+    plan = AlgoRunPlan(
+        parent=_parent(parent_id, qty=Decimal("10")),
+        children=[_child(parent_id, 0, Decimal("10"))],
+    )
+    scheduler = _FakeAlgoScheduler(plans={parent_id: plan})
+
+    start = time.perf_counter()
+    await get_algo_run_progress(parent_id, _user=_user(), scheduler=scheduler)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    assert elapsed_ms < 50
