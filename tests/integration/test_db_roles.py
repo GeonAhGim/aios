@@ -12,9 +12,11 @@ DoD: 역할 존재, `aios_app`으로 `audit_log` UPDATE 실패, `/metrics`는 �
 예외를 던지게 해 자동 롤백시키면, 실제 DML이 커밋되지 않으면서도 role 상태가
 깨끗이 원복된다.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 from uuid import uuid4
 
 import asyncpg
@@ -178,3 +180,77 @@ async def test_metrics_endpoint_returns_200_with_token(monkeypatch: pytest.Monke
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
+
+
+async def test_metrics_endpoint_surfaces_registry_failure_as_500(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입 — `get_registry().render_text()`(L0-1 의존성)가 예외를 던지면
+    `/metrics`는 부분적으로 깨진 본문을 조용히 200으로 돌려주지 않고 500으로
+    실패해야 한다(fail-closed, CLAUDE.md §3). `render_text`를
+    `side_effect=RuntimeError`로 교체해 그 의존성 실패를 주입한다."""
+    monkeypatch.setenv("AIOS_METRICS_TOKEN", "test-suite-token")
+    broken_registry = Mock()
+    broken_registry.render_text.side_effect = RuntimeError("registry snapshot corrupted")
+    monkeypatch.setattr("src.api.routers.metrics.get_registry", lambda: broken_registry)
+
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            response = await ac.get("/metrics", headers={"X-Metrics-Token": "test-suite-token"})
+
+    assert response.status_code == 500
+    broken_registry.render_text.assert_called_once_with()
+
+
+@pytest.mark.perf
+async def test_aios_app_cannot_update_audit_log_detection_within_budget(conn, perf_budget) -> None:
+    """성능 단언 — WORM 가드가 쓰기를 거부하는 왕복(`SET ROLE` + 거부된 UPDATE +
+    자동 롤백)이 사람이 감지 가능한 지연(1초, ADR-2026-09-09-C 예산표의 단순
+    쿼리류 항목에 준함) 안에 끝나는지 측정한다. 트리거가 실패 경로에서 잠금을
+    오래 들고 있거나 매 요청마다 느려지는 회귀를 잡는다."""
+    row = await conn.fetchrow(
+        "INSERT INTO audit_log (actor_agent, action_type, decision_data) "
+        "VALUES ('test-suite', 'test.worm.audit_log.perf', '{}'::jsonb) RETURNING log_id"
+    )
+    log_id = row["log_id"]
+
+    async def _attempt_denied_update() -> None:
+        with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)):
+            async with conn.transaction():
+                await conn.execute("SET ROLE aios_app")
+                await conn.execute(
+                    "UPDATE audit_log SET actor_agent = 'tampered' WHERE log_id = $1", log_id
+                )
+
+    sample = await perf_budget.sample_async(_attempt_denied_update)
+    budget_ms = 1000.0
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+
+
+async def test_disabling_worm_trigger_lets_audit_log_update_through_gate_red(conn) -> None:
+    """게이트 적색 재현 — 소유자 계정에서 `audit_log_worm_guard_trg`를 트랜잭션
+    안에서 `DISABLE TRIGGER`하면 `test_worm_trigger_blocks_table_owner_on_audit_log`가
+    강제하는 WORM 불변식이 더는 걸리지 않고 UPDATE가 조용히 성공한다. 즉 저
+    테스트가 우연히 통과하는 게 아니라 실제로 이 트리거([[src/core/db/append_only.py]]
+    `worm_sql`)에 의존한다는 것을 보인다 — 트리거가 회귀로 빠지면 이 테스트가
+    그 사실을 드러낸다."""
+    row = await conn.fetchrow(
+        "INSERT INTO audit_log (actor_agent, action_type, decision_data) "
+        "VALUES ('test-suite', 'test.worm.audit_log.gate_red', '{}'::jsonb) RETURNING log_id"
+    )
+    log_id = row["log_id"]
+
+    tr = conn.transaction()
+    await tr.start()
+    try:
+        await conn.execute("ALTER TABLE audit_log DISABLE TRIGGER audit_log_worm_guard_trg")
+        await conn.execute(
+            "UPDATE audit_log SET actor_agent = 'tampered-while-trigger-disabled' "
+            "WHERE log_id = $1",
+            log_id,
+        )
+        actor = await conn.fetchval("SELECT actor_agent FROM audit_log WHERE log_id = $1", log_id)
+        assert actor == "tampered-while-trigger-disabled"
+    finally:
+        await tr.rollback()
