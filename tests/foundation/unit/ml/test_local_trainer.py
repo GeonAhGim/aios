@@ -6,7 +6,6 @@ DoD "resumable" equivalence proof.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 
 import lightgbm as lgb
@@ -195,16 +194,17 @@ this file's small in-repo dataset."""
 
 
 @pytest.mark.perf
-def test_train_step_latency_within_budget(tmp_path):
+def test_train_step_latency_within_budget(tmp_path, perf_budget):
+    """task-10990 — raw perf_counter → perf_budget.samples 전환.
+    예산 값(_TRAIN_STEP_P95_BUDGET_MS)은 불변."""
     trainer = LocalTrainer(tmp_path)
     samples = _samples()
-    durations: list[float] = []
-    checkpoint = None
-    for _ in range(5):
-        started = time.perf_counter()
-        checkpoint = trainer.train_step(checkpoint, samples, num_boost_round=3, params=_PARAMS)
-        durations.append((time.perf_counter() - started) * 1000)
 
-    p95_ms = _p95(durations)
+    def _one_round() -> None:
+        trainer.train_step(None, samples, num_boost_round=3, params=_PARAMS)
+
+    samples = perf_budget.samples(_one_round, n=5)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
     print(f"[AI-20 train_step] p95={p95_ms:.2f}ms budget<{_TRAIN_STEP_P95_BUDGET_MS:.1f}ms")
     assert p95_ms < _TRAIN_STEP_P95_BUDGET_MS
