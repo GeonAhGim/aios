@@ -1,38 +1,47 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4/§3.3/§9.4 DSL-10 —
-cond-v2 조건식 → AIOS Script(DSL-1 AST) 변환 브리지 + `compat_map`.
+cond-v2 expression → AIOS Script (DSL-1 AST) conversion bridge + `compat_map`.
 
-입력은 `src/core/strategy/condition_evaluator.py`(FROZEN_PAPER_ONLY, 읽기
-전용)가 해석하는 cond-v2 v1 평면 문자열 — `ConditionCompiler`가 만드는
-`"{KEY} {OP} {NUMBER}"`를 `" AND "` 또는 `" OR "` 하나로만 결합한 형태다.
-L4_strategy §3.1의 `condition_ast.py`/`condition_parser.py`(괄호·NOT·`@tf`)
-는 아직 저장소에 없어, 이 브리지는 현 평가기가 실제로 받아들이는 문법만
-받아들이고 그 밖은 위치(문자 오프셋·조각 번호)와 함께 거부한다(부분 변환
-금지). 출력은 소스 텍스트를 만들어 DSL-3 `parse()`로 다시 읽은 `Program`
-이라 결과가 §3.3 문법 안에 있음이 구성적으로 보장된다(새 문법 없음).
+Input is a cond-v2 v1 flat string interpreted by
+`src/core/strategy/condition_evaluator.py` (FROZEN_PAPER_ONLY, read-only) —
+a form combining `"{KEY} {OP} {NUMBER}"` tokens produced by `ConditionCompiler`
+with only `" AND "` or `" OR "`. The L4_strategy §3.1
+`condition_ast.py`/`condition_parser.py` (parentheses, NOT, `@tf`) are not
+yet in the repository; this bridge accepts only the grammar the current
+evaluator actually consumes and rejects anything else along with its position
+(character offset, part index) (partial conversion prohibited). The output is
+a `Program` obtained by feeding the generated source text through DSL-3
+`parse()`, so conformance to §3.3 grammar is guaranteed by construction
+(no new grammar).
 
-변환 규칙(§3.3 "cond-v2 호환" 예시 그대로):
+Conversion rules (following §3.3 "cond-v2 compat" example verbatim):
     RSI_timeperiod14 < 30 AND SMA_timeperiod20 > 100
   → input close: series<float> = 0
     let RSI_timeperiod14 = ta.rsi(close, 14)
     let SMA_timeperiod20 = ta.sma(close, 20)
     signal cond = RSI_timeperiod14 < 30 and SMA_timeperiod20 > 100
-지표 이름·파라미터·입력 시리즈는 `indicators.registry.DEFAULT_REGISTRY`
-(cond-v2 실행 루프 `market_state.py`가 쓰는 것과 같은 레지스트리)로 검증하고
-기본값을 채운다. `ta.*` 인자 순서는 레지스트리 `params` 선언 순서다 —
-미검증: DSL-9 `builtins_ta.py`가 확정되면 `_TA_IDENT`만 맞추면 된다.
-다중 출력 지표(MACD·BBANDS·STOCH)는 cond-v2가 primary 출력을 암묵 선택하지만
-DSL 호출의 반환 출력이 미정이라 거부한다(추측으로 신호를 만들지 않는다).
+Indicator names, parameters, and input series are validated against
+`indicators.registry.DEFAULT_REGISTRY` (same registry used by the cond-v2
+execution loop in `market_state.py`) and defaults are filled in. The argument
+order of `ta.*` calls follows the registry `params` declaration order —
+unverified: once DSL-9 `builtins_ta.py` is finalized, only `_TA_IDENT` needs
+updating. Multi-output indicators (MACD, BBANDS, STOCH) implicitly select the
+primary output in cond-v2, but this bridge rejects them because the DSL call's
+return output type is undecided (no signal fabrication by guess).
 
-의미 차이(둘 다 "비발화" 범위 안, 테스트가 명시 단언):
-- cond-v2는 좌→우 단락 평가로 첫 누락 키에서 판단 보류(예외)하지만 DSL은
-  Kleene 3치(`na and False = False`)다. 발화(True)는 항상 일치한다.
-- 교차 연산은 직전 틱이 없으면 cond-v2가 False, DSL은 na(0번 봉)다.
+Semantic differences (both within "non-fired" scope, tests assert explicitly):
+- cond-v2 uses left-to-right short-circuit evaluation, deferring judgment at
+  the first missing key (raises exception); DSL uses Kleene three-valued logic
+  (`na and False = False`). Firing (True) always matches.
+- For cross operations, cond-v2 returns False when no previous tick exists;
+  DSL returns na (bar 0).
 
-`compat_map`은 컴파일 아티팩트에 실리는 순수 dict다(DB 저장·마이그레이션
-없음): 원 노드 id(`root`, `atom:i`) → 스크립트 라인·식별자, 원 표현식의
-`node_hash`(= sha256(정규화 문자열), L4_strategy §3.1 `to_canonical` 규칙:
-공백 단일화·리프 순서 보존), 변환 결과 `script_hash`(`compile_cond_v2`).
+`compat_map` is a pure dict carried in the compile artifact (no DB storage or
+migration): maps original node ids (`root`, `atom:i`) → script lines/identifiers,
+the original expression's `node_hash` (= sha256 of canonical string per
+L4_strategy §3.1 `to_canonical` rules: whitespace normalization, leaf order
+preservation), and the conversion result `script_hash` (`compile_cond_v2`).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,7 +59,7 @@ COMPAT_SCHEMA: Final = "cond-v2-compat-1"
 SOURCE_GRAMMAR_VERSION: Final = "cond-v2"
 SIGNAL_NAME: Final = "cond"
 
-# condition_evaluator._ATOMIC_RE / market_state._KEY_RE와 동일 문법(테스트가 동기화 단언).
+# Same grammar as condition_evaluator._ATOMIC_RE / market_state._KEY_RE (tests assert synchronization).
 _ATOMIC_RE: Final = re.compile(
     r"^(?P<key>\S+)\s+(?P<op>>=|<=|==|>|<|CROSSES_ABOVE|CROSSES_BELOW)\s+"
     r"(?P<threshold>-?\d+(?:\.\d+)?)$"
@@ -63,15 +72,16 @@ _OP_MAP: Final[Mapping[str, str]] = {
 }  # fmt: skip
 _JOINERS: Final[Mapping[str, str]] = {" AND ": "and", " OR ": "or"}
 _INPUT_ORDER: Final = ("open", "high", "low", "close", "volume")
-# 레지스트리 이름 → DSL `ta.` 식별자(미검증: DSL-9 확정 시 이 표만 수정).
+# Registry name → DSL `ta.` identifier (unverified: once DSL-9 finalizes, only this table needs updating).
 _TA_IDENT: Final[Mapping[str, str]] = {
     n: n.lower() for n in ("SMA", "EMA", "RSI", "ATR", "CCI", "WILLR", "MFI", "OBV")
 }
 
 
 class CondV2BridgeError(Exception):
-    """변환 거부(fail-closed). `offset`은 원 cond-v2 문자열의 0-기반 문자 위치,
-    `part_index`는 결합 조각 번호. `code`는 원인 분류(cond-v2/레지스트리 코드 재사용)."""
+    """Conversion rejection (fail-closed). `offset` is the 0-based character
+    position in the original cond-v2 string, `part_index` is the combined part
+    index. `code` is the cause classification (reuses cond-v2/registry codes)."""
 
     def __init__(self, code: str, message: str, *, offset: int, part_index: int) -> None:
         super().__init__(f"[{code}] {message} (offset {offset}, part {part_index})")
@@ -95,7 +105,8 @@ class _Atom:
 
 @dataclass(frozen=True)
 class BridgedScript:
-    """`source`는 DSL 소스 텍스트, `program == parse(source)`, `compat_map`은 JSON 호환 dict."""
+    """`source` is the DSL source text, `program == parse(source)`,
+    `compat_map` is a JSON-compatible dict."""
 
     expression: str
     source: str
@@ -110,22 +121,25 @@ class CompiledCondV2:
 
 
 def canonical_expression(expression: str) -> str:
-    """L4_strategy §3.1 `to_canonical`(평면형): 공백 단일화, 리프 순서 보존."""
+    """L4_strategy §3.1 `to_canonical` (flat form): whitespace normalization,
+    leaf order preservation."""
     joiner, parts = _split(expression)
     canon = [" ".join(p.strip().split()) for p in parts]
     return joiner.join(canon) if joiner else canon[0]
 
 
 def node_hash(expression: str) -> str:
-    """`sha256(to_canonical(expr))` — L4_strategy §3.0 표의 `node_hash` 정의."""
+    """`sha256(to_canonical(expr))` — `node_hash` definition from L4_strategy
+    §3.0 table."""
     return hashlib.sha256(canonical_expression(expression).encode("utf-8")).hexdigest()
 
 
 def bridge_cond_v2(
     expression: str, *, registry: IndicatorRegistry = DEFAULT_REGISTRY
 ) -> BridgedScript:
-    """cond-v2 문자열 → `BridgedScript`. 미지 연산자·지원 밖 지표/파라미터·혼합
-    결합·다중 출력 지표는 `CondV2BridgeError`(위치 포함)로 전체 거부한다."""
+    """Converts a cond-v2 string to `BridgedScript`. Unknown operators,
+    unsupported indicators/parameters, mixed joiners, and multi-output
+    indicators are fully rejected via `CondV2BridgeError` (with position info)."""
     joiner, parts = _split(expression)
     atoms: list[_Atom] = []
     pos = 0
@@ -172,19 +186,20 @@ def bridge_cond_v2(
 def compile_cond_v2(
     expression: str, *, registry_version: str, registry: IndicatorRegistry = DEFAULT_REGISTRY
 ) -> CompiledCondV2:
-    """변환 + DSL-12 전 파이프라인 컴파일. `compat_map["script_hash"]`를 채워 원
-    `node_hash`와 함께 아티팩트 dict 필드로 저장할 수 있게 한다(§3.3)."""
+    """Conversion + DSL-12 pre-pipeline compile. Fills
+    `compat_map["script_hash"]` so the artifact dict field can be stored
+    alongside the original `node_hash` (§3.3)."""
     bridged = bridge_cond_v2(expression, registry=registry)
     compiled = compile_source(bridged.source, registry_version=registry_version)
     compat_map = dict(bridged.compat_map, script_hash=compiled.script_hash)
     return CompiledCondV2(compiled=compiled, compat_map=compat_map)
 
 
-# ---- 내부 ----
+# ---- Internal helpers ----
 
 
 def _split(expression: str) -> tuple[str, list[str]]:
-    """condition_evaluator.evaluate와 같은 분기: AND 우선, 아니면 OR, 아니면 단일."""
+    """Branching same as condition_evaluator.evaluate: AND-first, else OR, else single."""
     for joiner in _JOINERS:
         if joiner in expression:
             return joiner, expression.split(joiner)
