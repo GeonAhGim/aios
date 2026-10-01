@@ -19,7 +19,6 @@ so the repository is mocked (`AsyncMock`) instead.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -42,6 +41,7 @@ from src.foundation.ems.application.aggregate_parent import (
 )
 from src.foundation.ems.domain.parent_child import AlgoConstraintError, ParentTerminalError
 from src.services.oms.contracts.v1_views import OrderView
+from tests.conftest import PerfBudget
 
 _ATTACK_SNIPPET = """
 async def sneaky_child_insert(conn, parent_id):
@@ -369,7 +369,9 @@ async def test_children_awaiting_cancel_propagates_db_failure() -> None:
 
 
 @pytest.mark.perf
-async def test_recompute_parent_aggregate_perf_budget_many_children() -> None:
+async def test_recompute_parent_aggregate_perf_budget_many_children(
+    perf_budget: PerfBudget,
+) -> None:
     """성능 단언 -- `recompute_parent_aggregate`는 호출마다 자식 목록 전체를
     순회해 롤업한다(EM-2 `aggregate_parent_state`, O(n)). 자식 300개 x 반복
     100회를 예산 안에서 처리하는지 고정해, 롤업 루프 안에서 자식을 다시
@@ -389,17 +391,18 @@ async def test_recompute_parent_aggregate_perf_budget_many_children() -> None:
     repo.transition.return_value = parent.model_copy(update={"status": OrderStatus.FILLED})
     conn = object()
 
-    start = time.perf_counter()
-    for _ in range(100):
-        await recompute_parent_aggregate(
-            repo,
-            conn,
-            parent_order_id=parent.order_id,
-            trace_id=uuid4(),
-            occurred_at=datetime.now(timezone.utc),
-        )
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    async def _run() -> None:
+        for _ in range(100):
+            await recompute_parent_aggregate(
+                repo,
+                conn,
+                parent_order_id=parent.order_id,
+                trace_id=uuid4(),
+                occurred_at=datetime.now(timezone.utc),
+            )
 
-    assert elapsed_ms < 800, (
-        f"recompute_parent_aggregate() too slow: {elapsed_ms:.1f}ms/100 calls x 300 children"
+    budget_ms = 800.0
+    sample = await perf_budget.sample_async(_run)
+    assert sample.wall_ms < budget_ms, (
+        f"recompute_parent_aggregate() too slow: {sample.wall_ms:.1f}ms/100 calls x 300 children"
     )
