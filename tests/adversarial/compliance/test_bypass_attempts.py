@@ -13,6 +13,11 @@ CM-A2)과 `tests/foundation/integration/compliance/*`이 이미 증명한 시나
 앞선 CM 리프(CM-4 WORM 트리거, CM-8 `evaluate_pre_trade`/
 `evaluate_compliance_gate`, CM-13 `explain()`, mandate 승인 흐름)의 기존
 포트를 그대로 재사용하고, 새 src 코드는 없다(test-only 리프).
+
+DEEPEN(task-10492, D2→D3): 실패 주입/성능 예산/게이트 적색 재현 증빙은
+이 파일을 500줄 밑으로 유지하기 위해(ADR-2026-09-10-C §7, CLAUDE.md #12)
+옆의 `test_bypass_attempts_deepen.py`에 둔다 — 같은 우회 시도 번호
+체계(11번부터)를 이어받는 책임 분리 파일이다.
 """
 
 from __future__ import annotations
