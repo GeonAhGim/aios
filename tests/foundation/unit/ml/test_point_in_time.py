@@ -6,7 +6,6 @@ gate-red reproduction 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -17,6 +16,7 @@ from src.foundation.ml.domain.point_in_time import (
     FutureDataLeakageError,
     check_point_in_time,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime.now(timezone.utc)
 
@@ -107,14 +107,15 @@ def _p95(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_check_point_in_time_p95_latency_within_budget() -> None:
+def test_check_point_in_time_p95_latency_within_budget(perf_budget: PerfBudget) -> None:
     backtest_start = _NOW
     card = _model_card(lineage_end=backtest_start - timedelta(days=1))
-    samples: list[float] = []
-    for _ in range(200):
-        started = time.perf_counter()
+
+    def _measure() -> None:
         check_point_in_time(card, backtest_start=backtest_start)
-        samples.append((time.perf_counter() - started) * 1000)
+
+    raw = perf_budget.samples(_measure, n=200)
+    samples: list[float] = [s.cpu_ms for s in raw]
 
     p95_ms = _p95(samples)
     print(f"[AI-18 check_point_in_time] p95={p95_ms:.4f}ms budget<{_CHECK_BUDGET_MS:.1f}ms")
