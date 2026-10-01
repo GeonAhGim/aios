@@ -4,8 +4,8 @@ Covers construction, frozen immutability, enum validation, and equality for
 ReconciliationItem/ReconciliationRun/ReconciliationState/MaterialityPolicy and
 their state enums.
 """
+
 import dataclasses
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
@@ -165,24 +165,30 @@ def test_reconciliation_state_is_frozen_and_rejects_mutation() -> None:
 
 def test_reconciliation_item_missing_required_field_raises_type_error() -> None:
     with pytest.raises(TypeError):
-        cast(Any, ReconciliationItem(
-            id=uuid4(),
-            run_id=uuid4(),
-            entity_type="USDT_BALANCE",
-            entity_key="acct-1",
-            internal_value=Decimal("100.00"),
-            # provider_value omitted, classification omitted
-        ))
+        cast(
+            Any,
+            ReconciliationItem(
+                id=uuid4(),
+                run_id=uuid4(),
+                entity_type="USDT_BALANCE",
+                entity_key="acct-1",
+                internal_value=Decimal("100.00"),
+                # provider_value omitted, classification omitted
+            ),
+        )
 
 
 def test_reconciliation_run_missing_required_field_raises_type_error() -> None:
     with pytest.raises(TypeError):
-        cast(Any, ReconciliationRun(
-            id=uuid4(),
-            tenant_id=uuid4(),
-            target_type="ACCOUNT",
-            # target_ref, connection_id, input_hash, state, rule_version omitted
-        ))
+        cast(
+            Any,
+            ReconciliationRun(
+                id=uuid4(),
+                tenant_id=uuid4(),
+                target_type="ACCOUNT",
+                # target_ref, connection_id, input_hash, state, rule_version omitted
+            ),
+        )
 
 
 def test_classification_rejects_unknown_value() -> None:
@@ -214,14 +220,16 @@ def test_classification_construction_surfaces_injected_lookup_failure(
 
 
 @pytest.mark.perf
-def test_bulk_construction_meets_latency_budget() -> None:
+def test_bulk_construction_meets_latency_budget(perf_budget: Any) -> None:
     """10k instantiations of every value object must stay well under 1s (p50 budget
     for pure in-memory dataclass construction, ADR-2026-09-09-C Decision 1 default)."""
-    start = time.perf_counter()
-    for _ in range(10_000):
-        _policy()
-        _item()
-        _run()
-        _state()
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+
+    def _bulk() -> None:
+        for _ in range(10_000):
+            _policy()
+            _item()
+            _run()
+            _state()
+
+    sample = perf_budget.assert_within(_bulk, budget_ms=1000.0, n=1)
+    assert sample.wall_ms < 1000.0
