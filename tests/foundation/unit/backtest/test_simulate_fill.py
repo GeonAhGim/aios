@@ -1,6 +1,5 @@
 """simulate_fill() 단위테스트 — 체결가/수수료/슬리피지 계산 검증."""
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -11,6 +10,7 @@ from src.data.models.market_data import Candle
 from src.data.models.trading import OrderSide
 from src.foundation.backtest.application.simulate_fill import simulate_fill
 from src.foundation.backtest.domain.models import CostModel
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
 
@@ -144,21 +144,23 @@ def test_underlying_simulator_failure_propagates(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.perf
-def test_simulate_fill_completes_within_latency_budget() -> None:
+def test_simulate_fill_completes_within_latency_budget(perf_budget: PerfBudget) -> None:
     """단일 체결 계산은 순수 산술이라 p95 1ms 예산을 크게 밑돌아야
-    한다 -- 숫자 성능 단언(D2 floor)."""
+    한다 -- 숫자 성능 단언(D2 floor).
+
+    raw time.perf_counter() → perf_budget.assert_within(process_time 기반) 전환(task-10951)."""
     cost_model = CostModel(fee_bps=Decimal("10"), slippage_bps=Decimal("5"))
     bar = _bar(open_price="100")
 
-    start = time.perf_counter()
-    for i in range(200):
-        simulate_fill(
+    perf_budget.assert_within(
+        lambda: simulate_fill(
             bar=bar,
-            bar_index=i,
+            bar_index=0,
             side=OrderSide.BUY,
             quantity=Decimal("1"),
             cost_model=cost_model,
-        )
-    elapsed_ms = (time.perf_counter() - start) * 1000
-
-    assert elapsed_ms / 200 < 1.0
+        ),
+        budget_ms=1.0,
+        batch=200,
+        label="simulate_fill avg",
+    )
