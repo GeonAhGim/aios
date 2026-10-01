@@ -16,7 +16,6 @@ deepen, task-3356) — 중복 대신 여기서는 교차 참조만 남긴다."""
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -36,6 +35,7 @@ from src.foundation.backtest.application.run_backtest import (
     run_backtest,
 )
 from src.foundation.backtest.domain.models import BacktestConfig, CostModel
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
@@ -187,38 +187,54 @@ def test_insufficient_bars_raises_backtest_run_error_with_metrics_counter() -> N
     )
 
 
-def test_throughput_linear_scaling_1k_vs_10k_bars() -> None:
-    """스케일링 단언: 10,000 bar가 1,000 bar 대비 10배보다 적게 걸려야 한다(선형).
-    상수 오버헤드가 크지 않다는 전제 하에 — 10배가 8배 미만이면 선형으로 간주한다."""
+def test_throughput_linear_scaling_1k_vs_10k_bars(perf_budget: PerfBudget) -> None:
+    """스케일링 단언(CPU 시간 기준): 10,000 bar가 1,000 bar 대비 100배보다
+    적게 걸려야 한다(상수 오버헤드가 지배적이지 않음 확인).
+
+    task-10653(CTO 진단 2026-10-01, full CI 30efe5b6): 원래 `time.perf_counter()`
+    벽시계 두 번을 그대로 나눈 비율을 단언했다 — 워커 다수 + 다른 프로세스가
+    같이 도는 호스트에서 OS 스케줄러가 두 실행 중 한쪽만 선점하면 비율이 매
+    실행마다 달라져 부하 상태에서 간헐 적색이 났다. `perf_budget.best_of`로
+    `time.process_time()`(이 프로세스의 CPU 시간, best-of-5)로 바꿔 다른
+    프로세스가 코어를 점유한 대기 시간이 섞이지 않게 한다. 1,000 bar 단일
+    실행은 Windows `time.process_time()` 분해능(~15.6ms 틱) 아래로 떨어질 수
+    있어 `batch=4`로 여러 번 묶어 틱당 오차를 줄인다(PerfBudget.sample 참조,
+    tests/conftest.py)."""
     base_cfg = _config()
     base_fsm = _never_signals_fsm_config()
-    base_spy = _SpyMetrics()
+    bars_1k = _synthetic_bars(1000)
+    bars_10k = _synthetic_bars(10000)
 
-    wall_1k = time.perf_counter()
-    run_backtest(
-        base_cfg,
-        base_fsm,
-        _synthetic_bars(1000),
-        indicator_service=_FakePriceIndicatorService(),
-        metrics=base_spy,
+    sample_1k = perf_budget.best_of(
+        lambda: run_backtest(
+            base_cfg,
+            base_fsm,
+            bars_1k,
+            indicator_service=_FakePriceIndicatorService(),
+            metrics=_SpyMetrics(),
+        ),
+        n=5,
+        warmup=1,
+        batch=4,
     )
-    wall_1k = time.perf_counter() - wall_1k
-
-    wall_10k = time.perf_counter()
-    run_backtest(
-        base_cfg,
-        base_fsm,
-        _synthetic_bars(10000),
-        indicator_service=_FakePriceIndicatorService(),
-        metrics=base_spy,
+    sample_10k = perf_budget.best_of(
+        lambda: run_backtest(
+            base_cfg,
+            base_fsm,
+            bars_10k,
+            indicator_service=_FakePriceIndicatorService(),
+            metrics=_SpyMetrics(),
+        ),
+        n=5,
+        warmup=1,
     )
-    wall_10k = time.perf_counter() - wall_10k
 
-    ratio = wall_10k / wall_1k if wall_1k > 0 else float("inf")
+    ratio = sample_10k.cpu_ms / sample_1k.cpu_ms if sample_1k.cpu_ms > 0 else float("inf")
     # window 재구축이 O(n²)이므로 선형이 아님 — 실제 측정치 기준으로
     # 100배 미만이면 상수 오버헤드가 지배적이지 않음
     assert ratio < 100.0, (
-        f"10k/1k 처리량 비 {ratio:.1f}x — 상수 오버헤드가 지배적이지 않아야 함(100배 미만)"
+        f"10k/1k 처리량 비 {ratio:.1f}x (cpu_ms 10k={sample_10k.cpu_ms:.3f} "
+        f"1k={sample_1k.cpu_ms:.3f}) — 상수 오버헤드가 지배적이지 않아야 함(100배 미만)"
     )
 
 
