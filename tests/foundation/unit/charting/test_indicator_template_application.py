@@ -16,7 +16,6 @@ scope for this leaf."""
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -37,6 +36,7 @@ from src.foundation.charting.application.errors import (
 )
 from src.foundation.charting.application.get_indicator_template import get_indicator_template
 from src.foundation.charting.domain.models import ChartIndicatorTemplate
+from tests.conftest import PerfBudget
 
 
 @dataclass
@@ -186,10 +186,14 @@ async def test_gate_red_repro_tenant_ownership_guard_is_load_bearing(
 
 
 @pytest.mark.perf
-def test_indicator_template_to_view_perf_budget() -> None:
+def test_indicator_template_to_view_perf_budget(perf_budget: PerfBudget) -> None:
     """`list_indicator_templates`의 응답 경로는 조회된 각 행을 매번 뷰로
     변환한다 — 그 변환 자체가 서버 지연을 지배하지 않는다는 상한을
-    고정한다(2,000회 <300ms, 로컬 CI 잡음 여유 포함)."""
+    고정한다(2,000회 <300ms, 로컬 CI 잡음 여유 포함).
+
+    task-10956: raw `time.perf_counter()`를 `perf_budget`(CPU 시간 기준)로
+    전환 — 워커 다수·로컬 LLM 동시 실행 호스트에서 wall-clock이 다른
+    프로세스에 코어를 뺏겨 대기한 시간이 섞이지 않게 한다."""
     now = datetime.now(timezone.utc)
     template = ChartIndicatorTemplate(
         id=uuid4(),
@@ -209,9 +213,8 @@ def test_indicator_template_to_view_perf_budget() -> None:
         updated_at=now,
     )
 
-    start = time.perf_counter()
-    for _ in range(2_000):
-        indicator_template_to_view(template)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-
-    assert elapsed_ms < 300, f"indicator_template_to_view() too slow: {elapsed_ms:.1f}ms/2000 calls"
+    perf_budget.assert_within(
+        lambda: [indicator_template_to_view(template) for _ in range(2_000)],
+        budget_ms=300,
+        label="indicator_template_to_view 2,000회 — 예산 300ms",
+    )
