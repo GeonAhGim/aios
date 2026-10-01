@@ -1,34 +1,35 @@
-"""14번 — 전략 편집기 API 라우터 (FD-14.1~14.4).
+"""Router 14 — Strategy Builder API (FD-14.1~FD-14.4).
 
-Spec: 기능설계문서_v1.20.md#FD-14.1~FD-14.4, 16_backend_signatures.md §16.4
+Spec: functional_spec_v1.20.md#FD-14.1~FD-14.4, 16_backend_signatures.md §16.4
 
-편차 1: §16.4 Draft는 조건 1개짜리 단순 스키마를 가정했지만, 실제
-StrategyCreateRequest는 이미 완성된 ConditionCompiler/PreviewCalculator
-서비스 계약(리스트+AND/OR 결합)을 그대로 따른다(schemas/strategy_builder.py
-참조).
+Deviation 1: §16.4 Draft assumed a single-condition simple schema, but the actual
+StrategyCreateRequest follows the already-implemented ConditionCompiler/PreviewCalculator
+service contract (list + AND/OR composition) as-is (see schemas/strategy_builder.py).
 
-편차 2: FD-14.4 본문이 "입력: strategy_id 없음(저장 전 임시 계산)"이라고
-명시하는데 §16.4 Draft는 `GET /strategies/{strategy_id}/preview`로
-스케치해 서로 모순된다 — FD-14.4 본문(더 구체적인 처리단계 서술)을
-따라 `POST /preview`로 구현하고 strategy_id를 받지 않는다.
+Deviation 2: FD-14.4 states "input: no strategy_id (temporary calculation before save)",
+yet §16.4 Draft sketches `GET /strategies/{strategy_id}/preview` — a contradiction.
+Following FD-14.4's more detailed processing steps, this implements `POST /preview`
+and does not accept strategy_id.
 
-편차 3(의도적 축소): 이미 구현된 StrategyBuilderService.transition_lifecycle()을
-이 라우터에 노출하지 않는다 — 백테스트/검증/스트레스테스트/Paper
-Trading 파이프라인(FD-9.3 등, 아직 미구현)이 자동으로 호출해야 할
-전이를 사용자가 HTTP로 직접 호출하면 본인 전략을 셀프 승인해 9.1
-생애주기 강제를 무력화하는 구멍이 생긴다. 그 파이프라인들이 생기면
-그때 내부 호출 경로로 연결한다.
+Deviation 3 (intentional reduction): The already-implemented
+StrategyBuilderService.transition_lifecycle() is not exposed via this router — if users
+could call transitions via HTTP directly, they could self-approve their own strategies,
+creating a loophole that neutralizes the lifecycle enforcement in 9.1. The pipeline
+(backtest/validation/stress-test/Paper Trading, FD-9.3, etc., not yet implemented)
+should automatically invoke these transitions when it exists; at that point, wire
+to internal call paths.
 
-PLT-18 — raw `HTTPException` raise를 전부 도메인 예외로 이관했다(§9
-PLT-17~21). `get_strategy()`가 던지는 "존재하지 않음" 사유는
-`StrategyNotFoundError`(strategy_builder_service.py, `StrategyLifecycleError`
-서브클래스)로 분리했다 — 같은 `StrategyLifecycleError`를 `create_strategy`
-(저장 거부, 400)와 `get_strategy`(조회 대상 없음, 404) 양쪽에서 던지면
-exception_mapping.py의 타입 기반 EXCEPTION_MAP이 상태코드를 하나로만
-고를 수 없기 때문이다. `PromptGenerationUnavailableError`(501)는
-STATUS_OVERRIDE로 상태코드만 개별 지정한다(marketplace.py 모듈
-docstring과 동일 근거 — 501에 대응하는 새 ErrorCode를 만들지 않는다).
+PLT-18 — Migrated all raw `HTTPException` raises to domain exceptions (§9
+PLT-17~21). The "not found" reason from `get_strategy()` is separated into
+`StrategyNotFoundError`(strategy_builder_service.py, a `StrategyLifecycleError`
+subclass) — using the same `StrategyLifecycleError` for both `create_strategy`
+(save rejection, 400) and `get_strategy`(target not found, 404) would leave
+exception_mapping.py's type-based EXCEPTION_MAP unable to choose a single status code.
+`PromptGenerationUnavailableError`(501) specifies only the status code via
+STATUS_OVERRIDE (same rationale as marketplace.py module
+docstring — no new ErrorCode for 501).
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status
@@ -108,11 +109,11 @@ async def get_candles(
     user: User = Depends(get_current_user),
     resolver: CredentialResolver = Depends(get_credential_resolver),
 ) -> list[CandleResponse]:
-    """편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): compute_indicator/
-    preview는 서버 내부에서만 캔들을 조회하고 지표값·신호만 반환한다 —
-    프론트엔드가 실제 캔들스틱 차트(가격 자체)를 그릴 방법이 없었다.
-    같은 CredentialResolver 패턴을 그대로 재사용해 원시 OHLCV를 그대로
-    반환한다(신규 계산 로직 없음)."""
+    """Deviation (2026-09-01, gap discovered after app assembly): compute_indicator/
+    preview only fetch candles server-side and return indicator values/signals —
+    the frontend had no way to render actual candlestick charts (price data itself).
+    Reuses the same CredentialResolver pattern to return raw OHLCV as-is
+    (no new computation logic)."""
     adapter = await resolver.get_adapter(user.user_id, exchange)
     candles = await adapter.get_ohlcv(symbol, timeframe, limit=limit)
     return [to_candle_response(c) for c in candles]
