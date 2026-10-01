@@ -64,7 +64,7 @@ class RiskProfileService:
                 "SELECT risk_profile FROM users WHERE user_id = $1", user_id
             )
             if existing is None:
-                raise RiskProfileError("존재하지 않는 사용자입니다.")
+                raise RiskProfileError("User not found.")
             previous_profile = existing["risk_profile"]
 
             is_higher_risk = (
