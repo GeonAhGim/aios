@@ -255,6 +255,32 @@ def test_query_filter_defaults_to_now() -> None:
     assert diff < 1
 
 
+def test_query_filter_as_of_now_uses_injected_clock_deterministically() -> None:
+    """QueryFilter.as_of_now resolves via the injected `clock` callable, not
+    a fresh `datetime.now()` read each call -- fixing the clock makes
+    `as_of_now` deterministic (task-10468, F4: PIT auto-bind non-determinism)."""
+    fixed = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    f = QueryFilter(clock=lambda: fixed)
+    assert f.as_of_now == fixed
+    assert f.as_of_now == f.as_of_now
+
+
+def test_search_as_of_uses_injected_clock_deterministically() -> None:
+    """search() omitting `as_of` resolves via the injected `clock`, not the
+    real wall clock -- same inputs + same fixed clock => same result set
+    across repeated calls (point-in-time query determinism)."""
+    fixed = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    items = (
+        _item(known_at=fixed - timedelta(days=1)),
+        _item(known_at=fixed + timedelta(days=1)),
+    )
+    result_1 = search(items, clock=lambda: fixed)
+    result_2 = search(items, clock=lambda: fixed)
+    assert result_1 == result_2
+    assert len(result_1) == 1
+    assert result_1[0].known_at == fixed - timedelta(days=1)
+
+
 def test_query_filter_with_values() -> None:
     """QueryFilter preserves provided values."""
     f = QueryFilter(

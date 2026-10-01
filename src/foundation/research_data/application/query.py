@@ -21,7 +21,7 @@ time-comparison logic (RD-2 DoD (d), RD-3 DoD (d)).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 
 from src.core.bitemporal import BitemporalRecord
@@ -29,6 +29,15 @@ from src.core.bitemporal import as_of as _bitemporal_as_of
 from src.foundation.research_data.contracts.v1 import ResearchItem
 
 __all__ = ["QueryFilter", "search"]
+
+
+def _default_clock() -> datetime:
+    """Wall clock used when no `clock` override is injected (production
+    default — unchanged behaviour). Tests inject a fixed `clock` callable
+    instead of patching `datetime.now`, mirroring the existing
+    `clock: Callable[[], float] = time.monotonic` pattern in
+    `src/core/rate_limit/limiter.py`."""
+    return datetime.now(timezone.utc)
 
 
 class QueryFilter:
@@ -45,18 +54,22 @@ class QueryFilter:
         kinds: Sequence[str] | None = None,
         span: Sequence[str] | None = None,
         as_of: datetime | None = None,
+        clock: Callable[[], datetime] = _default_clock,
     ) -> None:
         self.instruments = tuple(instruments) if instruments else None
         self.kinds = tuple(kinds) if kinds else None
         self.span = tuple(span) if span else None
         self.as_of = as_of
+        self._clock = clock
 
     @property
     def as_of_now(self) -> datetime:
-        """Return `as_of` if set, otherwise current UTC time."""
+        """Return `as_of` if set, otherwise the injected clock's current time
+        (defaults to the real UTC wall clock; tests inject a fixed `clock`
+        for deterministic PIT queries)."""
         if self.as_of is not None:
             return self.as_of
-        return datetime.now(timezone.utc)
+        return self._clock()
 
 
 def _item_to_record(item: ResearchItem) -> BitemporalRecord[ResearchItem]:
@@ -84,6 +97,7 @@ def search(
     kinds: Sequence[str] | None = None,
     span: Sequence[datetime] | None = None,
     as_of: datetime | None = None,
+    clock: Callable[[], datetime] = _default_clock,
 ) -> tuple[ResearchItem, ...]:
     """Query research items with an `as_of` point-in-time filter.
 
@@ -101,7 +115,11 @@ def search(
         `(start, end)` range (both inclusive).
     as_of:
         Point-in-time coordinate. Items with `known_at > as_of` are
-        excluded (RD-A1). When omitted, uses the current UTC time.
+        excluded (RD-A1). When omitted, uses `clock()`.
+    clock:
+        Injectable clock, called only when `as_of` is omitted. Defaults to
+        the real UTC wall clock (production behaviour unchanged); tests
+        inject a fixed callable for deterministic PIT queries.
 
     Returns
     -------
@@ -115,7 +133,7 @@ def search(
         If `as_of` is a naive datetime (tzinfo is None).
     """
     # Resolve as_of to a concrete value
-    probe = as_of if as_of is not None else datetime.now(timezone.utc)
+    probe = as_of if as_of is not None else clock()
 
     # Validate tz-awareness
     if probe.tzinfo is None:
