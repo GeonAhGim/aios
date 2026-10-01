@@ -1,43 +1,55 @@
-"""LB-17 — positions 스케줄러: 마크(Draft 10s)·대사(Draft 60s)·
-NAV(세션 마감 +5m) 주기 실행.
+"""LB-17 — positions scheduler: runs mark (Draft 10s), reconcile
+(Draft 60s), and NAV (session close +5m) cycles.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.3, §7, §9.3 LB-17.
-간격 값은 새로 만들지 않고 §2.3 `application/scheduler.py` 행의 Draft
-숫자를 그대로 쓴다.
+The interval values are not invented here; they are taken verbatim from the
+Draft numbers in the §2.3 `application/scheduler.py` row.
 
-편차: 명세 표는 자유 함수 `run_positions_scheduler(app_state, *, stop)`로
-적지만, 이미 병합된 같은 계층의 스케줄러 셋(`execution_loop`, `ledger`,
-`market_data`)이 전부 클래스 + `run_forever()` 메서드 패턴이라 그쪽을
-따른다(`market_data/application/scheduler.py`의 같은 판단, task-712 decision).
+Deviation: the spec table writes this as a free function
+`run_positions_scheduler(app_state, *, stop)`, but every already-merged
+scheduler at this same layer (`execution_loop`, `ledger`, `market_data`)
+uses the class + `run_forever()` method pattern, so this follows that
+instead (same call as `market_data/application/scheduler.py`, task-712
+decision).
 
-계좌 단위 예외 격리: 세 단계(mark/reconcile/nav) 전부 계좌 하나의 실패를
-잡아 실패 카운터 메트릭(`POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL`)만
-올리고 다음 계좌로 진행한다 — 한 계좌의 예외가 사이클 전체를 막지 않는다
-(§9 LB-17 DoD, `reconcile_provider.py`의 계좌별 독립 호출과 같은 원칙).
+Per-account exception isolation: all three stages (mark/reconcile/nav)
+catch a single account's failure, only bump the failure counter metric
+(`POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL`), and move on to the next
+account — one account's exception never blocks the whole cycle (§9 LB-17
+DoD, same principle as the per-account independent calls in
+`reconcile_provider.py`).
 
-일별 NAV 롤포워드(realized/unrealized_delta/funding/fees/flows)를 저널에서
-집계하는 로직은 아직 없다 — `compute_daily_nav.py` 모듈독스트링이 "다음
-리프가 발명하지 않도록" 남겨 둔 부분(task-714 decision)이고, 이 스케줄러도
-새로 발명하지 않는다. 대신 `compute_daily_nav`의 `CashSource`와 같은 방식으로
-`DailyRollForward`를 호출자가 주입하게 한다 — `TrackedAccount.roll_forward`가
-없는 계좌는 NAV 단계를 건너뛴다. 운영 배선(저널 집계 구현·계좌 목록·거래소
-연결)은 §10 후속 과제로 남는다: `main.py`는 `tracked=()`로 배선해 이
-스케줄러가 실제로는 아무 계좌도 처리하지 않는다(`market_data`
-`MarketDataQualityScheduler`의 `watched=()` 선례와 동일, LA-18 task-712).
+The logic to aggregate the daily NAV roll-forward
+(realized/unrealized_delta/funding/fees/flows) from the journal does not
+exist yet — `compute_daily_nav.py`'s module docstring deliberately leaves
+this for "the next leaf to invent" (task-714 decision), and this scheduler
+does not invent it either. Instead, following the same approach as
+`compute_daily_nav`'s `CashSource`, the caller injects a `DailyRollForward`
+— an account without `TrackedAccount.roll_forward` simply skips the NAV
+stage. Operational wiring (the journal-aggregation implementation, the
+account list, exchange connections) is left as a §10 follow-up: `main.py`
+wires this with `tracked=()`, so this scheduler currently processes no
+accounts at all (same precedent as `market_data`'s
+`MarketDataQualityScheduler` using `watched=()`, LA-18 task-712).
 
-`marks`/`fx`/`nav_repo`/`cash`/`provider`/`recon`은 그래서 전부 선택
-인자(기본값 `None`)다 — `tracked=()`면 어느 사이클도 이 값들을 참조하지
-않으므로 `main.py`가 아직 존재하지 않는 어댑터(`CashSource`, `main.py`
-자체에 실제 계좌·거래소 연결 레지스트리)를 억지로 만들어 넘길 필요가
-없다. `tracked`가 실제로 채워지면 각 사이클 진입 시 `assert`로 필요한
-의존성이 빠졌는지 바로 드러난다(조용한 `AttributeError` 대신).
+That is why `marks`/`fx`/`nav_repo`/`cash`/`provider`/`recon` are all
+optional arguments (default `None`) — with `tracked=()` no cycle ever
+references these values, so there is no need to force `main.py` to build
+and pass adapters that do not exist yet (`CashSource`, or a real
+account/exchange connection registry inside `main.py` itself). Once
+`tracked` is actually populated, an `assert` at the start of each cycle
+immediately surfaces any missing dependency (instead of a silent
+`AttributeError`).
 
-NAV는 매 주기(폴링 간격 `NAV_POLL_INTERVAL_SECONDS`) `nav_repo.get`으로
-그날 이미 계산됐는지 먼저 확인해 멱등하게 건너뛴다 — 하루 한 번만 의미
-있는 이벤트를 정확한 시각에 깨우는 스케줄 대신, 이미 있는 값이면 다시
-계산하지 않는 폴링으로 단순화했다(`compute_daily_nav` 자체도 같은 날
-재계산에 `source_hash` 비교로 멱등하므로 이중 방어).
+NAV uses `nav_repo.get` on every cycle (poll interval
+`NAV_POLL_INTERVAL_SECONDS`) to check whether it has already been computed
+for the day, and skips idempotently if so — instead of a schedule that
+wakes precisely at an event meaningful only once a day, this is simplified
+to polling that skips recomputation when a value already exists
+(`compute_daily_nav` itself is also idempotent for same-day recomputation
+via a `source_hash` comparison, so this is defense in depth).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -98,16 +110,18 @@ class RollForwardValues(NamedTuple):
 
 @runtime_checkable
 class DailyRollForward(Protocol):
-    """일별 NAV 롤포워드 입력(저널 집계, 아직 구현 없음 — 모듈독스트링
-    참조). 호출자가 이미 계산해 둔 값을 준다는 계약만 표현한다."""
+    """Daily NAV roll-forward input (journal aggregation, not implemented
+    yet — see module docstring). Only expresses the contract that the
+    caller provides already-computed values."""
 
     async def roll_forward(self, account_id: UUID, at: datetime) -> RollForwardValues: ...
 
 
 @dataclass(frozen=True, slots=True)
 class TrackedAccount:
-    """스케줄러가 매 주기 처리할 계좌 하나. `connection_id`가 없으면 대사
-    단계를, `roll_forward`가 없으면 NAV 단계를 건너뛴다."""
+    """One account the scheduler processes each cycle. Skips the reconcile
+    stage if `connection_id` is absent, and the NAV stage if `roll_forward`
+    is absent."""
 
     tenant_id: UUID
     account_id: UUID
@@ -166,21 +180,28 @@ class PositionsScheduler:
         report.failed[f"{account_id}:{stage}"] = f"{type(exc).__name__}: {exc}"
         self._registry.counter(POSITIONS_SCHEDULER_CYCLE_FAILURE_COUNT_TOTAL).inc()
         logger.exception(
-            "positions_scheduler: account_id=%s stage=%s 실패 — 다음 주기에 재시도",
-            account_id, stage,
+            "positions_scheduler: account_id=%s stage=%s failed — will retry next cycle",
+            account_id,
+            stage,
         )
 
     async def run_mark_cycle(self) -> CycleReport:
         report = CycleReport()
         if not self._tracked:
             return report
-        assert self._marks is not None and self._fx is not None, "marks/fx 미배선(tracked 있음)"
+        assert self._marks is not None and self._fx is not None, (
+            "marks/fx not wired (tracked is non-empty)"
+        )
         for target in self._tracked:
             try:
                 await mark_positions(
-                    target.tenant_id, target.account_id,
-                    snapshots=self._snapshots, marks=self._marks, fx=self._fx,
-                    pool=self._pool, clock=self._clock,
+                    target.tenant_id,
+                    target.account_id,
+                    snapshots=self._snapshots,
+                    marks=self._marks,
+                    fx=self._fx,
+                    pool=self._pool,
+                    clock=self._clock,
                 )
             except Exception as exc:
                 self._fail(report, target.account_id, "mark", exc)
@@ -194,16 +215,20 @@ class PositionsScheduler:
         if not self._tracked:
             return report
         assert self._provider is not None and self._recon is not None, (
-            "provider/recon 미배선(tracked 있음)"
+            "provider/recon not wired (tracked is non-empty)"
         )
         for target in self._tracked:
             if target.connection_id is None:
                 continue
             try:
                 await reconcile_account(
-                    target.tenant_id, target.account_id,
-                    connection_id=target.connection_id, snapshots=self._snapshots,
-                    provider=self._provider, recon=self._recon, pool=self._pool,
+                    target.tenant_id,
+                    target.account_id,
+                    connection_id=target.connection_id,
+                    snapshots=self._snapshots,
+                    provider=self._provider,
+                    recon=self._recon,
+                    pool=self._pool,
                     registry=self._registry,
                 )
             except Exception as exc:
@@ -216,9 +241,9 @@ class PositionsScheduler:
         report = CycleReport()
         if not self._tracked:
             return report
-        assert (
-            self._nav_repo is not None and self._cash is not None and self._fx is not None
-        ), "nav_repo/cash/fx 미배선(tracked 있음)"
+        assert self._nav_repo is not None and self._cash is not None and self._fx is not None, (
+            "nav_repo/cash/fx not wired (tracked is non-empty)"
+        )
         now = self._clock()
         for target in self._tracked:
             if target.roll_forward is None:
@@ -246,8 +271,13 @@ class PositionsScheduler:
                     trace_id=uuid4(),
                 )
                 await compute_daily_nav(
-                    cmd, snapshots=self._snapshots, cash=self._cash, nav_repo=self._nav_repo,
-                    calendar=target.calendar, fx=self._fx, pool=self._pool,
+                    cmd,
+                    snapshots=self._snapshots,
+                    cash=self._cash,
+                    nav_repo=self._nav_repo,
+                    calendar=target.calendar,
+                    fx=self._fx,
+                    pool=self._pool,
                 )
             except Exception as exc:
                 self._fail(report, target.account_id, "nav", exc)
@@ -261,7 +291,9 @@ class PositionsScheduler:
             try:
                 await self.run_mark_cycle()
             except Exception:
-                logger.exception("positions_scheduler: mark 사이클 전체 실패 — 다음 주기에 재시도")
+                logger.exception(
+                    "positions_scheduler: mark cycle failed entirely — will retry next cycle"
+                )
 
     async def run_reconcile_forever(self) -> None:
         while True:
@@ -270,7 +302,7 @@ class PositionsScheduler:
                 await self.run_reconcile_cycle()
             except Exception:
                 logger.exception(
-                    "positions_scheduler: reconcile 사이클 전체 실패 — 다음 주기에 재시도"
+                    "positions_scheduler: reconcile cycle failed entirely — will retry next cycle"
                 )
 
     async def run_nav_forever(self) -> None:
@@ -279,4 +311,6 @@ class PositionsScheduler:
             try:
                 await self.run_nav_cycle()
             except Exception:
-                logger.exception("positions_scheduler: nav 사이클 전체 실패 — 다음 주기에 재시도")
+                logger.exception(
+                    "positions_scheduler: nav cycle failed entirely — will retry next cycle"
+                )
