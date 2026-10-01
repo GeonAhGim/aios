@@ -12,6 +12,7 @@ test_openapi_compat_actions.py(실패주입·성능·서브프로세스).
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -236,3 +237,106 @@ def test_self_referential_ref_cycle_terminates_without_error():
     current = json.loads(json.dumps(baseline))
 
     assert find_violations(baseline, current) == []
+
+
+# --- negative: 불변식 위반 입력을 명시적으로 거부 ----------------------------
+# task-10266 DEEPEN: 아래는 "호환성 깨짐"을 놓치면 안 되는 케이스들 —
+# find_violations가 각 사례를 실제로 FAIL(비어있지 않은 목록)로 판정해야 한다.
+
+
+def test_path_removed_is_rejected():
+    baseline = _login_bundle(_STR)
+    current = _schema(paths={}, schemas=baseline["components"]["schemas"])
+
+    violations = find_violations(baseline, current)
+
+    assert any("path 제거" in v and "/login" in v for v in violations)
+
+
+def test_method_removed_is_rejected():
+    baseline = _login_bundle(_STR)
+    current = _schema(paths={"/login": {}}, schemas=baseline["components"]["schemas"])
+
+    violations = find_violations(baseline, current)
+
+    assert any("method 제거" in v and "POST /login" in v for v in violations)
+
+
+def test_request_body_removed_is_rejected():
+    baseline = _login_bundle(_STR)
+    current = json.loads(json.dumps(baseline))
+    del current["paths"]["/login"]["post"]["requestBody"]
+
+    violations = find_violations(baseline, current)
+
+    assert any("request body 제거" in v and "/login" in v for v in violations)
+
+
+def test_response_body_removed_is_rejected():
+    baseline = _login_bundle(_STR)
+    current = json.loads(json.dumps(baseline))
+    del current["paths"]["/login"]["post"]["responses"]["200"]["content"]
+
+    violations = find_violations(baseline, current)
+
+    assert any("response body 제거" in v and "/login" in v for v in violations)
+
+
+def test_request_required_field_added_is_rejected():
+    """요청에 새 required 필드를 추가하면 기존 클라이언트가 깨진다 — FAIL."""
+    baseline = _login_bundle(_STR)
+    current = json.loads(json.dumps(baseline))
+    current["components"]["schemas"]["Login"]["required"] = ["otp"]
+
+    violations = find_violations(baseline, current)
+
+    assert any("request required 추가" in v and "otp" in v for v in violations)
+
+
+# --- 실패주입: 외부 의존성(서브프로세스/파일) 실패 시 fail-closed -------------
+
+
+def test_main_missing_baseline_file_fails_closed(tmp_path, capsys):
+    missing = tmp_path / "does-not-exist.json"
+
+    exit_code = main(["--baseline", str(missing)])
+
+    out = capsys.readouterr().out
+    assert exit_code == 1 and "베이스라인 스냅샷 없음" in out
+
+
+def test_main_export_current_subprocess_failure_propagates(tmp_path, monkeypatch):
+    """`export_openapi.py` 서브프로세스가 비정상 종료하면 조용히 넘어가지 않고
+    예외가 전파돼야 한다(성공으로 위장 금지, fail-closed)."""
+    import subprocess as subprocess_module
+
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(_login_bundle(_STR)), encoding="utf-8")
+
+    def _boom(*args, **kwargs):
+        raise subprocess_module.CalledProcessError(returncode=1, cmd=args[0] if args else [])
+
+    monkeypatch.setattr(subprocess_module, "run", _boom)
+
+    with pytest.raises(subprocess_module.CalledProcessError):
+        main(["--baseline", str(baseline_path)])
+
+
+# --- 성능 단언 ---------------------------------------------------------------
+
+
+def test_identical_v1_snapshot_perf_budget():
+    """실 스냅샷 자기비교가 예산(1초) 내에 끝나야 한다 — PLT-16 CI 핫패스."""
+    from pathlib import Path
+
+    baseline_path = Path(__file__).resolve().parents[3] / "contracts" / "openapi" / "v1.json"
+    if not baseline_path.exists():
+        return  # 스냅샷이 없는 환경에서는 스킵
+    snapshot = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+    start = time.perf_counter()
+    violations = find_violations(snapshot, snapshot)
+    elapsed = time.perf_counter() - start
+
+    assert violations == []
+    assert elapsed < 1.0, f"find_violations too slow: {elapsed:.3f}s"
