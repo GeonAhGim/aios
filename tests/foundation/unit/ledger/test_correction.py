@@ -5,14 +5,16 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-11.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
 
 from src.data.models.base import Currency
 from src.foundation.ledger.contracts.v1 import PostingLine, Side
-from src.foundation.ledger.domain import balance_rules
+from src.foundation.ledger.domain import balance_rules, correction
 from src.foundation.ledger.domain.correction import (
     BlankReasonError,
     EmptyEntryError,
@@ -150,6 +152,94 @@ def test_build_correction_propagates_unbalanced_corrected_lines() -> None:
             corrected_lines=unbalanced,
             reason="bad repost",
         )
+
+
+# ---- 실패 주입(D2): 하류 의존(check_balanced)이 예외를 던지면 삼키지 않고 전파한다 ----
+
+
+def test_failure_injection_check_balanced_error_propagates_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """build_correction은 reversal_lines(내부에서 check_balanced 호출)에
+    의존한다. 그 의존이 예상 밖 예외(LC-3 구현 버그 등)를 던지면 조용히
+    삼키고 "정정 성공"으로 위장해선 안 된다 — fail-closed로 그대로
+    전파해야 한다."""
+    failure = RuntimeError("injected balance_rules.check_balanced failure")
+    monkeypatch.setattr(correction.balance_rules, "check_balanced", Mock(side_effect=failure))
+
+    with pytest.raises(RuntimeError, match="injected balance_rules.check_balanced failure"):
+        build_correction(
+            original_entry_id=uuid4(),
+            original_lines=_lines(amount=Decimal("100.00")),
+            corrected_lines=_lines(amount=Decimal("150.00")),
+            reason="dependency failure injection",
+        )
+
+
+# ---- 게이트 적색 재현(D2): digest 기반 no-op 판정을 합계 비교로 약화하면 놓친다 ----
+
+
+def test_gate_red_noop_check_catches_account_swap_that_naive_sum_check_misses() -> None:
+    """게이트 적색 재현: 만약 `NoOpCorrectionError` 판정이 (지금처럼)
+    `lines_digest` 전체 비교가 아니라 "차/대변 합계만 같으면 no-op"이라는
+    순진한 비교로 약화된다면, 금액은 그대로 두고 수취 계좌만 바꿔치기한
+    정정(오기재 계좌를 바로잡는 정당한 정정)을 "변경 없음"으로 오판해
+    `NoOpCorrectionError`를 던지며 막아버린다. 이 테스트가 적색이 된다는
+    것은 no-op 판정이 digest 전체 비교에서 합계만 보는 방식으로 후퇴했다는
+    뜻이다."""
+    original_id = uuid4()
+    amount = Decimal("100.00")
+    original = _lines(amount=amount)
+
+    corrected_wrong_account_fixed = [
+        original[0].model_copy(),
+        original[1].model_copy(update={"account_code": f"USER:{uuid4()}:AVAILABLE"}),
+    ]
+
+    def _side_totals(lines: list[PostingLine]) -> tuple[Decimal, Decimal]:
+        debit = sum((line.amount for line in lines if line.side is Side.DEBIT), Decimal("0"))
+        credit = sum((line.amount for line in lines if line.side is Side.CREDIT), Decimal("0"))
+        return debit, credit
+
+    # 합계만 보면 원본과 정정안이 동일해 "no-op"으로 오판할 상황을 구성했다.
+    assert _side_totals(original) == _side_totals(corrected_wrong_account_fixed)
+
+    result = build_correction(
+        original_entry_id=original_id,
+        original_lines=original,
+        corrected_lines=corrected_wrong_account_fixed,
+        reason="오기재 수취 계좌 정정",
+    )
+
+    assert result.repost == tuple(corrected_wrong_account_fixed)
+
+
+# ---- D3: 동시성 — 순수 함수가 공유 상태 없이 재진입 가능함을 증명 ----
+
+
+def test_adversarial_concurrent_build_correction_calls_do_not_cross_contaminate() -> None:
+    """D3 동시성 증빙: `build_correction`/`reversal_lines`는 모듈 수준 가변
+    상태를 갖지 않는 순수 함수여야 한다 — 여러 스레드가 서로 다른 입력으로
+    동시에 호출해도 각자의 결과가 섞이지 않아야 한다(한 스레드의 원본 금액이
+    다른 스레드의 결과에 새어 들어가면 숨은 공유 상태가 있다는 뜻)."""
+
+    def _build(amount: Decimal) -> Decimal:
+        entry_id = uuid4()
+        original = _lines(amount=amount)
+        corrected = _lines(amount=amount + Decimal("1.00"))
+        result = build_correction(
+            original_entry_id=entry_id,
+            original_lines=original,
+            corrected_lines=corrected,
+            reason=f"concurrent correction {amount}",
+        )
+        return result.repost[0].amount
+
+    amounts = [Decimal(n) for n in range(1, 33)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(_build, amounts))
+
+    assert results == [amount + Decimal("1.00") for amount in amounts]
 
 
 # ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701 DEEPEN 선례와 동일 패턴) ----
