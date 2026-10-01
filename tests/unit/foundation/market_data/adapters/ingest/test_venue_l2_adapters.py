@@ -265,13 +265,11 @@ async def test_upbit_fetch_snapshot_propagates_connect_error():
 
 
 @pytest.mark.perf
-def test_binance_parse_event_perf_budget():
+def test_binance_parse_event_perf_budget(perf_budget):
     """`parse_event` is a pure in-memory parse (no I/O) — 1000 calls must stay
     well under 100ms (budget table ADR-2026-09-09-C Decision 1, pure-function
     tier), guarding against an accidental synchronous I/O regression.
     """
-    import time
-
     adapter = BinanceL2Adapter()
     message = {
         "e": "depthUpdate",
@@ -282,8 +280,9 @@ def test_binance_parse_event_perf_budget():
         "b": [["10.0", "1"], ["9.5", "0"]],
         "a": [["10.5", "2"]],
     }
-    start = time.perf_counter()
-    for _ in range(1000):
-        adapter.parse_event(message)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.1
+
+    def _run() -> None:
+        for _ in range(1000):
+            adapter.parse_event(message)
+
+    perf_budget.assert_within(_run, budget_ms=100.0, label="binance parse_event x1000")

@@ -8,7 +8,6 @@ Spec: docs/specs/L4_product_experience_and_discovery_v1.0.md §8("테넌트 격�
 from __future__ import annotations
 
 import os
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -349,7 +348,7 @@ async def test_read_fields_pool_failure_propagates_fail_closed(
 
 @pytest.mark.perf
 async def test_read_fields_batched_lookup_perf_budget(
-    pool, field_source, batch_repo, hot_storage
+    pool, field_source, batch_repo, hot_storage, perf_budget
 ) -> None:
     # UTC-midnight truncation used to land on the wrong side of md_candle's
     # KST-anchored monthly partition boundary near month-end; use the actual
@@ -370,15 +369,17 @@ async def test_read_fields_batched_lookup_perf_budget(
             close=Decimal("12345.67"),
         )
 
-    started = time.perf_counter()
-    result = await field_source.read_fields(
-        instrument_ids_by_venue={Venue.KIS_KRX: instrument_ids},
-        field_names=frozenset({"close"}),
-        as_of=t0 + timedelta(days=1),
+    sample = await perf_budget.sample_async(
+        lambda: field_source.read_fields(
+            instrument_ids_by_venue={Venue.KIS_KRX: instrument_ids},
+            field_names=frozenset({"close"}),
+            as_of=t0 + timedelta(days=1),
+        )
     )
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    result = sample.result
 
     assert len(result) == 50
     # UX-6 batched-query budget (ADR-2026-09-09-C): one grouped DISTINCT ON
     # scan for 50 instruments must stay well under a per-request second.
-    assert elapsed_ms < 1000
+    budget_ms = 1000.0
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)

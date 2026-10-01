@@ -142,21 +142,20 @@ def test_ticker_upstream_validation_failure_is_not_swallowed(monkeypatch):
 
 
 @pytest.mark.perf
-def test_perf_construct_1000_tickers():
+def test_perf_construct_1000_tickers(perf_budget):
     """performance: constructing 1000 Ticker instances must stay under 200 ms."""
-    import time
 
-    start = time.perf_counter()
-    for i in range(1000):
-        Ticker(
-            symbol="BTC/USDT",
-            exchange="bitget",
-            price=Decimal(f"{i}.5"),
-            bid=Decimal(f"{i}.0"),
-            ask=Decimal(f"{i}.5"),
-            volume_24h=Decimal("1234.5"),
-            timestamp=datetime.now(timezone.utc),
-            source_type="primary",
-        )
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 200, f"Construction took {elapsed_ms:.1f}ms (budget: 200ms)"
+    def _run() -> None:
+        for i in range(1000):
+            Ticker(
+                symbol="BTC/USDT",
+                exchange="bitget",
+                price=Decimal(f"{i}.5"),
+                bid=Decimal(f"{i}.0"),
+                ask=Decimal(f"{i}.5"),
+                volume_24h=Decimal("1234.5"),
+                timestamp=datetime.now(timezone.utc),
+                source_type="primary",
+            )
+
+    perf_budget.assert_within(_run, budget_ms=200, label="construct 1000 Tickers")

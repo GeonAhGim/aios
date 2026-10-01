@@ -9,8 +9,6 @@ test_error_codes.py가 이 규칙을 강제한다.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 from starlette import status
 
@@ -194,11 +192,12 @@ def test_no_duplicate_http_status_for_different_codes():
 
 
 @pytest.mark.perf
-def test_perf_http_status_lookup_under_1ms():
+def test_perf_http_status_lookup_under_1ms(perf_budget):
     """HTTP_STATUS 조회가 1ms 이내여야 한다 — API 응답 지연에 영향 없어야 함."""
-    start = time.perf_counter()
-    for _ in range(1000):
-        for code in HTTP_STATUS:
-            _ = HTTP_STATUS[code]
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 100, f"1000회 조회에 {elapsed_ms:.1f}ms 소요 — 100ms 미만이어야 함"
+
+    def _run() -> None:
+        for _ in range(1000):
+            for code in HTTP_STATUS:
+                _ = HTTP_STATUS[code]
+
+    perf_budget.assert_within(_run, budget_ms=100, label="HTTP_STATUS 1000회 조회")

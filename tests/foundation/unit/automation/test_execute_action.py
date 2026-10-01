@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from uuid import uuid4
 
@@ -185,23 +184,24 @@ async def test_notifier_raising_exception_is_not_swallowed(tenant_id) -> None:
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_order_action_latency_budget(tenant_id) -> None:
+async def test_order_action_latency_budget(tenant_id, perf_budget) -> None:
     """성능 단언: fake 의존성만 쓰는 execute_action 1회 호출은 50ms 예산 내에서
     끝난다(순수 조율 로직에 I/O 지연이 섞이지 않았는지 회귀 감지)."""
     sink = FakeSink()
-    start = time.perf_counter()
-    result = await execute_action(
-        tenant_id=tenant_id,
-        rule_id=uuid4(),
-        action=OrderAction(symbol="005930", side=OrderSide.BUY, quantity=Decimal("1")),
-        trace_id=uuid4(),
-        gate=FakeGate(allow=True),
-        sink=sink,
-        notifier=FakeNotifier(),
+    sample = await perf_budget.sample_async(
+        lambda: execute_action(
+            tenant_id=tenant_id,
+            rule_id=uuid4(),
+            action=OrderAction(symbol="005930", side=OrderSide.BUY, quantity=Decimal("1")),
+            trace_id=uuid4(),
+            gate=FakeGate(allow=True),
+            sink=sink,
+            notifier=FakeNotifier(),
+        )
     )
-    elapsed = time.perf_counter() - start
-    assert result.executed is True
-    assert elapsed < 0.05
+    budget_ms = 50.0
+    assert sample.result.executed is True
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
 
 @pytest.mark.asyncio

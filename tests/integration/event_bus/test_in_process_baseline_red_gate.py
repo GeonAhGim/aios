@@ -9,7 +9,6 @@ red baseline이고, `test_redis_streams_event_bus.py::test_crash_then_replay_no_
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
 
@@ -158,12 +157,13 @@ async def test_in_process_bus_audit_sink_failure_does_not_rescue_lost_events():
 
 
 @pytest.mark.perf
-async def test_in_process_bus_crash_detection_perf_budget():
+async def test_in_process_bus_crash_detection_perf_budget(perf_budget):
     """perf — 이 red-gate 재현 자체가 CI 기본 스위트에 상시 포함되므로,
     시나리오 1회 실행이 예산(2000ms, xdist 코어 경합 감안) 안에 끝나야 한다
     (p99 budget, ADR-2026-09-09-C)."""
-    start = time.perf_counter()
-    processed = await _scenario()
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert processed == 0
-    assert elapsed_ms < 2000, f"red-gate scenario took {elapsed_ms:.1f}ms, budget=2000ms"
+    budget_ms = 2000.0
+    sample = await perf_budget.sample_async(_scenario)
+    assert sample.result == 0
+    assert sample.wall_ms < budget_ms, (
+        f"red-gate scenario: {perf_budget.describe(sample, budget_ms=budget_ms)}"
+    )

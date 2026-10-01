@@ -3,8 +3,6 @@
 Spec: AIOSproject 73_trust_core_l3_build_and_operational_specification_v1.0.md §3.1.
 """
 
-import time
-
 import pytest
 
 from src.foundation.trust.domain.models import MembershipRole, MembershipState
@@ -283,43 +281,47 @@ def test_role_can_rejects_unknown_action():
 
 
 @pytest.mark.perf
-def test_membership_transition_lookup_latency():
+def test_membership_transition_lookup_latency(perf_budget):
     """성능 단언: is_membership_transition_allowed는 딕셔너리 조회이므로
     10만 회 호출에 50ms 미만이어야 한다. 상태 전이 검사가 성능 병목이 되면
     실시간 리스크 트리거에 영향을 준다."""
     iterations = 100_000
-    t0 = time.perf_counter()
-    for _ in range(iterations):
-        is_membership_transition_allowed(
-            MembershipState.ACTIVE, MembershipState.SUSPENDED, actor_role=MembershipRole.ADMIN
-        )
-    elapsed = time.perf_counter() - t0
 
-    assert elapsed < 0.05, (
-        f"is_membership_transition_allowed 10만 회에 {elapsed:.4f}초 — 예산 0.05초 초과"
+    def _run() -> None:
+        for _ in range(iterations):
+            is_membership_transition_allowed(
+                MembershipState.ACTIVE, MembershipState.SUSPENDED, actor_role=MembershipRole.ADMIN
+            )
+
+    perf_budget.assert_within(
+        _run, budget_ms=50.0, label="is_membership_transition_allowed 10만 회 — 예산 0.05초"
     )
 
 
 @pytest.mark.perf
-def test_would_remove_last_owner_latency():
+def test_would_remove_last_owner_latency(perf_budget):
     """성능 단언: would_remove_last_owner는 단순 정수 비교이므로
     10만 회 호출에 20ms 미만이어야 한다."""
     iterations = 100_000
-    t0 = time.perf_counter()
-    for _ in range(iterations):
-        would_remove_last_owner(active_owners=1, target_is_owner=True, to=MembershipState.REVOKED)
-    elapsed = time.perf_counter() - t0
 
-    assert elapsed < 0.02, f"would_remove_last_owner 10만 회에 {elapsed:.4f}초 — 예산 0.02초 초과"
+    def _run() -> None:
+        for _ in range(iterations):
+            would_remove_last_owner(
+                active_owners=1, target_is_owner=True, to=MembershipState.REVOKED
+            )
+
+    perf_budget.assert_within(
+        _run, budget_ms=20.0, label="would_remove_last_owner 10만 회 — 예산 0.02초"
+    )
 
 
 @pytest.mark.perf
-def test_role_can_latency():
+def test_role_can_latency(perf_budget):
     """성능 단언: role_can은 집합 멤버십 검사이므로 10만 회 호출에 30ms 미만이어야 한다."""
     iterations = 100_000
-    t0 = time.perf_counter()
-    for _ in range(iterations):
-        role_can(MembershipRole.OWNER, "admin")
-    elapsed = time.perf_counter() - t0
 
-    assert elapsed < 0.03, f"role_can 10만 회에 {elapsed:.4f}초 — 예산 0.03초 초과"
+    def _run() -> None:
+        for _ in range(iterations):
+            role_can(MembershipRole.OWNER, "admin")
+
+    perf_budget.assert_within(_run, budget_ms=30.0, label="role_can 10만 회 — 예산 0.03초")

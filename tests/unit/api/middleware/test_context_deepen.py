@@ -1,6 +1,5 @@
 """PLT-05 middleware rejection and failure-injection regression tests."""
 
-import time
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
@@ -69,7 +68,7 @@ async def test_failure_injection_restores_outer_request_context(monkeypatch):
 
 
 @pytest.mark.perf
-async def test_request_id_middleware_p95_overhead():
+async def test_request_id_middleware_p95_overhead(perf_budget):
     """PLT platform spec: middleware p95 overhead below 1 ms."""
     middleware = RequestIdMiddleware(AsyncMock())
     request = Request(
@@ -88,11 +87,9 @@ async def test_request_id_middleware_p95_overhead():
         await middleware.dispatch(request, respond)
     samples = []
     for _ in range(1000):
-        started = time.perf_counter()
-        await respond(request)
-        baseline = time.perf_counter() - started
-        started = time.perf_counter()
-        response = await middleware.dispatch(request, respond)
-        samples.append(max(0.0, time.perf_counter() - started - baseline))
-        assert response.status_code == 204
-    assert sorted(samples)[949] < 0.001
+        baseline = await perf_budget.sample_async(lambda: respond(request))
+        measured = await perf_budget.sample_async(lambda: middleware.dispatch(request, respond))
+        samples.append(max(0.0, measured.wall_ms - baseline.wall_ms))
+        assert measured.result.status_code == 204
+    p95_ms = sorted(samples)[949]
+    assert p95_ms < 1.0, f"RequestIdMiddleware p95 overhead={p95_ms:.4f}ms budget<1.000ms"

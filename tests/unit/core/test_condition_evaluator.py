@@ -1,5 +1,4 @@
 import re
-import time
 
 import pytest
 
@@ -140,19 +139,23 @@ def test_crosses_above_prev_state_get_failure_propagates(
 
 
 @pytest.mark.perf
-def test_evaluate_stays_within_budget_for_repeated_calls(evaluator: ConditionEvaluator):
+def test_evaluate_stays_within_budget_for_repeated_calls(
+    evaluator: ConditionEvaluator, perf_budget
+):
     """수치 성능 단언(D2) — 조건식 재컴파일 없이 반복 평가되는 실행 루프
     경로이므로 호출당 비용이 정규식 매칭 수준에 머물러야 한다. O(n^2) 등으로
     회귀하면 이 단언이 실패한다."""
     market_state = {"RSI": 31.0, "SMA_timeperiod20": 45000.0}
     prev_state = {"RSI": 29.0, "SMA_timeperiod20": 44000.0}
     repeats = 500
-    start = time.perf_counter()
-    for _ in range(repeats):
-        evaluator.evaluate("RSI > 30 AND SMA_timeperiod20 < 46000", market_state, prev_state)
-        evaluator.evaluate("RSI CROSSES_ABOVE 30", market_state, prev_state)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    per_call_ms = elapsed_ms / (repeats * 2)
+
+    def _run() -> None:
+        for _ in range(repeats):
+            evaluator.evaluate("RSI > 30 AND SMA_timeperiod20 < 46000", market_state, prev_state)
+            evaluator.evaluate("RSI CROSSES_ABOVE 30", market_state, prev_state)
+
+    sample = perf_budget.best_of(_run)
+    per_call_ms = sample.cpu_ms / (repeats * 2)
     budget_ms = 1.0  # 순수 정규식 매칭 + dict 조회 — 1ms/call이면 넉넉한 여유치
     assert per_call_ms < budget_ms, (
         f"evaluate() averaged {per_call_ms:.4f}ms/call over {repeats * 2} calls, "

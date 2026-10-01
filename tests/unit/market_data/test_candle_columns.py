@@ -222,11 +222,9 @@ def test_to_candle_records_propagates_duration_return_type_error(
 
 
 @pytest.mark.perf
-def test_to_candle_records_performance_under_10k_rows() -> None:
+def test_to_candle_records_performance_under_10k_rows(perf_budget) -> None:
     """성능 단언: 10,000개 행을 to_candle_records로 변환하는 데
     100ms 미만이어야 한다(컬럼 기반 접근의 성능 목표)."""
-    import time
-
     n = 10_000
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     columns = CandleColumns(
@@ -240,9 +238,10 @@ def test_to_candle_records_performance_under_10k_rows() -> None:
     )
     key = _key()
 
-    start = time.perf_counter()
-    records = to_candle_records(columns, key)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    sample = perf_budget.assert_within(
+        lambda: to_candle_records(columns, key),
+        budget_ms=100,
+        label=f"to_candle_records({n} rows)",
+    )
 
-    assert len(records) == n
-    assert elapsed_ms < 100, f"to_candle_records({n} rows) took {elapsed_ms:.1f}ms (budget: 100ms)"
+    assert len(sample.result) == n

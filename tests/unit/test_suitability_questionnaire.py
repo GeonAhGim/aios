@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import pytest
 from pydantic import ValidationError
 
@@ -262,14 +260,12 @@ def test_evaluate_propagates_exception_from_investable_ratio(monkeypatch):
 
 
 @pytest.mark.perf
-def test_evaluate_completes_within_1ms():
+def test_evaluate_completes_within_1ms(perf_budget):
     """evaluate() call completes within 1ms — performance budget (task-10175)."""
     qa = SuitabilityQuestionnaire()
     ans = _answers()
     iterations = 1000
-    start = time.perf_counter()
-    for _ in range(iterations):
-        qa.evaluate(ans)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    avg_ms = elapsed_ms / iterations
-    assert avg_ms < 1.0, f"evaluate avg {avg_ms:.3f}ms > 1ms budget"
+    # batch=iterations: per-call average over 1000 consecutive calls
+    perf_budget.assert_within(
+        lambda: qa.evaluate(ans), budget_ms=1.0, batch=iterations, label="evaluate avg"
+    )

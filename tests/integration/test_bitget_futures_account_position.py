@@ -10,7 +10,6 @@ task-10257 DEEPEN — negative test 0건이던 상태에서 입력 불변식 위
 """
 
 import json
-import time
 from decimal import Decimal
 
 import httpx
@@ -301,7 +300,7 @@ async def test_get_futures_accounts_retries_exhausted_raises_retryable_on_connec
 
 
 @pytest.mark.perf
-async def test_get_futures_positions_latency_budget():
+async def test_get_futures_positions_latency_budget(perf_budget):
     """성능 단언 — 모킹된 전송 경로에서 순차 호출 20회의 p95 지연이
     예산(500ms/call) 안에 들어오는지 확인한다. 실거래소 왕복이 아니라
     어댑터 직렬화/서명/파싱 오버헤드 회귀를 잡는 용도라 예산을 넉넉히
@@ -320,12 +319,11 @@ async def test_get_futures_positions_latency_budget():
 
     adapter = make_adapter(handler)
 
-    durations: list[float] = []
+    durations_ms: list[float] = []
     for _ in range(20):
-        start = time.perf_counter()
-        await adapter.get_futures_positions()
-        durations.append(time.perf_counter() - start)
+        sample = await perf_budget.sample_async(lambda: adapter.get_futures_positions())
+        durations_ms.append(sample.wall_ms)
 
-    durations.sort()
-    p95 = durations[int(len(durations) * 0.95) - 1]
-    assert p95 < 0.5
+    durations_ms.sort()
+    p95_ms = durations_ms[int(len(durations_ms) * 0.95) - 1]
+    assert p95_ms < 500, f"get_futures_positions p95={p95_ms:.3f}ms budget<500ms"

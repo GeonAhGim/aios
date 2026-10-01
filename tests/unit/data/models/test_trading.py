@@ -1,4 +1,3 @@
-import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -81,14 +80,15 @@ def test_order_construction_fails_when_clock_raises() -> None:
 
 
 @pytest.mark.perf
-def test_order_construction_perf_under_budget() -> None:
+def test_order_construction_perf_under_budget(perf_budget) -> None:
     """성능단언: Order 생성 1000회가 1초 예산 내에 끝나야 한다
     (pydantic validation 회귀로 인한 급격한 저하 탐지)."""
-    start = time.perf_counter()
-    for i in range(1000):
-        Order(**_order_kwargs(client_order_id=f"c-perf-{i}"))
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+
+    def _run() -> None:
+        for i in range(1000):
+            Order(**_order_kwargs(client_order_id=f"c-perf-{i}"))
+
+    perf_budget.assert_within(_run, budget_ms=1000.0, label="construct 1000 Orders")
 
 
 def test_order_defaults_and_market_price_none():

@@ -172,13 +172,11 @@ async def test_get_algo_run_progress_propagates_scheduler_failures_fail_closed()
 
 
 @pytest.mark.perf
-async def test_get_algo_run_progress_completes_within_latency_budget() -> None:
+async def test_get_algo_run_progress_completes_within_latency_budget(perf_budget) -> None:
     """Perf -- the handler is a pure in-memory read (no I/O per the module
     docstring), so a single call must complete under a 2000ms budget (xdist
     core contention, see task-7434); a regression here would indicate an
     accidental I/O call creeping into this read path."""
-    import time
-
     parent_id = uuid4()
     plan = AlgoRunPlan(
         parent=_parent(parent_id, qty=Decimal("10")),
@@ -186,8 +184,8 @@ async def test_get_algo_run_progress_completes_within_latency_budget() -> None:
     )
     scheduler = _FakeAlgoScheduler(plans={parent_id: plan})
 
-    start = time.perf_counter()
-    await get_algo_run_progress(parent_id, _user=_user(), scheduler=scheduler)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    sample = await perf_budget.sample_async(
+        lambda: get_algo_run_progress(parent_id, _user=_user(), scheduler=scheduler)
+    )
 
-    assert elapsed_ms < 2000, f"progress read took {elapsed_ms:.1f}ms, budget=2000ms"
+    assert sample.wall_ms < 2000, "progress read: " + perf_budget.describe(sample, budget_ms=2000)

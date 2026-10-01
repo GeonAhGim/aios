@@ -220,18 +220,17 @@ def test_zero_tick_size_skips_multiple_check():
 
 
 @pytest.mark.perf
-def test_validate_order_params_perf_budget():
+def test_validate_order_params_perf_budget(perf_budget):
     """validate_order_params is a pure in-memory check — 1000 calls must stay
     well under 100ms (budget table ADR-2026-09-09-C Decision 1, pure-function
     tier), guarding against an accidental I/O or heavy-validation regression.
     """
-    import time
-
     order = _order(
         order_type=OrderType.LIMIT, price=Money(amount=Decimal("100.00"), currency=Currency.USDT)
     )
-    start = time.perf_counter()
-    for _ in range(1000):
-        validate_order_params(order, tick_size=Decimal("0.01"))
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.1, f"1000 calls took {elapsed:.4f}s, expected < 0.1s"
+
+    def _run() -> None:
+        for _ in range(1000):
+            validate_order_params(order, tick_size=Decimal("0.01"))
+
+    perf_budget.assert_within(_run, budget_ms=100, label="validate_order_params x1000")

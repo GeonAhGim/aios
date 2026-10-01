@@ -9,7 +9,6 @@ provider가 낼 법한 대표 산출물(정상/구문오류/미래참조/자원�
 
 from __future__ import annotations
 
-import time
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -170,15 +169,17 @@ async def test_generate_script_provider_raises_exception() -> None:
 
 # perf: 1000개 항목 집계 성능 — xdist core contention 하에서도 <100ms 보장
 @pytest.mark.perf
-async def test_large_outcome_list_performance() -> None:
+async def test_large_outcome_list_performance(perf_budget) -> None:
     """1000 개 항목 처리 → 시간 측정 및 성능 단언."""
     statuses = ["compiled", "compile_failed"] * 500
-    start = time.perf_counter()
-    report = build_pass_rate_report(statuses)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    # 1000 개 항목 집계는 100ms 이내여야 함
+    sample = perf_budget.assert_within(
+        lambda: build_pass_rate_report(statuses),
+        budget_ms=100,
+        label="build_pass_rate_report for 1000 items",
+    )
+    report = sample.result
     assert report.attempted == 1000
     assert report.compiled == 500
     assert report.failed_with_explicit_reason == 500
     assert report.silent_failures == 0
-    # 1000 개 항목 집계는 100ms 이내여야 함
-    assert elapsed_ms < 100, f"build_pass_rate_report took {elapsed_ms:.1f}ms for 1000 items"

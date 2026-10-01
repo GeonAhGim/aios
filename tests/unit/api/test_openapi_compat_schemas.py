@@ -12,7 +12,6 @@ test_openapi_compat_actions.py(실패주입·성능·서브프로세스).
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 
@@ -326,7 +325,7 @@ def test_main_export_current_subprocess_failure_propagates(tmp_path, monkeypatch
 
 
 @pytest.mark.perf
-def test_identical_v1_snapshot_perf_budget():
+def test_identical_v1_snapshot_perf_budget(perf_budget):
     """실 스냅샷 자기비교가 예산(1초) 내에 끝나야 한다 — PLT-16 CI 핫패스."""
     from pathlib import Path
 
@@ -335,9 +334,10 @@ def test_identical_v1_snapshot_perf_budget():
         return  # 스냅샷이 없는 환경에서는 스킵
     snapshot = json.loads(baseline_path.read_text(encoding="utf-8"))
 
-    start = time.perf_counter()
-    violations = find_violations(snapshot, snapshot)
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.assert_within(
+        lambda: find_violations(snapshot, snapshot),
+        budget_ms=1000,
+        label="find_violations too slow",
+    )
 
-    assert violations == []
-    assert elapsed < 1.0, f"find_violations too slow: {elapsed:.3f}s"
+    assert sample.result == []

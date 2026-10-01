@@ -18,7 +18,6 @@ Decision 1's "numeric performance assertion" D2 floor).
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import pytest
@@ -165,6 +164,7 @@ async def test_confirm_promotion_round_trip_latency_budget(
     instrument_repo: Any,
     experiment_repo: Any,
     token_repo: PostgresAgentTokenRepository,
+    perf_budget: Any,
 ) -> None:
     """Full propose -> preview -> confirm round trip against the test DB
     must complete within a fixed wall-clock budget (ADR-2026-09-09-C
@@ -176,30 +176,35 @@ async def test_confirm_promotion_round_trip_latency_budget(
         token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.PROPOSE, Scope.PAPER})
     )
 
-    start = time.perf_counter()
+    async def _round_trip() -> Any:
+        proposal = await _submit_proposal(client, issued.secret, instrument_id)
+        experiment = _accepted_experiment(tenant_id)
+        await experiment_repo.append(experiment)
+        params = _promotion_params(
+            proposal_id=proposal["proposal_id"],
+            experiment_id=experiment.experiment_id,
+            idempotency_key=f"promo-perf-{tenant_id}",
+        )
+        preview = await client.post(
+            "/mcp/tools/preview_promotion",
+            json=params,
+            headers={AGENT_TOKEN_HEADER: issued.secret},
+        )
+        assert preview.status_code == 200, preview.text
+        ticket_id = preview.json()["ticket_id"]
 
-    proposal = await _submit_proposal(client, issued.secret, instrument_id)
-    experiment = _accepted_experiment(tenant_id)
-    await experiment_repo.append(experiment)
-    params = _promotion_params(
-        proposal_id=proposal["proposal_id"],
-        experiment_id=experiment.experiment_id,
-        idempotency_key=f"promo-perf-{tenant_id}",
-    )
-    preview = await client.post(
-        "/mcp/tools/preview_promotion", json=params, headers={AGENT_TOKEN_HEADER: issued.secret}
-    )
-    assert preview.status_code == 200, preview.text
-    ticket_id = preview.json()["ticket_id"]
+        return await client.post(
+            "/mcp/tools/confirm_promotion",
+            json={**params, "ticket_id": ticket_id},
+            headers={AGENT_TOKEN_HEADER: issued.secret},
+        )
 
-    confirm = await client.post(
-        "/mcp/tools/confirm_promotion",
-        json={**params, "ticket_id": ticket_id},
-        headers={AGENT_TOKEN_HEADER: issued.secret},
-    )
-    elapsed_sec = time.perf_counter() - start
+    budget_ms = 5000.0
+    sample = await perf_budget.sample_async(_round_trip)
+    confirm: Any = sample.result
 
     assert confirm.status_code == 200, confirm.text
-    assert elapsed_sec < 5.0, (
-        f"propose->preview->confirm took {elapsed_sec:.2f}s, exceeds 5s budget"
+    assert sample.wall_ms < budget_ms, (
+        "propose->preview->confirm exceeds 5s budget: "
+        + perf_budget.describe(sample, budget_ms=budget_ms)
     )

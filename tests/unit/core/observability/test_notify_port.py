@@ -7,8 +7,6 @@ DoD "웹훅 수신 mock으로 전달 테스트": httpx.MockTransport로 웹훅 �
 
 from __future__ import annotations
 
-import time
-
 import httpx
 import pytest
 
@@ -159,7 +157,9 @@ async def test_send_timeout_exception_is_not_ok(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.perf
-async def test_send_success_latency_stays_under_budget(monkeypatch: pytest.MonkeyPatch):
+async def test_send_success_latency_stays_under_budget(
+    monkeypatch: pytest.MonkeyPatch, perf_budget
+):
     """성능 단언: 로컬 MockTransport 왕복은 네트워크 I/O가 없으므로 500ms 예산 내에
     끝나야 한다 -- 어댑터가 불필요한 재시도/블로킹 대기를 추가하지 않았는지 감시한다."""
 
@@ -169,9 +169,8 @@ async def test_send_success_latency_stays_under_budget(monkeypatch: pytest.Monke
     _mock_client(monkeypatch, httpx.MockTransport(handler))
     adapter = WebhookNotifyAdapter(WEBHOOK_URL)
 
-    start = time.monotonic()
-    result = await adapter.send(ALERT)
-    elapsed = time.monotonic() - start
+    sample = await perf_budget.sample_async(lambda: adapter.send(ALERT))
+    result = sample.result
 
     assert result.ok is True
-    assert elapsed < 0.5
+    assert sample.wall_ms < 500, perf_budget.describe(sample, budget_ms=500)

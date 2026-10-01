@@ -1,4 +1,3 @@
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -151,13 +150,14 @@ def test_fxrate_construction_failure_injection_propagates(monkeypatch):
 
 
 @pytest.mark.perf
-def test_money_add_perf_budget_many_iterations():
+def test_money_add_perf_budget_many_iterations(perf_budget):
     """성능 단언(D2) — Money.__add__ 1,000회 반복이 100ms 예산 내에
     끝나야 한다 (ADR-2026-09-09-C Decision 1, 비-실행축 로컬 CPU 연산)."""
     a = Money(amount=Decimal("1.5"), currency=Currency.USDT)
     b = Money(amount=Decimal("2.5"), currency=Currency.USDT)
-    start = time.perf_counter()
-    for _ in range(1000):
-        a + b
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.1
+
+    def _run() -> None:
+        for _ in range(1000):
+            a + b
+
+    perf_budget.assert_within(_run, budget_ms=100, label="Money.__add__ x1000")

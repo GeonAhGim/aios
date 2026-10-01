@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from typing import Any
 
@@ -70,7 +69,9 @@ _MAX_SEQUENTIAL_ROUND_TRIPS = 3  # list_open + nav_repo.get(prev) + nav_repo.ins
 
 
 @pytest.mark.perf
-async def test_compute_daily_nav_sequential_round_trips_and_latency(pool: asyncpg.Pool) -> None:
+async def test_compute_daily_nav_sequential_round_trips_and_latency(
+    pool: asyncpg.Pool, perf_budget
+) -> None:
     """수치 성능 단언(D3) — `compute_daily_nav` 1회가 쓰는 순차 DB 왕복 수를
     직접 세어 구조 회귀를 막는다."""
     tenant_id, account_id = await setup_account(pool)
@@ -95,17 +96,18 @@ async def test_compute_daily_nav_sequential_round_trips_and_latency(pool: asyncp
         tenant_i, account_i = await setup_account(pool)
         cash_i = FakeCashSource()
         cash_i.seed(account_i, Decimal("1000"))
-        started = time.perf_counter()
-        await compute_daily_nav(
-            cmd(tenant_id=tenant_i, account_id=account_i, at=NOW),
-            snapshots=PostgresSnapshotRepository(pool),
-            cash=cash_i,
-            nav_repo=nav_repo,
-            calendar=BITGET,
-            fx=FakeFxRateSource(),
-            pool=pool,
+        sample = await perf_budget.sample_async(
+            lambda tenant_i=tenant_i, account_i=account_i, cash_i=cash_i: compute_daily_nav(
+                cmd(tenant_id=tenant_i, account_id=account_i, at=NOW),
+                snapshots=PostgresSnapshotRepository(pool),
+                cash=cash_i,
+                nav_repo=nav_repo,
+                calendar=BITGET,
+                fx=FakeFxRateSource(),
+                pool=pool,
+            )
         )
-        latencies_ms.append((time.perf_counter() - started) * 1000)
+        latencies_ms.append(sample.wall_ms)
 
     latencies_ms.sort()
     p95_ms = latencies_ms[int(len(latencies_ms) * 0.95)]

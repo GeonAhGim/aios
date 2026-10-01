@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time as time_module
 from datetime import datetime, time, timezone
 from decimal import Decimal
 
@@ -195,7 +194,7 @@ def test_indicator_condition_compare_value_failure_propagates(
 
 
 @pytest.mark.perf
-def test_evaluate_conditions_performance_budget() -> None:
+def test_evaluate_conditions_performance_budget(perf_budget) -> None:
     """Numeric performance assertion: evaluating 500 AND-composed price
     conditions against one snapshot must stay well under a loose 200ms
     budget -- this is a pure in-memory comparison loop, no I/O."""
@@ -203,8 +202,9 @@ def test_evaluate_conditions_performance_budget() -> None:
         PriceCondition(symbol="005930", operator=">", threshold=Decimal(str(i))) for i in range(500)
     )
     snapshot = MarketSnapshot(candle=make_candle(close=Decimal("1000")))
-    started = time_module.perf_counter()
-    result = evaluate_conditions(conditions, {"005930": snapshot}, {})
-    elapsed = time_module.perf_counter() - started
-    assert result is True
-    assert elapsed < 0.2
+    sample = perf_budget.assert_within(
+        lambda: evaluate_conditions(conditions, {"005930": snapshot}, {}),
+        budget_ms=200.0,
+        label="evaluate_conditions x500",
+    )
+    assert sample.result is True

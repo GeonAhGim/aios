@@ -359,16 +359,15 @@ class TestPerformance:
     """Numeric throughput budget for pure in-memory model construction."""
 
     @pytest.mark.perf
-    def test_construction_throughput_budget(self, valid_task_kwargs):
+    def test_construction_throughput_budget(self, valid_task_kwargs, perf_budget):
         """Pydantic validation for this model has no I/O, so 2000
         constructions must complete well under 1 second (budget: 1000/s)."""
-        import time
-
         iterations = 2000
-        start = time.perf_counter()
-        for _ in range(iterations):
-            AIOSTask(**valid_task_kwargs)
-        elapsed = time.perf_counter() - start
-        assert elapsed < 1.0, (
-            f"construction of {iterations} tasks took {elapsed:.3f}s (budget 1.0s)"
+
+        def _run() -> None:
+            for _ in range(iterations):
+                AIOSTask(**valid_task_kwargs)
+
+        perf_budget.assert_within(
+            _run, budget_ms=1000.0, label=f"construction of {iterations} tasks"
         )

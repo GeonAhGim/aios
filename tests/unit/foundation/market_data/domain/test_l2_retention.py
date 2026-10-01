@@ -169,14 +169,13 @@ def test_records_source_raising_mid_iteration_propagates_not_swallowed():
 
 
 @pytest.mark.perf
-def test_plan_retention_perf_budget_for_large_record_set():
+def test_plan_retention_perf_budget_for_large_record_set(perf_budget):
     """`plan_retention`은 순수 in-memory 계산(I/O 없음) — 5000건 레코드에
     대해서도 100ms budget(ADR-2026-09-09-C Decision 1, pure-function tier)
     안에서 끝나야 한다."""
-    import time
-
     records = [_rec(f"r-{i}", days_old=i % 60, size=1_000) for i in range(5_000)]
-    start = time.perf_counter()
-    plan_retention(records, _NOW, _POLICY)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.1
+    perf_budget.assert_within(
+        lambda: plan_retention(records, _NOW, _POLICY),
+        budget_ms=100.0,
+        label="plan_retention 5000 records",
+    )

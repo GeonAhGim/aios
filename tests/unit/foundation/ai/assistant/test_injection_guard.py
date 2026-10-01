@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import time
 import typing
 
 import pytest
@@ -104,13 +103,12 @@ def test_detect_injection_propagates_pattern_failure(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.perf
-def test_detect_injection_perf_budget_on_large_input() -> None:
+def test_detect_injection_perf_budget_on_large_input(perf_budget) -> None:
     """성능 단언 -- `detect_injection`은 순수 정규식 스캔(I/O 없음)이므로
     100KB 텍스트 1회 스캔이 50ms를 넘으면 안 된다 (U-3a 경로의 실시간
     프롬프트 체크 예산)."""
     large_text = "RSI 14 기준 과매도 전략 설명 " * 5000
-    start = time.perf_counter()
-    finding = detect_injection(large_text)
-    elapsed = time.perf_counter() - start
-    assert finding.detected is False
-    assert elapsed < 0.05, f"detect_injection took {elapsed:.4f}s, budget is 0.05s"
+    sample = perf_budget.assert_within(
+        lambda: detect_injection(large_text), budget_ms=50.0, label="detect_injection 100KB"
+    )
+    assert sample.result.detected is False

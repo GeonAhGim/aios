@@ -10,7 +10,6 @@ kill-switch-active 시나리오가 동일하게 막히는지를 한 번에 증�
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -169,7 +168,7 @@ async def test_gate_check_failure_injection_propagates_without_touching_sink() -
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_kill_switch_denial_path_meets_latency_budget() -> None:
+async def test_kill_switch_denial_path_meets_latency_budget(perf_budget) -> None:
     """Numeric performance assertion: the deny-path (kill-switch active) for
     all three live-trading action kinds must resolve well under a
     100ms/call budget with an in-memory fake gate -- a regression here would
@@ -179,19 +178,21 @@ async def test_kill_switch_denial_path_meets_latency_budget() -> None:
     notifier = FakeNotifier()
     tenant_id: UUID = uuid4()
 
-    start = time.perf_counter()
-    for action in _ACTIONS:
-        result = await execute_action(
-            tenant_id=tenant_id,
-            rule_id=uuid4(),
-            action=action,
-            trace_id=uuid4(),
-            gate=gate,
-            sink=sink,
-            notifier=notifier,
-        )
-        assert result.executed is False
-    elapsed = time.perf_counter() - start
+    async def _run() -> None:
+        for action in _ACTIONS:
+            result = await execute_action(
+                tenant_id=tenant_id,
+                rule_id=uuid4(),
+                action=action,
+                trace_id=uuid4(),
+                gate=gate,
+                sink=sink,
+                notifier=notifier,
+            )
+            assert result.executed is False
 
-    assert elapsed < 0.1 * len(_ACTIONS)
+    budget_ms = 100.0 * len(_ACTIONS)
+    sample = await perf_budget.sample_async(_run)
+
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
     assert sink.total_calls == 0

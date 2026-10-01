@@ -9,7 +9,6 @@ DEEPEN(task-2983, docs/audit/DEPTH_LA_LB_LC.md#727)이 추가한 수치 성능
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 
 import pytest
@@ -35,7 +34,7 @@ from tests.integration.foundation.positions.scheduler_test_doubles import (
 
 
 @pytest.mark.perf
-async def test_run_mark_cycle_completes_within_polling_interval_budget(pool):
+async def test_run_mark_cycle_completes_within_polling_interval_budget(pool, perf_budget):
     """수치 성능 단언: `run_mark_cycle()`은 폴링 주기
     (`MARK_INTERVAL_SECONDS`, §2.3 Draft 10s)마다 추적 계좌 전체를 한 번씩
     순회한다 — 계좌 수가 늘어도 그 사이클 자체가 다음 폴링 간격을 밀어낼
@@ -67,9 +66,9 @@ async def test_run_mark_cycle_completes_within_polling_interval_budget(pool):
     )
 
     budget_sec = MARK_INTERVAL_SECONDS
-    start = time.perf_counter()
-    report = await scheduler.run_mark_cycle()
-    elapsed = time.perf_counter() - start
+    sample = await perf_budget.sample_async(lambda: scheduler.run_mark_cycle())
+    report = sample.result
+    elapsed = sample.wall_ms / 1000
 
     print(f"[LB-17 run_mark_cycle] n={n} elapsed={elapsed:.3f}s (budget<{budget_sec}s)")
     assert report.succeeded == [target.account_id for target in tracked]

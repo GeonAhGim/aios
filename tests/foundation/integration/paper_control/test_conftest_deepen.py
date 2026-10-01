@@ -13,7 +13,6 @@ INVARIANTS.md 점검: I-01~I-11은 주문 제출/실행-소유권/멱등키/전�
 
 from __future__ import annotations
 
-import time
 import uuid
 
 import asyncpg
@@ -134,27 +133,29 @@ async def test_repo_get_deployment_by_request_key_propagates_connection_failure(
 
 @pytest.mark.perf
 async def test_tenant_with_mandate_setup_stays_within_local_budget(
-    pool: asyncpg.Pool, mandate_repo, trust_repo
+    pool: asyncpg.Pool, mandate_repo, trust_repo, perf_budget
 ) -> None:
     """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1, n=20, 워밍업
     3회 버림)을 이 환경에서 직접 재고, `tenant_with_mandate`(tenant 생성 +
     mandate 활성화, 여러 순차 INSERT/UPDATE 왕복)의 절대 시간이 그 기준의
     40배(연속 DB 왕복 여유) 이내인지 단언한다 -- 절대 ms 임계는 실행환경마다
     흔들려 회귀 게이트로 못 쓴다."""
-    samples: list[float] = []
-    for _ in range(23):
-        start = time.perf_counter()
+
+    async def _baseline_round_trip() -> None:
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        samples.append(time.perf_counter() - start)
-    baseline_rt = sorted(samples[3:])[-1]  # 워밍업 3회 버리고 최댓값(보수적 rt)
 
-    start = time.perf_counter()
-    await tenant_with_mandate(pool, mandate_repo, trust_repo)
-    elapsed = time.perf_counter() - start
+    samples_ms: list[float] = []
+    for _ in range(23):
+        samples_ms.append((await perf_budget.sample_async(_baseline_round_trip)).wall_ms)
+    baseline_rt_ms = sorted(samples_ms[3:])[-1]  # 워밍업 3회 버리고 최댓값(보수적 rt)
 
-    budget = max(0.100, 40 * baseline_rt)
-    assert elapsed < budget, (
-        f"tenant_with_mandate took {elapsed * 1000:.1f}ms, budget {budget * 1000:.1f}ms "
-        f"(baseline rt {baseline_rt * 1000:.1f}ms)"
+    sample = await perf_budget.sample_async(
+        lambda: tenant_with_mandate(pool, mandate_repo, trust_repo)
+    )
+
+    budget_ms = max(100.0, 40 * baseline_rt_ms)
+    assert sample.wall_ms < budget_ms, (
+        f"tenant_with_mandate took {sample.wall_ms:.1f}ms, budget {budget_ms:.1f}ms "
+        f"(baseline rt {baseline_rt_ms:.1f}ms)"
     )

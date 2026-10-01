@@ -5,7 +5,6 @@ tests/foundation/integration/trust/test_membership_admin.py가 이미 실DB로
 검증한다. 이 파일은 라우터 자체가 앱에 배선됐는지(router_registry.py
 누락으로 0 임포터였던 결함)만 HTTP 계층에서 확인한다."""
 
-import time
 import uuid
 from pathlib import Path
 
@@ -131,7 +130,7 @@ async def test_post_suspend_membership_dependency_failure_returns_500_not_silent
 
 
 @pytest.mark.perf
-async def test_membership_grant_latency_within_budget(client, monkeypatch):
+async def test_membership_grant_latency_within_budget(client, monkeypatch, perf_budget):
     """성능 단언 — grant_membership 라우터 호출의 E2E 지연 시간이
     예산 내여야 한다(100ms, 실DB 왕복·MFA 검증 포함 wall-clock 측정).
     task-7434 패턴: wall-clock 성능 테스트는 @pytest.mark.perf 필수
@@ -139,13 +138,15 @@ async def test_membership_grant_latency_within_budget(client, monkeypatch):
     headers = await _register(client)
     subject_id = str(uuid.uuid4())
 
-    start = time.perf_counter()
-    response = await client.post(
-        "/v1/foundation/trust/memberships",
-        json={"subject_id": subject_id, "role": "MEMBER"},
-        headers=headers,
+    sample = await perf_budget.sample_async(
+        lambda: client.post(
+            "/v1/foundation/trust/memberships",
+            json={"subject_id": subject_id, "role": "MEMBER"},
+            headers=headers,
+        )
     )
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    response = sample.result
+    elapsed_ms = sample.wall_ms
 
     assert response.status_code == 403  # MFA 검증 필요
     assert elapsed_ms < 100, f"grant_membership latency {elapsed_ms:.1f}ms exceeded budget 100ms"
