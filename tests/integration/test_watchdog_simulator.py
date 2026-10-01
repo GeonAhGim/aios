@@ -8,10 +8,12 @@ SCAFFOLD 완료 조건)". 이 테스트가 그 최초 실행이다 — 실제 �
 
 from decimal import Decimal
 
+from src.core.safety import watchdog_simulator
 from src.core.safety.heartbeat import write_heartbeat
 from src.core.safety.split_brain import Diagnosis, FailureDomain
 from src.core.safety.watchdog import (
     DEFAULT_LOSS_THRESHOLD_PCT,
+    DEFAULT_UNRESPONSIVE_SEC_THRESHOLD,
     WatchdogAction,
     WatchdogService,
     WatchdogSnapshot,
@@ -176,3 +178,64 @@ async def test_watchdog_service_first_lookup_failure_reports_unhealthy_not_norma
 
     assert snapshot.exchange_healthy is False
     assert snapshot.loss_pct == Decimal("0")
+
+
+def test_decide_rejects_undecidable_correlation_as_normal():
+    """market_wide_correlated=None(상관성 판정 불가)인데 손실이 임계값을
+    넘으면 "판단 불가"를 "정상"으로 오판해서는 안 된다 — docstring의
+    "예외상황 원칙: 판단 불가는 정상으로 취급하지 않는다"를 직접 검증한다
+    (지금까지는 default_scenarios 시나리오 하나로만 간접 커버됐다)."""
+    snapshot = WatchdogSnapshot(
+        loss_pct=Decimal("15.0"),
+        unresponsive_sec=0.0,
+        exchange_healthy=True,
+    )
+
+    decision = decide(snapshot, market_wide_correlated=None)
+
+    assert decision.action != WatchdogAction.NORMAL
+    assert decision.action == WatchdogAction.HALT
+    assert decision.reason == "isolated_loss_suspected_manipulation"
+
+
+def test_decide_does_not_halt_when_unresponsive_just_below_threshold():
+    """unresponsive_sec이 임계값(30초) 바로 아래(29.9초)이고 손실도 임계값
+    미만이면 HALT로 오발동하면 안 된다 — `>=` 경계 비교를 잘못 뒤집어
+    "미만"도 발동시키는 회귀를 잡는 경계값 negative test."""
+    snapshot = WatchdogSnapshot(
+        loss_pct=Decimal("1.0"),
+        unresponsive_sec=DEFAULT_UNRESPONSIVE_SEC_THRESHOLD - 0.1,
+        exchange_healthy=True,
+    )
+
+    decision = decide(snapshot, market_wide_correlated=None)
+
+    assert decision.action == WatchdogAction.NORMAL
+    assert decision.reason == "within_thresholds"
+
+
+async def test_watchdog_simulator_fails_on_injected_bug_disabling_liquidation(
+    monkeypatch, tmp_path
+):
+    """게이트 적색 재현 — decide()가 손실 임계값을 무시하고 항상 NORMAL만
+    돌려주는 결함을 주입하면, 시뮬레이터의 false_negative_rate가 반드시
+    0을 벗어나야 한다. 이 테스트가 통과한다는 것은
+    `test_watchdog_simulator_runs_once_and_measures_fp_fn_rate`의
+    `false_negative_rate == 0.0` 단언이 실제 회귀에 대해 공허하지 않고
+    적색으로 뒤집힌다는 것을 직접 증명한다(검사가 진짜로 실패할 수 있음을
+    보임)."""
+
+    class _AlwaysNormalDecision:
+        action = WatchdogAction.NORMAL
+        reason = "within_thresholds"
+
+    def buggy_decide(snapshot, **kwargs):
+        return _AlwaysNormalDecision()
+
+    monkeypatch.setattr(watchdog_simulator, "decide", buggy_decide)
+
+    scenarios = default_scenarios()
+    report = await run_simulation(scenarios, heartbeat_dir=tmp_path)
+
+    assert report.false_negative_rate > 0.0
+    assert any(r.final_action == WatchdogAction.NORMAL for r in report.results if r.expect_trigger)
