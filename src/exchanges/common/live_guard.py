@@ -1,18 +1,19 @@
-"""확장 어댑터 메서드(주문성 API)용 공용 LIVE 모드 가드.
+"""Common LIVE-mode guard for exchange adapter methods (order-capability API).
 
-Executor.execute()는 두 독립 검사로 실주문을 막는다: (1) `mode !=
-"PAPER"` 하드 차단, (2) `adapter.is_paper_trading`/`is_sandboxed` 확인.
-이 중 (1)은 실행 레코드(strategy_executions.mode)라는 호출자 컨텍스트에
-있어 adapter 인스턴스 스스로는 알 수 없다 — 그래서 이 데코레이터가
-대신할 수 있는 건 (2)뿐이다.
+Executor.execute() blocks live orders via two independent checks: (1) hard
+block when `mode != "PAPER"`, (2) verification of
+`adapter.is_paper_trading`/`is_sandboxed`. Check (1) lives in the caller's
+context (strategy_executions.mode), so the adapter instance cannot inspect it
+itself — this decorator can only substitute for (2).
 
-레드팀 #2026-09-02-32 — Convert/Grid/Strategy/Margin/Futures/Loan/
-Subaccount 확장 메서드는 `Executor`를 거치지 않고 거래소에 직결되어
-이 방어선이 전혀 없었다. 이 데코레이터를 적용하면 최소한 "LIVE로
-구성된(demo_mode=False) adapter는 이 메서드를 아예 실행할 수 없다"는
-방어선은 확보된다 — Executor가 주는 이중 방어의 완전한 대체는 아니지만,
-다음 leaf가 이 메서드들을 라우터에 배선하면서 그 가드를 재발명하는 걸
-잊어도 최소 안전장치는 남는다.
+Red team #2026-09-02-32 — Convert/Grid/Strategy/Margin/Futures/Loan/
+Subaccount extension methods bypass `Executor` and connect directly to the
+exchange, leaving this defense line entirely absent. Applying this decorator
+at least ensures "an adapter configured for LIVE (demo_mode=False) cannot
+execute these methods at all" — not a complete replacement for the dual
+defense Executor provides, but it leaves a minimum safety net so that when
+the next leaf wires these methods into the router, forgetting to reimplement
+that guard still leaves this fallback in place.
 """
 
 from __future__ import annotations
