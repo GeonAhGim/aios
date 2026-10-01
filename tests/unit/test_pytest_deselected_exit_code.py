@@ -14,12 +14,18 @@ These tests run real subprocesses against this repo (not `tmp_path`, which
 would sit outside the tree and never pick up `tests/conftest.py`) to prove the
 hook fires exactly where it should and nowhere else.
 """
+
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+from tests import conftest as _tests_conftest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BITGET_DEMO_FILE = "tests/e2e/bitget_demo/test_bitget_demo_pipeline.py"
@@ -80,3 +86,31 @@ def test_nonexistent_nodeid_still_reports_usage_error() -> None:
     result = _run_pytest(f"{_TIMEOUT_FILE}::test_does_not_exist_at_all")
 
     assert result.returncode == 4, result.stdout + result.stderr
+
+
+def test_sessionfinish_propagates_terminalreporter_dependency_failure() -> None:
+    """Failure injection — if `reporter.stats` itself raises (e.g. a plugin
+    that corrupts terminalreporter state), the hook must not catch and
+    swallow it into a false green. Fail-closed: the exception propagates and
+    `session.exitstatus` is left untouched by the hook."""
+    session = MagicMock()
+    session.config.pluginmanager.get_plugin.return_value.stats.get.side_effect = RuntimeError(
+        "terminalreporter.stats is corrupted"
+    )
+
+    with pytest.raises(RuntimeError, match="terminalreporter.stats is corrupted"):
+        _tests_conftest.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+
+
+def test_sessionfinish_noop_when_terminalreporter_plugin_missing() -> None:
+    """Negative #4 — if the `terminalreporter` plugin is unavailable (e.g.
+    `-p no:terminalreporter`), the hook must not crash trying to read stats
+    off `None`; it must leave `session.exitstatus` untouched instead of
+    guessing the outcome."""
+    session = MagicMock()
+    session.config.pluginmanager.get_plugin.return_value = None
+    original_exitstatus = session.exitstatus
+
+    _tests_conftest.pytest_sessionfinish(session, pytest.ExitCode.NO_TESTS_COLLECTED)
+
+    assert session.exitstatus is original_exitstatus
