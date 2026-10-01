@@ -37,7 +37,7 @@ call so neither side of the ratio carries tracer overhead.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TypeVar
 
@@ -104,12 +104,22 @@ class RelativeBudget:
         n: int = 5,
         warmup: int = 1,
         calibration_n: int = 3,
+        calibration_fn: Callable[[], object] | None = None,
     ) -> RelativeSample:
+        """`calibration_fn` defaults to the fixed pure-CPU loop (host-speed
+        calibration). Pass a different reference operation when the thing
+        under test is *not* CPU-bound but still has a real, in-process,
+        same-moment comparison available -- e.g. a single DB round-trip when
+        measuring N concurrent round-trips, so the ratio tracks the actual
+        contended resource (DB server load) instead of this process's CPU
+        speed, which may not move in lockstep with it (task-10652)."""
         clock = self._clock(mode)
         for _ in range(warmup):
             fn()
         op_ms = self._best_of(fn, clock=clock, n=n)
-        calibration_ms = self._best_of(lambda: _calibration_loop(), clock=clock, n=calibration_n)
+        calibration_ms = self._best_of(
+            calibration_fn or _calibration_loop, clock=clock, n=calibration_n
+        )
         ratio = op_ms / calibration_ms if calibration_ms else float("inf")
         return RelativeSample(op_ms=op_ms, calibration_ms=calibration_ms, ratio=ratio)
 
@@ -128,9 +138,67 @@ class RelativeBudget:
         n: int = 5,
         warmup: int = 1,
         calibration_n: int = 3,
+        calibration_fn: Callable[[], object] | None = None,
         label: str = "",
     ) -> RelativeSample:
-        sample = self.measure(fn, mode=mode, n=n, warmup=warmup, calibration_n=calibration_n)
+        sample = self.measure(
+            fn,
+            mode=mode,
+            n=n,
+            warmup=warmup,
+            calibration_n=calibration_n,
+            calibration_fn=calibration_fn,
+        )
+        prefix = f"{label}: " if label else ""
+        assert sample.ratio < max_ratio, prefix + self.describe(sample, max_ratio=max_ratio)
+        return sample
+
+    async def _best_of_async(
+        self, fn: Callable[[], Awaitable[object]], *, clock: Callable[[], float], n: int
+    ) -> float:
+        best: float | None = None
+        for _ in range(n):
+            with paused_coverage():
+                start = clock()
+                await fn()
+                elapsed = (clock() - start) * 1000
+            if best is None or elapsed < best:
+                best = elapsed
+        assert best is not None
+        return best
+
+    async def measure_async(
+        self,
+        fn: Callable[[], Awaitable[_T]],
+        *,
+        n: int = 3,
+        warmup: int = 1,
+        calibration_n: int = 3,
+    ) -> RelativeSample:
+        """`measure()`의 async 변형 — 네트워크/DB 왕복처럼 `await`가 필요한
+        작업을 ``time.perf_counter()`` 벽시계로 재되, 같은 프로세스에서 같은
+        순간에 돈 CPU 보정 루프와의 비율로 호스트 부하를 상쇄한다(모듈
+        docstring 참고). 보정 루프 자체는 동기 CPU 작업이라 `await`가 필요
+        없다."""
+        clock = self._clock("wall")
+        for _ in range(warmup):
+            await fn()
+        op_ms = await self._best_of_async(fn, clock=clock, n=n)
+        calibration_ms = self._best_of(lambda: _calibration_loop(), clock=clock, n=calibration_n)
+        ratio = op_ms / calibration_ms if calibration_ms else float("inf")
+        return RelativeSample(op_ms=op_ms, calibration_ms=calibration_ms, ratio=ratio)
+
+    async def assert_within_async(
+        self,
+        fn: Callable[[], Awaitable[_T]],
+        *,
+        max_ratio: float,
+        n: int = 3,
+        warmup: int = 1,
+        calibration_n: int = 3,
+        label: str = "",
+    ) -> RelativeSample:
+        sample = await self.measure_async(fn, n=n, warmup=warmup, calibration_n=calibration_n)
         prefix = f"{label}: " if label else ""
         assert sample.ratio < max_ratio, prefix + self.describe(sample, max_ratio=max_ratio)
         return sample

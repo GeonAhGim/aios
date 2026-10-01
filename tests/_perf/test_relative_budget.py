@@ -7,6 +7,7 @@ it in the serial performance stage.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
@@ -102,6 +103,42 @@ def test_p95_wall_seconds_within_warmup_calls_are_not_counted_in_samples() -> No
 
     budget.p95_wall_seconds_within(_op, max_ratio=1_000_000.0, n=3, warmup=2, calibration_n=1)
     assert len(calls) == 5
+
+
+async def test_measure_async_returns_positive_ratio_for_real_io() -> None:
+    """task-10652 — async 변형이 real await를 재는지: `asyncio.sleep`은
+    `await`를 안 거치면 측정에 안 잡혀야 한다(wall-clock만 보는 이유)."""
+    budget = RelativeBudget()
+
+    async def _io_op() -> int:
+        await asyncio.sleep(0.01)
+        return 1
+
+    sample = await budget.measure_async(_io_op, n=2, warmup=1, calibration_n=1)
+    assert sample.op_ms >= 5.0
+    assert sample.calibration_ms > 0.0
+    assert sample.ratio == pytest.approx(sample.op_ms / sample.calibration_ms)
+
+
+async def test_assert_within_async_passes_when_op_is_cheaper_than_calibration() -> None:
+    budget = RelativeBudget()
+
+    async def _cheap_op() -> int:
+        return 1 + 1
+
+    await budget.assert_within_async(_cheap_op, max_ratio=1.0, n=2, calibration_n=1)
+
+
+async def test_assert_within_async_fails_when_ratio_exceeds_budget() -> None:
+    """failure injection -- an await that sleeps far longer than the
+    calibration loop must push the ratio past a tiny max_ratio."""
+    budget = RelativeBudget()
+
+    async def _slow_op() -> None:
+        await asyncio.sleep(0.05)
+
+    with pytest.raises(AssertionError, match="ratio="):
+        await budget.assert_within_async(_slow_op, max_ratio=0.01, n=1, calibration_n=1)
 
 
 def test_relative_sample_is_frozen_dataclass() -> None:

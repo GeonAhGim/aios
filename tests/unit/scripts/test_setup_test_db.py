@@ -28,16 +28,16 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
+from tests._perf.relative_budget import RelativeBudget
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
-# 실DB 쓰기 성능 예산 — ADR-2026-09-09-C의 고정비 DB 쓰기 축(주문 제출 p95
-# 50ms)과 달리 DB *생성*은 그 축에 해당 항목이 없으므로, 동시 8개 재생성이
-# 순차 실행(각 수백ms)보다 크게 느려지지 않는다는 것만 지역 예산으로 못박는다.
-CONCURRENT_RESET_BUDGET_S = 15.0
 # task-5822: 4-way concurrent reset+migrate — each leg runs a real `alembic upgrade
 # head` subprocess against a fresh DB (all revisions, not the already-migrated
-# no-op case), so this budget is looser than CONCURRENT_RESET_BUDGET_S.
+# no-op case). 8-way plain reset (no migrate) switched to a self-calibrating
+# `RelativeBudget` ratio (task-10652, see test body) since this host's
+# absolute DROP/CREATE DATABASE wall time varies with concurrent DB load.
 CONCURRENT_RESET_MIGRATE_BUDGET_S = 90.0
 
 
@@ -62,9 +62,7 @@ async def _database_exists(server_url: str, database: str) -> bool:
         setup_test_db._asyncpg_dsn(setup_test_db._with_database(server_url, "postgres"))
     )
     try:
-        exists = await admin.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", database
-        )
+        exists = await admin.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", database)
         return bool(exists)
     finally:
         await admin.close()
@@ -123,7 +121,22 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
     """failure-injection: task-5782 회귀 직접 재현 — 정정 전에는 여러 동시
     `reset=True` 호출 중 늦게 `DROP DATABASE`를 쏘는 쪽이
     `InvalidCatalogNameError`로 죽었다(esc-ci-prepare sha 0f693214).
-    """
+
+    task-10652: correctness(`results == [True] * 8`, DB가 실제로 존재)는
+    advisory lock 직렬화 덕에 호스트 부하와 무관하게 항상 성립한다 — 로컬
+    재현에서 8-way가 32~65s까지 걸려도 전부 True였다. 실패한 쪽은 절대
+    벽시계 예산(`CONCURRENT_RESET_BUDGET_S=15.0`)뿐이다.
+
+    `RelativeBudget`의 기본 CPU 보정 루프로는 이 작업을 정규화할 수 없다는
+    것부터 로컬 재현으로 확인했다: 같은 세션에서 반복 실행 시 8-way 소요가
+    34s -> 49s -> 65s로 커지는 동안 CPU 보정 루프는 102~106ms로 평평했다
+    (host CPU는 안 바빠졌다는 뜻) — 반면 단일 `_ensure_database(reset=True)`
+    호출 1회는 같은 구간에서 2.3s -> 4~7s로 거의 같은 비율로 느려졌다. 즉
+    이 테스트의 병목은 CPU가 아니라 Postgres 서버 측 경합(동시 커넥션/락,
+    `pg_terminate_backend` 대기 등 — 이 호스트에 다른 워커들이 각자의
+    TEST_DATABASE_URL로 같은 서버에 동시 접속)이다. `calibration_fn`에 같은
+    프로세스·같은 순간에 돈 "DB 작업 1회"(단일 reset 호출)를 넘겨, 호스트
+    CPU가 아니라 실제 병목(Postgres 서버 부하)과 같은 축으로 비율을 잰다."""
     server_url = _server_url()
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
     try:
@@ -137,16 +150,33 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
             )
             return cast("list[bool]", results)
 
-        start = time.monotonic()
-        results = asyncio.run(_run_concurrent())
-        elapsed = time.monotonic() - start
+        results_holder: list[list[bool]] = []
 
+        def _run_and_capture() -> None:
+            results_holder.append(asyncio.run(_run_concurrent()))
+
+        def _single_reset_call() -> None:
+            asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=True))
+
+        budget = RelativeBudget()
+        # 로컬 실측 ratio ~13-15x(8-way가 단일 reset 호출의 13-15배) — 순수
+        # 직렬화 하한(8x)에 연결/락 오버헤드 여유를 더해 2배 이상 여유를 둔
+        # 40x를 바닥선으로 건다.
+        sample = budget.assert_within(
+            _run_and_capture,
+            max_ratio=40.0,
+            mode="wall",
+            n=1,
+            warmup=0,
+            calibration_n=1,
+            calibration_fn=_single_reset_call,
+            label="8-way concurrent reset vs 1x sequential reset",
+        )
+        print(f"[setup_test_db] {budget.describe(sample, max_ratio=40.0)}")
+
+        results = results_holder[0]
         assert results == [True] * 8
         assert asyncio.run(_database_exists(server_url, scratch_db_name)) is True
-        assert elapsed < CONCURRENT_RESET_BUDGET_S, (
-            f"8-way concurrent reset took {elapsed:.2f}s, budget "
-            f"{CONCURRENT_RESET_BUDGET_S}s"
-        )
     finally:
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
 
