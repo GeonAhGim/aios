@@ -5,7 +5,6 @@ failure injection 1, numeric performance assertion 1, gate-red reproduction 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -20,6 +19,7 @@ from src.foundation.experiments.domain.lineage import (
     ReproducibilityKeyCollisionError,
     validate_new_experiment,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime.now(timezone.utc)
 
@@ -128,17 +128,21 @@ def _p95(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_validate_new_experiment_p95_latency_within_budget() -> None:
+def test_validate_new_experiment_p95_latency_within_budget(perf_budget: PerfBudget) -> None:
     tenant_id = uuid4()
     parent = _experiment(tenant_id=tenant_id)
-    samples: list[float] = []
-    for _ in range(200):
-        child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
-        started = time.perf_counter()
-        validate_new_experiment(child, parent=parent, existing_with_same_key=None)
-        samples.append((time.perf_counter() - started) * 1000)
+    children = iter(
+        [_experiment(tenant_id=tenant_id, parent_id=parent.experiment_id) for _ in range(200)]
+    )
 
-    p95_ms = _p95(samples)
+    def _validate() -> None:
+        validate_new_experiment(next(children), parent=parent, existing_with_same_key=None)
+
+    # wall_ms, not cpu_ms: this loop's per-call cost is well under the ~15.6ms
+    # Windows `time.process_time()` tick, so cpu_ms would quantize to 0 for
+    # most calls and flatten the p95 distribution.
+    wall_ms_samples = sorted(s.wall_ms for s in perf_budget.samples(_validate, n=200, warmup=0))
+    p95_ms = _p95(wall_ms_samples)
     print(f"[AI-10 validate_new_experiment] p95={p95_ms:.4f}ms budget<{_VALIDATE_BUDGET_MS:.1f}ms")
     assert p95_ms < _VALIDATE_BUDGET_MS
 
@@ -147,18 +151,19 @@ def test_validate_new_experiment_p95_latency_within_budget() -> None:
 
 
 @pytest.mark.perf
-def test_gate_red_budget_actually_fails_past_budget() -> None:
+def test_gate_red_budget_actually_fails_past_budget(perf_budget: PerfBudget) -> None:
     """Proves the perf assertion above is not a tautology -- an absurdly
     low budget against the same samples must fail."""
     tenant_id = uuid4()
     parent = _experiment(tenant_id=tenant_id)
-    samples: list[float] = []
-    for _ in range(20):
-        child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
-        started = time.perf_counter()
-        validate_new_experiment(child, parent=parent, existing_with_same_key=None)
-        samples.append((time.perf_counter() - started) * 1000)
+    children = iter(
+        [_experiment(tenant_id=tenant_id, parent_id=parent.experiment_id) for _ in range(20)]
+    )
 
+    def _validate() -> None:
+        validate_new_experiment(next(children), parent=parent, existing_with_same_key=None)
+
+    wall_ms_samples = sorted(s.wall_ms for s in perf_budget.samples(_validate, n=20, warmup=0))
     absurdly_low_budget_ms = 1e-9
     with pytest.raises(AssertionError):
-        assert _p95(samples) < absurdly_low_budget_ms
+        assert _p95(wall_ms_samples) < absurdly_low_budget_ms
