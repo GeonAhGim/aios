@@ -1,13 +1,15 @@
-"""`MembershipRepository`(ports/membership_repository.py)의 asyncpg 구현.
+"""asyncpg implementation of `MembershipRepository` (ports/membership_repository.py).
 
-Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2 표(80행),
-§9 PLT-27. 스키마는 PLT-26(f4a6b8c0d2e4)이 만든 `tenant`/`tenant_membership`.
+Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2 table (row 80),
+§9 PLT-27. The schema is `tenant`/`tenant_membership`, created by PLT-26 (f4a6b8c0d2e4).
 
-상태 전이는 `id`/`tenant_id`/`state`/`revision`을 전부 WHERE에 건 단일
-UPDATE로 처리한다(105번 표준) — 공용 `conditional_update` 헬퍼는 id·상태
-컬럼 하나씩만 받아 `tenant_id`를 함께 걸 수 없으므로, LC-8b
-(`postgres_balance_repository.apply`)와 같은 방식으로 직접 SQL을 쓴다.
+State transitions use a single UPDATE with `id`/`tenant_id`/`state`/`revision`
+all in the WHERE clause (standard-105). The shared `conditional_update` helper
+only takes an id and a single state column, so it cannot also constrain
+`tenant_id` — raw SQL is used here instead, the same way LC-8b
+(`postgres_balance_repository.apply`) does.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -74,9 +76,10 @@ class PostgresMembershipRepository:
         return [_row_to_membership(row) for row in rows]
 
     async def count_active_owners(self, conn: asyncpg.Connection, tenant_id: UUID) -> int:
-        # PostgreSQL은 집계 함수에 직접 FOR UPDATE를 허용하지 않으므로("FOR UPDATE
-        # is not allowed with aggregate functions"), 잠글 행을 서브쿼리에서 먼저
-        # FOR UPDATE로 골라낸 뒤 바깥에서 센다 — 잠금 대상은 동일하다.
+        # PostgreSQL does not allow FOR UPDATE directly on an aggregate function
+        # ("FOR UPDATE is not allowed with aggregate functions"), so the rows to
+        # lock are selected with FOR UPDATE in a subquery first, then counted
+        # outside — the locked set is the same either way.
         count = await conn.fetchval(
             "SELECT count(*) FROM ("
             "  SELECT id FROM tenant_membership "
@@ -106,8 +109,9 @@ class PostgresMembershipRepository:
                 created_by,
             )
         except asyncpg.UniqueViolationError as exc:
-            # uq_tenant_membership_active(f4a6b8c0d2e4) 위반 — 이 tenant/subject에
-            # 이미 ACTIVE 멤버십이 존재한다(동시 grant 경합 또는 중복 커맨드).
+            # uq_tenant_membership_active (f4a6b8c0d2e4) violation — an ACTIVE
+            # membership already exists for this tenant/subject (concurrent
+            # grant race or a duplicate command).
             raise ConcurrencyConflictError(
                 f"tenant_membership: tenant_id={tenant_id} subject_id={subject_id}에 대한 "
                 "ACTIVE 멤버십이 이미 존재합니다(동시 처리 충돌)."
@@ -136,8 +140,9 @@ class PostgresMembershipRepository:
             new_state.value,
         )
         if row is None:
-            # tenant_id 불일치(교차 테넌트 시도)와 state/revision 불일치(동시
-            # 경합)를 구분해 응답하지 않는다 — 둘 다 동형(§8.3 "404 동형").
+            # Does not distinguish a tenant_id mismatch (cross-tenant attempt)
+            # from a state/revision mismatch (concurrent race) in the response
+            # — both are isomorphic (§8.3 "404 isomorphism").
             raise ConcurrencyConflictError(
                 f"tenant_membership.id={membership_id}: tenant_id/state/revision이 기대와 "
                 "다릅니다(동시 처리 충돌 또는 다른 tenant 소유) — 다시 조회 후 시도하세요."
