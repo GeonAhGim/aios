@@ -232,6 +232,14 @@ describe("PerformanceStatementsPage", () => {
     },
     20000,
   );
+
+  // ADR-2026-10-01-A D4(task-10801): 실적 명세서 화면의 수익률 등은 측정·공시값이며
+  // 보장값이 아니라는 고지가 화면에 항상 렌더돼야 한다.
+  it("'성과 보장 아님' 고지가 항상 렌더된다", () => {
+    renderPage({ listStatements: async () => ({ statements: [] }) });
+
+    expect(screen.getByText(/미래 수익을 보장하지 않습니다/)).toBeInTheDocument();
+  });
 });
 
 // ADR-2026-09-09-C D2 증거: negative 5건(빈 목록·500·404·정정 사유 미입력·이 파일

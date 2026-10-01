@@ -322,6 +322,8 @@ export function PerformanceStatementsPage({
       <div className="max-w-4xl space-y-6">
         <PageHeader title={t("performanceStatementsPage.title")} />
 
+        <Alert tone="warning">{t("common.performanceNotGuaranteed")}</Alert>
+
         <ComputeForm computeStatement={computeStatement} onComputed={refreshAfterMutation} />
 
         <Card data-testid="performance-statement-list">

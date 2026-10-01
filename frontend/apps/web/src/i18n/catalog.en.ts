@@ -29,6 +29,9 @@ export const catalogEn = {
     featureDisabled: "This feature is currently disabled.",
     notFound: "Not found",
     progress: "Progress",
+    performanceNotGuaranteed:
+      "Displayed performance metrics (return, Sharpe, MDD, etc.) are historical measurements for disclosure purposes only. They do not guarantee future returns.",
+    backtestDivergence: "Backtest results may differ from live execution fills and slippage.",
   },
   errors: {
     supportCode: "Support code: {{code}}",

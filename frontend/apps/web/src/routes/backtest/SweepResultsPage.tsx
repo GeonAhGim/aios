@@ -244,6 +244,9 @@ export function SweepResultsPage({ runSweep = defaultRunSweep }: SweepResultsPag
 
         {result && (
           <>
+            <Alert tone="warning">{t("common.performanceNotGuaranteed")}</Alert>
+            <Alert tone="warning">{t("common.backtestDivergence")}</Alert>
+
             <Card>
               <div className="flex items-center justify-between gap-4">
                 <p className="text-sm text-fg-muted">{t("legacy.sweepResultsPage.t19")}</p>

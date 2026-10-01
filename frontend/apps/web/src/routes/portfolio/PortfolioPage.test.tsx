@@ -318,4 +318,14 @@ describe("PortfolioPage 재조정 에러 표시", () => {
       expect(screen.getByText("재조정 후 배분 비중 합이 100%를 초과합니다.")).toBeInTheDocument(),
     );
   });
+
+  // ADR-2026-10-01-A D4(task-10801): 포트폴리오 화면도 성과 지표(총평가액·손익 등)를
+  // 보여주므로 보장값이 아니라는 고지가 렌더돼야 한다.
+  it("포트폴리오 조회 성공 시 '성과 보장 아님' 고지가 함께 렌더된다", async () => {
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/미래 수익을 보장하지 않습니다/)).toBeInTheDocument(),
+    );
+  });
 });

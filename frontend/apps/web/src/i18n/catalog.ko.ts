@@ -18,6 +18,11 @@ export const catalogKo = {
     featureDisabled: "이 기능은 현재 비활성화되어 있습니다.",
     notFound: "찾을 수 없음",
     progress: "진행률",
+    // ADR-2026-10-01-A D4(task-10801): 수익률·샤프·MDD 등 성과 지표는 보장값이
+    // 아니라 측정·공시값이다 — /portfolio, /reports, performance-statements,
+    // 백테스트 결과 화면이 공유하는 단일 고지 문구.
+    performanceNotGuaranteed: "표시된 성과 지표(수익률·샤프·MDD 등)는 과거 측정값이며 공시 목적입니다. 미래 수익을 보장하지 않습니다.",
+    backtestDivergence: "백테스트 결과는 실거래 체결·슬리피지와 다를 수 있습니다.",
   },
   errors: {
     supportCode: "지원코드: {{code}}",

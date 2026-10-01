@@ -117,6 +117,26 @@ journeys 단계를 생략하는 실행 조건(gate vs full)을 점검하거나 c
 | 3 성과 명세서 | `/portfolio/performance-statements` (`PerformanceStatementsPage.tsx`) | `compute`/`correct` mutation, list/detail `useQuery` | 계산·정정·조회 전체 흐름 | 있음 |
 | 4 지갑/정산 | `/wallet`, `/wallet/ledger`, `/wallet/payouts` | `useWalletBalance`, 커서 페이지네이션 `useQuery`, `markPaid` mutation | 잔액·원장·정산 내역 | 있음 |
 
+#### J5 부록 — "보장 아님" 고지(ADR-2026-10-01-A D4, task-10801)
+
+ADR-2026-10-01-A D4: 수익률·샤프·MDD 등 성과 지표는 보장값이 아니라 측정·공시값으로
+노출해야 한다. 아래 표는 리프 착수 시점(2026-10-01) 실제 렌더 결과를 확인한 화면별
+고지 유무이며, 없던 화면에는 이 리프에서 `common.performanceNotGuaranteed`
+(한/영 i18n 키, `catalog.ko.ts`/`catalog.en.ts` `common` 네임스페이스)를 추가했다.
+백테스트 결과 화면에는 "백테스트는 실거래 체결·슬리피지와 다를 수 있음"
+(`common.backtestDivergence`)도 함께 추가했다.
+
+| 화면(라우트) | 성과 지표 | 착수 전 고지 유무 | 조치 |
+|---|---|---|---|
+| `/portfolio` (`PortfolioPage.tsx`) | 총평가액, 배분 비중, 종목별 손익(totalPnl) | 없음 | `common.performanceNotGuaranteed` 추가 |
+| `/reports` (`ReportsPage.tsx`) | 수익률(totalReturn), 승률, MDD(maxDrawdown) | 없음 | `common.performanceNotGuaranteed` 추가 |
+| `/portfolio/performance-statements` (`PerformanceStatementsPage.tsx`) | 명세서 수익률(returns), 구성요소 손익 | 없음 | `common.performanceNotGuaranteed` 추가 |
+| `/backtest/sweep-results` (`SweepResultsPage.tsx`) | 스윕 메트릭(final_equity 등), 안정성 점수 | 없음 | `common.performanceNotGuaranteed` + `common.backtestDivergence` 추가 |
+
+검사: 4개 화면 각각의 컴포넌트 테스트(`*.test.tsx`)에서 고지 문자열이 렌더되는지
+확인하고, `e2e/journey-j2-discover-to-backtest.spec.ts`의 스윕 결과 단계에서 두 고지
+문자열의 가시성을 e2e로도 검사한다.
+
 ### J6 — 설정·승인·감사: 위임장/승인 흐름, 감사 추적, 개인 모드 (MVP-2)
 
 | 단계 | 화면(라우트) | 필요한 API/상태 | 성공 조건 | 현재 상태 |

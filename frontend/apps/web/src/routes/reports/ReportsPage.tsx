@@ -1,7 +1,7 @@
 import { useReport } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import { classifyForbidden, routeApiError } from "@aios/shared-types";
-import { Card, CardTitle, EmptyState, Input, LoadingState, PageHeader, PnlChart, Stat } from "@aios/ui-web";
+import { Alert, Card, CardTitle, EmptyState, Input, LoadingState, PageHeader, PnlChart, Stat } from "@aios/ui-web";
 import { useState } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { ErrorMessage } from "../../components/ErrorMessage";
@@ -60,6 +60,8 @@ export function ReportsPage() {
           <LoadingState />
         ) : report ? (
           <>
+            <Alert tone="warning">{t("common.performanceNotGuaranteed")}</Alert>
+
             <div className="grid grid-cols-4 gap-4">
               <Stat
                 label={t("legacy.reportsPage.label4")}

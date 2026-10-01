@@ -2,6 +2,7 @@ import { usePortfolio, useRebalancePortfolio } from "@aios/shared-hooks";
 import { ApiError } from "@aios/api-client";
 import { classifyBadRequest, classifyForbidden, routeApiError } from "@aios/shared-types";
 import {
+  Alert,
   AllocationBarChart,
   Button,
   Card,
@@ -108,6 +109,8 @@ export function PortfolioPage({ positionsClient, now }: PortfolioPageProps = {})
           <LoadingState />
         ) : portfolio ? (
           <>
+            <Alert tone="warning">{t("common.performanceNotGuaranteed")}</Alert>
+
             <div className="grid grid-cols-3 gap-4">
               <Stat label={t("legacy.portfolioPage.label2")} value={portfolio.totalPortfolioValue} />
               <Stat

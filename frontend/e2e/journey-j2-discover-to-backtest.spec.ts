@@ -234,6 +234,11 @@ test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크�
     await expect(page).toHaveURL(/\/backtest\/sweep-results$/);
     await expect(page.getByText("sweep-repro-8252")).toBeVisible();
     expect(calls).toBe(1);
+
+    // ADR-2026-10-01-A D4(task-10801): 백테스트 결과 화면은 성과 보장 아님 고지와
+    // 실거래 체결·슬리피지 상이 고지를 함께 보여줘야 한다.
+    await expect(page.getByText(/미래 수익을 보장하지 않습니다/)).toBeVisible();
+    await expect(page.getByText(/실거래 체결·슬리피지와 다를 수 있습니다/)).toBeVisible();
   });
 
   // ─── 7단계: 리서치 검색 — 실제 테스트 (mockBackend에 search/sources 목 추가 완료) ──

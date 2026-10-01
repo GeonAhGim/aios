@@ -129,6 +129,16 @@ describe("SweepResultsPage", () => {
     expect(runSweep).toHaveBeenCalledWith(expect.objectContaining({ metric: "final_equity" }));
   });
 
+  // ADR-2026-10-01-A D4(task-10801): 백테스트 결과는 성과 보장이 아니라는 고지와,
+  // 실거래 체결·슬리피지와 다를 수 있다는 고지가 함께 렌더돼야 한다.
+  it("결과가 오면 성과 보장 아님 고지와 실거래 상이 고지가 함께 렌더된다", async () => {
+    const runSweep = vi.fn().mockResolvedValue(sweepResult());
+    renderPage({ runSweep }, { sweepRequest: sweepRequest() });
+
+    await waitFor(() => expect(screen.getByText(/미래 수익을 보장하지 않습니다/)).toBeInTheDocument());
+    expect(screen.getByText(/실거래 체결·슬리피지와 다를 수 있습니다/)).toBeInTheDocument();
+  });
+
   it("축이 2개가 아니면 히트맵 대신 안내를 보여준다", async () => {
     const runSweep = vi.fn().mockResolvedValue(
       sweepResult({ axes: [{ name: "rsi_len", values: [10, 14] }], stability: null }),

@@ -57,6 +57,30 @@ describe("ReportsPage 조회 에러 표시", () => {
     await waitFor(() => expect(screen.getByText("12.3%")).toBeInTheDocument());
   });
 
+  // ADR-2026-10-01-A D4(task-10801): 성과 지표는 보장값이 아니라 측정·공시값임을
+  // 화면에 명시한다 — 정상 응답 렌더에서 고지가 실제로 보이는지 확인한다.
+  it("정상 응답이면 '성과 보장 아님' 고지가 함께 렌더된다", async () => {
+    useReportResult = {
+      data: {
+        totalReturn: "12.3",
+        winRate: "55%",
+        maxDrawdown: "8.1",
+        tradeCount: 20,
+        dailyPnl: [],
+        strategyContributions: [],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/미래 수익을 보장하지 않습니다/)).toBeInTheDocument(),
+    );
+  });
+
   it("negative: 403(AUTHZ_FORBIDDEN) 조회 실패는 err.message 대신 ForbiddenNotice의 매핑 문구를 보여준다", async () => {
     useReportResult = {
       data: undefined,
