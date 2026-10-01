@@ -1,22 +1,22 @@
-"""BT-10c/BT-18 — `POST /v1/backtests/{quick,sweep}` 요청·응답 스키마.
+"""BT-10c/BT-18 — `POST /v1/backtests/{quick,sweep}` request/response schema.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.5 BT-10,
 §9.9 BT-16/BT-18, §3.4(`BacktestConfigV2`).
 
-식별자 규칙은 LA-24(`src/api/schemas/market_data.py`/`application/read_api.
-resolve_instrument`)와 같다 — `instrument_id`가 있으면 우선, 없으면
-`venue`+`symbol`. `script_source`의 길이 상한은 DSL-12와 같은 값
-(`scripts.MAX_SOURCE_CHARS`)을 재사용한다 — 트랜스포트 상한을 두 곳에서
-따로 정의하지 않는다.
+Identifier rules follow LA-24 (`src/api/schemas/market_data.py`/`application/read_api.
+resolve_instrument`): prefer `instrument_id` when present, fall back to
+`venue`+`symbol`. The length cap on `script_source` reuses the same value
+as DSL-12 (`scripts.MAX_SOURCE_CHARS`) — transport caps are not defined
+separately in two places.
 
-`initial_cash`/`funding_rate`는 `run_quick_backtest`(BT-10)의 필수·선택
-인자를 그대로 옮긴 것이다 — `BacktestConfigV2`(BT-1)에는 없는 값이라
-요청에 별도로 싣는다.
+`initial_cash`/`funding_rate` are direct copies of the required/optional
+arguments from `run_quick_backtest` (BT-10) — values absent from
+`BacktestConfigV2` (BT-1), so they are carried separately in the request.
 
-응답은 `QuickBacktestResult`(BT-10)를 그대로 뷰로 옮긴다. `Decimal` 필드는
-pydantic v2 JSON 모드 기본 동작(문자열 직렬화)을 그대로 쓴다 — 별도
-인코더가 필요 없다. `fills`는 원본 튜플 순서(체결 시각 순, 결정론)를
-그대로 유지하고 재정렬하지 않는다.
+Responses mirror `QuickBacktestResult` (BT-10) as-is. `Decimal` fields rely
+on Pydantic v2 JSON mode default behaviour (string serialisation) — no
+custom encoder needed. `fills` preserve the original tuple order (by
+execution time, deterministic) without re-sorting.
 
 `Sweep*` schemas (BT-18, task-7774) map 1:1 to `SweepRequestInput`/
 `SweepResultView` in frontend/packages/api-client/src/clients/backtests.ts
