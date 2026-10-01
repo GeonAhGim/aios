@@ -1,13 +1,14 @@
-"""BT-8 — 백테스트 비용 2종(펀딩·차입) 패키지.
+"""BT-8 — Backtest cost functions (funding and borrow).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.5 BT-8(`domain/costs/{funding,borrow}.py`), §3.4(`BacktestConfigV2.costs`),
-§9.5 BT-8(DoD: "일할 계산 정확").
+§9.5 BT-8(DoD: "pro-rata calculation accuracy").
 
-`funding.py`(고정 인터벌 정산)와 `borrow.py`(일할 계산)는 정산 방식이
-달라 파일을 나눴지만, 최종 비용의 반올림 규칙만은 이 `round_cost` 하나로
-고정한다 — 두 파일이 각자 반올림을 따로 구현하면 같은 입력에도 마지막
-자리가 어긋날 수 있다.
+`funding.py` (fixed-interval settlement) and `borrow.py` (pro-rata/day-count)
+use different settlement logic and live in separate files, but both must
+round their final cost through this single `round_cost` — if each module
+implements its own rounding, the last digits can diverge for identical
+inputs.
 
 DEEPEN task-3039: `exact_total_seconds` also lives here for the same reason.
 `timedelta.total_seconds()` returns a `float`, silently breaking this
@@ -22,16 +23,19 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import ROUND_HALF_EVEN, Decimal
 
-_COST_QUANTIZE_EXPONENT = Decimal("0.00000001")  # 1e-8(소수 8자리) — 거래소 통화 정밀도 상한 관례
+_COST_QUANTIZE_EXPONENT = Decimal(
+    "0.00000001"
+)  # 1e-8 (8 decimal places) — exchange currency precision ceiling convention
 _SECONDS_PER_DAY = Decimal(86400)
 _MICROSECONDS_PER_SECOND = Decimal(1_000_000)
 
 
 def round_cost(value: Decimal) -> Decimal:
-    """비용 계산 결과를 소수 8자리로 반올림(HALF_EVEN, 은행가 반올림)한다.
+    """Round a cost value to 8 decimal places using banker's rounding (HALF_EVEN).
 
-    `funding.py`·`borrow.py`가 최종 반환 직전 이 함수 하나만 거치게 해
-    반올림 로직 중복 구현을 막는다.
+    Both `funding.py` and `borrow.py` must pass their final cost through
+    this single function before returning, preventing duplicated rounding
+    logic across modules.
     """
 
     return value.quantize(_COST_QUANTIZE_EXPONENT, rounding=ROUND_HALF_EVEN)
