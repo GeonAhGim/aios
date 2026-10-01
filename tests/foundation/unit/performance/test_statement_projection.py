@@ -10,7 +10,6 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §9 PLT-44.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -150,7 +149,7 @@ def test_statement_to_view_raises_on_corrupted_return_method():
 
 
 @pytest.mark.perf
-def test_statement_to_view_maps_large_return_series_within_budget():
+def test_statement_to_view_maps_large_return_series_within_budget(perf_budget):
     many_returns = tuple(
         _return_figure(
             basis="GROSS" if i % 2 == 0 else "NET",
@@ -160,12 +159,12 @@ def test_statement_to_view_maps_large_return_series_within_budget():
     )
     statement = _statement(returns=many_returns)
 
-    started = time.perf_counter()
-    view = statement_to_view(statement)
-    elapsed = time.perf_counter() - started
-
-    assert len(view.returns) == 5000
-    assert elapsed <= 1.0, f"5000건 매핑에 {elapsed:.3f}s — 예산(1.0s) 초과"
+    perf_budget.assert_within(
+        lambda: statement_to_view(statement),
+        budget_ms=1000.0,
+        n=1,
+        label="statement_to_view/5000",
+    )
 
 
 # ---------- 게이트 적색 재현(D2) — 억제 대신 실제 타입 수정 회귀 방지 ----------
