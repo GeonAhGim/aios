@@ -60,3 +60,12 @@ def test_negative_admission_condition_removed() -> None:
     corrupted = text.replace("미확인 아티팩트의 무조건 반입은 금지한다", "")
     with pytest.raises(AssertionError, match="missing admission condition"):
         assert_evidence_contract(corrupted)
+
+
+def test_failure_injection_document_read_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Path.read_text() IOError → 예외가 전파되어 호출자가 실패함을 검증."""
+    monkeypatch.setattr(
+        Path, "read_text", lambda self, encoding=None: (_ for _ in ()).throw(OSError("disk full"))
+    )
+    with pytest.raises(IOError):
+        DOCUMENT.read_text(encoding="utf-8-sig")
