@@ -1,22 +1,24 @@
-"""SubmitPaperIntent 커맨드 — 실제 tick 워크플로(스케줄러)는 이 리프에
-없다(71번 §1 FROZEN 영역과 무관한 새 개념이지만, 그 자체가 아직 미구현 —
-마이그레이션 docstring 참조). 이 함수는 미래의 스케줄러 또는 수동
-호출자가 "지금 이 fence로 하나의 주문 의도를 제출해도 되는가"를 확인하는
-지점만 제공한다.
+"""SubmitPaperIntent command — the actual tick workflow (scheduler) is not
+in this leaf (a new concept unrelated to the §1 FROZEN area of spec 71, but
+not yet implemented itself — see the migration docstring). This function only
+provides the checkpoint a future scheduler or manual caller uses to confirm
+"is it still OK to submit one order intent under this fence right now."
 
-Spec: AIOSproject 77번 §3 "Every tick ... verifies current state/fence
+Spec: AIOSproject spec 77 §3 "Every tick ... verifies current state/fence
 immediately before intent and immediately before adapter call. Superseded
-fence token means no-op/audit, never late order submission." — 이 함수는
-그 "즉시 확인"을 하나의 원자적 UPDATE(increment 없이 상태/토큰만 조건부
-확인)로 구현한다.
+fence token means no-op/audit, never late order submission." — this function
+implements that "immediate check" as one atomic UPDATE (a conditional
+state/token check only, without incrementing).
 
-교차세션 감사 발견(agent-platform-12, 2026-09-02) 반영 — start_deployment/
-resume_deployment는 진입 시점에 risk_gate를 확인하지만, RUNNING이 된
-*이후* 관리자가 kill switch를 켜도 fence_token 자체는 안 바뀌므로(kill
-switch 활성화는 이 deployment의 pause/stop을 자동으로 트리거하지 않는다)
-fence 재확인만으로는 이 경로를 못 막는다. GateKind.PRE_INTENT로 매 제출마다
-risk_gate를 다시 확인해 이 틈을 막는다 — evaluate_risk_gate()는 10초
-TTL로 자체 캐시하므로(78번 §2) 매 tick마다 전체 재계산을 강제하지는 않는다.
+Reflects a cross-session audit finding (agent-platform-12, 2026-09-02) —
+start_deployment/resume_deployment check the risk_gate on entry, but if an
+admin flips the kill switch *after* the deployment reaches RUNNING, the
+fence_token itself does not change (activating the kill switch does not
+automatically trigger pause/stop on this deployment), so re-checking the
+fence alone cannot block this path. We close the gap by re-checking the
+risk_gate on every submission via GateKind.PRE_INTENT — evaluate_risk_gate()
+caches itself with a 10s TTL (spec 78 §2), so this doesn't force a full
+recomputation on every tick.
 """
 
 from __future__ import annotations
@@ -52,11 +54,12 @@ __all__ = [
     "RiskGateDeniedError",
     "submit_paper_intent",
 ]
-"""RiskGateDeniedError를 여기서도 re-export한다 — start_deployment.py와
-pause_deployment.py가 각자 독립된 InvalidDeploymentStateError를 정의해뒀던
-걸 리뷰 중 발견한 뒤(같은 이름, 다른 클래스라 pytest.raises가 조용히
-틀린 걸 잡을 뻔했다), 같은 실수를 반복하지 않기로 했다 — 새 클래스를
-또 만드는 대신 start_deployment.py의 것을 그대로 재사용한다."""
+"""Re-export RiskGateDeniedError here too — after a review found that
+start_deployment.py and pause_deployment.py had each defined their own
+independent InvalidDeploymentStateError (same name, different classes,
+which almost let pytest.raises silently pass on the wrong one), we decided
+not to repeat that mistake — reuse start_deployment.py's class instead of
+defining a new one."""
 
 
 class DeploymentNotFoundError(Exception):
@@ -64,16 +67,18 @@ class DeploymentNotFoundError(Exception):
 
 
 class FenceSupersededError(Exception):
-    """PAP-004 — 이 fence로는 더 이상 제출할 수 없다(그 사이 pause/stop이
-    fence를 이미 올렸다). 늦은 주문 제출이 아니라 no-op이다."""
+    """PAP-004 — submission under this fence is no longer possible (a
+    pause/stop already advanced the fence in the meantime). This is a
+    no-op, not a late order submission."""
 
 
 class ProviderUnavailableError(Exception):
     """PAP-007 "provider timeout produces DEGRADED/retry policy and never
-    switches modes" — paper adapter 호출이 실패하면(시뮬레이션이라도 timeout/
-    거부 가능) RUNNING을 DEGRADED로 내리고, 원문 adapter 예외는 노출하지
-    않는다(72번 §4 에러 taxonomy와 동일 원칙). "모드를 절대 바꾸지 않는다"는
-    이 예외가 mode=PAPER를 그대로 유지한 채 상태만 옮긴다는 뜻이다."""
+    switches modes" — if the paper adapter call fails (even a simulation
+    can time out or be rejected), we drop RUNNING to DEGRADED and do not
+    expose the raw adapter exception (same principle as the spec 72 §4
+    error taxonomy). "Never switches modes" means this exception moves the
+    state only, leaving mode=PAPER unchanged."""
 
 
 async def submit_paper_intent(
@@ -93,8 +98,8 @@ async def submit_paper_intent(
     if deployment is None:
         raise DeploymentNotFoundError(str(deployment_id))
 
-    # 77번 §3 "verifies ... immediately before intent" — adapter를 부르기
-    # 전에 먼저 확인한다.
+    # Spec 77 §3 "verifies ... immediately before intent" — check this
+    # before calling the adapter.
     fence_stale = deployment.fence_token != expected_fence_token
     if deployment.state != DeploymentState.RUNNING or fence_stale:
         raise FenceSupersededError(
@@ -103,8 +108,9 @@ async def submit_paper_intent(
             f"현재 fence={deployment.fence_token})."
         )
 
-    # 교차세션 감사 발견 반영 — fence가 유효해도 kill switch가 RUNNING
-    # *도중에* 켜졌을 수 있다. PRE_INTENT 게이트로 매 제출 직전 다시 확인한다.
+    # Reflects the cross-session audit finding — even if the fence is
+    # valid, the kill switch may have been flipped on *while* RUNNING.
+    # Re-check right before each submission via the PRE_INTENT gate.
     risk_result = await evaluate_risk_gate(
         risk_repo,
         mandate_repo,
@@ -122,11 +128,13 @@ async def submit_paper_intent(
     try:
         ack = await adapter.submit_paper_intent(context, sequence)
     except Exception as exc:
-        # PAP-007 — adapter 호출 실패는 fence 문제가 아니라 provider 자체의
-        # 문제다. RUNNING이 아니게 된 사이 다른 요청이 먼저 상태를 바꿨을 수도
-        # 있으니 조건부로만 내린다 — 실패해도(이미 DEGRADED/PAUSED 등) 무시하고
-        # 원래 예외를 그대로 올린다(105번 §2.2, 상태 전이 실패가 "더 급한
-        # 원인"을 가리는 이차 예외가 되지 않게).
+        # PAP-007 — an adapter call failure is a provider problem, not a
+        # fence problem. Another request may have already changed the
+        # state away from RUNNING, so we only drop it conditionally — if
+        # that fails too (already DEGRADED/PAUSED etc.), ignore it and
+        # re-raise the original exception unchanged (spec 105 §2.2, so a
+        # state-transition failure never becomes a secondary exception
+        # that masks the "more urgent cause").
         try:
             await repo.transition_deployment_state(
                 deployment_id,
@@ -134,12 +142,13 @@ async def submit_paper_intent(
                 expected_state=DeploymentState.RUNNING.value,
                 new_state=DeploymentState.DEGRADED.value,
             )
-        except Exception:  # noqa: BLE001 — 위 주석대로 원래 예외를 가리지 않는다
+        except Exception:  # noqa: BLE001 — per the comment above, don't mask the original exception
             pass
         raise ProviderUnavailableError("DEPENDENCY_PAPER_PROVIDER_UNAVAILABLE") from exc
 
-    # "immediately before adapter call" 재확인 — adapter 호출 자체가
-    # 네트워크 왕복이라 그 사이 pause/stop이 커밋됐을 수 있다.
+    # Re-check for "immediately before adapter call" — the adapter call
+    # itself is a network round trip, so a pause/stop could have committed
+    # in the meantime.
     fresh = await repo.get_deployment(deployment_id)
     if (
         fresh is None
@@ -153,9 +162,10 @@ async def submit_paper_intent(
         )
 
     # PLT-10 §7.2 `aios.foundation_paper_control.order_intent.count_total` —
-    # A4 알림(§7.4)이 mode="live_blocked" 발생 자체를 critical로 취급하므로,
-    # credential_class가 PAPER가 아닌 경우를 여기서 구조적으로 구분해둔다
-    # (지금은 CredentialClass에 PAPER만 존재해 항상 "paper"다).
+    # the A4 alert (§7.4) treats a mode="live_blocked" occurrence itself as
+    # critical, so we structurally distinguish the non-PAPER credential_class
+    # case here (today CredentialClass only has PAPER, so this is always
+    # "paper").
     is_paper = deployment.provenance.credential_class == CredentialClass.PAPER
     mode = "paper" if is_paper else "live_blocked"
     metrics.counter(FOUNDATION_PAPER_CONTROL_ORDER_INTENT_COUNT_TOTAL, labels={"mode": mode})
