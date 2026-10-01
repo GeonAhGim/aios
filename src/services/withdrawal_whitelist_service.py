@@ -1,6 +1,6 @@
 """11.7 — Emergency withdrawal destination whitelist management.
 
-Spec: 기능설계문서_v1.20.md#FD-11.5, 정책문서 7.10-A/20.1-B
+Spec: design_document_v1.20.md#FD-11.5, policy_document 7.10-A/20.1-B
 
 Pre-registers destinations that FD-10.3 (panic prompt) will reference
 during a crisis — to genuinely enforce "registration itself becomes
@@ -22,6 +22,7 @@ FD-17.1 event publishing — on successful registration, publishes
 "security.withdrawal_whitelist.added" (4.9 mandatory rule — this
 channel cannot be disabled by the user, channel_policy.py).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -98,7 +99,9 @@ class WithdrawalWhitelistService:
             # withdrawal destination and must not appear even in audit_log
             # (record only which exchange, label, and result).
             await record_audit_log(
-                conn, actor_agent=str(user_id), action_type="withdrawal_whitelist.registered",
+                conn,
+                actor_agent=str(user_id),
+                action_type="withdrawal_whitelist.registered",
                 user_id=user_id,
                 decision_data={"exchange": exchange, "label": label, "entry_id": row["id"]},
             )
