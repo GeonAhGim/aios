@@ -24,7 +24,6 @@ docs/audit/DEPTH_DC_RD.md#1765) D1 -> D3 증빙.
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import cast
@@ -41,6 +40,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     authorize_source,
     permits_use,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
 
@@ -102,48 +102,44 @@ def test_permits_use_fail_closed_denies_unknown_data_use_value_even_for_widest_s
 
 
 @pytest.mark.perf
-def test_permits_use_repeated_calls_meet_throughput_budget() -> None:
+def test_permits_use_repeated_calls_meet_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """`permits_use`는 요청마다(캔들 페이지네이션 등) 반복 호출될 수 있는
     hot path다 — 딕셔너리 멤버십 조회가 반복 호출에서 예산을 지켜야 한다."""
     iterations = 100_000
-    budget_sec = 2.0  # 실측 로컬 <0.05s, CI 편차 감안
     scopes = list(RedistributionScope)
     uses = list(DataUse)
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        permits_use(scopes[i % len(scopes)], uses[i % len(uses)])
-    elapsed = time.perf_counter() - start
-
-    print(
-        f"[DC-28 source_contract] permits_use() x{iterations} in {elapsed:.4f}s "
-        f"(budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"permits_use {iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    # batch=iterations: per-call average over 100k consecutive calls
+    # budget_ms=2000 (2.0s, unchanged from raw wall-clock budget)
+    perf_budget.assert_within(
+        lambda: [
+            permits_use(scopes[j % len(scopes)], uses[j % len(uses)]) for j in range(iterations)
+        ],
+        budget_ms=2000,
+        n=1,
+        label="permits_use avg",
     )
 
 
 @pytest.mark.perf
-def test_authorize_source_with_many_calls_meets_latency_budget() -> None:
+def test_authorize_source_with_many_calls_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """`authorize_source`도 요청마다 재호출되는 순수 판정이다 — 절대시간
     예산 내에 있어야 실시간 판정 경로가 다건 요청에서도 지연 SLA를
     지킨다."""
     n = 20_000
-    budget_sec = 2.0  # 실측 로컬 <0.1s
     contract = _contract()
 
-    start = time.perf_counter()
-    for _ in range(n):
-        grant = authorize_source(contract, _NOW)
-        assert grant.allowed is True
-    elapsed = time.perf_counter() - start
-
-    print(
-        f"[DC-28 source_contract] authorize_source() x{n} in {elapsed:.4f}s (budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"authorize_source {n}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    # batch=n: per-call average over 20k consecutive calls
+    # budget_ms=2000 (2.0s, unchanged from raw wall-clock budget)
+    perf_budget.assert_within(
+        lambda: [authorize_source(contract, _NOW) for _ in range(n)],
+        budget_ms=2000,
+        n=1,
+        label="authorize_source avg",
     )
 
 
