@@ -20,10 +20,10 @@ negative quantity), 실패주입 1건(journal 어댑터 예외 -> 원자성 검�
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -45,6 +45,7 @@ from src.foundation.positions.application.record_fill import UnknownPositionErro
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.cost_basis.fifo import NegativeQuantityError
 from src.foundation.positions.domain.position_key import PositionKey
+from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
@@ -360,23 +361,33 @@ async def test_journal_write_failure_preserves_atomicity(pool: asyncpg.Pool) -> 
 
 
 @pytest.mark.perf
-async def test_concurrent_fills_serializable(pool: asyncpg.Pool) -> None:
+async def test_concurrent_fills_serializable(pool: asyncpg.Pool, perf_budget: PerfBudget) -> None:
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key(tenant_id)
     await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
     try:
-        started = time.perf_counter()
-        results = await asyncio.gather(
-            *[
-                _fill_once(
-                    pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
-                )
-                for _ in range(_CONCURRENT_FILLS)
-            ],
-            return_exceptions=True,
-        )
-        elapsed = time.perf_counter() - started
+
+        async def _run_concurrent_fills() -> list[object]:
+            return await asyncio.gather(
+                *[
+                    _fill_once(
+                        pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
+                    )
+                    for _ in range(_CONCURRENT_FILLS)
+                ],
+                return_exceptions=True,
+            )
+
+        # 20건 동시 체결은 position_key당 1회만 성립하는 상태 변이라
+        # best-of-N 재실행이 불가하다(재실행하면 두 번째부터는 이미 채워진
+        # 포지션에 또 체결이 들어가 데이터가 달라진다) - perf_budget을
+        # 단일 표본(sample_async)으로만 써서 coverage tracer 오버헤드를
+        # 측정 구간 밖으로 빼되(conftest.py PerfBudget 독스트링 참고),
+        # raw time.perf_counter()는 쓰지 않는다.
+        sample = await perf_budget.sample_async(_run_concurrent_fills)
+        results = cast("list[object]", sample.result)
+        elapsed = sample.wall_ms / 1000
 
         failures = [r for r in results if isinstance(r, BaseException)]
         assert failures == []  # 락이 제대로 걸리면 전부 성공해야 한다 - 실패는 곧 경쟁상태.
