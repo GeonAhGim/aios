@@ -13,8 +13,46 @@ test_openapi_compat_actions.py(실패주입·성능·서브프로세스, 3/3).
 from __future__ import annotations
 
 import json
+from typing import Any
+
+import pytest
 
 from scripts.check_openapi_compat import find_violations, main
+
+
+def test_find_violations_rejects_non_dict_baseline():
+    """불변식: baseline이 dict가 아니면 AttributeError로 거부해야 한다."""
+    bad_baseline: Any = "not-a-dict"
+    with pytest.raises(AttributeError):
+        find_violations(bad_baseline, {"paths": {}})
+
+
+def test_find_violations_rejects_non_dict_current():
+    """불변식: current가 dict가 아니면 AttributeError로 거부해야 한다."""
+    bad_current: Any = "not-a-dict"
+    with pytest.raises(AttributeError):
+        find_violations({"paths": {}}, bad_current)
+
+
+def test_find_violations_rejects_none_baseline():
+    """불변식: baseline이 None이면 AttributeError로 거부해야 한다."""
+    bad_baseline: Any = None
+    with pytest.raises(AttributeError):
+        find_violations(bad_baseline, {"paths": {}})
+
+
+def test_find_violations_rejects_none_current():
+    """불변식: current가 None이면 AttributeError로 거부해야 한다."""
+    bad_current: Any = None
+    with pytest.raises(AttributeError):
+        find_violations({"paths": {}}, bad_current)
+
+
+def test_find_violations_rejects_list_as_paths_container():
+    """불변식: baseline 자체가 list면 .get() 호출이 없어 AttributeError로 거부된다."""
+    bad_baseline: Any = []
+    with pytest.raises(AttributeError):
+        find_violations(bad_baseline, {})
 
 
 def _schema(*, paths: dict, schemas: dict | None = None) -> dict:
@@ -225,3 +263,36 @@ def test_cli_fails_when_baseline_missing(tmp_path, capsys):
 
     assert exit_code == 1
     assert "FAIL:" in capsys.readouterr().out
+
+
+# --- failure-injection: baseline 파일 읽기 중 예외 전파 ---
+
+
+def test_cli_propagates_baseline_json_decode_error(tmp_path, capsys):
+    """실패주입: baseline이 손상된 JSON이면 CLI가 예외를 삼키지 않고 전파한다
+    (fail-closed — 손상 파일을 암묵적으로 OK 취급하지 않음)."""
+    baseline_path = tmp_path / "corrupt.json"
+    baseline_path.write_text("not valid json{{{", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        main(["--baseline", str(baseline_path)])
+
+
+def test_cli_propagates_export_subprocess_failure(monkeypatch, tmp_path):
+    """실패주입: --current 생략 시 export_openapi.py 서브프로세스를 호출하는데,
+    서브프로세스가 산출 파일을 쓰지 않고 실패하면 CLI는 반환코드를 검증하지
+    않으므로 FileNotFoundError가 그대로 전파된다(fail-closed 확인)."""
+    import scripts.check_openapi_compat as mod
+
+    def fake_run(*args, **kwargs):
+        import subprocess as sp
+
+        return sp.CompletedProcess(args[0] if args else [], returncode=1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps({"paths": {}}), encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError):
+        main(["--baseline", str(baseline_path)])
