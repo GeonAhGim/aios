@@ -324,4 +324,4 @@ def test_role_can_latency(perf_budget):
         for _ in range(iterations):
             role_can(MembershipRole.OWNER, "admin")
 
-    perf_budget.assert_within(_run, budget_ms=30.0, label="role_can 10만 회 — 예산 0.03초")
+    perf_budget.assert_within(_run, budget_ms=30.0, batch=8, label="role_can 10만 회 — 예산 0.03초")

@@ -125,22 +125,33 @@ def _never_signals_fsm_config() -> FSMStrategyConfig:
     )
 
 
-def test_throughput_meets_local_budget_floor_and_metric_matches_wall_clock() -> None:
+def test_throughput_meets_local_budget_floor_and_metric_matches_wall_clock(perf_budget) -> None:
     """성능 단언(수치): ADR-2026-09-09-C "백테스트 1개월 M1 1심볼 3초"의 극히
     일부 구간(2,000 bar ≈ 1.4일치 M1)조차 여유 있게 끝나야 한다 — 실측
     기준선(로컬, fake indicator) 대비 8배 이상 여유를 둔 1.0초를 바닥선으로
     건다(tests/foundation/unit/backtest/test_run_backtest.py의 동일 예산과
     같은 값 — L50이 그 실측치를 재확인하고, 새로 배선한 메트릭 관측이 그
-    벽시계 실측과 일치하는지까지 함께 증명한다)."""
+    벽시계 실측과 일치하는지까지 함께 증명한다).
+
+    예산 단언은 `perf_budget`(이 프로세스의 `time.process_time()` CPU 시간)으로
+    잰다 — `time.perf_counter()` 벽시계는 CI xdist 부하(다른 워커가 코어를
+    점유)에 흔들려 80% 부하에서 2.186s까지 관측됐다(ND-1 재현, task-10552).
+    메트릭 관측값과 벽시계의 일치 여부는 별개로 `sample.wall_ms`(같은 1회
+    실행 구간의 실측 벽시계)와 계속 비교한다."""
     bars = _synthetic_bars(2000)
     fsm = _never_signals_fsm_config()
     spy = _SpyMetrics()
 
-    wall_start = time.perf_counter()
-    run_backtest(_config(), fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy)
-    wall_elapsed = time.perf_counter() - wall_start
-
-    assert wall_elapsed < 1.0, f"2,000 bar 처리에 {wall_elapsed:.3f}s — 1.0s 예산 초과"
+    sample = perf_budget.assert_within(
+        lambda: run_backtest(
+            _config(), fsm, bars, indicator_service=_FakePriceIndicatorService(), metrics=spy
+        ),
+        budget_ms=1000.0,
+        n=1,
+        warmup=0,
+        label="2,000 bar 백테스트 처리 — 예산 1.0초(CPU)",
+    )
+    wall_elapsed = sample.wall_ms / 1000.0
 
     durations = [o for o in spy.observations if o[0] == BACKTEST_RUN_DURATION_SECONDS]
     assert len(durations) == 1

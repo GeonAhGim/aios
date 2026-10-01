@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 73_trust_core_l3_build_and_operational_specification_v1.0.md §6.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -107,6 +108,17 @@ def would_remove_last_owner(active_owners: int, target_is_owner: bool, to: Membe
     return active_owners <= 1
 
 
+_MUTATE_ROLES = frozenset(
+    {
+        MembershipRole.OWNER,
+        MembershipRole.ADMIN,
+        MembershipRole.MEMBER,
+        MembershipRole.SERVICE,
+    }
+)
+_ADMIN_ROLES = frozenset({MembershipRole.OWNER, MembershipRole.ADMIN})
+
+
 def role_can(role: MembershipRole, action: Literal["read", "mutate", "admin"]) -> bool:
     """A role's default permissions within a tenant. AUDITOR is read-only as
     the name implies — granting write permission to an audit-purpose role
@@ -114,12 +126,7 @@ def role_can(role: MembershipRole, action: Literal["read", "mutate", "admin"]) -
     if action == "read":
         return True
     if action == "mutate":
-        return role in {
-            MembershipRole.OWNER,
-            MembershipRole.ADMIN,
-            MembershipRole.MEMBER,
-            MembershipRole.SERVICE,
-        }
+        return role in _MUTATE_ROLES
     if action == "admin":
-        return role in {MembershipRole.OWNER, MembershipRole.ADMIN}
+        return role in _ADMIN_ROLES
     return False

@@ -129,6 +129,8 @@ markers = [
     "nightly: 실행 시간이 긴 성능 테스트 — 기본 CI에서 제외하고 nightly 잡에서만 돈다(task-1081/ADR-2026-09-04-A).",
     "live_demo: 거래소 데모 계정 실키 왕복 테스트(Bitget task-2179/L4-30, KIS task-2787/BR-14) — 기본 CI에서 제외, 키 없으면 skip(사유 출력).",
     "redis: 실 Redis 인스턴스가 필요한 통합테스트(M2-8 Phase2, task-2624) — 아직 CI에 Redis 서비스가 배선되지 않아 기본 실행에서 제외, `pytest -m redis`로 명시 실행하거나 TEST_REDIS_URL을 지정한다.",
+    "negative: D2/D3 증빙용 음성 테스트 — 실패/거부 경로가 의도대로 fail-closed 하는지 확인한다(ADR-2026-09-09-C).",
+    "failure_injection: D2/D3 증빙용 실패주입 테스트 — 외부 의존성/DB 장애를 강제해 복구·거부 경로를 검증한다(ADR-2026-09-09-C).",
 ]
 
 [tool.ruff]

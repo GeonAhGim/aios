@@ -165,21 +165,35 @@ async def test_resync_detects_and_repairs_drift_matching_replay_verify(pool):
     assert clean.ok, clean.mismatches
 
     await _bump_balance_outside_event_trail(pool, debit_code, 1)
-    tampered = await replay_verify.verify(pool, as_of=as_of, hours=1)
-    assert not tampered.ok
-    assert any(d.domain == "ledger" and d.key == debit_code for d in tampered.mismatches)
+    # `replay_verify.verify` scans every account in the window, not just
+    # `debit_code` -- `-n 8` (xdist "load" scheduling) can run this test
+    # concurrently with another worker's own tamper-then-repair test in this
+    # file, so a committed tamper left behind by an assertion failure here
+    # (before the repair below commits) would fail *that* worker's unrelated
+    # `clean.ok`/`repaired.ok` checks too. Converge back to the journal value
+    # in `finally` unless the repair itself already did (task-10552).
+    repair_committed = False
+    try:
+        tampered = await replay_verify.verify(pool, as_of=as_of, hours=1)
+        assert not tampered.ok
+        assert any(d.domain == "ledger" and d.key == debit_code for d in tampered.mismatches)
 
-    async with pool.acquire() as conn, conn.transaction():
-        report = await resync_account_balance(conn, debit_code, journal=journal, balances=balances)
-    assert report.resynced is True
-    assert report.actual_balance_before != report.replayed_balance
+        async with pool.acquire() as conn, conn.transaction():
+            report = await resync_account_balance(
+                conn, debit_code, journal=journal, balances=balances
+            )
+        # `resync_account_balance`'s commit above is the repair itself -- it
+        # already converged the row back to what the journal says, so no
+        # separate undo is needed for the tamper from this point on.
+        repair_committed = True
+        assert report.resynced is True
+        assert report.actual_balance_before != report.replayed_balance
 
-    # `resync_account_balance`'s commit above is the repair itself -- unlike
-    # the tamper helper, there is nothing left to undo in a `finally` here;
-    # a correct repair converges the row back to what the journal already
-    # says, permanently (that convergence is exactly what this test proves).
-    repaired = await replay_verify.verify(pool, as_of=as_of, hours=1)
-    assert repaired.ok, repaired.mismatches
+        repaired = await replay_verify.verify(pool, as_of=as_of, hours=1)
+        assert repaired.ok, repaired.mismatches
+    finally:
+        if not repair_committed:
+            await _bump_balance_outside_event_trail(pool, debit_code, -1)
 
 
 async def test_resync_second_call_after_repair_is_idempotent(pool):
@@ -188,14 +202,24 @@ async def test_resync_second_call_after_repair_is_idempotent(pool):
     debit_code = await _seed_ledger_entry(pool)
 
     await _bump_balance_outside_event_trail(pool, debit_code, 1)
-    async with pool.acquire() as conn, conn.transaction():
-        first = await resync_account_balance(conn, debit_code, journal=journal, balances=balances)
-    assert first.resynced is True
+    repair_committed = False
+    try:
+        async with pool.acquire() as conn, conn.transaction():
+            first = await resync_account_balance(
+                conn, debit_code, journal=journal, balances=balances
+            )
+        repair_committed = True
+        assert first.resynced is True
 
-    async with pool.acquire() as conn, conn.transaction():
-        second = await resync_account_balance(conn, debit_code, journal=journal, balances=balances)
-    assert second.resynced is False
-    assert second.actual_balance_before == first.replayed_balance
+        async with pool.acquire() as conn, conn.transaction():
+            second = await resync_account_balance(
+                conn, debit_code, journal=journal, balances=balances
+            )
+        assert second.resynced is False
+        assert second.actual_balance_before == first.replayed_balance
+    finally:
+        if not repair_committed:
+            await _bump_balance_outside_event_trail(pool, debit_code, -1)
 
 
 async def test_resync_refuses_when_ledger_write_frozen(pool):
