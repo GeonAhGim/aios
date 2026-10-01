@@ -12,7 +12,6 @@ only the D2 floor applies here -- D3 is out of scope for this leaf.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -240,25 +239,31 @@ async def test_gate_red_repro_market_vwap_validation_is_load_bearing(
 
 
 @pytest.mark.perf
-async def test_compute_tca_perf_budget_many_fills_and_bars() -> None:
+async def test_compute_tca_perf_budget_many_fills_and_bars(
+    perf_budget,
+) -> None:
     """`compute_tca` calls EM-12's `compute_vwap` twice (execution + market
     interval) and EM-13's `decompose_cost` once, each O(n) over `fills`/
     `bars` -- this pins an upper bound so an accidental O(n^2) (e.g.
     re-scanning fills inside the bps conversion loop) fails this test
-    instead of only showing up as production latency."""
+    instead of only showing up as production latency.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-10964).
+    """
     fills = _fills(200)
     bars = [_bar(Decimal("100") + i, Decimal("10")) for i in range(100)]
     repo = FakeTcaResultRepository()
 
-    start = time.perf_counter()
-    for revision in range(1, 101):
-        await compute_tca(
-            repo,
-            parent_id=uuid4(),
-            **_kwargs(fills=fills, bars=bars, revision=revision),
-        )
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    async def _run_100() -> None:
+        for revision in range(1, 101):
+            await compute_tca(
+                repo,
+                parent_id=uuid4(),
+                **_kwargs(fills=fills, bars=bars, revision=revision),
+            )
 
-    assert elapsed_ms < 1500, (
-        f"compute_tca() too slow: {elapsed_ms:.1f}ms/100 calls x 200 fills x 100 bars"
+    sample = await perf_budget.sample_async(_run_100)
+
+    assert sample.wall_ms < 1500, (
+        f"compute_tca() 100 calls too slow: {sample.wall_ms:.1f}ms (200 fills x 100 bars)"
     )
