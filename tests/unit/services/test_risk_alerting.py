@@ -241,6 +241,66 @@ async def test_concurrent_breaches_for_same_key_result_in_exactly_one_dispatch()
 
 @pytest.mark.perf
 @pytest.mark.asyncio
+async def test_hard_and_soft_breach_do_not_suppress_each_other() -> None:
+    """Negative: the suppression key includes severity, so a hard (CRITICAL)
+    breach must NOT suppress a soft (WARN) breach for the same tenant and
+    limit -- they are independent channels."""
+    gateway = FakeGateway()
+    service = RiskAlertService(gateway, _clock([0, 0]))
+
+    await service.on_breach(_event(hard=True))  # CRITICAL
+    await service.on_breach(_event(hard=False))  # WARN
+
+    assert len(gateway.calls) == 2
+    assert gateway.calls[0]["severity"] == "CRITICAL"
+    assert gateway.calls[1]["severity"] == "WARN"
+
+
+@pytest.mark.asyncio
+async def test_suppression_resets_after_expiry_and_rebreach_cycles() -> None:
+    """Negative/boundary: after the suppression window expires and a new
+    dispatch occurs, a subsequent breach inside the new window MUST be
+    suppressed again -- the window re-centres on the last *successful* send.
+    Tests the full cycle: dispatch -> suppress -> expire -> dispatch ->
+    suppress."""
+    gateway = FakeGateway()
+    # offsets: 0 (first dispatch), 301 (expired -> second dispatch),
+    # 301.5 (inside new window -> suppressed), 602 (expired again -> third
+    # dispatch), 602.1 (inside new window -> suppressed)
+    service = RiskAlertService(gateway, _clock([0, 301, 301.5, 602, 602.1]))
+
+    await service.on_breach(_event(hard=True))  # 0s -> dispatch 1
+    await service.on_breach(_event(hard=True))  # 301s -> expired -> dispatch 2
+    await service.on_breach(_event(hard=True))  # 301.5s -> suppressed
+    await service.on_breach(_event(hard=True))  # 602s -> expired -> dispatch 3
+    await service.on_breach(_event(hard=True))  # 602.1s -> suppressed
+
+    assert len(gateway.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_same_tenant_different_user_still_suppresses() -> None:
+    """Negative: the suppression key is (tenant_id, limit_id, severity) and
+    does NOT include user_id -- a breach for one user on a tenant suppresses
+    other users on the same tenant+limit+severity. This is intentional:
+    risk alerts are tenant-scoped, not user-scoped."""
+    USER_B = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    gateway = FakeGateway()
+    service = RiskAlertService(gateway, _clock([0, 0]))
+
+    await service.on_breach(
+        LimitBreachEvent(tenant_id=TENANT_A, user_id=USER_A, limit_id=LIMIT_1, hard=True)
+    )
+    await service.on_breach(
+        LimitBreachEvent(tenant_id=TENANT_A, user_id=USER_B, limit_id=LIMIT_1, hard=True)
+    )
+
+    # Only one dispatch -- user B is suppressed by user A's alert
+    assert len(gateway.calls) == 1
+    assert gateway.calls[0]["user_id"] == str(USER_A)
+
+
+@pytest.mark.asyncio
 async def test_suppressed_path_dispatch_overhead_stays_under_5ms_p99() -> None:
     """Performance assertion: `on_breach` is called inline in the
     decision-recording path (see module docstring), so the common case --
