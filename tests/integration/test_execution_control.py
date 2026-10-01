@@ -19,6 +19,7 @@ from dotenv import dotenv_values
 from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.execution_service import ExecutionControlError, ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
+from src.services.order_service.gate import GateDecision, GateOutcome
 from tests.integration.conftest import create_test_tenant
 
 
@@ -258,3 +259,55 @@ async def test_concurrent_safety_pause_blocks_racing_user_start(service, pool, m
         )
     assert row["status"] == "PAUSED"
     assert row["paused_by"] == "SAFETY_LAYER"
+
+
+@pytest.mark.perf
+async def test_start_latency_within_db_round_trip_budget(service, pool, perf_budget):
+    """EO-5 깊이 D3 — 성능 단언. start()는 fetchrow(조회) + make_foundation_pre_submit_gate의
+    다단 리스크 레이어 평가(각각 별도 DB 왕복) + UPDATE까지 다수의 순차 DB 왕복을
+    포함해 단순 SELECT 1보다 훨씬 비싸다. 절대 ms 임계는 실행환경마다 흔들려
+    회귀 게이트로 못 쓰므로(task-6774 관례), 이 환경에서 직접 잰 단순 SELECT 1
+    왕복시간(워밍업 3회 버리고 최댓값)의 1000배를 예산으로 쓴다(test_conftest_
+    deepen.py의 tenant_with_mandate 성능 단언과 같은 상대-배수 패턴)."""
+    user_id = await create_test_tenant(pool)
+    created = await _create_execution(service, pool, user_id, mode="PAPER")
+
+    async def _baseline_round_trip() -> None:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+
+    samples_ms = []
+    for _ in range(23):
+        samples_ms.append((await perf_budget.sample_async(_baseline_round_trip)).wall_ms)
+    baseline_rt_ms = sorted(samples_ms[3:])[-1]
+
+    sample = await perf_budget.sample_async(lambda: service.start(created.id, user_id))
+
+    budget_ms = max(1000.0, 1000 * baseline_rt_ms)
+    assert sample.wall_ms < budget_ms, (
+        f"start() took {sample.wall_ms:.1f}ms, budget {budget_ms:.1f}ms "
+        f"(baseline rt {baseline_rt_ms:.1f}ms)"
+    )
+
+
+async def test_gate_red_pre_start_gate_deny_blocks_start(pool):
+    """EO-5 게이트 적색 재현 — pre_start_gate가 DENY를 돌려주면 start()가
+    실제로 ExecutionControlError를 일으켜 상태 전환을 막는지 확인한다
+    (execution_control.py의 '필수 인자로 바뀐 게이트는 항상 평가된다'는
+    EO-05 주석이 실제 코드 경로에서 참인지 보이는 failure-injection)."""
+    user_id = await create_test_tenant(pool)
+
+    async def deny_gate(_ctx):
+        return GateDecision(outcome=GateOutcome.DENY, reason_codes=("test_deny",))
+
+    service = ExecutionService(pool, load_risk_policy(), pre_start_gate=deny_gate)
+    created = await _create_execution(service, pool, user_id, mode="PAPER")
+
+    with pytest.raises(ExecutionControlError, match="Risk gate rejected start"):
+        await service.start(created.id, user_id)
+
+    async with pool.acquire() as conn:
+        status = await conn.fetchval(
+            "SELECT status FROM strategy_executions WHERE id = $1", created.id
+        )
+    assert status == "PENDING_APPROVAL"
