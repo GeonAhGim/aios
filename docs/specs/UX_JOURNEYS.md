@@ -33,6 +33,38 @@ MVP-2(U-11) 이후 범위다.
 | 7 거래소 자격증명 관리 | `/exchanges` (`ExchangeManagementPage.tsx`) | `useExchangeCredentials`(목록), `register` mutation | 등록된 자격증명이 목록에 반영, 오류 시 개별 배너 | 있음 |
 | 8 첫 대시보드 | `/dashboard` (`DashboardPage.tsx`) | `usePortfolio()`, `useExecutions()`(5s 폴링) | 포지션·현금·실행 현황 표시, 데이터 없을 때 EmptyState | 있음 — 단, 알림(alerts)은 대시보드에 직접 표시되지 않고 `/alerts`로 분리(아래 갭 G-2) |
 
+#### J1 closeout 적색 재조사 (task-10612, 2026-10-01)
+
+MVP-1 closeout의 `13_user_journeys`가 J1을 적색으로 보고했으나, `frontend/e2e/
+journey-j1-onboarding-to-dashboard.spec.ts`를 직접 실행한 결과 코드·테스트 결함은 없다 —
+단독 실행 7 passed(23.8s), J1~J2~J3 묶음 실행(`npx playwright test journey-j1 journey-j2
+journey-j3 --project=chromium`) 28 passed(25.5s), 둘 다 그린. 원인: `scripts/closeout/
+ops.py::check_13_user_journeys`가 자체적으로 Playwright를 실행하지 않고 `--ci-report`로
+받은 `pm/ci/latest.json`의 `steps.journeys.ok`만 신뢰하는데(ADR-D "모른다=통과 아님"
+원칙), 이번에 참조된 리포트(sha `ef3b15039`, 2026-10-01T07:40:32+00:00)는 `steps`에
+`journeys` 키 자체가 없다 — `pm/local_ci.py`가 journeys 단계를 "full" 모드에서만 기록하므로
+(task-7145), 이번 실행이 "gate" 모드였던 것으로 보인다. 즉 J1 실패는 프런트엔드 코드나
+여정 테스트의 결함이 아니라 CI 오케스트레이션이 full 모드를 안 돌려 리포트에 `journeys`
+단계가 비어 있던 것이며, `docs/CI_SYSTEMIC_LOG.md` #13/#30/#51/#55/#85와 동일 계열의
+거짓양성(stale/누락 ci_report)이다. `pm/local_ci.py`와 orchestrator는 `C:\aios\pm` 아래에
+있어 CLAUDE.md §4가 금지하는 편집 대상이므로 이 리프 범위 밖이다 — "pm/local_ci.py가
+journeys 단계를 생략하는 실행 조건(gate vs full)을 점검하거나 closeout 호출 시 항상 full
+모드 리포트를 요구하도록" 만드는 별도 리프(PM/오케스트레이터 영역)가 필요하다고 보고한다.
+
+#### J1 사용감 소견 (task-10612, 2026-10-01 — "통과/실패"가 아니라 "쓰기 좋은가" 기준)
+
+여정 자체는 통과하지만(위 재조사 참고), 코드를 직접 읽고 단계를 따라가며 쓰기 불편한
+지점을 기록한다. 이 리프에서 개선 구현은 하지 않는다 — 소견만.
+
+| # | 지점 | 증상 | 개선안 |
+|---|---|---|---|
+| F-1 | 가입(`SignupPage.tsx`) → MFA 설정(`MfaSetupPage.tsx`) | 가입 직후 바로 인증 앱(Google Authenticator 등) QR 스캔을 요구하는 필수 게이트(FD-11.2)인데, 가입 화면에는 "이 다음 인증 앱이 필요하다"는 사전 안내가 없다 — 처음 쓰는 사용자가 인증 앱을 설치하지 않은 채로 가입하면 그 자리에서 막힌다(기준 6) | `SignupPage.tsx`의 가입 버튼 위/아래에 "다음 단계에서 Google Authenticator 등 인증 앱이 필요합니다" 같은 사전 고지 추가 |
+| F-2 | 가입 → MFA → 위험성향평가 전체 흐름 | 각 단계가 전진 전용이다 — `AuthLayout`/`MfaSetupPage.tsx`/`RiskAssessmentPage.tsx` 어디에도 이전 단계로 돌아가는 링크가 없어, 가입 시 이메일을 잘못 입력했음을 MFA 화면에서 깨달아도 되돌릴 수 없다(기준 3, 되돌리기 불가) | 각 온보딩 단계 상단에 이전 단계로 돌아가는 링크(또는 "처음부터 다시" 버튼) 추가 |
+| F-3 | 위험성향평가(`RiskAssessmentPage.tsx`) | 5개 필드(경력·투자가능비중·손실감내·투자목표·유동성필요)를 다 채운 뒤 제출 시점에 세션이 만료(401 `AUTH_TOKEN_EXPIRED`)되면 "세션이 만료되었습니다. 다시 로그인해주세요." 메시지는 뜨지만(`apiError.ts` EXACT_MESSAGES), 재로그인 후 입력값이 전부 사라져 처음부터 다시 작성해야 한다(기준 3·5, 돈이 걸리진 않지만 되돌릴 수 없는 입력 손실) | 제출 직전 폼 상태를 세션스토리지에 임시 저장하거나, 재로그인 리다이렉트 후 동일 화면으로 복귀하며 값 복원 |
+| F-4 | 온보딩 체크리스트(`OnboardingFlowPage.tsx`, `/onboarding/first-run`) | "거래소 연결" CTA를 누르면 `/exchanges`로 이동하는데, 그 화면에는 "온보딩 3단계 중 1단계"라는 맥락이 전혀 남지 않는다 — 완료 후 전체 진행률을 보려면 사용자가 직접 `/onboarding/first-run`으로 되돌아가야 한다(기준 1·3, 불필요한 수동 이동 + 다음 행동 불명확) | `/exchanges`·`/strategy-builder`·`/system/paper-deployments`에 공통 온보딩 진행률 위젯(예: "2/3단계") 노출(기존 갭 G-11과 동일 근본 원인) |
+| F-5 | 거래소 자격증명 등록(`ExchangeManagementPage.tsx`) | 등록이 실패하면(`submitRegistration` catch 블록) API Secret/Passphrase 입력값을 보안상 지운다(의도적) — 그런데 실패 사유가 형식 오류처럼 단순 재시도로 고쳐지는 경우에도 매번 Secret/Passphrase를 처음부터 다시 타이핑해야 한다(기준 3, 반복 마찰) | 오류 배너에 "Secret/Passphrase를 다시 입력해주세요"라고 명시해 왜 비워졌는지 설명(보안상 지우는 동작 자체는 유지) |
+| F-6 | 첫 대시보드(`DashboardPage.tsx:50-71`) | 포트폴리오 조회가 5xx로 실패하면 `portfolio`가 falsy가 되어 "총 포트폴리오 가치" 카드 섹션이 통째로 사라지고 오류 메시지도, 로딩도, 빈 상태 안내도 없다 — 데이터가 "원래 없는 것"과 "조회에 실패한 것"을 사용자가 구분할 수 없다(기준 4, 무음 실패) | 다른 카드(알림)처럼 `isError`를 받아 `ErrorMessage`로 표면화 |
+
 ### J2 — 종목 발견: 스크리너 → 차트·지표 → 전략/스크립트 → 즉시 백테스트 → 해석 (MVP-1 필수)
 
 | 단계 | 화면(라우트) | 필요한 API/상태 | 성공 조건 | 현재 상태 |
