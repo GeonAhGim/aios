@@ -44,6 +44,7 @@ from src.foundation.market_data.adapters.providers.kis_provider import KISProvid
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
 from src.foundation.market_data.ports.provider import DataProviderError, TimeSpan
+from tests.conftest import PerfBudget
 
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -191,7 +192,9 @@ def _large_bitget_candle_set(n: int) -> list[Candle]:
 
 
 @pytest.mark.perf
-async def test_bitget_fetch_candles_filter_sort_throughput_bounded_vs_trivial_baseline() -> None:
+async def test_bitget_fetch_candles_filter_sort_throughput_bounded_vs_trivial_baseline(
+    perf_budget: PerfBudget,
+) -> None:
     """`fetch_candles`의 구간 필터+정렬 파이프라인이 대용량(2000개) 캔들에서
     30회 반복 처리하는 총소요시간이, 같은 프로세스가 방금 측정한 구조적으로
     동등한 트리비얼 정렬 베이스라인 대비 좁은 배율 범위여야 한다. 절대 ms
@@ -203,7 +206,10 @@ async def test_bitget_fetch_candles_filter_sort_throughput_bounded_vs_trivial_ba
     반복 중 burst를 넘는 호출들이 진짜 `asyncio.sleep`으로 대기해
     측정 대상(필터+정렬)과 무관한 고정 지연이 섞여 배율이 기기 성능과
     반비례로 널뛴다(base_adapter.py의 "시간은 주입받는다" 설계를 그대로
-    따라 무지연 fake sleep을 준다)."""
+    따라 무지연 fake sleep을 준다).
+
+    raw perf_counter() 단언을 PerfBudget.samples() → ratio 단언으로 전환
+    (task-10986)."""
     candles = _large_bitget_candle_set(_N_CANDLES)
     fake = _FakeBitgetAdapter({"BTC/USDT": candles})
 
@@ -226,22 +232,25 @@ async def test_bitget_fetch_candles_filter_sort_throughput_bounded_vs_trivial_ba
             values = [(_BASE + timedelta(hours=_N_CANDLES - h), h) for h in range(_N_CANDLES)]
             sorted(values, key=lambda pair: pair[0])
 
+    # 베이스라인은 calibrations reference — raw timer 유지(고정 기준점).
     baseline_start = time.perf_counter()
     run_baseline()
     baseline_seconds = time.perf_counter() - baseline_start
 
-    fetch_start = time.perf_counter()
-    await run_fetch()
-    fetch_seconds = time.perf_counter() - fetch_start
+    # fetch 측정을 PerfBudget.samples_async() 경유로 전환 (best-of-3, coverage-trace pause).
+    # run_fetch는 async → samples_async() 사용.
+    raw_samples = await perf_budget.samples_async(run_fetch, n=3)
+    fetch_ms = sorted(s.wall_ms for s in raw_samples)[len(raw_samples) // 2]
 
     assert baseline_seconds > 0.0
-    ratio = fetch_seconds / baseline_seconds
+    baseline_ms = baseline_seconds * 1000
+    ratio = fetch_ms / baseline_ms
     budget_ratio = 30.0  # fetch는 필터+정렬+CandleColumns 조립+비동기 호출
     # 오버헤드가 더해져 트리비얼 정렬 베이스라인보다 근본적으로 느리다.
     print(
         f"\nBitgetProvider.fetch_candles filter+sort throughput vs trivial baseline: "
         f"n_candles={_N_CANDLES} n_iterations={_N_ITERATIONS} "
-        f"baseline={baseline_seconds * 1000:.1f}ms fetch={fetch_seconds * 1000:.1f}ms "
+        f"baseline={baseline_ms:.1f}ms fetch_p50={fetch_ms:.1f}ms "
         f"ratio={ratio:.2f} (budget={budget_ratio})"
     )
     assert ratio < budget_ratio, (
