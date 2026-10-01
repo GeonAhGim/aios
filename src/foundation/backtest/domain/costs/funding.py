@@ -1,18 +1,23 @@
-"""BT-8 — 무기한선물 펀딩비 모델(순수).
+"""BT-8 — Perpetual futures funding-rate model (pure).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.5 BT-8, §3.4(`costs: {funding: bool, borrow_apr}`), §9.5 BT-8(DoD: "일할 계산 정확").
+§2.5 BT-8, §3.4(`costs: {funding: bool, borrow_apr}`),
+§9.5 BT-8(DoD: "accurate pro-rata calculation").
 
-무기한선물 펀딩비는 고정 인터벌(기본 8시간)마다, UNIX epoch
-(1970-01-01T00:00:00Z)를 기준으로 그 배수인 시각에 정산된다고 가정한다
-(바이낸스·바이비트 등 주요 거래소의 00:00/08:00/16:00 UTC 관례를
-채택했다 — 미검증: 거래소별 실제 스펙 대조는 하지 않았다. 다른 정산
-시각을 쓰는 거래소는 `interval_hours`로 교정한다).
+Perpetual futures funding is assumed to settle at a fixed interval
+(default 8 hours), at timestamps that are multiples of that interval
+relative to the UNIX epoch (1970-01-01T00:00:00Z). This follows the
+00:00/08:00/16:00 UTC convention used by major exchanges such as
+Binance and Bybit — unverified: no per-exchange spec cross-check was
+performed. Exchanges using different settlement times can be
+corrected via `interval_hours`.
 
-부호 관례(무기한선물 표준): `funding_rate > 0`이면 롱이 숏에게 지급한다.
-반환값은 포지션 보유자 관점의 순비용이다 — 양수는 지급(비용), 음수는
-수취(수익)다. `side=BUY`는 롱, `side=SELL`은 숏 포지션을 뜻한다(주문
-방향이 아니라 보유 포지션 방향).
+Sign convention (standard for perpetual futures): if `funding_rate > 0`,
+longs pay shorts. The return value is the net cost from the position
+holder's perspective — positive means a payment (cost), negative means
+a receipt (income). `side=BUY` means a long position, `side=SELL` means
+a short position (this refers to the held position direction, not the
+order direction).
 """
 
 from __future__ import annotations
@@ -48,11 +53,13 @@ def _ceil_div(numerator: Decimal, denominator: Decimal) -> int:
 def count_funding_settlements(
     *, entry_time: datetime, exit_time: datetime, interval_hours: int = _DEFAULT_INTERVAL_HOURS
 ) -> int:
-    """반열린 구간 `[entry_time, exit_time)`에 포함되는 정산 시각 개수.
+    """Number of settlement timestamps within the half-open interval `[entry_time, exit_time)`.
 
-    진입이 정확히 정산 시각이면 그 정산을 포함하고(그 순간부터 보유),
-    청산이 정확히 정산 시각이면 그 정산은 제외한다(그 순간 보유 종료 —
-    다음 트레이드가 이어받는다는 가정, 경계 이중 계산 방지).
+    If entry falls exactly on a settlement timestamp, that settlement is
+    included (held from that instant); if exit falls exactly on a
+    settlement timestamp, that settlement is excluded (position ends at
+    that instant — assumes the next trade picks it up, preventing
+    double-counting at the boundary).
     """
 
     _require_utc(entry_time, "entry_time")
@@ -82,10 +89,11 @@ def compute_funding_cost(
     exit_time: datetime,
     interval_hours: int = _DEFAULT_INTERVAL_HOURS,
 ) -> Decimal:
-    """보유 구간 동안 정산된 펀딩비 순비용(지급 양수/수취 음수).
+    """Net funding cost settled during the holding period (payment positive / receipt negative).
 
-    `config.funding=False`면 다른 인자를 검증하지 않고 즉시 `Decimal('0')`
-    을 반환한다(꺼진 비용은 예외가 아니라 무비용).
+    If `config.funding=False`, returns `Decimal('0')` immediately without
+    validating the other arguments (a disabled cost is zero cost, not an
+    exception).
     """
 
     if not config.funding:
