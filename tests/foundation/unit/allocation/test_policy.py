@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from uuid import uuid4
 
@@ -227,25 +226,29 @@ def test_allocate_rejects_unknown_policy():
 
 
 @pytest.mark.perf
-def test_allocate_by_weight_hot_path_performance():
+def test_allocate_by_weight_hot_path_performance(perf_budget):
     # pro_rata/fixed_weight가 공유하는 _allocate_by_weight 커널 — 잔여
     # 흡수 루프가 우연히 O(n^2)로 퇴화하는 회귀를 잡는다.
     targets = _equal_weights(*(uuid4() for _ in range(5)))
-    start = time.perf_counter()
-    for _ in range(10_000):
-        allocate_pro_rata(Decimal("1000"), targets, Decimal("1"))
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+    perf_budget.assert_within(
+        lambda: allocate_pro_rata(Decimal("1000"), targets, Decimal("1")),
+        budget_ms=1000.0,
+        n=5,
+        batch=10_000,
+        label="allocate_by_weight",
+    )
 
 
 @pytest.mark.perf
-def test_allocate_manual_hot_path_performance():
+def test_allocate_manual_hot_path_performance(perf_budget):
     targets = [
         ManualTarget(sub_account_id=uuid4(), quantity=Decimal(str(q))) for q in (10, 20, 30, 40)
     ]
     total = sum((t.quantity for t in targets), Decimal("0"))
-    start = time.perf_counter()
-    for _ in range(10_000):
-        allocate_manual(total, targets)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+    perf_budget.assert_within(
+        lambda: allocate_manual(total, targets),
+        budget_ms=1000.0,
+        n=5,
+        batch=10_000,
+        label="allocate_manual",
+    )
