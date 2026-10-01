@@ -8,6 +8,7 @@ DoD(R-22): scope당 ACTIVE 2개는 partial unique로 거부(동시 activate 경�
 expected_state 불일치는 실패로 드러남, 교차 scope 조회는 0건.
 DoD(R-23): 승인자=작성자 거부, approval_ref 필수, 감사 이벤트.
 """
+
 from __future__ import annotations
 
 import asyncio
