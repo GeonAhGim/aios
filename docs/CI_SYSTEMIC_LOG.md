@@ -2586,6 +2586,36 @@ the numbering they had in CLAUDE.md section 6.
     `esc-ci-guards.json`'s `status`/`resolved_sha` before creating a new individual leaf, since a
     second leaf for an already-`resolved` sha is the duplicate-leaf pattern, not a new violation.
 
+100. task-10705 (parent task-10665, `[leak_scan]` auto-published from task-10665's note) is not a
+    `[health:ci_red_systemic]` leaf like the entries above, but documents a related pattern worth
+    recording here: an audit report that finds real gaps but has no built-in mechanism to turn its
+    recommendations into tracked leaves is itself an instance of gap-type (2) "failure happens but
+    the cause is invisible" from its own taxonomy. `docs/audits/AUDIT-6-gap-sweep-2026-10.md`
+    (task-10665, backend-2, 2026-10-01) is a report-only leaf (23 findings: P0x3/P1x13/P2x7 across
+    6 gap types) that explicitly says in its own §9 "권장 후속 리프" that none of the 6 recommended
+    follow-up leaves were created as part of that leaf — they were left as prose for someone else
+    to read and act on. Without a cross-reference into a normative/tracked doc, a finding like that
+    risks sitting in `docs/audits/` indefinitely with no leaf ever picking it up (the same shape as
+    #16/#39/#52's "misattributed to the wrong owner and never fixed", just at the audit-recommendation
+    layer instead of the CI-stage layer). This leaf's scope (docs-only, no `src/` changes per its
+    task file list) addressed that for two of the highest-severity findings: P0-3/G5-1 (Execution
+    create/`convert_to_live()` missing `record_audit_log()`, `execution_service.py:86-174`) is now
+    recorded as an unnumbered documented gap in `docs/design/INVARIANTS.md` (new I-xx numbering
+    requires an ADR per that file's own adoption rule, so it is logged as a gap pending ADR rather
+    than silently assigned an ID), and G5-1/G5-2/G5-3/G5-5 (killswitch idempotency, INACTIVE
+    re-validation, no step-up reauth for LIVE execution) are cross-referenced into
+    `docs/specs/UX_JOURNEYS.md` J4 and J8, closing the "INVARIANTS.md 교차 확인 필요" action item
+    §6.5 of that doc had already flagged for J8. The remaining audit §9 recommendations (P0-1 ops
+    ci_report schema unification, P0-2 ops `auto_decision.py` unknown-code branches — both out of
+    repo-worker scope per CLAUDE.md's `C:\aios\pm` edit ban, P0-3's actual code fix in
+    `execution_service.py`, P1 killswitch idempotency code fix, P1 MVP-1 metric reweighting, P1
+    perf-baseline 519-file migration) are still unaddressed by any task as of this leaf — they need
+    individual leaf tasks created from the audit report, not another docs-only cross-reference pass.
+    Before closing a future leaf whose spec is "write an audit report" or "point-in-time gap sweep":
+    check whether the spec also requires filing the resulting §9-style recommendations as actual
+    tasks, since a report with no leaf behind it is exactly the kind of finding this entry exists to
+    flag.
+
 ---
 
 Moved from CLAUDE.md on 2026-10-01 (CLAUDE.md is English-only and loaded into every worker context):
