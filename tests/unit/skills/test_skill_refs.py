@@ -294,3 +294,64 @@ def test_has_at_least_three_real_incidents(skill_path: Path) -> None:
     assert len(resolved) >= 3, (
         f"{skill_path.parent.name}: 사고 인용 {len(resolved)}건 (3건 이상 필요)"
     )
+
+
+# -- negative / failure-injection coverage (task-10282 DEEPEN) --------------
+
+
+def test_resolve_ref_rejects_unknown_invariant_id() -> None:
+    """존재하지 않는 I-xx 근거는 거짓으로 거부돼야 한다 -- 조용히 통과하면 안 된다."""
+    assert not _resolve_ref("I-99")
+
+
+def test_resolve_ref_rejects_unknown_rtf_id() -> None:
+    """INVARIANTS/RED_TEAM_FINDINGS에 없는 RTF 토큰은 해석 불가로 거부한다."""
+    assert not _resolve_ref("RTF-999999")
+
+
+def test_resolve_ref_rejects_nonexistent_git_sha() -> None:
+    """존재하지 않는(조상이 아닌) git sha는 근거로 인정되지 않는다."""
+    assert not _resolve_ref("git:0000000")
+
+
+def test_resolve_ref_rejects_nonexistent_spec_anchor() -> None:
+    """spec: 파일은 존재해도 앵커 문자열이 없으면 거부한다."""
+    assert not _resolve_ref("spec:L4_execution_oms_and_exchange_v1.0.md#NO-SUCH-ANCHOR-XYZ")
+
+
+def test_resolve_check_rejects_nonexistent_path() -> None:
+    """[검사:]가 실제 파일을 가리키지 않으면 '후보'가 아닌 한 거부한다."""
+    assert not _resolve_check("scripts/does_not_exist_at_all.py")
+
+
+def test_resolve_check_rejects_nonexistent_function_in_existing_file() -> None:
+    """파일은 존재하지만 함수명이 없으면 해석 불가로 거부한다."""
+    assert not _resolve_check("scripts/check_zone_manifest.py::_totally_absent_symbol_zzqq")
+
+
+def test_split_frontmatter_rejects_missing_frontmatter_marker() -> None:
+    """frontmatter 시작 마커가 없는 본문은 조용히 통과하지 않고 즉시 실패한다."""
+    with pytest.raises(AssertionError):
+        _split_frontmatter("# no frontmatter here\nbody text\n")
+
+
+def test_section_rejects_missing_heading() -> None:
+    """요구된 '## 체크리스트' 절이 없으면 빈 결과로 넘어가지 않고 실패한다."""
+    with pytest.raises(AssertionError):
+        _section("## 다른 절\ncontent\n", "체크리스트")
+
+
+def test_git_commit_exists_fails_closed_when_subprocess_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """git 바이너리 부재 등으로 subprocess.run이 예외를 던지면, 근거를 조용히
+    통과시키지 않고 예외가 그대로 전파돼야 한다(fail-closed) -- 실패주입."""
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError("git executable not found")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    _git_commit_exists.cache_clear()
+    _reachability_target.cache_clear()
+    with pytest.raises(FileNotFoundError):
+        _git_commit_exists("deadbeef")
