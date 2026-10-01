@@ -267,7 +267,23 @@ async def test_negative_downgrade_always_raises_irreversible_error(pool):
     # d4e8f1a29c37 as this test expects. Downgrade for real to d4e8f1a29c37
     # first (exercising the 2 reversible steps on their own), then attempt
     # only the single remaining step that must raise.
-    _run_alembic_ok("downgrade", "d4e8f1a29c37")
+    # task-11151: prepare data so downgrade() finds a row to protect. First
+    # use _stamp_past to land below d4e8f1a29c37, then create an order and
+    # insert the backfill manually (simulating a prior upgrade that backfilled
+    # it). Then downgrade past d4e8f1a29c37 to trigger the protection.
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await insert_order(conn, user_id, quantity=Decimal("10"))
+    # Simulate pre-fix buggy path: plain UPDATE creates version gap.
+    await _bump_committed_child_qty_without_event(pool, order_id, qty=Decimal("5"))
+    # Land below d4e8f1a29c37 so it can re-run and insert backfill rows.
+    _stamp_past_d4e8f1a29c37()
+    # Now upgrade to d4e8f1a29c37, which will insert backfill row(s).
+    _run_alembic_ok("upgrade", "d4e8f1a29c37")
+    # Verify the backfill was inserted.
+    assert await _order_events_count(pool, order_id) == 1
+    # Now attempt downgrade past d4e8f1a29c37: it must refuse because
+    # there's a WORM row that would need deletion.
     result = _run_alembic("downgrade", _DOWN_REVISION)
     try:
         assert result.returncode != 0
