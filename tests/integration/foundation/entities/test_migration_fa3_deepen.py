@@ -298,71 +298,44 @@ async def test_concurrent_backfill_runners_converge_to_the_same_correct_state(po
     assert rows[0]["portfolio_id"] == portfolio_id
 
 
-async def test_gate_red_fills_fund_id_fk_enforced(pool):
-    """FA-3 게이트 적색 재현 — fills.fund_id FK가 실제로 위존하는 fund_id를
-    거부함을 DB 레벨에서 증명한다.
+async def test_gate_red_fills_backfill_update_rejected_by_worm_trigger(pool):
+    """FA-3 게이트 적색 재현 — 789c138f13fe 마이그레이션 docstring이 "fills는
+    백필하지 않는다"고 선언한 근거(073beca589d5가 건 WORM 트리거가 모든
+    UPDATE를 역할 무관하게 거부한다)를 실제로 fund_id/portfolio_id
+    백필 UPDATE를 시도해 재현한다.
 
-    이 테스트는 "검사가 실제로 실패함을 보이는" 게이트 적색 증빙이다.
-    fund_id에 존재하지 않는 UUID를 넣으면 FK 제약 위반으로 INSERT가
-    실패해야 한다. 실패가 성공하면 FA-3의 불변식 위반이다.
+    이 테스트는 "검사가 실제로 실패함을 보이는" 게이트 적색 증빙이다:
+    FA-4가 pos_snapshot/ledger처럼 fills도 사후 backfill 하려 시도하면
+    (이 UPDATE가 그 시도를 흉내낸다) WORM 가드가 즉시 거부해야 한다.
+    거부가 성공(=예외 발생)하면 게이트가 의도대로 적색이라는 뜻이고, 만약
+    UPDATE가 조용히 성공해 버리면 WORM 트리거가 깨졌다는 뜻이라 이 테스트가
+    실패한다.
     """
     bootstrapped_user = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+    await _bootstrap_fund_and_portfolio(pool, bootstrapped_user, venue_suffix="gate-red")
+    fund_id = default_fund_id(bootstrapped_user)
+    portfolio_id = default_portfolio_id(bootstrapped_user)
+
     async with pool.acquire() as conn:
-        await conn.execute(
-            _INSERT_FILL_SQL,
-            uuid.uuid4(),  # fill_id
-            bootstrapped_user,
-            "LIMIT_MARKET",
-            "BUY",
-            Decimal("100.00"),
-            Decimal("10.50"),
-            Decimal("10"),
-            Decimal("105.00"),
-            Decimal("0.50"),
-            "filled",
-            "exchange",
-            "2025-01-01 00:00:00+00",
+        order_id = await _insert_bare_order(conn, bootstrapped_user)
+        fill_id = await conn.fetchval(
+            """
+            INSERT INTO fills (
+                provider_fill_id, venue, order_id, exchange_order_id, symbol, side,
+                quantity, price, fee, fee_currency, liquidity, venue_ts
+            ) VALUES ($1, 'bitget', $2, 'ext-fa3-deepen', 'BTC/USDT', 'BUY', 1, 10000,
+                      1, 'USDT', 'TAKER', now())
+            RETURNING id
+            """,
+            f"fa3-deepen-fill-{uuid4().hex}",
+            order_id,
         )
 
-    fake_fund_id = uuid.uuid4()  # 존재하지 않는 fund_id
-
     async with pool.acquire() as conn:
-        with pytest.raises(asyncpg.ForeignKeyViolationError):
+        with pytest.raises(asyncpg.exceptions.RaiseError, match="append-only violation"):
             await conn.execute(
-                "UPDATE fills SET fund_id = $1 WHERE user_id = $2",
-                fake_fund_id,
-                bootstrapped_user,
-            )
-
-
-async def test_gate_red_fills_portfolio_id_fk_enforced(pool):
-    """FA-3 게이트 적색 재현 — fills.portfolio_id FK가 실제로 위존하는
-    portfolio_id를 거부함을 DB 레벨에서 증명한다.
-    """
-    bootstrapped_user = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            _INSERT_FILL_SQL,
-            uuid4(),  # fill_id
-            bootstrapped_user,
-            "LIMIT_MARKET",
-            "BUY",
-            Decimal("100.00"),
-            Decimal("10.50"),
-            Decimal("10"),
-            Decimal("105.00"),
-            Decimal("0.50"),
-            "filled",
-            "exchange",
-            "2025-01-01 00:00:00+00",
-        )
-
-    fake_portfolio_id = uuid4()  # 존재하지 않는 portfolio_id
-
-    async with pool.acquire() as conn:
-        with pytest.raises(asyncpg.ForeignKeyViolationError):
-            await conn.execute(
-                "UPDATE fills SET portfolio_id = $1 WHERE user_id = $2",
-                fake_portfolio_id,
-                bootstrapped_user,
+                "UPDATE fills SET fund_id = $1, portfolio_id = $2 WHERE id = $3",
+                fund_id,
+                portfolio_id,
+                fill_id,
             )
