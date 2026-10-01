@@ -46,6 +46,7 @@ from src.core.portfolio.mandate_binding import POLICY_MAX_SINGLE_INSTRUMENT, bin
 from src.data.models.trading import AccountBalance, OrderStatus
 from src.services.condition_compiler import ConditionCompiler
 from src.services.execution_loop.tick import run_execution_tick
+from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
@@ -231,6 +232,82 @@ async def test_gate_red_mandate_clamp_never_applied_to_submitted_quantity(pool):
     assert submitted_quantity == unclamped_quantity  # mandate 클램프가 전혀 반영되지 않음
     assert submitted_quantity != green.quantity, (
         "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 L23가 이미 배선된 것이다"
+    )
+
+
+# --- negative 테스트 (3건) ---------------------------------------------------
+
+
+async def test_negative_nonexistent_execution_raises_value_error(pool):
+    """negative-1: `_load_execution_context`가 존재하지 않는 execution_id를
+    바로 거부한다(`src/services/execution_loop/tick.py`의
+    `raise ValueError(f"존재하지 않는 실행입니다: {execution_id}")`) —
+    오케스트레이터가 fail-open으로 넘어가지 않는다는 fail-closed 보증."""
+    with pytest.raises(ValueError, match="존재하지 않는 실행입니다"):
+        await run_execution_tick(
+            pool, FakeExchangeAdapter(closes=[Decimal("50")] * 65), -1, **_engines()
+        )
+
+
+async def test_negative_gate_deny_blocks_submission_without_touching_fsm_state(pool):
+    """negative-2: `pre_submit_gate`가 DENY를 돌려주면 `evaluate_submission_gate`
+    직후 바로 return한다(FND-06 배선, tick.py 주석 "거부되면 executor.execute()를
+    아예 안 부르므로 FSM은 전혀 건드리지 않는다") — 거부된 신호가 주문으로도,
+    fsm_state 전이로도 새지 않는다는 fail-closed 보증."""
+
+    async def _deny_gate(context: object) -> GateDecision:
+        return GateDecision(outcome=GateOutcome.DENY)
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_crossover_execution(pool, user_id)
+    engines = _engines()
+    engines["pre_submit_gate"] = _deny_gate
+
+    await run_execution_tick(
+        pool, FakeExchangeAdapter(closes=[Decimal("60")] * 65), execution_id, **engines
+    )
+    adapter = _filled_adapter(Decimal("40"))
+
+    await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    assert adapter.place_order_call_count == 0
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"  # DENY로 조기 반환 — PENDING류로 전이된 적이 없음
+
+
+async def test_negative_paused_execution_skips_without_calling_exchange_adapter(pool, monkeypatch):
+    """negative-3: `paused_by`가 설정된 실행은 신호 평가 전에 early return
+    하므로(FD-16.3) 거래소 어댑터(`get_ohlcv`/`get_ticker`)가 한 번도
+    호출되지 않는다 — 정지 중에도 거래소로 나가는 호출이 생기면 레이트리밋·
+    중복 주문 위험이 생기므로 "호출 자체가 없음"을 직접 단언한다(단순히
+    주문 미제출만 보는 것보다 엄격한 회귀 가드)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE strategy_executions SET paused_by = 'SAFETY_LAYER' WHERE id = $1",
+            execution_id,
+        )
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    ohlcv_calls = 0
+    original_get_ohlcv = adapter.get_ohlcv
+
+    async def _counting_get_ohlcv(*args: object, **kwargs: object) -> object:
+        nonlocal ohlcv_calls
+        ohlcv_calls += 1
+        return await original_get_ohlcv(*args, **kwargs)
+
+    monkeypatch.setattr(adapter, "get_ohlcv", _counting_get_ohlcv)
+
+    result = await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    assert result is None
+    assert adapter.place_order_call_count == 0
+    assert ohlcv_calls == 0, (
+        "정지된 실행인데 시세 조회가 발생했다 — early return 전에 거래소를 호출하고 있다"
     )
 
 
