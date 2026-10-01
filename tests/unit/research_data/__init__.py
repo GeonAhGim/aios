@@ -291,6 +291,7 @@ def test_revision_chain_break_injection() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_search_latency_under_budget_for_10k_items() -> None:
     """Performance: search() over 10k items completes well under a 300ms
     budget (RD-7)."""
