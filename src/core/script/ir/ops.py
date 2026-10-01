@@ -1,28 +1,35 @@
-"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 표 87행/§9.4 DSL-7 —
-AIOS Script IR(`IR_VERSION`) 명령 집합과 결정론 직렬화.
+"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 table row 87/§9.4 DSL-7 —
+AIOS Script IR (`IR_VERSION`) instruction set and deterministic serialization.
 
-스택 기반 평탄 명령열이다. 각 decl은 명령 몇 개로 내려가고, decl 하나가
-끝날 때마다 스택은 비어 있어야 한다(`verify_stack`). 표현식 명령은
-post-order(피연산자 먼저, 왼쪽부터)로 놓이므로 인터프리터(DSL-8)는 앞에서
-뒤로 한 번만 훑으면 된다 — 재귀·점프·루프 명령은 없다(§3.3 문법에 반복·
-재귀가 없으니 IR에도 없다. 결정론은 "표현 불가"로 강제한다, DSL-1 decision).
+A stack-based flat instruction stream. Each decl lowers to a handful of
+instructions, and the stack must be empty whenever a decl ends (`verify_stack`).
+Expression instructions are laid out in post-order (operands first, left to
+right), so the interpreter (DSL-8) only needs a single forward pass — there
+are no recursion/jump/loop instructions (the §3.3 grammar has no iteration or
+recursion, so neither does the IR. Determinism is enforced by making it
+"inexpressible", DSL-1 decision).
 
-타입 주석: DSL-4 검사기가 확정한 정적 타입(`Type`, 5종)을 값을 만들어 내는
-명령마다 실어 둔다. 인터프리터가 시리즈/스칼라 승격을 다시 추론하지 않고
-IR만 보고 결정하게 하기 위함이다(I-05: 백테스트·라이브가 같은 컴파일
-산출물을 공유 — 산출물이 자기완결적이어야 한다).
+Type annotations: the static type (`Type`, 5 kinds) that the DSL-4 checker
+resolved is carried on every instruction that produces a value. This lets the
+interpreter decide series/scalar promotion from the IR alone instead of
+re-inferring it (I-05: backtest and live share the same compiled artifact —
+the artifact must be self-contained).
 
-의미 미정의 피연산자(`Order.side/qty_expr/opts`, `Plot.style`)는 §3.3에 별도
-프로덕션이 없어 DSL-4가 검사하지 않는다(`typing/checker.py` 모듈 docstring).
-IR도 이를 스택 코드로 "해석"하지 않고 DSL-1 AST 노드 그대로 운반한다 —
-`buy` 같은 미선언 식별자에 임의 의미를 붙이지 않는다. 의미 확정은 DSL-8/11.
+Operands with undefined semantics (`Order.side/qty_expr/opts`, `Plot.style`)
+have no separate production in §3.3, so DSL-4 does not check them
+(see the `typing/checker.py` module docstring). The IR likewise does not
+"interpret" them as stack code — it carries the DSL-1 AST node as-is, so an
+undeclared identifier like `buy` is never assigned an arbitrary meaning.
+Semantics are resolved later, in DSL-8/11.
 
-결정론(DoD "같은 AST=같은 IR 바이트"): `to_bytes`는 pydantic JSON 덤프를
-`sort_keys=True`·고정 구분자·ASCII로 인코딩한다. 딕셔너리 삽입 순서·해시
-시드에 의존하는 경로가 없고, `ConstFloat`는 유한수만 허용해 `NaN`/`Infinity`
-같은 비표준 JSON 토큰이 바이트열에 들어가는 일을 막는다(파서는 아주 긴
-십진 리터럴에서 `inf`를 만들 수 있다 — 값 수준에서 여기서 거부).
+Determinism (DoD "same AST = same IR bytes"): `to_bytes` encodes the pydantic
+JSON dump with `sort_keys=True`, fixed separators, and ASCII. No path depends
+on dict insertion order or hash seed, and `ConstFloat` allows only finite
+numbers so that non-standard JSON tokens like `NaN`/`Infinity` never make it
+into the byte stream (the parser can produce `inf` from a very long decimal
+literal — rejected here at the value level).
 """
+
 from __future__ import annotations
 
 import json
@@ -38,12 +45,13 @@ IR_VERSION: Final = "aios-ir-1"
 
 
 class IRNode(BaseModel):
-    """모든 IR 노드의 베이스 — 불변·미지 필드 거부(AST `ScriptNode`와 같은 이유)."""
+    """Base for all IR nodes — immutable, rejects unknown fields (same reason as
+    AST `ScriptNode`)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-# ---- 표현식 명령: 스택에 값을 push/pop ----
+# ---- Expression instructions: push/pop values on the stack ----
 
 
 class ConstInt(IRNode):
@@ -64,7 +72,7 @@ class ConstFloat(IRNode):
 
 
 class Load(IRNode):
-    """선언된 이름(input/let/signal)의 값을 push."""
+    """Push the value of a declared name (input/let/signal)."""
 
     op: Literal["load"] = "load"
     name: str
@@ -72,7 +80,7 @@ class Load(IRNode):
 
 
 class Neg(IRNode):
-    """단항 '-': pop 1, push 1."""
+    """Unary '-': pop 1, push 1."""
 
     op: Literal["neg"] = "neg"
     type: Type
@@ -86,7 +94,8 @@ class Not(IRNode):
 
 
 class Index(IRNode):
-    """postfix `[n]`: 시리즈 pop 1, `offset`봉 전 원소 push 1. `type`은 원소 타입."""
+    """postfix `[n]`: pop 1 series, push 1 element from `offset` bars back.
+    `type` is the element type."""
 
     op: Literal["index"] = "index"
     offset: int = Field(ge=0)
@@ -94,7 +103,7 @@ class Index(IRNode):
 
 
 class BinOp(IRNode):
-    """이항 연산: pop 2(left 아래, right 위), push 1. `type`은 승격 결과."""
+    """Binary op: pop 2 (left below, right above), push 1. `type` is the promotion result."""
 
     op: Literal["binop"] = "binop"
     operator: BinaryOp
@@ -102,7 +111,7 @@ class BinOp(IRNode):
 
 
 class Call(IRNode):
-    """`ns.ident(args)`: pop `argc`(첫 인자가 가장 아래), push 1."""
+    """`ns.ident(args)`: pop `argc` (first arg at the bottom), push 1."""
 
     op: Literal["call"] = "call"
     ns: str
@@ -111,7 +120,7 @@ class Call(IRNode):
     type: Type
 
 
-# ---- decl 명령: 스택을 비운다 ----
+# ---- decl instructions: these empty the stack ----
 
 
 class DeclareInput(IRNode):
@@ -122,7 +131,7 @@ class DeclareInput(IRNode):
 
 
 class Store(IRNode):
-    """`let name = expr`: pop 1을 `name`에 바인딩."""
+    """`let name = expr`: pop 1 and bind it to `name`."""
 
     op: Literal["store"] = "store"
     name: str
@@ -130,7 +139,8 @@ class Store(IRNode):
 
 
 class Plot(IRNode):
-    """`plot(expr[, style])`: pop 1(expr). `style`은 의미 미정의 → AST 원형 운반."""
+    """`plot(expr[, style])`: pop 1 (expr). `style` has undefined semantics →
+    carried as the raw AST."""
 
     op: Literal["plot"] = "plot"
     type: Type
@@ -138,7 +148,7 @@ class Plot(IRNode):
 
 
 class Signal(IRNode):
-    """`signal name = expr`: pop 1을 신호 `name`에 바인딩."""
+    """`signal name = expr`: pop 1 and bind it to signal `name`."""
 
     op: Literal["signal"] = "signal"
     name: str
@@ -146,7 +156,8 @@ class Signal(IRNode):
 
 
 class Order(IRNode):
-    """`order(side, qty_expr[, opts]) when expr`: pop 1(when). 나머지는 AST 원형 운반."""
+    """`order(side, qty_expr[, opts]) when expr`: pop 1 (when). The rest is
+    carried as the raw AST."""
 
     op: Literal["order"] = "order"
     side: Expr
@@ -156,12 +167,13 @@ class Order(IRNode):
 
 
 class Request(IRNode):
-    """`request(symbol, timeframe, expr)`(M2-2a 확장 문법): pop 1(내부 expr 값),
-    push 1(항상 `series<float>` — `typing/checker.py` `_infer_request` 결정).
-    `symbol`/`timeframe`은 M2-2a가 파싱 시점 상수로 고정했다(AST `RequestExpr`가
-    `str` 필드로만 받아 동적 인자 자체를 조립 불가능하게 함). MTF 리샘플(확정봉만
-    참조, lookahead=off 고정)은 런타임(DSL-8 `runtime/mtf.py`, M2-2b)이 맡는다 —
-    이 명령은 그 평가에 필요한 symbol/timeframe만 실어 나른다."""
+    """`request(symbol, timeframe, expr)` (M2-2a extended grammar): pop 1 (the inner expr value),
+    push 1 (always `series<float>` — decided by `typing/checker.py`'s `_infer_request`).
+    `symbol`/`timeframe` were fixed as parse-time constants by M2-2a (the AST `RequestExpr`
+    only accepts them as `str` fields, so a dynamic argument can never be assembled). MTF
+    resampling (confirmed bars only, lookahead=off fixed) is handled by the runtime
+    (DSL-8 `runtime/mtf.py`, M2-2b) — this instruction only carries the symbol/timeframe
+    that evaluation needs."""
 
     op: Literal["request"] = "request"
     symbol: str
@@ -200,15 +212,17 @@ for _cls in (Plot, Order, IRProgram):
     _cls.model_rebuild()
 
 
-# ---- 직렬화(결정론) ----
+# ---- Serialization (determinism) ----
 
 
 def to_bytes(ir: IRProgram) -> bytes:
-    """IR → 정규화 JSON 바이트. 같은 IR이면 언제·어디서 호출해도 같은 바이트.
+    """IR → normalized JSON bytes. The same IR always yields the same bytes,
+    regardless of when or where it is called.
 
-    `sort_keys`로 키 순서를, 고정 구분자로 공백을, `ensure_ascii`로 유니코드
-    이스케이프 표기를 고정한다. `allow_nan=False`는 `ConstFloat` 검증의 2차
-    방어다(비표준 토큰이 섞이면 예외로 fail-closed).
+    `sort_keys` fixes key order, the fixed separators fix whitespace, and
+    `ensure_ascii` fixes unicode escaping. `allow_nan=False` is a second line
+    of defense on top of `ConstFloat` validation (fail-closed with an
+    exception if a non-standard token slips through).
     """
     return json.dumps(
         ir.model_dump(mode="json"),
@@ -220,19 +234,22 @@ def to_bytes(ir: IRProgram) -> bytes:
 
 
 def from_bytes(data: bytes) -> IRProgram:
-    """`to_bytes`의 역. 버전 불일치·미지 필드·비유한 상수는 거부."""
+    """Inverse of `to_bytes`. Rejects version mismatches, unknown fields, and
+    non-finite constants."""
     return IRProgram.model_validate(json.loads(data.decode("utf-8")))
 
 
-# ---- 스택 규율 검증 ----
+# ---- Stack discipline verification ----
 
 
 class IRStackError(Exception):
-    """IR 명령열이 스택 규율(언더플로·decl 뒤 잔여값)을 깨뜨림 — 잘못 만들어진 IR."""
+    """An IR instruction stream violates stack discipline (underflow or
+    leftover value after a decl) — malformed IR."""
 
 
 def stack_effect(instr: Instr) -> tuple[int, int]:
-    """명령의 (pop 수, push 수). 인터프리터·검증기가 공유하는 단일 정의."""
+    """(pop count, push count) for an instruction. The single definition
+    shared by the interpreter and the verifier."""
     if isinstance(instr, ConstInt | ConstFloat | Load):
         return (0, 1)
     if isinstance(instr, Neg | Not | Index | Request):
@@ -249,19 +266,19 @@ def stack_effect(instr: Instr) -> tuple[int, int]:
 
 
 def verify_stack(ir: IRProgram) -> None:
-    """명령열을 한 번 훑어 (1) 언더플로 없음 (2) decl 명령 직후 스택 비어 있음
-    (3) 끝에서 스택 비어 있음을 확인한다. 위반은 `IRStackError`.
+    """Walk the instruction stream once to confirm (1) no underflow, (2) the stack
+    is empty right after each decl instruction, and (3) the stack is empty at the
+    end. Violations raise `IRStackError`.
 
-    `lower_program`이 산출물마다 호출하지만, 바이트에서 복원한 IR(`from_bytes`)을
-    실행 전에 다시 검증하는 용도로도 공개한다(I-07: 실패를 실제로 낼 수 있어야 함).
+    `lower_program` calls this for every artifact, but it is also exposed publicly
+    to re-verify an IR restored from bytes (`from_bytes`) before execution
+    (I-07: failures must actually be raisable).
     """
     depth = 0
     for pos, instr in enumerate(ir.instrs):
         pops, pushes = stack_effect(instr)
         if depth < pops:
-            raise IRStackError(
-                f"#{pos} {instr.op}: 스택 언더플로(필요 {pops}, 현재 {depth})"
-            )
+            raise IRStackError(f"#{pos} {instr.op}: 스택 언더플로(필요 {pops}, 현재 {depth})")
         depth = depth - pops + pushes
         if instr.op in _DECL_OPS and depth != 0:
             raise IRStackError(f"#{pos} {instr.op}: decl 뒤 스택 잔여값 {depth}개")
