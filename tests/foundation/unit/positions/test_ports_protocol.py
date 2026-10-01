@@ -349,3 +349,105 @@ def test_isinstance_port_check_is_fast() -> None:
     assert per_check_us < 100, (
         f"isinstance port check took {per_check_us:.1f}us/check, budget: 100us"
     )
+
+
+# ── DEEPEN(D3): 게이트 적색 재현 ──────────────────────────────────────────────
+
+
+def test_gate_red_check_perf_marker_guard_flags_unmarked_perf_assertion(
+    tmp_path: object,
+) -> None:
+    """게이트 적색 재현 — `scripts/check_perf_marker_guard.py`(task-7434, CI가
+    `python scripts/check_perf_marker_guard.py`로 직접 실행하는 정적 검사,
+    `main()` 종료코드 0=통과)가 바로 위 `test_isinstance_port_check_is_fast`가
+    따르는 패턴(`time.perf_counter()` 차이를 `assert`로 직접 검증하려면
+    `@pytest.mark.perf`가 필수)을 실제로 적색 처리하는지, 내부 헬퍼가 아니라
+    CI가 호출하는 `main()` 자체의 종료코드로 증명한다. 가짜 tests 루트를
+    `--tests-root`로 바꿔치기하므로 실제 저장소 파일은 건드리지 않는다."""
+    import scripts.check_perf_marker_guard as guard
+
+    marked = tmp_path / "test_marked_ok.py"
+    marked.write_text(
+        "import time\n"
+        "import pytest\n"
+        "\n"
+        "@pytest.mark.perf\n"
+        "def test_something_fast():\n"
+        "    started = time.perf_counter()\n"
+        "    elapsed = time.perf_counter() - started\n"
+        "    assert elapsed < 5.0\n",
+        encoding="utf-8",
+    )
+    assert guard.main(["--tests-root", str(tmp_path)]) == 0  # 대조군 — marker 있으면 통과
+
+    unmarked = tmp_path / "test_unmarked_regression.py"
+    unmarked.write_text(
+        "import time\n"
+        "\n"
+        "def test_port_check_is_fast_without_marker():\n"
+        "    started = time.perf_counter()\n"
+        "    elapsed = time.perf_counter() - started\n"
+        "    assert elapsed < 100\n",
+        encoding="utf-8",
+    )
+    # 게이트 적색: perf marker 없는 perf_counter 단언은 exit 1로 실패해야 한다.
+    assert guard.main(["--tests-root", str(tmp_path)]) == 1
+
+
+# ── DEEPEN(D3): 적대적/동시성 증빙 ────────────────────────────────────────────
+
+
+class _LostUpdateSnapshotRepo:
+    """`expected_seq`를 완전히 무시하는 가짜 구현 — `SnapshotRepository.upsert`의
+    docstring(§4.3)은 "기존 row의 `last_journal_seq != expected_seq`면
+    `ConcurrencyConflictError`를 던진다"고 명시하지만, 이 fake는 항상 성공
+    응답을 돌려준다. `isinstance()`는 메서드 이름만 보므로 이 결함을 잡지
+    못한다 — 실제 adapter(`postgres_snapshot_repository.py`)의 조건부
+    UPDATE(표준-105)가 메우는 간극이다."""
+
+    async def get(self, conn, tenant_id, position_key): ...
+
+    async def upsert(self, conn, snapshot, expected_seq):
+        return snapshot
+
+    async def list_open(self, conn, tenant_id, account_id): ...
+
+
+async def test_adversarial_concurrent_writers_with_stale_seq_bypass_concurrency_control() -> None:
+    """D3 동시성 증빙: 두 "동시" writer가 서로 다른 `expected_seq`(하나는
+    stale)로 `upsert()`를 호출하는 상황을 시뮬레이션한다. 포트 계약(§4.3,
+    표준-105)은 stale seq 호출에 `ConcurrencyConflictError`를 요구하지만,
+    구조 검사(`isinstance`)만으로는 이 동시성 방어가 실제로 구현됐는지
+    증명할 수 없다는 것을 보인다 — lost update 취약점이 조용히 통과한다."""
+    repo = _LostUpdateSnapshotRepo()
+    assert isinstance(repo, SnapshotRepository)
+
+    snapshot = PositionSnapshotView(
+        position_key="acct-1:BTC/USDT:spot:default:default",
+        tenant_id=uuid4(),
+        account_id=uuid4(),
+        instrument_id=uuid4(),
+        quantity=Decimal("1.0"),
+        avg_cost=Money(amount=Decimal("50000"), currency=Currency.USDT),
+        cost_method="FIFO",
+        lots=[],
+        realized_pnl_base=Decimal("0"),
+        unrealized_pnl_base=None,
+        fees_base=Decimal("0"),
+        funding_base=Decimal("0"),
+        mark_price=None,
+        mark_at=None,
+        base_currency=Currency.USDT,
+        last_journal_seq=5,
+        updated_at=_now(),
+    )
+
+    # Writer A: 최신 seq(5)로 먼저 upsert — 정상 진행.
+    result_a = await repo.upsert(conn=None, snapshot=snapshot, expected_seq=5)
+    assert result_a is snapshot
+
+    # Writer B: Writer A의 갱신을 보지 못한 채 stale seq(5, 이미 A가 올렸다고
+    # 가정하면 실제로는 6이어야 함)로 "동시에" upsert를 호출 — 포트 계약대로면
+    # ConcurrencyConflictError가 나야 하지만, 이 fake는 조건 없이 성공한다.
+    result_b = await repo.upsert(conn=None, snapshot=snapshot, expected_seq=5)
+    assert result_b is snapshot  # contract-violating: should raise ConcurrencyConflictError
