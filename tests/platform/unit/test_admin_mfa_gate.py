@@ -79,3 +79,47 @@ async def test_mfa_verified_at_exactly_at_window_boundary_passes():
     admin = _admin(mfa_verified_at=datetime.now(timezone.utc) - timedelta(minutes=14, seconds=59))
     result = await get_current_mfa_admin(admin=admin)
     assert result is admin
+
+
+async def test_mfa_verified_at_exactly_at_15min_boundary_rejected():
+    """불변식 위반 입력 — 정확히 15분이 지난 시점은 게이트를 통과하지 못한다.
+    `mfa_step_up_fresh`의 `(now - mfa_verified_at) <= MFA_STEP_UP_WINDOW`
+    조건에서 15:00은 > 창이므로 거부되어야 한다."""
+    admin = _admin(mfa_verified_at=datetime.now(timezone.utc) - timedelta(minutes=15))
+    with pytest.raises(AdminMfaRequiredError, match=str(admin.user_id)):
+        await get_current_mfa_admin(admin=admin)
+
+
+async def test_mfa_enabled_but_never_verified_rejected():
+    """불변식 위반 입력 — mfa_enabled=True 이지만 mfa_verified_at=None 인 경우
+    (MFA 활성화 상태지만 아직 검증되지 않음) 게이트가 명시적으로 거부한다."""
+    admin = AuthenticatedUser(
+        user_id=uuid4(),
+        email="admin@example.com",
+        display_name="admin",
+        mfa_enabled=True,
+        mfa_verified_at=None,
+        status="ACTIVE",
+        is_verifier=False,
+        is_platform_admin=True,
+        session_id=uuid4(),
+        auth_level="MFA_VERIFIED",
+    )
+    with pytest.raises(AdminMfaRequiredError, match=str(admin.user_id)):
+        await get_current_mfa_admin(admin=admin)
+
+
+async def test_mfa_step_up_fresh_monkeypatch_raises():
+    """실패주입 — monkeypatch로 break_glass.mfa_step_up_fresh 가 예외를
+    유발할 때 게이트가 그 예외를 그대로 전파한다."""
+    admin = _admin(mfa_verified_at=datetime.now(timezone.utc))
+    import src.core.security.break_glass as bg_module
+
+    with pytest.raises(ValueError, match="injected"):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                bg_module,
+                "mfa_step_up_fresh",
+                lambda *a, **k: (_ for _ in ()).throw(ValueError("injected")),
+            )
+            await get_current_mfa_admin(admin=admin)
