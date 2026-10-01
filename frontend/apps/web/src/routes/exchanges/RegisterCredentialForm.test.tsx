@@ -18,6 +18,7 @@ function baseProps(overrides: Partial<Props> = {}): Props {
     apiPassphrase: "",
     fieldErrors: {},
     error: null,
+    secretsCleared: false,
     isPending: false,
     onExchangeChange: vi.fn(),
     onApiKeyChange: vi.fn(),
@@ -140,5 +141,24 @@ describe("RegisterCredentialForm 상태 표시", () => {
     );
 
     expect(screen.getByText("입력값을 확인해주세요.")).toBeInTheDocument();
+  });
+
+  // F-5(task-10642, UX_JOURNEYS.md §6 J1 사용감 소견): 등록 실패 시 보안상
+  // Secret/Passphrase를 지우는 동작 자체는 유지하되, 왜 비었는지 모르면 매번
+  // 영문도 모르고 다시 타이핑해야 한다 — secretsCleared가 true면 이유를 안내한다.
+  it("secretsCleared가 true면 Secret/Passphrase를 비운 이유를 안내한다", () => {
+    render(<RegisterCredentialForm {...baseProps({ secretsCleared: true })} />);
+
+    expect(
+      screen.getByText("보안을 위해 Secret/Passphrase를 비웠습니다. 다시 입력해주세요."),
+    ).toBeInTheDocument();
+  });
+
+  it("negative: secretsCleared가 false면 비운 이유 안내를 렌더링하지 않는다", () => {
+    render(<RegisterCredentialForm {...baseProps({ secretsCleared: false })} />);
+
+    expect(
+      screen.queryByText("보안을 위해 Secret/Passphrase를 비웠습니다. 다시 입력해주세요."),
+    ).not.toBeInTheDocument();
   });
 });

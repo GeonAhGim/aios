@@ -132,7 +132,12 @@ function EmergencyStopPanel({ executions }: { executions: { executionId: number;
 export function DashboardPage() {
   const { t } = useTranslation();
   const { data: riskProfile } = useRiskProfile();
-  const { data: portfolio, isLoading: portfolioLoading } = usePortfolio();
+  const {
+    data: portfolio,
+    isLoading: portfolioLoading,
+    isError: portfolioError,
+    error: portfolioErrorObj,
+  } = usePortfolio();
   const { data: executions, isLoading: executionsLoading } = useExecutions();
   const {
     data: recentNotifications,
@@ -161,7 +166,17 @@ export function DashboardPage() {
                 금지). 봉투가 붙기 전까지는 null로 두어 "확인 불가"를 정직하게 보여준다. */}
             {portfolio && <DataFreshness asOf={null} />}
           </div>
-          {portfolioLoading ? (
+          {portfolioError ? (
+            // F-6(task-10642, UX_JOURNEYS.md §6 J1 사용감 소견): 포트폴리오 조회가
+            // 5xx 등으로 실패하면 portfolio가 falsy가 되어 카드 섹션이 통째로
+            // 사라지고 알림(notifications) 카드와 달리 오류도 표시하지 않았다
+            // (무음 실패). isError를 표면화해 "원래 없음"과 "조회 실패"를 구분한다.
+            <ErrorMessage
+              errorCode={portfolioErrorObj instanceof ApiError ? portfolioErrorObj.errorCode : undefined}
+              message={portfolioErrorObj instanceof Error ? portfolioErrorObj.message : undefined}
+              traceId={portfolioErrorObj instanceof ApiError ? portfolioErrorObj.traceId : undefined}
+            />
+          ) : portfolioLoading ? (
             <LoadingState />
           ) : portfolio ? (
             <div className="space-y-6">

@@ -79,6 +79,8 @@ export function MfaSetupPage() {
     <AuthLayout
       title={t("legacy.mfaSetupPage.title1")}
       subtitle="Google Authenticator 등 인증 앱으로 QR코드를 스캔해주세요"
+      backTo="/signup"
+      backLabel={t("legacy.mfaSetupPage.backLink")}
     >
       <div className="space-y-4">
         {setupError !== null && <MfaError error={setupError} />}

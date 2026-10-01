@@ -13,6 +13,7 @@ export function RegisterCredentialForm({
   apiPassphrase,
   fieldErrors,
   error,
+  secretsCleared,
   isPending,
   onExchangeChange,
   onApiKeyChange,
@@ -27,6 +28,10 @@ export function RegisterCredentialForm({
   apiPassphrase: string;
   fieldErrors: Record<string, string>;
   error: unknown;
+  // F-5(task-10642): 등록 실패 시 submitRegistration이 보안상 Secret/Passphrase를
+  // 지운다(의도적 동작, 유지) — 그 이유를 모르면 매번 "왜 비었지" 하고 다시 타이핑해야
+  // 한다. error와 함께 true로 넘어오면 비운 이유를 배너로 설명한다.
+  secretsCleared: boolean;
   isPending: boolean;
   onExchangeChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
@@ -74,6 +79,11 @@ export function RegisterCredentialForm({
               onChange={(e) => onApiPassphraseChange(e.target.value)}
             />
           </Field>
+        )}
+        {secretsCleared && (
+          <p role="status" className="text-sm text-fg-muted">
+            {t("legacy.registerCredentialForm.secretsClearedNotice")}
+          </p>
         )}
         {error !== null && (
           <RegisterCredentialError error={error} onRetry={onRetry} fieldErrors={fieldErrors} />

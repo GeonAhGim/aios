@@ -11,7 +11,7 @@ const refetch = vi.fn();
 let credentialsData: unknown[] = [];
 let revokeMutateAsync = vi.fn().mockResolvedValue(undefined);
 vi.mock("@aios/shared-hooks", () => ({
-  useExchangeCredentials: () => ({ data: credentialsData, isLoading: false, refetch }),
+  useExchangeCredentials: () => ({ data: credentialsData, isLoading: false, isError: false, refetch }),
   useRegisterExchangeCredential: () => ({ mutateAsync, isPending: false }),
   useRevokeExchangeCredential: () => ({ mutateAsync: revokeMutateAsync }),
   useExchangeBalance: () => ({ data: undefined }),
@@ -22,6 +22,10 @@ vi.mock("@aios/shared-hooks", () => ({
     error: null,
     refetch: vi.fn(),
   }),
+  // OnboardingProgressWidget(F-4, task-10642)도 이 모듈의 useExchangeCredentials/
+  // useMyStrategies/usePaperDeployments를 쓴다.
+  useMyStrategies: () => ({ data: [], isLoading: false, isError: false }),
+  usePaperDeployments: () => ({ data: { deployments: [] }, isLoading: false, isError: false }),
   useMe: () => ({ data: { email: "a@example.com" } }),
   useLogout: () => vi.fn(),
 }));

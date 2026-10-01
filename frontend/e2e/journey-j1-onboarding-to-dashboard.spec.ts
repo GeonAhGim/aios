@@ -328,7 +328,11 @@ test.describe("J1 여정: 온보딩 → 계좌/거래소 연결(데모 키) → 
     await expect(page.getByText("e2e-j1-risk-mismatch")).toBeVisible();
   });
 
-  test("[실패 주입] 8단계 포트폴리오 조회 5xx 시 대시보드가 빈 요약을 보여주고 크래시하지 않는다", async ({
+  // F-6(task-10642, UX_JOURNEYS.md §6 J1 사용감 소견): 이전에는 DashboardPage.tsx가
+  // portfolio 쿼리 오류를 표면화하지 않아(isError 미확인) 카드가 통째로 사라지는
+  // 무음 실패였다 — 이제 ErrorMessage로 보여주고, 원문(raw server detail) 대신
+  // errorCode 매핑 문구만 노출한다.
+  test("[실패 주입] 8단계 포트폴리오 조회 5xx 시 오류 배너를 보이고 크래시하지 않는다", async ({
     page,
   }) => {
     await mockBackend(page);
@@ -345,9 +349,8 @@ test.describe("J1 여정: 온보딩 → 계좌/거래소 연결(데모 키) → 
     await page.goto("/dashboard");
 
     await expect(page.getByRole("heading", { name: "대시보드" })).toBeVisible();
-    // DashboardPage.tsx는 portfolio 쿼리 오류를 별도 배너로 표면화하지 않는다(코드
-    // 확인 — portfolioLoading이 끝나면 portfolio가 falsy이므로 그냥 아무것도 렌더하지
-    // 않는다) — 크래시 없이 "총 포트폴리오 가치"가 나타나지 않는 것으로 이 계약을 검증한다.
+    await expect(page.getByText("거래소 자격증명을 확인해주세요.")).toBeVisible();
+    await expect(page.getByText("raw server detail")).toHaveCount(0);
     await expect(page.getByText("총 포트폴리오 가치")).toHaveCount(0);
   });
 });

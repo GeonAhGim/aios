@@ -37,6 +37,19 @@ function submitSignupForm() {
 // task-902 §3.3/§3.4: 회원가입 실패는 err.message를 직접 노출하지 않고
 // routeApiError로 판정해 BadRequestNotice/ForbiddenNotice/ErrorMessage/잠금
 // 안내(423) 경로로만 보여준다.
+// F-1(task-10642, UX_JOURNEYS.md §6 J1 사용감 소견): 가입 직후 MFA 설정(FD-11.2
+// 필수 게이트)으로 바로 넘어가는데, 인증 앱을 설치하지 않고 가입하면 그 자리에서
+// 막힌다 — 가입 화면에 사전 고지가 항상 보여야 한다.
+describe("SignupPage 인증 앱 사전 고지(F-1)", () => {
+  it("가입 화면에 다음 단계에서 인증 앱이 필요하다는 사전 고지를 보여준다", () => {
+    renderPage();
+
+    expect(
+      screen.getByText("다음 단계에서 Google Authenticator 등 인증 앱이 필요합니다. 가입 전에 미리 설치해두세요."),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("SignupPage 에러 표시", () => {
   it("가입 성공 시 /onboarding/mfa-setup으로 이동한다", async () => {
     mutateAsync.mockResolvedValue({ accessToken: "t-1" });

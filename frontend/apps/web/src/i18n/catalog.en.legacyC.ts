@@ -76,6 +76,7 @@ export const catalogEnLegacyC = {
     "t6": "Already have an account?{{val}}",
     "t7": "Log in",
     "t8": "Failed to sign up.",
+    "mfaPrenotice": "The next step requires an authenticator app (e.g. Google Authenticator). Install it before you sign up.",
   },
   "chartLegend": {
     "ariaLabel1": "Chart legend",
@@ -191,6 +192,8 @@ export const catalogEnLegacyC = {
     "t10": "3+ years",
     "t11": "Submit",
     "t12": "Failed to submit the assessment.",
+    "backLink": "← Back to two-factor setup",
+    "restoredNotice": "Restored your answers after the interrupted session.",
   },
   "positionJournalPanel": {
     "t1": "View journal",

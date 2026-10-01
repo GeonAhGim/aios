@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@aios/api-client";
 import { DashboardPage } from "./DashboardPage";
 
-let portfolioResult: { data: unknown; isLoading: boolean } = { data: undefined, isLoading: false };
+let portfolioResult: { data: unknown; isLoading: boolean; isError: boolean; error: unknown } = {
+  data: undefined,
+  isLoading: false,
+  isError: false,
+  error: null,
+};
 let executionsResult: { data: unknown; isLoading: boolean } = { data: [], isLoading: false };
 let notificationsResult: { data: unknown; isLoading: boolean; isError: boolean; error: unknown } = {
   data: [],
@@ -48,7 +53,7 @@ const PORTFOLIO = {
 
 afterEach(() => {
   cleanup();
-  portfolioResult = { data: undefined, isLoading: false };
+  portfolioResult = { data: undefined, isLoading: false, isError: false, error: null };
   executionsResult = { data: [], isLoading: false };
   notificationsResult = { data: [], isLoading: false, isError: false, error: null };
   pauseExecutionMutate.mockClear();
@@ -62,7 +67,7 @@ afterEach(() => {
 // 보여주고 stale 배지를 그리지 않는지만 검증한다.
 describe("DashboardPage", () => {
   it("negative: 포트폴리오 데이터가 있어도 meta.as_of가 없으면 확인 불가를 보여주고 stale 배지를 그리지 않는다", () => {
-    portfolioResult = { data: PORTFOLIO, isLoading: false };
+    portfolioResult = { data: PORTFOLIO, isLoading: false, isError: false, error: null };
     renderPage();
 
     expect(screen.getByText("기준 시각 확인 불가")).toBeInTheDocument();
@@ -70,10 +75,40 @@ describe("DashboardPage", () => {
   });
 
   it("포트폴리오 데이터가 없으면 신선도 표시 자체를 그리지 않는다", () => {
-    portfolioResult = { data: undefined, isLoading: false };
+    portfolioResult = { data: undefined, isLoading: false, isError: false, error: null };
     renderPage();
 
     expect(screen.queryByTestId("data-freshness")).not.toBeInTheDocument();
+  });
+});
+
+// F-6(task-10642, UX_JOURNEYS.md §6 J1 사용감 소견): 포트폴리오 조회가 5xx로
+// 실패하면 portfolio가 falsy가 되어 카드 섹션이 통째로 사라지고 오류도, 로딩도,
+// 빈 상태 안내도 없었다(무음 실패) — 알림 카드와 동일하게 isError를 표면화한다.
+describe("DashboardPage 포트폴리오 조회 실패 표시(F-6)", () => {
+  it("포트폴리오 조회가 실패하면 ErrorMessage로 표면화한다", () => {
+    portfolioResult = {
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new ApiError(500, "raw server detail", "trace-portfolio-1", "INTERNAL_ERROR"),
+    };
+    renderPage();
+
+    expect(screen.getByText("지원코드: trace-portfolio-1")).toBeInTheDocument();
+    expect(screen.queryByText("raw server detail")).not.toBeInTheDocument();
+  });
+
+  it("negative: 조회가 실패하면(isError) 로딩 상태를 보여주지 않는다", () => {
+    portfolioResult = {
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new ApiError(500, "raw", undefined, "INTERNAL_ERROR"),
+    };
+    renderPage();
+
+    expect(screen.queryByText(/불러오는 중/)).not.toBeInTheDocument();
   });
 });
 

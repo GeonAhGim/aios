@@ -10,6 +10,7 @@ import { useState, type FormEvent } from "react";
 import { AppShell } from "../../components/layout/AppShell";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
 import { useFieldErrors } from "../../hooks/useFieldErrors";
+import { OnboardingProgressWidget } from "../../onboarding/OnboardingProgressWidget";
 import { CredentialListCard } from "./CredentialListCard";
 import { ExchangePositionsCard } from "./ExchangePositionsCard";
 import { RegisterCredentialForm } from "./RegisterCredentialForm";
@@ -25,6 +26,10 @@ export function ExchangeManagementPage() {
   const [apiSecret, setApiSecret] = useState("");
   const [apiPassphrase, setApiPassphrase] = useState("");
   const [error, setError] = useState<unknown>(null);
+  // F-5(task-10642): submitRegistration이 실패 시 apiSecret/apiPassphrase를 지우는
+  // 순간에만 true로 세워 "왜 비었는지" 안내 배너를 띄운다. 입력을 다시 시작하면(아래
+  // handleApiSecretChange/handleApiPassphraseChange) 즉시 꺼진다.
+  const [secretsCleared, setSecretsCleared] = useState(false);
   const [revokeError, setRevokeError] = useState<{ exchange: string; error: unknown } | null>(
     null,
   );
@@ -82,6 +87,7 @@ export function ExchangeManagementPage() {
   async function submitRegistration() {
     setError(null);
     setFromError(null);
+    setSecretsCleared(false);
     try {
       await registerWithRetry();
       setApiKey("");
@@ -90,6 +96,7 @@ export function ExchangeManagementPage() {
     } catch (err) {
       setApiSecret("");
       setApiPassphrase("");
+      setSecretsCleared(true);
       setError(err instanceof ApiError ? err : new Error(t("legacy.exchangeManagementPage.t2")));
       setFromError(err);
     }
@@ -112,11 +119,13 @@ export function ExchangeManagementPage() {
 
   function handleApiSecretChange(value: string) {
     setApiSecret(value);
+    setSecretsCleared(false);
     clearField("api_secret");
   }
 
   function handleApiPassphraseChange(value: string) {
     setApiPassphrase(value);
+    setSecretsCleared(false);
     clearField("api_passphrase");
   }
 
@@ -124,6 +133,7 @@ export function ExchangeManagementPage() {
     <AppShell>
       <div className="space-y-8">
         <PageHeader title={t("legacy.exchangeManagementPage.title1")} />
+        <OnboardingProgressWidget />
 
         <CredentialListCard
           credentials={credentials}
@@ -146,6 +156,7 @@ export function ExchangeManagementPage() {
           apiPassphrase={apiPassphrase}
           fieldErrors={fieldErrors}
           error={error}
+          secretsCleared={secretsCleared}
           isPending={register.isPending}
           onExchangeChange={handleExchangeChange}
           onApiKeyChange={handleApiKeyChange}

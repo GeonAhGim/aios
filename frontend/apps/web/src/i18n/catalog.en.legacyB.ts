@@ -130,6 +130,7 @@ export const catalogEnLegacyB = {
     "t1": "New exchange connection",
     "label2": "Exchange",
     "t3": "Register",
+    "secretsClearedNotice": "Secret/Passphrase were cleared for security. Please re-enter them.",
   },
   "mandatePolicyPanel": {
     "t1": "Policy evaluation (policy:evaluate)",
@@ -158,6 +159,7 @@ export const catalogEnLegacyB = {
     "t6": "Verification complete",
     "t7": "Failed to issue the setup.",
     "t8": "Verification failed.",
+    "backLink": "← Back to sign up",
   },
   "portfolioPositionsSection": {
     "t1": "Unsupported schema_version ({{string}}).",

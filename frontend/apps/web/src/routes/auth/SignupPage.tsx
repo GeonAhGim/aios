@@ -101,6 +101,8 @@ export function SignupPage() {
             }}
           />
         </Field>
+        <p role="note" className="text-sm text-fg-muted">
+          {t("legacy.signupPage.mfaPrenotice")}</p>
         {error !== null && <SignupError error={error} fieldErrors={fieldErrors} />}
         {locked && (
           <p role="status" className="text-sm text-fg-muted">

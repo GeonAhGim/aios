@@ -132,6 +132,7 @@ export const catalogKoLegacyB = {
     "t1": "새 거래소 연동",
     "label2": "거래소",
     "t3": "등록",
+    "secretsClearedNotice": "보안을 위해 Secret/Passphrase를 비웠습니다. 다시 입력해주세요.",
   },
   "mandatePolicyPanel": {
     "t1": "정책 평가(policy:evaluate)",
@@ -160,6 +161,7 @@ export const catalogKoLegacyB = {
     "t6": "인증 완료",
     "t7": "설정 발급에 실패했습니다.",
     "t8": "인증에 실패했습니다.",
+    "backLink": "← 이전 단계(가입)로 돌아가기",
   },
   "portfolioPositionsSection": {
     "t1": "지원하지 않는 schema_version입니다 ({{string}}).",

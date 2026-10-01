@@ -37,6 +37,19 @@ function renderPage() {
 // task-902 §3.3/§3.4: 설정·검증 실패는 err.message를 직접 노출하지 않고
 // routeApiError로 판정해 ForbiddenNotice/BadRequestNotice/ErrorMessage
 // 경로로만 보여준다.
+// F-2(task-10642, UX_JOURNEYS.md §6 J1 사용감 소견): 온보딩 단계가 전진 전용이라
+// 가입 시 이메일 오타 등을 MFA 화면에서 깨달아도 되돌릴 수 없었다 — 이전 단계로
+// 돌아가는 링크가 항상 보여야 한다.
+describe("MfaSetupPage 이전 단계 링크(F-2)", () => {
+  it("가입(/signup)으로 돌아가는 링크를 보여준다", async () => {
+    setupMutate.mockImplementation(() => {});
+    renderPage();
+
+    const link = screen.getByRole("link", { name: "← 이전 단계(가입)로 돌아가기" });
+    expect(link).toHaveAttribute("href", "/signup");
+  });
+});
+
 describe("MfaSetupPage 설정 발급 에러 표시", () => {
   // negative: 이미 MFA가 켜진 계정이 비밀번호 없이 재발급을 요청하면
   // 403 AUTH_MFA_REQUIRED로 거부된다(auth.py setup_mfa) — raw message 대신

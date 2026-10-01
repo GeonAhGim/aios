@@ -78,6 +78,7 @@ export const catalogKoLegacyC = {
     "t6": "이미 계정이 있으신가요?{{val}}",
     "t7": "로그인",
     "t8": "회원가입에 실패했습니다.",
+    "mfaPrenotice": "다음 단계에서 Google Authenticator 등 인증 앱이 필요합니다. 가입 전에 미리 설치해두세요.",
   },
   "chartLegend": {
     "ariaLabel1": "차트 레전드",
@@ -193,6 +194,8 @@ export const catalogKoLegacyC = {
     "t10": "3년 이상",
     "t11": "제출하기",
     "t12": "평가 제출에 실패했습니다.",
+    "backLink": "← 이전 단계(2단계 인증)로 돌아가기",
+    "restoredNotice": "세션 만료로 중단됐던 입력값을 복원했습니다.",
   },
   "positionJournalPanel": {
     "t1": "저널 보기",

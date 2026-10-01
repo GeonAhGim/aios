@@ -281,6 +281,10 @@ export const catalogKo = {
     completeTitle: "첫 실행을 완주했습니다",
     completeDescription: "거래소 연결, 전략 생성, 페이퍼 실행까지 모두 마쳤습니다.",
     goToDashboard: "대시보드로 이동",
+    // F-4(task-10642): /exchanges 등 온보딩 단계가 재사용하는 화면에 전체 진행률을
+    // 남겨 "온보딩 체크리스트로 되돌아가지 않으면 몇 단계인지 알 수 없는" 문제를 없앤다.
+    progressWidget: "온보딩 {{completed}}/{{total}}단계 진행 중",
+    progressWidgetLink: "온보딩 체크리스트 보기",
     steps: {
       connectExchange: {
         title: "거래소 연결",

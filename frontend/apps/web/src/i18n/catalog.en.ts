@@ -277,6 +277,8 @@ export const catalogEn = {
     completeTitle: "You've completed your first run",
     completeDescription: "You connected an exchange, created a strategy, and ran a paper deployment.",
     goToDashboard: "Go to dashboard",
+    progressWidget: "Onboarding step {{completed}}/{{total}}",
+    progressWidgetLink: "View onboarding checklist",
     steps: {
       connectExchange: {
         title: "Connect an exchange",
