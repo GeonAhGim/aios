@@ -143,7 +143,15 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
     `pg_terminate_backend` 대기 등 — 이 호스트에 다른 워커들이 각자의
     TEST_DATABASE_URL로 같은 서버에 동시 접속)이다. `calibration_fn`에 같은
     프로세스·같은 순간에 돈 "DB 작업 1회"(단일 reset 호출)를 넘겨, 호스트
-    CPU가 아니라 실제 병목(Postgres 서버 부하)과 같은 축으로 비율을 잰다."""
+    CPU가 아니라 실제 병목(Postgres 서버 부하)과 같은 축으로 비율을 잰다.
+
+    task-10774: full CI -n 8 부하 병행 재현에서 ratio가 80x까지 튄 적색을
+    봤다(op=231.7s, calibration=2.9s) — 8-way 창이 1-way 창보다 4배 길어
+    동시 실행 중인 다른 -n 8 워커의 순간적 Postgres 부하 버스트를 창에 담을
+    확률이 구조적으로 더 높다(sibling `..._with_migrate_survives_race`와
+    동일 원인, 그 테스트 docstring 참고). `n`/`calibration_n`을 2로 올려
+    best-of-2(최소값)를 쓰면 양쪽 다 그 실행에서 가장 덜 간섭받은 표본에
+    수렴한다 — 예산(40x)은 그대로."""
     server_url = _server_url()
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
     try:
@@ -173,9 +181,9 @@ def test_ensure_database_concurrent_reset_survives_race(scratch_db_name: str) ->
             _run_and_capture,
             max_ratio=40.0,
             mode="wall",
-            n=1,
+            n=2,
             warmup=0,
-            calibration_n=1,
+            calibration_n=2,
             calibration_fn=_single_reset_call,
             label="8-way concurrent reset vs 1x sequential reset",
         )
@@ -209,7 +217,19 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
     직렬화)지만, 매 호출이 별도 `alembic upgrade head` 서브프로세스(파이썬
     인터프리터 기동 포함)라 로컬 재현 실측 비율은 ~10.1x였다 — 순수 직렬화
     하한 위에 서브프로세스 기동 오버헤드 + 스케줄링 여유를 더해 30x를
-    바닥선으로 건다."""
+    바닥선으로 건다.
+
+    task-10774: full CI(47b499948) -n 8 부하 병행 재현에서 ratio가 30x를
+    넘겨 단독 실행(실측 ratio 4.4x, 위 여유의 1/7)로는 재현되지 않는 적색이
+    나왔다. `scripts/setup_test_db.py`의 advisory lock은 CREATE부터 migrate
+    끝까지를 감싸 직렬화를 보장하므로(§`_ensure_database` docstring
+    task-5822) 제품 코드 결함이 아니다 — op(4-way, 창 길이가 calibration의
+    4배)가 calibration(1-way, 창이 짧음)보다 동시 실행 중인 다른 -n 8
+    워커의 순간적 부하 버스트를 창에 담을 확률이 구조적으로 더 높아, 단일
+    표본(n=1)으로는 그 버스트 하나가 ratio를 왜곡했다. `n`/`calibration_n`을
+    2로 올려 각각 best-of-2(최소값)를 쓰면 두 쪽 다 그 실행에서 가장 덜
+    간섭받은 표본에 수렴해 왜곡이 줄어든다 — 예산(30x)은 그대로, 측정
+    표본 수만 늘린다(예산 완화 아님)."""
     server_url = _server_url()
     test_url = setup_test_db._with_database(server_url, scratch_db_name)
 
@@ -242,9 +262,9 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
             _run_and_capture,
             max_ratio=30.0,
             mode="wall",
-            n=1,
+            n=2,
             warmup=0,
-            calibration_n=1,
+            calibration_n=2,
             calibration_fn=_single_reset_migrate_call,
             label="4-way concurrent reset+migrate vs 1x sequential reset+migrate",
         )
