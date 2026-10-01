@@ -16,7 +16,6 @@ exercise the actual SQL path a revoked/expired token depends on.
 
 from __future__ import annotations
 
-import time
 from datetime import timedelta
 from uuid import uuid4
 
@@ -196,26 +195,23 @@ _MCP_ROUNDTRIP_P95_BUDGET_MS = 200.0
 그 상한을 기준선으로 넉넉히 잡는다."""
 
 
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
-
-
 @pytest.mark.perf
-async def test_mcp_roundtrip_p95_within_budget(client, token_repo: PostgresAgentTokenRepository):
+async def test_mcp_roundtrip_p95_within_budget(
+    client, perf_budget: PerfBudget, token_repo: PostgresAgentTokenRepository
+):
     issued = await issue(token_repo, tenant_id=uuid4(), scopes=frozenset({Scope.READ}))
-    samples: list[float] = []
-    for _ in range(20):
-        started = time.perf_counter()
+
+    async def _roundtrip_once() -> None:
         response = await client.post(
             "/mcp/tools/compute_indicator",
             json=_INDICATOR_BODY,
             headers={AGENT_TOKEN_HEADER: issued.secret},
         )
-        samples.append((time.perf_counter() - started) * 1000)
         assert response.status_code == 200
 
-    p95_ms = _p95(samples)
+    samples = [await perf_budget.sample_async(_roundtrip_once) for _ in range(20)]
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
     print(f"[AI-15 mcp server] p95={p95_ms:.2f}ms budget<{_MCP_ROUNDTRIP_P95_BUDGET_MS:.0f}ms")
     assert p95_ms < _MCP_ROUNDTRIP_P95_BUDGET_MS
 
@@ -225,19 +221,21 @@ async def test_mcp_roundtrip_p95_within_budget(client, token_repo: PostgresAgent
 
 @pytest.mark.perf
 async def test_gate_red_budget_actually_fails_past_budget(
-    client, token_repo: PostgresAgentTokenRepository
+    client, perf_budget: PerfBudget, token_repo: PostgresAgentTokenRepository
 ):
     issued = await issue(token_repo, tenant_id=uuid4(), scopes=frozenset({Scope.READ}))
-    samples: list[float] = []
-    for _ in range(5):
-        started = time.perf_counter()
+
+    async def _roundtrip_once() -> None:
         await client.post(
             "/mcp/tools/compute_indicator",
             json=_INDICATOR_BODY,
             headers={AGENT_TOKEN_HEADER: issued.secret},
         )
-        samples.append((time.perf_counter() - started) * 1000)
+
+    samples = [await perf_budget.sample_async(_roundtrip_once) for _ in range(5)]
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
 
     absurdly_low_budget_ms = 1e-9
     with pytest.raises(AssertionError):
-        assert _p95(samples) < absurdly_low_budget_ms
+        assert p95_ms < absurdly_low_budget_ms
