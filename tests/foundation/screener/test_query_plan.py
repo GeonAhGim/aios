@@ -6,8 +6,6 @@ Spec: task-2628(U-1a) decision, L4_product_experience_and_discovery_v1.0.md
 
 from __future__ import annotations
 
-import statistics
-import time
 from datetime import datetime, timezone
 
 import pytest
@@ -23,6 +21,7 @@ from src.foundation.screener.contracts.v1 import (
     SortSpec,
 )
 from src.foundation.screener.domain.query_plan import ScreenerConditionError, build_query_plan
+from tests.conftest import PerfBudget
 
 _DEFAULT_FILTERS: tuple[Filter, ...] = (IndicatorFilter(condition="ta.rsi(close, 14) < 30"),)
 
@@ -153,7 +152,9 @@ def test_screen_definition_requires_at_least_one_filter() -> None:
 
 
 @pytest.mark.perf
-def test_build_query_plan_p95_latency_within_dsl_compile_budget() -> None:
+def test_build_query_plan_p95_latency_within_dsl_compile_budget(
+    perf_budget: PerfBudget,
+) -> None:
     definition = _definition(
         filters=(
             IndicatorFilter(condition="ta.rsi(close, 14) < 30"),
@@ -161,11 +162,8 @@ def test_build_query_plan_p95_latency_within_dsl_compile_budget() -> None:
             BacktestStatFilter(condition="sharpe_ratio > 1.5"),
         )
     )
-    samples: list[float] = []
-    for _ in range(50):
-        start = time.perf_counter()
-        build_query_plan(definition)
-        samples.append(time.perf_counter() - start)
-
-    p95 = statistics.quantiles(samples, n=20)[18]
-    assert p95 < 0.3  # ADR-2026-09-09-C 축별 예산: DSL 컴파일 300ms
+    samples = perf_budget.samples(lambda: build_query_plan(definition), n=50)
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    budget_ms = 300.0  # ADR-2026-09-09-C 축별 예산: DSL 컴파일 300ms
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    assert p95_ms < budget_ms
