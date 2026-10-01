@@ -1,8 +1,9 @@
-"""IND-1 — Column-oriented batch indicator computation (backtest path) + equivalence
-contract with incremental engine.
+"""IND-1 — Column-oriented batch indicator computation (backtest path) +
+equivalence contract with incremental engine.
 
-Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.3 `engine/vectorized.py`,
-§9.3 IND-1 (DoD: incremental == batch results within 1e-9).
+Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.3
+`engine/vectorized.py`, §9.3 IND-1 (DoD: incremental == batch results
+within 1e-9).
 
 Pure module — no I/O. Window statistics are computed independently per window via
 `sliding_window_view` (no cumulative sum drift); EMA and Wilder recursions are
@@ -17,6 +18,7 @@ the same columns into the incremental engine bar-by-bar, compare against batch
 results — raises `INDICATOR_ENGINE_MISMATCH` if NaN positions differ or scale
 deviation `|a-b| / max(1, |a|, |b|)` exceeds `EQUIVALENCE_TOLERANCE` (1e-9).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
@@ -54,8 +56,9 @@ def _windows(x: FloatArray, size: int) -> FloatArray:
 
 
 def _ema(x: FloatArray, period: int, skip: int = 0) -> FloatArray:
-    """SMA-seeded EMA (sequential). Skip first bars, then seed (matches MACD fast line,
-    TA-Lib behavior)."""
+    """SMA-seeded EMA (sequential).
+
+    Skip first bars, then seed (matches MACD fast line, TA-Lib behavior)."""
     out = np.full(len(x), np.nan)
     start = skip + period - 1
     if start >= len(x):
@@ -260,8 +263,10 @@ def check_equivalence(
     registry: IndicatorRegistry = DEFAULT_REGISTRY,
     tolerance: float = EQUIVALENCE_TOLERANCE,
 ) -> float:
-    """Incremental == batch contract. Violation raises INDICATOR_ENGINE_MISMATCH; pass
-    returns max scale deviation."""
+    """Incremental == batch contract.
+
+    Violation raises INDICATOR_ENGINE_MISMATCH; pass returns max scale deviation.
+    """
     batch = compute(name, columns, params, registry)
     streamed = run_incremental(name, columns, params, registry)
     worst = 0.0
