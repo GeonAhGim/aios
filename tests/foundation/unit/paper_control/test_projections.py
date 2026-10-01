@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -23,6 +22,7 @@ from src.foundation.paper_control.projections import (
     DeploymentListView,
     build_deployment_list_view,
 )
+from tests.conftest import PerfBudget
 
 _TENANT_ID = uuid4()
 
@@ -118,13 +118,17 @@ async def test_build_deployment_list_view_propagates_repository_failure():
 
 
 @pytest.mark.perf
-async def test_build_deployment_list_view_assembly_latency_budget():
+async def test_build_deployment_list_view_assembly_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """성능 단언 — 1000건 조립도 순수 in-memory 매핑이므로 100ms 내에 끝나야 한다
-    (105 DB 왕복은 fake로 대체했으므로 이 시간은 순수 조립 비용만 반영한다)."""
+    (105 DB 왕복은 fake로 대체했으므로 이 시간은 순수 조립 비용만 반영한다).
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-10998).
+    """
     deployments = [_deployment() for _ in range(1000)]
     repo = FakeRepo(deployments)
-    start = time.perf_counter()
-    view = await build_deployment_list_view(repo, _TENANT_ID)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    sample = await perf_budget.sample_async(lambda: build_deployment_list_view(repo, _TENANT_ID))
+    view = sample.result
     assert len(view.deployments) == 1000
-    assert elapsed_ms < 100, f"assembly took {elapsed_ms:.2f}ms, budget is 100ms"
+    assert sample.wall_ms < 100, f"assembly took {sample.wall_ms:.2f}ms, budget is 100ms"
