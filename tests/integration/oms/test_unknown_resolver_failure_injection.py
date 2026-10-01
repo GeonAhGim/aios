@@ -43,6 +43,7 @@ multi-instance/adversarial-bypass 증명: 같은 order_id에 대해 동시에 �
 남긴다 — 중복 쓰기는 낭비지만 안전 통제가 사라지는 방향의 결함(escape)은
 아니다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -220,9 +221,7 @@ async def test_simulated_dropped_message_during_resolved_absent_transition_rolls
     adapter = _LookupAdapter(results=[None, None], open_orders=[])
 
     async def _dropped_transition(conn, **kwargs):
-        raise ConnectionResetError(
-            "simulated dropped connection during RESOLVED_ABSENT transition"
-        )
+        raise ConnectionResetError("simulated dropped connection during RESOLVED_ABSENT transition")
 
     monkeypatch.setattr(unknown_resolver_module._orders, "transition", _dropped_transition)
 
@@ -371,8 +370,13 @@ def test_pytest_gate_turns_red_when_still_open_guard_is_removed(tmp_path: Path) 
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -383,8 +387,12 @@ def test_pytest_gate_turns_red_when_still_open_guard_is_removed(tmp_path: Path) 
 
     mutated = subprocess.run(
         [*command[:-1], "-p", _MUTATED_MODULE_NAME, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout
@@ -464,7 +472,9 @@ async def test_concurrent_resolvers_escalate_race_never_loses_the_safety_control
 
     controls = await risk_gate_repo.list_active_controls(tenant_id=user_id)
     assert len(controls) >= 1  # 안전 불변: 절대 0건이면 안 된다.
-    assert len(controls) == 2  # 실측된 실제 동작(중복) — 문서화 목적.
+    # task-9065(F4) 이후 같은 (scope, scope_ref)에는 ACTIVE가 하나뿐이다 — 두 번째 resolver는
+    # 충돌로 죽지 않고 이미 걸린 통제를 그대로 재사용한다(ensure_safety_control_active).
+    assert len(controls) == 1
     for control in controls:
         assert control.scope is SafetyScope.ACCOUNT
         assert control.scope_ref == str(user_id)

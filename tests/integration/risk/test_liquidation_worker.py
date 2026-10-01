@@ -19,6 +19,9 @@ import pytest
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
+from src.foundation.risk_gate.application.deactivate_safety_control import (
+    deactivate_safety_control,
+)
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.safety.liquidation_executor import (
     _advance,
@@ -90,6 +93,27 @@ async def _create_request(pool: asyncpg.Pool, actor: UUID, requests: list[UUID])
         )
     requests.append(row["id"])
     return row["id"]
+
+
+async def _supersede_account_control(pool: asyncpg.Pool, actor: UUID) -> None:
+    """task-9065(F4): one ACTIVE control per (scope, scope_ref). The fence only moves when the
+    engaged control is released and a new one is engaged -- which is exactly the situation the
+    liquidation worker must treat as "the request's fence snapshot is stale"."""
+    repo = PostgresRiskGateRepository(pool)
+    for control in await repo.list_active_controls(tenant_id=actor):
+        if control.scope is SafetyScope.ACCOUNT and control.scope_ref == str(actor):
+            await deactivate_safety_control(
+                repo, tenant_id=actor, actor_is_admin=True, control_id=control.id
+            )
+    await activate_safety_control(
+        repo,
+        tenant_id=actor,
+        actor_subject_id=actor,
+        actor_is_admin=True,
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(actor),
+        reason="supersede",
+    )
 
 
 async def _insert_open_position(pool: asyncpg.Pool, user_id: UUID, symbol: str) -> None:
@@ -193,16 +217,7 @@ async def test_fence_change_aborts_request_and_skips_slices(pool, ctx):
     assert (await _request_row(pool, request_id))["state"] == "PLANNED"
 
     # A brand-new control bumps this ACCOUNT's fence past the request's snapshot.
-    repo = PostgresRiskGateRepository(pool)
-    await activate_safety_control(
-        repo,
-        tenant_id=actor,
-        actor_subject_id=actor,
-        actor_is_admin=True,
-        scope=SafetyScope.ACCOUNT,
-        scope_ref=str(actor),
-        reason="supersede",
-    )
+    await _supersede_account_control(pool, actor)
 
     await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
 
@@ -370,16 +385,7 @@ async def test_stale_planned_snapshot_cannot_resurrect_an_aborted_request(pool, 
     stale_row = await _select_candidate(pool)
     assert stale_row is not None and stale_row["state"] == "PLANNED"
 
-    repo = PostgresRiskGateRepository(pool)
-    await activate_safety_control(
-        repo,
-        tenant_id=actor,
-        actor_subject_id=actor,
-        actor_is_admin=True,
-        scope=SafetyScope.ACCOUNT,
-        scope_ref=str(actor),
-        reason="supersede",
-    )
+    await _supersede_account_control(pool, actor)
     await run_liquidation_worker_once(pool, adapters, now=now)  # 실제 워커가 ABORT를 확정
     assert (await _request_row(pool, request_id))["state"] == "ABORTED"
 

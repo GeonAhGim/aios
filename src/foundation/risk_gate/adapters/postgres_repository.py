@@ -26,6 +26,7 @@ from src.foundation.risk_gate.domain.models import (
     SafetyControlState,
     SafetyScope,
 )
+from src.foundation.risk_gate.ports.repository import SafetyControlAlreadyActiveError
 
 
 def _row_to_control(row: asyncpg.Record) -> SafetyControl:
@@ -151,9 +152,10 @@ class PostgresRiskGateRepository:
                 scope_ref,
             )
             if existing is not None:
-                raise ConcurrencyConflictError(
+                raise SafetyControlAlreadyActiveError(
                     f"safety_control scope={scope.value} scope_ref={scope_ref}: "
-                    f"이미 ACTIVE 상태인 control(id={existing['id']})이 있습니다."
+                    f"이미 ACTIVE 상태인 control(id={existing['id']})이 있습니다.",
+                    control_id=existing["id"],
                 )
 
             fence_row = await conn.fetchrow(

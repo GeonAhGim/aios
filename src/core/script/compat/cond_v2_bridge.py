@@ -59,7 +59,8 @@ COMPAT_SCHEMA: Final = "cond-v2-compat-1"
 SOURCE_GRAMMAR_VERSION: Final = "cond-v2"
 SIGNAL_NAME: Final = "cond"
 
-# Same grammar as condition_evaluator._ATOMIC_RE / market_state._KEY_RE (tests assert synchronization).
+# Same grammar as condition_evaluator._ATOMIC_RE / market_state._KEY_RE
+# (tests assert synchronization).
 _ATOMIC_RE: Final = re.compile(
     r"^(?P<key>\S+)\s+(?P<op>>=|<=|==|>|<|CROSSES_ABOVE|CROSSES_BELOW)\s+"
     r"(?P<threshold>-?\d+(?:\.\d+)?)$"
@@ -72,7 +73,8 @@ _OP_MAP: Final[Mapping[str, str]] = {
 }  # fmt: skip
 _JOINERS: Final[Mapping[str, str]] = {" AND ": "and", " OR ": "or"}
 _INPUT_ORDER: Final = ("open", "high", "low", "close", "volume")
-# Registry name → DSL `ta.` identifier (unverified: once DSL-9 finalizes, only this table needs updating).
+# Registry name → DSL `ta.` identifier (unverified: once DSL-9 finalizes, only this table
+# needs updating).
 _TA_IDENT: Final[Mapping[str, str]] = {
     n: n.lower() for n in ("SMA", "EMA", "RSI", "ATR", "CCI", "WILLR", "MFI", "OBV")
 }

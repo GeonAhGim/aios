@@ -53,7 +53,9 @@ from src.foundation.connections.adapters.postgres_repository import PostgresConn
 from src.foundation.reconciliation.contracts.v1 import Classification
 from src.foundation.reconciliation.domain.models import MaterialityPolicy
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
-from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
+from src.foundation.risk_gate.application.activate_safety_control import (
+    ensure_safety_control_active,
+)
 from src.foundation.risk_gate.application.deactivate_safety_control import (
     deactivate_safety_control,
 )
@@ -159,7 +161,7 @@ async def _apply_account_gate(
             return
         # This is the reconciliation engine's own judgment, not a human's (same rationale
         # as run_reconciliation.py).
-        await activate_safety_control(
+        await ensure_safety_control_active(
             risk_repo,
             tenant_id=tenant_id,
             actor_subject_id=tenant_id,

@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.risk.decision import RiskDecision
 from src.core.risk.policy_bundle import BundleState, RiskRuleBundle
 from src.foundation.risk_gate.domain.models import (
@@ -19,6 +20,19 @@ from src.foundation.risk_gate.domain.models import (
     SafetyControl,
     SafetyScope,
 )
+
+
+class SafetyControlAlreadyActiveError(ConcurrencyConflictError):
+    """The (scope, scope_ref) already has an ACTIVE control (F4 single-ACTIVE invariant).
+
+    Subclasses ConcurrencyConflictError so the manual activation API keeps answering 409.
+    System-initiated escalations treat it as "already engaged" via
+    `ensure_safety_control_active()` instead of crashing after their own write committed.
+    """
+
+    def __init__(self, message: str, *, control_id: UUID) -> None:
+        super().__init__(message)
+        self.control_id = control_id
 
 
 class RiskGateRepository(Protocol):

@@ -15,7 +15,11 @@ from uuid import uuid4
 import pytest
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.foundation.risk_gate.application.activate_safety_control import (
+    ensure_safety_control_active,
+)
 from src.foundation.risk_gate.domain.models import SafetyScope
+from src.foundation.risk_gate.ports.repository import SafetyControlAlreadyActiveError
 from tests.foundation.integration.risk_gate.conftest import _tenant
 
 
@@ -96,3 +100,74 @@ async def test_reactivation_allowed_after_prior_control_deactivated(pool, repo):
     )
     assert second.state.value == "ACTIVE"
     assert second.id != first.id
+
+
+async def test_ensure_active_reuses_existing_control_without_spending_a_fence_token(pool, repo):
+    """System escalations (unknown-order resolver, reconciliation engines) call
+    `ensure_safety_control_active()`: when the scope is already ACTIVE the existing control is
+    returned as-is -- no second row, no conflict, and the fence token does not move."""
+    tenant_id = await _tenant(pool)
+    kwargs = {
+        "tenant_id": tenant_id,
+        "actor_subject_id": tenant_id,
+        "actor_is_admin": True,
+        "scope": SafetyScope.ACCOUNT,
+        "scope_ref": str(tenant_id),
+    }
+
+    first = await ensure_safety_control_active(repo, reason="first escalation", **kwargs)
+    second = await ensure_safety_control_active(repo, reason="second escalation", **kwargs)
+
+    assert second.id == first.id
+    assert second.fence_token == first.fence_token
+    assert second.reason == "first escalation"  # the engaged control is not rewritten
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM safety_control "
+            "WHERE scope = 'ACCOUNT' AND scope_ref = $1 AND state = 'ACTIVE'",
+            str(tenant_id),
+        )
+    assert count == 1
+
+
+async def test_ensure_active_engages_a_new_control_after_the_previous_one_was_released(pool, repo):
+    """After a release the scope is unprotected again -- ensure must engage a NEW control with a
+    newer fence token, never hand back the released one."""
+    tenant_id = await _tenant(pool)
+    kwargs = {
+        "tenant_id": tenant_id,
+        "actor_subject_id": tenant_id,
+        "actor_is_admin": True,
+        "scope": SafetyScope.ACCOUNT,
+        "scope_ref": str(tenant_id),
+    }
+    first = await ensure_safety_control_active(repo, reason="first", **kwargs)
+    await repo.deactivate_safety_control(first.id)
+
+    second = await ensure_safety_control_active(repo, reason="second", **kwargs)
+
+    assert second.id != first.id
+    assert second.fence_token > first.fence_token
+    assert second.state.value == "ACTIVE"
+
+
+async def test_manual_activation_still_conflicts_with_the_dedicated_error_type(pool, repo):
+    """The strict path is unchanged for the manual API: a duplicate activation raises the
+    dedicated subtype (still a ConcurrencyConflictError, so the 409 mapping holds) and carries
+    the id of the control that is already engaged."""
+    tenant_id = await _tenant(pool)
+    first = await repo.insert_safety_control(
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_id),
+        reason="manual",
+        actor_subject_id=tenant_id,
+    )
+    with pytest.raises(SafetyControlAlreadyActiveError) as excinfo:
+        await repo.insert_safety_control(
+            scope=SafetyScope.ACCOUNT,
+            scope_ref=str(tenant_id),
+            reason="manual again",
+            actor_subject_id=tenant_id,
+        )
+    assert isinstance(excinfo.value, ConcurrencyConflictError)
+    assert excinfo.value.control_id == first.id

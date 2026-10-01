@@ -46,7 +46,9 @@ from src.foundation.reconciliation.domain.rules import (
 )
 from src.foundation.reconciliation.ports.repository import ReconciliationRepository
 from src.foundation.risk_gate.api import SafetyScope
-from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
+from src.foundation.risk_gate.application.activate_safety_control import (
+    ensure_safety_control_active,
+)
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 
 RULE_VERSION = "v1"
@@ -162,7 +164,7 @@ async def run_reconciliation(
     blocking_reason: str | None = None
     if aggregate in _BLOCKING_CLASSIFICATIONS:
         blocking_reason = f"INTEGRITY_RECONCILIATION_MISMATCH:{aggregate.value}"
-        control = await activate_safety_control(
+        control = await ensure_safety_control_active(
             risk_repo,
             tenant_id=tenant_id,
             actor_subject_id=tenant_id,

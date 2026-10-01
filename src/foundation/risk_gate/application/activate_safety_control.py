@@ -61,7 +61,10 @@ from src.foundation.risk_gate.domain.models import (
     SafetyControl,
     SafetyScope,
 )
-from src.foundation.risk_gate.ports.repository import RiskGateRepository
+from src.foundation.risk_gate.ports.repository import (
+    RiskGateRepository,
+    SafetyControlAlreadyActiveError,
+)
 
 _SELF_SERVICE_SCOPES = frozenset({SafetyScope.ACCOUNT})
 # 레드팀 #2026-09-02-29 — scope_ref 없이는 절대 매치될 수 없는(고아) control
@@ -165,3 +168,50 @@ async def activate_safety_control(
         await on_activated(view)
 
     return view
+
+
+_ENSURE_ACTIVE_ATTEMPTS = 3
+
+
+async def ensure_safety_control_active(
+    repo: RiskGateRepository,
+    *,
+    tenant_id: UUID,
+    actor_subject_id: UUID,
+    actor_is_admin: bool,
+    scope: SafetyScope,
+    scope_ref: str | None,
+    reason: str,
+    trace_id: UUID | None = None,
+    audit_repo: AuditEventRepository | None = None,
+) -> SafetyControlView:
+    """Idempotent activation for system-initiated escalations (unknown-order resolver,
+    reconciliation engines).
+
+    task-9065 made a second ACTIVE control on the same (scope, scope_ref) a hard conflict.
+    That is right for the manual API (409), but a system escalation only needs the control to
+    BE active: if one already is, the safety goal is met and the existing control is returned
+    untouched (no new fence token is spent). Without this, a second escalation raised after
+    its own order transition had already committed. The loop covers the race where the
+    existing control is deactivated between the conflict and the read.
+    """
+    for attempt in range(_ENSURE_ACTIVE_ATTEMPTS):
+        try:
+            return await activate_safety_control(
+                repo,
+                tenant_id=tenant_id,
+                actor_subject_id=actor_subject_id,
+                actor_is_admin=actor_is_admin,
+                scope=scope,
+                scope_ref=scope_ref,
+                reason=reason,
+                trace_id=trace_id,
+                audit_repo=audit_repo,
+            )
+        except SafetyControlAlreadyActiveError as exc:
+            existing = await repo.get_safety_control(exc.control_id)
+            if existing is not None and existing.state.value == "ACTIVE":
+                return control_to_view(existing)
+            if attempt == _ENSURE_ACTIVE_ATTEMPTS - 1:
+                raise
+    raise RuntimeError("ensure_safety_control_active: unreachable")

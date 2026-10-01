@@ -13,6 +13,7 @@ Each function still opens exactly one independent transaction and is
 solely responsible for its own commit/rollback — that contract is
 unchanged.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -25,7 +26,9 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from src.data.models.trading import Order, OrderStatus
-from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
+from src.foundation.risk_gate.application.activate_safety_control import (
+    ensure_safety_control_active,
+)
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.foundation.risk_gate.ports.repository import RiskGateRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
@@ -192,7 +195,7 @@ async def escalate(
                 await tx.rollback()
 
     if should_activate:
-        await activate_safety_control(
+        await ensure_safety_control_active(
             risk_gate_repo,
             tenant_id=result.tenant_id,
             actor_subject_id=result.tenant_id,
