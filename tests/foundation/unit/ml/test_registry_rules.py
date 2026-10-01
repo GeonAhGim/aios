@@ -7,7 +7,6 @@ Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §2.5/§9 AI-19
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -17,6 +16,7 @@ from src.foundation.ml.domain.registry_rules import (
     ModelHashMismatchError,
     validate_new_registration,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -109,22 +109,14 @@ def test_gate_red_without_hash_check_mismatch_would_go_unnoticed() -> None:
 _VALIDATE_P95_BUDGET_MS = 1.0
 
 
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
-
-
 @pytest.mark.perf
-def test_validate_new_registration_p95_within_budget() -> None:
+def test_validate_new_registration_p95_within_budget(perf_budget: PerfBudget) -> None:
     existing = _card()
-    samples: list[float] = []
-    for _ in range(200):
-        candidate = _card()
-        started = time.perf_counter()
-        validate_new_registration(candidate, existing=existing)
-        samples.append((time.perf_counter() - started) * 1000)
-
-    p95_ms = _p95(samples)
+    samples = perf_budget.samples(
+        lambda: validate_new_registration(_card(), existing=existing), n=200
+    )
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
     print(
         f"[AI-19 validate_new_registration] p95={p95_ms:.4f}ms "
         f"budget<{_VALIDATE_P95_BUDGET_MS:.1f}ms"
