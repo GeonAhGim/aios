@@ -20,7 +20,6 @@ call order asserted directly.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -43,6 +42,7 @@ from src.foundation.connections.domain.models import (
     ConnectionState,
     CredentialBinding,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
@@ -298,24 +298,27 @@ async def test_gate_red_repro_revocable_states_check_is_load_bearing(
 
 
 @pytest.mark.perf
-async def test_revoke_connection_perf_budget_p95_latency() -> None:
-    """No published per-axis budget covers FND-05 specifically (ADR-2026-09-09-C
+async def test_revoke_connection_perf_budget_p95_latency(
+    perf_budget: PerfBudget,
+) -> None:
+    """raw time.perf_counter() → perf_budget.samples_async() 전환 (task-10963).
+
+    No published per-axis budget covers FND-05 specifically (ADR-2026-09-09-C
     Decision 1's table); pin the same order of magnitude as the closest
     published command-write budget ("order submit -> ACK p95 50ms, paper")
     since this command is also a single fail-closed transition plus one
     dependent write, all served in-memory here."""
     tenant_id = uuid4()
-    samples = 50
-    durations_ms: list[float] = []
+    n_samples = 50
 
-    for _ in range(samples):
-        connection = _connection(tenant_id=tenant_id)
-        conn_repo = FakeConnectionRepository(connection=connection)
+    # samples_async: 비동기 I/O 전용 (coverage tracer-pause + wall_ms 보존)
+    async def _fn() -> None:
+        conn = _connection(tenant_id=tenant_id)
+        repo = FakeConnectionRepository(connection=conn)
+        await revoke_connection(repo, tenant_id=tenant_id, connection_id=conn.id)
 
-        start = time.perf_counter()
-        await revoke_connection(conn_repo, tenant_id=tenant_id, connection_id=connection.id)
-        durations_ms.append((time.perf_counter() - start) * 1000)
+    samples = await perf_budget.samples_async(_fn, n=n_samples)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
-    assert p95 < 50.0, f"revoke_connection p95 latency {p95:.3f}ms exceeded 50ms budget"
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
+    assert p95_ms < 50.0, f"revoke_connection p95 latency {p95_ms:.3f}ms exceeded 50ms budget"
