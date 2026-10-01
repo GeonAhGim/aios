@@ -5,9 +5,9 @@ Spec: AIOSproject 47_paper_execution_and_control_center_specification_v1.0.md,
 107_contract_versioning_and_compatibility_standard_v1.0.md.
 task-4645.
 """
+
 from __future__ import annotations
 
-import time
 from uuid import uuid4
 
 import pytest
@@ -132,14 +132,17 @@ def test_view_mapping_fails_closed_on_corrupted_repository_row(monkeypatch):
 
 
 @pytest.mark.perf
-def test_paper_deployment_view_construction_throughput():
+def test_paper_deployment_view_construction_throughput(perf_budget):
     """Pydantic model construction has no I/O; 5k instances must build well
     under 1s (budget: >= 5k ops/sec) — regression guard against someone later
     adding hidden validation/I/O to this contract model."""
     iterations = 5_000
     kwargs = _view_kwargs()
-    started = time.perf_counter()
-    for _ in range(iterations):
-        PaperDeploymentView(**kwargs)
-    elapsed = time.perf_counter() - started
-    assert elapsed < 1.0, f"expected < 1.0s for {iterations} constructions, took {elapsed:.3f}s"
+
+    def construct_batch() -> None:
+        for _ in range(iterations):
+            PaperDeploymentView(**kwargs)
+
+    perf_budget.assert_within(
+        construct_batch, budget_ms=1_000, label=f"PaperDeploymentView x{iterations}"
+    )
