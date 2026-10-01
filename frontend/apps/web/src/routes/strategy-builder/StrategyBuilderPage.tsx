@@ -9,6 +9,7 @@ import {
 } from "@aios/shared-types";
 import { Alert, Button, CandlestickChart, Card, Field, PageHeader, Select } from "@aios/ui-web";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
@@ -60,6 +61,7 @@ const DEFAULT_STOP_LOSS: PreviewCondition = {
 
 export function StrategyBuilderPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data: indicatorList } = useIndicators();
   const createStrategy = useCreateStrategy();
   const previewStrategy = usePreviewStrategy();
@@ -254,6 +256,18 @@ export function StrategyBuilderPage() {
         {saved && (
           <Alert tone="success">
             {t("legacy.strategyBuilderPage.t13", { strategyId: saved.strategyId, version: saved.version, status: saved.status })}</Alert>
+        )}
+
+        {saved && (
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              onClick={() => navigate(`/chart?instrument_id=${encodeURIComponent(targetAsset)}`)}
+            >
+              {t("legacy.strategyBuilderPage.t17")}
+            </Button>
+            <p className="text-sm text-fg-muted">{t("legacy.strategyBuilderPage.t18")}</p>
+          </div>
         )}
 
         <ValidationRunPanel

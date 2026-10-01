@@ -210,6 +210,8 @@ export const catalogEnLegacyA = {
     "t14": "Failed to preview.",
     "t15": "Please enter a strategy ID.",
     "t16": "Failed to save.",
+    "t17": "Go to backtest →",
+    "t18": "From the backtest results you can continue on to a paper-trading deployment.",
   },
   "payoutsPage": {
     "t1": "{{accountcode}} · Expires {{expiresat}}",

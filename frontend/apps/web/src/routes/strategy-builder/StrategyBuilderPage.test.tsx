@@ -11,6 +11,12 @@ const saveMutateAsync = vi.fn();
 const generateWizardMutateAsync = vi.fn();
 const generateFromPromptMutateAsync = vi.fn();
 const startValidationMutateAsync = vi.fn();
+const navigateMock = vi.fn();
+
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return { ...actual, useNavigate: () => navigateMock };
+});
 
 vi.mock("@aios/shared-hooks", () => ({
   useIndicators: () => ({ data: { indicators: ["RSI", "SMA", "EMA"] } }),
@@ -31,6 +37,7 @@ afterEach(() => {
   generateWizardMutateAsync.mockReset();
   generateFromPromptMutateAsync.mockReset();
   startValidationMutateAsync.mockReset();
+  navigateMock.mockReset();
 });
 
 function renderPage() {
@@ -80,5 +87,37 @@ describe("StrategyBuilderPage 에러 표시", () => {
       expect(screen.getByText("전략 ID를 입력해주세요.")).toBeInTheDocument(),
     );
     expect(saveMutateAsync).not.toHaveBeenCalled();
+  });
+});
+
+// J7(docs/specs/UX_JOURNEYS.md §6) — 전략 저장 후 주소를 직접 쳐서 백테스트 화면으로
+// 가지 않도록, 저장 성공 알림 옆에 다음 단계 CTA를 둔다. 대상 자산을 query로 넘겨
+// 재입력 없이 ChartPage(instrument_id)가 바로 그 심볼로 열리게 한다.
+describe("StrategyBuilderPage J7 백테스트 연결 CTA", () => {
+  it("전략 저장 성공 시 백테스트로 이동 CTA가 대상 자산을 넘겨 /chart로 이동한다", async () => {
+    saveMutateAsync.mockResolvedValue({
+      strategyId: "my-strategy",
+      version: "1.0.0",
+      status: "draft",
+    });
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText("my-rsi-strategy"), {
+      target: { value: "my-strategy" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "전략 저장" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "백테스트로 이동 →" })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "백테스트로 이동 →" }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/chart?instrument_id=BTC%2FUSDT");
+  });
+
+  it("negative: 저장 전에는 백테스트로 이동 CTA가 보이지 않는다", () => {
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: "백테스트로 이동 →" })).not.toBeInTheDocument();
   });
 });
