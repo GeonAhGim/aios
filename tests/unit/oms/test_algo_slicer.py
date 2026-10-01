@@ -1,14 +1,17 @@
 """TWAP/VWAP/POV/iceberg 슬라이스 계획기 단위테스트 — L4-06. DB 없음."""
+
 from __future__ import annotations
 
 import os
 import random
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -16,7 +19,7 @@ from pydantic import ValidationError
 
 from src.data.models.trading import OrderSide
 from src.services.oms.contracts.v1_commands import AlgoRequest, OrderIdempotencyScope
-from src.services.oms.domain.algo_slicer import plan_slices
+from src.services.oms.domain.algo_slicer import SlicePlan, plan_slices
 
 
 def _scope() -> OrderIdempotencyScope:
@@ -108,9 +111,7 @@ def test_participation_cap_limits_non_final_slices() -> None:
 def test_last_slice_absorbs_remainder_even_under_participation_cap() -> None:
     """참여율 상한 때문에 앞선 슬라이스들이 원래 몫보다 적게 나가도,
     마지막 슬라이스가 남은 전량을 흡수해 합계는 정확히 total과 같다."""
-    req = _request(
-        total_quantity=Decimal("100"), slice_count=4, max_participation_pct=Decimal("1")
-    )
+    req = _request(total_quantity=Decimal("100"), slice_count=4, max_participation_pct=Decimal("1"))
     volume_profile = [Decimal("10"), Decimal("10"), Decimal("10"), Decimal("10")]
     plans = plan_slices(
         req, now=req.start_at, volume_profile=volume_profile, rng=random.Random(req.seed)
@@ -171,6 +172,42 @@ def test_rng_backend_crash_propagates_without_partial_plan() -> None:
         plan_slices(req, now=req.start_at, volume_profile=None, rng=crashing_rng)
 
 
+def test_round_qty_dependency_exception_propagates() -> None:
+    """rounding.round_qty는 계획기가 의존하는 유일한 비-rng 외부 모듈 경계
+    (모듈 docstring §2-A 의존 목록) — 그 경계에서 운영 장애(정밀도 초과로
+    decimal 연산이 깨지는 상황 등)가 나면 삼키지 않고 그대로 전파해야 한다
+    (fail-closed, §3 쓰기 원칙과 동일 정신)."""
+    req = _request(slice_count=5)
+    with patch(
+        "src.services.oms.domain.algo_slicer.round_qty",
+        side_effect=ArithmeticError("SIMULATED_ROUNDING_BACKEND_ERROR"),
+    ):
+        with pytest.raises(ArithmeticError, match="SIMULATED_ROUNDING_BACKEND_ERROR"):
+            plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+
+
+def test_concurrent_plan_slices_invocations_do_not_cross_contaminate() -> None:
+    """plan_slices는 순수 함수 선언(모듈 docstring) — 서로 다른 요청을 여러
+    스레드에서 동시에 호출해도 한 호출의 중간 계산이 다른 호출로 새어나가지
+    않아야 한다. 숨은 모듈 전역/공유 가변 상태가 있다면 경쟁 조건으로 결과가
+    단일 스레드 기준값과 어긋나며 드러난다(D3 동시성 증빙)."""
+    requests = [_request(seed=i, slice_count=5, total_quantity=Decimal(i + 1)) for i in range(1, 9)]
+    expected = [
+        plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+        for req in requests
+    ]
+
+    def _run(index: int) -> list[SlicePlan]:
+        req = requests[index]
+        return plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_run, index): index for index in range(len(requests))}
+        for future in as_completed(futures):
+            index = futures[future]
+            assert future.result() == expected[index]
+
+
 @pytest.mark.perf
 def test_max_slice_count_planning_latency_budget() -> None:
     """500슬라이스(계약 상한) 계획을 100회 반복 — 로컬 회귀 예산이며 SLO 아님."""
@@ -183,7 +220,7 @@ def test_max_slice_count_planning_latency_budget() -> None:
     assert elapsed < 20.0, f"100 x 500-slice plans took {elapsed:.3f}s (budget 20.0s)"
 
 
-def test_pytest_gate_turns_red_when_remainder_absorption_is_removed(tmp_path: Path) -> None:
+def test_gate_red_when_remainder_absorption_guard_is_removed(tmp_path: Path) -> None:
     """실제 회귀 테스트가 통과하는 걸 먼저 확인하고, 마지막 슬라이스 잔량
     흡수 가드를 제거하면 pytest가 exit 1로 red가 되는 것까지 증명한다."""
     test_copy = tmp_path / "test_algo_slicer_copy.py"
@@ -191,8 +228,16 @@ def test_pytest_gate_turns_red_when_remainder_absorption_is_removed(tmp_path: Pa
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\n", encoding="utf-8")
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "-c", str(config), "--confcutdir", str(tmp_path),
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
         f"{test_copy}::test_slices_sum_exactly_to_total_quantity",
     ]
     env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="")
