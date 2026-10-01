@@ -10,7 +10,6 @@ LookupError/PermissionError)를 이 파일에서 직접 repo를 호출해 커버
 from __future__ import annotations
 
 import asyncio
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -630,9 +629,16 @@ async def test_get_active_consent_cross_tenant_returns_none_under_aios_app_role(
 
 @pytest.mark.perf
 async def test_get_active_consent_read_p95_latency_within_budget(
-    pool: asyncpg.Pool, repo: PostgresTrustRepository, purpose: str
+    pool: asyncpg.Pool, repo: PostgresTrustRepository, purpose: str, perf_budget
 ) -> None:
-    """ADR-2026-09-09-C 예산표 — 단순 인덱스 조회(FA 축)는 p95 50ms 이하를 기대한다."""
+    """ADR-2026-09-09-C 예산표 — 단순 인덱스 조회(FA 축)는 p95 50ms 이하를 기대한다.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-10898).
+    """
+
+    async def _read_once() -> None:
+        await repo.get_active_consent(tenant_id, purpose)
+
     tenant_id = await _make_tenant(pool)
     disclosure_id = await create_disclosure(pool, purpose=purpose, revision=1)
     await repo.insert_consent(
@@ -644,12 +650,9 @@ async def test_get_active_consent_read_p95_latency_within_budget(
         expires_at=None,
     )
 
-    samples = []
-    for _ in range(20):
-        start = time.perf_counter()
-        await repo.get_active_consent(tenant_id, purpose)
-        samples.append(time.perf_counter() - start)
-
-    samples.sort()
-    p95 = samples[int(len(samples) * 0.95) - 1]
-    assert p95 < 0.05, f"get_active_consent p95={p95:.4f}s exceeds 50ms budget"
+    samples = sorted(
+        [await perf_budget.sample_async(_read_once) for _ in range(20)],
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[int(len(samples) * 0.95) - 1].wall_ms
+    assert p95 < 50.0, f"get_active_consent p95={p95:.3f}ms exceeds 50ms budget"
