@@ -26,7 +26,6 @@ D3 요소 없음"으로 지적됐다(1126행). 이 파일이 그 부족분을 �
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -189,41 +188,45 @@ def test_unknown_enum_value_is_rejected_fail_closed(build: Any) -> None:
 
 
 @pytest.mark.perf
-def test_lineage_bearing_dto_construction_meets_latency_budget() -> None:
+def test_lineage_bearing_dto_construction_meets_latency_budget(perf_budget) -> None:
     """`ProviderTick`/`CoverageSpan` 등 lineage 필드가 딸린 DTO를 대량
-    구성해도(캔들 배치 수신 시뮬레이션) 절대시간 예산 내에 있어야 한다."""
+    구성해도(캔들 배치 수신 시뮬레이션) 절대시간 예산 내에 있어야 한다.
+
+    task-10982: raw perf_counter → PerfBudget.assert_within 전환
+    (check_perf_measurement_guard.py 대상 함수 1/2)"""
     from src.foundation.market_data.ports.provider import ProviderTick
 
     n = 5_000
-    budget_sec = 2.0  # 실측 로컬 <0.6s
+    budget_ms = 2_000.0  # 2.0s → ms 단위 (PerfBudget.assert_within budget_ms)
     listing = _listing()
-    start = time.perf_counter()
-    ticks = [
-        ProviderTick(
-            listing=listing,
-            price=Decimal("50000") + Decimal(i),
-            quantity=Decimal("0.01"),
-            side="buy" if i % 2 == 0 else "sell",
-            traded_at=_aware(),
-            lineage=DataLineage(
-                provider_id="bitget", fetched_at=_aware(), raw_digest=f"digest-{i}"
-            ),
-        )
-        for i in range(n)
-    ]
-    elapsed = time.perf_counter() - start
-    print(f"[DC-5 ports] ProviderTick x{n} construction in {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert len(ticks) == n
-    assert elapsed < budget_sec, (
-        f"ProviderTick {n}건 구성이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
-    )
+
+    def _build_batch() -> list:
+        return [
+            ProviderTick(
+                listing=listing,
+                price=Decimal("50000") + Decimal(i),
+                quantity=Decimal("0.01"),
+                side="buy" if i % 2 == 0 else "sell",
+                traded_at=_aware(),
+                lineage=DataLineage(
+                    provider_id="bitget", fetched_at=_aware(), raw_digest=f"digest-{i}"
+                ),
+            )
+            for i in range(n)
+        ]
+
+    # task-10982: raw perf_counter → PerfBudget.assert_within 전환
+    perf_budget.assert_within(_build_batch, budget_ms=budget_ms, label=f"[ProviderTick x{n}]")
 
 
 @pytest.mark.perf
-def test_protocol_isinstance_check_meets_latency_budget() -> None:
+def test_protocol_isinstance_check_meets_latency_budget(perf_budget) -> None:
     """`@runtime_checkable` Protocol의 `isinstance()`는 매 호출마다 대상의
     속성을 훑는다 — 대량 반복에서도 예산 내에 있어야 한다(회귀가 있다면
-    구조 검사 경로가 선형 이상으로 퇴화했다는 뜻)."""
+    구조 검사 경로가 선형 이상으로 퇴화했다는 뜻).
+
+    task-10982: raw perf_counter → PerfBudget.assert_within 전환
+    (check_perf_measurement_guard.py 대상 함수 2/2)"""
 
     class _Impl:
         def capabilities(self): ...
@@ -233,17 +236,15 @@ def test_protocol_isinstance_check_meets_latency_budget() -> None:
 
     impl = _Impl()
     iterations = 3_000
-    budget_sec = 3.0  # 실측 로컬 <0.5s(런타임 속성 훑기라 1회당 다소 비싸다)
-    start = time.perf_counter()
-    for _ in range(iterations):
-        assert isinstance(impl, MarketDataProvider)
-    elapsed = time.perf_counter() - start
-    print(
-        f"[DC-5 ports] isinstance(MarketDataProvider) x{iterations} in {elapsed:.3f}s "
-        f"(budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"isinstance 검사 {iterations}회가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    budget_ms = 3_000.0  # 3.0s → ms 단위
+
+    def _check_batch() -> None:
+        for _ in range(iterations):
+            assert isinstance(impl, MarketDataProvider)
+
+    # task-10982: raw perf_counter → PerfBudget.assert_within 전환
+    perf_budget.assert_within(
+        _check_batch, budget_ms=budget_ms, label=f"[isinstance x{iterations}]"
     )
 
 
