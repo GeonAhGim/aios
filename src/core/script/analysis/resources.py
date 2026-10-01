@@ -1,31 +1,38 @@
 """L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3/§9.4 DSL-6 —
-AIOS Script 컴파일 시 자원 산정치 상한 검사기.
+AIOS Script compile-time resource estimate ceiling checker.
 
-Spec: §2 표 86행(`analysis/resources.py`, "루프·시리즈 길이·호출 깊이 상한
-산정", 160줄), §3.3 169행("최대 시리즈 길이·연산 수·호출 깊이는 컴파일
-산정치로 거부(`SCRIPT_RESOURCE_LIMIT`)"), §9.4 DoD("산정치 상한 거부").
+Spec: §2 table row 86 (`analysis/resources.py`, "estimate loop/series-length/
+call-depth ceilings", 160 lines), §3.3 line 169 ("max series length/operation
+count/call depth are rejected by compile-time estimate
+(`SCRIPT_RESOURCE_LIMIT`)"), §9.4 DoD ("estimate ceiling rejection").
 
-DSL-4(`typing/checker.py`)가 통과시킨 `Program`(DSL-1 AST)만 입력으로
-받는다 — 시리즈 개수를 세려면 타입 정보가 필요해서다. DSL-4의 `infer_type`
-을 그대로 재사용하고(타입 추론 재구현 금지), 에러 관례(위치 없음, `code`
-클래스 속성, fail-closed)도 DSL-4/5와 동일하게 따른다. 새 taxonomy 없음:
-§3.3 4종 중 `SCRIPT_RESOURCE_LIMIT` 하나만 낸다.
+Takes only a `Program` (DSL-1 AST) that has passed DSL-4 (`typing/checker.py`)
+as input — counting series requires type information. Reuses DSL-4's
+`infer_type` as-is (no reimplementing type inference), and follows the same
+error conventions as DSL-4/5 (no location, `code` class attribute,
+fail-closed). No new taxonomy: emits only `SCRIPT_RESOURCE_LIMIT`, one of
+§3.3's 4 kinds.
 
-산정 항목(전부 정적·결정론 — 스크립트 실행·I/O·DB 없음):
-- series_count   : 시리즈로 구체화되는 decl 수(시리즈 타입 input/let/signal
-                   + 시리즈를 그리는 plot). 런타임 시리즈 버퍼 개수의 상한.
-- lookback_total : 모든 `[n]` 오프셋 n의 합 + 모든 호출의 기간 인자 합.
-                   호출의 기간은 "정적으로 접히는 정수 인자 중 최댓값"으로
-                   본다(§미검증 참조).
-- op_count       : 표현식 노드 총수(§3.3 "연산 수").
-- call_count     : `ns.ident(...)` 호출 총수(지표 호출 수).
-- call_depth     : 호출 인자 안에 호출이 중첩된 최대 깊이(§3.3 "호출 깊이").
-- plot_count     : plot decl 수.
-- request_count  : `request(symbol, timeframe, expr)`(M2-2a, §3.3 밖 확장)
-                   노드 수. request(...)는 항상 series<float>로 타입 추론돼
-                   (DSL-4) 이를 담는 decl의 series_count에는 그 경로로 이미
-                   반영되므로, 여기서는 이중 계상하지 않고 `max_requests`로
-                   별도 상한만 건다(§상한 근거).
+Estimated items (all static and deterministic — no script execution, I/O, or
+DB):
+- series_count   : number of decls materialized as a series (series-typed
+                   input/let/signal + plot that draws a series). Ceiling on
+                   the runtime series buffer count.
+- lookback_total : sum of every `[n]` offset n + sum of every call's period
+                   argument. A call's period is taken as "the max among its
+                   statically-foldable integer args" (see §unverified).
+- op_count       : total expression node count (§3.3 "operation count").
+- call_count     : total `ns.ident(...)` call count (indicator call count).
+- call_depth     : max nesting depth of calls within call arguments (§3.3
+                   "call depth").
+- plot_count     : number of plot decls.
+- request_count  : count of `request(symbol, timeframe, expr)` (M2-2a, an
+                   extension outside §3.3) nodes. request(...) is always
+                   type-inferred as series<float> (DSL-4), so it is already
+                   reflected in the series_count of the decl holding it via
+                   that path; it is not double-counted here, and instead only
+                   gets its own separate ceiling via `max_requests` (see
+                   §ceiling rationale).
 - array_length   : total element count summed over every `array<float>`
                    literal (M2-3 step 2, task-8694). Unlike a series it is not
                    refreshed per bar -- it is a constant vector baked into the
@@ -33,25 +40,32 @@ DSL-4(`typing/checker.py`)가 통과시킨 `Program`(DSL-1 AST)만 입력으로
                    allocates this much memory once per compile, so it gets its
                    own limit.
 
-Fail-closed(산정 불가 = 거부): 타입 추론이 실패하는 AST(DSL-4를 거치지
-않았거나 env가 어긋남), 음수 기간 인자, bool 리터럴로 선언된 int input을
-기간으로 쓰는 경우처럼 lookback을 정수로 확정할 수 없으면 "모르니 통과"가
-아니라 `SCRIPT_RESOURCE_LIMIT`로 거부한다(DSL-5 decision과 동일 원칙).
+Fail-closed (estimate not possible = reject): an AST whose type inference
+fails (did not go through DSL-4, or env mismatch), a negative period
+argument, or a case like using a bool-literal-declared int input as a period
+where lookback cannot be pinned down to an integer — in these cases this
+rejects with `SCRIPT_RESOURCE_LIMIT` rather than "unsure, so pass" (same
+principle as the DSL-5 decision).
 
-상한 근거(코드 상수, `DEFAULT_LIMITS`):
-- max_lookback_total 5000 = 지표 레지스트리 파라미터 상한(`specs_talib.py`
-  `_MAX_PERIOD = 500`) × 10. 최대 기간 지표 10개를 직렬로 이어도 통과한다.
-- max_series 64·max_plots 32: 차트 한 장에 겹치는 오버레이·페인 수의
-  실용 상한(CH-3 overlayRegistry가 페인/오버레이를 개별 관리하는 규모).
-- max_ops 2000·max_calls 100·max_call_depth 8: §3.3 문법에 반복·재귀가
-  없어 노드 수가 곧 봉당 연산 수다. 한 봉당 2000 노드·호출 100개면 DSL-12
-  컴파일 ≤300ms·즉시 백테스트 예산 안에 넉넉히 든다. 깊이 8은 사람이 읽을
-  수 있는 중첩의 상한이자 인터프리터(DSL-8) 스택 보호선.
-- max_requests 8(M2-2a): `request(symbol, timeframe, expr)` 하나마다 다른
-  심볼/타임프레임의 시리즈 버퍼 전체를 별도로 구체화해야 해서 일반 시리즈
-  binding보다 훨씬 무겁다 — `max_calls`(100)의 1/10 미만으로 별도 상한을
-  둔다. MTF 런타임 비용의 실측치는 M2-2b가 붙기 전까지 없어 보수적 기본값
-  (§미검증).
+Ceiling rationale (code constants, `DEFAULT_LIMITS`):
+- max_lookback_total 5000 = indicator registry parameter ceiling
+  (`specs_talib.py` `_MAX_PERIOD = 500`) x 10. Passes even if 10 max-period
+  indicators are chained in series.
+- max_series 64 / max_plots 32: practical ceiling for the number of
+  overlays/panes stacked on a single chart (the scale at which CH-3's
+  overlayRegistry manages panes/overlays individually).
+- max_ops 2000 / max_calls 100 / max_call_depth 8: §3.3's grammar has no
+  loops or recursion, so node count is directly the per-bar operation count.
+  2000 nodes / 100 calls per bar comfortably fits within DSL-12 compile
+  <=300ms and the live-backtest budget. Depth 8 is both the limit of
+  human-readable nesting and a stack-protection line for the interpreter
+  (DSL-8).
+- max_requests 8 (M2-2a): each `request(symbol, timeframe, expr)` must
+  separately materialize an entire series buffer for a different
+  symbol/timeframe, making it far heavier than an ordinary series binding —
+  it gets its own ceiling at under 1/10 of `max_calls` (100). No measured
+  MTF runtime cost exists until M2-2b lands, so this is a conservative
+  default (§unverified).
 - max_array_length 4096 (M2-3 step 2): an `array<float>` literal is fully
   baked into memory at compile time, so it is sized the same order of
   magnitude as `max_lookback_total` (5000), but gets its own constant because
@@ -59,9 +73,10 @@ Fail-closed(산정 불가 = 거부): 타입 추론이 실패하는 AST(DSL-4를 
   count) (unverified -- conservative default until the interpreter's actual
   cost is measured).
 
-미검증: 호출별 실제 lookback은 IND 레지스트리(DSL-9 `builtins_ta.py`)가
-붙어야 정확히 알 수 있다. 그때까지 "정적 정수 인자 최댓값"은 보수적
-추정치이며, 기간 인자가 하나도 없는 호출(`math.abs(x)` 등)은 0으로 본다.
+Unverified: the actual per-call lookback can only be known precisely once
+the IND registry (DSL-9 `builtins_ta.py`) is wired in. Until then, "max of
+the statically-folded integer args" is a conservative estimate, and a call
+with no period argument at all (e.g. `math.abs(x)`) is treated as 0.
 """
 
 from __future__ import annotations
@@ -91,9 +106,10 @@ from src.core.script.typing.types import Type, is_series
 
 
 class ScriptResourceLimitError(Exception):
-    """§3.3 에러 taxonomy의 `SCRIPT_RESOURCE_LIMIT`(400, 재시도 불가).
+    """`SCRIPT_RESOURCE_LIMIT` from §3.3's error taxonomy (400, non-retryable).
 
-    `metric`은 초과한 산정 항목 이름(산정 불가 거부면 `None`).
+    `metric` is the name of the estimated item that exceeded its ceiling
+    (`None` if rejected because the estimate could not be computed).
     """
 
     code = "SCRIPT_RESOURCE_LIMIT"
@@ -131,7 +147,7 @@ class ResourceEstimate:
     array_length: int = 0
 
 
-# (산정 항목, 상한 항목) — 검사 순서가 곧 오류 메시지 우선순위다.
+# (estimated item, ceiling item) — check order is the error-message priority order.
 _CHECKS: tuple[tuple[str, str], ...] = (
     ("series_count", "max_series"),
     ("lookback_total", "max_lookback_total"),
@@ -145,10 +161,11 @@ _CHECKS: tuple[tuple[str, str], ...] = (
 
 
 def check_resources(program: Program, limits: ResourceLimits = DEFAULT_LIMITS) -> ResourceEstimate:
-    """DSL-4 타입 검사를 다시 적용해 env를 얻은 뒤 산정·상한 검사한다.
+    """Re-run DSL-4 type checking to obtain env, then estimate and check ceilings.
 
-    DSL-4를 통과하지 못하는 AST는 산정 불가이므로 `SCRIPT_RESOURCE_LIMIT`로
-    거부한다(원인은 메시지에 남긴다). 통과하면 산정치를 돌려준다.
+    An AST that fails DSL-4 cannot be estimated, so it is rejected with
+    `SCRIPT_RESOURCE_LIMIT` (the cause is kept in the message). On success,
+    returns the estimate.
     """
     try:
         env = check_program(program)
@@ -162,7 +179,7 @@ def check_resources(program: Program, limits: ResourceLimits = DEFAULT_LIMITS) -
 
 
 def enforce_limits(estimate: ResourceEstimate, limits: ResourceLimits) -> None:
-    """산정치가 상한을 하나라도 초과하면 `ScriptResourceLimitError`(경계 포함 통과)."""
+    """`ScriptResourceLimitError` if any estimate exceeds its ceiling (boundary value passes)."""
     for metric, limit_name in _CHECKS:
         value: int = getattr(estimate, metric)
         limit: int = getattr(limits, limit_name)
@@ -174,9 +191,10 @@ def enforce_limits(estimate: ResourceEstimate, limits: ResourceLimits) -> None:
 
 
 def estimate_resources(program: Program, env: TypeEnv) -> ResourceEstimate:
-    """`Program`의 정적 자원 산정치. `env`는 DSL-4 `check_program`의 결과.
+    """Static resource estimate for a `Program`. `env` is the result of DSL-4's `check_program`.
 
-    env가 program과 어긋나면(타입 추론 실패) 산정 불가로 거부한다.
+    If `env` is out of sync with `program` (type inference failure), rejects
+    as not estimable.
     """
     inputs = {d.name: d for d in program.decls if isinstance(d, InputDecl)}
     acc = _Acc(env, inputs)
@@ -196,7 +214,7 @@ def estimate_resources(program: Program, env: TypeEnv) -> ResourceEstimate:
             for expr in (decl.side, decl.qty_expr, decl.opts, decl.when):
                 if expr is not None:
                     acc.visit(expr)
-        else:  # pragma: no cover — Decl union은 닫혀 있다
+        else:  # pragma: no cover — the Decl union is closed
             raise ScriptResourceLimitError(f"자원 산정 불가: 알 수 없는 decl {decl!r}")
     return ResourceEstimate(
         series_count=acc.series,
@@ -211,7 +229,7 @@ def estimate_resources(program: Program, env: TypeEnv) -> ResourceEstimate:
 
 
 class _Acc:
-    """단일 순회용 누산기(모듈 외부 비공개)."""
+    """Single-pass accumulator (private to this module)."""
 
     def __init__(self, env: TypeEnv, inputs: dict[str, InputDecl]) -> None:
         self.env = env
@@ -264,15 +282,17 @@ class _Acc:
                 self.visit(element, depth)
             return
         if isinstance(expr, RequestExpr):
-            # request(...) 자체는 항상 series<float>로 타입 추론되므로(DSL-4
-            # `_infer_request`) 이를 담는 상위 decl의 series_count는 그 경로로
-            # 이미 반영된다 — 여기서는 request_count만 별도로 센다(이중 계상
-            # 방지). 요청의 "무게"는 request_count·max_requests가 따로 상한을
-            # 건다(§상한 근거).
+            # request(...) itself is always type-inferred as series<float>
+            # (DSL-4 `_infer_request`), so the series_count of the parent
+            # decl holding it is already reflected via that path -- here we
+            # only count request_count separately (avoiding double
+            # counting). The "weight" of a request gets its own separate
+            # ceiling via request_count/max_requests (see §ceiling
+            # rationale).
             self.requests += 1
             self.visit(expr.expr, depth)
             return
-        raise ScriptResourceLimitError(  # pragma: no cover — Expr union은 닫혀 있다
+        raise ScriptResourceLimitError(  # pragma: no cover — the Expr union is closed
             f"자원 산정 불가: 알 수 없는 표현식 {expr!r}"
         )
 
@@ -288,7 +308,7 @@ class _Acc:
         return period
 
     def _static_int(self, expr: Expr) -> int | None:
-        """정적으로 접히는 정수 인자만 값으로, 그 외(float·시리즈·let)는 None."""
+        """An integer arg that statically folds to a value; otherwise (float/series/let) None."""
         if isinstance(expr, NumberLiteral):
             return expr.value if isinstance(expr.value, int) else None
         if isinstance(expr, UnaryExpr):
@@ -301,7 +321,7 @@ class _Acc:
     def _input_default(self, name: str) -> int | None:
         decl = self.inputs.get(name)
         if decl is None:
-            return None  # let으로 묶인 int — 정적 접힘 대상 아님(0으로 봄, §미검증)
+            return None  # int bound by a let -- not statically foldable (treated as 0, §unverified)
         if isinstance(decl.value, bool) or not isinstance(decl.value, int):
             raise ScriptResourceLimitError(
                 f"자원 산정 불가: int input {name!r}의 기본값 {decl.value!r}이"
