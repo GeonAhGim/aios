@@ -167,6 +167,67 @@ async def test_get_candles_returns_raw_series_with_hash_and_no_gaps(
     assert len(series.series_hash) == 64
 
 
+async def test_get_candles_as_of_equal_to_close_time_includes_candle(
+    pool, candle_store, batch_repo, reference_repo, calendar_repo
+):
+    """경계 계약 고정(AUDIT_2026-10-01 F5): `as_of`가 캔들의 `close_time`과
+    정확히 같으면 그 캔들은 포함된다. 실제 필터는 `created_at <= as_of`(WORM
+    스냅샷, `postgres_candle_store.query`)로 동작한다 — `md_candle`은
+    append-only라 `created_at`을 사후에 바꿀 수 없으므로(UPDATE 거부), 삽입
+    시점에 `created_at`을 명시적으로 `close_time`과 같게 넣어 `created_at <=
+    as_of`가 성립하는 상태에서 `as_of == close_time` 경계만을 검증한다."""
+    async with pool.acquire() as conn, conn.transaction():
+        instrument_id = await _instrument_id(conn)
+        t0 = (datetime.now(timezone.utc) - timedelta(minutes=2)).replace(second=0, microsecond=0)
+        close_time = t0 + timedelta(minutes=1)
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+        audit_event_id = await _audit_event_id(conn)
+        batch = IngestBatchResult(
+            batch_id=uuid.uuid4(),
+            source="test",
+            venue=Venue.BITGET,
+            instrument_id=instrument_id,
+            timeframe=Timeframe.M1,
+            range_start=t0,
+            range_end=close_time,
+            request_fingerprint=f"fp-{uuid.uuid4().hex}",
+            verdict=QualityVerdict(
+                verdict=Verdict.ACCEPT, accepted=1, quarantined=0, rejected=0, issues=[]
+            ),
+            batch_hash=f"hash-{uuid.uuid4().hex}",
+            audit_event_id=audit_event_id,
+            stored_range=None,
+        )
+        await batch_repo.create(conn, batch)
+        # `created_at`을 `close_time`과 같게 명시 삽입 — WORM이라 삽입 후에는
+        # 바꿀 수 없다(`UPDATE`는 트리거가 거부).
+        await conn.execute(
+            "INSERT INTO md_candle "
+            "(venue, instrument_id, timeframe, open_time, close_time, open, high, low, "
+            " close, volume, batch_id, created_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $5)",
+            key.venue.value,
+            key.instrument_id,
+            key.timeframe.value,
+            t0,
+            close_time,
+            Decimal("100"),
+            Decimal("110"),
+            Decimal("90"),
+            Decimal("105"),
+            Decimal("10"),
+            batch.batch_id,
+        )
+
+    query = CandleQuery(key=key, start=t0, end=close_time, as_of=close_time)
+    series = await get_candles(
+        query, store=candle_store, refs=reference_repo, cal=calendar_repo, pool=pool
+    )
+    assert [c.open_time for c in series.candles] == [t0], (
+        "as_of == close_time인 캔들은 경계 포함(contract)"
+    )
+
+
 async def test_get_candles_reports_gap_without_raising(
     pool, candle_store, batch_repo, reference_repo, calendar_repo
 ):
