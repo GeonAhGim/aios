@@ -102,6 +102,7 @@ async def test_pool_fixture_propagates_connection_failure(
 # ── Performance assertion: DSN rewrite budget ────────────────────────────
 
 
+@pytest.mark.perf
 def test_asyncpg_dsn_rewrite_performance_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     """Performance: 1000 DSN rewrites must complete within 50ms — this is a
     hot-path helper called once per fixture instantiation across the suite.

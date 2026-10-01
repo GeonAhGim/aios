@@ -98,6 +98,7 @@ def test_run_base_backup_unexpected_run_cmd_exception_propagates(tmp_path: Path)
 # -- performance assertion ----------------------------------------------------
 
 
+@pytest.mark.perf
 def test_latest_backup_dir_scans_300_candidates_under_200ms(tmp_path: Path) -> None:
     """수치 성능 단언: 300개 백업 디렉터리(절반은 실패 manifest) 중 최신 성공 백업을
     찾는 데 200ms를 넘기면 안 된다 -- 디스크 I/O가 적은 순수 스캔이라 O(n log n) 정렬

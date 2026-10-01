@@ -155,6 +155,7 @@ async def test_preview_promotion_failure_injection_ticket_issue_raises(
 # --- 성능 단언: propose -> preview -> confirm 왕복 지연 예산 ---
 
 
+@pytest.mark.perf
 async def test_confirm_promotion_round_trip_latency_budget(
     pool: Any,
     client: Any,

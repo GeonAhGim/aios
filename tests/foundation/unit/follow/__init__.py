@@ -236,6 +236,7 @@ _LATENCY_CEILING_SECONDS = 1.0
 관대하게만 잡는다(task-1521 선례처럼 비차단 print + 절대 상한)."""
 
 
+@pytest.mark.perf
 def test_convert_signal_repeated_calls_stay_within_budget() -> None:
     subscription = _subscription(max_notional=Decimal("1000.00"))
     signal = _signal(source_weight_pct=Decimal("50"))

@@ -5,6 +5,7 @@
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-B(factory.py 행)
 """
+
 from __future__ import annotations
 
 import pytest
@@ -42,13 +43,11 @@ def test_dummy_adapter_opens_new_exchange_without_touching_factory_branches():
     sentinel = object()
     calls: list[tuple[str, str, dict[str, str], bool]] = []
 
-    def _dummy_factory(
-        api_key: str, api_secret: str, extra: dict[str, str], demo_mode: bool
-    ):
+    def _dummy_factory(api_key: str, api_secret: str, extra: dict[str, str], demo_mode: bool):
         calls.append((api_key, api_secret, extra, demo_mode))
         return sentinel
 
-    register_exchange_adapter_factory(_DUMMY_EXCHANGE, _dummy_factory)  # type: ignore[arg-type]
+    register_exchange_adapter_factory(_DUMMY_EXCHANGE, _dummy_factory)
 
     result = build_adapter(_DUMMY_EXCHANGE, "k", "s", {"region": "kr"})
 
@@ -60,7 +59,8 @@ def test_dummy_adapter_still_blocked_by_live_guard_without_env():
     """negative — 새 거래소도 세 방어선 중 첫 번째(factory LIVE 가드)를
     그대로 통과한다. 확장점이 가드 앞이 아니라 뒤에 있다는 뜻."""
     register_exchange_adapter_factory(
-        _DUMMY_EXCHANGE, lambda k, s, e, d: object()  # type: ignore[arg-type, return-value]
+        _DUMMY_EXCHANGE,
+        lambda k, s, e, d: object(),  # type: ignore[arg-type, return-value]
     )
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         build_adapter(_DUMMY_EXCHANGE, "k", "s", None, demo_mode=False)
@@ -68,7 +68,8 @@ def test_dummy_adapter_still_blocked_by_live_guard_without_env():
 
 def test_reset_exchange_adapter_factories_restores_explicit_failure():
     register_exchange_adapter_factory(
-        _DUMMY_EXCHANGE, lambda k, s, e, d: object()  # type: ignore[arg-type, return-value]
+        _DUMMY_EXCHANGE,
+        lambda k, s, e, d: object(),  # type: ignore[arg-type, return-value]
     )
     reset_exchange_adapter_factories()
     with pytest.raises(UnsupportedExchangeError):

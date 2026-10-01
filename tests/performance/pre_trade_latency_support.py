@@ -262,7 +262,7 @@ async def count_pre_submit_round_trips(
     symbol = await seed_normal_distrust_symbol(pool)
     async with pool.acquire() as conn:
         pinned = PinnedConnectionPool(conn)
-        risk_repo = repo_cls(pinned)  # type: ignore[arg-type]  # PinnedConnectionPool은 pool 프로토콜의 perf 계측 전용 대역
+        risk_repo = repo_cls(pinned)
         recorder = RiskDecisionRecorder(
             pinned,
             PostgresDecisionRepository(pinned),
@@ -276,7 +276,7 @@ async def count_pre_submit_round_trips(
                 connection_repo,
                 NoOpenSignalsRepo(),
                 recorder,
-                tenant_id=tenant_id,  # type: ignore[arg-type]  # risk_repo가 pinned 대역이라 프로토콜 타입을 정적으로 못 좁힘
+                tenant_id=tenant_id,
                 execution_ref="exec:perf",
                 provider_code=PROVIDER,
                 symbol=symbol,

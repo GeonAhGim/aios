@@ -143,6 +143,7 @@ async def test_run_selftest_propagates_unexpected_adapter_exception(
 # -- performance assertion --
 
 
+@pytest.mark.perf
 def test_write_report_100_paths_under_200ms(tmp_path: Path) -> None:
     """Numeric performance assertion: writing the self-test report to 100
     destinations (pure local filesystem I/O, no network) must complete well

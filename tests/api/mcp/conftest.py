@@ -165,19 +165,20 @@ async def test_issue_repository_failure_raises_exception(
     token_repo: PostgresAgentTokenRepository,
 ) -> None:
     """실패주입: repo.insert_token이 Exception을 raise하면 issue도 그대로 전파."""
-    original_insert = token_repo.insert_token  # type: ignore[attr-defined]
+    original_insert = token_repo.insert_token
 
     async def broken_insert(*args, **kwargs):
         raise RuntimeError("DB 연결 실패")
 
-    token_repo.insert_token = broken_insert  # type: ignore[attr-defined]
+    token_repo.insert_token = broken_insert
     try:
         with pytest.raises(RuntimeError, match="DB 연결 실패"):
             await issue(token_repo, tenant_id=UUID(int=7), scopes=frozenset({Scope.READ}))
     finally:
-        token_repo.insert_token = original_insert  # type: ignore[attr-defined]
+        token_repo.insert_token = original_insert
 
 
+@pytest.mark.perf
 async def test_issue_performance_under_load(token_repo: PostgresAgentTokenRepository) -> None:
     """성능: 50회 issue 호출이 5초 미만이어야 함."""
     start = time.perf_counter()

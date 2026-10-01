@@ -146,7 +146,7 @@ async def test_record_reuse_detected_audit_swallows_backend_failure(
     monkeypatch.setattr(sr, "record_audit_log", _boom)
 
     # conn is never touched by the monkeypatched record_audit_log above.
-    await sr._record_reuse_detected_audit(None, uuid4(), None)  # type: ignore[arg-type]
+    await sr._record_reuse_detected_audit(None, uuid4(), None)
 
 
 # ── numeric performance assertion ───────────────────────────────────────

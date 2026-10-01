@@ -161,6 +161,7 @@ def test_evaluate_conditions_missing_indicator_propagates_runtime_error(
 # ── performance assertion ────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_evaluate_conditions_500_price_conditions_under_200ms() -> None:
     """Numeric performance assertion: 500 AND-composed price conditions
     against one snapshot must complete well under 200ms — pure in-memory

@@ -163,7 +163,7 @@ async def test_grant_membership_without_mfa_raises():
             None,
             owner_ctx,
             subject_id=uuid4(),
-            role=MembershipRole.MEMBER,  # type: ignore[arg-type]
+            role=MembershipRole.MEMBER,
         )
 
 

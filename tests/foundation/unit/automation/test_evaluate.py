@@ -194,6 +194,7 @@ def test_indicator_condition_compare_value_failure_propagates(
         evaluate_condition(condition, {"005930": snapshot}, {})
 
 
+@pytest.mark.perf
 def test_evaluate_conditions_performance_budget() -> None:
     """Numeric performance assertion: evaluating 500 AND-composed price
     conditions against one snapshot must stay well under a loose 200ms

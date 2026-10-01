@@ -249,6 +249,7 @@ class TestFailureInjection:
 class TestPerformance:
     """성능 테스트 -- 지표 조회/검증이 예산 내 완료되는지."""
 
+    @pytest.mark.perf
     def test_registry_lookup_budget(self) -> None:
         """registry.get()이 1000회 조회 기준 1초 이내에 완료되어야 한다(1회당 1ms 예산)."""
         spec = _spec("PERF_TEST")
@@ -259,6 +260,7 @@ class TestPerformance:
         elapsed = time.monotonic() - start
         assert elapsed < 1.0, f"1000회 registry.get()이 {elapsed:.2f}s 걸림 (예산: 1s)"
 
+    @pytest.mark.perf
     def test_registry_hash_budget(self) -> None:
         """registry_hash()가 100개 스펙 기준 1초 이내에 완료되어야 한다."""
         specs = {f"IND{i}": _spec(f"IND{i}") for i in range(100)}

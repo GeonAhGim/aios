@@ -61,6 +61,7 @@ def test_models_package_missing_submodule_raises_import_error() -> None:
 # ── Performance assertion: Decimal arithmetic budget ────────────────────
 
 
+@pytest.mark.perf
 def test_money_arithmetic_performance_budget() -> None:
     """Performance: 1000 Money additions must complete within 50ms.
 

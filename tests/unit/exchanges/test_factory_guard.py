@@ -9,6 +9,7 @@ I-10(배선·우회불가·증명) — 가드가 factory 안에만 있고 운영
 `build_adapter`인지, (b) `src/**`에 factory 밖 직접 생성자 호출이
 demo/paper 리터럴로만 존재하는지를 AST로 함께 증명한다.
 """
+
 from __future__ import annotations
 
 import ast
@@ -141,7 +142,7 @@ def test_paper_sim_uses_registered_factory():
         calls.append((api_key, api_secret, extra))
         return sentinel
 
-    register_paper_sim_factory(_factory)  # type: ignore[arg-type]
+    register_paper_sim_factory(_factory)
     result = build_adapter("paper_sim", "k", "s", {"reference": "bitget"})
 
     assert result is sentinel
@@ -178,8 +179,10 @@ def _direct_ctor_calls_outside_factory() -> list[str]:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            name = func.id if isinstance(func, ast.Name) else (
-                func.attr if isinstance(func, ast.Attribute) else None
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else (func.attr if isinstance(func, ast.Attribute) else None)
             )
             if name not in _ADAPTER_CTORS:
                 continue

@@ -261,6 +261,7 @@ def test_evaluate_propagates_exception_from_investable_ratio(monkeypatch):
 # ── performance assertion ───────────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_evaluate_completes_within_1ms():
     """evaluate() call completes within 1ms — performance budget (task-10175)."""
     qa = SuitabilityQuestionnaire()

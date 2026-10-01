@@ -178,7 +178,7 @@ async def test_evaluate_calls_kill_switch_activate_exactly_once(pool, kill_switc
         calls.append((kwargs, result))
         return result
 
-    kill_switch.activate = _spy_activate  # type: ignore[method-assign]
+    kill_switch.activate = _spy_activate
     risk_guard = RiskGuardService(pool, kill_switch)
     user_id = await create_test_user(pool)
     execution_id, strategy_id = await _seed_execution(pool, user_id, max_drawdown_pct=Decimal("10"))

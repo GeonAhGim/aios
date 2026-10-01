@@ -91,6 +91,7 @@ async def test_generate_propagates_unexpected_exception_from_dependency(monkeypa
         await service.generate("실패주입 테스트")
 
 
+@pytest.mark.perf
 async def test_generate_p95_latency_within_budget():
     """성능단언: generate()는 의존성 호출 없이 즉시 예외를 발생시키므로
     p95 지연은 10ms 예산 이내여야 한다 (ADR-2026-09-09-C 결정1 준용)."""

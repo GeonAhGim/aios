@@ -27,6 +27,7 @@ PostgreSQL 프로토콜의 단일 쿼리 바인드 파라미터 상한(65,535)�
 커넥션의 평생 1회성 드라이버 오버헤드지 `replay()`가 매 호출 내는 왕복이
 아니다.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -66,8 +67,18 @@ MONTH_ROW_COUNT = 43_200  # 60(분) × 24(시) × 30(일) — 1분봉 1개월치
 DAY_ROW_COUNT = 1_440  # 60(분) × 24(시) — 1분봉 1일치, §8.4 "1일"
 
 _CANDLE_COLUMNS = (
-    "venue", "instrument_id", "timeframe", "open_time", "close_time",
-    "open", "high", "low", "close", "volume", "quote_volume", "batch_id",
+    "venue",
+    "instrument_id",
+    "timeframe",
+    "open_time",
+    "close_time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "quote_volume",
+    "batch_id",
 )
 
 
@@ -96,9 +107,18 @@ async def new_instrument_id(conn: asyncpg.Connection) -> uuid.UUID:
 
 def _row(instrument_id: uuid.UUID, batch_id: uuid.UUID, open_time: datetime) -> tuple:
     return (
-        Venue.BITGET.value, instrument_id, Timeframe.M1.value, open_time,
-        open_time + timedelta(minutes=1), Decimal("100"), Decimal("110"), Decimal("90"),
-        Decimal("105"), Decimal("10"), None, batch_id,
+        Venue.BITGET.value,
+        instrument_id,
+        Timeframe.M1.value,
+        open_time,
+        open_time + timedelta(minutes=1),
+        Decimal("100"),
+        Decimal("110"),
+        Decimal("90"),
+        Decimal("105"),
+        Decimal("10"),
+        None,
+        batch_id,
     )
 
 
@@ -122,19 +142,25 @@ async def seed_candles(
     async with pool.acquire() as conn, conn.transaction():
         audit_event_id = await _audit_event_id(conn)
         batch = IngestBatchResult(
-            batch_id=uuid.uuid4(), source="test", venue=Venue.BITGET,
-            instrument_id=instrument_id, timeframe=Timeframe.M1, range_start=t0,
-            range_end=range_end, request_fingerprint=f"fp-{uuid.uuid4().hex}",
-            verdict=QualityVerdict(verdict=Verdict.ACCEPT, accepted=row_count, quarantined=0,
-                                    rejected=0, issues=[]),
-            batch_hash=f"hash-{uuid.uuid4().hex}", audit_event_id=audit_event_id,
+            batch_id=uuid.uuid4(),
+            source="test",
+            venue=Venue.BITGET,
+            instrument_id=instrument_id,
+            timeframe=Timeframe.M1,
+            range_start=t0,
+            range_end=range_end,
+            request_fingerprint=f"fp-{uuid.uuid4().hex}",
+            verdict=QualityVerdict(
+                verdict=Verdict.ACCEPT, accepted=row_count, quarantined=0, rejected=0, issues=[]
+            ),
+            batch_hash=f"hash-{uuid.uuid4().hex}",
+            audit_event_id=audit_event_id,
             stored_range=None,
         )
         await batch_repo.create(conn, batch)
 
         records = (
-            _row(instrument_id, batch.batch_id, t0 + timedelta(minutes=i))
-            for i in range(row_count)
+            _row(instrument_id, batch.batch_id, t0 + timedelta(minutes=i)) for i in range(row_count)
         )
         await conn.copy_records_to_table("md_candle", records=records, columns=_CANDLE_COLUMNS)
 
@@ -176,11 +202,11 @@ async def count_replay_round_trips(
 
     async with pool.acquire() as conn:
         pinned = _PinnedConnectionPool(conn)
-        await replay(request, store=store, refs=refs, cal=cal, pool=pinned)  # type: ignore[arg-type]
+        await replay(request, store=store, refs=refs, cal=cal, pool=pinned)
 
         conn.add_query_logger(_log)
         try:
-            await replay(request, store=store, refs=refs, cal=cal, pool=pinned)  # type: ignore[arg-type]
+            await replay(request, store=store, refs=refs, cal=cal, pool=pinned)
         finally:
             conn.remove_query_logger(_log)
 

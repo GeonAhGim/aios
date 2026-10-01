@@ -263,6 +263,7 @@ class TestFailureInjectionConfirm:
 class TestPerformanceToken:
     """Latency budget for the hot-path authorize() judgment."""
 
+    @pytest.mark.perf
     def test_performance_authorize_latency(self):
         """authorize() must average under a 1ms/op budget -- it sits on
         every MCP tool call per spec §2.1 ("single authorization point")."""
@@ -282,6 +283,7 @@ class TestPerformanceToken:
 class TestPerformanceConfirm:
     """Latency budget for confirm ticket verification."""
 
+    @pytest.mark.perf
     def test_performance_confirm_ticket_verify(self):
         """verify_and_consume() must average under a 0.5ms/op budget."""
         budget_ms = 0.5

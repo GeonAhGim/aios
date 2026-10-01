@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -95,9 +96,10 @@ def test_build_default_hierarchy_rejects_none_user_id():
     """user_id=None → ValidationError (UUID required)."""
     from pydantic import ValidationError
 
+    invalid_user_id: Any = None
     with pytest.raises(ValidationError):
         build_default_hierarchy(
-            user_id=None,  # type: ignore[arg-type]
+            user_id=invalid_user_id,
             tenant_id=uuid4(),
             **_KWARGS,
         )
@@ -107,10 +109,11 @@ def test_build_default_hierarchy_rejects_none_tenant_id():
     """tenant_id=None → ValidationError (UUID required)."""
     from pydantic import ValidationError
 
+    invalid_tenant_id: Any = None
     with pytest.raises(ValidationError):
         build_default_hierarchy(
             user_id=uuid4(),
-            tenant_id=None,  # type: ignore[arg-type]
+            tenant_id=invalid_tenant_id,
             **_KWARGS,
         )
 

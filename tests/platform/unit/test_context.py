@@ -117,7 +117,7 @@ def test_request_context_is_frozen():
     ctx = current()
 
     with pytest.raises(ValidationError):
-        ctx.tenant_id = uuid.uuid4()  # type: ignore[misc]
+        ctx.tenant_id = uuid.uuid4()
 
 
 def test_bind_exception_still_restores_context():

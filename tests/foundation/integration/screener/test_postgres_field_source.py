@@ -347,6 +347,7 @@ async def test_read_fields_pool_failure_propagates_fail_closed(
 # ---- perf: batched per-venue DISTINCT ON lookup stays within the UX-6 budget ----
 
 
+@pytest.mark.perf
 async def test_read_fields_batched_lookup_perf_budget(
     pool, field_source, batch_repo, hot_storage
 ) -> None:
