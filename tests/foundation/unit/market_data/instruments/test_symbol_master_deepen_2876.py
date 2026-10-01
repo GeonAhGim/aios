@@ -32,7 +32,6 @@ DEPTH_DC_RD.md#1124) D1 -> D3 증빙.
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -48,6 +47,7 @@ from src.foundation.market_data.contracts.v2.instruments import (
     VenueListing,
 )
 from src.foundation.market_data.domain.instruments import symbol_master as sm
+from tests.conftest import PerfBudget
 
 _ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _ID_B = "01BXQR6X4TVQFP7NM5H7J1K2C3"
@@ -189,56 +189,46 @@ def test_find_instrument_missing_record_despite_matching_listing_fail_closed() -
 
 
 @pytest.mark.perf
-def test_resolve_meets_latency_budget_with_large_listing_set() -> None:
+def test_resolve_meets_latency_budget_with_large_listing_set(
+    perf_budget: PerfBudget,
+) -> None:
     """`resolve`는 listings를 선형탐색하므로, 수천 건 규모에서도 절대시간
     예산 내에 있어야 한다(회귀가 있다면 이중 루프 등으로의 퇴화다)."""
     n = 5_000
     instruments = [_instrument(_ulid(i), InstrumentLifecycle.ACTIVE) for i in range(n)]
     listings = [_listing(_ulid(i), f"SYM{i:05d}USDT", 1) for i in range(n)]
     iterations = 200
-    budget_sec = 6.0  # 실측 로컬 <0.5s, 동시 실행 CI 부하 대비 여유
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        # (i * n) // iterations로 조회 대상을 목록 전체(0..n-1)에 고르게
-        # 펼쳐 뒤쪽(최악 경로, 선형탐색이 끝까지 가야 하는 인덱스)도 실제로
-        # 탐색되게 한다 — i % n(iterations < n일 때 앞부분만 반복 조회)로는
-        # 대규모 목록의 최악 경로 성능 회귀를 검출하지 못한다(XREV task-3641).
-        target_idx = (i * n) // iterations
-        target = f"SYM{target_idx:05d}USDT"
-        ref = sm.resolve(Venue.BITGET, target, instruments=instruments, listings=listings)
-        assert ref.listing.venue_symbol == target
-    elapsed = time.perf_counter() - start
-    print(
-        f"[DC-2 symbol_master] resolve x{iterations} over {n} listings in {elapsed:.3f}s "
-        f"(budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"resolve {iterations}회(목록 {n}건)가 예산({budget_sec}s)을 넘었습니다"
-        f"({elapsed:.3f}s) — 선형탐색이 더 나쁜 복잡도로 퇴화했는지 확인하세요."
-    )
+    def _work() -> None:
+        for i in range(iterations):
+            # (i * n) // iterations로 조회 대상을 목록 전체(0..n-1)에 고르게
+            # 펼쳐 뒤쪽(최악 경로, 선형탐색이 끝까지 가야 하는 인덱스)도 실제로
+            # 탐색되게 한다 — i % n(iterations < n일 때 앞부분만 반복 조회)로는
+            # 대규모 목록의 최악 경로 성능 회귀를 검출하지 못한다(XREV task-3641).
+            target_idx = (i * n) // iterations
+            target = f"SYM{target_idx:05d}USDT"
+            ref = sm.resolve(Venue.BITGET, target, instruments=instruments, listings=listings)
+            assert ref.listing.venue_symbol == target
+
+    perf_budget.assert_within(_work, budget_ms=6_000.0)
 
 
 @pytest.mark.perf
-def test_register_and_change_symbol_meet_latency_budget() -> None:
+def test_register_and_change_symbol_meet_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     iterations = 2_000
-    budget_sec = 8.0  # 실측 로컬 <0.3s, 동시 실행 CI 부하 대비 여유(pydantic 검증 포함)
-    start = time.perf_counter()
-    for i in range(iterations):
-        ref = _register(instrument_id=_ulid(i), venue_symbol="BTCUSDT")
-        closed, new = sm.change_symbol(
-            current=ref.listing, new_venue_symbol="XBTUSDT", changed_at=_t(5)
-        )
-        assert new.instrument_id == ref.instrument.instrument_id
-        assert closed.delisted_at == _t(5)
-    elapsed = time.perf_counter() - start
-    print(
-        f"[DC-2 symbol_master] register+change_symbol x{iterations} in {elapsed:.3f}s "
-        f"(budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"register+change_symbol {iterations}회가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
-    )
+
+    def _work() -> None:
+        for i in range(iterations):
+            ref = _register(instrument_id=_ulid(i), venue_symbol="BTCUSDT")
+            closed, new = sm.change_symbol(
+                current=ref.listing, new_venue_symbol="XBTUSDT", changed_at=_t(5)
+            )
+            assert new.instrument_id == ref.instrument.instrument_id
+            assert closed.delisted_at == _t(5)
+
+    perf_budget.assert_within(_work, budget_ms=8_000.0)
 
 
 # ---- 게이트 적색 재현(D2) — 실제 다단계 심볼 마스터 시나리오 재생 ----
