@@ -1,27 +1,31 @@
-"""BT-10c — `POST /v1/backtests/quick`: 즉시 백테스트 HTTP API.
+"""BT-10c — `POST /v1/backtests/quick`: immediate backtest HTTP API.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#§9.5 BT-10
-(호출자=라우터, `quick_backtest.py` 모듈 docstring "호출자(BT-13 라우터·BT-11
-잡)가 `read_candles_columnar` 한 번(왕복 1회)으로 읽어 넘긴다"), §3.4.
+(caller=router; `quick_backtest.py` module docstring states "the caller (BT-13
+router / BT-11 job) reads once via `read_candles_columnar` (single round trip)
+and passes it in"), §3.4.
 
-71번 §6 규칙: 라우터는 auth/TenantContext 주입·transport validation·
-application 호출만 한다. 이 라우터는 `compile_source`(DSL-12)로 컴파일 →
-`build_script_signal_source`(BT-10b)로 전략 접점 조립 → 캔들 컬럼 1회 조회
-(`CandleStore.read_candles_columnar`, LA-23b) → `run_quick_backtest`(BT-10)
-호출까지만 하고, 체결·비용·전략 로직을 다시 계산하지 않는다(REJECT 대상).
-`quick_backtest.py`(task-1504 9a1ae87)는 이미 머지된 소비 대상이라 수정하지
-않는다.
+Rule 71 §6: a router only wires auth/TenantContext, performs transport
+validation, and calls into the application layer. This router only goes as
+far as compiling via `compile_source` (DSL-12) -> wiring the strategy
+touchpoint via `build_script_signal_source` (BT-10b) -> a single candle
+column read (`CandleStore.read_candles_columnar`, LA-23b) -> calling
+`run_quick_backtest` (BT-10); it never recomputes fills, costs, or strategy
+logic (that would be rejected in review). `quick_backtest.py` (task-1504
+9a1ae87) is an already-merged consumer and is not modified here.
 
-도메인 예외는 잡지 않는다 — `exception_registry_foundation.py`(EXCEPTION_MAP)
-가 400/404로 번역한다(raw HTTPException 0건, PLT-21 가드 대상). 예외:
-`TooManyBarsError`는 BT-11 안내를 위해 `details.bars/max`가 필요한데 그
-클래스 자체(`quick_backtest.py`, 수정 금지)는 details를 채우지 않으므로,
-여기서 우리가 이미 아는 값(읽은 봉 수·상한)을 인스턴스에 얹어 그대로
-재전파한다(새 예외 클래스·새 error_code 없음 — task-1218 `ConsentNotFoundError`
-번역 패턴과 같은 "애플리케이션 파일 수정 불가, 라우터가 보강" 근거).
+Domain exceptions are not caught here — `exception_registry_foundation.py`
+(EXCEPTION_MAP) translates them into 400/404 (zero raw HTTPException, a
+PLT-21 guard target). Exception: `TooManyBarsError` needs `details.bars/max`
+for BT-11 guidance, but the class itself (`quick_backtest.py`, do not modify)
+does not populate `details`, so here we attach the values we already know
+(bars read / max) onto the instance and re-raise it as-is (no new exception
+class or error_code — same "application file cannot be modified, router
+backfills" rationale as the `ConsentNotFoundError` translation pattern in
+task-1218).
 
-동기 실행·무저장(decision) — 백테스트 결과를 어디에도 쓰지 않는다. LIVE
-경로와 무관하며 주문을 실제로 내지 않는다.
+Synchronous execution, no persistence (by decision) — backtest results are
+not written anywhere. Unrelated to the LIVE path; no real orders are placed.
 """
 
 from __future__ import annotations
@@ -86,8 +90,8 @@ router = APIRouter(prefix="/v1/backtests", tags=["backtests"])
 
 
 def get_indicator_registry() -> IndicatorRegistry:
-    """IND-1 기본 레지스트리 — DSL-12 라우터(`scripts.py`)와 같은 프로세스
-    단일 인스턴스를 공유한다(테스트가 덮어쓸 수 있는 의존성)."""
+    """IND-1 default registry — shares a single in-process instance with the
+    DSL-12 router (`scripts.py`) (overridable dependency for tests)."""
     return DEFAULT_REGISTRY
 
 
