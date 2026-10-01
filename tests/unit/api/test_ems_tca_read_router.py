@@ -9,6 +9,7 @@ without I/O. Covers the raw-`HTTPException` -> domain-exception migration
 must raise `TcaResultNotFoundError`, translated to 404 by the central
 `exception_registry_foundation.py` mapping, not by the router itself.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -111,3 +112,43 @@ async def test_get_tca_revision_raises_not_found_for_unknown_revision() -> None:
 
     with pytest.raises(TcaResultNotFoundError):
         await get_tca_revision(parent_id, 2, _user=_user(), repo=repo)
+
+
+async def test_get_tca_revision_rejects_negative_revision() -> None:
+    """negative -- a revision below the valid domain (revisions start at 1)
+    must not be treated as a cache-miss-only concern: the repo correctly
+    reports no record and the router still raises the domain NotFoundError
+    rather than coercing a negative revision into a lookup that could match
+    an unrelated record."""
+    parent_id = uuid4()
+    repo = _FakeTcaResultRepository(records={(parent_id, 1): _record(parent_id, 1)})
+
+    with pytest.raises(TcaResultNotFoundError):
+        await get_tca_revision(parent_id, -1, _user=_user(), repo=repo)
+
+
+@dataclass
+class _ExplodingTcaResultRepository:
+    """failure-injection -- simulates a dependency outage (e.g. DB pool
+    exhaustion) underneath the repository port. The router must propagate
+    the error unchanged instead of swallowing it into a false 404/200."""
+
+    async def get_by_revision(self, parent_id: UUID, revision: int) -> TcaResultRecord | None:
+        raise ConnectionError("tca_result repository connection lost")
+
+    async def get_latest(self, parent_id: UUID) -> TcaResultRecord | None:
+        raise ConnectionError("tca_result repository connection lost")
+
+
+async def test_get_latest_tca_propagates_repository_connection_failure() -> None:
+    repo = _ExplodingTcaResultRepository()
+
+    with pytest.raises(ConnectionError):
+        await get_latest_tca(uuid4(), _user=_user(), repo=repo)
+
+
+async def test_get_tca_revision_propagates_repository_connection_failure() -> None:
+    repo = _ExplodingTcaResultRepository()
+
+    with pytest.raises(ConnectionError):
+        await get_tca_revision(uuid4(), 1, _user=_user(), repo=repo)
