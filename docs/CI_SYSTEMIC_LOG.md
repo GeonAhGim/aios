@@ -2597,6 +2597,34 @@ the numbering they had in CLAUDE.md section 6.
     to read and act on. Without a cross-reference into a normative/tracked doc, a finding like that
     risks sitting in `docs/audits/` indefinitely with no leaf ever picking it up (the same shape as
     #16/#39/#52's "misattributed to the wrong owner and never fixed", just at the audit-recommendation
+
+101. A third `pytest_perf` 24h 8-repeat systemic leaf (task-11128, parent task-11094) citing a
+    *new* repeat set (task-10655, task-10656, task-10789, task-10861) distinct from #43
+    (task-9552) and #63 (task-9664)'s sets (task-8934, task-9056, task-9287, task-9520). Like #43
+    and #63, there is no `scripts/check_pytest_perf.py` (confirmed: file does not exist) —
+    `pytest_perf` is a full-mode-only CI stage in `pm/ci_recheck.py:467-486` (`pytest -m "perf
+    and not nightly and not live_demo" -p no:xdist --cov-append --cov-report=xml`, 1800s budget,
+    serial by design), not a shared check script with its own design. The cited repeats are
+    expected to follow the same pattern #43/#63 already established: each is an independent,
+    already-fixed real bug or correctly-classified contention noop, not a single recurring design
+    flaw. This worktree (HEAD synced, `git status` clean) confirms `scripts/check_pytest_perf.py`
+    does not exist locally either. `esc-ci-pytest_perf.json`'s own status shows the escalation
+    still `status: "open"` (unlike resolved/resolved-then-reopened patterns in other entries);
+    its `auto_actions` log pattern matches #43/#63: N independent fixes landing at different
+    times (task-8934 correctly classified as noop per DECISION_GUIDELINES B-2; task-9056 fixed
+    ruff E501; task-9287 fixed migration downgrade; task-9520 fixed test collection) then the
+    escalation re-triggering on the same `detail_hash` afterward, or now, citing a fresh repeat
+    set without re-checking current HEAD. This is the same fleet-code re-trigger pattern named
+    for #43/#63 and twelve+ other gates (#17-#26, #30-#31, #33-#41/#48/#50/#56/#59-#61/#99):
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule spawning a fix task (or logging a
+    repeat event) off a stale escalation snapshot instead of re-running the stage's own gating
+    check at current HEAD first, out of a repo worker's edit scope (§4). No shared script/baseline
+    design defect found in this repo (DECISION_GUIDELINES B-2 n/a). Before working a future
+    `pytest_perf` leaf: check whether the cited repeat leaf ids match #43's set (task-8934,
+    task-9056, task-9287, task-9520), #63's identical set, or this entry's new set — if so,
+    close as noop citing the matching prior investigation rather than re-deriving the same root
+    causes a fourth time. The remaining defect is fleet-code escalation re-triggering (ops task
+    scope, C:\aios\pm), not this repo's pytest_perf stage itself.
     layer instead of the CI-stage layer). This leaf's scope (docs-only, no `src/` changes per its
     task file list) addressed that for two of the highest-severity findings: P0-3/G5-1 (Execution
     create/`convert_to_live()` missing `record_audit_log()`, `execution_service.py:86-174`) is now
