@@ -14,7 +14,6 @@ already have their own unit tests in AI-10).
 from __future__ import annotations
 
 import os
-import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -44,6 +43,7 @@ from src.foundation.experiments.domain.lineage import (
     DanglingParentError,
     ReproducibilityKeyCollisionError,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime.now(timezone.utc)
 
@@ -319,12 +319,12 @@ def _p95(samples: list[float]) -> float:
 @pytest.mark.perf
 async def test_record_experiment_db_roundtrip_p95_within_budget(
     repo: PostgresExperimentRepository,
+    perf_budget: PerfBudget,
 ) -> None:
     samples: list[float] = []
     for _ in range(30):
-        started = time.perf_counter()
-        await record_experiment(repo, _experiment())
-        samples.append((time.perf_counter() - started) * 1000)
+        sample = await perf_budget.sample_async(lambda: record_experiment(repo, _experiment()))
+        samples.append(sample.wall_ms)
 
     p95_ms = _p95(samples)
     print(
