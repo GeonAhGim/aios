@@ -25,7 +25,6 @@ delisted negative만 증명했다(D1) — 감사에서 "실패주입 없음, 성
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
@@ -44,6 +43,7 @@ from src.foundation.market_data.domain.instruments.lifecycle import (
     audit_event_for,
     transition,
 )
+from tests.conftest import PerfBudget
 
 # ---- 실패 주입(D2) — 표에 없는 임의 입력이 fail-closed로 거부됨 ----
 
@@ -115,11 +115,17 @@ def test_transition_never_returns_unhashable_lookup_crash() -> None:
 
 
 @pytest.mark.perf
-def test_transition_and_audit_event_for_meet_latency_budget() -> None:
+def test_transition_and_audit_event_for_meet_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """순수 딕셔너리 조회이므로 매우 빨라야 한다 — 절대시간 예산은 넉넉히
-    잡아(느린 CI 머신 대비) 회귀(예: 선형탐색으로의 퇴화)만 잡는다."""
+    잡아(느린 CI 머신 대비) 회귀(예: 선형탐색으로의 퇴화)만 잡는다.
+
+    raw time.perf_counter() → perf_budget.assert_within(process_time 기반) 전환(task-10980)."""
+
     iterations = 20_000
-    budget_sec = 1.0  # 실측 로컬 <0.05s
+    budget_ms = 1_000.0  # 1.0s — 실측 로컬 <50ms (CPU ms)
+
     calls: list[tuple[InstrumentLifecycle, LifecycleEvent]] = [
         (InstrumentLifecycle.PENDING, "listed"),
         (InstrumentLifecycle.ACTIVE, "symbol_changed"),
@@ -127,21 +133,15 @@ def test_transition_and_audit_event_for_meet_latency_budget() -> None:
         (InstrumentLifecycle.HALTED, "resumed"),
         (InstrumentLifecycle.ACTIVE, "delisted"),
     ]
-    start = time.perf_counter()
-    for _ in range(iterations):
-        for state, event in calls:
-            transition(state, event)
-            audit_event_for(state, event)
-    elapsed = time.perf_counter() - start
-    total_calls = iterations * len(calls) * 2
-    print(
-        f"[DC-3 lifecycle] {total_calls} calls in {elapsed:.3f}s "
-        f"({elapsed / total_calls * 1e6:.2f} us/call, budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"transition/audit_event_for {total_calls}회가 예산({budget_sec}s)을 "
-        f"넘었습니다({elapsed:.3f}s) — 딕셔너리 조회가 선형탐색으로 퇴화했는지 "
-        "확인하세요."
+
+    def run_batch() -> None:
+        for _ in range(iterations):
+            for state, event in calls:
+                transition(state, event)
+                audit_event_for(state, event)
+
+    perf_budget.assert_within(
+        run_batch, budget_ms=budget_ms, label="transition+audit_event_for x20k"
     )
 
 
@@ -185,7 +185,11 @@ def test_gate_red_blocks_illegal_transition_mid_replay_without_mutating_flow() -
 
     # DELISTED에서 그 외 모든 이벤트도 전부 적색 — 종단 상태 고정 증명.
     terminal_events: tuple[LifecycleEvent, ...] = (
-        "listed", "symbol_changed", "halted", "resumed", "delisted"
+        "listed",
+        "symbol_changed",
+        "halted",
+        "resumed",
+        "delisted",
     )
     for event in terminal_events:
         with pytest.raises(LifecycleTransitionError):
