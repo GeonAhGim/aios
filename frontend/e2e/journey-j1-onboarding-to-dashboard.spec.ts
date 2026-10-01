@@ -1,6 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { fieldControl } from "./support/fieldControl";
 import { mockBackend } from "./support/mockBackend";
+// task-10800 (ADR-2026-10-01-A D1): baseline-only perceived-perf collection, see
+// docs/specs/UX_JOURNEYS.md §4 "실측" column. No budget assertion is made here.
+import { createJourneyTimer, flushJourneyTimer } from "./support/perceivedPerf.mjs";
 
 // task-6664 (J1): docs/specs/UX_JOURNEYS.md J1 단계표(가입→로그인→MFA 설정→위험성향
 // 평가→최초 실행 체크리스트→거래소 자격증명(데모 키에 준하는 고정 키)→첫 대시보드)를
@@ -298,14 +301,18 @@ test.describe("J1 여정: 온보딩 → 계좌/거래소 연결(데모 키) → 
       ]);
     });
 
+    const timer = createJourneyTimer("J1");
     await page.goto("/dashboard");
 
     await expect(page.getByRole("heading", { name: "대시보드" })).toBeVisible();
     await expect(page.getByText("포트폴리오 요약")).toBeVisible();
     await expect(page.getByText("총 포트폴리오 가치")).toBeVisible();
+    timer.mark("dashboard", "displayed");
     await expect(page.getByText("실행 중인 전략")).toBeVisible();
     await expect(page.getByText("e2e-j1-dashboard-strategy").first()).toBeVisible();
     await expect(page.getByText("RUNNING", { exact: true })).toBeVisible();
+    timer.mark("dashboard", "interactive");
+    flushJourneyTimer(timer);
   });
 
   // G-2(UX_JOURNEYS.md §2, task-7776로 해소): DashboardPage.tsx가 useNotificationHistory로

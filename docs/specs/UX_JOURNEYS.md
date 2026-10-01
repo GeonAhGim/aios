@@ -185,6 +185,34 @@ ADR-2026-10-01-A D4: 수익률·샤프·MDD 등 성과 지표는 보장값이 �
 - **오류 0**: J1~J3 Playwright 시나리오에 실패 주입 케이스(5xx·단절) 최소 1건 포함, 무음 실패(오류
   없이 잘못된 상태로 진행) 0건.
 
+### 4.1 체감 성능 실측 기준선 (task-10800, 2026-10-01, ADR-2026-10-01-A D1)
+
+`frontend/e2e/support/perceivedPerf.mjs`(여정 타이머 헬퍼, 단위 테스트
+`perceivedPerf.test.mjs`)로 J1~J3 각 1개 화면당 "표시 완료"(핵심 텍스트/헤딩이 보이는 시점)·
+"상호작용 가능"(마지막 핵심 단언이 통과하는 시점)을 `journey-j1-onboarding-to-dashboard.spec.ts`
+/`journey-j2-discover-to-backtest.spec.ts`/`journey-j3-paper-order-to-position.spec.ts`의
+그린 경로 테스트에서 측정했다. `frontend/e2e/perf-results/perceived-perf.json`(gitignore,
+로컬 산출물)에 반복 3회를 누적하고 중앙값만 아래 표에 옮겼다 — 단발 값은 쓰지 않는다. 이
+리프는 예산 단언을 걸지 않는다(기준선 수집 단계, 스펙 요구사항).
+
+| 여정 | 화면 | 지표 | 실측 중앙값(ms, n=3, 2026-10-01) | §4 목표 대비 |
+|---|---|---|---|---|
+| J1 | 대시보드 | displayed | 678 | 목표(첫 화면 상호작용 ≤2.5s) 범위 내 — 단 아래 주의 참조 |
+| J1 | 대시보드 | interactive | 697 | 상동 |
+| J2 | 스크리너 결과 | displayed | 728 | 목표(스크리너 결과 p95 ≤2s) 범위 내 — 단 아래 주의 참조 |
+| J2 | 차트 진입 | interactive | 832 | 참고치(차트 5k봉 렌더 p95 200ms 목표는 캔들 렌더만의 지표라 이 측정값과 범위가 다름 — 직접 비교 불가) |
+| J3 | 실행 제어판(executions) | displayed | 621 | 목표(첫 화면 상호작용 ≤2.5s) 범위 내 — 단 아래 주의 참조 |
+| J3 | 실행 제어판(executions) | interactive | 734 | 상동 |
+| J3 | 포트폴리오 | displayed | 661 | 상동 |
+| J3 | 포트폴리오 | interactive | 669 | 상동 |
+
+**주의(비교 불가 사유, 추측 없이 사실만)**: 위 실측은 `mockBackend`(page.route 고정 픽스처,
+실 네트워크 왕복 없음) + 로컬 `vite preview` 단일 프로세스 기준이다. §4 목표치(스크리너 p95
+≤2s, 차트 5k봉 p95 ≤200ms, 상호작용 ≤2.5s)는 실 서버·실 데이터량·p95 집계를 전제로 하므로
+이 표의 중앙값과 **직접 비교하면 안 된다** — 이 표는 "체감 지연 계측 코드가 생겼다"는 기준선
+증거이지, §4 목표 충족 여부 판정이 아니다. 실 서버 대상 p95 측정·예산 단언은 기준선이 더
+쌓인 뒤 별도 리프로 발행한다(task-10800 spec).
+
 ## 5. 부록 — J1~J3 Playwright 시나리오 초안
 
 기존 관용 재사용: `frontend/e2e/support/mockBackend.ts`(page.route로 고정 픽스처 응답, 실 서버

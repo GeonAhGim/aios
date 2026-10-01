@@ -1,5 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { mockBackend } from "./support/mockBackend";
+// task-10800 (ADR-2026-10-01-A D1): baseline-only perceived-perf collection, see
+// docs/specs/UX_JOURNEYS.md §4 "실측" column. No budget assertion is made here.
+import { createJourneyTimer, flushJourneyTimer } from "./support/perceivedPerf.mjs";
 
 // task-6665 (J2): docs/specs/UX_JOURNEYS.md J2 단계표(스크리닝→차트·지표→전략
 // 빌더/스크립트→즉시 백테스트→결과 해석)를 그대로 따라간다. mockBackend가 덮지
@@ -99,14 +102,19 @@ test.describe("J2 여정: 스크리너→차트·지표→전략 빌더/스크�
     await page.route(`${API_BASE}/v1/foundation/screener/run`, (route) => json(route, 200, envelope({
       rows: [{ instrument_id: "BTCUSDT", symbol: "BTC-USDT", venue: "BITGET", values: { rsi_14: "25" } }], total: 1, truncated: false,
     })));
+    const timer = createJourneyTimer("J2");
     await page.goto("/screener");
     await page.getByTestId("screener-universe").fill("KRX");
     await page.getByTestId("screener-filter-0-field").fill("rsi_14");
     await page.getByTestId("screener-filter-0-value").fill("30");
     await page.getByTestId("screener-run").click();
+    await expect(page.getByTestId("screener-row-BTCUSDT")).toBeVisible();
+    timer.mark("screener-result", "displayed");
     await page.getByTestId("screener-row-BTCUSDT").getByRole("link").click();
     await expect(page).toHaveURL(/\/chart\?instrument_id=BTCUSDT$/);
     await expect(page.getByTestId("chart-instrument-id")).toContainText("BTCUSDT");
+    timer.mark("chart", "interactive");
+    flushJourneyTimer(timer);
   });
 
   test("2→3단계 심볼/캔들 조회 후 차트·지표 화면에서 상태가 표시된다", async ({ page }) => {

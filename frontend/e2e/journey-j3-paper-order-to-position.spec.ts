@@ -1,6 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { fieldControl } from "./support/fieldControl";
 import { mockBackend } from "./support/mockBackend";
+// task-10800 (ADR-2026-10-01-A D1): baseline-only perceived-perf collection, see
+// docs/specs/UX_JOURNEYS.md §4 "실측" column. No budget assertion is made here.
+import { createJourneyTimer, flushJourneyTimer } from "./support/perceivedPerf.mjs";
 
 // task-6666 (J3): docs/specs/UX_JOURNEYS.md J3 단계표(주문 생성→리스크/컴플라이언스
 // 판정 표시→체결·취소·거부 상태→포지션 반영→컴플라이언스/위임장 상태→알림 수신)를
@@ -91,16 +94,20 @@ async function enableRiskVerdictPanel(page: Page) {
 test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판정 → 체결·취소·거부 → 포지션 반영 → 알림", () => {
   test("1단계 주문 제출 시 실행 목록에 새 카드가 나타난다", async ({ page }) => {
     await mockBackend(page);
+    const timer = createJourneyTimer("J3");
     await page.goto("/executions");
 
     await expect(page.getByRole("heading", { name: "실행 제어판" })).toBeVisible();
+    timer.mark("executions", "displayed");
 
     await fieldControl(page, "전략 ID").fill("e2e-paper-order-strategy");
     await fieldControl(page, "버전").fill("1.0.0");
     await fieldControl(page, "배분 자본(USDT)").fill("500");
     await page.getByRole("button", { name: "실행 생성" }).click();
+    timer.mark("executions", "interactive");
 
     await expect(page.getByText("e2e-paper-order-strategy")).toBeVisible();
+    flushJourneyTimer(timer);
   });
 
   // task-7505(G-4 해소): task-7504가 ExecutionCardResponse.last_risk_verdict를
@@ -282,13 +289,17 @@ test.describe("J3 여정: 페이퍼 주문 → 리스크/컴플라이언스 판�
         weight_pct: "5",
       },
     ]);
+    const timer = createJourneyTimer("J3");
     await page.goto("/portfolio");
 
     await expect(page.getByRole("heading", { name: "포트폴리오" })).toBeVisible();
     await expect(page.getByText("총 포트폴리오 가치")).toBeVisible();
+    timer.mark("portfolio", "displayed");
     // 동일 strategy_id가 배분 테이블 행과 범례(legend) 등 두 곳에 렌더돼 strict-mode
     // 위반이 난다 — first()로 한 요소만 특정한다.
     await expect(page.getByText("e2e-paper-order-strategy").first()).toBeVisible();
+    timer.mark("portfolio", "interactive");
+    flushJourneyTimer(timer);
   });
 
   test("[실패 주입] 4단계 포지션 조회 5xx 시 포트폴리오 화면이 오류 배너를 보여주고 배분 내역을 표시하지 않는다", async ({
