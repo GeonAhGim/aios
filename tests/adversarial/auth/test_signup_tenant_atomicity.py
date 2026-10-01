@@ -27,7 +27,6 @@ DEEPEN(task-4152) 메모 — D2 하한(ADR-2026-09-09-C Decision 1) 대조:
 
 from __future__ import annotations
 
-import time
 import uuid
 from uuid import UUID
 
@@ -151,17 +150,20 @@ async def test_signup_rolls_back_user_row_on_unexpected_tenant_insert_failure(
 
 
 @pytest.mark.perf
-async def test_signup_p95_latency_within_budget(auth, pool):
+async def test_signup_p95_latency_within_budget(auth, pool, perf_budget):
     """성능 단언(D2) — 이 leaf(PLT-26/28)는 ADR-2026-09-09-C Decision 1
     예산표에 전용 행이 없는 비-실행축이다. argon2 해시 + 로컬 DB 왕복을 포함해도
-    넉넉히 넘지 말아야 할 회귀 감지용 예산(호출당 1.5초)을 건다."""
-    durations: list[float] = []
-    for _ in range(5):
-        email = _unique_email()
-        start = time.perf_counter()
-        await auth.signup(email, STRONG_PASSWORD)
-        durations.append(time.perf_counter() - start)
+    넉넉히 넘지 말아야 할 회귀 감지용 예산(호출당 1.5초)을 건다.
 
-    durations.sort()
-    p95 = durations[-1]
-    assert p95 < 1.5, f"signup p95 latency {p95:.3f}s exceeded 1.5s budget"
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-10874).
+    """
+
+    async def _signup_once() -> None:
+        await auth.signup(_unique_email(), STRONG_PASSWORD)
+
+    samples = sorted(
+        [await perf_budget.sample_async(_signup_once) for _ in range(5)],
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[-1].wall_ms
+    assert p95 < 1500.0, f"signup p95 latency {p95:.3f}ms exceeded 1.5s budget"
