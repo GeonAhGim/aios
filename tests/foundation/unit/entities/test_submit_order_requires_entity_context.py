@@ -182,3 +182,33 @@ async def test_submit_order_propagates_entity_repo_failure_without_touching_adap
         )
 
     pool.acquire.assert_not_called()
+
+
+def test_gate_red_repro_check_entity_context_flips_to_red_on_contextless_write(
+    tmp_path, monkeypatch
+):
+    """게이트 적색 재현 — `scripts/check_entity_context.py`(FA-5 AST 정적
+    검사, main() 종료코드 0=통과)가 `entity_context` 없이 저장소 write를
+    호출하는 함수를 실제로 적색 처리하는지, CI가 직접 호출하는 `main()`
+    자체의 종료코드로 증명한다. 가짜 `src` 트리를 만들어 `_REPO_ROOT`와
+    `_TARGET_FILES`만 바꿔치기하므로 실제 저장소 파일은 건드리지 않는다."""
+    import scripts.check_entity_context as gate
+
+    target_rel = "src/services/oms/application/submit_order.py"
+    app_dir = tmp_path / "src" / "services" / "oms" / "application"
+    app_dir.mkdir(parents=True)
+    target_file = app_dir / "submit_order.py"
+
+    target_file.write_text(
+        "async def submit_order(cmd, entity_context):\n    await pool.execute(cmd)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_TARGET_FILES", (target_rel,))
+    assert gate.main() == 0  # 대조군 — entity_context 인자가 있는 트리는 통과한다
+
+    target_file.write_text(
+        "async def submit_order(cmd):\n    await pool.execute(cmd)\n",
+        encoding="utf-8",
+    )
+    assert gate.main() == 1  # entity_context 인자를 빼자 적색으로 뒤집힌다
