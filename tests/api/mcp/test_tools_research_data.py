@@ -343,3 +343,42 @@ async def test_research_data_search_tool_gate_red_if_repository_ignores_tenant(
     assert str(item.item_id) in {row["item_id"] for row in leaked.json()}, (
         "list_by_tenant가 tenant_id를 무시하면 MCP 경로도 교차 테넌트 검색을 노출한다"
     )
+
+
+# --- D2 failure injection: repository 의존성 예외는 500 전파(조용히 삼키지 않는다) ---
+
+
+class _RaisingResearchRepository:
+    def __init__(self, pool) -> None:  # noqa: ANN001
+        self._pool = pool
+
+    async def list_by_tenant(self, tenant_id, *, source_id, limit=200):  # noqa: ANN001
+        raise ConnectionError("simulated research_items connection loss")
+
+
+async def test_research_data_search_tool_propagates_repository_failure(
+    client,
+    pool,
+    token_repo: PostgresAgentTokenRepository,
+):
+    import src.api.mcp.tools_research_data as tools_research_data
+
+    await _insert_source_contract(pool)
+    tenant_id = await _make_tenant(pool)
+    issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
+
+    original = tools_research_data.PostgresResearchRepository
+    tools_research_data.PostgresResearchRepository = lambda p: _RaisingResearchRepository(p)  # noqa: E731
+    try:
+        response = await client.post(
+            "/mcp/tools/research_data_search",
+            json={"source_id": SOURCE_ID},
+            headers={AGENT_TOKEN_HEADER: issued.secret},
+        )
+    finally:
+        tools_research_data.PostgresResearchRepository = original
+
+    assert response.status_code == 500, (
+        "repository 의존성 예외(ConnectionError)는 fail-closed로 500 전파되어야 하며 "
+        "200/빈 목록으로 조용히 삼켜지면 안 된다"
+    )
