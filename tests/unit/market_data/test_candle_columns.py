@@ -207,7 +207,7 @@ def test_to_candle_records_propagates_duration_return_type_error(
     columns = _columns(2)
 
     def fake_duration_returns_string(timeframe):
-        return "not a timedelta"  # type: ignore[return-value]
+        return "not a timedelta"
 
     monkeypatch.setattr(
         "src.foundation.market_data.domain.candle_columns.duration",
@@ -221,6 +221,7 @@ def test_to_candle_records_propagates_duration_return_type_error(
 # ── numeric performance assertion ────────────────────────────────────────────
 
 
+@pytest.mark.perf
 def test_to_candle_records_performance_under_10k_rows() -> None:
     """성능 단언: 10,000개 행을 to_candle_records로 변환하는 데
     100ms 미만이어야 한다(컬럼 기반 접근의 성능 목표)."""

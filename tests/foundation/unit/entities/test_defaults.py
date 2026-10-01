@@ -122,11 +122,12 @@ def test_build_default_hierarchy_rejects_invalid_base_currency():
     """base_currency에 유효하지 않은 정수 → ValidationError."""
     from pydantic import ValidationError
 
+    invalid_base_currency: Any = 99999
     with pytest.raises(ValidationError):
         build_default_hierarchy(
             user_id=uuid4(),
             tenant_id=uuid4(),
-            base_currency=99999,  # type: ignore[arg-type]
+            base_currency=invalid_base_currency,
             jurisdiction="KR",
             region_tag="ap-northeast-2",
             venue_account_ref="ACC-1",
