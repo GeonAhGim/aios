@@ -1,16 +1,20 @@
-"""append-only(WORM) 테이블 공통 DDL 생성기.
+"""Append-only (WORM) table DDL generator.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md §2.1 L0-3, §9 L0-3
 
-`REVOKE UPDATE, DELETE ... FROM PUBLIC`만으로는 WORM이 강제되지 않는다 —
-PostgreSQL은 테이블 소유자(마이그레이션을 실행하는 역할)를 GRANT/REVOKE와
-무관하게 항상 전체 권한자로 취급한다(마이그레이션 9ec8a1ee28d7 docstring이
-남긴 미해결 문제). 반면 트리거는 소유자에게도 예외 없이 발동하므로,
-`BEFORE UPDATE OR DELETE` 트리거가 항상 `RAISE EXCEPTION`하는 것이 실제
-강제 수단이다. REVOKE는 PUBLIC/비소유 역할에 대한 방어 심화로 함께 둔다.
+Revoking UPDATE, DELETE from PUBLIC alone does not enforce WORM —
+PostgreSQL always treats the table owner (the role running migrations)
+as the full privileged user regardless of GRANT/REVOKE settings
+(see unresolved note left in migration 9ec8a1ee28d7 docstring).
+Triggers, however, fire even for the owner without exception, so a
+`BEFORE UPDATE OR DELETE` trigger that always raises an exception is
+the actual enforcement mechanism. REVOKE is kept as a defensive
+hardening measure for PUBLIC/non-owner roles.
 
-이 모듈은 SQL 문자열만 생성한다 — 실행(마이그레이션 적용)은 L0-5.
+This module only generates SQL strings — execution (migration apply)
+belongs to L0-5.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,7 +23,7 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
 
 class InvalidIdentifierError(ValueError):
-    """테이블명이 안전한 SQL 식별자 형식이 아니다(인젝션 방지)."""
+    """Table name does not match safe SQL identifier syntax (injection prevention)."""
 
 
 def _validate_table(table: str) -> None:
@@ -36,9 +40,9 @@ def _guard_trigger_name(table: str) -> str:
 
 
 def worm_sql(table: str) -> list[str]:
-    """`table`을 append-only(WORM)로 만드는 DDL 문 목록을 반환한다.
+    """Return a list of DDL statements that make `table` append-only (WORM).
 
-    순서: REVOKE(방어 심화) → 가드 함수 생성 → 가드 트리거 부착.
+    Order: REVOKE (defensive hardening) → create guard function → attach guard trigger.
     """
     _validate_table(table)
     guard_fn = _guard_function_name(table)
@@ -61,7 +65,7 @@ def worm_sql(table: str) -> list[str]:
 
 
 def worm_drop_sql(table: str) -> list[str]:
-    """`worm_sql(table)`이 만든 강제를 역순으로 해제하는 DDL 문 목록을 반환한다."""
+    """Return a list of DDL statements that reverse the enforcement applied by `worm_sql(table)`."""
     _validate_table(table)
     guard_fn = _guard_function_name(table)
     trigger = _guard_trigger_name(table)
