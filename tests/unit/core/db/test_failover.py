@@ -372,3 +372,60 @@ def test_backoff_delays_grow_and_cap_at_max() -> None:
     gen = policy.delays()
     first_five = [next(gen) for _ in range(5)]
     assert first_five == [1.0, 2.0, 4.0, 4.0, 4.0]
+
+
+@pytest.mark.perf
+async def test_failover_manager_construction_latency(perf_budget) -> None:
+    """Performance assertion (D3) — FailoverConnectionManager construction
+    plus write_available() decision must complete under 1 ms. Degradation
+    here (blocking I/O, heavy sorting) would slow every pre-order check."""
+
+    def _build() -> None:
+        mgr = FailoverConnectionManager(
+            [
+                HostEndpoint("h1", priority=0),
+                HostEndpoint("h2", priority=1),
+                HostEndpoint("h3", priority=2),
+            ],
+            connect=lambda h: FakeConnection(h),
+        )
+        mgr.write_available()
+
+    perf_budget.assert_within(_build, budget_ms=1.0, n=100)
+
+
+async def test_gate_red_all_hosts_stuck_read_only_raises_exhausted() -> None:
+    """Gate-red reproduction: inject a cluster where every host answers
+    read_only=True permanently — the failover gate MUST raise
+    FailoverExhaustedError instead of silently returning a read-only
+    connection. This test verifies the gate *fails* (raises) under
+    injected bad state, proving the safety invariant is enforced."""
+    conns = {
+        "h1": FakeConnection("h1", read_only=True),
+        "h2": FakeConnection("h2", read_only=True),
+        "h3": FakeConnection("h3", read_only=True),
+    }
+
+    async def connect(host: str) -> FakeConnection:
+        return conns[host]
+
+    mgr = FailoverConnectionManager(
+        [
+            HostEndpoint("h1", priority=0),
+            HostEndpoint("h2", priority=1),
+            HostEndpoint("h3", priority=2),
+        ],
+        connect=connect,
+        backoff=BackoffPolicy(initial_seconds=0.01, max_seconds=0.01, multiplier=2.0),
+    )
+
+    with pytest.raises(FailoverExhaustedError) as exc_info:
+        await mgr.get_writable_connection()
+
+    # Verify: no connection is held open (fail-closed)
+    for conn in conns.values():
+        assert conn.closed is True, "read-only conn must be closed immediately"
+
+    # Verify: error message lists all tried hosts
+    msg = str(exc_info.value)
+    assert "h1" in msg and "h2" in msg and "h3" in msg
