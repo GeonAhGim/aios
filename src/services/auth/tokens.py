@@ -10,6 +10,7 @@ so PyJWT rejects signatures outside this list with `InvalidAlgorithmError`.
 Refresh tokens never store plaintext (only sha256 hex in DB) — rotation/reuse
 detection is performed by `session_repository.py` using hashes only.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -63,17 +64,17 @@ class SigningKeyConfigError(ValueError):
 
 
 class TokenInvalidError(Exception):
-    """서명·claims·kid 검증 실패. HTTP 매핑(§3.3 AUTH_TOKEN_INVALID)은 라우터
-    책임(PLT-24) — 여기서는 상태를 갖지 않는 순수 예외만 던진다."""
+    """Signature, claims, or kid verification failure. HTTP mapping (§3.3 AUTH_TOKEN_INVALID)
+    is the router's responsibility (PLT-24) — here we raise only stateless exceptions."""
 
 
 class TokenExpiredError(TokenInvalidError):
-    """exp 만료 전용 — 호출자가 refresh 유도(§3.3 AUTH_TOKEN_EXPIRED)와
-    재로그인 유도(그 외 AUTH_TOKEN_INVALID)를 구분할 수 있게 분리한다."""
+    """Token expiration only — allows callers to distinguish refresh hint (§3.3 AUTH_TOKEN_EXPIRED)
+    from re-login hint (other AUTH_TOKEN_INVALID) separately."""
 
 
 def hash_refresh_token(plaintext: str) -> str:
-    """DB에 저장할 sha256 hex(64자). 평문은 호출자가 응답 이후 버려야 한다."""
+    """SHA256 hex (64 chars) for DB storage. Caller must discard plaintext after response."""
     return hashlib.sha256(plaintext.encode("ascii")).hexdigest()
 
 
@@ -97,9 +98,7 @@ def _parse_signing_keys(raw: str) -> dict[str, bytes]:
         try:
             key_bytes = bytes.fromhex(hex_key)
         except ValueError as exc:
-            raise SigningKeyConfigError(
-                f"kid={kid!r} 키가 유효한 hex 문자열이 아닙니다"
-            ) from exc
+            raise SigningKeyConfigError(f"kid={kid!r} 키가 유효한 hex 문자열이 아닙니다") from exc
         if not key_bytes:
             raise SigningKeyConfigError(f"kid={kid!r} 키가 비어 있습니다")
         keys[kid] = key_bytes
@@ -114,9 +113,7 @@ def _load_signing_keys(source: Mapping[str, str]) -> tuple[dict[str, bytes], str
     if not active_kid:
         raise SigningKeyConfigError("JWT_ACTIVE_KID가 설정되지 않았습니다")
     if active_kid not in keys:
-        raise SigningKeyConfigError(
-            f"JWT_ACTIVE_KID={active_kid!r}가 JWT_SIGNING_KEYS에 없습니다"
-        )
+        raise SigningKeyConfigError(f"JWT_ACTIVE_KID={active_kid!r}가 JWT_SIGNING_KEYS에 없습니다")
     return keys, active_kid
 
 
