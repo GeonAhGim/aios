@@ -2757,3 +2757,27 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
    이전 커밋을 가리킴 (stale escalation 재트리거 방지)
 3. 최근 24h 동안 새 개별 정정 리프(`[health:ci_red]`) 생성 0건
 4. `--near 30`으로 감지된 near-threshold 파일들의 LOC가 임계선 근처에서 안정적
+
+94. A fourth `ruff` `[health:ci_red_systemic]` leaf (task-11195, current) reconfirms #15/#39/#50/#62/#92
+    for a sixth+ round off the exact same escalation snapshot, `esc-ci-ruff.json`
+    (`C:\aios\pm\escalations\esc-ci-ruff.json`). The four recent repeats (task-10928, task-11125,
+    task-11162, task-11194) all cite the identical detail_hash `"a520573f2b93"` — the same
+    `F821 Undefined name PerfBudget` in `tests/api/mcp/test_server_auth.py:200/224` that was
+    already fixed by commit `117f9adf4` (import added from `tests.conftest`). All four tasks are
+    `status=done` with notes confirming the fix was already upstream. The escalation JSON shows
+    `status: "resolved"`, `reopen_count: 3`, and `auto_actions` spawning task-11125, task-11162,
+    task-11194 off the same `detail_hash` after each "fix done — 다음 CI 평가 대기" entry,
+    without re-evaluating current HEAD before deciding to spawn another fix task.
+    `python -m ruff check src tests scripts` on this worktree prints `All checks passed!`.
+    This is the identical fleet-code pattern already named for ruff in #15/#39/#50/#62/#92 and
+    for fifteen+ other gates (#17-#26, #30-#31, #33-#36, #38, #40, #45, #48, #56, #60, #88):
+    `pm/auto_decision.py`/`orchestrator.py`'s `ci_red` rule not distinguishing "escalation open
+    because the fix hasn't landed yet" from "escalation open because the resolution snapshot
+    hasn't been re-evaluated yet," out of a repo worker's edit scope (§4). No script/baseline
+    change made — the ratchet design is sound; the remaining defect is fleet code, not this repo.
+    Before working a future `ruff` correction leaf: check `esc-ci-ruff.json`'s `owner_detail_hash`
+    against its `auto_actions` log for a `"resolved"`/`closed_at` entry that postdates the cited
+    leaf's creation — if the config is clean and the cited repeat leaf ids match an already-closed
+    set (task-9157/task-9288/#15, task-9466, task-9576/#39/#50, task-9703/#62, task-11194/#92,
+    or this entry), close as noop citing them rather than re-fixing already-fixed code for a
+    seventh round. No baseline/rule relief made (DECISION_GUIDELINES B-2) — none was warranted.
