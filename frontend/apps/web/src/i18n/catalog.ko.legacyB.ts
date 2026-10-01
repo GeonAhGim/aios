@@ -122,6 +122,11 @@ export const catalogKoLegacyB = {
     "t8": "실행 중인 전략이 없습니다.",
     "t9": "최근 알림",
     "t10": "표시할 최근 알림이 없습니다.",
+    "emergencyStopTitle": "긴급 정지",
+    "emergencyStopHint": "실행 중인 운용을 즉시 모두 정지합니다.",
+    "emergencyStopButton": "내 운용 전부 정지",
+    "emergencyStopEmpty": "현재 실행 중인 운용이 없습니다.",
+    "emergencyStopResume": "재개",
   },
   "registerCredentialForm": {
     "t1": "새 거래소 연동",

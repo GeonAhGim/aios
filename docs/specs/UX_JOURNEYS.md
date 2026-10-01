@@ -253,7 +253,7 @@ task-10599(사용자 관점 1등급 지표 ADR 초안)의 "편리함" 축 입력
 | 전략 선택·백테스트 확인 → **모의 운용 시작**(페이퍼 배포 요청) | **부분** — `StrategyBuilderPage.tsx`/`SweepResultsPage.tsx`에 `/system/paper-deployments`로의 `navigate`/`Link` 없음(grep 0건). 배포 요청은 `PaperDeploymentsPage.tsx`의 `useRequestPaperDeployment`로 가능하나 전략 생성·백테스트 결과 화면에서 이어지는 CTA가 없어 사용자가 URL을 스스로 찾아가야 함 | `StrategyBuilderPage.tsx`, `PaperDeploymentsPage.tsx:1-12` |
 | **모의 운용 → 실운용(LIVE) 전환** | **거의 없음** — 전용 전환 화면이 없고, `ExecutionControlPage.tsx:99,178-180`의 `mode` 드롭다운(`PAPER`/`LIVE`)으로 매 주문마다 선택할 뿐이다. 실계좌 전환임을 알리는 별도 확인 단계·요약(그동안의 페이퍼 성과, 전환 시점부터 실제 자금 사용 고지)은 코드에서 확인되지 않음 | `ExecutionControlPage.tsx:99,178-180` |
 | 운용 중 상태 확인·알림(실시간) | **부분** — `DashboardPage.tsx`는 포지션·실행만 폴링하고 알림 위젯이 없음(G-2 재확인, grep 0건). 알림은 `/alerts`·`/notifications`로 분리 | `DashboardPage.tsx`, `AlertsPage.tsx`, `NotificationCenterPage.tsx` |
-| **손실·이상 발생 시 즉시 중단** | **부분, 페르소나 기준으로는 약함** — 전역 긴급 정지 화면(`/admin/safety-controls`, `SafetyControlsPage.tsx`)은 `protectAdmin`(`AdminRoute.tsx:45` `!me?.isPlatformAdmin` → `/dashboard`로 리다이렉트)으로 막혀 §0 페르소나(개인 트레이더, 플랫폼 관리자 아님)는 접근 불가로 추정됨(실사용자 권한 플래그 실측은 미확인). 개인 트레이더가 쓸 수 있는 중단 수단은 배포 단위 `PaperDeploymentsPage.tsx`의 pause/stop과 `ExecutionControlPage.tsx`의 개별 실행 취소뿐 — "지금 전부 멈춰라" 단일 액션 없음 | `AdminRoute.tsx:11,45`, `PaperDeploymentsPage.tsx:88-95`, `DashboardPage.tsx`(정지류 액션 grep 0건) |
+| **손실·이상 발생 시 즉시 중단** | **해소(task-10636)** — U-3 확정: `ExecutionCard.tsx`에 상태별 개별 중단 액션이 이미 있다(RUNNING→일시정지 `pause.mutate`, RETIRED 전까지 상시 `retire.mutate`). 전역 긴급 정지 화면(`/admin/safety-controls`, `SafetyControlsPage.tsx`)은 여전히 `AdminRoute.tsx:45` `!me?.isPlatformAdmin` → `/dashboard` 리다이렉트로 막혀 있으나, `DashboardPage.tsx`에 "내 운용 전부 정지" 패널을 신설해 `useExecutions()`가 돌려주는(= 본인 소유로 서버가 이미 스코프한) RUNNING 실행 전체에 `usePauseExecution`을 반복 호출하는 방식으로 비관리자도 1클릭에 전역 정지에 도달한다. 백엔드/권한 모델 변경 없이 기존 pause API 재사용 | `AdminRoute.tsx:11,45`, `ExecutionCard.tsx:134-153`, `DashboardPage.tsx`(긴급 정지 패널) |
 | 성과 확인(수익률/MDD/샤프 등) | 덮음(J5, `/portfolio`·`/reports`·`/portfolio/performance-statements`) — J1~J3 밖이지만 기존 J5가 충족 | §1 J5 표 |
 | 설정 변경·되돌리기 | 덮음(J6, `/settings/*`) — 단 `AccountDeletionPage.tsx`의 탈퇴 액션이 비밀번호 재입력 1단계 확인만 쓰는지, 별도 "정말 삭제" 확인 모달이 있는지는 렌더 결과 미확인(아래 §6.4 U-1) | `AccountDeletionPage.tsx:146-179` |
 
@@ -288,8 +288,8 @@ task-10599(사용자 관점 1등급 지표 ADR 초안)의 "편리함" 축 입력
 |---|---|---|---|
 | 1 상태 인지 | `/dashboard`, `/alerts` | `usePortfolio`, `useExecutions`, `useMyAlerts` | 있음(수동 새로고침/폴링 기반, 능동 푸시 아님 — G-6과 동일 축) |
 | 2 배포 단위 정지 | `/system/paper-deployments` | `usePausePaperDeployment`, `useStopPaperDeployment` | 있음 |
-| 3 개별 실행 취소 | `/executions` | 실행 카드 취소 액션(코드 경로 확인 필요 — 이번 실사 범위 밖, 미확인) | 미확인 |
-| 4 전역 긴급 정지("전부 멈춰라") | `/admin/safety-controls`(관리자 전용) | `useActivateSafetyControl` | **개인 트레이더 페르소나는 접근 불가로 추정**(`AdminRoute.tsx`) — 동급 기능이 비관리자 화면에 없음 |
+| 3 개별 실행 취소 | `/executions` | `ExecutionCard.tsx`의 pause(RUNNING일 때)/retire(RETIRED 전까지 상시) 버튼 | **확인됨(U-3 해소)** — `ExecutionCard.tsx:134-153` |
+| 4 전역 긴급 정지("전부 멈춰라") | `/dashboard`(비관리자용 신설 패널) + `/admin/safety-controls`(관리자 전용, 플랫폼 범위) | `usePauseExecution`(본인 소유 RUNNING 실행 일괄) | **해소(task-10636)** — 비관리자는 `/dashboard`의 "내 운용 전부 정지" 패널로 1클릭 도달, 관리자는 기존 `/admin/safety-controls`로 플랫폼 범위 정지 유지 |
 
 ### 6.3 여정별 사용감 합격 기준 (기능 동작이 아니라 "쓰기 좋은가")
 
@@ -303,7 +303,7 @@ task-10599(사용자 관점 1등급 지표 ADR 초안)의 "편리함" 축 입력
 | J3 페이퍼 주문 | 주문 제출 후 **승인/거부 사유가 일반 오류 배너와 구분**(G-4는 해소됨, `RiskVerdictPanel` 확인), 돈이 걸린 submit 버튼은 이중 입력(수량·대상)을 보여준 뒤 제출해야 하며 제출 중 재클릭으로 중복 주문이 나지 않아야 함(`useIdempotentSubmit` 패턴 존재 확인 — `PaperDeploymentsPage.tsx` 기준) | 기계(멱등 키 사용 여부는 코드 grep으로 확인 가능, 중복 제출 테스트는 Playwright) + 사람(거부 사유 문구가 원인·해결을 말하는지는 사람 판단) |
 | J7 모의 운용 시작 | 백테스트 결과 화면에서 모의 운용 배포까지 **클릭 1~2회**(현재는 URL을 직접 쳐야 하므로 사실상 무한대 — 이 기준 미충족), 배포 요청 성공 시 "어디서 상태를 볼 수 있는지"가 같은 화면에 안내돼야 함 | 기계(CTA 존재·클릭 경로 수는 Playwright로 단계 수 측정 가능) |
 | J8 모의→실운용 전환 | 전환 시 **확인 단계 ≥1회**(현재 "없음" — 드롭다운 선택만으로 실자금 주문이 나감, 이 기준 미충족), 전환 직후 화면에 "지금부터 실제 자금이 사용됨" 고지와 되돌리기(다시 PAPER로)가 같은 화면에서 가능해야 함, 전환 전 페이퍼 성과 요약이 보여야 함(막연한 전환 금지) | 사람(고지 문구의 명확성) + 기계(확인 모달/2단계 제출 존재 여부는 DOM으로 판정 가능) |
-| J9 즉시 중단 | 이상 인지부터 "모든 운용 정지" 완료까지 **클릭 수 상한 후보 3회**, 정지 액션은 별도 확인 없이 즉시 발동(손실 상황에서 추가 단계는 사용감 저해 — 단, 오발동 방지를 위한 "실행 취소" 안내는 필요), 개인 트레이더가 전역 정지에 **접근 가능**해야 함(현재 `/admin/safety-controls`만 있어 미충족으로 명시) | 사람(위기 상황 UX는 사람 시나리오 리뷰 필요) + 기계(정지 API 호출까지의 클릭 수는 Playwright로 측정 가능) |
+| J9 즉시 중단 | 이상 인지부터 "모든 운용 정지" 완료까지 **클릭 수 상한 후보 3회**(충족 — `/dashboard` 진입 후 "내 운용 전부 정지" 1클릭으로 완료), 정지 액션은 별도 확인 없이 즉시 발동(손실 상황에서 추가 단계는 사용감 저해 — 단, 오발동 방지를 위한 "실행 취소" 안내는 필요, 재개 버튼이 동일 화면에 있음), 개인 트레이더가 전역 정지에 **접근 가능**해야 함(충족 — `/dashboard` 패널, task-10636) | 사람(위기 상황 UX는 사람 시나리오 리뷰 필요) + 기계(정지 API 호출까지의 클릭 수는 Playwright로 측정 가능 — journey-j9 스펙) |
 | (공통) 빈 상태·로딩·실패 | 모든 화면에서 빈 데이터/로딩/오류 3상태 각각 안내 문구 존재(G-9와 연결 — 현재 화면마다 개별 `*ErrorBanner`로 구현돼 있어 문구 일관성은 사람 리뷰 필요) | 기계(컴포넌트 렌더 여부) + 사람(문구 일관성·톤) |
 | (공통) 처음 쓰는 사용자가 설명 없이 끝낼 수 있는가 | J1·J7·J8처럼 여러 화면을 넘나드는 여정에서 진행률/다음 단계 안내가 없으면 미충족 — `OnboardingFlowPage.tsx`는 J1에 한해 진행 상태 계산이 있으나(G-11) J7·J8에는 그런 장치 자체가 없음 | 사람(설명 없이 완주 가능 여부는 실제 미경험 사용자 관찰이 필요 — Playwright로 대체 불가, 전량 "사람" 판정) |
 
@@ -313,11 +313,12 @@ task-10599(사용자 관점 1등급 지표 ADR 초안)의 "편리함" 축 입력
   렌더하는지 — i18n 키(`t12`~`t17`)만 확인했고 실제 번역 문자열·추가 모달 컴포넌트 존재 여부는
   미확인.
 - U-2: `is_platform_admin` 플래그가 실제 운영 환경에서 개인 트레이더(페르소나, §0)에게도 부여되는
-  배포 구성이 있는지 — 이번 실사는 `AdminRoute.tsx` 코드 로직만 확인했고 운영 데이터는 보지
-  않았다. 만약 1인 운영 환경에서 본인 계정에 admin 플래그가 항상 켜져 있다면 J9의 "접근 불가"
-  판정은 틀릴 수 있다.
-- U-3: `ExecutionCard.tsx`(`/executions`)의 개별 실행 취소 액션 존재 여부·클릭 경로 — §6.2 J9
-  3단계, 이번 실사 범위 밖(코드 미확인).
+  배포 구성이 있는지 — 여전히 미확인(운영 데이터 접근 범위 밖, 코드 로직 확인만으로는 판정 불가).
+  task-10636에서는 이 플래그 값과 무관하게 비관리자도 `/dashboard`의 "내 운용 전부 정지" 패널로
+  전역 정지에 도달하게 해 U-2 값에 의존하지 않도록 우회했다 — U-2 자체는 여전히 열려 있으나 J9
+  판정(§6.1, §6.3)을 막지 않는다.
+- U-3(해소): `ExecutionCard.tsx:134-153` 확인 — RUNNING 상태일 때 `pause.mutate`(일시정지),
+  RETIRED 전까지 상시 `retire.mutate`(퇴역) 버튼이 있다. §6.2 J9 3단계에 반영.
 - U-4: J1~J3 외 화면의 체감 지연 실측치(스크리너 외) — §4 성능 예산은 스크리너/차트에만 있고
   `/system/paper-deployments`, `/executions` 등의 p95는 이번 문서에서 측정하지 않음.
 - U-5: 모바일/반응형 렌더 결과(G-10과 동일 — 코드만으로는 breakpoint 실제 동작 판정 불가).
@@ -329,8 +330,10 @@ task-10599(사용자 관점 1등급 지표 ADR 초안)의 "편리함" 축 입력
 1. **J8 모의→실운용 전환에 확인 단계 추가** — 실자금이 걸린 행동에 고지·확인이 없는 상태가 가장
    리스크가 크다(§6.1 "모의 운용 → 실운용 전환" 행, §6.3 J8 기준 미충족). `INVARIANTS.md`의
    자금 관련 불변식과 교차 확인 필요.
-2. **J9 개인 트레이더용 전역 중단 수단 확보** — 현재 유일한 전역 정지 화면이 관리자 전용으로
-   추정되는 상태(U-2 확인 전까지는 가정)이며, 손실 상황에서 막힘 지점이 가장 치명적이다.
+2. **(해소, task-10636) J9 개인 트레이더용 전역 중단 수단 확보** — `/dashboard`에 "내 운용
+   전부 정지" 패널을 신설해 기존 `usePauseExecution`을 본인 소유 RUNNING 실행 전체에 반복 호출하는
+   방식으로 해결했다(백엔드/권한 모델 변경 없음). 관리자 전용 `/admin/safety-controls`는 플랫폼
+   범위 정지 용도로 그대로 유지.
 3. **J7 전략→백테스트→모의 운용 CTA 연결(G-3·G-11과 통합 해결)** — 구현 비용이 낮고(라우팅
    링크 추가 수준) 반복적으로 지적된 패턴(§2 갭 목록 G-3, G-11)과 겹친다.
 4. **G-2(대시보드 알림 위젯) 해결** — J9 1단계(상태 인지)의 전제 조건이라 J9보다 먼저 또는

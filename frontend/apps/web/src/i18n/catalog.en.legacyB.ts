@@ -120,6 +120,11 @@ export const catalogEnLegacyB = {
     "t8": "No running strategies.",
     "t9": "Recent alerts",
     "t10": "No recent alerts to display.",
+    "emergencyStopTitle": "Emergency stop",
+    "emergencyStopHint": "Immediately stop all running executions.",
+    "emergencyStopButton": "Stop all my executions",
+    "emergencyStopEmpty": "No executions are currently running.",
+    "emergencyStopResume": "Resume",
   },
   "registerCredentialForm": {
     "t1": "New exchange connection",
