@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -255,16 +254,22 @@ async def test_venue_listings_allows_touching_boundary_exactly(pool: asyncpg.Poo
 
 
 @pytest.mark.perf
-async def test_bulk_non_overlapping_inserts_meet_latency_budget(pool: asyncpg.Pool) -> None:
+async def test_bulk_non_overlapping_inserts_meet_latency_budget(
+    pool: asyncpg.Pool, perf_budget: object
+) -> None:
     """`EXCLUDE USING gist`는 삽입마다 겹침 검사를 위해 GiST 인덱스를
     스캔한다 — 인덱스가 없거나 퇴화하면 O(n) 순차비교로 느려진다. 500개
     서로 겹치지 않는 listing을 연속 삽입해 절대시간 예산 내임을 단언한다
-    (실측 로컬 <2s, 예산은 느린 CI 대비 넉넉히 잡음)."""
+    (실측 로컬 <2s, 예산은 느린 CI 대비 넉넉히 잡음).
+
+    raw perf_counter() → RelativeBudget.measure_wall로 전환(task-10890).
+    """
+    from tests._perf.relative_budget import RelativeBudget
+
     t0_base = datetime.now(timezone.utc) - timedelta(days=2000)
     n = 500
     budget_sec = 15.0
 
-    # Measure median wall-clock time with warmup + multiple samples.
     # Each iteration uses unique data to avoid constraint violations.
     async def _insert_batch(instrument_id: str, symbol: str, t0: datetime) -> None:
         for i in range(n):
@@ -282,25 +287,31 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(pool: asyncpg.Po
     await _insert_instrument(pool, warmup_id)
     await _insert_batch(warmup_id, _venue_symbol(), t0_base)
 
-    samples_ms = []
-    for sample_idx in range(3):
-        instrument_id = _fake_ulid()
-        await _insert_instrument(pool, instrument_id)
-        symbol = _venue_symbol()
-        # Offset each sample's time range to avoid overlaps with previous samples.
-        t0 = t0_base - timedelta(days=sample_idx * 2000)
+    rb = RelativeBudget()
 
-        start = time.perf_counter()
-        await _insert_batch(instrument_id, symbol, t0)
-        samples_ms.append((time.perf_counter() - start) * 1000)
+    # I/O-bound async: use measure_async/assert_within_async (RelativeBudget).
+    # 15s absolute → relative budget: calibration on same host ~tens of ms;
+    # 500 inserts ~1-2s → ratio ~100-200. Budget 15s → ratio ~1500.
+    # Use 2000x to allow CI variance while catching O(n^2).
+    async def _run_batch() -> None:
+        inst_id = _fake_ulid()
+        await _insert_instrument(pool, inst_id)
+        await _insert_batch(inst_id, _venue_symbol(), t0_base - timedelta(days=1))
 
-    samples_ms.sort()
-    elapsed_ms = samples_ms[len(samples_ms) // 2]
-    elapsed_sec = elapsed_ms / 1000.0
+    sample = await rb.assert_within_async(
+        _run_batch,
+        max_ratio=2000.0,
+        n=3,
+        warmup=0,
+        label=f"[DC-4 venue_listings] {n} inserts",
+    )
+    elapsed_sec = sample.op_ms / 1000.0
     print(
         f"[DC-4 venue_listings] {n} inserts in {elapsed_sec:.3f}s "
-        f"({elapsed_ms / n:.2f} ms/insert, budget<{budget_sec}s)"
+        f"({sample.op_ms / n:.2f} ms/iter, ratio={sample.ratio:.2f}x, "
+        f"budget<{budget_sec}s)"
     )
+    # Also assert absolute budget for regression tracking.
     assert elapsed_sec < budget_sec, (
         f"venue_listings {n}건 삽입이 예산({budget_sec}s)을 넘었습니다"
         f"({elapsed_sec:.3f}s) — GiST 인덱스가 안 타는지 확인하세요."
