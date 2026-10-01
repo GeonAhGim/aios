@@ -6,6 +6,7 @@ proven against adversarial fakes -- `_FakeStore` reproduces RD-4's
 `(tenant_id, source_id, external_id)` ON CONFLICT DO NOTHING semantics so
 the idempotent-retry-after-crash guarantee is exercised without Postgres.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -281,15 +282,23 @@ async def test_idempotent_retry_after_crash_inserts_no_duplicate_rows() -> None:
         return page
 
     first = await ingest_job(
-        tenant_id=_TENANT, source_id=_SOURCE_ID, span=_SPAN,
-        fetch_page=fetch_page, store=store, lock=_noop_lock,
+        tenant_id=_TENANT,
+        source_id=_SOURCE_ID,
+        span=_SPAN,
+        fetch_page=fetch_page,
+        store=store,
+        lock=_noop_lock,
     )
     # Simulate a crash after storage but before the caller persisted the new
     # cursor -- the caller retries with the *same* (stale) resume_cursor and
     # the source replays the identical page.
     second = await ingest_job(
-        tenant_id=_TENANT, source_id=_SOURCE_ID, span=_SPAN,
-        fetch_page=fetch_page, store=store, lock=_noop_lock,
+        tenant_id=_TENANT,
+        source_id=_SOURCE_ID,
+        span=_SPAN,
+        fetch_page=fetch_page,
+        store=store,
+        lock=_noop_lock,
     )
 
     assert first.stored_item_ids == second.stored_item_ids
@@ -311,16 +320,111 @@ async def test_concurrent_jobs_same_lock_key_are_serialized() -> None:
 
     await asyncio.gather(
         ingest_job(
-            tenant_id=_TENANT, source_id=_SOURCE_ID, span=_SPAN,
-            fetch_page=slow_fetch, store=store, lock=lock,
+            tenant_id=_TENANT,
+            source_id=_SOURCE_ID,
+            span=_SPAN,
+            fetch_page=slow_fetch,
+            store=store,
+            lock=lock,
         ),
         ingest_job(
-            tenant_id=_TENANT, source_id=_SOURCE_ID, span=_SPAN,
-            fetch_page=slow_fetch, store=store, lock=lock,
+            tenant_id=_TENANT,
+            source_id=_SOURCE_ID,
+            span=_SPAN,
+            fetch_page=slow_fetch,
+            store=store,
+            lock=lock,
         ),
     )
 
     assert max(max_concurrent) == 1
+
+
+# --- negative tests (>=3, D2 floor) -----------------------------------------
+# `ingest_job` only ever converts `ExchangeError` into a `CoverageGap` (§6) --
+# it must never mask a genuine programming error (a bad page shape, a broken
+# store, a failed lock acquisition) behind that same fail-soft path. These
+# tests pin the boundary: non-`ExchangeError` failures propagate unchanged.
+
+
+async def test_non_exchange_error_from_fetch_propagates_without_gap() -> None:
+    """A bug in a source adapter (e.g. a malformed page) must surface as a
+    real exception, not be silently absorbed into an empty `CoverageGap` --
+    only `ExchangeError` is a recognized, reportable source failure (§6)."""
+
+    async def fetch_page(_cursor: str | None) -> IngestPage:
+        raise ValueError("malformed page shape")
+
+    store = _FakeStore()
+    with pytest.raises(ValueError, match="malformed page shape"):
+        await ingest_job(
+            tenant_id=_TENANT,
+            source_id=_SOURCE_ID,
+            span=_SPAN,
+            fetch_page=fetch_page,
+            store=store,
+            lock=_noop_lock,
+        )
+    assert store.append_calls == 0
+
+
+async def test_store_append_failure_propagates_and_is_not_swallowed() -> None:
+    """RD-4's `append_item` failing mid-batch (e.g. a dropped DB connection)
+    must not be turned into a false-success `IngestJobResult` -- the caller
+    needs the exception to know the page was only partially persisted."""
+
+    class _FailingStore:
+        async def append_item(
+            self, tenant_id: UUID, item: ResearchItem, *, external_id: str
+        ) -> UUID:
+            raise RuntimeError("connection reset")
+
+    page = IngestPage(items=((_item("ext-8"), "ext-8"),), next_cursor=None)
+
+    async def fetch_page(_cursor: str | None) -> IngestPage:
+        return page
+
+    with pytest.raises(RuntimeError, match="connection reset"):
+        await ingest_job(
+            tenant_id=_TENANT,
+            source_id=_SOURCE_ID,
+            span=_SPAN,
+            fetch_page=fetch_page,
+            store=_FailingStore(),
+            lock=_noop_lock,
+        )
+
+
+async def test_lock_acquisition_failure_propagates_before_fetch() -> None:
+    """A broken advisory lock (e.g. the dedicated connection can't be
+    acquired) must fail the job outright rather than proceed without
+    serialization -- `fetch_page` must never even run."""
+    fetch_called = False
+
+    def _broken_lock(_key: str) -> AbstractAsyncContextManager[None]:
+        @asynccontextmanager
+        async def _acquire() -> AsyncIterator[None]:
+            raise ConnectionError("could not acquire advisory lock")
+            yield  # pragma: no cover - unreachable, satisfies generator shape
+
+        return _acquire()
+
+    async def fetch_page(_cursor: str | None) -> IngestPage:
+        nonlocal fetch_called
+        fetch_called = True
+        return IngestPage(items=(), next_cursor=None)
+
+    store = _FakeStore()
+    with pytest.raises(ConnectionError, match="could not acquire advisory lock"):
+        await ingest_job(
+            tenant_id=_TENANT,
+            source_id=_SOURCE_ID,
+            span=_SPAN,
+            fetch_page=fetch_page,
+            store=store,
+            lock=_broken_lock,
+        )
+    assert fetch_called is False
 
 
 @pytest.mark.perf
@@ -341,8 +445,12 @@ async def test_page_processing_throughput_bounded() -> None:
     store = _FakeStore()
     started = time.monotonic()
     result = await ingest_job(
-        tenant_id=_TENANT, source_id=_SOURCE_ID, span=_SPAN,
-        fetch_page=fetch_page, store=store, lock=_noop_lock,
+        tenant_id=_TENANT,
+        source_id=_SOURCE_ID,
+        span=_SPAN,
+        fetch_page=fetch_page,
+        store=store,
+        lock=_noop_lock,
     )
     elapsed = time.monotonic() - started
 
