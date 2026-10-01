@@ -8,7 +8,58 @@
 
 from __future__ import annotations
 
+import dataclasses
+
+import pytest
+
 from tests.unit.scripts.closeout_check_loader import ROOT, cc
+
+
+def test_check_result_is_frozen_and_rejects_mutation() -> None:
+    """불변식: CheckResult는 frozen dataclass — 판정 결과를 사후 변조할 수 없다."""
+    result = cc.CheckResult("01_x", "제목", True, (), "요약")
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.passed = False
+
+
+def test_main_rejects_unknown_cli_argument() -> None:
+    """불변식: argparse는 정의되지 않은 플래그를 조용히 무시하지 않고 거부한다."""
+    with pytest.raises(SystemExit) as exc_info:
+        cc.main(["--no-such-flag"])
+
+    assert exc_info.value.code == 2
+
+
+def test_main_rejects_repo_root_without_value() -> None:
+    """불변식: `--repo-root`는 값이 필수 — 값 없이 주면 거부돼야 한다."""
+    with pytest.raises(SystemExit) as exc_info:
+        cc.main(["--repo-root"])
+
+    assert exc_info.value.code == 2
+
+
+def test_write_closeout_doc_rejects_when_parent_path_is_a_file(tmp_path) -> None:
+    """불변식: 문서 경로의 부모가 이미 평범한 파일이면 디렉터리로 만들 수 없다."""
+    results = [cc.CheckResult("01_x", "제목", True, (), "요약")]
+    blocker = tmp_path / "blocker"
+    blocker.write_text("i am a file, not a directory", encoding="utf-8")
+    out = blocker / "CLOSEOUT.md"
+
+    with pytest.raises((NotADirectoryError, FileExistsError)):
+        cc.write_closeout_doc(out, results)
+
+
+def test_main_propagates_when_run_all_raises(tmp_path, monkeypatch) -> None:
+    """실패주입: 검사 함수 하나가 예외를 던지면 main은 삼키지 않고 그대로 전파한다(fail-closed)."""
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("check crashed")
+
+    monkeypatch.setattr(cc, "run_all", _boom)
+
+    with pytest.raises(RuntimeError, match="check crashed"):
+        cc.main(["--repo-root", str(tmp_path)])
 
 
 def test_render_markdown_contains_table_and_evidence() -> None:
