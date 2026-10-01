@@ -13,6 +13,7 @@ test_concurrent_inserts_for_same_scope_and_type_serialize_to_one_winner).
 """
 
 import time
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -229,3 +230,22 @@ def test_default_scope_derivation_throughput_stays_within_budget() -> None:
         f"default_scope() 처리량이 최소값({min_ops_per_sec:.0f} ops/s)에 "
         f"못 미칩니다({ops_per_sec:.0f})."
     )
+
+
+# --- 게이트 적색 재현 ---
+
+
+@pytest.mark.perf
+def test_gate_red_default_scope_budget_actually_fails_past_budget(perf_budget: Any) -> None:
+    """DEPTH 감사(task-10520)가 지적한 공백 -- 위 perf 단언이 실제로 `cpu_ms <
+    budget_ms`를 체크한다는 것 자체를 증명한다(단언이 항상 통과하는 죽은 코드가
+    아님을 보인다). 예산을 0에 가깝게 조르면 `perf_budget.assert_within`이
+    `AssertionError`로 적색을 내야 한다."""
+    code = coa.user_account(_USER_ID, UserSub.AVAILABLE)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: coa.default_scope(code),
+            budget_ms=-1.0,
+            label="gate_red default_scope",
+        )
