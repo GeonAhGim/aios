@@ -13,7 +13,6 @@ base_adapter.py::NormalizationNotImplementedError`와 같은 전례.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -35,6 +34,7 @@ from src.foundation.market_data.ports.provider import (
     TimeSpan,
     require_microstructure,
 )
+from tests.conftest import PerfBudget
 
 _IID = "0" * 25 + "1"
 _TS_EVENT = 1_700_000_000_000_000_000
@@ -181,17 +181,21 @@ async def test_subscribe_book_missing_yields_nothing_not_none() -> None:
 
 
 @pytest.mark.perf
-def test_require_microstructure_check_is_fast_at_scale() -> None:
+@pytest.mark.perf
+def test_require_microstructure_check_is_fast_at_scale(
+    perf_budget: PerfBudget,
+) -> None:
     """성능 어서션(D2 필수) — capability 게이트는 캔들/틱 핫 경로에서
     호출당 마이크로초 단위여야 하므로, 10,000회 반복이 200ms(p_all)를
     넘지 않아야 한다(단순 isinstance() 체크이므로 여유 있는 예산)."""
     provider = _MicrostructureCapableProvider()
     iterations = 10_000
-    started = time.perf_counter()
-    for _ in range(iterations):
-        require_microstructure(provider, "fetch_trades")
-    elapsed = time.perf_counter() - started
-    assert elapsed < 0.2, f"require_microstructure too slow: {elapsed:.4f}s for {iterations} calls"
+
+    def _loop() -> None:
+        for _ in range(iterations):
+            require_microstructure(provider, "fetch_trades")
+
+    perf_budget.assert_within(_loop, budget_ms=200, n=5, label="require_microstructure 10k")
 
 
 # ---------------------------------------------------------------------------
