@@ -355,7 +355,7 @@ def test_finding_rejects_missing_constructor_arguments() -> None:
     하나라도 빠뜨리면 조용히 반쪽짜리 Finding을 만드는 대신 즉시 TypeError로 죽어야
     한다(그래야 `run()`의 try/except가 "검사기 자체 실패"로 분류해 잡는다)."""
     with pytest.raises(TypeError):
-        check_audit_regressions.Finding("only_code")  # type: ignore[call-arg]
+        check_audit_regressions.Finding("only_code")
 
 
 def test_hits_raises_on_invalid_regex_pattern() -> None:
