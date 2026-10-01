@@ -7,7 +7,6 @@ failure-injection 1, numeric performance assertion 1, gate-red repro 1.
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -41,6 +40,7 @@ from src.foundation.validation.checks.context import CheckContext
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from src.services.strategy_builder_service import StrategyBuilderService
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -317,14 +317,27 @@ async def test_p95_latency_within_local_run_check_budget(pool, validation_repo, 
     """ADR-2026-09-09-C axis performance budget: end-to-end `run_check` for a
     small (10-bar) replay against a real DB stays within a generous 2s
     floor -- each iteration uses a freshly saved strategy so none of the
-    samples hit the idempotency short-circuit."""
+    samples hit the idempotency short-circuit.
+
+    task-10901: raw `time.perf_counter()` replaced with `RelativeBudget.
+    measure_async` (tests/_perf/relative_budget.py) -- its wall-clock timing
+    still runs through `paused_coverage()` around each call, so the
+    `--cov=src` line tracer's per-line overhead (task-7250/7253) is excluded
+    from the measured span. The 2s budget itself is unchanged -- only the
+    measurement path moved off the raw, unguarded timer."""
+    budget = RelativeBudget()
     samples: list[float] = []
     for _ in range(3):
         owner_id, strategy_id, version = await _saved_strategy(pool, strategy_service)
         ctx = await _ctx_for(strategy_service, owner_id, strategy_id, version)
-        start = time.perf_counter()
-        await run_check(validation_repo, check_type="backtest", ctx=ctx, owner_user_id=owner_id)
-        samples.append(time.perf_counter() - start)
+
+        async def _run_once(_ctx=ctx, _owner_id=owner_id) -> None:
+            await run_check(
+                validation_repo, check_type="backtest", ctx=_ctx, owner_user_id=_owner_id
+            )
+
+        sample = await budget.measure_async(_run_once, n=1, warmup=0, calibration_n=1)
+        samples.append(sample.op_ms / 1000)
     p95_seconds = max(samples)
     assert p95_seconds < 2.0, f"p95={p95_seconds * 1000:.2f}ms exceeds 2000ms budget"
 
