@@ -13,6 +13,7 @@ contracts/v1.py:72 주석도 "아직 없는 later leaf"로 명시). 이 리프�
 그 상수 산식이고, `application/start_validation.py`가 그 값을 실제로 DB에
 써서 반환하는 유일한 경로다.
 """
+
 from __future__ import annotations
 
 import time
@@ -33,6 +34,7 @@ from src.foundation.validation.application import start_validation as start_vali
 from src.foundation.validation.application.start_validation import start_validation
 from src.foundation.validation.contracts.v1 import Outcome, StartValidationCommand
 from src.services.strategy_builder_service import StrategyBuilderService
+from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_user
 
 # ADR-2026-09-09-C Decision 1 예산 -- "백테스트 1개월 M1 1심볼 3초". 검증
@@ -343,24 +345,26 @@ async def test_result_hash_reproducible_across_fail_outcome_too(
 
 
 @pytest.mark.perf
-async def test_validation_run_stays_within_backtest_budget(pool, validation_repo, strategy_service):
+async def test_validation_run_stays_within_backtest_budget(
+    pool, validation_repo, strategy_service, perf_budget: PerfBudget
+):
     """ADR-2026-09-09-C Decision 1 -- 백테스트 1개월 M1 1심볼 3초 예산.
     start_validation()이 내부에서 그 백테스트 엔진을 호출하므로 같은
     예산을 단언한다."""
     owner_id, strategy_id, version = await _strategy_in_backtesting(pool, strategy_service)
 
-    started = time.perf_counter()
-    await start_validation(
-        validation_repo,
-        strategy_service,
-        owner_user_id=owner_id,
-        command=_command(strategy_id, version),
-        bars=_bars(),
-        indicator_service=_FakePriceIndicatorService(),
-    )
-    elapsed_s = time.perf_counter() - started
+    async def measure():
+        await start_validation(
+            validation_repo,
+            strategy_service,
+            owner_user_id=owner_id,
+            command=_command(strategy_id, version),
+            bars=_bars(),
+            indicator_service=_FakePriceIndicatorService(),
+        )
 
-    assert elapsed_s < _BACKTEST_BUDGET_S
+    sample = await perf_budget.sample_async(measure)
+    assert sample.cpu_ms < _BACKTEST_BUDGET_S * 1000
 
 
 # ---- 게이트 적색 재현 ----
@@ -368,7 +372,7 @@ async def test_validation_run_stays_within_backtest_budget(pool, validation_repo
 
 @pytest.mark.perf
 async def test_budget_gate_actually_fails_when_result_hash_computation_stalls(
-    pool, validation_repo, strategy_service
+    pool, validation_repo, strategy_service, perf_budget: PerfBudget
 ):
     """게이트 적색 재현: `compute_result_hash`가 예산(3초)을 실제로 넘기도록
     지연을 주입하면, 위 성능 단언과 동일한 식이 실제로 AssertionError를
@@ -382,17 +386,18 @@ async def test_budget_gate_actually_fails_when_result_hash_computation_stalls(
         time.sleep(_BACKTEST_BUDGET_S + 0.1)
         return original(metrics)
 
-    started = time.perf_counter()
-    with patch.object(start_validation_mod, "compute_result_hash", _stalled):
-        await start_validation(
-            validation_repo,
-            strategy_service,
-            owner_user_id=owner_id,
-            command=_command(strategy_id, version),
-            bars=_bars(),
-            indicator_service=_FakePriceIndicatorService(),
-        )
-    elapsed_s = time.perf_counter() - started
+    async def measure_with_stall():
+        with patch.object(start_validation_mod, "compute_result_hash", _stalled):
+            await start_validation(
+                validation_repo,
+                strategy_service,
+                owner_user_id=owner_id,
+                command=_command(strategy_id, version),
+                bars=_bars(),
+                indicator_service=_FakePriceIndicatorService(),
+            )
+
+    sample = await perf_budget.sample_async(measure_with_stall)
 
     with pytest.raises(AssertionError):
-        assert elapsed_s < _BACKTEST_BUDGET_S
+        assert sample.wall_ms < _BACKTEST_BUDGET_S * 1000
