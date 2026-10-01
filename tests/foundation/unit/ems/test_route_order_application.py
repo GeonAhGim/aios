@@ -17,7 +17,6 @@ for this leaf.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -34,6 +33,7 @@ from src.foundation.ems.domain.route.venue_scoring import (
     VenueScoreWeights,
 )
 from src.foundation.ems.ports.route_decision_repository import RouteDecisionRecord
+from tests.conftest import PerfBudget
 
 
 @dataclass
@@ -218,24 +218,31 @@ async def test_gate_red_repro_duplicate_venue_guard_is_load_bearing(
 
 
 @pytest.mark.perf
-async def test_route_order_perf_budget_many_candidates() -> None:
+async def test_route_order_perf_budget_many_candidates(perf_budget: PerfBudget) -> None:
     """`route_order` builds two snapshots (`candidates_snapshot`,
     `score_snapshot`) per candidate on top of EM-5's O(n log n) rank -- this
     pins an upper bound so an accidental O(n^2) (e.g. re-scanning candidates
     inside the snapshot loop, or re-fetching from the repository per
     candidate) fails this test instead of only showing up as production
-    latency."""
+    latency.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-10966).
+    """
     candidates = _candidates(100)
     repo = FakeRouteDecisionRepository()
 
-    start = time.perf_counter()
-    for _ in range(200):
-        repo.records.clear()
-        await route_order(
-            repo, order_id=uuid4(), candidates=candidates, decided_at=datetime.now(timezone.utc)
-        )
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    async def _batch_200() -> None:
+        for _ in range(200):
+            repo.records.clear()
+            await route_order(
+                repo,
+                order_id=uuid4(),
+                candidates=candidates,
+                decided_at=datetime.now(timezone.utc),
+            )
 
-    assert elapsed_ms < 800, (
-        f"route_order() too slow: {elapsed_ms:.1f}ms/200 calls x 100 candidates"
+    sample = await perf_budget.sample_async(_batch_200)
+    # budget 값 불변: 기존 800ms(200 calls x 100 candidates 총 wall-clock)
+    assert sample.wall_ms < 800, (
+        f"route_order() too slow: {sample.wall_ms:.1f}ms/200 calls x 100 candidates"
     )
