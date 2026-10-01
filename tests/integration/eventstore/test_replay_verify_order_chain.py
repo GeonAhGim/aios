@@ -19,6 +19,7 @@ from scripts import replay_verify
 from src.core.eventstore import replay
 from src.core.eventstore.projections.orders import EventChainBrokenError
 from src.data.models.trading import OrderStatus
+from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.conftest import create_test_user
@@ -289,3 +290,43 @@ async def test_replay_still_raises_for_post_cutover_broken_event_chain(pool):
                 "UPDATE oms_order_transition_cutover SET cutover_at = NULL, armed_by = NULL "
                 "WHERE id = 1"
             )
+
+
+async def test_replay_raises_when_order_timeline_lookup_fails_instead_of_reporting_false_ok(
+    pool, monkeypatch
+):
+    """Failure-injection test (DoD checklist, task-10844) -- mirrors
+    test_replay_verify.py's dependency-failure test but targets this file's
+    own domain (`_order_pair`'s order-chain read, not the ledger/fills side):
+    `_order_pair` pulls the order's event timeline via
+    `PostgresOrderEventRepository.timeline` before it can replay anything.
+    `_order_pair`/`verify()` have no `try/except` around this call (by
+    design -- FA-15 is fail-closed), so an injected exception here must
+    propagate out of `verify()` unchanged instead of being swallowed and
+    reported as a false `ok=True` or a silently skipped stream."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await insert_order(conn, user_id, status="CREATED")
+        await PostgresOrderRepository().transition(
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.CREATED,
+            expected_version=0,
+            new_status=OrderStatus.VALIDATED,
+            patch={},
+            event=_order_event(
+                order_id,
+                from_status=OrderStatus.CREATED,
+                to_status=OrderStatus.VALIDATED,
+                event="VALIDATED",
+            ),
+        )
+    as_of = _clock() + timedelta(minutes=1)
+
+    async def _raise_timeline_error(self, conn, order_id):
+        raise RuntimeError("injected dependency failure -- order timeline lookup unavailable")
+
+    monkeypatch.setattr(PostgresOrderEventRepository, "timeline", _raise_timeline_error)
+
+    with pytest.raises(RuntimeError, match="injected dependency failure"):
+        await replay_verify.verify(pool, as_of=as_of, hours=1)
