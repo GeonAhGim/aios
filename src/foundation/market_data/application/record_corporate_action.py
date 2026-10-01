@@ -22,6 +22,7 @@ then raise), but since this function opens its own transaction on its
 own `pool` (it does not accept the caller's `conn`), the exception must
 be raised **outside** the `async with` block to persist the DENIED row.
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -49,7 +50,7 @@ class CorporateActionConflictError(Exception):
 
     def __init__(self, action: CorporateAction) -> None:
         super().__init__(
-            f"다른 내용으로 재전송됨: instrument_id={action.instrument_id} "
+            f"Resent with different content: instrument_id={action.instrument_id} "
             f"action_type={action.action_type} ex_date={action.ex_date}"
         )
         self.action = action
