@@ -5,7 +5,6 @@ failure injection 1, numeric performance assertion 1, gate-red reproduction
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -15,6 +14,7 @@ from pydantic import ValidationError
 
 from src.foundation.ai.factory.contracts import v1
 from src.foundation.market_data.contracts.v1 import Timeframe
+from tests.conftest import PerfBudget
 
 _START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _END = _START + timedelta(days=30)
@@ -146,36 +146,38 @@ _CONSTRUCT_BUDGET_SEC = 2.0
 
 
 @pytest.mark.perf
-def test_bulk_construction_of_many_strategy_proposals_meets_latency_budget() -> None:
+def test_bulk_construction_of_many_strategy_proposals_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     n = 3_000
     payloads = [_proposal_kwargs(proposal_id=uuid4()) for _ in range(n)]
 
-    start = time.perf_counter()
-    proposals = [v1.StrategyProposal(**payload) for payload in payloads]
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.sample(lambda: [v1.StrategyProposal(**p) for p in payloads])
+    budget_ms = _CONSTRUCT_BUDGET_SEC * 1_000  # seconds → ms
 
-    budget = _CONSTRUCT_BUDGET_SEC
-    print(f"[AI-8 factory contracts_v1] {n}건 construct in {elapsed:.4f}s (budget<{budget}s)")
-    assert len(proposals) == n
-    assert elapsed < _CONSTRUCT_BUDGET_SEC
+    print(
+        f"[AI-8 factory contracts_v1] {n}건 construct in "
+        f"{sample.wall_ms / 1_000:.4f}s (budget<{_CONSTRUCT_BUDGET_SEC}s)"
+    )
+    assert len(sample.result) == n
+    assert sample.wall_ms < budget_ms
 
 
 # --- 게이트 적색 재현 ---
 
 
 @pytest.mark.perf
-def test_gate_red_budget_actually_fails_past_budget() -> None:
+def test_gate_red_budget_actually_fails_past_budget(
+    perf_budget: PerfBudget,
+) -> None:
     n = 200
     absurdly_low_budget_sec = 1e-9
     payloads = [_proposal_kwargs(proposal_id=uuid4()) for _ in range(n)]
 
-    start = time.perf_counter()
-    for payload in payloads:
-        v1.StrategyProposal(**payload)
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.sample(lambda: [v1.StrategyProposal(**p) for p in payloads])
 
     with pytest.raises(AssertionError):
-        assert elapsed < absurdly_low_budget_sec
+        assert sample.wall_ms < absurdly_low_budget_sec * 1_000  # seconds → ms
 
 
 def test_gate_red_progressive_field_corruption_flips_pass_fail_at_each_stage() -> None:
