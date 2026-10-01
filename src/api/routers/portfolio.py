@@ -1,18 +1,19 @@
-"""19번 — 통합 포트폴리오 API 라우터 (FD-19.1/FD-19.2).
+"""Router 19 — unified portfolio API (FD-19.1/FD-19.2).
 
-Spec: 기능설계문서_v1.20.md#FD-19.1/FD-19.2, FD-3.2
+Spec: functional_design_doc_v1.20.md#FD-19.1/FD-19.2, FD-3.2
 
-PortfolioService는 total_cash_balance를 "호출부가 이미 단일 통화로
-정리해 전달한다"고 가정한다(services/portfolio_service.py 모듈 docstring
-참조) — Phase 1이 crypto(Bitget) 단일 자산군 전제이므로, 사용자가 연동한
-모든 활성 거래소의 USDT 잔고(FD-3.2)를 합산해 넘긴다.
+PortfolioService assumes total_cash_balance is "already consolidated into a
+single currency by the caller" (see services/portfolio_service.py module
+docstring).  Phase 1 targets crypto (Bitget) only, so this router sums USDT
+balances across all active exchanges the user has linked (FD-3.2).
 
-PLT-19(task-1016): raw HTTPException을 전부 제거했다 — RebalanceError/
-CapitalAllocationError는 전역 핸들러가 exception_mapping.py의
-EXCEPTION_MAP을 통해 동일한 400으로 변환한다. 이 라우터의 성공 응답
-봉투화는 PLT-17 decision과 동일 사유로 보류한다(exchange_credentials.py
-모듈 docstring 참조).
+PLT-19 (task-1016): removed all raw HTTPException usages — RebalanceError /
+CapitalAllocationError are converted to the same 400 by the global handler
+via EXCEPTION_MAP in exception_mapping.py.  Success response envelope
+formatting is deferred for the same reason as PLT-17 decision (see
+exchange_credentials.py module docstring).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
