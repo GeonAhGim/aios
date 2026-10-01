@@ -30,7 +30,6 @@ import importlib
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -208,7 +207,7 @@ async def test_bitget_fetch_candles_filter_sort_throughput_bounded_vs_trivial_ba
     반비례로 널뛴다(base_adapter.py의 "시간은 주입받는다" 설계를 그대로
     따라 무지연 fake sleep을 준다).
 
-    raw perf_counter() 단언을 PerfBudget.samples() → ratio 단언으로 전환
+    raw perf_counter() 단언 전량 PerfBudget 경유 ratio 단언으로 전환
     (task-10986)."""
     candles = _large_bitget_candle_set(_N_CANDLES)
     fake = _FakeBitgetAdapter({"BTC/USDT": candles})
@@ -232,18 +231,16 @@ async def test_bitget_fetch_candles_filter_sort_throughput_bounded_vs_trivial_ba
             values = [(_BASE + timedelta(hours=_N_CANDLES - h), h) for h in range(_N_CANDLES)]
             sorted(values, key=lambda pair: pair[0])
 
-    # 베이스라인은 calibrations reference — raw timer 유지(고정 기준점).
-    baseline_start = time.perf_counter()
-    run_baseline()
-    baseline_seconds = time.perf_counter() - baseline_start
+    # 베이스라인도 perf_budget 경유로 전환 — process_time 기반, coverage-trace pause.
+    baseline_samples = perf_budget.samples(run_baseline, n=3)
+    baseline_ms = sorted(s.cpu_ms for s in baseline_samples)[len(baseline_samples) // 2]
 
     # fetch 측정을 PerfBudget.samples_async() 경유로 전환 (best-of-3, coverage-trace pause).
     # run_fetch는 async → samples_async() 사용.
     raw_samples = await perf_budget.samples_async(run_fetch, n=3)
     fetch_ms = sorted(s.wall_ms for s in raw_samples)[len(raw_samples) // 2]
 
-    assert baseline_seconds > 0.0
-    baseline_ms = baseline_seconds * 1000
+    assert baseline_ms > 0.0
     ratio = fetch_ms / baseline_ms
     budget_ratio = 30.0  # fetch는 필터+정렬+CandleColumns 조립+비동기 호출
     # 오버헤드가 더해져 트리비얼 정렬 베이스라인보다 근본적으로 느리다.
