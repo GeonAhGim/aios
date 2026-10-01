@@ -3,6 +3,7 @@
 5회 연속 실패 잠금(15분)의 실제 대기 대신, DB의 failed_login_attempts를
 직접 4로 세팅해 "다음 실패가 5번째"인 상태를 결정적으로 재현한다.
 """
+
 from pathlib import Path
 
 import asyncpg
@@ -10,7 +11,8 @@ import jwt
 import pytest
 from dotenv import dotenv_values
 
-from src.services.auth_service import AuthError, AuthService
+from src.core.db.conditional_write import ConcurrencyConflictError
+from src.services.auth_service import AuthError, AuthService, get_user_by_id
 
 JWT_SECRET = "test-secret-key-not-for-production"
 
@@ -86,9 +88,7 @@ async def test_fifth_consecutive_failure_locks_account(auth, pool):
     await auth.signup(email, STRONG_PASSWORD)
 
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE users SET failed_login_attempts = 4 WHERE email = $1", email
-        )
+        await conn.execute("UPDATE users SET failed_login_attempts = 4 WHERE email = $1", email)
 
     with pytest.raises(AuthError):
         await auth.authenticate(email, "WrongPassword1!")
@@ -180,9 +180,7 @@ async def test_account_lockout_is_audit_logged(auth, pool):
     email = _unique_email()
     await auth.signup(email, STRONG_PASSWORD)
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE users SET failed_login_attempts = 4 WHERE email = $1", email
-        )
+        await conn.execute("UPDATE users SET failed_login_attempts = 4 WHERE email = $1", email)
         user_id = await conn.fetchval("SELECT user_id FROM users WHERE email = $1", email)
 
     with pytest.raises(AuthError):
@@ -228,3 +226,60 @@ async def test_nonexistent_account_timing_matches_wrong_password_timing(auth):
         f"두 경로의 처리시간 차이가 너무 큽니다(계정 존재 여부 유출 가능): "
         f"nonexistent={nonexistent_elapsed:.4f}s, wrong_password={wrong_password_elapsed:.4f}s"
     )
+
+
+async def test_get_user_by_id_returns_user(auth, pool):
+    email = _unique_email()
+    user = await auth.signup(email, STRONG_PASSWORD)
+
+    fetched = await get_user_by_id(pool, user.user_id)
+
+    assert fetched is not None
+    assert fetched.email == email
+
+
+async def test_get_user_by_id_returns_none_for_unknown_id(pool):
+    import uuid
+
+    fetched = await get_user_by_id(pool, uuid.uuid4())
+
+    assert fetched is None
+
+
+async def test_signup_concurrent_race_raises_concurrency_conflict(auth, monkeypatch):
+    """TOCTOU 레이스 분기 커버(review task-2083 REJECT #1) — 사전 SELECT와 INSERT
+    사이에 동시 가입이 끼어든 상황을 결정적으로 재현한다. 이메일이 실제로 이미
+    존재하는 상태에서 사전 중복 체크(SELECT 1 ...)만 monkeypatch로 강제 None을
+    반환시켜, INSERT가 UniqueViolationError로 실패하고 ConcurrencyConflictError로
+    변환되는지 검증한다."""
+    email = _unique_email()
+    await auth.signup(email, STRONG_PASSWORD)
+
+    original_fetchval = asyncpg.Connection.fetchval
+
+    async def fake_fetchval(self, query, *args, **kwargs):
+        if "SELECT 1 FROM users WHERE email" in query:
+            return None
+        return await original_fetchval(self, query, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchval", fake_fetchval)
+
+    with pytest.raises(ConcurrencyConflictError):
+        await auth.signup(email, STRONG_PASSWORD)
+
+
+async def test_authenticate_fails_closed_when_audit_log_raises(auth, monkeypatch):
+    """실패주입 — 의존성(record_audit_log)이 예외를 던지면 인증 결과는 반드시
+    실패로 전파되어야 한다(§4 fail-closed 기본값). 감사기록 실패를 삼키고
+    로그인을 성공으로 위장하면 안 된다."""
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("audit log backend unavailable")
+
+    monkeypatch.setattr("src.services.auth_service.record_audit_log", boom)
+
+    email = _unique_email()
+    await auth.signup(email, STRONG_PASSWORD)
+
+    with pytest.raises(RuntimeError):
+        await auth.authenticate(email, STRONG_PASSWORD)
