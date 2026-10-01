@@ -2637,6 +2637,23 @@ the numbering they had in CLAUDE.md section 6.
     (`_stage_tail`/`_FAIL_LINE_MARKERS`), out of repo-worker edit scope per CLAUDE.md §4 — no
     frontend code change warranted; closing noop per the established precedent above.
 
+102. An eleventh `frontend` `[health:ci_red]` leaf (task-11109) reopens the identical #101 alert
+    verbatim: same stage detail text (`CH-18e indicator compute failed, falling back to server:
+    SMA (WORKER_POOL_TASK_FAILED: kernel exploded)` plus the two `MarketplaceBrowsePage`/
+    `PortfolioPage` 5xx-retry `stderr |` negative-test lines and the `IndicatorParityPanel`
+    verified-gate negative-test line), same `bisect_culprit`
+    (`a100a82f94e6ef5d5118df9c1c985ffcc831b3f0`). Confirmed again that the "kernel exploded" string
+    is the literal mocked-rejection message asserted on by
+    `packages/chart-engine/src/compute/__tests__/workerPool.test.ts` (`run: () =>
+    Promise.reject(new Error("kernel exploded"))`), i.e. the fallback `console.error` is the
+    intended behavior under test, not a failure. `git log cdbd1ce43..HEAD -- frontend/` is empty —
+    zero frontend commits landed between #101's full-suite green run and this reopened round, so the
+    frontend tree is unchanged and necessarily still in the same state. Reconfirmed locally (HEAD
+    `d27a046a1`): the three cited test files individually (9/9 tests pass), `npm run lint
+    --workspace=apps/web` clean (ratchets OK), `npm run build --workspace=apps/web` succeeds.
+    Same fleet-code (`pm/auto_decision.py`) stale/reopen pattern as #101 and its predecessors
+    (#16/#39/#52/#64/#66/#84/#89/#97) — no frontend code change warranted; closing noop.
+
 ---
 
 Moved from CLAUDE.md on 2026-10-01 (CLAUDE.md is English-only and loaded into every worker context):
