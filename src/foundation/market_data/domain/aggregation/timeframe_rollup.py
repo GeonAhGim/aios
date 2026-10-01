@@ -1,31 +1,38 @@
-"""DC-10 — M1 → 파생 타임프레임 결정론 집계.
+"""DC-10 — Deterministic aggregation of M1 into derived timeframes.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.1 DC-10, §4.1, §9.2 DC-10.
 
-M1 캔들 컬럼(ADR-A `CandleColumns`, 재정의 금지)만 입력으로 받아 상위
-타임프레임으로 집계한다. 타임프레임 그리드 정렬(`align_open`/
-`expected_opens`)과 세션 판정(`VenueCalendar`)은 LA-2/LA-3에 위임하고
-재구현하지 않는다(LA-19 위임 원칙). 순수 함수만 — I/O·asyncpg 금지.
+Takes only M1 candle columns (ADR-A `CandleColumns`, do not redefine) as
+input and aggregates them into a higher timeframe. Timeframe grid
+alignment (`align_open`/`expected_opens`) and session resolution
+(`VenueCalendar`) are delegated to LA-2/LA-3 and not reimplemented here
+(LA-19 delegation principle). Pure functions only — no I/O, no asyncpg.
 
-fail-closed 규칙(§4.1):
-- 파생 TF는 M1에서만 생성 — 대상 timeframe이 M1이면 거부한다.
-- 커버리지 밖 구간을 0/NaN으로 채우지 않는다 — 세션 안에서 기대되는
-  캔들이지만 그 구간에 소스 M1 행이 하나도 없으면(갭) 그 파생 캔들을
-  아예 만들지 않는다(0으로 채운 가짜 캔들을 만들지 않는다).
-- `quote_volume`은 구간 안의 어느 M1 행이라도 값이 없으면(`None`) 합계를
-  `None`으로 둔다 — 모르는 값을 0으로 합산하면 §4.1을 어기는 셈이다.
-- `rollup_version` 없는 산출은 만들 수 없다 — `RollupResult`가 항상
-  같이 들고 다니므로 타입 수준에서 강제된다.
+fail-closed rules (§4.1):
+- Derived TFs are only produced from M1 — rejected if the target
+  timeframe is M1 itself.
+- Out-of-coverage windows are never filled with 0/NaN — if a candle is
+  expected within the session but the window has zero source M1 rows
+  (a gap), that derived candle is simply not produced (no fake
+  zero-filled candle).
+- `quote_volume` is left `None` for the sum if any M1 row in the window
+  has a missing (`None`) value — summing an unknown value as 0 would
+  violate §4.1.
+- An output without `rollup_version` cannot be produced — `RollupResult`
+  always carries it alongside, enforced at the type level.
 
-`rollup_version`은 BT-9 재현 키(`reproducibility_key`) 구성요소다. 사람이
-수동으로 올려야 하는 상수 문자열이면 집계 규칙을 바꾸고 버전을 올리는
-걸 잊기 쉽다 — 그래서 이 모듈은 집계 규칙을 기술한 `_ROLLUP_RULE_SPEC`
-문자열의 해시로 버전을 정의한다: 규칙 서술이 바뀌면(즉 이 모듈의 집계
-로직을 바꾸면서 그 서술도 함께 고치면) 값이 자동으로 바뀐다. 코드
-로직만 바뀌고 `_ROLLUP_RULE_SPEC`은 그대로 두면 버전이 바뀌지 않는
-한계는 남는다(정직하게 남겨 두는 편차) — 규칙을 바꿀 때 서술도 함께
-고치는 리뷰 규율에 의존한다.
+`rollup_version` is a component of the BT-9 reproducibility key
+(`reproducibility_key`). If it were a constant string that a human had to
+bump by hand, it would be easy to forget to bump the version when the
+aggregation rule changes — so this module instead defines the version as
+a hash of the `_ROLLUP_RULE_SPEC` string that describes the aggregation
+rule: whenever the rule description changes (i.e. when the aggregation
+logic in this module changes along with its description), the value
+changes automatically. The limitation — honestly left as-is — is that if
+only the code logic changes while `_ROLLUP_RULE_SPEC` is left untouched,
+the version will not change; this relies on review discipline to update
+the description whenever the rule changes.
 """
 
 from __future__ import annotations
@@ -64,29 +71,33 @@ ROLLUP_VERSION = f"tfr1-{hashlib.sha256(_ROLLUP_RULE_SPEC.encode('utf-8')).hexdi
 
 
 class InvalidRollupTargetError(ValueError):
-    """`MD_ROLLUP_TARGET_INVALID` — M1은 롤업 대상이 될 수 없다(§4.1: 파생
-    TF는 M1에서만 생성되므로, M1 자신으로의 "롤업"은 정의되지 않는다)."""
+    """`MD_ROLLUP_TARGET_INVALID` — M1 cannot be a rollup target (§4.1:
+    derived TFs are only produced from M1, so a "rollup" of M1 into
+    itself is undefined)."""
 
     def __init__(self, tf: Timeframe) -> None:
         super().__init__(f"M1은 롤업 대상 timeframe이 될 수 없습니다: {tf!r}")
 
 
 class UnsortedCandlesError(ValueError):
-    """`MD_ROLLUP_UNSORTED_INPUT` — 정렬되지 않은 M1 입력은 두-포인터 집계를
-    조용히 어긋난 구간과 짝짓는다(fail-closed로 거부)."""
+    """`MD_ROLLUP_UNSORTED_INPUT` — unsorted M1 input would silently pair
+    the two-pointer aggregation with the wrong window (rejected
+    fail-closed)."""
 
 
 class SessionNotFoundError(ValueError):
-    """`MD_ROLLUP_SESSION_NOT_FOUND` — `expected_opens`가 반환한 open이
-    그 open을 낳은 세션 목록에서 다시 찾아지지 않는다(내부 불변 위반,
-    발생하면 안 되지만 방어적으로 거부한다)."""
+    """`MD_ROLLUP_SESSION_NOT_FOUND` — an open returned by `expected_opens`
+    cannot be found again in the session list that produced it (an
+    internal invariant violation that should never happen, but is
+    rejected defensively)."""
 
 
 @dataclass(frozen=True, slots=True)
 class RollupResult:
-    """`rollup` 한 번의 산출. `rollup_version` 없이 `columns`만 꺼내 쓸 수
-    없도록 항상 짝을 이뤄 반환한다(§4.1: rollup_version 없는 파생 캔들
-    저장 금지 — 저장 전에 이미 타입으로 강제)."""
+    """The output of a single `rollup` call. Always returned paired with
+    `rollup_version` so `columns` can never be taken out alone (§4.1:
+    storing a derived candle without rollup_version is forbidden —
+    enforced at the type level before storage)."""
 
     columns: CandleColumns
     rollup_version: str
@@ -112,11 +123,12 @@ def _session_containing(ts_open: datetime, sessions: list[SessionWindow]) -> Ses
 
 
 def rollup(columns: CandleColumns, tf: Timeframe, calendar: VenueCalendar) -> RollupResult:
-    """`columns`(M1 소스, `open_time` 오름차순)를 `tf` 캔들로 집계한다.
+    """Aggregates `columns` (M1 source, ascending `open_time`) into `tf` candles.
 
-    같은 입력(`columns`·`tf`·`calendar`)이면 항상 바이트 동일한 출력을
-    낸다 — 정렬 순서·세션 창을 결정하는 값은 전부 인자로만 받고 전역
-    시계·난수를 쓰지 않는다.
+    Given the same inputs (`columns`, `tf`, `calendar`), always produces a
+    byte-identical output — every value that determines sort order or
+    session windows is taken only from arguments, never from the system
+    clock or randomness.
     """
     if tf is Timeframe.M1:
         raise InvalidRollupTargetError(tf)
@@ -186,7 +198,7 @@ def rollup(columns: CandleColumns, tf: Timeframe, calendar: VenueCalendar) -> Ro
 
         if first_open is None:
             idx = j
-            continue  # 갭: 0/NaN으로 채우지 않고 이 파생 캔들을 만들지 않는다
+            continue  # gap: skip this derived candle instead of filling with 0/NaN
 
         out_ts.append(ts_open)
         out_open.append(first_open)
