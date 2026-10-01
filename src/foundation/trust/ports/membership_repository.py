@@ -1,22 +1,22 @@
-"""PLT-27 — tenant/tenant_membership 저장소 포트.
+"""PLT-27 — tenant/tenant_membership repository port.
 
-Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2 표(79행),
-§9 PLT-27. 스키마는 PLT-26(task-1010, f4a6b8c0d2e4)이 만든
-`tenant`/`tenant_membership`을 그대로 쓴다 — 이 리프는 새 마이그레이션을
-만들지 않는다.
+Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2 table(line 79),
+§9 PLT-27. The schema reuses `tenant`/`tenant_membership` created by PLT-26
+(task-1010, f4a6b8c0d2e4) as-is — this leaf creates no new migration.
 
-domain/application은 이 Protocol만 알고, 실제 구현(adapters/
-postgres_membership_repository.py)은 모른다(71번 §4). 모든 메서드는
-호출자가 이미 얻은 `asyncpg.Connection`을 받는다 — 트랜잭션 경계는 호출부
-(`tenant_transaction()` 등)가 소유하고, 이 포트는 커넥션을 새로 만들지
-않는다.
+domain/application knows only this Protocol, not the actual implementation
+(adapters/postgres_membership_repository.py) (§4). All methods receive an
+`asyncpg.Connection` already obtained by the caller — the caller owns the
+transaction boundary (`tenant_transaction()`, etc.) and this port never creates
+a new connection.
 
-교차 테넌트 열람/변경 차단(LA-22 선례, 190dfea)은 시그니처 레벨에서
-강제한다 — `tenant_id`를 생략 가능한 필터가 아니라 필수 인자로 받는다.
-다른 tenant 소유 행을 가리키는 `tenant_id`로 조회/변경하면 "존재하지
-않음"과 동형으로 `None` 또는 `ConcurrencyConflictError`를 돌려준다(§8.3
-"404 동형") — "권한 없음"과 "존재하지 않음"을 구분해 응답하지 않는다.
+Cross-tenant read/write blocking (LA-22 precedent, 190dfea) is enforced at the
+signature level — `tenant_id` is a required argument, not an optional filter.
+Lookups/mutations targeting a `tenant_id` owned by another tenant return `None`
+or `ConcurrencyConflictError` homomorphically (§8.3 "404 homomorphism") — the
+response never distinguishes "forbidden" from "not found".
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -38,25 +38,26 @@ class MembershipRepository(Protocol):
     async def get_active_membership(
         self, conn: asyncpg.Connection, tenant_id: UUID, subject_id: UUID
     ) -> Membership | None:
-        """해당 tenant에서 subject의 현재 ACTIVE 멤버십(있다면 정확히 하나 —
-        `uq_tenant_membership_active` 부분 UNIQUE가 보장). 다른 tenant
-        소유라 없으면(또는 정말 없으면) 동형으로 `None`."""
+        """Return the subject's current ACTIVE membership within the given tenant
+        (at most one — guaranteed by the `uq_tenant_membership_active` partial UNIQUE
+        constraint). Returns `None` homomorphically when the row does not exist or
+        belongs to a different tenant."""
         ...
 
     async def list_memberships_for_subject(
         self, conn: asyncpg.Connection, subject_id: UUID
     ) -> list[Membership]:
-        """subject 본인이 속한 모든 tenant의 멤버십(상태 무관) —
-        `resolve_tenant_context`가 "이 사용자가 어느 tenant들에 속하는가"를
-        판정할 때 쓴다. subject_id는 호출자 자신의 신원이므로 교차 테넌트
-        열람이 아니다."""
+        """All memberships for the subject across every tenant (any state). Used by
+        `resolve_tenant_context` to determine "which tenants does this user belong
+        to?". Since `subject_id` is the caller's own identity, this is not a
+        cross-tenant read."""
         ...
 
     async def count_active_owners(self, conn: asyncpg.Connection, tenant_id: UUID) -> int:
-        """73번 §6-5 "same transaction" — last-owner 검사 직전 활성 OWNER
-        행을 `FOR UPDATE`로 잠근 뒤 개수를 센다. 호출자는 이 메서드와 같은
-        트랜잭션 안에서 `update_conditional_membership_state`를 이어서
-        호출해야 락이 유효하다."""
+        """Count active OWNER rows while locking them with `FOR UPDATE` just before
+        the last-owner check ("same transaction" — §6-5). The caller must invoke
+        `update_conditional_membership_state` within the same transaction for the
+        lock to be effective."""
         ...
 
     async def insert_membership(
@@ -68,10 +69,11 @@ class MembershipRepository(Protocol):
         role: MembershipRole,
         created_by: UUID,
     ) -> Membership:
-        """새 ACTIVE 멤버십을 만든다(최초 부여 또는 REVOKED에서 regrant —
-        revision은 매번 새 행이므로 DB DEFAULT 1). 같은 tenant/subject에
-        이미 ACTIVE 행이 있으면 `uq_tenant_membership_active` 부분 UNIQUE
-        위반 → `ConcurrencyConflictError`(구현체 책임, 105번 §2.2)."""
+        """Create a new ACTIVE membership (initial grant or regrant from REVOKED —
+        `revision` defaults to 1 per row since each insert creates a new row). If an
+        ACTIVE row already exists for the same tenant/subject, the partial UNIQUE
+        constraint `uq_tenant_membership_active` fires → `ConcurrencyConflictError`
+        (implementation responsibility, §2.2 of the 105 pattern)."""
         ...
 
     async def update_conditional_membership_state(
@@ -84,18 +86,20 @@ class MembershipRepository(Protocol):
         expected_revision: int,
         new_state: MembershipState,
     ) -> Membership:
-        """105번 표준 조건부 UPDATE — `id`/`tenant_id`/`state`/`revision`이
-        전부 기대값과 일치해야 전이하고, `revision`을 1 증가시킨다.
-        `tenant_id` 불일치(교차 테넌트 시도)와 `state`/`revision` 불일치
-        (동시 경합)를 구현체가 구분해 응답하지 않는다 — 둘 다
-        `ConcurrencyConflictError`로 동형 처리(fail-closed, §8.3)."""
+        """Standard-105 conditional UPDATE — all of `id`, `tenant_id`, `state`, and
+        `revision` must match expected values for the transition to succeed, and
+        `revision` is incremented by 1. The implementation must not distinguish
+        between `tenant_id` mismatch (cross-tenant attempt) and `state`/`revision`
+        mismatch (concurrency conflict) — both return `ConcurrencyConflictError`
+        homomorphically (fail-closed, §8.3)."""
         ...
 
     async def get_personal_tenant(
         self, conn: asyncpg.Connection, subject_id: UUID
     ) -> Tenant | None:
-        """PERSONAL tenant는 `id == subject_id`(84b7d0faf14f 이후 불변조건,
-        PLT-26 backfill이 이를 만족). 존재하지 않으면 `None`."""
+        """Look up the PERSONAL tenant for the subject. The invariant `id ==
+        subject_id` holds for PERSONAL tenants (since 84b7d0faf14f, enforced by
+        PLT-26 backfill). Returns `None` if no such tenant exists."""
         ...
 
     async def insert_tenant(
@@ -106,6 +110,6 @@ class MembershipRepository(Protocol):
         kind: TenantKind,
         display_name: str | None = None,
     ) -> Tenant:
-        """HOUSEHOLD/ORGANIZATION tenant 신규 생성(PLT-28 이후 소비 예정).
-        `state`는 DB DEFAULT `ACTIVE`."""
+        """Insert a new HOUSEHOLD or ORGANIZATION tenant (consumed after PLT-28).
+        `state` defaults to DB DEFAULT `ACTIVE`."""
         ...
