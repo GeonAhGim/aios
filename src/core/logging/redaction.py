@@ -1,13 +1,15 @@
-"""108 §2.1 금지 필드 차단 — 키/값 기반 마스킹 순수 함수.
+"""108 §2.1 deny-field blocking — pure key/value-based masking functions.
 
 Spec: docs/design/codex/108_structured_logging_and_observability_field_standard_v1.0.md §2.1,
 docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-02.
 
-`redact()`는 입력을 변경하지 않고 마스킹된 새 dict를 반환하는 순수 함수다(I/O 없음).
-값 기반 패턴(64자 hex, JWT-유사 `eyJ` 접두, 주민등록번호류)은 전체 문자열이 패턴과
-정확히 일치할 때만 마스킹한다(fullmatch) — 긴 문장 속 우연한 부분 문자열까지
-지워버리면 로그 자체가 무의미해지므로 부분 일치 오탐을 피한다. 키 매칭은 스펙이
-명시한 대로 부분 일치·대소문자 무시다(`user_api_key`도 `api_key`로 걸린다).
+`redact()` is a pure function (no I/O) that returns a new masked dict without
+mutating its input. Value-based patterns (64-char hex, JWT-like `eyJ` prefix,
+Korean resident-registration-number-like strings) only mask when the entire
+string matches the pattern exactly (fullmatch) — masking an incidental
+substring inside a longer sentence would make the log itself meaningless, so
+partial-match false positives are avoided. Key matching, as specified, is
+substring and case-insensitive (`user_api_key` also matches `api_key`).
 """
 
 from __future__ import annotations
@@ -19,8 +21,9 @@ from typing import Any, Final
 
 REDACTED: Final[str] = "<redacted>"
 
-# 108 §2.1: 원문 secret/토큰/복호화 credential은 절대 로그에 남기지 않는다 —
-# 이 키들과 부분 일치(대소문자 무시)하면 값 형태와 무관하게 마스킹한다.
+# 108 §2.1: raw secrets/tokens/decrypted credentials must never land in logs —
+# any key that substring-matches one of these (case-insensitive) gets masked
+# regardless of the value's shape.
 _DEFAULT_DENY_KEYS: set[str] = {
     "api_key",
     "api_secret",
@@ -37,13 +40,15 @@ _DEFAULT_DENY_KEYS: set[str] = {
 # Backwards-compatible alias for callers that import `DENY_KEYS`.
 DENY_KEYS = _DEFAULT_DENY_KEYS
 
-# opaque reference(secret_ref.py)는 108 §2.1이 허용하는 안전한 값이므로
-# 아래 값 기반 패턴에 우연히 걸려도 마스킹하지 않는다.
+# An opaque reference (secret_ref.py) is a value 108 §2.1 treats as safe, so
+# it is not masked even if it incidentally matches one of the value-based
+# patterns below.
 _SECRET_REF_PREFIX: Final[str] = "secref://"
 
 _HEX64_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-fA-F]{64}$")
 _JWT_LIKE_RE: Final[re.Pattern[str]] = re.compile(r"^eyJ[A-Za-z0-9_.-]{10,}$")
-# 한국 주민등록번호류: 6자리(생년월일) + 선택적 하이픈 + 7자리(성별·지역 코드).
+# Korean resident-registration-number-like: 6 digits (birth date) + optional
+# hyphen + 7 digits (gender/region code).
 _RRN_LIKE_RE: Final[re.Pattern[str]] = re.compile(r"^\d{6}-?\d{7}$")
 
 
@@ -69,11 +74,12 @@ def _redact_value(value: Any) -> Any:
 
 
 def redact(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """`payload`를 마스킹한 새 dict를 반환한다 — 원본은 그대로 둔다(순수 함수).
+    """Return a new masked dict for `payload` — the original is left untouched (pure function).
 
-    키가 `DENY_KEYS`와 부분 일치하면 값의 형태와 무관하게 `<redacted>`로
-    바꾼다. 그 외 키는 값이 dict/list면 재귀적으로, 문자열이면 값 기반 패턴으로
-    검사한다.
+    A key that substring-matches `DENY_KEYS` is replaced with `<redacted>`
+    regardless of the value's shape. Other keys are checked recursively if
+    the value is a dict/list, or against the value-based patterns if it is
+    a string.
     """
     result: dict[str, Any] = {}
     for key, value in payload.items():
@@ -82,9 +88,10 @@ def redact(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class RedactionFilter(logging.Filter):
-    """`logging.Handler`에 부착하는 어댑터 — `record.payload`(구조화 extra)를
-    `redact()`로 마스킹한 새 dict로 교체한다. `redact()` 자체는 순수 함수로
-    남기고, 로깅 파이프라인과의 연결만 이 클래스가 담당한다."""
+    """Adapter attached to a `logging.Handler` — replaces `record.payload`
+    (structured extra) with the masked dict returned by `redact()`. `redact()`
+    itself stays a pure function; this class only owns the wiring into the
+    logging pipeline."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         payload = getattr(record, "payload", None)
