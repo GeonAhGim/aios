@@ -5,6 +5,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-4.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -202,3 +203,74 @@ def test_to_base_rejects_zero_rate() -> None:
 
     with pytest.raises(fx_module.FxRateMissingError):
         funding_fees.to_base(fee, Currency.KRW, zero_rate)
+
+
+# ── DEEPEN D3: 동시성/적대적 증빙, 게이트 적색 재현 ──────────────────
+
+
+def test_funding_amount_and_to_base_concurrent_calls_do_not_cross_contaminate() -> None:
+    """D3 동시성 증빙: `funding_amount`/`to_base`는 순수 함수(모듈 전역
+    상태 없음)이므로, 여러 스레드가 서로 다른 qty/rate 조합으로 동시에
+    호출해도 각자의 결과가 다른 호출의 인자로 오염되면 안 된다. 만약
+    향후 누군가 캐시나 공유 가변 상태를 도입하면 이 테스트가 깨진다."""
+    mark = Money(amount=Decimal("100"), currency=Currency.USDT)
+    rate = _rate()
+    n = 200
+
+    def _compute(i: int) -> tuple[int, Decimal, Decimal]:
+        qty = Decimal(i) - Decimal(n) / 2  # 음수/양수/0 고루 포함
+        funding = funding_fees.funding_amount(qty, mark, Decimal("0.001"))
+        base_amount = funding_fees.to_base(funding, Currency.KRW, rate)
+        return i, funding.amount, base_amount
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(_compute, range(n)))
+
+    for i, funding_amount, base_amount in results:
+        qty = Decimal(i) - Decimal(n) / 2
+        expected_funding = qty * mark.amount * Decimal("0.001")
+        assert funding_amount == expected_funding, i
+        assert base_amount == expected_funding * rate.rate, i
+
+
+def test_gate_red_repro_check_perf_marker_guard_flags_unmarked_perf_counter_assert(
+    tmp_path: object,
+) -> None:
+    """게이트 적색 재현 -- `scripts/check_perf_marker_guard.py`(task-7434,
+    CI에서 `python scripts/check_perf_marker_guard.py`로 실행되는 정적
+    검사, main() 종료코드 0=통과)가 이 파일의
+    `test_to_base_batch_10000_calls_within_latency_budget`처럼
+    `time.perf_counter()` 차이를 `assert`로 직접 검증하는 함수에
+    `@pytest.mark.perf`가 없으면 실제로 적색 처리하는지, 개별 내부
+    함수가 아니라 CI가 직접 호출하는 `main()` 자체의 종료코드로
+    증명한다. 가짜 tests 루트를 만들어 `--tests-root`만 바꿔치기하므로
+    실제 저장소 파일은 건드리지 않는다."""
+    import scripts.check_perf_marker_guard as guard
+
+    marked = tmp_path / "test_marked_ok.py"
+    marked.write_text(
+        "import time\n"
+        "import pytest\n"
+        "\n"
+        "@pytest.mark.perf\n"
+        "def test_something_fast():\n"
+        "    started = time.perf_counter()\n"
+        "    elapsed = time.perf_counter() - started\n"
+        "    assert elapsed < 5.0\n",
+        encoding="utf-8",
+    )
+
+    assert guard.main(["--tests-root", str(tmp_path)]) == 0  # 대조군 -- marker 있으면 통과
+
+    unmarked = tmp_path / "test_unmarked_regression.py"
+    unmarked.write_text(
+        "import time\n"
+        "\n"
+        "def test_something_fast_but_unmarked():\n"
+        "    started = time.perf_counter()\n"
+        "    elapsed = time.perf_counter() - started\n"
+        "    assert elapsed < 5.0\n",
+        encoding="utf-8",
+    )
+
+    assert guard.main(["--tests-root", str(tmp_path)]) == 1  # marker 누락 시 적색으로 뒤집힘
