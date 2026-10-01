@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -12,10 +11,11 @@ import pytest
 import src.foundation.backtest.application.param_sweep as param_sweep_module
 from src.data.models.market_data import Candle
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
-from src.foundation.backtest.application.param_sweep import SweepError, sweep
+from src.foundation.backtest.application.param_sweep import SweepError, SweepResult, sweep
 from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from src.foundation.backtest.domain.param_stability import ParamGrid
 from src.services.condition_compiler import ORDER_FILLED
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
@@ -205,20 +205,26 @@ def test_run_backtest_failure_propagates_without_partial_result(monkeypatch) -> 
 
 
 @pytest.mark.perf
-def test_sweep_throughput_meets_minimum_points_per_second() -> None:
+def test_sweep_throughput_meets_minimum_points_per_second(perf_budget: PerfBudget) -> None:
     """Numeric performance assertion (D2 floor, ADR-2026-09-09-C): a 4-point grid over
     7 bars with a fake indicator service must clear a generous throughput floor -- this
     guards against an accidental O(n^2) regression in the grid-point loop, not a tight
-    production SLA."""
+    production SLA. task-10947: routed through the shared `perf_budget` (process_time
+    based) instead of raw `time.perf_counter()` so other workers/local-LLM load on this
+    host do not get counted as elapsed sweep time."""
     grid = _grid()
-    started = time.perf_counter()
-    result = sweep(
-        _config(),
-        _fsm_config(),
-        _bars(),
-        grid,
-        indicator_service=_FakePriceIndicatorService(),
-    )
-    elapsed = time.perf_counter() - started
-    throughput = len(result.points) / elapsed if elapsed > 0 else float("inf")
+
+    def _run_once() -> SweepResult:
+        return sweep(
+            _config(),
+            _fsm_config(),
+            _bars(),
+            grid,
+            indicator_service=_FakePriceIndicatorService(),
+        )
+
+    sample = perf_budget.best_of(_run_once)
+    result: SweepResult = sample.result  # type: ignore[assignment]
+    cpu_seconds = sample.cpu_ms / 1000
+    throughput = len(result.points) / cpu_seconds if cpu_seconds > 0 else float("inf")
     assert throughput > 10.0, f"grid-point throughput too low: {throughput:.2f} points/sec"
