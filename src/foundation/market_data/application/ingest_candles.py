@@ -233,6 +233,19 @@ async def ingest_candles(
     )
 
     async with pool.acquire() as conn, conn.transaction():
+        # F9: re-check tradability inside the write transaction. The read_conn
+        # check above and source.fetch_candles (both outside this transaction,
+        # the latter an external HTTP call) leave a window where instrument.status
+        # can transition to DELISTED/SUSPENDED before this point — re-lookup here
+        # to close that TOCTOU gap (AUDIT_2026-10-01_data_ingest_replay §4 F9).
+        live_instrument = await refs.get_instrument(conn, cmd.venue, lookup_symbol, clock())
+        if live_instrument is None or live_instrument.status in _NOT_TRADABLE:
+            status = live_instrument.status.value if live_instrument else "UNKNOWN"
+            raise SymbolNotTradableError(
+                f"Symbol not tradable at write time: instrument_id={instrument.instrument_id} "
+                f"status={status}"
+            )
+
         # `md_candle`/`md_quarantine_candle`.batch_id is FK to `md_ingest_batch(id)` —
         # the batch row (and its required audit_event_id) must be committed first
         # before candles can be written. Since everything is in one transaction,

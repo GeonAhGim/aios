@@ -25,7 +25,10 @@ import pytest
 
 from src.exchanges.bitget.adapter import BitgetAdapter
 from src.foundation.market_data.adapters.bitget_ingest_source import BitgetIngestSource
-from src.foundation.market_data.application.ingest_candles import ingest_candles
+from src.foundation.market_data.application.ingest_candles import (
+    SymbolNotTradableError,
+    ingest_candles,
+)
 from src.foundation.market_data.contracts.v1 import (
     Timeframe,
     Venue,
@@ -265,7 +268,9 @@ class _QueryCountingPool:
             return await self._ctx.__aexit__(*exc)
 
 
-_MAX_INGEST_CANDLES_ROUND_TRIPS = 22
+_MAX_INGEST_CANDLES_ROUND_TRIPS = 23
+"""task-10569 F9: +1 round trip for the write-transaction tradability re-check
+(TOCTOU close between read_conn check and source.fetch_candles)."""
 
 
 @pytest.mark.perf
@@ -426,3 +431,49 @@ def test_batch_hash_is_stable_across_different_pythonhashseed() -> None:
         "batch_hash must be identical regardless of PYTHONHASHSEED — "
         f"got {digest_seed_0!r}, {digest_seed_1!r}, {digest_seed_random!r}"
     )
+
+
+class _DelistingDuringFetchSource:
+    """TOCTOU 재현용 fake source — fetch_candles 호출 중(read_conn 확인 이후,
+    쓰기 트랜잭션 진입 전) instrument.status를 DELISTED로 바꾼 뒤 평범한 캔들을
+    반환한다. `apply_lifecycle_event`는 md_instrument.status를 실제로 갱신하지
+    않으므로(LA-14 범위 밖 — 반환값만 in-memory로 전이), 여기서는 TOCTOU 경쟁을
+    직접 재현하기 위해 테스트 전용으로 status 컬럼을 raw SQL로 갱신한다."""
+
+    def __init__(self, candles, pool, instrument_id) -> None:
+        self._candles = candles
+        self._pool = pool
+        self._instrument_id = instrument_id
+
+    async def fetch_candles(self, venue, raw_symbol, tf, start, end):
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE md_instrument SET status = 'DELISTED' WHERE instrument_id = $1",
+                self._instrument_id,
+            )
+        return list(self._candles)
+
+
+async def test_f9_toctou_delisted_during_fetch_rejects_write(pool, deps):
+    """[health:toctou] F9 — read_conn에서 tradable 확인 후, source.fetch_candles(외부 HTTP,
+    트랜잭션 밖) 도중 instrument.status가 DELISTED로 바뀌면 쓰기 트랜잭션 진입 시 재확인하고
+    SymbolNotTradableError로 거부해야 한다(AUDIT_2026-10-01_data_ingest_replay §4 F9, L등급).
+    """
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    candles = [_candle(t0, "100", "110", "90", "105", "10")]
+    source = _DelistingDuringFetchSource(candles, pool, instrument.instrument_id)
+
+    with pytest.raises(SymbolNotTradableError):
+        await _run(deps, _cmd(instrument, t0, t0 + timedelta(minutes=1)), source, clock_at=t0)
+
+    async with pool.acquire() as conn:
+        stored = await conn.fetchval(
+            "SELECT COUNT(*) FROM md_candle WHERE instrument_id = $1", instrument.instrument_id
+        )
+        batch_rows = await conn.fetchval(
+            "SELECT COUNT(*) FROM md_ingest_batch WHERE instrument_id = $1",
+            instrument.instrument_id,
+        )
+    assert stored == 0, "DELISTED로 전이된 instrument로는 fetch 캔들이 저장되면 안 된다"
+    assert batch_rows == 0, "거부된 쓰기는 배치 레코드도 남기면 안 된다(트랜잭션 전체 롤백)"
