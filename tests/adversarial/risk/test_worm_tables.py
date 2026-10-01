@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import asyncpg
@@ -21,6 +22,7 @@ from pydantic import ValidationError
 
 from src.core.risk.decision import GateKind, RiskDecision, RiskOutcome
 from src.foundation.risk_gate.adapters.postgres_decision_repository import (
+    DecisionCorruptError,
     PostgresDecisionRepository,
 )
 from tests.integration.conftest import create_test_tenant
@@ -192,3 +194,58 @@ async def test_list_recent_only_returns_own_tenant(
     recent_a = await repo.list_recent(tenant_a, limit=50)
 
     assert decision.decision_id in [d.decision_id for d in recent_a]
+
+
+async def test_get_propagates_injected_connection_failure_fail_closed() -> None:
+    """실패 주입 -- 의존 asyncpg 커넥션이 `ConnectionDoesNotExistError`로 실패
+    하면 `get()`은 이를 삼키거나 `None`으로 둔갑시키지 않고 그대로 전파해야
+    한다(fail-closed, CLAUDE.md §3 105 표준). 실 Postgres로 커넥션 단절을
+    결정적으로 재현할 수 없어(`tests/adversarial/ems/test_child_order_bypass.py`
+    와 동일 근거) `pool`을 `AsyncMock`/`MagicMock`으로 격리했다."""
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+        "simulated connection drop"
+    )
+    mock_acquire_cm = AsyncMock()
+    mock_acquire_cm.__aenter__.return_value = mock_conn
+    mock_acquire_cm.__aexit__.return_value = False
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value = mock_acquire_cm
+
+    repo = PostgresDecisionRepository(mock_pool)
+
+    with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
+        await repo.get(uuid4())
+    mock_conn.fetchrow.assert_awaited_once()
+
+
+async def test_get_fails_on_injected_corrupt_latency_us_row(pool: asyncpg.Pool) -> None:
+    """게이트 적색 재현 -- `_row_to_decision`의 NULL `latency_us` fail-loud
+    가드(task-2395, R-02 `RiskDecision.latency_us: int` 계약)가 실제로
+    발동함을 보인다. 정상 쓰기 경로(`insert()`)는 pydantic이 NULL을 구성
+    단계에서부터 거부해 이 행을 만들 수 없으므로,
+    `tests/integration/risk/test_risk_limits_db.py::_insert_minimal_risk_decision`
+    와 동일한 패턴으로 계약을 우회하는 raw SQL INSERT로 오염된 행을 직접
+    심는다(`latency_us`만 NULL로 남긴다). 이 가드가 없다면 `get()`은
+    `pydantic.ValidationError`로 호출자를 깨뜨렸을 것이다(docstring 17-30행)."""
+    tenant_id = await create_test_tenant(pool)
+    decision_id = uuid4()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO risk_decision "
+            "(decision_id, tenant_id, gate_kind, subject_fingerprint, outcome, "
+            " rule_version, rule_hash, engine_version, inputs_hash, inputs_snapshot, "
+            " trace_id, evaluated_at, expires_at, latency_us) "
+            "VALUES ($1, $2, 'PRE_TRADE', $3, 'DENY', 'v1', $4, 'engine-v1', $5, "
+            " '{}'::jsonb, $6, now(), now(), NULL)",
+            decision_id,
+            tenant_id,
+            "f" * 64,
+            "b" * 64,
+            "c" * 64,
+            uuid4(),
+        )
+
+    repo = PostgresDecisionRepository(pool)
+    with pytest.raises(DecisionCorruptError, match="latency_us"):
+        await repo.get(decision_id)
