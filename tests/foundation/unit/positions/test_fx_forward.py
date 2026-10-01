@@ -9,7 +9,6 @@ DoD("헤지 미실현 FX 손익이 NAV 분해에서 자산 손익과 분리 표�
 from __future__ import annotations
 
 import decimal
-import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -176,7 +175,7 @@ def test_hedge_unrealized_pnl_signaling_nan_rate_fails_loud_not_silent() -> None
 
 
 @pytest.mark.perf
-def test_unhedged_exposure_perf_and_precision_at_volume() -> None:
+def test_unhedged_exposure_perf_and_precision_at_volume(perf_budget) -> None:
     """수치 성능/지연 단언: 기존 수치검증(소규모 hand-calc 4자리 일치)은
     정확성만 봤다. 여기서는 10,000건 규모(매칭 통화쌍 5,000 + 무관 통화쌍
     5,000)에서 (1) 선형 시간 내 완료해 루프/재계산 성능 회귀를 잡고 (2)
@@ -194,15 +193,17 @@ def test_unhedged_exposure_perf_and_precision_at_volume() -> None:
     ]
     hedges = matching + other_pair
 
-    start = time.perf_counter()
-    result = fxf.unhedged_exposure(
-        Decimal("5000.0000"), hedges, base=Currency.USDT, quote=Currency.KRW, quantize_to=4
-    )
-    elapsed = time.perf_counter() - start
-
     # 수기 계산: 5000.0000 - (5000 * 0.1) = 4500.0000 (다른 통화쌍 5,000건은 무시)
-    assert result == Decimal("4500.0000")
-    assert elapsed < 2.0
+    sample = perf_budget.assert_within(
+        lambda: fxf.unhedged_exposure(
+            Decimal("5000.0000"), hedges, base=Currency.USDT, quote=Currency.KRW, quantize_to=4
+        ),
+        budget_ms=2000.0,
+        n=5,
+        batch=1,
+        label="unhedged_exposure_perf_and_precision",
+    )
+    assert sample.result == Decimal("4500.0000")
 
 
 def test_decompose_fx_pnl_detects_mismatch_hidden_among_many_matching_hedges() -> None:
