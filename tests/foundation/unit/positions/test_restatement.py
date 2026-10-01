@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from time import perf_counter
 from uuid import UUID
 
 import pytest
@@ -28,6 +27,7 @@ from src.foundation.positions.domain.restatement import (
     restate_position,
 )
 from src.foundation.positions.domain.snapshot_builder import SnapshotFold, fold
+from tests.conftest import PerfBudget
 
 _POSITION_KEY = "binance:BTCUSDT:s1:e1"
 _ORDER_ID = UUID("00000000-0000-0000-0000-0000000000aa")
@@ -203,24 +203,24 @@ def test_restate_position_rejects_sequence_gap() -> None:
 
 
 @pytest.mark.perf
-def test_restate_position_hot_path_performance() -> None:
+def test_restate_position_hot_path_performance(perf_budget: PerfBudget) -> None:
     # restate_position은 소급 정정마다 호출되는 순수 함수(apply_one 재폴드 +
     # BitemporalRecord 재구성 + check_no_overlap)다. 10,000회 호출이 1s
     # 내로 끝나야 한다 — I/O 없는 순수 계약의 실측 증명.
+    # task-11003: raw perf_counter → perf_budget.assert_within(process_time 기반).
     prior = _prior_record([_ENTRY_1, _ENTRY_2], valid_from=_dt(2026, 9, 4), tx_from=_dt(2026, 9, 4))
     now = _dt(2026, 9, 10)
     iterations = 10_000
 
-    started = perf_counter()
-    for _ in range(iterations):
-        restate_position(
-            position_key=_POSITION_KEY,
-            cost_method=CostMethod.FIFO,
-            asset_class=AssetClass.CRYPTO,
-            prior=prior,
-            late_entry=_LATE_ENTRY,
-            now=now,
-        )
-    elapsed = perf_counter() - started
+    def _run() -> None:
+        for _ in range(iterations):
+            restate_position(
+                position_key=_POSITION_KEY,
+                cost_method=CostMethod.FIFO,
+                asset_class=AssetClass.CRYPTO,
+                prior=prior,
+                late_entry=_LATE_ENTRY,
+                now=now,
+            )
 
-    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
+    perf_budget.assert_within(_run, budget_ms=1000.0, batch=8, label=f"{iterations}회 호출")
