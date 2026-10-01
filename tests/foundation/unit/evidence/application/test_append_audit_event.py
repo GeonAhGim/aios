@@ -5,7 +5,6 @@ Spec: AIOSproject #79 §1/§2, #71 §3 FND-03."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -24,6 +23,7 @@ from src.foundation.evidence.contracts.v1 import (
 from src.foundation.evidence.contracts.v1 import RecordAuditEventCommand
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 from src.foundation.evidence.domain.rules import UnsafePayloadError
+from tests._perf.relative_budget import RelativeBudget
 
 NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 
@@ -220,14 +220,28 @@ async def test_append_audit_event_orchestration_throughput():
     """Pure orchestration overhead (payload safety check + hash + mapping,
     repo I/O excluded via in-memory fake) for 500 sequential calls stays
     well under a 1s budget — guards against an accidental O(n^2) regression
-    in payload validation or hashing on the hot append path."""
+    in payload validation or hashing on the hot append path.
+
+    Raw time.perf_counter() → RelativeBudget.measure_async 전환 (task-10971).
+    """
     repo = FakeAuditEventRepository()
     commands = [_command(payload={"i": i}) for i in range(500)]
 
-    start = time.perf_counter()
+    sample = await RelativeBudget().measure_async(
+        lambda: _run_batch(repo, commands),
+        n=1,
+        warmup=0,
+        calibration_n=1,
+    )
+
+    # 1.0s = 1000ms 예산 불변
+    assert sample.op_ms < 1000.0, (
+        f"orchestration throughput {sample.op_ms:.2f}ms exceeds 1000ms budget"
+    )
+    assert len(repo.calls) == 500
+
+
+async def _run_batch(repo, commands):
+    """500개 명령을 순차 실행 — RelativeBudget.measure_async 래퍼용 콜백."""
     for command in commands:
         await append_audit_event(repo, command)
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 1.0
-    assert len(repo.calls) == 500
