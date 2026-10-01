@@ -1,25 +1,29 @@
-"""FD-13.11(신설) — 사용자 지갑 조회 + 충전 요청 API.
+"""FD-13.11 (new) — user wallet balance lookup + topup request API.
 
 Spec: ADR-2026-08-29-wallet-marketplace-dual-seller-strategy-authoring.md §1,
-src/services/wallet_service.py 모듈 docstring. 충전 확인(관리자 액션)은
-admin.py 라우터 소관 — 여기서는 사용자 본인의 조회/요청만 다룬다.
+src/services/wallet_service.py module docstring. Topup confirmation (an admin
+action) belongs to the admin.py router — this module only covers the user's
+own balance lookup/request.
 
-LC-16 — `/balance`는 이제 `application/queries.py::get_balance`(LC-16)를
-호출한다. 71번 §6 규칙(router는 auth/주입/transport validation만) 그대로 —
-SQL·잔액 비교 로직은 전부 그 모듈에 있다(`ledger_admin.py`와 동일 관행으로
-`pool.acquire()` + 어댑터 조립만 여기서 한다). `WalletService.get_balance`
-(레거시 단일 `balance` 조회)는 이제 이 라우터가 쓰지 않지만, 공개 서비스
-메서드라 이 리프의 파일 목록 밖이라 그대로 둔다.
+LC-16 — `/balance` now calls `application/queries.py::get_balance` (LC-16).
+Rule §6 of task-71 still applies (router only does auth/injection/transport
+validation) — all SQL/balance comparison logic lives in that module (same
+practice as `ledger_admin.py`: only `pool.acquire()` + adapter assembly happen
+here). `WalletService.get_balance` (the legacy single-`balance` lookup) is no
+longer used by this router, but it stays as-is since it is a public service
+method outside this leaf's file list.
 
-PLT-20 — raw HTTPException 제거(WalletTopupError는 이미 EXCEPTION_MAP에
-VALIDATION_INVALID_FIELD로 매핑돼 있어 전역 핸들러가 그대로 처리한다).
-task-1017 decision(PM 선반영) — 이 라우터는 금전 라우트라 PLT-15 멱등
-헤더 규격(task-338/493)·프론트 배선(task-618/718)이 이미 붙어 있고, 성공
-응답 봉투화는 mount_v1(PLT-16, src/api/versioning.py) 배선 이후 별도
-리프에서 `/api/v1` 경로에만 적용하기로 미뤄졌다 — 그래서 available/held/
-pending_payout 3분할 응답과 Idempotency-Key 처리를 그대로 두고 raw
-HTTPException raise만 제거했다.
+PLT-20 — removed raw HTTPException (WalletTopupError is already mapped to
+VALIDATION_INVALID_FIELD in EXCEPTION_MAP, so the global handler already
+handles it). Per task-1017 decision (pre-reflected by PM), this router is a
+money route where the PLT-15 idempotency header spec (task-338/493) and the
+frontend wiring (task-618/718) are already in place, and success-response
+envelope wrapping was deferred to a separate leaf to apply only to `/api/v1`
+paths after the mount_v1 (PLT-16, src/api/versioning.py) wiring — so the
+available/held/pending_payout 3-way split response and Idempotency-Key
+handling were left as-is, and only the raw HTTPException raise was removed.
 """
+
 from __future__ import annotations
 
 import asyncpg
