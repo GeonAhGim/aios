@@ -5,8 +5,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#L26 DoD (b)(c)(d).
 
 from __future__ import annotations
 
-import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -15,6 +14,7 @@ import pytest
 from src.data.models.market_data import Candle
 from src.foundation.backtest.adapters.list_bars import BacktestLookaheadError, ListBars
 from src.foundation.backtest.ports.bar_source import PointInTimeBars
+from tests.conftest import PerfBudget
 
 
 def _candle(index: int) -> Candle:
@@ -161,20 +161,23 @@ def test_construction_propagates_upstream_bar_source_failure() -> None:
 
 
 @pytest.mark.perf
-def test_upto_p95_latency_within_5k_bar_budget() -> None:
+def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms."""
     fixture = _bars(5_000)
     bars = ListBars(fixture)
-    samples: list[float] = []
+    samples_ms: list[float] = []
     for bar_index in range(len(fixture)):
-        start = time.perf_counter()
-        bars.upto(bar_index)
-        samples.append(time.perf_counter() - start)
 
-    samples.sort()
-    p95_index = int(len(samples) * 0.95)
-    p95_seconds = samples[p95_index]
-    assert p95_seconds < 0.2, f"p95={p95_seconds * 1000:.2f}ms exceeds 200ms budget"
+        def _call(idx: int = bar_index) -> Sequence[Candle]:
+            return bars.upto(idx)
+
+        sample = perf_budget.sample(_call)
+        samples_ms.append(sample.cpu_ms)
+
+    samples_ms.sort()
+    p95_index = int(len(samples_ms) * 0.95)
+    p95_ms = samples_ms[p95_index]
+    assert p95_ms < 200.0, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
 
 
 # -- D2 게이트 적색 재현 -------------------------------------------------------
