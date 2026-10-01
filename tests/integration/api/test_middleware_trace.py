@@ -313,6 +313,43 @@ def test_rebind_tenant_mismatch_increments_metric_and_warns_but_stays_fail_open(
     assert any(record.message == "tenant_mismatch" for record in caplog.records)
 
 
+def test_rebind_tenant_with_different_tenant_id_is_mismatch(spy_metrics, caplog):
+    """negative: 이미 tenant_id가 바인딩된 trace_id 위에 다른 tenant_id가
+    오면(비정상 상황 — 인증 실패 후 다른 계정으로 재시도), 이전과 다른
+    tenant_id이므로 mismatch로 간주된다. fail-open이므로 예외는 안 던지지만
+    카운터와 경고 로그가 발생한다.
+    (TenantContext.tenant_id는 UUID이므로 None 직접 전달은 불가 — 다른 UUID로
+    시뮬레이션한다.)"""
+    trace_id = uuid.uuid4()
+    first_tenant = uuid.uuid4()
+    second_tenant = uuid.uuid4()
+    ctx = TenantContext(tenant_id=second_tenant, subject_id=uuid.uuid4(), mfa_verified=False)
+
+    with caplog.at_level(logging.WARNING, logger="src.core.observability.tenant_binding"):
+        with bind(trace_id=trace_id, tenant_id=first_tenant):
+            rebind_tenant(ctx)  # fail-open: 다른 tenant_id → mismatch
+
+    assert spy_metrics.counters == [(AUTH_TENANT_MISMATCH_COUNT_TOTAL, None)]
+    assert any(record.message == "tenant_mismatch" for record in caplog.records)
+
+
+def test_rebind_tenant_same_id_twice_is_noop(
+    spy_metrics,
+):
+    """negative: 같은 tenant_id로 rebind_tenant을 여러 번 호출하면
+    이전과 현재가 같으므로 mismatch가 아니다. 카운터도 로그도 발생하지
+    않는다. (스펙: "repeated identical tenant_id is not a mismatch")"""
+    trace_id = uuid.uuid4()
+    tenant = uuid.uuid4()
+    ctx = TenantContext(tenant_id=tenant, subject_id=uuid.uuid4(), mfa_verified=True)
+
+    with bind(trace_id=trace_id, tenant_id=tenant):
+        rebind_tenant(ctx)  # 첫 호출: noop
+        rebind_tenant(ctx)  # 두 번째 호출: 여전히 noop
+
+    assert spy_metrics.counters == []
+
+
 # ---------------------------------------------------------------------------
 # task-3149 DEEPEN — RequestContextMiddleware.dispatch 실패 주입 + 성능 단언.
 #
