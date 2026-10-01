@@ -227,3 +227,56 @@ async def test_missing_cash_source_value_rejects_nav(pool: asyncpg.Pool) -> None
             fx=FakeFxRateSource(),
             pool=pool,
         )
+
+
+_CHAIN_BUDGET_MS = 300.0  # 일배치 작업이라 사전거래 경로보다 여유를 둔 상한
+
+
+@pytest.mark.perf
+async def test_rollforward_chain_day_latency_within_budget(pool: asyncpg.Pool, perf_budget) -> None:
+    """수치 성능 단언(D3) — 연속 3영업일 롤포워드 체인에서 하루치
+    `compute_daily_nav` 호출의 p95 지연이 일배치 예산(300ms) 안에 든다.
+    `test_compute_daily_nav_perf.py`(단일 계좌 반복 샘플 + 순차 DB 왕복
+    수 상한)와 달리 여기는 실제 체인(opening=전일 closing)을 타는 호출
+    각각을 `perf_budget`으로 재 p95를 잰다 — 체인을 타며 prev-day 조회가
+    추가돼도 예산 안에 머무는지가 관심사다."""
+    tenant_id, account_id = await setup_account(pool)
+    cash = FakeCashSource()
+    cash.seed(account_id, Decimal("1000"))
+    nav_repo = PostgresNavRepository(pool)
+    common = dict(
+        snapshots=PostgresSnapshotRepository(pool),
+        cash=cash,
+        nav_repo=nav_repo,
+        calendar=BITGET,
+        fx=FakeFxRateSource(),
+        pool=pool,
+    )
+
+    latencies_ms: list[float] = []
+    for day_offset in range(3):
+        cash.seed(account_id, Decimal("1000") + Decimal(10 * day_offset))
+        sample = await perf_budget.sample_async(
+            lambda day_offset=day_offset: compute_daily_nav(
+                cmd(
+                    tenant_id=tenant_id,
+                    account_id=account_id,
+                    at=NOW + timedelta(days=day_offset),
+                    realized="10" if day_offset else "1000",
+                ),
+                **common,
+            )
+        )
+        latencies_ms.append(sample.wall_ms)
+
+    latencies_ms.sort()
+    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95) if len(latencies_ms) > 1 else -1]
+    print(
+        f"\ncompute_daily_nav rollforward chain day latency p95={p95_ms:.3f}ms "
+        f"(n={len(latencies_ms)}, budget<{_CHAIN_BUDGET_MS}ms)"
+    )
+
+    assert p95_ms < _CHAIN_BUDGET_MS, (
+        f"롤포워드 체인 하루치 compute_daily_nav p95({p95_ms:.3f}ms)가 일배치 "
+        f"예산({_CHAIN_BUDGET_MS}ms)을 초과했습니다."
+    )
