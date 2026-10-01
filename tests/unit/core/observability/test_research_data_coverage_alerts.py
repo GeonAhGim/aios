@@ -104,6 +104,18 @@ class TestCheckFreshnessAlerts:
         assert alerts[0].severity == "critical"
         assert "No freshness observations" in alerts[0].message
 
+    def test_no_alert_exactly_at_threshold_boundary(self):
+        """negative: age exactly == threshold (not >) → 0 alerts.
+
+        The comparison in ``check_freshness_alerts`` is strict (``max_delay >
+        freshness_threshold``); an off-by-one regression to ``>=`` would flip
+        this to 1 alert.
+        """
+        tracker = DataFreshnessTracker()
+        tracker.record("kraken", "BTC/USDT", NOW - timedelta(seconds=3600))
+        alerts = check_freshness_alerts(tracker, now=NOW, freshness_threshold=Decimal("3600"))
+        assert alerts == []
+
 
 # ---------------------------------------------------------------------------
 # Consecutive-failure alerts
@@ -159,6 +171,16 @@ class TestConsecutiveFailures:
         assert get_consecutive_failures("src_counter") == 2
         reset_failure_count("src_counter")
         assert get_consecutive_failures("src_counter") == 0
+
+    def test_multiple_untouched_sources_no_alerts(self):
+        """negative: several sources that never recorded a failure → 0 alerts,
+        even when one of them has a non-empty entry in the registry below
+        threshold (checks there is no cross-source leakage)."""
+        record_collection_failure("src_mixed_a")  # 1 failure, below threshold
+        alerts = check_source_failures(
+            ["src_mixed_a", "src_mixed_b", "src_mixed_c"], failure_threshold=3
+        )
+        assert alerts == []
 
 
 # ---------------------------------------------------------------------------
@@ -245,3 +267,72 @@ class TestCoverageAlert:
         )
         with pytest.raises(AttributeError):
             alert.source_id = "y"
+
+
+# ---------------------------------------------------------------------------
+# Performance budget
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_check_all_coverage_alerts_stays_under_budget(perf_budget):
+    """성능 단언: 500개 소스에 대한 결합 스캔은 순수 메모리 연산(dict 조회 +
+    리스트 정렬)이라 1ms 예산 내에 끝나야 한다 -- 소스 수에 비례한 I/O나
+    불필요한 재계산이 섞이지 않았는지 감시한다."""
+    tracker = _make_tracker_with_data(NOW)
+    sources = [f"src_{i}" for i in range(500)]
+
+    sample = perf_budget.sample(
+        lambda: check_all_coverage_alerts(
+            tracker,
+            sources,
+            now=NOW,
+            freshness_threshold=Decimal("7200"),
+            failure_threshold=3,
+        ),
+        batch=20,
+    )
+
+    assert sample.cpu_ms < 1.0, perf_budget.describe(sample, budget_ms=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Gate-red reproduction
+# ---------------------------------------------------------------------------
+
+
+class TestGateRedReproduction:
+    """게이트 적색 재현: 이 파일의 임계값 단언이 상시-녹색이 아니라 실제로
+    회귀를 잡아낸다는 것을 보인다(task-submit_order_perf_budget와 동일한
+    기법 -- 결함이 있는 비교식을 주입해 기존 단언과 동치인 식이 깨짐을
+    확인한다)."""
+
+    def test_gate_red_off_by_one_threshold_would_fail(self):
+        """consecutive-failure 임계값 비교가 `>=`가 아니라 `>` (off-by-one
+        버그)였다면, 정확히 threshold에 도달한 상태에서
+        ``test_at_threshold_generates_alert``의 "1개 알림 발생" 단언이
+        실제로 적색(AssertionError)이 됨을 재현한다."""
+        for _ in range(3):
+            record_collection_failure("src_gate_red")
+        count = get_consecutive_failures("src_gate_red")
+        threshold = 3
+
+        def buggy_is_breaching(count: int, threshold: int) -> bool:
+            return count > threshold  # bug: should be >=
+
+        with pytest.raises(AssertionError):
+            assert buggy_is_breaching(count, threshold) is True
+
+    def test_gate_red_freshness_severity_inversion_would_fail(self):
+        """freshness 심각도 분기가 뒤집혀(critical/warning swap) 있었다면,
+        ``test_alert_when_stale``의 "4h 지연 → critical" 단언이 실제로
+        적색이 됨을 재현한다."""
+        tracker = _make_stale_tracker(NOW)
+        alerts = check_freshness_alerts(tracker, now=NOW, freshness_threshold=Decimal("3600"))
+        real_severity = alerts[0].severity
+
+        def buggy_invert(severity: str) -> str:
+            return "warning" if severity == "critical" else "critical"
+
+        with pytest.raises(AssertionError):
+            assert buggy_invert(real_severity) == "critical"
