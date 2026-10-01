@@ -29,6 +29,7 @@ The round trip now runs against its own disposable DB clone
 (`tests/support/db.ensure_worker_database`) so an interrupted downgrade can
 never corrupt state anything else reads.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,6 +37,7 @@ import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 import asyncpg
 import pytest
@@ -268,6 +270,44 @@ async def test_status_change_without_order_event_raises_once_cutover_armed(pool)
                     )
         finally:
             await tr.rollback()
+
+
+async def test_disabling_transition_trigger_lets_terminal_reverse_update_through_gate_red(pool):
+    """게이트 적색 재현 — `oms_enforce_order_transition_trg`를 트랜잭션 안에서
+    비활성화하면 `test_terminal_reverse_transition_raises_once_cutover_armed`가
+    강제하는 I4(터미널 불변)가 더는 걸리지 않고 손 UPDATE가 조용히 성공한다.
+    즉 저 테스트가 우연히 통과하는 게 아니라 실제로 이 트리거에 의존한다는
+    것을 보인다 — 트리거가 회귀로 빠지면 이 테스트가 그 사실을 드러낸다."""
+    async with pool.acquire() as conn:
+        user_id = await create_test_user(pool)
+        tr = conn.transaction()
+        await tr.start()
+        try:
+            await conn.execute(arm_cutover_sql)
+            order_id = await insert_order(
+                conn, user_id, status="FILLED", quantity=Decimal("1"), filled_quantity=Decimal("1")
+            )
+            await conn.execute(
+                "ALTER TABLE orders DISABLE TRIGGER oms_enforce_order_transition_trg"
+            )
+            # 트리거가 없으니 I4가 금지하는 FILLED->SUBMITTED도 그냥 통과한다.
+            await conn.execute(
+                "UPDATE orders SET status = 'SUBMITTED' WHERE order_id = $1", order_id
+            )
+            status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+            assert status == "SUBMITTED"
+        finally:
+            await tr.rollback()
+
+
+def test_run_alembic_propagates_subprocess_dependency_failure():
+    """실패 주입 — `_run_alembic`이 의존하는 `subprocess.run`(alembic CLI
+    호출)이 예외를 던지면 그대로 전파해야 한다. 실패를 삼키고 성공으로
+    위장하면 `test_downgrade_then_upgrade_round_trip`이 실제로는 downgrade/
+    upgrade가 안 됐는데도 통과한 것처럼 보일 수 있다(fail-closed)."""
+    with patch("subprocess.run", side_effect=FileNotFoundError("alembic entrypoint missing")):
+        with pytest.raises(FileNotFoundError, match="alembic entrypoint missing"):
+            _run_alembic("upgrade", "head")
 
 
 def test_worm_sql_rejects_malicious_table_name():
