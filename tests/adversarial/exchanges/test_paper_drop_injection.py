@@ -20,6 +20,7 @@ SentUnknownError(...)` 분기를 제거하면 위
 green(1 passed)에서 red(1 failed)로 뒤집힘을 증명한다 — 즉 그 테스트의
 주장이 실제로 이 분기에 의존한다는 뜻이다.
 """
+
 from __future__ import annotations
 
 import os
@@ -191,7 +192,7 @@ def pytest_configure(config):
 """
 
 
-def test_pytest_gate_turns_red_when_drop_raise_branch_is_removed(tmp_path: Path) -> None:
+def test_gate_red_when_drop_raise_branch_is_removed(tmp_path: Path) -> None:
     """`place_order`의 `if outcome.kind == "DROP": raise SentUnknownError(...)`
     분기를 자식 pytest 프로세스 안에서만 제거하면(프로덕션 소스는 그대로),
     `test_drop_injection_raises_but_ledger_holds_real_terminal_state`가
@@ -206,8 +207,13 @@ def test_pytest_gate_turns_red_when_drop_raise_branch_is_removed(tmp_path: Path)
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -219,8 +225,12 @@ def test_pytest_gate_turns_red_when_drop_raise_branch_is_removed(tmp_path: Path)
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout
