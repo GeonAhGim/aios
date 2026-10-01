@@ -12,10 +12,10 @@ recovering via `ConcurrencyConflictError`), the negative/failure-injection
 cases for when recovery itself cannot find a winner, and a throughput bound
 on the happy path.
 """
+
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass, field
 from datetime import date
 from uuid import UUID, uuid4
@@ -255,20 +255,22 @@ async def test_concurrent_bootstrap_for_different_users_does_not_cross_contamina
 
 
 @pytest.mark.perf
-async def test_race_recovery_costs_at_most_one_extra_get_per_level():
+async def test_race_recovery_costs_at_most_one_extra_get_per_level(perf_budget):
     """Numeric performance assertion: recovering from a lost create-vs-create
     race must cost exactly one extra `get_*` re-query per level, not an
     unbounded retry loop -- `_get_or_create` re-queries once and then
     re-raises if that still does not find a winner (see the failure-injection
     test below), so N concurrent racers for one user cost at most
-    N get-calls per level up front plus 1 recovery get for every loser."""
+    N get-calls per level up front plus 1 recovery get for every loser.
+
+    task-10969: raw time.perf_counter() 단언 -> perf_budget.sample_async()로 전환."""
     repo = _RacyRepository()
     user_id = uuid4()
     racers = 5
 
-    started = time.perf_counter()
-    await asyncio.gather(*(_ensure(repo, user_id) for _ in range(racers)))
-    elapsed = time.perf_counter() - started
+    sample = await perf_budget.sample_async(
+        lambda: asyncio.gather(*(_ensure(repo, user_id) for _ in range(racers)))
+    )
 
     # Each racer does at most 2 get_* calls per level (the initial lookup plus
     # one recovery re-query), and get_portfolio/get_sub_account additionally
@@ -277,7 +279,10 @@ async def test_race_recovery_costs_at_most_one_extra_get_per_level():
     # generous constant catches a retry storm/livelock without hand-deriving
     # the exact fan-out count.
     assert repo.get_calls < 20 * racers
-    assert elapsed < 1.0, f"in-memory bootstrap of {racers} racers took {elapsed:.3f}s"
+    assert sample.wall_ms < 1000, (
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<1000ms "
+        f"in-memory bootstrap of {racers} racers"
+    )
 
 
 async def test_get_or_create_reraises_conflict_when_no_winner_is_ever_found():
