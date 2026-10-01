@@ -1,26 +1,27 @@
-"""13번 — 마켓플레이스 API 라우터.
+"""13 — Marketplace API router.
 
 Spec: 기능설계문서_v1.20.md#FD-13.1~FD-13.10, 16_backend_signatures.md
 
-구매(purchase)는 15번 §15.1 Idempotency-Key 원칙 적용 대상(금전 관련
-POST) — I-03 4중 스코프(route+tenant_id+subject_id+header_key) +
-digest 대조를 강제하는 src/api/contracts/idempotency.py
-(require_idempotency_key/run_idempotent)로 동일 키 재요청 시 중복
-구매를 만들지 않는다(전수감사 2026-09-06 P0-F, task-1719).
+Purchase is subject to §15.1 Idempotency-Key policy (monetary POST) —
+src/api/contracts/idempotency.py enforces four-way scoping
+(route + tenant_id + subject_id + header_key) plus digest comparison
+via require_idempotency_key/run_idempotent, preventing duplicate
+purchases on replay (full-audit 2026-09-06 P0-F, task-1719).
 
-PLT-18 — raw `HTTPException` raise를 전부 도메인 예외로 이관했다(§9
-PLT-17~21). 도메인 예외 → ErrorCode 매핑은 src/api/contracts/
-exception_mapping.py EXCEPTION_MAP/STATUS_OVERRIDE, 전역 핸들러는
-src/api/contracts/handlers.py. `InsufficientWalletBalanceError`(402)는
-ErrorCode 자체는 POLICY_DENIED를 쓰되 상태코드만 STATUS_OVERRIDE로
-402를 고정한다 — 기존 라우터 테스트(test_marketplace_router.py)가
-정확히 402를 기대하는데, error_codes.py taxonomy 접두 화이트리스트에
-결제 전용 코드가 없기 때문이다.
+PLT-18 — All raw HTTPException raises migrated to domain exceptions (§9
+PLT-17~21). Domain exception → ErrorCode mapping lives in
+src/api/contracts/exception_mapping.py EXCEPTION_MAP/STATUS_OVERRIDE;
+the global handler is in src/api/contracts/handlers.py.
+InsufficientWalletBalanceError(402) keeps ErrorCode POLICY_DENIED but
+overrides the status code to 402 via STATUS_OVERRIDE — existing router
+tests (test_marketplace_router.py) expect exactly 402, and error_codes.py
+taxonomy prefix whitelist has no payment-specific code.
 
-이 리프도 PLT-17과 동일하게 성공 응답의 `ApiResponse` 봉투화는 보류한다
-— `/marketplace/*`가 아직 legacy 단일 경로라 감싸면 openapi 스냅샷
-MAJOR 위반이 난다(PM 선반영 decision, task-1009).
+This leaf also defers wrapping successful responses in ApiResponse, same
+as PLT-17 — wrapping /marketplace/* would break the OpenAPI snapshot
+with a MAJOR change (PM pre-reflection decision, task-1009).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -178,7 +179,7 @@ async def get_strategy_definition(
     user: User = Depends(get_current_user),
     service: StrategyAccessService = Depends(get_strategy_access_service),
 ) -> dict[str, object]:
-    """10.3-B 블랙박스 원칙 — 소유자이거나 결제확인된 구매자만 접근 가능."""
+    """10.3-B black-box principle — only the owner or a verified purchaser may access."""
     definition = await service.get_strategy_for_execution(
         user.user_id, strategy_id, strategy_version
     )
