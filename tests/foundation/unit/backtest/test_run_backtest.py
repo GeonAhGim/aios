@@ -7,7 +7,6 @@ FSM 전이, equity 계산)을 지표 계산과 분리해서 검증한다. 개별
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -20,6 +19,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.backtest.application.run_backtest import BacktestRunError, run_backtest
 from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from src.services.condition_compiler import ORDER_FILLED
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
@@ -345,21 +345,23 @@ def _never_signals_fsm_config() -> FSMStrategyConfig:
 
 
 @pytest.mark.perf
-def test_throughput_meets_local_budget_floor() -> None:
+def test_throughput_meets_local_budget_floor(perf_budget: PerfBudget) -> None:
     """성능 단언(수치): ADR-2026-09-09-C §축별 성능 예산 "백테스트 1개월 M1
     1심볼 3초"의 극히 일부 구간(2,000 bar ≈ 1.4일치 M1)조차 여유 있게
     끝나야 한다 — 실측 기준선(로컬, fake indicator) 대비 8배 이상 여유를
     둔 1.0초를 바닥선으로 건다."""
     bars = _synthetic_bars(2000)
     fsm = _never_signals_fsm_config()
-    start = time.perf_counter()
-    run_backtest(_config(), fsm, bars, indicator_service=_FakePriceIndicatorService())
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+    perf_budget.assert_within(
+        lambda: run_backtest(_config(), fsm, bars, indicator_service=_FakePriceIndicatorService()),
+        budget_ms=1000.0,
+    )
 
 
 @pytest.mark.perf
-def test_quadratic_window_rebuild_is_a_known_gate_red_against_monthly_budget() -> None:
+def test_quadratic_window_rebuild_is_a_known_gate_red_against_monthly_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """게이트 적색 재현: run_backtest()는 매 bar마다 `bars[: bar_index + 1]`로
     전체 누적 윈도를 새로 만들어 build_market_state에 넘긴다(L28
     series_cache의 점진적 인과 계산을 쓰지 않음) — bar 수 n에 대해 O(n^2)로
@@ -375,16 +377,16 @@ def test_quadratic_window_rebuild_is_a_known_gate_red_against_monthly_budget() -
     fsm = _never_signals_fsm_config()
 
     small = _synthetic_bars(1000)
-    start = time.perf_counter()
-    run_backtest(_config(), fsm, small, indicator_service=_FakePriceIndicatorService())
-    small_elapsed = time.perf_counter() - start
+    small_result = perf_budget.best_of(
+        lambda: run_backtest(_config(), fsm, small, indicator_service=_FakePriceIndicatorService()),
+    )
 
     large = _synthetic_bars(4000)  # 4배 bar 수
-    start = time.perf_counter()
-    run_backtest(_config(), fsm, large, indicator_service=_FakePriceIndicatorService())
-    large_elapsed = time.perf_counter() - start
+    large_result = perf_budget.best_of(
+        lambda: run_backtest(_config(), fsm, large, indicator_service=_FakePriceIndicatorService()),
+    )
 
-    ratio = large_elapsed / small_elapsed
+    ratio = large_result.cpu_ms / small_result.cpu_ms
     # 선형 스케일이면 ratio ≈ 4.0. O(n^2)이면 이상적으로는 16.0에 근접해야
     # 하지만 고정 오버헤드가 섞여 실측은 그보다 낮다 — 노이즈 여유를 두고도
     # 선형(4.0)과는 뚜렷이 구분되는 6.0을 문턱으로 건다.
