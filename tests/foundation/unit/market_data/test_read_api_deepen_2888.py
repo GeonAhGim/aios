@@ -27,7 +27,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -44,6 +43,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     SourceContractTier,
     permits_use,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
 
@@ -115,7 +115,9 @@ async def test_missing_contract_row_denies_as_none_scope() -> None:
 
 
 @pytest.mark.perf
-async def test_repeated_gate_calls_meet_latency_budget_allow_and_deny() -> None:
+async def test_repeated_gate_calls_meet_latency_budget_allow_and_deny(
+    perf_budget: PerfBudget,
+) -> None:
     """허용 경로(DISPLAY+SHARED_DISPLAY)와 거부 경로(NONE+SHARED_DISPLAY)
     양쪽 다 반복 호출이 절대시간 예산 내에 있어야 한다 — 페이지네이션된
     캔들 조회마다 이 게이트가 매번 재호출되므로, 여기서 선형 이상의 비용이
@@ -125,23 +127,32 @@ async def test_repeated_gate_calls_meet_latency_budget_allow_and_deny() -> None:
     allow_repo = _FakeSourceContractRepository({"BITGET": _contract()})
     deny_repo = _FakeSourceContractRepository({"BITGET": _contract(scope=RedistributionScope.NONE)})
 
-    start = time.perf_counter()
+    # raw time.perf_counter() → PerfBudget.sample_async 전환
+    total_wall_ms = 0.0
     for _ in range(iterations):
-        await authorize_redistribution(
-            None, "BITGET", repo=allow_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
-        )
-        with pytest.raises(MarketDataNotFoundError):
-            await authorize_redistribution(
-                None, "BITGET", repo=deny_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
+        # allow 호출
+        sample = await perf_budget.sample_async(
+            lambda: authorize_redistribution(
+                None, "BITGET", repo=allow_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
             )
-    elapsed = time.perf_counter() - start
+        )
+        total_wall_ms += sample.wall_ms
+        # deny 호출
+        with pytest.raises(MarketDataNotFoundError):
+            sample = await perf_budget.sample_async(
+                lambda: authorize_redistribution(
+                    None, "BITGET", repo=deny_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
+                )
+            )
+        total_wall_ms += sample.wall_ms
 
+    elapsed_sec = total_wall_ms / 1000.0
     print(
         f"[DC-28 read_api] authorize_redistribution() x{iterations * 2}(allow+deny) in "
-        f"{elapsed:.4f}s (budget<{budget_sec}s)"
+        f"{elapsed_sec:.4f}s (budget<{budget_sec}s)"
     )
-    assert elapsed < budget_sec, (
-        f"게이트 {iterations * 2}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    assert elapsed_sec < budget_sec, (
+        f"게이트 {iterations * 2}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed_sec:.4f}s)."
     )
 
 
