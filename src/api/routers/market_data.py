@@ -1,21 +1,26 @@
-"""LA-24 — market_data HTTP 읽기 API(캔들 조회/리플레이, 인스트루먼트 목록/별칭).
+"""LA-24 — market_data HTTP read API (candle lookup/replay, instrument list/aliases).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24
-(CA 결정 ADR-2026-09-04-C 후속, esc-marketdata-http-api-gap).
+(follow-up to CA decision ADR-2026-09-04-C, esc-marketdata-http-api-gap).
 
-71번 §6 규칙: 라우터는 auth/TenantContext 주입·transport validation·application
-호출만 한다. 캔들 로직은 LA-17(`application/get_candles`·`replay_candles`),
-식별자 해석·이용권 판정·페이지 분할은 `application/read_api.py`에 위임하고
-SQL은 없다. 도메인 예외는 잡지 않는다 — `exception_registry_foundation.py`
-(EXCEPTION_MAP)가 봉투로 번역한다(PLT-29).
+Rule 71 §6: the router only does auth/TenantContext injection, transport
+validation, and application calls. Candle logic belongs to LA-17
+(`application/get_candles`/`replay_candles`); identifier resolution,
+entitlement decisions, and pagination are delegated to
+`application/read_api.py`. No SQL here. Domain exceptions are not caught —
+`exception_registry_foundation.py` (EXCEPTION_MAP) translates them into the
+envelope (PLT-29).
 
-마운트 경로는 프론트 레지스트리(`frontend/packages/api-client/src/apiPaths.ts`
-task-719/824)가 이미 기대하던 `/v1/foundation/market-data/*`다 — 다른
-foundation 라우터와 같은 네임스페이스. 커버리지 판정: 기대 세션(갭)은
-있는데 저장 캔들이 0건이면 구간 전체가 커버리지 밖 → 409
-`DATA_COVERAGE_MISSING`(§4.1 0/NaN 채움 금지). 일부만 비면 `gaps`로 알린다
-(LA-17 비-strict 규칙 그대로). 리플레이는 strict라 결측 하나도 409다.
+The mount path is the one the frontend registry
+(`frontend/packages/api-client/src/apiPaths.ts`, task-719/824) already expects:
+`/v1/foundation/market-data/*` — the same namespace as other foundation
+routers. Coverage decision: if a session is expected (a gap) but zero candles
+are stored, the whole range is out of coverage -> 409 `DATA_COVERAGE_MISSING`
+(§4.1 forbids filling with 0/NaN). A partial gap is reported via `gaps`
+(same non-strict rule as LA-17). Replay is strict, so even one missing
+candle is a 409.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -110,8 +115,9 @@ def get_instrument_repository(pool: asyncpg.Pool = Depends(get_pool)) -> Instrum
 
 
 def _entitlement_view(decision: Entitlement) -> EntitlementView:
-    """`authorize_feed`가 거부를 이미 404로 끝냈으므로 여기 오는 결정은 항상
-    허용(mode 존재)이다 — `Entitlement`의 model_validator가 그 배타성을 보장한다."""
+    """`authorize_feed` already ends a denial with a 404, so any decision that
+    reaches here is always an allow (mode is present) — `Entitlement`'s
+    model_validator guarantees that exclusivity."""
     return EntitlementView(
         mode=decision.mode or "delayed", delayed_seconds=decision.delayed_seconds or 0
     )
@@ -142,16 +148,27 @@ async def get_candles_endpoint(
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         inst = await resolve_instrument(
-            conn, refs=refs, reader=reader, venue=venue, symbol=symbol,
-            instrument_id=instrument_id, now=now,
+            conn,
+            refs=refs,
+            reader=reader,
+            venue=venue,
+            symbol=symbol,
+            instrument_id=instrument_id,
+            now=now,
         )
         await authorize_redistribution(
-            conn, inst.venue.value, repo=source_contracts, clock=lambda: now,
+            conn,
+            inst.venue.value,
+            repo=source_contracts,
+            clock=lambda: now,
             use=DataUse.SHARED_DISPLAY,
         )
     decision = await authorize_feed(
-        entitlement, tenant_id=context.tenant_id, subject_id=context.subject_id,
-        inst=inst, timeframe=timeframe,
+        entitlement,
+        tenant_id=context.tenant_id,
+        subject_id=context.subject_id,
+        inst=inst,
+        timeframe=timeframe,
     )
 
     key = SeriesKey(venue=inst.venue, instrument_id=inst.instrument_id, timeframe=timeframe)
@@ -164,10 +181,16 @@ async def get_candles_endpoint(
 
     page, next_cursor = paginate_candles(series.candles, cursor, limit)
     view = CandleSeriesView(
-        key=series.key, candles=page, gaps=series.gaps, adjustment=series.adjustment,
-        as_of=series.as_of, series_hash=series.series_hash,
-        instrument_id=inst.instrument_id, symbol=symbol or inst.venue_symbol,
-        canonical_symbol=inst.canonical_symbol, entitlement=_entitlement_view(decision),
+        key=series.key,
+        candles=page,
+        gaps=series.gaps,
+        adjustment=series.adjustment,
+        as_of=series.as_of,
+        series_hash=series.series_hash,
+        instrument_id=inst.instrument_id,
+        symbol=symbol or inst.venue_symbol,
+        canonical_symbol=inst.canonical_symbol,
+        entitlement=_entitlement_view(decision),
     )
     return ok(view, page=PageMeta(size=limit, next_cursor=next_cursor))
 
@@ -191,36 +214,54 @@ async def replay_candles_endpoint(
     entitlement: EntitlementPort = Depends(get_entitlement_port),
     source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
 ) -> ApiResponse[ReplaySeriesView]:
-    """LA-17 `replay` 위임 — 결측이 하나라도 있으면 `ReplayIncompleteError`가
-    409 `DATA_COVERAGE_MISSING`으로 번역된다(strict). 페이지네이션 없음(A5
-    "같은 as_of+같은 범위 → 같은 바이트")."""
+    """Delegates to LA-17 `replay` — if even one candle is missing,
+    `ReplayIncompleteError` is translated into 409 `DATA_COVERAGE_MISSING`
+    (strict). No pagination (A5: "same as_of + same range -> same bytes")."""
     validate_span(start, end, ("as_of", as_of))
     async with pool.acquire() as conn:
         inst = await resolve_instrument(
-            conn, refs=refs, reader=reader, venue=venue, symbol=symbol,
-            instrument_id=instrument_id, now=as_of,
+            conn,
+            refs=refs,
+            reader=reader,
+            venue=venue,
+            symbol=symbol,
+            instrument_id=instrument_id,
+            now=as_of,
         )
         # Redistribution scope asks "is this call allowed right now", not
         # the replay target time (as_of) — contract validity is evaluated
         # against the actual current time.
         await authorize_redistribution(
-            conn, inst.venue.value, repo=source_contracts,
-            clock=lambda: datetime.now(timezone.utc), use=DataUse.SHARED_DISPLAY,
+            conn,
+            inst.venue.value,
+            repo=source_contracts,
+            clock=lambda: datetime.now(timezone.utc),
+            use=DataUse.SHARED_DISPLAY,
         )
     decision = await authorize_feed(
-        entitlement, tenant_id=context.tenant_id, subject_id=context.subject_id,
-        inst=inst, timeframe=timeframe,
+        entitlement,
+        tenant_id=context.tenant_id,
+        subject_id=context.subject_id,
+        inst=inst,
+        timeframe=timeframe,
     )
 
     key = SeriesKey(venue=inst.venue, instrument_id=inst.instrument_id, timeframe=timeframe)
     request = ReplayRequest(key=key, start=start, end=end, as_of=as_of, adjustment=adjustment)
     series = await replay(request, store=store, refs=refs, cal=cal, pool=pool)
     view = ReplaySeriesView(
-        key=series.key, candles=series.candles, gaps=series.gaps,
-        adjustment=series.adjustment, as_of=series.as_of, series_hash=series.series_hash,
-        expected_count=series.expected_count, missing_count=series.missing_count,
-        instrument_id=inst.instrument_id, symbol=symbol or inst.venue_symbol,
-        canonical_symbol=inst.canonical_symbol, entitlement=_entitlement_view(decision),
+        key=series.key,
+        candles=series.candles,
+        gaps=series.gaps,
+        adjustment=series.adjustment,
+        as_of=series.as_of,
+        series_hash=series.series_hash,
+        expected_count=series.expected_count,
+        missing_count=series.missing_count,
+        instrument_id=inst.instrument_id,
+        symbol=symbol or inst.venue_symbol,
+        canonical_symbol=inst.canonical_symbol,
+        entitlement=_entitlement_view(decision),
     )
     return ok(view)
 
@@ -236,9 +277,10 @@ async def list_instruments_endpoint(
     reader: ReferenceReadRepository = Depends(get_market_reference_reader),
     source: VenueRegistrySource = Depends(get_venue_registry_source),
 ) -> ApiResponse[InstrumentListView]:
-    """자기 테넌트가 등록한 벤처의 인스트루먼트만. 등록 벤처가 없으면 빈
-    목록(200) — 목록은 존재 누설 문제가 없어 404가 아니다. `cursor`는 직전
-    페이지 마지막 `instrument_id`(keyset)."""
+    """Only instruments from venues registered to this tenant. If no venue is
+    registered, returns an empty list (200) — a listing has no existence-leak
+    concern, so it's never a 404. `cursor` is the last `instrument_id` of the
+    previous page (keyset)."""
     venues = await source.registered_venues(context.tenant_id)
     if venue is not None:
         venues = venues & {venue}
@@ -262,9 +304,10 @@ async def list_aliases_endpoint(
     reader: ReferenceReadRepository = Depends(get_market_reference_reader),
     source: VenueRegistrySource = Depends(get_venue_registry_source),
 ) -> ApiResponse[list[SymbolAliasRef]]:
-    """경로 세그먼트는 벤처 심볼(이때 `venue` 쿼리 필수) 또는 md_instrument
-    UUID 둘 다 받는다(프론트 `listInstrumentAliases(instrumentId)`는 UUID를
-    보낸다). UUID 형식이면 id 조회, 아니면 심볼 조회."""
+    """The path segment accepts either a venue symbol (in which case the
+    `venue` query param is required) or an md_instrument UUID (the frontend's
+    `listInstrumentAliases(instrumentId)` sends a UUID). If it parses as a
+    UUID, look up by id; otherwise look up by symbol."""
     try:
         instrument_id: UUID | None = UUID(symbol)
     except ValueError:
@@ -272,8 +315,13 @@ async def list_aliases_endpoint(
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         inst = await resolve_instrument(
-            conn, refs=refs, reader=reader, venue=venue,
-            symbol=None if instrument_id else symbol, instrument_id=instrument_id, now=now,
+            conn,
+            refs=refs,
+            reader=reader,
+            venue=venue,
+            symbol=None if instrument_id else symbol,
+            instrument_id=instrument_id,
+            now=now,
         )
         await authorize_venue(source, tenant_id=context.tenant_id, inst=inst)
         aliases = await reader.list_aliases(conn, inst.instrument_id)
@@ -282,8 +330,11 @@ async def list_aliases_endpoint(
 
 @router.get("/coverage")
 async def get_coverage_endpoint(
-    instrument_id: str, venue: Venue, timeframe: Timeframe,
-    context: TenantContext = Depends(get_tenant_context), pool: asyncpg.Pool = Depends(get_pool),
+    instrument_id: str,
+    venue: Venue,
+    timeframe: Timeframe,
+    context: TenantContext = Depends(get_tenant_context),
+    pool: asyncpg.Pool = Depends(get_pool),
     coverage_repo: CoverageRepository = Depends(get_coverage_repository),
     instrument_repo: InstrumentRepository = Depends(get_instrument_repository),
     venue_registry: VenueRegistrySource = Depends(get_venue_registry_source),
@@ -292,8 +343,13 @@ async def get_coverage_endpoint(
     `md_instrument` UUID above); no coverage / no entitlement -> 200 + `[]`."""
     async with pool.acquire() as conn:
         spans = await get_coverage(
-            conn, tenant_id=context.tenant_id, instrument_id=instrument_id,
-            venue=venue, timeframe=timeframe, coverage_repo=coverage_repo,
-            instrument_repo=instrument_repo, venue_registry=venue_registry,
+            conn,
+            tenant_id=context.tenant_id,
+            instrument_id=instrument_id,
+            venue=venue,
+            timeframe=timeframe,
+            coverage_repo=coverage_repo,
+            instrument_repo=instrument_repo,
+            venue_registry=venue_registry,
         )
     return ok(spans)
