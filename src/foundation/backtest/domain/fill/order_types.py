@@ -1,13 +1,13 @@
-"""BT-6 — 주문유형 트리거 모델(순수).
+"""BT-6 — Order type trigger model (pure).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.5 BT-6, §3.4(`order_types: {limit, stop, oco, trailing}`).
 
-각 함수는 "이 봉에서 트리거됐는가"만 판정한다 — 트리거된 체결가 계산은
-슬리피지 모델(BT-2, `slippage.py`)의 책임이라 섞지 않는다(5개 파일은
-서로 임포트하지 않는다). `OrderTypesConfig`로 꺼진 유형이 들어오면
-`OrderTypeDisabledError`로 거부한다(`models_v2.py` docstring이
-이 모듈에 위임한 책임).
+Each function determines only "was this bar triggering?" — the calculation of fill
+price after trigger is the responsibility of the slippage model (BT-2, `slippage.py`)
+and must not be mixed here (the 5 files do not import each other). When a disabled
+order type is passed via `OrderTypesConfig`, it is rejected with `OrderTypeDisabledError`
+(as documented in the `models_v2.py` docstring delegating responsibility to this module).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ OrderTypeName = Literal["limit", "stop", "oco", "trailing"]
 
 
 class OrderTypeDisabledError(ValueError):
-    """`OrderTypesConfig`에서 꺼진 유형으로 들어온 주문."""
+    """Order entered with a type disabled in `OrderTypesConfig`."""
 
 
 def _reject_negative_or_nan(value: Decimal, name: str) -> None:
@@ -46,8 +46,9 @@ def ensure_order_type_enabled(config: OrderTypesConfig, order_type: OrderTypeNam
 def is_limit_triggered(
     *, side: OrderSide, limit_price: Decimal, bar_low: Decimal, bar_high: Decimal
 ) -> bool:
-    """매수 지정가는 저가가 지정가 이하로 닿으면, 매도 지정가는 고가가
-    지정가 이상으로 닿으면 그 봉에서 체결 가능하다고 본다."""
+    """For a buy limit order, it can fill on a bar if the low reaches the limit price
+    or lower; for a sell limit order, it can fill if the high reaches the limit price
+    or higher."""
 
     _reject_negative_or_nan(limit_price, "limit_price")
     _reject_negative_or_nan(bar_low, "bar_low")
@@ -60,8 +61,9 @@ def is_limit_triggered(
 def is_stop_triggered(
     *, side: OrderSide, stop_price: Decimal, bar_low: Decimal, bar_high: Decimal
 ) -> bool:
-    """매수 스탑(숏 커버·돌파매수)은 고가가 스탑 이상으로 닿으면, 매도
-    스탑(손절)은 저가가 스탑 이하로 닿으면 트리거된다."""
+    """A buy stop (short cover or breakout buy) triggers if the high reaches the stop
+    price or higher; a sell stop (stop-loss) triggers if the low reaches the stop price
+    or lower."""
 
     _reject_negative_or_nan(stop_price, "stop_price")
     _reject_negative_or_nan(bar_low, "bar_low")
@@ -80,12 +82,13 @@ class OcoResolution:
 def resolve_oco(
     *, leg_a_triggered: bool, leg_b_triggered: bool, priority_leg: Literal["a", "b"]
 ) -> OcoResolution:
-    """한쪽이 체결되면 반대편은 즉시 취소된다.
+    """When one leg fills, the other is immediately cancelled.
 
-    같은 봉 안에서 둘 다 닿는 경우(고저 범위가 두 레그를 모두 포함하는
-    큰 봉)는 실거래소에서 어느 쪽이 실제로 먼저 체결됐는지 이 정보만으로는
-    알 수 없다 — 이 모호함을 조용히 숨기지 않고, 호출자가 `priority_leg`로
-    보수적 가정(예: 손절 레그 우선)을 명시적으로 고르게 강제한다.
+    When both legs are touched within the same bar (a wide bar whose high-low range
+    covers both leg trigger prices), a real exchange provides no way to know which leg
+    actually filled first from the bar data alone. Instead of silently hiding this
+    ambiguity, the caller is forced to explicitly specify a conservative assumption via
+    `priority_leg` (e.g., loss leg priority).
     """
 
     if leg_a_triggered and leg_b_triggered:
@@ -113,11 +116,11 @@ def update_trailing_stop(
     bar_high: Decimal,
     trail_pct: Decimal,
 ) -> TrailingStopState:
-    """`side=SELL`(롱 포지션 청산용 트레일링 스탑)은 신고가가 나올 때마다
-    극값을 올리고 스탑을 `극값 * (1 - trail_pct)`로 끌어올린다.
-    `side=BUY`(숏 포지션 청산용)는 신저가를 따라 스탑을
-    `극값 * (1 + trail_pct)`로 끌어내린다 — 극값은 불리한 방향으로는
-    절대 되돌리지 않는다(단조).
+    """`side=SELL` (trailing stop to close a long position) raises the extreme price
+    whenever a new high appears and raises the stop to `extreme_price * (1 - trail_pct)`.
+    `side=BUY` (trailing stop to close a short position) follows new lows and lowers the
+    stop to `extreme_price * (1 + trail_pct)` — the extreme price never moves in the
+    unfavorable direction (monotonic).
     """
 
     _reject_negative_or_nan(bar_low, "bar_low")
