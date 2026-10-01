@@ -1,35 +1,42 @@
-"""BT-10 — 즉시 백테스트(컬럼 경로 + BT-2~8 체결 모델 조립).
+"""BT-10 — Quick backtest (columnar path + BT-2~8 fill-model assembly).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.5(`application/quick_backtest.py` 차트 범위 즉시 백테스트, 컬럼 경로, 상한
-봉수), §3.4, §7(1개월 M1 ≤5s), §9.5 BT-10,
+§2.5 (`application/quick_backtest.py` chart-range quick backtest, columnar
+path, bar-count cap), §3.4, §7 (1-month M1 ≤5s), §9.5 BT-10,
 docs/design/ADR-2026-09-04-A-market-data-replay-perf.md #1·#3.
 
-체결 모델을 하나도 재구현하지 않는다 — 주문 1건의 생애주기(BT-2~8 위임)는
-`quick_backtest_fill.py`에 있고, 이 파일은 봉 순회·전략 접점·포지션/현금
-갱신·결과 조립만 한다.
+Does not reimplement any part of the fill model — a single order's lifecycle
+(delegated to BT-2~8) lives in `quick_backtest_fill.py`; this file only does
+bar iteration, the strategy touchpoint, position/cash updates, and result
+assembly.
 
-캔들 입력은 LA-23b 컬럼지향 `CandleColumns`(ADR-A #1) 그대로다 — 레코드별
-pydantic 재구성 없이 인덱스로 순회한다. 이 모듈은 I/O를 하지 않는다
-(TID251: backtest/application은 asyncpg 금지). 호출자(BT-13 라우터·BT-11 잡)가
+Candle input stays as the LA-23b columnar `CandleColumns` (ADR-A #1) — it is
+iterated by index, with no per-record pydantic reconstruction. This module
+does no I/O (TID251: asyncpg is forbidden in backtest/application). The
+caller (BT-13 router / BT-11 job) reads once with
 `columns = await store.read_candles_columnar(conn, key, start, end, as_of)`
-한 번(왕복 1회)으로 읽어 넘긴다 — 통합테스트가 그 경로를 그대로 증명한다.
+(one round trip) and hands it over — the integration test proves that path
+directly.
 
-v1(`run_backtest.py`, `BacktestConfig`)은 건드리지 않고 v2(`BacktestConfigV2`,
-BT-1) 경로로 병존한다(107번 §3.3).
+v1 (`run_backtest.py`, `BacktestConfig`) is left untouched; it coexists with
+the v2 (`BacktestConfigV2`, BT-1) path (no. 107 §3.3).
 
-결정론: 전역 시계·난수·dict/set 순회가 없고 모든 금액은 `Decimal`이다 —
-같은 (config, columns, 전략) 입력이면 체결 로그가 바이트 동일하다.
+Determinism: no global clock, randomness, or dict/set iteration — all
+amounts are `Decimal` — the same (config, columns, strategy) input always
+produces a byte-identical fill log.
 
-미래 참조 금지(fail-closed): 전략은 현재 봉까지만 보이는 읽기 전용 뷰
-`BarWindow`를 받는다 — 그 뒤 인덱스 접근은 `LookAheadError`. 신호는 봉 j의
-open_time에 제출된 것으로 보고 BT-4(엄격 초과)가 체결 봉을 고르므로 체결
-봉은 항상 j보다 뒤다(`domain/rules.is_look_ahead_safe`와 같은 원칙).
+No look-ahead (fail-closed): the strategy receives `BarWindow`, a read-only
+view visible only up to the current bar — any index access beyond that
+raises `LookAheadError`. A signal is treated as submitted at bar j's
+open_time, and since BT-4 (strict-exceed) picks the fill bar, the fill bar
+is always after j (same principle as `domain/rules.is_look_ahead_safe`).
 
-범위 밖(BT-11/12): OCO·트레일링, 체크포인트·진행률, 성과 지표(tearsheet).
-실행 시간 상한은 결정론을 깨는 시계 접근이 필요하므로 호출자(async
-timeout)의 책임이고, 여기서는 봉 수 상한(`MAX_QUICK_BARS`)만 건다.
+Out of scope (BT-11/12): OCO/trailing, checkpoint/progress, performance
+metrics (tearsheet). The execution-time cap needs clock access that would
+break determinism, so it is the caller's responsibility (async timeout);
+here we only enforce the bar-count cap (`MAX_QUICK_BARS`).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -74,18 +81,21 @@ __all__ = [
     "run_quick_backtest",
 ]
 
-MAX_QUICK_BARS = 44_640  # 31일 × 1,440 — 1개월 M1 상한(§2.5 "상한 봉수", §7 1개월 기준)
+MAX_QUICK_BARS = (
+    44_640  # 31 days x 1,440 -- 1-month M1 cap (§2.5 "bar-count cap", §7 1-month basis)
+)
 _ZERO = Decimal("0")
 
 
 class TooManyBarsError(QuickBacktestInputError):
-    """`BT_QUICK_TOO_MANY_BARS` — 즉시 백테스트 봉 수 상한 초과(BT-11 딥 백테스트 대상)."""
+    """`BT_QUICK_TOO_MANY_BARS` -- quick-backtest bar-count cap exceeded
+    (target for BT-11 deep backtest)."""
 
     details: dict[str, int]
 
 
 class LookAheadError(IndexError):
-    """`BT_QUICK_LOOK_AHEAD` — 전략이 현재 봉보다 뒤의 봉을 읽으려 했다."""
+    """`BT_QUICK_LOOK_AHEAD` -- strategy tried to read a bar beyond the current one."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +106,8 @@ class PositionState:
 
 
 class BarWindow:
-    """`columns[0:end)`만 보이는 읽기 전용 뷰(복사 없음). 음수 인덱스는 창 끝 기준."""
+    """Read-only view exposing only `columns[0:end)` (no copy). Negative
+    indices are relative to the window end."""
 
     __slots__ = ("_columns", "_end")
 
@@ -133,8 +144,8 @@ class BarWindow:
 
 
 class SignalSource(Protocol):
-    """전략 접점. DSL-11 파사드가 컴파일 산출물을 이 형태로 감싼다(I-05) —
-    이 모듈은 전략 내부를 모른다."""
+    """Strategy touchpoint. The DSL-11 facade wraps its compiled output in this
+    shape (I-05) -- this module knows nothing about the strategy internals."""
 
     def on_bar(self, window: BarWindow, position: PositionState) -> OrderIntent | None: ...
 
@@ -149,13 +160,17 @@ class QuickBacktestResult:
     funding_cost: Decimal
     borrow_cost: Decimal
     bars: int
-    expired_orders: int  # 데이터 범위 안에 체결 가능 봉이 없어 버려진 주문 수
+    expired_orders: int  # Orders dropped because no fillable bar existed within the data range
     warnings: tuple[str, ...]
 
 
 def _validate(
-    config: BacktestConfigV2, columns: CandleColumns, timeframe: Timeframe,
-    initial_cash: Decimal, funding_rate: Decimal | None, max_bars: int,
+    config: BacktestConfigV2,
+    columns: CandleColumns,
+    timeframe: Timeframe,
+    initial_cash: Decimal,
+    funding_rate: Decimal | None,
+    max_bars: int,
 ) -> None:
     n = len(columns)
     if n == 0:
@@ -186,16 +201,17 @@ def run_quick_backtest(
     max_bars: int = MAX_QUICK_BARS,
     bracket: BracketMetadata | None = None,
 ) -> QuickBacktestResult:
-    """`columns`(LA-23b 컬럼 경로, `timeframe` 봉) 위에서 `strategy`를 봉마다
-    한 번씩 평가하고 BT-2~8로 체질·비용을 계산한다. 대기 주문은 한 번에
-    하나 — 새 의도가 오면 기존 대기 주문을 대체(취소)한다. Bracket이
-    configure되면, 진입 체결 후 후속 봉에서 bracket 청산 레그(profit/loss/trail)
-    트리거를 감시하고 resolve_oca/bracket_quantity_for_fill로 청산을 처리한다."""
+    """Evaluates `strategy` once per bar over `columns` (LA-23b columnar path,
+    `timeframe` bars) and computes fills/costs via BT-2~8. At most one pending
+    order at a time -- a new intent replaces (cancels) the existing pending
+    order. When a bracket is configured, after the entry fills this watches
+    the bracket exit legs (profit/loss/trail) on subsequent bars and handles
+    the exit via resolve_oca/bracket_quantity_for_fill."""
     _validate(config, columns, timeframe, initial_cash, funding_rate, max_bars)
 
     # Extract bracket metadata from strategy if present (duck typing for _MaterializedSignalSource).
     if bracket is None:
-        bracket = getattr(strategy, 'bracket', None)
+        bracket = getattr(strategy, "bracket", None)
     n = len(columns)
     step = duration(timeframe)
     warnings: list[str] = []
@@ -217,7 +233,11 @@ def run_quick_backtest(
     for i in range(n):
         if pending is not None and i >= pending.execution_index:
             path, lower_cursor = price_path(
-                config, columns, i, timeframe=timeframe, lower_columns=lower_columns,
+                config,
+                columns,
+                i,
+                timeframe=timeframe,
+                lower_columns=lower_columns,
                 lower_cursor=lower_cursor,
             )
             fill = try_fill(config, pending, i, columns, path)
@@ -253,9 +273,7 @@ def run_quick_backtest(
 
         # Check bracket exit legs and generate exit fills when triggered.
         if bracket_exit is not None and not bracket_exit.resolved and qty != 0:
-            bracket_exit_fill = resolve_bracket_exit(
-                columns, i, qty, bracket_exit
-            )
+            bracket_exit_fill = resolve_bracket_exit(columns, i, qty, bracket_exit)
             if bracket_exit_fill is not None:
                 fills.append(bracket_exit_fill)
                 exit_signed = (
@@ -292,8 +310,14 @@ def run_quick_backtest(
     if pending is not None:
         expired += 1
     return QuickBacktestResult(
-        fills=tuple(fills), equity_curve=tuple(equity),
-        final_equity=cash + qty * columns.close[n - 1], cash=cash, position_quantity=qty,
-        funding_cost=funding_total, borrow_cost=borrow_total, bars=n, expired_orders=expired,
+        fills=tuple(fills),
+        equity_curve=tuple(equity),
+        final_equity=cash + qty * columns.close[n - 1],
+        cash=cash,
+        position_quantity=qty,
+        funding_cost=funding_total,
+        borrow_cost=borrow_total,
+        bars=n,
+        expired_orders=expired,
         warnings=tuple(warnings),
     )
