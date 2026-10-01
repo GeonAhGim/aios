@@ -1,9 +1,9 @@
-"""ChartingRepository의 asyncpg 구현 — `chart_layout`/`chart_drawing_set`.
+"""asyncpg implementation of ChartingRepository for `chart_layout`/`chart_drawing_set`.
 
-Spec: 105번(동시성 표준). `create_layout()`이 두 테이블을 하나의 트랜잭션으로
-묶는 유일한 쓰기 경로다 — 그 결과 `put_drawings()`는 `chart_drawing_set`
-행이 항상 존재한다고 가정하고 조건부 UPDATE 하나만 한다(INSERT-or-UPDATE
-분기의 first-write 경합을 설계로 없앤다, ports/repository.py 참조)."""
+Spec: Invariant-105 (concurrency standard). `create_layout()` is the sole write path that
+bundles both tables in a single transaction — as a result, `put_drawings()` assumes the
+`chart_drawing_set` row always exists and issues only a conditional UPDATE (eliminating the
+first-write race of the INSERT-or-UPDATE branch by design; see ports/repository.py)."""
 
 from __future__ import annotations
 
@@ -108,9 +108,10 @@ class PostgresChartingRepository:
         name: str | None,
         layout_state: dict[str, Any] | None,
     ) -> ChartLayout:
-        # `conditional_write.conditional_update()`를 쓰지 않는다 — name/
-        # layout_state가 각각 선택적 부분 갱신이고 jsonb 캐스트도 필요해
-        # 공용 헬퍼의 고정 `set_values` 바인딩 방식으로는 표현할 수 없다.
+        # Do not use `conditional_write.conditional_update()` — name and
+        # layout_state are optional partial updates that also require jsonb
+        # casting, which cannot be expressed with the shared helper's fixed
+        # `set_values` binding pattern.
         # `tenant_id` is stated explicitly in the WHERE clause -- even though
         # the caller (application/update_layout.py) already checked ownership
         # via `load_owned_layout()`, the same principle as the connections
@@ -164,10 +165,10 @@ class PostgresChartingRepository:
         schema_version: int,
         drawings: tuple[dict[str, Any], ...],
     ) -> ChartDrawingSet:
-        # `conditional_write.conditional_update()`를 쓰지 않는다 — 그 헬퍼는
-        # `set_values`를 캐스트 없는 `$N`으로 바인딩하는데, jsonb 컬럼에
-        # `now()` 리터럴까지 같이 넣어야 해서(update_layout()과 동일 이유)
-        # 여기서 직접 조건부 UPDATE 문을 쓴다.
+        # Do not use `conditional_write.conditional_update()` — that helper
+        # binds `set_values` with uncast `$N` placeholders, and we need to
+        # include the `now()` literal alongside jsonb columns (same reason as
+        # `update_layout()`), so we write the conditional UPDATE directly here.
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "UPDATE chart_drawing_set SET schema_version = $3, drawings = $4::jsonb, "
@@ -205,8 +206,8 @@ class PostgresChartingRepository:
                     json.dumps(template),
                 )
             except asyncpg.UniqueViolationError as exc:
-                # uq_chart_indicator_template_tenant_name 위반 — 이 tenant에
-                # 같은 이름의 템플릿이 이미 존재한다.
+                # UniqueViolationError on uq_chart_indicator_template_tenant_name —
+                # a template with the same name already exists for this tenant.
                 raise ConcurrencyConflictError(
                     f"chart_indicator_template: tenant_id={tenant_id} name={name!r} "
                     "템플릿이 이미 존재합니다."
