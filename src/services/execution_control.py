@@ -13,6 +13,7 @@ if the user presses "start" (system triggers take priority over user actions).
 Only executions paused by the user themselves (paused_by=USER) can be resumed
 by that user.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -20,6 +21,7 @@ from uuid import UUID
 
 import asyncpg
 
+from src.core.logging.audit_log import record_audit_log
 from src.services.execution_types import ExecutionControlError, ExecutionSummary
 from src.services.order_service.gate import GateOutcome, OrderContext, PreSubmitGate
 
@@ -30,7 +32,7 @@ async def start(
     execution_id: int,
     user_id: UUID,
 ) -> ExecutionSummary:
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         execution = await conn.fetchrow(
             "SELECT user_id, status, mode, paused_by, allocated_capital, exchange "
             "FROM strategy_executions WHERE id = $1",
@@ -76,9 +78,7 @@ async def start(
             )
         )
         if decision.outcome != GateOutcome.ALLOW:
-            raise ExecutionControlError(
-                f"Risk gate rejected start: {decision.reason_codes}"
-            )
+            raise ExecutionControlError(f"Risk gate rejected start: {decision.reason_codes}")
 
         row = await conn.fetchrow(
             "UPDATE strategy_executions "
@@ -99,6 +99,26 @@ async def start(
                 "Another process changed this execution's status just now — "
                 "re-query and retry (a safety mechanism may have paused it)."
             )
+
+        # G5-1(AUDIT-6, task-10779) — status-change entry point of the same
+        # service layer as create_execution()/convert_to_live(); audited in the
+        # same transaction so a logging failure rolls back the RUNNING transition.
+        await record_audit_log(
+            conn,
+            actor_agent=str(user_id),
+            action_type="execution.started",
+            decision_data={
+                "execution_id": execution_id,
+                "mode": row["mode"],
+                "exchange": row["exchange"],
+                "allocated_capital": row["allocated_capital"],
+                "status_before": execution["status"],
+                "status_after": row["status"],
+            },
+            user_id=user_id,
+            target_type="strategy_execution",
+            target_id=str(execution_id),
+        )
     return ExecutionSummary(
         id=execution_id,
         status=row["status"],
@@ -118,7 +138,7 @@ async def pause(
     if paused_by not in ("USER", "SAFETY_LAYER"):
         raise ExecutionControlError(f"Unknown paused_by value: {paused_by}")
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         execution = await conn.fetchrow(
             "SELECT user_id, status, mode, exchange, allocated_capital "
             "FROM strategy_executions WHERE id = $1",
@@ -148,6 +168,26 @@ async def pause(
             raise ExecutionControlError(
                 "Another process already paused this execution — re-query and try again."
             )
+
+        # G5-1(AUDIT-6, task-10779) — paused_by=SAFETY_LAYER has no human user_id;
+        # the system actor name is recorded instead so the row never stays unaudited.
+        await record_audit_log(
+            conn,
+            actor_agent=str(user_id) if user_id is not None else paused_by,
+            action_type="execution.paused",
+            decision_data={
+                "execution_id": execution_id,
+                "mode": row["mode"],
+                "exchange": row["exchange"],
+                "allocated_capital": row["allocated_capital"],
+                "paused_by": paused_by,
+                "status_before": execution["status"],
+                "status_after": row["status"],
+            },
+            user_id=user_id,
+            target_type="strategy_execution",
+            target_id=str(execution_id),
+        )
     return ExecutionSummary(
         id=execution_id,
         status=row["status"],
@@ -171,7 +211,7 @@ async def set_max_drawdown(
     if max_drawdown_pct is not None and not (0 < max_drawdown_pct <= 100):
         raise ExecutionControlError("Loss limit must be greater than 0 and at most 100.")
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         row = await conn.fetchrow(
             "UPDATE strategy_executions SET max_drawdown_pct = $3 "
             "WHERE id = $1 AND user_id = $2 "
@@ -180,8 +220,26 @@ async def set_max_drawdown(
             user_id,
             max_drawdown_pct,
         )
-    if row is None:
-        raise ExecutionControlError("You can only control your own executions.")
+        if row is None:
+            raise ExecutionControlError("You can only control your own executions.")
+
+        # G5-1(AUDIT-6, task-10779) — risk-guard threshold change on a capital-
+        # bearing execution; audited in the same transaction (fail-closed).
+        await record_audit_log(
+            conn,
+            actor_agent=str(user_id),
+            action_type="execution.max_drawdown_set",
+            decision_data={
+                "execution_id": execution_id,
+                "mode": row["mode"],
+                "exchange": row["exchange"],
+                "allocated_capital": row["allocated_capital"],
+                "max_drawdown_pct": max_drawdown_pct,
+            },
+            user_id=user_id,
+            target_type="strategy_execution",
+            target_id=str(execution_id),
+        )
     return ExecutionSummary(
         id=execution_id,
         status=row["status"],
@@ -202,7 +260,7 @@ async def retire(
     if liquidation not in ("IMMEDIATE_MARKET", "KEEP_POSITIONS"):
         raise ExecutionControlError(f"Unknown liquidation method: {liquidation}")
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         execution = await conn.fetchrow(
             "SELECT user_id, status, mode, exchange, allocated_capital "
             "FROM strategy_executions WHERE id = $1",
@@ -231,6 +289,26 @@ async def retire(
             raise ExecutionControlError(
                 "Another process already changed this execution's status — re-query."
             )
+
+        # G5-1(AUDIT-6, task-10779) — terminates the capital allocation; audited
+        # in the same transaction (fail-closed).
+        await record_audit_log(
+            conn,
+            actor_agent=str(user_id),
+            action_type="execution.retired",
+            decision_data={
+                "execution_id": execution_id,
+                "mode": row["mode"],
+                "exchange": row["exchange"],
+                "allocated_capital": row["allocated_capital"],
+                "liquidation": liquidation,
+                "status_before": execution["status"],
+                "status_after": row["status"],
+            },
+            user_id=user_id,
+            target_type="strategy_execution",
+            target_id=str(execution_id),
+        )
     return ExecutionSummary(
         id=execution_id,
         status=row["status"],

@@ -41,6 +41,7 @@ import asyncpg
 
 from src.core.approval import service as approval
 from src.core.loader.risk_policy_loader import RiskPolicy
+from src.core.logging.audit_log import record_audit_log
 from src.services import execution_control
 from src.services.approval_settings_service import ApprovalSettingsService
 from src.services.capital_allocation import validate_capital_allocation
@@ -100,7 +101,7 @@ class ExecutionService:
         if mode == "LIVE" and exchange == KIS_EXCHANGE:
             raise ExecutionCreateError("Phase 1은 암호화폐 거래소만 실거래 가능합니다.")
 
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
             strategy = await conn.fetchrow(
                 "SELECT lifecycle_status, certified_badge FROM strategies "
                 "WHERE strategy_id = $1 AND version = $2",
@@ -145,6 +146,28 @@ class ExecutionService:
                 currency,
             )
             execution_id = row["id"]
+
+            # G5-1/P0-3(AUDIT-6, task-10779) — fail-closed: the audit row is written
+            # in the same transaction as the INSERT, so a logging failure rolls back
+            # the execution row instead of leaving an unaudited capital allocation.
+            await record_audit_log(
+                conn,
+                actor_agent=str(user_id),
+                action_type="execution.created",
+                decision_data={
+                    "execution_id": execution_id,
+                    "strategy_id": strategy_id,
+                    "strategy_version": strategy_version,
+                    "exchange": exchange,
+                    "mode": mode,
+                    "allocated_capital": allocated_capital,
+                    "currency": currency,
+                    "status_after": row["status"],
+                },
+                user_id=user_id,
+                target_type="strategy_execution",
+                target_id=str(execution_id),
+            )
 
         approval_request_id = None
         if mode == "LIVE":
@@ -241,10 +264,30 @@ class ExecutionService:
             available_balance=available_balance,
         )
 
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 "UPDATE strategy_executions SET converted_from_execution_id = $2 WHERE id = $1",
                 result.id,
                 source_execution_id,
+            )
+            # G5-1/P0-3(AUDIT-6, task-10779) — the LIVE conversion itself (distinct
+            # from the create_execution() call above, which already logs its own
+            # "execution.created" row) needs its own audited before/after state.
+            await record_audit_log(
+                conn,
+                actor_agent=str(user_id),
+                action_type="execution.converted_to_live",
+                decision_data={
+                    "source_execution_id": source_execution_id,
+                    "new_execution_id": result.id,
+                    "allocated_capital": allocated_capital,
+                    "currency": currency,
+                    "exchange": exchange,
+                    "mode_before": "PAPER",
+                    "mode_after": "LIVE",
+                },
+                user_id=user_id,
+                target_type="strategy_execution",
+                target_id=str(result.id),
             )
         return result
