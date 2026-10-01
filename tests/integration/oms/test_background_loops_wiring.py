@@ -26,6 +26,7 @@ from src.core.observability.loop_health import LoopHealth
 from src.core.safety.metrics_collector import ApiCallTracker
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
+from src.services.alert_service import AlertService
 from src.services.background_loops import start_background_loops
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
@@ -157,9 +158,7 @@ async def test_start_background_loops_wires_four_core_loops_and_scheduler(
     monkeypatch.setattr(background_loops_module, "ALERT_EVALUATION_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr(background_loops_module, "RISK_GUARD_INTERVAL_SECONDS", 0.05)
     monkeypatch.setattr(background_loops_module, "SAFETY_REACTIVATION_INTERVAL_SECONDS", 0.05)
-    monkeypatch.setattr(
-        pdl_monitor_module, "PERSONAL_DAILY_LOSS_MONITOR_INTERVAL_SECONDS", 0.05
-    )
+    monkeypatch.setattr(pdl_monitor_module, "PERSONAL_DAILY_LOSS_MONITOR_INTERVAL_SECONDS", 0.05)
     monkeypatch.delenv("PERSONAL_MODE_ACCOUNT_ID", raising=False)
     monkeypatch.setenv("AIOS_EXECUTION_LOOP_ENABLED", "0")
     monkeypatch.setenv("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
@@ -168,7 +167,10 @@ async def test_start_background_loops_wires_four_core_loops_and_scheduler(
 
     health = LoopHealth()
     core_loop_names = (
-        "heartbeat", "alert_evaluation", "risk_guard", "safety_reactivation",
+        "heartbeat",
+        "alert_evaluation",
+        "risk_guard",
+        "safety_reactivation",
         "personal_daily_loss_monitor",
     )
 
@@ -199,5 +201,52 @@ async def test_start_background_loops_wires_four_core_loops_and_scheduler(
         # execution_loop/liquidation_worker/post_trade_batch/oms_dispatcher 전부
         # 플래그 off라 코어 5개만 남는다.
         assert len(loops.tasks) == 5
+    finally:
+        await loops.stop()
+
+
+async def test_alert_loop_survives_repeated_tick_failures(pool, monkeypatch) -> None:
+    """negative/failure-injection — `run_periodic_loop`이 tick 예외를 삼키고
+    다음 주기에 재시도한다는 주석(위 Red team #2026-09-02-21)이 지금까지
+    코드로 증명된 적이 없다. `AlertService.evaluate_all_active`가 매번
+    예외를 던지도록 몽키패치해, alert_evaluation 태스크가 heartbeat와 달리
+    죽지 않고(`asyncio.Task.done()`이 False) `LoopHealth`에 연속 실패를
+    계속 기록하는지(죽어서 더는 tick을 안 남기는 게 아니라 실제로 재시도
+    중인지) 둘 다 결정론적으로 짧게 기다려 확인한다."""
+    monkeypatch.setattr(background_loops_module, "ALERT_EVALUATION_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setenv("AIOS_EXECUTION_LOOP_ENABLED", "0")
+    monkeypatch.setenv("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
+    monkeypatch.setenv("AIOS_POST_TRADE_BATCH_ENABLED", "0")
+    monkeypatch.setenv("AIOS_STARTUP_RECOVERY_ENABLED", "0")
+
+    async def _always_fails(self: AlertService) -> None:
+        raise RuntimeError("injected alert_evaluation failure — depth test only")
+
+    monkeypatch.setattr(AlertService, "evaluate_all_active", _always_fails)
+
+    health = LoopHealth()
+    loops = await background_loops_module.start_background_loops(
+        pool=pool,
+        policy=load_risk_policy(),
+        event_bus=InProcessEventBus(),
+        credential_resolver=_StubCredentialResolver(ScriptedAdapter()),
+        api_tracker=ApiCallTracker(),
+        health=health,
+    )
+    try:
+        for _ in range(100):
+            snapshot = health.snapshot()
+            tick = snapshot.get("alert_evaluation")
+            if tick is not None and tick.consecutive_failures >= 3:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError(
+                "alert_evaluation이 반복 예외로 연속 실패를 3회 이상 기록하지 않았다"
+                " — 실패 흡수/재시도 배선 회귀"
+            )
+        tick = health.snapshot()["alert_evaluation"]
+        assert tick.last_success_at is None  # 매 tick이 예외라 성공 기록이 없다
+        assert not any(t.done() for t in loops.tasks)  # 전부 생존(크래시로 죽지 않음)
     finally:
         await loops.stop()
