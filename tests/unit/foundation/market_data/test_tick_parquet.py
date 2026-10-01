@@ -1,4 +1,5 @@
 """DC-23 exact round trips, fail-closed partitions and million-tick streaming."""
+
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -24,11 +25,16 @@ TS = 1767225600000000001
 def record(kind="trades", **changes):
     values = dict(instrument_id=ID, venue=VENUE, ts_event=TS, ts_recv=TS + 123, seq=0)
     if kind == "trades":
-        values.update(price=Decimal("123.45000000000000000001"), size=Decimal("1E-20"),
-                      aggressor="BUY")
+        values.update(
+            price=Decimal("123.45000000000000000001"), size=Decimal("1E-20"), aggressor="BUY"
+        )
     else:
-        values.update(bid_price=Decimal("123.4500"), ask_price=Decimal("124.0000"),
-                      bid_size=Decimal("0E-10"), ask_size=Decimal("1E-20"))
+        values.update(
+            bid_price=Decimal("123.4500"),
+            ask_price=Decimal("124.0000"),
+            bid_size=Decimal("0E-10"),
+            ask_size=Decimal("1E-20"),
+        )
     values.update(changes)
     return (TradeTick if kind == "trades" else QuoteL1)(**values)
 
@@ -52,8 +58,9 @@ def test_exact_round_trip(tmp_path, kind):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("change", [dict(ts_event=TS - 2), dict(instrument_id=ID[:-1] + "W"),
-                                   dict(venue=Venue.BITGET)])
+@pytest.mark.parametrize(
+    "change", [dict(ts_event=TS - 2), dict(instrument_id=ID[:-1] + "W"), dict(venue=Venue.BITGET)]
+)
 def test_partition_mismatch_never_publishes(tmp_path, change):
     store = TickParquetStorage(tmp_path, batch_size=1)
     with pytest.raises(ValueError, match="partition"):
@@ -134,7 +141,8 @@ def test_concurrent_publication_and_independent_replay(tmp_path, monkeypatch, ki
     def publish(seq):
         try:
             return TickParquetStorage(tmp_path).write_day(
-                VENUE, ID, DAY, [record(kind, seq=seq)], kind=kind)
+                VENUE, ID, DAY, [record(kind, seq=seq)], kind=kind
+            )
         except FileExistsError:
             return None
 
@@ -143,8 +151,9 @@ def test_concurrent_publication_and_independent_replay(tmp_path, monkeypatch, ki
     assert sum(result is not None for result in results) == (1 if conflict else 2)
     monkeypatch.setattr(tick_parquet.os, "link", link)
     reader = TickParquetStorage(tmp_path)
-    rows = [row for batch in reader.read_columns(VENUE, ID, DAY, kind=kind)
-            for row in batch.to_pylist()]
+    rows = [
+        row for batch in reader.read_columns(VENUE, ID, DAY, kind=kind) for row in batch.to_pylist()
+    ]
     winner = int(rows[0]["seq"])
     path = next(result for result in results if result is not None)
     before = path.read_bytes()
@@ -171,3 +180,67 @@ def test_interrupted_stream_and_unvalidated_model_fail_closed(tmp_path, kind):
     assert not list(tmp_path.rglob("*.tmp"))
     store.write_day(VENUE, ID, DAY, [record(kind)], kind=kind)
 
+
+# ── D3 증빙: 실패 주입 + 게이트 적색 재현 ──────────────────────────────
+
+
+def test_fail_injected_io_error_cleans_up(tmp_path, monkeypatch):
+    """DC-23 D3: pq.ParquetWriter IOError → 파티션 반쪽쓰기·.tmp 누수 없음.
+
+    의존성(side_effect) 예외 주입으로 실제 결함을 재현:
+    Writer.__exit__ 이후 os.link 전에 IOError가 발생하면 finally 블록이
+    temporary 파일을 반드시 정리해야 한다. 정리되지 않으면 다음 재시도에
+    FileExistsError를 유발한다.
+    """
+    import pyarrow.parquet as pq_mod
+
+    original_parquet_writer = pq_mod.ParquetWriter
+
+    class FailingParquetWriter:
+        def __init__(self, *args, **kwargs):
+            self._real = original_parquet_writer(*args, **kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._real.__exit__(*exc)
+
+        def write_batch(self, batch):
+            raise OSError("simulated disk full")
+
+        def write_table(self, table):
+            raise OSError("simulated disk full")
+
+    monkeypatch.setattr(pq_mod, "ParquetWriter", FailingParquetWriter)
+    store = TickParquetStorage(tmp_path, batch_size=2)
+    with pytest.raises(OSError, match="simulated disk full"):
+        store.write_day(VENUE, ID, DAY, [record(kind="trades")], kind="trades")
+    # finally: temporary 파일이 남지 않았는지 확인
+    tmp_files = list(tmp_path.rglob("*.tmp"))
+    assert tmp_files == [], f".tmp 파일 누수: {tmp_files}"
+    # 파티션 파일도 생성되지 않았어야 함
+    parquet_files = list(tmp_path.rglob("*.parquet"))
+    assert parquet_files == [], f"반쪽쓰기 parquet: {parquet_files}"
+
+
+def test_gate_red_corrupt_parquet_raises(tmp_path):
+    """DC-23 D3 gate_red: 손상된 parquet 파일이 read_columns에서 실제로 실패함을 증명.
+
+    이 테스트는 게이트(검증)가 실제로 적색으로 떨어지는지를 확인한다.
+    유효한 파일을 작성한 뒤 바이너리를 훼손하고, read_columns가
+    Exception을 raising 하는지를 단언한다 — 게이트가 무음 통과하지 않음을 확인.
+    """
+    store = TickParquetStorage(tmp_path, batch_size=2)
+    path = store.write_day(VENUE, ID, DAY, [record("trades")], kind="trades")
+    # 원본 바이트 저장
+    original_bytes = path.read_bytes()
+    # 파일 바이너리 훼손: 중간 영역을 0x00으로 덮어쓰기 (파라켓 구조 파괴)
+    corrupted = bytearray(original_bytes)
+    mid = len(corrupted) // 2
+    for i in range(mid, min(mid + 100, len(corrupted))):
+        corrupted[i] = 0x00
+    path.write_bytes(bytes(corrupted))
+    # 게이트 적색 재현: read_columns가 실제로 실패해야 함
+    with pytest.raises((ValueError, OSError, pa.lib.ArrowInvalid)):
+        list(store.read_columns(VENUE, ID, DAY, kind="trades"))
