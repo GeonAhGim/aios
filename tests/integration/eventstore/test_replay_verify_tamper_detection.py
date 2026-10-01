@@ -25,6 +25,7 @@ from scripts import replay_verify
 from src.core.eventstore import replay
 from src.core.eventstore.projections.orders import EventChainBrokenError
 from src.data.models.trading import OrderStatus
+from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from tests.integration.conftest import create_test_user
 from tests.integration.eventstore._replay_verify_support import (
@@ -345,3 +346,146 @@ async def test_replay_still_raises_for_post_cutover_broken_event_chain(pool):
                 "UPDATE oms_order_transition_cutover SET cutover_at = NULL, armed_by = NULL "
                 "WHERE id = 1"
             )
+
+
+async def test_replay_detects_average_fill_price_tampered_outside_the_event_trail(pool):
+    """Negative test extending the FA-15 invariant to another `_ORDER_FIELDS`
+    entry -- `average_fill_price`. Unlike `filled_quantity`/`fee_total`,
+    this column is a plain `NUMERIC(30,10)` with no default (NULL until a
+    fill actually lands), so a direct literal `UPDATE` (not `+1` arithmetic)
+    is enough to desync it from the projected value without tripping
+    073beca589d5's I6 guard (armed only on a `status` change)."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                order_id = await insert_order(conn, user_id, status="CREATED")
+                await PostgresOrderRepository().transition(
+                    conn,
+                    order_id=order_id,
+                    expected_status=OrderStatus.CREATED,
+                    expected_version=0,
+                    new_status=OrderStatus.VALIDATED,
+                    patch={},
+                    event=_order_event(
+                        order_id,
+                        from_status=OrderStatus.CREATED,
+                        to_status=OrderStatus.VALIDATED,
+                        event="VALIDATED",
+                    ),
+                )
+
+                cutover_at = await replay_verify._cutover_at(conn)
+                clean_pair = await replay_verify._order_pair(conn, order_id, cutover_at=cutover_at)
+                assert clean_pair is not None
+                clean_replayed, clean_actual = clean_pair
+                assert replay.digest_state(clean_replayed) == replay.digest_state(clean_actual)
+
+                await conn.execute(
+                    "UPDATE orders SET average_fill_price = 100.5 WHERE order_id = $1",
+                    order_id,
+                )
+
+                tampered_pair = await replay_verify._order_pair(
+                    conn, order_id, cutover_at=cutover_at
+                )
+                assert tampered_pair is not None
+                tampered_replayed, tampered_actual = tampered_pair
+                assert (
+                    tampered_replayed["average_fill_price"] != tampered_actual["average_fill_price"]
+                )
+                assert replay.digest_state(tampered_replayed) != replay.digest_state(
+                    tampered_actual
+                )
+
+                raise _DiscardTransaction
+        except _DiscardTransaction:
+            pass
+
+
+async def test_replay_detects_fee_currency_tampered_outside_the_event_trail(pool):
+    """Negative test extending the FA-15 invariant to `fee_currency` (the
+    remaining untested `_ORDER_FIELDS` entry). Like `average_fill_price`,
+    this column has no default and stays NULL until a fill posts a
+    commission, so a direct literal `UPDATE` desyncs it from the projected
+    (still-NULL) value without touching `status`."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        try:
+            async with conn.transaction():
+                order_id = await insert_order(conn, user_id, status="CREATED")
+                await PostgresOrderRepository().transition(
+                    conn,
+                    order_id=order_id,
+                    expected_status=OrderStatus.CREATED,
+                    expected_version=0,
+                    new_status=OrderStatus.VALIDATED,
+                    patch={},
+                    event=_order_event(
+                        order_id,
+                        from_status=OrderStatus.CREATED,
+                        to_status=OrderStatus.VALIDATED,
+                        event="VALIDATED",
+                    ),
+                )
+
+                cutover_at = await replay_verify._cutover_at(conn)
+                clean_pair = await replay_verify._order_pair(conn, order_id, cutover_at=cutover_at)
+                assert clean_pair is not None
+                clean_replayed, clean_actual = clean_pair
+                assert replay.digest_state(clean_replayed) == replay.digest_state(clean_actual)
+
+                await conn.execute(
+                    "UPDATE orders SET fee_currency = 'KRW' WHERE order_id = $1",
+                    order_id,
+                )
+
+                tampered_pair = await replay_verify._order_pair(
+                    conn, order_id, cutover_at=cutover_at
+                )
+                assert tampered_pair is not None
+                tampered_replayed, tampered_actual = tampered_pair
+                assert tampered_replayed["fee_currency"] != tampered_actual["fee_currency"]
+                assert replay.digest_state(tampered_replayed) != replay.digest_state(
+                    tampered_actual
+                )
+
+                raise _DiscardTransaction
+        except _DiscardTransaction:
+            pass
+
+
+async def test_replay_raises_when_order_timeline_lookup_fails_instead_of_reporting_false_ok(
+    pool, monkeypatch
+):
+    """Failure-injection test (D2 checklist item, task-4084 기준) -- if the
+    order-events timeline lookup `_order_pair` relies on raises, `verify()`
+    must never swallow it into a false `ok=True`/skipped stream. Mirrors
+    `test_replay_raises_when_a_dependency_fails_instead_of_reporting_false_ok`
+    in `test_replay_verify.py` (same invariant, different dependency)."""
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await insert_order(conn, user_id, status="CREATED")
+        await PostgresOrderRepository().transition(
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.CREATED,
+            expected_version=0,
+            new_status=OrderStatus.VALIDATED,
+            patch={},
+            event=_order_event(
+                order_id,
+                from_status=OrderStatus.CREATED,
+                to_status=OrderStatus.VALIDATED,
+                event="VALIDATED",
+            ),
+        )
+    as_of = _clock() + timedelta(minutes=1)
+
+    async def _raise_timeline_error(self, conn, order_id):
+        raise RuntimeError("injected dependency failure -- order timeline unavailable")
+
+    monkeypatch.setattr(PostgresOrderEventRepository, "timeline", _raise_timeline_error)
+
+    with pytest.raises(RuntimeError, match="injected dependency failure"):
+        await replay_verify.verify(pool, as_of=as_of, hours=1)
