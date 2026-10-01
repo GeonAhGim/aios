@@ -1,12 +1,13 @@
-"""108 §2 구조화 로그 필수 필드 집합 — 단일 출처.
+"""108 §2 structured logging required field set — single source of truth.
 
 Spec: docs/design/codex/108_structured_logging_and_observability_field_standard_v1.0.md §2,
 docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-02.
 
-`REQUIRED_FIELDS`가 108 §2 표의 8필드를 나열하는 유일한 정의다 — 다른 모듈(PLT-03의
-schema.py, 메트릭/알림 검증 등)은 이 상수를 import해서 비교하고, 여기서 다시
-하드코딩하지 않는다. `StructuredLogLine`은 이 8필드에 로그 라인 자체에 필요한
-비-108 필드(timestamp/message/extra)를 더한 pydantic 모델이다.
+`REQUIRED_FIELDS` is the sole definition listing the 8 fields from 108 §2 table — other
+modules (schema.py for PLT-03, metric/notification validators, etc.) import this constant
+to compare against and never hardcode the set again. `StructuredLogLine` is a Pydantic model
+that adds non-108 fields (timestamp/message/extra) needed for log line rendering on top of
+these 8 fields.
 """
 
 from __future__ import annotations
@@ -21,9 +22,9 @@ from src.core.observability.context import RequestContext
 
 Level = Literal["debug", "info", "warn", "error"]
 
-# 108 §2 표 순서 그대로 — trace_id, tenant_id, actor_subject_id, command_id(또는
-# query_id), component, event, level, duration_ms. `critical`은 로그 레벨로 쓰지
-# 않는다(§2 표 `level` 행) — CRITICAL 이벤트는 level="error" + event="*_critical"로 남긴다.
+# 108 §2 table order as-is — trace_id, tenant_id, actor_subject_id, command_id (or
+# query_id), component, event, level, duration_ms. "critical" is not used as a log level
+# (§2 table `level` row) — CRITICAL events are recorded as level="error" + event="*_critical".
 REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     "trace_id",
     "tenant_id",
@@ -45,10 +46,11 @@ _LEVEL_MAP: Final[dict[str, Level]] = {
 
 
 class StructuredLogLine(BaseModel):
-    """108 §2 필드 + 로그 라인 렌더링에 필요한 timestamp/message/extra.
+    """108 §2 fields + timestamp/message/extra needed for log line rendering.
 
-    필드 이름·타입은 §2 표와 동일해야 한다(`test_fields.py`가 `REQUIRED_FIELDS`와
-    이 모델의 필드 집합이 정확히 일치하는지 — 추가·누락 모두 실패하도록 — 검증한다).
+    Field names and types must match the §2 table exactly (`test_fields.py` verifies that
+    the field set of `REQUIRED_FIELDS` and this model match precisely — adding or omitting
+    any field causes failure).
 
     `extra="forbid"`: pydantic's default (`extra="ignore"`) would silently drop a
     caller's typo'd field (e.g. `trace__id`) into `.model_extra`, leaving `.trace_id`
@@ -80,10 +82,10 @@ class StructuredLogLine(BaseModel):
 
 
 def from_record(record: logging.LogRecord, ctx: RequestContext) -> StructuredLogLine:
-    """`LogRecord` + 현재 `RequestContext`로부터 `StructuredLogLine`을 만든다.
+    """Construct `StructuredLogLine` from `LogRecord` + current `RequestContext`.
 
-    `event`/`duration_ms`/`payload`는 호출자가 `logging.info(msg, extra={...})`로
-    명시하지 않으면 각각 기본값(`log.unstructured`/`None`/`{}`)으로 채워진다.
+    `event`/`duration_ms`/`payload` default to `log.unstructured`/`None`/`{}` if the caller
+    did not explicitly pass them via `logging.info(msg, extra={...})`.
     """
     raw_duration = getattr(record, "duration_ms", None)
     return StructuredLogLine(
