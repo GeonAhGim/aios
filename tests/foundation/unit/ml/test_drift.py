@@ -5,8 +5,6 @@ performance assertion 1, gate-red reproduction 1.
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 import pytest
 
@@ -18,6 +16,7 @@ from src.foundation.ml.domain.drift import (
     ks_statistic,
     population_stability_index,
 )
+from tests.conftest import PerfBudget
 
 _RNG = np.random.default_rng(seed=42)
 
@@ -108,16 +107,12 @@ def _p95(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_evaluate_drift_p95_latency_within_budget() -> None:
+def test_evaluate_drift_p95_latency_within_budget(perf_budget: PerfBudget) -> None:
     baseline = _stable_sample()
     current = _stable_sample()
-    samples: list[float] = []
-    for _ in range(50):
-        started = time.perf_counter()
-        evaluate_drift("rsi_14", baseline, current)
-        samples.append((time.perf_counter() - started) * 1000)
-
-    p95_ms = _p95(samples)
+    raw = perf_budget.samples(lambda: evaluate_drift("rsi_14", baseline, current), n=50)
+    cpu_ms_values = sorted(s.cpu_ms for s in raw)
+    p95_ms = cpu_ms_values[min(int(len(cpu_ms_values) * 0.95), len(cpu_ms_values) - 1)]
     print(f"[AI-18 evaluate_drift] p95={p95_ms:.4f}ms budget<{_EVALUATE_BUDGET_MS:.1f}ms")
     assert p95_ms < _EVALUATE_BUDGET_MS
 
@@ -126,17 +121,20 @@ def test_evaluate_drift_p95_latency_within_budget() -> None:
 
 
 @pytest.mark.perf
-def test_gate_red_absurdly_low_budget_actually_fails() -> None:
+def test_gate_red_absurdly_low_budget_actually_fails(perf_budget: PerfBudget) -> None:
     """Proves the perf assertion above is not a tautology -- an absurdly
-    low budget against the same kind of samples must fail."""
+    low budget against the same kind of samples must fail.
+
+    Uses wall_ms because process_time() resolution (~15ms on Windows)
+    is too coarse to distinguish sub-millisecond operations; wall-clock
+    measurement is required for the absurdly-low budget to be meaningful.
+    """
     baseline = _stable_sample()
     current = _stable_sample()
-    samples: list[float] = []
-    for _ in range(10):
-        started = time.perf_counter()
-        evaluate_drift("rsi_14", baseline, current)
-        samples.append((time.perf_counter() - started) * 1000)
+    raw = perf_budget.samples(lambda: evaluate_drift("rsi_14", baseline, current), n=10)
+    wall_ms_values = sorted(s.wall_ms for s in raw)
+    p95_ms = wall_ms_values[min(int(len(wall_ms_values) * 0.95), len(wall_ms_values) - 1)]
 
     absurdly_low_budget_ms = 1e-9
     with pytest.raises(AssertionError):
-        assert _p95(samples) < absurdly_low_budget_ms
+        assert p95_ms < absurdly_low_budget_ms
