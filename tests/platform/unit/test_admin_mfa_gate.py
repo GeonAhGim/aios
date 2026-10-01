@@ -31,6 +31,7 @@ import pytest
 
 from src.api.admin_deps import get_current_mfa_admin
 from src.api.deps import AuthenticatedUser
+from src.core.security import break_glass
 from src.core.security.break_glass import AdminMfaRequiredError
 
 
@@ -81,13 +82,25 @@ async def test_mfa_verified_at_exactly_at_window_boundary_passes():
     assert result is admin
 
 
-async def test_mfa_verified_at_exactly_at_15min_boundary_rejected():
-    """불변식 위반 입력 — 정확히 15분이 지난 시점은 게이트를 통과하지 못한다.
-    `mfa_step_up_fresh`의 `(now - mfa_verified_at) <= MFA_STEP_UP_WINDOW`
-    조건에서 15:00은 > 창이므로 거부되어야 한다."""
-    admin = _admin(mfa_verified_at=datetime.now(timezone.utc) - timedelta(minutes=15))
+async def test_mfa_verified_just_past_15min_boundary_rejected():
+    """불변식 위반 입력 — 15분 창을 막 넘긴 시점은 게이트를 통과하지 못한다.
+
+    예전 버전은 `now - 15분`을 넣고 "그 사이 시간이 흘러 15분을 넘는다"에 기대었다 —
+    Windows의 `datetime.now()` 해상도(약 15.6ms)에서는 두 번의 now()가 같은 값을 돌려줘
+    경과가 정확히 15분(= 창 안, `<=`)이 되어 간헐적으로 통과했다. 경계는 아래 순수 함수
+    테스트가 주입한 시각으로 고정하고, 게이트는 창을 확실히 넘긴 입력으로 검증한다."""
+    admin = _admin(mfa_verified_at=datetime.now(timezone.utc) - timedelta(minutes=15, seconds=1))
     with pytest.raises(AdminMfaRequiredError, match=str(admin.user_id)):
         await get_current_mfa_admin(admin=admin)
+
+
+def test_mfa_step_up_window_boundary_is_inclusive_and_exact():
+    """경계 고정(시각 주입) — 정확히 15분은 창 안(`<=`), 1마이크로초라도 넘으면 창 밖."""
+    now = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
+    window = break_glass.MFA_STEP_UP_WINDOW
+    assert break_glass.mfa_step_up_fresh(now - window, now=now) is True
+    assert break_glass.mfa_step_up_fresh(now - window - timedelta(microseconds=1), now=now) is False
+    assert break_glass.mfa_step_up_fresh(None, now=now) is False
 
 
 async def test_mfa_enabled_but_never_verified_rejected():

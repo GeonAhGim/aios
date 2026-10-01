@@ -32,6 +32,8 @@ def _top_level_tests(path: Path) -> list[str]:
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith(
             "test_"
         ):
+            if any("fixture" in ast.unparse(dec) for dec in node.decorator_list):
+                continue  # a fixture that happens to be named test_* (e.g. `test_app`)
             names.append(node.name)
         elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
             names.extend(
@@ -79,4 +81,10 @@ def test_guard_ignores_helpers_and_fixtures(tmp_path: Path) -> None:
     (tmp_path / "support").mkdir()
     (tmp_path / "support" / "helpers.py").write_text("def make_thing():\n    return 1\n", "utf-8")
     (tmp_path / "conftest.py").write_text("def pool():\n    return None\n", "utf-8")
+    assert _offenders(tmp_path) == {}
+
+
+def test_guard_ignores_fixtures_named_like_tests(tmp_path: Path) -> None:
+    source = "import pytest\n\n\n@pytest.fixture\ndef test_app():\n    return object()\n"
+    (tmp_path / "conftest.py").write_text(source, "utf-8")
     assert _offenders(tmp_path) == {}

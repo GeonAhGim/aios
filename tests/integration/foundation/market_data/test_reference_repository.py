@@ -111,7 +111,11 @@ async def test_rename_alias_resolves_only_within_its_own_period(pool, repo):
     async with pool.acquire() as conn, conn.transaction():
         await repo.add_alias(conn, instrument.instrument_id, Venue.KIS_KRX, new_symbol)
 
-    after_rename = datetime.now(timezone.utc)
+    # The alias period is stamped with the DB clock. Reading "after" from Python's clock made
+    # this flaky on Windows: `datetime.now()` ticks every ~15.6ms, so it could return an instant
+    # that is still before the rename's DB timestamp. Ask the same clock that stamped it.
+    async with pool.acquire() as conn:
+        after_rename = (await conn.fetchval("SELECT clock_timestamp()")).astimezone(timezone.utc)
     async with pool.acquire() as conn, conn.transaction():
         via_old_after_rename = await repo.get_instrument(
             conn, Venue.KIS_KRX, old_symbol, after_rename
