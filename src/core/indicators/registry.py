@@ -1,13 +1,15 @@
-"""L02 — 지표 조회·파라미터 검증·lookback·registry_hash 단일 진입점.
+"""L02 — Single entry point for indicator lookup, parameter validation, lookback, and registry_hash.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.2 L02
 
-순수 모듈 — I/O 없음, L01(`spec`, `specs_talib`)만 소비하고 지표 계산은
-하지 않는다. `registry_hash()`는 `strategy_artifact.registry_version`의
-입력이 되므로(§7 아티팩트 해시 규칙) dict 순서·부동소수에 의존하지 않게
-스펙 이름으로 정렬한 뒤 `sort_keys` JSON으로 정준 직렬화한다. `lookback`
-콜러블 자체(함수 객체)는 해시에 넣을 수 없으므로 `__name__`으로 대신한다 —
-동일 모듈에서 재기동해도 같은 이름이 나오므로 프로세스 재기동에 안정적이다.
+Pure module — no I/O, consumes only L01 (`spec`, `specs_talib`), and does not
+perform indicator calculations. `registry_hash()` feeds into
+`strategy_artifact.registry_version` (§7 artifact hash rules), so it sorts
+spec names (independent of dict order and floating-point values) and
+serialises to canonical JSON with `sort_keys`. The `lookback` callable
+itself (a function object) cannot be hashed, so we use its `__name__`
+instead — the same name is produced across process restarts, ensuring
+stability on restart.
 """
 
 from __future__ import annotations
@@ -22,9 +24,9 @@ from src.core.indicators.specs_talib import TALIB_SPECS
 
 
 def canonical_spec_dict(name: str, spec: IndicatorSpec) -> dict[str, object]:
-    """스펙 하나를 JSON 직렬화 가능한 정준 형태로 만든다(`registry_hash` 및
-    IND-10 생성 결정론 테스트 공용 — `lookback` 콜러블 자체는 해시에 못 넣으므로
-    `__name__`으로 대신한다)."""
+    """Produce a canonical JSON-serialisable form of one spec (shared by
+    `registry_hash` and the IND-10 determinism tests — the `lookback`
+    callable itself cannot be hashed, so we substitute its `__name__`)."""
     return {
         "name": name,
         "inputs": list(spec.inputs),
@@ -56,7 +58,8 @@ def canonical_spec_dict(name: str, spec: IndicatorSpec) -> dict[str, object]:
 
 
 class IndicatorError(Exception):
-    """레지스트리 조회/검증 실패. `code`는 API 계층이 400 매핑에 쓴다."""
+    """Registry lookup/validation failure. `code` is used by the API layer
+    to map to 400 responses."""
 
     def __init__(self, code: str) -> None:
         super().__init__(code)
@@ -64,7 +67,7 @@ class IndicatorError(Exception):
 
 
 class IndicatorRegistry:
-    """지표 스펙 조회·파라미터 검증·lookback 산출 단일 진입점."""
+    """Single entry point for spec lookup, parameter validation, and lookback computation."""
 
     def __init__(self, specs: Mapping[str, IndicatorSpec] | None = None) -> None:
         self._specs: dict[str, IndicatorSpec] = (
