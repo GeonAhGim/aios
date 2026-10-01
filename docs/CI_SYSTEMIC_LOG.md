@@ -2616,6 +2616,27 @@ the numbering they had in CLAUDE.md section 6.
     tasks, since a report with no leaf behind it is exactly the kind of finding this entry exists to
     flag.
 
+101. A tenth+ `frontend` `[health:ci_red]` leaf (task-11099, `reopen_count: 9`) reconfirms
+    #16/#39/#52/#64/#66/#84/#89/#97 with the identical false-positive shape. `esc-ci-frontend.json`'s
+    stored `detail.frontend` for this round is, end to end, `stderr | <file>.test.tsx > ... negative:
+    ...` blocks each followed by the normal React Router v7 future-flag `console.warn` pair, plus two
+    expected `console.error` lines from `IndicatorParityPanel`'s own fallback logging
+    (`CH-18e indicator compute failed, falling back to server: SMA (WORKER_POOL_TASK_FAILED: kernel
+    exploded)`, `CH-18d indicator not in verified whitelist, falling back to server: ...`) — these are
+    the literal, intentional `console.error` calls the negative tests assert on (mocked worker-pool
+    rejection / unverified-indicator fallback), not failures. Zero `FAIL`/`✗`/`AssertionError` tokens
+    anywhere in the captured text. The escalation's own `bisect_culprit`
+    (`a100a82f94e6ef5d5118df9c1c985ffcc831b3f0`) only touches backend Python test files
+    (`tests/integration/test_auth_router.py`, `tests/unit/scripts/test_plt42_env_example_audit.py`,
+    `tests/unit/scripts/test_setup_test_db.py`, `tests/_perf/relative_budget.py`) — no `frontend/`
+    change at all, the same stale/garbage bisect pattern #39 already documented. Reconfirmed locally
+    (HEAD `cdbd1ce43`): the three cited files individually (9/9 tests), then the full suite —
+    `npm run lint --workspace=apps/web` clean (ratchets OK), `npm run build --workspace=apps/web`
+    succeeds, `npm run test --workspace=apps/web` → 201 files passed, 1628 tests passed, exit 0.
+    Root cause remains fleet-code stderr-noise misclassification in `pm/auto_decision.py`
+    (`_stage_tail`/`_FAIL_LINE_MARKERS`), out of repo-worker edit scope per CLAUDE.md §4 — no
+    frontend code change warranted; closing noop per the established precedent above.
+
 ---
 
 Moved from CLAUDE.md on 2026-10-01 (CLAUDE.md is English-only and loaded into every worker context):
