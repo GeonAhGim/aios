@@ -286,6 +286,9 @@ def read_baseline(path: Path) -> dict[str, int] | None:
         raise CodeRatchetsError(f"baseline JSON 파싱 실패: {exc}") from exc
     if not isinstance(data, dict):
         raise CodeRatchetsError("baseline JSON은 객체여야 함")
+    unknown = sorted(set(data) - set(METRICS))
+    if unknown:
+        raise CodeRatchetsError(f"baseline JSON에 정의되지 않은 키: {unknown}")
     result: dict[str, int] = {}
     for metric in METRICS:
         value = data.get(metric)

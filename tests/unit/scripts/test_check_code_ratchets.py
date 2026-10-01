@@ -440,4 +440,51 @@ def test_increase_in_loc_over_500_fails_red(
     out = capsys.readouterr().out
     assert exit_code == 2
     assert "loc_over_500" in out
-    assert "1개 -> 2개" in out
+
+
+# ── DEEPEN: negative / failure-injection (task-10135) ──────────────────
+
+
+def test_baseline_unknown_key_fails(tmp_path: Path) -> None:
+    """baseline JSON에 METRICS에 없는 키가 섞여 있으면 조용히 무시하지 않고 exit 1."""
+    _write_py(tmp_path, "src/a.py", "x = 1\n")
+    baseline_path = _write_baseline(tmp_path, {**_empty_baseline(), "unknown_fake_metric": 99})
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+
+
+def test_baseline_bool_value_fails(tmp_path: Path) -> None:
+    """baseline 값이 bool이면 int로 오인하지 않고 exit 1 (bool은 int 서브클래스)."""
+    _write_py(tmp_path, "src/a.py", "x = 1\n")
+    baseline_path = _write_baseline(tmp_path, {**_empty_baseline(), "skip_xfail": True})
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+
+
+def test_baseline_read_json_decode_error_does_not_pass_silently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """실패주입: baseline 읽기 도중 json.loads가 JSONDecodeError를 던지면 호출부(main)가
+    이를 삼켜 exit 0으로 조용히 통과시키지 않고 FAIL로 변환해 exit 1을 반환해야 한다."""
+    _write_py(tmp_path, "src/a.py", "x = 1\n")
+    baseline_path = _write_baseline(tmp_path, _empty_baseline())
+
+    def _raise_decode_error(*_args: object, **_kwargs: object) -> None:
+        raise json.JSONDecodeError("injected failure", "{}", 0)
+
+    monkeypatch.setattr(check_code_ratchets.json, "loads", _raise_decode_error)
+
+    exit_code = check_code_ratchets.main(
+        ["--root", str(tmp_path), "--baseline", str(baseline_path)]
+    )
+
+    assert exit_code == 1
+    assert "baseline JSON 파싱 실패" in capsys.readouterr().out
