@@ -15,9 +15,9 @@ transition order asserted directly.
 # accidental call surfaces immediately instead of returning a silently wrong
 # fake value.
 """
+
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
@@ -78,9 +78,7 @@ class FakeConnectionRepository:
         if self.transition_exc is not None:
             raise self.transition_exc
         if self._state is None or self._state.value != expected_state:
-            raise _ConcurrencyConflictError(
-                f"expected {expected_state}, actual {self._state}"
-            )
+            raise _ConcurrencyConflictError(f"expected {expected_state}, actual {self._state}")
         self._state = ConnectionState(new_state)
         assert self.connection is not None
         return replace(self.connection, state=self._state)
@@ -93,14 +91,19 @@ class FakeConnectionRepository:
     # Unused Protocol members -- not exercised by confirm_connection().
     async def list_connections(self, tenant_id: UUID) -> list[AccountConnection]:
         raise NotImplementedError
+
     async def insert_pending_connection(self, connection: AccountConnection) -> AccountConnection:
         raise NotImplementedError
+
     async def insert_consent_link(self, link: ConnectionConsent) -> ConnectionConsent:
         raise NotImplementedError
+
     async def get_credential_binding(self, connection_id: UUID) -> CredentialBinding | None:
         raise NotImplementedError
+
     async def revoke_credential_binding(self, connection_id: UUID) -> None:
         raise NotImplementedError
+
     async def persist_snapshot_if_syncable(
         self,
         connection_id: UUID,
@@ -109,10 +112,13 @@ class FakeConnectionRepository:
         health: ConnectionHealth,
     ) -> AccountSnapshot:
         raise NotImplementedError
+
     async def get_latest_snapshot(self, connection_id: UUID) -> AccountSnapshot | None:
         raise NotImplementedError
+
     async def insert_health_record(self, health: ConnectionHealth) -> ConnectionHealth:
         raise NotImplementedError
+
     async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
         raise NotImplementedError
 
@@ -187,9 +193,7 @@ async def test_confirm_connection_raises_when_connection_not_found() -> None:
     provider = FakeProvider(proof=_proof())
 
     with pytest.raises(ConnectionNotFoundError):
-        await confirm_connection(
-            conn_repo, provider, **_kwargs(tenant_id, uuid4())
-        )
+        await confirm_connection(conn_repo, provider, **_kwargs(tenant_id, uuid4()))
 
     assert conn_repo.transition_calls == []
     assert provider.verify_calls == 0
@@ -205,9 +209,7 @@ async def test_confirm_connection_rejects_cross_tenant_access() -> None:
     provider = FakeProvider(proof=_proof())
 
     with pytest.raises(CrossTenantConnectionAccessError):
-        await confirm_connection(
-            conn_repo, provider, **_kwargs(attacker_tenant_id, connection.id)
-        )
+        await confirm_connection(conn_repo, provider, **_kwargs(attacker_tenant_id, connection.id))
 
     assert conn_repo.transition_calls == []
     assert provider.verify_calls == 0
@@ -222,15 +224,11 @@ async def test_confirm_connection_rejects_scope_drift_without_activating() -> No
     )
     conn_repo = FakeConnectionRepository(connection=connection)
     provider = FakeProvider(
-        proof=_proof(
-            granted_scopes=(CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION)
-        )
+        proof=_proof(granted_scopes=(CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION))
     )
 
     with pytest.raises(ForbiddenCapabilityScopeError) as exc_info:
-        await confirm_connection(
-            conn_repo, provider, **_kwargs(tenant_id, connection.id)
-        )
+        await confirm_connection(conn_repo, provider, **_kwargs(tenant_id, connection.id))
 
     assert "READ_POSITION" in exc_info.value.rejected
     # first transition (PENDING_CONSENT -> CONNECTING) already ran before the
@@ -249,9 +247,7 @@ async def test_confirm_connection_propagates_conflict_when_state_already_advance
     provider = FakeProvider(proof=_proof())
 
     with pytest.raises(_ConcurrencyConflictError):
-        await confirm_connection(
-            conn_repo, provider, **_kwargs(tenant_id, connection.id)
-        )
+        await confirm_connection(conn_repo, provider, **_kwargs(tenant_id, connection.id))
 
     assert provider.verify_calls == 0
     assert conn_repo.insert_credential_binding_calls == 0
@@ -272,9 +268,7 @@ async def test_confirm_connection_wraps_provider_failure_fail_closed() -> None:
     provider = FakeProvider(verify_exc=ConnectionResetError("simulated handshake drop"))
 
     with pytest.raises(ScopeVerificationFailedError):
-        await confirm_connection(
-            conn_repo, provider, **_kwargs(tenant_id, connection.id)
-        )
+        await confirm_connection(conn_repo, provider, **_kwargs(tenant_id, connection.id))
 
     assert conn_repo.transition_calls == [("PENDING_CONSENT", "CONNECTING")]
     assert conn_repo.insert_credential_binding_calls == 0
@@ -293,9 +287,7 @@ async def test_confirm_connection_success_activates_and_stores_encrypted_binding
     proof = _proof(granted_scopes=scopes, provider_verified=True)
     provider = FakeProvider(proof=proof)
 
-    view = await confirm_connection(
-        conn_repo, provider, **_kwargs(tenant_id, connection.id)
-    )
+    view = await confirm_connection(conn_repo, provider, **_kwargs(tenant_id, connection.id))
 
     assert view.state.value == "ACTIVE_READONLY"
     assert view.scope_verified is True
@@ -330,9 +322,7 @@ async def test_gate_red_repro_scope_drift_check_is_load_bearing(
         tenant_id=tenant_id, capability_profile=(CapabilityScope.READ_BALANCE,)
     )
     provider = FakeProvider(
-        proof=_proof(
-            granted_scopes=(CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION)
-        )
+        proof=_proof(granted_scopes=(CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION))
     )
 
     # green: guard active -- wider-than-requested grant is rejected, no
@@ -352,9 +342,7 @@ async def test_gate_red_repro_scope_drift_check_is_load_bearing(
 
     conn_repo2 = FakeConnectionRepository(connection=connection)
     provider2 = FakeProvider(
-        proof=_proof(
-            granted_scopes=(CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION)
-        )
+        proof=_proof(granted_scopes=(CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION))
     )
     view = await confirm_connection(conn_repo2, provider2, **_kwargs(tenant_id, connection.id))
 
@@ -368,25 +356,26 @@ async def test_gate_red_repro_scope_drift_check_is_load_bearing(
 
 
 @pytest.mark.perf
-async def test_confirm_connection_perf_budget_p95_latency() -> None:
+async def test_confirm_connection_perf_budget_p95_latency(
+    perf_budget: Any,
+) -> None:
     """No published per-axis budget covers FND-05 specifically (ADR-2026-09-09-C
     Decision 1's table); pin the same order of magnitude as the closest
     published command-write budget ("order submit -> ACK p95 50ms, paper")
     since this command is also two fail-closed writes plus one provider
-    round trip, all served in-memory here."""
-    tenant_id = uuid4()
-    samples = 50
-    durations_ms: list[float] = []
+    round trip, all served in-memory here.
 
-    for _ in range(samples):
+    raw time.perf_counter() → perf_budget.samples_async() 전환(task-10959).
+    """
+    tenant_id = uuid4()
+
+    async def _run() -> None:
         connection = _connection(tenant_id=tenant_id)
         conn_repo = FakeConnectionRepository(connection=connection)
         provider = FakeProvider(proof=_proof())
-
-        start = time.perf_counter()
         await confirm_connection(conn_repo, provider, **_kwargs(tenant_id, connection.id))
-        durations_ms.append((time.perf_counter() - start) * 1000)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
+    samples = await perf_budget.samples_async(_run, n=50)
+    durations_ms = sorted(s.cpu_ms for s in samples)
+    p95 = durations_ms[int(50 * 0.95) - 1]
     assert p95 < 50.0, f"confirm_connection p95 latency {p95:.3f}ms exceeded 50ms budget"
