@@ -1,37 +1,46 @@
-"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 표 88행/§9.4 DSL-8 —
-AIOS Script IR(DSL-7 `IRProgram`) 스택 인터프리터. 순수·I/O 없음·재귀 없음.
+"""L4_analytics_authoring_backtest_marketplace_v1.0.md §2.4 row 88 / §9.4 DSL-8 —
+stack interpreter for the AIOS Script IR (DSL-7 `IRProgram`). Pure, no I/O, no recursion.
 
-실행 모델은 "전 봉 벡터화"다. 명령열을 앞에서 뒤로 정확히 한 번 훑고(점프·
-루프·재귀 없음 — IR에 그런 명령이 없다), 스택 값은 `runtime/series.py`의
-`Value`(스칼라 또는 길이 `bar_count`의 시리즈)다. 봉마다 다시 실행하지 않으므로
-`s[n]`은 시프트, 산술·비교·논리는 브로드캐스트 원소 연산이 된다. 같은 IR·같은
-입력·같은 레지스트리면 결과는 항상 같다(백테스트=라이브 산출물 공유, I-05).
+The execution model is "whole-bar vectorized". The instruction stream is walked
+front to back exactly once (no jumps, no loops, no recursion — the IR has no
+such instructions), and stack values are `Value` from `runtime/series.py`
+(a scalar, or a series of length `bar_count`). Because nothing re-runs per bar,
+`s[n]` becomes a shift, and arithmetic/comparison/logical ops become broadcast
+elementwise ops. The same IR, same inputs, same registry always produce the
+same result (backtest and live share output, I-05).
 
-IR 타입 주석의 해석(이 리프의 결정): 주석은 값의 *도메인*(int/float/bool)과
-"시리즈임"의 하한을 고정한다. 주석이 `series<*>`면 런타임 값은 반드시
-`Series`다. 주석이 스칼라(`float`/`bool`)여도 런타임 값은 `Series`일 수 있다 —
-DSL-4가 `close[1]`의 정적 타입을 원소 타입 `float`로 정했지만 그 값은 봉마다
-다르기 때문이다(`ta.sma(close[1], 3)`처럼 그 값을 다시 시리즈 자리에 넣는
-스크립트가 정당하다). `int` 주석만은 항상 스칼라다(인덱싱·호출은 int를 내지
-않는다). 인터프리터는 정적 타입을 다시 추론하지 않고 주석과 실제 모양·도메인의
-정합만 검사한다(불일치 = `ScriptRuntimeError`, fail-closed).
+How IR type annotations are interpreted (this leaf's decision): an annotation
+fixes the value's *domain* (int/float/bool) and a lower bound on "is a series".
+If the annotation is `series<*>`, the runtime value must be a `Series`. Even a
+scalar annotation (`float`/`bool`) may still hold a `Series` at runtime —
+DSL-4 fixes the static type of `close[1]` as the element type `float`, but the
+value varies per bar (so a script like `ta.sma(close[1], 3)` legitimately puts
+that value back into a series slot). Only the `int` annotation is always a
+scalar (indexing/calls never produce an int series). The interpreter does not
+re-infer static types; it only checks that the annotation matches the actual
+shape and domain at runtime (a mismatch is a `ScriptRuntimeError`, fail-closed).
 
-빌트인(`ns.ident(...)`)은 호스트가 주입하는 레지스트리(`BuiltinRegistry`)로만
-디스패치한다. 본체(`ta.*`/`math.*`/`strategy.*`)는 DSL-9 소유라 여기엔 스텁도
-기본값도 없다 — 미등록 호출은 예외다. 빌트인 반환값도 주석·봉 수와 대조한다
-(외부 코드의 산출물을 신뢰하지 않는다). DSL-9a 내장 표는
-`builtins_ta.default_builtins()`(`builtins_math.MATH_BUILTINS` + `TaBuiltins.table`)가
-만들어 호스트가 주입한다 — 이 모듈은 지표 레지스트리를 임포트하지 않고(I/O·외부
-의존 없음 정적 검사 유지) `execute(builtins=None)`은 여전히 빈 레지스트리다.
+Builtins (`ns.ident(...)`) dispatch only through the host-injected registry
+(`BuiltinRegistry`). The bodies (`ta.*`/`math.*`/`strategy.*`) are owned by
+DSL-9, so there is no stub or default here — an unregistered call raises.
+Builtin return values are also checked against the annotation and bar count
+(external code's output is not trusted). The DSL-9a builtin table is built by
+`builtins_ta.default_builtins()` (`builtins_math.MATH_BUILTINS` +
+`TaBuiltins.table`) and injected by the host — this module does not import the
+indicator registry (keeping the no-I/O / no-external-dependency static check
+intact), so `execute(builtins=None)` still gets an empty registry.
 
-의미 미정의 피연산자(`Order.side/qty_expr/opts`, `Plot.style`)는 IR이 AST 원형으로
-운반한 그대로 결과에 실어 보낸다 — 평가하지 않는다. 의미 확정은 DSL-11.
+Operands with undefined semantics (`Order.side/qty_expr/opts`, `Plot.style`)
+are carried through to the result exactly as the IR received them from the AST
+— they are not evaluated. Fixing their semantics is DSL-11.
 
-입력: `DeclareInput`의 시리즈 타입 입력(`close` 등)은 호스트가 `inputs`로 반드시
-공급해야 한다(리터럴 기본값 0을 시리즈로 펴지 않는다). 스칼라 입력은 `inputs`
-값이 우선, 없으면 선언 리터럴. 선언되지 않은 이름이 `inputs`에 있으면 오류
-(오타를 조용히 무시하지 않는다).
+Inputs: series-typed inputs of `DeclareInput` (e.g. `close`) must always be
+supplied by the host via `inputs` (a literal default of 0 is never broadcast
+into a series). For scalar inputs, an `inputs` value takes precedence, falling
+back to the declared literal otherwise. An undeclared name present in `inputs`
+is an error (typos are never silently ignored).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -100,12 +109,14 @@ def execute(
     base_timeframe: str | None = None,
     runtime_limit: int = SCRIPT_RUNTIME_LIMIT,
 ) -> ExecutionResult:
-    """IR을 실행한다. 실패는 전부 `ScriptRuntimeError`(또는 IR 자체 결함이면 `IRStackError`).
+    """Execute the IR. Every failure is `ScriptRuntimeError` (or `IRStackError`
+    if the IR itself is malformed).
 
-    `symbol`/`base_timeframe`은 IR에 `request(...)`(M2-2b `Request` 명령)가
-    하나라도 있을 때만 필요하다 — 없으면 기본값 `None`으로 충분하다(기존
-    호출부와 하위호환). `request(...)`가 있는데 둘 중 하나라도 빠지면
-    `ScriptRuntimeError`(fail-closed, MTF 평가 불가)."""
+    `symbol`/`base_timeframe` are only needed when the IR contains at least one
+    `request(...)` (M2-2b `Request` instruction) — otherwise the default
+    `None` is fine (backward compatible with existing callers). If
+    `request(...)` is present but either one is missing, this raises
+    `ScriptRuntimeError` (fail-closed, MTF evaluation is impossible)."""
     if isinstance(bar_count, bool) or not isinstance(bar_count, int) or bar_count < 0:
         raise ScriptRuntimeError(f"bar_count는 0 이상 정수여야 합니다: {bar_count!r}")
     verify_stack(ir)
@@ -114,7 +125,7 @@ def execute(
     return machine.result()
 
 
-# ---- 스택 머신 ----
+# ---- stack machine ----
 
 
 class _Machine:
@@ -187,10 +198,10 @@ class _Machine:
             raise ScriptRuntimeError(f"이미 바인딩된 이름을 다시 바인딩했습니다: {name!r}")
         self._bindings[name] = value
 
-    # -- 표현식 --
+    # -- expressions --
 
     def _const(self, instr: Instr) -> None:
-        assert isinstance(instr, ConstInt | ConstFloat)  # noqa: S101 — 디스패치 키가 보장
+        assert isinstance(instr, ConstInt | ConstFloat)  # noqa: S101 — guaranteed by the dispatch key
         self._stack.append(instr.value)
 
     def _load(self, instr: Instr) -> None:
@@ -242,8 +253,9 @@ class _Machine:
         )
 
     def _request(self, instr: Instr) -> None:
-        """`request(symbol, timeframe, expr)`(M2-2b). 내부 expr 값은 이미 스택
-        위에 있다(post-order) — 검증·확정봉 리샘플 본체는 `mtf.evaluate_request`."""
+        """`request(symbol, timeframe, expr)` (M2-2b). The inner expr value is
+        already on the stack (post-order) — validation and the closed-bar
+        resample body live in `mtf.evaluate_request`."""
         assert isinstance(instr, Request)  # noqa: S101
         resampled = mtf.evaluate_request(
             self._pop(),
@@ -259,7 +271,7 @@ class _Machine:
             )
         )
 
-    # -- decl --
+    # -- declarations --
 
     def _declare_input(self, instr: Instr) -> None:
         assert isinstance(instr, DeclareInput)  # noqa: S101
@@ -275,9 +287,7 @@ class _Machine:
 
     def _store(self, instr: Instr) -> None:
         assert isinstance(instr, Store)  # noqa: S101
-        self._bind(
-            instr.name, check_value(self._pop(), instr.type, self._n, f"let {instr.name}")
-        )
+        self._bind(instr.name, check_value(self._pop(), instr.type, self._n, f"let {instr.name}"))
 
     def _plot(self, instr: Instr) -> None:
         assert isinstance(instr, Plot)  # noqa: S101
@@ -296,4 +306,3 @@ class _Machine:
         self._orders.append(
             OrderOutput(when=when, side=instr.side, qty_expr=instr.qty_expr, opts=instr.opts)
         )
-
