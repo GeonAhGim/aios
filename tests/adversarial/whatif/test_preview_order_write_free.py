@@ -371,6 +371,49 @@ def test_negative_control_clean_tree_has_no_import_violation(tmp_path: Path) -> 
     assert root / "src/services/helper.py" in reached
 
 
+def _fake_tree_two_hop(tmp_path: Path, leaf_source: str) -> tuple[Path, Path]:
+    """`_fake_tree`와 달리 위반을 2단계 떨어진 모듈에 심는다(target ->
+    helper -> leaf). BFS가 직접 이웃을 지나 더 깊은 간선까지 따라가는지
+    검증하기 위함 — 1-hop 체인만 보는 `_fake_tree`로는 잡지 못하는 결함."""
+    for pkg in (
+        "src",
+        "src/foundation",
+        "src/foundation/whatif",
+        "src/foundation/whatif/application",
+        "src/services",
+    ):
+        (tmp_path / pkg).mkdir(parents=True, exist_ok=True)
+        (tmp_path / pkg / "__init__.py").write_text("", encoding="utf-8")
+    target = tmp_path / "src/foundation/whatif/application/preview_order.py"
+    target.write_text("from src.services.helper import compute\n", encoding="utf-8")
+    (tmp_path / "src/services/helper.py").write_text(
+        "from src.services.leaf import compute\n", encoding="utf-8"
+    )
+    (tmp_path / "src/services/leaf.py").write_text(
+        leaf_source + "\ndef compute():\n    return 1\n", encoding="utf-8"
+    )
+    return target, tmp_path
+
+
+def test_negative_injected_db_import_is_detected_through_two_hop_chain(
+    tmp_path: Path,
+) -> None:
+    """BFS가 직접 이웃(helper.py)뿐 아니라 그 너머(leaf.py)까지 추이적으로
+    따라가 banned import를 잡는지 확인한다 — `_fake_tree` 기반 1-hop
+    테스트와 동형이 아닌, 깊이 2 체인에 특화된 negative 케이스."""
+    target, root = _fake_tree_two_hop(tmp_path, "import asyncpg\n")
+    violations, _reached = scan_import_graph(target, root, BANNED_MODULES)
+    assert violations, "체커 결함 — 2단계 떨어진 banned import를 놓침"
+    file, module, chain = violations[0]
+    assert file == "src/services/leaf.py"
+    assert module == "asyncpg"
+    assert chain == (
+        "src/foundation/whatif/application/preview_order.py",
+        "src/services/helper.py",
+        "src/services/leaf.py",
+    )
+
+
 # ---------------------------------------------------------------------------
 # D2 "게이트 적색 재현": 실제 preview_order.py 소스에 쓰기 동사 호출을 주입한
 # 사본을 스캔하면 게이트가 실제로 적색(위반 검출)이 된다.
