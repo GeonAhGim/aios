@@ -2585,3 +2585,42 @@ the numbering they had in CLAUDE.md section 6.
     `vetoed: false` and the cited commit's fix is already an ancestor of HEAD, check
     `esc-ci-guards.json`'s `status`/`resolved_sha` before creating a new individual leaf, since a
     second leaf for an already-`resolved` sha is the duplicate-leaf pattern, not a new violation.
+
+---
+
+Moved from CLAUDE.md on 2026-10-01 (CLAUDE.md is English-only and loaded into every worker context):
+
+### 단계 설계 검증 결과 (task-9505, 2026-09-30)
+
+`scripts/check_code_ratchets.py` 설계는 정상 — 5개 메트릭(`skip_xfail`, `todo_fixme_xxx`,
+`not_implemented_error`, `loc_over_500`, `loc_over_800`, `loc_over_1000`)을 올바르게 계산하고,
+기준선 갱신은 `--update` 플래그가 있을 때만 수행하며, 임계값(500/800/1000)은 ADR 관찰 지수이지
+hard cap이 아님. 현재 `python scripts/check_code_ratchets.py` 실행 결과는
+`OK: {'skip_xfail': 3, 'loc_over_500': 42, 'loc_over_800': 3, 'loc_over_1000': 0,
+'todo_fixme_xxx': 0, 'not_implemented_error': 27} (baseline {...}, all metrics match)`이며
+`code-ratchets-baseline.json`과 정확히 일치. 스크립트/기준선 설계에 결함 없음.
+
+### near-threshold churn 완화 현황
+
+`--near 30` 도구(task-9145)가 10개 `loc_over_500` 근처 파일과 3개 `loc_over_800` 근처 파일을
+식별 중. 이 파일들이 D2/D3 증빙(부정 테스트 3개 이상) 추가 시 임계선을 넘는 "process churn"의
+원인 — DoD mandated negative tests가 file-size ratchet와 충돌하는 구조적 충돌로, 스크립트 결함이
+아님.
+
+### 24h 재발 억제 조건
+
+code_ratchets 게이트가 24h 동안 새 개별 정정 리프를 생성하지 않으려면 다음 조건을 모두 만족해야 함:
+(a) 새 개별 정정 리프 0건 생성 — fleet code(`pm/auto_decision.py`/`orchestrator.py`)가 stale
+escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`일 때 repeat-count 증가 및
+추가 fix-task 생성을 건너뜀(#23의 fleet-code 동일 패턴)
+(b) `check_code_ratchets.py` 자체 위반 0건 — 스크립트/기준선 설계 정상 유지
+(c) 기준선 내 개별 파일들의 주기적 분할 유지 — `--near 30`으로 near-threshold 파일을 사전
+감지하고, 400줄 이상인 파일은 D3 증빙 추가 전에 책임별로 분할
+
+### 24h 재발이 억제되는 조건
+
+1. `python scripts/check_code_ratchets.py` 실행 시 `OK` + 기준선과 일치
+2. `esc-ci-code_ratchets.json`의 `status`가 `"resolved"`이고 `resolved_sha`가 현재 HEAD보다
+   이전 커밋을 가리킴 (stale escalation 재트리거 방지)
+3. 최근 24h 동안 새 개별 정정 리프(`[health:ci_red]`) 생성 0건
+4. `--near 30`으로 감지된 near-threshold 파일들의 LOC가 임계선 근처에서 안정적
