@@ -260,6 +260,33 @@ async def test_backfill_is_noop_when_no_tenant_rows_exist(pool, migration_db_url
     assert await _tenant_id_of(pool, entity_id) == orphan_user_id
 
 
+async def test_gate_red_fk_constraint_actually_enforced(pool, migration_db_url: str):
+    # gate_red — FK 제약이 활성화된 상태에서 invalid tenant_id를 UPDATE하면
+    # PostgreSQL이 ForeignKeyViolationError를 던진다. 이 테스트가 PASS한다는
+    # 것은 게이트가 실제로 작동함을 증명한다(게이트가 무력하면 에러 없이 UPDATE됨).
+    await purge_position_snapshots(pool)
+    _run_alembic("downgrade", _FA2_REVISION, database_url=migration_db_url)
+    _run_alembic("upgrade", _FA2A_REVISION, database_url=migration_db_url)
+
+    # valid tenant_id로 legal_entity를 먼저 삽입 (백필이 필요 없도록)
+    valid_tenant = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+    entity_id = await _insert_legal_entity_at_fa2(pool, tenant_id=valid_tenant)
+
+    # 게이트 적색 재현: FK 제약이 살아 있으므로 존재하지 않는 tenant_id로
+    # UPDATE하면 PostgreSQL이 ForeignKeyViolationError를 던져야 한다.
+    fake_tenant_id = "00000000-0000-0000-0000-000000000000"
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE legal_entity SET tenant_id = $1 WHERE entity_id = $2",
+                fake_tenant_id,
+                entity_id,
+            )
+
+    # 게이트가 작동했으므로 원래 값은 보존되어야 한다.
+    assert await _tenant_id_of(pool, entity_id) == valid_tenant
+
+
 @pytest.mark.perf
 async def test_backfill_of_fifty_orphaned_rows_completes_within_budget(pool, migration_db_url: str):
     # 성능단언 — 오염된 행 다수에 대한 백필이 예산 안에서 끝나는지 확인한다
