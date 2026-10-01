@@ -4,6 +4,7 @@ DoD(task-1193): 평가 순서 고정·첫 DENY 단락(통과 규칙은 끝까지
 심각도 합성(PAUSE>REDUCE>ESCALATE>ALLOW)·REDUCE 조건(수량 축소로 해소
 가능·축소 후 0이면 DENY)·규칙 예외=DENY·latency_us>0.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -220,9 +221,7 @@ def test_reduce_when_quantity_reduction_resolves_breach():
 
 
 def test_reduce_requires_reduce_only_false():
-    intent = _order_intent(
-        quantity=Decimal("1.000000"), notional=Decimal("5000"), reduce_only=True
-    )
+    intent = _order_intent(quantity=Decimal("1.000000"), notional=Decimal("5000"), reduce_only=True)
     limit = ExposureLimit(
         scope=LimitScope.SYMBOL,
         scope_ref="BTC/USDT",
@@ -312,3 +311,38 @@ def test_decision_id_is_deterministic_for_same_inputs():
 def test_naive_now_is_rejected():
     with pytest.raises(ValidationError):
         _evaluate(_safe_inputs(), now=datetime(2026, 9, 3))
+
+
+def test_zero_ttl_decision_is_never_actionable():
+    """ttl=0은 §4.2 계약상 '즉시 만료'를 뜻한다 — expires_at을 evaluated_at보다
+    뒤로 늦춰서 ALLOW를 순간적으로라도 실행 가능하게 만들면 안 된다(fail-closed)."""
+    decision = _evaluate(_safe_inputs(), ttl=0.0)
+    assert decision.outcome == RiskOutcome.ALLOW
+    assert decision.expires_at == NOW
+    assert decision.is_actionable(NOW) is False
+
+
+# ---- 게이트 적색 재현: I2 예외 가드가 없으면 RuntimeError가 그대로 샌다 ----
+
+
+def test_gate_red_without_exception_guard_leaks_runtime_error(monkeypatch):
+    """`evaluate()`의 `try/except Exception`(I2 가드)을 빼고 규칙을 직접
+    호출하는 회귀본은 RuntimeError를 그대로 전파한다(적색) — 실제 `evaluate()`는
+    같은 예외를 `rule_error()`로 흡수해 DENY로 fail-close한다(녹색)."""
+
+    def _boom(_inputs, _policy):
+        raise RuntimeError("boom")
+
+    def _naive_rule_call_without_guard(rule_fn, inputs, policy):
+        return rule_fn(inputs, policy)  # I2 가드(try/except) 없는 회귀 시나리오
+
+    with pytest.raises(RuntimeError):
+        _naive_rule_call_without_guard(
+            _boom, _safe_inputs(), evaluator_module.RiskPolicy(**_bundle().policy_snapshot)
+        )
+
+    patched = tuple((rid, _boom if rid == "leverage" else fn) for rid, fn in _ORDER)
+    monkeypatch.setattr(evaluator_module, "_ORDER", patched)
+    decision = _evaluate(_safe_inputs())
+    assert decision.outcome == RiskOutcome.DENY
+    assert decision.rule_results[-1].reason_code == "RISK_RULE_ERROR:leverage"
