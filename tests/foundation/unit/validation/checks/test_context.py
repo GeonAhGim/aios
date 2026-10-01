@@ -81,3 +81,47 @@ def test_context_is_frozen_rejects_mutation() -> None:
     )
     with pytest.raises(FrozenInstanceError):
         setattr(ctx, attr_name, 1)
+
+
+def test_context_is_frozen_rejects_mutation_of_mutable_field() -> None:
+    # prior_results is itself a mutable dict, but __setattr__ on the frozen
+    # dataclass must still refuse to rebind the attribute to a new dict.
+    ctx = _ctx()
+    with pytest.raises(FrozenInstanceError):
+        setattr(ctx, "prior_results", {})  # noqa: B010 -- exercises __setattr__, not a field write
+
+
+def test_context_is_frozen_rejects_delattr() -> None:
+    ctx = _ctx()
+    with pytest.raises(FrozenInstanceError):
+        delattr(ctx, "trace_id")
+
+
+def test_context_rejects_missing_required_field() -> None:
+    kwargs = _ctx().__dict__.copy()
+    del kwargs["prior_results"]
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_rejects_unknown_field() -> None:
+    kwargs = _ctx().__dict__.copy()
+    kwargs["unknown_field"] = "nope"
+    with pytest.raises(TypeError):
+        CheckContext(**kwargs)
+
+
+def test_context_construction_propagates_dependency_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Failure injection: if a dependency the context bundles together
+    # (here UniverseSnapshot) blows up while assembling the bundle, the
+    # exception must propagate -- CheckContext must not swallow it or
+    # construct a partially-valid context (fail-closed per standard-105).
+    def _boom(*_args: object, **_kwargs: object) -> UniverseSnapshot:
+        raise RuntimeError("universe snapshot source unavailable")
+
+    monkeypatch.setattr(UniverseSnapshot, "__init__", _boom)
+
+    with pytest.raises(RuntimeError, match="universe snapshot source unavailable"):
+        _ctx()
