@@ -419,6 +419,13 @@ class PerfBudget:
                 result=result,
             )
 
+    async def samples_async(self, fn: Callable[[], Awaitable[_T]], *, n: int) -> list[PerfSample]:
+        """비동기 I/O n회 반복 측정 — coverage tracer 일시정지 + 원시 샘플 목록 반환."""
+        samples: list[PerfSample] = []
+        for _ in range(n):
+            samples.append(await self.sample_async(fn))
+        return samples
+
     def samples(
         self, fn: Callable[[], _T], *, n: int, warmup: int = 1, batch: int = 1
     ) -> list[PerfSample]:

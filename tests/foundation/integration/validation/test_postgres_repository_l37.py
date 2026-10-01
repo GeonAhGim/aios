@@ -10,7 +10,6 @@ performance assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -330,13 +329,12 @@ async def test_db_check_constraint_rejects_hard_fail_reasons_without_fail_outcom
 
 
 @pytest.mark.perf
-async def test_p95_latency_within_bundle_round_trip_budget(bundle_repo):
+async def test_p95_latency_within_bundle_round_trip_budget(bundle_repo, perf_budget):
     """ADR-2026-09-09-C axis performance budget: create_bundle + get_bundle
     against a real DB stays within a generous 200ms floor per iteration."""
-    samples: list[float] = []
-    for _ in range(5):
+
+    async def _single_round_trip() -> None:
         key = _bundle_key()
-        start = time.perf_counter()
         await bundle_repo.create_bundle(
             **key,
             outcome=Outcome.PASS,
@@ -344,6 +342,7 @@ async def test_p95_latency_within_bundle_round_trip_budget(bundle_repo):
             bundle_hash="bundle-hash-perf",
         )
         await bundle_repo.get_bundle(**key)
-        samples.append(time.perf_counter() - start)
-    p95_seconds = max(samples)
-    assert p95_seconds < 0.2, f"p95={p95_seconds * 1000:.2f}ms exceeds 200ms budget"
+
+    samples = await perf_budget.samples_async(_single_round_trip, n=5)
+    p95_ms = max(s.wall_ms for s in samples)
+    assert p95_ms < 200, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
