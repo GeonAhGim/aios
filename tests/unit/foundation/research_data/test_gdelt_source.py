@@ -3,10 +3,12 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md sec.9 RD-15
 DoD ("link_only 강제").
 """
+
 from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,6 +22,13 @@ from src.foundation.research_data.adapters.sources.gdelt import (
     parse_gdelt_gkg_export,
     parse_gdelt_gkg_row,
 )
+from src.foundation.research_data.domain.source_eval_gate import (
+    SourceEvalGateError,
+    assert_source_eval_gate,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_EVAL_PATH = _REPO_ROOT / "docs" / "design" / "RESEARCH_DATA_SOURCE_EVAL.md"
 
 _COLLECTED_AT = datetime(2026, 9, 24, 6, 5, 0, tzinfo=timezone.utc)
 
@@ -163,3 +172,29 @@ def test_parse_gdelt_gkg_export_throughput_floor() -> None:
     assert len(records) == 2_000
     throughput = len(records) / elapsed
     assert throughput > 5_000, f"parse_gdelt_gkg_export throughput too low: {throughput:.0f}/s"
+
+
+# --- gate red reproduction (D2 floor) --------------------------------------
+
+
+def test_source_eval_gate_fails_on_injected_gdelt_admission_drift() -> None:
+    """`fetch_gdelt_gkg_export` trusts the frozen `EXPECTED_ADMISSION[GDELT_SOURCE_ID]
+    == "allow"` constant (module docstring) rather than re-reading RD-1's eval doc on
+    every call -- the real gate that would catch a silent flip away from that frozen
+    value is RD-1's `assert_source_eval_gate` over `RESEARCH_DATA_SOURCE_EVAL.md`
+    §7. This reproduces that gate actually going red: if GDELT's §7 conclusion were
+    edited to 반입 금지 without the frozen constant changing too, the gate must
+    reject the document instead of letting the drift pass silently.
+    """
+    eval_text = _EVAL_PATH.read_text(encoding="utf-8")
+    needle = (
+        "**결론: 허용** (뉴스 본문 `link_only` 강제 "
+        "— 본문 저장·요약 생성 금지를 RD-3/RD-15가 코드로 강제해야 한다)."
+    )
+    assert needle in eval_text, "GDELT §7 conclusion text moved -- update this test's needle"
+    drifted = eval_text.replace(
+        needle, "**결론: 반입 금지** (synthetic drift injected by test).", 1
+    )
+    with pytest.raises(SourceEvalGateError) as excinfo:
+        assert_source_eval_gate(drifted)
+    assert excinfo.value.code in {"ADMISSION_DRIFT", "TABLE_SECTION_MISMATCH"}
