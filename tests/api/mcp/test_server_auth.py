@@ -31,6 +31,7 @@ from src.foundation.ai.gateway.application.revoke_token import revoke_token
 from src.foundation.ai.gateway.domain.token_rules import Scope
 from src.services.auth.tokens import TokenIssuer
 from tests.api.mcp.conftest import NOW, issue
+from tests.conftest import PerfBudget
 
 _INDICATOR_BODY = {
     "name": "SMA",
