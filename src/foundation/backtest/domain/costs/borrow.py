@@ -1,14 +1,17 @@
-"""BT-8 — 차입(대차) 비용 모델(순수).
+"""BT-8 — Borrowing (short) cost model (pure).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
-§2.5 BT-8, §3.4(`costs.borrow_apr: Decimal | None`), §9.5 BT-8(DoD: "일할 계산 정확").
+§2.5 BT-8, §3.4(`costs.borrow_apr: Decimal | None`), §9.5 BT-8(DoD: "Day-count accrual accuracy").
 
-day-count 관례는 ACT/365(실제 경과일수 / 365)로 고정한다 — 분모를 실제
-연도 길이(윤년 366)로 바꾸는 ACT/365.25나 채권시장의 ACT/360과 달리,
-크립토·주식 공매도 대차 이자는 연 365일 고정을 관행으로 쓰는 경우가
-많다는 점을 채택 근거로 삼았다(미검증: 거래소·프라임브로커별 실제 대차
-계약서 대조는 하지 않았다). 분자(실제 경과일수)는 윤년이어도 달력 그대로
-셈한다 — 분모만 365로 고정한다(ACT/365 fixed).
+The day-count convention is fixed to ACT/365 (actual elapsed days / 365).
+Unlike ACT/365.25 which adjusts the denominator to the actual year length
+(leap year 366), or ACT/360 used in bond markets, crypto and equity short-
+selling stock-borrow interest commonly follows the industry practice of fixing
+the denominator at 365 days — this observation is the adoption rationale
+(unverified: we have not cross-checked actual stock-borrow agreements against
+each exchange and prime broker). The numerator (actual elapsed days) counts
+calendar days as-is even in leap years — only the denominator is fixed at 365
+(ACT/365 fixed).
 """
 
 from __future__ import annotations
@@ -25,21 +28,24 @@ _SECONDS_PER_DAY = Decimal(86400)
 
 def _require_utc(value: datetime, name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{name}는 tz-aware UTC datetime이어야 한다: {value}")
+        raise ValueError(f"{name} must be a tz-aware UTC datetime: {value}")
 
 
 def _reject_negative_or_nan(value: Decimal, name: str) -> None:
     if value.is_nan() or value < 0:
-        raise ValueError(f"{name}는 음수·NaN을 허용하지 않는다: {value}")
+        raise ValueError(
+            f"{name} must be non-negative: NaN and negative values are rejected: {value}"
+        )
 
 
 def compute_borrow_cost(
     config: CostsConfig, *, notional: Decimal, entry_time: datetime, exit_time: datetime
 ) -> Decimal:
-    """실제 보유 일수(ACT/365) 기준 차입 비용.
+    """Borrowing cost based on actual holding days (ACT/365).
 
-    `config.borrow_apr=None`이면 다른 인자를 검증하지 않고 즉시
-    `Decimal('0')`을 반환한다(무차입 전략은 예외가 아니라 무비용).
+    When `config.borrow_apr=None`, returns `Decimal('0')` immediately without
+    validating other arguments (no-borrow strategies are not exceptions — they
+    are cost-free).
     """
 
     if config.borrow_apr is None:
