@@ -1,16 +1,18 @@
-"""LA-1 — 시장데이터(market_data) 계약 v1.
+"""LA-1 — market_data contracts v1.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.1 (A), §9.2 LA-1,
 107_contract_versioning_and_compatibility_standard_v1.0.md.
 
-이 모듈은 캔들/틱 수집·품질판정·참조데이터·리플레이의 유일한 공개 표면이다.
-`domain/`은 이 파일을 import하지만, 이 파일은 `domain/`을 import하지 않는다
-(71번 §4, FND-03·LB-1·LC-1과 동일 원칙). 필드 추가는 minor(107번, 기본값
-필수) — 제거·의미 변경은 `v2` 모듈 신설.
+This module is the sole public surface for candle/tick ingestion, quality
+verdicts, reference data, and replay. `domain/` imports this file, but this
+file never imports `domain/` (same principle as rule 71 §4, FND-03/LB-1/LC-1).
+Field additions are minor (rule 107, default required) — removals or meaning
+changes go into a new `v2` module instead.
 
-모든 `datetime` 필드는 `AwareDatetime`으로 naive 값을 거부하고, 가격·수량은
-`Decimal`(NUMERIC(30,10)과 동일 정밀도, float 금지)이다.
+Every `datetime` field is `AwareDatetime`, rejecting naive values, and
+prices/quantities are `Decimal` (same precision as NUMERIC(30,10), no float).
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -32,20 +34,40 @@ from src.foundation.market_data.contracts.v1_enums import (
 )
 
 __all__ = [
-    "SCHEMA_VERSION", "Timeframe", "Venue", "Adjustment", "SymbolStatus",
-    "QualityIssueType", "Severity", "Verdict", "SeriesKey", "CandleRecord",
-    "TickRecord", "QualityIssue", "QualityVerdict", "IngestCandlesCommand",
-    "IngestBatchResult", "TickIngestBatchResult", "CandleQuery", "CandleSeries",
-    "ReplayRequest", "ReplaySeries", "SessionWindow", "CalendarDay",
-    "InstrumentRef", "RegisterInstrumentCommand", "LifecycleEventCommand",
-    "CorporateAction", "DataQualityMetrics",
+    "SCHEMA_VERSION",
+    "Timeframe",
+    "Venue",
+    "Adjustment",
+    "SymbolStatus",
+    "QualityIssueType",
+    "Severity",
+    "Verdict",
+    "SeriesKey",
+    "CandleRecord",
+    "TickRecord",
+    "QualityIssue",
+    "QualityVerdict",
+    "IngestCandlesCommand",
+    "IngestBatchResult",
+    "TickIngestBatchResult",
+    "CandleQuery",
+    "CandleSeries",
+    "ReplayRequest",
+    "ReplaySeries",
+    "SessionWindow",
+    "CalendarDay",
+    "InstrumentRef",
+    "RegisterInstrumentCommand",
+    "LifecycleEventCommand",
+    "CorporateAction",
+    "DataQualityMetrics",
 ]
 
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
 class SeriesKey(BaseModel):
-    """캔들/틱 시계열 식별자(venue, instrument, timeframe)."""
+    """Candle/tick series identifier (venue, instrument, timeframe)."""
 
     venue: Venue
     instrument_id: UUID
@@ -54,7 +76,7 @@ class SeriesKey(BaseModel):
 
 
 class CandleRecord(BaseModel):
-    """가격·수량은 NUMERIC(30,10) 저장과 동일 정밀도로 Decimal 유지."""
+    """Price/quantity stay Decimal at the same precision as the NUMERIC(30,10) storage."""
 
     key: SeriesKey
     open_time: AwareDatetime
@@ -97,7 +119,7 @@ class QualityVerdict(BaseModel):
 
 
 class IngestCandlesCommand(BaseModel):
-    """`ingest_candles`(LA-15)의 입력. `tenant_id=None`은 플랫폼 공용 데이터."""
+    """Input for `ingest_candles` (LA-15). `tenant_id=None` means platform-shared data."""
 
     tenant_id: UUID | None
     venue: Venue
@@ -110,14 +132,15 @@ class IngestCandlesCommand(BaseModel):
 
 
 class IngestBatchResult(BaseModel):
-    """LA-9 `BatchRepository.create()`가 `md_ingest_batch`에 그대로 옮겨 적는
-    배치 기록 표현(LA-13, task-615 note). LA-11이 실제로 만든
-    `md_ingest_batch`는 `venue`/`instrument_id`/`timeframe`/`range_start`/
-    `range_end`/`source`/`request_fingerprint`가 전부 NOT NULL이라, 이
-    필드들이 없던 원래 정의로는 그 테이블에 쓸 수 없었다 — LA-9 포트
-    시그니처(`create(conn, batch: IngestBatchResult)`)는 그대로 두고(task
-    note: 포트는 새로 만들지 않는다) 이 DTO에 추가했다. 107번 §8 "필드 추가는
-    minor" 규칙에 따라 fixture(`test_contracts_schema.py`)도 함께 갱신했다."""
+    """Batch record representation that LA-9's `BatchRepository.create()` writes
+    verbatim into `md_ingest_batch` (LA-13, task-615 note). The `md_ingest_batch`
+    table LA-11 actually built has `venue`/`instrument_id`/`timeframe`/
+    `range_start`/`range_end`/`source`/`request_fingerprint` all NOT NULL, so
+    the original definition without these fields could not write to that
+    table — the LA-9 port signature (`create(conn, batch: IngestBatchResult)`)
+    was kept as-is (task note: do not create a new port) and these fields were
+    added to this DTO instead. Per rule 107 §8 ("field additions are minor"),
+    the fixture (`test_contracts_schema.py`) was updated together with it."""
 
     batch_id: UUID
     tenant_id: UUID | None = None
@@ -135,7 +158,7 @@ class IngestBatchResult(BaseModel):
     schema_version: Literal["v1"] = SCHEMA_VERSION
 
 
-class TickIngestBatchResult(BaseModel):  # LA-16a: timeframe 없음, md_ingest_batch_tick 저장
+class TickIngestBatchResult(BaseModel):  # LA-16a: no timeframe, stored in md_ingest_batch_tick
     batch_id: UUID
     tenant_id: UUID | None = None
     source: str
@@ -171,8 +194,8 @@ class CandleSeries(BaseModel):
 
 
 class ReplayRequest(CandleQuery):
-    """백테스트 결정론 요구(A5): `as_of`는 부모에서 Optional이지만 여기선
-    필수로 재정의하고, `include_quarantined`는 항상 `False`로 고정한다."""
+    """Backtest determinism requirement (A5): `as_of` is Optional in the parent
+    but redefined as required here, and `include_quarantined` is always fixed to `False`."""
 
     as_of: AwareDatetime
     include_quarantined: Literal[False] = False
@@ -241,7 +264,8 @@ class LifecycleEventCommand(BaseModel):
 
 
 class CorporateAction(BaseModel):
-    """`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록.
+    """`ratio`: 2 for a 2:1 split. For dividends, ratio=1 and `cash_amount`
+    holds the amount separately.
 
     `known_at` (RD-20): the time we learned this fact (the filing's receipt
     time) — distinct from `ex_date` (the effective date). A correcting

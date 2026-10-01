@@ -92,7 +92,7 @@
         "type": "string"
       },
       "SeriesKey": {
-        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "description": "Candle/tick series identifier (venue, instrument, timeframe).",
         "properties": {
           "instrument_id": {
             "format": "uuid",
@@ -204,7 +204,7 @@
   "CandleRecord": {
     "$defs": {
       "SeriesKey": {
-        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "description": "Candle/tick series identifier (venue, instrument, timeframe).",
         "properties": {
           "instrument_id": {
             "format": "uuid",
@@ -262,7 +262,7 @@
         "type": "string"
       }
     },
-    "description": "가격·수량은 NUMERIC(30,10) 저장과 동일 정밀도로 Decimal 유지.",
+    "description": "Price/quantity stay Decimal at the same precision as the NUMERIC(30,10) storage.",
     "properties": {
       "close": {
         "anyOf": [
@@ -384,7 +384,7 @@
         "type": "string"
       },
       "CandleRecord": {
-        "description": "가격·수량은 NUMERIC(30,10) 저장과 동일 정밀도로 Decimal 유지.",
+        "description": "Price/quantity stay Decimal at the same precision as the NUMERIC(30,10) storage.",
         "properties": {
           "close": {
             "anyOf": [
@@ -496,7 +496,7 @@
         "type": "object"
       },
       "SeriesKey": {
-        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "description": "Candle/tick series identifier (venue, instrument, timeframe).",
         "properties": {
           "instrument_id": {
             "format": "uuid",
@@ -615,7 +615,7 @@
     "type": "object"
   },
   "CorporateAction": {
-    "description": "`ratio`: 2:1 분할이면 2. 배당은 ratio=1, `cash_amount`에 별도 기록.\n\n`known_at` (RD-20): the time we learned this fact (the filing's receipt\ntime) — distinct from `ex_date` (the effective date). A correcting\nfiling is appended as a new row with the same `(instrument_id,\naction_type, ex_date)` but a different `known_at` (no UPDATE). The\nexisting LA-12/LA-14 paths (ledger recording) leave this field unset\n(`None`) — per rule 107, this is backward compatible since it's an\nadded field with a default value.",
+    "description": "`ratio`: 2 for a 2:1 split. For dividends, ratio=1 and `cash_amount`\nholds the amount separately.\n\n`known_at` (RD-20): the time we learned this fact (the filing's receipt\ntime) — distinct from `ex_date` (the effective date). A correcting\nfiling is appended as a new row with the same `(instrument_id,\naction_type, ex_date)` but a different `known_at` (no UPDATE). The\nexisting LA-12/LA-14 paths (ledger recording) leave this field unset\n(`None`) — per rule 107, this is backward compatible since it's an\nadded field with a default value.",
     "properties": {
       "action_type": {
         "enum": [
@@ -702,7 +702,7 @@
   "DataQualityMetrics": {
     "$defs": {
       "SeriesKey": {
-        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "description": "Candle/tick series identifier (venue, instrument, timeframe).",
         "properties": {
           "instrument_id": {
             "format": "uuid",
@@ -972,7 +972,7 @@
         "type": "string"
       }
     },
-    "description": "LA-9 `BatchRepository.create()`가 `md_ingest_batch`에 그대로 옮겨 적는\n배치 기록 표현(LA-13, task-615 note). LA-11이 실제로 만든\n`md_ingest_batch`는 `venue`/`instrument_id`/`timeframe`/`range_start`/\n`range_end`/`source`/`request_fingerprint`가 전부 NOT NULL이라, 이\n필드들이 없던 원래 정의로는 그 테이블에 쓸 수 없었다 — LA-9 포트\n시그니처(`create(conn, batch: IngestBatchResult)`)는 그대로 두고(task\nnote: 포트는 새로 만들지 않는다) 이 DTO에 추가했다. 107번 §8 \"필드 추가는\nminor\" 규칙에 따라 fixture(`test_contracts_schema.py`)도 함께 갱신했다.",
+    "description": "Batch record representation that LA-9's `BatchRepository.create()` writes\nverbatim into `md_ingest_batch` (LA-13, task-615 note). The `md_ingest_batch`\ntable LA-11 actually built has `venue`/`instrument_id`/`timeframe`/\n`range_start`/`range_end`/`source`/`request_fingerprint` all NOT NULL, so\nthe original definition without these fields could not write to that\ntable — the LA-9 port signature (`create(conn, batch: IngestBatchResult)`)\nwas kept as-is (task note: do not create a new port) and these fields were\nadded to this DTO instead. Per rule 107 §8 (\"field additions are minor\"),\nthe fixture (`test_contracts_schema.py`) was updated together with it.",
     "properties": {
       "audit_event_id": {
         "anyOf": [
@@ -1119,7 +1119,7 @@
         "type": "string"
       }
     },
-    "description": "`ingest_candles`(LA-15)의 입력. `tenant_id=None`은 플랫폼 공용 데이터.",
+    "description": "Input for `ingest_candles` (LA-15). `tenant_id=None` means platform-shared data.",
     "properties": {
       "canonical_symbol": {
         "title": "Canonical Symbol",
@@ -1708,7 +1708,7 @@
         "type": "string"
       },
       "SeriesKey": {
-        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "description": "Candle/tick series identifier (venue, instrument, timeframe).",
         "properties": {
           "instrument_id": {
             "format": "uuid",
@@ -1766,7 +1766,7 @@
         "type": "string"
       }
     },
-    "description": "백테스트 결정론 요구(A5): `as_of`는 부모에서 Optional이지만 여기선\n필수로 재정의하고, `include_quarantined`는 항상 `False`로 고정한다.",
+    "description": "Backtest determinism requirement (A5): `as_of` is Optional in the parent\nbut redefined as required here, and `include_quarantined` is always fixed to `False`.",
     "properties": {
       "adjustment": {
         "$ref": "#/$defs/Adjustment",
@@ -1823,7 +1823,7 @@
         "type": "string"
       },
       "CandleRecord": {
-        "description": "가격·수량은 NUMERIC(30,10) 저장과 동일 정밀도로 Decimal 유지.",
+        "description": "Price/quantity stay Decimal at the same precision as the NUMERIC(30,10) storage.",
         "properties": {
           "close": {
             "anyOf": [
@@ -1935,7 +1935,7 @@
         "type": "object"
       },
       "SeriesKey": {
-        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "description": "Candle/tick series identifier (venue, instrument, timeframe).",
         "properties": {
           "instrument_id": {
             "format": "uuid",
@@ -2095,7 +2095,7 @@
         "type": "string"
       }
     },
-    "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+    "description": "Candle/tick series identifier (venue, instrument, timeframe).",
     "properties": {
       "instrument_id": {
         "format": "uuid",
