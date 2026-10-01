@@ -1,16 +1,19 @@
-"""DSL-3 — AIOS Script 재귀하향 파서.
+"""DSL-3 — AIOS Script recursive-descent parser.
 
-Spec: L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3(문법 전
-프로덕션), §9.4(DSL-3), §2.4(상한 280줄). DSL-2 `tokenize()` 토큰만
-입력으로 받고 DSL-1 `ast.py` 노드만 출력한다(decision: 재구현 금지).
-문법표 밖 프로덕션(반복문·`security()`류, ta/math/series/strategy 밖 네임스페이스,
-변수·음수 postfix 인덱스)은 노드를 만들지 않고 전부 `SCRIPT_SYNTAX`(렉서의
-`ScriptSyntaxError` 재사용 — taxonomy를 늘리지 않는다)로 (line, col)과
-함께 거부한다. 타입·미래참조·리소스 검사는 DSL-4/5/6 몫이라 선취하지
-않는다(`ns.ident()`가 레지스트리에 실재하는지는 검사하지 않는다).
-토큰 커서 원시 연산과 표현식 문법(or/and/not/cmp/arith/term/unary/
-postfix/primary/call/request)은 §2.4 상한을 지키기 위해 `parser_expr.py`
-의 `_ExprParser`로 분리했다 — 이 클래스는 그 위에 decl 파싱만 얹는다.
+Spec: L4_analytics_authoring_backtest_marketplace_v1.0.md §3.3 (pre-production
+grammar), §9.4 (DSL-3), §2.4 (280-line cap). Takes only DSL-2
+`tokenize()` tokens as input and outputs only DSL-1 `ast.py` nodes
+(decision: no re-implementation). Productions outside the grammar spec
+(loops, `security()`-like constructs, namespaces outside ta/math/series/strategy,
+variables, negative postfix indices) produce no nodes; all are rejected as
+`SCRIPT_SYNTAX` (reusing the lexer's `ScriptSyntaxError` — does not expand the
+taxonomy) together with (line, col). Type, forward-reference, and resource
+checks belong to DSL-4/5/6, so this parser does not preempt them
+(`ns.ident()` does not verify whether the identifier actually exists in the
+registry). Token-cursor primitive ops and expression grammar (or/and/not/cmp/
+arith/term/unary/postfix/primary/call/request) are split into `_ExprParser` in
+`parser_expr.py` to respect the §2.4 line cap — this class layers only decl
+parsing on top of that.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ from src.core.script.grammar.parser_expr import _ExprParser, _number_value
 
 
 def parse(source: str) -> Program:
-    """AIOS Script 소스 전체를 `Program`으로 파싱한다(`program := decl*`)."""
+    """Parse the entire AIOS Script source into a `Program` (`program := decl*`)."""
     tokens = tokenize(source)
     parser = _Parser(tokens)
     decls: list[Decl] = []
@@ -45,7 +48,7 @@ def parse(source: str) -> Program:
 
 
 class _Parser(_ExprParser):
-    """decl := input | let | plot | signal | order — 표현식 문법은 상위 클래스."""
+    """decl := input | let | plot | signal | order — expression grammar is in the parent class."""
 
     # decl := input | let | plot | signal | order
     def _decl(self) -> Decl:
