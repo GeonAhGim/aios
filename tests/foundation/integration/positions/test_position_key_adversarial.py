@@ -24,6 +24,7 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -209,7 +210,8 @@ async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isola
         elapsed = sample.wall_ms / 1000
         ops_per_sec = n / elapsed
 
-        failures = [r for r in sample.result if isinstance(r, BaseException)]  # type: ignore[operator]
+        gather_results = cast("list[BaseException | None]", sample.result)
+        failures = [r for r in gather_results if isinstance(r, BaseException)]
         assert failures == [], f"동시 체결 중 실패 발생: {failures}"
 
         async with pool.acquire() as conn:
