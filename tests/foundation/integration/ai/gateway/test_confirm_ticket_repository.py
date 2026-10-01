@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -26,6 +25,7 @@ from src.foundation.ai.gateway.adapters.postgres_token_repository import (
 )
 from src.foundation.ai.gateway.application.issue_token import issue_token
 from src.foundation.ai.gateway.domain.token_rules import Scope
+from tests._perf.relative_budget import RelativeBudget
 
 _NOW = datetime.now(timezone.utc)
 _DIGEST = "a" * 64
@@ -204,15 +204,17 @@ async def test_without_the_guard_clause_both_concurrent_updates_would_win(
 _GET_DB_ROUNDTRIP_P95_BUDGET_MS = 50.0
 
 
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
-
-
 @pytest.mark.perf
 async def test_get_db_roundtrip_p95_within_budget(
     repo: PostgresConfirmTicketRepository, token_repo: PostgresAgentTokenRepository
 ):
+    """raw time.perf_counter() → RelativeBudget.measure_async 전환(task-10884).
+
+    비동기 I/O 왕복은 time.process_time() CPU 시간으로 재면 대기 시간이
+    통째로 사라지므로(실제 DB 지연을 못 재음), RelativeBudget.measure_async로
+    wall-clock 기반 상대 비율 단언으로 바꾼다 — 보정 루프가 2배 느려지면
+    DB 왕복도 스케줄링 경합으로 비례해 느려지므로 비율은 유지된다.
+    """
     tenant_id, token_id = await _issued_token_id(token_repo)
     ticket = await repo.issue(
         tenant_id=tenant_id,
@@ -223,11 +225,17 @@ async def test_get_db_roundtrip_p95_within_budget(
 
     samples: list[float] = []
     for _ in range(30):
-        started = time.perf_counter()
-        await repo.get(ticket.ticket_id)
-        samples.append((time.perf_counter() - started) * 1000)
+        sample = await RelativeBudget().measure_async(
+            lambda: repo.get(ticket.ticket_id),
+            n=1,
+            warmup=0,
+            calibration_n=1,
+        )
+        samples.append(sample.op_ms)
 
-    p95_ms = _p95(samples)
+    # p95 계산 (원 로직 유지: sorted samples에서 95% 퍼센타일)
+    samples = sorted(samples)
+    p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
     print(
         f"[AI-16 confirm_ticket] get() db roundtrip p95={p95_ms:.2f}ms "
         f"budget<{_GET_DB_ROUNDTRIP_P95_BUDGET_MS:.1f}ms"
