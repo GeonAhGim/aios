@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -44,6 +43,7 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 from src.foundation.positions.application.record_fill import record_fill
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.position_key import PositionKey
+from tests import conftest
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 from tests.support.entities_seed import bootstrap_default_hierarchy
@@ -165,7 +165,9 @@ async def test_identical_strategy_replicated_across_two_portfolios_does_not_coll
 
 
 @pytest.mark.perf
-async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isolated(pool):
+async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isolated(
+    pool, perf_budget: conftest.PerfBudget
+):
     """다중 인스턴스/동시성 D3 증거 + 수치 성능 단언 -- 같은 전략을 복제하는
     서로 다른 포트폴리오 10개가 asyncio.gather로 동시에 첫 체결을 기록해도
     각자 자신의 `pos_snapshot` 행(서로 다른 position_key)에만 정확히 수량 1을
@@ -195,18 +197,19 @@ async def test_ten_portfolios_concurrent_fills_for_identical_strategy_stay_isola
         await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
 
     try:
-        start = time.perf_counter()
-        results = await asyncio.gather(
-            *[
-                _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
-                for key in keys
-            ],
-            return_exceptions=True,
+        sample = await perf_budget.sample_async(
+            lambda: asyncio.gather(
+                *[
+                    _fill_once(pool, tenant_id=tenant_id, account_id=account_id, position_key=key)
+                    for key in keys
+                ],
+                return_exceptions=True,
+            )
         )
-        elapsed = time.perf_counter() - start
+        elapsed = sample.wall_ms / 1000
         ops_per_sec = n / elapsed
 
-        failures = [r for r in results if isinstance(r, BaseException)]
+        failures = [r for r in sample.result if isinstance(r, BaseException)]  # type: ignore[operator]
         assert failures == [], f"동시 체결 중 실패 발생: {failures}"
 
         async with pool.acquire() as conn:
