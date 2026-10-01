@@ -1,6 +1,9 @@
 """Tests for src/foundation/connections/contracts/v1.py - Connected Asset contract v1.
 
 DoD: negative tests >=3, failure-injection >=1, coverage >=70%.
+
+D3 깊이 증빙(FA-8, FA-24, LA-1, LB-1, LC-1)의 gate_red/perf 테스트는
+test_v1_depth.py에 있다(CLAUDE.md §12, loc_over_800 래칫 회피를 위한 책임별 분리).
 """
 
 from datetime import datetime, timezone
@@ -23,6 +26,7 @@ from src.foundation.connections.contracts.v1 import (
 # ---------------------------------------------------------------------------
 # ConnectionState enum - membership, iteration, value access
 # ---------------------------------------------------------------------------
+
 
 class TestConnectionState:
     """Negative tests: enum members, membership, iteration."""
@@ -60,6 +64,7 @@ class TestConnectionState:
 # CapabilityScope enum
 # ---------------------------------------------------------------------------
 
+
 class TestCapabilityScope:
     """Negative tests: enum membership, iteration."""
 
@@ -81,6 +86,7 @@ class TestCapabilityScope:
 # SCHEMA_VERSION constant
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaVersion:
     def test_schema_version_is_string(self) -> None:
         assert isinstance(SCHEMA_VERSION, str)
@@ -92,6 +98,7 @@ class TestSchemaVersion:
 # ---------------------------------------------------------------------------
 # BeginConnectionRequest - valid construction
 # ---------------------------------------------------------------------------
+
 
 class TestBeginConnectionRequest:
     """Positive + boundary tests for BeginConnectionRequest."""
@@ -149,6 +156,7 @@ class TestBeginConnectionRequest:
 # BeginConnectionRequest - validation errors (negative tests)
 # ---------------------------------------------------------------------------
 
+
 class TestBeginConnectionRequestValidation:
     """Negative tests: invalid inputs that should raise ValidationError."""
 
@@ -194,6 +202,7 @@ class TestBeginConnectionRequestValidation:
 # ---------------------------------------------------------------------------
 # AccountConnectionView - valid construction
 # ---------------------------------------------------------------------------
+
 
 class TestAccountConnectionView:
     """Positive tests for AccountConnectionView."""
@@ -323,6 +332,7 @@ class TestAccountConnectionView:
 # AccountConnectionView - validation errors (negative tests)
 # ---------------------------------------------------------------------------
 
+
 class TestAccountConnectionViewValidation:
     """Negative tests: missing required fields should raise ValidationError."""
 
@@ -393,6 +403,7 @@ class TestAccountConnectionViewValidation:
 # SnapshotValueView
 # ---------------------------------------------------------------------------
 
+
 class TestSnapshotValueView:
     """Positive + boundary tests for SnapshotValueView."""
 
@@ -444,6 +455,7 @@ class TestSnapshotValueView:
 # SnapshotValueView - validation errors (negative tests)
 # ---------------------------------------------------------------------------
 
+
 class TestSnapshotValueViewValidation:
     """Negative tests: missing required fields should raise ValidationError."""
 
@@ -481,6 +493,7 @@ class TestSnapshotValueViewValidation:
 # ---------------------------------------------------------------------------
 # AccountSnapshotView
 # ---------------------------------------------------------------------------
+
 
 class TestAccountSnapshotView:
     """Positive tests for AccountSnapshotView."""
@@ -554,6 +567,7 @@ class TestAccountSnapshotView:
 # AccountSnapshotView - validation errors (negative tests)
 # ---------------------------------------------------------------------------
 
+
 class TestAccountSnapshotViewValidation:
     """Negative tests: missing required fields should raise ValidationError."""
 
@@ -620,6 +634,7 @@ class TestAccountSnapshotViewValidation:
 # Failure injection test - monkeypatch for dependency exception
 # ---------------------------------------------------------------------------
 
+
 class TestFailureInjection:
     """Failure injection: validate that invalid inputs raise properly."""
 
@@ -646,3 +661,4 @@ class TestFailureInjection:
                 freshness="1m",
                 currency="USD",
             )
+
