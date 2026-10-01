@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from uuid import uuid4
 
@@ -118,31 +117,31 @@ def test_apply_average_price_rejects_empty_lines():
 
 
 @pytest.mark.perf
-def test_blended_average_price_hot_path_performance():
+def test_blended_average_price_hot_path_performance(perf_budget):
     fills = [
         PartialFill(quantity=Decimal("60"), price=Decimal("10.00")),
         PartialFill(quantity=Decimal("40"), price=Decimal("11.00")),
     ]
-    start = time.perf_counter()
-    for _ in range(10_000):
-        blended_average_price(fills, Decimal("0.01"))
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+    perf_budget.assert_within(
+        lambda: blended_average_price(fills, Decimal("0.01")),
+        budget_ms=1000.0,
+        n=1,
+    )
 
 
 @pytest.mark.perf
-def test_apply_average_price_hot_path_performance():
+def test_apply_average_price_hot_path_performance(perf_budget):
     lines = [
         AllocationLine(sub_account_id=uuid4(), quantity=Decimal("60")),
         AllocationLine(sub_account_id=uuid4(), quantity=Decimal("40")),
     ]
-    start = time.perf_counter()
-    for _ in range(10_000):
-        apply_average_price(
+    perf_budget.assert_within(
+        lambda: apply_average_price(
             lines,
             Decimal("10.40"),
             total_notional=Decimal("1040.00"),
             notional_quantum=Decimal("0.01"),
-        )
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+        ),
+        budget_ms=1000.0,
+        n=1,
+    )
