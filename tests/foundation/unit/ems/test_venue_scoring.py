@@ -163,32 +163,12 @@ def test_failure_injection_extreme_fee_bps_still_ranks() -> None:
 
 
 @pytest.mark.perf
-def test_numerical_performance_assertion_500_venues_ratio() -> None:
-    """Numerical performance assertion: a 50x growth in candidate count
-    (10 -> 500) must not blow up the ranking time by more than a
-    generous linear-ish multiple -- catching an accidental O(n^2)
-    regression while tolerating normal per-call constant-factor noise.
+def test_numerical_performance_assertion_500_venues_ratio(perf_budget) -> None:
+    """task-10968: raw perf_counter → PerfBudget.best_of(process_time 기반).
 
-    This is a D2 numerical assertion per DEPTH_R_EO §D2-01:
-    '수치 성능 단언 1건' — assert a performance ratio, not absolute
-    milliseconds, so CI runners with different CPU speeds agree.
-
-    UNVERIFIED (measured, task-8757): the baseline previously used a
-    single-venue (n=1) reference. At n=1, `rank_venues`'s total cost
-    *is* its one-item marginal cost (RouteDecision/pydantic validation,
-    ~2.7us measured), so the 500-venue/1-venue ratio is mathematically
-    pinned at ~n_large (no headroom for the O(n log n) sort or ordinary
-    process jitter) instead of bounding actual algorithmic complexity --
-    it was failing 480-1050x on unmodified code across repeated local
-    runs, not from any src regression (see task-8757 note). Comparing
-    two sizes that are both far above the fixed-overhead floor (10 vs
-    500) gives a stable ~50-55x ratio in practice with 100x headroom
-    before the assertion below trips, while still catching real
-    quadratic blowups (which would land near 50*50=2500x for the same
-    size jump).
+    ratio 단언만 유지 — budget_ms 숫자는 변경하지 않음. batch=100로
+    양자화 보정 유지.
     """
-    import time
-
     n_small = 10
     n_large = 500
 
@@ -205,25 +185,28 @@ def test_numerical_performance_assertion_500_venues_ratio() -> None:
     rank_venues(small_candidates)
     rank_venues(large_candidates)
 
-    # Take the minimum of several trials, not a single sample: a single
-    # 100-iteration sum is vulnerable to one GC pause or scheduler
-    # preemption inflating either side and swinging the ratio: the
-    # minimum is the only statistic that isolates steady-state cost from
-    # transient host noise (noise only ever adds delay, never subtracts).
-    def _timed_run(candidates: list[VenueCandidate]) -> float:
-        start = time.perf_counter()
-        for _ in range(100):
-            rank_venues(candidates)
-        return time.perf_counter() - start
+    # batch=100: process_time() Windows 15.6ms 틱 양자화 오차를 batch로
+    # 나누어 줄인다(task-7253). best_of-N(min)으로 transient 노이즈 제거.
+    small_sample = perf_budget.best_of(
+        lambda: [rank_venues(small_candidates) for _ in range(100)],
+        n=5,
+        warmup=1,
+        batch=1,
+    )
+    large_sample = perf_budget.best_of(
+        lambda: [rank_venues(large_candidates) for _ in range(100)],
+        n=5,
+        warmup=1,
+        batch=1,
+    )
 
-    small_elapsed = min(_timed_run(small_candidates) for _ in range(5))
-    large_elapsed = min(_timed_run(large_candidates) for _ in range(5))
-
-    ratio = large_elapsed / small_elapsed if small_elapsed > 0 else 0
+    # cpu_ms는 100회 호출 총시간(best_of가 min을 찾음).
+    # ratio 계산: large/small 비율이 150배 미만이어야 선형 스케일링 유지.
+    ratio = large_sample.cpu_ms / small_sample.cpu_ms if small_sample.cpu_ms > 0 else 0
     assert ratio < 150, (
         f"Performance regression: {n_large} venues took {ratio:.1f}× "
-        f"the time of {n_small} venues (small={small_elapsed:.4f}s, "
-        f"large={large_elapsed:.4f}s)"
+        f"the time of {n_small} venues "
+        f"(small={small_sample.cpu_ms:.3f}ms, large={large_sample.cpu_ms:.3f}ms)"
     )
 
 
