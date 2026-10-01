@@ -1,6 +1,6 @@
 """14.2 (backend)/14.5 — Condition combination → FSM compilation (ConditionCompiler).
 
-Spec: 기능설계문서_v1.20.md#FD-14.2 processing steps 1/3/4, 9.11(FSMStrategyConfig), #06 §6.1/6.2
+Spec: design_doc_v1.20.md#FD-14.2 processing steps 1/3/4, 9.11(FSMStrategyConfig), #06 §6.1/6.2
 
 FD-14.2 splits into two branches: "condition combination UI" (frontend) and
 "FSM compilation" (pure logic). This session is backend-only, so the UI is
@@ -27,6 +27,7 @@ so "compilation failure due to contradictory state transitions" mentioned in
 FD-14.2 narrows to "required condition group is empty" for this simple compiler
 (rather than a generic condition builder that creates arbitrary graphs).
 """
+
 from __future__ import annotations
 
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
@@ -65,9 +66,7 @@ def _compile_condition_group(conditions: list[PreviewCondition], combine: str) -
     for condition in conditions:
         if condition.operator not in _OPERATOR_SYMBOLS:
             raise ConditionCompileError(f"지원하지 않는 연산자입니다: {condition.operator}")
-        params_suffix = "".join(
-            f"_{key}{value}" for key, value in sorted(condition.params.items())
-        )
+        params_suffix = "".join(f"_{key}{value}" for key, value in sorted(condition.params.items()))
         symbol = _OPERATOR_SYMBOLS[condition.operator]
         parts.append(f"{condition.indicator}{params_suffix} {symbol} {condition.threshold}")
 
@@ -93,9 +92,7 @@ class ConditionCompiler:
         stop_loss_combine: str = "AND",
     ) -> FSMStrategyConfig:
         if target_asset not in TARGET_ASSET_WHITELIST:
-            raise ConditionCompileError(
-                f"화이트리스트에 없는 target_asset입니다: {target_asset}"
-            )
+            raise ConditionCompileError(f"화이트리스트에 없는 target_asset입니다: {target_asset}")
 
         entry_expr = _compile_condition_group(entry_conditions, entry_combine)
         exit_expr = _compile_condition_group(exit_conditions, exit_combine)
