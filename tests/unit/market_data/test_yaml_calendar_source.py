@@ -164,13 +164,16 @@ def test_file_read_failure_propagates_not_swallowed(
         load_calendar(good)
 
 
-def test_load_calendar_performance_under_10ms() -> None:
+@pytest.mark.perf
+def test_load_calendar_performance_under_10ms(perf_budget) -> None:
     """성능 단언: 전체 config 파일(최대 4개)을 로드하는 데 10ms 미만이어야 한다.
-    캘린더 로더는 I/O 바운드가 아니므로 마이크로초 단위가 목표."""
-    import time
 
-    start = time.perf_counter_ns()
-    for p in [_KRX_2026, _KRX_2027, _US_2026, _US_2027]:
-        load_calendar(p)
-    elapsed_ms = (time.perf_counter_ns() - start) / 1e6
-    assert elapsed_ms < 10, f"4개 파일 로드 총소요 {elapsed_ms:.1f}ms — 예산 10ms 초과"
+    wall-clock 한 번 측정은 CI 부하에서 흔들렸다(2026-10-01 full CI 적색). perf_budget으로
+    CPU 시간을 재되, Windows process_time 해상도(~15.6ms)가 10ms 예산보다 거칠어 20회를
+    한 구간으로 묶어 1회당 시간을 구한다."""
+
+    def _load_all() -> None:
+        for p in [_KRX_2026, _KRX_2027, _US_2026, _US_2027]:
+            load_calendar(p)
+
+    perf_budget.assert_within(_load_all, budget_ms=10, batch=20, label="4개 캘린더 파일 로드")
