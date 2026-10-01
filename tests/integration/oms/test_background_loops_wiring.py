@@ -250,3 +250,49 @@ async def test_alert_loop_survives_repeated_tick_failures(pool, monkeypatch) -> 
         assert not any(t.done() for t in loops.tasks)  # 전부 생존(크래시로 죽지 않음)
     finally:
         await loops.stop()
+
+
+async def test_non_core_loops_disabled_when_all_flags_off(pool, monkeypatch) -> None:
+    """negative — 모든 대선택 플래그가 off면 5개 코어 루프만 등록되고
+    이외(execution_loop, liquidation_worker, post_trade_batch, oms_dispatcher)는
+    무시된다."""
+    monkeypatch.setenv("AIOS_EXECUTION_LOOP_ENABLED", "0")
+    monkeypatch.setenv("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
+    monkeypatch.setenv("AIOS_POST_TRADE_BATCH_ENABLED", "0")
+    monkeypatch.setenv("OMS_DISPATCHER_FLAG", "0")
+    monkeypatch.setenv("AIOS_STARTUP_RECOVERY_ENABLED", "0")
+
+    loops = await background_loops_module.start_background_loops(
+        pool=pool,
+        policy=load_risk_policy(),
+        event_bus=InProcessEventBus(),
+        credential_resolver=_StubCredentialResolver(ScriptedAdapter()),
+        api_tracker=ApiCallTracker(),
+    )
+    try:
+        assert len(loops.tasks) == 5
+        assert isinstance(loops.execution_scheduler, ExecutionLoopScheduler)
+        assert loops.trigger_post_trade_batch is None
+    finally:
+        await loops.stop()
+
+
+async def test_core_loops_startup_perf(pool, monkeypatch, perf_budget) -> None:
+    """perf — 5개 코어 루프 시작 오버헤드가 예산 내다."""
+    monkeypatch.setenv("AIOS_EXECUTION_LOOP_ENABLED", "0")
+    monkeypatch.setenv("AIOS_LIQUIDATION_WORKER_ENABLED", "0")
+    monkeypatch.setenv("AIOS_POST_TRADE_BATCH_ENABLED", "0")
+    monkeypatch.setenv("OMS_DISPATCHER_FLAG", "0")
+    monkeypatch.setenv("AIOS_STARTUP_RECOVERY_ENABLED", "0")
+
+    async def _startup():
+        loops = await background_loops_module.start_background_loops(
+            pool=pool,
+            policy=load_risk_policy(),
+            event_bus=InProcessEventBus(),
+            credential_resolver=_StubCredentialResolver(ScriptedAdapter()),
+            api_tracker=ApiCallTracker(),
+        )
+        await loops.stop()
+
+    await perf_budget.sample_async(_startup)
