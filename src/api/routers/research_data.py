@@ -2,19 +2,21 @@
 entitlement wiring.
 
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §2.3, §9
-RD-8 ("entitlement 연동(DC-9) + src/api/routers/research_data.py + 통합",
-DoD "교차 테넌트 404, 소스 권한 403").
+RD-8 ("entitlement integration (DC-9) + src/api/routers/research_data.py + integration",
+DoD "cross-tenant 404, source-permission 403").
 
-71번 §6 규칙대로 라우터는 auth/TenantContext 주입·transport validation·
-application 호출만 한다. 이용권/소스계약 판정은
-`application/authorize_access.py`(DC-27, DC-9 lineage -- see that module's
+Per §6 rule 71, the router only handles auth/TenantContext injection,
+transport validation, and application calls. License/source-contract
+judgment is delegated to
+`application/authorize_access.py` (DC-27, DC-9 lineage -- see that module's
 docstring for why DC-9's `Venue`-typed policy itself cannot be reused
-as-is), PIT 필터는 `application/query.py`(RD-7)에 위임한다. 도메인 예외는
-잡지 않는다 -- `exception_registry_foundation.py`가 봉투로 번역한다.
+as-is), and PIT filtering to `application/query.py` (RD-7). Domain exceptions
+are not caught here -- `exception_registry_foundation.py` translates them
+in bulk.
 
-마운트 경로는 다른 foundation 라우터와 같은 네임스페이스
-(`/v1/foundation/market-data`, `/v1/foundation/charting` 등)를 따른
-`/v1/foundation/research/items*`다.
+The mount path follows the same namespace as other foundation routers
+(`/v1/foundation/market-data`, `/v1/foundation/charting`, etc.):
+`/v1/foundation/research/items*`.
 """
 
 from __future__ import annotations
@@ -88,9 +90,9 @@ async def search_items_endpoint(
     repo: PostgresResearchRepository = Depends(get_research_repository),
     source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
 ) -> ApiResponse[list[ResearchItem]]:
-    """`source_id`는 필수다 -- DC-27 소스 계약 판정이 소스 단위이기 때문에
-    (§ module docstring), 소스를 밝히지 않은 전체 검색은 이 leaf의 스콥
-    밖이다. `instruments`/`kinds`는 콤마 구분 문자열."""
+    """`source_id` is required -- DC-27 source-contract judgment operates
+    per source (§ module docstring), so a source-agnostic full search falls
+    outside this leaf's scope. `instruments`/`kinds` are comma-separated."""
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
         await authorize_source_read(
@@ -122,10 +124,10 @@ async def get_item_endpoint(
     repo: PostgresResearchRepository = Depends(get_research_repository),
     source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
 ) -> ApiResponse[ResearchItem]:
-    """타 테넌트/미존재는 동형 404(`require_item`). 항목이 자기 테넌트
-    것으로 확인된 *후에* 소스 권한을 판정해 403을 준다 -- 순서를 바꾸면
-    "이 소스는 거부됐다"는 신호가 "이 item_id가 존재한다"는 사실을 먼저
-    노출하게 된다."""
+    """Cross-tenant/non-existent returns homomorphic 404 (`require_item`).
+    Source entitlement is judged *after* confirming the item belongs to
+    the caller's tenant, returning 403 -- reversing the order would signal
+    "this source was denied" before "this item_id exists"."""
     item = require_item(await repo.get_item(context.tenant_id, item_id))
     now = datetime.now(timezone.utc)
     async with pool.acquire() as conn:
