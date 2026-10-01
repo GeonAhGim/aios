@@ -252,24 +252,30 @@ def _p95(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-async def test_register_model_orchestration_p95_within_budget() -> None:
+async def test_register_model_orchestration_p95_within_budget(
+    perf_budget,
+) -> None:
     registry = _FakeModelRegistry()
     artifacts = _FakeArtifactStore()
-    durations: list[float] = []
-    for i in range(30):
-        job = _completed_job(
-            job_id=f"job-{i}", checkpoint=f"tree-content-{i}-{time.perf_counter_ns()}"
-        )
-        started = time.perf_counter()
+    _idx = [0]
+
+    async def _measure() -> None:
+        idx = _idx[0]
+        _idx[0] += 1
         await register_model(
-            job=job,
-            version=f"v{i}",
+            job=_completed_job(
+                job_id=f"job-{idx}",
+                checkpoint=f"tree-{idx}-{time.perf_counter_ns()}",
+            ),
+            version=f"v{idx}",
             train_data_lineage=_LINEAGE,
             trained_at=_NOW,
             model_registry=registry,
             artifact_store=artifacts,
         )
-        durations.append((time.perf_counter() - started) * 1000)
+
+    samples = await perf_budget.samples_async(_measure, n=30)
+    durations: list[float] = [s.cpu_ms for s in samples]
 
     p95_ms = _p95(durations)
     print(f"[AI-20 register_model] p95={p95_ms:.2f}ms budget<{_REGISTER_MODEL_P95_BUDGET_MS:.1f}ms")
