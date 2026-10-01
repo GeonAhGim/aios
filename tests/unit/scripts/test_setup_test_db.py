@@ -19,7 +19,6 @@ import asyncio
 import importlib.util
 import os
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 from typing import cast
@@ -35,10 +34,18 @@ SCRIPTS_DIR = ROOT / "scripts"
 
 # task-5822: 4-way concurrent reset+migrate — each leg runs a real `alembic upgrade
 # head` subprocess against a fresh DB (all revisions, not the already-migrated
-# no-op case). 8-way plain reset (no migrate) switched to a self-calibrating
-# `RelativeBudget` ratio (task-10652, see test body) since this host's
-# absolute DROP/CREATE DATABASE wall time varies with concurrent DB load.
-CONCURRENT_RESET_MIGRATE_BUDGET_S = 90.0
+# no-op case).
+#
+# task-10646: this used to be a fixed `CONCURRENT_RESET_MIGRATE_BUDGET_S = 90.0`
+# wall-clock ceiling, left behind when the sibling 8-way reset-only test (above)
+# was switched to a self-calibrating `RelativeBudget` ratio in task-10652 — this
+# migrate variant kept failing under host load (local repro: 201.28s > 90.0s,
+# single reset+migrate baseline ~19.8-19.9s -> observed ratio ~10.1x). Switched
+# to the same `RelativeBudget(calibration_fn=<single reset+migrate call>)`
+# pattern the sibling test already uses, for the same reason: this is I/O-bound
+# (mostly awaiting the DB/alembic subprocess, not CPU), so the ratio must be
+# measured against the same real-world bottleneck, not a fixed-CPU loop or an
+# absolute second count.
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -193,7 +200,16 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
     `migrate_url`을 넘겨 락을 쥔 채로 마이그레이션까지 끝내면 이 경합이 사라져야
     한다: 4-way 동시 reset+migrate가 예외 없이 전부 끝나고, 최종 DB에
     `alembic_version`이 채워져 있어야 한다(마이그레이션이 실제로 적용됐다는 증거).
-    """
+
+    task-10646: correctness 단언(결과 전부 True, `alembic_version` 채워짐)은
+    advisory lock 직렬화 덕에 호스트 부하와 무관하게 항상 성립한다. 타이밍
+    단언만 호스트에 따라 흔들려서, 고정 벽시계 상한 대신 같은 실행에서 직접
+    잰 "단일 reset+migrate 호출 1회" 비용과의 비율로 건다(`RelativeBudget`,
+    sibling 8-way 테스트와 동일 패턴, task-10652). 이론적 하한은 4x(완전
+    직렬화)지만, 매 호출이 별도 `alembic upgrade head` 서브프로세스(파이썬
+    인터프리터 기동 포함)라 로컬 재현 실측 비율은 ~10.1x였다 — 순수 직렬화
+    하한 위에 서브프로세스 기동 오버헤드 + 스케줄링 여유를 더해 30x를
+    바닥선으로 건다."""
     server_url = _server_url()
     test_url = setup_test_db._with_database(server_url, scratch_db_name)
 
@@ -208,11 +224,33 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
         )
         return cast("list[bool]", results)
 
-    try:
-        start = time.monotonic()
-        results = asyncio.run(_run_concurrent())
-        elapsed = time.monotonic() - start
+    results_holder: list[list[bool]] = []
 
+    def _run_and_capture() -> None:
+        results_holder.append(asyncio.run(_run_concurrent()))
+
+    def _single_reset_migrate_call() -> None:
+        asyncio.run(
+            setup_test_db._ensure_database(
+                server_url, scratch_db_name, reset=True, migrate_url=test_url
+            )
+        )
+
+    try:
+        budget = RelativeBudget()
+        sample = budget.assert_within(
+            _run_and_capture,
+            max_ratio=30.0,
+            mode="wall",
+            n=1,
+            warmup=0,
+            calibration_n=1,
+            calibration_fn=_single_reset_migrate_call,
+            label="4-way concurrent reset+migrate vs 1x sequential reset+migrate",
+        )
+        print(f"[setup_test_db] {budget.describe(sample, max_ratio=30.0)}")
+
+        results = results_holder[0]
         assert results == [True] * 4
         assert asyncio.run(_database_exists(server_url, scratch_db_name)) is True
 
@@ -224,11 +262,6 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
                 await conn.close()
 
         assert asyncio.run(_read_alembic_version()) is not None
-
-        assert elapsed < CONCURRENT_RESET_MIGRATE_BUDGET_S, (
-            f"4-way concurrent reset+migrate took {elapsed:.2f}s, budget "
-            f"{CONCURRENT_RESET_MIGRATE_BUDGET_S}s"
-        )
     finally:
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
 
