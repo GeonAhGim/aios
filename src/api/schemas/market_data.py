@@ -1,18 +1,22 @@
-"""LA-24 — market_data HTTP 읽기 API 응답 스키마.
+"""LA-24 — market_data HTTP read API response schemas.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-24.
 
-캔들 응답은 `contracts/v1.CandleSeries`/`ReplaySeries`를 **상속**해 계약
-필드(key/candles/gaps/adjustment/as_of/series_hash/schema_version)를 한 글자도
-바꾸지 않고, 스펙 문장 "둘 다 허용, 응답에 둘 다 표기"에 따라 `instrument_id`·
-`symbol`·`canonical_symbol`과 이용권 판정 결과(`entitlement`)만 얹는다(107번
-§8 "필드 추가는 minor"). 프론트 `parseCandleSeries`(shared-types)는 계약
-필드만 읽으므로 부가 필드에 영향받지 않는다.
+The candle response **inherits** `contracts/v1.CandleSeries`/`ReplaySeries`
+without changing a single character of the contract fields
+(key/candles/gaps/adjustment/as_of/series_hash/schema_version), and per the
+spec's "allow both, surface both in the response" wording it only adds
+`instrument_id`/`symbol`/`canonical_symbol` and the entitlement decision
+(`entitlement`) (standard-107 §8 "adding a field is minor"). The frontend's
+`parseCandleSeries` (shared-types) only reads the contract fields, so it is
+unaffected by the extra fields.
 
-인스트루먼트 항목은 `InstrumentRef`, 별칭 항목은 `ports/reference_repository.
-SymbolAliasRef`를 그대로 쓴다(새 DTO 금지 — 프론트 `parseInstrumentView`/
-`parseSymbolAlias`가 기대하는 필드 집합과 동일).
+Instrument items reuse `InstrumentRef` as-is, and alias items reuse
+`ports/reference_repository.SymbolAliasRef` as-is (no new DTO — identical to
+the field set expected by the frontend's `parseInstrumentView`/
+`parseSymbolAlias`).
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -33,8 +37,9 @@ __all__ = [
 
 
 class EntitlementView(BaseModel):
-    """`Entitlement`(DC-9)의 허용 결과만 노출한다 — 거부는 응답이 아니라
-    404로 끝나므로(타 테넌트 동형) 여기 도달하지 않는다."""
+    """Exposes only the allowed outcome of `Entitlement` (DC-9) — a denial
+    never reaches here, since it ends as a 404 (isomorphic to another tenant)
+    instead of a response."""
 
     mode: Literal["realtime", "delayed"]
     delayed_seconds: int
@@ -56,9 +61,10 @@ class ReplaySeriesView(ReplaySeries, _SeriesIdentity):
 
 
 class InstrumentListView(BaseModel):
-    """프론트 `toInstrumentListResult`(clients/marketData.ts)가 `items`/
-    `next_cursor`를 data 안에서 읽는다 — `meta.page.next_cursor`에도 같은
-    값을 싣지만 data 쪽 필드가 그 클라이언트의 계약이다."""
+    """The frontend's `toInstrumentListResult` (clients/marketData.ts) reads
+    `items`/`next_cursor` from inside `data` — the same value is also carried
+    on `meta.page.next_cursor`, but the `data`-side field is that client's
+    contract."""
 
     items: list[InstrumentRef]
     next_cursor: str | None
