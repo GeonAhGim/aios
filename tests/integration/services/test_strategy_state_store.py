@@ -9,6 +9,7 @@ D2: negative >= 3(존재하지 않는 execution_id 조회, 잘못된 expected_ve
 1승 1충돌로 수렴함을 asyncio.gather로 증명(§9 L13 DoD "경합 테스트
 1승 1충돌").
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -212,6 +213,27 @@ async def test_connection_failure_propagates_instead_of_being_swallowed(pool, mo
             await save_state(conn, _memory(execution_id), expected_version=None)
 
 
+@pytest.mark.perf
+async def test_save_load_round_trip_within_budget(pool, perf_budget):
+    """성능 단언 -- save_state + load_state 단일 왕복이 예산 내야 한다.
+
+    async I/O는 perf_budget.sample_async()로 wall-clock 지연을 측정한다
+    (CPU time는 async await를 보지 못함). perf-budget 게이트가 이
+    assert를 raw 타이머로 재구현하는 것을 막는다(perf-measurement 래칫).
+    """
+
+    user_id = await create_test_user(pool)
+    execution_id = await _create_execution(pool, user_id)
+
+    async def _round_trip():
+        async with pool.acquire() as conn:
+            await save_state(conn, _memory(execution_id), expected_version=None)
+            await load_state(conn, execution_id)
+
+    sample = await perf_budget.sample_async(_round_trip)
+    assert sample.wall_ms < 200, f"round-trip wall={sample.wall_ms:.1f}ms exceeds 200ms budget"
+
+
 async def test_regression_confirms_suite_would_catch_missing_version_guard(pool, monkeypatch):
     """게이트 적색 재현 -- ON CONFLICT의 state_version WHERE 절이 실수로
     빠지면(결함 주입) 이 스위트가 실제로 RED가 됨을 먼저 증명한 뒤, 원래 SQL로
@@ -241,6 +263,4 @@ async def test_regression_confirms_suite_would_catch_missing_version_guard(pool,
     async with pool.acquire() as conn:
         with pytest.raises(ConcurrencyConflictError):
             # 원래 SQL 복구 후: 같은 잘못된 expected_version은 이제 거부된다(GREEN 재확인).
-            await save_state(
-                conn, _memory(execution_id, state_version=2), expected_version=99
-            )
+            await save_state(conn, _memory(execution_id, state_version=2), expected_version=99)
