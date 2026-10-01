@@ -20,7 +20,6 @@ DEEPEN(task-3039, ADR-2026-09-09-C D2): depth=D2 증빙.
   테스트가 런타임 가드를 직접 실행한다).
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -34,6 +33,7 @@ from src.foundation.backtest.domain.costs.funding import (
     count_funding_settlements,
 )
 from src.foundation.backtest.domain.models_v2 import CostsConfig
+from tests.conftest import PerfBudget
 
 # --------------------------------------------------------------------------
 # BT-8 funding
@@ -300,18 +300,21 @@ def test_compute_funding_cost_far_future_settlement_count_is_exact() -> None:
 
 
 @pytest.mark.perf
-def test_compute_borrow_cost_perf_budget() -> None:
+def test_compute_borrow_cost_perf_budget(perf_budget: PerfBudget) -> None:
     """perf assertion(D2): `compute_borrow_cost`는 백테스트 한 회 실행에서
     보유 포지션마다 반복 호출되는 순수 함수다 — O(1) 산술만 하므로 상한을
-    넉넉히 잡아도(10,000회 <= 200ms) 회귀를 잡아낼 수 있다."""
+    넉넉히 잡아도(10,000회 <= 200ms) 회귀를 잡아낼 수 있다.
+
+    raw time.perf_counter() → perf_budget.assert_within(process_time 기반) 전환(task-10944)."""
 
     config = CostsConfig(funding=False, borrow_apr=Decimal("0.10"))
     entry = datetime(2026, 1, 1, tzinfo=timezone.utc)
     exit_ = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
-    start = time.perf_counter()
-    for _ in range(10_000):
-        compute_borrow_cost(config, notional=Decimal("100000"), entry_time=entry, exit_time=exit_)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    def run_batch() -> None:
+        for _ in range(10_000):
+            compute_borrow_cost(
+                config, notional=Decimal("100000"), entry_time=entry, exit_time=exit_
+            )
 
-    assert elapsed_ms < 200, f"compute_borrow_cost 너무 느림: {elapsed_ms:.1f}ms/10,000회"
+    perf_budget.assert_within(run_batch, budget_ms=200, label="compute_borrow_cost x10k")
