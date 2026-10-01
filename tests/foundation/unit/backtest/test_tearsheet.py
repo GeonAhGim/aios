@@ -256,19 +256,17 @@ def _p95_ms(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_build_tearsheet_p95_latency_within_backtest_budget_slice() -> None:
+def test_build_tearsheet_p95_latency_within_backtest_budget_slice(
+    perf_budget,
+) -> None:
     """DEEPEN(task-3054): ADR-2026-09-09-C Decision 1 예산 중 리포트 뷰
     조립 몫(2ms)을 실제로 단언한다."""
     curve = [_point(0, "100"), _point(1, "110"), _point(2, "120")]
     config = _config()
     result = _result(curve, config=config)
 
-    samples: list[float] = []
-    for _ in range(_ITERATIONS):
-        started = time.perf_counter()
-        build_tearsheet(result)
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
+    raw_samples = perf_budget.samples(lambda: build_tearsheet(result), n=_ITERATIONS, batch=1)
+    p95_ms = _p95_ms([s.cpu_ms for s in raw_samples])
     print(f"[BT-12] build_tearsheet p95={p95_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
     assert p95_ms < _BUDGET_MS
 
@@ -279,6 +277,7 @@ def test_build_tearsheet_p95_latency_within_backtest_budget_slice() -> None:
 @pytest.mark.perf
 def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget,
 ) -> None:
     """게이트 적색 재현: `config_hash`가 2ms 예산을 실제로 넘기도록 지연을
     주입하면, `test_build_tearsheet_p95_latency_within_backtest_budget_slice`
@@ -292,17 +291,17 @@ def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     original_config_hash = BacktestConfig.config_hash
 
     def _stalled_config_hash(self: BacktestConfig) -> str:
-        time.sleep(0.01)  # > 2ms 예산
+        # CPU-busy stall > 2ms budget (process_time counts this; time.sleep does not)
+        total: int = 0
+        for i in range(500_000):
+            total += i * i % 7
+        assert total >= 0  # 최적화로 반복이 제거되지 않도록 결과를 소비한다
         return original_config_hash(self)
 
     monkeypatch.setattr(BacktestConfig, "config_hash", _stalled_config_hash)
 
-    samples: list[float] = []
-    for _ in range(5):
-        started = time.perf_counter()
-        build_tearsheet(result)
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
+    raw_samples = perf_budget.samples(lambda: build_tearsheet(result), n=5, batch=1)
+    p95_ms = _p95_ms([s.cpu_ms for s in raw_samples])
     with pytest.raises(AssertionError):
         assert p95_ms < _BUDGET_MS
 
