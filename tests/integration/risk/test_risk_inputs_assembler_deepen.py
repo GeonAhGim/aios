@@ -1,5 +1,7 @@
 """R-3/R-28 `risk_inputs_assembler.py` D3 증빙 — negative/실패주입/성능.
 
+depth=D3: circuit_breaker safety_state, correlation_rule, DB failure propagation,
+missing fields become None, latency budget, concurrent equity peak convergence.
 `test_risk_inputs_assembler.py`(R-31 기본 계약)에서 분리(task-10539,
 loc_over_500 분리, CLAUDE.md §7). 제품 코드는 변경하지 않는다.
 """
