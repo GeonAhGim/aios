@@ -200,3 +200,90 @@ def test_post_begin_exception(client: TestClient, monkeypatch) -> None:
     )
     with pytest.raises(RuntimeError):
         client.post("/v1/foundation/connections", json=body.model_dump())
+
+
+# ── negative tests: invariant-violating inputs ──────────────────────────
+
+
+def test_post_begin_invalid_capability(client: TestClient) -> None:
+    """Reject connection request with an unknown capability scope."""
+    body = {
+        "provider_code": "ex",
+        "opaque_account_ref": "ref",
+        "requested_capability_profile": ["NONEXISTENT_SCOPE"],
+    }
+    response = client.post("/v1/foundation/connections", json=body)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+def test_post_confirm_tenant_mismatch(client: TestClient, monkeypatch) -> None:
+    """Reject confirm when connection belongs to a different tenant (I-03 idempotency boundary)."""
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+
+    async def mock_confirm_raises(repo: Any, provider: Any, **kwargs: Any):
+        raise ValueError("tenant_mismatch")
+
+    from src.api.routers.foundation import connections
+
+    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_raises)
+    with pytest.raises(ValueError, match="tenant_mismatch"):
+        client.post(f"/v1/foundation/connections/{cid}:confirm")
+
+
+def test_post_sync_tenant_mismatch(client: TestClient, monkeypatch) -> None:
+    """Reject sync when connection belongs to a different tenant."""
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+
+    async def mock_sync_raises(repo: Any, provider: Any, **kwargs: Any):
+        raise ValueError("tenant_mismatch")
+
+    from src.api.routers.foundation import connections
+
+    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_raises)
+    with pytest.raises(ValueError, match="tenant_mismatch"):
+        client.post(f"/v1/foundation/connections/{cid}:sync")
+
+
+# ── failure injection: dependency exceptions ────────────────────────────
+
+
+def test_post_confirm_provider_error(client: TestClient, monkeypatch) -> None:
+    """Failure injection: ReadonlyAccountProvider raises ConnectionError."""
+
+    async def mock_confirm_repo_error(repo: Any, provider: Any, **kwargs: Any):
+        raise ConnectionError("provider unreachable")
+
+    from src.api.routers.foundation import connections
+
+    monkeypatch.setattr(connections, "confirm_connection", mock_confirm_repo_error)
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    with pytest.raises(ConnectionError):
+        client.post(f"/v1/foundation/connections/{cid}:confirm")
+
+
+def test_post_sync_repo_error(client: TestClient, monkeypatch) -> None:
+    """Failure injection: ConnectionRepository raises during sync."""
+
+    async def mock_sync_repo_error(repo: Any, provider: Any, **kwargs: Any):
+        raise RuntimeError("db connection lost")
+
+    from src.api.routers.foundation import connections
+
+    monkeypatch.setattr(connections, "sync_snapshot", mock_sync_repo_error)
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    with pytest.raises(RuntimeError):
+        client.post(f"/v1/foundation/connections/{cid}:sync")
+
+
+def test_post_revoke_repo_error(client: TestClient, monkeypatch) -> None:
+    """Failure injection: ConnectionRepository raises during revoke."""
+
+    async def mock_revoke_repo_error(repo: Any, **kwargs: Any):
+        raise RuntimeError("db connection lost")
+
+    from src.api.routers.foundation import connections
+
+    monkeypatch.setattr(connections, "revoke_connection", mock_revoke_repo_error)
+    cid = UUID("550e8400-e29b-41d4-a716-446655440001")
+    with pytest.raises(RuntimeError):
+        client.post(f"/v1/foundation/connections/{cid}:revoke")
