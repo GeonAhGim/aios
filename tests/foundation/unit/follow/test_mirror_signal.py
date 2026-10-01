@@ -19,7 +19,6 @@ ADR-2026-09-09-C D2 증빙:
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -291,35 +290,36 @@ p99 5ms"(실 DB 기준) 예산을 그대로 가져다 쓸 수는 없다 — 대�
 
 
 @pytest.mark.perf
-async def test_repeated_mirror_calls_stay_within_budget() -> None:
+async def test_repeated_mirror_calls_stay_within_budget(perf_budget) -> None:
     risk_repo = FakeRiskGateRepository()
     mandate_repo = FakeMandateRepository()
     connection_repo = UnusedConnectionRepository()
 
-    started = time.perf_counter()
-    for _ in range(_CALL_COUNT):
-        subscription = _subscription()
-        signal = _signal(source_listing=subscription.source_listing)
-        intent = await mirror_signal(
-            risk_repo,
-            mandate_repo,
-            connection_repo,
-            subscription=subscription,
-            signal=signal,
-            now=NOW,
-        )
-        assert intent.paper_only is True
-    elapsed_seconds = time.perf_counter() - started
+    async def _batch() -> None:
+        for _ in range(_CALL_COUNT):
+            subscription = _subscription()
+            signal = _signal(source_listing=subscription.source_listing)
+            intent = await mirror_signal(
+                risk_repo,
+                mandate_repo,
+                connection_repo,
+                subscription=subscription,
+                signal=signal,
+                now=NOW,
+            )
+            assert intent.paper_only is True
+
+    sample = await perf_budget.sample_async(_batch)
 
     print(
         f"\nmirror_signal latency (n={_CALL_COUNT}, in-memory fakes): "
-        f"{elapsed_seconds * 1000:.2f}ms total, "
-        f"{(elapsed_seconds / _CALL_COUNT) * 1000:.3f}ms/call "
-        f"(ceiling={_LATENCY_CEILING_SECONDS}s total)"
+        f"{sample.wall_ms:.2f}ms total, "
+        f"{sample.wall_ms / _CALL_COUNT:.3f}ms/call "
+        f"(ceiling={_LATENCY_CEILING_SECONDS * 1000:.0f}ms total)"
     )
     assert risk_repo.list_active_controls_calls == _CALL_COUNT
     assert risk_repo.insert_evaluation_calls == _CALL_COUNT
-    assert elapsed_seconds < _LATENCY_CEILING_SECONDS, (
-        f"{_CALL_COUNT}회 mirror_signal 호출이 {elapsed_seconds:.3f}s로 상한"
+    assert sample.wall_ms < _LATENCY_CEILING_SECONDS * 1000, (
+        f"{_CALL_COUNT}회 mirror_signal 호출이 {sample.wall_ms:.3f}ms로 상한"
         f"({_LATENCY_CEILING_SECONDS}s)을 넘었다 — 회귀 의심."
     )
