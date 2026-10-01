@@ -10,6 +10,7 @@ UPDATE`로 조회해, 있으면 `ConcurrencyConflictError`를 던진다.
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -171,3 +172,40 @@ async def test_manual_activation_still_conflicts_with_the_dedicated_error_type(p
         )
     assert isinstance(excinfo.value, ConcurrencyConflictError)
     assert excinfo.value.control_id == first.id
+
+
+async def test_ten_concurrent_first_activations_produce_exactly_one_active_control(pool, repo):
+    """negative(task-10672, R-40 후속, task-10490 DEEPEN CM-12) — 같은
+    (scope, scope_ref)에 ACTIVE 행이 하나도 없는 상태에서 동시에 10건의 최초
+    activate가 들어오면, 과거 구현(`SELECT ... FOR UPDATE`만)은 매치되는 행이
+    없어 아무것도 잠그지 못하고 전부 통과해 중복 ACTIVE 행과 fence token
+    낭비가 발생했다(TOCTOU). advisory lock으로 직렬화한 뒤에는 정확히 1건만
+    성공하고 나머지 9건은 `ConcurrencyConflictError`로 거부돼야 한다."""
+    tenant_id = await _tenant(pool)
+    scope_ref = str(tenant_id)
+
+    async def attempt(i: int):
+        return await repo.insert_safety_control(
+            scope=SafetyScope.ACCOUNT,
+            scope_ref=scope_ref,
+            reason=f"concurrent activate #{i}",
+            actor_subject_id=tenant_id,
+        )
+
+    results = await asyncio.gather(*(attempt(i) for i in range(10)), return_exceptions=True)
+
+    successes = [r for r in results if not isinstance(r, BaseException)]
+    failures = [r for r in results if isinstance(r, BaseException)]
+
+    assert len(successes) == 1, f"정확히 1건만 성공해야 하는데 {len(successes)}건 성공했다"
+    assert len(failures) == 9
+    for failure in failures:
+        assert isinstance(failure, ConcurrencyConflictError)
+
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM safety_control "
+            "WHERE scope = 'ACCOUNT' AND scope_ref = $1 AND state = 'ACTIVE'",
+            scope_ref,
+        )
+    assert count == 1, "동시 최초-activate 경합 후에도 ACTIVE 행은 정확히 1개여야 한다"

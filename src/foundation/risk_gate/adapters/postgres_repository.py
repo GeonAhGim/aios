@@ -138,12 +138,28 @@ class PostgresRiskGateRepository:
         actor_subject_id: UUID,
     ) -> SafetyControl:
         async with self._pool.acquire() as conn, conn.transaction():
+            # task-10672(R-40 후속, task-10490 DEEPEN CM-12) — 같은
+            # (scope, scope_ref)에 ACTIVE 행이 아직 하나도 없는 상태에서 동시에
+            # 여러 activate가 들어오면 아래 `SELECT ... FOR UPDATE`는 매치되는
+            # 행이 없어 아무것도 잠그지 못하고 전부 통과한다(TOCTOU). 행이
+            # 생기기 전에는 행 잠금으로 직렬화할 수 없으므로, 트랜잭션
+            # 범위의 advisory lock으로 같은 (scope, scope_ref) 요청끼리
+            # 먼저 직렬화한다 — 트랜잭션 종료(커밋/롤백) 시 자동 해제되므로
+            # 별도 해제 호출이 필요 없다.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1 || '|' || $2))",
+                scope.value,
+                scope_ref,
+            )
+
             # F4(L) 안정화 감사(task-8882/9065) — 이 존재 확인 없이 그냥
             # INSERT하면 같은 (scope, scope_ref)에 ACTIVE 행이 중복 생성돼
             # fence-token/감사 정합성이 오염된다. FOR UPDATE로 동시 activate
             # 시도끼리 이 행을 두고 직렬화하고, 이미 ACTIVE면 fence를
             # 건드리기 전에 거부해 거부되는 요청이 fence token을 낭비하지
-            # 않게 한다.
+            # 않게 한다. (위 advisory lock이 "행이 아직 없을 때"의 레이스를
+            # 막고, 이 FOR UPDATE는 "이미 행이 있을 때"의 레이스를 막는다 —
+            # 서로 다른 레이스를 막는 상호보완 장치다.)
             existing = await conn.fetchrow(
                 "SELECT id FROM safety_control "
                 "WHERE scope = $1 AND scope_ref = $2 AND state = 'ACTIVE' "
