@@ -8,7 +8,6 @@ CLAUDE.md §5 / ADR-2026-09-10-C Decision 4.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -94,19 +93,21 @@ async def test_fetch_snapshot_defaults_to_empty_values_boundary():
 
 
 @pytest.mark.perf
-async def test_fetch_snapshot_perf_budget_p95_latency() -> None:
+async def test_fetch_snapshot_perf_budget_p95_latency(perf_budget) -> None:
     """발행된 FND-05 전용 예산이 없어(ADR-2026-09-09-C Decision 1 표) 가장
     가까운 publish된 command-write 예산("order submit -> ACK p95 50ms, paper")과
-    같은 자릿수를 사용한다 — 이 더블도 메모리 내에서만 동작하는 단일 조회다."""
-    samples = 50
-    durations_ms: list[float] = []
+    같은 자릿수를 사용한다 — 이 더블도 메모리 내에서만 동작하는 단일 조회다.
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환(task-10960):
+    process_time 기반 측정 + coverage tracer-pause로 부하 민감 호스트에서의
+    오탐을 줄인다. I/O 지연은 wall_ms로 판정한다. 예산 값(50ms)은 그대로 유지한다."""
+    sample_count = 50
     provider = FakeReadonlyAccountProvider()
 
-    for _ in range(samples):
-        start = time.perf_counter()
-        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
-        durations_ms.append((time.perf_counter() - start) * 1000)
-
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
+    samples = await perf_budget.samples_async(
+        lambda: provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc)),
+        n=sample_count,
+    )
+    durations_ms = sorted(s.wall_ms for s in samples)
+    p95 = durations_ms[int(sample_count * 0.95) - 1]
     assert p95 < 50.0, f"fetch_snapshot p95 latency {p95:.3f}ms exceeded 50ms budget"
