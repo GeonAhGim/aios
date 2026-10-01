@@ -156,13 +156,12 @@ async def test_critical_handler_retries_then_succeeds() -> None:
 
 @pytest.mark.asyncio
 async def test_critical_handler_exhausts_retries_and_escalates() -> None:
-    bus = InProcessEventBus(max_retries=2, retry_initial_delay_seconds=0.001)
     audit_calls: list[dict[str, Any]] = []
 
     async def audit_sink(record: dict[str, Any]) -> None:
         audit_calls.append(record)
 
-    bus._audit_sink = audit_sink  # type: ignore[assignment]
+    bus = InProcessEventBus(max_retries=2, retry_initial_delay_seconds=0.001, audit_sink=audit_sink)
 
     escalated: asyncio.Queue[Any] = asyncio.Queue()
 
@@ -418,8 +417,10 @@ async def test_negative_subscribe_without_criticality_keyword_raises() -> None:
     async def handler(payload: Any) -> None:
         return None
 
+    attr_name = "subscribe"
+    subscribe = getattr(bus, attr_name)
     with pytest.raises(TypeError):
-        bus.subscribe("topic.kw", handler, HandlerCriticality.SAFE)  # type: ignore[misc]
+        subscribe("topic.kw", handler, HandlerCriticality.SAFE)
 
 
 @pytest.mark.asyncio
