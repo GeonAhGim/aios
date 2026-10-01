@@ -10,7 +10,6 @@ gateway-red failures instead of a generic fake exception -- see
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -21,6 +20,7 @@ import pytest
 from src.core.notifications.channel_policy import NotificationChannel
 from src.core.notifications.gateway import NotificationGateway
 from src.services.risk_alerting import LimitBreachEvent, RiskAlertService
+from tests.conftest import PerfBudget
 
 TENANT_A = UUID("11111111-1111-1111-1111-111111111111")
 TENANT_B = UUID("22222222-2222-2222-2222-222222222222")
@@ -302,11 +302,16 @@ async def test_same_tenant_different_user_still_suppresses() -> None:
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_suppressed_path_dispatch_overhead_stays_under_5ms_p99() -> None:
+async def test_suppressed_path_dispatch_overhead_stays_under_5ms_p99(
+    perf_budget: PerfBudget,
+) -> None:
     """Performance assertion: `on_breach` is called inline in the
     decision-recording path (see module docstring), so the common case --
     a duplicate breach inside the suppression window -- must return fast
-    without touching the gateway. Measures wall-clock p99 over 200 calls."""
+    without touching the gateway. Measures p99 CPU time over 200 calls via
+    `perf_budget` (process_time, tracer-paused -- see conftest.py PerfBudget)
+    instead of a raw wall-clock diff, which mixes in coverage tracer
+    overhead and OS scheduler noise (task-9121)."""
     gateway = FakeGateway()
     fixed_now = _BASE
 
@@ -316,13 +321,12 @@ async def test_suppressed_path_dispatch_overhead_stays_under_5ms_p99() -> None:
     service = RiskAlertService(gateway, _fixed_clock)
     await service.on_breach(_event(hard=True))  # establishes the reservation
 
-    samples: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
-        await service.on_breach(_event(hard=True))  # inside the window -> must be suppressed
-        samples.append(time.perf_counter() - start)
+    samples = [
+        await perf_budget.sample_async(lambda: service.on_breach(_event(hard=True)))
+        for _ in range(200)  # inside the window -> must be suppressed
+    ]
 
-    samples.sort()
-    p99 = samples[int(len(samples) * 0.99)]
-    assert p99 < 0.005, f"suppressed on_breach p99={p99 * 1000:.3f}ms exceeds 5ms budget"
+    cpu_ms_samples = sorted(s.cpu_ms for s in samples)
+    p99 = cpu_ms_samples[int(len(cpu_ms_samples) * 0.99)]
+    assert p99 < 5.0, f"suppressed on_breach p99={p99:.3f}ms exceeds 5ms budget"
     assert len(gateway.calls) == 1  # only the initial, unsuppressed send
