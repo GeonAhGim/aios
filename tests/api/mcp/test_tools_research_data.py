@@ -19,7 +19,6 @@ mirroring the router's own default wiring).
 from __future__ import annotations
 
 import json
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -252,6 +251,7 @@ async def test_research_data_search_tool_latency_stays_within_normalized_ceiling
     pool,
     token_repo: PostgresAgentTokenRepository,
     research_repo: PostgresResearchRepository,
+    perf_budget,
 ):
     await _insert_source_contract(pool)
     tenant_id = await _make_tenant(pool)
@@ -262,29 +262,33 @@ async def test_research_data_search_tool_latency_stays_within_normalized_ceiling
         await research_repo.append_item(tenant_id, _item(), external_id=f"ext-{uuid.uuid4().hex}")
     issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
 
-    baseline_start = time.perf_counter()
-    baseline = await client.post(
-        "/mcp/tools/research_data_search",
-        json={"source_id": SOURCE_ID, "instruments": ["no-such-instrument"]},
-        headers={AGENT_TOKEN_HEADER: issued.secret},
+    baseline_sample = await perf_budget.sample_async(
+        lambda: client.post(
+            "/mcp/tools/research_data_search",
+            json={"source_id": SOURCE_ID, "instruments": ["no-such-instrument"]},
+            headers={AGENT_TOKEN_HEADER: issued.secret},
+        )
     )
-    baseline_elapsed = time.perf_counter() - baseline_start
+    baseline = baseline_sample.result
     assert baseline.status_code == 200, baseline.text
+    baseline_elapsed_s = baseline_sample.wall_ms / 1000
 
-    full_start = time.perf_counter()
-    full = await client.post(
-        "/mcp/tools/research_data_search",
-        json={"source_id": SOURCE_ID},
-        headers={AGENT_TOKEN_HEADER: issued.secret},
+    full_sample = await perf_budget.sample_async(
+        lambda: client.post(
+            "/mcp/tools/research_data_search",
+            json={"source_id": SOURCE_ID},
+            headers={AGENT_TOKEN_HEADER: issued.secret},
+        )
     )
-    full_elapsed = time.perf_counter() - full_start
+    full = full_sample.result
     assert full.status_code == 200, full.text
     assert len(full.json()) == 51
 
-    ceiling = baseline_elapsed * 20 + 0.5
-    assert full_elapsed <= ceiling, (
-        f"51개 항목 검색이 {full_elapsed:.3f}s 걸림 "
-        f"(baseline {baseline_elapsed:.3f}s, 정규화 상한 {ceiling:.3f}s)"
+    full_elapsed_s = full_sample.wall_ms / 1000
+    ceiling = baseline_elapsed_s * 20 + 0.5
+    assert full_elapsed_s <= ceiling, (
+        f"51개 항목 검색이 {full_elapsed_s:.3f}s 걸림 "
+        f"(baseline {baseline_elapsed_s:.3f}s, 정규화 상한 {ceiling:.3f}s)"
     )
 
 
