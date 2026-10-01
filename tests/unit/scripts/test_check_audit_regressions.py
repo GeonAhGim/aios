@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -347,3 +348,48 @@ def test_run_completes_within_time_budget_when_many_checkers_fail(monkeypatch) -
 
     assert len(findings) == 150  # 절반만 예외로 죽어 Finding을 남김
     assert elapsed < 1.0, f"run()이 {elapsed:.3f}s — 예산(1.0s) 초과"
+
+
+def test_finding_rejects_missing_constructor_arguments() -> None:
+    """네거티브: `Finding`은 code/detail/evidence 세 값을 모두 요구한다 — 호출자가
+    하나라도 빠뜨리면 조용히 반쪽짜리 Finding을 만드는 대신 즉시 TypeError로 죽어야
+    한다(그래야 `run()`의 try/except가 "검사기 자체 실패"로 분류해 잡는다)."""
+    with pytest.raises(TypeError):
+        check_audit_regressions.Finding("only_code")  # type: ignore[call-arg]
+
+
+def test_hits_raises_on_invalid_regex_pattern() -> None:
+    """네거티브: `_hits`에 컴파일 불가능한 정규식을 넘기면 빈 결과로 삼키지 않고
+    `re.error`를 그대로 올려야 한다 — 검사 코드가 오타난 패턴을 쓰고도 "결함
+    없음"으로 거짓 통과하는 것을 막는다."""
+    with pytest.raises(re.error):
+        check_audit_regressions._hits("(unclosed(", [])
+
+
+def test_main_exits_nonzero_on_unknown_cli_flag(monkeypatch, capsys) -> None:
+    """네거티브: argparse가 모르는 플래그를 받으면 `main()`이 베이스라인을 읽어
+    보려 시도하는 대신 바로 `SystemExit(2)`로 fail-closed해야 한다 — 잘못된 호출이
+    rc=0으로 조용히 넘어가는 것을 막는다."""
+    monkeypatch.setattr(sys, "argv", ["check_audit_regressions.py", "--no-such-flag"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        check_audit_regressions.main()
+
+    assert exc_info.value.code == 2
+
+
+def test_main_raises_when_baseline_path_is_a_directory_not_a_file(tmp_path, monkeypatch) -> None:
+    """네거티브: `--baseline`에 디렉터리 경로를 주면 `read_text()`가 `OSError`
+    서브클래스(`IsADirectoryError`)를 던진다 — 현재 `main()`은 `OSError`만
+    JSONDecodeError와 함께 잡으므로 통과해야 하지만, 이 경계가 깨져 다른
+    예외 타입으로 새면 이 테스트가 바로 잡는다."""
+    baseline_dir = tmp_path / "audit-baseline.json"
+    baseline_dir.mkdir()
+    monkeypatch.setattr(
+        sys, "argv", ["check_audit_regressions.py", "--baseline", str(baseline_dir)]
+    )
+    monkeypatch.setattr(check_audit_regressions, "CHECKS", [])
+
+    rc = check_audit_regressions.main()
+
+    assert rc == 0
