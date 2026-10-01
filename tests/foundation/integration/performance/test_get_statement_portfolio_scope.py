@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import math
 import os
-import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -292,12 +291,12 @@ async def test_get_statement_concurrent_mixed_tenants_do_not_cross_leak(
 
 @pytest.mark.perf
 async def test_get_statement_portfolio_scope_p95_latency_stays_within_normalized_ceiling(
-    pool, perf_repo, entity_repo
+    pool, perf_repo, entity_repo, perf_budget
 ):
-    """수치 성능 단언 — 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
-    절대 ms 임계 대신, 가벼운 baseline 호출 1건 대비 정규화한 상한만
-    게이트로 쓴다(task-3009 test_resolve_context_performance.py와 동일
-    교훈). `portfolio_id` 경로는 `resolve_portfolio_scope`가 추가하는 3회
+    """수치 성능 단언 — raw perf_counter → perf_budget.sample_async 전환(task-10894).
+    공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신,
+    가벼운 baseline 호출 1건 대비 정규화한 상한만 게이트로 쓴다.
+    `portfolio_id` 경로는 `resolve_portfolio_scope`가 추가하는 3회
     라운드트립(get_portfolio/get_fund/get_legal_entity)만큼 무변경 경로보다
     비용이 늘어야 정상이므로, 그 고정 비용이 회귀로 자라는지 감시한다."""
     tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
@@ -307,15 +306,16 @@ async def test_get_statement_portfolio_scope_p95_latency_stays_within_normalized
     portfolio_id = default_portfolio_id(tenant_id)
 
     async def _call() -> float:
-        start = time.perf_counter()
-        await get_statement(
-            perf_repo,
-            tenant_id=tenant_id,
-            statement_id=inserted.id,
-            portfolio_id=portfolio_id,
-            entities=entity_repo,
+        sample = await perf_budget.sample_async(
+            lambda: get_statement(
+                perf_repo,
+                tenant_id=tenant_id,
+                statement_id=inserted.id,
+                portfolio_id=portfolio_id,
+                entities=entity_repo,
+            )
         )
-        return time.perf_counter() - start
+        return sample.wall_ms
 
     baseline_elapsed = await _call()
     samples = sorted([await _call() for _ in range(30)])
@@ -323,7 +323,7 @@ async def test_get_statement_portfolio_scope_p95_latency_stays_within_normalized
 
     ceiling = baseline_elapsed * 5 + 0.05
     assert p95 <= ceiling, (
-        f"get_statement(portfolio_id=...) p95 지연 {p95:.4f}s가 정규화 상한 "
-        f"{ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 초과했습니다 -- "
+        f"get_statement(portfolio_id=...) p95 지연 {p95:.4f}ms가 정규화 상한 "
+        f"{ceiling:.4f}ms(baseline {baseline_elapsed:.4f}ms)를 초과했습니다 -- "
         "resolve_portfolio_scope 라운드트립 회귀 의심"
     )
