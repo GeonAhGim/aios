@@ -1,28 +1,35 @@
-"""LB-13 — 펀딩피 정산 → 포지션 저널 기록의 단일 경로(application/record_funding_fee).
+"""LB-13 — single path for funding-fee settlement -> position journal entry
+(application/record_funding_fee).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §5, §9.3 LB-13.
 
-`record_fill`(LB-11, [[record_fill]])과 같은 정신(락 → 조회 → 규칙 계산 →
-쓰기 → 감사)을 따르되 훨씬 단순하다: 펀딩은 원가법 로트를 건드리지 않는다
-(`qty_delta=0`, [[journal_rules.funding_entry]]) — 그래서 `record_fill`처럼
-"멱등 재입력이면 계산을 건너뛴다"는 사전 분기가 필요 없다. 같은
-`funding_id`로 재전송돼도 `amount_base`를 다시 계산하는 것 자체가
-부작용이 없고(로트 소진 같은 상태 변화가 없다), 최종 판단은 여전히
-`journal.append`가 돌려주는 `sequence_no`로 한다
-(`sequence_no <= snapshot.last_journal_seq`면 이미 접힌 REPLAY).
+Follows the same spirit as `record_fill` (LB-11, [[record_fill]]) — lock ->
+read -> compute rule -> write -> audit — but is much simpler: funding never
+touches cost-basis lots (`qty_delta=0`, [[journal_rules.funding_entry]]), so
+it doesn't need `record_fill`'s upfront "skip the computation if this is an
+idempotent re-submission" branch. Even if the same `funding_id` is resent,
+recomputing `amount_base` has no side effect (no state change like lot
+consumption), so the final decision still rests on the `sequence_no`
+returned by `journal.append` (`sequence_no <= snapshot.last_journal_seq`
+means it's already a folded REPLAY).
 
-`RecordFundingCommand.amount`는 호출자가 이미 계산해 온 정산액이다
-([[domain.funding_fees.funding_amount]]는 이 값을 만드는 상류(거래소 펀딩
-수집 경로, 아직 미착수)의 책임이지 이 리프의 책임이 아니다) — 이 함수는
-그 금액을 기준통화로 환산([[domain.fx.convert]] 위임, `record_fill`의
-`_fx_multiplier`와 같은 모양을 사서 재선언한다 — 모듈 경계상 private
-헬퍼를 빌려 쓰지 않는다는 같은 이유)하고 저널에 적을 뿐이다.
-`RecordFundingCommand.rate`는 계산에 쓰이지 않는다(이미 `amount`에 반영된
-값) — 감사 payload에만 원인 추적용으로 남긴다.
+`RecordFundingCommand.amount` is the settlement amount the caller has
+already computed ([[domain.funding_fees.funding_amount]] is the
+responsibility of an upstream path (exchange funding collection, not yet
+started) that produces this value, not this leaf's responsibility) — this
+function only converts that amount to the base currency (delegating to
+[[domain.fx.convert]]; it buys and re-declares the same shape as
+`record_fill`'s `_fx_multiplier` for the same reason: module boundaries mean
+private helpers aren't borrowed across modules) and writes it to the
+journal. `RecordFundingCommand.rate` is not used in the computation (it's
+already reflected in `amount`) — it is kept only in the audit payload for
+root-cause tracing.
 
-저널 append 후 스냅샷 접힘은 `record_fill`과 동일하게
-`snapshot_builder.apply_one`(LB-5, 유일한 "진실 계산" 경로)을 재사용한다.
+After the journal append, snapshot folding reuses
+`snapshot_builder.apply_one` (LB-5, the sole "source of truth" computation
+path) just like `record_fill` does.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -58,10 +65,11 @@ _LOCK_NAMESPACE = "pos_journal"
 
 
 class UnknownPositionError(Exception):
-    """`POS_ACCOUNT_UNKNOWN` — `position_key`에 대응하는 `pos_snapshot` 행이
-    없다([[record_fill.UnknownPositionError]]와 같은 전제·재선언). 재시도
-    불가. `command.tenant_id`/`account_id`가 실제 소유자와 다를 때도
-    [[record_fill.UnknownPositionError]]와 같은 이유로 이 예외를 재사용한다
+    """`POS_ACCOUNT_UNKNOWN` — there is no `pos_snapshot` row matching
+    `position_key` (same premise/re-declaration as
+    [[record_fill.UnknownPositionError]]). Not retryable. This exception is
+    also reused for the same reason as [[record_fill.UnknownPositionError]]
+    when `command.tenant_id`/`account_id` differs from the actual owner
     (task-489/LB-18)."""
 
     def __init__(self, position_key: str) -> None:
@@ -99,8 +107,8 @@ async def _acquire_position_lock(conn: asyncpg.Connection, position_key: str) ->
 def _fx_multiplier(
     amount: Money, base_currency: Currency, rate: FXRate | None
 ) -> tuple[Decimal | None, str | None]:
-    """[[record_fill._fx_multiplier]]와 같은 모양(모듈 경계상 재선언) —
-    같은 통화면 `(None, None)`."""
+    """Same shape as [[record_fill._fx_multiplier]] (re-declared across the
+    module boundary) — `(None, None)` when the currency matches."""
     if amount.currency == base_currency:
         return None, None
     converted = fx.convert(
