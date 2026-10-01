@@ -17,6 +17,7 @@ task-1803(리뷰 task-1799 REJECT 후속) — 잔여 결함 2건에 대한 적�
     전부 타 사용자 B 소유일 때는 거부되고, 같은 이력이 A 소유일 때만
     통과한다(strategy_executions.user_id 스코프).
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from dotenv import dotenv_values
 
 from src.services.listing_service import ListingError, ListingService
 from src.services.paper_trading_eligibility import check_paper_trading_eligibility
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_user
 
 
@@ -260,29 +262,28 @@ class _FailingPool:
 
 async def test_check_paper_trading_eligibility_denies_on_acquire_failure() -> None:
     """실패주입 — pool.acquire()가 예외를 던지면 fail-closed해야 한다."""
-    eligible = await check_paper_trading_eligibility(
-        _FailingPool(), "strategy-x", "1.0.0", uuid4()
-    )
+    eligible = await check_paper_trading_eligibility(_FailingPool(), "strategy-x", "1.0.0", uuid4())
 
     assert eligible is False
 
 
 @pytest.mark.perf
 async def test_check_paper_trading_eligibility_p95_latency(pool) -> None:
-    """성능 단언 — check_paper_trading_eligibility의 p95 레이턴시 <= 2s."""
-    import time
+    """성능 단언 — check_paper_trading_eligibility의 p95 레이턴시 <= 2s.
 
+    raw perf_counter 단언을 RelativeBudget.measure_async로 전환(task-10879).
+    비동기 I/O(DB 조회)이므로 process_time 기반 PerfBudget이 아닌
+    wall-clock 기반 RelativeBudget을 사용한다.
+    """
     seller = await create_test_user(pool)
     strategy_id, version = await _create_strategy(pool, seller)
     await _insert_execution(pool, strategy_id, version, seller, days_ago=120)
 
-    latencies = []
-    for _ in range(20):
-        start = time.perf_counter()
-        await check_paper_trading_eligibility(pool, strategy_id, version, seller)
-        latencies.append((time.perf_counter() - start) * 1000)
+    eligibility_fn = partial(check_paper_trading_eligibility, pool, strategy_id, version, seller)
 
-    sorted_latencies = sorted(latencies)
-    p95 = sorted_latencies[int(len(sorted_latencies) * 0.95)]
-
-    assert p95 <= 2000, f"p95 latency {p95}ms exceeds 2s budget"
+    await RelativeBudget().assert_within_async(
+        eligibility_fn,
+        n=20,
+        max_ratio=40,
+        label="check_paper_trading_eligibility",
+    )
