@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -224,7 +225,7 @@ def test_sweep_throughput_meets_minimum_points_per_second(perf_budget: PerfBudge
         )
 
     sample = perf_budget.best_of(_run_once)
-    result: SweepResult = sample.result  # type: ignore[assignment]
+    result = cast(SweepResult, sample.result)
     cpu_seconds = sample.cpu_ms / 1000
     throughput = len(result.points) / cpu_seconds if cpu_seconds > 0 else float("inf")
     assert throughput > 10.0, f"grid-point throughput too low: {throughput:.2f} points/sec"
