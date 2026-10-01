@@ -3,7 +3,6 @@
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L29 DoD.
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -16,6 +15,7 @@ from src.foundation.backtest.domain.universe import (
     compute_snapshot_hash,
     is_member,
 )
+from tests.conftest import PerfBudget
 
 _UTC = timezone.utc
 _AS_OF = datetime(2026, 3, 1, tzinfo=_UTC)
@@ -145,7 +145,9 @@ def test_is_member_corrupted_window_defaults_false_not_crash_or_true() -> None:
 
 
 @pytest.mark.perf
-def test_is_member_p95_latency_within_budget_for_large_snapshot() -> None:
+def test_is_member_p95_latency_within_budget_for_large_snapshot(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: 5,000개 심볼을 담은 스냅샷에서도 `is_member`(선형 탐색)
     단일 조회가 실사용 규모(거래소 상장 종목 수 상한)에서 예산 안에 든다
     (ADR-2026-09-09-C 축 차용 -- 순수 함수 조회 경로, p95 예산 10ms/call)."""
@@ -156,14 +158,12 @@ def test_is_member_p95_latency_within_budget_for_large_snapshot() -> None:
     snap = _snapshot(members)
     target_symbol = "SYM04999"  # 선형 탐색 최악 경로(리스트 끝)
 
-    durations_ms: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
-        is_member(snap, target_symbol, _LISTED_FROM)
-        durations_ms.append((time.perf_counter() - start) * 1000)
-
-    durations_ms.sort()
-    p95 = durations_ms[int(len(durations_ms) * 0.95)]
+    samples = perf_budget.samples(
+        lambda: is_member(snap, target_symbol, _LISTED_FROM), n=200, batch=1
+    )
+    cpu_ms_values = [s.cpu_ms for s in samples]
+    cpu_ms_values.sort()
+    p95 = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
     assert p95 < 10.0, f"p95={p95:.3f}ms exceeds 10ms budget for 5,000-member snapshot scan"
 
 
