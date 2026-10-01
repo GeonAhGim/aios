@@ -16,7 +16,6 @@ there is no stream to replay).
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -31,6 +30,7 @@ from src.foundation.entities.domain.region import (
     assert_storage_region_allowed,
     same_region_policy,
 )
+from tests.conftest import PerfBudget
 
 NOW = datetime(2026, 9, 26, tzinfo=timezone.utc)
 
@@ -148,7 +148,7 @@ def test_a_storage_adapter_that_forgets_the_guard_writes_to_the_wrong_region():
 
 
 @pytest.mark.perf
-def test_region_check_throughput_budget():
+def test_region_check_throughput_budget(perf_budget: PerfBudget):
     """Numeric performance assertion: the guard is a pure dict-lookup +
     frozenset membership test called on every entity-scoped write, so it must
     stay far below the write path itself -- 50k checks in well under 1s."""
@@ -156,9 +156,8 @@ def test_region_check_throughput_budget():
     policy = same_region_policy(["kr-seoul", "us-east"])
     iterations = 50_000
 
-    started = time.perf_counter()
-    for _ in range(iterations):
-        assert_storage_region_allowed(entity, "kr-seoul", policy)
-    elapsed = time.perf_counter() - started
+    def _run() -> None:
+        for _ in range(iterations):
+            assert_storage_region_allowed(entity, "kr-seoul", policy)
 
-    assert elapsed < 1.0, f"{iterations} region checks took {elapsed:.3f}s"
+    perf_budget.assert_within(_run, budget_ms=1000.0, batch=8, label=f"{iterations} region checks")
