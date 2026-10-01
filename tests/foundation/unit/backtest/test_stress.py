@@ -19,6 +19,7 @@ from src.foundation.backtest.application.stress import (
 )
 from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from src.services.condition_compiler import ORDER_FILLED
+from tests.conftest import PerfBudget, PerfSample
 
 # DEEPEN(task-3204): REQUIRED_SCENARIOS 5개 x 이 픽스처(7봉) = bar-call 35개
 # (최대 7봉). ADR-2026-09-09-C Decision 1 예산("백테스트 1개월 M1 1심볼 3초" =
@@ -35,26 +36,26 @@ def _p95_ms(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_run_stress_p95_latency_within_backtest_budget_slice() -> None:
-    samples: list[float] = []
-    for _ in range(_ITERATIONS):
-        started = time.perf_counter()
-        run_stress(
+def test_run_stress_p95_latency_within_backtest_budget_slice(
+    perf_budget: PerfBudget,
+) -> None:
+    sample = perf_budget.sample(
+        lambda: run_stress(
             _config(),
             _fsm_config(),
             _bars(),
             list(REQUIRED_SCENARIOS),
             indicator_service=_FakePriceIndicatorService(),
         )
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
-    print(f"[L35] run_stress p95={p95_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
-    assert p95_ms < _BUDGET_MS
+    )
+    print(f"[L35] run_stress wall_ms={sample.wall_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
+    assert sample.wall_ms < _BUDGET_MS
 
 
 @pytest.mark.perf
 def test_run_stress_still_correct_when_run_backtest_stalls(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """DEEPEN(task-3204) 실패 주입: run_backtest가 실제로 느려져도(회귀로
     체결 시뮬레이션에 무거운 단계가 끼어드는 상황) run_stress의 시나리오별
@@ -70,15 +71,16 @@ def test_run_stress_still_correct_when_run_backtest_stalls(
 
     monkeypatch.setattr(stress_mod, "run_backtest", _stalled_run_backtest)
 
-    started = time.perf_counter()
-    stalled_report = run_stress(
-        _config(),
-        _fsm_config(),
-        _bars(),
-        list(REQUIRED_SCENARIOS),
-        indicator_service=_FakePriceIndicatorService(),
+    sample = perf_budget.sample(
+        lambda: run_stress(
+            _config(),
+            _fsm_config(),
+            _bars(),
+            list(REQUIRED_SCENARIOS),
+            indicator_service=_FakePriceIndicatorService(),
+        )
     )
-    elapsed_s = time.perf_counter() - started
+    assert sample.wall_ms >= delay_s * _RUN_BACKTEST_CALLS * 1000
 
     monkeypatch.undo()
     baseline_report = run_stress(
@@ -89,13 +91,20 @@ def test_run_stress_still_correct_when_run_backtest_stalls(
         indicator_service=_FakePriceIndicatorService(),
     )
 
-    assert elapsed_s >= delay_s * _RUN_BACKTEST_CALLS
+    stalled_report = run_stress(
+        _config(),
+        _fsm_config(),
+        _bars(),
+        list(REQUIRED_SCENARIOS),
+        indicator_service=_FakePriceIndicatorService(),
+    )
     assert stalled_report.per_scenario == baseline_report.per_scenario
 
 
 @pytest.mark.perf
 def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """DEEPEN(task-3204) 게이트 적색 재현: run_backtest가 50ms 예산을 실제로
     넘기도록 지연을 주입하면, 위 p95 단언과 동일한 단언식이 실제로
@@ -109,18 +118,19 @@ def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
 
     monkeypatch.setattr(stress_mod, "run_backtest", _stalled_run_backtest)
 
-    samples: list[float] = []
+    samples: list[PerfSample] = []
     for _ in range(2):
-        started = time.perf_counter()
-        run_stress(
-            _config(),
-            _fsm_config(),
-            _bars(),
-            list(REQUIRED_SCENARIOS),
-            indicator_service=_FakePriceIndicatorService(),
+        sample = perf_budget.sample(
+            lambda: run_stress(
+                _config(),
+                _fsm_config(),
+                _bars(),
+                list(REQUIRED_SCENARIOS),
+                indicator_service=_FakePriceIndicatorService(),
+            )
         )
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
+        samples.append(sample)
+    p95_ms = _p95_ms([s.wall_ms for s in samples])
     with pytest.raises(AssertionError):
         assert p95_ms < _BUDGET_MS
 
