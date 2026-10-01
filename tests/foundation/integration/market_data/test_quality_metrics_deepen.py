@@ -8,7 +8,6 @@ DoD(task-712): 스케줄러 1주기 후 게이지 존재, 심볼 1개 실패가 
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -208,7 +207,14 @@ async def test_export_quality_metrics_latency_stays_within_normalized_ceiling(de
     """수치 성능/지연 단언 — 공유 TEST_DATABASE_URL은 계속 자라 타이트한
     절대 지연 임계는 못 쓴다(ledger test_perf_journal.py task-920/1029와
     동일 교훈). 이 환경의 기준 DB 왕복비용(SELECT 1) 대비 넉넉한 배율로
-    정규화한 상한만 게이트로 쓰고, 절대 수치는 print로 남긴다."""
+    정규화한 상한만 게이트로 쓰고, 절대 수치는 print로 남긴다.
+
+    raw perf_counter 단언을 RelativeBudget.measure_async로 전환(task-10891).
+    비동기 I/O(DB 조회)이므로 process_time 기반 PerfBudget이 아닌
+    wall-clock 기반 RelativeBudget을 사용한다.
+    """
+    from tests._perf.relative_budget import RelativeBudget
+
     series_count = 15
     instruments = []
     t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
@@ -218,22 +224,25 @@ async def test_export_quality_metrics_latency_stays_within_normalized_ceiling(de
         await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
         instruments.append(instrument)
 
-    # Measure baseline (SELECT 1) with median of multiple samples.
-    baseline_samples_ms = []
-    for _ in range(3):
-        t0_baseline = time.perf_counter()
+    # Baseline: best-of-3 SELECT 1 round-trip (wall-clock via async).
+    async def _baseline_select() -> None:
         async with deps.pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        baseline_samples_ms.append((time.perf_counter() - t0_baseline) * 1000)
-    baseline_samples_ms.sort()
-    baseline_ms = baseline_samples_ms[len(baseline_samples_ms) // 2]
+
+    rb = RelativeBudget()
+    baseline_sample = await rb.measure_async(
+        _baseline_select,
+        n=3,
+        warmup=1,
+        calibration_n=3,
+    )
+    baseline_ms = baseline_sample.op_ms
 
     later = _clock(t0 + timedelta(minutes=10))
-    # Measure export_quality_metrics with median of multiple samples.
-    export_samples_ms = []
-    for _ in range(3):
-        started = time.perf_counter()
-        results = await export_quality_metrics(
+
+    # Measure export_quality_metrics with best-of-3 (wall-clock via async).
+    async def _run_export():
+        return await export_quality_metrics(
             batches=deps.batches,
             store=deps.store,
             cal=deps.cal,
@@ -241,10 +250,17 @@ async def test_export_quality_metrics_latency_stays_within_normalized_ceiling(de
             registry=MetricsRegistry(),
             clock=later,
         )
-        export_samples_ms.append((time.perf_counter() - started) * 1000)
-    export_samples_ms.sort()
-    elapsed_ms = export_samples_ms[len(export_samples_ms) // 2]
 
+    export_sample = await rb.measure_async(
+        _run_export,
+        n=3,
+        warmup=1,
+        calibration_n=3,
+    )
+    elapsed_ms = export_sample.op_ms
+
+    # Get actual results for assertion (re-run after measurement).
+    results = await _run_export()
     result_ids = {m.key.instrument_id for m in results}
     for instrument in instruments:
         assert instrument.instrument_id in result_ids
