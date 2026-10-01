@@ -86,21 +86,21 @@ def _parse_signing_keys(raw: str) -> dict[str, bytes]:
         if not entry:
             continue
         if ":" not in entry:
-            raise SigningKeyConfigError("JWT_SIGNING_KEYS 형식 오류(kid:hex 아님)")
+            raise SigningKeyConfigError("Invalid JWT_SIGNING_KEYS format (expected kid:hex)")
         kid, hex_key = entry.split(":", 1)
         kid = kid.strip()
         hex_key = hex_key.strip()
         if not kid:
-            raise SigningKeyConfigError("JWT_SIGNING_KEYS에 빈 kid가 있습니다")
+            raise SigningKeyConfigError("JWT_SIGNING_KEYS contains an empty kid")
         if kid in seen:
-            raise SigningKeyConfigError(f"JWT_SIGNING_KEYS에 kid={kid!r}가 중복됩니다")
+            raise SigningKeyConfigError(f"Duplicate kid={kid!r} in JWT_SIGNING_KEYS")
         seen.add(kid)
         try:
             key_bytes = bytes.fromhex(hex_key)
         except ValueError as exc:
-            raise SigningKeyConfigError(f"kid={kid!r} 키가 유효한 hex 문자열이 아닙니다") from exc
+            raise SigningKeyConfigError(f"Key for kid={kid!r} is not a valid hex string") from exc
         if not key_bytes:
-            raise SigningKeyConfigError(f"kid={kid!r} 키가 비어 있습니다")
+            raise SigningKeyConfigError(f"Key for kid={kid!r} is empty")
         keys[kid] = key_bytes
     return keys
 
@@ -108,12 +108,12 @@ def _parse_signing_keys(raw: str) -> dict[str, bytes]:
 def _load_signing_keys(source: Mapping[str, str]) -> tuple[dict[str, bytes], str]:
     keys = _parse_signing_keys(source.get("JWT_SIGNING_KEYS", ""))
     if not keys:
-        raise SigningKeyConfigError("JWT_SIGNING_KEYS가 설정되지 않았습니다")
+        raise SigningKeyConfigError("JWT_SIGNING_KEYS is not configured")
     active_kid = source.get("JWT_ACTIVE_KID", "")
     if not active_kid:
-        raise SigningKeyConfigError("JWT_ACTIVE_KID가 설정되지 않았습니다")
+        raise SigningKeyConfigError("JWT_ACTIVE_KID is not configured")
     if active_kid not in keys:
-        raise SigningKeyConfigError(f"JWT_ACTIVE_KID={active_kid!r}가 JWT_SIGNING_KEYS에 없습니다")
+        raise SigningKeyConfigError(f"JWT_ACTIVE_KID={active_kid!r} is not in JWT_SIGNING_KEYS")
     return keys, active_kid
 
 
@@ -122,7 +122,7 @@ class TokenIssuer:
 
     def __init__(self, keys: Mapping[str, bytes], active_kid: str) -> None:
         if active_kid not in keys:
-            raise SigningKeyConfigError(f"active_kid={active_kid!r}가 keys에 없습니다")
+            raise SigningKeyConfigError(f"active_kid={active_kid!r} is not in keys")
         self._keys = dict(keys)
         self._active_kid = active_kid
 
@@ -187,11 +187,11 @@ class TokenVerifier:
         try:
             header = jwt.get_unverified_header(token)
         except jwt.PyJWTError as exc:
-            raise TokenInvalidError("토큰 헤더를 읽을 수 없습니다") from exc
+            raise TokenInvalidError("Cannot read token header") from exc
 
         kid = header.get("kid")
         if not kid or kid not in self._keys:
-            raise TokenInvalidError(f"알 수 없는 kid: {kid!r}")
+            raise TokenInvalidError(f"Unknown kid: {kid!r}")
 
         try:
             payload = jwt.decode(
@@ -201,11 +201,11 @@ class TokenVerifier:
                 options={"require": ["exp", "iat", "nbf"]},
             )
         except jwt.ExpiredSignatureError as exc:
-            raise TokenExpiredError("토큰이 만료되었습니다") from exc
+            raise TokenExpiredError("Token has expired") from exc
         except jwt.PyJWTError as exc:
-            raise TokenInvalidError("토큰 서명 또는 claims가 유효하지 않습니다") from exc
+            raise TokenInvalidError("Token signature or claims are invalid") from exc
 
         try:
             return AccessClaims.model_validate(payload)
         except ValueError as exc:
-            raise TokenInvalidError("토큰 claims 스키마가 유효하지 않습니다") from exc
+            raise TokenInvalidError("Token claims schema is invalid") from exc
