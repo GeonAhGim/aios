@@ -2682,6 +2682,43 @@ the numbering they had in CLAUDE.md section 6.
     Same fleet-code (`pm/auto_decision.py`) stale/reopen pattern as #101 and its predecessors
     (#16/#39/#52/#64/#66/#84/#89/#97) — no frontend code change warranted; closing noop.
 
+103. A thirteenth `coverage` `[health:ci_red]` leaf (task-11090) cites `esc-ci-coverage.json`
+    (sha `d27a046a1`) with `detail.coverage` reading `기준선 미달 94.83% -> 58.23%
+    (-36.60%p...)`, while the task's own title cites a *different* degraded value,
+    `94.83% -> 87.90% (-6.93%p...)`, for the same escalation — two mutually inconsistent
+    "current" readings for one alert, already the signature named at #21/#26/#32/#44/#49/#58/
+    #61/#69/#83/#86/#95. Reconfirmed on this worktree (HEAD `e4c4a5869`, `git status` clean):
+    `git log --oneline -3 -- scripts/coverage_ratchet.py coverage-baseline.txt` still shows
+    `3bbf20326` (task-9120's trusted-write gate fix) as the latest touch to either file, and
+    `coverage-baseline.txt` still reads `94.83`/`52977` exactly as at #95. The only `coverage.xml`
+    on this worktree is a stale (2026-09-29, 3 days old) artifact reading `line-rate=0.7225`
+    (72.25%) / `lines-valid=50734` — a *third* distinct degraded value, none of the three (58.23%,
+    87.90%, 72.25%) agreeing with each other, which is itself strong evidence the underlying
+    measurement is non-reproducible rather than a stable regression. `lines-valid=50734` sits at
+    95.77% of baseline's `52977`, above the `--min-lines-valid-ratio` 0.5 floor, so the partial-
+    report guard does not catch this particular artifact — the floor catches gross truncation, not
+    moderate under-collection from flaky fixture/DB contention, which is the same gap already
+    named at #95. Reviewed all `src/`-touching commits between #95's HEAD (`aa740bede`) and this
+    leaf's HEAD (580 commits, `git log aa740bede..HEAD`): the overwhelming majority are `lang-en`/
+    `LANG-en`/`docs` Korean-to-English docstring/comment translations (no executable-line change),
+    plus a dozen `fix(...)` leaves (`d006b7ff4`, `172a1803d`, `bc8fc3c73`, `9a391f2b5`, `60c1e93b6`,
+    `d1cfc99ae`, `71c56d1fb`, `e52368c57`, `e34fd80af`, `e5cfc5416`, `b00ff68dc`) that are all
+    small, additive, test-paired changes (tens of lines, each with a matching test addition) —
+    none plausibly drops line coverage by 7-37 points. `c6dd4c6a7` ("conftest.py·tests/support의
+    수집 안 되는 test_* 67건 제거") removes 1,167 lines from `tests/support/*.py` and 12 `conftest.py`
+    files, but per its own commit message only removes top-level `test_*` functions that pytest
+    was never collecting in the first place (fixtures/helpers kept, two actually-executed shim
+    conftests left untouched) — dead code removal cannot reduce coverage of code that was never
+    exercised by those functions. No script/baseline change made — `coverage_ratchet.py`'s
+    `--min-lines-valid-ratio` floor and the `GITHUB_ACTIONS`-gated baseline-write trust boundary
+    (task-9120) remain sound; regenerating a trustworthy full-repo `coverage.xml` requires a full
+    `pytest --cov=src` run this repo's own rules forbid inside a single leaf (§4), and the three
+    non-agreeing degraded readings already cited above are themselves evidence that any such local
+    run would reproduce the same shared-host partial-report artifact, not a true regression value.
+    Closing noop per the established precedent (#21/#26/#32/#44/#49/#58/#61/#69/#83/#86/#95); before
+    working a future `coverage` leaf, check `esc-ci-coverage.json`'s `resolved_sha`/`resolution` for
+    a prior close first and confirm `coverage-baseline.txt` still reads `94.83`/`52977`.
+
 ---
 
 Moved from CLAUDE.md on 2026-10-01 (CLAUDE.md is English-only and loaded into every worker context):
