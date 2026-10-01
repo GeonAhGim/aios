@@ -15,6 +15,7 @@ import pytest
 from src.data.models.base import Currency
 from src.foundation.positions.contracts.v1 import NAVSnapshot
 from src.foundation.positions.domain import nav
+from tests.conftest import PerfBudget
 
 _ACCOUNT = uuid4()
 _DAY = date(2026, 9, 3)
@@ -163,7 +164,7 @@ def test_compute_daily_nav_propagates_snapshot_construction_failure(
 
 
 @pytest.mark.perf
-def test_verify_chain_batch_within_latency_budget(perf_budget) -> None:  # type: ignore[no-untyped-def]
+def test_verify_chain_batch_within_latency_budget(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: 순수 Decimal 등식 비교뿐이므로 10,000회 반복이
     200ms 예산 안에 끝나야 한다(O(1) per call 유지 확인)."""
     prev = _snapshot(closing_nav=Decimal("1000"))
