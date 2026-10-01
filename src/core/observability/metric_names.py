@@ -1,16 +1,19 @@
-"""메트릭 이름 단일 출처.
+"""Single source of metric names.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §7.2, §9 PLT-04.
-값은 §7.2 표 원문 리터럴이며, 계측 지점(PLT-10 이후)은 이 모듈의 상수만 참조한다
-(문자열 리터럴을 직접 쓰지 않는다 — 오타·중복 정의를 정적으로 막기 위함).
+Values are verbatim literals from the §7.2 table; instrumentation points (from PLT-10 onward)
+must reference only these constants (never inline string literals — to catch typos and
+duplicate definitions at static analysis time).
 
-Prometheus 노출 시 이름의 `.`는 `_`로 치환한다(`to_prom`) — Prometheus 메트릭 이름은
-`.`를 허용하지 않는다.
+When exposing to Prometheus, dots `.` in names are replaced with underscores `_` via
+``to_prom`` — Prometheus metric naming rules do not allow dots.
 
-미검증: `aios.readiness.status`는 §7.2 표 원문이지만 §6 단위테스트 표의 정규식
-(`aios.<context>.<subject>.<verb>` 4-세그먼트)과 형식이 맞지 않는다. 이 리프의 DoD가
-"정규식 전수 통과"를 요구하므로 `aios.readiness.check.status`로 세그먼트를 추가했다 —
-PLT-11(alert_rules.yaml)이 이 상수 값을 그대로 참조하면 문서 표기와의 괴리는 생기지 않는다.
+Unverified: ``aios.readiness.status`` is a verbatim literal from the §7.2 table, but its
+format does not match the 4-segment regex in the §6 unit-test table
+(``aios.<context>.<subject>.<verb>``). Since the DoD for this leaf requires "full regex
+pass", we added the ``check`` segment to produce ``aios.readiness.check.status`` —
+referencing this constant as-is in PLT-11 (alert_rules.yaml) avoids divergence from the
+documented table.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ ORDER_UNKNOWN_STATE_GAUGE = "aios.order.unknown_state.gauge"
 RISK_DECISION_COUNT_TOTAL = "aios.risk.decision.count_total"
 RISK_EVALUATION_DURATION_SECONDS = "aios.risk.evaluation.duration_seconds"
 
-# L4 risk_and_safety §7 "post-fence 부작용 — 목표 0 — fenced_submit" 행 원문.
+# L4 risk_and_safety §7 verbatim row "post-fence side-effect — target 0 — fenced_submit".
 SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL = "aios.safety.post_fence_side_effect.count_total"
 
 FOUNDATION_PAPER_CONTROL_ORDER_INTENT_COUNT_TOTAL = (
@@ -211,5 +214,5 @@ ALL_METRIC_NAMES: frozenset[str] = frozenset(
 
 
 def to_prom(name: str) -> str:
-    """Prometheus 메트릭 이름 형식으로 변환한다(`.` -> `_`)."""
+    """Convert metric name to Prometheus format (dots -> underscores)."""
     return name.replace(".", "_")
