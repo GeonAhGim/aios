@@ -1,9 +1,11 @@
+import json
 from datetime import datetime, timezone
 from uuid import UUID
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from scripts.check_openapi_compat import find_violations
 from src.api.contracts.envelope import ApiError, ApiResponse, Meta, ok
 from src.api.contracts.pagination import PageMeta
 from src.core.logging.request_context import request_id_var
@@ -135,3 +137,54 @@ class TestFailureInjectionGetRequestIdException:
         assert response.data.value == 42
         # trace_id 는 uuid4() fallback — 유효한 UUID 여야 함
         assert isinstance(response.meta.trace_id, UUID)
+
+
+# ── 게이트 적색 재현 ──
+
+
+def test_gate_red_reproduction_meta_trace_id_removed_from_openapi_schema() -> None:
+    """게이트적색재현: envelope.Meta 가 실제로 생성하는 OpenAPI 스키마에서
+    trace_id 프로퍼티가 삭제되면 check_openapi_compat.find_violations(PLT-16)가
+    MAJOR 위반으로 잡아야 한다 — I-01(trace_id 불변)이 openapi 계약 레벨에서도
+    기계적으로 지켜지는지 확인한다(단순 pydantic ValidationError 재현이 아니라
+    실제 게이트 스크립트를 호출한다)."""
+    meta_properties = Meta.model_json_schema()["properties"]
+    meta_schema = {
+        "type": "object",
+        "properties": {k: v for k, v in meta_properties.items() if k != "page"},
+    }
+    payload_schema = {"type": "object", "properties": {"value": {"type": "integer"}}}
+    envelope_schema = {
+        "type": "object",
+        "properties": {
+            "data": {"$ref": "#/components/schemas/_Payload"},
+            "meta": {"$ref": "#/components/schemas/Meta"},
+        },
+    }
+    paths = {
+        "/foo": {
+            "get": {
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ApiResponse__Payload_"}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    schemas = {
+        "ApiResponse__Payload_": envelope_schema,
+        "_Payload": payload_schema,
+        "Meta": meta_schema,
+    }
+    baseline = {"paths": paths, "components": {"schemas": schemas}}
+    current = json.loads(json.dumps(baseline))
+    current["components"]["schemas"]["Meta"]["properties"].pop("trace_id")
+
+    violations = find_violations(baseline, current)
+
+    assert violations != [], "Meta.trace_id 삭제는 게이트가 MAJOR 위반으로 잡아야 한다"
