@@ -1,25 +1,28 @@
-"""PLT-22 — 로그인 실패 잠금 원자화.
+"""PLT-22 — Atomicity of login-failure lockout.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-22
 
-기존 AuthService._register_failed_attempt()는 SELECT로 읽어둔
-failed_login_attempts를 파이썬에서 +1 계산해 UPDATE했다(읽고-쓰기
-2왕복 = TOCTOU). 동시 요청 N개가 전부 같은 스냅샷을 읽으면 그중
-일부의 증가분이 서로 덮어써져 소실된다(task-329 mandate 동시
-activate 경합과 같은 결함 유형). 여기서는 단일 `UPDATE ... RETURNING`
-으로 증가와 잠금 판정을 한 왕복에 끝내 그 경합을 제거한다 — Postgres가
-대상 행에 잠금을 잡은 채 값을 읽고 쓰므로 동시 UPDATE는 DB 레벨에서
-직렬화된다.
+The previous AuthService._register_failed_attempt() read
+failed_login_attempts via SELECT, incremented in Python, and wrote back
+via UPDATE (a read-modify-write two-round-trip = TOCTOU race). When N
+concurrent requests all read the same snapshot, some increments overwrite
+each other and are lost — the same defect class as the task-329 mandate
+concurrent-activate race. Here we collapse the increment and lock-out
+decision into a single `UPDATE ... RETURNING`, eliminating the race:
+Postgres serialises concurrent UPDATEs on the target row by acquiring a
+row lock before reading or writing the value.
 
-라우터 계층(§9 PLT-24, `routers/auth.py` 재작성 예정)이 아직
-`AccountLockedError`를 423 + `retry_after_seconds` 응답으로 변환하지
-않는다 — 지금은 `AuthError`를 상속해 기존 계정열거 방지 매핑
-(`exception_mapping.py`: 모든 AuthError → 401 AUTH_INVALID_CREDENTIALS)
-을 그대로 타므로 동작 회귀는 없다. error_code/retry_after_seconds
-속성 이름은 이미 머지된 §3.3 error taxonomy·프론트 deriveLockout
-(task-387)과 맞춰뒀다 — 라우터 이관 리프가 이름을 바꾸지 않고 그대로
-쓸 수 있게 하기 위함이다.
+The router layer (§9 PLT-24, `routers/auth.py` rewrite pending) still
+does not translate `AccountLockedError` into a 423 response with
+`retry_after_seconds` — for now `AccountLockedError` subclasses
+`AuthError`, so it rides the existing account-enumeration-prevention
+mapping (`exception_mapping.py`: every AuthError → 401
+AUTH_INVALID_CREDENTIALS), meaning there is no behavioural regression.
+The attribute names error_code / retry_after_seconds were aligned with
+the already-merged §3.3 error taxonomy and the frontend deriveLockout
+(task-387) so that the router-migration leaf can reuse them unchanged.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -40,16 +43,17 @@ class LockoutState:
 
 
 def retry_after_seconds(locked_until: datetime | None, now: datetime) -> int | None:
-    """잠금 해제까지 남은 초. 잠겨있지 않으면 None.
+    """Seconds remaining until lock expiry. Returns None if not locked.
 
-    프론트 deriveLockout(task-387, accountLockout.ts)이 0 이하 값을 기본
-    60초로 클램프하므로, 여기서는 "막 잠긴 순간" 반올림 오차로 0이 나가는
-    것을 막기 위해 최소 1초를 보장한다. 상한도 마찬가지로 계약의 일부다
-    — `locked_until` 산출 시각과 `now` 산출 시각이 서로 다른 두 번의
-    `clock_timestamp()` 호출에서 나올 수 있어(예: register_failed_attempt의
-    UPDATE...RETURNING), 초 단위로 절삭하기 전 부동소수 오차가 1초를 넘겨
-    LOCKOUT_MINUTES*60을 초과할 수 있다 — 그 값도 카운트다운 계약이므로
-    상한을 여기서 고정한다(esc-ci-401c16dd420e).
+    The frontend deriveLockout (task-387, accountLockout.ts) clamps values
+    <= 0 to a default of 60 seconds, so we guarantee a minimum of 1 second
+    to prevent a rounding error from yielding 0 at the instant the lock is
+    set. The upper bound is likewise part of the contract:
+    `locked_until` and `now` may come from two separate
+    `clock_timestamp()` calls (e.g. in register_failed_attempt's
+    UPDATE...RETURNING), and floating-point truncation before converting
+    to whole seconds can produce a value that exceeds LOCKOUT_MINUTES*60.
+    We cap it here as part of the countdown contract (esc-ci-401c16dd420e).
     """
     if locked_until is None or locked_until <= now:
         return None
@@ -60,22 +64,26 @@ def retry_after_seconds(locked_until: datetime | None, now: datetime) -> int | N
 async def register_failed_attempt(
     conn: asyncpg.Connection, user_id: UUID, *, now: datetime | None = None
 ) -> LockoutState:
-    """실패 1회를 원자적으로 반영한다.
+    """Atomically record one failed attempt.
 
-    `failed_login_attempts + 1`과 잠금 임계값 비교를 SQL 안에서 수행해,
-    Python이 미리 읽어둔 카운트를 쓰지 않는다 — 동시 호출 N개가 모두
-    이 함수를 호출해도 UPDATE 문 자체가 행 잠금으로 직렬화되므로 최종
-    카운트는 정확히 N이 된다(경합 손실 0).
+    The increment (`failed_login_attempts + 1`) and the lockout-threshold
+    comparison happen inside SQL, so Python never writes a stale
+    pre-read count — even when N concurrent calls invoke this function,
+    the UPDATE statement itself serialises via row lock, so the final
+    count is exactly N (zero lost-update).
 
-    `now` 인자는 호출부(auth_service.authenticate)와의 시그니처 호환을
-    위해서만 남아 있고 시각 계산에는 쓰지 않는다 — 그 값은 비밀번호 해시
-    검증처럼 느린 작업 이전에 캡처되므로, DB에는 나중에 도착했지만
-    Python `now`는 더 이른 호출이 "이미 잠근 호출보다 이른 now"로
-    retry_after를 계산해 상한(LOCKOUT_MINUTES*60)을 넘겨버릴 수 있다
-    (동시 10건 경합에서 902초 오버슈트로 재현됨). 잠금 판정과 잔여 시간은
-    DB 서버시각(`clock_timestamp()`)만 기준으로 삼는다 — 동시 UPDATE는
-    행 잠금으로 직렬화되므로 서버시각 호출 순서는 항상 실제 커밋 순서와
-    일치하지만, 컨텍스트 스위칭에 노출된 Python 시각은 그렇지 않다.
+    The `now` parameter remains only for signature compatibility with the
+    caller (auth_service.authenticate); it is not used for time
+    calculations. Because `now` is captured before a slow operation like
+    password-hash verification, a call with an earlier Python `now` can
+    arrive at the DB after a call with a later `now`, potentially causing
+    `retry_after` to exceed the upper bound (LOCKOUT_MINUTES*60) —
+    reproducible with 10 concurrent calls yielding a 902-second overshoot.
+    Lock-out decisions and remaining-time calculations therefore rely
+    exclusively on the DB server clock (`clock_timestamp()`): concurrent
+    UPDATEs are serialised by row locks, so the server-clock call order
+    always matches the actual commit order, whereas Python wall-clock
+    values exposed to context switches do not.
     """
     row = await conn.fetchrow(
         """
