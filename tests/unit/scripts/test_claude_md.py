@@ -10,7 +10,10 @@ code_ratchets skip_xfail 래칫을 올리므로 쓰지 않는다) -- 존재/길�
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 CLAUDE_MD = ROOT / "CLAUDE.md"
@@ -87,3 +90,87 @@ def test_claude_md_has_no_duplicate_sentences_with_worker_prompt() -> None:
 
     overlap = claude_sentences & prompt_sentences
     assert not overlap, f"CLAUDE.md duplicates sentences already in WORKER_PROMPT.md: {overlap}"
+
+
+_THIS_MODULE = sys.modules[__name__]
+
+
+def test_claude_md_within_line_budget_rejects_oversized_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An over-budget file must be rejected, not silently accepted."""
+    oversized = tmp_path / "CLAUDE.md"
+    oversized.write_text("\n".join(f"line {i}" for i in range(MAX_LINES + 1)), encoding="utf-8")
+    monkeypatch.setattr(_THIS_MODULE, "CLAUDE_MD", oversized)
+
+    with pytest.raises(AssertionError, match="budget"):
+        test_claude_md_within_line_budget()
+
+
+def test_claude_md_is_english_only_rejects_hangul_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hangul content must be rejected, matching the comment-language ratchet."""
+    tainted = tmp_path / "CLAUDE.md"
+    tainted.write_text("## 1. Repository map\n한글 문장이 섞여 있다.\n", encoding="utf-8")
+    monkeypatch.setattr(_THIS_MODULE, "CLAUDE_MD", tainted)
+
+    with pytest.raises(AssertionError, match="English only"):
+        test_claude_md_is_english_only()
+
+
+def test_claude_md_has_required_sections_rejects_missing_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dropping a mandated section header must fail the gate, not pass silently."""
+    incomplete = tmp_path / "CLAUDE.md"
+    headers_without_last = "\n".join(REQUIRED_HEADERS[:-1])
+    incomplete.write_text(headers_without_last, encoding="utf-8")
+    monkeypatch.setattr(_THIS_MODULE, "CLAUDE_MD", incomplete)
+
+    with pytest.raises(AssertionError, match="missing required sections"):
+        test_claude_md_has_required_sections()
+
+
+def test_claude_md_exists_rejects_missing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing CLAUDE.md must fail closed instead of being treated as vacuously fine."""
+    monkeypatch.setattr(_THIS_MODULE, "CLAUDE_MD", tmp_path / "does-not-exist.md")
+
+    with pytest.raises(AssertionError, match="must exist"):
+        test_claude_md_exists()
+
+
+def test_claude_md_duplicate_sentence_check_rejects_overlap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sentence copy-pasted into both files must be flagged, not treated as independent."""
+    shared_sentence = "This exact sentence appears verbatim in both documents for the test."
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text(f"{shared_sentence}\n", encoding="utf-8")
+    worker_prompt = tmp_path / "WORKER_PROMPT.md"
+    worker_prompt.write_text(f"{shared_sentence}\n", encoding="utf-8")
+
+    monkeypatch.setattr(_THIS_MODULE, "CLAUDE_MD", claude_md)
+    monkeypatch.setattr(_THIS_MODULE, "_WORKER_PROMPT_CANDIDATES", [worker_prompt])
+
+    with pytest.raises(AssertionError, match="duplicates sentences"):
+        test_claude_md_has_no_duplicate_sentences_with_worker_prompt()
+
+
+def test_claude_md_checks_fail_closed_on_read_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Failure injection: a disk read error must propagate, never be swallowed into a pass."""
+    unreadable = tmp_path / "CLAUDE.md"
+    unreadable.write_text("## 1. Repository map\n", encoding="utf-8")
+    monkeypatch.setattr(_THIS_MODULE, "CLAUDE_MD", unreadable)
+
+    def _raise_oserror(self: Path, *args: object, **kwargs: object) -> str:
+        raise OSError("simulated disk failure reading CLAUDE.md")
+
+    monkeypatch.setattr(Path, "read_text", _raise_oserror)
+
+    with pytest.raises(OSError, match="simulated disk failure"):
+        test_claude_md_within_line_budget()
