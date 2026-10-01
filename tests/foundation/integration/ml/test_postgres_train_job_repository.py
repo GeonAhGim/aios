@@ -19,6 +19,7 @@ import pytest
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.ml.adapters.postgres_train_job_repository import PostgresTrainJobRepository
+from tests.conftest import PerfBudget
 
 
 @pytest.fixture
@@ -199,32 +200,43 @@ AI-specific SLO number exists in §7 yet (§7's 30s figure is the training
 job's own progress cadence, not a single DB call's budget)."""
 
 
-def _p95(samples: list[float]) -> float:
-    samples = sorted(samples)
-    return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+async def _checkpoint_one(
+    repo: PostgresTrainJobRepository,
+    job_id: str,
+    idx: int,
+    rnd: int,
+) -> None:
+    await repo.checkpoint(
+        job_id,
+        expected_rounds_completed=rnd,
+        rounds_completed=rnd + 1,
+        checkpoint=f"c{idx}",
+    )
 
 
 @pytest.mark.perf
 async def test_checkpoint_db_roundtrip_p95_within_budget(
     repository: PostgresTrainJobRepository,
+    perf_budget: PerfBudget,
 ) -> None:
+    from functools import partial
+
     job_id = _job_id("j-perf")
     await repository.create(job_id, "model-a")
 
     samples: list[float] = []
     rounds = 0
     for i in range(30):
-        started = time.perf_counter()
-        await repository.checkpoint(
-            job_id,
-            expected_rounds_completed=rounds,
-            rounds_completed=rounds + 1,
-            checkpoint=f"c{i}",
+        idx = i
+        rnd = rounds
+        sample = await perf_budget.sample_async(
+            partial(_checkpoint_one, repository, job_id, idx, rnd)
         )
-        samples.append((time.perf_counter() - started) * 1000)
+        samples.append(sample.wall_ms)
         rounds += 1
 
-    p95_ms = _p95(samples)
+    samples.sort()
+    p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
     budget = _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
     print(f"[AI-20 checkpoint] db roundtrip p95={p95_ms:.2f}ms budget<{budget:.1f}ms")
     assert p95_ms < _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
