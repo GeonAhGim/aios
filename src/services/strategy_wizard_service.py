@@ -1,25 +1,28 @@
-"""FD-14.2(신설) — 목표기반 전략 생성 마법사 (StrategyWizardService).
+"""FD-14.2 (new) — Goal-based strategy generation wizard (StrategyWizardService).
 
 Spec: ADR-2026-08-29-wallet-marketplace-dual-seller-strategy-authoring.md §3
-— "조건식을 직접 조립하는 것보다 쉬운 고차원 전략 생성" 결정 중 AI 없는
-축(목표기반 마법사) 구현. condition_compiler.py/StrategyCreateRequest가
-이미 쓰는 조건 스키마(PreviewCondition 리스트 + AND/OR 결합)를 그대로
-생성해서 반환한다 — 실행 엔진·프론트엔드 조건 에디터를 전혀 바꾸지
-않고, "무엇을 채울지"만 자동으로 정해준다. 반환값을 그대로
-StrategyCreateRequest의 entry/exit/stop_loss 필드에 채워 넣으면 기존
-POST /strategy-builder/strategies로 저장할 수 있다.
+— Implementation of goal-based wizard axis (without AI) from the decision
+"easier high-level strategy creation than manually assembling conditions".
+Generates and returns the condition schema already used by condition_compiler.py
+and StrategyCreateRequest (PreviewCondition list + AND/OR combination) as-is
+— without changing the execution engine or frontend condition editor, only
+automatically determining "what to fill in". Returned values can be directly
+filled into entry/exit/stop_loss fields of StrategyCreateRequest and saved via
+existing POST /strategy-builder/strategies.
 
-편차: stop_loss 조건도 이 시스템에서는 가격 기반 %손절이 아니라 지표
-조건(PreviewCondition)이다 — ATR 같은 변동성 지표는 자산마다 절대
-스케일이 달라(BTC vs DOGE) 고정 임계값을 마법사가 일괄 생성할 수 없어
-템플릿에서 제외했다. 대신 오실레이터(RSI/CCI/WILLR/STOCH)는 스케일이
-0~100(또는 -100~0)으로 고정돼 자산에 무관하게 같은 임계값을 쓸 수
-있다 — "모멘텀이 계속 불리하게 진행 중"이라는 손절 신호로 활용한다.
+Deviation: stop_loss conditions here are indicator conditions (PreviewCondition)
+rather than price-based % stop loss — volatility indicators like ATR scale
+differently per asset (BTC vs DOGE), so the wizard cannot batch-generate fixed
+thresholds and they are excluded from templates. Instead, oscillators
+(RSI/CCI/WILLR/STOCH) have fixed scales (0~100 or -100~0), allowing same
+thresholds regardless of asset — used as stop-loss signal for "momentum
+continuing unfavorably".
 
-3(투자 목표) x 3(위험 허용도) = 9개 템플릿을 순수 함수로 고정 정의한다
-— AI 호출이 전혀 없어 예측 가능하고, Anthropic 크레딧 상태와 무관하게
-항상 동작한다(자연어 프롬프트 축은 strategy_prompt_service.py 참조).
+3 (investment goal) x 3 (risk tolerance) = 9 templates defined as pure functions
+— no AI calls for full predictability, always works regardless of Anthropic
+credit status (natural-language prompt axis is in strategy_prompt_service.py).
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -37,7 +40,7 @@ RISK_TOLERANCES: tuple[RiskTolerance, ...] = ("LOW", "MEDIUM", "HIGH")
 
 
 class WizardError(Exception):
-    """알 수 없는 goal/risk_tolerance — 라우터가 400으로 변환."""
+    """Unknown goal/risk_tolerance — router converts to 400."""
 
 
 class GeneratedConditions(BaseModel):
@@ -80,8 +83,8 @@ def _macd(threshold: float, operator: Operator) -> PreviewCondition:
     )
 
 
-# 목표별 (진입 임계값, 청산 임계값, 손절 임계값) — 위험 허용도가 높을수록
-# 진입은 느슨하게(더 자주 진입), 청산은 더 오래 들고가게, 손절은 더 늦게.
+# Per goal (entry threshold, exit threshold, stop-loss threshold) — higher risk tolerance:
+# looser entry (more frequent), longer hold, later stop-loss.
 _STEADY_GROWTH: dict[RiskTolerance, tuple[float, float, float]] = {
     "LOW": (25.0, 65.0, 15.0),
     "MEDIUM": (30.0, 70.0, 18.0),
@@ -104,9 +107,9 @@ _AGGRESSIVE_STOP: dict[RiskTolerance, float] = {
 class StrategyWizardService:
     def generate(self, goal: str, risk_tolerance: str) -> GeneratedConditions:
         if goal not in GOALS:
-            raise WizardError(f"알 수 없는 투자 목표입니다: {goal}")
+            raise WizardError(f"Unknown investment goal: {goal}")
         if risk_tolerance not in RISK_TOLERANCES:
-            raise WizardError(f"알 수 없는 위험 허용도입니다: {risk_tolerance}")
+            raise WizardError(f"Unknown risk tolerance: {risk_tolerance}")
 
         if goal == "STEADY_GROWTH":
             entry_th, exit_th, stop_th = _STEADY_GROWTH[risk_tolerance]
