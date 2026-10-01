@@ -28,6 +28,7 @@ from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEv
 from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
 from src.foundation.market_data.application.ingest_ticks import IngestTicksCommand, ingest_ticks
 from src.foundation.market_data.contracts.v1 import TickRecord, Venue, Verdict
+from tests.integration.conftest import create_test_tenant
 
 
 async def _instrument_id(conn: asyncpg.Connection) -> uuid.UUID:
@@ -68,8 +69,8 @@ def deps(pool):
     )
 
 
-async def _run(deps, ticks, *, audit=None) -> object:
-    cmd = IngestTicksCommand(tenant_id=None, source="test", ticks=ticks, trace_id=uuid.uuid4())
+async def _run(deps, ticks, *, audit=None, tenant_id=None) -> object:
+    cmd = IngestTicksCommand(tenant_id=tenant_id, source="test", ticks=ticks, trace_id=uuid.uuid4())
     return await ingest_ticks(cmd, batches=deps.batches, audit=audit or deps.audit, pool=deps.pool)
 
 
@@ -99,6 +100,41 @@ async def test_ingest_accepts_and_stores_ticks_with_one_audit_event(pool, deps):
     assert stored == 2
     assert events == 1
     assert batch_rows == 1
+
+
+async def test_ingest_propagates_tenant_id_to_stored_ticks(pool, deps):
+    tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn)
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    ticks = [_tick(instrument_id, "1", t0)]
+
+    result = await _run(deps, ticks, tenant_id=tenant_id)
+
+    assert result.verdict.verdict == Verdict.ACCEPT
+    async with pool.acquire() as conn:
+        stored_tenant_id = await conn.fetchval(
+            "SELECT tenant_id FROM md_tick WHERE instrument_id = $1", instrument_id
+        )
+    assert stored_tenant_id == tenant_id
+
+
+async def test_ingest_leaves_tick_tenant_id_null_for_platform_shared_data(pool, deps):
+    """`tenant_id=None`은 "모름"이 아니라 "플랫폼 공유 데이터"다(F1 보정이
+    이 의미를 깨고 NULL을 다른 값으로 지어내 저장하면 안 된다)."""
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn)
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    ticks = [_tick(instrument_id, "1", t0)]
+
+    result = await _run(deps, ticks)
+
+    assert result.verdict.verdict == Verdict.ACCEPT
+    async with pool.acquire() as conn:
+        stored_tenant_id = await conn.fetchval(
+            "SELECT tenant_id FROM md_tick WHERE instrument_id = $1", instrument_id
+        )
+    assert stored_tenant_id is None
 
 
 async def test_ingest_rejects_whole_batch_on_trade_id_regression(pool, deps):

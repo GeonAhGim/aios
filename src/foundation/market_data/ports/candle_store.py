@@ -7,6 +7,7 @@ domain/application knows only this Protocol; the actual implementation
 only the contract that the caller passes an already-opened `asyncpg.Connection`
 (same pattern as LC-8a `src/foundation/ledger/ports/*.py`).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -22,11 +23,18 @@ from src.foundation.market_data.domain.candle_columns import CandleColumns
 @runtime_checkable
 class CandleStore(Protocol):
     async def upsert_batch(
-        self, conn: asyncpg.Connection, batch_id: UUID, candles: list[CandleRecord]
+        self,
+        conn: asyncpg.Connection,
+        batch_id: UUID,
+        candles: list[CandleRecord],
+        *,
+        tenant_id: UUID | None = None,
     ) -> int:
         """§5 `ON CONFLICT (venue, instrument_id, timeframe, open_time) DO
         NOTHING` — returns the count of actually inserted rows (0 on retry
-        is not an error)."""
+        is not an error). `tenant_id` (F1(M), task-10465) is stored alongside
+        each row since `md_candle` is WORM and cannot be updated afterward;
+        `None` means platform-shared data, not "unknown"."""
         ...
 
     async def quarantine(

@@ -29,6 +29,7 @@ on audit failure, everything rolls back (same as LA-15). To prevent concurrent c
 the same (venue, instrument_id) from reading the same "last stored" value and both
 passing, we serialize with `pg_advisory_xact_lock` until the transaction ends.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -161,13 +162,25 @@ def _first_regression(
     return None
 
 
-async def _store_ticks(conn: asyncpg.Connection, ticks: list[TickRecord]) -> None:
+async def _store_ticks(
+    conn: asyncpg.Connection, ticks: list[TickRecord], tenant_id: UUID | None
+) -> None:
     await conn.executemany(
-        "INSERT INTO md_tick (venue, instrument_id, trade_id, price, quantity, side, traded_at) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7) "
+        "INSERT INTO md_tick "
+        "(venue, instrument_id, trade_id, price, quantity, side, traded_at, tenant_id) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) "
         "ON CONFLICT (venue, instrument_id, trade_id, traded_at) DO NOTHING",
         [
-            (t.venue.value, t.instrument_id, t.trade_id, t.price, t.quantity, t.side, t.traded_at)
+            (
+                t.venue.value,
+                t.instrument_id,
+                t.trade_id,
+                t.price,
+                t.quantity,
+                t.side,
+                t.traded_at,
+                tenant_id,
+            )
             for t in ticks
         ],
     )
@@ -261,6 +274,6 @@ async def ingest_ticks(
         created = await batches.create_tick_batch(conn, result)
 
         if is_stored:
-            await _store_ticks(conn, cmd.ticks)
+            await _store_ticks(conn, cmd.ticks, cmd.tenant_id)
 
     return created

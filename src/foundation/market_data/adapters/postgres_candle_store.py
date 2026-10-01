@@ -14,6 +14,7 @@ Snapshot isolation for `query(as_of=...)` is implemented via
 `md_candle.created_at` (WORM, never updated afterwards) — batches arriving
 after `as_of` have `created_at > as_of` and are automatically filtered out.
 """
+
 from __future__ import annotations
 
 from typing import cast
@@ -108,22 +109,28 @@ class PostgresCandleStore:
         self._pool = pool
 
     async def upsert_batch(
-        self, conn: asyncpg.Connection, batch_id: UUID, candles: list[CandleRecord]
+        self,
+        conn: asyncpg.Connection,
+        batch_id: UUID,
+        candles: list[CandleRecord],
+        *,
+        tenant_id: UUID | None = None,
     ) -> int:
         if not candles:
             return 0
 
+        columns = (*_CANDLE_COLUMNS, "tenant_id")
         params: list[object] = []
         value_groups: list[str] = []
         for candle in candles:
-            row_params = _candle_params(candle, batch_id)
+            row_params = (*_candle_params(candle, batch_id), tenant_id)
             offset = len(params)
             placeholders = ", ".join(f"${offset + i + 1}" for i in range(len(row_params)))
             value_groups.append(f"({placeholders})")
             params.extend(row_params)
 
         rows = await conn.fetch(
-            f"INSERT INTO md_candle ({', '.join(_CANDLE_COLUMNS)}) "  # noqa: S608
+            f"INSERT INTO md_candle ({', '.join(columns)}) "  # noqa: S608
             f"VALUES {', '.join(value_groups)} "
             "ON CONFLICT (venue, instrument_id, timeframe, open_time) DO NOTHING "
             "RETURNING open_time",

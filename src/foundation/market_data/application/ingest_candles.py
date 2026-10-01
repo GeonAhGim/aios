@@ -292,7 +292,11 @@ async def ingest_candles(
         created = await batches.create(conn, batch_result)
 
         if is_stored:
-            await store.upsert_batch(conn, batch_id, good)
+            # F1(M) -- `md_candle` has a WORM (append-only) trigger that blocks any
+            # UPDATE after INSERT, so tenant_id must be set here. `tenant_id` is an
+            # optional kwarg defaulting to None, so existing direct callers of
+            # `upsert_batch` (~15 test/backfill call sites) are unaffected.
+            await store.upsert_batch(conn, batch_id, good, tenant_id=cmd.tenant_id)
         if quarantine_candles:
             await store.quarantine(conn, batch_id, quarantine_candles, all_issues)
         await batches.add_issues(conn, batch_id, all_issues)
