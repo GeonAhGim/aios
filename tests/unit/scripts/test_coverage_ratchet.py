@@ -8,6 +8,7 @@ exit=1로 FAIL한다. coverage.xml을 읽기만 하는 순수 파서이므로 DB
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -510,6 +511,46 @@ def test_local_run_still_fails_on_real_regression_without_touching_baseline(
     )
 
     assert exit_code == 1
+    assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"
+
+
+# ---------------------------------------------------------------------------
+# 게이트 적색 재현 — main()을 직접 임포트해 호출하는 위 테스트들과 달리, 실제
+# CI가 쓰는 커맨드라인 진입점(`python scripts/coverage_ratchet.py ...`)을
+# 서브프로세스로 그대로 실행해 회귀 시 정말로 비정상 종료(exit=1)하는지 확인한다.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_red_reproduction_cli_invocation_fails_on_real_regression(
+    tmp_path: Path,
+) -> None:
+    """DoD 게이트 적색 재현: 이 파일의 다른 테스트는 모두 `coverage_ratchet.main()`을
+    임포트해 직접 호출하지만, 실제 로컬 CI/GitHub Actions는 그 모듈을 임포트하지
+    않고 `python scripts/coverage_ratchet.py ...`를 서브프로세스로 실행한다 --
+    `if __name__ == "__main__": raise SystemExit(main())` 가드나 argparse 레이어가
+    테스트에서 쓰는 임포트 경로와 다르게 동작해 실제 게이트는 조용히 통과시키는
+    사고를 이 경로 하나가 놓치지 않는지 확인한다."""
+    xml_path = _write_coverage_xml(tmp_path, 0.70)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "coverage_ratchet.py"),
+            "--coverage-xml",
+            str(xml_path),
+            "--baseline",
+            str(baseline_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "FAIL" in result.stdout
+    assert "80.00" in result.stdout and "70.00" in result.stdout
     assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"
 
 
