@@ -20,12 +20,43 @@ test whose target is below FA-4. Nothing references `pos_snapshot` by FK, and
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+_EM3_CHILD_QTY_BACKFILL_REVISION = "d4e8f1a29c37"
+_EM3_CHILD_QTY_BACKFILL_PARENT_REVISION = "6e2b5965124e"
+
 
 async def purge_position_snapshots(pool: object) -> int:
     """Delete every `pos_snapshot` row; returns how many were removed."""
     async with pool.acquire() as conn:
         status = await conn.execute("DELETE FROM pos_snapshot")
     return int(status.rsplit(" ", 1)[-1])
+
+
+def downgrade_past_irreversible_em3_backfill(
+    run_alembic: Callable[..., object], target_revision: str
+) -> None:
+    """Real-downgrade to `target_revision` when it sits below `d4e8f1a29c37`.
+
+    task-10836: `d4e8f1a29c37`'s `downgrade()` unconditionally raises
+    `Em3ChildQtyBackfillIrreversibleError` (the compensating `order_events`
+    self-loop rows it backfills are WORM (I7) and cannot be un-written --
+    review-migration checklist item 8 forbids dropping the append-only
+    trigger to fake a rollback). A bare `run_alembic("downgrade",
+    target_revision)` from anywhere above it therefore always dies partway
+    through, and a bare `stamp` straight to `target_revision` skips every
+    revision stacked above `d4e8f1a29c37` for real (including
+    `f1a9c6d3e8b2`'s md_candle/md_tick `tenant_id` columns), leaving the
+    schema physically ahead of what `alembic_version` claims and the next
+    `upgrade head` dying on `DuplicateColumnError` (CI full 32f7cc56 red).
+    The fix: downgrade for real down to `d4e8f1a29c37` (so every revision
+    above it runs its genuine `downgrade()`), `stamp` past only the one
+    revision that cannot be downgraded for real, then continue downgrading
+    for real to the actual target below it.
+    """
+    run_alembic("downgrade", _EM3_CHILD_QTY_BACKFILL_REVISION)
+    run_alembic("stamp", _EM3_CHILD_QTY_BACKFILL_PARENT_REVISION)
+    run_alembic("downgrade", target_revision)
 
 
 # ---------------------------------------------------------------------------

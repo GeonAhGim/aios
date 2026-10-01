@@ -78,6 +78,27 @@ def _ensure_head():
     _run_alembic_ok("upgrade", "head")
 
 
+def _stamp_past_d4e8f1a29c37() -> None:
+    """Puts `alembic_version` at `_DOWN_REVISION` (d4e8f1a29c37's parent) so the
+    next `upgrade head` re-exercises d4e8f1a29c37's backfill from a clean slate.
+
+    task-10836: a bare `stamp _DOWN_REVISION` from head does NOT just skip
+    d4e8f1a29c37 -- it also skips the real `downgrade()` of every revision
+    stacked on top of it (f1a9c6d3e8b2's md_candle/md_tick tenant_id columns,
+    fa25b1c9d340's WORM guard trigger retrofit), because `stamp` only moves the
+    alembic_version pointer and never calls a migration's `downgrade()`. The
+    schema then still physically has those columns/triggers while alembic
+    believes it is at `_DOWN_REVISION`, so the following `upgrade head` re-runs
+    f1a9c6d3e8b2's `ADD COLUMN tenant_id` on a column that is already there and
+    dies with DuplicateColumnError (CI full 32f7cc56 red). Running a real
+    `downgrade` to d4e8f1a29c37 first executes fa25b1c9d340's and
+    f1a9c6d3e8b2's `downgrade()` for real, then `stamp` only needs to skip the
+    one revision (d4e8f1a29c37) whose `downgrade()` unconditionally raises.
+    """
+    _run_alembic_ok("downgrade", "d4e8f1a29c37")
+    _run_alembic_ok("stamp", _DOWN_REVISION)
+
+
 async def _bump_committed_child_qty_without_event(
     pool: asyncpg.Pool, order_id: UUID, *, qty: Decimal
 ) -> None:
@@ -106,7 +127,7 @@ async def _order_version(pool: asyncpg.Pool, order_id: UUID) -> int:
 
 async def test_backfill_inserts_self_loop_event_per_unaccounted_version_gap(pool):
     user_id = await create_test_user(pool)
-    _run_alembic_ok("stamp", _DOWN_REVISION)
+    _stamp_past_d4e8f1a29c37()
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id, quantity=Decimal("10"))
     try:
@@ -141,7 +162,7 @@ async def test_backfill_inserts_self_loop_event_per_unaccounted_version_gap(pool
 
 async def test_negative_untouched_order_with_zero_committed_qty_gets_no_rows(pool):
     user_id = await create_test_user(pool)
-    _run_alembic_ok("stamp", _DOWN_REVISION)
+    _stamp_past_d4e8f1a29c37()
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id)
     try:
@@ -166,7 +187,7 @@ async def test_negative_untouched_order_with_zero_committed_qty_gets_no_rows(poo
 
 async def test_negative_already_accounted_gap_is_idempotent_no_rows(pool):
     user_id = await create_test_user(pool)
-    _run_alembic_ok("stamp", _DOWN_REVISION)
+    _stamp_past_d4e8f1a29c37()
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id)
     try:
@@ -193,7 +214,7 @@ async def test_negative_already_accounted_gap_is_idempotent_no_rows(pool):
 
 async def test_failure_injection_insert_error_rolls_back_whole_backfill(pool):
     user_id = await create_test_user(pool)
-    _run_alembic_ok("stamp", _DOWN_REVISION)
+    _stamp_past_d4e8f1a29c37()
     async with pool.acquire() as conn:
         order_id = await insert_order(conn, user_id)
     trigger_name = "d4e8f1_inject_" + uuid4().hex
@@ -237,6 +258,16 @@ async def test_failure_injection_insert_error_rolls_back_whole_backfill(pool):
 
 
 async def test_negative_downgrade_always_raises_irreversible_error(pool):
+    # task-10836: head now sits 2 revisions above d4e8f1a29c37
+    # (f1a9c6d3e8b2, fa25b1c9d340). A multi-step `downgrade _DOWN_REVISION`
+    # from head runs all 3 steps inside one alembic transaction, so when the
+    # 3rd step (d4e8f1a29c37's own downgrade) raises, the whole transaction
+    # -- including the first 2 steps' otherwise-reversible downgrades --
+    # rolls back and `alembic_version` lands back on head, not on
+    # d4e8f1a29c37 as this test expects. Downgrade for real to d4e8f1a29c37
+    # first (exercising the 2 reversible steps on their own), then attempt
+    # only the single remaining step that must raise.
+    _run_alembic_ok("downgrade", "d4e8f1a29c37")
     result = _run_alembic("downgrade", _DOWN_REVISION)
     try:
         assert result.returncode != 0

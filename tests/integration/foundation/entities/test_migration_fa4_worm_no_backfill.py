@@ -30,7 +30,10 @@ from tests.integration.foundation.entities._fa4_worm_support import (
     _run_alembic,
     pool,  # noqa: F401 -- re-exported fixture
 )
-from tests.support.deep_downgrade import purge_position_snapshots
+from tests.support.deep_downgrade import (
+    downgrade_past_irreversible_em3_backfill,
+    purge_position_snapshots,
+)
 
 __all__ = ["pool", "_ensure_head"]
 
@@ -39,7 +42,7 @@ async def test_pos_journal_never_backfilled_because_worm_blocks_update(pool):
     tenant_id = await create_test_tenant(pool)
 
     await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
-    _run_alembic("downgrade", _DOWN_REVISION)
+    downgrade_past_irreversible_em3_backfill(_run_alembic, _DOWN_REVISION)
     async with pool.acquire() as conn:
         account_id = await conn.fetchval(
             "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method) "
@@ -168,7 +171,7 @@ async def test_pos_journal_worm_guard_rejects_delete(pool):
 
 async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
     await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
-    _run_alembic("downgrade", _DOWN_REVISION)
+    downgrade_past_irreversible_em3_backfill(_run_alembic, _DOWN_REVISION)
     entry_id = await _insert_pre_fa4_ledger_entry(pool, f"fa4-worm-test:{uuid4().hex}", uuid4())
 
     _run_alembic("upgrade", "head")

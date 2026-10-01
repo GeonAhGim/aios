@@ -22,6 +22,7 @@ import pytest
 from src.foundation.market_data.adapters.postgres_instrument_attributes_repository import (
     PostgresInstrumentAttributesRepository,
 )
+from tests.support.deep_downgrade import downgrade_past_irreversible_em3_backfill
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "8425d20c192e"
@@ -83,9 +84,13 @@ async def _seed_instrument(pool: asyncpg.Pool, instrument_id: str) -> None:
 
 
 async def test_upgrade_downgrade_upgrade_round_trip(pool):
+    """task-10836: `_DOWN_REVISION` sits below the irreversible
+    `d4e8f1a29c37` em3_child_qty_committed_backfill revision, so a bare
+    `downgrade` from head dies on `Em3ChildQtyBackfillIrreversibleError`
+    partway through -- see `downgrade_past_irreversible_em3_backfill`."""
     assert await _table_exists(pool, "instrument_attributes")
 
-    _run_alembic("downgrade", _DOWN_REVISION)
+    downgrade_past_irreversible_em3_backfill(_run_alembic, _DOWN_REVISION)
     assert not await _table_exists(pool, "instrument_attributes")
 
     _run_alembic("upgrade", "head")

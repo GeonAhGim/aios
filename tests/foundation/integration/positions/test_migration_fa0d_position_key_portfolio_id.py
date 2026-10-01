@@ -70,12 +70,28 @@ def _run_alembic_ok(*args: str) -> None:
 # 계속 태우려면 d4e8f1a29c37 한 리비전만 `stamp`로 건너뛴다. d4e8f1a29c37는
 # 스키마를 건드리지 않는 순수 데이터 백필(INSERT-only)이라 이 건너뛰기는 실제
 # 스키마 상태와 어긋나지 않는다 -- stamp는 alembic_version 포인터만 바꾸고
-# 마이그레이션 코드를 실행하지 않으므로, 그다음 real downgrade가 되짚는
-# 리비전들의 downgrade()는 여전히 실제로 실행돼 스키마를 정확히 원복한다.
+# 마이그레이션 코드를 실행하지 않는다.
+#
+# task-10836: head가 d4e8f1a29c37 바로 위였을 때는 "head에서 곧장
+# `stamp 6e2b5965124e`"가 d4e8f1a29c37 하나만 건너뛰는 것과 같았다. 그 뒤
+# f1a9c6d3e8b2(md_candle/md_tick tenant_id)·fa25b1c9d340(WORM guard 트리거
+# 재설치)이 head 위에 더 얹히면서, 같은 stamp를 head에서 바로 쏘면 이제
+# *세 리비전*(fa25b1c9d340·f1a9c6d3e8b2·d4e8f1a29c37)의 downgrade()를 전부
+# 건너뛰게 됐다 -- alembic_version 포인터만 6e2b5965124e로 내려가고 md_candle/
+# md_tick의 tenant_id 컬럼·인덱스는 실제로는 그대로 남는다. 그 상태에서
+# 이어지는 `upgrade head`(아래 `_ensure_head` autouse fixture)가 f1a9c6d3e8b2의
+# upgrade()를 다시 실행하며 `ALTER TABLE md_candle ADD COLUMN tenant_id`가
+# DuplicateColumnError로 죽는다(CI full 32f7cc56 적색의 근본 원인 -- f1a9c6d3e8b2
+# 자체의 upgrade/downgrade는 대칭이다, 이 파일의 stamp 트릭이 그 downgrade를
+# 호출하지 않고 건너뛴 것이 문제였다). 고쳐서: 먼저 d4e8f1a29c37까지 "진짜"
+# downgrade로 내려가 fa25b1c9d340·f1a9c6d3e8b2의 downgrade()를 실제로 실행시키고,
+# d4e8f1a29c37 한 리비전만 stamp로 건너뛴 뒤 나머지를 계속 downgrade한다.
+_EM3_BACKFILL_REVISION = "d4e8f1a29c37"
 _EM3_BACKFILL_DOWN_REVISION = "6e2b5965124e"
 
 
 def _downgrade_past_fa0d(target_revision: str) -> None:
+    _run_alembic_ok("downgrade", _EM3_BACKFILL_REVISION)
     _run_alembic_ok("stamp", _EM3_BACKFILL_DOWN_REVISION)
     _run_alembic_ok("downgrade", target_revision)
 
