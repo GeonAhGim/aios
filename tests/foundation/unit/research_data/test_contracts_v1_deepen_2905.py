@@ -157,7 +157,10 @@ def test_bulk_validation_of_many_research_items_meets_latency_budget(
 
     # 정합성 검증 — 모델 구성이 올바르게 동작하는지 확인
     # (best_of가 최소 CPU 시간을 선택하므로, 첫 sample의 result로 확인)
-    restored_list: list[v1.ResearchItem] = sample.result  # type: ignore[assignment]
+    restored_list: list[v1.ResearchItem]
+    _raw = sample.result
+    assert isinstance(_raw, list)
+    restored_list = _raw
     assert len(restored_list) == n
     assert restored_list[0].title == "공시 0"
     assert restored_list[-1].title == f"공시 {n - 1}"
