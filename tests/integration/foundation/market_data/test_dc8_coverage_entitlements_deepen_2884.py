@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -245,36 +244,40 @@ async def test_entitlements_rejects_expiry_equal_to_granted_at(pool):
 
 
 @pytest.mark.perf
-async def test_bulk_upsert_span_meets_latency_budget(coverage_repo, pool):
+async def test_bulk_upsert_span_meets_latency_budget(coverage_repo, pool, perf_budget):
     """`EXCLUDE USING gist`는 삽입마다 GiST 인덱스를 스캔해 겹침을 검사한다
     — 인덱스가 안 타면 O(n) 열화로 느려진다. 500개 서로 겹치지 않는 span을
-    어댑터(`upsert_span`)로 연속 삽입해 절대시간 예산 내임을 단언한다."""
+    어댑터(`upsert_span`)로 연속 삽입해 절대시간 예산 내임을 단언한다.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환 (task-11055).
+    비동기 DB I/O를 재므로 sample_async(wall_ms)로 왕복 지연을 보존하고
+    coverage tracer 오버헤드를 걷어낸다. 예산 값(15초)은 그대로 유지한다.
+    """
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
     t0 = datetime.now(timezone.utc) - timedelta(days=2000)
     n = 500
     budget_sec = 15.0
 
-    start = time.perf_counter()
-    for i in range(n):
-        async with pool.acquire() as conn, conn.transaction():
-            await coverage_repo.upsert_span(
-                conn,
-                _span(
-                    instrument_id=instrument_id,
-                    start=t0 + timedelta(days=i),
-                    end=t0 + timedelta(days=i + 1),
-                ),
-            )
-    elapsed = time.perf_counter() - start
+    async def _bulk_upsert() -> None:
+        for i in range(n):
+            async with pool.acquire() as conn, conn.transaction():
+                await coverage_repo.upsert_span(
+                    conn,
+                    _span(
+                        instrument_id=instrument_id,
+                        start=t0 + timedelta(days=i),
+                        end=t0 + timedelta(days=i + 1),
+                    ),
+                )
+
+    sample = await perf_budget.sample_async(_bulk_upsert)
+    elapsed_sec = sample.wall_ms / 1_000
     print(
-        f"[DC-8 coverage_spans] {n} upsert_span in {elapsed:.3f}s "
-        f"({elapsed / n * 1e3:.2f} ms/insert, budget<{budget_sec}s)"
+        f"[DC-8 coverage_spans] {n} upsert_span in {elapsed_sec:.3f}s "
+        f"({sample.wall_ms / n:.2f} ms/insert, budget<{budget_sec}s)"
     )
-    assert elapsed < budget_sec, (
-        f"coverage_spans {n}건 upsert_span이 예산({budget_sec}s)을 넘었습니다"
-        f"({elapsed:.3f}s) — GiST 인덱스가 안 타는지 확인하세요."
-    )
+    assert elapsed_sec < budget_sec, perf_budget.describe(sample, budget_ms=budget_sec * 1_000)
 
     async with pool.acquire() as conn, conn.transaction():
         spans = await coverage_repo.list_spans(conn, instrument_id, Timeframe.M1)
