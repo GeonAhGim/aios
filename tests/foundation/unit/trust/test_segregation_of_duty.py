@@ -9,7 +9,6 @@ fail-closed로 전파되는지 검증한다(아래 test_comparison_crash_propaga
 fail_closed).
 """
 
-import time
 from uuid import uuid4
 
 import pytest
@@ -72,15 +71,17 @@ def test_comparison_crash_propagates_fail_closed() -> None:
 
 
 @pytest.mark.perf
-def test_bulk_calls_complete_within_latency_budget() -> None:
+def test_bulk_calls_complete_within_latency_budget(perf_budget) -> None:
     """수치 성능 단언: PLT-43은 매 DUAL 2차 서명·CM-5 활성화 호출마다 동기 경로에서
     실행되므로(순수 함수, I/O 없음), 만 번 호출이 평균 50us/call을 넘으면 이 primitive가
     실수로 I/O를 갖게 됐다는 회귀 신호로 본다."""
     actor, counterparty = uuid4(), uuid4()
     iterations = 10_000
-    start = time.perf_counter()
-    for _ in range(iterations):
-        assert_actor_not_counterparty(actor, counterparty, action="perf.bulk")
-    elapsed = time.perf_counter() - start
-    per_call_us = (elapsed / iterations) * 1_000_000
-    assert per_call_us < 50, f"per-call latency {per_call_us:.2f}us exceeds 50us budget"
+    # 50us/call = 0.05ms per call (assert_within divides by batch)
+    perf_budget.assert_within(
+        lambda: assert_actor_not_counterparty(actor, counterparty, action="perf.bulk"),
+        budget_ms=0.05,
+        n=5,
+        batch=iterations,
+        label="segregation_of_duty.bulk",
+    )
