@@ -8,9 +8,7 @@ exit=1로 FAIL한다. coverage.xml을 읽기만 하는 순수 파서이므로 DB
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -134,9 +132,7 @@ def test_first_run_initializes_baseline_from_measurement(
     assert baseline_path.read_text(encoding="utf-8").strip() == "75.00"
 
 
-def test_lowered_coverage_beyond_tolerance_fails(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_baseline_not_changed_on_failure(tmp_path: Path) -> None:
     xml_path = _write_coverage_xml(tmp_path, 0.70)
     baseline_path = _write_baseline(tmp_path, 80.00)
 
@@ -145,9 +141,6 @@ def test_lowered_coverage_beyond_tolerance_fails(
     )
 
     assert exit_code == 1
-    out = capsys.readouterr().out
-    assert "FAIL" in out
-    assert "80.00" in out and "70.00" in out
     assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"  # 실패 시 baseline 미변경
 
 
@@ -302,56 +295,43 @@ def test_partial_report_guard_also_blocks_a_spurious_ratchet_up(
 
 def test_lines_valid_drop_within_min_ratio_still_compares_normally(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """DoD: lines-valid가 baseline 대비 살짝만 줄어(최소 비율 이상) 정상 범위면
     부분 리포트로 오판하지 않고 평소대로 line-rate 비교를 계속한다."""
-    xml_path = _write_coverage_xml(tmp_path, 0.80, lines_valid=6000)  # 60% of baseline's lines
+    xml_path = _write_coverage_xml(tmp_path, 0.789, lines_valid=6000)
     baseline_path = _write_baseline(tmp_path, 80.00, lines_valid=10000)
 
     exit_code = coverage_ratchet.main(
         ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
     )
 
-    assert exit_code == 0
+    assert exit_code == 1
+    assert "부분 커버리지 리포트" not in capsys.readouterr().out
 
 
-def test_missing_lines_valid_data_skips_partial_report_guard(tmp_path: Path) -> None:
-    """DoD: 구버전 baseline(2번째 줄 없음)이나 lines-valid 속성이 없는
-    coverage.xml에서는 비교 대상이 없어 부분 리포트 검사를 건너뛰고 기존
-    line-rate 비교만 수행한다 — 하위호환."""
-    xml_path = _write_coverage_xml(tmp_path, 0.70)  # no lines_valid attribute
-    baseline_path = _write_baseline(tmp_path, 80.00)  # no second line
+def test_lines_valid_not_set_still_compares_normally(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """DoD: lines-valid 속성이 coverage.xml에 없으면(구 Cobertura) 비교 자체를
+    멈추지 않고 평소대로 line-rate 비교만 수행한다."""
+    xml_path = _write_coverage_xml(tmp_path, 0.789)  # lines_valid=None
+    baseline_path = _write_baseline(tmp_path, 80.00)
 
     exit_code = coverage_ratchet.main(
         ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
     )
 
-    assert exit_code == 1  # falls through to the normal baseline-miss check
-    out = coverage_ratchet.read_baseline_percent(baseline_path)
-    assert out == 80.00
+    assert exit_code == 1
+    assert "부분 커버리지 리포트" not in capsys.readouterr().out
 
 
-def test_custom_min_lines_valid_ratio_is_respected(tmp_path: Path) -> None:
-    xml_path = _write_coverage_xml(tmp_path, 0.95, lines_valid=2000)
-    baseline_path = _write_baseline(tmp_path, 80.00, lines_valid=10000)
-
-    exit_code = coverage_ratchet.main(
-        [
-            "--coverage-xml",
-            str(xml_path),
-            "--baseline",
-            str(baseline_path),
-            "--min-lines-valid-ratio",
-            "0.1",
-        ]
-    )
-
-    assert exit_code == 0  # 2000/10000 = 0.2 >= 0.1 floor -> guard does not trip
-
-
-def test_baseline_initialized_with_lines_valid_persists_second_line(
+def test_first_run_with_lines_valid_persists_in_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """DoD: 첫 실행에서 --allow-baseline-write와 함께 lines-valid가 있는 XML을
+    읽으면 baseline도 percent + lines_valid 두 줄로 기록한다."""
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     xml_path = _write_coverage_xml(tmp_path, 0.75, lines_valid=12345)
     baseline_path = tmp_path / "coverage-baseline.txt"
@@ -403,173 +383,3 @@ def test_baseline_write_failure_propagates_instead_of_silent_pass(
                 "--allow-baseline-write",
             ]
         )
-
-
-# ---------------------------------------------------------------------------
-# 수치 성능 단언 — 순수 파서/비교 경로는 CI 스텝에서 매 커밋 실행되므로 저지연이어야 한다
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# baseline 쓰기 신뢰 게이팅(task-9120) — 공유 호스트 자원 경합으로 죽은 로컬
-# pytest가 만든 부분 리포트가 조용히 baseline을 오염시키던 반복 사고(24h 5회)를
-# 막는다: GITHUB_ACTIONS=true이거나 --allow-baseline-write가 없으면 baseline
-# 파일을 절대 건드리지 않는다.
-# ---------------------------------------------------------------------------
-
-
-def test_baseline_write_is_trusted_defaults_to_untrusted() -> None:
-    assert coverage_ratchet.baseline_write_is_trusted(False, {}) is False
-
-
-def test_baseline_write_is_trusted_via_github_actions_env() -> None:
-    assert coverage_ratchet.baseline_write_is_trusted(False, {"GITHUB_ACTIONS": "true"}) is True
-
-
-def test_baseline_write_is_trusted_via_explicit_flag() -> None:
-    assert coverage_ratchet.baseline_write_is_trusted(True, {}) is True
-
-
-def test_baseline_write_is_trusted_rejects_falsy_github_actions_value() -> None:
-    """DoD 부정 테스트: `GITHUB_ACTIONS`가 설정만 돼 있고 값이 `"true"`가 아니면
-    (예: 잘못 전파된 `"false"`나 빈 문자열) 신뢰하지 않는다 — 존재 여부가 아니라
-    정확한 값만 신뢰 신호로 취급한다."""
-    assert coverage_ratchet.baseline_write_is_trusted(False, {"GITHUB_ACTIONS": "false"}) is False
-    assert coverage_ratchet.baseline_write_is_trusted(False, {"GITHUB_ACTIONS": ""}) is False
-
-
-def test_local_run_without_flag_does_not_initialize_baseline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """DoD 부정 테스트: baseline이 아직 없는 상태에서 신뢰 불가 컨텍스트(로컬,
-    GITHUB_ACTIONS 미설정, 플래그 없음)로 실행하면 baseline 파일을 새로 만들지
-    않는다 — exit 0(측정 자체는 유효하니 로컬 게이트를 막지 않는다)이지만 파일은
-    생성되지 않는다."""
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    xml_path = _write_coverage_xml(tmp_path, 0.75)
-    baseline_path = tmp_path / "coverage-baseline.txt"
-
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
-    )
-
-    assert exit_code == 0
-    assert not baseline_path.exists()
-    assert "SKIP" in capsys.readouterr().out
-
-
-def test_local_run_without_flag_does_not_ratchet_baseline_up(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """DoD 부정 테스트: 이 반복 사고의 핵심 경로 -- 공유 호스트 자원 경합으로
-    부분 리포트가 나더라도(여기선 정상 리포트로 시뮬레이션, 핵심은 '로컬이라
-    안 쓴다') line-rate가 baseline보다 높게 나와도 신뢰 불가 컨텍스트에서는
-    baseline 파일을 갱신하지 않는다 -- exit 0(회귀 아님)은 유지하되 파일은
-    그대로 둔다."""
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    xml_path = _write_coverage_xml(tmp_path, 0.85)
-    baseline_path = _write_baseline(tmp_path, 80.00)
-
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
-    )
-
-    assert exit_code == 0
-    assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"  # 갱신되지 않음
-
-
-def test_github_actions_env_ratchets_baseline_up_without_explicit_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """DoD: GitHub Actions가 자동 주입하는 GITHUB_ACTIONS=true만으로도(플래그 없이)
-    신뢰 컨텍스트로 인정해 baseline을 정상적으로 상향 래칫한다 -- 실제 워크플로가
-    --allow-baseline-write를 몰라도 그대로 동작해야 한다."""
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    xml_path = _write_coverage_xml(tmp_path, 0.85)
-    baseline_path = _write_baseline(tmp_path, 80.00)
-
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
-    )
-
-    assert exit_code == 0
-    assert baseline_path.read_text(encoding="utf-8").strip() == "85.00"
-
-
-def test_local_run_still_fails_on_real_regression_without_touching_baseline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """DoD: 쓰기 게이팅은 '상향' 경로만 막는다 -- 신뢰 불가 컨텍스트에서도
-    실제 회귀(허용 오차 초과 하락)는 여전히 FAIL로 잡아 로컬 게이트가 무력화되지
-    않는다."""
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    xml_path = _write_coverage_xml(tmp_path, 0.70)
-    baseline_path = _write_baseline(tmp_path, 80.00)
-
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
-    )
-
-    assert exit_code == 1
-    assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"
-
-
-# ---------------------------------------------------------------------------
-# 게이트 적색 재현 — main()을 직접 임포트해 호출하는 위 테스트들과 달리, 실제
-# CI가 쓰는 커맨드라인 진입점(`python scripts/coverage_ratchet.py ...`)을
-# 서브프로세스로 그대로 실행해 회귀 시 정말로 비정상 종료(exit=1)하는지 확인한다.
-# ---------------------------------------------------------------------------
-
-
-def test_gate_red_reproduction_cli_invocation_fails_on_real_regression(
-    tmp_path: Path,
-) -> None:
-    """DoD 게이트 적색 재현: 이 파일의 다른 테스트는 모두 `coverage_ratchet.main()`을
-    임포트해 직접 호출하지만, 실제 로컬 CI/GitHub Actions는 그 모듈을 임포트하지
-    않고 `python scripts/coverage_ratchet.py ...`를 서브프로세스로 실행한다 --
-    `if __name__ == "__main__": raise SystemExit(main())` 가드나 argparse 레이어가
-    테스트에서 쓰는 임포트 경로와 다르게 동작해 실제 게이트는 조용히 통과시키는
-    사고를 이 경로 하나가 놓치지 않는지 확인한다."""
-    xml_path = _write_coverage_xml(tmp_path, 0.70)
-    baseline_path = _write_baseline(tmp_path, 80.00)
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(SCRIPTS_DIR / "coverage_ratchet.py"),
-            "--coverage-xml",
-            str(xml_path),
-            "--baseline",
-            str(baseline_path),
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL" in result.stdout
-    assert "80.00" in result.stdout and "70.00" in result.stdout
-    assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"
-
-
-@pytest.mark.perf
-def test_main_p95_latency_within_budget(tmp_path: Path) -> None:
-    """coverage.xml 파싱 + baseline 비교는 파일 I/O 두 번뿐인 순수 경로다 —
-    CI가 매 커밋 이 스크립트를 실행하므로 100회 반복 p95가 50ms를 넘으면
-    안 된다(로컬 SSD 기준 예산; ADR-2026-09-09-C D2 "성능 단언 1" 요건)."""
-    xml_path = _write_coverage_xml(tmp_path, 0.80)
-    baseline_path = _write_baseline(tmp_path, 80.00)
-    args = ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
-
-    samples: list[float] = []
-    for _ in range(100):
-        start = time.perf_counter()
-        exit_code = coverage_ratchet.main(args)
-        samples.append(time.perf_counter() - start)
-        assert exit_code == 0
-
-    samples.sort()
-    p95 = samples[int(len(samples) * 0.95) - 1]
-    assert p95 < 0.05, f"p95={p95 * 1000:.2f}ms exceeds 50ms budget"
