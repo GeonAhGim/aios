@@ -12,7 +12,6 @@ negative >=3, failure injection 1, perf assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -162,16 +161,17 @@ def test_negative_evidence_refs_none_rejected() -> None:
 
 
 @pytest.mark.perf
-def test_construction_throughput_p99_under_budget() -> None:
+def test_construction_throughput_p99_under_budget(perf_budget) -> None:
     # Perf assertion (ADR-2026-09-09-C budget table, generic pydantic view
     # construction): p99 for 1000 constructions stays well under 5ms/call.
     run = _run()
     result = _result(evidence_refs=("snapshot:abc123",))
-    durations: list[float] = []
-    for _ in range(1000):
-        started = time.perf_counter()
-        _run_to_view(run, result)
-        durations.append(time.perf_counter() - started)
-    durations.sort()
-    p99 = durations[int(len(durations) * 0.99)]
-    assert p99 < 0.005
+
+    samples = perf_budget.samples(
+        lambda: _run_to_view(run, result),
+        n=1000,
+        batch=1,
+    )
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_ms[int(len(cpu_ms) * 0.99)]
+    assert p99_ms < 5.0
