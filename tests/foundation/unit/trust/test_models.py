@@ -5,7 +5,6 @@ Disclosure/Consent/Tenant/Membership and their state enums.
 """
 
 import dataclasses
-import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -23,6 +22,7 @@ from src.foundation.trust.domain.models import (
     TenantKind,
     TenantState,
 )
+from tests.conftest import PerfBudget
 
 NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
@@ -178,14 +178,15 @@ def test_membership_role_construction_surfaces_injected_lookup_failure(
 
 
 @pytest.mark.perf
-def test_bulk_construction_meets_latency_budget() -> None:
+def test_bulk_construction_meets_latency_budget(perf_budget: "PerfBudget") -> None:
     """10k instantiations of every value object must stay well under 1s (p50 budget
     for pure in-memory dataclass construction, ADR-2026-09-09-C Decision 1 default)."""
-    start = time.perf_counter()
-    for _ in range(10_000):
-        _disclosure()
-        _consent()
-        _tenant()
-        _membership()
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+
+    def _bulk() -> None:
+        for _ in range(10_000):
+            _disclosure()
+            _consent()
+            _tenant()
+            _membership()
+
+    perf_budget.assert_within(_bulk, budget_ms=1000.0)
