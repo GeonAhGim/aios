@@ -14,7 +14,6 @@ mypy --strict(파라미터·반환 타입 정적 검사)가 메운다는 것을 
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -334,20 +333,19 @@ async def test_fx_rate_source_raises_on_missing_rate() -> None:
 
 
 @pytest.mark.perf
-def test_isinstance_port_check_is_fast() -> None:
+def test_isinstance_port_check_is_fast(perf_budget) -> None:
     """성능 단언: isinstance()로 Protocol 체크하는 overhead는 1회당
-    100us 미만이어야 한다(10만 회/초 기준). 구조 검사라도 N번 호출하면
-    누적 overhead가 중요하다."""
+    100us 미만이어야 한다(10만 회/초 기준). 구조 검사이라도 N번 호출하면
+    누적 overhead가 중요하다.
+
+    전환: raw time.perf_counter() → perf_budget.assert_within(process_time 기반).
+    budget_ms=0.1은 100us(10만 회/초 기준)와 동일하다 — 측정 방식만 바꾼다.
+    """
     repo = _FullJournalRepo()
-    iterations = 10_000
-    start = time.perf_counter()
-    for _ in range(iterations):
-        isinstance(repo, PositionJournalRepository)
-    elapsed = time.perf_counter() - start
-    per_check_us = elapsed / iterations * 1_000_000
-    # 100us 미만 — 구조 검사라도 과용하면 병목된다
-    assert per_check_us < 100, (
-        f"isinstance port check took {per_check_us:.1f}us/check, budget: 100us"
+    perf_budget.assert_within(
+        lambda: isinstance(repo, PositionJournalRepository),
+        budget_ms=0.1,
+        batch=10_000,
     )
 
 
