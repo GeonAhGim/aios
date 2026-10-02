@@ -7,7 +7,6 @@ test_backtest.py`'s "no DB, real domain code" style).
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
@@ -106,18 +105,23 @@ async def test_underlying_lifecycle_error_type_is_not_leaked_unwrapped() -> None
 
 
 @pytest.mark.perf
-async def test_p95_latency_within_pure_compile_budget() -> None:
-    """Compiling is pure (no I/O beyond the injected fake read) -- 100
-    sequential compiles of a moderately-sized FSM definition must stay well
-    under a 200ms floor."""
+async def test_p95_latency_within_pure_compile_budget(perf_budget) -> None:
+    """raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11017).
+
+    비동기 I/O를 재는 테스트는 RelativeBudget.measure_async / samples_async를
+    쓴다 — wall_ms로 왕복 지연을 보존하고 coverage tracer 오버헤드를 걷어낸다.
+    예산 값(200ms)은 그대로 유지한다.
+    """
     fsm = {"states": [f"S{i}" for i in range(50)]}
     service = _FakeStrategyService(fsm)
-    samples: list[float] = []
-    for _ in range(100):
-        start = time.perf_counter()
+    n = 100
+
+    async def _fn() -> None:
         await compile_artifact(
             service, owner_user_id=uuid4(), strategy_id="strat-1", strategy_version="v1"
         )
-        samples.append(time.perf_counter() - start)
-    p95_seconds = sorted(samples)[int(len(samples) * 0.95)]
-    assert p95_seconds < 0.2, f"p95={p95_seconds * 1000:.2f}ms exceeds 200ms budget"
+
+    samples = await perf_budget.samples_async(_fn, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
+    assert p95_ms < 200, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
