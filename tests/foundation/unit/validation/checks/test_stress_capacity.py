@@ -8,7 +8,6 @@ failure-injection 1, numeric performance assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -27,6 +26,7 @@ from src.foundation.validation.checks.stress_capacity import run
 from src.foundation.validation.domain.artifact import build_artifact
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _COST = CostModel(fee_bps=Decimal("10"), slippage_bps=Decimal("5"))
@@ -259,19 +259,21 @@ def test_stress_error_from_run_stress_propagates_uncaught(monkeypatch: pytest.Mo
 
 
 @pytest.mark.perf
-def test_p95_latency_within_local_stress_replay_budget() -> None:
+def test_p95_latency_within_local_stress_replay_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C axis performance budget: 5 required scenarios over a
     40-bar fixture, 3 iterations, generous 3s p95 floor (mirrors
     test_stress.py's per-scenario budget reasoning, scaled up for the real
-    -- not faked -- IndicatorService path this check always uses)."""
+    -- not faked -- IndicatorService path this check always uses).
+
+    Converted from raw time.perf_counter() to PerfBudget (task-11023, L4-DC-2)
+    so wall-clock budget survives host noise (other workers / local LLM).
+    """
     ctx = _ctx(bars=_bars(40))
-    samples: list[float] = []
-    for _ in range(3):
-        start = time.perf_counter()
-        run(ctx)
-        samples.append(time.perf_counter() - start)
-    p95_seconds = max(samples)
-    assert p95_seconds < 3.0, f"p95={p95_seconds * 1000:.2f}ms exceeds 3000ms budget"
+    samples = perf_budget.samples(lambda: run(ctx), n=3)
+    p95_ms = max(s.cpu_ms for s in samples)
+    assert p95_ms < 3_000, f"p95={p95_ms:.2f}ms exceeds 3000ms budget"
 
 
 # -- D2 gate-red reproduction ------------------------------------------------
