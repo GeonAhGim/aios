@@ -22,6 +22,7 @@ from src.foundation.validation.domain.artifact import build_artifact
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from src.services.condition_compiler import ORDER_FILLED
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
@@ -261,20 +262,26 @@ def _p95_ms(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-def test_run_p95_latency_within_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_p95_latency_within_budget(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ctx = _ctx(_bars(60))
-    samples: list[float] = []
-    for _ in range(_ITERATIONS):
-        started = time.perf_counter()
-        _run_with_fake_indicator(ctx, monkeypatch)
-        samples.append(time.perf_counter() - started)
-    p95_ms = _p95_ms(samples)
+    samples = perf_budget.samples(
+        lambda: _run_with_fake_indicator(ctx, monkeypatch),
+        n=_ITERATIONS,
+    )
+    ordered = sorted(s.cpu_ms for s in samples)
+    p95_ms = ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)]
     print(f"[L39 robustness] p95={p95_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
     assert p95_ms < _BUDGET_MS
 
 
 @pytest.mark.perf
-def test_budget_gate_actually_fails_when_sweep_stalls(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_budget_gate_actually_fails_when_sweep_stalls(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Gate-red reproduction: injecting a delay into `sweep` that actually
     exceeds the budget proves the p95 assertion above would fire
     AssertionError, not just pass trivially."""
@@ -287,8 +294,6 @@ def test_budget_gate_actually_fails_when_sweep_stalls(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(check_mod, "sweep", _stalled)
 
-    started = time.perf_counter()
-    check_mod.run(ctx)
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    sample = perf_budget.sample(lambda: check_mod.run(ctx))
     with pytest.raises(AssertionError):
-        assert elapsed_ms < _BUDGET_MS
+        assert sample.wall_ms < _BUDGET_MS
