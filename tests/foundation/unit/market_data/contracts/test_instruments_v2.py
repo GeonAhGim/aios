@@ -30,7 +30,6 @@ to what a pure pydantic-contract module can actually exercise:
 """
 
 import json
-import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -43,6 +42,7 @@ from pydantic import ValidationError
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.contracts.v2 import instruments as v2
+from tests.conftest import PerfBudget
 
 FIXTURE = Path(__file__).parent / "fixtures" / "market_data_contracts_v2_instruments.json"
 
@@ -395,20 +395,23 @@ def test_currency_country_mic_validator_failure_injection_fails_closed(
 
 
 @pytest.mark.perf
-def test_bulk_instrument_construction_completes_within_latency_budget() -> None:
-    """Numeric performance assertion: constructing a large symbol-master
-    page must not become a bottleneck for callers (DC-2 symbol_master,
-    DC-5 ports). 5,000 instruments is far more than the venue/instrument
-    count AIOS is provisioned for today; the budget is a generous ceiling
-    on frozen-model construction + validation cost, not a copy of any
-    specific SLO.
+def test_bulk_instrument_construction_completes_within_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """task-10978: raw time.perf_counter() → perf_budget.sample() 전환.
+    process_time 기반 측정으로 부하 민감 호스트에서 다른 프로세스에 코어를
+    뺏겨 대기한 시간이 wall-clock에 섞이지 않게 한다.
     """
-    started = time.perf_counter()
-    instruments = [_sample_instrument(instrument_id=_ulid_for(i)) for i in range(5000)]
-    elapsed_s = time.perf_counter() - started
+    sample = perf_budget.sample(
+        lambda: [_sample_instrument(instrument_id=_ulid_for(i)) for i in range(5000)],
+        batch=1,
+    )
 
-    assert len(instruments) == 5000
-    assert elapsed_s < 2.0, f"constructing 5,000 Instruments took {elapsed_s:.3f}s (budget 2.0s)"
+    assert len(sample.result) == 5000
+    budget_ms = 2_000.0  # 2.0s — budget 값 불변
+    assert sample.cpu_ms < budget_ms, (
+        f"constructing 5,000 Instruments took {sample.cpu_ms:.1f}ms (budget {budget_ms:.0f}ms)"
+    )
 
 
 def test_instrument_required_fields_match_dc1_contract_table_ci_guard() -> None:
