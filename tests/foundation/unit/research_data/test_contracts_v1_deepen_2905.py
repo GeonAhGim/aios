@@ -15,7 +15,6 @@ DB/네트워크가 없으므로, 여기서 "실패주입"이란 잘못된 리터
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +24,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.foundation.research_data.contracts import v1
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)
 
@@ -120,12 +120,19 @@ def test_naive_datetime_is_rejected_for_both_time_fields() -> None:
 
 
 @pytest.mark.perf
-def test_bulk_validation_of_many_research_items_meets_latency_budget() -> None:
+def test_bulk_validation_of_many_research_items_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """5,000건의 원본 dict를 `ResearchItem`으로 검증하는 왕복(구성 +
     `model_dump_json` 직렬화 + `model_validate_json` 역직렬화)이 절대시간
-    예산 내여야 한다 -- 검증 경로가 건당 상수시간에서 벗어나지 않았는지."""
+    예산 내여야 한다 -- 검증 경로가 건당 상수시간에서 벗어나지 않았는지.
+
+    raw `time.perf_counter()` → `perf_budget.assert_within()` 전환 (task-11008,
+    L4-DC-2). 부하 민감 호스트에서 wall-clock 노이즈를 제거하기 위해
+    `process_time()` 기반 best-of-N 측정으로 교체한다.
+    """
     n = 5_000
-    budget_sec = 3.0  # 실측 로컬 <0.6s
+    budget_ms = 3_000.0  # 3.0s wall-clock 예산 → CPU 밀리초 동일값
     payloads = [
         _base_item_kwargs(
             item_id=uuid4(),
@@ -135,19 +142,25 @@ def test_bulk_validation_of_many_research_items_meets_latency_budget() -> None:
         for i in range(n)
     ]
 
-    start = time.perf_counter()
-    items = [v1.ResearchItem(**payload) for payload in payloads]
-    dumped = [item.model_dump_json() for item in items]
-    restored = [v1.ResearchItem.model_validate_json(blob) for blob in dumped]
-    elapsed = time.perf_counter() - start
+    def _bulk_roundtrip() -> list[v1.ResearchItem]:
+        items = [v1.ResearchItem(**payload) for payload in payloads]
+        dumped = [item.model_dump_json() for item in items]
+        return [v1.ResearchItem.model_validate_json(blob) for blob in dumped]
 
-    print(
-        f"[RD-2 contracts_v1] {n}건 construct+dump+restore in {elapsed:.4f}s (budget<{budget_sec}s)"
+    sample = perf_budget.assert_within(
+        _bulk_roundtrip,
+        budget_ms=budget_ms,
+        n=5,
+        warmup=1,
+        label=f"RD-2 contracts_v1 {n}건 construct+dump+restore",
     )
-    assert len(restored) == n
-    assert restored[0].title == "공시 0"
-    assert restored[-1].title == f"공시 {n - 1}"
-    assert elapsed < budget_sec, f"{n}건 왕복이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+
+    # 정합성 검증 — 모델 구성이 올바르게 동작하는지 확인
+    # (best_of가 최소 CPU 시간을 선택하므로, 첫 sample의 result로 확인)
+    restored_list: list[v1.ResearchItem] = sample.result  # type: ignore[assignment]
+    assert len(restored_list) == n
+    assert restored_list[0].title == "공시 0"
+    assert restored_list[-1].title == f"공시 {n - 1}"
 
 
 # ---- 게이트 적색 재현 ---------------------------------------------------------
