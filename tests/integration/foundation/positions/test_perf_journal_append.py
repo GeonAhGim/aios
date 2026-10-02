@@ -72,6 +72,7 @@ test_perf_journal, LC-17)과 동일한 decision을 적용한다: 절대 지연 p
 방식은 다른 환경에서 XPASS strict로 되돌아온 전례가 있어(task-920) 둘 다
 금지한다. src(postgres_journal_repository.py)는 무수정이다(왕복 축소는
 task-653으로 이미 끝났고, 계약·동작을 바꾸지 않는다)."""
+
 from __future__ import annotations
 
 import time
@@ -112,7 +113,8 @@ def _clock() -> datetime:
 
 def _key(tenant_id: UUID) -> str:
     return str(
-        PositionKey(portfolio_id=default_portfolio_id(tenant_id),
+        PositionKey(
+            portfolio_id=default_portfolio_id(tenant_id),
             venue="TESTVENUE",
             instrument_id=f"INST{uuid4().hex[:8]}",
             strategy_id="default",
@@ -189,9 +191,15 @@ async def _count_record_fill_round_trips(
 
 
 @pytest.mark.perf
-async def test_record_fill_journal_append_p95_under_30ms(pool) -> None:
+async def test_record_fill_journal_append_p95_under_30ms(
+    pool,
+    perf_budget,
+) -> None:
     """§7 30ms는 운영 목표이며 CI는 환경 정규화 + 왕복수 상한으로 회귀만
-    잡는다(PM 결정 2026-09-03, task-822)."""
+    잡는다(PM 결정 2026-09-03, task-822).
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11063).
+    """
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)
     audit = PostgresAuditEventRepository(pool)
@@ -225,35 +233,39 @@ async def test_record_fill_journal_append_p95_under_30ms(pool) -> None:
             )
         )
 
-    latencies_ms: list[float] = []
-    for command in commands:
-        started = time.perf_counter()
+    n = len(commands)
+    _idx = 0  # mutable index into commands
+
+    async def _call() -> None:
+        nonlocal _idx
+        cmd = commands[_idx]
+        _idx = (_idx + 1) % n
         async with pool.acquire() as conn, conn.transaction():
             await record_fill(
                 conn,
-                command,
+                cmd,
                 asset_class=AssetClass.CRYPTO,
                 journal=journal,
                 snapshots=snapshots,
                 audit=audit,
                 clock=_clock,
             )
-        latencies_ms.append((time.perf_counter() - started) * 1000)
 
-    latencies_ms.sort()
-    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95)]
+    samples = await perf_budget.samples_async(_call, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[int(n * 0.95)]
     normalized_target_ms = max(_TARGET_P95_MS, _ROUND_TRIP_MULTIPLIER * baseline_p95_ms)
 
     print(
         f"\npositions record_fill journal append latency: "
-        f"p95={p95_ms:.3f}ms (n={len(latencies_ms)}); "
+        f"p95={p95_ms:.3f}ms (n={n}); "
         f"baseline round-trip p95={baseline_p95_ms:.3f}ms (n={_BASELINE_SAMPLE_COUNT}); "
         f"normalized target={normalized_target_ms:.3f}ms "
         f"(max({_TARGET_P95_MS}, {_ROUND_TRIP_MULTIPLIER}*rt)); "
         f"sequential DB round trips={round_trip_count} (max={_MAX_SEQUENTIAL_ROUND_TRIPS})"
     )
 
-    assert len(latencies_ms) == _SAMPLE_COUNT
+    assert n == _SAMPLE_COUNT
     assert round_trip_count <= _MAX_SEQUENTIAL_ROUND_TRIPS, (
         f"record_fill 순차 DB 왕복 수({round_trip_count})가 상한"
         f"({_MAX_SEQUENTIAL_ROUND_TRIPS})을 초과했습니다 — 왕복 수 회귀입니다."
