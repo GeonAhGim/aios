@@ -60,7 +60,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -164,7 +163,9 @@ def _large_candle_set(n: int) -> list[Candle]:
 
 
 @pytest.mark.perf
-async def test_fetch_candles_filter_sort_throughput_bounded_vs_trivial_baseline() -> None:
+async def test_fetch_candles_filter_sort_throughput_bounded_vs_trivial_baseline(
+    perf_budget,
+) -> None:
     """`fetch_candles`의 구간 필터+정렬 파이프라인이 대용량(2000개) 캔들에서
     30회 반복 처리하는 총소요시간이, 같은 프로세스가 방금 측정한 구조적으로
     동등한 트리비얼 정렬 베이스라인(같은 N의 리스트를 comparison-key 정렬)
@@ -200,22 +201,17 @@ async def test_fetch_candles_filter_sort_throughput_bounded_vs_trivial_baseline(
             values = [(_BASE + timedelta(days=_N_CANDLES - d), d) for d in range(_N_CANDLES)]
             sorted(values, key=lambda pair: pair[0])
 
-    baseline_start = time.perf_counter()
-    run_baseline()
-    baseline_seconds = time.perf_counter() - baseline_start
+    baseline_sample = perf_budget.sample(run_baseline)
+    fetch_sample = await perf_budget.sample_async(run_fetch)
 
-    fetch_start = time.perf_counter()
-    await run_fetch()
-    fetch_seconds = time.perf_counter() - fetch_start
-
-    assert baseline_seconds > 0.0
-    ratio = fetch_seconds / baseline_seconds
+    assert baseline_sample.cpu_ms > 0.0
+    ratio = fetch_sample.cpu_ms / baseline_sample.cpu_ms
     budget_ratio = 30.0  # fetch는 필터+정렬+CandleColumns 조립+비동기 호출
     # 오버헤드가 더해져 트리비얼 정렬 베이스라인보다 근본적으로 느리다.
     print(
         f"\nKISProvider.fetch_candles filter+sort throughput vs trivial baseline: "
         f"n_candles={_N_CANDLES} n_iterations={_N_ITERATIONS} "
-        f"baseline={baseline_seconds * 1000:.1f}ms fetch={fetch_seconds * 1000:.1f}ms "
+        f"baseline={baseline_sample.cpu_ms:.1f}ms fetch={fetch_sample.cpu_ms:.1f}ms "
         f"ratio={ratio:.2f} (budget={budget_ratio})"
     )
     assert ratio < budget_ratio, (
