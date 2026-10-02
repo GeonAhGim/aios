@@ -15,9 +15,9 @@ p50/p95를 print로 남기고, (b) 이 어댑터가 `PostgresCandleStore`에
 그건 이 코드가 만든 회귀이고, 절대 지연 변동은 이 파일이 통제할 수
 없는 환경 신호이기 때문이다.
 """
+
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -43,8 +43,18 @@ _MAX_ROUND_TRIPS = 1  # HotPostgresStorage.read_columns()는 SELECT 1회여야 �
 _MEASURE_SAMPLES = 20
 
 _CANDLE_COLUMNS = (
-    "venue", "instrument_id", "timeframe", "open_time", "close_time",
-    "open", "high", "low", "close", "volume", "quote_volume", "batch_id",
+    "venue",
+    "instrument_id",
+    "timeframe",
+    "open_time",
+    "close_time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "quote_volume",
+    "batch_id",
 )
 
 
@@ -81,8 +91,9 @@ async def _instrument_id(conn: asyncpg.Connection, prefix: str = "DC13") -> uuid
     )
 
 
-def _candle(key: SeriesKey, open_time: datetime, o: float, h: float, low: float, c: float,
-            v: float) -> CandleRecord:
+def _candle(
+    key: SeriesKey, open_time: datetime, o: float, h: float, low: float, c: float, v: float
+) -> CandleRecord:
     return CandleRecord(
         key=key,
         open_time=open_time,
@@ -133,8 +144,12 @@ async def test_read_columns_across_partition_boundary_sorted_no_gaps_no_dupes(
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
         t1 = t0 + timedelta(days=40)  # 어떤 시작일이든 최소 한 달 파티션 경계를 넘는다
         batch = await _create_batch(
-            conn, batch_repo, instrument_id=instrument_id,
-            range_start=t0, range_end=t1 + timedelta(minutes=1), accepted=2,
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t1 + timedelta(minutes=1),
+            accepted=2,
         )
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
         candles = [
@@ -146,8 +161,12 @@ async def test_read_columns_across_partition_boundary_sorted_no_gaps_no_dupes(
 
     async with pool.acquire() as conn, conn.transaction():
         columns = await hot_storage.read_columns(
-            conn, instrument_id, Venue.BITGET, Timeframe.M1,
-            t0 - timedelta(minutes=1), t1 + timedelta(minutes=1),
+            conn,
+            instrument_id,
+            Venue.BITGET,
+            Timeframe.M1,
+            t0 - timedelta(minutes=1),
+            t1 + timedelta(minutes=1),
         )
 
     assert columns.ts == [t0, t1], "파티션 경계를 넘는 구간이 정렬된 채 누락·중복 없이 와야 한다"
@@ -158,8 +177,12 @@ async def test_read_columns_nonexistent_instrument_returns_empty_not_error(pool,
     async with pool.acquire() as conn, conn.transaction():
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
         columns = await hot_storage.read_columns(
-            conn, uuid.uuid4(), Venue.BITGET, Timeframe.M1,
-            t0 - timedelta(days=1), t0 + timedelta(days=1),
+            conn,
+            uuid.uuid4(),
+            Venue.BITGET,
+            Timeframe.M1,
+            t0 - timedelta(days=1),
+            t0 + timedelta(days=1),
         )
     assert len(columns) == 0
     assert columns.ts == []
@@ -170,8 +193,12 @@ async def test_read_columns_empty_range_returns_empty_not_error(pool, hot_storag
         instrument_id = await _instrument_id(conn)
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
         await _create_batch(
-            conn, batch_repo, instrument_id=instrument_id,
-            range_start=t0, range_end=t0 + timedelta(minutes=1), accepted=0,
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t0 + timedelta(minutes=1),
+            accepted=0,
         )
         # start == end: 반개구간 [start, end)이 공집합이라 조회 결과도 공집합이어야 한다.
         columns = await hot_storage.read_columns(
@@ -186,8 +213,12 @@ async def test_read_columns_future_range_returns_empty_not_error(pool, hot_stora
         instrument_id = await _instrument_id(conn)
         t0 = datetime.now(timezone.utc).replace(microsecond=0)
         batch = await _create_batch(
-            conn, batch_repo, instrument_id=instrument_id,
-            range_start=t0, range_end=t0 + timedelta(minutes=1), accepted=1,
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t0 + timedelta(minutes=1),
+            accepted=1,
         )
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
         candle = _candle(key, t0, 100, 110, 90, 105, 10)
@@ -195,15 +226,17 @@ async def test_read_columns_future_range_returns_empty_not_error(pool, hot_stora
 
         far_future_start = t0 + timedelta(days=365 * 5)
         columns = await hot_storage.read_columns(
-            conn, instrument_id, Venue.BITGET, Timeframe.M1,
-            far_future_start, far_future_start + timedelta(days=1),
+            conn,
+            instrument_id,
+            Venue.BITGET,
+            Timeframe.M1,
+            far_future_start,
+            far_future_start + timedelta(days=1),
         )
     assert len(columns) == 0, "저장된 캔들보다 훨씬 미래인 구간은 빈 결과여야 한다(예외 아님)"
 
 
-async def _seed_5000_candles(
-    pool, batch_repo, *, instrument_id: uuid.UUID, t0: datetime
-) -> None:
+async def _seed_5000_candles(pool, batch_repo, *, instrument_id: uuid.UUID, t0: datetime) -> None:
     """`_SAMPLE_ROW_COUNT`개의 연속 1분봉을 COPY로 적재한다
     (`test_perf_replay._seed_candles`와 동일 근거 — 파라미터화 멀티행
     INSERT는 이 행수(5,000×12≈60,000 바인드)에서도 asyncpg/PostgreSQL
@@ -216,22 +249,41 @@ async def _seed_5000_candles(
     async with pool.acquire() as conn, conn.transaction():
         audit_event_id = await _audit_event_id(conn)
         batch = IngestBatchResult(
-            batch_id=uuid.uuid4(), source="test", venue=Venue.BITGET,
-            instrument_id=instrument_id, timeframe=Timeframe.M1, range_start=t0,
-            range_end=range_end, request_fingerprint=f"fp-{uuid.uuid4().hex}",
-            verdict=QualityVerdict(verdict=Verdict.ACCEPT, accepted=_SAMPLE_ROW_COUNT,
-                                    quarantined=0, rejected=0, issues=[]),
-            batch_hash=f"hash-{uuid.uuid4().hex}", audit_event_id=audit_event_id,
+            batch_id=uuid.uuid4(),
+            source="test",
+            venue=Venue.BITGET,
+            instrument_id=instrument_id,
+            timeframe=Timeframe.M1,
+            range_start=t0,
+            range_end=range_end,
+            request_fingerprint=f"fp-{uuid.uuid4().hex}",
+            verdict=QualityVerdict(
+                verdict=Verdict.ACCEPT,
+                accepted=_SAMPLE_ROW_COUNT,
+                quarantined=0,
+                rejected=0,
+                issues=[],
+            ),
+            batch_hash=f"hash-{uuid.uuid4().hex}",
+            audit_event_id=audit_event_id,
             stored_range=None,
         )
         await batch_repo.create(conn, batch)
 
         records = (
             (
-                Venue.BITGET.value, instrument_id, Timeframe.M1.value,
-                t0 + timedelta(minutes=i), t0 + timedelta(minutes=i + 1),
-                Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105"), Decimal("10"),
-                None, batch.batch_id,
+                Venue.BITGET.value,
+                instrument_id,
+                Timeframe.M1.value,
+                t0 + timedelta(minutes=i),
+                t0 + timedelta(minutes=i + 1),
+                Decimal("100"),
+                Decimal("110"),
+                Decimal("90"),
+                Decimal("105"),
+                Decimal("10"),
+                None,
+                batch.batch_id,
             )
             for i in range(_SAMPLE_ROW_COUNT)
         )
@@ -258,8 +310,18 @@ async def _round_trip_count(
     return len(queries)
 
 
+async def _read_and_check(
+    hot_storage, pool, instrument_id, venue, timeframe, start, end, expected_count: int
+) -> list:
+    """Helper for samples_async — wraps read_columns + row-count assert."""
+    async with pool.acquire() as conn, conn.transaction():
+        columns = await hot_storage.read_columns(conn, instrument_id, venue, timeframe, start, end)
+    assert len(columns) == expected_count
+    return columns
+
+
 @pytest.mark.perf
-async def test_read_columns_5000_candles_p95_measured(pool, hot_storage, batch_repo):
+async def test_read_columns_5000_candles_p95_measured(pool, hot_storage, batch_repo, perf_budget):
     """§9.2 DC-13 DoD: instrument_id 키 5,000봉 조회 p95를 실DB로 실측
     출력한다. 200ms는 운영 목표로 print에 남기되(모듈 docstring), 차단
     게이트는 순차 DB 왕복 수(<=1)로만 건다."""
@@ -273,23 +335,21 @@ async def test_read_columns_5000_candles_p95_measured(pool, hot_storage, batch_r
         pool, hot_storage, instrument_id=instrument_id, start=t0, end=end
     )
 
-    latencies_ms: list[float] = []
-    for _ in range(_MEASURE_SAMPLES):
-        started = time.perf_counter()
-        async with pool.acquire() as conn, conn.transaction():
-            columns = await hot_storage.read_columns(
-                conn, instrument_id, Venue.BITGET, Timeframe.M1, t0, end
-            )
-        latencies_ms.append((time.perf_counter() - started) * 1000)
-        assert len(columns) == _SAMPLE_ROW_COUNT
+    samples = await perf_budget.samples_async(
+        lambda: _read_and_check(
+            hot_storage, pool, instrument_id, Venue.BITGET, Timeframe.M1, t0, end, _SAMPLE_ROW_COUNT
+        ),
+        n=_MEASURE_SAMPLES,
+    )
 
-    latencies_ms.sort()
-    p50_ms = latencies_ms[int(len(latencies_ms) * 0.50)]
-    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95)]
+    wall_ms_values = [s.wall_ms for s in samples]
+    wall_ms_values.sort()
+    p50_ms = wall_ms_values[int(len(wall_ms_values) * 0.50)]
+    p95_ms = wall_ms_values[int(len(wall_ms_values) * 0.95)]
 
     print(
         f"\nhot_postgres read_columns latency ({_SAMPLE_ROW_COUNT} candles): "
-        f"p50={p50_ms:.3f}ms p95={p95_ms:.3f}ms (n={len(latencies_ms)}); "
+        f"p50={p50_ms:.3f}ms p95={p95_ms:.3f}ms (n={len(samples)}); "
         f"target={_TARGET_P95_MS}ms(운영 목표, 비차단); "
         f"sequential DB round trips={round_trip_count} (max={_MAX_ROUND_TRIPS})"
     )
