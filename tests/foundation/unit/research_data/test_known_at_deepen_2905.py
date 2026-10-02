@@ -16,7 +16,6 @@ task-2726) D1 -> D2 증빙.
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -28,6 +27,7 @@ from src.foundation.research_data.domain.known_at import (
     PointInTimeViolationError,
     assert_point_in_time,
 )
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
 
@@ -93,38 +93,42 @@ def test_maximum_datetime_known_at_is_rejected_against_any_realistic_as_of() -> 
 
 
 @pytest.mark.perf
-def test_repeated_point_in_time_checks_meet_throughput_budget() -> None:
+def test_repeated_point_in_time_checks_meet_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """통과/거부가 번갈아 나오는 20,000회 반복 호출(폴링 패턴)이 절대시간
     예산 내여야 한다 -- FA-9 위임 경로가 호출당 상수시간에서 벗어나지
-    않았는지."""
+    않았는지.
+
+    task-11010: raw perf_counter → PerfBudget.assert_within 전환
+    (check_perf_measurement_guard.py 대상 함수 1/1)"""
     iterations = 20_000
-    budget_sec = 5.0  # 실측 로컬 <1.0s, CI 편차 감안
     past_item = _item(known_at=_T0 - timedelta(days=1))
     future_item = _item(known_at=_T0 + timedelta(days=1))
 
-    start = time.perf_counter()
-    passed = 0
-    rejected = 0
-    for i in range(iterations):
-        if i % 2 == 0:
-            assert_point_in_time(past_item, _T0)
-            passed += 1
-        else:
-            try:
-                assert_point_in_time(future_item, _T0)
-            except PointInTimeViolationError:
-                rejected += 1
-    elapsed = time.perf_counter() - start
+    def run_batch() -> tuple[int, int]:
+        passed = 0
+        rejected = 0
+        for i in range(iterations):
+            if i % 2 == 0:
+                assert_point_in_time(past_item, _T0)
+                passed += 1
+            else:
+                try:
+                    assert_point_in_time(future_item, _T0)
+                except PointInTimeViolationError:
+                    rejected += 1
+        return passed, rejected
 
-    print(
-        f"[RD-2 known_at] {iterations}회 반복(통과/거부 번갈아) in {elapsed:.4f}s "
-        f"(budget<{budget_sec}s)"
+    sample = perf_budget.assert_within(
+        run_batch,
+        budget_ms=5000,
+        n=1,
+        label="20k 반복 폴링(통과/거부 번갈아)",
     )
+    passed, rejected = sample.result
     assert passed == iterations // 2
     assert rejected == iterations // 2
-    assert elapsed < budget_sec, (
-        f"{iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
-    )
 
 
 # ---- 게이트 적색 재현 ---------------------------------------------------------
