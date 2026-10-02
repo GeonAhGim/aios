@@ -9,7 +9,6 @@ tenant 요청(비회원) -> `TenantMismatchError`(403 AUTH_TENANT_MISMATCH);
 from __future__ import annotations
 
 import os
-import time
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -280,10 +279,15 @@ async def test_membership_lookup_outage_propagates_fail_closed(pool):
 
 
 @pytest.mark.perf
-async def test_resolve_tenant_context_membership_path_latency_p95_within_budget(pool, repo):
+async def test_resolve_tenant_context_membership_path_latency_p95_within_budget(
+    pool, repo, perf_budget
+):
     """수치 성능 단언: 멤버십이 있는 tenant 요청 경로(DB 조회 1회, §8.3)의
     p95 지연시간이 예산을 넘지 않아야 한다 — 인덱스/쿼리플랜 회귀로 조회가
-    느려지는 것을 잡기 위함이지 현재 실측치에 딱 맞춘 문턱은 아니다."""
+    느려지는 것을 잡기 위함이지 현재 실측치에 딱 맞춘 문턱은 아니다.
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11069).
+    """
     owner_id = await create_test_user(pool)
     member_id = await create_test_user(pool)
 
@@ -297,11 +301,8 @@ async def test_resolve_tenant_context_membership_path_latency_p95_within_budget(
             created_by=owner_id,
         )
 
-    n = 30
-    latencies: list[float] = []
-    for _ in range(n):
+    async def _call() -> None:
         async with pool.acquire() as conn:
-            start = time.perf_counter()
             await resolve_tenant_context(
                 repo,
                 conn,
@@ -309,10 +310,11 @@ async def test_resolve_tenant_context_membership_path_latency_p95_within_budget(
                 requested_tenant_id=owner_id,
                 mfa_verified=False,
             )
-            latencies.append(time.perf_counter() - start)
 
-    latencies.sort()
-    p95_ms = latencies[int(n * 0.95)] * 1000
+    n = 30
+    samples = await perf_budget.samples_async(_call, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[int(n * 0.95)]
     assert p95_ms < RESOLVE_TENANT_CONTEXT_P95_BUDGET_MS, (
         f"resolve_tenant_context(멤버십 경로) p95 지연시간 {p95_ms:.4f}ms가 예산 "
         f"{RESOLVE_TENANT_CONTEXT_P95_BUDGET_MS}ms 초과"
