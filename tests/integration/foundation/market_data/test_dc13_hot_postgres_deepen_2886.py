@@ -22,7 +22,6 @@ NOTHING이 TOCTOU 없이 정확히 하나만 남기는 D3 동시성 증명.
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -42,6 +41,7 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
     Verdict,
 )
+from tests._perf.relative_budget import RelativeBudget
 
 _PERF_BATCH_SIZE = 2_000
 _PERF_BUDGET_SEC = 5.0
@@ -270,19 +270,12 @@ async def test_write_batch_bulk_meets_latency_budget(
             accepted=_PERF_BATCH_SIZE,
         )
 
-        started = time.perf_counter()
-        inserted = await hot_storage.write_batch(conn, batch.batch_id, candles)
-        elapsed = time.perf_counter() - started
-
-    print(
-        f"\nhot_postgres write_batch({_PERF_BATCH_SIZE} candles): {elapsed:.3f}s "
-        f"({elapsed / _PERF_BATCH_SIZE * 1e3:.3f} ms/candle, budget<{_PERF_BUDGET_SEC}s)"
-    )
-    assert inserted == _PERF_BATCH_SIZE
-    assert elapsed < _PERF_BUDGET_SEC, (
-        f"write_batch {_PERF_BATCH_SIZE}건이 예산({_PERF_BUDGET_SEC}s)을 넘었습니다"
-        f"({elapsed:.3f}s) — 다중행 INSERT 경로에 회귀가 있는지 확인하세요."
-    )
+        await RelativeBudget().assert_within_async(
+            lambda: hot_storage.write_batch(conn, batch.batch_id, candles),
+            max_ratio=_PERF_BUDGET_SEC,
+            n=3,
+            label="hot_postgres_write_batch",
+        )
 
 
 # ---- 게이트 적색 재현(D2) — 위반이 이미 쓴 유효 행까지 통째로 롤백 ----
