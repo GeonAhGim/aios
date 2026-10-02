@@ -7,12 +7,12 @@ negative: 미인증 401, 교차 테넌트 스크립트 지표 미노출, 잘못�
 INVARIANTS I-10(배선 증명): 라우트가 실제 앱에 마운트돼 있고, 인증 없이는
 거부되며, 커서 오류가 전역 핸들러 봉투로 나오는지 앱 왕복으로 단언한다.
 """
+
 from __future__ import annotations
 
 import ast
 import uuid
 from pathlib import Path
-from time import perf_counter
 from unittest.mock import Mock
 from uuid import UUID
 
@@ -76,9 +76,9 @@ def test_route_is_mounted_on_app() -> None:
 
 
 def test_router_has_zero_raw_http_exception() -> None:
-    source = (
-        Path(__file__).resolve().parents[3] / "src/api/routers/indicators.py"
-    ).read_text("utf-8")
+    source = (Path(__file__).resolve().parents[3] / "src/api/routers/indicators.py").read_text(
+        "utf-8"
+    )
     calls = [
         n
         for n in ast.walk(ast.parse(source))
@@ -124,9 +124,7 @@ async def test_search_is_case_insensitive_substring(client: AsyncClient) -> None
 async def test_category_filter_matches_core_talib_group(client: AsyncClient) -> None:
     headers, _ = await _register(client)
     category = DEFAULT_STATIC_CATALOG["SMA"].category
-    response = await client.get(
-        PATH, params={"category": category, "limit": 200}, headers=headers
-    )
+    response = await client.get(PATH, params={"category": category, "limit": 200}, headers=headers)
     items = response.json()["data"]["items"]
     assert items
     assert all(item["category"] == category for item in items)
@@ -219,12 +217,14 @@ async def test_script_indicator_yields_to_core_name_conflict(client: AsyncClient
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("limit", "0"), ("limit", "201"), ("limit", "abc"),
-     ("q", "x" * 101), ("category", "x" * 101)],
+    [("limit", "0"), ("limit", "201"), ("limit", "abc"), ("q", "x" * 101), ("category", "x" * 101)],
     ids=["zero-limit", "oversize-limit", "noninteger-limit", "long-query", "long-category"],
 )
 async def test_negative_invalid_query_rejected_before_source_read(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, field: str, value: str,
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
 ) -> None:
     """I-10: transport bounds reject invalid requests before catalog access."""
     headers, _ = await _register(client)
@@ -245,7 +245,8 @@ async def test_negative_invalid_query_rejected_before_source_read(
 
 
 async def test_failure_injection_source_error_is_closed_and_recovers(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch,
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """I-10: storage failure cannot become a successful partial core catalog."""
     headers, tenant_id = await _register(client)
@@ -274,17 +275,25 @@ async def test_failure_injection_source_error_is_closed_and_recovers(
 
 
 @pytest.mark.perf
-async def test_catalog_list_p95_budget(client: AsyncClient) -> None:
-    """IND-12: authenticated list API p95 <= 200ms, excluding registration/warmup."""
+async def test_catalog_list_p95_budget(client: AsyncClient, perf_budget) -> None:
+    """IND-12: authenticated list API p95 <= 200ms, excluding registration/warmup.
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11032).
+
+    비동기 I/O를 재는 테스트는 samples_async를 쓴다 — wall_ms로 왕복 지연을
+    보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(200ms)은 그대로 유지한다.
+    """
     headers, _ = await _register(client)
     warmup = await client.get(PATH, params={"limit": 200}, headers=headers)
     assert warmup.status_code == 200, warmup.text
-    samples = []
-    for _ in range(20):
-        start = perf_counter()
+
+    async def _fn() -> None:
         response = await client.get(PATH, params={"limit": 200}, headers=headers)
-        samples.append((perf_counter() - start) * 1000)
         assert response.status_code == 200, response.text
         assert response.json()["data"]["items"]
-    p95_ms = sorted(samples)[18]
+
+    n = 20
+    samples = await perf_budget.samples_async(_fn, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
     assert p95_ms <= 200, f"IND-12 list API p95={p95_ms:.2f}ms > 200ms"
