@@ -14,7 +14,6 @@ DoD: 신규 라우터의 200 정상 1건 + negative >=3(잘못된 universe/curso
 
 from __future__ import annotations
 
-import time
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timezone
@@ -260,18 +259,17 @@ async def test_field_source_failure_mid_scan_is_500_not_swallowed(client: AsyncC
 
 
 @pytest.mark.perf
-async def test_screen_run_completes_well_within_scan_timeout_budget(client: AsyncClient) -> None:
+async def test_screen_run_completes_well_within_scan_timeout_budget(
+    client: AsyncClient, perf_budget: Any
+) -> None:
     headers = await _register(client)
     instruments = [_instrument(f"SYM{i}") for i in range(50)]
     fields = {i.instrument_id: {"close": Decimal("10")} for i in instruments}
     _override(client, _FakeFieldSource(instruments, fields))
 
-    start = time.monotonic()
-    response = await client.post(PATH, json=_body(), headers=headers)
-    elapsed = time.monotonic() - start
+    budget_s = SCAN_TIMEOUT_SECONDS / 10  # 1.0 s — 라우터 오버헤드 없음 증거
+    sample = await perf_budget.sample_async(
+        lambda: client.post(PATH, json=_body(), headers=headers)
+    )
 
-    assert response.status_code == 200, response.text
-    # 인메모리 페이크 소스이므로 §9 UX-6 DoD의 <=10s 예산(SCAN_TIMEOUT_SECONDS)에
-    # 훨씬 못 미쳐야 한다 -- 라우터가 엔진에 불필요한 오버헤드를 추가하지 않는다는
-    # 증거로 예산의 1/10을 문턱으로 쓴다.
-    assert elapsed < SCAN_TIMEOUT_SECONDS / 10
+    assert sample.wall_ms < budget_s * 1000, perf_budget.describe(sample, budget_ms=budget_s * 1000)
