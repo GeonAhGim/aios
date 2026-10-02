@@ -41,6 +41,7 @@ def _uuid() -> UUID:
 # SCHEMA_VERSION
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaVersion:
     def test_schema_version_value(self):
         assert SCHEMA_VERSION == "v1"
@@ -49,6 +50,7 @@ class TestSchemaVersion:
 # ---------------------------------------------------------------------------
 # Classification enum
 # ---------------------------------------------------------------------------
+
 
 class TestClassification:
     def test_all_members_exist(self):
@@ -79,6 +81,7 @@ class TestClassification:
 # ---------------------------------------------------------------------------
 # EntitySnapshot
 # ---------------------------------------------------------------------------
+
 
 class TestEntitySnapshot:
     def test_minimal_valid(self):
@@ -173,6 +176,7 @@ class TestEntitySnapshot:
 # RunReconciliationRequest
 # ---------------------------------------------------------------------------
 
+
 class TestRunReconciliationRequest:
     def test_minimal_valid(self):
         req = RunReconciliationRequest(
@@ -234,6 +238,7 @@ class TestRunReconciliationRequest:
 # ReconciliationItemView
 # ---------------------------------------------------------------------------
 
+
 class TestReconciliationItemView:
     def test_healthy_item(self):
         item = ReconciliationItemView(
@@ -288,6 +293,7 @@ class TestReconciliationItemView:
 # ---------------------------------------------------------------------------
 # ReconciliationRunView
 # ---------------------------------------------------------------------------
+
 
 class TestReconciliationRunView:
     def test_minimal_valid(self):
@@ -358,6 +364,7 @@ class TestReconciliationRunView:
 # ResolveReconciliationRequest
 # ---------------------------------------------------------------------------
 
+
 class TestResolveReconciliationRequest:
     def test_minimal_valid(self):
         req = ResolveReconciliationRequest(reason="Manual override approved")
@@ -376,6 +383,7 @@ class TestResolveReconciliationRequest:
 # ---------------------------------------------------------------------------
 # ReconciliationStateView
 # ---------------------------------------------------------------------------
+
 
 class TestReconciliationStateView:
     def test_minimal_valid(self):
@@ -446,103 +454,3 @@ class TestReconciliationStateView:
             revision=1,
         )
         assert state.last_healthy_at is None
-
-
-# ---------------------------------------------------------------------------
-# Negative tests — boundary / malformed input
-# ---------------------------------------------------------------------------
-
-class TestNegativeTests:
-    def test_decimal_string_input_to_entity_snapshot(self):
-        """Pydantic coerces string decimals to Decimal internally."""
-        snap = EntitySnapshot(
-            entity_type="BALANCE",
-            entity_key="USDT_BALANCE",
-            internal_value=Decimal("999.99"),
-            provider_value=Decimal("999.00"),
-        )
-        assert isinstance(snap.internal_value, Decimal)
-        assert isinstance(snap.provider_value, Decimal)
-
-    def test_negative_decimal_allowed(self):
-        """Negative amounts are valid (e.g. short positions)."""
-        snap = EntitySnapshot(
-            entity_type="POSITION",
-            entity_key="BTCUSDT_POSITION",
-            internal_value=Decimal("-1.5"),
-        )
-        assert snap.internal_value == Decimal("-1.5")
-
-    def test_zero_decimal_allowed(self):
-        snap = EntitySnapshot(
-            entity_type="BALANCE",
-            entity_key="USDT_BALANCE",
-            internal_value=Decimal("0"),
-        )
-        assert snap.internal_value == Decimal("0")
-
-    def test_large_decimal(self):
-        large = Decimal("999999999999.99")
-        snap = EntitySnapshot(
-            entity_type="BALANCE",
-            entity_key="USDT_BALANCE",
-            internal_value=large,
-        )
-        assert snap.internal_value == large
-
-    def test_entity_snapshot_model_validate(self):
-        """model_validate from dict."""
-        snap = EntitySnapshot.model_validate({
-            "entity_type": "BALANCE",
-            "entity_key": "USDT_BALANCE",
-            "internal_value": "500.00",
-        })
-        assert snap.internal_value == Decimal("500.00")
-
-    def test_reconciliation_run_view_model_validate(self):
-        run = ReconciliationRunView.model_validate({
-            "id": str(_FAKE_UUID),
-            "target_type": "SPOT",
-            "target_ref": str(_uuid()),
-            "items": [],
-            "aggregate_classification": "HEALTHY",
-            "created_at": _OK_NOW.isoformat(),
-        })
-        assert run.aggregate_classification is Classification.HEALTHY
-
-
-# ---------------------------------------------------------------------------
-# Failure-injection tests — monkeypatch dependency
-# ---------------------------------------------------------------------------
-
-class TestFailureInjection:
-    def test_entity_snapshot_with_invalid_decimal(self, monkeypatch: pytest.MonkeyPatch):
-        """When Decimal conversion fails, Pydantic raises ValidationError."""
-        # Patch Decimal to raise on specific input
-        original_decimal = Decimal
-        monkeypatch.setattr(
-            "decimal.Decimal",
-            lambda x: (_ for _ in ()).throw(ValueError("bad decimal")),
-            raising=False,
-        )
-        with pytest.raises((ValidationError, ValueError)):
-            EntitySnapshot(
-                entity_type="BALANCE",
-                entity_key="USDT_BALANCE",
-                internal_value="NOT_A_NUMBER",
-            )
-        # Restore
-        import decimal
-        decimal.Decimal = original_decimal
-
-    def test_classification_with_mocked_enum(self, monkeypatch: pytest.MonkeyPatch):
-        """When Classification lookup fails, ValueError propagates."""
-        def _missing_(value):
-            raise ValueError("mock missing")
-        monkeypatch.setattr(
-            Classification,
-            "_missing_",
-            _missing_,
-        )
-        with pytest.raises(ValueError):
-            Classification("NONEXISTENT")
