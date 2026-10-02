@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -116,7 +115,7 @@ async def test_duplicate_known_at_for_same_key_is_rejected_by_pk(pool):
 
 
 @pytest.mark.perf
-async def test_get_as_of_meets_latency_budget_with_many_corrections(pool):
+async def test_get_as_of_meets_latency_budget_with_many_corrections(pool, perf_budget):
     """단일 (instrument_id, attr_key)에 500건의 정정이 쌓여도 `get_as_of`
     조회가 절대시간 예산 내여야 한다 -- `ix_instrument_attributes_lookup
     (instrument_id, attr_key, known_at DESC)`가 실제로 순차 스캔을
@@ -126,7 +125,7 @@ async def test_get_as_of_meets_latency_budget_with_many_corrections(pool):
     repo = PostgresInstrumentAttributesRepository(pool)
     base = datetime.now(timezone.utc)
     n = 500
-    budget_sec = 3.0  # 실측 로컬 <0.5s, CI 편차 감안
+    budget_ms = 3_000.0  # 실측 로컬 <0.5s, CI 편차 감안
 
     async with pool.acquire() as conn:
         for i in range(n):
@@ -138,16 +137,19 @@ async def test_get_as_of_meets_latency_budget_with_many_corrections(pool):
                 known_at=base + timedelta(seconds=i),
             )
 
-        start = time.perf_counter()
-        result = await repo.get_as_of(conn, instrument_id, as_of=base + timedelta(seconds=n + 10))
-        elapsed = time.perf_counter() - start
+        sample = await perf_budget.sample_async(
+            lambda: repo.get_as_of(conn, instrument_id, as_of=base + timedelta(seconds=n + 10))
+        )
+        elapsed_sec = sample.wall_ms / 1000
 
     print(
         f"[DC-21 instrument_attributes] get_as_of with {n} corrections in "
-        f"{elapsed:.4f}s (budget<{budget_sec}s)"
+        f"{elapsed_sec:.4f}s (budget<{budget_ms / 1000:.1f}s)"
     )
-    assert result["lot_size"].attr_value == str(n - 1)
-    assert elapsed < budget_sec, f"get_as_of가 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    assert sample.result["lot_size"].attr_value == str(n - 1)
+    assert sample.wall_ms < budget_ms, (
+        f"get_as_of가 예산({budget_ms / 1000:.1f}s)을 넘었습니다({elapsed_sec:.4f}s)."
+    )
 
 
 # ---- 게이트 적색 재현 -------------------------------------------------------
