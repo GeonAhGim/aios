@@ -22,6 +22,7 @@ from src.foundation.validation.domain.artifact import build_artifact
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from src.services.condition_compiler import ORDER_FILLED
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
