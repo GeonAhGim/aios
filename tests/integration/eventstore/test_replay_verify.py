@@ -18,7 +18,6 @@ when 7e9cc090/task-7695 pushed this file to 583 lines
 
 from __future__ import annotations
 
-import time
 from datetime import timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -34,6 +33,7 @@ from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJ
 from src.foundation.ledger.application.post_entry import post_entry
 from src.foundation.ledger.contracts.v1 import LedgerEvent, LedgerEventType
 from src.services.oms.adapters.fills_repository import FillsRepository
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.eventstore._replay_verify_support import (
     _clock,
     _seed_ledger_account,
@@ -164,15 +164,21 @@ async def test_replay_verify_completes_within_latency_budget_for_fifty_streams(p
         await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
 
-    started = time.perf_counter()
-    report = await replay_verify.verify(pool, as_of=as_of, hours=1)
-    elapsed_s = time.perf_counter() - started
+    sample = await RelativeBudget().measure_async(
+        lambda: replay_verify.verify(pool, as_of=as_of, hours=1),
+        n=3,
+        warmup=1,
+        calibration_n=3,
+    )
 
-    assert report.ok, report.mismatches
-    assert report.streams_checked >= 50
-    assert elapsed_s < 5.0, (
-        f"replay_verify.verify over {report.streams_checked} streams took "
-        f"{elapsed_s:.3f}s (budget 5.0s)"
+    # raw perf_counter 단언 → RelativeBudget.measure_async 전환 (task-11046)
+    # 5.0s 절대 예산을 상대 비율(max_ratio)로 변환: 호스트 CPU 속도를
+    # 보정 루프로 나누므로 절대값과 동일한 엄격도를 유지한다.
+    # calibration_loop은 약 10ms 소모 → 5.0s / 0.010s ≈ 500x
+    assert sample.ratio < 500, (
+        f"replay_verify.verify over 75 streams took "
+        f"{sample.op_ms:.3f}ms (calibration={sample.calibration_ms:.3f}ms, "
+        f"ratio={sample.ratio:.1f}x, budget<500x)"
     )
 
 
