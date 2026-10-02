@@ -247,29 +247,33 @@ async def test_compute_exception_releases_claim_and_allows_retry(pool):
 
 
 @pytest.mark.perf
-def test_compute_body_digest_p99_latency_within_budget():
+def test_compute_body_digest_p99_latency_within_budget(perf_budget):
     """`compute_body_digest`는 I/O 없이 순수 CPU(정렬+직렬화+sha256)만 쓰므로
     ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
-    차용해 반복 호출 p99가 그 안에 드는지 단언한다."""
+    차용해 반복 호출 p99가 그 안에 드는지 단언한다 — raw perf_counter →
+    perf_budget.samples() 전환 (task-11031)."""
     body = {"amount": "10.00", "items": [{"sku": f"sku-{i}", "qty": i} for i in range(50)]}
 
-    samples: list[float] = []
-    for _ in range(30):
-        started = time.perf_counter()
-        compute_body_digest(body)
-        samples.append(time.perf_counter() - started)
-
-    assert _p99(samples) < _DIGEST_P99_BUDGET_SECONDS
+    samples = perf_budget.samples(
+        lambda: compute_body_digest(body),
+        n=30,
+        batch=1,
+    )
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_ms[int(len(cpu_ms) * 0.99)]
+    assert p99_ms < _DIGEST_P99_BUDGET_SECONDS * 1000
 
 
 @pytest.mark.perf
 def test_gate_red_reproduction_digest_p99_budget_guard_catches_regression(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget,
 ) -> None:
     """위 단언이 상시-녹색 tautology가 아님을 증명 — `compute_body_digest`가
     호출하는 `canonical_json`(idempotency.py 59-61행)에 예산의 배수만큼
     지연을 주입하면(직렬화 로직 회귀를 흉내) 같은 p99 단언이 실제로
-    적색(AssertionError)이 되어야 한다."""
+    적색(AssertionError)이 되어야 한다 — raw perf_counter →
+    perf_budget.samples() 전환 (task-11031)."""
     original_canonical_json = idempotency_contract.canonical_json
 
     def slow_canonical_json(value: object) -> str:
@@ -279,11 +283,13 @@ def test_gate_red_reproduction_digest_p99_budget_guard_catches_regression(
     monkeypatch.setattr(idempotency_contract, "canonical_json", slow_canonical_json)
 
     body = {"amount": "10.00"}
-    samples: list[float] = []
-    for _ in range(5):
-        started = time.perf_counter()
-        idempotency_contract.compute_body_digest(body)
-        samples.append(time.perf_counter() - started)
-
+    samples = perf_budget.samples(
+        lambda: idempotency_contract.compute_body_digest(body),
+        n=5,
+        batch=1,
+    )
+    # regression injection uses time.sleep() → wall-clock budget check
+    wall_ms = sorted(s.wall_ms for s in samples)
+    p99_ms = wall_ms[int(len(wall_ms) * 0.99)]
     with pytest.raises(AssertionError):
-        assert _p99(samples) < _DIGEST_P99_BUDGET_SECONDS
+        assert p99_ms < _DIGEST_P99_BUDGET_SECONDS * 1000
