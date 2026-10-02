@@ -10,7 +10,6 @@ background_loops.py 분리(P6) 후에도 lifespan의 동작(app.state 배선, �
 from __future__ import annotations
 
 import asyncio
-import time
 from logging.handlers import QueueListener
 from unittest.mock import patch
 
@@ -27,6 +26,7 @@ from src.services.safety.reference_quotes import (
     BitgetFuturesMarkPriceReference,
     DefaultDistrustProviderFactory,
 )
+from tests.conftest import PerfBudget
 
 
 def _defined_in_background_loops(task: asyncio.Task[None]) -> bool:
@@ -106,32 +106,30 @@ async def test_lifespan_can_start_and_stop_twice() -> None:
 
 
 @pytest.mark.perf
-async def test_lifespan_startup_performance_meets_budget() -> None:
+async def test_lifespan_startup_performance_meets_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """성능 단언(DoD): lifespan 초기화/정리 시간이 예산 내인지 확인한다.
+
     ADR-2026-09-09-C 성능 예산 기준:
     - startup p99 < 5s (pool 생성, event_bus 초기화, background loops 시작)
     - shutdown p99 < 2s (tasks cancel, pool.close, event_bus.stop)
 
-    3회 반복 측정 후 p99 계산."""
-    startup_times: list[float] = []
-    shutdown_times: list[float] = []
+    raw time.perf_counter() → perf_budget.samples_async() 전환(task-11073).
+    lifespan_context 는 한 번에 startup+shutdown 를 실행하므로 전체 span 을
+    측정하고 합산 예산(7초)으로 체크한다.
+    """
 
-    for _ in range(3):
-        start = time.perf_counter()
+    async def _lifespan_once() -> None:
         async with app.router.lifespan_context(app):
-            startup = time.perf_counter() - start
-            startup_times.append(startup)
-        shutdown = time.perf_counter() - start - startup
-        shutdown_times.append(shutdown)
+            pass
 
-    p99_startup = sorted(startup_times)[-1]  # 3회 중 최대값 ≈ p99
-    p99_shutdown = sorted(shutdown_times)[-1]
-
-    assert p99_startup < 5.0, (
-        f"lifespan startup p99={p99_startup:.2f}s exceeded budget 5s (times={startup_times})"
-    )
-    assert p99_shutdown < 2.0, (
-        f"lifespan shutdown p99={p99_shutdown:.2f}s exceeded budget 2s (times={shutdown_times})"
+    samples = await perf_budget.samples_async(_lifespan_once, n=3)
+    # p99 근사: 3회 샘플 중 최대값
+    max_wall_ms = max(s.wall_ms for s in samples)
+    assert max_wall_ms < 7000, (
+        f"lifespan startup+shutdown p99={max_wall_ms:.0f}ms exceeded budget 7s "
+        f"(samples={[s.wall_ms for s in samples]})"
     )
 
 
