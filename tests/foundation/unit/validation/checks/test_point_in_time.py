@@ -10,7 +10,6 @@ failure-injection 1, numeric performance assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -27,6 +26,7 @@ from src.foundation.validation.checks.point_in_time import run
 from src.foundation.validation.domain.artifact import build_artifact
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -185,7 +185,7 @@ def test_broken_bar_source_propagates_instead_of_reporting_false_result() -> Non
 
 
 @pytest.mark.perf
-def test_p95_latency_within_5k_bar_budget() -> None:
+def test_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C axis performance budget: 5k-bar point-in-time scan
     stays well within a 200ms floor (mirrors L26 `ListBars.upto`'s own
     5k-bar/200ms budget, since this check does one linear pass over the
@@ -194,14 +194,10 @@ def test_p95_latency_within_5k_bar_budget() -> None:
         5_000,
     )
     ctx = _ctx(bars)
-    samples: list[float] = []
-    for _ in range(5):
-        start = time.perf_counter()
-        run(ctx)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95_seconds = samples[-1]
-    assert p95_seconds < 0.2, f"p95={p95_seconds * 1000:.2f}ms exceeds 200ms budget"
+    samples = perf_budget.samples(lambda: run(ctx), n=5)
+    wall_ms = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms[-1]
+    assert p95_ms < 200, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
 
 
 # -- D2 gate-red reproduction ---------------------------------------------------
