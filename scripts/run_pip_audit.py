@@ -55,6 +55,54 @@ class AuditFailure(ValueError):
 NETWORK_ERROR_MARKERS = ("ENOTFOUND", "NameResolutionError", "ConnectionError", "Max retries")
 NETWORK_ERROR_RC = 3
 
+# Lock-file minimum versions for build tools. pip-audit itself spawns a pip subprocess; if the
+# venv's pip/setuptools are older than what requirements-lock.txt pins, the audit database
+# (OSV/purl lookups) and vulnerability metadata can contain stale entries that trigger false
+# positives. We enforce the lock-file versions here rather than adding ignores.
+# See: CVE-2026-101918 (pyjwt 2.14.0 → 2.15.1) was a symptom of the same root cause — the
+# environment's build-tool versions were behind the lock file.
+BUILDTOOL_MIN = {
+    "pip": "26.2.1",
+    "setuptools": "84.0.0",
+}
+
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    """'26.2.1' → (26, 2, 1)."""
+    parts: list[int] = []
+    for seg in v.split("."):
+        try:
+            parts.append(int(seg))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def _check_buildtools() -> None:
+    """Ensure pip and setuptools are at least the locked versions.
+
+    Raises SystemExit(1) if any tool is outdated.
+    """
+    import importlib.metadata
+
+    for name, min_ver in BUILDTOOL_MIN.items():
+        try:
+            installed = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError as exc:
+            msg = (
+                f"[pip-audit] {name} not found — upgrade with: "
+                f"pip install --upgrade {name}>={min_ver}"
+            )
+            print(msg, file=sys.stderr)
+            raise SystemExit(1) from exc
+        if _parse_version(installed) < _parse_version(min_ver):
+            print(
+                f"[pip-audit] {name} {installed} is below lock-file minimum {min_ver}. "
+                f"Upgrade with: pip install --upgrade {name}>={min_ver}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
+
 
 def is_network_error(text: str | None) -> bool:
     """`text`가 None이어도(예: subprocess 캡처 실패) TypeError 없이 False를 낸다."""
@@ -145,6 +193,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ignore-file", type=Path, default=DEFAULT_IGNORE_FILE)
     parser.add_argument("--python", default=sys.executable)
     args = parser.parse_args(argv)
+
+    # Pre-flight: ensure build tools (pip/setuptools) are at lock-file minimums.
+    # Outdated build tools cause stale vulnerability metadata → false-positive CVE hits.
+    _check_buildtools()
 
     try:
         ignored_ids = load_ignored_vuln_ids(args.ignore_file, today=dt.date.today())
