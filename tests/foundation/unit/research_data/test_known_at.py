@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
-from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -20,6 +19,7 @@ from src.foundation.research_data.domain.known_at import (
     PointInTimeViolationError,
     assert_point_in_time,
 )
+from tests.conftest import PerfBudget
 
 
 def _item(*, known_at: datetime) -> ResearchItem:
@@ -117,7 +117,9 @@ def test_naive_as_of_rejected_by_fa9_kernel() -> None:
 
 
 @pytest.mark.perf
-def test_assert_point_in_time_hot_path_performance() -> None:
+def test_assert_point_in_time_hot_path_performance(
+    perf_budget: PerfBudget,
+) -> None:
     # assert_point_in_time은 모든 read path가 아이템을 반환하기 전에 호출하는
     # 순수 함수(BitemporalRecord 구성 + FA-9 as_of 위임)다. 10,000회 호출이
     # 1s 내로 끝나야 한다 -- I/O 없는 순수 계약의 실측 증명.
@@ -125,9 +127,8 @@ def test_assert_point_in_time_hot_path_performance() -> None:
     item = _item(known_at=as_of_time - timedelta(days=1))
     iterations = 10_000
 
-    started = perf_counter()
-    for _ in range(iterations):
-        assert_point_in_time(item, as_of_time)
-    elapsed = perf_counter() - started
-
-    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
+    perf_budget.assert_within(
+        lambda: [assert_point_in_time(item, as_of_time) for _ in range(iterations)],
+        budget_ms=1000.0,
+        n=1,
+    )
