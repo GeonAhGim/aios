@@ -9,9 +9,9 @@ numeric performance assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -199,20 +199,15 @@ def test_unexpected_replay_exception_is_not_swallowed(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.perf
-def test_p95_latency_within_local_replay_budget() -> None:
+def test_p95_latency_within_local_replay_budget(perf_budget: Any) -> None:
     """ADR-2026-09-09-C axis performance budget: this check's own overhead
     (cost gate + benchmark calc) on top of `run_backtest` for a 60-bar
     replay stays within a generous 1.5s floor (mirrors
     test_run_backtest.py's 2,000-bar/1.0s budget, scaled down for this
     check's much smaller fixture)."""
-    ctx = _ctx(bars=_bars(60), warmup_bars=5)
-    samples: list[float] = []
-    for _ in range(3):
-        start = time.perf_counter()
-        run(ctx)
-        samples.append(time.perf_counter() - start)
-    p95_seconds = max(samples)
-    assert p95_seconds < 1.5, f"p95={p95_seconds * 1000:.2f}ms exceeds 1500ms budget"
+    samples = perf_budget.samples(lambda: run(_ctx(bars=_bars(60), warmup_bars=5)), n=3)
+    p95_ms = max(s.wall_ms for s in samples)
+    assert p95_ms < 1500, f"p95={p95_ms:.2f}ms exceeds 1500ms budget"
 
 
 # -- D2 gate-red reproduction ---------------------------------------------------
