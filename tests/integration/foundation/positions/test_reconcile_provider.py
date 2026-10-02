@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -260,12 +259,15 @@ async def test_unknown_connection_id_raises_unknown_connection_error(pool):
 
 
 @pytest.mark.perf
-async def test_reconcile_account_completes_within_cycle_safety_margin(pool):
+async def test_reconcile_account_completes_within_cycle_safety_margin(pool, perf_budget):
     """수치 성능 단언 — spec §7 B "브레이크 표면화: 감지 -> 알림 < 2분(대사
     주기 60s + 처리)"의 60s 주기 예산 대비 넉넉한 안전마진(30s)으로 단일
     계좌 `reconcile_account()` 지연을 잰다. 공유 TEST_DATABASE_URL은 다른
     리프가 남긴 행으로 계속 자라 타이트한 절대 임계는 못 쓴다
-    (task-920/1029, bf513da8와 동일 교훈이라 넉넉하게 잡는다)."""
+    (task-920/1029, bf513da8와 동일 교훈이라 넉넉하게 잡는다).
+
+    raw time.monotonic() → perf_budget.sample_async() 전환(task-11065).
+    """
     registry = MetricsRegistry()
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id, venue="bitget")
@@ -276,21 +278,21 @@ async def test_reconcile_account_completes_within_cycle_safety_margin(pool):
     connection_id = uuid4()
     provider = ExchangeBalanceSource({connection_id: FakeAdapter([_balance(asset, Decimal("3"))])})
 
-    started = time.monotonic()
-    result = await reconcile_account(
-        tenant_id,
-        account_id,
-        connection_id=connection_id,
-        snapshots=PostgresSnapshotRepository(pool),
-        provider=provider,
-        recon=_recon(pool),
-        pool=pool,
-        registry=registry,
+    sample = await perf_budget.sample_async(
+        lambda: reconcile_account(
+            tenant_id,
+            account_id,
+            connection_id=connection_id,
+            snapshots=PostgresSnapshotRepository(pool),
+            provider=provider,
+            recon=_recon(pool),
+            pool=pool,
+            registry=registry,
+        )
     )
-    elapsed_s = time.monotonic() - started
 
-    assert result.aggregate_classification == Classification.HEALTHY
-    assert elapsed_s < 30.0
+    assert sample.result.aggregate_classification == Classification.HEALTHY
+    assert sample.wall_ms < 30_000.0
 
 
 async def test_unrelated_connection_health_does_not_override_this_accounts_classification(pool):
