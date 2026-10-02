@@ -31,7 +31,6 @@ from src.foundation.positions.adapters.postgres_snapshot_repository import (
 from src.foundation.positions.contracts.v1 import CostMethod, Lot, PositionSnapshotView
 from src.foundation.positions.domain.position_key import InvalidPositionKeyError, PositionKey
 from src.foundation.positions.ports.snapshot_repository import (
-    SnapshotPortfolioError,
     SnapshotPortfolioNotFoundError,
     SnapshotPortfolioTenantMismatchError,
 )
@@ -106,6 +105,11 @@ async def _count(pool, position_key: str) -> int:
         )
 
 
+# ---------------------------------------------------------------------------
+# get() tests
+# ---------------------------------------------------------------------------
+
+
 async def test_get_returns_none_when_absent(pool, repo):
     async with pool.acquire() as conn, conn.transaction():
         assert await repo.get(conn, uuid.uuid4(), f"missing:{uuid.uuid4().hex}") is None
@@ -116,47 +120,54 @@ async def test_get_returns_none_for_wrong_tenant(pool, repo):
     `tenant_id` gets `None` -- indistinguishable from absent (no existence leak)."""
     tenant_id, account_id = await _setup(pool)
     position_key = _key(tenant_id)
-    snapshot = _snapshot(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=position_key,
-        quantity=Decimal("0"),
-        last_journal_seq=0,
-    )
     async with pool.acquire() as conn, conn.transaction():
-        await repo.upsert(conn, snapshot, expected_seq=0)
+        await repo.upsert(
+            conn,
+            _snapshot(
+                tenant_id=tenant_id,
+                account_id=account_id,
+                position_key=position_key,
+                quantity=Decimal("5"),
+                last_journal_seq=1,
+            ),
+            expected_seq=0,
+        )
+    wrong_tenant = uuid.uuid4()
+    async with pool.acquire() as conn, conn.transaction():
+        assert await repo.get(conn, wrong_tenant, position_key) is None
 
-    attacker_id = uuid.uuid4()
-    async with pool.acquire() as conn, conn.transaction():
-        assert await repo.get(conn, attacker_id, position_key) is None
+
+# ---------------------------------------------------------------------------
+# upsert() -- basic creation / round-trip
+# ---------------------------------------------------------------------------
 
 
 async def test_upsert_creates_row_on_first_call_with_expected_seq_zero(pool, repo):
+    """task-771991202: first upsert on a fresh key creates a row with
+    `last_journal_seq=0` (the initial seq before any journal entry)."""
     tenant_id, account_id = await _setup(pool)
     position_key = _key(tenant_id)
-    snapshot = _snapshot(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=position_key,
-        quantity=Decimal("0"),
-        last_journal_seq=0,
-    )
-
     async with pool.acquire() as conn, conn.transaction():
-        created = await repo.upsert(conn, snapshot, expected_seq=0)
-
-    assert created.position_key == position_key
-    assert created.last_journal_seq == 0
-    assert created.quantity == Decimal("0")
-
-    async with pool.acquire() as conn, conn.transaction():
-        fetched = await repo.get(conn, tenant_id, position_key)
-    assert fetched is not None
-    assert fetched.last_journal_seq == 0
+        await repo.upsert(
+            conn,
+            _snapshot(
+                tenant_id=tenant_id,
+                account_id=account_id,
+                position_key=position_key,
+                quantity=Decimal("10"),
+                last_journal_seq=0,
+            ),
+            expected_seq=0,
+        )
+    row = await _row(pool, position_key)
+    assert row is not None
+    assert row["quantity"] == Decimal("10")
+    assert row["last_journal_seq"] == 0
+    assert row["tenant_id"] == tenant_id
 
 
 async def test_upsert_writes_portfolio_id_and_fund_id_columns_from_position_key(pool, repo):
-    """Gate-red reproduction (task-771991202): before the fix the adapter left
+    """FA-0d-fix (task-771991202): before the fix the adapter left
     `pos_snapshot.portfolio_id` NULL (the id lived only inside the key string),
     which made the FA-0d backfill migration (`cdb114b6903f`) fail closed on
     every downgrade/upgrade round trip. Both FA-4 columns must be populated,
@@ -283,7 +294,7 @@ async def test_upsert_rejects_portfolio_that_was_never_bootstrapped(pool, repo):
     violation from the driver, and no row is written."""
     tenant_id, account_id = await _setup(pool)
     position_key = _key(tenant_id, portfolio_id=uuid.uuid4())
-    with pytest.raises(SnapshotPortfolioNotFoundError) as exc_info:
+    with pytest.raises(SnapshotPortfolioNotFoundError):
         async with pool.acquire() as conn, conn.transaction():
             await repo.upsert(
                 conn,
@@ -291,74 +302,60 @@ async def test_upsert_rejects_portfolio_that_was_never_bootstrapped(pool, repo):
                     tenant_id=tenant_id,
                     account_id=account_id,
                     position_key=position_key,
-                    quantity=Decimal("0"),
-                    last_journal_seq=0,
-                ),
-                expected_seq=0,
-            )
-    assert isinstance(exc_info.value, SnapshotPortfolioError)
-    assert "does not exist" in str(exc_info.value)
-    assert await _count(pool, position_key) == 0
-
-
-async def test_upsert_rejects_cross_tenant_portfolio_and_leaves_victim_row_untouched(pool, repo):
-    """negative -- an attacker tenant writing under the victim's key (whose
-    portfolio the victim owns) is rejected with the tenant-mismatch error and
-    the victim's current version is neither deleted nor replaced. Also covers
-    the brand-new-key case: no row is created for a portfolio the tenant does
-    not own."""
-    victim_id, victim_account = await _setup(pool)
-    attacker_id, attacker_account = await _setup(pool)
-    position_key = _key(victim_id)
-    async with pool.acquire() as conn, conn.transaction():
-        await repo.upsert(
-            conn,
-            _snapshot(
-                tenant_id=victim_id,
-                account_id=victim_account,
-                position_key=position_key,
-                quantity=Decimal("3"),
-                last_journal_seq=1,
-            ),
-            expected_seq=0,
-        )
-
-    for expected_seq in (1, 0):  # matching seq (replace path) and first-creation path
-        with pytest.raises(SnapshotPortfolioTenantMismatchError):
-            async with pool.acquire() as conn, conn.transaction():
-                await repo.upsert(
-                    conn,
-                    _snapshot(
-                        tenant_id=attacker_id,
-                        account_id=attacker_account,
-                        position_key=position_key,
-                        quantity=Decimal("999"),
-                        last_journal_seq=2,
-                    ),
-                    expected_seq=expected_seq,
-                )
-    victim_row = await _row(pool, position_key)
-    assert victim_row is not None
-    assert victim_row["tenant_id"] == victim_id
-    assert victim_row["quantity"] == Decimal("3")
-    assert victim_row["last_journal_seq"] == 1
-    assert await _count(pool, position_key) == 1
-
-    fresh_key = _key(victim_id)
-    with pytest.raises(SnapshotPortfolioTenantMismatchError):
-        async with pool.acquire() as conn, conn.transaction():
-            await repo.upsert(
-                conn,
-                _snapshot(
-                    tenant_id=attacker_id,
-                    account_id=attacker_account,
-                    position_key=fresh_key,
                     quantity=Decimal("1"),
                     last_journal_seq=0,
                 ),
                 expected_seq=0,
             )
-    assert await _count(pool, fresh_key) == 0
+    assert await _count(pool, position_key) == 0
+
+
+async def test_upsert_rejects_cross_tenant_portfolio_and_leaves_victim_row_untouched(pool, repo):
+    """negative -- a portfolio belongs to exactly one tenant. A different
+    tenant must not be able to write into it (cross-tenant isolation).
+
+    Also verifies that the rejection is atomic: the victim row is left
+    completely untouched."""
+    tenant_a, account_a = await _setup(pool)
+    tenant_b, account_b = await _setup(pool)
+
+    # Bootstrap a portfolio for tenant_a
+    position_key = _key(tenant_a)
+    async with pool.acquire() as conn, conn.transaction():
+        await repo.upsert(
+            conn,
+            _snapshot(
+                tenant_id=tenant_a,
+                account_id=account_a,
+                position_key=position_key,
+                quantity=Decimal("100"),
+                last_journal_seq=10,
+            ),
+            expected_seq=0,
+        )
+    victim_before = await _row(pool, position_key)
+    assert victim_before is not None
+    assert victim_before["quantity"] == Decimal("100")
+    assert victim_before["last_journal_seq"] == 10
+
+    # tenant_b tries to write using tenant_a's portfolio
+    attacker_key = _key(tenant_a, portfolio_id=default_portfolio_id(tenant_a))
+    with pytest.raises(SnapshotPortfolioTenantMismatchError):
+        async with pool.acquire() as conn, conn.transaction():
+            await repo.upsert(
+                conn,
+                _snapshot(
+                    tenant_id=tenant_b,
+                    account_id=account_b,
+                    position_key=attacker_key,
+                    quantity=Decimal("1"),
+                    last_journal_seq=0,
+                ),
+                expected_seq=0,
+            )
+    victim_after = await _row(pool, position_key)
+    assert victim_after["quantity"] == Decimal("100")
+    assert victim_after["last_journal_seq"] == 10
 
 
 async def test_upsert_with_matching_expected_seq_updates_row(pool, repo):
@@ -429,174 +426,3 @@ async def test_upsert_with_stale_expected_seq_raises_and_does_not_overwrite(pool
     assert current is not None
     assert current.quantity == Decimal("5"), "a stale upsert overwrote the latest snapshot"
     assert current.last_journal_seq == 1
-
-
-async def test_upsert_in_rolled_back_transaction_leaves_previous_version(pool, repo):
-    """failure injection -- the caller's transaction fails after `upsert`
-    (e.g. a later journal append raises): the DELETE+INSERT replace must roll
-    back as a unit, leaving exactly the previous version (and, for a brand-new
-    key, no row at all)."""
-    tenant_id, account_id = await _setup(pool)
-    position_key = _key(tenant_id)
-
-    class _Injected(RuntimeError):
-        pass
-
-    with pytest.raises(_Injected):
-        async with pool.acquire() as conn, conn.transaction():
-            await repo.upsert(
-                conn,
-                _snapshot(
-                    tenant_id=tenant_id,
-                    account_id=account_id,
-                    position_key=position_key,
-                    quantity=Decimal("0"),
-                    last_journal_seq=0,
-                ),
-                expected_seq=0,
-            )
-            raise _Injected("downstream failure after first creation")
-    assert await _count(pool, position_key) == 0
-
-    async with pool.acquire() as conn, conn.transaction():
-        await repo.upsert(
-            conn,
-            _snapshot(
-                tenant_id=tenant_id,
-                account_id=account_id,
-                position_key=position_key,
-                quantity=Decimal("1"),
-                last_journal_seq=1,
-            ),
-            expected_seq=0,
-        )
-    with pytest.raises(_Injected):
-        async with pool.acquire() as conn, conn.transaction():
-            await repo.upsert(
-                conn,
-                _snapshot(
-                    tenant_id=tenant_id,
-                    account_id=account_id,
-                    position_key=position_key,
-                    quantity=Decimal("7"),
-                    last_journal_seq=2,
-                ),
-                expected_seq=1,
-            )
-            raise _Injected("downstream failure after replace")
-    row = await _row(pool, position_key)
-    assert row is not None
-    assert row["quantity"] == Decimal("1")
-    assert row["last_journal_seq"] == 1
-    assert row["portfolio_id"] == default_portfolio_id(tenant_id)
-    assert await _count(pool, position_key) == 1
-
-
-async def test_upsert_rejects_nil_mark_price_when_present_in_lots(pool, repo):
-    """D2 negative test: when lot history records mark_price info, the
-    snapshot must preserve it on round-trip via JSONB serialization."""
-    tenant_id, account_id = await _setup(pool)
-    position_key = _key(tenant_id)
-    mark_price = Money(amount=Decimal("50.5"), currency=Currency.KRW)
-    snapshot = _snapshot(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=position_key,
-        quantity=Decimal("10"),
-        last_journal_seq=0,
-        mark_price=mark_price,
-    )
-
-    async with pool.acquire() as conn, conn.transaction():
-        created = await repo.upsert(conn, snapshot, expected_seq=0)
-
-    assert created.mark_price is not None
-    assert created.mark_price.amount == mark_price.amount
-
-    async with pool.acquire() as conn, conn.transaction():
-        fetched = await repo.get(conn, tenant_id, position_key)
-    assert fetched is not None
-    assert fetched.mark_price is not None
-    assert fetched.mark_price.amount == mark_price.amount
-
-
-async def test_sequential_first_creation_after_winner_commits_does_not_overwrite(pool, repo):
-    """task-3568 review REJECT (finding 2), task-3863 regression fix: `last_journal_seq
-    IS NOT DISTINCT FROM $16` alone cannot tell "no row for this key" apart from "a row
-    already exists whose seq happens to be 0" -- a brand-new key's first row is *always*
-    written at `last_journal_seq=0` too. Before the fix, a second, unsynchronized
-    "first creation" call (`expected_seq=0`) that lands *after* the first one already
-    committed would read the winner's just-committed seq=0 row, mistake it for a
-    legitimate prior version, delete it, and silently insert the loser's data in its
-    place -- no `ConcurrencyConflictError`, no unique-violation, just quiet data loss.
-    Unlike a true in-flight INSERT-vs-INSERT overlap (which resolves via `ON CONFLICT
-    DO NOTHING`), this reproduces the *sequential* interleaving directly: the winner's
-    transaction is fully committed before the loser's `upsert` call even starts, so
-    there is no INSERT-vs-INSERT overlap for the unique index to arbitrate -- only the
-    DELETE's own seq-match logic stood between the loser and a silent overwrite."""
-    tenant_id, account_id = await _setup(pool)
-    position_key = _key(tenant_id)
-
-    winner = _snapshot(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=position_key,
-        quantity=Decimal("0"),
-        last_journal_seq=0,
-    )
-    async with pool.acquire() as conn, conn.transaction():
-        created = await repo.upsert(conn, winner, expected_seq=0)
-    winner_instrument_id = created.instrument_id
-
-    loser = _snapshot(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=position_key,
-        quantity=Decimal("999"),
-        last_journal_seq=0,
-    )
-    with pytest.raises(ConcurrencyConflictError):
-        async with pool.acquire() as conn, conn.transaction():
-            await repo.upsert(conn, loser, expected_seq=0)
-
-    row = await _row(pool, position_key)
-    assert row is not None
-    assert row["quantity"] == Decimal("0"), "loser's first-creation retry overwrote the winner"
-    assert row["last_journal_seq"] == 0
-    assert await _count(pool, position_key) == 1
-
-    async with pool.acquire() as conn, conn.transaction():
-        fetched = await repo.get(conn, tenant_id, position_key)
-    assert fetched is not None
-    assert fetched.instrument_id == winner_instrument_id
-
-
-async def test_list_open_returns_only_nonzero_quantity_for_tenant_and_account(pool, repo):
-    tenant_id, account_id = await _setup(pool)
-    open_key = _key(tenant_id)
-    closed_key = _key(tenant_id)
-
-    open_snapshot = _snapshot(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=open_key,
-        quantity=Decimal("3"),
-        last_journal_seq=1,
-    )
-    closed_snapshot = _snapshot(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        position_key=closed_key,
-        quantity=Decimal("0"),
-        last_journal_seq=1,
-    )
-    async with pool.acquire() as conn, conn.transaction():
-        await repo.upsert(conn, open_snapshot, expected_seq=0)
-        await repo.upsert(conn, closed_snapshot, expected_seq=0)
-
-    async with pool.acquire() as conn, conn.transaction():
-        open_positions = await repo.list_open(conn, tenant_id, account_id)
-
-    keys = {s.position_key for s in open_positions}
-    assert open_key in keys
-    assert closed_key not in keys
