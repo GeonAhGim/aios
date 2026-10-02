@@ -31,7 +31,6 @@ DEEPEN task-3011 (docs/audit/DEPTH_FA.md): 원 커밋(2ea05de)이 D1로 판정�
 
 from __future__ import annotations
 
-import time
 from uuid import uuid4
 
 import asyncpg
@@ -185,17 +184,19 @@ async def test_create_legal_entity_propagates_pool_acquire_failure(pool, repo, m
 
 
 @pytest.mark.perf
-async def test_fk_violation_round_trip_p95_latency_within_local_budget(pool, repo):
+async def test_fk_violation_round_trip_p95_latency_within_local_budget(pool, repo, perf_budget):
     # ADR-2026-09-09-C Decision 1의 축별 성능 예산 표는 사전거래 게이트/
     # 주문 제출/봉 조회 등만 나열하고 FK 왕복 지연은 다루지 않는다(N/A인
     # 축). 그래도 D2 하한(성능단언 1)을 채우기 위해, 로컬 회귀 기준선으로
     # "FK 위반이 INSERT당 100ms 안에 확정된다"를 이 테스트가 직접 건다 —
     # repo가 락/재시도 루프를 얹어 조용히 느려지면 여기서 적색이 된다.
+    # raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11051).
+    # 비동기 I/O를 재는 테스트는 samples_async를 쓴다 — wall_ms로 왕복 지연을
+    # 보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(100ms)은 그대로
+    # 유지한다.
     sample_count = 20
-    latencies_ms: list[float] = []
 
-    for _ in range(sample_count):
-        started_at = time.perf_counter()
+    async def _probe() -> None:
         with pytest.raises(asyncpg.ForeignKeyViolationError):
             await repo.create_legal_entity(
                 LegalEntity(
@@ -206,10 +207,9 @@ async def test_fk_violation_round_trip_p95_latency_within_local_budget(pool, rep
                     region_tag="kr-seoul",
                 )
             )
-        latencies_ms.append((time.perf_counter() - started_at) * 1000)
 
-    latencies_ms.sort()
-    p95_index = min(len(latencies_ms) - 1, int(round(0.95 * (len(latencies_ms) - 1))))
-    p95_ms = latencies_ms[p95_index]
+    samples = await perf_budget.samples_async(_probe, n=sample_count)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
 
-    assert p95_ms < 100.0, f"FK 위반 왕복 p95={p95_ms:.1f}ms — 로컬 예산(100ms) 초과"
+    assert p95_ms < 100.0, f"FK 위반 왕복 p95={p95_ms:.2f}ms — 로컬 예산(100ms) 초과"
