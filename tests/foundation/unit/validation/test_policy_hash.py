@@ -4,7 +4,6 @@ Decision 1): negative >=3, failure injection 1, perf assertion 1, gate-red
 repro 1.
 """
 
-import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -155,13 +154,14 @@ def test_check_result_rejects_raw_rules_warning_text_as_hard_fail_code():
 
 
 @pytest.mark.perf
-def test_policy_hash_throughput_within_dsl_compile_budget():
+def test_policy_hash_throughput_within_dsl_compile_budget(perf_budget):
     policy = ValidationPolicy()
-    start = time.perf_counter()
-    for _ in range(1000):
-        policy.policy_hash()
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.3, f"1000x policy_hash() took {elapsed * 1000:.2f}ms, budget 300ms"
+    perf_budget.assert_within(
+        lambda: policy.policy_hash(),
+        budget_ms=300,
+        batch=1000,
+        label="1000x policy_hash()",
+    )
 
 
 # --------------------------------------------------------------------------
