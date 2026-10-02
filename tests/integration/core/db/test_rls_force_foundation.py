@@ -7,8 +7,6 @@ and always rolled back. These tests do not claim cross-tenant row filtering proo
 
 from __future__ import annotations
 
-import time
-
 import asyncpg
 import pytest
 
@@ -87,13 +85,20 @@ async def test_failure_injection_unforce_trips_red_gate_and_rolls_back(pool, tab
 
 
 @pytest.mark.perf
-async def test_catalog_security_check_p95_under_borrowed_ack_budget(pool):
-    """Borrow ADR-2026-09-09-C's paper ACK p95 50ms budget for catalog reads."""
-    durations = []
+async def test_catalog_security_check_p95_under_borrowed_ack_budget(pool, perf_budget) -> None:
+    """Catalog read p95 ≤ 50ms (ADR-2026-09-09-C paper ACK budget).
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11040).
+
+    비동기 I/O를 재는 테스트는 samples_async를 쓴다 — wall_ms로 왕복 지연을
+    보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(50ms)은 그대로 유지한다.
+    """
     async with pool.acquire() as conn:
         await _assert_foundation_security(conn)
-        for _ in range(30):
-            start = time.perf_counter()
-            await _assert_foundation_security(conn)
-            durations.append((time.perf_counter() - start) * 1000)
-    assert sorted(durations)[28] < 50.0, durations
+        # 30회 측정 → p95 계산 (samples_async: 비동기 I/O 전용)
+        samples = await perf_budget.samples_async(
+            lambda c=conn: _assert_foundation_security(c), n=30
+        )
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    assert p95_ms < 50.0, f"catalog read p95={p95_ms:.2f}ms >= 50ms budget"
