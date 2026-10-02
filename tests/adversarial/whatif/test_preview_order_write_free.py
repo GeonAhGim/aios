@@ -443,35 +443,19 @@ def test_gate_turns_red_when_a_write_call_is_injected_into_the_real_file(
 # ---------------------------------------------------------------------------
 
 
-def test_performance_ast_scan_under_10ms() -> None:
-    """AST 스캔 성능: 10ms 이내 완료 (성능 예산)."""
-    import time
-
-    source = TARGET.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-
-    # Warm-up
-    find_direct_violations(tree)
-
-    start = time.perf_counter_ns()
-    for _ in range(100):
-        find_direct_violations(tree)
-    elapsed_ms = (time.perf_counter_ns() - start) / 1e6 / 100
-
-    assert elapsed_ms < 10, f"AST 스캔 성능 예산 초과: {elapsed_ms:.2f}ms (예산 10ms)"
+def test_performance_ast_scan_under_10ms(perf_budget) -> None:
+    """AST scan CPU budget excludes unrelated xdist scheduling delays."""
+    tree = ast.parse(TARGET.read_text(encoding="utf-8"))
+    perf_budget.assert_within(
+        lambda: find_direct_violations(tree), budget_ms=10, batch=100
+    )
 
 
-def test_performance_import_scan_under_200ms() -> None:
-    """import graph 스캔 성능: 200ms 이내 완료 (성능 예산).
+def test_performance_import_scan_under_200ms(perf_budget) -> None:
+    """Measure the complete import graph with the unchanged 200ms CPU budget."""
+    def scan():
+        violations, reached = scan_import_graph(TARGET, ROOT, BANNED_MODULES)
+        assert not violations
+        assert TARGET in reached and len(reached) > 1
 
-    Note: 예산을 50ms에서 200ms로 상향 조정. Windows 환경에서 파일 시스템 I/O
-    변동성과 냉각 import 캐시 효과로 인해 50ms는 현실적이지 않음.
-    """
-    import time
-
-    start = time.perf_counter_ns()
-    for _ in range(100):
-        scan_import_graph(TARGET, TARGET.parent, BANNED_MODULES)
-    elapsed_ms = (time.perf_counter_ns() - start) / 1e6 / 100
-
-    assert elapsed_ms < 200, f"import graph 스캔 성능 예산 초과: {elapsed_ms:.2f}ms (예산 200ms)"
+    perf_budget.assert_within(scan, budget_ms=200)
