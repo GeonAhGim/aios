@@ -26,6 +26,7 @@ from src.foundation.positions.application.record_funding_fee import (
 )
 from src.foundation.positions.contracts.v1 import RecordFundingCommand
 from src.foundation.positions.domain.position_key import PositionKey
+from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
@@ -218,7 +219,9 @@ async def test_audit_failure_rolls_back_journal_and_snapshot(pool, ports):
 
 
 @pytest.mark.perf
-async def test_funding_settlement_round_trip_and_latency_guard(pool, ports):
+async def test_funding_settlement_round_trip_and_latency_guard(
+    pool, ports, perf_budget: PerfBudget
+) -> None:
     """수치 성능 단언(DEEPEN task-2958) — DEPTH 감사(task-2723,
     docs/audit/DEPTH_LA_LB_LC.md #452)가 원 리프(2c9bf78)에 이 축 증빙이
     전무하다고 판정했다. task-2959/2962/2970/2974/2977과 같은 결정을
@@ -227,8 +230,10 @@ async def test_funding_settlement_round_trip_and_latency_guard(pool, ports):
     수 상한(lock + get + journal.append(3왕복) + upsert + audit(2왕복) 구성,
     실측 9회, 여유 3 -> 12)을 걸고, 지연은 "무한정 걸리지 않는다"는 느슨한
     sanity 상한만 건다.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환 (task-11066).
+    비동기 I/O는 wall_ms로 왕복 지연을 재고 budget 비교에 사용한다.
     """
-    import time
 
     tenant_id, account_id, position_key = await _open(pool)
     command = _command(
@@ -243,25 +248,26 @@ async def test_funding_settlement_round_trip_and_latency_guard(pool, ports):
     def _log(record: object) -> None:
         queries.append(getattr(record, "query", ""))
 
-    started = time.perf_counter()
-    async with pool.acquire() as conn, conn.transaction():
-        conn.add_query_logger(_log)
-        try:
-            await record_funding_fee(
-                conn,
-                command,
-                asset_class=AssetClass.CRYPTO,
-                journal=ports.journal,
-                snapshots=ports.snapshots,
-                audit=ports.audit,
-                clock=_clock,
-            )
-        finally:
-            conn.remove_query_logger(_log)
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    async def _run_funding_fee() -> None:
+        async with pool.acquire() as conn, conn.transaction():
+            conn.add_query_logger(_log)
+            try:
+                await record_funding_fee(
+                    conn,
+                    command,
+                    asset_class=AssetClass.CRYPTO,
+                    journal=ports.journal,
+                    snapshots=ports.snapshots,
+                    audit=ports.audit,
+                    clock=_clock,
+                )
+            finally:
+                conn.remove_query_logger(_log)
+
+    sample = await perf_budget.sample_async(_run_funding_fee)
 
     print(
-        f"\nrecord_funding_fee latency={elapsed_ms:.3f}ms "
+        f"\nrecord_funding_fee latency={sample.wall_ms:.3f}ms "
         f"(sanity max={_MAX_FUNDING_LATENCY_MS}ms); "
         f"sequential DB round trips={len(queries)} (max={_MAX_FUNDING_ROUND_TRIPS})"
     )
@@ -269,8 +275,8 @@ async def test_funding_settlement_round_trip_and_latency_guard(pool, ports):
         f"record_funding_fee 순차 DB 왕복 수({len(queries)})가 상한"
         f"({_MAX_FUNDING_ROUND_TRIPS})을 초과했습니다 — 왕복 수 회귀입니다."
     )
-    assert elapsed_ms < _MAX_FUNDING_LATENCY_MS, (
-        f"record_funding_fee 지연({elapsed_ms:.1f}ms)이 sanity 상한"
+    assert sample.wall_ms < _MAX_FUNDING_LATENCY_MS, (
+        f"record_funding_fee 지연({sample.wall_ms:.1f}ms)이 sanity 상한"
         f"({_MAX_FUNDING_LATENCY_MS}ms)을 초과했습니다."
     )
 
