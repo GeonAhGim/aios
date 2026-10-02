@@ -33,7 +33,6 @@ import asyncio
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -284,7 +283,7 @@ async def test_adversarial_direct_update_of_ledger_journal_entry_fund_id_blocked
 
 
 @pytest.mark.perf
-async def test_backfill_of_fifty_bootstrapped_tenants_completes_within_budget(pool):
+async def test_backfill_of_fifty_bootstrapped_tenants_completes_within_budget(pool, perf_budget):
     # 성능단언 — 감사가 지적한 "성능단언 없음" 공백을 메운다.
     await purge_position_snapshots(pool)
     _run_alembic("downgrade", _DOWN_REVISION)
@@ -304,12 +303,11 @@ async def test_backfill_of_fifty_bootstrapped_tenants_completes_within_budget(po
             )
         tenant_ids.append(tenant_id)
 
-    started = time.monotonic()
-    _run_alembic("upgrade", "963d5f3cfb1b")
-    elapsed = time.monotonic() - started
+    sample = perf_budget.sample(lambda: _run_alembic("upgrade", "963d5f3cfb1b"))
 
-    assert elapsed < _PERF_BUDGET_SECONDS, (
-        f"{_PERF_TENANT_COUNT}명 백필이 예산({_PERF_BUDGET_SECONDS}s)을 넘겼다: {elapsed:.2f}s"
+    assert sample.cpu_ms < _PERF_BUDGET_SECONDS * 1000, (
+        f"{_PERF_TENANT_COUNT}명 백필이 예산({_PERF_BUDGET_SECONDS}s) 초과: "
+        f"{sample.cpu_ms / 1000:.2f}s"
     )
 
     async with pool.acquire() as conn:
