@@ -25,7 +25,6 @@ tenant_id FK 거부·RLS SELECT 교차증명만 갖췄을 뿐 (1) FK/RLS 이외�
 
 from __future__ import annotations
 
-import time
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -265,28 +264,35 @@ async def test_pos_borrow_position_insert_for_other_tenant_is_rejected(pool):
 
 
 @pytest.mark.perf
-async def test_pos_borrow_position_batch_insert_meets_latency_budget(pool):
+async def test_pos_borrow_position_batch_insert_meets_latency_budget(pool, perf_budget):
     """50건의 `pos_borrow_position` 순차 INSERT가 3.0초 예산 내에 끝나야
     한다(LC-15a `test_schedule_payouts_batch_meets_latency_budget`,
     task-2961과 동일 판단 — 공유 로컬 Postgres 지연 변동을 흡수할 만큼
     넉넉하되 무한정은 아닌 회귀 감시 상한). 이 leaf에 저장소 어댑터가
     아직 없어 배치 write 경로는 이 원시 INSERT 반복이 유일한 대리
-    측정치다."""
+    측정치다.
+
+    raw time.monotonic() → perf_budget.sample_async() 전환 (task-11064).
+    비동기 DB I/O를 재므로 sample_async(wall_ms)로 왕복 지연을 보존하고
+    coverage tracer 오버헤드를 걷어낸다. 예산 값(3.0초)은 그대로 유지한다.
+    """
     tenant_id = await create_test_tenant(pool)
     batch_size = 50
 
-    start = time.monotonic()
-    async with pool.acquire() as conn:
-        for i in range(batch_size):
-            await conn.execute(
-                """
-                INSERT INTO pos_borrow_position
-                    (position_key, tenant_id, short_quantity, supply_rate, currency)
-                VALUES ($1, $2, 100, 0.03, 'USDT')
-                """,
-                f"BORROW-PERF-{uuid4().hex}-{i}",
-                tenant_id,
-            )
-    elapsed = time.monotonic() - start
+    async def _insert_batch() -> None:
+        async with pool.acquire() as conn:
+            for i in range(batch_size):
+                await conn.execute(
+                    """
+                    INSERT INTO pos_borrow_position
+                        (position_key, tenant_id, short_quantity, supply_rate, currency)
+                    VALUES ($1, $2, 100, 0.03, 'USDT')
+                    """,
+                    f"BORROW-PERF-{uuid4().hex}-{i}",
+                    tenant_id,
+                )
 
-    assert elapsed < 3.0, f"{batch_size}건 순차 INSERT가 예산(3.0s)을 초과: {elapsed:.3f}s"
+    sample = await perf_budget.sample_async(_insert_batch)
+    budget_ms = 3000.0  # 3.0초
+
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
