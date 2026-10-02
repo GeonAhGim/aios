@@ -8,12 +8,12 @@ DEEPEN(task-2823, docs/audit/DEPTH_R_EO.md leaf 1222): D1이었던 이 리프에
 성능 단언·게이트 적색 재현·kill-switch 동시성 경합 증거를 추가해 D2/D3를
 채운다(negative≥3·실패주입·성능단언·게이트 적색 재현은 이미 존재/아래에서
 보강, 다중 인스턴스 증명은 동시성 테스트로 겸한다)."""
+
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import time
 import uuid
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -98,9 +98,7 @@ async def test_global_scope_pauses_every_running_execution_across_tenants(pool):
     exec_b = await _seed_execution(pool, user_b, exchange="binance")
 
     async with pool.acquire() as conn:
-        paused = await pause_executions_for_scope(
-            conn, SafetyScope.GLOBAL, "", control_id=uuid4()
-        )
+        paused = await pause_executions_for_scope(conn, SafetyScope.GLOBAL, "", control_id=uuid4())
 
     assert set(paused) >= {exec_a, exec_b}
     assert await _status_of(pool, exec_a) == ("PAUSED", "SAFETY_LAYER")
@@ -223,7 +221,10 @@ async def test_unmapped_scope_raises_instead_of_silently_matching_zero_rows(pool
     async with pool.acquire() as conn:
         with pytest.raises(UnmappedSafetyScopeError):
             await pause_executions_for_scope(
-                conn, "BOGUS_SCOPE", "irrelevant", control_id=uuid4()  # type: ignore[arg-type]
+                conn,
+                "BOGUS_SCOPE",
+                "irrelevant",
+                control_id=uuid4(),  # type: ignore[arg-type]
             )
 
 
@@ -266,7 +267,7 @@ async def test_aborted_transaction_propagates_instead_of_appearing_as_zero_match
 
 
 @pytest.mark.perf
-async def test_pause_executions_completes_within_single_round_trip_latency_bound(pool):
+async def test_pause_executions_completes_within_single_round_trip_latency_bound(pool, perf_budget):
     """성능 단언 — 매칭 50건 + 비매칭 50건이 섞여 있어도 단일 UPDATE...
     RETURNING 왕복 하나로 끝난다(행별 개별 쿼리로 퇴화하는 회귀를 방지).
     느슨한 상한(500ms)은 flakiness 회피용이며 명백한 회귀만 잡는다(다른
@@ -279,14 +280,14 @@ async def test_pause_executions_completes_within_single_round_trip_latency_bound
         await _seed_execution(pool, other_user)
 
     async with pool.acquire() as conn:
-        start = time.monotonic()
-        paused = await pause_executions_for_scope(
-            conn, SafetyScope.TENANT, str(user_id), control_id=uuid4()
+        sample = await perf_budget.sample_async(
+            lambda: pause_executions_for_scope(
+                conn, SafetyScope.TENANT, str(user_id), control_id=uuid4()
+            )
         )
-        elapsed = time.monotonic() - start
 
-    assert len(paused) == 50
-    assert elapsed < 0.5
+    assert len(sample.result) == 50
+    assert sample.wall_ms < 500
 
 
 async def test_concurrent_overlapping_scope_kill_switches_pause_each_execution_exactly_once(
