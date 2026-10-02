@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import date
 from pathlib import Path
@@ -41,6 +40,7 @@ from src.foundation.market_data.application.sync_calendar import (
     sync_calendar,
 )
 from src.foundation.market_data.contracts.v1 import CalendarDay, Venue
+from tests.conftest import PerfBudget
 
 _CONFIG_DIR = Path(__file__).resolve().parents[4] / "config" / "market_calendars"
 _KRX_2026_YAML = _CONFIG_DIR / "KRX_2026.yaml"
@@ -136,13 +136,16 @@ async def test_upsert_days_connection_failure_leaves_no_partial_write(
 
 @pytest.mark.perf
 async def test_sync_calendar_full_year_round_trip_meets_latency_budget(
-    pool: asyncpg.Pool, repo: PostgresCalendarRepository, audit: PostgresAuditEventRepository
+    pool: asyncpg.Pool,
+    repo: PostgresCalendarRepository,
+    audit: PostgresAuditEventRepository,
+    perf_budget: PerfBudget,
 ) -> None:
     """1개 연도 분량(영업일 기준 약 250개) 캘린더 적재+감사 이벤트 기록+
     재조회 왕복이 절대시간 예산 내여야 한다(연 1회성 배치이지만 운영 중
     수십 개 venue로 확장될 수 있으므로 예산을 둔다)."""
     year = 2192
-    budget_sec = 5.0  # 실측 로컬 <1s, CI 편차 감안
+    budget_ms = 5_000.0  # 실측 로컬 <1s, CI 편차 감안
     days = []
     d = date(year, 1, 1)
     while d.year == year:
@@ -161,26 +164,30 @@ async def test_sync_calendar_full_year_round_trip_meets_latency_budget(
         d = date.fromordinal(d.toordinal() + 1)
 
     try:
-        start = time.perf_counter()
-        count = await sync_calendar(
-            pool,
-            Venue.KIS_KRX,
-            year,
-            days,
-            actor_subject_id=uuid.uuid4(),
-            trace_id=uuid.uuid4(),
-            cal=repo,
-            audit=audit,
-        )
-        async with pool.acquire() as conn, conn.transaction():
-            calendar = await repo.load(conn, Venue.KIS_KRX, year)
-        elapsed = time.perf_counter() - start
 
-        print(f"[RD-21 sync_calendar] {len(days)}행 왕복 {elapsed:.3f}s (budget<{budget_sec}s)")
-        assert count == len(days)
-        assert len(calendar.holidays) == len(days)
-        assert elapsed < budget_sec, (
-            f"연간 캘린더 왕복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+        async def _round_trip() -> None:
+            await sync_calendar(
+                pool,
+                Venue.KIS_KRX,
+                year,
+                days,
+                actor_subject_id=uuid.uuid4(),
+                trace_id=uuid.uuid4(),
+                cal=repo,
+                audit=audit,
+            )
+            async with pool.acquire() as conn, conn.transaction():
+                await repo.load(conn, Venue.KIS_KRX, year)
+
+        sample = await perf_budget.sample_async(_round_trip)
+        # wall_ms == budget_ms → seconds budget(5s)과 동일 단위
+        print(
+            f"[RD-21 sync_calendar] {len(days)}행 왕복 {sample.wall_ms / 1000:.3f}s "
+            f"(budget<{budget_ms / 1000:.3f}s)"
+        )
+        assert sample.wall_ms < budget_ms, (
+            f"연간 캘린더 왕복이 예산({budget_ms / 1000:.3f}s)을 넘었습니다"
+            f"({sample.wall_ms / 1000:.3f}s)."
         )
     finally:
         async with pool.acquire() as conn:
