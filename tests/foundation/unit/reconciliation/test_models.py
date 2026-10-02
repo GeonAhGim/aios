@@ -231,5 +231,4 @@ def test_bulk_construction_meets_latency_budget(perf_budget: Any) -> None:
             _run()
             _state()
 
-    sample = perf_budget.assert_within(_bulk, budget_ms=1000.0, n=1)
-    assert sample.wall_ms < 1000.0
+    perf_budget.assert_within(_bulk, budget_ms=1000.0, n=1)
