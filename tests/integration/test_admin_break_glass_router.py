@@ -28,7 +28,6 @@ ADR-2026-09-09-C D2 증빙:
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -184,8 +183,7 @@ async def test_request_grant_rejects_stale_mfa_step_up_through_http(client, pool
 
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE users SET mfa_verified_at = now() - interval '16 minutes' "
-            "WHERE user_id = $1",
+            "UPDATE users SET mfa_verified_at = now() - interval '16 minutes' WHERE user_id = $1",
             uuid.UUID(user_id),
         )
 
@@ -291,11 +289,13 @@ async def test_audit_log_route_succeeds_with_approved_grant_and_grant_is_single_
 
 
 @pytest.mark.perf
-async def test_audit_log_route_round_trip_latency_budget(client, pool):
-    """관리자 조회치고 관대한 예산(p95 아래 기준으로 단일 왕복 1초) --
-    실 DB + 실 HTTP 스택을 타는 통합테스트라 break_glass 코어 자체의
-    100ms 예산(test_break_glass.py::test_consume_latency_budget)보다
-    넉넉하게 잡는다."""
+async def test_audit_log_route_round_trip_latency_budget(client, pool, perf_budget):
+    """raw time.perf_counter() → perf_budget.sample_async() 전환 (task-11072).
+
+    비동기 I/O를 재는 테스트는 RelativeBudget.measure_async / samples_async를
+    쓴다 — wall_ms로 왕복 지연을 보존하고 coverage tracer 오버헤드를 걷어낸다.
+    예산 값(1초)은 그대로 유지한다.
+    """
     requester_headers, _requester_id = await _register_mfa_admin(client, pool)
     approver_headers, _approver_id = await _register_mfa_admin(client, pool)
     reader_headers, _reader_id = await _register_mfa_admin(client, pool)
@@ -304,14 +304,14 @@ async def test_audit_log_route_round_trip_latency_budget(client, pool):
         client, requester_headers, approver_headers, scope="tenant_read"
     )
 
-    started = time.perf_counter()
-    response = await client.get(
-        "/admin/audit-log", headers={**reader_headers, "X-Break-Glass-Grant": grant_id}
+    sample = await perf_budget.sample_async(
+        lambda: client.get(
+            "/admin/audit-log", headers={**reader_headers, "X-Break-Glass-Grant": grant_id}
+        )
     )
-    elapsed = time.perf_counter() - started
-
-    assert response.status_code == 200
-    assert elapsed < 1.0, f"GET /admin/audit-log elapsed={elapsed * 1000:.1f}ms, 예산 1000ms 초과"
+    assert sample.wall_ms < 1000, (
+        f"GET /admin/audit-log elapsed={sample.wall_ms:.2f}ms, 예산 1000ms 초과"
+    )
 
 
 async def test_consume_failure_during_http_request_rolls_back_grant_state(
