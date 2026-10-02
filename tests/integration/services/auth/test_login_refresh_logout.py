@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest import mock
@@ -335,11 +334,13 @@ async def test_logout_completed_between_active_check_and_rotate_is_rejected_not_
 
 
 @pytest.mark.perf
-async def test_refresh_latency_p95_within_borrowed_order_ack_budget(pool):
-    """수치 성능 단언 — refresh() 1회 호출(조건부 UPDATE 회전 + JWT 발급)의
-    p95 지연시간이 차용 예산(50ms) 이내여야 한다. Argon2 해시 비용이 섞이지
-    않도록 세션은 로그인 유스케이스가 아니라 `session_repository.insert_session`
-    으로 직접 만들어, refresh() 자체의 고정비만 측정한다."""
+async def test_refresh_latency_p95_within_borrowed_order_ack_budget(pool, perf_budget):
+    """raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11070).
+
+    비동기 I/O를 재는 테스트는 RelativeBudget.measure_async / samples_async를
+    쓴다 — wall_ms로 왕복 지연을 보존하고 coverage tracer 오버헤드를 걷어낸다.
+    예산 값(50ms)은 그대로 유지한다.
+    """
     auth = _auth(pool)
     issuer = _issuer()
     email = await _signup(auth)
@@ -348,8 +349,8 @@ async def test_refresh_latency_p95_within_borrowed_order_ack_budget(pool):
         user_id = (await session_repository.get_active(conn, seed.session_id)).user_id
 
     n = 30
-    latencies: list[float] = []
-    for _ in range(n):
+
+    async def _refresh_once():
         plain, refresh_hash = TokenIssuer.issue_refresh()
         async with pool.acquire() as conn:
             session = await session_repository.insert_session(
@@ -362,14 +363,13 @@ async def test_refresh_latency_p95_within_borrowed_order_ack_budget(pool):
                 expires_at=datetime.now(timezone.utc) + timedelta(days=1),
                 auth_level="PASSWORD",
             )
-        start = time.perf_counter()
         await refresh_usecase.refresh(pool, issuer, session_id=session.id, refresh_token=plain)
-        latencies.append(time.perf_counter() - start)
 
-    latencies.sort()
-    p95_ms = latencies[int(n * 0.95)] * 1000
+    samples = await perf_budget.samples_async(_refresh_once, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
     assert p95_ms < REFRESH_P95_BUDGET_MS, (
-        f"refresh() p95 지연시간 {p95_ms:.4f}ms가 예산 {REFRESH_P95_BUDGET_MS}ms 초과"
+        f"refresh() p95 지연시간 {p95_ms:.2f}ms가 예산 {REFRESH_P95_BUDGET_MS}ms 초과"
     )
 
 
