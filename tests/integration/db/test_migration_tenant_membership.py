@@ -19,15 +19,15 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
 from dotenv import dotenv_values
 
+from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_user
 from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
@@ -278,7 +278,9 @@ async def test_backfill_heals_user_left_without_tenant_row(pool: asyncpg.Pool) -
 
 
 @pytest.mark.perf
-async def test_tenant_membership_insert_latency_p95_within_budget(pool: asyncpg.Pool) -> None:
+async def test_tenant_membership_insert_latency_p95_within_budget(
+    pool: asyncpg.Pool, perf_budget: PerfBudget
+) -> None:
     """수치 성능 단언 — 부분 UNIQUE 인덱스(uq_tenant_membership_active)가
     걸려 있는 상태에서 `tenant_membership` 삽입 1회의 p95 지연시간이
     예산을 넘지 않아야 한다. 실측 기준선은 로컬 DB에서 수 ms 수준이며,
@@ -289,27 +291,33 @@ async def test_tenant_membership_insert_latency_p95_within_budget(pool: asyncpg.
         await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id)
 
     n = 30
-    latencies: list[float] = []
-    for _ in range(n):
-        subject_id = await create_test_user(pool)
-        async with pool.acquire() as conn:
-            start = time.perf_counter()
-            await conn.execute(
-                "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
-                "VALUES ($1, $2, 'MEMBER', 'ACTIVE')",
-                tenant_id,
-                subject_id,
-            )
-            latencies.append(time.perf_counter() - start)
-        # 다음 반복의 subject_id는 새 user라 부분 인덱스와 충돌하지 않는다 —
-        # 측정 대상은 INSERT 고정비이지 unique 충돌 재시도가 아니다.
 
-    latencies.sort()
-    p95_ms = latencies[int(n * 0.95)] * 1000
+    async def _run() -> None:
+        await _insert_membership(pool, tenant_id)
+
+    samples = await perf_budget.samples_async(_run, n=n)
+    # 다음 반복의 subject_id는 새 user라 부분 인덱스와 충돌하지 않는다 —
+    # 측정 대상은 INSERT 고정비이지 unique 충돌 재시도가 아니다.
+
+    wall_ms_list = [s.wall_ms for s in samples]
+    wall_ms_list.sort()
+    p95_ms = wall_ms_list[int(n * 0.95)]
     assert p95_ms < MEMBERSHIP_INSERT_P95_BUDGET_MS, (
         f"tenant_membership INSERT p95 지연시간 {p95_ms:.4f}ms가 예산 "
         f"{MEMBERSHIP_INSERT_P95_BUDGET_MS}ms 초과"
     )
+
+
+async def _insert_membership(pool: asyncpg.Pool, tenant_id: UUID) -> None:
+    """Helper: 새 subject_id로 tenant_membership INSERT 1회."""
+    subject_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+            "VALUES ($1, $2, 'MEMBER', 'ACTIVE')",
+            tenant_id,
+            subject_id,
+        )
 
 
 # ----------------------------------------------------------------------
