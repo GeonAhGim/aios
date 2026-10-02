@@ -7,7 +7,6 @@ DoD(task-451): "심볼 RENAME 별칭이 기간(valid_from/valid_to)으로 정확
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -249,34 +248,36 @@ async def test_register_alias_insert_connection_failure_leaves_no_orphan_instrum
 
 
 @pytest.mark.perf
-async def test_get_instrument_lookup_p95_under_budget(pool, repo):
+async def test_get_instrument_lookup_p95_under_budget(pool, repo, perf_budget):
     """수치 성능 단언: get_instrument()는 시점별 심볼 해석에 매번 불리는
     읽기 경로다(§9.2 LA-12) — 반복 조회의 p95 지연이 원장 append p95 예산
     (task-489/LB-18, task-614/LC-17, 30ms)과 같은 자릿수 안에 있음을
-    증명한다."""
+    증명한다. raw time.perf_counter() → perf_budget.samples_async() 전환
+    (task-11061).
+
+    비동기 I/O를 재는 테스트는 samples_async를 쓴다 — wall_ms로 왕복 지연을
+    보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(30ms)은 그대로
+    유지한다.
+    """
     symbol = _krx_symbol()
     listed_at = datetime.now(timezone.utc) - timedelta(days=1)
     async with pool.acquire() as conn, conn.transaction():
         await repo.register(conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at))
 
     n = 200
-    budget_p95_sec = 0.03
+    budget_p95_ms = 30.0
     at = datetime.now(timezone.utc)
-    latencies: list[float] = []
-    for _ in range(n):
-        start = time.perf_counter()
-        async with pool.acquire() as conn, conn.transaction():
-            found = await repo.get_instrument(conn, Venue.KIS_KRX, symbol, at)
-        latencies.append(time.perf_counter() - start)
-        assert found is not None
 
-    latencies.sort()
-    p95 = latencies[int(n * 0.95)]
-    print(
-        f"[LA-12 get_instrument] n={n} p95={p95 * 1000:.2f}ms "
-        f"(budget<{budget_p95_sec * 1000:.0f}ms)"
-    )
-    assert p95 < budget_p95_sec, f"get_instrument p95가 예산을 넘었습니다: {p95:.4f}s"
+    # 200회 측정 → p95 계산 (samples_async: 비동기 I/O 전용)
+    async def _probe():
+        async with pool.acquire() as conn, conn.transaction():
+            return await repo.get_instrument(conn, Venue.KIS_KRX, symbol, at)
+
+    samples = await perf_budget.samples_async(_probe, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    print(f"[LA-12 get_instrument] n={n} p95={p95_ms:.2f}ms (budget<{budget_p95_ms:.0f}ms)")
+    assert p95_ms < budget_p95_ms, f"get_instrument p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
 
 
 async def test_gate_red_when_digest_check_removed_negative_test_would_fail(pool, repo, monkeypatch):
