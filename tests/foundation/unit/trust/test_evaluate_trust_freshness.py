@@ -15,7 +15,6 @@ the reason_code branching asserted without a DB.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -25,6 +24,7 @@ import pytest
 from src.foundation.trust.application.evaluate_trust_freshness import evaluate_trust_freshness
 from src.foundation.trust.contracts.v1 import TenantContext
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 
@@ -272,22 +272,22 @@ async def test_gate_red_repro_disclosure_short_circuit_is_load_bearing(
 
 
 @pytest.mark.perf
-async def test_evaluate_trust_freshness_perf_budget_p95_latency() -> None:
+async def test_evaluate_trust_freshness_perf_budget_p95_latency(
+    perf_budget: PerfBudget,
+) -> None:
     """No published per-axis budget covers Trust Core queries specifically
     (ADR-2026-09-09-C Decision 1's table); pin the same order of magnitude as
     the closest published read-query budget, served purely in-memory here."""
     context = _context()
     disclosure = _disclosure(purpose="p1")
     consent = _consent(tenant_id=context.tenant_id, purpose="p1")
-    samples = 50
-    durations_ms: list[float] = []
+    n_samples = 50
 
-    for _ in range(samples):
+    async def _run_once() -> None:
         repo = FakeTrustRepository(disclosure=disclosure, consent=consent)
-        start = time.perf_counter()
         await evaluate_trust_freshness(repo, context, purpose="p1")
-        durations_ms.append((time.perf_counter() - start) * 1000)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
+    samples = await perf_budget.samples_async(_run_once, n=n_samples)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95 = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
     assert p95 < 50.0, f"evaluate_trust_freshness p95 latency {p95:.3f}ms exceeded 50ms budget"
