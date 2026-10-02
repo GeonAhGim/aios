@@ -1,6 +1,5 @@
 """76번 §1/§3/§6 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -270,7 +269,7 @@ def test_bundle_gate_red_repro_naive_outcome_trusting_aggregator_would_pass_inco
 
 
 @pytest.mark.perf
-def test_bundle_evaluation_throughput_within_local_budget():
+def test_bundle_evaluation_throughput_within_local_budget(perf_budget):
     """성능 단언 1 — 순수 집계 함수라 사전거래 게이트급 예산(p99 5ms,
     ADR-2026-09-09-C)에 견줘도 훨씬 여유로워야 한다. 6개 체크 x 50 사이클
     분량(300건)을 반복 평가해 p95를 잰다."""
@@ -282,11 +281,11 @@ def test_bundle_evaluation_throughput_within_local_budget():
         )
         for i in range(300)
     ]
-    samples: list[float] = []
-    for _ in range(20):
-        start = time.perf_counter()
+
+    def _measure():
         evaluate_bundle(results)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95_seconds = samples[int(len(samples) * 0.95)]
-    assert p95_seconds < 0.005, f"p95={p95_seconds * 1000:.3f}ms exceeds 5ms budget"
+
+    samples = perf_budget.samples(_measure, n=20)
+    ordered = sorted(s.cpu_ms for s in samples)
+    p95_ms = ordered[int(len(ordered) * 0.95)]
+    assert p95_ms < 5.0, f"p95={p95_ms:.3f}ms exceeds 5ms budget"
