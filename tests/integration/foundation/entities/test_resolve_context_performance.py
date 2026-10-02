@@ -16,41 +16,38 @@ test_market_data_router.py까지 거슬러 올라가는 관례).
 
 from __future__ import annotations
 
-import math
-import time
-
 import pytest
 
 from src.foundation.entities.application.resolve_context import (
     ResolveContextRequest,
     resolve_context,
 )
+from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 
 
 @pytest.mark.perf
-async def test_resolve_context_p95_latency_stays_within_normalized_ceiling(pool, repo):
+async def test_resolve_context_p95_latency_stays_within_normalized_ceiling(
+    pool, repo, perf_budget: PerfBudget
+) -> None:
     # `create_test_tenant()` persists the FA-1 default hierarchy by default
     # (see its docstring) -- `resolve_context()`'s deterministic ids resolve
     # against it without any extra seeding step.
     tenant_id = await create_test_tenant(pool)
     request = ResolveContextRequest(tenant_id=tenant_id, user_id=tenant_id)
 
-    baseline_start = time.perf_counter()
-    await resolve_context(repo, request)
-    baseline_elapsed = time.perf_counter() - baseline_start
+    # baseline: 비동기 I/O를 재는 테스트는 perf_budget.sample_async() 사용
+    baseline = await perf_budget.sample_async(lambda: resolve_context(repo, request))
 
-    samples: list[float] = []
-    for _ in range(30):
-        start = time.perf_counter()
-        await resolve_context(repo, request)
-        samples.append(time.perf_counter() - start)
+    # 30회 측정 → p95 계산 (samples_async: 비동기 I/O 전용, coverage tracer-pause + wall_ms 보존)
+    samples = await perf_budget.samples_async(lambda: resolve_context(repo, request), n=30)
 
-    samples.sort()
-    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
 
-    ceiling = baseline_elapsed * 5 + 0.05
-    assert p95 <= ceiling, (
-        f"resolve_context p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s(baseline "
-        f"{baseline_elapsed:.4f}s)를 초과했습니다 -- 4단 계층 조회 라운드트립 회귀 의심"
+    # baseline wall_ms → s로 환산, 상한 계산: baseline * 5 + 50ms
+    ceiling_ms = baseline.wall_ms * 5 + 50.0
+    assert p95_ms <= ceiling_ms, (
+        f"resolve_context p95 지연 {p95_ms:.2f}ms가 정규화 상한 {ceiling_ms:.2f}ms(baseline "
+        f"{baseline.wall_ms:.2f}ms)를 초과했습니다 -- 4단 계층 조회 라운드트립 회귀 의심"
     )
