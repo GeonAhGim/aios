@@ -10,7 +10,6 @@ DC-18(backend half, task-2195). DoD: (a) 병합 구간과 quality_grade가 정�
 from __future__ import annotations
 
 import math
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -32,6 +31,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.coverage import QualityGrade
 from src.foundation.market_data.contracts.v2.instruments import Instrument, InstrumentLifecycle
 from src.foundation.market_data.ports.coverage_repository import CoverageQuality, CoverageSpan
+from tests.conftest import PerfBudget
 
 
 def _fake_ulid() -> str:
@@ -346,7 +346,11 @@ async def test_get_coverage_instrument_lookup_failure_propagates_fail_closed(
 
 @pytest.mark.perf
 async def test_get_coverage_latency_stays_within_normalized_ceiling_as_span_count_grows(
-    pool, instrument_repo, coverage_repo, venue_registry
+    perf_budget: PerfBudget,
+    pool,
+    instrument_repo,
+    coverage_repo,
+    venue_registry,
 ):
     """수치 성능 단언 — 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
     절대 ms 임계 대신 baseline(1 span) 대비 정규화한 상한만 게이트로 쓴다
@@ -355,7 +359,8 @@ async def test_get_coverage_latency_stays_within_normalized_ceiling_as_span_coun
     registered_venues / coverage_repo.list_spans / instrument_repo.get)만
     해야 하므로, span 개수가 20배(1 -> 20) 늘어도 지연이 거의 늘지 않아야
     한다 — span당 1회씩 DB를 왕복하거나 merge_spans가 이차식으로 느려지는
-    회귀가 생기면 이 상한을 넘는다."""
+    회귀가 생기면 이 상한을 넘는다.
+    raw time.perf_counter() → perf_budget.sample_async() 전환 (task-11056)."""
     tenant_id = uuid.uuid4()
     baseline_id = _fake_ulid()
     scaled_id = _fake_ulid()
@@ -384,19 +389,21 @@ async def test_get_coverage_latency_stays_within_normalized_ceiling_as_span_coun
             )
 
     async def _call(instrument_id: str) -> float:
-        start = time.perf_counter()
-        async with pool.acquire() as conn, conn.transaction():
-            await get_coverage(
-                conn,
-                tenant_id=tenant_id,
-                instrument_id=instrument_id,
-                venue=Venue.BITGET,
-                timeframe=Timeframe.M1,
-                coverage_repo=coverage_repo,
-                instrument_repo=instrument_repo,
-                venue_registry=venue_registry,
-            )
-        return time.perf_counter() - start
+        async def _fn() -> None:
+            async with pool.acquire() as conn, conn.transaction():
+                await get_coverage(
+                    conn,
+                    tenant_id=tenant_id,
+                    instrument_id=instrument_id,
+                    venue=Venue.BITGET,
+                    timeframe=Timeframe.M1,
+                    coverage_repo=coverage_repo,
+                    instrument_repo=instrument_repo,
+                    venue_registry=venue_registry,
+                )
+
+        sample = await perf_budget.sample_async(_fn)
+        return sample.wall_ms / 1000  # ms → s (기존 _call 반환 단위 유지)
 
     baseline_samples = sorted([await _call(baseline_id) for _ in range(10)])
     scaled_samples = sorted([await _call(scaled_id) for _ in range(10)])
