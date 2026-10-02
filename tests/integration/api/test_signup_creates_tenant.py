@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import math
 import os
-import time
 import uuid
 from uuid import UUID
 
@@ -147,16 +146,18 @@ async def test_tenant_insert_failure_rolls_back_user_row(client, pool, monkeypat
 
 
 @pytest.mark.perf
-async def test_register_p95_latency_stays_within_normalized_ceiling(client):
+async def test_register_p95_latency_stays_within_normalized_ceiling(client, perf_budget):
     """수치 성능 단언 — 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
     절대 ms 임계 대신 baseline 호출 1건 대비 정규화한 상한만 게이트로 쓴다
     (test_dashboard_router.py의 동일 결정 참조). `/auth/register`는 Argon2
     해시(~수십ms) + users/tenant INSERT + 세션 발급까지 한 요청에 묶여있어
     회귀(예: N+1 쿼리, 잠금 경합)가 생기면 baseline 대비 배율이 눈에 띄게
-    벌어진다."""
+    벌어진다.
 
-    async def _call() -> float:
-        started = time.monotonic()
+    raw time.monotonic() → perf_budget.samples_async() 전환 (task-11038).
+    """
+
+    async def _call() -> None:
         response = await client.post(
             "/auth/register",
             json={
@@ -164,16 +165,19 @@ async def test_register_p95_latency_stays_within_normalized_ceiling(client):
                 "password": STRONG_PASSWORD,
             },
         )
-        elapsed = time.monotonic() - started
         assert response.status_code == 201, response.text
-        return elapsed
 
-    baseline_elapsed = await _call()
-    samples = sorted([await _call() for _ in range(6)])
-    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+    # baseline 1건 (wall_ms)
+    baseline_sample = await perf_budget.sample_async(_call)
+    baseline_ms = baseline_sample.wall_ms
 
-    ceiling = baseline_elapsed * 5 + 0.2
-    assert p95 <= ceiling, (
-        f"POST /auth/register p95 지연 {p95:.4f}s가 정규화 상한 "
-        f"{ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 초과했습니다"
+    # 6회 샘플 → p95 계산
+    samples = await perf_budget.samples_async(_call, n=6)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(math.ceil(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+
+    ceiling_ms = baseline_ms * 5 + 200  # 0.2s = 200ms
+    assert p95_ms <= ceiling_ms, (
+        f"POST /auth/register p95 지연 {p95_ms:.2f}ms가 정규화 상한 "
+        f"{ceiling_ms:.2f}ms(baseline {baseline_ms:.2f}ms)를 초과했습니다"
     )
