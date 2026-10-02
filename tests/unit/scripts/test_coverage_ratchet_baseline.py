@@ -148,7 +148,7 @@ def test_explicit_allow_flag_allows_ratchet_up_locally(
     assert baseline_path.read_text(encoding="utf-8").strip() == "85.00"
 
 
-# perf: baseline 쓰기 평균 <100ms — xdist core contention 하에서도 보장
+@pytest.mark.perf
 def test_performance_assertion_baseline_write_under_100ms(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
