@@ -15,7 +15,6 @@ task-1768: `KRX_2026.yaml`의 `source`는 더 이상 `UNVERIFIED` placeholder가
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -215,10 +214,16 @@ async def test_load_connection_failure_propagates_without_fabricating_calendar(
 
 
 @pytest.mark.perf
-async def test_load_p95_under_budget(pool, repo):
+async def test_load_p95_under_budget(pool, repo, perf_budget):
     """수치 성능 단언: load()는 갭 판정마다 불리는 읽기 경로다(§9.2 LA-12) —
     반복 조회의 p95 지연이 원장 append p95 예산(task-489/LB-18, 30ms)과
-    같은 자릿수 안에 있음을 증명한다."""
+    같은 자릿수 안에 있음을 증명한다.
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11052).
+
+    비동기 I/O를 재는 테스트는 samples_async를 쓴다 — wall_ms로 왕복 지연을
+    보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(30ms)은 그대로 유지한다.
+    """
     year = 2196
     days = [
         CalendarDay(
@@ -232,25 +237,42 @@ async def test_load_p95_under_budget(pool, repo):
         )
         for month in range(1, 13)
     ]
-    try:
-        async with pool.acquire() as conn, conn.transaction():
+    async with pool.acquire() as conn:
+        # upsert holidays inside transaction
+        async with conn.transaction():
             await repo.upsert_days(conn, Venue.KIS_KRX, days)
 
         n = 200
         budget_p95_sec = 0.03
-        latencies: list[float] = []
-        for _ in range(n):
-            start = time.perf_counter()
-            async with pool.acquire() as conn, conn.transaction():
-                calendar = await repo.load(conn, Venue.KIS_KRX, year)
-            latencies.append(time.perf_counter() - start)
-            assert len(calendar.holidays) == 12
 
-        latencies.sort()
-        p95 = latencies[int(n * 0.95)]
-        print(f"[LA-12 load] n={n} p95={p95 * 1000:.2f}ms (budget<{budget_p95_sec * 1000:.0f}ms)")
-        assert p95 < budget_p95_sec, f"load() p95가 예산을 넘었습니다: {p95:.4f}s"
-    finally:
+        # 200회 측정 → p95 계산
+        # samples_async: 비동기 I/O 전용, coverage tracer-pause + wall_ms 보존
+        # conn은 바깥 acquire가 유지되므로 release 후에도 안전
+        samples = await perf_budget.samples_async(
+            lambda c=conn: repo.load(c, Venue.KIS_KRX, year), n=n
+        )
+
+        # assert each iteration returned valid calendar
+        for s in samples:
+            assert len(s.result.holidays) == 12
+
+        wall_ms_list = sorted(s.wall_ms for s in samples)
+        p95_sec = wall_ms_list[int(n * 0.95)] / 1000
+        print(
+            f"[LA-12 load] n={n} "
+            f"p95={wall_ms_list[int(n * 0.95)]:.2f}ms "
+            f"(budget<{budget_p95_sec * 1000:.0f}ms)"
+        )
+        assert p95_sec < budget_p95_sec, f"load() p95가 예산을 넘었습니다: {p95_sec:.4f}s"
+
+        # cleanup (same connection, no transaction needed)
+        await conn.execute(
+            "DELETE FROM md_venue_calendar_day WHERE venue = $1 "
+            "AND trade_date >= $2 AND trade_date <= $3",
+            Venue.KIS_KRX.value,
+            date(year, 1, 1),
+            date(year, 12, 31),
+        )
         async with pool.acquire() as conn:
             await conn.execute(
                 "DELETE FROM md_venue_calendar_day WHERE venue = $1 "
