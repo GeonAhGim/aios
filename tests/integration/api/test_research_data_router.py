@@ -14,7 +14,6 @@ seeded directly per test via `PostgresResearchRepository`.
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -213,34 +212,38 @@ async def test_source_contract_repository_failure_fails_closed_not_open(client, 
 
 
 @pytest.mark.perf
-async def test_search_items_latency_stays_within_normalized_ceiling(client, seeded):
-    """Numeric perf assertion -- baseline-normalized ceiling (same technique
-    as test_market_data_router.py) instead of an absolute threshold, since
-    TEST_DATABASE_URL latency is shared/variable."""
+async def test_search_items_latency_stays_within_normalized_ceiling(client, seeded, perf_budget):
+    """Numeric perf assertion -- baseline-normalized ceiling via
+    perf_budget.sample_async() (task-11035).
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환. 비동기 I/O는
+    sample_async로 wall_ms를 얻고 baseline * 20 + 0.5 상한과 비교한다.
+    예산 값(20배 + 0.5s)은 그대로 유지한다.
+    """
     pool = app.state.pool
     repo = PostgresResearchRepository(pool)
     for _ in range(50):
-        await repo.append_item(
-            seeded["tenant_a"], _item(), external_id=f"ext-{uuid.uuid4().hex}"
-        )
+        await repo.append_item(seeded["tenant_a"], _item(), external_id=f"ext-{uuid.uuid4().hex}")
 
-    baseline_start = time.perf_counter()
-    baseline = await client.get(f"{BASE}/items/{seeded['item_id']}", headers=seeded["a"])
-    baseline_elapsed = time.perf_counter() - baseline_start
-    assert baseline.status_code == 200, baseline.text
-
-    full_start = time.perf_counter()
-    full = await client.get(
-        f"{BASE}/items", params={"source_id": SOURCE_ID}, headers=seeded["a"]
+    baseline_sample = await perf_budget.sample_async(
+        lambda: client.get(f"{BASE}/items/{seeded['item_id']}", headers=seeded["a"])
     )
-    full_elapsed = time.perf_counter() - full_start
+    baseline = baseline_sample.result
+    assert baseline.status_code == 200, baseline.text
+    baseline_elapsed_s = baseline_sample.wall_ms / 1000
+
+    full_sample = await perf_budget.sample_async(
+        lambda: client.get(f"{BASE}/items", params={"source_id": SOURCE_ID}, headers=seeded["a"])
+    )
+    full = full_sample.result
     assert full.status_code == 200, full.text
     assert len(full.json()["data"]) == 51
+    full_elapsed_s = full_sample.wall_ms / 1000
 
-    ceiling = baseline_elapsed * 20 + 0.5
-    assert full_elapsed <= ceiling, (
-        f"51개 항목 검색이 {full_elapsed:.3f}s 걸림 "
-        f"(baseline {baseline_elapsed:.3f}s, 정규화 상한 {ceiling:.3f}s)"
+    ceiling = baseline_elapsed_s * 20 + 0.5
+    assert full_elapsed_s <= ceiling, (
+        f"51개 항목 검색이 {full_elapsed_s:.3f}s 걸림 "
+        f"(baseline {baseline_elapsed_s:.3f}s, 정규화 상한 {ceiling:.3f}s)"
     )
 
 
