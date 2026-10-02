@@ -33,6 +33,7 @@ from src.foundation.backtest.application.sandboxed_script_eval import (
     ScriptSandboxTimeoutError,
     run_sandboxed,
 )
+from tests.conftest import PerfBudget
 
 _SAMPLE = (
     "input close: series<float> = 0\n"
@@ -97,13 +98,18 @@ def test_fast_script_matches_direct_call_byte_identical() -> None:
 
 
 @pytest.mark.perf
-def test_wallclock_limit_exceeded_raises_timeout_error() -> None:
+def test_wallclock_limit_exceeded_raises_timeout_error(perf_budget: PerfBudget) -> None:
     limit = 1.0
-    started = time.monotonic()
-    with pytest.raises(ScriptSandboxTimeoutError):
-        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=limit, rss_mb=512))
-    elapsed = time.monotonic() - started
-    assert elapsed <= limit + 2.0
+    budget_ms = (limit + 2.0) * 1000  # 3000.0 ms -- child teardown headroom
+
+    # sandbox가 child를 킬 때까지의 wall-clock budget을 perf_budget로 측정한다.
+    # process_time 기반이지만 sandbox kill은 자식 프로세스 종료 대기이므로
+    # parent CPU 소비가 거의 없고 wall_ms가 실제 종료 지연을 보존한다.
+    def _run() -> None:
+        with pytest.raises(ScriptSandboxTimeoutError):
+            run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=limit, rss_mb=512))
+
+    perf_budget.assert_within(_run, budget_ms=budget_ms, label="wallclock_timeout")
 
 
 @pytest.mark.perf
@@ -153,7 +159,7 @@ def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
 
 
 @pytest.mark.perf
-def test_child_crash_does_not_hang_parent() -> None:
+def test_child_crash_does_not_hang_parent(perf_budget: PerfBudget) -> None:
     # Bound is generous (well under the wallclock_sec limit) -- this only
     # asserts the parent does not hang on an unrelated crash, it does not
     # pin down exact process-teardown timing. The spawned child still
@@ -162,8 +168,10 @@ def test_child_crash_does_not_hang_parent() -> None:
     # bytecode-compile-from-source cost applies here too even though the
     # fixture itself does nothing (observed 22.3s > a previous 20.0s bound
     # on a cold run -- task-8732); both bounds now carry headroom for that.
-    started = time.monotonic()
-    with pytest.raises(ScriptSandboxCrashError):
-        run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
-    elapsed = time.monotonic() - started
-    assert elapsed <= 90.0
+    budget_ms = 90_000.0  # 90s wall-clock budget
+
+    def _run() -> None:
+        with pytest.raises(ScriptSandboxCrashError):
+            run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
+
+    perf_budget.assert_within(_run, budget_ms=budget_ms, label="crash_no_hang")
