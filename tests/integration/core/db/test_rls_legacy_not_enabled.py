@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 from uuid import UUID
 
@@ -37,8 +38,12 @@ import pytest
 
 from tests.integration.conftest import create_test_user
 from tests.integration.core.db.conftest import AppRoleTx
+from tests.integration.oms.conftest import insert_order
 from tests.support.db import ensure_worker_database, template_database_url
-from tests.support.deep_downgrade import purge_position_snapshots
+from tests.support.deep_downgrade import (
+    downgrade_past_irreversible_em3_backfill,
+    purge_position_snapshots,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 # b3c7f19ad2e6(rls_policies_foundation, PLT-30 M5)의 down_revision. 이 리프
@@ -199,11 +204,32 @@ async def test_upgrade_downgrade_round_trip():
         max_size=2,
     )
     try:
+        # Seed the backfill evidence that makes a deep downgrade irreversible.
+        # Empty databases otherwise hide this ordering-dependent failure.
+        user_id = await create_test_user(migration_pool)
+        async with migration_pool.acquire() as conn:
+            order_id = await insert_order(conn, user_id)
+            await conn.execute(
+                "UPDATE orders SET committed_child_qty = 1 WHERE order_id = $1", order_id
+            )
+            await conn.execute(
+                "INSERT INTO order_events "
+                "(order_id, from_status, to_status, event, reason_code, actor_subject_id, "
+                "trace_id, occurred_at, payload_hash) VALUES "
+                "($1, 'CREATED', 'CREATED', 'CHILD_QTY_COMMITTED', "
+                "'EM3_CHILD_SLICE_COMMIT_BACKFILL_TASK8890', 'system', "
+                "gen_random_uuid(), now(), repeat('e', 64))",
+                order_id,
+            )
         try:
+            with pytest.raises(AssertionError, match="Em3ChildQtyBackfillIrreversibleError"):
+                _run_alembic("downgrade", _PRE_RLS_REVISION, database_url=migration_db_url)
             await purge_position_snapshots(
                 migration_pool
             )  # deep downgrade: see tests/support/deep_downgrade.py
-            _run_alembic("downgrade", _PRE_RLS_REVISION, database_url=migration_db_url)
+            downgrade_past_irreversible_em3_backfill(
+                partial(_run_alembic, database_url=migration_db_url), _PRE_RLS_REVISION
+            )
             for table in _FOUNDATION_TABLES:
                 assert await _relrowsecurity(migration_pool, table) is False
                 assert not await _policy_exists(migration_pool, table)
