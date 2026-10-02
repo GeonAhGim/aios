@@ -13,7 +13,6 @@ D2 evidence: negative >=3, failure-injection 1, perf 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -28,8 +27,10 @@ from src.foundation.validation.contracts.v1 import (
     ValidationBundleView,
     ValidationResultView,
 )
+from tests.conftest import PerfBudget
 
 # ── SCHEMA_VERSION ─────────────────────────────────────────────────────────
+
 
 def test_schema_version_is_v1() -> None:
     assert SCHEMA_VERSION == "v1"
@@ -38,8 +39,10 @@ def test_schema_version_is_v1() -> None:
 
 # ── RunState enum ──────────────────────────────────────────────────────────
 
+
 def test_run_state_all_values() -> None:
     from src.foundation.validation.contracts.v1 import RunState
+
     assert RunState.QUEUED.value == "QUEUED"
     assert RunState.RUNNING.value == "RUNNING"
     assert RunState.SUCCEEDED.value == "SUCCEEDED"
@@ -49,6 +52,7 @@ def test_run_state_all_values() -> None:
 
 def test_run_state_from_str() -> None:
     from src.foundation.validation.contracts.v1 import RunState
+
     assert RunState("QUEUED") is RunState.QUEUED
     assert RunState("SUCCEEDED") is RunState.SUCCEEDED
     assert RunState("CANCELLED") is RunState.CANCELLED
@@ -56,8 +60,10 @@ def test_run_state_from_str() -> None:
 
 # ── Outcome enum ───────────────────────────────────────────────────────────
 
+
 def test_outcome_all_values() -> None:
     from src.foundation.validation.contracts.v1 import Outcome
+
     assert Outcome.PASS.value == "PASS"
     assert Outcome.FAIL.value == "FAIL"
     assert Outcome.PASS_WITH_OBLIGATIONS.value == "PASS_WITH_OBLIGATIONS"
@@ -65,11 +71,13 @@ def test_outcome_all_values() -> None:
 
 def test_outcome_from_str() -> None:
     from src.foundation.validation.contracts.v1 import Outcome
+
     assert Outcome("PASS") is Outcome.PASS
     assert Outcome("FAIL") is Outcome.FAIL
 
 
 # ── StartValidationCommand ─────────────────────────────────────────────────
+
 
 def _valid_cmd_kwargs(**overrides) -> dict[str, Any]:
     """Return a minimal valid command dict, overridden by *overrides*."""
@@ -114,6 +122,7 @@ def test_start_command_int_fields() -> None:
 
 
 # ── ValidationResultView ───────────────────────────────────────────────────
+
 
 def _valid_result_kwargs(**overrides) -> dict[str, Any]:
     """Return a minimal valid result dict, overridden by *overrides*."""
@@ -173,6 +182,7 @@ def test_validation_result_view_schema_version_default() -> None:
 
 
 # ── ValidationBundleView ───────────────────────────────────────────────────
+
 
 def _valid_bundle_kwargs(**overrides) -> dict[str, Any]:
     """Return a minimal valid bundle dict, overridden by *overrides*."""
@@ -238,6 +248,7 @@ def test_validation_bundle_view_multiple_check_run_ids() -> None:
 
 
 # ── Negative tests ─────────────────────────────────────────────────────────
+
 
 def test_start_command_missing_strategy_id_raises() -> None:
     kw = _valid_cmd_kwargs()
@@ -337,6 +348,7 @@ def test_validation_bundle_view_negative_empty_dict_raises() -> None:
 
 # ── Failure-injection test ─────────────────────────────────────────────────
 
+
 def test_validation_result_view_monkeypatch_invalid_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -349,14 +361,19 @@ def test_validation_result_view_monkeypatch_invalid_state(
 
 # ── Performance assertion ──────────────────────────────────────────────────
 
+
 @pytest.mark.perf
-def test_validation_result_view_latency_under_1ms() -> None:
+def test_validation_result_view_latency_under_1ms(
+    perf_budget: PerfBudget,
+) -> None:
     """ValidationResultView construction should complete in < 1ms.
-    ADR-2026-09-09-C performance budget: contract validation < 1ms p95."""
+    ADR-2026-09-09-C performance budget: contract validation < 1ms p95.
+
+    raw time.perf_counter() → perf_budget.assert_within() 전환 (task-11025).
+    """
     kw = _valid_result_kwargs()
-    iterations = 1000
-    start = time.perf_counter()
-    for _ in range(iterations):
+
+    def _build_once() -> None:
         ValidationResultView(**kw)
-    elapsed_ms = (time.perf_counter() - start) / iterations * 1000
-    assert elapsed_ms < 1.0, f"avg {elapsed_ms:.2f}ms exceeds 1ms budget"
+
+    perf_budget.assert_within(_build_once, budget_ms=1.0)
