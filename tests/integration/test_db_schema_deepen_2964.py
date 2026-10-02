@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from uuid import uuid4
@@ -92,36 +91,43 @@ async def _insert_md_instrument_full(
 
 
 @pytest.mark.perf
-async def test_bulk_non_overlapping_alias_inserts_meet_latency_budget(pool):
+async def test_bulk_non_overlapping_alias_inserts_meet_latency_budget(pool, perf_budget):
     """500개 서로 겹치지 않는 (venue, alias_symbol) 별칭을 같은 심볼에
     연속 삽입해 절대시간 예산 내임을 단언한다(실측 로컬 <2s, 예산은
     느린 CI 대비 넉넉히 잡음). EXCLUDE USING gist가 GiST 인덱스를 타지
-    못하고 순차 스캔으로 퇴화하면 이 예산을 넘긴다."""
+    못하고 순차 스캔으로 퇴화하면 이 예산을 넘긴다.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환 (task-11077).
+    비동기 DB I/O를 재므로 sample_async(wall_ms)로 왕복 지연을 보존하고
+    coverage tracer 오버헤드를 걷어낸다. 예산 값(15초)은 그대로 유지한다.
+    """
     instrument_id = await _insert_md_instrument(pool, canonical_symbol=f"TEST-{uuid4().hex}")
     alias_symbol = f"ALIAS-{uuid4().hex}"
     t0 = datetime(2000, 1, 1, tzinfo=timezone.utc)
     n = 500
-    budget_sec = 15.0
 
-    start = time.perf_counter()
-    for i in range(n):
-        await pool.execute(
-            "INSERT INTO md_symbol_alias "
-            "(instrument_id, venue, alias_symbol, valid_from, valid_to) "
-            "VALUES ($1, 'BITGET', $2, $3, $4)",
-            instrument_id,
-            alias_symbol,
-            t0 + timedelta(days=i),
-            t0 + timedelta(days=i + 1),
-        )
-    elapsed = time.perf_counter() - start
+    async def _insert_aliases() -> None:
+        for i in range(n):
+            await pool.execute(
+                "INSERT INTO md_symbol_alias "
+                "(instrument_id, venue, alias_symbol, valid_from, valid_to) "
+                "VALUES ($1, 'BITGET', $2, $3, $4)",
+                instrument_id,
+                alias_symbol,
+                t0 + timedelta(days=i),
+                t0 + timedelta(days=i + 1),
+            )
+
+    sample = await perf_budget.sample_async(_insert_aliases)
+    budget_ms = 15000.0  # 15초
+
     print(
-        f"[LA-10 md_symbol_alias] {n} inserts in {elapsed:.3f}s "
-        f"({elapsed / n * 1e3:.2f} ms/insert, budget<{budget_sec}s)"
+        f"[LA-10 md_symbol_alias] {n} inserts wall={sample.wall_ms:.3f}ms "
+        f"({sample.wall_ms / n:.2f} ms/insert, budget<{budget_ms / 1000:.1f}s)"
     )
-    assert elapsed < budget_sec, (
-        f"md_symbol_alias {n}건 삽입이 예산({budget_sec}s)을 넘었습니다"
-        f"({elapsed:.3f}s) — GiST 인덱스가 안 타는지 확인하세요."
+    assert sample.wall_ms < budget_ms, (
+        f"md_symbol_alias {n}건 삽입이 예산({budget_ms / 1000:.1f}s)을 넘었습니다"
+        f"(wall={sample.wall_ms:.3f}ms) — GiST 인덱스가 안 타는지 확인하세요."
     )
 
     row = await pool.fetchrow(
