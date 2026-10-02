@@ -12,7 +12,6 @@ and cross-tenant mixing can be forced on demand without a DB.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -22,6 +21,7 @@ import pytest
 from src.foundation.trust.contracts.v1 import ConsentState as ContractConsentState
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 from src.foundation.trust.projections import build_trust_status_view
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 
@@ -186,21 +186,21 @@ async def test_gate_red_repro_mapping_loop_is_load_bearing(monkeypatch: pytest.M
 
 
 @pytest.mark.perf
-async def test_build_trust_status_view_perf_budget_p95_latency() -> None:
+async def test_build_trust_status_view_perf_budget_p95_latency(
+    perf_budget: PerfBudget,
+) -> None:
     """No published per-axis budget covers Trust Core projections specifically
     (ADR-2026-09-09-C Decision 1's table); pin the same order of magnitude as
     the closest published read-query budget, served purely in-memory here."""
     tenant_id = uuid4()
     consents = [_consent(tenant_id=tenant_id, purpose=f"p{i}") for i in range(5)]
-    samples = 50
-    durations_ms: list[float] = []
+    n = 50
 
-    for _ in range(samples):
+    async def _run() -> None:
         repo = FakeTrustRepository(consents=consents)
-        start = time.perf_counter()
         await build_trust_status_view(repo, tenant_id)
-        durations_ms.append((time.perf_counter() - start) * 1000)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
+    samples = await perf_budget.samples_async(_run, n=n)
+    wall_ms = sorted(s.wall_ms for s in samples)
+    p95 = wall_ms[int(n * 0.95) - 1]
     assert p95 < 50.0, f"build_trust_status_view p95 latency {p95:.3f}ms exceeded 50ms budget"
