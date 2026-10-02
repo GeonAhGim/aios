@@ -8,7 +8,6 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-5,
 from __future__ import annotations
 
 import random
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import reduce
@@ -38,6 +37,7 @@ from src.foundation.positions.domain.snapshot_builder import (
     apply_one,
     fold,
 )
+from tests.conftest import PerfBudget
 
 _POSITION_KEY = "binance:BTCUSDT:s1:e1"
 _ORDER_ID = UUID("00000000-0000-0000-0000-0000000000aa")
@@ -330,7 +330,9 @@ def test_apply_one_propagates_cost_basis_selector_fault_without_swallowing(
 
 
 @pytest.mark.perf
-def test_fold_completes_within_latency_budget_for_10000_entries() -> None:
+def test_fold_completes_within_latency_budget_for_10000_entries(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: 10,000개 저널 엔트리 fold가 1초 예산 안에 끝나야 한다
     (실측 약 0.06초, ~16배 여유). `apply_one`은 매 FILL 스텝마다
     `_seeded_cost_basis`로 로트 전체를 재구성한다(O(lots) per step) — 로트
@@ -338,9 +340,10 @@ def test_fold_completes_within_latency_budget_for_10000_entries() -> None:
     생기면 이 경계가 깨진다."""
     entries = _random_entries(seed=321, n=10_000)
 
-    start = time.perf_counter()
-    result = _fold(entries)
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 1.0, f"fold 지연 회귀: {elapsed:.4f}s for 10,000 entries"
-    assert result.last_journal_seq == 10_000
+    sample = perf_budget.assert_within(
+        lambda: _fold(entries),
+        budget_ms=1000,
+        n=5,
+        label="fold 10k entries",
+    )
+    assert sample.result.last_journal_seq == 10_000
