@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -365,7 +364,7 @@ async def test_tick_algo_releases_reservation_on_unexpected_submit_failure_and_k
 
 
 @pytest.mark.perf
-async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool):
+async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool, perf_budget):
     """Performance assertion -- a single tick over a realistic worst-case
     slice count (500, EM-8~11's own `_MAX_SLICE_COUNT`) must not blow up
     super-linearly. Threshold is deliberately generous (wall-clock,
@@ -381,14 +380,16 @@ async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool):
     plan = AlgoRunPlan(parent=_parent_order(parent_id, qty=Decimal("500")), children=children)
     submitter = _RecordingSubmitter()
 
-    started = time.perf_counter()
-    result = await tick_algo(
-        plan, pool=pool, orders_repo=PostgresOrderRepository(), submit_child=submitter, now=now
+    sample = await perf_budget.sample_async(
+        lambda: tick_algo(
+            plan, pool=pool, orders_repo=PostgresOrderRepository(), submit_child=submitter, now=now
+        )
     )
-    elapsed = time.perf_counter() - started
 
-    assert len(result.outcomes) == 100
-    assert elapsed < 15.0, f"tick_algo took {elapsed:.2f}s for 100 slices -- looks superlinear"
+    assert len(sample.result.outcomes) == 100
+    assert sample.wall_ms < 15_000, (
+        f"tick_algo took {sample.wall_ms / 1000:.2f}s for 100 slices -- looks superlinear"
+    )
 
 
 # -- cancel_algo ------------------------------------------------------------------
