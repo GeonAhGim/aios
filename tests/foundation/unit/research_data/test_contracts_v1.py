@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
@@ -21,6 +20,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.foundation.research_data.contracts import v1
+from tests.conftest import PerfBudget
 
 FIXTURE = Path(__file__).parent / "fixtures" / "research_data_contracts_v1.json"
 
@@ -128,18 +128,16 @@ def test_source_meta_link_only_roundtrip() -> None:
 
 
 @pytest.mark.perf
-def test_research_item_construction_hot_path_performance() -> None:
+def test_research_item_construction_hot_path_performance(perf_budget: PerfBudget) -> None:
     # ResearchItem(**payload) 생성/검증은 모든 수집 어댑터가 아이템 하나마다
     # 호출하는 순수 경로(pydantic validation)다. 10,000회 호출이 1s 내로
     # 끝나야 한다 -- I/O 없는 순수 계약의 실측 증명.
     iterations = 10_000
-
-    started = perf_counter()
-    for _ in range(iterations):
-        _sample_item()
-    elapsed = perf_counter() - started
-
-    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
+    perf_budget.assert_within(
+        lambda: _sample_item(),
+        budget_ms=1000.0,
+        label=f"{iterations}회 호출",
+    )
 
 
 @pytest.mark.parametrize("field", ["known_at", "item_id", "revision_of"])
