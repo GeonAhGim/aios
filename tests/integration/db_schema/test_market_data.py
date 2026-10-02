@@ -5,7 +5,6 @@ RATCHET-split(task-4222) — 원 `test_db_schema.py`(1176줄)에서 분리.
 Spec: 04_db_schema_v1.7.md.
 """
 
-import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -324,42 +323,48 @@ async def test_md_ensure_partitions_creates_future_partitions(raw_conn):
 
 
 @pytest.mark.perf
-async def test_md_candle_bulk_insert_p95_under_budget(raw_conn):
+async def test_md_candle_bulk_insert_p95_under_budget(
+    raw_conn,
+    perf_budget,
+) -> None:
     """LA-11 DEEPEN(task-2966, docs/audit/DEPTH_LA_LB_LC.md#450) — 수치
-    성능 단언. §4.1 배치 인제스트는 캔들마다 md_candle에 개별 INSERT를
-    낸다(CHECK 6종 평가 포함, WORM 트리거는 BEFORE UPDATE OR DELETE만이라
-    INSERT 경로엔 붙지 않는다) — 이 핫 경로의 p95 지연이 예산 안에 있는지
-    증명한다. 예산은 해시체인 계산까지 포함하는 원장 append p95 30ms
-    (task-489/LB-18, task-614/LC-17) 관행과 같은 자릿수를 쓴다: md_candle
-    INSERT는 해시체인이 없어 그보다 가벼워야 하지만, 공유 로컬 Postgres
-    편차를 감안해 같은 예산을 그대로 적용한다."""
+    성능 단언. raw time.perf_counter() → perf_budget.samples_async() 전환
+    (task-11043).
+
+    비동기 I/O를 재는 테스트는 samples_async를 쓴다 — wall_ms로 왕복 지연을
+    보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(30ms)은 그대로
+    유지한다.
+    """
     instrument_id, batch_id = await _md_candles_setup(raw_conn)
     n = 200
-    budget_p95_sec = 0.03
     base_time = datetime.now(timezone.utc)
-    latencies: list[float] = []
-    for i in range(n):
-        start = time.perf_counter()
-        await _insert_md_candle(
-            raw_conn,
-            instrument_id=instrument_id,
-            batch_id=batch_id,
-            open_=100,
-            high=110,
-            low=90,
-            close=105,
-            volume=10,
-            open_time=base_time + timedelta(minutes=i),
-        )
-        latencies.append(time.perf_counter() - start)
 
-    latencies.sort()
-    p95 = latencies[int(n * 0.95)]
-    print(
-        f"[LA-11 md_candle insert] n={n} p95={p95 * 1000:.2f}ms "
-        f"(budget<{budget_p95_sec * 1000:.0f}ms)"
-    )
-    assert p95 < budget_p95_sec, f"md_candle 단건 INSERT p95가 예산을 넘었습니다: {p95:.4f}s"
+    # 200회 측정 → p95 계산 (samples_async: 비동기 I/O 전용)
+    # samples_async는 fn()을 n회 호출하므로, mutable counter로 iteration 인덱스 추적
+    _call_idx = 0
+
+    async def _make_call() -> None:
+        nonlocal _call_idx
+        try:
+            return await _insert_md_candle(
+                raw_conn,
+                instrument_id=instrument_id,
+                batch_id=batch_id,
+                open_=100,
+                high=110,
+                low=90,
+                close=105,
+                volume=10,
+                open_time=base_time + timedelta(minutes=_call_idx),
+            )
+        finally:
+            _call_idx += 1
+
+    samples = await perf_budget.samples_async(_make_call, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    print(f"[LA-11 md_candle insert] n={n} p95={p95_ms:.2f}ms (budget<30ms)")
+    assert p95_ms < 30.0, f"md_candle 단건 INSERT p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
 
 
 async def test_md_candle_lifecycle_replayed_quarantine_then_accept_does_not_leak(raw_conn):
