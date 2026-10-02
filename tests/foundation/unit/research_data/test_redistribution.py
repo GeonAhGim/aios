@@ -6,7 +6,6 @@ DoD (a)(b).
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import cast
 from uuid import uuid4
@@ -30,6 +29,7 @@ from src.foundation.research_data.domain.redistribution import (
     RedistributionViolationError,
     assert_redistribution_allowed,
 )
+from tests.conftest import PerfBudget
 
 _KNOWN_AT = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
 _CAPABILITY = SourceCapability(
@@ -186,7 +186,9 @@ def test_corrupted_grant_scope_propagates_keyerror_instead_of_silently_permittin
 
 
 @pytest.mark.perf
-def test_assert_redistribution_allowed_meets_latency_budget_for_bulk_calls() -> None:
+def test_assert_redistribution_allowed_meets_latency_budget_for_bulk_calls(
+    perf_budget: PerfBudget,
+) -> None:
     """성능 단언 — 순수 함수(I/O 없음) 호출은 상수 시간이어야 한다. 대량
     반복 호출(예: 배치 수집 후 일괄 검증)이 절대시간 예산 내에 있다 —
     회귀가 있다면(예: 매 호출마다 소스 테이블을 O(n) 스캔하는 재구현으로
@@ -195,17 +197,22 @@ def test_assert_redistribution_allowed_meets_latency_budget_for_bulk_calls() -> 
     source = _source(redistribution="link_only")
     grant = _grant()
 
-    budget_sec = 1.0  # 실측 로컬 <0.05s(20,000회, 상수시간 순수 함수 기준)
-    start_time = time.perf_counter()
-    for _ in range(20_000):
-        assert_redistribution_allowed(item, source, grant)
-    elapsed = time.perf_counter() - start_time
+    budget_ms = 1000.0  # 실측 로컬 <50ms(20,000회, 상수시간 순수 함수 기준)
 
-    print(f"[RD-3 redistribution] 20000 calls in {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"assert_redistribution_allowed 20000회 호출이 예산({budget_sec}s)을 "
-        f"넘었습니다({elapsed:.3f}s) — 상수시간 순수 함수가 아닌 무언가로 "
-        "퇴화했는지 확인하세요."
+    def bulk_call() -> None:
+        for _ in range(20_000):
+            assert_redistribution_allowed(item, source, grant)
+
+    sample = perf_budget.assert_within(
+        bulk_call,
+        budget_ms=budget_ms,
+        n=5,
+        batch=1,
+        label="20000 calls RD-3 redistribution latency",
+    )
+    print(
+        f"[RD-3 redistribution] 20000 calls in {sample.cpu_ms / 1000:.3f}s CPU "
+        f"(budget<{budget_ms / 1000:.1f}s)"
     )
 
 
