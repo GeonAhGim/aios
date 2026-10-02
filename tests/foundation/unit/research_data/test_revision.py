@@ -7,7 +7,6 @@ DoD (c)(d).
 from __future__ import annotations
 
 import random
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -143,7 +142,7 @@ def test_link_revision_chain_rejects_non_research_item_element() -> None:
 
 
 @pytest.mark.perf
-def test_link_revision_chain_meets_latency_budget_for_long_chain() -> None:
+def test_link_revision_chain_meets_latency_budget_for_long_chain(perf_budget) -> None:
     """성능 단언 — 단선 체인 워크(FA-9 위임 known_at 비교 포함)는
     O(n)이어야 한다 — 회귀가 있다면(예: 매 단계마다 이미 방문한 전체
     항목을 다시 스캔) O(n^2)로 퇴화한다."""
@@ -157,17 +156,10 @@ def test_link_revision_chain_meets_latency_budget_for_long_chain() -> None:
     rng = random.Random(2907)
     rng.shuffle(items)  # 입력 순서는 링크 구조와 무관해야 한다
 
-    budget_sec = 5.0  # 실측 로컬 <1s(5000개, FA-9 위임 비교 포함)
-    start_time = time.perf_counter()
-    ordered = link_revision_chain(items)
-    elapsed = time.perf_counter() - start_time
+    def _run() -> None:
+        link_revision_chain(items)
 
-    assert len(ordered) == n
-    print(f"[RD-3 revision] {n}-item chain linked in {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"link_revision_chain({n}개)가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s) — "
-        "O(n) 워크가 O(n^2)로 퇴화했는지 확인하세요."
-    )
+    perf_budget.assert_within(_run, budget_ms=5000.0, label="link_revision_chain 5000-item chain")
 
 
 def test_gate_red_if_branch_check_removed_existing_negative_would_flip() -> None:
