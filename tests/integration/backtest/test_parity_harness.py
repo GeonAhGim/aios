@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from time import perf_counter
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -316,16 +315,20 @@ def test_failure_injection_conversion_error_propagates_without_partial_success(
 
 
 @pytest.mark.perf
-def test_parity_throughput_within_monthly_backtest_budget() -> None:
+def test_parity_throughput_within_monthly_backtest_budget(perf_budget) -> None:
     """ADR-2026-09-09-C: comparison alone must fit the 3s monthly M1 budget."""
     repetitions = 30 * 24 * 60 // len(_PAPER_TRACE)
     paper = _PAPER_TRACE * repetitions
     backtest = _matching_backtest_fills() * repetitions
 
-    started = perf_counter()
-    report = check_parity(paper, backtest)
-    elapsed = perf_counter() - started
+    sample = perf_budget.assert_within(
+        lambda: check_parity(paper, backtest),
+        budget_ms=3000.0,
+        n=1,
+        warmup=0,
+        label="43,200 fill pair parity comparison — 예산 3s",
+    )
 
+    report = sample.result
     report.raise_if_mismatch()
     assert report.paper_fill_count == report.backtest_fill_count == 43_200
-    assert elapsed < 3.0, f"43,200 fill pairs took {elapsed:.3f}s (budget 3s)"
