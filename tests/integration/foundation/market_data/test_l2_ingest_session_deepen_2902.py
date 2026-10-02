@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +35,7 @@ from src.foundation.market_data.adapters.postgres_coverage_repository import (
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.domain.l2_orderbook import L2Diff, L2Snapshot
 from src.foundation.market_data.ports.coverage_repository import CoverageQuality, CoverageSpan
+from tests.conftest import PerfBudget
 
 
 class _Stop(Exception):
@@ -268,7 +268,9 @@ async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_con
 
 
 @pytest.mark.perf
-async def test_repeated_gap_cycles_meet_real_db_write_latency_budget(pool: asyncpg.Pool):
+async def test_repeated_gap_cycles_meet_real_db_write_latency_budget(
+    pool: asyncpg.Pool, perf_budget: PerfBudget
+) -> None:
     """실 DB에 대한 반복 갭/재동기화 사이클(span 쓰기 포함)이 절대시간
     예산 내여야 한다 — 24시간 연속 수집에서 갭이 잦아도 DB 쓰기가 병목이
     되지 않는지 증명한다."""
@@ -289,19 +291,22 @@ async def test_repeated_gap_cycles_meet_real_db_write_latency_budget(pool: async
     connect_fn = _connect_sequence([conn])
     session = _session(instrument_id, pool, repo, clock, connect_fn)
 
-    start = time.perf_counter()
-    with pytest.raises(_Stop):
-        await session.run()
-    elapsed = time.perf_counter() - start
+    async def _run() -> None:
+        with pytest.raises(_Stop):
+            await session.run()
+
+    sample = await perf_budget.sample_async(_run)
 
     async with pool.acquire() as db_conn, db_conn.transaction():
         spans = await repo.list_spans(db_conn, instrument_id, Timeframe.L2)
 
+    budget_ms = budget_sec * 1000
     print(
-        f"[RD-19 l2_ingest_session] 갭 {n_gaps}회 실 DB 사이클 {elapsed:.3f}s "
+        f"[RD-19 l2_ingest_session] 갭 {n_gaps}회 실 DB 사이클 {sample.wall_ms / 1000:.3f}s "
         f"(budget<{budget_sec}s)"
     )
     assert len(spans) == n_gaps  # 갭마다 1개씩 결손 span, 마지막 끊김이 추가로 닫지 않음(연결 소진)
-    assert elapsed < budget_sec, (
-        f"갭 {n_gaps}회 실 DB 사이클이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    elapsed_sec = sample.wall_ms / 1000
+    assert sample.wall_ms < budget_ms, (
+        f"갭 {n_gaps}회 실 DB 사이클이 예산({budget_sec}s)을 넘었습니다({elapsed_sec:.3f}s)."
     )
