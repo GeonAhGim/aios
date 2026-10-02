@@ -25,6 +25,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from unittest import mock
 from uuid import uuid4
@@ -50,6 +51,11 @@ from src.foundation.risk_gate.domain.models import RiskSignalType, SafetyScope
 from src.services.safety.kill_switch_service import KillSwitchService
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.db import ensure_worker_database, template_database_url
+from tests.support.deep_downgrade import (
+    downgrade_past_irreversible_em3_backfill,
+    purge_position_snapshots,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DOWN_REVISION = "b76f4590b1b8"
@@ -59,10 +65,13 @@ def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
 
 
-def _run_alembic(*args: str) -> subprocess.CompletedProcess[str]:
+def _run_alembic(
+    *args: str, database_url: str | None = None
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
+        env={**os.environ, "DATABASE_URL": database_url} if database_url else None,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -98,10 +107,9 @@ def kill_switch_service(pool):
     )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _ensure_head():
-    _run_alembic("upgrade", "head")
-    yield
+    # Only the disposable round-trip DB changes schema during this module.
     _run_alembic("upgrade", "head")
 
 
@@ -137,19 +145,29 @@ def test_alembic_heads_is_single():
     assert len(lines) == 1, f"alembic heads가 단일이어야 합니다: {result.stdout}"
 
 
-async def test_upgrade_downgrade_upgrade_round_trip_recreates_risk_signal(pool):
-    assert await _table_exists(pool, "risk_signal")
-
-    _run_alembic("downgrade", _DOWN_REVISION)
-    assert not await _table_exists(pool, "risk_signal")
-
-    _run_alembic("upgrade", "head")
-    assert await _table_exists(pool, "risk_signal")
+async def test_upgrade_downgrade_upgrade_round_trip_recreates_risk_signal():
+    migration_url = await ensure_worker_database(template_database_url(), "intradayrt")
+    migration_pool = await asyncpg.create_pool(
+        migration_url.replace("postgresql+asyncpg://", "postgresql://"),
+        min_size=1, max_size=2,
+    )
+    run_alembic = partial(_run_alembic, database_url=migration_url)
+    try:
+        assert await _table_exists(migration_pool, "risk_signal")
+        await purge_position_snapshots(migration_pool)
+        try:
+            downgrade_past_irreversible_em3_backfill(run_alembic, _DOWN_REVISION)
+            assert not await _table_exists(migration_pool, "risk_signal")
+        finally:
+            run_alembic("upgrade", "head")
+        assert await _table_exists(migration_pool, "risk_signal")
+    finally:
+        await migration_pool.close()
 
 
 async def test_insert_with_nonexistent_tenant_id_raises_fk_violation(pool):
     missing_tenant_id = uuid4()
-    with pytest.raises(asyncpg.ForeignKeyViolationError):
+    with pytest.raises(asyncpg.ForeignKeyViolationError) as exc_info:
         async with pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO risk_signal "
@@ -159,6 +177,8 @@ async def test_insert_with_nonexistent_tenant_id_raises_fk_violation(pool):
                 missing_tenant_id,
                 f"orphan-{uuid4().hex}",
             )
+    assert exc_info.value.sqlstate == "23503"
+    assert exc_info.value.constraint_name == "risk_signal_tenant_id_fkey"
 
 
 # -- (a)(b) insert_if_new 멱등 + dedupe_key 5분 경계 -----------------------
