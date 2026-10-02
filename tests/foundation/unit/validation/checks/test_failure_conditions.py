@@ -8,7 +8,6 @@ performance assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -186,18 +185,14 @@ def test_non_numeric_mdd_value_raises_instead_of_silently_passing() -> None:
 
 
 @pytest.mark.perf
-def test_p95_latency_within_local_budget() -> None:
+def test_p95_latency_within_local_budget(perf_budget) -> None:
     """This check does no I/O and no replay -- pure dict lookup + one
     multiplication -- so its own overhead budget is tight (5ms)."""
     ctx = _ctx(prior_results={"oos_walk_forward": _oos_result()})
-    samples: list[float] = []
-    for _ in range(20):
-        start = time.perf_counter()
-        run(ctx)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95_seconds = samples[int(len(samples) * 0.95)]
-    assert p95_seconds < 0.005, f"p95={p95_seconds * 1000:.2f}ms exceeds 5ms budget"
+    samples = perf_budget.samples(lambda: run(ctx), n=20)
+    sorted_cpu = sorted(s.cpu_ms for s in samples)
+    p95_ms = sorted_cpu[int(len(sorted_cpu) * 0.95)]
+    assert p95_ms < 5.0, f"p95={p95_ms:.2f}ms exceeds 5ms budget"
 
 
 # -- D2 gate-red reproduction --------------------------------------------------
