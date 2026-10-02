@@ -4,8 +4,6 @@ detection (§2 row 158). Pure domain, no DB. Includes D2 evidence
 failure-injection and gate-red repro live in `test_policy_hash.py`).
 """
 
-import time
-
 import pytest
 from pydantic import ValidationError
 
@@ -185,7 +183,7 @@ def test_build_artifact_propagates_registry_hash_failure(monkeypatch):
 
 
 @pytest.mark.perf
-def test_build_artifact_large_fsm_within_dsl_compile_budget():
+def test_build_artifact_large_fsm_within_dsl_compile_budget(perf_budget):
     large_fsm = {
         "states": [f"S{i}" for i in range(500)],
         "transitions": [
@@ -197,7 +195,8 @@ def test_build_artifact_large_fsm_within_dsl_compile_budget():
             for i in range(2000)
         ],
     }
-    start = time.perf_counter()
-    _artifact(fsm_definition=large_fsm)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.3, f"large-FSM build_artifact() took {elapsed * 1000:.2f}ms, budget 300ms"
+    perf_budget.assert_within(
+        lambda: _artifact(fsm_definition=large_fsm),
+        budget_ms=300,
+        label="large-FSM build_artifact()",
+    )
