@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import math
 import os
-import time
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -343,12 +342,17 @@ async def test_accounts_summary_concurrent_mixed_tenants_do_not_cross_leak(clien
 
 
 @pytest.mark.perf
-async def test_accounts_summary_p95_latency_stays_within_normalized_ceiling(client, pool):
+async def test_accounts_summary_p95_latency_stays_within_normalized_ceiling(
+    client, pool, perf_budget
+):
     """수치 성능 단언 -- 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
     절대 ms 임계 대신, 가벼운 baseline 호출 1건 대비 정규화한 상한만
     게이트로 쓴다(test_positions_router.py p95 테스트와 동일 결정, DoD
     "응답 p95 300ms"는 운영 배포 기준이고 공유 로컬 DB에서는 baseline 대비
-    배율로 회귀만 감시한다)."""
+    배율로 회귀만 감시한다).
+
+    raw time.monotonic() → perf_budget.samples_async() 전환 (task-11029).
+    """
     headers, tenant_id = await _register(client)
     account_id = await _create_account(pool, tenant_id, venue="KIS_PAPER")
     await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
@@ -356,19 +360,21 @@ async def test_accounts_summary_p95_latency_stays_within_normalized_ceiling(clie
         pool, account_id, date(2026, 9, 16), cash=Decimal("1000"), positions_mv=Decimal("100")
     )
 
-    async def _call() -> float:
-        started = time.monotonic()
+    async def _call() -> None:
         response = await client.get(BASE, headers=headers)
-        elapsed = time.monotonic() - started
         assert response.status_code == 200
-        return elapsed
 
-    baseline_elapsed = await _call()
-    samples = sorted([await _call() for _ in range(20)])
-    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+    # baseline 1건 (wall_ms)
+    baseline_sample = await perf_budget.sample_async(_call)
+    baseline_ms = baseline_sample.wall_ms
 
-    ceiling = baseline_elapsed * 5 + 0.05
-    assert p95 <= ceiling, (
-        f"GET /v1/accounts/summary p95 지연 {p95:.4f}s가 정규화 상한 "
-        f"{ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 초과했습니다"
+    # 20회 샘플 → p95 계산
+    samples = await perf_budget.samples_async(_call, n=20)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(math.ceil(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+
+    ceiling_ms = baseline_ms * 5 + 50  # 0.05s = 50ms
+    assert p95_ms <= ceiling_ms, (
+        f"GET /v1/accounts/summary p95 지연 {p95_ms:.2f}ms가 정규화 상한 "
+        f"{ceiling_ms:.2f}ms(baseline {baseline_ms:.2f}ms)를 초과했습니다"
     )
