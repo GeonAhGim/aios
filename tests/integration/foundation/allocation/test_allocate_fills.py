@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -36,6 +35,7 @@ from src.foundation.entities.contracts.v1 import SubAccount
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
 from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.foundation.allocation.conftest import (
     create_order_with_fills,
     create_test_user,
@@ -397,14 +397,18 @@ async def test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool
     """수치 성능 단언 — 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
     절대 ms 임계 대신, 가벼운 baseline 호출 1건 대비 정규화한 상한만
     게이트로 쓴다(LA-18 test_quality_metrics.py·LA-24
-    test_market_data_router.py·task-3004 test_append.py와 동일 교훈)."""
+    test_market_data_router.py·task-3004 test_append.py와 동일 교훈).
+
+    raw perf_counter 단언 → RelativeBudget.measure_async 전환 (task-11047).
+    비동기 I/O는 wall-clock으로 재되, CPU 보정 루프 비율로 호스트 부하를
+    상쇄한다(task-7631)."""
     entities, journal, balances, audit = await _ports(pool)
     hierarchy = await build_hierarchy(pool, entities)
     targets = (
         WeightTarget(sub_account_id=hierarchy.sub_account.sub_account_id, weight=Decimal("1")),
     )
 
-    async def _run_once() -> float:
+    async def _run_once(conn) -> float:
         order_id = await create_order_with_fills(
             pool,
             user_id=hierarchy.tenant_id,
@@ -413,9 +417,8 @@ async def test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool
             side="SELL",
             fills=[(Decimal("1"), Decimal("100.00"))],
         )
-        start = time.perf_counter()
-        async with pool.acquire() as conn, conn.transaction():
-            await allocate_order_fills(
+        sample = await RelativeBudget().measure_async(
+            lambda: allocate_order_fills(
                 conn,
                 tenant_id=hierarchy.tenant_id,
                 order_id=order_id,
@@ -429,12 +432,14 @@ async def test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool
                 audit=audit,
                 clock=_clock,
                 trace_id=uuid4(),
-            )
-        return time.perf_counter() - start
+            ),
+            n=1,
+        )
+        return sample.op_ms / 1000  # ms → s
 
-    baseline_elapsed = await _run_once()
-
-    samples = [await _run_once() for _ in range(20)]
+    async with pool.acquire() as conn:
+        baseline_elapsed = await _run_once(conn)
+        samples = [await _run_once(conn) for _ in range(20)]
     samples.sort()
     p95 = samples[math.ceil(0.95 * len(samples)) - 1]
 
