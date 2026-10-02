@@ -127,7 +127,7 @@ async def test_repeated_gate_calls_meet_latency_budget_allow_and_deny(
     allow_repo = _FakeSourceContractRepository({"BITGET": _contract()})
     deny_repo = _FakeSourceContractRepository({"BITGET": _contract(scope=RedistributionScope.NONE)})
 
-    # raw time.perf_counter() → PerfBudget.sample_async 전환
+    # PerfBudget.sample_async: process_time + coverage tracer-pause + best-of-N
     total_wall_ms = 0.0
     for _ in range(iterations):
         # allow 호출
