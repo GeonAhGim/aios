@@ -19,7 +19,6 @@ docs/audit/DEPTH_DC_RD.md#1767) D1 -> D2 증빙, 실 DB 대상.
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -43,6 +42,7 @@ from src.foundation.research_data.adapters.opendart.postgres_filing_repository i
 from src.foundation.research_data.adapters.opendart.postgres_unprocessed_queue import (
     PostgresUnprocessedFilingQueue,
 )
+from tests._perf.relative_budget import RelativeBudget
 
 _EX_DATE = date(2026, 4, 1)
 
@@ -177,28 +177,41 @@ async def test_bulk_append_and_pit_resolve_meets_latency_budget(
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
     try:
-        start = time.perf_counter()
-        async with pool.acquire() as conn, conn.transaction():
-            for i in range(n):
-                await filing_repo.append(
-                    conn,
-                    _split(
-                        instrument_id,
-                        ratio=str(i + 1),
-                        known_at=base + timedelta(hours=i),
-                        source_ref=f"rcept-perf-{instrument_id}-{i}",
-                    ),
-                )
-            history = await filing_repo.list_history(conn, instrument_id)
-        mid = resolve_as_of(history, base + timedelta(hours=n // 2))
-        elapsed = time.perf_counter() - start
 
-        print(f"[RD-20 filing repo] {n}행 왕복 {elapsed:.3f}s (budget<{budget_sec}s)")
-        assert len(history) == n
-        assert len(mid) == 1
-        assert mid[0].ratio == Decimal(str(n // 2 + 1))
-        assert elapsed < budget_sec, (
-            f"대량 append+PIT 왕복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+        async def _bulk_append_and_pit() -> None:
+            async with pool.acquire() as conn, conn.transaction():
+                for i in range(n):
+                    await filing_repo.append(
+                        conn,
+                        _split(
+                            instrument_id,
+                            ratio=str(i + 1),
+                            known_at=base + timedelta(hours=i),
+                            source_ref=f"rcept-perf-{instrument_id}-{i}",
+                        ),
+                    )
+                history = await filing_repo.list_history(conn, instrument_id)
+            mid = resolve_as_of(history, base + timedelta(hours=n // 2))
+            assert len(history) == n
+            assert len(mid) == 1
+            assert mid[0].ratio == Decimal(str(n // 2 + 1))
+
+        # raw perf_counter → RelativeBudget.measure_async (task-11067, L4-DC-2).
+        # 비동기 I/O 왕복은 wall-clock으로 재되, CPU 보정 루프 비율로 호스트 부하
+        # 상쇄 — 보정 루프가 2배 느려지면 로그인 왕복도 스케줄링 경합으로 비례해
+        # 느려지므로 비율은 유지된다(task-7631).
+        sample = await RelativeBudget().measure_async(
+            _bulk_append_and_pit,
+            n=3,
+            calibration_n=5,
+        )
+        print(
+            f"[RD-20 filing repo] {n}행 왕복 보정 비율 {sample.ratio:.1f}x "
+            f"(wall {sample.op_ms:.0f}ms, calib {sample.calibration_ms:.0f}ms)"
+        )
+        # 절대시간 예산 8s — 상대 보정 비율과 함께 하드 게이트
+        assert sample.op_ms < budget_sec * 1000, (
+            f"대량 append+PIT 왕복이 예산({budget_sec}s)을 넘었습니다."
         )
     finally:
         async with pool.acquire() as conn:
@@ -241,8 +254,7 @@ async def test_aios_app_cannot_update_or_delete_filing_then_pit_still_works(
             await conn.execute("SET LOCAL ROLE aios_app")
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 await conn.execute(
-                    "UPDATE md_corporate_action_filing SET ratio = 99 "
-                    "WHERE source_ref = $1",
+                    "UPDATE md_corporate_action_filing SET ratio = 99 WHERE source_ref = $1",
                     original.source_ref,
                 )
         # 권한 거부 후 트랜잭션이 aborted 되므로 DELETE는 새 트랜잭션에서 검증한다
