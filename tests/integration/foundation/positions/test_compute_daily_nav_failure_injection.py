@@ -120,7 +120,15 @@ def _run_pytest_node(
 ) -> subprocess.CompletedProcess[str]:
     repo_root = str(Path.cwd())
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", target_test]
-    env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
+    env = dict(
+        os.environ,
+        PYTHONPATH=repo_root,
+        PYTEST_ADDOPTS="",
+        PYTHONIOENCODING="utf-8",
+        TEST_DATABASE_URL=os.environ["DATABASE_URL"],
+    )
+    # The child reuses this worker's DB; it must not DROP/reclone the parent's DB.
+    env.pop("PYTEST_XDIST_WORKER", None)
     if plugin_name is not None:
         assert plugin_dir is not None
         command = [*command[:-1], "-p", plugin_name, command[-1]]

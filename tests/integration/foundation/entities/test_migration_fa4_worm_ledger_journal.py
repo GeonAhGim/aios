@@ -24,6 +24,7 @@ DEFERRABLE 제약 트리거(`ledger_entry_balanced_trg`, Σ차변=Σ대변 강�
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -57,7 +58,17 @@ from src.foundation.ledger.domain.chart_of_accounts import (
 )
 from src.foundation.ledger.domain.hash_chain import entry_hash, lines_digest
 from src.foundation.ledger.domain.idempotency import idempotency_key
-from tests.support.deep_downgrade import purge_position_snapshots
+from tests.integration.conftest import create_test_user
+from tests.integration.oms.conftest import insert_order
+from tests.support.db import (
+    drop_worker_database,
+    ensure_worker_database,
+    template_database_url,
+)
+from tests.support.deep_downgrade import (
+    downgrade_past_irreversible_em3_backfill,
+    purge_position_snapshots,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "789c138f13fe"
@@ -89,28 +100,17 @@ async def pool():
     await p.close()
 
 
-def _sweep_synthetic_snapshots(prefix: str) -> None:
-    """FA-0d-fix (task-771991202): rows this module inserts below FA-4 carry
-    synthetic non-5-part keys that `cdb114b6903f` (FA-0d) refuses fail-closed,
-    so they are removed before the schema is brought back to head."""
-    import asyncio
-
-    async def _sweep() -> None:
-        conn = await asyncpg.connect(_asyncpg_dsn())
-        try:
-            await conn.execute("DELETE FROM pos_snapshot WHERE position_key LIKE $1", f"{prefix}%")
-        finally:
-            await conn.close()
-
-    asyncio.run(_sweep())
-
-
 @pytest.fixture(autouse=True)
-def _ensure_head():
-    _run_alembic("upgrade", "head")
-    yield
-    _sweep_synthetic_snapshots("fa4-worm-test-")
-    _run_alembic("upgrade", "head")
+def _ensure_head(monkeypatch):
+    template = template_database_url()
+    worker = f"fa4_{uuid4().hex[:8]}"
+    database_url = asyncio.run(ensure_worker_database(template, worker))
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    try:
+        _run_alembic("upgrade", "head")
+        yield
+    finally:
+        asyncio.run(drop_worker_database(template, worker))
 
 
 def _clock() -> datetime:
@@ -283,13 +283,38 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
 
 
 async def test_ledger_journal_entry_and_posting_line_never_backfilled(pool):
+    # Reproduce the WORM residue left by earlier EM3 backfill tests.
+    user_id = await create_test_user(pool)
+    async with pool.acquire() as conn:
+        order_id = await insert_order(conn, user_id)
+        await conn.execute(
+            "UPDATE orders SET committed_child_qty = 1 WHERE order_id = $1", order_id
+        )
+        await conn.execute(
+            "INSERT INTO order_events "
+            "(order_id, from_status, to_status, event, reason_code, actor_subject_id, "
+            "trace_id, occurred_at, payload_hash) VALUES "
+            "($1, 'CREATED', 'CREATED', 'CHILD_QTY_COMMITTED', "
+            "'EM3_CHILD_SLICE_COMMIT_BACKFILL_TASK8890', 'system', "
+            "gen_random_uuid(), now(), repeat('e', 64))",
+            order_id,
+        )
     await purge_position_snapshots(pool)  # deep downgrade: see tests/support/deep_downgrade.py
-    _run_alembic("downgrade", _DOWN_REVISION)
+    # Only the data-only WORM revision is stamped; all schema DDL still runs.
+    downgrade_past_irreversible_em3_backfill(_run_alembic, _DOWN_REVISION)
     entry_id = await _insert_pre_fa4_ledger_entry(pool, f"fa4-worm-test:{uuid4().hex}", uuid4())
 
     _run_alembic("upgrade", "head")
 
     async with pool.acquire() as conn:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM order_events WHERE order_id = $1 "
+                "AND reason_code = 'EM3_CHILD_SLICE_COMMIT_BACKFILL_TASK8890'",
+                order_id,
+            )
+            == 1
+        )
         entry_row = await conn.fetchrow(
             "SELECT fund_id, portfolio_id FROM ledger_journal_entry WHERE entry_id = $1",
             entry_id,

@@ -263,7 +263,15 @@ def test_pytest_gate_turns_red_when_br8_websocket_declaration_is_reverted(
     )
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", target_test]
     repo_root = str(Path.cwd())
-    env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
+    env = dict(
+        os.environ,
+        PYTHONPATH=repo_root,
+        PYTEST_ADDOPTS="",
+        PYTHONIOENCODING="utf-8",
+        TEST_DATABASE_URL=os.environ["DATABASE_URL"],
+    )
+    # The child reuses this worker's DB; it must not DROP/reclone the parent's DB.
+    env.pop("PYTEST_XDIST_WORKER", None)
 
     baseline = subprocess.run(
         command,
