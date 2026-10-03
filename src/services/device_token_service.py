@@ -13,6 +13,7 @@ expired, etc.) deactivate() marks the token inactive — this is separate
 from the FD-17.1 CRITICAL retry policy (retrying a token-level issue
 has no effect).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -45,11 +46,9 @@ class DeviceTokenService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    async def register(
-        self, user_id: UUID, device_token: str, platform: str
-    ) -> DeviceTokenRecord:
+    async def register(self, user_id: UUID, device_token: str, platform: str) -> DeviceTokenRecord:
         if platform not in VALID_PLATFORMS:
-            raise DeviceTokenError(f"알 수 없는 platform입니다: {platform}")
+            raise DeviceTokenError(f"Unknown platform: {platform}")
 
         async with self._pool.acquire() as conn:
             existing = await conn.fetchrow(
@@ -88,7 +87,7 @@ class DeviceTokenService:
                 user_id,
             )
         if result == "UPDATE 0":
-            raise DeviceTokenNotFoundError("존재하지 않거나 이미 비활성화된 디바이스입니다.")
+            raise DeviceTokenNotFoundError("Device not found or already inactive.")
 
     async def list_active_tokens(self, user_id: UUID) -> list[str]:
         async with self._pool.acquire() as conn:
