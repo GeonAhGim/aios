@@ -2819,3 +2819,22 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
     N/A(실행 코드 변경 없이 이미 해결된 경보를 재검증하는 문서 리프).
     다음 배정 전 신규 실패 시각과 resolved 이력을 대조하고 현재 SHA에서 해당 단계부터
     실행해야 한다. 해결된 경보의 반복 배정 로직은 저장소 밖 PM 운영 코드의 별도 과제다.
+
+## task-11249 — 해결된 e2e 서버 기동 경보 재검증 (2026-10-04)
+
+- 대상: H-7b / L4-07, esc-ci-e2e.json의 180000ms webServer timeout.
+- 후보 1a580317be36b2ab42103799e5e72fa612c8be1e의 diff는 Python sandbox 종료 처리
+  한 파일뿐이다. Playwright 서버 명령은 Python을 실행하지 않으며, 4회 예산 소진 bisect의
+  후보를 e2e 원인으로 확정할 근거는 없다.
+- 경보는 이미 resolved이고 resolved_sha=deacc374b0ed34d59cf2e4e0401ee053bd01127a,
+  last_seen=2026-09-29T21:48:12+00:00이다. ee5d30079는 서버 선행 빌드의 중복 tsc를
+  제거했고 현재 설정에도 반영돼 있다. 당시 자원 경합은 이번 실행에서 재현되지 않았다.
+- 검증 HEAD=afd4866fe. frontend에서 npm run test:e2e: 35 passed (29.6s), exit 0.
+  local_ci.py의 smoke_specs 및 e2e 명령과 동일한 단계도 별도로 실행했다:
+  npm exec -- playwright test e2e/backtest-run.spec.ts e2e/chart-indicator-overlay.spec.ts e2e/demo-onboarding-flow.spec.ts e2e/order-submission.spec.ts --retries=1 --trace=on-first-retry
+  결과 5 passed (8.1s), exit 0, 재시도 없음. 서버 기동 포함 전체 시간이 180초 미만이다.
+- npm run lint --workspace=apps/web 및 npm run build --workspace=apps/web: exit 0.
+  번들 빌드 520ms; 기존 lint/번들 경고는 남아 있다. 전체 e2e의 부정/실패 주입 사례도 통과.
+- 실행 코드·타임아웃·기준선·규칙·ignore 변경 없음. 신규 수정으로 포장하지 않고 검증만 기록.
+  D2 신규 negative/실패 주입/성능 assertion/red 재현, Vitest 변경 코드 검사 및 D3 replay:
+  N/A(이미 해결된 경보의 문서 증빙 리프이며 실행 코드 변경 없음).
