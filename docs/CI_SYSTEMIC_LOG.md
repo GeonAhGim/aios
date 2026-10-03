@@ -2798,3 +2798,24 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
     D2 신규 negative 3건·성능 assertion·red 재현: N/A(실행 코드 변경 없는 기존 적색 재검증).
     다음 동일 경보는 현재 SHA에서 e2e 단계부터 재현하고, resolved 이력과 신규 실패 시각을
     대조해야 한다. PM 자동 재할당 로직은 이 task의 저장소 수정 범위 밖이다.
+
+96. task-11224 (2026-10-03, H-7b / UX_JOURNEYS J1-J3,J9): journeys 기존 적색 재검증.
+    재개 HEAD `c92bcad4de2effd438f425e40baf021a0fdd7830`. 보존 패치에는 실행 코드 변경이
+    없고 `test-results/.last-run.json` 실패 표지만 있었다. 후보 `d21e3e681`의 stat과
+    `src/exchanges/kis/generated/etfetn_01_mixin.py` diff는 백엔드 docstring 정리다.
+    4회로 소진된 bisect 대상도 backend pytest 3건이므로 webServer 회귀 확정 근거가 아니다.
+    원본 `esc-ci-journeys.json`은 last_seen=2026-09-29T17:49:14+00:00,
+    status=resolved, closed_at=2026-09-30T00:53:50+00:00,
+    resolved_sha=4d5ebed5b621a5e92c18eca2aa8d654e195577d8이며 해당 SHA는 HEAD의 조상이다.
+    `local_ci.py`의 journey_specs/journeys_cmd와 동일하게 frontend에서 실행:
+    `npm exec -- playwright test e2e/journey-j1-onboarding-to-dashboard.spec.ts e2e/journey-j2-discover-to-backtest.spec.ts e2e/journey-j3-paper-order-to-position.spec.ts e2e/journey-j9-emergency-stop.spec.ts --retries=1 --trace=on-first-retry`.
+    결과 30 passed (39.1s), exit 0, 재시도 없음. 가입 409, 자격증명 403, 포트폴리오 5xx,
+    주문 거부 403, 위임장 미설정, 긴급 정지 403 등 기존 부정/실패 주입 테스트도 통과했다.
+    webServer.timeout=180000ms, workers=4, reuseExistingServer=false 유지.
+    `npm run lint --workspace=apps/web`와 `npm run build --workspace=apps/web` exit 0;
+    Vite 번들 빌드 625ms(전체 타입 검사 시간 아님). 기존 lint/번들 크기 경고는 남아 있다.
+    현재 실패가 재현되지 않아 신규 코드 수정으로 주장하지 않는다. 기준선/예산/규칙/ignore
+    변경 없음. D2 신규 negative/성능 assertion/red 재현, Vitest 변경 코드 검사 및 D3 replay:
+    N/A(실행 코드 변경 없이 이미 해결된 경보를 재검증하는 문서 리프).
+    다음 배정 전 신규 실패 시각과 resolved 이력을 대조하고 현재 SHA에서 해당 단계부터
+    실행해야 한다. 해결된 경보의 반복 배정 로직은 저장소 밖 PM 운영 코드의 별도 과제다.
