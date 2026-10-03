@@ -155,7 +155,7 @@ jobs:
       # 별도 ADR. 결과는 로그·step summary로 계속 남는다.
       - name: Test (perf, serial)
         continue-on-error: true
-        run: pytest -q -m "perf and not nightly and not live_demo and not redis" --cov=src --cov-append --cov-report=term --cov-report=xml
+        run: pytest -q -m "perf and not nightly and not live_demo and not redis" --cov=src --cov-append --cov-report=term
 
       # PLT-37 — 절대 임계치(--cov-fail-under) 대신 coverage.xml 대비 직전
       # baseline에서 하락(허용 오차 0.5%p)했을 때만 FAIL한다. coverage.xml만
