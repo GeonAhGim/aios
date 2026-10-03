@@ -94,7 +94,7 @@ _REASON_CODE = "EM3_CHILD_SLICE_COMMIT_BACKFILL_TASK8890"
 
 # `:reason_code` is a bound parameter (never interpolated) -- everything
 # else is a fixed constant (table/column names).
-_BACKFILL_SQL = """
+_BACKFILL_SQL = r"""
 WITH gaps AS (
     SELECT
         o.order_id,

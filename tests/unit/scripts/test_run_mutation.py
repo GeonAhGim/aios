@@ -16,7 +16,15 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from cosmic_ray.work_item import MutationSpec, TestOutcome, WorkerOutcome, WorkItem, WorkResult
+from cosmic_ray.work_item import (
+    MutationSpec,
+    WorkerOutcome,
+    WorkItem,
+    WorkResult,
+)
+from cosmic_ray.work_item import (
+    TestOutcome as _TestOutcome,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -53,17 +61,17 @@ def _spec(
 
 
 def _killed() -> WorkResult:
-    return WorkResult(worker_outcome=WorkerOutcome.NORMAL, test_outcome=TestOutcome.KILLED)
+    return WorkResult(worker_outcome=WorkerOutcome.NORMAL, test_outcome=_TestOutcome.KILLED)
 
 
 def _survived(diff: str = "--- diff ---") -> WorkResult:
     return WorkResult(
-        worker_outcome=WorkerOutcome.NORMAL, test_outcome=TestOutcome.SURVIVED, diff=diff
+        worker_outcome=WorkerOutcome.NORMAL, test_outcome=_TestOutcome.SURVIVED, diff=diff
     )
 
 
 def _incompetent() -> WorkResult:
-    return WorkResult(worker_outcome=WorkerOutcome.EXCEPTION, test_outcome=TestOutcome.INCOMPETENT)
+    return WorkResult(worker_outcome=WorkerOutcome.EXCEPTION, test_outcome=_TestOutcome.INCOMPETENT)
 
 
 def _skipped() -> WorkResult:
