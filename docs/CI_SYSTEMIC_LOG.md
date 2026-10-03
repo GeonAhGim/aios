@@ -2838,3 +2838,25 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
 - 실행 코드·타임아웃·기준선·규칙·ignore 변경 없음. 신규 수정으로 포장하지 않고 검증만 기록.
   D2 신규 negative/실패 주입/성능 assertion/red 재현, Vitest 변경 코드 검사 및 D3 replay:
   N/A(이미 해결된 경보의 문서 증빙 리프이며 실행 코드 변경 없음).
+
+## task-11258 — 해결된 journeys 기동 경보 재검증 (2026-10-04)
+
+- 대상 H-7b / L4-07, 검증 HEAD=5f02fcde641498d739570655d6dac21cf0722064.
+  esc-ci-journeys.json은 resolved, last_seen=2026-09-29T17:49:14+00:00,
+  resolved_sha=4d5ebed5b621a5e92c18eca2aa8d654e195577d8,
+  closed_at=2026-09-30T00:53:50+00:00이다. 해결 후 반복 배정된 경보다.
+- 후보 d21e3e681은 KIS generated mixin 7개 파일의 문서 문자열 정리다.
+  journeys 서버는 Python을 실행하지 않는다. 예산 소진 bisect 후보를 원인으로
+  확정할 근거가 없으며, 현재 서버 기동 오류도 재현되지 않았다.
+- 기존 ee5d30079는 webServer 선행 빌드의 중복 tsc를 제거했다. 현재도
+  build:e2e(vite build) 후 preview를 실행하며 180000ms 예산을 유지한다.
+  0c6f4ff52의 workers=4도 반영돼 있다. 과거 자원 경합의 재현 증빙은 이번에 없다.
+- local_ci.py journey_specs/journeys_cmd와 동일한 단계 명령을 frontend에서 실행:
+  npm exec -- playwright test e2e/journey-j1-onboarding-to-dashboard.spec.ts e2e/journey-j2-discover-to-backtest.spec.ts e2e/journey-j3-paper-order-to-position.spec.ts e2e/journey-j9-emergency-stop.spec.ts --retries=1 --trace=on-first-retry
+  결과 30 passed (26.0s), exit 0, 재시도 없음. 서버 기동 포함 180초 미만이다.
+  기존 409/403/5xx 부정 및 실패 주입 사례를 포함한다.
+- npm run lint --workspace=apps/web 및 npm run build --workspace=apps/web: exit 0.
+  Vite 1088 modules, 620ms(타입 검사 시간 제외). 기존 lint/번들 경고는 남아 있다.
+- 실행 코드/기준선/예산/규칙/ignore 변경 없음. D2 신규 negative/실패 주입/성능
+  assertion/red 재현, 변경 코드 Vitest 및 D3 replay: N/A(실패 미재현, 문서 증빙 리프).
+  재발 시 해당 실행의 전체 webServer 로그와 자원 측정으로 원인을 다시 특정해야 한다.
