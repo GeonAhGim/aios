@@ -300,7 +300,7 @@ class _SlowCandleStore(PostgresCandleStore):
 
 @pytest.mark.perf
 async def test_absolute_time_assertion_would_flake_but_round_trip_gate_stays_green(
-    pool, batch_repo, reference_repo, calendar_repo
+    pool, batch_repo, reference_repo, calendar_repo, perf_budget
 ):
     """red→green 회귀 증거(task-826 DEPTH 재감사, docs/audit/DEPTH_LA_LB_LC.md
     leaf 826): task-1405가 겪은 CPU 시간 편차를 인위적 지연으로 재현하면—
@@ -321,14 +321,23 @@ async def test_absolute_time_assertion_would_flake_but_round_trip_gate_stays_gre
         pool, request, store=slow_store, refs=reference_repo, cal=calendar_repo
     )
 
-    started = time.perf_counter()
-    series = await replay(
-        request, store=slow_store, refs=reference_repo, cal=calendar_repo, pool=pool
-    )
-    elapsed_seconds = time.perf_counter() - started
+    # raw time.perf_counter() → perf_budget.sample_async() 전환(task-11060).
+    # sample_async는 fn 결과값을 버리므로 series를 별도로 캡처.
+    _captured_series: list = []
+
+    async def _run_replay():
+        s = await replay(
+            request, store=slow_store, refs=reference_repo, cal=calendar_repo, pool=pool
+        )
+        _captured_series.append(s)
+        return s
+
+    sample = await perf_budget.sample_async(_run_replay)
+    series = _captured_series[0]
+    wall_seconds = sample.wall_ms / 1000
 
     with pytest.raises(AssertionError):
-        assert elapsed_seconds < _DAY_TARGET_SECONDS, "RED: 옛 절대시간 단언 재현"
+        assert wall_seconds < _DAY_TARGET_SECONDS, "RED: 옛 절대시간 단언 재현"
 
     assert round_trip_count <= _MAX_REPLAY_ROUND_TRIPS
     assert series.expected_count == DAY_ROW_COUNT
