@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import time
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -27,7 +26,7 @@ from httpx import ASGITransport, AsyncClient
 from src.api.deps import get_pool
 from src.core.observability.loop_health import LoopHealth, loop_health, set_loop_health
 from src.main import app
-from tests.conftest import lifespan_context_with_retry
+from tests.conftest import PerfBudget, lifespan_context_with_retry
 
 _READYZ_READ_ROUTE_P95_BUDGET_SECONDS = 0.3
 
@@ -163,6 +162,11 @@ def _p95(samples: list[float]) -> float:
     return ordered[index]
 
 
+def _p95_ms(samples: list[float]) -> float:
+    """p95 계산 — samples는 millisecond 단위 float."""
+    return _p95(samples)
+
+
 class _SlowPool:
     """`get_pool` 오버라이드용 더블 — `fetchval`에 read 라우트 예산의 2배
     지연을 인위 주입해, 아래 p95 단언이 tautology가 아니라 실제 회귀를
@@ -174,35 +178,40 @@ class _SlowPool:
 
 
 @pytest.mark.perf
-async def test_readyz_p95_latency_within_read_route_budget(client: AsyncClient) -> None:
-    samples: list[float] = []
-    for _ in range(30):
-        started = time.perf_counter()
-        response = await client.get("/readyz")
-        samples.append(time.perf_counter() - started)
-        assert response.status_code == 200
+async def test_readyz_p95_latency_within_read_route_budget(
+    client: AsyncClient, perf_budget: PerfBudget
+) -> None:
+    samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=30)
+    for s in samples:
+        assert s.result.status_code == 200
 
-    assert _p95(samples) < _READYZ_READ_ROUTE_P95_BUDGET_SECONDS
+    # budget 0.3s = 300ms — 측정 방식은 process_time 기반 wall_ms(실제 왕복 지연)
+    p95_wall_ms = _p95_ms([s.wall_ms for s in samples])
+    budget_ms = _READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 1000
+    assert p95_wall_ms < budget_ms
 
 
 @pytest.mark.perf
 async def test_readyz_p95_latency_budget_fails_when_db_pool_is_slow(
     client: AsyncClient,
+    perf_budget: PerfBudget,
 ) -> None:
+    # budget 0.3 s = 300 ms.
+    # _SlowPool injects 600 ms into every `fetchval` call — enough to
+    # exceed the 300 ms read-route budget and force a red gate.
     async def _slow_pool() -> _SlowPool:
         return _SlowPool()
 
     app.dependency_overrides[get_pool] = _slow_pool
 
-    samples: list[float] = []
-    for _ in range(5):
-        started = time.perf_counter()
-        response = await client.get("/readyz")
-        samples.append(time.perf_counter() - started)
-        assert response.status_code == 200
-
-    with pytest.raises(AssertionError):
-        assert _p95(samples) < _READYZ_READ_ROUTE_P95_BUDGET_SECONDS
+    try:
+        samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=5)
+        p95_ms = _p95_ms([s.wall_ms for s in samples])
+        budget_ms = _READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 1000
+        with pytest.raises(AssertionError):
+            assert p95_ms < budget_ms
+    finally:
+        app.dependency_overrides.pop(get_pool, None)
 
 
 # ---------------------------------------------------------------------------
