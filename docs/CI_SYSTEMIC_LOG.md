@@ -2781,3 +2781,20 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
     set (task-9157/task-9288/#15, task-9466, task-9576/#39/#50, task-9703/#62, task-11194/#92,
     or this entry), close as noop citing them rather than re-fixing already-fixed code for a
     seventh round. No baseline/rule relief made (DECISION_GUIDELINES B-2) — none was warranted.
+
+95. task-11209 (2026-10-03, H-7b): e2e 서버 시작 시간 초과 재검증.
+    재개 기준 HEAD는 `605ed1774`이며 보존된 패치나 미커밋 변경은 없었다.
+    후보 `1a580317`은 백엔드 샌드박스 파일만 변경한다. 이분 탐색은 4회 예산
+    소진 상태이며 대상도 backend pytest여서 frontend webServer 회귀의 확정 근거가 아니다.
+    원본 `esc-ci-e2e.json`은 이미 `status=resolved`, `closed_at=2026-09-29T23:15:15+00:00`,
+    `resolved_sha=deacc374b0ed34d59cf2e4e0401ee053bd01127a`를 기록하고 있다.
+    현재 checkout에서 local_ci.py e2e 단계와 동일한 비 journey 스펙 선택 및
+    `npm exec -- playwright test <smoke specs> --retries=1 --trace=on-first-retry`로
+    5 passed (41.3s), exit 0. 400 응답 실패 주입 테스트도 통과했다.
+    원래 webServer 180000ms 예산, workers=4, 재사용 금지 설정 그대로 검증했다.
+    `npm run lint --workspace=apps/web` 및 `npm run build --workspace=apps/web` exit 0
+    (기존 lint 경고와 번들 크기 경고는 존재). 현재 실패는 재현되지 않았으므로
+    신규 원인 수정으로 주장하지 않고 검증 기록만 남긴다. 기준선/예산/규칙/ignore 변경 없음.
+    D2 신규 negative 3건·성능 assertion·red 재현: N/A(실행 코드 변경 없는 기존 적색 재검증).
+    다음 동일 경보는 현재 SHA에서 e2e 단계부터 재현하고, resolved 이력과 신규 실패 시각을
+    대조해야 한다. PM 자동 재할당 로직은 이 task의 저장소 수정 범위 밖이다.
