@@ -10,7 +10,6 @@ INVARIANTS.md 점검: I-01~I-11은 주문 제출/실행-소유권/멱등키/전�
 
 from __future__ import annotations
 
-import time
 import uuid
 from decimal import Decimal
 from uuid import UUID
@@ -19,6 +18,7 @@ import asyncpg
 import pytest
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import (
     _asyncpg_dsn,
@@ -143,19 +143,28 @@ async def test_open_position_rejects_duplicate_first_creation_call(pool: asyncpg
 
 
 @pytest.mark.perf
-async def test_open_position_round_trip_stays_within_local_budget(pool: asyncpg.Pool) -> None:
+async def test_open_position_round_trip_stays_within_local_budget(
+    pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
+) -> None:
     """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1, n=20, 워밍업
     3회 버림)을 이 환경에서 직접 재고, `open_position`의 절대 시간이 그
     기준의 12배(연속 DB 왕복 여유, `test_perf_journal_append.py`와 같은
     정규화 방식) 이내인지 단언한다 -- 절대 ms 임계는 실행환경마다 흔들려
-    회귀 게이트로 못 쓴다."""
-    samples: list[float] = []
-    for _ in range(23):
-        start = time.perf_counter()
+    회귀 게이트로 못 쓴다.
+
+    raw time.perf_counter() → perf_budget.samples_async() 전환 (task-11062).
+    """
+
+    async def _baseline_once() -> None:
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        samples.append(time.perf_counter() - start)
-    baseline_rt = sorted(samples[3:])[-1]  # 워밍업 3회 버리고 최댓값(보수적 rt)
+
+    # baseline: 23회 측정 → 워밍업 3회 버리고 최댓값 (보수적 rt)
+    n_baseline = 23
+    raw_samples = await perf_budget.samples_async(_baseline_once, n=n_baseline)
+    baseline_ms_list = sorted(s.wall_ms for s in raw_samples[3:])
+    baseline_rt_sec = baseline_ms_list[-1] / 1000.0  # wall_ms → 초
 
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
@@ -172,12 +181,16 @@ async def test_open_position_round_trip_stays_within_local_budget(pool: asyncpg.
         )
     )
 
-    start = time.perf_counter()
-    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
-    elapsed = time.perf_counter() - start
+    async def _open_once() -> None:
+        await open_position(
+            pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
+        )
 
-    budget = max(0.030, 12 * baseline_rt)
-    assert elapsed < budget, (
-        f"open_position took {elapsed * 1000:.1f}ms, budget {budget * 1000:.1f}ms "
-        f"(baseline rt {baseline_rt * 1000:.1f}ms)"
+    # single open_position measurement
+    samples = await perf_budget.samples_async(_open_once, n=1)
+    elapsed_ms = samples[0].wall_ms
+    budget_ms = max(30.0, 12 * baseline_rt_sec * 1000)  # 0.030초 → 30ms
+    assert elapsed_ms < budget_ms, (
+        f"open_position took {elapsed_ms:.1f}ms, budget {budget_ms:.1f}ms "
+        f"(baseline rt {baseline_rt_sec * 1000:.1f}ms)"
     )
