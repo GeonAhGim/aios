@@ -5,7 +5,6 @@ DC-28: source_contract PK isolation via _FakeSourceContractRepository override.
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -478,11 +477,15 @@ async def test_entitlement_port_failure_fails_closed_not_open(client, seeded):
 
 
 @pytest.mark.perf
-async def test_candles_full_page_latency_stays_within_normalized_ceiling(client, seeded):
-    """수치 성능 단언 — 공유 TEST_DATABASE_URL 지연 변동성 때문에 절대
-    임계 대신, 가벼운 1건짜리 baseline 요청 대비 정규화한 상한만 게이트로
-    쓴다(LA-18 test_quality_metrics.py test_export_quality_metrics_latency_*와
-    동일 교훈)."""
+async def test_candles_full_page_latency_stays_within_normalized_ceiling(
+    client, seeded, perf_budget
+):
+    """수치 성능 단언 — baseline 대비 정규화 상한 게이트
+    (time.perf_counter() → perf_budget.sample_async() 전환, task-11033).
+
+    비동기 I/O는 sample_async로 wall_ms를 얻고 baseline * 20 + 0.5 상한과
+    비교한다. 예산 값(20배 + 0.5s)은 그대로 유지한다.
+    """
     t1 = seeded["t0"] + timedelta(minutes=100)
     pool = app.state.pool
     async with pool.acquire() as conn, conn.transaction():
@@ -490,20 +493,24 @@ async def test_candles_full_page_latency_stays_within_normalized_ceiling(client,
     span = _span(t1, 0, 200)
     base_params = {"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"], **span}
 
-    baseline_start = time.perf_counter()
-    baseline = await client.get(
-        f"{BASE}/candles", params={**base_params, "limit": 1}, headers=seeded["a"]
+    baseline_sample = await perf_budget.sample_async(
+        lambda: client.get(
+            f"{BASE}/candles", params={**base_params, "limit": 1}, headers=seeded["a"]
+        )
     )
-    baseline_elapsed = time.perf_counter() - baseline_start
+    baseline = baseline_sample.result
     assert baseline.status_code == 200, baseline.text
+    baseline_elapsed = baseline_sample.wall_ms / 1000
 
-    full_start = time.perf_counter()
-    full = await client.get(
-        f"{BASE}/candles", params={**base_params, "limit": 200}, headers=seeded["a"]
+    full_sample = await perf_budget.sample_async(
+        lambda: client.get(
+            f"{BASE}/candles", params={**base_params, "limit": 200}, headers=seeded["a"]
+        )
     )
-    full_elapsed = time.perf_counter() - full_start
+    full = full_sample.result
     assert full.status_code == 200, full.text
     assert len(full.json()["data"]["candles"]) == 200
+    full_elapsed = full_sample.wall_ms / 1000
 
     ceiling = baseline_elapsed * 20 + 0.5
     assert full_elapsed <= ceiling, (
