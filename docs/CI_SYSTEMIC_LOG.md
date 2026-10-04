@@ -2820,6 +2820,36 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
     다음 배정 전 신규 실패 시각과 resolved 이력을 대조하고 현재 SHA에서 해당 단계부터
     실행해야 한다. 해결된 경보의 반복 배정 로직은 저장소 밖 PM 운영 코드의 별도 과제다.
 
+97. task-11124 (2026-10-04, [health:ci_red] `pytest_latency_serial`): esc-ci-pytest_latency_serial
+    재검증, 이전 worker(attempt 3)는 턴 한도로 중단되고 미커밋 상태였다(`git status` clean,
+    HEAD는 재개 시점 origin/main과 동일). spec이 지정한 이분 탐색 후보
+    `ccf2fb93da78e3772406d8c0307634bd8e765ded`는 `git show --stat`으로 확인한 결과
+    `src/core/indicators/engine/vectorized.py` 한 파일, 긴 docstring을 100자 제한에 맞춰
+    줄바꿈한 변경뿐이다(로직 변경 없음, E501 준수) — 파서 성능과 무관해 레이턴시 회귀의
+    근거가 아니다. #93(task-9762)이 이미 확정한 바와 같이 `tests/_perf/relative_budget.py`
+    (`eaa83bbd1`, task-9269)의 `RelativeBudget` 이전이 실제 정정이며 여전히 적용돼 있다:
+    `git log --oneline -3 -- tests/_perf/relative_budget.py tests/unit/core/script/test_parser.py
+    tests/unit/core/script/test_builtins_math.py tests/unit/core/script/test_lower.py
+    tests/unit/core/script/test_interpreter.py`의 최신 접촉 커밋은 여전히 `eaa83bbd1`이고,
+    네 파일 모두 `RelativeBudget` 사용이 grep으로 확인됐다. `pm/ci_recheck.py`의
+    `FULL_PYTEST_SERIAL_LATENCY_NODEIDS` 4건(`test_parser.py::
+    test_parse_latency_stays_within_half_of_dsl_compile_budget`, `test_builtins_math.py::
+    test_series_builtin_call_latency_p95_within_backtest_budget_slice`, `test_lower.py::
+    test_lowering_latency_p95_within_compile_budget_slice`, `test_interpreter.py::
+    test_execution_latency_p95_within_backtest_budget_slice`)를 단계와 동일한 플래그
+    (`-p no:cacheprovider -p no:xdist --benchmark-disable --maxfail=5`)로 직렬 실행한 결과
+    `4 passed in 7.60s`, 300s 예산 대비 두 자릿수 배 아래였다. 이 저장소에는
+    `scripts/check_pytest_latency_serial.py`가 없다(#20/#29/#42/#65/#73/#76/#79/#82/#93와 동일
+    재확인) — 검사는 fleet 코드(`pm/ci_recheck.py`/`orchestrator.py`)에 있으므로, 이미 닫힌
+    동일 질문에 대해 `pm/auto_decision.py`의 `ci_red` 규칙이 반복 배정하는 패턴이다(#17-#26,
+    #30-#31, #33-#36, #38, #40-#42, #48, #50, #56, #59, #61, #65, #73, #76, #79, #82, #93에서
+    스물세 번 이상 명명됨), 저장소 worker 범위(§4) 밖이다. 기준선/예산/규칙/ignore 변경
+    없음(DECISION_GUIDELINES B-2). D2 신규 negative/failure-injection/성능 assertion/red
+    재현: N/A(실행 코드 변경 없이 이미 해결된 경보를 재검증하는 문서 리프). 다음 동일 경보는
+    먼저 4개 nodeid를 직렬 실행하고 `RelativeBudget` 사용을 grep해 확인한 뒤, 인용된 반복
+    leaf id가 이미 닫힌 systemic leaf 집합(#20/#29/#42/#65/#73/#76/#79/#82/#93 또는 본 항목)과
+    겹치면 재진단 없이 noop으로 닫아야 한다.
+
 ## task-11249 — 해결된 e2e 서버 기동 경보 재검증 (2026-10-04)
 
 - 대상: H-7b / L4-07, esc-ci-e2e.json의 180000ms webServer timeout.
