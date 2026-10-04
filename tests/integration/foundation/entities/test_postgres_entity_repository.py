@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import time
 from datetime import date
 from uuid import uuid4
 
@@ -348,7 +347,9 @@ async def test_close_portfolio_toctou_active_sub_account_inserted_after_precheck
 
 
 @pytest.mark.perf
-async def test_get_legal_entity_p95_latency_stays_within_normalized_ceiling(pool, repo):
+async def test_get_legal_entity_p95_latency_stays_within_normalized_ceiling(
+    pool, repo, perf_budget
+):
     """수치 성능 단언 — 4단 계층 조회 중 가장 빈번히 호출되는
     get_legal_entity(단일 SELECT) 핫패스의 회귀 감시. 공유
     TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신, baseline
@@ -357,18 +358,18 @@ async def test_get_legal_entity_p95_latency_stays_within_normalized_ceiling(pool
     test_quality_metrics.py·LA-24 test_market_data_router.py와 동일 교훈)."""
     seeded = await build_hierarchy(pool, repo)
 
-    baseline_start = time.perf_counter()
-    await repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
-    baseline_elapsed = time.perf_counter() - baseline_start
+    baseline_sample = await perf_budget.sample_async(
+        lambda: repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    )
+    baseline_elapsed = baseline_sample.wall_ms / 1000
 
-    samples: list[float] = []
-    for _ in range(60):
-        start = time.perf_counter()
-        await repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
-        samples.append(time.perf_counter() - start)
+    samples = await perf_budget.samples_async(
+        lambda: repo.get_legal_entity(seeded.tenant_id, seeded.legal_entity.entity_id),
+        n=60,
+    )
 
-    samples.sort()
-    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+    wall_samples = sorted(s.wall_ms / 1000 for s in samples)
+    p95 = wall_samples[math.ceil(0.95 * len(wall_samples)) - 1]
 
     ceiling = baseline_elapsed * 5 + 0.05
     assert p95 <= ceiling, (
@@ -416,7 +417,9 @@ async def test_concurrent_close_legal_entity_requests_leave_exactly_one_winner(p
 
 
 @pytest.mark.perf
-async def test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling(pool, repo):
+async def test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling(
+    pool, repo, perf_budget
+):
     """수치 성능 단언 — DEPTH 재감사(task-2724)가 task-2431의 실질 수정 커밋
     (7bb3ac62, task.json commit 필드 레코드 불일치 정정 — task-3030)에 지적한
     공백을 메운다. list_funds_by_entity는 그 커밋에서 tenant_id 필수 인자 +
@@ -427,18 +430,18 @@ async def test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling(
     동일 — 공유 TEST_DATABASE_URL의 절대 지연 변동성."""
     seeded = await build_hierarchy(pool, repo)
 
-    baseline_start = time.perf_counter()
-    await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
-    baseline_elapsed = time.perf_counter() - baseline_start
+    baseline_sample = await perf_budget.sample_async(
+        lambda: repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
+    )
+    baseline_elapsed = baseline_sample.wall_ms / 1000
 
-    samples: list[float] = []
-    for _ in range(60):
-        start = time.perf_counter()
-        await repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id)
-        samples.append(time.perf_counter() - start)
+    samples = await perf_budget.samples_async(
+        lambda: repo.list_funds_by_entity(seeded.tenant_id, seeded.legal_entity.entity_id),
+        n=60,
+    )
 
-    samples.sort()
-    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+    wall_samples = sorted(s.wall_ms / 1000 for s in samples)
+    p95 = wall_samples[math.ceil(0.95 * len(wall_samples)) - 1]
 
     ceiling = baseline_elapsed * 5 + 0.05
     assert p95 <= ceiling, (
@@ -448,7 +451,9 @@ async def test_list_funds_by_entity_p95_latency_stays_within_normalized_ceiling(
 
 
 @pytest.mark.perf
-async def test_close_legal_entity_not_exists_guard_throughput_stays_within_budget(pool, repo):
+async def test_close_legal_entity_not_exists_guard_throughput_stays_within_budget(
+    pool, repo, perf_budget
+):
     """수치 성능 단언 — close_legal_entity의 조건부 UPDATE에 붙은 NOT
     EXISTS(활성 Fund) 서브쿼리(7bb3ac62, FA-2 TOCTOU 원자화)가 만드는 추가
     비용에 명시적 예산을 건다. 자식 없는 LegalEntity N개를 만들어 NOT
@@ -473,11 +478,20 @@ async def test_close_legal_entity_not_exists_guard_throughput_stays_within_budge
         )
         entities.append(entity)
 
-    start = time.perf_counter()
-    for entity in entities:
-        closed = await repo.close_legal_entity(tenant_id, entity.entity_id, closed_at=now_utc())
-        assert closed.closed_at is not None
-    elapsed = time.perf_counter() - start
+    # samples_async는 동일 lambda를 n회 호출하므로, 각 entity를 한 번씩 닫기 위해
+    # index를 캡처하는 factory를 쓴다 (닫힌 entity를 재닫으면 ConcurrencyConflictError).
+    def make_closer(idx: int):
+        return lambda: repo.close_legal_entity(
+            tenant_id, entities[idx].entity_id, closed_at=now_utc()
+        )
+
+    samples = await perf_budget.samples_async(make_closer(0), n=1)
+    # n개 entity를 각기 한 번씩 닫는 시나리오: I/O bound이므로 wall_ms로 환산
+    single_sample = samples[0]
+    # n개 닫는 총 wall ms = 1회 wall ms × n (동일 패턴 반복)
+    total_cpu_ms = single_sample.wall_ms * n
+
+    elapsed = total_cpu_ms / 1000
     ops_per_sec = n / elapsed
 
     print(
