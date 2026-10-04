@@ -1,19 +1,19 @@
-"""Paper Execution & Control API — 71번 §6 규칙: router는 auth/주입/transport
-validation/command invocation만 담당한다.
+"""Paper Execution & Control API — L4-71 §6 rule: router handles only auth/injection/transport
+validation/command invocation.
 
-77번 §4 "Control Center ... never calls a provider directly" — 이 라우터는
-adapter를 직접 부르지 않는다(submit_paper_intent는 아직 사용자 트리거
-API가 없다 — 미래 스케줄러 전용, 마이그레이션 docstring 참조).
+L4-77 §4 "Control Center ... never calls a provider directly" — this router does not
+call adapters directly (submit_paper_intent has no user-facing API yet
+— reserved for future scheduler; see migration docstring).
 
-도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
-`EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(§9 PLT-21b decision,
-task-1217. start/resume(start_deployment.py)와 pause/stop(pause_deployment.py)이
-이름은 같지만 서로 다른 예외 클래스를 각자 정의해두므로(전수감사 이전부터
-있던 중복, CON-006 커밋 docstring 참조) `EXCEPTION_MAP`이 양쪽 클래스를
-모두 등록한다 — 하나만 등록하면 나머지 절반이 매핑되지 않은 채 500으로
-샌다(실제로 있었던 버그, 회귀 테스트: test_foundation_paper_control_
-risk_gate_router.py::test_start_on_already_running_deployment_is_409_not_500).
+Domain exceptions are not caught here — `src/api/contracts/exception_mapping.py`
+`EXCEPTION_MAP` translates them to envelope in the global handler (§9 PLT-21b decision,
+task-1217. start/resume (start_deployment.py) and pause/stop (pause_deployment.py) define
+separate exception classes despite identical names (pre-audit duplicate, see CON-006 commit
+docstring), so `EXCEPTION_MAP` registers both — registering only one leaves the other
+half unmapped and returns 500 (actual bug observed; regression test:
+test_foundation_paper_control_risk_gate_router.py::test_start_on_already_running_deployment_is_409_not_500).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
