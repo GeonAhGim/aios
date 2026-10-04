@@ -35,7 +35,6 @@ was numeric perf assertions and a gate-red reproduction):
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -52,6 +51,7 @@ from src.foundation.research_data.contracts.v1 import (
     ResearchItem,
     SourceMeta,
 )
+from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 
 _PARENT_REVISION = "c7f1e3a9d024"  # f5529244403f's down_revision
@@ -292,16 +292,17 @@ async def test_get_item_across_tenant_returns_none(
 
 @pytest.mark.perf
 async def test_append_item_latency_under_budget(
-    pool: asyncpg.Pool, repo: PostgresResearchRepository
+    pool: asyncpg.Pool, repo: PostgresResearchRepository, perf_budget: PerfBudget
 ) -> None:
     budget_sec = 1.0
     source_id = await _seed_source(repo)
     tenant_id = await create_test_tenant(pool)
     item = _item(source_id=source_id)
 
-    start = time.perf_counter()
-    await repo.append_item(tenant_id, item, external_id="ext-latency")
-    elapsed = time.perf_counter() - start
+    sample = await perf_budget.sample_async(
+        lambda: repo.append_item(tenant_id, item, external_id="ext-latency")
+    )
+    elapsed = sample.wall_ms / 1000.0
 
     print(f"[RD-4 append_item] single insert {elapsed:.3f}s (budget<{budget_sec}s)")
     assert elapsed < budget_sec, f"append_item이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
@@ -309,7 +310,7 @@ async def test_append_item_latency_under_budget(
 
 @pytest.mark.perf
 async def test_append_item_idempotent_replay_throughput(
-    pool: asyncpg.Pool, repo: PostgresResearchRepository
+    pool: asyncpg.Pool, repo: PostgresResearchRepository, perf_budget: PerfBudget
 ) -> None:
     n = 50
     budget_sec = 10.0
@@ -319,13 +320,15 @@ async def test_append_item_idempotent_replay_throughput(
     item = _item(source_id=source_id)
     first_id = await repo.append_item(tenant_id, item, external_id="ext-throughput")
 
-    start = time.perf_counter()
-    for _ in range(n):
-        replay_id = await repo.append_item(
-            tenant_id, _item(source_id=source_id), external_id="ext-throughput"
-        )
-        assert replay_id == first_id
-    elapsed = time.perf_counter() - start
+    async def _replay_batch() -> None:
+        for _ in range(n):
+            replay_id = await repo.append_item(
+                tenant_id, _item(source_id=source_id), external_id="ext-throughput"
+            )
+            assert replay_id == first_id
+
+    sample = await perf_budget.sample_async(_replay_batch)
+    elapsed = sample.wall_ms / 1000.0
     ops_per_sec = n / elapsed
 
     print(
