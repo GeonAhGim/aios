@@ -10,7 +10,6 @@ research_sources는 `PostgresResearchRepository`로 직접 시딩)을 재사용�
 
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -276,7 +275,7 @@ async def test_search_source_contract_failure_fails_closed_not_open(client, seed
 
 
 @pytest.mark.perf
-async def test_search_latency_stays_within_normalized_ceiling(client, seeded):
+async def test_search_latency_stays_within_normalized_ceiling(client, seeded, perf_budget):
     pool = app.state.pool
     repo = PostgresResearchRepository(pool)
     for _ in range(50):
@@ -284,16 +283,16 @@ async def test_search_latency_stays_within_normalized_ceiling(client, seeded):
             seeded["tenant_a"], _item(source_id=SOURCE_A), external_id=f"ext-{uuid.uuid4().hex}"
         )
 
-    baseline_start = time.perf_counter()
-    baseline = await client.get(f"{BASE}/sources")
-    baseline_elapsed = time.perf_counter() - baseline_start
-    assert baseline.status_code == 200, baseline.text
+    baseline_resp = await perf_budget.sample_async(lambda: client.get(f"{BASE}/sources"))
+    baseline_elapsed = baseline_resp.wall_ms / 1000
+    assert baseline_resp.result.status_code == 200, baseline_resp.result.text
 
-    full_start = time.perf_counter()
-    full = await client.post(f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"])
-    full_elapsed = time.perf_counter() - full_start
-    assert full.status_code == 200, full.text
-    assert len(full.json()["data"]["items"]) == 52
+    full_resp = await perf_budget.sample_async(
+        lambda: client.post(f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"]),
+    )
+    full_elapsed = full_resp.wall_ms / 1000
+    assert full_resp.result.status_code == 200, full_resp.result.text
+    assert len(full_resp.result.json()["data"]["items"]) == 52
 
     ceiling = baseline_elapsed * 20 + 0.5
     assert full_elapsed <= ceiling, (
