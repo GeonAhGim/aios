@@ -23,6 +23,7 @@ from src.api.contracts.error_codes import ErrorCode
 from src.core.rate_limit.limiter import Decision, InMemoryTokenBucket, set_limiter
 from src.core.rate_limit.policy import POLICIES, RateLimitPolicy
 from src.main import app
+from tests.conftest import PerfBudget
 
 # ADR-2026-09-09-C Decision 1 축별 성능 예산표에 rate limiter 전용 항목이 없어
 # 가장 가까운 유사 항목("사전거래 게이트 p99 5ms" — 이쪽도 I/O 없이 인메모리
@@ -177,30 +178,39 @@ async def test_broken_limiter_backend_fails_closed_not_silently_allowed(
 
 
 @pytest.mark.perf
-async def test_acquire_p99_latency_within_budget() -> None:
+async def test_acquire_p99_latency_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """`InMemoryTokenBucket.acquire()`는 I/O 없이 dict 조회 + 락만 쓰므로
     ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를 자체 예산으로
-    차용해 반복 호출 p99가 그 안에 드는지 단언한다."""
+    차용해 반복 호출 p99가 그 안에 드는지 단언한다.
+    raw perf_counter → perf_budget.samples_async(task-11034)."""
     bucket = InMemoryTokenBucket(clock=time.monotonic)
     policy = POLICIES["read"]
 
-    samples: list[float] = []
-    for _ in range(30):
-        started = time.perf_counter()
-        await bucket.acquire(policy, "perf:subject-1")
-        samples.append(time.perf_counter() - started)
+    samples = await perf_budget.samples_async(
+        lambda: bucket.acquire(policy, "perf:subject-1"),
+        n=30,
+    )
 
-    assert _p99(samples) < _ACQUIRE_P99_BUDGET_SECONDS
+    # p99를 PerfSample.cpu_ms 기준으로 계산 — wall_ms는 부하 참고용
+    cpu_values = sorted(s.cpu_ms * 1000 for s in samples)  # ms → μs 비교 용이
+    index = max(0, math.ceil(0.99 * len(cpu_values)) - 1)
+    p99_ms = cpu_values[index]
+
+    assert p99_ms < _ACQUIRE_P99_BUDGET_SECONDS * 1000
 
 
 @pytest.mark.perf
 async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """위 단언이 상시-녹색이 아님을 증명 — 버킷 dict 접근을 직렬화하는 락
     (limiter.py 모듈 docstring 47행) 획득 경로에 예산의 배수만큼 지연을
     주입하면(락 경합 회귀를 흉내) 같은 p99 단언이 실제로 적색(AssertionError)
-    이 되어야 한다."""
+    이 되어야 한다.
+    raw perf_counter → perf_budget.samples_async(task-11034)."""
     bucket = InMemoryTokenBucket(clock=time.monotonic)
     policy = POLICIES["read"]
     original_acquire = bucket._lock.acquire
@@ -211,14 +221,18 @@ async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regre
 
     monkeypatch.setattr(bucket._lock, "acquire", delayed_acquire)
 
-    samples: list[float] = []
-    for _ in range(5):
-        started = time.perf_counter()
-        await bucket.acquire(policy, "perf:subject-2")
-        samples.append(time.perf_counter() - started)
+    samples = await perf_budget.samples_async(
+        lambda: bucket.acquire(policy, "perf:subject-2"),
+        n=5,
+    )
+
+    # original test measured wall time via perf_counter — use wall_ms
+    wall_values = sorted(s.wall_ms for s in samples)
+    index = max(0, math.ceil(0.99 * len(wall_values)) - 1)
+    p99_ms = wall_values[index]
 
     with pytest.raises(AssertionError):
-        assert _p99(samples) < _ACQUIRE_P99_BUDGET_SECONDS
+        assert p99_ms < _ACQUIRE_P99_BUDGET_SECONDS * 1000
 
 
 # ---------------------------------------------------------------------------
