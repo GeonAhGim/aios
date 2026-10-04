@@ -189,15 +189,18 @@ def test_negative_timeout_marker_value_disables_enforcement_instead_of_erroring(
 def test_signal_timeout_method_is_rejected_on_windows(tmp_path: Path) -> None:
     """부정 케이스 — 이 파일의 docstring이 주장하는 "SIGALRM이 없는
     Windows에서는 signal 방식을 쓸 수 없다"를 실측으로 고정한다.
-    `--timeout-method=signal`을 이 플랫폼에서 강제하면 조용히 무시되고
+    `--timeout-method=signal`을 Windows worktree에서 강제하면 조용히 무시되고
     thread 방식으로 폴백하는 것이 아니라 `AttributeError`로 INTERNALERROR가
     나며 죽는다 — 이 저장소가 `timeout_method = "thread"`를 고정한 이유가
-    "선호"가 아니라 "그 외에는 동작하지 않기 때문"임을 증명한다.
-    이 저장소의 실제 CI 러너(`C:\\aios\\pm\\local_ci.py`)와 모든 worktree는
-    Windows에서만 돈다(파일 상단 docstring과 동일 가정) — 조건부
-    skip/skipif를 쓰지 않는 이유는 `check_code_ratchets.py`의 `skip_xfail`
-    기준선을 늘리지 않기 위해서다."""
-    assert sys.platform == "win32", "이 테스트는 Windows CI 가정을 검증한다"
+    "선호"가 아니라 "Windows에서는 그 외에는 동작하지 않기 때문"임을 증명한다.
+
+    로컬 worktree(Windows)와 달리 `.github/workflows/quality.yml`의 `verify`
+    잡은 `ubuntu-latest`에서 돈다 — SIGALRM이 있는 POSIX에서는 같은
+    `--timeout-method=signal`이 INTERNALERROR 없이 정상 동작한다(task-11265:
+    이 테스트가 플랫폼과 무관하게 `sys.platform == "win32"`를 강제해 GH
+    Actions에서 항상 FAIL했던 회귀). skip/skipif 대신 플랫폼별 기대 동작을
+    직접 단언해 `check_code_ratchets.py`의 `skip_xfail` 기준선을 건드리지
+    않으면서도 두 플랫폼 모두에서 실측 그대로를 고정한다."""
     module = tmp_path / "test_signal_method.py"
     module.write_text(
         textwrap.dedent(
@@ -228,9 +231,14 @@ def test_signal_timeout_method_is_rejected_on_windows(tmp_path: Path) -> None:
         timeout=30,
     )
 
-    assert result.returncode == 3
-    assert "INTERNALERROR" in result.stdout
-    assert "SIGALRM" in result.stdout
+    if sys.platform == "win32":
+        assert result.returncode == 3
+        assert "INTERNALERROR" in result.stdout
+        assert "SIGALRM" in result.stdout
+    else:
+        assert result.returncode == 1
+        assert "INTERNALERROR" not in result.stdout
+        assert "Timeout" in result.stdout
 
 
 def test_missing_synthetic_module_path_fails_closed_instead_of_reporting_pass(

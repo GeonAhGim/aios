@@ -53,10 +53,17 @@ def test_baseline_write_is_trusted_rejects_falsy_github_actions_value() -> None:
 
 
 def test_baseline_from_untrusted_context_warns_but_allows_ratchet_up(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """DoD: 로컬 환경(비 CI)에서 생성된 baseline은 신뢰할 수 없으므로, 커버리지가
-    올라 baseline을 올리는 시도는 경고 메시지를 출력하지만 거부하지는 않는다."""
+    올라 baseline을 올리는 시도는 경고 메시지를 출력하지만 거부하지는 않는다.
+
+    GITHUB_ACTIONS는 실제 GitHub Actions 러너에서 이미 "true"로 설정돼 있어 이 테스트
+    프로세스에도 상속된다 — 명시적으로 지우지 않으면 "비 CI" 전제가 실제 CI에서 깨져
+    trusted 경로로 새고 어서션이 실패한다(이 테스트가 로컬에서는 통과, GH Actions에서는
+    FAIL했던 회귀, task-11265).
+    """
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     xml_path = _write_coverage_xml(tmp_path, 0.85)
     baseline_path = _write_baseline(tmp_path, 80.00)
 
