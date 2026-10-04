@@ -2890,3 +2890,22 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
 - 실행 코드/기준선/예산/규칙/ignore 변경 없음. D2 신규 negative/실패 주입/성능
   assertion/red 재현, 변경 코드 Vitest 및 D3 replay: N/A(실패 미재현, 문서 증빙 리프).
   재발 시 해당 실행의 전체 webServer 로그와 자원 측정으로 원인을 다시 특정해야 한다.
+
+## task-11271 — 기존 e2e 기동 경보 재검증 (2026-10-05)
+
+- 대상 H-7b / L4-07. 검증 HEAD=a84c6b698. 지목된 1a580317be36b2ab42103799e5e72fa612c8be1e는
+  Python sandbox 종료 처리 한 파일만 변경한다. Playwright 서버 명령은 Python을 호출하지
+  않으므로 이 후보만으로 e2e 기동 실패의 인과관계를 확정할 수 없다.
+- esc-ci-e2e.json은 이미 resolved, last_seen=2026-09-29T21:48:12+00:00이다.
+  task-11249에서 동일 경보를 검증했다. 현재도 build:e2e(vite build) 후 preview를
+  실행하고 workers=4, webServer.timeout=180000을 유지한다. 이번에는 실패가 재현되지 않았다.
+- frontend에서 npm run test:e2e: 35 passed (1.1m), exit 0.
+  C:/aios/pm/local_ci.py의 e2e 단계와 동일한 스모크 명령:
+  npm exec -- playwright test e2e/backtest-run.spec.ts e2e/chart-indicator-overlay.spec.ts e2e/demo-onboarding-flow.spec.ts e2e/order-submission.spec.ts --retries=1 --trace=on-first-retry
+  결과 5 passed (1.1m), exit 0, 재시도 없음. 서버 기동 포함 실행 시간이 180초 미만이다.
+  기존 부정/실패 주입 사례도 통과했다.
+- npm run lint --workspace=apps/web 및 npm run build --workspace=apps/web: exit 0.
+  기존 lint/번들 크기 경고는 남아 있다. 네트워크 git ls-remote/fetch도 성공했다.
+- 실행 코드/기준선/예산/규칙/ignore 변경 없음. D2 신규 부정/실패 주입/성능 assertion/
+  red 재현, 변경 코드 Vitest 및 D3 replay: N/A(실패 미재현, 기존 해결 경보의 문서 증빙).
+  재발 시 새로운 실행의 webServer 전체 로그와 자원 측정으로 원인을 특정해야 한다.
