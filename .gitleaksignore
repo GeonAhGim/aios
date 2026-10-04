@@ -7,3 +7,12 @@ f6dc4110f977654cd8e6590377486a5e23bd944a:frontend/packages/api-client/src/client
 7c6286fb98b97063d3948dca61d68d3318305f80:.gitleaksignore:generic-api-key:2
 # 2026-09-25 CTO: task-7147 커밋의 RFC 6455 예제 WebSocket 키(dGhlIHNhbXBsZSBub25jZQ==) — 시크릿 아님. HEAD는 런타임 난수로 정정(5ec6abaa), 이력 지문만 허용
 97e046059a79cb709ddb33fecd2d2b41192989c2:scripts/upbit_openapi_fetch.py:generic-api-key:174
+# task-11283: 커밋별 검증 완료: 멱등키 합성 테스트 7건 및 RFC 6238 공개 테스트 벡터 1건.
+c3a756e86312df63ec9f2c9c5861586392cb42b5:tests/unit/api/contracts/__init__.py:generic-api-key:67
+c3a756e86312df63ec9f2c9c5861586392cb42b5:tests/unit/api/contracts/__init__.py:generic-api-key:89
+c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-key:75
+c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-key:97
+c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-key:107
+c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-key:124
+c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-key:235
+13fda0ca4b3e857f3148ef13d2f46339f6534f2c:tests/integration/mfa_clock.py:generic-api-key:168
