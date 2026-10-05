@@ -2909,3 +2909,28 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
 - 실행 코드/기준선/예산/규칙/ignore 변경 없음. D2 신규 부정/실패 주입/성능 assertion/
   red 재현, 변경 코드 Vitest 및 D3 replay: N/A(실패 미재현, 기존 해결 경보의 문서 증빙).
   재발 시 새로운 실행의 webServer 전체 로그와 자원 측정으로 원인을 특정해야 한다.
+
+## task-11396 — frontend ci_red 14번째 재확인, 동일 거짓양성 (2026-10-06)
+
+- esc-ci-frontend.json 지목 bisect_culprit 264587c11056eddd9c352d1af807c21139793e7b는
+  `git show --stat`로 확인한 결과 pytest 자식 DB 소유권/WORM 왕복 격리 정정 1건으로,
+  변경 파일 4개가 전부 `tests/` 아래 Python 테스트 파일이다 — `frontend/` 변경은 전혀 없다.
+  #16/#39/#52/#64/#66/#84/#89/#97/#101/#102와 동일한 stale/garbage bisect 패턴.
+- esc-ci-frontend.json의 detail.frontend는 지목된 세 테스트
+  (MarketplaceBrowsePage.errors.test.tsx, PortfolioPage.errors.test.tsx,
+  IndicatorParityPanel.verifiedGate.test.tsx) 모두 `stderr | ... > negative: ...` 블록 뒤에
+  React Router v7 future-flag 경고 또는 CH-18d 의도된 폴백 `console.error`
+  (`CH-18d indicator not in verified whitelist, falling back to server: ...`)만 있다.
+  `FAIL`/`✗`/`AssertionError` 토큰은 전혀 없다 — 이 stderr 출력은 negative 테스트가
+  직접 assert하는 의도된 로그이지 실패가 아니다.
+- HEAD 66ef644b1에서 재검증: 세 테스트 파일 단독 실행 9/9 passed(19.55s).
+  전체 스위트 `npm test`(apps/web): 201 files passed, 1628 tests passed, exit 0(78.73s).
+  `npm run lint --workspace=apps/web`: i18n-literals/hardcoded-colors/a11y 라쳇 전부 OK
+  (기존 react-hooks/refresh 경고만 잔존, 에러 없음).
+  `npm run build --workspace=apps/web`: tsc -b && vite build 성공, exit 0
+  (기존 500kB 청크 크기 경고만 잔존).
+- 실행 코드/기준선/예산/규칙/ignore 변경 없음. 근본 원인은 변하지 않았다:
+  pm/auto_decision.py의 stderr 노이즈를 실패로 오분류하는 fleet-code 결함
+  (`_stage_tail`/`_FAIL_LINE_MARKERS` 추정)이며 repo-worker 편집 범위(CLAUDE.md §4,
+  C:\aios\pm 금지) 밖이다. D2 신규 부정/실패주입/성능/red 재현: N/A(실패 미재현,
+  기존 해결 경보의 15번째 문서 증빙) — frontend 코드 변경 불필요, noop으로 종결.
