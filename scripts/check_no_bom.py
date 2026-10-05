@@ -138,13 +138,17 @@ def _iter_and_scan(base: Path, pool_executor: ThreadPoolExecutor) -> list[Path]:
             # early termination on large directories.
             if len(pending_paths) >= 256:
                 flags = list(pool_executor.map(has_bom, pending_paths))
-                bom_files.extend([path for path, is_bom in zip(pending_paths, flags) if is_bom])
+                bom_files.extend(
+                    [path for path, is_bom in zip(pending_paths, flags, strict=True) if is_bom]
+                )
                 pending_paths.clear()
 
     # Scan remaining batch.
     if pending_paths:
         flags = list(pool_executor.map(has_bom, pending_paths))
-        bom_files.extend([path for path, is_bom in zip(pending_paths, flags) if is_bom])
+        bom_files.extend(
+            [path for path, is_bom in zip(pending_paths, flags, strict=True) if is_bom]
+        )
 
     return bom_files
 
