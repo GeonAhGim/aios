@@ -121,18 +121,32 @@ def has_bom(path: Path) -> bool:
         return False
 
 
-def _iter_files(base: Path) -> list[Path]:
-    """os.walk with in-place pruning: rglob("*") descended into every skipped directory
-    (node_modules/.venv/__pycache__) before filtering, which is the difference that made the
-    original unpruned scan slow. This only lists paths -- no I/O per file yet."""
+def _iter_and_scan(base: Path, pool_executor: ThreadPoolExecutor) -> list[Path]:
+    """os.walk with in-place pruning and real-time parallel scanning: instead of
+    collecting all paths first then scanning, scan files as they are discovered to
+    reduce memory pressure on cold checkouts and improve cache locality."""
     if not base.is_dir():
         return []
-    found = []
+    bom_files = []
+    pending_paths = []
+
     for dirpath, dirnames, filenames in os.walk(base):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIR_NAMES]
         for name in filenames:
-            found.append(Path(dirpath) / name)
-    return found
+            pending_paths.append(Path(dirpath) / name)
+            # Scan in batches to avoid unbounded memory growth and enable
+            # early termination on large directories.
+            if len(pending_paths) >= 256:
+                flags = list(pool_executor.map(has_bom, pending_paths))
+                bom_files.extend([path for path, is_bom in zip(pending_paths, flags) if is_bom])
+                pending_paths.clear()
+
+    # Scan remaining batch.
+    if pending_paths:
+        flags = list(pool_executor.map(has_bom, pending_paths))
+        bom_files.extend([path for path, is_bom in zip(pending_paths, flags) if is_bom])
+
+    return bom_files
 
 
 def _scan_all(files: list[Path]) -> list[Path]:
@@ -164,13 +178,17 @@ def frontend_src_dirs(repo_root: Path) -> list[Path]:
 
 def find_bom_files(repo_root: Path) -> list[Path]:
     """repo_root 아래 전체 스캔 대상(SCAN_ROOT_NAMES + frontend의 각 src/)에서 BOM으로
-    시작하는 파일 경로를 정렬해 돌려준다."""
+    시작하는 파일 경로를 정렬해 돌려준다. Real-time scanning during traversal
+    reduces memory pressure on cold checkouts and improves cache locality."""
     roots = [repo_root / name for name in SCAN_ROOT_NAMES]
     roots += frontend_src_dirs(repo_root)
-    files: list[Path] = []
-    for root in roots:
-        files.extend(_iter_files(root))
-    return sorted(set(_scan_all(files)))
+    bom_files: set[Path] = set()
+
+    with ThreadPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        for root in roots:
+            bom_files.update(_iter_and_scan(root, pool))
+
+    return sorted(bom_files)
 
 
 def main(argv: list[str] | None = None) -> int:
