@@ -60,10 +60,16 @@ export default defineConfig({
   // 시퀀스)가 e2e 스테이지보다 먼저 수행한다 — 여기서 또 tsc -b를 반복하는
   // 것은 중복이었다. e2e 전용 빌드는 타입체크 없이 `vite build`만 돌려(5~15s)
   // webServer 기동 시간을 크게 줄인다. 타임아웃 예산(180s) 자체는 그대로 둔다.
+  // task-11406 근본 정정: 위 두 npm run(build:e2e, preview)은 각각 독립된 npm
+  // 프로세스를 새로 띄운다 -- npm 자체의 workspace 해석·모듈 로드 오버헤드가
+  // 그대로 두 번 중복된다(이 호스트에서 단일 npm run 왕복만 ~2.2~2.5s).
+  // 여러 worktree가 동시에 local_ci를 도는 동안은 이 오버헤드가 CPU 경합으로
+  // 더 늘어나고, 불필요한 프로세스 수 자체가 스케줄링 경합을 더해 webServer가
+  // config.webServer.timeout(180s) 안에 못 뜨는 사례(esc-ci-e2e.json)에 기여한다.
+  // apps/web 쪽에 build+preview를 한 셸 체인으로 묶은 `serve:e2e` 스크립트를
+  // 추가해 npm 프로세스 기동을 1회로 줄인다 -- 예산(180s)은 그대로 둔다.
   webServer: {
-    command:
-      "npm run build:e2e --workspace=apps/web && npm run preview --workspace=apps/web -- " +
-      `--strictPort --port ${WORKTREE_PORT}`,
+    command: `npm run serve:e2e --workspace=apps/web -- --port ${WORKTREE_PORT}`,
     url: BASE_URL,
     // task-8753: 항상 이 worktree 전용 서버를 새로 띄운다 -- reuseExistingServer(로컬은
     // 기본 true)를 켜면 다른 worktree가 우연히 같은 포트에 먼저 띄운 서버를 "재사용"으로
