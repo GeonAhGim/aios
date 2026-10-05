@@ -1,12 +1,13 @@
-"""API 버저닝 — `/api/v1` 정식 마운트 + 레거시 alias(107 §4).
+"""API versioning — `/api/v1` formal mount + legacy alias (107 §4).
 
-PLT-16 decision: 이 리프는 계약을 고정하는 것이 목적이라 `mount_v1`을 아직
-`src/main.py`에 배선하지 않는다 — 실제 적용은 §9 PLT-17~21에서 라우터별
-봉투 이관과 함께 순차 진행한다.
+PLT-16 decision: this leaf exists to lock the contract; `mount_v1` is not yet
+wired into `src/main.py` — actual rollout happens sequentially in §9 PLT-17~21
+along with per-router envelope migration.
 
-같은 `APIRouter` 인스턴스를 두 프리픽스로 두 번 `include_router`하면 FastAPI가
-라우트를 각각 독립적으로 등록한다(경로만 다른 별개 엔드포인트). 레거시 alias
-쪽에만 `Deprecation`/`Sunset` 응답 헤더가 붙도록 alias 등록에만 의존성을 건다.
+Mounting the same `APIRouter` instance via two prefixes with `include_router`
+makes FastAPI register each route independently (separate endpoints differing
+only by path). Dependency on the alias registration alone ensures that only
+the legacy alias receives `Deprecation`/`Sunset` response headers.
 """
 
 from __future__ import annotations
@@ -18,14 +19,15 @@ from datetime import date
 from fastapi import APIRouter, Depends, FastAPI, Response
 
 V1_PREFIX = "/api/v1"
-# 107 §4 — alias는 최소 1 배포 주기 유지. 배포 주기가 확정되기 전까지는
-# 보수적으로 90일 뒤로 둔다(정확한 해제일은 배포 주기 확정 후 갱신).
+# 107 §4 — alias must survive at least one deployment cycle.
+# Until the deployment cycle is confirmed, set conservatively 90 days out
+# (exact sunset date to be updated after cycle confirmation).
 DEFAULT_SUNSET = date(2026, 12, 3)
 
 
 @dataclass(frozen=True)
 class RouterMount:
-    """`mount_v1`에 넘기는 라우터 하나의 마운트 정보."""
+    """Mount info for a single router passed to `mount_v1`."""
 
     router: APIRouter
     legacy_prefix: str
@@ -38,9 +40,9 @@ def mount_v1(
     *,
     sunset: date = DEFAULT_SUNSET,
 ) -> None:
-    """`mounts`의 각 라우터를 `/api/v1<legacy_prefix>`에 정식 등록하고,
-    `legacy_prefix` 그대로도 별칭 등록한다. 별칭 응답에만 `Deprecation: true`,
-    `Sunset: <date>` 헤더가 붙는다."""
+    """Register each router in `mounts` at `/api/v1<legacy_prefix>`,
+    and also register an alias at `legacy_prefix` alone. Only alias responses
+    receive `Deprecation: true` and `Sunset: <date>` headers."""
     sunset_value = sunset.isoformat()
 
     async def _mark_deprecated(response: Response) -> None:
