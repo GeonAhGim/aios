@@ -90,6 +90,8 @@ def run_sandboxed(
     """Run `fn(*args, **kwargs)` in a single-worker `ProcessPoolExecutor`
     under `limits`. `fn` and its arguments/return value must be picklable
     (standard `multiprocessing` constraint)."""
+    own_pid = os.getpid()
+    children_before = _own_child_pids(own_pid)
     executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
     try:
         future = executor.submit(fn, *args, **kwargs)
@@ -111,6 +113,16 @@ def run_sandboxed(
                 # keep looking past that deadline so we can still kill it instead
                 # of leaving it running (see `_PID_CAPTURE_GRACE_SEC`).
                 pid = _wait_for_worker_pid(executor, _PID_CAPTURE_GRACE_SEC)
+            if pid is None:
+                # Both windows elapsed and `executor._processes` (a private,
+                # management-thread-populated dict) still never saw the
+                # worker -- under severe host contention that bookkeeping can
+                # lag arbitrarily far behind the OS actually creating the
+                # process. Fall back to the OS process tree directly, which
+                # reflects the real child the instant it exists, so we never
+                # leave a true orphan (e.g. a 3600s `time.sleep`) running
+                # unkillable for the rest of its natural life (task-11273).
+                pid = _find_new_child_pid(own_pid, children_before)
             _kill_pid(pid)
             raise ScriptSandboxTimeoutError(
                 f"script sandbox exceeded wall-clock limit ({limits.wallclock_sec}s)"
@@ -153,6 +165,31 @@ def _wait_for_worker_pid(executor: ProcessPoolExecutor, deadline_sec: float) -> 
         if processes:
             return int(next(iter(processes)))
         time.sleep(_PID_POLL_INTERVAL_SEC)
+    return None
+
+
+def _own_child_pids(parent_pid: int) -> frozenset[int]:
+    """Snapshot of the current process's direct OS child pids, taken before
+    submitting the sandboxed worker so a later diff can identify the new
+    child even if `executor._processes` never registers it."""
+    try:
+        return frozenset(p.pid for p in psutil.Process(parent_pid).children())
+    except psutil.NoSuchProcess:
+        return frozenset()
+
+
+def _find_new_child_pid(parent_pid: int, known_pids: frozenset[int]) -> int | None:
+    """OS-process-tree fallback for `_wait_for_worker_pid`: returns the pid
+    of a direct child of `parent_pid` not present in `known_pids`, or
+    `None` if no such child exists (e.g. it already exited)."""
+    try:
+        children = psutil.Process(parent_pid).children()
+    except psutil.NoSuchProcess:
+        return None
+    for child in children:
+        pid: int = child.pid
+        if pid not in known_pids:
+            return pid
     return None
 
 

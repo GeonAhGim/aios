@@ -16,6 +16,7 @@ module-level, not closures/lambdas.
 from __future__ import annotations
 
 import os
+import sys
 import time
 
 import psutil
@@ -26,6 +27,7 @@ from src.core.script.ir import IRProgram, lower_program
 from src.core.script.runtime.interpreter import execute
 from src.core.script.runtime.interpreter_types import ExecutionResult
 from src.core.script.runtime.series import Series, Value
+from src.foundation.backtest.application import sandboxed_script_eval
 from src.foundation.backtest.application.sandboxed_script_eval import (
     SandboxLimits,
     ScriptSandboxCrashError,
@@ -175,3 +177,41 @@ def test_child_crash_does_not_hang_parent(perf_budget: PerfBudget) -> None:
             run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
 
     perf_budget.assert_within(_run, budget_ms=budget_ms, label="crash_no_hang")
+
+
+def test_find_new_child_pid_identifies_only_the_new_process() -> None:
+    # Unit-level check of the OS-process-tree fallback in isolation (no
+    # sandbox/executor involved): a pid present before the snapshot must
+    # never be reported as "new", and a genuinely new child must be found.
+    own_pid = os.getpid()
+    before = sandboxed_script_eval._own_child_pids(own_pid)
+    assert sandboxed_script_eval._find_new_child_pid(own_pid, before) is None
+
+    proc = psutil.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+    try:
+        found = sandboxed_script_eval._find_new_child_pid(own_pid, before)
+        assert found == proc.pid
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def test_pid_capture_exhausted_still_kills_child_via_process_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Failure injection: force `_wait_for_worker_pid` to never see a pid
+    # (simulates `executor._processes` bookkeeping lagging past both the
+    # caller deadline and `_PID_CAPTURE_GRACE_SEC` under severe host
+    # contention -- the exact gap `1a580317b` left open, task-11273). The
+    # OS-process-tree fallback must still find and kill the real child so a
+    # `time.sleep(3600)` worker never survives as an unkillable orphan.
+    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **k: None)
+    own_pid = os.getpid()
+    before = {p.pid for p in psutil.Process(own_pid).children()}
+
+    with pytest.raises(ScriptSandboxTimeoutError):
+        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=1.0, rss_mb=512))
+
+    time.sleep(1.0)  # let the kill signal land
+    after = {p.pid for p in psutil.Process(own_pid).children()}
+    assert after - before == set(), "sandbox worker survived as an unkillable orphan"
