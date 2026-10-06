@@ -1,10 +1,12 @@
-"""GrantMembership 커맨드.
+"""GrantMembership command.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§4.1 Membership,
-§9 PLT-29. 저장소 접근은 PLT-27 `MembershipRepository`만 쓰고 새 SQL을 만들지
-않는다 — 중복 활성 멤버십은 `insert_membership`의 부분 UNIQUE 위반을 그대로
-전파한다(`ConcurrencyConflictError`, 이미 EXCEPTION_MAP에 등록됨).
+§9 PLT-29. Repository access uses only PLT-27 `MembershipRepository`; do not
+create new SQL — duplicate active membership propagates the partial UNIQUE
+violation from `insert_membership` as-is
+(`ConcurrencyConflictError`, already registered in EXCEPTION_MAP).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -19,13 +21,13 @@ from src.foundation.trust.ports.membership_repository import MembershipRepositor
 
 
 class MembershipMfaRequiredError(Exception):
-    """73번 §4.1 GrantMembership guard "mfa_verified" — 최근 step-up 없이
-    멤버십을 부여/재부여할 수 없다(403 AUTH_MFA_REQUIRED)."""
+    """§4.1 GrantMembership guard "mfa_verified" — without a recent step-up,
+    membership cannot be granted or re-granted (403 AUTH_MFA_REQUIRED)."""
 
 
 class GrantAuthorizationError(Exception):
-    """73번 §4.1 전이표 — 신규 부여는 actor ACTIVE OWNER/ADMIN, REVOKED에서
-    regrant는 actor OWNER만 가능하다. 위반 시 403 AUTHZ_FORBIDDEN."""
+    """§4.1 transition table — initial grant requires actor ACTIVE OWNER/ADMIN;
+    regrant requires actor OWNER only. Violation returns 403 AUTHZ_FORBIDDEN."""
 
 
 async def grant_membership(
@@ -50,16 +52,16 @@ async def grant_membership(
         ]
         live = [m for m in history if m.state != MembershipState.REVOKED]
         if live:
-            # 이미 ACTIVE/SUSPENDED 멤버십이 있다 — insert_membership의 DB
-            # 부분 UNIQUE는 ACTIVE만 걸러내므로(SUSPENDED는 통과), 여기서
-            # 먼저 결정론적으로 막는다. ACTIVE 동시경합은 아래 insert가 그대로
-            # 잡는다(같은 예외 타입으로 동형 처리).
+            # An ACTIVE/SUSPENDED membership already exists — the DB partial UNIQUE
+            # on `insert_membership` filters only ACTIVE (SUSPENDED passes), so we
+            # deterministically block it here first. Concurrent ACTIVE collision is
+            # caught by the insert below (same exception type).
             raise ConcurrencyConflictError(
                 f"tenant_id={context.tenant_id} subject_id={subject_id}: 이미 "
                 f"state={live[0].state.value} 멤버십이 있습니다."
             )
 
-        is_regrant = len(history) > 0  # 전부 REVOKED뿐이면 regrant(73번 §4.1 4행)
+        is_regrant = len(history) > 0  # regrant when all are REVOKED (§4.1 line 4)
         if is_regrant:
             allowed = is_membership_transition_allowed(
                 MembershipState.REVOKED, MembershipState.ACTIVE, actor_role=actor_role
