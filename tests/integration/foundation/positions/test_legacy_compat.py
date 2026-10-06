@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -222,10 +221,16 @@ async def test_get_positions_propagates_connection_fault_without_swallowing(proj
 
 
 @pytest.mark.perf
-async def test_get_positions_completes_within_latency_budget_for_many_reentries(pool, projection):
+async def test_get_positions_completes_within_latency_budget_for_many_reentries(
+    pool, projection, perf_budget
+):
     """legacy 재진입(같은 계정·심볼, 서로 다른 `entry_time`)이 300건 쌓인
     계정에서도 조회가 예산 안에 끝나야 한다(수치 성능 단언) — 이전엔 DoD
-    "쿼리 결과 동일"만 확인했지 비용은 잰 적이 없었다."""
+    "쿼리 결과 동일"만 확인했지 비용은 잰 적이 없었다.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-11431).
+    비동기 I/O는 wall_ms로 왕복 지연을 측정한다.
+    """
     tenant_id, account_id = await _setup_account(pool)
     symbol = f"SYM{uuid.uuid4().hex[:8]}"
     base_time = datetime.now(timezone.utc)
@@ -269,13 +274,16 @@ async def test_get_positions_completes_within_latency_budget_for_many_reentries(
                 default_portfolio_id(tenant_id),
             )
 
-    start = time.perf_counter()
-    projected = await _project(projection, pool, user_id=tenant_id, symbol=symbol)
-    elapsed = time.perf_counter() - start
+    sample = await perf_budget.sample_async(
+        lambda: _project(projection, pool, user_id=tenant_id, symbol=symbol)
+    )
 
+    projected = sample.result
     assert len(projected) == reentry_count
-    assert elapsed < 1.0, (
-        f"get_positions took {elapsed:.3f}s for {reentry_count} re-entries, budget 1.0s"
+    budget_ms = 1000.0  # 1.0s in ms — budget 값 불변
+    assert sample.wall_ms < budget_ms, (
+        f"get_positions took {sample.wall_ms:.3f}ms for "
+        f"{reentry_count} re-entries, budget {budget_ms:.3f}ms"
     )
 
 
