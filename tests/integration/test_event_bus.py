@@ -2,6 +2,7 @@
 
 Spec: 08_test_plan_v1.2.md#§8.3 (Event Bus pub/sub), §8.6 (백프레셔)
 """
+
 import asyncio
 import time
 
@@ -164,7 +165,7 @@ async def test_backpressure_rejects_publish_when_queue_full(fast_bus):
 
 
 @pytest.mark.perf
-async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus):
+async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus, perf_budget):
     # 워커가 실제로 동작 중이면 큐가 계속 드레인되어 "지속적으로 가득 참" 상태를
     # 실시간으로 재현하기 어렵다 — time.monotonic()을 전역 패치하면 asyncio
     # 내부 스케줄링까지 깨지므로, 대신 내부 상태(_queue_full_since)에 과거
@@ -179,9 +180,15 @@ async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus):
 
     stale = time.monotonic() - (fast_bus._backpressure_sustained_seconds + 1)
     fast_bus._queue_full_since["market.ticker.updated"] = stale
-    await fast_bus._handle_backpressure("market.ticker.updated")
-    await asyncio.sleep(0.05)
-    await fast_bus.stop()
+
+    async def _run() -> None:
+        await fast_bus._handle_backpressure("market.ticker.updated")
+        await asyncio.sleep(0.05)
+        await fast_bus.stop()
+
+    budget_ms = 1000.0  # 실측 로컬 ~10ms, CI 편차 감안 넉넉히
+    sample = await perf_budget.sample_async(_run)
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
     assert len(sustained) == 1
     assert sustained[0]["topic"] == "market.ticker.updated"
