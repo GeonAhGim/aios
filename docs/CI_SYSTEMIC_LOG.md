@@ -2934,3 +2934,38 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
   (`_stage_tail`/`_FAIL_LINE_MARKERS` 추정)이며 repo-worker 편집 범위(CLAUDE.md §4,
   C:\aios\pm 금지) 밖이다. D2 신규 부정/실패주입/성능/red 재현: N/A(실패 미재현,
   기존 해결 경보의 15번째 문서 증빙) — frontend 코드 변경 불필요, noop으로 종결.
+
+## task-11407 — journeys `[journeys] Error: Timed out waiting 180000ms from config.webServer.` 재검증 (2026-10-06)
+
+- `esc-ci-journeys.json`은 이미 `status=resolved`, `resolved_sha=4d5ebed5b621a5e92c18eca2aa8d654e195577d8`,
+  `closed_at=2026-09-30T00:53:50+00:00`이다. `auto_actions`는 2026-09-29부터 2026-10-06까지
+  "3x-repeat CI red" 재배정이 130회 넘게 반복됐고, 이번 리프도 그 흐름에서 생성됐다
+  (`created fix task-11407` at `2026-10-05T16:02:50+00:00` 이후에도 "3x-repeat CI red"가
+  계속 기록됨) — fleet의 `pm/auto_decision.py` ci_red 규칙이 이미 해결된 경보를 반복
+  재할당하는 동일 패턴(#96/task-11224, #task-11258과 동일).
+- spec이 지목한 이분 탐색 후보 `d21e3e6817683023ea33fcee07c90ea1638d721c`는
+  `git show --stat`으로 확인한 결과 `src/exchanges/kis/generated/*_mixin.py` 7개 파일의
+  docstring 정리뿐이다(동작 변경 없음). Playwright webServer는 Python을 실행하지 않으므로
+  이 후보로 frontend 서버 기동 타임아웃의 인과관계를 확정할 근거가 없다 — 4회 bisect
+  예산 소진의 좁혀진 후보일 뿐, 대상 3건도 전부 backend pytest(`test_sandboxed_script_eval.py`,
+  `test_local_trainer.py`, `test_setup_test_db.py`)다.
+- 재검증 HEAD `e0c7502ec`(task-11406, 바로 전 리프가 webServer 기동용 `build:e2e`+`preview`
+  두 `npm run` 호출을 `serve:e2e` 단일 호출로 합쳐 npm 기동 오버헤드/프로세스 수를 줄였다)
+  위에서 `local_ci.py`의 journeys 단계와 동일한 명령을 frontend에서 실행:
+  `npm exec -- playwright test e2e/journey-j1-onboarding-to-dashboard.spec.ts
+  e2e/journey-j2-discover-to-backtest.spec.ts e2e/journey-j3-paper-order-to-position.spec.ts
+  e2e/journey-j9-emergency-stop.spec.ts --retries=1 --trace=on-first-retry`.
+  결과 **30 passed (34.2s), exit 0, 재시도 0건** — webServer 기동 포함 180초 예산의 20% 미만.
+  가입 409, 거래소 자격증명 403, 포트폴리오 5xx, 전략 ID 없이 저장(클라이언트 검증), 리스크
+  게이트 거부 403, 포지션 조회 5xx, 위임장 미설정, 긴급 정지 403 등 기존 부정/실패 주입
+  테스트 전부 통과.
+  webServer.timeout=180000ms, workers=4, reuseExistingServer=false 설정 그대로 검증했다.
+- `npm run lint --workspace=apps/web`: i18n-literals/hardcoded-colors/a11y 라쳇 전부 OK.
+  `npm run build --workspace=apps/web`: tsc -b && vite build 성공, exit 0, 2.74s
+  (기존 500kB 청크 크기 경고만 잔존, 신규 아님).
+- 현재 실패가 재현되지 않아 신규 코드 수정으로 포장하지 않는다. 기준선/예산/규칙/ignore
+  변경 없음(DECISION_GUIDELINES B-2). D2 신규 negative/실패 주입/성능 assertion/red 재현,
+  변경 코드 Vitest 및 D3 replay: N/A(실행 코드 변경 없이 이미 해결된 경보를 재검증하는
+  문서 리프). 다음 동일 경보는 `esc-ci-journeys.json`의 `resolved`/`resolved_sha` 이력과
+  신규 실패 시각을 먼저 대조하고, `pm/auto_decision.py`의 반복 재배정 패턴(저장소 worker
+  범위 밖, CLAUDE.md §4)을 재진단 없이 인용해 noop으로 닫아야 한다.
