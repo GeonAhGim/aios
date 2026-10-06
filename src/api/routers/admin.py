@@ -1,14 +1,14 @@
-"""18번 — 관리자 도구 API 라우터 (FD-18.1~18.5, FD-10.1 승인 결정).
+"""Route 18 — Admin tools API router (FD-18.1~FD-18.5, FD-10.1 approval decision).
 
 Spec: 기능설계문서_v1.20.md#FD-18.1~FD-18.5, FD-10.1
 
-FD-18.1(검증 대기열 조회)은 운영자가 아니라 검증담당자(is_verifier)
-권한이라 이 라우터 안에서도 get_current_verifier를 쓴다 — 나머지
-엔드포인트는 전부 get_current_admin(운영자 전용).
+FD-18.1 (verification queue listing) requires is_verifier, not admin,
+so this router uses get_current_verifier for it — all other
+endpoints use get_current_admin (admin-only).
 
-16번(실행 제어판) leaf에서 미룬 FD-10.1 승인 결정(approve/reject) HTTP
-엔드포인트를 여기서 채운다 — LIVE 실행 시작에 필요한 승인은 운영자
-액션이라 이 위치가 맞다.
+This is where we wire the FD-10.1 approval decision (approve/reject) HTTP
+endpoints deferred from Route 16 (execution control panel) — the approvals
+needed for LIVE execution start are operator actions, so this location is correct.
 
 PLT-35-fix(task-3850): `list_audit_log` reads sensitive cross-tenant/
 cross-user audit history, so it now also carries
@@ -201,11 +201,11 @@ async def confirm_topup(
     pool: asyncpg.Pool = Depends(get_pool),
     service: WalletService = Depends(get_wallet_service),
 ) -> ApiResponse[WalletTopupConfirmResult]:
-    """전수감사(2026-09-06 P0-F, task-1719) 반영 — 예전에는 원시
-    `Idempotency-Key` 헤더 문자열을 그대로 `confirm_topup`에 넘길 뿐, I-03
-    4중 스코프·digest 대조를 강제하지 않았다(DB `status='PENDING'` 조건부
-    UPDATE만이 실질적 중복방지였다). 이제 marketplace 구매 라우터와 같은
-    `require_idempotency_key`/`run_idempotent` 경로를 강제한다."""
+    """Reflects full-audit requirement (2026-09-06 P0-F, task-1719) — previously the raw
+    `Idempotency-Key` header string was passed through to `confirm_topup` without
+    enforcing I-03's four-scope digest cross-check (DB `status='PENDING'` conditional
+    UPDATE was the only real dedup guard). Now enforces the same
+    `require_idempotency_key`/`run_idempotent` path as the marketplace purchase router."""
 
     async def compute() -> tuple[int, dict[str, object]]:
         result = await service.confirm_topup(
