@@ -53,6 +53,26 @@ async def pool():
     await p.close()
 
 
+async def _delete_order_and_events(pool: asyncpg.Pool, order_id: uuid.UUID) -> None:
+    """This module's `pool` fixture connects straight to `DATABASE_URL` (no
+    per-module clone/isolation, unlike `tests/integration/eventstore/conftest.py`'s
+    per-module replay clone) and `test_update_from_exchange_raises_on_status_mismatch`
+    below writes a status change straight to `orders` with no companion
+    `order_events` row -- by design, to simulate a caller observing a stale
+    status (task-11356). That write's final state (CANCELLED) is never
+    advanced again by the test, so unlike the `eventstore` replay tests'
+    rollback-on-teardown clones, nothing undoes it: the row permanently
+    desyncs `orders.status` from its `order_events` trail -- exactly the
+    mismatch `scripts/replay_verify.py` flagged scanning this worker's real
+    DB directly (ci_recheck.py "full" mode, run 9b5f0b71, order_id
+    36b1623b-35ca-44f1-b040-d1a68f5c92de) -- test residue, not a product
+    defect."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", order_id)
+        await conn.execute("DELETE FROM order_events WHERE order_id = $1", order_id)
+        await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
+
+
 async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> int:
     strategy_id = f"order-svc-test-{uuid.uuid4().hex[:8]}"
     async with pool.acquire() as conn:
@@ -266,25 +286,31 @@ async def test_update_from_exchange_raises_on_status_mismatch(pool):
     )
     assert submitted.status == OrderStatus.SUBMITTED
 
-    # 다른 경로가 먼저 CANCELLED로 바꿨다고 가정 — 이 시점에 apply_fill이
-    # (여전히 SUBMITTED인 줄 알고) FILLED로 덮어쓰려 하면 충돌해야 한다.
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE orders SET status = 'CANCELLED' WHERE order_id = $1", submitted.order_id
-        )
-
-    stale_update = submitted.model_copy(update={"status": OrderStatus.FILLED})
-    async with pool.acquire() as conn:
-        with pytest.raises(ConcurrencyConflictError):
-            await order_repository.update_from_exchange(
-                conn, stale_update, expected_status=OrderStatus.SUBMITTED
+    try:
+        # 다른 경로가 먼저 CANCELLED로 바꿨다고 가정 — 이 시점에 apply_fill이
+        # (여전히 SUBMITTED인 줄 알고) FILLED로 덮어쓰려 하면 충돌해야 한다.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE orders SET status = 'CANCELLED' WHERE order_id = $1", submitted.order_id
             )
 
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT status FROM orders WHERE order_id = $1", submitted.order_id
-        )
-    assert row["status"] == "CANCELLED"  # 충돌한 쓰기는 반영되지 않았어야 함
+        stale_update = submitted.model_copy(update={"status": OrderStatus.FILLED})
+        async with pool.acquire() as conn:
+            with pytest.raises(ConcurrencyConflictError):
+                await order_repository.update_from_exchange(
+                    conn, stale_update, expected_status=OrderStatus.SUBMITTED
+                )
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT status FROM orders WHERE order_id = $1", submitted.order_id
+            )
+        assert row["status"] == "CANCELLED"  # 충돌한 쓰기는 반영되지 않았어야 함
+    finally:
+        # task-11356 — 위 raw UPDATE가 order_events 짝 없이 CANCELLED를 썼다
+        # (의도된 재현); 치우지 않으면 이 행이 replay_verify 불일치로 영구히
+        # 남는다(`_delete_order_and_events` 독스트링 참조).
+        await _delete_order_and_events(pool, submitted.order_id)
 
 
 async def test_cancel_order_acknowledged_enqueues_cancel_command(pool):
