@@ -122,8 +122,16 @@ def run_sandboxed(
                 # reflects the real child the instant it exists, so we never
                 # leave a true orphan (e.g. a 3600s `time.sleep`) running
                 # unkillable for the rest of its natural life (task-11273).
-                pid = _find_new_child_pid(own_pid, children_before)
-            _kill_pid(pid)
+                # `spawn` can register more than one new direct child at once
+                # (the worker plus a multiprocessing helper such as the
+                # resource tracker) -- killing only the first one left the
+                # other an unkillable orphan under contention (two surviving
+                # pids observed in one GH Actions run, task-11399). Kill
+                # every pid the diff finds, not just one.
+                for candidate_pid in _find_new_child_pids(own_pid, children_before):
+                    _kill_pid(candidate_pid)
+            else:
+                _kill_pid(pid)
             raise ScriptSandboxTimeoutError(
                 f"script sandbox exceeded wall-clock limit ({limits.wallclock_sec}s)"
             ) from None
@@ -178,19 +186,18 @@ def _own_child_pids(parent_pid: int) -> frozenset[int]:
         return frozenset()
 
 
-def _find_new_child_pid(parent_pid: int, known_pids: frozenset[int]) -> int | None:
-    """OS-process-tree fallback for `_wait_for_worker_pid`: returns the pid
-    of a direct child of `parent_pid` not present in `known_pids`, or
-    `None` if no such child exists (e.g. it already exited)."""
+def _find_new_child_pids(parent_pid: int, known_pids: frozenset[int]) -> list[int]:
+    """OS-process-tree fallback for `_wait_for_worker_pid`: returns the pids
+    of every direct child of `parent_pid` not present in `known_pids` (empty
+    if none exist, e.g. they already exited). A `spawn` worker can bring up
+    more than one new direct child at once (the worker itself plus a
+    multiprocessing helper process such as the resource tracker), so callers
+    must kill all of them, not just the first."""
     try:
         children = psutil.Process(parent_pid).children()
     except psutil.NoSuchProcess:
-        return None
-    for child in children:
-        pid: int = child.pid
-        if pid not in known_pids:
-            return pid
-    return None
+        return []
+    return [child.pid for child in children if child.pid not in known_pids]
 
 
 def _watch_rss(

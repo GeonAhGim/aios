@@ -185,12 +185,12 @@ def test_find_new_child_pid_identifies_only_the_new_process() -> None:
     # never be reported as "new", and a genuinely new child must be found.
     own_pid = os.getpid()
     before = sandboxed_script_eval._own_child_pids(own_pid)
-    assert sandboxed_script_eval._find_new_child_pid(own_pid, before) is None
+    assert sandboxed_script_eval._find_new_child_pids(own_pid, before) == []
 
     proc = psutil.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
     try:
-        found = sandboxed_script_eval._find_new_child_pid(own_pid, before)
-        assert found == proc.pid
+        found = sandboxed_script_eval._find_new_child_pids(own_pid, before)
+        assert found == [proc.pid]
     finally:
         proc.kill()
         proc.wait(timeout=5)
