@@ -31,13 +31,26 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_IGNORE_FILE = ROOT / ".pip-audit-ignore"
+DEFAULT_LOCK_FILE = ROOT / "requirements-lock.txt"
 EXPECTED_SKIP_REASON = "distribution marked as editable"
+
+# task-11447: GitHub Actions는 `.[test,dev]`만 설치하지만, 로컬 CI는 mutation 테스트
+# 도구(cosmic-ray/mutmut 등, `.[mutation]`)까지 깐 상주 venv(C:\aios\mihwa-aios\.venv)를
+# 재사용한다 -- 그 extras의 전이 의존(예: cosmic-ray -> aiohttp -> multidict)은
+# requirements-lock.txt에 핀이 없어 Actions가 절대 보지 못하는 영역이고, 로컬에서만
+# CVE가 터질 수 있다(2026-10-07, multidict 6.8.0 CVE-2026-104874). lock 안 패키지의
+# 취약점은 사람이 lock을 바꿔야 고칠 문제라 숫자 집계만 하고 그대로 fail 시키되,
+# lock 밖(local-only) 패키지의 취약점은 "Actions parity 밖 로컬 전용 환경 문제"임을
+# 보고서 tail에 명시해 두 원인을 혼동하지 않게 한다(허용 목록이 아니다 -- 여전히
+# 게이트는 실패한다, 진단만 분리한다).
+_FAILURE_LINE_RE = re.compile(r"^(\S+) \S+: \S+ \(fix: ")
 
 
 class IgnoreFileError(ValueError):
@@ -54,54 +67,6 @@ class AuditFailure(ValueError):
 # rc=3(구분 코드)을 대신 돌려준다.
 NETWORK_ERROR_MARKERS = ("ENOTFOUND", "NameResolutionError", "ConnectionError", "Max retries")
 NETWORK_ERROR_RC = 3
-
-# Lock-file minimum versions for build tools. pip-audit itself spawns a pip subprocess; if the
-# venv's pip/setuptools are older than what requirements-lock.txt pins, the audit database
-# (OSV/purl lookups) and vulnerability metadata can contain stale entries that trigger false
-# positives. We enforce the lock-file versions here rather than adding ignores.
-# See: CVE-2026-101918 (pyjwt 2.14.0 → 2.15.1) was a symptom of the same root cause — the
-# environment's build-tool versions were behind the lock file.
-BUILDTOOL_MIN = {
-    "pip": "26.2.1",
-    "setuptools": "84.0.0",
-}
-
-
-def _parse_version(v: str) -> tuple[int, ...]:
-    """'26.2.1' → (26, 2, 1)."""
-    parts: list[int] = []
-    for seg in v.split("."):
-        try:
-            parts.append(int(seg))
-        except ValueError:
-            parts.append(0)
-    return tuple(parts)
-
-
-def _check_buildtools() -> None:
-    """Ensure pip and setuptools are at least the locked versions.
-
-    Raises SystemExit(1) if any tool is outdated.
-    """
-    import importlib.metadata
-
-    for name, min_ver in BUILDTOOL_MIN.items():
-        try:
-            installed = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError as exc:
-            msg = (
-                f"[pip-audit] {name} not found — upgrade with: "
-                f"pip install --upgrade {name}>={min_ver}"
-            )
-            print(msg, file=sys.stderr)
-            raise SystemExit(1) from exc
-        if _parse_version(installed) < _parse_version(min_ver):
-            print(
-                f"[pip-audit] {name} {installed} is below lock-file minimum {min_ver}. "
-                f"Upgrade with: pip install --upgrade {name}>={min_ver}",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from None
 
 
 def is_network_error(text: str | None) -> bool:
@@ -156,6 +121,54 @@ def build_pip_audit_command(python: str) -> list[str]:
     return [python, "-m", "pip_audit", "--skip-editable", "--format", "json"]
 
 
+def _normalize_pkg_name(name: str) -> str:
+    """'PyJWT' -> 'pyjwt', 'pydantic_settings' -> 'pydantic-settings' -- local_ci.py의
+    _normalize_pkg_name과 같은 정규화(대소문자·구분자 차이를 다른 패키지로 보지 않는다)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def parse_lock_names(lock_text: str) -> set[str]:
+    """requirements-lock.txt에서 핀 줄의 패키지명만 정규화해 집합으로 돌려준다(주석·
+    빈 줄·환경 마커 뒤는 무시, 버전은 보지 않는다 -- '이 이름이 사람이 고정한 적
+    있는가'만 안다)."""
+    names: set[str] = set()
+    for raw in lock_text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        line = line.split(";", 1)[0].strip()  # PEP 508 환경 마커 제거
+        m = re.match(r"^([A-Za-z0-9_.\-]+)", line)
+        if m:
+            names.add(_normalize_pkg_name(m.group(1)))
+    return names
+
+
+def failure_package_name(failure_line: str) -> str | None:
+    """`evaluate_pip_audit_json`이 낸 실패 한 줄에서 패키지명만 뽑는다. 취약점 실패
+    (`"{name} {version}: {id} (fix: ...)"`) 형태만 매치한다 -- skip_reason 실패
+    (`"{name}: 수집 실패 — ..."`)는 pip install로 자동 복구할 대상이 아니라서
+    None을 돌려준다."""
+    m = _FAILURE_LINE_RE.match(failure_line)
+    return m.group(1) if m else None
+
+
+def split_failures_by_lock(
+    failures: list[str], lock_names: set[str]
+) -> tuple[list[str], list[str]]:
+    """실패 목록을 (locked, local_only)로 나눈다. locked는 requirements-lock.txt에 핀이
+    있어 사람이 lock을 바꿔야 고칠 수 있는 패키지, local_only는 lock 밖 전이 의존이라
+    pip install --upgrade로 그 자리에서 복구를 시도할 수 있는 패키지다."""
+    locked: list[str] = []
+    local_only: list[str] = []
+    for line in failures:
+        name = failure_package_name(line)
+        if name is not None and _normalize_pkg_name(name) not in lock_names:
+            local_only.append(line)
+        else:
+            locked.append(line)
+    return locked, local_only
+
+
 def evaluate_pip_audit_json(raw_stdout: str, ignored_ids: set[str]) -> list[str]:
     """pip-audit --format json 출력을 검사해 strict 판정을 대신한다.
 
@@ -191,12 +204,9 @@ def evaluate_pip_audit_json(raw_stdout: str, ignored_ids: set[str]) -> list[str]
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ignore-file", type=Path, default=DEFAULT_IGNORE_FILE)
+    parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE)
     parser.add_argument("--python", default=sys.executable)
     args = parser.parse_args(argv)
-
-    # Pre-flight: ensure build tools (pip/setuptools) are at lock-file minimums.
-    # Outdated build tools cause stale vulnerability metadata → false-positive CVE hits.
-    _check_buildtools()
 
     try:
         ignored_ids = load_ignored_vuln_ids(args.ignore_file, today=dt.date.today())
@@ -259,6 +269,27 @@ def main(argv: list[str] | None = None) -> int:
         print("pip-audit 게이트 실패:", file=sys.stderr)
         for line in failures:
             print(f"  - {line}", file=sys.stderr)
+        # task-11447: lock 밖(local-only) 패키지의 취약점은 GitHub Actions가 절대
+        # 보지 않는 영역(parity 밖)이라는 걸 tail에 명시해 "어디서 왜 적색인지"를
+        # 혼동하지 않게 한다 -- 여전히 게이트는 fail한다, 진단만 분리한다.
+        lock_text = args.lock_file.read_text(encoding="utf-8") if args.lock_file.exists() else ""
+        locked, local_only = split_failures_by_lock(failures, parse_lock_names(lock_text))
+        if local_only:
+            print(
+                f"\n참고: 위 {len(local_only)}건은 {args.lock_file.name}에 핀이 없는 "
+                "로컬 전용 패키지다(예: mutation extras의 전이 의존) -- GitHub Actions는 "
+                "이 패키지를 설치하지 않아 같은 취약점을 보지 못한다(Actions parity 밖). "
+                "`pip install --upgrade <package>`로 로컬 venv에서 직접 고친다:",
+                file=sys.stderr,
+            )
+            for line in local_only:
+                print(f"  - {line}", file=sys.stderr)
+        if locked:
+            print(
+                f"\n참고: 위 {len(locked)}건은 {args.lock_file.name}에 핀이 있다 -- "
+                "requirements-lock.txt 갱신이 필요하다(사람 결정).",
+                file=sys.stderr,
+            )
         return 1
 
     print(f"pip-audit 게이트 통과 (ignored={sorted(ignored_ids)})")

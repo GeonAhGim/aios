@@ -241,3 +241,98 @@ def test_main_empty_stdout_without_network_marker_is_audit_failure_not_network(
     assert rc == 1
     assert rc != mod.NETWORK_ERROR_RC
     assert "감사 실행 자체가 실패" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# task-11447: lock 밖(local-only, 예: mutation extras의 전이 의존) 취약점과
+# lock 안(사람이 lock을 바꿔야 할) 취약점을 구분하는 보고 로직.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_lock_names_normalizes_and_strips_comments_markers(mod: ModuleType) -> None:
+    lock_text = (
+        "# comment line\n"
+        "\n"
+        "PyJWT==2.15.1\n"
+        "pydantic_settings==2.15.0  # pinned for X\n"
+        "requests>=2.0; python_version >= '3.10'\n"
+    )
+    assert mod.parse_lock_names(lock_text) == {"pyjwt", "pydantic-settings", "requests"}
+
+
+def test_parse_lock_names_empty_text_is_empty_set(mod: ModuleType) -> None:
+    assert mod.parse_lock_names("") == set()
+
+
+def test_failure_package_name_extracts_vuln_failure(mod: ModuleType) -> None:
+    line = "multidict 6.8.0: CVE-2026-104874 (fix: 6.9.1)"
+    assert mod.failure_package_name(line) == "multidict"
+
+
+def test_failure_package_name_returns_none_for_skip_reason_failure(mod: ModuleType) -> None:
+    line = "somepkg: 수집 실패 — PyPI에 없음"
+    assert mod.failure_package_name(line) is None
+
+
+def test_split_failures_by_lock_separates_local_only_from_locked(mod: ModuleType) -> None:
+    failures = [
+        "multidict 6.8.0: CVE-2026-104874 (fix: 6.9.1)",
+        "pyjwt 2.14.0: CVE-2026-101918 (fix: 2.15.1)",
+        "somepkg: 수집 실패 — PyPI에 없음",
+    ]
+    locked, local_only = mod.split_failures_by_lock(failures, {"pyjwt"})
+    assert local_only == ["multidict 6.8.0: CVE-2026-104874 (fix: 6.9.1)"]
+    assert locked == [
+        "pyjwt 2.14.0: CVE-2026-101918 (fix: 2.15.1)",
+        "somepkg: 수집 실패 — PyPI에 없음",
+    ]
+
+
+def test_split_failures_by_lock_no_failures_is_empty(mod: ModuleType) -> None:
+    locked, local_only = mod.split_failures_by_lock([], {"pyjwt"})
+    assert locked == []
+    assert local_only == []
+
+
+def test_main_tail_notes_local_only_packages_not_covered_by_actions(
+    mod: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """supply_chain이 lock 밖 전이 의존(예: multidict) 때문에 적색일 때, 보고서
+    tail에 'Actions parity 밖 로컬 전용' 사실이 드러나야 한다(task-11447)."""
+    payload = json.dumps(
+        {
+            "dependencies": [
+                {
+                    "name": "multidict",
+                    "version": "6.8.0",
+                    "vulns": [
+                        {
+                            "id": "CVE-2026-104874",
+                            "aliases": [],
+                            "fix_versions": ["6.9.1"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    lock_file = tmp_path / "requirements-lock.txt"
+    lock_file.write_text("pyjwt==2.15.1\n", encoding="utf-8")
+    ignore_file = tmp_path / ".pip-audit-ignore"
+    printer = "import sys; print(" + repr(payload) + ")"
+    with patch.object(mod, "build_pip_audit_command", return_value=[sys.executable, "-c", printer]):
+        rc = mod.main(
+            [
+                "--ignore-file",
+                str(ignore_file),
+                "--lock-file",
+                str(lock_file),
+                "--python",
+                sys.executable,
+            ]
+        )
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "로컬 전용 패키지" in err
+    assert "multidict" in err
