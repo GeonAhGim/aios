@@ -109,7 +109,18 @@ async def test_concurrent_reconciler_instances_only_one_reconciles_same_account(
     `_reconcile_one`이 잠금용 커넥션 1개를 쥔 채로 `reconcile_account` 내부가
     또 다른 커넥션을 요구하는 상황에서, 인스턴스 수가 4를 넘으면 전부가
     서로의 커넥션 반납을 기다리며 교착한다(각 워커 프로세스가 자기 풀을
-    갖는 실제 운영 구조와도 더 가깝다)."""
+    갖는 실제 운영 구조와도 더 가깝다).
+
+    `asyncio.gather`만으로는 "정확히 같은 시각"이 보장되지 않는다 — 각
+    코루틴의 첫 await(`pool.acquire()`로 TCP/인증을 새로 여는 커넥션 생성
+    지연)가 서로 다른 시각에 끝나면, 먼저 끈 쪽이 advisory xact lock을 쥐고
+    짧게 일하고 커밋(=잠금 해제)까지 끝낸 뒤에야 다음 쪽이 같은 키를 시도해
+    매번 성공해버린다 — pg_try_advisory_xact_lock 자체는 올바르게 동작하지만
+    (`pg_locks`로 확인: 동시 보유 시 정확히 1개만 granted), 테스트가 "동시
+    경합"을 실제로 만들지 못해 가끔(로컬 재현 약 1/4) 거짓 통과·거짓
+    실패를 오간다. 커넥션을 미리 데워(pre-warm) `pool.acquire()`의 생성
+    지연을 없애고, `asyncio.Condition` 배리어로 전원이 도착한 뒤 한 번에
+    출발시켜 실제 동시 시도를 강제한다."""
     user_id = await create_test_tenant(pool)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
     await insert_open_order(
@@ -127,6 +138,10 @@ async def test_concurrent_reconciler_instances_only_one_reconciles_same_account(
     n_instances = 5
     scheduler_pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4 * n_instances)
     try:
+        warm_conns = [await scheduler_pool.acquire() for _ in range(n_instances)]
+        for conn in warm_conns:
+            await scheduler_pool.release(conn)
+
         schedulers = [
             ReconcileScheduler(scheduler_pool, targets=_no_targets) for _ in range(n_instances)
         ]
@@ -139,9 +154,19 @@ async def test_concurrent_reconciler_instances_only_one_reconciles_same_account(
             ),
         )
 
-        results = await asyncio.gather(
-            *(scheduler._reconcile_one(target) for scheduler in schedulers)
-        )
+        barrier_gate = asyncio.Condition()
+        arrived = 0
+
+        async def _run_at_barrier(scheduler: ReconcileScheduler) -> bool:
+            nonlocal arrived
+            async with barrier_gate:
+                arrived += 1
+                barrier_gate.notify_all()
+                while arrived < n_instances:
+                    await barrier_gate.wait()
+            return await scheduler._reconcile_one(target)
+
+        results = await asyncio.gather(*(_run_at_barrier(scheduler) for scheduler in schedulers))
     finally:
         await scheduler_pool.close()
 
