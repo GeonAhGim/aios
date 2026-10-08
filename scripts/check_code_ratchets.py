@@ -70,6 +70,7 @@ _EXCLUDE_DIR_NAMES = frozenset(
     }
 )
 
+
 # esc-ci-code_ratchets ([code_ratchets] timeout 180s, bisect culprit 2dd74ce9 -- a DEEPEN
 # commit that grew the tracked-file count under tests/): a serial path.read_text() over
 # ~3,100 src/tests/scripts .py files took ~117s wall-clock on a cold-cache checkout even
@@ -82,7 +83,27 @@ _EXCLUDE_DIR_NAMES = frozenset(
 # that starved sibling process-creation under this fleet's antivirus scanning when every
 # worker lane's step used the library default at once. No baseline/threshold change
 # (DECISION_GUIDELINES B-2) -- this only retunes this step's own I/O concurrency.
-SCAN_WORKERS = 16
+#
+# 2026-10-09(task-11489/esc-ci-prepare): this script never got the AIOS_CI_SCAN_WORKERS
+# override that check_no_bom.py (task-9259) and check_import_linter.py (task-9259) already
+# have -- it was a dead end in the "only the fleet scheduler can see concurrent-lane load"
+# finding those two files document: ops could dial every *other* I/O-parallel gate down
+# during an antivirus-scan-storm (STATUS_DLL_INIT_FAILED / head_sha resolution failures in a
+# sibling lane's local_ci prepare, rc=3221225794) except this one, which stayed hardcoded at
+# its own 16-wide pool regardless of fleet load. Mirroring the override here closes that gap
+# without changing the default value or any baseline (DECISION_GUIDELINES B-2).
+def _resolve_scan_workers(default: int) -> int:
+    raw = os.environ.get("AIOS_CI_SCAN_WORKERS")
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+SCAN_WORKERS = _resolve_scan_workers(16)
 
 _TODO_RE = re.compile(r"\b(?:TODO|FIXME|XXX)\b")
 _RATCHET_ALLOW_RE = re.compile(r"#\s*ratchet-allow:\s*(\S.*)")
