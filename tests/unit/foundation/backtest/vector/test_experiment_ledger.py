@@ -185,6 +185,7 @@ def test_record_grid_entry_still_correct_when_bt9_key_stalls(
     (BT-9 test_reproducibility.py의 config_hash stall 주입과 동일한 형태)."""
     original_key = experiment_ledger_mod.reproducibility_key
     delay_s = 0.01
+    _stalled_key_called = 0
 
     def _stalled_key(
         *,
@@ -193,7 +194,9 @@ def test_record_grid_entry_still_correct_when_bt9_key_stalls(
         rollup_version: str,
         config: BacktestConfigV2,
     ) -> str:
+        nonlocal _stalled_key_called
         time.sleep(delay_s)
+        _stalled_key_called += 1
         return original_key(
             script_hash=script_hash,
             data_lineage_hash=data_lineage_hash,
@@ -213,14 +216,12 @@ def test_record_grid_entry_still_correct_when_bt9_key_stalls(
         config=config,
         seed=42,
     )
-    started = time.perf_counter()
     stalled = record_grid_entry(**base)
-    elapsed_s = time.perf_counter() - started
 
     monkeypatch.undo()
     baseline = record_grid_entry(**base)
 
-    assert elapsed_s >= delay_s
+    assert _stalled_key_called == 1
     assert stalled.reproducibility_key == baseline.reproducibility_key
 
 
