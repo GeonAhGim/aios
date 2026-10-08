@@ -2969,3 +2969,38 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
   문서 리프). 다음 동일 경보는 `esc-ci-journeys.json`의 `resolved`/`resolved_sha` 이력과
   신규 실패 시각을 먼저 대조하고, `pm/auto_decision.py`의 반복 재배정 패턴(저장소 worker
   범위 밖, CLAUDE.md §4)을 재진단 없이 인용해 noop으로 닫아야 한다.
+
+## task-11488 — replay_verify `ConnectionResetError: [WinError 10054]` 재검증 (2026-10-08)
+
+- `esc-ci-replay_verify.json`: `first_seen=2026-09-22T15:23:36+00:00`, `reopen_count=4`,
+  지목 `sha=8ce872810`(task-11399, backtest 샌드박스 OS-tree fallback의 kill 대상 pid를
+  1개→N개로 넓힌 리프). `first_seen`이 그 커밋(2026-10-07T20:10:38 JST)보다 2주 이상
+  앞서므로 이 sha가 회귀를 만든 것이 아니다 — `pm/auto_decision.py`가 매번 가장 최근 HEAD를
+  "지목 커밋"으로 붙이는 동일한 패턴(task-11396/11407과 동일, bisect 후보 아님).
+  해당 리프도 `_own_child_pids`/`_find_new_child_pids`로 자기 자신(테스트 프로세스)의
+  직계 자식 pid만 추적·종료하는 범위라 공유 Postgres 컨테이너의 TCP 소켓과 인과 경로가 없다.
+- `scripts/replay_verify.py` 자체 docstring(L36-141)이 이 정확한 `ConnectionResetError`
+  shape를 `task-6177`부터 `task-8556`까지 9차례 이미 근본 원인을 추적한 기록: Windows
+  loopback TCP stack 레벨 리셋(task-6522 proactor→selector 교체로 확인), 원인은 이 머신의
+  모든 worktree가 공유하는 로컬 Postgres 컨테이너에 대한 동시 `setup_test_db.py
+  --reset/--drop`의 `pg_terminate_backend`/`DROP DATABASE`/`CREATE DATABASE` 경합이다.
+  `_create_pool_with_retry`/`_verify_with_retry` 모두 `OSError`(`ConnectionResetError`의
+  부모 클래스) 포함 5종 재시도 가능 예외, full-jitter 백오프(cap 8s), 8회 재시도, pool
+  leak 정정(task-6714)까지 이미 반영돼 있다 — DECISION_GUIDELINES B-2상 추가 예산 상향은
+  근거 없이 금지된다.
+- 로컬 재현: `DATABASE_URL`을 `TEST_DATABASE_URL`로 설정해 `python -m scripts.replay_verify`
+  3회 연속 실행 — 매회 `exit=0`, `replay_verify: OK`, `streams=0`
+  (`combined_digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`,
+  빈 스트림 집합의 SHA-256). `ConnectionResetError`는 재현되지 않았다(이 worktree 실행
+  구간에 sibling worktree의 `--reset/--drop`이 겹치지 않았다는 뜻).
+  관련 테스트 `tests/integration/eventstore/test_replay_verify*.py` 3개 +
+  `tests/unit/scripts/test_replay_verify_db_pressure.py` +
+  `test_replay_verify_pool_retry.py` + `test_replay_verify_scan_retry.py`:
+  **58 passed in 76.75s**, 기존 pool-leak/jitter/5종 예외 negative 테스트 전부 포함.
+- 기준선/예산/재시도 횟수/예외 목록/ignore 변경 없음(DECISION_GUIDELINES B-2) — 이미
+  9차례 근본 수정이 들어간 코드 경로를 다시 넓히는 것은 근본 수정이 아니라 증상
+  은폐다. D2 신규 negative/실패 주입/성능 assertion/red 재현, 변경 코드 Vitest 및 D3
+  replay: N/A(실행 코드 변경 없이 이미 해결된 공유 DB 경합 경보를 재검증하는 문서 리프).
+  다음 동일 경보는 (a) 지목 sha의 `first_seen`보다 이전인지 먼저 대조하고, (b) 재현되면
+  이 리프가 기록한 58건 부정/실패주입 테스트 중 어느 것이 새로 깨졌는지부터 확인한다 —
+  통과한다면 공유 컨테이너 경합 window가 이번엔 이 worktree의 실행 구간과 겹친 것뿐이다.
