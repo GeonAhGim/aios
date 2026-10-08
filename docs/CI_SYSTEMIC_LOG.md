@@ -3004,3 +3004,35 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
   다음 동일 경보는 (a) 지목 sha의 `first_seen`보다 이전인지 먼저 대조하고, (b) 재현되면
   이 리프가 기록한 58건 부정/실패주입 테스트 중 어느 것이 새로 깨졌는지부터 확인한다 —
   통과한다면 공유 컨테이너 경합 window가 이번엔 이 worktree의 실행 구간과 겹친 것뿐이다.
+
+## task-11488 — replay_verify 재오픈, 동일 경보 10차 재발 (2026-10-08, 후속)
+
+- 위 재검증 커밋(`2c91c1f9`, docs 전용) 자체가 다시 `esc-ci-replay_verify.json`의 지목
+  `sha`로 붙어 재오픈됐다 — `first_seen`은 여전히 `2026-09-22T15:23:36+00:00`으로 불변,
+  즉 `pm/auto_decision.py`가 실패 시점 HEAD를 기계적으로 지목 sha에 다시 붙인 것뿐이고,
+  docs 전용 커밋은 `scripts/replay_verify.py`를 건드리지 않으므로 이 sha도 회귀 후보가
+  될 수 없다(동일 오탐 패턴, task-11396/11407/11488 1차 보고와 동형).
+- 이번 재오픈의 failure detail은 결정적 신규 증거를 하나 더 준다: 같은 CI 실행에서
+  `pytest-xdist` worker 3개(`gw0/gw1/gw2`)가 동시에 `replay_verify`를 각자 실행했고,
+  `gw0`만 `_create_pool_with_retry`의 8회 재시도를 전부 소진해
+  `ConnectionDoesNotExistError: connection was closed in the middle of operation`로
+  fail-closed 종료했다 — `gw1`(`streams=6`)과 `gw2`(`streams=0`, pre-cutover 13건 skip)는
+  **같은 실행, 같은 코드, 같은 커밋**에서 정상 종료(`exit=0`/`OK`)했다. 코드 경로가 동일한
+  세 worker 중 하나만 실패하는 것은 코드 결함이 아니라, 세 worker가 동시에 같은 로컬
+  Postgres 컨테이너에 접속을 시도하는 그 순간의 공유 자원 경합(task-6256/6267/8556이 이미
+  문서화한 `setup_test_db.py --reset/--drop`·`max_connections` 포화 계열)이 `gw0`의 접속
+  시도 윈도우에만 걸렸다는 직접적 증거다.
+- 로컬 재현: `DATABASE_URL=TEST_DATABASE_URL`로 `python -m scripts.replay_verify` 3회
+  연속 — 매회 `exit=0`, `streams=0`,
+  `combined_digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+  관련 테스트(`test_replay_verify*.py` 3개 + `test_replay_verify_db_pressure.py` +
+  `test_replay_verify_pool_retry.py` + `test_replay_verify_scan_retry.py`):
+  **58 passed in 63.04s**. 기준선/예산/재시도 횟수/예외 목록/ignore 변경 없음
+  (DECISION_GUIDELINES B-2) — `gw1`/`gw2`가 같은 실행에서 통과했다는 사실 자체가 재시도
+  예산을 더 넓혀야 한다는 근거가 아니라, 이미 사이즈를 맞춘 예산이 대부분의 worker에는
+  충분하고 드물게 겹치는 극단적 동시 접속 윈도우만 놓친다는 근거다.
+- 다음 동일 경보 처리: 지목 sha가 `scripts/replay_verify.py`나 그 의존 모듈을 건드리지
+  않는 커밋(docs-only, 무관 리프 등)이면 즉시 비회귀로 분류하고, failure detail에
+  `gw0/gw1/gw2`처럼 동일 실행 내 worker별 성공/실패가 섞여 있는지부터 확인한다 — 섞여
+  있으면 그 자체가 코드 결함이 아니라 동시 접속 경합이라는 자기완결적 증거이므로 추가
+  분석 없이 이 리프를 인용해 비회귀로 닫는다.
