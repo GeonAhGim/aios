@@ -1,6 +1,5 @@
-"""FA-14 통합테스트 — 실DB(TEST_DATABASE_URL)에서 `order_events`·`pos_journal`·
-`ledger_journal_entry`+`ledger_posting_line` 전건을 재생한 투영이 현재 테이블
-(`orders`·`pos_snapshot`·`ledger_balance`)과 필드 단위로 같은지 검증한다.
+"""FA-14 통합테스트 — 실DB(TEST_DATABASE_URL)에서 `order_events` 전건을 재생한
+`orders` 투영이 현재 `orders` 테이블과 필드 단위로 같은지 검증한다.
 
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-14 DoD.
 DoD(1) 필드 단위 동일(불일치 1건이면 FAIL). DoD(2) 배선증명 negative — 원천
@@ -13,6 +12,10 @@ DoD(1) 필드 단위 동일(불일치 1건이면 FAIL). DoD(2) 배선증명 nega
 `order_events`가 `payload_hash`만 갖고 실제 payload가 없어 후자 필드들을
 이벤트만으로 재구성할 수 없다는 것이 단일 원천 시도에서 나온 발견이다 —
 자세한 근거는 `src/core/eventstore/projections/orders.py` 모듈 docstring.
+
+`pos_journal`·`ledger_journal_entry` 재생 검증은
+`test_projections_positions.py`·`test_projections_ledger.py`로 분리돼 있다
+(책임 단위 분할, CLAUDE.md ADR-2026-09-10-C §7).
 """
 
 from __future__ import annotations
@@ -20,48 +23,19 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
-from time import perf_counter
 from uuid import uuid4
 
 import pytest
 
 from src.core.eventstore.projections import orders as orders_projection
-from src.core.eventstore.projections import positions as positions_projection
-from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import OrderSide, OrderStatus
-from src.foundation.entities.domain.defaults import default_portfolio_id
-from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
-from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
-from src.foundation.ledger.adapters.postgres_journal_repository import PostgresJournalRepository
-from src.foundation.ledger.application.post_entry import post_entry
-from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerEventType, UserSub
-from src.foundation.ledger.domain import eventstore_projection as ledger_projection
-from src.foundation.ledger.domain.chart_of_accounts import user_account
-from src.foundation.positions.adapters.postgres_journal_repository import (
-    PostgresJournalRepository as PositionsJournalRepository,
-)
-from src.foundation.positions.adapters.postgres_snapshot_repository import (
-    PostgresSnapshotRepository,
-)
-from src.foundation.positions.application.record_fill import record_fill
-from src.foundation.positions.contracts.v1 import (
-    CostMethod,
-    JournalEntryType,
-    PositionJournalEntryView,
-    RecordFillCommand,
-)
-from src.foundation.positions.domain import journal_rules
-from src.foundation.positions.domain.position_key import PositionKey
 from src.services.oms.adapters.fills_repository import FillsRepository
 from src.services.oms.adapters.order_events_repository import PostgresOrderEventRepository
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.contracts.v1_events import FillEvent, OrderTransitionEvent, ProviderOrderEvent
-from tests.integration.conftest import create_test_tenant, create_test_user
-from tests.integration.foundation.positions.conftest import create_pos_account, open_position
+from tests.integration.conftest import create_test_user
 from tests.integration.oms.conftest import insert_order
-
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def _clock() -> datetime:
@@ -292,333 +266,3 @@ async def test_orders_projection_detects_dropped_fill(pool):
     dropped = orders_projection.project(order_id, events, fills[:1])
 
     assert dropped.filled_quantity != row["filled_quantity"]
-
-
-# ------------------------------------------------------------- positions ---
-
-
-async def _record_two_fills(pool) -> tuple:
-    journal = PositionsJournalRepository(pool)
-    snapshots = PostgresSnapshotRepository(pool)
-    audit = PostgresAuditEventRepository(pool)
-    tenant_id = await create_test_tenant(pool)
-    account_id = await create_pos_account(pool, tenant_id)
-    position_key = str(
-        PositionKey(
-            venue="TESTVENUE",
-            instrument_id=f"INST{uuid4().hex[:8]}",
-            strategy_id="default",
-            execution_id="paper",
-            portfolio_id=default_portfolio_id(tenant_id),
-        )
-    )
-    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
-    order_id = uuid4()
-
-    async def _fill(side: OrderSide, quantity: Decimal, price: Decimal, fill_seq: int):
-        async with pool.acquire() as conn, conn.transaction():
-            return await record_fill(
-                conn,
-                RecordFillCommand(
-                    tenant_id=tenant_id,
-                    account_id=account_id,
-                    position_key=position_key,
-                    order_id=order_id,
-                    fill_seq=fill_seq,
-                    side=side,
-                    quantity=quantity,
-                    price=Money(amount=price, currency=Currency.KRW),
-                    fee=None,
-                    occurred_at=_OCCURRED_AT,
-                    trace_id=uuid4(),
-                ),
-                asset_class=AssetClass.CRYPTO,
-                journal=journal,
-                snapshots=snapshots,
-                audit=audit,
-                clock=_clock,
-            )
-
-    await _fill(OrderSide.BUY, Decimal("10"), Decimal("100"), 1)
-    await _fill(OrderSide.SELL, Decimal("4"), Decimal("120"), 2)
-
-    async with pool.acquire() as conn:
-        entries = await journal.list_for(conn, position_key)
-        row = await conn.fetchrow(
-            "SELECT quantity, avg_cost, realized_pnl_base, fees_base, funding_base, "
-            "last_journal_seq FROM pos_snapshot WHERE position_key = $1",
-            position_key,
-        )
-    return position_key, entries, row
-
-
-async def test_positions_projection_matches_current_snapshot_after_full_replay(pool):
-    position_key, entries, row = await _record_two_fills(pool)
-
-    folded = positions_projection.project(
-        entries,
-        position_key=position_key,
-        cost_method=CostMethod.FIFO,
-        asset_class=AssetClass.CRYPTO,
-    )
-
-    assert folded.quantity == row["quantity"]
-    assert folded.avg_cost == row["avg_cost"]
-    assert folded.realized_pnl_base == row["realized_pnl_base"]
-    assert folded.fees_base == row["fees_base"]
-    assert folded.funding_base == row["funding_base"]
-    assert folded.last_journal_seq == row["last_journal_seq"]
-
-
-async def test_positions_projection_detects_dropped_entry(pool):
-    """DoD(2) 배선증명: 원천 저널 엔트리 1건(두 번째 체결)을 빼면 재생
-    수량이 현재 스냅샷과 실제로 달라진다."""
-    position_key, entries, row = await _record_two_fills(pool)
-    assert len(entries) == 2
-
-    dropped = positions_projection.project(
-        entries[:1],
-        position_key=position_key,
-        cost_method=CostMethod.FIFO,
-        asset_class=AssetClass.CRYPTO,
-    )
-
-    assert dropped.quantity != row["quantity"]
-
-
-async def test_positions_projection_rejects_fill_entry_missing_price(pool):
-    """실패 주입(D2): 이벤트가 빠진 게 아니라, 실제로 존재하는 FILL 엔트리의
-    `price` 필드가 백엔드 회귀(예: 직렬화 버그로 원본 체결가 유실)로 손상된
-    경우를 흉내낸다 — `apply_one`이 조용히 스킵하지 않고 ValueError로
-    드러내는지 확인한다(늘 통과하는 대조가 아님)."""
-    position_key, entries, _row = await _record_two_fills(pool)
-    corrupted = entries[0].model_copy(update={"price": None})
-
-    with pytest.raises(ValueError, match="price"):
-        positions_projection.project(
-            [corrupted],
-            position_key=position_key,
-            cost_method=CostMethod.FIFO,
-            asset_class=AssetClass.CRYPTO,
-        )
-
-
-async def _record_three_fills(pool) -> tuple:
-    """`_record_two_fills`와 같은 계좌 설정에 체결을 하나 더 쌓아, 시퀀스
-    가운데(2번)를 건너뛴 재생이 `SequenceConflictError`로 실제 발동하는지
-    볼 수 있는 3건짜리 저널을 만든다."""
-    journal = PositionsJournalRepository(pool)
-    snapshots = PostgresSnapshotRepository(pool)
-    audit = PostgresAuditEventRepository(pool)
-    tenant_id = await create_test_tenant(pool)
-    account_id = await create_pos_account(pool, tenant_id)
-    position_key = str(
-        PositionKey(
-            venue="TESTVENUE",
-            instrument_id=f"INST{uuid4().hex[:8]}",
-            strategy_id="default",
-            execution_id="paper",
-            portfolio_id=default_portfolio_id(tenant_id),
-        )
-    )
-    await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key)
-    order_id = uuid4()
-
-    async def _fill(side: OrderSide, quantity: Decimal, price: Decimal, fill_seq: int):
-        async with pool.acquire() as conn, conn.transaction():
-            return await record_fill(
-                conn,
-                RecordFillCommand(
-                    tenant_id=tenant_id,
-                    account_id=account_id,
-                    position_key=position_key,
-                    order_id=order_id,
-                    fill_seq=fill_seq,
-                    side=side,
-                    quantity=quantity,
-                    price=Money(amount=price, currency=Currency.KRW),
-                    fee=None,
-                    occurred_at=_OCCURRED_AT,
-                    trace_id=uuid4(),
-                ),
-                asset_class=AssetClass.CRYPTO,
-                journal=journal,
-                snapshots=snapshots,
-                audit=audit,
-                clock=_clock,
-            )
-
-    await _fill(OrderSide.BUY, Decimal("10"), Decimal("100"), 1)
-    await _fill(OrderSide.SELL, Decimal("4"), Decimal("120"), 2)
-    await _fill(OrderSide.SELL, Decimal("2"), Decimal("130"), 3)
-
-    async with pool.acquire() as conn:
-        entries = await journal.list_for(conn, position_key)
-    return position_key, entries
-
-
-async def test_positions_projection_rejects_sequence_gap_from_dropped_middle_entry(pool):
-    """게이트 적색 재현(D2): §4.3 연속성 불변을 강제하는 `journal_rules.
-    validate_sequence`(POS_SEQUENCE_CONFLICT)가 실제로 배선돼 있음을, 값
-    분기가 아니라 그 가드가 직접 던지는 예외로 증명한다 — 가운데 엔트리
-    (2번)를 빼고 1·3번만 재생하면 3번의 sequence_no=3이 기대값(prev+1=2)과
-    달라 즉시 거부된다."""
-    position_key, entries = await _record_three_fills(pool)
-    assert [e.sequence_no for e in entries] == [1, 2, 3]
-
-    with pytest.raises(journal_rules.SequenceConflictError):
-        positions_projection.project(
-            [entries[0], entries[2]],
-            position_key=position_key,
-            cost_method=CostMethod.FIFO,
-            asset_class=AssetClass.CRYPTO,
-        )
-
-
-@pytest.mark.perf
-def test_positions_projection_folds_ten_thousand_fee_entries_under_budget() -> None:
-    """성능 단언(D2): `project()`는 순수 fold(모듈 docstring, I/O 없음)라 DB
-    없이도 측정할 수 있다 — `apply_one`이 엔트리마다 로트 전체를 다시
-    스캔하는 등 O(n) 밖의 비용을 갖고 있지 않은지 10,000건으로 상한을
-    건다."""
-    position_key = f"perf-{uuid4().hex}"
-    now = datetime.now(timezone.utc)
-    entries = [
-        PositionJournalEntryView(
-            id=seq,
-            position_key=position_key,
-            sequence_no=seq,
-            entry_type=JournalEntryType.FEE,
-            qty_delta=Decimal("0"),
-            price=None,
-            fee=Money(amount=Decimal("0.01"), currency=Currency.KRW),
-            realized_pnl_base=Decimal("0"),
-            fx_rate=None,
-            fx_source=None,
-            source_event_type="fee",
-            source_event_id=f"fee-{seq}",
-            idempotency_key=f"fee:{seq}",
-            prev_hash=None,
-            entry_hash="e" * 64,
-            occurred_at=now,
-            recorded_at=now,
-        )
-        for seq in range(1, 10_001)
-    ]
-
-    started = perf_counter()
-    folded = positions_projection.project(
-        entries,
-        position_key=position_key,
-        cost_method=CostMethod.FIFO,
-        asset_class=AssetClass.CRYPTO,
-    )
-    elapsed_ms = (perf_counter() - started) * 1000
-
-    assert folded.fees_base == Decimal("100.00")
-    assert elapsed_ms < 800, f"10,000건 fold가 {elapsed_ms:.1f}ms 걸림(예산 800ms)"
-
-
-# ----------------------------------------------------------------ledger ---
-
-
-async def _create_ledger_test_account(
-    pool, user_id, sub: UserSub, *, kind: AccountType, allow_negative: bool = False
-) -> str:
-    """`USER:{uuid}:{sub}` 계정 하나를 만든다 — `account_type()`이 아는
-    형식(USER:*/PLATFORM:*의 고정 이름 4종)만 `posting_rules.lines_for`를
-    통과하므로, `PLATFORM:TEST_*` 같은 임의 이름(다른 디렉터리의
-    `create_ledger_account`)은 MANUAL_ADJUSTMENT 경로에 쓸 수 없다."""
-    code = user_account(user_id, sub)
-    async with pool.acquire() as conn:
-        account_id = await conn.fetchval(
-            "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
-            "VALUES ($1, $2, $3, $4) RETURNING account_id",
-            code,
-            kind.value,
-            Currency.KRW.value,
-            allow_negative,
-        )
-        await conn.execute(
-            "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
-            "VALUES ($1, $2, 0)",
-            account_id,
-            allow_negative,
-        )
-    return code
-
-
-async def _post_two_manual_adjustments(pool) -> tuple:
-    # MANUAL_ADJUSTMENT lets a test post between two freshly-created accounts
-    # directly, isolated from LC-6's shared PLATFORM:* seed accounts. Debit
-    # goes to a RECEIVABLE(ASSET, debit-normal) test account and credit to an
-    # AVAILABLE(LIABILITY, credit-normal) one so both sides increase — no
-    # negative-balance rejection to work around.
-    journal = PostgresJournalRepository(pool)
-    balances = PostgresBalanceRepository(pool)
-    audit = PostgresAuditEventRepository(pool)
-
-    debit_code = await _create_ledger_test_account(
-        pool, uuid4(), UserSub.RECEIVABLE, kind=AccountType.ASSET, allow_negative=True
-    )
-    credit_code = await _create_ledger_test_account(
-        pool, uuid4(), UserSub.AVAILABLE, kind=AccountType.LIABILITY
-    )
-
-    async with pool.acquire() as conn:
-        last = await journal.last(conn)
-    start_seq = 0 if last is None else last.sequence_no
-
-    async def _adjust(amount: Decimal):
-        event = LedgerEvent(
-            event_type=LedgerEventType.MANUAL_ADJUSTMENT,
-            event_ref=f"adj:{uuid4().hex}",
-            tenant_id=None,
-            actor_subject_id=None,
-            trace_id=uuid4(),
-            amount=amount,
-            currency=Currency.KRW,
-            parties={},
-            extra={"debit_account": debit_code, "credit_account": credit_code},
-        )
-        async with pool.acquire() as conn, conn.transaction():
-            return await post_entry(
-                conn,
-                event,
-                journal=journal,
-                balances=balances,
-                audit=audit,
-                clock=_clock,
-            )
-
-    await _adjust(Decimal("10.00"))
-    await _adjust(Decimal("5.00"))
-
-    async with pool.acquire() as conn:
-        entries = await journal.list_since(conn, start_seq)
-        row = await conn.fetchrow(
-            "SELECT lb.balance, lb.last_entry_seq FROM ledger_balance lb "
-            "JOIN ledger_account la ON la.account_id = lb.account_id WHERE la.account_code = $1",
-            debit_code,
-        )
-    return debit_code, entries, row
-
-
-async def test_ledger_projection_matches_current_balance_after_full_replay(pool):
-    debit_code, entries, row = await _post_two_manual_adjustments(pool)
-
-    projected = ledger_projection.project(entries)
-
-    assert projected[debit_code].balance == row["balance"]
-    assert projected[debit_code].last_entry_seq == row["last_entry_seq"]
-
-
-async def test_ledger_projection_detects_dropped_entry(pool):
-    """DoD(2) 배선증명: 원천 분개 1건(두 번째 조정)을 빼면 재생 잔액이 현재
-    `ledger_balance`와 실제로 달라진다."""
-    debit_code, entries, row = await _post_two_manual_adjustments(pool)
-    assert len(entries) == 2
-
-    dropped = ledger_projection.project(entries[:1])
-
-    assert dropped[debit_code].balance != row["balance"]
