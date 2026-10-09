@@ -32,14 +32,24 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
+from scripts.backup._restore_config import (  # noqa: F401 (재노출 -- 호출부는 restore_drill.* 사용)
+    libpq_dsn,
+    with_port,
+    write_recovery_config,
+)
+from scripts.backup._restore_wait import (  # noqa: F401 (재노출)
+    LAST_FAILED_RESTORE_DIR,
+    collect_start_failure_logs,
+    preserve_failed_restore_logs,
+    wait_for_process_start,
+    wait_for_recovery,
+)
 from scripts.backup.base_backup import latest_backup_dir, server_url
 
 ROOT = Path(__file__).resolve().parents[2]
 PM_REPORT_PATH = Path(r"C:\aios\pm") / "backup" / "drill_latest.json"
 LOCAL_REPORT_PATH = ROOT / "runtime" / "backup" / "drill_latest.json"
-LAST_FAILED_RESTORE_DIR = Path(r"C:\aios\pm") / "backup_runtime" / "last_failed_restore"
 
 
 def _now() -> dt.datetime:
@@ -72,57 +82,6 @@ def _run(cmd: list[str], cwd: Path, env: dict | None, timeout: int) -> tuple[int
         return r.returncode, text[-4000:]
     except OSError as exc:
         return 1, f"{type(exc).__name__}: {exc}"
-
-
-def libpq_dsn(url: str) -> str:
-    """SQLAlchemy 스킴(postgresql+asyncpg://)을 psql/libpq가 파싱하는 postgresql://로."""
-    return url.replace("postgresql+asyncpg://", "postgresql://")
-
-
-def with_port(url: str, port: int) -> str:
-    """접속 URL의 host는 유지하고 port만 별도 인스턴스 것으로 바꾼다."""
-    parts = urlsplit(url.replace("postgresql+asyncpg://", "postgresql://"))
-    userinfo, _, hostport = parts.netloc.rpartition("@")
-    host = parts.hostname or "127.0.0.1"
-    new_netloc = f"{userinfo}@{host}:{port}" if userinfo else f"{host}:{port}"
-    return urlunsplit((parts.scheme, new_netloc, parts.path, parts.query, parts.fragment))
-
-
-def _escape_path_for_pg_conf(path: Path) -> str:
-    """PostgreSQL postgresql.conf 값에 넣기 전에 Windows 경로를 forward slash로 변환한다.
-
-    PostgreSQL GUC 문자열 파서는 따옴표로 감싼 값 안의 백슬래시 시퀀스를
-    C-스타일 escape로 해석한다(\\b -> backspace, \\a -> bell 등).
-    Windows 경로에 역슬래시가 섞이면 restore_command 등에 치명적인 corruption을
-    일으키므로, conf 파일에 쓰기 전에 모든 역슬래시를 forward slash로 통일한다.
-    PostgreSQL 문서도 Windows 경로는 conf 파일에 forward slash로 쓰라고 권장한다.
-    """
-    return str(path).replace("\\", "/")
-
-
-def write_recovery_config(data_dir: Path, archive_dir: Path) -> None:
-    (data_dir / "recovery.signal").touch()
-    # backslash -> forward slash (GUC escape corruption 방지)
-    safe_archive = _escape_path_for_pg_conf(archive_dir)
-    # Windows(cp 명령어 미존재)는 copy, Unix는 cp 사용
-    restore_cmd = "copy" if os.name == "nt" else "cp"
-    restore_command = f'{restore_cmd} "{safe_archive}/%f" "%p"'
-    conf = data_dir / "postgresql.auto.conf"
-    existing = conf.read_text(encoding="utf-8") if conf.exists() else ""
-    # CTO 2026-09-30(task-9469): 리허설 인스턴스는 버리는 사본이다.
-    # - archive_mode=off: 원본의 archive_command를 물려받아 운영 WAL 아카이브에 자기 타임라인
-    #   기록(00000002.history)을 써 넣던 결함 차단 — 남으면 이후 복구가 엉뚱한 타임라인을 쫓는다.
-    # - recovery_target_timeline=current: 아카이브에 다른 타임라인 기록이 있어도
-    #   백업의 타임라인만 재생한다.
-    # - fsync=off: 기동 시 데이터 디렉터리 전체 fsync(파일 10만 개 기준 수 분, 09-23 로그 실측)를
-    #   건너뛴다. 사본의 내구성은 검증 대상이 아니다(복구 가능성·재생 일치가 대상).
-    scratch = (
-        f"\nrestore_command = '{restore_command}'\n"
-        "archive_mode = off\n"
-        "recovery_target_timeline = 'current'\n"
-        "fsync = off\n"
-    )
-    conf.write_text(existing + scratch, encoding="utf-8")
 
 
 def _copy_backup_tree(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
@@ -243,102 +202,6 @@ def _restore_backup_files(src: Path, dst: Path, timeout: float) -> tuple[bool, s
     if (src / "base.tar.gz").exists() or (src / "base.tar").exists():
         return _extract_tar_backup(src, dst, timeout)
     return _copy_backup_tree(src, dst, timeout)
-
-
-def _tail_lines(text: str, n: int) -> str:
-    return "\n".join(text.splitlines()[-n:])
-
-
-def collect_start_failure_logs(restore_data_dir: Path) -> str:
-    """start_postgres 실패 시 진단용 로그를 모은다: pg_ctl_start.log 전체 +
-    restore_data_dir/log/*.log(logging_collector 사용 시 postgres 자체 로그) 마지막 80줄.
-    포트 충돌/복구 재생 시간 초과/권한 오류를 로그 내용으로 구분할 수 있게 한다(task-4978)."""
-    parts: list[str] = []
-    pg_ctl_log = restore_data_dir / "pg_ctl_start.log"
-    if pg_ctl_log.exists():
-        content = pg_ctl_log.read_text(encoding="utf-8", errors="replace")
-        parts.append(f"--- pg_ctl_start.log (전체) ---\n{content}")
-    else:
-        parts.append("--- pg_ctl_start.log 없음 ---")
-    log_dir = restore_data_dir / "log"
-    if log_dir.is_dir():
-        for log_file in sorted(log_dir.glob("*.log")):
-            content = log_file.read_text(encoding="utf-8", errors="replace")
-            parts.append(f"--- {log_file.name} (마지막 80줄) ---\n{_tail_lines(content, 80)}")
-    return "\n\n".join(parts)
-
-
-def preserve_failed_restore_logs(
-    restore_data_dir: Path, dest_dir: Path = LAST_FAILED_RESTORE_DIR
-) -> None:
-    """정리(rmtree) 전에 실패한 드릴의 로그를 fleet 저장소로 복사한다 -- restore_data_dir는
-    드릴 후 항상 지워지므로, 여기 복사해두지 않으면 원인 분석 근거가 남지 않는다(task-4978)."""
-    try:
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        pg_ctl_log = restore_data_dir / "pg_ctl_start.log"
-        if pg_ctl_log.exists():
-            shutil.copy2(pg_ctl_log, dest_dir / "pg_ctl_start.log")
-        log_dir = restore_data_dir / "log"
-        if log_dir.is_dir():
-            dest_log_dir = dest_dir / "log"
-            dest_log_dir.mkdir(exist_ok=True)
-            for log_file in log_dir.glob("*.log"):
-                shutil.copy2(log_file, dest_log_dir / log_file.name)
-    except OSError:
-        pass
-
-
-def wait_for_process_start(
-    data_dir: Path,
-    *,
-    pg_ctl_bin: str,
-    run_cmd: Callable[[list[str], Path, dict | None, int], tuple[int, str]],
-    cwd: Path,
-    timeout: float,
-    poll_interval: float,
-    env: dict | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> str | None:
-    """postgres 프로세스가 실제로 떠 있는지(`pg_ctl status`)만 폴링한다 -- WAL replay 완료는
-    wait_for_recovery로 분리했다(이전엔 `pg_ctl start -w -t 60`이 둘 다 기다려 735MB 베이스
-    백업 replay가 60초를 넘기면 정상 진행 중인데도 실패로 오분류됐다, task-4978). 정상이면
-    None, 타임아웃까지 확인 안 되면 사유 문자열을 돌려준다."""
-    deadline = clock() + timeout
-    while True:
-        rc, tail = run_cmd([pg_ctl_bin, "status", "-D", str(data_dir)], cwd, env, 30)
-        if rc == 0:
-            return None
-        if clock() >= deadline:
-            return (
-                f"{timeout:.0f}초 안에 서버 프로세스가 뜨지 않았다(rc={rc}, tail={tail[-200:]!r})"
-            )
-        sleep(poll_interval)
-
-
-def wait_for_recovery(
-    dsn: str,
-    *,
-    psql_bin: str,
-    run_cmd: Callable[[list[str], Path, dict | None, int], tuple[int, str]],
-    cwd: Path,
-    timeout: float,
-    poll_interval: float,
-    env: dict | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> str | None:
-    """`pg_is_in_recovery()`가 f가 될 때까지 psql로 폴링한다. 정상이면 None, 타임아웃까지
-    끝나지 않으면 사유 문자열을 돌려준다(run_cmd/sleep/clock 주입으로 실제 대기 없이
-    타임아웃 경로를 테스트할 수 있다)."""
-    deadline = clock() + timeout
-    while True:
-        rc, tail = run_cmd([psql_bin, dsn, "-tAc", "SELECT pg_is_in_recovery();"], cwd, env, 30)
-        if rc == 0 and tail.strip() == "f":
-            return None
-        if clock() >= deadline:
-            return f"{timeout:.0f}초 안에 복구가 끝나지 않았다(rc={rc}, tail={tail[-200:]!r})"
-        sleep(poll_interval)
 
 
 def _finish(steps: dict[str, dict], started: dt.datetime) -> dict:
