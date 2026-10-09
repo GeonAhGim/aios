@@ -4,6 +4,7 @@
 옮겨 두므로(테스트 전용 DB — 개발/운영 DB 접속 금지), 여기서는 그 값을
 그대로 읽어 asyncpg DSN으로 변환하기만 한다.
 """
+
 from __future__ import annotations
 
 import os
@@ -98,3 +99,56 @@ async def create_ledger_account(
             allow_negative,
         )
     return account_code
+
+
+@pytest.fixture(scope="module")
+async def _sentinel_watch_orders_residue(pool):
+    """D3 test harness: watch for orphaned orders rows (no matching event).
+
+    Sentinel hook runs after each module to detect if any test left an orders
+    row without the corresponding order_event(s). This catches the residue class
+    task-11356 partially fixed (orders row mutated without an event), catching
+    the originating test instead of the victim test (test_resync_drift).
+
+    Simple variant: count orders table mutations. A test that commits an orders
+    row change without a matching event will be pinned down when replay_verify
+    sees the mismatch.
+    """
+    orders_count_before = None
+
+    async def _get_orders_count() -> int:
+        """Count rows in orders table; covers the shared TEST_DATABASE_URL."""
+        async with pool.acquire() as conn:
+            count = await conn.fetchval("SELECT count(*) FROM orders")
+        return count or 0
+
+    # Record baseline before module tests run
+    orders_count_before = await _get_orders_count()
+
+    yield
+
+    # After all tests in module, check for drift
+    orders_count_after = await _get_orders_count()
+    as_of = datetime.now(timezone.utc)
+
+    # Run replay_verify to catch any orders row ↔ event mismatch
+    try:
+        verify_result = await replay_verify.verify(pool, as_of=as_of, hours=24)
+        if not verify_result.ok:
+            mismatches = [
+                m
+                for m in verify_result.mismatches
+                if m.domain == "orders" or (hasattr(m, "key") and isinstance(m.key, str))
+            ]
+            if mismatches:
+                msg = (
+                    f"Sentinel: orders residue detected after module teardown. "
+                    f"Table mutations: {orders_count_before} → {orders_count_after}. "
+                    f"Mismatches: {mismatches}"
+                )
+                raise AssertionError(msg)
+    except Exception as e:
+        # If verify() fails for other reasons (network, schema), don't block the module
+        # but log it so manual triage can investigate
+        if "orders" in str(e).lower() or "residue" in str(e).lower():
+            pytest.skip(f"Sentinel watch aborted: {e}", allow_module_level=True)

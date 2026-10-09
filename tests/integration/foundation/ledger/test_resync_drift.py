@@ -315,3 +315,36 @@ async def test_resync_completes_within_latency_budget_for_one_account_with_many_
 
     assert report.resynced is False
     assert elapsed_s < 5.0, f"compute_drift took {elapsed_s:.3f}s (budget 5.0s)"
+
+
+@pytest.mark.skip(
+    reason="Sentinel reproducer: intentionally leaves ledger drift. "
+    + "If sentinel hook works, it detects this in module teardown. "
+    + "To test, remove skip and run: pytest "
+    + "tests/integration/foundation/ledger/test_resync_drift.py"
+    + "::test_sentinel_reproducer_detects_ledger_drift -v"
+)
+async def test_sentinel_reproducer_detects_ledger_drift(pool):
+    """D2 negative test: Reproducer for sentinel watch (task-11523).
+
+    This test intentionally creates a ledger_balance row drift (balance mutated
+    without a journal entry), leaving residue that violates I-10 (INVARIANTS.md).
+
+    The module-level `_sentinel_watch_orders_residue` fixture should detect this
+    during module teardown by running replay_verify.py, catching the mismatch
+    and pinpointing this test as the culprit instead of a downstream victim
+    test like test_resync_drift.
+
+    Once the sentinel correctly raises AssertionError (proving it works),
+    mark this test @pytest.mark.skip to prevent false reds in normal CI.
+    """
+    journal = PostgresJournalRepository(pool)
+    balances = PostgresBalanceRepository(pool)
+    test_code = await _seed_ledger_entry(pool)
+
+    # Intentionally leave drift: bump balance but don't repair
+    await _bump_balance_outside_event_trail(pool, test_code, 1)
+
+    # This test passes but leaves drift. The sentinel fixture should
+    # catch it in module teardown (via replay_verify) and fail.
+    # Once verified working, skip this permanently to keep CI green

@@ -451,23 +451,27 @@ async def test_resolve_unknown_confirms_status_within_max_attempts(pool):
     submitted = await submit_order(
         order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
     )
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE orders SET status = 'UNKNOWN', unknown_since = now() WHERE order_id = $1",
-            submitted.order_id,
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE orders SET status = 'UNKNOWN', unknown_since = now() WHERE order_id = $1",
+                submitted.order_id,
+            )
+
+        sleep_calls = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        resolved = await resolve_unknown(
+            submitted.order_id, adapter=adapter, pool=pool, sleep=fake_sleep
         )
 
-    sleep_calls = []
-
-    async def fake_sleep(seconds: float) -> None:
-        sleep_calls.append(seconds)
-
-    resolved = await resolve_unknown(
-        submitted.order_id, adapter=adapter, pool=pool, sleep=fake_sleep
-    )
-
-    assert resolved.status == OrderStatus.FILLED
-    assert sleep_calls == []  # 1회차에 바로 확정 — 재시도 대기 없음
+        assert resolved.status == OrderStatus.FILLED
+        assert sleep_calls == []  # 1회차에 바로 확정 — 재시도 대기 없음
+    finally:
+        # task-11523: cleanup residue from raw UPDATE (UNKNOWN without order_events)
+        await _delete_order_and_events(pool, submitted.order_id)
 
 
 async def test_resolve_unknown_gives_up_after_max_attempts(pool):
@@ -484,22 +488,26 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
     # FD-4.5는 "주문 상태가 UNKNOWN으로 관측될 때"(예: FD-3.4 폴링 자체가
     # 실패) 트리거된다 — 여기서는 그 관측이 이미 일어나 DB에 UNKNOWN으로
     # 반영된 상태를 직접 시뮬레이션한다.
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE orders SET status = 'UNKNOWN', unknown_since = now() WHERE order_id = $1",
-            submitted.order_id,
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE orders SET status = 'UNKNOWN', unknown_since = now() WHERE order_id = $1",
+                submitted.order_id,
+            )
+
+        sleep_calls = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        resolved = await resolve_unknown(
+            submitted.order_id, adapter=adapter, pool=pool, sleep=fake_sleep
         )
 
-    sleep_calls = []
-
-    async def fake_sleep(seconds: float) -> None:
-        sleep_calls.append(seconds)
-
-    resolved = await resolve_unknown(
-        submitted.order_id, adapter=adapter, pool=pool, sleep=fake_sleep
-    )
-
-    assert resolved.status == OrderStatus.UNKNOWN
+        assert resolved.status == OrderStatus.UNKNOWN
+    finally:
+        # task-11523: cleanup residue from raw UPDATE (UNKNOWN without order_events)
+        await _delete_order_and_events(pool, submitted.order_id)
     # 5회 시도 중 마지막을 제외한 4회만 대기(DEFAULT_BACKOFF)
     assert sleep_calls == [1.0, 2.0, 4.0, 8.0]
 
