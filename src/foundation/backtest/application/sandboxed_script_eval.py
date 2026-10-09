@@ -91,9 +91,11 @@ def run_sandboxed(
     under `limits`. `fn` and its arguments/return value must be picklable
     (standard `multiprocessing` constraint)."""
     own_pid = os.getpid()
-    children_before = _own_child_pids(own_pid)
     executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
     try:
+        # Executor construction starts the shared resource tracker on POSIX.
+        # Snapshot before submit starts our worker so shared helpers survive.
+        children_before = _own_child_pids(own_pid)
         future = executor.submit(fn, *args, **kwargs)
         pid = _wait_for_worker_pid(executor, limits.wallclock_sec)
         exceeded = threading.Event()
@@ -122,12 +124,9 @@ def run_sandboxed(
                 # reflects the real child the instant it exists, so we never
                 # leave a true orphan (e.g. a 3600s `time.sleep`) running
                 # unkillable for the rest of its natural life (task-11273).
-                # `spawn` can register more than one new direct child at once
-                # (the worker plus a multiprocessing helper such as the
-                # resource tracker) -- killing only the first one left the
-                # other an unkillable orphan under contention (two surviving
-                # pids observed in one GH Actions run, task-11399). Kill
-                # every pid the diff finds, not just one.
+                # Kill every new child, not just the first. Shared executor
+                # infrastructure is already in children_before and must not
+                # be killed: multiprocessing would relaunch its tracker.
                 for candidate_pid in _find_new_child_pids(own_pid, children_before):
                     _kill_pid(candidate_pid)
             else:
