@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import os
-import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -34,9 +33,29 @@ from src.foundation.execution_ownership.adapters.postgres_repository import (
 from src.services.credential_resolver import CredentialNotFoundError
 from src.services.execution_loop.scheduler import ExecutionLoopScheduler
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
+from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
+
+
+async def _measure_tick_all_running_seconds(
+    scheduler: ExecutionLoopScheduler,
+) -> tuple[float, Any]:
+    """`scheduler.tick_all_running()` 1회 왕복을 `RelativeBudget.measure_async`로
+    잰다(task-11433, raw `time.perf_counter()` 단언 전환 —
+    scripts/check_perf_measurement_guard.py). DB 왕복·엔진 체인을 포함한
+    비동기 I/O라 `PerfBudget`(process_time 기반)이 아니라 wall-clock 기반
+    `measure_async`를 쓴다 — 예산 값(2.0s)은 바꾸지 않고 측정 경로만
+    coverage tracer-pause가 적용된 공용 헬퍼로 옮긴다."""
+    result: Any = None
+
+    async def _tick() -> None:
+        nonlocal result
+        result = await scheduler.tick_all_running()
+
+    sample = await RelativeBudget().measure_async(_tick, n=1, warmup=0, calibration_n=1)
+    return sample.op_ms / 1000, result
 
 
 def _asyncpg_dsn() -> str:
@@ -396,9 +415,8 @@ async def test_tick_all_running_p95_latency_within_budget(pool):
             resolve_adapter=_resolver_for({user_a: _filled_adapter(), user_b: _filled_adapter()}),
         )
 
-        start = time.perf_counter()
-        report = await scheduler.tick_all_running()
-        durations.append(time.perf_counter() - start)
+        elapsed_sec, report = await _measure_tick_all_running_seconds(scheduler)
+        durations.append(elapsed_sec)
 
         assert {exec_a, exec_b} <= set(report.ticked)
 
