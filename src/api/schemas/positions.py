@@ -9,6 +9,7 @@ so this single value determines the resume point).
 Decode failure is a transport-layer error, not a domain error, so we express it
 here as `InvalidCursorError` and let the global handler translate it into a
 VALIDATION_INVALID_FIELD envelope."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -47,9 +48,9 @@ def decode_cursor(raw: str | None) -> int:
     try:
         value = int(raw)
     except ValueError as exc:
-        raise InvalidCursorError(f"cursor 형식이 올바르지 않습니다: {raw!r}") from exc
+        raise InvalidCursorError(f"cursor format is invalid: {raw!r}") from exc
     if value < 0:
-        raise InvalidCursorError(f"cursor는 0 이상이어야 합니다: {raw!r}")
+        raise InvalidCursorError(f"cursor must be >= 0: {raw!r}")
     return value
 
 

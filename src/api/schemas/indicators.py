@@ -10,6 +10,7 @@ layer error, not a domain error, so we express it here as
 translate it into a VALIDATION_INVALID_FIELD envelope (same pattern as
 LB-19 `InvalidCursorError`, raw HTTPException prohibited).
 """
+
 from __future__ import annotations
 
 import re
@@ -40,7 +41,7 @@ def decode_cursor(raw: str | None) -> str | None:
     if raw is None or raw == "":
         return None
     if not _CURSOR_RE.match(raw):
-        raise InvalidIndicatorCursorError(f"cursor 형식이 올바르지 않습니다: {raw!r}")
+        raise InvalidIndicatorCursorError(f"cursor format is invalid: {raw!r}")
     return raw
 
 
