@@ -470,8 +470,13 @@ async def test_resolve_unknown_confirms_status_within_max_attempts(pool):
         assert resolved.status == OrderStatus.FILLED
         assert sleep_calls == []  # 1회차에 바로 확정 — 재시도 대기 없음
     finally:
-        # task-11523: cleanup residue from raw UPDATE (UNKNOWN without order_events)
-        await _delete_order_and_events(pool, submitted.order_id)
+        # task-11523: revert raw UPDATE (order_events is append-only, cannot DELETE)
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE orders SET status = $1 WHERE order_id = $2",
+                OrderStatus.FILLED.value,
+                submitted.order_id,
+            )
 
 
 async def test_resolve_unknown_gives_up_after_max_attempts(pool):
@@ -506,8 +511,9 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
 
         assert resolved.status == OrderStatus.UNKNOWN
     finally:
-        # task-11523: cleanup residue from raw UPDATE (UNKNOWN without order_events)
-        await _delete_order_and_events(pool, submitted.order_id)
+        # task-11523: revert raw UPDATE (order_events is append-only, cannot DELETE)
+        # Status stays UNKNOWN since that's the resolved state
+        pass
     # 5회 시도 중 마지막을 제외한 4회만 대기(DEFAULT_BACKOFF)
     assert sleep_calls == [1.0, 2.0, 4.0, 8.0]
 
