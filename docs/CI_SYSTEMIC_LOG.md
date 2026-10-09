@@ -3036,3 +3036,94 @@ escalation 스냅샷에서 재트리거하지 않도록 `status == "resolved"`�
   `gw0/gw1/gw2`처럼 동일 실행 내 worker별 성공/실패가 섞여 있는지부터 확인한다 — 섞여
   있으면 그 자체가 코드 결함이 아니라 동시 접속 경합이라는 자기완결적 증거이므로 추가
   분석 없이 이 리프를 인용해 비회귀로 닫는다.
+
+## task-11538 — PERF-measure 전환 완료분 전수 정합 감사: 단위 혼용·틱 양자화·공허 단언 (2026-10-09)
+
+CTO 표본 검토가 지목한 결함(전환 커밋 `451e8d590`, `test_rate_limit_storm.py`)은 이미
+`task-11519`(커밋 `be9aa2bb0`)가 정정했다 — 이 리프 실행 시점에 `wt/backend-3`에 반영돼 있다.
+남은 작업은 spec이 요구한 전수 감사 체크리스트·검출력 확인 기계 검사·분할 발행 목록이다.
+이 리프의 `files`는 본 문서 1개뿐이므로(사이블링 `task-11519`=
+`tests/integration/api/test_rate_limit_storm.py` 1개, `task-11433`=
+`tests/integration/test_execution_scheduler.py` 1개 — 둘 다 `files` 필드가 자신이 고친
+테스트 파일 1개와 정확히 일치) 실제 파일 정정은 이 리프 범위 밖이고, 아래 결함 목록은
+파일별 후속 리프로 발행 요청한다(§3).
+
+### 감사 방법 (기계 검사)
+
+1. `git grep -l samples_async tests/` → `tests/conftest.py`(정의) 제외 33개 테스트 파일 전수.
+2. 각 파일에서 `.cpu_ms`/`.wall_ms` 참조 횟수를 센다 — `tests/conftest.py`의
+   `PerfBudget.samples_async`(L411-427)는 **batch 파라미터가 없다**(`PerfBudget.sample`만
+   있음, L373-409) — 즉 이 메서드로 `cpu_ms`를 재는 모든 테스트는 호출 1회당 1샘플이라
+   Windows `time.process_time()` 15.6ms(64Hz) 틱 양자화를 그대로 받는다(`PerfBudget.sample`
+   독스트링 L374-380이 이미 문서화한 리스크, batch 우회 수단이 `samples_async`에는 없다).
+   `wall_ms`만 쓰는 파일(실제 비동기 I/O 왕복 측정)은 이 결함 클래스에 해당하지 않는다 —
+   왕복 지연은 보통 틱(15.6ms)보다 커서 양자화 영향이 상대적으로 작고, wall 측정은 애초에
+   CPU 틱과 무관하다.
+3. `cpu_ms=1 and wall_ms=0`(= cpu_ms만 참조, 즉 CPU-바운드 단언을 `samples_async`로 재는
+   파일)으로 걸러지는 파일이 정확히 이 결함 클래스의 후보다. "검출력 확인"은 각 후보 파일의
+   예산(ms) 대비 틱 폭(~15.6ms)의 비율로 기계적으로 판정한다 — 비율이 낮을수록(예산이
+   틱에 가까울수록) 양자화가 p95/p99를 그대로 왜곡해 "허울 단언"이 될 위험이 크고, 비율이
+   충분히 크면(예산이 틱의 수십 배) 통계적으로는 덜 치명적이지만 여전히 같은 구조적 결함
+   (batch 미사용)이다. 동적 주입(예산 10배 지연 monkeypatch) 검증은 `test_rate_limit_storm.py`
+   가 이미 가진 `test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression`
+   패턴(L223-253: 측정 대상의 락/의존성에 `monkeypatch.setattr`로 `asyncio.sleep(budget*3)`
+   주입 후 동일 단언이 `AssertionError`로 적색화하는지 확인)을 공용 헬퍼로 일반화해 각
+   후속 리프에서 재사용한다 — 측정 대상(락/리포지토리 호출/orchestration 함수)이 파일마다
+   달라 완전 범용 헬퍼로 한 번에 돌릴 수는 없고, 각 후속 리프가 자기 파일의 의존성 하나를
+   주입점으로 정해 이 패턴을 적용해야 한다(아래 체크리스트의 "검출력 재현" 칸).
+
+### 체크리스트 (파일 · 결함유형 · batch 사용 · 0 수렴 위험 · gate-red 재현 · 예산 불변 · 정정 상태)
+
+| 파일 | 원 전환 커밋/task | 단위 일치 | batch 사용 | 0 수렴(허울) 위험 | gate-red 재현 | 예산 불변 | 정정 상태 |
+|---|---|---|---|---|---|---|---|
+| `tests/integration/api/test_rate_limit_storm.py` | `451e8d590`(task-11034) | **불일치**(cpu_ms를 재차 ×1000해 "μs" 주석, ms 예산과 비교) | 없음(samples_async 1회/샘플) | 높음(예산 5ms ≈ 틱 1/3) | 있음(L223, 원래도 wall_ms 기준이라 결함과 무관하게 적색 유지) | 불변(5ms) | **정정 완료**(task-11519, `be9aa2bb0`, 수동 batch=8 루프로 전환) |
+| `tests/foundation/unit/automation/test_evaluate_rules_perf.py` | `1db537f18`(task-10943) | 일치(ms/ms) | 없음(samples_async, cpu_ms 직접 사용) | 낮음(예산 1000ms, 틱의 ~64배) | 없음(gate-red 재현 테스트 부재) | 불변 | **미정정** — 구조적 결함(batch 미사용) 있으나 예산 여유로 당장 허울화는 아님 |
+| `tests/foundation/unit/connections/test_begin_connection_application.py` | task-10958 | 일치(ms/ms) | 없음 | 중간(예산 50ms, 틱의 ~3배 — p95 꼬리가 양자화에 흔들릴 수 있음) | 있음(L418, 다른 불변식용 — 이 perf 단언 전용 재현은 없음) | 불변 | **미정정** |
+| `tests/foundation/unit/connections/test_confirm_connection.py` | task-10959 | 일치(ms/ms) | 없음 | 중간(예산 50ms) | 있음(L317, 다른 불변식용) | 불변 | **미정정** |
+| `tests/foundation/unit/connections/test_projections.py` | task-10961 | 일치(ms/ms) | 없음 | 중간(예산 100ms, 틱의 ~6배) | 없음 | 불변 | **미정정** |
+| `tests/foundation/unit/ml/test_register_model.py` | `5aa5d7f2c`(task-10992) | 일치(ms/ms) | 없음 | 중간(예산 50ms) | 있음(L219, 다른 불변식용) | 불변 | **미정정** |
+| `tests/integration/test_execution_scheduler.py` | task-11433 | 해당 없음 | 해당 없음(`RelativeBudget.measure_async`, wall-clock 전용 — `PerfBudget`/`samples_async` 계열 아님) | 해당 없음 | 해당 없음 | 불변(2.0s) | 다른 결함 클래스(raw perf_counter, `check_perf_measurement_guard.py` 대상) — 이미 전환 완료, 이 감사 범위 밖 |
+| 나머지 27개 `samples_async` 사용 파일(`wall_ms`만 참조) | 각기 다름 | 해당 없음(cpu_ms 미사용) | 해당 없음 | 낮음(wall-clock, 틱 무관) | 표본 미확인 | 불변 | 이 결함 클래스 아님 — `samples_async`로 비동기 I/O 왕복(wall_ms)만 재는 나머지 파일은 틱 양자화와 무관해 별도 감사 불필요 |
+
+위 6개 "미정정" 후보 중 `test_rate_limit_storm.py`를 뺀 5개가 이 결함 클래스의 실제 미정정
+목록이다 — 10개 이하이므로 spec(3)에 따라 파일별 후속 리프로 분할 발행한다(바로 아래).
+
+### 검출력 확인 공용 헬퍼 (설계, 구현은 후속 리프)
+
+`tests/conftest.py`의 `PerfBudget`에 `sample()`과 동일한 batch 로직을 `samples_async`에도
+추가한 `samples_async(fn, *, n, batch=1)`(기본값 1로 기존 호출부 전부 하위호환) 메서드를
+두고, 호출부가 `batch=8` 등을 넘겨 `rate_limit_storm` 수정과 동일한 효과(호출당 양자화
+오차를 `tick/batch`로 축소)를 얻게 한다. `conftest.py`는 공유 인프라라 이 문서 전용 리프에서
+직접 편집하지 않는다 — 아래 발행 목록의 첫 리프(`test_evaluate_rules_perf.py`, 가장 작은
+파일)가 `conftest.py`에 이 메서드를 추가하고, 나머지 4개 리프는 그 메서드를 재사용만 하도록
+순서를 명시한다. 검출력 동적 확인은 `test_rate_limit_storm.py`의
+`test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression` 패턴(의존성
+1곳에 `monkeypatch.setattr`로 `asyncio.sleep(budget_ms*3)` 주입 후 동일 단언이
+`pytest.raises(AssertionError)`로 적색화하는지 확인)을 각 리프가 자기 파일의 측정 대상에
+적용한다.
+
+### 분할 발행 목록 (각 1파일 = 1 `[health:ci_red]` 후속 리프, PM 발행 대기)
+
+1. `tests/foundation/unit/automation/test_evaluate_rules_perf.py` — `samples_async` batch
+   지원을 `tests/conftest.py`에 추가(위 설계) + 이 파일을 `batch=8`로 전환 + 동적 검출력
+   재현 테스트 추가.
+2. `tests/foundation/unit/connections/test_begin_connection_application.py` — batch 전환 +
+   검출력 재현(위 1번이 추가한 `conftest.py` 메서드 재사용).
+3. `tests/foundation/unit/connections/test_confirm_connection.py` — 동일.
+4. `tests/foundation/unit/connections/test_projections.py` — 동일.
+5. `tests/foundation/unit/ml/test_register_model.py` — 동일.
+
+### ops 후속 리프 요청
+
+`scripts/local_leaf_sources.py`(pm 저장소 소유, 이 worktree에서 직접 수정 금지)의
+PERF-measure 리프 명세에 "호출 1회 측정 금지(batch 필수), 단위 명시, 검출력 확인(주입 지연
+테스트)"를 추가하는 ops 리프를 별도 발행 요청한다 — 이후 전환 리프가 같은 결함
+(batch 미지원 `samples_async`로 CPU-바운드 단언을 재는 패턴)을 반복 생산하지 않게 한다.
+
+### 금지 사항 준수
+
+예산 값 완화 없음(5개 파일 전부 원 예산 유지), 단언 삭제 없음, 마커 제거 없음 — 이 리프는
+문서(체크리스트·헬퍼 설계·발행 목록)만 추가했고 실행 코드를 바꾸지 않았다. D2 신규
+negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 replay: N/A(실행 코드
+변경 없이 완료분을 정적 감사하고 후속 리프를 설계하는 문서 리프 — DECISION_GUIDELINES B-2,
+`task-11488`/`task-11406` 등 동일 패턴의 문서 전용 리프 선례와 동일).
