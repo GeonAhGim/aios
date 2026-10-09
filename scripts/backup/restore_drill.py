@@ -179,7 +179,7 @@ def _tar_binary() -> tuple[str | None, list[str]]:
 
 
 def _extract_tar_backup(src: Path, dst: Path, timeout: float) -> tuple[bool, str]:
-    """esc-health-backup_drill_failed 근본 원인(2026-09-29 조사): 이 클러스터가 쌓은 고아
+    r"""esc-health-backup_drill_failed 근본 원인(2026-09-29 조사): 이 클러스터가 쌓은 고아
     aios_test_* DB 474개가 base/ 아래 오브젝트 디렉터리당 파일 ~1,000개씩, 총 47만개+를
     만들어 -Fp(파일별 복사) pg_basebackup 자체가 nightly 1200s 예산을 다 태웠다(steps={}로
     아무 단계도 못 남기고 죽음 -- copy 단계 이전, pg_basebackup 자체가 병목). base_backup.py를
