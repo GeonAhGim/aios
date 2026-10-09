@@ -18,7 +18,13 @@ if TYPE_CHECKING:
     from src.foundation.market_data.adapters.postgres_batch_repository import (
         PostgresBatchRepository,
     )
+    from src.foundation.market_data.adapters.postgres_calendar_repository import (
+        PostgresCalendarRepository,
+    )
     from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
+    from src.foundation.market_data.adapters.postgres_reference_repository import (
+        PostgresReferenceRepository,
+    )
 
 
 def _asyncpg_dsn() -> str:
@@ -48,3 +54,22 @@ def batch_repo(pool: asyncpg.Pool[asyncpg.Connection]) -> PostgresBatchRepositor
     )
 
     return PostgresBatchRepository(pool)
+
+
+# task-10929: test_get_candles.py 분할(loc_over_500)로 여러 모듈이 공유하는 픽스처.
+@pytest.fixture
+def reference_repo(pool: asyncpg.Pool[asyncpg.Connection]) -> PostgresReferenceRepository:
+    from src.foundation.market_data.adapters.postgres_reference_repository import (
+        PostgresReferenceRepository,
+    )
+
+    return PostgresReferenceRepository(pool)
+
+
+@pytest.fixture
+def calendar_repo(pool: asyncpg.Pool[asyncpg.Connection]) -> PostgresCalendarRepository:
+    from src.foundation.market_data.adapters.postgres_calendar_repository import (
+        PostgresCalendarRepository,
+    )
+
+    return PostgresCalendarRepository(pool)
