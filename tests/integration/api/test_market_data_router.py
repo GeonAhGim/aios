@@ -1,199 +1,19 @@
 """LA-24 market_data HTTP read API (L4_market_data_positions_ledger_v1.0#LA-24).
-4 endpoints + cross-tenant 404 + coverage-gap DATA_COVERAGE_MISSING 409.
-DC-28: source_contract PK isolation via _FakeSourceContractRepository override.
+4 endpoints 핵심 경로: 심볼/instrument_id 조회, 페이지네이션, 교차 테넌트 404,
+coverage-gap 409, instruments/aliases 목록, 입력 검증, 수치 성능.
+
+엔타이틀먼트/소스계약 거부 경로(DC-28)는 test_market_data_router_entitlement.py,
+순수 커서 로직은 test_market_data_router_pure.py — 공유 fixture/헬퍼는 conftest.py.
 """
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 
-import asyncpg
-import jwt
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from src.api.foundation_deps import get_entitlement_port, get_venue_registry_source
-from src.api.routers.market_data import get_source_contract_repository
-from src.foundation.market_data.adapters.postgres_batch_repository import PostgresBatchRepository
-from src.foundation.market_data.adapters.postgres_candle_store import PostgresCandleStore
-from src.foundation.market_data.application.read_api import paginate_candles
-from src.foundation.market_data.contracts.v1 import (
-    CandleRecord,
-    IngestBatchResult,
-    QualityVerdict,
-    SeriesKey,
-    Timeframe,
-    Venue,
-    Verdict,
-)
-from src.foundation.market_data.domain.entitlement.source_contract import (
-    RedistributionScope,
-    SourceCapability,
-    SourceContract,
-    SourceContractTier,
-)
 from src.main import app
-
-STRONG_PASSWORD = "Str0ng!Passw0rd"
-BASE = "/v1/foundation/market-data"
-
-
-def _source_contract(scope: RedistributionScope, *, source_id: str = "BITGET") -> SourceContract:
-    now = datetime.now(timezone.utc)
-    return SourceContract(
-        source_id=source_id,
-        tier=SourceContractTier.ENTERPRISE,
-        credential_ref="test:none",
-        redistribution_scope=scope,
-        rate_limit=1000,
-        quota=1_000_000,
-        valid_from=now - timedelta(days=365),
-        valid_to=None,
-        capability=SourceCapability(
-            asset_classes=frozenset({"CRYPTO"}),
-            resolutions=frozenset({"1m"}),
-        ),
-    )
-
-
-class _FakeSourceContractRepository:
-    """`SourceContractRepository`(포트) 페이크 — 실DB `source_contract` 행에
-    의존하지 않고 테스트마다 원하는 스코프를 즉석에서 준다."""
-
-    def __init__(self, contract: SourceContract | None) -> None:
-        self._contract = contract
-
-    async def get(self, conn: asyncpg.Connection, source_id: str) -> SourceContract | None:
-        return self._contract
-
-
-@pytest.fixture
-async def client():
-    async with app.router.lifespan_context(app):
-        app.dependency_overrides[get_source_contract_repository] = lambda: (
-            _FakeSourceContractRepository(_source_contract(RedistributionScope.DISPLAY))
-        )
-        transport = ASGITransport(app=app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-        app.dependency_overrides.pop(get_source_contract_repository, None)
-
-
-async def _register(client: AsyncClient) -> tuple[dict, uuid.UUID]:
-    response = await client.post(
-        "/auth/register",
-        json={"email": f"test-{uuid.uuid4().hex}@example.com", "password": STRONG_PASSWORD},
-    )
-    token = response.json()["data"]["access_token"]
-    user_id = jwt.decode(token, options={"verify_signature": False})["sub"]
-    return {"Authorization": f"Bearer {token}"}, uuid.UUID(user_id)
-
-
-async def _seed_instrument(conn: asyncpg.Connection, listed_at: datetime) -> tuple[uuid.UUID, str]:
-    symbol = f"TST{uuid.uuid4().hex[:10].upper()}"
-    instrument_id = await conn.fetchval(
-        "INSERT INTO md_instrument (venue, canonical_symbol, venue_symbol, asset_class, "
-        " tick_size, lot_size, status, listed_at) "
-        "VALUES ('BITGET', $1, $1, 'CRYPTO', 0.01, 0.0001, 'LISTED', $2) RETURNING instrument_id",
-        symbol,
-        listed_at,
-    )
-    await conn.execute(
-        "INSERT INTO md_symbol_alias (instrument_id, venue, alias_symbol, valid_from) "
-        "VALUES ($1, 'BITGET', $2, $3)",
-        instrument_id,
-        symbol,
-        listed_at,
-    )
-    return instrument_id, symbol
-
-
-async def _audit_event_id(conn: asyncpg.Connection) -> uuid.UUID:
-    return await conn.fetchval(
-        "INSERT INTO foundation_audit_event "
-        "(sequence_no, aggregate_type, aggregate_id, action, outcome, trace_id, "
-        " payload_hash, payload, event_hash) "
-        "VALUES ($1, 'test.market_data', gen_random_uuid(), 'test.md.ingest', 'SUCCESS', "
-        " gen_random_uuid(), 'deadbeef', '{}'::jsonb, 'deadbeef') RETURNING id",
-        uuid.uuid4().int % (2**62),
-    )
-
-
-def _candle(key: SeriesKey, open_time: datetime, price: int) -> CandleRecord:
-    return CandleRecord(
-        key=key,
-        open_time=open_time,
-        close_time=open_time + timedelta(minutes=1),
-        open=Decimal(price),
-        high=Decimal(price + 10),
-        low=Decimal(price - 10),
-        close=Decimal(price + 5),
-        volume=Decimal(10),
-    )
-
-
-async def _seed_candles(
-    conn: asyncpg.Connection, pool: asyncpg.Pool, instrument_id: uuid.UUID, t0: datetime, n: int
-) -> SeriesKey:
-    key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-    batch = IngestBatchResult(
-        batch_id=uuid.uuid4(),
-        source="test",
-        venue=Venue.BITGET,
-        instrument_id=instrument_id,
-        timeframe=Timeframe.M1,
-        range_start=t0,
-        range_end=t0 + timedelta(minutes=n),
-        request_fingerprint=f"fp-{uuid.uuid4().hex}",
-        verdict=QualityVerdict(
-            verdict=Verdict.ACCEPT, accepted=n, quarantined=0, rejected=0, issues=[]
-        ),
-        batch_hash=f"hash-{uuid.uuid4().hex}",
-        audit_event_id=await _audit_event_id(conn),
-        stored_range=None,
-    )
-    await PostgresBatchRepository(pool).create(conn, batch)
-    candles = [_candle(key, t0 + timedelta(minutes=i), 100 + i) for i in range(n)]
-    await PostgresCandleStore(pool).upsert_batch(conn, batch.batch_id, candles)
-    return key
-
-
-async def _grant_venue(conn: asyncpg.Connection, tenant_id: uuid.UUID) -> None:
-    await conn.execute(
-        "INSERT INTO entitlements (tenant_id, subject_id, venue, timeframe, feed_type) "
-        "VALUES ($1, $1, 'BITGET', '1m', 'DELAYED')",
-        tenant_id,
-    )
-
-
-@pytest.fixture
-async def seeded(client: AsyncClient) -> dict:
-    headers_a, tenant_a = await _register(client)
-    headers_b, _tenant_b = await _register(client)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=30)
-    pool = app.state.pool
-    async with pool.acquire() as conn, conn.transaction():
-        instrument_id, symbol = await _seed_instrument(conn, t0 - timedelta(days=1))
-        other_id, _ = await _seed_instrument(conn, t0 - timedelta(days=1))
-        await _seed_candles(conn, pool, instrument_id, t0, 3)
-        await _grant_venue(conn, tenant_a)
-    return {
-        "a": headers_a,
-        "b": headers_b,
-        "instrument_id": instrument_id,
-        "other_id": other_id,
-        "symbol": symbol,
-        "t0": t0,
-    }
-
-
-def _span(t0: datetime, start_min: int, end_min: int) -> dict:
-    return {
-        "start": (t0 + timedelta(minutes=start_min)).isoformat(),
-        "end": (t0 + timedelta(minutes=end_min)).isoformat(),
-    }
+from tests.integration.api.conftest import BASE, _seed_candles, _span
 
 
 async def test_candles_by_symbol_returns_envelope_with_both_ids_and_entitlement(client, seeded):
@@ -258,67 +78,6 @@ async def test_cross_tenant_candles_is_404_isomorphic_with_unknown_symbol(client
     assert foreign_body["error_code"] == unknown_body["error_code"] == "RESOURCE_NOT_FOUND"
     assert foreign_body["message"] == unknown_body["message"]
     assert set(foreign_body) == set(unknown_body) and "data" not in foreign_body
-
-
-async def test_internal_scope_source_denies_candles_display(client, seeded):
-    """DC-28 DoD — INTERNAL 계약 소스는 차트(캔들) 응답에 포함되면 안
-    된다. 미등록 심볼과 동형인 404로 접힌다(재배포 스코프 거부도 존재
-    누설 문제이므로 authorize_feed 거부와 같은 취급, read_api.py 원칙)."""
-    app.dependency_overrides[get_source_contract_repository] = lambda: (
-        _FakeSourceContractRepository(_source_contract(RedistributionScope.INTERNAL))
-    )
-    response = await client.get(
-        f"{BASE}/candles",
-        params={
-            "venue": "BITGET",
-            "timeframe": "1m",
-            "symbol": seeded["symbol"],
-            **_span(seeded["t0"], 0, 3),
-        },
-        headers=seeded["a"],
-    )
-    assert response.status_code == 404, response.text
-    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
-
-
-async def test_internal_scope_source_denies_replay(client, seeded):
-    app.dependency_overrides[get_source_contract_repository] = lambda: (
-        _FakeSourceContractRepository(_source_contract(RedistributionScope.INTERNAL))
-    )
-    as_of = datetime.now(timezone.utc).isoformat()
-    response = await client.get(
-        f"{BASE}/candles/replay",
-        params={
-            "venue": "BITGET",
-            "timeframe": "1m",
-            "symbol": seeded["symbol"],
-            "as_of": as_of,
-            **_span(seeded["t0"], 0, 3),
-        },
-        headers=seeded["a"],
-    )
-    assert response.status_code == 404, response.text
-    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
-
-
-async def test_unspecified_source_contract_denies_candles(client, seeded):
-    """D2 "미지정은 NONE으로 취급" — 계약 행 자체가 없으면(`NOT_FOUND`) 조용히
-    통과하지 않고 거부한다."""
-    app.dependency_overrides[get_source_contract_repository] = lambda: (
-        _FakeSourceContractRepository(None)
-    )
-    response = await client.get(
-        f"{BASE}/candles",
-        params={
-            "venue": "BITGET",
-            "timeframe": "1m",
-            "symbol": seeded["symbol"],
-            **_span(seeded["t0"], 0, 3),
-        },
-        headers=seeded["a"],
-    )
-    assert response.status_code == 404, response.text
-    assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
 
 
 async def test_span_outside_coverage_is_409_data_coverage_missing(client, seeded):
@@ -436,44 +195,7 @@ async def test_unauthenticated_request_is_401_envelope(client):
 
 
 # --- DEEPEN task-2994 (docs/audit/DEPTH_LA_LB_LC.md, 원 task-1376 D1) — 이
-# 리프의 D3 하한 미달 3건(failure-injection 없음; 수치 성능 단언 없음;
-# 게이트 적색 재현 없음)을 채운다. ---
-
-
-class _BoomEntitlementPort:
-    """실패 주입 — 엔타이틀먼트 포트가 예외를 던진다(DB 커넥션 유실 등
-    실장애 시뮬레이션). `authorize_feed`가 이 예외를 삼켜 "허용"으로
-    바꿔치기하면 fail-open이 된다."""
-
-    async def allowed(self, subject, feed):  # noqa: ANN001, ARG002
-        raise ConnectionError("simulated entitlement backend outage")
-
-
-async def test_entitlement_port_failure_fails_closed_not_open(client, seeded):
-    """실패 주입 — 엔타이틀먼트 포트 장애는 데이터 노출(fail-open)이 아니라
-    500 `INTERNAL_ERROR` 봉투로 접혀야 한다(전역 핸들러,
-    src/api/contracts/handlers.py). 원인 문자열도 클라이언트에 노출되지
-    않는다(고정 메시지 + trace_id만)."""
-    app.dependency_overrides[get_entitlement_port] = lambda: _BoomEntitlementPort()
-    try:
-        response = await client.get(
-            f"{BASE}/candles",
-            params={
-                "venue": "BITGET",
-                "timeframe": "1m",
-                "symbol": seeded["symbol"],
-                **_span(seeded["t0"], 0, 3),
-            },
-            headers=seeded["a"],
-        )
-    finally:
-        app.dependency_overrides.pop(get_entitlement_port, None)
-
-    assert response.status_code == 500, response.text
-    body = response.json()
-    assert body["error_code"] == "INTERNAL_ERROR"
-    assert "data" not in body, "장애 상황에서 candles 데이터가 노출되면 안 된다(fail-closed)"
-    assert "simulated entitlement backend outage" not in body["message"]
+# 리프의 D3 하한 미달 중 수치 성능 단언을 채운다. ---
 
 
 @pytest.mark.perf
@@ -517,50 +239,3 @@ async def test_candles_full_page_latency_stays_within_normalized_ceiling(
         f"200개 캔들 전체 페이지 조회가 {full_elapsed:.3f}s 걸림 "
         f"(baseline {baseline_elapsed:.3f}s, 정규화 상한 {ceiling:.3f}s)"
     )
-
-
-class _LeakyVenueRegistrySource:
-    """게이트 적색 재현용 결함 시뮬레이션 — `registered_venues`가
-    `tenant_id` 인자를 무시하고 모든 테넌트에게 BITGET을 등록된 것으로
-    답한다(어댑터 SQL이 tenant_id WHERE 절을 빠뜨리는 흔한 실수)."""
-
-    async def registered_venues(self, tenant_id):  # noqa: ANN001, ARG002
-        return frozenset({Venue.BITGET})
-
-
-async def test_aliases_gate_red_reproduction_if_venue_registry_source_ignores_tenant(
-    client, seeded
-):
-    """게이트 적색 재현 — `authorize_venue()`(read_api.py)의 교차 테넌트
-    방어는 `VenueRegistrySource`가 tenant_id로 올바르게 스코프될 때만
-    유효하다. 이 어댑터가 tenant 필터링을 빠뜨리면, 정상 시나리오에서는
-    404였던 타 테넌트 조회(test_aliases_by_symbol_and_uuid_and_cross_tenant_404)가
-    200으로 새어나간다 — 이 결함을 대조 재현한다(200이 "정상"이라는 뜻이
-    아니라 재현된 결함이라는 뜻)."""
-    app.dependency_overrides[get_venue_registry_source] = lambda: _LeakyVenueRegistrySource()
-    try:
-        leaked = await client.get(
-            f"{BASE}/instruments/{seeded['instrument_id']}/aliases", headers=seeded["b"]
-        )
-    finally:
-        app.dependency_overrides.pop(get_venue_registry_source, None)
-
-    assert leaked.status_code == 200, (
-        "VenueRegistrySource가 tenant_id를 무시하면 authorize_venue()의 방어는 무력화된다"
-        f" — got {leaked.status_code}: {leaked.text}"
-    )
-    assert leaked.json()["data"][0]["instrument_id"] == str(seeded["instrument_id"])
-
-
-def test_paginate_candles_pure_cursor_semantics():
-    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid.uuid4(), timeframe=Timeframe.M1)
-    candles = [_candle(key, t0 + timedelta(minutes=i), 100) for i in range(5)]
-
-    page, nxt = paginate_candles(candles, None, 2)
-    assert [c.open_time for c in page] == [t0, t0 + timedelta(minutes=1)]
-    assert nxt == "2026-09-01T00:02:00Z"
-
-    last, nxt2 = paginate_candles(candles, t0 + timedelta(minutes=4), 2)
-    assert len(last) == 1 and nxt2 is None
-    assert paginate_candles(candles, t0 + timedelta(minutes=9), 2) == ([], None)
