@@ -7,12 +7,40 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from functools import cache
 from pathlib import Path
 
-_PRIME_MAX_WORKERS = 32
+
+# esc-ci-prepare ([prepare] FileNotFoundError(2, ..., None, 2, None) / earlier
+# RuntimeError "head_sha: origin/main 해석 실패 rc=3221225794" STATUS_DLL_INIT_FAILED):
+# task-8949 added this pool at 32 workers -- higher than even the
+# ThreadPoolExecutor library default (min(32, cpu_count+4)=28) that check_no_bom.py's
+# SCAN_WORKERS saga (task-8639/8657/8667/9156) already proved storms this shared,
+# antivirus-scanned fleet box: a burst of concurrent file-open threads from one
+# lane's step starves sibling lanes' process-creation (git.exe/python.exe spawn
+# fails with STATUS_DLL_INIT_FAILED or, with different OS-level timing, a bare
+# FileNotFoundError out of CreateProcess). check_no_bom.py/check_code_ratchets.py/
+# check_import_linter.py were all retuned to the fleet-safe value of 16 and given
+# an AIOS_CI_SCAN_WORKERS override (task-9259/task-11489) the same week, but this
+# consistency-check pool was never brought in line -- it kept running at 32,
+# nearly double the proven-unsafe 28, every time `check_consistency.py` ran.
+# Matching the other three gates' value and override closes that gap without
+# raising any budget/baseline (DECISION_GUIDELINES B-2).
+def _resolve_scan_workers(default: int) -> int:
+    raw = os.environ.get("AIOS_CI_SCAN_WORKERS")
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+_PRIME_MAX_WORKERS = _resolve_scan_workers(16)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BASELINE = ROOT / "consistency-baseline.json"
