@@ -9,7 +9,6 @@ Per ADR-2026-09-09-C Decision 1, D2 requires:
 """
 
 import asyncio
-import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -46,46 +45,43 @@ def service(pool):
 
 
 @pytest.mark.perf
-async def test_save_strategy_p95_latency_within_normalized_budget(service, pool):
+async def test_save_strategy_p95_latency_within_normalized_budget(service, pool, perf_budget):
     """성능 단언 — ADR-2026-09-09-C Decision 1 예산표에는 전략 저장 전용
     항목이 없다(가장 가까운 DSL 컴파일 300ms는 별도 컴파일 단계라 여기엔
     안 맞는다). save_strategy()는 105번 표준(존재 여부 SELECT + 조건부
     INSERT)을 따르는 순차 DB 왕복 2회짜리라, tests/integration/foundation/
     ledger/test_perf_journal.py(LC-17)와 같은 근거로 이 환경의 기준 DB
     왕복비용(rt) 대비 정규화한 p95를 잰다 — 절대 ms를 고정하면 CI 인프라
-    변동성에 흔들린다(같은 파일의 task-1029 전례)."""
-    baseline_samples_ms: list[float] = []
-    for _ in range(5 + 30):
-        started = time.perf_counter()
+    변동성에 흔들린다(같은 파일의 task-1029 전례).
+
+    raw time.perf_counter() -> perf_budget.samples_async() 전환(task-11628) —
+    비동기 I/O라 wall_ms 기준(coverage tracer는 일시정지됨)."""
+    owner = await create_test_user(pool)
+
+    async def _baseline_once() -> None:
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
-        baseline_samples_ms.append((time.perf_counter() - started) * 1000)
-    baseline_samples_ms = baseline_samples_ms[5:]
-    baseline_samples_ms.sort()
-    baseline_p95_ms = baseline_samples_ms[int(len(baseline_samples_ms) * 0.95)]
 
-    sample_count = 30
-    owner = await create_test_user(pool)
-    latencies_ms: list[float] = []
-    for _ in range(sample_count):
-        strategy_id = f"perf-strategy-{uuid4().hex[:8]}"
-        started = time.perf_counter()
+    async def _save_once() -> None:
         await service.save_strategy(
             owner,
-            strategy_id,
+            f"perf-strategy-{uuid4().hex[:8]}",
             "1.0.0",
             target_asset="BTC/USDT",
             market="crypto",
             exchange="bitget",
             fsm_definition={"states": ["IDLE"]},
         )
-        latencies_ms.append((time.perf_counter() - started) * 1000)
-    latencies_ms.sort()
-    p95_ms = latencies_ms[int(len(latencies_ms) * 0.95)]
+
+    baseline_samples = await perf_budget.samples_async(_baseline_once, n=35)
+    baseline_wall_ms = sorted(s.wall_ms for s in baseline_samples)[30]
+
+    save_samples = await perf_budget.samples_async(_save_once, n=30)
+    save_p95_ms = sorted(s.wall_ms for s in save_samples)[28]
 
     # p95는 기준 DB 왕복 p95의 10배 미만이어야 함
-    assert p95_ms < baseline_p95_ms * 10, (
-        f"p95={p95_ms:.1f}ms가 기준 p95({baseline_p95_ms:.1f}ms)*10을 초과"
+    assert save_p95_ms < baseline_wall_ms * 10, (
+        f"p95={save_p95_ms:.1f}ms가 기준 p95({baseline_wall_ms:.1f}ms)*10을 초과"
     )
 
 
