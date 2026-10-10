@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -232,11 +231,19 @@ async def test_positions_projection_rejects_sequence_gap_from_dropped_middle_ent
 
 
 @pytest.mark.perf
-def test_positions_projection_folds_ten_thousand_fee_entries_under_budget() -> None:
+def test_positions_projection_folds_ten_thousand_fee_entries_under_budget(
+    perf_budget,
+) -> None:
     """성능 단언(D2): `project()`는 순수 fold(모듈 docstring, I/O 없음)라 DB
     없이도 측정할 수 있다 — `apply_one`이 엔트리마다 로트 전체를 다시
     스캔하는 등 O(n) 밖의 비용을 갖고 있지 않은지 10,000건으로 상한을
-    건다."""
+    건다.
+
+    raw perf_counter() → perf_budget.assert_within(batch=10) 전환:
+    process_time의 15.6ms 틱으로 인해 빠른 1회 호출은 0/15.6만 나오므로,
+    batch=10으로 묶어 호출당 오차를 tick/10 ≈ 1.6ms로 낮췄다.
+    단위는 samples.cpu_ms가 ms이므로 예산도 ms(초预算은 *1000 한 번).
+    """
     position_key = f"perf-{uuid4().hex}"
     now = datetime.now(timezone.utc)
     entries = [
@@ -262,14 +269,24 @@ def test_positions_projection_folds_ten_thousand_fee_entries_under_budget() -> N
         for seq in range(1, 10_001)
     ]
 
-    started = perf_counter()
     folded = positions_projection.project(
         entries,
         position_key=position_key,
         cost_method=CostMethod.FIFO,
         asset_class=AssetClass.CRYPTO,
     )
-    elapsed_ms = (perf_counter() - started) * 1000
-
     assert folded.fees_base == Decimal("100.00")
-    assert elapsed_ms < 800, f"10,000건 fold가 {elapsed_ms:.1f}ms 걸림(예산 800ms)"
+
+    perf_budget.assert_within(
+        lambda: positions_projection.project(
+            entries,
+            position_key=position_key,
+            cost_method=CostMethod.FIFO,
+            asset_class=AssetClass.CRYPTO,
+        ),
+        budget_ms=800,
+        n=5,
+        warmup=1,
+        batch=10,
+        label="10k fee entries fold",
+    )
