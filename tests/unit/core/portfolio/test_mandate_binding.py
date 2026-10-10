@@ -244,14 +244,14 @@ def test_clamp_to_zero_denies_instead_of_approving_zero_quantity() -> None:
 
 
 def test_same_inputs_produce_equal_results_twice() -> None:
-    kwargs: dict[str, object] = dict(
-        qty=Decimal("50"),
-        price=Decimal("100"),
-        symbol="BTC/USDT",
-        agg=agg(total_equity=Decimal("10000"), total_exposure_pct=Decimal("20")),
-        mandate=mandate(max_total_exposure_pct=30.0),
+    qty = Decimal("50")
+    price = Decimal("100")
+    symbol = "BTC/USDT"
+    agg_value = agg(total_equity=Decimal("10000"), total_exposure_pct=Decimal("20"))
+    mandate_value = mandate(max_total_exposure_pct=30.0)
+    assert bind(qty=qty, price=price, symbol=symbol, agg=agg_value, mandate=mandate_value) == bind(
+        qty=qty, price=price, symbol=symbol, agg=agg_value, mandate=mandate_value
     )
-    assert bind(**kwargs) == bind(**kwargs)  # type: ignore[arg-type]
 
 
 # --- an unclamped order approves the full requested quantity -----------------
@@ -416,7 +416,7 @@ def test_float_quantity_rejected_by_binding_result_validator() -> None:
     from src.core.portfolio.mandate_binding import BindingResult
 
     with pytest.raises(ValidationError):
-        BindingResult(quantity=10.5, reasons=[], denied=False)  # type: ignore[arg-type]
+        BindingResult.model_validate({"quantity": 10.5, "reasons": [], "denied": False})
 
 
 # --- D2 성능 단언 (performance assertion) --------------------------------------

@@ -222,9 +222,9 @@ async def test_unmapped_scope_raises_instead_of_silently_matching_zero_rows(pool
         with pytest.raises(UnmappedSafetyScopeError):
             await pause_executions_for_scope(
                 conn,
-                "BOGUS_SCOPE",
+                "BOGUS_SCOPE",  # type: ignore[arg-type]
                 "irrelevant",
-                control_id=uuid4(),  # type: ignore[arg-type]
+                control_id=uuid4(),
             )
 
 
