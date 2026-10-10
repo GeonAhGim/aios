@@ -13,7 +13,6 @@ assertion >= 1, gate-red reproduction >= 1.
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 
 import pytest
@@ -323,10 +322,15 @@ def test_mandate_field_validator_raises_on_corrupt_view(monkeypatch):
 
 
 @pytest.mark.perf
-def test_bind_p99_latency_within_pretrade_gate_budget():
+def test_bind_p99_latency_within_pretrade_gate_budget(perf_budget) -> None:
     """ADR-2026-09-09-C Decision 1 사전거래 게이트 p99 5ms 예산.
     `bind()`는 주문이 거래소로 나가기 직전에 호출되는 핵심 경로이므로
-    200회 반복 측정 시 p99가 5ms 미만이어야 한다."""
+    200회 반복 측정 시 p99가 5ms 미만이어야 한다.
+
+    raw time.perf_counter() → perf_budget.samples(wall_ms) 전환(task-11675).
+    batch=8로 process_time 양자화 오차(15.6ms tick)를 1/8로 줄인다.
+    단위: samples가 ms 단위이므로 예산도 ms(0.005s → 5ms).
+    """
     m = mandate(
         max_single_instrument_pct=20.0,
         max_total_exposure_pct=30.0,
@@ -337,12 +341,50 @@ def test_bind_p99_latency_within_pretrade_gate_budget():
         per_symbol_pct={"BTC/USDT": Decimal("5")},
         total_exposure_pct=Decimal("10"),
     )
-    samples: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
-        bind(qty=Decimal("50"), price=Decimal("100"), symbol="BTC/USDT", agg=a, mandate=m)
-        samples.append(time.perf_counter() - start)
+    # batch=8: 1회 호출당 process_time tick 오차가 15.6/8≈2ms로 감소
+    raw_samples = perf_budget.samples(
+        lambda: bind(qty=Decimal("50"), price=Decimal("100"), symbol="BTC/USDT", agg=a, mandate=m),
+        n=200,
+        batch=8,
+    )
+    # wall_ms는 PerfSample에서 ms 단위 — 예산도 ms로 직접 비교
+    wall_ms_samples = sorted(s.wall_ms for s in raw_samples)
+    p99_ms = wall_ms_samples[int(len(wall_ms_samples) * 0.99)]
+    assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms exceeds 5ms budget"
 
-    samples.sort()
-    p99_seconds = samples[int(len(samples) * 0.99)]
-    assert p99_seconds < 0.005, f"p99={p99_seconds * 1000:.3f}ms exceeds 5ms budget"
+
+def test_bind_p99_budget_assertion_catches_regression(monkeypatch, perf_budget) -> None:
+    """게이트 적색 재현 — bind() 내부에 인위 지연을 주입해 p99 예산 단언이
+    실제로 AssertionError를 내는지 확인한다(타우톨로지 아님을 증명)."""
+    from unittest.mock import patch
+
+    real_bind = bind
+
+    def _slow_bind(*args, **kwargs):
+        import time
+
+        time.sleep(0.1)  # 100ms 지연 → batch=8로 나눠도 12.5ms > 5ms 예산
+        return real_bind(*args, **kwargs)
+
+    m = mandate(
+        max_single_instrument_pct=20.0,
+        max_total_exposure_pct=30.0,
+        min_cash_buffer_pct=10.0,
+    )
+    a = agg(
+        total_equity=Decimal("10000"),
+        per_symbol_pct={"BTC/USDT": Decimal("5")},
+        total_exposure_pct=Decimal("10"),
+    )
+    with patch(__name__ + ".bind", _slow_bind):
+        raw_samples = perf_budget.samples(
+            lambda: bind(
+                qty=Decimal("50"), price=Decimal("100"), symbol="BTC/USDT", agg=a, mandate=m
+            ),
+            n=20,
+            batch=8,
+        )
+    wall_ms_samples = sorted(s.wall_ms for s in raw_samples)
+    p99_ms = wall_ms_samples[int(len(wall_ms_samples) * 0.99)]
+    with pytest.raises(AssertionError):
+        assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms exceeds 5ms budget"
