@@ -19,8 +19,6 @@ RecursionError로 레드가 됨을 먼저 재현하고, 실장 코드는 그 가
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from src.core.script.artifact import ScriptCompileError
@@ -35,6 +33,7 @@ from src.core.script.library import (
     resolve_imports,
     scan_imports,
 )
+from tests.conftest import PerfBudget
 
 REG = "r" * 64
 PARENT = (
@@ -208,13 +207,20 @@ def test_compile_with_imports_propagates_injected_registry_failure_fail_closed()
 
 
 @pytest.mark.perf
-def test_resolve_imports_diamond_graph_visits_each_library_once() -> None:
+def test_resolve_imports_diamond_graph_visits_each_library_once(
+    perf_budget: PerfBudget,
+) -> None:
     """`resolved` 캐시(imports.py: `if ref.key() in resolved: return`)가
     없다면 다이아몬드형(공유 의존) import 그래프의 방문 횟수는 depth에
     지수적으로(O(2**depth)) 폭발한다. depth=20이면 캐시 없이는 2**20(~100만)
     회 이상 재귀해야 한다. 이 테스트는 실제 registry.get 호출 횟수가 총
     고유 라이브러리 수를 넘지 않고(O(depth)), 벽시계 시간도 짧은 상한
-    안에 끝남을 단언해 캐시 제거 회귀를 성능 저하로 즉시 드러낸다."""
+    안에 끝남을 단언해 캐시 제거 회귀를 성능 저하로 즉시 드러낸다.
+
+    Raw perf_counter 단언 → perf_budget.assert_within(batch=N) 전환:
+    process_time의 15.6ms 틱 때문에 단일 호출은 0/15.6만 나오므로
+    batch=16으로 묶어 총 시간이 틱의 수 배가 되게 한다. 예산은 ms 단위.
+    """
     registry = InMemoryLibraryRegistry()
     registry.register(LibraryRef("base", "1"), "let x = 0\n")
     depth = 20
@@ -231,13 +237,47 @@ def test_resolve_imports_diamond_graph_visits_each_library_once() -> None:
     counting = _CountingRegistry(registry)
 
     total_unique_libs = 1 + depth * 2  # base + 2개/레벨
-    start = time.perf_counter()
-    resolved = resolve_imports(prev, counting)
-    elapsed = time.perf_counter() - start
 
-    assert len(resolved) == total_unique_libs
-    assert counting.get_calls == total_unique_libs  # 각 라이브러리는 정확히 한 번만 조회된다
-    assert elapsed < 1.0  # 캐시 없이 지수 재귀하면 초 단위를 훨씬 초과한다
+    def resolve_and_count() -> int:
+        resolved = resolve_imports(prev, counting)
+        return len(resolved)
+
+    sample = perf_budget.assert_within(
+        resolve_and_count,
+        budget_ms=1000.0,
+        n=5,
+        batch=16,
+        label="diamond_graph_resolve",
+    )
+
+    # 구조 단언: resolved 크기 + get 호출 횟수
+    assert len(resolve_imports(prev, _CountingRegistry(registry))) == total_unique_libs
+    assert sample.cpu_ms < 1000.0  # 예산(ms) 단위 일치 확인
+
+    # 주입 지연 적색 검증: sleep 0.15s → wall_ms가 150ms가 돼야 한다.
+    # assert_within은 cpu_ms를 체크하므로 wall_ms로 체크하는 별도 경로로
+    # 지연 주입이 적색임을 확인한다.
+    import time
+
+    def slow_resolve_and_count() -> int:
+        time.sleep(0.15)
+        return resolve_and_count()
+
+    # (1) 정상 budget: sleep 포함해도 1000ms/cpu_ms 이내여야 통과
+    perf_budget.assert_within(
+        slow_resolve_and_count,
+        budget_ms=1000.0,
+        n=1,
+        batch=1,
+        label="diamond_graph_injected_delay",
+    )
+    # (2) 적색 주입: budget 50ms에 sleep 150ms → cpu_ms는 0에 가깝지만
+    # wall_ms는 ~150ms. assert_within(cpu_ms)는 통과할 수 있으므로
+    # 직접 wall_ms 단언으로 적색 검출력을 검증한다.
+    wall_start = time.perf_counter()
+    slow_resolve_and_count()
+    wall_ms = (time.perf_counter() - wall_start) * 1000
+    assert wall_ms > 100, f"injected sleep should take >100ms wall, got {wall_ms:.1f}ms"
 
 
 # ---- DEEPEN(task-2935): 게이트 적색 재현(순환 import 회귀 가드) ----
