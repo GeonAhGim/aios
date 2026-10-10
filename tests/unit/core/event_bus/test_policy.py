@@ -165,22 +165,17 @@ class TestPolicyPerformance:
     """Performance assertions for EventBusPolicy lookups."""
 
     @pytest.mark.perf
-    def test_lookup_throughput(self):
-        """ON_HANDLER_ERROR lookup should handle >=1M calls/sec."""
+    def test_lookup_throughput(self, perf_budget) -> None:
+        """ON_HANDLER_ERROR lookup should handle >=1M calls/sec (≤1000ms for 1M calls)."""
         key = HandlerCriticality.SAFE
         iterations = 1_000_000
+        budget_ms = 1000  # 1M calls in ≤1 s → 1000 ms for the batch
 
-        import time
+        def lookup_batch() -> None:
+            for _ in range(iterations):
+                EventBusPolicy.ON_HANDLER_ERROR[key]
 
-        start = time.perf_counter()
-        for _ in range(iterations):
-            EventBusPolicy.ON_HANDLER_ERROR[key]
-        elapsed = time.perf_counter() - start
-
-        throughput = iterations / elapsed if elapsed > 0 else float("inf")
-        assert throughput >= 1_000_000, (
-            f"ON_HANDLER_ERROR lookup throughput {throughput:.0f}/s below 1M/s budget"
-        )
+        perf_budget.assert_within(lookup_batch, budget_ms=budget_ms, batch=1)
 
 
 # ---------------------------------------------------------------------------
