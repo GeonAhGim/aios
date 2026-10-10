@@ -148,8 +148,8 @@ def running_count(tasks, workers=()):
 
 @admission_lock
 def run_triage(**kwargs):
-    import orchestrator as o
     import local_triage
+    import orchestrator as o
     if running_count(o.tasks(), set(o._running) | set(o.live_runner_tasks().values())) >= SLOTS:
         return {"ran": False, "reason": "all six local slots occupied"}
     return local_triage.run_cycle(**kwargs)
