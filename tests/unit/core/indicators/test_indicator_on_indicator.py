@@ -8,8 +8,6 @@ DoD (전부 반증 가능): (a) RSI(SMA(close,20),14) 정확값, (b) 순환·자
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 import pytest
 
@@ -26,6 +24,7 @@ from src.core.indicators.registry import (
     resolve_chain,
 )
 from src.core.indicators.specs_talib import TALIB_SPECS
+from tests.conftest import PerfBudget
 
 
 def _close(seed: int, n: int) -> np.ndarray:
@@ -242,7 +241,9 @@ def test_non_finite_value_in_base_column_fails_closed_not_silently_propagated() 
 
 
 @pytest.mark.perf
-def test_resolve_chain_latency_is_bounded_for_max_depth_chain() -> None:
+def test_resolve_chain_latency_is_bounded_for_max_depth_chain(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: 그래프 해석(`resolve_chain`의 위상 정렬)과 lookback
     체인 합성은 깊이 상한(MAX_CHAIN_DEPTH) 그래프에서도 호출당 5ms를 넘지
     않아야 한다. O(depth) DFS가 실수로 재귀 재계산형(예: 메모이즈 누락으로
@@ -251,14 +252,15 @@ def test_resolve_chain_latency_is_bounded_for_max_depth_chain() -> None:
     root = f"n{MAX_CHAIN_DEPTH - 1}"
     resolve_chain(graph, root, DEFAULT_REGISTRY)  # warm-up: import/캐시 워밍업 제외
 
-    iterations = 500
-    start = time.perf_counter()
-    for _ in range(iterations):
-        resolve_chain(graph, root, DEFAULT_REGISTRY)
-    elapsed = time.perf_counter() - start
-
-    per_call_ms = (elapsed / iterations) * 1000
-    assert per_call_ms < 5.0, f"resolve_chain graph 해석 지연 회귀: {per_call_ms:.4f}ms/call"
+    # batch=10: resolve_chain 한 번은 ~0.01ms라 process_time 틱(15.6ms)보다
+    # 훨씬 빠름 — batch로 10회 묶으면 총 CPU 시간이 tick을 넘어 양자화 오차
+    # 가 1.56ms로 줄어든다. assert_within 내부에서 best-of-5로 노이즈 제거.
+    perf_budget.assert_within(
+        lambda: resolve_chain(graph, root, DEFAULT_REGISTRY),
+        budget_ms=5.0,
+        batch=10,
+        label="resolve_chain graph 해석 지연",
+    )
 
 
 def test_cycle_hidden_behind_one_valid_sibling_branch_is_still_detected() -> None:
