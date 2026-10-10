@@ -7,7 +7,6 @@ model construction (ADR-2026-09-09-C Decision 1).
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -21,6 +20,7 @@ from src.api.schemas.foundation.connections import (
     ConnectionState,
 )
 from src.foundation.connections.contracts.v1 import CapabilityScope
+from tests.conftest import PerfBudget
 
 
 def _connection_view() -> AccountConnectionView:
@@ -101,18 +101,21 @@ def test_connection_list_response_dependency_failure_injected(
 
 
 @pytest.mark.perf
-def test_connection_list_response_construction_throughput_budget() -> None:
+def test_connection_list_response_construction_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""
     as_of = datetime.now(timezone.utc)
     connections = [_connection_view() for _ in range(5)]
 
-    durations: list[float] = []
-    for _ in range(500):
-        start = time.perf_counter()
-        ConnectionListResponse(connections=connections, as_of=as_of)
-        durations.append(time.perf_counter() - start)
+    # batch=500: 총 500회 호출을 한 구간에 묶어 process_time 양자화 오차 제거
+    samples = perf_budget.samples(
+        lambda: ConnectionListResponse(connections=connections, as_of=as_of),
+        n=10,
+        warmup=0,
+        batch=500,
+    )
 
-    durations.sort()
-    p95 = durations[int(len(durations) * 0.95) - 1]
-    assert p95 < 0.05, f"p95 construction time {p95:.4f}s exceeded 50ms budget"
+    # cpu_ms 기준, 단위 일관성: ms (0.05초 → 50.0ms)
+    assert all(s.cpu_ms < 50.0 for s in samples), f"budget 초과: {[s.cpu_ms for s in samples]}"
