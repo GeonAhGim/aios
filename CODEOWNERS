@@ -1,6 +1,8 @@
-# .aios-zone과 1:1 대응. 소유자는 저장소 소유 계정(GeonAhGim/mihwa-aios).
-# branch protection은 private repo free plan 제약으로 아직 API로 켤 수 없어
-# (docs/QUALITY_ELEVATION_ROADMAP.md), 이 파일은 현재 리뷰 요청 안내용이다.
+# 저장소 소유자: GeonAhGim/aios (2026-10-09 GitHub API 확인).
+# CODEOWNERS는 리뷰 라우팅이며 강제 보호는 GitHub 설정이 필요하다.
+# task-11405: CI, 테스트, 설정 및 이 파일 자체를 포함한 모든 경로의 기본 소유자.
+*                        @GeonAhGim
+# 기존 zone별 소유권은 아래에서 유지한다. FROZEN 변경 승인을 뜻하지 않는다.
 #
 # FROZEN — 15.6-D 종료조건 전까지 어떤 PR도 불가 (아직 파일 없음)
 /aios/kernel/policy/      @GeonAhGim
