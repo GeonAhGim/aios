@@ -10,8 +10,6 @@ task-4147 DEEPEN — negative(부모 코드로의 오매핑 거부, 미등록 �
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§3.3
 """
 
-import time
-
 import pytest
 
 from src.api.contracts import exception_mapping as exception_mapping_module
@@ -85,18 +83,25 @@ def test_corrupted_registration_order_collapses_notfound_into_parent_code(monkey
 
 
 @pytest.mark.perf
-def test_map_exception_lookup_stays_within_budget():
+def test_map_exception_lookup_stays_within_budget(perf_budget):
     """성능단언(D2) — map_exception은 순수 인메모리 리스트 스캔(I/O 없음)이라
     호출 5,000회가 500ms 안에 끝나야 한다(로컬 CI 기준 여유 있는 예산; 이
-    범위를 넘으면 EXCEPTION_MAP에 O(n^2) 회귀가 들어왔다는 신호)."""
+    범위를 넘으면 EXCEPTION_MAP에 O(n^2) 회귀가 들어왔다는 신호).
+
+    raw perf_counter() → perf_budget.assert_within(batch=10) 전환(task-11640).
+    process_time의 15.6ms 틱으로 빠른 1회 호출은 0/15.6만 나오므로 batch=10으로 묶어
+    호출당 오차를 tick/10 ≈ 1.6ms로 낮췄다. 단위는 samples.cpu_ms가 ms이므로
+    예산도 ms. 주입 지연 500ms를 주면 적색 게이트가 확인됨."""
     exc = WalletTopupNotFoundError("존재하지 않는 충전 요청입니다.")
 
-    start = time.perf_counter()
-    for _ in range(5000):
-        map_exception(exc)
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 0.5
+    perf_budget.assert_within(
+        lambda: [map_exception(exc) for _ in range(5000)],
+        budget_ms=500,
+        n=5,
+        warmup=1,
+        batch=10,
+        label="5000 exception lookups",
+    )
 
 
 def test_user_admin_not_found_maps_to_resource_not_found_before_base():
