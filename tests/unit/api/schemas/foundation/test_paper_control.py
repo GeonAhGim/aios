@@ -7,7 +7,6 @@ model construction (ADR-2026-09-09-C Decision 1).
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -104,18 +103,26 @@ def test_deployment_command_request_missing_idempotency_key_raises() -> None:
 
 
 @pytest.mark.perf
-def test_deployment_list_response_construction_throughput_budget() -> None:
+def test_deployment_list_response_construction_throughput_budget(
+    perf_budget: PerfBudget,  # noqa: F821
+) -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
-    (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""
+    (ADR-2026-09-09-C Decision 1 — simple schema construction path).
+
+    raw perf_counter() → perf_budget.samples(batch=500) 전환:
+    process_time의 15.6ms 틱으로 인해 빠른 1회 호출은 0/15.6만 나오므로,
+    batch=500으로 묶어 호출당 오차를 tick/500 ≈ 0.03ms로 낮췄다.
+    단위는 samples.cpu_ms가 ms이므로 예산도 ms(0.05초 → 50.0ms).
+    """
     as_of = datetime.now(timezone.utc)
     deployments = [_deployment_view() for _ in range(5)]
 
-    durations: list[float] = []
-    for _ in range(500):
-        start = time.perf_counter()
-        DeploymentListResponse(deployments=deployments, as_of=as_of)
-        durations.append(time.perf_counter() - start)
+    samples = perf_budget.samples(
+        lambda: DeploymentListResponse(deployments=deployments, as_of=as_of),
+        n=10,
+        warmup=0,
+        batch=500,
+    )
 
-    durations.sort()
-    p95 = durations[int(len(durations) * 0.95) - 1]
-    assert p95 < 0.05, f"p95 construction time {p95:.4f}s exceeded 50ms budget"
+    # cpu_ms 기준, 단위 일관성: ms
+    assert all(s.cpu_ms < 50.0 for s in samples), f"budget 초과: {[s.cpu_ms for s in samples]}"
