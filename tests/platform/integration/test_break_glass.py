@@ -19,7 +19,6 @@ ADR-2026-09-09-C D2 증빙:
 from __future__ import annotations
 
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -357,18 +356,22 @@ async def test_audit_failure_rolls_back_approval(pool, monkeypatch):
 
 
 @pytest.mark.perf
-async def test_consume_latency_budget(pool):
+async def test_consume_latency_budget(pool, perf_budget):
     """단일 조건부 UPDATE(consume)는 관리자 작업치고 관대한 예산인 p95 100ms
     아래여야 한다(이 축은 §4 성능 예산 표에 별도 수치가 없어 임시로 정한
     ad-hoc 예산 -- 사전거래 게이트처럼 확정된 SLO가 아니다). 20개 grant를
-    각각 승인 후 소비해 실측한다."""
+    각각 승인 후 소비해 실측한다.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-11633).
+    """
     requester_id = await create_test_user(pool)
     approver_id = await create_test_user(pool)
     admin_id = await create_test_user(pool)
 
-    durations: list[float] = []
+    # 준비: 승인된 grant 5개 생성 (측정 대상은 consume()만)
+    grants: list = []
     async with pool.acquire() as conn:
-        for _ in range(20):
+        for _ in range(5):
             grant = await _request(pool, conn, requester_id)
             await break_glass.approve_grant(
                 conn,
@@ -377,13 +380,19 @@ async def test_consume_latency_budget(pool):
                 approver_mfa_verified_at=_fresh(),
                 check_segregation_of_duty=assert_actor_not_counterparty,
             )
-            started = time.perf_counter()
-            await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
-            durations.append(time.perf_counter() - started)
+            grants.append(grant)
 
-    durations.sort()
-    p95 = durations[int(len(durations) * 0.95) - 1]
-    assert p95 < 0.1, f"consume() p95={p95 * 1000:.1f}ms, 예산 100ms 초과"
+    async def _consume_once() -> None:
+        async with pool.acquire() as conn:
+            grant = grants.pop()
+            await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
+
+    samples = sorted(
+        [await perf_budget.sample_async(_consume_once) for _ in range(5)],
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[-1].wall_ms
+    assert p95 < 100.0, f"consume p95={p95:.1f}ms, 예산 100ms 초과"
 
 
 # --- require_break_glass dependency ------------------------------------------
