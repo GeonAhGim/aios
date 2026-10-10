@@ -11,10 +11,10 @@ class RecordingProvider:
         self.summaries: list[str] = []
 
     async def generate_script(self, *, prompt: str, hint: str | None = None) -> ScriptDraft:
-        raise NotImplementedError
+        return ScriptDraft(source="", provider_name="recording", model_name="stub")
 
     async def explain_script(self, *, source: str) -> str:
-        raise NotImplementedError
+        return "[stub] script explained"
 
     async def explain_backtest(self, *, summary: str) -> str:
         self.summaries.append(summary)
