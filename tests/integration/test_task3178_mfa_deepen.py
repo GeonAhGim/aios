@@ -15,7 +15,6 @@ D3 여부: 이 리프의 spec id(PLT-17~21/PLT-24)는 ADR-2026-09-09-C D3 축
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 
 import asyncpg
@@ -144,7 +143,7 @@ def _p95(samples: list[float]) -> float:
 
 
 @pytest.mark.perf
-async def test_mfa_resetup_rejection_p95_latency_budget(client):
+async def test_mfa_resetup_rejection_p95_latency_budget(client, perf_budget):
     """수치 성능 단언 — 비밀번호 없이 재설정을 시도하는 공격 트래픽은 실제
     비밀번호 검증(bcrypt)이나 `mfa.setup()`(TOTP secret 생성) 없이 즉시
     403이어야 한다(src/api/routers/auth.py:132 `if not body.password: raise`
@@ -167,21 +166,19 @@ async def test_mfa_resetup_rejection_p95_latency_budget(client):
         code = totp_at(secret, frozen_now)
         await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
-        samples: list[float] = []
-        for _ in range(20):
-            started = time.perf_counter()
-            response = await client.post("/auth/mfa/setup", headers=headers)
-            samples.append((time.perf_counter() - started) * 1000)
-            assert response.status_code == 403
+        fn = lambda: client.post("/auth/mfa/setup", headers=headers)
+        samples = await perf_budget.samples_async(lambda fn=fn: fn(), n=20)
+        for s in samples:
+            assert s.result.status_code == 403
 
-    p95_ms = _p95(samples)
+    p95_ms = sorted([s.cpu_ms for s in samples])[19]
     print(f"[task-3178] MFA 재설정 즉시거부 p95={p95_ms:.2f}ms budget<{_REJECTION_BUDGET_MS:.0f}ms")
     assert p95_ms < _REJECTION_BUDGET_MS
 
 
 @pytest.mark.perf
 async def test_perf_budget_gate_actually_fails_when_rejection_path_stalls(
-    client, monkeypatch: pytest.MonkeyPatch
+    client, perf_budget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """게이트 적색 재현 — 거부 경로가 실제로 느려지면(예: `if not
     body.password` 가드가 `mfa.setup()` 뒤로 밀려나는 회귀)
@@ -212,16 +209,15 @@ async def test_perf_budget_gate_actually_fails_when_rejection_path_stalls(
         # 이 회귀 시나리오에서는 거부 가드가 authenticate() 호출 "뒤"로
         # 밀려났다고 가정 — password를 줘서 그 경로를 타게 만든다.
         monkeypatch.setattr(AuthService, "authenticate", _stalled_authenticate)
-        started = time.perf_counter()
-        await client.post(
+        fn = lambda: client.post(
             "/auth/mfa/setup",
             json={"password": STRONG_PASSWORD, "totp_code": code},
             headers=headers,
         )
-        elapsed_ms = (time.perf_counter() - started) * 1000
+        samples = await perf_budget.samples_async(lambda fn=fn: fn(), n=5)
 
     with pytest.raises(AssertionError):
-        assert elapsed_ms < _REJECTION_BUDGET_MS
+        assert max(s.wall_ms for s in samples) < _REJECTION_BUDGET_MS
 
 
 # --- negative ---------------------------------------------------------------
