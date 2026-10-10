@@ -20,6 +20,7 @@ from src.core.script.runtime import (
     broadcast,
     execute,
 )
+from tests.conftest import PerfBudget
 
 from .test_interpreter_property import (
     BARS,
@@ -153,15 +154,16 @@ def test_property_suite_catches_an_off_by_one_sma_regression(
 
 
 @pytest.mark.perf
-def test_property_suite_runs_within_latency_budget() -> None:
+def test_property_suite_runs_within_latency_budget(perf_budget: PerfBudget) -> None:
     """성능 단언(ADR-2026-09-09-C D2, DEEPEN task-4146): 150개 시드 전체를
     순차 실행해도 예산(3초) 안에 끝나야 한다 — 참조 구현 대조가 우발적으로
     seed당 재귀 폭주(예: memo 미적용)를 일으키지 않는지 확인하는 회귀
     가드. 측정치는 로컬 기준 ~0.2s(14배 여유)."""
-    import time
 
-    started = time.perf_counter()
-    for seed in range(150):
-        _check_program(seed)
-    elapsed = time.perf_counter() - started
-    assert elapsed < 3.0, f"property suite took {elapsed:.4f}s, exceeds 3s budget"
+    def _run_suite() -> None:
+        for seed in range(150):
+            _check_program(seed)
+
+    perf_budget.assert_within(
+        _run_suite, budget_ms=3000, n=3, batch=1, label="property_suite_150_seeds"
+    )
