@@ -16,3 +16,7 @@ c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-
 c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-key:124
 c113c5d56c77d9af4322714fe03333824e75e212:tests/unit/api/__init__.py:generic-api-key:235
 13fda0ca4b3e857f3148ef13d2f46339f6534f2c:tests/integration/mfa_clock.py:generic-api-key:168
+# task-11604: 1d805a01d 커밋 검증 완료 — ecq.find_secret() 패턴 탐지 함수를 테스트하는
+# 고정 예시 문자열("token: ghp_...")이며 실제 자격 증명 아님. 해당 파일은 현재 HEAD에는
+# 존재하지 않고 이력에만 남아 gitleaks 전체 이력 스캔에서 검출된다.
+1d805a01d3a1c77fb9b559f3ac4377c565f4c742:tests/test_cloud_queue_bridge.py:generic-api-key:101
