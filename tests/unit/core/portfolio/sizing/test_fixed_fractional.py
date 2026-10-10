@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -112,14 +111,18 @@ def test_size_propagates_require_positive_exception():
 
 
 @pytest.mark.perf
-def test_size_completes_within_perf_budget():
-    """size() must finish < 10 ms per 1000 iterations (budget: 100 ops/ms)."""
-    iterations = 1000
-    start = time.perf_counter()
-    for _ in range(iterations):
-        size(_inp())
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < (iterations / 10), (
-        f"sizing took {elapsed_ms:.1f}ms for {iterations} iterations "
-        f"(>10ms per 1000 ops, budget violated)"
+def test_size_completes_within_perf_budget(perf_budget):
+    """size() must finish < 0.1 ms per call (budget: 100 ops/ms).
+
+    raw perf_counter() → perf_budget.assert_within(batch=100) 전환(task-11672).
+    process_time의 15.6ms 틱으로 빠른 1회 호출은 0/15.6만 나오므로 batch=100으로 묶어
+    호출당 오차를 tick/100 ≈ 0.16ms로 낮췄다. 단위는 samples.cpu_ms가 ms이므로
+    예산도 ms(100ms/1000회 = 0.1ms). 주입 지연 500ms를 주면 적색 게이트가 확인됨."""
+    perf_budget.assert_within(
+        lambda: size(_inp()),
+        budget_ms=0.1,
+        n=5,
+        warmup=1,
+        batch=100,
+        label="1000 iterations sizing",
     )

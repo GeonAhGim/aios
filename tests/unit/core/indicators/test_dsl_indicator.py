@@ -9,7 +9,6 @@ failure-injection 1, numeric perf assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-import time
 import uuid
 
 import pytest
@@ -27,6 +26,7 @@ from src.core.script.artifact.compile import CompiledScript, ScriptCompileError,
 from src.core.script.artifact.hash import script_hash
 from src.core.script.grammar.ast import GRAMMAR_VERSION
 from src.core.script.ir.ops import IR_VERSION, DeclareInput, IRProgram, Plot
+from tests.conftest import PerfBudget
 
 REG = "r" * 64
 
@@ -38,9 +38,7 @@ VALID_SOURCE = (
 )
 
 NO_PLOT_SOURCE = (
-    "input length: int = 14\n"
-    "input close: series<float> = 0\n"
-    "let rsi_val = ta.rsi(close, length)\n"
+    "input length: int = 14\ninput close: series<float> = 0\nlet rsi_val = ta.rsi(close, length)\n"
 )
 
 FLOAT_INPUT_SOURCE = (
@@ -53,9 +51,7 @@ FLOAT_INPUT_SOURCE = (
 BOOL_INPUT_SOURCE = (
     # Grammar only allows a NUMBER literal after `=` (parser.py `_input_decl`),
     # even for a `bool`-typed input -- `1` is the only way to reach this decl.
-    "input flag: bool = 1\n"
-    "input close: series<float> = 0\n"
-    "plot(close)\n"
+    "input flag: bool = 1\ninput close: series<float> = 0\nplot(close)\n"
 )
 
 SYNTAX_ERROR_SOURCE = "plot(\n"
@@ -121,9 +117,7 @@ def test_rejects_bool_scalar_input() -> None:
         )
 
 
-def test_script_compile_error_propagates_unwrapped_not_taxonomized_as_dsl_indicator_error() -> (
-    None
-):
+def test_script_compile_error_propagates_unwrapped_not_taxonomized_as_dsl_indicator_error() -> None:
     """Compile failures stay in the §3.3 4-kind taxonomy — this leaf must not
     swallow a `ScriptCompileError` into its own `DslIndicatorError`, which
     would hide the real (line, col) diagnostic from the DSL editor."""
@@ -206,25 +200,20 @@ def test_in_memory_source_register_replaces_prior_entry_same_key() -> None:
 
 
 @pytest.mark.perf
-def test_compile_script_indicator_conversion_overhead_stays_within_budget() -> None:
+def test_compile_script_indicator_conversion_overhead_stays_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """§9.4 DSL-12 already budgets raw `compile_source` at <=300ms
     (ADR-2026-09-09-C Decision 1, `test_compile.py`). This pins the marginal
     cost this leaf adds on top (IR walk -> `IndicatorSpec`) so it cannot
     quietly regress into a per-indicator O(n^2) scan without a test noticing."""
     tenant_id = uuid.uuid4()
-    repeats = 30
-    start = time.perf_counter()
-    for i in range(repeats):
-        compile_script_indicator(
-            f"perf_{i}", VALID_SOURCE, tenant_id=tenant_id, registry_version=REG
-        )
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    per_call_ms = elapsed_ms / repeats
     budget_ms = 300.0  # matches DSL-12's own compile_source budget (this leaf adds a thin pass)
-    assert per_call_ms < budget_ms, (
-        f"compile_script_indicator took {per_call_ms:.2f}ms/call over {repeats} reps, "
-        f"budget {budget_ms}ms"
-    )
+
+    def _compile() -> None:
+        compile_script_indicator("perf", VALID_SOURCE, tenant_id=tenant_id, registry_version=REG)
+
+    perf_budget.assert_within(_compile, budget_ms=budget_ms)
 
 
 # ---- D2 게이트 적색 재현 ------------------------------------------------------
