@@ -127,15 +127,16 @@ async def pause_deployment(
             new_state=DeploymentState.PAUSED.value,
         )
     except ConcurrencyConflictError:
-        # 안정화 감사 A6-G5-4(task-10780) — stop_deployment의 재시도-후-확인
-        # 경로(§2 "STOP and risk/emergency PAUSE take precedence")와 비대칭
-        # 이었다: 동일 idempotency_key로 재시도한 PAUSE가 경합에서 졌을 때
-        # 바로 실패로 변환하면, 먼저 도착한 요청이 이미 PAUSED로 전이시킨
-        # 경우에도 재시도는 에러를 받는다 — "같은 요청의 중복은 idempotent"
-        # 원칙(PAP-006)에 반한다. 재조회해 이미 PAUSED면 그 결과를 그대로
-        # 반환한다(새 커맨드 행을 또 만들지 않는다 — 처음 성공한 요청이
-        # 이미 기록했다). PAUSED가 아니면(예: STOP이 먼저 와서 선점한
-        # 경우) 이 PAUSE 의도는 달성되지 않았으므로 그대로 실패로 남긴다.
+        # Stability audit A6-G5-4 (task-10780): asymmetric to stop_deployment's
+        # retry-after-check path (§2 "STOP and risk/emergency PAUSE take
+        # precedence"). When a retry of the same idempotency_key PAUSE loses the
+        # race and is immediately converted to failure, the initial request that
+        # has already transitioned to PAUSED still receives an error — violating
+        # PAP-006 "duplicate command is idempotent" principle. Re-read and if
+        # already PAUSED return that result (without creating a duplicate command
+        # row — the first successful request already recorded it). If not PAUSED
+        # (e.g., STOP preempted first), this PAUSE intent failed and remains
+        # failed.
         refreshed = await repo.get_deployment(deployment_id)
         assert refreshed is not None
         if refreshed.state == DeploymentState.PAUSED:
