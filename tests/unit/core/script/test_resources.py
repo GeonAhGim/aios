@@ -16,8 +16,6 @@ negative는 이미 6건으로 충분해 추가하지 않는다.
 
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from src.core.script.analysis.resources import (
@@ -42,6 +40,7 @@ from src.core.script.grammar.ast import (
 )
 from src.core.script.grammar.parser import parse
 from src.core.script.typing.checker import ScriptTypeError, check_program
+from tests.conftest import PerfBudget
 
 _CLOSE = "input close: series<float> = 0\n"
 
@@ -263,30 +262,32 @@ def test_unrecognized_expr_in_untyped_order_field_fails_closed() -> None:
 
 
 @pytest.mark.perf
-def test_estimation_latency_p95_within_compile_budget_slice() -> None:
+def test_estimation_latency_p95_within_compile_budget_slice(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: ADR-2026-09-09-C 축별 성능 예산 "DSL 컴파일 300ms" 중
     자원 산정(DSL-6) 단계 몫을 30ms로 상한 잡는다(나머지는 렉스/파스/타입체크/
     lookahead 몫 — 이 리프가 전체 예산을 다 써버리면 안 된다). `env`는
     `check_program`으로 미리 얻어 DSL-4 비용을 측정에서 분리하고,
     `estimate_resources` 단독 호출 500회분(500문 스크립트 1회 순회)을
-    30회 반복해 p95로 1회성 지터를 흡수한다."""
+    30회 반복해 p95로 1회성 지터를 흡수한다.
+
+    raw time.perf_counter() → perf_budget.samples() 전환(task-11692).
+    batch=8로 Windows process_time(~15.6ms) 양자화 오차를 호출당 ~2ms로
+    줄이고, cpu_ms(이 프로세스의 실제 CPU 소비)를 예산 판정 기준으로 쓴다."""
     source = _CLOSE + "\n".join(
         f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(500)
     )
     program = parse(source)
     env = check_program(program)
-    budget_sec = 0.03
+    budget_ms = 30.0
 
-    samples: list[float] = []
-    for _ in range(30):
-        start = time.perf_counter()
-        estimate_resources(program, env)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    samples = perf_budget.samples(lambda: estimate_resources(program, env), n=30, batch=8)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms_values[min(int(len(cpu_ms_values) * 0.95), len(cpu_ms_values) - 1)]
 
-    print(f"[DSL-6 resources] 500-stmt p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    print(f"[DSL-6 resources] 500-stmt p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
 
 
 # ---- 게이트 적색 재현: PlotDecl.style 미방문 회귀 가드 ----
