@@ -10,7 +10,6 @@ Prometheus 메트릭이 아니므로 이 검증에서 자연히 제외된다(exp
 from __future__ import annotations
 
 import re
-import time
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,7 @@ import pytest
 import yaml
 
 from src.core.observability.metric_names import ALL_METRIC_NAMES, to_prom
+from tests.conftest import PerfBudget
 
 ALERT_RULES_PATH = Path(__file__).parents[3] / "config" / "observability" / "alert_rules.yaml"
 RUNBOOKS_DIR = Path(__file__).parents[3] / "docs" / "runbooks"
@@ -224,7 +224,9 @@ def test_missing_groups_key_raises_instead_of_returning_empty(tmp_path: Path) ->
 
 
 @pytest.mark.perf
-def test_full_validation_pipeline_p95_latency_within_budget() -> None:
+def test_full_validation_pipeline_p95_latency_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: 이 파일의 정적 검증은 CI 게이트마다 매번 실행된다. 전체 규칙
     (11개)에 대해 메트릭 토큰 대조 + 필수 필드 + runbook 검증을 1회 통과하는 시간의
     p95가 15ms를 넘지 않아야 한다 — 순수 정적 스캔(디스크 I/O 없이 이미 로드된 파이썬
@@ -240,18 +242,18 @@ def test_full_validation_pipeline_p95_latency_within_budget() -> None:
         for rule in rules
         if "runbook" in (rule.get("labels") or {})
     }
-    samples: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
+
+    def _measure_one() -> None:
         _unknown_metric_tokens(rules)
         for rule in rules:
             _missing_required_fields(rule)
             if "runbook" in (rule.get("labels") or {}):
                 _invalid_runbook_reason_from_cache(rule, runbook_exists)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[int(len(samples) * 0.95)]
-    assert p95 < 0.015, f"p95={p95 * 1000:.3f}ms >= 15ms 예산"
+
+    samples = perf_budget.samples(_measure_one, n=20, batch=10)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p95 = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
+    assert p95 < 15, f"p95={p95:.3f}ms >= 15ms 예산"
 
 
 def test_rule_missing_expr_field_is_rejected() -> None:
