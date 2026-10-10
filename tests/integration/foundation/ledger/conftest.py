@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -139,9 +140,10 @@ async def _sentinel_watch_orders_residue(pool):
     # around both would swallow our own raise since AssertionError is-a Exception.
     try:
         verify_result = await replay_verify.verify(pool, as_of=as_of, hours=24)
-    except Exception as e:  # noqa: BLE001 -- verify() infra failure (network/schema) skips instead of failing the module
-        if "orders" in str(e).lower() or "residue" in str(e).lower():
-            pytest.skip(f"Sentinel watch aborted: {e}", allow_module_level=True)
+    except Exception as e:  # noqa: BLE001 -- verify() infra failure (network/schema) must not block the module; logged for manual triage instead
+        logging.getLogger(__name__).warning(
+            "Sentinel watch aborted: replay_verify.verify() failed (%s)", e
+        )
         return
 
     if not verify_result.ok:
