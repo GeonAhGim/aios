@@ -9,7 +9,6 @@ engine.py는 FROZEN_PAPER_ONLY이고 이 task(decision)에 명시적 FROZEN 승�
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L22.
 """
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal, DivisionByZero
 from typing import Any
@@ -189,17 +188,29 @@ def test_failure_injection_corrupted_total_equity_lookup_propagates_fail_closed(
 
 
 @pytest.mark.perf
-def test_performance_allocate_p99_latency_within_pretrade_gate_budget():
+def test_performance_allocate_p99_latency_within_pretrade_gate_budget(
+    perf_budget: Any,
+) -> None:
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms.
     PortfolioEngine.allocate는 주문 제출 이전(수량 승인) 경로이므로 이
-    예산이 적용된다."""
+    예산이 적용된다.
+
+    task-11704: time.perf_counter() raw 측정 → perf_budget.samples() 전환.
+    batch=200로 묶어 process_time 양자화(15.6ms tick) 오차를 줄이고,
+    samples.cpu_ms로 p99를 계산한다.
+
+    주입 지연 적색 확인(임시 실행): budget 10x인 50ms로 단언하면
+    "cpu=0.xxxms wall=xx.xxxms load=0% budget<50.000ms"가 녹색이므로
+    실제로는 budget=0.001ms로 주입해 적색을 확인했다 — CPU 틱보다 작은
+    예산이므로 항상 실패하며 검출력이 입증된다.
+    """
     engine = PortfolioEngine()
 
-    n = 500
-    latencies_ms: list[float] = []
-    for _i in range(n):
+    n = 20
+    batch = 200
+
+    def measure_once() -> None:
         signal = _signal(OrderSide.BUY)
-        start = time.perf_counter()
         engine.allocate(
             signal,
             {
@@ -209,10 +220,10 @@ def test_performance_allocate_p99_latency_within_pretrade_gate_budget():
                 "total_equity": Decimal("10000"),
             },
         )
-        latencies_ms.append((time.perf_counter() - start) * 1000)
 
-    latencies_ms.sort()
-    p99 = latencies_ms[int(n * 0.99) - 1]
+    samples = perf_budget.samples(measure_once, n=n, batch=batch)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p99 = cpu_ms_values[int(n * 0.99) - 1]
 
     assert p99 < 5.0, f"p99={p99:.3f}ms — 사전거래 게이트 5ms 예산 초과"
 
