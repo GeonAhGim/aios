@@ -338,8 +338,6 @@ async def test_sentinel_reproducer_detects_ledger_drift(pool):
     Once the sentinel correctly raises AssertionError (proving it works),
     mark this test @pytest.mark.skip to prevent false reds in normal CI.
     """
-    journal = PostgresJournalRepository(pool)
-    balances = PostgresBalanceRepository(pool)
     test_code = await _seed_ledger_entry(pool)
 
     # Intentionally leave drift: bump balance but don't repair

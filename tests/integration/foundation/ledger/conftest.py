@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
 import pytest
 
+from scripts import replay_verify
 from src.data.models.base import Currency
 from src.foundation.ledger.contracts.v1 import AccountType
 
@@ -131,24 +133,27 @@ async def _sentinel_watch_orders_residue(pool):
     orders_count_after = await _get_orders_count()
     as_of = datetime.now(timezone.utc)
 
-    # Run replay_verify to catch any orders row ↔ event mismatch
+    # Run replay_verify to catch any orders row ↔ event mismatch. The verify()
+    # call itself is wrapped so infrastructure failures (network/schema) don't
+    # mask the deliberate AssertionError raised below -- catching Exception
+    # around both would swallow our own raise since AssertionError is-a Exception.
     try:
         verify_result = await replay_verify.verify(pool, as_of=as_of, hours=24)
-        if not verify_result.ok:
-            mismatches = [
-                m
-                for m in verify_result.mismatches
-                if m.domain == "orders" or (hasattr(m, "key") and isinstance(m.key, str))
-            ]
-            if mismatches:
-                msg = (
-                    f"Sentinel: orders residue detected after module teardown. "
-                    f"Table mutations: {orders_count_before} → {orders_count_after}. "
-                    f"Mismatches: {mismatches}"
-                )
-                raise AssertionError(msg)
-    except Exception as e:
-        # If verify() fails for other reasons (network, schema), don't block the module
-        # but log it so manual triage can investigate
+    except Exception as e:  # noqa: BLE001 -- verify() infra failure (network/schema) skips instead of failing the module
         if "orders" in str(e).lower() or "residue" in str(e).lower():
             pytest.skip(f"Sentinel watch aborted: {e}", allow_module_level=True)
+        return
+
+    if not verify_result.ok:
+        mismatches = [
+            m
+            for m in verify_result.mismatches
+            if m.domain == "orders" or (hasattr(m, "key") and isinstance(m.key, str))
+        ]
+        if mismatches:
+            msg = (
+                f"Sentinel: orders residue detected after module teardown. "
+                f"Table mutations: {orders_count_before} → {orders_count_after}. "
+                f"Mismatches: {mismatches}"
+            )
+            raise AssertionError(msg)
