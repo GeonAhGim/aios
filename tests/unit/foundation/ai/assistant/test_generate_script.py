@@ -44,10 +44,10 @@ class FakeProvider:
         return ScriptDraft(source=self._source, provider_name="fake", model_name="fake-1")
 
     async def explain_script(self, *, source: str) -> str:
-        raise NotImplementedError
+        return f"[fake] explained script: {source[:50]}"
 
     async def explain_backtest(self, *, summary: str) -> str:
-        raise NotImplementedError
+        return f"[fake] explained backtest: {summary[:50]}"
 
 
 class ExplodingProvider:
@@ -57,10 +57,10 @@ class ExplodingProvider:
         raise ConnectionError("simulated provider timeout")
 
     async def explain_script(self, *, source: str) -> str:
-        raise NotImplementedError
+        return f"[exploding] explained script: {source[:50]}"
 
     async def explain_backtest(self, *, summary: str) -> str:
-        raise NotImplementedError
+        return f"[exploding] explained backtest: {summary[:50]}"
 
 
 class InMemoryCounter(UsageCounterStore):
