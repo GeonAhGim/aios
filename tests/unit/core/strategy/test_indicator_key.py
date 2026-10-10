@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 import pytest
 
 from scripts.check_import_linter import ROOT as LINTER_ROOT
@@ -19,6 +17,7 @@ from src.services.execution_loop.market_state import (
     IndicatorKeyParseError,
     parse_indicator_key,
 )
+from tests.conftest import PerfBudget
 
 
 @pytest.mark.parametrize(
@@ -91,17 +90,22 @@ def test_extract_indicator_keys_propagates_compiler_regression_malformed_key() -
 
 
 @pytest.mark.perf
-def test_parse_and_format_key_round_trip_throughput_budget() -> None:
+def test_parse_and_format_key_round_trip_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """`parse_key`/`format_key` run once per required indicator key on every
     execution-loop tick (`market_state.build_market_state`); 10,000 round
     trips must stay well under a 200ms budget to rule out a pathological
     (e.g. backtracking-regex) implementation creeping into this hot path."""
     key = "MACD_slowperiod26.signal@1h"
-    start = time.perf_counter()
-    for _ in range(10_000):
-        format_key(parse_key(key))
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.2, f"10,000 round trips took {elapsed * 1000:.2f}ms, budget 200ms"
+
+    def run_10k() -> None:
+        for _ in range(10_000):
+            format_key(parse_key(key))
+
+    # batch=100으로 묶어 호출당 100회 → process_time 양자화 오차 최소화.
+    # 예산 200ms, 단위 일치(ms). n=5 best-of-N으로 host 부하 변동 상쇄.
+    perf_budget.assert_within(run_10k, budget_ms=200, batch=100, n=5)
 
 
 # -- D2 게이트 적색 재현 -------------------------------------------------------
