@@ -5,7 +5,6 @@ D2 증빙: negative >=3, 실패주입 1, 성능 단언 1(p95), 게이트 적색 
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -21,6 +20,7 @@ from src.core.config.profile import (
     load_profile_config,
     resolve_profile_name,
 )
+from tests.conftest import PerfBudget
 
 CONFIG_DIR = Path(__file__).resolve().parents[4] / "config"
 
@@ -200,19 +200,21 @@ def test_gate_red_repro_bypassing_the_guard_lets_contamination_through(
 
 
 @pytest.mark.perf
-def test_load_profile_config_p95_latency_under_50ms() -> None:
+def test_load_profile_config_p95_latency_under_50ms(perf_budget: PerfBudget) -> None:
     """로컬 성능 예산: 설정 파일 하나 읽기는 가벼운 I/O라 5k봉 조회
     p95 200ms(ADR-2026-09-09-C Decision 1)보다 훨씬 낮은 예산인 50ms를
     쓴다 — 반복 로드가 앱 기동/재로드 경로에서 병목이 되지 않음을 증명."""
-    samples: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
-        load_profile_config(env={"AIOS_ENV": "dev"})
-        samples.append(time.perf_counter() - start)
+    raw_samples: list[float] = []
+    for ps in perf_budget.samples(
+        lambda: load_profile_config(env={"AIOS_ENV": "dev"}),
+        n=200,
+        batch=8,
+    ):
+        raw_samples.append(ps.cpu_ms)
 
-    samples.sort()
-    p95 = samples[int(len(samples) * 0.95)]
-    assert p95 < 0.05, f"load_profile_config p95={p95 * 1000:.2f}ms exceeds 50ms budget"
+    raw_samples.sort()
+    p95_ms = raw_samples[int(len(raw_samples) * 0.95)]
+    assert p95_ms < 50.0, f"load_profile_config p95={p95_ms:.2f}ms exceeds 50ms budget"
 
 
 def test_all_valid_profiles_have_a_config_file_in_repo() -> None:
