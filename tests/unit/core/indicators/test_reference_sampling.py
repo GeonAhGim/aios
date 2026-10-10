@@ -23,7 +23,6 @@ and one numeric performance assertion on `run_ci_sample`'s wall-clock budget.
 from __future__ import annotations
 
 import logging
-import time
 
 import pytest
 
@@ -31,6 +30,7 @@ from scripts import verify_indicators_nightly
 from src.core.indicators.engine import vectorized
 from src.core.indicators.engine.vectorized import FloatArray
 from src.core.indicators.reference import verify_all, verify_job
+from tests.conftest import PerfBudget
 
 
 def test_sample_job_names_is_deterministic_across_two_calls() -> None:
@@ -84,18 +84,26 @@ def test_ci_sample_has_no_unexpected_exclusions() -> None:
     assert set(result.report.excluded) <= set(verify_job.KNOWN_UNVERIFIED)
 
 
+_CI_SAMPLE_BUDGET_MS = 5_000.0  # 5.0 s → ms 단위 일치 (assert_within는 ms 기준)
+
+
 @pytest.mark.perf
-def test_ci_sample_completes_within_latency_budget() -> None:
+def test_ci_sample_completes_within_latency_budget(perf_budget: PerfBudget) -> None:
     """Numeric performance assertion: the 30-name CI sample runs on every
     commit (unmarked, no `nightly` gate), so a regression that made it scale
     like the full catalog (or worse) must show up as a real gate failure, not
     just a slow-CI complaint. Measured baseline is ~0.1s on CI hardware; 5s
     leaves >40x headroom for slower machines without masking an actual
     blow-up (e.g. accidentally running the full corpus per call)."""
-    start = time.perf_counter()
-    verify_job.run_ci_sample()
-    elapsed = time.perf_counter() - start
-    assert elapsed < 5.0, f"CI sample took {elapsed:.3f}s, budget is 5.0s"
+    # batch=8: run_ci_sample은 ~0.1s이므로 process_time 15.6ms 틱보다 충분히
+    # 커지지만, batch 없이 한 번만 호출하면 0/15.6ms만 나온다 — batch로 묶어
+    # 양자화 오차를 호출당 tick/batch로 줄인다.
+    perf_budget.assert_within(
+        verify_job.run_ci_sample,
+        budget_ms=_CI_SAMPLE_BUDGET_MS,
+        n=5,
+        batch=8,
+    )
 
 
 # ---------------------------------------------------------------- negative --
