@@ -111,6 +111,7 @@ def test_size_monkeypatch_dependency_error(monkeypatch: pytest.MonkeyPatch) -> N
         size(_inp())
 
 
+@pytest.mark.perf
 def test_size_performance_under_1ms() -> None:
     """Performance: single size() call must complete well under 1 ms."""
     inp = _inp()
