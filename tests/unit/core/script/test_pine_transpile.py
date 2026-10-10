@@ -38,6 +38,7 @@ from src.core.script.import_.pine.transpile import (
     transpile_source,
 )
 from src.core.script.ir.ops import from_bytes, verify_stack
+from tests.conftest import PerfBudget
 
 # ---- 결정 단위: 변환되는 것 ----
 
@@ -308,17 +309,20 @@ def test_failure_injection_transpile_program_raises() -> None:
 
 # 2. 수치 성능 단언 (numerical performance): transpile 지연이 임계치 이하
 @pytest.mark.perf
-def test_transpile_latency_under_threshold() -> None:
-    """DoD "수치 성능 단언" — 공개 예제 30개를 transpile_and_verify할 때
-    총 지연이 10초 미만이어야 한다(성능 회귀 가드)."""
-    import time
+def test_transpile_latency_under_threshold(perf_budget: PerfBudget) -> None:
+    """DoD "수치 성능 단언" — 공개 예제 30개 중 성공 20개를 transpile_and_verify할 때
+    CPU 시간이 10초 미만이어야 한다(성능 회귀 가드).
 
-    start = time.perf_counter()
-    for _case_id, source, _expect in _CORPUS:
-        if _expect == _OK:
-            transpile_and_verify(source)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 10.0, f"transpile 지연 {elapsed:.2f}s — 임계치 10초 초과"
+    raw perf_counter → perf_budget.assert_within(batch=4) 전환(task-11688).
+    process_time()은 Windows에서 15.6ms 틱이므로 batch=4로 4회 호출을 묶어
+    호출당 오차를 ~3.9ms로 낮춘다. 단위: budget_ms=10000(ms) ↔ cpu_ms(ms)."""
+
+    def _transpile_ok_corpus() -> None:
+        for _case_id, source, _expect in _CORPUS:
+            if _expect == _OK:
+                transpile_and_verify(source)
+
+    perf_budget.assert_within(_transpile_ok_corpus, budget_ms=10000, batch=4)
 
 
 # 3. 게이트 적색 재현 (gate red reproduction): corpus 통과율 회귀 가드
