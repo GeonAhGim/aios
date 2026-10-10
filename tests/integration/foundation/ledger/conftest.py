@@ -106,8 +106,19 @@ async def create_ledger_account(
     return account_code
 
 
+@pytest.fixture(scope="module")
+async def _sentinel_pool():
+    """Own module-scoped pool for the sentinel below -- the `pool` fixture
+    above is function-scoped (a fresh pool per test, closed at test
+    teardown), so a module-scoped fixture cannot depend on it
+    (`ScopeMismatch`, task-11517). Separate pool, separate lifecycle."""
+    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    yield p
+    await p.close()
+
+
 @pytest.fixture(scope="module", autouse=True)
-async def _sentinel_watch_orders_residue(pool):
+async def _sentinel_watch_orders_residue(_sentinel_pool):
     """D3 test harness: watch for orphaned orders rows (no matching event).
 
     Sentinel hook runs after each module to detect if any test left an orders
@@ -119,11 +130,10 @@ async def _sentinel_watch_orders_residue(pool):
     row change without a matching event will be pinned down when replay_verify
     sees the mismatch.
     """
-    orders_count_before = None
 
     async def _get_orders_count() -> int:
         """Count rows in orders table; covers the shared TEST_DATABASE_URL."""
-        async with pool.acquire() as conn:
+        async with _sentinel_pool.acquire() as conn:
             count = await conn.fetchval("SELECT count(*) FROM orders")
         return count or 0
 
@@ -141,7 +151,7 @@ async def _sentinel_watch_orders_residue(pool):
     # mask the deliberate AssertionError raised below -- catching Exception
     # around both would swallow our own raise since AssertionError is-a Exception.
     try:
-        verify_result = await replay_verify.verify(pool, as_of=as_of, hours=24)
+        verify_result = await replay_verify.verify(_sentinel_pool, as_of=as_of, hours=24)
     except Exception as e:  # noqa: BLE001 -- verify() infra failure (network/schema) must not block the module; logged for manual triage instead
         logging.getLogger(__name__).warning(
             "Sentinel watch aborted: replay_verify.verify() failed (%s)", e
