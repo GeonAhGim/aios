@@ -75,6 +75,7 @@ class BlockingMarkPriceSource:
 
 
 class FakeFxRateSource:
+    # ratchet-allow: fail-closed stub — this suite never exercises FX mismatch paths
     async def rate(self, base: Currency, quote: Currency, at: datetime) -> None:  # pragma: no cover
         raise NotImplementedError("이 스위트는 통화 불일치를 쓰지 않는다")
 
