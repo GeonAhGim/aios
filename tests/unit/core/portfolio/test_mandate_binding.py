@@ -111,7 +111,7 @@ def agg(
 # --- (b) FORBIDDEN_ASSET denies, never clamps --------------------------------
 
 
-def test_forbidden_asset_denies_exactly():
+def test_forbidden_asset_denies_exactly() -> None:
     result = bind(
         qty=Decimal("10"),
         price=Decimal("250"),
@@ -127,7 +127,7 @@ def test_forbidden_asset_denies_exactly():
 # --- (c) single-instrument clamp exact value ---------------------------------
 
 
-def test_single_instrument_clamp_exact_value():
+def test_single_instrument_clamp_exact_value() -> None:
     # total_equity 10000, price 250, requested qty 10 (=2500, 25%) against a
     # 20% single-instrument limit -> allowed notional 2000 -> qty 2000/250=8.
     result = bind(
@@ -142,7 +142,7 @@ def test_single_instrument_clamp_exact_value():
     assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
 
 
-def test_single_instrument_clamp_accounts_for_existing_position():
+def test_single_instrument_clamp_accounts_for_existing_position() -> None:
     # Already holding 15% of equity in this symbol; limit is 20% -> only 5%
     # (500 notional) of new room remains -> qty 500/100=5.
     result = bind(
@@ -160,7 +160,7 @@ def test_single_instrument_clamp_accounts_for_existing_position():
 # --- total-exposure and cash-buffer clamps -----------------------------------
 
 
-def test_total_exposure_clamp_exact_value():
+def test_total_exposure_clamp_exact_value() -> None:
     # 30% total-exposure limit already at 20% existing -> 10% (1000) of new
     # room -> qty 1000/100=10. Single-instrument limit is set loose (100%)
     # so it never binds here.
@@ -176,7 +176,7 @@ def test_total_exposure_clamp_exact_value():
     assert result.reasons == [POLICY_MAX_TOTAL_EXPOSURE]
 
 
-def test_min_cash_buffer_clamp_exact_value():
+def test_min_cash_buffer_clamp_exact_value() -> None:
     # cash is 100% of equity, buffer requires 80% remain -> only 20% (2000)
     # may be spent -> qty 2000/100=20.
     result = bind(
@@ -194,7 +194,7 @@ def test_min_cash_buffer_clamp_exact_value():
 # --- (c)/(f) sequential order is fixed and observable ------------------------
 
 
-def test_sequential_clamp_order_is_single_then_total_then_cash():
+def test_sequential_clamp_order_is_single_then_total_then_cash() -> None:
     """All three constraints bind at once, each strictly tighter than the
     last (single 30 -> total 25 -> cash 20 shares). Because the pipeline
     always applies single-instrument first, every constraint contributes a
@@ -227,7 +227,7 @@ def test_sequential_clamp_order_is_single_then_total_then_cash():
 # --- (d) clamp-to-zero denies, never returns a zero-quantity approval --------
 
 
-def test_clamp_to_zero_denies_instead_of_approving_zero_quantity():
+def test_clamp_to_zero_denies_instead_of_approving_zero_quantity() -> None:
     result = bind(
         qty=Decimal("5"),
         price=Decimal("100"),
@@ -243,21 +243,21 @@ def test_clamp_to_zero_denies_instead_of_approving_zero_quantity():
 # --- (f) deterministic reasons/result across repeated calls ------------------
 
 
-def test_same_inputs_produce_equal_results_twice():
-    kwargs = dict(
+def test_same_inputs_produce_equal_results_twice() -> None:
+    kwargs: dict[str, object] = dict(
         qty=Decimal("50"),
         price=Decimal("100"),
         symbol="BTC/USDT",
         agg=agg(total_equity=Decimal("10000"), total_exposure_pct=Decimal("20")),
         mandate=mandate(max_total_exposure_pct=30.0),
     )
-    assert bind(**kwargs) == bind(**kwargs)
+    assert bind(**kwargs) == bind(**kwargs)  # type: ignore[arg-type]
 
 
 # --- an unclamped order approves the full requested quantity -----------------
 
 
-def test_unclamped_order_approves_full_quantity_with_no_reasons():
+def test_unclamped_order_approves_full_quantity_with_no_reasons() -> None:
     result = bind(
         qty=Decimal("10"),
         price=Decimal("100"),
@@ -273,7 +273,7 @@ def test_unclamped_order_approves_full_quantity_with_no_reasons():
 # --- negative tests: invariant-violating inputs must be rejected ---------------
 
 
-def test_nan_quantity_denied():
+def test_nan_quantity_denied() -> None:
     """NaN qty triggers _is_unsafe_input → denied with MAX_SINGLE_INSTRUMENT."""
     result = bind(
         qty=Decimal("nan"),
@@ -287,7 +287,7 @@ def test_nan_quantity_denied():
     assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
 
 
-def test_nan_price_denied():
+def test_nan_price_denied() -> None:
     """NaN price triggers _is_unsafe_input → denied."""
     result = bind(
         qty=Decimal("10"),
@@ -301,7 +301,7 @@ def test_nan_price_denied():
     assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
 
 
-def test_nan_total_equity_rejected_by_portfolio_aggregate():
+def test_nan_total_equity_rejected_by_portfolio_aggregate() -> None:
     """NaN total_equity is rejected by PortfolioAggregate (Pydantic finite_number
     constraint) before bind() even runs — fail-closed at the model layer."""
     from pydantic import ValidationError
@@ -310,7 +310,7 @@ def test_nan_total_equity_rejected_by_portfolio_aggregate():
         agg(total_equity=Decimal("nan"))
 
 
-def test_zero_quantity_denied():
+def test_zero_quantity_denied() -> None:
     """Zero qty is unsafe input → denied, never approved."""
     result = bind(
         qty=Decimal("0"),
@@ -324,7 +324,7 @@ def test_zero_quantity_denied():
     assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
 
 
-def test_negative_price_denied():
+def test_negative_price_denied() -> None:
     """Negative price is unsafe input → denied (would make qty*price look small)."""
     result = bind(
         qty=Decimal("10"),
@@ -338,7 +338,7 @@ def test_negative_price_denied():
     assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
 
 
-def test_zero_total_equity_denied():
+def test_zero_total_equity_denied() -> None:
     """Zero total_equity is unsafe input → denied."""
     result = bind(
         qty=Decimal("10"),
@@ -352,7 +352,7 @@ def test_zero_total_equity_denied():
     assert result.reasons == [POLICY_MAX_SINGLE_INSTRUMENT]
 
 
-def test_revision_hash_mismatch_raises():
+def test_revision_hash_mismatch_raises() -> None:
     """Tampered revision_hash raises MandateRevisionHashMismatchError — fail-closed."""
     from src.core.portfolio.mandate_binding import MandateRevisionHashMismatchError
 
@@ -375,7 +375,7 @@ def test_revision_hash_mismatch_raises():
         raise AssertionError("Expected MandateRevisionHashMismatchError on hash mismatch")
 
 
-def test_forbidden_asset_precedes_all_clamps():
+def test_forbidden_asset_precedes_all_clamps() -> None:
     """FORBIDDEN_ASSET denial happens before any clamp arithmetic — even if
     clamps would also bind, only FORBIDDEN_ASSET appears in reasons."""
     result = bind(
@@ -400,7 +400,7 @@ def test_forbidden_asset_precedes_all_clamps():
 # --- failure injection: dependency exception -----------------------------------
 
 
-def test_mandate_revision_hash_mismatch_error_type_is_value_error_subclass():
+def test_mandate_revision_hash_mismatch_error_type_is_value_error_subclass() -> None:
     """MandateRevisionHashMismatchError must be a ValueError subclass so that
     callers catching ValueError around bind() still pick it up (fail-closed)."""
     from src.core.portfolio.mandate_binding import MandateRevisionHashMismatchError
@@ -408,7 +408,7 @@ def test_mandate_revision_hash_mismatch_error_type_is_value_error_subclass():
     assert issubclass(MandateRevisionHashMismatchError, ValueError)
 
 
-def test_float_quantity_rejected_by_binding_result_validator():
+def test_float_quantity_rejected_by_binding_result_validator() -> None:
     """BindingResult._no_float validator must reject float quantities — a
     common bug vector when callers pass float instead of Decimal."""
     from pydantic import ValidationError
@@ -416,14 +416,14 @@ def test_float_quantity_rejected_by_binding_result_validator():
     from src.core.portfolio.mandate_binding import BindingResult
 
     with pytest.raises(ValidationError):
-        BindingResult(quantity=10.5, reasons=[], denied=False)
+        BindingResult(quantity=10.5, reasons=[], denied=False)  # type: ignore[arg-type]
 
 
 # --- D2 성능 단언 (performance assertion) --------------------------------------
 
 
 @pytest.mark.perf
-def test_bind_p99_latency_within_pretrade_gate_budget():
+def test_bind_p99_latency_within_pretrade_gate_budget() -> None:
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
     `bind()`가 바로 그 사전거래 사이징 게이트다(모듈 docstring -- 매수/매도
     수량이 거래소로 나가기 직전에 호출됨)."""
