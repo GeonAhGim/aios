@@ -479,3 +479,7 @@ def perf_budget() -> PerfBudget:
     `perf_budget.assert_within(fn, budget_ms=...)`, p95 등 분포가 필요하면
     `perf_budget.samples(fn, n=...)`을 직접 쓴다."""
     return PerfBudget()
+
+
+# task-11554: Sentinel watch for orders table residue (test cleanup tracking)
+_orders_row_count_at_module_start: dict[str, int] = {}
