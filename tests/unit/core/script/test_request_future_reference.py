@@ -17,6 +17,7 @@ D2: negative test >=3(잘못된 타임프레임 형식, 음수 봉 인덱스, ra
 깨는 반례를 hypothesis로 실제로 찾아냄 → 현재 구현은 같은 입력에서 위반
 없음을 대조).
 """
+
 from __future__ import annotations
 
 import time
@@ -107,24 +108,54 @@ def test_resample_confirmed_rejects_length_mismatch_instead_of_truncating() -> N
 
 
 @pytest.mark.perf
-def test_resample_confirmed_latency_p95_within_runtime_budget() -> None:
+def test_resample_confirmed_latency_p95_within_runtime_budget(perf_budget) -> None:
     """수치 성능 단언(ADR-2026-09-09-C): 5,000봉 시리즈를 ratio=5로 리샘플하는
     지연이 30회 반복 p95로 20ms 안에 머무는지 확인한다(런타임 실행은 DSL 컴파일
     예산 300ms와 별개 축이지만, 봉 수에 선형 이상으로 느려지지 않음을 조기에
     드러낸다)."""
     source = Series.of_floats(list(range(5_000)))
-    budget_sec = 0.02
+    budget_ms = 20.0
 
-    samples: list[float] = []
-    for _ in range(30):
-        start = time.perf_counter()
-        resample_confirmed(source, bar_count=5_000, ratio=5)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    samples = perf_budget.samples(
+        lambda: resample_confirmed(source, bar_count=5_000, ratio=5),
+        n=30,
+        batch=10,
+    )
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
 
-    print(f"[M2-2b mtf] resample p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    print(f"[M2-2b mtf] resample p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
+
+
+def test_resample_latency_budget_actually_fails_with_delay(
+    perf_budget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실패 주입: resample_confirmed 경로에 50ms 지연을 주입하면预算 단언이
+    AssertionError를 내는지 확인한다(항상 통과하는 허울 단언이 아님을 검증).
+    지연은 원래 budget(20ms)의 2.5배로, 충분히 과하게 주입한다."""
+    original_resample = resample_confirmed
+
+    def _stalled_resample(source, *, bar_count: int, ratio: int):
+        time.sleep(0.05)  # 50ms 지연
+        return original_resample(source, bar_count=bar_count, ratio=ratio)
+
+    monkeypatch.setattr(
+        "tests.unit.core.script.test_request_future_reference.resample_confirmed",
+        _stalled_resample,
+    )
+
+    source = Series.of_floats(list(range(5_000)))
+    # main 테스트와 동일한 설정: n=30, batch=10, budget_ms=20
+    samples = perf_budget.samples(
+        lambda: resample_confirmed(source, bar_count=5_000, ratio=5),
+        n=30,
+        batch=10,
+    )
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    budget_ms = 20.0
+    assert p95_ms < budget_ms  # 지연 주입으로 반드시 실패해야 한다
 
 
 # ---- 게이트 적색 재현: 진행 중 버킷을 참조하는 naive 구현의 불변식 위반 ----
