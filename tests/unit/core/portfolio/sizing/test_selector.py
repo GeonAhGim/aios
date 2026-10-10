@@ -17,6 +17,7 @@ from src.core.portfolio.sizing.selector import (
     size_for,
 )
 from src.core.portfolio.state_input import PortfolioAggregate, PortfolioStateInput
+from tests.conftest import PerfBudget
 
 _HEX64 = "e" * 64
 _AS_OF = datetime(2026, 9, 9, tzinfo=timezone.utc)
@@ -109,22 +110,18 @@ def test_size_for_rejects_result_method_mismatch(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.perf
-def test_size_for_p99_latency_is_within_pre_trade_gate_budget():
+def test_size_for_p99_latency_is_within_pre_trade_gate_budget(perf_budget: PerfBudget):
     """사이징은 주문 제출 전 경로에 있으므로 ADR-2026-09-09-C Decision 1의
     "사전거래 게이트 p99 5ms" 예산이 적용된다 — 4개 산식 전부를 디스패치해도
     한 번의 size_for() 호출이 그 예산 안에 들어야 한다."""
-    import time
-
     cfg = _config(SizingMethod.FIXED_FRACTIONAL)
     inp = _inp(SizingMethod.FIXED_FRACTIONAL)
+    budget_ms = 5.0
 
-    samples_us: list[float] = []
-    for _ in range(500):
-        start = time.perf_counter()
-        size_for(cfg, inp)
-        samples_us.append((time.perf_counter() - start) * 1_000_000)
+    samples = perf_budget.samples(lambda: size_for(cfg, inp), n=500, batch=50)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99)]
 
-    samples_us.sort()
-    p99_us = samples_us[int(len(samples_us) * 0.99)]
-
-    assert p99_us < 5_000, f"size_for() p99={p99_us:.1f}us exceeds 5ms pre-trade gate budget"
+    assert p99_ms < budget_ms, (
+        f"size_for() p99={p99_ms:.3f}ms exceeds {budget_ms}ms pre-trade gate budget"
+    )
