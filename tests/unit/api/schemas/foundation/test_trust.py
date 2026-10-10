@@ -7,8 +7,11 @@ budget for repeated model construction (ADR-2026-09-09-C Decision 1).
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
+
+# PerfBudget: lazy import so ruff does not flag the type annotation (F821).
+# Real type is from tests.conftest; string annotation avoids the import at runtime.
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
@@ -20,6 +23,9 @@ from src.api.schemas.foundation.trust import (
     TrustStatusResponse,
 )
 from src.foundation.trust.contracts.v1 import ConsentDecision, ConsentState
+
+if TYPE_CHECKING:
+    from tests.conftest import PerfBudget  # noqa: F401
 
 
 def _consent_decision() -> ConsentDecision:
@@ -113,19 +119,22 @@ def test_trust_status_response_dependency_failure_injected(monkeypatch: pytest.M
 
 
 @pytest.mark.perf
-def test_trust_status_response_construction_throughput_budget() -> None:
+def test_trust_status_response_construction_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""
     tenant_id = uuid4()
     as_of = datetime.now(timezone.utc)
     consents = [_consent_decision() for _ in range(5)]
 
-    durations: list[float] = []
-    for _ in range(500):
-        start = time.perf_counter()
-        TrustStatusResponse(tenant_id=tenant_id, consents=consents, as_of=as_of)
-        durations.append(time.perf_counter() - start)
+    # batch=500: 총 500회 호출을 한 구간에 묶어 process_time 양자화 오차 제거
+    samples = perf_budget.samples(
+        lambda: TrustStatusResponse(tenant_id=tenant_id, consents=consents, as_of=as_of),
+        n=10,
+        warmup=0,
+        batch=500,
+    )
 
-    durations.sort()
-    p95 = durations[int(len(durations) * 0.95) - 1]
-    assert p95 < 0.05, f"p95 construction time {p95:.4f}s exceeded 50ms budget"
+    # cpu_ms 기준, 단위 일관성: ms (0.05초 → 50.0ms)
+    assert all(s.cpu_ms < 50.0 for s in samples), f"budget 초과: {[s.cpu_ms for s in samples]}"
