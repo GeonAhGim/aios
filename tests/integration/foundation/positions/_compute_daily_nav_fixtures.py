@@ -47,6 +47,7 @@ class FakeFxRateSource:
     그 자체가 결함 신호다."""
 
     async def rate(self, base: Currency, quote: Currency, at: datetime) -> None:  # pragma: no cover
+        # ratchet-allow: FX 불일치 케이스를 쓰지 않는 이 테스트 스위트에서 FX 호출은 결함 신호
         raise NotImplementedError(f"FX 경로가 필요 없는 테스트에서 호출됨: {base}->{quote}")
 
 
