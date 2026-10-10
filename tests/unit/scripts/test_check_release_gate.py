@@ -7,7 +7,7 @@ DB·네트워크 접근 없음 — 임시 디렉터리와 파일 존재 여부�
 
 DEEPEN(task-6006): 실패 주입(손상된 YAML이 예외로 죽지 않고 fail-closed
 exit 1을 내는지)과 수치 성능 단언(실제 5-stage 체인 전수 검사 시간 예산)을
-추가한다 — `tests/unit/scripts/test_check_migration_chain.py`의
+추가한다 — `tests/unit/scripts/test_check_migration_chain_merge_1814_1987.py`의
 `test_check_migration_chain_real_versions_dir_completes_within_time_budget`
 패턴을 따른다.
 """
@@ -390,7 +390,7 @@ def test_gate_red_fails_on_injected_missing_evidence_path(
 def test_full_chain_resolution_completes_within_time_budget() -> None:
     """수치 성능 단언: 가장 깊은 stage(`marketplace_commercialization`, 5단계
     depends_on 체인)의 evidence 누적 해석 + 파일 존재 확인이 예산 내에
-    끝나는지 확인한다. `test_check_migration_chain.py`의 시간 예산 패턴과
+    끝나는지 확인한다. `test_check_migration_chain_merge_1814_1987.py`의 시간 예산 패턴과
     동일 — 정적 파일 존재 확인만 하므로 CI 스텝 예산(수 초)보다 훨씬 낮은
     50ms를 예산으로 건다.
 
