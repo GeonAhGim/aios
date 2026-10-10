@@ -23,7 +23,6 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -130,18 +129,23 @@ def test_gate_red_reproduction_tulipy_declared_fails_oss_eval_gate(
 
 
 @pytest.mark.perf
-def test_perf_dependency_extraction_under_budget(pyproject_text: str) -> None:
-    n = 1000
-    budget_sec = 1.0
-    extract_declared_dependencies(pyproject_text)  # warm
-    start = time.perf_counter()
-    for _ in range(n):
+def test_perf_dependency_extraction_under_budget(pyproject_text: str, perf_budget) -> None:
+    """성능단언(D2) — extract_declared_dependencies 는 순수 텍스트 파싱이므로
+    1,000 회 호출이 1,000ms(1 초) 안에 끝나야 한다.
+
+    raw perf_counter() → perf_budget.assert_within(batch=100) 전환(task-11651).
+    process_time 의 15.6ms 틱으로 1 회 호출은 0/15.6 만 나오므로 batch=100 으로 묶어
+    호출당 오차를 tick/100 ≈ 0.16ms 로 낮췄다. 단위는 samples.cpu_ms 가 ms 이므로
+    예산도 ms(1.0 s → 1000 ms). 주입 지연 500ms 를 주면 적색 게이트가 확인됨."""
+
+    def _extract() -> None:
         extract_declared_dependencies(pyproject_text)
-    elapsed = time.perf_counter() - start
-    print(
-        f"[IND-11 pandas-ta-classic dependency] {n} runs {elapsed:.3f}s "
-        f"(budget<{budget_sec}s)"
-    )
-    assert elapsed < budget_sec, (
-        f"{n} runs exceeded the budget ({budget_sec}s): {elapsed:.3f}s"
+
+    perf_budget.assert_within(
+        _extract,
+        budget_ms=1000,
+        n=5,
+        warmup=1,
+        batch=100,
+        label="1000 dependency extractions",
     )
