@@ -19,6 +19,7 @@ import pytest
 
 import scripts.check_openapi_compat as compat_module
 from scripts.check_openapi_compat import find_violations, main
+from tests.conftest import PerfBudget
 
 
 def _schema(*, paths: dict[str, Any], schemas: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -221,13 +222,14 @@ def test_failure_injection_type_change_nested_via_array_items_fails() -> None:
 
 
 @pytest.mark.perf
-def test_performance_assertion_nested_ref_recursion_budget() -> None:
+def test_performance_assertion_nested_ref_recursion_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: 중첩 $ref 재귀가 100개 스키마에서도 1초 이내에 완료된다.
 
     PLT-16의 재귀 비교가 스키마 수가 많아져도 실용적인 시간 내에 종료되어야 한다.
+    raw perf_counter() → perf_budget.assert_within(batch=20) 전환.
     """
-    import time
-
     # 100개의 중첩 스키마 체인 생성
     schemas = {"Meta": _meta_schema()}
     paths = {}
@@ -256,15 +258,14 @@ def test_performance_assertion_nested_ref_recursion_budget() -> None:
     baseline = _schema(paths=paths, schemas=schemas)
     current = json.loads(json.dumps(baseline))
 
-    # 성능 측정
-    start = time.perf_counter()
-    violations = find_violations(baseline, current)
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.assert_within(
+        lambda: find_violations(baseline, current),
+        budget_ms=1000.0,
+        batch=20,
+    )
 
-    # 성능 단언: 100개 스키마 체인에서 1초 이내
-    assert elapsed < 1.0, f"100개 스키마 재귀가 {elapsed:.3f}초로 1초 한도를 초과"
     # 동일 스키마이므로 위반이 없어야 함
-    assert violations == [], f"동일 스키마에서 위반이 없어야 함: {violations}"
+    assert sample.result == [], f"동일 스키마에서 위반이 없어야 함: {sample.result}"
 
 
 def test_gate_red_reproduction_account_connection_view_deletion() -> None:
@@ -357,9 +358,7 @@ def test_main_propagates_when_export_subprocess_fails(monkeypatch: Any, tmp_path
     def _fail(*args: Any, **kwargs: Any) -> None:
         raise subprocess.CalledProcessError(returncode=1, cmd=["export_openapi"])
 
-    monkeypatch.setattr(
-        cast(Any, compat_module).subprocess, "run", _fail
-    )
+    monkeypatch.setattr(cast(Any, compat_module).subprocess, "run", _fail)
 
     with pytest.raises(subprocess.CalledProcessError):
         main(["--baseline", str(baseline_path)])
@@ -394,9 +393,7 @@ def test_main_propagates_when_export_subprocess_lies_about_success(
     def _noop_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(args=["export_openapi"], returncode=0)
 
-    monkeypatch.setattr(
-        cast(Any, compat_module).subprocess, "run", _noop_run
-    )
+    monkeypatch.setattr(cast(Any, compat_module).subprocess, "run", _noop_run)
 
     with pytest.raises(FileNotFoundError):
         main(["--baseline", str(baseline_path)])
