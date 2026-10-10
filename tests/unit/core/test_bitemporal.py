@@ -11,7 +11,6 @@ Jan1~Jan5) 1/5에 120으로 정정됐다(tx Jan5~무한대, FA-A2 방식 — UPD
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from time import perf_counter
 
 import pytest
 
@@ -197,14 +196,22 @@ def test_bitemporal_record_rejects_tx_to_not_after_tx_from():
 
 
 @pytest.mark.perf
-def test_as_of_hot_path_performance():
+def test_as_of_hot_path_performance(perf_budget):
     # as_of는 4종 질의 함수(current/as_of_valid_time/as_of_transaction_time/
     # as_of_bitemporal)가 공유하는 질의 커널이므로 포지션·원장 조회 경로의
     # 핫패스다. 10,000회 호출이 1s 내로 끝나야 한다 — 순수 필터링(I/O 없음)
     # 이라는 계약의 실측 증명(1701/task-3002 DEEPEN 선례와 동일 패턴).
+    # raw perf_counter → perf_budget.assert_within(batch) 전환:
+    # process_time은 ~15.6ms 틱이므로 batch=100이면 총 1560ms가 돼
+    # 호출당 0.156ms로 분할 가능. 예산 1000ms = 1.0s(ms 단위 일치).
     iterations = 10_000
-    started = perf_counter()
-    for _ in range(iterations):
-        as_of(HISTORY, valid_time=_dt(2026, 1, 3), tx_time=_dt(2026, 1, 20))
-    elapsed = perf_counter() - started
-    assert elapsed < 1.0, f"{iterations}회 호출에 {elapsed:.4f}s — 순수 함수치고 너무 느리다"
+    batch = 100
+    perf_budget.assert_within(
+        lambda: [
+            as_of(HISTORY, valid_time=_dt(2026, 1, 3), tx_time=_dt(2026, 1, 20))
+            for _ in range(batch)
+        ],
+        budget_ms=1000.0,
+        n=5,
+        label=f"as_of hot_path {iterations}calls",
+    )
