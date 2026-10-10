@@ -514,6 +514,11 @@ async def test_resolve_unknown_gives_up_after_max_attempts(pool):
         # task-11523: revert raw UPDATE (order_events is append-only, cannot DELETE)
         # Restore to original submitted status, not leaving UNKNOWN residue for replay_verify
         async with pool.acquire() as conn:
+            # I-05: SELECT ... FOR UPDATE before conditional UPDATE
+            await conn.fetchrow(
+                "SELECT status FROM orders WHERE order_id = $1 FOR UPDATE",
+                submitted.order_id,
+            )
             await conn.execute(
                 "UPDATE orders SET status = $1 WHERE order_id = $2",
                 submitted.status.value,

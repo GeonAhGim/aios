@@ -47,6 +47,8 @@ async def _ledger_control_clean_slate(pool):
 
     async def _reset() -> None:
         async with pool.acquire() as conn:
+            # I-05: SELECT ... FOR UPDATE before conditional UPDATE
+            await conn.fetchrow("SELECT write_frozen FROM ledger_control WHERE id = 1 FOR UPDATE")
             await conn.execute(
                 "UPDATE ledger_control SET write_frozen = FALSE, frozen_reason = NULL, "
                 "frozen_at = NULL WHERE id = 1"
@@ -104,7 +106,7 @@ async def create_ledger_account(
     return account_code
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="module", autouse=True)
 async def _sentinel_watch_orders_residue(pool):
     """D3 test harness: watch for orphaned orders rows (no matching event).
 
