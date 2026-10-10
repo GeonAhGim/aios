@@ -4,7 +4,6 @@ DoD (a)-(f) must all be falsifiable: dropping a single field, using the
 wrong type, or breaking a value rule must fail some test in this file.
 """
 
-import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -244,20 +243,17 @@ def test_from_dict_propagates_broken_upstream_mapping_failure():
 
 
 @pytest.mark.perf
-def test_config_hash_p99_latency_within_pretrade_gate_budget():
+def test_config_hash_p99_latency_within_pretrade_gate_budget(perf_budget: Any) -> None:
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
     `config_hash()`는 `AllocationDecision.decision_hash` 재료로 사전거래
     사이징 경로마다 호출된다(§2 226행)."""
     cfg = _config()
-    samples: list[float] = []
-    for _ in range(1000):
-        start = time.perf_counter()
-        cfg.config_hash()
-        samples.append(time.perf_counter() - start)
-
-    samples.sort()
-    p99_seconds = samples[int(len(samples) * 0.99)]
-    assert p99_seconds < 0.005, f"p99={p99_seconds * 1000:.3f}ms exceeds 5ms budget"
+    # batch=8: process_time() Windows 틱(~15.6ms) 양자화 오차를 batch로 나눈다.
+    # 1회 호출만 하면 0 또는 15.6ms만 나오므로 분포가 왜곡된다.
+    raw_samples = perf_budget.samples(lambda: cfg.config_hash(), n=100, batch=8)
+    cpu_ms_values = sorted(s.cpu_ms for s in raw_samples)
+    p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99) - 1]
+    assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms exceeds 5ms budget"
 
 
 # --- D2 게이트 적색 재현 (gate-red reproduction) --------------------------------
