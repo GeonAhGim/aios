@@ -16,6 +16,7 @@ does (`tools_research_data.py`'s module docstring: it constructs
 mirroring the router's own default wiring).
 """
 
+# ratchet-allow: get_item not called by research_data_search (only list_by_tenant exercised)
 from __future__ import annotations
 
 import json
