@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -27,6 +26,7 @@ from src.core.eventstore.append import (
     event_hash,
     payload_digest,
 )
+from tests._perf.relative_budget import RelativeBudget
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _RECORDED_AT = datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
@@ -205,7 +205,7 @@ async def test_append_rejects_naive_datetime(pool: asyncpg.Pool):
 
 
 @pytest.mark.perf
-async def test_append_p95_latency_stays_within_normalized_ceiling(pool: asyncpg.Pool):
+async def test_append_p95_latency_stays_within_normalized_ceiling(pool: asyncpg.Pool, perf_budget):
     """수치 성능 단언 — §5 "이벤트 append p95 20ms" 목표의 회귀 감시.
     공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신,
     가벼운 baseline append 1건 대비 정규화한 상한만 게이트로 쓴다(LA-18
@@ -216,15 +216,22 @@ async def test_append_p95_latency_stays_within_normalized_ceiling(pool: asyncpg.
     크게 벌어진다."""
     stream_id = _stream()
 
-    baseline_start = time.perf_counter()
+    # Each baseline retry uses a fresh stream so sequence checks remain valid.
+    baseline = await RelativeBudget().measure_async(
+        lambda: _append(pool, _stream(), 1), warmup=0
+    )
+    baseline_elapsed = baseline.op_ms / 1000
     await _append(pool, stream_id, 1)
-    baseline_elapsed = time.perf_counter() - baseline_start
 
-    samples: list[float] = []
-    for seq in range(2, 62):
-        start = time.perf_counter()
-        await _append(pool, stream_id, seq)
-        samples.append(time.perf_counter() - start)
+    seq = 1
+
+    async def append_next():
+        nonlocal seq
+        seq += 1
+        return await _append(pool, stream_id, seq)
+
+    measurements = await perf_budget.samples_async(append_next, n=60)
+    samples = [sample.wall_ms / 1000 for sample in measurements]
 
     samples.sort()
     p95 = samples[math.ceil(0.95 * len(samples)) - 1]
