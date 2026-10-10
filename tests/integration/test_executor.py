@@ -1,7 +1,6 @@
 """FD-8.4 통합테스트 — Executor의 LIVE 하드가드 + PAPER 제출 + FSM 전이."""
 
 import json
-import time
 import uuid
 from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
@@ -431,7 +430,7 @@ _MAX_LEDGER_LATENCY_MS = 2000.0
 
 
 @pytest.mark.perf
-async def test_record_fill_in_position_ledger_bounded_round_trips_and_latency(pool):
+async def test_record_fill_in_position_ledger_bounded_round_trips_and_latency(pool, perf_budget):
     """LB-12 수치 성능 단언 — DEPTH 감사(task-2723)가 원 리프(commit
     5424d67)에 이 축 증빙이 전무하다고 판정했다(docs/audit/DEPTH_LA_LB_LC.md
     #425). record_fill_in_position_ledger()는 pos_account 부트스트랩 →
@@ -471,9 +470,12 @@ async def test_record_fill_in_position_ledger_bounded_round_trips_and_latency(po
     await record_fill_in_position_ledger(pool, _filled_order(Decimal("1"), Decimal("100")))
 
     counting_pool = _QueryCountingPool(pool)
-    started = time.perf_counter()
-    await record_fill_in_position_ledger(counting_pool, _filled_order(Decimal("1"), Decimal("101")))
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    sample = await perf_budget.sample_async(
+        lambda: record_fill_in_position_ledger(
+            counting_pool, _filled_order(Decimal("1"), Decimal("101"))
+        )
+    )
+    elapsed_ms = sample.wall_ms
     round_trip_count = len(counting_pool.queries)
 
     print(
