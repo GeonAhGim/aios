@@ -52,10 +52,10 @@ class FixedProvider:
         return ScriptDraft(source=self._source, provider_name="fixture", model_name="fixture-1")
 
     async def explain_script(self, *, source: str) -> str:
-        raise NotImplementedError
+        return f"Explanation of script: {source[:40]}"
 
     async def explain_backtest(self, *, summary: str) -> str:
-        raise NotImplementedError
+        return f"Backtest narrative: {summary[:40]}"
 
 
 async def test_pass_rate_fixture_has_zero_silent_failures() -> None:
