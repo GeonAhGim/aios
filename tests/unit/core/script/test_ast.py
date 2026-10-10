@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import pytest
@@ -35,6 +34,7 @@ from src.core.script.grammar.ast import (
     program_from_dict,
     to_dict,
 )
+from tests.conftest import PerfBudget
 
 
 def _sample_program() -> Program:
@@ -172,23 +172,27 @@ def test_to_dict_propagates_serialization_failure_instead_of_masking_it(
 
 
 @pytest.mark.perf
-def test_serialization_round_trip_latency_is_bounded() -> None:
+def test_serialization_round_trip_latency_is_bounded(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: 중간 크기 프로그램의 `to_dict`→`program_from_dict`
     왕복 평균 지연이 예산(2ms/회)을 넘지 않는다 — 우연한 이차 복잡도 회귀나
     검증기 재구성 누락을 조기에 검출한다."""
     program = _sample_program()
 
-    for _ in range(20):  # JIT/캐시 워밍업 — 첫 호출 지연을 측정에서 배제
+    # 캐시 워밍업 — 첫 호출 지연을 측정에서 배제
+    for _ in range(20):
         program_from_dict(to_dict(program))
 
-    iterations = 500
-    start = time.perf_counter()
-    for _ in range(iterations):
-        program_from_dict(to_dict(program))
-    elapsed_s = time.perf_counter() - start
-
-    avg_ms = (elapsed_s / iterations) * 1000
-    assert avg_ms < 2.0, f"직렬화 왕복 평균 {avg_ms:.3f}ms > 2.0ms 예산"
+    # batch>1: process_time의 Windows 틱(15.6ms) 양자화 오차를 batch로 나눈다.
+    # batch=128이면 총 시간이 ~128×틱보다 커져 호출당 오차가 ~0.12ms 수준으로 줄어든다.
+    sample = perf_budget.assert_within(
+        lambda: program_from_dict(to_dict(program)),
+        budget_ms=2.0,
+        n=5,
+        warmup=0,
+        batch=128,
+        label="직렬화 왕복 — 예산 2.0ms(CPU)",
+    )
+    assert sample.cpu_ms < 2.0, f"직렬화 왕복 평균 {sample.cpu_ms:.3f}ms > 2.0ms 예산"
 
 
 def test_extra_forbid_regression_would_be_caught_by_unknown_field_guard() -> None:
