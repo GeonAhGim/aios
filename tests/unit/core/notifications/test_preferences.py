@@ -12,7 +12,6 @@ Coverage targets:
 from __future__ import annotations
 
 import os
-import time
 from uuid import uuid4
 
 import asyncpg
@@ -191,18 +190,40 @@ class TestUpdateNotificationPreferencesFailureInjection:
 
 class TestUpdateNotificationPreferencesPerformance:
     @pytest.mark.perf
-    async def test_p95_latency_within_budget(self, pool):
+    async def test_p95_latency_within_budget(self, perf_budget, pool):
         """Numeric perf assertion: 20 sequential upserts, p95 < 100ms (single-row upsert budget)."""
         user_id = await create_test_user(pool)
-        samples: list[float] = []
+        counter = 0
 
-        for i in range(20):
-            start = time.perf_counter()
+        async def measure_upsert_closure():
+            nonlocal counter
+            counter += 1
             await update_notification_preferences(
-                pool, user_id, {"risk_mismatch_email": bool(i % 2)}
+                pool, user_id, {"risk_mismatch_email": bool(counter % 2)}
             )
-            samples.append(time.perf_counter() - start)
 
-        samples.sort()
-        p95 = samples[int(len(samples) * 0.95) - 1]
-        assert p95 < 0.1, f"p95 upsert latency {p95:.4f}s exceeded 100ms budget"
+        samples = await perf_budget.samples_async(measure_upsert_closure, n=20)
+        wall_ms_list = sorted(s.wall_ms for s in samples)
+        p95 = wall_ms_list[int(len(wall_ms_list) * 0.95) - 1]
+        assert p95 < 100.0, f"p95 upsert latency {p95:.2f}ms exceeded 100ms budget"
+
+    @pytest.mark.perf
+    async def test_p95_latency_detects_budget_violation(self, perf_budget, pool):
+        """Failure-injection: 1s delay pushes p95 over 1000ms budget (red gate)."""
+        import asyncio as _asyncio
+
+        user_id = await create_test_user(pool)
+        counter = 0
+
+        async def slow_upsert_closure():
+            nonlocal counter
+            counter += 1
+            await _asyncio.sleep(1)  # 1s per call → p95 ≈ 1000ms, exceeds 1000ms budget
+            await update_notification_preferences(
+                pool, user_id, {"risk_mismatch_email": bool(counter % 2)}
+            )
+
+        samples = await perf_budget.samples_async(slow_upsert_closure, n=20)
+        wall_ms_list = sorted(s.wall_ms for s in samples)
+        p95 = wall_ms_list[int(len(wall_ms_list) * 0.95) - 1]
+        assert p95 > 1000.0, f"Expected p95 > 1000ms with injected delay, got {p95:.2f}ms"
