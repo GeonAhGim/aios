@@ -63,6 +63,7 @@ class _FakeTcaResultRepository:
     records: dict[tuple[UUID, int], TcaResultRecord] = field(default_factory=dict)
 
     async def insert_or_get(self, **_kwargs: object) -> TcaResultRecord:
+        # ratchet-allow: not exercised by these tests
         raise NotImplementedError("not exercised by these tests")
 
     async def get_by_revision(self, parent_id: UUID, revision: int) -> TcaResultRecord | None:
