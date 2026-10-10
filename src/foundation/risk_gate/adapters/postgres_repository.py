@@ -17,6 +17,7 @@ from uuid import UUID
 import asyncpg
 
 from src.core.db.conditional_write import ConcurrencyConflictError
+from src.core.db.tenant_scope import tenant_transaction
 from src.foundation.risk_gate.domain.models import (
     FenceSnapshot,
     GateKind,
@@ -216,7 +217,14 @@ class PostgresRiskGateRepository:
         return _row_to_control(row)
 
     async def insert_evaluation(self, evaluation: RiskEvaluation) -> RiskEvaluation:
-        async with self._pool.acquire() as conn:
+        # F1(M) 안정화 감사(task-9420/9457) — risk_evaluation은 b3c7f19ad2e6/
+        # c9f4e2a1b6d7이 RLS ENABLE+FORCE한 8개 foundation 테이블 중 하나다.
+        # tenant_transaction()으로 app.tenant_id GUC를 바인딩하지 않으면
+        # (connections/adapters/postgres_repository.py 선례와 동일 계약),
+        # 운영 DSN이 non-superuser 롤로 바뀐 뒤에는 정상 테넌트조차 자기
+        # 행을 못 읽는다 — WHERE tenant_id = $1 조건은 지금의 superuser DSN
+        # 아래에서의 1차 방어선이고, GUC 바인딩은 그 전환 이후의 2차 방어선.
+        async with tenant_transaction(self._pool, evaluation.tenant_id) as conn:
             row = await conn.fetchrow(
                 "INSERT INTO risk_evaluation "
                 "(tenant_id, gate_kind, subject_fingerprint, outcome, reason_codes, "
@@ -237,7 +245,7 @@ class PostgresRiskGateRepository:
     async def get_cached_evaluation(
         self, tenant_id: UUID, fingerprint: str
     ) -> RiskEvaluation | None:
-        async with self._pool.acquire() as conn:
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM risk_evaluation WHERE tenant_id = $1 AND subject_fingerprint = $2 "
                 "AND (expires_at IS NULL OR expires_at > now()) "
@@ -287,8 +295,15 @@ class PostgresRiskGateRepository:
         return cb_level, distrust_level
 
     async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:
-        async with self._pool.acquire() as conn:
-            if tenant_id is None:
+        if tenant_id is None:
+            # GLOBAL 범위 kill switch(activate_safety_control.py) — 의도적으로
+            # 모든 테넌트의 캐시를 지우는 시스템 전역 동작이라 tenant_transaction()
+            # 으로 GUC를 바인딩하면 안 된다(그러면 app.tenant_id=''가 되어 RLS가
+            # 0행만 매치 — risk_evaluation은 foundation_audit_event처럼
+            # tenant_id IS NULL 시스템 예외가 없다, b3c7f19ad2e6 참고). 지금의
+            # superuser DSN 경로는 RLS를 우회하므로 기존 동작과 동일하다.
+            async with self._pool.acquire() as conn:
                 await conn.execute("DELETE FROM risk_evaluation")
-            else:
+        else:
+            async with tenant_transaction(self._pool, tenant_id) as conn:
                 await conn.execute("DELETE FROM risk_evaluation WHERE tenant_id = $1", tenant_id)
