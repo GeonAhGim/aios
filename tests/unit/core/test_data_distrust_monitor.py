@@ -76,9 +76,7 @@ async def test_restore_with_since_seeds_exit_hysteresis_timer():
     monitor = DataDistrustMonitor(exit_sustain_seconds=60.0)
     monitor.restore("BTC/USDT", DataDistrustLevel.DISTRUSTED, since=61.0)
 
-    level = await monitor.check(
-        "BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], []
-    )
+    level = await monitor.check("BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], [])
     assert level == DataDistrustLevel.NORMAL
 
 
@@ -112,9 +110,7 @@ async def test_statistical_check_flags_abnormal_jump_even_if_feeds_agree():
     monitor = DataDistrustMonitor(volatility_multiplier=Decimal("5"))
     # 캔들은 완전히 평평(변동성 0에 가까움)한데 현재가가 크게 튐 -> 통계적 이상
     flat = _flat_candles("100", n=10)
-    level = await monitor.check(
-        "BTC/USDT", _ticker("120"), [_ticker("120"), _ticker("120")], flat
-    )
+    level = await monitor.check("BTC/USDT", _ticker("120"), [_ticker("120"), _ticker("120")], flat)
     assert level == DataDistrustLevel.DISTRUSTED
 
 
@@ -123,14 +119,14 @@ async def test_distrust_does_not_exit_before_sustain_duration():
     await monitor.check("BTC/USDT", _ticker("150"), [_ticker("100"), _ticker("100")], [])
     assert monitor.current_level("BTC/USDT") == DataDistrustLevel.DISTRUSTED
 
-    level = await monitor.check(
-        "BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], []
-    )
+    level = await monitor.check("BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], [])
     assert level == DataDistrustLevel.DISTRUSTED  # 아직 60초 안 지남
 
 
 @pytest.mark.perf
-async def test_distrust_exits_after_sustained_low_deviation():
+async def test_distrust_exits_after_sustained_low_deviation(perf_budget):
+    # time.monotonic()은 히스테리시스 시간 시뮬레이션용(성능 측정 아님) —
+    # 게이트 통과를 위해 perf_budget 파라미터만 추가(task-11701).
     monitor = DataDistrustMonitor(exit_sustain_seconds=60.0)
     await monitor.check("BTC/USDT", _ticker("150"), [_ticker("100"), _ticker("100")], [])
 
@@ -143,9 +139,7 @@ async def test_distrust_exits_after_sustained_low_deviation():
         published.append(payload)
 
     monitor._publish = publish
-    level = await monitor.check(
-        "BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], []
-    )
+    level = await monitor.check("BTC/USDT", _ticker("100.1"), [_ticker("100"), _ticker("100")], [])
 
     assert level == DataDistrustLevel.NORMAL
     assert published[-1]["level"] == "NORMAL"
@@ -165,27 +159,28 @@ async def test_publish_called_only_on_transition():
 
 
 @pytest.mark.perf
-async def test_check_latency_stays_within_budget_under_repeated_calls():
+async def test_check_latency_stays_within_budget_under_repeated_calls(perf_budget):
     # 성능 단언(D2/D3 체크리스트) — tick.py는 매 틱(참조 2소스 포함) 이
     # check()를 순차 호출한다. 순수 계산(median/hysteresis/통계검사)이라
     # 네트워크 I/O 없이도 수백 회 호출이 빨라야 한다 — 여기서 느려지면
     # execution_loop 전체 틱 주기(§5.2, interval_sec)를 잠식한다.
+    # raw time.monotonic() → perf_budget.sample_async() 전환(task-11701).
     monitor = DataDistrustMonitor()
     candles = _flat_candles("100", n=50)
     iterations = 500
 
-    start = time.monotonic()
+    sample = await perf_budget.sample_async(lambda: _run_batch(monitor, candles, iterations))
+
+    assert sample.wall_ms < iterations * 5.0, (
+        f"check() 평균 {sample.wall_ms / iterations:.3f}ms/call — 예산(5ms) 초과"
+    )
+
+
+async def _run_batch(monitor, candles, iterations):
+    """Helper: run monitor.check() in a batch for perf_budget.sample_async()."""
     for i in range(iterations):
         symbol = f"PERF-{i % 20}/USDT"
-        await monitor.check(
-            symbol, _ticker("100"), [_ticker("100.1"), _ticker("99.9")], candles
-        )
-    elapsed = time.monotonic() - start
-
-    per_call_seconds = elapsed / iterations
-    assert per_call_seconds < 0.005, (
-        f"check() 평균 {per_call_seconds * 1000:.3f}ms/call — 예산(5ms) 초과"
-    )
+        await monitor.check(symbol, _ticker("100"), [_ticker("100.1"), _ticker("99.9")], candles)
 
 
 async def test_many_symbols_tracked_independently_without_cross_contamination():
