@@ -9,7 +9,6 @@ fail some test here.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -235,7 +234,7 @@ def test_failure_injection_plan_rebalance_propagates_corrupted_aggregate_feed():
 
 
 @pytest.mark.perf
-def test_perf_plan_rebalance_p99_within_pre_trade_gate_budget():
+def test_perf_plan_rebalance_p99_within_pre_trade_gate_budget(perf_budget) -> None:
     """plan_rebalance() produces the trade list that precedes order
     submission, so it sits on the same pre-trade gate path as L18's
     aggregate() -- the "사전거래 게이트 p99 5ms" budget (ADR-2026-09-09-C
@@ -247,14 +246,14 @@ def test_perf_plan_rebalance_p99_within_pre_trade_gate_budget():
     targets = {s: Decimal("0.6") for s in symbols}
     prices = {s: Decimal("100") for s in symbols}
 
-    latencies_ms: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
+    def measure_once() -> None:
         plan_rebalance(targets, current, cfg, prices, Decimal("2"))
-        latencies_ms.append((time.perf_counter() - start) * 1000)
 
-    latencies_ms.sort()
-    p99 = latencies_ms[int(len(latencies_ms) * 0.99) - 1]
+    # batch=50: process_time의 15.6ms 틱이 빠른 호출을 0/15.6만 나오게 하는
+    # 양자화 오차를 batch/50≈0.3ms로 줄인다. samples가 반환하는 cpu_ms 단위 = ms.
+    samples = perf_budget.samples(measure_once, n=200, batch=50, warmup=1)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p99 = cpu_ms[int(len(cpu_ms) * 0.99) - 1]
     assert p99 < 5.0, f"p99 {p99:.3f}ms exceeds pre-trade gate budget of 5ms (ADR-2026-09-09-C)"
 
 
