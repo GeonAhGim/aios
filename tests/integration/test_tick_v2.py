@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import json
 import statistics
-import time
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -320,7 +319,7 @@ _NO_SIGNAL_LATENCY_CEILING_SECONDS = (
 
 
 @pytest.mark.perf
-async def test_performance_no_signal_tick_round_trips_and_latency(pool):
+async def test_performance_no_signal_tick_round_trips_and_latency(pool, perf_budget):
     """성능 단언(D2) — `run_execution_tick`의 "신호 없음"(가장 빈번한, 신호가
     나지 않는 매 틱마다 반복되는) 경로가 소비하는 순차 DB 왕복 수를 정확히
     단언한다(`tests/performance/test_pre_trade_latency.py`의 R-57 선례와
@@ -353,12 +352,15 @@ async def test_performance_no_signal_tick_round_trips_and_latency(pool):
         "다릅니다 — 왕복 수 구조 변경입니다(이 파일의 예산 상수를 갱신하고 리뷰를 받으세요)."
     )
 
+    # raw time.perf_counter() -> perf_budget.samples_async 전환(task-11630).
+    # DB 왕복 지연은 I/O 대기라 wall_ms(perf_counter) 기준 — cpu_ms(process_time)는
+    # 이 프로세스가 await 중 쉬는 시간을 못 보므로 여기서는 쓰지 않는다.
     n = 30
-    samples_ms: list[float] = []
-    for _ in range(n):
-        started = time.perf_counter()
-        await run_execution_tick(pool, adapter, execution_id, **engines)
-        samples_ms.append((time.perf_counter() - started) * 1000.0)
+    samples = await perf_budget.samples_async(
+        lambda: run_execution_tick(pool, adapter, execution_id, **engines),
+        n=n,
+    )
+    samples_ms = [s.wall_ms for s in samples]
 
     print(
         f"\nrun_execution_tick(no-signal) latency (n={n}): "
@@ -368,7 +370,8 @@ async def test_performance_no_signal_tick_round_trips_and_latency(pool):
         "비차단 목표 — task-1521/2835 선례); "
         f"sequential DB round trips={_NO_SIGNAL_ROUND_TRIPS}"
     )
-    assert max(samples_ms) / 1000.0 < _NO_SIGNAL_LATENCY_CEILING_SECONDS, (
+    budget_ms = _NO_SIGNAL_LATENCY_CEILING_SECONDS * 1000
+    assert max(samples_ms) < budget_ms, (
         f"신호 없음 tick 지연이 환경 정규화 상한({_NO_SIGNAL_LATENCY_CEILING_SECONDS}s)을 넘었다 — "
         "회귀 의심."
     )
