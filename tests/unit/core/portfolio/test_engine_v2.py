@@ -11,7 +11,6 @@ DoD (L4_strategy_portfolio_backtest_v1.0.md#L22):
 from __future__ import annotations
 
 import hashlib
-import time
 from decimal import Decimal
 from typing import Any
 
@@ -20,6 +19,7 @@ import pytest
 from src.core.portfolio.engine import PortfolioEngine, PortfolioEngineError
 from src.core.portfolio.models import AllocationDecision
 from src.data.models.trading import OrderSide
+from tests.conftest import PerfBudget
 
 # --- 헬퍼 --------------------------------------------------------------------
 
@@ -252,18 +252,28 @@ def test_failure_injection_corrupted_total_equity_lookup_propagates_fail_closed(
 
 
 @pytest.mark.perf
-def test_performance_allocate_p99_latency_within_pretrade_gate_budget() -> None:
+def test_performance_allocate_p99_latency_within_pretrade_gate_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms."""
     engine = PortfolioEngine()
-    latencies_ms: list[float] = []
-    for _i in range(500):
-        start = time.perf_counter()
+
+    def allocate_once() -> None:
         engine.allocate(
             _signal(direction=OrderSide.BUY),
             _state(allocated_capital=Decimal("1000"), current_price=Decimal("50000")),
         )
-        latencies_ms.append((time.perf_counter() - start) * 1000)
 
-    latencies_ms.sort()
+    # Calibrate to at least four Windows CPU-clock ticks per batch.
+    batch = 2
+    while perf_budget.sample(allocate_once, batch=batch).cpu_ms * batch < 62.5:
+        batch *= 2
+        if batch >= 65536:
+            break
+
+    # Each sample is already milliseconds per call, not total batch time.
+    latencies_ms = sorted(
+        sample.cpu_ms for sample in perf_budget.samples(allocate_once, n=500, batch=batch)
+    )
     p99 = latencies_ms[int(500 * 0.99) - 1]
     assert p99 < 5.0, f"p99={p99:.3f}ms — 사전거래 게이트 5ms 예산 초과"
