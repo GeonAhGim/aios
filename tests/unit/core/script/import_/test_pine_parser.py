@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -30,6 +29,7 @@ from src.core.script.import_.pine.parser import (
     UnaryExpr,
     parse,
 )
+from tests.conftest import PerfBudget
 
 # ---- 지원 문법: 성공 케이스 ----
 
@@ -249,19 +249,28 @@ def test_lexer_failure_from_tokenize_propagates_without_being_swallowed(
 
 
 @pytest.mark.perf
-def test_lexing_and_parsing_large_script_within_latency_budget() -> None:
+def test_lexing_and_parsing_large_script_within_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언(렉싱/파싱 지연) — 실사용 스크립트보다 훨씬 큰 5,000문
     스크립트도 합리적 예산(3초) 안에 렉싱+파싱이 끝나야 한다. 재귀 하강
     파서가 문장마다 토큰 리스트를 복사하거나 이차식으로 스캔하게 퇴화하면
-    이 예산을 넘긴다."""
+    이 예산을 넘긴다.
+
+    raw perf_counter() → perf_budget.assert_within(batch=5) 전환(task-11680).
+    process_time의 15.6ms 틱으로 빠른 1회 호출은 0/15.6만 나오므로 batch=5로
+    묶어 총 시간이 tick을 넘어 양자화 오차를 줄였다. 단위는 samples.cpu_ms가
+    ms이므로 예산도 ms(3초 → 3000ms). 주입 지연 10x(30초)를 주면 적색 게이트
+    확인."""
     source = "\n".join(f"v{i} = ta.sma(close, {i % 50 + 1})" for i in range(5_000))
 
-    started = time.perf_counter()
-    program = parse(source)
-    elapsed = time.perf_counter() - started
+    def parse_large() -> None:
+        program = parse(source)
+        assert len(program.statements) == 5_000
 
-    assert len(program.statements) == 5_000
-    assert elapsed < 3.0
+    perf_budget.assert_within(
+        parse_large, budget_ms=3000.0, n=5, batch=5, label="5,000문 렉싱+파싱"
+    )
 
 
 _GUARD_SRC_LINE_CAP = 300  # meta/guards/common.py:SRC_LINE_CAP 복제 -- 가드는 이
