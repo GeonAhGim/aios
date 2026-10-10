@@ -33,13 +33,13 @@ RESOURCE_LIMIT_SCRIPT = "input c: series<float> = 0\n" + "plot(c)\n" * 33
 
 class FakeProvider:
     async def generate_script(self, *, prompt: str, hint: str | None = None) -> ScriptDraft:
-        raise NotImplementedError
+        return ScriptDraft(source=VALID_SCRIPT, provider_name="fake", model_name="fake-model")
 
     async def explain_script(self, *, source: str) -> str:
         return "RSI가 30 밑으로 내려가면 매수 신호를 냅니다."
 
     async def explain_backtest(self, *, summary: str) -> str:
-        raise NotImplementedError
+        return "백테스트 결과 요약입니다."
 
 
 async def test_valid_script_is_explained() -> None:
