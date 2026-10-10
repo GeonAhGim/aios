@@ -18,7 +18,6 @@ Decimal/Enum을 monkeypatch해도 pydantic-core는 스키마 컴파일 시점에
 from __future__ import annotations
 
 import sys
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -157,21 +156,26 @@ def test_failure_injection_upstream_payload_corrupted_to_state_fails_closed(monk
 
 
 @pytest.mark.perf
-def test_performance_signal_construction_p99_within_pretrade_gate_budget():
+def test_performance_signal_construction_p99_within_pretrade_gate_budget(
+    perf_budget,
+):
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms.
-    Signal은 FD-8.1 evaluate()의 직접 출력이므로 이 예산에 포함된다."""
+    Signal은 FD-8.1 evaluate()의 직접 출력이므로 이 예산에 포함된다.
+
+    raw perf_counter() → perf_budget.samples() 전환: process_time 기반
+    측정으로 다른 프로세스 CPU 뺏김 노이즈 제거, batch=100으로 양자화
+    오차 줄임(task-10775).
+    """
     kwargs = _valid_kwargs()
 
-    n = 1000
-    latencies_ms: list[float] = []
-    for _ in range(n):
-        start = time.perf_counter()
-        Signal(**kwargs)
-        latencies_ms.append((time.perf_counter() - start) * 1000)
-
-    latencies_ms.sort()
-    p99 = latencies_ms[int(n * 0.99) - 1]
-    assert p99 < 5.0, f"p99={p99:.3f}ms -- 사전거래 게이트 5ms 예산 초과"
+    samples = perf_budget.samples(
+        lambda: Signal(**kwargs),
+        n=100,
+        batch=100,
+    )
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99) - 1]
+    assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
 
 
 # --- 게이트 적색 재현 (1) --------------------------------------------------
