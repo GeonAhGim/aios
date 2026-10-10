@@ -41,7 +41,7 @@ def decode_cursor(raw: str | None) -> str | None:
     if raw is None or raw == "":
         return None
     if not _CURSOR_RE.match(raw):
-        raise InvalidIndicatorCursorError(f"cursor format is invalid: {raw!r}")
+        raise InvalidIndicatorCursorError(f"cursor 형식이 올바르지 않습니다: {raw!r}")
     return raw
 
 
