@@ -245,17 +245,19 @@ def test_record_tick_failure_with_metrics_crash_still_counts_failures() -> None:
 
 
 @pytest.mark.perf
-def test_record_tick_latency_under_budget() -> None:
-    """10,000회 record_tick 호출이 1초 미만에 완료되어야 한다 (PLT-08 성능 예산)."""
-    import time as _time
+def test_record_tick_latency_under_budget(perf_budget) -> None:
+    """10,000회 record_tick 호출이 1초 미만에 완료되어야 한다 (PLT-08 성능 예산).
 
+    raw perf_counter() 대신 perf_budget.assert_within()로 CPU 시간 기반 측정.
+    batch=100으로 묶어 호출당 100회 → process_time 양자화 오차 최소화(15.6ms/100≈0.16ms).
+    예산 1초 = 1000ms, 단위 일치(ms).
+    """
     clock = _FakeClock(0.0)
     spy = _SpyMetrics()
     health = LoopHealth(clock=clock, metrics_port=spy)
 
-    start = _time.perf_counter()
-    for _i in range(10_000):
-        health.record_tick("perf_loop", True, 0.001, interval_sec=1.0)
-    elapsed = _time.perf_counter() - start
+    def tick_100():
+        for _i in range(100):
+            health.record_tick("perf_loop", True, 0.001, interval_sec=1.0)
 
-    assert elapsed < 1.0, f"10,000 calls took {elapsed:.3f}s — exceeds 1s budget"
+    perf_budget.assert_within(tick_100, budget_ms=1000, batch=100, n=100)
