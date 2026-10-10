@@ -60,7 +60,6 @@ from __future__ import annotations
 import asyncio
 import os
 import statistics
-import time
 from typing import Any
 
 import asyncpg
@@ -109,9 +108,9 @@ async def pool():
 
 
 @pytest.mark.perf
-async def test_pre_trade_phase_p99_measured_and_round_trips_exact(pool):
+async def test_pre_trade_phase_p99_measured_and_round_trips_exact(pool, perf_budget):
     """R-57 — t0~t6 N회 실측(p50/p95/p99 print, 50 ms 목표 비차단) + 순차 DB
-    왕복 수 정확 단언(CI 게이트)."""
+    왕복 수 정확 단언(CI 게이트). raw perf_counter → perf_budget.sample_async() 전환(task-11631)."""
     scenario = await new_scenario(pool)
     recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
     warm = await scenario.run_once(pool, recorder)  # seed·캐시 워밍업(정상 상태 측정)
@@ -119,9 +118,9 @@ async def test_pre_trade_phase_p99_measured_and_round_trips_exact(pool):
 
     samples_ms: list[float] = []
     for _ in range(_SAMPLE_COUNT):
-        started = time.perf_counter()
-        outcome = await scenario.run_once(pool, recorder)
-        samples_ms.append((time.perf_counter() - started) * 1000.0)
+        sample = await perf_budget.sample_async(lambda: scenario.run_once(pool, recorder))
+        outcome = sample.result
+        samples_ms.append(sample.wall_ms)
         assert outcome is not None and outcome.decision.outcome == RiskOutcome.ALLOW
 
     round_trips = await count_pre_trade_round_trips(pool, scenario)
@@ -192,16 +191,9 @@ _ORDER_HISTORY_LATENCY_CEILING_SECONDS = 0.5  # _P99_TARGET_MS(50ms)의 10배 �
 
 
 @pytest.mark.perf
-async def test_pre_trade_phase_stays_fast_with_large_order_history(pool):
-    """성능 단언(D2, task-2835) — 왕복 수 게이트(위 테스트들)는 "왕복이 하나
-    늘었다"류 회귀만 잡고, R-27 노출 스냅샷의 `orders WHERE execution_id = $3`
-    집계(trades_1h/trades_24h)처럼 같은 왕복 *안에서* 스캔 비용이 커지는
-    회귀는 놓친다. 이 execution_id에 주문 이력 2,000행을 채운 뒤에도 phase
-    1회가 관대한 절대 상한 안에서 끝나는지 확인한다 — task-1038/1405/822
-    선례와 동일하게, 정상 실측(p50≈19~20ms)의 10배를 상한으로 두어 CPU 편차로
-    상시 적색이 되는 것을 피하면서도 스캔 비용 폭증(예: 인덱스 누락)은 잡는다.
-    `created_at`을 2일 전으로 심어 trades_1h/24h 과다거래 룰(R-27 집계 소비자)을
-    건드리지 않고 순수 스캔 비용만 키운다."""
+async def test_pre_trade_phase_stays_fast_with_large_order_history(pool, perf_budget):
+    """성능 단언(D2, task-2835) — raw perf_counter → perf_budget.sample_async() 전환(task-11631).
+    budget_ms={_ORDER_HISTORY_LATENCY_CEILING_SECONDS*1000:.0f}ms."""
     scenario = await new_scenario(pool)
     recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
     warm = await scenario.run_once(pool, recorder)
@@ -228,17 +220,17 @@ async def test_pre_trade_phase_stays_fast_with_large_order_history(pool):
             _ORDER_HISTORY_ROWS,
         )
 
-    started = time.perf_counter()
-    outcome = await scenario.run_once(pool, recorder)
-    elapsed_seconds = time.perf_counter() - started
+    sample = await perf_budget.sample_async(lambda: scenario.run_once(pool, recorder))
+    outcome = sample.result
+    budget_ms = _ORDER_HISTORY_LATENCY_CEILING_SECONDS * 1000  # 초 → ms 단위 일치
     print(
         f"\npre_trade_risk_phase latency with {_ORDER_HISTORY_ROWS}-row order history: "
-        f"{elapsed_seconds * 1000:.2f}ms (ceiling={_ORDER_HISTORY_LATENCY_CEILING_SECONDS}s)"
+        f"{sample.wall_ms:.2f}ms (budget={budget_ms:.0f}ms)"
     )
     assert outcome is not None and outcome.decision.outcome == RiskOutcome.ALLOW
-    assert elapsed_seconds < _ORDER_HISTORY_LATENCY_CEILING_SECONDS, (
-        f"주문 이력 {_ORDER_HISTORY_ROWS}행 상태에서 사전검사 지연이 {elapsed_seconds:.3f}s로 "
-        f"상한({_ORDER_HISTORY_LATENCY_CEILING_SECONDS}s)을 넘었다 — R-27 노출 스냅샷의 "
+    assert sample.wall_ms < budget_ms, (
+        f"주문 이력 {_ORDER_HISTORY_ROWS}행 상태에서 사전검사 지연이 {sample.wall_ms:.2f}ms로 "
+        f"상한({budget_ms:.0f}ms)을 넘었다 — R-27 노출 스냅샷의 "
         "execution_id 집계가 인덱스를 타지 못하는 회귀 의심."
     )
 
