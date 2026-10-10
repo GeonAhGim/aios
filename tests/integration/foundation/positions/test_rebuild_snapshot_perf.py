@@ -71,7 +71,7 @@ _MAX_REBUILD_LATENCY_MS = 2000.0
 
 @pytest.mark.perf
 async def test_rebuild_snapshot_round_trip_and_latency_guard(
-    pool: asyncpg.Pool, ports: _RealPorts
+    pool: asyncpg.Pool, ports: _RealPorts, perf_budget
 ) -> None:
     """수치 성능 단언(DEEPEN task-2958) — DEPTH 감사(task-2723,
     docs/audit/DEPTH_LA_LB_LC.md #452)가 원 리프(2c9bf78)에 이 축 증빙이
@@ -82,8 +82,15 @@ async def test_rebuild_snapshot_round_trip_and_latency_guard(
     + 쿼리 로거가 트랜잭션 경계(BEGIN/COMMIT)도 왕복으로 잡는다는 점까지
     합쳐 실측 6회, 여유 2 -> 8)을 걸고, 지연은 "무한정 걸리지 않는다"는
     느슨한 sanity 상한만 건다.
+
+    raw `time.perf_counter()` 단언을 `perf_budget.sample_async`(task-11626,
+    `tests/conftest.py` PerfBudget)로 전환 — coverage tracer 일시정지 +
+    wall_ms 계측을 공용 헬퍼로 위임한다. DB 왕복이라 `cpu_ms`(process_time)
+    는 대기 시간을 보지 못하므로 `wall_ms`를 기준으로 삼는다. `sample_async`
+    는 `fn()`을 정확히 1회만 호출하므로(이 테스트는 drift가 1회만 존재하는
+    상태 의존적 시나리오라 재호출이 불가능하다) 기존과 동일하게 단일
+    실행만 측정한다.
     """
-    import time
 
     tenant_id, account_id, position_key = await _open(pool)
     order_id = uuid4()
@@ -108,18 +115,22 @@ async def test_rebuild_snapshot_round_trip_and_latency_guard(
     )
 
     counting_pool = _QueryCountingPool(pool)
-    started = time.perf_counter()
-    report = await rebuild_snapshot(
-        position_key,
-        tenant_id=tenant_id,
-        asset_class=AssetClass.CRYPTO,
-        journal=ports.journal,
-        snapshots=ports.snapshots,
-        pool=counting_pool,
-        clock=_clock,
-        dry_run=False,
-    )
-    elapsed_ms = (time.perf_counter() - started) * 1000
+
+    async def _rebuild() -> Any:
+        return await rebuild_snapshot(
+            position_key,
+            tenant_id=tenant_id,
+            asset_class=AssetClass.CRYPTO,
+            journal=ports.journal,
+            snapshots=ports.snapshots,
+            pool=counting_pool,
+            clock=_clock,
+            dry_run=False,
+        )
+
+    sample = await perf_budget.sample_async(_rebuild)
+    report = sample.result
+    elapsed_ms = sample.wall_ms
     round_trip_count = len(counting_pool.queries)
 
     print(
