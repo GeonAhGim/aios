@@ -217,13 +217,15 @@ class PostgresRiskGateRepository:
         return _row_to_control(row)
 
     async def insert_evaluation(self, evaluation: RiskEvaluation) -> RiskEvaluation:
-        # F1(M) 안정화 감사(task-9420/9457) — risk_evaluation은 b3c7f19ad2e6/
-        # c9f4e2a1b6d7이 RLS ENABLE+FORCE한 8개 foundation 테이블 중 하나다.
-        # tenant_transaction()으로 app.tenant_id GUC를 바인딩하지 않으면
-        # (connections/adapters/postgres_repository.py 선례와 동일 계약),
-        # 운영 DSN이 non-superuser 롤로 바뀐 뒤에는 정상 테넌트조차 자기
-        # 행을 못 읽는다 — WHERE tenant_id = $1 조건은 지금의 superuser DSN
-        # 아래에서의 1차 방어선이고, GUC 바인딩은 그 전환 이후의 2차 방어선.
+        # F1(M) stabilization audit (task-9420/9457) -- risk_evaluation is one
+        # of the 8 foundation tables with RLS ENABLE+FORCE (b3c7f19ad2e6,
+        # c9f4e2a1b6d7). Without binding the app.tenant_id GUC via
+        # tenant_transaction() (same contract as
+        # connections/adapters/postgres_repository.py), once the production
+        # DSN switches to a non-superuser role even a tenant's own rows
+        # become unreadable. The WHERE tenant_id = $1 condition is the first
+        # line of defense under today's superuser DSN; the GUC binding is the
+        # second line of defense for after that switch.
         async with tenant_transaction(self._pool, evaluation.tenant_id) as conn:
             row = await conn.fetchrow(
                 "INSERT INTO risk_evaluation "
@@ -296,12 +298,13 @@ class PostgresRiskGateRepository:
 
     async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:
         if tenant_id is None:
-            # GLOBAL 범위 kill switch(activate_safety_control.py) — 의도적으로
-            # 모든 테넌트의 캐시를 지우는 시스템 전역 동작이라 tenant_transaction()
-            # 으로 GUC를 바인딩하면 안 된다(그러면 app.tenant_id=''가 되어 RLS가
-            # 0행만 매치 — risk_evaluation은 foundation_audit_event처럼
-            # tenant_id IS NULL 시스템 예외가 없다, b3c7f19ad2e6 참고). 지금의
-            # superuser DSN 경로는 RLS를 우회하므로 기존 동작과 동일하다.
+            # GLOBAL-scope kill switch (activate_safety_control.py) --
+            # intentionally a system-wide action that clears every tenant's
+            # cache, so it must not go through tenant_transaction() (that
+            # would bind app.tenant_id='', and RLS would match 0 rows --
+            # risk_evaluation has no tenant_id IS NULL system exception like
+            # foundation_audit_event, see b3c7f19ad2e6). Today's superuser
+            # DSN path bypasses RLS here, matching the pre-existing behavior.
             async with self._pool.acquire() as conn:
                 await conn.execute("DELETE FROM risk_evaluation")
         else:
