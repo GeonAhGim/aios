@@ -1,9 +1,8 @@
-import time
-
 import pytest
 
 import src.core.loader.secret_loader as secret_loader_module
 from src.core.loader.secret_loader import load_env_secrets
+from tests.conftest import PerfBudget
 
 MINIMAL_ENV = {
     "DATABASE_URL": "postgresql+asyncpg://user:password@localhost:5432/aios_dev",
@@ -121,12 +120,11 @@ def test_load_env_secrets_propagates_dotenv_read_failure(monkeypatch: pytest.Mon
 
 
 @pytest.mark.perf
-def test_load_env_secrets_repeated_calls_stay_within_perf_budget():
+def test_load_env_secrets_repeated_calls_stay_within_perf_budget(perf_budget: PerfBudget):
     """성능 단언 — load_env_secrets는 부팅 경로에서 반복 호출될 수 있으니
     (헬스체크·워커 재기동 등) 단일 호출 비용이 병적으로 커지면 안 된다."""
-    start = time.perf_counter()
-    for _ in range(500):
-        load_env_secrets(MINIMAL_ENV)
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2.0
+    # Preserve the original 2-second budget for 500 calls in per-call milliseconds.
+    # Batch fast calls so CPU timer quantization is amortized across the sample.
+    perf_budget.assert_within(
+        lambda: load_env_secrets(MINIMAL_ENV), budget_ms=2.0 * 1000 / 500, batch=20000
+    )
