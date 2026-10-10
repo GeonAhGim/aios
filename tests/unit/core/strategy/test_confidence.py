@@ -8,7 +8,6 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L10.
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 
 import pytest
@@ -104,23 +103,28 @@ def test_failure_injection_corrupted_upstream_result_fails_closed():
 
 
 @pytest.mark.perf
-def test_performance_compute_confidence_p99_latency_within_pretrade_gate_budget():
+def test_performance_compute_confidence_p99_latency_within_pretrade_gate_budget(
+    perf_budget,
+):
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms.
-    confidence 산출은 신호 생성 경로(주문 제출 이전)의 일부다."""
+    confidence 산출은 신호 생성 경로(주문 제출 이전)의 일부다.
+
+    raw perf_counter() → perf_budget.samples() 전환: process_time 기반
+    측정으로 다른 프로세스 CPU 뺏김 노이즈 제거, batch=100으로 양자화
+    오차 줄임(task-10775, task-11694).
+    """
     result = EvalResult(
         matched=True, satisfied_leaves=7, total_leaves=10, crossover_leaves_satisfied=3
     )
 
-    n = 1000
-    latencies_ms: list[float] = []
-    for _ in range(n):
-        start = time.perf_counter()
-        compute_confidence(result)
-        latencies_ms.append((time.perf_counter() - start) * 1000)
-
-    latencies_ms.sort()
-    p99 = latencies_ms[int(n * 0.99) - 1]
-    assert p99 < 5.0, f"p99={p99:.3f}ms — 사전거래 게이트 5ms 예산 초과"
+    samples = perf_budget.samples(
+        lambda: compute_confidence(result),
+        n=100,
+        batch=100,
+    )
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99) - 1]
+    assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
 
 
 # --- 게이트 적색 재현 (1) ----------------------------------------------------
