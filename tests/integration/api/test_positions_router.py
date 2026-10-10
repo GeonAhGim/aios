@@ -1,209 +1,29 @@
-"""LB-19 통합테스트 — /v1/positions 읽기 라우터. 실제 FastAPI 앱 + 실제
-테스트 DB(TEST_DATABASE_URL → conftest가 DATABASE_URL로 옮김).
-
-쓰기 API가 없으므로 선행 상태(pos_account/pos_snapshot/pos_journal/
-pos_nav_daily)는 LB-9 어댑터를 직접 호출해 만든다 — 라우터가 우회할 수 있는
-쓰기 경로가 HTTP에 없다는 사실 자체가 검증 대상이다(§9 LB-19 "쓰기 없음").
-교차 테넌트 검사는 응답 상태코드뿐 아니라 봉투의 error_code·키 집합까지
-미존재 응답과 같은지(동형) 비교한다."""
+"""LB-19 / FA-6: position listing and tenant/portfolio scope."""
 
 from __future__ import annotations
 
 import asyncio
-import math
-import os
-import time
 import uuid
-from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
-import asyncpg
-import pytest
-from httpx import ASGITransport, AsyncClient
-
-from src.api.deps import get_pool
-from src.api.routers.positions import get_entity_repository, get_snapshot_repository
-from src.data.models.base import Currency, Money
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
-from src.foundation.positions.adapters.postgres_journal_repository import (
-    PostgresJournalRepository,
-)
-from src.foundation.positions.adapters.postgres_nav_repository import PostgresNavRepository
-from src.foundation.positions.adapters.postgres_snapshot_repository import (
-    PostgresSnapshotRepository,
-)
-from src.foundation.positions.contracts.v1 import (
-    CostMethod,
-    JournalEntryType,
-    NAVSnapshot,
-    PositionSnapshotView,
-)
-from src.foundation.positions.domain.position_key import PositionKey
-from src.main import app
-from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
 from tests.integration.foundation.entities.conftest import build_hierarchy
-from tests.support.entities_seed import bootstrap_default_portfolio
-
-STRONG_PASSWORD = "Str0ng!Passw0rd"
-BASE = "/v1/positions"
-
-
-def _asyncpg_dsn() -> str:
-    return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-
-
-@pytest.fixture
-async def pool():
-    p = await retry_too_many_connections(
-        lambda: asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
-    )
-    yield p
-    await p.close()
-
-
-@pytest.fixture
-async def client():
-    async with lifespan_context_with_retry(app):
-        # raise_app_exceptions=False — 도메인 예외는 전역 핸들러가 봉투로 번역하고
-        # Starlette가 정상 응답 뒤에도 재전파하므로(test_auth_router.py 근거).
-        transport = ASGITransport(app=app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-
-async def _register(client: AsyncClient) -> tuple[dict, UUID]:
-    response = await client.post(
-        "/auth/register",
-        json={"email": f"test-{uuid.uuid4().hex}@example.com", "password": STRONG_PASSWORD},
-    )
-    headers = {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
-    me = await client.get("/users/me", headers=headers)
-    return headers, UUID(me.json()["data"]["user_id"])
-
-
-async def _create_account(pool: asyncpg.Pool, tenant_id: UUID) -> UUID:
-    async with pool.acquire() as conn:
-        account_id: UUID = await conn.fetchval(
-            "INSERT INTO pos_account (tenant_id, venue, base_currency, cost_method) "
-            "VALUES ($1, $2, $3, $4) RETURNING account_id",
-            tenant_id,
-            f"V{uuid.uuid4().hex[:8]}",
-            Currency.KRW.value,
-            CostMethod.FIFO.value,
-        )
-    return account_id
-
-
-async def _open_position(
-    pool: asyncpg.Pool,
-    *,
-    tenant_id: UUID,
-    account_id: UUID,
-    quantity: Decimal,
-    portfolio_id: UUID | None = None,
-) -> PositionSnapshotView:
-    # FA-0d-fix: the adapter now requires a 5-part key whose portfolio the
-    # tenant owns -- callers that do not pick a portfolio get the tenant's
-    # FA-1 default one. The default hierarchy is bootstrapped (idempotently,
-    # API-registered tenants have none yet) even when an explicit portfolio is
-    # given: a migration round trip below FA-4 re-derives `pos_snapshot.
-    # portfolio_id` from the tenant default, and FA-0d fails closed on rows
-    # whose tenant has none.
-    default_portfolio_id = await bootstrap_default_portfolio(pool, tenant_id)
-    if portfolio_id is None:
-        portfolio_id = default_portfolio_id
-    key = str(
-        PositionKey(
-            venue="TESTVENUE",
-            instrument_id=uuid.uuid4().hex,
-            strategy_id="strat",
-            execution_id="exec",
-            portfolio_id=portfolio_id,
-        )
-    )
-    snapshot = PositionSnapshotView(
-        position_key=key,
-        tenant_id=tenant_id,
-        account_id=account_id,
-        instrument_id=uuid.uuid4(),
-        quantity=quantity,
-        avg_cost=Money(amount=Decimal("100"), currency=Currency.KRW),
-        cost_method=CostMethod.FIFO,
-        lots=[],
-        realized_pnl_base=Decimal("0"),
-        unrealized_pnl_base=None,
-        fees_base=Decimal("0"),
-        funding_base=Decimal("0"),
-        mark_price=None,
-        mark_at=None,
-        base_currency=Currency.KRW,
-        last_journal_seq=0,
-        updated_at=datetime.now(timezone.utc),
-    )
-    repo = PostgresSnapshotRepository(pool)
-    async with pool.acquire() as conn, conn.transaction():
-        return await repo.upsert(conn, snapshot, expected_seq=0)
-
-
-async def _append_fills(pool: asyncpg.Pool, position_key: str, count: int) -> None:
-    repo = PostgresJournalRepository(pool)
-    for i in range(count):
-        async with pool.acquire() as conn, conn.transaction():
-            await repo.append(
-                conn,
-                position_key=position_key,
-                entry_type=JournalEntryType.FILL,
-                qty_delta=Decimal("1"),
-                price=Money(amount=Decimal("100"), currency=Currency.KRW),
-                fee=None,
-                realized_pnl_base=Decimal("0"),
-                fx_rate=None,
-                fx_source=None,
-                source_event_type="fill",
-                source_event_id=f"{position_key}:{i}",
-                idempotency_key=f"fill:{position_key}:{i}",
-                occurred_at=datetime.now(timezone.utc),
-            )
-
-
-async def _insert_nav(pool: asyncpg.Pool, account_id: UUID, day: date, cash: Decimal) -> None:
-    nav = NAVSnapshot(
-        account_id=account_id,
-        nav_date=day,
-        base_currency=Currency.KRW,
-        opening_nav=cash,
-        cash=cash,
-        positions_mv=Decimal("0"),
-        realized=Decimal("0"),
-        unrealized_delta=Decimal("0"),
-        funding=Decimal("0"),
-        fees=Decimal("0"),
-        flows=Decimal("0"),
-        closing_nav=cash,
-        fx_rates=[],
-        source_hash="ab" * 32,
-    )
-    async with pool.acquire() as conn:
-        await PostgresNavRepository(pool).insert(conn, nav)
-
-
-def _nav_params(account_id: UUID, start: str, end: str) -> dict[str, str]:
-    return {"account_id": str(account_id), "start_date": start, "end_date": end}
-
-
-def _assert_error_envelope(body: dict, code: str) -> None:
-    assert body["error_code"] == code
-    assert set(body) >= {"error_code", "message", "trace_id"}
-    assert "data" not in body
-
-
-# --- GET /positions -------------------------------------------------------
+from tests.support.positions_router import (
+    BASE,
+    _assert_error_envelope,
+    _create_account,
+    _open_position,
+    _register,
+)
+from tests.support.positions_router import client as client
+from tests.support.positions_router import pool as pool
 
 
 async def test_positions_require_authentication(client):
     response = await client.get(BASE)
     assert response.status_code == 401
+
 
 
 async def test_list_positions_returns_own_open_positions_and_filters(client, pool):
@@ -236,6 +56,7 @@ async def test_list_positions_returns_own_open_positions_and_filters(client, poo
     assert items[0]["schema_version"] == "v1"
 
 
+
 async def test_list_positions_other_tenant_account_is_404_isomorphic(client, pool):
     victim_headers, victim_id = await _register(client)
     attacker_headers, _ = await _register(client)
@@ -253,8 +74,6 @@ async def test_list_positions_other_tenant_account_is_404_isomorphic(client, poo
     own = await client.get(BASE, headers=victim_headers, params={"account_id": str(account_id)})
     assert own.status_code == 200 and len(own.json()["data"]["items"]) == 1
 
-
-# --- FA-6 portfolio_id scope -------------------------------------------------
 
 
 async def test_list_positions_without_portfolio_id_is_unchanged_regression(client, pool):
@@ -293,6 +112,7 @@ async def test_list_positions_without_portfolio_id_is_unchanged_regression(clien
     }
 
 
+
 async def test_list_positions_portfolio_id_filters_to_that_portfolio_only(client, pool):
     headers, tenant_id = await _register(client)
     repo = PostgresEntityRepository(pool)
@@ -322,6 +142,7 @@ async def test_list_positions_portfolio_id_filters_to_that_portfolio_only(client
     assert [item["position_key"] for item in items] == [in_a.position_key]
 
 
+
 async def test_list_positions_portfolio_id_rejects_cross_tenant_scope_fail_closed(client, pool):
     """negative — 다른 테넌트 소유 portfolio_id를 주면 그 tenant의 포지션
     전체를 돌려주는 대신(전체 반환 폴백 금지) 404로 거부한다."""
@@ -343,6 +164,7 @@ async def test_list_positions_portfolio_id_rejects_cross_tenant_scope_fail_close
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
 
 
+
 async def test_list_positions_portfolio_id_rejects_unknown_portfolio(client, pool):
     headers, tenant_id = await _register(client)
     account_id = await _create_account(pool, tenant_id)
@@ -352,224 +174,6 @@ async def test_list_positions_portfolio_id_rejects_unknown_portfolio(client, poo
     assert response.status_code == 404
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
 
-
-# --- GET /positions/{key}/journal ------------------------------------------
-
-
-async def test_journal_cursor_pagination_walks_in_sequence_order(client, pool):
-    headers, tenant_id = await _register(client)
-    account_id = await _create_account(pool, tenant_id)
-    opened = await _open_position(
-        pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1")
-    )
-    await _append_fills(pool, opened.position_key, 3)
-
-    first = await client.get(
-        f"{BASE}/{opened.position_key}/journal", headers=headers, params={"limit": 2}
-    )
-    assert first.status_code == 200
-    body = first.json()
-    assert [e["sequence_no"] for e in body["data"]["items"]] == [1, 2]
-    assert body["meta"]["page"]["next_cursor"] == "2"
-    assert body["data"]["items"][0]["entry_type"] == "FILL"
-    assert body["data"]["items"][0]["prev_hash"] is None
-
-    second = await client.get(
-        f"{BASE}/{opened.position_key}/journal",
-        headers=headers,
-        params={"limit": 2, "cursor": body["meta"]["page"]["next_cursor"]},
-    )
-    body2 = second.json()
-    assert [e["sequence_no"] for e in body2["data"]["items"]] == [3]
-    assert body2["meta"]["page"]["next_cursor"] is None
-
-
-async def test_journal_cross_tenant_is_404_isomorphic_with_unknown_key(client, pool):
-    _, victim_id = await _register(client)
-    attacker_headers, _ = await _register(client)
-    account_id = await _create_account(pool, victim_id)
-    opened = await _open_position(
-        pool, tenant_id=victim_id, account_id=account_id, quantity=Decimal("1")
-    )
-    await _append_fills(pool, opened.position_key, 1)
-
-    cross = await client.get(f"{BASE}/{opened.position_key}/journal", headers=attacker_headers)
-    ghost = await client.get(f"{BASE}/TESTVENUE:nope:strat:exec/journal", headers=attacker_headers)
-    assert cross.status_code == ghost.status_code == 404
-    _assert_error_envelope(cross.json(), "RESOURCE_NOT_FOUND")
-    assert cross.json()["error_code"] == ghost.json()["error_code"]
-
-
-async def test_journal_rejects_malformed_cursor(client, pool):
-    headers, tenant_id = await _register(client)
-    account_id = await _create_account(pool, tenant_id)
-    opened = await _open_position(
-        pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1")
-    )
-
-    response = await client.get(
-        f"{BASE}/{opened.position_key}/journal", headers=headers, params={"cursor": "abc"}
-    )
-    assert response.status_code == 400
-    _assert_error_envelope(response.json(), "VALIDATION_INVALID_FIELD")
-
-
-# --- GET /positions/nav ------------------------------------------------------
-
-
-async def test_nav_series_is_ascending_and_exposes_missing_days(client, pool):
-    headers, tenant_id = await _register(client)
-    account_id = await _create_account(pool, tenant_id)
-    await _insert_nav(pool, account_id, date(2026, 9, 3), Decimal("1000"))
-    await _insert_nav(pool, account_id, date(2026, 9, 1), Decimal("900"))
-
-    response = await client.get(
-        f"{BASE}/nav",
-        headers=headers,
-        params=_nav_params(account_id, "2026-09-01", "2026-09-03"),
-    )
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert [item["nav_date"] for item in data["items"]] == ["2026-09-01", "2026-09-03"]
-    assert Decimal(data["items"][0]["closing_nav"]) == Decimal("900")
-    assert data["missing_dates"] == ["2026-09-02"]
-
-
-async def test_nav_cross_tenant_is_404_and_bad_range_is_rejected(client, pool):
-    _, victim_id = await _register(client)
-    attacker_headers, attacker_id = await _register(client)
-    victim_account = await _create_account(pool, victim_id)
-    await _insert_nav(pool, victim_account, date(2026, 9, 1), Decimal("1"))
-    own_account = await _create_account(pool, attacker_id)
-
-    cross = await client.get(
-        f"{BASE}/nav",
-        headers=attacker_headers,
-        params=_nav_params(victim_account, "2026-09-01", "2026-09-01"),
-    )
-    assert cross.status_code == 404
-    _assert_error_envelope(cross.json(), "RESOURCE_NOT_FOUND")
-
-    reversed_range = await client.get(
-        f"{BASE}/nav",
-        headers=attacker_headers,
-        params=_nav_params(own_account, "2026-09-02", "2026-09-01"),
-    )
-    assert reversed_range.status_code == 400
-    _assert_error_envelope(reversed_range.json(), "VALIDATION_INVALID_FIELD")
-
-    too_long = await client.get(
-        f"{BASE}/nav",
-        headers=attacker_headers,
-        params=_nav_params(own_account, "2025-01-01", "2026-09-01"),
-    )
-    assert too_long.status_code == 400
-
-
-# --- DEEPEN task-2993: failure-injection / 수치 성능 단언 / 게이트 적색 재현 ----
-
-
-class _OutageSnapshotRepository:
-    """모의 어댑터 예외 -- 커넥션 단절 등 인프라 장애를 흉내낸다. 도메인
-    예외(PositionNotFoundError 등)가 아니라 asyncpg 드라이버 예외라 전역
-    `Exception` 핸들러의 미분류(INTERNAL_ERROR) 경로를 탄다."""
-
-    async def get(self, conn, tenant_id, position_key):
-        raise asyncpg.PostgresConnectionError("simulated adapter outage")
-
-    async def upsert(self, conn, snapshot, expected_seq):
-        raise AssertionError("읽기 라우터가 upsert를 호출했다 — §9 LB-19 '쓰기 없음' 위반")
-
-    async def list_open(self, conn, tenant_id, account_id):
-        raise asyncpg.PostgresConnectionError("simulated adapter outage")
-
-
-async def test_list_positions_snapshot_adapter_outage_is_fail_closed_500(client, pool):
-    """failure-injection -- SnapshotRepository 어댑터가 커넥션 예외를 던지면
-    부분 데이터나 200을 흘리지 않고 500/INTERNAL_ERROR 봉투로 fail-closed
-    한다. 원인 예외 문자열은 로그에만 남고 응답 메시지에는 새지 않는다
-    (handlers.py `_handle_domain_or_unknown_exception`)."""
-    headers, tenant_id = await _register(client)
-    account_id = await _create_account(pool, tenant_id)
-    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
-
-    app.dependency_overrides[get_snapshot_repository] = lambda: _OutageSnapshotRepository()
-    try:
-        response = await client.get(BASE, headers=headers)
-    finally:
-        app.dependency_overrides.pop(get_snapshot_repository, None)
-
-    assert response.status_code == 500
-    body = response.json()
-    _assert_error_envelope(body, "INTERNAL_ERROR")
-    assert "PostgresConnectionError" not in body["message"]
-    assert "simulated adapter outage" not in body["message"]
-
-
-class _QueryCountingConnectionCtx:
-    """`pool.acquire()`의 async 컨텍스트 프록시 -- 실 connection에 query
-    logger를 달아 라우터가 이 요청 하나에 실제로 여는 SQL 왕복 수를 센다
-    (test_rebuild_snapshot.py f80af78e와 동일 기법)."""
-
-    def __init__(self, inner_ctx, sink: list[str]) -> None:
-        self._inner_ctx = inner_ctx
-        self._sink = sink
-        self._conn = None
-        self._log = None
-
-    async def __aenter__(self):
-        self._conn = await self._inner_ctx.__aenter__()
-        self._log = lambda record: self._sink.append(getattr(record, "query", ""))
-        self._conn.add_query_logger(self._log)
-        return self._conn
-
-    async def __aexit__(self, exc_type, exc, tb):
-        if self._conn is not None and self._log is not None:
-            self._conn.remove_query_logger(self._log)
-        return await self._inner_ctx.__aexit__(exc_type, exc, tb)
-
-
-class _QueryCountingPool:
-    def __init__(self, pool) -> None:
-        self._pool = pool
-        self.queries: list[str] = []
-
-    def acquire(self) -> _QueryCountingConnectionCtx:
-        return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
-
-
-_ACCOUNT_COUNT = 5
-_MAX_ROUND_TRIPS = _ACCOUNT_COUNT + 3  # 1(owned account ids) + N(list_open) + 여유분
-_MAX_LATENCY_MS = 3000.0
-
-
-@pytest.mark.perf
-async def test_list_positions_round_trip_and_latency_guard(client, pool):
-    """수치 성능 단언 -- `list_positions`는 계정별로 순차 `list_open` 왕복을
-    낸다(§9 LB-17 문서화된 N+1). 계정 수가 늘어도 왕복 수가 선형 상한
-    안에 있는지(회귀 가드)와, 공유 TEST_DATABASE_URL이 계속 자라는 환경에서도
-    버틸 넉넉한 지연 sanity 상한(절대 임계 대신, task-2959/2962/2970/2977과
-    동일 결정)을 함께 잰다."""
-    headers, tenant_id = await _register(client)
-    for _ in range(_ACCOUNT_COUNT):
-        account_id = await _create_account(pool, tenant_id)
-        await _open_position(
-            pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1")
-        )
-
-    counting_pool = _QueryCountingPool(pool)
-    app.dependency_overrides[get_pool] = lambda: counting_pool
-    try:
-        started = time.monotonic()
-        response = await client.get(BASE, headers=headers)
-        elapsed_ms = (time.monotonic() - started) * 1000
-    finally:
-        app.dependency_overrides.pop(get_pool, None)
-
-    assert response.status_code == 200
-    assert len(response.json()["data"]["items"]) == _ACCOUNT_COUNT
-    assert 0 < len(counting_pool.queries) <= _MAX_ROUND_TRIPS, counting_pool.queries
-    assert elapsed_ms <= _MAX_LATENCY_MS, elapsed_ms
 
 
 async def test_list_positions_closed_portfolio_scope_is_rejected_fail_closed(client, pool):
@@ -602,57 +206,6 @@ async def test_list_positions_closed_portfolio_scope_is_rejected_fail_closed(cli
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
 
 
-class _OutageEntityRepository:
-    """FA-6 실패주입 -- entities 저장소가 `resolve_portfolio_scope` 조회
-    도중 커넥션 예외를 던지는 인프라 장애를 흉내낸다(도메인 예외가 아니라
-    asyncpg 드라이버 예외). DEPTH 감사(task-2724)가 지적한 공백: 지금까지의
-    `portfolio_id` negative는 전부 "존재하지 않음/폐쇄됨" 같은 정상 입력
-    검증 거부였을 뿐, entities 저장소 자체가 죽는 경우는 흉내낸 적이 없었다."""
-
-    async def get_legal_entity(self, tenant_id, entity_id):
-        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
-
-    async def get_fund(self, tenant_id, fund_id):
-        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
-
-    async def get_portfolio(self, tenant_id, portfolio_id):
-        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
-
-    async def get_sub_account(self, tenant_id, sub_account_id):
-        raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
-
-
-async def test_list_positions_portfolio_id_entities_outage_is_fail_closed_500(client, pool):
-    """failure-injection -- `portfolio_id` 스코프 검증에 쓰는 entities
-    저장소가 커넥션 예외를 던지면, 이미 조회를 시작했다는 이유로 스코프
-    없이(또는 unscoped) 200을 흘리지 않고 500/INTERNAL_ERROR 봉투로
-    fail-closed 한다. 원인 예외 문자열은 응답 메시지에 새지 않는다."""
-    headers, tenant_id = await _register(client)
-    repo = PostgresEntityRepository(pool)
-    hierarchy = await build_hierarchy(pool, repo, tenant_id=tenant_id)
-    account_id = await _create_account(pool, tenant_id)
-    await _open_position(
-        pool,
-        tenant_id=tenant_id,
-        account_id=account_id,
-        quantity=Decimal("1"),
-        portfolio_id=hierarchy.portfolio.portfolio_id,
-    )
-
-    app.dependency_overrides[get_entity_repository] = lambda: _OutageEntityRepository()
-    try:
-        response = await client.get(
-            BASE, headers=headers, params={"portfolio_id": str(hierarchy.portfolio.portfolio_id)}
-        )
-    finally:
-        app.dependency_overrides.pop(get_entity_repository, None)
-
-    assert response.status_code == 500
-    body = response.json()
-    _assert_error_envelope(body, "INTERNAL_ERROR")
-    assert "PostgresConnectionError" not in body["message"]
-    assert "simulated entities adapter outage" not in body["message"]
-
 
 async def test_list_positions_portfolio_id_concurrent_mixed_tenants_do_not_cross_leak(client, pool):
     """D3증거 -- 서로 다른 tenant가 `portfolio_id`로 스코프한 `GET /positions`를
@@ -684,45 +237,3 @@ async def test_list_positions_portfolio_id_concurrent_mixed_tenants_do_not_cross
     for response in responses:
         assert response.status_code == 200
         assert len(response.json()["data"]["items"]) == 1
-
-
-@pytest.mark.perf
-async def test_list_positions_portfolio_id_p95_latency_stays_within_normalized_ceiling(
-    client, pool
-):
-    """수치 성능 단언 -- 공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에
-    절대 ms 임계 대신, 가벼운 baseline 호출 1건 대비 정규화한 상한만
-    게이트로 쓴다(task-2993/3009와 동일 교훈). `portfolio_id` 경로는
-    `resolve_portfolio_scope`가 추가하는 3회 라운드트립만큼 무변경 경로보다
-    비용이 늘어야 정상이므로, 그 고정 비용이 회귀로 자라는지 감시한다."""
-    headers, tenant_id = await _register(client)
-    repo = PostgresEntityRepository(pool)
-    hierarchy = await build_hierarchy(pool, repo, tenant_id=tenant_id)
-    account_id = await _create_account(pool, tenant_id)
-    await _open_position(
-        pool,
-        tenant_id=tenant_id,
-        account_id=account_id,
-        quantity=Decimal("1"),
-        portfolio_id=hierarchy.portfolio.portfolio_id,
-    )
-
-    async def _call() -> float:
-        started = time.monotonic()
-        response = await client.get(
-            BASE, headers=headers, params={"portfolio_id": str(hierarchy.portfolio.portfolio_id)}
-        )
-        elapsed = time.monotonic() - started
-        assert response.status_code == 200
-        return elapsed
-
-    baseline_elapsed = await _call()
-    samples = sorted([await _call() for _ in range(20)])
-    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
-
-    ceiling = baseline_elapsed * 5 + 0.05
-    assert p95 <= ceiling, (
-        f"GET /positions?portfolio_id=... p95 지연 {p95:.4f}s가 정규화 상한 "
-        f"{ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 초과했습니다 -- "
-        "resolve_portfolio_scope 라운드트립 회귀 의심"
-    )
