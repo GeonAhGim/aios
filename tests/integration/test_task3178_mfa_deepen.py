@@ -166,8 +166,10 @@ async def test_mfa_resetup_rejection_p95_latency_budget(client, perf_budget):
         code = totp_at(secret, frozen_now)
         await client.post("/auth/mfa/verify", json={"totp_code": code}, headers=headers)
 
-        fn = lambda: client.post("/auth/mfa/setup", headers=headers)
-        samples = await perf_budget.samples_async(lambda fn=fn: fn(), n=20)
+        async def _resetup_request():
+            return await client.post("/auth/mfa/setup", headers=headers)
+
+        samples = await perf_budget.samples_async(_resetup_request, n=20)
         for s in samples:
             assert s.result.status_code == 403
 
@@ -209,12 +211,15 @@ async def test_perf_budget_gate_actually_fails_when_rejection_path_stalls(
         # 이 회귀 시나리오에서는 거부 가드가 authenticate() 호출 "뒤"로
         # 밀려났다고 가정 — password를 줘서 그 경로를 타게 만든다.
         monkeypatch.setattr(AuthService, "authenticate", _stalled_authenticate)
-        fn = lambda: client.post(
-            "/auth/mfa/setup",
-            json={"password": STRONG_PASSWORD, "totp_code": code},
-            headers=headers,
-        )
-        samples = await perf_budget.samples_async(lambda fn=fn: fn(), n=5)
+
+        async def _stalled_request():
+            return await client.post(
+                "/auth/mfa/setup",
+                json={"password": STRONG_PASSWORD, "totp_code": code},
+                headers=headers,
+            )
+
+        samples = await perf_budget.samples_async(_stalled_request, n=5)
 
     with pytest.raises(AssertionError):
         assert max(s.wall_ms for s in samples) < _REJECTION_BUDGET_MS
