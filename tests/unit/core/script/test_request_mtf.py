@@ -15,20 +15,17 @@ D2: negative test >=3(base_timeframe 누락, symbol 불일치, 배수 아닌
 부재 재현 → 현재 구현이 이를 고쳤음을 대조). 백테스트=PAPER 패리티는
 `test_request_backtest_paper_parity`.
 """
-from __future__ import annotations
 
-import time
+from __future__ import annotations
 
 import pytest
 
 from src.core.script.grammar.parser import parse
 from src.core.script.ir import ScriptLowerError, lower_program, to_bytes
 from src.core.script.runtime import ScriptRuntimeError, Series, execute
+from tests.conftest import PerfBudget
 
-_BASE = (
-    "input close: series<float> = 0\n"
-    'let higher = request("BTCUSDT", "5m", close)\n'
-)
+_BASE = 'input close: series<float> = 0\nlet higher = request("BTCUSDT", "5m", close)\n'
 
 
 def _close(n: int) -> Series:
@@ -45,9 +42,7 @@ def test_request_resamples_using_only_confirmed_higher_timeframe_bars() -> None:
     )
     # ratio=5: bar 0..4는 아직 첫 5m 버킷이 안 닫혀 close[0]로 대체,
     # bar 5..9는 첫 버킷(close[4])이 닫힌 값, bar 10..14는 두 번째 버킷(close[9]).
-    assert result.bindings["higher"] == Series(
-        (0.0,) * 5 + (4.0,) * 5 + (9.0,) * 5
-    )
+    assert result.bindings["higher"] == Series((0.0,) * 5 + (4.0,) * 5 + (9.0,) * 5)
 
 
 def test_request_same_timeframe_as_base_is_previous_confirmed_bar() -> None:
@@ -109,9 +104,7 @@ def test_request_timeframe_shorter_than_base_is_rejected() -> None:
     source = 'input close: series<float> = 0\nlet r = request("BTCUSDT", "1m", close)'
     ir = lower_program(parse(source))
     with pytest.raises(ScriptRuntimeError, match="정수배"):
-        execute(
-            ir, bar_count=5, inputs={"close": _close(5)}, symbol="BTCUSDT", base_timeframe="5m"
-        )
+        execute(ir, bar_count=5, inputs={"close": _close(5)}, symbol="BTCUSDT", base_timeframe="5m")
 
 
 # ---- 실패 주입: 내부 expr이 스칼라로 접혀도 시리즈 차원을 되살림 ----
@@ -137,29 +130,27 @@ def test_scalar_inner_expr_is_broadcast_before_resample() -> None:
 
 
 @pytest.mark.perf
-def test_request_heavy_script_still_compiles_within_budget() -> None:
+def test_request_heavy_script_still_compiles_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산은 300ms. M2-2a가 확인한
     parse()+check_resources() 예산과 별개로, 이 리프가 추가한 `lower_program`
     경로(request() 8개 lowering 포함)가 예산 절반(150ms) 안에 머무는지 30회
     반복 p95로 재확인한다 — `Request` IR 명령 추가가 lowering을 선형 이상으로
     느리게 만들지 않았음을 보인다."""
-    requests = "\n".join(
-        f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8)
-    )
+    requests = "\n".join(f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8))
     lets = "\n".join(f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(50))
     source = "input close: series<float> = 0\n" + requests + "\n" + lets
-    budget_sec = 0.15
+    budget_ms = 150.0  # 0.15 sec → ms 단위 일치
 
-    samples: list[float] = []
-    for _ in range(30):
-        start = time.perf_counter()
-        lower_program(parse(source))
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    # batch=5: process_time의 15.6ms 틱이 빠른 lowering 호출에 0/15.6만 나오지
+    # 않도록 묶는다. samples.cpu_ms 단위 = ms.
+    samples = perf_budget.samples(lambda: lower_program(parse(source)), n=30, warmup=0, batch=5)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
 
-    print(f"[M2-2b request lowering] compile p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    print(f"[M2-2b request lowering] compile p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
 
 
 # ---- 게이트 적색 재현: M2-2a 시점 RequestExpr lowering 부재 회귀 가드 ----
@@ -215,9 +206,7 @@ def test_request_backtest_paper_parity() -> None:
     assert to_bytes(ir_for_backtest) == to_bytes(ir_for_paper)
 
     close = Series.of_floats([1, 2, 3, 10, 10, 10, 1, 1, 1, 1, 20, 20, 20, 20, 20])
-    kwargs = dict(
-        bar_count=15, inputs={"close": close}, symbol="BTCUSDT", base_timeframe="1m"
-    )
+    kwargs = dict(bar_count=15, inputs={"close": close}, symbol="BTCUSDT", base_timeframe="1m")
 
     backtest_result = execute(ir_for_backtest, **kwargs)
     paper_result = execute(ir_for_paper, **kwargs)
