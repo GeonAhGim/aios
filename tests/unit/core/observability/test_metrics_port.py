@@ -6,12 +6,15 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §9 PLT-04.
 
 from __future__ import annotations
 
-import time
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.core.observability.metric_names import API_REQUEST_COUNT_TOTAL
 from src.core.observability.metrics import NullMetrics, PrometheusMetrics, metrics, set_metrics
+
+if TYPE_CHECKING:
+    from tests.conftest import PerfBudget
 
 
 @pytest.fixture(autouse=True)
@@ -161,7 +164,9 @@ def test_safe_counter_catches_metrics_port_exception() -> None:
 
 
 @pytest.mark.perf
-def test_prometheus_metrics_counter_increments_within_perf_budget() -> None:
+def test_prometheus_metrics_counter_increments_within_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: `_get_or_create`가 이름당 1회만 등록한다면(캐시 적중) 5,000회
     반복이 300ms 안에 끝나야 한다. 캐시가 없다면 두 번째 호출부터 동일 이름의 중복
     등록으로 `CollectorRegistry`가 즉시 `ValueError`를 던져 이 테스트 자체가 실패한다
@@ -169,11 +174,16 @@ def test_prometheus_metrics_counter_increments_within_perf_budget() -> None:
     """
     adapter = PrometheusMetrics()
     iterations = 5000
-    start = time.perf_counter()
-    for _ in range(iterations):
-        adapter.counter("aios.test.perf.count_total")
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 300, f"{iterations}회 counter() 호출 {elapsed_ms:.1f}ms — 상한 300ms 초과"
+
+    def increment_counters() -> None:
+        for _ in range(iterations):
+            adapter.counter("aios.test.perf.count_total")
+
+    # 5,000회 묶음을 16번 측정해 CPU 클록 틱 오차를 줄인다.
+    # sample의 cpu_ms는 묶음 1회당 ms이므로 기존 300ms 예산과 단위가 같다.
+    perf_budget.assert_within(
+        increment_counters, budget_ms=300, n=3, batch=16, label="5000 counter calls"
+    )
 
 
 def test_safe_observe_catches_metrics_port_exception() -> None:
