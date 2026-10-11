@@ -321,8 +321,8 @@ EXCEPTION_MAP_FOUNDATION: list[tuple[type[Exception], ErrorCode]] = [
 ]
 
 STATUS_OVERRIDE_FOUNDATION: list[tuple[type[Exception], int]] = [
-    (MethodologyNotFoundError, status.HTTP_422_UNPROCESSABLE_ENTITY),
-    (DisclosureRetiredError, status.HTTP_422_UNPROCESSABLE_ENTITY),
-    (BacktestRunError, status.HTTP_422_UNPROCESSABLE_ENTITY),
+    (MethodologyNotFoundError, status.HTTP_422_UNPROCESSABLE_CONTENT),
+    (DisclosureRetiredError, status.HTTP_422_UNPROCESSABLE_CONTENT),
+    (BacktestRunError, status.HTTP_422_UNPROCESSABLE_CONTENT),
     (ScreenTimeoutError, status.HTTP_408_REQUEST_TIMEOUT),
 ]
