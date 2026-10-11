@@ -13,13 +13,16 @@ DEEPEN(task-2913, task-2727 감사 후속): D2 하한 보강 — 실패 주입 1
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import pytest
 
 from src.core.script.analysis.lookahead import ScriptLookaheadError, check_lookahead, check_source
 from src.core.script.grammar.lexer import Token, TokenKind, tokenize
+
+if TYPE_CHECKING:
+    from tests.conftest import PerfBudget
 
 # ---- negative: (a) 음수 인덱스 ----
 
@@ -164,25 +167,24 @@ def test_truncated_token_stream_from_upstream_failure_fails_closed() -> None:
 
 
 @pytest.mark.perf
-def test_static_detection_latency_p95_within_compile_budget_slice() -> None:
+def test_static_detection_latency_p95_within_compile_budget_slice(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: ADR-2026-09-09-C 축별 성능 예산 "DSL 컴파일 300ms"
     중 lookahead 정적 검출 단계 몫을 50ms로 상한 잡는다(나머지는 렉스/파스/
     타입체크 몫 — 이 리프가 전체 예산을 다 써버리면 안 된다). 500문 스크립트
-    30회 반복의 p95로 1회성 지터를 흡수한다."""
+    100회씩 묶은 CPU 측정 30개의 호출당 p95로 타이머 양자화 오차를 줄인다."""
     source = "\n".join(f"let v{i} = close[{i % 5}] + close[0]" for i in range(500))
     tokens = tokenize(source)
     budget_sec = 0.05
+    budget_ms = budget_sec * 1000
 
-    samples: list[float] = []
-    for _ in range(30):
-        start = time.perf_counter()
-        check_lookahead(tokens)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    samples = perf_budget.samples(lambda: check_lookahead(tokens), n=30, batch=100)
+    cpu_ms = sorted(sample.cpu_ms for sample in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
 
-    print(f"[DSL-5 lookahead] 500-stmt p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    print(f"[DSL-5 lookahead] 500-stmt p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
 
 
 # ---- 게이트 적색 재현: security() 네임스페이스 우회 회귀 가드 ----
