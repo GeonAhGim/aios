@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import random
 import re
 import subprocess
 import sys
@@ -51,6 +52,22 @@ from dotenv import dotenv_values
 ROOT = Path(__file__).resolve().parents[1]
 PREFIX = "aios_test_"
 _NAME_RE = re.compile(r"^[a-z0-9_]{1,40}$")
+
+
+async def _connect_with_retry(dsn: str) -> asyncpg.Connection:
+    """Retry initial transport failures only; never replay database mutations.
+
+    Match tests/support/db.py's five attempts and linear jitter ceiling.
+    Authentication/configuration failures remain immediate errors.
+    """
+    for attempt in range(5):
+        try:
+            return await asyncpg.connect(dsn)
+        except (OSError, asyncpg.ConnectionDoesNotExistError, asyncpg.CannotConnectNowError):
+            if attempt == 4:
+                raise
+            await asyncio.sleep(random.uniform(0, 0.5 * (attempt + 1)))  # noqa: S311
+    raise AssertionError("unreachable")
 
 
 def _server_url() -> str:
@@ -91,7 +108,7 @@ async def _ensure_database(
     `InvalidCatalogNameError`로 죽었다. `migrate_url`을 넘기면 마이그레이션을
     advisory lock을 쥔 채로(락 해제 전에) 실행해 그 창을 없앤다.
     """
-    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
+    admin = await _connect_with_retry(_asyncpg_dsn(_with_database(server_url, "postgres")))
     try:
         await admin.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", database)
         try:
@@ -121,7 +138,7 @@ async def _drop_database(server_url: str, database: str) -> bool:
     """대상 DB를 지운다(존재하지 않으면 아무 일도 하지 않는다). 반환값: 실제로 지웠는지.
     `_ensure_database`와 같은 advisory lock으로 직렬화 — 같은 이름을 향한 동시 --reset과
     경합해도 DROP 순서가 꼬이지 않는다."""
-    admin = await asyncpg.connect(_asyncpg_dsn(_with_database(server_url, "postgres")))
+    admin = await _connect_with_retry(_asyncpg_dsn(_with_database(server_url, "postgres")))
     try:
         await admin.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", database)
         try:
@@ -177,7 +194,7 @@ async def _list_test_databases(server_url: str) -> list[tuple[str, int]]:
     테스트 예산(LIST_SUBPROCESS_BUDGET_S)을 올리는 대신, DB 증가에 무관하게 --list
     자체가 유한 시간에 끝나도록 만드는 근본 수정이다(DECISION_GUIDELINES B-2)."""
     dsn = _asyncpg_dsn(_with_database(server_url, "postgres"))
-    admin = await asyncpg.connect(dsn)
+    admin = await _connect_with_retry(dsn)
     try:
         names = [
             r["datname"]
