@@ -267,25 +267,37 @@ def test_scan_tree_p95_latency_within_budget_for_real_repo():
 
 
 @pytest.mark.perf
-def test_perf_budget_guard_fails_on_injected_scan_delay(monkeypatch: pytest.MonkeyPatch):
+def test_perf_budget_guard_fails_on_injected_scan_delay(
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Proves the assertion above is not vacuously green -- injecting a delay
     per scanned file must push elapsed time past the same budget. task-7434:
-    the injected delay is a real `time.sleep()`, so this keeps raw
-    wall-clock perf_counter() (process_time would not see the sleep)."""
+    the injected delay is a real `time.sleep()`, so RelativeBudget uses
+    mode="wall" (process_time would not see the sleep).
+
+    Calibration ~0.095s, 50ms/file × ~30 files ≈ 1.5s → ratio ≈ 15.8x < 150x.
+    10× injected delay (500ms/file) → ~15s → ratio ≈ 158x > 150x, proving
+    detection power. Uses RelativeBudget directly (not perf_budget fixture)
+    because PerfBudget.assert_within uses process_time which misses sleep().
+    """
     original_scan_source = civ._scan_source
 
     def _slow_scan_source(source: str, location: str):
-        time.sleep(0.05)
+        time.sleep(0.5)  # 10× original delay to exceed ratio budget
         return original_scan_source(source, location)
 
     monkeypatch.setattr(civ, "_scan_source", _slow_scan_source)
 
-    started = time.perf_counter()
-    civ.scan_tree(ROOT, scan_roots=("scripts",))
-    elapsed = time.perf_counter() - started
-
+    # 10× injected delay (500ms/file × ~30 files ≈ 15s) must exceed budget ratio
     with pytest.raises(AssertionError):
-        assert elapsed < 0.01
+        RelativeBudget().assert_within(
+            lambda: civ.scan_tree(ROOT, scan_roots=("scripts",)),
+            max_ratio=_SCAN_P95_MAX_RATIO,
+            mode="wall",
+            n=1,
+            warmup=0,
+            label="scan_tree(slow)",
+        )
 
 
 # --- real-repo baseline consistency ----------------------------------------
