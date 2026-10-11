@@ -5,7 +5,6 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from threading import Barrier
-from time import perf_counter
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -99,27 +98,29 @@ def test_empty_corrupt_and_wrong_schema(tmp_path):
 
 @pytest.mark.perf
 @pytest.mark.timeout(600)
-def test_million_ticks_bounded_arrow_memory(tmp_path: Path):
+def test_million_ticks_bounded_arrow_memory(tmp_path: Path, perf_budget):
     store = TickParquetStorage(tmp_path, batch_size=65536)
     tick = record()
     baseline = pa.total_allocated_bytes()
-    started = perf_counter()
-    store.write_day(VENUE, ID, DAY, (tick for _ in range(1_000_000)), kind="trades")
-    write_seconds = perf_counter() - started
-    assert write_seconds < 200, write_seconds
-    started = perf_counter()
-    total = 0
-    for batch in store.read_columns(VENUE, ID, DAY, kind="trades"):
-        assert batch.num_rows <= 65536
-        assert batch.nbytes < 32 * 1024 * 1024
-        assert pa.total_allocated_bytes() - baseline < 64 * 1024 * 1024
-        for name, value in tick.model_dump(mode="json").items():
-            assert batch.column(name).unique().to_pylist() == [str(value)]
-        total += batch.num_rows
-    assert total == 1_000_000
-    read_seconds = perf_counter() - started
-    assert read_seconds < 20, read_seconds
-    print(f"million ticks: write={write_seconds:.3f}s read={read_seconds:.3f}s")
+
+    def write_phase():
+        store.write_day(VENUE, ID, DAY, (tick for _ in range(1_000_000)), kind="trades")
+
+    perf_budget.assert_within(write_phase, budget_ms=200_000)
+
+    def read_phase():
+        total = 0
+        for batch in store.read_columns(VENUE, ID, DAY, kind="trades"):
+            assert batch.num_rows <= 65536
+            assert batch.nbytes < 32 * 1024 * 1024
+            assert pa.total_allocated_bytes() - baseline < 64 * 1024 * 1024
+            for name, value in tick.model_dump(mode="json").items():
+                assert batch.column(name).unique().to_pylist() == [str(value)]
+            total += batch.num_rows
+        assert total == 1_000_000
+
+    perf_budget.assert_within(read_phase, budget_ms=20_000)
+
     projected = next(store.read_columns(VENUE, ID, DAY, kind="trades", columns=["ts_event"]))
     assert projected.schema.names == ["ts_event"]
 
