@@ -1,10 +1,10 @@
-import time
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
+from tests.conftest import PerfBudget
 
 
 def _valid_kwargs(**overrides):
@@ -71,11 +71,18 @@ def test_transition_dependency_failure_propagates_fail_closed(monkeypatch):
 
 
 @pytest.mark.perf
-def test_fsm_strategy_config_construction_throughput():
-    iterations = 500
-    start = time.perf_counter()
-    for _ in range(iterations):
-        FSMStrategyConfig(**_valid_kwargs())
-    elapsed = time.perf_counter() - start
-    per_op_ms = (elapsed / iterations) * 1000
-    assert per_op_ms < 5.0
+def test_fsm_strategy_config_construction_throughput(perf_budget: PerfBudget) -> None:
+    """FSMStrategyConfig construction throughput — budget: 5 ms/op (process_time).
+
+    `perf_budget.assert_within` uses `time.process_time()` (not wall-clock
+    `perf_counter`) so CI xdist scheduler noise and other-process CPU contention
+    do not inflate the measurement. `batch=16` groups fast calls so the total
+    time exceeds the ~15.6 ms process_time tick, reducing quantisation error.
+    """
+    sample = perf_budget.assert_within(
+        lambda: FSMStrategyConfig(**_valid_kwargs()),
+        budget_ms=5.0,
+        n=5,
+        batch=16,
+    )
+    assert sample.cpu_ms < 5.0
