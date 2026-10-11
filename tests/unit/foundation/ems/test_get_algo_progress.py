@@ -8,7 +8,6 @@ D2 floor: >=3 negative tests, 1 failure-injection, 1 performance assertion,
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -214,11 +213,19 @@ def test_get_algo_progress_remaining_qty_is_exact_decimal_not_float_imprecise() 
 
 
 @pytest.mark.perf
-def test_get_algo_progress_stays_fast_over_max_slice_count() -> None:
+def test_get_algo_progress_stays_fast_over_max_slice_count(
+    perf_budget,
+) -> None:
     """Performance assertion -- worst-case slice count (500, EM-8~11's own
     `_MAX_SLICE_COUNT`) must resolve in well under human-perceptible latency;
     threshold generous to avoid CI flakiness while still catching an O(n^2)
-    regression in the pure computation."""
+    regression in the pure computation.
+
+    Uses `perf_budget.sample(batch=N)` so the total time spans multiple
+    ``time.process_time()`` ticks (15.6 ms on Windows) and the per-call
+    estimate is not quantised to 0/15.6 ms.  Budget is 50 ms (500 slices
+    must stay fast).
+    """
     parent_id = uuid4()
     children = [_child(parent_id, i, Decimal("1")) for i in range(500)]
     plan = AlgoRunPlan(
@@ -227,10 +234,14 @@ def test_get_algo_progress_stays_fast_over_max_slice_count() -> None:
         submitted_slice_seqs=set(range(0, 500, 2)),
     )
 
-    started = time.perf_counter()
-    progress = get_algo_progress(plan, parent_id=parent_id)
-    elapsed = time.perf_counter() - started
+    sample = perf_budget.sample(
+        lambda: get_algo_progress(plan, parent_id=parent_id),
+        batch=200,
+    )
+    progress = sample.result
 
     assert progress.total_slices == 500
     assert progress.submitted_slices == 250
-    assert elapsed < 0.05, f"get_algo_progress took {elapsed:.4f}s for 500 slices"
+    assert sample.cpu_ms < 50, (
+        f"get_algo_progress took {sample.cpu_ms:.3f}ms per call (batch=200) — budget 50ms"
+    )
