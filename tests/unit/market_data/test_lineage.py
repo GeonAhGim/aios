@@ -17,10 +17,10 @@ task-1136(QA): `_canonical_json`이 재사용 `JSONEncoder`로 바뀐 뒤에도
 해시 규칙은 `hash_chain`과 공유하는 계약이라 값이 바뀌면 저장된 해시
 (P3 WORM)와 어긋나므로, 어떤 "최적화"가 바이트를 바꾸면 여기서 실패해야 한다.
 """
+
 from __future__ import annotations
 
 import random
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -35,6 +35,7 @@ from src.foundation.market_data.domain.lineage import (
     batch_hash,
     request_fingerprint,
 )
+from tests.conftest import PerfBudget
 
 
 def _candle(open_time: datetime, close: str) -> CandleRecord:
@@ -130,7 +131,7 @@ def test_batch_hash_streaming_matches_reference_for_empty_and_singleton() -> Non
 
 
 @pytest.mark.perf
-def test_batch_hash_large_batch_stays_order_independent() -> None:
+def test_batch_hash_large_batch_stays_order_independent(perf_budget: PerfBudget) -> None:
     """task-1111(esc-ci-8e93e475afa9 후속) 실측: DB 없이 순수 함수만으로도
     `batch_hash` 대량 배치 비용을 관측 가능하게 남긴다. 실측 결과 지배적
     비용은 `_canonical_json`의 레코드별 `model_dump(mode="json")` +
@@ -145,19 +146,20 @@ def test_batch_hash_large_batch_stays_order_independent() -> None:
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     records = [_random_candle(rng, base) for _ in range(20_000)]
 
-    started = time.perf_counter()
-    forward = batch_hash(records)
-    elapsed = time.perf_counter() - started
+    # task-11808: raw `time.perf_counter()` → `perf_budget.sample(batch=N)` 전환.
+    # `process_time()` Windows 틱(~15.6ms)을 극복하기 위해 batch=10 으로 묶어
+    # 총 시간을 틱 수 배로 늘린 뒤 batch 로 나눈다(단위: ms).
+    sample = perf_budget.sample(lambda: batch_hash(records), batch=10)
     print(
-        f"\nbatch_hash latency (n=20000, no DB): {elapsed:.4f}s "
-        f"({elapsed / len(records) * 1e6:.2f}us/record)"
+        f"\nbatch_hash latency (n=20000, no DB): cpu={sample.cpu_ms:.3f}ms "
+        f"({sample.cpu_ms / len(records) * 1e6:.2f}us/record)"
     )
 
     shuffled = list(records)
     rng.shuffle(shuffled)
-    assert batch_hash(shuffled) == forward
+    assert batch_hash(shuffled) == batch_hash(records)
     # task-1136: 이 규모에서도 옛 구현(json.dumps 직접 호출 + join)과 바이트 동일.
-    assert _batch_hash_reference(records) == forward
+    assert _batch_hash_reference(records) == batch_hash(records)
 
 
 def _fixed_candle(day: int, close: str) -> CandleRecord:
@@ -168,8 +170,14 @@ def _fixed_candle(day: int, close: str) -> CandleRecord:
     )
     at = datetime(2026, 1, day, tzinfo=timezone.utc)
     return CandleRecord(
-        key=key, open_time=at, close_time=at, open=Decimal(close), high=Decimal(close),
-        low=Decimal(close), close=Decimal(close), volume=Decimal("1"),
+        key=key,
+        open_time=at,
+        close_time=at,
+        open=Decimal(close),
+        high=Decimal(close),
+        low=Decimal(close),
+        close=Decimal(close),
+        volume=Decimal("1"),
     )
 
 
@@ -207,8 +215,12 @@ def test_canonical_json_matches_json_dumps_reference() -> None:
         assert _canonical_json(record) == _canonical_json_reference(record)
 
     plain = {
-        "z": Decimal("1.50"), "a": None, "m": {"y": [1, 2.5, "x"], "b": base},
-        "한글": "값", "id": uuid4(), "nested": {"d": Decimal("-0.001")},
+        "z": Decimal("1.50"),
+        "a": None,
+        "m": {"y": [1, 2.5, "x"], "b": base},
+        "한글": "값",
+        "id": uuid4(),
+        "nested": {"d": Decimal("-0.001")},
     }
     assert _canonical_json(plain) == _canonical_json_reference(plain)
     assert _canonical_json([]) == _canonical_json_reference([]) == "[]"
