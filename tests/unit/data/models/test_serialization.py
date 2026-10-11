@@ -120,12 +120,13 @@ def test_encoder_propagates_superclass_failure(monkeypatch):
 
 
 @pytest.mark.perf
-def test_perf_serialize_1000_decimals():
+def test_perf_serialize_1000_decimals(perf_budget):
     """performance: 1000 Decimal fields must serialise under 50 ms."""
-    import time
-
     payload = {f"field_{i}": Decimal(f"{i}.99") for i in range(1000)}
-    start = time.perf_counter()
-    json.dumps(payload, cls=DecimalSafeEncoder)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 50, f"Serialization took {elapsed_ms:.1f}ms (budget: 50ms)"
+
+    def serialize():
+        return json.dumps(payload, cls=DecimalSafeEncoder)
+
+    perf_budget.assert_within(
+        serialize, budget_ms=50, n=5, warmup=1, batch=8, label="serialize_1000_decimals"
+    )
