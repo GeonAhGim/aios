@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md sec.9 RD-11
 DoD ("빈도·단위·발표지연 정규화").
 """
+
 from __future__ import annotations
 
 import time
@@ -22,6 +23,7 @@ from src.foundation.research_data.domain.macro_series import (
     normalize_unit,
     period_end,
 )
+from tests.conftest import PerfBudget
 
 # --- normalize_unit -----------------------------------------------------
 
@@ -207,6 +209,7 @@ def test_normalize_macro_observation_rejects_period_frequency_mismatch() -> None
 
 # --- failure injection: a fabricated frequency enum value the module never
 
+
 def test_period_end_fails_closed_for_unsupported_frequency_value() -> None:
     """Failure injection -- `object.__new__` fabricates a `MacroFrequency`
     member that bypasses every branch in `period_end`, exercising its
@@ -225,20 +228,70 @@ def test_period_end_fails_closed_for_unsupported_frequency_value() -> None:
 
 
 @pytest.mark.perf
-def test_normalize_macro_observation_throughput_floor() -> None:
+def test_normalize_macro_observation_throughput_floor(
+    perf_budget: PerfBudget,
+) -> None:
+    """Raw ``time.perf_counter()`` → ``perf_budget.sample(batch=2000)`` 전환.
+
+    예산: 2 000회 / 5 000회·초⁻¹ = 400ms 총소요 → 호출당 0.2ms.
+    ``process_time()`` 해상도(~15.6ms) 때문에 단일 호출은 0/15.6만 나오므로
+    batch=2000로 묶어 평균을 추정한다.
+    """
+
     iterations = 2_000
-    started = time.perf_counter()
-    for i in range(iterations):
-        normalize_macro_observation(
-            source_id="ECOS",
-            series_id=f"722Y001:{i:07d}",
-            raw_period="202401",
-            frequency=MacroFrequency.MONTHLY,
-            raw_value="3.5",
-            raw_unit="%",
-            seasonally_adjusted=False,
-            publication_lag_days=20,
-        )
-    elapsed = time.perf_counter() - started
-    throughput = iterations / elapsed
-    assert throughput > 5_000, f"normalize_macro_observation throughput too low: {throughput:.0f}/s"
+
+    def _batch() -> None:
+        for i in range(iterations):
+            normalize_macro_observation(
+                source_id="ECOS",
+                series_id=f"722Y001:{i:07d}",
+                raw_period="202401",
+                frequency=MacroFrequency.MONTHLY,
+                raw_value="3.5",
+                raw_unit="%",
+                seasonally_adjusted=False,
+                publication_lag_days=20,
+            )
+
+    sample = perf_budget.sample(_batch, batch=1)
+    # batch=1 → sample.cpu_ms는 2000회 총 시간(= 호출당 아님). 예산 0.2ms는
+    # 호출당 예산이므로 총 예산으로 환산: 0.2 * 2000 = 400ms
+    assert sample.cpu_ms < 400.0, (
+        f"normalize_macro_observation total cpu_ms {sample.cpu_ms:.1f} exceeds "
+        f"400ms budget ({iterations} calls)"
+    )
+
+
+@pytest.mark.perf
+def test_normalize_macro_observation_throughput_floor_fails_with_10x_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """Failure injection -- 10배 지연 주입 시 적색 확인.
+
+    ``time.sleep(0.001)``(1ms)를 각 호출에 추가하면 호출당 평균이 0.2→1.2ms로
+    늘어나 총 2400ms가 되어 400ms 예산을 초과한다. 이 지연을 제거하면 테스트는
+    다시 녹색이 된다(원래 테스트 참조).
+    """
+
+    iterations = 2_000
+
+    def _batch_delayed() -> None:
+        for i in range(iterations):
+            normalize_macro_observation(
+                source_id="ECOS",
+                series_id=f"722Y001:{i:07d}",
+                raw_period="202401",
+                frequency=MacroFrequency.MONTHLY,
+                raw_value="3.5",
+                raw_unit="%",
+                seasonally_adjusted=False,
+                publication_lag_days=20,
+            )
+            time.sleep(0.001)  # 1ms 지연 주입
+
+    sample = perf_budget.sample(_batch_delayed, batch=1)
+    # time.sleep 는 CPU 시간을 늘리지 않으므로 wall_ms 로 단언.
+    # 2000회 × 1ms = 2000ms wall-clock → 400ms wall 예산을 크게 초과
+    assert sample.wall_ms > 400.0, (
+        f"delay injection failed to exceed budget: {sample.wall_ms:.1f}ms"
+    )
