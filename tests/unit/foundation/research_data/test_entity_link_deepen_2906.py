@@ -24,7 +24,6 @@ task-2726) D1 -> D2 증빙.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from unittest.mock import Mock
 from uuid import uuid4
@@ -39,6 +38,7 @@ from src.foundation.research_data.domain.entity_link import (
     is_valid_isin,
     link_item,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _VALID_ISIN = "KR7005930003"  # 미검증: 삼성전자 보통주 ISIN(공개 문헌 인용, 거래소 원문 대조 없음)
@@ -103,11 +103,12 @@ def test_link_item_crash_on_first_key_does_not_silently_fall_through_to_second_k
 
 
 @pytest.mark.perf
-def test_extract_entity_key_throughput_meets_latency_budget() -> None:
+def test_extract_entity_key_throughput_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """순수 함수(I/O 없음)이므로 대량 처리도 빨라야 한다 -- OpenDART 배치
     수집 시 하루 수만 건의 `instruments` 원문을 분류해야 하는 실제 부하를
     반영한 예산이다."""
-    budget_sec = 1.0  # 실측 로컬 <0.05s, CI 편차 감안
     samples = (
         "005930",
         "1101110097494",
@@ -119,16 +120,11 @@ def test_extract_entity_key_throughput_meets_latency_budget() -> None:
     )
     n_repeats = 20_000 // len(samples)
 
-    start = time.perf_counter()
-    for _ in range(n_repeats):
-        for raw in samples:
-            extract_entity_key(raw)
-    elapsed = time.perf_counter() - start
-
-    total = n_repeats * len(samples)
-    print(f"[RD-5 extract_entity_key] {total}건 분류 {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"extract_entity_key {total}건 처리가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    perf_budget.assert_within(
+        lambda: [extract_entity_key(raw) for raw in samples],
+        budget_ms=1000.0,
+        batch=n_repeats,
+        label="extract_entity_key",
     )
 
 
