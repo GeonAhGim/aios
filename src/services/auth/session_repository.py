@@ -1,12 +1,14 @@
-"""auth_session CRUD — refresh 회전·재사용 감지·revoke.
+"""auth_session CRUD — refresh rotation, reuse detection, and revoke.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2 M3 DDL, §3.4, §9 PLT-23.
 
-`rotate_refresh()`는 105번 표준의 `conditional_update()`(`expected_state_column`)를
-그대로 쓴다 — 호출자가 마지막으로 읽은(=클라이언트가 보낸) refresh 평문의 해시를
-`expected_hash`로 넘기면, 그 사이 다른 요청이 이미 회전시켰을 경우 0행이 RETURNING
-되어 `ConcurrencyConflictError`가 난다. 이 리프에서는 그 신호를 "동시성 충돌"이
-아니라 "탈취된 refresh 토큰의 재사용"으로 해석해 세션을 즉시 revoke한다(§3.4).
+`rotate_refresh()` uses the standard-105 `conditional_update()` (`expected_state_column`)
+as-is — when the caller passes the hash of the refresh plaintext last read
+(=sent by the client) as `expected_hash`, and another request has already
+rotated in the meantime, zero rows are RETURNING and a
+`ConcurrencyConflictError` is raised. This module interprets that signal not
+as "concurrency conflict" but as "replay of a stolen refresh token" and
+immediately revokes the session (§3.4).
 
 task-9420 F4 audit fix — the WHERE now also checks `revoked_at IS NULL` (active)
 and `expires_at > now()` (not expired), not just `refresh_hash` equality. If a
@@ -51,10 +53,10 @@ class Session:
 
 
 class RefreshReuseDetected(Exception):
-    """이미 회전되었거나 존재하지 않는 refresh_hash 재사용 시도.
+    """Replay of a refresh_hash that was already rotated or does not exist.
 
-    호출자(§9 PLT-24 `refresh.py`)는 이 예외를 401로 매핑하고 재로그인을
-    요구해야 한다 — 세션은 이미 이 함수 안에서 revoke됐다."""
+    The caller (§9 PLT-24 `refresh.py`) should map this to 401 and require
+    re-login — the session has already been revoked inside this function."""
 
 
 class PrincipalMismatchError(Exception):
@@ -152,7 +154,7 @@ def verify_principal_binding(
     ):
         raise PrincipalMismatchError(
             f"session_id={session.id}: claims(sub={user_id}, tid={tenant_id}, "
-            f"auth_level={auth_level})가 세션 소유자와 일치하지 않습니다"
+            f"auth_level={auth_level}) do not match the session owner"
         )
 
 
@@ -215,24 +217,25 @@ async def rotate_refresh(
         )
         if current is not None and current["revoked_at"] is not None:
             raise RefreshSessionRevokedError(
-                f"session_id={session_id}: 회전 시도 중 다른 요청이 먼저 세션을 revoke했습니다"
+                f"session_id={session_id}: "
+                "another request already revoked the session during rotation"
             ) from exc
         if current is not None and current["expires_at"] <= now:
             await revoke(conn, session_id, reason="expired")
             raise RefreshSessionExpiredMidRotationError(
-                f"session_id={session_id}: 회전 시도 중 절대 만료 시각을 넘겼습니다"
+                f"session_id={session_id}: absolute expiry passed during rotation"
             ) from exc
         await revoke(conn, session_id, reason="refresh_reuse")
         await _record_reuse_detected_audit(conn, session_id, current)
         raise RefreshReuseDetected(
-            f"session_id={session_id}: refresh_hash 재사용 감지 — 세션을 revoke했습니다"
+            f"session_id={session_id}: refresh_hash replay detected — session has been revoked"
         ) from exc
     return _row_to_session(row)
 
 
 async def revoke(conn: asyncpg.Connection, session_id: UUID, *, reason: str) -> None:
-    """`revoked_at IS NULL`인 행만 갱신 — 이미 revoked면 조용히 no-op(멱등, §3.4:
-    "0행이면 이미 revoked, 에러 아님")."""
+    """Update only rows where `revoked_at IS NULL` — quiet no-op if already
+    revoked (idempotent, §3.4: "0 rows means already revoked, not an error")."""
     await conn.execute(
         "UPDATE auth_session SET revoked_at = now(), revoke_reason = $2 "
         "WHERE id = $1 AND revoked_at IS NULL",
