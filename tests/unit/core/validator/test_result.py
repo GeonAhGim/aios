@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
 from src.core.validator.result import ValidationResult
+from tests.conftest import PerfBudget
 
 
 def test_valid_construction_defaults_errors_to_empty_list() -> None:
@@ -74,14 +76,37 @@ def test_default_factory_failure_is_propagated(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.perf
-def test_construction_perf_p95_under_budget() -> None:
+def test_construction_perf_p95_under_budget(perf_budget: PerfBudget) -> None:
     """Simple pydantic model construction must stay well under the 1ms p95 budget."""
-    samples = []
-    for _ in range(200):
-        start = time.perf_counter()
-        ValidationResult(is_valid=True, errors=["x"])
-        samples.append(time.perf_counter() - start)
 
-    samples.sort()
-    p95 = samples[int(len(samples) * 0.95)]
-    assert p95 < 0.001, f"p95 construction time {p95:.6f}s exceeded 1ms budget"
+    def construct() -> None:
+        ValidationResult(is_valid=True, errors=["x"])
+
+    samples = perf_budget.samples(construct, n=100, batch=10)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95) - 1]
+    assert p95_ms < 1.0, f"p95 construction time {p95_ms:.4f}ms exceeded 1ms budget"
+
+
+def test_construction_perf_p95_under_budget_delay_injection(perf_budget: PerfBudget) -> None:
+    """Red-gate: inject 200 μs sleep per construction → p95 should turn red against 1ms budget."""
+
+    original_process_time = time.process_time
+    call_count = 0
+
+    def slow_process_time() -> float:
+        nonlocal call_count
+        call_count += 1
+        # cumulative offset: each process_time() call adds 0.0002*N seconds.
+        # Inside sample(), start is call N and end is call N+1, so the delta
+        # gains 0.0002 s = 200 μs. With batch=10, cpu_ms = 200 μs * 1000 / 10 = 20 ms.
+        return original_process_time() + 0.01 * call_count
+
+    def construct_with_delay() -> None:
+        ValidationResult(is_valid=True, errors=["x"])
+
+    with patch.object(time, "process_time", side_effect=slow_process_time):
+        samples = perf_budget.samples(construct_with_delay, n=100, batch=10)
+        cpu_ms_values = sorted(s.cpu_ms for s in samples)
+        p95_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95) - 1]
+        assert p95_ms >= 1.0, f"delay-injected p95={p95_ms:.4f}ms should exceed 1ms budget"
