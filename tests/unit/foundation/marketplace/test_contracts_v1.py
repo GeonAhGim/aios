@@ -19,7 +19,6 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.6,
 from __future__ import annotations
 
 import json
-import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from src.foundation.marketplace.contracts import v1
+from tests.conftest import PerfBudget
 
 FIXTURE = Path(__file__).parent / "fixtures" / "marketplace_contracts_v1.json"
 
@@ -240,21 +240,25 @@ def test_script_listing_is_frozen_against_post_construction_mutation() -> None:
 
 
 @pytest.mark.perf
-def test_bulk_construction_of_many_script_listings_meets_latency_budget() -> None:
+def test_bulk_construction_of_many_script_listings_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """마켓플레이스 브라우즈 화면(MP-10)은 목록 하나에 리스팅 다수를
     렌더링한다 -- 5,000건 구성이 절대시간 예산 내여야 건당 상수시간에서
     벗어나지 않았다고 볼 수 있다."""
     n = 5_000
-    budget_sec = 2.0  # 실측 로컬 <0.6s
+    budget_ms = 2_000.0  # 2.0s in ms — 실측 로컬 <0.6s
     payloads = [_listing_kwargs(listing_id=uuid4()) for _ in range(n)]
 
-    start = time.perf_counter()
-    listings = [v1.ScriptListing(**payload) for payload in payloads]
-    elapsed = time.perf_counter() - start
-
-    print(f"[MP-1] {n} listings constructed in {elapsed:.4f}s (budget<{budget_sec}s)")
-    assert len(listings) == n
-    assert elapsed < budget_sec, f"{n}건 구성이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    sample = perf_budget.assert_within(
+        lambda: [v1.ScriptListing(**p) for p in payloads],
+        budget_ms=budget_ms,
+        n=3,
+        batch=1,
+        label=f"[MP-1] {n} listings",
+    )
+    assert sample.result is not None
+    assert len(sample.result) == n
 
 
 # ---- 게이트 적색 재현 ---------------------------------------------------------
