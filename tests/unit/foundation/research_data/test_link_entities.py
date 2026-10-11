@@ -10,7 +10,6 @@ entry point.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -264,9 +263,16 @@ async def test_link_entities_propagates_repository_list_failure() -> None:
 
 
 @pytest.mark.perf
-async def test_is_valid_isin_throughput_budget() -> None:
+def test_is_valid_isin_throughput_budget(
+    perf_budget,
+) -> None:
     """ADR-2026-09-09-C: `is_valid_isin` must handle ≥10k calls/sec.
-    Budget: ≤100 µs per call (10k/sec → 100µs/call)."""
+    Budget: ≤100 µs per call (10k/sec → 100µs/call = 0.1 ms).
+
+    task-11793: raw time.perf_counter() → PerfBudget.sample(batch=N) 전환.
+    batch=500로 묶어 process_time() 15.6ms 틱 양자화 오차를 호출당 1/500로
+    줄이고, cpu_ms 단위로 예산과 단위를 일치시킴.
+    """
     # Valid ISINs
     valid_candidates = [
         "US0378331005",  # Apple
@@ -282,13 +288,19 @@ async def test_is_valid_isin_throughput_budget() -> None:
     ]
     all_candidates = valid_candidates + invalid_candidates
     iterations = 5000
-    total = iterations * len(all_candidates)
 
-    start = time.perf_counter()
-    for _ in range(iterations):
-        for cand in all_candidates:
-            is_valid_isin(cand)
-    elapsed = time.perf_counter() - start
+    def run_batch() -> int:
+        for _ in range(iterations):
+            for cand in all_candidates:
+                is_valid_isin(cand)
+        return iterations
 
-    per_call_us = (elapsed / total) * 1_000_000
-    assert per_call_us < 100, f"is_valid_isin took {per_call_us:.1f} µs/call (budget: 100 µs)"
+    # batch=1: run_batch() 자체가 이미 iterations×len(all_candidates) 회 호출
+    sample = perf_budget.sample(run_batch, batch=1)
+    total_calls = iterations * len(all_candidates)
+    per_call_ms = sample.cpu_ms / total_calls
+
+    assert per_call_ms < 0.1, (
+        f"is_valid_isin took {per_call_ms * 1000:.1f} µs/call "
+        f"(cpu={sample.cpu_ms:.3f}ms / {total_calls} calls — budget 0.1 ms)"
+    )
