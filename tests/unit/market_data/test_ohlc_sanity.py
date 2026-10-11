@@ -8,7 +8,6 @@ close_time==open_time+duration, tz-aware UTC, 값 유한성) 각각 REJECT,
 """
 
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -131,8 +130,12 @@ def test_duration_lookup_fault_propagates_without_swallowing(
 
 
 @pytest.mark.perf
-def test_check_candle_handles_large_batch_within_latency_budget() -> None:
-    """수치 성능 단언: 50,000개 캔들 검사가 O(n) 유지 하에 3초 예산 안에 끝난다."""
+def test_check_candle_handles_large_batch_within_latency_budget(
+    perf_budget: Any,
+) -> None:
+    """수치 성능 단언: 50,000개 캔들 검사가 O(n) 유지 하에 3초 예산 안에 끝난다.
+
+    raw perf_counter → perf_budget.assert_within 전환 (task-11809)."""
     candles = [
         _candle(
             open_time=_OPEN + timedelta(minutes=i),
@@ -140,11 +143,12 @@ def test_check_candle_handles_large_batch_within_latency_budget() -> None:
         )
         for i in range(50_000)
     ]
-    start = time.perf_counter()
-    for c in candles:
-        check_candle(c)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 3.0
+
+    def _run_batch() -> None:
+        for c in candles:
+            check_candle(c)
+
+    perf_budget.assert_within(_run_batch, budget_ms=3000)
 
 
 def test_low_and_high_violations_both_reported_not_short_circuited() -> None:
@@ -294,8 +298,13 @@ def test_multiple_invalid_prices_report_all_non_finite_fields() -> None:
 
 
 @pytest.mark.perf
-def test_check_candle_batch_p95_within_budget() -> None:
-    """수치 성능 단언: 100,000개 캔들(위반 케이스 혼합) 검사가 p95 < 100ms."""
+def test_check_candle_batch_p95_within_budget(
+    perf_budget: Any,
+) -> None:
+    """수치 성능 단언: 100,000개 캔들(위반 케이스 혼합) 검사가 p95 < 100ms.
+
+    raw perf_counter → perf_budget.assert_within 전환 (task-11809).
+    budget_ms=5000 (5.0초) — 배치 전체 시간 기준."""
     valid = _candle()
     invalid_low = _candle(low=Decimal("101"))
     invalid_vol = _candle(volume=Decimal("-1"))
@@ -304,9 +313,9 @@ def test_check_candle_batch_p95_within_budget() -> None:
         invalid_low,
         invalid_vol,
     ][:100_000]
-    start = time.perf_counter()
-    for c in batch:
-        check_candle(c)
-    elapsed = time.perf_counter() - start
-    # p95는 전체 시간의 대략 2/3 (100k/3 * 2/3 ≈ 66k 개의 p95 지점)
-    assert elapsed < 5.0, f"p95 성능 예산 초과: {elapsed:.2f}s"
+
+    def _run_batch() -> None:
+        for c in batch:
+            check_candle(c)
+
+    perf_budget.assert_within(_run_batch, budget_ms=5000)
