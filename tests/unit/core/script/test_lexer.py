@@ -7,7 +7,7 @@ DEPTH 감사(task-2727, docs/audit/DEPTH_DSL_IND.md) D2 보강: negative를
 """
 
 import inspect
-import time
+from typing import cast
 
 import pytest
 
@@ -232,22 +232,28 @@ def test_invalid_emoji_character_rejected_with_correct_column():
 
 
 @pytest.mark.perf
-def test_tokenize_survives_pathological_input_without_crashing_or_hanging():
+def test_tokenize_survives_pathological_input_without_crashing_or_hanging(
+    perf_budget: PerfBudget,
+):
     """실패 주입(DEPTH 감사 예시): 매우 긴 입력과 악의적 유니코드를 섞어
     tokenize의 강건성을 확인한다. 두 시나리오 모두 RecursionError/IndexError
     같은 예기치 못한 크래시나 무한 루프 없이, 유한 시간 안에 정상 토큰화되거나
-    ScriptSyntaxError(fail-closed)로 끝나야 한다. task-7434: 코어 경합으로
-    여전히 flaky할 수 있어 perf 마커로 직렬 단계에 옮기되, 이 테스트는
-    "무한루프가 아님"을 잡는 행 가드라 best-of-N(느린 실행을 가려버림)인
-    공용 perf_budget으로 바꾸지 않고 raw wall-clock을 유지한다."""
+    ScriptSyntaxError(fail-closed)로 끝나야 한다. task-11686: perf_budget.sample
+    batch=3으로 묶어 process_time 양자화 오차를 1/3로 줄임. 단위: cpu_ms(밀리초).
+    """
     # 시나리오 1: 매우 긴 유효 입력(5만 개 식별자) — 정상 토큰화, 시간 예산 내.
     huge_valid_source = " ".join(f"x{i}" for i in range(50_000))
-    start = time.perf_counter()
-    tokens = tokenize(huge_valid_source)
-    elapsed = time.perf_counter() - start
+
+    def _tokenize_huge() -> list[Token]:
+        return tokenize(huge_valid_source)
+
+    sample = perf_budget.sample(_tokenize_huge, batch=3)
+    tokens = cast(list[Token], sample.result)
     assert tokens[-1].kind is TokenKind.EOF
     assert len(tokens) == 50_001  # 식별자 5만 개 + EOF
-    assert elapsed < 3.0, f"대용량 입력 처리 {elapsed:.3f}s > 3.0s 예산(무한루프/크래시 의심)"
+    assert sample.cpu_ms < 3_000, (
+        f"대용량 입력 처리 {sample.cpu_ms:.0f}ms > 3000ms 예산(무한루프/크래시 의심)"
+    )
 
     # 시나리오 2: 악의적 유니코드(NUL, RTL override, ZWSP, BOM)는 크래시 없이
     # 항상 SCRIPT_SYNTAX(fail-closed)로 깔끔히 거부된다. 원 소스 파일에 제어
@@ -264,11 +270,17 @@ def test_tokenize_survives_pathological_input_without_crashing_or_hanging():
     # 시나리오 3: 악의적 유니코드가 아주 긴 유효 입력 뒤에 섞여도(초반에 오래
     # 걸리지 않고) 여전히 유한 시간 안에 거부된다.
     combined = huge_valid_source + " " + rtl_override
-    start = time.perf_counter()
-    with pytest.raises(ScriptSyntaxError):
-        tokenize(combined)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 3.0, f"장문+악성 유니코드 처리 {elapsed:.3f}s > 3.0s 예산"
+
+    def _tokenize_combined() -> object:
+        try:
+            tokenize(combined)
+            return None
+        except ScriptSyntaxError as exc:
+            return exc
+
+    sample2 = perf_budget.sample(_tokenize_combined, batch=3)
+    assert isinstance(sample2.result, ScriptSyntaxError)
+    assert sample2.cpu_ms < 3_000, f"장문+악성 유니코드 처리 {sample2.cpu_ms:.0f}ms > 3000ms 예산"
 
 
 # --- DEPTH 감사 D2 보강: 수치 성능 단언(토큰화 처리량) ----------------------
