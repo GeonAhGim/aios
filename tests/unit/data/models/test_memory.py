@@ -1,4 +1,3 @@
-import time
 from datetime import datetime, timezone
 
 import pytest
@@ -6,6 +5,7 @@ from pydantic import ValidationError
 
 from src.data.models.base import ProvenanceStatus
 from src.data.models.memory import MemoryEntry, MemoryType
+from tests.conftest import PerfBudget
 
 
 def _valid_kwargs(**overrides):
@@ -111,11 +111,9 @@ MemoryEntry(memory_type="DECISION", content={"action": "buy"}, source_agent="tes
 
 
 @pytest.mark.perf
-def test_memory_entry_construction_throughput():
-    iterations = 500
-    start = time.perf_counter()
-    for _ in range(iterations):
-        MemoryEntry(**_valid_kwargs())
-    elapsed = time.perf_counter() - start
-    per_op_ms = (elapsed / iterations) * 1000
-    assert per_op_ms < 5.0
+def test_memory_entry_construction_throughput(perf_budget: PerfBudget):
+    perf_budget.assert_within(
+        lambda: MemoryEntry(**_valid_kwargs()),
+        budget_ms=5.0,
+        batch=32,
+    )
