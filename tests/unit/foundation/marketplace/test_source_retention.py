@@ -16,7 +16,6 @@ policy.py, 그리고 이 패키지의 test_visibility.py 선례와 동일하게
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -129,9 +128,14 @@ def test_corrupted_retention_fails_closed_and_reproduces_on_repeat():
 
 
 @pytest.mark.perf
-def test_validate_source_retention_hot_path_performance():
-    start = time.perf_counter()
-    for _ in range(10_000):
-        validate_source_retention(ListingVisibility.PROTECTED, "IR_ONLY")
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+def test_validate_source_retention_hot_path_performance(perf_budget):
+    # raw perf_counter → perf_budget.assert_within(batch) 전환:
+    # process_time은 ~15.6ms 틱이므로 batch=10_000이면 총 156ms가 돼
+    # 호출당 15.6μs로 분할 가능. 예산 1000ms = 1.0s(ms 단위 일치).
+    perf_budget.assert_within(
+        lambda: validate_source_retention(ListingVisibility.PROTECTED, "IR_ONLY"),
+        budget_ms=1000.0,
+        n=5,
+        batch=10_000,
+        label="validate_source_retention",
+    )
