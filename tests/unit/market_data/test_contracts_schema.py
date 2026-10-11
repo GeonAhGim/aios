@@ -9,7 +9,6 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.1 (A), §9.2 LA-1.
 """
 
 import json
-import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -20,6 +19,7 @@ from pydantic import ValidationError
 
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts import v1
+from tests.conftest import PerfBudget
 
 FIXTURE = Path(__file__).parent / "fixtures" / "market_data_contracts_v1.json"
 
@@ -337,14 +337,22 @@ def test_fixture_read_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> Non
 # ── DEEPEN: performance assertion (LA-1) ───────────────────────────────────
 
 
-@pytest.mark.perf  # wall-clock budget: serial perf stage (task-7434 guard)
-def test_candle_record_bulk_validation_throughput() -> None:
-    """1,000건 CandleRecord 검증이 예산(200ms) 내에 끝나야 한다 — O(n) 이상 회귀 감지."""
-    start = time.perf_counter()
-    for _ in range(1_000):
-        _sample_candle()
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    assert elapsed_ms < 200, f"1,000건 CandleRecord 검증이 {elapsed_ms:.1f}ms — 200ms 예산 초과"
+@pytest.mark.perf
+def test_candle_record_bulk_validation_throughput(perf_budget: PerfBudget) -> None:
+    """1,000건 CandleRecord 검증이 예산(200ms) 내에 끝나야 한다 — O(n) 이상 회귀 감지.
+
+    `perf_budget.assert_within`은 내부적으로 `process_time()`을 쓰므로
+    `perf_counter()` wall-clock 노이즈(다른 워커/llama.cpp 코어 경합)가 제거된다.
+    batch=100 → 1,000÷100=10 sample; process_time 15.6ms 틱 오차를 1.56ms로 줄임.
+    """
+    # batch=100: 1,000회 / 100 = 10회 측정, process_time 15.6ms 틱 오차 1.56ms로 감소
+    perf_budget.assert_within(
+        lambda: [_sample_candle() for _ in range(100)],
+        budget_ms=200.0,
+        n=10,
+        batch=1,
+        label="1,000건 CandleRecord 검증",
+    )
 
 
 # ── DEEPEN: optional field (X | None) accept None / omission / round-trip (task-6978) ──
