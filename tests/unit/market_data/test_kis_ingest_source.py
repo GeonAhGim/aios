@@ -17,7 +17,6 @@ D1로 판정한 4건을 아래에서 채운다: (1) failure-injection — MockTr
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -242,7 +241,9 @@ async def test_fetch_candles_raises_fatal_error_on_malformed_row() -> None:
 
 
 @pytest.mark.perf
-async def test_fetch_candles_repeated_calls_p95_latency_under_budget() -> None:
+async def test_fetch_candles_repeated_calls_p95_latency_under_budget(
+    perf_budget,
+) -> None:
     """수치 성능 단언: 토큰 캐시(MonotonicTokenCache) 이후의 반복 조회는
     순수 인메모리 MockTransport 왕복이라, 원장 append p95 예산(task-489/
     LB-18, task-614/LC-17, 30ms)과 같은 자릿수 안에 있어야 한다."""
@@ -258,20 +259,16 @@ async def test_fetch_candles_repeated_calls_p95_latency_under_budget() -> None:
     await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)  # 토큰 캐시 예열
 
     n = 50
-    budget_p95_sec = 0.03
-    latencies: list[float] = []
-    for _ in range(n):
-        t0 = time.perf_counter()
-        candles = await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
-        latencies.append(time.perf_counter() - t0)
-        assert candles
-
-    latencies.sort()
-    p95 = latencies[int(n * 0.95)]
-    print(
-        f"[LA-20 fetch_candles] n={n} p95={p95 * 1000:.2f}ms (budget<{budget_p95_sec * 1000:.0f}ms)"
+    budget_p95_ms = 30.0  # 0.03s → ms 단위 통일
+    samples = await perf_budget.samples_async(
+        lambda: source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end), n=n
     )
-    assert p95 < budget_p95_sec, f"fetch_candles p95가 예산을 넘었습니다: {p95:.4f}s"
+    # wall_ms는 I/O 왕복 지연(커버리지 tracer 영향 없음)
+    wall_ms_values = sorted(s.wall_ms for s in samples)
+    p95_idx = int(n * 0.95)
+    p95_ms = wall_ms_values[p95_idx]
+    print(f"[LA-20 fetch_candles] n={n} p95={p95_ms:.2f}ms (budget<{budget_p95_ms:.0f}ms)")
+    assert p95_ms < budget_p95_ms, f"fetch_candles p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
 
 
 # --- 게이트 적색 재현 -------------------------------------------------------
