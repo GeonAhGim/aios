@@ -28,6 +28,7 @@ from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.strategy.state_memory import StrategyStateMemory
 from src.services.execution_loop.strategy_state_store import load_state, save_state
 from tests.integration.conftest import create_test_user
+from tests.support.db import create_pool_with_retry
 
 
 def _asyncpg_dsn() -> str:
@@ -39,7 +40,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 

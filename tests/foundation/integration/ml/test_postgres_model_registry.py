@@ -22,6 +22,7 @@ import pytest
 from src.foundation.ml.adapters.postgres_model_registry import PostgresModelRegistry
 from src.foundation.ml.contracts.v1 import ModelCard, TrainDataLineage
 from src.foundation.ml.domain.registry_rules import ModelHashMismatchError
+from tests.support.db import create_pool_with_retry
 
 _NOW = datetime.now(timezone.utc)
 
@@ -29,7 +30,7 @@ _NOW = datetime.now(timezone.utc)
 @pytest.fixture
 async def pool():
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    p = await asyncpg.create_pool(dsn, min_size=1, max_size=8)
+    p = await create_pool_with_retry(dsn, min_size=1, max_size=8)
     yield p
     await p.close()
 

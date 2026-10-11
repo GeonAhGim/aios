@@ -29,7 +29,7 @@ from dotenv import dotenv_values
 
 from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_user
-from tests.support.db import ensure_worker_database, template_database_url
+from tests.support.db import create_pool_with_retry, ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -66,7 +66,7 @@ def _run_alembic(*args: str, database_url: str | None = None) -> None:
 
 @pytest.fixture
 async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 
@@ -102,7 +102,7 @@ async def test_downgrade_then_upgrade_backfills_personal_tenant() -> None:
     (`tests/support/db.ensure_worker_database`), so an interrupted downgrade
     can only corrupt its own throwaway DB."""
     migration_db_url = await ensure_worker_database(template_database_url(), "tenantmembershiprt")
-    migration_pool = await asyncpg.create_pool(
+    migration_pool = await create_pool_with_retry(
         migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
         min_size=1,
         max_size=2,

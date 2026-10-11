@@ -21,6 +21,7 @@ from src.services.execution_service import ExecutionControlError, ExecutionServi
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.order_service.gate import GateDecision, GateOutcome
 from tests.integration.conftest import create_test_tenant
+from tests.support.db import create_pool_with_retry
 
 
 def _asyncpg_dsn() -> str:
@@ -32,7 +33,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=2)
     # system_safety_state는 전역 싱글톤 행 — 다른 테스트 파일(예:
     # test_execution_scheduler.py의 halted/restricted 시나리오)이 남긴 값과
     # 섞이지 않도록 매 테스트 시작 전 normal로 되돌린다(test_execution_tick.py 관례).

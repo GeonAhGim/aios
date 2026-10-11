@@ -23,6 +23,7 @@ from src.foundation.experiments.adapters.postgres_repository import (
     PostgresExperimentRepository,
 )
 from src.foundation.experiments.contracts.v1 import Experiment, ExperimentKind
+from tests.support.db import create_pool_with_retry
 
 _NOW = datetime.now(timezone.utc)
 
@@ -30,7 +31,7 @@ _NOW = datetime.now(timezone.utc)
 @pytest.fixture
 async def pool():
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    p = await asyncpg.create_pool(dsn, min_size=1, max_size=8)
+    p = await create_pool_with_retry(dsn, min_size=1, max_size=8)
     yield p
     await p.close()
 

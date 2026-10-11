@@ -48,6 +48,7 @@ from src.foundation.positions.domain.position_key import PositionKey
 from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
+from tests.support.db import create_pool_with_retry
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _CONCURRENT_FILLS = 20
@@ -66,7 +67,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool() -> asyncpg.Pool:
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=_CONCURRENT_FILLS + 5)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=_CONCURRENT_FILLS + 5)
     yield p
     await p.close()
 

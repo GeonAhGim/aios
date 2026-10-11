@@ -27,7 +27,6 @@ from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
 
-import asyncpg
 import pytest
 
 from src.data.models.base import AssetClass, Currency, Money
@@ -47,6 +46,7 @@ from src.foundation.positions.domain.position_key import PositionKey
 from tests import conftest
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
+from tests.support.db import create_pool_with_retry
 from tests.support.entities_seed import bootstrap_default_hierarchy
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -59,7 +59,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=16)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=16)
     yield p
     await p.close()
 

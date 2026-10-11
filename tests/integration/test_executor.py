@@ -22,6 +22,7 @@ from src.services.order_service.position_ledger import record_fill_in_position_l
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.db import create_pool_with_retry
 
 
 async def _allow_gate(context: object) -> GateDecision:
@@ -42,7 +43,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=2)
     yield p
     await p.close()
 

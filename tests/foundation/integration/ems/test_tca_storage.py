@@ -26,12 +26,13 @@ import pytest
 
 from src.foundation.ems.adapters.tca_storage import PostgresTcaResultRepository
 from src.foundation.ems.contracts.v1 import TcaResult
+from tests.support.db import create_pool_with_retry
 
 
 @pytest.fixture
 async def pool():
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    p = await asyncpg.create_pool(dsn, min_size=2, max_size=8)
+    p = await create_pool_with_retry(dsn, min_size=2, max_size=8)
     yield p
     await p.close()
 

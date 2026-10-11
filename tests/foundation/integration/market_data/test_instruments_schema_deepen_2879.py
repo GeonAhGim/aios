@@ -1,14 +1,12 @@
 """DC-4 instruments/venue_listings — DEEPEN(task-2879, DEPTH_DC_RD 소급감사)
 D1 -> D3 증빙.
 
-`test_instruments_schema.py`는 순차 실행 기준 EXCLUDE/트리거의 정상계·주요
-음성계만 증명했다(D1) — 부족분: 실패주입 범위(CHECK/FK/UNIQUE 경계값),
-수치 성능 단언, 게이트 적색이 트랜잭션을 전부 롤백함(부분 커밋 없음)의
-증명, 그리고 동시 다중 커넥션(D3 — 여러 "인스턴스"가 동시에 같은 DB에
-쓰는 상황) 경합에서도 EXCLUDE/트리거가 깨지지 않는다는 증명이다.
-앱 레벨(check-then-insert) 검사는 TOCTOU 경합에 취약하지만, DB 제약은
-그 경합 자체를 없앤다는 것이 이 파일의 핵심 주장이다. 새 기능 없음,
-깊이만 올린다.
+`test_instruments_schema.py`는 순차 실행 기준 EXCLUDE/트리거의 정상계·주요 음성계만
+증명했다(D1) — 부족분: 실패주입 범위(CHECK/FK/UNIQUE 경계값), 수치 성능 단언, 게이트
+적색이 트랜잭션을 전부 롤백함(부분 커밋 없음)의 증명, 그리고 동시 다중 커넥션(D3 —
+여러 "인스턴스"가 동시에 같은 DB에 쓰는 상황) 경합에서도 EXCLUDE/트리거가 깨지지
+않는다는 증명이다. 앱 레벨(check-then-insert) 검사는 TOCTOU 경합에 취약하지만, DB
+제약은 그 경합 자체를 없앤다는 것이 이 파일의 핵심 주장이다. 새 기능 없음, 깊이만 올린다.
 """
 
 from __future__ import annotations
@@ -21,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 import asyncpg
 import pytest
 
+from tests.support.db import create_pool_with_retry
+
 
 def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
@@ -28,7 +28,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool() -> asyncpg.Pool:
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=32)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=2, max_size=32)
     yield p
     await p.close()
 

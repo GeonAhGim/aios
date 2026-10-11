@@ -50,6 +50,7 @@ from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.application.submit_order import OrderSubmitDeniedError
 from src.services.oms.contracts.v1_views import OrderView
 from tests.integration.oms.conftest import create_test_user
+from tests.support.db import create_pool_with_retry
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _CONCURRENT_RUNS = 15
@@ -61,7 +62,7 @@ def _dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_dsn(), min_size=4, max_size=_CONCURRENT_RUNS + 10)
+    p = await create_pool_with_retry(_dsn(), min_size=4, max_size=_CONCURRENT_RUNS + 10)
     yield p
     await p.close()
 

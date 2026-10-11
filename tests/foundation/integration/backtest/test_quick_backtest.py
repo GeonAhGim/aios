@@ -24,7 +24,6 @@ from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-import asyncpg
 import pytest
 
 from src.data.models.trading import OrderSide
@@ -63,6 +62,7 @@ from tests.integration.foundation.market_data.perf_replay_support import (
     new_instrument_id,
     series_key,
 )
+from tests.support.db import create_pool_with_retry
 
 _MONTH_TARGET_SECONDS = 5.0  # §7 즉시 백테스트(1개월 M1) ≤5s — 운영 목표, 비차단(print)
 _MAX_READ_ROUND_TRIPS = 1  # read_candles_columnar 단일 SELECT
@@ -98,7 +98,7 @@ _CONFIG = BacktestConfigV2(
 @pytest.fixture
 async def pool():
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    p = await asyncpg.create_pool(dsn, min_size=1, max_size=4)
+    p = await create_pool_with_retry(dsn, min_size=1, max_size=4)
     yield p
     await p.close()
 

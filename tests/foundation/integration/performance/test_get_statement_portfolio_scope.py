@@ -38,6 +38,7 @@ from src.foundation.performance.domain.models import (
 )
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.entities.conftest import build_hierarchy
+from tests.support.db import create_pool_with_retry
 
 _NOW = datetime.now(timezone.utc)
 
@@ -48,7 +49,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 

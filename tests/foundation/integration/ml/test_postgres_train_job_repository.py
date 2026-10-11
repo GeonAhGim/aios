@@ -20,12 +20,13 @@ import pytest
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.ml.adapters.postgres_train_job_repository import PostgresTrainJobRepository
 from tests.conftest import PerfBudget
+from tests.support.db import create_pool_with_retry
 
 
 @pytest.fixture
 async def pool():
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    p = await asyncpg.create_pool(dsn, min_size=1, max_size=8)
+    p = await create_pool_with_retry(dsn, min_size=1, max_size=8)
     yield p
     await p.close()
 

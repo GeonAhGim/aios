@@ -24,7 +24,6 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
-import asyncpg
 import pytest
 from dotenv import dotenv_values
 
@@ -37,6 +36,7 @@ from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepos
 from src.services.execution_service import ExecutionControlError
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import NoopEventBus, create_test_tenant
+from tests.support.db import create_pool_with_retry
 
 
 def _asyncpg_dsn() -> str:
@@ -48,7 +48,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 

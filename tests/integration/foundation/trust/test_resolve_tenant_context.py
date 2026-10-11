@@ -33,6 +33,7 @@ from src.foundation.trust.domain.models import (
 )
 from src.services.auth_service import User
 from tests.integration.conftest import create_test_user
+from tests.support.db import create_pool_with_retry
 
 # ADR-2026-09-09-C §"축별 성능 예산" — resolve_tenant_context 전용 항목은 없으므로,
 # 가장 근접한 DB 읽기 비교축(tenant_membership INSERT p95 50ms, task-3159가 차용한
@@ -47,7 +48,7 @@ def _asyncpg_dsn() -> str:
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=16)
+    p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=16)
     yield p
     await p.close()
 

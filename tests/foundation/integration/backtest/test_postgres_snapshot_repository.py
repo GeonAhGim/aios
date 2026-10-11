@@ -27,6 +27,7 @@ from src.foundation.backtest.domain.snapshot import (
     BarSnapshotRef,
     compute_bar_snapshot_hash,
 )
+from tests.support.db import create_pool_with_retry
 
 _AS_OF = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -34,7 +35,7 @@ _AS_OF = datetime(2026, 1, 1, tzinfo=timezone.utc)
 @pytest.fixture
 async def pool():
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-    p = await asyncpg.create_pool(dsn, min_size=1, max_size=8)
+    p = await create_pool_with_retry(dsn, min_size=1, max_size=8)
     yield p
     await p.close()
 
