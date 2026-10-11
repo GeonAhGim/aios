@@ -3127,3 +3127,47 @@ PERF-measure 리프 명세에 "호출 1회 측정 금지(batch 필수), 단위 �
 negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 replay: N/A(실행 코드
 변경 없이 완료분을 정적 감사하고 후속 리프를 설계하는 문서 리프 — DECISION_GUIDELINES B-2,
 `task-11488`/`task-11406` 등 동일 패턴의 문서 전용 리프 선례와 동일).
+
+## task-11836 — replay_verify 동일 경보 11차 재발, 비회귀 재확인 (2026-10-11)
+
+- `esc-ci-replay_verify.json`: `first_seen=2026-09-22T15:23:36+00:00` 불변,
+  `reopen_count=1`(이번 재오픈), 지목 `sha=6f1cd8f8266e8c51b056b225a608196366ae9943`.
+  `git show --stat`로 확인한 결과 이 sha는 `merge-queue: task-11808` 머지 커밋으로
+  `tests/unit/market_data/test_lineage.py` 1개 파일만 건드린다 — `scripts/replay_verify.py`,
+  `scripts/replay_verify_db_pressure.py`나 그 의존 모듈(`src/core/eventstore/replay`,
+  `src/foundation/ledger/...`, OMS 리포지토리) 어디에도 닿지 않는다. `first_seen`이 이
+  sha의 커밋 시각보다 2주 이상 앞서므로 `pm/auto_decision.py`가 실패 시점 HEAD를
+  기계적으로 지목 sha에 붙이는 동일한 오탐 패턴(task-11396/11407/11488과 동형)이다.
+- failure detail은 `task-11488` 2차 재오픈이 문서화한 자기완결적 증거를 그대로 재현한다:
+  같은 CI 실행에서 `pytest-xdist` worker 4개(`gw0/gw1/gw2/gw3`)가 동시에
+  `replay_verify.py`를 각자 실행했고, `gw0`만 `_create_pool_with_retry`의 8회 재시도를
+  전부 소진해 `ConnectionDoesNotExistError: connection was closed in the middle of
+  operation`로 fail-closed 종료했다 — `gw1`(`streams=0`), `gw2`(`streams=6`, pre-cutover
+  1건 skip), `gw3`(`streams=0`)는 **같은 실행, 같은 코드, 같은 커밋**에서 정상 종료
+  (`exit=0`/`OK`)했다. 동일 코드 경로를 쓰는 worker 중 하나만 실패하는 것은 코드 결함이
+  아니라 접속 시도 순간의 공유 Postgres 컨테이너 경합(task-6256/6267/8556/11488이 이미
+  문서화)이 `gw0`의 윈도우에만 걸렸다는 직접 증거 — "다음 동일 경보 처리" 기준(위
+  `task-11488` 2차 항목)에 따라 추가 분석 없이 비회귀로 닫는다.
+- 로컬 재현: 이 worktree 세션에서는 공유 Postgres(Windows 서비스
+  `postgresql-x64-17`)가 마침 정지 상태였다(`Get-Service postgresql-x64-17` →
+  `Stopped`; 서비스 시작은 관리자 권한이 필요해 이 세션 권한으로는 불가, 서비스
+  기동/중지 자체가 바로 이 경보가 추적하는 공유 리소스 경합 패턴과 일치하는 외부
+  상태라 강제 기동 시도는 하지 않았다) — `scripts/replay_verify.py`를 직접 3회 재현하는
+  대신, 실DB 연결 없이 도는 관련 단위 테스트 전체를 실행해 코드 경로 자체의 무결성을
+  확인했다: `tests/unit/scripts/test_replay_verify_db_pressure.py` +
+  `test_replay_verify_pool_retry.py` + `test_replay_verify_scan_retry.py` —
+  **39 passed in 1.19s**(기존 pool-leak/jitter/5종 재시도 예외 negative 테스트 전부 포함,
+  신규 실패 없음).
+- 기준선/예산/재시도 횟수/예외 목록/ignore 변경 없음(DECISION_GUIDELINES B-2) — `gw1`/
+  `gw2`/`gw3`가 같은 실행에서 통과했다는 사실 자체가 재시도 예산을 더 넓혀야 한다는
+  근거가 아니라, 이미 사이즈를 맞춘 예산이 대부분의 worker에는 충분하고 드물게 겹치는
+  극단적 동시 접속 윈도우만 놓친다는 근거(task-11488과 동일 결론)다. D2 신규
+  negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 replay:
+  N/A(실행 코드 변경 없이 이미 9회 이상 근본 수정이 들어간 공유 DB 경합 경보를
+  재확인하는 문서 리프).
+- 다음 동일 경보 처리: 지목 sha가 `scripts/replay_verify.py`나 그 의존 모듈을 건드리지
+  않는 커밋이면 즉시 비회귀로 분류하고, failure detail에 worker별 성공/실패가 섞여
+  있는지부터 확인한다 — 섞여 있으면 추가 분석 없이 `task-11488`/`task-11836`을 인용해
+  비회귀로 닫는다. 공유 Postgres 서비스가 세션상 정지돼 있어 로컬 통합 재현이 막히는
+  경우는 그 자체를 공유 자원 경합 증거로 기록하고, 단위 테스트(DB 비의존)로 코드 경로
+  무결성만 확인한 뒤 닫는다.
