@@ -16,7 +16,6 @@ test_timeframe.py와 동일 논리). 아래 테스트들은 그 축의 정신을
 from __future__ import annotations
 
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -28,6 +27,7 @@ from src.foundation.market_data.domain.reference.symbol_normalizer import (
     to_canonical,
     to_venue,
 )
+from tests.conftest import PerfBudget
 
 
 def test_bitget_roundtrip() -> None:
@@ -123,7 +123,9 @@ def test_krx_validate_fails_closed_when_regex_corrupted(
 
 
 @pytest.mark.perf
-def test_to_canonical_completes_within_budget_for_bulk_and_adversarial_inputs() -> None:
+def test_to_canonical_completes_within_budget_for_bulk_and_adversarial_inputs(
+    perf_budget: PerfBudget,
+) -> None:
     """정규식 기반 검증기(`_KRX_CODE`, `_US_TICKER`)는 유효 입력 10만 건과,
     매칭에 실패해야 하는 긴 적대적 입력(비-ASCII 폭주 문자열 포함)을 섞어도
     3초 안에 끝난다 — 두 정규식 모두 `{1,6}` 등 고정 길이 quantifier만 쓰고
@@ -134,17 +136,23 @@ def test_to_canonical_completes_within_budget_for_bulk_and_adversarial_inputs() 
     krx_codes = [f"{i:06d}" for i in range(50_000)]
     adversarial = ["A" * 10_000, "9" * 10_000, "가" * 10_000]
 
-    began = time.perf_counter()
-    for code in krx_codes:
-        assert to_canonical(Venue.KIS_KRX, code) == code
-    for bad in adversarial:
-        with pytest.raises(SymbolNormalizationError):
-            to_canonical(Venue.KIS_KRX, bad)
-        with pytest.raises(SymbolNormalizationError):
-            to_canonical(Venue.KIS_US, bad)
-    elapsed = time.perf_counter() - began
+    def _bulk_validate() -> None:
+        for code in krx_codes:
+            assert to_canonical(Venue.KIS_KRX, code) == code
+        for bad in adversarial:
+            with pytest.raises(SymbolNormalizationError):
+                to_canonical(Venue.KIS_KRX, bad)
+            with pytest.raises(SymbolNormalizationError):
+                to_canonical(Venue.KIS_US, bad)
 
-    assert elapsed < 3.0
+    perf_budget.assert_within(
+        _bulk_validate,
+        budget_ms=3000.0,
+        n=3,
+        warmup=1,
+        batch=10,
+        label="50k KRX + 3종 적대적 입력 정규화 — 예산 3s(CPU)",
+    )
 
 
 # --- DEEPEN(task-2951) 게이트 적색 재현(회귀 클래스) ----------------------------
