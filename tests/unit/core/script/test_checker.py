@@ -28,13 +28,13 @@ SCRIPT_TYPE으로 fail-closed함을 대조)을 추가한다.
 from __future__ import annotations
 
 import sys
-import time
 
 import pytest
 
 from src.core.script.grammar.parser import parse
 from src.core.script.typing import checker as checker_module
 from src.core.script.typing.checker import ScriptTypeError, check_program
+from tests.conftest import PerfBudget
 
 # ---- 선언 등록: input/let/signal이 환경에 타입으로 남는다 ----
 
@@ -286,7 +286,9 @@ def test_deeply_nested_unary_fails_closed_under_low_recursion_limit() -> None:
 
 
 @pytest.mark.perf
-def test_check_program_latency_stays_within_quarter_of_dsl_compile_budget() -> None:
+def test_check_program_latency_stays_within_quarter_of_dsl_compile_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1의 DSL 컴파일 예산은(로컬 기준) 300ms다.
     파싱 단계가 이미 절반(150ms, task-2911 DEEPEN)을 쓴다고 가정하면 타입
     검사 단계는 남은 예산의 절반, 즉 전체 예산의 1/4(75ms) 안에 머물러야
@@ -306,12 +308,13 @@ def test_check_program_latency_stays_within_quarter_of_dsl_compile_budget() -> N
     )
     program = parse(source)
 
-    start = time.perf_counter()
-    env = check_program(program)
-    elapsed = time.perf_counter() - start
+    # Batch CPU time spans multiple Windows timer ticks; values are ms per call.
+    sample = perf_budget.assert_within(
+        lambda: check_program(program), budget_ms=75, batch=32, n=3
+    )
 
-    assert len(env) == 1000
-    assert elapsed < 0.075
+    assert isinstance(sample.result, dict)
+    assert len(sample.result) == 1000
 
 
 # ---- DEEPEN(task-2912): 게이트 적색 재현(호출 인자 수치 계열 가드) ----
