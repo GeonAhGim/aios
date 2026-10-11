@@ -224,37 +224,54 @@ async def test_adapter_exception_leaves_terminal_failed_order_and_retry_does_not
 
 
 @pytest.mark.perf
-def test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_collides():
+def test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_collides(
+    perf_budget,
+):
     tenant_id = uuid.uuid4()
     window_start = datetime.now(timezone.utc)
-    latencies: list[float] = []
     ids: set[str] = set()
+    cpu_ms_values: list[float] = []
 
-    for intent_seq in range(5000):
-        scope = build_scope(
-            tenant_id=tenant_id,
-            account_ref="",
-            provider="bitget",
-            strategy_id="perf-test",
-            strategy_version="1.0.0",
-            execution_id=1,
-            intent_seq=intent_seq,
-            window_start=window_start,
+    # batch=10 → 5000÷10=500 calls; process_time 15.6ms 틱 오차를 ~1.56ms로 줄임
+    # 각 sample.result는 batch 내 마지막 호출 결과이므로, 모든 ID를 모으기 위해
+    # batch 내 전 결과를 mutable collector에 기록한다.
+    batch_collector: list[str] = []
+
+    for seq in range(500):
+        # 10개 scope를 한 번에 측정 (batch=10)
+        scopes = [
+            build_scope(
+                tenant_id=tenant_id,
+                account_ref="",
+                provider="bitget",
+                strategy_id="perf-test",
+                strategy_version="1.0.0",
+                execution_id=1,
+                intent_seq=seq * 10 + i,
+                window_start=window_start,
+            )
+            for i in range(10)
+        ]
+        batch_collector.clear()
+        sample = perf_budget.sample(
+            lambda s=scopes: batch_collector.extend(
+                derive_client_order_id(
+                    scope, max_len=_CLIENT_ORDER_ID_MAX_LEN, charset=_CLIENT_ORDER_ID_CHARSET
+                )
+                for scope in s
+            ),
+            batch=1,
         )
-        started = time.perf_counter()
-        cid = derive_client_order_id(
-            scope, max_len=_CLIENT_ORDER_ID_MAX_LEN, charset=_CLIENT_ORDER_ID_CHARSET
-        )
-        latencies.append(time.perf_counter() - started)
-        ids.add(cid)
+        cpu_ms_values.append(sample.cpu_ms)
+        ids.update(batch_collector)
 
     assert len(ids) == 5000  # 5,000 distinct intents -> 5,000 distinct ids, no collision
 
-    latencies.sort()
-    total = sum(latencies)
-    p95 = latencies[int(len(latencies) * 0.95)]
-    assert total < 1.0  # 5,000 pure sha256-based derivations complete well under 1s total
-    assert p95 < 0.001  # p95 per-derivation latency under 1ms (no I/O in this path)
+    cpu_ms_values.sort()
+    total_ms = sum(cpu_ms_values)
+    p95_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
+    assert total_ms < 1000.0  # 5,000 derivations < 1s total (budget in ms)
+    assert p95_ms < 1.0  # p95 per-derivation < 1ms (no I/O)
 
 
 # ---------------------------------------------------------------------------
