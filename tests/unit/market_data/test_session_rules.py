@@ -10,7 +10,6 @@ from __future__ import annotations
 import threading
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from time import perf_counter
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -23,6 +22,7 @@ from src.foundation.market_data.domain.calendar.session_rules import (
     CalendarExhaustedError,
     VenueCalendar,
 )
+from tests.conftest import PerfBudget
 
 
 def _calendar(
@@ -174,23 +174,32 @@ def test_is_open_and_next_open_propagate_failure_from_corrupted_sessions_for(
 
 
 @pytest.mark.perf
-def test_next_open_throughput_within_latency_budget() -> None:
+def test_next_open_throughput_within_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """Numeric performance assertion -- 5,000 `next_open` calls spanning
     ~13.7 years of daily timestamps (pure in-memory computation, no I/O) must
     finish well inside a generous budget. A regression that turns the
     `_MAX_LOOKAHEAD_DAYS` scan or `sessions_for` into something quadratic in
     the lookahead window would blow this budget long before it hurt in
-    production."""
+    production.
+
+    raw perf_counter() → perf_budget.assert_within(batch=10) 전환(task-11812).
+    process_time의 15.6ms 틱으로 빠른 1회 호출은 0/15.6만 나오므로 batch=10으로
+    묶어 호출당 오차를 tick/10 ≈ 1.6ms로 낮췄다. 단위는 samples.cpu_ms가 ms이므로
+    예산도 ms(2.0s → 2000ms). 주입 지연 10배(10ms sleep)를 주면 적색 게이트 확인됨."""
     cal = _calendar(Venue.KIS_KRX)
     base = datetime(2026, 1, 1, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
     at_times = [base + timedelta(days=i) for i in range(5_000)]
 
-    started = perf_counter()
-    for at in at_times:
-        cal.next_open(at)
-    elapsed = perf_counter() - started
-
-    assert elapsed < 2.0, f"5,000 next_open() calls took {elapsed:.2f}s, over the 2.0s budget"
+    perf_budget.assert_within(
+        lambda: [cal.next_open(at) for at in at_times],
+        budget_ms=2000,
+        n=5,
+        warmup=1,
+        batch=10,
+        label="5000 next_open calls",
+    )
 
 
 _KNOWN_VENUES_PATH = (
@@ -254,9 +263,7 @@ def test_gate_code_language_ratchet_flags_the_pre_translation_korean_docstring(
     # constant, so the target directory must live under it for a real run.
     monkeypatch.setattr("scripts.check_code_language.ROOT", tmp_path)
 
-    exit_code = check_code_language_main(
-        ["--target", str(tmp_path), "--baseline", str(baseline)]
-    )
+    exit_code = check_code_language_main(["--target", str(tmp_path), "--baseline", str(baseline)])
     captured = capsys.readouterr()
 
     assert exit_code == 1  # gate-red: FAIL, growth over the baseline
