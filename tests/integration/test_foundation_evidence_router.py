@@ -214,8 +214,19 @@ async def test_failure_db_error_returns_500(client, monkeypatch):
     headers, _ = await _register(client)
     import asyncpg
 
-    async def failing_acquire(self, *args, **kwargs):
-        raise asyncpg.PostgresConnectionError("connection refused")
+    class _FailingAcquireContext:
+        async def __aenter__(self):
+            raise asyncpg.PostgresConnectionError("connection refused")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    def failing_acquire(self, *args, **kwargs):
+        # asyncpg.Pool.acquire() returns an async-context-manager object
+        # synchronously; call sites use `async with pool.acquire() as conn:`.
+        # An `async def` replacement here would instead hand back an
+        # unawaited coroutine, corrupting pool state for later tests.
+        return _FailingAcquireContext()
 
     monkeypatch.setattr(asyncpg.Pool, "acquire", failing_acquire)
 
