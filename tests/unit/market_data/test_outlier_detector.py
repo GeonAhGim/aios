@@ -17,7 +17,6 @@ reproduction (the `_MAD_FLOOR` guard), replay, and concurrency.
 
 import random
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -34,6 +33,7 @@ from src.foundation.market_data.contracts.v1 import (
 )
 from src.foundation.market_data.domain.quality import outlier_detector as _outlier_detector_module
 from src.foundation.market_data.domain.quality.outlier_detector import detect_spikes
+from tests.conftest import PerfBudget
 
 UTC = timezone.utc
 _KEY = SeriesKey(venue=Venue.BITGET, instrument_id=UUID(int=1), timeframe=Timeframe.M1)
@@ -152,22 +152,24 @@ def test_detect_spikes_propagates_failure_from_corrupted_median() -> None:
 
 
 @pytest.mark.perf
-def test_detect_spikes_throughput_within_latency_budget() -> None:
+def test_detect_spikes_throughput_within_latency_budget(perf_budget: PerfBudget) -> None:
     """Numeric performance assertion -- 20,000 candles (pure in-memory
     computation, no I/O) must finish well inside a generous budget. A
     regression that made the per-candle trailing-window median computation
     scale with the full history instead of the bounded `window` would blow
-    this budget long before it hurt in production."""
+    this budget long before it hurt in production.
+
+    task-11811: raw perf_counter() → perf_budget.assert_within() 전환.
+    batch=100으로 500회 → 총 50,000 호출, 평균 100회 묶어 호출당 값 추출.
+    단위: ms(예산도 ms, 5.0s → 5000ms).
+    """
     closes = _noisy_closes(seed=99, steps=20_000, bound="0.02")
     candles = _series(closes)
 
-    started = time.perf_counter()
-    detect_spikes(candles)
-    elapsed = time.perf_counter() - started
+    def _run_once() -> None:
+        detect_spikes(candles)
 
-    assert elapsed < 5.0, (
-        f"detect_spikes() over 20k candles took {elapsed:.2f}s, over the 5.0s budget"
-    )
+    perf_budget.assert_within(_run_once, budget_ms=5000, batch=100, n=5)
 
 
 def test_gate_mad_floor_guard_prevents_false_positive_storm_on_flat_market() -> None:
