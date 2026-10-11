@@ -16,7 +16,6 @@ I/O가 없어 failure-injection·성능단언·게이트 재현이 성립하기 
 동시 접근에서도 결정론을 유지하는지로 증명한다.
 """
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import cast
@@ -31,6 +30,7 @@ from src.foundation.market_data.domain.timeframe import (
     duration,
     expected_opens,
 )
+from tests.conftest import PerfBudget
 
 UTC = timezone.utc
 
@@ -239,7 +239,9 @@ def test_align_open_fails_closed_on_corrupted_zero_duration_entry(
 
 
 @pytest.mark.perf
-def test_expected_opens_completes_within_budget_for_full_year_of_m1_candles() -> None:
+def test_expected_opens_completes_within_budget_for_full_year_of_m1_candles(
+    perf_budget: PerfBudget,
+) -> None:
     """1년치 M1 캔들(단일 24/7 세션, 525,600개 open) 전개가 3초 안에 끝난다.
 
     이 임계값은 알고리즘이 세션당 `open_at`~`close_at`을 캔들 스텝만큼 선형
@@ -250,12 +252,12 @@ def test_expected_opens_completes_within_budget_for_full_year_of_m1_candles() ->
     end = datetime(2027, 1, 1, tzinfo=UTC)
     session = _session(start, end)
 
-    began = time.perf_counter()
-    opens = expected_opens(start, end, Timeframe.M1, [session])
-    elapsed = time.perf_counter() - began
+    def run() -> list[datetime]:
+        return expected_opens(start, end, Timeframe.M1, [session])
 
+    sample = perf_budget.assert_within(run, budget_ms=3000)
+    opens = cast(list[datetime], sample.result)
     assert len(opens) == 525_600
-    assert elapsed < 3.0
 
 
 # --- DEEPEN(task-2946) 게이트 적색 재현(회귀 클래스) -----------------------------
