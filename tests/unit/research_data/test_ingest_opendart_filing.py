@@ -10,7 +10,6 @@ DEEPEN (task-10133): 빈 문서/결과셋 주입, API timeout/5xx 실패주입,
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -347,7 +346,7 @@ async def test_enqueue_failure_on_parse_error_propagates_not_swallowed() -> None
 
 
 @pytest.mark.perf
-def test_normalize_filing_bulk_meets_latency_budget() -> None:
+def test_normalize_filing_bulk_meets_latency_budget(perf_budget) -> None:
     """5,000 건 공시(다종목·다유형 배치 적재 시나리오) 정규화가 절대시간
     예산 내여야 한다."""
     from src.foundation.market_data.domain.corporate_action.opendart_filing import (
@@ -355,7 +354,7 @@ def test_normalize_filing_bulk_meets_latency_budget() -> None:
     )
 
     n = 5_000
-    budget_sec = 5.0  # 실측 로컬 <<1s, CI 편차 감안
+    budget_ms = 5_000.0  # 5.0초 → ms (단위: perf_budget.assert_within는 ms 기준)
     instrument_id = uuid4()
 
     filings = [
@@ -371,11 +370,58 @@ def test_normalize_filing_bulk_meets_latency_budget() -> None:
         for i in range(n)
     ]
 
-    start = time.perf_counter()
-    for f in filings:
-        normalize_filing(f)
-    elapsed = time.perf_counter() - start
+    def bulk_normalize() -> None:
+        for f in filings:
+            normalize_filing(f)
 
-    assert elapsed < budget_sec, (
-        f"normalize_filing({n}건) 소요 {elapsed:.3f}s — 예산 {budget_sec}s 초과"
-    )
+    perf_budget.assert_within(bulk_normalize, budget_ms=budget_ms, n=1)
+
+
+@pytest.mark.perf
+def test_normalize_filing_bulk_detects_ten_x_delay() -> None:
+    """예산 10배 지연 주입 → 적색 검출력 확인 (budget_ms=50_000, 5초×10).
+
+    실제 5,000건×0.5초=2,500초는 너무 길므로 샘플 100건으로 지연 검출력만
+    확인하고 (100×0.5초=50초 > budget 50초), 원본 테스트가 전체 배치 예산을
+    검증한다."""
+    import time
+
+    n = 100  # 지연 주입 테스트용 소량 샘플
+    budget_ms = 50_000.0  # 5초 × 10
+    instrument_id = uuid4()
+
+    filings = [
+        OpenDartFiling(
+            instrument_id=instrument_id,
+            rcept_no=f"20260302{i:06d}",
+            report_type="SPLIT",
+            event_date=date(2026, 4, 1),
+            known_at=_NOW,
+            split_ratio_before=Decimal("10000"),
+            split_ratio_after=Decimal("1000"),
+        )
+        for i in range(n)
+    ]
+
+    # normalize_filing을 일시적으로 치환 — 모듈 네임스페이스 직접 조작
+    import src.foundation.market_data.domain.corporate_action.opendart_filing as mod
+
+    original_normalize = mod.normalize_filing
+
+    def slow_normalize(filing) -> None:
+        time.sleep(0.5)  # 500ms 지연 → 100건 × 0.5초 = 50초 (budget 50초 초과)
+        original_normalize(filing)
+
+    mod.normalize_filing = slow_normalize
+    try:
+        start = time.perf_counter()
+        # 모듈 네임스페이스의 치환된 함수를 직접 호출
+        for f in filings:
+            mod.normalize_filing(f)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        # 지연 주입으로 예산 초과 → 적색
+        assert elapsed_ms > budget_ms, (
+            f"지연 주입 후 {elapsed_ms:.0f}ms — 예산 {budget_ms:.0f}ms 초과 (적색 검출 성공)"
+        )
+    finally:
+        mod.normalize_filing = original_normalize
