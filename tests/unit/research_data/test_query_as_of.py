@@ -16,7 +16,6 @@ DoD (D2 minimum):
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -29,6 +28,7 @@ from src.foundation.research_data.application.query import (
     search,
 )
 from src.foundation.research_data.contracts.v1 import ResearchItem
+from tests.conftest import PerfBudget
 
 # --- fixtures ---
 
@@ -162,12 +162,12 @@ def test_future_item_leak_injection() -> None:
 
 
 @pytest.mark.perf
-def test_search_latency_under_budget() -> None:
+def test_search_latency_under_budget(perf_budget: PerfBudget) -> None:
     """RD-7 performance: 10,000 items must search in < 300ms (budget=300).
 
-    This is a floor assertion — the actual implementation delegates to the
-    FA-9 bitemporal kernel which is O(n) per item, so 10k items should
-    complete well within budget on modern hardware.
+    Converted from raw perf_counter to perf_budget.assert_within().
+    Uses batch=10 so total wall time spans multiple process_time ticks
+    (15.6ms), avoiding the 0/15.6ms cliff. Budget stays in ms (units match).
     """
     items = [
         _item(
@@ -178,18 +178,19 @@ def test_search_latency_under_budget() -> None:
         for i in range(10_000)
     ]
 
-    start = time.perf_counter()
-    for _ in range(10):
-        search(
+    _sample = perf_budget.assert_within(
+        lambda: search(
             items,
             instruments=["KR:SYM0500"],
             kinds=["news"],
             as_of=datetime(2026, 6, 15, tzinfo=timezone.utc),
-        )
-    elapsed = time.perf_counter() - start
-
-    avg_ms = (elapsed / 10) * 1000
-    assert avg_ms < 300, f"search avg {avg_ms:.1f}ms exceeds 300ms budget"
+        ),
+        budget_ms=300.0,
+        n=5,
+        warmup=1,
+        batch=10,
+        label="10k items search avg < 300ms budget",
+    )
 
 
 # --- gate-red reproduction ---
