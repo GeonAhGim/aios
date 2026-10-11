@@ -15,7 +15,6 @@ risk/compliance gate composition.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -347,10 +346,15 @@ class TestFailureInjection:
 
 class TestPerformance:
     @pytest.mark.perf
-    def test_preview_order_p99_under_5ms_pre_trade_gate_budget(self):
+    def test_preview_order_p99_under_5ms_pre_trade_gate_budget(self, perf_budget) -> None:
         """Budget: ADR-2026-09-09-C Decision 1 §23 "사전거래 게이트 p99 5ms" —
         preview_order runs the same two authorities a real pre-trade gate
-        does, read-only, so it must fit the same budget."""
+        does, read-only, so it must fit the same budget.
+
+        task-11800: raw perf_counter() → perf_budget.cpu_ms 전환.
+        batch=10으로 500회 → 총 5000 호출, 평균 10회 묶어 호출당 값 추출.
+        단위: ms(예산도 ms).
+        """
         before = _make_state()
         risk_inputs = _risk_inputs()
         mandate = _mandate()
@@ -365,10 +369,7 @@ class TestPerformance:
             now=_NOW,
         )
 
-        iterations = 500
-        samples: list[float] = []
-        for _ in range(iterations):
-            start = time.perf_counter()
+        def _run_once() -> None:
             preview_order(
                 before=before,
                 trade=BUY_AAPL,
@@ -377,10 +378,10 @@ class TestPerformance:
                 mandate=mandate,
                 now=_NOW,
             )
-            samples.append((time.perf_counter() - start) * 1000)
 
+        samples = [s.cpu_ms for s in perf_budget.samples(_run_once, n=500, batch=10)]
         samples.sort()
-        p99_ms = samples[int(iterations * 0.99) - 1]
+        p99_ms = samples[int(len(samples) * 0.99) - 1]
         assert p99_ms < 5.0, f"preview_order p99 = {p99_ms:.3f} ms, budget is 5 ms"
 
 
