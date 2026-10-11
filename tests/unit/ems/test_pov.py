@@ -23,6 +23,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -346,26 +347,64 @@ class TestPerformanceBenchmark:
 
     @pytest.mark.perf
     def test_plan_pov_schedule_p99_latency_under_budget(
-        self, parent_order: ParentOrder
+        self, parent_order: ParentOrder, perf_budget
     ) -> None:
         """Measure wall-clock latency of `plan_pov_schedule` over its full
         390-slice plan across repeated runs and assert p99 < 50ms."""
         slice_count = _slice_count(parent_order)
         volume_profile = [Decimal("10000000")] * slice_count
 
-        durations_ms: list[float] = []
-        for _ in range(self._ITERATIONS):
-            start = time.perf_counter()
-            children = plan_pov_schedule(parent_order, volume_profile=volume_profile)
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            durations_ms.append(elapsed_ms)
-        assert children
+        # batch=10: 1회 호출당 process_time tick 오차를 15.6/10≈1.6ms로 줄임.
+        # perf_budget.samples()는 coverage tracer 일시정지 + best-of-N 분포
+        # 제공. wall_ms(μs 아님, ms 단위)를 직접 추출해 p99 계산.
+        raw_samples = perf_budget.samples(
+            lambda: plan_pov_schedule(parent_order, volume_profile=volume_profile),
+            n=self._ITERATIONS,
+            batch=10,
+        )
+        assert raw_samples  # non-empty list guard
 
-        durations_ms.sort()
-        p99_index = min(len(durations_ms) - 1, int(len(durations_ms) * 0.99))
-        p99_ms = durations_ms[p99_index]
+        wall_ms_samples = sorted(s.wall_ms for s in raw_samples)
+        p99_ms = wall_ms_samples[min(len(wall_ms_samples) - 1, int(len(wall_ms_samples) * 0.99))]
         assert p99_ms < self._P99_BUDGET_MS, (
             f"plan_pov_schedule p99 latency {p99_ms:.3f}ms exceeds the "
             f"{self._P99_BUDGET_MS}ms SLO budget over {self._ITERATIONS} runs "
             f"({slice_count} slices/run)"
         )
+
+    @pytest.mark.perf
+    def test_plan_pov_schedule_p99_budget_catches_regression(
+        self, parent_order: ParentOrder, perf_budget
+    ) -> None:
+        """게이트 적색 재현 — plan_pov_schedule 내부에 인위 지연을 주입해 p99
+        예산 단언이 실제로 AssertionError를 내는지 확인한다.
+
+        10배 지연(0.5s sleep)을 주입하면 batch=10로 나눠도 50ms > 50ms 예산
+        단언이 실패해야 한다(타우톨로지 아님을 증명).
+        """
+        real_plan = plan_pov_schedule
+
+        def _slow_plan(*args, **kwargs):
+            time.sleep(0.5)  # 500ms 지연 → budget 50ms 단언이 적색이어야 함
+            return real_plan(*args, **kwargs)
+
+        slice_count = _slice_count(parent_order)
+        volume_profile = [Decimal("10000000")] * slice_count
+
+        with patch(__name__ + ".plan_pov_schedule", _slow_plan):
+            raw_samples = perf_budget.samples(
+                lambda: plan_pov_schedule(parent_order, volume_profile=volume_profile),
+                n=5,
+                batch=10,
+            )
+
+        wall_ms_samples = sorted(s.wall_ms for s in raw_samples)
+        p99_ms = wall_ms_samples[min(len(wall_ms_samples) - 1, int(len(wall_ms_samples) * 0.99))]
+        with pytest.raises(AssertionError) as exc_info:
+            assert p99_ms < self._P99_BUDGET_MS, (
+                f"plan_pov_schedule p99 latency {p99_ms:.3f}ms exceeds the "
+                f"{self._P99_BUDGET_MS}ms SLO budget over {self._ITERATIONS} runs "
+                f"({slice_count} slices/run)"
+            )
+        # 지연 주입으로 인해 AssertionError가 발생했음을 확인
+        assert "exceeds" in str(exc_info.value)
