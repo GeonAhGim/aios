@@ -16,8 +16,34 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import asyncpg
+import pytest
+
 from src.services.oms.application import order_query
 from tests.integration.oms.conftest import create_test_user, insert_order
+from tests.support.db import drop_worker_database, ensure_worker_database, template_database_url
+
+
+@pytest.fixture
+async def isolated_event_pool():
+    """The event-query seed intentionally omits the companion order UPDATE.
+
+    Its WORM event cannot be deleted, so dispose of the entire clone even
+    when assertions or pool creation fail (task-11767, FA-15/L4-26).
+    """
+    template = template_database_url()
+    clone_id = "ct" + uuid4().hex[:8]
+    url = await ensure_worker_database(template, clone_id)
+    try:
+        pool = await asyncpg.create_pool(
+            url.replace("postgresql+asyncpg://", "postgresql://"), min_size=1, max_size=2
+        )
+        try:
+            yield pool
+        finally:
+            await pool.close()
+    finally:
+        await drop_worker_database(template, clone_id)
 
 
 async def test_get_order_cross_tenant_does_not_leak_existence(pool) -> None:
@@ -71,7 +97,8 @@ async def test_list_orders_for_tenant_with_no_orders_is_empty(pool) -> None:
     assert cursor is None
 
 
-async def test_list_order_events_cross_tenant_does_not_leak_existence(pool) -> None:
+async def test_list_order_events_cross_tenant_does_not_leak_existence(isolated_event_pool) -> None:
+    pool = isolated_event_pool
     owner_id = await create_test_user(pool)
     attacker_id = await create_test_user(pool)
     async with pool.acquire() as conn:

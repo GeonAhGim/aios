@@ -7,16 +7,13 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal
 
 import asyncpg
 import pytest
 
-from scripts import replay_verify
 from src.data.models.base import Currency
 from src.foundation.ledger.contracts.v1 import AccountType
 
@@ -105,69 +102,3 @@ async def create_ledger_account(
         )
     return account_code
 
-
-@pytest.fixture(scope="module")
-async def _sentinel_pool():
-    """Own module-scoped pool for the sentinel below -- the `pool` fixture
-    above is function-scoped (a fresh pool per test, closed at test
-    teardown), so a module-scoped fixture cannot depend on it
-    (`ScopeMismatch`, task-11517). Separate pool, separate lifecycle."""
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
-    yield p
-    await p.close()
-
-
-@pytest.fixture(scope="module", autouse=True)
-async def _sentinel_watch_orders_residue(_sentinel_pool):
-    """D3 test harness: watch for orphaned orders rows (no matching event).
-
-    Sentinel hook runs after each module to detect if any test left an orders
-    row without the corresponding order_event(s). This catches the residue class
-    task-11356 partially fixed (orders row mutated without an event), catching
-    the originating test instead of the victim test (test_resync_drift).
-
-    Simple variant: count orders table mutations. A test that commits an orders
-    row change without a matching event will be pinned down when replay_verify
-    sees the mismatch.
-    """
-
-    async def _get_orders_count() -> int:
-        """Count rows in orders table; covers the shared TEST_DATABASE_URL."""
-        async with _sentinel_pool.acquire() as conn:
-            count = await conn.fetchval("SELECT count(*) FROM orders")
-        return count or 0
-
-    # Record baseline before module tests run
-    orders_count_before = await _get_orders_count()
-
-    yield
-
-    # After all tests in module, check for drift
-    orders_count_after = await _get_orders_count()
-    as_of = datetime.now(timezone.utc)
-
-    # Run replay_verify to catch any orders row ↔ event mismatch. The verify()
-    # call itself is wrapped so infrastructure failures (network/schema) don't
-    # mask the deliberate AssertionError raised below -- catching Exception
-    # around both would swallow our own raise since AssertionError is-a Exception.
-    try:
-        verify_result = await replay_verify.verify(_sentinel_pool, as_of=as_of, hours=24)
-    except Exception as e:  # noqa: BLE001 -- verify() infra failure (network/schema) must not block the module; logged for manual triage instead
-        logging.getLogger(__name__).warning(
-            "Sentinel watch aborted: replay_verify.verify() failed (%s)", e
-        )
-        return
-
-    if not verify_result.ok:
-        mismatches = [
-            m
-            for m in verify_result.mismatches
-            if m.domain == "orders" or (hasattr(m, "key") and isinstance(m.key, str))
-        ]
-        if mismatches:
-            msg = (
-                f"Sentinel: orders residue detected after module teardown. "
-                f"Table mutations: {orders_count_before} → {orders_count_after}. "
-                f"Mismatches: {mismatches}"
-            )
-            raise AssertionError(msg)

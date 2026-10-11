@@ -479,3 +479,9 @@ def perf_budget() -> PerfBudget:
     `perf_budget.assert_within(fn, budget_ms=...)`, p95 등 분포가 필요하면
     `perf_budget.samples(fn, n=...)`을 직접 쓴다."""
     return PerfBudget()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    from tests.support.orders_residue import OrdersResidueSentinel
+
+    config.pluginmanager.register(OrdersResidueSentinel(_TEST_DATABASE_URL), "orders-residue")
