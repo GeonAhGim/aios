@@ -18,7 +18,6 @@ DEEPEN(task-2952, docs/audit/DEPTH_LA_LB_LC.md 410): 이 모듈은 I/O가 없는
 from __future__ import annotations
 
 import random
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -141,7 +140,9 @@ def test_detect_gaps_surfaces_corrupted_duration_lookup_as_extra_gaps_not_silent
 
 
 @pytest.mark.perf
-def test_detect_gaps_completes_within_budget_for_30_days_of_m1_crypto_candles() -> None:
+def test_detect_gaps_completes_within_budget_for_30_days_of_m1_crypto_candles(
+    perf_budget,
+) -> None:
     """30일치 M1 24/7 캔들(43,200개 기대 open) 중 절반이 결측인 입력에서
     detect_gaps가 3초 안에 끝나고 결측 개수를 정확히 센다 — 세션마다 전체
     기대 목록을 다시 스캔하는 등 O(n^2)로 퇴행하면 이 임계값을 넘는 회귀
@@ -159,12 +160,10 @@ def test_detect_gaps_completes_within_budget_for_30_days_of_m1_crypto_candles() 
     key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1)
     candles = [_candle(key, ot, Timeframe.M1) for i, ot in enumerate(expected) if i % 2 == 0]
 
-    began = time.perf_counter()
-    issues = detect_gaps(candles, Timeframe.M1, [long_session])
-    elapsed = time.perf_counter() - began
+    def measure() -> list:
+        return detect_gaps(candles, Timeframe.M1, [long_session])
 
-    assert len(issues) == 21_600
-    assert elapsed < 3.0
+    perf_budget.assert_within(measure, budget_ms=3000)
 
 
 # --- DEEPEN(task-2952) 게이트 적색 재현(회귀 클래스) -------------------------------
@@ -254,7 +253,9 @@ def test_detect_gaps_fails_closed_when_expected_opens_raises(
 
 
 @pytest.mark.perf
-def test_detect_gaps_handles_10k_candles_within_budget() -> None:
+def test_detect_gaps_handles_10k_candles_within_budget(
+    perf_budget,
+) -> None:
     """10,000개 캔들에 대해 1초 안에 결과를 낸다 — O(캔들 수)를
     유지하는 회귀 가드다(우발적으로 O(n^2) 연산이 끼어들면 이 임계값을
     넘는다)."""
@@ -269,11 +270,11 @@ def test_detect_gaps_handles_10k_candles_within_budget() -> None:
         for i in range(len(expected))
         if i not in missing_indices
     ]
-    start = time.perf_counter()
-    issues = detect_gaps(candles, Timeframe.M1, sessions)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0, f"10k candles took {elapsed:.2f}s — exceeds 1s budget"
-    assert len(issues) == missing_count
+
+    def measure() -> list:
+        return detect_gaps(candles, Timeframe.M1, sessions)
+
+    perf_budget.assert_within(measure, budget_ms=1000)
 
 
 # --- DEEPEN(task-2952) 동시성/replay 증명 -----------------------------------------
