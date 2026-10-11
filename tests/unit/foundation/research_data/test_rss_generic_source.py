@@ -3,9 +3,9 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md sec.9 RD-15
 DoD ("link_only 강제, 사용자 RSS 등록").
 """
+
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
@@ -22,6 +22,7 @@ from src.foundation.research_data.adapters.sources.rss_generic import (
     fetch_rss_feed,
     parse_rss_feed,
 )
+from tests.conftest import PerfBudget
 
 _COLLECTED_AT = datetime(2026, 9, 24, 6, 5, 0, tzinfo=timezone.utc)
 
@@ -162,16 +163,34 @@ async def test_fetch_rss_feed_builds_items_on_success() -> None:
 
 
 @pytest.mark.perf
-def test_parse_rss_feed_throughput_floor() -> None:
+def test_parse_rss_feed_throughput_floor(perf_budget: PerfBudget) -> None:
+    """2,000 항목 RSS 파싱이 CPU 시간 예산 내여야 한다 — wall clock(
+    time.perf_counter)은 CI xdist 부하에 흔들려 `perf_budget`가
+    측정하는 `time.process_time()` CPU 시간으로만 단언한다.
+
+    budget_ms=1_000.0 (1초 CPU): 이전 raw perf_counter 단언이 요구한
+    throughput > 2,000/s (2,000 항목 ÷ 1초)와 동등한 예산을 ms 단위로
+    옮긴 것. batch=8로 묶어 process_time 15.6mstick 양자화 오차를
+    호출당 ~2ms로 낮춘다(1초 ÷ 8 ≈ 125ms/번 > tick).
+    """
     items_xml = "".join(
         f"<item><title>T{i}</title><link>https://example.com/{i}</link>"
         f"<guid>guid-{i}</guid><pubDate>Wed, 23 Sep 2026 06:00:00 GMT</pubDate></item>"
         for i in range(2_000)
     )
-    feed = f"<rss version=\"2.0\"><channel><title>Big</title>{items_xml}</channel></rss>"
-    started = time.perf_counter()
-    entries = parse_rss_feed(feed)
-    elapsed = time.perf_counter() - started
-    assert len(entries) == 2_000
-    throughput = len(entries) / elapsed
-    assert throughput > 2_000, f"parse_rss_feed throughput too low: {throughput:.0f}/s"
+    feed = f'<rss version="2.0"><channel><title>Big</title>{items_xml}</channel></rss>'
+
+    sample = perf_budget.sample(
+        lambda: parse_rss_feed(feed),
+        batch=8,
+    )
+    assert len(sample.result) == 2_000  # 결과 정정성
+
+    budget_ms = 1_000.0
+    perf_budget.assert_within(
+        lambda: parse_rss_feed(feed),
+        budget_ms=budget_ms,
+        n=3,
+        batch=8,
+        label="parse_rss_feed 2,000 items",
+    )
