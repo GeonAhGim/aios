@@ -21,7 +21,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -34,6 +33,7 @@ from src.foundation.backtest.domain.vector_oss_eval_gate import (
     assert_vector_oss_eval_gate,
     extract_declared_dependencies,
 )
+from tests.conftest import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EVAL_PATH = _REPO_ROOT / "docs" / "design" / "BACKTEST_VECTOR_EVAL.md"
@@ -134,17 +134,17 @@ def test_failure_injection_read_oserror_surfaces_as_gate_red(
 
 
 @pytest.mark.perf
-def test_perf_gate_under_budget(eval_text: str, pyproject_text: str) -> None:
-    n = 1000
-    budget_sec = 2.0
-    assert_vector_oss_eval_gate(eval_text, pyproject_text)  # warm
-    start = time.perf_counter()
-    for _ in range(n):
-        assert_vector_oss_eval_gate(eval_text, pyproject_text)
-    elapsed = time.perf_counter() - start
-    print(f"[BT-14 vector_oss_eval_gate] {n} runs {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"{n}회 게이트 실행이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+def test_perf_gate_under_budget(
+    eval_text: str,
+    pyproject_text: str,
+    perf_budget: PerfBudget,
+) -> None:
+    perf_budget.assert_within(
+        lambda: assert_vector_oss_eval_gate(eval_text, pyproject_text),
+        budget_ms=2.0,
+        batch=100,
+        n=5,
+        label="[BT-14 vector_oss_eval_gate]",
     )
 
 
