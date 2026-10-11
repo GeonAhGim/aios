@@ -11,9 +11,9 @@ DEPTH_DC_RD(task-2726)가 task-2401을 D0로 판정했다(문서 1건·코드/�
 3. 성능 단언 — 실제 EVAL.md 1,000회 파싱이 절대시간 예산 내.
 4. 게이트 적색 재현 — CLI `main()`이 변조 문서에서 exit 1, 원문은 exit 0.
 """
+
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -26,6 +26,7 @@ from src.foundation.research_data.domain.source_eval_gate import (
     assert_source_eval_gate,
     parse_source_eval_markdown,
 )
+from tests.conftest import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EVAL_PATH = _REPO_ROOT / "docs" / "design" / "RESEARCH_DATA_SOURCE_EVAL.md"
@@ -142,24 +143,62 @@ def test_failure_injection_section_table_drift(eval_text: str) -> None:
 
 
 @pytest.mark.perf
-def test_perf_parse_eval_markdown_under_budget(eval_text: str) -> None:
-    n = 1000
-    budget_sec = 2.0
-    # Warm once so first-parse import noise is outside the window.
-    assert_source_eval_gate(eval_text)
-    start = time.perf_counter()
-    for _ in range(n):
-        assert_source_eval_gate(eval_text)
-    elapsed = time.perf_counter() - start
-    print(f"[RD-1 source_eval_gate] {n} parses {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"{n}회 파싱이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+def test_perf_parse_eval_markdown_under_budget(eval_text: str, perf_budget: PerfBudget) -> None:
+    # budget=2.0s → 2000ms for 1000 parses; batch=100 so total CPU time
+    # exceeds process_time tick (15.6ms) and quantisation error drops to
+    # ~0.16ms per call.
+    def parse_100() -> None:
+        for _ in range(100):
+            assert_source_eval_gate(eval_text)
+
+    sample = perf_budget.sample(parse_100, batch=10)  # 10×100=1000 total
+    budget_ms = 2000.0
+    print(
+        f"[RD-1 source_eval_gate] 1000 parses cpu={sample.cpu_ms:.3f}ms (budget<{budget_ms:.3f}ms)"
+    )
+    assert sample.cpu_ms < budget_ms, (
+        f"1000회 파싱이 예산({budget_ms:.3f}ms)을 넘었습니다({sample.cpu_ms:.3f}ms)."
     )
 
 
-def test_gate_red_cli_rejects_mutated_document(
-    eval_text: str, tmp_path: Path
+@pytest.mark.perf
+def test_perf_parse_eval_markdown_budget_injection_fails_red(
+    eval_text: str,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Budget injection: add ~90× CPU work per parse so total exceeds 2000ms.
+
+    Confirms the perf assertion is *sensitive* — a sufficiently slowed hot path
+    must go red, not pass silently.
+    """
+    from src.foundation.research_data.domain.source_eval_gate import (
+        assert_source_eval_gate as _orig,
+    )
+
+    def _slow(*args: object, **kwargs: object) -> object:
+        result = _orig(*args, **kwargs)
+        # ~15ms CPU work per call → ~15s for 1000 calls (>> 2000ms budget)
+        _ = sum(i * i for i in range(600000))
+        return result
+
+    import src.foundation.research_data.domain.source_eval_gate as mod
+
+    monkeypatch.setattr(mod, "assert_source_eval_gate", _slow)
+
+    def parse_100() -> None:
+        for _ in range(100):
+            mod.assert_source_eval_gate(eval_text)
+
+    sample = perf_budget.sample(parse_100, batch=10)
+    budget_ms = 2000.0
+    assert sample.cpu_ms >= budget_ms, (
+        f"Injection test failed: cpu={sample.cpu_ms:.3f}ms did not exceed "
+        f"budget({budget_ms:.3f}ms) — the assertion is not sensitive enough."
+    )
+
+
+def test_gate_red_cli_rejects_mutated_document(eval_text: str, tmp_path: Path) -> None:
     # Drop the entire OpenDART numbered section so LAYER_A coverage fails.
     start = eval_text.index("## 1. OpenDART")
     end = eval_text.index("## 2. ECOS")
