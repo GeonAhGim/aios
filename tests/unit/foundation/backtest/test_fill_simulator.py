@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import ast
 import inspect
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +26,7 @@ from src.foundation.backtest.domain.rules import (
     assert_fill_after_signal,
 )
 from src.foundation.backtest.ports.fill_simulator import FillSimulatorPort
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
 
@@ -207,7 +207,7 @@ def test_wrapper_fill_bar_index_caught_by_domain_lookahead_rule_on_regression() 
 
 
 @pytest.mark.perf
-def test_bar_fill_simulator_throughput_budget() -> None:
+def test_bar_fill_simulator_throughput_budget(perf_budget: PerfBudget) -> None:
     """`BarFillSimulator.simulate()` runs once per pending-order fill on
     every bar of the replay loop (`run_backtest.py`); 10,000 calls must stay
     well under a 300ms budget to rule out an accidental O(n) loop or Decimal
@@ -215,7 +215,19 @@ def test_bar_fill_simulator_throughput_budget() -> None:
     cost_model = CostModel(fee_bps=Decimal("5"), slippage_bps=Decimal("10"))
     bar = _bar(open_price="100")
     simulator = BarFillSimulator()
-    start = time.perf_counter()
+    perf_budget.assert_within(
+        lambda: _run_fill_batch(simulator, bar, cost_model),
+        budget_ms=300,
+        batch=1,
+    )
+
+
+def _run_fill_batch(
+    simulator: BarFillSimulator,
+    bar: Candle,
+    cost_model: CostModel,
+) -> None:
+    """10,000 simulate() calls — batched to amortise process_time quantisation."""
     for i in range(10_000):
         simulator.simulate(
             bar=bar,
@@ -225,8 +237,6 @@ def test_bar_fill_simulator_throughput_budget() -> None:
             cost_model=cost_model,
             seed=0,
         )
-    elapsed = time.perf_counter() - start
-    assert elapsed < 0.3, f"10,000 simulate() calls took {elapsed * 1000:.2f}ms, budget 300ms"
 
 
 # -- D2 gate-red repro ---------------------------------------------------------
