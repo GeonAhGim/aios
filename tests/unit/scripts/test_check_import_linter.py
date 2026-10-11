@@ -387,6 +387,8 @@ def test_build_graph_overlaps_io_bound_reads(
     직렬화로의 회귀 포함)가 로컬 게이트를 항상 통과하고 production CI에서만 드러났다.
     이 테스트는 SCAN_WORKERS=1(직렬)과 실제 설정값을 같은 인위 지연 하에서 비교해,
     스레드풀이 I/O 대기를 겹치지 못하는 회귀를 로컬에서 즉시 잡는다.
+
+    raw perf_counter() 단언을 RelativeBudget(mode="wall")로 전환(task-11827).
     """
     n_files = 60
     _touch_pkg(tmp_path, "src", "foundation")
@@ -402,23 +404,24 @@ def test_build_graph_overlaps_io_bound_reads(
 
     monkeypatch.setattr(cil, "_read_file", _slow_read_file)
 
-    def _timed(workers: int) -> float:
-        monkeypatch.setattr(cil, "SCAN_WORKERS", workers)
-        start = time.perf_counter()
-        graph = cil.build_graph(tmp_path)
-        elapsed = time.perf_counter() - start
-        assert len(graph) >= n_files
-        return elapsed
+    budget = RelativeBudget()
 
-    serial_elapsed = _timed(workers=1)
-    parallel_elapsed = _timed(workers=24)
+    def _build(workers: int) -> list:
+        monkeypatch.setattr(cil, "SCAN_WORKERS", workers)
+        return list(cil.build_graph(tmp_path).keys())
+
+    # Use RelativeBudget.measure(mode="wall") for I/O-bound measurement.
+    # batch=N groups calls so total time exceeds the ~15.6ms process_time tick
+    # quantization; wall mode preserves sleep() duration that CPU mode would miss.
+    serial_sample = budget.measure(lambda: _build(workers=1), mode="wall", n=3, warmup=1)
+    parallel_sample = budget.measure(lambda: _build(workers=24), mode="wall", n=3, warmup=1)
 
     # Serial pays ~n_files * delay_s (0.6s here); a working pool overlaps that wait so
     # parallel should land well under half of it -- generous enough margin for CI jitter
     # while still catching a de-parallelization regression (e.g. SCAN_WORKERS silently
     # dropped to 1, or a future refactor back to a plain serial loop).
-    assert parallel_elapsed < serial_elapsed / 2, (
-        f"parallel={parallel_elapsed:.3f}s serial={serial_elapsed:.3f}s -- "
+    assert parallel_sample.op_ms < serial_sample.op_ms / 2, (
+        f"parallel={parallel_sample.op_ms:.3f}ms serial={serial_sample.op_ms:.3f}ms -- "
         "I/O reads are not overlapping (this is the exact defect class that reopened "
         "esc-ci-import_linter three times: task-8752/8845/8930)"
     )
