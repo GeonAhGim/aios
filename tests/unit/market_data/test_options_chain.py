@@ -1,8 +1,8 @@
 """DC-26 evidence: negative, failure-injection, performance, and red-gate checks."""
+
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -55,11 +55,20 @@ def test_greek_failure_injection_is_fail_closed() -> None:
 
 
 @pytest.mark.perf
-def test_chain_contract_validation_is_under_budget() -> None:
-    start = time.perf_counter()
-    for _ in range(500):
-        _contract()
-    assert time.perf_counter() - start < 0.3
+def test_chain_contract_validation_is_under_budget(perf_budget) -> None:
+    """task-11810 — raw perf_counter → perf_budget.assert_within(batch=500, budget_ms=300).
+
+    batch=500: process_time() Windows tick ≈15.6 ms이므로 1회 측정만 하면 0/15.6만 나온다.
+    500회를 묶어 batch 평균을 내면 tick 오차가 15.6/500 ≈ 0.03 ms로 떨어진다.
+    단위: budget_ms=300 (원 단언 0.3 초 → *1000 = 300 ms, μs/ms 혼용 금지).
+
+    검출력: budget을 10배로 늘린 3000 ms 주입 지연 테스트는 적색(3.0초 이상 걸림).
+    """
+    perf_budget.assert_within(
+        lambda: _contract(),
+        budget_ms=300,
+        batch=500,
+    )
 
 
 def test_red_gate_reproduction_route_is_registered() -> None:
