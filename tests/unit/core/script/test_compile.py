@@ -36,6 +36,7 @@ from src.core.script.grammar.parser import parse
 from src.core.script.ir import IR_VERSION, IRProgram, ScriptLowerError, to_bytes
 from src.core.script.ir.lower import lower_program
 from src.core.script.typing.types import Type
+from tests.conftest import PerfBudget
 
 SAMPLE = (
     "input length: int = 14\n"
@@ -104,6 +105,7 @@ def test_compile_p95_latency_within_adr_budget() -> None:
 @pytest.mark.perf
 def test_compile_still_returns_correct_result_when_a_pipeline_stage_stalls(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """실패 주입: DSL-7 로우어링 단계가 실제로 느려지면(예: 외부 지표 레지스트리
     조회 hang) `compile_source`가 그 지연을 숨기지 않고 그대로 감내한 뒤에도
@@ -119,14 +121,14 @@ def test_compile_still_returns_correct_result_when_a_pipeline_stage_stalls(
 
     monkeypatch.setattr("src.core.script.artifact.compile.lower_program", _stalled_lower)
 
-    started = time.perf_counter()
-    compiled = compile_source(SAMPLE, registry_version=REG)
-    elapsed = time.perf_counter() - started
-
-    # Windows 타이머 해상도상 time.sleep(delay_s)가 요청한 시간보다 근소하게(<1ms) 일찍
-    # 반환할 수 있어, 지연이 실제로 감내됐는지는 90% 문턱으로 확인한다(정확히 delay_s 이상을
-    # 요구하면 타이머 해상도 노이즈로 flaky해진다).
-    assert elapsed >= delay_s * 0.9
+    # Sleep is observable only in wall time; CPU time excludes this injected stall.
+    # Batch averaging preserves the original 90% lower bound in milliseconds.
+    sample = perf_budget.sample(
+        lambda: compile_source(SAMPLE, registry_version=REG), batch=128
+    )
+    assert sample.wall_ms >= delay_s * 1000 * 0.9
+    compiled = sample.result
+    assert isinstance(compiled, CompiledScript)
     assert compiled.script_hash == script_hash(source=SAMPLE, ir=compiled.ir, registry_version=REG)
 
 
