@@ -13,7 +13,6 @@ import importlib.util
 import json
 import re
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -325,9 +324,14 @@ def test_main_exits_red_when_a_checker_crash_is_a_new_unbaselined_finding(
 
 
 @pytest.mark.perf
-def test_run_completes_within_time_budget_when_many_checkers_fail(monkeypatch) -> None:
+@pytest.mark.perf
+def test_run_completes_within_time_budget_when_many_checkers_fail(monkeypatch, perf_budget) -> None:
     """성능단언: 격리 로직(try/except)이 검사 수백 개 규모에서도 예외 처리
-    오버헤드로 예산을 넘기지 않는지 확인한다."""
+    오버헤드로 예산을 넘기지 않는지 확인한다.
+
+    raw perf_counter → perf_budget.sample(batch) 전환(task-11824).
+    batch=100으로 묶어 process_time 양자화 오차(15.6ms 틱)를 호출당 0.16ms로
+    낮춤. 예산 1000ms(ms 단위 일치)."""
     checks = []
     for i in range(300):
         if i % 2 == 0:
@@ -342,12 +346,11 @@ def test_run_completes_within_time_budget_when_many_checkers_fail(monkeypatch) -
         checks.append(_c)
     monkeypatch.setattr(check_audit_regressions, "CHECKS", checks)
 
-    start = time.perf_counter()
-    findings = check_audit_regressions.run()
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.sample(lambda: check_audit_regressions.run(), batch=100)
+    findings = sample.result
 
     assert len(findings) == 150  # 절반만 예외로 죽어 Finding을 남김
-    assert elapsed < 1.0, f"run()이 {elapsed:.3f}s — 예산(1.0s) 초과"
+    assert sample.cpu_ms < 1000.0, f"run()이 {sample.cpu_ms:.3f}ms — 예산(1000ms) 초과"
 
 
 def test_finding_rejects_missing_constructor_arguments() -> None:
