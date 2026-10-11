@@ -54,6 +54,7 @@ from src.core.strategy.condition_evaluator import (
     IndicatorDataMissingError,
     extract_indicator_keys,
 )
+from tests.conftest import PerfBudget
 
 State = dict[str, float]
 Case = tuple[str, State, State | None, bool]
@@ -158,21 +159,21 @@ def test_all_fixture_cases_are_covered() -> None:
 # ---- DEEPEN(task-2921): 수치 성능 단언 ----
 
 
+def _bridge_cases() -> None:
+    for expr, _, _, _ in ALL_CASES:
+        bridge_cond_v2(expr)
+
+
 @pytest.mark.perf
-def test_bridge_latency_p95_within_compile_budget_slice() -> None:
-    """DEEPEN(task-2921): ADR-2026-09-09-C Decision 1 'DSL 컴파일 300ms' 예산 중
-    브리지(정규식 분해 + 레지스트리 조회 + DSL-3 재파싱) 몫을 20ms로 상한, 전체
-    케이스 배치를 30회 반복한 p95로 잰다(이전
-    `test_all_fixture_cases_are_covered_and_latency_printed`는 print만 하고
-    단언을 의도적으로 피했다 — task-2727 DEPTH 감사 지적)."""
-    samples: list[float] = []
-    for _ in range(30):
-        started = time.perf_counter()
-        for expr, _, _, _ in ALL_CASES:
-            bridge_cond_v2(expr)
-        samples.append(time.perf_counter() - started)
-    samples.sort()
-    p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)] * 1000
+def test_bridge_latency_p95_within_compile_budget_slice(perf_budget: PerfBudget) -> None:
+    """DSL-10: 전체 케이스당 CPU p95를 컴파일 예산 중 20ms와 비교한다.
+
+    64회씩 묶어 Windows CPU 클록 틱을 상쇄하고 30개 샘플을 유지한다.
+    cpu_ms는 전체 케이스 1회당 ms이므로 추가 단위 변환은 하지 않는다.
+    """
+    samples = perf_budget.samples(_bridge_cases, n=30, batch=64)
+    cpu_ms = sorted(sample.cpu_ms for sample in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
     budget_ms = 20.0
     print(f"[DSL-10 bridge] {len(ALL_CASES)} cases p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms")
     assert p95_ms < budget_ms
@@ -181,25 +182,26 @@ def test_bridge_latency_p95_within_compile_budget_slice() -> None:
 @pytest.mark.perf
 def test_bridge_budget_gate_actually_fails_when_batch_stalls_past_20ms(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
-    """게이트 적색 재현: 브리지 내부에서 쓰는 DSL-3 `parse`가 실제로 느려지면
-    `test_bridge_latency_p95_within_compile_budget_slice`와 동일한 단언식이
-    진짜로 `AssertionError`를 내는지(= CI가 빨간불이 되는지) 확인한다 — 그
-    단언이 항상 통과하는 tautology가 아님을 보장한다."""
+    """parse에 예산 10배 CPU 지연을 주입해 동일한 ms 단언의 적색을 확인한다."""
     original_parse = bridge_mod.parse
 
     def _stalled_parse(source: str):
-        time.sleep(0.025)  # > 20ms 예산(단일 케이스도 초과)
+        deadline = time.process_time() + 0.200
+        while time.process_time() < deadline:
+            pass
         return original_parse(source)
 
     monkeypatch.setattr(bridge_mod, "parse", _stalled_parse)
-
-    started = time.perf_counter()
-    bridge_cond_v2(ALL_CASES[0][0])
-    elapsed_ms = (time.perf_counter() - started) * 1000
+    samples = perf_budget.samples(
+        lambda: bridge_cond_v2(ALL_CASES[0][0]), n=3, batch=4, warmup=0,
+    )
+    cpu_ms = sorted(sample.cpu_ms for sample in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
     budget_ms = 20.0
     with pytest.raises(AssertionError):
-        assert elapsed_ms < budget_ms
+        assert p95_ms < budget_ms
 
 
 # ---- DEEPEN(task-2921): 실패 주입 ----
