@@ -19,7 +19,6 @@ DEEPEN(task-2951, docs/audit/DEPTH_LA_LB_LC.md 391): 이 모듈도 I/O 없는
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -31,6 +30,7 @@ from src.foundation.market_data.domain.reference.lifecycle import (
     LifecycleTransitionError,
     transition,
 )
+from tests.conftest import PerfBudget
 
 _EVENTS: tuple[LifecycleEvent, ...] = ("LIST", "SUSPEND", "RESUME", "DELIST", "RENAME")
 
@@ -42,6 +42,17 @@ _ALLOWED: dict[tuple[SymbolStatus, LifecycleEvent], SymbolStatus] = {
     (SymbolStatus.SUSPENDED, "DELIST"): SymbolStatus.DELISTED,
     (SymbolStatus.LISTED, "RENAME"): SymbolStatus.LISTED,
 }
+
+
+def _bulk_lookup(states: list[SymbolStatus]) -> None:
+    """5만 회 전이표 조회 — perf_budget.batch 묶음으로 측정한다."""
+    for i in range(50_000):
+        state = states[i % len(states)]
+        event = _EVENTS[i % len(_EVENTS)]
+        try:
+            transition(state, event)
+        except LifecycleTransitionError:
+            pass
 
 
 @pytest.mark.parametrize("state", list(SymbolStatus))
@@ -110,24 +121,23 @@ def test_transition_fails_closed_when_table_is_cleared(
 
 
 @pytest.mark.perf
-def test_transition_completes_within_budget_for_bulk_lookups() -> None:
-    """전이표 조회는 O(1) 딕셔너리 lookup이라, 20만 회 반복 호출(허용/거부
-    조합 균등 혼합)이 1초 안에 끝난다 — 향후 리팩터가 이를 순차 if-elif
-    체인이나 리포지토리 조회를 곁들인 O(n) 경로로 퇴행시키면 이 임계값을
-    넘는다.
+def test_transition_completes_within_budget_for_bulk_lookups(
+    perf_budget: PerfBudget,
+) -> None:
+    """전이표 조회는 O(1) 딕셔너리 lookup이라, 5만 회 반복 호출(허용/거부
+    조합 균등 혼합)이 125ms 안에 끝난다 — process_time() 15.6ms 틱 양자화
+    오차를 줄이기 위해 batch=8로 8회 묶어 호출당 평균을 추정한다.
     """
     states = list(SymbolStatus)
-    began = time.perf_counter()
-    for i in range(50_000):
-        state = states[i % len(states)]
-        event = _EVENTS[i % len(_EVENTS)]
-        try:
-            transition(state, event)
-        except LifecycleTransitionError:
-            pass
-    elapsed = time.perf_counter() - began
 
-    assert elapsed < 1.0
+    sample = perf_budget.assert_within(
+        lambda: _bulk_lookup(states),
+        budget_ms=125.0,
+        n=1,
+        batch=8,
+    )
+
+    assert sample.cpu_ms < 125.0
 
 
 # --- DEEPEN(task-2951) 게이트 적색 재현(사고 시나리오 replay) -------------------
