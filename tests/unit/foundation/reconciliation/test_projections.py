@@ -4,7 +4,6 @@ tenant scoping, and repository failure propagation."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import cast
 from unittest.mock import patch
@@ -17,6 +16,7 @@ from src.foundation.reconciliation.projections import (
     ReconciliationStateListView,
     build_reconciliation_state_list_view,
 )
+from tests.conftest import PerfBudget
 
 
 def _state(**overrides: object) -> ReconciliationState:
@@ -119,19 +119,23 @@ async def test_build_reconciliation_state_list_view_propagates_repository_failur
 
 
 @pytest.mark.perf
-async def test_build_reconciliation_state_list_view_hot_path_performance() -> None:
+async def test_build_reconciliation_state_list_view_hot_path_performance(
+    perf_budget: PerfBudget,
+) -> None:
+    """perf: 50회 연속 호출 총 wall 시간 예산 1초 — batch=N으로 묶어 측정."""
     tenant_id = uuid4()
     states = tuple(_state(tenant_id=tenant_id) for _ in range(200))
     repo = _FakeRepo(states)
 
-    start = time.perf_counter()
-    for _ in range(50):
-        _ = cast(
-            ReconciliationStateListView, await build_reconciliation_state_list_view(repo, tenant_id)
-        )
-    elapsed = time.perf_counter() - start
+    async def _run_batch() -> None:
+        for _ in range(50):
+            _ = cast(
+                ReconciliationStateListView,
+                await build_reconciliation_state_list_view(repo, tenant_id),
+            )
 
-    assert elapsed < 1.0
+    sample = await perf_budget.sample_async(_run_batch)
+    assert sample.wall_ms < 1000.0
 
 
 # ---- 음수 테스트 ----
