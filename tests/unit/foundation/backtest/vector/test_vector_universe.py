@@ -6,9 +6,9 @@ BT-17. DoD: (a) 메모리 상한 반증(경계 직전/직후). (b) 100종목×1�
 (c) `CandleColumns` 컬럼 경로 재사용(새 시계열 표현 신설 없음). (d) 결측
 종목 반증 — 빈 구간 종목은 `skipped`에 명시 보고된다.
 """
+
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -34,6 +34,7 @@ from src.foundation.backtest.vector.universe import (
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from tests.conftest import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _D = Decimal
@@ -69,10 +70,13 @@ def _config() -> BacktestConfigV2:
         commission=VenueTierCommission(
             venue="BITGET", maker_bps=_D("2"), taker_bps=_D("5"), min_fee=_D("0")
         ),
-        latency_ms=0, partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
+        latency_ms=0,
+        partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
         order_types=OrderTypesConfig(limit=True, stop=True, oco=True, trailing=True),
-        magnifier_tf=None, costs=CostsConfig(funding=False, borrow_apr=None),
-        adjustments=AdjustmentsConfig(splits=False, dividends=False), calendar="24x7",
+        magnifier_tf=None,
+        costs=CostsConfig(funding=False, borrow_apr=None),
+        adjustments=AdjustmentsConfig(splits=False, dividends=False),
+        calendar="24x7",
     )
 
 
@@ -81,7 +85,10 @@ UniverseInput = dict[str, tuple[CandleColumns, VectorSignal]]
 
 def _sweep(universe: UniverseInput) -> universe_module.UniverseSweepResult:
     return sweep_universe(
-        universe, _config(), timeframe=Timeframe.D1, initial_cash=_CASH,
+        universe,
+        _config(),
+        timeframe=Timeframe.D1,
+        initial_cash=_CASH,
     )
 
 
@@ -101,7 +108,9 @@ def test_sweep_rejects_universe_one_candle_over_cap() -> None:
     with pytest.raises(UniverseMemoryLimitError):
         sweep_universe(
             {"AAA": (cols, _no_signal(len(cols))), "BBB": (other, _no_signal(len(other)))},
-            _config(), timeframe=Timeframe.D1, initial_cash=_CASH,
+            _config(),
+            timeframe=Timeframe.D1,
+            initial_cash=_CASH,
         )
 
 
@@ -113,7 +122,9 @@ def test_sweep_over_cap_returns_no_partial_results() -> None:
     with pytest.raises(UniverseMemoryLimitError):
         sweep_universe(
             {"SMALL": (small, _no_signal(10)), "HUGE": (huge, _no_signal(MAX_UNIVERSE_CANDLES))},
-            _config(), timeframe=Timeframe.D1, initial_cash=_CASH,
+            _config(),
+            timeframe=Timeframe.D1,
+            initial_cash=_CASH,
         )
 
 
@@ -156,31 +167,34 @@ _YEAR_D1_BARS = 365
 
 
 @pytest.mark.perf
-def test_sweep_100_symbols_1y_d1_within_normalized_threshold() -> None:
+def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
+    perf_budget: PerfBudget,
+) -> None:
     """절대 초 상한이 아니라 1종목 실측 x 100 x 1.5로 단언한다 — 공유 CI의
     CPU 시간 편차에 흔들리지 않기 위함(BT-16a와 동일 선례, docs/specs 참고)."""
     baseline_cols = _columns(_YEAR_D1_BARS, step=timedelta(days=1))
     baseline_universe = {"S000": (baseline_cols, _no_signal(_YEAR_D1_BARS))}
-    baseline_start = time.perf_counter()
-    _sweep(baseline_universe)
-    baseline_seconds = time.perf_counter() - baseline_start
+
+    baseline_sample = perf_budget.sample(lambda: _sweep(baseline_universe), batch=200)
+    baseline_ms = baseline_sample.cpu_ms
 
     universe = {
         f"S{i:03d}": (
-            _columns(_YEAR_D1_BARS, step=timedelta(days=1)), _no_signal(_YEAR_D1_BARS),
+            _columns(_YEAR_D1_BARS, step=timedelta(days=1)),
+            _no_signal(_YEAR_D1_BARS),
         )
         for i in range(100)
     }
-    start = time.perf_counter()
     result = _sweep(universe)
-    elapsed_seconds = time.perf_counter() - start
+    elapsed_sample = perf_budget.sample(lambda: _sweep(universe), batch=10)
+    elapsed_ms = elapsed_sample.cpu_ms
 
-    threshold_seconds = baseline_seconds * 100 * 1.5
+    threshold_ms = baseline_ms * 100 * 1.5
     print(
-        f"[BT-17] 1종목 1년 D1 실측={baseline_seconds:.4f}s, "
-        f"100종목 실측={elapsed_seconds:.4f}s, 정규화 임계={threshold_seconds:.4f}s "
-        f"(§9.9 목표: ≤30s)"
+        f"[BT-17] 1종목 1년 D1 실측={baseline_ms:.1f}ms, "
+        f"100종목 실측={elapsed_ms:.1f}ms, 정규화 임계={threshold_ms:.1f}ms "
+        f"(§9.9 목표: ≤30000ms)"
     )
     assert len(result.results) == 100
     assert result.skipped == ()
-    assert elapsed_seconds <= threshold_seconds
+    assert elapsed_ms <= threshold_ms
