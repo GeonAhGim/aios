@@ -1,0 +1,33 @@
+{
+  "role": "claude-local",
+  "priority": 3,
+  "stage": "implement",
+  "status": "done",
+  "parent": null,
+  "depends_on": [],
+  "attempts": 1,
+  "title": "[health:ci_red] PERF-measure: tests/unit/foundation/marketplace/test_source_retention.py — raw 타이머 예산 1건을 PerfBudget/RelativeBudget로 전환",
+  "spec": "tests/unit/foundation/marketplace/test_source_retention.py — raw perf_counter()/monotonic() 단언 1건(scripts/check_perf_measurement_guard.py, 함수: test_validate_source_retention_hot_path_performance). 부하 민감 호스트에서 실행마다 몇 건이 떨어진다 — 전량 전환 대상(task-10775).\n\n규칙:\n- tests/conftest.py perf_budget 픽스처(process_time+coverage 일시정지+best-of-N)로 전환: 시그니처에 `perf_budget` 추가. 비동기 I/O는 RelativeBudget.measure_async\n- 예산 숫자와 `@pytest.mark.perf` 마커는 불변\n- 호출 1회 측정 금지: process_time은 15.6ms 틱이라 빠른 호출은 0/15.6만 나온다 — `perf_budget.sample(fn, batch=N)`으로 총 시간이 틱의 수 배가 되게 묶어 호출당 값으로\n- 단위 일치: 샘플이 ms면 예산도 ms(초 예산은 `*1000` 한 번). μs/ms 혼용 금지\n- 검출력 확인: 대상에 예산 10배 지연을 주입하면 적색이어야 한다(임시 실행 후 원복, 결과를 note에) — 항상 통과하는 허울 단언 금지\n\nDoD:\n- [ ] 대상 함수(test_validate_source_retention_hot_path_performance) raw 단언 제거, perf_budget 경유\n- [ ] `python -m pytest tests/unit/foundation/marketplace/test_source_retention.py -q` 3회 연속 녹색(xdist 금지)\n- [ ] perf-measurement-baseline.json 수정 금지(충돌, 별도 집계 몫)\n- [ ] note에 batch 사용·단위 일치·주입 지연 적색 결과 각 한 줄",
+  "files": [
+    "tests/unit/foundation/marketplace/test_source_retention.py"
+  ],
+  "commit": "c2f86eb",
+  "tests": "10 passed",
+  "note": "raw perf_counter 제거, perf_budget.assert_within 전환. 3회 연속 녹색.",
+  "id": 11787,
+  "updated_at": "2026-10-11T05:00:00+00:00",
+  "created_at": "2026-10-11T03:49:42+00:00",
+  "rev": 5,
+  "worker": "claude-local-3",
+  "model": "",
+  "orig_role": "backend",
+  "processed": false,
+  "lease": {
+    "worker": "claude-local-3",
+    "attempt": 1,
+    "token": "task-11787-attempt-1-1791694060.2379923",
+    "until": "2026-10-11T05:47:40+00:00"
+  },
+  "spec_hash": "b21d2511567be454",
+  "engine": "claude-local"
+}
