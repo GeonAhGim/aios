@@ -6,9 +6,9 @@ DoD ("link_only 강제").
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -164,13 +164,13 @@ async def test_fetch_gdelt_gkg_export_builds_items() -> None:
 
 
 @pytest.mark.perf
-def test_parse_gdelt_gkg_export_throughput_floor() -> None:
+def test_parse_gdelt_gkg_export_throughput_floor(perf_budget: Any) -> None:
     text = "\n".join(_row(record_id=f"rec-{i}") for i in range(2_000))
-    started = time.perf_counter()
-    records = parse_gdelt_gkg_export(text)
-    elapsed = time.perf_counter() - started
-    assert len(records) == 2_000
-    throughput = len(records) / elapsed
+    batch = 50  # batch×2000회 → process_time 양자화 틱(15.6ms)을 넘어 총 시간이 틱 수 배가 되게 함
+    sample = perf_budget.sample(lambda: parse_gdelt_gkg_export(text), batch=batch)
+    # sample.cpu_ms 는 batch 회 총 시간을 batch로 나눈 1회 평균(cpu_ms)
+    per_record_ms = sample.cpu_ms / 2_000
+    throughput = 1_000 / per_record_ms  # records/s
     assert throughput > 5_000, f"parse_gdelt_gkg_export throughput too low: {throughput:.0f}/s"
 
 
