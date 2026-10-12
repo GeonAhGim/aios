@@ -12,7 +12,6 @@ DC-28 후속(ADR-2026-09-06-H D7) — `test_get_isolates_cache_by_owner_id`가
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -34,6 +33,7 @@ from src.core.risk.rules.var_es import var_es
 from src.data.models.market_data import Candle
 from src.services.execution_loop.candle_history import CandleHistoryCache
 from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
+from tests.conftest import PerfBudget
 
 _OWNER = uuid4()
 _RISK_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
@@ -270,24 +270,36 @@ async def test_get_propagates_cancelled_error_instead_of_swallowing_it(
 
 
 @pytest.mark.perf
-async def test_get_cache_hit_makes_no_adapter_call_and_is_fast() -> None:
+async def test_get_cache_hit_makes_no_adapter_call_and_is_fast(
+    perf_budget: PerfBudget,
+) -> None:
     """성능 단언(D2) — TTL 이내 재요청은 어댑터를 다시 부르지 않는 O(1)
     dict 조회여야 한다. 500회 캐시 히트가 느슨한 상한(200ms, 회귀 감지용
     — 절대 성능목표로 쓰지 않는다) 안에 끝나면서 어댑터 호출이 여전히
-    1회뿐이면 새 I/O를 걷지 않았다는 뜻이다."""
+    1회뿐이면 새 I/O를 걷지 않았다는 뜻이다.
+
+    perf_counter raw 단언을 perf_budget.sample_async(batch=1)로 전환:
+    500회 루프를 wrapper 함수로 묶어 한 번의 sample_async 호출로 측정.
+    process_time tick(15.6ms) 양자화 방지를 위해 batch가 아닌 전체 루프
+    한 번으로 묶으면 총 500회 CPU 시간이 tick을 넘어 정확한 측정 가능.
+    단위: cpu_ms 기준, 예산 200ms(기존 elapsed_ms budget과 동일).
+    """
     adapter = _FakeAdapter()
     clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
     cache = CandleHistoryCache(now=clock)
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
 
-    started = time.perf_counter()
-    for _ in range(500):
-        result = await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
-        assert result is not None
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    async def _batch_500() -> None:
+        for _ in range(500):
+            result = await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
+            assert result is not None
+
+    sample = await perf_budget.sample_async(_batch_500)
 
     assert adapter.calls == [("BTC/USDT", 30)]  # 501회 요청 중 최초 1회만 실제 I/O.
-    assert elapsed_ms < 200.0, f"캐시 히트 500회 지연 회귀 의심: {elapsed_ms:.2f}ms"
+    assert sample.cpu_ms < 200.0, (
+        f"캐시 히트 500회 지연 회귀 의심: cpu={sample.cpu_ms:.2f}ms wall={sample.wall_ms:.2f}ms"
+    )
 
 
 async def test_candle_fetch_failure_chain_denies_via_var_es_gate() -> None:
