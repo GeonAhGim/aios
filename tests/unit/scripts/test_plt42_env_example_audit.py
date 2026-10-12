@@ -23,7 +23,7 @@ from types import ModuleType
 
 import pytest
 
-from tests._perf.relative_budget import RelativeBudget
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -149,32 +149,30 @@ def test_check_env_keys_catches_direct_os_environ_regression(tmp_path: Path) -> 
 
 
 @pytest.mark.perf
-def test_check_env_keys_perf_budget_on_real_repo() -> None:
+def test_check_env_keys_perf_budget_on_real_repo(
+    perf_budget: PerfBudget,
+) -> None:
     """The full `src/` ast scan must stay inside the CI gate step's budget.
 
     task-10652: the scan does real disk I/O (reading every `src/` file), so
     an absolute wall-clock budget (previously 8.0s) measures this host's
-    disk/CPU contention, not the scan itself -- on a host running 13 pytest
-    workers plus a concurrent llama.cpp inference, other processes' I/O and
-    CPU time leak into `time.perf_counter()`. `RelativeBudget` (mode="wall",
-    see `tests/_perf/relative_budget.py`) expresses the budget as a multiple
-    of a same-process, same-moment CPU calibration loop instead: a slower/
-    busier host inflates both sides of the ratio together, so the ratio
-    stays stable while a real regression (e.g. an accidentally quadratic
-    scan) still moves it."""
-    budget = RelativeBudget()
-    # Local unloaded ratio ~7-10x (scan ~1.3s, calibration loop ~130-180ms);
-    # 40x leaves >4x headroom, matching the original 8.0s/1.3s margin.
-    sample = budget.assert_within(
+    disk/CPU contention, not the scan itself. Switched from RelativeBudget
+    (task-11852) to perf_budget fixture (process_time + coverage pause +
+    best-of-N) so the budget is an absolute CPU-ms figure that does not
+    depend on host-speed calibration.
+
+    Budget: 200.0 ms CPU (measured ~78 ms unloaded, ~2.5x margin).
+    batch=3 ensures total time exceeds the 15.6 ms process_time tick so
+    the quantised 0/15.6 split never dominates a single-call sample."""
+    sample = perf_budget.assert_within(
         lambda: cc.check_env_keys(ROOT),
-        max_ratio=40.0,
-        mode="wall",
+        budget_ms=200.0,
         n=3,
         warmup=1,
-        calibration_n=3,
+        batch=3,
         label="check_env_keys(ROOT)",
     )
-    print(f"[plt42] {budget.describe(sample, max_ratio=40.0)}")
+    print(f"[plt42] {perf_budget.describe(sample, budget_ms=200.0)}")
 
 
 # ---------------------------------------------------------------------------
