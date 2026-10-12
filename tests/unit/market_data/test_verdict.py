@@ -25,7 +25,6 @@ from a looser/older schema) could carry the plain string `"REJECT"`, which
 """
 
 import threading
-import time
 from datetime import datetime, timezone
 
 import pytest
@@ -37,6 +36,7 @@ from src.foundation.market_data.contracts.v1 import (
     Verdict,
 )
 from src.foundation.market_data.domain.quality.verdict import decide
+from tests.conftest import PerfBudget
 
 UTC = timezone.utc
 
@@ -159,19 +159,33 @@ def test_gate_severity_identity_comparison_regression_undercounts_rejected() -> 
 
 
 @pytest.mark.perf
-def test_decide_throughput_within_latency_budget() -> None:
+def test_decide_throughput_within_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """Numeric performance assertion -- 100,000 REJECT issues (pure in-memory
     arithmetic, no I/O) must be decided well inside a generous budget. A
     regression that turned the ratio check into something worse than O(n)
-    would blow this budget long before it hurt in production."""
+    would blow this budget long before it hurt in production.
+
+    raw perf_counter() -> perf_budget.assert_within() 전환(task-11834):
+    process_time 기반 CPU 시간 측정으로 다른 프로세스의 코어 경쟁 영향을 뺀다."""
     issues = [_reject_issue(i) for i in range(100_000)]
+    last_result: Verdict | None = None
 
-    started = time.perf_counter()
-    result = decide(issues, total=1_000_000)
-    elapsed = time.perf_counter() - started
+    def _run() -> None:
+        nonlocal last_result
+        last_result = decide(issues, total=1_000_000).verdict
 
-    assert elapsed < 2.0, f"decide() over 100k issues took {elapsed:.2f}s, over the 2.0s budget"
-    assert result.verdict is Verdict.PARTIAL
+    perf_budget.assert_within(
+        _run,
+        budget_ms=2000,
+        n=5,
+        warmup=1,
+        batch=10,
+        label="decide 100k issues",
+    )
+
+    assert last_result is Verdict.PARTIAL
 
 
 def test_decide_is_deterministic_across_repeated_replay() -> None:
