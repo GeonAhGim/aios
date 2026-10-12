@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from collections.abc import Generator
 from typing import Any
 
@@ -45,6 +44,7 @@ import asyncpg
 import pytest
 
 from scripts import replay_verify
+from tests._perf.relative_budget import RelativeBudget
 
 
 class _FakePool:
@@ -287,7 +287,11 @@ async def test_create_pool_with_retry_does_not_retry_unrelated_exceptions(monkey
 @pytest.mark.asyncio
 async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(monkeypatch) -> None:
     """Perf assertion: the happy path (first attempt succeeds) must not pay
-    any backoff delay -- `asyncio.sleep` is only reached on a retry."""
+    any backoff delay -- `asyncio.sleep` is only reached on a retry.
+
+    Raw `perf_counter` 단언을 `RelativeBudget.measure_async`로 전환(task-11855).
+    비동기 I/O이므로 wall-clock 기반 RelativeBudget을 사용한다.
+    """
 
     def _fake_create_pool(dsn: str, **kwargs: object) -> _FakePool:
         return _FakePool()
@@ -301,13 +305,27 @@ async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(monk
     monkeypatch.setattr(replay_verify.asyncpg, "create_pool", _fake_create_pool)
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _tracking_sleep)
 
-    started = time.perf_counter()
-    pool = await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
-    elapsed = time.perf_counter() - started
+    pool = None
+
+    async def _call_create() -> _FakePool:
+        nonlocal pool
+        pool = await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
+        return pool
+
+    sample = await RelativeBudget().measure_async(
+        _call_create,
+        n=5,
+        warmup=1,
+    )
 
     assert isinstance(pool, _FakePool)
     assert slept is False
-    assert elapsed < 0.05, f"first-attempt success took {elapsed:.3f}s, expected no backoff delay"
+    # calibration loop(2M iter)은 수 ms~수십 ms — 첫 시도 성공은 그보다 훨씬 빨라야 함
+    # max_ratio=2: happy path ratio≈0.000x, 500ms 지연 주입 시 ratio≈5.4x로 적색 확인(task-11855)
+    assert sample.ratio < 2, (
+        f"first-attempt success ratio={sample.ratio:.3f}x "
+        f"op={sample.op_ms:.3f}ms cal={sample.calibration_ms:.3f}ms"
+    )
 
 
 async def _no_sleep(delay: float) -> None:
