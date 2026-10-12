@@ -1,16 +1,18 @@
-"""16.4 — 실행 중 전략 모니터링 (ExecutionMonitoringService, 조회 전용).
+"""16.4 — Execution strategy monitoring (ExecutionMonitoringService, read-only).
 
-Spec: 기능설계문서_v1.20.md#FD-16.4, FD-3.2/3.3, 9.4(평가지표)
+Spec: functional_spec_v1.20.md#FD-16.4, FD-3.2/3.3, 9.4(assessment_metrics)
 
-strategy_executions와 positions(execution_id로 연결, FD-16.5/ADR-2026-08-10-C)
-를 조인해 실행별 실현/미실현 손익을 집계한다. 아직 실제 주문 체결
-파이프라인이 배선되지 않아(BitgetAdapter가 실제 주문을 넣는 경로는
-FD-4/FD-8 소관, 이 세션 스콥 밖) positions에 행이 없는 실행은 손익
-0으로 정직하게 나타난다 — 이는 버그가 아니라 현재 상태를 그대로
-반영한 것이다.
+Joins strategy_executions with positions (linked by execution_id,
+FD-16.5/ADR-2026-08-10-C) to aggregate realized/unrealized PnL per
+execution. Because the actual order-filling pipeline is not yet wired
+(BitgetAdapter's order placement path falls under FD-4/FD-8, outside
+this session's scope), executions without position rows will honestly
+show 0 PnL — this is not a bug but a faithful reflection of the
+current state.
 
-실행중인 전략이 하나도 없는 경우는 오류가 아니라 빈 목록을 반환한다
-(FD-16.4 예외상황 — 안내 문구는 프론트엔드 몫).
+When no strategy is running, returns an empty list rather than raising
+an error (FD-16.4 exception — guidance messages are the frontend's
+responsibility).
 """
 
 from __future__ import annotations
