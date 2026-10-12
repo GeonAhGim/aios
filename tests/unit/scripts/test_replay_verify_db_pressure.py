@@ -11,7 +11,6 @@ no real socket or TEST_DATABASE_URL needed.
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 import pytest
@@ -42,19 +41,28 @@ def _make_sleep():
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_await_db_capacity_returns_immediately_under_threshold() -> None:
+async def test_await_db_capacity_returns_immediately_under_threshold(
+    perf_budget: Any,
+) -> None:
     """Perf assertion: no pressure on the first probe means zero sleeps and the
-    call returns without paying any of the backoff schedule."""
+    call returns without paying any of the backoff schedule.
+
+    Raw `perf_counter` 단언을 `perf_budget.sample_async`로 전환(task-11854).
+    비동기 I/O이므로 wall_ms 기반 측정. `sample_async`는 단일 호출이라
+    `time.process_time()` 틱(15.6ms) 문제가 없지만 wall-clock은 원시
+    perf_counter를 그대로 쓰므로 budget 경유 단언으로 통일한다.
+    """
     probe, calls = _make_probe([(10, 100)])
     sleep, delays = _make_sleep()
 
-    started = time.perf_counter()
-    await pressure.await_db_capacity("postgresql://u:p@localhost/db", sleep=sleep, probe=probe)
-    elapsed = time.perf_counter() - started
+    async def _call_once() -> None:
+        await pressure.await_db_capacity("postgresql://u:p@localhost/db", sleep=sleep, probe=probe)
+
+    sample = await perf_budget.sample_async(_call_once)
 
     assert calls() == 1
     assert delays == []
-    assert elapsed < 0.05
+    assert sample.wall_ms < 50, f"wall_ms={sample.wall_ms:.3f}ms, budget 50ms 초과"
 
 
 @pytest.mark.asyncio
