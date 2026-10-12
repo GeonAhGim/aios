@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -199,7 +198,7 @@ def test_build_market_state_propagates_indicator_service_failure_mid_batch() -> 
 
 
 @pytest.mark.perf
-def test_build_market_state_throughput_budget() -> None:
+def test_build_market_state_throughput_budget(perf_budget) -> None:
     """`run_execution_tick` (tick.py) calls `build_market_state` once per
     execution per tick; 300 calls over a realistic 2-timeframe/2-key
     strategy must stay well under a 2s budget to rule out a pathological
@@ -212,14 +211,13 @@ def test_build_market_state_throughput_budget() -> None:
     as_of = max(candles_1m[-1].close_time, candles_1h[-1].close_time)
     service = IndicatorService()
 
-    start = time.perf_counter()
-    for _ in range(300):
-        build_market_state(
+    perf_budget.assert_within(
+        lambda: build_market_state(
             fsm, {"1m": candles_1m, "1h": candles_1h}, as_of=as_of, indicator_service=service
-        )
-    elapsed = time.perf_counter() - start
-
-    assert elapsed < 2.0, f"300 build_market_state calls took {elapsed * 1000:.2f}ms, budget 2000ms"
+        ),
+        budget_ms=2000.0,
+        batch=300,
+    )
 
 
 # -- D2 gate-red reproduction --------------------------------------------------
