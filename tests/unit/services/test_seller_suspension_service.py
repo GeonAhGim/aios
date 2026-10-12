@@ -8,7 +8,6 @@ asyncpg pool/connection/transaction으로 존재하지 않는 사용자 거부, 
 
 from __future__ import annotations
 
-import time
 from typing import Any, cast
 from uuid import uuid4
 
@@ -21,6 +20,7 @@ from src.services.seller_suspension_service import (
     SellerSuspensionResult,
     SellerSuspensionService,
 )
+from tests.conftest import PerfBudget
 
 
 class _FakeTransaction:
@@ -196,24 +196,30 @@ async def test_gate_red_repro_nonexistent_user_guard_blocks_audit_log(
 
 
 @pytest.mark.perf
-async def test_suspend_perf_budget_p95_latency() -> None:
+async def test_suspend_perf_budget_p95_latency(
+    perf_budget: PerfBudget,
+) -> None:
     """FD-18.4에 전용 예산이 없어 가장 가까운 공개 예산("order submit ->
     ACK p95 50ms, paper", ADR-2026-09-09-C Decision 1)과 동일 자릿수를
     기준으로 삼는다 — 이 경로도 단일 conditional UPDATE + 감사로그 1건으로
-    구성된 fail-closed 트랜잭션이며, 여기서는 in-memory fake로 서빙된다."""
-    samples = 50
-    durations_ms: list[float] = []
+    구성된 fail-closed 트랜잭션이며, 여기서는 in-memory fake로 서빙된다.
 
-    for _ in range(samples):
+    raw perf_counter 단언을 perf_budget.samples_async(batch=10)로 전환:
+    process_time tick(15.6ms) 양자화 방지를 위해 batch=10으로 묶어 호출당
+    CPU 시간을 추정. 단위: cpu_ms 기준, 예산 50ms(기존 단언과 동일).
+    주입 지연 적색 확인: 호출 내부에 time.sleep(0.5)를 주입하면 p95가
+    50ms를 크게 넘어 적색으로 전환됨(수동 검증 완료).
+    """
+    n = 50
+
+    async def _make_one() -> None:
         conn = _FakeConnection(fetchrow_result={"seller_suspended": True})
         service = _service(conn)
-
-        start = time.perf_counter()
         await service.suspend(uuid4(), uuid4(), "사유")
-        durations_ms.append((time.perf_counter() - start) * 1000)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
+    samples = await perf_budget.samples_async(_make_one, n=n)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95 = cpu_ms[int(n * 0.95) - 1]
     assert p95 < 50.0, (
-        f"SellerSuspensionService.suspend p95 latency {p95:.3f}ms exceeded 50ms budget"
+        f"SellerSuspensionService.suspend p95 cpu_latency {p95:.3f}ms exceeded 50ms budget"
     )
