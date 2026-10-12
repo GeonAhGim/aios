@@ -10,7 +10,6 @@ pool/connection으로 (1) 쿼리에 verifier_user_id가 정확히 전달되는�
 
 from __future__ import annotations
 
-import time
 from typing import Any, cast
 from uuid import uuid4
 
@@ -174,24 +173,26 @@ async def test_list_pending_propagates_db_fetch_failure() -> None:
 
 
 @pytest.mark.perf
-async def test_list_pending_perf_budget_p95_latency() -> None:
+async def test_list_pending_perf_budget_p95_latency(perf_budget: Any) -> None:
     """FD-18.1에 전용 예산이 없어 가장 가까운 공개 예산("order submit ->
     ACK p95 50ms, paper", ADR-2026-09-09-C Decision 1)과 동일 자릿수를
-    기준으로 삼는다 — 단일 SELECT + in-memory 매핑, fake pool로 서빙."""
-    rows = [_row(id=i) for i in range(20)]
-    samples = 50
-    durations_ms: list[float] = []
+    기준으로 삼는다 — 단일 SELECT + in-memory 매핑, fake pool로 서빙.
 
-    for _ in range(samples):
+    raw time.perf_counter() → perf_budget.samples_async() 전환(task-11867).
+    samples_async는 coverage tracer 일시정지 + wall_ms 보존으로 CI 부하
+    민감 호스트에서도 측정 일관성을 보장한다.
+    """
+    rows = [_row(id=i) for i in range(20)]
+    n = 50
+
+    async def _make_call() -> None:
         conn = _FakeConnection(fetch_result=list(rows))
         service = _service(conn)
-
-        start = time.perf_counter()
         await service.list_pending(uuid4())
-        durations_ms.append((time.perf_counter() - start) * 1000)
 
-    durations_ms.sort()
-    p95 = durations_ms[int(samples * 0.95) - 1]
-    assert p95 < 50.0, (
-        f"VerificationQueueService.list_pending p95 latency {p95:.3f}ms exceeded 50ms budget"
+    samples = await perf_budget.samples_async(_make_call, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    assert p95_ms < 50.0, (
+        f"VerificationQueueService.list_pending p95 latency {p95_ms:.3f}ms exceeded 50ms budget"
     )
