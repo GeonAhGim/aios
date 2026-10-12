@@ -143,12 +143,14 @@ def test_deep_job_p95_latency_within_self_declared_budget(perf_budget: PerfBudge
 @pytest.mark.perf
 def test_perf_budget_gate_actually_fails_when_chunk_execution_stalls(
     monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """게이트 적색 재현: BT-10 실행 코어가 실제로 느려지면
     `test_deep_job_p95_latency_within_self_declared_budget`과 동일한 단언식이
     진짜로 `AssertionError`를 내는지(= CI가 빨간불이 되는지) 확인한다 — 그
-    단언이 항상 통과하는 tautology가 아님을 보장한다. task-7434: sleep()
-    지연 주입이라 process_time으로는 못 잡아, wall-clock을 유지한다."""
+    단언이 항상 통과하는 tautology가 아님을 보장한다. sleep() 지연 주입은
+    process_time에 반영되지 않으므로 wall_ms로 측정한다(batch=1로 1회 측정:
+    지연 주입으로 충분히 느려져 양자화 문제가 없다)."""
     original_run = quick_backtest_mod.run_quick_backtest
 
     def _stalled_run(*args: Any, **kwargs: Any) -> Any:
@@ -159,20 +161,22 @@ def test_perf_budget_gate_actually_fails_when_chunk_execution_stalls(
 
     cfg, cols = _config(), _columns(2000)
     store = InMemoryCheckpointStore()
-    started = time.perf_counter()
-    run_deep_backtest_job(
-        cfg,
-        cols,
-        timeframe=Timeframe.M1,
-        strategy=_Scripted({}),
-        initial_cash=_CASH,
-        job_id="perf-stall",
-        checkpoints=store,
-        chunk_bars=200,
-    )
-    elapsed_ms = (time.perf_counter() - started) * 1000
+
+    def _run_stalled_job() -> None:
+        run_deep_backtest_job(
+            cfg,
+            cols,
+            timeframe=Timeframe.M1,
+            strategy=_Scripted({}),
+            initial_cash=_CASH,
+            job_id="perf-stall",
+            checkpoints=store,
+            chunk_bars=200,
+        )
+
+    sample = perf_budget.sample(_run_stalled_job, batch=1)
     with pytest.raises(AssertionError):
-        assert elapsed_ms < _DEEP_JOB_BUDGET_MS
+        assert sample.wall_ms < _DEEP_JOB_BUDGET_MS
 
 
 # --- DEEPEN(task-3047): 실패 주입 ------------------------------------------
