@@ -18,7 +18,6 @@ import importlib
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -35,6 +34,8 @@ from importlinter.application.use_cases import (
     create_report,
     read_user_options,
 )
+
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 PYPROJECT = ROOT / "pyproject.toml"
@@ -345,15 +346,17 @@ forbidden_modules = ["fixture_src.foundation"]
 
 
 @pytest.mark.perf
-def test_real_repo_report_throughput_budget() -> None:
+def test_real_repo_report_throughput_budget(perf_budget: PerfBudget) -> None:
     """Static analysis over this repo's full `src/` tree (~1,300 files)
     must stay well inside interactive/CI budget -- grimp's Rust-backed
     graph builder is expected to be much faster than the pure-Python
     AST scan `scripts/check_import_linter.py` already runs in well under
     a second (see that script's own throughput test)."""
-    start = time.perf_counter()
-    report = _run_report(PYPROJECT)
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.assert_within(
+        lambda: _run_report(PYPROJECT),
+        budget_ms=20_000.0,
+        batch=2,
+    )
+    report = cast("Report", sample.result)
 
     assert len(report.contracts) == 4
-    assert elapsed < 20.0, f"lint-imports report took {elapsed:.2f}s (budget 20.0s)"
