@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -215,23 +214,27 @@ async def test_reference_quote_replay_reproduces_identical_distrust_decision():
 
 
 @pytest.mark.perf
-async def test_binance_reference_lookup_stays_within_pretrade_gate_budget():
+async def test_binance_reference_lookup_stays_within_pretrade_gate_budget(perf_budget):
     """수치 성능 단언 — ADR-2026-09-09-C Decision 1의 사전거래 게이트 예산
     (p99 5ms)에 맞춘 p95 지연 단언. DataDistrustMonitor.check()가 매 tick
     이 참조가를 소비하는 사전거래 경로에 있으므로, 조회 자체도 그 예산
-    안에 들어야 한다(N/A 아님 — 명시적 임계값 존재)."""
+    안에 들어야 한다(N/A 아님 — 명시적 임계값 존재).
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-11863).
+    batch=1: sample_async는 단일 비동기 호출당 wall_ms를 반환하므로 p95
+    분포를 위해 n=200회 반복(단위: ms, 예산 5ms와 일치).
+    """
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"symbol": "BTCUSDT", "price": "100.5"})
 
     provider = BinancePublicTickerReference(http_client=_mock_transport(handler))
 
-    durations: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
-        await provider.get_reference_ticker("BTC/USDT")
-        durations.append(time.perf_counter() - start)
+    async def _lookup_once():
+        return await provider.get_reference_ticker("BTC/USDT")
 
-    durations.sort()
-    p95 = durations[int(len(durations) * 0.95) - 1]
-    assert p95 < 0.005, f"p95 참조가 조회 지연 {p95:.4f}s가 사전거래 예산(5ms) 초과"
+    samples = [await perf_budget.sample_async(_lookup_once) for _ in range(200)]
+
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[int(len(wall_ms_list) * 0.95) - 1]
+    assert p95_ms < 5, f"p95 참조가 조회 지연 {p95_ms:.4f}ms가 사전거래 예산(5ms) 초과"
