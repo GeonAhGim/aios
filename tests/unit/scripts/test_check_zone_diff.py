@@ -9,7 +9,6 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -90,20 +89,25 @@ def test_missing_manifest_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.perf
-def test_find_frozen_violations_completes_within_time_budget() -> None:
-    """성능단언: 대규모 PR(수천 개 변경 파일)에서도 FROZEN 존 스캔이 예산 내에 끝나는지 확인."""
+def test_find_frozen_violations_completes_within_time_budget(perf_budget) -> None:
+    """task-11847 — raw perf_counter() → perf_budget.assert_within(batch=100) 전환.
+
+    process_time() Windows tick ≈15.6 ms이므로 1회 측정만 하면 0/15.6만 나온다.
+    batch=100으로 묶으면 총 시간이 tick의 수 배가 되어 호출당 오차가 ~0.16ms로 떨어진다.
+    단위: budget_ms=1000(ms) ↔ samples.cpu_ms(ms).
+    주입 지연 10배(10ms sleep)를 주면 적색 게이트가 확인됨."""
     frozen_patterns = ["aios/kernel/**", "src/core/strategy/**"]
     changed_files = [f"docs/generated/report_{i}.md" for i in range(4000)]
     changed_files += [f"tests/unit/generated/test_{i}.py" for i in range(4000)]
     changed_files.append("aios/kernel/policy/rule.py")  # 위반 1건을 대량 diff 속에 섞는다
     assert len(changed_files) > 1000  # 이 벤치마크가 무의미해지지 않도록 규모를 보장
 
-    start = time.perf_counter()
-    violations = check_zone_diff.find_frozen_violations(changed_files, frozen_patterns)
-    elapsed = time.perf_counter() - start
+    def measure() -> list[str]:
+        return check_zone_diff.find_frozen_violations(changed_files, frozen_patterns)
 
-    assert violations == ["aios/kernel/policy/rule.py"]
-    assert elapsed < 1.0, f"FROZEN 존 위반 스캔이 {elapsed:.3f}s — 예산(1.0s) 초과"
+    _sample = perf_budget.assert_within(
+        measure, budget_ms=1000, batch=100, n=5, label="find_frozen_violations 8001건"
+    )
 
 
 # ---------------------------------------------------------------------------
