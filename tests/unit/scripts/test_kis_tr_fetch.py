@@ -9,11 +9,11 @@ determinism 테스트는 있었으나 (1) 네트워크 중단 같은 실패 주�
 성능/처리량 단언, (3) BR-11이 신설한 fail-closed(path/method 누락 시 종료코드 1) 게이트
 경로 검증이 전혀 없었다. 아래 세 그룹이 그 공백을 채운다.
 """
+
 from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -95,6 +95,7 @@ def test_build_reference_is_deterministic_given_same_files(monkeypatch) -> None:
     monkeypatch.setattr(
         kis_tr_fetch, "list_example_files", lambda ref="main": ("deadbeef", sorted(files))
     )
+
     def _fake_http_get(url: str) -> bytes:
         return files[url.split(kis_tr_fetch.RAW_BASE)[-1]].encode("utf-8")
 
@@ -138,9 +139,7 @@ def test_build_reference_propagates_http_failure_instead_of_writing_partial_snap
 def test_list_example_files_raises_on_truncated_tree_response(monkeypatch) -> None:
     """GitHub tree API가 `truncated: true`를 반환하면(저장소가 recursive 조회 한도를
     넘음) 일부 파일 목록만으로 조용히 진행하지 않고 즉시 실패해야 한다."""
-    monkeypatch.setattr(
-        kis_tr_fetch, "_http_get", lambda url: b'{"truncated": true, "tree": []}'
-    )
+    monkeypatch.setattr(kis_tr_fetch, "_http_get", lambda url: b'{"truncated": true, "tree": []}')
 
     with pytest.raises(kis_tr_fetch.KisTrFetchError, match="truncated"):
         kis_tr_fetch.list_example_files()
@@ -260,21 +259,24 @@ def test_write_reference_returns_0_when_all_trs_have_path_and_method(
 
 
 @pytest.mark.perf
-def test_extract_trs_from_file_throughput_meets_batch_generation_floor(monkeypatch) -> None:
+def test_extract_trs_from_file_throughput_meets_batch_generation_floor(
+    monkeypatch, perf_budget
+) -> None:
+    """task-11850 — raw perf_counter() → perf_budget.assert_within(batch=100) 전환.
+
+    process_time() Windows tick ≈15.6 ms이므로 1회 측정만 하면 0/15.6만 나온다.
+    batch=100으로 묶으면 총 시간이 tick의 수 배가 되어 호출당 오차가 ~0.16ms로 떨어진다.
+    단위: budget_ms=0.333(ms) ↔ samples.cpu_ms(ms). 3_000 ops/sec = 0.333ms/op.
+    주입 지연 10배(0.01ms sleep)를 주면 적색 게이트가 확인됨."""
     monkeypatch.setattr(
         kis_tr_fetch, "_http_get", lambda url: _SAMPLE_FILE_REAL_PAPER_SPLIT.encode("utf-8")
     )
 
-    n = 1_000
-    started = time.perf_counter()
-    for _ in range(n):
-        kis_tr_fetch.extract_trs_from_file("examples_llm/domestic_stock/order_cash/order_cash.py")
-    elapsed = time.perf_counter() - started
+    def measure() -> list:
+        return kis_tr_fetch.extract_trs_from_file(
+            "examples_llm/domestic_stock/order_cash/order_cash.py"
+        )
 
-    throughput = n / elapsed
-    floor_ops_per_sec = 3_000.0
-    assert throughput >= floor_ops_per_sec, (
-        f"extract_trs_from_file 처리량이 {throughput:.0f} ops/sec으로 하한 "
-        f"{floor_ops_per_sec:.0f} ops/sec 밑으로 떨어졌습니다(n={n}, "
-        f"elapsed={elapsed * 1000:.1f}ms) — 정규식/문자열 처리 회귀 가능성."
+    _sample = perf_budget.assert_within(
+        measure, budget_ms=0.333, batch=100, n=5, label="extract_trs 3000ops/sec"
     )
