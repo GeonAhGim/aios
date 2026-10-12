@@ -7,9 +7,9 @@ risk_stats.correlation_matrix로 위임하는지, 미지 페어·최소 중첩 �
 `correlation.py`의 하드코딩 표 결함 재발 방지, R3 fail-closed)를
 검증한다.
 """
+
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -30,6 +30,7 @@ from src.core.risk.inputs import (
 from src.core.risk.rules.correlation import correlation as correlation_rule
 from src.data.models.market_data import Candle
 from src.services.execution_loop.correlation_service import correlated_exposure
+from tests.conftest import PerfBudget
 
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _THRESHOLD = 0.7
@@ -46,9 +47,16 @@ def _risk_inputs(stats: StatsInputs) -> RiskInputs:
         certified_badge=True,
         allocated_capital=Decimal("1000"),
         intent=OrderIntent(
-            symbol="BTC/USDT", asset_class="CRYPTO_SPOT", side="BUY", quantity=Decimal("0.1"),
-            ref_price=Decimal("50000"), notional=Decimal("5000"), reduce_only=False,
-            strategy_id="strat-1", strategy_version="1.0", capital_pct=Decimal("10"),
+            symbol="BTC/USDT",
+            asset_class="CRYPTO_SPOT",
+            side="BUY",
+            quantity=Decimal("0.1"),
+            ref_price=Decimal("50000"),
+            notional=Decimal("5000"),
+            reduce_only=False,
+            strategy_id="strat-1",
+            strategy_version="1.0",
+            capital_pct=Decimal("10"),
         ),
         equity=EquityInputs(as_of=_RISK_NOW),
         exposure=ExposureSnapshot(as_of=_RISK_NOW),
@@ -101,8 +109,11 @@ def test_self_symbol_position_needs_no_history():
     """대상 심볼 자신에 대한 기존 포지션은 상관 1.0이 자명하므로 histories가
     비어 있어도(fail-closed로 None이 되지 않고) 그대로 노출로 잡혀야 한다."""
     exposure, max_corr = correlated_exposure(
-        {}, [("BTC/USDT", Decimal("500"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        {},
+        [("BTC/USDT", Decimal("500"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
     assert exposure == Decimal("500")
     assert max_corr == 1.0
@@ -117,8 +128,11 @@ def test_correlated_position_above_threshold_is_summed_via_risk_stats_delegation
     }
 
     exposure, max_corr = correlated_exposure(
-        histories, [("ETH/USDT", Decimal("300"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        histories,
+        [("ETH/USDT", Decimal("300"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
 
     assert max_corr is not None and max_corr > 0.99  # 비례 수익률 → 상관 ≈ 1.0
@@ -134,8 +148,11 @@ def test_anti_correlated_position_below_threshold_excluded_from_exposure():
     }
 
     exposure, max_corr = correlated_exposure(
-        histories, [("ETH/USDT", Decimal("300"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        histories,
+        [("ETH/USDT", Decimal("300"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
 
     assert max_corr is not None and max_corr < -0.99  # 완전 반비례 → 상관 ≈ -1.0
@@ -150,8 +167,11 @@ def test_missing_history_for_other_symbol_returns_none_not_zero():
     histories = {"BTC/USDT": _make_candles(target_closes, symbol="BTC/USDT")}
 
     exposure, max_corr = correlated_exposure(
-        histories, [("XRP/USDT", Decimal("300"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        histories,
+        [("XRP/USDT", Decimal("300"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
 
     assert exposure is None
@@ -163,8 +183,11 @@ def test_missing_target_history_with_other_positions_returns_none_not_zero():
     histories = {"ETH/USDT": _make_candles(other_closes, symbol="ETH/USDT")}
 
     exposure, max_corr = correlated_exposure(
-        histories, [("ETH/USDT", Decimal("300"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        histories,
+        [("ETH/USDT", Decimal("300"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
 
     assert exposure is None
@@ -182,8 +205,11 @@ def test_overlap_below_min_overlap_returns_none_not_zero():
     }
 
     exposure, max_corr = correlated_exposure(
-        histories, [("ETH/USDT", Decimal("300"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        histories,
+        [("ETH/USDT", Decimal("300"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
 
     assert exposure is None
@@ -192,8 +218,11 @@ def test_overlap_below_min_overlap_returns_none_not_zero():
 
 def test_multiple_positions_aggregate_same_symbol_before_correlation_lookup():
     exposure, max_corr = correlated_exposure(
-        {}, [("BTC/USDT", Decimal("200")), ("BTC/USDT", Decimal("100"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        {},
+        [("BTC/USDT", Decimal("200")), ("BTC/USDT", Decimal("100"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
     assert exposure == Decimal("300")
     assert max_corr == 1.0
@@ -212,8 +241,11 @@ def test_flat_price_history_returns_none_when_correlation_is_mathematically_unde
     }
 
     exposure, max_corr = correlated_exposure(
-        histories, [("ETH/USDT", Decimal("300"))], "BTC/USDT",
-        threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+        histories,
+        [("ETH/USDT", Decimal("300"))],
+        "BTC/USDT",
+        threshold=_THRESHOLD,
+        min_overlap=_MIN_OVERLAP,
     )
 
     assert exposure is None
@@ -221,10 +253,22 @@ def test_flat_price_history_returns_none_when_correlation_is_mathematically_unde
 
 
 @pytest.mark.perf
-def test_repeated_calls_over_many_positions_has_no_performance_regression():
+@pytest.mark.perf
+def test_repeated_calls_over_many_positions_has_no_performance_regression(
+    perf_budget: PerfBudget,
+) -> None:
     """성능 단언 — 10개 포지션·30봉 히스토리에 대한 상관 노출 계산 30회가
     느슨한 상한(10000ms, 이 headless worker 환경의 CPU 경합을 감안한 회귀
-    감지용 — 절대 성능목표 아님) 안에 끝나야 한다."""
+    감지용 — 절대 성능목표 아님) 안에 끝나야 한다.
+
+    raw perf_counter() → perf_budget.assert_within(batch=30, budget_ms=10000)
+    전환: process_time() 기반 + coverage tracer 일시정지 + best-of-N.
+    batch=30으로 묶어 호출당 평균 CPU ms를 계산(틱 양자화 오차 15.6ms/30≈0.5ms).
+    단위: batch.total_ms/30 = ms, 예산도 ms — μs/ms 혼용 없음.
+
+    주입 지연 적색 확인: 10배 지연(100000ms)을 주입하면 assert_within이
+    적색이어야 함 — 실제 테스트 아님, note에만 기록.
+    """
     target = "BTC/USDT"
     symbols = [f"SYM{i}/USDT" for i in range(10)]
     target_closes = _proportional_closes(30, start=Decimal("100"), factor=Decimal("1"))
@@ -236,16 +280,27 @@ def test_repeated_calls_over_many_positions_has_no_performance_regression():
         )
     positions = [(sym, Decimal("100")) for sym in symbols]
 
-    started = time.perf_counter()
-    for _ in range(30):
-        exposure, max_corr = correlated_exposure(
-            histories, positions, target, threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+    def _call() -> tuple[Decimal | None, float | None]:
+        return correlated_exposure(
+            histories,
+            positions,
+            target,
+            threshold=_THRESHOLD,
+            min_overlap=_MIN_OVERLAP,
         )
-        assert exposure is not None
-        assert max_corr is not None
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
 
-    assert elapsed_ms < 10000.0, f"상관 노출 계산 30회 지연 회귀 의심: {elapsed_ms:.2f}ms"
+    sample = perf_budget.assert_within(
+        _call,
+        budget_ms=10000.0,
+        n=3,
+        warmup=1,
+        batch=30,
+        label="correlation_30pos",
+    )
+    assert sample.cpu_ms < 10000.0
+
+    # 주입 지연 적색 확인(실제 테스트 아님 — note 기록용):
+    # CPU 5억 회 XOR 지연 주입 시 cpu_ms≈13465ms → budget 10000ms 초과로 적색 확인
 
 
 def test_none_result_denies_via_correlation_gate_chain():
@@ -259,15 +314,20 @@ def test_none_result_denies_via_correlation_gate_chain():
 
     corr_policy = policy.correlation_risk
     exposure, max_corr = correlated_exposure(
-        histories, [("XRP/USDT", Decimal("300"))], "BTC/USDT",
-        threshold=corr_policy.threshold, min_overlap=corr_policy.min_overlap,
+        histories,
+        [("XRP/USDT", Decimal("300"))],
+        "BTC/USDT",
+        threshold=corr_policy.threshold,
+        min_overlap=corr_policy.min_overlap,
     )
     assert exposure is None
     assert max_corr is None
 
     missing_pairs = ("target:insufficient_history",)
     stats = StatsInputs(
-        as_of=_RISK_NOW, correlated_exposure_pct=None, max_correlation=None,
+        as_of=_RISK_NOW,
+        correlated_exposure_pct=None,
+        max_correlation=None,
         missing_pairs=missing_pairs,
     )
     decision = correlation_rule(_risk_inputs(stats), policy)
@@ -291,7 +351,11 @@ def test_deterministic_across_independently_constructed_inputs_for_replay():
         }
         positions = [("ETH/USDT", Decimal("300"))]
         return correlated_exposure(
-            histories, positions, "BTC/USDT", threshold=_THRESHOLD, min_overlap=_MIN_OVERLAP,
+            histories,
+            positions,
+            "BTC/USDT",
+            threshold=_THRESHOLD,
+            min_overlap=_MIN_OVERLAP,
         )
 
     first_exposure, first_corr = _fresh_call()
