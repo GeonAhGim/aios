@@ -7,9 +7,9 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md#9 R-29.
 None을 반환하는지(R3 fail-closed), 포트폴리오 VaR ≤ Σ 개별 VaR인지를
 검증한다.
 """
+
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -47,9 +47,16 @@ def _risk_inputs(stats: StatsInputs) -> RiskInputs:
         certified_badge=True,
         allocated_capital=Decimal("1000"),
         intent=OrderIntent(
-            symbol="BTC/USDT", asset_class="CRYPTO_SPOT", side="BUY", quantity=Decimal("0.1"),
-            ref_price=Decimal("50000"), notional=Decimal("5000"), reduce_only=False,
-            strategy_id="strat-1", strategy_version="1.0", capital_pct=Decimal("10"),
+            symbol="BTC/USDT",
+            asset_class="CRYPTO_SPOT",
+            side="BUY",
+            quantity=Decimal("0.1"),
+            ref_price=Decimal("50000"),
+            notional=Decimal("5000"),
+            reduce_only=False,
+            strategy_id="strat-1",
+            strategy_version="1.0",
+            capital_pct=Decimal("10"),
         ),
         equity=EquityInputs(as_of=_RISK_NOW),
         exposure=ExposureSnapshot(as_of=_RISK_NOW),
@@ -85,9 +92,7 @@ def _oscillating_closes(n: int, *, base: int = 100, amplitude: int = 5) -> list[
     return [Decimal(base + amplitude * (1 if i % 2 == 0 else -1) + i % 3) for i in range(n)]
 
 
-def _policy(
-    *, method: str = "parametric", timeframe: str = "1d", min_bars: int = 10
-) -> VarPolicy:
+def _policy(*, method: str = "parametric", timeframe: str = "1d", min_bars: int = 10) -> VarPolicy:
     return VarPolicy(
         confidence=0.95,
         horizon_days=1,
@@ -195,9 +200,7 @@ def test_no_weighted_symbols_returns_none():
     candles = _make_candles(_oscillating_closes(30))
     policy = _policy()
 
-    result = estimate_portfolio_var_es(
-        {"BTC/USDT": candles}, {"BTC/USDT": Decimal("0")}, policy
-    )
+    result = estimate_portfolio_var_es({"BTC/USDT": candles}, {"BTC/USDT": Decimal("0")}, policy)
 
     assert result is None
 
@@ -239,7 +242,9 @@ def test_unsupported_var_method_returns_none_not_crash():
 
 
 @pytest.mark.perf
-def test_repeated_multi_symbol_estimation_has_no_performance_regression():
+def test_repeated_multi_symbol_estimation_has_no_performance_regression(
+    perf_budget,
+):
     """성능 단언 — 3종목 250봉 포트폴리오 VaR/ES 계산 300회가 느슨한 상한
     (3000ms, 회귀 감지용 — 절대 성능목표 아님) 안에 끝나야 한다."""
     symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
@@ -250,13 +255,11 @@ def test_repeated_multi_symbol_estimation_has_no_performance_regression():
     weights = {s: Decimal("1") / Decimal(len(symbols)) for s in symbols}
     policy = _policy(method="historical", min_bars=10)
 
-    started = time.perf_counter()
-    for _ in range(300):
-        result = estimate_portfolio_var_es(histories, weights, policy)
-        assert result is not None
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    def _run() -> object:
+        return estimate_portfolio_var_es(histories, weights, policy)
 
-    assert elapsed_ms < 3000.0, f"포트폴리오 VaR 계산 300회 지연 회귀 의심: {elapsed_ms:.2f}ms"
+    sample = perf_budget.assert_within(_run, budget_ms=3000.0, batch=300, n=1)
+    assert sample.result is not None
 
 
 def test_none_result_denies_via_var_es_gate_chain():
