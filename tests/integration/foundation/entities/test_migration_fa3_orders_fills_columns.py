@@ -8,6 +8,7 @@ FK로 거부되는 negative test, 백필된 행 수와 NULL 잔여 행 수를 �
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from src.foundation.entities.domain.defaults import (
     default_portfolio_id,
 )
 from tests.integration.conftest import create_test_tenant, create_test_user
+from tests.support.db import drop_worker_database, ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -60,10 +62,18 @@ async def pool():
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head():
-    _run_alembic("upgrade", "head")
-    yield
-    _run_alembic("upgrade", "head")
+def _ensure_head(monkeypatch):
+    # Backfills bump versions of existing orders without companion events.
+    # Never run a downgrade/upgrade cycle against the shared worker database.
+    template = template_database_url()
+    worker = "f3a_" + os.environ.get("PYTEST_XDIST_WORKER", "master")
+    database_url = asyncio.run(ensure_worker_database(template, worker))
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    try:
+        _run_alembic("upgrade", "head")
+        yield
+    finally:
+        asyncio.run(drop_worker_database(template, worker))
 
 
 async def _column_exists(pool: asyncpg.Pool, table: str, column: str) -> bool:
