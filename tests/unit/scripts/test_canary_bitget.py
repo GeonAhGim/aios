@@ -24,7 +24,6 @@ import sys
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from time import perf_counter
 from types import ModuleType
 from uuid import UUID, uuid4
 
@@ -32,6 +31,7 @@ import pytest
 
 from src.data.models.trading import Order, OrderStatus
 from src.foundation.risk_gate.domain.models import SafetyControl, SafetyControlState, SafetyScope
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -409,13 +409,20 @@ def test_write_report_creates_file_under_out_dir(tmp_path: Path) -> None:
 
 
 @pytest.mark.perf
-def test_evaluate_pretrade_gate_throughput_budget() -> None:
+def test_evaluate_pretrade_gate_throughput_budget(perf_budget: PerfBudget) -> None:
+    """성능 단언: evaluate_pretrade_gate 10,000회가 CPU 예산 1,000ms 안에 끝남.
+
+    raw perf_counter() → perf_budget.assert_within() 전환(task-11920).
+    batch=1로 단일 호출당 측정 — 내부에서 10,000회 루프를 돌므로
+    best_of-N이 여러 번 반복해 양자화 노이즈를 걷어낸다.
+    """
     limits = _limits()
     state = canary.CanarySessionState()
-    started = perf_counter()
-    for _ in range(10_000):
-        canary.evaluate_pretrade_gate(
-            symbol="BTC/USDT", notional_usdt=Decimal("1"), limits=limits, state=state
-        )
-    elapsed = perf_counter() - started
-    assert elapsed < 1.0, f"evaluate_pretrade_gate 10,000회가 {elapsed:.3f}s (예산 1.0s 초과)"
+
+    def measure() -> None:
+        for _ in range(10_000):
+            canary.evaluate_pretrade_gate(
+                symbol="BTC/USDT", notional_usdt=Decimal("1"), limits=limits, state=state
+            )
+
+    perf_budget.assert_within(measure, budget_ms=1000.0, label="evaluate_pretrade_gate 10k 호출")
