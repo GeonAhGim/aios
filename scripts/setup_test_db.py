@@ -59,10 +59,21 @@ async def _connect_with_retry(dsn: str) -> asyncpg.Connection:
 
     Match tests/support/db.py's five attempts and linear jitter ceiling.
     Authentication/configuration failures remain immediate errors.
+
+    task-11878: `ConnectionRefusedError` (nothing listening at host:port at
+    all) is a configuration failure, not the transient mid-handshake reset
+    this retry loop exists for -- it was previously caught by the broad
+    `OSError` clause and retried 5x anyway, and on Windows each refused
+    connect attempt itself takes ~4s (WinError 1225), so 5 attempts plus
+    jitter sleeps blew past the 20s fail-closed budget
+    (tests/test_nightly_db_cleanup.py::test_list_subprocess_fails_closed_on_unreachable_server).
+    Exclude it so a genuinely unreachable server fails immediately.
     """
     for attempt in range(5):
         try:
             return await asyncpg.connect(dsn)
+        except ConnectionRefusedError:
+            raise
         except (OSError, asyncpg.ConnectionDoesNotExistError, asyncpg.CannotConnectNowError):
             if attempt == 4:
                 raise
