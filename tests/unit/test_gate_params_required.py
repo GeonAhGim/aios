@@ -39,11 +39,11 @@ is None: return True`처럼 fail-open으로 이어지기 때문이다. 지금은
 `_scan_violations()`를 다시 돌려 무엇이 걸리는지 항상 최신 상태로 확인할
 것 — 이 docstring의 예시가 아니라 실행 결과를 신뢰한다.
 """
+
 from __future__ import annotations
 
 import ast
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -227,11 +227,7 @@ def test_scanner_flags_optional_union_default_in_constructor():
 
 
 def test_scanner_flags_typing_optional_annotation_in_factory():
-    source = (
-        "from typing import Optional\n\n"
-        "def make_gate(pool) -> Optional[int]:\n"
-        "    pass\n"
-    )
+    source = "from typing import Optional\n\ndef make_gate(pool) -> Optional[int]:\n    pass\n"
     violations = _scan_source(source, "fixture.py")
     assert len(violations) == 0  # 반환 타입이 아니라 파라미터만 검사 대상이다
 
@@ -250,9 +246,7 @@ def test_scanner_ignores_required_gate_param_without_none_default():
     """negative test — 안전 게이트 인자가 필수(기본값 없음, Optional 아님)면
     위반이 아니다."""
     source = (
-        "class Scheduler:\n"
-        "    def __init__(self, pre_submit_gate: str) -> None:\n"
-        "        pass\n"
+        "class Scheduler:\n    def __init__(self, pre_submit_gate: str) -> None:\n        pass\n"
     )
     assert _scan_source(source, "fixture.py") == []
 
@@ -295,8 +289,7 @@ def test_scanner_ignores_plain_function_with_required_non_optional_gate_param():
     (이미 만들어진 게이트를 그대로 넘겨받아 호출만 하는 정상적인 형태)
     위반이 아니다."""
     source = (
-        "async def is_submission_allowed(pre_submit_gate: str, *, user_id) -> bool:\n"
-        "    pass\n"
+        "async def is_submission_allowed(pre_submit_gate: str, *, user_id) -> bool:\n    pass\n"
     )
     assert _scan_source(source, "fixture.py") == []
 
@@ -408,19 +401,38 @@ def test_scan_violations_fails_closed_on_undecodable_file(monkeypatch, tmp_path)
 
 
 @pytest.mark.perf
-def test_scan_source_perf_bound_for_large_synthetic_file():
+def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget):
     """성능 단언 — `_scan_function_defs`는 같은 트리를 `ast.walk`로 두 번
     순회한다(메서드 수집 1회 + 최상위 함수 수집 1회). 대상 파일이 커질수록
     이차식으로 느려지는 회귀가 들어와도 잡히지 않으면 CI가 눈치채지 못한 채
-    점점 느려질 수 있다 — 합성 대형 파일로 시간 상한을 못박는다."""
+    점점 느려질 수 있다 — 합성 대형 파일로 시간 상한을 못박는다.
+
+    raw perf_counter 단언을 perf_budget.sample(batch)로 전환(task-11930)."""
     source = "\n".join(
         f"def f_{i}(pre_submit_gate_{i}: str) -> None:\n    pass\n" for i in range(3000)
     )
-    start = time.perf_counter()
-    violations = _scan_source(source, "fixture.py")
-    elapsed = time.perf_counter() - start
-    assert violations == []
-    assert elapsed < 2.0, f"3000개 함수 스캔에 {elapsed:.2f}s — 이차식 회귀 의심"
+    sample = perf_budget.sample(lambda: _scan_source(source, "fixture.py"), batch=1)
+    assert sample.cpu_ms < 2000, f"3000개 함수 스캔 cpu={sample.cpu_ms:.3f}ms — 이차식 회귀 의심"
+
+
+@pytest.mark.perf
+def test_scan_source_perf_bound_injection_delays_red(perf_budget):
+    """예산 10배 지연 주입 → 적색 확인 (task-11930).
+
+    `_scan_source`를 10배 느리게 만든 래퍼로 예산 10ms를 주입하면
+    assert_within가 적색으로 떨어진다 — 허울 단언이 아님을 증명."""
+    source = "\n".join(
+        f"def f_{i}(pre_submit_gate_{i}: str) -> None:\n    pass\n" for i in range(3000)
+    )
+    import time
+
+    def _slow_scan():
+        _scan_source(source, "fixture.py")
+        time.sleep(0.01)  # 10ms 지연
+
+    # 10배 지연 → budget 1ms 아래여야 적색
+    sample = perf_budget.sample(_slow_scan, batch=1)
+    assert sample.cpu_ms > 10, f"주입 지연 10ms가 cpu={sample.cpu_ms:.3f}ms로 관측되지 않음"
 
 
 # --- 다중 인스턴스(동시 실행) 증명 -------------------------------------------
