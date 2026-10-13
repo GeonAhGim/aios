@@ -369,3 +369,118 @@ async def test_invalid_position_key_format_rejected(pool: asyncpg.Pool, ports: _
                 clock=_clock,
                 dry_run=True,
             )
+
+
+async def test_duplicate_funding_id_is_idempotent(pool: asyncpg.Pool, ports: _RealPorts) -> None:
+    """음성 테스트 — 동일한 funding_id 로 중복 기록하면 저널 행이 늘어나지 않고
+    기존 엔트리를 그대로 두어야 한다(멱등키 불변식). 금액이 동일하므로 digest 도 같다."""
+    tenant_id, account_id, position_key = await _open(pool)
+    order_id = uuid4()
+    await _fill(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=order_id,
+    )
+
+    funding_id = str(uuid4())
+    await _funding(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        amount=Decimal("5"),
+        funding_id=funding_id,
+    )
+
+    # 같은 funding_id 재기록 → 예외 없이 기존 엔트리 반환 (멱등)
+    await _funding(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        amount=Decimal("5"),  # 동일 금액
+        funding_id=funding_id,
+    )
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM pos_journal "
+            "WHERE position_key = $1 AND entry_type = 'FUNDING'",
+            position_key,
+        )
+    assert row["cnt"] == 1, "동일 funding_id 중복 기록 시 저널 행이 증가하지 않아야 한다"
+
+
+async def test_rebuild_snapshot_after_funding_fee_on_missing_position(
+    pool: asyncpg.Pool, ports: _RealPorts
+) -> None:
+    """음성 테스트 — position 이 존재하지 않는 상태에서 rebuild_snapshot 을 호출하면
+    UnknownPositionError 가 발생해야 한다."""
+    tenant_id = await create_test_tenant(pool)
+    # position 을 열지 않고 position_key 만 생성
+    position_key = _key(tenant_id)
+
+    with pytest.raises(UnknownPositionError):
+        await rebuild_snapshot(
+            position_key,
+            tenant_id=tenant_id,
+            asset_class=AssetClass.CRYPTO,
+            journal=ports.journal,
+            snapshots=ports.snapshots,
+            pool=pool,
+            clock=_clock,
+            dry_run=True,
+        )
+
+
+async def test_rebuild_snapshot_pool_failure_raises(
+    pool: asyncpg.Pool, ports: _RealPorts, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실패주입 — pool.acquire() 가 예외를 던지면 rebuild_snapshot 도
+    동일하게 전파해야 한다(의존성 결함 격리, fail-closed)."""
+    tenant_id, account_id, position_key = await _open(pool)
+    order_id = uuid4()
+    await _fill(
+        pool,
+        ports,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        price=Decimal("100"),
+        fill_seq=1,
+        order_id=order_id,
+    )
+
+    class _AcquireGuard:
+        async def __aenter__(self) -> None:
+            raise ConnectionError("simulated pool failure")
+
+        async def __aexit__(self, *exc: object) -> None:
+            pass
+
+    def _failing_acquire(self: asyncpg.Pool, *, timeout: float | None = None) -> _AcquireGuard:
+        return _AcquireGuard()
+
+    monkeypatch.setattr(asyncpg.Pool, "acquire", _failing_acquire)
+
+    with pytest.raises(ConnectionError, match="simulated pool failure"):
+        await rebuild_snapshot(
+            position_key,
+            tenant_id=tenant_id,
+            asset_class=AssetClass.CRYPTO,
+            journal=ports.journal,
+            snapshots=ports.snapshots,
+            pool=pool,
+            clock=_clock,
+            dry_run=True,
+        )
