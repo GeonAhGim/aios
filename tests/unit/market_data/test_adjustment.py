@@ -22,9 +22,9 @@ CI-red, precedent 3ea1fc1/9bdcd21).
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -42,6 +42,7 @@ from src.foundation.market_data.domain.corporate_actions.adjustment import (
     adjust,
     factor_chain,
 )
+from tests.conftest import PerfBudget
 
 
 def _candle(instrument_id: UUID, open_time: datetime, close: Decimal) -> CandleRecord:
@@ -285,7 +286,7 @@ def test_adjust_zero_volume_candle_monkeypatch_injection(
 
 
 @pytest.mark.perf
-def test_factor_chain_and_adjust_large_batch_stays_correct() -> None:
+def test_factor_chain_and_adjust_large_batch_stays_correct(perf_budget: PerfBudget) -> None:
     """Observes large-batch timing (print) without asserting a numeric bound
     -- same policy as `test_lineage.py`'s
     `test_batch_hash_large_batch_stays_order_independent` (avoids permanent
@@ -312,19 +313,21 @@ def test_factor_chain_and_adjust_large_batch_stays_correct() -> None:
         for i in range(2_000)
     ]
 
-    started = time.perf_counter()
-    factors = factor_chain(actions, as_of)
-    adjusted = adjust(candles, factors)
-    elapsed = time.perf_counter() - started
+    def _run() -> list[CandleRecord]:
+        factors = factor_chain(actions, as_of)
+        return adjust(candles, factors)
+
+    # Performance assertion (ADR-2026-09-09-C D2): 500 actions + 2000 candles
+    # must complete under 1 second on CI-grade hardware.  Measured p95 ~0.08s
+    # on a M2 Mac (2024-04).  This is a soft bound — use `pytest --assert`
+    # to relax if the CI environment is consistently slower.  `batch=5` bundles
+    # calls so the total CPU time clears Windows' ~15.6ms process_time tick
+    # (task-11802).
+    sample = perf_budget.assert_within(_run, budget_ms=1000.0, batch=5)
+    adjusted = cast(list[CandleRecord], sample.result)
 
     # The earliest candle reflects all 40 splits (2:1 each): divided by 2^40.
     assert adjusted[0].close == Decimal("100") / (Decimal(2) ** 40)
     # An adjustment past `as_of` is not reflected.
     assert adjusted[-1].close == Decimal("100")
-
-    # Performance assertion (ADR-2026-09-09-C D2): 500 actions + 2000 candles
-    # must complete under 1 second on CI-grade hardware.  Measured p95 ~0.08s
-    # on a M2 Mac (2024-04).  This is a soft bound — use `pytest --assert`
-    # to relax if the CI environment is consistently slower.
-    assert elapsed < 1.0, f"factor_chain+adjust took {elapsed:.4f}s, exceeds 1s budget"
-    print(f"\nfactor_chain+adjust latency (500 splits, 2000 candles): {elapsed:.4f}s")
+    print(f"\nfactor_chain+adjust latency (500 splits, 2000 candles): {sample.cpu_ms:.4f}ms")
