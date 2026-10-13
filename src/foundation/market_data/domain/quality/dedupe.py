@@ -1,15 +1,18 @@
-"""LA-4 — market_data 캔들 중복 판정(dedupe) 순수 규칙.
+"""LA-4 — market_data candle deduplication pure rule.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-4, §9.2 LA-4.
 
-같은 (venue, instrument, timeframe, open_time)의 캔들이 둘 이상이면: 내용이
-전부 같으면 1건만 남기고 `DUPLICATE_IDENTICAL`(info) 이슈를 낸다. 내용이
-하나라도 다르면 어느 쪽이 옳은지 판정할 수 없으므로 그룹 전체를
-`conflicts`로 격리하고 `DUPLICATE_CONFLICT`(reject) 이슈를 낸다.
-`QualityIssue`는 LA-1 계약을 그대로 쓴다. `DedupeResult`는 이 리프가
-생산하는 순수 출력이며 계약에 없다(LB-2 `CostBasisResult`와 동일 원칙).
-I/O 없음 — 순수 함수.
+When two or more candles share the same (venue, instrument, timeframe, open_time):
+if all contents are identical, keep one and emit a
+`DUPLICATE_IDENTICAL` (info) issue. If any content differs, the group cannot be
+resolved, so isolate the entire group into `conflicts` and emit a
+`DUPLICATE_CONFLICT` (reject) issue.
+`QualityIssue` follows the LA-1 contract. `DedupeResult` is the pure output
+produced by this leaf and is not part of the contract (same principle as
+LB-2 `CostBasisResult`).
+No I/O — pure function.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -33,8 +36,9 @@ _GroupKey = tuple[Venue, UUID, Timeframe, datetime]
 
 @dataclass(frozen=True, slots=True)
 class DedupeResult:
-    """`dedupe` 한 번의 결과. `kept`는 저장 대상(중복 제거 후), `conflicts`는
-    양쪽 다 격리해야 하는 캔들, `issues`는 그룹별 판정 근거."""
+    """Result of one `dedupe` call. `kept` contains candles to store (after dedup),
+    `conflicts` holds candles isolated from both sides,
+    `issues` provides per-group resolution rationale."""
 
     kept: tuple[CandleRecord, ...]
     conflicts: tuple[CandleRecord, ...]
