@@ -225,3 +225,117 @@ async def test_portfolio_engine_allocation_error_propagates(pool, monkeypatch):
             "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
         )
     assert fsm_state == "IDLE"
+
+
+async def test_executor_failure_propagates_and_leaves_fsm_pending(pool, monkeypatch):
+    """실패주입 — Executor.execute()가 예외를 던지면 tick 전체가 실패해야
+    한다. 신호→배분→리스크는 통과했으나 실행 단계에서 오류. FSM은
+    BUY_ORDER_PENDING으로 남는다(주문 제출 전이 이미 적용됨)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        place_order_result_status=OrderStatus.FILLED,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+    engines = _engines()
+
+    def fake_execute(*args, **kwargs):
+        raise RuntimeError("executor failed to place order")
+
+    monkeypatch.setattr(engines["executor"], "execute", fake_execute)
+
+    with pytest.raises(RuntimeError, match="executor failed to place order"):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM은 BUY_ORDER_PENDING으로 남아있어야 함(주문 제출 전이 적용 후
+    # executor.execute()에서 예외 발생).
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "BUY_ORDER_PENDING"
+
+
+async def test_risk_engine_rejects_negative_allocated_capital(pool):
+    """negative test — 할당 자본이 음수일 때 PortfolioEngine이 음수 수량을
+    계산하고, Executor가 validate_order_params에서 수량 <= 0을 거부하여
+    OrderSubmissionError가 발생해야 한다(I-07: 검증 게이트 hard-fail)."""
+    from src.services.order_service.submit import OrderSubmissionError
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(
+        pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("-100")
+    )
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    with pytest.raises(OrderSubmissionError, match="수량은 0보다 커야"):
+        await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    # FSM은 BUY_ORDER_PENDING(주문 제출 시도 후 검증 실패).
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "BUY_ORDER_PENDING"
+
+
+async def test_risk_engine_rejects_zero_allocated_capital(pool):
+    """negative test — 할당 자본이 0일 때 PortfolioEngine이 0 수량을
+    계산하고, Executor가 validate_order_params에서 수량 <= 0을 거부하여
+    OrderSubmissionError가 발생해야 한다."""
+    from src.services.order_service.submit import OrderSubmissionError
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(
+        pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("0")
+    )
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    with pytest.raises(OrderSubmissionError, match="수량은 0보다 커야"):
+        await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    # FSM은 BUY_ORDER_PENDING(주문 제출 시도 후 검증 실패).
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "BUY_ORDER_PENDING"
+
+
+async def test_execution_tick_performance_under_500ms(pool):
+    """성능 단언 — 단일 tick 실행이 500ms 이내여야 한다(실시간 1m 틱 간격
+    대비 여유 확보, DB 연결 풀 오버헤드 포함). ADR-2026-09-09-C Decision 1
+    성능 예산 준수 확인."""
+    import time
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        place_order_result_status=OrderStatus.FILLED,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    start = time.perf_counter()
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    assert elapsed_ms < 500, (
+        f"Single execution tick took {elapsed_ms:.1f}ms, "
+        f"exceeds 500ms budget — must process within 1m tick interval margin"
+    )
