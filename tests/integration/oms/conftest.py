@@ -62,6 +62,7 @@ async def pool():
     # 워커/프로세스와 동시에 같은 Postgres 인스턴스에 접속) 커넥션 풀 생성이
     # 지연·정체되어 CI pytest 단계가 통째로 타임아웃하는 회귀를 낳았다).
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
+    await _reset_safety_state(p)
     yield p
     await p.close()
 
@@ -79,8 +80,23 @@ async def pool_warm():
     # 필요한 두 테스트에만 한정한다(task-7332 — 전체 픽스처에 적용하면 전체
     # 스위트 커넥션 풀 압박으로 CI가 타임아웃한다).
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=4, max_size=4)
+    await _reset_safety_state(p)
     yield p
     await p.close()
+
+
+async def _reset_safety_state(pool: asyncpg.Pool) -> None:
+    # system_safety_state는 전역 싱글톤 행 — 다른 테스트 파일(예:
+    # tests/integration/test_execution_scheduler.py의 halted/restricted
+    # 시나리오, test_three_way_reconciler.py가 `make_foundation_pre_submit_
+    # gate`로 실제 risk_gate를 거치며 의존)이 남긴 값과 섞이지 않도록 매
+    # 테스트 시작 전 normal로 되돌린다(tests/integration/test_execution_
+    # control.py의 관례와 동일, task-11975).
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
 
 
 # 단조(105번 조건부 UPDATE) — 이미 무장됐으면 no-op. 호출부가 항상 트랜잭션
