@@ -16,6 +16,7 @@ import pytest
 
 from src.core.portfolio.state_input import PortfolioAggregate
 from src.foundation.whatif.domain.impact import ProposedTrade, delta_impact
+from tests.conftest import PerfBudget
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -228,11 +229,9 @@ class TestFailureInjection:
 
 class TestPerformance:
     @pytest.mark.perf
-    def test_impact_computes_under_1ms_for_100_symbols(self) -> None:
+    def test_impact_computes_under_1ms_for_100_symbols(self, perf_budget: PerfBudget) -> None:
         """D2 perf assertion: delta_impact must complete in < 1 ms
         even with 100 symbols in the portfolio."""
-        import time
-
         many_symbols = {f"SYM{i:03d}": Decimal("1") for i in range(100)}
         before = _make_state(
             per_symbol_pct=many_symbols,
@@ -244,17 +243,13 @@ class TestPerformance:
             symbol="SYM050", notional=Decimal("10000"), side="BUY", strategy_id="S1"
         )
 
-        # Warm-up
-        delta_impact(before=before, trade=trade)
-
-        # Measure
-        iterations = 1000
-        start = time.perf_counter()
-        for _ in range(iterations):
-            delta_impact(before=before, trade=trade)
-        elapsed_ms = (time.perf_counter() - start) / iterations * 1000
-
-        assert elapsed_ms < 1.0, f"delta_impact took {elapsed_ms:.3f} ms per call, budget is 1 ms"
+        # batch=1000: process_time()'s ~15.6ms quantization shrinks to ~0.0156ms/call.
+        perf_budget.assert_within(
+            lambda: delta_impact(before=before, trade=trade),
+            budget_ms=1.0,
+            batch=1000,
+            label="delta_impact 100 symbols",
+        )
 
 
 # ---------------------------------------------------------------------------
