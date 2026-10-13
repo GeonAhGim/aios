@@ -284,7 +284,7 @@ def test_scanner_flags_plain_function_not_just_constructor_or_factory() -> None:
     ]
 
 
-def test_scanner_ignores_plain_function_with_required_non_optional_gate_param():
+def test_scanner_ignores_plain_function_with_required_non_optional_gate_param() -> None:
     """negative test — 일반 함수라도 게이트 인자가 필수·non-Optional이면
     (이미 만들어진 게이트를 그대로 넘겨받아 호출만 하는 정상적인 형태)
     위반이 아니다."""
@@ -294,7 +294,7 @@ def test_scanner_ignores_plain_function_with_required_non_optional_gate_param():
     assert _scan_source(source, "fixture.py") == []
 
 
-def test_scanner_flags_call_site_literal_none_for_gate_param():
+def test_scanner_flags_call_site_literal_none_for_gate_param() -> None:
     """호출 지점에서 `pre_submit_gate=None`을 명시적으로 넘기는 배선도
     잡는다 — 시그니처가 required로 고쳐진 뒤에도 재발 가능한 우회다."""
     source = "submit_order(order, user_id=user_id, pre_submit_gate=None)\n"
@@ -304,7 +304,7 @@ def test_scanner_flags_call_site_literal_none_for_gate_param():
     ]
 
 
-def test_scanner_ignores_call_site_passing_real_gate_object():
+def test_scanner_ignores_call_site_passing_real_gate_object() -> None:
     """negative test — 호출 지점에서 실제 게이트 객체를 넘기면 위반이 아니다."""
     source = "submit_order(order, user_id=user_id, pre_submit_gate=pre_submit_gate)\n"
     assert _scan_source(source, "fixture.py") == []
@@ -331,7 +331,7 @@ def test_regression_flags_p0b_bypass_shape_before_fix():
     assert [v.param for v in violations] == ["pre_submit_gate"]
 
 
-def test_regression_clears_after_p0b_required_gate_fix():
+def test_regression_clears_after_p0b_required_gate_fix() -> None:
     """task-1715(P0-B)가 Optional을 제거하고 게이트를 필수 인자로 바꾼 뒤의
     형태 — 위반 0건이어야 하드 게이트가 통과한다(strict 전환의 목표 상태)."""
     source = (
@@ -349,7 +349,7 @@ def test_regression_clears_after_p0b_required_gate_fix():
 # --- 실제 배선 코드 검사 -----------------------------------------------------
 
 
-def test_no_optional_safety_gate_constructor_params():
+def test_no_optional_safety_gate_constructor_params() -> None:
     """하드 게이트 — xfail 없음. 위반이 있으면 CI가 빨간불이 된다.
 
     2026-09-06 기준 알려진 잔여 위반: task-1715(P0-B)가 아직 해소하지 않은
