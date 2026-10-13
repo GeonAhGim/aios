@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 
 from ops import backup_verify
+from tests.conftest import PerfBudget
 
 
 def _ok_base_backup(dest_dir: Path, dsn: str) -> dict:
@@ -269,23 +270,55 @@ def test_run_scheduled_sleeps_interval_hours_in_seconds_between_cycles() -> None
 
 
 @pytest.mark.perf
-def test_run_backup_verify_orchestration_overhead_within_budget(tmp_path: Path) -> None:
-    """단계 자체(pg_basebackup/asyncpg/pg_ctl)는 즉시 반환하는 가짜로 대체했으므로,
-    남는 시간은 순수 오케스트레이션(딕셔너리 조립·조건 분기) 오버헤드뿐이다. 절대시간
-    예산은 넉넉히 잡아(느린 CI 머신 대비) 회귀만 잡는다."""
+def test_run_backup_verify_orchestration_overhead_within_budget(
+    tmp_path: Path, perf_budget: PerfBudget
+) -> None:
+    """raw time.perf_counter() → perf_budget.sample(batch=1) 전환 (task-11918).
+
+    process_time 기반 측정 + coverage tracer-pause로 부하 민감 호스트에서의
+    오탐을 줄인다. batch=1 for outer sample but 2_000 iterations inside fn
+    so total CPU time spans multiple 15.6ms ticks → stable per-call average.
+    Budget: 2.0s → 2000ms (single *1000 conversion, no μs/ms mix).
+    """
+
     iterations = 2_000
-    budget_sec = 2.0  # 실측 로컬 <0.1s
     kwargs = _common_kwargs(tmp_path)
 
-    start = time.perf_counter()
-    for _ in range(iterations):
-        result = backup_verify.run_backup_verify(**kwargs)
-        assert result["ok"] is True
-    elapsed = time.perf_counter() - start
+    def _batch() -> None:
+        for _ in range(iterations):
+            result = backup_verify.run_backup_verify(**kwargs)
+            assert result["ok"] is True
 
-    print(f"[FA-20 backup_verify] {iterations} runs in {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"오케스트레이션 {iterations}회가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)"
+    sample = perf_budget.sample(_batch, batch=1)
+    print(f"[FA-20 backup_verify] {iterations} runs in {sample.cpu_ms:.3f}ms (budget<2000.0ms)")
+    assert sample.cpu_ms < 2000.0, (
+        f"오케스트레이션 {iterations}회가 예산(2000.0ms)을 넘었습니다({sample.cpu_ms:.3f}ms)"
+    )
+
+
+def test_run_backup_verify_orchestration_overhead_fails_with_10x_delay(
+    tmp_path: Path, perf_budget: PerfBudget
+) -> None:
+    """Failure injection -- 10배 지연 주입 시 적색 확인.
+
+    time.sleep(0.001)(1ms)를 각 호출에 추가하면 2000회 × 1ms = 2000ms wall-clock
+    가 되어 2000ms wall 예산을 초과한다. 이 지연을 제거하면 다시 녹색이 된다.
+    """
+
+    iterations = 2_000
+    kwargs = _common_kwargs(tmp_path)
+
+    def _batch_delayed() -> None:
+        for _ in range(iterations):
+            result = backup_verify.run_backup_verify(**kwargs)
+            assert result["ok"] is True
+            time.sleep(0.002)  # 2ms 지연 주입 → 2000회 × 2ms = 4000ms wall
+
+    sample = perf_budget.sample(_batch_delayed, batch=1)
+    # time.sleep 는 CPU 시간을 늘리지 않으므로 wall_ms 로 단언.
+    # 4000ms wall > 2000ms budget → 적색 검출력 확인
+    assert sample.wall_ms > 2000.0, (
+        f"delay injection failed to exceed budget: {sample.wall_ms:.1f}ms"
     )
 
 
