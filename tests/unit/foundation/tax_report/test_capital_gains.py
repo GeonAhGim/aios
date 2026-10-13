@@ -4,7 +4,6 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 from random import Random
-from time import perf_counter
 from typing import Any
 
 import pytest
@@ -15,6 +14,7 @@ from src.foundation.tax_report.domain.capital_gains import (
     RealizedGainEntry,
     summarize_realized_gains,
 )
+from tests.conftest import PerfBudget
 
 START = date(2026, 1, 1)
 END = date(2026, 12, 31)
@@ -169,13 +169,15 @@ def test_inputs_and_results_are_independent(gains: list[RealizedGainEntry]) -> N
 
 
 @pytest.mark.perf
-def test_5000_entries_p95_budget() -> None:
+def test_5000_entries_p95_budget(perf_budget: PerfBudget) -> None:
     # ADR D2: use the 5k-row/200ms budget as an upper bound for pure aggregation.
     entries = [entry("-0.0123", list(AssetClass)[i % 3]) for i in range(5000)]
-    samples = []
-    for _ in range(20):
-        started = perf_counter()
-        result = summarize_realized_gains(entries, START, END)
-        samples.append(perf_counter() - started)
-        assert result.total == Decimal("-61.5000")
-    assert sorted(samples)[18] < 0.2
+
+    def measure() -> Any:
+        return summarize_realized_gains(entries, START, END)
+
+    samples = perf_budget.samples(measure, n=20, batch=8)
+    for s in samples:
+        assert s.result.total == Decimal("-61.5000")
+    sorted_cpu = sorted(s.cpu_ms for s in samples)
+    assert sorted_cpu[18] < 200
