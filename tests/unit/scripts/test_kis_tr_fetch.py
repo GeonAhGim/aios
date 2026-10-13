@@ -290,8 +290,10 @@ def test_extract_trs_from_file_throughput_delay_injection_fails_red(
     """검출력 확인: extract_trs_from_file에 10배 지연 주입 → 적색이어야 한다.
 
     PerfBudget.assert_within은 process_time 기준이라 time.sleep()을 보지 못한다.
-    RelativeBudget(mode="wall")로 wall-clock 지연을 계측하고,
-    sleep 0.5s가 wall-budget(0.1s)을 넘으면 적색임을 확인한다.
+    RelativeBudget(mode="wall")로 wall-clock 지연을 계측하고, sleep 0.5s가
+    같은 프로세스의 2,000,000회 보정 루프(호스트 속도 기준) 대비 2.0x 비율을
+    넘으면 적색임을 확인한다 — 보정 루프는 이 호스트에서 ~0.1~0.2s이므로
+    500ms sleep은 안정적으로 비율을 넘긴다.
     """
     import time
 
@@ -315,10 +317,10 @@ def test_extract_trs_from_file_throughput_delay_injection_fails_red(
             lambda: kis_tr_fetch.extract_trs_from_file(
                 "examples_llm/domestic_stock/order_cash/order_cash.py"
             ),
-            max_ratio=5.0,
+            max_ratio=2.0,
             mode="wall",
             n=1,
             warmup=0,
-            calibration_n=1,
+            calibration_n=3,
             label="지연 주입 스캔(적색 확인)",
         )
