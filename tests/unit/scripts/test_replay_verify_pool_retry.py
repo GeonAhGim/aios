@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from collections.abc import Generator
 from typing import Any
 
@@ -285,9 +284,15 @@ async def test_create_pool_with_retry_does_not_retry_unrelated_exceptions(monkey
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(monkeypatch) -> None:
+async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(
+    monkeypatch, perf_budget
+) -> None:
     """Perf assertion: the happy path (first attempt succeeds) must not pay
-    any backoff delay -- `asyncio.sleep` is only reached on a retry."""
+    any backoff delay -- `asyncio.sleep` is only reached on a retry.
+
+    raw perf_counter → perf_budget.sample_async() 전환 (task-11925).
+    비동기 I/O는 sample_async로 wall_ms를 얻는다. 예산 값(50ms)은 그대로 유지한다.
+    """
 
     def _fake_create_pool(dsn: str, **kwargs: object) -> _FakePool:
         return _FakePool()
@@ -301,13 +306,14 @@ async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(monk
     monkeypatch.setattr(replay_verify.asyncpg, "create_pool", _fake_create_pool)
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _tracking_sleep)
 
-    started = time.perf_counter()
-    pool = await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
-    elapsed = time.perf_counter() - started
+    async def _run() -> _FakePool:
+        return await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
 
-    assert isinstance(pool, _FakePool)
+    sample = await perf_budget.sample_async(_run)
+
+    assert isinstance(sample.result, _FakePool)
     assert slept is False
-    assert elapsed < 0.05, f"first-attempt success took {elapsed:.3f}s, expected no backoff delay"
+    assert sample.wall_ms < 50.0, perf_budget.describe(sample, budget_ms=50.0)
 
 
 async def _no_sleep(delay: float) -> None:
