@@ -22,7 +22,6 @@ source_contract 거부·파싱 실패 큐 적재)과 PIT 정정 무결성을 단
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -46,6 +45,7 @@ from src.foundation.research_data.application.ingest_opendart_filing import (
     OPENDART_SOURCE_ID,
     ingest_opendart_filing,
 )
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc)
 _EX_DATE = date(2026, 4, 1)
@@ -82,9 +82,7 @@ class _FakeUnprocessedQueue:
     async def enqueue(self, conn, *, source_id: str, raw_payload, reason: str) -> None:
         if self._boom is not None:
             raise self._boom
-        self.entries.append(
-            {"source_id": source_id, "raw_payload": raw_payload, "reason": reason}
-        )
+        self.entries.append({"source_id": source_id, "raw_payload": raw_payload, "reason": reason})
 
 
 def _allowed_contract(*, valid_from: datetime | None = None) -> SourceContract:
@@ -216,11 +214,11 @@ def test_normalize_filing_zero_split_after_raises_not_swallowed() -> None:
 
 
 @pytest.mark.perf
-def test_normalize_filing_bulk_meets_latency_budget() -> None:
+def test_normalize_filing_bulk_meets_latency_budget(perf_budget: PerfBudget) -> None:
     """5,000건 공시(다종목·다유형 배치 적재 시나리오) 정규화가 절대시간
     예산 내여야 한다."""
     n = 5_000
-    budget_sec = 5.0  # 실측 로컬 <<1s, CI 편차 감안
+    budget_ms = 5000  # 5.0s → ms 단위 통일
     instrument_id = uuid4()
     filings = [
         _split_filing(
@@ -233,24 +231,25 @@ def test_normalize_filing_bulk_meets_latency_budget() -> None:
         for i in range(n)
     ]
 
-    start = time.perf_counter()
-    actions = [normalize_filing(f) for f in filings]
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.sample(lambda: [normalize_filing(f) for f in filings], batch=15)
 
-    print(f"[RD-20 normalize] {n}건 {elapsed:.3f}s (budget<{budget_sec}s)")
+    actions = sample.result
+    print(f"[RD-20 normalize] {n}건 {sample.cpu_ms:.1f}ms (budget<{budget_ms}ms)")
     assert len(actions) == n
     assert all(a.ratio == Decimal("10") for a in actions)
-    assert elapsed < budget_sec, (
-        f"대량 정규화가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    assert sample.cpu_ms < budget_ms, (
+        f"대량 정규화가 예산({budget_ms}ms)을 넘었습니다({sample.cpu_ms:.1f}ms)."
     )
 
 
 @pytest.mark.perf
-def test_resolve_as_of_large_correction_history_meets_latency_budget() -> None:
+def test_resolve_as_of_large_correction_history_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """동일 (instrument, type, ex_date)에 2,000건 정정이 쌓여도 as_of
     조회가 절대시간 예산 내여야 한다(append-only 이력 성장 시나리오)."""
     n = 2_000
-    budget_sec = 3.0
+    budget_ms = 3000  # 3.0s → ms 단위 통일
     instrument_id = uuid4()
     history = [
         CorporateAction(
@@ -265,16 +264,14 @@ def test_resolve_as_of_large_correction_history_meets_latency_budget() -> None:
     ]
     as_of = _NOW + timedelta(seconds=n // 2)
 
-    start = time.perf_counter()
-    for _ in range(200):
-        result = resolve_as_of(history, as_of)
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.sample(lambda: resolve_as_of(history, as_of), batch=3)
 
-    print(f"[RD-20 resolve_as_of] {n}행×200회 {elapsed:.3f}s (budget<{budget_sec}s)")
+    result = sample.result
+    print(f"[RD-20 resolve_as_of] {n}행×3 {sample.cpu_ms:.1f}ms (budget<{budget_ms}ms)")
     assert len(result) == 1
     assert result[0].ratio == Decimal(str(n // 2 + 1))
-    assert elapsed < budget_sec, (
-        f"대량 PIT 조회가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    assert sample.cpu_ms < budget_ms, (
+        f"대량 PIT 조회가 예산({budget_ms}ms)을 넘었습니다({sample.cpu_ms:.1f}ms)."
     )
 
 
