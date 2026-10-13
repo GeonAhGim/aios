@@ -73,6 +73,64 @@ async def test_no_signal_tick_does_nothing(pool):
     assert fsm_state == "IDLE"
 
 
+async def test_no_signal_tick_with_nonexistent_execution(pool):
+    """negative test — 존재하지 않는 execution_id로 tick을 호출하면
+    ValueError를 즉시 반환해야 한다(I-07: 검증 게이트 hard-fail)."""
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+
+    with pytest.raises(ValueError, match="존재하지 않는 실행"):
+        await run_execution_tick(pool, adapter, execution_id=99999999, **_engines())
+
+
+async def test_no_signal_tick_with_deleted_strategy(pool):
+    """negative test — 실행은 존재하지만 참조하는 전략이 삭제된 경우,
+    tick 실행 중 ValueError를 반환해야 한다(I-07: 검증 게이트 hard-fail)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=-1.0)
+
+    # FK 제약을 일시적으로 비활성화하고 전략 행을 삭제.
+    async with pool.acquire() as conn:
+        await conn.execute("SET session_replication_role = replica")
+        await conn.execute(
+            "DELETE FROM strategies WHERE strategy_id = "
+            "(SELECT strategy_id FROM strategy_executions WHERE id = $1)",
+            execution_id,
+        )
+        await conn.execute("SET session_replication_role = default")
+
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+
+    with pytest.raises(ValueError, match="전략이 없습니다"):
+        await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+
+async def test_no_signal_tick_with_strategy_engine_exception(pool, monkeypatch):
+    """실패주입 — StrategyEngine.evaluate가 예외를 던지면 tick 전체가
+    실패하고 fsm_state는 IDLE 그대로 남아야 한다(I-07: 안전 게이트 hard-fail)."""
+    from src.core.strategy.engine import StrategyEngine
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+
+    engines = _engines()
+
+    def fake_evaluate(*args, **kwargs):
+        raise RuntimeError("의도적 평가 실패")
+
+    monkeypatch.setattr(StrategyEngine, "evaluate", fake_evaluate)
+
+    with pytest.raises(RuntimeError, match="의도적 평가 실패"):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM 상태가 IDLE에서 변경되지 않았는지 확인.
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
 async def test_risk_rejection_leaves_fsm_state_idle_for_retry(pool):
     """자본배분 상한 초과(미인증 전략 10%인데 50% 요청) — RiskEngine이
     거부하면 fsm_state는 IDLE 그대로 남아 다음 틱에 재평가돼야 한다."""
