@@ -405,7 +405,7 @@ def test_scan_violations_fails_closed_on_undecodable_file(
 
 
 @pytest.mark.perf
-def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget: object) -> None:
+def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget) -> None:
     """성능 단언 — `_scan_function_defs`는 같은 트리를 `ast.walk`로 두 번
     순회한다(메서드 수집 1회 + 최상위 함수 수집 1회). 대상 파일이 커질수록
     이차식으로 느려지는 회귀가 들어와도 잡히지 않으면 CI가 눈치채지 못한 채
