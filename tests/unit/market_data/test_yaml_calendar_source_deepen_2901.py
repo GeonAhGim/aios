@@ -24,7 +24,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -36,6 +35,7 @@ from src.foundation.market_data.adapters.yaml_calendar_source import load_calend
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIONS
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
+from tests.conftest import PerfBudget
 
 _CONFIG_DIR = Path(__file__).resolve().parents[3] / "config" / "market_calendars"
 _KRX_2026 = _CONFIG_DIR / "KRX_2026.yaml"
@@ -137,12 +137,18 @@ def test_invalid_close_time_format_propagates(tmp_path: Path) -> None:
 
 
 @pytest.mark.perf
-def test_load_calendar_large_holiday_list_meets_latency_budget(tmp_path: Path) -> None:
+def test_load_calendar_large_holiday_list_meets_latency_budget(
+    tmp_path: Path, perf_budget: PerfBudget
+) -> None:
     """5,000건 휴장일(다자산·다년도 벤더 통합 시나리오를 흉내)을 담은 yaml
-    파싱이 절대시간 예산 내여야 한다."""
+    파싱이 절대시간 예산 내여야 한다.
+
+    raw perf_counter() → PerfBudget.assert_within(process_time 기반, batch 묶음) 전환.
+    예산 15.0s = 15000.0ms. process_time 15.6ms 틱 양자화를 피하기 위해
+    batch=8로 묶어 호출당 오차를 tick/8 ≈ 2ms로 줄인다.
+    """
     n = 5_000
-    budget_sec = 15.0  # 실측 로컬 <0.5s, 동일 세션에서 다른 테스트 파일과 병행 시 디스크/백신
-    # 경합으로 최대 ~9s까지 관측됨 — CI 환경 편차를 넉넉히 흡수한다
+    budget_ms = 15_000.0  # 15.0s → ms 단위 통일
     big = tmp_path / "big.yaml"
     lines = [
         "source: https://example.com/official-notice",
@@ -161,39 +167,52 @@ def test_load_calendar_large_holiday_list_meets_latency_budget(tmp_path: Path) -
     lines.append("early_closes: []")
     big.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    start = time.perf_counter()
-    days = load_calendar(big)
-    elapsed = time.perf_counter() - start
-
-    print(
-        f"[RD-21 yaml_calendar_source] load_calendar({n}) in {elapsed:.3f}s (budget<{budget_sec}s)"
+    sample = perf_budget.assert_within(
+        lambda: load_calendar(big),
+        budget_ms=budget_ms,
+        n=5,
+        batch=8,
+        label="[RD-21 yaml_calendar_source] load_calendar_large_holiday",
     )
-    assert len(days) == n
-    assert elapsed < budget_sec, (
-        f"대량 휴장일 파싱이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    assert len(load_calendar(big)) == n
+    print(
+        f"[RD-21 yaml_calendar_source] load_calendar({n}) cpu={sample.cpu_ms:.3f}ms "
+        f"wall={sample.wall_ms:.3f}ms budget<{budget_ms:.3f}ms"
     )
 
 
 @pytest.mark.perf
-def test_venue_calendar_repeated_is_open_queries_meet_throughput_budget() -> None:
+def test_venue_calendar_repeated_is_open_queries_meet_throughput_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """실제 KRX 공시 캘린더로 조립한 `VenueCalendar.is_open()` 반복 조회(주문
     라우팅 경로에서 매 주문마다 호출되는 것을 흉내)가 처리량 예산을 지켜야
-    한다."""
+    한다.
+
+    raw perf_counter() → PerfBudget.assert_within(process_time 기반, batch 묶음) 전환.
+    예산 15.0s = 15000.0ms. batch=16으로 묶어 process_time 틱 오차를 15.6/16≈1ms로 줄인다.
+    """
     calendar = _venue_calendar_from_yaml(_KRX_2026, Venue.KIS_KRX)
     iterations = 50_000
-    budget_sec = 15.0  # 실측 로컬 <1s, 동일 세션 병행 실행 시 최대 ~8s까지 관측됨 — CI 편차 흡수
+    budget_ms = 15_000.0  # 15.0s → ms 단위 통일
     tz = calendar.tz
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        day = date(2026, 1, 1) + (date(2026, 12, 31) - date(2026, 1, 1)) * (i % 365) // 365
-        at = datetime(day.year, day.month, day.day, 10, 0, tzinfo=tz)
-        calendar.is_open(at)
-    elapsed = time.perf_counter() - start
+    def _query() -> None:
+        for i in range(iterations):
+            day = date(2026, 1, 1) + (date(2026, 12, 31) - date(2026, 1, 1)) * (i % 365) // 365
+            at = datetime(day.year, day.month, day.day, 10, 0, tzinfo=tz)
+            calendar.is_open(at)
 
-    print(f"[RD-21 session_rules] is_open() x{iterations} in {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"is_open 반복 조회가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    sample = perf_budget.assert_within(
+        _query,
+        budget_ms=budget_ms,
+        n=5,
+        batch=16,
+        label="[RD-21 session_rules] is_open_throughput",
+    )
+    print(
+        f"[RD-21 session_rules] is_open() x{iterations} cpu={sample.cpu_ms:.3f}ms "
+        f"wall={sample.wall_ms:.3f}ms budget<{budget_ms:.3f}ms"
     )
 
 
