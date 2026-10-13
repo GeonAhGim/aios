@@ -9,11 +9,12 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -90,20 +91,74 @@ def test_missing_manifest_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.perf
-def test_find_frozen_violations_completes_within_time_budget() -> None:
-    """성능단언: 대규모 PR(수천 개 변경 파일)에서도 FROZEN 존 스캔이 예산 내에 끝나는지 확인."""
+def test_find_frozen_violations_completes_within_time_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능단언: 대규모 PR(수천 개 변경 파일)에서도 FROZEN 존 스캔이 예산 내에 끝나는지 확인.
+
+    raw perf_counter 단언 → perf_budget.assert_within 전환.
+    batch=8로 process_time 양자화 오차(15.6ms tick)를 호출당 ~2ms로 축소.
+    예산 1.0s → 1000ms 단위 일치.
+    """
     frozen_patterns = ["aios/kernel/**", "src/core/strategy/**"]
     changed_files = [f"docs/generated/report_{i}.md" for i in range(4000)]
     changed_files += [f"tests/unit/generated/test_{i}.py" for i in range(4000)]
     changed_files.append("aios/kernel/policy/rule.py")  # 위반 1건을 대량 diff 속에 섞는다
     assert len(changed_files) > 1000  # 이 벤치마크가 무의미해지지 않도록 규모를 보장
 
-    start = time.perf_counter()
-    violations = check_zone_diff.find_frozen_violations(changed_files, frozen_patterns)
-    elapsed = time.perf_counter() - start
+    perf_budget.assert_within(
+        lambda: check_zone_diff.find_frozen_violations(changed_files, frozen_patterns),
+        budget_ms=1000.0,
+        batch=8,
+        label="FROZEN 존 위반 스캔(8000+ 파일)",
+    )
 
-    assert violations == ["aios/kernel/policy/rule.py"]
-    assert elapsed < 1.0, f"FROZEN 존 위반 스캔이 {elapsed:.3f}s — 예산(1.0s) 초과"
+    # 정답 검증: budget 통과와 별도로 올바른 결과가 나옵니다.
+    result = check_zone_diff.find_frozen_violations(changed_files, frozen_patterns)
+    assert result == ["aios/kernel/policy/rule.py"]
+
+
+@pytest.mark.perf
+def test_find_frozen_violations_delay_injection_fails_red_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인: find_frozen_violations에 10배 지연을 주입하면 적색이어야 한다.
+
+    PerfBudget.assert_within은 process_time 기준이라 time.sleep()을 보지 못한다.
+    그래서 RelativeBudget(mode="wall")로 wall-clock 지연을 계측하고,
+    지연 주입 후 같은 함수가 절대 wall-budget(1.0s)을 넘으면 적색이다.
+    calibration_n=1로 비율 오차를 줄이고 max_ratio를 매우 낮게 설정해
+    sleep 1.5s이 반드시 예산을 넘게 한다.
+    """
+    import time
+
+    from tests._perf.relative_budget import RelativeBudget
+
+    original_fn = check_zone_diff.find_frozen_violations
+    frozen_patterns = ["aios/kernel/**", "src/core/strategy/**"]
+    changed_files = [f"docs/generated/report_{i}.md" for i in range(4000)]
+    changed_files += [f"tests/unit/generated/test_{i}.py" for i in range(4000)]
+    changed_files.append("aios/kernel/policy/rule.py")
+
+    # 약 1.5s 지연 주입 (원본 ~0.1s → 10x 초과)
+    def _slow_violations(files: list[str], patterns: list[str]) -> list[str]:
+        time.sleep(1.5)
+        return original_fn(files, patterns)
+
+    monkeypatch.setattr(check_zone_diff, "find_frozen_violations", _slow_violations)
+
+    # 지연 주입된 함수는 wall-clock 예산을 넘어야 한다 → 적색
+    # calibration loop가 ~50-100ms이므로 max_ratio=10이면 1.5s는 15-30x로 명확 초과
+    with pytest.raises(AssertionError):
+        RelativeBudget().assert_within(
+            lambda: check_zone_diff.find_frozen_violations(changed_files, frozen_patterns),
+            max_ratio=10.0,
+            mode="wall",
+            n=1,
+            warmup=0,
+            calibration_n=1,
+            label="지연 주입 스캔(적색 확인)",
+        )
 
 
 # ---------------------------------------------------------------------------
