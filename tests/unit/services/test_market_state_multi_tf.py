@@ -180,7 +180,7 @@ def test_build_market_state_propagates_indicator_service_failure_mid_batch() -> 
     as_of = max(candles_1m[-1].close_time, candles_1h[-1].close_time)
     real_service = IndicatorService()
 
-    class _PoisonedIndicatorService:
+    class _PoisonedIndicatorService(IndicatorService):
         def calculate(self, indicator: str, candles: list[Candle], **params: int) -> object:
             if indicator == "RSI":
                 raise RuntimeError("simulated indicator engine crash")
@@ -191,7 +191,7 @@ def test_build_market_state_propagates_indicator_service_failure_mid_batch() -> 
             fsm,
             {"1m": candles_1m, "1h": candles_1h},
             as_of=as_of,
-            indicator_service=_PoisonedIndicatorService(),  # type: ignore[arg-type]
+            indicator_service=_PoisonedIndicatorService(),
         )
 
 
