@@ -313,7 +313,7 @@ def test_scanner_ignores_call_site_passing_real_gate_object() -> None:
 # --- 회귀 방지 증명: task-1715(P0-B) 수정 전/후 형태 --------------------------
 
 
-def test_regression_flags_p0b_bypass_shape_before_fix():
+def test_regression_flags_p0b_bypass_shape_before_fix() -> None:
     """task-1715(P0-B) 수정 전 `is_submission_allowed`의 실제 시그니처 형태
     (`src/services/execution_loop/pre_submit_check.py`) — 이 검사가 강화되지
     않았다면 놓쳤을 우회를 지금은 잡는다는 증거."""
