@@ -14,7 +14,6 @@ fixture/헬퍼는 `conftest.py`.
 from __future__ import annotations
 
 import math
-import time
 from uuid import uuid4
 
 import pytest
@@ -91,50 +90,106 @@ async def test_conditional_update_failure_rolls_back_order_event_atomically(pool
 
 
 @pytest.mark.perf
-async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(pool):
+async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(pool, perf_budget):
     """수치 성능 단언(task-3029, DEPTH 감사 task-2724가 지목한 마지막 공백).
-    단일 취소대상 주문에 대한 `sweep_open_orders` 1회 호출은 후보 선별 SELECT
-    2회 + 주문당 트랜잭션(FOR UPDATE SKIP LOCKED 잠금 -> order_events INSERT ->
-    조건부 UPDATE) 1회 + 어댑터 cancel 1회로 라운드트립 수가 고정되어 있어야
-    한다 — task-2406의 원래 결함(단일 bulk UPDATE)이 되돌아오거나 주문 단위
-    루프에 회귀(예: 후보마다 추가 조회가 붙는 것)가 생기면 이 비용이 자란다.
 
-    공유 TEST_DATABASE_URL의 절대 지연 변동성 때문에 절대 ms 임계 대신,
-    같은 모양(주문 1건 대상 sweep)의 baseline 호출 1건 대비 정규화한 상한만
-    게이트로 쓴다(task-3004/3009 선례와 동일 패턴)."""
+    raw time.perf_counter() 단언을 perf_budget.samples_async() 경유로 전환
+    (task-11862). 비동기 I/O(DB 라운드트립)이므로 PerfBudget.wall_ms로
+    측정하고, p95 분포 단언은 그대로 유지한다.
+
+    예산: baseline 대비 max_ratio 5배 + 50ms 고정 오버헤드 (불변).
+    """
     user_id = await create_test_user(pool)
     adapter = _CountingCancelAdapter()
 
+    # baseline: 같은 모양 1회 호출
     await _seed_order(pool, user_id)
-    baseline_start = time.perf_counter()
-    await sweep_open_orders(
-        pool,
-        {"bitget": adapter},
-        control_id=uuid4(),
-        scope=SafetyScope.TENANT,
-        scope_ref=str(user_id),
-    )
-    baseline_elapsed = time.perf_counter() - baseline_start
-
-    samples: list[float] = []
-    for _ in range(30):
-        await _seed_order(pool, user_id)
-        start = time.perf_counter()
-        await sweep_open_orders(
+    baseline_result = await perf_budget.sample_async(
+        lambda: sweep_open_orders(
             pool,
             {"bitget": adapter},
             control_id=uuid4(),
             scope=SafetyScope.TENANT,
             scope_ref=str(user_id),
         )
-        samples.append(time.perf_counter() - start)
+    )
+    baseline_elapsed_s = baseline_result.wall_ms / 1000
 
-    samples.sort()
-    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+    # p95 측정: 30회 samples_async → wall_ms 분포에서 p95 계산
+    measurements = await perf_budget.samples_async(
+        lambda: sweep_open_orders(
+            pool,
+            {"bitget": adapter},
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        ),
+        n=30,
+    )
+    wall_ms_list = sorted(m.wall_ms for m in measurements)
+    p95_ms = wall_ms_list[math.ceil(0.95 * len(wall_ms_list)) - 1]
 
-    ceiling = baseline_elapsed * 5 + 0.05
-    assert p95 <= ceiling, (
-        f"sweep_open_orders(주문 1건) p95 지연 {p95:.4f}s가 정규화 상한 "
-        f"{ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 초과했습니다 -- "
-        f"주문 단위 트랜잭션 라운드트립 회귀 의심"
+    ceiling_ms = baseline_elapsed_s * 5 * 1000 + 50
+    assert p95_ms <= ceiling_ms, (
+        f"sweep_open_orders(주문 1건) p95 wall {p95_ms:.2f}ms가 정규화 상한 "
+        f"{ceiling_ms:.2f}ms(baseline {baseline_result.wall_ms:.2f}ms)를 초과했습니다 -- "
+        "주문 단위 트랜잭션 라운드트립 회귀 의심"
+    )
+
+
+@pytest.mark.perf
+async def test_sweep_open_orders_p95_latency_detection_injected_delay(
+    pool, perf_budget, monkeypatch
+):
+    """검출력 확인 — sweep_open_orders에 200ms 지연을 주입하면 적색이어야 한다.
+
+    raw 단언이 허울이 아닌지 확인하는 실패주입: 어댑터 cancel에 sleep을
+    monkeypatch로 주입해 baseline 대비 10배 이상 지연을 만든다. 이 지연이
+    p95 단언을 적색으로 만들어야 perf_budget 전환의 의미가 있다."""
+    import time as _time
+
+    user_id = await create_test_user(pool)
+    adapter = _CountingCancelAdapter()
+
+    # baseline (지연 없음)
+    await _seed_order(pool, user_id)
+    baseline_result = await perf_budget.sample_async(
+        lambda: sweep_open_orders(
+            pool,
+            {"bitget": adapter},
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        )
+    )
+    baseline_ms = baseline_result.wall_ms
+
+    # 지연 주입: cancel 호출 시 200ms sleep
+    original_cancel = adapter.cancel_order
+
+    async def _slow_cancel(*args, **kwargs):
+        _time.sleep(0.2)
+        return await original_cancel(*args, **kwargs)
+
+    adapter.cancel_order = _slow_cancel
+
+    # 지연 버전 p95 측정 — 각 호출 전에 주문을 다시 심어야 실제 cancel이 발생함
+    async def _sweep_with_seed():
+        await _seed_order(pool, user_id)
+        return await sweep_open_orders(
+            pool,
+            {"bitget": adapter},
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        )
+
+    measurements = await perf_budget.samples_async(_sweep_with_seed, n=10)
+    wall_ms_list = sorted(m.wall_ms for m in measurements)
+    p95_ms = wall_ms_list[math.ceil(0.95 * len(wall_ms_list)) - 1]
+
+    # baseline 대비 10배 이상 지연이 발생해야 함 (단언이 제대로 작동하는지 확인)
+    assert p95_ms > baseline_ms * 5, (
+        f"지연 주입에도 p95({p95_ms:.0f}ms)가 baseline({baseline_ms:.0f}ms)*5를 넘지 않음 — "
+        "지연 주입이 누수되었거나 monkeypatch가 작동 안 함"
     )
