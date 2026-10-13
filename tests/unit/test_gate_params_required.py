@@ -47,8 +47,11 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+from tests.conftest import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -373,7 +376,7 @@ def test_no_optional_safety_gate_constructor_params() -> None:
 
 
 def test_scan_violations_fails_closed_when_target_file_vanishes(
-    monkeypatch: object, tmp_path: object
+    monkeypatch: Any, tmp_path: Any
 ) -> None:
     """실패 주입 1 — 스캔 도중 대상 파일이 사라지면(파일시스템 경합) 조용히
     위반 0건으로 넘어가는 대신 예외로 시끄럽게 실패해야 한다."""
@@ -385,9 +388,7 @@ def test_scan_violations_fails_closed_when_target_file_vanishes(
         _scan_violations()
 
 
-def test_scan_violations_fails_closed_on_undecodable_file(
-    monkeypatch: object, tmp_path: object
-) -> None:
+def test_scan_violations_fails_closed_on_undecodable_file(monkeypatch: Any, tmp_path: Any) -> None:
     """실패 주입 2 — 대상 파일이 UTF-8로 디코딩되지 않으면(손상된 배포본 등)
     역시 예외로 실패해야 한다. `errors="ignore"` 같은 관용적 디코딩으로
     조용히 넘어가면 손상된 파일의 실제 내용을 검사하지 못한 채 초록불을
@@ -405,7 +406,7 @@ def test_scan_violations_fails_closed_on_undecodable_file(
 
 
 @pytest.mark.perf
-def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget) -> None:
+def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget: PerfBudget) -> None:
     """성능 단언 — `_scan_function_defs`는 같은 트리를 `ast.walk`로 두 번
     순회한다(메서드 수집 1회 + 최상위 함수 수집 1회). 대상 파일이 커질수록
     이차식으로 느려지는 회귀가 들어와도 잡히지 않으면 CI가 눈치채지 못한 채
