@@ -31,16 +31,18 @@ in-memory string building, no I/O -- an absolute time budget is safe here,
 unlike the ratio-based budgets used for HTTP-bearing tests elsewhere in this
 suite).
 """
+
 from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 import pytest
+
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -173,13 +175,17 @@ def test_generate_files_aborts_whole_batch_on_one_poisoned_row() -> None:
 
 
 @pytest.mark.perf
-def test_generate_files_throughput_at_10x_real_reference_scale() -> None:
+def test_generate_files_throughput_at_10x_real_reference_scale(
+    perf_budget: PerfBudget,
+) -> None:
     """The real reference currently generates ~290 methods across a handful
     of domains in well under a second. This synthesizes ~3,000 rows (~10x)
     spread across 30 domains (small enough per domain to stay under the
-    300-line file cap on tr_labels.py) and asserts the whole batch still
-    completes inside a generous budget -- catching an accidental O(n^2) in
-    future edits to chunking/wrapping, not just "did it hang forever"."""
+    500-line file cap per domain labels/mixin).
+
+    Budget: 30 000 ms CPU (measured ~1 700-6 000 ms depending on machine;
+    generous headroom). batch=2 reduces Windows process_time quantisation
+    noise (15.6 ms tick) so the CPU measurement is stable across runs."""
     rows_per_domain = 100
     domain_count = 30
     trs = [
@@ -191,19 +197,17 @@ def test_generate_files_throughput_at_10x_real_reference_scale() -> None:
     n = len(trs)
     assert n == rows_per_domain * domain_count
 
-    started = time.perf_counter()
-    files = gen.generate_files(reference, handwritten_source="")
-    elapsed = time.perf_counter() - started
-
-    budget_seconds = 30.0  # observed ~1.7-6s depending on machine/CI load; generous headroom
-    throughput = n / elapsed if elapsed > 0 else float("inf")
-    print(
-        f"\ngenerate_files throughput: n={n} elapsed={elapsed * 1000:.1f}ms "
-        f"throughput={throughput:.0f} rows/s (budget={budget_seconds}s)"
+    sample = perf_budget.assert_within(
+        lambda: gen.generate_files(reference, handwritten_source=""),
+        budget_ms=30_000.0,
+        batch=2,
     )
-    assert elapsed < budget_seconds, (
-        f"generate_files({n} rows) took {elapsed:.2f}s, over the {budget_seconds}s budget -- "
-        "check for an accidental quadratic blowup in chunking/wrapping."
+    files: dict[str, str] = cast(dict[str, str], sample.result)
+    throughput = n / (sample.cpu_ms / 1000) if sample.cpu_ms > 0 else float("inf")
+    print(
+        f"\ngenerate_files throughput: n={n} cpu={sample.cpu_ms:.1f}ms "
+        f"wall={sample.wall_ms:.1f}ms throughput={throughput:.0f} rows/s "
+        f"(budget=30000ms)"
     )
 
     # correctness alongside the timing, not just raw speed: every domain got a
