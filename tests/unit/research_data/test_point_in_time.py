@@ -7,7 +7,6 @@ DoD: 정정 공시 적용 후에도 정정 전 시점 질의가 정정 전 값�
 
 from __future__ import annotations
 
-import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -20,6 +19,7 @@ from src.foundation.market_data.domain.corporate_action import (
     point_in_time as point_in_time_module,
 )
 from src.foundation.market_data.domain.corporate_action.point_in_time import resolve_as_of
+from tests.conftest import PerfBudget
 
 _EX_DATE = date(2026, 4, 1)
 
@@ -165,12 +165,14 @@ def test_resolve_as_of_propagates_unexpected_sort_failure(monkeypatch: pytest.Mo
 
 
 @pytest.mark.perf
-def test_resolve_as_of_meets_latency_budget_with_many_instruments_and_corrections() -> None:
+def test_resolve_as_of_meets_latency_budget_with_many_instruments_and_corrections(
+    perf_budget: PerfBudget,
+) -> None:
     """수천 개 종목 x 정정 이력에 대한 단건 `as_of` 판정이 절대시간 예산
     내여야 한다 — 그룹핑(dict 축약)이 선형 스캔에서 이차로 퇴화하지
     않았는지 확인한다(ADR-2026-09-09-C Decision 1)."""
     n_instruments = 2_000
-    budget_sec = 2.0  # 실측 로컬 <0.4s
+    budget_ms = 2_000.0  # 실측 로컬 <0.4s(400ms)
     base_known_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     as_of = base_known_at + timedelta(days=2)
 
@@ -202,16 +204,23 @@ def test_resolve_as_of_meets_latency_budget_with_many_instruments_and_correction
             )
         )
 
-    start = time.perf_counter()
-    result = resolve_as_of(actions, as_of)
-    elapsed = time.perf_counter() - start
+    result: list[CorporateAction] = []
+
+    def _resolve() -> None:
+        nonlocal result
+        result = resolve_as_of(actions, as_of)
+
+    # 단일 호출이 이미 ~400ms로 15.6ms process_time 틱의 수십 배라 batch=1로도
+    # 양자화 오차가 무시 가능하다 — batch는 빠른 호출의 틱 희석용이지 여기선
+    # 불필요(note에 기록).
+    sample = perf_budget.sample(_resolve, batch=1)
 
     print(
         f"[RD-20 resolve_as_of] {len(actions)}건({n_instruments} 종목) 판정 "
-        f"{elapsed:.4f}s (budget<{budget_sec}s)"
+        f"{perf_budget.describe(sample, budget_ms=budget_ms)}"
     )
     assert len(result) == n_instruments
     assert all(a.ratio == Decimal("5") for a in result)
-    assert elapsed < budget_sec, (
-        f"{len(actions)}건 판정이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    assert sample.cpu_ms < budget_ms, (
+        f"{len(actions)}건 판정이 예산({budget_ms:.1f}ms)을 넘었습니다({sample.cpu_ms:.4f}ms)."
     )
