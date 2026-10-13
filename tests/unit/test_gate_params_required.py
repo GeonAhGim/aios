@@ -214,7 +214,7 @@ def _scan_violations() -> list[Violation]:
 # --- 스캐너 자체의 정확성 검증 (negative test 포함) -------------------------
 
 
-def test_scanner_flags_optional_union_default_in_constructor():
+def test_scanner_flags_optional_union_default_in_constructor() -> None:
     source = (
         "class Scheduler:\n"
         "    def __init__(self, pre_submit_gate: str | None = None) -> None:\n"
@@ -226,7 +226,7 @@ def test_scanner_flags_optional_union_default_in_constructor():
     ]
 
 
-def test_scanner_flags_typing_optional_annotation_in_factory():
+def test_scanner_flags_typing_optional_annotation_in_factory() -> None:
     source = "from typing import Optional\n\ndef make_gate(pool) -> Optional[int]:\n    pass\n"
     violations = _scan_source(source, "fixture.py")
     assert len(violations) == 0  # 반환 타입이 아니라 파라미터만 검사 대상이다
@@ -242,7 +242,7 @@ def test_scanner_flags_typing_optional_annotation_in_factory():
     ]
 
 
-def test_scanner_ignores_required_gate_param_without_none_default():
+def test_scanner_ignores_required_gate_param_without_none_default() -> None:
     """negative test — 안전 게이트 인자가 필수(기본값 없음, Optional 아님)면
     위반이 아니다."""
     source = (
@@ -251,7 +251,7 @@ def test_scanner_ignores_required_gate_param_without_none_default():
     assert _scan_source(source, "fixture.py") == []
 
 
-def test_scanner_ignores_substring_false_positives():
+def test_scanner_ignores_substring_false_positives() -> None:
     """negative test — `release`/`aggregate`처럼 `lease`/`gate`를 부분
     문자열로 포함할 뿐인 이름은 토큰 단위 비교라 걸리지 않는다."""
     source = (
@@ -263,7 +263,7 @@ def test_scanner_ignores_substring_false_positives():
     assert _scan_source(source, "fixture.py") == []
 
 
-def test_scanner_flags_plain_function_not_just_constructor_or_factory():
+def test_scanner_flags_plain_function_not_just_constructor_or_factory() -> None:
     """이 검사가 잡아야 할 바로 그 형태 — 이미 만들어진 게이트를 인자로
     받아 호출만 하는 일반 함수(생성자도 `make_*`/`get_*` 팩토리도 아님)가
     안전 게이트 인자를 Optional로 받으면 위반이다. 이전 버전은 이런 함수를
@@ -372,7 +372,9 @@ def test_no_optional_safety_gate_constructor_params():
 # 인코딩이 깨졌는데도 스캔이 통과로 보고되면 안전 검사 자체가 우회된다.
 
 
-def test_scan_violations_fails_closed_when_target_file_vanishes(monkeypatch, tmp_path):
+def test_scan_violations_fails_closed_when_target_file_vanishes(
+    monkeypatch: object, tmp_path: object
+) -> None:
     """실패 주입 1 — 스캔 도중 대상 파일이 사라지면(파일시스템 경합) 조용히
     위반 0건으로 넘어가는 대신 예외로 시끄럽게 실패해야 한다."""
     vanished = tmp_path / "vanished_between_list_and_read.py"
@@ -383,7 +385,9 @@ def test_scan_violations_fails_closed_when_target_file_vanishes(monkeypatch, tmp
         _scan_violations()
 
 
-def test_scan_violations_fails_closed_on_undecodable_file(monkeypatch, tmp_path):
+def test_scan_violations_fails_closed_on_undecodable_file(
+    monkeypatch: object, tmp_path: object
+) -> None:
     """실패 주입 2 — 대상 파일이 UTF-8로 디코딩되지 않으면(손상된 배포본 등)
     역시 예외로 실패해야 한다. `errors="ignore"` 같은 관용적 디코딩으로
     조용히 넘어가면 손상된 파일의 실제 내용을 검사하지 못한 채 초록불을
@@ -401,7 +405,7 @@ def test_scan_violations_fails_closed_on_undecodable_file(monkeypatch, tmp_path)
 
 
 @pytest.mark.perf
-def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget):
+def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget: object) -> None:
     """성능 단언 — `_scan_function_defs`는 같은 트리를 `ast.walk`로 두 번
     순회한다(메서드 수집 1회 + 최상위 함수 수집 1회). 대상 파일이 커질수록
     이차식으로 느려지는 회귀가 들어와도 잡히지 않으면 CI가 눈치채지 못한 채
@@ -424,7 +428,7 @@ def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget):
 # --- 다중 인스턴스(동시 실행) 증명 -------------------------------------------
 
 
-def test_scan_source_consistent_across_concurrent_instances():
+def test_scan_source_consistent_across_concurrent_instances() -> None:
     """다중 인스턴스 증거 — CI가 여러 워커(pytest-xdist 등)나 여러 스레드에서
     동시에 이 스캐너를 돌릴 수 있다. 스캐너가 모듈 전역 가변 상태를 공유하면
     경합으로 일부 실행이 위반을 놓치는 거짓 초록불(fail-open)이 나올 수

@@ -24,6 +24,7 @@ from src.services.execution_loop.market_state import (
     parse_indicator_key,
     required_timeframes,
 )
+from tests.conftest import PerfBudget
 
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _MARKET_STATE_PATH = (
@@ -180,7 +181,7 @@ def test_build_market_state_propagates_indicator_service_failure_mid_batch() -> 
     real_service = IndicatorService()
 
     class _PoisonedIndicatorService:
-        def calculate(self, indicator: str, candles: list[Candle], **params: int):
+        def calculate(self, indicator: str, candles: list[Candle], **params: int) -> object:
             if indicator == "RSI":
                 raise RuntimeError("simulated indicator engine crash")
             return real_service.calculate(indicator, candles, **params)
@@ -190,7 +191,7 @@ def test_build_market_state_propagates_indicator_service_failure_mid_batch() -> 
             fsm,
             {"1m": candles_1m, "1h": candles_1h},
             as_of=as_of,
-            indicator_service=_PoisonedIndicatorService(),
+            indicator_service=_PoisonedIndicatorService(),  # type: ignore[arg-type]
         )
 
 
@@ -198,7 +199,7 @@ def test_build_market_state_propagates_indicator_service_failure_mid_batch() -> 
 
 
 @pytest.mark.perf
-def test_build_market_state_throughput_budget(perf_budget) -> None:
+def test_build_market_state_throughput_budget(perf_budget: PerfBudget) -> None:
     """`run_execution_tick` (tick.py) calls `build_market_state` once per
     execution per tick; 300 calls over a realistic 2-timeframe/2-key
     strategy must stay well under a 2s budget to rule out a pathological
