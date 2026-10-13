@@ -315,10 +315,15 @@ async def test_risk_engine_rejects_zero_allocated_capital(pool):
     assert fsm_state == "BUY_ORDER_PENDING"
 
 
+@pytest.mark.perf
 async def test_execution_tick_performance_under_500ms(pool):
     """성능 단언 — 단일 tick 실행이 500ms 이내여야 한다(실시간 1m 틱 간격
     대비 여유 확보, DB 연결 풀 오버헤드 포함). ADR-2026-09-09-C Decision 1
-    성능 예산 준수 확인."""
+    성능 예산 준수 확인.
+
+    pytest.mark.perf: xdist 병렬 실행 시 핵심 세션에서 wall-clock
+    perf_counter()로 측정하므로 perf marker 필수(task-7434).
+    """
     import time
 
     user_id = await create_test_tenant(pool)
