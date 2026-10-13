@@ -7,7 +7,6 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-4, §8.1, §9.
 """
 
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import cast
@@ -24,6 +23,7 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
 )
 from src.foundation.market_data.domain.quality.dedupe import DedupeResult, dedupe
+from tests.conftest import PerfBudget
 
 UTC = timezone.utc
 _KEY = SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1)
@@ -110,16 +110,17 @@ def test_dedupe_propagates_equality_fault_without_misclassifying() -> None:
 
 
 @pytest.mark.perf
-def test_dedupe_handles_large_batch_within_latency_budget() -> None:
+def test_dedupe_handles_large_batch_within_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언: 20,000개 고유 캔들 + 중복 그룹 하나가 O(n) 유지 하에
     3초 예산 안에 끝난다."""
     unique = [_candle(open_time=_OPEN + timedelta(minutes=i)) for i in range(20_000)]
     dup_group = [_candle(open_time=_OPEN + timedelta(days=365)) for _ in range(50)]
-    start = time.perf_counter()
-    result = dedupe(unique + dup_group)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 3.0
-    assert len(result.kept) == 20_000 + 1
+    sample = perf_budget.assert_within(
+        lambda: dedupe(unique + dup_group), budget_ms=3000.0, batch=20
+    )
+    assert len(sample.result.kept) == 20_000 + 1
 
 
 def test_three_member_group_two_identical_one_different_isolates_all_three() -> None:
