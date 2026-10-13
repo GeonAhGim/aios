@@ -22,6 +22,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from typing_extensions import Never
 
 from src.foundation.market_data.contracts.v1 import SymbolStatus
 from src.foundation.market_data.domain.reference import lifecycle as lifecycle_module
@@ -192,3 +193,51 @@ def test_transition_is_deterministic_under_concurrent_thread_access() -> None:
 
     assert all(result == reference for result in results)
     assert reference == (SymbolStatus.SUSPENDED, True)
+
+
+# --- 추가 negative test: 불변식 위반 입력 ------------------------------
+
+
+def test_listed_rejects_list_event() -> None:
+    """이미 상장(LISTED)된 심볼에 LIST 이벤트를 보내면 거부해야 한다 —
+    상장 심볼이 재상장 상태로 전환되는 것은 도메인 불변식(I-07)에 위배된다.
+    `_TRANSITIONS`에 `(LISTED, "LIST")`가 실수로 추가되는 회귀를 검증한다.
+    """
+    with pytest.raises(LifecycleTransitionError):
+        transition(SymbolStatus.LISTED, "LIST")
+
+
+def test_suspended_rejects_list_and_suspend_events() -> None:
+    """거래 정지(SUSPENDED) 상태에서는 LIST/SUSPEND 이벤트가 모두 거부된다 —
+    정지 종목이 갑자기 상장 상태로 전환되거나 중복 정지되는 것은 원장
+    불일치(I-07)를 유발한다.
+    """
+    for event in ("LIST", "SUSPEND"):
+        with pytest.raises(LifecycleTransitionError):
+            transition(SymbolStatus.SUSPENDED, event)
+
+
+# --- 추가 실패주입: _TRANSITIONS 접근 시 예외 유발 -------------------------
+
+
+def test_transition_raises_when_transition_table_raises_on_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_TRANSITIONS.__getitem__`가 예외를 raise하면(예: 메모리 손상,
+    분산 캐시 장애), transition()은 예외를 그대로 전파한다(fail-closed).
+    이 함수가 `_TRANSITIONS[(state, event)]` 경로를 통해 읽는다는 것을
+    직접 관찰한다.
+    """
+
+    # _TRANSITIONS 대신 __getitem__이 항상 예외를 raise하는 객체로 교체
+    class BrokenMapping:
+        def __getitem__(self, key: object) -> Never:
+            raise RuntimeError("internal error")
+
+        def __contains__(self, key: object) -> bool:
+            return False
+
+    monkeypatch.setattr(lifecycle_module, "_TRANSITIONS", BrokenMapping(), raising=False)
+
+    with pytest.raises(RuntimeError, match="internal error"):
+        transition(SymbolStatus.LISTED, "SUSPEND")
