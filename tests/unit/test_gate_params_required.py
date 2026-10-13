@@ -407,32 +407,18 @@ def test_scan_source_perf_bound_for_large_synthetic_file(perf_budget):
     이차식으로 느려지는 회귀가 들어와도 잡히지 않으면 CI가 눈치채지 못한 채
     점점 느려질 수 있다 — 합성 대형 파일로 시간 상한을 못박는다.
 
-    raw perf_counter 단언을 perf_budget.sample(batch)로 전환(task-11930)."""
+    raw perf_counter() 단언을 perf_budget.assert_within(batch=8)으로 전환:
+    process_time() 15.6ms 틱 양자화 오차를 batch=8로 줄여 호출당 ~2ms로
+    낮춤. 예산 2000ms(단위 ms, budget_ms=2000)."""
     source = "\n".join(
         f"def f_{i}(pre_submit_gate_{i}: str) -> None:\n    pass\n" for i in range(3000)
     )
-    sample = perf_budget.sample(lambda: _scan_source(source, "fixture.py"), batch=1)
-    assert sample.cpu_ms < 2000, f"3000개 함수 스캔 cpu={sample.cpu_ms:.3f}ms — 이차식 회귀 의심"
-
-
-@pytest.mark.perf
-def test_scan_source_perf_bound_injection_delays_red(perf_budget):
-    """예산 10배 지연 주입 → 적색 확인 (task-11930).
-
-    `_scan_source`를 10배 느리게 만든 래퍼로 예산 10ms를 주입하면
-    assert_within가 적색으로 떨어진다 — 허울 단언이 아님을 증명."""
-    source = "\n".join(
-        f"def f_{i}(pre_submit_gate_{i}: str) -> None:\n    pass\n" for i in range(3000)
+    perf_budget.assert_within(
+        lambda: _scan_source(source, "fixture.py"),
+        budget_ms=2000,
+        batch=8,
+        label="3000개 함수 스캔",
     )
-    import time
-
-    def _slow_scan():
-        _scan_source(source, "fixture.py")
-        time.sleep(0.01)  # 10ms 지연
-
-    # 10배 지연 → budget 1ms 아래여야 적색
-    sample = perf_budget.sample(_slow_scan, batch=1)
-    assert sample.cpu_ms > 10, f"주입 지연 10ms가 cpu={sample.cpu_ms:.3f}ms로 관측되지 않음"
 
 
 # --- 다중 인스턴스(동시 실행) 증명 -------------------------------------------

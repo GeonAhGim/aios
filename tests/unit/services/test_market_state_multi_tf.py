@@ -211,16 +211,13 @@ def test_build_market_state_throughput_budget(perf_budget) -> None:
     as_of = max(candles_1m[-1].close_time, candles_1h[-1].close_time)
     service = IndicatorService()
 
-    sample = perf_budget.sample(
+    perf_budget.assert_within(
         lambda: build_market_state(
             fsm, {"1m": candles_1m, "1h": candles_1h}, as_of=as_of, indicator_service=service
         ),
+        budget_ms=2000.0,
         batch=300,
     )
-
-    # budget: 2000ms for 300 calls → 6.67ms/call; report total for clarity
-    total_ms = sample.cpu_ms
-    assert total_ms < 2000, f"300 calls took {total_ms:.2f}ms (budget 2000ms)"
 
 
 # -- D2 gate-red reproduction --------------------------------------------------
