@@ -1,18 +1,20 @@
-"""LA-4 — market_data 단일 캔들 정합성(OHLC sanity) 순수 규칙.
+"""LA-4 — market_data single-candle sanity (OHLC sanity) pure rules.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-4, §9.2 LA-4.
 
-`QualityIssue`/`QualityIssueType`/`Severity`는 LA-1 계약(contracts/v1)을
-그대로 쓴다 — 재정의하지 않는다. §2.2의 6개 규칙(low<=min(open,close),
-high>=max(open,close), volume>=0, close_time==open_time+duration,
-tz-aware UTC, 값 유한성)을 각각 독립적으로 검사해 위반마다 별도
-`QualityIssue`(severity=REJECT)를 낸다. I/O 없음 — 순수 함수.
+Reuses `QualityIssue`/`QualityIssueType`/`Severity` from LA-1 contract
+(contracts/v1) without overriding. Independently checks the six rules in
+§2.2 (low<=min(open,close), high>=max(open,close), volume>=0,
+close_time==open_time+duration, tz-aware UTC, value finiteness), emitting
+a separate `QualityIssue` (severity=REJECT) for each violation. No I/O —
+pure functions.
 
-naive datetime이면 aware와 섞어 시간 비교를 하면 예외가 나므로 그 검사는
-건너뛰고 NAIVE_DATETIME 단독 이슈만 낸다. 값이 비유한(NaN/Infinity)이면
-Decimal 순서 비교(`>`, `<`)가 `InvalidOperation`을 내므로 OHLC/volume
-비교도 건너뛴다.
+If a naive datetime is passed, comparing it with an aware one would raise,
+so skip that check and emit NAIVE_DATETIME only. If values are non-finite
+(NaN/Infinity), Decimal ordering (`>`, `<`) raises `InvalidOperation`,
+so skip OHLC/volume comparisons as well.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -54,7 +56,11 @@ def check_candle(c: CandleRecord) -> list[QualityIssue]:
     ot: datetime | None = None if open_naive else c.open_time
 
     values: dict[str, Decimal] = {
-        "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume,
+        "open": c.open,
+        "high": c.high,
+        "low": c.low,
+        "close": c.close,
+        "volume": c.volume,
     }
     if c.quote_volume is not None:
         values["quote_volume"] = c.quote_volume
