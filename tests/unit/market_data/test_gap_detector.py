@@ -208,6 +208,37 @@ def test_detect_gaps_handles_duplicate_candles_without_false_gaps() -> None:
     assert issues == []  # 중복이 갭 수에 영향을 주지 않아야 한다
 
 
+def test_detect_gaps_rejects_out_of_order_candles_correctly() -> None:
+    """캔들 open_time이 시간순으로 정렬되지 않은 입력에서도 기대 집합 대비
+    누락된 open_time만 정확히 갭으로 보고한다. 불변식: 입력 순서가
+    결과의 정확성에 영향을 주지 않음."""
+    key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=uuid4(), timeframe=Timeframe.H1)
+    sessions = _calendar(Venue.KIS_KRX).sessions_for(date(2026, 9, 4))
+    expected = expected_opens(sessions[0].open_at, sessions[0].close_at, Timeframe.H1, sessions)
+    assert len(expected) >= 4
+    # 2개 결측 + 정렬 뒤섞인 캔들
+    missing = {expected[1], expected[3]}
+    candles = [_candle(key, ot, Timeframe.H1) for ot in expected if ot not in missing]
+    # 역순으로 섞기
+    candles.reverse()
+    issues = detect_gaps(candles, Timeframe.H1, sessions)
+    assert len(issues) == 2
+    assert {i.open_time for i in issues} == missing
+
+
+def test_detect_gaps_with_single_session_single_candle_no_gap() -> None:
+    """단일 세션에 단일 캔들만 있고 기대 집합과 정확히 일치하면 갭이 없다.
+    불변식: 최소 단위 입력에서 false positive가 발생하지 않음."""
+    key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=uuid4(), timeframe=Timeframe.H1)
+    sessions = _calendar(Venue.KIS_KRX).sessions_for(date(2026, 9, 4))
+    expected = expected_opens(sessions[0].open_at, sessions[0].close_at, Timeframe.H1, sessions)
+    # 첫 번째 open_time만 사용
+    candle = _candle(key, expected[0], Timeframe.H1)
+    issues = detect_gaps([candle], Timeframe.H1, sessions)
+    # 첫 번째 open_time만 있으면 나머지는 모두 갭으로 보고된다
+    assert len(issues) == len(expected) - 1
+
+
 def test_detect_gaps_rejects_naive_open_time_at_model_boundary() -> None:
     """naive datetime(open_time이 tzinfo 없음)을 가진 CandleRecord는
     Pydantic 모델 단계에서 거부된다 — detect_gaps 호출 전에 fail-closed
