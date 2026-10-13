@@ -1,14 +1,16 @@
-"""ConfirmConnection(+VerifyScope) 커맨드.
+"""ConfirmConnection(+VerifyScope) command.
 
-Spec: AIOSproject 74번 §2/§3.
+Spec: AIOSproject #74 §2/§3.
 
-스콥 축소(명시, 마이그레이션 docstring 참조): 74번 §2는 PENDING_CONSENT ->
-CONNECTING(ConfirmConnection/owner)와 CONNECTING -> ACTIVE_READONLY(
-VerifyScope/service)를 별도 커맨드/actor로 나누지만, 이 리프는 실 provider의
-비동기 브라우저 handshake가 없어(fake adapter만 있음) 두 전이를 한 커맨드
-안에서 순서대로 수행한다 — 두 상태 값 자체는 74번 §2 그대로 남겨 실
-provider가 붙을 때 이 함수를 두 커맨드로 쪼갤 수 있게 한다.
+Scope reduction (explicit, see migration docstring): #74 §2 splits
+PENDING_CONSENT -> CONNECTING (ConfirmConnection/owner) and
+CONNECTING -> ACTIVE_READONLY (VerifyScope/service) into separate commands/actors,
+but this leaf performs both transitions sequentially within a single command — the
+real provider's async browser handshake is absent (only a fake adapter exists), so
+the two state values remain as-is per #74 §2, allowing the provider to split this
+function into two commands when it attaches.
 """
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -55,8 +57,8 @@ async def confirm_connection(
     if connection.tenant_id != tenant_id:
         raise CrossTenantConnectionAccessError(str(connection_id))
 
-    # PENDING_CONSENT -> CONNECTING. ConcurrencyConflictError는 상태가 기대와
-    # 다르면(이미 CONNECTING 이상으로 진행됨 등) 그대로 호출부로 전파한다.
+    # PENDING_CONSENT -> CONNECTING. Propagate ConcurrencyConflictError as-is
+    # if the state differs from expected (e.g., already advanced past CONNECTING).
     await repo.transition_connection_state(
         connection_id,
         tenant_id=tenant_id,
