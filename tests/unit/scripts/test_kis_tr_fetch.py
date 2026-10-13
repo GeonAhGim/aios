@@ -9,15 +9,17 @@ determinism 테스트는 있었으나 (1) 네트워크 중단 같은 실패 주�
 성능/처리량 단언, (3) BR-11이 신설한 fail-closed(path/method 누락 시 종료코드 1) 게이트
 경로 검증이 전혀 없었다. 아래 세 그룹이 그 공백을 채운다.
 """
+
 from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -95,6 +97,7 @@ def test_build_reference_is_deterministic_given_same_files(monkeypatch) -> None:
     monkeypatch.setattr(
         kis_tr_fetch, "list_example_files", lambda ref="main": ("deadbeef", sorted(files))
     )
+
     def _fake_http_get(url: str) -> bytes:
         return files[url.split(kis_tr_fetch.RAW_BASE)[-1]].encode("utf-8")
 
@@ -138,9 +141,7 @@ def test_build_reference_propagates_http_failure_instead_of_writing_partial_snap
 def test_list_example_files_raises_on_truncated_tree_response(monkeypatch) -> None:
     """GitHub tree API가 `truncated: true`를 반환하면(저장소가 recursive 조회 한도를
     넘음) 일부 파일 목록만으로 조용히 진행하지 않고 즉시 실패해야 한다."""
-    monkeypatch.setattr(
-        kis_tr_fetch, "_http_get", lambda url: b'{"truncated": true, "tree": []}'
-    )
+    monkeypatch.setattr(kis_tr_fetch, "_http_get", lambda url: b'{"truncated": true, "tree": []}')
 
     with pytest.raises(kis_tr_fetch.KisTrFetchError, match="truncated"):
         kis_tr_fetch.list_example_files()
@@ -260,21 +261,64 @@ def test_write_reference_returns_0_when_all_trs_have_path_and_method(
 
 
 @pytest.mark.perf
-def test_extract_trs_from_file_throughput_meets_batch_generation_floor(monkeypatch) -> None:
+def test_extract_trs_from_file_throughput_meets_batch_generation_floor(
+    monkeypatch, perf_budget: PerfBudget
+) -> None:
+    """성능단언: raw perf_counter → perf_budget.assert_within 전환.
+
+    batch=1000으로 process_time 양자화 오차(15.6ms tick)를 호출당 ~0.016ms로 축소.
+    예산 3000 ops/sec → 0.333ms/ops 단위 일치(ms).
+    """
     monkeypatch.setattr(
         kis_tr_fetch, "_http_get", lambda url: _SAMPLE_FILE_REAL_PAPER_SPLIT.encode("utf-8")
     )
 
-    n = 1_000
-    started = time.perf_counter()
-    for _ in range(n):
-        kis_tr_fetch.extract_trs_from_file("examples_llm/domestic_stock/order_cash/order_cash.py")
-    elapsed = time.perf_counter() - started
-
-    throughput = n / elapsed
-    floor_ops_per_sec = 3_000.0
-    assert throughput >= floor_ops_per_sec, (
-        f"extract_trs_from_file 처리량이 {throughput:.0f} ops/sec으로 하한 "
-        f"{floor_ops_per_sec:.0f} ops/sec 밑으로 떨어졌습니다(n={n}, "
-        f"elapsed={elapsed * 1000:.1f}ms) — 정규식/문자열 처리 회귀 가능성."
+    perf_budget.assert_within(
+        lambda: kis_tr_fetch.extract_trs_from_file(
+            "examples_llm/domestic_stock/order_cash/order_cash.py"
+        ),
+        budget_ms=0.333,
+        batch=1000,
+        label="extract_trs_from_file 처리량 하한(3000 ops/sec)",
     )
+
+
+@pytest.mark.perf
+def test_extract_trs_from_file_throughput_delay_injection_fails_red(
+    monkeypatch,
+) -> None:
+    """검출력 확인: extract_trs_from_file에 10배 지연 주입 → 적색이어야 한다.
+
+    PerfBudget.assert_within은 process_time 기준이라 time.sleep()을 보지 못한다.
+    RelativeBudget(mode="wall")로 wall-clock 지연을 계측하고,
+    sleep 0.5s가 wall-budget(0.1s)을 넘으면 적색임을 확인한다.
+    """
+    import time
+
+    from tests._perf.relative_budget import RelativeBudget
+
+    original_fn = kis_tr_fetch.extract_trs_from_file
+
+    def _slow_extract(path: str) -> list:
+        time.sleep(0.5)
+        return original_fn(path)
+
+    monkeypatch.setattr(kis_tr_fetch, "_http_get", lambda url: b"")
+    monkeypatch.setattr(
+        kis_tr_fetch,
+        "extract_trs_from_file",
+        lambda p: _slow_extract(p),
+    )
+
+    with pytest.raises(AssertionError):
+        RelativeBudget().assert_within(
+            lambda: kis_tr_fetch.extract_trs_from_file(
+                "examples_llm/domestic_stock/order_cash/order_cash.py"
+            ),
+            max_ratio=5.0,
+            mode="wall",
+            n=1,
+            warmup=0,
+            calibration_n=1,
+            label="지연 주입 스캔(적색 확인)",
+        )
