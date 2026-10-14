@@ -25,7 +25,13 @@ import pytest
 from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.rate_limit.limiter import UnlimitedRateLimiter, set_limiter
 from tests.support.coverage_pause import paused_coverage as paused_coverage
-from tests.support.db import TEMPLATE_DATABASE_URL_ENV, ensure_worker_database
+from tests.support.db import (
+    TEMPLATE_DATABASE_URL_ENV,
+    WORKER_OWNER_PID_ENV,
+    drop_worker_database,
+    effective_worker_id,
+    ensure_worker_database,
+)
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
 from tests.support.talib_cache import (
     reset_talib_metadata_cache as reset_talib_metadata_cache,  # noqa: F401 -- re-exported fixture
@@ -67,12 +73,33 @@ if not _TEST_DATABASE_URL:
 # 아니라 이 모듈 임포트 시점(=워커 프로세스 시작 직후, 아직 아무 DB 커넥션도
 # 열리기 전)에 워커 전용 DB로 바꿔 낀다. `-n` 없이 실행하면(worker_id="master")
 # 아무 것도 복제하지 않고 기존과 동일하게 TEST_DATABASE_URL을 그대로 쓴다.
-_WORKER_ID = os.environ.get("PYTEST_XDIST_WORKER", "master")
+_WORKER_ID = effective_worker_id(os.environ, os.getpid())
 if _WORKER_ID != "master":
     # 일회용 클론(tests/support/db.template_database_url)이 살아있는 워커 DB가 아닌
     # 원본 템플릿에서 복제할 수 있도록, 갈아끼우기 전 URL을 남겨 둔다.
     os.environ[TEMPLATE_DATABASE_URL_ENV] = _TEST_DATABASE_URL
+    _TEMPLATE_URL_FOR_CLEANUP = _TEST_DATABASE_URL
     _TEST_DATABASE_URL = asyncio.run(ensure_worker_database(_TEST_DATABASE_URL, _WORKER_ID))
+    os.environ[WORKER_OWNER_PID_ENV] = str(os.getpid())
+    _OWNS_NESTED_DB = _WORKER_ID != os.environ.get("PYTEST_XDIST_WORKER")
+else:
+    _OWNS_NESTED_DB = False
+
+
+def _drop_nested_worker_db() -> None:
+    """xdist 워커가 띄운 자식 pytest가 받은 고유 DB(`gwNn<pid>`)를 세션 끝에 지운다.
+
+    pid가 이름에 들어가 재사용되지 않으므로 지우지 않으면 `aios_test_*`가 쌓인다.
+    (atexit에서는 asyncio 기본 executor가 이미 닫혀 `asyncio.run`이 실패한다.)
+    정리는 최선 노력이다 -- 남아도 pm의 cleanup_orphan_test_dbs가 회수한다.
+    """
+    if not _OWNS_NESTED_DB:
+        return
+    try:
+        asyncio.run(drop_worker_database(_TEMPLATE_URL_FOR_CLEANUP, _WORKER_ID))
+    except (OSError, asyncpg.PostgresError):
+        pass
+
 
 # Do not use an operator's credentials even if their shell or local .env has
 # them. External exchange calls in tests are mocked; these values exist only so
@@ -259,6 +286,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     모든 항목이 `_DEFAULT_EXCLUDED_MARKERS` 중 하나를 실제로 달고 있을 때만
     (c)로 판정한다 — (b)처럼 무관한 테스트를 `-k`로 잘못 걸렀다면 그 항목들은
     이 마커가 없으므로 여전히 적색으로 남는다."""
+    _drop_nested_worker_db()
     if exitstatus != pytest.ExitCode.NO_TESTS_COLLECTED:
         return
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")

@@ -25,7 +25,7 @@ import asyncio
 import os
 import random
 import re
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -97,6 +97,27 @@ def _asyncpg_dsn(url: str) -> str:
 
 
 TEMPLATE_DATABASE_URL_ENV = "AIOS_TEST_TEMPLATE_DATABASE_URL"
+
+
+WORKER_OWNER_PID_ENV = "AIOS_TEST_WORKER_OWNER_PID"
+
+
+def effective_worker_id(environ: Mapping[str, str], pid: int) -> str:
+    """이 프로세스가 워커 DB를 만들 때 쓸 worker_id.
+
+    xdist 워커 안에서 `subprocess`로 자식 `pytest`를 띄우면(KIS 게이트-적색 증명 등)
+    자식이 `PYTEST_XDIST_WORKER=gwN`을 그대로 물려받아, 같은 이름의 부모 워커 DB를
+    `pg_terminate_backend` -> `DROP` -> `CREATE` 해 버린다. 부모의 커넥션이 끊겨
+    `ConnectionDoesNotExistError`/WinError 10054가 나고 이후 그 워커의 모든 테스트가
+    "데이터베이스 없음"으로 연쇄 적색이 된다(full CI 57ffb7fb, gw3 287건).
+    부모 워커는 DB를 만든 뒤 자기 pid를 `WORKER_OWNER_PID_ENV`에 남기므로, 그 값이
+    있는데 내 pid와 다르면 자식이다 -- 부모와 겹치지 않는 고유 id를 돌려준다.
+    """
+    worker = environ.get("PYTEST_XDIST_WORKER", "master")
+    owner = environ.get(WORKER_OWNER_PID_ENV)
+    if worker == "master" or owner is None or owner == str(pid):
+        return worker
+    return f"{worker}n{pid}"
 
 
 def template_database_url() -> str:
