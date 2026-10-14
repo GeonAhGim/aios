@@ -3361,3 +3361,38 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 다음 동일 경보 처리: 위 선례들을 인용해 즉시 비회귀로 분류한다. 근본 수정(ops 캡처 레이어
   misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽에 별도 요청이
   필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
+
+## task-12049 — `pytest_perf_parallel` 단계 24h 4회 반복(task-11985/12001/12011/12047)
+  시스템 조사 — task-12039 결론 재확인, 설계 결함 아님 (2026-10-15)
+
+- 이 리프의 DoD는 반복 유입 원인을 "찾아 고치거나, 원인을 note에 남기는" 것이다. 직전 반복
+  집합(task-11985, task-12001, task-12011, task-12047)을 대조한 결과 전부 동일한
+  `esc-ci-pytest_perf_parallel.json` 경보의 재첨부이며, 근본 원인은 `pytest` 단계의 동형
+  시스템 조사인 task-12039(위 항목)에서 이미 확정한 것과 완전히 동일한 2건이다: (a)
+  `replay_verify.py::_order_pair`가 사전-cutover 주문을 skip하며 남기는 설계된 stderr 진단
+  로그(task-2173)를 CI 캡처 레이어가 FAILED와 구분하지 않고 tail에 남기는
+  misclassification(ops 캡처 레이어 문제, `C:\aios\pm` fleet 코드 영역), (b) `auto_decision`이
+  `stage_recheck` 실패 후에도 `detail_hash`를 갱신하지 않아 오래된 캐시를 새 리프에 재첨부하는
+  stale-detail 패턴.
+- 이 저장소에는 `scripts/check_pytest_perf_parallel.py` 자체가 존재하지 않는다(`ls scripts/`
+  확인 — `check_perf_marker_guard.py`/`check_perf_measurement_guard.py`만 존재). `pytest_perf_
+  parallel`은 `C:\aios\pm\ci_recheck.py`의 풀-모드 전용 단계이고, 이 저장소 안에서 고칠 "검사
+  스크립트/기준선"이 없다 — task-12039가 `pytest` 단계에 대해 내린 결론과 동일한 구조다.
+- `git log --oneline -10 -- src/core/eventstore/ scripts/replay_verify.py
+  "src/foundation/*/domain/" src/services/execution_loop src/foundation/paper_control
+  scripts/check_pytest_perf_parallel.py` 확인 결과 HEAD(`b3f4705f6`) 근방 커밋은 전부
+  LANG-en 번역 + paper_control 킬스위치 멱등성 수정(task-10780, 이미 반영됨)뿐이며,
+  OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py` 자체를 건드리는 새 커밋이 없다.
+- 로컬 재현: `tests/foundation/unit/paper_control/test_projections.py` + `tests/unit/scripts/
+  test_check_complexity.py` + `tests/unit/services/test_open_order_sweeper_edge.py` 전체 —
+  **29 passed in 4.21s, exit=0**, stdout에 "skipped -- pre-cutover order ... missing or
+  reordered event." 라인이 green 실행에서도 그대로 반복 출력됨을 재확인했다 — 기존 결론과
+  글자 단위로 동일.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다. D2:
+  N/A(실행 코드 변경 없이 기존에 확정된 비회귀를 재확인하는 문서 리프, task-12039/task-12047과
+  동일 선례).
+- 다음 동일 경보 처리: `pytest_perf_parallel` 또는 `pytest` 단계가 다시 24h 내 반복되면, 지목
+  sha가 OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py`를 건드리는지부터 확인하고
+  아니면 이 항목과 task-12039를 인용해 noop으로 닫는다. 근본 수정(ops 캡처 레이어
+  misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽 별도 요청이
+  필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
