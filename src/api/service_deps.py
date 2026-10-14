@@ -1,9 +1,11 @@
-"""16번대 — 인증/RBAC 외 서비스 팩토리 의존성.
+"""Seventeen — service factory dependencies outside auth/RBAC.
 
-deps.py는 인증 흐름(get_pool/get_current_user/RBAC)에 집중하고, 그 외
-서비스별 Depends 팩토리는 여기 모은다 — 섹션이 늘어날수록 deps.py가
-무한정 커지지 않도록 분리(feedback_minimal_modules 원칙).
+service_deps.py keeps service-specific Depends factories separate from
+deps.py (which focuses on auth flow: get_pool/get_current_user/RBAC).
+This prevents deps.py from growing infinitely as sections increase
+(following the feedback_minimal_modules principle).
 """
+
 from __future__ import annotations
 
 import asyncpg
@@ -75,10 +77,10 @@ def get_wallet_service(pool: asyncpg.Pool = Depends(get_pool)) -> WalletService:
 
 
 def get_credential_resolver(request: Request) -> CredentialResolver:
-    """레드팀 감사(docs/RED_TEAM_FINDINGS.md #02) 반영 — 매 요청 새로
-    만들면 CredentialResolver의 5분 TTL 캐시가 절대 재사용되지 않는다.
-    main.py lifespan이 앱 시작 시 한 번만 만들어 둔 것을 그대로 반환한다
-    (pool/event_bus와 동일 패턴)."""
+    """Reflect Red Team audit (docs/RED_TEAM_FINDINGS.md #02) — creating
+    CredentialResolver on every request would invalidate its 5-minute TTL
+    cache. Returns the singleton created once at app startup in main.py
+    lifespan (same pattern as pool/event_bus)."""
     resolver: CredentialResolver = request.app.state.credential_resolver
     return resolver
 
