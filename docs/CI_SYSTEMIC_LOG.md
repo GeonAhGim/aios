@@ -3334,3 +3334,30 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   task-11982/task-12014를 인용해 noop으로 닫는다. 근본 수정(ops 캡처 레이어 misclassification
   + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽에 별도 요청이 필요하다 — 같은 조사를
   반복하지 말고 PM에게 ops task 발행을 요청한다.
+
+## task-12047 — esc-ci-pytest_perf_parallel.json 재발, task-11982/task-12011/task-12038/
+  task-12039와 동형, 비회귀 확인 (2026-10-14)
+
+- task-12047 spec 본문(`[pytest_perf_parallel] ... skipped -- pre-cutover order, event history
+  incomplete (not an FA-16 wiring guarantee): ... from_status=ACKNOWLEDGED/SUBMITTED != folded
+  status so far (CREATED) — missing or reordered event.`)은 task-12011/task-12038과 글자 단위로
+  동일한 패턴이다 — `scripts/replay_verify.py::_order_pair`가 사전-cutover 주문의 깨진 이벤트
+  체인을 의도적으로 skip하며 stderr에 남기는 설계된 진단 문구(task-2173)이고, FAILED 신호가
+  아니다.
+- `git log --oneline -5 -- src/core/eventstore/ scripts/replay_verify.py
+  src/foundation/*/domain/ src/services/execution_loop` 확인 결과 HEAD(`57ffb7fb4`) 근방 커밋은
+  전부 LANG-en 주석 번역 + QA 타입 애너테이션뿐이며, OMS/eventstore 쓰기 경로나
+  `scripts/replay_verify.py` 자체를 건드리는 커밋이 없다 — 새 회귀를 만들 변경이 없다.
+- 로컬 재현: `tests/foundation/unit/paper_control/test_projections.py` +
+  `tests/unit/scripts/test_check_complexity.py` + `tests/unit/services/
+  test_open_order_sweeper_edge.py` 전체 — **29 passed in 4.57s, exit=0**, stdout에 spec과
+  글자 단위로 동일한 "skipped -- pre-cutover order ... missing or reordered event." 라인이
+  green 실행에서도 그대로 반복 출력됨을 재확인했다 — task-11982/task-12011/task-12038에서 이미
+  확정한 "설계된 성공-경로 stderr 진단, 실패 신호 아님" 결론이 그대로 적용된다.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: spec에
+  인용된 문구는 설계된 성공-경로 로그이고 관련 스위트는 로컬에서 100% green이다. D2: N/A(실행
+  코드 변경 없이 기존에 확정된 비회귀를 재확인하는 문서 리프, task-11982/task-12011/
+  task-12038과 동일 선례).
+- 다음 동일 경보 처리: 위 선례들을 인용해 즉시 비회귀로 분류한다. 근본 수정(ops 캡처 레이어
+  misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽에 별도 요청이
+  필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
