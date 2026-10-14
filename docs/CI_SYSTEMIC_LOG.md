@@ -3273,3 +3273,37 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   동시에 `esc-ci-*.json`의 `resolution`/`closed_at`/`resolved_sha` 필드가 이미 채워져 있고
   task lease가 그 이후에 발급됐다면, 추가 조사 전에 먼저 escalation이 이미 닫혔는지부터
   확인한다.
+
+## task-12039 — `pytest` 단계 24h 4회 반복(task-11975/11982/12014/12038) 시스템 조사 —
+  task-11982/task-12014 결론 재확인, 설계 결함 아님 (2026-10-14)
+
+- 이 리프의 DoD는 반복 유입 원인을 "찾아 고치거나, 원인을 note에 남기는" 것이다. 반복 집합
+  (task-11975, task-11982, task-12014, task-12038)을 하나씩 대조한 결과 전부 동일한
+  `esc-ci-pytest.json` 단일 경보의 재첨부이며, 근본 원인은 이미 task-11982(위 항목)에서 확정된
+  2건이 합쳐진 것이다: (a) `replay_verify.py::_order_pair`가 사전-cutover 주문을 skip하며 남기는
+  **설계된 stderr 진단 로그**를 CI 캡처 레이어가 FAILED와 구분하지 않고 그대로 tail에 남기는
+  misclassification(ops 캡처 레이어 문제, `C:\aios\pm` fleet 코드 영역이라 이 worker가 직접
+  고칠 수 없음 — review-ops task 필요, task-12011에서도 동일하게 명시됨), (b) `auto_decision`이
+  `stage_recheck` 실패 후에도 `detail_hash`를 갱신하지 않아 오래된 캐시된 detail을 새 리프에
+  그대로 재첨부하는 stale-detail 패턴(#17-#53에서부터 반복 문서화).
+- `esc-ci-pytest.json` 현재 상태(status=open, 2026-10-14T11:01:29Z last_seen) 확인: owner.
+  leaf_ids=[12038], `detail.pytest`는 이번에도 `replay_verify: order_id=... skipped --
+  pre-cutover order` 문구 그대로(FAILED 라인 0건). 최근 `auto_actions`가 지목하는 sha
+  `404e34299420f395c98a1ee301e3bd61be9ccc05`는 `git show --stat` 확인 결과
+  `docs/CI_SYSTEMIC_LOG.md` 25줄 추가뿐인 **문서 전용 커밋**(task-12014 자신의 기록)이다 —
+  OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py`를 전혀 건드리지 않으므로 이 sha가
+  회귀를 만들었을 수 없다. 이 저장소에는 `scripts/check_pytest.py` 자체가 존재하지 않는다
+  (`ls scripts/` 확인) — `pytest`는 `C:\aios\pm\ci_recheck.py`의 풀-모드 전용 단계이고, 이
+  저장소 안에서 고칠 "검사 스크립트"가 없다.
+- 결론: 단계 규칙/기준선 자체의 설계 결함이 아니다. 위반이 반복 유입되는 원인은 fleet
+  ops 레이어(`pm/ci_recheck.py` 또는 `pm/auto_decision.py`)의 stdout/stderr 캡처가 설계된
+  성공-경로 진단 로그를 FAILED로 오분류하는 버그 + stale `detail_hash` 재첨부이며, 둘 다
+  이 repo worker의 편집 범위(§4, `C:\aios\pm` 직접 수정 금지) 밖이다. 기준선/예산/재시도
+  횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 애초에 고칠 저장소 내 결함이 없다.
+- D2: N/A(실행 코드 변경 없음 — 4개 반복 리프 전체가 동일 경보의 재첨부임을 교차 확인하는
+  문서 조사 리프, task-11982/task-12011과 동일 선례).
+- 다음 동일 경보 처리: `esc-ci-pytest.json`이 다시 24h 내 반복되면, 지목 sha가 OMS/eventstore
+  쓰기 경로나 `scripts/replay_verify.py`를 건드리는지부터 확인하고 아니면 이 항목과
+  task-11982/task-12014를 인용해 noop으로 닫는다. 근본 수정(ops 캡처 레이어 misclassification
+  + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽에 별도 요청이 필요하다 — 같은 조사를
+  반복하지 말고 PM에게 ops task 발행을 요청한다.
