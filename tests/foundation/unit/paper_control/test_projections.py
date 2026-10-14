@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -118,17 +119,25 @@ async def test_build_deployment_list_view_propagates_repository_failure():
 
 
 @pytest.mark.perf
-async def test_build_deployment_list_view_assembly_latency_budget(
+def test_build_deployment_list_view_assembly_latency_budget(
     perf_budget: PerfBudget,
 ) -> None:
     """성능 단언 — 1000건 조립도 순수 in-memory 매핑이므로 100ms 내에 끝나야 한다
     (105 DB 왕복은 fake로 대체했으므로 이 시간은 순수 조립 비용만 반영한다).
 
-    raw time.perf_counter() → perf_budget.sample_async() 전환(task-10998).
+    build_deployment_list_view()는 비동기 시그니처지만 측정 대상이 순수 CPU 조립이므로,
+    asyncio.run()로 동기 래핑해 perf_budget.sample()로 측정한다. sample()은
+    coverage tracer를 일시정지하고 time.process_time() 기준으로 CPU 시간을 재므로
+    --cov-append 부하가 측정값에 얹히지 않는다.
     """
     deployments = [_deployment() for _ in range(1000)]
     repo = FakeRepo(deployments)
-    sample = await perf_budget.sample_async(lambda: build_deployment_list_view(repo, _TENANT_ID))
+
+    # coroutine을 한 번 끝까지 돌려 결과를 얻는 동기 래퍼
+    def sync_wrapper() -> DeploymentListView:
+        return asyncio.run(build_deployment_list_view(repo, _TENANT_ID))
+
+    sample = perf_budget.sample(sync_wrapper, batch=8)
     view = sample.result
     assert len(view.deployments) == 1000
-    assert sample.wall_ms < 100, f"assembly took {sample.wall_ms:.2f}ms, budget is 100ms"
+    assert sample.cpu_ms < 100, f"assembly took {sample.cpu_ms:.2f}ms, budget is 100ms"
