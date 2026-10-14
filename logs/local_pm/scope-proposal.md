@@ -53,3 +53,61 @@ application/compute_statement.py       251
 ## 범위 밖 (이 task가 하지 않은 것)
 - task-12051의 hold 해제, 재큐, status 변경 — 수행하지 않음.
 - 소스 코드 수정 — 수행하지 않음(읽기/라인수 확인만).
+
+---
+
+# 파일 범위 분할 제안: task-12055 (task-12057 triage_note)
+
+## 조사 결과
+
+- task-12055는 `pools.yaml`의 `local-review: repo: backend` 레인에서 실행됐다. `fleet.yaml`의
+  `app_repo`에 따라 실제 대상 저장소는 `C:\aios\aios` (worktree가 아닌 메인 clone) — 이 작업
+  디렉터리(`C:\aios\wt\backend-2`)가 아니다.
+- task-12055.files = `["src/api/*"]` — glob이 `src/api/` 트리 전체(30+ 라우터, 15개 스키마,
+  11개 contracts 모듈, middleware, foundation 서브패키지, mcp, ws 등)를 가리켜 `local_file_split.expand()`
+  한도(매치 12개)를 초과하고 `needs_split=true`/`hold=true`로 멈춰 있다.
+- task-12055.title/spec은 "PLT API 계약 리프: 응답 봉투·에러 taxonomy·페이지네이션 (auth/users/admin까지)"
+  — 즉 실제 책임 범위는 (a) 계약 인프라(응답 봉투/에러 taxonomy/페이지네이션)와 (b) 이를 적용받는
+  auth/users/admin 라우터 3개로 한정된다. `src/api/*` 전체가 아니다.
+- `C:\aios\aios`에서 확인한 실제 파일/라인 수:
+  - `src/api/contracts/envelope.py` 59
+  - `src/api/contracts/error_codes.py` 112
+  - `src/api/contracts/exception_mapping.py` 97
+  - `src/api/contracts/handlers.py` 122
+  - `src/api/contracts/pagination.py` 30
+  - `src/api/contracts/idempotency.py` 131
+  - `src/api/contracts/exception_registry.py` 156
+  - `src/api/routers/auth.py` 153, `src/api/schemas/auth.py` 86
+  - `src/api/routers/users.py` 145 (schemas/users.py 없음 — users는 schemas/auth.py 또는 공용 스키마 재사용 추정, 분할 2에서 확인 필요)
+  - `src/api/routers/admin.py` 260, `src/api/routers/admin_break_glass.py` 71,
+    `src/api/schemas/admin.py` 38, `src/api/schemas/admin_break_glass.py` 13
+  - `src/api/router_registry.py` 117, `src/api/deps.py` 165, `src/api/admin_deps.py` 107
+    (라우터 배선 확인용, 변경 대상 여부는 분할 4에서 diff로 재확인)
+
+## 제안: 4개 리프로 분할
+
+1. **계약 인프라(응답 봉투/에러 taxonomy/페이지네이션)**
+   `src/api/contracts/envelope.py`, `src/api/contracts/error_codes.py`,
+   `src/api/contracts/exception_mapping.py`, `src/api/contracts/handlers.py`,
+   `src/api/contracts/pagination.py`, `src/api/contracts/exception_registry.py`
+   (idempotency.py는 응답 봉투/에러/페이지네이션과 축이 달라 제외 — 별도 확인 필요시 후속 리프)
+
+2. **auth 라우터 적용**
+   `src/api/routers/auth.py`, `src/api/schemas/auth.py`
+
+3. **users 라우터 적용**
+   `src/api/routers/users.py` (+ users 전용 스키마 파일이 diff에 있으면 포함, 현재 저장소에는
+   `schemas/users.py` 없음 — 리뷰 대상 diff로 재확인 필요)
+
+4. **admin 라우터 적용**
+   `src/api/routers/admin.py`, `src/api/routers/admin_break_glass.py`,
+   `src/api/schemas/admin.py`, `src/api/schemas/admin_break_glass.py`
+
+`router_registry.py`/`deps.py`/`admin_deps.py`는 위 4개 리프의 실제 diff에 배선 변경이 포함된
+경우에만 해당 리프에 추가 — 현재는 라인 수 확인 목적으로만 조사했고 diff 내용은 보지 않았다.
+
+## 범위 외 (이번 조사에서 수행하지 않음)
+
+- task-12055의 hold 해제, 재큐, 코드 수정 — 금지 사항이므로 수행하지 않았다.
+- `local_file_split.py`/`local_triage.py` 등 `C:\aios\pm` 코드 수정 — fleet 코드는 직접 수정 금지
+  대상이라 건드리지 않았다. 위 분할안을 자동화에 반영하려면 ops task로 별도 요청 필요.
