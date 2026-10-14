@@ -308,6 +308,36 @@ async def test_nonexistent_execution_id_raises_value_error(pool):
         await run_execution_tick(pool, FakeExchangeAdapter(), 99999999, **_engines())
 
 
+async def test_negative_execution_id_raises_value_error(pool):
+    """negative test — 음수 execution_id는 즉시 ValueError를 던져야 한다.
+    DB 조회 전 입력 검증 게이트에서 거부(I-07: 검증 게이트 hard-fail)."""
+    with pytest.raises(ValueError, match="존재하지 않는 실행"):
+        await run_execution_tick(pool, FakeExchangeAdapter(), -1, **_engines())
+
+
+async def test_execution_id_zero_raises_value_error(pool):
+    """negative test — execution_id=0은 DB에 존재하지 않으므로 ValueError
+    를 던져야 한다(0은 falsy로 오인될 수 있는 경계값)."""
+    with pytest.raises(ValueError, match="존재하지 않는 실행"):
+        await run_execution_tick(pool, FakeExchangeAdapter(), 0, **_engines())
+
+
+async def test_db_error_during_execution_lookup_raises_error(pool, monkeypatch):
+    """실패주입 — _load_execution_context가 DB 조회 중 예외를 던지면
+    tick 전체가 실패하고 fsm_state 변경 없이 즉시 종료되어야 한다(I-07)."""
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+
+    async def fake_load(*args, **kwargs):
+        raise asyncpg.PostgresError("DB 연결 끊김")
+
+    monkeypatch.setattr("src.services.execution_loop.tick._load_execution_context", fake_load)
+
+    with pytest.raises(asyncpg.PostgresError, match="DB 연결 끊김"):
+        await run_execution_tick(pool, FakeExchangeAdapter(), execution_id, **_engines())
+
+
 async def test_invalid_fsm_state_raises_value_error(pool):
     """LB-12 — DB CHECK 제약 조건이 FSMState enum 범위를 벗어난 값을
     거부한다. strategy_executions_fsm_state_check 제약이
