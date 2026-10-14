@@ -18,7 +18,8 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
+from typing import Any
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -43,7 +44,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     """owner/superuser 풀 — 시드 데이터 삽입 및 비교용 베이스라인에 쓴다."""
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=8)
     yield p
@@ -51,7 +52,7 @@ async def pool():
 
 
 @pytest.fixture
-async def app_role_pool():
+async def app_role_pool() -> asyncpg.Pool:
     """매 acquire마다 `SET ROLE aios_app`을 거치는 전용 풀 — 이 풀로 생성한
     `PostgresRiskGateRepository`는 더 이상 슈퍼유저가 아니므로, repository가
     tenant_transaction()으로 GUC를 바인딩하지 않으면 RLS가 실제로 행을
@@ -66,17 +67,19 @@ async def app_role_pool():
 
 
 @pytest.fixture
-def repo(pool):
+def repo(pool: asyncpg.Pool) -> PostgresRiskGateRepository:
     return PostgresRiskGateRepository(pool)
 
 
-def _unbound_tenant_transaction(pool_: asyncpg.Pool, _tenant_id):
+def _unbound_tenant_transaction(
+    pool_: asyncpg.Pool, _tenant_id: UUID
+) -> asyncpg.pool.PoolConnectionContextManager[asyncpg.Connection]:
     """F1 발견 당시의 결함 코드 경로를 그대로 재현한다 — `app.tenant_id`
     GUC를 전혀 바인딩하지 않고 커넥션만 빌려주는 `pool.acquire()`."""
     return pool_.acquire()
 
 
-async def _seed_evaluation(pool_: asyncpg.Pool, *, tenant_id, fingerprint: str) -> None:
+async def _seed_evaluation(pool_: asyncpg.Pool, *, tenant_id: UUID, fingerprint: str) -> None:
     async with pool_.acquire() as conn:
         await conn.execute(
             "INSERT INTO risk_evaluation "
@@ -95,8 +98,8 @@ async def _seed_evaluation(pool_: asyncpg.Pool, *, tenant_id, fingerprint: str) 
 
 
 async def test_get_cached_evaluation_without_guc_binding_returns_none_regression(
-    pool, app_role_pool, monkeypatch: pytest.MonkeyPatch
-):
+    pool: asyncpg.Pool, app_role_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """negative #1 — F1 재현: `tenant_transaction()`을 쓰지 않고 맨 `pool.
     acquire()`만 쓰는(수정 전) 경로로 되돌리면, 같은 역할(aios_app)·같은
     테넌트 조회가 0행(=None)이 된다. 이 테스트는 그 회귀를 고정한다 — 누가
@@ -112,7 +115,9 @@ async def test_get_cached_evaluation_without_guc_binding_returns_none_regression
     assert result is None
 
 
-async def test_get_cached_evaluation_with_guc_binding_returns_own_row(pool, app_role_pool):
+async def test_get_cached_evaluation_with_guc_binding_returns_own_row(
+    pool: asyncpg.Pool, app_role_pool: asyncpg.Pool
+) -> None:
     """positive — 수정된 경로(`tenant_transaction()` 사용)는 같은
     aios_app 역할 아래에서도 테넌트 자신의 행을 1건 돌려준다(F1 수정
     확인: GUC 주입 후 동일 조회 1행)."""
@@ -128,7 +133,9 @@ async def test_get_cached_evaluation_with_guc_binding_returns_own_row(pool, app_
     assert result.subject_fingerprint == fingerprint
 
 
-async def test_get_cached_evaluation_cross_tenant_guc_returns_none(pool, app_role_pool):
+async def test_get_cached_evaluation_cross_tenant_guc_returns_none(
+    pool: asyncpg.Pool, app_role_pool: asyncpg.Pool
+) -> None:
     """negative #2 — 교차 테넌트 격리: tenant A GUC로 tenant B의 행을
     조회하면 0행(None)이어야 한다."""
     tenant_a = await create_test_tenant(pool)
@@ -142,7 +149,9 @@ async def test_get_cached_evaluation_cross_tenant_guc_returns_none(pool, app_rol
     assert result is None
 
 
-async def test_insert_evaluation_under_app_role_persists_and_is_tenant_scoped(pool, app_role_pool):
+async def test_insert_evaluation_under_app_role_persists_and_is_tenant_scoped(
+    pool: asyncpg.Pool, app_role_pool: asyncpg.Pool
+) -> None:
     """write 경로도 같은 계약으로 이관됐는지 확인 — aios_app 역할로
     insert_evaluation()을 호출해도(WITH CHECK 정책 평가 통과) 저장되고,
     저장된 행은 그 테넌트 자신만 다시 읽을 수 있다."""
@@ -172,8 +181,8 @@ async def test_insert_evaluation_under_app_role_persists_and_is_tenant_scoped(po
 
 
 async def test_invalidate_evaluations_for_tenant_under_app_role_only_deletes_own_rows(
-    pool, app_role_pool
-):
+    pool: asyncpg.Pool, app_role_pool: asyncpg.Pool
+) -> None:
     """tenant 범위 invalidate도 tenant_transaction 계약을 타며, 다른
     테넌트의 캐시 행은 지우지 못한다(교차 테넌트 쓰기 격리)."""
     tenant_a = await create_test_tenant(pool)
@@ -198,8 +207,8 @@ async def test_invalidate_evaluations_for_tenant_under_app_role_only_deletes_own
 
 
 async def test_get_cached_evaluation_guc_binding_failure_raises_without_fallback(
-    pool, app_role_pool, monkeypatch: pytest.MonkeyPatch
-):
+    pool: asyncpg.Pool, app_role_pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """failure-injection — GUC 바인딩(`set_config`) 자체가 예외를 내면
     repository는 그 예외를 그대로 전파해야 한다. fail-closed 기본(CLAUDE.md
     §3) — GUC 없이 조용히 커넥션을 넘겨 RLS 없는 조회가 일어나는 경로가
@@ -210,7 +219,9 @@ async def test_get_cached_evaluation_guc_binding_failure_raises_without_fallback
 
     original_execute = asyncpg.Connection.execute
 
-    async def _raise_on_set_config(self, query, *args, **kwargs):
+    async def _raise_on_set_config(
+        self: asyncpg.Connection, query: str, *args: object, **kwargs: object
+    ) -> Any:
         if "set_config" in query:
             raise RuntimeError("injected GUC binding failure")
         return await original_execute(self, query, *args, **kwargs)
@@ -223,7 +234,7 @@ async def test_get_cached_evaluation_guc_binding_failure_raises_without_fallback
 
 
 async def _read_p95_ms(
-    repo_: PostgresRiskGateRepository, tenant_id, fingerprint: str, *, n: int
+    repo_: PostgresRiskGateRepository, tenant_id: UUID, fingerprint: str, *, n: int
 ) -> float:
     durations_ms: list[float] = []
     for _ in range(n):
@@ -234,7 +245,9 @@ async def _read_p95_ms(
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
-async def test_get_cached_evaluation_p95_under_borrowed_order_ack_budget(pool, app_role_pool):
+async def test_get_cached_evaluation_p95_under_borrowed_order_ack_budget(
+    pool: asyncpg.Pool, app_role_pool: asyncpg.Pool
+) -> None:
     """수치 성능 단언: tenant_transaction 경유(SET ROLE + GUC 바인딩 + 정책
     평가 포함 단일 실DB 왕복) 조회의 p95가 차용 예산(50ms, 위 상수) 안에
     있어야 한다."""
