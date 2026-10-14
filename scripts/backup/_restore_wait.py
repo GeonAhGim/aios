@@ -16,6 +16,34 @@ from pathlib import Path
 LAST_FAILED_RESTORE_DIR = Path(r"C:\aios\pm") / "backup_runtime" / "last_failed_restore"
 
 
+def _decode_process_output(data: bytes) -> str:
+    """task-12010(task-5203 후속): LC_ALL=C/LANG=C 주입은 Windows 네이티브 PostgreSQL 빌드의
+    메시지 로케일을 바꾸지 못한다 — 그 빌드는 POSIX 환경변수가 아니라 OS 코드페이지로
+    지역화해, 10-13 드릴 결과에도 한국어 cp949가 utf-8로 오디코딩된 mojibake가 그대로
+    남았다(실측 확인). 어느 인코딩이 맞는지 미리 알 수 없으니 utf-8과 이 호스트의
+    실제 코드페이지(locale.getpreferredencoding) 양쪽으로 디코딩해, 치환문자(U+FFFD)가
+    더 적게 나오는 쪽을 쓴다."""
+    import locale
+
+    candidates = ["utf-8"]
+    preferred = locale.getpreferredencoding(False)
+    if preferred and preferred.lower().replace("-", "") not in ("utf8",):
+        candidates.append(preferred)
+    if "cp949" not in (c.lower() for c in candidates):
+        candidates.append("cp949")
+
+    best_text, best_errors = "", None
+    for enc in candidates:
+        try:
+            text = data.decode(enc, errors="replace")
+        except LookupError:
+            continue
+        errors = text.count("\ufffd")
+        if best_errors is None or errors < best_errors:
+            best_text, best_errors = text, errors
+    return best_text
+
+
 def _tail_lines(text: str, n: int) -> str:
     return "\n".join(text.splitlines()[-n:])
 

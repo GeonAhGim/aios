@@ -296,6 +296,54 @@ def test_recovery_timeout_still_stops_server(tmp_path: Path):
     assert any(c[0] == "pg_ctl" and c[1] == "stop" for c in calls)  # 실패해도 정리는 한다
 
 
+def test_recovery_timeout_captures_diagnostic_logs_and_preserves_them(tmp_path: Path):
+    """task-12010(task-12003 후속): run_drill의 finally가 성공/실패 가리지 않고 항상
+    restore_data_dir를 rmtree하는데, 기존에는 collect_start_failure_logs/
+    preserve_failed_restore_logs가 start_postgres 실패 분기에서만 불려 wait_recovery
+    타임아웃 시 postgres 자신의 log/*.log(redo starts at / consistent recovery state
+    reached가 적힐 그 로그)가 증거 없이 사라졌다. 이제는 wait_recovery 실패도 같이
+    보존해야 한다."""
+
+    def run_cmd(cmd, cwd, env, timeout):
+        if cmd[0] == "pg_ctl" and cmd[1] == "start":
+            data_dir = Path(cmd[cmd.index("-D") + 1])
+            log_dir = data_dir / "log"
+            log_dir.mkdir(exist_ok=True)
+            (log_dir / "postgresql-1.log").write_text(
+                "redo starts at 0/1234568\nstill recovering...", encoding="utf-8"
+            )
+            return 0, "server started"
+        if cmd[0] == "pg_ctl" and cmd[1] == "status":
+            return 0, "server is running"
+        if cmd[0] == "pg_ctl" and cmd[1] == "stop":
+            return 0, "server stopped"
+        if cmd[0] == "psql" and "pg_is_in_recovery" in cmd[-1]:
+            return 0, "t"  # 계속 recovery 중 -> 타임아웃
+        if cmd[0] == "psql":
+            return 0, ""  # 복제 슬롯 정리 쿼리
+        raise AssertionError(f"unexpected cmd {cmd}")
+
+    kwargs = _common_kwargs(
+        tmp_path,
+        run_cmd=run_cmd,
+        recovery_poll_timeout=3.0,
+        recovery_poll_interval=1.0,
+    )
+    last_failed_dir = kwargs["last_failed_restore_dir"]
+
+    result = restore_drill.run_drill(**kwargs)
+
+    assert result["ok"] is False
+    assert result["steps"]["wait_recovery"]["ok"] is False
+    detail = result["steps"]["wait_recovery"]["detail"]
+    assert "redo starts at" in detail
+    assert (last_failed_dir / "log" / "postgresql-1.log").read_text(encoding="utf-8") == (
+        "redo starts at 0/1234568\nstill recovering..."
+    )
+    # restore_data_dir 자체는 드릴 종료 후 정리된다(원본은 last_failed_dir에만 남는다)
+    assert not kwargs["restore_data_dir"].exists()
+
+
 def test_replay_verify_mismatch_fails_drill_and_still_cleans_up(tmp_path: Path):
     run_cmd, calls = _dispatching_run_cmd(replay_rc=1)
     result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))

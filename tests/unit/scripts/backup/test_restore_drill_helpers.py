@@ -212,3 +212,29 @@ def test_wait_for_recovery_times_out_while_still_in_recovery():
         clock=iter([0.0, 1.0, 2.0, 4.0, 4.0]).__next__,
     )
     assert reason is not None
+
+
+# --- _decode_process_output ----------------------------------------------------
+
+
+def test_decode_process_output_picks_cp949_for_korean_bytes():
+    """task-12010: LC_ALL=C 주입이 Windows 네이티브 postgres 빌드에는 효과가 없어
+    한국어 메시지가 cp949 바이트 그대로 나온다 -- utf-8로 읽으면 전부 치환문자가 되지만
+    cp949로 읽으면 원문이 그대로 나와야 한다."""
+    text = "서버가 이미 실행 중입니다".encode("cp949")
+    decoded = restore_drill._decode_process_output(text)
+    assert decoded == "서버가 이미 실행 중입니다"
+
+
+def test_decode_process_output_keeps_ascii_as_utf8():
+    text = b"server started\n"
+    decoded = restore_drill._decode_process_output(text)
+    assert decoded == "server started\n"
+
+
+def test_decode_process_output_prefers_utf8_for_valid_utf8_korean_bytes():
+    """양쪽 다 '그럴듯하게' 디코딩되는 경우가 아니라, 진짜 utf-8 바이트는 cp949로 읽으면
+    치환문자가 생기므로 utf-8이 선택돼야 한다(치환문자 최소 쪽을 고르는 로직 검증)."""
+    text = "복구가 끝나지 않았다".encode()
+    decoded = restore_drill._decode_process_output(text)
+    assert decoded == "복구가 끝나지 않았다"

@@ -40,6 +40,7 @@ from scripts.backup._restore_config import (  # noqa: F401 (재노출 -- 호출�
 )
 from scripts.backup._restore_wait import (  # noqa: F401 (재노출)
     LAST_FAILED_RESTORE_DIR,
+    _decode_process_output,
     collect_start_failure_logs,
     preserve_failed_restore_logs,
     wait_for_process_start,
@@ -78,7 +79,7 @@ def _run(cmd: list[str], cwd: Path, env: dict | None, timeout: int) -> tuple[int
             except subprocess.TimeoutExpired:
                 return 124, f"timeout {timeout}s"
             out.seek(0)
-            text = out.read().decode("utf-8", errors="replace")
+            text = _decode_process_output(out.read())
         return r.returncode, text[-4000:]
     except OSError as exc:
         return 1, f"{type(exc).__name__}: {exc}"
@@ -372,6 +373,13 @@ def run_drill(
                 f"in {recovery_elapsed}s",
                 file=sys.stderr,
             )
+
+            if reason is not None:
+                # task-12010: finally의 rmtree 전에 start_postgres 분기와 같이 진단 로그를 보존한다.
+                steps["wait_recovery"]["detail"] = (
+                    f"{reason}\n\n{collect_start_failure_logs(restore_data_dir)}"
+                )
+                preserve_failed_restore_logs(restore_data_dir, last_failed_restore_dir)
 
             if reason is None:
                 env = {**pg_env, "DATABASE_URL": restore_dsn, "TEST_DATABASE_URL": restore_dsn}
