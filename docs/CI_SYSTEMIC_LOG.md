@@ -3235,3 +3235,41 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 다음 동일 경보 처리: task-11982의 처리 규칙을 그대로 적용한다 — 지목 sha가 OMS/eventstore
   쓰기 경로나 `scripts/replay_verify.py`를 건드리지 않으면 즉시 비회귀로 분류하고, 같은
   `OSError: cannot send (already closed?)` 두 줄 패턴이면 추가 조사 없이 닫는다.
+## task-12011 — esc-ci-pytest_perf_parallel.json, task-11982와 동일한 stdout 오분류 + 실제
+  회귀는 이미 선행 리프에서 해소됨 (2026-10-14)
+
+- task-12011의 spec 본문(`[pytest_perf_parallel] 5bed-452f... skipped -- pre-cutover order,
+  event history incomplete` 반복 블록)은 task-11982와 글자 단위로 동일한 패턴이다 —
+  `scripts/replay_verify.py::_order_pair`가 사전-cutover 주문의 깨진 이벤트 체인을 의도적으로
+  skip하며 stderr에 남기는 설계된 진단 문구(task-2173)이고, FAILED 신호가 아니다. 로컬에서
+  `tests/foundation/unit/paper_control/test_projections.py` + `tests/unit/scripts/
+  test_check_complexity.py` 전체를 실행하면 동일 skip 라인이 green 실행(`29 passed in 4.73s`)
+  에도 그대로 섞여 출력됨을 재확인했다 — pytest 로그 캡처가 이 stderr 진단과 실제 FAILED
+  summary를 구분하지 않고 그대로 tail에 남기는 것이 근본 misclassification이다(ops 영역,
+  review-ops task로 별도 요청 필요 — worker가 `C:\aios\pm` fleet 코드를 직접 고치지 않는다).
+- `esc-ci-pytest_perf_parallel.json`의 `auto_actions` 이력을 보면 동일 `detail_hash=
+  e7e0cb71c0b5`가 2026-10-07 `first_seen`부터 2026-10-14 재발까지 그대로 재첨부됐다 —
+  stage_recheck 실패(`81444eba7eca`) 후에도 detail_hash가 갱신되지 않는 #17-#53/task-11982와
+  동일한 stale-detail 재사용 패턴.
+- 실제 regression은 이 stderr 문구와 무관하게, 같은 `pytest_perf_parallel` 단계에 섞여 있던
+  wall_ms 기반 perf_budget 측정의 coverage-tracing 인플레이션이었다 — 이미 HEAD에 포함된
+  `52c069d85`(`test_build_deployment_list_view_assembly_latency_budget`: `sample_async`→
+  `sample` 동기 wrapper, wall_ms→cpu_ms), `9de4e0475`(`test_scan_tree_throughput_budget`: raw
+  `time.perf_counter()`→`perf_budget` fixture), `420cb3944`(`test_open_order_sweeper_edge.py`
+  orphan perf_budget 전환 회수) 세 커밋이 근본 수정이다. 로컬 재현: 위 세 테스트 파일 전체 —
+  **29 passed in 4.73s**(`test_projections.py`+`test_check_complexity.py`+
+  `test_open_order_sweeper_edge.py` 통합), perf 단일 케이스 `test_build_deployment_list_view_
+  assembly_latency_budget` **1 passed, setup 0.56s/call 0.02s**, `test_scan_tree_throughput_
+  budget` **1 passed, call 0.50s** — 둘 다 budget 내 통과.
+- `esc-ci-pytest_perf_parallel.json`은 `resolution: "최신 full CI 녹색 52c069d855a6"`,
+  `closed_at: 2026-10-14T04:32:34+00:00`로 이미 `resolved` 상태다 — task-12011의 lease는 그
+  이후(09:43) 발급돼 이미 해소된 경보를 재조사하는 리프였다.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: stderr
+  진단 오분류는 ops 캡처 레이어 문제고, 실제 perf flakiness는 이미 선행 3개 커밋이 근본
+  수정했다. D2: N/A(실행 코드 변경 없이 이미 해소된 경보의 비회귀를 재확인하는 문서 리프,
+  task-11982와 동일 선례).
+- 다음 동일 경보 처리: `pytest_perf_parallel` spec 본문에 `replay_verify: ... skipped --
+  pre-cutover order`가 등장하면 task-11982/task-12011을 인용해 stderr 오분류로 즉시 분류한다.
+  동시에 `esc-ci-*.json`의 `resolution`/`closed_at`/`resolved_sha` 필드가 이미 채워져 있고
+  task lease가 그 이후에 발급됐다면, 추가 조사 전에 먼저 escalation이 이미 닫혔는지부터
+  확인한다.
