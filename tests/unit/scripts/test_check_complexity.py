@@ -12,11 +12,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -252,12 +253,15 @@ def test_baseline_missing_metric_key_fails(tmp_path: Path) -> None:
 
 
 @pytest.mark.perf
-def test_scan_tree_throughput_budget(tmp_path: Path) -> None:
+def test_scan_tree_throughput_budget(tmp_path: Path, perf_budget: PerfBudget) -> None:
     """200개 파일(각 20개 함수) 스캔이 30초 예산 안에 끝난다 -- 회귀 시 CI 스텝이
     조용히 느려지는 것을 막는 처리량 단언(D2 DoD 성능 단언 1건).
 
     CI(pytest --cov=src --no:xdist) 환경에서 coverage 오버헤드 포함 시 실제 소요는
     14~19s 사이므로, 5s 예산는 불현실적임. 30s로 상향 조정(DECISION_GUIDELINES B-2).
+
+    단일 호출이 이미 수 초 걸려 process_time의 15.6ms 틱 양자화와 무관하므로
+    batch=1(기본값)로 측정한다. 예산은 ms 단위로 맞춰 *1000 한 번만 적용한다.
     """
     for i in range(200):
         body = "\n".join(
@@ -265,9 +269,12 @@ def test_scan_tree_throughput_budget(tmp_path: Path) -> None:
         )
         _write_py(tmp_path, f"src/mod_{i}.py", body)
 
-    start = time.perf_counter()
-    hits = cc.scan_tree(tmp_path, subdirs=("src",))
-    elapsed = time.perf_counter() - start
+    hits: list[object] = []
+
+    def _scan() -> None:
+        hits[:] = cc.scan_tree(tmp_path, subdirs=("src",))
+
+    sample = perf_budget.assert_within(_scan, budget_ms=30.0 * 1000, n=1, warmup=0)
 
     assert hits == []
-    assert elapsed < 30.0, f"scan_tree took {elapsed:.2f}s for 4000 functions (budget 30.0s)"
+    assert sample.cpu_ms < 30.0 * 1000
