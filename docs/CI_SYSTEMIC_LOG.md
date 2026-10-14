@@ -3396,3 +3396,39 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   아니면 이 항목과 task-12039를 인용해 noop으로 닫는다. 근본 수정(ops 캡처 레이어
   misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽 별도 요청이
   필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
+
+## task-12048 — replay_verify `ConnectionResetError`/`ConnectionDoesNotExistError` 12차+
+  재발, 비회귀 재확인 (2026-10-14)
+
+- `esc-ci-replay_verify.json`: `first_seen=2026-09-22T15:23:36+00:00` 불변, `reopen_count=2`,
+  `sha=57ffb7fb42dcc64c2609e0233b3348ce7899af60`, `detail.replay_verify`에 `gw1`만
+  `_create_pool_with_retry` 초기 connect에서 `ConnectionResetError: [WinError 10054]` →
+  `asyncpg.exceptions.ConnectionDoesNotExistError: connection was closed in the middle of
+  operation`로 8회 재시도 전부 소진; `gw0/gw2/gw3`는 같은 실행에서 전부 `rc=0`
+  (`streams=0/6/0`, pre-cutover skip 진단 포함) — task-6256/6267/6627/7648/7877/8556이 이미
+  문서화한 "공유 Postgres 컨테이너를 모든 워크트리가 동시에 때리는 thundering-herd 리셋"과
+  동형이다.
+- 지목 sha `57ffb7fb4`를 `git show --stat`로 확인: `tests/unit/.../risk_gate/
+  test_postgres_repository_rls.py` 1개 파일(타입 어노테이션 추가)뿐 — OMS/eventstore 쓰기
+  경로나 `scripts/replay_verify.py`/`scripts/replay_verify_db_pressure.py`를 전혀 건드리지
+  않는다. `git log --oneline -15 -- src/core/eventstore/ scripts/replay_verify*.py
+  scripts/setup_test_db.py src/foundation/ledger/ src/services/oms/`로 더 넓게 확인해도
+  가장 최근 관련 커밋은 task-11878/task-11841(`scripts/setup_test_db.py`의 DB 준비 도구
+  connect-retry 보강, task-8556 이전)뿐이고, 둘 다 `replay_verify.py` 자체의 연결/재시도
+  로직은 건드리지 않는다 — 이 sha가 회귀를 만들었을 수 없다.
+- 로컬 재현: `DATABASE_URL=TEST_DATABASE_URL`로 `python -m scripts.replay_verify` 3회 연속
+  실행 — 매회 `exit=0`, `replay_verify: OK`, `streams=0`, 동일 `combined_digest`
+  (`e3b0c44298fc...`). 관련 테스트: `tests/unit/scripts/test_replay_verify_{pool_retry,
+  db_pressure,scan_retry}.py` 39 passed; `tests/integration/eventstore/test_replay_verify
+  {,_order_chain,_tamper_detection}.py` 19 passed (88.62s).
+- 결론: 설계 결함이 아니다 — 공유 로컬 Postgres에 여러 워크트리가 동시에 접속하며 발생하는
+  TCP 리셋이고, `_create_pool_with_retry`/`_verify_with_retry`의 8회 지수 백오프 + jitter +
+  `await_db_capacity`/`await_reset_lock_clear` 사전 게이트가 이미 이 실패 계열 전체(6177,
+  6213, 6236, 6256, 6267, 6522, 6627, 6714, 7648, 7877, 8556)를 원인별로 대응한 상태다. 이번
+  재발은 그 예산을 초과한 드문 타이밍일 뿐 새 코드 경로가 아니다. 기준선/예산/재시도
+  횟수/ignore 변경 없음(DECISION_GUIDELINES B-2).
+- D2: N/A(실행 코드 변경 없음 — 지목 sha와 최근 관련 커밋 이력을 교차 확인하고 로컬
+  재현으로 비회귀를 확인하는 문서 조사 리프, task-11488/task-11836 계열과 동일 선례).
+- 다음 동일 경보 처리: 지목 sha가 `scripts/replay_verify.py`/`scripts/replay_verify_db_pressure.py`
+  나 OMS/eventstore 쓰기 경로를 건드리지 않으면 이 항목과 task-11488/task-11836을 인용해
+  비회귀로 분류한다.
