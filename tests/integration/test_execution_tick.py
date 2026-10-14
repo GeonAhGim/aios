@@ -155,6 +155,93 @@ async def test_risk_rejection_leaves_fsm_state_idle_for_retry(pool):
     assert fsm_state == "IDLE"
 
 
+async def test_risk_rejection_capital_pct_over_100_leaves_fsm_idle(pool):
+    """negative test — allocated_capital(20000)이 가용잔고(10000)를 넘어
+    capital_pct가 100%를 초과한다(불변식 위반 입력). strategy_allocation
+    규칙이 실제 엔진에서 거부해야 하고 fsm_state는 IDLE 그대로여야 한다."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(
+        pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("20000")
+    )
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    assert adapter.place_order_call_count == 0
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
+async def test_risk_rejection_circuit_breaker_halted_leaves_fsm_idle(pool):
+    """negative test — 자본배분은 정상(allocated_capital=1000, 10%)이어도
+    system_safety_state.circuit_breaker_level이 halted면 safety_state
+    규칙이 §4.2 평가 순서상 가장 먼저 단락 거부한다(I-07). fsm_state는
+    IDLE 그대로여야 한다."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(
+        pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("1000")
+    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'halted' WHERE id = 1"
+        )
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    assert adapter.place_order_call_count == 0
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
+async def test_risk_engine_exception_propagates_and_leaves_fsm_idle(pool, monkeypatch):
+    """실패주입 — RiskEngine.check_decision()가 예외를 던지면 tick 전체가
+    실패하고 fsm_state는 IDLE 그대로 남아야 한다(I-07: 안전 게이트는
+    판단 불가를 승인으로 취급하지 않는다, fail-closed)."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(
+        pool, user_id, entry_threshold=100.0, allocated_capital=Decimal("5000")
+    )
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    engines = _engines()
+
+    def fake_check_decision(*args, **kwargs):
+        raise RuntimeError("의도적 리스크 엔진 실패")
+
+    monkeypatch.setattr(engines["risk_engine"], "check_decision", fake_check_decision)
+
+    with pytest.raises(RuntimeError, match="의도적 리스크 엔진 실패"):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
 async def test_equity_baseline_persists_and_survives_simulated_restart(pool):
     """PM 배정 ③(agent-platform-12, 2026-09-02) 회귀 테스트 — 이전엔
     일손실/MDD 기준점이 프로세스 메모리에만 있어 재시작하면 유실됐다.
