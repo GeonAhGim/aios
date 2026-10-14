@@ -443,6 +443,61 @@ async def test_strategy_engine_evaluation_error_propagates(pool, monkeypatch):
     assert fsm_state == "IDLE"
 
 
+async def test_strategy_engine_invalid_signal_type_raises(pool, monkeypatch):
+    """negative test — StrategyEngine.evaluate()가 None(신호 없음)이 아닌
+    비정상 타입(예: int)을 반환하면 tick 전체가 ValueError를 던져야 한다.
+    평가 산출물은 dict(signal: str, ...) 구조여야 한다(I-07: 검증 게이트
+    hard-fail)."""
+    from src.core.strategy.engine import StrategyEngine
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    engines = _engines()
+
+    def fake_evaluate(*args, **kwargs):
+        return 42  # 비정상 타입 — dict가 아님
+
+    monkeypatch.setattr(StrategyEngine, "evaluate", fake_evaluate)
+
+    with pytest.raises(AttributeError):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM이 IDLE 그대로.
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
+async def test_strategy_engine_empty_return_raises(pool, monkeypatch):
+    """negative test — StrategyEngine.evaluate()가 빈 dict({})를 반환하면
+    tick 전체가 AttributeError를 던져야 한다. 빈 dict는 signal 키가 없어
+    PortfolioEngine이 AttributeError를 일으킨다(I-07: 검증 게이트 hard-fail)."""
+    from src.core.strategy.engine import StrategyEngine
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    engines = _engines()
+
+    def fake_evaluate(*args, **kwargs):
+        return {}  # 빈 딕셔너리 — signal 키 없음
+
+    monkeypatch.setattr(StrategyEngine, "evaluate", fake_evaluate)
+
+    with pytest.raises(AttributeError):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM이 IDLE 그대로.
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
 async def test_portfolio_engine_allocation_error_propagates(pool, monkeypatch):
     """실패주입 — PortfolioEngine.allocate()가 예외를 던지면 tick 전체가
     실패해야 한다. 신호는 평가됐으나 배분 단계에서 오류."""
