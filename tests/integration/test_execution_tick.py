@@ -522,6 +522,61 @@ async def test_portfolio_engine_allocation_error_propagates(pool, monkeypatch):
     assert fsm_state == "IDLE"
 
 
+async def test_portfolio_engine_invalid_allocation_result_type(pool, monkeypatch):
+    """negative test — PortfolioEngine.allocate()가 dict가 아닌 비정상 타입(
+    예: int)을 반환하면 tick 전체가 AttributeError를 던져야 한다. 배분 산출물은
+    dict(quantity: Decimal, ...) 구조여야 한다(I-07: 검증 게이트 hard-fail)."""
+    from src.core.portfolio.engine import PortfolioEngine
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    engines = _engines()
+
+    def fake_allocate(*args, **kwargs):
+        return 42  # 비정상 타입 — dict가 아님
+
+    monkeypatch.setattr(PortfolioEngine, "allocate", fake_allocate)
+
+    with pytest.raises(AttributeError):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM이 IDLE 그대로.
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
+async def test_portfolio_engine_empty_allocation_result(pool, monkeypatch):
+    """negative test — PortfolioEngine.allocate()가 빈 dict({})를 반환하면
+    tick 전체가 AttributeError를 던져야 한다. 빈 dict는 속성이 없어
+    build_order_intent가 allocation.symbol 접근 시 AttributeError를 일으킨다
+    (I-07: 검증 게이트 hard-fail)."""
+    from src.core.portfolio.engine import PortfolioEngine
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(closes=[Decimal("50")] * 65)
+    engines = _engines()
+
+    def fake_allocate(*args, **kwargs):
+        return {}  # 빈 dict — symbol/quantity 속성 없음
+
+    monkeypatch.setattr(PortfolioEngine, "allocate", fake_allocate)
+
+    with pytest.raises(AttributeError):
+        await run_execution_tick(pool, adapter, execution_id, **engines)
+
+    # FSM이 IDLE 그대로.
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
 async def test_executor_failure_propagates_and_leaves_fsm_pending(pool, monkeypatch):
     """실패주입 — Executor.execute()가 예외를 던지면 tick 전체가 실패해야
     한다. 신호→배분→리스크는 통과했으나 실행 단계에서 오류. FSM은
