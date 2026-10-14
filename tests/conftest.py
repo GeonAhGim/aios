@@ -41,6 +41,16 @@ except ImportError:  # pragma: no cover -- psutil is not a declared hard
 
 _T = TypeVar("_T")
 
+# task-12043 (task-12030 follow-up) -- py3.10 Windows defaults asyncio to
+# ProactorEventLoop, which was the A/B leg that correlated with the
+# asyncpg.exceptions.ConnectionDoesNotExistError bursts under xdist
+# (-n4 --dist loadfile): client-side socket resets, not server refusal
+# (no matching Postgres FATAL in the server log). WindowsSelectorEventLoopPolicy
+# does not change asyncpg wire behavior on Linux/Actions/prod -- this branch is
+# Windows-only and test-only.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _ROOT_ENV_PATH = (_PROJECT_ROOT / ".env").resolve()
 

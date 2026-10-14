@@ -100,6 +100,13 @@ def _asyncpg_dsn(database_url: str) -> str:
 _POOL_CONNECT_ATTEMPTS = 5
 _POOL_CONNECT_RETRY_BASE_DELAY = 0.5
 _POOL_CONNECT_RETRY_MAX_DELAY = 8.0
+# task-12043 (task-12030 follow-up) -- asyncpg.create_pool defaults to
+# min_size=10/max_size=10; overridable only via env so production keeps the
+# unchanged default and only a test runner that sets these (e.g. to shrink
+# per-xdist-worker pool contention against the shared local Postgres) is
+# affected.
+_POOL_MIN_SIZE = int(os.environ.get("AIOS_DB_POOL_MIN_SIZE", "10"))
+_POOL_MAX_SIZE = int(os.environ.get("AIOS_DB_POOL_MAX_SIZE", "10"))
 _RETRYABLE_POOL_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
     OSError,
     asyncpg.exceptions.ConnectionDoesNotExistError,
@@ -143,7 +150,7 @@ async def _create_pool_with_retry(dsn: str) -> asyncpg.Pool:
     retrying, to avoid leaking a partially-initialized pool's connections.
     """
     for attempt in range(_POOL_CONNECT_ATTEMPTS):
-        maybe_pool = asyncpg.create_pool(dsn)
+        maybe_pool = asyncpg.create_pool(dsn, min_size=_POOL_MIN_SIZE, max_size=_POOL_MAX_SIZE)
         try:
             return await maybe_pool
         except _RETRYABLE_POOL_CONNECT_ERRORS:
