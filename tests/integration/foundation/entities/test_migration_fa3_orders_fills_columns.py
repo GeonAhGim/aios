@@ -32,6 +32,10 @@ from tests.support.deep_downgrade import purge_position_snapshots
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c9f4e2a1b6d7"
 
+# Module-level store for order_ids inserted by _insert_bare_order,
+# used by _ensure_head teardown to clean up orphaned rows.
+_test_order_ids: list[object] = []
+
 
 def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
@@ -60,9 +64,38 @@ async def pool():
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head():
+def _ensure_head(pool):
     _run_alembic("upgrade", "head")
     yield
+    # Cleanup orphaned orders/fills inserted by this module's tests.
+    # fills 테이블은 append-only 트리거가 있어 DELETE가 거부되므로
+    # 양쪽 테이블의 트리거를 임시 비활성화한다.
+    import asyncio
+
+    async def _cleanup() -> None:
+        async with pool.acquire() as conn:
+            # Disable triggers on both tables to allow cleanup.
+            await conn.execute("ALTER TABLE fills DISABLE TRIGGER ALL")
+            await conn.execute("ALTER TABLE orders DISABLE TRIGGER ALL")
+            # Delete fills referencing fa3-test orders first (FK cascade).
+            await conn.execute(
+                "DELETE FROM fills WHERE order_id IN "
+                "(SELECT order_id FROM orders WHERE strategy_id = 'fa3-test')"
+            )
+            # Delete tracked order_ids.
+            if _test_order_ids:
+                await conn.execute(
+                    "DELETE FROM orders WHERE order_id = ANY($1::uuid[])",
+                    _test_order_ids,
+                )
+                _test_order_ids.clear()
+            # Delete any remaining fa3-test orders.
+            await conn.execute("DELETE FROM orders WHERE strategy_id = 'fa3-test'")
+            # Re-enable triggers.
+            await conn.execute("ALTER TABLE orders ENABLE TRIGGER ALL")
+            await conn.execute("ALTER TABLE fills ENABLE TRIGGER ALL")
+
+    asyncio.get_event_loop().run_until_complete(_cleanup())
     _run_alembic("upgrade", "head")
 
 
@@ -78,8 +111,11 @@ async def _column_exists(pool: asyncpg.Pool, table: str, column: str) -> bool:
 
 async def _insert_bare_order(conn: asyncpg.Connection, user_id) -> object:
     """`fund_id`/`portfolio_id` 컬럼이 아직 없는(FA-3 이전) 스키마 상태를
-    가정한 최소 INSERT — 백필 대상 원본 행을 만든다."""
-    return await conn.fetchval(
+    가정한 최소 INSERT — 백필 대상 원본 행을 만든다.
+
+    반환값(order_id)은 모듈 전역 _test_order_ids에 기록되어
+    _ensure_head teardown에서 정리한다."""
+    order_id = await conn.fetchval(
         """
         INSERT INTO orders (
             user_id, client_order_id, strategy_id, strategy_version, symbol,
@@ -91,6 +127,8 @@ async def _insert_bare_order(conn: asyncpg.Connection, user_id) -> object:
         user_id,
         f"fa3-test-{uuid4().hex}",
     )
+    _test_order_ids.append(order_id)
+    return order_id
 
 
 async def test_upgrade_downgrade_upgrade_round_trip_adds_and_removes_columns(pool):
