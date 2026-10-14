@@ -3171,3 +3171,42 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   비회귀로 닫는다. 공유 Postgres 서비스가 세션상 정지돼 있어 로컬 통합 재현이 막히는
   경우는 그 자체를 공유 자원 경합 증거로 기록하고, 단위 테스트(DB 비의존)로 코드 경로
   무결성만 확인한 뒤 닫는다.
+
+## task-11982 — esc-ci-pytest.json 재발, stdout 진단 문구가 실패로 오분류됨 (2026-10-14)
+
+- task-11982의 spec에 적힌 "실패" 본문(`[pytest]  so far (CREATED) — missing or reordered
+  event.` + 반복되는 `replay_verify: order_id=... skipped -- pre-cutover order, event history
+  incomplete` 블록)은 `scripts/replay_verify.py::_order_pair`가 사전-cutover 주문의 깨진
+  이벤트 체인을 **의도적으로 skip하며 stderr에 남기는 진단 문구** 그대로다
+  (`src/core/eventstore/projections/orders.py::EventChainBrokenError`의 메시지 포맷과
+  `_order_pair`의 `print(..., file=sys.stderr)` 호출부가 글자 그대로 일치) — 이 문구 자체는
+  FAILED가 아니라 설계된 성공 경로(task-2173, `test_replay_skips_pre_cutover_order_with_broken_
+  event_chain`)의 출력이다.
+- 로컬 재현: `tests/integration/eventstore/` + `tests/adversarial/eventstore/` +
+  `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` 전체 —
+  **98 passed in 140.43s, exit=0**, 그리고 바로 이 실행의 stdout이 task spec에 인용된 것과
+  글자 단위로 동일한 "skipped -- pre-cutover order ... missing or reordered event." 라인을
+  반복 출력한다. 즉 이 문구는 green 실행에서도 항상 나오는 정상 진단 로그이며, 실패를
+  가리키는 신호가 아니다.
+- `esc-ci-pytest.json`에 실제로 저장된 `detail.pytest` 필드는 위 문구와 전혀 다른 내용이다 —
+  xdist 컨트롤러가 `pytest_sessionfinish`에서 `nm.teardown_nodes()`를 호출하다 이미 끊긴
+  워커 채널에 `OSError: cannot send (already closed?)`를 두 번 던지는 것(FAILED 라인 0건,
+  수집 진행률 23%에서 종료)으로, task-11975/task-11982 두 fix task 생성 모두 동일
+  `detail_hash=0633ed99c0e5`를 인용한다 — `stage_recheck` 실패(`4e3eb1ecc587`)로 새 리프가
+  열렸는데도 detail_hash가 갱신되지 않은, #17-#53에서 이미 반복 문서화된 stale-detail 재사용
+  패턴(auto_decision이 새 recheck 실패의 실제 내용 대신 오래된 캐시를 재첨부)이다.
+- `git log`로 확인한 현재 HEAD 직전 5개 커밋은 전부 문서/Korean-to-English 주석 번역
+  커밋(`0077ffde9`, `98fa5c527`, `12dbe7acf`, `ad58ec409`, `f9db58073`)이며 OMS/eventstore 쓰기
+  경로를 건드리지 않는다 — 회귀를 만들 수 있는 최근 변경 자체가 없다.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: (a)
+  task spec에 인용된 문구는 설계된 성공-경로 로그고 로컬에서 98 passed/exit=0으로 재현됐으며,
+  (b) escalation에 실제 저장된 xdist OSError는 FAILED 테스트가 전혀 없는 워커-채널 종료
+  경쟟(#28 "node down" 계열과 동형, 코드 결함 아님)이고, (c) 그 워커-크래시조차 stale
+  detail_hash 재첨부로 이 리프까지 전파된 것이라 애초에 이 리프가 조사해야 할 "현재"
+  실패가 아니다.
+- 다음 동일 경보 처리: `esc-ci-pytest.json`의 지목 sha가 OMS/eventstore 쓰기 경로나
+  `scripts/replay_verify.py`를 건드리지 않으면 즉시 비회귀로 분류한다. `detail.pytest`에
+  FAILED 라인이 0건이고 `PluggyTeardownRaisedWarning`/`cannot send (already closed?)`만
+  있으면 xdist 워커-채널 경쟟(#28 선례)으로 분류해 추가 분석 없이 닫는다. task spec 본문에
+  `replay_verify: ... skipped -- pre-cutover order`가 등장하면, 이는 설계된 stderr 진단
+  로그이지 실패 신호가 아니므로 그 자체를 근거로 fix를 시도하지 않는다.
