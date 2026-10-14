@@ -3210,3 +3210,28 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   있으면 xdist 워커-채널 경쟟(#28 선례)으로 분류해 추가 분석 없이 닫는다. task spec 본문에
   `replay_verify: ... skipped -- pre-cutover order`가 등장하면, 이는 설계된 stderr 진단
   로그이지 실패 신호가 아니므로 그 자체를 근거로 fix를 시도하지 않는다.
+
+## task-12014 — esc-ci-pytest.json 재발(detail_hash=a578815702f4), task-11982과 동형 (2026-10-14)
+
+- task-11982(#위 항목)가 이미 특정한 것과 동일한 패턴의 재발이다: 지목 sha
+  `52c069d855a62da031e532dbe922dac069ff19ef`(`test(projections): switch sample_async→sample for
+  CPU assembly test`)는 `tests/foundation/unit/paper_control/test_projections.py` 17줄만
+  건드리며, OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py`를 건드리지 않는다 — task-11982
+  문서화 규칙("지목 sha가 OMS/eventstore 쓰기 경로나 scripts/replay_verify.py를 건드리지 않으면
+  즉시 비회귀로 분류한다")이 그대로 적용된다.
+- task spec 본문에 인용된 `OSError: cannot send (already closed?)` 두 줄은 task-11982에서
+  확인한 xdist 컨트롤러의 `pytest_sessionfinish`→`nm.teardown_nodes()` 워커-채널 종료 경쟟과
+  동형이다(FAILED 라인 0건). escalation에 실제 저장된 `detail.pytest`는 이번에도
+  `replay_verify.py::_order_pair`의 설계된 성공-경로 stderr 진단 문구(사전-cutover 주문 skip)
+  그대로이며, 실패 신호가 아니다.
+- 로컬 재현: `tests/integration/eventstore/` + `tests/adversarial/eventstore/` +
+  `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` 전체 —
+  **98 passed in 57.22s, exit=0**. stdout에 동일한 "skipped -- pre-cutover order ... missing or
+  reordered event." 라인이 green 실행에서도 반복 출력됨을 재확인했다.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: 지목
+  commit은 쓰기 경로 비관련 테스트 측정 방식 변경일 뿐이고, 관련 테스트 스위트는 로컬에서
+  100% green이다. D2 신규 negative/실패주입/성능 assertion/red 재현: N/A(실행 코드 변경 없이
+  이미 task-11982에서 근본 원인이 확정된 xdist 워커-채널 teardown 경쟟을 재확인하는 문서 리프).
+- 다음 동일 경보 처리: task-11982의 처리 규칙을 그대로 적용한다 — 지목 sha가 OMS/eventstore
+  쓰기 경로나 `scripts/replay_verify.py`를 건드리지 않으면 즉시 비회귀로 분류하고, 같은
+  `OSError: cannot send (already closed?)` 두 줄 패턴이면 추가 조사 없이 닫는다.
