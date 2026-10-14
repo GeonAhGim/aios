@@ -3270,6 +3270,33 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   task-11982와 동일 선례).
 - 다음 동일 경보 처리: `pytest_perf_parallel` spec 본문에 `replay_verify: ... skipped --
   pre-cutover order`가 등장하면 task-11982/task-12011을 인용해 stderr 오분류로 즉시 분류한다.
+
+## task-12038 — esc-ci-pytest.json 재발, task-11982/task-12014와 동형 (2026-10-14)
+
+- task-12038의 spec 본문(`[pytest] from_status=SUBMITTED != folded status so far (CREATED) —
+  missing or reordered event.` + 반복되는 `replay_verify: order_id=... skipped -- pre-cutover
+  order, event history incomplete` 블록)은 task-11982/task-12014와 글자 단위로 동일한 패턴이다
+  — `scripts/replay_verify.py::_order_pair`가 사전-cutover 주문의 깨진 이벤트 체인을 의도적으로
+  skip하며 stderr에 남기는 설계된 진단 문구(task-2173)이고, FAILED 신호가 아니다.
+- `git log --oneline -10 -- src/core/eventstore/ scripts/replay_verify.py src/foundation/*/domain/
+  src/services/execution_loop`로 확인한 결과 현재 HEAD(`1d501220d`) 근방 커밋은 전부 Korean→
+  English 주석 번역(LANG-en) + 이미 task-12011/12014에서 근본 수정으로 확인된 perf_budget 전환
+  커밋뿐이며, OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py` 자체를 건드리는 커밋이 없다
+  — 새 회귀를 만들 변경이 없다.
+- 로컬 재현: `tests/integration/eventstore/` + `tests/adversarial/eventstore/` +
+  `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` 전체 —
+  **98 passed in 71.56s, exit=0**. stdout에 spec과 글자 단위로 동일한 "skipped -- pre-cutover
+  order ... missing or reordered event." 라인이 green 실행에서도 그대로 반복 출력됨을 재확인
+  했다 — task-11982/task-12014에서 이미 확정한 "설계된 성공-경로 stderr 진단, 실패 신호 아님"
+  결론이 그대로 적용된다.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: spec에
+  인용된 문구는 설계된 성공-경로 로그이고 관련 스위트는 로컬에서 100% green이다. D2 신규
+  negative/실패주입/성능 assertion/red 재현: N/A(실행 코드 변경 없이 기존에 확정된 비회귀를
+  재확인하는 문서 리프, task-11982/task-12014와 동일 선례).
+- 다음 동일 경보 처리: `esc-ci-pytest.json`의 지목 sha가 OMS/eventstore 쓰기 경로나
+  `scripts/replay_verify.py`를 건드리지 않으면 즉시 비회귀로 분류한다. 같은 stale detail_hash
+  재첨부 패턴(auto_decision이 새 recheck 결과 대신 오래된 캐시를 재사용)일 가능성이 높다 —
+  ops 영역 근본 수정은 `C:\aios\pm` fleet 코드 변경이 필요해 worker 권한 밖이다.
   동시에 `esc-ci-*.json`의 `resolution`/`closed_at`/`resolved_sha` 필드가 이미 채워져 있고
   task lease가 그 이후에 발급됐다면, 추가 조사 전에 먼저 escalation이 이미 닫혔는지부터
   확인한다.
