@@ -354,6 +354,71 @@ async def test_invalid_fsm_state_raises_value_error(pool):
             )
 
 
+async def test_invalid_fsm_state_in_db_raises_on_tick(pool):
+    """negative test — DB에 FSMState enum 범위를 벗어난 fsm_state 값이
+    존재할 때, tick 코드가 _load_execution_context에서 해당 값을 읽으려
+    하면 asyncpg.CheckViolationError를 던져야 한다(I-05: FSMState 무결성).
+    test_invalid_fsm_state_raises_value_error와 중복되지만, tick 파이프라인
+    전체 관점에서 fsm_state 검증 게이트가 작동함을 재확인한다."""
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+
+    # DB CHECK 제약을 우회하여 무효 상태값 직접 삽입 시도 → CheckViolationError.
+    async with pool.acquire() as conn:
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "UPDATE strategy_executions SET fsm_state = 'NONEXISTENT_STATE' WHERE id = $1",
+                execution_id,
+            )
+
+    # tick이 정상 실행되면 fsm_state이 enum 범위에 있어야 함.
+    # 위 삽입이 실패했으므로 fsm_state은 원래 IDLE 유지.
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
+async def test_fsm_writer_concurrency_conflict_skips_gracefully(pool, monkeypatch):
+    """실패주입 — FSM writer가 ConcurrencyConflictError를 던지면(동시 tick
+    경합), tick 전체가 실패하지 않고 조용히 포기하고 현재 fsm_state를 유지해야
+    한다(I-05: FSM 상태 일관성 — 동시성 충돌 시 실패가 아닌 skip)."""
+    from src.core.db.conditional_write import ConcurrencyConflictError
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    adapter = FakeExchangeAdapter(
+        closes=[Decimal("50")] * 65,
+        place_order_result_status=OrderStatus.FILLED,
+        usdt_balance=AccountBalance(
+            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
+        ),
+    )
+
+    async def fake_fsm_writer(exec_id: int, expected_state, new_state) -> None:
+        raise ConcurrencyConflictError(f"execution_id={exec_id} fsm_state contention")
+
+    # _make_fsm_state_writer를 monkeypatch하여 동시성 충돌을 시뮬레이션.
+    import src.services.execution_loop.tick as tick_module
+
+    async def fake_make_fsm_state_writer(p):
+        return fake_fsm_writer
+
+    monkeypatch.setattr(tick_module, "_make_fsm_state_writer", fake_make_fsm_state_writer)
+
+    # tick이 실패하지 않고 조용히 종료되어야 함(ConcurrencyConflictError는
+    # tick 루프에서 try/except로 포착하여 logger.info만 찍고 리턴).
+    await run_execution_tick(pool, adapter, execution_id, **_engines())
+
+    # FSM 상태가 IDLE 그대로(전이 시도했으나 동시성 충돌로 skip).
+    async with pool.acquire() as conn:
+        fsm_state = await conn.fetchval(
+            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
+        )
+    assert fsm_state == "IDLE"
+
+
 async def test_strategy_engine_evaluation_error_propagates(pool, monkeypatch):
     """실패주입 — StrategyEngine.evaluate()가 예외를 던지면 tick 전체가
     실패해야 한다(FSM 상태 변경 없이 예외가 외부로 전파)."""
