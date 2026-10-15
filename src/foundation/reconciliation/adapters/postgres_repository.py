@@ -1,28 +1,29 @@
-"""ReconciliationRepository의 asyncpg 구현.
+"""Asyncpg implementation of ReconciliationRepository.
 
-Spec: AIOSproject 80번 §1/§2, 105번(동시성 표준).
+Spec: AIOSproject #80 §§1/2, #105 (concurrency standard).
 
-upsert_state()는 매 reconciliation run의 "최신 계산 결과가 항상 이긴다"는
-원칙이라 조건부(expected_revision) 없이 revision을 무조건 증가시킨다 —
-반면 transition_state_status()(resolve 등 사람이 트리거하는 개별 전이)는
-동시에 새 run이 상태를 이미 바꿨을 수 있어 105번 표준대로 revision을
-조건으로 건다.
+upsert_state() unconditionally increments revision without expected_revision check,
+based on the principle that "the latest calculation result always wins" per
+reconciliation run. In contrast, transition_state_status()(human-triggered
+transitions such as resolve) conditions the revision on the 105 standard, because
+a concurrent new run may have already changed the state.
 
-F1(task-9456) — `reconciliation_run`은 RLS ENABLE+FORCE(b3c7f19ad2e6/
-c9f4e2a1b6d7)가 걸려 있는데, `get_run_by_input_hash`/`insert_run_with_items`가
-`pool.acquire()`만 쓰고 `tenant_transaction()`(GUC 바인딩)을 거치지 않아 —
-이 환경의 DATABASE_URL 롤은 슈퍼유저(rolbypassrls=true)라 지금은 드러나지
-않지만 — 운영에서 non-superuser 롤(`aios_app`)로 전환되는 순간 정상
-테넌트도 자기 run을 조회/삽입하지 못하게 된다. 두 메서드 모두 이미
-tenant_id를 갖고 있어(`get_run_by_input_hash`는 REC-004/006 dedupe 호출자가,
-`insert_run_with_items`는 `run.tenant_id`가) `connections/adapters/
-postgres_repository.py`/`mandates/adapters/postgres_repository.py`의
-`get_mandate` 선례와 동일하게 `tenant_transaction()`으로 옮긴다. 명시적
-`tenant_id = $N` WHERE/컬럼 조건은 그대로 남긴다 — 슈퍼유저인 동안의 실제
-방어선이고, `tenant_transaction()`은 롤 전환 이후의 두 번째 방어선이다.
-`reconciliation_item`/`reconciliation_state`는 RLS가 걸려 있지 않아(선례
-마이그레이션 docstring — 부모 FK로 간접 격리되는 자식 테이블/상태 테이블은
-제외) 이 리프의 범위 밖이다."""
+F1(task-9456) — `reconciliation_run` has RLS ENABLE+FORCE(b3c7f19ad2e6/
+c9f4e2a1b6d7) applied, but `get_run_by_input_hash`/`insert_run_with_items` use
+only `pool.acquire()` without going through `tenant_transaction()`(GUC binding) —
+the DATABASE_URL role in this environment is a superuser (rolbypassrls=true), so
+it is not visible now — but the moment production switches to a non-superuser role
+(`aios_app`), even normal tenants will be unable to query/insert their own runs.
+Both methods already hold tenant_id(`get_run_by_input_hash` via the REC-004/006
+dedupe caller, `insert_run_with_items` via `run.tenant_id`), so following the same
+precedent as `get_mandate` in `connections/adapters/postgres_repository.py`/
+`mandates/adapters/postgres_repository.py`, we move them into `tenant_transaction()`.
+The explicit `tenant_id = $N` WHERE/column condition stays as-is — it is the real
+line of defense while a superuser, and `tenant_transaction()` is the second line
+of defense after the role switch.
+`reconciliation_item`/`reconciliation_state` are not subject to RLS (precedent
+migration docstring — child tables/status tables indirectly isolated by parent FK
+are excluded), so they are out of scope for this leaf."""
 
 from __future__ import annotations
 
