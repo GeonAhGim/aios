@@ -52,3 +52,4 @@
 | ADR-2026-09-30-A | 로컬 PM 대리 임무 — 대시보드 호출·로컬 워커풀 자가복구 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-A-local-pm-delegate-and-self-recovery.md |
 | ADR-2026-09-30-B | 머지 큐·기계 검증 정정·게이트 캐시 — 함대 처리 효율 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-B-merge-queue-and-throughput.md |
 | ADR-2026-10-01-A | 사용자 관점 1등급 지표 축 — 체감 성능·기능 범위·편리함·전략 성과 (MVP-2 종결 조건 보강) | Accepted | 2026-10-01 |  |  |  | ADR-2026-10-01-A-user-facing-tier1-metrics.md |
+| ADR-2026-10-15-A | 수렴 모드 — CI 3계층 · 골든패스 판정 · 좁은 실패 카드 | Accepted | 2026-10-15 |  |  |  | ADR-2026-10-15-A-convergence-mode-ci-tiers-golden-path.md |
