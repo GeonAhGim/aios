@@ -1,11 +1,12 @@
-"""AIOS Script 런타임 패키지(§9.4 DSL-8) — 값 모델(`series.py`)과 IR 인터프리터(`interpreter.py`).
+"""AIOS Script runtime package (§9.4 DSL-8) — value models (`series.py`) and IR interpreter (`interpreter.py`).
 
-신규 패키지, `src/core/**` SCAFFOLD zone. 순수(I/O 없음·재귀 없음). 빌트인
-본체는 DSL-9가 이 패키지에 추가하고 `BuiltinRegistry`로 주입한다 — 인터프리터는
-디스패치 인터페이스만 가진다. DSL-9a: `builtins_math.py`(`math.*`)·`builtins_ta.py`
-(`ta.*`, 레지스트리 버전 고정·IND-1 위임), `default_builtins()`로 한 번에 등록.
-`builtins_strategy.py`(`strategy.*`)는 DSL-9b.
+New package under `src/core/**` SCAFFOLD zone. Pure (no I/O, no recursion). Builtin
+implementations are added to this package by DSL-9 and injected via `BuiltinRegistry` — the
+interpreter holds only a dispatch interface. DSL-9a: `builtins_math.py` (`math.*`) and
+`builtins_ta.py` (`ta.*`, fixed registry version, IND-1 delegation), registered at once via
+`default_builtins()`. `builtins_strategy.py` (`strategy.*`) is DSL-9b.
 """
+
 from __future__ import annotations
 
 from src.core.script.runtime.builtins_math import MATH_BUILTINS, BuiltinCallError
