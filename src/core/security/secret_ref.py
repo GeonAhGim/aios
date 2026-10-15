@@ -1,10 +1,13 @@
-"""불투명 비밀 참조 — 평문·암호문 대신 로그·이벤트·API에 노출해도 되는 값.
+"""Opaque secret reference — a value safe to expose in logs, events, and APIs
+instead of plaintext or ciphertext.
 
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-32
-(+ §3.6). 문자열 표현 `secref://<scope>/<kind>/<id>@<kid>`는 이미 프론트에
-배포된 계약(`frontend/packages/shared-types/src/secretRef.ts`)과 반드시
-일치해야 한다 — scope는 소문자(`paper`/`live`)로 직렬화한다.
+(+ §3.6). The string representation `secref://<scope>/<kind>/<id>@<kid>` must
+match the contract already deployed to the frontend
+(`frontend/packages/shared-types/src/secretRef.ts`); serialize scope in
+lowercase (`paper`/`live`).
 """
+
 from __future__ import annotations
 
 import re
@@ -22,13 +25,14 @@ _PATTERN = re.compile(r"^secref://([^/]+)/([^/]+)/([^@]+)@(.+)$")
 
 
 class SecretRefParseError(ValueError):
-    """`SecretRef.parse` 형식/값 오류(fail-closed). 원본 문자열은 평문을
-    담고 있을 가능성(호출부 실수)이 있으므로 메시지에 echo하지 않는다."""
+    """Format/value error from `SecretRef.parse` (fail-closed). The original
+    string may contain plaintext (caller mistake), so never echo it in the message."""
 
 
 class SecretRef(BaseModel):
-    """`frontend/.../secretRef.ts`의 `SecretRef`와 1:1 대응하는 불투명 참조.
-    비밀 원문을 담지 않으므로 그대로 로그·이벤트·API에 실어도 된다."""
+    """Opaque reference that maps 1:1 to `SecretRef` in
+    `frontend/.../secretRef.ts`. Contains no secret material, so safe to
+    include directly in logs, events, and API responses."""
 
     model_config = ConfigDict(frozen=True)
 
