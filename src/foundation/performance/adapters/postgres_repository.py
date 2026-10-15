@@ -1,10 +1,11 @@
-"""PerformanceRepository의 asyncpg 구현.
+"""asyncpg implementation of PerformanceRepository.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§3.7 M5.
 
-statement 행의 Decimal↔JSONB (역)직렬화는 postgres_statement_repository.py로
-분리했다(P6: 300줄 초과 분할) — 이 파일은 쿼리 실행과 methodology/attribution
-매핑만 담당한다."""
+Decimal↔JSONB (de)serialization of statement rows was extracted into
+postgres_statement_repository.py (P6: split at 300+ lines) — this file
+is responsible only for query execution and methodology/attribution mapping."""
+
 from __future__ import annotations
 
 import json
@@ -67,9 +68,10 @@ class PostgresPerformanceRepository:
         return _row_to_methodology(row) if row is not None else None
 
     async def insert_methodology(self, methodology: Methodology) -> Methodology:
-        """WORM 대상은 아니지만(§3.7에 REVOKE 명시 안 됨) 버전 문자열이 이미
-        내용 주소 성격이라(methodology_hash가 버전 정의를 완전히 결정) 실제로
-        재정의할 일이 없다 — `ON CONFLICT DO NOTHING`으로 중복 삽입만 흡수."""
+        """Not a WORM target (no REVOKE specified in §3.7), but the version string
+        carries content-addressed semantics (methodology_hash fully defines the version),
+        so overrides never occur in practice — `ON CONFLICT DO NOTHING` simply absorbs
+        duplicate inserts."""
         definition = json.dumps(
             {
                 "twr_method": methodology.twr_method,
@@ -130,13 +132,14 @@ class PostgresPerformanceRepository:
                 "SELECT methodology_hash FROM performance_methodology WHERE version = $1",
                 statement.methodology_version,
             )
-        assert hash_row is not None  # FK 제약이 이미 존재를 보장한다
+        assert hash_row is not None  # FK constraint guarantees existence
         return row_to_statement({**dict(row), "methodology_hash": hash_row["methodology_hash"]})
 
     async def get_statement(self, statement_id: UUID) -> PerformanceStatement | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(_SELECT_WITH_METHODOLOGY_HASH + " WHERE ps.id = $1",
-                                       statement_id)
+            row = await conn.fetchrow(
+                _SELECT_WITH_METHODOLOGY_HASH + " WHERE ps.id = $1", statement_id
+            )
         return row_to_statement(row) if row is not None else None
 
     async def list_statements(
