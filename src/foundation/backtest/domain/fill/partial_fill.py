@@ -1,13 +1,15 @@
-"""BT-5 — 부분체결 모델(순수).
+"""BT-5 — Partial fill model (pure).
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.5 BT-5, §3.4(`partial_fill: {max_participation_pct}`).
 
-한 봉이 소화할 수 있는 최대 참여율(`max_participation_pct * bar_volume`)을
-넘는 주문은 그 봉에서 그만큼만 체결되고 나머지는 잔량으로 남는다 — 잔량을
-다음 봉에 재시도하는 이월 로직은 조립(BT-10)의 책임이라 여기서는 한
-봉의 체결/잔량 계산만 한다.
+Orders exceeding the maximum participable volume per bar
+(`max_participation_pct * bar_volume`) are filled only up to that limit
+on the current bar; the remainder stays as open quantity. Rollover logic
+to retry on the next bar is the responsibility of composition (BT-10),
+so this module handles only per-bar fill/remaining calculations.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,7 +20,7 @@ from src.foundation.backtest.domain.models_v2 import PartialFillConfig
 
 def _reject_negative_or_nan(value: Decimal, name: str) -> None:
     if value.is_nan() or value < 0:
-        raise ValueError(f"{name}는 음수·NaN을 허용하지 않는다: {value}")
+        raise ValueError(f"{name} does not accept negative or NaN values: {value}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +36,8 @@ class PartialFillOutcome:
 def compute_partial_fill(
     config: PartialFillConfig, *, order_quantity: Decimal, bar_volume: Decimal
 ) -> PartialFillOutcome:
-    """`order_quantity`를 이 봉의 최대 참여 물량(`capacity`) 안에서
-    체결시키고 나머지를 `remaining_quantity`로 돌려준다."""
+    """Fill `order_quantity` within this bar's maximum participable volume
+    (`capacity`) and return the remainder as `remaining_quantity`."""
 
     _reject_negative_or_nan(order_quantity, "order_quantity")
     _reject_negative_or_nan(bar_volume, "bar_volume")
