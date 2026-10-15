@@ -31,6 +31,7 @@ from tests.support.db import (
     drop_worker_database,
     effective_worker_id,
     ensure_worker_database,
+    worker_owner_marker,
 )
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
 from tests.support.talib_cache import (
@@ -80,7 +81,9 @@ if _WORKER_ID != "master":
     os.environ[TEMPLATE_DATABASE_URL_ENV] = _TEST_DATABASE_URL
     _TEMPLATE_URL_FOR_CLEANUP = _TEST_DATABASE_URL
     _TEST_DATABASE_URL = asyncio.run(ensure_worker_database(_TEST_DATABASE_URL, _WORKER_ID))
-    os.environ[WORKER_OWNER_PID_ENV] = str(os.getpid())
+    os.environ[WORKER_OWNER_PID_ENV] = worker_owner_marker(
+        os.getpid(), os.environ.get("PYTEST_XDIST_WORKER", "master")
+    )
     _OWNS_NESTED_DB = _WORKER_ID != os.environ.get("PYTEST_XDIST_WORKER")
 else:
     _OWNS_NESTED_DB = False

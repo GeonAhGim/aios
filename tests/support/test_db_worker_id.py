@@ -7,7 +7,12 @@
 
 from __future__ import annotations
 
-from tests.support.db import WORKER_OWNER_PID_ENV, effective_worker_id, session_database_url
+from tests.support.db import (
+    WORKER_OWNER_PID_ENV,
+    effective_worker_id,
+    session_database_url,
+    worker_owner_marker,
+)
 
 _TEMPLATE = "postgresql://u:p@localhost:5432/aios_test_ci_full"
 
@@ -21,27 +26,41 @@ def test_xdist_worker_first_import_keeps_its_worker_id() -> None:
 
 
 def test_xdist_worker_reimport_in_same_process_keeps_its_worker_id() -> None:
-    env = {"PYTEST_XDIST_WORKER": "gw3", WORKER_OWNER_PID_ENV: "100"}
+    env = {"PYTEST_XDIST_WORKER": "gw3", WORKER_OWNER_PID_ENV: worker_owner_marker(100, "gw3")}
     assert effective_worker_id(env, 100) == "gw3"
 
 
 def test_child_pytest_inheriting_worker_env_gets_a_distinct_id() -> None:
-    env = {"PYTEST_XDIST_WORKER": "gw3", WORKER_OWNER_PID_ENV: "100"}
+    env = {"PYTEST_XDIST_WORKER": "gw3", WORKER_OWNER_PID_ENV: worker_owner_marker(100, "gw3")}
     child = effective_worker_id(env, 200)
     assert child != "gw3"
     assert session_database_url(_TEMPLATE, child) != session_database_url(_TEMPLATE, "gw3")
 
 
 def test_two_children_of_the_same_worker_do_not_collide() -> None:
-    env = {"PYTEST_XDIST_WORKER": "gw3", WORKER_OWNER_PID_ENV: "100"}
+    env = {"PYTEST_XDIST_WORKER": "gw3", WORKER_OWNER_PID_ENV: worker_owner_marker(100, "gw3")}
     assert effective_worker_id(env, 200) != effective_worker_id(env, 201)
 
 
 def test_child_database_name_stays_within_the_name_rule() -> None:
-    env = {"PYTEST_XDIST_WORKER": "gw12", WORKER_OWNER_PID_ENV: "100"}
+    env = {"PYTEST_XDIST_WORKER": "gw12", WORKER_OWNER_PID_ENV: worker_owner_marker(100, "gw12")}
     # pid가 7자리여도 `_NAME_RE`(소문자·숫자·밑줄 40자)를 넘지 않아야 한다.
     session_database_url(_TEMPLATE, effective_worker_id(env, 9_999_999))
 
 
-def test_child_of_master_run_does_not_get_a_worker_id() -> None:
-    assert effective_worker_id({WORKER_OWNER_PID_ENV: "100"}, 200) == "master"
+def test_real_xdist_worker_under_localci_master_keeps_plain_gw_id() -> None:
+    """local_ci는 마스터 pytest에 PYTEST_XDIST_WORKER=localci를 심는다. 그 아래의 진짜 xdist
+    워커(gwN)는 자식이 아니므로 `{템플릿}_gwN`을 그대로 써야 한다 -- full CI의
+    replay_verify가 그 이름으로 DB를 다시 읽는다."""
+    env = {"PYTEST_XDIST_WORKER": "gw2", WORKER_OWNER_PID_ENV: worker_owner_marker(50, "localci")}
+    assert effective_worker_id(env, 60) == "gw2"
+
+
+def test_child_of_localci_master_gets_a_distinct_id() -> None:
+    """commit 모드(직렬, localci)에서도 자식 pytest가 부모의 `localci` DB를 지우면 안 된다."""
+    env = {
+        "PYTEST_XDIST_WORKER": "localci",
+        WORKER_OWNER_PID_ENV: worker_owner_marker(50, "localci"),
+    }
+    assert effective_worker_id(env, 60) != "localci"
+    assert effective_worker_id(env, 50) == "localci"

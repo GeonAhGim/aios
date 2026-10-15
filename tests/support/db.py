@@ -102,6 +102,11 @@ TEMPLATE_DATABASE_URL_ENV = "AIOS_TEST_TEMPLATE_DATABASE_URL"
 WORKER_OWNER_PID_ENV = "AIOS_TEST_WORKER_OWNER_PID"
 
 
+def worker_owner_marker(pid: int, worker: str) -> str:
+    """`WORKER_OWNER_PID_ENV`에 심는 값 -- "<pid>:<worker_id>"."""
+    return f"{pid}:{worker}"
+
+
 def effective_worker_id(environ: Mapping[str, str], pid: int) -> str:
     """이 프로세스가 워커 DB를 만들 때 쓸 worker_id.
 
@@ -110,14 +115,56 @@ def effective_worker_id(environ: Mapping[str, str], pid: int) -> str:
     `pg_terminate_backend` -> `DROP` -> `CREATE` 해 버린다. 부모의 커넥션이 끊겨
     `ConnectionDoesNotExistError`/WinError 10054가 나고 이후 그 워커의 모든 테스트가
     "데이터베이스 없음"으로 연쇄 적색이 된다(full CI 57ffb7fb, gw3 287건).
-    부모 워커는 DB를 만든 뒤 자기 pid를 `WORKER_OWNER_PID_ENV`에 남기므로, 그 값이
-    있는데 내 pid와 다르면 자식이다 -- 부모와 겹치지 않는 고유 id를 돌려준다.
+    DB를 만든 프로세스는 `<pid>:<worker_id>`를 `WORKER_OWNER_PID_ENV`에 남긴다. 내 환경의
+    worker_id와 같은 worker_id를 가진 *다른 pid*의 표식이 있으면 그 프로세스의 자식이다 --
+    부모와 겹치지 않는 고유 id를 돌려준다. worker_id가 다르면(local_ci가 심은 `localci`
+    마스터 아래의 진짜 xdist 워커 `gwN`) 자식이 아니므로 `gwN`을 그대로 쓴다: full CI의
+    replay_verify가 `{템플릿}_gwN` DB를 이름으로 다시 읽는다.
     """
     worker = environ.get("PYTEST_XDIST_WORKER", "master")
-    owner = environ.get(WORKER_OWNER_PID_ENV)
-    if worker == "master" or owner is None or owner == str(pid):
+    marker = environ.get(WORKER_OWNER_PID_ENV)
+    if worker == "master" or not marker:
         return worker
-    return f"{worker}n{pid}"
+    owner_pid, _, owner_worker = marker.partition(":")
+    if owner_worker == worker and owner_pid != str(pid):
+        return f"{worker}n{pid}"
+    return worker
+
+
+DB_AUDIT_LOG_ENV = "AIOS_TEST_DB_AUDIT_LOG"
+
+
+def _audit(event: str, target_db: str) -> None:
+    """워커 DB 생성/삭제를 누가 했는지 남긴다(`AIOS_TEST_DB_AUDIT_LOG`가 있을 때만).
+
+    full CI에서 워커 DB가 도중에 사라지는 원인을 추적하려는 진단용이다 -- 호출 프로세스의
+    pid/ppid, 상속된 xdist 환경, 호출 스택 요약을 한 줄(JSON)로 덧붙인다.
+    """
+    path = os.environ.get(DB_AUDIT_LOG_ENV)
+    if not path:
+        return
+    import json
+    import time
+    import traceback
+
+    row = {
+        "t": time.strftime("%H:%M:%S"),
+        "event": event,
+        "db": target_db,
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "worker": os.environ.get("PYTEST_XDIST_WORKER"),
+        "owner": os.environ.get(WORKER_OWNER_PID_ENV),
+        "stack": [
+            f"{f.filename.rsplit(chr(92), 1)[-1]}:{f.lineno}:{f.name}"
+            for f in traceback.extract_stack()[-6:-1]
+        ],
+    }
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def template_database_url() -> str:
@@ -227,6 +274,7 @@ async def ensure_worker_database(template_url: str, worker_id: str) -> str:
                     "WHERE datname = $1 AND pid <> pg_backend_pid()",
                     target_db,
                 )
+                _audit("ensure_drop_create", target_db)
                 await admin.execute(f'DROP DATABASE IF EXISTS "{target_db}"')
                 await admin.execute(f'CREATE DATABASE "{target_db}" TEMPLATE "{template_db}"')
                 break
@@ -280,6 +328,7 @@ async def drop_worker_database(template_url: str, worker_id: str) -> None:
             "WHERE datname = $1 AND pid <> pg_backend_pid()",
             target_db,
         )
+        _audit("drop_worker_database", target_db)
         await admin.execute(f'DROP DATABASE IF EXISTS "{target_db}"')
     finally:
         await admin.close()
