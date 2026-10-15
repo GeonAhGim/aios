@@ -1,12 +1,13 @@
-"""LA-6 — 이슈 집합 → 배치 판정(ACCEPT/PARTIAL/QUARANTINE/REJECT).
+"""LA-6 — Issue set → batch verdict (ACCEPT/PARTIAL/QUARANTINE/REJECT).
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-6, §4.1, §9.2 LA-6.
 
-fail-closed 규칙표(§4.1) 그대로: REJECT 심각도 이슈는 캔들별 격리 대상으로
-세고(`rejected`), 그 비율이 20%(Draft)를 넘으면 "부분 저장 금지" 원칙에
-따라 배치 전체를 quarantine한다(`quarantined=total`, `accepted=0`).
-`total<=0`은 채점 불가 상태라 fail-closed 기본값으로 REJECT를 반환한다
-(§4.1 표에 명시된 배치 규칙은 아니며, 방어적 기본값 — 미검증).
+Fail-closed rule table (§4.1): issues with REJECT severity are counted as
+per-candle quarantine targets (`rejected`); when their ratio exceeds 20%
+(Draft), the entire batch is quarantined per the "no partial storage"
+principle (`quarantined=total`, `accepted=0`).
+`total<=0` means unscorable state, so fail-closed default returns REJECT
+(not a batch rule specified in §4.1 table, but a defensive default — unverified).
 """
 
 from __future__ import annotations
