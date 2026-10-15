@@ -7,12 +7,14 @@ splitting along a mixin boundary is natural. `PostgresMandateRepository`
 inherits this mixin to implement the entire `MandateRepository` Protocol as
 one class.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
 
 import asyncpg
 
+from src.core.db.tenant_scope import tenant_transaction
 from src.foundation.mandates.domain.models import PolicyBundle, PolicyDecision, PolicyOutcome
 
 
@@ -86,7 +88,13 @@ class PostgresPolicyRepositoryMixin:
         return _row_to_bundle(row) if row is not None else None
 
     async def insert_policy_decision(self, decision: PolicyDecision) -> PolicyDecision:
-        async with self._pool.acquire() as conn:
+        # F2(task-12103) -- `policy_decision` is now RLS-ENABLE+FORCEd
+        # (d3f8a6c91e52), same as `portfolio_mandate` (F1/task-9420). A bare
+        # `pool.acquire()` never binds `app.tenant_id`, so once the
+        # DATABASE_URL role stops being a superuser this INSERT's WITH CHECK
+        # would reject every row. `tenant_transaction` binds the GUC; the
+        # explicit `tenant_id` column value stays as the real parameter.
+        async with tenant_transaction(self._pool, decision.tenant_id) as conn:
             row = await conn.fetchrow(
                 "INSERT INTO policy_decision "
                 "(tenant_id, bundle_id, command_type, command_fingerprint, outcome, "
@@ -111,7 +119,8 @@ class PostgresPolicyRepositoryMixin:
     async def get_cached_decision(
         self, tenant_id: UUID, command_fingerprint: str
     ) -> PolicyDecision | None:
-        async with self._pool.acquire() as conn:
+        # F2(task-12103) -- same GUC-binding gap as insert_policy_decision above.
+        async with tenant_transaction(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM policy_decision WHERE tenant_id = $1 AND command_fingerprint = $2 "
                 "AND (expires_at IS NULL OR expires_at > now()) "
