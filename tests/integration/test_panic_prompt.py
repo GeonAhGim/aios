@@ -14,7 +14,14 @@ from src.core.approval.panic_prompt import (
     PanicPromptGenerator,
     WhitelistEntry,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
+
+
+async def create_test_user(pool: asyncpg.Pool):
+    """F2(task-12104): approval_requests' scope=USER create_request now
+    resolves tenant_id from a real `tenant` row — local alias kept so the
+    call sites below read unchanged."""
+    return await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
 
 
 def _asyncpg_dsn() -> str:

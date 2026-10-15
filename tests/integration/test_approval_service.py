@@ -3,6 +3,7 @@
 mandatory_wait_seconds(60/180초) 실제 대기 대신, DB의 created_at을 직접
 과거로 돌려 "대기시간이 지난 상태"를 결정적으로 재현한다.
 """
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,7 +22,15 @@ from src.core.approval.service import (
     list_pending,
     reject,
 )
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant
+
+
+async def _tenant_user(pool: asyncpg.Pool):
+    """F2(task-12104): approval_requests is now RLS-ENABLE+FORCEd and a
+    scope=USER insert resolves tenant_id from the real `tenant` row — a
+    bare `create_test_user` has none, so every USER-scope fixture here
+    needs `create_test_tenant` instead."""
+    return await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
 
 
 def _asyncpg_dsn() -> str:
@@ -51,7 +60,7 @@ async def test_solo_approval_blocked_before_mandatory_wait(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={"symbol": "BTC/USDT"},
@@ -65,7 +74,7 @@ async def test_solo_approval_succeeds_after_wait_elapsed(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={"symbol": "BTC/USDT"},
@@ -84,7 +93,7 @@ async def test_dual_approval_requires_two_different_accounts(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="execution_high_allocation",
         requested_action="START_LIVE_EXECUTION",
         context={},
@@ -126,7 +135,7 @@ async def test_expire_pending_auto_rejects_stale_requests(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={},
@@ -147,7 +156,7 @@ async def test_reject_marks_status_rejected(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={},
@@ -176,7 +185,7 @@ async def test_concurrent_solo_approvals_only_one_succeeds(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={},
@@ -221,7 +230,7 @@ async def test_concurrent_dual_first_signature_only_one_succeeds(pool, monkeypat
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="execution_high_allocation",
         requested_action="START_LIVE_EXECUTION",
         context={},
@@ -266,8 +275,8 @@ async def test_concurrent_dual_first_signature_only_one_succeeds(pool, monkeypat
 
 
 async def test_list_pending_filters_by_user(pool):
-    owner = await create_test_user(pool)
-    stranger = await create_test_user(pool)
+    owner = await _tenant_user(pool)
+    stranger = await _tenant_user(pool)
     request = await create_request(
         pool,
         scope="USER",
@@ -303,7 +312,7 @@ async def test_list_pending_filters_by_scope(pool):
 
 
 async def test_list_pending_excludes_resolved_requests(pool):
-    owner = await create_test_user(pool)
+    owner = await _tenant_user(pool)
     request = await create_request(
         pool,
         scope="USER",
@@ -326,7 +335,7 @@ async def test_context_roundtrips_with_decimal_values(pool):
     request = await create_request(
         pool,
         scope="USER",
-        user_id=await create_test_user(pool),
+        user_id=await _tenant_user(pool),
         trigger_source="watchdog_liquidate",
         requested_action="LIQUIDATE_POSITION",
         context={"loss_pct": Decimal("7.25")},

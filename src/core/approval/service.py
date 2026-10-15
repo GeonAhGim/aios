@@ -38,6 +38,7 @@ logic stays here because tests monkeypatch `_fetch` as a module attribute
 that monkeypatch targets this module's global `_fetch` binding, approve/reject
 etc. remain in this module where the monkeypatch is visible.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,7 +49,14 @@ from uuid import UUID
 
 import asyncpg
 
-from src.core.approval._shared import ApprovalError, ApprovalRequest, _fetch, _row_to_model
+from src.core.approval._shared import (
+    ApprovalError,
+    ApprovalRequest,
+    _fetch,
+    _resolve_tenant_id,
+    _row_to_model,
+)
+from src.core.db.tenant_scope import system_transaction, tenant_transaction
 from src.core.security.segregation_of_duty_port import (
     SegregationOfDutyViolation,
     assert_actor_not_counterparty,
@@ -101,11 +109,24 @@ async def list_pending(
         conditions.append(f"user_id = ${len(params)}")
     where_clause = " AND ".join(conditions)
 
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            f"SELECT * FROM approval_requests WHERE {where_clause} ORDER BY created_at DESC",
-            *params,
-        )
+    # F2(task-12104) -- when the caller filters by user_id (self-service "my
+    # pending requests"), scope the read to that user's own tenant via
+    # tenant_transaction. An unfiltered/admin-wide listing has no single
+    # tenant to bind, so it goes through system_transaction instead (same
+    # split _fetch uses, see _shared.py).
+    if user_id is not None:
+        tenant_id = await _resolve_tenant_id(pool, user_id)
+        async with tenant_transaction(pool, tenant_id) as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM approval_requests WHERE {where_clause} ORDER BY created_at DESC",
+                *params,
+            )
+    else:
+        async with system_transaction(pool) as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM approval_requests WHERE {where_clause} ORDER BY created_at DESC",
+                *params,
+            )
     return [_row_to_model(row) for row in rows]
 
 
@@ -125,31 +146,49 @@ async def create_request(
         wait_seconds = PLATFORM_WAIT_SECONDS
     elif scope == "USER":
         wait_seconds = USER_WAIT_SECONDS
+        if user_id is None:
+            raise ApprovalError("scope=USER 요청은 user_id가 필요합니다.")
     else:
         raise ApprovalError(f"알 수 없는 scope: {scope}")
 
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(seconds=wait_seconds + RESPONSE_WINDOW_SECONDS)
 
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO approval_requests
-                (scope, user_id, trigger_source, provenance, context, requested_action,
-                 approval_mode, mandatory_wait_seconds, expires_at)
-            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
-            RETURNING *
-            """,
-            scope,
-            user_id,
-            trigger_source,
-            provenance,
-            json.dumps(context, cls=DecimalSafeEncoder),
-            requested_action,
-            approval_mode,
-            wait_seconds,
-            expires_at,
-        )
+    # F2(task-12104) -- approval_requests is RLS-ENABLE+FORCEd (a4f27d91c6e8).
+    # scope="USER" always owns a user_id, so its row gets a real tenant_id
+    # (looked up, not assumed, see _resolve_tenant_id) and is inserted under
+    # tenant_transaction. scope="PLATFORM" has no owning user -- tenant_id
+    # stays NULL by design, matching the system-role carve-out the policy
+    # grants for that case (same shape as foundation_audit_event).
+    insert_sql = """
+        INSERT INTO approval_requests
+            (scope, tenant_id, user_id, trigger_source, provenance, context,
+             requested_action, approval_mode, mandatory_wait_seconds, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+        RETURNING *
+        """
+    insert_args: tuple[object, ...] = (
+        scope,
+        None,
+        user_id,
+        trigger_source,
+        provenance,
+        json.dumps(context, cls=DecimalSafeEncoder),
+        requested_action,
+        approval_mode,
+        wait_seconds,
+        expires_at,
+    )
+    if scope == "USER":
+        if user_id is None:
+            raise ApprovalError("scope=USER 요청은 user_id가 필요합니다.")
+        tenant_id = await _resolve_tenant_id(pool, user_id)
+        insert_args = (scope, tenant_id, *insert_args[2:])
+        async with tenant_transaction(pool, tenant_id) as conn:
+            row = await conn.fetchrow(insert_sql, *insert_args)
+    else:
+        async with system_transaction(pool) as conn:
+            row = await conn.fetchrow(insert_sql, *insert_args)
     result = _row_to_model(row)
 
     # PLATFORM scope (no specific user_id) has no "broadcast to all admins" design
@@ -187,7 +226,7 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
     if now < request.created_at + timedelta(seconds=request.mandatory_wait_seconds):
         raise ApprovalError("강제 대기시간이 아직 지나지 않았습니다.")
     if now > request.expires_at:
-        async with pool.acquire() as conn:
+        async with system_transaction(pool) as conn:
             await conn.execute(
                 "UPDATE approval_requests SET status = 'EXPIRED', resolved_at = $2 "
                 "WHERE id = $1 AND status = 'PENDING'",
@@ -197,7 +236,7 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
         raise ApprovalError("요청이 만료되어 자동 거부되었습니다.")
 
     if request.approval_mode == "SOLO":
-        async with pool.acquire() as conn:
+        async with system_transaction(pool) as conn:
             row = await conn.fetchrow(
                 "UPDATE approval_requests SET status = 'APPROVED', first_approver_id = $2, "
                 "resolved_at = $3 WHERE id = $1 AND status = 'PENDING' RETURNING *",
@@ -211,7 +250,7 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
 
     # DUAL — sequential signatures from different accounts (principle 4.9)
     if request.first_approver_id is None:
-        async with pool.acquire() as conn:
+        async with system_transaction(pool) as conn:
             row = await conn.fetchrow(
                 "UPDATE approval_requests SET first_approver_id = $2 "
                 "WHERE id = $1 AND status = 'PENDING' AND first_approver_id IS NULL "
@@ -232,7 +271,7 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
     except SegregationOfDutyViolation as exc:
         raise ApprovalError("DUAL 모드는 서로 다른 계정의 순차 서명이 필요합니다.") from exc
 
-    async with pool.acquire() as conn:
+    async with system_transaction(pool) as conn:
         row = await conn.fetchrow(
             "UPDATE approval_requests SET status = 'APPROVED', second_approver_id = $2, "
             "resolved_at = $3 WHERE id = $1 AND status = 'PENDING' "
@@ -250,7 +289,7 @@ async def reject(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> Appr
     request = await _fetch(pool, request_id)
     if request.status != "PENDING":
         raise ApprovalError(f"이미 처리된 요청: status={request.status}")
-    async with pool.acquire() as conn:
+    async with system_transaction(pool) as conn:
         row = await conn.fetchrow(
             "UPDATE approval_requests SET status = 'REJECTED', resolved_at = $2 "
             "WHERE id = $1 AND status = 'PENDING' RETURNING *",
@@ -274,7 +313,7 @@ async def expire_pending(pool: asyncpg.Pool) -> list[int]:
     """FD-10.1 exception case — auto-reject if nobody responds before the timer
     expires (fail-safe, no implicit approval). Called periodically (e.g. from the
     safety loop)."""
-    async with pool.acquire() as conn:
+    async with system_transaction(pool) as conn:
         rows = await conn.fetch(
             """
             UPDATE approval_requests
@@ -290,7 +329,7 @@ async def _update(pool: asyncpg.Pool, request_id: int, **fields: Any) -> Approva
     columns = list(fields.keys())
     values = [fields[c] for c in columns]
     set_clause = ", ".join(f"{c} = ${i + 2}" for i, c in enumerate(columns))
-    async with pool.acquire() as conn:
+    async with system_transaction(pool) as conn:
         row = await conn.fetchrow(
             f"UPDATE approval_requests SET {set_clause} WHERE id = $1 RETURNING *",
             request_id,
