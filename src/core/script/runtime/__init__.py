@@ -1,4 +1,5 @@
-"""AIOS Script runtime package (§9.4 DSL-8) — value models (`series.py`) and IR interpreter (`interpreter.py`).
+"""AIOS Script runtime package (§9.4 DSL-8) — value models (`series.py`) and
+IR interpreter (`interpreter.py`).
 
 New package under `src/core/**` SCAFFOLD zone. Pure (no I/O, no recursion). Builtin
 implementations are added to this package by DSL-9 and injected via `BuiltinRegistry` — the
