@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.mandates.application.activate_revision import (
     InvalidRevisionStateError,
     SelfApprovalNotAllowedError,
@@ -233,3 +234,49 @@ async def test_propose_and_activate_cycle_meets_throughput_budget(
         f"{n_cycles}회 propose+activate 사이클이 {elapsed_s:.3f}s 걸림 (예산 15.0s)"
     )
     assert throughput > 2.0, f"처리량 {throughput:.2f} cycles/s < 2.0 cycles/s 하한"
+
+
+class _StaleListRevisionsRepo:
+    """F3(task-12106, AUDIT_2026-10-15_compliance_approval.md) negative test
+    helper — wraps a real repo but freezes `list_revisions()` to a snapshot
+    taken before a concurrent proposer's revision existed, reproducing the
+    exact race `propose_amendment.py` is exposed to: two proposers who both
+    read the mandate before the other's INSERT lands compute the same
+    `next_revision_no`."""
+
+    def __init__(self, real_repo: object, stale_revisions: list) -> None:
+        self._real = real_repo
+        self._stale_revisions = stale_revisions
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real, name)
+
+    async def list_revisions(self, mandate_id: UUID) -> list:
+        return self._stale_revisions
+
+
+async def test_concurrent_propose_amendment_converts_unique_violation_to_domain_error(
+    pool, repo, trust_repo, audit_repo
+):
+    """F3(task-12106): propose_amendment.py:65-66 computes next_revision_no
+    from an unlocked `list_revisions()` read. A proposer who observed the
+    mandate before another proposer's revision was inserted computes the
+    same next_revision_no and loses the race on UNIQUE(mandate_id,
+    revision_no) (d8e8e4ba2365:75) — that loss must surface as the domain
+    `ConcurrencyConflictError`, not a raw `asyncpg.UniqueViolationError`
+    reaching the router (src/api/routers/foundation/mandates.py)."""
+    tenant_id = await _activated_tenant(pool, repo, trust_repo)
+    mandate = await repo.get_mandate(tenant_id)
+    stale_revisions = await repo.list_revisions(mandate.id)
+
+    first = await propose_amendment(repo, tenant_id=tenant_id, rules=default_rules())
+    assert first.revision_no == 2
+
+    racing_repo = _StaleListRevisionsRepo(repo, stale_revisions)
+    with pytest.raises(ConcurrencyConflictError):
+        await propose_amendment(
+            racing_repo, tenant_id=tenant_id, rules=default_rules(max_total_exposure_pct=55.0)
+        )
+
+    revisions_after = await repo.list_revisions(mandate.id)
+    assert [r.revision_no for r in revisions_after] == [1, 2]  # loser's INSERT did not persist

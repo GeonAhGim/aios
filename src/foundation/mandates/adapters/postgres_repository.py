@@ -151,24 +151,41 @@ class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
         self, *, mandate_id: UUID, revision_no: int, rules: MandateRevision
     ) -> MandateRevision:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "INSERT INTO mandate_revision "
-                "(mandate_id, revision_no, state, max_total_exposure_pct, "
-                " max_single_instrument_pct, min_cash_buffer_pct, max_daily_loss_pct, "
-                " allowed_autonomy, forbidden_assets, revision_hash, cooling_off_started_at) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
-                mandate_id,
-                revision_no,
-                rules.state.value,
-                rules.max_total_exposure_pct,
-                rules.max_single_instrument_pct,
-                rules.min_cash_buffer_pct,
-                rules.max_daily_loss_pct,
-                rules.allowed_autonomy.value,
-                list(rules.forbidden_assets),
-                rules.revision_hash,
-                rules.cooling_off_started_at,
-            )
+            try:
+                row = await conn.fetchrow(
+                    "INSERT INTO mandate_revision "
+                    "(mandate_id, revision_no, state, max_total_exposure_pct, "
+                    " max_single_instrument_pct, min_cash_buffer_pct, max_daily_loss_pct, "
+                    " allowed_autonomy, forbidden_assets, revision_hash, cooling_off_started_at) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *",
+                    mandate_id,
+                    revision_no,
+                    rules.state.value,
+                    rules.max_total_exposure_pct,
+                    rules.max_single_instrument_pct,
+                    rules.min_cash_buffer_pct,
+                    rules.max_daily_loss_pct,
+                    rules.allowed_autonomy.value,
+                    list(rules.forbidden_assets),
+                    rules.revision_hash,
+                    rules.cooling_off_started_at,
+                )
+            except asyncpg.UniqueViolationError as exc:
+                # UNIQUE(mandate_id, revision_no) violation (d8e8e4ba2365:75) —
+                # F3(task-12106): propose_amendment.py computes next_revision_no
+                # from a plain SELECT with no lock, so two concurrent proposals
+                # for the same mandate can compute the same next_revision_no and
+                # race to INSERT. Unlike get_or_create_mandate's analogous race
+                # (re-reads the winner's row), there is no "winner row" semantics
+                # here — the loser's whole proposed revision is simply invalid,
+                # so this surfaces as a retryable conflict instead of a raw
+                # asyncpg error reaching the router (src/api/routers/foundation/
+                # mandates.py), matching the "caller must re-query and retry"
+                # contract conditional_write.py already documents.
+                raise ConcurrencyConflictError(
+                    f"mandate_id={mandate_id}: revision_no={revision_no} was already "
+                    "taken by a concurrent amendment — retry propose_amendment"
+                ) from exc
         return _row_to_revision(row)
 
     async def transition_revision_state(

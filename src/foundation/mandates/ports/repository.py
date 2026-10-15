@@ -1,5 +1,6 @@
 """Portfolio Mandate repository port. domain은 이 Protocol만 알고, 실제 구현
 (adapters/)은 모른다(71번 §4)."""
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -56,7 +57,10 @@ class MandateRepository(Protocol):
         revision_no: int,
         rules: MandateRevision,
     ) -> MandateRevision:
-        """새 DRAFT revision을 append한다(immutable, 75번 §1)."""
+        """새 DRAFT revision을 append한다(immutable, 75번 §1). `(mandate_id,
+        revision_no)` UNIQUE 충돌(동시 propose_amendment 경합, F3/task-12106)은
+        `ConcurrencyConflictError`로 변환한다(구현체 책임) — 호출자는 재조회 후
+        재시도한다."""
         ...
 
     async def transition_revision_state(
