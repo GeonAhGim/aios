@@ -43,6 +43,7 @@ from src.foundation.entities.domain.defaults import (
 )
 from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant, create_test_user
+from tests.support.db import drop_worker_database, ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -105,10 +106,18 @@ async def pool():
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head():
-    _run_alembic("upgrade", "head")
-    yield
-    _run_alembic("upgrade", "head")
+def _ensure_head(monkeypatch):
+    # Downgrade/re-upgrade resets replayed columns on every existing order.
+    # Keep the whole migration lifecycle outside the shared worker database.
+    template = template_database_url()
+    clone_id = "m3" + uuid4().hex[:8]
+    url = asyncio.run(ensure_worker_database(template, clone_id))
+    monkeypatch.setenv("DATABASE_URL", url)
+    try:
+        _run_alembic("upgrade", "head")
+        yield
+    finally:
+        asyncio.run(drop_worker_database(template, clone_id))
 
 
 async def _insert_bare_order(conn: asyncpg.Connection, user_id) -> object:

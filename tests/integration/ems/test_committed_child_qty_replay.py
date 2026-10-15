@@ -38,7 +38,12 @@ from src.foundation.ems.application.aggregate_parent import (
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from tests.integration.oms.conftest import create_test_user, insert_order
-from tests.support.db import _asyncpg_dsn, ensure_worker_database
+from tests.support.db import (
+    _asyncpg_dsn,
+    drop_worker_database,
+    ensure_worker_database,
+    template_database_url,
+)
 
 
 @pytest.fixture
@@ -48,12 +53,17 @@ async def pool() -> AsyncIterator[asyncpg.Pool]:
     (`replay_verify.verify()` digests every stream touched inside the
     window, so a shared worker DB would pick up other files' leftovers)."""
     worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
-    url = await ensure_worker_database(os.environ["TEST_DATABASE_URL"], f"{worker}_child_qty")
-    p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=4)
+    template = template_database_url()
+    clone_id = f"{worker}_cq"
+    url = await ensure_worker_database(template, clone_id)
     try:
-        yield p
+        p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=4)
+        try:
+            yield p
+        finally:
+            await p.close()
     finally:
-        await p.close()
+        await drop_worker_database(template, clone_id)
 
 
 def _clock() -> datetime:

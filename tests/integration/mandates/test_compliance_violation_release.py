@@ -36,6 +36,11 @@ from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.order_service.gate import GateOutcome, OrderContext
 from src.services.safety.kill_switch_service import KillSwitchService, MissingEvidenceRefError
+from tests.foundation.integration.risk_gate.conftest import (
+    activate_mandate_with_defaults,
+    mandate_repo,  # noqa: F401 -- pytest fixture
+    trust_repo,  # noqa: F401 -- pytest fixture
+)
 from tests.integration.conftest import create_test_tenant
 
 _EXCHANGE = "bitget"
@@ -211,9 +216,13 @@ async def test_release_without_evidence_ref_is_rejected(
 
 
 async def test_release_with_evidence_ref_reopens_gate_and_is_audited(
-    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo, audit_repo
+    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo, audit_repo,
+    mandate_repo, trust_repo,  # noqa: F811 -- imported fixtures
 ) -> None:
     tenant_id = await create_test_tenant(pool)
+    # The independent compliance gate requires an active mandate even when
+    # this scenario only exercises post-trade safety controls.
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
     await _seed_wash_trade_violation(pool, tenant_id)
     await _run_batch(pool, kill_switch, risk_gate_repo, publish=None)
 

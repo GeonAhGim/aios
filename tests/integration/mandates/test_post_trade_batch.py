@@ -31,6 +31,11 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from src.services.order_service.gate import GateOutcome, OrderContext
 from src.services.safety.kill_switch_service import KillSwitchService
+from tests.foundation.integration.risk_gate.conftest import (
+    activate_mandate_with_defaults,
+    mandate_repo,  # noqa: F401 -- pytest fixture
+    trust_repo,  # noqa: F401 -- pytest fixture
+)
 from tests.integration.conftest import create_test_tenant
 
 _EXCHANGE = "bitget"
@@ -183,10 +188,14 @@ async def test_rerunning_same_batch_keeps_a_single_violation_record(
 
 
 async def test_no_violation_leaves_gate_open(
-    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo
+    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo,
+    mandate_repo, trust_repo,  # noqa: F811 -- imported fixtures
 ) -> None:
     """negative test -- 정상 체결만 있으면 아무것도 차단하지 않는다."""
     tenant_id = await create_test_tenant(pool)
+    # The independent compliance gate requires an active mandate even when
+    # this scenario only exercises post-trade safety controls.
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
     order_id = await _seed_order(pool, tenant_id, side="BUY", price=Decimal("100"), status="FILLED")
     venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
     await _seed_fill(pool, order_id, side="BUY", price=Decimal("100"), venue_ts=venue_ts)
@@ -210,7 +219,8 @@ async def test_no_violation_leaves_gate_open(
 
 
 async def test_market_abuse_warn_only_leaves_gate_open(
-    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo
+    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo,
+    mandate_repo, trust_repo,  # noqa: F811 -- imported fixtures
 ) -> None:
     """게이트/CI 적색 회귀 -- CM-10 market_abuse.wash_trade는 WARN 전용(§3
     "WARN은 통과시키되 기록")이라, 반대 방향 체결 두 건이 60초 안에 잡혀도
@@ -219,6 +229,9 @@ async def test_market_abuse_warn_only_leaves_gate_open(
     체결 모두 FILLED(open_orders 없음)라 CM-9 wash_trade(DENY)도 걸리지
     않는다 -- 남는 것은 CM-10 WARN 하나뿐이어야 한다."""
     tenant_id = await create_test_tenant(pool)
+    # The independent compliance gate requires an active mandate even when
+    # this scenario only exercises post-trade safety controls.
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
     await _seed_position(pool, tenant_id, quantity=Decimal("10"))
     buy_order_id = await _seed_order(
         pool, tenant_id, side="BUY", price=Decimal("100"), status="FILLED"

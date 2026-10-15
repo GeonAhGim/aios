@@ -8,6 +8,7 @@ FK로 거부되는 negative test, 백필된 행 수와 NULL 잔여 행 수를 �
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import sys
@@ -27,16 +28,12 @@ from src.foundation.entities.domain.defaults import (
     default_portfolio_id,
 )
 from tests.integration.conftest import create_test_tenant, create_test_user
+from tests.support.db import drop_worker_database, ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
 from tests.support.orders_residue import check_orders
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c9f4e2a1b6d7"
-
-# Module-level store for order_ids inserted by _insert_bare_order,
-# used by _ensure_head teardown to clean up orphaned rows.
-_test_order_ids: list[object] = []
-
 
 def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
@@ -65,39 +62,18 @@ async def pool():
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head(pool):
-    _run_alembic("upgrade", "head")
-    yield
-    # Cleanup orphaned orders/fills inserted by this module's tests.
-    # fills 테이블은 append-only 트리거가 있어 DELETE가 거부되므로
-    # 양쪽 테이블의 트리거를 임시 비활성화한다.
-    import asyncio
-
-    async def _cleanup() -> None:
-        async with pool.acquire() as conn:
-            # Disable triggers on both tables to allow cleanup.
-            await conn.execute("ALTER TABLE fills DISABLE TRIGGER ALL")
-            await conn.execute("ALTER TABLE orders DISABLE TRIGGER ALL")
-            # Delete fills referencing fa3-test orders first (FK cascade).
-            await conn.execute(
-                "DELETE FROM fills WHERE order_id IN "
-                "(SELECT order_id FROM orders WHERE strategy_id = 'fa3-test')"
-            )
-            # Delete tracked order_ids.
-            if _test_order_ids:
-                await conn.execute(
-                    "DELETE FROM orders WHERE order_id = ANY($1::uuid[])",
-                    _test_order_ids,
-                )
-                _test_order_ids.clear()
-            # Delete any remaining fa3-test orders.
-            await conn.execute("DELETE FROM orders WHERE strategy_id = 'fa3-test'")
-            # Re-enable triggers.
-            await conn.execute("ALTER TABLE orders ENABLE TRIGGER ALL")
-            await conn.execute("ALTER TABLE fills ENABLE TRIGGER ALL")
-
-    asyncio.get_event_loop().run_until_complete(_cleanup())
-    _run_alembic("upgrade", "head")
+def _ensure_head(monkeypatch):
+    # Downgrade/re-upgrade resets replayed columns on every existing order.
+    # Keep the whole migration lifecycle outside the shared worker database.
+    template = template_database_url()
+    clone_id = "m3" + uuid4().hex[:8]
+    url = asyncio.run(ensure_worker_database(template, clone_id))
+    monkeypatch.setenv("DATABASE_URL", url)
+    try:
+        _run_alembic("upgrade", "head")
+        yield
+    finally:
+        asyncio.run(drop_worker_database(template, clone_id))
 
 
 async def _column_exists(pool: asyncpg.Pool, table: str, column: str) -> bool:
@@ -114,8 +90,7 @@ async def _insert_bare_order(conn: asyncpg.Connection, user_id) -> object:
     """`fund_id`/`portfolio_id` 컬럼이 아직 없는(FA-3 이전) 스키마 상태를
     가정한 최소 INSERT — 백필 대상 원본 행을 만든다.
 
-    반환값(order_id)은 모듈 전역 _test_order_ids에 기록되어
-    _ensure_head teardown에서 정리한다."""
+    모든 데이터는 _ensure_head의 일회용 DB 정리로 제거한다."""
     order_id = await conn.fetchval(
         """
         INSERT INTO orders (
@@ -128,7 +103,6 @@ async def _insert_bare_order(conn: asyncpg.Connection, user_id) -> object:
         user_id,
         f"fa3-test-{uuid4().hex}",
     )
-    _test_order_ids.append(order_id)
     return order_id
 
 
@@ -352,11 +326,12 @@ async def test_backfill_computes_default_ids_for_bootstrapped_user_and_nulls_the
 
 
 async def test_check_orders_sentinel_passes_after_this_modules_teardown(pool):
-    """task-12155 proof: by the time this (last) test runs, every earlier test's
-    `_ensure_head` autouse teardown has already deleted its fa3-test orders/fills
-    rows. The orders_residue sentinel (tests/support/orders_residue.py) must see
-    no leftover digest mismatch on the shared worker DB for this file's run."""
+    """Prior migration clones have been dropped; the shared worker stays clean.
+
+    The active fixture redirects DATABASE_URL to this test's disposable clone,
+    so check the captured worker URL rather than that empty clone.
+    """
     await check_orders(
-        os.environ["DATABASE_URL"],
+        os.environ["TEST_DATABASE_URL"],
         "test_migration_fa3_orders_fills_columns.py standalone run",
     )

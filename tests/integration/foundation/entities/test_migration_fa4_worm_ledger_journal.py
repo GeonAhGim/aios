@@ -103,7 +103,7 @@ async def pool():
 @pytest.fixture(autouse=True)
 def _ensure_head(monkeypatch):
     template = template_database_url()
-    worker = f"fa4_{uuid4().hex[:8]}"
+    worker = f"f4{uuid4().hex[:8]}"
     database_url = asyncio.run(ensure_worker_database(template, worker))
     monkeypatch.setenv("DATABASE_URL", database_url)
     try:

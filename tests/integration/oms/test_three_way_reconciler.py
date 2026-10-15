@@ -25,6 +25,11 @@ from src.services.oms.application import three_way_reconciler as reconciler_modu
 from src.services.oms.application.submit_order import OrderSubmitDeniedError, submit_order
 from src.services.oms.application.three_way_reconciler import reconcile_account
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
+from tests.foundation.integration.risk_gate.conftest import (
+    activate_mandate_with_defaults,
+    mandate_repo,  # noqa: F401
+    trust_repo,  # noqa: F401
+)
 from tests.integration.oms._reconciler_test_support import (
     ScriptedAdapter,
     active_account_controls,
@@ -82,10 +87,13 @@ async def test_reconcile_healthy_reports_zero_discrepancies(pool):
     assert await active_account_controls(pool, user_id) == 0
 
 
-async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(pool):
+async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(
+    pool, mandate_repo, trust_repo,  # noqa: F811
+):
     """REC-002 + DoD (b) — 체결수량 불일치는 MATERIAL_MISMATCH, 그동안 같은
     계정의 신규 submit_order는 DENY, 해소되면 같은 명령이 다시 허용된다."""
     user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     execution_id = await create_running_execution(pool, user_id)
     entity_context = await seed_entity_context(pool, user_id)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
@@ -162,7 +170,9 @@ async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(po
     assert allowed.status == OrderStatus.VALIDATED
 
 
-async def test_reconcile_confirmed_cancel_self_heals_and_reopens_gate(pool):
+async def test_reconcile_confirmed_cancel_self_heals_and_reopens_gate(
+    pool, mandate_repo, trust_repo,  # noqa: F811
+):
     """task-7978 F1 — 거래소가 실제로 취소를 확정한 주문(체결 없이 open-orders
     에서 사라짐)이 `CANCEL_REQUESTED` 이력을 갖고 있으면 대사가 스스로
     `VENUE_CANCELLED`로 전이시켜야 한다. 그러지 않으면 이 주문 하나가
@@ -170,6 +180,7 @@ async def test_reconcile_confirmed_cancel_self_heals_and_reopens_gate(pool):
     게이트가 계속 ACTIVE로 남고, 같은 테넌트의 신규 submit_order가 무기한
     DENY된다(라이브니스 버그, task-7978 발견)."""
     user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     execution_id = await create_running_execution(pool, user_id)
     entity_context = await seed_entity_context(pool, user_id)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
@@ -413,7 +424,7 @@ async def test_reconcile_fails_closed_when_risk_gate_repository_raises(pool, mon
 
 
 async def test_reconcile_gate_red_when_account_gate_wiring_removed_allows_submit_during_mismatch(
-    pool, monkeypatch
+    pool, monkeypatch, mandate_repo, trust_repo,  # noqa: F811
 ):
     """게이트 적색 재현 — 모듈 docstring의 경고("`activate_safety_control` 호출을
     지우면 DENY 단언이 실패한다")를 실제로 재현한다. `_apply_account_gate`
@@ -428,6 +439,7 @@ async def test_reconcile_gate_red_when_account_gate_wiring_removed_allows_submit
     monkeypatch.setattr(reconciler_module, "_apply_account_gate", _noop_apply_account_gate)
 
     user_id = await create_test_tenant(pool)
+    await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=user_id)
     execution_id = await create_running_execution(pool, user_id)
     entity_context = await seed_entity_context(pool, user_id)
     client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"

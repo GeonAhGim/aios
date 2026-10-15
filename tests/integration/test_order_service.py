@@ -4,11 +4,9 @@ import asyncio
 import json
 import uuid
 from decimal import Decimal
-from pathlib import Path
 
 import asyncpg
 import pytest
-from dotenv import dotenv_values
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.core.exceptions import RetryableExchangeError
@@ -27,6 +25,7 @@ from src.services.order_service import repository as order_repository
 from src.services.order_service.gate import GateDecision, GateOutcome
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.order_service_isolation import isolated_order_service_pool
 
 
 async def _allow_gate(context: object) -> GateDecision:
@@ -39,34 +38,14 @@ async def _allow_gate(context: object) -> GateDecision:
     )
 
 
-def _asyncpg_dsn() -> str:
-    env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
-    url = env.get("DATABASE_URL")
-    assert url
-    return url.replace("postgresql+asyncpg://", "postgresql://")
-
-
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
-    yield p
-    await p.close()
+    async with isolated_order_service_pool() as isolated:
+        yield isolated
 
 
 async def _delete_order_and_events(pool: asyncpg.Pool, order_id: uuid.UUID) -> None:
-    """This module's `pool` fixture connects straight to `DATABASE_URL` (no
-    per-module clone/isolation, unlike `tests/integration/eventstore/conftest.py`'s
-    per-module replay clone) and `test_update_from_exchange_raises_on_status_mismatch`
-    below writes a status change straight to `orders` with no companion
-    `order_events` row -- by design, to simulate a caller observing a stale
-    status (task-11356). That write's final state (CANCELLED) is never
-    advanced again by the test, so unlike the `eventstore` replay tests'
-    rollback-on-teardown clones, nothing undoes it: the row permanently
-    desyncs `orders.status` from its `order_events` trail -- exactly the
-    mismatch `scripts/replay_verify.py` flagged scanning this worker's real
-    DB directly (ci_recheck.py "full" mode, run 9b5f0b71, order_id
-    36b1623b-35ca-44f1-b040-d1a68f5c92de) -- test residue, not a product
-    defect."""
+    """Remove the stale-status scenario inside its disposable test database."""
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", order_id)
         await conn.execute("DELETE FROM order_events WHERE order_id = $1", order_id)

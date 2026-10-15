@@ -14,39 +14,39 @@ tx 1회). 왕복 수를 `add_query_logger`로 정확히 세려면 그 반복이 
 커넥션을 받을지 보장할 수 없어 로거가 일부 왕복을 놓칠 수 있다. 이 파일들은
 전부 단일 스레드 순차 측정이라 `max_size=1`이 동시성을 제한하지 않는다.
 
-`_drain_shared_queues`(autouse) — `order_command_outbox`/`provider_event_
-inbox`의 클레임 쿼리는 전역 큐다(주문/테스트로 필터하지 않음, §5.1/L4-15
-설계 그대로). 공유 `TEST_DATABASE_URL`에 이전 pytest 실행이 남긴 PENDING/
-NEW 잔여 행이 있으면 이 디렉터리의 정확 왕복 수 단언("방금 넣은 행만
-클레임된다"는 전제)이 깨지므로, 각 테스트 시작 전에 두 큐를 비운다
-(`_fixtures.drain_outbox_backlog`/`drain_inbox_backlog`).
+각 테스트는 원본 템플릿의 일회용 클론을 쓴다. 다른 모듈이 남긴 미래
+not_before 재시도는 사전 drain 뒤에도 측정 중 활성화될 수 있으므로,
+전역 큐의 정확 왕복 수 측정은 공유 워커 DB에서 수행하지 않는다.
 """
 from __future__ import annotations
 
-import os
 import time
+from uuid import uuid4
 
 import asyncpg
 import pytest
 
-from tests.performance.oms._fixtures import drain_inbox_backlog, drain_outbox_backlog
-
-
-def _asyncpg_dsn() -> str:
-    return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+from tests.support.db import (
+    _asyncpg_dsn,
+    drop_worker_database,
+    ensure_worker_database,
+    template_database_url,
+)
 
 
 @pytest.fixture
 async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=1)
-    yield p
-    await p.close()
-
-
-@pytest.fixture(autouse=True)
-async def _drain_shared_queues(pool: asyncpg.Pool) -> None:
-    await drain_outbox_backlog(pool)
-    await drain_inbox_backlog(pool)
+    template = template_database_url()
+    clone_id = "pf" + uuid4().hex[:8]
+    url = await ensure_worker_database(template, clone_id)
+    try:
+        p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=1)
+        try:
+            yield p
+        finally:
+            await p.close()
+    finally:
+        await drop_worker_database(template, clone_id)
 
 
 async def attach_round_trip_logger(pool: asyncpg.Pool) -> list[str]:

@@ -52,7 +52,7 @@ def _asyncpg_dsn() -> str:
 
 
 # `session_database_url` caps the composed clone name at 40 chars, and this
-# suffix stacks with `_REPLAY_CLONE_SUFFIX` (e.g. `..._p_master_rv_tamper`), so
+# suffix stacks with `_REPLAY_CLONE_SUFFIX` (e.g. `..._p_master_rvt`), so
 # it stays a single character to leave room for longer per-worktree base names
 # (e.g. `aios_test_backend_1`) plus the longest registered replay suffix.
 _PRISTINE_CLONE_WORKER_ID = "p"
@@ -98,14 +98,14 @@ async def pool():
 # registered suffix instead of its full module name.
 _REPLAY_CLONE_SUFFIX: dict[str, str] = {
     "test_replay_verify": "rv",
-    "test_replay_verify_order_chain": "rv_chain",
-    "test_replay_verify_tamper_detection": "rv_tamper",
+    "test_replay_verify_order_chain": "rvc",
+    "test_replay_verify_tamper_detection": "rvt",
 }
 
 
 def _replay_clone_id(request: pytest.FixtureRequest) -> str:
     """Deterministic, short clone name per (xdist worker, replay test module):
-    `gw0_rv`, `gw0_rv_chain`, `gw0_rv_tamper`."""
+    `gw0_rv`, `gw0_rvc`, `gw0_rvt`."""
     worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
     module = request.module.__name__.rsplit(".", 1)[-1]
     suffix = _REPLAY_CLONE_SUFFIX.get(module)
