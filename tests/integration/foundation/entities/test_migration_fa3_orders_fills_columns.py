@@ -35,6 +35,7 @@ from tests.support.orders_residue import check_orders
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c9f4e2a1b6d7"
 
+
 def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
 
@@ -73,6 +74,31 @@ def _ensure_head(monkeypatch):
         _run_alembic("upgrade", "head")
         yield
     finally:
+        # Clean up orders/fills rows created by _insert_bare_order (strategy_id='fa3-test').
+        # Disable triggers during cleanup, then restore.
+        async def cleanup_test_orders() -> None:
+            dsn = url.replace("postgresql+asyncpg://", "postgresql://")
+            conn = await asyncpg.connect(dsn)
+            test_strategy = "fa3-test"
+            try:
+                await conn.execute("ALTER TABLE orders DISABLE TRIGGER ALL")
+                await conn.execute("ALTER TABLE fills DISABLE TRIGGER ALL")
+                try:
+                    await conn.execute(
+                        (
+                            "DELETE FROM fills WHERE order_id IN "
+                            "(SELECT order_id FROM orders WHERE strategy_id = $1)"
+                        ),
+                        test_strategy,
+                    )
+                    await conn.execute("DELETE FROM orders WHERE strategy_id = $1", test_strategy)
+                finally:
+                    await conn.execute("ALTER TABLE orders ENABLE TRIGGER ALL")
+                    await conn.execute("ALTER TABLE fills ENABLE TRIGGER ALL")
+            finally:
+                await conn.close()
+
+        asyncio.run(cleanup_test_orders())
         asyncio.run(drop_worker_database(template, clone_id))
 
 
