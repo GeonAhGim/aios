@@ -23,23 +23,26 @@ class FSMState(str, Enum):
 class FSMTransition(BaseModel):
     from_state: FSMState
     to_state: FSMState
-    condition: str  # Condition expression string; evaluation logic in FROZEN Zone (Strategy Engine)
+    condition: str  # condition expression string; evaluation logic is in
+    # the FROZEN Zone (Strategy Engine)
 
 
 class FSMStrategyConfig(BaseModel):
-    """9.11 — Use only this FSM for strategies (prevents infinite loops / state tangles)."""
+    """9.11 — Strategies must be defined only via this FSM structure
+    (prevents infinite loops / state entanglement)."""
 
     strategy_id: str
-    version: str  # e.g., "v1.4"
+    version: str  # e.g. "v1.4"
     target_asset: str
-    market: str  # "crypto" | "kr_stock" etc.
+    market: str  # "crypto" | "kr_stock", etc.
     exchange: str
     initial_state: FSMState = FSMState.IDLE
     states: list[FSMState]
     transitions: list[FSMTransition]
 
-    # 9.4 Strategy Definition — additional fields
-    author_agent: str  # Which Agent created this (5.4 Strategy Research Agent)
+    # 9.4 Strategy Definition additional fields
+    author_agent: str  # which Agent created this (5.4 Strategy Research Agent)
     memory_provenance: list[UUID] = Field(default_factory=list)
-    """10th Red Team reflection — Memory item IDs referenced during strategy creation.
-    Implements 4.6-A Memory-Strategy provenance linkage. Verify field diversity at 9.5."""
+    """Reflects 10th red team review — Memory item IDs referenced
+    during strategy creation. Implements 4.6-A Memory-Strategy provenance
+    linking principle. Verify diversity of this field at 9.5 validation."""
