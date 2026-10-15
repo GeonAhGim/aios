@@ -28,6 +28,7 @@ from src.foundation.entities.domain.defaults import (
 )
 from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.support.deep_downgrade import purge_position_snapshots
+from tests.support.orders_residue import check_orders
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c9f4e2a1b6d7"
@@ -348,3 +349,14 @@ async def test_backfill_computes_default_ids_for_bootstrapped_user_and_nulls_the
     assert bare_row["portfolio_id"] is None
     assert backfilled_count == 1
     assert null_count == 1
+
+
+async def test_check_orders_sentinel_passes_after_this_modules_teardown(pool):
+    """task-12155 proof: by the time this (last) test runs, every earlier test's
+    `_ensure_head` autouse teardown has already deleted its fa3-test orders/fills
+    rows. The orders_residue sentinel (tests/support/orders_residue.py) must see
+    no leftover digest mismatch on the shared worker DB for this file's run."""
+    await check_orders(
+        os.environ["DATABASE_URL"],
+        "test_migration_fa3_orders_fills_columns.py standalone run",
+    )
