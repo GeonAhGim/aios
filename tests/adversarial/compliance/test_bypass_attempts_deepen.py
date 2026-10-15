@@ -5,7 +5,7 @@ CLAUDE.md #12: 원본 파일이 500줄 경계를 넘기지 않도록 새 D3 증�
 `test_bypass_attempts.py`가 이미 재사용하는 CM-4/CM-8 포트만 그대로
 빌려 쓴다.
 
-여기서 다루는 세 가지(원본 파일의 우회 시도 1~10을 잇는 11번부터):
+여기서 다루는 네 가지(원본 파일의 우회 시도 1~10을 잇는 11번부터):
 11. 영속화 실패(`insert_policy_decision` 예외)를 틈타 "판정은 났으니 일단
     통과"로 조용히 fail-open 변질되지 않는지(실패 주입).
 12. 우회 시도 2(캐시 재사용)가 겨냥하는 캐시 적중 경로의 왕복 지연 예산
@@ -13,6 +13,10 @@ CLAUDE.md #12: 원본 파일이 500줄 경계를 넘기지 않도록 새 D3 증�
 13. `scripts/check_compliance_gate.py`(CM-8 CI 정적 검사) `main()`이
     ad-hoc `pre_submit_gate=` 대입을 실제로 적색 처리하는지(게이트 적색
     재현).
+14. task-12102(audit F1/S) — 프로덕션 조립부 셋(`background_loops.py`,
+    `execution_deps.py`, `oms/application/wiring.py`)이 그대로 쓰는
+    `make_foundation_pre_submit_gate`의 `require_compliance_mandate`
+    기본값이 mandate 미설정 테넌트를 DENY로 떨어뜨리는지(I-09 CM-A2).
 """
 
 from __future__ import annotations
@@ -24,7 +28,13 @@ import pytest
 
 from src.foundation.mandates.application.evaluate_pre_trade import evaluate_pre_trade
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict
-from tests.adversarial.compliance.test_bypass_attempts import _active_tenant
+from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
+from src.services.order_service.gate import GateOutcome, OrderContext
+from tests.adversarial.compliance.test_bypass_attempts import (
+    _active_tenant,
+    _create_running_execution,
+)
+from tests.integration.oms.conftest import create_test_tenant
 
 # --- 11. 영속화 실패를 틈타 "판정은 났으니 일단 통과" 노리는 시도 --------------
 
@@ -128,3 +138,38 @@ def test_gate_red_repro_check_compliance_gate_flips_to_red_on_ad_hoc_gate_factor
     )
 
     assert gate.main() == 1  # 우회 코드를 섞어 넣자 적색으로 뒤집힌다
+
+
+# --- 14. 프로덕션 조립부 기본값으로 mandate 미설정 테넌트 밀어넣기 시도 --------
+
+
+async def test_production_gate_default_denies_tenant_with_no_mandate_configured(
+    pool, repo, trust_repo
+):
+    """우회 시도 14(task-12102, audit F1/S) — `test_bypass_attempts.py`의
+    우회 시도 3 통제군은 `evaluate_compliance_gate`에 `require_compliance_
+    mandate=False`를 명시적으로 넘겼을 때만 통과한다는 것을 보인다. 하지만
+    프로덕션 조립부 셋(`background_loops.py`, `execution_deps.py`,
+    `oms/application/wiring.py`) 전부가 이 키워드를 아예 넘기지 않고
+    `make_foundation_pre_submit_gate`의 기본값에 의존한다 — 그 기본값이
+    `False`였을 때는 mandate를 설정하지 않은 테넌트의 주문이 CM-6/7 규칙 평가
+    없이 그대로 ALLOW됐다(I-09 CM-A2 "결손은 DENY"와 비대칭). 이 테스트는 그
+    기본값 자체를 `make_foundation_pre_submit_gate(pool, require_mandate=False)`
+    로(=프로덕션 조립부와 동일하게 키워드 생략) 호출해, mandate가 아예 없는
+    테넌트의 게이트 통과 시도가 DENY로 뒤집혔음을 확인한다."""
+    tenant_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, tenant_id)
+
+    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    context = OrderContext(
+        user_id=tenant_id,
+        execution_id=execution_id,
+        exchange="bitget",
+        mandate_revision_id=None,
+        symbol="BTC/USDT",
+    )
+
+    decision = await gate(context)
+
+    assert decision.outcome == GateOutcome.DENY
+    assert "CM_MANDATE_MISSING" in decision.reason_codes

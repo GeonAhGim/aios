@@ -5,6 +5,7 @@ this is the only file in `order_service` that imports `evaluate_pre_trade`
 (mirrors `foundation_gate.py`'s own "foundation imports live in one place"
 rule for `gate.py`/`submit.py`).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -67,8 +68,11 @@ async def evaluate_compliance_gate(
     configured and `require_compliance_mandate=False` lets that pass — mirrors
     the numeric-policy check's own sibling `require_mandate` flag when that one
     is off. H-1b(task-3369) flipped `require_mandate` to `True` in all three
-    production assemblies; this CM-8 flag is an independent axis and still
-    defaults to `False` (H-2/CM-11 is its own separate leaf).
+    production assemblies; task-12102 (audit F1, S-tier) now defaults this
+    CM-8 flag to `True` too (I-09 CM-A2, fail-closed on missing mandate) --
+    callers that still want the old passthrough (e.g. the adversarial
+    control-group test) must now pass `require_compliance_mandate=False`
+    explicitly.
     """
     try:
         result = await evaluate_pre_trade(

@@ -30,8 +30,11 @@ isolation, not an account-wide PAUSE (other symbols/accounts are unaffected).
    OPEN RECON_MISMATCH → 즉시 DENY.
 2층(CM-8/CM-A5): `evaluate_compliance_gate` — mandate 위임장 규칙(CM-6/7)
    위반은 리스크·수치정책이 ALLOW여도 DENY(권위 분리). `require_compliance_
-   mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 False — 아래
-   `require_mandate`와 같은 이유).
+   mandate`가 "mandate 자체가 없을 때"의 처리를 정한다(기본 True — task-12102,
+   audit F1 S-tier: 3개 프로덕션 조립부 어디서도 이 파라미터를 명시 전달하지
+   않아 기본값이 그대로 노출됐었다. I-09(CM-A2, 결손은 DENY)에 맞춰 레이어 3
+   `require_mandate`와 동일하게 기본 결손-DENY로 전환. 명시적으로 `False`를
+   넘기는 호출부(예: 아래 적대적 테스트의 대조군)만 여전히 패스스루된다).
 Layer 3: mandate numeric policy (`foundation_gate_mandate_layer.
    evaluate_mandate_layer`). `require_mandate` (mandatory explicit
    argument, no default) decides "no mandate bound" handling -- `True` ->
@@ -105,10 +108,13 @@ def make_foundation_pre_submit_gate(
     require_mandate: bool,
     # CM-8 — sibling flag for the independent compliance rule-bundle check
     # (`evaluate_compliance_gate`); only governs "no mandate configured at
-    # all" (same reasoning/default as `require_mandate`, no UI binds mandates
-    # to executions yet). CM-A5 (mandate violations block even risk-ALLOW
-    # orders) is enforced unconditionally, regardless of this flag.
-    require_compliance_mandate: bool = False,
+    # all". task-12102 (audit F1, S-tier): defaults to True (fail-closed,
+    # I-09 CM-A2) -- none of the three production assembly sites pass this
+    # explicitly, so the old False default silently let unmandated tenants'
+    # orders skip CM-6/7 rule evaluation entirely. CM-A5 (mandate violations
+    # block even risk-ALLOW orders) is enforced unconditionally, regardless
+    # of this flag.
+    require_compliance_mandate: bool = True,
     # task-3986 — the personal-conservative 4th layer's own ports. Default
     # to the real single-operator adapters (cheap, I/O-free __init__, so
     # constructing them here can never fail the whole factory -- see
