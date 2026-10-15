@@ -42,6 +42,7 @@ from tests.integration.foundation.allocation.conftest import (
     wallet_available_balance,
 )
 from tests.integration.foundation.entities.conftest import build_hierarchy
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _clock() -> datetime:

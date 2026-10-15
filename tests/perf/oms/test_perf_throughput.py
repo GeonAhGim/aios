@@ -41,6 +41,7 @@ from tests.integration.oms.conftest import create_test_user, insert_order
 from tests.perf.oms.conftest import attach_round_trip_logger, measure_baseline_round_trip_p95_ms
 from tests.performance.oms._fixtures import insert_open_order, partial_fill_event
 from tests.support.oms_outbox_fakes import ScriptedAdapter, allow_gate, submit_payload
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _OUTBOX_TARGET_CMD_PER_SEC = 100.0  # §7.1 운영 목표 — 비차단(print)
 _OUTBOX_BATCH_SIZE = 100

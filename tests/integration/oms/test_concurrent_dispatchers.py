@@ -65,6 +65,7 @@ from tests.support.oms_outbox_fakes import (
     make_order_view,
     submit_payload,
 )
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 WORKERS = ("w1", "w2", "w3")
 

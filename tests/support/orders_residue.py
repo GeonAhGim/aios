@@ -19,6 +19,22 @@ async def check_orders(database_url: str, boundary: str) -> None:
     try:
         report = await replay_verify.verify(pool, as_of=datetime.now(timezone.utc), hours=24)
         mismatches = [m for m in report.mismatches if m.domain == "orders"]
+        # Event-window enumeration cannot discover a row with no events at all.
+        # Use the same projection and comparison fields, with no cutover exception.
+        async with (
+            pool.acquire() as conn,
+            conn.transaction(isolation="repeatable_read", readonly=True),
+        ):
+            rows = await conn.fetch(
+                "SELECT order_id FROM orders o WHERE NOT EXISTS "
+                "(SELECT 1 FROM order_events e WHERE e.order_id = o.order_id)"
+            )
+            for row in rows:
+                pair = await replay_verify._order_pair(conn, row["order_id"], cutover_at=None)
+                if pair is not None and pair[0] != pair[1]:
+                    raise AssertionError(
+                        f"Sentinel: eventless orders residue at {boundary}: {row['order_id']}"
+                    )
         if mismatches:
             raise AssertionError(f"Sentinel: orders residue at {boundary}: {mismatches}")
     finally:

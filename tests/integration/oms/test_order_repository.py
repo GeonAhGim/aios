@@ -51,6 +51,7 @@ from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from src.services.oms.contracts.v1_views import OrderView
 from src.services.oms.ports.repository import OrderEventRepoPort, OrderRepoPort
 from tests.integration.oms.conftest import arm_cutover_sql, create_test_user, insert_order
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _transition_event(

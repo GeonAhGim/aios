@@ -37,6 +37,7 @@ from tests.foundation.integration.risk_gate.conftest import (
     trust_repo,  # noqa: F401 -- pytest fixture
 )
 from tests.integration.conftest import create_test_tenant
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _EXCHANGE = "bitget"
 _SYMBOL = "BTC/USDT"

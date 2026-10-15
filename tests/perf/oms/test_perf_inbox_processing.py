@@ -45,6 +45,7 @@ from src.services.oms.contracts.v1_events import FillEvent
 from tests.integration.oms.conftest import create_test_user
 from tests.perf.oms.conftest import attach_round_trip_logger, measure_baseline_round_trip_p95_ms
 from tests.performance.oms._fixtures import insert_open_order, partial_fill_event
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _SAMPLE_COUNT = 100
 _P99_TARGET_MS = 300.0  # §7.1 운영 목표

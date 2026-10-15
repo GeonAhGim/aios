@@ -35,6 +35,7 @@ from src.services.oms.application.wiring import OMS_DISPATCHER_FLAG
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.oms.conftest import create_test_tenant, insert_order
 from tests.support.oms_outbox_fakes import ScriptedAdapter, submit_payload
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 class _StubCredentialResolver:

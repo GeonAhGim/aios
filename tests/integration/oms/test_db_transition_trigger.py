@@ -51,6 +51,7 @@ from tests.integration.oms.conftest import (
 )
 from tests.support.db import ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 

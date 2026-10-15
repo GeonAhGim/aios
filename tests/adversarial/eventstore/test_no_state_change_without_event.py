@@ -47,6 +47,7 @@ from src.services.safety.open_order_sweeper import sweep_open_orders
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.oms.conftest import arm_cutover_sql, insert_event, insert_order
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 class _RaisingCancelAdapter(FakeExchangeAdapter):

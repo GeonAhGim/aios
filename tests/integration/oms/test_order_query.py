@@ -21,6 +21,7 @@ from src.data.models.trading import OrderStatus
 from src.services.oms.application import order_query
 from src.services.oms.ports.repository import OrderQueryPort
 from tests.integration.oms.conftest import create_test_user, insert_event, insert_order
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _raw_cursor(created_at_str: str, order_id: str) -> str:

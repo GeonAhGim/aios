@@ -17,6 +17,7 @@ from src.services.oms.application.cancel_order import cancel_order
 from src.services.oms.contracts.v1_commands import CancelOrderCommand
 from src.services.oms.domain.errors import InvalidOrderTransitionError
 from tests.integration.oms.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def _insert_order(

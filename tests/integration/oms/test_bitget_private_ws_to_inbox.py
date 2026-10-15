@@ -40,6 +40,7 @@ from src.exchanges.bitget.private_ws_mixin import (
 )
 from src.services.oms.application.inbox_processor import InboxProcessor
 from tests.integration.oms.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 class _StopTest(Exception):

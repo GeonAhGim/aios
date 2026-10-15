@@ -29,6 +29,7 @@ from src.services.safety.legacy_execution_pauser import (
 )
 from src.services.safety.open_order_sweeper import sweep_open_orders
 from tests.integration.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 from tests.unit.services.conftest import _adapters, _seed_execution, _seed_order, _status_of
 
 

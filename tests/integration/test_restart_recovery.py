@@ -28,6 +28,7 @@ from src.services.order_service import repository
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _asyncpg_dsn() -> str:

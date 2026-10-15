@@ -28,6 +28,7 @@ from src.foundation.ems.application.aggregate_parent import (
 from src.foundation.ems.domain.parent_child import AlgoConstraintError, ParentTerminalError
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from tests.integration.oms.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _dsn() -> str:

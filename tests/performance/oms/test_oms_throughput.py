@@ -64,6 +64,7 @@ from tests.performance.oms.conftest import (
     measure_baseline_round_trip_p95_ms,
 )
 from tests.support.oms_outbox_fakes import ScriptedAdapter, allow_gate, submit_payload
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _OUTBOX_TARGET_CMD_PER_SEC = 100.0  # §7.1 운영 목표 — 비차단(print)
 _OUTBOX_BATCH_SIZE = 100

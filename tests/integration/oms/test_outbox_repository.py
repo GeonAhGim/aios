@@ -34,6 +34,7 @@ from src.core.db.conditional_write import ConcurrencyConflictError
 from src.services.oms.adapters.outbox_repository import OutboxRepository, _row_to_outbox_row
 from src.services.oms.ports.repository import OutboxRepoPort
 from tests.integration.oms.conftest import create_test_user, insert_order
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 @pytest.fixture

@@ -32,6 +32,7 @@ from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
 from src.services.order_service import repository as legacy_order_repository
 from src.services.order_service.submit import apply_fill
 from tests.integration.oms.conftest import create_test_tenant, create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def _seed_execution(pool, user_id: UUID) -> int:

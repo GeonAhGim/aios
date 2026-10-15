@@ -67,6 +67,7 @@ from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapability
 from src.services.order_service.gate import GateDecision, GateOutcome, OrderContext
 from tests.integration.conftest import create_test_tenant
 from tests.integration.oms.conftest import insert_order, seed_entity_context
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _MAX_TRANSITION_ROUND_TRIPS = 10
 

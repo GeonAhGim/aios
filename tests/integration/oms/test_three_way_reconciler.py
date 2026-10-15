@@ -44,6 +44,7 @@ from tests.integration.oms._reconciler_test_support import (
     submit_cmd,
 )
 from tests.integration.oms.conftest import create_test_tenant, seed_entity_context
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 class _CallTrackingAdapter(ScriptedAdapter):

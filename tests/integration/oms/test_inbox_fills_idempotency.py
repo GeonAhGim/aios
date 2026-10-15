@@ -21,6 +21,7 @@ from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
 from src.services.oms.domain.errors import IdempotencyDigestMismatchError
 from src.services.oms.ports.repository import FillRepoPort, IdempotencyRepoPort, InboxRepoPort
 from tests.integration.oms.conftest import create_test_user, insert_order
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def test_inbox_repository_satisfies_port():

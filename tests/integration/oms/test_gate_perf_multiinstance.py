@@ -51,12 +51,16 @@ async def test_trigger_guarded_update_latency_within_normalized_budget(pool):
         user_id = await create_test_user(pool)
         order_id = await insert_order(conn, user_id)
 
-        baseline_p95 = await _p95_ms(lambda: conn.fetchval("SELECT 1"))
-        trigger_p95 = await _p95_ms(
-            lambda: conn.execute(
-                "UPDATE orders SET price = price + 1 WHERE order_id = $1", order_id
+        try:
+            baseline_p95 = await _p95_ms(lambda: conn.fetchval("SELECT 1"))
+            trigger_p95 = await _p95_ms(
+                lambda: conn.execute(
+                    "UPDATE orders SET price = price + 1 WHERE order_id = $1", order_id
+                )
             )
-        )
+        finally:
+            # This raw seed has no events; do not leave its version bumps behind.
+            await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
 
     budget_ms = max(30.0, 8.0 * baseline_p95)
     print(  # noqa: T201 — 실측치는 비차단 기록, 게이트는 아래 assert.
@@ -115,14 +119,24 @@ async def test_concurrent_conditional_update_multi_instance_exactly_one_wins(poo
             )
             return result == "UPDATE 1"
 
-    results = await asyncio.gather(*(attempt() for _ in range(n_instances)))
-    assert sum(results) == 1
-
-    async with pool.acquire() as conn:
-        version = await conn.fetchval(
-            "SELECT version FROM orders WHERE order_id = $1", order_id
+    try:
+        # Drain every writer before cleanup, including when one writer fails.
+        results = await asyncio.gather(
+            *(attempt() for _ in range(n_instances)), return_exceptions=True
         )
-    assert version == 1
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        assert sum(results) == 1
+
+        async with pool.acquire() as conn:
+            version = await conn.fetchval(
+                "SELECT version FROM orders WHERE order_id = $1", order_id
+            )
+        assert version == 1
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
 
 
 async def test_concurrent_duplicate_provider_event_replay_exactly_one_wins(pool):

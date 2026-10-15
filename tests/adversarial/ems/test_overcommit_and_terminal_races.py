@@ -51,6 +51,7 @@ from src.services.oms.application.submit_order import OrderSubmitDeniedError
 from src.services.oms.contracts.v1_views import OrderView
 from tests.integration.oms.conftest import create_test_user
 from tests.support.db import create_pool_with_retry
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _CONCURRENT_RUNS = 15

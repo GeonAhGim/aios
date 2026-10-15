@@ -32,6 +32,7 @@ from tests.integration.ems.conftest import (
     _RecordingSubmitter,
 )
 from tests.integration.oms.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 # -- cancel_algo ------------------------------------------------------------------
 

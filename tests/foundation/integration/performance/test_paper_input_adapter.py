@@ -30,6 +30,7 @@ from tests.foundation.integration.performance.conftest import (
     set_reconciliation_state,
 )
 from tests.integration.conftest import create_test_tenant
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _NOW = datetime.now(timezone.utc)
 _PERIOD_START = _NOW - timedelta(days=1)

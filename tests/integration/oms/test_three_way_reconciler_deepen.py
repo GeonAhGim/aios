@@ -43,6 +43,7 @@ from tests.integration.oms._reconciler_test_support import (
     registry,
 )
 from tests.integration.oms.conftest import _asyncpg_dsn, create_test_tenant, seed_entity_context
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 @pytest.mark.perf

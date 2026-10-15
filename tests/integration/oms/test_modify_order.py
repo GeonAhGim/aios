@@ -22,6 +22,7 @@ from src.services.oms.contracts.v1_commands import ModifyOrderCommand
 from src.services.oms.domain.errors import InvalidOrderTransitionError, OrderValidationError
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from tests.integration.oms.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _profile(**overrides: object) -> VenueCapabilityProfile:

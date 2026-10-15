@@ -28,6 +28,7 @@ from src.data.models.trading import OrderSide
 from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
 from tests.integration.oms.conftest import create_test_tenant
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def _seed_execution(pool, user_id: UUID) -> int:

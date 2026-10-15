@@ -19,6 +19,7 @@ from tests.integration._execution_tick_helpers import (
 )
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 @pytest.fixture

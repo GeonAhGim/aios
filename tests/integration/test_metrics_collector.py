@@ -20,6 +20,7 @@ from src.core.safety.metrics_collector import (
     collect_circuit_breaker_metrics,
 )
 from tests.integration.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _asyncpg_dsn() -> str:

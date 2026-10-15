@@ -81,6 +81,7 @@ from tests.performance.pre_trade_latency_support import (
     new_scenario,
     percentile,
 )
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _PRE_TRADE_ROUND_TRIPS = 7  # 모듈 docstring 구성표 — 정확 단언(==)
 _PRE_SUBMIT_ROUND_TRIPS = 8  # 모듈 docstring 구성표 — 정확 단언(==)

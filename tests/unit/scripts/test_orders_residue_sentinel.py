@@ -1,6 +1,6 @@
 """Boundary ordering and fail-closed checks for the worker sentinel."""
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -9,7 +9,12 @@ from tests.support import orders_residue as sentinel
 
 @pytest.fixture
 def scan(monkeypatch):
-    pool = SimpleNamespace(close=AsyncMock())
+    conn = MagicMock()
+    conn.fetch = AsyncMock(return_value=[])
+    conn.transaction.return_value.__aenter__ = AsyncMock()
+    pool = MagicMock()
+    pool.close = AsyncMock()
+    pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
     monkeypatch.setattr(sentinel.asyncpg, "create_pool", AsyncMock(return_value=pool))
     verify = AsyncMock(return_value=SimpleNamespace(mismatches=[]))
     monkeypatch.setattr(sentinel.replay_verify, "verify", verify)
@@ -88,3 +93,26 @@ def test_diagnostic_mode_attributes_each_test(monkeypatch):
     with pytest.raises(StopIteration):
         next(hook)
     check.assert_awaited_once_with("captured", "test teardown after same.py::writer")
+
+
+@pytest.mark.parametrize("field", ["version", "status", "filled_quantity"])
+async def test_eventless_state_mismatch_fails_at_source(scan, monkeypatch, field):
+    pool, _ = scan
+    conn = pool.acquire.return_value.__aenter__.return_value
+    conn.fetch.return_value = [{"order_id": "raw-order"}]
+    monkeypatch.setattr(
+        sentinel.replay_verify, "_order_pair",
+        AsyncMock(return_value=({field: "expected"}, {field: "changed"})),
+    )
+    with pytest.raises(AssertionError, match="eventless.*raw writer.*raw-order"):
+        await sentinel.check_orders("unused", "raw writer")
+    pool.close.assert_awaited_once()
+
+
+async def test_eventless_scan_failure_propagates_and_closes_pool(scan):
+    pool, _ = scan
+    conn = pool.acquire.return_value.__aenter__.return_value
+    conn.fetch.side_effect = ConnectionError("raw scan failure")
+    with pytest.raises(ConnectionError, match="raw scan failure"):
+        await sentinel.check_orders("unused", "raw writer")
+    pool.close.assert_awaited_once()

@@ -66,6 +66,8 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 from src.foundation.risk_gate.domain.models import SafetyScope
 from src.services.oms.application import unknown_resolver
 from tests.integration.oms.conftest import create_test_user
+from tests.support.db import template_database_url
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def _insert_unknown_order(
@@ -367,7 +369,11 @@ def test_pytest_gate_turns_red_when_still_open_guard_is_removed(tmp_path: Path) 
     red(1 failed)로 바뀌는 것까지 확인한다."""
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", _TARGET_TEST]
     repo_root = str(Path.cwd())
-    env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
+    env = dict(
+        os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8",
+        TEST_DATABASE_URL=template_database_url(),
+    )
+    env.pop("PYTEST_XDIST_WORKER", None)
 
     baseline = subprocess.run(
         command,

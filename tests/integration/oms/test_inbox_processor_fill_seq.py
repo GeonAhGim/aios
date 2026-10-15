@@ -25,6 +25,7 @@ from src.services.order_service import repository as legacy_order_repository
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
 from tests.integration.oms.conftest import create_test_tenant
 from tests.integration.oms.test_inbox_processor import _fill_event, _insert_order, _seed_execution
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def test_ingest_two_partial_fills_assigns_distinct_fill_seq_in_ledger(pool):

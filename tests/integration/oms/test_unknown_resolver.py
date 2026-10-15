@@ -24,6 +24,7 @@ from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGa
 from src.foundation.risk_gate.domain.models import SafetyControlState, SafetyScope
 from src.services.oms.application import unknown_resolver
 from tests.integration.oms.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def _insert_unknown_order(

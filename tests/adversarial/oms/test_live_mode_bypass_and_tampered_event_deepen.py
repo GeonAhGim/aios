@@ -99,6 +99,7 @@ from tests.adversarial.oms.test_tampered_provider_event import (
 )
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 # ---------------------------------------------------------------------------
 # Part A -- LIVE-mode gate under a simulated total DB/network outage.

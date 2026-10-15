@@ -49,6 +49,7 @@ from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.foundation.execution_ownership.conftest import create_execution
 from tests.integration.oms.conftest import insert_order
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _INSERT_LEASE_SQL = """
     INSERT INTO execution_leases (execution_id, owner_id, fencing_token, heartbeat_at, expires_at)

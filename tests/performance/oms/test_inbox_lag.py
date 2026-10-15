@@ -70,6 +70,7 @@ from tests.performance.oms.conftest import (
     attach_round_trip_logger,
     measure_baseline_round_trip_p95_ms,
 )
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _SAMPLE_COUNT = 100
 _P99_TARGET_MS = 300.0  # §7.1 운영 목표 — 비차단(print), task-1038/1521 decision

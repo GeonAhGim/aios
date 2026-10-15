@@ -33,6 +33,7 @@ from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application import restart_recovery
 from tests.integration.oms.conftest import create_test_user, insert_order
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 def _past() -> datetime:
