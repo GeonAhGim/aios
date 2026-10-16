@@ -205,10 +205,15 @@ async def test_snapshot_without_intent_key_is_fail_closed_even_for_matching_orde
     """negative — R-35 이전 형식(intent 키 부재) WORM 행은 subject를 증명할 수 없으므로
     주문이 실제로 같은 subject여도 거부한다(I-01 fail-closed, 앱층 `decision_binding`과
     같은 규칙). 첫 결손 키 순서(symbol→side→quantity)로 거부 문구가 정해진다."""
+    order_ids: list[UUID] = []
     legacy = await _tampered_decision(pool, victim, **{key: ... for key in drop})
-    async with pool.acquire() as conn:
-        with _rejected(field):
-            await _insert(conn, victim["user_id"], legacy, execution_id=victim["execution_id"])
+    try:
+        async with pool.acquire() as conn:
+            with _rejected(field):
+                await _insert(conn, victim["user_id"], legacy, execution_id=victim["execution_id"])
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
 
 
 @pytest.mark.parametrize(
