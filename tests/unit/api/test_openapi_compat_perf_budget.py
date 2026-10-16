@@ -24,8 +24,9 @@ import pytest
 
 import scripts.check_openapi_compat as compat_module
 from scripts.check_openapi_compat import find_violations
+from tests.support.perf_budget import PerfBudget
 
-_V1_SNAPSHOT_DIFF_P95_BUDGET_SECONDS = 0.3  # DSL 컴파일 300ms 예산 차용(모듈 docstring 참조)
+_V1_SNAPSHOT_DIFF_P95_BUDGET_MS = 300.0  # DSL 컴파일 300ms 예산 차용(모듈 docstring 참조)
 _V1_SNAPSHOT_PATH = Path(__file__).resolve().parents[3] / "contracts" / "openapi" / "v1.json"
 
 
@@ -42,17 +43,18 @@ def _load_v1_snapshot() -> dict | None:
 
 
 @pytest.mark.perf
-def test_find_violations_p95_latency_within_budget_for_real_v1_snapshot() -> None:
+def test_find_violations_p95_latency_within_budget_for_real_v1_snapshot(
+    perf_budget: PerfBudget,
+) -> None:
     snapshot = _load_v1_snapshot()
     if snapshot is None:
         return
-    samples = []
-    for _ in range(30):
-        started = time.perf_counter()
-        find_violations(snapshot, snapshot)
-        samples.append(time.perf_counter() - started)
-
-    assert _p95(samples) < _V1_SNAPSHOT_DIFF_P95_BUDGET_SECONDS
+    samples = perf_budget.samples(lambda: find_violations(snapshot, snapshot), n=30, batch=8)
+    cpu_ms_samples = [s.cpu_ms for s in samples]
+    p95 = _p95(cpu_ms_samples)
+    assert p95 < _V1_SNAPSHOT_DIFF_P95_BUDGET_MS, (
+        f"p95 cpu={p95:.3f}ms exceeds budget {_V1_SNAPSHOT_DIFF_P95_BUDGET_MS:.3f}ms"
+    )
 
 
 def _busy_wait(seconds: float) -> None:
@@ -66,6 +68,7 @@ def _busy_wait(seconds: float) -> None:
 
 @pytest.mark.perf
 def test_perf_budget_guard_fails_on_injected_leaf_comparison_delay(
+    perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # 위 단언이 상시-녹색이 아님을 증명 — leaf 단위 비교(`_leaf_violations`,
@@ -82,9 +85,6 @@ def test_perf_budget_guard_fails_on_injected_leaf_comparison_delay(
 
     monkeypatch.setattr(compat_module, "_leaf_violations", _slow_leaf_violations)
 
-    started = time.perf_counter()
-    find_violations(snapshot, snapshot)
-    elapsed = time.perf_counter() - started
-
+    sample = perf_budget.sample(lambda: find_violations(snapshot, snapshot), batch=1)
     with pytest.raises(AssertionError):
-        assert elapsed < _V1_SNAPSHOT_DIFF_P95_BUDGET_SECONDS
+        assert sample.cpu_ms < _V1_SNAPSHOT_DIFF_P95_BUDGET_MS
