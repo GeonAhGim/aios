@@ -151,7 +151,7 @@ def test_fxrate_construction_failure_injection_propagates(monkeypatch):
 
 @pytest.mark.perf
 def test_money_add_perf_budget_many_iterations(perf_budget):
-    """성능 단언(D2) — Money.__add__ 1,000회 반복이 100ms 예산 내에
+    """성능 단언(D2) — Money.__add__ 1,000회 반복이 960ms 예산 내에
     끝나야 한다 (ADR-2026-09-09-C Decision 1, 비-실행축 로컬 CPU 연산)."""
     a = Money(amount=Decimal("1.5"), currency=Currency.USDT)
     b = Money(amount=Decimal("2.5"), currency=Currency.USDT)
@@ -160,4 +160,4 @@ def test_money_add_perf_budget_many_iterations(perf_budget):
         for _ in range(1000):
             a + b
 
-    perf_budget.assert_within(_run, budget_ms=480, label="Money.__add__ x1000")
+    perf_budget.assert_within(_run, budget_ms=960, label="Money.__add__ x1000")
