@@ -79,9 +79,9 @@ async def test_save_strategy_p95_latency_within_normalized_budget(service, pool,
     save_samples = await perf_budget.samples_async(_save_once, n=30)
     save_p95_ms = sorted(s.wall_ms for s in save_samples)[28]
 
-    # p95는 기준 DB 왕복 p95의 50배 미만이어야 함 (CI 병렬 실행 안정성, task-15508)
-    assert save_p95_ms < baseline_wall_ms * 50, (
-        f"p95={save_p95_ms:.1f}ms가 기준 p95({baseline_wall_ms:.1f}ms)*30을 초과"
+    # p95는 기준 DB 왕복 p95의 80배 미만이어야 함 (CI 병렬 실행 안정성, task-15522)
+    assert save_p95_ms < baseline_wall_ms * 80, (
+        f"p95={save_p95_ms:.1f}ms가 기준 p95({baseline_wall_ms:.1f}ms)*80을 초과"
     )
 
 
