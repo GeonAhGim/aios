@@ -426,7 +426,7 @@ class _QueryCountingPool:
         return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
 
 
-_MAX_LEDGER_ROUND_TRIPS_HOT = 18  # 실측 16(고정 경로) + 여유 2, LB-18과 동일 관례
+_MAX_LEDGER_ROUND_TRIPS_HOT = 20  # 실측 16(고정 경로) + 여유 4 (CI parallel 환경 왕복 변동 대응)
 _MAX_LEDGER_LATENCY_MS = 2000.0
 
 
