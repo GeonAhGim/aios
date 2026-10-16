@@ -1,6 +1,7 @@
-"""GetDrawings 쿼리 — `create_layout()`이 항상 빈 문서를 함께 만들어 두므로
-`get_drawing_set()`이 None을 반환하는 경우는 이 리프의 정상 경로에 없다
-(레이아웃 존재를 이미 `load_owned_layout()`으로 확인했으므로)."""
+"""GetDrawings query — `create_layout()` always creates an empty document alongside
+the layout, so `get_drawing_set()` never returns None on the normal path here
+(since `load_owned_layout()` already confirmed the layout exists)."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -11,8 +12,9 @@ from src.foundation.charting.ports.repository import ChartingRepository
 
 
 class DrawingSetMissingError(Exception):
-    """정상 경로에서는 발생하지 않는다(위 docstring) — 발생하면 `create_layout()`
-    불변조건이 깨진 것이므로 조용히 빈 문서로 흘려보내지 않고 예외로 드러낸다."""
+    """Should not occur on the normal path (see module docstring) — if raised,
+    the `create_layout()` invariant is broken, so surface it as an exception
+    rather than silently swallowing it into an empty document."""
 
 
 async def get_drawings(
