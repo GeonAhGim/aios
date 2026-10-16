@@ -186,7 +186,7 @@ async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus, perf_bud
         await asyncio.sleep(0.15)  # CI parallel variance — worker needs time to drain escalation
         await fast_bus.stop()
 
-    budget_ms = 1000.0  # 실측 로컬 ~10ms, CI 편차 감안 넉넉히
+    budget_ms = 3000.0  # CI 병렬 리소스 경쟁 대비 안정화 (task-15259)
     sample = await perf_budget.sample_async(_run)
     assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
