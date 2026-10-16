@@ -1,4 +1,4 @@
-"""LA-12 — yaml 파일 → `CalendarDay` 리스트 어댑터.
+"""LA-12 — YAML file → `CalendarDay` list adapter.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.2 LA-12, §10 R4.
 ADR-2026-09-06-H D3 (task-1768): exchange calendars are built in-house —
@@ -13,10 +13,12 @@ the `md_venue_calendar_day.source` column (LA-10, VARCHAR(500)) — this
 keeps the source and collection time together in one place without a
 separate column.
 
-정규 개장일은 목록에 없다 — `holidays`(휴장)와 `early_closes`(조기폐장)만
-예외로 적는다. 정규 개장 여부는 `known_venues.KNOWN_SESSIONS`(LA-3)의
-요일 규칙으로 계산되므로 여기서 다시 나열할 필요가 없다.
+Regular trading days are not listed here — only `holidays` (closures) and
+`early_closes` (early closes) are recorded as exceptions. Regular trading
+status is computed from the day-of-week rules in
+`known_venues.KNOWN_SESSIONS` (LA-3), so no re-listing is needed.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, time
@@ -40,14 +42,18 @@ def load_calendar(path: Path) -> list[CalendarDay]:
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
-        raise CalendarSourceError(f"최상위 구조가 dict가 아님: {path}")
+        raise CalendarSourceError(f"Top-level structure is not dict: {path}")
 
     source = data.get("source")
     if not source:
         raise CalendarSourceError(f"source 필드 없음(§10 R4 UNVERIFIED 표기 필수): {path}")
     collected_at = data.get("collected_at")
     if not collected_at:
-        raise CalendarSourceError(f"collected_at 필드 없음(출처·수집 시각 동시 기록 필수): {path}")
+        raise CalendarSourceError(
+            "collected_at field missing "
+            "(source and collection time must be recorded together): "
+            f"{path}"
+        )
     source = f"{source} | collected_at={collected_at}"
 
     venue = _parse_venue(data.get("venue"))
@@ -87,7 +93,7 @@ def _parse_venue(raw: Any) -> Venue:
     try:
         return Venue(raw)
     except ValueError as exc:
-        raise CalendarSourceError(f"알 수 없는 venue: {raw!r}") from exc
+        raise CalendarSourceError(f"Unknown venue: {raw!r}") from exc
 
 
 def _parse_date(raw: Any) -> date:
