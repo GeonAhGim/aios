@@ -56,6 +56,54 @@ application/compute_statement.py       251
 
 ---
 
+# 파일 범위 분할 제안: task-12301 (task-15114 triage_note)
+
+## 배경
+
+- task-12301은 `files: ["tests/perf/oms"]`로 배정됐고, `hold=true` / `hold_reason=local_file_scope` / `needs_split=true` 상태로 멈춰 있다.
+- `tests/perf/oms` 디렉터리 전체를 가리키는 glob이라 "한 리프 = 한 범위" 원칙에 맞지 않는다.
+- task-12301의 spec: "CI 실패 카드 — pytest :: tests/perf/oms" — 첫 오류는 `_drain_shared_queues` ImportError였다.
+- 실제 저장소에는 아래 5개 `.py` 파일(`__init__.py` 1개 제외, 총 942 LOC)이 존재한다.
+
+## 실제 파일 목록 (tests/perf/oms/)
+
+```
+__init__.py                                    0
+conftest.py                                   23
+test_perf_inbox_processing.py               240
+test_perf_outbox_dispatch.py                167
+test_perf_submit_internal.py                238
+test_perf_throughput.py                     274
+```
+
+## 분할안 — 각 테스트 파일이 독립된 책임(측정 대상)을 갖도록 쪼개는 것
+
+`tests/perf/oms/` 디렉터리는 이미 4개 테스트 파일로 명확히 분리되어 있다. 각 파일은
+서로 다른 OMS 측정 지점(inbox/outbox/제출/처리량)을 재며, `conftest.py`는 공용 픽스처다.
+
+| 분할 조각 | files | 근거 |
+|---|---|---|
+| perf-oms-conftest | `conftest.py` | `tests.performance.oms.conftest`에서 3개 픽스처 재노출(23줄). 공유 의존성. |
+| perf-oms-inbox | `test_perf_inbox_processing.py` | inbox 처리 지연 p99 ≤ 300ms + 실패주입 + 동시성 리플레이 stress (240줄) |
+| perf-oms-outbox | `test_perf_outbox_dispatch.py` | outbox 지연 p99 ≤ 200ms + 어댑터 실패주입 (167줄) |
+| perf-oms-submit | `test_perf_submit_internal.py` | 제출 내부 경로 p99 ≤ 50ms + entity_repo 실패주입 + 왕복 수 증가 감지 (238줄) |
+| perf-oms-throughput | `test_perf_throughput.py` | outbox 100 cmd/s + inbox 500 ev/s 처리량 + 배치 격리 실패주입 (274줄) |
+
+## 제안 요약
+
+- `tests/perf/oms/*` 1개 glob → 위 5개 조각(실질적 코드 4개 파일 + 공용 conftest)으로 분할.
+- 각 조각은 이미 독립된 pytest 파일이고 서로 다른 OMS 측정 지점을 재므로 추가 설계 없이
+  개별 리프로 배정 가능.
+- `__init__.py`(0줄)는 분할 시 고려하지 않음(빈 파일).
+- 조각 경계는 기존 파일 경계를 그대로 따른다.
+
+## 범위 밖 (이 task가 하지 않은 것)
+
+- task-12301의 hold 해제, 재큐, status 변경 — 수행하지 않음.
+- 소스 코드 수정 — 수행하지 않음(읽기/라인수 확인만).
+
+---
+
 # 파일 범위 분할 제안: task-12055 (task-12057 triage_note)
 
 ## 조사 결과
