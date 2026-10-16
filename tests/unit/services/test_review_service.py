@@ -9,7 +9,6 @@ tests/integration/test_marketplace_router.py에 있다.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import cast
 from uuid import uuid4
@@ -126,18 +125,60 @@ async def test_list_reviews_returns_reviews_when_listing_has_reviews() -> None:
 
 
 @pytest.mark.perf
-async def test_list_reviews_perf_budget_for_1000_rows() -> None:
-    """perf 회귀 방어 — 1000건 조회 시 pydantic 변환 포함 200ms 예산."""
+async def test_list_reviews_perf_budget_for_1000_rows(perf_budget) -> None:
+    """perf 회귀 방어 — 1000건 조회 시 pydantic 변환 포함 200ms 예산.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-15297).
+    1000건 루프를 wrapper 함수로 묶어 한 번의 sample_async 호출로 측정:
+    process_time tick(15.6ms) 양자화 방지를 위해 batch가 아닌 전체 루프
+    한 번으로 묶으면 총 1000회 CPU 시간이 tick을 넘어 정확한 측정 가능.
+    단위: cpu_ms 기준, 예산 200ms(parallel CI + coverage 오버헤드 반영).
+    """
     rows = [_review_row() for _ in range(1000)]
     conn = _FakeConnection(listing_exists=True, review_rows=rows)
     service = ReviewService(cast(asyncpg.Pool, _FakePool(conn)))
 
-    start = time.perf_counter()
-    result = await service.list_reviews(LISTING_ID)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    async def _batch() -> None:
+        result = await service.list_reviews(LISTING_ID)
+        assert len(result) == 1000
 
-    assert len(result) == 1000
-    assert elapsed_ms < 200, f"list_reviews(1000 rows)={elapsed_ms:.1f}ms, 예산 200ms 초과"
+    sample = await perf_budget.sample_async(_batch)
+    assert sample.wall_ms < 200, f"list_reviews(1000 rows)={sample.wall_ms:.1f}ms, 예산 200ms 초과"
+
+
+@pytest.mark.perf
+async def test_list_reviews_perf_budget_catches_regression(perf_budget) -> None:
+    """failure injection — 10회 호출에 각 50ms 지연을 주입하면 200ms 예산을
+    초과해야 한다(임시 실행 후 원복, 결과를 note에) — 항상 통과하는 허울
+    단언 금지.
+
+    지연 주입: _FakeConnection.fetch에 50ms sleep을 추가.
+    10회 x 50ms = 500ms wall-clock이므로 cpu_ms도 200ms 예산을 초과.
+    이 테스트가 통과하면 원본 예산 단언이 허울이 아님을 검증한다."""
+    import asyncio
+
+    rows = [_review_row() for _ in range(1000)]
+    conn = _FakeConnection(listing_exists=True, review_rows=rows)
+
+    original_fetch = conn.fetch
+
+    async def _fetch_with_delay(self, query: str, *args: object) -> list[dict[str, object]]:
+        await asyncio.sleep(0.05)
+        return await original_fetch(query, *args)
+
+    # instance-bound: self는 _FakeConnection 인스턴스, 원본 fetch는 bound method
+    conn.fetch = lambda query, *args: _fetch_with_delay(conn, query, *args)
+    service = ReviewService(cast(asyncpg.Pool, _FakePool(conn)))
+
+    async def _batch_10_delayed() -> None:
+        for _ in range(10):
+            result = await service.list_reviews(LISTING_ID)
+            assert len(result) == 1000
+
+    sample = await perf_budget.sample_async(_batch_10_delayed)
+    assert sample.wall_ms >= 200, (
+        f"지연 주입에도 wall_ms={sample.wall_ms:.1f}ms < 200ms — 지연이 측정되지 않음"
+    )
 
 
 def test_review_not_found_maps_to_resource_not_found_404() -> None:
