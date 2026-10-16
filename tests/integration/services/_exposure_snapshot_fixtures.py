@@ -107,20 +107,28 @@ async def _insert_order(
     exchange: str,
     strategy_id: str,
     created_at: datetime | None = None,
-) -> None:
+) -> UUID:
+    """Insert an order and return its order_id (UUID PK).
+
+    Returns the generated order_id so callers can track and clean up
+    eventless orders (orders_residue.py sentinel, task-15406).
+    """
+    client_order_id = f"order-{uuid.uuid4().hex}"
     async with pool.acquire() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             """
             INSERT INTO orders
                 (user_id, client_order_id, strategy_id, strategy_version, symbol, exchange,
                  side, order_type, quantity, execution_id, created_at)
             VALUES ($1, $2, $3, '1.0.0', $4, $5, 'BUY', 'MARKET', 1, $6, COALESCE($7, now()))
+            RETURNING order_id
             """,
             user_id,
-            f"order-{uuid.uuid4().hex}",
+            client_order_id,
             strategy_id,
             symbol,
             exchange,
             execution_id,
             created_at,
         )
+    return row["order_id"]

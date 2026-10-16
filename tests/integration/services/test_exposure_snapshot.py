@@ -203,38 +203,60 @@ async def test_unknown_symbol_goes_to_unknown_asset_class_bucket(pool):
 
 
 async def test_trades_counts_and_safety_fields_are_populated(pool):
+    """DoD (3) — trades_1h/24h 카운트 및 safety 필드 채움.
+
+    eventless orders 잔재 방지: 삽입한 order_id를 추적해 finally에서 삭제한다.
+    참고: tests/integration/oms/test_gate_perf_residue_cleanup.py 패턴.
+    """
     user_id = await create_test_user(pool)
     execution_id = await _create_execution(pool, user_id, exchange="bitget")
     strategy_id = "strat-trades"
-    await _insert_order(
-        pool,
-        user_id=user_id,
-        execution_id=execution_id,
-        symbol="BTC/USDT",
-        exchange="bitget",
-        strategy_id=strategy_id,
-    )
-    await _insert_order(
-        pool,
-        user_id=user_id,
-        execution_id=execution_id,
-        symbol="BTC/USDT",
-        exchange="bitget",
-        strategy_id=strategy_id,
-        created_at=datetime.now(timezone.utc) - timedelta(hours=25),
-    )
 
-    async with pool.acquire() as conn:
-        snapshot = await load_exposure_snapshot(
-            conn,
-            user_id=user_id,
-            execution_id=execution_id,
-            symbol="BTC/USDT",
-            strategy_id=strategy_id,
-            provider="bitget",
-            prices={"BTC/USDT": Decimal("50000")},
+    # Track order IDs for cleanup (orders_residue.py sentinel)
+    order_ids: list = []
+
+    try:
+        order_ids.append(
+            await _insert_order(
+                pool,
+                user_id=user_id,
+                execution_id=execution_id,
+                symbol="BTC/USDT",
+                exchange="bitget",
+                strategy_id=strategy_id,
+            )
+        )
+        order_ids.append(
+            await _insert_order(
+                pool,
+                user_id=user_id,
+                execution_id=execution_id,
+                symbol="BTC/USDT",
+                exchange="bitget",
+                strategy_id=strategy_id,
+                created_at=datetime.now(timezone.utc) - timedelta(hours=25),
+            )
         )
 
-    assert snapshot.trades_1h == 1
-    assert snapshot.trades_24h == 1
-    assert snapshot.cb_level == "normal"
+        async with pool.acquire() as conn:
+            snapshot = await load_exposure_snapshot(
+                conn,
+                user_id=user_id,
+                execution_id=execution_id,
+                symbol="BTC/USDT",
+                strategy_id=strategy_id,
+                provider="bitget",
+                prices={"BTC/USDT": Decimal("50000")},
+            )
+
+        assert snapshot.trades_1h == 1
+        assert snapshot.trades_24h == 1
+        assert snapshot.cb_level == "normal"
+    finally:
+        # Clean up eventless orders to satisfy orders_residue.py sentinel
+        if order_ids:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM orders WHERE order_id = ANY($1::uuid[])",
+                    order_ids,
+                )
