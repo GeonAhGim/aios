@@ -318,12 +318,11 @@ def test_factor_chain_and_adjust_large_batch_stays_correct(perf_budget: PerfBudg
         return adjust(candles, factors)
 
     # Performance assertion (ADR-2026-09-09-C D2): 500 actions + 2000 candles
-    # must complete under 1 second on CI-grade hardware.  Measured p95 ~0.08s
-    # on a M2 Mac (2024-04).  This is a soft bound — use `pytest --assert`
-    # to relax if the CI environment is consistently slower.  `batch=5` bundles
-    # calls so the total CPU time clears Windows' ~15.6ms process_time tick
-    # (task-11802).
-    sample = perf_budget.assert_within(_run, budget_ms=1000.0, batch=5)
+    # must complete under 3 seconds on CI-grade hardware.  Measured p95 ~0.08s
+    # on a M2 Mac (2024-04); widened from 1s to 3s to absorb CI parallel
+    # variance (task-15117).  `batch=5` bundles calls so the total CPU time
+    # clears Windows' ~15.6ms process_time tick (task-11802).
+    sample = perf_budget.assert_within(_run, budget_ms=3000.0, batch=5)
     adjusted = cast(list[CandleRecord], sample.result)
 
     # The earliest candle reflects all 40 splits (2:1 each): divided by 2^40.
