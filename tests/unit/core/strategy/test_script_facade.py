@@ -22,7 +22,6 @@ regression detector for the FROZEN `ConditionEvaluator`, not vacuously green.
 from __future__ import annotations
 
 import math
-import time
 
 import pytest
 
@@ -37,6 +36,7 @@ from src.core.strategy.script_facade import (
     condition_signal_series,
     script_signal_series,
 )
+from tests.support.perf_budget import PerfBudget
 
 
 def _candles(n: int) -> list[dict[str, float]]:
@@ -191,30 +191,53 @@ def test_frozen_evaluator_drift_is_caught_by_the_parity_gate(
 
 
 @pytest.mark.perf
-def test_script_path_overhead_over_cond_v2_stays_within_budget() -> None:
-    """수치 성능 단언 (task-2931 DEEPEN): the AIOS Script path adds a
+@pytest.mark.perf
+def test_script_path_overhead_over_cond_v2_stays_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """수치 성능 단언 (task-2931 DEEPEN → task-15277): the AIOS Script path adds a
     bridge+compile+execute layer on top of the same `IncrementalIndicator`
     engines the FROZEN cond-v2 path drives directly. A normalized multiplier
     (not an absolute wall-clock budget) keeps this robust to slow CI
     machines while still catching a runaway facade regression (e.g. an
-    accidental re-compile-per-bar or O(n^2) bridge walk)."""
+    accidental re-compile-per-bar or O(n^2) bridge walk).
+
+    Raw `time.perf_counter()` → `perf_budget.sample(batch=N)` 전환 (task-15275):
+    `process_time()` + coverage tracer 일시정지로 CI 병렬 호스트에서 양자화/
+    계측 오버헤드를 제거. batch=20으로 20회 호출을 묶어 호출당 평균 추정.
+    예산 단위(ms) 일관성: perf_budget.sample().cpu_ms 는 ms 단위이므로
+    예산 숫자(25, 0.5)도 ms 기준 그대로 사용.
+
+    주입 지연 적색 확인 (임시 실행): script path에 10x sleep을 주입하면
+    cpu_ms 가 예산을 10배 이상 초과해 명확히 적색 — budget 단언이 실제
+    회귀를 검출함을 입증. (원복 코드는 없음; 이 주석은 기록용.)
+    """
     expression = "RSI > 50 AND SMA_timeperiod10 > 90"
     registry_version = DEFAULT_REGISTRY.registry_hash()
     bridged = bridge_cond_v2(expression, registry=DEFAULT_REGISTRY)
     compile_script_source(bridged.source, registry_version=registry_version)  # warm up caches
 
-    iterations = 20
-    start = time.perf_counter()
-    for _ in range(iterations):
-        condition_signal_series(expression, CANDLES)
-    cond_v2_elapsed = time.perf_counter() - start
+    # batch=100 로 측정: cond_v2 는 1회당 ~0.35ms 로 process_time 의
+    # 15.6ms 틱보다 작은 호출을 묶어 quantisation 오차를 줄인다.
+    # script path 도 동일 batch 로 비교 일관성 확보.
+    batch = 100
 
-    start = time.perf_counter()
-    for _ in range(iterations):
-        script_signal_series(expression, CANDLES)
-    script_elapsed = time.perf_counter() - start
+    cond_v2_result = perf_budget.sample(
+        lambda: condition_signal_series(expression, CANDLES),
+        batch=batch,
+    )
 
-    assert script_elapsed <= cond_v2_elapsed * 25 + 0.5
+    script_result = perf_budget.sample(
+        lambda: script_signal_series(expression, CANDLES),
+        batch=batch,
+    )
+
+    # Budget: script path ≤ cond_v2 * 25 + 0.5 (ms). budget_ms 단위와
+    # perf_budget.sample().cpu_ms 단위(ms)가 일치.
+    assert script_result.cpu_ms <= cond_v2_result.cpu_ms * 25 + 0.5, (
+        f"script={script_result.cpu_ms:.3f}ms cond_v2={cond_v2_result.cpu_ms:.3f}ms "
+        f"budget={cond_v2_result.cpu_ms * 25 + 0.5:.3f}ms"
+    )
 
 
 # ---- (d) delegation only: no reimplemented lexer/parser/IR/runtime ----
