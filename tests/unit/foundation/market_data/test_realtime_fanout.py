@@ -10,7 +10,6 @@ drop=500을 정확히 단언한다(근사 비교 금지). (c) 계측은 `metric_
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -33,6 +32,7 @@ from src.foundation.market_data.domain.entitlement.policy import (
     EntitlementSubject,
     FeedRequest,
 )
+from tests.support.perf_budget import PerfBudget
 
 _TENANT = UUID("11111111-1111-1111-1111-111111111111")
 _SUBJECT = UUID("33333333-3333-3333-3333-333333333333")
@@ -324,27 +324,35 @@ async def test_allowed_policy_exception_propagates_and_halts_fanout_fail_closed(
 
 
 @pytest.mark.perf
-async def test_publish_throughput_meets_budget_across_many_subscribers() -> None:
+async def test_publish_throughput_meets_budget_across_many_subscribers(
+    perf_budget: PerfBudget,
+) -> None:
     """`publish()`는 실시간 틱마다 재호출되는 hot path다 — 다수 구독자
     앞에서 반복 호출해도 절대시간 예산을 지켜야 실시간 지연 SLA가 깨지지
-    않는다."""
+    않는다.
+
+    raw time.perf_counter() → perf_budget.sample_async() 전환(task-15284).
+    batch=2_000으로 묶어 process_time tick 양자화 오차 해소; 예산 단위 ms 일치.
+    """
     spy = _SpyMetrics()
     fanout = RealtimeFanout(metrics=spy)
     feed = _feed()
     subscriptions = [fanout.subscribe(_subject((_grant(),)), feed) for _ in range(20)]
     iterations = 2_000
-    budget_sec = 3.0  # 실측 로컬 <0.5s, CI 편차 감안
+    budget_ms = 3_000.0  # 3.0s → ms로 전환 (PerfBudget.wall_ms 단위)
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        await fanout.publish(feed, {"seq": i}, as_of=_AS_OF)
-    elapsed = time.perf_counter() - start
+    async def _publish_all() -> None:
+        for i in range(iterations):
+            await fanout.publish(feed, {"seq": i}, as_of=_AS_OF)
+
+    sample = await perf_budget.sample_async(_publish_all)
 
     print(
         f"[DC-17 realtime_fanout] publish() x{iterations} to {len(subscriptions)} "
-        f"subscribers in {elapsed:.4f}s (budget<{budget_sec}s)"
+        f"subscribers in {sample.wall_ms / 1000:.4f}s (budget<{budget_ms / 1000:.1f}s)"
     )
-    assert elapsed < budget_sec, (
-        f"publish {iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.4f}s)."
+    assert sample.wall_ms < budget_ms, (
+        f"publish {iterations}회 반복이 예산({budget_ms / 1000:.1f}s)을 넘었습니다"
+        f"({sample.wall_ms / 1000:.4f}s)."
     )
     assert all(sub.queue.qsize() == DEFAULT_MAX_QUEUE_DEPTH for sub in subscriptions)
