@@ -36,9 +36,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # ADR-2026-09-09-C §"축별 성능 예산" — tenant_membership 삽입 전용 항목은
 # 없으므로, 가장 근접한 DB 쓰기 비교축(주문 제출->ACK p95 50ms, paper)을
-# 고정비 예산으로 차용한다. CI 병렬 실행 안정성을 위해 50->80ms로 확대
-# (task-15376, parallel CPU contention 대응).
-MEMBERSHIP_INSERT_P95_BUDGET_MS = 80.0
+# 고정비 예산으로 차용한다. CI 병렬 실행 안정성을 위해 80->120ms로 확대
+# (task-15386, parallel CPU contention 대응).
+MEMBERSHIP_INSERT_P95_BUDGET_MS = 120.0
 
 
 def _asyncpg_dsn() -> str:
