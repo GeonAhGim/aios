@@ -3469,3 +3469,37 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 다음 동일 경보 처리: 위 선례들을 인용해 즉시 비회귀로 분류한다. 근본 수정(ops 캡처 레이어
   misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽 별도 요청이
   필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
+
+## task-12311 — esc-ci-pytest.json 재발, task-11982/12014/12038/12047/12223와 동형, 비회귀
+  재확인 (2026-10-16)
+
+- task-12311 spec 본문(`[pytest]  (CREATED) — missing or reordered event.` + 반복되는
+  `replay_verify: order_id=... skipped -- pre-cutover order, event history incomplete (not an
+  FA-16 wiring guarantee): ... seq=... from_status=UNKNOWN/SUBMITTED/VALIDATED/ACKNOWLEDGED !=
+  folded status so far (CREATED) — missing or reordered event.` 10개 order_id 블록)은
+  task-11982/12014/12038/12047/12223와 글자 단위로 동일한 패턴이다 — `scripts/replay_verify.py
+  ::_order_pair`가 사전-cutover 주문의 깨진 이벤트 체인을 의도적으로 skip하며 stderr에 남기는
+  설계된 진단 문구(task-2173, `src/core/eventstore/projections/orders.py::EventChainBrokenError`
+  메시지 포맷과 글자 단위로 일치)이고, FAILED 신호가 아니다.
+- HEAD(`edeb59e5e`, "fix(tests): orders 잔여물 발생원 격리와 이벤트 없는 주문 감시", task-11513)를
+  `git show --stat -- src/`로 확인한 결과 `src/` 변경이 전혀 없다 — 전부 `tests/`와 `docs/`
+  파일(오토유즈 teardown 픽스처 전파, orders 잔여물 격리 지원 모듈)뿐이며, OMS/eventstore 쓰기
+  경로나 `scripts/replay_verify.py` 자체를 건드리지 않는다. `git log --oneline -10 -- src/core/
+  eventstore/ scripts/replay_verify.py "src/foundation/*/domain/" src/services/execution_loop
+  src/foundation/paper_control tests/perf/oms/`로 더 넓게 확인해도 가장 최근 관련 커밋은
+  paper_control 킬스위치 멱등성 수정(task-10780, 이미 반영됨)과 L4-28 D3 증빙 추가뿐이며 새
+  회귀를 만들 변경이 없다.
+- 로컬 재현: `tests/integration/eventstore/` + `tests/adversarial/eventstore/` +
+  `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` 전체 —
+  **98 passed in 83.83s, exit=0**, stdout에 spec과 글자 단위로 동일한 "skipped -- pre-cutover
+  order ... missing or reordered event." 라인이 green 실행에서도 그대로 반복 출력됨을 재확인
+  했다. HEAD가 변경한 orders 잔여물 격리 테스트 집합도 별도로 확인: `tests/unit/scripts/
+  test_orders_residue_sentinel.py` + `test_raw_order_isolation.py` + `tests/adversarial/oms/
+  test_orders_residue_source.py` — **15 passed in 11.16s, exit=0**.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: spec에
+  인용된 문구는 설계된 성공-경로 로그이고 관련 스위트는 로컬에서 100% green이다. D2: N/A(실행
+  코드 변경 없이 기존에 확정된 비회귀를 재확인하는 문서 리프, task-12039/12047/12223와 동일
+  선례).
+- 다음 동일 경보 처리: 위 선례들을 인용해 즉시 비회귀로 분류한다. 근본 수정(ops 캡처 레이어
+  misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽 별도 요청이
+  필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
