@@ -225,9 +225,16 @@ async def test_present_but_invalid_intent_value_is_check_violation(pool, victim,
     """키가 있는데 값이 못 쓰는 경우 — 데이터 오류(22P02)가 새어 나오지 않고 같은
     check_violation으로 거부된다(호출부가 한 예외 클래스만 다루면 된다)."""
     tampered = await _tampered_decision(pool, victim, **{key: value})
-    async with pool.acquire() as conn:
-        with _rejected(key):
-            await _insert(conn, victim["user_id"], tampered, execution_id=victim["execution_id"])
+    order_ids: list[UUID] = []
+    try:
+        async with pool.acquire() as conn:
+            with _rejected(key):
+                await _insert(
+                    conn, victim["user_id"], tampered, execution_id=victim["execution_id"]
+                )
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
 
 
 async def test_quantity_is_compared_numerically_not_textually(pool, victim):
