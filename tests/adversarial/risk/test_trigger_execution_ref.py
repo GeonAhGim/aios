@@ -106,23 +106,32 @@ async def test_i10_db_layer_rejects_allow_transferred_to_other_execution_symbol_
     """결정은 exec:X·BTC/USDT·BUY·0.01의 ALLOW. 공격자는 같은 tenant의 exec:Y·
     ETH/USDT·100 주문에 그 decision_id를 직접 INSERT한다(51be3c7 재현 원문).
     이전 트리거(93c0e7f6b8d9)는 통과시켰다 — 지금은 execution_ref에서 거부."""
+    order_ids: list[UUID] = []
     exec_y = await seed_execution(pool, victim["user_id"])
-    async with pool.acquire() as conn:
-        with _rejected("execution_ref"):
-            await _insert(
-                conn,
-                victim["user_id"],
-                victim["decision_id"],
-                execution_id=exec_y,
-                symbol="ETH/USDT",
-                quantity=Decimal("100"),
+    try:
+        async with pool.acquire() as conn:
+            with _rejected("execution_ref"):
+                await _insert(
+                    conn,
+                    victim["user_id"],
+                    victim["decision_id"],
+                    execution_id=exec_y,
+                    symbol="ETH/USDT",
+                    quantity=Decimal("100"),
+                )
+            count_sql = "SELECT count(*) FROM orders WHERE user_id = $1"
+            assert await conn.fetchval(count_sql, victim["user_id"]) == 0
+            # 대조군: 결정이 결속된 바로 그 subject는 통과한다.
+            oid = await _insert(
+                conn, victim["user_id"], victim["decision_id"], execution_id=victim["execution_id"]
             )
-        count_sql = "SELECT count(*) FROM orders WHERE user_id = $1"
-        assert await conn.fetchval(count_sql, victim["user_id"]) == 0
-        # 대조군: 결정이 결속된 바로 그 subject는 통과한다.
-        assert await _insert(
-            conn, victim["user_id"], victim["decision_id"], execution_id=victim["execution_id"]
-        )
+            order_ids.append(oid)
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM orders WHERE order_id = ANY($1)",
+                order_ids,
+            )
 
 
 @pytest.mark.parametrize(
@@ -205,10 +214,16 @@ async def test_present_but_invalid_intent_value_is_check_violation(pool, victim,
 async def test_quantity_is_compared_numerically_not_textually(pool, victim):
     """`'0.0100'` = `0.01` — Decimal 직렬화 표기 차이로 정직한 주문을 거부하면 안 된다."""
     decision_id = await _tampered_decision(pool, victim, quantity="0.0100")
-    async with pool.acquire() as conn:
-        assert await _insert(
-            conn, victim["user_id"], decision_id, execution_id=victim["execution_id"]
-        )
+    order_ids: list[UUID] = []
+    try:
+        async with pool.acquire() as conn:
+            oid = await _insert(
+                conn, victim["user_id"], decision_id, execution_id=victim["execution_id"]
+            )
+            order_ids.append(oid)
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
 
 
 # --- UPDATE 우회 -------------------------------------------------------------------
@@ -231,20 +246,27 @@ async def test_update_of_binding_columns_after_valid_insert_is_rejected(
     """일치하는 행을 넣은 뒤 컬럼만 바꾸는 우회 — 트리거가 그 컬럼 UPDATE에도 발화."""
     if value == _OTHER_EXEC:
         value = await seed_execution(pool, victim["user_id"])
-    async with pool.acquire() as conn:
-        order_id = await _insert(
-            conn, victim["user_id"], victim["decision_id"], execution_id=victim["execution_id"]
-        )
-        with _rejected(field):
-            await conn.execute(
-                f"UPDATE orders SET {column} = $2 WHERE order_id = $1",  # noqa: S608
-                order_id,
-                value,
+    order_ids: list[UUID] = []
+    try:
+        async with pool.acquire() as conn:
+            order_id = await _insert(
+                conn, victim["user_id"], victim["decision_id"], execution_id=victim["execution_id"]
             )
-        row = await conn.fetchrow(
-            "SELECT symbol, side, quantity, execution_id FROM orders WHERE order_id = $1", order_id
-        )
-        assert tuple(row) == ("BTC/USDT", "BUY", Decimal("0.01"), victim["execution_id"])
+            order_ids.append(order_id)
+            with _rejected(field):
+                await conn.execute(
+                    f"UPDATE orders SET {column} = $2 WHERE order_id = $1",  # noqa: S608
+                    order_id,
+                    value,
+                )
+            row = await conn.fetchrow(
+                "SELECT symbol, side, quantity, execution_id FROM orders WHERE order_id = $1",
+                order_id,
+            )
+            assert tuple(row) == ("BTC/USDT", "BUY", Decimal("0.01"), victim["execution_id"])
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
 
 
 # --- 기존 3검사 회귀 + 정적 배선 ---------------------------------------------------
@@ -312,9 +334,17 @@ async def test_i10_wiring_real_pre_submit_snapshot_is_what_the_trigger_reads(poo
     )
     assert decision.outcome == RiskOutcome.ALLOW
     did = decision.decision_id
-    async with pool.acquire() as conn:
-        with _rejected("quantity"):
-            await _insert(conn, user_id, did, execution_id=execution_id, quantity=Decimal("0.02"))
-        with _rejected("side"):
-            await _insert(conn, user_id, did, execution_id=execution_id, side="SELL")
-        assert await _insert(conn, user_id, did, execution_id=execution_id)
+    order_ids: list[UUID] = []
+    try:
+        async with pool.acquire() as conn:
+            with _rejected("quantity"):
+                await _insert(
+                    conn, user_id, did, execution_id=execution_id, quantity=Decimal("0.02")
+                )
+            with _rejected("side"):
+                await _insert(conn, user_id, did, execution_id=execution_id, side="SELL")
+            oid = await _insert(conn, user_id, did, execution_id=execution_id)
+            order_ids.append(oid)
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
