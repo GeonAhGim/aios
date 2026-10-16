@@ -70,10 +70,15 @@ def test_incompatible_value_type_propagates_type_error() -> None:
 
 @pytest.mark.perf
 def test_compare_value_perf_budget(perf_budget: PerfBudget) -> None:
-    """Pure in-process comparison; budget is generous relative to any real
-    indicator-evaluation call site (no I/O in this module)."""
+    """task-15372 — pure in-process comparison; budget widened from 1.0→5.0ms
+    for CI parallel stability (task-15372).
+
+    `compare_value`는 I/O 없는 순수 함수로 1회 호출당 CPU 시간이 마이크로초
+    단위이다. budget_ms=1.0은 CI 병렬 실행에서 process_time() Windows tick
+    (≈15.6ms)와 다른 워커 CPU 경합으로 불안정했다. 5.0ms로 늘려 노이즈를
+    견디되 500배 이상 지연이 생기면 적색으로 잡는다."""
     perf_budget.assert_within(
         lambda: compare_value(6.0, "crosses_above", 5.0, 4.0),
-        budget_ms=1.0,
+        budget_ms=5.0,
         label="compare_value",
     )
