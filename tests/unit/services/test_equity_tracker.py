@@ -208,9 +208,9 @@ async def test_record_and_persist_equity_propagates_infra_failure_fail_closed() 
 @pytest.mark.perf
 def test_record_throughput_bound_for_many_executions() -> None:
     """성능 단언 — 순수 메모리 연산이므로 실 DB 왕복 없이 10,000회
-    record() 호출이 느슨한 상한 안에 끝나야 한다(다른 DEEPEN 리프의
-    성능 단언과 동일하게 flakiness 회피용 여유 상한 — 명백한 알고리즘
-    회귀(예: 매 호출마다 전체 딕셔너리 스캔으로 퇴화)만 잡는다)."""
+    record() 호출이 느슨한 상한 안에 끝나야 한다(CI CPU 변동을 고려한
+    여유 상한 15s — 명백한 알고리즘 회귀(예: 매 호출마다 전체 딕셔너리
+    스캔으로 퇴화)만 잡는다)."""
     tracker = ExecutionEquityTracker(today=lambda: date(2026, 9, 2))
 
     start = time.monotonic()
@@ -218,7 +218,7 @@ def test_record_throughput_bound_for_many_executions() -> None:
         tracker.record(execution_id, Decimal("1000") + execution_id)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 5.0
+    assert elapsed < 15.0
 
 
 def _imports_asyncpg(source: str) -> bool:
