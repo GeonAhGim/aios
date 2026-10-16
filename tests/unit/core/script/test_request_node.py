@@ -13,9 +13,8 @@ RequestExpr.expr 자리로 새어 들어와도 fail-closed), 수치 성능 단�
 재현 1(RequestExpr.expr 미방문 회귀를 먼저 재현한 뒤 현재 구현이 이를
 막음을 대조).
 """
-from __future__ import annotations
 
-import time
+from __future__ import annotations
 
 import pytest
 
@@ -39,6 +38,7 @@ from src.core.script.grammar.ast import (
 from src.core.script.grammar.lexer import ScriptSyntaxError
 from src.core.script.grammar.parser import parse
 from src.core.script.typing.checker import ScriptTypeError, check_program, infer_type
+from tests.conftest import PerfBudget
 
 _CLOSE = "input close: series<float> = 0\n"
 
@@ -167,9 +167,7 @@ def test_unrecognized_expr_inside_request_fails_closed() -> None:
     마지막 방어선이 된다 — "모르니 통과"가 아니라 fail-closed로 거부됨을
     확인한다(`estimate_resources`는 `check_program`을 다시 타지 않으므로
     손으로 만든 env로 충분하다)."""
-    request = RequestExpr.model_construct(
-        symbol="BTCUSDT", timeframe="5m", expr=_UnknownExpr()
-    )
+    request = RequestExpr.model_construct(symbol="BTCUSDT", timeframe="5m", expr=_UnknownExpr())
     order = OrderDecl.model_construct(
         side=request,
         qty_expr=NumberLiteral(value=1),
@@ -225,30 +223,33 @@ def test_request_inner_expr_visitation_regression_guard() -> None:
 
 
 @pytest.mark.perf
-def test_request_heavy_script_compiles_well_within_budget() -> None:
+def test_request_heavy_script_compiles_well_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언(ADR-2026-09-09-C Decision 1, DSL 컴파일 300ms 예산):
     request() 8개(=DEFAULT_LIMITS.max_requests) + 일반 let 50개를 포함한
     스크립트의 parse()+check_resources() 합산 지연이 예산의 절반 안에
     머무는지 30회 반복 p95로 확인한다(request 전용 비용이 예산을 잠식하지
     않음을 조기에 드러낸다)."""
-    requests = "\n".join(
-        f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8)
-    )
+    requests = "\n".join(f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8))
     lets = "\n".join(f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(50))
     source = _CLOSE + requests + "\n" + lets
     limits = ResourceLimits(max_requests=8)
-    budget_sec = 0.15
+    budget_ms = 150.0
 
-    samples: list[float] = []
-    for _ in range(30):
-        start = time.perf_counter()
-        check_resources(parse(source), limits)
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    p95 = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    # batch=64: process_time의 Windows 틱(15.6ms) 양자화 오차를 batch로
+    # 나눈다. batch=64이면 총 시간이 ~64×틱보다 커져 호출당 오차가 ~0.24ms
+    # 수준으로 줄어든다.
+    samples = perf_budget.samples(
+        lambda: check_resources(parse(source), limits),
+        n=30,
+        batch=64,
+    )
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
 
-    print(f"[M2-2a request] compile p95={p95 * 1e3:.3f}ms budget<{budget_sec * 1e3:.0f}ms")
-    assert p95 < budget_sec
+    print(f"[M2-2a request] compile p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms
 
 
 def test_infer_type_direct_call_matches_check_program() -> None:
