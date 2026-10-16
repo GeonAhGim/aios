@@ -233,14 +233,21 @@ async def test_live_lease_not_expired_is_left_untouched(pool):
     row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_future())
     adapter = _LookupAdapter(lookup_result=None)
 
-    processed = await _recover(pool, adapter)
+    try:
+        processed = await _recover(pool, adapter)
 
-    assert processed == 0
-    assert await _order_status(pool, order_id) == "SUBMITTED"
-    outbox = await _outbox_row(pool, row_id)
-    assert outbox["state"] == "SENDING"
-    assert outbox["worker_id"] == "dead-worker"  # 복구 워커가 리스를 훔치지 않았다
-    assert adapter.lookup_calls == 0
+        assert processed == 0
+        assert await _order_status(pool, order_id) == "SUBMITTED"
+        outbox = await _outbox_row(pool, row_id)
+        assert outbox["state"] == "SENDING"
+        assert outbox["worker_id"] == "dead-worker"  # 복구 워커가 리스를 훔치지 않았다
+        assert adapter.lookup_calls == 0
+    finally:
+        # task-15417: 테스트가 남긴 orders/order_command_outbox 잔재를 반드시 정리한다.
+        # orders_residue.py sentinel이 이벤트 없는 orders 행을 적색으로 연쇄한다.
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM order_command_outbox WHERE id = $1", row_id)
+            await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
 
 
 async def test_risk_gate_repo_none_is_rejected_i01() -> None:
