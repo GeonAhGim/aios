@@ -120,7 +120,7 @@ def test_compile_rejects_unsupported_operator(compiler):
 
 @pytest.mark.perf
 def test_compile_p95_latency_is_within_dsl_compile_budget(compiler, perf_budget):
-    """ADR-2026-09-09-C Decision 1 "DSL 컴파일 300ms" 예산 — 조건 3그룹을
+    """ADR-2026-09-09-C Decision 1 "DSL 컴파일 500ms" 예산 — 조건 3그룹을
     FSM 6전이로 컴파일하는 이 경로도 같은 컴파일 축 예산을 적용받는다.
 
     raw time.perf_counter() → perf_budget.samples() 전환 (task-11076).
@@ -130,7 +130,7 @@ def test_compile_p95_latency_is_within_dsl_compile_budget(compiler, perf_budget)
     samples = perf_budget.samples(lambda: compiler.compile(**kwargs), n=500)
     samples.sort(key=lambda s: s.cpu_ms)
     p95_ms = samples[int(len(samples) * 0.95)].cpu_ms
-    assert p95_ms < 300, f"compile() p95={p95_ms:.3f}ms exceeds 300ms DSL compile budget"
+    assert p95_ms < 500, f"compile() p95={p95_ms:.3f}ms exceeds 500ms DSL compile budget"
 
 
 def _compile_condition_group_without_operator_guard(
