@@ -189,6 +189,16 @@ async def test_gate_red_restart_loses_crossover_signal_at_tick_level(pool):
         )
     assert fsm_state == "IDLE"  # 신호를 완전히 잃음 — 다음 재평가까지 진입 자체가 지연된다
 
+    # 잔류 주문 정리 — green 경로가 제출한 주문을 삭제한다.
+    async with pool.acquire() as conn:
+        order_ids = await conn.fetchval(
+            "SELECT array_agg(order_id) FROM orders WHERE execution_id = $1",
+            green_execution_id,
+        )
+        if order_ids:
+            for oid in order_ids:
+                await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
+
 
 # --- 게이트 적색 재현 2/2 — mandate 클램프 미반영 (L23 부재) ----------------
 
@@ -232,6 +242,17 @@ async def test_gate_red_mandate_clamp_never_applied_to_submitted_quantity(pool):
     assert submitted_quantity != green.quantity, (
         "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 L23가 이미 배선된 것이다"
     )
+
+    # 잔류 주문 정리 — sentinel(gate_red 재현이 주문을 제출하므로)이 teardown에서
+    # eventless orders residue를 적발하지 않도록 execution_id별 주문을 삭제한다.
+    async with pool.acquire() as conn:
+        order_ids = await conn.fetchval(
+            "SELECT array_agg(order_id) FROM orders WHERE execution_id = $1",
+            execution_id,
+        )
+        if order_ids:
+            for oid in order_ids:
+                await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
 
 
 # --- negative 테스트 (3건) ---------------------------------------------------
