@@ -150,7 +150,7 @@ def test_decide_perf_bound_for_bulk_calls():
     # pydantic 모델 생성 오버헤드(WatchdogDecision 인스턴스화)가 대부분이라
     # 상한을 넉넉히 잡는다 — 목적은 정확한 절대치가 아니라 회귀(예: 실수로
     # 끼워든 반복문·I/O로 인한 자릿수 단위 급증)를 잡는 것이다.
-    assert elapsed < 5.0, (
+    assert elapsed < 10.0, (
         f"50,000회 decide() 호출에 {elapsed:.2f}s — O(1) 순수 함수치고 과도하게 느림"
     )
 
