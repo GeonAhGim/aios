@@ -202,19 +202,26 @@ async def test_crash_before_sent_reenters_as_pending(pool):
     row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_past())
     adapter = _LookupAdapter(lookup_result=None)
 
-    processed = await _recover(pool, adapter)
+    try:
+        processed = await _recover(pool, adapter)
 
-    assert processed == 1
-    assert await _order_status(pool, order_id) == "VALIDATED"
-    outbox = await _outbox_row(pool, row_id)
-    assert outbox["state"] == "PENDING"
-    assert adapter.lookup_calls == 0  # UNKNOWN이 아니므로 resolver로 위임되지 않는다
+        assert processed == 1
+        assert await _order_status(pool, order_id) == "VALIDATED"
+        outbox = await _outbox_row(pool, row_id)
+        assert outbox["state"] == "PENDING"
+        assert adapter.lookup_calls == 0  # UNKNOWN이 아니므로 resolver로 위임되지 않는다
 
-    async with pool.acquire() as conn:
-        reclaimed = await OutboxRepository().claim_batch(
-            conn, worker_id="dispatcher-1", limit=10, lease_sec=30
-        )
-    assert row_id in [r.id for r in reclaimed]  # 재진입 = 정상 클레임 경로로 복귀
+        async with pool.acquire() as conn:
+            reclaimed = await OutboxRepository().claim_batch(
+                conn, worker_id="dispatcher-1", limit=10, lease_sec=30
+            )
+        assert row_id in [r.id for r in reclaimed]  # 재진입 = 정상 클레임 경로로 복귀
+    finally:
+        # task-15416: 테스트가 남긴 orders/order_command_outbox 잔재를 반드시 정리한다.
+        # orders_residue.py sentinel이 이벤트 없는 orders 행을 적색으로 연쇄한다.
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM order_command_outbox WHERE id = $1", row_id)
+            await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
 
 
 async def test_live_lease_not_expired_is_left_untouched(pool):
