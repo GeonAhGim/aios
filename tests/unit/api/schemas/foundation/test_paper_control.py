@@ -109,9 +109,11 @@ def test_deployment_list_response_construction_throughput_budget(
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path).
 
-    raw perf_counter() → perf_budget.samples(batch=500) 전환:
+    raw perf_counter() → perf_budget.samples(batch=2000) 전환:
     process_time의 15.6ms 틱으로 인해 빠른 1회 호출은 0/15.6만 나오므로,
-    batch=500으로 묶어 호출당 오차를 tick/500 ≈ 0.03ms로 낮췄다.
+    batch=2000으로 묶어 호출당 오차를 tick/2000 ≈ 0.008ms로 낮췄다.
+    CI 러너(--cov 오버헤드 + CPU 경합)에서 occasional spike가 all() 단언을
+    깨는 원인을 batch 증가로 막는다(task-15090).
     단위는 samples.cpu_ms가 ms이므로 예산도 ms(0.05초 → 50.0ms).
     """
     as_of = datetime.now(timezone.utc)
@@ -121,7 +123,7 @@ def test_deployment_list_response_construction_throughput_budget(
         lambda: DeploymentListResponse(deployments=deployments, as_of=as_of),
         n=10,
         warmup=0,
-        batch=500,
+        batch=2000,
     )
 
     # cpu_ms 기준, 단위 일관성: ms
