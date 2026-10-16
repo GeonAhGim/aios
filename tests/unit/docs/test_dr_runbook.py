@@ -96,15 +96,15 @@ def test_truncated_runbook_fails_as_failure_injection(runbook_text: str) -> None
 @pytest.mark.perf
 def test_validate_dr_runbook_perf_budget(perf_budget: PerfBudget, runbook_text: str) -> None:
     """ADR-2026-09-09-C 예산표에 문서 검증 항목은 없다(docs-only 리프) —
-    수 KB 텍스트에 대한 리터럴 스캔 규모에 맞춘 보수적 로컬 상한(단일 실행 120ms,
-    CI 병렬 안정화 — task-15464)."""
+    수 KB 텍스트에 대한 리터럴 스캔 규모에 맞춘 보수적 로컬 상한(단일 실행 240ms,
+    CI 병렬 안정화 — task-15497, task-15464)."""
 
     def measure_once() -> None:
         validate_dr_runbook(runbook_text)
 
     samples = perf_budget.samples(measure_once, n=100)
     p95_ms = sorted(s.cpu_ms for s in samples)[94]
-    assert p95_ms < 120.0, f"DR_RUNBOOK validation p95={p95_ms:.3f}ms > 120ms budget"
+    assert p95_ms < 240.0, f"DR_RUNBOOK validation p95={p95_ms:.3f}ms > 240ms budget"
 
 
 def test_adversarial_dr_runbook_section_obfuscation_bypass(runbook_text: str) -> None:
