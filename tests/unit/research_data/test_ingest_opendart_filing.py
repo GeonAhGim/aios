@@ -382,7 +382,7 @@ def test_normalize_filing_bulk_detects_ten_x_delay() -> None:
     """예산 10배 지연 주입 → 적색 검출력 확인 (budget_ms=50_000, 5초×10).
 
     실제 5,000건×0.5초=2,500초는 너무 길므로 샘플 100건으로 지연 검출력만
-    확인하고 (100×0.5초=50초 > budget 50초), 원본 테스트가 전체 배치 예산을
+    확인하고 (100×0.6초=60초 > budget 50초), 원본 테스트가 전체 배치 예산을
     검증한다."""
     import time
 
@@ -409,7 +409,7 @@ def test_normalize_filing_bulk_detects_ten_x_delay() -> None:
     original_normalize = mod.normalize_filing
 
     def slow_normalize(filing) -> None:
-        time.sleep(0.5)  # 500ms 지연 → 100건 × 0.5초 = 50초 (budget 50초 초과)
+        time.sleep(0.6)  # 600ms 지연 → 100건 × 0.6초 = 60초 (budget 50초 명확 초과)
         original_normalize(filing)
 
     mod.normalize_filing = slow_normalize
