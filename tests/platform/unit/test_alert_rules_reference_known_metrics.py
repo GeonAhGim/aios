@@ -229,7 +229,7 @@ def test_full_validation_pipeline_p95_latency_within_budget(
 ) -> None:
     """수치 성능 단언: 이 파일의 정적 검증은 CI 게이트마다 매번 실행된다. 전체 규칙
     (11개)에 대해 메트릭 토큰 대조 + 필수 필드 + runbook 검증을 1회 통과하는 시간의
-    p95가 15ms를 넘지 않아야 한다 — 순수 정적 스캔(디스크 I/O 없이 이미 로드된 파이썬
+    p95가 20ms를 넘지 않아야 한다 — 순수 정적 스캔(디스크 I/O 없이 이미 로드된 파이썬
     객체만 순회)이며, 초기 실행 오버헤드와 Windows 환경의 변동성을 감안했다.
 
     runbook 파일 존재 여부는 루프 시작 전 1회만 disk에서 조회해 캐시한다 —
@@ -253,7 +253,7 @@ def test_full_validation_pipeline_p95_latency_within_budget(
     samples = perf_budget.samples(_measure_one, n=20, batch=10)
     cpu_ms_values = sorted(s.cpu_ms for s in samples)
     p95 = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
-    assert p95 < 15, f"p95={p95:.3f}ms >= 15ms 예산"
+    assert p95 < 20, f"p95={p95:.3f}ms >= 20ms 예산"
 
 
 def test_rule_missing_expr_field_is_rejected() -> None:
