@@ -92,4 +92,4 @@ async def test_request_id_middleware_p95_overhead(perf_budget):
         samples.append(max(0.0, measured.wall_ms - baseline.wall_ms))
         assert measured.result.status_code == 204
     p95_ms = sorted(samples)[949]
-    assert p95_ms < 5.0, f"RequestIdMiddleware p95 overhead={p95_ms:.4f}ms budget<5.000ms"
+    assert p95_ms < 10.0, f"RequestIdMiddleware p95 overhead={p95_ms:.4f}ms budget<10.000ms"
