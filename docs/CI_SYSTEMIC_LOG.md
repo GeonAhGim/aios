@@ -3570,3 +3570,32 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다. 19-nodeid 카드의 다른
   파일(market_data/ai assistant/backtest 쪽)은 각자의 전담 task에서 개별 확인해야 한다 — 이
   항목은 `test_start_algo.py`에만 좁게 적용된다.
+
+
+## task-15075 — ci_failure_card pytest 묶음(18 nodeid), 대상 파일
+  `tests/unit/scripts/test_check_migration_chain_merge_1988.py` 단독/동반 재확인, 비회귀 (2026-10-17)
+
+- 대상 테스트 `test_removing_task_1988_merge_revision_reproduces_original_dual_head_failure`는
+  `scripts/check_migration_chain.py`를 임포트해 `tmp_path`에 섀도 versions 디렉터리를 만들고
+  병합 리비전 파일을 제거/치환하는 순수 정적 분석 테스트다 — DB 연결이나 `orders`/
+  `order_events` 테이블 접근이 전혀 없다. 단독 실행: **1 passed in 4.04s**. 같은 파일 전체
+  (`tests/unit/scripts/test_check_migration_chain_merge_1988.py`): **8 passed in 9.62s**.
+- `tests/conftest.py`가 등록하는 `OrdersResidueSentinel`(`tests/support/orders_residue.py`)은
+  모듈/세션 경계마다 공유 테스트 DB의 `orders` 잔여물을 검사한다 — 이 테스트 자체는 DB를
+  건드리지 않으므로, 분류된 18-nodeid 카드가 이 파일을 "첫 오류" 지점으로 지목했더라도
+  원인은 이 파일에 없다(task-15073과 동형: 경계 검사가 "teardown after <이 테스트의
+  nodeid>"로 보고하는 것은 그 시점에 검사했다는 의미일 뿐, 이 테스트가 오염원이라는 의미가
+  아니다).
+  `tests/unit/scripts/test_orders_residue_sentinel.py` + `tests/adversarial/oms/
+  test_orders_residue_{teardown,source}.py`(잔여물 발생/회귀 전용 테스트)와 대상 파일을
+  함께 실행해 교차 확인: **23 passed in 47.30s, exit=0** — orders 잔여물 감시 경로 자체도
+  green이다.
+- `ruff check tests/unit/scripts/test_check_migration_chain_merge_1988.py`: All checks passed.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: 지정된
+  파일은 로컬에서 단독·동반 실행 모두 100% green이고, 소스 변경이 전혀 필요하지 않다. D2:
+  N/A(실행 코드 변경 없음 — 비회귀를 재현/교차 확인하는 문서 리프, task-12039/12047/12223/
+  12311/12315/15073과 동일 선례).
+- 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다. 18-nodeid 카드의 다른
+  파일(backup/restore_drill, type_ignore_budget, kis_generate_adapters 등)은 각자의 전담
+  task에서 개별 확인해야 한다 — 이 항목은 `test_check_migration_chain_merge_1988.py`에만
+  좁게 적용된다.
