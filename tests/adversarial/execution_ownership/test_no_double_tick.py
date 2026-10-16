@@ -35,6 +35,7 @@ from src.services.order_service.gate import GateDecision, GateOutcome, OrderCont
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def _allow_all(_context: OrderContext) -> GateDecision:
