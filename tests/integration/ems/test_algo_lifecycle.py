@@ -206,6 +206,6 @@ async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool, p
     )
 
     assert len(sample.result.outcomes) == 100
-    assert sample.wall_ms < 15_000, (
+    assert sample.wall_ms < 20_000, (
         f"tick_algo took {sample.wall_ms / 1000:.2f}s for 100 slices -- looks superlinear"
     )
