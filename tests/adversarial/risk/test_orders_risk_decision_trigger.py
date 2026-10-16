@@ -49,6 +49,7 @@ async def _insert_raw(
     is_liquidation: bool = False,
     liquidation_request_id: UUID | None = None,
     created_at: datetime | None = None,
+    _track: list[UUID] | None = None,
 ) -> UUID:
     result = await conn.fetchval(
         """
@@ -68,7 +69,10 @@ async def _insert_raw(
         liquidation_request_id,
         created_at,
     )
-    return result if isinstance(result, UUID) else uuid4()
+    order_id = result if isinstance(result, UUID) else uuid4()
+    if _track is not None:
+        _track.append(order_id)
+    return order_id
 
 
 async def test_trigger_rejects_order_without_decision_once_cutover_armed(
@@ -79,29 +83,32 @@ async def test_trigger_rejects_order_without_decision_once_cutover_armed(
         "UPDATE orders_risk_decision_cutover SET cutover_at = now(), armed_by = 'test' "
         "WHERE id = 1 AND cutover_at IS NULL RETURNING cutover_at"
     )
+    order_ids: list[UUID] = []
     async with pool.acquire() as conn:
         tr = conn.transaction()
         await tr.start()
         try:
-            await _insert_raw(conn, ctx["user_id"], ctx["execution_id"])  # 비무장(현재 운영 상태)
+            await _insert_raw(conn, ctx["user_id"], ctx["execution_id"], _track=order_ids)
             armed_at = await conn.fetchval(arm_sql)
             assert armed_at is not None
             assert await conn.fetchval(arm_sql) is None  # 단조: 재무장은 no-op
 
             with pytest.raises(asyncpg.CheckViolationError, match="has no risk_decision_id"):
                 async with conn.transaction():
-                    await _insert_raw(conn, ctx["user_id"], ctx["execution_id"])
+                    await _insert_raw(conn, ctx["user_id"], ctx["execution_id"], _track=order_ids)
             with_decision = await _insert_raw(
                 conn,
                 ctx["user_id"],
                 ctx["execution_id"],
                 risk_decision_id=ctx["decision"].decision_id,
+                _track=order_ids,
             )
             await _insert_raw(
                 conn,
                 ctx["user_id"],
                 ctx["execution_id"],
-                created_at=armed_at - timedelta(seconds=1),  # 이전 행
+                created_at=armed_at - timedelta(seconds=1),
+                _track=order_ids,
             )
             with pytest.raises(asyncpg.CheckViolationError):  # UPDATE로 참조 제거 우회 불가
                 async with conn.transaction():
@@ -111,6 +118,10 @@ async def test_trigger_rejects_order_without_decision_once_cutover_armed(
                     )
         finally:
             await tr.rollback()
+    # 정리: 테스트가 남긴 eventless orders 행 제거
+    async with pool.acquire() as conn:
+        for oid in order_ids:
+            await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
 
 
 @pytest.mark.parametrize("case", ["other_tenant", "deny", "expired", "unknown", "other_execution"])
@@ -132,27 +143,52 @@ async def test_trigger_rejects_invalid_decision_reference_even_when_disarmed(
         decision_id = expired.decision_id
     else:
         decision_id = uuid4()
+    order_ids: list[UUID] = []
     async with pool.acquire() as conn:
-        with pytest.raises((asyncpg.CheckViolationError, asyncpg.ForeignKeyViolationError)):
-            await _insert_raw(
-                conn, ctx["user_id"], ctx["execution_id"], risk_decision_id=decision_id
-            )
-        assert await _insert_raw(
-            conn, ctx["user_id"], ctx["execution_id"], risk_decision_id=ctx["decision"].decision_id
-        )  # 대조군
+        try:
+            with pytest.raises((asyncpg.CheckViolationError, asyncpg.ForeignKeyViolationError)):
+                await _insert_raw(
+                    conn,
+                    ctx["user_id"],
+                    ctx["execution_id"],
+                    risk_decision_id=decision_id,
+                    _track=order_ids,
+                )
+            assert await _insert_raw(
+                conn,
+                ctx["user_id"],
+                ctx["execution_id"],
+                risk_decision_id=ctx["decision"].decision_id,
+                _track=order_ids,
+            )  # 대조군
+        finally:
+            # 정리: 테스트가 남긴 eventless orders 행 제거
+            for oid in order_ids:
+                await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
 
 
 async def test_trigger_liquidation_requires_request_id(
     pool: asyncpg.Pool, ctx: dict[str, Any]
 ) -> None:
     """청산 주문은 liquidation_request_id 필수."""
+    order_ids: list[UUID] = []
     async with pool.acquire() as conn:
-        with pytest.raises(asyncpg.CheckViolationError, match="requires liquidation_request_id"):
-            await _insert_raw(conn, ctx["user_id"], ctx["execution_id"], is_liquidation=True)
-        assert await _insert_raw(
-            conn,
-            ctx["user_id"],
-            ctx["execution_id"],
-            is_liquidation=True,
-            liquidation_request_id=uuid4(),
-        )
+        try:
+            with pytest.raises(
+                asyncpg.CheckViolationError, match="requires liquidation_request_id"
+            ):
+                await _insert_raw(
+                    conn, ctx["user_id"], ctx["execution_id"], is_liquidation=True, _track=order_ids
+                )
+            assert await _insert_raw(
+                conn,
+                ctx["user_id"],
+                ctx["execution_id"],
+                is_liquidation=True,
+                liquidation_request_id=uuid4(),
+                _track=order_ids,
+            )
+        finally:
+            # 정리: 테스트가 남긴 eventless orders 행 제거
+            for oid in order_ids:
+                await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
