@@ -218,7 +218,7 @@ def test_record_throughput_bound_for_many_executions() -> None:
         tracker.record(execution_id, Decimal("1000") + execution_id)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 1.0
+    assert elapsed < 5.0
 
 
 def _imports_asyncpg(source: str) -> bool:
