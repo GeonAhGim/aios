@@ -391,7 +391,7 @@ async def test_failover_manager_construction_latency(perf_budget) -> None:
         )
         mgr.write_available()
 
-    perf_budget.assert_within(_build, budget_ms=3.0, n=100)
+    perf_budget.assert_within(_build, budget_ms=1.0, n=100)
 
 
 async def test_gate_red_all_hosts_stuck_read_only_raises_exhausted() -> None:
