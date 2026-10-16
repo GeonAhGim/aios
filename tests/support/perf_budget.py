@@ -83,13 +83,25 @@ class PerfBudget:
         return PerfSample(cpu_ms=cpu_ms, wall_ms=wall_ms, result=result)
 
     async def sample_async(self, fn: Callable[[], Awaitable[_T]]) -> PerfSample:
-        """비동기 I/O는 커버리지 계측 없이 wall_ms로 왕복 지연을 보존한다."""
+        """비동기 I/O는 커버리지 계측 없이 wall_ms로 왕복 지연을 보존한다.
+
+        `sys.settrace` 일시 정지도 함께 적용 — pytest --cov 가 건넨 line-tracer
+        는 매 coroutine switch 마다 CPU를 먹으므로(동기 `sample`의 처리와 같은
+        근본 원인), async 구간에서도 동일한 패턴으로 제거해야 CI 병렬 실행에서
+        budget 단언이 안정적으로 통과한다(task-15234).
+        """
+        active_tracer = sys.gettrace()
         with paused_coverage():
-            wall, cpu = time.perf_counter(), time.process_time()
-            result = await fn()
+            wall_start = time.perf_counter()
+            cpu_start = time.process_time()
+            sys.settrace(None)
+            try:
+                result = await fn()
+            finally:
+                sys.settrace(active_tracer)
             return PerfSample(
-                cpu_ms=(time.process_time() - cpu) * 1000,
-                wall_ms=(time.perf_counter() - wall) * 1000,
+                cpu_ms=(time.process_time() - cpu_start) * 1000,
+                wall_ms=(time.perf_counter() - wall_start) * 1000,
                 result=result,
             )
 
