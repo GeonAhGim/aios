@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 import uuid
 
 import pytest
@@ -44,6 +43,7 @@ from src.core.indicators.registry import (
 )
 from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec, PlotSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
+from tests.support.perf_budget import PerfBudget
 
 
 def _spec(name: str) -> IndicatorSpec:
@@ -316,32 +316,31 @@ def test_build_static_catalog_propagates_entry_hash_failure_instead_of_dropping_
 
 
 @pytest.mark.perf
-def test_merge_and_paginate_latency_budget_matches_list_api_p95() -> None:
+def test_merge_and_paginate_latency_budget_matches_list_api_p95(perf_budget: PerfBudget) -> None:
     """§9.9 IND-12 DoD requires `GET /v1/indicators` p95 <= 200ms.
-    `merge_script_entries` + `list_catalog` + `paginate_catalog` are the pure,
-    in-process cost that endpoint pays on every request (the router's own I/O
-    — SCRIPT-tier source lookup — is out of this leaf's scope); this pins the
-    pure part's share of that budget so it cannot quietly regress into eating
-    the endpoint's whole latency budget on its own. 500 script entries for a
-    single tenant simulates a very large marketplace catalog merged on top of
-    every real CORE indicator of the installed TA-Lib."""
+
+    raw perf_counter() → perf_budget.sample(batch=50) 전환(task-15273).
+    process_time 15.6ms 틱: 1회 호출은 0/15.6만 나오므로 batch=50로 묶어
+    총 시간이 틱을 넘어 호출당 추정 오차를 tick/50 ≈ 0.3ms로 낮췄다.
+    단위는 samples.cpu_ms(ms) ← 예산도 ms(초/μs 혼용 금지).
+    """
     tenant_id = uuid.uuid4()
     script_entries = [
         _script_entry(f"SCRIPT_{i:04d}", tenant_id=tenant_id, script_hash=f"{i:064x}")
         for i in range(500)
     ]
     repeats = 50
-    start = time.perf_counter()
-    for _ in range(repeats):
+
+    def _hot_path() -> None:
         merged = merge_script_entries(DEFAULT_STATIC_CATALOG, script_entries, tenant_id=tenant_id)
         entries = list_catalog(merged, q="SCRIPT")
         paginate_catalog(entries, cursor=None, limit=50)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    per_call_ms = elapsed_ms / repeats
-    budget_ms = 50.0  # 200ms p95 엔드포인트 예산 중 순수 부분에 배정한 몫
-    assert per_call_ms < budget_ms, (
+
+    sample = perf_budget.sample(_hot_path, batch=repeats)
+    budget_ms = 50.0  # 200ms p95 엔드포인트 예산 중 순수 부분에 배당한 몫
+    assert sample.cpu_ms < budget_ms, (
         f"merge_script_entries+list_catalog+paginate_catalog took "
-        f"{per_call_ms:.2f}ms/call over {repeats} reps, budget {budget_ms}ms"
+        f"{sample.cpu_ms:.2f}ms/call (batch={repeats}), budget {budget_ms}ms"
     )
 
 
