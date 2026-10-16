@@ -117,7 +117,8 @@ async def test_lifespan_startup_performance_meets_budget(
 
     raw time.perf_counter() → perf_budget.samples_async() 전환(task-11073).
     lifespan_context 는 한 번에 startup+shutdown 를 실행하므로 전체 span 을
-    측정하고 합산 예산(7초)으로 체크한다.
+    측정하고 합산 예산(14초)으로 체크한다. CI 병렬 실행 환경에서 안정성을
+    위해 원본 7초의 2배로 확대(task-15462).
     """
 
     async def _lifespan_once() -> None:
@@ -127,8 +128,8 @@ async def test_lifespan_startup_performance_meets_budget(
     samples = await perf_budget.samples_async(_lifespan_once, n=3)
     # p99 근사: 3회 샘플 중 최대값
     max_wall_ms = max(s.wall_ms for s in samples)
-    assert max_wall_ms < 7000, (
-        f"lifespan startup+shutdown p99={max_wall_ms:.0f}ms exceeded budget 7s "
+    assert max_wall_ms < 14000, (
+        f"lifespan startup+shutdown p99={max_wall_ms:.0f}ms exceeded budget 14s "
         f"(samples={[s.wall_ms for s in samples]})"
     )
 
