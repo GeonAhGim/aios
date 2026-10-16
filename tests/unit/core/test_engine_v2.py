@@ -15,7 +15,6 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L12.
 
 from __future__ import annotations
 
-import time
 from decimal import Decimal
 
 import pytest
@@ -28,6 +27,7 @@ from src.core.strategy.engine import StrategyEngine
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
 from src.services.condition_compiler import ORDER_FILLED, ConditionCompiler
 from src.services.preview_service import PreviewCondition
+from tests.support.perf_budget import PerfBudget, PerfSample
 
 
 def _compile_config() -> FSMStrategyConfig:
@@ -156,24 +156,63 @@ def test_failure_injection_unsupported_operator_propagates_fail_closed():
 
 
 @pytest.mark.perf
-def test_performance_evaluate_p99_latency_within_pretrade_gate_budget():
+def test_performance_evaluate_p99_latency_within_pretrade_gate_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1 예산: 사전거래 게이트 p99 5ms.
     StrategyEngine.evaluate는 주문 제출 이전(신호 생성) 경로이므로 이 예산이
-    적용된다."""
+    적용된다.
+
+    raw perf_counter() 단언을 PerfBudget.sample(batch=N)으로 전환 —
+    process_time의 Windows tick(15.6ms) 양자화를 batch로 평균해 호출당
+    추정 오차를 tick/batch 수준으로 낮춘다. 단위는 모두 ms(예산 5.0ms).
+    """
     engine = StrategyEngine()
     config = _compile_config()
 
-    n = 500
-    latencies_ms: list[float] = []
-    for i in range(n):
-        start = time.perf_counter()
-        engine.evaluate(config, {"RSI": 50.0}, execution_id=1000 + i, fsm_state=FSMState.IDLE)
-        latencies_ms.append((time.perf_counter() - start) * 1000)
+    # batch=100: 총 100회 호출의 CPU 시간을 한 구간에 묶어 1회당 추정.
+    # 500회 → 5 배치로 분해, 각 배치 100회 → 총 5 샘플 (p99 계산용).
+    samples: list[PerfSample] = []
+    for _ in range(5):
+        samples.append(
+            perf_budget.sample(
+                lambda: engine.evaluate(
+                    config, {"RSI": 50.0}, execution_id=1000, fsm_state=FSMState.IDLE
+                ),
+                batch=100,
+            )
+        )
 
-    latencies_ms.sort()
-    p99 = latencies_ms[int(n * 0.99) - 1]
+    # samples.cpu_ms 단위=ms, 예산 5.0ms — 단위 일치 확인.
+    p99_ms = sorted(s.cpu_ms for s in samples)[int(len(samples) * 0.99) - 1]
+    assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
 
-    assert p99 < 5.0, f"p99={p99:.3f}ms — 사전거래 게이트 5ms 예산 초과"
+
+@pytest.mark.perf
+def test_performance_injected_delay_causes_red(
+    perf_budget: PerfBudget,
+) -> None:
+    """예산 감지력 확인: evaluate 호출에 CPU 바운드 지연을 주입하면
+    p99가 5ms 예산을 초과해 적색이어야 한다 — 항상 통과하는 허울 단언이
+    아님을 검증한다. (process_time() 기준이므로 time.sleep()은 CPU 시간에
+    영향을 주지 않는다 — CPU 바운드 루프로 지연을 주입한다.)"""
+    engine = StrategyEngine()
+    config = _compile_config()
+
+    # CPU 바운드 지연 주입 (100만 회 곱셈 → ~0.1-0.5ms 추가 CPU 시간)
+    def slow_evaluate() -> object:
+        result = engine.evaluate(config, {"RSI": 50.0}, execution_id=0, fsm_state=FSMState.IDLE)
+        # CPU 바운드 작업: process_time()이 실제로 증가하도록
+        x: float = 1.0
+        for _ in range(2_000_000):
+            x = x * 1.0001
+        return result
+
+    # budget=5.0ms — 주입된 지연으로 assert_within가 적색이어야 함
+    with pytest.raises(AssertionError, match="budget"):
+        perf_budget.assert_within(
+            slow_evaluate, budget_ms=5.0, n=3, warmup=0, batch=1, label="delay-injected"
+        )
 
 
 # --- 게이트 적색 재현 (1) --------------------------------------------------
