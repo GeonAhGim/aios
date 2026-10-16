@@ -1,9 +1,10 @@
-"""AIOS Script 아티팩트 패키지(§9.4 DSL-12) — `hash.py`(script_hash)와
-`compile.py`(DSL-2→7 파이프라인 조립 + §3.3 4종 오류·위치).
+"""AIOS Script artifact package (§9.4 DSL-12) — `hash.py`(script_hash) and
+`compile.py`(DSL-2→7 pipeline assembly + §3.3 four error types/positions).
 
-신규 패키지, `src/core/**` SCAFFOLD zone. 순수(I/O 없음). 소비자: `POST
-/v1/scripts/compile`(src/api/routers/scripts.py), BT-9 재현 키, MP-1 게시.
+New package, `src/core/**` SCAFFOLD zone. Pure (no I/O). Consumers: `POST
+/v1/scripts/compile`(src/api/routers/scripts.py), BT-9 reproduction key, MP-1 publish.
 """
+
 from __future__ import annotations
 
 from src.core.script.artifact.compile import (
