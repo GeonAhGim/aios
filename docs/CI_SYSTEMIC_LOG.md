@@ -3599,3 +3599,34 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   파일(backup/restore_drill, type_ignore_budget, kis_generate_adapters 등)은 각자의 전담
   task에서 개별 확인해야 한다 — 이 항목은 `test_check_migration_chain_merge_1988.py`에만
   좁게 적용된다.
+
+
+## task-15079 — ci_failure_card pytest_perf_parallel 묶음(10 nodeid), 대상 파일
+  `tests/foundation/unit/research_data/test_contracts_v1_deepen_2905.py` 단독/동반 재확인,
+  비회귀 (2026-10-17)
+
+- 대상 테스트 `test_bulk_validation_of_many_research_items_meets_latency_budget`는 `perf_budget`
+  픽스처(`process_time()` 기반 best-of-N, task-11008/L4-DC-2 전환)로 `ResearchItem` 구성 +
+  `model_dump_json`/`model_validate_json` 왕복만 측정하는 순수 CPU 벤치마크다 — DB 연결이나
+  `orders`/`order_events` 테이블 접근이 전혀 없다. 단독 실행: **1 passed in 2.57s**. 같은 파일
+  전체(`tests/foundation/unit/research_data/test_contracts_v1_deepen_2905.py`): **15 passed in
+  2.94s**.
+- 같은 10-nodeid 카드에 묶인 나머지 테스트도 전부 `test_*_p95_latency*`/`test_*_throughput*`류
+  DSL 컴파일·검증·리플레이 perf 단언이며, `pytest_perf_parallel` 단계에서 여러 perf 테스트가
+  동시에 CPU를 공유할 때 wall-clock 노이즈로 예산을 스치는 것이 task-12049/12223/12315에서
+  이미 확인된 동형 패턴이다 — 대상 파일 자체가 오염원이라는 근거는 없다(task-15073/15075와
+  동형: 경계 검사가 "teardown after <이 테스트의 nodeid>"로 보고하는 것은 그 시점에 검사했다는
+  의미일 뿐, 이 테스트가 오염원이라는 의미가 아니다).
+  `tests/unit/scripts/test_orders_residue_sentinel.py` + `tests/adversarial/oms/
+  test_orders_residue_{teardown,source}.py`(잔여물 발생/회귀 전용 테스트)와 대상 파일을 함께
+  실행해 교차 확인: **30 passed in 45.15s, exit=0** — orders 잔여물 감시 경로 자체도 green이다.
+- `ruff check tests/foundation/unit/research_data/test_contracts_v1_deepen_2905.py`: All checks
+  passed.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: 지정된
+  파일은 로컬에서 단독·동반 실행 모두 100% green이고, 소스 변경이 전혀 필요하지 않다. D2:
+  N/A(실행 코드 변경 없음 — 비회귀를 재현/교차 확인하는 문서 리프, task-12039/12047/12223/
+  12311/12315/15073/15075와 동일 선례).
+- 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다. 10-nodeid 카드의 다른
+  파일(trust/freshness, validation/compile_artifact·backtest·failure_conditions·point_in_time·
+  artifact·contracts_v1_evidence_refs·policy_hash)은 각자의 전담 task에서 개별 확인해야 한다 —
+  이 항목은 `test_contracts_v1_deepen_2905.py`에만 좁게 적용된다.
