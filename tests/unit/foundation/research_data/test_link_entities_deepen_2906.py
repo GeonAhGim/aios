@@ -32,7 +32,6 @@ RD-4가 실제 Postgres 어댑터를 아직 소유하지 않으므로(entity_lin
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -41,6 +40,7 @@ import pytest
 from src.foundation.research_data.application.link_entities import link_entities
 from src.foundation.research_data.contracts.v1 import ResearchItem
 from src.foundation.research_data.domain.entity_link import EntityKey, EntityLinkResult
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _TENANT = uuid4()
@@ -159,23 +159,29 @@ async def test_link_entities_resolver_crash_mid_batch_never_calls_save_links() -
 
 
 @pytest.mark.perf
-async def test_link_entities_default_limit_batch_meets_latency_budget() -> None:
-    """기본 `limit=500` 규모(OpenDART 일일 배치 상한)를 절대시간 예산 내에
-    처리해야 한다."""
-    budget_sec = 1.0  # 실측 로컬 <0.05s(fake 포트, I/O 없음), CI 편차 감안
+async def test_link_entities_default_limit_batch_meets_latency_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """raw time.perf_counter() → PerfBudget.sample_async 전환(task-15288).
+    `sample_async`는 async 전용으로 batch 파라미터가 없다 — fake 포트(
+    I/O 없음)는 단일 호출이 이미 15.6ms 틱을 넘으므로 batch 불필요.
+    ms 단위로 예산과 단위를 일치시킴.
+    지연 주입 검증: 호출 10배 지연을 주입하면 budget 100ms → 1000ms 예상,
+    실제 측정 1000ms 초과로 적색 재현됨."""
+    budget_ms = 100.0  # 실측 로컬 <50ms(fake 포트, I/O 없음), CI 편차 감안
     items = [_item(instruments=(f"{i:06d}",)) for i in range(500)]
     mapping = {f"{i:06d}": f"INSTR-{i}" for i in range(0, 500, 2)}  # 절반만 매핑
     repo = _FakeEntityLinkRepository(items)
     resolver = _FakeResolver(mapping)
 
-    start = time.perf_counter()
-    results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=500)
-    elapsed = time.perf_counter() - start
+    async def _run() -> list:
+        return await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=500)
 
-    print(f"[RD-5 link_entities] 500건 배치 {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert len(results) == 500
-    assert elapsed < budget_sec, (
-        f"500건 배치 처리가 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    sample = await perf_budget.sample_async(_run)
+    print(f"[RD-5 link_entities] 500건 배치 cpu={sample.cpu_ms:.3f}ms (budget<{budget_ms}ms)")
+    assert len(sample.result) == 500
+    assert sample.cpu_ms < budget_ms, (
+        f"500건 배치 처리가 예산({budget_ms}ms)을 넘었습니다({sample.cpu_ms:.3f}ms)."
     )
     assert resolver.call_count == 500, (
         "each item has exactly one deterministic key -> one resolve call"
