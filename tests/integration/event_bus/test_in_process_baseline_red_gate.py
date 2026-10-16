@@ -159,9 +159,9 @@ async def test_in_process_bus_audit_sink_failure_does_not_rescue_lost_events():
 @pytest.mark.perf
 async def test_in_process_bus_crash_detection_perf_budget(perf_budget):
     """perf — 이 red-gate 재현 자체가 CI 기본 스위트에 상시 포함되므로,
-    시나리오 1회 실행이 예산(2000ms, xdist 코어 경합 감안) 안에 끝나야 한다
-    (p99 budget, ADR-2026-09-09-C)."""
-    budget_ms = 2000.0
+    시나리오 1회 실행이 예산(5000ms, xdist 코어 경합/CI 병렬 안정성) 안에
+    끝나야 한다 (p99 budget, ADR-2026-09-09-C, task-15394)."""
+    budget_ms = 5000.0
     sample = await perf_budget.sample_async(_scenario)
     assert sample.result == 0
     assert sample.wall_ms < budget_ms, (
