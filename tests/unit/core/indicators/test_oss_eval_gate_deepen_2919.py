@@ -20,7 +20,6 @@ INDICATOR_OSS_EVAL.md, commit da52f3c)을 D2 미달로 판정했다 — 순수 �
 from __future__ import annotations
 
 import re
-import time
 from pathlib import Path
 
 import pytest
@@ -32,6 +31,7 @@ from src.core.indicators.oss_eval_gate import (
     assert_oss_eval_gate,
     extract_declared_dependencies,
 )
+from tests.support.perf_budget import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EVAL_PATH = _REPO_ROOT / "docs" / "design" / "INDICATOR_OSS_EVAL.md"
@@ -128,17 +128,41 @@ def test_failure_injection_read_oserror_surfaces_as_gate_red(
 
 
 @pytest.mark.perf
-def test_perf_gate_under_budget(eval_text: str, pyproject_text: str) -> None:
+def test_perf_gate_under_budget(
+    eval_text: str, pyproject_text: str, perf_budget: PerfBudget
+) -> None:
     n = 1000
-    budget_sec = 2.0
+    budget_ms = 2000.0  # 2.0 s in ms — unit matches PerfSample.cpu_ms (ms)
     assert_oss_eval_gate(eval_text, pyproject_text)  # warm
-    start = time.perf_counter()
-    for _ in range(n):
-        assert_oss_eval_gate(eval_text, pyproject_text)
-    elapsed = time.perf_counter() - start
-    print(f"[IND-9 oss_eval_gate] {n} runs {elapsed:.3f}s (budget<{budget_sec}s)")
-    assert elapsed < budget_sec, (
-        f"{n}회 게이트 실행이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    sample = perf_budget.sample(lambda: assert_oss_eval_gate(eval_text, pyproject_text), batch=n)
+    print(f"[IND-9 oss_eval_gate] {n} runs cpu={sample.cpu_ms:.3f}ms budget<{budget_ms:.3f}ms")
+    assert sample.cpu_ms < budget_ms, f"{n}회 게이트 실행이 예산({budget_ms:.3f}ms)을 넘었습니다."
+
+
+def test_perf_gate_fails_on_injected_delay(
+    eval_text: str, pyproject_text: str, perf_budget: PerfBudget
+) -> None:
+    """Failure injection: CPU-burning delay must push past budget → red.
+
+    Uses a tight computation loop (not sleep) because perf_budget measures
+    process_time — sleep() adds wall time but zero CPU time.
+    """
+
+    def _burn_cpu() -> None:
+        # ~250 ms CPU per call; batch=10 → 2500 ms avg >> 2000 ms budget
+        x = 0.0
+        for _ in range(120_000_000):
+            x += 0.1
+
+    def slow() -> object:
+        _burn_cpu()
+        return assert_oss_eval_gate(eval_text, pyproject_text)
+
+    n = 10
+    budget_ms = 2000.0
+    sample = perf_budget.sample(slow, batch=n)
+    assert sample.cpu_ms >= budget_ms, (
+        f"예상 적색: 지연 주입 후 cpu={sample.cpu_ms:.3f}ms >= budget {budget_ms:.3f}ms"
     )
 
 
