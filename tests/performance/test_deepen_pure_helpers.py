@@ -86,4 +86,4 @@ def test_percentile_throughput_budget(perf_budget) -> None:
         for _ in range(200):
             percentile(samples, 99)
 
-    perf_budget.assert_within(run_batch, budget_ms=1000, n=1, warmup=0)
+    perf_budget.assert_within(run_batch, budget_ms=1000, n=5, warmup=1)
