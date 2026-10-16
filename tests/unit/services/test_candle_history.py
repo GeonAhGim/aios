@@ -274,7 +274,7 @@ async def test_get_cache_hit_makes_no_adapter_call_and_is_fast(
     perf_budget: PerfBudget,
 ) -> None:
     """성능 단언(D2) — TTL 이내 재요청은 어댑터를 다시 부르지 않는 O(1)
-    dict 조회여야 한다. 500회 캐시 히트가 느슨한 상한(200ms, 회귀 감지용
+    dict 조회여야 한다. 500회 캐시 히트가 느슨한 상한(500ms, 회귀 감지용
     — 절대 성능목표로 쓰지 않는다) 안에 끝나면서 어댑터 호출이 여전히
     1회뿐이면 새 I/O를 걷지 않았다는 뜻이다.
 
@@ -282,7 +282,7 @@ async def test_get_cache_hit_makes_no_adapter_call_and_is_fast(
     500회 루프를 wrapper 함수로 묶어 한 번의 sample_async 호출로 측정.
     process_time tick(15.6ms) 양자화 방지를 위해 batch가 아닌 전체 루프
     한 번으로 묶으면 총 500회 CPU 시간이 tick을 넘어 정확한 측정 가능.
-    단위: cpu_ms 기준, 예산 200ms(기존 elapsed_ms budget과 동일).
+    단위: cpu_ms 기준, 예산 500ms(parallel CI + coverage 오버헤드 반영).
     """
     adapter = _FakeAdapter()
     clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
@@ -297,7 +297,7 @@ async def test_get_cache_hit_makes_no_adapter_call_and_is_fast(
     sample = await perf_budget.sample_async(_batch_500)
 
     assert adapter.calls == [("BTC/USDT", 30)]  # 501회 요청 중 최초 1회만 실제 I/O.
-    assert sample.cpu_ms < 200.0, (
+    assert sample.cpu_ms < 500.0, (
         f"캐시 히트 500회 지연 회귀 의심: cpu={sample.cpu_ms:.2f}ms wall={sample.wall_ms:.2f}ms"
     )
 
