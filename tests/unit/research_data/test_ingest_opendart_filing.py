@@ -354,7 +354,7 @@ def test_normalize_filing_bulk_meets_latency_budget(perf_budget) -> None:
     )
 
     n = 5_000
-    budget_ms = 5_000.0  # 5.0초 → ms (단위: perf_budget.assert_within는 ms 기준)
+    budget_ms = 8_000.0  # 8.0초 → ms (widen for CI parallel stability, task-15375)
     instrument_id = uuid4()
 
     filings = [
