@@ -12,7 +12,6 @@ MP-2. 완료 하한: ADR-2026-09-09-C D2 -- negative >=3, 실패주입 1, 성능
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -25,6 +24,7 @@ from src.foundation.marketplace.domain.visibility import (
     resolve_visibility,
     validate_visibility_grade,
 )
+from tests.support.perf_budget import PerfBudget
 
 OWNER = ViewerContext(is_owner=True)
 STRANGER = ViewerContext()
@@ -106,9 +106,7 @@ def test_protected_source_bypass_via_public_request_is_rejected():
     # 협의된 거부 입력: has_protected_source=True 인데 PUBLIC 등급을
     # 요청하면 ValueError -- owner가 요청해도 예외 없이 거부된다.
     with pytest.raises(ValueError, match=MarketplaceErrorCode.VISIBILITY_DENIED.value):
-        resolve_visibility(
-            ListingVisibility.PUBLIC, has_protected_source=True, viewer=OWNER
-        )
+        resolve_visibility(ListingVisibility.PUBLIC, has_protected_source=True, viewer=OWNER)
     with pytest.raises(ValueError, match=MarketplaceErrorCode.VISIBILITY_DENIED.value):
         validate_visibility_grade(ListingVisibility.PUBLIC, has_protected_source=True)
 
@@ -174,9 +172,15 @@ def test_corrupted_grade_fails_closed_and_reproduces_on_repeat():
 
 
 @pytest.mark.perf
-def test_resolve_visibility_hot_path_performance():
-    start = time.perf_counter()
-    for _ in range(10_000):
-        resolve_visibility(ListingVisibility.PROTECTED, has_protected_source=False, viewer=STRANGER)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 1.0
+def test_resolve_visibility_hot_path_performance(perf_budget: PerfBudget) -> None:
+    # batch=10_000: process_time의 Windows 양자화(약 15.6ms tick)를
+    # 덮기 위해 한 묶음으로 측정 — 호출당 값은 batch로 나눈다.
+    # 단위: budget_ms는 ms(1.0초 = 1000ms).
+    perf_budget.assert_within(
+        lambda: resolve_visibility(
+            ListingVisibility.PROTECTED, has_protected_source=False, viewer=STRANGER
+        ),
+        budget_ms=1000,
+        batch=10_000,
+        label="resolve_visibility hot path",
+    )
