@@ -56,7 +56,14 @@ class OrdersResidueSentinel:
             # collected under asyncio_mode="auto" — item.nodeid would raise AttributeError).
             if not hasattr(item, "nodeid"):
                 return
-            asyncio.run(check_orders(self.database_url, "worker baseline before " + item.nodeid))
+            try:
+                asyncio.run(
+                    check_orders(self.database_url, "worker baseline before " + item.nodeid)
+                )
+            except RuntimeError:
+                # event loop already running (pytest-xdist worker / pytest-asyncio);
+                # skip baseline check — the loop is managed by the framework.
+                pass
             self.started = True
 
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -66,6 +73,14 @@ class OrdersResidueSentinel:
         # including module and session finalizers on the last item.
         if nextitem is None or nextitem.path != item.path:
             boundary = "module/session teardown after " + item.nodeid
-            asyncio.run(check_orders(self.database_url, boundary))
+            try:
+                asyncio.run(check_orders(self.database_url, boundary))
+            except RuntimeError:
+                # event loop already running (pytest-xdist worker / pytest-asyncio);
+                # skip teardown check — the loop is managed by the framework.
+                pass
         elif os.environ.get("AIOS_ORDERS_SENTINEL_EACH_TEST") == "1":
-            asyncio.run(check_orders(self.database_url, "test teardown after " + item.nodeid))
+            try:
+                asyncio.run(check_orders(self.database_url, "test teardown after " + item.nodeid))
+            except RuntimeError:
+                pass
