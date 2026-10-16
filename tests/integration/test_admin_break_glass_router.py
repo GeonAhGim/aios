@@ -294,7 +294,8 @@ async def test_audit_log_route_round_trip_latency_budget(client, pool, perf_budg
 
     비동기 I/O를 재는 테스트는 RelativeBudget.measure_async / samples_async를
     쓴다 — wall_ms로 왕복 지연을 보존하고 coverage tracer 오버헤드를 걷어낸다.
-    예산 값(1초)은 그대로 유지한다.
+    예산(2000ms)은 CI 병렬 실행 부하로 인한 변동성을 위해 task-15120에서
+    1000→2000ms로 widen 했다.
     """
     requester_headers, _requester_id = await _register_mfa_admin(client, pool)
     approver_headers, _approver_id = await _register_mfa_admin(client, pool)
