@@ -3,11 +3,11 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md sec.9 RD-14
 DoD ("10-K/Q, 8-K normalization").
 """
+
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -20,6 +20,7 @@ from src.foundation.research_data.adapters.sources.sec_edgar import (
     fetch_sec_edgar_filings,
     parse_sec_edgar_submissions,
 )
+from tests.support.perf_budget import PerfBudget
 
 
 def _submissions(**overrides: Any) -> dict[str, Any]:
@@ -202,7 +203,15 @@ async def test_fetch_sec_edgar_filings_builds_url_and_headers() -> None:
 
 
 @pytest.mark.perf
-def test_parse_sec_edgar_submissions_throughput_floor() -> None:
+def test_parse_sec_edgar_submissions_throughput_floor(
+    perf_budget: PerfBudget,
+) -> None:
+    """Raw ``time.perf_counter()`` → ``perf_budget.sample(batch=1)`` 전환.
+
+    예산: 3 000회 / 2 000회·초⁻¹ = 1 500ms 총소요. ``batch=1``로 전체
+    페이로드 한 번에 측정하고 ``cpu_ms``로 예산 판정.
+    """
+
     size = 1_000
     payload = _submissions(
         form=["10-K", "10-Q", "8-K"] * size,
@@ -211,9 +220,14 @@ def test_parse_sec_edgar_submissions_throughput_floor() -> None:
         acceptanceDateTime=["2024-02-15T18:30:00.000Z"] * (3 * size),
         primaryDocument=["aapl-20240215.htm"] * (3 * size),
     )
-    started = time.perf_counter()
-    items = parse_sec_edgar_submissions(payload, cik="320193")
-    elapsed = time.perf_counter() - started
+
+    def _run() -> list[Any]:
+        return parse_sec_edgar_submissions(payload, cik="320193")
+
+    sample = perf_budget.sample(_run, batch=1)
+    items = cast(list[Any], sample.result)
     assert len(items) == 3 * size
-    throughput = len(items) / elapsed
-    assert throughput > 2_000, f"parse_sec_edgar_submissions throughput too low: {throughput:.0f}/s"
+    assert sample.cpu_ms < 1_500.0, (
+        f"parse_sec_edgar_submissions cpu_ms {sample.cpu_ms:.1f} exceeds "
+        f"1500ms budget (3000 items, throughput floor 2000/s)"
+    )
