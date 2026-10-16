@@ -173,11 +173,20 @@ async def test_decision_with_null_execution_ref_is_never_actionable(pool, victim
         execution_ref=None,
         inputs_snapshot=snapshot,
     )
-    async with pool.acquire() as conn:
-        with _rejected("execution_ref"):
-            await _insert(
-                conn, victim["user_id"], unbound.decision_id, execution_id=victim["execution_id"]
-            )
+    order_ids: list[UUID] = []
+    try:
+        async with pool.acquire() as conn:
+            with _rejected("execution_ref"):
+                oid = await _insert(
+                    conn,
+                    victim["user_id"],
+                    unbound.decision_id,
+                    execution_id=victim["execution_id"],
+                )
+                order_ids.append(oid)
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
 
 
 @pytest.mark.parametrize(
