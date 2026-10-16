@@ -1,4 +1,5 @@
 """Check the shared worker database outside fixture setup/teardown lifetimes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,8 @@ from scripts import replay_verify
 async def check_orders(database_url: str, boundary: str) -> None:
     pool = await asyncpg.create_pool(
         database_url.replace("postgresql+asyncpg://", "postgresql://"),
-        min_size=1, max_size=1,
+        min_size=1,
+        max_size=1,
     )
     try:
         report = await replay_verify.verify(pool, as_of=datetime.now(timezone.utc), hours=24)
@@ -50,6 +52,10 @@ class OrdersResidueSentinel:
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_setup(self, item):
         if not self.started:
+            # Guard: skip if item is not a proper pytest Item (e.g., coroutine from async test
+            # collected under asyncio_mode="auto" — item.nodeid would raise AttributeError).
+            if not hasattr(item, "nodeid"):
+                return
             asyncio.run(check_orders(self.database_url, "worker baseline before " + item.nodeid))
             self.started = True
 
