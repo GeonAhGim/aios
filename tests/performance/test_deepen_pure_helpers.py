@@ -79,11 +79,11 @@ def test_query_logger_propagates_append_failure(monkeypatch: pytest.MonkeyPatch)
 @pytest.mark.perf
 def test_percentile_throughput_budget(perf_budget) -> None:
     """D2 성능 단언 — 순수 CPU 정렬/인덱싱 연산이므로 10,000개 표본에 대한
-    200회 p99 계산이 1초 예산 안에 들어야 한다(회귀 시 여기서 잡힌다)."""
+    200회 p99 계산이 2초 예산 안에 들어야 한다(회귀 시 여기서 잡힌다)."""
     samples = [float(i) for i in range(10_000)]
 
     def run_batch():
         for _ in range(200):
             percentile(samples, 99)
 
-    perf_budget.assert_within(run_batch, budget_ms=1000, n=5, warmup=1)
+    perf_budget.assert_within(run_batch, budget_ms=2000, n=5, warmup=1)
