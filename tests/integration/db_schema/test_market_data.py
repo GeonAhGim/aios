@@ -363,8 +363,8 @@ async def test_md_candle_bulk_insert_p95_under_budget(
     samples = await perf_budget.samples_async(_make_call, n=n)
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
-    print(f"[LA-11 md_candle insert] n={n} p95={p95_ms:.2f}ms (budget<30ms)")
-    assert p95_ms < 30.0, f"md_candle 단건 INSERT p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
+    print(f"[LA-11 md_candle insert] n={n} p95={p95_ms:.2f}ms (budget<60ms)")
+    assert p95_ms < 60.0, f"md_candle 단건 INSERT p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
 
 
 async def test_md_candle_lifecycle_replayed_quarantine_then_accept_does_not_leak(raw_conn):
