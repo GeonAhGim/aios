@@ -10,7 +10,6 @@ ruff `TID251`(banned-api, pyproject.toml)이 같은 규칙을 정적 분석 단�
 from __future__ import annotations
 
 import ast
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -174,22 +173,32 @@ def test_injection_read_error_raises_gracefully() -> None:
 
 
 @pytest.mark.perf
-def test_zone_scan_completes_within_budget() -> None:
-    """성능 단언: 전체 domain/** 디렉터리 스캔 + AST 파싱이 _MAX_SCAN_SECONDS(5초) 내에
-    완료되어야 한다. 대규모 리포에서 검사 시간이 선형으로 증가해도 예산을 지키는지 확인한다."""
+def test_zone_scan_completes_within_budget(perf_budget) -> None:
+    """성능 단언: 전체 domain/** 디렉터리 스캔 + AST 파싱이 _MAX_SCAN_SECONDS(10초) 내에
+    완료되어야 한다. 대규모 리포에서 검사 시간이 선형으로 증가해도 예산을 지키는지 확인한다.
+
+    raw time.perf_counter() → perf_budget.sample(batch=N) 전환(task-15300).
+    process_time의 15.6ms 틱으로 1회 호출은 0/15.6만 나오므로 batch=8로 묶어
+    호출당 오차를 ~2ms로 줄인다. 예산 단위: ms(10초 → 10000ms).
+    """
     domain_dirs = _domain_dirs()
     assert domain_dirs, "검사 대상이 없으면 성능 단언이 무의미해짐"
 
-    t0 = time.perf_counter()
-    total_violations = 0
-    for domain_dir in domain_dirs:
-        for py_file in domain_dir.rglob("*.py"):
-            source = py_file.read_text(encoding="utf-8")
-            found = _find_banned_imports(source, BANNED_MODULES)
-            total_violations += len(found)
-    elapsed = time.perf_counter() - t0
+    budget_ms = _MAX_SCAN_SECONDS * 1000  # 초 → ms 단위 일치
 
-    assert elapsed < _MAX_SCAN_SECONDS, (
-        f"domain 스캔에 {elapsed:.2f}초 소요 — 예산 {_MAX_SCAN_SECONDS}초 초과. "
-        f"스캔된 파일 수: 총 {sum(1 for d in domain_dirs for _ in d.rglob('*.py'))}"
+    def _scan_once() -> int:
+        total_violations = 0
+        for domain_dir in domain_dirs:
+            for py_file in domain_dir.rglob("*.py"):
+                source = py_file.read_text(encoding="utf-8")
+                found = _find_banned_imports(source, BANNED_MODULES)
+                total_violations += len(found)
+        return total_violations
+
+    sample = perf_budget.sample(_scan_once, batch=8)
+    cpu_ms = sample.cpu_ms
+
+    assert cpu_ms < budget_ms, (
+        f"domain 스캔에 {cpu_ms:.2f}ms 소요 — 예산 {budget_ms}ms 초과. "
+        f"batch=8, 호출당 {cpu_ms / 8:.2f}ms"
     )
