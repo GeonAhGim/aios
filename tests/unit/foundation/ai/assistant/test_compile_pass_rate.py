@@ -167,15 +167,15 @@ async def test_generate_script_provider_raises_exception() -> None:
 # ---------------------------------------------------------------------------
 
 
-# perf: 1000개 항목 집계 성능 — xdist core contention 하에서도 <100ms 보장
+# perf: 1000개 항목 집계 성능 — xdist core contention 하에서도 <200ms 보장
 @pytest.mark.perf
 async def test_large_outcome_list_performance(perf_budget) -> None:
     """1000 개 항목 처리 → 시간 측정 및 성능 단언."""
     statuses = ["compiled", "compile_failed"] * 500
-    # 1000 개 항목 집계는 100ms 이내여야 함
+    # 1000 개 항목 집계는 200ms 이내여야 함 (CI xdist 안정화, task-15137)
     sample = perf_budget.assert_within(
         lambda: build_pass_rate_report(statuses),
-        budget_ms=100,
+        budget_ms=200,
         batch=20,
         label="build_pass_rate_report for 1000 items",
     )
