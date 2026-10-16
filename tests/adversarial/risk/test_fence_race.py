@@ -16,7 +16,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §9 R-37 DoD("gather 경합 post-fen
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -55,6 +55,41 @@ from tests.integration.conftest import create_test_tenant
 _N_EARLY = 3
 _N_LATE = 3
 _N_UNSTAGED = 8
+
+
+@pytest.fixture
+async def _fence_race_cleanup(pool: asyncpg.Pool) -> AsyncGenerator[None, None]:
+    """Cleanup eventless orders created by this test module on teardown.
+
+    `submit_with_fence` fence-stale path (fenced_submit.py:142-172) updates
+    `orders.status` to FAILED without inserting a companion `order_events` row,
+    violating I-6. The sentinel (orders_residue.py) flags these as residue.
+    This fixture deletes any eventless orders with strategy_id='fence-race'
+    both at setup (to start clean) and at teardown (to leave no residue).
+    """
+    # Start clean: remove any residue left by previous runs
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM orders "
+            "WHERE order_id IN ("
+            "  SELECT o.order_id FROM orders o "
+            "  WHERE NOT EXISTS ("
+            "    SELECT 1 FROM order_events e WHERE e.order_id = o.order_id"
+            "  ) AND o.strategy_id = 'fence-race'"
+            ")"
+        )
+    yield
+    # Teardown: remove any eventless orders created by this test
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM orders "
+            "WHERE order_id IN ("
+            "  SELECT o.order_id FROM orders o "
+            "  WHERE NOT EXISTS ("
+            "    SELECT 1 FROM order_events e WHERE e.order_id = o.order_id"
+            "  ) AND o.strategy_id = 'fence-race'"
+            ")"
+        )
 
 
 @dataclass(frozen=True)
@@ -106,7 +141,7 @@ def _recording_hook(
 
 
 async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(
-    pool: asyncpg.Pool, ctx: _Ctx
+    pool: asyncpg.Pool, ctx: _Ctx, _fence_race_cleanup: None
 ) -> None:
     metrics = SpyMetrics()
     fence_at_place: dict[UUID, Mapping[str, int]] = {}
@@ -186,7 +221,7 @@ async def test_staged_gather_kill_switch_vs_submits_post_fence_zero(
 
 
 async def test_unstaged_gather_every_post_fence_effect_is_detected_and_reversed(
-    pool: asyncpg.Pool, ctx: _Ctx
+    pool: asyncpg.Pool, ctx: _Ctx, _fence_race_cleanup: None
 ) -> None:
     metrics = SpyMetrics()
     fence_at_place: dict[UUID, Mapping[str, int]] = {}
