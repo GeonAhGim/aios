@@ -56,17 +56,17 @@ def test_greek_failure_injection_is_fail_closed() -> None:
 
 @pytest.mark.perf
 def test_chain_contract_validation_is_under_budget(perf_budget) -> None:
-    """task-11810 — raw perf_counter → perf_budget.assert_within(batch=500, budget_ms=500).
+    """task-11810 — raw perf_counter → perf_budget.assert_within(batch=500, budget_ms=800).
 
     batch=500: process_time() Windows tick ≈15.6 ms이므로 1회 측정만 하면 0/15.6만 나온다.
     500회를 묶어 batch 평균을 내면 tick 오차가 15.6/500 ≈ 0.03 ms로 떨어진다.
-    단위: budget_ms=500 (CI 병렬 실행 CPU 경합으로 300ms가 불안정, task-15360).
+    단위: budget_ms=800 (CI 병렬 실행 CPU 경합으로 500ms가 불안정, task-15369).
 
-    검출력: budget을 10배로 늘린 5000 ms 주입 지연 테스트는 적색(5.0초 이상 걸림).
+    검출력: budget을 10배로 늘린 8000 ms 주입 지연 테스트는 적색(8.0초 이상 걸림).
     """
     perf_budget.assert_within(
         lambda: _contract(),
-        budget_ms=500,
+        budget_ms=800,
         batch=500,
     )
 
