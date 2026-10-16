@@ -1,7 +1,8 @@
-"""Audit Event 도메인 모델 — pure value object.
+"""Audit Event domain model — pure value object.
 
 Spec: AIOSproject 79_audit_evidence_l3_build_and_operational_specification_v1.0.md §1.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -27,11 +28,11 @@ class Classification(str, Enum):
 
 @dataclass(frozen=True)
 class AuditEvent:
-    """79번 §1 `audit_event` — append-only, per-aggregate sequence unique.
+    """79 §1 `audit_event` — append-only, per-aggregate sequence unique.
 
-    `tenant_id`가 None이면 system 이벤트(79번 §1 그대로)다. 체인은 tenant별로
-    독립적이다 — `sequence_no`/`previous_hash`/`event_hash`가 그 tenant(또는
-    system)의 체인 안에서만 의미를 갖는다."""
+    If `tenant_id` is None, this is a system event (as per §1). The chain is
+    independent per tenant — `sequence_no`/`previous_hash`/`event_hash` are
+    meaningful only within that tenant's (or system's) chain."""
 
     id: UUID
     tenant_id: UUID | None
