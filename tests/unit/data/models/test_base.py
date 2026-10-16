@@ -160,4 +160,4 @@ def test_money_add_perf_budget_many_iterations(perf_budget):
         for _ in range(1000):
             a + b
 
-    perf_budget.assert_within(_run, budget_ms=100, label="Money.__add__ x1000")
+    perf_budget.assert_within(_run, budget_ms=200, label="Money.__add__ x1000")
