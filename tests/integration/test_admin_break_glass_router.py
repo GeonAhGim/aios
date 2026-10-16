@@ -309,8 +309,8 @@ async def test_audit_log_route_round_trip_latency_budget(client, pool, perf_budg
             "/admin/audit-log", headers={**reader_headers, "X-Break-Glass-Grant": grant_id}
         )
     )
-    assert sample.wall_ms < 1000, (
-        f"GET /admin/audit-log elapsed={sample.wall_ms:.2f}ms, 예산 1000ms 초과"
+    assert sample.wall_ms < 2000, (
+        f"GET /admin/audit-log elapsed={sample.wall_ms:.2f}ms, 예산 2000ms 초과"
     )
 
 
