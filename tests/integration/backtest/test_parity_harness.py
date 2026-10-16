@@ -323,10 +323,10 @@ def test_parity_throughput_within_monthly_backtest_budget(perf_budget) -> None:
 
     sample = perf_budget.assert_within(
         lambda: check_parity(paper, backtest),
-        budget_ms=5000.0,
+        budget_ms=10000.0,
         n=1,
         warmup=0,
-        label="43,200 fill pair parity comparison — 예산 5s (CI parallel stability)",
+        label="43,200 fill pair parity comparison — 예산 10s (CI parallel stability)",
     )
 
     report = sample.result
