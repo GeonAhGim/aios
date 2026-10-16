@@ -148,12 +148,17 @@ async def test_i10_db_layer_rejects_allow_transferred_to_other_execution_symbol_
 async def test_single_binding_field_mismatch_is_rejected(pool, victim, update, field):
     """tenant·outcome·만료는 전부 맞고 결속 필드 하나만 다르다 — 그 하나로 거부.
     `orders.execution_id`는 NULL 허용 컬럼: NULL이면 결속 증명 불가 → 거부."""
+    order_ids: list[UUID] = []
     if update.get("execution_id") == _OTHER_EXEC:
         update = {"execution_id": await seed_execution(pool, victim["user_id"])}
     kwargs = {"execution_id": victim["execution_id"], **update}
-    async with pool.acquire() as conn:
-        with _rejected(field):
-            await _insert(conn, victim["user_id"], victim["decision_id"], **kwargs)
+    try:
+        async with pool.acquire() as conn:
+            with _rejected(field):
+                await _insert(conn, victim["user_id"], victim["decision_id"], **kwargs)
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
 
 
 # --- NULL·결손·변조 스냅샷: fail-closed 경계 -------------------------------------
