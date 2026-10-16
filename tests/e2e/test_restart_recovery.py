@@ -196,6 +196,12 @@ async def test_restart_recovery_reclaims_lease_and_resyncs_stale_order(pool: asy
     assert audit_rows
 
     assert published
+
+    # Cleanup: repository.insert creates no order_events; delete residue on both pass and fail.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM orders WHERE client_order_id = $1", stale_order.client_order_id
+        )
     assert published[-1][0] == "order.status.changed"
     assert published[-1][1]["status"] == "CANCELLED"
 
@@ -253,6 +259,10 @@ async def test_submit_order_denied_until_recovery_completes_then_allowed(
         pre_submit_gate=make_recovery_gate(state, real_gate),
     )
     assert submitted.status is OrderStatus.FILLED
+
+    # Cleanup: submit_order may create orders without order_events on failure path.
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM orders WHERE client_order_id = $1", order.client_order_id)
 
 
 async def test_recovery_failure_injection_keeps_submissions_denied(
