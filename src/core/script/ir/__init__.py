@@ -1,8 +1,9 @@
-"""AIOS Script IR 패키지(§9.4 DSL-7) — 명령 집합(`ops.py`)과 AST→IR 로우어링(`lower.py`).
+"""AIOS Script IR package (§9.4 DSL-7) — ops set (`ops.py`) and AST-to-IR lowering (`lower.py`).
 
-신규 패키지, `src/core/**` SCAFFOLD zone. 순수(I/O 없음). 소비자: DSL-8
-인터프리터(실행), DSL-12 `artifact/hash.py`(script_hash에 IR 바이트 포함).
+New package under `src/core/**` SCAFFOLD zone. Pure (no I/O). Consumers: DSL-8
+interpreter (execution), DSL-12 `artifact/hash.py` (includes IR bytes in script_hash).
 """
+
 from __future__ import annotations
 
 from src.core.script.ir.lower import ScriptLowerError, lower_expr, lower_program
