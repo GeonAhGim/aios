@@ -138,7 +138,12 @@ async def _insert_terminal_order(
     strategy_id: str,
     strategy_version: str,
     status: str,
-) -> None:
+) -> uuid.UUID:
+    """Insert an order and its matching order_event so the
+    OrdersResidueSentinel does not flag it as eventless residue."""
+    order_id = uuid.uuid4()
+    client_id = f"{status.lower()}-{uuid.uuid4().hex}"
+    exchange_id = f"ex-{status.lower()}-{uuid.uuid4().hex[:8]}"
     await pool.execute(
         """
         INSERT INTO orders (
@@ -146,15 +151,32 @@ async def _insert_terminal_order(
             strategy_version, execution_id, symbol, exchange, side, order_type,
             quantity, status, filled_quantity, is_liquidation, asset_class
         ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5,
-            $6, 'BTC/USDT', 'bitget', 'BUY', 'MARKET', 0.01, $7, 0, false, 'CRYPTO'
+            $1, $2, $3, $4, $5, $6,
+            $7, 'BTC/USDT', 'bitget', 'BUY', 'MARKET', 0.01, $8, 0, false, 'CRYPTO'
         )
         """,
+        order_id,
         user_id,
-        f"{status.lower()}-{uuid.uuid4().hex}",
-        f"ex-{status.lower()}-{uuid.uuid4().hex[:8]}",
+        client_id,
+        exchange_id,
         strategy_id,
         strategy_version,
         execution_id,
         status,
     )
+    # Insert a matching event so the sentinel's eventless-check passes.
+    # from_status=CREATED, to_status=<actual>, event=STATUS_CHANGED
+    # matches the invariant "no status change without an order_events row".
+    await pool.execute(
+        """
+        INSERT INTO order_events (
+            order_id, from_status, to_status, event, actor_subject_id, trace_id,
+            occurred_at, payload_hash
+        ) VALUES ($1, 'CREATED', $2, 'STATUS_CHANGED', 'system', $3, now(), $4)
+        """,
+        order_id,
+        status,
+        uuid.uuid4(),
+        "e" * 64,
+    )
+    return order_id
