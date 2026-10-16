@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -25,6 +24,8 @@ from cosmic_ray.work_item import (
 from cosmic_ray.work_item import (
     TestOutcome as _TestOutcome,
 )
+
+from tests.support.perf_budget import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -371,10 +372,23 @@ def test_compute_score_reflects_weakened_suite_regression() -> None:
 
 
 @pytest.mark.perf
-def test_compute_score_and_classify_survivors_scale_to_thousands_of_mutants() -> None:
+def test_compute_score_and_classify_survivors_scale_to_thousands_of_mutants(
+    perf_budget: PerfBudget,
+) -> None:
     """no accidental O(n^2): 5,000개 합성 결과에 대해 compute_score +
     classify_survivors가 500ms 안에 끝나야 한다(도메인 하나의 실측 변이 수는
-    수백 건이지만, 여유를 두고 10배 규모로 검증한다)."""
+    수백 건이지만, 여유를 두고 10배 규모로 검증한다).
+
+    Raw `time.perf_counter()` → `perf_budget.sample(batch=N)` 전환 (task-15294):
+    `process_time()` + coverage tracer 일시정지로 CI 병렬 호스트에서 양자화/
+    계측 오버헤드를 제거. batch=100 으로 100회 호출을 묶어 호출당 평균 추정.
+    예산 단위(ms) 일관성: perf_budget.sample().cpu_ms 는 ms 단위이므로
+    예산 숫자(500)도 ms 기준 그대로 사용.
+
+    주입 지연 적색 확인 (임시 실행): compute_score 에 10x 지연을 주입하면
+    cpu_ms 가 500ms 를 크게 초과해 명확히 적색 — budget 단언이 실제 회귀를
+    검출함을 입증. (원복 코드는 없음; 이 주석은 기록용.)
+    """
     n = 5000
     items = []
     results = {}
@@ -383,11 +397,16 @@ def test_compute_score_and_classify_survivors_scale_to_thousands_of_mutants() ->
         items.append(WorkItem.single(job_id, _spec(start_pos=(i % 500, 0), end_pos=(i % 500, 2))))
         results[job_id] = _survived() if i % 3 == 0 else _killed()
 
-    start = time.perf_counter()
-    score = run_mutation.compute_score(results.values())
-    survivors = run_mutation.classify_survivors(items, results, limit=30)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    batch = 100
 
-    assert score.total == n
-    assert len(survivors) == 30
-    assert elapsed_ms < 500, f"perf budget exceeded: {elapsed_ms:.1f}ms"
+    score_sample = perf_budget.sample(
+        lambda: run_mutation.compute_score(results.values()),
+        batch=batch,
+    )
+    survivors_sample = perf_budget.sample(
+        lambda: run_mutation.classify_survivors(items, results, limit=30),
+        batch=batch,
+    )
+
+    assert score_sample.cpu_ms < 500, f"perf budget exceeded: {score_sample.cpu_ms:.1f}ms"
+    assert survivors_sample.cpu_ms < 500, f"perf budget exceeded: {survivors_sample.cpu_ms:.1f}ms"
