@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from time import perf_counter
+from time import process_time
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -210,13 +210,15 @@ def test_concurrent_plan_slices_invocations_do_not_cross_contaminate() -> None:
 
 @pytest.mark.perf
 def test_max_slice_count_planning_latency_budget() -> None:
-    """500슬라이스(계약 상한) 계획을 100회 반복 — 로컬 회귀 예산이며 SLO 아님."""
+    """500슬라이스(계약 상한) 계획을 100회 반복 — 로컬 회귀 예산이며 SLO 아님.
+    perf_counter(wall-clock)가 아닌 process_time(CPU 시간)으로 측정해 CI의
+    다른 프로세스/coverage 오버헤드가 예산 판정에 섞이지 않도록 한다."""
     req = _request(slice_count=500, total_quantity=Decimal("500"))
     plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
-    started = perf_counter()
+    started = process_time()
     for _ in range(100):
         plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
-    elapsed = perf_counter() - started
+    elapsed = process_time() - started
     assert elapsed < 20.0, f"100 x 500-slice plans took {elapsed:.3f}s (budget 20.0s)"
 
 
