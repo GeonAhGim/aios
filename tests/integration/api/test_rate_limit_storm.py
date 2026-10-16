@@ -228,7 +228,13 @@ async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regre
     (limiter.py 모듈 docstring 47행) 획득 경로에 예산의 배수만큼 지연을
     주입하면(락 경합 회귀를 흉내) 같은 p99 단언이 실제로 적색(AssertionError)
     이 되어야 한다.
-    raw perf_counter → perf_budget.samples_async(task-11034)."""
+
+    단위/틱 정정(task-15550): `sample_async`는 batch 파라미터가 없어 호출 1회당
+    CPU 시간이 Windows 15.6ms 틱으로 양자화된다(대부분 0). `wall_ms`도tick
+    양자화로 ~15ms 이상이라 지연 주입 없이도 항상 적색 — 허울 단언이었다.
+    이제 첫 테스트와 동일한 수동 batch(=8) 패턴으로 CPU 시간과 wall 시간을
+    함께 재며, 지연 주입 시 wall_ms가 예산을 넘는지 확인한다.
+    """
     bucket = InMemoryTokenBucket(clock=time.monotonic)
     policy = POLICIES["read"]
     original_acquire = bucket._lock.acquire
@@ -239,15 +245,19 @@ async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regre
 
     monkeypatch.setattr(bucket._lock, "acquire", delayed_acquire)
 
-    samples = await perf_budget.samples_async(
-        lambda: bucket.acquire(policy, "perf:subject-2"),
-        n=5,
-    )
+    batch = 8
+    n = 30
+    wall_ms_per_call: list[float] = []
+    for _ in range(n):
+        with paused_coverage():
+            wall_start = time.perf_counter()
+            for _ in range(batch):
+                await bucket.acquire(policy, "perf:subject-2")
+            wall_ms_per_call.append((time.perf_counter() - wall_start) * 1000 / batch)
 
-    # original test measured wall time via perf_counter — use wall_ms
-    wall_values = sorted(s.wall_ms for s in samples)
-    index = max(0, math.ceil(0.99 * len(wall_values)) - 1)
-    p99_ms = wall_values[index]
+    wall_ms_per_call.sort()
+    index = max(0, math.ceil(0.99 * len(wall_ms_per_call)) - 1)
+    p99_ms = wall_ms_per_call[index]
 
     with pytest.raises(AssertionError):
         assert p99_ms < _ACQUIRE_P99_BUDGET_SECONDS * 1000
