@@ -6,6 +6,7 @@ DoD ("link_only 강제").
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from src.foundation.research_data.domain.source_eval_gate import (
     SourceEvalGateError,
     assert_source_eval_gate,
 )
+from tests.support.perf_budget import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EVAL_PATH = _REPO_ROOT / "docs" / "design" / "RESEARCH_DATA_SOURCE_EVAL.md"
@@ -172,6 +174,25 @@ def test_parse_gdelt_gkg_export_throughput_floor(perf_budget: Any) -> None:
     per_record_ms = sample.cpu_ms / 2_000
     throughput = 1_000 / per_record_ms  # records/s
     assert throughput > 5_000, f"parse_gdelt_gkg_export throughput too low: {throughput:.0f}/s"
+
+
+def test_parse_gdelt_gkg_export_throughput_floor_injected_delay_goes_red() -> None:
+    """task-15287 — 주입 지연(10×)이 적색을 내는지 확인.
+
+    정상 budget cpu_ms ~0.05ms 에 10배 지연(0.5ms) 을 주입하면 assert_within 가
+    적색이어야 한다. budget 단위(ms)와 sample.cpu_ms 단위(ms)가 일치함을 검증.
+    """
+    text = "\n".join(_row(record_id=f"rec-{i}") for i in range(2_000))
+    batch = 50
+
+    def slow_parse() -> None:
+        parse_gdelt_gkg_export(text)
+        time.sleep(0.5)  # 10× 지연 주입
+
+    pb = PerfBudget()
+    # assert_within 는 budget 초과 시 AssertionError 를 raise — 적색 검증
+    with pytest.raises(AssertionError):
+        pb.assert_within(slow_parse, budget_ms=0.05, n=1, warmup=0, batch=batch)
 
 
 # --- gate red reproduction (D2 floor) --------------------------------------
