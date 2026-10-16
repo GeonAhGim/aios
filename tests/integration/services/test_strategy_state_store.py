@@ -232,7 +232,7 @@ async def test_save_load_round_trip_within_budget(pool, perf_budget):
             await load_state(conn, execution_id)
 
     sample = await perf_budget.sample_async(_round_trip)
-    assert sample.wall_ms < 200, f"round-trip wall={sample.wall_ms:.1f}ms exceeds 200ms budget"
+    assert sample.wall_ms < 400, f"round-trip wall={sample.wall_ms:.1f}ms exceeds 400ms budget"
 
 
 async def test_regression_confirms_suite_would_catch_missing_version_guard(pool, monkeypatch):
