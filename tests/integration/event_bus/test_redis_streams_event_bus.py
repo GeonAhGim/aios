@@ -370,7 +370,15 @@ async def test_transient_redis_read_failure_recovers(redis_url, monkeypatch):
 
 
 @pytest.mark.perf
-async def test_dispatch_latency_p95_under_ws_fanout_budget(redis_url):
+async def test_dispatch_latency_p95_under_ws_fanout_budget(redis_url, perf_budget):
+    """task-15265: raw time.monotonic() 단언 → perf_budget 경유 전환.
+
+    per-message dispatch 지연은 비동기 I/O(wall-clock) 측정이라
+    PerfBudget.process_time 기반 샘플링으로 대체 불가 — Redis 네트워크/큐
+    대기 시간이 process_time에 잡히지 않는다. 따라서 time.monotonic()으로
+    per-message wall-clock 지연을 추적하되, perf_budget 픽스처를 파라미터로
+    받아 coverage tracer 일시정지 등 perf 측정 공용 파이프라인에 가입한다.
+    """
     topic = _topic("perf")
     n = 200
     latencies: list[float] = []
