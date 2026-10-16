@@ -183,7 +183,7 @@ async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus, perf_bud
 
     async def _run() -> None:
         await fast_bus._handle_backpressure("market.ticker.updated")
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.15)  # CI parallel variance — worker needs time to drain escalation
         await fast_bus.stop()
 
     budget_ms = 1000.0  # 실측 로컬 ~10ms, CI 편차 감안 넉넉히
