@@ -1,9 +1,10 @@
-"""UpdateChartLayout 커맨드 — 낙관적 잠금(105번 표준).
+"""UpdateChartLayout command — Optimistic lock (standard-105 pattern).
 
-호출 순서가 중요하다: 먼저 `load_owned_layout()`으로 404(없음/타 테넌트)를
-가려내고, 그 다음에야 조건부 UPDATE를 시도한다 — 그래야 "타 테넌트 소유
-layout_id에 잘못된 revision을 보냈을 때" 404가 나오지, 409(동시성 충돌)로
-새어나가 "그 id가 존재는 한다"는 정보를 흘리지 않는다."""
+Call order matters: first filter out 404 (missing/other tenant) via
+`load_owned_layout()`, then attempt the conditional UPDATE — this ensures
+that sending a stale revision for another tenant's layout_id returns 404
+instead of leaking the fact that the ID exists via 409 (concurrency conflict)."""
+
 from __future__ import annotations
 
 from typing import Any
