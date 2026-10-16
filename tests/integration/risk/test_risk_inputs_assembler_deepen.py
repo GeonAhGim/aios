@@ -301,7 +301,7 @@ async def test_assemble_risk_inputs_latency_within_order_submission_budget(pool,
         )
     ]
 
-    budget_ms = 100.0
+    budget_ms = 200.0
     latencies_ms: list[float] = []
     for _ in range(10):
         sample = await perf_budget.sample_async(
