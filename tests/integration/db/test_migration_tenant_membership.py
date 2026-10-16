@@ -101,7 +101,7 @@ async def test_downgrade_then_upgrade_backfills_personal_tenant() -> None:
     runs against its own disposable DB clone
     (`tests/support/db.ensure_worker_database`), so an interrupted downgrade
     can only corrupt its own throwaway DB."""
-    migration_db_url = await ensure_worker_database(template_database_url(), "tenantmembershiprt")
+    migration_db_url = await ensure_worker_database(template_database_url(), "tm_rt")
     migration_pool = await create_pool_with_retry(
         migration_db_url.replace("postgresql+asyncpg://", "postgresql://"),
         min_size=1,
