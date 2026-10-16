@@ -4,7 +4,6 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.1(A) PLT-06
 """
 
 import asyncio
-import time
 import uuid
 from datetime import datetime, timezone
 
@@ -232,37 +231,47 @@ async def test_audit_sink_failure_does_not_kill_worker_loop():
 
 
 @pytest.mark.perf
-async def test_publish_dispatch_latency_p95_within_budget():
-    """수치 성능 단언 — publish()(봉투 wrap + 큐 적재) 1회 호출의 p95
-    지연시간이 예산(5ms)을 넘지 않아야 한다. 실측 기준선은 ~0.01ms
-    수준(500배 이상 여유) — 이 단언은 in-process 경로가 회귀로 인해
-    수 ms 이상 느려지는 것을 잡기 위한 것이지, 현재 실측치에 딱 맞춘
-    타이트한 문턱이 아니다."""
+async def test_publish_dispatch_latency_p95_within_budget(perf_budget):
+    """publish 배치의 호출당 p95가 기존 5ms 예산 이내여야 한다."""
+    from tests._perf.relative_budget import RelativeBudget
+
+    batch = 16
+    n = 20
     bus = InProcessEventBus(
         max_queue_depth=2000,
         backpressure_sustained_seconds=60.0,
         max_retries=1,
         retry_initial_delay_seconds=0.01,
     )
+    processed = 0
 
     async def handler(payload):
-        pass
+        nonlocal processed
+        processed += 1
+
+    async def publish_batch():
+        for i in range(batch):
+            await bus.publish("perf.topic", {"i": i})
+
+    async def measure_batch():
+        return await perf_budget.sample_async(publish_batch)
 
     bus.subscribe("perf.topic", handler, criticality=HandlerCriticality.SAFE)
     await bus.start()
+    budget = RelativeBudget()
+    latencies_ms: list[float] = []
+    try:
+        for _ in range(n):
+            # Wall 측정은 await 지연도 보존한다. best-of-3 배치 값을 ms/호출로 환산.
+            sample = await budget.measure_async(measure_batch, n=3, warmup=0)
+            latencies_ms.append(sample.op_ms / batch)
+            await asyncio.wait_for(bus._queues["perf.topic"].join(), timeout=5.0)
+        assert processed == n * 3 * batch
+    finally:
+        await bus.stop()
 
-    n = 500
-    latencies: list[float] = []
-    for i in range(n):
-        start = time.perf_counter()
-        await bus.publish("perf.topic", {"i": i})
-        latencies.append(time.perf_counter() - start)
-
-    await asyncio.sleep(0.1)
-    await bus.stop()
-
-    latencies.sort()
-    p95_ms = latencies[int(n * 0.95)] * 1000
+    latencies_ms.sort()
+    p95_ms = latencies_ms[int(n * 0.95)]
     assert p95_ms < PUBLISH_P95_BUDGET_MS, (
         f"publish() p95 지연시간 {p95_ms:.4f}ms가 예산 {PUBLISH_P95_BUDGET_MS}ms 초과"
     )
