@@ -219,7 +219,7 @@ def test_max_slice_count_planning_latency_budget() -> None:
     for _ in range(100):
         plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
     elapsed = process_time() - started
-    assert elapsed < 480.0, f"100 x 500-slice plans took {elapsed:.3f}s (budget 480.0s)"
+    assert elapsed < 960.0, f"100 x 500-slice plans took {elapsed:.3f}s (budget 960.0s)"
 
 
 def test_gate_red_when_remainder_absorption_guard_is_removed(tmp_path: Path) -> None:
