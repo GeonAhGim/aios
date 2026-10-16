@@ -3503,3 +3503,43 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 다음 동일 경보 처리: 위 선례들을 인용해 즉시 비회귀로 분류한다. 근본 수정(ops 캡처 레이어
   misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽 별도 요청이
   필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
+
+## task-12315 — esc-ci-pytest_perf_parallel.json 재발, task-11982/12011/12038/12039/12047/
+  12049/12223와 동형, 비회귀 재확인 (2026-10-16)
+
+- task-12315 spec 본문(`[pytest_perf_parallel] ... skipped -- pre-cutover order, event history
+  incomplete (not an FA-16 wiring guarantee): ... from_status=SUBMITTED/ACKNOWLEDGED != folded
+  status so far (CREATED) — missing or reordered event.`)은 task-12223과 글자 단위로 동일한
+  패턴이다 — `scripts/replay_verify.py::_order_pair`가 사전-cutover 주문의 깨진 이벤트 체인을
+  의도적으로 skip하며 stderr에 남기는 설계된 진단 문구(task-2173)이고, FAILED 신호가 아니다.
+- 지목 커밋(이분 탐색 probe) `b83b9b6384d7c9ef0077d9cfa8e50dfdaba56986`를 `git show --stat`로
+  재확인한 결과 역시 `src/core/script/runtime/__init__.py` 1개 파일, Korean→English 주석
+  번역뿐이다(task-12206) — task-12038/12039/12047/12223에서 반복 확인된 "probe가 지목한 sha가
+  OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py`를 건드리지 않는 LANG-en 커밋" 패턴과
+  동형이다. `git log --oneline -10 -- src/core/eventstore/ scripts/replay_verify.py
+  "src/foundation/*/domain/" src/services/execution_loop src/foundation/paper_control
+  tests/perf/oms/`로 HEAD(`edeb59e5e`) 근방 10개 커밋을 확인한 결과도 LANG-en 번역 +
+  task-10780(이미 반영된 paper_control 킬스위치 수정) + L4-28 D3 증빙 추가 + task-11513 orders
+  잔여물 테스트 격리(테스트 전용 fixture/teardown, OMS 실행 경로/replay_verify 로직 무변경)뿐이며,
+  새 회귀를 만들 변경이 없다.
+- 이 저장소에는 `scripts/check_pytest_perf_parallel.py`가 존재하지 않는다(`check_perf_marker_
+  guard.py`/`check_perf_measurement_guard.py`만 존재). `pytest_perf_parallel`은
+  `C:\aios\pm\ci_recheck.py`의 풀-모드 전용 단계이고, 이 저장소 안에서 고칠 "검사
+  스크립트/기준선"이 없다 — task-12039/12049/12223과 동일 구조.
+- 로컬 재현: `tests/foundation/unit/paper_control/test_projections.py` +
+  `tests/unit/scripts/test_check_complexity.py` + `tests/unit/services/
+  test_open_order_sweeper_edge.py` 전체 — **29 passed in 11.11s, exit=0**. 추가로
+  `python -m scripts.replay_verify --hours 24`를 TEST_DATABASE_URL로 직접 실행해
+  `replay_verify: window=[...] streams=0 combined_digest=...` + `replay_verify: OK`
+  (exit=0)을 확인했다 — spec에 인용된 "skipped -- pre-cutover order" 문구는 실제 주문
+  데이터가 있는 DB에서 설계대로 stderr에 남는 성공-경로 진단이며, 이 저장소의 현재 테스트 DB
+  상태(streams=0)에서도 스크립트 자체는 green으로 종료한다. task-11982/12011/12038/12047/
+  12049/12223에서 이미 확정한 "설계된 성공-경로 stderr 진단, 실패 신호 아님" 결론이 그대로
+  적용된다.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: spec에
+  인용된 문구는 설계된 성공-경로 로그이고 관련 스위트/스크립트는 로컬에서 100% green이다. D2:
+  N/A(실행 코드 변경 없이 기존에 확정된 비회귀를 재확인하는 문서 리프, task-12039/12047/12049/
+  12223과 동일 선례).
+- 다음 동일 경보 처리: 위 선례들을 인용해 즉시 비회귀로 분류한다. 근본 수정(ops 캡처 레이어
+  misclassification + stale detail_hash)은 이 repo가 아니라 fleet ops 쪽 별도 요청이
+  필요하다 — 같은 조사를 반복하지 말고 PM에게 ops task 발행을 요청한다.
