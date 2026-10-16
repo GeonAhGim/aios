@@ -176,6 +176,7 @@ async def test_large_outcome_list_performance(perf_budget) -> None:
     sample = perf_budget.assert_within(
         lambda: build_pass_rate_report(statuses),
         budget_ms=100,
+        batch=20,
         label="build_pass_rate_report for 1000 items",
     )
     report = sample.result
