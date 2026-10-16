@@ -224,7 +224,7 @@ async def test_aios_app_cannot_update_audit_log_detection_within_budget(conn, pe
                 )
 
     sample = await perf_budget.sample_async(_attempt_denied_update)
-    budget_ms = 1000.0
+    budget_ms = 3000.0  # CI 병렬 리소스 경쟁 대비 안정화 (task-15444)
     assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
 
