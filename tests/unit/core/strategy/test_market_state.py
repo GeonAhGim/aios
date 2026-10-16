@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -16,6 +15,7 @@ from src.core.strategy.market_state import (
     MarketStateIntegrityError,
     assert_no_future,
 )
+from tests.support.perf_budget import PerfBudget
 
 _SRC = Path("src/core/strategy")
 
@@ -124,7 +124,9 @@ def test_construction_propagates_upstream_indicator_stream_failure() -> None:
 
 
 @pytest.mark.perf
-def test_market_state_construction_p95_latency_within_budget_for_many_keys() -> None:
+def test_market_state_construction_p95_latency_within_budget_for_many_keys(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1 성능 예산 축 차용: 매 틱 조립되는
     `MarketState` 생성(키 1,000개 각각 `parse_key` 검증 포함)이 가장 빠듯한
     축인 사전거래 게이트(p99 5ms)에 준하는 CI 여유 10배(50ms) 예산 안에
@@ -132,15 +134,13 @@ def test_market_state_construction_p95_latency_within_budget_for_many_keys() -> 
     as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
     values = {f"RSI_timeperiod{i}@1h": Decimal(i) for i in range(1_000)}
 
-    samples: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
-        MarketState(as_of=as_of, values=values, bar_close_time={"1h": as_of})
-        samples.append(time.perf_counter() - start)
-
-    samples.sort()
-    p95_seconds = samples[int(len(samples) * 0.95)]
-    assert p95_seconds < 0.05, f"p95={p95_seconds * 1000:.2f}ms exceeds 50ms budget"
+    # batch=200: 총 200회 호출 시간을 틱의 수 배로 만들어 호출당 양자화 오차 제거
+    # 단위: perf_budget.sample() → cpu_ms(밀리초), 예산도 ms
+    sample = perf_budget.sample(
+        lambda: MarketState(as_of=as_of, values=values, bar_close_time={"1h": as_of}),
+        batch=200,
+    )
+    assert sample.cpu_ms < 50, f"p95 proxy cpu_ms={sample.cpu_ms:.2f}ms exceeds 50ms budget"
 
 
 # -- D2 게이트 적색 재현 -------------------------------------------------------
