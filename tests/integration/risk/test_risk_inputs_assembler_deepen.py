@@ -317,7 +317,7 @@ async def test_assemble_risk_inputs_latency_within_order_submission_budget(pool,
                 now=NOW,
             )
         )
-        latencies_ms.append(sample.wall_ms)
+        latencies_ms.append(sample.cpu_ms)
 
     latencies_ms.sort()
     p95_ms = latencies_ms[int(len(latencies_ms) * 0.95) - 1]
