@@ -318,12 +318,12 @@ def test_decompose_cost_p95_latency_stays_under_budget_at_500_fills(
     checked Decimal exactness, not the p95/p99 latency or throughput budget
     the D2 floor (ADR-2026-09-09-C Decision 1) requires. This test actually
     times `decompose_cost` -- 20 samples of a realistic 500-fill parent
-    order with batch=10 -- and asserts the measured p95 CPU latency against
+    order with batch=512 -- and asserts the measured p95 CPU latency against
     a fixed millisecond budget, so an accidental O(n^2) regression in the
     fill-accumulation loop (`_total_filled_qty`) would fail the gate.
 
     Uses `perf_budget.samples()` (process_time + coverage-tracer pause +
-    best-of-N) instead of raw time.perf_counter() to avoid CI scheduler
+    batched CPU samples) instead of raw time.perf_counter() to avoid CI scheduler
     noise and coverage-tracer overhead corrupting the measurement
     (task-9121 / check_perf_measurement_guard.py).
     """
@@ -341,7 +341,8 @@ def test_decompose_cost_p95_latency_stays_under_budget_at_500_fills(
             total_cost=Decimal("50000.00"),
         )
 
-    samples = perf_budget.samples(_measure_one, n=20, batch=10)
+    # Batch enough calls to span multiple Windows process_time clock ticks.
+    samples = perf_budget.samples(_measure_one, n=20, batch=512)
     cpu_ms_values = sorted(s.cpu_ms for s in samples)
     p95_index = int(len(cpu_ms_values) * 0.95)
     p95_latency_ms = cpu_ms_values[min(p95_index, len(cpu_ms_values) - 1)]
