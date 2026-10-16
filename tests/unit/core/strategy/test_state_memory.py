@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -12,6 +11,7 @@ from pydantic import ValidationError
 from src.core.strategy.indicator_key import IndicatorKeyError
 from src.core.strategy.market_state import MarketState
 from src.core.strategy.state_memory import StrategyStateMemory, advance
+from tests.support.perf_budget import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _T1 = _T0 + timedelta(hours=1)
@@ -188,11 +188,16 @@ def test_advance_propagates_malformed_key_from_bypassed_validation() -> None:
 
 
 @pytest.mark.perf
-def test_advance_p95_latency_within_budget_for_many_keys() -> None:
+def test_advance_p95_latency_within_budget_for_many_keys(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C Decision 1 성능 예산 축 차용: `advance()`는 매 틱마다
     실행되는 순수 상태 전이이므로 가장 빠듯한 축인 사전거래 게이트(p99 5ms)에
     준하는 부하(5개 tf x 100개 지표 키 = 500 키)에서도 CI 여유 10배(50ms)
-    안에 든다."""
+    안에 든다.
+
+    raw perf_counter() → perf_budget.samples() 전환(task-15278).
+    batch=8로 호출당 process_time 양자화 오차(Windows 15.6ms)를 1/8로 분산.
+    단위는 전량 ms(예산 50ms, sample.cpu_ms 기준).
+    """
     timeframes = ["1m", "5m", "15m", "30m", "1h"]
     values: dict[str, Decimal] = {}
     bar_close_time: dict[str, datetime] = {}
@@ -215,15 +220,17 @@ def test_advance_p95_latency_within_budget_for_many_keys() -> None:
     market_state = MarketState(as_of=_T1, values=values, bar_close_time=bar_close_time)
     bar_times = dict(last_bar_time)
 
-    samples: list[float] = []
-    for _ in range(200):
-        start = time.perf_counter()
-        advance(memory, market_state, bar_times=bar_times)
-        samples.append(time.perf_counter() - start)
-
-    samples.sort()
-    p95_seconds = samples[int(len(samples) * 0.95)]
-    assert p95_seconds < 0.05, f"p95={p95_seconds * 1000:.2f}ms exceeds 50ms budget"
+    # perf_budget.sample()은 process_time() 기반 → CPU 실제 소비만 측정.
+    # batch=8: 1회 호출당 총 시간을 8로 나눠 양자화 오차 최소화.
+    # 200회 샘플 → p95 분포 계산.
+    samples = perf_budget.samples(
+        lambda: advance(memory, market_state, bar_times=bar_times),
+        n=200,
+        batch=8,
+    )
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
+    assert p95_ms < 50, f"p95={p95_ms:.2f}ms exceeds 50ms budget"
 
 
 # -- D2 게이트 적색 재현 -------------------------------------------------------
