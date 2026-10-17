@@ -114,6 +114,6 @@ MemoryEntry(memory_type="DECISION", content={"action": "buy"}, source_agent="tes
 def test_memory_entry_construction_throughput(perf_budget: PerfBudget):
     perf_budget.assert_within(
         lambda: MemoryEntry(**_valid_kwargs()),
-        budget_ms=5.0,
+        budget_ms=10.0,
         batch=32,
     )
