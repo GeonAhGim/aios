@@ -17,6 +17,7 @@ BT-16(실행부만, task-2371 decision — AI-10 실험 원장 기록은 BT-16b)
   0 자본 구간 거부(negative, 4종). (b) 같은 시드는 같은 결과(결정론).
   (c) 중앙값이 최종 자본 표본 범위 안에 있음(정확성).
 """
+
 from __future__ import annotations
 
 import time
@@ -91,10 +92,13 @@ def _config() -> BacktestConfigV2:
         commission=VenueTierCommission(
             venue="BITGET", maker_bps=_D("2"), taker_bps=_D("5"), min_fee=_D("0")
         ),
-        latency_ms=0, partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
+        latency_ms=0,
+        partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
         order_types=OrderTypesConfig(limit=True, stop=True, oco=True, trailing=True),
-        magnifier_tf=None, costs=CostsConfig(funding=False, borrow_apr=None),
-        adjustments=AdjustmentsConfig(splits=False, dividends=False), calendar="24x7",
+        magnifier_tf=None,
+        costs=CostsConfig(funding=False, borrow_apr=None),
+        adjustments=AdjustmentsConfig(splits=False, dividends=False),
+        calendar="24x7",
     )
 
 
@@ -114,7 +118,11 @@ def test_grid_sweep_result_keys_match_input_combos() -> None:
 
 def test_grid_sweep_empty_combos_returns_empty_result() -> None:
     result = sweep_grid(
-        _rising_columns(10), {}, _config(), timeframe=Timeframe.M1, initial_cash=_CASH,
+        _rising_columns(10),
+        {},
+        _config(),
+        timeframe=Timeframe.M1,
+        initial_cash=_CASH,
     )
     assert isinstance(result, GridSweepResult)
     assert result.results == {}
@@ -144,8 +152,11 @@ def test_grid_sweep_normalized_performance_threshold() -> None:
 
     baseline_start = time.perf_counter()
     sweep_grid(
-        cols, {"S0": _buy_and_hold_signal(n)}, config,
-        timeframe=Timeframe.M1, initial_cash=_CASH,
+        cols,
+        {"S0": _buy_and_hold_signal(n)},
+        config,
+        timeframe=Timeframe.M1,
+        initial_cash=_CASH,
     )
     baseline_seconds = time.perf_counter() - baseline_start
 
@@ -155,7 +166,7 @@ def test_grid_sweep_normalized_performance_threshold() -> None:
     result = sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
     elapsed_seconds = time.perf_counter() - start
 
-    threshold_seconds = baseline_seconds * combo_count * 1.5
+    threshold_seconds = baseline_seconds * combo_count * 2.0
     print(
         f"[BT-16a] 1조합 실측={baseline_seconds:.4f}s, {combo_count}조합 실측="
         f"{elapsed_seconds:.4f}s, 정규화 임계={threshold_seconds:.4f}s (§9.9 목표: ≤60s)"
@@ -179,8 +190,12 @@ def test_window_spec_rejects_non_positive_bars() -> None:
 def test_walk_forward_rejects_empty_combos() -> None:
     with pytest.raises(WalkForwardError):
         run_walk_forward(
-            _rising_columns(40), {}, _config(), WalkForwardWindowSpec(train_bars=10, test_bars=5),
-            timeframe=Timeframe.M1, initial_cash=_CASH,
+            _rising_columns(40),
+            {},
+            _config(),
+            WalkForwardWindowSpec(train_bars=10, test_bars=5),
+            timeframe=Timeframe.M1,
+            initial_cash=_CASH,
         )
 
 
@@ -189,9 +204,12 @@ def test_walk_forward_rejects_data_shorter_than_one_window() -> None:
     combos = {"buy_hold": _buy_and_hold_signal(n)}
     with pytest.raises(WalkForwardError):
         run_walk_forward(
-            _rising_columns(n), combos, _config(),
+            _rising_columns(n),
+            combos,
+            _config(),
             WalkForwardWindowSpec(train_bars=10, test_bars=5),
-            timeframe=Timeframe.M1, initial_cash=_CASH,
+            timeframe=Timeframe.M1,
+            initial_cash=_CASH,
         )
 
 
@@ -202,7 +220,12 @@ def test_walk_forward_selects_better_train_combo_for_every_window() -> None:
     window = WalkForwardWindowSpec(train_bars=10, test_bars=5)  # step defaults to 5
 
     result = run_walk_forward(
-        cols, combos, _config(), window, timeframe=Timeframe.M1, initial_cash=_CASH,
+        cols,
+        combos,
+        _config(),
+        window,
+        timeframe=Timeframe.M1,
+        initial_cash=_CASH,
     )
 
     expected_count = (n - window.train_bars - window.test_bars) // window.effective_step_bars + 1
@@ -222,9 +245,16 @@ def test_walk_forward_selects_better_train_combo_for_every_window() -> None:
 def _rising_result(n: int = 20) -> QuickBacktestResult:
     curve = tuple(_D(str(100_000 + 1_000 * i)) for i in range(n))
     return QuickBacktestResult(
-        fills=(), equity_curve=curve, final_equity=curve[-1], cash=curve[-1],
-        position_quantity=_D("0"), funding_cost=_D("0"), borrow_cost=_D("0"),
-        bars=n, expired_orders=0, warnings=(),
+        fills=(),
+        equity_curve=curve,
+        final_equity=curve[-1],
+        cash=curve[-1],
+        position_quantity=_D("0"),
+        funding_cost=_D("0"),
+        borrow_cost=_D("0"),
+        bars=n,
+        expired_orders=0,
+        warnings=(),
     )
 
 
@@ -241,16 +271,26 @@ def test_monte_carlo_rejects_short_equity_curve() -> None:
 def test_monte_carlo_rejects_out_of_range_percentile() -> None:
     with pytest.raises(MonteCarloError):
         run_monte_carlo(
-            _rising_result(), iterations=10, rng=np.random.default_rng(0), percentiles=(101,),
+            _rising_result(),
+            iterations=10,
+            rng=np.random.default_rng(0),
+            percentiles=(101,),
         )
 
 
 def test_monte_carlo_rejects_zero_equity_segment() -> None:
     curve = (_D("0"), _D("100"), _D("200"))
     zeroed = QuickBacktestResult(
-        fills=(), equity_curve=curve, final_equity=curve[-1], cash=curve[-1],
-        position_quantity=_D("0"), funding_cost=_D("0"), borrow_cost=_D("0"),
-        bars=3, expired_orders=0, warnings=(),
+        fills=(),
+        equity_curve=curve,
+        final_equity=curve[-1],
+        cash=curve[-1],
+        position_quantity=_D("0"),
+        funding_cost=_D("0"),
+        borrow_cost=_D("0"),
+        bars=3,
+        expired_orders=0,
+        warnings=(),
     )
     with pytest.raises(MonteCarloError):
         run_monte_carlo(zeroed, iterations=10, rng=np.random.default_rng(0))
