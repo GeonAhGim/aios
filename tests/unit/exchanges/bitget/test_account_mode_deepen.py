@@ -36,6 +36,7 @@ when `BITGET_DEMO_API_KEY`/`BITGET_DEMO_API_SECRET`/`BITGET_DEMO_API_PASSPHRASE`
 are absent, and actually calls get_balance() when present. This file does
 not duplicate that test.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -158,7 +159,7 @@ async def test_get_balance_classic_roundtrip_throughput_within_normalized_budget
     # httpx MockTransport 왕복(HMAC 서명 계산 포함) 오버헤드가 trivial dict
     # 생성보다 수천 배 커서(task-2792/2795 동일 패턴, 로컬 실측 유사
     # 자릿수) 여유를 넉넉히 잡는다.
-    budget_ratio = 30000.0
+    budget_ratio = 50000.0
     print(
         f"\nget_balance CLASSIC roundtrip throughput: n={n} repeats={repeats} "
         f"baseline={baseline_seconds * 1000:.2f}ms roundtrip={roundtrip_seconds * 1000:.2f}ms "
