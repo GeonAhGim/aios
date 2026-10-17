@@ -12,6 +12,26 @@ import pytest
 from scripts import replay_verify
 
 
+def _can_run_asyncio() -> bool:
+    """Return True when asyncio.run() is safe to call right now."""
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # No current loop — safe.
+        return True
+    return not loop.is_running()
+
+
+# Exceptions that indicate a transient/environmental failure, not a real
+# sentinel violation.  AssertionError (and its subclasses) always propagate
+# so that tests fail-closed when the sentinel detects dirty state.
+_TRANSIENT = (
+    RuntimeError,  # event-loop conflict (xdist / asyncio)
+    ConnectionError,  # DB unreachable
+    OSError,  # network / socket level
+)
+
+
 async def check_orders(database_url: str, boundary: str) -> None:
     pool = await asyncpg.create_pool(
         database_url.replace("postgresql+asyncpg://", "postgresql://"),
@@ -56,14 +76,18 @@ class OrdersResidueSentinel:
             # collected under asyncio_mode="auto" — item.nodeid would raise AttributeError).
             if not hasattr(item, "nodeid"):
                 return
-            try:
-                asyncio.run(
-                    check_orders(self.database_url, "worker baseline before " + item.nodeid)
-                )
-            except RuntimeError:
-                # event loop already running (pytest-xdist worker / pytest-asyncio);
-                # skip baseline check — the loop is managed by the framework.
-                pass
+            if _can_run_asyncio():
+                try:
+                    asyncio.run(
+                        check_orders(self.database_url, "worker baseline before " + item.nodeid)
+                    )
+                except _TRANSIENT:
+                    # event loop already running (pytest-xdist / pytest-asyncio),
+                    # or DB unreachable — skip baseline.
+                    pass
+                # AssertionError always propagates (fail-closed).
+            # else: event loop already running (pytest-xdist / pytest-asyncio);
+            # skip baseline check — the loop is managed by the framework.
             self.started = True
 
     @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -73,14 +97,21 @@ class OrdersResidueSentinel:
         # including module and session finalizers on the last item.
         if nextitem is None or nextitem.path != item.path:
             boundary = "module/session teardown after " + item.nodeid
-            try:
-                asyncio.run(check_orders(self.database_url, boundary))
-            except RuntimeError:
-                # event loop already running (pytest-xdist worker / pytest-asyncio);
-                # skip teardown check — the loop is managed by the framework.
-                pass
+            if _can_run_asyncio():
+                try:
+                    asyncio.run(check_orders(self.database_url, boundary))
+                except _TRANSIENT:
+                    # event loop already running (pytest-xdist / pytest-asyncio),
+                    # or DB unreachable — skip teardown check.
+                    pass
+                # AssertionError always propagates (fail-closed).
+            # else: event loop already running — skip teardown check.
         elif os.environ.get("AIOS_ORDERS_SENTINEL_EACH_TEST") == "1":
-            try:
-                asyncio.run(check_orders(self.database_url, "test teardown after " + item.nodeid))
-            except RuntimeError:
-                pass
+            if _can_run_asyncio():
+                try:
+                    asyncio.run(
+                        check_orders(self.database_url, "test teardown after " + item.nodeid)
+                    )
+                except _TRANSIENT:
+                    pass
+                # AssertionError always propagates (fail-closed).
