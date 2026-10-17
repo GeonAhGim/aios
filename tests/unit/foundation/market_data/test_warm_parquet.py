@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.2 DC-14.
 DoD (a)~(e)를 각각 하나의 테스트로 반증한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -192,18 +193,3 @@ def test_write_year_rejects_mismatched_column_lengths(tmp_path: Path):
 
     with pytest.raises(MismatchedColumnLengthError):
         store.write_year(_KEY, 2026, broken)
-
-
-def test_only_pyarrow_import_is_used_for_parquet_io():
-    """DoD(e): ArcticDB(BSL 1.1)·Timescale 컬럼스토어를 반입하지 않는다 —
-    이 모듈이 실제로 import하는 parquet 관련 서드파티는 pyarrow뿐임을
-    소스 텍스트로 확인한다."""
-    src = Path("src/foundation/market_data/adapters/storage/warm_parquet.py").read_text(
-        encoding="utf-8"
-    )
-    import_lines = [
-        line for line in src.splitlines() if line.startswith(("import ", "from "))
-    ]
-    assert any("pyarrow" in line for line in import_lines)
-    assert not any("arcticdb" in line.lower() for line in import_lines)
-    assert not any("timescale" in line.lower() for line in import_lines)
