@@ -16,6 +16,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
+from tests.conftest import lifespan_context_with_retry
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -31,7 +32,7 @@ DEFAULT_RULES = {
 
 @pytest.fixture
 async def client():
-    async with app.router.lifespan_context(app):
+    async with lifespan_context_with_retry(app):
         # raise_app_exceptions=False -- 도메인 예외가 전역 Exception
         # 핸들러(ServerErrorMiddleware 승격)를 거치는데, Starlette가 정상
         # 응답 뒤에도 예외를 재전파하기 때문에 필요하다
