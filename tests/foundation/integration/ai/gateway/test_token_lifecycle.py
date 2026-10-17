@@ -204,13 +204,13 @@ async def test_paper_only_check_gate_actually_fails_without_the_constraint(
     CHECK 제약이 없는 임시 테이블(스키마는 동일하되 `paper_only` CHECK만
     뺀 것)에서는 같은 INSERT가 성공한다는 것을 보여, `agent_token`의 CHECK가
     실제로 그 삽입을 막고 있다는 인과를 확인한다."""
+    _tbl = f"agent_token_no_check_{uuid4().hex[:8]}"
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
-            "CREATE TEMP TABLE agent_token_no_check "
-            "(paper_only BOOLEAN NOT NULL DEFAULT TRUE) ON COMMIT DROP"
+            f"CREATE TEMP TABLE {_tbl} (paper_only BOOLEAN NOT NULL DEFAULT TRUE) ON COMMIT DROP"
         )
-        await conn.execute("INSERT INTO agent_token_no_check (paper_only) VALUES (FALSE)")
-        row = await conn.fetchrow("SELECT paper_only FROM agent_token_no_check")
+        await conn.execute(f"INSERT INTO {_tbl} (paper_only) VALUES (FALSE)")  # noqa: S608
+        row = await conn.fetchrow(f"SELECT paper_only FROM {_tbl}")  # noqa: S608
         assert row["paper_only"] is False  # 적색: CHECK 없이는 통과했을 것
 
 
