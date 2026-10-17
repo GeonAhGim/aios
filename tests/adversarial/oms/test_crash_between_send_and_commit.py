@@ -182,14 +182,22 @@ async def test_crash_after_sent_before_finalize_becomes_unknown_not_resent(pool)
     row_id = await _insert_stuck_outbox_row(pool, order_id, lease_until=_past())
     adapter = _LookupAdapter(lookup_result=None)
 
-    processed = await _recover(pool, adapter)
+    try:
+        processed = await _recover(pool, adapter)
 
-    assert processed == 1
-    assert await _order_status(pool, order_id) == "UNKNOWN"
-    outbox = await _outbox_row(pool, row_id)
-    assert outbox["state"] == "DONE"
-    # UNKNOWN 해소가 곧장 unknown_resolver로 위임됐다는 증거 — 역조회가 실제로 불렸다.
-    assert adapter.lookup_calls >= 1
+        assert processed == 1
+        assert await _order_status(pool, order_id) == "UNKNOWN"
+        outbox = await _outbox_row(pool, row_id)
+        assert outbox["state"] == "DONE"
+        # UNKNOWN 해소가 곧장 unknown_resolver로 위임됐다는 증거 — 역조회가 실제로 불렸다.
+        assert adapter.lookup_calls >= 1
+    finally:
+        # task-15420: 테스트가 남긴 잔재를 반드시 정리한다.
+        # 이 테스트는 SUBMITTED→UNKNOWN 전환으로 order_events를 생성했으므로
+        # FK로 orders 삭제 불가. 이벤트가 있는 orders 행은 orders_residue.py
+        # sentinel이 걸러내지 않으므로 outbox만 정리하면 충분하다.
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM order_command_outbox WHERE id = $1", row_id)
 
 
 async def test_crash_before_sent_reenters_as_pending(pool):
@@ -299,22 +307,31 @@ async def test_concurrent_recovery_workers_do_not_double_process(pool):
     order_ids = await _insert_stuck_submitted_orders(pool, user_id, count=20)
     adapter = _LookupAdapter(lookup_result=_resolved_order())
 
-    processed_a, processed_b = await asyncio.gather(
-        _recover(pool, adapter, worker_id="recovery-worker-a"),
-        _recover(pool, adapter, worker_id="recovery-worker-b"),
-    )
-
-    assert processed_a + processed_b == len(order_ids)  # 행 손실도 중복도 없음
-    assert adapter.lookup_calls == len(order_ids)  # 주문마다 정확히 1회만 해소
-    for order_id in order_ids:
-        assert await _order_status(pool, order_id) == "ACKNOWLEDGED"
-    async with pool.acquire() as conn:
-        remaining_sending = await conn.fetchval(
-            "SELECT count(*) FROM order_command_outbox WHERE order_id = ANY($1) "
-            "AND state = 'SENDING'",
-            order_ids,
+    try:
+        processed_a, processed_b = await asyncio.gather(
+            _recover(pool, adapter, worker_id="recovery-worker-a"),
+            _recover(pool, adapter, worker_id="recovery-worker-b"),
         )
-    assert remaining_sending == 0  # 재클레임되지 않은 채 방치된 행 없음
+
+        assert processed_a + processed_b == len(order_ids)  # 행 손실도 중복도 없음
+        assert adapter.lookup_calls == len(order_ids)  # 주문마다 정확히 1회만 해소
+        for order_id in order_ids:
+            assert await _order_status(pool, order_id) == "ACKNOWLEDGED"
+        async with pool.acquire() as conn:
+            remaining_sending = await conn.fetchval(
+                "SELECT count(*) FROM order_command_outbox WHERE order_id = ANY($1) "
+                "AND state = 'SENDING'",
+                order_ids,
+            )
+        assert remaining_sending == 0  # 재클레임되지 않은 채 방치된 행 없음
+    finally:
+        # task-15420: 테스트가 남긴 잔재를 반드시 정리한다.
+        # 이 테스트는 SUBMITTED→ACKNOWLEDGED 전환으로 order_events를 생성했으므로
+        # FK로 orders 삭제 불가. 이벤트가 있는 orders 행은 orders_residue.py
+        # sentinel이 걸러내지 않으므로 outbox만 정리하면 충분하다.
+        async with pool.acquire() as conn:
+            for oid in order_ids:
+                await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", oid)
 
 
 @pytest.mark.perf
@@ -328,13 +345,22 @@ async def test_recovery_latency_bound_for_batch(pool):
     order_ids = await _insert_stuck_submitted_orders(pool, user_id, count=20)
     adapter = _LookupAdapter(lookup_result=_resolved_order())
 
-    start = time.perf_counter()
-    processed = await _recover(pool, adapter)
-    elapsed = time.perf_counter() - start
+    try:
+        start = time.perf_counter()
+        processed = await _recover(pool, adapter)
+        elapsed = time.perf_counter() - start
 
-    assert processed == len(order_ids)
-    per_row = elapsed / len(order_ids)
-    assert elapsed < 5.0, f"복구 배치 {len(order_ids)}건이 {elapsed:.2f}s 걸림 — 상한 5.0s 초과"
-    assert per_row < 0.25, (
-        f"행당 평균 {per_row:.3f}s — 상한 0.25s 초과(실시간 backoff sleep 유입 의심)"
-    )
+        assert processed == len(order_ids)
+        per_row = elapsed / len(order_ids)
+        assert elapsed < 5.0, f"복구 배치 {len(order_ids)}건이 {elapsed:.2f}s 걸림 — 상한 5.0s 초과"
+        assert per_row < 0.25, (
+            f"행당 평균 {per_row:.3f}s — 상한 0.25s 초과(실시간 backoff sleep 유입 의심)"
+        )
+    finally:
+        # task-15420: 테스트가 남긴 잔재를 반드시 정리한다.
+        # 이 테스트는 SUBMITTED→ACKNOWLEDGED 전환으로 order_events를 생성했으므로
+        # FK로 orders 삭제 불가. 이벤트가 있는 orders 행은 orders_residue.py
+        # sentinel이 걸러내지 않으므로 outbox만 정리하면 충분하다.
+        async with pool.acquire() as conn:
+            for oid in order_ids:
+                await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", oid)
