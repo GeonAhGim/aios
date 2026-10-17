@@ -106,6 +106,10 @@ def test_structured_output_rejects_negative_output_tokens() -> None:
 def test_generation_budget_rejects_string_contaminated_cost_cap_from_upstream_config() -> None:
     """실패 주입: 상류(설정 로더)가 손상되어 `cost_cap`이 Decimal이 아니라
     문자열로 섞여 들어오면, 문자열과 int의 순서 비교는 TypeError를 내므로
-    "음수 아님"으로 조용히 통과시키지 않고 fail-closed 거부해야 한다."""
+    "음수 아님"으로 조용히 통과시키지 않고 fail-closed 거부해야 한다.
+
+    Note: mypy는 str 인자에 대해 arg-type 경고를 발생시키지만, 이는 의도된
+    부정 테스트이므로 pytest.raises(TypeError)로 검증한다.
+    """
     with pytest.raises(TypeError):
         GenerationBudget(cost_cap="1.00", max_output_tokens=100)
