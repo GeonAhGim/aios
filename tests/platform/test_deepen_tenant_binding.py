@@ -23,6 +23,7 @@ from src.core.observability.metric_names import AUTH_TENANT_MISMATCH_COUNT_TOTAL
 from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.observability.tenant_binding import rebind_tenant
 from src.foundation.trust.contracts.v1 import TenantContext
+from tests.support.perf_budget import PerfBudget
 
 _PRETRADE_GATE_P99_BUDGET_SEC = (
     0.005  # ADR-2026-09-09-C Decision 1 차용 (test_context.py와 동일 근거)
@@ -144,7 +145,7 @@ def test_rebind_tenant_meets_pretrade_gate_budget() -> None:
 
 
 @pytest.mark.perf
-def test_rebind_tenant_budget_assertion_catches_regression(perf_budget) -> None:
+def test_rebind_tenant_budget_assertion_catches_regression(perf_budget: PerfBudget) -> None:
     """게이트 적색 재현 -- `RequestContext.model_copy`(rebind_tenant 내부에서
     새 컨텍스트를 만드는 데 쓰는 호출)에 인위 지연을 주입해 위 p99 예산 단언이
     실제로 AssertionError를 내는지 확인한다(타우톨로지 아님을 증명).
