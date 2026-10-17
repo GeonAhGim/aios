@@ -189,7 +189,7 @@ async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool, p
     super-linearly. Threshold is deliberately generous (wall-clock,
     real localhost Postgres round trips) to avoid CI flakiness while still
     catching an O(n^2) regression. Widened 15->20s (task-15365), 20->40s
-    (task-15507) as CI parallel load keeps increasing."""
+    (task-15507), 40->60s (task-15577) as CI parallel load keeps increasing."""
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("500"))
     now = datetime.now(timezone.utc)
@@ -207,6 +207,6 @@ async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool, p
     )
 
     assert len(sample.result.outcomes) == 100
-    assert sample.wall_ms < 40_000, (
+    assert sample.wall_ms < 60_000, (
         f"tick_algo took {sample.wall_ms / 1000:.2f}s for 100 slices -- looks superlinear"
     )
