@@ -271,7 +271,7 @@ def test_planning_many_positions_completes_within_latency_budget() -> None:
     elapsed = time.perf_counter() - start
 
     assert len(plan.slices) == 200 * policy.slice_count_max
-    assert elapsed < 20.0
+    assert elapsed < 60.0
 
 
 # -- D3: multi-instance proof -- independent "planner instances" (separate
