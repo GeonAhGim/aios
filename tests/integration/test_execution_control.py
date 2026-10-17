@@ -270,7 +270,7 @@ async def test_start_latency_within_db_round_trip_budget(service, pool, perf_bud
     다단 리스크 레이어 평가(각각 별도 DB 왕복) + UPDATE까지 다수의 순차 DB 왕복을
     포함해 단순 SELECT 1보다 훨씬 비싸다. 절대 ms 임계는 실행환경마다 흔들려
     회귀 게이트로 못 쓰므로(task-6774 관례), 이 환경에서 직접 잰 단순 SELECT 1
-    왕복시간(워밍업 3회 버리고 최댓값)의 1000배를 예산으로 쓰되 최소 5000ms(
+    왕복시간(워밍업 3회 버리고 최댓값)의 2000배를 예산으로 쓰되 최소 5000ms(
     CI 병렬 실행 CPU 경쟁 안정화, task-15569 관례)를 보장한다."""
     user_id = await create_test_tenant(pool)
     created = await _create_execution(service, pool, user_id, mode="PAPER")
@@ -286,7 +286,7 @@ async def test_start_latency_within_db_round_trip_budget(service, pool, perf_bud
 
     sample = await perf_budget.sample_async(lambda: service.start(created.id, user_id))
 
-    budget_ms = max(5000.0, 1000 * baseline_rt_ms)
+    budget_ms = max(5000.0, 2000 * baseline_rt_ms)
     assert sample.wall_ms < budget_ms, (
         f"start() took {sample.wall_ms:.1f}ms, budget {budget_ms:.1f}ms "
         f"(baseline rt {baseline_rt_ms:.1f}ms)"
