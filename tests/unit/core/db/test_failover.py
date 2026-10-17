@@ -18,6 +18,7 @@ from src.core.db.failover import (
     FailoverExhaustedError,
     HostEndpoint,
 )
+from tests.support.perf_budget import PerfBudget
 
 
 class FakeConnection:
@@ -375,19 +376,22 @@ def test_backoff_delays_grow_and_cap_at_max() -> None:
 
 
 @pytest.mark.perf
-async def test_failover_manager_construction_latency(perf_budget) -> None:
+async def test_failover_manager_construction_latency(perf_budget: PerfBudget) -> None:
     """Performance assertion (D3) — FailoverConnectionManager construction
     plus write_available() decision must complete under 1 ms. Degradation
     here (blocking I/O, heavy sorting) would slow every pre-order check."""
 
     def _build() -> None:
+        async def _connect(host: str) -> FakeConnection:
+            return FakeConnection(host)
+
         mgr = FailoverConnectionManager(
             [
                 HostEndpoint("h1", priority=0),
                 HostEndpoint("h2", priority=1),
                 HostEndpoint("h3", priority=2),
             ],
-            connect=lambda h: FakeConnection(h),
+            connect=_connect,
         )
         mgr.write_available()
 
