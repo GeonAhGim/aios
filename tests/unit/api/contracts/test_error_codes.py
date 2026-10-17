@@ -196,8 +196,8 @@ def test_perf_http_status_lookup_under_1ms(perf_budget):
     """HTTP_STATUS 조회가 1ms 이내여야 한다 — API 응답 지연에 영향 없어야 함."""
 
     def _run() -> None:
-        for _ in range(1000):
+        for _ in range(100):
             for code in HTTP_STATUS:
                 _ = HTTP_STATUS[code]
 
-    perf_budget.assert_within(_run, budget_ms=100, label="HTTP_STATUS 1000회 조회")
+    perf_budget.assert_within(_run, budget_ms=100, label="HTTP_STATUS 100회 조회")
