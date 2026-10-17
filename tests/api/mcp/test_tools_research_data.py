@@ -24,9 +24,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from src.api.mcp.server import AGENT_TOKEN_HEADER, create_mcp_app
+from src.api.mcp.server import AGENT_TOKEN_HEADER
 from src.foundation.ai.gateway.adapters.postgres_token_repository import (
     PostgresAgentTokenRepository,
 )
@@ -98,14 +97,6 @@ async def _make_tenant(pool) -> uuid.UUID:
     tenant_id = uuid.uuid4()
     await pool.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", tenant_id)
     return tenant_id
-
-
-@pytest.fixture
-async def client(pool):  # noqa: ANN001 -- type is asyncpg.Pool
-    app = create_mcp_app(pool)
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
-    async with AsyncClient(transport=transport, base_url="http://mcp.test") as c:
-        yield c
 
 
 @pytest.fixture
