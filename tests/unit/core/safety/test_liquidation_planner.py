@@ -20,6 +20,7 @@ import hashlib
 import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -46,7 +47,7 @@ _BASELINE_POLICY_KWARGS = dict(
 )
 
 
-def _policy(**overrides: object) -> LiquidationPolicy:
+def _policy(**overrides: Any) -> LiquidationPolicy:
     return LiquidationPolicy(**{**_BASELINE_POLICY_KWARGS, **overrides})
 
 
