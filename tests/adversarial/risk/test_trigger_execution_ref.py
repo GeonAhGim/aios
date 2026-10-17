@@ -309,13 +309,18 @@ async def test_prior_checks_still_fire_before_binding_checks(pool, victim):
         outcome=RiskOutcome.DENY,
         execution_ref=f"exec:{victim['execution_id']}",
     )
-    async with pool.acquire() as conn:
-        with _rejected("tenant"):
-            await _insert(conn, victim["user_id"], foreign.decision_id, execution_id=exec_other)
-        with pytest.raises(asyncpg.CheckViolationError, match="is not actionable"):
-            await _insert(
-                conn, victim["user_id"], deny.decision_id, execution_id=victim["execution_id"]
-            )
+    order_ids: list[UUID] = []
+    try:
+        async with pool.acquire() as conn:
+            with _rejected("tenant"):
+                await _insert(conn, victim["user_id"], foreign.decision_id, execution_id=exec_other)
+            with pytest.raises(asyncpg.CheckViolationError, match="is not actionable"):
+                await _insert(
+                    conn, victim["user_id"], deny.decision_id, execution_id=victim["execution_id"]
+                )
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1)", order_ids)
 
 
 async def test_trigger_definition_covers_binding_columns_and_function_has_checks(pool):
