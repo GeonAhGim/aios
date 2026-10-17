@@ -192,12 +192,20 @@ async def test_crash_after_sent_before_finalize_becomes_unknown_not_resent(pool)
         # UNKNOWN 해소가 곧장 unknown_resolver로 위임됐다는 증거 — 역조회가 실제로 불렸다.
         assert adapter.lookup_calls >= 1
     finally:
-        # task-15420: 테스트가 남긴 잔재를 반드시 정리한다.
-        # 이 테스트는 SUBMITTED→UNKNOWN 전환으로 order_events를 생성했으므로
-        # FK로 orders 삭제 불가. 이벤트가 있는 orders 행은 orders_residue.py
-        # sentinel이 걸러내지 않으므로 outbox만 정리하면 충분하다.
+        # task-15648: 성공·실패 모두 orders/order_command_outbox 잔재를
+        # 반드시 정리한다. 성공 시: recovery가 SUBMITTED→UNKNOWN 전환으로
+        # order_events를 생성했으므로 FK로 orders 삭제 불가 → outbox만 삭제.
+        # 실패 시: events가 없는 orders가 남을 수 있으므로 FK 에러를 잡고
+        # orders도 삭제 시도한다.
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM order_command_outbox WHERE id = $1", row_id)
+            try:
+                await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
+            except asyncpg.ForeignKeyViolationError:
+                # FK constraint: events exist, orders cannot be deleted.
+                # This is expected on success path — events-only orders
+                # do not trigger orders_residue.py sentinel.
+                pass
 
 
 async def test_crash_before_sent_reenters_as_pending(pool):
