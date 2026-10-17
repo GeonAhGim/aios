@@ -26,6 +26,29 @@ from src.foundation.market_data.domain.candle_columns import (
     MismatchedColumnLengthError,
 )
 
+# -- import-surface gate (DoD e): warm_parquet.py must only depend on pyarrow --
+_SRC = (
+    Path(__file__).resolve().parent.parent.parent.parent.parent
+    / "src"
+    / "foundation"
+    / "market_data"
+    / "adapters"
+    / "storage"
+    / "warm_parquet.py"
+)
+
+
+def test_only_pyarrow_import_is_used_for_parquet_io():
+    """DoD(e): ArcticDB(BSL 1.1)·Timescale 컬럼스토어를 반입하지 않는다 —
+    이 모듈이 실제로 import하는 parquet 관련 서드파티는 pyarrow뿐임을
+    소스 텍스트로 확인한다."""
+    src = _SRC.read_text(encoding="utf-8")
+    import_lines = [line for line in src.splitlines() if line.startswith(("import ", "from "))]
+    assert any("pyarrow" in line for line in import_lines)
+    assert not any("arcticdb" in line.lower() for line in import_lines)
+    assert not any("timescale" in line.lower() for line in import_lines)
+
+
 _KEY = SeriesKey(venue=Venue.BINANCE, instrument_id=uuid4(), timeframe=Timeframe.D1)
 
 
