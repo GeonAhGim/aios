@@ -67,7 +67,9 @@ def service(pool):
     return ExecutionService(
         pool,
         load_risk_policy(),
-        pre_start_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
+        pre_start_gate=make_foundation_pre_submit_gate(
+            pool, require_mandate=False, require_compliance_mandate=False
+        ),
     )
 
 
