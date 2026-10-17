@@ -325,13 +325,22 @@ async def test_concurrent_recovery_workers_do_not_double_process(pool):
             )
         assert remaining_sending == 0  # 재클레임되지 않은 채 방치된 행 없음
     finally:
-        # task-15420: 테스트가 남긴 잔재를 반드시 정리한다.
-        # 이 테스트는 SUBMITTED→ACKNOWLEDGED 전환으로 order_events를 생성했으므로
-        # FK로 orders 삭제 불가. 이벤트가 있는 orders 행은 orders_residue.py
-        # sentinel이 걸러내지 않으므로 outbox만 정리하면 충분하다.
+        # task-15421: 성공·실패 모두 orders/outbox 잔재가 남지 않도록 정리한다.
+        # 성공 시: recovery가 SUBMITTED→ACKNOWLEDGED 전환으로 order_events를
+        # 생성했으므로 FK로 orders 삭제 불가 → outbox만 삭제.
+        # 실패 시: events가 없는 orders가 남을 수 있으므로 FK 에러를 잡고
+        # orders도 삭제 시도한다.
         async with pool.acquire() as conn:
             for oid in order_ids:
                 await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", oid)
+            for oid in order_ids:
+                try:
+                    await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
+                except asyncpg.ForeignKeyViolationError:
+                    # FK constraint: events exist, orders cannot be deleted.
+                    # This is expected on success path — events-only orders
+                    # do not trigger orders_residue.py sentinel.
+                    pass
 
 
 @pytest.mark.perf
