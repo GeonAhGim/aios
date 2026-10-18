@@ -262,7 +262,7 @@ def test_planning_many_positions_completes_within_latency_budget() -> None:
     policy = _policy(slice_count_min=3, slice_count_max=20, max_slice_notional=1)
     positions = [
         _position(symbol=f"SYM{i}USDT", quantity=Decimal("100"), notional=Decimal("100000"))
-        for i in range(200)
+        for i in range(50)
     ]
     volume_5m = {p.symbol: None for p in positions}
 
@@ -270,8 +270,8 @@ def test_planning_many_positions_completes_within_latency_budget() -> None:
     plan = plan_liquidation(positions, seed=b"perf-seed", policy=policy, volume_5m=volume_5m)
     elapsed = time.perf_counter() - start
 
-    assert len(plan.slices) == 200 * policy.slice_count_max
-    assert elapsed < 120.0
+    assert len(plan.slices) == 50 * policy.slice_count_max
+    assert elapsed < 5.0
 
 
 # -- D3: multi-instance proof -- independent "planner instances" (separate
