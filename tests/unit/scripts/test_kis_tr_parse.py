@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -254,7 +253,7 @@ def inquire_price({signature}):
 
 
 @pytest.mark.perf
-def test_extract_trs_from_text_latency_scales_linearly_not_quadratically() -> None:
+def test_extract_trs_from_text_latency_scales_linearly_not_quadratically(perf_budget) -> None:
     """수치 성능 단언 — `extract_trs_from_text`는 예제 파일 하나당 정규식 추출을
     한 번 돌린다(`build_reference`가 375개 파일 각각에 호출). params 항목 수를
     10배로 늘렸을 때 소요시간이 선형 배율(10배)의 넉넉한 배수(예산 8배, 총 80배)를
@@ -266,23 +265,24 @@ def test_extract_trs_from_text_latency_scales_linearly_not_quadratically() -> No
 
     kis_tr_parse.extract_trs_from_text(small_text, "x/y/z.py")  # 워밍업
 
-    small_started = time.perf_counter()
-    for _ in range(20):
-        kis_tr_parse.extract_trs_from_text(small_text, "x/y/z.py")
-    small_elapsed = time.perf_counter() - small_started
-
-    large_started = time.perf_counter()
-    for _ in range(20):
-        kis_tr_parse.extract_trs_from_text(large_text, "x/y/z.py")
-    large_elapsed = time.perf_counter() - large_started
+    small_elapsed = perf_budget.sample(
+        lambda: kis_tr_parse.extract_trs_from_text(small_text, "x/y/z.py"),
+        batch=2000,
+    )
+    large_elapsed = perf_budget.sample(
+        lambda: kis_tr_parse.extract_trs_from_text(large_text, "x/y/z.py"),
+        batch=2000,
+    )
 
     size_ratio = 200 / 20  # 10.0
     budget_multiplier = 8.0  # 선형(10배) 대비 넉넉한 여유 -> 총 80배까지 허용
-    time_budget = small_elapsed * size_ratio * budget_multiplier
-    assert large_elapsed <= time_budget, (
+    small_ms = small_elapsed.cpu_ms
+    large_ms = large_elapsed.cpu_ms
+    time_budget = small_ms * size_ratio * budget_multiplier
+    assert large_ms <= time_budget, (
         f"extract_trs_from_text 소요시간이 params 10배 증가에 비해 초선형으로 늘었습니다 "
-        f"(small={small_elapsed * 1000:.2f}ms n=20, large={large_elapsed * 1000:.2f}ms "
-        f"n=200, budget={time_budget * 1000:.2f}ms) — O(n^2) 회귀 가능성."
+        f"(small={small_ms:.2f}ms n=20, large={large_ms:.2f}ms "
+        f"n=200, budget={time_budget:.2f}ms) — O(n^2) 회귀 가능성."
     )
 
 
