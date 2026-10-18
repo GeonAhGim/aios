@@ -41,6 +41,7 @@ from tests.adversarial.risk.conftest import (
     seed_execution,
 )
 from tests.integration.conftest import create_test_tenant
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _TRIGGER_ERRORS = (asyncpg.CheckViolationError, asyncpg.ForeignKeyViolationError)
 _WORM_ERRORS = (asyncpg.InsufficientPrivilegeError, asyncpg.RaiseError)
