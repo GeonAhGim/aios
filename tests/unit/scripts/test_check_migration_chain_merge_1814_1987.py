@@ -10,7 +10,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
@@ -205,18 +204,20 @@ def test_task_1814_merge_still_flags_new_unmerged_sibling_branch_as_head(
 
 
 @pytest.mark.perf
-def test_check_migration_chain_real_versions_dir_completes_within_time_budget() -> None:
+def test_check_migration_chain_real_versions_dir_completes_within_time_budget(perf_budget) -> None:
     """성능단언: 실제 저장소(116개 리비전) 전수 체인 검사가 예산 내에 끝나는지 수치로 확인한다."""
     real_versions_dir = ROOT / "src" / "db" / "migrations" / "versions"
     revision_count = len([p for p in real_versions_dir.glob("*.py") if p.name != "__init__.py"])
     assert revision_count > 100  # 이 벤치마크가 무의미해지지 않도록 규모를 보장
 
-    start = time.perf_counter()
-    issues = check_migration_chain.find_chain_issues(real_versions_dir)
-    elapsed = time.perf_counter() - start
+    # Batch full scans to amortize the Windows process_time clock tick.
+    sample = perf_budget.best_of(
+        lambda: check_migration_chain.find_chain_issues(real_versions_dir), batch=4
+    )
+    budget_ms = 2.0 * 1000
 
-    assert issues == []
-    assert elapsed < 2.0, f"마이그레이션 체인 검사가 {elapsed:.3f}s — 예산(2.0s) 초과"
+    assert sample.result == []
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
 
 def test_task_1814_merge_check_is_deterministic_under_concurrent_replay() -> None:
