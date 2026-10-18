@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from src.core.safety.market_correlation import is_market_wide_move
+from tests.support.perf_budget import PerfBudget
 
 
 def test_basket_below_min_symbols_is_undeterminable() -> None:
@@ -131,7 +132,7 @@ def test_corrupted_nan_return_fails_loud_not_silently_wrong() -> None:
 
 
 @pytest.mark.perf
-def test_is_market_wide_move_perf_bound_for_large_basket(perf_budget) -> None:
+def test_is_market_wide_move_perf_bound_for_large_basket(perf_budget: PerfBudget) -> None:
     """성능 단언 — 이 함수는 basket을 한 번 순회하는 O(n) 순수 함수여야
     한다. 대형 합성 basket(5만 심볼)으로 이차식 회귀가 들어와도 CI가
     눈치채도록 시간 상한을 못박는다.
