@@ -1,5 +1,4 @@
 import decimal
-import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
@@ -132,22 +131,33 @@ def test_corrupted_nan_return_fails_loud_not_silently_wrong() -> None:
 
 
 @pytest.mark.perf
-def test_is_market_wide_move_perf_bound_for_large_basket() -> None:
+def test_is_market_wide_move_perf_bound_for_large_basket(perf_budget) -> None:
     """성능 단언 — 이 함수는 basket을 한 번 순회하는 O(n) 순수 함수여야
     한다. 대형 합성 basket(5만 심볼)으로 이차식 회귀가 들어와도 CI가
-    눈치채도록 시간 상한을 못박는다."""
+    눈치채도록 시간 상한을 못박는다.
+
+    `time.perf_counter()` wall-clock 대신 `perf_budget`(process_time +
+    paused_coverage)를 쓴다 — CI의 --cov=src line-tracer 오버헤드와
+    OS 스케줄러 노이즈가 wall-clock을 흔들면 CI가 불통으로 끊겼다
+    (task-9933, task-8660, task-6774).
+    """
     basket = {
         f"SYM{i}/USDT": Decimal("-5") if i % 3 == 0 else Decimal("0.1") for i in range(50_000)
     }
-    start = time.perf_counter()
-    result = is_market_wide_move(
-        basket, account_loss_pct=Decimal("8"), move_threshold_pct=Decimal("3")
+
+    sample = perf_budget.assert_within(
+        lambda: is_market_wide_move(
+            basket, account_loss_pct=Decimal("8"), move_threshold_pct=Decimal("3")
+        ),
+        budget_ms=100.0,
+        n=1,
+        warmup=0,
+        label="5만 심볼 basket — O(n) 순수 함수",
     )
-    elapsed = time.perf_counter() - start
+
+    # correctness also verified
+    result = sample.result
     assert result is False  # 1/3 하락 — 과반 아님
-    assert elapsed < 30.0, (
-        f"5만 심볼 basket 처리에 {elapsed:.2f}s — O(n) 순수 함수치고 과도하게 느림"
-    )
 
 
 # --- 다중 인스턴스(동시 실행) 증명 -------------------------------------------
