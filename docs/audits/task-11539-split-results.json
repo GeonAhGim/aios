@@ -1,0 +1,1572 @@
+[
+  {
+    "file": "tests/adversarial/auth/test_signup_tenant_atomicity.py",
+    "id": 15949,
+    "status": "issued"
+  },
+  {
+    "file": "tests/adversarial/ems/test_child_order_bypass.py",
+    "id": 15950,
+    "status": "issued"
+  },
+  {
+    "file": "tests/adversarial/ems/test_overcommit_and_terminal_races.py",
+    "id": 15951,
+    "status": "issued"
+  },
+  {
+    "file": "tests/adversarial/execution_ownership/test_no_double_tick.py",
+    "id": 15952,
+    "status": "issued"
+  },
+  {
+    "file": "tests/adversarial/market_data/test_backfill_job_deepen_perf_d3_2898.py",
+    "id": 15953,
+    "status": "issued"
+  },
+  {
+    "file": "tests/adversarial/marketplace/test_paper_trading_gate.py",
+    "id": 15954,
+    "status": "issued"
+  },
+  {
+    "file": "tests/api/mcp/test_server_auth.py",
+    "id": 15955,
+    "status": "issued"
+  },
+  {
+    "file": "tests/api/mcp/test_tools_research_data.py",
+    "id": 15956,
+    "status": "issued"
+  },
+  {
+    "file": "tests/contract/nh/test_nh_order_requery_contract.py",
+    "id": 15957,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/adversarial/positions/test_race_fills.py",
+    "id": 15958,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/ai/gateway/test_confirm_ticket_repository.py",
+    "id": 15959,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/ai/gateway/test_token_lifecycle.py",
+    "id": 15960,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/backtest/test_postgres_snapshot_repository.py",
+    "id": 15961,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/ems/test_tca_storage.py",
+    "id": 15962,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/experiments/test_application_integration.py",
+    "id": 15963,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/experiments/test_postgres_repository.py",
+    "id": 15964,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/market_data/test_instruments_schema_deepen_2879.py",
+    "id": 15965,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/market_data/test_quality_metrics_deepen.py",
+    "id": 15966,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/ml/test_postgres_model_registry.py",
+    "id": 15967,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/ml/test_postgres_train_job_repository.py",
+    "id": 15968,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/performance/test_get_statement_portfolio_scope.py",
+    "id": 15969,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/positions/test_position_key_adversarial.py",
+    "id": 15970,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/reconciliation/test_reconciliation_resolve.py",
+    "id": 15971,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/screener/test_save_share_alert.py",
+    "id": 15972,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/trust/test_postgres_repository.py",
+    "id": 15973,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/validation/test_postgres_repository_l37.py",
+    "id": 15974,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/validation/test_reproducibility.py",
+    "id": 15975,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/integration/validation/test_run_check.py",
+    "id": 15976,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/screener/test_query_plan.py",
+    "id": 15977,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/screener/test_run_screen.py",
+    "id": 15978,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ai/factory/test_contracts_v1.py",
+    "id": 15979,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ai/gateway/test_contracts_v1.py",
+    "id": 15980,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ai/providers/test_anthropic_provider.py",
+    "id": 15981,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ai/providers/test_gemini_provider.py",
+    "id": 15982,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ai/providers/test_openai_compatible_provider.py",
+    "id": 15983,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ai/providers/test_prompt_registry.py",
+    "id": 15984,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/allocation/test_average_price.py",
+    "id": 15985,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/allocation/test_policy.py",
+    "id": 15986,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/automation/test_evaluate_rules_perf.py",
+    "id": 15987,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_cost_models.py",
+    "id": 15988,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_list_bars.py",
+    "id": 15989,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_models_v2.py",
+    "id": 15990,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_param_sweep.py",
+    "id": 15991,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_reproducibility.py",
+    "id": 15992,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_run_backtest.py",
+    "id": 15993,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_sandboxed_script_eval.py",
+    "id": 15994,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_simulate_fill.py",
+    "id": 15995,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_stress.py",
+    "id": 15996,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_tearsheet.py",
+    "id": 15997,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_universe.py",
+    "id": 15998,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/backtest/test_walk_forward.py",
+    "id": 15999,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/charting/test_indicator_template_application.py",
+    "id": 16000,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/charting/test_layout_application.py",
+    "id": 16001,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/connections/test_begin_connection_application.py",
+    "id": 16002,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/connections/test_confirm_connection.py",
+    "id": 16003,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/connections/test_fake_provider.py",
+    "id": 16004,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/connections/test_projections.py",
+    "id": 16005,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/connections/test_provider_port.py",
+    "id": 16006,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/connections/test_revoke_connection.py",
+    "id": 16007,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ems/test_compute_tca.py",
+    "id": 16008,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ems/test_fix_session_contract.py",
+    "id": 16009,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ems/test_route_order_application.py",
+    "id": 16010,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ems/test_venue_recalibration.py",
+    "id": 16011,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ems/test_venue_scoring.py",
+    "id": 16012,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/entities/test_ensure_default_hierarchy.py",
+    "id": 16013,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/entities/test_region.py",
+    "id": 16014,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/evidence/application/test_append_audit_event.py",
+    "id": 16015,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/evidence/application/test_get_audit_timeline.py",
+    "id": 16016,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/evidence/application/test_verify_audit_chain.py",
+    "id": 16017,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/evidence/test_rules.py",
+    "id": 16018,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/execution_ownership/test_rules.py",
+    "id": 16019,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/experiments/test_lineage.py",
+    "id": 16020,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/follow/test_mirror_signal.py",
+    "id": 16021,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/contracts/test_instruments_v2.py",
+    "id": 16022,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/entitlement/test_source_contract_deepen_2888.py",
+    "id": 16023,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/instruments/test_lifecycle_deepen_2875.py",
+    "id": 16024,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/instruments/test_symbol_master_deepen_2876.py",
+    "id": 16025,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/ports/test_ports_protocol_deepen_2877.py",
+    "id": 16026,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/ports/test_provider_microstructure.py",
+    "id": 16027,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/providers/test_base_adapter_deepen_2883.py",
+    "id": 16028,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/providers/test_kis_provider_deepen.py",
+    "id": 16029,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/providers/test_provider_spi_deepen_2885.py",
+    "id": 16030,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/market_data/test_read_api_deepen_2888.py",
+    "id": 16031,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_drift.py",
+    "id": 16032,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_feature_values.py",
+    "id": 16033,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_local_trainer.py",
+    "id": 16034,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_point_in_time.py",
+    "id": 16035,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_register_model.py",
+    "id": 16036,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_registry_rules.py",
+    "id": 16037,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_run_train_job.py",
+    "id": 16038,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/ml/test_serve_signal.py",
+    "id": 16039,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/paper_control/test_contracts_v1.py",
+    "id": 16040,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/paper_control/test_models.py",
+    "id": 16041,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/paper_control/test_projections.py",
+    "id": 16042,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/performance/test_statement_projection.py",
+    "id": 16043,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/positions/test_borrow.py",
+    "id": 16044,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/positions/test_fx_forward.py",
+    "id": 16045,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/positions/test_ports_protocol.py",
+    "id": 16046,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/positions/test_restatement.py",
+    "id": 16047,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/positions/test_snapshot_builder.py",
+    "id": 16048,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/positions/test_weighted.py",
+    "id": 16049,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/reconciliation/test_models.py",
+    "id": 16050,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/research_data/test_contracts_v1.py",
+    "id": 16051,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/research_data/test_contracts_v1_deepen_2905.py",
+    "id": 16052,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/research_data/test_known_at.py",
+    "id": 16053,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/research_data/test_known_at_deepen_2905.py",
+    "id": 16054,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/research_data/test_redistribution.py",
+    "id": 16055,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/research_data/test_revision.py",
+    "id": 16056,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/trust/test_evaluate_trust_freshness.py",
+    "id": 16057,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/trust/test_models.py",
+    "id": 16058,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/trust/test_projections.py",
+    "id": 16059,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/trust/test_segregation_of_duty.py",
+    "id": 16060,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/application/test_compile_artifact.py",
+    "id": 16061,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/checks/test_backtest.py",
+    "id": 16062,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/checks/test_failure_conditions.py",
+    "id": 16063,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/checks/test_oos_walk_forward.py",
+    "id": 16064,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/checks/test_point_in_time.py",
+    "id": 16065,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/checks/test_robustness.py",
+    "id": 16066,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/checks/test_stress_capacity.py",
+    "id": 16067,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/test_artifact.py",
+    "id": 16068,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/test_contracts_v1.py",
+    "id": 16069,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/test_contracts_v1_evidence_refs.py",
+    "id": 16070,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/test_policy_hash.py",
+    "id": 16071,
+    "status": "issued"
+  },
+  {
+    "file": "tests/foundation/unit/validation/test_rules.py",
+    "id": 16072,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_dashboard_router.py",
+    "id": 16073,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_health_endpoints.py",
+    "id": 16074,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_idempotency_digest.py",
+    "id": 16075,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_indicators_router.py",
+    "id": 16076,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_market_data_router.py",
+    "id": 16077,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_positions_router.py",
+    "id": 16078,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_research_data_router.py",
+    "id": 16079,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_research_data_search_router.py",
+    "id": 16080,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_screener_router.py",
+    "id": 16081,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/api/test_signup_creates_tenant.py",
+    "id": 16082,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/backtest/test_parity_harness.py",
+    "id": 16083,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/core/db/test_rls_force_foundation.py",
+    "id": 16084,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/core/eventstore/test_append.py",
+    "id": 16085,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/db/test_migration_tenant_membership.py",
+    "id": 16086,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/db_schema/test_market_data.py",
+    "id": 16087,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/ems/test_algo_lifecycle.py",
+    "id": 16088,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/event_bus/test_redis_streams_event_bus.py",
+    "id": 16089,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/eventstore/test_projections.py",
+    "id": 16090,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/eventstore/test_replay_verify.py",
+    "id": 16091,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/allocation/test_allocate_fills.py",
+    "id": 16092,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/entities/test_migration_fa4_deepen.py",
+    "id": 16093,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/entities/test_postgres_entity_repository.py",
+    "id": 16094,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/entities/test_resolve_context_performance.py",
+    "id": 16095,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/entities/test_tenant_fk_enforced.py",
+    "id": 16096,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_calendar_repository.py",
+    "id": 16097,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_calendar_sync_deepen_2901.py",
+    "id": 16098,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_dc13_hot_postgres_deepen_2886.py",
+    "id": 16099,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_dc8_coverage_entitlements_deepen_2884.py",
+    "id": 16100,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_get_coverage.py",
+    "id": 16101,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_hot_postgres.py",
+    "id": 16102,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_instrument_attributes_deepen_2892.py",
+    "id": 16103,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_l2_ingest_session_deepen_2902.py",
+    "id": 16104,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_perf_replay.py",
+    "id": 16105,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/market_data/test_reference_repository.py",
+    "id": 16106,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/positions/test_conftest_deepen.py",
+    "id": 16107,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/positions/test_legacy_compat.py",
+    "id": 16108,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/positions/test_perf_journal_append.py",
+    "id": 16110,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/positions/test_pos_borrow_position_schema.py",
+    "id": 16112,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/positions/test_rebuild_snapshot.py",
+    "id": 16114,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/positions/test_reconcile_provider.py",
+    "id": 16116,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/positions/test_record_funding_fee.py",
+    "id": 16118,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/research_data/test_opendart_filing_deepen_2903.py",
+    "id": 16120,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/research_data/test_research_repository.py",
+    "id": 16122,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/foundation/trust/test_resolve_tenant_context.py",
+    "id": 16124,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/services/auth/test_login_refresh_logout.py",
+    "id": 16125,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/services/test_legacy_execution_pauser.py",
+    "id": 16126,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_admin_break_glass_router.py",
+    "id": 16127,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_app_lifespan.py",
+    "id": 16128,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_auth_router.py",
+    "id": 16129,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_auth_service.py",
+    "id": 16130,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_condition_compiler.py",
+    "id": 16131,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_db_schema_deepen_2964.py",
+    "id": 16132,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_event_bus.py",
+    "id": 16133,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_execution_scheduler.py",
+    "id": 16134,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_executor.py",
+    "id": 16135,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_strategy_builder_service.py",
+    "id": 16136,
+    "status": "issued"
+  },
+  {
+    "file": "tests/integration/test_task3178_mfa_deepen.py",
+    "id": 16137,
+    "status": "issued"
+  },
+  {
+    "file": "tests/performance/test_pre_trade_latency.py",
+    "id": 16138,
+    "status": "issued"
+  },
+  {
+    "file": "tests/platform/integration/test_break_glass.py",
+    "id": 16139,
+    "status": "issued"
+  },
+  {
+    "file": "tests/platform/unit/test_alert_rules_reference_known_metrics.py",
+    "id": 16140,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/schemas/foundation/test_connections.py",
+    "id": 16141,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/schemas/foundation/test_paper_control.py",
+    "id": 16142,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/schemas/foundation/test_reconciliation.py",
+    "id": 16143,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/schemas/foundation/test_trust.py",
+    "id": 16144,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/test_exception_registry.py",
+    "id": 16145,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/test_openapi_compat_actions.py",
+    "id": 16146,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/test_openapi_compat_perf_budget.py",
+    "id": 16147,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/api/ws/test_market_ws_dispatch.py",
+    "id": 16148,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/config/test_profile.py",
+    "id": 16149,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/event_bus/test_policy.py",
+    "id": 16150,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/indicators/test_dsl_indicator.py",
+    "id": 16151,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/indicators/test_indicator_on_indicator.py",
+    "id": 16152,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/indicators/test_ml_catalog.py",
+    "id": 16153,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/indicators/test_oss_eval_gate_deepen_2919.py",
+    "id": 16154,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py",
+    "id": 16155,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/indicators/test_reference_sampling.py",
+    "id": 16156,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/indicators/test_registry_tiers.py",
+    "id": 16157,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/loader/test_secret_loader.py",
+    "id": 16158,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/notifications/test_preferences.py",
+    "id": 16159,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/observability/test_loop_health.py",
+    "id": 16160,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/observability/test_metrics_port.py",
+    "id": 16161,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/sizing/test_fixed_fractional.py",
+    "id": 16162,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/sizing/test_selector.py",
+    "id": 16163,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/test_accounting.py",
+    "id": 16164,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/test_adversarial_binding.py",
+    "id": 16165,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/test_engine_v2.py",
+    "id": 16166,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/test_mandate_binding.py",
+    "id": 16167,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/test_portfolio_contracts.py",
+    "id": 16168,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/portfolio/test_rebalance.py",
+    "id": 16169,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/import_/test_pine_parser.py",
+    "id": 16170,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_ast.py",
+    "id": 16171,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_checker.py",
+    "id": 16172,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_compile.py",
+    "id": 16173,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_cond_v2_bridge.py",
+    "id": 16174,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_interpreter_property.py",
+    "id": 16175,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_lexer.py",
+    "id": 16176,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_lookahead.py",
+    "id": 16177,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_pine_transpile.py",
+    "id": 16178,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_request_future_reference.py",
+    "id": 16179,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_request_mtf.py",
+    "id": 16180,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_request_node.py",
+    "id": 16181,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_resources.py",
+    "id": 16182,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/script/test_script_library.py",
+    "id": 16183,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/strategy/test_confidence.py",
+    "id": 16184,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/strategy/test_indicator_key.py",
+    "id": 16185,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/strategy/test_market_state.py",
+    "id": 16186,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/strategy/test_models.py",
+    "id": 16187,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/strategy/test_script_facade.py",
+    "id": 16188,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/strategy/test_state_memory.py",
+    "id": 16189,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/test_bitemporal.py",
+    "id": 16190,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/test_data_distrust_monitor.py",
+    "id": 16191,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/test_engine_v2.py",
+    "id": 16192,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/test_event_bus_trace.py",
+    "id": 16193,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/test_portfolio_engine.py",
+    "id": 16194,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/test_split_brain.py",
+    "id": 16195,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/core/validator/test_result.py",
+    "id": 16196,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/data/models/test_memory.py",
+    "id": 16197,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/data/models/test_serialization.py",
+    "id": 16198,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/data/models/test_strategy_fsm.py",
+    "id": 16199,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/ems/test_pov.py",
+    "id": 16200,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/executor/test_executor_client_order_id_deepen.py",
+    "id": 16201,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/backtest/test_deep_backtest_job.py",
+    "id": 16202,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/backtest/test_fill_simulator.py",
+    "id": 16203,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/backtest/test_vector_oss_eval_gate_deepen_3048.py",
+    "id": 16204,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/backtest/vector/test_vector_sweeps.py",
+    "id": 16205,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/backtest/vector/test_vector_universe.py",
+    "id": 16206,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/ems/test_decomposition.py",
+    "id": 16207,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/ems/test_get_algo_progress.py",
+    "id": 16208,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/market_data/adapters/ingest/test_l2_ingest_session_deepen_2902.py",
+    "id": 16209,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/market_data/test_realtime_fanout.py",
+    "id": 16210,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/market_data/test_tick_parquet.py",
+    "id": 16211,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/marketplace/test_contracts_v1.py",
+    "id": 16212,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/marketplace/test_source_retention.py",
+    "id": 16213,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/marketplace/test_visibility.py",
+    "id": 16214,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/reconciliation/test_projections.py",
+    "id": 16215,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_entity_link_deepen_2906.py",
+    "id": 16216,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_gdelt_source.py",
+    "id": 16217,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_ingest_job.py",
+    "id": 16218,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_link_entities.py",
+    "id": 16219,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_link_entities_deepen_2906.py",
+    "id": 16220,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_macro_series.py",
+    "id": 16221,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_rss_generic_source.py",
+    "id": 16222,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/research_data/test_source_eval_gate_deepen_2904.py",
+    "id": 16223,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/tax_report/test_capital_gains.py",
+    "id": 16224,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/whatif/application/test_preview_order.py",
+    "id": 16225,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/foundation/whatif/domain/test_impact.py",
+    "id": 16226,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_adjustment.py",
+    "id": 16227,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_contracts_schema.py",
+    "id": 16228,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_dedupe.py",
+    "id": 16229,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_gap_detector.py",
+    "id": 16230,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_kis_ingest_source.py",
+    "id": 16231,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_lifecycle.py",
+    "id": 16232,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_lineage.py",
+    "id": 16233,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_ohlc_sanity.py",
+    "id": 16234,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_options_chain.py",
+    "id": 16235,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_outlier_detector.py",
+    "id": 16236,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_session_rules.py",
+    "id": 16237,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_stale_detector.py",
+    "id": 16238,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_symbol_normalizer.py",
+    "id": 16239,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_timeframe.py",
+    "id": 16240,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_verdict.py",
+    "id": 16241,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/market_data/test_yaml_calendar_source_deepen_2901.py",
+    "id": 16242,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/ops/test_backup_verify.py",
+    "id": 16243,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/research_data/test_ingest_opendart_filing.py",
+    "id": 16244,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/research_data/test_opendart_rd20_deepen_2903.py",
+    "id": 16245,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/research_data/test_point_in_time.py",
+    "id": 16246,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/research_data/test_query_as_of.py",
+    "id": 16247,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_canary_bitget.py",
+    "id": 16248,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_check_audit_regressions.py",
+    "id": 16249,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_check_complexity.py",
+    "id": 16250,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_check_idempotent_writes.py",
+    "id": 16251,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_check_import_linter.py",
+    "id": 16252,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_check_zone_diff.py",
+    "id": 16253,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_kis_tr_fetch.py",
+    "id": 16254,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_plt42_env_example_audit.py",
+    "id": 16255,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_pyproject_importlinter_dom1.py",
+    "id": 16256,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_replay_verify_db_pressure.py",
+    "id": 16257,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_replay_verify_pool_retry.py",
+    "id": 16258,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_run_mutation.py",
+    "id": 16259,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/scripts/test_setup_test_db.py",
+    "id": 16260,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/services/test_candle_history.py",
+    "id": 16261,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/services/test_correlation_service.py",
+    "id": 16262,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/services/test_market_state_multi_tf.py",
+    "id": 16263,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/services/test_reference_quotes.py",
+    "id": 16264,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/services/test_seller_suspension_service.py",
+    "id": 16265,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/services/test_var_estimator.py",
+    "id": 16266,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/services/test_verification_queue_service.py",
+    "id": 16267,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/test_gate_params_required.py",
+    "id": 16268,
+    "status": "issued"
+  },
+  {
+    "file": "tests/unit/test_zone_purity.py",
+    "id": 16269,
+    "status": "issued"
+  },
+  {
+    "file": "scripts/local_leaf_sources.py",
+    "id": 16270,
+    "status": "issued"
+  }
+]

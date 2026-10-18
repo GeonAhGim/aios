@@ -12,7 +12,6 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-25
 from __future__ import annotations
 
 import asyncio
-import math
 import time
 from collections.abc import AsyncGenerator
 
@@ -23,19 +22,12 @@ from src.api.contracts.error_codes import ErrorCode
 from src.core.rate_limit.limiter import Decision, InMemoryTokenBucket, set_limiter
 from src.core.rate_limit.policy import POLICIES, RateLimitPolicy
 from src.main import app
-from tests.conftest import PerfBudget
-from tests.support.coverage_pause import paused_coverage
+from tests.support.perf_detection import assert_async_p99_ms, assert_slowdown_detected
 
 # ADR-2026-09-09-C Decision 1 축별 성능 예산표에 rate limiter 전용 항목이 없어
 # 가장 가까운 유사 항목("사전거래 게이트 p99 5ms" — 이쪽도 I/O 없이 인메모리
 # 상태만 보고 즉시 allow/deny를 판정하는 동기 게이트)을 자체 예산으로 차용한다.
 _ACQUIRE_P99_BUDGET_SECONDS = 0.005
-
-
-def _p99(samples: list[float]) -> float:
-    ordered = sorted(samples)
-    index = max(0, math.ceil(0.99 * len(ordered)) - 1)
-    return ordered[index]
 
 
 class _BrokenLimiter:
@@ -179,88 +171,30 @@ async def test_broken_limiter_backend_fails_closed_not_silently_allowed(
 
 
 @pytest.mark.perf
-async def test_acquire_p99_latency_within_budget(
-    perf_budget: PerfBudget,
-) -> None:
-    """`InMemoryTokenBucket.acquire()`는 I/O 없이 dict 조회 + 락만 쓰는 순수
-    CPU 작업이므로 ADR-2026-09-09-C 예산표의 "사전거래 게이트 p99 5ms"를
-    자체 예산으로 차용해 반복 호출 p99가 그 안에 드는지 단언한다.
-
-    단위: 이 함수의 모든 시간 값은 밀리초(ms)다 — `cpu_ms_per_call`도
-    `_ACQUIRE_P99_BUDGET_SECONDS * 1000`도 ms. 혼용하지 않는다(task-11519
-    이전에는 `cpu_ms`(이미 ms)에 추가로 *1000을 해 "μs"라 주석을 달고
-    ms 예산과 비교하는 단위 버그가 있었다 — 5ms 예산을 5μs 상당으로
-    요구하는 셈이라 거의 항상 틱이 0이어야만 통과했다).
-
-    `perf_budget.samples_async`(호출 1회당 1샘플)는 쓰지 않는다 — Windows
-    `time.process_time()`은 ~15.6ms(64Hz) 틱으로 양자화되고(`PerfBudget.sample`
-    docstring 참고) `acquire()` 1회는 그보다 훨씬 짧아 샘플이 0 또는
-    15.625 중 하나로만 읽힌다. `PerfBudget.sample`과 동일하게 `batch`회를
-    한 구간으로 묶어 총 CPU 시간을 틱 폭보다 크게 만들고 호출당 값으로
-    나눠(`tick/batch`로 양자화 오차 축소), coverage 트레이서도 측정 구간
-    밖으로 뺀다(task-7253과 동일 근거)."""
+async def test_acquire_p99_latency_within_budget() -> None:
+    """PLT-25: adaptive batch means, ms throughout, original 5ms budget."""
     bucket = InMemoryTokenBucket(clock=time.monotonic)
-    policy = POLICIES["read"]
-
-    batch = 8
-    n = 30
-    cpu_ms_per_call: list[float] = []
-    for _ in range(n):
-        with paused_coverage():
-            cpu_start = time.process_time()
-            for _ in range(batch):
-                await bucket.acquire(policy, "perf:subject-1")
-            cpu_ms_per_call.append((time.process_time() - cpu_start) * 1000 / batch)
-
-    cpu_ms_per_call.sort()
-    index = max(0, math.ceil(0.99 * len(cpu_ms_per_call)) - 1)
-    p99_ms = cpu_ms_per_call[index]
-
-    assert p99_ms < _ACQUIRE_P99_BUDGET_SECONDS * 1000
+    await assert_async_p99_ms(
+        lambda: bucket.acquire(POLICIES["read"], "perf:subject-1"),
+        budget_ms=_ACQUIRE_P99_BUDGET_SECONDS * 1000,
+    )
 
 
 @pytest.mark.perf
 async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression(
     monkeypatch: pytest.MonkeyPatch,
-    perf_budget: PerfBudget,
 ) -> None:
-    """위 단언이 상시-녹색이 아님을 증명 — 버킷 dict 접근을 직렬화하는 락
-    (limiter.py 모듈 docstring 47행) 획득 경로에 예산의 배수만큼 지연을
-    주입하면(락 경합 회귀를 흉내) 같은 p99 단언이 실제로 적색(AssertionError)
-    이 되어야 한다.
+    """The identical benchmark must pass normally and reject a 10x lock delay."""
+    await test_acquire_p99_latency_within_budget()
+    original_acquire = asyncio.Lock.acquire
 
-    단위/틱 정정(task-15550): `sample_async`는 batch 파라미터가 없어 호출 1회당
-    CPU 시간이 Windows 15.6ms 틱으로 양자화된다(대부분 0). `wall_ms`도tick
-    양자화로 ~15ms 이상이라 지연 주입 없이도 항상 적색 — 허울 단언이었다.
-    이제 첫 테스트와 동일한 수동 batch(=8) 패턴으로 CPU 시간과 wall 시간을
-    함께 재며, 지연 주입 시 wall_ms가 예산을 넘는지 확인한다.
-    """
-    bucket = InMemoryTokenBucket(clock=time.monotonic)
-    policy = POLICIES["read"]
-    original_acquire = bucket._lock.acquire
+    async def delayed_acquire(lock: asyncio.Lock) -> bool:
+        await asyncio.sleep(_ACQUIRE_P99_BUDGET_SECONDS * 10)
+        return await original_acquire(lock)
 
-    async def delayed_acquire() -> bool:
-        await asyncio.sleep(_ACQUIRE_P99_BUDGET_SECONDS * 3)
-        return await original_acquire()
-
-    monkeypatch.setattr(bucket._lock, "acquire", delayed_acquire)
-
-    batch = 8
-    n = 30
-    wall_ms_per_call: list[float] = []
-    for _ in range(n):
-        with paused_coverage():
-            wall_start = time.perf_counter()
-            for _ in range(batch):
-                await bucket.acquire(policy, "perf:subject-2")
-            wall_ms_per_call.append((time.perf_counter() - wall_start) * 1000 / batch)
-
-    wall_ms_per_call.sort()
-    index = max(0, math.ceil(0.99 * len(wall_ms_per_call)) - 1)
-    p99_ms = wall_ms_per_call[index]
-
-    with pytest.raises(AssertionError):
-        assert p99_ms < _ACQUIRE_P99_BUDGET_SECONDS * 1000
+    with monkeypatch.context() as patch:
+        patch.setattr(asyncio.Lock, "acquire", delayed_acquire)
+        await assert_slowdown_detected(test_acquire_p99_latency_within_budget)
 
 
 # ---------------------------------------------------------------------------
