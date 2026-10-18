@@ -141,8 +141,8 @@ class _RawHttpExceptionPortfolioService:
 
 
 async def test_raw_http_exception_with_unmapped_status_code_keeps_envelope_shape_and_status(
-    client,
-):
+    client: AsyncClient,
+) -> None:
     """실패 주입: `_STATUS_DEFAULT_CODE`(handlers.py)에 없는 상태코드(402)로
     레거시 `HTTPException`이 발생해도(이관 안 된 의존성 대비 fallback 경로)
     응답이 §15.3 ApiError 봉투 모양을 유지하고, 라우터가 명시적으로 고른
