@@ -84,4 +84,4 @@ def test_experiment_rejects_unknown_kind() -> None:
 def test_experiment_is_frozen() -> None:
     exp = _experiment()
     with pytest.raises(ValidationError):
-        exp.inputs_hash = "b" * 64
+        exp.inputs_hash = "b" * 64  # type: ignore[misc]
