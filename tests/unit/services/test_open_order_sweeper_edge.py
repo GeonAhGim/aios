@@ -94,11 +94,12 @@ async def test_conditional_update_failure_rolls_back_order_event_atomically(pool
 async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(pool, perf_budget):
     """수치 성능 단언(task-3029, DEPTH 감사 task-2724가 지목한 마지막 공백).
 
-    raw time.perf_counter() 단언을 perf_budget.samples_async() 경유로 전환
-    (task-11862). 비동기 I/O(DB 라운드트립)이므로 PerfBudget.wall_ms로
+    raw time.perf_counter() 단언을 perf_budget 경유로 전환 완료(task-11862,
+    task-16292). 비동기 I/O(DB 라운드트립)이므로 PerfBudget.wall_ms로
     측정하고, p95 분포 단언은 그대로 유지한다.
 
     예산: baseline 대비 max_ratio 5배 + 50ms 고정 오버헤드 (불변).
+    단위: wall_ms → ms 통일, μs 혼용 없음.
     """
     user_id = await create_test_user(pool)
     adapter = _CountingCancelAdapter()
@@ -114,7 +115,7 @@ async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(poo
             scope_ref=str(user_id),
         )
     )
-    baseline_elapsed_s = baseline_result.wall_ms / 1000
+    baseline_ms = baseline_result.wall_ms
 
     # p95 측정: 30회 samples_async → wall_ms 분포에서 p95 계산
     measurements = await perf_budget.samples_async(
@@ -130,7 +131,7 @@ async def test_sweep_open_orders_p95_latency_stays_within_normalized_ceiling(poo
     wall_ms_list = sorted(m.wall_ms for m in measurements)
     p95_ms = wall_ms_list[math.ceil(0.95 * len(wall_ms_list)) - 1]
 
-    ceiling_ms = baseline_elapsed_s * 5 * 1000 + 50
+    ceiling_ms = baseline_ms * 5 + 50
     assert p95_ms <= ceiling_ms, (
         f"sweep_open_orders(주문 1건) p95 wall {p95_ms:.2f}ms가 정규화 상한 "
         f"{ceiling_ms:.2f}ms(baseline {baseline_result.wall_ms:.2f}ms)를 초과했습니다 -- "
