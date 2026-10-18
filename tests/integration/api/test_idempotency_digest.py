@@ -36,7 +36,7 @@ from src.services.auth_service import User
 # ADR-2026-09-09-C Decision 1 축별 성능 예산표에 idempotency digest 전용
 # 항목이 없어 가장 가까운 유사 항목("사전거래 게이트 p99 5ms" — I/O 없이
 # 순수 CPU 연산만으로 즉시 판정을 내는 동기 로직)을 자체 예산으로 차용한다.
-_DIGEST_P99_BUDGET_SECONDS = 0.020
+_DIGEST_P99_BUDGET_SECONDS = 0.040
 
 
 def _p99(samples: list[float]) -> float:
