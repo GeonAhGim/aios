@@ -84,4 +84,4 @@ def test_experiment_rejects_unknown_kind() -> None:
 def test_experiment_is_frozen() -> None:
     exp = _experiment()
     with pytest.raises(ValidationError):
-        object.__setattr__(exp, "inputs_hash", "b" * 64)
+        exp.inputs_hash = "b" * 64
