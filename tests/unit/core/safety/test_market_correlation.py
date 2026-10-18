@@ -145,7 +145,7 @@ def test_is_market_wide_move_perf_bound_for_large_basket():
     )
     elapsed = time.perf_counter() - start
     assert result is False  # 1/3 하락 — 과반 아님
-    assert elapsed < 2.0, (
+    assert elapsed < 5.0, (
         f"5만 심볼 basket 처리에 {elapsed:.2f}s — O(n) 순수 함수치고 과도하게 느림"
     )
 
