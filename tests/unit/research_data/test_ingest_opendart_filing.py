@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -35,19 +35,19 @@ class _FakeSourceContractRepo:
     def __init__(self, contract: SourceContract | None) -> None:
         self._contract = contract
 
-    async def get(self, conn, source_id: str):
+    async def get(self, conn: object, source_id: str) -> SourceContract | None:
         return self._contract if source_id == OPENDART_SOURCE_ID else None
 
 
 class _FakeFilingRepo:
     def __init__(self) -> None:
-        self.appended: list = []
+        self.appended: list[OpenDartFiling] = []
 
-    async def append(self, conn, action):
+    async def append(self, conn: object, action: OpenDartFiling) -> OpenDartFiling:
         self.appended.append(action)
         return action
 
-    async def list_history(self, conn, instrument_id):
+    async def list_history(self, conn: object, instrument_id: UUID) -> list[OpenDartFiling]:
         return [a for a in self.appended if a.instrument_id == instrument_id]
 
 
@@ -55,7 +55,9 @@ class _FakeUnprocessedQueue:
     def __init__(self) -> None:
         self.entries: list[dict[str, object]] = []
 
-    async def enqueue(self, conn, *, source_id: str, raw_payload, reason: str) -> None:
+    async def enqueue(
+        self, conn: object, *, source_id: str, raw_payload: object, reason: str
+    ) -> None:
         self.entries.append({"source_id": source_id, "raw_payload": raw_payload, "reason": reason})
 
 
