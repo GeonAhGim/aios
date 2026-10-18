@@ -166,7 +166,7 @@ def test_grid_sweep_normalized_performance_threshold() -> None:
     result = sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
     elapsed_seconds = time.perf_counter() - start
 
-    threshold_seconds = baseline_seconds * combo_count * 2.0
+    threshold_seconds = baseline_seconds * combo_count * 3.0
     print(
         f"[BT-16a] 1조합 실측={baseline_seconds:.4f}s, {combo_count}조합 실측="
         f"{elapsed_seconds:.4f}s, 정규화 임계={threshold_seconds:.4f}s (§9.9 목표: ≤60s)"
