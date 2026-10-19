@@ -355,6 +355,39 @@ def test_candle_record_bulk_validation_throughput(perf_budget: PerfBudget) -> No
     )
 
 
+@pytest.mark.perf
+def test_candle_record_bulk_validation_budget_exceeded_with_injected_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """예산 주입 지연 — perf_budget 내부의 process_time()을 monkeypatch해
+    1회 호출당 50ms CPU를 주입하면 100회 호출당 5초가 돼 200ms 예산을
+    크게 초과한다.
+
+    이 테스트는 '성능 단언이 실제로 예산 초과를 포착하는지' 검증한다(검출력 확인).
+    주입 없이 통과하는 단언은 허울 단언일 수 있다 — 이 테스트가 통과해야
+    단언이 의미 있다.
+    """
+    from tests.support import perf_budget as _perf_budget_mod
+
+    cumulative: list[float] = [0.0]
+
+    def _fake_process_time() -> float:
+        cumulative[0] += 0.250  # 250ms CPU per call → delta=500ms/sample > 200ms 예산
+        return cumulative[0]
+
+    monkeypatch.setattr(_perf_budget_mod.time, "process_time", _fake_process_time)  # type: ignore[attr-defined]
+
+    with pytest.raises(AssertionError):
+        perf = PerfBudget()
+        perf.assert_within(
+            lambda: [_sample_candle() for _ in range(100)],
+            budget_ms=200.0,
+            n=5,
+            batch=1,
+            label="1,000건 CandleRecord 검증(주입 지연)",
+        )
+
+
 # ── DEEPEN: optional field (X | None) accept None / omission / round-trip (task-6978) ──
 
 
