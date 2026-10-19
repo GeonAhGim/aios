@@ -12,10 +12,12 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 import pytest
 
+from src.foundation.market_data.contracts.v1 import CorporateAction
 from src.foundation.market_data.domain.corporate_action.opendart_filing import OpenDartFiling
 from src.foundation.market_data.domain.entitlement.source_contract import (
     RedistributionScope,
@@ -41,13 +43,13 @@ class _FakeSourceContractRepo:
 
 class _FakeFilingRepo:
     def __init__(self) -> None:
-        self.appended: list[OpenDartFiling] = []
+        self.appended: list[CorporateAction] = []
 
-    async def append(self, conn: object, action: OpenDartFiling) -> OpenDartFiling:
+    async def append(self, conn: object, action: CorporateAction) -> CorporateAction:
         self.appended.append(action)
         return action
 
-    async def list_history(self, conn: object, instrument_id: UUID) -> list[OpenDartFiling]:
+    async def list_history(self, conn: object, instrument_id: UUID) -> list[CorporateAction]:
         return [a for a in self.appended if a.instrument_id == instrument_id]
 
 
@@ -178,7 +180,9 @@ async def test_unsupported_report_type_is_rejected_not_silently_accepted() -> No
         filing=OpenDartFiling(
             instrument_id=uuid4(),
             rcept_no="20260302000000",
-            report_type="NOTICE",  # 지원 안 되는 유형
+            report_type=cast(
+                Literal["SPLIT", "CASH_DIVIDEND", "MERGER"], "NOTICE"
+            ),  # unsupported type for negative test
             event_date=date(2026, 4, 1),
             known_at=_NOW,
         ),
