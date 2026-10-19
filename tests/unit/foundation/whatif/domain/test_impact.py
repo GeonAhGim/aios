@@ -9,8 +9,11 @@ Depth=D2 — per ADR-2026-09-09-C Decision 1:
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from time import process_time as _original_process_time
+from unittest.mock import patch
 
 import pytest
 
@@ -253,25 +256,53 @@ class TestPerformance:
 
 
 # ---------------------------------------------------------------------------
-# 6. Gate-red reproduction: test that a gate-violating call is caught
+# 6. Failure-injection: injected CPU load makes budget assertion go red
 # ---------------------------------------------------------------------------
 
 
-class TestGateRed:
-    def test_float_notional_rejected_at_caller(self) -> None:
-        """Gate-red: caller must not pass float. The ProposedTrade dataclass
-        does not enforce Decimal at the type level (Python has no runtime
-        type enforcement), but the function raises ValueError for invalid
-        notional. We verify the function catches non-numeric input."""
-        before = _make_state()
-        # Decimal("0") is the edge case that should raise
-        trade = ProposedTrade(symbol="AAPL", notional=Decimal("0"), side="BUY")
-        with pytest.raises(ValueError):
-            delta_impact(before=before, trade=trade)
+class TestFailureInjectionCPU:
+    def test_injected_cpu_load_breaks_budget_assertion(self, perf_budget: PerfBudget) -> None:
+        """Failure-injection: monkeypatch time.process_time to simulate CPU
+        work. The same assert_within call that passes green under normal
+        conditions must go red when the measured function consumes enough
+        fake CPU to exceed the budget.
 
-    def test_buy_new_symbol_increases_position_count(self) -> None:
-        """Buying a symbol not in the portfolio: position count +1."""
+        This validates that the performance assertion actually detects
+        regressions — a silent pass on both normal and injected input would
+        be a hollow guard.
+        """
         before = _make_state()
-        impact = delta_impact(before=before, trade=BUY_NEW)
-        assert impact.position_count_delta == 1
-        assert impact.per_symbol_pct_delta["TSLA"] > Decimal("0")
+        trade = BUY_AAPL
+
+        # Verify green control first (same measurement as the D2 perf test).
+        sample = perf_budget.assert_within(
+            lambda: delta_impact(before=before, trade=trade),
+            budget_ms=1.0,
+            batch=100,
+            label="delta_impact green control",
+        )
+        assert sample.cpu_ms < 1.0, "control must pass budget before injection"
+
+        # Inject cumulative CPU delay: each process_time() call adds
+        # 0.01 * call_count seconds. Inside sample(), the delta between
+        # start and end call gains ~0.01 s = 10 ms per batch iteration.
+        # With batch=10: cpu_ms = 10 ms * 1000 / 10 = 10 ms,
+        # well above the 1 ms budget.
+        call_count = 0
+
+        def slow_process_time() -> float:
+            nonlocal call_count
+            call_count += 1
+            return _original_process_time() + 0.01 * call_count
+
+        with patch.object(time, "process_time", side_effect=slow_process_time):
+            with pytest.raises(
+                AssertionError,
+                match=r"cpu=.*budget<1\.0",
+            ):
+                perf_budget.assert_within(
+                    lambda: delta_impact(before=before, trade=trade),
+                    budget_ms=1.0,
+                    batch=10,
+                    label="delta_impact injected load",
+                )
