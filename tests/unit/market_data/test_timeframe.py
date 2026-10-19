@@ -16,6 +16,7 @@ I/O가 없어 failure-injection·성능단언·게이트 재현이 성립하기 
 동시 접근에서도 결정론을 유지하는지로 증명한다.
 """
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import cast
@@ -280,6 +281,52 @@ def test_align_open_normalizes_non_utc_tz_for_intraday_timeframes(
     kst = timezone(timedelta(hours=9))
     ts = datetime(2026, 9, 4, 8, 30, tzinfo=kst)  # == 2026-09-03 23:30 UTC
     assert align_open(ts, tf) == expected_open
+
+
+# --- DEEPEN(task-2946) 게이트 적색: 지연 주입으로 예산 위반 검증 -----------------
+
+
+def test_perf_budget_fails_when_expected_opens_slowed_10x(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`expected_opens`가 10배 더 많은 작업을 하면 3초 예산을 넘는다 — 게이트가
+    실제로 지연을 적색으로 잡는지 검증한다.
+
+    원본 함수를 감싸서 내부에서 CPU busy-wait를 주입한 후, 같은 측정/단언
+    (`budget_ms=3000`)을 재사용해 적색을 확인한다.
+    작은 데이터셋(1개월 M1, 43,200 캔들)으로 원본 실행 시간이 짧아지도록 한다.
+    """
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = datetime(2026, 2, 1, tzinfo=UTC)
+    session = _session(start, end)
+
+    # 원본 expected_opens 호출
+    original_expected_opens = expected_opens
+
+    def slow_expected_opens(
+        s: datetime, e: datetime, tf: Timeframe, sessions: list[SessionWindow]
+    ) -> list[datetime]:
+        result = original_expected_opens(s, e, tf, sessions)
+        # 10배 지연: ~5초 CPU 부하 (3초 예산을 넘기기 위해)
+        # busy-wait로 실제 CPU 시간 소모 → time.process_time() 측정값 증가
+        target_cpu_s = 5
+        deadline = time.perf_counter() + target_cpu_s
+        while time.perf_counter() < deadline:
+            pass
+        return result
+
+    monkeypatch.setattr(
+        "tests.unit.market_data.test_timeframe.expected_opens",
+        slow_expected_opens,
+    )
+
+    def run() -> list[datetime]:
+        return expected_opens(start, end, Timeframe.M1, [session])
+
+    # 10배 지연 주입 → assert_within가 AssertionError를 raise해야 한다
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(run, budget_ms=3000)
 
 
 def test_expected_opens_deduplicates_overlapping_session_opens() -> None:
