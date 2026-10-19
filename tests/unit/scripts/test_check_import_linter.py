@@ -70,17 +70,37 @@ def _touch_pkg(tmp_path: Path, *parts: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_contracts_reads_all_four_kinds(tmp_path: Path) -> None:
+def test_parse_contracts_forbidden_kind(tmp_path: Path) -> None:
     path = _write_contracts(
-        tmp_path,
-        "[forbidden:a]\nsource = src.core\nforbidden =\n    src.exchanges\n\n"
-        "[forbidden_suffix:b]\nroot = src.foundation\nsource_suffix = domain\n"
-        "forbidden_suffix = adapters\n\n"
-        "[boundary:c]\nroot = src.foundation\ninternal_suffixes =\n    domain\n    adapters\n\n"
-        "[cycles:d]\nroot = src\n",
+        tmp_path, "[forbidden:a]\nsource = src.core\nforbidden =\n    src.exchanges\n"
     )
     contracts = cil.parse_contracts(path)
-    assert [c["kind"] for c in contracts] == ["forbidden", "forbidden_suffix", "boundary", "cycles"]
+    assert [c["kind"] for c in contracts] == ["forbidden"]
+
+
+def test_parse_contracts_forbidden_suffix_kind(tmp_path: Path) -> None:
+    path = _write_contracts(
+        tmp_path,
+        "[forbidden_suffix:b]\nroot = src.foundation\nsource_suffix = domain\n"
+        "forbidden_suffix = adapters\n",
+    )
+    contracts = cil.parse_contracts(path)
+    assert [c["kind"] for c in contracts] == ["forbidden_suffix"]
+
+
+def test_parse_contracts_boundary_kind(tmp_path: Path) -> None:
+    path = _write_contracts(
+        tmp_path,
+        "[boundary:c]\nroot = src.foundation\ninternal_suffixes =\n    domain\n    adapters\n",
+    )
+    contracts = cil.parse_contracts(path)
+    assert [c["kind"] for c in contracts] == ["boundary"]
+
+
+def test_parse_contracts_cycles_kind(tmp_path: Path) -> None:
+    path = _write_contracts(tmp_path, "[cycles:d]\nroot = src\n")
+    contracts = cil.parse_contracts(path)
+    assert [c["kind"] for c in contracts] == ["cycles"]
 
 
 def test_parse_contracts_missing_file_raises(tmp_path: Path) -> None:
