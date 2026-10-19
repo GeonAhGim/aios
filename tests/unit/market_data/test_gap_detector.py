@@ -163,7 +163,9 @@ def test_detect_gaps_completes_within_budget_for_30_days_of_m1_crypto_candles(
     def measure() -> list:
         return detect_gaps(candles, Timeframe.M1, [long_session])
 
-    perf_budget.assert_within(measure, budget_ms=3000)
+    # batch=10: Windows process_time의 15.6ms 양자화 틱을 batch로 묶어
+    # 1회 호출당 CPU 측정 오차를 ~1.6ms로 낮춘다(task-11539 후속).
+    perf_budget.assert_within(measure, budget_ms=3000, batch=10)
 
 
 # --- DEEPEN(task-2952) 게이트 적색 재현(회귀 클래스) -------------------------------
@@ -305,10 +307,49 @@ def test_detect_gaps_handles_10k_candles_within_budget(
     def measure() -> list:
         return detect_gaps(candles, Timeframe.M1, sessions)
 
-    perf_budget.assert_within(measure, budget_ms=1000)
+    # batch=10: Windows process_time의 15.6ms 양자화 틱을 batch로 묶어
+    # 1회 호출당 CPU 측정 오차를 ~1.6ms로 낮춘다(task-11539 후속).
+    perf_budget.assert_within(measure, budget_ms=1000, batch=10)
 
 
-# --- DEEPEN(task-2952) 동시성/replay 증명 -----------------------------------------
+# --- DEEPEN(task-2952) 게이트 적색 재현(10배 지연 주입) ---------------------------
+
+
+def test_detect_gaps_perf_budget_turns_red_with_10x_cpu_burn(
+    perf_budget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """detect_gaps의 성능 단언이 실제로 검출력을 갖는지 확인 —
+    expected_opens에 CPU 부하를 주입하면 같은 budget 단언이 적색이 된다.
+    PerfBudget.assert_within은 time.process_time()(CPU 시간)을 측정하므로
+    sleep 대신 CPU-burning CPU 연산을 주입해야 gate-red를 재현할 수 있다.
+    """
+    key = SeriesKey(venue=Venue.KIS_KRX, instrument_id=uuid4(), timeframe=Timeframe.H1)
+    sessions = _calendar(Venue.KIS_KRX).sessions_for(date(2026, 9, 4))
+    expected = expected_opens(sessions[0].open_at, sessions[0].close_at, Timeframe.H1, sessions)
+    assert len(expected) >= 4
+    candles = [_candle(key, ot, Timeframe.H1) for ot in expected]
+
+    # expected_opens 호출 시 CPU-burning 연산을 주입 (10배 지연)
+    original_expected_opens = expected_opens
+
+    def cpu_burn_expected_opens(*args: Any, **kwargs: Any) -> list:
+        # 100MB 배열 할당 + 산술 연산 → CPU 부하
+        total = 0
+        for _ in range(10_000_000):
+            total += 1
+        return original_expected_opens(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "src.foundation.market_data.domain.quality.gap_detector.expected_opens",
+        cpu_burn_expected_opens,
+    )
+
+    def measure() -> list:
+        return detect_gaps(candles, Timeframe.H1, sessions)
+
+    # budget 10ms — CPU 부하 주입으로 실제 CPU 시간이 10ms를 크게 넘으면 적색
+    perf_budget.assert_within(measure, budget_ms=10, batch=10)
 
 
 def test_detect_gaps_is_deterministic_under_concurrent_thread_access() -> None:
