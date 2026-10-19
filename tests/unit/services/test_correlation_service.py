@@ -253,7 +253,6 @@ def test_flat_price_history_returns_none_when_correlation_is_mathematically_unde
 
 
 @pytest.mark.perf
-@pytest.mark.perf
 def test_repeated_calls_over_many_positions_has_no_performance_regression(
     perf_budget: PerfBudget,
 ) -> None:
@@ -266,8 +265,8 @@ def test_repeated_calls_over_many_positions_has_no_performance_regression(
     batch=30으로 묶어 호출당 평균 CPU ms를 계산(틱 양자화 오차 15.6ms/30≈0.5ms).
     단위: batch.total_ms/30 = ms, 예산도 ms — μs/ms 혼용 없음.
 
-    주입 지연 적색 확인: 10배 지연(100000ms)을 주입하면 assert_within이
-    적색이어야 함 — 실제 테스트 아님, note에만 기록.
+    검출력 확인: test_repeated_calls_budget_goes_red_with_10x_cpu_injection
+    에서 process_time monkeypatch로 10배 CPU 지연을 주입해 적색을 검증한다.
     """
     target = "BTC/USDT"
     symbols = [f"SYM{i}/USDT" for i in range(10)]
@@ -299,8 +298,62 @@ def test_repeated_calls_over_many_positions_has_no_performance_regression(
     )
     assert sample.cpu_ms < 10000.0
 
-    # 주입 지연 적색 확인(실제 테스트 아님 — note 기록용):
-    # CPU 5억 회 XOR 지연 주입 시 cpu_ms≈13465ms → budget 10000ms 초과로 적색 확인
+
+@pytest.mark.perf
+def test_repeated_calls_budget_goes_red_with_10x_cpu_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인 — `time.process_time`을 monkeypatch해 1회 호출당
+    10배 CPU 시간을 가장하면 budget 단언이 AssertionError로 적색이 돼야 한다.
+
+    PerfBudget.assert_within은 time.process_time()(CPU 시간)을 측정하므로
+    sleep() 주입은 wall-clock만 늘어나고 CPU 시간이 변하지 않는다.
+    따라서 process_time의 반환값을 인위적으로 늘려 CPU 부하를 가장한다.
+
+    기존 test_repeated_calls_over_many_positions_has_no_performance_regression와
+    동일한 측정/단언을 재사용하되, process_time이 매 호출 시 1000s(1000000ms)를
+    더하게 해 budget 10000ms를 크게 넘기면 적색임을 확인한다.
+    """
+    target = "BTC/USDT"
+    symbols = [f"SYM{i}/USDT" for i in range(10)]
+    target_closes = _proportional_closes(30, start=Decimal("100"), factor=Decimal("1"))
+    histories = {target: _make_candles(target_closes, symbol=target)}
+    for i, sym in enumerate(symbols):
+        factor = Decimal("1") if i % 2 == 0 else Decimal("-1")
+        histories[sym] = _make_candles(
+            _proportional_closes(30, start=Decimal("50"), factor=factor), symbol=sym
+        )
+    positions = [(sym, Decimal("100")) for sym in symbols]
+
+    budget_ms = 10000.0
+    batch = 30
+
+    # process_time을 monkeypatch: 매 호출 시 1000s(1000000ms)를 더한다.
+    # batch=30 → 총 30000s / 30 = 1000000ms/batch >> budget 10000ms.
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 1000.0  # 1000s per call
+        return _fake_time[0]
+
+    monkeypatch.setattr("tests.support.perf_budget.time.process_time", _fake_process_time)
+
+    def _call() -> tuple[Decimal | None, float | None]:
+        return correlated_exposure(
+            histories,
+            positions,
+            target,
+            threshold=_THRESHOLD,
+            min_overlap=_MIN_OVERLAP,
+        )
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_call, batch=batch)
+        assert sample.cpu_ms < budget_ms, (
+            f"상관 노출 계산이 예산({budget_ms}ms)을 넘었습니다 (cpu={sample.cpu_ms:.1f}ms)."
+        )
 
 
 def test_none_result_denies_via_correlation_gate_chain():
