@@ -233,13 +233,12 @@ def test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_col
     ids: set[str] = set()
     cpu_ms_values: list[float] = []
 
-    # batch=10 → 5000÷10=500 calls; process_time 15.6ms 틱 오차를 ~1.56ms로 줄임
-    # 각 sample.result는 batch 내 마지막 호출 결과이므로, 모든 ID를 모으기 위해
-    # batch 내 전 결과를 mutable collector에 기록한다.
+    # Measure 100 individual derivations per sample: the Windows CPU clock's
+    # 15.625ms tick contributes at most 0.15625ms per derivation.
+    batch_size = 100
     batch_collector: list[str] = []
 
-    for seq in range(500):
-        # 10개 scope를 한 번에 측정 (batch=10)
+    for seq in range(5000 // batch_size):
         scopes = [
             build_scope(
                 tenant_id=tenant_id,
@@ -248,28 +247,32 @@ def test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_col
                 strategy_id="perf-test",
                 strategy_version="1.0.0",
                 execution_id=1,
-                intent_seq=seq * 10 + i,
+                intent_seq=seq * batch_size + i,
                 window_start=window_start,
             )
-            for i in range(10)
+            for i in range(batch_size)
         ]
+        # Build scopes outside the measured interval.
+        scope_iter = iter(scopes)
         batch_collector.clear()
         sample = perf_budget.sample(
-            lambda s=scopes: batch_collector.extend(
+            lambda it=scope_iter: batch_collector.append(
                 derive_client_order_id(
-                    scope, max_len=_CLIENT_ORDER_ID_MAX_LEN, charset=_CLIENT_ORDER_ID_CHARSET
+                    next(it),
+                    max_len=_CLIENT_ORDER_ID_MAX_LEN,
+                    charset=_CLIENT_ORDER_ID_CHARSET,
                 )
-                for scope in s
             ),
-            batch=1,
+            batch=batch_size,
         )
+        assert len(batch_collector) == batch_size
         cpu_ms_values.append(sample.cpu_ms)
         ids.update(batch_collector)
 
     assert len(ids) == 5000  # 5,000 distinct intents -> 5,000 distinct ids, no collision
 
     cpu_ms_values.sort()
-    total_ms = sum(cpu_ms_values)
+    total_ms = sum(cpu_ms_values) * batch_size
     p95_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
     assert total_ms < 1000.0  # 5,000 derivations < 1s total (budget in ms)
     assert p95_ms < 1.0  # p95 per-derivation < 1ms (no I/O)
