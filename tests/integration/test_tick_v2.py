@@ -150,54 +150,62 @@ def _filled_adapter(close: Decimal) -> FakeExchangeAdapter:
 # --- 게이트 적색 재현 1/2 — 재시작 crossover 지연 (L13 부재) ----------------
 
 
+async def _cleanup_orders(pool, execution_ids):
+    """Delete orders for the given execution IDs so the orders_residue sentinel
+    never flags eventless rows (task-15409)."""
+    async with pool.acquire() as conn:
+        for eid in execution_ids:
+            order_ids = await conn.fetchval(
+                "SELECT array_agg(order_id) FROM orders WHERE execution_id = $1", eid
+            )
+            if order_ids:
+                for oid in order_ids:
+                    await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
+
+
+# --- 게이트 적색 재현 1/2 — 재시작 crossover 지연 (L13 부재) ----------------
+
+
 async def test_gate_red_restart_loses_crossover_signal_at_tick_level(pool):
     """L12(`tests/unit/core/test_engine_v2.py::test_gate_red_process_cache_
     loses_crossover_state_on_restart`)가 StrategyEngine 단위에서 증명한
     `_prev_tick_cache` 프로세스 메모리 결함이, `run_execution_tick` 오케스트
     레이터 전체를 통과해도 그대로 새어나온다는 것을 보인다."""
     user_id = await create_test_tenant(pool)
-
-    # 초록 기준선: 같은 프로세스(=같은 StrategyEngine 인스턴스)가 두 틱
-    # 연속 실행되면 crossover가 정상 감지된다.
     green_execution_id = await _create_crossover_execution(pool, user_id)
-    green_engines = _engines()
-    await run_execution_tick(
-        pool, FakeExchangeAdapter(closes=[Decimal("60")] * 65), green_execution_id, **green_engines
-    )
-    green_below_adapter = _filled_adapter(Decimal("40"))
-    await run_execution_tick(pool, green_below_adapter, green_execution_id, **green_engines)
-    assert green_below_adapter.place_order_call_count == 1, (
-        "초록 기준선 실패 — 같은 프로세스에서도 crossover가 감지되지 않았다(테스트 설계 오류)"
-    )
-
-    # 적색: 완전히 동일한 가격 이력(60 -> 40, 실제로 CROSSES_BELOW 50이
-    # 발생)이지만 두 번째 틱을 "재시작"(새 `_engines()` = 새 StrategyEngine
-    # 인스턴스)으로 부른다. L13(영속 prev_market_state)이 없으므로 신호를
-    # 완전히 잃는다.
     red_execution_id = await _create_crossover_execution(pool, user_id)
-    await run_execution_tick(
-        pool, FakeExchangeAdapter(closes=[Decimal("60")] * 65), red_execution_id, **_engines()
-    )
-    red_below_adapter = _filled_adapter(Decimal("40"))
-    await run_execution_tick(pool, red_below_adapter, red_execution_id, **_engines())  # "재시작"
-    assert red_below_adapter.place_order_call_count == 0, (
-        "적색 재현 실패 — 재시작 후에도 crossover 신호가 살아있다면 L13가 이미 배선된 것이다"
-    )
-    async with pool.acquire() as conn:
-        fsm_state = await conn.fetchval(
-            "SELECT fsm_state FROM strategy_executions WHERE id = $1", red_execution_id
-        )
-    assert fsm_state == "IDLE"  # 신호를 완전히 잃음 — 다음 재평가까지 진입 자체가 지연된다
 
-    # 잔류 주문 정리 — green 경로가 제출한 주문을 삭제한다.
-    async with pool.acquire() as conn:
-        order_ids = await conn.fetchval(
-            "SELECT array_agg(order_id) FROM orders WHERE execution_id = $1",
+    try:
+        green_engines = _engines()
+        await run_execution_tick(
+            pool,
+            FakeExchangeAdapter(closes=[Decimal("60")] * 65),
             green_execution_id,
+            **green_engines,
         )
-        if order_ids:
-            for oid in order_ids:
-                await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
+        green_below_adapter = _filled_adapter(Decimal("40"))
+        await run_execution_tick(pool, green_below_adapter, green_execution_id, **green_engines)
+        assert green_below_adapter.place_order_call_count == 1, (
+            "초록 기준선 실패 — 같은 프로세스에서도 crossover가 감지되지 않았다(테스트 설계 오류)"
+        )
+
+        await run_execution_tick(
+            pool, FakeExchangeAdapter(closes=[Decimal("60")] * 65), red_execution_id, **_engines()
+        )
+        red_below_adapter = _filled_adapter(Decimal("40"))
+        await run_execution_tick(
+            pool, red_below_adapter, red_execution_id, **_engines()
+        )  # "재시작"
+        assert red_below_adapter.place_order_call_count == 0, (
+            "적색 재현 실패 — 재시작 후에도 crossover 신호가 살아있다면 L13가 이미 배선된 것이다"
+        )
+        async with pool.acquire() as conn:
+            fsm_state = await conn.fetchval(
+                "SELECT fsm_state FROM strategy_executions WHERE id = $1", red_execution_id
+            )
+        assert fsm_state == "IDLE"  # 신호를 완전히 잃음 — 다음 재평가까지 진입 자체가 지연된다
+    finally:
+        await _cleanup_orders(pool, [green_execution_id, red_execution_id])
 
 
 # --- 게이트 적색 재현 2/2 — mandate 클램프 미반영 (L23 부재) ----------------
@@ -234,25 +242,17 @@ async def test_gate_red_mandate_clamp_never_applied_to_submitted_quantity(pool):
     )
     adapter = _filled_adapter(price)
 
-    await run_execution_tick(pool, adapter, execution_id, **_engines())
+    try:
+        await run_execution_tick(pool, adapter, execution_id, **_engines())
 
-    assert adapter.place_order_call_count == 1
-    submitted_quantity = adapter.placed_orders[-1].quantity
-    assert submitted_quantity == unclamped_quantity  # mandate 클램프가 전혀 반영되지 않음
-    assert submitted_quantity != green.quantity, (
-        "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 L23가 이미 배선된 것이다"
-    )
-
-    # 잔류 주문 정리 — sentinel(gate_red 재현이 주문을 제출하므로)이 teardown에서
-    # eventless orders residue를 적발하지 않도록 execution_id별 주문을 삭제한다.
-    async with pool.acquire() as conn:
-        order_ids = await conn.fetchval(
-            "SELECT array_agg(order_id) FROM orders WHERE execution_id = $1",
-            execution_id,
+        assert adapter.place_order_call_count == 1
+        submitted_quantity = adapter.placed_orders[-1].quantity
+        assert submitted_quantity == unclamped_quantity  # mandate 클램프가 전혀 반영되지 않음
+        assert submitted_quantity != green.quantity, (
+            "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 L23가 이미 배선된 것이다"
         )
-        if order_ids:
-            for oid in order_ids:
-                await conn.execute("DELETE FROM orders WHERE order_id = $1", oid)
+    finally:
+        await _cleanup_orders(pool, [execution_id])
 
 
 # --- negative 테스트 (3건) ---------------------------------------------------
