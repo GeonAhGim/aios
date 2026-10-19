@@ -33,8 +33,16 @@ _LAST = datetime(2026, 9, 3, 10, 0, tzinfo=UTC)
 
 
 def test_session_closed_never_stale_regardless_of_elapsed() -> None:
-    now = _LAST + timedelta(days=1)
-    assert detect_stale(_LAST, now, Timeframe.M1, session_open=False) is None
+    # Closed sessions must not produce false positives, even far past the threshold.
+    for elapsed in (timedelta(0), timedelta(days=1), timedelta(days=365)):
+        now = _LAST + elapsed
+        assert detect_stale(_LAST, now, Timeframe.M1, session_open=False) is None
+
+    # Session closure must not bypass timezone validation (LA-5).
+    naive = _LAST.replace(tzinfo=None)
+    for last_ts, now in ((naive, _LAST), (_LAST, naive), (naive, naive)):
+        with pytest.raises(ValueError, match="tz-aware"):
+            detect_stale(last_ts, now, Timeframe.M1, session_open=False)
 
 
 def test_session_open_exceeds_3x_duration_plus_1s_is_stale() -> None:
