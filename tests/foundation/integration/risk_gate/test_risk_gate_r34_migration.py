@@ -334,7 +334,7 @@ async def test_concurrent_evaluate_risk_gate_calls_never_cross_contaminate_trace
         await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
 
     async def _evaluate(tenant_id: UUID) -> tuple[UUID, str]:
-        with bind_request_context() as ctx:
+        with bind_request_context(trace_id=uuid4()) as ctx:
             result = await evaluate_risk_gate(
                 repo,
                 mandate_repo,
