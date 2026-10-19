@@ -144,15 +144,15 @@ def test_failure_injection_section_table_drift(eval_text: str) -> None:
 
 @pytest.mark.perf
 def test_perf_parse_eval_markdown_under_budget(eval_text: str, perf_budget: PerfBudget) -> None:
-    # budget=2.0s → 2000ms for 1000 parses; batch=100 so total CPU time
+    # budget=2.0s → 2000ms for 1000 parses; batch=10 so total CPU time
     # exceeds process_time tick (15.6ms) and quantisation error drops to
-    # ~0.16ms per call.
+    # ~1.6ms per call (15.6/10).
     def parse_100() -> None:
         for _ in range(100):
             assert_source_eval_gate(eval_text)
 
     sample = perf_budget.sample(parse_100, batch=10)  # 10×100=1000 total
-    budget_ms = 2000.0
+    budget_ms = 200.0  # 2000ms / 10 batches = 200ms per parse_100 (100 inner calls)
     print(
         f"[RD-1 source_eval_gate] 1000 parses cpu={sample.cpu_ms:.3f}ms (budget<{budget_ms:.3f}ms)"
     )
@@ -167,7 +167,7 @@ def test_perf_parse_eval_markdown_budget_injection_fails_red(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Budget injection: add ~90× CPU work per parse so total exceeds 2000ms.
+    """Budget injection: add ~15× CPU work per parse so total exceeds 200ms.
 
     Confirms the perf assertion is *sensitive* — a sufficiently slowed hot path
     must go red, not pass silently.
@@ -178,7 +178,7 @@ def test_perf_parse_eval_markdown_budget_injection_fails_red(
 
     def _slow(*args: object, **kwargs: object) -> object:
         result = _orig(*args, **kwargs)
-        # ~15ms CPU work per call → ~15s for 1000 calls (>> 2000ms budget)
+        # ~15ms CPU work per call → ~1500ms for 100 calls (>> 200ms budget)
         _ = sum(i * i for i in range(600000))
         return result
 
@@ -191,7 +191,7 @@ def test_perf_parse_eval_markdown_budget_injection_fails_red(
             mod.assert_source_eval_gate(eval_text)
 
     sample = perf_budget.sample(parse_100, batch=10)
-    budget_ms = 2000.0
+    budget_ms = 200.0  # 2000ms / 10 batches = 200ms per parse_100 (100 inner calls)
     assert sample.cpu_ms >= budget_ms, (
         f"Injection test failed: cpu={sample.cpu_ms:.3f}ms did not exceed "
         f"budget({budget_ms:.3f}ms) — the assertion is not sensitive enough."
