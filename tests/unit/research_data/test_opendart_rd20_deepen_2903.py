@@ -275,6 +275,53 @@ def test_resolve_as_of_large_correction_history_meets_latency_budget(
     )
 
 
+# ---- 성능 단언 적색 재현 (10x CPU 지연 주입) ----
+
+
+def test_normalize_filing_bulk_budget_goes_red_with_10x_cpu_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 예산 단언이 허울이 아닌지 검증 — `time.process_time`을
+    monkeypatch해 1회 호출당 예산 10배 CPU 시간을 가장하면预算을 초과해
+    AssertionError로 적색이 돼야 한다.
+
+    기존 test_normalize_filing_bulk_meets_latency_budget와 동일한 측정/단언을
+    재사용하되, process_time이 10x 예산(50s)을 더하게 해 적색 확인.
+    """
+    n = 5_000
+    budget_ms = 5000.0  # 동일 예산
+    instrument_id = uuid4()
+    filings = [
+        _split_filing(
+            instrument_id=instrument_id,
+            rcept_no=f"20260302{i:06d}",
+            known_at=_NOW + timedelta(seconds=i),
+            before="10000",
+            after="1000",
+        )
+        for i in range(n)
+    ]
+
+    # process_time을 monkeypatch: PerfBudget.sample()은 time.process_time()을
+    # start/end 두 번 호출해 차이를 계산한다. 차이를 batch=15 × 5000ms =
+    # 75,000ms(75s)보다 크게 만들면 budget 초과 → 적색.
+    # 매 호출 시 100s를 더해 diff 100s / 15 batch = 6,667ms > 5,000ms.
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 100.0  # 100s per call → diff 100s / 15 batch = 6,667ms
+        return _fake_time[0]
+
+    monkeypatch.setattr("tests.support.perf_budget.time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(lambda: [normalize_filing(f) for f in filings], batch=15)
+        assert sample.cpu_ms < budget_ms, (
+            f"대량 정규화가 예산({budget_ms}ms)을 넘었습니다({sample.cpu_ms:.1f}ms)."
+        )
+
+
 # ---- 게이트 적색 재현 — 동일 공시 생애주기 시간축 재생 ----
 
 
