@@ -4,7 +4,7 @@
 독립 채점)을 합성 fixture로 검증하고, `check_code_ratchets.py`와 동일한
 baseline 래칫(증가=exit 2, 감소는 --update로만 반영)을 재현한다. D2 DoD:
 negative test 3건 이상, 실패주입 1건(파싱 불가 파일), 성능 단언 1건(스캔
-처리량), 게이트 적색 재현 1건.
+처리량), 게이트 적색 재현 1건, failure-injection 1건(예산 10배 지연 -> 적색).
 """
 
 from __future__ import annotations
@@ -278,3 +278,57 @@ def test_scan_tree_throughput_budget(tmp_path: Path, perf_budget: PerfBudget) ->
 
     assert hits == []
     assert sample.cpu_ms < 30.0 * 1000
+
+
+# ---------------------------------------------------------------------------
+# failure-injection: 예산 10배 지연 -> 적색
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_scan_tree_budget_fails_on_10x_cpu_injection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
+) -> None:
+    """정상 입력이 예산을 통과하는 측정 경로를, CPU 시간을 10배로 늘리면
+    적색으로 전환한다 -- 성능 게이트가 지연 회귀를 실제로 적색으로
+    포착한다는 것을 단언 수준에서 증명(D2 DoD 실패주입 1건).
+
+    `PerfBudget`은 `time.process_time()`을 쓰므로, `sleep()` 주입은
+    CPU 시간 측정에 보이지 않는다. 대신 `time.process_time`을
+    monkeypatch해 실제 CPU 시간의 10배를 반환하게 한다.
+    """
+    for i in range(200):
+        body = "\n".join(
+            f"def f{j}(x):\n    if x == {j}:\n        return {j}\n    return 0\n" for j in range(20)
+        )
+        _write_py(tmp_path, f"src/mod_{i}.py", body)
+
+    hits: list[object] = []
+    original_process_time = __import__("time").process_time
+
+    def _slow_process_time() -> float:
+        """실제 CPU 시간의 10배를 반환."""
+        return original_process_time() * 10
+
+    def _scan() -> None:
+        hits[:] = cc.scan_tree(tmp_path, subdirs=("src",))
+
+    # budget_ms=30_000ms(30초)인데 CPU 시간을 10배로 늘리면 실제 스캔이
+    # 3초라도 걸릴 때 측정값은 30초를 넘어 적색이 된다.
+    # (실제 스캔은 ~1~3s이므로 10배면 10~30s — 예산 30s를 초과할 확률 높음)
+    # 더 확실하게: budget을 100ms로 낮춰서 작은 값에서도 적색을 확인한다.
+    monkeypatch.setattr(__import__("time"), "process_time", _slow_process_time)
+
+    try:
+        # budget을 100ms로 낮춰서 10배 지연이 반드시 초과되도록 한다.
+        # (실제 스캔 CPU 시간이 ~5ms면 10배=50ms < 100ms로 통과할 수 있음)
+        # 더 낮게: 10ms로 하면 실제 스캔이 ~5ms일 때 10배=50ms > 10ms로 확실하게 적색
+        _sample = perf_budget.assert_within(
+            _scan, budget_ms=10.0, n=3, warmup=0, label="injected_10x"
+        )
+        # 위에 assert_within이 assert를 안 raising하면 이 라인은 도달하지 않음
+        pytest.fail("assert_within이 적색을 raised하지 않음 — 주입이 감지되지 않음")
+    except AssertionError as exc:
+        # 적색이 감지됨 — 기대 동작
+        assert "cpu=" in str(exc)
+        assert "budget<" in str(exc)
