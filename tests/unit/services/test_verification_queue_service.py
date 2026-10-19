@@ -10,6 +10,7 @@ pool/connection으로 (1) 쿼리에 verifier_user_id가 정확히 전달되는�
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, cast
 from uuid import uuid4
 
@@ -28,13 +29,17 @@ class _FakeConnection:
         *,
         fetch_result: list[dict[str, Any]] | None = None,
         raise_on_fetch: Exception | None = None,
+        fetch_delay: float = 0.0,
     ) -> None:
         self._fetch_result = fetch_result if fetch_result is not None else []
         self._raise_on_fetch = raise_on_fetch
+        self._fetch_delay = fetch_delay
         self.fetch_calls: list[tuple[str, tuple[object, ...]]] = []
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, Any]]:
         self.fetch_calls.append((query, args))
+        if self._fetch_delay:
+            await asyncio.sleep(self._fetch_delay)
         if self._raise_on_fetch is not None:
             raise self._raise_on_fetch
         return self._fetch_result
@@ -195,4 +200,40 @@ async def test_list_pending_perf_budget_p95_latency(perf_budget: Any) -> None:
     p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
     assert p95_ms < 50.0, (
         f"VerificationQueueService.list_pending p95 latency {p95_ms:.3f}ms exceeded 50ms budget"
+    )
+
+
+# ---------------------------------------------------------------------------
+# gate-red reproduction (D2) — 10x delay injection proves budget is real
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_list_pending_perf_budget_red_on_10x_delay_injection(
+    perf_budget: Any, monkeypatch: Any
+) -> None:
+    """Gate-red reproduction: the same perf assertion that passes on the happy
+    path must fail when fetch latency is inflated 10x -- this proves the
+    50ms wall_ms budget actually constrains sleep latency, not passing
+    trivially.
+
+    Injects 10x delay via ``_FakeConnection.fetch_delay`` while keeping the
+    same ``samples_async`` / p95 measurement as the green test.  The
+    injected 50 ms per-call delay on 50 samples must push p95 past the
+    50 ms budget.
+    """
+    rows = [_row(id=i) for i in range(20)]
+    n = 50
+
+    async def _make_call() -> None:
+        conn = _FakeConnection(fetch_result=list(rows), fetch_delay=50_000 / 1_000_000)
+        service = _service(conn)
+        await service.list_pending(uuid4())
+
+    samples = await perf_budget.samples_async(_make_call, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    assert p95_ms >= 50.0, (
+        f"Expected p95 >= 50 ms on 10x delay injection (got {p95_ms:.3f} ms); "
+        "budget not constraining latency -- test is a hollow assertion"
     )
