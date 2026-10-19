@@ -64,6 +64,44 @@ async def test_await_db_capacity_returns_immediately_under_threshold(
     assert delays == []
 
 
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_perf_budget_guard_fails_on_injected_sleep_delay(
+    perf_budget: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction: injecting a real sleep delay larger than the
+    50 ms budget must push wall_ms past the same assertion, proving the green
+    test is not vacuously passing.
+
+    We reduce DB_PRESSURE_BACKOFF_SEC to [0.06, 0.06, 0.06] so the first
+    backoff step pays ~60 ms real sleep, which exceeds the 50 ms wall budget.
+    The probe returns over-threshold so the backoff path fires.
+    """
+    import asyncio as aio
+
+    # Reduce backoff delays to ~60 ms each so the first step exceeds 50 ms budget
+    monkeypatch.setattr(
+        pressure,
+        "DB_PRESSURE_BACKOFF_SEC",
+        (0.06, 0.06, 0.06),
+    )
+
+    probe, calls = _make_probe([(80, 100)])
+
+    async def _once() -> None:
+        await pressure.await_db_capacity(
+            "postgresql://u:p@localhost/db", sleep=aio.sleep, probe=probe
+        )
+
+    sample = await perf_budget.sample_async(_once)
+    # 60 ms backoff >> 50 ms budget → wall_ms must blow past it.
+    assert sample.wall_ms >= 50, (
+        f"budget guard did not fire: wall={sample.wall_ms:.3f}ms < 50ms "
+        f"(cpu={sample.cpu_ms:.3f}ms, calls={calls()})"
+    )
+
+
 @pytest.mark.asyncio
 async def test_await_db_capacity_waits_out_transient_pressure() -> None:
     """Negative test: pressure above threshold on the first probe, cleared by the
