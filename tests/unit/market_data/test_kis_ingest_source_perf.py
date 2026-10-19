@@ -16,6 +16,7 @@ import pytest
 from src.exchanges.kis.adapter import KISAdapter
 from src.foundation.market_data.adapters.kis_ingest_source import KisIngestSource
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
+from tests.support.perf_budget import PerfBudget
 
 _TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 
@@ -74,13 +75,24 @@ def _make_adapter_with_delay(*, delay_sec: float) -> KISAdapter:
     client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
-    kwargs = dict(is_paper_trading=True, http_client=client, sleep_fn=lambda _s: asyncio.sleep(0))
-    return KISAdapter("app", "secret", "12345678", "01", **kwargs)
+
+    async def _noop_sleep(sec: float) -> None:
+        await asyncio.sleep(sec)
+
+    return KISAdapter(
+        "app",
+        "secret",
+        "12345678",
+        "01",
+        is_paper_trading=True,
+        http_client=client,
+        sleep_fn=_noop_sleep,
+    )
 
 
 @pytest.mark.perf
 async def test_fetch_candles_p95_latency_detection_power_10x_delay_goes_red(
-    perf_budget,
+    perf_budget: PerfBudget,
 ) -> None:
     """검출력 확인: 10배 지연(300ms)을 주입하면 p95가 30ms 예산을 넘어서 적색이 된다.
 
