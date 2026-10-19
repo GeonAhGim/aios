@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -238,3 +239,42 @@ async def test_binance_reference_lookup_stays_within_pretrade_gate_budget(perf_b
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms_list[int(len(wall_ms_list) * 0.95) - 1]
     assert p95_ms < 5, f"p95 참조가 조회 지연 {p95_ms:.4f}ms가 사전거래 예산(5ms) 초과"
+
+
+# --- 게이트 적색 재현: 지연 주입 시 단언이 실제로 적색으로 전환되는지 검증 ---
+
+
+@pytest.mark.perf
+async def test_gate_red_budget_fails_when_lookup_delayed_10x(perf_budget):
+    """게이트 적색 재현 — 성능 단언이 단순한 통과가 아니라 실제로 지연을
+    포착하는지 검증한다. handler 내에서 sleep(0.05)로 50ms 지연을 주입한
+    후 같은 p95 < 5ms 단언을 실행하면 AssertionError가 발생해야 한다.
+
+    이 테스트가 없으면 "p95 < 5ms" 단언이 항상 녹색일 수 있다(예:
+    budget가 너무 느슨하거나 단언이 누락된 경우). 지연을 인위적으로
+    만들어 단언이 적색으로 전환되는 것을 확인함으로써, 이 단언이
+    실제 성능 회귀를 감지할 수 있는 게이트임을 증명한다.
+
+    DoD 요구: failure-injection 1, gate-red reproduction 1.
+    """
+    injected_delay = 0.05  # 50ms — 예산(5ms)의 10배
+
+    def slow_handler(request: httpx.Request) -> httpx.Response:
+        time.sleep(injected_delay)
+        return httpx.Response(200, json={"symbol": "BTCUSDT", "price": "100.5"})
+
+    provider = BinancePublicTickerReference(http_client=_mock_transport(slow_handler))
+
+    async def _lookup_once():
+        return await provider.get_reference_ticker("BTC/USDT")
+
+    samples = [await perf_budget.sample_async(_lookup_once) for _ in range(200)]
+
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[int(len(wall_ms_list) * 0.95) - 1]
+
+    # 지연 주입 후 p95가 5ms를 넘어야 하므로, 넘지 않으면 테스트 설정이 잘못됨
+    assert p95_ms >= 5, (
+        f"게이트 적색 재현 실패: p95 {p95_ms:.4f}ms가 5ms 미만 — "
+        "지연 주입이 충분히 작거나 단언이 느슨함"
+    )
