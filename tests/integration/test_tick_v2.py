@@ -249,7 +249,8 @@ async def test_gate_red_mandate_clamp_never_applied_to_submitted_quantity(pool):
         submitted_quantity = adapter.placed_orders[-1].quantity
         assert submitted_quantity == unclamped_quantity  # mandate 클램프가 전혀 반영되지 않음
         assert submitted_quantity != green.quantity, (
-            "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 L23가 이미 배선된 것이다"
+            "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 "
+            "L23가 이미 배선된 것이다"
         )
     finally:
         await _cleanup_orders(pool, [execution_id])
