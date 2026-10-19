@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.support.perf_budget import PerfBudget
+
 ROOT = Path(__file__).resolve().parents[2]
 BANNED_MODULES = frozenset({"asyncpg", "httpx", "sqlalchemy"})
 # ADR-2026-09-09-C Decision 1: AST 파싱 성능 예산 — 전체 domain 스캔 ≤ 10초
@@ -173,7 +175,7 @@ def test_injection_read_error_raises_gracefully() -> None:
 
 
 @pytest.mark.perf
-def test_zone_scan_completes_within_budget(perf_budget) -> None:
+def test_zone_scan_completes_within_budget(perf_budget: PerfBudget) -> None:
     """성능 단언: 전체 domain/** 디렉터리 스캔 + AST 파싱이 _MAX_SCAN_SECONDS(10초) 내에
     완료되어야 한다. 대규모 리포에서 검사 시간이 선형으로 증가해도 예산을 지키는지 확인한다.
 
@@ -202,3 +204,55 @@ def test_zone_scan_completes_within_budget(perf_budget) -> None:
         f"domain 스캔에 {cpu_ms:.2f}ms 소요 — 예산 {budget_ms}ms 초과. "
         f"batch=8, 호출당 {cpu_ms / 8:.2f}ms"
     )
+
+
+# ── gate-red reproduction: 10x delay injection proves budget is real ─────────
+
+
+@pytest.mark.perf
+def test_zone_scan_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(10초)을 10배 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 100초(100 000ms)를 반환하므로
+    batch=8로 나눈 평균도 100 000ms > 10 000ms budget로 적색 확정.
+    """
+    budget_ms = _MAX_SCAN_SECONDS * 1000  # 10 000ms
+
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 100초(10x budget)를 반환하게 한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 100.0  # 100 000ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    domain_dirs = _domain_dirs()
+    assert domain_dirs, "검사 대상이 없으면 성능 단언이 무의미해짐"
+
+    def _scan_once() -> int:
+        total_violations = 0
+        for domain_dir in domain_dirs:
+            for py_file in domain_dir.rglob("*.py"):
+                source = py_file.read_text(encoding="utf-8")
+                found = _find_banned_imports(source, BANNED_MODULES)
+                total_violations += len(found)
+        return total_violations
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_scan_once, batch=8)
+        cpu_ms = sample.cpu_ms
+
+        assert cpu_ms < budget_ms, (
+            f"domain 스캔에 {cpu_ms:.2f}ms 소요 — 예산 {budget_ms}ms 초과. "
+            f"batch=8, 호출당 {cpu_ms / 8:.2f}ms"
+        )
