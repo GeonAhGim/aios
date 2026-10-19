@@ -33,6 +33,7 @@ from src.core.risk_stats.var_historical import historical_var_es
 from src.core.risk_stats.var_parametric import parametric_var_es
 from src.data.models.market_data import Candle
 from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
+from tests.support.perf_budget import PerfBudget
 
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _RISK_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
@@ -260,6 +261,56 @@ def test_repeated_multi_symbol_estimation_has_no_performance_regression(
 
     sample = perf_budget.assert_within(_run, budget_ms=3000.0, batch=300, n=1)
     assert sample.result is not None
+
+
+@pytest.mark.perf
+def test_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산(3000ms * 10 = 30000ms)을 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. budget=3000ms의 10배 = 30000ms를 각 sample 호출에서 가장하므로
+    best-of-N 중 최소값도 30000ms > 3000ms budget로 적색 확정.
+    """
+    budget_ms = 3000.0  # 동일 예산
+
+    symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+    histories = {
+        s: _make_candles(_oscillating_closes(250, base=100 + i * 10, amplitude=5 + i), symbol=s)
+        for i, s in enumerate(symbols)
+    }
+    weights = {s: Decimal("1") / Decimal(len(symbols)) for s in symbols}
+    policy = _policy(method="historical", min_bars=10)
+
+    def _run() -> object:
+        return estimate_portfolio_var_es(histories, weights, policy)
+
+    # process_time을 monkeypatch: 호출할 때마다 30000ms(30초)를 더한다.
+    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
+    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 30000.0  # 30000ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _run,
+            budget_ms=budget_ms,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="multi-symbol VaR estimation avg < 3000ms budget (injection)",
+        )
 
 
 def test_none_result_denies_via_var_es_gate_chain():
