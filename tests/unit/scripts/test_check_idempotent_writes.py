@@ -300,6 +300,30 @@ def test_perf_budget_guard_fails_on_injected_scan_delay(
         )
 
 
+# --- performance assertion: normal green -----------------------------------
+
+
+def test_scan_tree_normal_input_passes_budget():
+    """Positive perf assertion -- a single call on normal inputs must stay
+    within the calibrated ratio budget.
+
+    This is the green counterpart to ``test_detects_10x_delay_injection``.
+    Warmup=1 flushes the cold OS file-cache (first ``scan_tree`` call pays
+    ~14-16s cold vs ~8-9s warm locally); without it the p95 would be
+    dominated by that one cold-cache outlier.
+
+    Calibration ~0.095s, warm-cache scan ~8-9s → ratio ~95x < 150x.
+    """
+    RelativeBudget().assert_within(
+        lambda: civ.scan_tree(ROOT, scan_roots=("scripts",)),
+        max_ratio=_SCAN_P95_MAX_RATIO,
+        mode="wall",
+        n=3,
+        warmup=1,
+        label="scan_tree(normal)",
+    )
+
+
 # --- real-repo baseline consistency ----------------------------------------
 
 
