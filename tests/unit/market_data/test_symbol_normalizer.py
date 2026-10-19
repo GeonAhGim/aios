@@ -16,6 +16,7 @@ test_timeframe.py와 동일 논리). 아래 테스트들은 그 축의 정신을
 from __future__ import annotations
 
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -30,9 +31,109 @@ from src.foundation.market_data.domain.reference.symbol_normalizer import (
 from tests.conftest import PerfBudget
 
 
-def test_bitget_roundtrip() -> None:
-    assert to_canonical(Venue.BITGET, "BTCUSDT") == "BTC/USDT"
-    assert to_venue(Venue.BITGET, "BTC/USDT") == "BTCUSDT"
+@pytest.mark.perf
+def test_bitget_roundtrip(perf_budget: PerfBudget) -> None:
+    """BITGET raw ↔ canonical 양방향 라운드트립 + 성능 단언.
+
+    CPU 예산 단언: `_crypto_raw_to_canonical`/`_crypto_canonical_to_raw`는
+    단순 문자열 연산만 하므로 batch=8로 묶어 1회 호출당 1ms 미만이어야 한다.
+    Windows `time.process_time()` 약 15.6ms 양자화 오차를 batch가 줄인다.
+    """
+
+    def _roundtrip() -> str:
+        canonical = to_canonical(Venue.BITGET, "BTCUSDT")
+        assert canonical == "BTC/USDT"
+        raw = to_venue(Venue.BITGET, canonical)
+        assert raw == "BTCUSDT"
+        return raw
+
+    perf_budget.assert_within(
+        _roundtrip,
+        budget_ms=1,
+        n=5,
+        warmup=1,
+        batch=8,
+        label="bitget_roundtrip",
+    )
+
+
+# --- DEEPEN(task-16494) bitget_roundtrip 음성 테스트 3개 -----------------------
+
+
+def test_bitget_roundtrip_unknown_raw_symbol_raises() -> None:
+    """BTCXYZ는 `_CRYPTO_QUOTES`에 없는 quote XYZ를 포함하므로 예외"""
+    with pytest.raises(SymbolNormalizationError):
+        to_canonical(Venue.BITGET, "BTCXYZ")
+
+
+def test_bitget_roundtrip_invalid_canonical_missing_quote_raises() -> None:
+    """BTC/XYZ — XYZ는 `_CRYPTO_QUOTES`에 없으므로 예외"""
+    with pytest.raises(SymbolNormalizationError):
+        to_venue(Venue.BITGET, "BTC/XYZ")
+
+
+def test_bitget_roundtrip_empty_base_raises() -> None:
+    """/USDT — base가 비어 있으므로 예외"""
+    with pytest.raises(SymbolNormalizationError):
+        to_venue(Venue.BITGET, "/USDT")
+
+
+# --- DEEPEN(task-16494) 실패주입: _CRYPTO_QUOTES 손상 -------------------------
+
+
+def test_bitget_roundtrip_fails_closed_when_quote_table_corrupted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_CRYPTO_QUOTES`에서 USDT를 제거하면 이전 통과 사례가 조용히 다른
+    quote로 잘못 분리되지 않고 즉시 SymbolNormalizationError로 죽는다."""
+    monkeypatch.setattr(
+        normalizer_module,
+        "_CRYPTO_QUOTES",
+        tuple(q for q in normalizer_module._CRYPTO_QUOTES if q != "USDT"),
+    )
+    with pytest.raises(SymbolNormalizationError):
+        to_canonical(Venue.BITGET, "BTCUSDT")
+
+
+# --- DEEPEN(task-16494) gate-red 재현: 10x 지연 주입 --------------------------
+
+
+@pytest.mark.perf
+def test_bitget_roundtrip_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(1ms)을 10배 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 100ms를 반환하므로
+    batch=8로 나눈 평균도 100ms > 1ms budget로 적색 확정.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.1  # 100ms per call = 100x budget
+        return _fake_time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    def _roundtrip() -> str:
+        canonical = to_canonical(Venue.BITGET, "BTCUSDT")
+        raw = to_venue(Venue.BITGET, canonical)
+        return raw
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _roundtrip,
+            budget_ms=1,
+            n=5,
+            warmup=1,
+            batch=8,
+            label="bitget_roundtrip_delayed",
+        )
 
 
 def test_krx_roundtrip() -> None:
