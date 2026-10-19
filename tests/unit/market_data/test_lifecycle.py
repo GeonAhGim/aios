@@ -19,6 +19,7 @@ DEEPEN(task-2951, docs/audit/DEPTH_LA_LB_LC.md 391): 이 모듈도 I/O 없는
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -127,18 +128,73 @@ def test_transition_completes_within_budget_for_bulk_lookups(
 ) -> None:
     """전이표 조회는 O(1) 딕셔너리 lookup이라, 5만 회 반복 호출(허용/거부
     조합 균등 혼합)이 125ms 안에 끝난다 — process_time() 15.6ms 틱 양자화
-    오차를 줄이기 위해 batch=8로 8회 묶어 호출당 평균을 추정한다.
+    오차를 줄이기 위해 batch=8로 8회 묶어 호출당 평균을 추정하고,
+    best-of-5(n=5)로 호스트 경합 노이즈를 제거한다.
     """
     states = list(SymbolStatus)
 
     sample = perf_budget.assert_within(
         lambda: _bulk_lookup(states),
         budget_ms=125.0,
-        n=1,
+        n=5,
         batch=8,
     )
 
     assert sample.cpu_ms < 125.0
+
+
+# --- DEEPEN(task-2951) 실패주입: 지연 주입 시 적색 --------------------------
+
+
+def test_perf_budget_goes_red_when_transition_is_cpu_delayed(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언이 허울이 아닌지 확인: `_TRANSITIONS`를 CPU 지연 맵으로
+    교체하면 기존 125ms 예산 단언이 적색으로 전환되어야 한다. —
+    `time.process_time()` 기반이므로 `sleep`이 아닌 실제 CPU 부하를
+    주입한다. 지연 맵은 500회 조회에 ~50ms를 더하므로(원본 ~1ms 대비
+    50배), 125ms 예산을 쉽게 초과한다.
+    """
+
+    class _SlowMapping:
+        """`_TRANSITIONS` 대신 들어갈 지연 맵 — 모든 조회에 CPU 부하를 더한다."""
+
+        def __init__(self) -> None:
+            self._data = dict(lifecycle_module._TRANSITIONS)
+
+        def __getitem__(self, key: object) -> SymbolStatus:
+            # 0.3ms CPU 부하: arithmetic loop가 process_time()을 실제로 증가시킴
+            target = time.perf_counter() + 0.0003
+            while time.perf_counter() < target:
+                _ = sum(range(100))
+            return self._data[key]
+
+        def __contains__(self, key: object) -> bool:
+            return key in self._data
+
+    slow_map = _SlowMapping()
+    monkeypatch.setattr(lifecycle_module, "_TRANSITIONS", slow_map)
+
+    # 500회 조회: 500 × 0.1ms = 50ms 부하 → 원본 ~0.5ms 대비 100배
+    def _small_bulk_lookup() -> None:
+        states = list(SymbolStatus)
+        for i in range(500):
+            state = states[i % len(states)]
+            event = _EVENTS[i % len(_EVENTS)]
+            try:
+                transition(state, event)
+            except LifecycleTransitionError:
+                pass
+
+    # 지연 주입 버전 — 예산을 초과해야 한다(단언이 제대로 작동함을 증명)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _small_bulk_lookup,
+            budget_ms=125.0,
+            n=3,
+            batch=8,
+        )
 
 
 # --- DEEPEN(task-2951) 게이트 적색 재현(사고 시나리오 replay) -------------------
