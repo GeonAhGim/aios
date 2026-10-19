@@ -263,3 +263,59 @@ async def test_authorize_db_roundtrip_p95_within_budget(repo: PostgresAgentToken
         f"budget<{_AUTHORIZE_DB_ROUNDTRIP_P95_BUDGET_MS:.1f}ms"
     )
     assert p95_ms < _AUTHORIZE_DB_ROUNDTRIP_P95_BUDGET_MS
+
+
+# --- 성능 주입 실패: 예산 10배 지연 monkeypatch → 테스트가 적색이어야 함 ---
+# authorize() 내부의 DB 왕복에 지연을 주입하면 p95가 50ms 예산을 넘어
+# 테스트가 적색이어야 함 — 기존 녹색 단언이 tautology가 아님을 확인.
+
+
+@pytest.mark.perf
+async def test_authorize_p95_detects_tenfold_delay_injection(
+    repo: PostgresAgentTokenRepository, monkeypatch: pytest.MonkeyPatch
+):
+    """성능 테스트가 실제 지연을 포착하는지 검증 — authorize() 내부의 DB
+    왕복에 5초 지연을 주입하면 p95가 50ms 예산을 10배 넘어서 테스트가
+    적색이어야 한다.
+
+    이 테스트가 통과하면 기존 녹색 단언이 tautology가 아님을 확인한다.
+    """
+    import asyncio
+
+    tenant_id = uuid4()
+    issued = await issue_token(
+        repo,
+        tenant_id=tenant_id,
+        scopes=frozenset({Scope.READ}),
+        allow_instruments=frozenset(),
+        notional_cap=Decimal("0"),
+        ttl=timedelta(hours=1),
+        now=_NOW,
+    )
+
+    # repo.get_by_hash()에 5초 지연 주입 — asyncpg 내부 await를 직접 대체
+    original_get_by_hash = repo.get_by_hash
+
+    async def delayed_get_by_hash(token_hash: str):
+        await asyncio.sleep(5.0)
+        return await original_get_by_hash(token_hash)
+
+    monkeypatch.setattr(repo, "get_by_hash", delayed_get_by_hash)
+
+    samples: list[float] = []
+    for _ in range(5):
+        sample = await RelativeBudget().measure_async(
+            lambda: authorize(repo, token_secret=issued.secret, scope=Scope.READ),
+            n=1,
+            warmup=0,
+            calibration_n=1,
+        )
+        samples.append(sample.op_ms)
+
+    p95_ms = _p95(samples)
+    print(
+        f"[AI-4 authorize+injected] db roundtrip p95={p95_ms:.2f}ms "
+        f"budget<{_AUTHORIZE_DB_ROUNDTRIP_P95_BUDGET_MS:.1f}ms"
+    )
+    # 5초 지연이 주입되었으므로 p95가 50ms 예산을 크게 넘어야 함
+    assert p95_ms > _AUTHORIZE_DB_ROUNDTRIP_P95_BUDGET_MS
