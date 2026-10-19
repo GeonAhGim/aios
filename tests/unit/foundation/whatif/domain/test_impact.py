@@ -116,6 +116,57 @@ class TestBuyExisting:
         # For BUY/SELL (total_equity_delta == 0), other symbols' pct is unchanged
         assert impact.per_symbol_pct_delta["GOOG"] == Decimal("0")
 
+    def test_buy_existing_computes_under_1ms_cpu(self, perf_budget: PerfBudget) -> None:
+        """D2 perf assertion: single-call CPU time must be well under 1 ms budget."""
+        before = _make_state()
+        sample = perf_budget.assert_within(
+            lambda: delta_impact(before=before, trade=BUY_AAPL),
+            budget_ms=1.0,
+            batch=100,
+            label="TestBuyExisting delta_impact",
+        )
+        assert sample.cpu_ms < 1.0, "delta_impact must compute under 1 ms CPU"
+
+    def test_buy_existing_gate_red_detects_delay(self, perf_budget: PerfBudget) -> None:
+        """D2 gate-red reproduction: inject cumulative CPU delay and verify
+        the perf assertion fails — proves the budget check actually detects
+        regressions instead of silently passing."""
+        before = _make_state()
+        trade = BUY_AAPL
+
+        # Verify green control first (same measurement as the D2 perf test).
+        sample = perf_budget.assert_within(
+            lambda: delta_impact(before=before, trade=trade),
+            budget_ms=1.0,
+            batch=100,
+            label="TestBuyExisting delta_impact green control",
+        )
+        assert sample.cpu_ms < 1.0, "control must pass budget before injection"
+
+        # Inject cumulative CPU delay: each process_time() call adds
+        # 0.01 * call_count seconds. Inside sample(), the delta between
+        # start and end call gains ~0.01 s = 10 ms per batch iteration.
+        # With batch=10: cpu_ms = 10 ms * 1000 / 10 = 10 ms,
+        # well above the 1 ms budget.
+        call_count = 0
+
+        def slow_process_time() -> float:
+            nonlocal call_count
+            call_count += 1
+            return _original_process_time() + 0.01 * call_count
+
+        with patch.object(time, "process_time", side_effect=slow_process_time):
+            with pytest.raises(
+                AssertionError,
+                match=r"cpu=.*budget<1\.0",
+            ):
+                perf_budget.assert_within(
+                    lambda: delta_impact(before=before, trade=trade),
+                    budget_ms=1.0,
+                    batch=10,
+                    label="TestBuyExisting delta_impact injected load",
+                )
+
 
 # ---------------------------------------------------------------------------
 # 2. Happy-path: SELL existing symbol
