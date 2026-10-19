@@ -193,6 +193,57 @@ def test_search_latency_under_budget(perf_budget: PerfBudget) -> None:
     )
 
 
+def test_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 예산 단언이 실제로 위반을 포착하는지 검증 — `time.process_time`을
+    monkeypatch해 1회 호출당 10x 예산(300ms * 10 = 3000ms = 3s)을 초과하는
+    CPU 시간을 가장하면 `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. budget=300ms의 10배 = 3000ms(3초)를 각 sample 호출에서
+    가장하므로 best-of-5 중 최소값도 3000ms > 300ms budget로 적색 확정.
+    """
+    budget_ms = 300.0  # 동일 예산
+
+    items = [
+        _item(
+            known_at=datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(days=i),
+            instruments=(f"KR:SYM{i:04d}",),
+            kind=["filing", "news", "macro", "alt"][i % 4],
+        )
+        for i in range(10_000)
+    ]
+
+    # process_time을 monkeypatch: 호출할 때마다 3000ms(3초)를 더한다.
+    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
+    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 3000.0  # 3000ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: search(
+                items,
+                instruments=["KR:SYM0500"],
+                kinds=["news"],
+                as_of=datetime(2026, 6, 15, tzinfo=timezone.utc),
+            ),
+            budget_ms=budget_ms,
+            n=5,
+            warmup=1,
+            batch=10,
+            label="10k items search avg < 300ms budget (injection)",
+        )
+
+
 # --- gate-red reproduction ---
 
 
