@@ -302,6 +302,45 @@ async def test_get_cache_hit_makes_no_adapter_call_and_is_fast(
     )
 
 
+@pytest.mark.perf
+async def test_perf_gate_red_reproduction_injected_cpu_load(
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 CPU 부하를 주입하고
+    같은 측정/단언이 적색으로 전환되는지 검증한다.
+
+    캐시 _entries를 CPU 부하를 simulate하는 dict로 교체해, 같은
+    `_batch_500` 패턴이 800ms CPU 예산을 초과하도록 한다.
+    """
+    adapter = _FakeAdapter()
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+
+    # 첫 호출 — adapter 호출(캐시 미스)으로 캐시 생성
+    await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
+
+    # CPU 부하 주입: _entries.get() 호출마다 ~3ms CPU 작업 추가
+    _original_entries = cache._entries
+
+    class _CPUHeavyDict(dict):
+        def get(self, key, default=None):
+            # 3ms CPU 작업 — 500회 × 3ms = 1500ms > 800ms 예산
+            _ = sum(i * i for i in range(500_000))
+            return super().get(key, default)
+
+    cache._entries = _CPUHeavyDict(_original_entries)
+
+    async def _batch_500_delayed() -> None:
+        for _ in range(500):
+            result = await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
+            assert result is not None
+
+    sample = await perf_budget.sample_async(_batch_500_delayed)
+    # 이 단언은 적색이어야 함 — 지연 주입으로 예산 초과
+    assert sample.cpu_ms >= 800.0, (
+        f"예상 적색 실패: cpu={sample.cpu_ms:.2f}ms wall={sample.wall_ms:.2f}ms"
+    )
+
+
 async def test_candle_fetch_failure_chain_denies_via_var_es_gate() -> None:
     """게이트 적색 재현(D2) — candle_history.get()이 어댑터 실패로 None을
     반환하면, 실제 하류 소비자(var_estimator.estimate_portfolio_var_es)도
