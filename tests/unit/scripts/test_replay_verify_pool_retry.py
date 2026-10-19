@@ -45,6 +45,10 @@ import pytest
 
 from scripts import replay_verify
 
+# Captured before any monkeypatch can replace asyncio.sleep on replay_verify.asyncio
+# (which is the same module object as asyncio). Needed for the 10x delay injection test.
+_real_asyncio_sleep = asyncio.sleep
+
 
 class _FakePool:
     """`asyncpg.create_pool`의 실제 계약을 흉내낸다: 호출은 동기적으로 `Pool`류
@@ -290,7 +294,7 @@ async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(
     """Perf assertion: the happy path (first attempt succeeds) must not pay
     any backoff delay -- `asyncio.sleep` is only reached on a retry.
 
-    raw perf_counter → perf_budget.sample_async() 전환 (task-11925).
+    raw perf_counter -> perf_budget.sample_async() 전환 (task-11925).
     비동기 I/O는 sample_async로 wall_ms를 얻는다. 예산 값(50ms)은 그대로 유지한다.
     """
 
@@ -314,6 +318,58 @@ async def test_create_pool_with_retry_succeeds_immediately_without_sleeping(
     assert isinstance(sample.result, _FakePool)
     assert slept is False
     assert sample.wall_ms < 50.0, perf_budget.describe(sample, budget_ms=50.0)
+
+
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_create_pool_with_retry_red_on_10x_delay_injection(monkeypatch, perf_budget) -> None:
+    """Gate-red reproduction: the same perf assertion that passes on the happy
+    path must fail when retry delays are inflated 10x -- this proves the
+    budget is actually constraining sleep latency, not passing trivially.
+
+    Injects 10x delay via `asyncio.sleep` monkeypatch while forcing a retry
+    (first attempt raises `ConnectionDoesNotExistError`). The wall_ms budget
+    (50 ms) must be exceeded because the jittered sleep over [0, 10xdelay]
+    averages 5x the base delay (5 ms on attempt 0 alone), blowing past the
+    no-sleep happy path budget.
+    """
+
+    def _fake_create_pool(dsn: str, **kwargs: object) -> _FakePool:
+        return _FakePool(asyncpg.exceptions.ConnectionDoesNotExistError("reset"))
+
+    injected_delays: list[float] = []
+
+    async def _ten_x_sleep(delay: float) -> None:
+        injected_delays.append(delay)
+        # Use the captured real sleep -- the monkeypatch replaces
+        # replay_verify.asyncio.sleep (which IS asyncio), so calling
+        # asyncio.sleep here would recurse through _ten_x_sleep.
+        await _real_asyncio_sleep(delay * 10)
+
+    monkeypatch.setattr(replay_verify.asyncpg, "create_pool", _fake_create_pool)
+    monkeypatch.setattr(replay_verify.asyncio, "sleep", _ten_x_sleep)
+
+    async def _run() -> _FakePool:
+        try:
+            return await replay_verify._create_pool_with_retry("postgresql://u:p@localhost/db")
+        except asyncpg.exceptions.ConnectionDoesNotExistError:
+            # Exhausted all retries -- expected. We still want wall time.
+            return _FakePool()
+
+    sample = await perf_budget.sample_async(_run)
+
+    # Must have actually slept (retries happened)
+    assert len(injected_delays) > 0, "retries must have triggered sleep"
+    # The perf assertion must FAIL -- wall_ms should far exceed 50 ms
+    # because 10x jittered sleep on even the first retry (0.5 s base)
+    # averages 5 s, far above the 50 ms no-sleep budget.
+    budget_exceeded = sample.wall_ms >= 50.0
+    desc = perf_budget.describe(sample, budget_ms=50.0)
+    assert budget_exceeded, (
+        f"Expected wall_ms >= 50 ms on 10x delay "
+        f"injection (got {sample.wall_ms:.1f} ms); "
+        f"budget not constraining sleep latency -- {desc}"
+    )
 
 
 async def _no_sleep(delay: float) -> None:
