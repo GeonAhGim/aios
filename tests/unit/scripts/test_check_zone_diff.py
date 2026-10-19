@@ -70,6 +70,45 @@ def test_frozen_zone_diff_fails(tmp_path: Path) -> None:
     assert exit_code == 1
 
 
+def test_frozen_zone_diff_fails_gate_red_reproduction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gate-red 재현: git diff 호출에 10배 지연을 주입해도 FROZEN 존 위반 감지가
+    적색(exit 1)이어야 한다 — 지연이 검출을 숨기거나 거짓 통과로 바꾸지 않는지 확인.
+
+    subprocess.run을 monkeypatch해 실제 git diff 대신 지연 후 정답 출력(위반 파일 1개)을
+    반환하게 한 뒤, main()이 여전히 exit 1을 반환하는지 단언한다.
+    """
+    _init_repo_with_manifest(tmp_path)
+
+    kernel_dir = tmp_path / "aios" / "kernel" / "policy"
+    kernel_dir.mkdir(parents=True)
+    (kernel_dir / "rule.py").write_text("# frozen change\n", encoding="utf-8")
+    _run_git(tmp_path, "add", "-A")
+    _run_git(tmp_path, "commit", "-q", "-m", "touch frozen zone")
+
+    import time
+
+    def _slow_git_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        """git 호출에 0.5s 지연 주입 — 실제 git을 대신해 지연 후 정답 반환."""
+        time.sleep(0.5)
+        # git diff --name-only가 반환할 정상 결과: 위반 파일 1개
+        return subprocess.CompletedProcess(
+            args=["git", "diff", "--name-only", "base..HEAD"],
+            returncode=0,
+            stdout="aios/kernel/policy/rule.py\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(check_zone_diff.subprocess, "run", _slow_git_run)
+
+    exit_code = check_zone_diff.main(["--base", "base", "--head", "HEAD", "--repo", str(tmp_path)])
+
+    assert exit_code == 1, (
+        "지연 주입 후 FROZEN 존 위반 감지가 거짓 통과(exit 0)로 바뀌었다 — gate-red 실패"
+    )
+
+
 def test_non_frozen_diff_passes(tmp_path: Path) -> None:
     _init_repo_with_manifest(tmp_path)
 
