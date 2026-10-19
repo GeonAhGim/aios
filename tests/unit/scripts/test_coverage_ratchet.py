@@ -14,6 +14,8 @@ from types import ModuleType
 
 import pytest
 
+from tests.support.perf_budget import PerfBudget
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -69,6 +71,28 @@ def test_read_current_coverage_percent_converts_line_rate(tmp_path: Path) -> Non
     xml_path = _write_coverage_xml(tmp_path, 0.8347)
 
     assert coverage_ratchet.read_current_coverage_percent(xml_path) == 83.47
+
+
+# ---------------------------------------------------------------------------
+# 성능 단언 — task-16272: raw 타이머 대신 perf_budget 경유
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_read_current_coverage_percent_performance(tmp_path: Path, perf_budget: PerfBudget) -> None:
+    """Numeric performance assertion: XML 파싱 1회가 CPU 예산 10ms 안에 끝남.
+
+    raw ``time.perf_counter()`` 단언을 ``perf_budget.assert_within()``로 전환.
+    ``batch=50``으로 호출당 양자화 오차를 ``15.6ms/50 ≈ 0.3ms`` 이하로 낮춤.
+    단위는 전량 ms 통일.
+    """
+    xml_path = _write_coverage_xml(tmp_path, 0.8347)
+
+    perf_budget.assert_within(
+        lambda: coverage_ratchet.read_current_coverage_percent(xml_path),
+        budget_ms=10,
+        batch=50,
+    )
 
 
 def test_read_current_coverage_percent_missing_file_raises(tmp_path: Path) -> None:
