@@ -25,18 +25,18 @@ from typing import Any
 import pytest
 
 from ops import backup_verify
-from tests.conftest import PerfBudget
+from tests.support.perf_budget import PerfBudget
 
 
-def _ok_base_backup(dest_dir: Path, dsn: str) -> dict:
+def _ok_base_backup(dest_dir: Path, dsn: str) -> dict[str, Any]:
     return {"ok": True, "dest": str(dest_dir / "20260910T000000Z"), "tail": "backup ok"}
 
 
-def _failing_base_backup(dest_dir: Path, dsn: str) -> dict:
+def _failing_base_backup(dest_dir: Path, dsn: str) -> dict[str, Any]:
     return {"ok": False, "dest": "", "tail": "pg_basebackup rc=1"}
 
 
-def _raising_base_backup(dest_dir: Path, dsn: str) -> dict:
+def _raising_base_backup(dest_dir: Path, dsn: str) -> dict[str, Any]:
     raise RuntimeError("pg_basebackup 실행 파일을 찾을 수 없습니다")
 
 
@@ -48,15 +48,15 @@ def _dirty_wal(dsn: str) -> dict[str, str]:
     return {"wal_level": "minimal", "archive_mode": "off", "archive_command": ""}
 
 
-def _ok_drill(**kwargs: Any) -> dict:
+def _ok_drill(**kwargs: Any) -> dict[str, Any]:
     return {"ok": True, "steps": {"replay_verify": {"ok": True}}}
 
 
-def _failing_drill(**kwargs: Any) -> dict:
+def _failing_drill(**kwargs: Any) -> dict[str, Any]:
     return {"ok": False, "steps": {"replay_verify": {"ok": False, "detail": "mismatch"}}}
 
 
-def _common_kwargs(tmp_path: Path, **overrides: Any) -> dict:
+def _common_kwargs(tmp_path: Path, **overrides: Any) -> dict[str, Any]:
     kwargs: dict[str, Any] = dict(
         backup_dest_dir=tmp_path / "base",
         archive_dir=tmp_path / "archive",
@@ -79,7 +79,7 @@ def _common_kwargs(tmp_path: Path, **overrides: Any) -> dict:
 def test_success_path_runs_all_three_stages_in_order(tmp_path: Path) -> None:
     calls: list[str] = []
 
-    def base_backup(dest_dir: Path, dsn: str) -> dict:
+    def base_backup(dest_dir: Path, dsn: str) -> dict[str, Any]:
         calls.append("base_backup")
         return _ok_base_backup(dest_dir, dsn)
 
@@ -87,7 +87,7 @@ def test_success_path_runs_all_three_stages_in_order(tmp_path: Path) -> None:
         calls.append("wal_archive")
         return _clean_wal(dsn)
 
-    def drill(**kwargs: Any) -> dict:
+    def drill(**kwargs: Any) -> dict[str, Any]:
         calls.append("restore_drill")
         return _ok_drill(**kwargs)
 
@@ -129,7 +129,7 @@ def test_base_backup_empty_tail_never_yields_empty_detail(tmp_path: Path) -> Non
     사람이 진단할 근거가 하나도 남지 않는다 -- rc·타임아웃 여부·소요 시간을 대신 채워
     detail이 절대 비지 않게 한다."""
 
-    def _empty_tail_timeout_base_backup(dest_dir: Path, dsn: str) -> dict:
+    def _empty_tail_timeout_base_backup(dest_dir: Path, dsn: str) -> dict[str, Any]:
         return {
             "ok": False,
             "dest": "",
@@ -167,7 +167,7 @@ def test_base_backup_raising_runtime_error_is_caught_and_halts(tmp_path: Path) -
 def test_wal_archive_issue_halts_before_drill(tmp_path: Path) -> None:
     drill_called = False
 
-    def drill(**kwargs: Any) -> dict:
+    def drill(**kwargs: Any) -> dict[str, Any]:
         nonlocal drill_called
         drill_called = True
         return _ok_drill(**kwargs)
@@ -211,9 +211,9 @@ def test_gate_red_wal_violation_blocks_drill_and_reports_exact_stop_point(tmp_pa
     리허설이 돈다. 게이트가 적색이 되어 restore_drill은 단 한 번도 호출되지 않아야
     하고(호출됐다면 존재하지 않는 WAL을 찾으려다 다른 방식으로 실패해 원인이 흐려진다),
     steps에는 정확히 base_backup=ok, wal_archive=violation까지만 남는다."""
-    drill_invocations: list[dict] = []
+    drill_invocations: list[dict[str, Any]] = []
 
-    def spy_drill(**kwargs: Any) -> dict:
+    def spy_drill(**kwargs: Any) -> dict[str, Any]:
         drill_invocations.append(kwargs)
         return _ok_drill(**kwargs)
 
@@ -236,7 +236,7 @@ def test_run_scheduled_survives_run_once_exception_and_retries_next_cycle() -> N
     스케줄에서 한 번의 예외로 이후 모든 리허설이 영구히 멈추면 안 된다."""
     calls = 0
 
-    def flaky_run_once() -> dict:
+    def flaky_run_once() -> dict[str, Any]:
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -338,15 +338,15 @@ def test_concurrent_run_backup_verify_calls_do_not_cross_contaminate(tmp_path: P
     run_backup_verify를 호출해도 서로의 결과가 섞이지 않는다 -- 모듈 레벨 가변
     상태가 없다는 동시성 증거(안전축 D3)."""
 
-    def _run_ok(i: int) -> tuple[int, dict]:
+    def _run_ok(i: int) -> tuple[int, dict[str, Any]]:
         return i, backup_verify.run_backup_verify(**_common_kwargs(tmp_path / f"ok-{i}"))
 
-    def _run_wal_violation(i: int) -> tuple[int, dict]:
+    def _run_wal_violation(i: int) -> tuple[int, dict[str, Any]]:
         return i, backup_verify.run_backup_verify(
             **_common_kwargs(tmp_path / f"wal-{i}", read_wal=_dirty_wal)
         )
 
-    def _run_drill_failure(i: int) -> tuple[int, dict]:
+    def _run_drill_failure(i: int) -> tuple[int, dict[str, Any]]:
         return i, backup_verify.run_backup_verify(
             **_common_kwargs(tmp_path / f"drill-{i}", drill=_failing_drill)
         )
@@ -411,7 +411,7 @@ def test_main_single_run_writes_report_and_returns_nonzero_on_failure(
 def test_main_schedule_flag_invokes_run_scheduled_not_single_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scheduled_calls: list[dict] = []
+    scheduled_calls: list[dict[str, Any]] = []
 
     def fake_run_scheduled(**kwargs: Any) -> None:
         scheduled_calls.append(kwargs)
