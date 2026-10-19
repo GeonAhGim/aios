@@ -296,8 +296,8 @@ def test_first_run_initializes_baseline(tmp_path: Path) -> None:
     assert json.loads(baseline_path.read_text(encoding="utf-8")) == {"a": 0}
 
 
-def test_increase_fails_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """게이트 적색 재현: 신규 forbidden import가 생기면 exit 2."""
+def test_gate_red_increase_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """gate-red: 신규 forbidden import가 생기면 exit 2로 적색."""
     _touch_pkg(tmp_path, "src", "core")
     _write(tmp_path, "src/core/engine.py", "import src.exchanges.bitget\n")
     _write_contracts(tmp_path, "[forbidden:a]\nsource = src.core\nforbidden =\n    src.exchanges\n")
@@ -392,6 +392,48 @@ def test_build_graph_throughput_budget(tmp_path: Path) -> None:
 
     assert len(graph) >= 300
     assert sample.ratio < 100.0, budget.describe(sample, max_ratio=100.0)
+
+
+def test_build_graph_throughput_budget_detection_fails_on_10x_delay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """검출력 확인: _read_file에 인위적 지연을 주입하면 CPU 예산 단언이 적색으로 떨어진다.
+
+    단언이 허울이 아닌지 검증 — 정상 입력에서 녹색인 단언이 지연을 주입한
+    입력에서 반드시 적색(assertion 실패)으로 떨어져야 한다.
+    """
+    _touch_pkg(tmp_path, "src", "foundation")
+    for i in range(300):
+        _write(
+            tmp_path,
+            f"src/foundation/mod_{i}.py",
+            f"import json\nimport src.foundation.mod_{(i + 1) % 300}\n",
+        )
+
+    budget = RelativeBudget()
+    original_read_file = cil._read_file
+
+    # 300 files × 50ms = 15s serial I/O. With wall-clock mode this dwarfs
+    # the ~100ms calibration loop, pushing ratio well above 100x.
+    def _slow_read_file(path: Path) -> str:
+        time.sleep(0.05)  # 50ms per file
+        return original_read_file(path)
+
+    monkeypatch.setattr(cil, "_read_file", _slow_read_file)
+    monkeypatch.setattr(cil, "SCAN_WORKERS", 1)  # serial to amplify delay
+
+    graph_holder: dict[str, dict[str, set[str]]] = {}
+
+    def _build() -> None:
+        graph_holder["graph"] = cil.build_graph(tmp_path)
+
+    # With heavy artificial delay the ratio should exceed 100x budget.
+    # If this assertion PASSES the test itself is a defect (undetectable budget).
+    sample = budget.measure(_build, mode="wall", n=1, warmup=0)
+    assert sample.ratio >= 100.0, (
+        f"검출력 실패: 인위적 지연 주입에도 예산 100x을 초과하지 못함 — "
+        f"ratio={sample.ratio:.3f}x. 단언이 허울임을 의미."
+    )
 
 
 @pytest.mark.perf
