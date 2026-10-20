@@ -218,24 +218,38 @@ async def test_settlement_failure_propagates_not_swallowed(
     user_id = await create_test_tenant(pool)
     execution_id = await create_execution(pool, user_id)
     adapter = _make_adapter()
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     order = _make_order(execution_id, "settle-mutation")
 
-    with pytest.raises(RuntimeError, match="simulated settlement failure"):
-        await submit_order(order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate)
+    try:
+        with pytest.raises(RuntimeError, match="simulated settlement failure"):
+            await submit_order(
+                order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate
+            )
 
-    async with pool.acquire() as conn:
-        db_status = await conn.fetchval(
-            "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
-        )
-        position = await conn.fetchval(
-            "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
-        )
-    # 주문 자체는 이미 체결·영속화됐다(거래소 왕복은 정산 실패 이전에 커밋) —
-    # 정산만 깨졌다는 것을 별도로 증명한다(알려진 미검증 갭, position_ledger.py
-    # 모듈 docstring "동시 첫 체결 경합" 항목과 같은 종류의 한계).
-    assert db_status == "FILLED"
-    assert position is None
+        async with pool.acquire() as conn:
+            db_status = await conn.fetchval(
+                "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
+            )
+            position = await conn.fetchval(
+                "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
+            )
+        # 주문 자체는 이미 체결·영속화됐다(거래소 왕복은 정산 실패 이전에 커밋) —
+        # 정산만 깨졌다는 것을 별도로 증명한다(알려진 미검증 갭, position_ledger.py
+        # 모듈 docstring "동시 첫 체결 경합" 항목과 같은 종류의 한계).
+        assert db_status == "FILLED"
+        assert position is None
+    finally:
+        # 정산 실패 주입으로 이 FILLED 주문은 order_events 없이 남는다 —
+        # tests/support/orders_residue.py가 teardown에서 eventless 잔여로
+        # 잡아내므로(test_unfilled_limit_order_does_not_write_position과
+        # 동일 관례), 단언 성공/실패와 무관하게 이 테스트의 행만 정리한다.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM orders WHERE client_order_id = $1", order.client_order_id
+            )
 
 
 async def _p95_ms(reps: int, step: Callable[[], Awaitable[object]]) -> float:
