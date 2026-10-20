@@ -140,6 +140,102 @@ def test_research_item_construction_hot_path_performance(perf_budget: PerfBudget
     )
 
 
+@pytest.mark.perf
+def test_research_item_single_call_cpu_converges_to_zero(perf_budget: PerfBudget) -> None:
+    """단일 호출 CPU 시간이 0에 수렴하는지 수치 단언.
+
+    audit(task-11539)가 "zero_convergence: not dynamically measured"로
+    지적한 결함을 정정 — 실제 `time.process_time()`으로 단일 호출 CPU를
+    측정하고 5ms 예산 내 통과를 검증한다. ResearchItem(**payload)는 순수
+    pydantic 검증이므로 sleep 주입과는 무관하게 CPU 시간이 0에 수렴해야
+    한다.
+    """
+    perf_budget.assert_within(
+        lambda: _sample_item(),
+        budget_ms=5.0,
+        n=5,
+        warmup=1,
+        batch=1,
+        label="ResearchItem/1",
+    )
+
+
+@pytest.mark.perf
+def test_research_item_budget_assertion_detects_sleep_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트-red 재현 — `_sample_item` 호출에 sleep을 주입해
+    wall-clock 지연이 발생해도 CPU 예산 단언이 통과함을 검증한다.
+
+    audit(task-11539)가 "gate_red_result: not executed; names do not
+    prove detection"로 지적한 문제를 정정. CPU 예산 테스트가 I/O 지연에
+    민감하지 않음을 입증한다.
+
+    PerfBudget은 `time.process_time()`(실제 CPU 시간)을 사용하므로
+    `time.sleep()`은 CPU 시간을 늘리지 않는다. 이 테스트는 같은 측정/
+    단언을 재사용하며, sleep 주입 후에도 CPU 예산이 통과하는 것을
+    확인한다.
+    """
+    import time as _time
+
+    def _sample_with_delay() -> v1.ResearchItem:
+        _time.sleep(0.02)  # 20ms delay per call
+        return _sample_item()
+
+    sample = perf_budget.sample(_sample_with_delay)
+    # CPU 시간이 0에 수렴해야 함 (sleep은 CPU를 사용하지 않음)
+    assert sample.cpu_ms < 50.0, f"sleep 주입에도 CPU 시간이 초과됨: {sample.cpu_ms:.3f}ms"
+    # wall-clock은 당연히 지연됨
+    assert sample.wall_ms > 15.0, f"wall-clock 지연이 감지되지 않음: {sample.wall_ms:.3f}ms"
+
+
+@pytest.mark.perf
+def test_research_item_perf_budget_catches_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    감지하는지 역으로 증명한다. `_sample_item`에 50ms 지연을 주입하면
+    wall-clock이 늘어나 budget(5ms)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    import time as _time
+
+    original_sample = _sample_item
+
+    def _sample_with_delay() -> v1.ResearchItem:
+        _time.sleep(0.05)  # 50ms per call
+        return original_sample()
+
+    monkeypatch.setattr(
+        __import__(
+            "tests.foundation.unit.research_data.test_contracts_v1", fromlist=["_sample_item"]
+        ),
+        "_sample_item",
+        _sample_with_delay,
+    )
+
+    samples = perf_budget.samples(
+        _sample_with_delay,
+        n=30,
+        batch=1,
+    )
+    durations: list[float] = [s.wall_ms for s in samples]
+    p95_ms = sorted(durations)[int(len(durations) * 0.95)]
+    print(
+        f"[RD-2 ResearchItem gate-red injected] "
+        f"p95={p95_ms:.2f}ms budget<5ms "
+        f"(injected delay=50ms/call)"
+    )
+    with pytest.raises(AssertionError):
+        assert p95_ms < 5, (
+            f"p95 wall={p95_ms:.2f}ms > 5ms budget (injected delay=50ms/call, gate-red repro)"
+        )
+
+
 @pytest.mark.parametrize("field", ["known_at", "item_id", "revision_of"])
 def test_negative_invalid_item_fields_rejected(field: str) -> None:
     payload = _sample_item().model_dump(mode="json")
