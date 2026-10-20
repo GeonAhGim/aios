@@ -171,7 +171,9 @@ async def test_unfilled_limit_order_does_not_write_position(pool: asyncpg.Pool) 
     user_id = await create_test_tenant(pool)
     execution_id = await create_execution(pool, user_id)
     adapter = _make_adapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     order = _make_order(
         execution_id, "settle-unfilled", order_type=OrderType.LIMIT, price=Decimal("100")
     )
@@ -185,6 +187,14 @@ async def test_unfilled_limit_order_does_not_write_position(pool: asyncpg.Pool) 
         position = await conn.fetchval(
             "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
         )
+        # order_service/submit.py's legacy write path never appends an
+        # `order_events` row (that trail belongs to the separate OMS state
+        # machine) -- left in place, this ACKNOWLEDGED row is eventless with a
+        # non-CREATED status forever, which `tests/support/orders_residue.py`
+        # flags as residue at module teardown (no cutover exception, by that
+        # sentinel's own design). Clean up this test's own row, same
+        # convention as test_restart_recovery.py.
+        await conn.execute("DELETE FROM orders WHERE client_order_id = $1", order.client_order_id)
     assert position is None
 
 
