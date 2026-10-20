@@ -143,6 +143,53 @@ def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
         assert p95_ms < _BUDGET_MS
 
 
+@pytest.mark.perf
+def test_gate_red_walk_forward_budget_actually_fails_on_10x_stall(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """Proves the p95 latency assertion is not a tautology -- a 10x budget
+    stall injected into run_backtest must flip the same assertion to red.
+
+    Uses the identical measurement/assertion path as the green test above
+    (p95 of wall_ms against _BUDGET_MS) but with run_backtest delayed by
+    10x the per-call budget so total wall time exceeds the budget slice.
+    If the assertion passes here, the test is a tautology and the gate is
+    hollow.
+    """
+    original_run_backtest = walk_forward_mod.run_backtest
+    # 10x per-call budget: _BUDGET_MS / _RUN_BACKTEST_CALLS * 10 per call
+    # ensures the total easily exceeds _BUDGET_MS even after p95.
+    delay_s = _BUDGET_MS / 1000 / _RUN_BACKTEST_CALLS * 10
+
+    def _stalled_run_backtest(*args: object, **kwargs: object) -> object:
+        time.sleep(delay_s)
+        return original_run_backtest(*args, **kwargs)
+
+    monkeypatch.setattr(walk_forward_mod, "run_backtest", _stalled_run_backtest)
+
+    def _one_run() -> None:
+        run_walk_forward(
+            _config(),
+            _fsm_config(),
+            _bars(50),
+            _grid(),
+            _splits(),
+            indicator_service=_FakePriceIndicatorService(),
+        )
+
+    perf_samples = perf_budget.samples(_one_run, n=_ITERATIONS)
+    wall_samples = [s.wall_ms for s in perf_samples]
+    ordered = sorted(wall_samples)
+    p95_ms = ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)]
+    print(
+        f"[L35 gate-red] run_walk_forward p95={p95_ms:.4f}ms "
+        f"budget<{_BUDGET_MS:.0f}ms (10x stall injected)"
+    )
+    with pytest.raises(AssertionError):
+        assert p95_ms < _BUDGET_MS
+
+
 def test_all_grid_points_with_unscoreable_is_sharpe_is_rejected() -> None:
     """DEEPEN(task-3204) 네거티브: `WalkForwardError` docstring이 명시하는
     두 번째 실패 모드(모든 IS 후보의 Sharpe가 None) 전용 회귀 -- train
