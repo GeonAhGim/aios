@@ -161,3 +161,28 @@ def test_region_check_throughput_budget(perf_budget: PerfBudget):
             assert_storage_region_allowed(entity, "kr-seoul", policy)
 
     perf_budget.assert_within(_run, budget_ms=1000.0, batch=8, label=f"{iterations} region checks")
+
+
+@pytest.mark.perf
+def test_gate_red_budget_actually_fails_past_budget(perf_budget: PerfBudget):
+    """게이트 적색 재현 -- 성능 단언이 tautology가 아님을 증명한다.
+    동일한 샘플에 터무니없이 낮은 예산(1e-9ms)을 적용하면 AssertionError가
+    발생해야 한다. budget 값을 10배 늘리는 monkeypatch 대신, assert 자체를
+    pytest.raises로 검증하는 것이 가장 명확하다(task-11539)."""
+    entity = _entity(region_tag="kr-seoul")
+    policy = same_region_policy(["kr-seoul", "us-east"])
+    iterations = 50_000
+
+    def _run() -> None:
+        for _ in range(iterations):
+            assert_storage_region_allowed(entity, "kr-seoul", policy)
+
+    samples = perf_budget.samples(_run, n=5, warmup=0, batch=8)
+    cpu_ms = min(s.cpu_ms for s in samples)
+
+    absurdly_low_budget_ms = 1e-9
+    with pytest.raises(AssertionError):
+        assert cpu_ms < absurdly_low_budget_ms, (
+            f"예상 적색 실패: cpu={cpu_ms:.6f}ms가 absurd budget "
+            f"{absurdly_low_budget_ms}ms보다 작지 않음"
+        )
