@@ -181,7 +181,6 @@ async def test_subscribe_book_missing_yields_nothing_not_none() -> None:
 
 
 @pytest.mark.perf
-@pytest.mark.perf
 def test_require_microstructure_check_is_fast_at_scale(
     perf_budget: PerfBudget,
 ) -> None:
