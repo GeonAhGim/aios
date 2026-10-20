@@ -319,17 +319,46 @@ def test_parse_mc_ticker_frame_meets_ws_fanout_latency_budget(perf_budget: PerfB
     자체 예산으로 차용한다(task-3167/ecc08318, task-3165/1bf6c043
     DEEPEN과 동일 차용 근거) -- parse_mc_ticker_frame()은 그 팬아웃
     파이프라인의 첫 단계이므로 반복 호출의 p95 지연이 그 예산 안에
-    들어와야 한다."""
+    들어와야 한다.
+
+    batch=100: Windows time.process_time()은 ~15.6ms tick 해상도 -- 단일
+    호출은 0 또는 15.6ms로 양자화되어 p95가 의미 없다. batch로 묶어
+    양자화 오차를 tick/batch로 줄인다(task-11539).
+    """
     raw = json.dumps({"header": {"tr_cd": "mc", "tr_key": "005940"}, "body": _MC_PUSH_EXAMPLE})
     n = 500
     budget_ms = 500.0  # WS 팬아웃 p95 500ms 예산(ADR Decision 1) 차용
 
-    samples = perf_budget.samples(lambda: parse_mc_ticker_frame(raw), n=n, warmup=1)
+    samples = perf_budget.samples(lambda: parse_mc_ticker_frame(raw), n=n, warmup=1, batch=100)
     wall_ms = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms[int(n * 0.95) - 1]
 
     print(f"[H-3 nh ws] parse_mc_ticker_frame x{n} p95={p95_ms:.4f}ms (budget<{budget_ms:.0f}ms)")
     assert p95_ms < budget_ms, f"WS 팬아웃 p95 예산({budget_ms}ms) 초과: {p95_ms:.4f}ms"
+
+
+# --- gate-red reproduction ---
+
+
+@pytest.mark.perf
+def test_gate_red_budget_actually_fails_past_budget(perf_budget: PerfBudget) -> None:
+    """게이트 적색 재현 -- 성능 단언이 tautology가 아님을 증명한다.
+    동일한 샘플에 터무니없이 낮은 예산(1e-9ms)을 적용하면 AssertionError가
+    발생해야 한다. budget 값을 10배 늘리는 monkeypatch 대신, assert 자체를
+    pytest.raises로 검증하는 것이 가장 명확하다(task-11539)."""
+    raw = json.dumps({"header": {"tr_cd": "mc", "tr_key": "005940"}, "body": _MC_PUSH_EXAMPLE})
+    n = 50
+
+    samples = perf_budget.samples(lambda: parse_mc_ticker_frame(raw), n=n, warmup=0, batch=100)
+    wall_ms = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms[int(n * 0.95) - 1]
+
+    absurdly_low_budget_ms = 1e-9
+    with pytest.raises(AssertionError):
+        assert p95_ms < absurdly_low_budget_ms, (
+            f"예상 적색 실패: p95={p95_ms:.4f}ms가 absurd budget {absurdly_low_budget_ms}ms보다 "
+            f"작지 않음"
+        )
 
 
 async def test_get_order_field_missing_injection_confirms_fail_closed_reasoning():
