@@ -252,3 +252,39 @@ def test_allocate_manual_hot_path_performance(perf_budget):
         batch=10_000,
         label="allocate_manual",
     )
+
+
+# ---- gate-red 재현 ----
+
+
+def test_gate_red_by_weight_budget_actually_fails_past_budget(perf_budget) -> None:
+    """Proves the perf assertion above is not a tautology -- an absurdly
+    low budget against the same operation must fail."""
+    targets = _equal_weights(*(uuid4() for _ in range(5)))
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: allocate_pro_rata(Decimal("1000"), targets, Decimal("1")),
+            budget_ms=-1.0,
+            n=5,
+            batch=10_000,
+            label="gate_red allocate_by_weight",
+        )
+
+
+def test_gate_red_manual_budget_actually_fails_past_budget(perf_budget) -> None:
+    """Proves the perf assertion above is not a tautology -- an absurdly
+    low budget against the same operation must fail."""
+    targets = [
+        ManualTarget(sub_account_id=uuid4(), quantity=Decimal(str(q))) for q in (10, 20, 30, 40)
+    ]
+    total = sum((t.quantity for t in targets), Decimal("0"))
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: allocate_manual(total, targets),
+            budget_ms=-1.0,
+            n=5,
+            batch=10_000,
+            label="gate_red allocate_manual",
+        )
