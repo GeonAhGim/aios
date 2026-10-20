@@ -287,3 +287,56 @@ async def test_check_paper_trading_eligibility_p95_latency(pool) -> None:
         max_ratio=40,
         label="check_paper_trading_eligibility",
     )
+
+
+@pytest.mark.perf
+async def test_gate_red_reproduction_p95_budget_catches_injected_delay(
+    pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현 — 동일한 성능 단언이 충분히 큰 지연 주입 시 실제로 적색(AssertionError)
+    으로 전환되는지 확인한다.
+
+    첫 번째로 정상 입력에서 녹색 통과를 검증한 뒤, asyncpg.Connection.fetchval 에
+    지연을 주입하고 동일한 단언이 실패하는지 확인한다.
+    (task-11539: 검출력 확인 — 주입 지연 테스트 없으면 단언이 허울일 수 있음)
+
+    RelativeBudget.assert_within_async는 ratio 기반(보정 루프 대비 연산 시간 비율)이므로,
+    보정 루프(~80ms)의 40배(=3.2s)를 넘는 지연을 주입해야 ratio > max_ratio가 된다.
+    best-of-N 샘플 중 최소값이 예산을 넘게 하려면 지연이 충분히 커야 한다.
+    n=5에 15초 지연 → best-of-5 최소값 ~15s, 보정 ~80ms, ratio ~187x > 40x.
+    """
+    seller = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, seller)
+    await _insert_execution(pool, strategy_id, version, seller, days_ago=120)
+
+    eligibility_fn = partial(check_paper_trading_eligibility, pool, strategy_id, version, seller)
+
+    # 녹색 제어군 — 정상 입력에서 통과해야 함
+    await RelativeBudget().assert_within_async(
+        eligibility_fn,
+        n=20,
+        max_ratio=40,
+        label="check_paper_trading_eligibility",
+    )
+
+    # 적색 주입 — fetchval에 15초 지연을 주입하여 ratio 예산을 넘게 함
+    import asyncio
+
+    original_fetchval = asyncpg.Connection.fetchval
+
+    async def delayed_fetchval(self, *args, **kwargs):
+        await asyncio.sleep(15.0)
+        return await original_fetchval(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchval", delayed_fetchval)
+
+    with pytest.raises(AssertionError) as exc_info:
+        await RelativeBudget().assert_within_async(
+            eligibility_fn,
+            n=5,
+            max_ratio=40,
+            label="check_paper_trading_eligibility(injected)",
+        )
+
+    assert "ratio" in str(exc_info.value), "AssertionError가 'ratio' 단언에서 발생해야 함"
