@@ -11,9 +11,11 @@ registry ordering, completed-job guard).
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -28,6 +30,7 @@ from src.foundation.ml.domain.registry_rules import (
     validate_new_registration,
 )
 from src.foundation.ml.ports.train_job_repository import TrainJobState, TrainJobStatus
+from tests.conftest import PerfBudget
 
 _NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
 _LINEAGE = TrainDataLineage(
@@ -280,3 +283,98 @@ async def test_register_model_orchestration_p95_within_budget(
     p95_ms = _p95(durations)
     print(f"[AI-20 register_model] p95={p95_ms:.2f}ms budget<{_REGISTER_MODEL_P95_BUDGET_MS:.1f}ms")
     assert p95_ms < _REGISTER_MODEL_P95_BUDGET_MS
+
+
+# ---- 0 수렴: 단일 호출 CPU 시간 ---------------------------------------------
+
+
+@pytest.mark.perf
+async def test_register_model_single_call_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 호출 CPU 시간이 0에 수렴하는지 검증(task-11539 감사 후속).
+
+    `register_model`은 인메모리 FakeRepo/ArtifactStore 위에서 동작하므로
+    `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
+
+    Windows `time.process_time()`은 ~15.6ms 양자화 오차가 있다 —
+    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다. 64회 평균 CPU 시간이
+    1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    """
+    registry = _FakeModelRegistry()
+    artifacts = _FakeArtifactStore()
+
+    _cpu_idx = [0]
+
+    async def _single_call() -> None:
+        idx = _cpu_idx[0]
+        _cpu_idx[0] += 1
+        await register_model(
+            job=_completed_job(job_id=f"job-cpu-{idx}", checkpoint=f"ckpt-{idx}"),
+            version=f"v-cpu-{idx}",
+            train_data_lineage=_LINEAGE,
+            trained_at=_NOW,
+            model_registry=registry,
+            artifact_store=artifacts,
+        )
+
+    # batch=64: Windows 15.6ms 틱 폭 오차를 1/64로 줄임
+    sample = await perf_budget.sample_async(_single_call, batch=64)
+    assert sample.cpu_ms < 1.0, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms > 1ms budget "
+        f"(64 calls averaged, wall={sample.wall_ms:.3f}ms)"
+    )
+
+
+# ---- 성능 게이트 적색 재현 (지연 주입) --------------------------------------
+
+
+@pytest.mark.perf
+async def test_register_model_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): `register_model`의 성능 단언이
+    실제로 지연을 감지하는지 역으로 증명한다. `model_registry.register`에
+    50ms 지연을 주입하면 30 calls × 50ms = 1.5s 총 wall-clock이 되어
+    budget(50ms p95)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    registry = _FakeModelRegistry()
+    artifacts = _FakeArtifactStore()
+
+    # register에 50ms 지연 주입 (예산 50ms의 10배)
+    original_register = registry.register
+
+    async def _register_with_delay(*args: Any, **kwargs: Any) -> ModelCard:
+        await asyncio.sleep(0.05)  # 50ms per call
+        return await original_register(*args, **kwargs)
+
+    monkeypatch.setattr(registry, "register", _register_with_delay)
+
+    _delay_idx = [0]
+
+    async def _measure_delayed() -> None:
+        idx = _delay_idx[0]
+        _delay_idx[0] += 1
+        await register_model(
+            job=_completed_job(job_id=f"job-delay-{idx}", checkpoint=f"ckpt-{idx}"),
+            version=f"v-delay-{idx}",
+            train_data_lineage=_LINEAGE,
+            trained_at=_NOW,
+            model_registry=registry,
+            artifact_store=artifacts,
+        )
+
+    samples = await perf_budget.samples_async(_measure_delayed, n=30)
+    durations: list[float] = [s.wall_ms for s in samples]
+    p95_ms = _p95(durations)
+    print(
+        f"[AI-20 register_model gate-red injected] "
+        f"p95={p95_ms:.2f}ms budget<{_REGISTER_MODEL_P95_BUDGET_MS:.1f}ms "
+        f"(injected delay=50ms/call)"
+    )
+    with pytest.raises(AssertionError):
+        assert p95_ms < _REGISTER_MODEL_P95_BUDGET_MS
