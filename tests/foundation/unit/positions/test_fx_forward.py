@@ -242,3 +242,80 @@ def test_decompose_fx_pnl_detects_mismatch_hidden_among_many_matching_hedges() -
         fxf.decompose_fx_pnl(asset_fx, [*matching_hedges, mismatched])
 
     assert exc_info.value.currencies == {Currency.KRW, Currency.USDT}
+
+
+# ---- 0 수렴: 단일 호출 CPU 시간 ---------------------------------------------
+
+
+@pytest.mark.perf
+def test_hedge_unrealized_pnl_single_call_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 호출 CPU 시간이 0에 수렴하는지 검증(task-11539 감사 후속).
+
+    `hedge_unrealized_pnl`은 인메모리 dataclass 연산만 수행하므로
+    `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
+
+    Windows `time.process_time()`은 ~15.6ms 양자화 오차가 있다 —
+    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다. 64회 평균 CPU 시간이
+    1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    """
+    contract = _contract(notional="1000", contract_rate="1350")
+    market = _quote(rate="1330", source="reuters-fwd", known_at=_KNOWN_AT)
+
+    # batch=64: Windows 15.6ms 틱 폭 오차를 1/64로 줄임
+    sample = perf_budget.sample(
+        lambda: fxf.hedge_unrealized_pnl(contract, market),
+        batch=64,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms > 1ms budget "
+        f"(64 calls averaged, wall={sample.wall_ms:.3f}ms)"
+    )
+
+
+# ---- 성능 게이트 적색 재현 (지연 주입) --------------------------------------
+
+
+@pytest.mark.perf
+def test_hedge_unrealized_pnl_perf_budget_catches_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    감지하는지 역으로 증명한다. `hedge_unrealized_pnl`에 50ms 지연을 주입하면
+    wall-clock이 늘어나 budget(5ms)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    import time as _time
+
+    contract = _contract(notional="1000", contract_rate="1350")
+    market = _quote(rate="1330", source="reuters-fwd", known_at=_KNOWN_AT)
+
+    # Original function to call after delay
+    _original_hedge = fxf.hedge_unrealized_pnl
+
+    def _hedge_with_delay(*args, **kwargs):
+        _time.sleep(0.05)  # 50ms per call
+        return _original_hedge(*args, **kwargs)
+
+    monkeypatch.setattr(fxf, "hedge_unrealized_pnl", _hedge_with_delay)
+
+    samples = perf_budget.samples(
+        lambda: fxf.hedge_unrealized_pnl(contract, market),
+        n=30,
+        batch=1,
+    )
+    durations: list[float] = [s.wall_ms for s in samples]
+    p95_ms = sorted(durations)[int(len(durations) * 0.95)]
+    print(
+        f"[LB-20 hedge_unrealized_pnl gate-red injected] "
+        f"p95={p95_ms:.2f}ms budget<5ms "
+        f"(injected delay=50ms/call)"
+    )
+    with pytest.raises(AssertionError):
+        assert p95_ms < 5, (
+            f"p95 wall={p95_ms:.2f}ms > 5ms budget (injected delay=50ms/call, gate-red repro)"
+        )
