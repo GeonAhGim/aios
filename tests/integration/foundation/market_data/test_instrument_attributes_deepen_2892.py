@@ -152,6 +152,103 @@ async def test_get_as_of_meets_latency_budget_with_many_corrections(pool, perf_b
     )
 
 
+@pytest.mark.perf
+async def test_get_as_of_cpu_time_converges_to_zero_for_io_call(pool, perf_budget):
+    """단일 `get_as_of` 호출은 I/O 중심 작업이므로 CPU 시간은 양자화 오차
+    범위 내여야 한다(약 0ms 수렴). 이 테스트는 PerfBudget.sample_async가
+    CPU와 wall 시간을 분리 측정함을 동적으로 검증한다 -- CPU 측정값이
+    양자화 틱(Windows ~15.6ms)을 초과하면 구현이 CPU 시간을 누산하고
+    있다는 결함이다."""
+    instrument_id = _instrument_id()
+    await _seed_instrument(pool, instrument_id)
+    repo = PostgresInstrumentAttributesRepository(pool)
+    base = datetime.now(timezone.utc)
+    n = 500
+
+    async with pool.acquire() as conn:
+        for i in range(n):
+            await repo.record(
+                conn,
+                instrument_id=instrument_id,
+                attr_key="lot_size",
+                attr_value=str(i),
+                known_at=base + timedelta(seconds=i),
+            )
+
+        # batch=1: 단일 호출의 CPU 시간을 직접 측정 — 양자화 오차가 그대로 드러남
+        sample = await perf_budget.sample_async(
+            lambda: repo.get_as_of(conn, instrument_id, as_of=base + timedelta(seconds=n + 10))
+        )
+
+    # I/O 호출이므로 CPU 시간은 양자화 오차 범위(Windows ~15.6ms) 내에 수렴
+    print(
+        f"[DC-21 instrument_attributes] get_as_of CPU quantization: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+    # 정답 확인
+    assert sample.result["lot_size"].attr_value == str(n - 1)
+    # CPU 시간은 Windows 양자화 틱 내에 수렴해야 — 15.6ms(64Hz 클록) 초과 불가
+    assert sample.cpu_ms < 15.625, (
+        f"get_as_of의 CPU 시간이 양자화 오차 범위를 초과했습니다(cpu={sample.cpu_ms:.3f}ms "
+        f"> 15.625ms). I/O 중심 작업은 CPU 시간을 누산하지 않아야 한다."
+    )
+
+
+@pytest.mark.perf
+async def test_get_as_of_budget_injection_fails_with_delayed_io(pool, monkeypatch, perf_budget):
+    """asyncpg.Connection.fetch에 지연을 주입하면 `get_as_of`의 wall_ms가
+    예산을 초과해야 한다 -- 이 테스트는 '게이트가 실제 예산 위반을 적색으로
+    포착하는가'를 동적으로 증명한다(monkeypatch fetch → budget 초과
+    단언 실패).
+
+    `get_as_of`는 `conn.fetch(...)`로 DB 쿼리를 실행한다. fetch를
+    monkeypatch하면 I/O 대기 시간이 늘고, wall_ms가 예산을 초과한다.
+    (task-11539: 검출력 확인 — 주입 지연 테스트 없으면 단언이 허울일 수 있음)"""
+    import asyncio
+
+    instrument_id = _instrument_id()
+    await _seed_instrument(pool, instrument_id)
+    repo = PostgresInstrumentAttributesRepository(pool)
+    base = datetime.now(timezone.utc)
+    n = 500
+    budget_ms = 3_000.0
+
+    # asyncpg.Connection.fetch에 지연 주입
+    original_fetch = asyncpg.Connection.fetch
+
+    async def delayed_fetch(self, *args, **kwargs):
+        await asyncio.sleep(3.5)  # 3.5s 지연 —预算 3s를 초과
+        return await original_fetch(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_fetch)
+
+    async with pool.acquire() as conn:
+        for i in range(n):
+            await repo.record(
+                conn,
+                instrument_id=instrument_id,
+                attr_key="lot_size",
+                attr_value=str(i),
+                known_at=base + timedelta(seconds=i),
+            )
+
+        sample = await perf_budget.sample_async(
+            lambda: repo.get_as_of(conn, instrument_id, as_of=base + timedelta(seconds=n + 10))
+        )
+
+    print(
+        f"[DC-21 instrument_attributes] gate-red injection: "
+        f"wall={sample.wall_ms:.1f}ms budget={budget_ms}ms"
+    )
+    # 정답 확인 (지연이 붙어도 같은 결과가 나와야 함)
+    assert sample.result["lot_size"].attr_value == str(n - 1)
+    # fetch 지연 주입 → wall_ms가 예산을 초과해야 한다(게이트가 위반을 포착)
+    assert sample.wall_ms >= budget_ms, (
+        f"gate-red: fetch 지연 주입 후 wall_ms={sample.wall_ms:.1f}ms가 "
+        f"예산({budget_ms}ms)을 넘지 않았습니다."
+    )
+
+
 # ---- 게이트 적색 재현 -------------------------------------------------------
 
 
