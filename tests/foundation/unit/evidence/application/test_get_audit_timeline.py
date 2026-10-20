@@ -5,6 +5,7 @@ Spec: AIOSproject #79 §3."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -196,3 +197,45 @@ async def test_get_audit_timeline_orchestration_throughput(perf_budget):
         f"500 sequential get_audit_timeline calls"
     )
     assert len(repo.calls) == 500
+
+
+# --- Performance gate-red repro (D2) ----------------------------------------
+
+
+@pytest.mark.perf
+async def test_get_audit_timeline_perf_budget_catches_10x_delay_injection(
+    perf_budget,
+    monkeypatch,
+):
+    """게이트 적색 재현(D2): 성능 단언이 실제로 지연을 감지하는지 역으로
+    증명한다. FakeAuditEventRepository.list_timeline에 10ms 지연을 주입하면
+    100 calls × 10ms = 1s 총 wall-clock이 되어 budget(1000ms)을 초과하므로
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539)."""
+    repo = FakeAuditEventRepository(events=[_event()])
+    tenant_id = uuid4()
+
+    original_list = repo.list_timeline
+
+    async def _list_with_delay(*args, **kwargs):
+        await asyncio.sleep(0.01)  # 10ms per call
+        return await original_list(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "list_timeline", _list_with_delay)
+
+    async def _run_100_delayed() -> None:
+        for _ in range(100):
+            await get_audit_timeline(repo, tenant_id=tenant_id)
+
+    sample = await perf_budget.sample_async(_run_100_delayed)
+
+    # 100 calls × 10ms sleep ≈ 1000ms wall — budget is 1000ms so this
+    # should overshoot and raise AssertionError.
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < 1000, (
+            f"예상 적색 실패: wall={sample.wall_ms:.3f}ms가 "
+            f"budget 1000ms보다 작지 않음 — 단언이 제대로 작동하지 않음"
+        )
+    assert len(repo.calls) == 100
