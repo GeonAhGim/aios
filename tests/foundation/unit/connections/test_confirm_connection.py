@@ -379,3 +379,46 @@ async def test_confirm_connection_perf_budget_p95_latency(
     durations_ms = sorted(s.cpu_ms for s in samples)
     p95 = durations_ms[int(50 * 0.95) - 1]
     assert p95 < 50.0, f"confirm_connection p95 latency {p95:.3f}ms exceeded 50ms budget"
+
+
+# ---------------------------------------------------------------------------
+# gate-red reproduction (D2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_confirm_connection_perf_assertion_catches_10x_delay_injection(
+    perf_budget: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    50ms(예산)를 초과하는 CPU 시간을 가장하면 p95 단언이 AssertionError로
+    적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다."""
+    import time as _time
+
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 60.0  # 60ms/call → budget 50ms 초과
+        return _fake_time
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    tenant_id = uuid4()
+
+    async def _run() -> None:
+        connection = _connection(tenant_id=tenant_id)
+        conn_repo = FakeConnectionRepository(connection=connection)
+        provider = FakeProvider(proof=_proof())
+        await confirm_connection(conn_repo, provider, **_kwargs(tenant_id, connection.id))
+
+    samples = await perf_budget.samples_async(_run, n=50)
+    durations_ms = sorted(s.cpu_ms for s in samples)
+    p95 = durations_ms[int(50 * 0.95) - 1]
+    with pytest.raises(AssertionError):
+        assert p95 < 50.0, f"confirm_connection p95 latency {p95:.3f}ms exceeded 50ms budget"
