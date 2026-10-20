@@ -157,3 +157,68 @@ def test_prompt_hash_p95_latency_within_self_declared_budget(
         f"budget<{_PROMPT_HASH_BUDGET_MS:.1f}ms"
     )
     assert p95_ms < _PROMPT_HASH_BUDGET_MS
+
+
+# ---- failure-injection: CPU 시간 10배 주입 → 단언이 적색으로 전환됨 ----
+# PerfBudget.sample 는 time.process_time() 을 사용하므로, sleep() 주입은
+# CPU 측정에 보이지 않는다. 대신 time.process_time 를 monkeypatch 해 실제
+# CPU 시간의 10 배를 반환하게 하면预算 단언이 반드시 실패해야 한다.
+
+
+@pytest.mark.perf
+def test_prompt_hash_budget_assertion_fails_on_cpu_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정상 입력이预算을 통과하는 측정 경로를, CPU 시간을 10 배로 늘리면
+    적색으로 전환한다 — 성능 게이트가 지연 회귀를 실제로 적색으로
+    포착한다는 것을 단언 수준에서 증명 (D2 DoD 실패주입 1 건).
+
+    `PerfBudget` 은 `time.process_time()` 을 쓰므로, `sleep()` 주입은
+    CPU 시간 측정에 보이지 않는다. `PerfBudget` 이 `time` 모듈을
+    import 하므로, `tests.support.perf_budget.time.process_time` 을
+    monkeypatch 해 실제 CPU 시간의 10 배를 반환하게 한다.
+
+    prompt_hash 는 실제 CPU 시간이 ~0ms 로 너무 작아 10 배 곱셈으로도
+    Windows process_time 양자화(~15.6ms tick) 를 넘지 못한다.
+    대신 실제 측정값에 5ms 고정 지연을 더하면 original_budget(1.0ms) 을
+    명확히 초과하므로, budget=1.0ms 단언이 반드시 적색으로 전환된다.
+    """
+    import tests.support.perf_budget as _perf_budget_mod
+
+    template = _template(template="x" * 2000)
+
+    original_process_time = _perf_budget_mod.time.process_time
+    # call counter — 매 호출마다 process_time 반환값에 누적 지연 추가
+    _call_count = [0]
+
+    def _slow_process_time() -> float:
+        _call_count[0] += 1
+        # 각 호출마다 0.01초(10ms) 씩 누적 — 1회 측정당 2회 호출이므로
+        # 20ms 누적 → cpu_ms = 20 * 1000 / 8 = 2500ms >> budget(1.0ms).
+        return original_process_time() + _call_count[0] * 0.01
+
+    monkeypatch.setattr(_perf_budget_mod.time, "process_time", _slow_process_time)
+
+    try:
+        budget_ms = 1.0
+        samples = perf_budget.samples(lambda: prompt_hash(template), n=200, batch=8)
+        cpu_values_ms = sorted(s.cpu_ms for s in samples)
+        p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+        print(
+            f"[AI-5 prompt_registry] prompt_hash p95={p95_ms:.4f}ms "
+            f"budget<{budget_ms:.1f}ms (injected)"
+        )
+        assert p95_ms < budget_ms, (
+            f"주입된 CPU 시간이预算을 초과해야 함 — p95={p95_ms:.4f}ms budget={budget_ms:.1f}ms"
+        )
+        pytest.fail(
+            f"assert_within 이 적색을 raised 하지 않음 — "
+            f"p95={p95_ms:.4f}ms budget={budget_ms:.1f}ms "
+            f"주입이 감지되지 않음"
+        )
+    except AssertionError as exc:
+        # 적색이 감지됨 — 기대 동작
+        assert "budget" in str(exc) or "p95" in str(exc)
+    finally:
+        _perf_budget_mod.time.process_time = original_process_time
