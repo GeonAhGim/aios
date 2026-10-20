@@ -205,10 +205,14 @@ def test_reproducibility_key_p95_latency_within_backtest_budget_slice(
     """DEEPEN(task-3041): ADR-2026-09-09-C Decision 1 예산 중 재현 키 조립
     몫(2ms)을 실제로 단언한다. raw perf_counter 대신 process_time 기반
     PerfBudget.samples()로 측정 — 병렬 워커가 코어를 다툴 때도 wall-clock
-    잡음이 cpu_ms 측정에 섞이지 않는다."""
+    잡음이 cpu_ms 측정에 섞이지 않는다.
+
+    `batch=8`로 Windows `process_time()` 약 15.6ms 양자화 오차를 호출당
+    ~2ms로 줄인다 — 대상 함수가 2ms 미만이면 batch=1로 모든 샘플이 0ms에
+    수렴하여 p95=0이 된다(task-11539 감사)."""
     raw_samples: list[float] = []
     for _ in range(_ITERATIONS):
-        sample = perf_budget.sample(_key)
+        sample = perf_budget.sample(_key, batch=8)
         raw_samples.append(sample.cpu_ms)
     p95_ms = _p95_ms(raw_samples)
     print(f"[BT-9] reproducibility_key p95={p95_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
@@ -263,7 +267,11 @@ def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     주입하면, `test_reproducibility_key_p95_latency_within_backtest_budget_slice`
     와 동일한 단언식이 실제로 `AssertionError`를 내는지(= CI가 실제로
     빨간불이 되는지) 확인한다 — 이 테스트가 없으면 위 단언이 항상
-    통과하는 tautology인지 아무도 검증하지 못한다."""
+    통과하는 tautology인지 아무도 검증하지 못한다.
+
+    `batch=8`로 Windows `process_time()` 15.6ms 양자화 오차를 줄이고,
+    `cpu_ms`로 녹색 테스트와 동일한 측정 지표 단언을 재사용한다(task-11539
+    감사: single-call 양자화 0 수렴·gate-red metric 불일치 정정)."""
     original_config_hash = reproducibility_mod.config_hash
 
     def _stalled_config_hash(config: BacktestConfigV2) -> str:
@@ -274,8 +282,8 @@ def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
 
     samples: list[float] = []
     for _ in range(5):
-        sample = perf_budget.sample(_key)
-        samples.append(sample.wall_ms)
+        sample = perf_budget.sample(_key, batch=8)
+        samples.append(sample.cpu_ms)
     p95_ms = _p95_ms(samples)
     with pytest.raises(AssertionError):
         assert p95_ms < _BUDGET_MS
