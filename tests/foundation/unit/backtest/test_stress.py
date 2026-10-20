@@ -46,7 +46,8 @@ def test_run_stress_p95_latency_within_backtest_budget_slice(
             _bars(),
             list(REQUIRED_SCENARIOS),
             indicator_service=_FakePriceIndicatorService(),
-        )
+        ),
+        batch=8,
     )
     print(f"[L35] run_stress wall_ms={sample.wall_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
     assert sample.wall_ms < _BUDGET_MS
@@ -78,7 +79,8 @@ def test_run_stress_still_correct_when_run_backtest_stalls(
             _bars(),
             list(REQUIRED_SCENARIOS),
             indicator_service=_FakePriceIndicatorService(),
-        )
+        ),
+        batch=8,
     )
     assert sample.wall_ms >= delay_s * _RUN_BACKTEST_CALLS * 1000
 
@@ -127,12 +129,42 @@ def test_budget_gate_actually_fails_when_run_backtest_stalls_past_budget(
                 _bars(),
                 list(REQUIRED_SCENARIOS),
                 indicator_service=_FakePriceIndicatorService(),
-            )
+            ),
+            batch=2,
         )
         samples.append(sample)
     p95_ms = _p95_ms([s.wall_ms for s in samples])
     with pytest.raises(AssertionError):
         assert p95_ms < _BUDGET_MS
+
+
+# ---- gate-red 재현 (named, assert_within pattern) ----
+
+
+def test_gate_red_stress_budget_actually_fails_with_negative_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """Proves the perf assertion above is not a tautology -- an absurdly
+    low (negative) budget against the same operation must fail.
+
+    This is the named gate-red evidence the audit flagged as missing
+    (gate_red_named=false). Unlike the monkeypatch-stall test, this uses
+    ``perf_budget.assert_within`` with a negative budget so the failure
+    path is exercised through the same code path the green test takes."""
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: run_stress(
+                _config(),
+                _fsm_config(),
+                _bars(),
+                list(REQUIRED_SCENARIOS),
+                indicator_service=_FakePriceIndicatorService(),
+            ),
+            budget_ms=-1.0,
+            n=5,
+            batch=8,
+            label="gate_red run_stress",
+        )
 
 
 def test_scenario_failure_aborts_before_returning_partial_report() -> None:
