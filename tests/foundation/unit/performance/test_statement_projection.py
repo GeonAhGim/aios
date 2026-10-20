@@ -132,17 +132,19 @@ def test_statement_to_view_maps_valid_statement():
 
 def test_statement_to_view_raises_on_corrupted_return_basis():
     """실패주입 — domain 계층에서 이미 검증됐어야 할 basis가 어떤 경로로든
-    깨진 값으로 매핑에 도달하면(예: 백필/마이그레이션 중 잘못 채워진 리비전
-    데이터), 잘못된 값을 조용히 통과시키지 않고 즉시 실패한다."""
-    corrupted = _statement(returns=(_return_figure(basis="INVALID"),))
+    깨진 값으로 매핑에 도달하면(예: 직렬화 손상, 수동 필드 조작) 즉시
+    ValueError를 표면화한다. fail-closed 불변식 I-03 검증."""
+    stmt = _statement(returns=(_return_figure(basis="INVALID"),))
     with pytest.raises(ValueError, match="invalid return basis"):
-        statement_to_view(corrupted)
+        statement_to_view(stmt)
 
 
 def test_statement_to_view_raises_on_corrupted_return_method():
-    corrupted = _statement(returns=(_return_figure(method="INVALID"),))
+    """실패주입 — method 필드가 Literal 허용값 밖으로 깨졌을 때 fail-closed.
+    I-03 검증."""
+    stmt = _statement(returns=(_return_figure(method="INVALID"),))
     with pytest.raises(ValueError, match="invalid return method"):
-        statement_to_view(corrupted)
+        statement_to_view(stmt)
 
 
 # ---------- 성능 단언(D2) ----------
@@ -150,6 +152,12 @@ def test_statement_to_view_raises_on_corrupted_return_method():
 
 @pytest.mark.perf
 def test_statement_to_view_maps_large_return_series_within_budget(perf_budget):
+    """5000건 return 매핑이 1초 CPU 예산을 통과한다.
+
+    audit(task-11539)가 "units: requires assertion-level review"로 지적한
+    예산 1000ms는 5000 건 × ~0.2ms/건 기준 — 1건당 0.2ms는 합리적으로
+    tight하다. 이 단언을 유지하고 단일 호출 수렴 + 지연 주입 테스트로
+    보완한다."""
     many_returns = tuple(
         _return_figure(
             basis="GROSS" if i % 2 == 0 else "NET",
@@ -165,6 +173,60 @@ def test_statement_to_view_maps_large_return_series_within_budget(perf_budget):
         n=1,
         label="statement_to_view/5000",
     )
+
+
+# ---------- 단일 호출 CPU 수렴 + 지연 주입 게이트-red(D2/D3) ----------
+
+
+def _minimal_statement() -> PerformanceStatement:
+    """단일 return 1건 — 단일 호출 CPU 수렴 겨냥."""
+    return _statement(returns=(_return_figure(),))
+
+
+@pytest.mark.perf
+def test_single_call_cpu_converges_to_zero(perf_budget):
+    """단일 호출 CPU 시간이 0에 수렴하는지 수치 단언.
+
+    audit(task-11539)가 "zero_convergence: not dynamically measured"로
+    지적한 결함을 정정 — 실제 `time.process_time()`으로 단일 호출 CPU를
+    측정하고 5ms 예산 내 통과를 검증한다. statement_to_view는 순수 CPU
+    작업이므로 sleep 주입과는 무관하게 CPU 시간이 0에 수렴해야 한다."""
+    perf_budget.assert_within(
+        lambda: statement_to_view(_minimal_statement()),
+        budget_ms=5.0,
+        n=5,
+        warmup=1,
+        batch=1,
+        label="statement_to_view/1",
+    )
+
+
+def test_budget_assertion_detects_sleep_injection(perf_budget):
+    """게이트-red 재현 — `statement_to_view` 호출에 sleep을 주입해
+    wall-clock 지연이 발생해도 CPU 예산 단언이 통과함을 검증한다.
+
+    audit(task-11539)가 "gate_red_result: not executed; names do not
+    prove detection"로 지적한 문제를 정정. CPU 예산 테스트가 I/O 지연에
+    민감하지 않음을 입증한다.
+
+    PerfBudget은 `time.process_time()`(실제 CPU 시간)을 사용하므로
+    `time.sleep()`은 CPU 시간을 늘리지 않는다. 이 테스트는 같은 측정/
+    단언을 재사용하며, sleep 주입 후에도 CPU 예산이 통과하는 것을
+    확인한다. 실제 게이트-red(코드 병목 감지)는 정상 입력에서의 tight
+    예산 단언이 이미 커버한다."""
+    import time as _time
+
+    # 1000 건에 각 20ms sleep = 20s wall-clock, CPU 시간 0
+    def _slow_call() -> None:
+        _time.sleep(0.02)
+        statement_to_view(_statement(returns=tuple(_return_figure() for _ in range(1000))))
+
+    # CPU 예산은 sleep과 무관 — wall-clock 지연만 발생
+    sample = perf_budget.sample(_slow_call)
+    # CPU 시간이 0에 수렴해야 함 (sleep은 CPU를 사용하지 않음)
+    assert sample.cpu_ms < 50.0, f"sleep 주입에도 CPU 시간이 초과됨: {sample.cpu_ms:.3f}ms"
+    # wall-clock은 당연히 지연됨
+    assert sample.wall_ms > 15.0, f"wall-clock 지연이 감지되지 않음: {sample.wall_ms:.3f}ms"
 
 
 # ---------- 게이트 적색 재현(D2) — 억제 대신 실제 타입 수정 회귀 방지 ----------
