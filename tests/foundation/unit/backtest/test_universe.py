@@ -170,6 +170,51 @@ def test_is_member_p95_latency_within_budget_for_large_snapshot(
 # -- (g) D2 보강: 게이트 적색 재현 ----------------------------------------------
 
 
+# -- (h) D2 주입 실패: 10x 지연 monkeypatch → 적색 ---------------------------------
+
+
+@pytest.mark.perf
+def test_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(10ms)을 10배 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 100ms를 반환하므로 p95 > 10ms
+    budget로 적색 확정.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 100ms(10x budget)를 반환하게 한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.1  # 100ms = 0.1s per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    members = [
+        UniverseMember(symbol=f"SYM{i:05d}", listed_from=_LISTED_FROM, delisted_at=None)
+        for i in range(5000)
+    ]
+    snap = _snapshot(members)
+    target_symbol = "SYM04999"
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError, match=r"p95=\d+\.\d+ms exceeds 10ms budget"):
+        samples = perf_budget.samples(
+            lambda: is_member(snap, target_symbol, _LISTED_FROM), n=200, batch=1
+        )
+        cpu_ms_values = [s.cpu_ms for s in samples]
+        cpu_ms_values.sort()
+        p95 = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
+        assert p95 < 10.0, f"p95={p95:.3f}ms exceeds 10ms budget for 5,000-member snapshot scan"
+
+
 def test_gate_red_repro_missing_as_of_guard_would_leak_future_state() -> None:
     """게이트 적색 재현: `if at > u.as_of: raise ...` 가드를 지운 회귀본을
     테스트 안에서 직접 재현한다. 가드가 없으면 스냅샷이 알지 못하는 미래
