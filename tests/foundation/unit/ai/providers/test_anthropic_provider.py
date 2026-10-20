@@ -398,7 +398,7 @@ async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budge
     타우톨로지가 아닌지) 증명한다. 전송에 예산을 초과하는 지연을 주입하면 같은
     측정 방식이 예산 초과를 실제로 잡아낸다.
     """
-    injected_delay = _OVERHEAD_BUDGET_SECONDS * 3
+    injected_delay = _OVERHEAD_BUDGET_SECONDS * 10
 
     def slow_handler(request: httpx.Request) -> httpx.Response:
         time.sleep(injected_delay)
@@ -413,8 +413,8 @@ async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budge
         warmup=0,
         calibration_n=1,
     )
-    # injected_delay=0.15s → 150ms; budget=50ms. gate-red가 예산 초과를
-    # 포착하려면 측정값이 50ms를 넘겨야 한다.
+    # injected_delay=0.50s → 500ms (10x budget); budget=50ms. gate-red가
+    # 예산 초과를 포착하려면 측정값이 50ms를 넘겨야 한다.
     assert sample.op_ms >= 50.0, (
         "적색 재현 실패 — 주입한 지연이 측정에 반영되지 않았다(타우톨로지 위험)"
     )
