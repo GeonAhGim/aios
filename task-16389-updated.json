@@ -1,0 +1,44 @@
+{
+  "role": "claude-local",
+  "orig_role": "backend",
+  "tier": "M",
+  "priority": 0,
+  "stage": "implement",
+  "engine": "claude-local",
+  "parent": 15903,
+  "files": [
+    "tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py"
+  ],
+  "spec": "CI 실패 카드 — pytest :: tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py::test_gate_red_reproduction_tulipy_declared_fails_oss_eval_gate\n\n첫 오류:\n\n묶인 nodeid 33건: tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py::test_gate_red_repro, tests/unit/core/indicators/test_reference_sampling.py::test_nightly_script_exits_nonzero_a, tests/unit/core/risk/test_concentration.py::test_reduce_only_bypasses_zero_total_equity, tests/unit/core/loader/test_strategy_loader.py::test_load_strategy_file_validation_failure, tests/unit/core/risk/test_daily_loss.py::test_policy_daily_loss_lookup_failure_propagates\n\n대상 파일: tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py\n\n재현: python -m pytest tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py::test_gate_red_reproduction_tulipy_declared_fails_oss_eval_gate -q\n\n완료 증거:\n  - python -m pytest tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py::test_gate_red_reproduction_tulipy_declared_fails_oss_eval_gate -q 단독 통과\n  - orders sentinel 체크('Sentinel: orders residue' 재발 없음) 통과\n\nLogical scope: tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py::test_oracle_extra_never_requested_in_pyproject. Change only this function/class; preserve other units. Shared imports/fixtures/helpers are read-only: pyproject_text. Validate this scope independently.",
+  "spec_hash": "3c0dd77d31b63ae4",
+  "title": "[health:ci_failure_card:pytest:error_chain:9c32bb2d672e] pytest tests/unit/core/indicators/test_pandas_ta_classic_dependency_ind11.py::test_gate_red_reproduction_tulipy_declared_fails_oss_eval_gate — ",
+  "status": "done",
+  "depends_on": [
+    16388
+  ],
+  "worker": "claude-local-3",
+  "model": "",
+  "logical_split_key": "b5ea7303aa97dd6c7ba0",
+  "logical_scope": "test_oracle_extra_never_requested_in_pyproject",
+  "logical_support": [
+    "pyproject_text"
+  ],
+  "loc_estimate": 4,
+  "file_split_source": 15903,
+  "logical_context_tokens": 11409,
+  "id": 16389,
+  "updated_at": "2026-10-20T12:00:00+00:00",
+  "created_at": "2026-10-19T10:25:33+00:00",
+  "rev": 5,
+  "processed": false,
+  "lease": {
+    "worker": "claude-local-3",
+    "attempt": 1,
+    "token": "task-16389-attempt-1-1792495973.1502604",
+    "until": "2026-10-20T12:32:53+00:00"
+  },
+  "attempts": 1,
+  "commit": "ba941d9e7",
+  "tests": "10 passed",
+  "note": "CI failure card resolved - test passes; all 10 tests green"
+}
