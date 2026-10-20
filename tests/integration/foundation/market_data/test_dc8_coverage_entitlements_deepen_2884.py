@@ -284,6 +284,57 @@ async def test_bulk_upsert_span_meets_latency_budget(coverage_repo, pool, perf_b
     assert len(spans) == n
 
 
+@pytest.mark.perf
+async def test_bulk_upsert_span_latency_budget_rejects_10x_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    coverage_repo: PostgresCoverageRepository,
+    pool,
+    perf_budget,
+):
+    """동일한 측정/단언이 10배 지연 주입 하에서 적색으로 전환된다 —
+    단언이 0 수렴 허울이 아님을 증명한다( task-11539 PERF-detection ).
+    DB 호출에 sleep을 주입해 실제 I/O 지연을 시뮬레이션하고, 같은
+    perf_budget.sample_async() 단언이 budget을 초과함을 확인한다.
+    """
+    instrument_id = _fake_ulid()
+    await _insert_instrument(pool, instrument_id)
+    t0 = datetime.now(timezone.utc) - timedelta(days=2000)
+    n = 500
+    budget_sec = 15.0
+
+    # 원본 upsert_span을 보존
+    original_upsert = coverage_repo.upsert_span
+
+    async def delayed_upsert(self, conn, span, **kwargs) -> None:
+        # 500회 호출 × 0.04s = 20s 총 지연 → budget 15s 초과 (검출력 검증)
+        await asyncio.sleep(0.04)
+        return await original_upsert(conn, span, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(coverage_repo.__class__, "upsert_span", delayed_upsert)
+
+        async def _bulk_upsert() -> None:
+            for i in range(n):
+                async with pool.acquire() as conn, conn.transaction():
+                    await coverage_repo.upsert_span(
+                        conn,
+                        _span(
+                            instrument_id=instrument_id,
+                            start=t0 + timedelta(days=i),
+                            end=t0 + timedelta(days=i + 1),
+                        ),
+                    )
+
+        sample = await perf_budget.sample_async(_bulk_upsert)
+        elapsed_sec = sample.wall_ms / 1_000
+        # 같은 단언이 지연 주입 하에서 budget을 초과해야 함
+        assert elapsed_sec >= budget_sec, (
+            f"지연 주입 후 {elapsed_sec:.3f}s budget {budget_sec}s 이상이어야 검출력 검증. "
+            f"단언/예산이 허울이면 통과하므로 실패 처리. "
+            f"{perf_budget.describe(sample, budget_ms=budget_sec * 1_000)}"
+        )
+
+
 # ---- 게이트 적색 재현(D2) — 위반이 트랜잭션 전체를 롤백함(부분 커밋 없음) ----
 
 
