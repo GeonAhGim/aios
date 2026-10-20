@@ -364,7 +364,9 @@ async def test_validation_run_stays_within_backtest_budget(
         )
 
     sample = await perf_budget.sample_async(measure)
-    assert sample.cpu_ms < _BACKTEST_BUDGET_S * 1000
+    # 예산은 wall-clock(대기 포함) 단위 -- I/O 바운드 비동기 호출은 cpu_ms가
+    # 0에 수렴하므로 wall_ms로 단언해야 실제 지연을 검증한다.
+    assert sample.wall_ms < _BACKTEST_BUDGET_S * 1000
 
 
 # ---- 게이트 적색 재현 ----
