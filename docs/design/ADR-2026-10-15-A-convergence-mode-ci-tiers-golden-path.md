@@ -75,3 +75,12 @@ pytest 적색 136건, 같이 적색인 단계는 coverage 87·pytest_perf 62·re
 실패 카드 생성기가 대량 적색 때 nodeid마다 리프를 발행해 1394건이 쌓인 사고의 재발 방지. 규칙: (1) 단계당 카드 상한 12(`MAX_CARDS_PER_STEP`),
 초과분은 오류 서명으로 접고 나머지는 overflow 1카드, (2) 연쇄 판정은 `Sentinel:` 접두어, (3) 카드 리프 role은 backend(로컬 자동 배정 대상),
 (4) 폭주를 닫을 때는 파생 QA 번들까지 함께 닫는다.
+
+## 개정 3 (2026-10-21) — 학습 기록과 테스트 작성 규칙
+
+사고 레지스트리·진단 레시피는 fleet 저장소 `docs/OPS_CONVERGENCE_PLAYBOOK.md`와 `C:\AiWorkKnowledge`(02 사고사례집 B-시리즈, 05 §7, 07 §9, 13)에 있다. 이 저장소 테스트에 적용되는 규칙만 여기 못 박는다.
+
+1. **자식 `pytest`/`subprocess`를 띄우는 테스트**는 부모 xdist 워커의 DB를 건드리면 안 된다. `tests/support/db.py::effective_worker_id`(표식 `AIOS_TEST_WORKER_OWNER_PID="<pid>:<worker>"`)가 같은 worker id의 다른 pid에 고유 id를 준다. 진짜 워커는 `gwN`을 유지해야 한다 — `replay_verify`가 `{템플릿}_gwN` DB를 이름으로 다시 읽는다.
+2. **orders를 직접 INSERT하는 테스트**는 종료(성공·실패 모두) 시 자기 행을 지우거나 일회용 DB 클론(ADR-2026-09-26-D)에서 돈다. 참고 패턴: `tests/integration/oms/test_gate_perf_residue_cleanup.py`. 이벤트 없는 `FILLED/SUBMITTED` 주문이 보이면 테스트 잔재가 아니라 제품 경로(`submit.update_from_exchange`가 `order_events`/`fills`를 안 씀)를 먼저 의심한다.
+3. 워커 DB 생성/삭제 주체 추적: 환경변수 `AIOS_TEST_DB_AUDIT_LOG`(fleet `gate_env`가 `logs/pytest_full/db_audit.jsonl`로 설정).
+4. 정확 일치 baseline 단언 금지.
