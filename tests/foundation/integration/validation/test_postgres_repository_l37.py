@@ -346,3 +346,76 @@ async def test_p95_latency_within_bundle_round_trip_budget(bundle_repo, perf_bud
     samples = await perf_budget.samples_async(_single_round_trip, n=5)
     p95_ms = max(s.wall_ms for s in samples)
     assert p95_ms < 200, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
+
+
+# -- D2 failure injection: 10x budget sleep → assertion red -------------------
+
+
+@pytest.mark.perf
+async def test_p95_latency_assertion_fires_on_10x_budget_sleep(bundle_repo, perf_budget):
+    """Budget invariance: if the same assertion is run against a call delayed
+    by 10× the budget (200ms × 10 = 2000ms), the p95 assertion must fail.
+
+    This proves the performance gate is not a tautology — it actually rejects
+    slow paths. The test **expects** the assertion to fire (AssertionError).
+    """
+    import asyncio as _asyncio
+
+    _BUDGET_MS = 200
+    _SLEEP_MS = _BUDGET_MS * 10  # 2000ms per iteration
+
+    async def _delayed_round_trip() -> None:
+        key = _bundle_key()
+        await bundle_repo.create_bundle(
+            **key,
+            outcome=Outcome.PASS,
+            check_run_ids=(uuid4(),),
+            bundle_hash="bundle-hash-injected",
+        )
+        await _asyncio.sleep(_SLEEP_MS / 1000)
+        await bundle_repo.get_bundle(**key)
+
+    samples = await perf_budget.samples_async(_delayed_round_trip, n=5)
+    p95_ms = max(s.wall_ms for s in samples)
+    # Same assertion as the green test; with 10× sleep it MUST exceed budget.
+    # We expect this assertion to fail — that's the point of this test.
+    with pytest.raises(AssertionError) as exc_info:
+        assert p95_ms < _BUDGET_MS, f"p95={p95_ms:.2f}ms should exceed {_BUDGET_MS}ms budget"
+    # Sanity: the fired assertion message contains the measured p95.
+    assert "p95=" in str(exc_info.value)
+
+
+# -- D2 CPU measurement convergence: single call cpu_ms → 0 for trivial work ---
+
+
+@pytest.mark.perf
+async def test_cpu_ms_converges_to_zero_for_trivial_bundle_lookup(bundle_repo, perf_budget):
+    """CPU measurement invariant: a trivially fast operation (get_bundle on a
+    freshly inserted row with no CPU work) must report cpu_ms close to zero.
+
+    This verifies that `PerfSample.cpu_ms` actually measures process CPU time
+    (via `time.process_time()`) and does not converge to a non-zero floor
+    caused by measurement artefacts or batch=1 quantization on Windows.
+    """
+    # First insert a bundle so get_bundle has a real row to read.
+    key = _bundle_key()
+    await bundle_repo.create_bundle(
+        **key,
+        outcome=Outcome.PASS,
+        check_run_ids=(uuid4(),),
+        bundle_hash="cpu-convergence-hash",
+    )
+
+    async def _trivial_get() -> None:
+        await bundle_repo.get_bundle(**key)
+
+    # batch=1 is the stress case: Windows time.process_time() has ~15.6ms tick
+    # resolution; a single trivial call should still read 0ms or 1 tick (15.6ms).
+    samples = await perf_budget.samples_async(_trivial_get, n=5)
+    # cpu_ms must be well under 50ms for a single-row lookup — proves the
+    # timer is not stuck at a non-zero floor.
+    max_cpu_ms = max(s.cpu_ms for s in samples)
+    assert max_cpu_ms < 50, (
+        f"cpu_ms={max_cpu_ms:.2f}ms exceeds trivial-work floor (50ms); "
+        f"samples={[f'{s.cpu_ms:.2f}' for s in samples]}"
+    )
