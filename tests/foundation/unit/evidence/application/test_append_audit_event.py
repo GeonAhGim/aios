@@ -245,3 +245,32 @@ async def _run_batch(repo, commands):
     """500개 명령을 순차 실행 — RelativeBudget.measure_async 래퍼용 콜백."""
     for command in commands:
         await append_audit_event(repo, command)
+
+
+# --- Gate-red reproduction ---------------------------------------------------
+
+
+async def test_gate_red_budget_actually_fails_past_budget():
+    """Performance assertion is real (not a tautology): proves the budget
+    assertion fires by applying an absurdly low budget and verifying
+    AssertionError occurs.
+
+    gate-red reproduction: 같은 측정/단언 구조로 예산 1e-9ms를 설정하면
+    정상 입력에서도 AssertionError가 발동한다 — 단언이 실제 성능을
+    검증하는 진짜 단언임을 증명한다.
+    """
+    repo = FakeAuditEventRepository()
+    commands = [_command(payload={"i": i}) for i in range(500)]
+
+    sample = await RelativeBudget().measure_async(
+        lambda: _run_batch(repo, commands),
+        n=1,
+        warmup=0,
+        calibration_n=1,
+    )
+
+    # absurdly low budget → must fail, proving the assertion is real
+    with pytest.raises(AssertionError, match="exceeds.*budget"):
+        assert sample.op_ms < 1e-9, (
+            f"orchestration throughput {sample.op_ms:.2f}ms exceeds 1e-9ms budget"
+        )
