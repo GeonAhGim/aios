@@ -8,9 +8,11 @@ ADR-2026-09-09-C D2 증빙:
   - 성능 단언 1: `test_repeated_mirror_calls_stay_within_budget` — 왕복
     수(게이트 호출 1:1) 정확 단언 + 절대 지연 상한(비차단 print, task-1521
     선례와 동일하게 환경 정규화 상한 사용).
-  - 게이트 적색 재현 1: `test_compliance_gate_denies_via_real_restricted_list_rule`
-    — 스텁이 아니라 CM-8 실제 `restricted_list` 규칙 코드 경로로 DENY를
-    낸다.
+  - 게이트 적색 재현 2: `test_compliance_gate_denies_via_real_restricted_list_rule`
+    (CM-8 실제 코드 경로 DENY) +
+    `test_perf_budget_catches_10x_delay_injection` (지연 주입 → AssertionError).
+  - 0 수렴 1: `test_single_call_cpu_converges_to_zero` — 단일 호출 CPU 시간
+   이 ~0ms 수렴 (task-11539 감사 후속).
 
 전부 인메모리 fake로 실행한다(follow leaf 자체는 DB를 쓰지 않는다 — spec
 §2.4 파일 표에 follow 전용 adapters/migrations가 없다, risk_gate/mandates의
@@ -19,6 +21,7 @@ ADR-2026-09-09-C D2 증빙:
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -32,6 +35,7 @@ from src.foundation.follow.application.mirror_signal import (
 from src.foundation.follow.contracts.v1 import FollowSubscription, SizingPolicy, SourceSignal
 from src.foundation.follow.domain.mirror_rules import MirrorRejectedError, MirrorRejectionReason
 from src.foundation.risk_gate.domain.models import SafetyControl, SafetyControlState, SafetyScope
+from tests.conftest import PerfBudget
 from tests.foundation.unit.follow._mirror_signal_fakes import (
     NOW,
     FakeMandateRepository,
@@ -322,4 +326,93 @@ async def test_repeated_mirror_calls_stay_within_budget(perf_budget) -> None:
     assert sample.wall_ms < _LATENCY_CEILING_SECONDS * 1000, (
         f"{_CALL_COUNT}회 mirror_signal 호출이 {sample.wall_ms:.3f}ms로 상한"
         f"({_LATENCY_CEILING_SECONDS}s)을 넘었다 — 회귀 의심."
+    )
+
+
+# ---- 성능 게이트 적색 재현 (지연 주입) --------------------------------------
+
+
+@pytest.mark.perf
+async def test_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): `mirror_signal`의 성능 단언이
+    실제로 지연을 감지하는지 역으로 증명한다. `FakeRiskGateRepository.list_active_controls`에
+    50ms 지연을 주입하면 200 calls × 50ms = 10s 총 wall-clock이 되어
+    budget(2000ms)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    risk_repo = FakeRiskGateRepository()
+    mandate_repo = FakeMandateRepository()
+    connection_repo = UnusedConnectionRepository()
+
+    # list_active_controls에 50ms 지연 주입
+    original_list = risk_repo.list_active_controls
+
+    async def _list_with_delay(*args: Any, **kwargs: Any) -> tuple:
+        await asyncio.sleep(0.05)  # 50ms per call
+        return await original_list(*args, **kwargs)
+
+    monkeypatch.setattr(risk_repo, "list_active_controls", _list_with_delay)
+
+    async def _batch_delayed() -> None:
+        for _ in range(_CALL_COUNT):
+            subscription = _subscription()
+            signal = _signal(source_listing=subscription.source_listing)
+            intent = await mirror_signal(
+                risk_repo,
+                mandate_repo,
+                connection_repo,
+                subscription=subscription,
+                signal=signal,
+                now=NOW,
+            )
+            assert intent.paper_only is True
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError
+    with pytest.raises(AssertionError):
+        sample = await perf_budget.sample_async(_batch_delayed)
+        assert sample.wall_ms < _LATENCY_CEILING_SECONDS * 1000, (
+            f"mirror_signal() should be slow with injected delay: "
+            f"{sample.wall_ms:.1f}ms/{_CALL_COUNT} calls"
+        )
+
+
+# ---- 0 수렴: 단일 호출 CPU 시간 ---------------------------------------------
+
+
+@pytest.mark.perf
+async def test_single_call_cpu_converges_to_zero(perf_budget: PerfBudget) -> None:
+    """단일 호출 CPU 시간이 0에 수렴하는지 검증(task-11539 감사 후속).
+    `mirror_signal`은 I/O 없이 인메모리 FakeRepo 위에서 동작하므로
+    `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
+
+    Windows `time.process_time()`은 ~15.6ms 양자화 오차가 있다 —
+    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다. 64회 평균 CPU 시간이
+    1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    """
+    risk_repo = FakeRiskGateRepository()
+    mandate_repo = FakeMandateRepository()
+    connection_repo = UnusedConnectionRepository()
+
+    async def _single_call() -> None:
+        subscription = _subscription()
+        signal = _signal(source_listing=subscription.source_listing)
+        await mirror_signal(
+            risk_repo,
+            mandate_repo,
+            connection_repo,
+            subscription=subscription,
+            signal=signal,
+            now=NOW,
+        )
+
+    # batch=64: Windows 15.6ms 틱 폭 오차를 1/64로 줄임
+    sample = await perf_budget.sample_async(_single_call, batch=64)
+    assert sample.cpu_ms < 1.0, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms > 1ms budget "
+        f"(64 calls averaged, wall={sample.wall_ms:.3f}ms)"
     )
