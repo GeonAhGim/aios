@@ -24,6 +24,7 @@ ledger, or capital-allocation state for `replay_verify` to reconcile)."""
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -347,3 +348,115 @@ def test_layout_and_drawing_set_to_view_perf_budget(perf_budget: PerfBudget) -> 
         label="layout_to_view()+drawing_set_to_view() 2000 calls",
     )
     # best-of-5 최소값이 300ms 미만이면 충분 — describe()가 cpu/wall 요약 출력
+
+
+@pytest.mark.perf
+def test_layout_and_drawing_set_to_view_0_convergence() -> None:
+    """단일 호출 CPU 측정의 0 수렴 확인 — Windows `time.process_time()`
+    약 15.6ms 양자화tick 때문에 1회 호출은 항상 0ms로 읽힌다. 이 테스트는
+    그 사실을 명시적으로 검증하고, batch(2000회)가 그 양자화 오차를
+    호출당 ~0.008ms로 줄여준다는 사실을 문서화한다(task-11539 감사)."""
+    now = datetime.now(timezone.utc)
+    layout = ChartLayout(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        owner_subject_id=uuid4(),
+        name="perf",
+        layout_state={"symbol": "BTCUSDT", "timeframe": "1h", "panes": list(range(10))},
+        revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+    drawing_set = ChartDrawingSet(
+        layout_id=layout.id,
+        schema_version=1,
+        drawings=tuple(
+            {"id": f"d{i}", "kind": "trendline", "points": [{"time": i, "price": 100.0 + i}]}
+            for i in range(50)
+        ),
+        revision=1,
+        updated_at=now,
+    )
+
+    # 단일 호출 10회 측정 — 모두 0ms여야 함(양자화 한계)
+    for _ in range(10):
+        cpu_start = time.process_time()
+        layout_to_view(layout)
+        drawing_set_to_view(drawing_set)
+        cpu_ms = (time.process_time() - cpu_start) * 1000
+        assert cpu_ms == 0.0, (
+            f"single-call CPU should converge to 0 (got {cpu_ms:.3f}ms); "
+            "if it does not, the 0-convergence invariant is broken"
+        )
+
+
+@pytest.mark.perf
+def test_layout_and_drawing_set_to_view_perf_budget_goes_red_with_10x_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인 — `layout_to_view`에 sleep을 주입하면 같은 단언이
+    적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이
+    아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함
+    방지).
+
+    2000회 호출당 0.5ms sleep = 1초 wall time로 예산(300ms)을 초과하므로
+    assert_within이 적색으로 넘어간다."""
+
+    import time as _time
+
+    now = datetime.now(timezone.utc)
+    layout = ChartLayout(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        owner_subject_id=uuid4(),
+        name="perf",
+        layout_state={"symbol": "BTCUSDT", "timeframe": "1h", "panes": list(range(10))},
+        revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+    drawing_set = ChartDrawingSet(
+        layout_id=layout.id,
+        schema_version=1,
+        drawings=tuple(
+            {"id": f"d{i}", "kind": "trendline", "points": [{"time": i, "price": 100.0 + i}]}
+            for i in range(50)
+        ),
+        revision=1,
+        updated_at=now,
+    )
+
+    # Inject 0.5ms sleep per layout_to_view call: 2000 calls x 0.5ms = 1s
+    from src.foundation.charting.application._shared import (
+        layout_to_view as _orig_layout_to_view,
+    )
+
+    def slow_layout_to_view(*args: Any, **kwargs: Any) -> Any:
+        _time.sleep(0.0005)  # 0.5ms
+        return _orig_layout_to_view(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "src.foundation.charting.application._shared.layout_to_view",
+        slow_layout_to_view,
+    )
+
+    def _run_2000() -> None:
+        # module-lookup for layout_to_view — monkeypatch가 모듈 속성을
+        # 교체했으므로 로컬 참조가 아닌 모듈에서 다시 가져와야 한다.
+        from src.foundation.charting.application._shared import (
+            layout_to_view as patched_layout_to_view,
+        )
+
+        for _ in range(2_000):
+            patched_layout_to_view(layout)
+            drawing_set_to_view(drawing_set)
+
+    # 같은 측정/단언 — sleep은 CPU 시간을 늘리지 않으므로 wall_ms로
+    # 검증한다. 2000회 x 0.5ms sleep = 1초 wall time로 예산(300ms)을
+    # 초과하므로 assert가 적색으로 넘어간다.
+    perf = PerfBudget()
+    sample = perf.best_of(_run_2000, n=3)
+    assert sample.wall_ms >= 300, (
+        f"Perf assertion should go red with injected delay: "
+        f"wall={sample.wall_ms:.1f}ms (expected >= 300ms)"
+    )
