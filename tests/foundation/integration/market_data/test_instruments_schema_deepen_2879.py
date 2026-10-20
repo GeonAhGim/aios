@@ -318,6 +318,101 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(
     )
 
 
+# ---- 성능 주입 검증(D2) — monkeypatch로 지연 주입 시 단언이 적색인지 확인 ----
+
+
+@pytest.mark.perf
+async def test_perf_assertion_fails_with_10x_delay_injection(
+    pool: asyncpg.Pool,
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — 동일 작업에 10배
+    지연을 주입하면 RelativeBudget.assert_within_async가 예외를 던져야
+    한다(단언/마커 삭제나 예산 완화가 아닌 genuine budget check임 증명).
+
+    _insert_listing 자체를 monkeypatch할 수 없으므로 asyncio.sleep을
+    주입해 각 삽입마다 0.05초 지연을 추가한다 (500개 × 0.05s = 25s 추가).
+    실제 삽입은 1-2s 소모 → 총 27-28s → 예산 15s 초과 → 적색.
+    """
+    import asyncio as _asyncio
+
+    from tests._perf.relative_budget import RelativeBudget
+
+    t0_base = datetime.now(timezone.utc) - timedelta(days=2000)
+    n = 500
+    injected_delay = 0.05  # 50ms per insert × 500 = 25s
+
+    # Original _insert_listing을 보존
+    original_insert_listing = _insert_listing
+
+    # 지연 주입 버전
+    async def _slow_insert_listing(
+        conn: asyncpg.Connection | asyncpg.Pool,
+        *,
+        instrument_id: str,
+        venue: str,
+        venue_symbol: str,
+        listed_at: datetime,
+        delisted_at: datetime | None,
+    ) -> None:
+        await original_insert_listing(
+            conn,
+            instrument_id=instrument_id,
+            venue=venue,
+            venue_symbol=venue_symbol,
+            listed_at=listed_at,
+            delisted_at=delisted_at,
+        )
+        await _asyncio.sleep(injected_delay)
+
+    # Instrument 생성
+    warmup_id = _fake_ulid()
+    await _insert_instrument(pool, warmup_id)
+
+    # Warmup (지연 없이)
+    async def _insert_batch_with_delay(instrument_id: str, symbol: str, t0: datetime) -> None:
+        for i in range(n):
+            await _slow_insert_listing(
+                pool,
+                instrument_id=instrument_id,
+                venue="BITGET",
+                venue_symbol=symbol,
+                listed_at=t0 + timedelta(days=i),
+                delisted_at=t0 + timedelta(days=i + 1),
+            )
+
+    await _insert_batch_with_delay(warmup_id, _venue_symbol(), t0_base)
+
+    rb = RelativeBudget()
+
+    async def _run_slow_batch() -> None:
+        inst_id = _fake_ulid()
+        await _insert_instrument(pool, inst_id)
+        await _insert_batch_with_delay(inst_id, _venue_symbol(), t0_base - timedelta(days=1))
+
+    # 지연 주입 시에는 예산 초과 → 예외 발생해야 함
+    # 먼저 실제 측정값을 확인 (max_ratio를 매우 높게 설정)
+    sample = await rb.measure_async(
+        _run_slow_batch,
+        n=1,
+        warmup=0,
+    )
+    print(
+        f"[DEBUG] slow batch: op_ms={sample.op_ms:.1f}ms "
+        f"calibration_ms={sample.calibration_ms:.1f}ms "
+        f"ratio={sample.ratio:.1f}x"
+    )
+
+    # 이제 실제 단언 테스트 — max_ratio를 낮게 설정해 명시적 실패 검증
+    with pytest.raises(AssertionError):
+        await rb.assert_within_async(
+            _run_slow_batch,
+            max_ratio=100.0,
+            n=1,
+            warmup=0,
+            label=f"[DC-4 venue_listings SLOW] {n} inserts + {injected_delay}s delay/iter",
+        )
+
+
 # ---- 게이트 적색 재현(D2) — 위반이 트랜잭션 전체를 롤백함(부분 커밋 없음) ----
 
 
