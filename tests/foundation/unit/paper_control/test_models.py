@@ -204,3 +204,72 @@ def test_paper_deployment_construction_throughput(perf_budget: PerfBudget):
         n=3,
         label="paper_deployment_construction",
     )
+
+
+# ---- 0 수렴: 단일 호출 CPU 시간 ---------------------------------------------
+
+
+@pytest.mark.perf
+def test_paper_deployment_single_call_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+):
+    """단일 호출 CPU 시간이 0에 수렴하는지 검증(task-11539 감사 후속).
+
+    `PaperDeployment`은 인메모리 frozen dataclass이므로
+    `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
+
+    Windows `time.process_time()`은 ~15.6ms 양자화 오차가 있다 —
+    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다. 64회 평균 CPU 시간이
+    1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    """
+    sample = perf_budget.sample(_deployment, batch=64)
+    assert sample.cpu_ms < 1.0, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms > 1ms budget "
+        f"(64 calls averaged, wall={sample.wall_ms:.3f}ms)"
+    )
+
+
+# ---- 성능 게이트 적색 재현 (지연 주입) --------------------------------------
+
+
+@pytest.mark.perf
+def test_paper_deployment_perf_budget_catches_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    감지하는지 역으로 증명한다. `_deployment`에 50ms 지연을 주입하면
+    wall-clock이 늘어나 budget(10ms)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    import time as _time
+
+    original_sleep = _time.sleep
+    call_count = [0]
+
+    def _sleep_with_delay(seconds: float) -> None:
+        call_count[0] += 1
+        original_sleep(seconds)
+
+    monkeypatch.setattr(_time, "sleep", _sleep_with_delay)
+
+    # Patch the module-level uuid4 used by _deployment to inject delay.
+    import tests.foundation.unit.paper_control.test_models as mod
+
+    original_uuid4 = mod.uuid4
+
+    def _uuid4_with_delay():
+        _time.sleep(0.05)  # 50ms per call
+        return original_uuid4()
+
+    monkeypatch.setattr(mod, "uuid4", _uuid4_with_delay)
+
+    samples = perf_budget.samples(_deployment, n=30)
+    durations: list[float] = [s.wall_ms for s in samples]
+    p95_ms = sorted(durations)[int(len(durations) * 0.95)]
+    with pytest.raises(AssertionError):
+        assert p95_ms < 10.0, (
+            f"p95 wall={p95_ms:.2f}ms > 10ms budget (injected delay=50ms/call, gate-red repro)"
+        )
