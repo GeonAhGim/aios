@@ -188,6 +188,18 @@ async def test_exchange_rejection_is_fail_closed_and_propagates_not_swallowed(
     positions에는 아무것도 안 남는다. fsm_state는 되돌려지지 않고
     BUY_ORDER_PENDING에 남는다(Executor 자신의 명시된 정책)."""
 
+    # CM-8 게이트(`require_compliance_mandate`, 기본 True)가 mandate 없는
+    # 테넌트의 주문을 CM_MANDATE_MISSING으로 거부해 Executor까지 도달하지
+    # 못한다 — 게이트를 끄는 대신(골든패스가 실제로 거치는 전제조건이라),
+    # 이 테스트 테넌트에 유효한 활성 컴플라이언스 mandate를 시드한다.
+    from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+    from src.foundation.mandates.application.activate_revision import (
+        activate_revision as activate_revision_command,
+    )
+    from src.foundation.mandates.application.create_draft_mandate import create_draft_mandate
+    from src.foundation.mandates.contracts.v1 import Autonomy, MandateRuleInput
+    from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
+
     async def reject_insufficient_funds(_order: Order) -> Order:
         raise ExchangeError(ExchangeErrorKind.INSUFFICIENT_FUNDS, venue="bitget")
 
@@ -195,6 +207,30 @@ async def test_exchange_rejection_is_fail_closed_and_propagates_not_swallowed(
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = _bitget_adapter(
         place_order_result_status=OrderStatus.FILLED, on_place_order=reject_insufficient_funds
+    )
+
+    mandate_repo = PostgresMandateRepository(pool)
+    trust_repo = PostgresTrustRepository(pool)
+    draft = await create_draft_mandate(
+        mandate_repo,
+        tenant_id=user_id,
+        subject_id=user_id,
+        rules=MandateRuleInput(
+            max_total_exposure_pct=80.0,
+            max_single_instrument_pct=20.0,
+            min_cash_buffer_pct=5.0,
+            max_daily_loss_pct=3.0,
+            allowed_autonomy=Autonomy.PAPER,
+            forbidden_assets=[],
+        ),
+    )
+    await activate_revision_command(
+        mandate_repo,
+        trust_repo,
+        tenant_id=user_id,
+        subject_id=user_id,
+        revision_id=draft.id,
+        reauthenticated=False,
     )
 
     with pytest.raises(ExchangeError):
