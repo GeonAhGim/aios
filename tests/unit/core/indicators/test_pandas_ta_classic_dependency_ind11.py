@@ -33,6 +33,7 @@ from src.core.indicators.oss_eval_gate import (
     assert_oss_eval_gate,
     extract_declared_dependencies,
 )
+from tests.conftest import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
@@ -129,7 +130,9 @@ def test_gate_red_reproduction_tulipy_declared_fails_oss_eval_gate(
 
 
 @pytest.mark.perf
-def test_perf_dependency_extraction_under_budget(pyproject_text: str, perf_budget) -> None:
+def test_perf_dependency_extraction_under_budget(
+    pyproject_text: str, perf_budget: PerfBudget
+) -> None:
     """성능단언(D2) — extract_declared_dependencies 는 순수 텍스트 파싱이므로
     1,000 회 호출이 1,000ms(1 초) 안에 끝나야 한다.
 
