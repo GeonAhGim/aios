@@ -6,6 +6,7 @@ DoD (a)(b).
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import cast
 from uuid import uuid4
@@ -245,3 +246,99 @@ def test_gate_red_if_license_gate_removed_existing_negative_would_flip() -> None
     with pytest.raises(RedistributionViolationError) as exc_info:
         assert_redistribution_allowed(item, source, grant)
     assert exc_info.value.reason == "link_only_body_present"
+
+
+# ---------------------------------------------------------------------------
+# task-11539 감사 후속 — CPU 측정 수렴 / 예산 주입 / 게이트 적색 재현
+# ---------------------------------------------------------------------------
+
+
+def test_cpu_convergence_single_call(perf_budget: PerfBudget) -> None:
+    """단일 호출 CPU 시간이 양자화 오차 범위 내에 수렴하는지 검증.
+
+    `assert_redistribution_allowed()` 는 O(1) 비교만 하므로
+    `time.process_time()` 으로 측정한 CPU 시간은 ~0ms 여야 한다.
+    Windows `time.process_time()` 은 ~15.6ms 양자화 오차가 있다 —
+    batch=100 으로 묶으면 오차가 ~0.15ms 로 줄어든다.
+    """
+    item = _item(body_ref=None)
+    source = _source(redistribution="link_only")
+    grant = _grant()
+
+    sample = perf_budget.sample(
+        lambda: assert_redistribution_allowed(item, source, grant),
+        batch=100,
+    )
+    # Single-call CPU time for ~5 string equality + int comparison
+    # operations is well under 1ms.
+    assert sample.cpu_ms < 1.0, (
+        f"CPU time {sample.cpu_ms:.3f}ms exceeds 1ms floor; wall={sample.wall_ms:.3f}ms"
+    )
+
+
+def test_perf_budget_goes_red_with_cpu_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """검출력 확인 — CPU 부하를 주입하면 같은 단언이 적색으로 넘어간다.
+
+    `busy_cpu()` 가 `time.process_time()` 을 증가시키므로
+    `assert_within` 가 적색으로 넘어간다. 이는 성능 단언이
+    '아무것도 잡지 못하는 허울'이 아님을 증명한다.
+    """
+
+    def busy_cpu(duration_sec: float) -> None:
+        """CPU 부하를 생성 — time.process_time() 을 증가시킨다."""
+        end = time.process_time() + duration_sec
+        while time.process_time() < end:
+            pass
+
+    item = _item(body_ref=None)
+    source = _source(redistribution="link_only")
+    grant = _grant()
+
+    def _call_with_cpu_load() -> None:
+        assert_redistribution_allowed(item, source, grant)
+        busy_cpu(0.005)  # 5ms CPU per call
+
+    sample = perf_budget.best_of(_call_with_cpu_load, n=5, batch=1)
+    # Budget is 10ms; injected 5ms CPU per call → measurement exceeds.
+    with pytest.raises(AssertionError) as exc_info:
+        assert sample.cpu_ms < 10.0, f"Expected cpu_ms={sample.cpu_ms:.3f}ms to exceed 10ms budget"
+    assert "cpu_ms=" in str(exc_info.value) or "cpu=" in str(exc_info.value)
+
+
+@pytest.mark.perf
+def test_perf_assertion_fails_with_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — `time.process_time`
+    을 monkeypatch 해 1회 호출당 예산(1000ms) 을 10배 초과하는 CPU 시간을
+    가장하면 `assert_within` 가 AssertionError 로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지" 를
+    검증한다.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 12000.0  # 12s per call → budget 1000ms × 12x 초과
+        return _fake_time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    item = _item(body_ref=None)
+    source = _source(redistribution="link_only")
+    grant = _grant()
+
+    def _bulk() -> None:
+        for _ in range(20_000):
+            assert_redistribution_allowed(item, source, grant)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _bulk,
+            budget_ms=1000.0,
+            n=1,
+            label="20000 calls RD-3 redistribution latency (delay-injected)",
+        )
