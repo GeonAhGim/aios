@@ -147,7 +147,9 @@ async def test_exchange_rejection_fails_closed_no_position_written(pool: asyncpg
     adapter = FakeExchangeAdapter(
         exchange_name="paper_sim", is_paper_trading=True, on_place_order=reject_insufficient_funds
     )
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     order = _make_order(execution_id, "settle-insufficient")
 
     with pytest.raises(ExchangeError):
