@@ -16,6 +16,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.positions.contracts.v1 import Lot
 from src.foundation.positions.domain.cost_basis.fifo import NegativeQuantityError
 from src.foundation.positions.domain.cost_basis.weighted import FillEvent, WeightedAverage
+from tests.support.perf_budget import PerfBudget
 
 
 def _now() -> datetime:
@@ -151,3 +152,65 @@ def test_weighted_average_10k_fills_within_budget(perf_budget) -> None:
 
     # D2: 10k 사이클 ≤ 5초 (≈2,000 ops/s)
     print(f"[weighted] 10k 사이클 {sample.cpu_ms:.0f}ms (budget<5000ms)")
+
+
+# ---------- 단일 호출 CPU 수렴 (task-11539 감사 후속) ----------
+
+
+def test_single_call_cpu_converges_to_zero(perf_budget: PerfBudget) -> None:
+    """단일 apply() 호출이 0에 수렴하는 CPU 시간을 보여야 한다.
+
+    `time.process_time()`은 Windows에서 약 15.6ms 양자화 오차가 있으므로
+    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. 1회당 CPU 시간이
+    1ms 미만이어야 순수 도메인 로직이라는 불변식(I-03)과 호환된다.
+    """
+    wavg = WeightedAverage()
+
+    def _one_call() -> None:
+        wavg.apply(_fill(OrderSide.BUY, "1", "100"))
+
+    sample = perf_budget.sample(_one_call, batch=64)
+
+    # CPU 시간이 1ms 미만 (양자화 오차 포함)
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"순수 도메인 로직은 1ms 미만이어야 함 (budget<1ms)"
+    )
+
+
+@pytest.mark.perf
+def test_gate_red_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(1ms)을 100배 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 100ms를 반환하므로
+    batch=64로 나눈 평균도 100ms > 1ms budget로 적색 확정.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 100ms(100x budget)를 반환하게 한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.1  # 100ms per call = 100x budget
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    wavg = WeightedAverage()
+
+    def _one_call() -> None:
+        wavg.apply(_fill(OrderSide.BUY, "1", "100"))
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_one_call, batch=64)
+        assert sample.cpu_ms < 1.0, (
+            f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            f"순수 도메인 로직은 1ms 미만이어야 함 (budget<1ms)"
+        )
