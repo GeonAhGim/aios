@@ -250,19 +250,27 @@ async def test_submit_order_denied_until_recovery_completes_then_allowed(
     assert exists is None
 
     state.mark_complete()  # run_startup_recovery가 이 시점에 이미 호출됐다고 가정
-    real_gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
-    submitted = await submit_order(
-        order,
-        user_id=user_id,
-        adapter=adapter,
-        pool=pool,
-        pre_submit_gate=make_recovery_gate(state, real_gate),
+    real_gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
     )
-    assert submitted.status is OrderStatus.FILLED
-
-    # Cleanup: submit_order may create orders without order_events on failure path.
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM orders WHERE client_order_id = $1", order.client_order_id)
+    submitted: Order | None = None
+    try:
+        submitted = await submit_order(
+            order,
+            user_id=user_id,
+            adapter=adapter,
+            pool=pool,
+            pre_submit_gate=make_recovery_gate(state, real_gate),
+        )
+        assert submitted.status is OrderStatus.FILLED
+    finally:
+        # Cleanup: update_from_exchange does not create order_events,
+        # so any order created by submit_order becomes residue for the
+        # shared DB sentinel. Always delete regardless of pass/fail.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM orders WHERE client_order_id = $1", order.client_order_id
+            )
 
 
 async def test_recovery_failure_injection_keeps_submissions_denied(
