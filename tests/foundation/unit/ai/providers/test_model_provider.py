@@ -111,5 +111,12 @@ def test_generation_budget_rejects_string_contaminated_cost_cap_from_upstream_co
     Note: mypy는 str 인자에 대해 arg-type 경고를 발생시키지만, 이는 의도된
     부정 테스트이므로 pytest.raises(TypeError)로 검증한다.
     """
+    # Build via __new__ to avoid mypy arg-type error at call site
+    budget = object.__new__(GenerationBudget)
+    object.__setattr__(budget, "cost_cap", "1.00")
+    object.__setattr__(budget, "max_output_tokens", 100)
+    # Validation in __post_init__ was already run at construction time,
+    # but we bypassed it above. To test the actual comparison path,
+    # call __post_init__ manually:
     with pytest.raises(TypeError):
-        GenerationBudget(cost_cap="1.00", max_output_tokens=100)  # type: ignore[arg-type]
+        budget.__post_init__()
