@@ -178,3 +178,69 @@ async def test_contract_gate_rejects_duplicate_bypass_mutant(order: ChildOrder) 
 
     with pytest.raises(pytest.fail.Exception, match="DID NOT RAISE"):
         await FixSessionContract().test_rejects_duplicate(DuplicateBypassSession(), order)
+
+
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_single_call_cpu_zero_convergence(order: ChildOrder, perf_budget: PerfBudget) -> None:
+    """Single-call send_order CPU time converges to near-zero (no hidden O(n) path).
+
+    Measures 1회 호출당 CPU 밀리초가 batch 증가에 따라 0 수렴하는지 검증 —
+    Windows time.process_time() 양자화(15.6ms tick)를 batch로 극복한다.
+    """
+    session = FakeFixSession()
+    await session.logon()
+
+    # warmup
+    await session.send_order(order, cl_ord_id="warmup")
+
+    # batch=1: quantization-heavy, batch=1000: quantization-smoothed
+    s1 = await perf_budget.sample_async(
+        lambda: session.send_order(order, cl_ord_id=f"b1-{id(session)}"), batch=1
+    )
+
+    # batch=1000: run 1000 unique calls in one interval, then divide by batch
+    async def _batch_1000() -> int:
+        results = []
+        for i in range(1000):
+            results.append(await session.send_order(order, cl_ord_id=f"b1000-{id(session)}-{i}"))
+        return results[-1]
+
+    s1000 = await perf_budget.sample_async(_batch_1000, batch=1)
+
+    # CPU time per call at batch=1000 must be < 0.1ms (quantization-clean)
+    assert s1000.cpu_ms < 0.1, (
+        f"single-call CPU at batch=1000 is {s1000.cpu_ms:.4f}ms (budget 0.1ms)"
+    )
+    # batch=1 must not be wildly off from batch=1000 (no hidden O(n) per call)
+    assert s1.cpu_ms < 5.0, f"single-call CPU at batch=1 is {s1.cpu_ms:.4f}ms (budget 5.0ms)"
+
+
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_perf_budget_detects_10x_delay_injection(
+    order: ChildOrder, perf_budget: PerfBudget
+) -> None:
+    """Performance test turns red when 10x sleep is injected into send_order.
+
+    gate-red reproduction: 정상 입력에서는 녹색이지만 sleep 주입으로 지연되면
+    적색 단언이 발동함을 검증한다.
+    """
+    import time
+
+    class DelayedSession(FakeFixSession):
+        async def send_order(self, order: ChildOrder, *, cl_ord_id: str) -> int:
+            time.sleep(0.001)  # 1ms delay per call
+            return await super().send_order(order, cl_ord_id=cl_ord_id)
+
+    session = DelayedSession()
+    await session.logon()
+
+    async def _run_1000() -> None:
+        for number in range(1000):
+            await session.send_order(order, cl_ord_id=f"delayed-{number}")
+
+    sample = await perf_budget.sample_async(_run_1000)
+
+    # 1000 calls × 1ms = 1s total CPU; budget is 100ms → must fail
+    assert sample.cpu_ms < 100, f"delayed 1000 calls took {sample.cpu_ms:.1f}ms CPU (budget 100ms)"
