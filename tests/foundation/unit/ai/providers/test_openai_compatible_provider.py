@@ -384,7 +384,7 @@ async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budge
 
     raw time.perf_counter() → perf_budget.sample_async() 전환(task-10939).
     """
-    injected_delay = _OVERHEAD_BUDGET_SECONDS * 3
+    injected_delay = _OVERHEAD_BUDGET_SECONDS * 10
 
     def slow_handler(request: httpx.Request) -> httpx.Response:
         time.sleep(injected_delay)
@@ -398,7 +398,8 @@ async def test_gate_red_repro_injected_transport_latency_breaches_the_same_budge
         lambda: provider.generate(_SCHEMA, _prompt(), _budget())
     )
 
-    # 지연 주입으로 500ms 이상 소요되어야 함
-    assert sample.wall_ms > 100.0, (
-        f"wall_ms={sample.wall_ms:.1f}ms should exceed 100ms with injected delay"
+    # injected_delay=0.50s → 500ms (10x budget); budget=50ms. gate-red가
+    # 예산 초과를 포착하려면 측정값이 50ms를 넘겨야 한다.
+    assert sample.wall_ms >= 50.0, (
+        f"wall_ms={sample.wall_ms:.1f}ms should exceed 50ms budget with injected delay"
     )
