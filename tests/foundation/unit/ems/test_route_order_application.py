@@ -17,6 +17,7 @@ for this leaf.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -245,4 +246,91 @@ async def test_route_order_perf_budget_many_candidates(perf_budget: PerfBudget) 
     # budget 값 불변: 기존 800ms(200 calls x 100 candidates 총 wall-clock)
     assert sample.wall_ms < 800, (
         f"route_order() too slow: {sample.wall_ms:.1f}ms/200 calls x 100 candidates"
+    )
+
+
+# ---------------------------------------------------------------------------
+# perf gate-red: 10x delay injection proves budget is real (D2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_route_order_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): `route_order`의 성능 단언이 실제로 지연을
+    감지하는지 역으로 증명한다. `FakeRouteDecisionRepository.insert_or_get`에
+    100ms 지연을 주입하면 200 calls × 100ms = 20s 총 wall-clock이 되어
+    budget(800ms)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    candidates = _candidates(100)
+    repo = FakeRouteDecisionRepository()
+
+    # insert_or_get에 100ms 지연 주입
+    original_insert = repo.insert_or_get
+
+    async def _insert_with_delay(*args: object, **kwargs: object) -> RouteDecisionRecord:
+        await asyncio.sleep(0.1)  # 100ms per call
+        return await original_insert(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "insert_or_get", _insert_with_delay)
+
+    async def _batch_200_delayed() -> None:
+        for _ in range(200):
+            repo.records.clear()
+            await route_order(
+                repo,
+                order_id=uuid4(),
+                candidates=candidates,
+                decided_at=datetime.now(timezone.utc),
+            )
+
+    # 같은 측정/단언을 재사용 — budget(800ms)을 초과하므로 AssertionError
+    with pytest.raises(AssertionError):
+        sample = await perf_budget.sample_async(_batch_200_delayed)
+        assert sample.wall_ms < 800, (
+            f"route_order() should be slow with injected delay: "
+            f"{sample.wall_ms:.1f}ms/200 calls x 100 candidates"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 0-convergence: single-call CPU time converges to near-zero (D2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_route_order_single_call_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 호출 CPU 시간이 0에 수렴하는지 검증(task-11539 감사 후속).
+    `route_order`는 I/O 없이 인메모리 FakeRepo 위에서 동작하므로
+    `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
+
+    Windows `time.process_time()`은 ~15.6ms 양자화 오차가 있다 —
+    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다. 64회 평균 CPU 시간이
+    1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    """
+    candidates = _candidates(100)
+    repo = FakeRouteDecisionRepository()
+
+    async def _single_call() -> None:
+        repo.records.clear()
+        await route_order(
+            repo,
+            order_id=uuid4(),
+            candidates=candidates,
+            decided_at=datetime.now(timezone.utc),
+        )
+
+    # batch=64: Windows 15.6ms 틱 폭 오차를 1/64로 줄임
+    sample = await perf_budget.sample_async(_single_call, batch=64)
+    # 64회 평균 CPU 시간 < 1ms → 단일 호출 ≈ 0.015ms (틱 오차 내)
+    assert sample.cpu_ms < 1.0, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms > 1ms budget "
+        f"(64 calls averaged, wall={sample.wall_ms:.3f}ms)"
     )
