@@ -19,6 +19,7 @@ so the repository is mocked (`AsyncMock`) instead.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -405,4 +406,54 @@ async def test_recompute_parent_aggregate_perf_budget_many_children(
     sample = await perf_budget.sample_async(_run)
     assert sample.wall_ms < budget_ms, (
         f"recompute_parent_aggregate() too slow: {sample.wall_ms:.1f}ms/100 calls x 300 children"
+    )
+
+
+@pytest.mark.perf
+async def test_recompute_parent_aggregate_perf_budget_goes_red_with_10x_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """검출력 확인 -- `recompute_parent_aggregate`에 sleep을 주입하면
+    같은 단언이 적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는
+    허울'이 아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴
+    결함 방지). 100회 호출당 10ms sleep = 1초 wall time로 예산(800ms)을
+    초과하므로 단언이 적색으로 넘어간다."""
+
+    children = [
+        _parent(
+            status=OrderStatus.FILLED,
+            quantity=Decimal("1"),
+            filled_quantity=Decimal("1"),
+        )
+        for _ in range(300)
+    ]
+    parent = _parent(status=OrderStatus.ACKNOWLEDGED, quantity=Decimal("300"))
+    repo = AsyncMock()
+    repo.get_for_update.return_value = parent
+    repo.list_children_for_update.return_value = children
+    repo.transition.return_value = parent.model_copy(update={"status": OrderStatus.FILLED})
+    conn = object()
+
+    # Inject 10ms sleep per transition call: 100 calls x 10ms = 1s wall time
+    async def slow_transition(*args: object, **kwargs: object) -> object:
+        time.sleep(0.01)
+        return parent.model_copy(update={"status": OrderStatus.FILLED})
+
+    repo.transition.side_effect = slow_transition
+
+    async def _run_delayed() -> None:
+        for _ in range(100):
+            await recompute_parent_aggregate(
+                repo,
+                conn,
+                parent_order_id=parent.order_id,
+                trace_id=uuid4(),
+                occurred_at=datetime.now(timezone.utc),
+            )
+
+    budget_ms = 800.0
+    sample = await perf_budget.sample_async(_run_delayed)
+    assert sample.wall_ms >= budget_ms, (
+        f"Perf assertion should go red with injected delay: "
+        f"{sample.wall_ms:.1f}ms/100 calls x 300 children (expected >= {budget_ms}ms)"
     )
