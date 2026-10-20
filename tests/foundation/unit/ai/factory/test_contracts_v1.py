@@ -163,6 +163,49 @@ def test_bulk_construction_of_many_strategy_proposals_meets_latency_budget(
     assert sample.wall_ms < budget_ms
 
 
+# --- 성능 주입 검증(D2) ---
+
+
+@pytest.mark.perf
+def test_perf_assertion_fails_with_10x_delay_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — 동일 작업에 지연을
+    주입하면 wall_ms 단언이 적색(AssertionError)이어야 한다(단언/마커
+    삭제나 예산 완화가 아닌 genuine budget check임 증명).
+
+    PerfBudget.sample()이 wall 측정에 쓰는 time.perf_counter를
+    unittest.mock.patch로 monkeypatch해 wall_start에 0,
+    wall_end에 4초를 반환하게 한다. diff = 4초 → wall_ms = 4000ms >
+    예산 2000ms (적색).
+    """
+
+    from unittest.mock import patch
+
+    payloads = [_proposal_kwargs(proposal_id=uuid4()) for _ in range(3_000)]
+    # wall_start=0, wall_end=4 → wall_ms=4000 > budget 2000
+    _call_num = 0
+
+    def _slow_perf_counter() -> float:
+        nonlocal _call_num
+        _call_num += 1
+        # 첫 호출(wall_start)은 0, 두 번째(wall_end)는 4초 반환
+        return 0.0 if _call_num == 1 else 4.0
+
+    with patch("tests.support.perf_budget.time.perf_counter", side_effect=_slow_perf_counter):
+        sample = perf_budget.sample(lambda: [v1.StrategyProposal(**p) for p in payloads])
+        # 지연 주입 후 wall_ms는 예산(2000ms)을 훨씬 초과해야 함
+        budget_ms = _CONSTRUCT_BUDGET_SEC * 1_000
+        print(
+            f"[delay injection] {_call_num} calls, "
+            f"wall_ms={sample.wall_ms:.1f}ms (budget={budget_ms}ms)"
+        )
+        assert sample.wall_ms > budget_ms, (
+            f"delay injection should exceed budget: "
+            f"wall_ms={sample.wall_ms:.1f}ms >= budget={budget_ms}ms"
+        )
+
+
 # --- 게이트 적색 재현 ---
 
 
