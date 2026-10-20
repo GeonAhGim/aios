@@ -13,6 +13,7 @@ from src.foundation.allocation.domain.average_price import (
     blended_average_price,
 )
 from src.foundation.allocation.domain.policy import AllocationLine, AllocationResidualError
+from tests.support.perf_budget import PerfBudget
 
 
 def test_blended_average_price_single_fill():
@@ -125,7 +126,7 @@ def test_blended_average_price_hot_path_performance(perf_budget):
     perf_budget.assert_within(
         lambda: blended_average_price(fills, Decimal("0.01")),
         budget_ms=1000.0,
-        n=1,
+        n=5,
     )
 
 
@@ -143,5 +144,87 @@ def test_apply_average_price_hot_path_performance(perf_budget):
             notional_quantum=Decimal("0.01"),
         ),
         budget_ms=1000.0,
-        n=1,
+        n=5,
     )
+
+
+# ---- 게이트 적색 재현(D2) — 지연 주입 단언이 적색인지 검증 ----
+
+
+@pytest.mark.perf
+def test_blended_average_price_hot_path_performance_catches_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산(1000ms * 10 = 10000ms)을 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    fills = [
+        PartialFill(quantity=Decimal("60"), price=Decimal("10.00")),
+        PartialFill(quantity=Decimal("40"), price=Decimal("11.00")),
+    ]
+
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 10000.0  # 10000ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: blended_average_price(fills, Decimal("0.01")),
+            budget_ms=1000.0,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="blended_average_price delay-injected",
+        )
+
+
+@pytest.mark.perf
+def test_apply_average_price_hot_path_performance_catches_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산(1000ms * 10 = 10000ms)을 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    lines = [
+        AllocationLine(sub_account_id=uuid4(), quantity=Decimal("60")),
+        AllocationLine(sub_account_id=uuid4(), quantity=Decimal("40")),
+    ]
+
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 10000.0  # 10000ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: apply_average_price(
+                lines,
+                Decimal("10.40"),
+                total_notional=Decimal("1040.00"),
+                notional_quantum=Decimal("0.01"),
+            ),
+            budget_ms=1000.0,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="apply_average_price delay-injected",
+        )
