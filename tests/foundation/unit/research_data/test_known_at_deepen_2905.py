@@ -93,6 +93,65 @@ def test_maximum_datetime_known_at_is_rejected_against_any_realistic_as_of() -> 
 
 
 @pytest.mark.perf
+def test_single_call_cpu_budget_assertion(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 `assert_point_in_time` 호출의 CPU 시간이 예산(1ms) 미만이어야
+    한다 -- FA-9 `as_of` 커널은 순수 비교만 하므로 상수시간이 고정된다.
+
+    task-11010: raw perf_counter → PerfBudget.assert_within 전환.
+    check_perf_measurement_guard.py 대상 함수 1/1."""
+    item = _item(known_at=_T0 - timedelta(days=1))
+
+    sample = perf_budget.sample(
+        lambda: assert_point_in_time(item, _T0),
+        batch=1,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"순수 도메인 로직은 1ms 미만이어야 함 (budget<1ms)"
+    )
+
+
+@pytest.mark.perf
+def test_gate_red_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(1ms)을 100배 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 100ms를 반환하므로
+    batch=64로 나눈 평균도 100ms > 1ms budget로 적색 확정.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 100ms(100x budget)를 반환하게 한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.1  # 100ms per call = 100x budget
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    item = _item(known_at=_T0 - timedelta(days=1))
+
+    def _one_call() -> None:
+        assert_point_in_time(item, _T0)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_one_call, batch=64)
+        assert sample.cpu_ms < 1.0, (
+            f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            f"순수 도메인 로직은 1ms 미만이어야 함 (budget<1ms)"
+        )
+
+
+@pytest.mark.perf
 def test_repeated_point_in_time_checks_meet_throughput_budget(
     perf_budget: PerfBudget,
 ) -> None:
