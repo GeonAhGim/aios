@@ -367,7 +367,7 @@ def test_candle_record_bulk_validation_budget_exceeded_with_injected_delay(
     주입 없이 통과하는 단언은 허울 단언일 수 있다 — 이 테스트가 통과해야
     단언이 의미 있다.
     """
-    from tests.support import perf_budget as _perf_budget_mod
+    import time
 
     cumulative: list[float] = [0.0]
 
@@ -375,7 +375,7 @@ def test_candle_record_bulk_validation_budget_exceeded_with_injected_delay(
         cumulative[0] += 0.250  # 250ms CPU per call → delta=500ms/sample > 200ms 예산
         return cumulative[0]
 
-    monkeypatch.setattr(_perf_budget_mod.time, "process_time", _fake_process_time)  # type: ignore[attr-defined]
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
 
     with pytest.raises(AssertionError):
         perf = PerfBudget()
