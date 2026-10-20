@@ -244,3 +244,66 @@ def test_concurrent_permits_use_calls_across_threads_do_not_cross_contaminate() 
 
     for name, outcomes in results:
         assert all(outcomes), f"동시 실행 중 시나리오 {name!r}가 다른 워커에 오염됐다."
+
+
+# ---- 검출력 확인 (주입 지연) ----
+
+
+@pytest.mark.perf
+def test_permits_use_budget_exceeded_with_injected_cpu_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인 — `time.process_time()`을 monkeypatch해 샘플당 2회
+    호출에서 2.0s씩 주입하면 1회 샘플당 4.0s가 돼 2,000ms 예산을 초과한다.
+    이 테스트가 적색으로 떨어지지 않으면 성능 단언은 허울 단언이다."""
+    import time
+
+    cumulative: list[float] = [0.0]
+
+    def _fake_process_time() -> float:
+        cumulative[0] += 2.0  # 2.0s per call → 2 calls/sample = 4.0s > 2.0s 예산
+        return cumulative[0]
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    with pytest.raises(AssertionError):
+        perf = PerfBudget()
+        iterations = 100_000
+        scopes = list(RedistributionScope)
+        uses = list(DataUse)
+        perf.assert_within(
+            lambda: [
+                permits_use(scopes[j % len(scopes)], uses[j % len(uses)]) for j in range(iterations)
+            ],
+            budget_ms=2000,
+            n=1,
+            label="permits_use avg(주입 지연)",
+        )
+
+
+@pytest.mark.perf
+def test_authorize_source_budget_exceeded_with_injected_cpu_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인 — `time.process_time()`을 monkeypatch해 샘플당 2회
+    호출에서 2.0s씩 주입하면 1회 샘플당 4.0s가 돼 2,000ms 예산을 초과한다.
+    이 테스트가 적색으로 떨어지지 않으면 성능 단언은 허울 단언이다."""
+    import time
+
+    cumulative: list[float] = [0.0]
+
+    def _fake_process_time() -> float:
+        cumulative[0] += 2.0  # 2.0s per call → 2 calls/sample = 4.0s > 2.0s 예산
+        return cumulative[0]
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    with pytest.raises(AssertionError):
+        perf = PerfBudget()
+        contract = _contract()
+        perf.assert_within(
+            lambda: [authorize_source(contract, _NOW) for _ in range(20_000)],
+            budget_ms=2000,
+            n=1,
+            label="authorize_source avg(주입 지연)",
+        )
