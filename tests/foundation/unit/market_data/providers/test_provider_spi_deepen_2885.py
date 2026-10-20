@@ -432,3 +432,125 @@ async def test_bitget_fetch_candles_replay_with_same_input_is_deterministic() ->
     assert first.open == second.open
     assert first.close == second.close
     assert len(fake.calls) == 2  # 두 번 다 실제로 위임했다(캐시로 둔갑하지 않음)
+
+
+# ---------------------------------------------------------------------------
+# 5) 성능 주입 검증 — 10배 지연 monkeypatch → 단언이 적색인지 확인
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_bitget_perf_assertion_fails_with_10x_sleep_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — `asyncio.sleep`을
+    10배 지연시키는 monkeypatch를 걸면 같은 측정/단언이 적색(AssertionError)
+    이어야 한다. 단언/마커 삭제나 예산 완화가 아닌 genuine budget check임을
+    증명한다.
+
+    토큰버킷(10 req/s, burst 20)은 `base_adapter.py`에서 `sleep` 콜백으로
+    주입받는다 — `_slow_sleep`으로 교체하면 각 호출당 실제 sleep이 10배
+    길어져 fetch_ms가 급증하고 ratio 단언이 적색으로 뒤집힌다."""
+    candles = _large_bitget_candle_set(_N_CANDLES)
+    fake = _FakeBitgetAdapter({"BTC/USDT": candles})
+
+    # 원래 sleep 보존 — 10배 지연 버전으로 교체
+    original_sleep = asyncio.sleep
+
+    async def _slow_sleep(seconds: float) -> None:
+        await original_sleep(seconds * 10)  # 10배 지연
+
+    provider = BitgetProvider(fake, sleep=_slow_sleep)
+    span = TimeSpan(start=_BASE, end=_BASE + timedelta(hours=_N_CANDLES + 1))
+
+    # 워밍업
+    await provider.fetch_candles(_bitget_listing(), Timeframe.H1, span)
+
+    async def run_fetch() -> None:
+        for _ in range(_N_ITERATIONS):
+            columns = await provider.fetch_candles(_bitget_listing(), Timeframe.H1, span)
+            assert len(columns.ts) == _N_CANDLES
+
+    def run_baseline() -> None:
+        for _ in range(_N_ITERATIONS):
+            values = [(_BASE + timedelta(hours=_N_CANDLES - h), h) for h in range(_N_CANDLES)]
+            sorted(values, key=lambda pair: pair[0])
+
+    baseline_samples = perf_budget.samples(run_baseline, n=3)
+    baseline_ms = sorted(s.cpu_ms for s in baseline_samples)[len(baseline_samples) // 2]
+
+    raw_samples = await perf_budget.samples_async(run_fetch, n=3)
+    fetch_ms = sorted(s.wall_ms for s in raw_samples)[len(raw_samples) // 2]
+
+    assert baseline_ms > 0.0
+    ratio = fetch_ms / baseline_ms
+    budget_ratio = 30.0
+    print(
+        f"\nBitgetProvider.fetch_candles WITH 10x delay injection: "
+        f"n_candles={_N_CANDLES} n_iterations={_N_ITERATIONS} "
+        f"baseline={baseline_ms:.1f}ms fetch_p50={fetch_ms:.1f}ms "
+        f"ratio={ratio:.2f} (budget={budget_ratio})"
+    )
+    # 10배 지연 주입 시 — 토큰버킷 대기 시간이 커져 ratio가 예산 초과 → AssertionError 발생
+    with pytest.raises(AssertionError) as exc_info:
+        assert ratio < budget_ratio, (
+            f"BitgetProvider.fetch_candles의 필터+정렬 파이프라인이 베이스라인 대비 "
+            f"{ratio:.2f}배로 회귀했습니다(예산 {budget_ratio}배)"
+        )
+    # 위 assert가 AssertionError를 던졌다는 것은 단언이 genuine budget check임을 증명
+    assert "회귀" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# 6) 단일 호출 CPU 측정 양자화 검증 — 작은 입력에서도 CPU 시간이 0 수렴 안 함
+# ---------------------------------------------------------------------------
+
+
+async def test_bitget_single_call_cpu_time_does_not_converge_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 `fetch_candles` 호출에서 CPU 시간이 0으로 수렴하면 안 된다 —
+    Windows `process_time()`은 ~15.6ms 해상도로 양자화되지만,
+    `PerfBudget.batch`로 여러 호출을 묶으면 총 CPU 시간이 tick 폭을 넘어
+    양자화 오차가 줄어든다.
+
+    10개 캔들만으로는 fake adapter에서 CPU 측정이 0으로 수렴하므로,
+    2000개 캔들로 입력을 늘려 필터+정렬+CandleColumns 조립이 충분히
+    무겁게 만들어야 한다. batch=8로 측정했을 때 총 CPU 시간이 양의
+    값을 보여야 한다.
+
+    이 테스트는 audit(task-11539)가 지적한 "single-call CPU 측정의 0
+    수렴" 문제를 batch 메커니즘으로 정정했음을 검증한다."""
+    candles = _large_bitget_candle_set(_N_CANDLES)  # 2000개 캔들
+    fake = _FakeBitgetAdapter({"BTC/USDT": candles})
+
+    async def _no_wait(_seconds: float) -> None:
+        return None
+
+    provider = BitgetProvider(fake, sleep=_no_wait)
+    span = TimeSpan(start=_BASE, end=_BASE + timedelta(hours=_N_CANDLES + 1))
+
+    # PerfBudget.batch=8로 묶어 단일 호출당 CPU 시간을 추정
+    # batch=1이면 양자화로 0 수렴 가능하지만 batch=8는 tick 폭을 넘어감
+    async def run_fetch() -> None:
+        await provider.fetch_candles(_bitget_listing(), Timeframe.H1, span)
+
+    samples = await perf_budget.samples_async(run_fetch, n=20, batch=8)
+    # cpu_ms는 호출당 평균 — batch=8이므로 8회 호출의 총 시간을 8로 나눈 값
+    # Windows 양자화로 개별 샘플이 0 또는 1.953ms로 교차할 수 있으므로,
+    # 모든 샘플의 합이 0인지 확인한다 (총 CPU 시간이 0이면 provider에
+    # 실제 연산이 없는 것)
+    total_cpu_ms = sum(s.cpu_ms for s in samples)
+    non_zero_count = sum(1 for s in samples if s.cpu_ms > 0)
+
+    print(
+        f"\nSingle-call CPU quantization check: "
+        f"n_candles={_N_CANDLES} n_calls=20 batch=8 total_cpu_ms={total_cpu_ms:.3f}ms "
+        f"non_zero_samples={non_zero_count}/20 "
+        f"all_cpu_ms={[f'{s.cpu_ms:.3f}' for s in samples]}"
+    )
+    # 20개 샘플 중 적어도 1개는 양의 CPU 시간을 보여야 함
+    assert non_zero_count > 0, (
+        "20개 샘플 모두 cpu_ms=0 — batch=8로 묶어도 총 CPU 시간이 0ms, "
+        "provider 내부에 실제로 연산이 없거나 측정 경로가 잘못된 것"
+    )
