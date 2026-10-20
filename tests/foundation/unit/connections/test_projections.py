@@ -258,7 +258,8 @@ async def test_build_connection_list_view_perf_budget_p95_latency(perf_budget: P
 
     raw time.perf_counter() -> perf_budget.samples_async (task-10961):
     process_time 기반 측정 + coverage tracer-pause로 부하 민감 호스트에서의
-    오탐을 줄인다. 예산 값(100ms)은 그대로 유지한다."""
+    오탐을 줄인다. batch=10 양자화 오차 감소 (task-16005). 예산 값(100ms)은
+    그대로 유지한다."""
     tenant_id = uuid4()
     sample_count = 50
 
@@ -268,7 +269,45 @@ async def test_build_connection_list_view_perf_budget_p95_latency(perf_budget: P
         repo = FakeConnectionRepository(connections=connections, bindings=bindings)
         await build_connection_list_view(repo, tenant_id)
 
-    samples = await perf_budget.samples_async(_build, n=sample_count)
+    samples = await perf_budget.samples_async(_build, n=sample_count, batch=10)
     durations_ms = sorted(s.cpu_ms for s in samples)
     p95 = durations_ms[int(sample_count * 0.95) - 1]
     assert p95 < 100.0, f"build_connection_list_view p95 latency {p95:.3f}ms exceeded 100ms budget"
+
+
+# ---------------------------------------------------------------------------
+# gate-red repro (D2) -- proves the p95 < 100ms budget is load-bearing,
+# not a tautology. Injects CPU-bound work to push cpu_ms above the 100ms
+# budget, verifying the same assertion fires AssertionError.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_gate_red_budget_actually_fails_with_cpu_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현 -- 성능 단언이 tautology가 아님을 증명한다.
+
+    CPU 예산(p95 < 100ms)이므로 sleep 대신 실제 CPU 부하를 주입한다.
+    `sum(i*i for i in range(3_000_000))` 연산이 ~110ms CPU를 소모하므로
+    같은 p95 < 100ms 단언이 AssertionError를 일으켜야 한다(task-16005)."""
+    tenant_id = uuid4()
+
+    async def _build_with_cpu_load() -> None:
+        # CPU-bound work: ~110ms on this host (measured, task-16005)
+        _ = sum(i * i for i in range(3_000_000))
+        connections = [_connection(tenant_id) for _ in range(5)]
+        bindings: dict[UUID, CredentialBinding | None] = {c.id: _binding(c.id) for c in connections}
+        repo = FakeConnectionRepository(connections=connections, bindings=bindings)
+        await build_connection_list_view(repo, tenant_id)
+
+    sample_count = 50
+    samples = await perf_budget.samples_async(_build_with_cpu_load, n=sample_count, batch=10)
+    durations_ms = sorted(s.cpu_ms for s in samples)
+    p95 = durations_ms[int(sample_count * 0.95) - 1]
+
+    with pytest.raises(AssertionError):
+        assert p95 < 100.0, (
+            f"예상 적색 실패: p95={p95:.3f}ms가 100ms budget보다 크지 않음 "
+            f"(gate-red tautology 의심)"
+        )

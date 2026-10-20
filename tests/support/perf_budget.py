@@ -109,11 +109,18 @@ class PerfBudget:
                 result=result,
             )
 
-    async def samples_async(self, fn: Callable[[], Awaitable[_T]], *, n: int) -> list[PerfSample]:
-        """비동기 I/O n회 반복 측정 — coverage tracer 일시정지 + 원시 샘플 목록 반환."""
+    async def samples_async(
+        self, fn: Callable[[], Awaitable[_T]], *, n: int, batch: int = 1
+    ) -> list[PerfSample]:
+        """비동기 I/O n회 반복 측정 — coverage tracer 일시정지 + 원시 샘플 목록 반환.
+
+        `batch`>1이면 각 샘플이 `fn`을 연속 `batch`회 호출한 평균 CPU 시간을
+        산출한다 — Windows의 `time.process_time()` 약 15.6ms 양자화 오차를
+        `tick/batch`로 줄여 0 수렴 문제를 해소한다(task-16005).
+        """
         samples: list[PerfSample] = []
         for _ in range(n):
-            samples.append(await self.sample_async(fn))
+            samples.append(await self.sample_async(fn, batch=batch))
         return samples
 
     def samples(
