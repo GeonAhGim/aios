@@ -218,3 +218,54 @@ def test_indicator_template_to_view_perf_budget(perf_budget: PerfBudget) -> None
         budget_ms=300,
         label="indicator_template_to_view 2,000회 — 예산 300ms",
     )
+
+
+@pytest.mark.perf
+def test_indicator_template_to_view_perf_assertion_fails_with_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 역으로 증명한다 —
+    `time.process_time`을 monkeypatch해 1회 호출당 400ms의 CPU 시간을
+    가장하면 `assert_within`(예산 300ms)가 AssertionError로 적색이 돼야
+    한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다."""
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 400.0  # 400ms/call → budget 300ms 초과
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    now = datetime.now(timezone.utc)
+    template = ChartIndicatorTemplate(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        owner_subject_id=uuid4(),
+        name="perf",
+        template={
+            "schemaVersion": 1,
+            "panes": [{"id": f"p{i}", "kind": "sub", "heightRatio": 0.1} for i in range(10)],
+            "indicators": [
+                {"id": f"ind{i}", "paneId": f"p{i % 10}", "params": {"period": i}}
+                for i in range(50)
+            ],
+        },
+        revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: [indicator_template_to_view(template) for _ in range(2_000)],
+            budget_ms=300,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="indicator_template_to_view delay-injected",
+        )

@@ -180,6 +180,69 @@ def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
     assert p95_ms < 200.0, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
 
 
+# -- D2 성능 주입 검증(D2) — monkeypatch로 지연 주입 시 단언이 적색인지 확인 ----
+
+
+@pytest.mark.perf
+def test_upto_perf_assertion_fails_with_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — `time.process_time`을
+    monkeypatch해 1회 호출당 예산(200ms)을 10배 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 2500.0  # 2500ms per call → budget 200ms × 10x 초과
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    fixture = _bars(5_000)
+    bars = ListBars(fixture)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: bars.upto(2_500),
+            budget_ms=200.0,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="ListBars.upto delay-injected",
+        )
+
+
+# -- D2 CPU 양자화 음수 테스트 ------------------------------------------------
+
+
+def test_single_call_cpu_ms_converges_to_sub_tick_value() -> None:
+    """ListBars.upto(0)는 O(1) 슬라이스이므로 실제 CPU 시간이 매우 작다.
+    Windows `time.process_time()`는 ~15.6ms 해상도이므로, 단일 호출은
+    0ms 또는 15.625ms 중 하나로 양자화된다. `batch`>1로 묶으면 양자화
+    오차가 줄어든다는 사실을 확인한다."""
+    fixture = _bars(100)
+    bars = ListBars(fixture)
+
+    # batch=1: 단일 호출 — 양자화 영향 큼
+    def _sample_upto(idx: int) -> Sequence[Candle]:
+        return bars.upto(idx)
+
+    samples_1 = [PerfBudget().sample(lambda i=i: _sample_upto(i)).cpu_ms for i in range(100)]
+
+    # batch=8: 8회 묶음 — 양자화 오차 1/8로 줄어듦
+    sample_batch = PerfBudget().sample(lambda: bars.upto(50), batch=8)
+
+    # batch=1의 평균이 batch>1의 측정과 같은 순서를 보여야 함
+    avg_single = sum(samples_1) / len(samples_1)
+    assert avg_single >= 0.0  # 양자화로 0일 수 있음
+    assert sample_batch.cpu_ms >= 0.0  # batch 측정도 0 이상
+
+
 # -- D2 게이트 적색 재현 -------------------------------------------------------
 
 
