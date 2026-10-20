@@ -132,3 +132,43 @@ def test_assert_point_in_time_hot_path_performance(
         budget_ms=1000.0,
         n=1,
     )
+
+
+# ---- gate-red 재현(D2): 10x 지연 monkeypatch → 적색 --------------------------
+
+
+@pytest.mark.perf
+def test_assert_point_in_time_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(1000ms/10000회 = 0.1ms/회)을 1000배 초과하는
+    CPU 시간을 가장하면 같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 호출당 100ms를 반환하므로
+    best_of(p95) > 0.1ms budget로 적색 확정.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 100ms를 반환하게 한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.1  # 100ms = 0.1s per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    item = _item(known_at=as_of_time - timedelta(days=1))
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: assert_point_in_time(item, as_of_time),
+            budget_ms=0.1,
+            n=5,
+            batch=1,
+        )
