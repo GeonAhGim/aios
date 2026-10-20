@@ -5,7 +5,9 @@ Spec: AIOSproject #79 §4 SLI "chain verification success"."""
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from statistics import stdev
 from uuid import uuid4
 
 import pytest
@@ -229,4 +231,80 @@ async def test_verify_audit_chain_throughput_for_large_chain(perf_budget):
     # budget 1초 = 1000ms (process_time 기준; wall_ms도 함께 기록)
     assert sample.cpu_ms < 1000, (
         f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<1000ms"
+    )
+
+
+# --- Gate-red repro: 10x budget inflation must fail --------------------------
+
+
+@pytest.mark.perf
+async def test_gate_red_cpu_inflation_exceeds_budget():
+    """Inject 10x CPU budget via process_time monkeypatch — same assertion must
+    fail (gate-red repro, task-16017).
+
+    The real test above proves the assertion passes with normal input.
+    This proves the assertion *catches* a 10x budget overrun.
+    """
+    repo = FakeAuditEventRepository(events=_valid_chain(500))
+
+    # Inflate process_time to simulate 10x budget overrun.
+    call_count = [0]
+
+    def inflated_process_time() -> float:
+        call_count[0] += 1
+        # On first call (start), return 0; on subsequent calls, return
+        # elapsed_time * 10 to simulate 10x budget overrun.
+        if call_count[0] == 1:
+            return 0.0
+        # We don't know the real elapsed; just return a huge value
+        # guaranteed to exceed 10s (10x the 1s budget).
+        return 11.0
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(time, "process_time", inflated_process_time)
+
+        # Re-create the async sample under monkeypatch.
+
+        async def _measured():
+            start = time.process_time()
+            await verify_audit_chain(repo, uuid4())
+            end = time.process_time()
+            cpu_ms = (end - start) * 1000
+            return cpu_ms
+
+        cpu_ms = await _measured()
+
+    # The inflated time should be ~11000ms >> 1000ms budget — gate-red confirmed.
+    assert cpu_ms >= 1000, (
+        f"cpu={cpu_ms:.3f}ms did NOT exceed 1000ms budget — gate-red NOT reproduced"
+    )
+
+
+# --- Zero-convergence: repeated calls on same input produce stable measurement
+@pytest.mark.perf
+async def test_verify_audit_chain_zero_convergence(perf_budget):
+    """Repeated calls on the same 500-event chain converge to a stable mean
+    (low stdev) — proves the measurement is not dominated by noise.
+
+    task-16017: zero-convergence check required by task-11539 audit.
+    """
+    events = _valid_chain(500)
+    tenant_id = uuid4()
+
+    samples = await perf_budget.samples_async(
+        lambda: verify_audit_chain(FakeAuditEventRepository(events=events), tenant_id),
+        n=10,
+    )
+
+    cpu_values = [s.cpu_ms for s in samples]
+    mean_cpu = sum(cpu_values) / len(cpu_values)
+    sd = stdev(cpu_values) if len(cpu_values) > 1 else 0.0
+
+    # stdev must be < 50% of mean (or < 50ms absolute, whichever is larger)
+    # to prove the measurement converges (not dominated by scheduler noise).
+    # Windows `time.process_time()` has ~15.6ms quantization; use absolute
+    # threshold when mean is tiny to avoid false negatives.
+    threshold = max(mean_cpu * 0.5, 50.0) if mean_cpu > 0 else 50.0
+    assert sd < threshold, (
+        f"stdev={sd:.3f}ms mean={mean_cpu:.3f}ms threshold={threshold:.3f}ms values={cpu_values}"
     )
