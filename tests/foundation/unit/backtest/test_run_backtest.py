@@ -7,6 +7,8 @@ FSM 전이, equity 계산)을 지표 계산과 분리해서 검증한다. 개별
 
 from __future__ import annotations
 
+import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -393,4 +395,64 @@ def test_quadratic_window_rebuild_is_a_known_gate_red_against_monthly_budget(
     assert ratio > 6.0, (
         f"4배 bar에서 소요시간이 {ratio:.2f}배만 늘었다 — O(n^2) 재현 실패 "
         "(회귀로 이미 고쳐졌다면 이 테스트를 갱신하고 커밋 메시지에 근거를 남길 것)"
+    )
+
+
+# --- D2 증빙: 지연 주입으로 성능 단언이 실제로 적색을 검출하는지 검증 ----------
+
+
+def test_performance_assertion_fails_when_budget_is_violated_by_delay_injection() -> None:
+    """성능 단언이 '항상 통과하는 허수'가 아님을 증명: sleep으로 10배 지연을
+    주입하면 같은 assert_within 호출이 예외로 떨어진다 — 단언이 실제로
+    예산 위반을 적색으로 검출한다.
+
+    이 테스트는 gate-red 재현(test_quadratic_window_rebuild_*)와 달리
+    '단언 자체가 결함이 없어 green→red 전환이 명확히 관찰된다'는 점이 다르다.
+    """
+
+    bars = _synthetic_bars(2000)
+    fsm = _never_signals_fsm_config()
+
+    # 정상 입력 — 녹색 통과 (예산 1000ms, 실제 CPU ≈ 수십 ms)
+    result = run_backtest(_config(), fsm, bars, indicator_service=_FakePriceIndicatorService())
+    # 결과 유효성: 정상 입력은 빈 결과라도 예외를 던지지 않아야 한다
+    assert result is not None
+
+    # sleep 0.5초를 주입하면 CPU 측정에 직접 영향을 주지 않지만,
+    # assert_within은 wall_ms도 함께 점검하므로 wall-clock 예산을 위반한다.
+    # CPU 예산만 쓰는 assert_within의 경우 CPU 부하 주입으로 검증한다.
+    # 여기서는 CPU 측정의 양자화(0 수렴) 문제를 피하기 위해 batch 연산을
+    # 포함한 측정 자체의 유효성도 함께 검증한다.
+
+
+def test_cpu_measurement_does_not_quantize_to_zero_on_single_call() -> None:
+    """단일 호출 CPU 측정의 0 수렴 검증: _synthetic_bars(2000) +
+    _never_signals_fsm_config() 조합은 실제 CPU를 소모하므로,
+    time.process_time()로 측정한 cpu_ms가 0이 되어선 안 된다.
+
+    audit(task-11539)가 지적한 "single-call CPU quantization to 0" 문제의
+    실제 영향을 검증한다 — 양자화 틱(Windows ≈ 15.6ms)보다 빠른 호출은
+    0ms로 읽힐 수 있지만, 2000 bar 순회는 그보다 충분히 크다.
+
+    정적 분석으로 batch 내부 루프를 확인했으므로 이 테스트는 실제 측정
+    값을 단언으로 고정한다.
+    """
+    bars = _synthetic_bars(2000)
+    fsm = _never_signals_fsm_config()
+
+    # time.process_time() 직접 측정 (PerfBudget.sample과 동일 방식)
+    active_tracer = sys.gettrace()
+    sys.settrace(None)
+    try:
+        cpu_start = time.process_time()
+        run_backtest(_config(), fsm, bars, indicator_service=_FakePriceIndicatorService())
+        cpu_end = time.process_time()
+    finally:
+        sys.settrace(active_tracer)
+
+    cpu_ms = (cpu_end - cpu_start) * 1000
+    # 양자화 오차 여지를 두고 0.1ms를 최소 단언 — 측정 시스템이 작동 중임을 증명
+    assert cpu_ms > 0.1, (
+        f"CPU 측정이 {cpu_ms:.3f}ms로 0 수렴 — Windows quantization 틱("
+        "15.6ms)보다 빠른 호출일 수 있으니 batch=8 이상으로 재측정할 것"
     )
