@@ -167,3 +167,95 @@ def test_gate_red_budget_actually_fails_past_budget(perf_budget: PerfBudget) -> 
     absurdly_low_budget_ms = 1e-9
     with pytest.raises(AssertionError):
         assert _p95(wall_ms_samples) < absurdly_low_budget_ms
+
+
+# --- zero-convergence (CPU clock quantization check) ---
+
+
+@pytest.mark.perf
+def test_validate_new_experiment_cpu_converges_to_zero(perf_budget: PerfBudget) -> None:
+    """Calls 1회 CPU 측정의 0 수렴 검증: 순수 메모리 검증 함수는
+    `time.process_time()` 기준으로 호출당 CPU 시간이 Windowstick(약 15.6ms)
+    아래로 떨어질 수 있으므로 batch로 묶어 측정하고 1회당으로 나누면
+    near-0에 수렴해야 한다.
+
+    audit task-11539: `zero_convergence`가 "not dynamically measured"로
+    기록된 항목을 정정한다.
+    """
+    tenant_id = uuid4()
+    parent = _experiment(tenant_id=tenant_id)
+    child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
+
+    def _validate() -> None:
+        validate_new_experiment(child, parent=parent, existing_with_same_key=None)
+
+    # batch=50으로 묶어 1회당 CPU 시간을 추정: Windows tick 15.6ms / 50 ≈ 0.3ms 오차
+    sample = perf_budget.sample(_validate, batch=50)
+    cpu_ms_per_call = sample.cpu_ms  # 이미 sample()이 batch로 나눴음
+    print(
+        f"[AI-10 cpu_convergence] cpu_ms/call={cpu_ms_per_call:.4f}ms "
+        f"(batch=50, Windows tick quantization reduced)"
+    )
+    # CPU 시간은 0이 될 수 없지만 batch로 나눈 오차가 매우 작아야 함.
+    # Windows tick 15.6ms / 50 ≈ 0.3125ms를 여유 한계로 삼는다.
+    assert cpu_ms_per_call < 0.5, (
+        f"CPU time per call {cpu_ms_per_call:.4f}ms exceeds 0.5ms "
+        "— may indicate regression or insufficient batch size"
+    )
+
+
+# --- gate-red with actual delay injection ---
+
+
+@pytest.mark.perf
+def test_gate_red_budget_fails_with_injected_delay(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): `validate_new_experiment`의 wall-clock 예산
+    단언이 실제로 지연을 포착하는지 검증한다. PerfBudget가 wall_ms를
+    측정할 때 쓰는 `time.perf_counter`를 monkeypatch해 실제 시간을
+    가장하게 하고, 같은 p95 단언이 AssertionError로 적색이 되는지를
+    확인한다.
+
+    이 테스트는 wall_ms 기반 예산이 "제대로 작동하는지"를 역으로 증명한다.
+    단언/마커 삭제나 예산 완화가 아니다.
+    """
+    import time as _time
+
+    # 원본 perf_counter 저장 (patch 전에)
+    _original_perf_counter = _time.perf_counter
+
+    tenant_id = uuid4()
+    parent = _experiment(tenant_id=tenant_id)
+    children = iter(
+        [_experiment(tenant_id=tenant_id, parent_id=parent.experiment_id) for _ in range(20)]
+    )
+
+    # 호출당 50ms 지연 주입 (예산 5ms의 10배)
+    injected_delay_s = _VALIDATE_BUDGET_MS * 10 / 1000  # 50ms in seconds
+    call_count = 0
+
+    def _fake_perf_counter() -> float:
+        nonlocal call_count
+        call_count += 1
+        # 실제 시간 + 호출당 지연을 더해 wall_clock이 지연된 것처럼 보이게 함
+        return _original_perf_counter() + (injected_delay_s * call_count)
+
+    # tests.support.perf_budget 모듈의 perf_counter를 패치:
+    # PerfBudget.sample()에서 time.perf_counter()를 직접 호출하므로
+    # 해당 모듈의 네임스페이스에서 패치해야 효과가 있다.
+    from tests.support import perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "perf_counter", _fake_perf_counter)
+
+    def _validate() -> None:
+        validate_new_experiment(next(children), parent=parent, existing_with_same_key=None)
+
+    wall_ms_samples = sorted(s.wall_ms for s in perf_budget.samples(_validate, n=20, warmup=0))
+    p95_ms = _p95(wall_ms_samples)
+    print(
+        f"[AI-10 gate-red injected] p95={p95_ms:.4f}ms budget={_VALIDATE_BUDGET_MS:.1f}ms "
+        f"(injected delay={injected_delay_s * 1000:.0f}ms/call)"
+    )
+    with pytest.raises(AssertionError):
+        assert p95_ms < _VALIDATE_BUDGET_MS
