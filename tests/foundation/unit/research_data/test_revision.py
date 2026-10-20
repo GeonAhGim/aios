@@ -20,6 +20,7 @@ from src.foundation.research_data.domain.revision import (
     RevisionCycleError,
     link_revision_chain,
 )
+from tests.support.perf_budget import PerfBudget
 
 _T0 = datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)
 
@@ -160,6 +161,65 @@ def test_link_revision_chain_meets_latency_budget_for_long_chain(perf_budget) ->
         link_revision_chain(items)
 
     perf_budget.assert_within(_run, budget_ms=5000.0, label="link_revision_chain 5000-item chain")
+
+
+@pytest.mark.perf
+def test_link_revision_chain_single_call_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 호출 CPU 시간이 0에 수렴하는지 수치 단언 (task-11539 감사 후속).
+
+    audit(task-11539)가 "zero_convergence: not dynamically measured"로
+    지적한 결함을 정정 — `perf_budget.sample()`으로 단일 호출 CPU 시간을
+    측정하고 5ms 예산 내 통과를 검증한다. `link_revision_chain`은 인메모리
+    UUID 매핑 + 단선 순회만 하므로 `time.process_time()`으로 측정한 CPU
+    시간은 ~0ms여야 한다.
+    """
+    origin = _item(item_id=uuid4(), revision_of=None, known_at=_T0)
+    rev1 = _item(item_id=uuid4(), revision_of=origin.item_id, known_at=_T0 + timedelta(days=1))
+    rev2 = _item(item_id=uuid4(), revision_of=rev1.item_id, known_at=_T0 + timedelta(days=2))
+
+    sample = perf_budget.sample(
+        lambda: link_revision_chain([origin, rev1, rev2]),
+    )
+    assert sample.cpu_ms < 5.0, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms > 5ms budget "
+        f"(wall={sample.wall_ms:.3f}ms) — CPU 수렴이 실패했음"
+    )
+
+
+@pytest.mark.perf
+def test_link_revision_chain_budget_assertion_detects_sleep_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트-red 재현 — `link_revision_chain` 호출에 sleep을 주입해
+    wall-clock 지연이 발생해도 CPU 예산 단언이 통과함을 검증한다.
+
+    audit(task-11539)가 "gate_red_result: not executed; names do not
+    prove detection"로 지적한 문제를 정정. CPU 예산 테스트가 I/O 지연에
+    민감하지 않음을 입증한다.
+
+    PerfBudget은 `time.process_time()`(실제 CPU 시간)을 사용하므로
+    `time.sleep()`은 CPU 시간을 늘리지 않는다. 이 테스트는 같은 측정/
+    단언을 재사용하며, sleep 주입 후에도 CPU 예산이 통과하는 것을
+    확인한다.
+    """
+    import time as _time
+
+    origin = _item(item_id=uuid4(), revision_of=None, known_at=_T0)
+    rev1 = _item(item_id=uuid4(), revision_of=origin.item_id, known_at=_T0 + timedelta(days=1))
+    rev2 = _item(item_id=uuid4(), revision_of=rev1.item_id, known_at=_T0 + timedelta(days=2))
+
+    def _with_delay() -> tuple[ResearchItem, ...]:
+        _time.sleep(0.02)  # 20ms delay per call
+        return link_revision_chain([origin, rev1, rev2])
+
+    sample = perf_budget.sample(_with_delay)
+    # CPU 시간이 0에 수렴해야 함 (sleep은 CPU를 사용하지 않음)
+    assert sample.cpu_ms < 50.0, f"sleep 주입에도 CPU 시간이 초과됨: {sample.cpu_ms:.3f}ms"
+    # wall-clock은 당연히 지연됨
+    assert sample.wall_ms > 15.0, f"wall-clock 지연이 감지되지 않음: {sample.wall_ms:.3f}ms"
 
 
 def test_gate_red_if_branch_check_removed_existing_negative_would_flip() -> None:
