@@ -287,7 +287,63 @@ async def test_evaluate_trust_freshness_perf_budget_p95_latency(
         repo = FakeTrustRepository(disclosure=disclosure, consent=consent)
         await evaluate_trust_freshness(repo, context, purpose="p1")
 
-    samples = await perf_budget.samples_async(_run_once, n=n_samples)
+    samples = await perf_budget.samples_async(_run_once, n=n_samples, batch=8)
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95 = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
     assert p95 < 50.0, f"evaluate_trust_freshness p95 latency {p95:.3f}ms exceeded 50ms budget"
+
+
+# ---------------------------------------------------------------------------
+# detection / gate-red repro with delay injection (D2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_evaluate_trust_freshness_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인 — sleep 주입으로 지연을 인위적으로 늘리면 같은 단언이
+    적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이
+    아님을 증명한다(task-11539 감사: single-call 양자화 결함 방지).
+
+    FakeTrustRepository.get_active_disclosure / get_latest_consent 에
+    50ms sleep 를 주입하므로 batch=8 로 8회 묶어도 평균 50ms > 50ms
+    예산 경계 (p95 단언이 적색) — wall-clock 예산이므로 sleep 으로
+            충분히 검출 가능.
+    """
+    import asyncio
+
+    context = _context()
+    disclosure = _disclosure(purpose="p1")
+    consent = _consent(tenant_id=context.tenant_id, purpose="p1")
+    n_samples = 50
+
+    async def _run_once() -> None:
+        repo = FakeTrustRepository(disclosure=disclosure, consent=consent)
+        # Patch the instance methods with delayed versions (instance-level
+        # patching avoids class-level descriptor issues with dataclasses).
+        orig_disc = repo.get_active_disclosure
+        orig_consent = repo.get_latest_consent
+
+        async def delayed_disc(purpose: str) -> Disclosure | None:
+            await asyncio.sleep(0.05)
+            return await orig_disc(purpose)
+
+        async def delayed_consent(tenant_id: UUID, purpose: str) -> Consent | None:
+            await asyncio.sleep(0.05)
+            return await orig_consent(tenant_id, purpose)
+
+        monkeypatch.setattr(repo, "get_active_disclosure", delayed_disc)
+        monkeypatch.setattr(repo, "get_latest_consent", delayed_consent)
+        await evaluate_trust_freshness(repo, context, purpose="p1")
+
+    samples = await perf_budget.samples_async(_run_once, n=n_samples, batch=8)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95 = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
+    # sleep 주입으로 인해 p95 가 50ms 예산을 넘으므로 AssertionError 를
+    # 유발한다 — 즉 같은 단언이 적색으로 넘어가는 것을 역으로 증명.
+    with pytest.raises(AssertionError):
+        assert p95 < 50.0, (
+            f"evaluate_trust_freshness p95 latency {p95:.3f}ms exceeded 50ms budget (injected)"
+        )
