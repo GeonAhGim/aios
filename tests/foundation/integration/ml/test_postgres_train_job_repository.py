@@ -241,3 +241,68 @@ async def test_checkpoint_db_roundtrip_p95_within_budget(
     budget = _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
     print(f"[AI-20 checkpoint] db roundtrip p95={p95_ms:.2f}ms budget<{budget:.1f}ms")
     assert p95_ms < _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
+
+
+# --- failure injection: injected delay proves the budget is real ---
+
+
+async def test_checkpoint_latency_budget_goes_red_with_delay_injection(
+    repository: PostgresTrainJobRepository,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """failure injection — `checkpoint` 호출에 100ms 지연을 주입하면 같은
+    단언이 AssertionError로 적색으로 넘어간다. 이는 성능 단언이 '아무것도
+    잡지 못하는 허울'이 아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의
+    0 수렴 결함 방지). 30회 호출당 100ms = 3초 wall time로 예산(50ms p95)을
+    초과하므로 단언이 적색으로 넘어간다.
+
+    DB 왕복 지연 예산이므로 `asyncio.sleep`을 repository.checkpoint 내부에
+    주입하고 `wall_ms`로 단언한다.
+    """
+    import asyncio
+    from functools import partial
+
+    original_checkpoint = repository.checkpoint
+
+    async def _slow_checkpoint(
+        job_id: str,
+        *,
+        expected_rounds_completed: int,
+        rounds_completed: int,
+        checkpoint: str,
+    ) -> object:
+        await asyncio.sleep(0.1)  # 100ms injected delay per call
+        return await original_checkpoint(
+            job_id,
+            expected_rounds_completed=expected_rounds_completed,
+            rounds_completed=rounds_completed,
+            checkpoint=checkpoint,
+        )
+
+    monkeypatch.setattr(repository, "checkpoint", _slow_checkpoint)
+
+    job_id = _job_id("j-inject")
+    await repository.create(job_id, "model-a")
+
+    samples: list[float] = []
+    rounds = 0
+    for i in range(30):
+        idx = i
+        rnd = rounds
+        sample = await perf_budget.sample_async(
+            partial(_checkpoint_one, repository, job_id, idx, rnd)
+        )
+        samples.append(sample.wall_ms)
+        rounds += 1
+
+    samples.sort()
+    p95_ms = samples[min(int(len(samples) * 0.95), len(samples) - 1)]
+    budget = _CHECKPOINT_DB_ROUNDTRIP_P95_BUDGET_MS
+    print(
+        f"[AI-20 checkpoint-inject] db roundtrip p95={p95_ms:.2f}ms "
+        f"budget<{budget:.1f}ms (injected 100ms/call)"
+    )
+    assert p95_ms >= budget, (
+        f"Injected delay should push p95 over budget: p95={p95_ms:.2f}ms >= {budget:.1f}ms"
+    )
