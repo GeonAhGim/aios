@@ -195,6 +195,69 @@ class TestFailureInjection:
 
 
 class TestPerformance:
+    """Single-call CPU convergence and budget-injection red-gate."""
+
+    def test_cpu_convergence_single_call(self) -> None:
+        """Trivial work → cpu_ms converges to near-0 for a single call.
+
+        Proves the measurement captures real CPU time, not noise.
+        With batch=1 the quantization error is ~15ms on Windows;
+        with batch=100 the per-call error drops to ~0.15ms.
+        """
+        samples = [
+            VenueCostSample("A", Decimal("10"), Decimal("1000")),
+            VenueCostSample("B", Decimal("20"), Decimal("2000")),
+        ]
+        sample = PerfBudget().sample(
+            lambda: recalibrate_weights(samples, _DEFAULT_CURRENT),
+            batch=100,
+        )
+        # Single-call CPU time for ~50 Decimal ops is well under 1ms.
+        assert sample.cpu_ms < 1.0, (
+            f"CPU time {sample.cpu_ms:.3f}ms exceeds 1ms floor; wall={sample.wall_ms:.3f}ms"
+        )
+
+    def test_perf_budget_goes_red_with_cpu_injection(self) -> None:
+        """검출력 확인 — CPU 부하를 주입하면 같은 단언이 적색으로 넘어간다.
+
+        busy_cpu() 가 process_time() 을 증가시키므로 assert_within 이
+        적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이
+        아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함
+        방지).
+        """
+        import time as _time
+
+        def busy_cpu(duration_sec: float) -> None:
+            """CPU 부하를 생성 — time.process_time() 을 증가시킨다."""
+            end = _time.process_time() + duration_sec
+            while _time.process_time() < end:
+                pass
+
+        # Inject 5ms CPU load per call → budget is 10ms, batch=100 calls
+        # Total injected = 500ms, budget = 10ms → must go red.
+        def _recalibrate_with_cpu_load() -> None:
+            recalibrate_weights(
+                [
+                    VenueCostSample("A", Decimal("10"), Decimal("1000")),
+                    VenueCostSample("B", Decimal("50"), Decimal("1000")),
+                ],
+                _DEFAULT_CURRENT,
+            )
+            busy_cpu(0.005)  # 5ms CPU per call
+
+        perf = PerfBudget()
+        sample = perf.best_of(_recalibrate_with_cpu_load, n=5, batch=1)
+        # Same assertion as the green test (budget_ms=10.0); with injected
+        # 5ms CPU the measurement MUST exceed budget. We expect this to
+        # fail — that's the point of this test.
+        with pytest.raises(AssertionError) as exc_info:
+            assert sample.cpu_ms < 10.0, (
+                f"Expected cpu_ms={sample.cpu_ms:.3f}ms to exceed 10ms budget"
+            )
+        assert "cpu_ms=" in str(exc_info.value) or "cpu=" in str(exc_info.value)
+
+
+class TestPerformanceGreen:
     """1000 samples must complete in reasonable time."""
 
     @pytest.mark.perf
