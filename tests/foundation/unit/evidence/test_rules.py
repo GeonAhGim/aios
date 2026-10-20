@@ -14,6 +14,7 @@ from src.foundation.evidence.domain.rules import (
     compute_payload_hash,
     verify_chain,
 )
+from tests.support.perf_budget import PerfBudget
 
 NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
 
@@ -158,3 +159,79 @@ def test_replayed_stale_event_breaks_chain_red_gate_repro():
     replayed_first_as_third = _event(sequence_no=3, previous_hash=first.event_hash)
     with pytest.raises(ChainIntegrityError):
         verify_chain([first, second, replayed_first_as_third])
+
+
+# ---- PERF-detection: 검출력 검증 (task-11539 감사 후속, task-16018) ----
+
+
+@pytest.mark.perf
+def test_verify_chain_budget_goes_red_with_cpu_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """검출력 확인 — CPU 시간을 monkeypatch로 100배 늘리면 같은 단언이
+    적색으로 넘어간다. PerfBudget 은 time.process_time() 을 쓰므로,
+    sleep() 주입은 CPU 시간 측정에 보이지 않는다. 대신 process_time 을
+    monkeypatch 해 실제 CPU 시간의 100 배를 반환하게 한다.
+
+    예산 500ms 로 실제 verify_chain(5k) 의 CPU 시간(~10-30ms 범위) 보다
+    훨씬 크지만, 100 배 주입으로 측정값이 예산을 명확히 초과해야 한다.
+    """
+    import time as _time
+
+    events: list[AuditEvent] = []
+    previous_hash: str | None = None
+    for sequence_no in range(1, 5001):
+        event = _event(sequence_no=sequence_no, previous_hash=previous_hash)
+        events.append(event)
+        previous_hash = event.event_hash
+
+    # 실제 CPU 시간의 100 배를 반환하게 monkeypatch
+    original_process_time = _time.process_time
+
+    def _slow_process_time() -> float:
+        return original_process_time() * 100.0
+
+    monkeypatch.setattr(_time, "process_time", _slow_process_time)
+
+    try:
+        # 같은 단언(budget_ms=500); CPU 100배 주입으로 반드시 적색이어야 함
+        perf_budget.assert_within(
+            lambda: verify_chain(events),
+            budget_ms=500,
+            n=5,
+            label="verify_chain(5k events, cpu_injected)",
+        )
+        pytest.fail(
+            "assert_within 이 적색을 raised 하지 않음 — CPU 주입이 감지되지 않음 (검출력 결함)"
+        )
+    except AssertionError as exc:
+        # 적색이 감지됨 — 기대 동작
+        assert "cpu=" in str(exc)
+
+
+@pytest.mark.perf
+def test_verify_chain_tight_budget_fails_proves_assertion_real(
+    perf_budget: PerfBudget,
+) -> None:
+    """예산이 실제 측정값보다 작은 경우 assert_within 이 적색으로 넘어간다 —
+    성능 단언이 '아무것도 잡지 못하는 허울'이 아님을 증명한다.
+
+    5k 이벤트에 대해 0.001ms(1마이크로초) 예산은 현실적으로 불가능하므로
+    반드시 적색이어야 한다.
+    """
+    events: list[AuditEvent] = []
+    previous_hash: str | None = None
+    for sequence_no in range(1, 5001):
+        event = _event(sequence_no=sequence_no, previous_hash=previous_hash)
+        events.append(event)
+        previous_hash = event.event_hash
+
+    with pytest.raises(AssertionError) as exc_info:
+        perf_budget.assert_within(
+            lambda: verify_chain(events),
+            budget_ms=0.001,
+            n=3,
+            label="verify_chain(5k events, impossible_budget)",
+        )
+    # AssertionError 메시지에 측정값이 포함되어야 함
+    assert "cpu=" in str(exc_info.value)
