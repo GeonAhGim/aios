@@ -26,6 +26,7 @@ from src.foundation.validation.domain.check_result import CheckResult
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from src.foundation.validation.domain.rules import compute_result_hash
+from tests.support.perf_budget import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _COST = CostModel(fee_bps=Decimal("10"), slippage_bps=Decimal("5"))
@@ -200,6 +201,40 @@ def test_p95_latency_within_local_budget(perf_budget) -> None:
     sorted_cpu = sorted(s.cpu_ms for s in samples)
     p95_ms = sorted_cpu[int(len(sorted_cpu) * 0.95)]
     assert p95_ms < 40.0, f"p95={p95_ms:.2f}ms exceeds 40ms budget"
+
+
+# -- D2 gate-red budget injection ----------------------------------------------
+
+
+def test_gate_red_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(40ms)을 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 50ms를 반환하므로 p95 단언이
+    40ms budget를 초과해 적색 확정.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.05  # 50ms per call = >40ms budget
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    ctx = _ctx(prior_results={"oos_walk_forward": _oos_result()})
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        samples = perf_budget.samples(lambda: run(ctx), n=30)
+        sorted_cpu = sorted(s.cpu_ms for s in samples)
+        p95_ms = sorted_cpu[int(len(sorted_cpu) * 0.95)]
+        assert p95_ms < 40.0, f"p95={p95_ms:.2f}ms exceeds 40ms budget"
 
 
 # -- D2 gate-red reproduction --------------------------------------------------
