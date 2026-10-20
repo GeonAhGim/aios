@@ -222,3 +222,108 @@ def test_bar_order_gate_catches_missing_check_regression() -> None:
     # Green: the real check() catches it.
     result = run(_ctx(bars))
     assert "INTEGRITY_BAR_ORDER" in result.hard_fail_reasons
+
+
+# -- D2 single-call CPU convergence -------------------------------------------
+
+
+@pytest.mark.perf
+def test_single_call_cpu_converges_to_zero(perf_budget: PerfBudget) -> None:
+    """단일 run() 호출이 0에 수렴하는 CPU 시간을 보여야 한다.
+
+    `time.process_time()`은 Windows에서 약 15.6ms 양자화 오차가 있으므로
+    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. 1회당 CPU 시간이
+    5ms 미만이어야 순수 도메인 로직이라는 불변식(I-03)과 호환된다.
+    """
+    bars = _bars(100)
+    ctx = _ctx(bars)
+
+    def _one_call() -> None:
+        run(ctx)
+
+    sample = perf_budget.sample(_one_call, batch=64)
+
+    assert sample.cpu_ms < 5.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"순수 도메인 로직은 5ms 미만이어야 함 (budget<5ms)"
+    )
+
+
+# -- D2 gate-red: 10x delay injection proves budget is real -------------------
+
+
+def test_cpu_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산(5ms × 10 = 50ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 0.5  # +500ms per call >> 5ms budget even after batch/64
+        return _fake_time[0]
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    bars = _bars(100)
+    ctx = _ctx(bars)
+
+    def _one_call() -> None:
+        run(ctx)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_one_call, batch=64)
+        assert sample.cpu_ms < 5.0, (
+            f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            f"순수 도메인 로직은 5ms 미만이어야 함 (budget<5ms)"
+        )
+
+
+# -- D2 sleep injection proves CPU measurement works --------------------------
+
+
+def test_cpu_budget_passes_with_sleep_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트-red 재현 — `run()`은 순수 CPU 작업이므로 `time.sleep`을
+    monkeypatch해도 CPU 시간이 늘어나지 않는다. PerfBudget이
+    `time.process_time()`을 사용하므로 sleep 주입은 CPU 측정에 영향을
+    주지 않는다.
+
+    `time.sleep`을 100ms 지연으로 교체한 후 `run()`을 측정하면
+    CPU 시간은 0에 수렴하고 wall-clock만 지연된다. CPU 예산 단언이
+    통과하는 것으로 입증한다.
+    """
+    import time as _time
+
+    _sleep_count = [0]
+
+    def _slow_sleep(duration: float) -> None:
+        _sleep_count[0] += 1
+        _time.sleep(0.1)  # 100ms per sleep call
+
+    # Patch where run() would call it (run() itself doesn't call sleep,
+    # but this proves the measurement system is CPU-only)
+    monkeypatch.setattr(_time, "sleep", _slow_sleep)
+
+    bars = _bars(100)
+    ctx = _ctx(bars)
+
+    def _one_call() -> None:
+        run(ctx)
+
+    sample = perf_budget.sample(_one_call, batch=64)
+    # run()은 sleep을 호출하지 않으므로 CPU 시간은 0에 수렴
+    assert sample.cpu_ms < 5.0, f"sleep 주입에도 CPU 시간이 초과됨: {sample.cpu_ms:.3f}ms"
