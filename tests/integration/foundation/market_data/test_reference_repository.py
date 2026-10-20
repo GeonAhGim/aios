@@ -280,6 +280,91 @@ async def test_get_instrument_lookup_p95_under_budget(pool, repo, perf_budget):
     assert p95_ms < budget_p95_ms, f"get_instrument p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
 
 
+@pytest.mark.perf
+async def test_get_instrument_cpu_ms_converges_below_quantization_noise(
+    pool, repo, perf_budget
+) -> None:
+    """CPU 측정 양자화 오차 검증: DB 왕복은 I/O 바운드이므로 cpu_ms는
+    Windows의 time.process_time() 약 15.6ms tick 양자화 오차 범위(
+    batch=8 시 ~2ms) 내에 수렴해야 한다. batch 없이 측정하면 대부분 0 또는
+    15.6ms로 양자화되어 p95가 예산 단언과 무관해지므로 batch=8 로 줄인다.
+
+    이 테스트는 단언이 "cpu_ms 가 0에 수렴한다"는 것이 아니라
+    "cpu_ms 가 양자화 오차 범위 내에 있다"는 것을 검증한다.
+    """
+    symbol = _krx_symbol()
+    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    async with pool.acquire() as conn, conn.transaction():
+        await repo.register(conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at))
+
+    n = 50
+    # Windows tick(15.6ms) / batch(8) ≈ 2ms 양자화 오차 한도
+    cpu_budget_ms = 2.0
+    at = datetime.now(timezone.utc)
+
+    async def _probe():
+        async with pool.acquire() as conn, conn.transaction():
+            return await repo.get_instrument(conn, Venue.KIS_KRX, symbol, at)
+
+    samples = await perf_budget.samples_async(_probe, n=n, batch=8)
+    cpu_ms_list = sorted(s.cpu_ms for s in samples)
+    p95_cpu_ms = cpu_ms_list[min(int(0.95 * len(cpu_ms_list)), len(cpu_ms_list) - 1)]
+    print(
+        f"[LA-12 get_instrument cpu] n={n} p95_cpu={p95_cpu_ms:.2f}ms budget<{cpu_budget_ms:.1f}ms"
+    )
+    assert p95_cpu_ms < cpu_budget_ms, (
+        f"get_instrument cpu p95가 양자화 오차 한도를 넘었습니다: "
+        f"{p95_cpu_ms:.2f}ms (batch=8 budget={cpu_budget_ms:.1f}ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_get_instrument_lookup_p95_goes_red_on_10x_delay_injection(
+    pool, repo, perf_budget, monkeypatch
+) -> None:
+    """게이트 적색 재현(D2): sleep() 주입으로 지연을 인위적으로 10배 늘리면
+    wall_ms 예산을 초과해야 한다(red-gate 재현). 단언/마커 삭제와 예산
+    완화가 아니라, 단언이 "제대로 작동하는지"를 역으로 증명한다.
+
+    실제 DB 왕복(≈5ms)의 10배인 50ms sleep 을 주입하면 p95 wall_ms가
+    30ms 예산을 명확히 넘어야 한다.
+    """
+    import asyncio
+
+    symbol = _krx_symbol()
+    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    async with pool.acquire() as conn, conn.transaction():
+        await repo.register(conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at))
+
+    budget_p95_ms = 30.0
+    at = datetime.now(timezone.utc)
+    original_get_instrument = repo.get_instrument
+
+    async def _delayed_get_instrument(*args, **kwargs):
+        await asyncio.sleep(0.05)  # 50ms ≈ 10× 실제 DB 왕복
+        return await original_get_instrument(*args, **kwargs)
+
+    monkeypatch.setattr(repo, "get_instrument", _delayed_get_instrument)
+
+    n = 50
+
+    async def _probe():
+        async with pool.acquire() as conn, conn.transaction():
+            return await repo.get_instrument(conn, Venue.KIS_KRX, symbol, at)
+
+    samples = await perf_budget.samples_async(_probe, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    print(
+        f"[LA-12 get_instrument-injected] n={n} p95={p95_ms:.2f}ms "
+        f"budget>{budget_p95_ms:.0f}ms (should go red)"
+    )
+    assert p95_ms > budget_p95_ms, (
+        f"10x 지연 주입에도 p95가 예산을 넘지 않았다: {p95_ms:.2f}ms — "
+        f"단언이 느린 호출을 포착하지 못한다"
+    )
+
+
 async def test_gate_red_when_digest_check_removed_negative_test_would_fail(pool, repo, monkeypatch):
     """게이트 적색 재현: record_action의 다이제스트 불일치 검사(fail-closed,
     §9.2 LA-12)를 제거하는 회귀를 주입하면 탬퍼가 조용히 통과한다 —
