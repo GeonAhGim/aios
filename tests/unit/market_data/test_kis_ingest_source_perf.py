@@ -116,6 +116,8 @@ async def test_fetch_candles_p95_latency_detection_power_10x_delay_goes_red(
     print(
         f"[LA-20 fetch_candles 10x-delay] n={n} p95={p95_ms:.2f}ms (budget<{budget_p95_ms:.0f}ms)"
     )
-    assert p95_ms < budget_p95_ms, (
-        f"예상: 10배 지연(300ms) 주입 시 p95가 예산을 넘어 적색. 실제: {p95_ms:.2f}ms"
-    )
+    # 10배 지연 주입 시 p95가 예산을 넘어야 함 → AssertionError 발생이 정상
+    with pytest.raises(AssertionError):
+        assert p95_ms < budget_p95_ms, (
+            f"예상: 10배 지연(300ms) 주입 시 p95가 예산을 넘어 적색. 실제: {p95_ms:.2f}ms"
+        )
