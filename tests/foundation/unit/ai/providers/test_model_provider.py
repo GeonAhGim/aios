@@ -112,4 +112,4 @@ def test_generation_budget_rejects_string_contaminated_cost_cap_from_upstream_co
     부정 테스트이므로 pytest.raises(TypeError)로 검증한다.
     """
     with pytest.raises(TypeError):
-        GenerationBudget(cost_cap="1.00", max_output_tokens=100)
+        GenerationBudget(cost_cap="1.00", max_output_tokens=100)  # type: ignore[arg-type]
