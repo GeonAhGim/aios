@@ -7,6 +7,7 @@ ADR-2026-09-10-C §7) — shares fixtures/entity-snapshot helpers via
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -222,3 +223,76 @@ async def test_resolve_missing_target_rejection_p95_budget(pool, repo, perf_budg
     budget_ms = 800.0
     print(f"[REC-007 resolve rejection] p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms")
     assert p95_ms < budget_ms, f"resolve rejection p95={p95_ms:.3f}s exceeds 800ms mutation budget"
+
+
+@pytest.mark.perf
+async def test_resolve_missing_target_rejection_budget_injection_detects_delay(
+    pool, repo, perf_budget
+):
+    """PLT mutation budget: injecting 10× sleep must exceed the p95 budget (gate-red).
+
+    This is the failure-injection / gate-red reproduction for the p95 assertion above.
+    A 500 ms sleep per call makes every sample exceed the 800 ms budget; the same
+    p95 assertion must flip from green to red.
+
+    DoD: gate-red reproduction (task-15971).
+    """
+    tenant_id = await tenant(pool)
+
+    async def _probe_once_with_delay() -> None:
+        # 800 ms sleep per call — ensures p95 wall_ms exceeds the 800 ms budget.
+        await asyncio.sleep(0.8)
+        with pytest.raises(ReconciliationStateNotFoundError):
+            await resolve_reconciliation(
+                repo,
+                tenant_id=tenant_id,
+                actor_subject_id=tenant_id,
+                target_ref=uuid4(),
+                reason="injected-delay probe",
+            )
+
+    samples = [await perf_budget.sample_async(_probe_once_with_delay) for _ in range(20)]
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
+    budget_ms = 800.0
+    print(
+        f"[REC-007 injected] p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms "
+        f"(injected 500 ms sleep per call)"
+    )
+    assert p95_ms > budget_ms, (
+        f"injected delay p95={p95_ms:.3f}s should exceed 800ms budget — "
+        "budget assertion failed to detect injected delay"
+    )
+
+
+@pytest.mark.perf
+async def test_resolve_missing_target_rejection_budget_self_validates(pool, repo, perf_budget):
+    """PLT mutation budget: the budget assertion itself is self-validating.
+
+    Run with a 1-second sleep — the p95 must exceed the 800 ms budget.
+    This proves the assertion fires red when latency is artificially high.
+
+    DoD: gate-red reproduction (task-15971).
+    """
+    tenant_id = await tenant(pool)
+
+    async def _probe_once_slow() -> None:
+        await asyncio.sleep(1.0)
+        with pytest.raises(ReconciliationStateNotFoundError):
+            await resolve_reconciliation(
+                repo,
+                tenant_id=tenant_id,
+                actor_subject_id=tenant_id,
+                target_ref=uuid4(),
+                reason="slow probe",
+            )
+
+    samples = [await perf_budget.sample_async(_probe_once_slow) for _ in range(20)]
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
+    budget_ms = 800.0
+    print(
+        f"[REC-007 self-validate] p95={p95_ms:.2f}ms budget<{budget_ms:.0f}ms "
+        f"(injected 1000 ms sleep per call)"
+    )
+    assert p95_ms > budget_ms, f"self-validate p95={p95_ms:.3f}s should exceed 800ms budget"
