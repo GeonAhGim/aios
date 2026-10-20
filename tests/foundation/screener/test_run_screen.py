@@ -342,6 +342,70 @@ async def test_run_screen_scans_5000_symbols_within_adr_budget(perf_budget: Perf
     assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
 
+# ---- failure-injection: CPU 시간 10배 주입 →预算 단언이 적색으로 전환됨 ----
+# PerfBudget.sample_async 는 time.process_time() 을 사용하므로, sleep() 주입은
+# CPU 측정에 보이지 않는다. 대신 time.process_time 를 monkeypatch 해 실제
+# CPU 시간의 N 배를 반환하게 하면预算 단언이 반드시 실패해야 한다.
+
+
+@pytest.mark.perf
+async def test_run_screen_budget_assertion_fails_on_cpu_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정상 입력이预算을 통과하는 측정 경로를, CPU 시간을 10 배로 늘리면
+    적색으로 전환한다 — 성능 게이트가 지연 회귀를 실제로 적색으로
+    포착한다는 것을 단언 수준에서 증명 (D2 DoD 실패주입 1 건).
+
+    `PerfBudget` 은 `time.process_time()` 을 쓰므로, `sleep()` 주입은
+    CPU 시간 측정에 보이지 않는다. 대신 `time.process_time` 을
+    monkeypatch 해 실제 CPU 시간의 10 배를 반환하게 한다.
+
+    budget_ms=100ms 로 낮춰서 실제 스캔 CPU 시간(~30ms) 의 10 배(~300ms) 가
+    반드시 예산을 초과하도록 한다 —budget 이 2000ms 라면 10 배 주입으로도
+    budget 안에 남아 검출력을 증명할 수 없다.
+    """
+    import time as _time
+
+    instruments = [_instrument(uuid4(), symbol=f"S{i:05d}") for i in range(5000)]
+    fields = {i.instrument_id: {"close": Decimal("50")} for i in instruments}
+    field_source = FakeFieldSource(instruments, fields)
+
+    async def _scan() -> ScreenRunPage:
+        return await run_screen(
+            _definition(),
+            field_source=field_source,
+            cache=ScreenResultCache(),
+            page_size=MAX_RESULT_ROWS,
+        )
+
+    # 실제 CPU 시간의 10 배를 반환하게 monkeypatch
+    original_process_time = _time.process_time
+
+    def _slow_process_time() -> float:
+        return original_process_time() * 10.0
+
+    monkeypatch.setattr(_time, "process_time", _slow_process_time)
+
+    try:
+        budget_ms = 100.0  # 실제 스캔이 ~30ms 면 10 배=300ms > 100ms 로 명확 적색
+        sample = await perf_budget.sample_async(_scan)
+        # 주입된 CPU 시간이预算을 초과해야 함 — 단언이 제대로 작동하는지 확인
+        assert sample.cpu_ms < budget_ms, (
+            f"cpu={sample.cpu_ms:.1f}ms wall={sample.wall_ms:.1f}ms budget<{budget_ms:.1f}ms"
+        )
+        pytest.fail(
+            f"assert_within 이 적색을 raised 하지 않음 — "
+            f"cpu={sample.cpu_ms:.1f}ms budget={budget_ms:.1f}ms "
+            f"주입이 감지되지 않음"
+        )
+    except AssertionError as exc:
+        # 적색이 감지됨 — 기대 동작
+        assert "cpu=" in str(exc)
+    finally:
+        _time.process_time = original_process_time
+
+
 # ---- gate-red repro: prove the "no float() coercion" scanner used below would
 # actually catch a violation, then prove the real source files are clean ----
 
