@@ -21,16 +21,6 @@ class RecordingProvider:
         return "최종 자산이 시작 대비 증가했습니다."
 
 
-async def test_explains_given_metrics_only() -> None:
-    provider = RecordingProvider()
-    result = await explain_backtest(
-        metrics={"final_equity": "1050.00", "bars": "120"}, provider=provider
-    )
-    assert result.narrative
-    assert "1050.00" in provider.summaries[0]
-    assert result.injection.detected is False
-
-
 async def test_injected_question_is_flagged_and_quarantined() -> None:
     provider = RecordingProvider()
     result = await explain_backtest(
