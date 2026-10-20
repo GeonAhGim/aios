@@ -25,6 +25,7 @@ tenant_id FK 거부·RLS SELECT 교차증명만 갖췄을 뿐 (1) FK/RLS 이외�
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -296,3 +297,50 @@ async def test_pos_borrow_position_batch_insert_meets_latency_budget(pool, perf_
     budget_ms = 3000.0  # 3.0초
 
     assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+
+
+# --- D2 검출력 확인: 지연 주입 시 적색 전환 ---------------------------------
+
+
+@pytest.mark.perf
+async def test_pos_borrow_position_batch_insert_goes_red_with_delay_injection(
+    pool,
+    monkeypatch,
+    perf_budget,
+) -> None:
+    """검출력 확인 — `asyncpg.Connection.execute`에 100ms 지연을 주입하면
+    같은 단언이 적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는
+    허울'이 아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴
+    결함 방지). 50건 × 100ms = 5초 wall time로 예산(3초)을 초과하므로
+    단언이 적색으로 넘어간다."""
+    tenant_id = await create_test_tenant(pool)
+    batch_size = 50
+
+    original_execute = asyncpg.Connection.execute
+
+    async def _slow_execute(self: asyncpg.Connection, *args: object, **kwargs: object) -> object:
+        await asyncio.sleep(0.1)  # 100ms 지연
+        return await original_execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "execute", _slow_execute)
+
+    async def _insert_batch() -> None:
+        async with pool.acquire() as conn:
+            for i in range(batch_size):
+                await conn.execute(
+                    """
+                    INSERT INTO pos_borrow_position
+                        (position_key, tenant_id, short_quantity, supply_rate, currency)
+                    VALUES ($1, $2, 100, 0.03, 'USDT')
+                    """,
+                    f"BORROW-DELAY-{uuid4().hex}-{i}",
+                    tenant_id,
+                )
+
+    sample = await perf_budget.sample_async(_insert_batch)
+    budget_ms = 3000.0  # 3.0초
+
+    assert sample.wall_ms >= budget_ms, (
+        f"Perf assertion should go red with injected delay: "
+        f"{sample.wall_ms:.1f}ms (expected >= {budget_ms}ms)"
+    )
