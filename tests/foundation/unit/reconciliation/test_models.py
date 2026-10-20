@@ -6,6 +6,7 @@ their state enums.
 """
 
 import dataclasses
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
@@ -21,6 +22,7 @@ from src.foundation.reconciliation.domain.models import (
     ReconciliationState,
     RunState,
 )
+from tests.support.perf_budget import PerfBudget
 
 NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
@@ -232,3 +234,92 @@ def test_bulk_construction_meets_latency_budget(perf_budget: Any) -> None:
             _state()
 
     perf_budget.assert_within(_bulk, budget_ms=1000.0, n=1)
+
+
+@pytest.mark.perf
+def test_perf_assertion_fails_with_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — `time.process_time`을
+    monkeypatch해 1회 호출당 예산(1000ms)을 10배 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 12000.0  # 12s per call → budget 1000ms × 12x 초과
+        return _fake_time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    def _bulk() -> None:
+        for _ in range(10_000):
+            _policy()
+            _item()
+            _run()
+            _state()
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _bulk, budget_ms=1000.0, n=1, label="reconciliation bulk delay-injected"
+        )
+
+
+def test_single_call_cpu_converges_to_sub_tick_value() -> None:
+    """단일 호출 CPU 시간이 양자화 오차 범위 내에 수렴하는지 검증(task-11539 감사 후속).
+
+    `_policy()` 등 value object construction은 O(1) 인메모리 작업이므로
+    `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
+    Windows `time.process_time()`은 ~15.6ms 양자화 오차가 있다 —
+    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다. 64회 평균 CPU 시간이
+    1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    """
+    pb = PerfBudget()
+
+    # batch=1: 단일 호출 — 양자화 영향 큼
+    samples_single = [pb.sample(_policy).cpu_ms for _ in range(64)]
+
+    # batch=64: 64회 묶음 — 양자화 오차 1/64로 줄어듦
+    sample_batch = pb.sample(_policy, batch=64)
+
+    avg_single = sum(samples_single) / len(samples_single)
+    assert avg_single < 1.0, f"single-call avg cpu_ms={avg_single:.3f}ms가 1ms 미만이 아님"
+    assert sample_batch.cpu_ms < 1.0, (
+        f"batch=64 cpu_ms={sample_batch.cpu_ms:.3f}ms가 1ms 미만이 아님"
+    )
+
+
+def test_bulk_construction_negative_empty_policy_raises() -> None:
+    """MaterialityPolicy에 필수 필드가 없으면 construction이 실패한다."""
+    with pytest.raises(TypeError):
+        MaterialityPolicy()
+
+
+def test_bulk_construction_negative_missing_required_item_field_raises() -> None:
+    """ReconciliationItem에 필수 필드(entity_type)가 없으면 construction이 실패한다."""
+    with pytest.raises(TypeError):
+        ReconciliationItem(
+            id=uuid4(),
+            run_id=uuid4(),
+            provider_value=Decimal("100.00"),
+            created_at=NOW,
+        )
+
+
+def test_bulk_construction_negative_invalid_classification_raises() -> None:
+    """잘못된 Classification 값은 construction을 차단한다."""
+    with pytest.raises(ValueError):
+        ReconciliationItem(
+            id=uuid4(),
+            run_id=uuid4(),
+            entity_type="USDT_BALANCE",
+            entity_key="acct-1",
+            internal_value=Decimal("100.00"),
+            provider_value=Decimal("100.00"),
+            classification=Classification("INVALID"),
+            created_at=NOW,
+        )
