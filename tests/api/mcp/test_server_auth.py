@@ -217,26 +217,53 @@ async def test_mcp_roundtrip_p95_within_budget(
     assert p95_ms < _MCP_ROUNDTRIP_P95_BUDGET_MS
 
 
-# --- 게이트 적색 재현 ---
+# --- 게이트 적색 재현: sleep 주입으로 p95가 실제 예산을 초과함을 검증 ---
 
 
 @pytest.mark.perf
 async def test_gate_red_budget_actually_fails_past_budget(
     client, perf_budget: PerfBudget, token_repo: PostgresAgentTokenRepository
 ):
+    """예산 10배 지연(monkeypatch sleep)을 주입하면 p95가 _MCP_ROUNDTRIP_P95_BUDGET_MS(200ms)를
+    초과해야 한다 -- 이 테스트는 '게이트가 실제 예산 위반을 적색으로 포착하는가'를
+    동적으로 증명한다. absurdly_low_budget(1e-9) 대신 실제 예산을 사용하고
+    sleep(0.5s)로 지연을 주입한다."""
+    import time
+
+    from src.foundation.ai.factory.application import research_tools
+
+    _original_compute = research_tools.compute_indicator
+
+    def _slow_compute(*args: object, **kwargs: object) -> dict[str, list[float]]:
+        # 0.5초 sleep -- 예산 200ms의 2.5배 (여러 호출 합치면 p95가 200ms 초과)
+        time.sleep(0.5)
+        return _original_compute(*args, **kwargs)
+
     issued = await issue(token_repo, tenant_id=uuid4(), scopes=frozenset({Scope.READ}))
 
-    async def _roundtrip_once() -> None:
-        await client.post(
-            "/mcp/tools/compute_indicator",
-            json=_INDICATOR_BODY,
-            headers={AGENT_TOKEN_HEADER: issued.secret},
+    research_tools.compute_indicator = _slow_compute
+
+    try:
+
+        async def _roundtrip_once() -> None:
+            await client.post(
+                "/mcp/tools/compute_indicator",
+                json=_INDICATOR_BODY,
+                headers={AGENT_TOKEN_HEADER: issued.secret},
+            )
+
+        samples = [await perf_budget.sample_async(_roundtrip_once) for _ in range(5)]
+        wall_ms_list = sorted(s.wall_ms for s in samples)
+        p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
+
+        print(
+            f"[AI-15 mcp server gate-red] "
+            f"p95={p95_ms:.2f}ms budget={_MCP_ROUNDTRIP_P95_BUDGET_MS:.0f}ms"
         )
-
-    samples = [await perf_budget.sample_async(_roundtrip_once) for _ in range(5)]
-    wall_ms_list = sorted(s.wall_ms for s in samples)
-    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
-
-    absurdly_low_budget_ms = 1e-9
-    with pytest.raises(AssertionError):
-        assert p95_ms < absurdly_low_budget_ms
+        # sleep(0.5s) 주입 후 p95는 200ms 예산을 크게 초과해야 한다
+        assert p95_ms > _MCP_ROUNDTRIP_P95_BUDGET_MS, (
+            f"gate-red: p95={p95_ms:.2f}ms > budget={_MCP_ROUNDTRIP_P95_BUDGET_MS:.0f}ms"
+        )
+    finally:
+        # 항상 원상복구
+        research_tools.compute_indicator = _original_compute
