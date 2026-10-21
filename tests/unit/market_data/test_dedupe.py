@@ -123,6 +123,60 @@ def test_dedupe_handles_large_batch_within_latency_budget(
     assert len(sample.result.kept) == 20_000 + 1
 
 
+# ── 0 수렴 (CPU 측정 단일 호출이 0에 수렴함을 동적으로 검증) ──────────────────
+
+
+@pytest.mark.perf
+def test_dedupe_cpu_time_converges_to_zero_for_small_input(
+    perf_budget: PerfBudget,
+) -> None:
+    """0 수렴 검증: 단일 dedupe 호출(고유 캔들 100개)의 CPU 시간이 1ms 미만이어야
+    한다 — Windows의 time.process_time() 약 15.6ms 양자화 오차 내에서
+    사실상 0ms에 수렴한다."""
+    small = [_candle(open_time=_OPEN + timedelta(minutes=i)) for i in range(100)]
+    sample = perf_budget.sample(lambda: dedupe(small), batch=1)
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "작은 입력은 사실상 0ms에 수렴해야 함 (budget<1ms)"
+    )
+
+
+# ── 게이트 적색 재현: 10x 지연 monkeypatch가 예산을 초과하면 적색 ─────────────
+
+
+@pytest.mark.perf
+def test_dedupe_cpu_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(3000ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. fake process_time이 호출당 5000ms를 반환하므로
+    측정 예산 3000ms를 초과해 적색 확정.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 100.0  # +100s per call → diff=200s / batch=20 = 10000ms >> 3000ms budget
+        return _fake_time[0]
+
+    # Patch at the module level where PerfBudget reads it
+    import time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    unique = [_candle(open_time=_OPEN + timedelta(minutes=i)) for i in range(20_000)]
+    dup_group = [_candle(open_time=_OPEN + timedelta(days=365)) for _ in range(50)]
+    with pytest.raises(AssertionError):
+        # same measurement/assertion as the green test — budget exceeded → red
+        perf_budget.assert_within(lambda: dedupe(unique + dup_group), budget_ms=3000.0, batch=20)
+
+
 def test_three_member_group_two_identical_one_different_isolates_all_three() -> None:
     """게이트 적색 재현: 3건 그룹에서 2건만 동일하고 1건이 다르면, 다른 1건만
     격리하는 게 아니라 그룹 전체(3건)를 conflicts로 격리해야 한다 —
