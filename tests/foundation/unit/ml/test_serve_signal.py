@@ -25,6 +25,7 @@ from src.foundation.ml.contracts.v1 import FeatureSpec, ModelCard, TrainDataLine
 from src.foundation.ml.domain.point_in_time import FutureDataLeakageError
 from src.foundation.ml.ports.feature_store import FeatureValue
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 _NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -414,3 +415,63 @@ async def test_serve_signal_latency_p99_within_budget(
     budget_us = 1000.0  # 1 ms
     print(f"[AI-21 serve_signal] n={n} p99={p99_us:.2f}us budget<{budget_us:.0f}us")
     assert p99_us < budget_us, f"p99 latency {p99_us:.2f}us exceeded {budget_us:.0f}us budget"
+
+
+@pytest.mark.perf
+async def test_serve_signal_latency_red_path_exceeds_budget_with_10x_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red-path: inject a 10 ms delay per call (10x the 1 ms budget) via
+    ``delayed_async`` on ``load_card`` and confirm the same p99 assertion
+    fails -- proves the budget guard is live and not a false-positive.
+
+    Budget: 1 ms (1000 us). Injected delay: 10 ms = 10 000 us per call.
+    With 2000 calls the p99 will be dominated by the injected delay and
+    must exceed the 1000 us budget."""
+    registry = _FakeModelRegistry({("momentum-lgbm", "v1"): _card()})
+    store = _FakeFeatureStore()
+    n = 2000
+    as_of_dates = [_NOW + timedelta(hours=i) for i in range(n)]
+    for as_of in as_of_dates:
+        store.write_batch(
+            _spec("rsi_14"),
+            as_of.date(),
+            [FeatureValue(entity_id="BTC-USD", as_of=as_of, value="42.0")],
+        )
+    predictor = _LinearPredictor({"rsi_14": 1.0})
+
+    _state: list[int] = [0]
+
+    async def _serve_once() -> None:
+        i = _state[0]
+        await ss.serve_signal(
+            model_id="momentum-lgbm",
+            version="v1",
+            entity_id="BTC-USD",
+            as_of=as_of_dates[i],
+            feature_specs=[_spec("rsi_14")],
+            registry=registry,
+            feature_store=store,
+            predictor=predictor,
+        )
+        _state[0] += 1
+
+    # Inject 10 ms delay on every async call inside serve_signal
+    # (load_card → registry.get/latest).
+    delayed_load_card = delayed_async(ss.load_card, seconds=0.01)
+    monkeypatch.setattr(ss, "load_card", delayed_load_card)
+
+    budget = PerfBudget()
+    samples = []
+    for _ in range(n):
+        samples.append(await budget.sample_async(_serve_once))
+    wall_us_list = sorted(s.wall_ms * 1000 for s in samples)
+    p99_us = wall_us_list[min(int(n * 0.99), len(wall_us_list) - 1)]
+    budget_us = 1000.0  # 1 ms
+    print(f"[AI-21 serve_signal RED] n={n} p99={p99_us:.2f}us budget<{budget_us:.0f}us")
+    # This assertion MUST fail — the injected delay far exceeds the budget.
+    # The test passes when the assertion raises AssertionError.
+    with pytest.raises(AssertionError):
+        assert p99_us < budget_us, (
+            f"p99 {p99_us:.2f}us did not exceed {budget_us:.0f}us budget (red-path should fail)"
+        )
