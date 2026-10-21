@@ -28,6 +28,7 @@ from src.foundation.ems.contracts.v1 import (
     ParentOrder,
     ParentOrderConstraints,
 )
+from tests.support.perf_budget import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -245,3 +246,48 @@ def test_get_algo_progress_stays_fast_over_max_slice_count(
     assert sample.cpu_ms < 50, (
         f"get_algo_progress took {sample.cpu_ms:.3f}ms per call (batch=200) — budget 50ms"
     )
+
+
+# -- gate-red: delay injection --------------------------------------------------
+
+
+@pytest.mark.perf
+def test_get_algo_progress_perf_assertion_catches_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction (D2, task-11539 후속): 성능 예산 단언이 실제로
+    위반을 포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해
+    1회 호출당 예산(50ms)을 초과하는 CPU 시간을 가장하면 같은 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    import time as _time
+
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 60.0  # 60ms per call >> 50ms budget
+        return _fake_time[0]
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    parent_id = uuid4()
+    children = [_child(parent_id, i, Decimal("1")) for i in range(500)]
+    plan = AlgoRunPlan(
+        parent=_parent(parent_id, qty=Decimal("500")),
+        children=children,
+        submitted_slice_seqs=set(range(0, 500, 2)),
+    )
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(
+            lambda: get_algo_progress(plan, parent_id=parent_id),
+            batch=1,
+        )
+        assert sample.cpu_ms < 50, (
+            f"get_algo_progress took {sample.cpu_ms:.3f}ms per call — budget 50ms"
+        )
