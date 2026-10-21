@@ -72,7 +72,7 @@ def _command(**overrides: object) -> SubmitOrderCommand:
         "issued_at": datetime.now(timezone.utc),
     }
     defaults.update(overrides)
-    return SubmitOrderCommand(**defaults)  # type: ignore[arg-type]
+    return SubmitOrderCommand.model_validate(defaults)
 
 
 def test_assert_supported_passes_for_supported_combination() -> None:

@@ -86,4 +86,4 @@ def make_profile(**overrides: object) -> VenueCapabilityProfile:
         "verified": "LIVE_VERIFIED",
     }
     defaults.update(overrides)
-    return VenueCapabilityProfile(**defaults)  # type: ignore[arg-type]
+    return VenueCapabilityProfile.model_validate(defaults)

@@ -49,7 +49,7 @@ def _order_view(**overrides: object) -> OrderView:
         "updated_at": datetime.now(timezone.utc),
     }
     defaults.update(overrides)
-    return OrderView(**defaults)  # type: ignore[arg-type]
+    return OrderView.model_validate(defaults)
 
 
 def test_matching_order_produces_no_discrepancy() -> None:

@@ -51,7 +51,7 @@ def _request(**overrides: object) -> AlgoRequest:
         "seed": 42,
     }
     defaults.update(overrides)
-    return AlgoRequest(**defaults)  # type: ignore[arg-type]
+    return AlgoRequest.model_validate(defaults)
 
 
 def test_slices_sum_exactly_to_total_quantity() -> None:

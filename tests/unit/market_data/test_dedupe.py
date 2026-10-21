@@ -42,7 +42,7 @@ def _candle(open_time: datetime = _OPEN, **overrides: object) -> CandleRecord:
         volume=Decimal("10"),
     )
     fields.update(overrides)
-    return CandleRecord(**fields)  # type: ignore[arg-type]
+    return CandleRecord.model_validate(fields)
 
 
 def test_no_duplicates_keeps_everything() -> None:
