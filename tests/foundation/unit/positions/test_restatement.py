@@ -28,6 +28,7 @@ from src.foundation.positions.domain.restatement import (
 )
 from src.foundation.positions.domain.snapshot_builder import SnapshotFold, fold
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _POSITION_KEY = "binance:BTCUSDT:s1:e1"
 _ORDER_ID = UUID("00000000-0000-0000-0000-0000000000aa")
@@ -110,6 +111,24 @@ def test_is_retroactive_true_when_occurred_before_valid_from() -> None:
 def test_is_retroactive_false_when_occurred_after_valid_from() -> None:
     on_time_entry = _fill_view(3, OrderSide.BUY, "2", "90", occurred_at=_dt(2026, 9, 5))
     assert is_retroactive(on_time_entry, _dt(2026, 9, 4)) is False
+
+
+def test_is_retroactive_false_when_occurred_equals_valid_from() -> None:
+    same_day_entry = _fill_view(3, OrderSide.BUY, "2", "90", occurred_at=_dt(2026, 9, 4))
+    assert is_retroactive(same_day_entry, _dt(2026, 9, 4)) is False
+
+
+def test_is_retroactive_false_when_occurred_after_valid_from_by_one_day() -> None:
+    next_day_entry = _fill_view(3, OrderSide.BUY, "2", "90", occurred_at=_dt(2026, 9, 5))
+    assert is_retroactive(next_day_entry, _dt(2026, 9, 4)) is False
+
+
+def test_is_retroactive_true_when_occurred_before_valid_from_by_one_day() -> None:
+    prev_day_entry = _fill_view(3, OrderSide.BUY, "2", "90", occurred_at=_dt(2026, 9, 3))
+    assert is_retroactive(prev_day_entry, _dt(2026, 9, 4)) is True
+
+
+# ---- 성능 단언(DEPTH 감사 task-2724 D1 판정 근거, 1702/1701 DEEPEN 선례와 동일 패턴) ----
 
 
 def test_restate_position_folds_late_entry_onto_prior() -> None:
@@ -224,3 +243,49 @@ def test_restate_position_hot_path_performance(perf_budget: PerfBudget) -> None:
             )
 
     perf_budget.assert_within(_run, budget_ms=1000.0, batch=8, label=f"{iterations}회 호출")
+
+
+# ---- is_retroactive 성능 단언 + 지연 주입 (task-11539 감사 후속) ----
+
+
+@pytest.mark.perf
+def test_is_retroactive_perf_budget_single_call_converges_to_zero_cpu(
+    perf_budget: PerfBudget,
+) -> None:
+    """`is_retroactive`는 단순 datetime 비교이므로 1회 호출 CPU 시간이 0ms에 수렴한다.
+
+    PerfBudget.sample(batch=1)로 단일 호출을 측정하고 budget 0.01ms(10µs)를 단언한다.
+    이预算은 "단순 비교 함수가 이 budget을 반드시 통과한다"는 정방향 증거다.
+    """
+    perf_budget.assert_within(
+        lambda: is_retroactive(_LATE_ENTRY, _dt(2026, 9, 4)),
+        budget_ms=0.01,
+        n=5,
+        batch=1,
+        label="is_retroactive single-call",
+    )
+
+
+@pytest.mark.perf
+def test_is_retroactive_perf_budget_catches_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): `is_retroactive`에 CPU 지연을 주입하면
+    assert_within가 AssertionError로 적색이 돼야 한다.
+
+    지연 주입은 delayed_sync 헬퍼를 사용한다(type: ignore 예산 보호).
+    """
+    import src.foundation.positions.domain.restatement as mod
+
+    original_is_retroactive = mod.is_retroactive
+    monkeypatch.setattr(mod, "is_retroactive", delayed_sync(original_is_retroactive, 0.05))
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: mod.is_retroactive(_LATE_ENTRY, _dt(2026, 9, 4)),
+            budget_ms=0.01,
+            n=5,
+            batch=1,
+            label="is_retroactive_delay_injection_gate_red",
+        )
