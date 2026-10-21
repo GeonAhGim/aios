@@ -273,3 +273,57 @@ async def test_screen_run_completes_well_within_scan_timeout_budget(
     )
 
     assert sample.wall_ms < budget_s * 1000, perf_budget.describe(sample, budget_ms=budget_s * 1000)
+
+
+# ---- 게이트 적색 재현(D2, task-11539 감사 후속) --------------------
+
+
+async def test_screen_latency_budget_fails_under_10x_delay_injection(
+    client: AsyncClient,
+    perf_budget: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. field_source.read_fields 에 0.5s 지연을
+    주입하면 SCAN_TIMEOUT_SECONDS/10 (1.0s) 예산을 초과해 AssertionError로
+    적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    import asyncio
+
+    headers = await _register(client)
+    instruments = [_instrument(f"SYM{i}") for i in range(50)]
+    fields = {i.instrument_id: {"close": Decimal("10")} for i in instruments}
+
+    _real_source = _FakeFieldSource(instruments, fields)
+
+    class _DelayedFieldSource(_FakeFieldSource):
+        async def read_fields(
+            self,
+            *,
+            instrument_ids_by_venue: Mapping[Venue, Sequence[UUID]],
+            field_names: frozenset[str],
+            as_of: datetime,
+        ) -> dict[UUID, dict[str, Decimal]]:
+            await asyncio.sleep(5.0)  # 5s 지연 주입
+            return await super().read_fields(
+                instrument_ids_by_venue=instrument_ids_by_venue,
+                field_names=field_names,
+                as_of=as_of,
+            )
+
+    _override(client, _DelayedFieldSource(instruments, fields))
+
+    budget_s = SCAN_TIMEOUT_SECONDS / 10  # 1.0 s
+    sample = await perf_budget.sample_async(
+        lambda: client.post(PATH, json=_body(), headers=headers)
+    )
+
+    # 5s 지연 주입 → wall_ms ≈ 5000ms > budget 1000ms → AssertionError
+    with pytest.raises(AssertionError) as exc_info:
+        assert sample.wall_ms < budget_s * 1000, perf_budget.describe(
+            sample, budget_ms=budget_s * 1000
+        )
+    assert "wall=" in str(exc_info.value)
