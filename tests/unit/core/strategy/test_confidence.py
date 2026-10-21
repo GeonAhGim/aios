@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from src.core.strategy.confidence import EvalResult, compute_confidence
 from src.core.strategy.engine import StrategyEngine
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig
+from tests.support.perf_budget import PerfBudget
 
 # --- 산식 정확값 -----------------------------------------------------------
 
@@ -127,7 +128,51 @@ def test_performance_compute_confidence_p99_latency_within_pretrade_gate_budget(
     assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
 
 
-# --- 게이트 적색 재현 (1) ----------------------------------------------------
+# --- 게이트 적색 재현 (10x CPU 지연 주입) ------------------------------------
+
+
+@pytest.mark.perf
+def test_performance_goes_red_with_10x_cpu_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+):
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    5ms * 10 = 50ms를 초과하는 CPU 시간을 가장하면
+    `samples` 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+    result = EvalResult(
+        matched=True, satisfied_leaves=7, total_leaves=10, crossover_leaves_satisfied=3
+    )
+
+    # process_time을 monkeypatch: 호출할 때마다 50ms(10x budget)를 더한다.
+    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
+    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 50.0  # 50ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        samples = perf_budget.samples(
+            lambda: compute_confidence(result),
+            n=100,
+            batch=100,
+        )
+        cpu_ms_values = sorted(s.cpu_ms for s in samples)
+        p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99) - 1]
+        assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
+
+
+# --- 게이트 적색 재현 (엔진 상수 1.0) ----------------------------------------------------
 
 
 def test_gate_red_engine_confidence_ignores_actual_leaf_ratio_today():
