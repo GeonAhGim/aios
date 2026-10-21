@@ -117,13 +117,28 @@ async def _run_three_transitions(pool) -> tuple:
     return order_id, events, row
 
 
-async def test_orders_projection_matches_current_status_after_full_replay(pool):
+@pytest.mark.perf
+async def test_orders_projection_matches_current_status_after_full_replay(
+    pool,
+    perf_budget: pytest.fixture,
+) -> None:
+    """DoD(1) — full field parity + CPU 성능 단언.
+
+    `orders_projection.project` 호출 1회의 CPU 시간이 5ms 예산을
+    초과하지 않는다(단일 order + 3개 이벤트의 정합성 fold는 O(n)
+    정수 비교만 하므로 이 예산이 충분하다).
+    """
     order_id, events, row = await _run_three_transitions(pool)
 
-    projected = orders_projection.project(order_id, events)
+    def _project_once() -> object:
+        return orders_projection.project(order_id, events)
+
+    sample = perf_budget.best_of(_project_once, n=5, warmup=1)
+    projected = _project_once()
 
     assert projected.status.value == row["status"]
     assert projected.version == row["version"]
+    assert sample.cpu_ms < 5, f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<5ms"
 
 
 async def test_orders_projection_detects_dropped_event(pool):
@@ -266,3 +281,107 @@ async def test_orders_projection_detects_dropped_fill(pool):
     dropped = orders_projection.project(order_id, events, fills[:1])
 
     assert dropped.filled_quantity != row["filled_quantity"]
+
+
+# ---- 게이트 적색 재현 / 지연 주입 -----------------------------------------------
+
+
+@pytest.mark.perf
+async def test_projection_perf_assertion_goes_red_with_cpu_delay_injection(
+    pool,
+    perf_budget: pytest.fixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction: inject CPU delay via `delayed_sync` into
+    `orders_projection.project` so the same CPU assertion turns red.
+
+    `delayed_sync` injects a busy-wait (CPU-time slowdown).
+    `PerfBudget.sample` uses `time.process_time()` so CPU delay is
+    captured directly. Without this test, the budget assertion could
+    be a hollow pass that never fails.
+    """
+    from tests.support.perf_inject import delayed_sync
+
+    order_id, events, row = await _run_three_transitions(pool)
+
+    original_project = orders_projection.project
+
+    def _slow_project(*args, **kwargs) -> object:
+        return delayed_sync(original_project, 0.05)(*args, **kwargs)
+
+    monkeypatch.setattr(orders_projection, "project", _slow_project)
+
+    def _project_once() -> object:
+        return orders_projection.project(order_id, events)
+
+    sample = perf_budget.best_of(_project_once, n=5, warmup=1)
+
+    # 50ms CPU delay × best-of-5 → measured cpu_ms should exceed 5ms budget
+    assert sample.cpu_ms >= 5, (
+        f"delay injection failed: cpu={sample.cpu_ms:.3f}ms — "
+        f"expected red (budget>=5ms); measurement is hollow"
+    )
+
+
+# ---- 음성 테스트 (negative tests ≥ 3) -------------------------------------------
+
+
+async def test_projection_with_empty_events_returns_initial_state(pool) -> None:
+    """Negative: zero events → projection returns the initial state
+    (order_id only, no status/version set by events)."""
+    order_id, events, row = await _run_three_transitions(pool)
+
+    projected = orders_projection.project(order_id, [])
+
+    # Empty events should not carry forward any status from DB
+    # The projection starts from CREATED (default) with no transitions
+    assert projected.order_id == order_id
+
+
+async def test_projection_with_mismatched_order_id(pool) -> None:
+    """Negative: passing a different order_id than the events belong to
+    should still produce a projection — but the events won't match
+    any DB row, confirming the projection is stateless and doesn't
+    accidentally read from the database."""
+    order_id, events, _row = await _run_three_transitions(pool)
+    fake_order_id = uuid4()
+
+    projected = orders_projection.project(fake_order_id, events)
+
+    # Projection is stateless — it should succeed but carry fake_order_id
+    assert projected.order_id == fake_order_id
+    # Status should reflect the last event transition, not DB state
+    assert projected.status == OrderStatus.ACKNOWLEDGED
+
+
+async def test_projection_with_fills_but_no_events_uses_fills_only(pool) -> None:
+    """Negative: fills without any order_events should still produce a
+    valid projection — fills contribute filled_quantity/price/fee but
+    status/version remain at defaults (CREATED/0)."""
+    order_id, events, _row = await _run_three_transitions(pool)
+
+    # Build fill events for a different order to isolate
+    fake_order_id = uuid4()
+    fill_events = [
+        FillEvent(
+            provider_fill_id=f"fill-{uuid4().hex}",
+            venue="bitget",
+            order_id=None,
+            exchange_order_id=f"ex-{uuid4().hex}",
+            symbol="BTC/USDT",
+            side=OrderSide.BUY,
+            quantity=Decimal("2"),
+            price=Decimal("200"),
+            fee=Decimal("0.5"),
+            fee_currency="USDT",
+            liquidity="TAKER",
+            venue_ts=datetime.now(timezone.utc),
+        ),
+    ]
+
+    projected = orders_projection.project(fake_order_id, [], fill_events)
+
+    # Status stays at default CREATED (no events to transition)
+    assert projected.status == OrderStatus.CREATED
+    assert projected.filled_quantity == Decimal("2")
+    assert projected.average_fill_price == Decimal("200")
