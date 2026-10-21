@@ -290,6 +290,51 @@ async def test_pause_executions_completes_within_single_round_trip_latency_bound
     assert sample.wall_ms < 500
 
 
+@pytest.mark.perf
+async def test_pause_executions_budget_goes_red_with_10x_delay_injection(
+    pool,
+    perf_budget,
+    monkeypatch,
+):
+    """검출력 확인 — `pause_executions_for_scope`에 지연을 주입하면 같은
+    단언이 적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이
+    아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    asyncpg `fetch`를 0.05초 sleep으로 monkeypatch — 10회 호출당 500ms가
+    쌓여 예산을 초과하므로 단언이 적색으로 넘어간다."""
+    import asyncio
+
+    user_id = await create_test_user(pool)
+    other_user = await create_test_user(pool)
+    for _ in range(50):
+        await _seed_execution(pool, user_id)
+    for _ in range(50):
+        await _seed_execution(pool, other_user)
+
+    # asyncpg fetch를 래핑해 지연 주입 — asyncpg는 C 확장이라 asyncio.sleep
+    # 호출이 없음. 따라서 Connection.fetch 자체를 monkeypatch해야 함.
+    _real_fetch = asyncpg.connection.Connection.fetch
+
+    async def _slow_fetch(self, sql: str, *args: object, **kwargs: object) -> object:
+        await asyncio.sleep(0.6)
+        return await _real_fetch(self, sql, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.connection.Connection, "fetch", _slow_fetch)
+
+    async with pool.acquire() as conn:
+        sample = await perf_budget.sample_async(
+            lambda: pause_executions_for_scope(
+                conn, SafetyScope.TENANT, str(user_id), control_id=uuid4()
+            )
+        )
+
+    assert len(sample.result) == 50
+    # 정상 경로에서는 wall_ms < 500이지만, sleep 주입으로 예산을 초과해야 한다(RED).
+    assert sample.wall_ms >= 500, (
+        f"지연 주입에도 500ms 미만 — 성능 단언이 실제로 동작하지 않는다: "
+        f"wall={sample.wall_ms:.1f}ms"
+    )
+
+
 async def test_concurrent_overlapping_scope_kill_switches_pause_each_execution_exactly_once(
     pool,
 ):
