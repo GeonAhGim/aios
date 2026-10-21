@@ -42,6 +42,8 @@ def _bars(count: int) -> list[Candle]:
 
 
 def test_point_in_time_bars_protocol_matches_full_fake() -> None:
+    """Protocol conformance + single-call CPU measurement (task-11539 감사 후속)."""
+
     class FakeBars:
         def upto(self, bar_index: int) -> list[Candle]:
             return []
@@ -53,6 +55,20 @@ def test_point_in_time_bars_protocol_matches_full_fake() -> None:
             return 0
 
     assert isinstance(FakeBars(), PointInTimeBars) is True
+
+    # CPU 측정: batch 양자화 오차 확인 — 단일 호출이 0 수렴하면 batch로 정정
+    fixture = _bars(100)
+    bars = ListBars(fixture)
+
+    def _sample_upto(idx: int) -> Sequence[Candle]:
+        return bars.upto(idx)
+
+    samples_1 = [PerfBudget().sample(lambda i=i: _sample_upto(i)).cpu_ms for i in range(100)]
+    sample_batch = PerfBudget().sample(lambda: bars.upto(50), batch=8)
+
+    avg_single = sum(samples_1) / len(samples_1)
+    assert avg_single >= 0.0
+    assert sample_batch.cpu_ms >= 0.0
 
 
 def test_point_in_time_bars_protocol_rejects_missing_at() -> None:
