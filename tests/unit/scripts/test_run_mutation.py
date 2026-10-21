@@ -410,3 +410,74 @@ def test_compute_score_and_classify_survivors_scale_to_thousands_of_mutants(
 
     assert score_sample.cpu_ms < 500, f"perf budget exceeded: {score_sample.cpu_ms:.1f}ms"
     assert survivors_sample.cpu_ms < 500, f"perf budget exceeded: {survivors_sample.cpu_ms:.1f}ms"
+
+
+# ---------------------------------------------------------------------------
+# 0-convergence + gate-red (task-11539 감사 후속)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_compute_score_single_call_converges_to_near_zero_cpu(
+    perf_budget: PerfBudget,
+) -> None:
+    """0 수렴 검증: compute_score 는 순수 Python 연산(사전에 빌드된 dict/values
+    순회)만으로 구성되므로 단일 호출 CPU 시간이 0에 수렴해야 한다.
+    `perf_budget.sample` 한 번의 cpu_ms 가 50ms 미만이면 충분하다.
+
+    이 테스트는 audit(task-11539)가 "not dynamically measured"로标记한
+    단일 호출 CPU 수렴을 처음으로 동적으로 측정한다.
+    """
+    n = 500
+    results = {}
+    for i in range(n):
+        results[f"job-{i}"] = _killed() if i % 3 != 0 else _survived()
+
+    sample = perf_budget.sample(
+        lambda: run_mutation.compute_score(results.values()),
+        batch=1,
+    )
+
+    assert sample.cpu_ms < 50, (
+        f"single-call compute_score cpu_ms={sample.cpu_ms:.1f}ms — "
+        f"pure-Python aggregation should converge to near 0"
+    )
+
+
+@pytest.mark.perf
+def test_compute_score_cpu_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(500ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. fake process_time이 호출당 200ms를 더 반환하므로
+    측정 예산 500ms 를 초과해 적색 확정.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 200.0  # +200ms per call → 200ms >> 500ms budget for 5000 items
+        return _fake_time[0]
+
+    import tests.support.perf_budget
+
+    monkeypatch.setattr(tests.support.perf_budget.time, "process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget 을 초과하므로 AssertionError 가 있어야 함
+    n = 5000
+    results = {}
+    for i in range(n):
+        results[f"job-{i}"] = _killed() if i % 3 != 0 else _survived()
+
+    sample = perf_budget.sample(
+        lambda: run_mutation.compute_score(results.values()),
+        batch=1,
+    )
+
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < 500, f"perf budget exceeded: {sample.cpu_ms:.1f}ms"
