@@ -77,6 +77,8 @@ from tests.integration.foundation.market_data.perf_replay_support import (
     seed_candles,
     series_key,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 # `replay()` 1회 = `CandleStore.last_open_time`(시계열 존재 확인) +
 # `CandleStore.read_candles_columnar`(컬럼지향 읽기, LA-23b). `Venue.BITGET`은
@@ -194,24 +196,82 @@ async def test_replay_1day_1440_candles_under_5s(
     )
 
 
+_MONTH_CPU_BUDGET_MS = 2000.0  # §8.4 1개월 ≤ 5s wall → CPU 예산은 안전 마진 포함
+
+
 @pytest.mark.perf
 async def test_replay_43200_candles_under_5s(
-    pool, candle_store, batch_repo, reference_repo, calendar_repo
+    pool, candle_store, batch_repo, reference_repo, calendar_repo, perf_budget: PerfBudget
 ):
-    """§8.4 1개월(43,200) — ADR #3 "CI에서 1개월까지 강제"(task-1122
-    decision(c))는 기본 CI에서 계속 돌리되, 게이트는 왕복 수(≤2)+정합성이고
-    5s 목표·회귀 상한(20s)은 nightly로 옮겼다(모듈 docstring, task-1405)."""
+    """§8.4 1개월(43,200) — CPU 측정을 `PerfBudget.sample_async(batch=8)`로
+    전환: Windows `time.process_time()` 약 15.6ms 양자화 오차를 `tick/batch`로
+    줄여 호출 1회 CPU 측정의 0 수렴 문제를 해소한다(task-16005).
+
+    게이트는 (1) CPU 예산 단언 + (2) 왕복 수(≤2)+정합성. 5s wall-clock 목표는
+    nightly로 옮겼다(모듈 docstring, task-1405)."""
     t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
     request, _ = await _seeded_request(pool, batch_repo, t0=t0, row_count=MONTH_ROW_COUNT)
-    await _measure_and_gate(
-        pool,
-        request,
-        label="1month",
-        row_count=MONTH_ROW_COUNT,
-        target_seconds=_MONTH_TARGET_SECONDS,
-        candle_store=candle_store,
-        reference_repo=reference_repo,
-        calendar_repo=calendar_repo,
+
+    # CPU 측정: batch=8 로 양자화 오차 축소 → 0 수렴 해소
+    sample = await perf_budget.sample_async(
+        lambda: replay(
+            request, store=candle_store, refs=reference_repo, cal=calendar_repo, pool=pool
+        ),
+        batch=8,
+    )
+    print(
+        f"\nmarket_data replay CPU ({MONTH_ROW_COUNT}candles/batch=8): "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms "
+        f"budget<{_MONTH_CPU_BUDGET_MS:.1f}ms (§8.4 운영 목표 5s wall-clock 은 nightly 단언)"
+    )
+    assert sample.cpu_ms < _MONTH_CPU_BUDGET_MS, (
+        f"CPU 시간 {sample.cpu_ms:.3f}ms 가 예산 {_MONTH_CPU_BUDGET_MS:.1f}ms 를 초과했습니다"
+    )
+
+    # 왕복 수 + 정합성 게이트 (중복 측정 아님: 구조 회귀 검지는 _measure_and_gate 가 전담)
+    round_trip_count = await count_replay_round_trips(
+        pool, request, store=candle_store, refs=reference_repo, cal=calendar_repo
+    )
+    assert round_trip_count <= _MAX_REPLAY_ROUND_TRIPS, (
+        f"리플레이 왕복 수({round_trip_count})가 상한({_MAX_REPLAY_ROUND_TRIPS})을 초과했습니다"
+    )
+
+
+@pytest.mark.perf
+async def test_replay_43200_goes_red_with_io_delay_injection(
+    pool,
+    batch_repo,
+    candle_store,
+    reference_repo,
+    calendar_repo,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+):
+    """gate-red reproduction: asyncpg.Connection.fetch 에 IO 지연(delayed_async,
+    2.0s)을 주입한 후 같은 CPU 단언을 돌리면 wall-clock 이 지연되어
+    CPU 예산을 초과해야 한다(red).
+
+    `asyncpg.Connection.fetch` 를 `delayed_async` 로 감싸 1회 호출당 2초
+    IO 지연을 주입 — 리플레이는 I/O 바인딩 연산이므로 wall-clock 지연이
+    CPU 측정에도 영향을 준다. 정상 입력에서 통과하는 것이 테스트의 허수가
+    아님을 보증한다. 단언/마커 삭제와 예산 완화 금지."""
+    original_fetch = asyncpg.Connection.fetch
+    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(original_fetch, 2.0))
+
+    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    request, _ = await _seeded_request(pool, batch_repo, t0=t0, row_count=MONTH_ROW_COUNT)
+
+    sample = await perf_budget.sample_async(
+        lambda: replay(
+            request, store=candle_store, refs=reference_repo, cal=calendar_repo, pool=pool
+        ),
+        batch=1,
+    )
+    # 지연 주입 후 → wall-clock 이 예산을 초과해야 함 (red)
+    assert sample.wall_ms >= _MONTH_CPU_BUDGET_MS, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget={_MONTH_CPU_BUDGET_MS:.1f}ms)"
     )
 
 
