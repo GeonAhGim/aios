@@ -23,6 +23,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -45,6 +46,7 @@ from src.foundation.ems.domain.algo.pov import (
     _slice_count,
     plan_pov_schedule,
 )
+from tests.support.perf_budget import PerfBudget
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -347,7 +349,7 @@ class TestPerformanceBenchmark:
 
     @pytest.mark.perf
     def test_plan_pov_schedule_p99_latency_under_budget(
-        self, parent_order: ParentOrder, perf_budget
+        self, parent_order: ParentOrder, perf_budget: PerfBudget
     ) -> None:
         """Measure wall-clock latency of `plan_pov_schedule` over its full
         390-slice plan across repeated runs and assert p99 < 50ms."""
@@ -374,7 +376,7 @@ class TestPerformanceBenchmark:
 
     @pytest.mark.perf
     def test_plan_pov_schedule_p99_budget_catches_regression(
-        self, parent_order: ParentOrder, perf_budget
+        self, parent_order: ParentOrder, perf_budget: PerfBudget
     ) -> None:
         """게이트 적색 재현 — plan_pov_schedule 내부에 인위 지연을 주입해 p99
         예산 단언이 실제로 AssertionError를 내는지 확인한다.
@@ -384,7 +386,7 @@ class TestPerformanceBenchmark:
         """
         real_plan = plan_pov_schedule
 
-        def _slow_plan(*args, **kwargs):
+        def _slow_plan(*args: Any, **kwargs: Any) -> Any:
             time.sleep(0.5)  # 500ms 지연 → budget 50ms 단언이 적색이어야 함
             return real_plan(*args, **kwargs)
 
