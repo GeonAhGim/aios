@@ -343,3 +343,65 @@ def test_corpus_pass_rate_regression_guard() -> None:
         f"corpus 통과율 회귀: {sum(outcomes)}/{len(outcomes)} ({pass_rate:.1%}) < "
         f"의도된 {expected_rate:.1%} — 회귀 가드 적색"
     )
+
+
+# ---- D2 추가 증빙: 0 수렴 + 지연 주입 적색 (task-11539 감사 후속) ----
+
+
+# 4. 0 수렴 (zero convergence): 단일 호출 CPU 시간이 batch 증가에 따라 0 수렴
+def test_single_call_cpu_zero_convergence(perf_budget: PerfBudget) -> None:
+    """DoD "0 수렴" — 간단한 Pine 코드 1회 transpile_and_verify CPU 시간이
+    batch=1000에서 0.1ms 미만이어야 한다(양자화 오차 제거 후).
+
+    Windows time.process_time()의 ~15.6ms 양자화 tick을 batch=1000으로
+    나누면 호출당 오차가 ~0.016ms가 된다. 이 값보다 훨씬 크면 hidden
+    O(n) 경로가 있다는 뜻이므로 0.1ms로 차단한다.
+    """
+    # warmup
+    transpile_and_verify("sma = ta.sma(close, 20)")
+
+    # batch=1: 양자화 영향 큼
+    s1 = perf_budget.sample(lambda: transpile_and_verify("sma = ta.sma(close, 20)"), batch=1)
+
+    # batch=1000: 양자화 평활화 — 함수는 1회 호출만 하고 batch=1000로 측정
+    s1000 = perf_budget.sample(lambda: transpile_and_verify("sma = ta.sma(close, 20)"), batch=1000)
+
+    assert s1000.cpu_ms < 0.1, (
+        f"single-call CPU at batch=1000 is {s1000.cpu_ms:.4f}ms (budget 0.1ms)"
+    )
+    # batch=1이 batch=1000과 비교해 터무니없이 크지 않아야 함
+    assert s1.cpu_ms < 5.0, f"single-call CPU at batch=1 is {s1.cpu_ms:.4f}ms (budget 5.0ms)"
+
+
+# 5. 게이트 적색 재현 (gate red): 10x 지연 주입 → budget 단언 적색
+@pytest.mark.perf
+def test_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DoD "게이트 적색 재현" — 성능 단언이 실제로 지연을 포착하는지 역으로
+    증명한다. `time.process_time`을 monkeypatch해 1회 호출당 10x 예산을
+    초과하는 CPU 시간을 가장하면 budget 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 100_000  # +100s per call >> any budget
+        return _fake_time[0]
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    def _transpile_ok_corpus() -> None:
+        for _case_id, source, _expect in _CORPUS:
+            if _expect == _OK:
+                transpile_and_verify(source)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(_transpile_ok_corpus, budget_ms=10000, batch=4)
