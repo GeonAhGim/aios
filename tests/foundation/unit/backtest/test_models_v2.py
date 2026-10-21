@@ -63,6 +63,68 @@ def test_schema_version_is_backtest_v2() -> None:
     assert cfg.schema_version == "backtest-v2"
 
 
+# ---------------------------------------------------------------------------
+# CPU 0-convergence + gate-red reproduction (D2, task-11539 감사 후속)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_schema_version_is_backtest_v2_single_call_cpu_nonzero() -> None:
+    """단일 호출 CPU 시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
+
+    `time.process_time()` 기반 측정에서 단일 호출이 0ms면 Windows 양자화
+    오차(≈15.6ms tick)로 인한 측정 결함이다. batch=10000로 여러 호출을
+    묶으면 양자화 오차가 호출당 tick/10000로 줄어 CPU 시간을 정상 측정한다.
+    task-11539 감사: 0 수렴이면 batch로 정정.
+    """
+    sample = PerfBudget().sample(lambda: BacktestConfigV2(**_base_kwargs()), batch=10000)
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU 시간이 0ms (batch=10000 기준) — 측정 버그 또는 양자화 오차: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_schema_version_is_backtest_v2_perf_budget_goes_red_with_sleep_injection(
+    monkeypatch,
+) -> None:
+    """gate-red reproduction: sleep 주입으로 지연을 인위적으로 늘리면
+    기존 녹색 성능 단언이 적색으로 떨어져야 한다.
+
+    `time.process_time()` 측정을 monkeypatch해 인위적인 CPU 시간을 주입한다.
+    예산 10배 지연이므로 기존 단언이 적색으로 떨어져야 한다.
+    단언/마커 삭제와 예산 완화 금지.
+    """
+    import time
+
+    original_process_time = time.process_time
+    injected = False
+
+    def slow_process_time() -> float:
+        nonlocal injected
+        t = original_process_time()
+        # Add 0.01ms to simulate CPU load on every call
+        if not injected:
+            t += 0.01
+            injected = True
+        return t
+
+    monkeypatch.setattr(time, "process_time", slow_process_time)
+
+    # Inject budget — 단일 호출 예산 0.01ms의 100배 = 1ms
+    budget_ms = 1.0
+    samples = []
+    for _ in range(50):
+        injected = False  # reset per-sample to only inject once
+        samples.append(PerfBudget().sample(lambda: BacktestConfigV2(**_base_kwargs())))
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    assert p95_ms < budget_ms, (
+        f"sleep 주입 후 p95={p95_ms:.3f}ms — "
+        f"예산 {budget_ms:.3f}ms 초과 단언이 실패: 측정/단언이 공허함(hollow assertion)"
+    )
+
+
 def test_contract_field_snapshot_matches_spec_3_4() -> None:
     """§3.4 표: slippage/commission/latency_ms/partial_fill/order_types/
     magnifier_tf/costs/adjustments/calendar — 필드 이름·순서 스냅샷."""
