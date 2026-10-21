@@ -21,6 +21,8 @@ from src.foundation.ems.domain.tca.decomposition import (
 )
 from tests.support.perf_budget import PerfBudget
 
+# -- D2 single-call CPU convergence -------------------------------------------
+
 _DECOMPOSITION_PATH = (
     Path(__file__).resolve().parents[4] / "src/foundation/ems/domain/tca/decomposition.py"
 )
@@ -352,6 +354,82 @@ def test_decompose_cost_p95_latency_stays_under_budget_at_500_fills(
         "samples at 500 fills, exceeding the 5ms pre-trade-gate-class budget "
         "(ADR-2026-09-09-C Decision 1)."
     )
+
+
+@pytest.mark.perf
+def test_decompose_cost_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 decompose_cost() 호출이 0에 수렴하는 CPU 시간을 보여야 한다.
+
+    `time.process_time()`은 Windows에서 약 15.6ms 양자화 오차가 있으므로
+    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. 1회당 CPU 시간이
+    1ms 미만이어야 순수 도메인 로직이라는 불변식(I-03)과 호환된다.
+    """
+    fills = [Fill(price=Decimal("100"), qty=Decimal("10"))]
+
+    def _one_call() -> CostDecomposition:
+        return decompose_cost(
+            fills=fills,
+            side=OrderSide.BUY,
+            arrival_price=Decimal("100"),
+            vwap_price=Decimal("101"),
+            close_price=Decimal("101"),
+            spread_cost=Decimal("1.00"),
+            fees=Decimal("2.00"),
+            total_cost=Decimal("50.00"),
+        )
+
+    sample = perf_budget.sample(_one_call, batch=64)
+
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — 비용 분해는 1ms 미만이어야 함 (budget<1ms)"
+    )
+
+
+def test_decompose_cost_cpu_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(1ms)을 10배 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 0.15  # +150ms per call >> 1ms budget
+        return _fake_time[0]
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    fills = [Fill(price=Decimal("100"), qty=Decimal("10"))]
+
+    def _build_once() -> CostDecomposition:
+        return decompose_cost(
+            fills=fills,
+            side=OrderSide.BUY,
+            arrival_price=Decimal("100"),
+            vwap_price=Decimal("101"),
+            close_price=Decimal("101"),
+            spread_cost=Decimal("1.00"),
+            fees=Decimal("2.00"),
+            total_cost=Decimal("50.00"),
+        )
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_build_once, batch=64)
+        assert sample.cpu_ms < 1.0, (
+            f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — 비용 분해는 1ms 미만이어야 함 (budget<1ms)"
+        )
 
 
 def test_gate_red_reproduction_empty_fills_bypass() -> None:
