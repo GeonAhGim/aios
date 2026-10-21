@@ -156,10 +156,107 @@ def test_link_only_body_rejected_goes_red_with_10x_delay_injection(
         )
 
 
-def test_link_only_source_without_body_passes() -> None:
+def test_link_only_source_without_body_passes(perf_budget: PerfBudget) -> None:
+    """RD-3 DoD (a) — link_only + body_ref=None 은 정상 통과.
+
+    CPU 측정 — 단일 호출이 O(1) 상수 시간임을 확인: batch=100 으로 묶어
+    양자화 오차를 줄이고 1ms 미만임을 단언한다.
+    """
     item = _item(body_ref=None)
     source = _source(redistribution="link_only")
-    assert_redistribution_allowed(item, source, _grant())  # raise 없음
+
+    def _call() -> None:
+        assert_redistribution_allowed(item, source, _grant())
+
+    sample = perf_budget.sample(_call, batch=100)
+    assert sample.cpu_ms < 1.0, (
+        f"CPU time {sample.cpu_ms:.3f}ms exceeds 1ms floor; wall={sample.wall_ms:.3f}ms"
+    )
+
+
+def test_link_only_negative_combinations_no_raise(perf_budget: PerfBudget) -> None:
+    """link_only + None body + 다른 source_id 조합이 조용히 통과해야 한다.
+
+    음성 테스트 1: body_ref=None 이지만 source_id 가 다른 조합.
+    음성 테스트 2: store_full + INTERNAL scope.
+    음성 테스트 3: store_full + REDISTRIBUTE scope + None body.
+    """
+    # 1: link_only + None body + 다른 source_id
+    item1 = _item(body_ref=None, source_id="NEWS_API")
+    source1 = _source(source_id="NEWS_API", redistribution="link_only")
+    assert_redistribution_allowed(item1, source1, _grant())
+
+    # 2: store_full + INTERNAL scope
+    item2 = _item(body_ref=None)
+    source2 = _source(redistribution="store_full")
+    assert_redistribution_allowed(item2, source2, _grant(scope=RedistributionScope.INTERNAL))
+
+    # 3: store_full + REDISTRIBUTE scope + None body
+    item3 = _item(body_ref=None)
+    source3 = _source(redistribution="store_full")
+    assert_redistribution_allowed(item3, source3, _grant(scope=RedistributionScope.REDISTRIBUTE))
+
+
+def test_link_only_passes_goes_red_with_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인 — `time.process_time`
+    을 monkeypatch 해 1회 호출당 예산(1ms) 을 10배 초과하는 CPU 시간을
+    가장하면 `sample` 의 cpu_ms 가 1ms 를 넘어 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지" 를
+    검증한다.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 15.0  # 15ms per call → budget 1ms × 15x 초과
+        return _fake_time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    item = _item(body_ref=None)
+    source = _source(redistribution="link_only")
+
+    def _call() -> None:
+        assert_redistribution_allowed(item, source, _grant())
+
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_call, batch=100)
+        assert sample.cpu_ms < 1.0, (
+            f"CPU time {sample.cpu_ms:.3f}ms should exceed 1ms budget under injection"
+        )
+
+
+def test_gate_red_regression_link_only_body_denied(perf_budget: PerfBudget) -> None:
+    """gate-red 회귀 감지: link_only + body 가 있으면 거부해야 하는데
+    현재 구현이 이를 거부하는지 확인. 만약 구현이 회귀해 조용히 통과하면
+    이 테스트는 AssertionError 를 던진다 (예산 단언이 실패하지 않음).
+
+    이 테스트는 두 가지 사실을 확인한다:
+    1. link_only + body 가 있는 경우 RedistributionViolationError 가 발생한다.
+    2. 그 경로의 CPU 시간이 예산 내다 (정상 동작 확인).
+    """
+    item = _item(body_ref="summary text")
+    source = _source(redistribution="link_only")
+
+    def _call() -> None:
+        try:
+            assert_redistribution_allowed(item, source, _grant())
+        except RedistributionViolationError:
+            pass  # 정상 경로: 예외 발생
+
+    sample = perf_budget.sample(_call, batch=100)
+    # 정상 구현이면 예외가 발생하므로 pass 로 떨어지고 CPU 측정만 남는다.
+    # 만약 회귀하면 예외가 발생하지 않고 _call 이 정상 리턴 → sample.result 는 None.
+    # 회귀를 감지하기 위해 예외가 실제로 발생했는지 별도 검증:
+    with pytest.raises(RedistributionViolationError) as exc_info:
+        assert_redistribution_allowed(item, source, _grant())
+    assert exc_info.value.reason == "link_only_body_present"
+    assert sample.cpu_ms < 1.0, (
+        f"CPU time {sample.cpu_ms:.3f}ms exceeds 1ms floor; wall={sample.wall_ms:.3f}ms"
+    )
 
 
 def test_store_full_source_with_body_allowed_when_grant_permits() -> None:
