@@ -57,13 +57,59 @@ class _FakeClock:
         return self.now
 
 
-async def test_readyz_returns_200_when_healthy(client: AsyncClient) -> None:
+@pytest.mark.perf
+async def test_readyz_returns_200_when_healthy(
+    client: AsyncClient, perf_budget: PerfBudget
+) -> None:
+    # --- behavioral assertions (unchanged) ---
     response = await client.get("/readyz")
 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ready"
     assert body["checks"]["db_pool"]["ok"] is True
+
+    # --- performance assertion: single-call wall-clock within read-route budget ---
+    # budget 0.3 s = 300 ms. Uses samples_async (async-safe) with batch=4 to
+    # avoid Windows process_time quantization (15.6 ms ticks) that would
+    # collapse a fast call to 0 ms and make the assertion a tautology.
+    budget_ms = _READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 1000
+    samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=10, batch=4)
+    p95_wall_ms = _p95_ms([s.wall_ms for s in samples])
+    assert p95_wall_ms < budget_ms, (
+        f"readyz p95 wall={p95_wall_ms:.1f}ms exceeds budget {budget_ms:.1f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_readyz_returns_200_when_healthy_budget_fails_with_delay(
+    client: AsyncClient,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: inject 600 ms IO delay via _SlowPool — the
+    same budget assertion that passes under normal conditions must raise
+    AssertionError (red gate).
+
+    Uses delayed_async from tests.support.perf_inject for typed delay
+    injection (no ``# type: ignore``).
+    """
+
+    # Replace get_pool with _SlowPool (2×budget delay = 600 ms per fetchval)
+    app.dependency_overrides[get_pool] = lambda: _SlowPool()
+
+    try:
+        budget_ms = _READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 1000
+        samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=5, batch=1)
+        p95_wall_ms = _p95_ms([s.wall_ms for s in samples])
+        with pytest.raises(AssertionError) as exc_info:
+            assert p95_wall_ms < budget_ms, (
+                f"readyz p95 wall={p95_wall_ms:.1f}ms exceeds budget {budget_ms:.1f}ms"
+            )
+
+        # Verify the failure is due to budget exceeded, not some other cause
+        assert "exceeds budget" in str(exc_info.value)
+    finally:
+        app.dependency_overrides.pop(get_pool, None)
 
 
 async def test_readyz_returns_503_when_db_pool_broken(client: AsyncClient) -> None:
