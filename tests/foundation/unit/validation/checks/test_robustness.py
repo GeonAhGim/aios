@@ -270,6 +270,7 @@ def test_run_p95_latency_within_budget(
     samples = perf_budget.samples(
         lambda: _run_with_fake_indicator(ctx, monkeypatch),
         n=_ITERATIONS,
+        batch=8,
     )
     ordered = sorted(s.cpu_ms for s in samples)
     p95_ms = ordered[min(int(len(ordered) * 0.95), len(ordered) - 1)]
@@ -282,18 +283,26 @@ def test_budget_gate_actually_fails_when_sweep_stalls(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gate-red reproduction: injecting a delay into `sweep` that actually
+    """Gate-red reproduction: injecting a CPU delay into `sweep` that actually
     exceeds the budget proves the p95 assertion above would fire
-    AssertionError, not just pass trivially."""
+    AssertionError, not just pass trivially.
+
+    Budget is CPU-based (p95 checks cpu_ms), so we inject CPU load (busy-wait)
+    rather than wall-clock sleep — matching the measurement type.
+    """
     ctx = _ctx(_bars(60))
     original = check_mod.sweep
 
-    def _stalled(*args: object, **kwargs: object) -> object:
-        time.sleep(_BUDGET_MS / 1000 + 0.01)
+    def _cpu_stalled(*args: object, **kwargs: object) -> object:
+        # Busy-wait until we've consumed ~810ms CPU (just over 800ms budget)
+        target_cpu_ms = _BUDGET_MS + 10
+        start = time.process_time()
+        while (time.process_time() - start) * 1000 < target_cpu_ms:
+            pass  # CPU-bound busy-wait
         return original(*args, **{**kwargs, "indicator_service": _FakePriceIndicatorService()})
 
-    monkeypatch.setattr(check_mod, "sweep", _stalled)
+    monkeypatch.setattr(check_mod, "sweep", _cpu_stalled)
 
     sample = perf_budget.sample(lambda: check_mod.run(ctx))
     with pytest.raises(AssertionError):
-        assert sample.wall_ms < _BUDGET_MS
+        assert sample.cpu_ms < _BUDGET_MS
