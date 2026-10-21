@@ -277,3 +277,123 @@ def test_performance_allocate_p99_latency_within_pretrade_gate_budget(
     )
     p99 = latencies_ms[int(500 * 0.99) - 1]
     assert p99 < 5.0, f"p99={p99:.3f}ms — 사전거래 게이트 5ms 예산 초과"
+
+
+# --- D2 단일 호출 CPU 수렴 (task-11539 감사 후속) ----------------------------
+
+
+@pytest.mark.perf
+def test_allocate_cpu_converges_to_near_zero(perf_budget: PerfBudget) -> None:
+    """단일 allocate() 호출이 0에 수렴하는 CPU 시간을 보여야 한다.
+
+    `time.process_time()`은 Windows에서 약 15.6ms 양자화 오차가 있으므로
+    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. 1회당 CPU 시간이
+    1ms 미만이어야 순수 도메인 로직(I-03)과 호환된다.
+    """
+    engine = PortfolioEngine()
+
+    def allocate_once() -> None:
+        engine.allocate(
+            _signal(direction=OrderSide.BUY),
+            _state(allocated_capital=Decimal("1000"), current_price=Decimal("50000")),
+        )
+
+    sample = perf_budget.sample(allocate_once, batch=64)
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"포트폴리오 할당 로직은 1ms 미만이어야 함 "
+        f"(budget<1ms, {perf_budget.describe(sample, budget_ms=1.0)})"
+    )
+
+
+# --- D2 게이트 적색 재현: CPU 지연 주입 → AssertionError ----------------------
+
+
+@pytest.mark.perf
+def test_allocate_budget_catches_10x_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산(1ms × 10 = 10ms)을 초과하는 CPU 시간을 가장하면 같은 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 누적 CPU 시간을 빠르게 올리므로
+    p99 > 5ms budget로 적색 확정.
+    """
+    _fake_cpu_ms = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_cpu_ms
+        # 1회 호출당 10ms 누적으로 p99가 5ms를 초과 → AssertionError 발생
+        _fake_cpu_ms += 10.0
+        return _fake_cpu_ms
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    engine = PortfolioEngine()
+
+    def allocate_once() -> None:
+        engine.allocate(
+            _signal(direction=OrderSide.BUY),
+            _state(allocated_capital=Decimal("1000"), current_price=Decimal("50000")),
+        )
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    batch = 2
+    while perf_budget.sample(allocate_once, batch=batch).cpu_ms * batch < 62.5:
+        batch *= 2
+        if batch >= 65536:
+            break
+
+    latencies_ms = sorted(
+        sample.cpu_ms for sample in perf_budget.samples(allocate_once, n=500, batch=batch)
+    )
+    p99 = latencies_ms[int(500 * 0.99) - 1]
+    with pytest.raises(AssertionError):
+        assert p99 < 5.0, f"p99={p99:.3f}ms — 지연 주입 하에서 사전거래 게이트 5ms 예산 초과"
+
+
+# --- D2 실패 주입: sleep 주입은 CPU 측정에 영향 없음 ------------------------
+
+
+@pytest.mark.perf
+def test_sleep_injection_does_not_affect_cpu_measurement(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """time.sleep()을 monkeypatch해 100ms 대기 주입 후 CPU 측정(cpu_ms)이
+    증가하지 않음을 확인한다 — time.sleep()은 wall-clock만 지연시키고
+    CPU 시간을 증가시키지 않는다.
+
+    이는 CPU 측정(time.process_time)이 실제 CPU 소비만 계측함을 증명한다.
+    """
+    import time as _time_module
+
+    # 원본 sleep 보존 (monkeypatch 전)
+    _real_sleep = _time_module.sleep
+
+    def _delayed_sleep(duration: float) -> None:
+        _real_sleep(duration)
+
+    # time 모듈의 sleep을 대체 — allocate_once 내부에서 sleep을 호출하지 않으므로
+    # allocate의 CPU 측정에는 영향 없다.
+    monkeypatch.setattr(_time_module, "sleep", _delayed_sleep)
+
+    engine = PortfolioEngine()
+
+    def allocate_with_sleep() -> None:
+        _time_module.sleep(0.1)  # 100ms 대기
+        engine.allocate(
+            _signal(direction=OrderSide.BUY),
+            _state(allocated_capital=Decimal("1000"), current_price=Decimal("50000")),
+        )
+
+    sample = perf_budget.sample(allocate_with_sleep, batch=1)
+    # wall_ms는 sleep(0.1)으로 인해 ~100ms가 되어야 하지만,
+    # cpu_ms는 실제 CPU 소비만 계측하므로 여전히 < 1ms여야 한다.
+    assert sample.cpu_ms < 1.0, (
+        f"sleep 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — sleep은 CPU 시간을 증가시키지 않아야 함"
+    )
