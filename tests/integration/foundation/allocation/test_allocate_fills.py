@@ -463,29 +463,20 @@ async def test_gate_red_reproduction_allocate_fills_latency_budget_catches_db_re
     동일한 RelativeBudget 단언을 재사용한다. `allocate_order_fills` 내부의
     DB 호출 앞에 sleep을 주입해 전체 지연이 정규화 상한을 넘게 만든 뒤,
     같은 단언이 AssertionError로 적색이 됨을 검증한다."""
-    import asyncio as _asyncio
+    import asyncpg
 
-    import asyncpg as _asyncpg
+    from tests.support.perf_inject import delayed_async
 
     # 먼저 제어 테스트: 정상 입력에서 녹색 확인
     await test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool)
 
-    # asyncpg Connection.fetch/fetchval을 클래스 레벨에서 monkeypatch한다.
-    # allocate_order_fills가 conn.fetch / conn.fetchval을 호출할 때마다
-    # 500ms 지연을 더해 baseline 대비 10배 이상 나가게 만든다.
-    _original_fetch = _asyncpg.Connection.fetch
-    _original_fetchval = _asyncpg.Connection.fetchval
-
-    async def _patched_fetch(self, sql, *args, **kwargs):
-        await _asyncio.sleep(0.5)
-        return await _original_fetch(self, sql, *args, **kwargs)
-
-    async def _patched_fetchval(self, sql, *args, **kwargs):
-        await _asyncio.sleep(0.5)
-        return await _original_fetchval(self, sql, *args, **kwargs)
-
-    monkeypatch.setattr(_asyncpg.Connection, "fetch", _patched_fetch)
-    monkeypatch.setattr(_asyncpg.Connection, "fetchval", _patched_fetchval)
+    # asyncpg Connection.fetch/fetchval을 클래스 레벨에서 delayed_async로
+    # monkeypatch한다. allocate_order_fills가 conn.fetch / conn.fetchval을
+    # 호출할 때마다 500ms 지연을 더해 baseline 대비 10배 이상 나가게 만든다.
+    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(asyncpg.Connection.fetch, 0.5))
+    monkeypatch.setattr(
+        asyncpg.Connection, "fetchval", delayed_async(asyncpg.Connection.fetchval, 0.5)
+    )
 
     # 동일한 단언이 지연 주입에서 실패해야 한다.
     # (baseline과 p95가 모두 지연되므로 상대 ceiling가 함께 늘어나지 않도록,
