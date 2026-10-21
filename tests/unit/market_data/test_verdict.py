@@ -35,8 +35,10 @@ from src.foundation.market_data.contracts.v1 import (
     Severity,
     Verdict,
 )
+from src.foundation.market_data.domain.quality import verdict as verdict_mod
 from src.foundation.market_data.domain.quality.verdict import decide
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 UTC = timezone.utc
 
@@ -186,6 +188,36 @@ def test_decide_throughput_within_latency_budget(
     )
 
     assert last_result is Verdict.PARTIAL
+
+
+@pytest.mark.perf
+def test_decide_gate_red_delay_injection_exceeds_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction with delay injection -- injecting delay into
+    `decide` via `delayed_sync` must make the same performance assertion
+    fail (budget exceeded). This proves the performance assertion actually
+    measures execution time, not some other property.
+
+    50 issues × 0.005s = 0.25s total delay per call, exceeding the 0.1s
+    budget. With n=3, batch=2 this completes in ~1s wall-clock."""
+    slow_decide = delayed_sync(verdict_mod.decide, 0.005)
+    monkeypatch.setattr(verdict_mod, "decide", slow_decide)
+
+    issues = [_reject_issue(i) for i in range(50)]
+
+    def _run() -> None:
+        slow_decide(issues, total=1000)
+
+    perf_budget.assert_within(
+        _run,
+        budget_ms=0.1,
+        n=3,
+        warmup=0,
+        batch=2,
+        label="decide 50 issues with 5ms delay",
+    )
 
 
 def test_decide_is_deterministic_across_repeated_replay() -> None:
