@@ -19,6 +19,7 @@ docs/audit/DEPTH_DC_RD.md#1767) D1 -> D2 증빙, 실 DB 대상.
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -297,3 +298,132 @@ async def test_aios_app_cannot_update_or_delete_filing_then_pit_still_works(
     latest = resolve_as_of(history, datetime(2026, 3, 25, tzinfo=timezone.utc))
     assert [a.ratio for a in latest] == [Decimal("4")]
     assert len(history) == 3
+
+
+# ---- 검출력 확인 — 예산 10배 지연 주입으로 적색 검증 ----
+
+
+async def test_append_delay_10x_exceeds_latency_budget(
+    pool: asyncpg.Pool,
+    filing_repo: PostgresCorporateActionFilingRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DB 호출에 10배 sleep을 주입하면 성능 단언이 적색이어야 한다.
+
+       RelativeBudget.measure_async는 wall-clock(perf_counter)를 쓰므로
+       sleep 지연이 op_ms에 직접 반영되고 calibration은 순수 CPU라 변하지
+    않아 — ratio가 예산 max_ratio를 넘어야 한다.
+    """
+    n = 200
+    instrument_id = await _make_instrument(pool)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    # 원본 fetchrow를 감싸서 10배 지연(0.01초 × 10 = 0.1초 per call)
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def _slow_fetchrow(
+        self: asyncpg.Connection, *args: object, **kwargs: object
+    ) -> asyncpg.Record | None:
+        time.sleep(0.1)  # 10배 지연 주입
+        return await original_fetchrow(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
+
+    try:
+
+        async def _bulk_append_and_pit() -> None:
+            async with pool.acquire() as conn, conn.transaction():
+                for i in range(n):
+                    await filing_repo.append(
+                        conn,
+                        _split(
+                            instrument_id,
+                            ratio=str(i + 1),
+                            known_at=base + timedelta(hours=i),
+                            source_ref=f"rcept-delay-{instrument_id}-{i}",
+                        ),
+                    )
+                history = await filing_repo.list_history(conn, instrument_id)
+            mid = resolve_as_of(history, base + timedelta(hours=n // 2))
+            assert len(mid) == 1
+
+        sample = await RelativeBudget().measure_async(
+            _bulk_append_and_pit,
+            n=3,
+            calibration_n=5,
+        )
+        # 지연 주입 시 ratio가 예산을 넘어야 함(검출력 확인)
+        # RelativeBudget.measure_async의 기본 max_ratio는 3.0
+        assert sample.ratio > 3.0, (
+            f"지연 주입에도 ratio={sample.ratio:.1f}x — "
+            f"검출력이 없습니다(op_ms={sample.op_ms:.0f}ms, calib={sample.calibration_ms:.0f}ms)"
+        )
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM md_corporate_action_filing WHERE source_ref LIKE $1",
+                f"rcept-delay-{instrument_id}%",
+            )
+
+
+async def test_list_history_delay_10x_exceeds_latency_budget(
+    pool: asyncpg.Pool,
+    filing_repo: PostgresCorporateActionFilingRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """list_history(fetch) 호출에 10배 sleep을 주입하면 성능 단언이 적색이어야 한다.
+
+    append가 아닌 read 경로(list_history → conn.fetch)의 검출력을 확인한다.
+    """
+    n = 200
+    instrument_id = await _make_instrument(pool)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    # 정상 append (지연 없이)
+    async with pool.acquire() as conn:
+        for i in range(n):
+            await filing_repo.append(
+                conn,
+                _split(
+                    instrument_id,
+                    ratio=str(i + 1),
+                    known_at=base + timedelta(hours=i),
+                    source_ref=f"rcept-listhist-{instrument_id}-{i}",
+                ),
+            )
+
+    # fetch에 지연 주입
+    original_fetch = asyncpg.Connection.fetch
+
+    async def _slow_fetch(
+        self: asyncpg.Connection, *args: object, **kwargs: object
+    ) -> list[asyncpg.Record]:
+        time.sleep(0.5)  # 10배 지연 주입 (단건 fetch이므로 충분히 크게)
+        result = await original_fetch(self, *args, **kwargs)  # type: ignore[no-any-return]
+        return result
+
+    monkeypatch.setattr(asyncpg.Connection, "fetch", _slow_fetch)
+
+    try:
+
+        async def _read_and_pit() -> None:
+            async with pool.acquire() as conn, conn.transaction():
+                history = await filing_repo.list_history(conn, instrument_id)
+            mid = resolve_as_of(history, base + timedelta(hours=n // 2))
+            assert len(mid) == 1
+
+        sample = await RelativeBudget().measure_async(
+            _read_and_pit,
+            n=3,
+            calibration_n=5,
+        )
+        assert sample.ratio > 3.0, (
+            f"list_history 지연에도 ratio={sample.ratio:.1f}x — "
+            f"검출력이 없습니다(op_ms={sample.op_ms:.0f}ms, calib={sample.calibration_ms:.0f}ms)"
+        )
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM md_corporate_action_filing WHERE source_ref LIKE $1",
+                f"rcept-listhist-{instrument_id}%",
+            )
