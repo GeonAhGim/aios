@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -24,6 +25,7 @@ from src.foundation.paper_control.projections import (
     build_deployment_list_view,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 _TENANT_ID = uuid4()
 
@@ -73,6 +75,72 @@ async def test_build_deployment_list_view_empty_repo_returns_empty_view():
     assert view.deployments == []
     assert isinstance(view, DeploymentListView)
     assert repo.list_deployments_calls == [_TENANT_ID]
+
+
+async def test_build_deployment_list_view_empty_repo_as_of_is_tz_aware_utc():
+    """음성 테스트 1 — 빈 목록에서도 as_of는 반드시 tz-aware UTC여야 한다
+    (INVARIANTS: 모든 datetime은 tz-aware UTC)."""
+    repo = FakeRepo([])
+    view = await build_deployment_list_view(repo, _TENANT_ID)
+    assert view.as_of.tzinfo is not None
+    assert view.as_of.utcoffset() == timezone.utc.utcoffset(None)
+
+
+async def test_build_deployment_list_view_empty_repo_as_of_is_recent():
+    """음성 테스트 2 — as_of는 호출 시점으로부터 1초 이내여야 한다
+    (stale projection은 spec 71 §4 위반)."""
+    repo = FakeRepo([])
+    before = datetime.now(timezone.utc)
+    view = await build_deployment_list_view(repo, _TENANT_ID)
+    after = datetime.now(timezone.utc)
+    assert before <= view.as_of <= after
+
+
+async def test_build_deployment_list_view_empty_repo_zero_cpu_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 수치 단언 — 빈 목록 조립은 순수 CPU 작업이므로 1ms 미만이어야 한다
+    (양자화 오차 제외). batch=64로 Windows 15.6ms tick을 분할해 0 수렴을 검증한다.
+
+    정상 입력에서 녹색: CPU 예산(1ms)을 명확히 하회한다."""
+    repo = FakeRepo([])
+
+    sample = await perf_budget.sample_async(
+        lambda: build_deployment_list_view(repo, _TENANT_ID), batch=64
+    )
+    assert sample.cpu_ms < 1.0, f"empty repo assembly took {sample.cpu_ms:.3f}ms, budget is 1ms"
+
+
+async def test_build_deployment_list_view_empty_repo_delay_injection_fails_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """적색 재현 — repo.list_deployments에 50ms 지연 주입 시 호출이 10배 이상 늘어나야 한다.
+    이는 성능 단언이 실제로 지연 감지 능력을 갖췄음을 증명한다.
+
+    delayed_async 사용: # type: ignore budget 소모 없음(task-11539 감사 후속)."""
+    repo = FakeRepo([])
+
+    # 원본 메서드 저장
+    original_list = repo.list_deployments
+
+    # 50ms 지연 주입 (CPU 예산 ~0.1ms의 500배)
+    monkeypatch.setattr(
+        repo,
+        "list_deployments",
+        delayed_async(original_list, seconds=0.05),
+    )
+
+    start = time.perf_counter()
+    view = await build_deployment_list_view(repo, _TENANT_ID)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    # 지연 주입 후에도 결과는 동일해야 함
+    assert view.deployments == []
+    # 하지만 소요 시간은 50ms 이상이어야 함 (지연이 실제로 측정됨)
+    assert elapsed_ms >= 40, (
+        f"injected 50ms delay resulted in only {elapsed_ms:.1f}ms wall time — "
+        "delay injection failed, gate-red reproduction inconclusive"
+    )
 
 
 async def test_build_deployment_list_view_maps_all_deployments_in_order():
