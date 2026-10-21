@@ -242,3 +242,102 @@ async def test_append_p95_latency_stays_within_normalized_ceiling(pool: asyncpg.
         f"append p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s(baseline "
         f"{baseline_elapsed:.4f}s)를 초과했습니다 -- §5 append p95 20ms 목표 회귀 의심"
     )
+
+
+async def test_append_concurrent_appends_conflict_is_deterministic(
+    pool: asyncpg.Pool,
+):
+    """실패 주입 — 같은 stream에 동시에 같은 seq를 append하면 정확히 하나만 성공하고
+    나머지는 SequenceConflictError를.raise 한다(task-11539 감사 후속).
+
+    이 테스트는 동시성 실패가 결정론적으로 처리되는지 검증한다 — race condition이
+    silent corruption로 이어지지 않음을 확인한다."""
+    import asyncio as _asyncio
+
+    stream_id = _stream()
+
+    # 먼저 첫 이벤트를 채워넣어 다음 seq부터 시작
+    await _append(pool, stream_id, 1)
+
+    target_seq = 2
+    results: list[tuple[bool, str]] = []
+
+    async def try_append():
+        try:
+            await _append(pool, stream_id, target_seq)
+            results.append((True, "success"))
+        except SequenceConflictError as exc:
+            results.append((False, str(exc)))
+
+    # 동시에 5개의 append가 같은 seq를 시도 — _append 내부에서 pool.acquire()
+    # 호출하므로 각각 독립적인 connection을 얻게 된다.
+    tasks = [_asyncio.create_task(try_append()) for _ in range(5)]
+    await _asyncio.gather(*tasks)
+
+    successes = sum(1 for ok, _ in results if ok)
+    conflicts = sum(1 for ok, _ in results if not ok)
+
+    assert successes == 1, f"정확히 1개만 성공해야 하지만 {successes}개가 성공함"
+    assert conflicts == 4, f"나머지 4개가 conflict여야 하지만 {conflicts}개"
+
+
+@pytest.mark.perf
+async def test_append_budget_injection_detected_by_10x_delay(
+    pool: asyncpg.Pool, monkeypatch, perf_budget
+):
+    """gate-red repro — append 내부에 10배 지연을 주입하면 성능 예산 단언이
+    적색으로 전환되는지 검증한다(task-11539 감사 후속).
+
+    `asyncpg.Connection.fetchrow`를 래핑해 실제 DB 호출 뒤에 `asyncio.sleep(0.05)`를
+    주입하면 append 1회당 wall_ms가 baseline 대비 10배 이상 늘어나고,
+    `test_append_p95_latency_stays_within_normalized_ceiling`과 동일한 정규화
+    상한 계산이 이를 포착해야 한다.
+
+    이 테스트는 "성능 게이트가 실제 회귀를 포착할 수 있는가"를 역으로 증명한다 —
+    정상 입력에서는 녹색이지만, 의도적으로 지연을 주입하면 적색으로 전환된다.
+    """
+    # 먼저 지연 없이 baseline을 측정한다 (이 시점에는 monkeypatch 미적용)
+    baseline = await RelativeBudget().measure_async(lambda: _append(pool, _stream(), 1), warmup=0)
+    baseline_elapsed = baseline.op_ms / 1000
+
+    # 이제 fetchrow에 지연 주입 — baseline 측정 *후*에 적용하므로
+    # baseline은 실제 DB 지연만 반영하고, 이후 append_next()는 지연 포함
+    original_fetchrow = asyncpg.Connection.fetchrow
+    delay_count = 0
+
+    async def _delayed_fetchrow(self, *args, **kwargs):
+        nonlocal delay_count
+        result = await original_fetchrow(self, *args, **kwargs)
+        delay_count += 1
+        if delay_count >= 2:  # 첫 번째 fetchrow는 stream 생성용, 두 번째부터 지연
+            import asyncio as _asyncio
+
+            await _asyncio.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _delayed_fetchrow)
+
+    # 지연 주입 후 append 측정
+    stream_id = _stream()
+    # 첫 번째 append(seq=1) + append_next()가 seq=2부터 시작하도록 설정
+    await _append(pool, stream_id, 1)
+
+    seq = 1
+
+    async def append_next():
+        nonlocal seq
+        seq += 1
+        return await _append(pool, stream_id, seq)
+
+    measurements = await perf_budget.samples_async(append_next, n=20)
+    samples = [sample.wall_ms / 1000 for sample in measurements]
+
+    samples.sort()
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    ceiling = baseline_elapsed * 8 + 0.08
+    # 지연 주입 후 p95가 상한을 넘어야 한다 — 게이트가 회귀를 포착하는지 검증
+    assert p95 > ceiling, (
+        f"지연 주입에도 p95={p95:.4f}s가 상한 {ceiling:.4f}s 미만에 머무름 — "
+        "게이트가 지연을 포착하지 못함"
+    )
