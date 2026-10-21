@@ -233,7 +233,69 @@ def test_advance_p95_latency_within_budget_for_many_keys(perf_budget: PerfBudget
     assert p95_ms < 50, f"p95={p95_ms:.2f}ms exceeds 50ms budget"
 
 
-# -- D2 게이트 적색 재현 -------------------------------------------------------
+# -- D2 게이트 적색 재현 (10x CPU 지연 주입) ------------------------------------
+
+
+@pytest.mark.perf
+def test_performance_goes_red_with_10x_cpu_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    50ms(예산 50ms의 10배)를 초과하는 CPU 시간을 가장하면
+    p95 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+    timeframes = ["1m", "5m", "15m", "30m", "1h"]
+    values: dict[str, Decimal] = {}
+    bar_close_time: dict[str, datetime] = {}
+    last_bar_time: dict[str, datetime] = {}
+    prev_values: dict[str, Decimal] = {}
+    for tf in timeframes:
+        bar_close_time[tf] = _T1
+        last_bar_time[tf] = _T0
+        for i in range(100):
+            key = f"RSI_timeperiod{i}@{tf}"
+            values[key] = Decimal(i)
+            prev_values[key] = Decimal(i)
+
+    memory = StrategyStateMemory(
+        execution_id=1,
+        state_version=0,
+        last_bar_time=last_bar_time,
+        prev_values=prev_values,
+    )
+    market_state = MarketState(as_of=_T1, values=values, bar_close_time=bar_close_time)
+    bar_times = dict(last_bar_time)
+
+    # process_time을 monkeypatch: 호출할 때마다 50ms(10x budget)를 더한다.
+    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
+    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 50.0  # 50ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        samples = perf_budget.samples(
+            lambda: advance(memory, market_state, bar_times=bar_times),
+            n=200,
+            batch=8,
+        )
+        cpu_ms_values = sorted(s.cpu_ms for s in samples)
+        p95_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
+        assert p95_ms < 50, f"p95={p95_ms:.2f}ms exceeds 50ms budget"
+
+
+# -- D2 게이트 적색 재현 (continuity check) ------------------------------------
 
 
 def test_gate_red_repro_missing_continuity_check_leaks_stale_crossover_values() -> None:
