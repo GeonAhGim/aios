@@ -120,6 +120,74 @@ async def test_get_indicator_template_propagates_connection_failure_fail_closed(
         await get_indicator_template(repo, tenant_id=uuid4(), template_id=uuid4())
 
 
+@pytest.mark.perf
+def test_get_indicator_template_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """`indicator_template_to_view` 호출 1회 CPU 시간이 0 수렴한다 —
+    최소 입력(best-of-N)에서 best 값이 예산 내여야 한다."""
+    budget_ms = 50.0
+
+    now = datetime.now(timezone.utc)
+    template = ChartIndicatorTemplate(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        owner_subject_id=uuid4(),
+        name="min",
+        template={"schemaVersion": 1, "panes": [], "indicators": []},
+        revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+
+    sample = perf_budget.best_of(
+        lambda: indicator_template_to_view(template),
+        n=5,
+        warmup=1,
+    )
+    print(f"[CH-17b] best-of-5 cpu={sample.cpu_ms:.3f}ms budget<{budget_ms:.3f}ms")
+    assert sample.cpu_ms < budget_ms
+
+
+@pytest.mark.perf
+def test_get_indicator_template_gate_red_sleep_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """성능 단언이 tautology 아님을 확인한다 —
+    `time.process_time`을 monkeypatch해 CPU 시간을 가장하면
+    AssertionError가 나와야 한다."""
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 10.0  # 10ms/call → budget 1µs 초과
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    now = datetime.now(timezone.utc)
+    template = ChartIndicatorTemplate(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        owner_subject_id=uuid4(),
+        name="gate-red",
+        template={"schemaVersion": 1, "panes": [], "indicators": []},
+        revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: indicator_template_to_view(template),
+            budget_ms=1e-6,
+            n=5,
+            warmup=1,
+            label="indicator_template_to_view gate-red injected",
+        )
+
+
 async def test_delete_indicator_template_propagates_connection_failure_fail_closed() -> None:
     repo = FakeChartingRepository(get_exc=ConnectionError("simulated connection drop"))
     with pytest.raises(ConnectionError):
