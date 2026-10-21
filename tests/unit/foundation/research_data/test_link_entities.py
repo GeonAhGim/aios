@@ -28,6 +28,7 @@ from src.foundation.research_data.domain.entity_link import (
     is_valid_isin,
     link_item,
 )
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _TENANT = uuid4()
@@ -297,6 +298,54 @@ def test_is_valid_isin_throughput_budget(
 
     # batch=1: run_batch() 자체가 이미 iterations×len(all_candidates) 회 호출
     sample = perf_budget.sample(run_batch, batch=1)
+    total_calls = iterations * len(all_candidates)
+    per_call_ms = sample.cpu_ms / total_calls
+
+    assert per_call_ms < 0.1, (
+        f"is_valid_isin took {per_call_ms * 1000:.1f} µs/call "
+        f"(cpu={sample.cpu_ms:.3f}ms / {total_calls} calls — budget 0.1 ms)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# gate-red reproduction: 10x 지연 monkeypatch가 예산을 초과하면 적색
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_is_valid_isin_budget_catches_10x_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(0.1ms)을 1000배 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 호출당 100ms를 반환하므로
+    측정 예산 0.1ms를 크게 초과해 적색 확정.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.1  # 100ms = 0.1s per call (1000x budget)
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    valid_candidates = ["US0378331005", "US5949181045", "KR0000000001"]
+    invalid_candidates = ["US0378331006", "X" * 12, "US037833100", ""]
+    all_candidates = valid_candidates + invalid_candidates
+    iterations = 5000
+
+    def run_batch() -> int:
+        for _ in range(iterations):
+            for cand in all_candidates:
+                is_valid_isin(cand)
+        return iterations
+
+    sample = PerfBudget().sample(run_batch, batch=1)
     total_calls = iterations * len(all_candidates)
     per_call_ms = sample.cpu_ms / total_calls
 
