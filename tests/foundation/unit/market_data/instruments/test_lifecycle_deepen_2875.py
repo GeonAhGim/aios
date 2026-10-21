@@ -44,6 +44,7 @@ from src.foundation.market_data.domain.instruments.lifecycle import (
     transition,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 # ---- 실패 주입(D2) — 표에 없는 임의 입력이 fail-closed로 거부됨 ----
 
@@ -142,6 +143,35 @@ def test_transition_and_audit_event_for_meet_latency_budget(
 
     perf_budget.assert_within(
         run_batch, budget_ms=budget_ms, label="transition+audit_event_for x20k"
+    )
+
+
+# ---- 성능 주입 적색 재현(D2) — 지연 주입으로 budget 초과 증명 ----
+
+
+@pytest.mark.perf
+def test_transition_perf_injection_exceeds_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`transition`에 CPU 지연(delayed_sync, 0.05s)을 주입한 후 같은
+    perf_budget.assert_within 단언을 돌리면 예산을 초과해야 한다(red).
+
+    정상 입력(PENDING→listed)으로 0.05s CPU 부하를 주입 — 예산 100ms보다
+    커서 assert_within가 실패한다. 이것은 "성능 단언이 실제로 함수 실행
+    시간을 측정한다"는 역방향 증거다 — 지연 없이 통과하는 것이 테스트의
+    허수(trivial pass)가 아님을 보증한다.
+    """
+    import src.foundation.market_data.domain.instruments.lifecycle as lifecycle_mod
+
+    # 0.05s = 50ms CPU 부하 — best_of(5) 최소값이 100ms 예산 초과
+    slow_transition = delayed_sync(lifecycle_mod.transition, 0.05)
+    monkeypatch.setattr(lifecycle_mod, "transition", slow_transition)
+
+    # 정상 입력으로 측정: PENDING→listed 전이는 50ms 소모 → 100ms 예산 초과
+    perf_budget.assert_within(
+        lambda: slow_transition(InstrumentLifecycle.PENDING, "listed"),
+        budget_ms=100.0,
+        label="perf_injection_transition",
     )
 
 
