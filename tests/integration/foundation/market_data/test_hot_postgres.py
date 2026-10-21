@@ -36,11 +36,14 @@ from src.foundation.market_data.contracts.v1 import (
     Venue,
     Verdict,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 _SAMPLE_ROW_COUNT = 5_000  # DoD "5,000봉"
 _TARGET_P95_MS = 200.0  # §9.2 DC-13 목표(운영 목표, 차단 게이트 아님 — 모듈 docstring)
 _MAX_ROUND_TRIPS = 1  # HotPostgresStorage.read_columns()는 SELECT 1회여야 한다
 _MEASURE_SAMPLES = 20
+_READ_COLUMNS_CPU_BUDGET_MS = 50.0  # read_columns 단일 호출 CPU 예산
 
 _CANDLE_COLUMNS = (
     "venue",
@@ -171,6 +174,167 @@ async def test_read_columns_across_partition_boundary_sorted_no_gaps_no_dupes(
 
     assert columns.ts == [t0, t1], "파티션 경계를 넘는 구간이 정렬된 채 누락·중복 없이 와야 한다"
     assert len(columns.ts) == len(set(columns.ts)), "중복 open_time이 없어야 한다"
+
+
+@pytest.mark.perf
+async def test_read_columns_cpu_time_converges_to_zero_for_small_input(
+    pool,
+    hot_storage,
+    batch_repo,
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 read_columns 호출의 CPU 측정이 0 수렴 확인 — 작은 입력(2 행)은
+    거의 즉시 반환되므로 CPU 시간은 Windows 양자화 tick(약 15.6ms) 범위
+    내여야 한다. batch=8로 묶으면 양자화 오차가 호출당 tick/8로 줄어
+    실제 CPU 시간을 정상 측정한다.
+
+    이 테스트는 파티션 경계를 가로지르는 read_columns()가 작은 입력에서
+    PerfBudget.sample_async가 단일 호출 CPU 시간을 올바르게 계측함을
+    동적으로 검증한다.
+    """
+    async with pool.acquire() as conn, conn.transaction():
+        await hot_storage.ensure_partitions(conn, months_ahead=6)
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t1 = t0 + timedelta(days=40)
+        batch = await _create_batch(
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t1 + timedelta(minutes=1),
+            accepted=2,
+        )
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+        candles = [
+            _candle(key, t0, 100, 110, 90, 105, 10),
+            _candle(key, t1, 200, 210, 190, 205, 20),
+        ]
+        await hot_storage.write_batch(conn, batch.batch_id, candles)
+
+    async def _one_call() -> object:
+        async with pool.acquire() as conn, conn.transaction():
+            return await hot_storage.read_columns(
+                conn,
+                instrument_id,
+                Venue.BITGET,
+                Timeframe.M1,
+                t0 - timedelta(minutes=1),
+                t1 + timedelta(minutes=1),
+            )
+
+    sample = await perf_budget.sample_async(_one_call, batch=8)
+    assert sample.cpu_ms < 100.0, (
+        f"read_columns 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "작은 입력이므로 양자화 오차 범위 내여야 함 (budget<100ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_read_columns_latency_within_budget(
+    pool,
+    hot_storage,
+    batch_repo,
+    perf_budget: PerfBudget,
+) -> None:
+    """read_columns 호출이 CPU 예산 내야 한다 — 작은 입력(2 행)에 대해
+    _READ_COLUMNS_CPU_BUDGET_MS 미만."""
+    async with pool.acquire() as conn, conn.transaction():
+        await hot_storage.ensure_partitions(conn, months_ahead=6)
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t1 = t0 + timedelta(days=40)
+        batch = await _create_batch(
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t1 + timedelta(minutes=1),
+            accepted=2,
+        )
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+        candles = [
+            _candle(key, t0, 100, 110, 90, 105, 10),
+            _candle(key, t1, 200, 210, 190, 205, 20),
+        ]
+        await hot_storage.write_batch(conn, batch.batch_id, candles)
+
+    async def _one_call() -> object:
+        async with pool.acquire() as conn, conn.transaction():
+            return await hot_storage.read_columns(
+                conn,
+                instrument_id,
+                Venue.BITGET,
+                Timeframe.M1,
+                t0 - timedelta(minutes=1),
+                t1 + timedelta(minutes=1),
+            )
+
+    sample = await perf_budget.sample_async(_one_call, batch=5)
+    print(
+        f"[DC-13 read_columns] cpu={sample.cpu_ms:.3f}ms budget<{_READ_COLUMNS_CPU_BUDGET_MS:.1f}ms"
+    )
+    assert sample.cpu_ms < _READ_COLUMNS_CPU_BUDGET_MS
+
+
+@pytest.mark.perf
+async def test_read_columns_goes_red_with_io_delay_injection(
+    pool,
+    hot_storage,
+    batch_repo,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.fetch 에 IO 지연(delayed_async,
+    2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `conn.fetch` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
+    주입 — read_columns 는 I/O 바인딩 연산이므로 CPU 대신 wall-clock
+    측정으로 지연을 검증한다. 정상 입력에서 통과하는 것이 테스트의 허수
+    (trivial pass)가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    # asyncpg.Connection.fetch 를 delayed_async 로 감싸 IO 지연 주입 (2초/회)
+    original_fetch = asyncpg.Connection.fetch
+    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(original_fetch, 2.0))
+
+    async with pool.acquire() as conn, conn.transaction():
+        await hot_storage.ensure_partitions(conn, months_ahead=6)
+        instrument_id = await _instrument_id(conn)
+        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t1 = t0 + timedelta(days=40)
+        batch = await _create_batch(
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t1 + timedelta(minutes=1),
+            accepted=2,
+        )
+        key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+        candles = [
+            _candle(key, t0, 100, 110, 90, 105, 10),
+            _candle(key, t1, 200, 210, 190, 205, 20),
+        ]
+        await hot_storage.write_batch(conn, batch.batch_id, candles)
+
+    async def _one_call_with_delay() -> object:
+        async with pool.acquire() as conn, conn.transaction():
+            return await hot_storage.read_columns(
+                conn,
+                instrument_id,
+                Venue.BITGET,
+                Timeframe.M1,
+                t0 - timedelta(minutes=1),
+                t1 + timedelta(minutes=1),
+            )
+
+    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
+    sample = await perf_budget.sample_async(_one_call_with_delay, batch=1)
+    assert sample.wall_ms >= _READ_COLUMNS_CPU_BUDGET_MS, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget={_READ_COLUMNS_CPU_BUDGET_MS:.1f}ms)"
+    )
 
 
 async def test_read_columns_nonexistent_instrument_returns_empty_not_error(pool, hot_storage):
