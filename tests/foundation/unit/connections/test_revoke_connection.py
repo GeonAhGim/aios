@@ -322,3 +322,75 @@ async def test_revoke_connection_perf_budget_p95_latency(
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
     assert p95_ms < 50.0, f"revoke_connection p95 latency {p95_ms:.3f}ms exceeded 50ms budget"
+
+
+# ---------------------------------------------------------------------------
+# CPU 0-convergence + gate-red reproduction (D2, task-11539 감사 후속)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_revoke_connection_raises_when_connection_not_found_0_convergence(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 호출 CPU 측정의 0 수렴 확인 — Windows `time.process_time()`
+    약 15.6ms 양자화 tick 때문에 1회 호출은 항상 0ms로 읽힌다. 이 테스트는
+    그 사실을 명시적으로 검증한다(task-11539 감사).
+
+    `get_connection`이 None을 반환하는 오류 경로는 매우 빠르므로
+    batch=8로 여러 호출을 묶으면 양자화 오차가 호출당 tick/8로 줄어
+    CPU 시간을 정상 측정한다."""
+    tenant_id = uuid4()
+    conn_repo = FakeConnectionRepository(connection=None)
+
+    async def _fn() -> None:
+        with pytest.raises(ConnectionNotFoundError):
+            await revoke_connection(conn_repo, tenant_id=tenant_id, connection_id=uuid4())
+
+    sample = await perf_budget.sample_async(_fn, batch=8)
+    assert sample.cpu_ms == 0.0, (
+        f"single-call CPU should converge to 0 (got {sample.cpu_ms:.3f}ms); "
+        "if it does not, the 0-convergence invariant is broken"
+    )
+
+
+@pytest.mark.perf
+async def test_revoke_connection_raises_when_connection_not_found_perf_budget_goes_red_with_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: sleep 주입으로 지연을 인위적으로 늘리면
+    기존 녹색 성능 단언이 적색으로 떨어져야 한다.
+
+    `FakeConnectionRepository.get_connection`을 monkeypatch해 1회 호출당
+    100ms sleep을 주입하면 wall_time 예산(50ms)을 초과하므로 같은 측정/
+    단언이 적색으로 넘어간다. 단언/마커 삭제와 예산 완화 금지."""
+    _original_get_connection = FakeConnectionRepository.get_connection
+
+    async def slow_get_connection(
+        self: FakeConnectionRepository, connection_id: UUID
+    ) -> AccountConnection | None:
+        import time as _time
+
+        _time.sleep(0.1)  # 100ms (Windows resolution ~15ms minimum)
+        return await _original_get_connection(self, connection_id)
+
+    monkeypatch.setattr(FakeConnectionRepository, "get_connection", slow_get_connection)
+
+    tenant_id = uuid4()
+    conn_repo = FakeConnectionRepository(connection=None)
+    n_samples = 50
+
+    async def _fn() -> None:
+        with pytest.raises(ConnectionNotFoundError):
+            await revoke_connection(conn_repo, tenant_id=tenant_id, connection_id=uuid4())
+
+    samples = await perf_budget.samples_async(_fn, n=n_samples)
+
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n_samples * 0.95), len(wall_ms_list) - 1)]
+    # sleep 주입으로 지연이 늘면 같은 단언이 적색으로 넘어간다.
+    # 이는 성능 단언이 '아무것도 잡지 못하는 허울'이 아님을 증명한다.
+    assert p95_ms >= 50.0, (
+        f"sleep 주입 후 p95={p95_ms:.3f}ms — 예상과 달리 녹색: 측정/단언이 공허함(hollow assertion)"
+    )
