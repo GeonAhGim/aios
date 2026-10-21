@@ -186,6 +186,69 @@ def test_prometheus_metrics_counter_increments_within_perf_budget(
     )
 
 
+@pytest.mark.perf
+def test_single_call_cpu_measurement_converges_to_zero() -> None:
+    """단일 호출 CPU 측정의 0 수렴 검증: `_get_or_create` 캐시가 동작하면
+    1회 counter() 호출의 CPU 시간이 0에 수렴해야 한다.
+
+    `PerfBudget.sample()`은 `time.process_time()`을 사용하므로 Windows의
+    약 15.6ms 양자화 오차가 있을 수 있다. `batch=1`로 측정해도 평균이
+    예산(budget_ms=1)을 훨씬 내려면 캐시가 실제로 동작하고 있음을 증명한다.
+    """
+    from tests.support.perf_budget import PerfBudget
+
+    adapter = PrometheusMetrics()
+    pb = PerfBudget()
+
+    def single_call() -> None:
+        adapter.counter("aios.test.single.zero_convergence")
+
+    # 첫 호출은 등록 비용이 들어가므로 warmup으로 흘린다.
+    single_call()
+
+    # 이후 10회 단일 호출을 측정 — 모두 1ms 미만이어야 함.
+    samples = pb.samples(single_call, n=10, batch=1)
+    for s in samples:
+        assert s.cpu_ms < 1.0, (
+            f"단일 호출 CPU 시간 {s.cpu_ms:.3f}ms가 1ms를 초과 — "
+            f"캐시 미적중 또는 과부하: {pb.describe(s, budget_ms=1.0)}"
+        )
+
+
+@pytest.mark.perf
+def test_perf_assertion_catches_cpu_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(300ms)을 초과하는 CPU 시간을 가장하면 `assert_within`가
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    import time as _time
+
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 50.0  # 50ms per call > 300ms/16=18.75ms budget per batch
+        return _fake_time[0]
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    adapter = PrometheusMetrics()
+
+    def increment_counters() -> None:
+        for _ in range(5000):
+            adapter.counter("aios.test.perf.count_total")
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            increment_counters, budget_ms=300, n=3, batch=16, label="injected 50ms/call delay"
+        )
+
+
 def test_safe_observe_catches_metrics_port_exception() -> None:
     """실패주입: MetricsPort.observe()가 예외를 던지면 safe_observe()는 이를
     잡아 warning 로그를 남기고 None을 반환한다(주문 경로 차단 금지).
