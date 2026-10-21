@@ -328,3 +328,169 @@ async def test_get_statement_portfolio_scope_p95_latency_stays_within_normalized
         f"{ceiling:.4f}ms(baseline {baseline_elapsed:.4f}ms)를 초과했습니다 -- "
         "resolve_portfolio_scope 라운드트립 회귀 의심"
     )
+
+
+# ---- 게이트 적색 재현 / 지연 주입 -----------------------------------------------
+
+
+@pytest.mark.perf
+async def test_p95_assertion_goes_red_with_io_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    pool,
+    perf_repo,
+    entity_repo,
+    perf_budget,
+) -> None:
+    """gate-red reproduction — `resolve_portfolio_scope` 내부 get_portfolio에
+     지연(delayed_async, 0.5s)을 주입하면 같은 정규화 상한 단언이 AssertionError
+    로 적색이 된다.
+
+     `delayed_async`는 wall-clock 대기를 주입한다.
+     `PerfBudget.sample_async`는 wall_ms를 측정하므로 wall-clock 기반 budget
+     단언이 지연을 잡는다. 정상 입력에서 통과하는 것이 테스트의 허수(trivial
+     pass)가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    from tests.support.perf_inject import delayed_async
+
+    tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+    await _seed_default_hierarchy(pool, entity_repo, tenant_id)
+    await perf_repo.insert_methodology(DEFAULT_METHODOLOGY)
+    inserted = await perf_repo.insert_statement(await _statement(tenant_id))
+    portfolio_id = default_portfolio_id(tenant_id)
+
+    async def _call() -> float:
+        sample = await perf_budget.sample_async(
+            lambda: get_statement(
+                perf_repo,
+                tenant_id=tenant_id,
+                statement_id=inserted.id,
+                portfolio_id=portfolio_id,
+                entities=entity_repo,
+            )
+        )
+        return sample.wall_ms
+
+    # 지연 주입 전 baseline 측정
+    baseline_elapsed = await _call()
+
+    # resolve_portfolio_scope 의 첫 DB 호출(get_portfolio)에 0.5s 지연 주입
+    original_get_portfolio = entity_repo.get_portfolio
+    monkeypatch.setattr(
+        entity_repo,
+        "get_portfolio",
+        delayed_async(original_get_portfolio, 0.5),
+    )
+
+    samples = sorted([await _call() for _ in range(30)])
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    # 지연 주입 후 p95가 baseline 기반 상한을 넘어야 함 — 지연이 ~500ms×3라운드트립
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 > ceiling, (
+        f"지연 주입 후 p95 지연 {p95:.4f}ms가 상한 {ceiling:.4f}ms를 넘지 않음 — "
+        "측정/단언이 공허함(hollow assertion, budget>=p95)"
+    )
+
+
+# ---- 음성 테스트 (negative tests ≥ 3) -------------------------------------------
+
+
+async def test_p95_assertion_not_triggered_by_omitting_portfolio_id(
+    pool,
+    perf_repo,
+    perf_budget,
+) -> None:
+    """음성 테스트 — portfolio_id 없이 호출하면 resolve_portfolio_scope 경로
+    (3회 라운드트립)를 타지 않으므로 p95가 훨씬 낮다. 같은 상한 공식을
+    적용했을 때 green이 되는지를 확인: 성능 단언이 portfolio_id 경로만의
+    회귀를 감지하는지 검증."""
+    tenant_id = await create_test_tenant(pool)
+    await perf_repo.insert_methodology(DEFAULT_METHODOLOGY)
+    inserted = await perf_repo.insert_statement(await _statement(tenant_id))
+
+    async def _call() -> float:
+        sample = await perf_budget.sample_async(
+            lambda: get_statement(
+                perf_repo,
+                tenant_id=tenant_id,
+                statement_id=inserted.id,
+            )
+        )
+        return sample.wall_ms
+
+    baseline_elapsed = await _call()
+    samples = sorted([await _call() for _ in range(30)])
+    p95 = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 <= ceiling, (
+        f"portfolio_id 없이 호출 시 p95 {p95:.4f}ms가 상한 {ceiling:.4f}ms 초과 — "
+        "단언이 경로 구별 없이 모든 호출에 느림을 허용함"
+    )
+
+
+async def test_p95_assertion_with_non_default_portfolio_id_rejected_before_timing(
+    pool,
+    perf_repo,
+    entity_repo,
+) -> None:
+    """음성 테스트 — 존재하지 않는 portfolio_id를 주면 get_statement가 즉시
+    EntityContextResolutionError를 던진다. 이 예외 경로는 성능 측정 구간을
+    통과하지 않으므로, p95 측정 테스트가 해당 경로를 우회해야 한다.
+    예외가 실제로 던져지는지를 검증."""
+    tenant_id = await create_test_tenant(pool)
+    await perf_repo.insert_methodology(DEFAULT_METHODOLOGY)
+    inserted = await perf_repo.insert_statement(await _statement(tenant_id))
+    fake_portfolio_id = uuid4()
+
+    with pytest.raises(EntityContextResolutionError):
+        await get_statement(
+            perf_repo,
+            tenant_id=tenant_id,
+            statement_id=inserted.id,
+            portfolio_id=fake_portfolio_id,
+            entities=entity_repo,
+        )
+
+
+async def test_p95_baseline_self_consistency_across_runs(
+    pool,
+    perf_repo,
+    entity_repo,
+    perf_budget,
+) -> None:
+    """음성 테스트 — 같은 설정으로 baseline을 2회 측정하면 둘 다 상한 내에서
+    통과해야 한다. 단언이 한 번만 우연히 green인 것이 아님을 확인."""
+    tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
+    await _seed_default_hierarchy(pool, entity_repo, tenant_id)
+    await perf_repo.insert_methodology(DEFAULT_METHODOLOGY)
+    inserted = await perf_repo.insert_statement(await _statement(tenant_id))
+    portfolio_id = default_portfolio_id(tenant_id)
+
+    async def _call() -> float:
+        sample = await perf_budget.sample_async(
+            lambda: get_statement(
+                perf_repo,
+                tenant_id=tenant_id,
+                statement_id=inserted.id,
+                portfolio_id=portfolio_id,
+                entities=entity_repo,
+            )
+        )
+        return sample.wall_ms
+
+    # 2회 독립 baseline 측정
+    baseline_1 = await _call()
+    baseline_2 = await _call()
+
+    # 각 baseline이 자체 상한 내에서 green이어야 함
+    ceiling_1 = baseline_1 * 5 + 0.05
+    ceiling_2 = baseline_2 * 5 + 0.05
+
+    samples_1 = sorted([await _call() for _ in range(30)])
+    p95_1 = samples_1[math.ceil(0.95 * len(samples_1)) - 1]
+    samples_2 = sorted([await _call() for _ in range(30)])
+    p95_2 = samples_2[math.ceil(0.95 * len(samples_2)) - 1]
+
+    assert p95_1 <= ceiling_1, f"1차 baseline p95 {p95_1:.4f}ms > 상한 {ceiling_1:.4f}ms"
+    assert p95_2 <= ceiling_2, f"2차 baseline p95 {p95_2:.4f}ms > 상한 {ceiling_2:.4f}ms"
