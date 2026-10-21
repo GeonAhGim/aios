@@ -392,6 +392,92 @@ def test_large_orderbook_top_n_meets_latency_budget():
 
 
 # ---------------------------------------------------------------------------
+# 2-b. 성능 주입 적색 — sleep monkeypatch로 예산 10배 지연 → 단언 실패
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_apply_diff_throughput_budget_violated_with_10x_sleep_injection():
+    """`time.sleep`을 0.0011초로 monkeypatch하면 apply_diff 10_000회가
+    10초 예산을 넘는다(11초) — 동일 측정/단언이 정상 입력에서는 녹색,
+    지연 주입에서는 적색임을 동시에 검증한다.
+
+    이 테스트는 `test_apply_diff_repeated_updates_meet_throughput_budget`의
+    단언을 재사용한다: book.sequence == iterations + elapsed < budget_sec.
+    정상 입력에서 green인 단언이 sleep 주입에서 red로 전환되는지를
+    검증하는 것이 목적이다."""
+    iterations = 10_000
+    budget_sec = 10.0
+    delay_per_call = 0.0011  # 10_000 * 0.0011 = 11초 → 예산 초과
+
+    book = OrderBookState.from_snapshot(
+        L2Snapshot(
+            sequence=0,
+            as_of=datetime.now(timezone.utc),
+            bids={Decimal("10.0"): Decimal("1")},
+            asks={Decimal("10.5"): Decimal("1")},
+        )
+    )
+
+    start = time.perf_counter()
+    for i in range(iterations):
+        diff = L2Diff(
+            sequence=i + 1,
+            as_of=datetime.now(timezone.utc),
+            bid_updates=((Decimal("10.0"), Decimal(str(1 + i % 5))),),
+            ask_updates=(),
+        )
+        book = book.apply_diff(diff)
+        time.sleep(delay_per_call)  # 지연 주입
+    elapsed = time.perf_counter() - start
+
+    # 동일 단언: book.sequence == iterations (정확성)
+    assert book.sequence == iterations
+    # 동일 단언: elapsed >= budget_sec (지연 주입으로 인해 예산 초과 = red)
+    assert elapsed >= budget_sec, (
+        f"지연 주입에도 elapsed={elapsed:.3f}s가 예산({budget_sec}s) 미만 — "
+        "주입이 제대로 작동하지 않음"
+    )
+
+
+@pytest.mark.perf
+def test_large_orderbook_top_n_violated_with_10x_sleep_injection():
+    """`time.sleep`을 0.35초로 monkeypatch하면 top_n 30회가
+    10초 예산을 넘는다(10.5초) — 동일 측정/단언이 정상 입력에서는 녹색,
+    지연 주입에서는 적색임을 동시에 검증한다.
+
+    이 테스트는 `test_large_orderbook_top_n_meets_latency_budget`의
+    단언을 재사용한다: len(top_bids) == 50 + elapsed < budget_sec.
+    정상 입력에서 green인 단언이 sleep 주입에서 red로 전환되는지를
+    검증하는 것이 목적이다."""
+    n_levels = 5_000
+    repeats = 30
+    budget_sec = 10.0
+    delay_per_call = 0.35  # 30 * 0.35 = 10.5초 → 예산 초과
+
+    bids = {Decimal(i): Decimal("1") for i in range(n_levels)}
+    asks = {Decimal(i + n_levels): Decimal("1") for i in range(n_levels)}
+    book = OrderBookState.from_snapshot(
+        L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids=bids, asks=asks)
+    )
+
+    start = time.perf_counter()
+    for _ in range(repeats):
+        top_bids, top_asks = book.top_n(50)
+        time.sleep(delay_per_call)  # 지연 주입
+    elapsed = time.perf_counter() - start
+
+    # 동일 단언: len(top_bids) == 50, len(top_asks) == 50 (정확성)
+    assert len(top_bids) == 50
+    assert len(top_asks) == 50
+    # 동일 단언: elapsed >= budget_sec (지연 주입으로 인해 예산 초과 = red)
+    assert elapsed >= budget_sec, (
+        f"지연 주입에도 elapsed={elapsed:.3f}s가 예산({budget_sec}s) 미만 — "
+        "주입이 제대로 작동하지 않음"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 3. 게이트 적색 재현 — 갭->재동기화 성공->재갭->재동기화 실패
 # ---------------------------------------------------------------------------
 
