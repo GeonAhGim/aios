@@ -28,6 +28,7 @@ from src.foundation.validation.checks import backtest as backtest_check
 from src.foundation.validation.checks.backtest import run
 from src.foundation.validation.checks.context import CheckContext
 from src.foundation.validation.domain.artifact import build_artifact
+from src.foundation.validation.domain.check_result import CheckResult
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 
@@ -136,6 +137,71 @@ def test_pass_with_paid_cost_model_and_no_trades() -> None:
     assert result.check_type == "backtest"
     # bars[0].close=100 -> bars[-1].close=129: (129-100)/100*100 = 29%.
     assert result.metrics["benchmark_buy_hold_return_pct"] == Decimal("29")
+
+
+# -- D2 CPU measurement convergence: single call cpu_ms → 0 for trivial work ---
+
+
+@pytest.mark.perf
+def test_backtest_check_cpu_ms_converges_to_zero_for_single_run(
+    perf_budget: Any,
+) -> None:
+    """CPU measurement invariant: a single `run()` call over 30 bars with a
+    no-trade FSM must report cpu_ms close to zero.
+
+    This verifies that ``PerfSample.cpu_ms`` actually measures process CPU time
+    (via ``time.process_time()``) and does not converge to a non-zero floor
+    caused by measurement artefacts or batch=1 quantization on Windows.
+    """
+
+    def _run_once() -> CheckResult:
+        return run(_ctx(bars=_bars(30), warmup_bars=5))
+
+    # batch=1 is the stress case: Windows time.process_time() has ~15.6ms tick
+    # resolution; a single trivial call should still read 0ms or 1 tick.
+    samples = perf_budget.samples(_run_once, n=5, warmup=1, batch=1)
+    max_cpu_ms = max(s.cpu_ms for s in samples)
+    assert max_cpu_ms < 50.0, (
+        f"backtest check cpu_ms too high for trivial work: {max_cpu_ms:.2f}ms "
+        f"(expected <50ms, batch=1 quantization floor)"
+    )
+
+
+# -- D2 failure injection: 10x budget CPU injection → assertion red ------------
+
+
+@pytest.mark.perf
+def test_backtest_check_assertion_fires_on_10x_cpu_injection(
+    perf_budget: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Budget invariance (D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산을 초과하는 CPU 시간을 가장하면 budget 단언이 AssertionError로
+    적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    import time as _time_module
+
+    _fake_cpu = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_cpu[0] += 0.5  # +500ms per call >> generous baseline
+        return _fake_cpu[0]
+
+    monkeypatch.setattr(_time_module, "process_time", _fake_process_time)
+
+    def _run_once() -> CheckResult:
+        return run(_ctx(bars=_bars(30), warmup_bars=5))
+
+    # Use the same assertion as test_backtest_check_cpu_ms_converges_to_zero_for_single_run:
+    # cpu_ms < 50ms. With 500ms injected per call it MUST exceed budget.
+    sample = perf_budget.sample(_run_once)
+    with pytest.raises(AssertionError) as exc_info:
+        assert sample.cpu_ms < 50.0, f"cpu_ms={sample.cpu_ms:.2f}ms exceeds 50ms budget"
+    assert "cpu_ms" in str(exc_info.value)
 
 
 # -- hard fail (negative) -----------------------------------------------------
