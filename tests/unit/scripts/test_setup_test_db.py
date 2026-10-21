@@ -28,6 +28,7 @@ import asyncpg
 import pytest
 
 from tests._perf.relative_budget import RelativeBudget
+from tests.support.perf_inject import delayed_async
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -96,12 +97,127 @@ def scratch_db_name() -> str:
 
 
 def test_ensure_database_creates_when_missing(scratch_db_name: str) -> None:
+    """perf: single _ensure_database call must stay within wall-clock budget.
+
+    task-17471: I/O-bound operation (connect → query → CREATE DATABASE).
+    Uses ``RelativeBudget(mode="wall")`` with ``calibration_fn`` so the
+    calibration measures the same I/O cost and the ratio captures
+    relative variance under load rather than calibration-vs-I/O overhead.
+    """
     server_url = _server_url()
     try:
-        created = asyncio.run(
+        budget = RelativeBudget()
+
+        def _ensure_one() -> None:
+            asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
+
+        sample = budget.assert_within(
+            _ensure_one,
+            max_ratio=10.0,
+            mode="wall",
+            n=3,
+            warmup=0,
+            calibration_fn=_ensure_one,
+            label="single _ensure_database(create)",
+        )
+        print(f"[setup_test_db] {budget.describe(sample, max_ratio=10.0)}")
+
+        # Final correctness: ensure DB exists.
+        assert asyncio.run(_database_exists(server_url, scratch_db_name)) is True
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+@pytest.mark.perf
+def test_ensure_database_creates_when_missing_gate_red(
+    scratch_db_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate-red: injecting 2.0 s sleep via ``delayed_async`` must breach the
+    ``max_ratio=10.0`` budget, proving the assertion in
+    ``test_ensure_database_creates_when_missing`` actually detects slowdowns.
+
+    task-17471: delay injection uses ``delayed_async`` from
+    ``tests.support.perf_inject`` (no ``# type: ignore``).
+    """
+    server_url = _server_url()
+    try:
+        # Patch fetchval — the exists check in _ensure_database.
+        # 2.0 s delay on a single fetchval call exceeds the typical
+        # calibration time (~0.08 s) × 10 = 0.8 s budget, so the
+        # RelativeBudget assertion must raise.
+        monkeypatch.setattr(
+            asyncpg.Connection,
+            "fetchval",
+            delayed_async(asyncpg.Connection.fetchval, 2.0),
+        )
+
+        budget = RelativeBudget()
+
+        def _ensure_one() -> None:
+            asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
+
+        # Same budget as the green test — this must FAIL (breach) because
+        # 2.0 s delay >> calibration × 10.
+        with pytest.raises(AssertionError, match=r"budget"):
+            budget.assert_within(
+                _ensure_one,
+                max_ratio=10.0,
+                mode="wall",
+                n=3,
+                warmup=0,
+                calibration_n=3,
+                label="single _ensure_database(create)+delay",
+            )
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+def test_ensure_database_noop_when_already_exists(scratch_db_name: str) -> None:
+    """negative: calling _ensure_database on an existing DB with reset=False
+    must return False (did not create).
+    """
+    server_url = _server_url()
+    try:
+        asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
+        second = asyncio.run(
             setup_test_db._ensure_database(server_url, scratch_db_name, reset=False)
         )
+        assert second is False
+        assert asyncio.run(_database_exists(server_url, scratch_db_name)) is True
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+def test_ensure_database_reset_on_missing_creates(scratch_db_name: str) -> None:
+    """negative: reset=True on a non-existent DB must still create it
+    (reset is a no-op when DB does not exist).
+    """
+    server_url = _server_url()
+    try:
+        # DB does not exist yet — reset=True should create it
+        created = asyncio.run(
+            setup_test_db._ensure_database(server_url, scratch_db_name, reset=True)
+        )
         assert created is True
+        assert asyncio.run(_database_exists(server_url, scratch_db_name)) is True
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+def test_ensure_database_reset_on_existing_drops_and_recreates(
+    scratch_db_name: str,
+) -> None:
+    """negative: reset=True on an existing DB must drop and recreate it,
+    returning True (newly created).
+    """
+    server_url = _server_url()
+    try:
+        asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
+        reset_result = asyncio.run(
+            setup_test_db._ensure_database(server_url, scratch_db_name, reset=True)
+        )
+        assert reset_result is True
         assert asyncio.run(_database_exists(server_url, scratch_db_name)) is True
     finally:
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
