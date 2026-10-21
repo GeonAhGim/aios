@@ -14,6 +14,7 @@ seeded directly per test via `PostgresResearchRepository`.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -245,6 +246,59 @@ async def test_search_items_latency_stays_within_normalized_ceiling(client, seed
         f"51개 항목 검색이 {full_elapsed_s:.3f}s 걸림 "
         f"(baseline {baseline_elapsed_s:.3f}s, 정규화 상한 {ceiling:.3f}s)"
     )
+
+
+@pytest.mark.perf
+async def test_search_items_latency_rejects_10x_delay_injection(client, seeded, perf_budget):
+    """Detection test -- 10배 지연(monkeypatch list_by_tenant에 sleep 0.5초)을
+    주입하면 같은 정규화 상한 단언이 적색이 된다. 정상 입력에서 녹색, 지연에서
+    적색을 교차 검증한다(task-11539, task-16079)."""
+    pool = app.state.pool
+    repo = PostgresResearchRepository(pool)
+    for _ in range(50):
+        await repo.append_item(seeded["tenant_a"], _item(), external_id=f"ext-{uuid.uuid4().hex}")
+
+    # Run normally first: must pass (green control)
+    baseline_sample = await perf_budget.sample_async(
+        lambda: client.get(f"{BASE}/items/{seeded['item_id']}", headers=seeded["a"])
+    )
+    baseline = baseline_sample.result
+    assert baseline.status_code == 200, baseline.text
+    baseline_elapsed_s = baseline_sample.wall_ms / 1000
+
+    # Inject 10x delay via repository override
+    class _SlowResearchRepository:
+        def __init__(self, real_repo: PostgresResearchRepository) -> None:
+            self._real = real_repo
+
+        async def get_item(self, tenant_id: uuid.UUID, item_id: uuid.UUID) -> ResearchItem | None:
+            return await self._real.get_item(tenant_id, item_id)
+
+        async def list_by_tenant(
+            self, tenant_id: uuid.UUID, *, source_id: str, limit: int = 200
+        ) -> list[ResearchItem]:
+            await asyncio.sleep(0.5)  # 500ms delay per call → ~10x typical query
+            return await self._real.list_by_tenant(tenant_id, source_id=source_id, limit=limit)
+
+    app.dependency_overrides[get_research_repository] = lambda: _SlowResearchRepository(repo)
+    try:
+        full_sample = await perf_budget.sample_async(
+            lambda: client.get(
+                f"{BASE}/items", params={"source_id": SOURCE_ID}, headers=seeded["a"]
+            )
+        )
+        full = full_sample.result
+        assert full.status_code == 200, full.text
+        full_elapsed_s = full_sample.wall_ms / 1000
+
+        ceiling = baseline_elapsed_s * 20 + 0.5
+        assert full_elapsed_s <= ceiling, (
+            f"10배 지연 주입 후 51개 항목 검색이 {full_elapsed_s:.3f}s 걸림 "
+            f"(baseline {baseline_elapsed_s:.3f}s, 상한 {ceiling:.3f}s) — "
+            "지연이 예산을 초과하면 반드시 실패해야 한다"
+        )
+    finally:
+        app.dependency_overrides.pop(get_research_repository, None)
 
 
 class _LeakyResearchRepository:
