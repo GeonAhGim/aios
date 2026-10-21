@@ -39,7 +39,11 @@ import pytest
 
 from src.foundation.research_data.application.link_entities import link_entities
 from src.foundation.research_data.contracts.v1 import ResearchItem
-from src.foundation.research_data.domain.entity_link import EntityKey, EntityLinkResult
+from src.foundation.research_data.domain.entity_link import (
+    EntityKey,
+    EntityLinkResult,
+    link_item,
+)
 from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -162,12 +166,11 @@ async def test_link_entities_resolver_crash_mid_batch_never_calls_save_links() -
 async def test_link_entities_default_limit_batch_meets_latency_budget(
     perf_budget: PerfBudget,
 ) -> None:
-    """raw time.perf_counter() → PerfBudget.sample_async 전환(task-15288).
-    `sample_async`는 async 전용으로 batch 파라미터가 없다 — fake 포트(
-    I/O 없음)는 단일 호출이 이미 15.6ms 틱을 넘으므로 batch 불필요.
-    ms 단위로 예산과 단위를 일치시킴.
-    지연 주입 검증: 호출 10배 지연을 주입하면 budget 100ms → 1000ms 예상,
-    실제 측정 1000ms 초과로 적색 재현됨."""
+    """PerfBudget.sample_async 전환 — CPU 시간( time.process_time() ) 기준으로
+    500건 배치 예산을 단언한다. fake 포트(I/O 없음)는 단일 호출이 15.6ms 틱을
+    넘지 않으므로 batch=1 로 충분하다. ms 단위로 예산과 단위를 일치시킴.
+    지연 주입 검증: test_link_entities_default_limit_batch_goes_red_with_delay
+    에서 역으로 증명."""
     budget_ms = 100.0  # 실측 로컬 <50ms(fake 포트, I/O 없음), CI 편차 감안
     items = [_item(instruments=(f"{i:06d}",)) for i in range(500)]
     mapping = {f"{i:06d}": f"INSTR-{i}" for i in range(0, 500, 2)}  # 절반만 매핑
@@ -186,6 +189,80 @@ async def test_link_entities_default_limit_batch_meets_latency_budget(
     assert resolver.call_count == 500, (
         "each item has exactly one deterministic key -> one resolve call"
     )
+
+
+# ---- CPU 0 수렴 (single-call 양자화 오차 검증) ----
+
+
+@pytest.mark.perf
+def test_link_entities_single_call_cpu_zero_convergence(
+    perf_budget: PerfBudget,
+) -> None:
+    """CPU 측정의 0 수렴: 단일 link_item 호출 20회 best-of-5 최소 CPU가 5ms
+    미만이어야 한다.
+
+    `link_item`은 순수 데이터 복사/해시/dict lookup 이므로 CPU 시간은
+    Windows 의 time.process_time() 양자화 틱(~15.6ms) 아래로 수렴해야 한다.
+    batch=1 로 단일 호출을 측정하고 best-of-5 최소값으로 노이즈를 걷어낸다.
+    """
+    item = _item(instruments=("005930",))
+    resolver = _FakeResolver({})
+
+    def _single_call() -> object:
+        return link_item(item, resolver)
+
+    # warmup
+    for _ in range(5):
+        _single_call()
+
+    samples = perf_budget.samples(_single_call, n=20, batch=1)
+    best = min(samples, key=lambda s: s.cpu_ms)
+    assert best.cpu_ms < 5.0, (
+        f"single-call CPU {best.cpu_ms:.3f}ms exceeds 5ms zero-convergence budget; "
+        f"wall={best.wall_ms:.3f}ms"
+    )
+
+
+# ---- 게이트 적색: 지연 주입으로 같은 단언이 적색이 됨을 검증 ----
+
+
+@pytest.mark.perf
+async def test_link_entities_default_limit_batch_goes_red_with_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction(D2, task-11539 후속): 성능 예산 단언이 실제로
+    위반을 포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해
+    1회 호출당 예산(100ms)을 초과하는 CPU 시간을 가장하면 같은 단언이
+    AssertionError 로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep 이 아닌 process_time 교체를 사용한다.
+    """
+    import time as _time
+
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 150.0  # 150ms per call >> 100ms budget
+        return _fake_time[0]
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    items = [_item(instruments=(f"{i:06d}",)) for i in range(500)]
+    mapping = {f"{i:06d}": f"INSTR-{i}" for i in range(0, 500, 2)}
+    repo = _FakeEntityLinkRepository(items)
+    resolver = _FakeResolver(mapping)
+
+    async def _run() -> list:
+        return await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=500)
+
+    # 같은 측정/단언을 재사용 — budget 을 초과하므로 AssertionError 가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = await perf_budget.sample_async(_run)
+        assert sample.cpu_ms < 100.0, (
+            f"500건 배치 처리가 예산(100ms)을 넘었습니다({sample.cpu_ms:.3f}ms)."
+        )
 
 
 # ---- 게이트 적색 재현 (미해결 -> 여전히 미해결 -> 뒤늦게 해결) ----
