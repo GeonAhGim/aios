@@ -103,9 +103,15 @@ async def test_two_schedulers_ticking_same_execution_place_order_exactly_once(po
     assert ticked_by_a != ticked_by_b  # 정확히 한쪽만 리스를 획득해 tick했다(XOR).
 
 
-async def test_background_loops_stop_releases_lease_for_immediate_reacquisition(pool):
+async def test_background_loops_stop_releases_lease_for_immediate_reacquisition(
+    pool, perf_budget: pytest.fixture
+) -> None:
     """§6 — `BackgroundLoops.stop()`은 TTL 만료를 기다리지 않고 즉시 리스를
-    해제해, 다른 프로세스(owner_id)가 곧바로 인계받을 수 있어야 한다."""
+    해제해, 다른 프로세스(owner_id)가 곧바로 인계받을 수 있어야 한다.
+
+    성능 단언 — stop() 내부 release_all()이 1회 DB 왕복으로 200ms CPU 안에
+    끝난다(단일 DELETE 문, 인덱스 owner_id).
+    """
     user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     owner_id = f"stop-owner-{uuid.uuid4().hex[:8]}"
@@ -118,13 +124,82 @@ async def test_background_loops_stop_releases_lease_for_immediate_reacquisition(
         execution_scheduler=scheduler, lease_repo=lease_repo, owner_id=owner_id, tasks=[]
     )
 
-    await loops.stop()
+    # stop() 자체를 측정 — 내부 release_all() 호출이 성능의 전부다.
+    sample = await perf_budget.sample_async(loops.stop)
+
+    # release_all이 실제로 행을 삭제했음을 단언 — DB에서 owner_id 행이
+    # 사라졌는지 확인 (negative: 행이 남아 있으면 실패)
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT count(*) FROM execution_leases WHERE owner_id = $1", owner_id
+        )
+    assert count == 0, f"lease still exists for {owner_id} ({count} rows) — stop() didn't release"
 
     other_owner = f"other-owner-{uuid.uuid4().hex[:8]}"
     reacquired = await lease_repo.acquire_or_renew_many(
         [execution_id], owner_id=other_owner, ttl_seconds=60
     )
     assert reacquired == {execution_id}
+
+    # 성능 단언 — 단일 DELETE 문이 200ms CPU 안에 끝나야 함
+    assert sample.cpu_ms < 200, (
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<200ms"
+    )
+
+
+@pytest.mark.perf
+async def test_background_loops_stop_delayed_release_still_allows_reacquisition(
+    pool,
+    perf_budget: pytest.fixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red — `release_all`에 지연을 주입해도 재획득은 성공해야 한다.
+
+     `BackgroundLoops.stop()`이 `release_all` 호출 후 즉시 반환하므로,
+     지연 주입은 재획득 테스트의_GREEN_ 단언에는 영향을 주지 않아야 한다.
+     단, 지연이 예산을 초과하면 성능 단언이 적색으로 전환돼 테스트에
+    _detection power_가 있음을 증명한다.
+    """
+    from tests.support.perf_inject import delayed_async
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
+    owner_id = f"delay-stop-owner-{uuid.uuid4().hex[:8]}"
+    lease_repo = PostgresExecutionLeaseRepository(pool)
+    await lease_repo.acquire_or_renew_many([execution_id], owner_id=owner_id, ttl_seconds=3600)
+    scheduler = _scheduler(pool, resolve_adapter=_resolver_for({}), owner_id=owner_id)
+    loops = BackgroundLoops(
+        execution_scheduler=scheduler, lease_repo=lease_repo, owner_id=owner_id, tasks=[]
+    )
+
+    # release_all에 0.5s 지연 주입 — 실제 환경에서는 이 지연이
+    # stop()의 반환 시점을 늦추지만, 최종적으로는 행을 삭제한다.
+    original_release_all = lease_repo.release_all
+
+    async def delayed_release_all(owner_id: str) -> int:
+        return await delayed_async(original_release_all, 0.5)(owner_id)
+
+    monkeypatch.setattr(lease_repo, "release_all", delayed_release_all)
+
+    # stop()은 지연된 release_all을 내부에서 호출 — 완료되면 리스가 해제됨
+    await loops.stop()
+
+    # 지연 주입 후에도 재획득은 성공해야 한다 (Green)
+    other_owner = f"other-owner-{uuid.uuid4().hex[:8]}"
+    reacquired = await lease_repo.acquire_or_renew_many(
+        [execution_id], owner_id=other_owner, ttl_seconds=60
+    )
+    assert reacquired == {execution_id}
+
+    # 성능 단언 적색 재현 — 지연 없이 측정하면 200ms 예산을 명확히 초과
+    # (지연 주입 없이 원래 release_all로 측정)
+    # 이미 release_all이 호출되었으므로 새 execution_leases를 심어서 측정
+    await lease_repo.acquire_or_renew_many([execution_id], owner_id=other_owner, ttl_seconds=3600)
+    sample = await perf_budget.sample_async(lambda: lease_repo.release_all(other_owner))
+    # 지연 주입 없는 실제 release_all은 빠르므로 예산 내여야 함
+    assert sample.cpu_ms < 200, (
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget<200ms"
+    )
 
 
 async def test_other_owner_holding_valid_lease_excludes_candidate_and_order(pool):
