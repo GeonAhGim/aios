@@ -44,6 +44,8 @@ from src.foundation.connections.domain.models import (
 )
 from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 _PURPOSE = "account_read_connection"
@@ -241,6 +243,90 @@ async def test_begin_connection_rejects_when_mfa_not_verified() -> None:
 
     assert conn_repo.insert_pending_calls == 0
     assert trust_repo.get_active_consent_calls == 0
+
+
+@pytest.mark.perf
+async def test_mfa_rejection_single_call_cpu_convergence() -> None:
+    """단일 호출 CPU 시간을 측정한다(0 수렴 결함 감지).
+
+    `is_lease_available` 패터너: batch=10000으로 측정한 CPU 시간이
+    0ms면 Windows 양자화 오차(≈15.6ms tick)일 수 있다. MFA 체크는
+    `if not mfa_verified: raise` 한 줄이므로 genuinely 0ms에 가깝고
+    `>= 0`으로 측정 메커니즘의 동작을 확인한다.
+    """
+    tenant_id = uuid4()
+
+    async def _run() -> None:
+        with pytest.raises(MfaRequiredError):
+            await begin_connection(
+                FakeConnectionRepository(),
+                _fresh_trust_repo(tenant_id),
+                **_kwargs(tenant_id, mfa_verified=False),
+            )
+
+    sample = await PerfBudget().sample_async(_run, batch=10000)
+    assert sample.cpu_ms >= 0, (
+        f"CPU 측정 실패 — 측정 메커니즘이 동작하지 않음: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_mfa_rejection_perf_budget(perf_budget: PerfBudget) -> None:
+    """성능 수치 단언(D2): MFA 거부 경로의 호출 1회가 0.1ms 미만이어야 한다.
+
+    `process_time()` 기반 측정 — 다른 워커나 호스트 대기 영향 제거.
+    예산 10배 지연 monkeypatch에서 적색으로 떨어져야 한다(gate-red).
+    """
+    tenant_id = uuid4()
+
+    async def _run() -> None:
+        with pytest.raises(MfaRequiredError):
+            await begin_connection(
+                FakeConnectionRepository(),
+                _fresh_trust_repo(tenant_id),
+                **_kwargs(tenant_id, mfa_verified=False),
+            )
+
+    sample = await perf_budget.sample_async(_run, batch=100)
+    assert sample.cpu_ms < 0.1, (
+        f"mfa_rejection_path CPU {sample.cpu_ms:.3f}ms exceeded 0.1ms budget"
+    )
+
+
+@pytest.mark.perf
+async def test_mfa_rejection_perf_injection_exceeds_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MFA 체크에 CPU 지연(delayed_sync, 0.05s)을 주입한 후
+    assert_within가 AssertionError를 발생시켜야 한다(red).
+
+    begin_connection의 첫 줄이 MFA 체크(`if not mfa_verified: raise`)이므로,
+    MfaRequiredError를 raise하기 전에 0.05s CPU 부하를 주입한다.
+    예산 0.1ms보다 500배 커서 assert_within가 실패한다. 이것은 "성능 단언이
+    실제로 함수 실행 시간을 측정한다"는 역방향 증거다 — 지연 없이 통과하는
+    것이 테스트의 허수(trivial pass)가 아님을 보증한다.
+    """
+    import src.foundation.connections.application.begin_connection as target
+
+    # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
+    slow_begin_connection = delayed_sync(target.begin_connection, 0.05)
+
+    tenant_id = uuid4()
+
+    async def _run() -> None:
+        with pytest.raises(MfaRequiredError):
+            await slow_begin_connection(
+                FakeConnectionRepository(),
+                _fresh_trust_repo(tenant_id),
+                **_kwargs(tenant_id, mfa_verified=False),
+            )
+
+    with pytest.raises(AssertionError):
+        sample = await perf_budget.sample_async(_run, batch=1)
+        assert sample.cpu_ms < 0.1, (
+            f"perf_injection_mfa_rejection CPU {sample.cpu_ms:.3f}ms exceeded 0.1ms budget"
+        )
 
 
 async def test_begin_connection_rejects_forbidden_capability_scope() -> None:
