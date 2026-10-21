@@ -88,6 +88,91 @@ async def test_fetch_snapshot_defaults_to_empty_values_boundary():
 
 
 # ---------------------------------------------------------------------------
+# D2 evidence for test_verify_readonly_scope_defaults_to_full_p0_profile
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_verify_readonly_scope_zero_convergence() -> None:
+    """단일 호출 CPU 시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
+
+    `time.process_time()` 기반 측정에서 단일 호출이 0ms면 Windows 양자화
+    오차(≈15.6ms tick)로 인한 측정 결함이다. batch=8로 여러 호출을 묶으면
+    양자화 오차가 호출당 tick/8로 줄어 CPU 시간을 정상 측정한다.
+    task-11539 감사: 0 수렴이면 batch로 정정.
+    """
+    from tests.support.perf_budget import PerfBudget
+
+    provider = FakeReadonlyAccountProvider()
+    sample = await PerfBudget().sample_async(
+        lambda: provider.verify_readonly_scope(SecretLease(lease_ref="lease-1")),
+        batch=65536,
+    )
+    assert sample.cpu_ms > 0, (
+        f"verify_readonly_scope 단일 호출 CPU 시간이 0ms (batch=65536 기준) — "
+        f"측정 버그 또는 양자화 오차: cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_verify_readonly_scope_perf_budget_p95_latency(perf_budget) -> None:
+    """verify_readonly_scope p95 레이턴시가 50ms 예산 내에 있음을 검증한다.
+
+    `verify_readonly_scope`는 메모리 내 ScopeProof 생성만 하므로
+    fetch_snapshot과 같은 단일 호출 예산(50ms)을 사용한다.
+    I/O 지연은 wall_ms로 판정한다.
+    """
+    sample_count = 50
+    provider = FakeReadonlyAccountProvider()
+
+    samples = await perf_budget.samples_async(
+        lambda: provider.verify_readonly_scope(SecretLease(lease_ref="lease-1")),
+        n=sample_count,
+    )
+    durations_ms = sorted(s.wall_ms for s in samples)
+    p95 = durations_ms[int(sample_count * 0.95) - 1]
+    assert p95 < 50.0, f"verify_readonly_scope p95 latency {p95:.3f}ms exceeded 50ms budget"
+
+
+@pytest.mark.perf
+async def test_verify_readonly_scope_gate_red_reproduction_with_sleep_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현 — 동일한 성능 단언이 sleep 주입 시 실제로 적색(AssertionError)
+    으로 떨어져야 한다.
+
+    `verify_readonly_scope` 메서드 자체에 asyncio.sleep(0.1)을 주입해
+    100ms 지연을 추가하면 p95가 50ms 예산을 초과해야 한다.
+    단언/마커 삭제와 예산 완화 금지.
+    """
+    import asyncio
+
+    from tests.support.perf_budget import PerfBudget
+
+    sample_count = 50
+
+    provider = FakeReadonlyAccountProvider()
+    original_method = provider.verify_readonly_scope
+
+    async def slow_verify(lease: SecretLease) -> object:
+        await asyncio.sleep(0.1)  # 100ms — 예산 50ms의 2배
+        return await original_method(lease)
+
+    monkeypatch.setattr(provider, "verify_readonly_scope", slow_verify)
+
+    samples = await PerfBudget().samples_async(
+        lambda: provider.verify_readonly_scope(SecretLease(lease_ref="lease-1")),
+        n=sample_count,
+    )
+    durations_ms = sorted(s.wall_ms for s in samples)
+    p95 = durations_ms[int(sample_count * 0.95) - 1]
+    assert p95 > 50.0, (
+        f"gate-red 실패: p95={p95:.3f}ms ≤ budget=50ms — "
+        "주입된 지연이 단언을 적색으로 만들지 못함(hollow assertion)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # perf assertion (D2)
 # ---------------------------------------------------------------------------
 
