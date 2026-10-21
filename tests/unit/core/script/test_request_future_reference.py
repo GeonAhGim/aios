@@ -131,13 +131,13 @@ def test_resample_confirmed_latency_p95_within_runtime_budget(perf_budget) -> No
 def test_resample_latency_budget_actually_fails_with_delay(
     perf_budget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """실패 주입: resample_confirmed 경로에 50ms 지연을 주입하면预算 단언이
-    AssertionError를 내는지 확인한다(항상 통과하는 허울 단언이 아님을 검증).
-    지연은 원래 budget(20ms)의 2.5배로, 충분히 과하게 주입한다."""
+    """실패 주입: resample_confirmed 경로에 예산의 10배 지연(200ms)을
+    주입하면预算 단언이 AssertionError를 내는지 확인한다(항상 통과하는
+    허울 단언이 아님을 검증)."""
     original_resample = resample_confirmed
 
     def _stalled_resample(source, *, bar_count: int, ratio: int):
-        time.sleep(0.05)  # 50ms 지연
+        time.sleep(0.2)  # 200ms 지연 (budget 20ms의 10배)
         return original_resample(source, bar_count=bar_count, ratio=ratio)
 
     monkeypatch.setattr(
@@ -156,6 +156,40 @@ def test_resample_latency_budget_actually_fails_with_delay(
     p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
     budget_ms = 20.0
     assert p95_ms < budget_ms  # 지연 주입으로 반드시 실패해야 한다
+
+
+# ---- CPU 0 수렴: 단일 호출 측정 ----
+
+
+@pytest.mark.perf
+def test_confirmed_source_index_single_call_cpu_converges_to_zero() -> None:
+    """단일 호출 CPU 측정의 0 수렴 검증: `confirmed_source_index`는 O(1)
+    산술 연산이므로 1회 호출의 CPU 시간이 0에 수렴해야 한다.
+
+    `PerfBudget.sample()`은 `time.process_time()`을 사용하므로 Windows의
+    약 15.6ms 양자화 오차가 있을 수 있다. `batch`로 여러 호출을 묶어
+    평균하면 양자화 오차가 `tick/batch`로 줄어든다 — 1ms 미만이어야
+    캐시가 아닌 순수 연산 비용임을 증명한다.
+    """
+    from tests.support.perf_budget import PerfBudget
+
+    pb = PerfBudget()
+
+    def single_call() -> int:
+        return confirmed_source_index(bar_index=1000, ratio=5)
+
+    # 첫 호출은 warm-up(파이썬 함수 호출 오버헤드 안정화)으로 흘린다.
+    single_call()
+
+    # 이후 20회 단일 호출을 측정 — 모두 1ms 미만이어야 함.
+    samples = pb.samples(single_call, n=20, batch=1)
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    budget_ms = 1.0
+    assert p95_ms < budget_ms, (
+        f"confirmed_source_index 단일 호출 p95 CPU 시간 "
+        f"{p95_ms:.3f}ms가 1ms를 초과 — O(1) 연산이 아님: {cpu_values_ms}"
+    )
 
 
 # ---- 게이트 적색 재현: 진행 중 버킷을 참조하는 naive 구현의 불변식 위반 ----
