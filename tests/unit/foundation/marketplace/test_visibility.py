@@ -184,3 +184,41 @@ def test_resolve_visibility_hot_path_performance(perf_budget: PerfBudget) -> Non
         batch=10_000,
         label="resolve_visibility hot path",
     )
+
+
+# ---- 성능 주입 실패 테스트 (budget이 실제 지연을 포착하는지 검증) ----
+
+
+def test_perf_budget_detects_excessive_delay() -> None:
+    """성능 예산 단언이 실제로 지연을 포착하는지 검증 — budget을 10배 초과하는
+    지연을 주입하면 assert_within이 AssertionError를 던지는지 확인한다.
+
+    `time.process_time()`을 모킹해 호출당 0.1ms가 소모되는 것처럼 보이게 하고,
+    budget_ms=0.001(1µs)을 설정해 budget을 훨씬 초과하도록 한다.
+    """
+    import time as _time
+
+    cumulative = [0.0]  # mutable closure for mock
+
+    def _fake_process_time() -> float:
+        cumulative[0] += 0.1  # 0.1ms per call → 10_000회 = 100ms total
+        return cumulative[0]
+
+    original = _time.process_time
+    try:
+        _time.process_time = _fake_process_time
+
+        budget = PerfBudget()
+        with pytest.raises(AssertionError, match="budget"):
+            budget.assert_within(
+                lambda: resolve_visibility(
+                    ListingVisibility.PROTECTED,
+                    has_protected_source=False,
+                    viewer=STRANGER,
+                ),
+                budget_ms=0.001,
+                batch=10_000,
+                label="resolve_visibility injected delay",
+            )
+    finally:
+        _time.process_time = original
