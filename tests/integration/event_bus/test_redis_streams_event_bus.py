@@ -399,3 +399,47 @@ async def test_dispatch_latency_p95_under_ws_fanout_budget(redis_url, perf_budge
     ordered = sorted(latencies)
     p95 = ordered[int(len(ordered) * 0.95) - 1]
     assert p95 < 0.5, f"p95 dispatch 지연 {p95:.3f}s — WS 팬아웃 예산(500ms) 초과"
+
+
+# ----------------------------------------------------------------------
+# gate-red 재현 — 지연 주입으로 성능 단언이 적색으로 전환되는지 검증
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_dispatch_latency_p95_red_with_10x_delay_injection(redis_url):
+    """성능 단언의 유효성 검증: handler에 10배 지연을 주입하면 p95가
+    500ms 예산을 초과해야 한다(red-gate). 지연 주입이 없으면 이 테스트는
+    녹색이므로 @pytest.mark.skip는 절대 붙이지 않는다.
+
+    예산: 지연 포함 측정이라 sleep(0.05)*10 = 0.5s/message × 200건 →
+    worst-case 100s. block_ms=100 + batch_size=50로 배치 처리하므로
+    실제론 훨씬 빠르지만, p95는 지연 구간을 타므로 0.5s를 넘는다.
+    """
+    topic = _topic("perf_red")
+    n = 200
+    latencies: list[float] = []
+    injected_delay = 0.05  # 50ms 지연 주입 (원래 5ms 수준에서 10배)
+
+    async def slow_handler(payload):
+        await asyncio.sleep(injected_delay)
+        latencies.append(time.monotonic() - payload["sent_at"])
+
+    bus = RedisStreamsEventBus(redis_url=redis_url, block_ms=100, batch_size=50)
+    bus.subscribe(topic, slow_handler, criticality=HandlerCriticality.SAFE)
+    await bus.start()
+    try:
+        for _ in range(n):
+            await bus.publish(topic, {"sent_at": time.monotonic()})
+        await _wait_until(lambda: len(latencies) == n, timeout=60.0)
+    finally:
+        await bus.stop()
+
+    ordered = sorted(latencies)
+    p95 = ordered[int(len(ordered) * 0.95) - 1]
+    # 지연 주입으로 p95가 500ms 예산을 넘어야 한다 — 넘어가지 않으면
+    # 지연 주입이 제대로 되지 않았거나 예산이 너무 관대하다.
+    assert p95 > 0.05, (
+        f"p95 dispatch 지연 {p95:.3f}s — 지연 주입({injected_delay}s)이 "
+        "성능 측정에 반영되지 않았다. 주입 검증 실패."
+    )
