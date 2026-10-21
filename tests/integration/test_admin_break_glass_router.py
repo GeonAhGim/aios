@@ -16,7 +16,7 @@ ADR-2026-09-09-C D2 증빙:
   (HTTP 경로로 들어와도 `require_break_glass`의 `conn.transaction()`이 실제
   DB 오류를 롤백함을 증명 -- grant가 반쯤 소비된 상태로 남지 않는다).
 - 성능 단언 1: `test_audit_log_route_round_trip_latency_budget`.
-- 게이트 적색 재현 2건:
+- 게이트 적색 재현 3건:
   1. `test_unfixed_admin_route_still_allows_non_mfa_admin_showing_the_original_gap`
      (이 leaf가 고치지 않은 15+개 `get_current_admin` 전용 라우트 중 하나가
      여전히 MFA 없이 통과됨을 보여, QA가 원래 발견한 결함이 이 3개 라우트
@@ -24,6 +24,8 @@ ADR-2026-09-09-C D2 증빙:
   2. `test_request_grant_rejects_stale_mfa_step_up_through_http`(task-6482,
      task-3795 재검 반영) -- `auth_level` 클레임만 봤다면 통과했을 16분 전
      TOTP 세션이 실제 HTTP 경로에서 403으로 막힌다.
+  3. `test_audit_log_route_latency_goes_red_with_10x_delay_injection` —
+     DB에 5s 지연 주입 시 wall_ms가 4000ms 예산을 초과해 적색(역검증).
 """
 
 from __future__ import annotations
@@ -313,6 +315,53 @@ async def test_audit_log_route_round_trip_latency_budget(client, pool, perf_budg
     assert sample.wall_ms < 4000, (
         f"GET /admin/audit-log elapsed={sample.wall_ms:.2f}ms, 예산 4000ms 초과"
     )
+
+
+# --- D2 gate-red reproduction: 10x delay injection proves budget is real ---
+
+
+@pytest.mark.perf
+async def test_audit_log_route_latency_goes_red_with_10x_delay_injection(
+    client, pool, perf_budget, monkeypatch
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. DB 조회에 5s 지연을 주입하면 wall_ms가
+    4000ms 예산을 초과해 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. 정상 입력에서 녹색, 지연에서 적색을 교차 검증한다
+    (task-11539, task-16079).
+    """
+    import asyncio
+
+    requester_headers, _requester_id = await _register_mfa_admin(client, pool)
+    approver_headers, _approver_id = await _register_mfa_admin(client, pool)
+    reader_headers, _reader_id = await _register_mfa_admin(client, pool)
+
+    grant_id = await _request_and_approve_grant(
+        client, requester_headers, approver_headers, scope="tenant_read"
+    )
+
+    _real_fetch = asyncpg.Connection.fetch
+
+    async def _slow_fetch(
+        self: asyncpg.Connection, *args: object, **kwargs: object
+    ) -> list[asyncpg.Record]:
+        await asyncio.sleep(5.0)  # 5s 지연 → 4000ms 예산을 명확히 초과
+        return await _real_fetch(self, *args, **kwargs)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(asyncpg.Connection, "fetch", _slow_fetch)
+
+    # 같은 측정/단언을 재사용 — 지연 주입으로 budget 초과 → AssertionError
+    with pytest.raises(AssertionError):
+        sample = await perf_budget.sample_async(
+            lambda: client.get(
+                "/admin/audit-log", headers={**reader_headers, "X-Break-Glass-Grant": grant_id}
+            )
+        )
+        assert sample.wall_ms < 4000, (
+            f"GET /admin/audit-log elapsed={sample.wall_ms:.2f}ms, 예산 4000ms 초과"
+        )
 
 
 async def test_consume_failure_during_http_request_rolls_back_grant_state(
