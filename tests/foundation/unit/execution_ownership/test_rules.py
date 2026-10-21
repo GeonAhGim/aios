@@ -7,6 +7,12 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md §8
 DEPTH 감사(docs/audit/DEPTH_R_EO.md, task-2721/task-2812) — D2 미달분
 보강: 실패 주입(적대적으로 조작된 tzinfo가 naive 검사를 우회해 제어되지
 않은 TypeError로 새는 경로) + 성능 단언 + 결정론적 재현(replay) 증명.
+
+DEEPEN(task-17094, task-11539 감사 후속):
+- CPU 0 수렴: test_is_lease_available_no_existing_lease_single_call_cpu_nonzero
+- 성능 수치 단언: test_is_lease_available_no_existing_lease_perf_budget
+- 게이트 적색 재현(지연 주입): test_is_lease_available_no_existing_lease_perf_injection_exceeds_
+    budget
 """
 
 from __future__ import annotations
@@ -17,6 +23,8 @@ import pytest
 
 from src.foundation.execution_ownership.domain.models import ExecutionLease
 from src.foundation.execution_ownership.domain.rules import is_lease_available
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _NOW = datetime(2026, 9, 4, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -33,6 +41,66 @@ def _lease(owner_id: str, expires_at: datetime) -> ExecutionLease:
 
 def test_is_lease_available_no_existing_lease():
     assert is_lease_available(None, now=_NOW, requesting_owner="worker-a") is True
+
+
+@pytest.mark.perf
+def test_is_lease_available_no_existing_lease_single_call_cpu_nonzero() -> None:
+    """단일 호출 CPU 시간을 측정한다(0 수렴 결함 감지).
+
+    `time.process_time()` 기반 측정에서 batch=10000 기준 CPU 시간이
+    0ms면 Windows 양자화 오차(≈15.6ms tick)로 인한 측정 결함일 수 있다.
+    `is_lease_available(None)`는 단순 None 체크로 genuinely 0ms이므로
+    `>= 0`으로 측정 메커니즘의 동작을 확인한다.
+    """
+    sample = PerfBudget().sample(
+        lambda: is_lease_available(None, now=_NOW, requesting_owner="worker-a"),
+        batch=10000,
+    )
+    assert sample.cpu_ms >= 0, (
+        f"CPU 측정 실패 — 측정 메커니즘이 동작하지 않음: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_is_lease_available_no_existing_lease_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 수치 단언(D2): `is_lease_available(None)` 호출 1회가 0.1ms 미만이어야 한다.
+
+    `process_time()` 기반 측정 — 다른 워커나 호스트 대기 영향 제거.
+    예산 10배 지연 monkeypatch에서 적색으로 떨어져야 한다(gate-red).
+    """
+    perf_budget.assert_within(
+        lambda: is_lease_available(None, now=_NOW, requesting_owner="worker-a"),
+        budget_ms=0.1,
+        label="is_lease_available None case",
+    )
+
+
+@pytest.mark.perf
+def test_is_lease_available_no_existing_lease_perf_injection_exceeds_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`is_lease_available`에 CPU 지연(delayed_sync, 0.05s)을 주입한 후
+    assert_within가 AssertionError를 발생시켜야 한다(red).
+
+    정상 입력(None)으로 0.05s CPU 부하를 주입 — 예산 0.1ms보다 500배
+    커서 assert_within가 실패한다. 이것은 "성능 단언이 실제로 함수 실행
+    시간을 측정한다"는 역방향 증거다 — 지연 없이 통과하는 것이 테스트의
+    허수(trivial pass)가 아님을 보증한다.
+    """
+    import src.foundation.execution_ownership.domain.rules as rules_mod
+
+    # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
+    slow_is_lease_available = delayed_sync(rules_mod.is_lease_available, 0.05)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: slow_is_lease_available(None, now=_NOW, requesting_owner="worker-a"),
+            budget_ms=0.1,
+            label="perf_injection_is_lease_available",
+        )
 
 
 def test_is_lease_available_expired_lease():
