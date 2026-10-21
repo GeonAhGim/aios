@@ -13,7 +13,7 @@ DEEPEN(task-3188, docs/audit/DEPTH_PLT.md leaf 1615): D1이었던 이 리프에
 결함이므로, 실패 주입 테스트조차 실 DB 클라이언트를 쓰지 않는다."""
 
 import ast
-import time
+import itertools
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 from pathlib import Path
@@ -26,6 +26,7 @@ from src.services.execution_loop.equity_tracker import (
     _utc_today,
     record_and_persist_equity,
 )
+from tests.support.perf_budget import PerfBudget
 
 
 def test_is_seeded_false_before_any_record_or_seed() -> None:
@@ -206,19 +207,25 @@ async def test_record_and_persist_equity_propagates_infra_failure_fail_closed() 
 
 
 @pytest.mark.perf
-def test_record_throughput_bound_for_many_executions() -> None:
-    """성능 단언 — 순수 메모리 연산이므로 실 DB 왕복 없이 10,000회
-    record() 호출이 느슨한 상한 안에 끝나야 한다(CI CPU 변동을 고려한
-    여유 상한 15s — 명백한 알고리즘 회귀(예: 매 호출마다 전체 딕셔너리
-    스캔으로 퇴화)만 잡는다)."""
+def test_record_throughput_bound_for_many_executions(perf_budget: PerfBudget) -> None:
+    """성능 단언 — 순수 메모리 연산이므로 실 DB 왕복 없이 record() 호출 1회가
+    느슨한 상한(CPU 1ms) 안에 끝나야 한다(명백한 알고리즘 회귀, 예: 매 호출마다
+    전체 딕셔너리 스캔으로 퇴화만 잡는다).
+
+    task-16701(ce9413b81f5e) — 이전엔 `time.monotonic()` 합계(10,000회 합산
+    15s 상한)로 측정했다. 공유 CI 머신에서 다른 프로세스에 코어를 뺏겨 대기한
+    시간까지 벽시계에 섞여 들어가 재발하는 pytest_perf 적색의 원인이었다
+    (`scripts/check_perf_measurement_guard.py`가 바로 이 raw-timer 패턴을
+    잡는다). `perf_budget`(`time.process_time()` 기반, best-of-5, coverage
+    tracer 일시정지)으로 바꿔 호스트 잡음을 측정에서 제거한다."""
     tracker = ExecutionEquityTracker(today=lambda: date(2026, 9, 2))
+    counter = itertools.count()
 
-    start = time.monotonic()
-    for execution_id in range(10_000):
+    def _record_once() -> None:
+        execution_id = next(counter)
         tracker.record(execution_id, Decimal("1000") + execution_id)
-    elapsed = time.monotonic() - start
 
-    assert elapsed < 15.0
+    perf_budget.assert_within(_record_once, budget_ms=1, batch=10_000, label="record() single-call")
 
 
 def _imports_asyncpg(source: str) -> bool:
