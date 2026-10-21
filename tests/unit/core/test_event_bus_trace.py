@@ -315,3 +315,69 @@ async def test_gate_red_reproduction_without_envelope_binding():
     # 관측한 trace_id는 발행 시점 값과 달라야 한다 — PLT-06 수정이 없었다면
     # 이 저장소의 회귀 테스트가 정확히 이렇게 적색이 됐을 것이다.
     assert seen[0] != published_trace_id
+
+
+# ----------------------------------------------------------------------
+# 지연 주입 — CPU 부하 10배 주입 시 p95 단언이 적색이어야 함
+# ----------------------------------------------------------------------
+
+
+async def test_publish_p95_budget_red_with_10x_cpu_delay():
+    """지연 주입 — publish()에 CPU 부하를 10배 주입했을 때, 같은 p95 단언이
+    적색(reject)해야 한다. 이는 성능 예산이 단순 통과가 아니라 실제
+    회귀를 잡아내는 검문이라는 증거다.
+
+    CPU 예산이므로 sleep이 아닌 CPU 바운드 작업을 주입하고, 같은
+    PUBLISH_P95_BUDGET_MS 단언을 재사용한다.
+    """
+    import time as _time
+
+    bus = InProcessEventBus(
+        max_queue_depth=2000,
+        backpressure_sustained_seconds=60.0,
+        max_retries=1,
+        retry_initial_delay_seconds=0.01,
+    )
+    processed = 0
+
+    # 1회 publish당 약 10ms CPU 부하 주입 — 5ms 예산을 명시적으로 초과
+    def heavy_cpu_work() -> None:
+        x = 0
+        for i in range(5_000_000):
+            x += i * i % 7
+
+    original_process_time = _time.process_time
+    batch = 16
+    n = 20
+
+    async def handler(payload):
+        nonlocal processed
+        processed += 1
+
+    async def publish_batch_with_load():
+        heavy_cpu_work()  # CPU 부하 10ms 주입
+        for i in range(batch):
+            await bus.publish("perf.delay.topic", {"i": i})
+
+    bus.subscribe("perf.delay.topic", handler, criticality=HandlerCriticality.SAFE)
+    await bus.start()
+
+    latencies_ms: list[float] = []
+    try:
+        for _ in range(n):
+            cpu_start = original_process_time()
+            await publish_batch_with_load()
+            cpu_end = original_process_time()
+            await asyncio.wait_for(bus._queues["perf.delay.topic"].join(), timeout=5.0)
+            latencies_ms.append((cpu_end - cpu_start) * 1000 / batch)
+        assert processed == n * batch
+    finally:
+        await bus.stop()
+
+    latencies_ms.sort()
+    p95_ms = latencies_ms[int(n * 0.95)]
+    # 같은 단언 — 예산을 초과하면 적색. pytest.raises로 "단언이 실패함을" 검증.
+    with pytest.raises(AssertionError, match=r"p95 지연시간.*초과"):
+        assert p95_ms < PUBLISH_P95_BUDGET_MS, (
+            f"publish() p95 지연시간 {p95_ms:.4f}ms가 예산 {PUBLISH_P95_BUDGET_MS}ms 초과"
+        )
