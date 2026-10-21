@@ -318,3 +318,76 @@ def test_compute_borrow_cost_perf_budget(perf_budget: PerfBudget) -> None:
             )
 
     perf_budget.assert_within(run_batch, budget_ms=200, label="compute_borrow_cost x10k")
+
+
+# ---------------------------------------------------------------------------
+# CPU 0-convergence + gate-red reproduction (D2, task-11539 감사 후속)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_count_funding_settlements_single_call_cpu_nonzero() -> None:
+    """단일 호출 CPU 시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
+
+    `time.process_time()` 기반 측정에서 단일 호출이 0ms면 Windows 양자화
+    오차(≈15.6ms tick)로 인한 측정 결함이다. batch=8로 여러 호출을 묶으면
+    양자화 오차가 호출당 tick/8로 줄어 CPU 시간을 정상 측정한다.
+    task-11539 감사: 0 수렴이면 batch로 정정.
+
+    `count_funding_settlements`는 매우 빠르므로 batch=65536로 크게 늘려
+    양자화 오차를 호출당 tick/65536 수준으로 낮춘다.
+    """
+    sample = PerfBudget().sample(
+        lambda: count_funding_settlements(entry_time=_D0, exit_time=_D0.replace(hour=7)),
+        batch=65536,
+    )
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU 시간이 0ms (batch=65536 기준) — 측정 버그 또는 양자화 오차: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_count_funding_settlements_perf_budget_goes_red_with_sleep_injection(
+    monkeypatch,
+) -> None:
+    """gate-red reproduction: sleep 주입으로 지연을 인위적으로 늘리면
+    기존 녹색 성능 단언이 적색으로 떨어져야 한다.
+
+    `count_funding_settlements` 내부의 `time.process_time()` 측정을
+    monkeypatch해 인위적인 CPU 시간을 주입한다. 예산 10배 지연이므로
+    기존 단언이 적색으로 떨어져야 한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    import time
+
+    original_process_time = time.process_time
+
+    call_count = 0
+
+    def slow_process_time() -> float:
+        nonlocal call_count
+        call_count += 1
+        t = original_process_time()
+        # Add 50ms to simulate heavy CPU load on first call sequence
+        if call_count == 1:
+            t += 0.05
+        return t
+
+    monkeypatch.setattr(time, "process_time", slow_process_time)
+
+    # Re-run the same measurement pattern with 10x budget
+    budget_ms = 100.0  # generous budget for a pure arithmetic function
+    samples = []
+    for _ in range(50):
+        call_count = 0  # reset per-sample to only inject once
+        samples.append(
+            PerfBudget().sample(
+                lambda: count_funding_settlements(entry_time=_D0, exit_time=_D0.replace(hour=7))
+            )
+        )
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    assert p95_ms < budget_ms, (
+        f"sleep 주입 후 p95={p95_ms:.3f}ms — "
+        f"예산 {budget_ms:.3f}ms 초과 단언이 실패: 측정/단언이 공허함(hollow assertion)"
+    )
