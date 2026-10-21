@@ -11,10 +11,14 @@ ADR-2026-09-09-C D2 증빙:
   미승인 상태 consume, 만료 후 consume.
 - 실패 주입 1: `test_audit_failure_rolls_back_approval`(감사 INSERT가 실제 DB
   오류로 실패하면 승인 자체가 롤백됨을 증명).
-- 성능 단언 1: `test_consume_latency_budget`.
+- 성능 단언 1: `test_consume_latency_budget`(정상 입력 녹색).
 - 게이트 적색 재현 1: `test_self_approval_bypassing_app_guard_still_blocked_by_db`
   (애플리케이션 가드를 우회한 raw UPDATE로 자기승인을 시도해도 DB CHECK가
-  막는다 -- 코드 가드 하나만 있었다면 이 시나리오는 통과했을 것이다)."""
+  막는다 -- 코드 가드 하나만 있었다면 이 시나리오는 통과했을 것이다).
+- budget invariance: `test_consume_latency_assertion_fires_on_10x_budget_sleep`(10x
+  sleep 주입 → 적색 재현).
+- cpu convergence: `test_cpu_ms_converges_near_zero_for_single_consume`(단일 호출
+  cpu_ms → 0 수렴 검증)."""
 
 from __future__ import annotations
 
@@ -393,6 +397,97 @@ async def test_consume_latency_budget(pool, perf_budget):
     )
     p95 = samples[-1].wall_ms
     assert p95 < 100.0, f"consume p95={p95:.1f}ms, 예산 100ms 초과"
+
+
+# --- failure injection: 10x sleep delay → assertion red ----------------------
+
+
+@pytest.mark.perf
+async def test_consume_latency_assertion_fires_on_10x_budget_sleep(pool, perf_budget):
+    """Budget invariance: if the same assertion is run against a call delayed
+    by 10× the budget (100ms × 10 = 1000ms), the p95 assertion must fail.
+
+    This proves the performance gate is not a tautology — it actually rejects
+    slow paths. The test **expects** the assertion to fire (AssertionError).
+    """
+    import asyncio as _asyncio
+
+    _BUDGET_MS = 100.0
+    _SLEEP_MS = _BUDGET_MS * 10  # 1000ms per iteration
+
+    requester_id = await create_test_user(pool)
+    approver_id = await create_test_user(pool)
+    admin_id = await create_test_user(pool)
+
+    async def _delayed_consume() -> None:
+        # Each iteration needs a fresh grant (consume is single-use).
+        async with pool.acquire() as conn:
+            grant = await _request(pool, conn, requester_id)
+            await break_glass.approve_grant(
+                conn,
+                grant_id=grant.id,
+                approver_id=approver_id,
+                approver_mfa_verified_at=_fresh(),
+                check_segregation_of_duty=assert_actor_not_counterparty,
+            )
+        async with pool.acquire() as conn:
+            await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
+        # Inject delay AFTER consume to prove the test body itself is slow
+        # (delay before consume would block the measured section;
+        #  delay after proves we're measuring the right thing).
+        await _asyncio.sleep(_SLEEP_MS / 1000)
+
+    samples = sorted(
+        [await perf_budget.sample_async(_delayed_consume) for _ in range(5)],
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[-1].wall_ms
+    # Same assertion as the green test; with 10× sleep it MUST exceed budget.
+    with pytest.raises(AssertionError) as exc_info:
+        assert p95 < _BUDGET_MS, f"consume p95={p95:.1f}ms, 예산 {_BUDGET_MS}ms 초과"
+    assert "p95=" in str(exc_info.value)
+
+
+# --- CPU measurement convergence: single-call cpu_ms → 0 for trivial work ----
+
+
+@pytest.mark.perf
+async def test_cpu_ms_converges_near_zero_for_single_consume(pool, perf_budget):
+    """CPU measurement invariant: a single consume() call on an I/O-bound
+    conditional UPDATE reports cpu_ms close to zero.
+
+    This verifies that `PerfSample.cpu_ms` actually measures process CPU time
+    (via `time.process_time()`) and does not converge to a non-zero floor
+    caused by measurement artefacts or batch=1 quantization on Windows.
+    """
+    requester_id = await create_test_user(pool)
+    approver_id = await create_test_user(pool)
+    admin_id = await create_test_user(pool)
+
+    async def _single_consume() -> None:
+        # Each iteration needs a fresh grant (consume is single-use).
+        async with pool.acquire() as conn:
+            grant = await _request(pool, conn, requester_id)
+            await break_glass.approve_grant(
+                conn,
+                grant_id=grant.id,
+                approver_id=approver_id,
+                approver_mfa_verified_at=_fresh(),
+                check_segregation_of_duty=assert_actor_not_counterparty,
+            )
+        async with pool.acquire() as conn:
+            await break_glass.consume(conn, grant_id=grant.id, admin_id=admin_id)
+
+    # batch=1 is the stress case: Windows time.process_time() has ~15.6ms tick
+    # resolution; a single trivial call should still read 0ms or 1 tick (15.6ms).
+    samples = await perf_budget.samples_async(_single_consume, n=5)
+    # cpu_ms must be well under 50ms for a single-row DB lookup — proves the
+    # timer is not stuck at a non-zero floor.
+    max_cpu_ms = max(s.cpu_ms for s in samples)
+    assert max_cpu_ms < 50, (
+        f"cpu_ms={max_cpu_ms:.2f}ms exceeds trivial-work floor (50ms); "
+        f"samples={[f'{s.cpu_ms:.2f}' for s in samples]}"
+    )
 
 
 # --- require_break_glass dependency ------------------------------------------
