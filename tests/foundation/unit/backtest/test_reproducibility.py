@@ -271,11 +271,18 @@ def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
 
     `batch=8`로 Windows `process_time()` 15.6ms 양자화 오차를 줄이고,
     `cpu_ms`로 녹색 테스트와 동일한 측정 지표 단언을 재사용한다(task-11539
-    감사: single-call 양자화 0 수렴·gate-red metric 불일치 정정)."""
+    감사: single-call 양자화 0 수렴·gate-red metric 불일치 정정).
+
+    `cpu_ms`는 `time.process_time()`(이 프로세스가 실제로 소비한 CPU 시간)
+    기준이라 `time.sleep()`은 반영되지 않는다 — 잠든 시간은 CPU를 쓰지
+    않으므로 이 지연 주입은 busy-loop여야 한다(tests/unit/core/test_bitemporal.py,
+    test_overfitting.py 등 이 리포의 동일 패턴 참조)."""
     original_config_hash = reproducibility_mod.config_hash
 
     def _stalled_config_hash(config: BacktestConfigV2) -> str:
-        time.sleep(0.01)  # > 2ms 예산
+        deadline = time.process_time() + 0.01  # > 2ms 예산, CPU-busy
+        while time.process_time() < deadline:
+            pass
         return original_config_hash(config)
 
     monkeypatch.setattr(reproducibility_mod, "config_hash", _stalled_config_hash)
