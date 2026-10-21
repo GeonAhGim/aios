@@ -1,4 +1,10 @@
-"""EM-5 domain/route/venue_scoring.py -- determinism, tie-break, boundary, negative cases."""
+"""EM-5 domain/route/venue_scoring.py -- determinism, tie-break, boundary, negative cases.
+
+DEEPEN(task-11539 감사 후속, D2):
+- CPU 0-convergence: test_ranking_is_invariant_under_random_input_shuffling_single_call_cpu_nonzero
+- 성능 수치 단언 1: test_ranking_is_invariant_under_random_input_shuffling_perf_budget
+- 게이트 적색 재현: 기존 test_gate_red_proof_composite_bypass_turns_red이 담당
+"""
 
 from __future__ import annotations
 
@@ -14,6 +20,7 @@ from src.foundation.ems.domain.route.venue_scoring import (
     VenueScoreWeights,
     rank_venues,
 )
+from tests.conftest import PerfBudget
 
 
 def _decisions_to_venues(decisions: list[RouteDecision]) -> list[str]:
@@ -38,6 +45,57 @@ def test_ranking_is_invariant_under_random_input_shuffling() -> None:
         rng.shuffle(shuffled)
         result = _decisions_to_venues(rank_venues(shuffled))
         assert result == expected
+
+
+# -- D2-deepening: CPU 0-convergence, perf budget, gate-red proof -----------
+
+
+@pytest.mark.perf
+def test_ranking_is_invariant_under_random_input_shuffling_single_call_cpu_nonzero() -> None:
+    """단일 호출 CPU 시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
+
+    `time.process_time()` 기반 측정에서 단일 호출이 0ms면 Windows 양자화
+    오차(≈15.6ms tick)로 인한 측정 결함이다. batch=10000로 여러 호출을
+    묶으면 양자화 오차가 호출당 tick/10000로 줄어 CPU 시간을 정상 측정한다.
+    task-11539 감사: 0 수렴이면 batch로 정정.
+    """
+    candidates = [
+        VenueCandidate(venue="ALPHA", fee_bps=Decimal("5"), liquidity_score=Decimal("0.9")),
+        VenueCandidate(venue="BETA", fee_bps=Decimal("2"), liquidity_score=Decimal("0.4")),
+        VenueCandidate(venue="GAMMA", fee_bps=Decimal("8"), liquidity_score=Decimal("0.1")),
+        VenueCandidate(venue="DELTA", fee_bps=Decimal("1"), liquidity_score=Decimal("0.6")),
+    ]
+    sample = PerfBudget().sample(
+        lambda: rank_venues(candidates),
+        batch=10000,
+    )
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU 시간이 0ms (batch=10000 기준) — 측정 버그 또는 양자화 오차: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_ranking_is_invariant_under_random_input_shuffling_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 수치 단언(D2): `rank_venues` 호출 1회가 1ms 미만이어야 한다.
+
+    `process_time()` 기반 측정 — 다른 워커나 호스트 대기 영향 제거.
+    예산 10배 지연 monkeypatch에서 적색으로 떨어져야 한다(gate-red).
+    """
+    candidates = [
+        VenueCandidate(venue="ALPHA", fee_bps=Decimal("5"), liquidity_score=Decimal("0.9")),
+        VenueCandidate(venue="BETA", fee_bps=Decimal("2"), liquidity_score=Decimal("0.4")),
+        VenueCandidate(venue="GAMMA", fee_bps=Decimal("8"), liquidity_score=Decimal("0.1")),
+        VenueCandidate(venue="DELTA", fee_bps=Decimal("1"), liquidity_score=Decimal("0.6")),
+    ]
+
+    perf_budget.assert_within(
+        lambda: rank_venues(candidates),
+        budget_ms=1,
+        label="rank_venues x4",
+    )
 
 
 # -- tie-break: identical fee + liquidity -> venue code ascending -----------
