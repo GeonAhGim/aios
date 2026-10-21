@@ -278,13 +278,17 @@ async def test_submit_order_end_to_end_latency_within_normalized_budget(pool: as
     user_id = await create_test_tenant(pool)
     execution_id = await create_execution(pool, user_id)
     adapter = _make_adapter()
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     counter = {"n": 0}
+    client_order_ids: list[str] = []
 
     async def _one_submit() -> None:
         counter["n"] += 1
         order = _make_order(execution_id, f"perf-{counter['n']}")
         await submit_order(order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate)
+        client_order_ids.append(order.client_order_id)
 
     submit_p95 = await _p95_ms(reps, _one_submit)
     budget_ms = max(800.0, 80.0 * baseline_p95)
@@ -293,3 +297,9 @@ async def test_submit_order_end_to_end_latency_within_normalized_budget(pool: as
         f"p95={baseline_p95:.3f}ms budget={budget_ms:.3f}ms"
     )
     assert submit_p95 < budget_ms
+
+    # cleanup — sentinel(orders_residue)가 eventless residue를 적발하지 않도록
+    # 이 테스트가 남긴 주문 행을 teardown 전에 제거한다.
+    if client_order_ids:
+        for cid in client_order_ids:
+            await pool.execute("DELETE FROM orders WHERE client_order_id = $1", cid)
