@@ -19,6 +19,8 @@ from src.foundation.validation.application.compile_artifact import (
     compile_artifact,
 )
 from src.services.strategy_builder_service import StrategyLifecycleError, StrategyNotFoundError
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 
 @dataclass
@@ -125,3 +127,62 @@ async def test_p95_latency_within_pure_compile_budget(perf_budget) -> None:
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
     assert p95_ms < 200, f"p95={p95_ms:.2f}ms exceeds 200ms budget"
+
+
+# -- gate-red: delay injection proves the budget assertion is non-trivial --------
+
+
+@pytest.mark.perf
+async def test_gate_red_injected_delay_exceeds_pure_compile_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """get_strategy 에 0.5s 지연(delayed_async) 을 주입하면 측정 값이
+    성능 예산을 초과한다(red).
+
+    정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을
+    보증한다 — 지연 주입 후 wall_ms 가 200ms 예산을 넘으면 단언이
+    실제로 실행 시간을 측정함을 증명한다.
+    """
+    fsm = {"states": [f"S{i}" for i in range(50)]}
+    service = _FakeStrategyService(fsm)
+
+    # 0.5s = 500ms 지연 주입 — get_strategy 의 async 호출을 느리게 만든다
+    slow_get_strategy = delayed_async(service.get_strategy, 0.5)
+    monkeypatch.setattr(service, "get_strategy", slow_get_strategy)
+
+    async def _fn() -> None:
+        await compile_artifact(
+            service, owner_user_id=uuid4(), strategy_id="strat-1", strategy_version="v1"
+        )
+
+    sample = await perf_budget.sample_async(_fn, batch=1)
+    assert sample.wall_ms >= 200, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget=200ms)"
+    )
+
+
+# -- zero CPU convergence --------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_single_call_cpu_converges_to_zero(perf_budget: PerfBudget) -> None:
+    """단일 호출의 CPU 시간이 0 수렴함을 동적으로 검증한다.
+
+    `compile_artifact` 는 FSM 정의 해싱만 수행 — 실제 I/O 가 없다.
+    CPU 예산 5ms 미만에서 best-of-5 최소값이 수렴해야 한다.
+    """
+    fsm = {"states": ["IDLE", "BUY_ORDER_PENDING"]}
+    service = _FakeStrategyService(fsm)
+
+    async def _fn() -> None:
+        await compile_artifact(
+            service, owner_user_id=uuid4(), strategy_id="strat-1", strategy_version="v1"
+        )
+
+    sample = await perf_budget.sample_async(_fn, batch=1)
+    assert sample.cpu_ms < 5, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms exceeds 5ms budget — "
+        f"wall={sample.wall_ms:.3f}ms load={perf_budget.load_percent()}"
+    )
