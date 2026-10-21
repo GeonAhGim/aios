@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import json
 from decimal import Decimal
 
 import pytest
 
 from src.data.models.serialization import DecimalSafeEncoder
+from tests.support.perf_budget import PerfBudget
 
 
 def test_decimal_serialized_as_string_not_float():
@@ -130,3 +133,85 @@ def test_perf_serialize_1000_decimals(perf_budget):
     perf_budget.assert_within(
         serialize, budget_ms=50, n=5, warmup=1, batch=8, label="serialize_1000_decimals"
     )
+
+
+# ---- CPU 측정 0 수렴 검증 (task-11539 감사 후속) -------------------------------
+
+
+@pytest.mark.perf
+def test_serialize_cpu_measurement_converges_with_batch(perf_budget: PerfBudget) -> None:
+    """CPU 측정 0 수렴 검증: 단일 Decimal 직렬화는 Windows
+    `time.process_time()` 약 15.6ms 양자화tick 때문에 batch=1로 측정하면
+    항상 0ms로 읽힌다. batch=8로 묶으면 양자화 오차가 호출당 15.6/8 ≈ 2ms로
+    줄어 실제 CPU 시간을 측정할 수 있다.
+
+    이 테스트는 batch 매개변수가 양자화 문제를 완화한다는 사실을
+    문서화한다(task-11539 감사).
+    """
+    payload = {"amount": Decimal("1.99")}
+
+    # batch=1 — 양자화tick보다 빠르므로 0ms 수렴 (정량 단언)
+    single_sample = perf_budget.sample(
+        lambda: json.dumps(payload, cls=DecimalSafeEncoder),
+        batch=1,
+    )
+    assert single_sample.cpu_ms < 1.0, (
+        f"batch=1 cpu={single_sample.cpu_ms:.3f}ms — "
+        f"Windows quantizationtick(15.6ms)보다 빠른 호출은 0ms 수렴"
+    )
+
+    # batch=8 — 양자화 오차가 1/8로 줄어 실제 CPU 측정 가능
+    batch_sample = perf_budget.sample(
+        lambda: json.dumps(payload, cls=DecimalSafeEncoder),
+        batch=8,
+    )
+    # batch로 나눈 평균이 양자화tick(15.6ms)보다 작아야 함
+    assert batch_sample.cpu_ms < 15.6, (
+        f"batch=8 cpu={batch_sample.cpu_ms:.3f}ms — 양자화tick 15.6ms 미만이어야 함"
+    )
+
+
+# ---- 게이트 적색 재현 (CPU 지연 주입) ------------------------------------------
+
+
+@pytest.mark.perf
+def test_perf_budget_assertion_catches_10x_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    500ms(예산 50ms의 10배)를 가장하면 `assert_within`가
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+    budget_ms = 50.0
+
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 500ms(10x budget)를 반환하게 한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.5  # 500ms per call = 10x budget
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    payload = {f"field_{i}": Decimal(f"{i}.99") for i in range(1000)}
+
+    def serialize():
+        return json.dumps(payload, cls=DecimalSafeEncoder)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            serialize,
+            budget_ms=budget_ms,
+            n=5,
+            warmup=1,
+            batch=8,
+            label="serialize_1000_decimals_injected",
+        )
