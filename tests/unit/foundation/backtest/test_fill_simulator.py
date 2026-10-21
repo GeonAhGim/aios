@@ -239,6 +239,107 @@ def _run_fill_batch(
         )
 
 
+# -- D2 CPU 측정 0 수렴 + 지연 주입 적색 재현 ----------------------------------
+
+
+@pytest.mark.perf
+def test_simulate_cpu_measurement_converges_with_batch(
+    perf_budget: PerfBudget,
+) -> None:
+    """CPU 측정 0 수렴 검증: 단일 `BarFillSimulator.simulate()` 호출은 Windows
+    `time.process_time()` 약 15.6ms 양자화 tick 때문에 batch=1로 측정하면
+    항상 0ms로 읽힌다. batch=8로 묶으면 양자화 오차가 호출당 15.6/8 ≈ 2ms로
+    줄어 실제 CPU 시간을 측정할 수 있다.
+
+    이 테스트는 batch 매개변수가 양자화 문제를 완화한다는 사실을
+    문서화한다(task-11539 감사).
+    """
+    cost_model = CostModel(fee_bps=Decimal("5"), slippage_bps=Decimal("10"))
+    bar = _bar(open_price="100")
+    simulator = BarFillSimulator()
+
+    def single_call() -> None:
+        simulator.simulate(
+            bar=bar,
+            bar_index=1,
+            side=OrderSide.BUY,
+            quantity=Decimal("1"),
+            cost_model=cost_model,
+            seed=0,
+        )
+
+    # batch=1 — 양자화 tick보다 빠르므로 0ms 수렴 (정량 단언)
+    single_sample = perf_budget.sample(single_call, batch=1)
+    assert single_sample.cpu_ms < 1.0, (
+        f"batch=1 cpu={single_sample.cpu_ms:.3f}ms — "
+        f"Windows quantization tick(15.6ms)보다 빠른 호출은 0ms 수렴"
+    )
+
+    # batch=8 — 양자화 오차가 1/8로 줄어 실제 CPU 측정 가능
+    batch_sample = perf_budget.sample(single_call, batch=8)
+    # batch로 나눈 평균이 양자화 tick(15.6ms)보다 작아야 함
+    assert batch_sample.cpu_ms < 15.6, (
+        f"batch=8 cpu={batch_sample.cpu_ms:.3f}ms — 양자화 tick 15.6ms 미만이어야 함"
+    )
+
+
+@pytest.mark.perf
+def test_perf_budget_assertion_catches_10x_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    50ms(예산 300ms의 10배)를 가장하면 `assert_within`가
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+    budget_ms = 300.0
+
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 매 호출 시 50ms를 더 반환하게 한다.
+    # batch=1이므로 1회 호출당 50ms가 측정되고, best_of(n=5) 최소값도
+    # 50ms 이상이어야 하지만 budget 300ms를 초과하려면 1회 호출당
+    # budget(300ms)의 10배인 3000ms를 가장해야 한다.
+    # — 대신 batch=10으로 묶으면 1 batch = 10 × 3000ms = 30000ms,
+    #   batch로 나눈 평균 = 3000ms >> 300ms budget.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 3.0  # 3000ms per call → 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    cost_model = CostModel(fee_bps=Decimal("5"), slippage_bps=Decimal("10"))
+    bar = _bar(open_price="100")
+    simulator = BarFillSimulator()
+
+    def single_call() -> None:
+        simulator.simulate(
+            bar=bar,
+            bar_index=1,
+            side=OrderSide.BUY,
+            quantity=Decimal("1"),
+            cost_model=cost_model,
+            seed=0,
+        )
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            single_call,
+            budget_ms=budget_ms,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="simulate_10x_injected",
+        )
+
+
 # -- D2 gate-red repro ---------------------------------------------------------
 
 
