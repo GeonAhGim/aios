@@ -276,6 +276,96 @@ def _broken_reserve_without_guard(ledger: CashLedger, notional: Decimal) -> Cash
     return CashLedger(cash=ledger.cash, reserved=new_reserved, margin_used=ledger.margin_used)
 
 
+# --- D2: zero-convergence (CPU measurement converges to near-zero) ------------
+
+
+@pytest.mark.perf
+def test_perf_single_call_cpu_zero_convergence(
+    perf_budget: PerfBudget,
+) -> None:
+    """reserve()/settle_fill()/release() 호출 1회당 CPU 시간이 batch 증가에
+     따라 0 수렴하는지 검증 — Windows time.process_time() 양자화(15.6ms tick)
+    를 batch로 극복한다.
+
+     단일 호출의 CPU 밀리초가 0.5ms 미만이어야 함(숨겨진 O(n) 경로 없음).
+    """
+    ledger = CashLedger(cash=Decimal("1000000"))
+    fill = _fill(
+        side=OrderSide.BUY,
+        price=Decimal("100"),
+        quantity=Decimal("1"),
+        fee=Decimal("0.1"),
+        slippage_cost=Decimal("0.05"),
+    )
+
+    def _one_call() -> CashLedger:
+        return release(settle_fill(reserve(ledger, Decimal("100")), fill), Decimal("0"))
+
+    # warmup: 첫 호출은 Pydantic 등록 비용이 들 수 있음
+    _one_call()
+
+    # batch=1: 양자화가 심한 측정
+    s1 = perf_budget.sample(_one_call, batch=1)
+
+    # batch=1000: 양자화 오차가 15.6/1000 ≈ 0.016ms로 줄어듦
+    s1000 = perf_budget.sample(_one_call, batch=1000)
+
+    # batch=1000에서의 1회 호출당 CPU 시간이 0.5ms 미만이어야 함
+    assert s1000.cpu_ms < 0.5, (
+        f"single-call CPU at batch=1000 is {s1000.cpu_ms:.4f}ms "
+        f"(budget 0.5ms, batch=1 was {s1.cpu_ms:.4f}ms)"
+    )
+
+
+# --- D2: gate-red reproduction (budget assertion catches regression) -----------
+
+
+@pytest.mark.perf
+def test_perf_budget_assertion_catches_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(5ms)을 초과하는 CPU 시간을 가장하면 AssertionError로 적색이
+    돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    import time as _time
+
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 10.0  # 10ms per call > 5ms budget
+        return _fake_time[0]
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    ledger = CashLedger(cash=Decimal("1000000"))
+    fill = _fill(
+        side=OrderSide.BUY,
+        price=Decimal("100"),
+        quantity=Decimal("1"),
+        fee=Decimal("0.1"),
+        slippage_cost=Decimal("0.05"),
+    )
+
+    def _cycle() -> CashLedger:
+        cycled = reserve(ledger, Decimal("100"))
+        cycled = settle_fill(cycled, fill)
+        return release(cycled, Decimal("0"))
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    # cpu_ms 단언을 사용한다(monkeypatch가 time.process_time을 가로챔).
+    with pytest.raises(AssertionError):
+        samples = perf_budget.samples(_cycle, n=10, warmup=0, batch=1)
+        cpu_ms_samples = sorted(s.cpu_ms for s in samples)
+        p99 = cpu_ms_samples[int(len(cpu_ms_samples) * 0.99) - 1]
+        assert p99 < 5.0, f"p99 {p99:.3f}ms exceeds pre-trade gate budget of 5ms (ADR-2026-09-09-C)"
+
+
 def test_gate_red_reserve_without_guard_would_silently_go_negative():
     ledger = CashLedger(cash=Decimal("1000"), reserved=Decimal("900"))
 
