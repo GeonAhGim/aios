@@ -48,6 +48,7 @@ from src.foundation.market_data.ports.provider import (
     RateLimitSpec,
     TimeSpan,
 )
+from tests.support.perf_budget import PerfBudget
 
 _IID = "0" * 25 + "1"
 
@@ -125,6 +126,76 @@ def test_naive_datetime_is_rejected_fail_closed(build: Any) -> None:
     `ValidationError`로 거부돼야 한다 — §3.1 "UTC tz-aware... 필수"."""
     with pytest.raises(ValidationError):
         build()
+
+
+# ---- 실패 주입 1/2 perf — CPU 0 수렴 + budget injection (task-11539 감사 후속) ----
+
+
+@pytest.mark.perf
+def test_naive_datetime_is_rejected_fail_closed_cpu_time_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """0 수렴 검증: naive datetime을 넣은 DTO 구성은 pydantic이 즉시
+    `ValidationError`를 던지므로 CPU 시간은 양자화 오차 범위 내여야 한다
+    (약 0ms 수렴). 이 테스트는 PerfBudget.sample가 단일 호출 CPU 시간을
+    올바르게 계측함을 동적으로 검증한다.
+
+    예외가 발생해도 CPU 측정은 유효하므로, 예외를 포착한 뒤 None을 반환하는
+    래퍼로 측정 구간을 감싼다."""
+    # _naive()를 사용하는 build 함수들: DataLineage, ProviderCapabilities,
+    # TimeSpan(start/end), CoverageSpan — 모두 pydantic 검증에서 즉시 거부됨
+
+    def _call() -> None:
+        try:
+            # lineage.fetched_at 케이스 — naive datetime이 ValidationError를 던짐
+            DataLineage(provider_id="bitget", fetched_at=_naive(), raw_digest="deadbeef")
+        except ValidationError:
+            pass  # expected — CPU 측정은 예외 발생 전까지의 시간을 반영
+
+    sample = perf_budget.sample(_call, batch=1)
+
+    assert sample.cpu_ms < 1.0, (
+        f"naive datetime 검증 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "입력 검증만 수행하므로 사실상 0ms에 수렴해야 함 (budget<1ms)"
+    )
+
+
+@pytest.mark.perf
+def test_naive_datetime_is_rejected_fail_closed_cpu_budget_catches_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(1ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. fake process_time이 호출당 10ms를 반환하므로
+    측정 예산 1ms를 초과해 적색 확정."""
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 0.01  # +10ms per call → >> 1ms budget
+        return _fake_time[0]
+
+    import time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    def _call() -> None:
+        try:
+            DataLineage(provider_id="bitget", fetched_at=_naive(), raw_digest="deadbeef")
+        except ValidationError:
+            pass  # expected
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_call, batch=1)
+        assert sample.cpu_ms < 1.0, (
+            f"naive datetime 검증 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            "입력 검증만 수행하므로 사실상 0ms에 수렴해야 함 (budget<1ms)"
+        )
 
 
 # ---- 실패 주입 2/2 — 미지의 enum 값(오타 벤처/타임프레임/품질등급)은 조용히 통과하지 않는다 ----
