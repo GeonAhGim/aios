@@ -3,7 +3,6 @@ negative >=3, 1 failure-injection, 1 perf assertion, 1 gate-red repro)."""
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -23,6 +22,7 @@ from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from src.services.condition_compiler import ORDER_FILLED
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
@@ -206,15 +206,22 @@ def _run_with_fake_indicator(ctx: CheckContext, monkeypatch: pytest.MonkeyPatch)
     return check_mod.run(ctx)
 
 
-def test_pass_when_oos_stitched_net_sharpe_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.perf
+def test_pass_when_oos_stitched_net_sharpe_positive(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ctx = _ctx(_uptrend_bars())
-    result = _run_with_fake_indicator(ctx, monkeypatch)
+    sample = perf_budget.sample(lambda: _run_with_fake_indicator(ctx, monkeypatch))
+    result = sample.result
     assert result.check_type == "oos_walk_forward"
     assert result.hard_fail_reasons == []
     assert result.metrics["oos_net_sharpe"] > 0
     assert result.outcome == Outcome.PASS
     assert result.metrics["basis"] == "PAPER_SIM"
     assert result.metrics["oos_windows_count"] == 2
+    print(f"[L39 oos_walk_forward] single_call cpu={sample.cpu_ms:.3f}ms")
+    assert sample.cpu_ms < _BUDGET_MS
 
 
 def test_soft_fail_when_oos_stitched_net_sharpe_nonpositive(
@@ -332,12 +339,16 @@ def test_budget_gate_actually_fails_when_run_walk_forward_stalls(
     AssertionError, not just pass trivially."""
     ctx = _ctx(_bars(50))
     original = check_mod.run_walk_forward
+    indicator_service = _FakePriceIndicatorService()
 
-    def _stalled(*args: object, **kwargs: object) -> object:
-        time.sleep(_BUDGET_MS / 1000 + 0.01)
-        return original(*args, **{**kwargs, "indicator_service": _FakePriceIndicatorService()})
-
-    monkeypatch.setattr(check_mod, "run_walk_forward", _stalled)
+    monkeypatch.setattr(
+        check_mod,
+        "run_walk_forward",
+        delayed_sync(
+            lambda *a, **k: original(*a, **{**k, "indicator_service": indicator_service}),
+            _BUDGET_MS / 1000 + 0.01,
+        ),
+    )
 
     sample = perf_budget.sample(lambda: check_mod.run(ctx))
     with pytest.raises(AssertionError):
