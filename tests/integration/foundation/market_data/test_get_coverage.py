@@ -32,6 +32,7 @@ from src.foundation.market_data.contracts.v2.coverage import QualityGrade
 from src.foundation.market_data.contracts.v2.instruments import Instrument, InstrumentLifecycle
 from src.foundation.market_data.ports.coverage_repository import CoverageQuality, CoverageSpan
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 
 def _fake_ulid() -> str:
@@ -168,28 +169,104 @@ async def test_get_coverage_merges_adjacent_spans_and_keeps_quality_axes_separat
     assert all(s.asset_class == AssetClass.CRYPTO for s in spans)
 
 
+@pytest.mark.perf
 async def test_get_coverage_returns_empty_list_for_uncovered_axis(
-    pool, instrument_repo, coverage_repo, venue_registry
+    perf_budget: PerfBudget,
+    pool,
+    instrument_repo,
+    coverage_repo,
+    venue_registry,
 ):
-    """(b) 커버리지 선언이 전혀 없는 구간은 예외가 아니라 빈 리스트다."""
+    """(b) 커버리지 선언이 전혀 없는 구간은 예외가 아니라 빈 리스트다.
+
+    성능 단언 — 호출 1회 CPU 시간이 0에 수렴하고 단위/예산 불변을 검증한다.
+    `get_coverage`는 빈 입력에서 DB 3회 왕복 후 즉시 []를 반환하므로
+    CPU 부하는 negligible해야 한다(budget: 50ms).
+    """
+    _CPU_BUDGET_MS = 50.0
+
     tenant_id = uuid.uuid4()
     instrument_id = _fake_ulid()
     async with pool.acquire() as conn, conn.transaction():
         await instrument_repo.create(conn, _instrument(instrument_id))
     await _grant_entitlement(pool, tenant_id=tenant_id, venue=Venue.BITGET)
 
+    async def _call() -> list:
+        async with pool.acquire() as conn, conn.transaction():
+            return await get_coverage(
+                conn,
+                tenant_id=tenant_id,
+                instrument_id=instrument_id,
+                venue=Venue.BITGET,
+                timeframe=Timeframe.M1,
+                coverage_repo=coverage_repo,
+                instrument_repo=instrument_repo,
+                venue_registry=venue_registry,
+            )
+
+    # 실제 성능 단언 — 정상 입력에서 녹색
+    # async 함수는 sample_async/samples_async 를 사용해야 함 (best_of 는 sync 전용)
+    samples = await perf_budget.samples_async(_call, n=5)
+    best_cpu = min(s.cpu_ms for s in samples)
+    assert best_cpu < _CPU_BUDGET_MS, (
+        f"빈 coverage 조회 CPU 시간 {best_cpu:.3f}ms가 예산 {_CPU_BUDGET_MS:.1f}ms를 초과했습니다"
+    )
+
+    # 결과 검증 — 빈 리스트 반환 확인
+    result = await _call()
+    assert result == []
+
+
+@pytest.mark.perf
+async def test_get_coverage_empty_axis_goes_red_with_io_delay_injection(
+    perf_budget: PerfBudget,
+    pool,
+    instrument_repo,
+    coverage_repo,
+    venue_registry,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """gate-red reproduction: asyncpg.Connection.fetch 에 IO 지연(delayed_async,
+    0.5s)을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `conn.fetch` 를 `delayed_async` 로 감싸 1회 호출당 0.5초 IO 지연을
+    주입 — get_coverage 는 I/O 바인딩 연산이므로 wall-clock 측지로
+    지연을 검증한다. 정상 입력에서 통과하는 것이 테스트의 허수(trivial
+    pass)가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    _CPU_BUDGET_MS = 50.0
+    _DELAY_SECONDS = 0.5
+
+    # asyncpg.Connection.fetch 를 delayed_async 로 감싸 IO 지연 주입
+    original_fetch = asyncpg.Connection.fetch
+    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(original_fetch, _DELAY_SECONDS))
+
+    tenant_id = uuid.uuid4()
+    instrument_id = _fake_ulid()
     async with pool.acquire() as conn, conn.transaction():
-        spans = await get_coverage(
-            conn,
-            tenant_id=tenant_id,
-            instrument_id=instrument_id,
-            venue=Venue.BITGET,
-            timeframe=Timeframe.M1,
-            coverage_repo=coverage_repo,
-            instrument_repo=instrument_repo,
-            venue_registry=venue_registry,
-        )
-    assert spans == []
+        await instrument_repo.create(conn, _instrument(instrument_id))
+    await _grant_entitlement(pool, tenant_id=tenant_id, venue=Venue.BITGET)
+
+    async def _call() -> list:
+        async with pool.acquire() as conn, conn.transaction():
+            return await get_coverage(
+                conn,
+                tenant_id=tenant_id,
+                instrument_id=instrument_id,
+                venue=Venue.BITGET,
+                timeframe=Timeframe.M1,
+                coverage_repo=coverage_repo,
+                instrument_repo=instrument_repo,
+                venue_registry=venue_registry,
+            )
+
+    # 지연 주입 후 → wall_ms 가 예산 초과해야 함 (red)
+    sample = await perf_budget.sample_async(_call)
+    assert sample.wall_ms >= _CPU_BUDGET_MS, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상 최소 {_DELAY_SECONDS * 1000:.0f}ms 초과인데 예산 {_CPU_BUDGET_MS:.1f}ms 미만; "
+        "지연 주입이 누락되었거나 get_coverage 가 fetch 를 직접 호출하지 않음"
+    )
 
 
 async def test_get_coverage_returns_empty_list_for_tenant_without_entitlement(
