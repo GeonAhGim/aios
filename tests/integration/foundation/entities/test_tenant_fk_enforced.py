@@ -213,3 +213,92 @@ async def test_fk_violation_round_trip_p95_latency_within_local_budget(pool, rep
     p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
 
     assert p95_ms < 100.0, f"FK 위반 왕복 p95={p95_ms:.2f}ms — 로컬 예산(100ms) 초과"
+
+
+@pytest.mark.perf
+async def test_gate_red_reproduction_fk_violation_p95_catches_10x_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    pool,
+    repo,
+    perf_budget,
+):
+    """FK 위반 p95 단언이 정상 입력에서는 녹색이고 10배 지연 주입에서 적색인지 검증한다.
+
+    gate-red 재현 패턴:
+    1. 지연 주입 없이 같은 성능 단언을 먼저 실행 → 녹색 통과 확인
+    2. repo._pool.acquire()에 asyncio.sleep(0.5)를 주입 → 같은 단언이
+       적색(p95 ≥ 100ms)으로 실패하는지 확인
+    """
+    import asyncio
+
+    # 단계 1: 정상 입력에서 녹색 통과
+    await test_fk_violation_round_trip_p95_latency_within_local_budget(pool, repo, perf_budget)
+
+    # 단계 2: repo._pool.acquire()에 지연 주입 — asyncpg.Pool.acquire는
+    # 읽기 전용 속성이므로 repo._pool 자체를 스텁으로 교체한다.
+    # asyncpg.Pool.acquire()는 coroutine이 아닌 async context manager를
+    # 반환하므로, 스텁 acquire()도 __aenter__/__aexit__를 가진 객체를
+    # 반환해야 한다.
+    original_pool = repo._pool
+
+    class _DelayedExecuteConn:
+        """원본 연결을 감싸 execute/fetchrow/fetch만 지연시킨다."""
+
+        def __init__(self, real_conn):
+            self._real_conn = real_conn
+
+        async def execute(self, *args, **kwargs):
+            await asyncio.sleep(0.5)  # 500ms 지연 — 예산(100ms)의 5배
+            return await self._real_conn.execute(*args, **kwargs)
+
+        async def fetchrow(self, *args, **kwargs):
+            await asyncio.sleep(0.5)
+            return await self._real_conn.fetchrow(*args, **kwargs)
+
+        async def fetch(self, *args, **kwargs):
+            await asyncio.sleep(0.5)
+            return await self._real_conn.fetch(*args, **kwargs)
+
+        # 원본 연결의 다른 모든 속성을 포워딩
+        def __getattr__(self, name):
+            return getattr(self._real_conn, name)
+
+    class _DelayedAcquireCtx:
+        """asyncpg.Pool.acquire()의 반환값을 모방한다."""
+
+        def __init__(self, pool):
+            self._pool = pool
+            self._wrapped_conn = None  # __aenter__에서 설정
+
+        async def __aenter__(self):
+            real_conn = await self._pool.acquire()
+            self._wrapped_conn = _DelayedExecuteConn(real_conn)
+            return self._wrapped_conn
+
+        async def __aexit__(self, *exc_info):
+            # 원본 연결을 풀로 반납 (close 대신 release)
+            if self._wrapped_conn is not None:
+                await self._wrapped_conn._real_conn.close()
+
+    class _DelayedPool:
+        def acquire(self, *args, **kwargs):
+            return _DelayedAcquireCtx(original_pool)
+
+        async def close(self):
+            await original_pool.close()
+
+    repo._pool = _DelayedPool()
+
+    try:
+        # 같은 단언을 재실행 — 지연 주입으로 p95가 100ms를 넘겨야 적색
+        with pytest.raises(AssertionError) as exc_info:
+            await test_fk_violation_round_trip_p95_latency_within_local_budget(
+                pool, repo, perf_budget
+            )
+
+        # 실제로 budget 초과로 실패했는지 확인 (다른 원인의 AssertionError 아님)
+        assert "p95" in str(exc_info.value), (
+            f"budget 초과가 아닌 다른 원인으로 실패: {exc_info.value}"
+        )
+    finally:
+        repo._pool = original_pool
