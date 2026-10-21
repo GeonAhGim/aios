@@ -12,9 +12,14 @@ DEEPEN(task-2914, task-2727 감사 후속): D2 하한 보강 — 실패 주입 1
 업스트림 계약 위반), 수치 성능 단언 1(`estimate_resources` 지연,
 ADR-2026-09-09-C), 게이트 적색 재현 1(`PlotDecl.style` 미방문 회귀 가드).
 negative는 이미 6건으로 충분해 추가하지 않는다.
+
+TASK-16182(감사 후속): zero-convergence 1(`test_single_call_cpu_converges_to_sub_tick_value`),
+10x 지연 주입 gate-red 1(`test_perf_assertion_fails_with_10x_delay_injection`) 추가.
 """
 
 from __future__ import annotations
+
+import time
 
 import pytest
 
@@ -288,6 +293,69 @@ def test_estimation_latency_p95_within_compile_budget_slice(
 
     print(f"[DSL-6 resources] 500-stmt p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
     assert p95_ms < budget_ms
+
+
+# ---- 성능 주입 검증(D2) — monkeypatch로 지연 주입 시 단언이 적색인지 확인 ----
+
+
+@pytest.mark.perf
+def test_perf_assertion_fails_with_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — `time.process_time`을
+    monkeypatch해 1회 호출당 예산(30ms)을 10배 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 500.0  # 500ms per call → budget 30ms × 16x 초과
+        return _fake_time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    source = _CLOSE + "\n".join(
+        f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(500)
+    )
+    program = parse(source)
+    env = check_program(program)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: estimate_resources(program, env),
+            budget_ms=30.0,
+            n=1,
+            label="DSL-6 resources delay-injected",
+        )
+
+
+def test_single_call_cpu_converges_to_sub_tick_value() -> None:
+    """단일 호출 CPU 시간이 양자화 오차 범위 내에 수렴하는지 검증(task-11539 감사 후속).
+
+    `estimate_resources`는 O(N) 정적 AST 순회이므로 trivial 프로그램(단일
+    ta.sma)에서 측정한 CPU 시간은 ~0ms여야 한다. Windows `time.process_time()`은
+    ~15.6ms 양자화 오차가 있다 — batch=64로 묶으면 오차가 ~0.24ms로 줄어든다.
+    64회 평균 CPU 시간이 1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    """
+    pb = PerfBudget()
+    program = parse(_CLOSE + "let x = ta.sma(close, 5)")
+    env = check_program(program)
+
+    # batch=1: 단일 호출 — 양자화 영향 큼
+    samples_single = [pb.sample(lambda: estimate_resources(program, env)).cpu_ms for _ in range(64)]
+
+    # batch=64: 64회 묶음 — 양자화 오차 1/64로 줄어듦
+    sample_batch = pb.sample(lambda: estimate_resources(program, env), batch=64)
+
+    avg_single = sum(samples_single) / len(samples_single)
+    assert avg_single < 1.0, f"single-call avg cpu_ms={avg_single:.3f}ms가 1ms 미만이 아님"
+    assert sample_batch.cpu_ms < 1.0, (
+        f"batch=64 cpu_ms={sample_batch.cpu_ms:.3f}ms가 1ms 미만이 아님"
+    )
 
 
 # ---- 게이트 적색 재현: PlotDecl.style 미방문 회귀 가드 ----
