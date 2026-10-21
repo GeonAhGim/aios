@@ -90,6 +90,26 @@ def test_extract_indicator_keys_propagates_compiler_regression_malformed_key() -
 
 
 @pytest.mark.perf
+def test_parse_key_single_call_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """Single `parse_key` call must consume ~0 CPU ms — a pathological
+    backtracking-regex would register measurable CPU even for one call.
+    100 samples, best-of-N minimum must stay below 1 ms (a wide floor for
+    single-call overhead)."""
+    key = "RSI_timeperiod14@1h"
+
+    def one_call() -> None:
+        parse_key(key)
+
+    sample = perf_budget.best_of(one_call, n=100, batch=1)
+    assert sample.cpu_ms < 1.0, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms exceeds 1ms floor — "
+        f"wall={sample.wall_ms:.3f}ms load={perf_budget.load_percent()}"
+    )
+
+
+@pytest.mark.perf
 def test_parse_and_format_key_round_trip_throughput_budget(
     perf_budget: PerfBudget,
 ) -> None:
@@ -109,6 +129,65 @@ def test_parse_and_format_key_round_trip_throughput_budget(
 
 
 # -- D2 게이트 적색 재현 -------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_parse_key_budget_assertion_detects_delay_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """Prove the budget assertion actually fires red: wrap `parse_key` in a
+    function that burns CPU (busy-loop), then assert the measurement exceeds
+    the budget. This is the gate-red reproduction — if the assertion logic
+    is broken (e.g. always passes), this test will incorrectly green.
+    Uses CPU-bound work because `time.process_time()` ignores sleep."""
+    key = "RSI_timeperiod14@1h"
+    injected_calls: list[int] = [0]
+
+    def cpu_heavy_call() -> None:
+        injected_calls[0] += 1
+        # Busy-loop to burn ~5ms of real CPU time.
+        # A tight loop of arithmetic is enough to register on process_time().
+        total = 0
+        for _ in range(5_000_000):
+            total += 1
+        _ = total  # prevent optimisation away
+        parse_key(key)
+
+    # Budget 1 ms — a 5ms busy-loop must exceed it.
+    sample = perf_budget.best_of(cpu_heavy_call, n=3, batch=1)
+    assert sample.cpu_ms >= 1.0, (
+        f"delay-injection gate-red failed: cpu={sample.cpu_ms:.3f}ms "
+        f"should be >= 1ms — assertion did not catch the injected CPU load"
+    )
+
+
+def test_parse_key_budget_assertion_catches_10x_violation() -> None:
+    """Verify that `PerfBudget.assert_within` raises on budget violation.
+    Monkey-patch `time.process_time` to return incrementing values that
+    simulate a 10x budget overrun, proving the assertion fires correctly."""
+    import time as _time
+
+    original_process_time = _time.process_time
+    call_counter: list[int] = [0]
+
+    def fake_process_time() -> float:
+        call_counter[0] += 1
+        # Simulate each call consuming 5ms worth of CPU time
+        return call_counter[0] * 0.005
+
+    _time.process_time = fake_process_time
+    try:
+        key = "SMA_timeperiod20"
+
+        def one_call() -> None:
+            parse_key(key)
+
+        # Budget 0.001 ms — fake clock makes each call ~5ms, must exceed.
+        with pytest.raises(AssertionError):
+            _pb = PerfBudget()
+            _pb.assert_within(one_call, budget_ms=0.001, n=1, batch=1)
+    finally:
+        _time.process_time = original_process_time
 
 
 def test_import_linter_core_no_io_catches_indicator_key_foundation_import_regression() -> None:
