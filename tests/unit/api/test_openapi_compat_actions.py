@@ -268,6 +268,73 @@ def test_performance_assertion_nested_ref_recursion_budget(
     assert sample.result == [], f"동일 스키마에서 위반이 없어야 함: {sample.result}"
 
 
+def test_performance_assertion_fails_with_cpu_delay_injection(
+    monkeypatch: Any,
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — 동일 호출에 지연을
+    주입하면 PerfBudget.assert_within가 AssertionError를 던져야 한다
+    (단언/마커 삭제나 예산 완화가 아닌 genuine budget check임 증명).
+
+    time.process_time()을 monkeypatch해 매 호출 시 누적 50ms를 추가하면
+    측정 구간(start→end)의 차이에 50ms가 더해져 budget_ms=10을 초과한다.
+    """
+    import time as _time
+
+    from tests.support.perf_budget import PerfBudget as _PerfBudget
+
+    original_process_time = _time.process_time
+    _offset = [0.0]
+
+    def _slow_process_time() -> float:
+        t = original_process_time()
+        _offset[0] += 0.05
+        return t + _offset[0]
+
+    # 100개의 중첩 스키마 체인 생성 (기존 테스트와 동일)
+    schemas = {"Meta": _meta_schema()}
+    paths: dict[str, Any] = {}
+    for i in range(100):
+        ref_name = f"Level{i}"
+        inner_ref = "#/components/schemas/Inner" if i == 0 else f"#/components/schemas/Level{i - 1}"
+        schemas[ref_name] = {
+            "type": "object",
+            "properties": {
+                "id": _string_prop(),
+                "next": {"$ref": inner_ref},
+            },
+        }
+    paths["/chain"] = {
+        "get": {
+            "responses": {
+                "200": {
+                    "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/Level0"}}
+                    }
+                }
+            }
+        }
+    }
+    baseline = _schema(paths=paths, schemas=schemas)
+    current = json.loads(json.dumps(baseline))
+
+    # process_time을 지연 시키도록 monkeypatch
+    monkeypatch.setattr(_time, "process_time", _slow_process_time)
+
+    # PerfBudget 직접 생성 (monkeypatch된 time.process_time을 사용)
+    pb = _PerfBudget()
+    with pytest.raises(AssertionError) as exc_info:
+        pb.assert_within(
+            lambda: find_violations(baseline, current),
+            budget_ms=10.0,
+            batch=1,
+        )
+
+    # AssertionError가 budget 관련 단언 실패임을 확인
+    assert "budget" in str(exc_info.value).lower() or "cpu" in str(exc_info.value).lower(), (
+        f"budget 단언 실패여야 함: {exc_info.value}"
+    )
+
+
 def test_gate_red_reproduction_account_connection_view_deletion() -> None:
     """게이트적색재현: 이전 실측 시나리오(AccountConnectionView.created_at 삭제) 재현.
 
