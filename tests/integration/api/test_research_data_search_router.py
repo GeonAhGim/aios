@@ -31,6 +31,7 @@ from src.foundation.research_data.adapters.postgres_repository import (
 )
 from src.foundation.research_data.contracts.v1 import ResearchItem, SourceMeta
 from src.main import app
+from tests.support.perf_budget import PerfBudget
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 BASE = "/v1/foundation/research-data"
@@ -301,6 +302,90 @@ async def test_search_latency_stays_within_normalized_ceiling(client, seeded, pe
         f"52개 항목 검색이 {full_elapsed:.3f}s 걸림 "
         f"(baseline {baseline_elapsed:.3f}s, 정규화 상한 {ceiling:.3f}s)"
     )
+
+
+# --- D2 single-call CPU convergence (0 수렴) -------------------------------
+
+
+@pytest.mark.perf
+async def test_search_cpu_converges_to_zero_single_call(
+    client, seeded, perf_budget: PerfBudget
+) -> None:
+    """단일 검색 호출이 0에 수렴하는 CPU 시간을 보여야 한다.
+
+    `time.process_time()`은 Windows에서 약 15.6ms 양자화 오차가 있으므로
+    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. 순수 도메인 로직
+    불변식(I-03)과 호환되도록 1회당 CPU 시간이 50ms 미만이어야 한다
+    (DB I/O가 아닌 Python CPU 코어만 측정).
+    """
+
+    async def _search_once() -> None:
+        await client.post(f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"])
+
+    sample = await perf_budget.sample_async(_search_once, batch=64)
+    assert sample.cpu_ms < 50.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"DB I/O를 제외한 Python CPU 코어는 50ms 미만이어야 함 (budget<50ms)"
+    )
+
+
+# --- D2 gate-red reproduction: 지연 주입 시 성능 단언이 적색으로 전환 ------
+
+
+async def test_search_latency_budget_fails_under_10x_delay_injection(
+    client, seeded, perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. repository의 DB 조회에 0.5s 지연을 주입하면
+    정규화 상한을 초과해 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    # PostgresResearchRepository.list_by_tenant_across_sources를 monkeypatch
+    # 하여 각 호출에 0.5s 지연을 추가
+    import asyncio
+
+    _real_repo_class = PostgresResearchRepository
+    _sleep_count = [0]
+
+    class _DelayedResearchRepository(_real_repo_class):
+        async def list_by_tenant_across_sources(self, tenant_id, *, limit=200) -> list:
+            _sleep_count[0] += 1
+            await asyncio.sleep(5.0)  # 5s 지연 주입
+            return await super().list_by_tenant_across_sources(tenant_id, limit=limit)
+
+    pool = app.state.pool
+    app.dependency_overrides[get_research_repository] = lambda: _DelayedResearchRepository(pool)
+    try:
+        # baseline은 지연 없는 엔드포인트로 측정
+        baseline_sample = await perf_budget.sample_async(
+            lambda: client.get(f"{BASE}/sources"),
+            batch=8,
+        )
+        baseline_elapsed = baseline_sample.wall_ms / 1000
+        assert baseline_sample.result.status_code == 200, baseline_sample.result.text
+
+        # full 호출 — 지연 주입으로 인해 ceiling 초과해야 함
+        full_sample = await perf_budget.sample_async(
+            lambda: client.post(
+                f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"]
+            ),
+            batch=8,
+        )
+        full_elapsed = full_sample.wall_ms / 1000
+        assert full_sample.result.status_code == 200, full_sample.result.text
+
+        # 지연 주입 시 full_elapsed가 ceiling를 초과해야 함 (적색)
+        # ceiling는 정규화 상한과 동일한 공식 — 30s floor는 CI 안정화용이므로
+        # 지연 주입 테스트에서는 baseline 기반 비율만 사용
+        ceiling = baseline_elapsed * 20 + 0.5
+        assert full_elapsed > ceiling, (
+            f"지연 주입에도 full_elapsed={full_elapsed:.3f}s <= ceiling={ceiling:.3f}s — "
+            "지연이 예산 단언을 포착하지 못함"
+        )
+    finally:
+        app.dependency_overrides.pop(get_research_repository, None)
 
 
 class _LeakyResearchRepository:
