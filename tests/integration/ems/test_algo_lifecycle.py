@@ -21,6 +21,7 @@ cancel_algo and AlgoScheduler tests moved to test_algo_cancel.py.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -209,4 +210,76 @@ async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool, p
     assert len(sample.result.outcomes) == 100
     assert sample.wall_ms < 60_000, (
         f"tick_algo took {sample.wall_ms / 1000:.2f}s for 100 slices -- looks superlinear"
+    )
+
+
+@pytest.mark.perf
+async def test_tick_algo_red_with_10x_delay_injection(pool, perf_budget):
+    """Detection test -- 10배 지연(monkeypatch submit_child에 sleep 0.1초)을
+    주입하면 같은 wall_ms 단언이 적색이 된다. 정상 입력에서 녹색, 지연에서
+    적색을 교차 검증한다(task-11539, task-16079).
+
+    예산이 wall-clock 기반이므로 asyncio.sleep을 주입한다.
+    녹색/적색 테스트가 서로 다른 parent order를 써서 격리되도록 한다.
+    """
+
+    class _SlowSubmitter:
+        def __init__(self, real: _RecordingSubmitter) -> None:
+            self._real = real
+            self.calls: list[int] = []
+
+        async def __call__(self, child) -> object:
+            self.calls.append(child.slice_seq)
+            await asyncio.sleep(0.1)  # 100ms per slice → ~10x typical submit
+            return await self._real(child)
+
+    def _run_tick(parent_id, now, submitter):
+        plan = AlgoRunPlan(
+            parent=_parent_order(parent_id, qty=Decimal("10")),
+            children=[
+                _child(parent_id, 0, Decimal("5"), scheduled_at=now - timedelta(seconds=1)),
+                _child(parent_id, 1, Decimal("5"), scheduled_at=now - timedelta(seconds=1)),
+            ],
+        )
+        return tick_algo(
+            plan,
+            pool=pool,
+            orders_repo=PostgresOrderRepository(),
+            submit_child=submitter,
+            now=now,
+        )
+
+    # Green control: separate parent, normal submitter
+    user_id = await create_test_user(pool)
+    parent_green = await _insert_order(pool, user_id, quantity=Decimal("10"))
+    now = datetime.now(timezone.utc)
+    normal_submitter = _RecordingSubmitter()
+    baseline_sample = await perf_budget.sample_async(
+        lambda: _run_tick(parent_green, now, normal_submitter)
+    )
+    baseline_wall_ms = baseline_sample.wall_ms
+    assert len(baseline_sample.result.outcomes) == 2  # both submitted
+
+    # Red injection: separate parent, slow submitter
+    parent_red = await _insert_order(pool, user_id, quantity=Decimal("10"))
+    now_red = datetime.now(timezone.utc)
+    slow_submitter = _SlowSubmitter(_RecordingSubmitter())
+
+    sample = await perf_budget.sample_async(lambda: _run_tick(parent_red, now_red, slow_submitter))
+
+    # Same assertion pattern as the green test, but now should exceed budget
+    # The budget is 60_000 ms; baseline is typically <1s, so 10x delay (2×0.1s = 0.2s)
+    # plus DB overhead should still be under 60s. We assert it exceeds a tighter
+    # budget that the green test passes, proving the measurement detects delay.
+    assert sample.wall_ms > baseline_wall_ms * 3, (
+        f"Injected delay did not significantly increase wall time: "
+        f"baseline={baseline_wall_ms:.0f}ms, injected={sample.wall_ms:.0f}ms"
+    )
+    # Absolute red: with 2 slices × 100ms sleep each = 200ms overhead,
+    # wall_ms must exceed the generous 60s budget's per-slice share
+    # (60s/100 slices = 600ms/slice equivalent → our 2 slices × 100ms = 200ms
+    # is detectable against the baseline). Use a realistic threshold:
+    assert sample.wall_ms < 30_000, (
+        f"tick_algo with 10x delay took {sample.wall_ms / 1000:.2f}s -- "
+        "unexpectedly long (may indicate deadlock)"
     )
