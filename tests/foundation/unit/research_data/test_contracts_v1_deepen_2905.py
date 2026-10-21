@@ -25,6 +25,7 @@ from pydantic import ValidationError
 
 from src.foundation.research_data.contracts import v1
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _NOW = datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)
 
@@ -70,6 +71,70 @@ def test_unknown_kind_literal_is_rejected_not_silently_coerced() -> None:
     조용히 통과시키지 않는다는 증거."""
     with pytest.raises(ValidationError, match="kind"):
         v1.ResearchItem(**_base_item_kwargs(kind="bogus"))
+
+
+def test_unknown_kind_single_call_cpu_budget(perf_budget: PerfBudget) -> None:
+    """`kind` 리터럴 검증을 위한 pydantic-core 단일 호출이 CPU 예산을
+    충족해야 한다 -- 검증 경로가 상수시간임을 수치로 증명한 다음,
+    `delayed_sync`로 sleep을 주입했을 때 같은 단언이 적색으로 전환되는지
+    검증한다(검증 경로가 실제로 동작한다는 증거).
+
+    정상 입력으로 측정한 CPU 시간이 예산을 충족하면, 동일한 budget_ms
+    단언이 지연 주입 후 적색으로 전환되는지 후속 테스트에서 확인한다.
+    """
+    payload = _base_item_kwargs(kind="filing")
+
+    sample = perf_budget.assert_within(
+        lambda: v1.ResearchItem(**payload),
+        budget_ms=5.0,
+        n=5,
+        warmup=1,
+        label="RD-2 kind_validation_single_call",
+    )
+    assert sample.cpu_ms < 5.0, "kind 검증 경로는 5ms CPU 미만이어야 한다"
+
+
+def test_unknown_kind_delay_injection_exceeds_budget(
+    monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
+) -> None:
+    """`delayed_sync`로 kind 검증 경로를 0.1s CPU 부하 주입하면
+    같은 budget_ms=5.0 단언이 적색으로 전환되어야 한다 -- 지연 주입이
+      없으면 통과하던 단언이 주입 후 실패한다는 사실이,
+      이 테스트가 실제 성능 측정임을 증명한다."""
+    payload = _base_item_kwargs(kind="filing")
+    original_research_item = v1.ResearchItem
+
+    def slow_constructor(**_kwargs: Any) -> v1.ResearchItem:  # type: ignore[return]
+        delayed_sync(lambda: original_research_item(**payload), 0.1)()
+
+    monkeypatch.setattr(v1, "ResearchItem", slow_constructor)  # type: ignore[arg-type]
+
+    with pytest.raises(AssertionError) as exc_info:
+        perf_budget.assert_within(
+            lambda: v1.ResearchItem(**payload),  # type: ignore[arg-type]
+            budget_ms=5.0,
+            n=5,
+            warmup=1,
+            label="RD-2 kind_validation_injected_delay",
+        )
+    assert "budget" in str(exc_info.value)
+
+
+def test_unknown_kind_literal_is_rejected_with_delayed_sync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """지연 주입 후에도 `kind` 검증 경로는 여전히 ValidationError를
+    발생시킨다 -- 지연이 검증 로직을 우회하지 않음을 확인한다."""
+    payload = _base_item_kwargs(kind="bogus")
+    original_research_item = v1.ResearchItem
+
+    def slow_constructor(**_kwargs: Any) -> None:  # type: ignore[return]
+        delayed_sync(lambda: original_research_item(**payload), 0.1)()
+
+    monkeypatch.setattr(v1, "ResearchItem", slow_constructor)  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError, match="kind"):
+        v1.ResearchItem(**payload)  # type: ignore[call-arg]
 
 
 def test_unknown_redistribution_literal_is_rejected() -> None:
