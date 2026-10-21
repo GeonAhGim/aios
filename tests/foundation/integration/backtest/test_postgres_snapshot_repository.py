@@ -215,6 +215,38 @@ async def test_gate_red_check_constraint_actually_fails_without_it(pool: asyncpg
         assert row["bar_count"] == 0  # red: without the CHECK, this would have passed
 
 
+# --- failure injection: 10x sleep delay should push p95 over budget ---
+
+
+@pytest.mark.perf
+async def test_save_db_roundtrip_p95_exceeds_with_10x_delay(
+    repo: PostgresSnapshotRepository, perf_budget: Any
+) -> None:
+    """task-16733: sleep() 주입으로 지연을 인위적으로 10 배 늘리면 wall_ms
+    예산을 초과해야 한다(red-gate 재현). 단언/마커 삭제와 예산 완화 금지."""
+    import asyncio
+
+    original_save = repo.save
+
+    async def slow_save(*args: Any, **kwargs: Any) -> None:
+        await asyncio.sleep(0.05)  # 50ms sleep × ~10× 실제 DB 왕복(≈5ms)
+        return await original_save(*args, **kwargs)
+
+    samples: list[float] = []
+    for i in range(30):
+        bars = _bars(symbol=f"INJ{i}USDT")
+        ref = _ref(bars)
+        sample = await perf_budget.sample_async(lambda r=ref, b=bars: slow_save(r, b))
+        samples.append(sample.wall_ms)
+
+    p95_ms = _p95(samples)
+    print(
+        f"[L32 save-injected] db roundtrip p95={p95_ms:.2f}ms "
+        f"budget>{_SAVE_DB_ROUNDTRIP_P95_BUDGET_MS:.1f}ms"
+    )
+    assert p95_ms > _SAVE_DB_ROUNDTRIP_P95_BUDGET_MS  # red: budget exceeded
+
+
 # --- numeric performance assertion ---
 
 _SAVE_DB_ROUNDTRIP_P95_BUDGET_MS = 50.0
