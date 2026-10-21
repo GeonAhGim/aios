@@ -295,3 +295,94 @@ def test_normalize_macro_observation_throughput_floor_fails_with_10x_delay(
     assert sample.wall_ms > 400.0, (
         f"delay injection failed to exceed budget: {sample.wall_ms:.1f}ms"
     )
+
+
+# ---- CPU 0 수렴 + gate-red 재현 (D2, task-11539 후속) --------------------------
+
+
+@pytest.mark.perf
+def test_normalize_macro_observation_cpu_zero_convergence(
+    perf_budget: PerfBudget,
+) -> None:
+    """CPU 측정의 0 수렴: 단일 호출 20회 best-of-5 최소 CPU가 5ms 미만이어야 한다.
+
+    ``normalize_macro_observation``은 정규화(정규 표현식 매칭, Decimal 파싱,
+    데이터클래스 인스턴스화)만 수행하는 순수 CPU 연산이므로, Windows의
+    time.process_time() 양자화 틱(~15.6ms) 아래로 수렴해야 한다.
+    """
+    for _ in range(3):  # warmup
+        normalize_macro_observation(
+            source_id="ECOS",
+            series_id="722Y001:0101000",
+            raw_period="202401",
+            frequency=MacroFrequency.MONTHLY,
+            raw_value="3.5",
+            raw_unit="%",
+            seasonally_adjusted=False,
+            publication_lag_days=20,
+        )
+
+    samples = [
+        perf_budget.sample(
+            lambda _i=i: normalize_macro_observation(
+                source_id="ECOS",
+                series_id=f"722Y001:{_i:07d}",
+                raw_period="202401",
+                frequency=MacroFrequency.MONTHLY,
+                raw_value="3.5",
+                raw_unit="%",
+                seasonally_adjusted=False,
+                publication_lag_days=20,
+            ),
+            batch=1,
+        )
+        for i in range(20)
+    ]
+    best = min(samples, key=lambda s: s.cpu_ms)
+    assert best.cpu_ms < 5.0, (
+        f"single-call CPU {best.cpu_ms:.3f}ms exceeds 5ms zero-convergence budget; "
+        f"wall={best.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_normalize_macro_observation_perf_assertion_catches_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction (D2, task-11539 후속): 성능 예산 단언이 실제로
+    위반을 포착하는지 역으로 증명한다. ``time.process_time``을 monkeypatch해
+    1회 호출당 예산(5ms)을 초과하는 CPU 시간을 가장하면 같은 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    import time as _time
+
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 60.0  # 60ms per call >> 5ms budget
+        return _fake_time[0]
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(
+            lambda: normalize_macro_observation(
+                source_id="ECOS",
+                series_id="722Y001:0101000",
+                raw_period="202401",
+                frequency=MacroFrequency.MONTHLY,
+                raw_value="3.5",
+                raw_unit="%",
+                seasonally_adjusted=False,
+                publication_lag_days=20,
+            ),
+            batch=1,
+        )
+        assert sample.cpu_ms < 5.0, (
+            f"normalize_macro_observation took {sample.cpu_ms:.3f}ms per call — budget 5ms"
+        )
