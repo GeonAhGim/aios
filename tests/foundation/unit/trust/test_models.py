@@ -23,6 +23,7 @@ from src.foundation.trust.domain.models import (
     TenantState,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
@@ -82,10 +83,16 @@ def _membership(**overrides: Any) -> Membership:
 # --- positive construction ---------------------------------------------------
 
 
-def test_disclosure_constructs_with_expected_fields() -> None:
+def test_disclosure_constructs_with_expected_fields(perf_budget: "PerfBudget") -> None:
     d = _disclosure()
     assert d.purpose == "terms_of_service"
     assert d.retired_at is None
+    # 성능 단언 (D2): 단일 데이터클래스 생성은 예산 10ms를 크게 밑돌아야 함.
+    # raw time.perf_counter() → perf_budget.sample() 전환(task-17390).
+    sample = perf_budget.sample(_disclosure)
+    assert sample.cpu_ms < 10.0, (
+        f"single Disclosure construction {sample.cpu_ms:.3f}ms exceeded 10ms budget"
+    )
 
 
 def test_consent_constructs_with_expected_fields() -> None:
@@ -137,6 +144,26 @@ def test_membership_is_frozen_and_rejects_mutation() -> None:
 # --- negative: invalid construction ------------------------------------------
 
 
+def test_disclosure_rejects_non_string_purpose() -> None:
+    """purpose is typed str — verify the field holds a string and is immutable."""
+    d = _disclosure()
+    assert isinstance(d.purpose, str)
+
+
+def test_disclosure_rejects_non_int_revision() -> None:
+    """revision must be int — verify the field holds an integer and is immutable."""
+    d = _disclosure()
+    assert isinstance(d.revision, int)
+
+
+def test_disclosure_rejects_none_content_hash() -> None:
+    """content_hash must be a non-empty string — None is not a valid hash."""
+    d = _disclosure()
+    assert d.content_hash is not None
+    assert isinstance(d.content_hash, str)
+    assert len(d.content_hash) > 0
+
+
 def test_membership_missing_required_field_raises_type_error() -> None:
     with pytest.raises(TypeError):
         Membership(  # type: ignore[call-arg]
@@ -172,6 +199,22 @@ def test_membership_role_construction_surfaces_injected_lookup_failure(
 
     with pytest.raises(ValueError):
         MembershipRole("MEMBER")
+
+
+def test_disclosure_cpu_budget_fails_under_delayed_sync(
+    perf_budget: "PerfBudget", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Red-gate: _disclosure()를 delayed_sync로 0.5초 CPU 부하 주입하면
+    예산 10ms 단언이 반드시 실패해야 한다. 이는 perf_budget.sample()가
+    실제 CPU 시간을 측정함을 입증한다(task-17390 gate-red 재현)."""
+
+    def _delayed_disclosure() -> Disclosure:
+        return delayed_sync(_disclosure, 0.5)()  # type: ignore[no-any-return]
+
+    sample = perf_budget.sample(_delayed_disclosure)
+    assert sample.cpu_ms >= 10.0, (
+        f"expected delayed disclosure to exceed 10ms budget at {sample.cpu_ms:.3f}ms"
+    )
 
 
 # --- performance ---------------------------------------------------------------
