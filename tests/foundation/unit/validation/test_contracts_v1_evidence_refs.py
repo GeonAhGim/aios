@@ -185,9 +185,11 @@ def test_construction_gate_red_fails_under_cpu_delay(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gate-red reproduction: injecting 0.5s CPU delay via delayed_sync into
-    _run_to_view proves the p99 assertion above fires on real slowdown —
-    confirming the test has detection power, not a trivially-passing zero."""
+    """Gate-red reproduction: injecting 50ms CPU delay (10x the 5ms budget)
+    via delayed_sync into _run_to_view proves the p99 assertion fires on
+    real slowdown — confirming the test has detection power, not a
+    trivially-passing zero. batch=8 matches the normal perf test to avoid
+    Windows process_time() quantization (~15.6ms tick) skewing results."""
     from tests.support.perf_inject import delayed_sync
 
     original_run_to_view = _run_to_view
@@ -195,7 +197,7 @@ def test_construction_gate_red_fails_under_cpu_delay(
     def slow_run_to_view(
         run: ValidationRun, result: ValidationResult | None
     ) -> ValidationResultView:
-        return delayed_sync(lambda: original_run_to_view(run, result), 0.5)()
+        return delayed_sync(lambda: original_run_to_view(run, result), 0.05)()
 
     # Patch the local import binding so the lambda below calls the delayed version.
     import sys
@@ -206,10 +208,13 @@ def test_construction_gate_red_fails_under_cpu_delay(
     run = _run()
     result = _result(evidence_refs=("snapshot:abc123",))
 
-    samples = perf_budget.sample(
+    samples = perf_budget.samples(
         lambda: _run_to_view(run, result),
-        batch=1,
+        n=10,
+        batch=8,
     )
-    # 0.5s CPU delay >> 5ms budget — must fail, proving detection works.
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_ms[int(len(cpu_ms) * 0.99)]
+    # 50ms CPU delay >> 5ms budget — must fail, proving detection works.
     with pytest.raises(AssertionError):
-        assert samples.cpu_ms < 5.0
+        assert p99_ms < 5.0
