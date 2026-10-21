@@ -167,6 +167,30 @@ async def test_unknown_position_rejected(pool, ports):
         await _record(pool, ports, command)
 
 
+async def test_wrong_account_rejected(pool, ports):
+    """음성 테스트: position_key는 맞지만 account_id가 다른 경우 UnknownPositionError.
+
+    I-10 "우회불가" — account_id 불일치는 position_key와 별개로 격리된 체크路径.
+    """
+    tenant_id, account_id, position_key = await _open(pool)
+    # 올바른 position_key + 잘못된 account_id
+    wrong_account_command = _command(
+        tenant_id=tenant_id,
+        account_id=uuid4(),  # 다른 계정
+        position_key=position_key,
+        amount=Decimal("-5"),
+    )
+
+    with pytest.raises(UnknownPositionError):
+        await _record(pool, ports, wrong_account_command)
+
+    async with pool.acquire() as conn:
+        journal_count = await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
+        )
+    assert journal_count == 0, "잘못된 account_id 요청은 저널을 남기지 않아야 한다"
+
+
 async def test_replay_same_funding_id_returns_existing_without_duplicate(pool, ports):
     tenant_id, account_id, position_key = await _open(pool)
     command = _command(
@@ -278,6 +302,66 @@ async def test_funding_settlement_round_trip_and_latency_guard(
     assert sample.wall_ms < _MAX_FUNDING_LATENCY_MS, (
         f"record_funding_fee 지연({sample.wall_ms:.1f}ms)이 sanity 상한"
         f"({_MAX_FUNDING_LATENCY_MS}ms)을 초과했습니다."
+    )
+
+
+@pytest.mark.perf
+async def test_funding_latency_budget_catches_10x_delay_injection(
+    pool, ports, perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. DB 호출에 sleep을 주입해 실제 I/O 지연을
+    시뮬레이션하고, 같은 latency 단언이 budget을 초과함을 확인한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    import asyncio
+
+    tenant_id, account_id, position_key = await _open(pool)
+    command = _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        amount=Decimal("-5"),
+    )
+
+    queries: list[str] = []
+
+    def _log(record: object) -> None:
+        queries.append(getattr(record, "query", ""))
+
+    async def _delayed_run_funding_fee() -> None:
+        async with pool.acquire() as conn, conn.transaction():
+            conn.add_query_logger(_log)
+            try:
+                # 2.5s 지연 → sanity 상한(2000ms)을 초과
+                await asyncio.sleep(2.5)
+                await record_funding_fee(
+                    conn,
+                    command,
+                    asset_class=AssetClass.CRYPTO,
+                    journal=ports.journal,
+                    snapshots=ports.snapshots,
+                    audit=ports.audit,
+                    clock=_clock,
+                )
+            finally:
+                conn.remove_query_logger(_log)
+
+    sample = await perf_budget.sample_async(_delayed_run_funding_fee)
+
+    print(
+        f"\nrecord_funding_fee+delay latency={sample.wall_ms:.3f}ms "
+        f"(sanity max={_MAX_FUNDING_LATENCY_MS}ms); "
+        f"sequential DB round trips={len(queries)} (max={_MAX_FUNDING_ROUND_TRIPS})"
+    )
+    # 지연 주입 하에서 지연이 budget을 초과해야 함 — 단언이 허울이 아님을 증명
+    assert sample.wall_ms >= _MAX_FUNDING_LATENCY_MS, (
+        f"지연 주입 후 지연({sample.wall_ms:.1f}ms)이 sanity 상한"
+        f"({_MAX_FUNDING_LATENCY_MS}ms) 이상이어야 검출력 검증. "
+        f"단언/예산이 허울이면 통과하므로 실패 처리. "
+        f"{perf_budget.describe(sample, budget_ms=_MAX_FUNDING_LATENCY_MS)}"
     )
 
 
