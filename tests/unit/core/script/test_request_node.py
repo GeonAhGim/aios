@@ -252,6 +252,78 @@ def test_request_heavy_script_compiles_well_within_budget(
     assert p95_ms < budget_ms
 
 
+@pytest.mark.perf
+def test_single_call_cpu_measurement_converges_to_zero() -> None:
+    """단일 호출 CPU 측정의 0 수렴 검증(ADR-2026-09-09-C Decision 1,
+    task-11539 후속): `parse()` 1회의 CPU 시간이 0에 수렴해야 한다.
+
+    `PerfBudget.sample()`은 `time.process_time()`을 사용하므로 Windows의
+    약 15.6ms 양자화 오차가 있을 수 있다. `batch=1`로 측정해도 평균이
+    예산(budget_ms=1)을 내려면 파서가 실제로 빠르게 동작하고 있음을
+    증명한다. batch=128로 여러 호출을 묶어 양자화 오차를 줄인 뒤
+    p95가 1ms 미만인지 확인한다."""
+    pb = PerfBudget()
+    source = _CLOSE + 'let r = request("BTCUSDT", "5m", close)'
+
+    def single_parse() -> None:
+        parse(source)
+
+    # 첫 호출은 warmup — 이후 30회 단일 호출을 batch=128로 측정
+    single_parse()
+    samples = pb.samples(single_parse, n=30, batch=128)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
+
+    assert p95_ms < 1.0, (
+        f"단일 parse 호출 p95 CPU 시간 {p95_ms:.3f}ms가 1ms 초과 — "
+        f"마지막 샘플 cpu_ms={cpu_ms[-1]:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_perf_assertion_catches_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 후속): 성능 예산 단언이 실제로
+    위반을 포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해
+    1회 호출당 예산(150ms/30=5ms)을 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    import time as _time
+
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 100.0  # 100ms per call >> 150ms budget
+        return _fake_time[0]
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    requests = "\n".join(f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8))
+    lets = "\n".join(f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(50))
+    source = _CLOSE + requests + "\n" + lets
+    limits = ResourceLimits(max_requests=8)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        samples = perf_budget.samples(
+            lambda: check_resources(parse(source), limits),
+            n=30,
+            batch=64,
+        )
+        cpu_ms = sorted(s.cpu_ms for s in samples)
+        p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
+
+        print(f"[M2-2a request INJECTED] compile p95={p95_ms:.3f}ms budget<{150.0:.0f}ms")
+        assert p95_ms < 150.0, (
+            f"주입 지연 p95={p95_ms:.3f}ms > 150ms budget — 마지막 샘플 cpu_ms={cpu_ms[-1]:.3f}ms"
+        )
+
+
 def test_infer_type_direct_call_matches_check_program() -> None:
     """`infer_type`을 `check_program` 없이 직접 호출해도 동일하게
     series<float>를 반환함을 확인(§checker.py `_infer_request` 단위 확인)."""
