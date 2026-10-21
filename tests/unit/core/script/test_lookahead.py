@@ -9,20 +9,20 @@ DEEPEN(task-2913, task-2727 감사 후속): D2 하한 보강 — 실패 주입 1
 수치 성능 단언 1(정적 검출 지연, ADR-2026-09-09-C), 게이트 적색 재현 1
 (security() 네임스페이스 우회 회귀 가드). negative는 이미 6건으로 충분해
 추가하지 않는다.
+
+task-11539 감사 후속: 단일 호출 CPU 0 수렴 + 지연 주입 검출력 테스트 추가.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 import pytest
 
 from src.core.script.analysis.lookahead import ScriptLookaheadError, check_lookahead, check_source
 from src.core.script.grammar.lexer import Token, TokenKind, tokenize
-
-if TYPE_CHECKING:
-    from tests.conftest import PerfBudget
+from tests.support.perf_budget import PerfBudget
 
 # ---- negative: (a) 음수 인덱스 ----
 
@@ -218,3 +218,66 @@ def test_security_namespace_bypass_regression_guard() -> None:
     with pytest.raises(ScriptLookaheadError) as excinfo:
         check_lookahead(tokens)
     assert excinfo.value.code == "SCRIPT_LOOKAHEAD"
+
+
+# ---- 단일 호출 CPU 0 수렴 (Windows quantization invariant) ----
+
+
+@pytest.mark.perf
+def test_lookahead_single_call_cpu_0_convergence() -> None:
+    """단일 호출 CPU 측정의 0 수렴 확인 — Windows `time.process_time()`
+    약 15.6ms 양자화 tick 때문에 1회 호출은 항상 0ms로 읽힌다. 이 테스트는
+    그 사실을 명시적으로 검증한다(task-11539 감사)."""
+
+    source = "let x = close[0]"
+    tokens = tokenize(source)
+
+    # 단일 호출 10회 측정 — 모두 0ms여야 함(양자화 한계)
+    for _ in range(10):
+        cpu_start = time.process_time()
+        check_lookahead(tokens)
+        cpu_ms = (time.process_time() - cpu_start) * 1000
+        assert cpu_ms == 0.0, (
+            f"single-call CPU should converge to 0 (got {cpu_ms:.3f}ms); "
+            "if it does not, the 0-convergence invariant is broken"
+        )
+
+
+# ---- 지연 주입: 성능 단언이 적색으로 넘어가는지 검출력 확인 ----
+
+
+@pytest.mark.perf
+def test_lookahead_perf_budget_goes_red_with_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인 — `_at`에 sleep을 주입하면 같은 성능 단언이 적색으로
+    넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이 아님을
+    증명한다(task-11539 감사).
+
+    `_at`에 2ms sleep을 주입하면 작은 입력(10문)에서도 총 지연이
+    측정 예산을 초과하므로 assert가 적색으로 넘어간다."""
+    import src.core.script.analysis.lookahead as lookahead_module
+
+    _orig_at = lookahead_module._at
+
+    def slow_at(tokens: Sequence[Token], idx: int) -> Token:
+        time.sleep(0.002)  # 2ms per call
+        return _orig_at(tokens, idx)
+
+    monkeypatch.setattr(lookahead_module, "_at", slow_at)
+
+    # 작은 입력 — 10문, 토큰 수 ~50개
+    source = "\n".join(f"let v{i} = close[{i % 5}]" for i in range(10))
+    tokens = tokenize(source)
+    budget_ms = 30.0
+
+    # n=5로 적게 측정 — 각 샘플은 ~50 토큰 × 2회 _at 호출 × 2ms = ~200ms
+    samples = PerfBudget().samples(lambda: check_lookahead(tokens), n=5, batch=1)
+    wall_ms = sorted(sample.wall_ms for sample in samples)
+    p95_wall = wall_ms[min(int(len(wall_ms) * 0.95), len(wall_ms) - 1)]
+
+    print(f"[DSL-5 lookahead+delay] 10-stmt p95_wall={p95_wall:.1f}ms budget={budget_ms:.0f}ms")
+    assert p95_wall > budget_ms, (
+        f"perf assertion should go red with injected delay: "
+        f"p95_wall={p95_wall:.1f}ms (expected > {budget_ms:.0f}ms)"
+    )
