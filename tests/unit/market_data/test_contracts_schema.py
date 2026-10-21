@@ -56,7 +56,7 @@ def _sample_key(**overrides: object) -> v1.SeriesKey:
         timeframe=v1.Timeframe.M1,
     )
     base.update(overrides)
-    return v1.SeriesKey(**base)  # type: ignore[arg-type]
+    return v1.SeriesKey.model_validate(base)
 
 
 def _sample_candle(**overrides: object) -> v1.CandleRecord:

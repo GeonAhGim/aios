@@ -1,4 +1,5 @@
 """FA-1 domain/hierarchy.py — 계층 불변조건 단위테스트(DB 없이 순수 함수만)."""
+
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -30,7 +31,7 @@ def _entity(**overrides: object) -> LegalEntity:
         entity_id=uuid4(), tenant_id=uuid4(), name="Acme", jurisdiction="KR", region_tag="ap-2"
     )
     defaults.update(overrides)
-    return LegalEntity(**defaults)  # type: ignore[arg-type]
+    return LegalEntity.model_validate(defaults)
 
 
 def _fund(entity_id, **overrides: object) -> Fund:
@@ -41,7 +42,7 @@ def _fund(entity_id, **overrides: object) -> Fund:
         inception=date(2026, 1, 1),
     )
     defaults.update(overrides)
-    return Fund(**defaults)  # type: ignore[arg-type]
+    return Fund.model_validate(defaults)
 
 
 def _portfolio(fund_id, **overrides: object) -> Portfolio:
@@ -49,7 +50,7 @@ def _portfolio(fund_id, **overrides: object) -> Portfolio:
         portfolio_id=uuid4(), fund_id=fund_id, venue_account_ref="ACC-1"
     )
     defaults.update(overrides)
-    return Portfolio(**defaults)  # type: ignore[arg-type]
+    return Portfolio.model_validate(defaults)
 
 
 def _sub_account(portfolio_id, **overrides: object) -> SubAccount:
@@ -57,7 +58,7 @@ def _sub_account(portfolio_id, **overrides: object) -> SubAccount:
         sub_account_id=uuid4(), portfolio_id=portfolio_id, owner_ref=uuid4()
     )
     defaults.update(overrides)
-    return SubAccount(**defaults)  # type: ignore[arg-type]
+    return SubAccount.model_validate(defaults)
 
 
 # ---- 상위 없는 하위 금지 ----
