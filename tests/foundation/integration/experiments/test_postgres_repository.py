@@ -24,6 +24,8 @@ from src.foundation.experiments.adapters.postgres_repository import (
 )
 from src.foundation.experiments.contracts.v1 import Experiment, ExperimentKind
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 _NOW = datetime.now(timezone.utc)
 
@@ -86,6 +88,9 @@ async def test_append_then_get_round_trip(
     assert got.artifacts == experiment.artifacts
 
 
+_APPEND_LINEAGE_P95_BUDGET_MS = 50.0
+
+
 async def test_append_parent_child_lineage_round_trip(
     pool: asyncpg.Pool, repo: PostgresExperimentRepository
 ) -> None:
@@ -98,6 +103,113 @@ async def test_append_parent_child_lineage_round_trip(
     got_child = await repo.get(tenant_id, child.experiment_id)
     assert got_child is not None
     assert got_child.parent_id == parent.experiment_id
+
+
+@pytest.mark.perf
+async def test_append_parent_child_lineage_p95_within_budget(
+    repo: PostgresExperimentRepository, perf_budget: PerfBudget
+) -> None:
+    """numeric performance assertion: lineage append+get 왕복 p95 가 예산 내.
+
+    I/O 바인딩 연산이므로 wall_ms 로 측정 — `PerfBudget.sample_async` 사용.
+    정상 입력에서 녹색; 지연 주입 테스트(`test_..._goes_red_with_io_delay`)
+    에서 같은 단언이 적색으로 전환됨을 보장한다.
+    """
+    samples_ms: list[float] = []
+    for _ in range(20):
+        tenant_id = uuid4()
+        parent = _experiment(tenant_id=tenant_id)
+        child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
+
+        async def _one_lineage_call(p=parent, c=child, t=tenant_id) -> object:
+            await repo.append(p)
+            await repo.append(c)
+            return await repo.get(t, c.experiment_id)
+
+        sample = await perf_budget.sample_async(_one_lineage_call)
+        samples_ms.append(sample.wall_ms)
+
+    p95_ms = _p95(samples_ms)
+    print(f"[lineage append] p95={p95_ms:.2f}ms budget<{_APPEND_LINEAGE_P95_BUDGET_MS:.1f}ms")
+    assert p95_ms < _APPEND_LINEAGE_P95_BUDGET_MS
+
+
+async def test_append_parent_child_lineage_orphan_parent_not_prevented(
+    pool: asyncpg.Pool, repo: PostgresExperimentRepository
+) -> None:
+    """negative: FK 제약(experiments_parent_id_fkey) 이 있어 parent 먼저
+    삽입해야 함 — parent 없이 child 만 append 하면 FK 위반으로 실패해야 함.
+    (append-only 테이블이 FK 를 강제하는 구조 확인)."""
+    tenant_id = uuid4()
+    parent = _experiment(tenant_id=tenant_id)
+    child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
+
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await repo.append(child)
+
+
+async def test_append_parent_child_lineage_wrong_tenant_returns_none(
+    pool: asyncpg.Pool, repo: PostgresExperimentRepository
+) -> None:
+    """negative: 다른 tenant_id 로 조회하면 parent 도 child 도 반환되지 않음
+    (tenant isolation)."""
+    tenant_id = uuid4()
+    wrong_tenant = uuid4()
+    parent = _experiment(tenant_id=tenant_id)
+    child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
+    await repo.append(parent)
+    await repo.append(child)
+
+    got_parent = await repo.get(wrong_tenant, parent.experiment_id)
+    got_child = await repo.get(wrong_tenant, child.experiment_id)
+    assert got_parent is None
+    assert got_child is None
+
+
+async def test_append_parent_child_lineage_self_reference_blocked(
+    pool: asyncpg.Pool, repo: PostgresExperimentRepository
+) -> None:
+    """negative: parent_id == experiment_id (self-reference) 는 pydantic
+    validator 에서 차단해야 함."""
+    tenant_id = uuid4()
+    exp_id = uuid4()
+    with pytest.raises(ValueError, match="parent_id must not reference the experiment itself"):
+        _experiment(tenant_id=tenant_id, experiment_id=exp_id, parent_id=exp_id)
+
+
+@pytest.mark.perf
+async def test_append_parent_child_lineage_goes_red_with_io_delay(
+    pool: asyncpg.Pool,
+    repo: PostgresExperimentRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.fetchrow 에 IO 지연(delayed_async,
+    2.0s) 을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `conn.fetchrow` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
+    주입 — lineage append+get 는 I/O 바인딩 연산이므로 wall-clock
+    측정으로 지연을 검증한다. 정상 입력에서 통과하는 것이 테스트의 허수
+    (trivial pass) 가 아님을 보장한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    original_fetchrow = asyncpg.Connection.fetchrow
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", delayed_async(original_fetchrow, 2.0))
+
+    tenant_id = uuid4()
+    parent = _experiment(tenant_id=tenant_id)
+    child = _experiment(tenant_id=tenant_id, parent_id=parent.experiment_id)
+
+    async def _one_lineage_call_with_delay() -> object:
+        await repo.append(parent)
+        await repo.append(child)
+        return await repo.get(tenant_id, child.experiment_id)
+
+    sample = await perf_budget.sample_async(_one_lineage_call_with_delay, batch=1)
+    assert sample.wall_ms >= _APPEND_LINEAGE_P95_BUDGET_MS, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget={_APPEND_LINEAGE_P95_BUDGET_MS:.1f}ms)"
+    )
 
 
 async def test_find_by_reproducibility_key_returns_all_sharing_it(
