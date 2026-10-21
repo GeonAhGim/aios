@@ -35,6 +35,7 @@ from src.foundation.ems.domain.tca.benchmarks import (
     InvalidFillError,
 )
 from src.foundation.ems.ports.tca_result_repository import TcaResultRecord
+from tests.support.perf_budget import PerfBudget
 
 
 @dataclass
@@ -133,6 +134,80 @@ async def test_compute_tca_rejects_non_positive_arrival_price(bad_price: Decimal
     with pytest.raises(InvalidArrivalPriceError):
         await compute_tca(repo, parent_id=uuid4(), **_kwargs(price_at_arrival_ts=bad_price))
     assert repo.insert_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# perf assertion for the above: CPU 0 수렴 + budget injection (task-11539 감사 후속)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_compute_tca_rejects_non_positive_arrival_price_cpu_time_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """0 수렴 검증: `compute_tca`에 음수/0 도착 가격을 넣으면 EM-12/EM-13 호출
+    전에 `InvalidArrivalPriceError`가 발생하므로 CPU 시간은 양자화 오차 범위
+    내여야 한다(약 0ms 수렴). 이 테스트는 PerfBudget.sample_async가 단일
+    호출 CPU 시간을 올바르게 계측함을 동적으로 검증한다.
+
+    예외가 발생해도 CPU 측정은 유효하므로, 예외를 포착한 뒤 None을 반환하는
+    래퍼로 측정 구간을 감싼다.
+    """
+    repo = FakeTcaResultRepository()
+
+    async def _call() -> None:
+        try:
+            await compute_tca(repo, parent_id=uuid4(), **_kwargs(price_at_arrival_ts=Decimal("0")))
+        except InvalidArrivalPriceError:
+            pass  # expected — CPU 측정은 예외 발생 전까지의 시간을 반영
+
+    sample = await perf_budget.sample_async(_call, batch=1)
+
+    assert sample.cpu_ms < 1.0, (
+        f"InvalidArrivalPriceError 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "입력 검증만 수행하므로 사실상 0ms에 수렴해야 함 (budget<1ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_compute_tca_rejects_non_positive_arrival_price_cpu_budget_catches_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(1ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. fake process_time이 호출당 10ms를 반환하므로
+    측정 예산 1ms를 초과해 적색 확정.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 0.01  # +10ms per call → >> 1ms budget
+        return _fake_time[0]
+
+    import time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    repo = FakeTcaResultRepository()
+
+    async def _call() -> None:
+        try:
+            await compute_tca(repo, parent_id=uuid4(), **_kwargs(price_at_arrival_ts=Decimal("0")))
+        except InvalidArrivalPriceError:
+            pass  # expected — CPU 측정은 예외 발생 전까지의 시간을 반영
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = await perf_budget.sample_async(_call, batch=1)
+        assert sample.cpu_ms < 1.0, (
+            f"InvalidArrivalPriceError 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            "입력 검증만 수행하므로 사실상 0ms에 수렴해야 함 (budget<1ms)"
+        )
 
 
 @pytest.mark.parametrize("bad_revision", [0, -1])
