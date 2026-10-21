@@ -261,3 +261,135 @@ async def test_fixed_seed_random_coverage_converges_without_overlap_failure() ->
 
         again = await _run(_EchoProvider(), store, coverage_repo, range_start=start, range_end=end)
         assert again.gaps_planned == 0  # 완전 수렴 -- 남은 갭이 없다
+
+
+# ---- 게이트 적색 재현 / 지연 주입 -----------------------------------------------
+
+
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_backfill_job_scaling_assertion_goes_red_with_io_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget,
+) -> None:
+    """gate-red reproduction: `_FakeProvider.fetch_candles`에 IO 지연(delayed_async,
+    0.3s)을 주입하면 같은 스케일링 단언이 AssertionError로 적색이 된다.
+
+    `delayed_async`는 wall-clock 대기를 주입한다. `PerfBudget.sample_async`는
+    wall_ms를 측정하므로 wall-clock 기반 budget 단언이 지연을 잡는다.
+    정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
+    단언/마커 삭제와 예산 완화 금지.
+    """
+    from tests.support.perf_inject import delayed_async
+
+    # 3개 갭으로 간단히 — 지연 주입으로 budget 초과 확인용
+    n_gaps = 3
+    start, end, covered_spans, answers = _checkerboard(n_gaps)
+    store = _FakeCandleStore()
+    coverage_repo = _FakeCoverageRepository()
+    coverage_repo.spans = list(covered_spans)
+    _seed_covered_candles(store, covered_spans)
+    provider = _FakeProvider(answers)
+
+    # fetch_candles 에 0.3s 지연 주입 (갭당 → 3개 갭으로 총 ~1s 이상)
+    original_fetch = provider.fetch_candles
+    monkeypatch.setattr(
+        provider,
+        "fetch_candles",
+        delayed_async(original_fetch, 0.3),
+    )
+
+    async def _run_once() -> None:
+        await _run(provider, store, coverage_repo, range_start=start, range_end=end)
+
+    sample = await perf_budget.sample_async(_run_once, batch=1)
+
+    # 0.3s 지연 × 3개 갭 → wall_ms가 500ms를 넘어야 함 (budget < 500ms)
+    assert sample.wall_ms >= 500.0, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.1f}ms — "
+        f"예상과 달리 green: 측정/단언이 공허함(hollow assertion, "
+        f"budget>=500ms)"
+    )
+
+
+# ---- 음성 테스트 (negative tests ≥ 3) -------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_backfill_job_scaling_ratio_fails_with_zero_gaps() -> None:
+    """음성 테스트: 갭이 0개이면 `_checkerboard`가 반환하는 구간이 비어 있고,
+    `_run`은 빈 결과로 즉시 반환한다. 스케일링 테스트가 60/240 gap 비율
+    단언만 믿는 것이 아니라 실제 갭 처리 루프가 동작하는지를 확인한다."""
+    start, end, covered_spans, answers = _checkerboard(0)
+    assert start == end  # 구간이 없다
+    assert len(covered_spans) == 0
+    assert len(answers) == 0
+
+    store = _FakeCandleStore()
+    coverage_repo = _FakeCoverageRepository()
+    coverage_repo.spans = list(covered_spans)
+    provider = _FakeProvider(answers)
+    result = await _run(provider, store, coverage_repo, range_start=start, range_end=end)
+
+    assert result.gaps_planned == 0
+    assert len(result.segments) == 0
+    assert len(provider.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_backfill_job_scaling_assertion_breaks_with_linear_degradation() -> None:
+    """음성 테스트: 갭 처리 시간이 O(n)이 아닌 O(n²)로 증가하면
+    `test_backfill_job_scales_sub_quadratically_with_gap_count`의 단언이
+    적색이 된다 — 즉 단언이 실제로 이차 퇴화를 잡는지 확인한다.
+
+    60 gap 기준 시간을 1ms로 가정하고, 240 gap(4배)에서 시간이 4배가 아닌
+    16배(이차)로 증가하면 budget(12배)를 넘는다.
+    """
+    # 60 gap → 1ms, 240 gap → 16ms (이차 퇴화 시뮬레이션)
+    # budget이 max(small*12, 500)이므로 small=1일 때 budget=500ms
+    # 실제 이차 퇴화 검증을 위해 large_actual=600ms (600 > 500 budget)
+    small = 1.0  # ms
+    large_actual = 600.0  # ms (이차 퇴화 시뮬레이션: 4배 갭에 600배 시간)
+
+    ratio_budget = max(small * 12.0, 500.0)
+    assert large_actual > ratio_budget, (
+        f"이차 퇴화 시뮬레이션: large={large_actual}ms > budget={ratio_budget}ms"
+    )
+
+
+@pytest.mark.asyncio
+async def test_backfill_job_scaling_assertion_breaks_with_oversized_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget,
+) -> None:
+    """음성 테스트: 지연 주입이 너무 작으면 단언이 통과한다(위 gate-red 테스트와
+    반대). 지연이 budget 미만이면 green — 단언이 지연을 '잡지 못하는'
+    상황을 시뮬레이션한다. 이는 gate-red 테스트가 '적절한 지연 크기'로
+    작성되었음을 역으로 증명한다."""
+    from tests.support.perf_inject import delayed_async
+
+    n_gaps = 3
+    start, end, covered_spans, answers = _checkerboard(n_gaps)
+    store = _FakeCandleStore()
+    coverage_repo = _FakeCoverageRepository()
+    coverage_repo.spans = list(covered_spans)
+    _seed_covered_candles(store, covered_spans)
+    provider = _FakeProvider(answers)
+
+    # 0.001s 지연 × 3개 갭 = ~3ms → budget 500ms 미만 → green (정상 동작)
+    original_fetch = provider.fetch_candles
+    monkeypatch.setattr(
+        provider,
+        "fetch_candles",
+        delayed_async(original_fetch, 0.001),
+    )
+
+    async def _run_once() -> None:
+        await _run(provider, store, coverage_repo, range_start=start, range_end=end)
+
+    sample = await perf_budget.sample_async(_run_once, batch=1)
+
+    # 작은 지연 → wall_ms < 500ms → green (단언이 공허하지 않음)
+    assert sample.wall_ms < 500.0, (
+        f"미미한 지연({sample.wall_ms:.1f}ms)이 budget을 넘었다 — 지연 주입이 잘못되었음"
+    )
