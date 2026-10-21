@@ -245,3 +245,45 @@ def test_gate_red_corrupt_parquet_raises(tmp_path):
     # 게이트 적색 재현: read_columns가 실제로 실패해야 함
     with pytest.raises((ValueError, OSError, pa.lib.ArrowInvalid)):
         list(store.read_columns(VENUE, ID, DAY, kind="trades"))
+
+
+# --- 게이트 적색 재현 (2): 10x 지연 주입으로 perf_budget 단언이 적색인지 검증 ---
+
+
+@pytest.mark.perf
+def test_write_day_budget_catches_10x_cpu_delay_injection(
+    tmp_path: Path,
+    perf_budget,
+    monkeypatch,
+):
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. time.process_time을 monkeypatch해 매 호출당
+    100초씩 증가하도록 하면 cpu_ms가 예산(200,000ms)을 초과해 AssertionError가
+    발생해야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 매 호출마다 300초씩 증가하도록 한다.
+    # cpu_ms = (end - start) * 1000 / batch = 300_000ms >> write budget 200_000ms.
+    # best_of(n=5)가 최소값을 찾아도 매 sample diff=300초이므로 예산을 넘는다.
+    _call_count = [0]
+
+    def _fake_process_time() -> float:
+        _call_count[0] += 1
+        return float(_call_count[0] * 300)
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    store = TickParquetStorage(tmp_path, batch_size=65536)
+
+    def _write_once() -> None:
+        store.write_day(VENUE, ID, DAY, (record() for _ in range(100)), kind="trades")
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(_write_once, budget_ms=200_000)
