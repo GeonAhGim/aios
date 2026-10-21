@@ -3697,3 +3697,30 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   넘는 드리프트를 확인했다 — task-16630(동일 worktree에 남아 있던 별도 task의 unpushed
   커밋, tier-S order_service 경로라 main-drift 예외 미적용)에 이미 needs_decision으로
   기록돼 있다. 이 task는 그 커밋을 포함하지 않고 문서 전용 커밋만 push한다.
+
+
+## task-17196 — ci_failure_card:pytest_perf:error_chain(9 nodeid), 대상 파일
+  `tests/unit/oms/test_algo_slicer.py::test_max_slice_count_planning_latency_budget` 단독/동반
+  재확인, 비회귀 (2026-10-22)
+
+- 대상 테스트는 `process_time()`(CPU 시간, task-15910에서 wall-clock 노이즈를 배제하려 전환)로
+  500슬라이스 계획 10회 반복을 측정하는 순수 CPU 벤치마크다 — DB 연결이나 `orders`/
+  `order_events` 테이블 접근이 전혀 없다. 실측 ≈0.01-0.03s에 예산 10.0s(300-900배 여유), 3회
+  연속 단독 실행 모두 **1 passed**(6.35s/2.84s/22.09s — wall-clock 변동은 있었지만 `process_time()`
+  기반 단언이라 CI 부하와 무관하게 전부 통과). 같은 파일 전체: **17 passed in 5.16s**.
+- 같은 9-nodeid 카드에 묶인 나머지 테스트(`test_dispatch_outcome.py`,
+  `test_idempotency_scope_rename_deepen_3189.py`, `test_observability_resilience.py`,
+  `test_order_types_em19_deepen.py`)와 대상 파일을 함께 실행해 교차 확인: **68 passed in 8.93s**
+  — task-15079/16667/16671과 동형 패턴(여러 perf 테스트가 동시에 CPU를 공유할 때의 노이즈이며,
+  대상 파일 자체가 오염원이라는 근거는 없다).
+  `tests/unit/scripts/test_orders_residue_sentinel.py` + `tests/adversarial/oms/
+  test_orders_residue_{teardown,source}.py`(잔여물 발생/회귀 전용 테스트)와 대상 파일을 함께
+  실행해 교차 확인: **32 passed in 22.58s, exit=0** — orders 잔여물 감시 경로 자체도 green이다.
+- `ruff check tests/unit/oms/test_algo_slicer.py`: All checks passed.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: 지정된
+  파일은 로컬에서 단독·동반 실행 모두 100% green이고, 소스 변경이 전혀 필요하지 않다. D2:
+  N/A(실행 코드 변경 없음 — 비회귀를 재현/교차 확인하는 문서 리프, task-12039/12047/12223/
+  12311/12315/15073/15075/15079/16667/16671과 동일 선례).
+- 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다. 9-nodeid 카드의 나머지
+  4개 파일은 각자의 전담 task에서 개별 확인해야 한다 — 이 항목은 `test_algo_slicer.py`에만
+  좁게 적용된다.
