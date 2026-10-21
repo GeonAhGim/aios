@@ -25,6 +25,7 @@ from tests.integration.foundation.positions.conftest import (
     create_pos_account,
     open_position,
 )
+from tests.support.perf_inject import delayed_async
 
 
 class _InjectedConnFailure(RuntimeError):
@@ -57,6 +58,68 @@ async def test_create_pos_account_propagates_connection_failure() -> None:
     `create_pos_account`는 이를 삼키지 않고 그대로 전파해야 한다(fail-closed)."""
     with pytest.raises(_InjectedConnFailure, match="injected connection failure"):
         await create_pos_account(_FailingPool(), uuid.uuid4())
+
+
+@pytest.mark.perf
+async def test_create_pos_account_perf_0_convergence_and_budget(
+    pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언(D2, task-11539 감사 후속): `create_pos_account` 단일 호출의
+    CPU 시간이 0 수렴(양자화 오차 범위 내)하고 절대 예산 이내인지 검증한다.
+
+    정상 입력에서 녹색 — 측정값이 예산을 초과하면 테스트가 실패한다.
+    단위/예산 불변: 예산은 10ms(단일 INSERT + RETURNING 이므로 1ms 미만이어야
+    하지만 Windows 15.6ms 양자화 오차를 고려해 10ms로 설정).
+    """
+    tenant_id = await create_test_tenant(pool)
+
+    async def _create_once() -> None:
+        await create_pos_account(pool, tenant_id)
+
+    # batch=8로 Windows 15.6ms 양자화 오차를 1/8로 줄이고 0 수렴 확인
+    sample = await perf_budget.sample_async(_create_once, batch=8)
+    assert sample.cpu_ms < 10.0, (
+        f"create_pos_account CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"단일 INSERT이므로 10ms 미만이어야 함 (budget<10ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_create_pos_account_perf_budget_goes_red_with_delay_injection(
+    pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): `create_pos_account`의
+    성능 단언이 지연을 감지하는지 역으로 증명한다.
+
+    `asyncpg.Connection.fetchval`에 50ms 지연을 주입하면 1회 호출 × 50ms가
+    되어 budget(10ms)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. 지연 주입은 perf_inject.delayed_async — type: ignore budgets
+    를 소모하지 않는다.
+    """
+    # 실제 커넥션의 fetchval 에 50ms 지연 주입 (예산 10ms의 5배)
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetchval",
+        delayed_async(asyncpg.Connection.fetchval, seconds=0.05),
+    )
+
+    tenant_id = await create_test_tenant(pool)
+
+    async def _create_with_delay() -> None:
+        await create_pos_account(pool, tenant_id)
+
+    # 지연 주입으로 budget 초과 → AssertionError 발생해야 함
+    sample = await perf_budget.sample_async(_create_with_delay, batch=1)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < 10.0, (
+            f"지연 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            f"예상과 달리 녹색: 측정/단언이 공허함 (budget<10ms)"
+        )
 
 
 async def test_asyncpg_dsn_raises_when_database_url_missing(
