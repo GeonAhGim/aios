@@ -206,14 +206,18 @@ def test_compile_script_indicator_conversion_overhead_stays_within_budget(
     """§9.4 DSL-12 already budgets raw `compile_source` at <=300ms
     (ADR-2026-09-09-C Decision 1, `test_compile.py`). This pins the marginal
     cost this leaf adds on top (IR walk -> `IndicatorSpec`) so it cannot
-    quietly regress into a per-indicator O(n^2) scan without a test noticing."""
+    quietly regress into a per-indicator O(n^2) scan without a test noticing.
+
+    Uses `batch=8` to avoid Windows `time.process_time()` ~15.6ms quantization
+    causing 0ms readings on fast calls (task-16151 follow-up).
+    """
     tenant_id = uuid.uuid4()
     budget_ms = 300.0  # matches DSL-12's own compile_source budget (this leaf adds a thin pass)
 
     def _compile() -> None:
         compile_script_indicator("perf", VALID_SOURCE, tenant_id=tenant_id, registry_version=REG)
 
-    perf_budget.assert_within(_compile, budget_ms=budget_ms)
+    perf_budget.assert_within(_compile, budget_ms=budget_ms, batch=8)
 
 
 # ---- D2 게이트 적색 재현 ------------------------------------------------------
@@ -240,3 +244,37 @@ def test_import_linter_core_no_io_catches_dsl_indicator_foundation_import_regres
         LINTER_ROOT / "src/core/indicators/custom/dsl_indicator.py", module, is_package=False
     )
     assert _eval_forbidden({module: real_imports}, core_no_io) == []
+
+
+# ---- D2 게이트 적색 재현 — 지연 주입 단언이 적색인지 검증 -------------------
+
+
+@pytest.mark.perf
+def test_perf_assertion_catches_10x_cpu_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(300ms)을 초과하는 CPU 시간을 가장하면 `assert_within`가
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    tenant_id = uuid.uuid4()
+    budget_ms = 300.0
+
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 500.0  # 500ms per call > 300ms budget
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    def _compile() -> None:
+        compile_script_indicator("perf", VALID_SOURCE, tenant_id=tenant_id, registry_version=REG)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(_compile, budget_ms=budget_ms, batch=8)
