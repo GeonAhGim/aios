@@ -223,3 +223,47 @@ async def test_suspend_perf_budget_p95_latency(
     assert p95 < 50.0, (
         f"SellerSuspensionService.suspend p95 cpu_latency {p95:.3f}ms exceeded 50ms budget"
     )
+
+
+# ---------------------------------------------------------------------------
+# gate-red reproduction (D2) — 10x delay injection
+# ---------------------------------------------------------------------------
+
+
+async def test_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    50ms 예산의 10배(500ms)를 가장하면 p95가 50ms를 크게 넘어
+    적색으로 전환됨을 검증한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    budget_ms = 50.0
+
+    # process_time을 monkeypatch: 호출할 때마다 500ms(10x budget)를 더한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 500.0  # 500ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    n = 50
+
+    async def _make_one() -> None:
+        conn = _FakeConnection(fetchrow_result={"seller_suspended": True})
+        service = _service(conn)
+        await service.suspend(uuid4(), uuid4(), "사유")
+
+    samples = await perf_budget.samples_async(_make_one, n=n)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95 = cpu_ms[int(n * 0.95) - 1]
+    assert p95 >= budget_ms, (
+        f"Expected p95 >= {budget_ms}ms on 10x delay injection "
+        f"(got {p95:.3f}ms); perf assertion may be broken"
+    )
