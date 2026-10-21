@@ -48,6 +48,7 @@ from src.foundation.market_data.contracts.v2.instruments import (
 )
 from src.foundation.market_data.domain.instruments import symbol_master as sm
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _ID_B = "01BXQR6X4TVQFP7NM5H7J1K2C3"
@@ -122,6 +123,69 @@ def test_resolve_rejects_non_str_symbol_fail_closed(garbage_symbol: Any) -> None
     누출하지 않고 항상 `SymbolMasterError`로 거부돼야 한다(fail-closed)."""
     with pytest.raises(sm.SymbolMasterError):
         sm.resolve(Venue.BITGET, garbage_symbol, instruments=[], listings=[])
+
+
+@pytest.mark.perf
+def test_resolve_rejects_non_str_symbol_fail_closed_perf(
+    perf_budget: PerfBudget,
+) -> None:
+    """`_normalize_symbol`의 isinstance 가드 + 예외raise 경로의 CPU 단언.
+
+    non-str 입력(예: `None`)은 `isinstance` 체크 한 번으로 즉시
+    `SymbolMasterError`를 raise하므로 CPU 시간은 0에 수렴해야 한다.
+    batch=16으로 Windows 15.6ms 양자화 오차를 줄이고 1ms 예산을
+    단언한다.
+    """
+
+    def _work() -> None:
+        with pytest.raises(sm.SymbolMasterError):
+            sm.resolve(Venue.BITGET, None, instruments=[], listings=[])
+
+    perf_budget.assert_within(
+        _work,
+        budget_ms=1.0,
+        n=5,
+        warmup=1,
+        batch=16,
+        label="resolve_non_str_perf",
+    )
+
+
+# ---- 성능 주입 적색 재현(D2) — 지연 주입으로 budget 초과 증명 ----
+
+
+@pytest.mark.perf
+def test_resolve_rejects_non_str_symbol_fail_closed_perf_injection_exceeds_budget(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_normalize_symbol`에 CPU 지연(delayed_sync, 0.05s)을 주입한 후
+    같은 perf_budget.assert_within 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `_normalize_symbol`을 50ms 지연 — isinstance 가드가 아닌 실제
+    지연된 path가 측정되므로 assert_within가 실패한다. 이것은 "성능
+    단언이 실제로 함수 실행 시간을 측정한다"는 역방향 증거다.
+    """
+    import src.foundation.market_data.domain.instruments.symbol_master as sm_mod
+
+    # 0.05s = 50ms CPU 부하 — best_of(5) 최소값이 1ms 예산 초과
+    slow_normalize = delayed_sync(sm_mod._normalize_symbol, 0.05)
+    monkeypatch.setattr(sm_mod, "_normalize_symbol", slow_normalize)
+
+    def _work() -> None:
+        with pytest.raises(sm.SymbolMasterError):
+            sm_mod.resolve(Venue.BITGET, None, instruments=[], listings=[])
+
+    # 지연 주입으로 인해 assert_within가 AssertionError를 raising해야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _work,
+            budget_ms=1.0,
+            n=5,
+            warmup=1,
+            batch=16,
+            label="resolve_non_str_perf_injected",
+        )
 
 
 @pytest.mark.parametrize("garbage_symbol", _GARBAGE_SYMBOLS)
