@@ -195,6 +195,45 @@ def test_serialization_round_trip_latency_is_bounded(perf_budget: PerfBudget) ->
     assert sample.cpu_ms < 2.0, f"직렬화 왕복 평균 {sample.cpu_ms:.3f}ms > 2.0ms 예산"
 
 
+@pytest.mark.perf
+def test_serialization_round_trip_latency_goes_red_with_10x_cpu_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
+    monkeypatch해 1회 호출당 예산(2ms)을 10배 초과하는 CPU 시간을 가장하면
+    같은 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완료가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다. fake process_time이 300ms를 반환하므로
+    batch=128로 나눈 평균도 2.34ms > 2.0ms budget로 적색 확정.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 300ms를 반환하게 한다.
+    # sample()은 time.process_time()을 start/end 두 번 호출하므로
+    # diff = 300ms, batch=128로 나누면 300/128 = 2.34ms > 2.0ms budget.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 0.3  # 300ms per call = 150x budget
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    program = _sample_program()
+
+    def _one_call() -> None:
+        program_from_dict(to_dict(program))
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_one_call, batch=128)
+        assert sample.cpu_ms < 2.0, (
+            f"직렬화 왕복 평균 {sample.cpu_ms:.3f}ms — 예산 2.0ms 미만이어야 함 (budget<2.0ms)"
+        )
+
+
 def test_extra_forbid_regression_would_be_caught_by_unknown_field_guard() -> None:
     """게이트 적색 재현: `test_program_rejects_unknown_field`가 실제로
     `ScriptNode`의 `extra=forbid` 설정에 의존한다는 것을 증명한다.
