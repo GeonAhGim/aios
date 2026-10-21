@@ -136,12 +136,63 @@ def test_load_canary_limits_rejects_unknown_key_fail_closed(tmp_path: Path) -> N
         canary.load_canary_limits(path)
 
 
-def test_load_canary_limits_rejects_non_positive_max_order_usdt(tmp_path: Path) -> None:
-    """negative #2 — 상한 값 자체가 0 이하면 설정 로드 단계에서 거부."""
+@pytest.mark.perf
+def test_load_canary_limits_rejects_non_positive_max_order_usdt(
+    tmp_path: Path, perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """negative #2 — 상한 값 자체가 0 이하면 설정 로드 단계에서 거부.
+
+    성능 단언: 0 이하는 Pydantic 검증에서 즉시 거부되므로 CPU 예산 안에
+    끝난다. 지연 주입(monkeypatch)으로 예산을 초과하면 테스트가 적색으로
+    떨어지는지 검출력도 확인한다.
+    """
     body = _VALID_CONFIG.replace("max_order_usdt: 10", "max_order_usdt: 0")
     path = _write_config(tmp_path, body)
+
+    # 실제 성능 단언: 0 이하는 Pydantic 검증에서 즉시 거부되므로
+    # CPU 예산 안에 끝난다. 예외가 발생해도 PerfBudget가 측정 구간을
+    # 벗어나도록 _exception_result sentinel로 반환값을 보존한다.
+    _exception_result = object()
+
+    def measure() -> object:
+        try:
+            return canary.load_canary_limits(path)
+        except canary.CanaryConfigError:
+            return _exception_result
+
+    sample = perf_budget.best_of(measure, n=5)
+    assert sample.result is _exception_result, "음성 테스트: 예외 대신 정상 반환값"
+    assert sample.cpu_ms < 50.0, (
+        f"검증 실패 경로가 느림: {sample.cpu_ms:.3f}ms — Pydantic gt=0 검증은 O(1)이어야 함"
+    )
+
+    # 예외 발생 재확인 (음성 테스트)
     with pytest.raises(canary.CanaryConfigError):
         canary.load_canary_limits(path)
+
+    # 검출력 확인: load_canary_limits 를 10배 느리게 만든 budgets.assert_within
+    # 가 적색으로 떨어지는지 검증 — 단언이 허울이 아닌 실제 검출력을 갖는지 확인.
+    # load_canary_limits 는 YAML 파일 읽기 + Pydantic 검증 + 심볼 변환을 하므로
+    # I/O 포함 지연 예산이다. sleep 으로 지연을 주입하고 wall-clock 으로 측정한다.
+    from tests.support.perf_inject import delayed_sync
+
+    monkeypatch.setattr(
+        canary,
+        "load_canary_limits",
+        delayed_sync(canary.load_canary_limits, 0.05),
+    )
+
+    def measure_delayed() -> object:
+        try:
+            return canary.load_canary_limits(path)
+        except canary.CanaryConfigError:
+            return _exception_result
+
+    sample = perf_budget.sample(measure_delayed, batch=1)
+    assert sample.wall_ms >= 50.0, (
+        f"검출력 실패: 지연 주입에도 wall-clock 50ms를 초과하지 못함 — "
+        f"wall={sample.wall_ms:.1f}ms. 단언이 허울임을 의미."
+    )
 
 
 # ---------------------------------------------------------------------------
