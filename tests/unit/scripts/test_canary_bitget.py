@@ -31,6 +31,7 @@ import pytest
 
 from src.data.models.trading import Order, OrderStatus
 from src.foundation.risk_gate.domain.models import SafetyControl, SafetyControlState, SafetyScope
+from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -70,13 +71,62 @@ stop_on_daily_loss: true
 # ---------------------------------------------------------------------------
 
 
-def test_load_canary_limits_normalizes_native_symbol_to_canonical(tmp_path: Path) -> None:
+@pytest.mark.perf
+def test_load_canary_limits_normalizes_native_symbol_to_canonical(
+    tmp_path: Path, perf_budget: PerfBudget
+) -> None:
     path = _write_config(tmp_path, _VALID_CONFIG)
-    limits = canary.load_canary_limits(path)
+
+    def measure() -> canary.CanaryLimits:
+        return canary.load_canary_limits(path)
+
+    limits = measure()
     assert limits.symbols == frozenset({"BTC/USDT"})
     assert limits.max_order_usdt == Decimal("10")
     assert limits.max_total_usdt == Decimal("50")
     assert limits.max_fills == 2
+
+    # 실제 성능 단언: 1회 호출이 50ms CPU 예산 안에 끝난다.
+    # load_canary_limits 는 YAML 파싱 + Pydantic 검증 + 심볼 정규화만 하므로
+    # 네트워크/디스크 I/O 대기 없이 순수 CPU 작업으로 완료된다.
+    perf_budget.assert_within(measure, budget_ms=50.0, label="load_canary_limits 1회 호출")
+
+
+@pytest.mark.perf
+def test_load_canary_limits_detection_budget_violation(
+    tmp_path: Path, perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """검출력 확인: load_canary_limits 를 10배 느리게 만든 budgets.assert_within
+    가 적색으로 떨어지는지 검증 — 단언이 허울이 아닌 실제 검출력을 갖는지 확인.
+
+    load_canary_limits 는 YAML 파일 읽기 + Pydantic 검증 + 심볼 변환을 하므로
+    I/O 포함 지연 예산이다. sleep 으로 지연을 주입하고 wall-clock 으로 측정한다.
+    """
+    path = _write_config(tmp_path, _VALID_CONFIG)
+
+    # 원본 함수 참조
+    _original_load = canary.load_canary_limits
+
+    def _delayed_load(path_arg: Path | None = None) -> canary.CanaryLimits:
+        import asyncio
+
+        # sleep 주입 — I/O 포함 지연 예산이므로 asyncio.sleep 사용
+        asyncio.run(asyncio.sleep(0.05))
+        return _original_load(path_arg)
+
+    monkeypatch.setattr(canary, "load_canary_limits", _delayed_load)
+
+    def measure() -> canary.CanaryLimits:
+        return canary.load_canary_limits(path)
+
+    # 지연 주입 후 wall_ms 가 50ms 예산을 초과해야 한다 — 그렇지 않으면
+    # 이 테스트가 허울 단언임을 의미(검출력 결함).
+    # load_canary_limits 는 I/O 포함 작업이므로 cpu_ms 가 0 수렴할 수 있다.
+    sample = perf_budget.sample(measure, batch=1)
+    assert sample.wall_ms >= 50.0, (
+        f"검출력 실패: 지연 주입에도 wall-clock 50ms를 초과하지 못함 — "
+        f"wall={sample.wall_ms:.1f}ms. 단언이 허울임을 의미."
+    )
 
 
 def test_load_canary_limits_rejects_unknown_key_fail_closed(tmp_path: Path) -> None:
