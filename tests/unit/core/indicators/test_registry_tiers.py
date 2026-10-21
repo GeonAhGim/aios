@@ -344,6 +344,57 @@ def test_merge_and_paginate_latency_budget_matches_list_api_p95(perf_budget: Per
     )
 
 
+# --- D2 실패 주입: CPU 지연 주입으로 성능 단언 적색 --------------------------------
+
+
+@pytest.mark.perf
+def test_merge_and_paginate_exceeds_budget_when_cpu_delay_injected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """성능 예산 단언이 진짜 검증인지 확인: `merge_script_entries`에 CPU busy-wait를
+     주입해 1회 호출당 CPU 시간이 예산(50ms)의 10배가 되면 단언이 적색(AssertionError)으로
+     떨어지는지를 검증한다. CPU 예산이므로 `time.sleep`은 효과 없음 — `time.process_time()`
+    을 소모하는 빈 루프로 주입한다.
+
+     같은 측정/단언을 재사용: 지연 주입 후 budget을 초과해야 한다."""
+    import time as _time
+
+    _BURN_MS = 100.0  # 예산(50ms)의 2배 이상 → p99가 확실히 예산 초과
+
+    _real_merge_script_entries = merge_script_entries
+
+    def _slow_merge(*args, **kwargs) -> dict:
+        target = _time.process_time() + _BURN_MS / 1000
+        while _time.process_time() < target:
+            pass
+        return _real_merge_script_entries(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "tests.unit.core.indicators.test_registry_tiers.merge_script_entries",
+        _slow_merge,
+    )
+
+    tenant_id = uuid.uuid4()
+    script_entries = [
+        _script_entry(f"SCRIPT_{i:04d}", tenant_id=tenant_id, script_hash=f"{i:064x}")
+        for i in range(500)
+    ]
+    repeats = 50
+
+    def _hot_path() -> None:
+        merged = merge_script_entries(DEFAULT_STATIC_CATALOG, script_entries, tenant_id=tenant_id)
+        entries = list_catalog(merged, q="SCRIPT")
+        paginate_catalog(entries, cursor=None, limit=50)
+
+    # 같은 측정/단언을 재사용: 지연 주입 후 budget을 초과해야 함
+    sample = PerfBudget().sample(_hot_path, batch=repeats)
+    budget_ms = 50.0
+    assert sample.cpu_ms >= budget_ms, (
+        f"Expected cpu_ms={sample.cpu_ms:.2f}ms >= {budget_ms}ms budget with "
+        f"{_BURN_MS}ms busy-wait injected — performance assertion may be a no-op"
+    )
+
+
 # --- D2 게이트 적색 재현 -------------------------------------------------------
 
 
