@@ -152,3 +152,42 @@ def test_perf_dependency_extraction_under_budget(
         batch=100,
         label="1000 dependency extractions",
     )
+
+
+@pytest.mark.perf
+def test_perf_assertion_catches_cpu_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(1000ms)을 초과하는 CPU 시간을 가장하면 `assert_within`가
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    budget_ms = 1000.0
+
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 2000.0  # 2000ms per call > 1000ms budget
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    def _extract() -> None:
+        extract_declared_dependencies(
+            '[project]\ndependencies = [\n    "pandas-ta-classic>=0.6.52",\n]\n'
+        )
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _extract,
+            budget_ms=budget_ms,
+            n=5,
+            warmup=1,
+            batch=100,
+            label="injected 2000ms/call vs 1000ms budget",
+        )
