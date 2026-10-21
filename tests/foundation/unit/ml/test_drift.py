@@ -17,6 +17,7 @@ from src.foundation.ml.domain.drift import (
     population_stability_index,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _RNG = np.random.default_rng(seed=42)
 
@@ -91,6 +92,69 @@ def test_evaluate_drift_flags_degraded_when_only_one_statistic_crosses() -> None
     assert result.psi < DEFAULT_THRESHOLDS.psi_degraded
     assert result.ks >= 0.1
     assert result.degraded is True
+
+
+# --- CPU 0-convergence (task-17119) ---
+
+
+@pytest.mark.perf
+def test_evaluate_drift_cpu_converges_to_zero_for_identical_input(
+    perf_budget: PerfBudget,
+) -> None:
+    """Identical distributions must consume near-zero CPU -- not just "fast"
+    but converging to 0 as batch size grows (quantisation noise cancels out).
+
+    Uses batch=32 to shrink Windows ``time.process_time()`` tick noise
+    (~15.6ms / 32 ~= 0.5ms) below the 1ms convergence floor.
+    """
+    baseline = _stable_sample()
+    current = _stable_sample()
+    sample = perf_budget.sample(
+        lambda: evaluate_drift("rsi_14", baseline, current),
+        batch=32,
+    )
+    # Windows quantisation floor is ~15.6ms for a single call; batch=32
+    # shrinks per-call noise to <0.5ms. We assert the per-call estimate
+    # is below 1ms -- far under the 50ms budget and consistent with a
+    # pure in-memory numpy hot path.
+    assert sample.cpu_ms < 1.0, (
+        f"CPU time {sample.cpu_ms:.3f}ms exceeds 0-convergence floor 1ms; "
+        f"wall={sample.wall_ms:.3f}ms -- expected near-0 for identical input"
+    )
+
+
+# --- budget delay injection (task-17119) ---
+
+
+@pytest.mark.perf
+def test_evaluate_drift_budget_injection_fails_closed(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inject 0.2s CPU delay into ``evaluate_drift`` via ``delayed_sync``
+    and verify the same budget assertion (50ms) now fails -- proving the
+    perf test measures real execution time, not a tautology.
+
+    The original function is wrapped so the delayed version returns the
+    identical ``DriftResult``; only the timing changes.
+    """
+    import src.foundation.ml.domain.drift as drift_mod
+
+    # Wrap the original with 200ms CPU delay (4x the 50ms budget).
+    original_evaluate = drift_mod.evaluate_drift
+    delayed_evaluate = delayed_sync(original_evaluate, 0.2)
+    monkeypatch.setattr(drift_mod, "evaluate_drift", delayed_evaluate)
+
+    baseline = _stable_sample()
+    current = _stable_sample()
+
+    # Same budget as the green test below; must fail with injected delay.
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: delayed_evaluate("rsi_14", baseline, current),
+            budget_ms=50.0,
+            label="perf_injection_drift",
+        )
 
 
 # --- numeric performance assertion ---
