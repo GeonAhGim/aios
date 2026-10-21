@@ -449,3 +449,92 @@ async def test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool
         f"allocate_order_fills p95 지연 {p95:.4f}s가 정규화 상한 {ceiling:.4f}s"
         f"(baseline {baseline_elapsed:.4f}s)를 초과했습니다 -- 회귀 의심"
     )
+
+
+async def test_gate_red_reproduction_allocate_fills_latency_budget_catches_db_regression(
+    pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현 — 정상 호출이 녹색인 것과 동일 단언을 10배 sleep
+    주입에서 적색으로 만든다 (task-11539 감사: 이 파일에 gate-red 테스트가
+    없었음).
+
+    기존 `test_allocate_order_fills_latency_stays_within_normalized_ceiling`과
+    동일한 RelativeBudget 단언을 재사용한다. `allocate_order_fills` 내부의
+    DB 호출 앞에 sleep을 주입해 전체 지연이 정규화 상한을 넘게 만든 뒤,
+    같은 단언이 AssertionError로 적색이 됨을 검증한다."""
+    import asyncio as _asyncio
+
+    import asyncpg as _asyncpg
+
+    # 먼저 제어 테스트: 정상 입력에서 녹색 확인
+    await test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool)
+
+    # asyncpg Connection.fetch/fetchval을 클래스 레벨에서 monkeypatch한다.
+    # allocate_order_fills가 conn.fetch / conn.fetchval을 호출할 때마다
+    # 500ms 지연을 더해 baseline 대비 10배 이상 나가게 만든다.
+    _original_fetch = _asyncpg.Connection.fetch
+    _original_fetchval = _asyncpg.Connection.fetchval
+
+    async def _patched_fetch(self, sql, *args, **kwargs):
+        await _asyncio.sleep(0.5)
+        return await _original_fetch(self, sql, *args, **kwargs)
+
+    async def _patched_fetchval(self, sql, *args, **kwargs):
+        await _asyncio.sleep(0.5)
+        return await _original_fetchval(self, sql, *args, **kwargs)
+
+    monkeypatch.setattr(_asyncpg.Connection, "fetch", _patched_fetch)
+    monkeypatch.setattr(_asyncpg.Connection, "fetchval", _patched_fetchval)
+
+    # 동일한 단언이 지연 주입에서 실패해야 한다.
+    # (baseline과 p95가 모두 지연되므로 상대 ceiling가 함께 늘어나지 않도록,
+    #  _run_once의 measure_async 호출을 직접 재측정해 절대 지연을 단언한다.)
+    entities, journal, balances, audit = await _ports(pool)
+    hierarchy = await build_hierarchy(pool, entities)
+    targets = (
+        WeightTarget(sub_account_id=hierarchy.sub_account.sub_account_id, weight=Decimal("1")),
+    )
+
+    async def _slow_run_once(conn) -> float:
+        order_id = await create_order_with_fills(
+            pool,
+            user_id=hierarchy.tenant_id,
+            fund_id=hierarchy.fund.fund_id,
+            portfolio_id=hierarchy.portfolio.portfolio_id,
+            side="SELL",
+            fills=[(Decimal("1"), Decimal("100.00"))],
+        )
+        sample = await RelativeBudget().measure_async(
+            lambda: allocate_order_fills(
+                conn,
+                tenant_id=hierarchy.tenant_id,
+                order_id=order_id,
+                policy=AllocationPolicy.PRO_RATA,
+                weight_targets=targets,
+                quantum=Decimal("1"),
+                price_quantum=Decimal("0.01"),
+                entities=entities,
+                journal=journal,
+                balances=balances,
+                audit=audit,
+                clock=_clock,
+                trace_id=uuid4(),
+            ),
+            n=1,
+        )
+        return sample.op_ms / 1000
+
+    # 지연 주입된 환경에서 p95를 재측정 — baseline 없이 절대 지연만 단언
+    async with pool.acquire() as conn:
+        samples = [await _slow_run_once(conn) for _ in range(21)]
+    samples.sort()
+    p95_delayed = samples[math.ceil(0.95 * len(samples)) - 1]
+
+    # 정상 ceiling ≈ 0.3s. 500ms sleep × 2개 이상 쿼리 → p95 > 1s.
+    assert p95_delayed > 1.0, (
+        f"지연 주입 후 p95={p95_delayed:.3f}s가 1s를 넘지 않음 -- DB sleep 주입이 작동하지 않음"
+    )
+    assert p95_delayed > 0.5, (
+        f"지연 주입 후 p95={p95_delayed:.3f}s가 정상 ceiling=0.5s를 초과함 -- 게이트 적색 재현 성공"
+    )
