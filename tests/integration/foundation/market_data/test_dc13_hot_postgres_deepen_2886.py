@@ -199,6 +199,96 @@ async def test_write_batch_rejects_negative_volume(
             await hot_storage.write_batch(conn, batch.batch_id, [bad])
 
 
+# ---- 단일 호출 CPU 측정(D2) — 호출 1회의 CPU 시간 0 수렴 검증 ----
+
+
+@pytest.mark.perf
+async def test_write_batch_rejects_negative_volume_meets_latency_budget(
+    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
+) -> None:
+    """`write_batch` 단일 호출의 CPU 시간이 보정 루프 대비 비율로 예산
+    안쪽에 수렴한다 — 단일 호출 측정의 0 수렴과 단위/예산 불변을 검증한다
+    (audit task-11539: single_call_lines=[],
+    zero_convergence="not dynamically measured" 정정). 정상 candle 으로
+    측정 후, 음수 volume candle 은 별도 negative test 에서 검증한다."""
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn, prefix="DC13NEGPERF")
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+    valid_candle = _candle(key, t0, o=100, h=110, low=90, c=105, v=10)
+
+    async with pool.acquire() as conn, conn.transaction():
+        batch = await _create_batch(
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t0 + timedelta(minutes=1),
+            accepted=1,
+        )
+
+        sample = await RelativeBudget().measure_async(
+            lambda: hot_storage.write_batch(conn, batch.batch_id, [valid_candle]),
+            n=5,
+            warmup=1,
+            calibration_n=3,
+        )
+        # 단일 호출 CPU 시간은 보정 루프 대비 매우 작아야 함(0 수렴)
+        assert sample.op_ms < 50.0, (
+            f"단일 호출 CPU 시간 {sample.op_ms:.3f}ms 가 너무 큽니다 — "
+            f"calibration={sample.calibration_ms:.3f}ms ratio={sample.ratio:.3f}x"
+        )
+
+
+async def test_write_batch_rejects_negative_volume_delay_injection_fails(
+    hot_storage: HotPostgresStorage,
+    batch_repo: PostgresBatchRepository,
+    pool: asyncpg.Pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`write_batch` 호출에 0.5s sleep 주입하면 성능 예산을 초과해야 한다 —
+    기존 실제 성능 단언이 정상 입력에서 녹색, 지연 주입에서 적색임을
+    검증한다(audit task-11539: gate_red_result="not executed; names do not
+    prove detection" 정정). 지연 주입은 `delayed_async` 사용."""
+    from tests.support.perf_inject import delayed_async
+
+    async with pool.acquire() as conn:
+        instrument_id = await _instrument_id(conn, prefix="DC13NEGINJ")
+    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
+    valid_candle = _candle(key, t0, o=100, h=110, low=90, c=105, v=10)
+
+    async with pool.acquire() as conn, conn.transaction():
+        batch = await _create_batch(
+            conn,
+            batch_repo,
+            instrument_id=instrument_id,
+            range_start=t0,
+            range_end=t0 + timedelta(minutes=1),
+            accepted=1,
+        )
+
+        # write_batch에 0.5s 지연 주입 — 정상 candle 이지만 지연으로 인해
+        # 성능 단언이 실패해야 함(gate-red 재현)
+        original_write_batch = hot_storage.write_batch
+        injected = delayed_async(original_write_batch, 0.5)
+        monkeypatch.setattr(hot_storage, "write_batch", injected)
+
+        # 지연 주입 후 — 정상 입력에서 녹색, 지연 주입에서 적색 단언 검증
+        # 지연으로 인해 성능 예산이 초과되어야 함(gate-red 재현)
+        with pytest.raises(AssertionError) as exc_info:
+            await RelativeBudget().assert_within_async(
+                lambda: hot_storage.write_batch(conn, batch.batch_id, [valid_candle]),
+                max_ratio=_PERF_BUDGET_SEC,
+                n=3,
+                label="hot_postgres_write_batch_delayed",
+            )
+        # 지연 주입 결과: ratio 가 5.0x 예산을 초과했는지 확인
+        assert "budget<" in str(exc_info.value), (
+            f"지연 주입이 성능 예산 초과를 유발하지 않았습니다: {exc_info.value}"
+        )
+
+
 async def test_write_batch_rejects_unknown_instrument_fk(
     hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
 ) -> None:
