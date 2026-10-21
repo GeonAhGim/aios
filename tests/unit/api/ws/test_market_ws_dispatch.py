@@ -31,6 +31,7 @@ from src.foundation.market_data.domain.entitlement.policy import (
 from src.services.auth import session_repository
 from src.services.auth.tokens import AccessClaims, AuthLevel
 from src.services.auth_service import User
+from tests.support.perf_budget import PerfBudget
 
 _TENANT = UUID("22222222-2222-2222-2222-222222222222")
 _SUBJECT = UUID("44444444-4444-4444-4444-444444444444")
@@ -108,6 +109,66 @@ async def test_load_500_subscribers_p95_latency_within_500ms(perf_budget) -> Non
         p95_index = max(0, int(round(0.95 * len(samples))) - 1)
         p95_ms = samples[p95_index].wall_ms
         assert p95_ms < 500.0, f"p95={p95_ms:.1f}ms > 500ms 예산 초과"
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.perf
+async def test_load_500_subscribers_p95_goes_red_with_10x_wall_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.perf_counter`를 monkeypatch해 publish 1회당
+    500ms * 10 = 5000ms의 wall 시간을 가장하면 p95 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+
+    fanout = RealtimeFanout(metrics=NullMetrics())
+    feed = _feed()
+    subject = _subject(feed)
+
+    sockets: list[_FakeWebSocket] = []
+    tasks: list[asyncio.Task[None]] = []
+    for _ in range(500):
+        subscription = fanout.subscribe(subject, feed)
+        ws = _FakeWebSocket()
+        sockets.append(ws)
+        tasks.append(
+            asyncio.create_task(
+                market_ws._pump(ws, subscription.subscription_id, subscription.queue)
+            )
+        )
+
+    try:
+        # perf_counter를 monkeypatch: 호출할 때마다 누적 지연을 더한다.
+        # 5000ms씩 더하면 p95가 500ms 예산을 10배 초과한다.
+        _cumulative_delay = 0.0
+
+        def _fake_perf_counter() -> float:
+            nonlocal _cumulative_delay
+            _cumulative_delay += 5000.0  # 5000ms = 10x budget per call
+            return _cumulative_delay / 1000.0  # perf_counter returns seconds
+
+        monkeypatch.setattr("time.perf_counter", _fake_perf_counter)
+
+        async def _publish_once() -> None:
+            await fanout.publish(feed, {"px": "100.5"}, as_of=_NOW)
+
+        samples = sorted(
+            await perf_budget.samples_async(_publish_once, n=10),
+            key=lambda s: s.wall_ms,
+        )
+        p95_index = max(0, int(round(0.95 * len(samples))) - 1)
+        p95_ms = samples[p95_index].wall_ms
+        # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+        with pytest.raises(AssertionError):
+            assert p95_ms < 500.0, f"p95={p95_ms:.1f}ms > 500ms 예산 초과 (게이트 적색 재현)"
     finally:
         for task in tasks:
             task.cancel()
