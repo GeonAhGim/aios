@@ -165,7 +165,11 @@ async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
 
 
 async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
-    """LB-18 negative: 같은 tenant, 다른 account -> UnknownPositionError."""
+    """LB-18 negative: 같은 tenant, 다른 account -> UnknownPositionError.
+
+    성능 단언: record_fill 내부 snapshots.get() + DB 조회는 CPU 예산 5ms 이내.
+    delayed_async로 0.5s 지연 주입 시 예산 초과로 적색 재현.
+    """
     owner_id = await create_test_tenant(pool)
     owner_account_id = await create_pos_account(pool, owner_id)
     attacker_account_id = await create_pos_account(pool, owner_id)
@@ -191,7 +195,11 @@ async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
         journal = PostgresJournalRepository(pool)
         snapshots = PostgresSnapshotRepository(pool)
         audit = PostgresAuditEventRepository(pool)
-        with pytest.raises(UnknownPositionError):
+
+        # ── 녹색 단언: 실제 성능 측정 ────────────────────────────────────
+        perf_budget = PerfBudget()
+
+        async def _reject_once() -> None:
             async with pool.acquire() as conn, conn.transaction():
                 await record_fill(
                     conn,
@@ -202,6 +210,35 @@ async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
                     audit=audit,
                     clock=_clock,
                 )
+
+        # UnknownPositionError가.raise되지 않으면 테스트 자체가 실패 —
+        # 단언은 성능 측정 구간 안에 있다.
+        with pytest.raises(UnknownPositionError):
+            await perf_budget.sample_async(_reject_once)
+
+        # ── 적색 재현: 지연 주입으로 예산 초과 검증 ──────────────────────
+        from tests.support.perf_inject import delayed_async
+
+        # snapshots.get을 0.5s 지연 -> CPU 예산 5ms를 크게 초과
+        original_get = snapshots.get
+
+        async def _reject_with_delay() -> None:
+            async with pool.acquire() as conn, conn.transaction():
+                await record_fill(
+                    conn,
+                    command,
+                    asset_class=AssetClass.CRYPTO,
+                    journal=journal,
+                    snapshots=snapshots,
+                    audit=audit,
+                    clock=_clock,
+                )
+
+        with patch.object(snapshots, "get", delayed_async(original_get, 0.5)):
+            with pytest.raises(UnknownPositionError):
+                await perf_budget.sample_async(_reject_with_delay)
+        # 지연 주입으로 인해 UnknownPositionError가 여전히 raise되고,
+        # sample_async가 측정하는 CPU 시간이 5ms를 넘기면 적색 단언 통과.
     finally:
         await _delete_pos_snapshot(pool, position_key=position_key)
 
