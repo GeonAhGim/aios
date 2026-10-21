@@ -5,6 +5,7 @@ RATCHET-split(task-4222) — 원 `test_db_schema.py`(1176줄)에서 분리.
 Spec: 04_db_schema_v1.7.md.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -365,6 +366,84 @@ async def test_md_candle_bulk_insert_p95_under_budget(
     p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
     print(f"[LA-11 md_candle insert] n={n} p95={p95_ms:.2f}ms (budget<60ms)")
     assert p95_ms < 60.0, f"md_candle 단건 INSERT p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
+
+
+@pytest.mark.perf
+async def test_md_candle_bulk_insert_p95_rejects_10x_delay_injection(
+    raw_conn,
+    perf_budget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LA-11 DEEPEN(task-16087, task-11539 PERF-detection) — 게이트 적색 재현.
+
+    동일한 측정/단언이 10배 지연 주입 하에서 적색으로 전환된다 — 단언이
+    0 수렴 허울이 아님을 증명한다. DB 호출에 sleep을 주입해 실제 I/O
+    지연을 시뮬레이션하고, 같은 p95 단언이 budget(60ms)을 초과함을
+    확인한다.
+    """
+    instrument_id, batch_id = await _md_candles_setup(raw_conn)
+    n = 200
+    base_time = datetime.now(timezone.utc)
+    budget_p95_ms = 60.0
+
+    # 원본 _insert_md_candle를 보존
+    original_insert = _insert_md_candle
+
+    async def delayed_insert(
+        conn: asyncpg.Connection,
+        *,
+        instrument_id,
+        batch_id,
+        open_: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: float,
+        open_time=None,
+    ) -> None:
+        # 200회 × 0.5s = 100s 총 지연 → p95가 60ms budget을 크게 초과
+        await asyncio.sleep(0.5)
+        return await original_insert(
+            conn,
+            instrument_id=instrument_id,
+            batch_id=batch_id,
+            open_=open_,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            open_time=open_time,
+        )
+
+    _call_idx = 0
+
+    async def _make_call() -> None:
+        nonlocal _call_idx
+        try:
+            return await delayed_insert(
+                raw_conn,
+                instrument_id=instrument_id,
+                batch_id=batch_id,
+                open_=100,
+                high=110,
+                low=90,
+                close=105,
+                volume=10,
+                open_time=base_time + timedelta(minutes=_call_idx),
+            )
+        finally:
+            _call_idx += 1
+
+    samples = await perf_budget.samples_async(_make_call, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    print(f"[LA-11 md_candle insert+delay] n={n} p95={p95_ms:.2f}ms (budget<{budget_p95_ms}ms)")
+    # 같은 단언이 지연 주입 하에서 budget을 초과해야 함
+    assert p95_ms >= budget_p95_ms, (
+        f"지연 주입 후 p95={p95_ms:.2f}ms budget {budget_p95_ms}ms 이상이어야 검출력 검증. "
+        f"단언/예산이 허울이면 통과하므로 실패 처리. "
+        f"{perf_budget.describe(samples[0], budget_ms=budget_p95_ms)}"
+    )
 
 
 async def test_md_candle_lifecycle_replayed_quarantine_then_accept_does_not_leak(raw_conn):
