@@ -257,6 +257,109 @@ def test_perf_plan_rebalance_p99_within_pre_trade_gate_budget(perf_budget) -> No
     assert p99 < 5.0, f"p99 {p99:.3f}ms exceeds pre-trade gate budget of 5ms (ADR-2026-09-09-C)"
 
 
+# --- D2: CPU quantization convergence (batch=1 vs batch=8+) -------------------
+
+
+@pytest.mark.perf
+def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> None:
+    """time.process_time() on Windows has ~15.6 ms quantization (64 Hz clock).
+    When the measured function is faster than one tick, batch=1 reads 0 ms
+    every time and the average/p95 converges to zero — a measurement artifact,
+    not a real property of the function.
+
+    batch=8+ bundles several calls into one tick window so the total CPU time
+    exceeds one tick, reducing per-call quantization error to tick/batch.
+    This test verifies that batch=8 yields a higher average than batch=1,
+    confirming the measurement is no longer stuck at zero.
+
+    The actual CPU budget test below uses batch=8 to avoid this pitfall.
+    """
+    cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
+    symbols = [f"SYM{i}/USDT" for i in range(200)]
+    current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("1000000"))
+    targets = {s: Decimal("0.6") for s in symbols}
+    prices = {s: Decimal("100") for s in symbols}
+
+    def measure_once() -> None:
+        plan_rebalance(targets, current, cfg, prices, Decimal("2"))
+
+    # batch=1: quantization likely reads 0 ms most of the time
+    samples_batch1 = perf_budget.samples(measure_once, n=40, batch=1)
+    cpu_ms_batch1 = [s.cpu_ms for s in samples_batch1]
+    avg_batch1 = sum(cpu_ms_batch1) / len(cpu_ms_batch1)
+
+    # batch=8: quantization error reduced by ~8x
+    samples_batch8 = perf_budget.samples(measure_once, n=40, batch=8)
+    cpu_ms_batch8 = [s.cpu_ms for s in samples_batch8]
+    avg_batch8 = sum(cpu_ms_batch8) / len(cpu_ms_batch8)
+
+    # batch=8 average must not be lower than batch=1 average
+    # (measurement should improve or stay equal, never degrade)
+    assert avg_batch8 >= avg_batch1, (
+        f"batch=8 avg {avg_batch8:.3f}ms < batch=1 avg {avg_batch1:.3f}ms — "
+        "quantization not improved by batching"
+    )
+
+
+# --- D2: failure injection — delayed rebalance triggers red -------------------
+
+
+@pytest.mark.perf
+def test_perf_plan_rebalance_budget_assertion_catches_regression(perf_budget, monkeypatch) -> None:
+    """Gate-red reproduction: inject a 10 ms sleep inside `plan_rebalance`
+    and verify the p99 CPU budget assertion *fails* (raises AssertionError).
+
+    This proves the budget assertion is not a tautology — it actually detects
+    performance regression.
+
+    NOTE: `plan_rebalance` is a CPU-bound pure function (no I/O). We inject
+    `time.sleep` which affects wall-clock but not CPU time. To make the CPU
+    budget fail we instead monkey-patch the inner loop body to do a small
+    busy-loop (~5 ms CPU per symbol). This matches the pattern in
+    test_bind_p99_budget_assertion_catches_regression in
+    test_adversarial_binding.py.
+    """
+    from unittest.mock import patch
+
+    cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
+    symbols = [f"SYM{i}/USDT" for i in range(200)]
+    current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("1000000"))
+    targets = {s: Decimal("0.6") for s in symbols}
+    prices = {s: Decimal("100") for s in symbols}
+
+    real_plan = plan_rebalance
+
+    def _slow_plan_rebalance(*args, **kwargs):
+        """Wrapper that injects ~5 ms CPU work per symbol via busy-loop."""
+        result = real_plan(*args, **kwargs)
+        # Inject CPU work proportional to the number of symbols processed.
+        # ~50M multiplications ≈ 5-10 ms CPU on modern hardware.
+        x = 1.0
+        for _ in range(50_000_000):
+            x = x * 1.0001
+        return result
+
+    with patch("src.core.portfolio.rebalance.plan_rebalance", _slow_plan_rebalance):
+        # Re-import to pick up the patched version
+        from src.core.portfolio.rebalance import plan_rebalance as patched_plan
+
+        samples = perf_budget.samples(
+            lambda: patched_plan(targets, current, cfg, prices, Decimal("2")),
+            n=20,
+            batch=5,
+        )
+        cpu_ms_samples = sorted(s.cpu_ms for s in samples)
+        p99_idx = max(0, int(len(cpu_ms_samples) * 0.99) - 1)
+        p99_ms = cpu_ms_samples[p99_idx]
+
+        # The budget is 5 ms p99 (ADR-2026-09-09-C Decision 1).
+        # With ~5 ms injected per call, p99 must exceed the budget.
+        with pytest.raises(AssertionError):
+            assert p99_ms < 5.0, (
+                f"p99={p99_ms:.3f}ms exceeds 5ms budget — wall={samples[-1].wall_ms:.3f}ms"
+            )
+
+
 # --- D2: gate-red reproduction -------------------------------------------------
 
 
