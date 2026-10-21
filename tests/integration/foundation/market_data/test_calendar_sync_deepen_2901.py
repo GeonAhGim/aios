@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import date
 from pathlib import Path
@@ -40,7 +41,7 @@ from src.foundation.market_data.application.sync_calendar import (
     sync_calendar,
 )
 from src.foundation.market_data.contracts.v1 import CalendarDay, Venue
-from tests.conftest import PerfBudget
+from tests.support.perf_budget import PerfBudget
 
 _CONFIG_DIR = Path(__file__).resolve().parents[4] / "config" / "market_calendars"
 _KRX_2026_YAML = _CONFIG_DIR / "KRX_2026.yaml"
@@ -76,20 +77,31 @@ async def _row_count(pool: asyncpg.Pool, venue: Venue, year: int) -> int:
 
 
 async def test_sync_calendar_rolls_back_upsert_when_audit_append_fails(
-    pool: asyncpg.Pool, repo: PostgresCalendarRepository
+    pool: asyncpg.Pool,
+    repo: PostgresCalendarRepository,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """감사 이벤트 기록이 실패하면(네트워크 단절·DB 장애를 흉내) 같은
     트랜잭션 안에서 이미 실행된 `upsert_days`까지 통째로 롤백돼야 한다 —
     캘린더 행만 남고 감사 이벤트가 없는 상태(증적 없는 데이터)가 절대
-    허용되지 않는다."""
+    허용되지 않는다.
+
+    성능 단언: batch=8 측정으로 Windows 15.6ms 양자화 오차를 줄인 뒤
+    wall_ms 예산(2s)을 검증하고, 예산 10배 지연(delayed_async 20s)을
+    주입하면 적색으로 떨어지는 것을 검출력 확인으로 검증한다.
+    """
     year = 2190  # 실제 데이터와 겹치지 않는 먼 미래 테스트 전용 연도
     days = [
         d.model_copy(update={"trade_date": date(year, d.trade_date.month, d.trade_date.day)})
         for d in load_calendar(_KRX_2026_YAML)
     ]
 
-    with pytest.raises(RuntimeError, match="injected audit failure"):
-        await sync_calendar(
+    # ---- 성능 단언 (정상 입력 → 녹색) ----
+    budget_ms = 2_000.0  # 2s 절대 예산 (연 1회 배치, 수십 venue 확장 대비)
+
+    async def _sync_once() -> int:
+        return await sync_calendar(
             pool,
             Venue.KIS_KRX,
             year,
@@ -97,13 +109,73 @@ async def test_sync_calendar_rolls_back_upsert_when_audit_append_fails(
             actor_subject_id=uuid.uuid4(),
             trace_id=uuid.uuid4(),
             cal=repo,
+            audit=PostgresAuditEventRepository(pool),
+        )
+
+    sample = await perf_budget.sample_async(_sync_once, batch=8)
+    assert sample.wall_ms < budget_ms, (
+        f"sync_calendar 1회 호출당 wall_ms={sample.wall_ms:.1f}ms가 "
+        f"예산({budget_ms}ms)을 넘었습니다"
+    )
+
+    # ---- 게이트 적색 재현 (예산 10배 지연 → 적색 검출) ----
+    # sync_calendar 내부의 cal.upsert_days를 20s 지연 → 전체 트랜잭션이
+    # 예산 2s을 크게 넘어서 성능 단언이 실패하는 것을 검출력 확인으로 검증.
+    _orig_upsert = repo.upsert_days
+
+    async def _delayed_upsert(
+        conn: asyncpg.Connection, venue: Venue, in_year: list[CalendarDay]
+    ) -> None:
+        await asyncio.sleep(20.0)
+        return await _orig_upsert(conn, venue, in_year)
+
+    monkeypatch.setattr(repo, "upsert_days", _delayed_upsert)
+
+    with pytest.raises(AssertionError):
+
+        async def _sync_delayed() -> int:
+            return await sync_calendar(
+                pool,
+                Venue.KIS_KRX,
+                year,
+                days,
+                actor_subject_id=uuid.uuid4(),
+                trace_id=uuid.uuid4(),
+                cal=repo,
+                audit=PostgresAuditEventRepository(pool),
+            )
+
+        sample_delayed = await perf_budget.sample_async(_sync_delayed, batch=1)
+        assert sample_delayed.wall_ms < budget_ms, (
+            f"지연 주입 후 wall_ms={sample_delayed.wall_ms:.1f}ms가 "
+            f"예산({budget_ms}ms)을 넘었습니다 — 게이트 적색 재현 실패"
+        )
+
+    # ---- 실패 주입 (감사 이벤트 실패 → 롤백) ----
+    # 지연 주입 후 원상 복구: 위 _delayed_upsert가 실패하면 롤백되므로
+    # 새 연도에서 _BoomAuditAppender로 롤백 검증을 재사용한다.
+    fail_year = 2191
+    fail_days = [
+        d.model_copy(update={"trade_date": date(fail_year, d.trade_date.month, d.trade_date.day)})
+        for d in load_calendar(_KRX_2026_YAML)
+    ]
+
+    with pytest.raises(RuntimeError, match="injected audit failure"):
+        await sync_calendar(
+            pool,
+            Venue.KIS_KRX,
+            fail_year,
+            fail_days,
+            actor_subject_id=uuid.uuid4(),
+            trace_id=uuid.uuid4(),
+            cal=repo,
             audit=_BoomAuditAppender(),
         )
 
-    assert await _row_count(pool, Venue.KIS_KRX, year) == 0
+    assert await _row_count(pool, Venue.KIS_KRX, fail_year) == 0
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(CalendarNotLoadedError):
-            await repo.load(conn, Venue.KIS_KRX, year)
+            await repo.load(conn, Venue.KIS_KRX, fail_year)
 
 
 async def test_upsert_days_connection_failure_leaves_no_partial_write(
