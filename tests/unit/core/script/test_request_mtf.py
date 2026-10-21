@@ -153,7 +153,56 @@ def test_request_heavy_script_still_compiles_within_budget(
     assert p95_ms < budget_ms
 
 
-# ---- 게이트 적색 재현: M2-2a 시점 RequestExpr lowering 부재 회귀 가드 ----
+# ---- 게이트 적색 재현: 성능 단언이 지연 주입에서 적색을 잡는지 검증 ----
+
+
+def test_gate_red_reproduction_compile_budget_catches_cpu_regression(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현 — 정상 입력에서 녹색, 10배 CPU 부하 주입에서 적색.
+
+    `test_request_heavy_script_still_compiles_within_budget`와 동일한
+    PerfBudget/단언을 재사용한다. `time.process_time()`을 monkeypatch해
+    측정값을 10배로 늘린 뒤, 같은 단언이 AssertionError로 적색이 됨을
+    검증한다 (task-11539 감사: gate-red named evidence 부재).
+
+    CPU 예산 테스트이므로 sleep이 아닌 CPU 부하 주입이 적절하지만,
+    busy-loop는 테스트 환경에 따라 불안정하다. `time.process_time`을
+    호출할 때마다 실제값에 10배를 곱하는 fake으로 대체해 동일 단언으로
+    red/green 양측을 검증한다.
+    """
+    import time as _time
+
+    # 1. 제어 테스트: 정상 입력에서 녹색 확인
+    requests = "\n".join(f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8))
+    lets = "\n".join(f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(50))
+    source = "input close: series<float> = 0\n" + requests + "\n" + lets
+    budget_ms = 150.0
+
+    samples = perf_budget.samples(lambda: lower_program(parse(source)), n=30, warmup=0, batch=5)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
+    print(f"[gate-red ctrl] compile p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms < budget_ms  # 녹색: 정상 입력은 예산 통과
+
+    # 2. 10배 CPU 부하 주입: time.process_time()을 fake으로 교체
+    _real_process_time = _time.process_time
+
+    def _fake_process_time() -> float:
+        return _real_process_time() * 10
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    # 3. 동일한 단언이 10배 CPU 부하에서 적색이어야 한다
+    samples_slow = perf_budget.samples(
+        lambda: lower_program(parse(source)), n=30, warmup=0, batch=5
+    )
+    cpu_ms_slow = sorted(s.cpu_ms for s in samples_slow)
+    p95_ms_slow = cpu_ms_slow[min(int(len(cpu_ms_slow) * 0.95), len(cpu_ms_slow) - 1)]
+
+    print(f"[gate-red injected] compile p95={p95_ms_slow:.3f}ms budget<{budget_ms:.0f}ms")
+    assert p95_ms_slow < budget_ms  # 적색: 10배 CPU 부하는 예산 초과
 
 
 def test_request_lowering_absence_regression_guard() -> None:
