@@ -308,3 +308,62 @@ async def test_run_train_job_orchestration_overhead_within_budget(
         f"[AI-20 run_train_job] p95={p95_ms:.2f}ms budget<{_ORCHESTRATION_STEP_P95_BUDGET_MS:.1f}ms"
     )
     assert p95_ms < _ORCHESTRATION_STEP_P95_BUDGET_MS
+
+
+# ---- 성능 게이트 적색 재현 (지연 주입) --------------------------------------
+
+
+@pytest.mark.perf
+async def test_run_train_job_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): `run_train_job`의 성능 단언이
+    실제로 지연을 감지하는지 역으로 증명한다. repository.checkpoint에
+    50ms 지연을 주입하면 여러 checkpoint 호출이 합쳐져
+    budget(50ms p95)을 초과하므로 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+
+    지연 주입은 perf_inject.delayed_async — type: ignore budgets를 소모하지
+    않는다(task-11539 감사 후속).
+    """
+    from tests.support.perf_inject import delayed_async
+
+    repo = _FakeRepository()
+    trainer = _FakeTrainer()
+
+    # checkpoint에 50ms 지연 주입 (예산 50ms의 10배)
+    monkeypatch.setattr(
+        repo,
+        "checkpoint",
+        delayed_async(repo.checkpoint, seconds=0.05),
+    )
+
+    _delay_idx = [0]
+
+    async def _measure_delayed() -> None:
+        idx = _delay_idx[0]
+        _delay_idx[0] += 1
+        await run_train_job(
+            job_id=f"perf-delay-{idx}",
+            model_id="m1",
+            trainer=trainer,
+            repository=repo,
+            samples=_samples(),
+            target_rounds=5,
+            params={},
+            checkpoint_every=1,
+        )
+
+    samples = await perf_budget.samples_async(_measure_delayed, n=20)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
+    print(
+        f"[AI-20 run_train_job gate-red injected] "
+        f"p95={p95_ms:.2f}ms budget<{_ORCHESTRATION_STEP_P95_BUDGET_MS:.1f}ms "
+        f"(injected delay=50ms/call)"
+    )
+    with pytest.raises(AssertionError):
+        assert p95_ms < _ORCHESTRATION_STEP_P95_BUDGET_MS
