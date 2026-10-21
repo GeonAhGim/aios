@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -24,6 +25,7 @@ from src.services.execution_loop.market_state import (
     parse_indicator_key,
     required_timeframes,
 )
+from tests.support.perf_budget import PerfBudget
 
 _BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 _MARKET_STATE_PATH = (
@@ -218,6 +220,80 @@ def test_build_market_state_throughput_budget(perf_budget: object) -> None:
         budget_ms=2000.0,
         batch=300,
     )
+
+
+# -- 0 수렴 (CPU 측정 단일 호출이 0에 수렴함을 동적으로 검증) -----------------
+
+
+@pytest.mark.perf
+def test_build_market_state_cpu_time_converges_to_zero_for_small_input(
+    perf_budget: PerfBudget,
+) -> None:
+    """0 수렴 검증: 단일 build_market_state 호출(2 타임프레임, 2 키, 50 바)의
+    CPU 시간이 1ms 미만이어야 한다 — Windows의 time.process_time() 약
+    15.6ms 양자화 오차 내에서 사실상 0ms에 수렴한다."""
+    fsm = _fsm("SMA_timeperiod3 >= 1 AND SMA_timeperiod3@1h >= 1")
+    candles_1m = _candles(50, timeframe="1m", step=timedelta(minutes=1), start=_BASE)
+    candles_1h = _candles(50, timeframe="1h", step=timedelta(hours=1), start=_BASE)
+    as_of = max(candles_1m[-1].close_time, candles_1h[-1].close_time)
+    service = IndicatorService()
+
+    sample = perf_budget.sample(
+        lambda: build_market_state(
+            fsm, {"1m": candles_1m, "1h": candles_1h}, as_of=as_of, indicator_service=service
+        ),
+        batch=1,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "작은 입력은 사실상 0ms에 수렴해야 함 (budget<1ms)"
+    )
+
+
+# --- gate-red reproduction (D2) — 10x 지연 monkeypatch ----------------------
+
+
+@pytest.mark.perf
+def test_build_market_state_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 예산 단언이 실제로
+    지연을 포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해
+    1회 호출당 예산(2000ms)을 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    budget_ms = 2000.0
+
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 10_000.0  # 10 000ms per call >> 2000ms budget
+        return _fake_time[0]
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    fsm = _fsm("SMA_timeperiod3 >= 1 AND SMA_timeperiod3@1h >= 1")
+    candles_1m = _candles(50, timeframe="1m", step=timedelta(minutes=1), start=_BASE)
+    candles_1h = _candles(50, timeframe="1h", step=timedelta(hours=1), start=_BASE)
+    as_of = max(candles_1m[-1].close_time, candles_1h[-1].close_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: build_market_state(
+                fsm,
+                {"1m": candles_1m, "1h": candles_1h},
+                as_of=as_of,
+                indicator_service=IndicatorService(),
+            ),
+            budget_ms=budget_ms,
+            batch=300,
+            label="build_market_state delay-injected",
+        )
 
 
 # -- D2 gate-red reproduction --------------------------------------------------
