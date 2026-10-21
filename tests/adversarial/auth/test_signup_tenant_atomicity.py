@@ -27,6 +27,7 @@ DEEPEN(task-4152) 메모 — D2 하한(ADR-2026-09-09-C Decision 1) 대조:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from uuid import UUID
 
@@ -39,6 +40,7 @@ from src.foundation.trust.adapters.postgres_membership_repository import (
 from src.foundation.trust.domain.models import TenantKind
 from src.services import auth_service as auth_service_module
 from src.services.auth_service import AuthError, AuthService
+from tests.support.perf_budget import PerfBudget
 
 JWT_SECRET = "test-secret-key-not-for-production"
 STRONG_PASSWORD = "Str0ng!Passw0rd"
@@ -167,3 +169,42 @@ async def test_signup_p95_latency_within_budget(auth, pool, perf_budget):
     )
     p95 = samples[-1].wall_ms
     assert p95 < 1500.0, f"signup p95 latency {p95:.3f}ms exceeded 1.5s budget"
+
+
+@pytest.mark.perf
+async def test_signup_p95_latency_goes_red_with_10x_delay_injection(
+    auth,
+    pool,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction(D2): 같은 성능 단언이 sleep 주입으로 적색이 돼야 한다.
+
+    `asyncio.sleep(3.0)`을 매 signup 호출 전 주입해 wall-clock을 3초 이상
+    늘리면, 기존 녹색 테스트의 `wall_ms < 1500.0` 예산(5회 배치 기준)에서도
+    각 호출당 지연이 누적되어 단언이 AssertionError로 떨어진다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다(task-11539 감사: 검출력 확인).
+    """
+
+    original_signup = auth.signup
+
+    async def _signup_with_delay(email: str, password: str) -> None:
+        await asyncio.sleep(3.0)  # 3s delay per call → p95 ≈ 3s > 1500ms budget
+        return await original_signup(email, password)
+
+    monkeypatch.setattr(auth, "signup", _signup_with_delay)
+
+    async def _signup_once() -> None:
+        await auth.signup(_unique_email(), STRONG_PASSWORD)
+
+    samples = sorted(
+        [await perf_budget.sample_async(_signup_once) for _ in range(5)],
+        key=lambda s: s.wall_ms,
+    )
+    p95 = samples[-1].wall_ms
+    assert p95 >= 1500.0, (
+        f"10x delay injection: p95 wall_ms={p95:.3f}ms did NOT exceed 1500ms budget — "
+        "budget assertion failed to detect injected delay (hollow assertion)"
+    )
