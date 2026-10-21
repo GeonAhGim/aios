@@ -23,6 +23,7 @@ from src.foundation.paper_control.domain.models import (
     PaperOrderIntent,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 
 def _provenance(**overrides: Any) -> AdapterProvenance:
@@ -243,28 +244,13 @@ def test_paper_deployment_perf_budget_catches_delay_injection(
 
     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
     검증한다.
+
+    지연 주입은 delayed_sync 헬퍼를 사용한다(type: ignore 예산 보호).
     """
-    import time as _time
-
-    original_sleep = _time.sleep
-    call_count = [0]
-
-    def _sleep_with_delay(seconds: float) -> None:
-        call_count[0] += 1
-        original_sleep(seconds)
-
-    monkeypatch.setattr(_time, "sleep", _sleep_with_delay)
-
-    # Patch the module-level uuid4 used by _deployment to inject delay.
     import tests.foundation.unit.paper_control.test_models as mod
 
     original_uuid4 = mod.uuid4
-
-    def _uuid4_with_delay():
-        _time.sleep(0.05)  # 50ms per call
-        return original_uuid4()
-
-    monkeypatch.setattr(mod, "uuid4", _uuid4_with_delay)
+    monkeypatch.setattr(mod, "uuid4", delayed_sync(original_uuid4, 0.05))
 
     samples = perf_budget.samples(_deployment, n=30)
     durations: list[float] = [s.wall_ms for s in samples]
