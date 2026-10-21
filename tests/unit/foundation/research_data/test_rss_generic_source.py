@@ -22,7 +22,7 @@ from src.foundation.research_data.adapters.sources.rss_generic import (
     fetch_rss_feed,
     parse_rss_feed,
 )
-from tests.conftest import PerfBudget
+from tests.support.perf_budget import PerfBudget
 
 _COLLECTED_AT = datetime(2026, 9, 24, 6, 5, 0, tzinfo=timezone.utc)
 
@@ -194,3 +194,49 @@ def test_parse_rss_feed_throughput_floor(perf_budget: PerfBudget) -> None:
         batch=8,
         label="parse_rss_feed 2,000 items",
     )
+
+
+# --- gate-red reproduction (D2) — 10x delay injection -----------------------
+
+
+@pytest.mark.perf
+def test_parse_rss_feed_perf_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(1,000ms)을 10배 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    items_xml = "".join(
+        f"<item><title>T{i}</title><link>https://example.com/{i}</link>"
+        f"<guid>guid-{i}</guid><pubDate>Wed, 23 Sep 2026 06:00:00 GMT</pubDate></item>"
+        for i in range(2_000)
+    )
+    feed = f'<rss version="2.0"><channel><title>Big</title>{items_xml}</channel></rss>'
+
+    budget_ms = 1_000.0
+
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 10초(10x budget)를 반환하게 한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 10_000.0  # 10 000ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: parse_rss_feed(feed),
+            budget_ms=budget_ms,
+            n=3,
+            batch=8,
+            label="parse_rss_feed 2,000 items delay-injected",
+        )
