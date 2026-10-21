@@ -47,6 +47,7 @@ from src.foundation.whatif.application.preview_order import (
 )
 from src.foundation.whatif.domain.impact import ProposedTrade
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _NOW = datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc)
 _TENANT = UUID(int=7)
@@ -168,6 +169,67 @@ class TestAllow:
             now=_NOW,
         )
         assert "risk" not in result.would_be_denied_by
+
+    @pytest.mark.perf
+    def test_allow_cpu_time_converges_to_zero_for_small_input(
+        self, perf_budget: PerfBudget
+    ) -> None:
+        """0 수렴 검증: ALLOW 경로 단일 호출의 CPU 시간이 1ms 미만이어야 한다.
+
+        정상 입력에서 녹색 — 실제 CPU 시간을 측정해 예산(1ms)을 낮게 통과함을
+        확인한다. Windows의 time.process_time() 약 15.6ms 양자화 오차 내에서
+        사실상 0ms에 수렴한다.
+        """
+        sample = perf_budget.sample(
+            lambda: preview_order(
+                before=_make_state(),
+                trade=BUY_AAPL,
+                risk_inputs=_risk_inputs(),
+                risk_limits=(),
+                mandate=_mandate(),
+                now=_NOW,
+            ),
+            batch=1,
+        )
+        assert sample.cpu_ms < 1.0, (
+            f"ALLOW 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            "작은 입력은 사실상 0ms에 수렴해야 함 (budget<1ms)"
+        )
+
+    @pytest.mark.perf
+    def test_allow_cpu_budget_catches_10x_delay_injection(
+        self,
+        perf_budget: PerfBudget,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """게이트 적색 재현: delayed_sync로 CPU 부하를 주입하면 예산을 초과해
+        AssertionError가 발생해야 한다.
+
+        단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+        검증한다. Windows의 time.process_time() 약 15.6ms 양자화 오차로
+        인해 10ms 부하는 0ms로 읽힐 수 있으므로 50ms 부하를 주입해
+        46~62ms CPU로 확실하게 측정되게 한다 (예산 1ms 초과 → 적색).
+        """
+        from src.core.risk.limits import check_exposure_limits
+
+        monkeypatch.setattr(
+            "src.foundation.whatif.application.preview_order.check_exposure_limits",
+            delayed_sync(check_exposure_limits, 0.05),
+        )
+
+        with pytest.raises(AssertionError):
+            perf_budget.assert_within(
+                lambda: preview_order(
+                    before=_make_state(),
+                    trade=BUY_AAPL,
+                    risk_inputs=_risk_inputs(),
+                    risk_limits=(),
+                    mandate=_mandate(),
+                    now=_NOW,
+                ),
+                budget_ms=1.0,
+                batch=1,
+            )
 
 
 # ---------------------------------------------------------------------------
