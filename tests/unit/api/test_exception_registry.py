@@ -104,6 +104,40 @@ def test_map_exception_lookup_stays_within_budget(perf_budget):
     )
 
 
+def test_perf_assertion_fails_under_cpu_injection(monkeypatch):
+    """주입 실패/gate-red — CPU 예산 단언이 지연 주입에 대해 실제로 적색으로
+    떨어지는지 검증한다. `time.process_time`을 monkeypatch해 샘플당 6s를
+    주입하면(batch=10로 나눠도 600ms > budget 500ms) AssertionError가
+    발생해야 한다.
+
+    이 테스트는 "성능 단언이 실제로 동작하는 측정 장치인가"를 검증한다 —
+    단언이 항상 pass하는 허수라면 이 테스트가 실패한다."""
+    cumulative = [0.0]
+
+    def _fake_process_time() -> float:
+        cumulative[0] += 6.0  # 6s per call → delta=6s, /batch=10 → 600ms/sample
+        return cumulative[0]
+
+    # PerfBudget이 내부적으로 tests.support.perf_budget.time.process_time을
+    # 사용하므로 해당 경로를 패치해야 한다.
+    monkeypatch.setattr("tests.support.perf_budget.time.process_time", _fake_process_time)
+
+    exc = WalletTopupNotFoundError("존재하지 않는 충전 요청입니다.")
+
+    with pytest.raises(AssertionError):
+        from tests.support.perf_budget import PerfBudget
+
+        perf = PerfBudget()
+        perf.assert_within(
+            lambda: [map_exception(exc) for _ in range(5000)],
+            budget_ms=500,
+            n=5,
+            warmup=1,
+            batch=10,
+            label="5000 exception lookups (injected delay)",
+        )
+
+
 def test_user_admin_not_found_maps_to_resource_not_found_before_base():
     code, _, _ = map_exception(UserAdminNotFoundError("존재하지 않는 사용자입니다."))
     assert code == ErrorCode.RESOURCE_NOT_FOUND
