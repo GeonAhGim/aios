@@ -55,6 +55,35 @@ def _unique_email() -> str:
 
 
 async def test_register_returns_access_token(client: AsyncClient) -> None:
+    """수치 성능 단언 — register 요청(실제 Argon2 해시 + DB INSERT + ASGI
+    직렬화)이 상수시간으로 끝나는지 확인한다. 이 단언이 보장하려는 것은
+    "register 경로에 선형 이상으로 느려지는 요인(예: 사용자 테이블 풀스캔,
+    N+1 쿼리)이 끼어들지 않았다"는 것이다.
+
+    register 는 I/O 바인딩 연산이므로 wall-clock 기반 RelativeBudget을
+    사용한다(process_time 은 async sleep 대기를 재지 못함)."""
+
+    async def _one_register() -> None:
+        response = await client.post(
+            "/auth/register", json={"email": _unique_email(), "password": STRONG_PASSWORD}
+        )
+        assert response.status_code == 201
+
+    budget = RelativeBudget()
+    # 로컬 무부하 실측 ratio ~3x(단일 register, 보정 루프 대비) — 10배
+    # 여유를 둔 15x를 바닥선으로 건다(순차 테이블 풀스캔 등 선형 이탈만
+    # 잡고, 호스트 부하로 인한 흔들림은 비율 상쇄로 흡수한다).
+    sample = await budget.assert_within_async(
+        _one_register,
+        max_ratio=15.0,
+        n=3,
+        warmup=1,
+        calibration_n=3,
+        label="single register",
+    )
+    print(f"[auth/register] {budget.describe(sample, max_ratio=15.0)}")
+
+    # 기능 단언 — 성능 측정 외부에서 한 번 더 검증
     response = await client.post(
         "/auth/register", json={"email": _unique_email(), "password": STRONG_PASSWORD}
     )
@@ -369,3 +398,74 @@ async def test_login_latency_within_budget(client: AsyncClient) -> None:
         label="20회 로그인",
     )
     print(f"[auth] {budget.describe(sample, max_ratio=40.0)}")
+
+
+# ── gate-red reproduction ──────────────────────────────────────────────────
+
+
+@pytest.mark.perf
+async def test_register_perf_goes_red_with_io_delay_injection(
+    client: AsyncClient,
+    pool: asyncpg.Pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연(delayed_async,
+    2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `conn.execute` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
+    주입 — register 는 I/O 바인딩 연산이므로 wall-clock 측정으로 지연을
+    검증한다. 정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가
+    아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+
+    task-17653: delay injection uses ``delayed_async`` from
+    ``tests.support.perf_inject`` (no ``# type: ignore``).
+    """
+    from tests.support.perf_inject import delayed_async
+
+    # asyncpg.Connection.execute 를 delayed_async 로 감싸 IO 지연 주입
+    original_execute = asyncpg.Connection.execute
+    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 2.0))
+
+    budget = RelativeBudget()
+
+    async def _one_register_with_delay() -> None:
+        response = await client.post(
+            "/auth/register",
+            json={"email": _unique_email(), "password": STRONG_PASSWORD},
+        )
+        assert response.status_code == 201
+
+    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
+    # 2.0 s 지연 >> calibration × 15 budget 이므로 AssertionError 발생해야 함
+    with pytest.raises(AssertionError, match=r"budget"):
+        await budget.assert_within_async(
+            _one_register_with_delay,
+            max_ratio=15.0,
+            n=3,
+            warmup=1,
+            calibration_n=3,
+            label="single register+delay",
+        )
+
+
+# ── negative tests (>= 3) ──────────────────────────────────────────────────
+
+
+async def test_register_rejects_empty_email(client: AsyncClient) -> None:
+    """음성: 빈 이메일로 등록하면 reject 한다."""
+    response = await client.post("/auth/register", json={"email": "", "password": STRONG_PASSWORD})
+    assert response.status_code in (400, 422)
+
+
+async def test_register_rejects_missing_password(client: AsyncClient) -> None:
+    """음성: password 필드가 없으면 reject 한다."""
+    response = await client.post("/auth/register", json={"email": _unique_email()})
+    assert response.status_code in (400, 422)
+
+
+async def test_register_rejects_email_without_domain(client: AsyncClient) -> None:
+    """음성: 도메인 부분이 없는 이메일(예: 'user@')은 reject 한다."""
+    response = await client.post(
+        "/auth/register", json={"email": "user@", "password": STRONG_PASSWORD}
+    )
+    assert response.status_code in (400, 422)
