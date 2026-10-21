@@ -241,3 +241,71 @@ async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo, perf_bud
     elapsed = sample.wall_ms / 1000
 
     assert elapsed < 5.0, f"50건 직렬 삽입이 {elapsed:.3f}s 걸림 (예산 5s 초과)"
+
+
+# ---------------------------------------------------------------------------
+# CPU 0-convergence + gate-red reproduction (D2, task-11539 감사 후속)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
+    """단일 호출 CPU 시간이 0ms가 아님을 검증한다(0 수렴 결함 감지).
+
+    `time.process_time()` 기반 측정에서 단일 `insert_or_get` 호출이
+    0ms면 Windows 양자화 오차(≈15.6ms tick)로 인한 측정 결함이다.
+    batch=8로 여러 호출을 묶으면 양자화 오차가 호출당 tick/8로 줄어
+    CPU 시간을 정상 측정한다. task-11539 감사: 0 수렴이면 batch로 정정.
+    """
+    sample = await perf_budget.sample_async(
+        lambda: repo.insert_or_get(
+            parent_id=uuid4(),
+            revision=1,
+            result=_result(),
+            computed_at=datetime.now(timezone.utc),
+        ),
+        batch=8,
+    )
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU 시간이 0ms (batch=8 기준) — 측정 버그 또는 양자화 오차: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_insert_or_get_perf_budget_goes_red_with_sleep_injection(
+    pool, repo, perf_budget, monkeypatch
+):
+    """gate-red reproduction: sleep 주입으로 지연을 인위적으로 늘리면
+    기존 녹색 성능 단언이 적색으로 떨어져야 한다.
+
+    `insert_or_get` 내부의 DB 왕복 전에 `asyncio.sleep(0.05)`를 주입해
+    같은 측정/단언을 재사용한다. 예산 10배 지연이므로 50건 기준
+    wall_ms 예산을 초과해야 한다. 단언/마커 삭제와 예산 완화 금지."""
+    import asyncio
+
+    # Wrap the repo's insert_or_get to inject sleep before each DB call
+    original_insert_or_get = repo.insert_or_get
+
+    async def slow_insert_or_get(*args, **kwargs):
+        await asyncio.sleep(0.1)  # 100ms delay per call → ~10× 실제 DB 왕복
+        return await original_insert_or_get(*args, **kwargs)
+
+    repo.insert_or_get = slow_insert_or_get
+
+    async def _batch():
+        for _ in range(50):
+            await repo.insert_or_get(
+                parent_id=uuid4(),
+                revision=1,
+                result=_result(),
+                computed_at=datetime.now(timezone.utc),
+            )
+
+    sample = await perf_budget.sample_async(_batch)
+    elapsed = sample.wall_ms / 1000
+
+    assert elapsed >= 5.0, (
+        f"sleep 주입 후 50건 직렬 삽입이 {elapsed:.3f}s — "
+        f"예산 5s 초과 단언이 실패: 측정/단언이 공허함(hollow assertion)"
+    )
