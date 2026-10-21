@@ -305,3 +305,83 @@ def test_resolve_imports_cycle_guard_prevents_recursion_error_regression() -> No
 
     with pytest.raises(ScriptLibraryCycleError):
         resolve_imports([LibraryRef("a", "1")], registry)
+
+
+# ---- DEEPEN(task-2935): 0 수렴 (단일 호출 CPU 측정) ----
+
+
+@pytest.mark.perf
+def test_resolve_imports_trivial_call_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 호출 CPU 측정이 0 수렴하는지 검증: registry.get이 O(1)인
+     InMemoryLibraryRegistry에서 단순 resolve_imports() 호출은 CPU 시간
+    이 극히 작아야 하며, batch를 늘려가면 측정값이 0에 수렴해야 한다.
+
+     이 테스트는 task-11539 감사에서 "not dynamically measured"로 지적된
+     0 수렴 단언을 보충한다. budget_ms=1.0은 매우 관대한 예산이지만,
+     batch=64로 평균 내면 양자화 오차 아래로 떨어지는지 검증한다."""
+    registry = InMemoryLibraryRegistry()
+    registry.register(LibraryRef("tiny", "1"), "let x = 1\n")
+
+    def trivial_resolve() -> int:
+        return len(resolve_imports([LibraryRef("tiny", "1")], registry))
+
+    # batch=64로 여러 호출을 묶어 평균 → 양자화 오차 감소
+    sample = perf_budget.assert_within(
+        trivial_resolve,
+        budget_ms=1000.0,
+        n=3,
+        warmup=1,
+        batch=64,
+        label="trivial_resolve_zero_convergence",
+    )
+    # 구조 단언: batch 평균 CPU가 1ms 미만이어야 수렴한다
+    assert sample.cpu_ms < 1.0, f"cpu_ms={sample.cpu_ms:.4f}ms — 0 수렴 실패"
+    # wall_ms는 CPU보다 크면 워커가 눌렸다는 뜻, 참고용으로 기록
+    assert sample.wall_ms >= sample.cpu_ms, (
+        f"wall_ms={sample.wall_ms:.3f}ms < cpu_ms={sample.cpu_ms:.3f}ms — 측정 이상"
+    )
+
+
+# ---- DEEPEN(task-2935): 게이트 적색 검출력 (예산 위반 감지) ----
+
+
+@pytest.mark.perf
+def test_perf_budget_assertion_detects_budget_violation_red(
+    perf_budget: PerfBudget,
+) -> None:
+    """perf_budget.assert_within()가 예산을 초과하면 실제로 적색(예외)으로
+     떨어지는지 검증한다. 이 테스트가 실패하면 assert_within이 budgets를
+     무시하고 항상 통과한다는 뜻이며, 모든 perf 테스트가 위양성 상태가 된다.
+
+     sleep(0.3)을 주입해 cpu_ms는 0에 가깝지만 wall 시간(=실제 지연)이
+     예산 50ms를 훨씬 초과하게 만든다. assert_within(cpu_ms)는 CPU 기반
+    단언이므로 sleep-only 부하를 못 잡을 수 있다 — 따라서 cpu 부하를
+     직접 주입해 예산 위반을 만든다."""
+    import time
+
+    registry = InMemoryLibraryRegistry()
+    registry.register(LibraryRef("util", "1"), "let x = 1\n")
+
+    def slow_resolve() -> int:
+        # CPU 부하 주입: 100ms 동안 빈 루프 돌리기
+        target = time.perf_counter() + 0.15
+        while time.perf_counter() < target:
+            _ = sum(range(100))
+        return len(resolve_imports([LibraryRef("util", "1")], registry))
+
+    # 예산 5ms에 150ms CPU 부하 → assert_within이 적색이어야 한다
+    with pytest.raises(AssertionError) as exc_info:
+        perf_budget.assert_within(
+            slow_resolve,
+            budget_ms=5.0,
+            n=1,
+            warmup=0,
+            batch=1,
+            label="budget_violation_red",
+        )
+    # 예외 메시지에 budget 정보가 포함되어 있는지 확인
+    assert "budget" in str(exc_info.value).lower() or "cpu" in str(exc_info.value).lower(), (
+        f"예외 메시지에 budget 정보가 없다: {exc_info.value}"
+    )
