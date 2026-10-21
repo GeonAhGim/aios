@@ -26,6 +26,7 @@ from src.foundation.ai.gateway.adapters.postgres_token_repository import (
 from src.foundation.ai.gateway.application.issue_token import issue_token
 from src.foundation.ai.gateway.domain.token_rules import Scope
 from tests._perf.relative_budget import RelativeBudget
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime.now(timezone.utc)
 _DIGEST = "a" * 64
@@ -96,6 +97,89 @@ async def test_issue_get_mark_consumed_round_trip(
         ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(timezone.utc)
     )
     assert replay is None
+
+
+# --- 0 수렴: repo.get() 단일 호출 CPU 시간이 0에 수렴함을 동적으로 검증 ---
+
+
+@pytest.mark.perf
+async def test_issue_get_mark_consumed_round_trip_cpu_time_converges_to_zero(
+    repo: PostgresConfirmTicketRepository,
+    token_repo: PostgresAgentTokenRepository,
+    perf_budget: PerfBudget,
+) -> None:
+    """0 수렴 검증: I/O 바운드 ops는 CPU 시간이 거의 0ms여야 한다.
+
+    단일 `repo.get()` 호출의 CPU 시간을 `PerfBudget.sample_async`로 동적
+    측정한다. I/O 바운드 작업은 실제 CPU를 거의 쓰지 않으므로 `cpu_ms`가
+    5ms 미만이어야 한다(Windows 양자화 오차 포함).
+    """
+    tenant_id, token_id = await _issued_token_id(token_repo)
+    ticket = await repo.issue(
+        tenant_id=tenant_id,
+        created_by_token=token_id,
+        action_digest=_DIGEST,
+        expires_at=_NOW + timedelta(minutes=5),
+    )
+
+    sample = await perf_budget.sample_async(lambda: repo.get(ticket.ticket_id), batch=1)
+    assert sample.cpu_ms < 5.0, (
+        f"repo.get() 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "I/O 바운드 ops는 사실상 0ms에 수렴해야 함 (budget<5ms)"
+    )
+
+
+# --- 게이트 적색 재현: 지연 주입 시 RelativeBudget이 AssertionError로 적색 ---
+
+
+@pytest.mark.perf
+async def test_issue_get_mark_consumed_round_trip_budget_catches_10x_delay_injection(
+    repo: PostgresConfirmTicketRepository,
+    token_repo: PostgresAgentTokenRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `asyncpg.Connection.fetchrow`에 10초 지연을
+    주입하면 `RelativeBudget.assert_within_async`가 AssertionError로 적색이
+    돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    tenant_id, token_id = await _issued_token_id(token_repo)
+    ticket = await repo.issue(
+        tenant_id=tenant_id,
+        created_by_token=token_id,
+        action_digest=_DIGEST,
+        expires_at=_NOW + timedelta(minutes=5),
+    )
+
+    # 녹색 제어군 — 정상 입력에서 통과해야 함
+    await RelativeBudget().assert_within_async(
+        lambda: repo.get(ticket.ticket_id),
+        n=5,
+        max_ratio=40,
+        label="repo.get(normal)",
+    )
+
+    # 적색 주입 — fetchrow에 10초 지연을 주입
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def delayed_fetchrow(self, *args, **kwargs):
+        await asyncio.sleep(10.0)
+        return await original_fetchrow(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", delayed_fetchrow)
+
+    with pytest.raises(AssertionError) as exc_info:
+        await RelativeBudget().assert_within_async(
+            lambda: repo.get(ticket.ticket_id),
+            n=5,
+            max_ratio=40,
+            label="repo.get(injected)",
+        )
+
+    assert "ratio" in str(exc_info.value), "AssertionError가 'ratio' 단언에서 발생해야 함"
 
 
 # --- negative #1: 존재하지 않는 ticket_id는 None(예외 아님) ---
