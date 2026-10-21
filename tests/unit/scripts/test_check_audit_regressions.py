@@ -178,6 +178,78 @@ def test_allows_balance_free_provisioning_insert(tmp_path, monkeypatch) -> None:
     assert finding is None
 
 
+@pytest.mark.perf
+def test_allows_balance_free_provisioning_insert_cpu_converges_to_zero(
+    perf_budget: PerfBudget,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0 수렴 검증(D2, task-11539 감사 후속): balance_free_provisioning 입력에 대한
+    raw_seed 스캔(1 파일)의 CPU 시간이 1ms 미만이어야 한다 — 정적 스캔은
+    사실상 0ms에 수렴한다."""
+    monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
+    _write_injected_fixture(
+        tmp_path,
+        "async def _ensure_account(conn, code):\n"
+        "    await conn.execute(\n"
+        '        "INSERT INTO ledger_balance (account_id, allow_negative) "\n'
+        '        "SELECT account_id, $2 FROM ledger_account WHERE account_code = $1 "\n'
+        '        "ON CONFLICT (account_id) DO NOTHING",\n'
+        "        code, negative_ok,\n"
+        "    )\n",
+    )
+
+    sample = perf_budget.sample(check_audit_regressions.check_ledger_balance_raw_seed, batch=1)
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "작은 입력은 사실상 0ms에 수렴해야 함 (budget<1ms)"
+    )
+
+
+@pytest.mark.perf
+def test_allows_balance_free_provisioning_insert_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(1.0ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. fake process_time이 호출당 5ms를 반환하므로
+    측정 예산 1.0ms를 초과해 적색 확정.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 5.0  # +5ms per call >> 1.0ms budget
+        return _fake_time[0]
+
+    import time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+    monkeypatch.setattr(check_audit_regressions, "ROOT", tmp_path)
+    _write_injected_fixture(
+        tmp_path,
+        "async def _ensure_account(conn, code):\n"
+        "    await conn.execute(\n"
+        '        "INSERT INTO ledger_balance (account_id, allow_negative) "\n'
+        '        "SELECT account_id, $2 FROM ledger_account WHERE account_code = $1 "\n'
+        '        "ON CONFLICT (account_id) DO NOTHING",\n'
+        "        code, negative_ok,\n"
+        "    )\n",
+    )
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            check_audit_regressions.check_ledger_balance_raw_seed,
+            budget_ms=1.0,
+            batch=1,
+        )
+
+
 def test_current_repository_has_no_open_ledger_balance_raw_seed_findings() -> None:
     """실제 저장소는 FA-15a 정리 이후 이 결함이 완전히 닫혀 있어야 한다 —
     회귀가 들어오면 이 테스트가 바로 잡는다."""
