@@ -20,6 +20,7 @@ from src.foundation.market_data.domain.corporate_action import (
 )
 from src.foundation.market_data.domain.corporate_action.point_in_time import resolve_as_of
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _EX_DATE = date(2026, 4, 1)
 
@@ -223,4 +224,121 @@ def test_resolve_as_of_meets_latency_budget_with_many_instruments_and_correction
     assert all(a.ratio == Decimal("5") for a in result)
     assert sample.cpu_ms < budget_ms, (
         f"{len(actions)}건 판정이 예산({budget_ms:.1f}ms)을 넘었습니다({sample.cpu_ms:.4f}ms)."
+    )
+
+
+def test_single_call_cpu_measurement_does_not_converge_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """CPU measurement quality: a single fast call on `resolve_as_of` must
+    record measurable CPU time (not 0 ms) when the input is large enough to
+    exceed Windows `time.process_time()` quantization (~15.6 ms).
+
+    This proves the perf budget assertion in
+    `test_resolve_as_of_meets_latency_budget_with_many_instruments_and_corrections`
+    is not a false negative caused by quantisation to zero.
+    """
+    # 5 000 instruments → ~10 000 actions; resolve_as_of의 dict/hash 경로는
+    # O(n)이지만 상수가 매우 작아 15.6 ms Windows quantisation tick을
+    # 넘어서 실제 CPU 시간을 측정할 수 있다. (기존 perf 테스트의
+    # 2 000 종목이 ~400ms이므로 5 000 종목은 ~1초대 — quantisation을
+    # 완전히 덮는다.)
+    n_instruments = 5_000
+    base_known_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = base_known_at + timedelta(days=2)
+
+    actions: list[CorporateAction] = []
+    for i in range(n_instruments):
+        instrument_id = uuid4()
+        actions.append(
+            _action(
+                instrument_id=instrument_id,
+                ratio="10",
+                known_at=base_known_at,
+                source_ref=f"rcept-{i}-original",
+            )
+        )
+        actions.append(
+            _action(
+                instrument_id=instrument_id,
+                ratio="5",
+                known_at=base_known_at + timedelta(days=1),
+                source_ref=f"rcept-{i}-correction",
+            )
+        )
+
+    # batch=1 — 단일 호출로 측정해야 양자화 오차를 확인할 수 있다.
+    sample = perf_budget.sample(lambda: resolve_as_of(actions, as_of), batch=1)
+
+    # single-call CPU 측정값이 0이 아님을 확인 — quantisation artefact 방지
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU 측정이 0 ms로 수렴했습니다. "
+        f"Windows quantisation tick({sample.cpu_ms:.4f}ms)이 예산 단언을 "
+        f"false-negative로 만들 수 있습니다."
+    )
+    # 그리고 같은 입력이 기존 예산도 통과해야 한다.
+    assert sample.cpu_ms < 10_000.0, (
+        f"5 000 종목 단일 호출이 10 s를 넘었습니다({sample.cpu_ms:.4f}ms)."
+    )
+
+
+@pytest.mark.perf
+def test_resolve_as_of_perf_assertion_becomes_red_under_delayed_load(
+    perf_budget: PerfBudget,
+) -> None:
+    """Failure-injection gate-red reproduction: inject a 0.5 s CPU-heavy
+    delay via `delayed_sync` and prove the budget assertion turns red —
+    confirming the assertion is live and not a false-green.
+
+    Budget is set to 100 ms (well within the ~15.6 ms quantisation tick
+    so any real CPU work is measurable). A 0.5 s injected delay must
+    exceed it, turning the green assertion red.
+    """
+    n_instruments = 10
+    budget_ms = 100.0
+    base_known_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = base_known_at + timedelta(days=2)
+
+    actions: list[CorporateAction] = []
+    for i in range(n_instruments):
+        instrument_id = uuid4()
+        actions.append(
+            _action(
+                instrument_id=instrument_id,
+                ratio="10",
+                known_at=base_known_at,
+                source_ref=f"rcept-{i}-original",
+            )
+        )
+        actions.append(
+            _action(
+                instrument_id=instrument_id,
+                ratio="5",
+                known_at=base_known_at + timedelta(days=1),
+                source_ref=f"rcept-{i}-correction",
+            )
+        )
+
+    # `resolve_as_of`를 0.5초 CPU 부하로 감싼 버전으로 교체 —
+    # delayed_sync는 `# type: ignore` 없이 시그니처를 보존한다.
+    monkeypatch_delayed = delayed_sync(resolve_as_of, 0.5)
+
+    result: list[CorporateAction] = []
+
+    def _resolve() -> None:
+        nonlocal result
+        result = monkeypatch_delayed(actions, as_of)
+
+    sample = perf_budget.sample(_resolve, batch=1)
+
+    print(
+        f"[RD-20 delayed] {len(actions)}건({n_instruments} 종목) 지연 부하 "
+        f"{perf_budget.describe(sample, budget_ms=budget_ms)}"
+    )
+    # 정상 입력에서는 통과하는 예산이 지연 주입으로 인해 적색 —
+    # 단언이 live함을 증명한다.
+    assert sample.cpu_ms >= budget_ms, (
+        f"지연 주입에도 CPU 측정이 예산({budget_ms:.1f}ms) 아래에 머물렀습니다. "
+        f"({sample.cpu_ms:.4f}ms) — 지연 주입이 제대로 작용하지 않았거나 "
+        f"예산이 과도하게 느슨합니다."
     )
