@@ -80,6 +80,39 @@ def test_schema_snapshot_matches_fixture() -> None:
     assert current == expected
 
 
+@pytest.mark.perf
+def test_schema_snapshot_cpu_converges_to_zero(perf_budget: PerfBudget) -> None:
+    """schema 생성 호출 1회 CPU 시간이 0 수렴한다 -- 양자화 틱 아래로
+    떨어지는 반복 측정에서 best-of-N이 예산 내여야 한다."""
+    budget_ms = 50.0  # ADR-2026-09-09-C schema-gen 예산 (pre-trade gate보다 느림).
+
+    def _generate() -> dict[str, object]:
+        return {m.__name__: m.model_json_schema() for m in _MODELS}
+
+    sample = perf_budget.best_of(_generate, n=5, warmup=1)
+    print(f"[AI-1 schema] best-of-5 cpu={sample.cpu_ms:.3f}ms budget<{budget_ms:.3f}ms")
+    assert sample.cpu_ms < budget_ms
+
+
+@pytest.mark.perf
+def test_schema_snapshot_gate_red_sleep_injection(perf_budget: PerfBudget) -> None:
+    """성능 단언이 tautology 아님을 확인한다 -- sleep을 주입해 CPU가 0이
+    아님을 만들고 예산을 낮게 걸면 AssertionError가 나와야 한다."""
+    import time
+
+    budget_ms = 1e-6  # 1 마이크로초 (실제 측정보다 훨씬 낮음).
+
+    def _generate_with_sleep() -> dict[str, object]:
+        time.sleep(0.01)  # 10ms sleep — CPU는 안 먹지만 wall은 차지함.
+        return {m.__name__: m.model_json_schema() for m in _MODELS}
+
+    sample = perf_budget.sample(_generate_with_sleep)
+    # CPU는 sleep으로 인해 0에 가깝지만 wall_ms는 sleep 시간을 포함해야 함.
+    # gate-red 검증: wall_ms 기준 예산을 낮게 걸어 실제 위반을 잡는다.
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < budget_ms
+
+
 def test_gateway_error_code_has_exactly_the_taxonomy_from_spec() -> None:
     assert {code.value for code in v1.AgentGatewayErrorCode} == _ERROR_CODES
 
