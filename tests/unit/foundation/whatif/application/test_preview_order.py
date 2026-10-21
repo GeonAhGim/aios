@@ -46,6 +46,7 @@ from src.foundation.whatif.application.preview_order import (
     preview_order,
 )
 from src.foundation.whatif.domain.impact import ProposedTrade
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc)
 _TENANT = UUID(int=7)
@@ -199,6 +200,80 @@ class TestRiskDenial:
         )
         assert result.risk_outcome == RiskOutcome.ESCALATE
         assert "risk" in result.would_be_denied_by
+
+
+# ---------------------------------------------------------------------------
+# 3. 0 수렴 (CPU 측정 단일 호출이 0에 수렴함을 동적으로 검증)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_risk_denial_cpu_time_converges_to_zero_for_small_input(
+    perf_budget: PerfBudget,
+) -> None:
+    """0 수렴 검증: preview_order 단일 호출(보통 입력)의 CPU 시간이 1ms 미만이어야
+    한다 — Windows의 time.process_time() 약 15.6ms 양자화 오차 내에서
+    사실상 0ms에 수렴한다."""
+    sample = perf_budget.sample(
+        lambda: preview_order(
+            before=_make_state(),
+            trade=BUY_AAPL,
+            risk_inputs=_risk_inputs(notional=Decimal("50000")),
+            risk_limits=(_order_notional_limit(Decimal("1000"), hard=True),),
+            mandate=_mandate(),
+            now=_NOW,
+        ),
+        batch=1,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "작은 입력은 사실상 0ms에 수렴해야 함 (budget<1ms)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 게이트 적색 재현: 10x 지연 monkeypatch가 예산을 초과하면 적색
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_risk_denial_cpu_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(1ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. fake process_time이 호출당 10ms를 반환하므로
+    측정 예산 1ms를 초과해 적색 확정.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 0.01  # +10ms per call → >> 1ms budget
+        return _fake_time[0]
+
+    import time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: preview_order(
+                before=_make_state(),
+                trade=BUY_AAPL,
+                risk_inputs=_risk_inputs(notional=Decimal("50000")),
+                risk_limits=(_order_notional_limit(Decimal("1000"), hard=True),),
+                mandate=_mandate(),
+                now=_NOW,
+            ),
+            budget_ms=1.0,
+            batch=1,
+        )
 
 
 # ---------------------------------------------------------------------------
