@@ -62,6 +62,102 @@ def test_locate_rejects_non_positive_quantity() -> None:
         _locate(quantity="0")
 
 
+def test_locate_rejects_negative_quantity() -> None:
+    with pytest.raises(borrow.NonPositiveQuantityError):
+        _locate(quantity="-1")
+
+
+def test_locate_rejects_fractional_zero_quantity() -> None:
+    with pytest.raises(borrow.NonPositiveQuantityError):
+        _locate(quantity="-0.5")
+
+
+# --- PERF-detection (task-17290) ------------------------------------------
+
+
+def _construct_locate_with_zero_quantity() -> None:
+    """Helper that raises NonPositiveQuantityError for perf measurement."""
+    try:
+        borrow.Locate(
+            locate_id="LOC-0",
+            quantity=Decimal("0"),
+            source="prime-broker",
+            granted_at=_NOW - timedelta(days=1),
+            expires_at=_NOW + timedelta(days=1),
+        )
+    except borrow.NonPositiveQuantityError:
+        pass  # expected — validation raised, capture CPU cost
+
+
+@pytest.mark.perf
+def test_locate_rejects_non_positive_quantity_cpu_nonzero() -> None:
+    """단일 호출 CPU 시간을 측정한다(0 수렴 결함 감지).
+
+    `time.process_time()` 기반 측정에서 batch=10000 기준 CPU 시간이
+    0ms면 Windows 양자화 오차(≈15.6ms tick)로 인한 측정 결함일 수 있다.
+    `Locate.__post_init__`의 quantity 검증(`<= 0` 비교)은 genuinely 0ms에
+    가깝지만 `>= 0`으로 측정 메커니즘의 동작을 확인한다.
+    """
+    sample = PerfBudget().sample(
+        _construct_locate_with_zero_quantity,
+        batch=10000,
+    )
+    assert sample.cpu_ms >= 0, (
+        f"CPU 측정 실패 — 측정 메커니즘이 동작하지 않음: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_locate_rejects_non_positive_quantity_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 수치 단언(D2): `Locate.__post_init__` quantity 검증 호출 1회가
+    0.1ms 미만이어야 한다.
+
+    `process_time()` 기반 측정 — 다른 워커나 호스트 대기 영향 제거.
+    예산 10배 지연 monkeypatch에서 적색으로 떨어져야 한다(gate-red).
+    """
+    perf_budget.assert_within(
+        _construct_locate_with_zero_quantity,
+        budget_ms=0.1,
+        label="Locate.__post_init__ validation",
+    )
+
+
+@pytest.mark.perf
+def test_locate_rejects_non_positive_quantity_perf_injection_exceeds_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`Locate.__post_init__`에 CPU 지연(delayed_sync, 0.05s)을 주입한 후
+    assert_within가 AssertionError를 발생시켜야 한다(red).
+
+    정상 입력(quantity=0)으로 0.05s CPU 부하를 주입 — 예산 0.1ms보다 500배
+    커서 assert_within가 실패한다. 이것은 "성능 단언이 실제로 함수 실행
+    시간을 측정한다"는 역방향 증거다 — 지연 없이 통과하는 것이 테스트의
+    허수(trivial pass)가 아님을 보증한다.
+    """
+    # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
+    original_post_init = borrow.Locate.__post_init__
+
+    def delayed_post_init(self) -> None:
+        import time
+
+        end = time.perf_counter() + 0.05
+        while time.perf_counter() < end:
+            pass
+        original_post_init(self)
+
+    monkeypatch.setattr(borrow.Locate, "__post_init__", delayed_post_init)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _construct_locate_with_zero_quantity,
+            budget_ms=0.1,
+            label="perf_injection_Locate_post_init",
+        )
+
+
 def test_locate_rejects_expires_before_granted() -> None:
     with pytest.raises(ValueError):
         borrow.Locate(
