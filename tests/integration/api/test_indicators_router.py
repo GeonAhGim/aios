@@ -297,3 +297,42 @@ async def test_catalog_list_p95_budget(client: AsyncClient, perf_budget) -> None
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
     assert p95_ms <= 200, f"IND-12 list API p95={p95_ms:.2f}ms > 200ms"
+
+
+@pytest.mark.perf
+async def test_catalog_list_p95_goes_red_on_10x_delay_injection(
+    client: AsyncClient, perf_budget, monkeypatch
+) -> None:
+    """게이트 적색 재현(D2): sleep() 주입으로 지연을 인위적으로 10배 늘리면
+    wall_ms 예산을 초과해야 한다(red-gate 재현). 단언/마커 삭제와 예산
+    완화가 아니라, 단언이 "제대로 작동하는지"를 역으로 증명한다.
+
+    실제 API 왕복(≈50ms)의 10배인 500ms sleep 을 주입하면 p95 wall_ms가
+    200ms 예산을 명확히 넘어야 한다.
+    """
+    import asyncio
+
+    headers, _ = await _register(client)
+    warmup = await client.get(PATH, params={"limit": 200}, headers=headers)
+    assert warmup.status_code == 200, warmup.text
+
+    budget_p95_ms = 200.0
+
+    async def _delayed_fn() -> None:
+        await asyncio.sleep(0.5)  # 500ms ≈ 10× 실제 API 왕복
+        response = await client.get(PATH, params={"limit": 200}, headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["items"]
+
+    n = 20
+    samples = await perf_budget.samples_async(_delayed_fn, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
+    print(
+        f"[IND-12 delay-injected] n={n} p95={p95_ms:.2f}ms "
+        f"budget={budget_p95_ms:.0f}ms (should go red)"
+    )
+    assert p95_ms > budget_p95_ms, (
+        f"10x 지연 주입에도 p95가 예산을 넘지 않았다: {p95_ms:.2f}ms — "
+        f"단언이 느린 호출을 포착하지 못한다"
+    )
