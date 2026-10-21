@@ -193,10 +193,24 @@ async def submit_order(
 
     # FD-4.2-c DB 영속화 — claimed 행을 실제 거래소 응답으로 갱신한다.
     # 이벤트 발행보다 먼저 커밋(05번 §5.6).
+    #
+    # task-16630(golden_red sentinel: orders residue) — 거래소가 place_order
+    # 응답에서 즉시 FILLED를 돌려주는 동기체결 분기는 `update_from_exchange`가
+    # 상태만 바꾸고 order_events/fills를 전혀 남기지 않아, 이 경로로 체결된
+    # 주문을 replay_verify로 재생하면 이벤트 이력이 비어 폴드 결과가 CREATED에
+    # 머물렀다(실제 상태 FILLED와 불일치). FILLED 분기만 따로
+    # `update_from_exchange_with_fill_event`로 보내 상태 갱신과 이벤트/체결
+    # 기록을 같은 트랜잭션에서 원자적으로 커밋한다 — 그 외 상태(REJECTED 등)는
+    # 기존 경로를 그대로 쓴다(이 task 스콥 밖).
     async with pool.acquire() as conn:
-        persisted = await repository.update_from_exchange(
-            conn, submitted, expected_status=claimed.status
-        )
+        if submitted.status == OrderStatus.FILLED:
+            persisted = await repository.update_from_exchange_with_fill_event(
+                conn, submitted, expected_status=claimed.status, actor_subject_id=user_id
+            )
+        else:
+            persisted = await repository.update_from_exchange(
+                conn, submitted, expected_status=claimed.status
+            )
 
     # PM 배정(agent-platform-12, 2026-09-02) — 거래소가 place_order 응답에서
     # 즉시 FILLED를 돌려주는 동기체결 케이스. apply_fill()을 거치지 않고
