@@ -8,6 +8,8 @@ DoD (전부 반증 가능): (a) RSI(SMA(close,20),14) 정확값, (b) 순환·자
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 
@@ -241,6 +243,38 @@ def test_non_finite_value_in_base_column_fails_closed_not_silently_propagated() 
 
 
 @pytest.mark.perf
+def test_resolve_chain_latency_budget_violation_detected(
+    perf_budget: PerfBudget,
+) -> None:
+    """Verify detection power: inject 10× budget delay (~50 ms > 5 ms budget)
+    via a busy-wait that burns CPU-visible time (``time.process_time``) and
+    assert the test turns red."""
+    graph = _linear_sma_chain(MAX_CHAIN_DEPTH)
+    root = f"n{MAX_CHAIN_DEPTH - 1}"
+    resolve_chain(graph, root, DEFAULT_REGISTRY)  # warm-up
+
+    budget_ms = 5.0
+    # Inject ~50 ms CPU work per call (10× budget).
+    # Use a busy-wait so ``time.process_time()`` sees the delay.
+    delay_sec = budget_ms / 1000 * 10  # 50 ms
+
+    def _delayed_resolve() -> tuple[list[str], int]:
+        target = time.process_time() + delay_sec
+        while time.process_time() < target:
+            pass  # busy-wait visible to process_time
+        return resolve_chain(graph, root, DEFAULT_REGISTRY)
+
+    # Same budget + batch as the green test below.
+    # best-of-5 inside assert_within; injected delay >> budget → should fail.
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _delayed_resolve,
+            budget_ms=budget_ms,
+            batch=10,
+            label="resolve_chain graph 해석 지연 — 주입된 지연으로 적색",
+        )
+
+
 def test_resolve_chain_latency_is_bounded_for_max_depth_chain(
     perf_budget: PerfBudget,
 ) -> None:
