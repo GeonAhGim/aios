@@ -107,3 +107,41 @@ async def test_catalog_security_check_p95_under_borrowed_ack_budget(pool, perf_b
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
     assert p95_ms < 300.0, f"catalog read p95={p95_ms:.2f}ms >= 300ms budget"
+
+
+@pytest.mark.perf
+async def test_catalog_security_check_p95_goes_red_with_10x_delay_injection(
+    pool: asyncpg.Pool, perf_budget, monkeypatch
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. catalog 조회에 0.5s 지연을 주입하면 p95가
+    300ms 예산을 초과해 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. 정상 입력에서 녹색, 지연에서 적색을 교차 검증한다
+    (task-11539, task-16079).
+    """
+    import asyncio
+
+    _real_fetch = asyncpg.Connection.fetch
+
+    async def _slow_fetch(
+        self: asyncpg.Connection, *args: object, **kwargs: object
+    ) -> list[asyncpg.Record]:
+        await asyncio.sleep(0.5)  # 500ms 지연 → 300ms 예산을 명확히 초과
+        return await _real_fetch(self, *args, **kwargs)  # type: ignore[no-any-return]
+
+    monkeypatch.setattr(asyncpg.Connection, "fetch", _slow_fetch)
+
+    async def _measure_catalog() -> None:
+        async with pool.acquire() as conn:
+            await _assert_foundation_security(conn)
+
+    # 지연 주입: 같은 측정/단언이 적색이어야 함
+    delayed_samples = await perf_budget.samples_async(_measure_catalog, n=5)
+    delayed_wall = sorted(s.wall_ms for s in delayed_samples)
+    delayed_p95 = delayed_wall[min(int(0.95 * len(delayed_wall)), len(delayed_wall) - 1)]
+    assert delayed_p95 >= 300.0, (
+        f"지연 주입에도 p95={delayed_p95:.2f}ms < 300ms 예산 — "
+        "성능 단언이 지연을 포착하지 못함 (허울 단언)"
+    )
