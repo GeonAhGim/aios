@@ -35,6 +35,8 @@ from tests.integration.foundation.positions.conftest_legacy import (
 from tests.integration.foundation.positions.conftest_legacy import (
     projection as projection,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 
 async def test_open_position_matches_legacy_query(pool, projection):
@@ -471,3 +473,195 @@ async def test_concurrent_queries_for_different_tenants_stay_isolated(pool, proj
         expected_id = legacy_a if tenant == tenant_a else legacy_b
         assert len(projected) == 1
         assert projected[0].legacy_position_id == expected_id
+
+
+# ---- PERF-detection (task-17197, task-11539 감사 후속) ----
+
+_GET_POSITIONS_CPU_BUDGET_MS = 50.0
+"""단일 get_positions 호출의 CPU 예산 — 작은 입력(1 행)이 이 예산을
+초과하면 legacy_adapter가 예상보다 무거운 쿼리/매핑을 하고 있다는 신호."""
+
+
+@pytest.mark.perf
+async def test_get_positions_cpu_time_converges_to_zero_for_small_input(
+    pool,
+    projection,
+    perf_budget: PerfBudget,
+) -> None:
+    """단일 get_positions 호출의 CPU 측정이 0 수렴 확인 — 작은 입력(1 행)은
+    거의 즉시 반환되므로 CPU 시간은 Windows 양자화 tick(약 15.6ms) 범위
+    내여야 한다. batch=8로 묶으면 양자화 오차가 호출당 tick/8로 줄어
+    실제 CPU 시간을 정상 측정한다.
+
+    이 테스트는 PerfBudget.sample_async가 단일 호출 CPU 시간을 올바르게
+    계측함을 동적으로 검증한다.
+    """
+    tenant_id, account_id = await _setup_account(pool)
+    symbol = f"SYM{uuid.uuid4().hex[:8]}"
+    await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        symbol=symbol,
+        quantity=Decimal("2.5"),
+        price=Decimal("100.1234567890"),
+    )
+
+    async def _one_call() -> list:
+        async with pool.acquire() as conn, conn.transaction():
+            return await projection.get_positions(
+                conn,
+                user_id=tenant_id,
+                symbol=symbol,
+                exchange=_EXCHANGE,
+            )
+
+    sample = await perf_budget.sample_async(_one_call, batch=8)
+    assert sample.cpu_ms < 100.0, (
+        f"get_positions 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "작은 입력이므로 양자화 오차 범위 내여야 함 (budget<100ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_get_positions_latency_within_budget(
+    pool,
+    projection,
+    perf_budget: PerfBudget,
+) -> None:
+    """get_positions 호출이 CPU 예산 내야 한다 — 작은 입력에 대해
+    _GET_POSITIONS_CPU_BUDGET_MS 미만."""
+    tenant_id, account_id = await _setup_account(pool)
+    symbol = f"SYM{uuid.uuid4().hex[:8]}"
+    await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        symbol=symbol,
+        quantity=Decimal("2.5"),
+        price=Decimal("100.1234567890"),
+    )
+
+    async def _one_call() -> list:
+        async with pool.acquire() as conn, conn.transaction():
+            return await projection.get_positions(
+                conn,
+                user_id=tenant_id,
+                symbol=symbol,
+                exchange=_EXCHANGE,
+            )
+
+    sample = await perf_budget.sample_async(_one_call, batch=5)
+    print(
+        f"[LB-10 get_positions] cpu={sample.cpu_ms:.3f}ms "
+        f"budget<{_GET_POSITIONS_CPU_BUDGET_MS:.1f}ms"
+    )
+    assert sample.cpu_ms < _GET_POSITIONS_CPU_BUDGET_MS
+
+
+@pytest.mark.perf
+async def test_get_positions_perf_goes_red_with_io_delay_injection(
+    pool,
+    projection,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.fetch 에 IO 지연(delayed_async,
+    2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `conn.fetch` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
+    주입 — get_positions 는 I/O 바인딩 연산이므로 CPU 대신 wall-clock
+    측정으로 지연을 검증한다. 정상 입력에서 통과하는 것이 테스트의 허수
+    (trivial pass)가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    # asyncpg.Connection.fetch 를 delayed_async 로 감싸 IO 지연 주입 (2초/회)
+    original_fetch = asyncpg.Connection.fetch
+    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(original_fetch, 2.0))
+
+    tenant_id, account_id = await _setup_account(pool)
+    symbol = f"SYM{uuid.uuid4().hex[:8]}"
+    await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        symbol=symbol,
+        quantity=Decimal("2.5"),
+        price=Decimal("100.1234567890"),
+    )
+
+    async def _one_call_with_delay() -> list:
+        async with pool.acquire() as conn, conn.transaction():
+            return await projection.get_positions(
+                conn,
+                user_id=tenant_id,
+                symbol=symbol,
+                exchange=_EXCHANGE,
+            )
+
+    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
+    sample = await perf_budget.sample_async(_one_call_with_delay, batch=1)
+    assert sample.wall_ms >= _GET_POSITIONS_CPU_BUDGET_MS, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget={_GET_POSITIONS_CPU_BUDGET_MS:.1f}ms)"
+    )
+
+
+# --- negative (>= 3) ---
+
+
+async def test_get_positions_returns_empty_when_no_legacy_row(pool, projection):
+    """매핑될 legacy 행이 없으면 빈 리스트를 반환한다(예외 아님)."""
+    tenant_id, account_id = await _setup_account(pool)
+    random_symbol = f"SYM{uuid.uuid4().hex[:8]}"
+
+    async with pool.acquire() as conn, conn.transaction():
+        result = await projection.get_positions(
+            conn,
+            user_id=tenant_id,
+            symbol=random_symbol,
+            exchange=_EXCHANGE,
+        )
+
+    assert result == []
+
+
+async def test_get_positions_returns_empty_for_unknown_user(pool, projection):
+    """존재하지 않는 user_id 에 대해 빈 리스트를 반환한다."""
+    from uuid import UUID
+
+    fake_user_id = UUID("00000000-0000-0000-0000-000000000001")
+
+    async with pool.acquire() as conn, conn.transaction():
+        result = await projection.get_positions(
+            conn,
+            user_id=fake_user_id,
+            symbol="ANY",
+            exchange=_EXCHANGE,
+        )
+
+    assert result == []
+
+
+async def test_get_positions_returns_empty_for_unknown_exchange(pool, projection):
+    """존재하지 않는 exchange 에 대해 빈 리스트를 반환한다."""
+    tenant_id, account_id = await _setup_account(pool)
+    symbol = f"SYM{uuid.uuid4().hex[:8]}"
+    await _seed_linked_pair(
+        pool,
+        tenant_id=tenant_id,
+        account_id=account_id,
+        symbol=symbol,
+        quantity=Decimal("1"),
+        price=Decimal("10"),
+    )
+
+    async with pool.acquire() as conn, conn.transaction():
+        result = await projection.get_positions(
+            conn,
+            user_id=tenant_id,
+            symbol=symbol,
+            exchange="NONEXISTENT",
+        )
+
+    assert result == []
