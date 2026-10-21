@@ -14,6 +14,8 @@ import pytest
 from src.foundation.ml.adapters.local_trainer import LocalTrainer, ModelArtifactNotFoundError
 from src.foundation.ml.contracts.v1 import ModelCard, TrainDataLineage
 from src.foundation.ml.ports.trainer import TrainingSample
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
 _PARAMS: dict[str, object] = {"num_leaves": 7, "min_data_in_leaf": 1, "learning_rate": 0.3}
@@ -208,3 +210,68 @@ def test_train_step_latency_within_budget(tmp_path, perf_budget):
     p95_ms = wall_ms_list[min(int(len(wall_ms_list) * 0.95), len(wall_ms_list) - 1)]
     print(f"[AI-20 train_step] p95={p95_ms:.2f}ms budget<{_TRAIN_STEP_P95_BUDGET_MS:.1f}ms")
     assert p95_ms < _TRAIN_STEP_P95_BUDGET_MS
+
+
+# ---- CPU 0 수렴 + 지연 주입 적색 재현(D2, task-11539 감사 후속) ----
+
+
+@pytest.mark.perf
+def test_train_step_cpu_time_converges_to_zero_for_small_input(
+    perf_budget: PerfBudget,
+    tmp_path,
+) -> None:
+    """단일 train_step 호출의 CPU 측정이 0 수렴 확인 — 작은 입력(40 샘플,
+    3 라운드)은 LightGBM이 거의 즉시 학습하므로 CPU 시간은 Windows 양자화
+    tick(약 15.6ms) 범위 내여야 한다. batch=8로 묶으면 양자화 오차가
+    호출당 tick/8로 줄어 실제 CPU 시간을 정상 측정한다.
+
+    이 테스트는 PerfBudget.sample가 단일 호출 CPU 시간을 올바르게 계측함을
+    동적으로 검증한다.
+    """
+    trainer = LocalTrainer(tmp_path)
+    samples = _samples()
+
+    def _one_step() -> str:
+        return trainer.train_step(None, samples, num_boost_round=3, params=_PARAMS)
+
+    sample = perf_budget.sample(_one_step, batch=8)
+    assert sample.cpu_ms < 100.0, (
+        f"train_step 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        "작은 입력이므로 양자화 오차 범위 내여야 함 (budget<100ms)"
+    )
+
+
+@pytest.mark.perf
+def test_train_step_perf_budget_goes_red_with_cpu_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+    tmp_path,
+) -> None:
+    """gate-red reproduction: lgb.train 에 CPU 지연(delayed_sync, 6.0s)을
+    주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `lgb.train` 을 `delayed_sync` 로 감싸 1회 호출당 6초 CPU 부하를
+    주입 — 3라운드 × 6초 = 18초 CPU 소모로 5000ms 예산을 크게 초과해
+    assert_within/assert 가 적색이 된다.
+
+    정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을
+    보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    # lgb.train 을 delayed_sync 로 감싸 CPU 지연 주입 (6초/회)
+    slow_train = delayed_sync(lgb.train, 6.0)
+    monkeypatch.setattr(lgb, "train", slow_train)
+
+    trainer = LocalTrainer(tmp_path)
+    samples = _samples()
+
+    # 같은 train_step 호출 — 지연 주입으로 budget 초과
+    def _one_step_with_delay() -> str:
+        return trainer.train_step(None, samples, num_boost_round=3, params=_PARAMS)
+
+    # 3라운드 × 6초 = 18초 CPU 소모 → 5000ms 예산 초과
+    sample = perf_budget.sample(_one_step_with_delay, batch=1)
+    assert sample.cpu_ms >= _TRAIN_STEP_P95_BUDGET_MS, (
+        f"지연 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget={_TRAIN_STEP_P95_BUDGET_MS:.1f}ms)"
+    )
