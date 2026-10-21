@@ -92,14 +92,68 @@ def _grant(
     )
 
 
-def test_link_only_source_with_one_char_body_rejected() -> None:
-    """RD-3 DoD (a) — 본문 문자열 1자만 있어도 link_only 소스는 거부."""
+def test_link_only_source_with_one_char_body_rejected(perf_budget: PerfBudget) -> None:
+    """RD-3 DoD (a) — 본문 문자열 1자만 있어도 link_only 소스는 거부.
+
+    CPU 측정 — 단일 호출이 O(1) 상수 시간임을 확인: batch=100 으로 묶어
+    양자화 오차를 줄이고 1ms 미만임을 단언한다.
+    """
     item = _item(body_ref="a")
     source = _source(redistribution="link_only")
+    grant = _grant()
+
+    # Measure CPU time of the rejection path (exception is caught internally).
+    def _call() -> None:
+        try:
+            assert_redistribution_allowed(item, source, grant)
+        except RedistributionViolationError:
+            pass
+
+    sample = perf_budget.sample(_call, batch=100)
+    # Also verify the exception semantics are correct.
     with pytest.raises(RedistributionViolationError) as exc_info:
-        assert_redistribution_allowed(item, source, _grant())
+        assert_redistribution_allowed(item, source, grant)
     assert exc_info.value.error_code.value == "RD_REDISTRIBUTION_DENIED"
     assert exc_info.value.reason == "link_only_body_present"
+    assert sample.cpu_ms < 1.0, (
+        f"CPU time {sample.cpu_ms:.3f}ms exceeds 1ms floor; wall={sample.wall_ms:.3f}ms"
+    )
+
+
+def test_link_only_body_rejected_goes_red_with_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인 — `time.process_time`
+    을 monkeypatch 해 1회 호출당 예산(1ms) 을 10배 초과하는 CPU 시간을
+    가장하면 `sample` 의 cpu_ms 가 1ms 를 넘어 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지" 를
+    검증한다.
+    """
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 15.0  # 15ms per call → budget 1ms × 15x 초과
+        return _fake_time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    item = _item(body_ref="a")
+    source = _source(redistribution="link_only")
+    grant = _grant()
+
+    def _call() -> None:
+        try:
+            assert_redistribution_allowed(item, source, grant)
+        except RedistributionViolationError:
+            pass
+
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_call, batch=100)
+        assert sample.cpu_ms < 1.0, (
+            f"CPU time {sample.cpu_ms:.3f}ms should exceed 1ms budget under injection"
+        )
 
 
 def test_link_only_source_without_body_passes() -> None:
