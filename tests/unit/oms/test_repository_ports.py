@@ -111,7 +111,7 @@ def test_outbox_row_rejects_unknown_command_type() -> None:
         OutboxRow(
             id=uuid4(),
             order_id=uuid4(),
-            command_type="DELETE",  # type: ignore[arg-type]
+            command_type="DELETE",
             payload={},
             state="PENDING",
             attempt=0,
