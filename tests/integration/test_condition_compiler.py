@@ -21,6 +21,7 @@ from src.services.condition_compiler import (
 from src.services.preview_service import PreviewCondition
 from src.services.strategy_builder_service import StrategyBuilderService
 from tests.integration.conftest import create_test_user
+from tests.support.perf_budget import PerfBudget
 
 
 def _asyncpg_dsn() -> str:
@@ -134,6 +135,50 @@ def test_compile_p95_latency_is_within_dsl_compile_budget(compiler, perf_budget)
         f"compile() p95={p95_ms:.3f}ms exceeds 1600ms DSL compile budget "
         f"(widen for CI parallel stability, task-15520)"
     )
+
+
+@pytest.mark.perf
+def test_compile_perf_budget_goes_red_with_10x_cpu_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    1600ms * 10 = 16000ms를 초과하는 CPU 시간을 가장하면
+    `assert_within`가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+    budget_ms = 1600.0  # 동일 예산
+
+    kwargs = _sample_kwargs(f"test-{uuid4().hex[:8]}")
+
+    def _run() -> object:
+        return ConditionCompiler().compile(**kwargs)
+
+    # process_time을 monkeypatch: 호출할 때마다 16000ms(16초)를 더한다.
+    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
+    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 16000.0  # 16000ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _run,
+            budget_ms=budget_ms,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="compile budget < 1600ms (injection)",
+        )
 
 
 def _compile_condition_group_without_operator_guard(
