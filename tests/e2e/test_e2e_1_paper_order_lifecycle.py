@@ -62,9 +62,16 @@ from src.core.safety.data_distrust import DataDistrustMonitor
 from src.core.strategy.engine import StrategyEngine
 from src.data.models.trading import AccountBalance, Order, OrderStatus
 from src.exchanges.common.error_taxonomy import ExchangeError, ExchangeErrorKind
+from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.mandates.application.activate_revision import (
+    activate_revision as activate_revision_command,
+)
+from src.foundation.mandates.application.create_draft_mandate import create_draft_mandate
+from src.foundation.mandates.contracts.v1 import Autonomy, MandateRuleInput
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from src.foundation.risk_gate.application.activate_safety_control import activate_safety_control
 from src.foundation.risk_gate.domain.models import SafetyScope
+from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.tick import run_execution_tick
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
@@ -76,6 +83,38 @@ from src.services.order_service.foundation_gate import make_foundation_pre_submi
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
+
+
+async def _seed_compliance_mandate(pool: asyncpg.Pool, tenant_id: UUID) -> None:
+    """Seed an active compliance mandate so the real CM-8 gate allows orders.
+
+    Required because `make_foundation_pre_submit_gate` defaults to
+    ``require_compliance_mandate=True`` (CM-A2 fail-closed).  Without an
+    active mandate the tenant's orders are rejected with ``CM_MANDATE_MISSING``.
+    """
+    mandate_repo = PostgresMandateRepository(pool)
+    trust_repo = PostgresTrustRepository(pool)
+    draft = await create_draft_mandate(
+        mandate_repo,
+        tenant_id=tenant_id,
+        subject_id=tenant_id,
+        rules=MandateRuleInput(
+            max_total_exposure_pct=80.0,
+            max_single_instrument_pct=20.0,
+            min_cash_buffer_pct=5.0,
+            max_daily_loss_pct=3.0,
+            allowed_autonomy=Autonomy.PAPER,
+            forbidden_assets=[],
+        ),
+    )
+    await activate_revision_command(
+        mandate_repo,
+        trust_repo,
+        tenant_id=tenant_id,
+        subject_id=tenant_id,
+        revision_id=draft.id,
+        reauthenticated=False,
+    )
 
 
 def _engines(pool: asyncpg.Pool, *, require_mandate: bool = False):
@@ -112,6 +151,7 @@ async def test_signal_generates_order_that_fills_and_settles_into_position(
     """happy path — SMA 진입 신호 -> 실 컴플라이언스 게이트 ALLOW -> 실
     거래소(대역) 체결 -> positions/ledger에 Decimal-exact 반영."""
     user_id = await create_test_tenant(pool)
+    await _seed_compliance_mandate(pool, user_id)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = _bitget_adapter(place_order_result_status=OrderStatus.FILLED)
 
@@ -257,9 +297,14 @@ async def _clear_outbox_leftovers(pool: asyncpg.Pool) -> AsyncIterator[None]:
     """`order_command_outbox` is shared by every test in this xdist worker DB and
     `claim_batch(limit=10)` takes PENDING rows in queue order, so leftovers from
     earlier files can crowd out this test's own CANCEL row (main run #36187016384:
-    claimed == 0). Same remedy as test_stale_worker_late_write.py (#89)."""
+    claimed == 0). Same remedy as test_stale_worker_late_write.py (#89).
+
+    Also TRUNCATE orders to remove eventless orders left by previous CM_MANDATE_MISSING
+    rejections — these trigger the OrdersResidueSentinel at module teardown.
+    """
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM order_command_outbox")
+        await conn.execute("TRUNCATE TABLE orders CASCADE")
     yield
 
 
@@ -274,6 +319,7 @@ async def test_cancel_request_crosses_real_outbox_boundary_to_exchange_adapter(
     이미 e2e 커버)에서만 일어나므로 여기서는 재확인하지 않는다 — outbox
     경계가 실제로 거래소 어댑터까지 관통함만 증명한다."""
     user_id = await create_test_tenant(pool)
+    await _seed_compliance_mandate(pool, user_id)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = _bitget_adapter(place_order_result_status=OrderStatus.ACKNOWLEDGED)
 
