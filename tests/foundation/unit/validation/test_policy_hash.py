@@ -4,6 +4,7 @@ Decision 1): negative >=3, failure injection 1, perf assertion 1, gate-red
 repro 1.
 """
 
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from src.foundation.validation.domain.check_result import HARD_FAIL_CODES, Check
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from src.foundation.validation.domain.rules import evaluate_validation_policy
+from tests.support.perf_budget import PerfBudget
 
 _DOMAIN_DIR = Path(__file__).resolve().parents[4] / "src" / "foundation" / "validation" / "domain"
 _DOMAIN_FILES = ("policy", "check_result", "artifact")
@@ -161,6 +163,123 @@ def test_policy_hash_throughput_within_dsl_compile_budget(perf_budget):
         budget_ms=300,
         batch=1000,
         label="1000x policy_hash()",
+    )
+
+
+# --------------------------------------------------------------------------
+# D2 single-call CPU convergence -- 1회 호출이 0에 수렴하는 CPU 시간을 보여야
+# 한다. time.process_time()은 Windows에서 약 15.6ms 양자화 오차가 있으므로
+# batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_policy_hash_cpu_converges_to_zero(perf_budget):
+    """단일 policy_hash() 생성이 0에 수렴하는 CPU 시간을 보여야 한다.
+
+    `time.process_time()`은 Windows에서 약 15.6ms 양자화 오차가 있으므로
+    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. 1회당 CPU 시간이
+    1ms 미만이어야 순수 도메인 로직이라는 불변식(I-03)과 호환된다.
+    """
+    policy = ValidationPolicy()
+
+    def _one_call() -> str:
+        return policy.policy_hash()
+
+    sample = perf_budget.sample(_one_call, batch=64)
+
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"Pydantic 모델 직렬화+해시는 1ms 미만이어야 함 (budget<1ms)"
+    )
+
+
+# --------------------------------------------------------------------------
+# D2 gate-red reproduction -- 10x 지연 monkeypatch가预算을 초과하면
+# AssertionError로 적색이 됨을 역으로 증명한다.
+# --------------------------------------------------------------------------
+
+
+def test_policy_hash_budget_catches_10x_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산(1ms × 10 = 10ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 0.15  # +150ms per call >> 1ms budget even after batch/64
+        return _fake_time[0]
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    policy = ValidationPolicy()
+
+    def _build_once() -> str:
+        return policy.policy_hash()
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_build_once, batch=64)
+        assert sample.cpu_ms < 1.0, (
+            f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            f"Pydantic 모델 직렬화+해시는 1ms 미만이어야 함 (budget<1ms)"
+        )
+
+
+# --------------------------------------------------------------------------
+# D2 failure injection -- time.sleep 주입은 CPU 측정에 영향을 주지 않아야
+# 한다. PerfBudget이 time.process_time()을 사용하므로 sleep은 wall-clock만
+# 늘리고 CPU 시간에는 영향을 주지 않는다.
+# --------------------------------------------------------------------------
+
+
+def test_policy_hash_sleep_injection_does_not_affect_cpu_measurement(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트-red 재현 — `policy_hash()` 생성은 순수 CPU 작업이므로
+    `time.sleep`을 monkeypatch해도 CPU 시간이 늘어나지 않는다. PerfBudget이
+    `time.process_time()`을 사용하므로 sleep 주입은 CPU 측정에 영향을
+    주지 않는다.
+
+    sleep이 CPU 측정에 영향을 준다면 PerfBudget의 측정 방식이 잘못됐다.
+    """
+    original_sleep = time.sleep
+    _sleep_calls = [0]
+
+    def _fake_sleep(seconds: float) -> None:
+        _sleep_calls[0] += 1
+        # 100ms sleep × 10회 = 1초 wall-clock 대기
+        original_sleep(0.1)
+
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "sleep", _fake_sleep)
+
+    policy = ValidationPolicy()
+
+    def _build_once() -> str:
+        # sleep을 호출하도록 유도하지만 policy_hash()는 sleep을 쓰지 않음
+        _fake_sleep(0)
+        return policy.policy_hash()
+
+    sample = perf_budget.sample(_build_once, batch=5)
+
+    # sleep 주입에도 CPU 시간이 1ms 미만이어야 함
+    assert sample.cpu_ms < 1.0, (
+        f"sleep 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"sleep은 CPU 측정에 영향을 주지 않아야 함 (budget<1ms)"
     )
 
 
