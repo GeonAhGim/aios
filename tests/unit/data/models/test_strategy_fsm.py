@@ -86,3 +86,47 @@ def test_fsm_strategy_config_construction_throughput(perf_budget: PerfBudget) ->
         batch=16,
     )
     assert sample.cpu_ms < 5.0
+
+
+# --- 게이트 적색 재현 (1): 10x 지연 주입으로 budget 단언이 적색인지 검증 --------
+
+
+@pytest.mark.perf
+def test_fsm_strategy_config_construction_budget_catches_10x_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch,
+):
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. time.process_time을 monkeypatch해 매 호출당
+    1초씩 증가하도록 하면 cpu_ms가 예산(5ms)을 크게 초과해 AssertionError가
+    발생해야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 매 호출마다 1초씩 증가하도록 한다.
+    # cpu_ms = (end - start) * 1000 / batch = 1000ms >> 5ms budget.
+    _call_count = [0]
+
+    def _fake_process_time() -> float:
+        _call_count[0] += 1
+        return float(_call_count[0])
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    def _build_once() -> None:
+        FSMStrategyConfig(**_valid_kwargs())
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        samples = perf_budget.samples(
+            _build_once,
+            n=5,
+            batch=16,
+        )
+        cpu_ms_values = sorted(s.cpu_ms for s in samples)
+        assert cpu_ms_values[-1] < 5.0, f"p99={cpu_ms_values[-1]:.3f}ms — FSM 구성 예산 초과"
