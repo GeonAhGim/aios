@@ -106,6 +106,54 @@ def test_ci_sample_completes_within_latency_budget(perf_budget: PerfBudget) -> N
     )
 
 
+@pytest.mark.perf
+def test_ci_sample_goes_red_with_10x_cpu_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction (D2): proves the performance budget assertion
+    actually catches violations instead of being a silent no-op.
+
+    Monkeypatch `time.process_time` so each call reports 10x the real
+    CPU time. The same `assert_within` assertion must then raise
+    ``AssertionError`` — confirming the budget check is live and not
+    swallowed by the batch/noise reduction.
+
+    This guards against the task-11539 audit finding: a measurement
+    that always converges to 0 (or a value below the budget regardless
+    of actual work) would pass even if the budget assertion were
+    broken. A 10x delay forces the measurement above budget so any
+    broken assertion fails red.
+    """
+    budget_ms = _CI_SAMPLE_BUDGET_MS  # 5000.0 ms
+
+    # Monkeypatch time.process_time so each sample() reports well above
+    # budget.  PerfBudget.sample() calls process_time() twice (start/end)
+    # inside the timed section.  With batch=8 the delta is divided by 8.
+    #
+    # We need cpu_ms > 5000 after division by batch=8, so delta > 40000.
+    # Each process_time call adds 25000 ms → 50000 ms delta / 8 = 6250 ms
+    # per sample → best-of-5 minimum = 6250 > 5000 budget → AssertionError.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 25_000.0  # 25 s per call → 6250 ms/sample after batch=8
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # Same measurement/assertion as the green test — but with injected
+    # delay the budget must be exceeded, raising AssertionError.
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            verify_job.run_ci_sample,
+            budget_ms=budget_ms,
+            n=5,
+            batch=8,
+        )
+
+
 # ---------------------------------------------------------------- negative --
 
 
