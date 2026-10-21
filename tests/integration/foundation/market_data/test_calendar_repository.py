@@ -283,6 +283,70 @@ async def test_load_p95_under_budget(pool, repo, perf_budget):
             )
 
 
+@pytest.mark.perf
+async def test_load_p95_goes_red_when_delay_injected(pool, repo, perf_budget, monkeypatch):
+    """성분 주입 실패 테스트: load()에 sleep을 주입해 10배 지연을 만들면
+    p95 단언이 적색으로 돌아와야 한다 — 같은 측정/단언을 재사용한다.
+
+    예산은 wall-delay(30ms)이므로 time.sleep으로 대기 시간을 주입한다.
+    """
+    year = 2198
+    days = [
+        CalendarDay(
+            venue=Venue.KIS_KRX,
+            trade_date=date(year, month, 1),
+            is_trading_day=False,
+            open_at=None,
+            close_at=None,
+            early_close=False,
+            source="TEST",
+        )
+        for month in range(1, 13)
+    ]
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await repo.upsert_days(conn, Venue.KIS_KRX, days)
+
+        budget_p95_sec = 0.03
+        # 예산의 10배 delay — 각 호출당 300ms 추가
+        injected_delay_sec = budget_p95_sec * 10
+
+        import asyncio
+
+        original_load = repo.load
+
+        async def _delayed_load(c, venue, year_to_load):
+            await asyncio.sleep(injected_delay_sec)
+            return await original_load(c, venue, year_to_load)
+
+        monkeypatch.setattr(repo, "load", _delayed_load)
+
+        n = 200
+        samples = await perf_budget.samples_async(
+            lambda c=conn: repo.load(c, Venue.KIS_KRX, year), n=n
+        )
+
+        wall_ms_list = sorted(s.wall_ms for s in samples)
+        p95_sec = wall_ms_list[int(n * 0.95)] / 1000
+        print(
+            f"[LA-12 load+delay] n={n} "
+            f"p95={wall_ms_list[int(n * 0.95)]:.2f}ms "
+            f"(budget<{budget_p95_sec * 1000:.0f}ms)"
+        )
+        assert p95_sec >= budget_p95_sec, (
+            f"예상: 지연 주입 시 p95가 예산 이상. 실제: {p95_sec:.4f}s"
+        )
+
+        # cleanup
+        await conn.execute(
+            "DELETE FROM md_venue_calendar_day WHERE venue = $1 "
+            "AND trade_date >= $2 AND trade_date <= $3",
+            Venue.KIS_KRX.value,
+            date(year, 1, 1),
+            date(year, 12, 31),
+        )
+
+
 async def test_gate_red_when_venue_guard_removed_negative_test_would_fail(pool, repo, monkeypatch):
     """게이트 적색 재현: upsert_days()의 venue 일치 가드(ValueError)를
     제거하는 회귀를 주입하면 venue가 다른 `CalendarDay`도 조용히 적재된다 —
