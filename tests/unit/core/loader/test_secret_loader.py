@@ -128,3 +128,45 @@ def test_load_env_secrets_repeated_calls_stay_within_perf_budget(perf_budget: Pe
     perf_budget.assert_within(
         lambda: load_env_secrets(MINIMAL_ENV), budget_ms=2.0 * 1000 / 500, batch=20000
     )
+
+
+@pytest.mark.perf
+def test_load_env_secrets_cpu_budget_goes_red_with_10x_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    예산(4.0ms × 10 = 40ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+    budget_ms = 2.0 * 1000 / 500  # 동일 예산 (~4.0ms)
+
+    def _run() -> object:
+        return load_env_secrets(MINIMAL_ENV)
+
+    # process_time을 monkeypatch: 호출할 때마다 40ms를 더한다.
+    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
+    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 40.0  # 40ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _run,
+            budget_ms=budget_ms,
+            n=5,
+            warmup=0,
+            batch=1,
+            label="secret_loader budget < 4.0ms (injection)",
+        )
