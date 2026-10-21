@@ -41,6 +41,7 @@ from tests.integration.eventstore._replay_verify_support import (
     _seed_order,
     assert_no_replay_window_leftovers,
 )
+from tests.support.perf_inject import delayed_async
 
 
 @pytest.fixture
@@ -179,6 +180,42 @@ async def test_replay_verify_completes_within_latency_budget_for_fifty_streams(p
         f"replay_verify.verify over 75 streams took "
         f"{sample.op_ms:.3f}ms (calibration={sample.calibration_ms:.3f}ms, "
         f"ratio={sample.ratio:.1f}x, budget<500x)"
+    )
+
+
+@pytest.mark.perf
+async def test_replay_verify_gate_red_reproduction_with_delayed_fills(pool, monkeypatch):
+    """gate-red 재현 -- 같은 RelativeBudget 단언이 10배 지연 주입에서 적색이어야 한다.
+
+     `FillsRepository.list_for_order`에 2초 sleep을 주입하면 75스트림에서
+    fills 조회만 최소 150초(75스트림 × 2조회 × 2초) 소모 → ratio가 500x 예산을
+     압도적으로 초과해야 한다. 정상 입력에서 녹색인 단언이 지연 입력에서 적색이면
+     이 테스트가 detection capability를 입증한다.
+    """
+    for _ in range(25):
+        await _seed_order(pool)
+    for _ in range(25):
+        await _seed_ledger_entry(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    # 2초 지연 주입 -- 75스트림 × 2조회 × 2초 = 300초의 CPU/CPU 대기 발생
+    monkeypatch.setattr(
+        FillsRepository,
+        "list_for_order",
+        delayed_async(FillsRepository.list_for_order, 2.0),
+    )
+
+    # 같은 단언 -- 지연 주입으로 ratio가 500x를 압도적으로 초과해야 함
+    sample = await RelativeBudget().measure_async(
+        lambda: replay_verify.verify(pool, as_of=as_of, hours=1),
+        n=1,
+        warmup=0,
+        calibration_n=3,
+    )
+
+    # gate-red: 지연 주입 시에는 반드시 budget 초과
+    assert sample.ratio > 500, (
+        f"delay injection should exceed budget -- ratio={sample.ratio:.1f}x (expected >500x)"
     )
 
 
