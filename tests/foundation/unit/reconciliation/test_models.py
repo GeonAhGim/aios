@@ -90,10 +90,56 @@ def _state(**overrides: Any) -> ReconciliationState:
 # --- positive construction ---------------------------------------------------
 
 
-def test_materiality_policy_constructs_with_expected_fields() -> None:
+@pytest.mark.perf
+def test_materiality_policy_constructs_with_expected_fields(perf_budget: PerfBudget) -> None:
+    """REC-001 — MaterialityPolicy construction produces expected fields within budget.
+
+    CPU convergence: `_policy()`는 O(1) 인메모리 dataclass construction이므로
+    `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
+    batch=64로 묶으면 Windows 양자화 오차가 ~0.24ms로 줄어든다.
+    """
+    # 1) 정적 단언 — 필드 값 검증
     p = _policy()
     assert p.absolute_tolerance == Decimal("0.01")
     assert p.relative_tolerance_pct == Decimal("0.1")
+
+    # 2) 성능 단언 — 단일 호출 CPU 시간이 예산 내에 수렴
+    pb = PerfBudget()
+    samples = pb.samples(_policy, n=64)
+    avg_cpu = sum(s.cpu_ms for s in samples) / len(samples)
+    assert avg_cpu < 1.0, f"avg cpu_ms={avg_cpu:.3f}ms가 1ms 미만이 아님"
+
+    # 3) batch=64 묶음 측정 — 양자화 오차 1/64로 줄어듦
+    batch_sample = pb.sample(_policy, batch=64)
+    assert batch_sample.cpu_ms < 1.0, (
+        f"batch=64 cpu_ms={batch_sample.cpu_ms:.3f}ms가 1ms 미만이 아님"
+    )
+
+
+@pytest.mark.perf
+def test_materiality_policy_cpu_assertion_fails_with_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — `time.process_time`을
+    monkeypatch해 1회 호출당 예산(1ms)을 1000배 초과하는 CPU 시간을 가장하면
+    assert_within가 AssertionError로 적색이 돼야 한다.
+
+    gate-red reproduction: 단언이 "제대로 작동하는지"를 검증한다.
+    """
+
+    _original_process_time = time.process_time
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 1.0  # 1초 per call → budget 1ms × 1000x 초과
+        return _fake_time
+
+    monkeypatch.setattr(time, "process_time", _fake_process_time)
+
+    pb = PerfBudget()
+    with pytest.raises(AssertionError):
+        pb.assert_within(_policy, budget_ms=1.0, n=1, label="materiality-policy delay-injected")
 
 
 def test_reconciliation_item_constructs_with_expected_fields() -> None:
