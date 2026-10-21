@@ -27,6 +27,7 @@ from src.foundation.validation.domain.models import (
     ValidationResult,
     ValidationRun,
 )
+from tests.support.perf_budget import PerfBudget
 
 
 def _run(**overrides) -> ValidationRun:
@@ -164,14 +165,51 @@ def test_negative_evidence_refs_none_rejected() -> None:
 def test_construction_throughput_p99_under_budget(perf_budget) -> None:
     # Perf assertion (ADR-2026-09-09-C budget table, generic pydantic view
     # construction): p99 for 1000 constructions stays well under 5ms/call.
+    # batch=8 reduces Windows process_time() quantization error from ~15.6ms
+    # to ~2ms per call (tick/batch), preventing 0-convergence on fast paths.
     run = _run()
     result = _result(evidence_refs=("snapshot:abc123",))
 
     samples = perf_budget.samples(
         lambda: _run_to_view(run, result),
         n=1000,
-        batch=1,
+        batch=8,
     )
     cpu_ms = sorted(s.cpu_ms for s in samples)
     p99_ms = cpu_ms[int(len(cpu_ms) * 0.99)]
     assert p99_ms < 5.0
+
+
+@pytest.mark.perf
+def test_construction_gate_red_fails_under_cpu_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction: injecting 0.5s CPU delay via delayed_sync into
+    _run_to_view proves the p99 assertion above fires on real slowdown —
+    confirming the test has detection power, not a trivially-passing zero."""
+    from tests.support.perf_inject import delayed_sync
+
+    original_run_to_view = _run_to_view
+
+    def slow_run_to_view(
+        run: ValidationRun, result: ValidationResult | None
+    ) -> ValidationResultView:
+        return delayed_sync(lambda: original_run_to_view(run, result), 0.5)()
+
+    # Patch the local import binding so the lambda below calls the delayed version.
+    import sys
+
+    mod = sys.modules[__name__]
+    monkeypatch.setattr(mod, "_run_to_view", slow_run_to_view)
+
+    run = _run()
+    result = _result(evidence_refs=("snapshot:abc123",))
+
+    samples = perf_budget.sample(
+        lambda: _run_to_view(run, result),
+        batch=1,
+    )
+    # 0.5s CPU delay >> 5ms budget — must fail, proving detection works.
+    with pytest.raises(AssertionError):
+        assert samples.cpu_ms < 5.0
