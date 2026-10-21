@@ -4,6 +4,7 @@ tenant scoping, and repository failure propagation."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import cast
 from unittest.mock import patch
@@ -176,3 +177,67 @@ async def test_build_reconciliation_state_list_view_handles_invalid_state_conver
                 ReconciliationStateListView,
                 await build_reconciliation_state_list_view(repo, uuid4()),
             )
+
+
+# ---- D2 성능 증거: CPU 0 수렴, gate-red 재현 ----
+
+
+@pytest.mark.perf
+async def test_build_reconciliation_state_list_view_cpu_zero_convergence(
+    perf_budget: PerfBudget,
+) -> None:
+    """CPU 측정의 0 수렴: 단일 호출 20회 best-of-5 최소 CPU가 5ms 미만이어야 한다.
+
+    `state_to_view`는 단순 데이터 복사, `datetime.now(timezone.utc)`는
+    경량 연산이므로 CPU 시간은 양자화 틱(Windows ~15.6ms) 아래로 수렴해야 한다.
+    """
+    tenant_id = uuid4()
+    states = tuple(_state(tenant_id=tenant_id) for _ in range(200))
+    repo = _FakeRepo(states)
+
+    async def _single_call() -> None:
+        _ = cast(
+            ReconciliationStateListView,
+            await build_reconciliation_state_list_view(repo, tenant_id),
+        )
+
+    # warmup은 sync 메서드 samples만 지원 — async는 직접 호출
+    for _ in range(3):
+        await _single_call()
+    samples = await perf_budget.samples_async(_single_call, n=20, batch=1)
+    best = min(samples, key=lambda s: s.cpu_ms)
+    assert best.cpu_ms < 5.0, (
+        f"single-call CPU {best.cpu_ms:.3f}ms exceeds 5ms zero-convergence budget; "
+        f"wall={best.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_build_reconciliation_state_list_view_goes_red_with_10x_delay_injection(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction(D2): 같은 성능 단언이 sleep 주입으로 적색이 돼야 한다.
+
+    `asyncio.sleep(0.1)`을 매 호출 전 주입해 wall-clock을 100ms 이상 늘리면,
+    기존 녹색 테스트의 `wall_ms < 1000.0` 예산(50회 배치 기준)에서도
+    각 호출당 지연이 누적되어 단언이 AssertionError로 떨어진다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    역으로 증명한다.
+    """
+    tenant_id = uuid4()
+    states = tuple(_state(tenant_id=tenant_id) for _ in range(200))
+
+    async def _run_batch_with_delay() -> None:
+        for _ in range(50):
+            await asyncio.sleep(0.1)  # 100ms delay per call → 50 calls × 100ms = 5s
+            _ = cast(
+                ReconciliationStateListView,
+                await build_reconciliation_state_list_view(_FakeRepo(states), tenant_id),
+            )
+
+    sample = await perf_budget.sample_async(_run_batch_with_delay)
+    assert sample.wall_ms >= 1000.0, (
+        f"10x delay injection: wall_ms={sample.wall_ms:.3f}ms did NOT exceed 1000ms budget — "
+        "budget assertion failed to detect injected delay (hollow assertion)"
+    )
