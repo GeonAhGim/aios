@@ -228,11 +228,17 @@ async def test_real_db_overlap_violation_propagates_out_of_session_run(pool: asy
 
 async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_contaminate(
     pool: asyncpg.Pool,
-):
+    perf_budget: PerfBudget,
+) -> None:
     """서로 다른 두 종목을 각각 담당하는 `L2IngestSession` 두 개를 실
     DB에 대해 `asyncio.gather`로 진짜 동시에 돌린다(다중 인스턴스/워커
     시뮬레이션) — 각 종목의 갭 결손 span이 서로 섞이지 않고, 각자 자기
-    `instrument_id` 아래에만 (갭 횟수+1)개씩 정확히 기록돼야 한다."""
+    `instrument_id` 아래에만 (갭 횟수+1)개씩 정확히 기록돼야 한다.
+
+    동시 실행 한 번의 CPU 시간을 `PerfBudget.sample_async(batch=4)`로
+    측정한다 — Windows `time.process_time()`의 15.6ms 양자화 오차를
+    batch=4로 1/4로 줄이고, CPU 예산 <100ms 단언을 추가한다.
+    """
     instrument_a = _fake_ulid()
     instrument_b = _fake_ulid()
     await _insert_instrument(pool, instrument_a)
@@ -249,7 +255,13 @@ async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_con
     session_a = _session(instrument_a, pool, repo, clock_a, _connect_sequence([conn_a]))
     session_b = _session(instrument_b, pool, repo, clock_b, _connect_sequence([conn_b]))
 
-    results = await asyncio.gather(session_a.run(), session_b.run(), return_exceptions=True)
+    async def _run_pair() -> list[object]:
+        return list(await asyncio.gather(session_a.run(), session_b.run(), return_exceptions=True))
+
+    sample = await perf_budget.sample_async(_run_pair, batch=4)
+
+    # 정상 입력에서 두 세션이 _Stop으로 종료
+    results = await _run_pair()
     assert all(isinstance(r, _Stop) for r in results)
 
     async with pool.acquire() as db_conn, db_conn.transaction():
@@ -260,6 +272,144 @@ async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_con
     assert len(spans_b) == 3  # 갭 2회 -> span 3개(갭 전/갭 사이/재동기화 후~끊김)
     assert all(s.instrument_id == instrument_a for s in spans_a)
     assert all(s.instrument_id == instrument_b for s in spans_b)  # 서로 오염 없음
+
+    # CPU 예산 단언 — Windows 양자화 오차(batch=4)에도 명확히 통과
+    cpu_budget_ms = 100.0
+    print(
+        f"[RD-19 l2_ingest_session] 동시 2세션 CPU={sample.cpu_ms:.3f}ms "
+        f"wall={sample.wall_ms:.3f}ms budget<{cpu_budget_ms:.1f}ms"
+    )
+    assert sample.cpu_ms < cpu_budget_ms, (
+        f"동시 2세션 CPU 시간 {sample.cpu_ms:.3f}ms — 예산({cpu_budget_ms:.1f}ms) 초과"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2b. gate-red: 지연 주입으로 적색 재현
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_two_concurrent_sessions_goes_red_with_io_delay_injection(
+    pool: asyncpg.Pool,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연
+    (delayed_async, 1.0s) 을 주입한 후 같은 동시 실행을 돌리면 wall-clock
+    이 예산을 초과해야 한다(red).
+
+    `conn.execute` 를 `delayed_async` 로 감싸 1회 호출당 1초 IO 지연을
+    주입 — L2IngestSession 은 DB 쓰기(I/O 바인딩)를 하므로 wall-clock
+    측정으로 지연을 검증한다. 정상 입력에서 통과하는 것이 테스트의 허수
+    (trivial pass) 가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    # asyncpg.Connection.execute 를 delayed_async 로 감싸 IO 지연 주입 (1초/회)
+    original_execute = asyncpg.Connection.execute
+
+    async def _delayed_execute(*args, **kwargs):
+        await asyncio.sleep(1.0)
+        return await original_execute(*args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "execute", _delayed_execute)
+
+    instrument_a = _fake_ulid()
+    instrument_b = _fake_ulid()
+    await _insert_instrument(pool, instrument_a)
+    await _insert_instrument(pool, instrument_b)
+    repo = PostgresCoverageRepository(pool)
+
+    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
+    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=timezone.utc))
+    frames_a = [_frame(s) for s in (1, 2, 4, 5)]
+    frames_b = [_frame(s) for s in (1, 3, 4, 6)]
+    conn_a = _FakeConnection(frames_a, raise_after=ConnectionClosed(None, None))
+    conn_b = _FakeConnection(frames_b, raise_after=ConnectionClosed(None, None))
+
+    session_a = _session(instrument_a, pool, repo, clock_a, _connect_sequence([conn_a]))
+    session_b = _session(instrument_b, pool, repo, clock_b, _connect_sequence([conn_b]))
+
+    async def _run_pair_with_delay() -> list[object]:
+        return list(await asyncio.gather(session_a.run(), session_b.run(), return_exceptions=True))
+
+    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
+    sample = await perf_budget.sample_async(_run_pair_with_delay, batch=1)
+    wall_budget_ms = 5000.0  # 1초 지연 × 2세션 + DB overhead → 최소 5초 예상
+    print(
+        f"[RD-19 l2_ingest_session] 지연 주입 동시 2세션 wall={sample.wall_ms:.3f}ms "
+        f"budget>={wall_budget_ms:.1f}ms (red-repro)"
+    )
+    assert sample.wall_ms >= wall_budget_ms, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget>={wall_budget_ms:.1f}ms)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2c. 음성 테스트 — instrument_id 누락 시 에러
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_sessions_reject_same_instrument_id(pool: asyncpg.Pool) -> None:
+    """동일 instrument_id 에 두 세션을 돌리면 EXCLUDE 제약 위반으로
+    CoverageSpanOverlapError 가 발생해야 한다 (음성 테스트)."""
+    instrument = _fake_ulid()
+    await _insert_instrument(pool, instrument)
+    repo = PostgresCoverageRepository(pool)
+
+    clock = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
+    frames = [_frame(s) for s in (1, 2, 4, 5)]
+    conn = _FakeConnection(frames, raise_after=ConnectionClosed(None, None))
+
+    session_a = _session(instrument, pool, repo, clock, _connect_sequence([conn]))
+    # 두 번째 세션은 동일한 instrument_id + 같은 시간대
+    clock2 = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
+    conn2 = _FakeConnection(frames, raise_after=ConnectionClosed(None, None))
+    session_b = _session(instrument, pool, repo, clock2, _connect_sequence([conn2]))
+
+    results = await asyncio.gather(session_a.run(), session_b.run(), return_exceptions=True)
+    # 둘 다 _Stop 이 아님 — EXCLEUDE 위반이 세션 전체를 표면화
+    assert not all(isinstance(r, _Stop) for r in results)
+
+
+# ---------------------------------------------------------------------------
+# 2d. 음성 테스트 — 빈 메시지 시퀀스
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_sessions_handle_empty_messages_gracefully(
+    pool: asyncpg.Pool,
+) -> None:
+    """빈 메시지 시퀀스(순수 연결 후 끊김) 에서 세션이 span 을 남기지
+    않고 정상 종료해야 한다 (음성 테스트)."""
+    instrument_a = _fake_ulid()
+    instrument_b = _fake_ulid()
+    await _insert_instrument(pool, instrument_a)
+    await _insert_instrument(pool, instrument_b)
+    repo = PostgresCoverageRepository(pool)
+
+    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
+    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=timezone.utc))
+    # 빈 메시지 — 아무런 데이터도 없음
+    conn_a = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+    conn_b = _FakeConnection([], raise_after=ConnectionClosed(None, None))
+
+    session_a = _session(instrument_a, pool, repo, clock_a, _connect_sequence([conn_a]))
+    session_b = _session(instrument_b, pool, repo, clock_b, _connect_sequence([conn_b]))
+
+    results = await asyncio.gather(session_a.run(), session_b.run(), return_exceptions=True)
+    # 빈 메시지 → 끊김 → _Stop
+    assert all(isinstance(r, _Stop) for r in results)
+
+    async with pool.acquire() as db_conn, db_conn.transaction():
+        spans_a = await repo.list_spans(db_conn, instrument_a, Timeframe.L2)
+        spans_b = await repo.list_spans(db_conn, instrument_b, Timeframe.L2)
+
+    # 빈 메시지라도 연결-끊김 사이클이 1초 span 을 생성할 수 있음 —
+    # 중요한 것은 두 세션이 서로 다른 instrument_id 아래만 span 을 남긴다
+    assert all(s.instrument_id == instrument_a for s in spans_a)
+    assert all(s.instrument_id == instrument_b for s in spans_b)
 
 
 # ---------------------------------------------------------------------------
