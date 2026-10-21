@@ -456,3 +456,56 @@ def test_bind_p99_latency_within_pretrade_gate_budget(
         f"p99 proxy cpu_ms={sample.cpu_ms:.3f}ms exceeds 5ms budget "
         f"(wall_ms={sample.wall_ms:.3f}ms)"
     )
+
+
+# --- gate-red 재현: 10x CPU 지연 주입으로 단언이 적색으로 넘어가는지 검증 -------
+
+
+@pytest.mark.perf
+def test_bind_goes_red_with_10x_cpu_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    5ms * 10 = 50ms를 초과하는 CPU 시간을 가장하면
+    `sample.cpu_ms < 5.0` 단언이 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    """
+    budget_ms = 5.0
+
+    m = mandate(
+        max_single_instrument_pct=20.0,
+        max_total_exposure_pct=30.0,
+        min_cash_buffer_pct=10.0,
+    )
+    a = agg(
+        total_equity=Decimal("10000"),
+        per_symbol_pct={"BTC/USDT": Decimal("5")},
+        total_exposure_pct=Decimal("10"),
+    )
+
+    def _call_once() -> None:
+        bind(qty=Decimal("50"), price=Decimal("100"), symbol="BTC/USDT", agg=a, mandate=m)
+
+    # process_time을 monkeypatch: 호출할 때마다 50ms(10x budget)를 더한다.
+    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
+    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
+    _fake_time = 0.0
+
+    def _fake_process_time() -> float:
+        nonlocal _fake_time
+        _fake_time += 50.0  # 50ms = 10x budget per call
+        return _fake_time
+
+    monkeypatch.setattr("time.process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.best_of(_call_once, n=5, batch=100)
+        assert sample.cpu_ms < budget_ms, (
+            f"p99 proxy cpu_ms={sample.cpu_ms:.3f}ms exceeds {budget_ms}ms budget "
+            f"(wall_ms={sample.wall_ms:.3f}ms)"
+        )
