@@ -52,7 +52,25 @@ SCRIPTS_DIR = ROOT / "scripts"
 # widen to 20000x to absorb remaining parallel-load spikes.
 # task-15868: CI perf card still failing at 20000x under parallel load;
 # widen to 50000x to absorb worst-case disk-I/O contention.
-_SCAN_TREE_MAX_RATIO = 50000.0
+# task-16894: widening this ratio forever never converged (500x -> 1000x ->
+# 3000x -> 5000x -> 20000x -> 50000x across six prior tasks, still red) --
+# the default `_calibration_loop` is a pure in-memory CPU loop with zero
+# disk I/O, while `count_tree(src/)` is dominated by ~1,600 file opens/reads.
+# Under a disk-I/O contention spike the op slows a lot and the calibration
+# barely moves at all, so no fixed ratio against that calibration is ever
+# safe -- this is the same class of mismatch the module docstring already
+# names for DB round-trips (task-10652): the calibration must exercise the
+# same contended resource as the operation. Passing `calibration_fn` that
+# runs the identical scanner over `scripts/` (same I/O-bound code path, ~18x
+# fewer files) makes both sides move together under disk contention; locally
+# measured ratio is a stable ~8.0-8.2x warm-cache across repeated runs
+# (vs. the old pure-CPU-loop calibration's documented 30x-277x swing under
+# load). 100x keeps ~12x headroom above that for host/file-count variance.
+_SCAN_TREE_MAX_RATIO = 100.0
+
+
+def _calibration_scan() -> None:
+    check_code_language.count_tree(SCRIPTS_DIR)
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -435,6 +453,7 @@ def test_count_tree_full_src_scan_completes_within_budget() -> None:
         n=3,
         warmup=1,
         label="count_tree(src) full scan",
+        calibration_fn=_calibration_scan,
     )
 
     assert result is not None
