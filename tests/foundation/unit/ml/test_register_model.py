@@ -11,11 +11,9 @@ registry ordering, completed-job guard).
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 import pytest
 
@@ -31,6 +29,7 @@ from src.foundation.ml.domain.registry_rules import (
 )
 from src.foundation.ml.ports.train_job_repository import TrainJobState, TrainJobStatus
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 _NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
 _LINEAGE = TrainDataLineage(
@@ -94,24 +93,35 @@ def _completed_job(
 # --- happy path ---
 
 
-async def test_register_model_computes_hash_and_registers() -> None:
+@pytest.mark.perf
+async def test_register_model_computes_hash_and_registers(
+    perf_budget: PerfBudget,
+) -> None:
     job = _completed_job()
     registry = _FakeModelRegistry()
     artifacts = _FakeArtifactStore()
 
-    card = await register_model(
-        job=job,
-        version="v1",
-        train_data_lineage=_LINEAGE,
-        trained_at=_NOW,
-        model_registry=registry,
-        artifact_store=artifacts,
-    )
+    async def _measure() -> None:
+        return await register_model(
+            job=job,
+            version="v1",
+            train_data_lineage=_LINEAGE,
+            trained_at=_NOW,
+            model_registry=registry,
+            artifact_store=artifacts,
+        )
 
+    sample = await perf_budget.sample_async(_measure)
+
+    card = sample.result
     assert card.model_hash == hashlib.sha256(b"tree-content-A").hexdigest()
     assert card.metrics == {"rmse": 0.1}
     assert artifacts.saved[card.model_hash] == "tree-content-A"
     assert await registry.get("m1", "v1") == card
+    assert sample.cpu_ms < _REGISTER_MODEL_P95_BUDGET_MS, (
+        f"single-call CPU={sample.cpu_ms:.3f}ms exceeds budget "
+        f"<{_REGISTER_MODEL_P95_BUDGET_MS:.1f}ms (wall={sample.wall_ms:.3f}ms)"
+    )
 
 
 async def test_register_model_identical_retry_is_idempotent() -> None:
@@ -341,18 +351,19 @@ async def test_register_model_perf_budget_catches_10x_delay_injection(
 
     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
     검증한다.
+
+    지연 주입은 perf_inject.delayed_async — type: ignore budgets를 소모하지
+    않는다(task-11539 감사 후속).
     """
     registry = _FakeModelRegistry()
     artifacts = _FakeArtifactStore()
 
     # register에 50ms 지연 주입 (예산 50ms의 10배)
-    original_register = registry.register
-
-    async def _register_with_delay(*args: Any, **kwargs: Any) -> ModelCard:
-        await asyncio.sleep(0.05)  # 50ms per call
-        return await original_register(*args, **kwargs)
-
-    monkeypatch.setattr(registry, "register", _register_with_delay)
+    monkeypatch.setattr(
+        registry,
+        "register",
+        delayed_async(registry.register, seconds=0.05),
+    )
 
     _delay_idx = [0]
 
