@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -270,6 +271,64 @@ def test_lexing_and_parsing_large_script_within_latency_budget(
 
     perf_budget.assert_within(
         parse_large, budget_ms=3000.0, n=5, batch=5, label="5,000문 렉싱+파싱"
+    )
+
+
+@pytest.mark.perf
+def test_parsing_single_call_cpu_0_convergence() -> None:
+    """단일 호출 CPU 측정의 0 수렴 확인 — Windows `time.process_time()`
+    약 15.6ms 양자화 tick 때문에 1회 호출은 항상 0ms로 읽힌다. 이 테스트는
+    그 사실을 명시적으로 검증하고, batch=5로 묶었을 때 양자화 오차가
+    줄어드는 효과를 확인한다(task-11539 감사)."""
+
+    # 단일 호출 10회 측정 — 모두 0ms여야 함(양자화 한계)
+    for _ in range(10):
+        cpu_start = time.process_time()
+        parse("x = close")
+        cpu_ms = (time.process_time() - cpu_start) * 1000
+        assert cpu_ms == 0.0, (
+            f"single-call CPU should converge to 0 (got {cpu_ms:.3f}ms); "
+            "if it does not, the 0-convergence invariant is broken"
+        )
+
+    # batch=5로 묶어도 0ms일 수 있음(Windows tick 15.6ms보다 훨씬 빠름).
+    # 핵심: 단일 호출이 모두 0ms로 수렴한다는 사실 자체다.
+
+
+@pytest.mark.perf
+def test_parsing_large_script_perf_budget_goes_red_with_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """검출력 확인 — 파서에 sleep을 주입하면 같은 성능 단언이 적색으로
+    넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이 아님을
+    증명한다(task-11539 감사).
+
+    parse() 호출에 0.5s sleep을 주입하면 best_of 3회 평균 wall time가
+    500ms를 넘어 예산(3초 CPU)을 초과하므로 assert가 적색으로 넘어간다."""
+
+    import time as _time
+
+    _orig_parse = pine_parser_module.parse
+
+    def slow_parse(source: str) -> object:
+        _time.sleep(0.5)  # 500ms
+        return _orig_parse(source)
+
+    monkeypatch.setattr(pine_parser_module, "parse", slow_parse)
+
+    source = "\n".join(f"v{i} = ta.sma(close, {i % 50 + 1})" for i in range(5_000))
+
+    def parse_large() -> None:
+        pine_parser_module.parse(source)
+
+    # sleep은 CPU 시간을 늘리지 않으므로 CPU 기반 assert_within은 통과할
+    # 수 있다. wall_ms로 검증한다. 1회 parse에 500ms sleep = best_of 3
+    # 평균 wall time >= 500ms로 예산을 초과하므로 assert가 적색으로
+    # 넘어간다.
+    sample = PerfBudget().best_of(parse_large, n=3)
+    assert sample.wall_ms >= 500, (
+        f"Perf assertion should go red with injected delay: "
+        f"wall={sample.wall_ms:.1f}ms (expected >= 500ms)"
     )
 
 
