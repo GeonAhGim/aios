@@ -178,7 +178,63 @@ def test_performance_signal_construction_p99_within_pretrade_gate_budget(
     assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
 
 
-# --- 게이트 적색 재현 (1) --------------------------------------------------
+# --- 게이트 적색 재현 (1): 10x 지연 주입으로预算 단언이 적색인지 검증 --------
+
+
+@pytest.mark.perf
+def test_performance_signal_construction_budget_catches_10x_delay_injection(
+    perf_budget,
+    monkeypatch,
+):
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. time.process_time을 monkeypatch해 1회 호출당
+    10x 예산(5ms × 10 = 50ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 각 sample() 호출의 delta(종료-시작)가 50ms가
+    # 되도록 한다. 반환값은 절대값이 아니라 delta로 측정하므로
+    # 매 호출마다 50ms씩 증가하는 값을 돌려야 한다.
+    _call_count = [0]
+
+    def _fake_process_time() -> float:
+        _call_count[0] += 1
+        # 매 호출마다 50ms(0.05초)씩 증가 → batch=100이어도
+        # delta = (batch+1)번째 호출 - 첫 호출 = 0.05초 = 50ms
+        # cpu_ms = 50ms / 100(batch) = 0.5ms per call ... 아니다.
+        # PerfBudget은 (cpu_end - cpu_start) * 1000 / batch 로 계산한다.
+        # delta를 batch * 5ms(0.005초)로 하면 cpu_ms = 5ms가 된다.
+        # batch=100이므로 0.005 * 100 = 0.5초 증가 필요.
+        # 간단히: 매 호출당 1초 증가 → delta = 101초 - 0초 = 101초
+        # cpu_ms = 101000ms / 100 = 1010ms >> 5ms
+        return float(_call_count[0])
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    kwargs = _valid_kwargs()
+
+    def _build_once() -> None:
+        Signal(**kwargs)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        samples = perf_budget.samples(
+            _build_once,
+            n=100,
+            batch=100,
+        )
+        cpu_ms_values = sorted(s.cpu_ms for s in samples)
+        p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99) - 1]
+        assert p99_ms < 5.0, f"p99={p99_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
+
+
+# --- 게이트 적색 재현 (2): target_position draft 값 구분 불가 ----------------
 
 
 def test_gate_red_target_position_draft_value_not_distinguishable_from_real_zero():
