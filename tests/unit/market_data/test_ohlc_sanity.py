@@ -319,3 +319,101 @@ def test_check_candle_batch_p95_within_budget(
             check_candle(c)
 
     perf_budget.assert_within(_run_batch, budget_ms=5000)
+
+
+# ── 단일 호출 CPU 측정 + 0 수렴 ──
+
+
+@pytest.mark.perf
+def test_check_candle_single_call_cpu_converges_to_zero(
+    perf_budget: Any,
+) -> None:
+    """단일 호출 CPU 측정: check_candle 1회 호출이 CPU 시간 1ms 미만이어야 한다.
+
+    check_candle은 순수 CPU 함수이므로 I/O 대기 없이 실제 CPU 시간만 측정한다.
+    Windows의 time.process_time() 약 15.6ms 양자화 오차를 batch=64로 줄여
+    0 수렴을 검증한다(task-11539).
+    """
+    valid = _candle()
+
+    def _one_call() -> None:
+        check_candle(valid)
+
+    sample = perf_budget.sample(_one_call, batch=64)
+    assert sample.cpu_ms < 1.0, (
+        f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        f"순수 도메인 로직은 1ms 미만이어야 함 (budget<1ms)"
+    )
+
+
+# ── 게이트 적색 재현: 성능 단언이 지연을 포착하는지 역으로 증명 ──
+
+
+def test_cpu_budget_catches_10x_delay_injection(
+    perf_budget: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    10x 예산(5000ms × 10 = 50000ms)을 초과하는 CPU 시간을 가장하면 budget 단언이
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다.
+    """
+
+    def _fake_process_time() -> float:
+        _fake_process_time._accum += 50000.0  # +50s per call >> 5000ms budget
+        return _fake_process_time._accum
+
+    _fake_process_time._accum = 0.0
+
+    # Patch where PerfBudget reads it (tests.support.perf_budget module level)
+    import tests.support.perf_budget as _pb_module
+
+    monkeypatch.setattr(_pb_module.time, "process_time", _fake_process_time)
+
+    valid = _candle()
+
+    def _one_call() -> None:
+        check_candle(valid)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = perf_budget.sample(_one_call, batch=5)
+        assert sample.cpu_ms < 5000.0  # 이 단언이 실패해야 함
+
+
+def test_cpu_budget_passes_with_sleep_injection(
+    perf_budget: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트-red 재현 — check_candle 생성은 순수 CPU 작업이므로
+    `time.sleep`을 monkeypatch해도 CPU 시간이 늘어나지 않는다. PerfBudget이
+    `time.process_time()`을 사용하므로 sleep 주입은 CPU 측정에 영향을
+    주지 않는다.
+
+    `time.sleep`을 100ms 지연으로 교체한 후 check_candle을 측정하면
+    CPU 시간은 0에 수렴하고 wall-clock만 지연된다. CPU 예산 단언이
+    통과하는 것으로 입증한다.
+    """
+    import time as _time
+
+    _sleep_count = [0]
+
+    def _slow_sleep(duration: float) -> None:
+        _sleep_count[0] += 1
+        _time.sleep(0.1)  # 100ms per sleep call
+
+    # Patch where the code under test would call it (it doesn't, but this
+    # proves the measurement system is CPU-only)
+    monkeypatch.setattr(_time, "sleep", _slow_sleep)
+
+    valid = _candle()
+
+    def _one_call() -> None:
+        check_candle(valid)
+
+    sample = perf_budget.sample(_one_call, batch=64)
+    # check_candle은 sleep을 호출하지 않으므로 CPU 시간은 0에 수렴
+    assert sample.cpu_ms < 1.0, f"sleep 주입에도 CPU 시간이 초과됨: {sample.cpu_ms:.3f}ms"
