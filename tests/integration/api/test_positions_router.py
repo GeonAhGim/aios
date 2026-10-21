@@ -7,8 +7,11 @@ import uuid
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
+
 from src.foundation.entities.adapters.postgres_repository import PostgresEntityRepository
 from tests.integration.foundation.entities.conftest import build_hierarchy
+from tests.support.perf_budget import PerfBudget
 from tests.support.positions_router import (
     BASE,
     _assert_error_envelope,
@@ -23,7 +26,6 @@ from tests.support.positions_router import pool as pool
 async def test_positions_require_authentication(client):
     response = await client.get(BASE)
     assert response.status_code == 401
-
 
 
 async def test_list_positions_returns_own_open_positions_and_filters(client, pool):
@@ -56,7 +58,6 @@ async def test_list_positions_returns_own_open_positions_and_filters(client, poo
     assert items[0]["schema_version"] == "v1"
 
 
-
 async def test_list_positions_other_tenant_account_is_404_isomorphic(client, pool):
     victim_headers, victim_id = await _register(client)
     attacker_headers, _ = await _register(client)
@@ -73,7 +74,6 @@ async def test_list_positions_other_tenant_account_is_404_isomorphic(client, poo
 
     own = await client.get(BASE, headers=victim_headers, params={"account_id": str(account_id)})
     assert own.status_code == 200 and len(own.json()["data"]["items"]) == 1
-
 
 
 async def test_list_positions_without_portfolio_id_is_unchanged_regression(client, pool):
@@ -112,7 +112,6 @@ async def test_list_positions_without_portfolio_id_is_unchanged_regression(clien
     }
 
 
-
 async def test_list_positions_portfolio_id_filters_to_that_portfolio_only(client, pool):
     headers, tenant_id = await _register(client)
     repo = PostgresEntityRepository(pool)
@@ -142,7 +141,6 @@ async def test_list_positions_portfolio_id_filters_to_that_portfolio_only(client
     assert [item["position_key"] for item in items] == [in_a.position_key]
 
 
-
 async def test_list_positions_portfolio_id_rejects_cross_tenant_scope_fail_closed(client, pool):
     """negative — 다른 테넌트 소유 portfolio_id를 주면 그 tenant의 포지션
     전체를 돌려주는 대신(전체 반환 폴백 금지) 404로 거부한다."""
@@ -164,7 +162,6 @@ async def test_list_positions_portfolio_id_rejects_cross_tenant_scope_fail_close
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
 
 
-
 async def test_list_positions_portfolio_id_rejects_unknown_portfolio(client, pool):
     headers, tenant_id = await _register(client)
     account_id = await _create_account(pool, tenant_id)
@@ -173,7 +170,6 @@ async def test_list_positions_portfolio_id_rejects_unknown_portfolio(client, poo
     response = await client.get(BASE, headers=headers, params={"portfolio_id": str(uuid.uuid4())})
     assert response.status_code == 404
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
-
 
 
 async def test_list_positions_closed_portfolio_scope_is_rejected_fail_closed(client, pool):
@@ -206,7 +202,6 @@ async def test_list_positions_closed_portfolio_scope_is_rejected_fail_closed(cli
     _assert_error_envelope(response.json(), "RESOURCE_NOT_FOUND")
 
 
-
 async def test_list_positions_portfolio_id_concurrent_mixed_tenants_do_not_cross_leak(client, pool):
     """D3증거 -- 서로 다른 tenant가 `portfolio_id`로 스코프한 `GET /positions`를
     asyncio.gather로 동시에 섞어 호출해도(공유 커넥션 풀·앱 인스턴스) 각
@@ -237,3 +232,102 @@ async def test_list_positions_portfolio_id_concurrent_mixed_tenants_do_not_cross
     for response in responses:
         assert response.status_code == 200
         assert len(response.json()["data"]["items"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Performance measurement — task-16078 (PERF-detection gate-red)
+# ---------------------------------------------------------------------------
+
+# LB-19: GET /v1/positions is a read-only DB query with tenant scoping.
+# Budget is wall-clock latency for a single call returning ≤2 positions
+# (calibrated against a typical dev-box with local Postgres).
+_LIST_POSITIONS_LATENCY_BUDGET_MS = 200.0
+
+
+@pytest.mark.perf
+async def test_list_positions_single_call_latency_within_budget(
+    client,
+    pool,
+) -> None:
+    """LB-19: normal 입력에서 단일 호출 지연이 예산 내에 있음을 측정한다.
+    PerfBudget.sample_async 로 wall-clock 을 재고 budget_ms 단언으로
+    정량 검증한다 (task-11539 감사 후속 — raw 타이머가 아닌 공용 헬퍼)."""
+    headers, tenant_id = await _register(client)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
+
+    perf_budget = PerfBudget()
+
+    async def _fetch() -> object:
+        return await client.get(BASE, headers=headers)
+
+    sample = await perf_budget.sample_async(_fetch, batch=1)
+    assert sample.wall_ms < _LIST_POSITIONS_LATENCY_BUDGET_MS, (
+        f"wall={sample.wall_ms:.3f}ms budget={_LIST_POSITIONS_LATENCY_BUDGET_MS}ms "
+        f"cpu={sample.cpu_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_gate_red_reproduction_positions_latency_budget_catches_db_regression(
+    monkeypatch: pytest.MonkeyPatch,
+    client,
+    pool,
+) -> None:
+    """게이트 적색 재현 — 정상 호출이 녹색인 것과 동일 단언을 10배 sleep
+    주입에서 적색으로 만든다 (task-11539 감사: 이 파일에 gate-red 테스트가
+    없었음)."""
+    # 먼저 제어 테스트: 정상 입력에서 녹색 확인
+    await test_list_positions_single_call_latency_within_budget(client, pool)
+
+    # sleep 을 monkeypatch 로 주입 — async 클라이언트 내부 await 지점에
+    # 지연을 더해 전체 지연이 예산을 초과하도록 만든다.
+    original_request = client.request
+
+    async def _delayed_request(*args, **kwargs):
+        await asyncio.sleep(_LIST_POSITIONS_LATENCY_BUDGET_MS * 10 / 1000)
+        return await original_request(*args, **kwargs)
+
+    monkeypatch.setattr(client, "request", _delayed_request)
+
+    # 동일한 단언이 지연 주입에서 실패해야 한다.
+    with pytest.raises(AssertionError) as exc_info:
+        await test_list_positions_single_call_latency_within_budget(client, pool)
+    # 실제 budget 단언 실패인지 확인 (다른 AssertionError 가 아님)
+    assert "wall=" in str(exc_info.value) or "budget=" in str(exc_info.value)
+
+
+async def test_list_positions_latency_budget_zero_rejects_invalid_budget(
+    client,
+    pool,
+) -> None:
+    """음성 — budget_ms ≤ 0 은 ValueError 를 던진다 (PerfBudget 불변식)."""
+    from tests.support.perf_detection import assert_async_p99_ms
+
+    headers, tenant_id = await _register(client)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
+
+    with pytest.raises(ValueError):
+        await assert_async_p99_ms(
+            lambda: client.get(BASE, headers=headers),
+            budget_ms=0,
+        )
+
+
+async def test_list_positions_latency_budget_negative_rejects_invalid_budget(
+    client,
+    pool,
+) -> None:
+    """음성 — budget_ms < 0 은 ValueError 를 던진다."""
+    from tests.support.perf_detection import assert_async_p99_ms
+
+    headers, tenant_id = await _register(client)
+    account_id = await _create_account(pool, tenant_id)
+    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
+
+    with pytest.raises(ValueError):
+        await assert_async_p99_ms(
+            lambda: client.get(BASE, headers=headers),
+            budget_ms=-1.0,
+        )
