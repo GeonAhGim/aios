@@ -172,6 +172,45 @@ def test_detect_spikes_throughput_within_latency_budget(perf_budget: PerfBudget)
     perf_budget.assert_within(_run_once, budget_ms=5000, batch=100, n=5)
 
 
+@pytest.mark.perf
+def test_detect_spikes_throughput_catches_10x_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate-red reproduction (D2, task-11539 후속): 성능 예산 단언이 실제로
+    위반을 포착하는지 역으로 증명한다. ``time.process_time``을 monkeypatch해
+    1회 호출당 예산(5,000ms)을 10배 초과하는 CPU 시간을 가장하면
+    ``assert_within``가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    """
+    import time as _time
+
+    closes = _noisy_closes(seed=99, steps=20_000, bound="0.02")
+    candles = _series(closes)
+    budget_ms = 5_000.0
+
+    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
+    # 이를 monkeypatch해 항상 10초(10x budget)를 반환하게 한다.
+    _fake_time = [0.0]
+
+    def _fake_process_time() -> float:
+        _fake_time[0] += 10_000.0  # 10 000ms = 10x budget per call
+        return _fake_time[0]
+
+    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: detect_spikes(candles),
+            budget_ms=budget_ms,
+            n=3,
+            batch=100,
+            label="detect_spikes 20,000 candles delay-injected",
+        )
+
+
 def test_gate_mad_floor_guard_prevents_false_positive_storm_on_flat_market() -> None:
     """Gate-red reproduction -- on a perfectly flat market (all trailing log
     returns exactly 0), the trailing median and MAD are both 0. Without the
