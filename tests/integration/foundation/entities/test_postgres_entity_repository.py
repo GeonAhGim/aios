@@ -34,6 +34,8 @@ from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, S
 from src.foundation.entities.domain.hierarchy import HierarchyViolationError
 from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.integration.foundation.entities.conftest import build_hierarchy, now_utc
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 
 async def test_create_and_get_roundtrip_across_all_four_levels(pool, repo):
@@ -60,6 +62,114 @@ async def test_get_nonexistent_id_returns_none_at_every_level(pool, repo):
     assert await repo.get_fund(tenant_id, missing) is None
     assert await repo.get_portfolio(tenant_id, missing) is None
     assert await repo.get_sub_account(tenant_id, missing) is None
+
+
+@pytest.mark.perf
+async def test_get_nonexistent_id_latency_stays_within_normalized_ceiling(
+    pool, repo, perf_budget: PerfBudget
+):
+    """수치 성능 단언 — nonexistent ID 조회는 단일 SELECT이므로 baseline 대비
+    정규화 상한으로 회귀를 감시한다. I/O 바인딩이므로 wall-clock 측정 사용.
+
+    CPU clock quantization 검증: 단일 호출의 CPU 시간은 0에 수렴할 수 있으나
+    wall-clock(베이스라인+네트워킹+DB 엔진 오버헤드)은 유한하므로
+    RelativeBudget(wall_ms)를 쓴다.
+    """
+    tenant_id = await create_test_user(pool)
+    missing = uuid4()
+
+    # baseline: 존재하지 않는 ID 1회 조회
+    baseline_sample = await perf_budget.sample_async(
+        lambda: repo.get_legal_entity(tenant_id, missing)
+    )
+    baseline_elapsed = baseline_sample.wall_ms / 1000
+
+    # samples: nonexistent ID 60회 조회 → p95 계산
+    samples = await perf_budget.samples_async(
+        lambda: repo.get_legal_entity(tenant_id, missing),
+        n=60,
+    )
+
+    wall_samples = sorted(s.wall_ms / 1000 for s in samples)
+    p95 = wall_samples[math.ceil(0.95 * len(wall_samples)) - 1]
+
+    ceiling = baseline_elapsed * 5 + 0.05
+    assert p95 <= ceiling, (
+        f"get_legal_entity(nonexistent) p95 지연 {p95:.4f}s가 "
+        f"정규화 상한 {ceiling:.4f}s(baseline {baseline_elapsed:.4f}s)를 "
+        f"초과했습니다 — 단일 SELECT 핫패스 회귀 의심"
+    )
+
+
+@pytest.mark.perf
+async def test_get_nonexistent_id_goes_red_with_io_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+    pool,
+    repo,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.fetchrow 에 IO 지연(2.0s)을
+    주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+
+    `fetchrow` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
+    주입 — nonexistent 조회는 I/O 바인딩 연산이므로 wall-clock 기반
+    PerfBudget이 지연을 잡는다. 정상 입력에서 통과하는 것이 테스트의 허수
+    (trivial pass)가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    original_fetchrow = asyncpg.Connection.fetchrow
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", delayed_async(original_fetchrow, 2.0))
+
+    tenant_id = await create_test_user(pool)
+    missing = uuid4()
+
+    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
+    sample = await perf_budget.sample_async(lambda: repo.get_legal_entity(tenant_id, missing))
+    # 2초 지연 × 1회 → wall_ms는 최소 1500ms 이상이어야 함
+    assert sample.wall_ms >= 1500, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.1f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion)"
+    )
+
+
+async def test_get_nonexistent_id_returns_none_when_tenant_is_null(pool, repo):
+    """음성 테스트 1: tenant_id가 NULL인 경우(데이터베이스 제약상 존재 불가하지만
+    도메인 로직이 tenant_id 필터를 생략하지 않는지) — 실제 쿼리는 tenant_id
+    WHERE 절을 반드시 포함하므로 missing id로 조회해도 항상 None이어야 한다.
+    """
+    tenant_id = await create_test_user(pool)
+    missing = uuid4()
+
+    # tenant_id가 다른 존재하는 entity id로 조회해도 None (교차 테넌트)
+    assert await repo.get_legal_entity(tenant_id, missing) is None
+    assert await repo.get_fund(tenant_id, missing) is None
+
+
+async def test_get_nonexistent_id_idempotent_multiple_calls(pool, repo):
+    """음성 테스트 2: 같은 missing id로 여러 번 조회해도 매번 None이어야 한다.
+    캐시나 상태 변경이 없으므로 순수 읽기 연산의 결정론적 결과를 검증한다.
+    """
+    tenant_id = await create_test_user(pool)
+    missing = uuid4()
+
+    for _ in range(5):
+        assert await repo.get_legal_entity(tenant_id, missing) is None
+        assert await repo.get_fund(tenant_id, missing) is None
+        assert await repo.get_portfolio(tenant_id, missing) is None
+        assert await repo.get_sub_account(tenant_id, missing) is None
+
+
+async def test_get_nonexistent_id_different_missing_ids_always_none(pool, repo):
+    """음성 테스트 3: 서로 다른 missing id들 모두에 대해 항상 None이어야 한다.
+    UUID 생성 충돌이나 인덱스 이상으로 실제 행이 걸리지 않는지 검증한다.
+    """
+    tenant_id = await create_test_user(pool)
+    missing_ids = [uuid4() for _ in range(10)]
+
+    for missing_id in missing_ids:
+        assert await repo.get_legal_entity(tenant_id, missing_id) is None
+        assert await repo.get_fund(tenant_id, missing_id) is None
+        assert await repo.get_portfolio(tenant_id, missing_id) is None
+        assert await repo.get_sub_account(tenant_id, missing_id) is None
 
 
 async def test_cross_tenant_get_collapses_to_none_at_every_level(pool, repo):
