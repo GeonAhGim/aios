@@ -31,6 +31,7 @@ from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_user
 from tests.support.db import create_pool_with_retry, ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
+from tests.support.perf_inject import delayed_async
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -147,9 +148,77 @@ async def test_downgrade_then_upgrade_backfills_personal_tenant() -> None:
     assert membership_rows[0]["revision"] == 1
 
 
-async def test_active_membership_unique_per_tenant_subject(pool: asyncpg.Pool) -> None:
+@pytest.mark.perf
+async def test_active_membership_unique_per_tenant_subject(
+    pool: asyncpg.Pool, perf_budget: PerfBudget
+) -> None:
+    """수치 성능 단언 — `uq_tenant_membership_active` 부분 UNIQUE 인덱스가
+    걸린 상태에서 ACTIVE INSERT → 중복 ACTIVE 충돌 감지 → SUSPENDED 공존
+    삽입까지의 전체 흐름이 예산 이내여야 한다.
+
+    예산: MEMBERSHIP_INSERT_P95_BUDGET_MS(120ms) — 단일 INSERT 예산과 동일.
+    이 테스트는 INSERT 2회 + unique 충돌 1회 + SELECT 1회를 한 세트로
+    측정하므로 실제 측정치는 INSERT 1회 예산을 크게 넘지 않는다.
+    """
     subject_id = await create_test_user(pool)
     tenant_id = uuid4()  # ORGANIZATION tenant는 personal backfill과 무관한 신규 id
+
+    async def _unique_flow() -> None:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id
+            )
+            await conn.execute(
+                "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+                "VALUES ($1, $2, 'MEMBER', 'ACTIVE')",
+                tenant_id,
+                subject_id,
+            )
+
+            try:
+                await conn.execute(
+                    "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+                    "VALUES ($1, $2, 'ADMIN', 'ACTIVE')",
+                    tenant_id,
+                    subject_id,
+                )
+            except asyncpg.UniqueViolationError:
+                pass  # 부분 인덱스에 의한 기대 동작
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+                "VALUES ($1, $2, 'ADMIN', 'SUSPENDED')",
+                tenant_id,
+                subject_id,
+            )
+            rows = await conn.fetch(
+                "SELECT state FROM tenant_membership WHERE tenant_id = $1 AND subject_id = $2",
+                tenant_id,
+                subject_id,
+            )
+        assert {r["state"] for r in rows} == {"ACTIVE", "SUSPENDED"}
+
+    sample = await perf_budget.sample_async(_unique_flow, batch=1)
+    assert sample.cpu_ms < MEMBERSHIP_INSERT_P95_BUDGET_MS, (
+        f"ACTIVE unique 흐름 CPU {sample.cpu_ms:.3f}ms — "
+        f"예산 {MEMBERSHIP_INSERT_P95_BUDGET_MS}ms 초과 "
+        f"(wall={sample.wall_ms:.3f}ms)"
+    )
+
+
+# ----------------------------------------------------------------------
+# 음성 테스트 — unique 제약 위반 경로
+# ----------------------------------------------------------------------
+
+
+async def test_active_membership_unique_rejects_different_role_same_state(
+    pool: asyncpg.Pool,
+) -> None:
+    """negative — 같은 (tenant_id, subject_id) + ACTIVE 상태면 role이
+    달라도 UNIQUE 위반이어야 한다."""
+    subject_id = await create_test_user(pool)
+    tenant_id = uuid4()
 
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id)
@@ -163,26 +232,152 @@ async def test_active_membership_unique_per_tenant_subject(pool: asyncpg.Pool) -
         with pytest.raises(asyncpg.UniqueViolationError):
             await conn.execute(
                 "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
-                "VALUES ($1, $2, 'ADMIN', 'ACTIVE')",
+                "VALUES ($1, $2, 'OWNER', 'ACTIVE')",
                 tenant_id,
                 subject_id,
             )
 
-    # 부분 인덱스(WHERE state = 'ACTIVE')라 비활성 상태는 같은 (tenant_id, subject_id)로
-    # 공존할 수 있다 — SUSPENDED/REVOKED 이력 행은 막지 않는 것이 의도다.
+
+async def test_active_membership_unique_allows_same_subject_different_tenant(
+    pool: asyncpg.Pool,
+) -> None:
+    """negative — 다른 tenant_id이면 같은 subject_id의 ACTIVE membership이
+    공존해야 한다(부분 인덱스 키는 (tenant_id, subject_id) 조합)."""
+    subject_id = await create_test_user(pool)
+    tenant_id_a = uuid4()
+    tenant_id_b = uuid4()
+
     async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id_a)
+        await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id_b)
         await conn.execute(
             "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
-            "VALUES ($1, $2, 'ADMIN', 'SUSPENDED')",
-            tenant_id,
+            "VALUES ($1, $2, 'MEMBER', 'ACTIVE')",
+            tenant_id_a,
             subject_id,
         )
+        # 같은 subject_id지만 다른 tenant_id — 공존 가능
+        await conn.execute(
+            "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+            "VALUES ($1, $2, 'MEMBER', 'ACTIVE')",
+            tenant_id_b,
+            subject_id,
+        )
+
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT state FROM tenant_membership WHERE tenant_id = $1 AND subject_id = $2",
-            tenant_id,
+            "SELECT tenant_id FROM tenant_membership WHERE subject_id = $1 AND state = 'ACTIVE'",
             subject_id,
         )
-    assert {r["state"] for r in rows} == {"ACTIVE", "SUSPENDED"}
+    assert {r["tenant_id"] for r in rows} == {tenant_id_a, tenant_id_b}
+
+
+async def test_active_membership_unique_allows_different_subject_same_tenant(
+    pool: asyncpg.Pool,
+) -> None:
+    """negative — 같은 tenant_id라도 다른 subject_id면 ACTIVE membership이
+    공존해야 한다."""
+    subject_id_a = await create_test_user(pool)
+    subject_id_b = await create_test_user(pool)
+    tenant_id = uuid4()
+
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id)
+        await conn.execute(
+            "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+            "VALUES ($1, $2, 'MEMBER', 'ACTIVE')",
+            tenant_id,
+            subject_id_a,
+        )
+        await conn.execute(
+            "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+            "VALUES ($1, $2, 'ADMIN', 'ACTIVE')",
+            tenant_id,
+            subject_id_b,
+        )
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT subject_id, role FROM tenant_membership "
+            "WHERE tenant_id = $1 AND state = 'ACTIVE'",
+            tenant_id,
+        )
+    assert len(rows) == 2
+    roles = {r["role"] for r in rows}
+    assert roles == {"MEMBER", "ADMIN"}
+
+
+# ----------------------------------------------------------------------
+# 실패 주입 — 지연 주입으로 성능 단언이 적색 전환되는지 검증
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.perf
+async def test_active_membership_unique_goes_red_with_io_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction — asyncpg.execute 에 지연을 주입하면 성능
+    단언이 적색이 된다.
+
+    `delayed_async` 는 wall-clock 대기를 주입한다. `PerfBudget.sample_async`
+    는 wall_ms 를 측정하므로 wall-clock 기반 budget 단언이 지연을 잡는다.
+    정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을
+    보증한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    subject_id = await create_test_user(pool)
+    tenant_id = uuid4()
+
+    # asyncpg.Connection.execute 에 0.1s 지연 주입
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "execute",
+        delayed_async(asyncpg.Connection.execute, 0.1),
+    )
+
+    async def _unique_flow_with_delay() -> None:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id
+            )
+            await conn.execute(
+                "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+                "VALUES ($1, $2, 'MEMBER', 'ACTIVE')",
+                tenant_id,
+                subject_id,
+            )
+
+            try:
+                await conn.execute(
+                    "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+                    "VALUES ($1, $2, 'ADMIN', 'ACTIVE')",
+                    tenant_id,
+                    subject_id,
+                )
+            except asyncpg.UniqueViolationError:
+                pass
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO tenant_membership (tenant_id, subject_id, role, state) "
+                "VALUES ($1, $2, 'ADMIN', 'SUSPENDED')",
+                tenant_id,
+                subject_id,
+            )
+            rows = await conn.fetch(
+                "SELECT state FROM tenant_membership WHERE tenant_id = $1 AND subject_id = $2",
+                tenant_id,
+                subject_id,
+            )
+        assert {r["state"] for r in rows} == {"ACTIVE", "SUSPENDED"}
+
+    sample = await perf_budget.sample_async(_unique_flow_with_delay, batch=1)
+    # 0.1s 지연 × 최소 4회 execute → wall_ms >= 400ms 이상이어야 함
+    assert sample.wall_ms >= 400, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.1f}ms — "
+        f"예상과 달리 green: 측정/단언이 공허함(hollow assertion)"
+    )
 
 
 # ----------------------------------------------------------------------
