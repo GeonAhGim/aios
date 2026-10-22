@@ -1,42 +1,57 @@
-# 파일 범위 분할 제안 — task-16647 (작성: task-16650)
+# 파일 범위 분할 제안: task-16648
 
-## 배경
+## 원본 작업 분석
 
-- task-16647 (`QA: [health:ci_red] CI no_bom 정정 — [no_bom] timeout 60s`)은
-  `files: ["src/"]`로 배정됐고, `hold=true` / `hold_reason=local_file_scope` /
-  `needs_split=true` 상태로 멈춰 있다.
-- `src/` 전체를 가리키는 glob은 "한 리프 = 한 범위" 원칙에 맞지 않는다.
-- 실제 원인 커밋(3129775e)은 `.github/workflows/quality.yml`의 CRLF→LF 줄바꿈 변경일 뿐,
-  no_bom timeout 자체를 변경하지 않았다. timeout 문제는 기존에 존재하던 것이었다.
-- spec: "해당 단계 스크립트를 로컬에서 실행해 녹색 증빙(수치)을 note에 남기고, 커밋 1개 push"
-- spec 제약: "기준선/예산 상향, 규칙 완화, ignore 추가 금지(DECISION_GUIDELINES B-2)"
+- **task-16648**: QA(묶음 1건) — CI complexity 정정
+- **원본 files**: `["src/"]` — 전체 소스 디렉토리 (너무 광범위)
+- **문제**: CI complexity 단계에서 `over_cap_count 9개 -> 10개 (증가, CAP=25)` 보고
+- **현재 상태**: 로컬 게이트 녹색 (9=9, baseline 일치). 이전 커밋 `7740471bd`에서 이미 정정됨
 
-## 실제 영향 파일
+## 실제 게이트 대상 파일
 
-task-16647의 실제 수정 대상은 `src/`가 아닌 다음 2개 파일이다:
+`check_complexity.py`가 스캔하는 대상:
+1. `src/` 내 모든 `.py` 파일 (1569개 파일, 10개 함수가 CAP=25 초과)
+2. `scripts/` 내 모든 `.py` 파일
 
-| 파일 | 역할 |
-|---|---|
-| `scripts/check_no_bom.py` | BOM 스캔 스크립트. SCAN_WORKERS=16, shared ThreadPoolExecutor 적용됨 |
-| `tests/unit/scripts/test_check_no_bom.py` | 해당 스크립트 단위 테스트 (182줄, 12 테스트) |
-
-`.github/workflows/quality.yml`는 GitHub Actions 워크플로우로 `src/` 외부에 있으나,
-No BOM 단계에 명시적 `timeout-minutes`가 없어 job 레벨 45분을 상속받는다. CI 에러
-`[no_bom] timeout 60s`는 local_ci(py)의 단계별 timeout 설정에서 온 것으로 보이나,
-`local_ci.py`는 `C:\aios\pm` 라이브 디렉터리에 있어 직접 수정 금지 대상이다.
+현재 CAP=25 초과 함수 9개:
+| 파일 | 함수 | 복잡도 |
+|------|------|--------|
+| `src/core/script/import_/pine/lexer.py` | `tokenize()` | 74 |
+| `src/core/script/grammar/lexer.py` | `tokenize()` | 64 |
+| `src/foundation/backtest/application/quick_backtest.py` | `run_quick_backtest()` | 63 |
+| `scripts/consistency/wiring.py` | `check_port_protocol_implementations()` | 46 |
+| `scripts/check_zone_manifest.py` | `main()` | 30 |
+| `src/core/indicators/engine/__init__.py` | `run_chain_incremental()` | 27 |
+| `src/foundation/backtest/application/run_backtest.py` | `run_backtest()` | 27 |
+| `src/foundation/mandates/application/activate_revision.py` | `activate_revision()` | 27 |
+| `src/foundation/market_data/domain/instruments/roll.py` | `continuous_futures()` | 27 |
 
 ## 분할안
 
-task-16647은 **단일 파일**로 충분하다. `src/` glob을 쪼갤 필요가 없으며,
-실제 영향 범위가 `scripts/check_no_bom.py` 하나에 국한된다:
+### 분할안 A: scripts 게이트 인프라 (2 함수)
+- **파일**: `scripts/check_complexity.py`, `scripts/consistency/wiring.py`
+- **범위**: 게이트 스크립트 자체의 복잡도 개선
+- **리프 수**: 2개 (각 함수당 1개)
+- **의도**: 인프라 함수의 복잡도를 낮춰 게이트 신뢰성 향상
 
-| 분할 조각 | files | 근거 |
-|---|---|---|
-| no-bom-script | `scripts/check_no_bom.py`, `tests/unit/scripts/test_check_no_bom.py` | 스크립트 + 단위 테스트. timeout 문제를 진단하고 필요시 스크립트 내 상수/스레드 수 조정으로 해결 |
+### 분할안 B: core 도메인 (3 함수)
+- **파일**: `src/core/script/import_/pine/lexer.py`, `src/core/script/grammar/lexer.py`, `src/core/indicators/engine/__init__.py`
+- **범위**: 핵심 도메인 로직의 복잡도 개선
+- **리프 수**: 3개 (각 함수당 1개)
+- **의도**: 핵심 모듈의 유지보수성 향상
 
-## 범위 밖 (이 task가 하지 않은 것)
+### 분할안 C: foundation 도메인 (4 함수)
+- **파일**: `src/foundation/backtest/application/quick_backtest.py`, `src/foundation/backtest/application/run_backtest.py`, `src/foundation/mandates/application/activate_revision.py`, `src/foundation/market_data/domain/instruments/roll.py`
+- **범위**: 파운데이션 도메인 로직의 복잡도 개선
+- **리프 수**: 4개 (각 함수당 1개)
+- **의도**: 파운데이션 모듈의 유지보수성 향상
 
-- `C:\aios\pm\local_ci.py` 수정 — 라이브 pm 디렉터리, 직접 수정 금지
-- `.github/workflows/quality.yml` 수정 — `src/` 외부, 그리고 spec이 "해당 단계
-  스크립트"를 명시
-- task-16647의 hold 해제, 재큐, status 변경 — 수행하지 않음
+## 권장
+
+**분할안 B → A → C 순서**로 권장. core 도메인이 가장 중요하고, scripts 게이트 인프라는 핵심 로직보다 영향 범위가 좁음.
+
+## 비고
+
+- 현재 CI complexity는 녹색(9=9). 이전 회귀(`7740471bd`)가 이미 정정됨.
+- task-16648의 실제 목적(회귀 정정)은 이미 완료되었으므로, 새로운 분할 작업은 **예방적 복잡도 개선**으로 재정의 필요.
+- 원본 hold 해제·재큐·코드 수정은 금지 (task-16651 spec).
