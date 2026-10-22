@@ -254,7 +254,7 @@ async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
 
     `time.process_time()` 기반 측정에서 단일 `insert_or_get` 호출이
     0ms면 Windows 양자화 오차(≈15.6ms tick)로 인한 측정 결함이다.
-    batch=8로 여러 호출을 묶으면 양자화 오차가 호출당 tick/8로 줄어
+    batch=32로 여러 호출을 묶으면 양자화 오차가 호출당 tick/32로 줄어
     CPU 시간을 정상 측정한다. task-11539 감사: 0 수렴이면 batch로 정정.
     """
     sample = await perf_budget.sample_async(
@@ -264,10 +264,10 @@ async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
             result=_result(),
             computed_at=datetime.now(timezone.utc),
         ),
-        batch=8,
+        batch=32,
     )
     assert sample.cpu_ms > 0, (
-        f"단일 호출 CPU 시간이 0ms (batch=8 기준) — 측정 버그 또는 양자화 오차: "
+        f"단일 호출 CPU 시간이 0ms (batch=32 기준) — 측정 버그 또는 양자화 오차: "
         f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
     )
 
