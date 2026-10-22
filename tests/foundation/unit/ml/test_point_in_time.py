@@ -16,7 +16,7 @@ from src.foundation.ml.domain.point_in_time import (
     FutureDataLeakageError,
     check_point_in_time,
 )
-from tests.conftest import PerfBudget
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime.now(timezone.utc)
 
