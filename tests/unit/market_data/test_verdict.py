@@ -200,9 +200,13 @@ def test_decide_gate_red_delay_injection_exceeds_budget(
     fail (budget exceeded). This proves the performance assertion actually
     measures execution time, not some other property.
 
-    50 issues × 0.005s = 0.25s total delay per call, exceeding the 0.1s
-    budget. With n=3, batch=2 this completes in ~1s wall-clock."""
-    slow_decide = delayed_sync(verdict_mod.decide, 0.005)
+    Delay is 20ms per `decide()` call. On Windows `time.process_time()` has
+    ~15.6ms quantization (64 Hz clock); 5ms busy-wait registers as 0ms and
+    silently falsifies the gate-red proof. 20ms reliably registers as 31.25ms
+    in CPU time, exceeding the 0.1 ms budget.
+
+    With n=3, batch=2 this completes in ~1s wall-clock."""
+    slow_decide = delayed_sync(verdict_mod.decide, 0.02)
     monkeypatch.setattr(verdict_mod, "decide", slow_decide)
 
     issues = [_reject_issue(i) for i in range(50)]
@@ -210,14 +214,15 @@ def test_decide_gate_red_delay_injection_exceeds_budget(
     def _run() -> None:
         slow_decide(issues, total=1000)
 
-    perf_budget.assert_within(
-        _run,
-        budget_ms=0.1,
-        n=3,
-        warmup=0,
-        batch=2,
-        label="decide 50 issues with 5ms delay",
-    )
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _run,
+            budget_ms=0.1,
+            n=3,
+            warmup=0,
+            batch=2,
+            label="decide 50 issues with 20ms delay",
+        )
 
 
 def test_decide_is_deterministic_across_repeated_replay() -> None:
