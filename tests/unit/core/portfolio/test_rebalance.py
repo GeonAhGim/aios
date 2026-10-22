@@ -264,13 +264,15 @@ def test_perf_plan_rebalance_p99_within_pre_trade_gate_budget(perf_budget) -> No
 def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> None:
     """time.process_time() on Windows has ~15.6 ms quantization (64 Hz clock).
     When the measured function is faster than one tick, batch=1 reads 0 ms
-    every time and the average/p95 converges to zero — a measurement artifact,
-    not a real property of the function.
+    most of the time and the average converges toward zero — a measurement
+    artifact, not a real property of the function.
 
     batch=8+ bundles several calls into one tick window so the total CPU time
     exceeds one tick, reducing per-call quantization error to tick/batch.
-    This test verifies that batch=8 yields a higher average than batch=1,
-    confirming the measurement is no longer stuck at zero.
+    This test verifies two things:
+      1. batch=1 average is near-zero (quantization artifact confirmed).
+      2. batch=8 average is non-zero and within the expected budget range,
+         proving the measurement captures real CPU work.
 
     The actual CPU budget test below uses batch=8 to avoid this pitfall.
     """
@@ -293,11 +295,22 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     cpu_ms_batch8 = [s.cpu_ms for s in samples_batch8]
     avg_batch8 = sum(cpu_ms_batch8) / len(cpu_ms_batch8)
 
-    # batch=8 average must not be lower than batch=1 average
-    # (measurement should improve or stay equal, never degrade)
-    assert avg_batch8 >= avg_batch1, (
-        f"batch=8 avg {avg_batch8:.3f}ms < batch=1 avg {avg_batch1:.3f}ms — "
-        "quantization not improved by batching"
+    # batch=1 average must be near-zero (quantization artifact).
+    # Under Windows quantization, a fast function reads 0 ms most of the time;
+    # the average should stay below half a tick (~7.8 ms).
+    assert avg_batch1 < 7.8, (
+        f"batch=1 avg {avg_batch1:.3f}ms not near-zero — quantization artifact not confirmed"
+    )
+
+    # batch=8 average must be non-zero and within budget.
+    # With 200 symbols the real CPU cost is measurable; batch=8 should
+    # capture it without the zero-convergence artifact.
+    assert avg_batch8 > 0.01, (
+        f"batch=8 avg {avg_batch8:.3f}ms near-zero — batching did not recover quantization loss"
+    )
+    assert avg_batch8 < 5.0, (
+        f"batch=8 avg {avg_batch8:.3f}ms exceeds 5ms budget — "
+        "performance regression or budget too tight"
     )
 
 
