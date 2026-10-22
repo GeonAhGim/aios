@@ -354,17 +354,14 @@ def test_bind_p99_latency_within_pretrade_gate_budget(perf_budget) -> None:
 
 
 def test_bind_p99_budget_assertion_catches_regression(monkeypatch, perf_budget) -> None:
-    """게이트 적색 재현 — bind() 내부에 인위 지연을 주입해 p99 예산 단언이
-    실제로 AssertionError를 내는지 확인한다(타우톨로지 아님을 증명)."""
+    """게이트 적색 재현 — bind()에 delayed_sync 지연을 주입해 p99 예산 단언이
+    실제로 AssertionError를 내는지 확인한다(타우톨로지 아님을 증명).
+
+    raw time.sleep → tests.support.perf_inject.delayed_sync 전환(task-17868).
+    """
     from unittest.mock import patch
 
-    real_bind = bind
-
-    def _slow_bind(*args, **kwargs):
-        import time
-
-        time.sleep(0.1)  # 100ms 지연 → batch=8로 나눠도 12.5ms > 5ms 예산
-        return real_bind(*args, **kwargs)
+    from tests.support.perf_inject import delayed_sync
 
     m = mandate(
         max_single_instrument_pct=20.0,
@@ -376,7 +373,7 @@ def test_bind_p99_budget_assertion_catches_regression(monkeypatch, perf_budget) 
         per_symbol_pct={"BTC/USDT": Decimal("5")},
         total_exposure_pct=Decimal("10"),
     )
-    with patch(__name__ + ".bind", _slow_bind):
+    with patch(__name__ + ".bind", delayed_sync(bind, 0.1)):
         raw_samples = perf_budget.samples(
             lambda: bind(
                 qty=Decimal("50"), price=Decimal("100"), symbol="BTC/USDT", agg=a, mandate=m
