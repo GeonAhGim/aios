@@ -26,6 +26,9 @@ from src.services.auth import session_repository
 from src.services.auth.tokens import TokenIssuer, TokenVerifier, hash_refresh_token
 from src.services.auth_service import AuthError, AuthService
 
+# perf_inject — 지연 주입 전용 (CLS ratchet: `type: ignore` 금지)
+from tests.support.perf_inject import delayed_async
+
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
 # ADR-2026-09-09-C §행 "축별 성능 예산" — auth refresh 전용 항목은 없다.
@@ -370,6 +373,51 @@ async def test_refresh_latency_p95_within_borrowed_order_ack_budget(pool, perf_b
     p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
     assert p95_ms < REFRESH_P95_BUDGET_MS, (
         f"refresh() p95 지연시간 {p95_ms:.2f}ms가 예산 {REFRESH_P95_BUDGET_MS}ms 초과"
+    )
+
+
+@pytest.mark.perf
+async def test_refresh_latency_p95_detection_power_injection_makes_assertion_red(pool, perf_budget):
+    """검출력 확인 — 지연을 주입하면 단언이 적색으로 전환된다.
+
+    `delayed_async`로 `refresh_usecase.refresh`에 500ms.wall 지연을 주입한다.
+    예산은 50ms이므로 주입 지연은 예산의 10배다. 같은 p95 단언이
+    `AssertionError`를 일으켜 검출력이 공허하지 않음을 증명한다.
+    """
+    auth = _auth(pool)
+    issuer = _issuer()
+    email = await _signup(auth)
+    seed = await login_usecase.login(pool, auth, issuer, email=email, password=STRONG_PASSWORD)
+    async with pool.acquire() as conn:
+        user_id = (await session_repository.get_active(conn, seed.session_id)).user_id
+
+    n = 30
+    injected_delay_s = 0.5  # 10× REFRESH_P95_BUDGET_MS(50ms) → wall 기준 10배
+
+    async def _refresh_once_delayed():
+        plain, refresh_hash = TokenIssuer.issue_refresh()
+        async with pool.acquire() as conn:
+            session = await session_repository.insert_session(
+                conn,
+                user_id=user_id,
+                tenant_id=user_id,
+                refresh_hash=refresh_hash,
+                ip_hash=None,
+                ua_hash=None,
+                expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+                auth_level="PASSWORD",
+            )
+        # 주입: 500ms 지연 → p95가 500ms가 되어 50ms 예산을 초과
+        await delayed_async(refresh_usecase.refresh, injected_delay_s)(
+            pool, issuer, session_id=session.id, refresh_token=plain
+        )
+
+    samples = await perf_budget.samples_async(_refresh_once_delayed, n=n)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
+    assert p95_ms >= REFRESH_P95_BUDGET_MS, (
+        f"지연 주입 후 p95={p95_ms:.2f}ms가 예산 {REFRESH_P95_BUDGET_MS}ms 이상이어야 한다 — "
+        "검출력이 공허하다"
     )
 
 
