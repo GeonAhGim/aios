@@ -14,7 +14,7 @@ from src.core.risk_stats.var_parametric import norm_ppf, parametric_var_es
 _R = np.array([-0.02, -0.01, 0.0, 0.01, 0.02])
 
 
-def test_known_value_95_confidence_horizon_1():
+def test_known_value_95_confidence_horizon_1() -> None:
     result = parametric_var_es(_R, confidence=0.95, horizon_days=1, bars_per_day=1)
     assert float(result.var_pct) == pytest.approx(0.02600741939377787, rel=1e-6)
     assert float(result.es_pct) == pytest.approx(0.03261435315261965, rel=1e-6)
