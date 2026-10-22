@@ -448,4 +448,4 @@ def test_update_trailing_stop_rejects_negative_trail_pct() -> None:
 
 def test_order_types_config_requires_all_four_switches() -> None:
     with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError, contract-level
-        OrderTypesConfig(limit=True, stop=True, oco=True)  # type: ignore[call-arg]
+        OrderTypesConfig.model_validate({"limit": True, "stop": True, "oco": True})

@@ -132,18 +132,20 @@ def test_instrument_ulid_normalized_to_uppercase() -> None:
 
 def test_instrument_missing_required_field_rejected() -> None:
     with pytest.raises(ValidationError):
-        v2.Instrument(  # type: ignore[call-arg]
-            instrument_id=_VALID_ULID,
-            asset_class=AssetClass.CRYPTO,
-            base="BTC",
-            quote="USDT",
-            isin=None,
-            figi=None,
-            tick_size=Decimal("0.01"),
-            lot_size=Decimal("0.0001"),
-            calendar_id="24x7",
-            # lifecycle_state 누락
-            created_at=_now(),
+        v2.Instrument.model_validate(
+            {
+                "instrument_id": _VALID_ULID,
+                "asset_class": AssetClass.CRYPTO,
+                "base": "BTC",
+                "quote": "USDT",
+                "isin": None,
+                "figi": None,
+                "tick_size": Decimal("0.01"),
+                "lot_size": Decimal("0.0001"),
+                "calendar_id": "24x7",
+                # lifecycle_state 누락
+                "created_at": _now(),
+            }
         )
 
 
@@ -173,13 +175,15 @@ def test_venue_listing_delisted_at_optional() -> None:
 
 def test_venue_listing_is_primary_required() -> None:
     with pytest.raises(ValidationError):
-        v2.VenueListing(  # type: ignore[call-arg]
-            instrument_id=_VALID_ULID,
-            venue=Venue.BITGET,
-            venue_symbol="BTCUSDT",
-            listed_at=_now(),
-            delisted_at=None,
-            # is_primary 누락
+        v2.VenueListing.model_validate(
+            {
+                "instrument_id": _VALID_ULID,
+                "venue": Venue.BITGET,
+                "venue_symbol": "BTCUSDT",
+                "listed_at": _now(),
+                "delisted_at": None,
+                # is_primary 누락
+            }
         )
 
 

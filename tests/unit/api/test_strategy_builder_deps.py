@@ -1,6 +1,7 @@
 """Tests for src/api/strategy_builder_deps.py — service factory dependency wires."""
 
 import inspect
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 import asyncpg
@@ -68,8 +69,9 @@ class TestNegativeTests:
         """get_indicator_service takes no parameters — calling with one raises TypeError."""
         from src.api.strategy_builder_deps import get_indicator_service
 
+        mistyped_call: Callable[..., object] = get_indicator_service
         with pytest.raises(TypeError):
-            get_indicator_service(MagicMock())  # type: ignore[call-arg]
+            mistyped_call(MagicMock())
 
 
 class TestFailureInjection:

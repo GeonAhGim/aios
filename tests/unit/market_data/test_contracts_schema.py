@@ -93,15 +93,17 @@ def test_candle_record_accepts_aware_open_time() -> None:
 
 def test_candle_record_missing_required_field_rejected() -> None:
     with pytest.raises(ValidationError):
-        v1.CandleRecord(  # type: ignore[call-arg]
-            key=_sample_key(),
-            open_time=_now(),
-            close_time=_now(),
-            open=Decimal("50000"),
-            high=Decimal("50100"),
-            low=Decimal("49900"),
-            # close 필드 누락
-            volume=Decimal("1.5"),
+        v1.CandleRecord.model_validate(
+            {
+                "key": _sample_key(),
+                "open_time": _now(),
+                "close_time": _now(),
+                "open": Decimal("50000"),
+                "high": Decimal("50100"),
+                "low": Decimal("49900"),
+                # close 필드 누락
+                "volume": Decimal("1.5"),
+            }
         )
 
 
@@ -139,7 +141,7 @@ def test_candle_query_as_of_optional() -> None:
 
 def test_replay_request_requires_as_of() -> None:
     with pytest.raises(ValidationError):
-        v1.ReplayRequest(key=_sample_key(), start=_now(), end=_now())  # type: ignore[call-arg]
+        v1.ReplayRequest.model_validate({"key": _sample_key(), "start": _now(), "end": _now()})
 
 
 def test_replay_request_include_quarantined_locked_false() -> None:

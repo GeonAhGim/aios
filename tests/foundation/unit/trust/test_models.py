@@ -165,15 +165,16 @@ def test_disclosure_rejects_none_content_hash() -> None:
 
 
 def test_membership_missing_required_field_raises_type_error() -> None:
+    incomplete: dict[str, object] = {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "subject_id": uuid4(),
+        "role": MembershipRole.MEMBER,
+        "state": MembershipState.ACTIVE,
+        # revision omitted, created_at omitted
+    }
     with pytest.raises(TypeError):
-        Membership(  # type: ignore[call-arg]
-            id=uuid4(),
-            tenant_id=uuid4(),
-            subject_id=uuid4(),
-            role=MembershipRole.MEMBER,
-            state=MembershipState.ACTIVE,
-            # revision omitted, created_at omitted
-        )
+        Membership(**incomplete)
 
 
 def test_consent_state_rejects_unknown_value() -> None:
