@@ -3795,3 +3795,55 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   pre-cutover order` 블록과 `from_status=... != folded status so far (...)` 줄이 함께 등장하면,
   지목 sha가 OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py`를 건드리지 않는 한 위 선례들을
   인용해 즉시 비회귀로 분류한다.
+
+- 카드의 "첫 오류"로 인용된 줄은 `perf_budget = <tests.support.perf_budget.PerfBudget object
+  at 0x...>`와 `@pytest.mark.perf` 한 줄로, pytest의 fixture/마커 표시일 뿐 `FAILED`/`ERROR`
+  표시가 아니다 — task-11982/12014/12038/16895와 동형의 stdout 오분류.
+- 대상 테스트는 `PerfBudget.sample()`(`tests/support/perf_budget.py`)의 `cpu_ms`
+  (`time.process_time()` 기반, 다른 프로세스가 코어를 뺏어도 영향 없음)만 예산 판정에 쓴다 —
+  `pytest_perf_parallel` 단계에서 여러 perf 테스트가 CPU를 공유해도 측정값 자체는 오염되지
+  않는 설계다. 단독 실행: **1 passed in 2.15s**. 같은 파일 전체: **16 passed in 1.75s**.
+  같은 디렉터리(`tests/unit/core/strategy/`) 전체: **97 passed in 18.11s**.
+- 조사 중 해당 테스트 정의에 `@pytest.mark.perf`가 두 줄 중복으로 달려 있던 것을 발견해
+  하나로 정리했다(동작에는 영향 없음 — pytest 마커 중복 적용은 no-op이지만 리뷰 혼란의
+  소지라 같은 커밋에서 제거).
+- orders sentinel 교차 확인: `tests/unit/scripts/test_orders_residue_sentinel.py` —
+  **12 passed in 1.30s** — 재발 없음.
+- `ruff check tests/unit/core/strategy/test_script_facade.py`: All checks passed.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 경로 변경
+  없음, 테스트 자체의 수치/로직 불변 — 중복 데코레이터 정리 + 비회귀 재확인 리프,
+  task-12039/12047/16895와 동일 선례).
+
+
+## task-16894 — ci_failure_card:pytest_perf:error_chain(dd9ec9d61f4f), 대상 파일
+  `tests/unit/scripts/test_check_code_language.py::
+  test_count_tree_full_src_scan_completes_within_budget` 단독/동반 재확인, 비회귀 (2026-10-22)
+
+- 대상 테스트는 `RelativeBudget`(task-7631 자가보정 설계, `mode="wall"`)으로 `src/` 전체
+  트리 스캔(`count_tree`)의 실측 시간을 같은 프로세스·같은 순간에 돈 고정 CPU 보정 루프
+  대비 배수로 비교한다. 이 카드(dd9ec9d61f4f)에 대해 이미 6차례 `max_ratio` 상향이
+  있었다(테스트 파일 주석: task-15601 500x→1000x, task-15725/15795 →3000x, task-15823
+  →5000x, task-15834/15856 →20000x, task-15868 →50000x) — ratio 숫자만 올리는 패턴이
+  반복돼도 카드가 재발했다는 것은 예산 여유가 아니라 `pytest_perf` 단계의 병렬 디스크
+  I/O 경합 자체가 근본 원인임을 시사한다(동형 선례: task-11982/12014/12038/16895/17168의
+  "stdout 요약 줄이 FAILED로 오분류"와 동일 계열 카드).
+- 단독 실행: **1 passed in ~13-20s**(3회 반복 재현, 전부 green). 같은 파일 전체(21개):
+  **21 passed in 11.28s**. 카드에 묶인 나머지 4개 파일과 동반 실행(
+  `test_check_deps_declared.py`, `test_check_idempotent_writes.py`,
+  `test_check_import_linter.py`, `test_check_release_gate.py`): **97 passed in 92.04s** —
+  동반 실행에서도 재발하지 않는다.
+- 실측 비율을 직접 측정(`RelativeBudget().measure(...)`로 `count_tree(src)` 단독 호출):
+  `op=2594.159ms calibration=92.806ms ratio=27.952x budget<50000.000x` — 현재 예산(50000x)
+  대비 약 1790배의 여유가 있다. 예산이 빡빡해 재발하는 구조가 전혀 아니다 — 추가 widening은
+  근본 원인을 고치지 못하고 ratchet 숫자만 키우는 동일한 실패를 반복할 뿐이다.
+- orders residue sentinel 교차 확인: `tests/unit/scripts/test_orders_residue_sentinel.py` —
+  **12 passed in 1.00s** — 재발 없음.
+- `ruff check tests/unit/scripts/test_check_code_language.py`: All checks passed.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 추가 widening은 근본
+  원인(병렬 pytest_perf 단계의 디스크 I/O 경합)을 고치지 못하므로 적용하지 않았다. D2:
+  N/A(실행 코드/예산 변경 없음 — 비회귀를 재현/교차 확인하는 문서 리프, task-12039/12047/
+  16895/17168과 동일 선례).
+- 다음 동일 경보 처리: 이 항목과 task-16895/17168을 인용해 비회귀로 분류한다. 카드가 계속
+  재발하면 다음 조치는 ratio 상향이 아니라 `pytest_perf` 단계의 동시 실행 워커 수/디스크
+  I/O 격리 자체를 조사하는 ops task로 넘겨야 한다(6차 widening이 이미 실패한 접근임을
+  근거로 기록).
