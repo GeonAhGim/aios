@@ -41,6 +41,7 @@ import asyncio
 import os
 import time
 import uuid
+from collections.abc import AsyncGenerator
 
 import asyncpg
 import pytest
@@ -216,7 +217,7 @@ def _build_bare_envelope_app() -> FastAPI:
 
 
 @pytest.fixture
-async def bare_client():
+async def bare_client() -> AsyncGenerator[AsyncClient, None]:
     bare_app = _build_bare_envelope_app()
     transport = ASGITransport(app=bare_app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -224,8 +225,8 @@ async def bare_client():
 
 
 async def test_unclassified_exception_envelope_leaks_no_message_type_or_traceback(
-    bare_client,
-):
+    bare_client: AsyncClient,
+) -> None:
     """(a) 미분류 예외는 표준 오류 봉투로 반환되고, 응답 본문(raw text
     포함)에는 원본 예외 메시지도, 예외 타입 이름도, 트레이스백도 남지
     않는다 — fail-closed 고정 메시지 + INTERNAL_ERROR만 노출한다."""
