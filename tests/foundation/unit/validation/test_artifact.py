@@ -7,12 +7,14 @@ failure-injection and gate-red repro live in `test_policy_hash.py`).
 import pytest
 from pydantic import ValidationError
 
-from src.core.indicators.registry import DEFAULT_REGISTRY
+from src.core.indicators.registry import DEFAULT_REGISTRY, IndicatorRegistry
 from src.foundation.validation.domain.artifact import (
     ARTIFACT_HASH_MISMATCH,
     build_artifact,
     verify,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 FSM_DEFINITION = {
     "states": ["IDLE", "IN_POSITION"],
@@ -47,9 +49,38 @@ def test_artifact_hash_changes_when_fsm_threshold_changes():
     assert baseline.artifact_hash != changed.artifact_hash
 
 
-def test_artifact_registry_version_delegates_to_l02_registry_hash():
+@pytest.mark.perf
+def test_artifact_registry_version_delegates_to_l02_registry_hash(perf_budget):
+    perf_budget.assert_within(
+        lambda: _artifact(),
+        budget_ms=5,
+        label="registry_version delegation",
+    )
     artifact = _artifact()
     assert artifact.registry_version == DEFAULT_REGISTRY.registry_hash()
+
+
+def test_artifact_registry_version_delay_injection_fails_redgate(monkeypatch):
+    """Budget 10배 지연 주입 — 같은 측정/단언이 적색으로 떨어지는지 검증(gate-red repro).
+
+    CPU 예산이므로 delayed_sync로 CPU 부하를 주입하고, perf_budget.assert_within이
+    AssertionError를 일으켜 fail-closed로 검출됨을 확인한다.
+    """
+
+    original_hash = IndicatorRegistry.registry_hash
+
+    def _slow_hash(self) -> str:
+        return delayed_sync(original_hash, 0.05)(self)
+
+    monkeypatch.setattr(IndicatorRegistry, "registry_hash", _slow_hash)
+
+    perf_budget_fixture = PerfBudget()
+    with pytest.raises(AssertionError):
+        perf_budget_fixture.assert_within(
+            lambda: _artifact(),
+            budget_ms=5,
+            label="registry_version delegation (delayed)",
+        )
 
 
 def test_verify_returns_none_for_untampered_artifact():
