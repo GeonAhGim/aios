@@ -104,14 +104,14 @@ def test_unknown_kind_delay_injection_exceeds_budget(
     payload = _base_item_kwargs(kind="filing")
     original_research_item = v1.ResearchItem
 
-    def slow_constructor(**_kwargs: Any) -> v1.ResearchItem:  # type: ignore[return]
+    def slow_constructor(**_kwargs: Any) -> v1.ResearchItem:
         delayed_sync(lambda: original_research_item(**payload), 0.1)()
 
-    monkeypatch.setattr(v1, "ResearchItem", slow_constructor)  # type: ignore[arg-type]
+    monkeypatch.setattr(v1, "ResearchItem", slow_constructor)
 
     with pytest.raises(AssertionError) as exc_info:
         perf_budget.assert_within(
-            lambda: v1.ResearchItem(**payload),  # type: ignore[arg-type]
+            lambda: v1.ResearchItem(**payload),
             budget_ms=5.0,
             n=5,
             warmup=1,
@@ -128,13 +128,13 @@ def test_unknown_kind_literal_is_rejected_with_delayed_sync(
     payload = _base_item_kwargs(kind="bogus")
     original_research_item = v1.ResearchItem
 
-    def slow_constructor(**_kwargs: Any) -> None:  # type: ignore[return]
+    def slow_constructor(**_kwargs: Any) -> None:
         delayed_sync(lambda: original_research_item(**payload), 0.1)()
 
-    monkeypatch.setattr(v1, "ResearchItem", slow_constructor)  # type: ignore[arg-type]
+    monkeypatch.setattr(v1, "ResearchItem", slow_constructor)
 
     with pytest.raises(ValidationError, match="kind"):
-        v1.ResearchItem(**payload)  # type: ignore[call-arg]
+        v1.ResearchItem(**payload)
 
 
 def test_unknown_redistribution_literal_is_rejected() -> None:

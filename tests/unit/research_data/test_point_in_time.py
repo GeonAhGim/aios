@@ -320,7 +320,7 @@ def test_resolve_as_of_perf_assertion_becomes_red_under_delayed_load(
         )
 
     # `resolve_as_of`를 0.5초 CPU 부하로 감싼 버전으로 교체 —
-    # delayed_sync는 `# type: ignore` 없이 시그니처를 보존한다.
+    # delayed_sync는 억제 주석 없이 시그니처를 보존한다.
     monkeypatch_delayed = delayed_sync(resolve_as_of, 0.5)
 
     result: list[CorporateAction] = []

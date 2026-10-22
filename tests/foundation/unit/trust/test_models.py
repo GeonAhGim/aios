@@ -209,7 +209,7 @@ def test_disclosure_cpu_budget_fails_under_delayed_sync(
     실제 CPU 시간을 측정함을 입증한다(task-17390 gate-red 재현)."""
 
     def _delayed_disclosure() -> Disclosure:
-        return delayed_sync(_disclosure, 0.5)()  # type: ignore[no-any-return]
+        return delayed_sync(_disclosure, 0.5)()
 
     sample = perf_budget.sample(_delayed_disclosure)
     assert sample.cpu_ms >= 10.0, (

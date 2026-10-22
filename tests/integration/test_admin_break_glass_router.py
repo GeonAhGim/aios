@@ -33,6 +33,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import asyncpg
@@ -348,7 +349,7 @@ async def test_audit_log_route_latency_goes_red_with_10x_delay_injection(
         self: asyncpg.Connection, *args: object, **kwargs: object
     ) -> list[asyncpg.Record]:
         await asyncio.sleep(5.0)  # 5s 지연 → 4000ms 예산을 명확히 초과
-        return await _real_fetch(self, *args, **kwargs)  # type: ignore[no-any-return]
+        return cast("list[asyncpg.Record]", await _real_fetch(self, *args, **kwargs))
 
     monkeypatch.setattr(asyncpg.Connection, "fetch", _slow_fetch)
 

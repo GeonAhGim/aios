@@ -7,6 +7,8 @@ and always rolled back. These tests do not claim cross-tenant row filtering proo
 
 from __future__ import annotations
 
+from typing import cast
+
 import asyncpg
 import pytest
 
@@ -129,7 +131,7 @@ async def test_catalog_security_check_p95_goes_red_with_10x_delay_injection(
         self: asyncpg.Connection, *args: object, **kwargs: object
     ) -> list[asyncpg.Record]:
         await asyncio.sleep(0.5)  # 500ms 지연 → 300ms 예산을 명확히 초과
-        return await _real_fetch(self, *args, **kwargs)  # type: ignore[no-any-return]
+        return cast("list[asyncpg.Record]", await _real_fetch(self, *args, **kwargs))
 
     monkeypatch.setattr(asyncpg.Connection, "fetch", _slow_fetch)
 
