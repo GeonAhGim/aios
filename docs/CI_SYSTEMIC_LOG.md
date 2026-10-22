@@ -3724,3 +3724,24 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다. 9-nodeid 카드의 나머지
   4개 파일은 각자의 전담 task에서 개별 확인해야 한다 — 이 항목은 `test_algo_slicer.py`에만
   좁게 적용된다.
+
+
+## task-16895 — ci_failure_card:pytest_perf:error_chain(9c32bb2d672e), 대상 파일
+  `tests/unit/core/safety/test_recovery_gate.py::test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls`
+  재확인, 비회귀 (2026-10-22)
+
+- 카드의 "첫 오류"는 FAILED/ERROR가 아니라 pytest `--durations 50` 요약 줄
+  (`test_check_idempotent_writes.py::test_perf_budget_guard_fails_on_injected_scan_delay` 45.37s)이다
+  — task-11982/12014/12038과 동형의 stdout 오분류.
+- 대상 테스트 단독 실행: **1 passed in 1.68s**. 같은 파일 전체: **32 passed in 1.72s**.
+- `RelativeBudget(mode="cpu")` 기반이고 예산은 `max_ratio=30.0`(task-15633 widening)인데 실측
+  비율은 이보다 훨씬 낮게 통과한다 — 예산 자체가 재발 원인이 아니다.
+- orders residue sentinel 교차 확인(`tests/unit/scripts/test_orders_residue_sentinel.py`):
+  **12 passed in 0.94s, exit=0**.
+- 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다. D2: N/A(실행 코드
+  변경 없음 — 비회귀를 재현/교차 확인하는 문서 리프, task-12039/12047/15079/16667/16671/17196과
+  동일 선례).
+- 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다. 9c32bb2d672e 카드의 나머지
+  파일(`test_watchdog_decide.py`, `test_watchdog_simulator_deepen.py`, `test_builtins_math.py`,
+  `test_interpreter.py`)은 각자의 전담 task에서 개별 확인해야 한다 — 이 항목은
+  `test_recovery_gate.py`에만 좁게 적용된다.
