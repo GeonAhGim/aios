@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
 import yaml
+
+from tests.support.perf_budget import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -387,7 +388,7 @@ def test_gate_red_fails_on_injected_missing_evidence_path(
 
 
 @pytest.mark.perf
-def test_full_chain_resolution_completes_within_time_budget() -> None:
+def test_full_chain_resolution_completes_within_time_budget(perf_budget: PerfBudget) -> None:
     """수치 성능 단언: 가장 깊은 stage(`marketplace_commercialization`, 5단계
     depends_on 체인)의 evidence 누적 해석 + 파일 존재 확인이 예산 내에
     끝나는지 확인한다. `test_check_migration_chain_merge_1814_1987.py`의 시간 예산 패턴과
@@ -400,12 +401,18 @@ def test_full_chain_resolution_completes_within_time_budget() -> None:
     stages = check_release_gate.load_stages(REAL_CONFIG)
     assert len(stages) >= 5  # 벤치마크가 무의미해지지 않도록 stage 수를 보장
 
-    start = time.perf_counter()
-    for _ in range(100):
+    def _resolve() -> list[Any]:
         result = check_release_gate.check_stage(stages, "internal_development", repo_root=ROOT)
         # 결과 정정 단언: 성능만 보고 결과가 틀렸으면 의미 없음
         assert isinstance(result, list)
         assert len(result) == 0  # 모든 필수 증거가 존재해야 함 (미충족 목록이 빈 list)
-    elapsed = time.perf_counter() - start
+        return result
 
-    assert elapsed < 0.05 * 100, f"100회 반복 해석이 {elapsed:.3f}s — 예산(5.0s) 초과"
+    # batch=100: 총 CPU 시간이 process_time 틱(15.6ms)의 수 배가 되도록 묶고 호출당 ms로 환산
+    sample = perf_budget.sample(_resolve, batch=100)
+
+    budget_ms = 0.05 * 1000  # 호출당 50ms (ms 단위 일치)
+    assert sample.cpu_ms < budget_ms, (
+        f"호출당 해석 cpu={sample.cpu_ms:.3f}ms (wall={sample.wall_ms:.3f}ms) — "
+        f"예산({budget_ms:.0f}ms) 초과"
+    )
