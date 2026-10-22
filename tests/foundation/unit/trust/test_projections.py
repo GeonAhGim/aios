@@ -21,7 +21,7 @@ import pytest
 from src.foundation.trust.contracts.v1 import ConsentState as ContractConsentState
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 from src.foundation.trust.projections import build_trust_status_view
-from tests.conftest import PerfBudget
+from tests.support.perf_budget import PerfBudget
 
 _NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
 
