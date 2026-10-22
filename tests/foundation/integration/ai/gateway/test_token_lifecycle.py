@@ -106,7 +106,7 @@ async def test_opaque_storage_never_persists_plaintext_secret(
 # --- negative #1: 스코프 없는 발급 요청은 거부(issue_scopes, AI-2 재사용) ---
 
 
-async def test_issue_token_rejects_empty_scope_request(repo: PostgresAgentTokenRepository):
+async def test_issue_token_rejects_empty_scope_request(repo: PostgresAgentTokenRepository) -> None:
     with pytest.raises(TokenRuleError):
         await issue_token(
             repo,
