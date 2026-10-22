@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
@@ -139,7 +138,7 @@ def test_failure_injection_corrupted_python_file_does_not_crash_scan(tmp_path: P
 
 @pytest.mark.perf
 def test_numerical_assertion_exact_count_across_many_files_within_time_budget(
-    tmp_path: Path,
+    tmp_path: Path, perf_budget
 ) -> None:
     """이 게이트는 커밋마다(§3) 돈다 — 전체 저장소(1200+ 소스 파일) 규모를
     흉내낸 합성 트리에서도 집계가 정확하고 1초 안에 끝나는지 단언한다.
@@ -155,12 +154,15 @@ def test_numerical_assertion_exact_count_across_many_files_within_time_budget(
         expected_total += ignores_in_file
         _write_py(tmp_path, f"pkg/mod_{i:03d}.py", "".join(lines))
 
-    start = time.monotonic()
-    total = check_type_ignore_budget.count_type_ignores(tmp_path)
-    elapsed = time.monotonic() - start
+    # batch=4: process_time ticks at ~15.6ms, so bundle calls and report per-call ms.
+    sample = perf_budget.assert_within(
+        lambda: check_type_ignore_budget.count_type_ignores(tmp_path),
+        budget_ms=5.0 * 1000,  # 250개 합성 파일 스캔 성능 예산(실측 여유 포함), ms
+        batch=4,
+        label="count_type_ignores x250 files",
+    )
 
-    assert total == expected_total
-    assert elapsed < 5.0  # 250개 합성 파일 스캔 성능 예산(실측 여유 포함)
+    assert sample.result == expected_total
 
 
 # ---------------------------------------------------------------------------
