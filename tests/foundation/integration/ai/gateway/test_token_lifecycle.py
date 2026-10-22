@@ -81,7 +81,7 @@ async def test_issue_authorize_revoke_round_trip(repo: PostgresAgentTokenReposit
 
 async def test_opaque_storage_never_persists_plaintext_secret(
     repo: PostgresAgentTokenRepository, pool: asyncpg.Pool
-):
+) -> None:
     tenant_id = uuid4()
     issued = await issue_token(
         repo,
