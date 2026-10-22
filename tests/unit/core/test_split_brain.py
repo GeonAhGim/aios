@@ -98,6 +98,7 @@ async def test_all_healthy_is_normal_with_delayed_db_times_out() -> None:
     assert result.exchange_ok is True
 
 
+@pytest.mark.perf
 async def test_all_healthy_is_normal_with_10x_budget_delay_monkeypatch() -> None:
     """음성 테스트 3 + gate-red 재현: 예산 10배 지연 주입 → 기존 성능 단언이 적색.
     기존 test_diagnose_completes_within_100ms_budget와 같은 측정/단언을 재사용하되,
@@ -126,6 +127,7 @@ async def test_all_healthy_is_normal_with_10x_budget_delay_monkeypatch() -> None
 # --- performance assertion: single-call budget ---
 
 
+@pytest.mark.perf
 async def test_all_healthy_is_normal_single_call_under_10ms() -> None:
     """성능 단언: diagnose() 단일 호출 10ms 이내 완료 (budget: ADR-2026-09-09-C).
     100회 평균을 측정하는 기존 테스트와 달리 단일 호출 단위로 검증.

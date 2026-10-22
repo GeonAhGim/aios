@@ -111,6 +111,7 @@ async def test_build_deployment_list_view_empty_repo_zero_cpu_budget(
     assert sample.cpu_ms < 1.0, f"empty repo assembly took {sample.cpu_ms:.3f}ms, budget is 1ms"
 
 
+@pytest.mark.perf
 async def test_build_deployment_list_view_empty_repo_delay_injection_fails_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

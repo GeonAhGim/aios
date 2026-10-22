@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import time
 
+import pytest
+
 from tests.support.perf_inject import delayed_async, delayed_sync
 
 
+@pytest.mark.perf
 def test_delayed_sync_keeps_result_and_adds_delay() -> None:
     wrapped = delayed_sync(lambda a, b=1: a + b, 0.02)
     start = time.perf_counter()
@@ -13,6 +16,7 @@ def test_delayed_sync_keeps_result_and_adds_delay() -> None:
     assert time.perf_counter() - start >= 0.02
 
 
+@pytest.mark.perf
 def test_delayed_async_keeps_result_and_adds_delay() -> None:
     async def original(x: int) -> list[int]:
         return [x]

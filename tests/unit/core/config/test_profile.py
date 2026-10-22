@@ -63,6 +63,7 @@ def test_load_staging_profile_from_repo_config_dir(perf_budget: PerfBudget) -> N
     )
 
 
+@pytest.mark.perf
 def test_load_staging_profile_cpu_injection_raises_p95_over_50ms(
     perf_budget: PerfBudget, monkeypatch
 ) -> None:

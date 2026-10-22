@@ -301,6 +301,7 @@ def test_record_tick_single_call_cpu_measurement_does_not_converge_to_zero(
 # ── Gate-red reproduction (지연 주입으로 적색 경로 검증) ───────────────
 
 
+@pytest.mark.perf
 def test_record_tick_10x_delay_injection_triggers_red_path(monkeypatch, perf_budget) -> None:
     """10배 지연 주입으로 record_tick이 예산을 초과하는 적색 경로를 재현한다.
 
