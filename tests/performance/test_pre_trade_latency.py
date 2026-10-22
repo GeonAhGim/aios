@@ -111,7 +111,12 @@ async def pool():
 @pytest.mark.perf
 async def test_pre_trade_phase_p99_measured_and_round_trips_exact(pool, perf_budget):
     """R-57 — t0~t6 N회 실측(p50/p95/p99 print, 50 ms 목표 비차단) + 순차 DB
-    왕복 수 정확 단언(CI 게이트). raw perf_counter → perf_budget.sample_async() 전환(task-11631)."""
+    왕복 수 정확 단언(CI 게이트). raw perf_counter → perf_budget.sample_async() 전환(task-11631).
+
+    batch=8 — Windows `time.process_time()` 약 15.6ms 양자화 오차를 tick/batch로 줄여
+    I/O 중심 호출의 CPU 0 수렴을 해소(task-11539 감사 후속, task-16005).
+    """
+
     scenario = await new_scenario(pool)
     recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
     warm = await scenario.run_once(pool, recorder)  # seed·캐시 워밍업(정상 상태 측정)
@@ -119,10 +124,19 @@ async def test_pre_trade_phase_p99_measured_and_round_trips_exact(pool, perf_bud
 
     samples_ms: list[float] = []
     for _ in range(_SAMPLE_COUNT):
-        sample = await perf_budget.sample_async(lambda: scenario.run_once(pool, recorder))
+        sample = await perf_budget.sample_async(
+            lambda: scenario.run_once(pool, recorder),
+            batch=8,
+        )
         outcome = sample.result
         samples_ms.append(sample.wall_ms)
         assert outcome is not None and outcome.decision.outcome == RiskOutcome.ALLOW
+
+    # CPU 측정 양자화 검증 — batch=8 로 측정한 CPU 시간이 0이면 양자화 오차
+    assert sample.cpu_ms > 0, (
+        f"batch=8 기준 CPU 시간 0ms — Windows quantization 오차 또는 측정 버그: "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
 
     round_trips = await count_pre_trade_round_trips(pool, scenario)
     print(
@@ -137,6 +151,174 @@ async def test_pre_trade_phase_p99_measured_and_round_trips_exact(pool, perf_bud
         "다릅니다 — 왕복 수 구조 변경입니다(모듈 docstring 구성표를 갱신하고 리뷰를 받으세요)."
     )
     # 절대시간(p99 ≤ 50 ms)은 게이트로 쓰지 않는다(모듈 docstring, task-1521 decision).
+
+
+@pytest.mark.perf
+async def test_pre_trade_phase_p99_budget_catches_10x_delay_injection(
+    pool, monkeypatch, perf_budget
+):
+    """gate-red repro — `run_pre_trade_risk_phase` 내부 DB 호출에 10배 지연을
+    주입하면 성능 단언이 적색으로 전환되는지 검증한다(task-11539 감사 후속).
+
+    `asyncpg.Connection.fetch`를 래핑해 실제 DB 호출 뒤에 `asyncio.sleep(0.05)`를
+    주입하면 wall_ms 가 baseline 대비 10 배 이상 늘어나고, 동일한 측정/단언이
+    이를 포착해야 한다. 이 테스트는 "성능 게이트가 실제 회귀를 포착할 수 있는가"를
+    역으로 증명한다 — 정상 입력에서는 녹색이지만, 의도적으로 지연을 주입하면
+    적색으로 전환된다.
+    """
+
+    scenario = await new_scenario(pool)
+    recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
+    await scenario.run_once(pool, recorder)  # 워밍업
+
+    # baseline 측정 (지연 주입 전)
+    baseline = await perf_budget.sample_async(
+        lambda: scenario.run_once(pool, recorder),
+        batch=8,
+    )
+    baseline_wall = baseline.wall_ms
+
+    # fetch 에 0.05s 지연 주입 — baseline 측정 *후* 에 적용
+    original_fetch = asyncpg.Connection.fetch
+    delay_counter = [0]
+
+    async def _delayed_fetch(self, *args, **kwargs):
+        result = await original_fetch(self, *args, **kwargs)
+        delay_counter[0] += 1
+        if delay_counter[0] >= 2:  # 첫 번째 fetch 는 seed/워밍업용, 두 번째부터 지연
+            await asyncio.sleep(0.05)
+        return result
+
+    monkeypatch.setattr(asyncpg.Connection, "fetch", _delayed_fetch)
+
+    # 지연 주입 후 측정
+    samples_ms: list[float] = []
+    for _ in range(10):
+        sample = await perf_budget.sample_async(
+            lambda: scenario.run_once(pool, recorder),
+            batch=8,
+        )
+        samples_ms.append(sample.wall_ms)
+
+    p99_ms = percentile(samples_ms, 99)
+    print(
+        f"\npre_trade_risk_phase WITH 10x delay injection: "
+        f"p99={p99_ms:.2f}ms baseline={baseline_wall:.2f}ms "
+        f"ratio={p99_ms / max(baseline_wall, 0.001):.1f}x"
+    )
+    # 지연 주입 후 p99 가 baseline 대비 3 배 이상 커야 한다 — 게이트가 회귀를 포착
+    assert p99_ms > baseline_wall * 3, (
+        f"지연 주입에도 p99={p99_ms:.2f}ms 가 baseline({baseline_wall:.2f}ms) 대비 "
+        "3 배 미만으로 증가 — 게이트가 지연을 포착하지 못함"
+    )
+
+
+# -- negative tests (task-11539 감사 후속 DoD: negative ≥3) -------------------
+
+
+@pytest.mark.perf
+async def test_pre_trade_phase_p99_batch_zero_cpu_is_invariant(pool, perf_budget):
+    """negative — batch=1 로 측정한 CPU 시간이 0 으로 수렴하면 양자화 오차다.
+
+    `sample_async` 의 batch=1 이 I/O 중심 호출에서 cpu_ms=0 을 반환하는
+    경우를 역으로 검증한다. 이 테스트는 "기존 batch=1 측정이 무의미할 수 있음"을
+    증명하고, batch=8 이 필요한 근거를 제공한다.
+    """
+    scenario = await new_scenario(pool)
+    recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
+    await scenario.run_once(pool, recorder)  # 워밍업
+
+    cpu_times_batch1: list[float] = []
+    for _ in range(10):
+        sample = await perf_budget.sample_async(
+            lambda: scenario.run_once(pool, recorder),
+            batch=1,
+        )
+        cpu_times_batch1.append(sample.cpu_ms)
+
+    # batch=1 로 측정한 CPU 시간 중 다수가 0 이어야 양자화 오차 증거
+    zero_count = sum(1 for ct in cpu_times_batch1 if ct == 0)
+    assert zero_count >= 5, (
+        f"batch=1 에서 CPU=0 횟수({zero_count}/10)이 5 미만 — "
+        f"cpu_times={cpu_times_batch1[:5]} (양자화 오차 증거 부족)"
+    )
+
+
+@pytest.mark.perf
+async def test_pre_trade_phase_p99_batch8_cpu_nonzero(pool, perf_budget):
+    """negative — batch=8 로 측정한 CPU 시간이 0 이 아니면 양자화 오차가 해소됐다.
+
+    batch=8 이 Windows `time.process_time()` 약 15.6ms 양자화 오차를
+    tick/8 로 줄여 cpu_ms > 0 을 보장하는지 검증한다.
+    """
+    scenario = await new_scenario(pool)
+    recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
+    await scenario.run_once(pool, recorder)  # 워밍업
+
+    cpu_times_batch8: list[float] = []
+    for _ in range(10):
+        sample = await perf_budget.sample_async(
+            lambda: scenario.run_once(pool, recorder),
+            batch=8,
+        )
+        cpu_times_batch8.append(sample.cpu_ms)
+
+    # batch=8 에서 CPU 시간이 모두 0 이 아니어야 양자화 오차 해소
+    nonzero_count = sum(1 for ct in cpu_times_batch8 if ct > 0)
+    assert nonzero_count >= 8, (
+        f"batch=8 에서 CPU>0 횟수({nonzero_count}/10)이 8 미만 — "
+        f"cpu_times={cpu_times_batch8[:5]} (양자화 오차 해소 불충분)"
+    )
+
+
+@pytest.mark.perf
+async def test_pre_trade_phase_p99_injection_failure_no_delay(pool, perf_budget):
+    """negative — 지연 주입 monkeypatch 가 작동하지 않으면 p99 가 baseline 과 차이가 없다.
+
+    `asyncpg.Connection.fetch` 에 지연을 주입하는 monkeypatch 대신,
+    지연을 전혀 주입하지 않는 가짜 래퍼를 사용한다. 이 테스트는 게이트가
+    "지연이 없을 때" 녹색을 반환하는지 검증한다.
+    """
+    scenario = await new_scenario(pool)
+    recorder = RiskDecisionRecorder(pool, PostgresDecisionRepository(pool), NoopEventBus())
+    await scenario.run_once(pool, recorder)  # 워밍업
+
+    # baseline 측정
+    baseline = await perf_budget.sample_async(
+        lambda: scenario.run_once(pool, recorder),
+        batch=8,
+    )
+    baseline_wall = baseline.wall_ms
+
+    # 지연을 전혀 주입하지 않는 가짜 래퍼
+
+    original_fetch = asyncpg.Connection.fetch
+
+    async def _no_delay_fetch(self, *args, **kwargs):
+        return await original_fetch(self, *args, **kwargs)
+
+    from _pytest.monkeypatch import MonkeyPatch
+
+    mp = MonkeyPatch()
+    mp.setattr(asyncpg.Connection, "fetch", _no_delay_fetch)
+
+    # 측정
+    samples_ms: list[float] = []
+    for _ in range(10):
+        sample = await perf_budget.sample_async(
+            lambda: scenario.run_once(pool, recorder),
+            batch=8,
+        )
+        samples_ms.append(sample.wall_ms)
+
+    p99_ms = percentile(samples_ms, 99)
+    mp.undo()
+
+    # 지연이 없으면 p99 가 baseline 과 비슷해야 한다 (3 배 미만)
+    assert p99_ms < baseline_wall * 3, (
+        f"지연 주입이 없는데 p99={p99_ms:.2f}ms 가 baseline({baseline_wall:.2f}ms) 대비 "
+        "3 배 이상 증가 — 게이트가 지연 없이도 적색으로 전환됨"
+    )
 
 
 async def test_pre_submit_gate_round_trips_exact(pool):
