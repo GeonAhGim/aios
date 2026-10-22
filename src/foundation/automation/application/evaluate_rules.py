@@ -17,7 +17,7 @@ from src.foundation.automation.domain.evaluate import MarketSnapshot, evaluate_r
 from src.foundation.automation.flags import flag_enabled
 from src.foundation.automation.ports.repository import AutomationRuleRepository
 
-__all__ = ["TriggeredRule", "evaluate_active_rules"]
+__all__ = ["TriggeredRule", "evaluate_active_rules", "evaluate_rule"]
 
 _EMPTY_SNAPSHOTS: Mapping[str, MarketSnapshot] = MappingProxyType({})
 
