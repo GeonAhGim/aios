@@ -44,10 +44,109 @@ def test_load_dev_profile_from_repo_config_dir() -> None:
     assert "http://localhost:5173" in cfg.cors_allowed_origins
 
 
-def test_load_staging_profile_from_repo_config_dir() -> None:
-    cfg = load_profile_config(env={"AIOS_ENV": "staging"})
+@pytest.mark.perf
+def test_load_staging_profile_from_repo_config_dir(perf_budget: PerfBudget) -> None:
+    """staging 프로필 로드 + 성능 단언 (CPU 예산 < 50ms).
+
+    정상 입력에서 p95 < 50ms (green).
+    YAML 읽기에 0.5s CPU 부하를 주입하면 p95 >= 50ms (red) — detection capability 입증.
+    """
+    sample = perf_budget.sample(
+        lambda: load_profile_config(env={"AIOS_ENV": "staging"}),
+        batch=8,
+    )
+    cfg = sample.result
     assert cfg.name == "staging"
     assert cfg.log_level == "INFO"
+    assert sample.cpu_ms < 50.0, (
+        f"staging load took {sample.cpu_ms:.3f}ms CPU — exceeds 50ms budget"
+    )
+
+
+def test_load_staging_profile_cpu_injection_raises_p95_over_50ms(
+    perf_budget: PerfBudget, monkeypatch
+) -> None:
+    """gate-red 재현 -- YAML 읽기에 0.5초 CPU 부하를 주입하면 p95 >= 50ms여야 한다.
+
+    정상 입력에서 녹색인 단언이 지연 입력에서 적색이면 detection capability를
+    입증한다. `delayed_sync`로 CPU busy-wait를 주입한다.
+    """
+    import src.core.config.profile as profile_module
+
+    original_read = profile_module._read_yaml_mapping
+
+    def patched_read(path):
+        # 0.5초 CPU 부하 주입 (delayed_sync 패턴)
+        end = __import__("time").perf_counter() + 0.5
+        while __import__("time").perf_counter() < end:
+            pass
+        return original_read(path)
+
+    monkeypatch.setattr(profile_module, "_read_yaml_mapping", patched_read)
+
+    raw_samples: list[float] = []
+    for ps in perf_budget.samples(
+        lambda: load_profile_config(env={"AIOS_ENV": "staging"}),
+        n=10,
+        batch=1,
+    ):
+        raw_samples.append(ps.cpu_ms)
+
+    raw_samples.sort()
+    p95_ms = raw_samples[int(len(raw_samples) * 0.95)]
+    assert p95_ms >= 50.0, (
+        f"CPU injection failed: p95={p95_ms:.2f}ms is still under 50ms budget — "
+        "the perf assertion does not detect slowdown"
+    )
+
+
+def test_load_staging_profile_missing_environment_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative -- environment 키가 없으면 ProfileSchemaError."""
+    import src.core.config.profile as profile_module
+
+    def patched_read(path):
+        return {"log_level": "INFO"}
+
+    monkeypatch.setattr(profile_module, "_read_yaml_mapping", patched_read)
+
+    with pytest.raises(ProfileSchemaError, match="environment"):
+        load_profile_config(env={"AIOS_ENV": "staging"})
+
+
+def test_load_staging_profile_environment_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative -- environment 값이 파일명과 다르면 ProfileSchemaError."""
+    import src.core.config.profile as profile_module
+
+    def patched_read(path):
+        return {"environment": "dev", "log_level": "INFO"}
+
+    monkeypatch.setattr(profile_module, "_read_yaml_mapping", patched_read)
+
+    with pytest.raises(ProfileSchemaError, match="dev"):
+        load_profile_config(env={"AIOS_ENV": "staging"})
+
+
+def test_load_staging_profile_invalid_cors_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative -- cors_allowed_origins가 문자열 리스트가 아니면 ProfileSchemaError."""
+    import src.core.config.profile as profile_module
+
+    def patched_read(path):
+        return {
+            "environment": "staging",
+            "log_level": "INFO",
+            "cors_allowed_origins": "bad",
+        }
+
+    monkeypatch.setattr(profile_module, "_read_yaml_mapping", patched_read)
+
+    with pytest.raises(ProfileSchemaError, match="cors_allowed_origins"):
+        load_profile_config(env={"AIOS_ENV": "staging"})
 
 
 def test_load_live_profile_succeeds_when_all_paper_flags_explicitly_off() -> None:
