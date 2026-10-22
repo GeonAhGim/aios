@@ -283,43 +283,39 @@ async def test_append_concurrent_appends_conflict_is_deterministic(
 
 @pytest.mark.perf
 async def test_append_budget_injection_detected_by_10x_delay(
-    pool: asyncpg.Pool, monkeypatch, perf_budget
+    pool: asyncpg.Pool,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget,
 ):
-    """gate-red repro — append 내부에 10배 지연을 주입하면 성능 예산 단언이
+    """gate-red reproduction — append 내부에 IO 지연을 주입하면 성능 예산 단언이
     적색으로 전환되는지 검증한다(task-11539 감사 후속).
 
-    `asyncpg.Connection.fetchrow`를 래핑해 실제 DB 호출 뒤에 `asyncio.sleep(0.05)`를
-    주입하면 append 1회당 wall_ms가 baseline 대비 10배 이상 늘어나고,
-    `test_append_p95_latency_stays_within_normalized_ceiling`과 동일한 정규화
+    ``tests.support.perf_inject.delayed_async`` 로 ``asyncpg.Connection.fetchrow`` 를
+    래핑해 실제 DB 호출 뒤에 ``asyncio.sleep`` 을 주입하면 append 1회당 wall_ms가
+    baseline 대비 10배 이상 늘어나고,
+    ``test_append_p95_latency_stays_within_normalized_ceiling`` 과 동일한 정규화
     상한 계산이 이를 포착해야 한다.
 
     이 테스트는 "성능 게이트가 실제 회귀를 포착할 수 있는가"를 역으로 증명한다 —
     정상 입력에서는 녹색이지만, 의도적으로 지연을 주입하면 적색으로 전환된다.
     """
-    # 먼저 지연 없이 baseline을 측정한다 (이 시점에는 monkeypatch 미적용)
+    from tests.support.perf_inject import delayed_async
+
+    # 먼저 지연 없이 baseline 을 측정한다 (이 시점에는 monkeypatch 미적용)
     baseline = await RelativeBudget().measure_async(lambda: _append(pool, _stream(), 1), warmup=0)
     baseline_elapsed = baseline.op_ms / 1000
 
-    # 이제 fetchrow에 지연 주입 — baseline 측정 *후*에 적용하므로
-    # baseline은 실제 DB 지연만 반영하고, 이후 append_next()는 지연 포함
-    original_fetchrow = asyncpg.Connection.fetchrow
-    delay_count = 0
-
-    async def _delayed_fetchrow(self, *args, **kwargs):
-        nonlocal delay_count
-        result = await original_fetchrow(self, *args, **kwargs)
-        delay_count += 1
-        if delay_count >= 2:  # 첫 번째 fetchrow는 stream 생성용, 두 번째부터 지연
-            import asyncio as _asyncio
-
-            await _asyncio.sleep(0.05)
-        return result
-
-    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _delayed_fetchrow)
+    # fetchrow 에 0.05s 지연 주입 — baseline 측정 *후* 에 적용하므로
+    # baseline 은 실제 DB 지연만 반영하고, 이후 append_next() 는 지연 포함
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetchrow",
+        delayed_async(asyncpg.Connection.fetchrow, 0.05),
+    )
 
     # 지연 주입 후 append 측정
     stream_id = _stream()
-    # 첫 번째 append(seq=1) + append_next()가 seq=2부터 시작하도록 설정
+    # 첫 번째 append(seq=1) + append_next() 가 seq=2부터 시작하도록 설정
     await _append(pool, stream_id, 1)
 
     seq = 1
@@ -336,8 +332,8 @@ async def test_append_budget_injection_detected_by_10x_delay(
     p95 = samples[math.ceil(0.95 * len(samples)) - 1]
 
     ceiling = baseline_elapsed * 8 + 0.08
-    # 지연 주입 후 p95가 상한을 넘어야 한다 — 게이트가 회귀를 포착하는지 검증
+    # 지연 주입 후 p95 가 상한을 넘어야 한다 — 게이트가 회귀를 포착하는지 검증
     assert p95 > ceiling, (
-        f"지연 주입에도 p95={p95:.4f}s가 상한 {ceiling:.4f}s 미만에 머무름 — "
+        f"지연 주입에도 p95={p95:.4f}s 가 상한 {ceiling:.4f}s 미만에 머무름 — "
         "게이트가 지연을 포착하지 못함"
     )
