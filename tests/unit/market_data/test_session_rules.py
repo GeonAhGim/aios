@@ -41,6 +41,7 @@ def _calendar(
     )
 
 
+@pytest.mark.perf
 def test_krx_close_15_30_kst_equals_06_30_utc() -> None:
     cal = _calendar(Venue.KIS_KRX)
     windows = cal.sessions_for(date(2026, 9, 4))  # 금요일, 정규 거래일
@@ -48,6 +49,84 @@ def test_krx_close_15_30_kst_equals_06_30_utc() -> None:
     assert windows[0].close_at.astimezone(timezone.utc) == datetime(
         2026, 9, 4, 6, 30, tzinfo=timezone.utc
     )
+
+
+@pytest.mark.perf
+def test_krx_close_cpu_budget_passes_on_normal_input(
+    perf_budget: PerfBudget,
+) -> None:
+    """정상 입력에서 sessions_for() 호출이 CPU 예산을 통과한다.
+
+    single-call CPU 측정이 0이 되지 않도록 batch=1024로 양자화 오차를 줄이고,
+    실제 CPU 시간이 0보다 큼을 확인한다. 같은 측정이 기존 예산도 통과해야 한다.
+    """
+    cal = _calendar(Venue.KIS_KRX)
+
+    def lookup() -> None:
+        cal.sessions_for(date(2026, 9, 4))
+
+    sample = perf_budget.sample(lookup, batch=1024)
+    assert sample.cpu_ms > 0, (
+        f"단일 호출 CPU 측정이 0 ms로 수렴했습니다. "
+        f"Windows quantisation tick({sample.cpu_ms:.4f}ms)이 예산 단언을 "
+        f"false-negative로 만들 수 있습니다."
+    )
+    assert sample.cpu_ms < 10.0, (
+        f"KRX 세션 조회가 {sample.cpu_ms:.4f}ms로 예산(10ms)을 초과했습니다."
+    )
+
+
+@pytest.mark.perf
+def test_krx_close_budget_assertion_fails_under_cpu_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction: injecting 0.1 s CPU delay via delayed_sync
+    proves the budget assertion has detection power, not a trivially-passing
+    zero. The same assertion that passes on normal input must fail when
+    the code path is slowed by 10× the budget."""
+    from tests.support.perf_inject import delayed_sync
+
+    cal = _calendar(Venue.KIS_KRX)
+    budget_ms = 10.0
+
+    def slow_lookup() -> None:
+        delayed_sync(lambda: cal.sessions_for(date(2026, 9, 4)), 0.1)()
+
+    sample = perf_budget.sample(slow_lookup, batch=1)
+
+    # 0.1 s injected CPU delay >> any reasonable budget for a session lookup.
+    # This assertion MUST fail, proving the green test is not vacuous.
+    assert sample.cpu_ms >= budget_ms, (
+        f"지연 주입에도 CPU 측정이 예산({budget_ms:.1f}ms) 아래에 머물렀습니다. "
+        f"({sample.cpu_ms:.4f}ms) — 지연 주입이 제대로 작용하지 않았거나 "
+        f"예산이 과도하게 느슨합니다."
+    )
+
+
+def test_krx_close_returns_empty_on_holiday() -> None:
+    """음성 테스트 1: 휴장일에는 sessions_for가 빈 리스트를 반환한다."""
+    day = date(2026, 10, 3)  # 개천일 (공휴일)
+    cal = _calendar(Venue.KIS_KRX, holidays=frozenset({day}))
+    windows = cal.sessions_for(day)
+    assert windows == []
+
+
+def test_krx_close_returns_empty_on_weekend() -> None:
+    """음성 테스트 2: 토요일/일요일에는 sessions_for가 빈 리스트를 반환한다."""
+    saturday = date(2026, 9, 5)
+    sunday = date(2026, 9, 6)
+    cal = _calendar(Venue.KIS_KRX)
+    assert cal.sessions_for(saturday) == []
+    assert cal.sessions_for(sunday) == []
+
+
+def test_krx_close_single_window_per_trading_day() -> None:
+    """음성 테스트 3: 거래일에는 정확히 하나의 세션 창만 반환한다."""
+    cal = _calendar(Venue.KIS_KRX)
+    for day in (date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3)):
+        windows = cal.sessions_for(day)
+        assert len(windows) == 1
+        assert windows[0].kind == "REGULAR"
 
 
 def test_us_close_est_before_dst() -> None:
