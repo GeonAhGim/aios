@@ -3762,3 +3762,36 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   재현/교차 확인하는 문서 리프 + 마커 중복 제거, task-12039/12047/15079/16667/16671/16895/17196과
   동일 선례).
 - 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다.
+
+
+## task-17484 — ci_failure_card:pytest_perf:b1f844-6425-42a2-8537-af6577cf4026:
+  order_id=2cb1f844-6425-42a2-8537-af6577cf4026 "seq=1 from_status=SUBMITTED != folded
+  status so far (CREATED)" — stdout 오분류, 비회귀 (2026-10-22)
+
+- task spec 본문의 "실패" 줄(`seq=1 from_status=SUBMITTED != folded status so far (CREATED) —
+  missing or reordered event.` + 10회 반복되는 `replay_verify: order_id=2cb1f844-...-af6577cf4026
+  skipped -- pre-cutover order, event history incomplete (not an FA-16 wiring guarantee): ...`)은
+  `scripts/replay_verify.py`(라인 249-255)가 pre-cutover 주문의 깨진 이벤트 체인을 의도적으로
+  skip하며 stderr에 남기는 **설계된 성공-경로 진단 문구**와 글자 단위로 동일하다(모듈 docstring
+  task-2173: "pre-cutover orders skipped"; 라인 230-236 — I6를 armed cutover 이전 주문에
+  소급 적용하면 `order_service/repository.py`의 legacy writer를 즉시 깨뜨리기 때문에 FA-15
+  byte-identical 재생 보장 대상이 아니라고 명시) — task-11982/12014/12011/12038/12039/12047/
+  12223/12311/12315/16895/17168/17196과 동형의 "설계된 stderr 진단 ≠ FAILED" 오분류 패턴이다.
+- `git log --oneline -15 -- src/core/eventstore/ scripts/replay_verify.py
+  src/foundation/*/domain/ src/services/execution_loop src/services/order_service/`로 확인:
+  HEAD 근방에서 쓰기 경로를 건드리는 유일한 커밋은 `c181cb9ce`(task-16630, 이 worktree의 선행
+  리프 — 동기 FILLED 응답의 `order_events`/`fills` 원자적 기록)인데, 이는 `CREATED→FILLED` 동기
+  체결 분기만 바꾼 것으로 이 카드의 `SUBMITTED→CREATED` 폴드 불일치(pre-cutover skip 경로)와는
+  무관하다 — 나머지는 전부 Korean→English 주석 번역 커밋뿐, 새 회귀를 만들 변경이 없다.
+- 로컬 재현: `tests/integration/eventstore/` + `tests/adversarial/eventstore/` +
+  `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` +
+  `tests/integration/foundation/test_order_service_fill_event_atomicity.py`(task-16630 회귀
+  테스트 포함, 쓰기 경로 공유) 전체 — **109 passed in 396.57s, exit=0**.
+- 기준선/예산/재시도 횟수/ignore 변경 없음(DECISION_GUIDELINES B-2) — 고칠 결함이 없다: 카드에
+  인용된 문구는 설계된 성공-경로 로그이고 관련 스위트는 로컬에서 100% green이며, 쓰기 경로에
+  새 회귀를 만들 커밋도 없다. D2 신규 negative/실패주입/성능 assertion/red 재현: N/A(실행 코드
+  변경 없이 기존에 확정된 비회귀 패턴을 재확인하는 문서 리프, 위 선례들과 동일).
+- 다음 동일 경보 처리: `pytest_perf` 류 카드 본문에 `replay_verify: order_id=... skipped --
+  pre-cutover order` 블록과 `from_status=... != folded status so far (...)` 줄이 함께 등장하면,
+  지목 sha가 OMS/eventstore 쓰기 경로나 `scripts/replay_verify.py`를 건드리지 않는 한 위 선례들을
+  인용해 즉시 비회귀로 분류한다.
