@@ -239,7 +239,6 @@ async def test_concurrent_breaches_for_same_key_result_in_exactly_one_dispatch()
     assert len(gateway.calls) == 1
 
 
-@pytest.mark.perf
 @pytest.mark.asyncio
 async def test_hard_and_soft_breach_do_not_suppress_each_other() -> None:
     """Negative: the suppression key includes severity, so a hard (CRITICAL)
