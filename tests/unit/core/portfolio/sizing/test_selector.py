@@ -125,3 +125,77 @@ def test_size_for_p99_latency_is_within_pre_trade_gate_budget(perf_budget: PerfB
     assert p99_ms < budget_ms, (
         f"size_for() p99={p99_ms:.3f}ms exceeds {budget_ms}ms pre-trade gate budget"
     )
+
+
+# ---------------------------------------------------------------------------
+# Negative tests — CPU quantisation & measurement integrity (task-11539 후속)
+# ---------------------------------------------------------------------------
+
+
+def test_size_for_returns_consistent_results_for_identical_inputs(perf_budget: PerfBudget):
+    """음성: 동일한 입력에 대한 반복 호출은 항상 동일한 결과를 반환한다
+    (side-effect 가 없고 memoisation 이 없어야 함)."""
+    cfg = _config(SizingMethod.FIXED_FRACTIONAL)
+    inp = _inp(SizingMethod.FIXED_FRACTIONAL)
+
+    results = [perf_budget.sample(lambda: size_for(cfg, inp)).result for _ in range(5)]
+    assert all(r == results[0] for r in results), (
+        "size_for produced inconsistent results for identical inputs"
+    )
+
+
+def test_size_for_dispatch_is_hollow_without_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """음성: _DISPATCH[_FIXED_FRACTIONAL] 을 None 으로 monkeypatch 하면
+    size_for 가 UnknownSizingMethodError 를 raising 해야 한다 — 단언이
+    hollow(실행 경로에 도달하지 않음) 아님을 확인."""
+    monkeypatch.setitem(_DISPATCH, SizingMethod.FIXED_FRACTIONAL, None)
+
+    cfg = _config(SizingMethod.FIXED_FRACTIONAL)
+    inp = _inp(SizingMethod.FIXED_FRACTIONAL)
+
+    with pytest.raises(UnknownSizingMethodError):
+        size_for(cfg, inp)
+
+    # perf_budget.sample 는 위 raise 전에 측정하지 않음 —
+    # 이 테스트는 "단언이 실제 코드를 건넜음"을 증명하는 negative test
+
+
+# ---------------------------------------------------------------------------
+# Failure injection — gate-red reproduction with CPU delay
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_size_for_p99_budget_goes_red_with_cpu_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Gate-red reproduction: `delayed_sync` 로 dispatch 함수에 CPU 부하를
+    주입하면 같은 p99 단언이 적색으로 전환된다.
+
+    `delayed_sync` 은 busy-wait(CPU-time slowdown) 를 주입한다.
+    `PerfBudget.sample` 는 `time.process_time()` 을 사용하므로 CPU 지연이
+    직접 포착된다. 이 테스트가 없으면 예산 단언은 항상 통과하는 hollow 가
+    될 수 있다.
+    """
+    from tests.support.perf_inject import delayed_sync
+
+    cfg = _config(SizingMethod.FIXED_FRACTIONAL)
+    inp = _inp(SizingMethod.FIXED_FRACTIONAL)
+    budget_ms = 5.0
+
+    original_fn = _DISPATCH[SizingMethod.FIXED_FRACTIONAL]
+    delayed_fn = delayed_sync(original_fn, 0.05)  # 50ms CPU delay
+    monkeypatch.setitem(_DISPATCH, SizingMethod.FIXED_FRACTIONAL, delayed_fn)
+
+    samples = perf_budget.samples(lambda: size_for(cfg, inp), n=100, batch=10)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99)]
+
+    assert p99_ms >= budget_ms, (
+        f"delay injection failed: p99={p99_ms:.3f}ms — "
+        f"expected red (budget>={budget_ms}ms); measurement is hollow"
+    )

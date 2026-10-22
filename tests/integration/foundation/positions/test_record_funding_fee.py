@@ -310,13 +310,16 @@ async def test_funding_latency_budget_catches_10x_delay_injection(
     pool, ports, perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
-    포착하는지 역으로 증명한다. DB 호출에 sleep을 주입해 실제 I/O 지연을
-    시뮬레이션하고, 같은 latency 단언이 budget을 초과함을 확인한다.
+    포착하는지 역으로 증명한다. asyncpg Connection.execute를 delayed_async로
+    monkeypatch해 실제 I/O 지연을 시뮬레이션하고, 같은 latency 단언이
+    budget을 초과함을 확인한다.
 
     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
     검증한다.
     """
-    import asyncio
+    import asyncpg
+
+    from tests.support.perf_inject import delayed_async
 
     tenant_id, account_id, position_key = await _open(pool)
     command = _command(
@@ -331,12 +334,16 @@ async def test_funding_latency_budget_catches_10x_delay_injection(
     def _log(record: object) -> None:
         queries.append(getattr(record, "query", ""))
 
+    # asyncpg Connection.execute에 2.5s 지연 주입 → advisory lock + upsert
+    # 모두 execute를 쓰므로 전체 지연이 sanity 상한(2000ms)을 넘는다.
+    monkeypatch.setattr(
+        asyncpg.Connection, "execute", delayed_async(asyncpg.Connection.execute, 2.5)
+    )
+
     async def _delayed_run_funding_fee() -> None:
         async with pool.acquire() as conn, conn.transaction():
             conn.add_query_logger(_log)
             try:
-                # 2.5s 지연 → sanity 상한(2000ms)을 초과
-                await asyncio.sleep(2.5)
                 await record_funding_fee(
                     conn,
                     command,
