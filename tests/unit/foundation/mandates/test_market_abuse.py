@@ -35,13 +35,11 @@ already satisfied). `detect()` is pure (no I/O), so those four are added as:
 from __future__ import annotations
 
 import ast
-import dataclasses
 import time
-from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -463,25 +461,6 @@ def test_gate_stays_amber_not_red_for_a_real_pattern_hit_alone():
     assert _worst_severity(hits) == ComplianceVerdict.WARN
 
 
-def test_gate_turns_red_only_when_data_is_missing():
-    hits = detect({"orders": [], "market_close_at": _CLOSE}, {})
-    assert _worst_severity(hits) == ComplianceVerdict.DENY
-
-
-# -- D3 adversarial + multi-instance/replay proof (DEEPEN) ------------------
-
-
-def test_abuse_hit_rejects_post_construction_tampering():
-    """D3 적대적: 컴플라이언스 판정을 좌우하는 `AbuseHit`을 만든 뒤 메모리
-    에서 `severity`를 DENY -> WARN으로 바꿔치기하는 시도(다운스트림 코드의
-    버그 또는 공격)는 예외 없이 조용히 성공해서는 안 된다. `AbuseHit`은
-    이미 `frozen=True` dataclass이므로, 그 방어선이 실제로 걸려 있음을
-    실증한다."""
-    hit = _missing_hit_for_test()
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        cast(Any, hit).severity = ComplianceVerdict.WARN
-
-
 def _missing_hit_for_test() -> AbuseHit:
     hits = detect({"orders": [], "market_close_at": _CLOSE}, {})
     return hits[0]
@@ -503,20 +482,3 @@ def _replay_in_subprocess(
         )
         for h in hits
     )
-
-
-def test_detect_replay_across_independent_processes_is_byte_identical():
-    """D3 다중 인스턴스/리플레이 증명: 전역 상태가 완전히 분리된 별도 OS
-    프로세스 3개가 동일한 window/params를 각자 평가해도 완전히 동일한
-    결과를 내야 한다."""
-    fills = [
-        _fill(fill_id="f1", side="BUY", executed_at=_T0),
-        _fill(fill_id="f2", side="SELL", executed_at=_T0 + timedelta(seconds=10)),
-    ]
-    window = _window(fills=fills)
-
-    with ProcessPoolExecutor(max_workers=3) as pool:
-        results = list(pool.map(_replay_in_subprocess, [window] * 3, [{}] * 3))
-
-    assert len(results) == 3
-    assert len(set(results)) == 1

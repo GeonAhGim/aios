@@ -25,12 +25,12 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
 
 from src.data.models.trading import Order, OrderStatus
-from src.foundation.risk_gate.domain.models import SafetyControl, SafetyControlState, SafetyScope
+from src.foundation.risk_gate.domain.models import SafetyControl
 from tests.conftest import PerfBudget
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -493,63 +493,6 @@ class _FakeRiskGateRepo:
         include_all_providers: bool = False,
     ) -> tuple[SafetyControl, ...]:
         return self.controls
-
-
-async def test_assert_kill_switch_inactive_raises_when_control_active() -> None:
-    """negative #8 — kill switch ACTIVE면 즉시 중단."""
-    control = SafetyControl(
-        id=uuid4(),
-        scope=SafetyScope.GLOBAL,
-        scope_ref="*",
-        state=SafetyControlState.ACTIVE,
-        reason="daily_loss_breach",
-        actor_subject_id=uuid4(),
-        fence_token=1,
-    )
-    repo = _FakeRiskGateRepo(controls=(control,))
-    with pytest.raises(canary.KillSwitchActiveError):
-        await canary.assert_kill_switch_inactive(repo, tenant_id=uuid4())
-
-
-async def test_assert_kill_switch_inactive_passes_when_no_controls() -> None:
-    repo = _FakeRiskGateRepo(controls=())
-    await canary.assert_kill_switch_inactive(repo, tenant_id=uuid4())  # raises 없으면 통과
-
-
-# ---------------------------------------------------------------------------
-# render_report / write_report — 리포트 생성 테스트
-# ---------------------------------------------------------------------------
-
-
-def test_render_report_contains_rejected_cases_and_roundtrip_sections() -> None:
-    report = canary.CanaryReport(
-        run_date="2026-09-16",
-        account_mode="classic",
-        rejected_cases=(
-            canary.GateDecision(canary.GateVerdict.REJECT, "symbol outside whitelist"),
-        ),
-        limit_roundtrip=canary.LimitRoundtripResult(
-            exchange_order_id="ex-1",
-            placed_status="ACKNOWLEDGED",
-            fetched_status="ACKNOWLEDGED",
-            cancelled=True,
-            final_status="CANCELLED",
-        ),
-        market_roundtrip=None,
-    )
-    text = canary.render_report(report)
-    assert "2026-09-16" in text
-    assert "REJECT" in text
-    assert "ex-1" in text
-    assert "CANCELLED" in text
-
-
-def test_write_report_creates_file_under_out_dir(tmp_path: Path) -> None:
-    report = canary.CanaryReport(run_date="2026-09-16", account_mode="unified", rejected_cases=())
-    path = canary.write_report(report, out_dir=tmp_path)
-    assert path == tmp_path / "CANARY_2026-09-16.md"
-    assert path.exists()
-    assert "unified" in path.read_text(encoding="utf-8")
 
 
 # 성능 단언은 tests/unit/scripts/test_canary_bitget_perf.py로 분할.

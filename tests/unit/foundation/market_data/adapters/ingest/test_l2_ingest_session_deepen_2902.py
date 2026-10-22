@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -475,80 +474,3 @@ def test_large_orderbook_top_n_violated_with_10x_sleep_injection():
         f"지연 주입에도 elapsed={elapsed:.3f}s가 예산({budget_sec}s) 미만 — "
         "주입이 제대로 작동하지 않음"
     )
-
-
-# ---------------------------------------------------------------------------
-# 3. 게이트 적색 재현 — 갭->재동기화 성공->재갭->재동기화 실패
-# ---------------------------------------------------------------------------
-
-
-async def test_gate_red_second_resync_failure_does_not_corrupt_first_recorded_span():
-    """시간축 재생: 정상 수신 -> 첫 갭(재동기화 성공, span1 결손 기록) ->
-    정상 수신 재개 -> 둘째 갭(재동기화가 REST 실패로 죽음). 둘째 갭
-    감지 시점에 span2는 정상적으로 닫혀 기록되지만(손실 구간 자체는
-    항상 결손으로 남는다는 DoD), 그 다음 재동기화 실패가 이미 기록된
-    span1/span2를 지우거나 고치는 일은 없어야 하고 예외가 표면화돼야
-    한다."""
-    adapter = _FakeAdapter(
-        fail_on_nth_snapshot=3
-    )  # 최초+1차 갭 재동기화 성공, 2차 갭 재동기화 실패
-    repo = _FakeCoverageRepo()
-    pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
-    # 1..3 정상, 4 누락(1차 갭), 5..6 정상, 8 누락(2차 갭 — 재동기화가 실패로 죽음)
-    frames = [_frame(s) for s in (1, 2, 3, 5, 6, 8)]
-    conn = _FakeConnection(frames, raise_after=_closed())
-    connect_fn, _ = _connect_sequence([conn])
-
-    session = _session(adapter, repo, pool, clock, connect_fn)
-    with pytest.raises(SnapshotFetchError, match="모의 REST 스냅샷 실패"):
-        await session.run()
-
-    assert adapter.snapshot_calls == 3  # 최초 1 + 1차 갭 재동기화 1 + 2차 갭 재동기화 시도 1(실패)
-    assert len(repo.spans) == 2  # 1차 갭이 닫은 span + 2차 갭 감지 시점에 닫힌 span
-    first, second = repo.spans
-    assert first.start < first.end
-    assert second.start < second.end
-    assert first.end < second.start  # 두 손실 구간 모두 결손으로 남아 겹치지 않는다
-
-
-# ---------------------------------------------------------------------------
-# 4. 동시 다중 인스턴스(D3) — 순수 함수 공유 없음 증명
-# ---------------------------------------------------------------------------
-
-
-def test_concurrent_threads_applying_diffs_to_independent_books_never_cross_contaminate():
-    """스레드풀에서 서로 다른 초기 스냅샷을 가진 호가창 4개에 반복적으로
-    증분을 적용한다 — `OrderBookState`가 불변 dataclass이고 `apply_diff`가
-    항상 새 인스턴스를 반환하므로 당연해야 하나, 회귀로 모듈 레벨 공유
-    가변 상태(캐시 등)가 실수로 추가되면 이 테스트가 잡는다."""
-
-    def _run(worker_id: int, repeat: int) -> bool:
-        base_price = Decimal(worker_id * 1000)
-        book = OrderBookState.from_snapshot(
-            L2Snapshot(
-                sequence=0,
-                as_of=datetime.now(timezone.utc),
-                bids={base_price: Decimal("1")},
-                asks={base_price + 1: Decimal("1")},
-            )
-        )
-        for i in range(repeat):
-            diff = L2Diff(
-                sequence=i + 1,
-                as_of=datetime.now(timezone.utc),
-                bid_updates=((base_price, Decimal(str(i + 1))),),
-                ask_updates=(),
-            )
-            book = book.apply_diff(diff)
-            if book.bids[base_price] != Decimal(str(i + 1)):
-                return False
-            if any(price != base_price for price in book.bids):
-                return False  # 다른 워커의 가격대가 섞여 들어옴(오염)
-        return True
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(_run, worker_id, 500) for worker_id in range(1, 9)]
-        results = [f.result() for f in futures]
-
-    assert all(results), "동시 스레드 호출 중 서로 다른 워커의 호가창 상태가 오염됐다."

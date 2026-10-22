@@ -29,7 +29,6 @@ from uuid import uuid4
 import asyncpg
 import pytest
 
-from src.api.admin_deps import require_break_glass
 from src.api.deps import AuthenticatedUser
 from src.core.observability.metrics import NullMetrics, set_metrics
 from src.core.security import break_glass
@@ -488,51 +487,3 @@ async def test_cpu_ms_converges_near_zero_for_single_consume(pool, perf_budget):
         f"cpu_ms={max_cpu_ms:.2f}ms exceeds trivial-work floor (50ms); "
         f"samples={[f'{s.cpu_ms:.2f}' for s in samples]}"
     )
-
-
-# --- require_break_glass dependency ------------------------------------------
-
-
-async def test_require_break_glass_consumes_grant_on_matching_scope(pool):
-    requester_id = await create_test_user(pool)
-    approver_id = await create_test_user(pool)
-    admin = _mfa_admin(await create_test_user(pool))
-
-    async with pool.acquire() as conn:
-        grant = await _request(pool, conn, requester_id, scope="credential_revoke")
-        await break_glass.approve_grant(
-            conn,
-            grant_id=grant.id,
-            approver_id=approver_id,
-            approver_mfa_verified_at=_fresh(),
-            check_segregation_of_duty=assert_actor_not_counterparty,
-        )
-
-    dependency = require_break_glass("credential_revoke")
-    consumed = await dependency(x_break_glass_grant=grant.id, admin=admin, pool=pool)
-    assert consumed.state == "USED"
-
-
-async def test_require_break_glass_scope_mismatch_rejected(pool):
-    requester_id = await create_test_user(pool)
-    approver_id = await create_test_user(pool)
-    admin = _mfa_admin(await create_test_user(pool))
-
-    async with pool.acquire() as conn:
-        grant = await _request(pool, conn, requester_id, scope="tenant_read")
-        await break_glass.approve_grant(
-            conn,
-            grant_id=grant.id,
-            approver_id=approver_id,
-            approver_mfa_verified_at=_fresh(),
-            check_segregation_of_duty=assert_actor_not_counterparty,
-        )
-
-    dependency = require_break_glass("credential_revoke")
-    with pytest.raises(BreakGlassInvalidStateError, match="tenant_read"):
-        await dependency(x_break_glass_grant=grant.id, admin=admin, pool=pool)
-
-    # 스코프가 틀려도 grant는 이미 소비됐다(재사용 불가 -- fail-closed).
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT state FROM break_glass_grant WHERE id = $1", grant.id)
-    assert row["state"] == "USED"

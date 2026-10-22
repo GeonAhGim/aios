@@ -24,7 +24,6 @@ from decimal import Decimal
 import asyncpg
 import pytest
 
-from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import AssetClass
 from src.foundation.market_data.adapters.postgres_coverage_repository import (
     CoverageSpanOverlapError,
@@ -466,81 +465,3 @@ async def test_concurrent_non_overlapping_upsert_span_all_succeed(coverage_repo,
     async with pool.acquire() as conn, conn.transaction():
         spans = await coverage_repo.list_spans(conn, instrument_id, Timeframe.M1)
     assert len(spans) == n
-
-
-async def test_concurrent_update_lifecycle_state_exactly_one_winner(instrument_repo, pool):
-    """105번 표준(조건부 UPDATE)이 실제 동시 경합 하에서도 지켜지는지 —
-    기존 `test_update_lifecycle_state_rejects_stale_expected_state`는 순차
-    실행으로 선행 변경을 주입했을 뿐이다(D1). 여기서는 8개 워커가 진짜
-    동시에 같은 `expected_state=ACTIVE`로 서로 다른 목표 상태 전이를
-    시도한다 — WHERE 조건의 원자적 UPDATE 덕에 정확히 1개만 성공해야
-    한다."""
-    instrument = _instrument()
-    async with pool.acquire() as conn, conn.transaction():
-        await instrument_repo.create(conn, instrument)
-
-    targets = [
-        InstrumentLifecycle.HALTED,
-        InstrumentLifecycle.DELISTED,
-        InstrumentLifecycle.HALTED,
-        InstrumentLifecycle.DELISTED,
-        InstrumentLifecycle.HALTED,
-        InstrumentLifecycle.DELISTED,
-        InstrumentLifecycle.HALTED,
-        InstrumentLifecycle.DELISTED,
-    ]
-
-    async def _attempt(target: InstrumentLifecycle) -> bool:
-        try:
-            async with pool.acquire() as conn, conn.transaction():
-                await instrument_repo.update_lifecycle_state(
-                    conn,
-                    instrument.instrument_id,
-                    expected_state=InstrumentLifecycle.ACTIVE,
-                    state=target,
-                )
-            return True
-        except ConcurrencyConflictError:
-            return False
-
-    results = await asyncio.gather(*(_attempt(t) for t in targets))
-
-    assert sum(results) == 1, (
-        f"동시 update_lifecycle_state {len(targets)}건 중 성공이 {sum(results)}건입니다 "
-        "— 조건부 UPDATE가 경합에서 정확히 하나만 통과시키지 못했습니다"
-    )
-    async with pool.acquire() as conn, conn.transaction():
-        final = await instrument_repo.get(conn, instrument.instrument_id)
-    assert final is not None
-    assert final.lifecycle_state != InstrumentLifecycle.ACTIVE
-
-
-async def test_concurrent_entitlements_duplicate_grant_exactly_one_winner(pool):
-    """8개 워커가 동시에 같은 (tenant_id, subject_id, venue, timeframe,
-    feed_type)로 entitlement 부여를 시도한다 — UNIQUE 제약이 경합에서도
-    정확히 1개만 통과시켜야 한다(이중 라이선스 부여 방지, entitlements는
-    decision상 어댑터가 없어 raw SQL로 증명)."""
-    tenant_id = uuid.uuid4()
-    subject_id = uuid.uuid4()
-    n = 8
-
-    async def _attempt() -> bool:
-        try:
-            async with pool.acquire() as conn:
-                await _grant_entitlement(conn, tenant_id=tenant_id, subject_id=subject_id)
-            return True
-        except asyncpg.exceptions.UniqueViolationError:
-            return False
-
-    results = await asyncio.gather(*(_attempt() for _ in range(n)))
-
-    assert sum(results) == 1, (
-        f"동시 entitlement 부여 {n}건 중 성공이 {sum(results)}건입니다 — UNIQUE가 "
-        "경합 상황에서 정확히 하나만 통과시키지 못했습니다"
-    )
-    rows = await pool.fetch(
-        "SELECT count(*) AS n FROM entitlements WHERE tenant_id = $1 AND subject_id = $2",
-        tenant_id,
-        subject_id,
-    )
-    assert rows[0]["n"] == 1

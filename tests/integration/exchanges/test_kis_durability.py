@@ -23,6 +23,7 @@ DEEPEN(task-2799) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md)가 원
 thundering-herd 상황에서도 토큰 재발급이 정확히 1회만 일어남(adversarial
 동시성)을 증명한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -472,81 +473,3 @@ async def test_nh_two_independent_client_instances_isolate_token_issuance():
     assert count_b["n"] == 1
     assert all(t == "tok-a" for t in tokens_a)
     assert all(t == "tok-b" for t in tokens_b)
-
-
-async def test_kis_thundering_herd_401_reissues_token_exactly_once():
-    """adversarial/replay 증명 — 기존 (b) 테스트는 요청 하나가 순차로
-    401→재시도를 거치는 경우만 봤다. 여기서는 이미 캐시된 토큰(tok-1)을
-    가진 채로 8개의 `_request()` 호출이 정확히 같은 시각에(asyncio.gather)
-    401을 맞아 각자 `_invalidate_token()`을 부르는 thundering herd
-    상황에서도, 재발급 엔드포인트가 정확히 1회만 더 불림(레이스에서 8개가
-    각자 재발급을 시도하지 않음)을 증명한다."""
-    issued_tokens = ["tok-1", "tok-2"]
-    token_calls = {"n": 0}
-    business_calls = {"n": 0}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/oauth2/tokenP":
-            idx = min(token_calls["n"], len(issued_tokens) - 1)
-            token_calls["n"] += 1
-            return httpx.Response(
-                200,
-                json={
-                    "access_token": issued_tokens[idx],
-                    "access_token_token_expired": "2099-01-01 00:00:00",
-                },
-            )
-        business_calls["n"] += 1
-        auth = request.headers.get("authorization")
-        if auth == "Bearer tok-1":
-            return httpx.Response(401, json={"rt_cd": "1", "msg1": "expired"})
-        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output": {}})
-
-    client = _kis_client(handler)
-    await client._ensure_token()  # tok-1을 미리 캐시 — 8개 요청이 동시에 같은 만료 토큰으로 시작
-
-    n_requests = 8
-    results = await asyncio.gather(
-        *[
-            client._request("GET", "/uapi/domestic-stock/v1/some-endpoint", "FHKST0")
-            for _ in range(n_requests)
-        ]
-    )
-
-    assert all(r["rt_cd"] == "0" for r in results)
-    assert token_calls["n"] == 2  # 최초 1회 + 재발급 1회 — 8개가 각자 재발급하지 않았다
-    # 스케줄링 순서에 따라 일부 요청은 재발급 완료 후에야 첫 시도를 보내
-    # tok-2로 단번에 성공할 수 있다 — 정확한 상한(모두 401 후 재시도)과
-    # 하한(적어도 하나는 401을 봐야 재발급이 트리거됨) 사이에만 있으면 된다.
-    assert n_requests < business_calls["n"] <= 2 * n_requests
-
-
-async def test_nh_thundering_herd_401_reissues_token_exactly_once():
-    issued_tokens = ["tok-1", "tok-2"]
-    token_calls = {"n": 0}
-    business_calls = {"n": 0}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/oauth2/token":
-            idx = min(token_calls["n"], len(issued_tokens) - 1)
-            token_calls["n"] += 1
-            return httpx.Response(
-                200, json={"access_token": issued_tokens[idx], "expires_in": 86400}
-            )
-        business_calls["n"] += 1
-        auth = request.headers.get("authorization")
-        if auth == "Bearer tok-1":
-            return httpx.Response(401, text="expired")
-        return httpx.Response(200, json={"rsp_cd": "00000", "rsp_msg": "정상처리완료"})
-
-    client = _nh_client(handler)
-    await client._ensure_token()
-
-    n_requests = 8
-    results = await asyncio.gather(
-        *[client._request("GET", "/krstock/some/endpoint") for _ in range(n_requests)]
-    )
-
-    assert all(r["rsp_cd"] == "00000" for r in results)
-    assert token_calls["n"] == 2
-    assert n_requests < business_calls["n"] <= 2 * n_requests

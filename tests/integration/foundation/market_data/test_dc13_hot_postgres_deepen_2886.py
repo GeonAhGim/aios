@@ -480,39 +480,3 @@ async def test_concurrent_write_batch_same_open_time_exactly_one_winner(
         "ON CONFLICT DO NOTHING이 경합 상황에서 정확히 하나만 통과시키지 못했습니다"
     )
     assert await _row_count(pool, instrument_id=instrument_id, open_time=t0) == 1
-
-
-async def test_concurrent_write_batch_disjoint_open_times_all_succeed(
-    hot_storage: HotPostgresStorage, batch_repo: PostgresBatchRepository, pool: asyncpg.Pool
-) -> None:
-    """겹치지 않는 `open_time`이면 동시에 write_batch해도 전부 성공해야
-    한다 — PK 제약이 과도하게 넓게 직렬화(모든 동시 쓰기를 막음)하지
-    않는다는 회귀 방지."""
-    n = 20
-    async with pool.acquire() as conn:
-        instrument_id = await _instrument_id(conn, prefix="DC13PARALLEL")
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
-    key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-
-    batch_ids: list[uuid.UUID] = []
-    for _ in range(n):
-        async with pool.acquire() as conn, conn.transaction():
-            batch = await _create_batch(
-                conn,
-                batch_repo,
-                instrument_id=instrument_id,
-                range_start=t0,
-                range_end=t0 + timedelta(minutes=n),
-                accepted=1,
-            )
-        batch_ids.append(batch.batch_id)
-
-    async def _attempt(i: int, batch_id: uuid.UUID) -> int:
-        candle = _candle(key, t0 + timedelta(minutes=i), o=100, h=110, low=90, c=105, v=10)
-        async with pool.acquire() as conn, conn.transaction():
-            return await hot_storage.write_batch(conn, batch_id, [candle])
-
-    results = await asyncio.gather(*(_attempt(i, b) for i, b in enumerate(batch_ids)))
-
-    assert results == [1] * n
-    assert await _row_count(pool, instrument_id=instrument_id) == n

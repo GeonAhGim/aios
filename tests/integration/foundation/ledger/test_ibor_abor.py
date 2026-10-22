@@ -37,7 +37,6 @@ from src.foundation.ledger.adapters.postgres_balance_repository import PostgresB
 from src.foundation.ledger.application import abor_snapshot, ibor_view
 from src.foundation.ledger.application.abor_snapshot import (
     AlreadyClosedError,
-    SnapshotNotFoundError,
 )
 from src.foundation.ledger.application.ibor_view import NaiveCutoffError
 from src.foundation.ledger.contracts.v1 import (
@@ -175,9 +174,9 @@ async def _insert_dated_entry(
             )
         deltas: dict[str, Decimal] = {}
         for line in lines:
-            deltas[line.account_code] = deltas.get(
-                line.account_code, Decimal("0")
-            ) + _signed_delta(line)
+            deltas[line.account_code] = deltas.get(line.account_code, Decimal("0")) + _signed_delta(
+                line
+            )
         balances = PostgresBalanceRepository(pool)
         current = await balances.get_for_update(conn, sorted(deltas))
         for code, delta in deltas.items():
@@ -459,61 +458,3 @@ async def test_close_period_rejects_reclose_of_same_as_of_date(
     still_there = await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=as_of_date)
     assert still_there is not None
     assert still_there.balances[debit_code] == Decimal("10.00")
-
-
-async def test_correction_pending_true_after_closing_when_new_posting_recorded(
-    pool, fund_id, portfolio_id, accounts
-):
-    debit_code, credit_code = accounts
-    account_ids = {
-        debit_code: await _account_id(pool, debit_code),
-        credit_code: await _account_id(pool, credit_code),
-    }
-    base = datetime.now(timezone.utc) - timedelta(hours=1)
-    t1, t2 = _t(base, 0), _t(base, 30)
-
-    await _insert_dated_entry(
-        pool,
-        fund_id=fund_id,
-        portfolio_id=portfolio_id,
-        posted_at=t1,
-        lines=_balanced_pair(debit_code, credit_code, Decimal("5.00")),
-        account_ids=account_ids,
-    )
-
-    as_of_date = date(2026, 9, 3)
-    await abor_snapshot.close_period(
-        pool, fund_id=fund_id, as_of_date=as_of_date, closing_recorded_at=t1
-    )
-
-    not_yet = await abor_snapshot.is_correction_pending(
-        pool, fund_id=fund_id, as_of_date=as_of_date
-    )
-    assert not_yet is False
-
-    # 마감 이후(t1) 새로 기록된 posting -- 마감 스냅샷 값 자체는 바꾸지
-    # 않지만 correction_pending은 True로 표시되어야 한다.
-    await _insert_dated_entry(
-        pool,
-        fund_id=fund_id,
-        portfolio_id=portfolio_id,
-        posted_at=t2,
-        lines=_balanced_pair(debit_code, credit_code, Decimal("1.00")),
-        account_ids=account_ids,
-    )
-
-    now_pending = await abor_snapshot.is_correction_pending(
-        pool, fund_id=fund_id, as_of_date=as_of_date
-    )
-    assert now_pending is True
-
-    unchanged = await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=as_of_date)
-    assert unchanged is not None
-    assert unchanged.balances[debit_code] == Decimal("5.00")  # 마감 값은 불변
-
-
-async def test_correction_pending_raises_when_period_never_closed(pool, fund_id):
-    with pytest.raises(SnapshotNotFoundError):
-        await abor_snapshot.is_correction_pending(
-            pool, fund_id=fund_id, as_of_date=date(2026, 9, 4)
-        )

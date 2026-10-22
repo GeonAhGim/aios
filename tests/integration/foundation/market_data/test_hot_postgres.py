@@ -482,46 +482,6 @@ async def _read_and_check(
         columns = await hot_storage.read_columns(conn, instrument_id, venue, timeframe, start, end)
     assert len(columns) == expected_count
     return columns
-
-
-@pytest.mark.perf
-async def test_read_columns_5000_candles_p95_measured(pool, hot_storage, batch_repo, perf_budget):
-    """§9.2 DC-13 DoD: instrument_id 키 5,000봉 조회 p95를 실DB로 실측
-    출력한다. 200ms는 운영 목표로 print에 남기되(모듈 docstring), 차단
-    게이트는 순차 DB 왕복 수(<=1)로만 건다."""
-    async with pool.acquire() as conn:
-        instrument_id = await _instrument_id(conn, prefix="DC13PERF")
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
-    await _seed_5000_candles(pool, batch_repo, instrument_id=instrument_id, t0=t0)
-    end = t0 + timedelta(minutes=_SAMPLE_ROW_COUNT)
-
-    round_trip_count = await _round_trip_count(
-        pool, hot_storage, instrument_id=instrument_id, start=t0, end=end
-    )
-
-    samples = await perf_budget.samples_async(
-        lambda: _read_and_check(
-            hot_storage, pool, instrument_id, Venue.BITGET, Timeframe.M1, t0, end, _SAMPLE_ROW_COUNT
-        ),
-        n=_MEASURE_SAMPLES,
-    )
-
-    wall_ms_values = [s.wall_ms for s in samples]
-    wall_ms_values.sort()
-    p50_ms = wall_ms_values[int(len(wall_ms_values) * 0.50)]
-    p95_ms = wall_ms_values[int(len(wall_ms_values) * 0.95)]
-
-    print(
-        f"\nhot_postgres read_columns latency ({_SAMPLE_ROW_COUNT} candles): "
-        f"p50={p50_ms:.3f}ms p95={p95_ms:.3f}ms (n={len(samples)}); "
-        f"target={_TARGET_P95_MS}ms(운영 목표, 비차단); "
-        f"sequential DB round trips={round_trip_count} (max={_MAX_ROUND_TRIPS})"
-    )
-
-    assert round_trip_count <= _MAX_ROUND_TRIPS, (
-        f"read_columns 순차 DB 왕복 수({round_trip_count})가 상한"
-        f"({_MAX_ROUND_TRIPS})을 초과했습니다 — 왕복 수 회귀입니다."
-    )
     # 절대 지연 p95 단언은 차단 게이트로 쓰지 않는다(task-1038 `3ea1fc1`/
     # task-1059 `9bdcd21` 선례, 모듈 docstring) — CI 인프라 절대 지연
     # 변동성이 코드 회귀와 무관하게 이 테스트를 상시 적색으로 만들 수

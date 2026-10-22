@@ -1,0 +1,201 @@
+"""scripts/canary_bitget.py 단위 테스트 — task-2750 L4-30b.
+
+D2 증빙:
+- negative >= 3: below_min_notional / exceeds_max_order_usdt /
+  exceeds_max_total_usdt(누적) / max_fills_reached / symbol_outside_whitelist /
+  하드가드 미해제 / kill switch ACTIVE / canary.yaml 스키마 위반, 8건.
+- 실패주입 1건: `assert_hard_guard_released`가 마일스톤 파일 없을 때 예외.
+- 성능 단언 1건: `evaluate_pretrade_gate` 10,000회 호출이 예산 안에 끝남
+  (순수 함수 — 결정론적 규칙만 평가하므로 상수 예산이면 충분, ADR-2026-08-29-E
+  설계 제약 1).
+- 레드게이트 재현 1건: `submit_with_gate`가 REJECT일 때 mock 어댑터의
+  `place_order`가 **한 번도 호출되지 않음**을 스파이로 증명 — 이 어설션이
+  깨지면(즉 게이트를 없애거나 우회하면) 상한 초과 주문이 거래소로 나간다는
+  뜻이므로, 이 테스트 자체가 "게이트가 빨간불일 때를 재현"하는 회귀 방지선.
+
+전부 합성 데이터 + mock 어댑터로 검증한다 — 네트워크 접근 없음, 실계좌 키
+불필요(모듈 docstring의 redaction 원칙 그대로 유지).
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from dataclasses import dataclass, field
+from decimal import Decimal
+from pathlib import Path
+from types import ModuleType
+from uuid import UUID, uuid4
+
+import pytest
+
+from src.data.models.trading import Order, OrderStatus
+from src.foundation.risk_gate.domain.models import SafetyControl, SafetyControlState, SafetyScope
+
+ROOT = Path(__file__).resolve().parents[3]
+SCRIPTS_DIR = ROOT / "scripts"
+
+
+def _load_module(name: str, path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+canary = _load_module("canary_bitget", SCRIPTS_DIR / "canary_bitget.py")
+
+
+def _write_config(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "canary.yaml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+_VALID_CONFIG = """
+name: canary-bitget-v1
+version: 1
+max_order_usdt: 10
+max_total_usdt: 50
+symbols: [BTCUSDT]
+max_fills: 2
+stop_on_daily_loss: true
+"""
+
+
+# ---------------------------------------------------------------------------
+# evaluate_pretrade_gate — DoD 4 거부 케이스
+# ---------------------------------------------------------------------------
+
+
+def _limits(**overrides: object) -> canary.CanaryLimits:
+    defaults = dict(
+        name="canary-bitget-v1",
+        max_order_usdt=Decimal("10"),
+        max_total_usdt=Decimal("50"),
+        symbols=frozenset({"BTC/USDT"}),
+        max_fills=2,
+        stop_on_daily_loss=True,
+    )
+    defaults.update(overrides)
+    return canary.CanaryLimits(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# submit_with_gate — 레드게이트 재현: REJECT면 어댑터를 절대 호출하지 않는다
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _SpyAdapter:
+    """CanaryAdapter Protocol의 최소 구현 + 호출 스파이."""
+
+    account_mode: str = "classic"
+    place_order_calls: list[Order] = field(default_factory=list)
+    _next_order_id: int = 0
+
+    async def get_balance(self, asset: str | None = None) -> list[object]:
+        return [object(), object()]
+
+    async def get_ticker(self, symbol: str) -> object:
+        return type("Ticker", (), {"price": Decimal("50000")})()
+
+    async def place_order(self, order: Order) -> Order:
+        self.place_order_calls.append(order)
+        self._next_order_id += 1
+        return order.model_copy(
+            update={
+                "exchange_order_id": f"ex-{self._next_order_id}",
+                "status": OrderStatus.FILLED,
+                "filled_quantity": order.quantity,
+            }
+        )
+
+    async def get_order(self, order_id: str) -> Order:
+        raise AssertionError("이 테스트에서는 호출되지 않아야 함")
+
+    async def get_order_history(
+        self, symbol: str | None = None, *, limit: int = 100
+    ) -> list[Order]:
+        return []
+
+    async def cancel_order(self, order_id: str) -> bool:
+        return True
+
+
+# ---------------------------------------------------------------------------
+# assert_kill_switch_inactive
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeRiskGateRepo:
+    controls: tuple[SafetyControl, ...] = ()
+
+    async def list_active_controls(
+        self,
+        *,
+        tenant_id: UUID,
+        provider_code: str | None = None,
+        include_all_providers: bool = False,
+    ) -> tuple[SafetyControl, ...]:
+        return self.controls
+
+
+async def test_assert_kill_switch_inactive_raises_when_control_active() -> None:
+    """negative #8 — kill switch ACTIVE면 즉시 중단."""
+    control = SafetyControl(
+        id=uuid4(),
+        scope=SafetyScope.GLOBAL,
+        scope_ref="*",
+        state=SafetyControlState.ACTIVE,
+        reason="daily_loss_breach",
+        actor_subject_id=uuid4(),
+        fence_token=1,
+    )
+    repo = _FakeRiskGateRepo(controls=(control,))
+    with pytest.raises(canary.KillSwitchActiveError):
+        await canary.assert_kill_switch_inactive(repo, tenant_id=uuid4())
+
+
+async def test_assert_kill_switch_inactive_passes_when_no_controls() -> None:
+    repo = _FakeRiskGateRepo(controls=())
+    await canary.assert_kill_switch_inactive(repo, tenant_id=uuid4())  # raises 없으면 통과
+
+
+# ---------------------------------------------------------------------------
+# render_report / write_report — 리포트 생성 테스트
+# ---------------------------------------------------------------------------
+
+
+def test_render_report_contains_rejected_cases_and_roundtrip_sections() -> None:
+    report = canary.CanaryReport(
+        run_date="2026-09-16",
+        account_mode="classic",
+        rejected_cases=(
+            canary.GateDecision(canary.GateVerdict.REJECT, "symbol outside whitelist"),
+        ),
+        limit_roundtrip=canary.LimitRoundtripResult(
+            exchange_order_id="ex-1",
+            placed_status="ACKNOWLEDGED",
+            fetched_status="ACKNOWLEDGED",
+            cancelled=True,
+            final_status="CANCELLED",
+        ),
+        market_roundtrip=None,
+    )
+    text = canary.render_report(report)
+    assert "2026-09-16" in text
+    assert "REJECT" in text
+    assert "ex-1" in text
+    assert "CANCELLED" in text
+
+
+def test_write_report_creates_file_under_out_dir(tmp_path: Path) -> None:
+    report = canary.CanaryReport(run_date="2026-09-16", account_mode="unified", rejected_cases=())
+    path = canary.write_report(report, out_dir=tmp_path)
+    assert path == tmp_path / "CANARY_2026-09-16.md"
+    assert path.exists()
+    assert "unified" in path.read_text(encoding="utf-8")

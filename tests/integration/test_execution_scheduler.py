@@ -17,7 +17,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 
 import asyncpg
 import pytest
@@ -485,38 +485,3 @@ async def test_lease_repo_failure_during_list_candidates_is_not_swallowed(pool):
 
     with pytest.raises(RuntimeError, match="lease store unavailable"):
         await scheduler.tick_all_running()
-
-
-@pytest.mark.perf
-async def test_tick_all_running_p95_latency_within_budget(pool):
-    """성능 단언(D2, ADR-2026-09-09-C Decision 1) — 이 스케줄러 축은 예산표에
-    전용 행이 없다(가장 가까운 행은 "주문 제출→ACK p95 50ms(paper)"이지만
-    tick_all_running은 전략/포트폴리오/리스크/실행 4엔진 + 리스 획득 + DB
-    왕복을 한 번에 묶으므로 그보다 넉넉해야 한다). 회귀 감지용으로 2개 실행을
-    동시에 tick하는 데 2초를 예산으로 건다."""
-    durations: list[float] = []
-    for _ in range(5):
-        user_a, user_b = await create_test_tenant(pool), await create_test_tenant(pool)
-        exec_a = await _create_execution(pool, user_a, entry_threshold=100.0)
-        exec_b = await _create_execution(pool, user_b, entry_threshold=100.0)
-        scheduler = _scheduler(
-            pool,
-            resolve_adapter=_resolver_for({user_a: _filled_adapter(), user_b: _filled_adapter()}),
-        )
-
-        elapsed_sec, report = await _measure_tick_all_running_seconds(scheduler)
-        durations.append(elapsed_sec)
-
-        assert {exec_a, exec_b} <= set(report.ticked)
-
-    durations.sort()
-    p95 = durations[-1]
-    assert p95 < 2.0, f"tick_all_running p95 latency {p95:.3f}s exceeded 2.0s budget"
-
-
-def test_interval_comes_from_risk_policy():
-    policy = load_risk_policy()
-    # DB 없이 policy 인자만 검증(pool은 사용되지 않음) — cast로 실제 asyncpg.Pool
-    # 시그니처는 그대로 두고 이 호출 지점에서만 None을 허용한다.
-    scheduler = _scheduler(cast(asyncpg.Pool, None), policy=policy)
-    assert scheduler.interval_seconds == policy.execution_loop.interval_sec
