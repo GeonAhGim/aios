@@ -1,11 +1,12 @@
-"""LA-15 ingest_candles/bitget_ingest_source 통합테스트 — 실 DB(TEST_DATABASE_URL) +
-httpx.MockTransport(실키 금지).
+"""LA-15 ingest_candles 통합테스트 — 실 DB(TEST_DATABASE_URL) + 트랜잭션 검증.
+
+bitget_ingest_source MockTransport 검증은 test_ingest_candles_standalone.py.
 
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§8.2, §9.2 LA-15.
 DoD(task-623): 정상 배치 저장+배치행+감사 이벤트 1건; 재실행 저장 0·새 배치행;
 DUPLICATE_CONFLICT 격리(기존 불변); OHLC 위반 캔들만 격리(나머지 정상 저장);
 감사 실패 주입 → md_ingest_batch/md_candle/md_quarantine_candle/md_quality_issue
-전부 롤백; bitget_ingest_source는 MockTransport로만 검증.
+전부 롤백; REJECT 비율 게이트(전량 격리); TOCTOU(delisting during fetch).
 
 task-10465 F1(M) tenant_id 전파 테스트는 loc_over_500 분할로
 test_ingest_candles_tenant.py에 있다(공용 헬퍼는 ingest_candles_support.py).
@@ -13,25 +14,15 @@ test_ingest_candles_tenant.py에 있다(공용 헬퍼는 ingest_candles_support.
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
-from pathlib import Path
 
-import httpx
 import pytest
 
-from src.exchanges.bitget.adapter import BitgetAdapter
-from src.foundation.market_data.adapters.bitget_ingest_source import BitgetIngestSource
 from src.foundation.market_data.application.ingest_candles import (
     SymbolNotTradableError,
     ingest_candles,
 )
 from src.foundation.market_data.contracts.v1 import (
-    Timeframe,
-    Venue,
     Verdict,
 )
 from tests.integration.foundation.market_data.ingest_candles_support import (
@@ -345,92 +336,6 @@ async def test_ingest_quarantines_entire_batch_when_reject_ratio_gate_turns_red(
         )
     assert stored == 0, "REJECT 비율 초과 시 부분 저장 금지 — 좋은 캔들도 저장되지 않는다"
     assert quarantined == 5, "배치 전체(좋은 캔들 포함)가 격리된다"
-
-
-async def test_bitget_ingest_source_fetches_and_filters_via_mock_transport():
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    ts_ms = int(t0.timestamp() * 1000)
-    rows = [
-        [str(ts_ms), "100", "110", "90", "105", "10", "1000", "1000"],
-        [str(ts_ms + 60_000), "105", "115", "95", "110", "12", "1200", "1200"],
-    ]
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v2/spot/market/candles"
-        assert request.url.params.get("symbol") == "BTCUSDT"
-        return httpx.Response(200, json={"code": "00000", "msg": "success", "data": rows})
-
-    transport = httpx.MockTransport(handler)
-    client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=True, http_client=client)
-    source = BitgetIngestSource(adapter)
-
-    result = await source.fetch_candles(
-        Venue.BITGET, "BTCUSDT", Timeframe.M1, t0, t0 + timedelta(minutes=1)
-    )
-
-    assert len(result) == 1
-    assert result[0].open_time == t0
-    assert result[0].close == Decimal("105")
-
-
-def test_batch_hash_is_stable_across_different_pythonhashseed() -> None:
-    """[health:audit_correction] task-10471 — AUDIT_2026-10-01_data_ingest_replay.md §2 F7(L).
-
-    The audit claims `ingest_candles.py` builds `batch_hash` with the builtin
-    `hash()`, which is `PYTHONHASHSEED`-randomized per process and would break
-    dedup. The current call site (`ingest_candles.py` -> `batch_hash(rekeyed)`)
-    actually delegates to `domain/lineage.py::batch_hash`, which is
-    `hashlib.sha256`-based and not seed-dependent — this test proves the value
-    `ingest_candles` persists as `md_ingest_batch.batch_hash` is identical
-    across two processes with different `PYTHONHASHSEED`, i.e. the audited
-    failure mode does not reproduce against the code as it stands.
-    """
-    script = (
-        "from decimal import Decimal\n"
-        "from datetime import datetime, timedelta, timezone\n"
-        "import uuid\n"
-        "from src.foundation.market_data.contracts.v1 import (\n"
-        "    CandleRecord, SeriesKey, Timeframe, Venue,\n"
-        ")\n"
-        "from src.foundation.market_data.domain.lineage import batch_hash\n"
-        "instrument_id = uuid.UUID('11111111-1111-1111-1111-111111111111')\n"
-        "t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)\n"
-        "records = [\n"
-        "    CandleRecord(\n"
-        "        key=SeriesKey(\n"
-        "            venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1,\n"
-        "        ),\n"
-        "        open_time=t0 + timedelta(minutes=i),\n"
-        "        close_time=t0 + timedelta(minutes=i + 1),\n"
-        "        open=Decimal('100'), high=Decimal('110'), low=Decimal('90'),\n"
-        "        close=Decimal('105'), volume=Decimal('10'),\n"
-        "    )\n"
-        "    for i in range(3)\n"
-        "]\n"
-        "print(batch_hash(records))\n"
-    )
-
-    def _run_with_seed(seed: str) -> str:
-        completed = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=str(Path(__file__).resolve().parents[4]),
-            env={**os.environ, "PYTHONHASHSEED": seed},
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert completed.returncode == 0, completed.stderr
-        return completed.stdout.strip()
-
-    digest_seed_0 = _run_with_seed("0")
-    digest_seed_1 = _run_with_seed("1")
-    digest_seed_random = _run_with_seed("random")
-
-    assert digest_seed_0 == digest_seed_1 == digest_seed_random, (
-        "batch_hash must be identical regardless of PYTHONHASHSEED — "
-        f"got {digest_seed_0!r}, {digest_seed_1!r}, {digest_seed_random!r}"
-    )
 
 
 class _DelistingDuringFetchSource:
