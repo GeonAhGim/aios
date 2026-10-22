@@ -145,6 +145,129 @@ async def test_suspended_account_loses_access_mid_session_not_just_at_next_login
     assert after_suspend.status_code == 401
 
 
+# ── performance assertion for suspended-account check ──────────────────────
+
+
+@pytest.mark.perf
+async def test_suspended_account_check_latency_within_budget(
+    client: AsyncClient,
+) -> None:
+    """수치 성능 단언 — SUSPEND 상태 조회(토큰 → DB user lookup → status
+    체크)가 상수시간으로 끝나는지 확인한다. 이 단언이 보장하려는 것은
+    "trust/status 경로에 선형 이상으로 느려지는 요인(예: 사용자 테이블
+    풀스캔, N+1 쿼리)이 끼어들지 않았다"는 것이다.
+
+    register/로그인보다 훨씬 가벼운 경로이므로 max_ratio=10x로 tighter
+    바닥선을 건다. I/O 바인딩이므로 wall-clock 측정 사용."""
+    email = _unique_email()
+    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+    login_response = await client.post(
+        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {login_response.json()['data']['access_token']}"}
+
+    async def _status_check() -> None:
+        response = await client.get("/v1/foundation/trust/status", headers=headers)
+        assert response.status_code == 200
+
+    budget = RelativeBudget()
+    sample = await budget.assert_within_async(
+        _status_check,
+        max_ratio=10.0,
+        n=3,
+        warmup=1,
+        calibration_n=3,
+        label="trust/status check",
+    )
+    print(f"[trust/status] {budget.describe(sample, max_ratio=10.0)}")
+
+
+# ── gate-red reproduction ──────────────────────────────────────────────────
+
+
+@pytest.mark.perf
+async def test_suspended_account_perf_goes_red_with_io_delay_injection(
+    client: AsyncClient,
+    pool: asyncpg.Pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연(
+    delayed_async, 2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을
+    초과해야 한다(red).
+
+    trust/status 조회가 DB execute(사용자 상태 조회)를 호출하므로 execute
+    에 2초 지연을 주입하면 wall-clock 이 budget을 초과한다. 정상 입력에서
+    통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
+    단언/마커 삭제와 예산 완화 금지.
+
+    task-17656: delay injection uses ``delayed_async`` from
+    ``tests.support.perf_inject`` (no ``# type: ignore``).
+    """
+    from tests.support.perf_inject import delayed_async
+
+    original_execute = asyncpg.Connection.execute
+    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 2.0))
+
+    email = _unique_email()
+    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+    login_response = await client.post(
+        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {login_response.json()['data']['access_token']}"}
+
+    budget = RelativeBudget()
+
+    async def _status_check_with_delay() -> None:
+        response = await client.get("/v1/foundation/trust/status", headers=headers)
+        assert response.status_code == 200
+
+    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
+    with pytest.raises(AssertionError, match=r"budget"):
+        await budget.assert_within_async(
+            _status_check_with_delay,
+            max_ratio=10.0,
+            n=3,
+            warmup=1,
+            calibration_n=3,
+            label="trust/status+delay",
+        )
+
+
+# ── negative tests (>= 3) ──────────────────────────────────────────────────
+
+
+async def test_suspended_account_check_with_deleted_user(
+    client: AsyncClient, pool: asyncpg.Pool
+) -> None:
+    """음성: DELETE 상태 사용자의 토큰으로 요청하면 401을 반환한다."""
+    email = _unique_email()
+    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
+    login_response = await client.post(
+        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
+    )
+    headers = {"Authorization": f"Bearer {login_response.json()['data']['access_token']}"}
+
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET status = 'DELETED' WHERE email = $1", email)
+
+    response = await client.get("/v1/foundation/trust/status", headers=headers)
+    assert response.status_code == 401
+
+
+async def test_suspended_account_check_without_auth(client: AsyncClient) -> None:
+    """음성: 인증 헤더 없이 trust/status 에 접근하면 401을 반환한다."""
+    response = await client.get("/v1/foundation/trust/status")
+    assert response.status_code == 401
+
+
+async def test_suspended_account_check_with_invalid_token(client: AsyncClient) -> None:
+    """음성: 유효하지 않은 토큰으로 trust/status 에 접근하면 401을 반환한다."""
+    response = await client.get(
+        "/v1/foundation/trust/status", headers={"Authorization": "Bearer invalid-token"}
+    )
+    assert response.status_code == 401
+
+
 async def test_login_with_wrong_password_rejected(client: AsyncClient) -> None:
     email = _unique_email()
     await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
