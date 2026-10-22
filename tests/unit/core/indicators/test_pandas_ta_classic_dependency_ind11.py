@@ -33,7 +33,7 @@ from src.core.indicators.oss_eval_gate import (
     assert_oss_eval_gate,
     extract_declared_dependencies,
 )
-from tests.conftest import PerfBudget
+from tests.support.perf_budget import PerfBudget
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
