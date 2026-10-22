@@ -1,4 +1,4 @@
-"""Typed delay injection for gate-red reproduction tests (no ``# type: ignore``).
+"""Typed delay injection for gate-red reproduction tests (needs no type-ignore comment).
 
 The ``type: ignore`` budget is a ratchet. Every PERF-detection test used to add one or two
 ignores (``no-any-return`` on the wrapped call, ``attr-defined`` on ``monkeypatch.setattr``)
