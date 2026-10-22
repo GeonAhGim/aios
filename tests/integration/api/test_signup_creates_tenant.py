@@ -28,6 +28,8 @@ from src.foundation.trust.adapters.postgres_membership_repository import (
 )
 from src.main import app
 from tests.conftest import lifespan_context_with_retry, retry_too_many_connections
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -92,6 +94,76 @@ async def test_duplicate_email_signup_rejected_and_leaves_single_tenant_row(clie
     async with pool.acquire() as conn:
         tenant_count = await conn.fetchval("SELECT count(*) FROM tenant WHERE id = $1", user_id)
     assert tenant_count == 1, "중복 가입 거부 후에도 personal tenant 행은 1개여야 한다"
+
+
+_DUPLICATE_SIGNUP_CPU_BUDGET_MS = 500.0
+
+
+@pytest.mark.perf
+async def test_duplicate_email_signup_cpu_converges_to_zero(client, pool, perf_budget: PerfBudget):
+    """수치 성능 단언 — 중복 이메일 재가입 호출 1회의 CPU 시간이 0 수렴하고
+    예산 내야 한다.
+
+    `time.process_time()` 기반 측정으로 공유 호스트의 wall-clock 노이즈를
+    제거하고, 실제 프로세스가 소비한 CPU 시간만 계측한다.
+    """
+    email = f"cpu-{uuid.uuid4().hex}@example.com"
+    # 먼저 등록
+    await client.post(
+        "/auth/register",
+        json={"email": email, "password": STRONG_PASSWORD},
+    )
+
+    async def _duplicate_call() -> None:
+        resp = await client.post(
+            "/auth/register",
+            json={"email": email, "password": STRONG_PASSWORD},
+        )
+        assert resp.status_code == 401
+
+    sample = await perf_budget.sample_async(_duplicate_call, batch=1)
+    assert sample.cpu_ms < _DUPLICATE_SIGNUP_CPU_BUDGET_MS, (
+        f"중복 가입 CPU 시간 {sample.cpu_ms:.2f}ms가 예산 "
+        f"{_DUPLICATE_SIGNUP_CPU_BUDGET_MS:.1f}ms를 초과했습니다"
+    )
+
+
+@pytest.mark.perf
+async def test_duplicate_email_signup_goes_red_with_io_delay(
+    client, pool, monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
+):
+    """gate-red reproduction: asyncpg.Connection.fetchval 에 IO 지연(
+    delayed_async, 1.0s) 을 주입한 후 같은 성능 단언을 돌리면 예산을
+    초과해야 한다(red).
+
+    `conn.fetchval` 를 `delayed_async` 로 감싸 1회 호출당 1초 IO 지연을
+    주입 — 중복 가입 검증(I/O 바인딩)이 wall-clock 지연으로 느려지는 것을
+    측정한다. 정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가
+    아님을 보장한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+    original_fetchval = asyncpg.Connection.fetchval
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchval", delayed_async(original_fetchval, 1.0))
+
+    email = f"delay-{uuid.uuid4().hex}@example.com"
+    await client.post(
+        "/auth/register",
+        json={"email": email, "password": STRONG_PASSWORD},
+    )
+
+    async def _duplicate_call_with_delay() -> None:
+        resp = await client.post(
+            "/auth/register",
+            json={"email": email, "password": STRONG_PASSWORD},
+        )
+        assert resp.status_code == 401
+
+    sample = await perf_budget.sample_async(_duplicate_call_with_delay, batch=1)
+    assert sample.wall_ms >= _DUPLICATE_SIGNUP_CPU_BUDGET_MS, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget={_DUPLICATE_SIGNUP_CPU_BUDGET_MS:.1f}ms)"
+    )
 
 
 async def test_weak_password_missing_complexity_rejected_no_user_or_tenant_created(client, pool):
