@@ -39,9 +39,16 @@ def record(kind="trades", **changes):
 
 
 @pytest.mark.parametrize("kind", ["trades", "quotes"])
-def test_exact_round_trip(tmp_path, kind):
+def test_exact_round_trip(tmp_path, kind, perf_budget):
     store = TickParquetStorage(tmp_path, batch_size=2)
     originals = [record(kind, seq=i, ts_event=TS + i) for i in range(5)]
+
+    # D2 성능 수치 단언: 실제 CPU 시간이 예산 내에 있어야 함 (task-11539 감사 후속)
+    perf_budget.assert_within(
+        lambda: store.write_day(VENUE, ID, DAY, originals, kind=kind),
+        budget_ms=500,
+    )
+
     path = store.write_day(VENUE, ID, DAY, originals, kind=kind)
     assert path == tmp_path / VENUE.value / ID / "2026-01-01" / f"{kind}.parquet"
     batches = list(store.read_columns(VENUE, ID, DAY, kind=kind))
