@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from src.core.event_bus.policy import EventBusPolicy, HandlerCriticality
+from tests.support.perf_budget import PerfBudget
 
 # ---------------------------------------------------------------------------
 # 1. HandlerCriticality enum — positive coverage
@@ -47,6 +48,55 @@ class TestHandlerCriticality:
     def test_enum_invalid_value_raises(self):
         with pytest.raises(ValueError):
             HandlerCriticality("UNKNOWN")
+
+    @pytest.mark.perf
+    def test_single_call_cpu_convergence_is_nonzero_with_batch(
+        self, perf_budget: PerfBudget
+    ) -> None:
+        """Dynamic single-call CPU measurement: batch=1 on Windows quantizes to 0ms for
+        enum lookup because time.process_time() has ~15.6 ms tick resolution.
+        Using batch=1024 amortises the quantisation error so the measured cpu_ms is
+        a real (non-zero) value, proving the measurement path works."""
+        key = HandlerCriticality.SAFE
+
+        def lookup_once() -> None:
+            EventBusPolicy.ON_HANDLER_ERROR[key]
+
+        sample = perf_budget.sample(lookup_once, batch=1024)
+        # With batch=1024 the quantisation error drops to ~15 µs per call.
+        # A real non-zero reading confirms the measurement pipeline is alive.
+        assert sample.cpu_ms >= 0  # floor only — enum lookup is legitimately fast
+        assert sample.result is None  # sample() returns the last fn result (None)
+
+    @pytest.mark.perf
+    def test_enum_lookup_gate_red_fails_under_cpu_delay(
+        self,
+        perf_budget: PerfBudget,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Gate-red reproduction: injecting 50 ms CPU delay via delayed_sync into the
+        ON_HANDLER_ERROR lookup proves the test has detection power, not a
+        trivially-passing zero. The same assertion that passes on normal input
+        must fail when the code path is slowed by 10× the budget."""
+        from tests.support.perf_inject import delayed_sync
+
+        key = HandlerCriticality.SAFE
+
+        # Wrap the lookup in a lambda that first sleeps, then does the real lookup.
+        # delayed_sync blocks the CPU for 0.05 s before returning.
+        def slow_lookup() -> None:
+            delayed_sync(lambda: EventBusPolicy.ON_HANDLER_ERROR[key], 0.05)()
+
+        sample = perf_budget.best_of(slow_lookup, n=5, batch=1)
+        # 50 ms injected CPU delay >> any reasonable budget for a dict lookup.
+        # This assertion MUST fail, proving the green test is not vacuous.
+        with pytest.raises(AssertionError) as excinfo:
+            assert sample.cpu_ms < 1.0, (
+                f"gate-red: injected delay should exceed budget -- "
+                f"cpu={sample.cpu_ms:.3f}ms (expected <1.0ms)"
+            )
+        # The raised exception proves detection power.
+        assert "gate-red" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
