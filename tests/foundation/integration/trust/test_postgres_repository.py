@@ -12,7 +12,11 @@ test_postgres_repository_mutations.py로 분리했다(500줄 경고 분할, task
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from uuid import uuid4
+
 import asyncpg
+import pytest
 
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.foundation.trust.domain.models import ConsentState
@@ -22,14 +26,21 @@ from tests.foundation.integration.trust.conftest import (
     unique_purpose,
 )
 from tests.integration.conftest import create_test_tenant
-
-# ============================================================================
-# Tests for helper functions: _row_to_disclosure, _row_to_consent
-# ============================================================================
+from tests.support.perf_budget import PerfBudget
 
 
-async def test_row_to_disclosure_converts_record_from_db(pool: asyncpg.Pool) -> None:
-    """_row_to_disclosure should convert asyncpg.Record to Disclosure domain object."""
+@pytest.mark.perf
+async def test_row_to_disclosure_converts_record_from_db(
+    pool: asyncpg.Pool, perf_budget: PerfBudget
+) -> None:
+    """_row_to_disclosure should convert asyncpg.Record to Disclosure domain object.
+
+    성능 단언(D2, ADR-2026-09-09-C Decision 1) — dict access + dataclass
+    생성은 CPU 바운드이므로 PerfBudget.sample(process_time)로 측정한다.
+    정상 입력에서 cpu_ms < 1.0 (green).
+    delayed_sync으로 0.5s CPU 부하를 주입하면 p95 >= 1.0 (red) —
+    gate-red 재현.
+    """
     purpose = unique_purpose()
     disclosure_id = await create_disclosure(pool, purpose=purpose, revision=1)
 
@@ -38,14 +49,102 @@ async def test_row_to_disclosure_converts_record_from_db(pool: asyncpg.Pool) -> 
 
     from src.foundation.trust.adapters.postgres_repository import _row_to_disclosure
 
+    # --- functional assertions ---
     disclosure = _row_to_disclosure(row)
-
     assert disclosure.id == disclosure_id
     assert disclosure.purpose == purpose
     assert disclosure.revision == 1
     assert disclosure.content_hash is not None
     assert disclosure.published_at is not None
     assert disclosure.retired_at is None
+
+    # --- performance assertion (D2) ---
+    sample = perf_budget.sample(lambda: _row_to_disclosure(row), batch=8)
+    assert sample.cpu_ms < 1.0, (
+        f"_row_to_disclosure cpu={sample.cpu_ms:.3f}ms — "
+        f"exceeds 1.0ms budget (wall={sample.wall_ms:.3f}ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_row_to_disclosure_cpu_injection_fails_p95_over_1ms(
+    pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate-red 재현 -- _row_to_disclosure에 0.5초 CPU 부하를 주입하면
+    p95 >= 1.0ms여야 한다.
+
+    정상 입력에서 녹색인 단언이 지연 입력에서 적색이면 detection
+    capability를 입증한다. `delayed_sync`로 CPU busy-wait를 주입한다.
+    단언/마커 삭제와 예산 완화 금지.
+    """
+
+    from src.foundation.trust.adapters import postgres_repository as repo_module
+
+    original = repo_module._row_to_disclosure
+
+    def slow_row_to_disclosure(row):
+        end = __import__("time").perf_counter() + 0.5
+        while __import__("time").perf_counter() < end:
+            pass
+        return original(row)
+
+    monkeypatch.setattr(repo_module, "_row_to_disclosure", slow_row_to_disclosure)
+
+    purpose = unique_purpose()
+    disclosure_id = await create_disclosure(pool, purpose=purpose, revision=1)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM disclosure WHERE id = $1", disclosure_id)
+
+    raw_samples: list[float] = []
+    for ps in perf_budget.samples(
+        lambda: repo_module._row_to_disclosure(row),
+        n=10,
+        batch=1,
+    ):
+        raw_samples.append(ps.cpu_ms)
+
+    raw_samples.sort()
+    p95_ms = raw_samples[int(len(raw_samples) * 0.95)]
+    assert p95_ms >= 1.0, (
+        f"CPU injection failed: p95={p95_ms:.2f}ms is still under 1.0ms budget — "
+        "the perf assertion does not detect slowdown"
+    )
+
+
+async def test_row_to_disclosure_returns_none_on_none_row(pool: asyncpg.Pool) -> None:
+    """negative: _row_to_disclosure should raise on None (not silently pass)."""
+    from src.foundation.trust.adapters.postgres_repository import _row_to_disclosure
+
+    with pytest.raises(TypeError):
+        _row_to_disclosure(None)
+
+
+async def test_row_to_disclosure_preserves_retired_at_when_set(pool: asyncpg.Pool) -> None:
+    """negative: _row_to_disclosure should carry retired_at when the row has it."""
+    purpose = unique_purpose()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO disclosure (purpose, revision, content_hash, retired_at) "
+            "VALUES ($1, $2, $3, $4)",
+            purpose,
+            1,
+            f"hash-{uuid4().hex[:8]}",
+            datetime(2025, 1, 1, tzinfo=timezone.utc),
+        )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM disclosure WHERE purpose = $1 AND revision = 1",
+            purpose,
+        )
+
+    from src.foundation.trust.adapters.postgres_repository import _row_to_disclosure
+
+    disclosure = _row_to_disclosure(row)
+    assert disclosure.retired_at is not None
 
 
 async def test_row_to_consent_converts_record_from_db(pool: asyncpg.Pool) -> None:
