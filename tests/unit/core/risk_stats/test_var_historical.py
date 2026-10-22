@@ -13,19 +13,19 @@ from src.core.risk_stats.var_historical import historical_var_es
 _R = np.array([-0.05, -0.03, -0.01, 0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06])
 
 
-def test_known_value_90_confidence_horizon_1():
+def test_known_value_90_confidence_horizon_1() -> None:
     result = historical_var_es(_R, confidence=0.9, horizon_days=1, bars_per_day=1)
     assert float(result.var_pct) == pytest.approx(0.032, rel=1e-9)
     assert float(result.es_pct) == pytest.approx(0.05, rel=1e-9)
 
 
-def test_known_value_80_confidence_horizon_1():
+def test_known_value_80_confidence_horizon_1() -> None:
     result = historical_var_es(_R, confidence=0.8, horizon_days=1, bars_per_day=1)
     assert float(result.var_pct) == pytest.approx(0.014, rel=1e-9)
     assert float(result.es_pct) == pytest.approx(0.04, rel=1e-9)
 
 
-def test_known_value_horizon_2_bars_uses_overlapping_sums():
+def test_known_value_horizon_2_bars_uses_overlapping_sums() -> None:
     # bars_per_day=1, horizon_days=2 -> h_bars=2, 겹침 합산 수익률 9개(=10-2+1)
     result = historical_var_es(_R, confidence=0.9, horizon_days=2, bars_per_day=1)
     assert float(result.var_pct) == pytest.approx(0.048, rel=1e-9)
@@ -34,38 +34,38 @@ def test_known_value_horizon_2_bars_uses_overlapping_sums():
     assert result.lookback_bars == 10
 
 
-def test_es_greater_equal_var_across_confidences():
+def test_es_greater_equal_var_across_confidences() -> None:
     for confidence in (0.5, 0.8, 0.9, 0.95):
         result = historical_var_es(_R, confidence=confidence, horizon_days=1, bars_per_day=1)
         assert result.es_pct >= result.var_pct
 
 
-def test_method_recorded():
+def test_method_recorded() -> None:
     result = historical_var_es(_R, confidence=0.9, horizon_days=1, bars_per_day=1)
     assert result.method == VarMethod.HISTORICAL
 
 
-def test_insufficient_observations_for_horizon_raises():
+def test_insufficient_observations_for_horizon_raises() -> None:
     with pytest.raises(ValueError):
         historical_var_es(np.array([0.01, 0.02]), confidence=0.9, horizon_days=5, bars_per_day=1)
 
 
-def test_empty_observations_raises():
+def test_empty_observations_raises() -> None:
     with pytest.raises(ValueError):
         historical_var_es(np.array([]), confidence=0.9, horizon_days=1, bars_per_day=1)
 
 
 @pytest.mark.parametrize("confidence", [-0.1, 1.1, float("nan"), float("inf")])
-def test_adversarial_invalid_confidence_fails_closed(confidence):
+def test_adversarial_invalid_confidence_fails_closed(confidence: float) -> None:
     """I-07/I-10: invalid risk inputs must reach the real domain rejection path."""
     with pytest.raises(ValueError):
         historical_var_es(_R, confidence=confidence, horizon_days=1, bars_per_day=1)
 
 
-def test_numeric_failure_is_not_replaced_by_zero_risk(monkeypatch):
+def test_numeric_failure_is_not_replaced_by_zero_risk(monkeypatch: pytest.MonkeyPatch) -> None:
     """I-07: a failed numeric dependency cannot manufacture a successful result."""
 
-    def fail(*args, **kwargs):
+    def fail(*args: object, **kwargs: object) -> None:
         raise ArithmeticError("injected numeric failure")
 
     monkeypatch.setattr(np, "quantile", fail)
@@ -73,7 +73,7 @@ def test_numeric_failure_is_not_replaced_by_zero_risk(monkeypatch):
         historical_var_es(_R, confidence=0.95, horizon_days=1, bars_per_day=1)
 
 
-def test_replay_verify_serialized_inputs_and_tampered_result():
+def test_replay_verify_serialized_inputs_and_tampered_result() -> None:
     """I-05/I-10: replay uses production calculation and FA-15's verifier.
 
     The DB replay adapter covers orders/ledger, not pure VaR calculations;
@@ -100,20 +100,26 @@ def test_replay_verify_serialized_inputs_and_tampered_result():
 
 
 @pytest.mark.perf
-def test_default_250_bar_calculation_p95_under_5ms():
+def test_default_250_bar_calculation_p95_under_5ms() -> None:
     """ADR-2026-09-09-C D1: component ceiling within the 5ms risk-gate budget.
 
     This component p95 check does not claim end-to-end gate p99 compliance.
     Default daily lookback=250 (L4 risk R4); setup/warmup are not timed.
     """
     returns = np.random.default_rng(8333).normal(0, 0.01, 250)
-    kwargs = {"confidence": 0.95, "horizon_days": 1, "bars_per_day": 1}
+    confidence: float = 0.95
+    horizon_days: float = 1.0
+    bars_per_day: int = 1
     for _ in range(5):
-        historical_var_es(returns, **kwargs)
+        historical_var_es(
+            returns, confidence=confidence, horizon_days=horizon_days, bars_per_day=bars_per_day
+        )
     durations = []
     for _ in range(100):
         started = perf_counter()
-        result = historical_var_es(returns, **kwargs)
+        result = historical_var_es(
+            returns, confidence=confidence, horizon_days=horizon_days, bars_per_day=bars_per_day
+        )
         durations.append(perf_counter() - started)
         assert result.es_pct >= result.var_pct >= 0
         assert result.bars_used == 250
