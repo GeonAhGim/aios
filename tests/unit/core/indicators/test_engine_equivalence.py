@@ -13,8 +13,9 @@ property 스타일이지만 hypothesis 없이 시드 고정 RNG로 (지표 × �
 
 from __future__ import annotations
 
-import time
+from collections.abc import Iterator
 from decimal import Decimal
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -31,6 +32,7 @@ from src.core.indicators.engine.vectorized import (
 from src.core.indicators.registry import DEFAULT_REGISTRY, IndicatorError
 from src.core.indicators.spec import IndicatorSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
+from tests.support.perf_budget import PerfBudget
 
 # IND-10(task-1729)이 TALIB_SPECS를 161종으로 넓혔지만 이 엔진(IND-1)은 여전히
 # 11개 지표만 `_KERNELS`/`_STATES`에 손으로 구현돼 있다 — 나머지 150종의 증분=
@@ -267,8 +269,14 @@ def test_vectorized_matches_talib_reference_default_params(name: str) -> None:
 # ---- DEEPEN(task-2916): 수치 성능 단언(증분 update 지연) ----
 
 
+def _feed_next(ind: IncrementalIndicator, bars: Iterator[dict[str, float]]) -> object:
+    return ind.update(next(bars))
+
+
 @pytest.mark.perf
-def test_incremental_update_latency_p99_within_streaming_budget() -> None:
+def test_incremental_update_latency_p99_within_streaming_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """ADR-2026-09-09-C Decision 1의 축별 성능 예산 표는 지표 축에 "증분=일괄 동일"만
     걸어 두고 지연 자체는 수치화하지 않았다 — 이 리프에서 실측으로 보강한다. 리플레이·
     실시간 루프는 bar 하나당 `IncrementalIndicator.update()`를 딱 한 번 부른다(모듈
@@ -280,23 +288,26 @@ def test_incremental_update_latency_p99_within_streaming_budget() -> None:
     rng = np.random.default_rng(21)
     n = 5000
     cols = _ohlcv(rng, n, 100.0)
-    budget_sec = 100e-6
+    budget_ms = 100e-6 * 1000
+    batch = 1000
     for name in NAMES:
         spec = TALIB_SPECS[name]
         params = {p.name: p.default for p in spec.params}
         ind = IncrementalIndicator(name, params)
         keys = ind.spec.inputs
-        samples = np.empty(n)
-        for i in range(n):
-            bar = {k: float(cols[k][i]) for k in keys}
-            start = time.perf_counter()
-            ind.update(bar)
-            samples[i] = time.perf_counter() - start
-        samples.sort()
-        p99 = samples[int(n * 0.99)]
-        p99_us, budget_us = p99 * 1e6, budget_sec * 1e6
-        print(f"[IND-1 incremental] {name} n={n} p99={p99_us:.2f}us budget<{budget_us:.0f}us")
-        assert p99 < budget_sec, (name, p99)
+        bars = iter([{k: float(cols[k][i]) for k in keys} for i in range(n)])
+        # process_time ticks at ~15.6ms, so each sample times `batch` update() calls and
+        # divides; the p99 is taken over the per-call means of the n/batch chunks.
+        chunk_ms = sorted(
+            perf_budget.sample(partial(_feed_next, ind, bars), batch=batch).cpu_ms
+            for _ in range(n // batch)
+        )
+        p99_ms = chunk_ms[min(len(chunk_ms) - 1, int(len(chunk_ms) * 0.99))]
+        p99_us = p99_ms * 1000
+        print(
+            f"[IND-1 incremental] {name} n={n} p99={p99_us:.2f}us budget<{budget_ms * 1000:.0f}us"
+        )
+        assert p99_ms < budget_ms, (name, p99_ms)
 
 
 # ---- DEEPEN(task-2916): 게이트 적색 재현(증분 준비도 자기검증) ----
