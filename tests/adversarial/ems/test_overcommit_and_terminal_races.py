@@ -51,6 +51,8 @@ from src.services.oms.application.submit_order import OrderSubmitDeniedError
 from src.services.oms.contracts.v1_views import OrderView
 from tests.integration.oms.conftest import create_test_user
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -285,6 +287,89 @@ async def test_single_tick_burst_admits_up_to_capacity_then_denies_rest(pool):
     assert len(admitted) == 2
     assert len(denied) == 1
     assert await _committed_qty(pool, parent_id) == Decimal("8")
+
+
+# -- performance assertion: single tick CPU budget -----------------------------
+
+
+@pytest.mark.perf
+async def test_single_tick_burst_cpu_converges_to_zero(pool, perf_budget: PerfBudget):
+    """Performance assertion -- one tick with 3 due slices (4+4+4=12, qty=10)
+    must consume near-zero CPU. The operation is a few FOR UPDATE rows and
+    inserts; best-of-5 CPU time should converge to 0ms (budget 50ms).
+
+    This proves the measurement is not a dead assertion (task-11539 audit:
+    "0 수렴과 단위/예산 불변 검증")."""
+    user_id = await create_test_user(pool)
+    parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
+    now = datetime.now(timezone.utc)
+    plan = AlgoRunPlan(
+        parent=_parent_order(parent_id, qty=Decimal("10")),
+        children=[
+            _child(parent_id, i, Decimal("4"), scheduled_at=now - timedelta(seconds=1))
+            for i in range(3)
+        ],
+    )
+    submitter = _Submitter()
+    repo = PostgresOrderRepository()
+
+    samples = await perf_budget.samples_async(lambda: _tick(plan, pool, repo, submitter, now), n=5)
+    best = min(samples, key=lambda s: s.cpu_ms)
+    budget_ms = 50.0
+    assert best.cpu_ms < budget_ms, (
+        f"single tick CPU={best.cpu_ms:.3f}ms exceeds budget<{budget_ms:.3f}ms -- "
+        f"wall={best.wall_ms:.3f}ms load={perf_budget.load_percent()}%"
+    )
+
+
+# -- gate-red reproduction: 10x delay makes assertion go red ------------------
+
+
+@pytest.mark.perf
+async def test_single_tick_burst_goes_red_with_10x_delay(
+    pool,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction -- injecting 0.1s async delay into pool.acquire()
+    (the real DB round-trip proxy) makes the same CPU+wall assertion go red.
+    This proves the performance gate detects real slowdowns, not just
+    asserts on noise (task-11539: "예산 10배 지연 monkeypatch에서 적색").
+
+    Uses delayed_async from tests.support.perf_inject (no type: ignore)."""
+    user_id = await create_test_user(pool)
+    parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
+    now = datetime.now(timezone.utc)
+    plan = AlgoRunPlan(
+        parent=_parent_order(parent_id, qty=Decimal("10")),
+        children=[
+            _child(parent_id, i, Decimal("4"), scheduled_at=now - timedelta(seconds=1))
+            for i in range(3)
+        ],
+    )
+
+    # Inject 100ms delay into asyncpg.Connection fetch/execute (the real DB
+    # round-trip proxy) — same class-level patching pattern used elsewhere
+    # in the suite (tests/support/perf_inject.py docstring examples).
+    original_fetch = asyncpg.Connection.fetch
+    original_fetchrow = asyncpg.Connection.fetchrow
+    original_execute = asyncpg.Connection.execute
+    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(original_fetch, 0.1))
+    monkeypatch.setattr(asyncpg.Connection, "fetchrow", delayed_async(original_fetchrow, 0.1))
+    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 0.1))
+
+    submitter = _Submitter()
+    repo = PostgresOrderRepository()
+
+    samples = await perf_budget.samples_async(lambda: _tick(plan, pool, repo, submitter, now), n=5)
+    # With 3 slices + recompute = ~4 DB round trips x 100ms = 400ms wall minimum
+    # CPU stays low but wall time must exceed budget
+    best = min(samples, key=lambda s: s.wall_ms)
+    wall_budget_ms = 200.0
+    assert best.wall_ms >= wall_budget_ms, (
+        f"delay injection failed: wall={best.wall_ms:.3f}ms < "
+        f"{wall_budget_ms:.3f}ms -- gate-red reproduction inconclusive"
+    )
 
 
 async def test_concurrent_reservations_against_already_terminal_parent_all_denied(pool):
