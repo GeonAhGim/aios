@@ -34,6 +34,8 @@ from src.foundation.entities.domain.defaults import (
     default_portfolio_id,
     default_sub_account_id,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 
 @dataclass
@@ -155,6 +157,105 @@ async def test_partial_hierarchy_only_creates_the_missing_levels():
     assert hierarchy.legal_entity == complete.legal_entity
     assert hierarchy.fund == complete.fund
     assert hierarchy.portfolio.portfolio_id == default_portfolio_id(user_id)
+
+
+# ── 성능 단언: 부분 계층 부트스트랩은 예산 내야 함 ───────────────────────────
+
+
+@pytest.mark.perf
+async def test_partial_hierarchy_only_creates_the_missing_levels_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 수치 단언 (D2): 포트폴리오/서브계정만 재생성하는 부분 부트스트랩은
+    1회 호출당 CPU < 1ms, wall < 5ms여야 한다 — 순수 인메모리 get-or-create
+    4개(async)이므로 인메모리 DB 왕복 8회 이하의 비용이다.
+
+    이 단언은 정상 입력에서 녹색이어야 한다. 적색 재현 테스트는 아래에 있다.
+    """
+    repo = _FakeRepository()
+    user_id = uuid4()
+    complete = await _ensure(repo, user_id)
+    # simulate a bootstrap that stopped after the fund
+    del repo.portfolios[complete.portfolio.portfolio_id]
+    del repo.sub_accounts[complete.sub_account.sub_account_id]
+
+    sample = await perf_budget.sample_async(
+        lambda: _ensure(repo, user_id),
+        batch=1,
+    )
+
+    assert sample.cpu_ms < 1.0, (
+        f"부분 계층 재생성 CPU={sample.cpu_ms:.3f}ms — "
+        "인메모리 4 레벨 get-or-create는 < 1ms여야 함 (budget<1ms)"
+    )
+    assert sample.wall_ms < 5.0, (
+        f"부분 계층 재생성 wall={sample.wall_ms:.3f}ms — "
+        "인메모리 async 왕복은 < 5ms여야 함 (budget<5ms)"
+    )
+
+
+# ── 게이트 적색 재현: 지연 주입이预算을 초과하면 AssertionError ───────────────
+
+
+@pytest.mark.perf
+@pytest.mark.asyncio
+async def test_partial_hierarchy_delay_injection_proves_budget_fires(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현 (D2, task-11539 감사 후속): 부분 계층 부트스트랩의
+     성능 단언이 실제로 지연을 포착하는지 역으로 증명한다.
+
+     `_FakeRepository.get_*` 메서드에 `delayed_async`로 1회 호출당 2ms
+     wall-clock 지연을 주입하면, 4개 레벨 × 2 get-or-create = 최대 8 get 호출
+    에 2ms × 8 = 16ms의 지연이 쌓여 wall_ms 예산 5ms를 명확히 초과해야 한다.
+
+     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+     검증한다.
+    """
+    # get_* 메서드를 지연시켜 전체 호출 시간을 예산보다 길게 만든다.
+    # 2ms 지연 × 8 get 호출 = 16ms >> 5ms wall-budget
+    original_get_legal_entity = _FakeRepository.get_legal_entity
+    original_get_fund = _FakeRepository.get_fund
+    original_get_portfolio = _FakeRepository.get_portfolio
+    original_get_sub_account = _FakeRepository.get_sub_account
+
+    monkeypatch.setattr(
+        _FakeRepository,
+        "get_legal_entity",
+        delayed_async(original_get_legal_entity, 0.002),
+    )
+    monkeypatch.setattr(
+        _FakeRepository,
+        "get_fund",
+        delayed_async(original_get_fund, 0.002),
+    )
+    monkeypatch.setattr(
+        _FakeRepository,
+        "get_portfolio",
+        delayed_async(original_get_portfolio, 0.002),
+    )
+    monkeypatch.setattr(
+        _FakeRepository,
+        "get_sub_account",
+        delayed_async(original_get_sub_account, 0.002),
+    )
+
+    repo = _FakeRepository()
+    user_id = uuid4()
+    complete = await _ensure(repo, user_id)
+    del repo.portfolios[complete.portfolio.portfolio_id]
+    del repo.sub_accounts[complete.sub_account.sub_account_id]
+
+    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    with pytest.raises(AssertionError):
+        sample = await perf_budget.sample_async(
+            lambda: _ensure(repo, user_id),
+            batch=1,
+        )
+        assert sample.wall_ms < 5.0, (
+            f"지연 주입 후 wall={sample.wall_ms:.3f}ms — 예산 5ms를 초과해야 함 (gate-red repro)"
+        )
 
 
 async def test_two_users_get_disjoint_hierarchies():
