@@ -205,6 +205,95 @@ async def test_create_pool_with_retry_retries_drop_create_race_errors(
     assert len(attempts) == 2
 
 
+async def test_create_pool_with_retry_passes_configured_pool_size_kwargs() -> None:
+    """task-12043 QA: `_create_pool_with_retry`가 실제로 `_POOL_MIN_SIZE`/
+    `_POOL_MAX_SIZE`를 `asyncpg.create_pool`에 전달하는지 확인한다 — 기존
+    테스트는 모두 `**kwargs: object`로 받아 버려 kwargs 값 자체를 단언하지
+    않았고(task-12043이 추가한 env-override 배선이 무점검 상태였음), 둘 중
+    하나만 깨져도(예: 이름 오타) 기존 가짜 create_pool이 조용히 받아들여
+    아무 테스트도 실패하지 않았다."""
+    import src.main as main_module
+
+    captured_kwargs: dict[str, object] = {}
+    fake_pool = object()
+
+    def _fake_create_pool(dsn: str, **kwargs: object) -> object:
+        captured_kwargs.update(kwargs)
+
+        async def _succeed() -> object:
+            return fake_pool
+
+        return _succeed()
+
+    with (
+        patch.object(main_module, "_POOL_MIN_SIZE", 3),
+        patch.object(main_module, "_POOL_MAX_SIZE", 7),
+        patch.object(main_module.asyncpg, "create_pool", _fake_create_pool),
+    ):
+        result = await main_module._create_pool_with_retry("postgresql://x")
+
+    assert result is fake_pool
+    assert captured_kwargs == {"min_size": 3, "max_size": 7}
+
+
+def test_pool_size_defaults_to_ten_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """회귀 방지: 프로덕션(env var 미설정)에서는 asyncpg의 기존 기본값
+    min_size=10/max_size=10이 그대로 유지돼야 한다 — task-12043의 env-override가
+    프로덕션 기본 풀 크기를 조용히 바꾸면 안 된다."""
+    import importlib
+
+    import src.main as main_module
+
+    monkeypatch.delenv("AIOS_DB_POOL_MIN_SIZE", raising=False)
+    monkeypatch.delenv("AIOS_DB_POOL_MAX_SIZE", raising=False)
+    try:
+        importlib.reload(main_module)
+        assert main_module._POOL_MIN_SIZE == 10
+        assert main_module._POOL_MAX_SIZE == 10
+    finally:
+        importlib.reload(main_module)
+
+
+def test_pool_size_overridable_via_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """task-12043의 핵심 요구사항(2): 테스트 러너가 env var로 per-worker
+    풀 크기를 줄일 수 있어야 한다 — xdist 워커당 asyncpg 기본 10/10이
+    경합을 키운다는 진단(task-12030)에 대한 실제 완화 수단."""
+    import importlib
+
+    import src.main as main_module
+
+    monkeypatch.setenv("AIOS_DB_POOL_MIN_SIZE", "2")
+    monkeypatch.setenv("AIOS_DB_POOL_MAX_SIZE", "4")
+    try:
+        importlib.reload(main_module)
+        assert main_module._POOL_MIN_SIZE == 2
+        assert main_module._POOL_MAX_SIZE == 4
+    finally:
+        monkeypatch.delenv("AIOS_DB_POOL_MIN_SIZE", raising=False)
+        monkeypatch.delenv("AIOS_DB_POOL_MAX_SIZE", raising=False)
+        importlib.reload(main_module)
+
+
+def test_pool_size_env_var_non_integer_fails_closed_at_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative test: env var에 정수가 아닌 값이 들어가면(오타 등) 조용히
+    기본값으로 넘어가지 않고 모듈 임포트 시점에 바로 `ValueError`로
+    fail-closed해야 한다 — 잘못 설정된 풀 크기로 기동해 나중에 알기 어려운
+    커넥션 경합을 재현하는 대신 즉시 드러낸다."""
+    import importlib
+
+    import src.main as main_module
+
+    monkeypatch.setenv("AIOS_DB_POOL_MIN_SIZE", "not-a-number")
+    try:
+        with pytest.raises(ValueError):
+            importlib.reload(main_module)
+    finally:
+        monkeypatch.delenv("AIOS_DB_POOL_MIN_SIZE", raising=False)
+        importlib.reload(main_module)
+
+
 def test_pool_retry_delay_grows_exponentially_and_caps() -> None:
     """성능/수치 단언(D2): 백오프 지연이 매 시도 2배로 늘다가
     `_POOL_CONNECT_RETRY_MAX_DELAY`에서 멈춰야 한다 — 무한정 늘어나
