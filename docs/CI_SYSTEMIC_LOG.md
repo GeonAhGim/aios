@@ -3745,3 +3745,20 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   파일(`test_watchdog_decide.py`, `test_watchdog_simulator_deepen.py`, `test_builtins_math.py`,
   `test_interpreter.py`)은 각자의 전담 task에서 개별 확인해야 한다 — 이 항목은
   `test_recovery_gate.py`에만 좁게 적용된다.
+
+
+## task-17168 — ci_failure_card:pytest_perf_parallel:single:617ae7e655d5, 대상 파일
+  `tests/unit/core/strategy/test_script_facade.py::test_script_path_overhead_over_cond_v2_stays_within_budget`
+  재확인, 비회귀 (2026-10-22)
+
+- 대상 테스트 단독 실행: **1 passed in 1.42s**. 같은 파일 전체: **16 passed in 1.54s**. 카드의
+  "첫 오류"는 `PerfBudget` fixture repr과 `@pytest.mark.perf` 마커 줄일 뿐 FAILED/ERROR 표시가
+  없다 — task-11982/12014/12038/16895와 동형의 stdout 오분류.
+- 조사 중 해당 테스트에 `@pytest.mark.perf`가 중복으로 달려 있던 것을 발견해 하나로 정리했다
+  (동작 영향 없음, 마커 중복은 pytest 수집에 영향을 주지 않지만 가독성/린트 목적상 정리).
+- orders residue sentinel 교차 확인(`tests/unit/scripts/test_orders_residue_sentinel.py`):
+  **12 passed in 1.02s, exit=0**.
+- 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없음 — 비회귀를
+  재현/교차 확인하는 문서 리프 + 마커 중복 제거, task-12039/12047/15079/16667/16671/16895/17196과
+  동일 선례).
+- 다음 동일 경보 처리: 위 선례들과 이 항목을 인용해 비회귀로 분류한다.

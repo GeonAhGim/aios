@@ -191,7 +191,6 @@ def test_frozen_evaluator_drift_is_caught_by_the_parity_gate(
 
 
 @pytest.mark.perf
-@pytest.mark.perf
 def test_script_path_overhead_over_cond_v2_stays_within_budget(
     perf_budget: PerfBudget,
 ) -> None:
