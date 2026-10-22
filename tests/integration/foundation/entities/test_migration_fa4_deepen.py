@@ -51,6 +51,8 @@ from src.foundation.ledger.contracts.v1 import AccountType, LedgerEvent, LedgerE
 from src.foundation.ledger.domain.chart_of_accounts import user_account
 from tests.integration.conftest import create_test_tenant
 from tests.support.deep_downgrade import purge_position_snapshots
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import delayed_async
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "789c138f13fe"
@@ -139,20 +141,76 @@ async def test_negative_insert_pos_account_with_nonexistent_portfolio_id_rejecte
             )
 
 
-async def test_negative_insert_pos_snapshot_with_nonexistent_fund_id_rejected_by_fk(pool):
+async def test_negative_insert_pos_snapshot_with_nonexistent_fund_id_rejected_by_fk(
+    pool, perf_budget: PerfBudget
+):
+    """negative — 존재하지 않는 fund_id 로 pos_snapshot INSERT 시 FK 제약이
+    위반되어야 한다. FK 검사는 DB 엔진이 한 번의 인덱스 검색으로 처리하므로
+    호출 1회 CPU 시간이 0 수렴해야 한다."""
     tenant_id = await create_test_tenant(pool)
-    async with pool.acquire() as conn:
-        account_id = await _insert_bare_pos_account(conn, tenant_id)
-        with pytest.raises(asyncpg.ForeignKeyViolationError):
-            await conn.execute(
-                "INSERT INTO pos_snapshot (position_key, tenant_id, account_id, instrument_id, "
-                "quantity, cost_method, fund_id) VALUES ($1, $2, $3, $4, 0, 'FIFO', $5)",
-                f"fa4-deepen-test-{uuid4().hex}",
-                tenant_id,
-                account_id,
-                uuid4(),
-                uuid4(),
-            )
+
+    async def _fk_violation_insert() -> None:
+        async with pool.acquire() as conn:
+            account_id = await _insert_bare_pos_account(conn, tenant_id)
+            with pytest.raises(asyncpg.ForeignKeyViolationError):
+                await conn.execute(
+                    "INSERT INTO pos_snapshot (position_key, tenant_id, account_id, instrument_id, "
+                    "quantity, cost_method, fund_id) VALUES ($1, $2, $3, $4, 0, 'FIFO', $5)",
+                    f"fa4-deepen-test-{uuid4().hex}",
+                    tenant_id,
+                    account_id,
+                    uuid4(),
+                    uuid4(),
+                )
+
+    sample = await perf_budget.sample_async(_fk_violation_insert, batch=1)
+    assert sample.cpu_ms < 500.0, (
+        f"FK 거부 CPU 시간 {sample.cpu_ms:.2f}ms가 예산 500ms를 초과했습니다 — "
+        f"인덱스 검색이 비정상적으로 느림"
+    )
+
+
+@pytest.mark.perf
+async def test_negative_insert_pos_snapshot_fund_id_goes_red_with_io_delay_injection(
+    pool,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연(
+    delayed_async, 1.0s) 을 주입한 후 같은 성능 단언을 돌리면 예산을
+    초과해야 한다(red).
+
+    `conn.execute` 를 `delayed_async` 로 감싸 1회 호출당 1초 IO 지연을
+    주입 — FK 제약 검증(I/O 바인딩)이 wall-clock 지연으로 느려지는 것을
+    측정한다. 정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가
+    아님을 보장한다. 단언/마커 삭제와 예산 완화 금지.
+    """
+
+    tenant_id = await create_test_tenant(pool)
+
+    async def _fk_violation_insert() -> None:
+        async with pool.acquire() as conn:
+            account_id = await _insert_bare_pos_account(conn, tenant_id)
+            with pytest.raises(asyncpg.ForeignKeyViolationError):
+                await conn.execute(
+                    "INSERT INTO pos_snapshot (position_key, tenant_id, account_id, instrument_id, "
+                    "quantity, cost_method, fund_id) VALUES ($1, $2, $3, $4, 0, 'FIFO', $5)",
+                    f"fa4-deepen-test-{uuid4().hex}",
+                    tenant_id,
+                    account_id,
+                    uuid4(),
+                    uuid4(),
+                )
+
+    original_execute = asyncpg.Connection.execute
+    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 1.0))
+
+    sample = await perf_budget.sample_async(_fk_violation_insert, batch=1)
+    assert sample.wall_ms >= 500.0, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
+        f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
+        f"budget=500ms)"
+    )
 
 
 async def test_negative_insert_pos_snapshot_with_nonexistent_portfolio_id_rejected_by_fk(pool):
