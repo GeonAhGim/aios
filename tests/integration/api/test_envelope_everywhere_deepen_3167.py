@@ -107,7 +107,9 @@ class _ExplodingReportService:
         )
 
 
-async def test_unclassified_exception_is_enveloped_without_leaking_original_message(client):
+async def test_unclassified_exception_is_enveloped_without_leaking_original_message(
+    client: AsyncClient,
+) -> None:
     """실패 주입: EXCEPTION_MAP에 없는 예외가 서비스 계층에서 터지면
     (`get_report_service` 의존성 오버라이드로 시뮬레이션), 전역 핸들러가
     이를 삼켜 위장 성공을 반환하지 않으면서도, 원본 예외 메시지(연결
