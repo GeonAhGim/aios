@@ -261,3 +261,78 @@ def test_record_tick_latency_under_budget(perf_budget) -> None:
             health.record_tick("perf_loop", True, 0.001, interval_sec=1.0)
 
     perf_budget.assert_within(tick_100, budget_ms=1000, batch=100, n=100)
+
+
+# ── CPU quantization validation (Windows process_time 0 수렴) ─────────
+
+
+@pytest.mark.perf
+def test_record_tick_single_call_cpu_measurement_does_not_converge_to_zero(
+    perf_budget,
+) -> None:
+    """단일 record_tick 호출이 process_time 양자화(~15.6ms)로 0ms로 수렴하지 않음을
+    batch=8로 정정한다.
+
+    Windows에서 time.process_time()은 GetProcessTimes 클록 틱(64Hz≈15.6ms)으로
+    양자화된다. 한 호출당 CPU 시간이 양자화 틱보다 작으면 0ms 또는 15.6ms로
+    읽혀 p95/평균이 왜곡된다. batch=8로 묶으면 총 CPU 시간이 틱 폭보다 커져
+    오차가 호출당 tick/8≈2ms로 줄어든다.
+    """
+    clock = _FakeClock(0.0)
+    spy = _SpyMetrics()
+    health = LoopHealth(clock=clock, metrics_port=spy)
+
+    def tick_one() -> None:
+        health.record_tick("cpu_test", True, 0.001, interval_sec=1.0)
+
+    # batch=1(단일 호출) — 양자화 오차가 큼(최대 15.6ms/회)
+    _ = perf_budget.sample(tick_one, batch=1)
+    # batch=8 — 양자화 오차가 1/8로 줄어듦
+    sample_batched = perf_budget.sample(tick_one, batch=8)
+
+    # batch=8 측정값이 batch=1보다 양자화 노이즈가 적어야 함
+    # (batch=1이 0 또는 15.6ms로 읽혀도 batch=8은 더 안정적인 값)
+    # 핵심 단언: batch=8 측정값이 예산(1ms)을 지켜야 함
+    assert sample_batched.cpu_ms < 1.0, (
+        f"batch=8 CPU={sample_batched.cpu_ms:.3f}ms가 예산 1ms를 초과 — 양자화 오차 아님"
+    )
+
+
+# ── Gate-red reproduction (지연 주입으로 적색 경로 검증) ───────────────
+
+
+def test_record_tick_10x_delay_injection_triggers_red_path(monkeypatch, perf_budget) -> None:
+    """10배 지연 주입으로 record_tick이 예산을 초과하는 적색 경로를 재현한다.
+
+    delayed_sync로 CPU 부하를 주입하여 CPU 시간 기반 측정이 지연을 포착함을
+    검증한다 (# type: ignore 금지, tests/support/perf_inject.delayed_sync 사용).
+    """
+
+    clock = _FakeClock(0.0)
+    spy = _SpyMetrics()
+    health = LoopHealth(clock=clock, metrics_port=spy)
+
+    # record_tick 내부의 safe_observe를 0.5초 지연
+    original_observe = spy.observe
+
+    def _delayed_observe(name: str, value: float, labels: dict[str, str] | None = None) -> None:
+        import time
+
+        end = time.perf_counter() + 0.5
+        while time.perf_counter() < end:
+            pass
+        original_observe(name, value, labels)
+
+    monkeypatch.setattr(spy, "observe", _delayed_observe)
+
+    def tick_one() -> None:
+        health.record_tick("delayed_loop", True, 0.001, interval_sec=1.0)
+
+    # 지연 주입 후 측정 — CPU 시간이 500ms 이상이어야 함
+    sample = perf_budget.sample(tick_one, batch=1)
+
+    # 지연 주입으로 CPU 시간이 예산(100ms)을 초과해야 함 (적색 경로)
+    assert sample.cpu_ms >= 100.0, (
+        f"지연 주입에도 cpu={sample.cpu_ms:.3f}ms가 예산 100ms를 넘지 않습니다 — "
+        "delay injection이 제대로 작동하지 않습니다."
+    )
