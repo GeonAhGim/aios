@@ -191,10 +191,11 @@ async def update_from_exchange_with_fill_event(
         occurred_at=now,
         payload_hash=payload_hash,
     )
+    fill_recorded = order.filled_quantity > 0 and order.average_fill_price is not None
     async with conn.transaction():
         await conn.execute("SELECT set_config('oms.event_written', '1', true)")
         await _order_events.append(conn, event)
-        if order.filled_quantity > 0 and order.average_fill_price is not None:
+        if fill_recorded and order.average_fill_price is not None:
             if order.exchange_order_id is None:
                 raise ValueError(
                     f"order_id={order.order_id}: FILLED 응답인데 exchange_order_id가 "
@@ -232,6 +233,16 @@ async def update_from_exchange_with_fill_event(
                     else None
                 ),
                 "updated_at": now,
+                # The projection folds fills into fee_total/fee_currency, so the
+                # row must carry them too or replay_verify flags a mismatch.
+                **(
+                    {
+                        "fee_total": Decimal("0"),
+                        "fee_currency": order.average_fill_price.currency.value,
+                    }
+                    if fill_recorded and order.average_fill_price is not None
+                    else {}
+                ),
             },
         )
     return _row_to_order(row)

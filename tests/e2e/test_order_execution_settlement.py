@@ -102,7 +102,9 @@ async def test_order_submission_fills_and_settles_into_positions(pool: asyncpg.P
     user_id = await create_test_tenant(pool)
     execution_id = await create_execution(pool, user_id)
     adapter = _make_adapter()
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     published: list[tuple[str, dict[str, object]]] = []
 
     async def publish(topic: str, payload: dict[str, object]) -> None:
@@ -225,33 +227,22 @@ async def test_settlement_failure_propagates_not_swallowed(
     )
     order = _make_order(execution_id, "settle-mutation")
 
-    try:
-        with pytest.raises(RuntimeError, match="simulated settlement failure"):
-            await submit_order(
-                order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate
-            )
+    with pytest.raises(RuntimeError, match="simulated settlement failure"):
+        await submit_order(order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate)
 
-        async with pool.acquire() as conn:
-            db_status = await conn.fetchval(
-                "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
-            )
-            position = await conn.fetchval(
-                "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
-            )
-        # 주문 자체는 이미 체결·영속화됐다(거래소 왕복은 정산 실패 이전에 커밋) —
-        # 정산만 깨졌다는 것을 별도로 증명한다(알려진 미검증 갭, position_ledger.py
-        # 모듈 docstring "동시 첫 체결 경합" 항목과 같은 종류의 한계).
-        assert db_status == "FILLED"
-        assert position is None
-    finally:
-        # 정산 실패 주입으로 이 FILLED 주문은 order_events 없이 남는다 —
-        # tests/support/orders_residue.py가 teardown에서 eventless 잔여로
-        # 잡아내므로(test_unfilled_limit_order_does_not_write_position과
-        # 동일 관례), 단언 성공/실패와 무관하게 이 테스트의 행만 정리한다.
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM orders WHERE client_order_id = $1", order.client_order_id
-            )
+    async with pool.acquire() as conn:
+        db_status = await conn.fetchval(
+            "SELECT status FROM orders WHERE client_order_id = $1", order.client_order_id
+        )
+        position = await conn.fetchval(
+            "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
+        )
+    # 주문 자체는 이미 체결·영속화됐다(거래소 왕복은 정산 실패 이전에 커밋) —
+    # 정산만 깨졌다는 것을 별도로 증명한다(알려진 미검증 갭, position_ledger.py
+    # 모듈 docstring "동시 첫 체결 경합" 항목과 같은 종류의 한계). 동기 FILLED는
+    # order_events/fills를 함께 남기므로(append-only) residue가 아니다 — 삭제 불필요.
+    assert db_status == "FILLED"
+    assert position is None
 
 
 async def _p95_ms(reps: int, step: Callable[[], Awaitable[object]]) -> float:
@@ -282,13 +273,11 @@ async def test_submit_order_end_to_end_latency_within_normalized_budget(pool: as
         pool, require_mandate=False, require_compliance_mandate=False
     )
     counter = {"n": 0}
-    client_order_ids: list[str] = []
 
     async def _one_submit() -> None:
         counter["n"] += 1
         order = _make_order(execution_id, f"perf-{counter['n']}")
         await submit_order(order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=gate)
-        client_order_ids.append(order.client_order_id)
 
     submit_p95 = await _p95_ms(reps, _one_submit)
     budget_ms = max(800.0, 80.0 * baseline_p95)
@@ -297,9 +286,3 @@ async def test_submit_order_end_to_end_latency_within_normalized_budget(pool: as
         f"p95={baseline_p95:.3f}ms budget={budget_ms:.3f}ms"
     )
     assert submit_p95 < budget_ms
-
-    # cleanup — sentinel(orders_residue)가 eventless residue를 적발하지 않도록
-    # 이 테스트가 남긴 주문 행을 teardown 전에 제거한다.
-    if client_order_ids:
-        for cid in client_order_ids:
-            await pool.execute("DELETE FROM orders WHERE client_order_id = $1", cid)

@@ -51,6 +51,13 @@ def _asyncpg_dsn() -> str:
 async def pool():
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
+    # Submits that pass the gate go through the legacy write path, which leaves
+    # an eventless SUBMITTED row; the orders-residue sentinel flags it at module
+    # teardown, so remove this test's own eventless rows.
+    await p.execute(
+        "DELETE FROM orders o WHERE o.client_order_id LIKE 'gate-test-%' AND NOT EXISTS "
+        "(SELECT 1 FROM order_events e WHERE e.order_id = o.order_id)"
+    )
     await p.close()
 
 
@@ -290,7 +297,9 @@ async def test_gate_red_without_require_mandate_the_unmandated_submit_would_allo
     없다."""
     user_id = await create_test_tenant(pool)
     execution_id = await _create_running_execution(pool, user_id)
-    red_gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    red_gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
 
     result = await submit_order(
         _market_order(execution_id),
