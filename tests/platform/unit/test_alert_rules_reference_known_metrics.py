@@ -256,6 +256,53 @@ def test_full_validation_pipeline_p95_latency_within_budget(
     assert p95 < 100, f"p95={p95:.3f}ms >= 100ms 예산"
 
 
+@pytest.mark.perf
+def test_full_validation_pipeline_goes_red_with_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate-red 재현: 지연 주입 없이 통과하는 동일한 성능 단언이 지연 주입 시
+    적색(AssertionError)으로 전환되는지 확인 — 성능 단언이 실제로 실행 시간을
+    측정하는지 증명한다(단언/마커 삭제나 예산 완화 아님).
+
+    `_unknown_metric_tokens`에 0.05초 CPU 부하를 주입하면 전체 측정 시간이
+    100ms 예산을 넘어서야 한다. delayed_sync는 busy-wait로 time.process_time()을
+    직접 증가시키므로 PerfBudget.sample의 CPU 측정과 호환된다."""
+    from tests.support.perf_inject import delayed_sync
+
+    rules = _load_rules()
+    runbook_exists = {
+        rule["labels"]["runbook"]: (RUNBOOKS_DIR / f"{rule['labels']['runbook']}.md").is_file()
+        for rule in rules
+        if "runbook" in (rule.get("labels") or {})
+    }
+
+    original_func = _unknown_metric_tokens
+    slow_func = delayed_sync(original_func, 0.2)
+    monkeypatch.setattr(
+        "tests.platform.unit.test_alert_rules_reference_known_metrics._unknown_metric_tokens",
+        lambda rules_arg: slow_func(rules_arg),
+    )
+
+    def _measure_one() -> None:
+        _unknown_metric_tokens(rules)
+        for rule in rules:
+            _missing_required_fields(rule)
+            if "runbook" in (rule.get("labels") or {}):
+                _invalid_runbook_reason_from_cache(rule, runbook_exists)
+
+    samples = perf_budget.samples(_measure_one, n=5, batch=1)
+    # Verify delay injection actually took effect
+    first_cpu = samples[0].cpu_ms
+    assert first_cpu > 150, f"지연 주입 실패: cpu={first_cpu:.3f}ms >= 150ms 기대"
+    # Same budget assertion as the green test must now raise (red gate)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
+    p95 = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
+    with pytest.raises(AssertionError) as exc_info:
+        assert p95 < 100, f"p95={p95:.3f}ms >= 100ms 예산"
+    assert "예산" in str(exc_info.value)
+
+
 def test_rule_missing_expr_field_is_rejected() -> None:
     """negative: expr 필드가 아예 없는 규칙은 필수 필드 검증에 걸려야 한다."""
     bad_rule = {
