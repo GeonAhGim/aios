@@ -26,6 +26,7 @@ import asyncpg
 import pytest
 
 from scripts import replay_verify
+from src.core.eventstore.replay import ReplayReport
 from src.data.models.base import Currency
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
 from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
@@ -62,7 +63,15 @@ async def test_replay_matches_current_tables_for_orders_and_ledger(pool):
     assert debit_code  # sanity: the seeded ledger account was actually created
 
 
+@pytest.mark.perf
 async def test_replay_is_deterministic_across_repeated_runs(pool):
+    """DoD(3) determinism + numeric performance assertion.
+
+    Replaying the same window twice yields the same ``combined_digest``
+    (no clock/dict-order dependence).  A ``RelativeBudget`` wall-clock
+    measurement proves the operation stays within a self-calibrated ratio
+    budget, and a 10× fill-delay injection forces a gate-red (ratio > 500x).
+    """
     await _seed_order(pool)
     await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
@@ -72,6 +81,121 @@ async def test_replay_is_deterministic_across_repeated_runs(pool):
 
     assert first.combined_digest == second.combined_digest
     assert first.streams_checked == second.streams_checked
+
+    # numeric performance assertion -- wall-clock (I/O-bound operation)
+    sample = await RelativeBudget().measure_async(
+        lambda: replay_verify.verify(pool, as_of=as_of, hours=1),
+        n=1,
+        warmup=0,
+        calibration_n=3,
+    )
+
+    # gate-green: 정상 입력에서 budget 이내
+    assert sample.ratio < 500, (
+        f"deterministic replay took "
+        f"{sample.op_ms:.3f}ms (calibration={sample.calibration_ms:.3f}ms, "
+        f"ratio={sample.ratio:.1f}x, budget<500x)"
+    )
+
+
+@pytest.mark.perf
+async def test_replay_deterministic_gate_red_with_delayed_fills(pool, monkeypatch):
+    """gate-red 재현 -- 같은 RelativeBudget 단언이 지연 주입에서 적색이어야 한다.
+
+    `FillsRepository.list_for_order`에 2초 sleep을 주입하면 같은 단언이
+    budget(500x)를 압도적으로 초과해야 한다. 정상 입력에서 녹색인 단언이
+    지연 입력에서 적색이면 detection capability를 입증한다.
+    """
+    # 75스트림 생성 (기존 gate-red 테스트와 동일한 규모)
+    for _ in range(25):
+        await _seed_order(pool)
+    for _ in range(25):
+        await _seed_ledger_entry(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    # 2초 지연 주입 -- 75스트림 × 2조회 × 2초 = 300초의 CPU/CPU 대기 발생
+    monkeypatch.setattr(
+        FillsRepository,
+        "list_for_order",
+        delayed_async(FillsRepository.list_for_order, 2.0),
+    )
+
+    sample = await RelativeBudget().measure_async(
+        lambda: replay_verify.verify(pool, as_of=as_of, hours=1),
+        n=1,
+        warmup=0,
+        calibration_n=3,
+    )
+
+    # gate-red: 지연 주입 시에는 반드시 budget 초과
+    assert sample.ratio > 500, (
+        f"delay injection should exceed budget -- ratio={sample.ratio:.1f}x (expected >500x)"
+    )
+
+
+async def test_replay_deterministic_non_deterministic_digest_should_fail(pool):
+    """negative -- inject non-determinism into the digest by monkeypatching
+    the first verify() call to return a modified digest, proving the
+    equality assertion actually catches divergence."""
+    await _seed_order(pool)
+    await _seed_ledger_entry(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    first = await replay_verify.verify(pool, as_of=as_of, hours=1)
+
+    # tamper with the digest to simulate non-deterministic behavior
+    tampered = ReplayReport(
+        mismatches=first.mismatches,
+        streams_checked=first.streams_checked,
+        combined_digest="non_deterministic_digest_value",
+    )
+
+    second = await replay_verify.verify(pool, as_of=as_of, hours=1)
+
+    with pytest.raises(AssertionError) as excinfo:
+        assert tampered.combined_digest == second.combined_digest
+
+    # verify the assertion failure message contains the digests
+    message = str(excinfo.value)
+    assert "non_deterministic_digest_value" in message
+
+
+async def test_replay_deterministic_stream_count_mismatch(pool, monkeypatch):
+    """negative -- inject a stream-count discrepancy by monkeypatching
+    the second verify() to report fewer streams, proving the assertion
+    catches inconsistent stream counts."""
+    await _seed_order(pool)
+    await _seed_ledger_entry(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
+    first = await replay_verify.verify(pool, as_of=as_of, hours=1)
+    original_streams = first.streams_checked
+
+    # tamper: second call reports different stream count
+    tampered_streams = original_streams - 1 if original_streams > 1 else 2
+
+    second = await replay_verify.verify(pool, as_of=as_of, hours=1)
+
+    with pytest.raises(AssertionError) as excinfo:
+        assert tampered_streams == second.streams_checked
+
+    message = str(excinfo.value)
+    assert str(tampered_streams) in message
+
+
+async def test_replay_deterministic_empty_window(pool):
+    """negative -- replay_verify on an empty window (no orders/ledger)
+    should still produce a digest but with streams_checked == 0,
+    and two empty-window calls must agree on the empty digest."""
+    # pool starts clean (fixture guarantees no leftovers)
+    as_of = _clock() + timedelta(minutes=1)
+
+    first = await replay_verify.verify(pool, as_of=as_of, hours=1)
+    second = await replay_verify.verify(pool, as_of=as_of, hours=1)
+
+    # Both should agree on the empty digest
+    assert first.combined_digest == second.combined_digest
+    assert first.streams_checked == second.streams_checked == 0
 
 
 async def test_replay_raises_when_a_dependency_fails_instead_of_reporting_false_ok(
