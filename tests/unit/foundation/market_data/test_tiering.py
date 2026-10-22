@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -27,6 +26,7 @@ from src.foundation.market_data.adapters.storage.warm_parquet import WarmParquet
 from src.foundation.market_data.contracts.v1 import SeriesKey, Timeframe, Venue
 from src.foundation.market_data.contracts.v2.candle_lineage import SourceKind
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from tests.support.perf_budget import PerfBudget
 
 _KEY = SeriesKey(venue=Venue.BINANCE, instrument_id=uuid4(), timeframe=Timeframe.D1)
 
@@ -322,7 +322,9 @@ def test_delete_year_failure_after_verify_keeps_hot_data_and_raises(tmp_path: Pa
 
 
 @pytest.mark.perf
-def test_promote_year_completes_within_budget_for_twenty_thousand_minute_bars(tmp_path: Path):
+def test_promote_year_completes_within_budget_for_twenty_thousand_minute_bars(
+    tmp_path: Path, perf_budget: PerfBudget
+) -> None:
     """수치 성능 단언: 실측상 M1 1년치에 근접한 20,000행 승격(read+write+
     round-trip 검증+digest)이 ~0.4초대에 끝난다(로컬 실측) — print만 하지
     않고 예산 5.0초(약 10배 여유)로 실제 단언한다."""
@@ -337,12 +339,21 @@ def test_promote_year_completes_within_budget_for_twenty_thousand_minute_bars(tm
         volume=[Decimal("12.3400000000") + Decimal(i) for i in range(n)],
         quote_volume=[None if i % 2 else Decimal("1234.5600000000") for i in range(n)],
     )
-    warm = WarmParquetStorage(tmp_path)
-    hot = _FakeHot(by_year={2026: columns})
+    runs = iter(range(1_000))
+    row_counts: list[int] = []
 
-    start = time.perf_counter()
-    outcome = asyncio.run(promote_year(hot, warm, tmp_path, _KEY, 2026))
-    elapsed = time.perf_counter() - start
+    def _promote_once() -> None:
+        # Fresh hot fake (promotion deletes the year) and warm root per call.
+        hot = _FakeHot(by_year={2026: columns})
+        root = tmp_path / f"run{next(runs)}"
+        root.mkdir()
+        outcome = asyncio.run(promote_year(hot, WarmParquetStorage(root), root, _KEY, 2026))
+        row_counts.append(outcome.row_count)
 
-    assert outcome.row_count == n
-    assert elapsed < 5.0
+    # batch=2 keeps the timed span well above the 15.6ms process_time tick;
+    # budget is 5.0s expressed in ms (unit matches PerfSample.cpu_ms).
+    perf_budget.assert_within(
+        _promote_once, budget_ms=5.0 * 1000, n=3, warmup=0, batch=2, label="promote_year 20k bars"
+    )
+
+    assert row_counts == [n] * 6
