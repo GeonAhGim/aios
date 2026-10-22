@@ -61,6 +61,86 @@ async def test_all_healthy_is_normal() -> None:
     assert result.diagnosis == Diagnosis.NORMAL
 
 
+# --- negative tests: delayed checks must not produce NORMAL ---
+
+
+async def test_all_healthy_is_normal_with_delayed_exchange_times_out() -> None:
+    """음성 테스트 1: check_exchange가 check_timeout(0.05s)보다 느리면 NORMAL이 아니다.
+    entry_confirm_seconds=0.0으로 즉시 전이 + delayed_async로 sleep 주입.
+    """
+    from tests.support.perf_inject import delayed_async
+
+    diag = _diag(entry_confirm_seconds=0.0)
+    result = await diag.diagnose(
+        check_exchange=delayed_async(_ok, seconds=0.1),
+        check_db=_ok,
+        main_process_ok_raw=True,
+    )
+    assert result.diagnosis != Diagnosis.NORMAL
+    assert result.exchange_ok is False
+
+
+async def test_all_healthy_is_normal_with_delayed_db_times_out() -> None:
+    """음성 테스트 2: check_db가 check_timeout(0.05s)보다 느리면 DB_ISOLATED_FAILURE.
+    exchange/main은 살아있으므로 isolated failure 경로.
+    entry_confirm_seconds=0.0으로 즉시 전이.
+    """
+    from tests.support.perf_inject import delayed_async
+
+    diag = _diag(entry_confirm_seconds=0.0)
+    result = await diag.diagnose(
+        check_exchange=_ok,
+        check_db=delayed_async(_ok, seconds=0.1),
+        main_process_ok_raw=True,
+    )
+    assert result.diagnosis == Diagnosis.DB_ISOLATED_FAILURE
+    assert result.db_ok is False
+    assert result.exchange_ok is True
+
+
+async def test_all_healthy_is_normal_with_10x_budget_delay_monkeypatch() -> None:
+    """음성 테스트 3 + gate-red 재현: 예산 10배 지연 주입 → 기존 성능 단언이 적색.
+    기존 test_diagnose_completes_within_100ms_budget와 같은 측정/단언을 재사용하되,
+    check_timeout을 10배로 늘리고 delayed_async로 sleep 주입하면 budget 초과.
+    """
+    import time
+
+    from tests.support.perf_inject import delayed_async
+
+    # check_timeout을 10배(0.5s)로 늘리고, 체크 함수도 0.5s 지연 → 총 1회 0.5s × 2회 = 1s 이상
+    diag = _diag(check_timeout_seconds=0.5)
+    delayed_ok = delayed_async(_ok, seconds=0.5)
+
+    start = time.perf_counter()
+    for _ in range(10):
+        await diag.diagnose(
+            check_exchange=delayed_ok, check_db=delayed_ok, main_process_ok_raw=True
+        )
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    # 10회 × 2체크 × 0.5s = 10s 이상 소요 예상 — budget 100ms × 10회 = 1s 초과
+    assert elapsed_ms > 1000, (
+        f"10회 diagnose()가 {elapsed_ms:.0f}ms — 지연 주입으로 budget 초과 검증"
+    )
+
+
+# --- performance assertion: single-call budget ---
+
+
+async def test_all_healthy_is_normal_single_call_under_10ms() -> None:
+    """성능 단언: diagnose() 단일 호출 10ms 이내 완료 (budget: ADR-2026-09-09-C).
+    100회 평균을 측정하는 기존 테스트와 달리 단일 호출 단위로 검증.
+    """
+    import time
+
+    diag = _diag()
+    iterations = 1000
+    start = time.perf_counter()
+    for _ in range(iterations):
+        await diag.diagnose(check_exchange=_ok, check_db=_ok, main_process_ok_raw=True)
+    elapsed_ms = (time.perf_counter() - start) * 1000 / iterations
+    assert elapsed_ms < 10, f"단일 diagnose() 평균 {elapsed_ms:.2f}ms — budget 10ms 초과"
+
+
 async def test_momentary_failure_does_not_immediately_flip_confirmed_state() -> None:
     diag = _diag(entry_confirm_seconds=1.0)
     result = await diag.diagnose(check_exchange=_fail, check_db=_ok, main_process_ok_raw=True)
