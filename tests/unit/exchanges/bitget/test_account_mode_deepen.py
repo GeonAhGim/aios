@@ -69,7 +69,7 @@ def _make_adapter(handler: Callable[[httpx.Request], httpx.Response]) -> BitgetA
     )
 
 
-def _envelope(code: str, data: object) -> dict:
+def _envelope(code: str, data: object) -> dict[str, object]:
     return {"code": code, "msg": "test", "requestTime": 1, "data": data}
 
 
@@ -105,7 +105,10 @@ async def test_get_balance_survives_infra_failures_then_switches_to_unified_on_4
 
     assert v2_calls == 3  # ConnectError x2 + 40085(바디 검증은 단발 평가, 재시도 없이 즉시 실패)
     assert v3_calls == 2  # ConnectError x1 + 성공
-    assert adapter.account_mode is BitgetAccountMode.UNIFIED
+    # mypy narrows account_mode to CLASSIC statically but get_balance()
+    # mutates it via account_aware_request — break the narrow with a rebind.
+    mode_after: BitgetAccountMode = adapter.account_mode
+    assert mode_after == BitgetAccountMode.UNIFIED
     assert balances[0].asset == "USDT"
     assert balances[0].available == Decimal("10")
 
