@@ -19,6 +19,7 @@ from src.core.portfolio.engine import PortfolioEngine, PortfolioEngineError
 from src.core.strategy.models import Signal
 from src.data.models.strategy_fsm import FSMState
 from src.data.models.trading import OrderSide
+from tests.conftest import PerfBudget
 
 
 def _signal(direction: OrderSide) -> Signal:
@@ -99,6 +100,126 @@ def test_entry_with_existing_position_raises_logic_error():
             {
                 "allocated_capital": Decimal("1000"),
                 "position_quantity": Decimal("0.1"),
+                "current_price": Decimal("50000"),
+                "total_equity": Decimal("10000"),
+            },
+        )
+
+
+@pytest.mark.perf
+def test_entry_with_existing_position_raises_logic_error_is_fast(
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언: 기존 위치가 있을 때 BUY 진입 경로는 단순 비교(Decimal != 0)
+    하나이므로 CPU 시간이 극히 작다 — 사전거래 게이트 예산(5ms) 대비
+    극히 작은 값을 보여야 한다.
+
+    음성: 이미 포지션이 있으면 즉시 `PortfolioEngineError` 를 raise 한다.
+    """
+    engine = PortfolioEngine()
+
+    cpu_ms_values: list[float] = []
+    for _ in range(10):
+        sample = perf_budget.sample(
+            lambda: _safe_allocate(engine),
+        )
+        cpu_ms_values.append(sample.cpu_ms)
+
+    avg_cpu_ms = sum(cpu_ms_values) / len(cpu_ms_values)
+
+    assert avg_cpu_ms < 1.0, (
+        f"existing-position rejection should be near-zero CPU; measured avg={avg_cpu_ms:.3f}ms"
+    )
+
+
+def _safe_allocate(engine: PortfolioEngine) -> object:
+    """Call ``engine.allocate()`` for the existing-position case,
+    swallow the expected ``PortfolioEngineError`` so
+    ``PerfBudget.sample`` can measure CPU time without crashing.
+    """
+    try:
+        engine.allocate(
+            _signal(OrderSide.BUY),
+            {
+                "allocated_capital": Decimal("1000"),
+                "position_quantity": Decimal("0.1"),
+                "current_price": Decimal("50000"),
+                "total_equity": Decimal("10000"),
+            },
+        )
+    except PortfolioEngineError:
+        pass
+    return None
+
+
+@pytest.mark.perf
+def test_entry_with_existing_position_raises_logic_error_goes_red_with_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction: `delayed_sync` 로 `allocate` 진입 전에 CPU
+    부하를 주입하면 같은 p99 단언이 적색으로 전환된다.
+
+    불일치 경로는 dispatch 전 비교이므로 `delayed_sync(original_allocate)`
+    로 전체 함수를 감싸야 지연이 측정된다.
+    """
+    from tests.support.perf_inject import delayed_sync
+
+    engine = PortfolioEngine()
+    budget_ms = 1.0
+
+    original_allocate = engine.allocate
+    delayed_allocate = delayed_sync(original_allocate, 0.05)  # 50ms CPU delay
+    monkeypatch.setattr(engine, "allocate", delayed_allocate)
+
+    cpu_ms_values: list[float] = []
+    for _ in range(100):
+        sample = perf_budget.sample(
+            lambda: _safe_allocate(engine),
+        )
+        cpu_ms_values.append(sample.cpu_ms)
+
+    cpu_ms_values.sort()
+    p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99)]
+
+    assert p99_ms >= budget_ms, (
+        f"delay injection failed: p99={p99_ms:.3f}ms — "
+        f"expected red (budget>={budget_ms}ms); measurement is hollow"
+    )
+
+
+def test_entry_with_zero_position_quantity_does_not_raise():
+    """음성: position_quantity == Decimal("0") 이면 진입이 정상 통과한다.
+    Decimal("0") != 0 (int) 일 수도 있으므로 명시 검증.
+    """
+    engine = PortfolioEngine()
+
+    decision = engine.allocate(
+        _signal(OrderSide.BUY),
+        {
+            "allocated_capital": Decimal("1000"),
+            "position_quantity": Decimal("0"),
+            "current_price": Decimal("50000"),
+            "total_equity": Decimal("10000"),
+        },
+    )
+
+    assert decision is not None
+    assert decision.approved_quantity == Decimal("1000") / Decimal("50000")
+
+
+def test_entry_with_negative_position_quantity_raises_logic_error():
+    """음성: position_quantity < 0 은 물리적으로 불가능한 상태이므로
+    `PortfolioEngineError` 를 raise 한다.
+    """
+    engine = PortfolioEngine()
+
+    with pytest.raises(PortfolioEngineError):
+        engine.allocate(
+            _signal(OrderSide.BUY),
+            {
+                "allocated_capital": Decimal("1000"),
+                "position_quantity": Decimal("-0.1"),
                 "current_price": Decimal("50000"),
                 "total_equity": Decimal("10000"),
             },
