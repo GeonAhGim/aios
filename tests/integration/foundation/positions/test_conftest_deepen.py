@@ -114,10 +114,12 @@ async def test_create_pos_account_perf_budget_goes_red_with_delay_injection(
         await create_pos_account(pool, tenant_id)
 
     # 지연 주입으로 budget 초과 → AssertionError 발생해야 함
+    # delayed_async(asyncio.sleep)는 CPU 시간 대신 wall-clock 시간만 증가하므로
+    # wall_ms로 단언해야 지연 감지가 제대로 작동한다.
     sample = await perf_budget.sample_async(_create_with_delay, batch=1)
     with pytest.raises(AssertionError):
-        assert sample.cpu_ms < 10.0, (
-            f"지연 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — "
+        assert sample.wall_ms < 10.0, (
+            f"지연 주입 후 wall 시간 {sample.wall_ms:.3f}ms — "
             f"예상과 달리 녹색: 측정/단언이 공허함 (budget<10ms)"
         )
 
