@@ -38,7 +38,7 @@ _SRC = (
 )
 
 
-def test_only_pyarrow_import_is_used_for_parquet_io():
+def test_only_pyarrow_import_is_used_for_parquet_io() -> None:
     """DoD(e): ArcticDB(BSL 1.1)·Timescale 컬럼스토어를 반입하지 않는다 —
     이 모듈이 실제로 import하는 parquet 관련 서드파티는 pyarrow뿐임을
     소스 텍스트로 확인한다."""
@@ -82,7 +82,7 @@ def _digest(columns: CandleColumns) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
-def test_round_trip_is_byte_identical(tmp_path: Path):
+def test_round_trip_is_byte_identical(tmp_path: Path) -> None:
     """DoD(a): 저장→로드한 컬럼 배열의 sha256 digest가 원본과 바이트 동일해야
     한다(근사·tolerance 비교 금지)."""
     store = WarmParquetStorage(tmp_path)
@@ -102,7 +102,7 @@ def test_round_trip_is_byte_identical(tmp_path: Path):
     assert loaded.quote_volume == original.quote_volume
 
 
-def test_partial_range_reports_explicit_missing_months(tmp_path: Path):
+def test_partial_range_reports_explicit_missing_months(tmp_path: Path) -> None:
     """DoD(b): 요청 2026-01~2026-03 중 02월 캔들만 저장된 경우, 반환된
     컬럼은 02월분만 담고, 결측 구간은 01·03월로 명시돼야 한다(빈 결과로
     뭉개지 않는다)."""
@@ -124,7 +124,7 @@ def test_partial_range_reports_explicit_missing_months(tmp_path: Path):
     )
 
 
-def test_missing_year_file_reports_whole_range_missing(tmp_path: Path):
+def test_missing_year_file_reports_whole_range_missing(tmp_path: Path) -> None:
     store = WarmParquetStorage(tmp_path)
 
     loaded, missing = store.read_columns(
@@ -139,7 +139,7 @@ def test_missing_year_file_reports_whole_range_missing(tmp_path: Path):
     )
 
 
-def test_reuses_candle_store_port_read_candles_columnar(tmp_path: Path):
+def test_reuses_candle_store_port_read_candles_columnar(tmp_path: Path) -> None:
     """DoD(c): DC-13 hot_postgres가 위임하는 `CandleStore` 포트와 같은
     이름·시그니처(`read_candles_columnar`)로 `CandleColumns`를 반환한다 —
     새 포트·새 DTO가 아니라 기존 반환형을 그대로 쓴다."""
@@ -160,7 +160,7 @@ def test_reuses_candle_store_port_read_candles_columnar(tmp_path: Path):
     assert len(columns) == 2
 
 
-def test_read_candles_columnar_rejects_as_of(tmp_path: Path):
+def test_read_candles_columnar_rejects_as_of(tmp_path: Path) -> None:
     store = WarmParquetStorage(tmp_path)
     store.write_year(_KEY, 2026, _daily_columns(2026, [0]))
 
@@ -177,7 +177,7 @@ def test_read_candles_columnar_rejects_as_of(tmp_path: Path):
         asyncio.run(_call())
 
 
-def test_truncated_parquet_file_raises_instead_of_returning_empty(tmp_path: Path):
+def test_truncated_parquet_file_raises_instead_of_returning_empty(tmp_path: Path) -> None:
     """DoD(d): 파일 꼬리를 잘라낸 손상 입력은 빈 시리즈를 조용히 반환하지
     않고 예외로 표면화해야 한다."""
     store = WarmParquetStorage(tmp_path)
@@ -193,7 +193,7 @@ def test_truncated_parquet_file_raises_instead_of_returning_empty(tmp_path: Path
         )
 
 
-def test_write_year_rejects_mismatched_year(tmp_path: Path):
+def test_write_year_rejects_mismatched_year(tmp_path: Path) -> None:
     store = WarmParquetStorage(tmp_path)
     wrong_year = _daily_columns(2025, [0])
 
@@ -201,7 +201,7 @@ def test_write_year_rejects_mismatched_year(tmp_path: Path):
         store.write_year(_KEY, 2026, wrong_year)
 
 
-def test_write_year_rejects_mismatched_column_lengths(tmp_path: Path):
+def test_write_year_rejects_mismatched_column_lengths(tmp_path: Path) -> None:
     store = WarmParquetStorage(tmp_path)
     columns = _daily_columns(2026, [0, 1])
     broken = CandleColumns(
