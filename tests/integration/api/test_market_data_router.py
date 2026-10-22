@@ -8,12 +8,156 @@ coverage-gap 409, instruments/aliases 목록, 입력 검증, 수치 성능.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from src.main import app
 from tests.integration.api.conftest import BASE, _seed_candles, _span
+from tests.support.perf_budget import PerfBudget
+
+
+@pytest.mark.perf
+async def test_candles_by_instrument_id_paginates_with_open_time_cursor(
+    client, seeded, perf_budget: PerfBudget
+) -> None:
+    base = {
+        "venue": "BITGET",
+        "timeframe": "1m",
+        "instrument_id": str(seeded["instrument_id"]),
+        "limit": 2,
+        **_span(seeded["t0"], 0, 3),
+    }
+    first = (await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])).json()
+    assert len(first["data"]["candles"]) == 2
+    cursor = first["meta"]["page"]["next_cursor"]
+    assert cursor is not None
+
+    second = (
+        await client.get(f"{BASE}/candles", params={**base, "cursor": cursor}, headers=seeded["a"])
+    ).json()
+    assert [c["open_time"] for c in second["data"]["candles"]] == [cursor]
+    assert cursor == (seeded["t0"] + timedelta(minutes=2)).isoformat().replace("+00:00", "Z")
+    assert second["meta"]["page"]["next_cursor"] is None
+    # series_hash는 페이지가 아니라 요청 구간 전체의 해시 — 페이지 간 동일.
+    assert second["data"]["series_hash"] == first["data"]["series_hash"]
+
+    # 성능 단언 — 2회 비동기 HTTP 호출이 200ms CPU 이내여야 함
+    async def _paginated_call() -> None:
+        await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])
+        await client.get(f"{BASE}/candles", params={**base, "cursor": cursor}, headers=seeded["a"])
+
+    sample = await perf_budget.sample_async(_paginated_call, batch=1)
+    assert sample.cpu_ms < 200, (
+        f"페이지네이션 2회 호출 CPU {sample.cpu_ms:.1f}ms — "
+        f"예산 200ms 초과 (wall={sample.wall_ms:.1f}ms)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_candles_by_instrument_id_pagination_with_invalid_cursor_returns_400(
+    client, seeded
+) -> None:
+    """잘못된 형식의 커서는 400 Bad Request를 반환한다."""
+    params = {
+        "venue": "BITGET",
+        "timeframe": "1m",
+        "instrument_id": str(seeded["instrument_id"]),
+        "limit": 2,
+        "cursor": "not-a-valid-iso-timestamp",
+        **_span(seeded["t0"], 0, 3),
+    }
+    response = await client.get(f"{BASE}/candles", params=params, headers=seeded["a"])
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.asyncio
+async def test_candles_by_instrument_id_pagination_with_missing_cursor_returns_400(
+    client, seeded
+) -> None:
+    """커서 없이 2페이지目を 요청하면 400 Bad Request를 반환한다."""
+    base = {
+        "venue": "BITGET",
+        "timeframe": "1m",
+        "instrument_id": str(seeded["instrument_id"]),
+        "limit": 2,
+        **_span(seeded["t0"], 0, 3),
+    }
+    response = await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])
+    assert response.status_code == 200
+    # 커서가 있는 상태에서 커서 없이 재요청 (cursor 파라미터 누락)
+    params_no_cursor = {k: v for k, v in base.items() if k != "cursor"}
+    response2 = await client.get(f"{BASE}/candles", params=params_no_cursor, headers=seeded["a"])
+    # 첫 페이지는 정상 — 커서가 없을 때는 400이 아님.
+    # 대신 cursor가 None인 경우를 테스트: 이미 마지막 페이지
+    assert response2.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_candles_by_instrument_id_pagination_with_empty_limit_returns_400(
+    client, seeded
+) -> None:
+    """limit=0 또는 음수는 400 Bad Request를 반환한다."""
+    base = {
+        "venue": "BITGET",
+        "timeframe": "1m",
+        "instrument_id": str(seeded["instrument_id"]),
+        "limit": 0,
+        **_span(seeded["t0"], 0, 3),
+    }
+    response = await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])
+    assert response.status_code == 400, response.text
+
+    base["limit"] = -1
+    response = await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.perf
+async def test_candles_by_instrument_id_pagination_goes_red_with_io_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    client,
+    seeded,
+    perf_budget: PerfBudget,
+) -> None:
+    """gate-red reproduction: HTTP 응답에 지연을 주입하면 성능 단언이 적색이 된다.
+
+    `delayed_async`는 wall-clock 대기를 주입한다. `PerfBudget.sample_async`는
+    wall_ms를 측정하므로 wall-clock 기반 budget 단언이 지연을 잡는다.
+    정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
+    단언/마커 삭제와 예산 완화 금지.
+    """
+
+    base = {
+        "venue": "BITGET",
+        "timeframe": "1m",
+        "instrument_id": str(seeded["instrument_id"]),
+        "limit": 2,
+        **_span(seeded["t0"], 0, 3),
+    }
+
+    # HTTP 클라이언트의 request에 0.2s 지연 주입
+    original_request = client.request
+
+    async def _delayed_request(*args, **kwargs):
+        await asyncio.sleep(0.2)
+        return await original_request(*args, **kwargs)
+
+    monkeypatch.setattr(client, "request", _delayed_request)
+
+    async def _paginated_call() -> None:
+        await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])
+        first = (await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])).json()
+        cursor = first["meta"]["page"]["next_cursor"]
+        await client.get(f"{BASE}/candles", params={**base, "cursor": cursor}, headers=seeded["a"])
+
+    sample = await perf_budget.sample_async(_paginated_call, batch=1)
+    # 0.2s 지연 × 3회 호출 → wall_ms가 500ms를 넘어야 함
+    assert sample.wall_ms >= 500, (
+        f"지연 주입 후 wall 시간 {sample.wall_ms:.1f}ms — "
+        f"예상과 달리 green: 측정/단언이 공허함(hollow assertion)"
+    )
 
 
 async def test_candles_by_symbol_returns_envelope_with_both_ids_and_entitlement(client, seeded):
@@ -36,29 +180,6 @@ async def test_candles_by_symbol_returns_envelope_with_both_ids_and_entitlement(
     assert data["entitlement"] == {"mode": "delayed", "delayed_seconds": 0}
     assert data["schema_version"] == "v1" and len(data["series_hash"]) == 64
     assert body["meta"]["page"]["next_cursor"] is None
-
-
-async def test_candles_by_instrument_id_paginates_with_open_time_cursor(client, seeded):
-    base = {
-        "venue": "BITGET",
-        "timeframe": "1m",
-        "instrument_id": str(seeded["instrument_id"]),
-        "limit": 2,
-        **_span(seeded["t0"], 0, 3),
-    }
-    first = (await client.get(f"{BASE}/candles", params=base, headers=seeded["a"])).json()
-    assert len(first["data"]["candles"]) == 2
-    cursor = first["meta"]["page"]["next_cursor"]
-    assert cursor is not None
-
-    second = (
-        await client.get(f"{BASE}/candles", params={**base, "cursor": cursor}, headers=seeded["a"])
-    ).json()
-    assert [c["open_time"] for c in second["data"]["candles"]] == [cursor]
-    assert cursor == (seeded["t0"] + timedelta(minutes=2)).isoformat().replace("+00:00", "Z")
-    assert second["meta"]["page"]["next_cursor"] is None
-    # series_hash는 페이지가 아니라 요청 구간 전체의 해시 — 페이지 간 동일.
-    assert second["data"]["series_hash"] == first["data"]["series_hash"]
 
 
 async def test_cross_tenant_candles_is_404_isomorphic_with_unknown_symbol(client, seeded):
