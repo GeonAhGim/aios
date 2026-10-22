@@ -202,3 +202,27 @@ def test_realized_volatility_empty_candles_returns_zero():
     """Empty candles list → 0 volatility."""
     result = _realized_volatility(candles=[])
     assert result == Decimal("0")
+
+
+# --- Numeric performance assertion (perf_budget fixture) ---
+
+
+async def test_scan_market_large_universe_meets_latency_budget(perf_budget):
+    """Filtering a 2,000-ticker universe on volume is pure in-memory work and
+    must stay well under a 50ms budget; a regression here would mean an
+    accidental blocking or quadratic step landed in the first-pass filter."""
+    tickers = [_ticker(f"SYM{i}/USDT", str(i)) for i in range(2000)]
+
+    async def fetch_tickers(exchange):
+        return tickers
+
+    async def _run() -> None:
+        await scan_market(
+            ScanCriteria(min_volume_24h=Decimal("1000"), exchanges=["bitget"]),
+            fetch_tickers=fetch_tickers,
+        )
+
+    budget_ms = 50
+    sample = await perf_budget.sample_async(_run)
+
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
