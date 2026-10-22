@@ -123,3 +123,69 @@ async def test_open_position_rejects_duplicate_first_creation_call(
         await open_position(
             pool, tenant_id=tenant_id, account_id=account_id, position_key=position_key
         )
+
+
+async def test_open_position_rejects_empty_position_key(
+    pool: asyncpg.Pool,
+) -> None:
+    """negative: 빈 문자열 position_key 는 즉시 거부해야 한다."""
+    tenant_id = await create_test_tenant(pool)
+    account_id = await create_pos_account(pool, tenant_id)
+    with pytest.raises(ValueError):
+        await open_position(pool, tenant_id=tenant_id, account_id=account_id, position_key="")
+
+
+async def test_open_position_rejects_invalid_cost_method(
+    pool: asyncpg.Pool,
+) -> None:
+    """negative: 지원되지 않는 cost_method 은 INSERT 단계에서 즉시 거부해야 한다."""
+    tenant_id = await create_test_tenant(pool)
+    account_id = await create_pos_account(pool, tenant_id)
+    from src.foundation.entities.domain.defaults import default_portfolio_id
+    from src.foundation.positions.domain.position_key import PositionKey
+
+    position_key = str(
+        PositionKey(
+            venue="TESTVENUE",
+            instrument_id=f"INST{uuid.uuid4().hex[:8]}",
+            strategy_id="default",
+            execution_id="paper",
+            portfolio_id=default_portfolio_id(tenant_id),
+        )
+    )
+    with pytest.raises(ValueError):
+        await open_position(
+            pool,
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
+            cost_method=CostMethod("INVALID"),
+        )
+
+
+async def test_open_position_rejects_unknown_account_id(
+    pool: asyncpg.Pool,
+) -> None:
+    """negative: 존재하지 않는 account_id 로 position 을 열면 FK 제약으로
+    실패해야 한다 (fail-closed)."""
+    tenant_id = await create_test_tenant(pool)
+    unknown_account_id = uuid.uuid4()
+    from src.foundation.entities.domain.defaults import default_portfolio_id
+    from src.foundation.positions.domain.position_key import PositionKey
+
+    position_key = str(
+        PositionKey(
+            venue="TESTVENUE",
+            instrument_id=f"INST{uuid.uuid4().hex[:8]}",
+            strategy_id="default",
+            execution_id="paper",
+            portfolio_id=default_portfolio_id(tenant_id),
+        )
+    )
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await open_position(
+            pool,
+            tenant_id=tenant_id,
+            account_id=unknown_account_id,
+            position_key=position_key,
+        )
