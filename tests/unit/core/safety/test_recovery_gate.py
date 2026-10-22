@@ -17,15 +17,27 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from typing import TypedDict
 
 import pytest
 from pydantic import ValidationError
 
-from src.core.loader.risk_policy_loader import load_risk_policy
+from src.core.loader.risk_policy_loader import CircuitBreakerPolicy, load_risk_policy
 from src.core.risk.decision import RiskOutcome
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerMetrics
 from src.core.safety.recovery_gate import RecoveryDecision, can_reactivate
 from tests._perf.relative_budget import RelativeBudget
+
+
+class _Kwargs(TypedDict):
+    current_level: CircuitBreakerLevel
+    metrics_history: list[CircuitBreakerMetrics]
+    cooldown_sec: int
+    evidence_ref: str | None
+    approval_status: str
+    fresh_risk_outcome: RiskOutcome
+    policy: CircuitBreakerPolicy
+
 
 COOLDOWN_SEC = 3
 _POLICY = load_risk_policy().circuit_breaker
@@ -35,7 +47,7 @@ def _clean_history(n: int = COOLDOWN_SEC) -> list[CircuitBreakerMetrics]:
     return [CircuitBreakerMetrics() for _ in range(n)]
 
 
-def _base_kwargs() -> dict:
+def _base_kwargs() -> _Kwargs:
     return dict(
         current_level=CircuitBreakerLevel.HALTED,
         metrics_history=_clean_history(),
