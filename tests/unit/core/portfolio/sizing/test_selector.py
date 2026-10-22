@@ -72,12 +72,90 @@ def test_size_for_dispatches_to_the_matching_module(method: SizingMethod):
     assert dispatched.method == method
 
 
-def test_size_for_rejects_config_input_method_mismatch():
+@pytest.mark.perf
+def test_size_for_rejects_config_input_method_mismatch(
+    perf_budget: PerfBudget,
+) -> None:
+    """음성: config.method ≠ inp.portfolio_config.method 일 때 즉시
+    `SizingResultTamperedError` 를 raise 한다 — dispatch 전 비교이므로
+    CPU 측정은 0 수렴해야 한다.
+
+    수치 단언: 이 경로는 산식 호출이 없으므로 pre-trade 게이트 예산(5ms)
+    대비 극히 작은 CPU 시간만 소비한다.
+    """
     cfg = _config(SizingMethod.FIXED_FRACTIONAL)
     inp = _inp(SizingMethod.VOLATILITY_TARGET)
 
+    # PerfBudget.sample does not catch exceptions; wrap so the
+    # measurement runs while the exception still propagates for the
+    # assertion below.
+    cpu_ms_values: list[float] = []
+    for _ in range(5):
+        sample = perf_budget.sample(lambda: _safe_mismatch_call(cfg, inp))
+        cpu_ms_values.append(sample.cpu_ms)
+
+    avg_cpu_ms = sum(cpu_ms_values) / len(cpu_ms_values)
+
+    assert avg_cpu_ms < 1.0, (
+        f"mismatch rejection should be near-zero CPU; measured avg={avg_cpu_ms:.3f}ms"
+    )
+
     with pytest.raises(SizingResultTamperedError):
         size_for(cfg, inp)
+
+
+@pytest.mark.perf
+def test_size_for_rejects_config_input_method_mismatch_goes_red_with_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction: `delayed_sync` 로 `size_for` 진입 전에 CPU
+    부하를 주입하면 같은 p99 단언이 적색으로 전환된다.
+
+    불일치 경로는 dispatch 전 비교이므로 `delayed_sync(original_size_for)`
+    로 전체 함수를 감싸야 지연이 측정된다.
+    """
+    from tests.support.perf_inject import delayed_sync
+
+    cfg = _config(SizingMethod.FIXED_FRACTIONAL)
+    inp = _inp(SizingMethod.VOLATILITY_TARGET)
+    budget_ms = 1.0
+
+    original_size_for = size_for
+    delayed_size_for = delayed_sync(original_size_for, 0.05)  # 50ms CPU delay
+    monkeypatch.setattr("tests.unit.core.portfolio.sizing.test_selector.size_for", delayed_size_for)
+
+    cpu_ms_values: list[float] = []
+    for _ in range(100):
+        sample = perf_budget.sample(lambda: _safe_mismatch_call(cfg, inp))
+        cpu_ms_values.append(sample.cpu_ms)
+
+    cpu_ms_values.sort()
+    p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99)]
+
+    assert p99_ms >= budget_ms, (
+        f"delay injection failed: p99={p99_ms:.3f}ms — "
+        f"expected red (budget>={budget_ms}ms); measurement is hollow"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helper: call size_for for mismatch, swallow exception for measurement
+# ---------------------------------------------------------------------------
+
+_NOT_RAISED = object()
+
+
+def _safe_mismatch_call(cfg: PortfolioConfig, inp: PortfolioStateInput) -> object:
+    """Call ``size_for(cfg, inp)`` and return ``_NOT_RAISED`` if the
+    expected ``SizingResultTamperedError`` is raised — so
+    ``PerfBudget.sample`` can measure the CPU time without crashing.
+    """
+    try:
+        size_for(cfg, inp)
+    except SizingResultTamperedError:
+        pass
+    return _NOT_RAISED
 
 
 def test_size_for_rejects_unknown_method(monkeypatch: pytest.MonkeyPatch):
