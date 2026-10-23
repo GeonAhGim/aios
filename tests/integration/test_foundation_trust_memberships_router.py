@@ -143,7 +143,8 @@ async def test_membership_grant_latency_within_budget(client, monkeypatch, perf_
             "/v1/foundation/trust/memberships",
             json={"subject_id": subject_id, "role": "MEMBER"},
             headers=headers,
-        )
+        ),
+        batch=8,
     )
     response = sample.result
     elapsed_ms = sample.cpu_ms
