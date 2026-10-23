@@ -184,7 +184,24 @@ def test_orphan_state_detected():
 
 
 def test_validate_config_logs_on_error(monkeypatch):
-    """Failure injection: mock logger.error and verify it is called on error."""
+    """Failure injection: replace ValidationResult with a stub that records
+    every call, then verify the validator passes all collected errors through.
+
+    This replaces the original stub test that claimed to mock a logger but
+    never imported or used one — the validator has no logger dependency.
+    """
+    import src.core.validator.strategy_validator as strategy_validator
+
+    call_log: list[tuple[bool, list[str]]] = []
+
+    class RecordingResult:
+        def __init__(self, is_valid: bool, errors: list[str]) -> None:
+            self.is_valid = is_valid
+            self.errors = errors
+            call_log.append((is_valid, list(errors)))
+
+    monkeypatch.setattr(strategy_validator, "ValidationResult", RecordingResult)
+
     config = FSMStrategyConfig(
         strategy_id="test-009",
         version="v1",
@@ -196,11 +213,11 @@ def test_validate_config_logs_on_error(monkeypatch):
         transitions=[],
         author_agent="researcher-1",
     )
-    # The validator does NOT call logger directly — errors accumulate in
-    # ValidationResult.  Verify the error is captured correctly.
     result = validate_strategy_config(config)
+    assert isinstance(result, RecordingResult)
     assert result.is_valid is False
-    assert len(result.errors) >= 1
+    assert len(call_log) == 1
+    assert call_log[0][1]  # at least one error recorded
 
 
 def test_multiple_errors_accumulated():
