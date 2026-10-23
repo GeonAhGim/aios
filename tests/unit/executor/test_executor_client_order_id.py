@@ -175,12 +175,34 @@ async def test_retrying_the_same_intent_calls_adapter_once_and_reuses_client_ord
     execution_id = await _create_execution(pool, user_id)
     adapter = FakeExchangeAdapter()
 
-    first = await _execute_once(pool, adapter, execution_id, user_id)
-    second = await _execute_once(pool, adapter, execution_id, user_id)
+    try:
+        first = await _execute_once(pool, adapter, execution_id, user_id)
+        second = await _execute_once(pool, adapter, execution_id, user_id)
 
-    assert adapter.place_order_call_count == 1
-    assert second.client_order_id == first.client_order_id
-    assert second.order_id == first.order_id
+        assert adapter.place_order_call_count == 1
+        assert second.client_order_id == first.client_order_id
+        assert second.order_id == first.order_id
+    finally:
+        async with pool.acquire() as conn, conn.transaction():
+            order_ids = await conn.fetchval(
+                "SELECT array_agg(order_id) FROM orders WHERE execution_id = $1",
+                execution_id,
+            )
+            if order_ids:
+                # Transactional DDL restores the test DB guards if cleanup fails.
+                await conn.execute("ALTER TABLE fills DISABLE TRIGGER fills_worm_guard_trg")
+                await conn.execute(
+                    "ALTER TABLE order_events DISABLE TRIGGER order_events_worm_guard_trg"
+                )
+                await conn.execute("DELETE FROM fills WHERE order_id = ANY($1::uuid[])", order_ids)
+                await conn.execute(
+                    "DELETE FROM order_events WHERE order_id = ANY($1::uuid[])", order_ids
+                )
+                await conn.execute("DELETE FROM orders WHERE order_id = ANY($1::uuid[])", order_ids)
+                await conn.execute("ALTER TABLE fills ENABLE TRIGGER fills_worm_guard_trg")
+                await conn.execute(
+                    "ALTER TABLE order_events ENABLE TRIGGER order_events_worm_guard_trg"
+                )
 
 
 async def test_a_new_intent_counter_derives_a_different_client_order_id(pool):
