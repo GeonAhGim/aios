@@ -105,6 +105,19 @@ async def _submit_order_accepted_once(
     monkeypatch.setattr(repository_module, "insert", fake_insert)
     monkeypatch.setattr(repository_module, "update_from_exchange", fake_update_from_exchange)
 
+    async def fake_update_from_exchange_with_fill_event(
+        conn: object, order: Order, *, expected_status: object, actor_subject_id: object
+    ) -> Order:
+        return order.model_copy(
+            update={"exchange_order_id": f"ex-{uuid4()}", "status": OrderStatus.SUBMITTED}
+        )
+
+    monkeypatch.setattr(
+        repository_module,
+        "update_from_exchange_with_fill_event",
+        fake_update_from_exchange_with_fill_event,
+    )
+
     async def on_place_order(placed: Order) -> Order:
         if place_order_delay_seconds:
             await asyncio.sleep(place_order_delay_seconds)
