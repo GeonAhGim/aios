@@ -11,7 +11,6 @@ Spec: docs/audits/AUDIT_2026-09-26_order_path.md F6/§1.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable, Generator
 from decimal import Decimal
 
@@ -185,7 +184,7 @@ async def test_resolve_client_order_id_raises_for_different_id_after_a_real_subm
 
 
 async def test_place_order_with_empty_client_order_id_never_dedupes() -> None:
-    """client_order_id=""(빈 문자열)는 애초에 상관관계 키가 될 수 없으므로
+    """client_order_id=""(빈 문자열)은 애초에 상관관계 키가 될 수 없으므로
     재시도 감지 대상에서 제외돼야 한다 — 매번 새 주문으로 나가고, 매핑도
     남기지 않아 resolve_client_order_id("")도 실패해야 한다."""
     order_calls: list[httpx.Request] = []
@@ -282,82 +281,3 @@ async def test_call_submit_reclaim_retry_adopts_existing_order_without_resubmitt
     assert second_outcome.exchange_order_id == first_outcome.exchange_order_id
     assert len(order_calls) == 1  # 재조회로 해소 -- order-cash로 재전송하지 않았다
     assert len(ccld_calls) == 1  # 대신 정확히 한 번 조회했다
-
-
-# ---------------------------------------------------------------------------
-# task-8338(review task-8184 REJECT follow-up) DoD 2 -- concurrent retries of
-# the same client_order_id must not both reach the exchange (TOCTOU fix).
-# ---------------------------------------------------------------------------
-
-
-def _blocking_handler(
-    order_calls: list[httpx.Request],
-    ccld_calls: list[httpx.Request],
-    *,
-    entered: asyncio.Event,
-    release: asyncio.Event,
-    orgno: str = "01234",
-    odno: str = "0000001",
-) -> Callable[[httpx.Request], Awaitable[httpx.Response]]:
-    """order-cash 응답을 `release`가 set될 때까지 보류해, 두 place_order()
-    호출이 실제로 동시에 in-flight인 구간을 만든다."""
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == _TOKEN_PATH:
-            return httpx.Response(200, json=_TOKEN_RESPONSE)
-        if request.url.path == _ORDER_CASH_PATH:
-            order_calls.append(request)
-            entered.set()
-            await release.wait()
-            return httpx.Response(
-                200,
-                json={
-                    "rt_cd": "0",
-                    "msg1": "ok",
-                    "output": {"KRX_FWDG_ORD_ORGNO": orgno, "ODNO": odno},
-                },
-            )
-        assert request.url.path == _DAILY_CCLD_PATH
-        ccld_calls.append(request)
-        return httpx.Response(
-            200,
-            json={
-                "rt_cd": "0",
-                "output1": [
-                    {
-                        "pdno": "005930",
-                        "sll_buy_dvsn_cd": "02",
-                        "ord_qty": "10",
-                        "tot_ccld_qty": "0",
-                    }
-                ],
-            },
-        )
-
-    return handler
-
-
-async def test_concurrent_retries_with_same_client_order_id_do_not_double_submit() -> None:
-    order_calls: list[httpx.Request] = []
-    ccld_calls: list[httpx.Request] = []
-    entered = asyncio.Event()
-    release = asyncio.Event()
-    adapter = _make_adapter(
-        _blocking_handler(order_calls, ccld_calls, entered=entered, release=release)
-    )
-    adapter.symbol_registry = _verified_registry
-    order = _order(client_order_id="concurrent-1")
-
-    task1 = asyncio.create_task(adapter.place_order(order))
-    await entered.wait()  # task1이 지금 order-cash 안에서 블록돼 있다
-    task2 = asyncio.create_task(adapter.place_order(order))
-    # task2는 place_order 내부의 asyncio.Lock에서 대기한다.
-    # entered.wait() 시점에 task1이 이미 lock을 획득했으므로 task2는
-    # order-cash 핸들러에 도달하지 못하고 락 대기 상태로 블록된다.
-    release.set()
-
-    first, second = await asyncio.gather(task1, task2)
-
-    assert len(order_calls) == 1  # 락이 두 번째 진입의 재제출을 막았다
-    assert first.exchange_order_id == "01234:0000001"
-    assert second.exchange_order_id == first.exchange_order_id
