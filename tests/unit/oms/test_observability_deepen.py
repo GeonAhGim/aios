@@ -41,6 +41,7 @@ adversarial/replay: 같은 중복 이벤트를 대량 동시 `ingest()`로 재�
 계측 경로를 크래시시키지 않는지 확인한다. 후자는 "안전하다"는 주장이 아니라
 현재 동작(라벨이 그대로 통과한다)을 기록하는 관측 테스트다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -241,6 +242,28 @@ async def test_inbox_duplicate_counter_not_recorded_when_insert_check_crashes() 
     assert spy.counters == []  # 삽입 자체가 실패 — "중복"으로 잘못 집계되지 않는다
 
 
+async def test_inbox_duplicate_counter_records_adversarial_venue_label_without_crashing() -> None:
+    """중복 이벤트의 `venue` 라벨에 악성 문자열(500자 이상)을 넣어도
+    `safe_counter`가 크래시 없이 라벨을 그대로 통과시킨다 — 라벨 카디널리티
+    폭발 공격 벡터의 관측 테스트. `safe_counter`가 Exception을 잡지 않으면
+    PrometheusMetrics가 ValueError를 던지지만, 이 테스트는 "크래시하지 않는다"
+    는 안전성만 확인한다."""
+    spy = _SpyMetrics()
+    adversarial_venue = "A" * 1000 + "!@#$%^&*()"
+    processor = InboxProcessor(_FakePool(), inbox_repo=_AlwaysDuplicateInboxRepo(), metrics=spy)
+
+    # duplicate 리턴 — safe_counter가 adversarial venue 라벨로 호출됨
+    result = await processor.ingest(_provider_event(venue=adversarial_venue))
+
+    assert result is False  # 중복이므로 False
+    assert len(spy.counters) == 1
+    counter_name, labels = spy.counters[0]
+    assert counter_name == "aios.oms.inbox_duplicate.count_total"
+    assert labels is not None
+    assert labels["venue"] == adversarial_venue  # 라벨 그대로 통과
+    assert labels["source"] == "WS"
+
+
 class _UnknownFakeTx:
     async def start(self) -> None:
         return None
@@ -285,8 +308,15 @@ class _CrashOnceUnknownOrderRepo:
         raise NotImplementedError
 
     async def transition(
-        self, conn: object, *, order_id: UUID, expected_status: OrderStatus,
-        expected_version: int, new_status: OrderStatus, patch: dict[str, Any], event: Any,
+        self,
+        conn: object,
+        *,
+        order_id: UUID,
+        expected_status: OrderStatus,
+        expected_version: int,
+        new_status: OrderStatus,
+        patch: dict[str, Any],
+        event: Any,
     ) -> OrderView:
         if self.crash_count == 0:
             self.crash_count += 1
@@ -312,8 +342,15 @@ class _SingleUnknownOrderRepo:
         raise NotImplementedError
 
     async def transition(
-        self, conn: object, *, order_id: UUID, expected_status: OrderStatus,
-        expected_version: int, new_status: OrderStatus, patch: dict[str, Any], event: Any,
+        self,
+        conn: object,
+        *,
+        order_id: UUID,
+        expected_status: OrderStatus,
+        expected_version: int,
+        new_status: OrderStatus,
+        patch: dict[str, Any],
+        event: Any,
     ) -> OrderView:
         self.order = self.order.model_copy(
             update={**patch, "status": new_status, "version": self.order.version + 1}
@@ -334,13 +371,21 @@ class _UnusedRiskGateRepo:
     테스트가 그 자리에서 실패해 가정이 깨졌음을 드러낸다."""
 
     async def list_active_controls(
-        self, *, tenant_id: UUID, provider_code: str | None = None,
+        self,
+        *,
+        tenant_id: UUID,
+        provider_code: str | None = None,
         include_all_providers: bool = False,
     ) -> tuple[SafetyControl, ...]:
         raise NotImplementedError
 
     async def insert_safety_control(
-        self, *, scope: SafetyScope, scope_ref: str, reason: str, actor_subject_id: UUID,
+        self,
+        *,
+        scope: SafetyScope,
+        scope_ref: str,
+        reason: str,
+        actor_subject_id: UUID,
     ) -> SafetyControl:
         raise NotImplementedError
 
@@ -358,9 +403,7 @@ class _UnusedRiskGateRepo:
     ) -> RiskEvaluation | None:
         raise NotImplementedError
 
-    async def read_fences(
-        self, pairs: tuple[tuple[SafetyScope, str], ...]
-    ) -> FenceSnapshot:
+    async def read_fences(self, pairs: tuple[tuple[SafetyScope, str], ...]) -> FenceSnapshot:
         raise NotImplementedError
 
     async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:
@@ -380,22 +423,49 @@ class _UnusedRiskGateRepo:
 def _unknown_order_view() -> OrderView:
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     return OrderView(
-        order_id=uuid4(), tenant_id=uuid4(), execution_id=1, client_order_id=f"c-{uuid4().hex}",
-        exchange_order_id=None, symbol="BTC/USDT", venue_symbol="BTCUSDT", exchange="bitget",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, time_in_force="GTC",
-        quantity=Decimal("1"), price=None, status=OrderStatus.UNKNOWN,
-        filled_quantity=Decimal("0"), average_fill_price=None, fee_total=None, fee_currency=None,
-        version=3, parent_order_id=None, algo_run_id=None, unknown_since=now,
-        provider_order_date=None, created_at=now, updated_at=now,
+        order_id=uuid4(),
+        tenant_id=uuid4(),
+        execution_id=1,
+        client_order_id=f"c-{uuid4().hex}",
+        exchange_order_id=None,
+        symbol="BTC/USDT",
+        venue_symbol="BTCUSDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        time_in_force="GTC",
+        quantity=Decimal("1"),
+        price=None,
+        status=OrderStatus.UNKNOWN,
+        filled_quantity=Decimal("0"),
+        average_fill_price=None,
+        fee_total=None,
+        fee_currency=None,
+        version=3,
+        parent_order_id=None,
+        algo_run_id=None,
+        unknown_since=now,
+        provider_order_date=None,
+        created_at=now,
+        updated_at=now,
     )
 
 
 def _found_order() -> Order:
     return Order(
-        client_order_id=f"c-{uuid4().hex}", strategy_id="s", strategy_version="1.0.0",
-        execution_id=1, symbol="BTC/USDT", exchange="bitget", side=OrderSide.BUY,
-        order_type=OrderType.MARKET, quantity=Decimal("1"), asset_class=AssetClass.CRYPTO,
-        status=OrderStatus.ACKNOWLEDGED, filled_quantity=Decimal("0"), exchange_order_id="ex-9",
+        client_order_id=f"c-{uuid4().hex}",
+        strategy_id="s",
+        strategy_version="1.0.0",
+        execution_id=1,
+        symbol="BTC/USDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1"),
+        asset_class=AssetClass.CRYPTO,
+        status=OrderStatus.ACKNOWLEDGED,
+        filled_quantity=Decimal("0"),
+        exchange_order_id="ex-9",
     )
 
 
@@ -411,10 +481,13 @@ async def test_unknown_resolution_duration_metric_not_observed_when_transition_c
 
     with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
         await resolve_unknown(
-            view.order_id, adapter=adapter, pool=_UnknownFakePool(),
+            view.order_id,
+            adapter=adapter,
+            pool=_UnknownFakePool(),
             risk_gate_repo=risk_gate_repo,
             clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc),
-            order_repo=repo, metrics=spy,
+            order_repo=repo,
+            metrics=spy,
         )
 
     assert spy.observations == [], (
