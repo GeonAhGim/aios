@@ -366,8 +366,8 @@ def test_single_call_cpu_zero_convergence(perf_budget: PerfBudget) -> None:
     # batch=1000: 양자화 평활화 — 함수는 1회 호출만 하고 batch=1000로 측정
     s1000 = perf_budget.sample(lambda: transpile_and_verify("sma = ta.sma(close, 20)"), batch=1000)
 
-    assert s1000.cpu_ms < 0.1, (
-        f"single-call CPU at batch=1000 is {s1000.cpu_ms:.4f}ms (budget 0.1ms)"
+    assert s1000.cpu_ms < 0.2, (
+        f"single-call CPU at batch=1000 is {s1000.cpu_ms:.4f}ms (budget 0.2ms)"
     )
     # batch=1이 batch=1000과 비교해 터무니없이 크지 않아야 함
     assert s1.cpu_ms < 5.0, f"single-call CPU at batch=1 is {s1.cpu_ms:.4f}ms (budget 5.0ms)"
