@@ -113,6 +113,7 @@ async def test_get_inst_loan_repaid_history_returns_raw_rows():
 # --- negative tests (불변식 위반 입력 거부) -------------------------------------
 
 
+@pytest.mark.negative
 async def test_get_inst_loan_products_raises_fatal_on_permission_denied():
     """§1.11 docstring — 기관 전용 엔드포인트에 리테일 키로 접근하면 권한 오류가
     정상적인 응답 케이스다(8.3 원칙). AUTH 코드(40099)는 재시도해도 같은 방식으로
@@ -127,6 +128,7 @@ async def test_get_inst_loan_products_raises_fatal_on_permission_denied():
         await adapter.get_inst_loan_products()
 
 
+@pytest.mark.negative
 async def test_get_inst_loan_ensure_coins_raises_retryable_on_server_error():
     """분류되지 않은 오류코드는 fail-closed 기본값(SERVER_ERROR, 재시도 가능)으로
     처리된다(error_codes.py) — 담보 코인 환산율을 조회하지 못했는데 빈 목록을
@@ -140,6 +142,7 @@ async def test_get_inst_loan_ensure_coins_raises_retryable_on_server_error():
         await adapter.get_inst_loan_ensure_coins()
 
 
+@pytest.mark.negative
 async def test_get_inst_loan_orders_raises_on_missing_data_field():
     """venue가 `code: 00000`(성공)이면서 스키마가 바뀌어 `data` 필드를 빼먹은
     응답을 보내면, `list(raw["data"])`가 빈 목록으로 눙치지 않고 KeyError로
@@ -157,6 +160,7 @@ async def test_get_inst_loan_orders_raises_on_missing_data_field():
 # --- 실패주입 (의존성 예외 전파) --------------------------------------------------
 
 
+@pytest.mark.failure_injection
 async def test_get_inst_loan_repaid_history_propagates_transport_failure():
     """기관 대출 상환 이력 조회 도중 커넥션 자체가 끊기면(httpx.TransportError),
     그 예외를 삼켜 "상환 이력 없음"으로 위장하지 않고 RetryableExchangeError로
