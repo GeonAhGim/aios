@@ -40,6 +40,20 @@ async def client():
     app.dependency_overrides.pop(get_pool, None)
 
 
+@pytest.fixture
+def slow_pool_override():
+    """xdist 병렬 실행 안전용 get_pool 오버라이드 관리 픽스처.
+
+    `app.dependency_overrides`는 전역 단일 객체이므로 xdist 워커 간
+    충돌을 방지하기 위해 픽스처 수명 주기로 관리한다.
+    """
+    app.dependency_overrides[get_pool] = lambda: _SlowPool()
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_pool, None)
+
+
 class _BrokenPool:
     """`get_pool` 오버라이드용 더블 — 실제 asyncpg.Pool 대신 항상 연결
     실패를 흉내낸다(DB 풀을 실제로 끊지 않고도 §9 PLT-09 negative case를
@@ -85,31 +99,24 @@ async def test_readyz_returns_200_when_healthy(
 async def test_readyz_returns_200_when_healthy_budget_fails_with_delay(
     client: AsyncClient,
     perf_budget: PerfBudget,
+    slow_pool_override: None,
 ) -> None:
     """gate-red reproduction: inject 600 ms IO delay via _SlowPool — the
     same budget assertion that passes under normal conditions must raise
     AssertionError (red gate).
 
-    Uses delayed_async from tests.support.perf_inject for typed delay
-    injection (no ``# type: ignore``).
+    Uses the slow_pool_override fixture for xdist-safe lifecycle management.
     """
+    budget_ms = _READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 1000
+    samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=5, batch=1)
+    p95_wall_ms = _p95_ms([s.wall_ms for s in samples])
+    with pytest.raises(AssertionError) as exc_info:
+        assert p95_wall_ms < budget_ms, (
+            f"readyz p95 wall={p95_wall_ms:.1f}ms exceeds budget {budget_ms:.1f}ms"
+        )
 
-    # Replace get_pool with _SlowPool (2×budget delay = 600 ms per fetchval)
-    app.dependency_overrides[get_pool] = lambda: _SlowPool()
-
-    try:
-        budget_ms = _READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 1000
-        samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=5, batch=1)
-        p95_wall_ms = _p95_ms([s.wall_ms for s in samples])
-        with pytest.raises(AssertionError) as exc_info:
-            assert p95_wall_ms < budget_ms, (
-                f"readyz p95 wall={p95_wall_ms:.1f}ms exceeds budget {budget_ms:.1f}ms"
-            )
-
-        # Verify the failure is due to budget exceeded, not some other cause
-        assert "exceeds budget" in str(exc_info.value)
-    finally:
-        app.dependency_overrides.pop(get_pool, None)
+    # Verify the failure is due to budget exceeded, not some other cause
+    assert "exceeds budget" in str(exc_info.value)
 
 
 async def test_readyz_returns_503_when_db_pool_broken(client: AsyncClient) -> None:
