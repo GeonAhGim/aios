@@ -132,9 +132,9 @@ async def test_post_suspend_membership_dependency_failure_returns_500_not_silent
 @pytest.mark.perf
 async def test_membership_grant_latency_within_budget(client, monkeypatch, perf_budget):
     """성능 단언 — grant_membership 라우터 호출의 E2E 지연 시간이
-    예산 내여야 한다(100ms, 실DB 왕복·MFA 검증 포함 wall-clock 측정).
-    task-7434 패턴: wall-clock 성능 테스트는 @pytest.mark.perf 필수
-    (xdist 병렬 실행 시 코어 경합 방지)."""
+    예산 내여야 한다(100ms, cpu_ms 기준). 병렬 CI 실행(xdist)에서
+    wall_ms는 다른 워커의 CPU 경합으로 왜곡되므로 cpu_ms(time.process_time)
+    기준으로 단언한다(task-19183)."""
     headers = await _register(client)
     subject_id = str(uuid.uuid4())
 
@@ -146,7 +146,7 @@ async def test_membership_grant_latency_within_budget(client, monkeypatch, perf_
         )
     )
     response = sample.result
-    elapsed_ms = sample.wall_ms
+    elapsed_ms = sample.cpu_ms
 
     assert response.status_code == 403  # MFA 검증 필요
     assert elapsed_ms < 100, f"grant_membership latency {elapsed_ms:.1f}ms exceeded budget 100ms"
