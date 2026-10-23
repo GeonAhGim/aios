@@ -13,7 +13,14 @@ from src.core.loader.risk_policy_loader import load_risk_policy
 from src.services.capital_allocation import CapitalAllocationError
 from src.services.execution_service import ExecutionCreateError, ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
-from tests.integration.conftest import create_test_user
+from tests.integration.conftest import create_test_tenant, create_test_user
+
+
+# Local override: approval service resolves tenant_id from a real `tenant` row,
+# so the user must have a PERSONAL tenant (id == user_id) before calling
+# create_execution with mode="LIVE".  See test_panic_prompt.py for the same pattern.
+async def _create_user_with_tenant(pool) -> str:
+    return await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
 
 
 def _asyncpg_dsn() -> str:
@@ -101,7 +108,7 @@ async def test_create_paper_execution_needs_no_approval(service, pool):
 
 
 async def test_create_live_execution_creates_approval_request(service, pool):
-    user_id = await create_test_user(pool)
+    user_id = await _create_user_with_tenant(pool)
     strategy_id, version = await _create_approved_strategy(pool, user_id)
     await _link_credential(pool, user_id)
 
