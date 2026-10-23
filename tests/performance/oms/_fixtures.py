@@ -21,13 +21,14 @@ from uuid import UUID
 import asyncpg
 
 from src.data.models.base import AssetClass
-from src.data.models.trading import OrderSide, OrderType
+from src.data.models.trading import OrderSide, OrderStatus, OrderType
 from src.services.oms.adapters.order_repository import PostgresOrderRepository
 from src.services.oms.adapters.outbox_repository import OutboxRepository
 from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.application.outbox_dispatcher import OutboxDispatcher
 from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, SubmitOrderCommand
-from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
+from src.services.oms.contracts.v1_events import FillEvent, OrderTransitionEvent, ProviderOrderEvent
+from src.services.oms.domain.state_machine import OrderEvent
 from src.services.oms.domain.symbol_registry import SymbolRegistry
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from tests.support.oms_outbox_fakes import ScriptedAdapter, allow_gate
@@ -96,14 +97,37 @@ async def insert_open_order(
     체결시킨다는 전제)."""
     client_order_id = f"cid-{uuid.uuid4().hex}"
     exchange_order_id = f"ex-{uuid.uuid4().hex}"
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         order_id = await conn.fetchval(
             "INSERT INTO orders (user_id, client_order_id, exchange_order_id, strategy_id, "
             "strategy_version, symbol, exchange, side, order_type, quantity, status, "
             "filled_quantity, is_liquidation, asset_class) VALUES ($1,$2,$3,'oms-perf-inbox',"
-            "'1.0.0','BTC/USDT','bitget','BUY','MARKET',$4,'SUBMITTED',0,false,'CRYPTO') "
+            "'1.0.0','BTC/USDT','bitget','BUY','MARKET',$4,'CREATED',0,false,'CRYPTO') "
             "RETURNING order_id",
             user_id, client_order_id, exchange_order_id, quantity,
+        )
+        await PostgresOrderRepository().transition(
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.CREATED,
+            expected_version=0,
+            new_status=OrderStatus.SUBMITTED,
+            patch={},
+            event=OrderTransitionEvent(
+                order_id=order_id,
+                from_status=OrderStatus.CREATED,
+                to_status=OrderStatus.SUBMITTED,
+                event=OrderEvent.SENT.value,
+                reason_code="PERF_FIXTURE_SUBMIT",
+                actor_subject_id="system",
+                trace_id=uuid.uuid4(),
+                command_id=None,
+                provider_event_id=None,
+                occurred_at=datetime.now(timezone.utc),
+                payload_hash=hashlib.sha256(
+                    f"perf-fixture:{order_id}".encode()
+                ).hexdigest(),
+            ),
         )
     return order_id, client_order_id, exchange_order_id
 
