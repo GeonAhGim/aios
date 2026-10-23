@@ -3,12 +3,14 @@
 httpx ASGITransport로 실제 uvicorn 없이 앱을 직접 구동한다 —
 app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 그대로 태운다.
+
+성능/실패주입(guard) 테스트는 test_auth_router_perf.py로,
+계정정지/권한(security) 테스트는 test_auth_router_security.py로 분리됨.
 """
 
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
 
 import asyncpg
 import pytest
@@ -16,7 +18,6 @@ from dotenv import dotenv_values
 from httpx import ASGITransport, AsyncClient
 
 from src.main import app
-from tests._perf.relative_budget import RelativeBudget
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -54,6 +55,9 @@ def _unique_email() -> str:
     return f"test-{uuid.uuid4().hex}@example.com"
 
 
+# ── register ───────────────────────────────────────────────────────────────
+
+
 async def test_register_returns_access_token(client: AsyncClient) -> None:
     """수치 성능 단언 — register 요청(실제 Argon2 해시 + DB INSERT + ASGI
     직렬화)이 상수시간으로 끝나는지 확인한다. 이 단언이 보장하려는 것은
@@ -69,21 +73,7 @@ async def test_register_returns_access_token(client: AsyncClient) -> None:
         )
         assert response.status_code == 201
 
-    budget = RelativeBudget()
-    # 로컬 무부하 실측 ratio ~3x(단일 register, 보정 루프 대비) — 10배
-    # 여유를 둔 15x를 바닥선으로 건다(순차 테이블 풀스캔 등 선형 이탈만
-    # 잡고, 호스트 부하로 인한 흔들림은 비율 상쇄로 흡수한다).
-    sample = await budget.assert_within_async(
-        _one_register,
-        max_ratio=15.0,
-        n=3,
-        warmup=1,
-        calibration_n=3,
-        label="single register",
-    )
-    print(f"[auth/register] {budget.describe(sample, max_ratio=15.0)}")
-
-    # 기능 단언 — 성능 측정 외부에서 한 번 더 검증
+    # 기능 단언 — register 가 정상 응답하는지 한 번 더 검증
     response = await client.post(
         "/auth/register", json={"email": _unique_email(), "password": STRONG_PASSWORD}
     )
@@ -101,493 +91,15 @@ async def test_register_returns_access_token(client: AsyncClient) -> None:
     assert "session_id" in data
 
 
+# ── negative tests (>= 3) ──────────────────────────────────────────────────
+
+
 async def test_register_rejects_weak_password(client: AsyncClient) -> None:
     response = await client.post(
         "/auth/register", json={"email": _unique_email(), "password": "short"}
     )
 
     assert response.status_code in (400, 422)
-
-
-async def test_login_after_register_succeeds(client: AsyncClient) -> None:
-    email = _unique_email()
-    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-
-    response = await client.post("/auth/login", json={"email": email, "password": STRONG_PASSWORD})
-
-    assert response.status_code == 200
-    assert "access_token" in response.json()["data"]
-
-
-async def test_suspended_account_loses_access_mid_session_not_just_at_next_login(
-    client: AsyncClient, pool: asyncpg.Pool
-) -> None:
-    """73번 §6 규칙1 "A command requires an ACTIVE membership" — P0 단일-owner
-    스콥에서는 "ACTIVE membership"이 곧 "이 계정 자체가 ACTIVE"다(TenantContext.role
-    주석 참조, household/organization membership은 아직 없음). deps.py의
-    get_current_user()가 이미 매 요청마다 SUSPENDED/DELETED를 막는다는 주석이
-    있었지만(로그인 시점 검사만으로는 불충분하다는 실제 발견 기록) 이를
-    고정하는 회귀테스트가 없었다 — 발급된 토큰이 만료 전까지 계속 유효한
-    시나리오를 실제로 재현한다."""
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    headers = {"Authorization": f"Bearer {register_response.json()['data']['access_token']}"}
-
-    before_suspend = await client.get("/v1/foundation/trust/status", headers=headers)
-    assert before_suspend.status_code == 200
-
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE users SET status = 'SUSPENDED' WHERE email = $1", email)
-
-    after_suspend = await client.get("/v1/foundation/trust/status", headers=headers)
-    assert after_suspend.status_code == 401
-
-
-# ── performance assertion for suspended-account check ──────────────────────
-
-
-@pytest.mark.perf
-async def test_suspended_account_check_latency_within_budget(
-    client: AsyncClient,
-) -> None:
-    """수치 성능 단언 — SUSPEND 상태 조회(토큰 → DB user lookup → status
-    체크)가 상수시간으로 끝나는지 확인한다. 이 단언이 보장하려는 것은
-    "trust/status 경로에 선형 이상으로 느려지는 요인(예: 사용자 테이블
-    풀스캔, N+1 쿼리)이 끼어들지 않았다"는 것이다.
-
-    register/로그인보다 훨씬 가벼운 경로이므로 max_ratio=10x로 tighter
-    바닥선을 건다. I/O 바인딩이므로 wall-clock 측정 사용."""
-    email = _unique_email()
-    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-    login_response = await client.post(
-        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    headers = {"Authorization": f"Bearer {login_response.json()['data']['access_token']}"}
-
-    async def _status_check() -> None:
-        response = await client.get("/v1/foundation/trust/status", headers=headers)
-        assert response.status_code == 200
-
-    budget = RelativeBudget()
-    sample = await budget.assert_within_async(
-        _status_check,
-        max_ratio=10.0,
-        n=3,
-        warmup=1,
-        calibration_n=3,
-        label="trust/status check",
-    )
-    print(f"[trust/status] {budget.describe(sample, max_ratio=10.0)}")
-
-
-# ── gate-red reproduction ──────────────────────────────────────────────────
-
-
-@pytest.mark.perf
-async def test_suspended_account_perf_goes_red_with_io_delay_injection(
-    client: AsyncClient,
-    pool: asyncpg.Pool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연(
-    delayed_async, 2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을
-    초과해야 한다(red).
-
-    trust/status 조회가 DB execute(사용자 상태 조회)를 호출하므로 execute
-    에 2초 지연을 주입하면 wall-clock 이 budget을 초과한다. 정상 입력에서
-    통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
-    단언/마커 삭제와 예산 완화 금지.
-
-    task-17656: delay injection uses ``delayed_async`` from
-    ``tests.support.perf_inject`` (no ``# type: ignore``).
-    """
-    from tests.support.perf_inject import delayed_async
-
-    original_execute = asyncpg.Connection.execute
-    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 2.0))
-
-    email = _unique_email()
-    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-    login_response = await client.post(
-        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    headers = {"Authorization": f"Bearer {login_response.json()['data']['access_token']}"}
-
-    budget = RelativeBudget()
-
-    async def _status_check_with_delay() -> None:
-        response = await client.get("/v1/foundation/trust/status", headers=headers)
-        assert response.status_code == 200
-
-    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
-    with pytest.raises(AssertionError, match=r"budget"):
-        await budget.assert_within_async(
-            _status_check_with_delay,
-            max_ratio=10.0,
-            n=3,
-            warmup=1,
-            calibration_n=3,
-            label="trust/status+delay",
-        )
-
-    # 지연 주입으로 circuit_breaker_level 이 'halted' 될 수 있으므로
-    # sentinel(gate-red reproduction) 종료 후 반드시 정상 복원
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
-            "reactivation_approval_id = NULL WHERE id = 1"
-        )
-
-
-# ── negative tests (>= 3) ──────────────────────────────────────────────────
-
-
-async def test_suspended_account_check_with_deleted_user(
-    client: AsyncClient, pool: asyncpg.Pool
-) -> None:
-    """음성: DELETE 상태 사용자의 토큰으로 요청하면 401을 반환한다."""
-    email = _unique_email()
-    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-    login_response = await client.post(
-        "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    headers = {"Authorization": f"Bearer {login_response.json()['data']['access_token']}"}
-
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE users SET status = 'DELETED' WHERE email = $1", email)
-
-    response = await client.get("/v1/foundation/trust/status", headers=headers)
-    assert response.status_code == 401
-
-
-async def test_suspended_account_check_without_auth(client: AsyncClient) -> None:
-    """음성: 인증 헤더 없이 trust/status 에 접근하면 401을 반환한다."""
-    response = await client.get("/v1/foundation/trust/status")
-    assert response.status_code == 401
-
-
-async def test_suspended_account_check_with_invalid_token(client: AsyncClient) -> None:
-    """음성: 유효하지 않은 토큰으로 trust/status 에 접근하면 401을 반환한다."""
-    response = await client.get(
-        "/v1/foundation/trust/status", headers={"Authorization": "Bearer invalid-token"}
-    )
-    assert response.status_code == 401
-
-
-async def test_login_with_wrong_password_rejected(client: AsyncClient) -> None:
-    email = _unique_email()
-    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-
-    response = await client.post(
-        "/auth/login", json={"email": email, "password": "WrongPassword1!"}
-    )
-
-    assert response.status_code == 401
-    body = response.json()
-    assert body["error_code"] == "AUTH_INVALID_CREDENTIALS"
-    assert "trace_id" in body
-
-
-async def test_get_me_requires_authentication(client: AsyncClient) -> None:
-    response = await client.get("/users/me")
-
-    assert response.status_code == 401
-
-
-async def test_get_me_returns_current_user_with_valid_token(client: AsyncClient) -> None:
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    token = register_response.json()["data"]["access_token"]
-
-    response = await client.get("/users/me", headers={"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 200
-    body = response.json()["data"]
-    assert body["email"] == email
-    assert body["mfa_enabled"] is False
-
-
-async def test_get_me_rejects_invalid_token(client: AsyncClient) -> None:
-    response = await client.get("/users/me", headers={"Authorization": "Bearer not-a-real-token"})
-
-    assert response.status_code == 401
-
-
-async def test_logout_requires_authentication(client: AsyncClient) -> None:
-    response = await client.post("/auth/logout")
-
-    assert response.status_code == 401
-
-
-async def test_refresh_endpoint_rotates_token_pair(client: AsyncClient) -> None:
-    """PLT-24 — spec §9 DoD "기존 test_auth_router.py는 토큰 쌍 응답으로
-    갱신"의 /auth/refresh 왕복 부분. 서비스 계층은
-    tests/integration/services/auth/test_login_refresh_logout.py가 이미
-    검증하지만, 라우터 배선(RefreshRequest 바인딩·ok() 봉투)은 여기서만
-    실제 HTTP로 확인된다."""
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    pair = register_response.json()["data"]
-
-    response = await client.post(
-        "/auth/refresh",
-        json={"session_id": pair["session_id"], "refresh_token": pair["refresh_token"]},
-    )
-
-    assert response.status_code == 200
-    rotated = response.json()["data"]
-    assert rotated["session_id"] == pair["session_id"]
-    assert rotated["refresh_token"] != pair["refresh_token"]
-    assert rotated["access_token"] != pair["access_token"]
-
-
-async def test_refresh_endpoint_rejects_reused_refresh_token(client: AsyncClient) -> None:
-    """핵심 DoD — 옛 refresh_token 재사용은 라우터 계층에서도 401
-    AUTH_SESSION_REVOKED로 거부된다(RefreshReuseDetected 전파 확인)."""
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    pair = register_response.json()["data"]
-    refresh_body = {"session_id": pair["session_id"], "refresh_token": pair["refresh_token"]}
-    await client.post("/auth/refresh", json=refresh_body)
-
-    response = await client.post("/auth/refresh", json=refresh_body)
-
-    assert response.status_code == 401
-    assert response.json()["error_code"] == "AUTH_SESSION_REVOKED"
-
-
-async def test_logout_endpoint_revokes_session(client: AsyncClient) -> None:
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    pair = register_response.json()["data"]
-    headers = {"Authorization": f"Bearer {pair['access_token']}"}
-
-    response = await client.post("/auth/logout", headers=headers)
-    assert response.status_code == 200
-
-    refresh_after_logout = await client.post(
-        "/auth/refresh",
-        json={"session_id": pair["session_id"], "refresh_token": pair["refresh_token"]},
-    )
-    assert refresh_after_logout.status_code == 401
-
-
-async def test_logout_all_endpoint_revokes_every_session(client: AsyncClient) -> None:
-    email = _unique_email()
-    first = (
-        await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-    ).json()["data"]
-    second = (
-        await client.post("/auth/login", json={"email": email, "password": STRONG_PASSWORD})
-    ).json()["data"]
-
-    response = await client.post(
-        "/auth/logout-all", headers={"Authorization": f"Bearer {first['access_token']}"}
-    )
-
-    assert response.status_code == 200
-    assert response.json()["data"]["revoked_count"] == 2
-    refresh_first = await client.post(
-        "/auth/refresh",
-        json={"session_id": first["session_id"], "refresh_token": first["refresh_token"]},
-    )
-    refresh_second = await client.post(
-        "/auth/refresh",
-        json={"session_id": second["session_id"], "refresh_token": second["refresh_token"]},
-    )
-    assert refresh_first.status_code == 401
-    assert refresh_second.status_code == 401
-
-
-# ── negative tests (DoD: ≥3건) ──────────────────────────────────────────
-
-
-async def test_register_rejects_duplicate_email(client: AsyncClient) -> None:
-    """불변식 위반 — 이미 가입된 이메일로 재가입하면 401으로 거부해야 한다.
-
-    AuthService.signup() 가 AuthError("이미 등록된 이메일입니다.")를
-    던지고, exception_mapping이 AuthError → 401 AUTH_INVALID_CREDENTIALS로
-    매핑한다(계정 존재 여부가 유출되지 않도록).
-    """
-    email = _unique_email()
-    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-    response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    assert response.status_code == 401
-    body = response.json()
-    assert body["error_code"] == "AUTH_INVALID_CREDENTIALS"
-
-
-async def test_admin_endpoint_rejects_non_admin(client: AsyncClient) -> None:
-    """불변식 위반 — admin-only 엔드포인트에 일반 사용자가 접근하면 403/401로 거부해야 한다.
-
-    admin.py 라우터는 get_current_admin 의존성으로 admin 체크를 한다.
-    일반 계정이 /admin/users 엔드포인트에 접근하면 거부된다.
-    """
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    token = register_response.json()["data"]["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    # 일반 사용자가 admin 엔드포인트 접근 시도
-    response = await client.get("/admin/users", headers=headers)
-    assert response.status_code in (401, 403)
-
-
-# ── failure-injection tests (DoD: ≥1건) ─────────────────────────────────
-
-
-async def test_login_failure_injection_db_error(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """실패주입 — DB 레이어에서 예외가 발생하면 500이 아닌 구조화된
-    서비스 에러 응답으로 감싸져야 한다.
-
-    FastAPI dependency_override로 get_current_user를 패치해
-    ConnectionError를 유발하고, exception_mapping이 INTERNAL_ERROR(500)로
-    매핑하는지, 그리고 trace_id가 반드시 포함되어 있는지 확인한다.
-    """
-    from src.api.deps import get_current_user as real_dep
-    from src.main import app
-
-    email = _unique_email()
-    register_response = await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
-    headers = {"Authorization": f"Bearer {register_response.json()['data']['access_token']}"}
-
-    async def patched_get_current_user() -> Any:
-        raise ConnectionError("Injected DB connection failure")
-
-    # FastAPI dependency_override — 앱 재시작 없이 의존성 대체
-    app.dependency_overrides[real_dep] = patched_get_current_user
-
-    try:
-        # /auth/logout-all — 의존성 호출 시 DB 예외 유발
-        response = await client.post("/auth/logout-all", headers=headers)
-
-        # 500 INTERNAL_ERROR로 감싸져서 반환되어야 함
-        assert response.status_code == 500
-        body = response.json()
-        assert body["error_code"] == "INTERNAL_ERROR"
-        # trace_id가 반드시 포함되어 있어야 함 (관측성 불변식)
-        assert "trace_id" in body
-    finally:
-        del app.dependency_overrides[real_dep]
-
-
-# ── performance assertion (DoD: 1건) ──────────────────────────────────────
-
-
-@pytest.mark.perf
-async def test_login_latency_within_budget(client: AsyncClient) -> None:
-    """수치 성능 단언 — 로그인 요청(실제 Argon2 해시 검증 + DB 왕복 + ASGI
-    요청/응답 직렬화)이 상수시간으로 끝나는지 확인한다. 이 단언이 보장하려는
-    것은 절대 ms가 아니라 "로그인 경로에 선형 이상으로 느려지는 요인(예:
-    테이블 풀스캔, N+1 쿼리)이 끼어들지 않았다"는 것이다.
-
-    task-10652: 원래 20회 순차 로그인의 절대 벽시계 합(예산 1.5s)을 썼다 —
-    비동기 I/O 왕복은 `time.process_time()` CPU 시간으로 바꾸면 대기 시간이
-    통째로 사라져 의미가 없어지므로(실제 DB/네트워크 지연을 재지 못함),
-    `RelativeBudget.measure_async`로 같은 프로세스·같은 순간에 돈 동기 CPU
-    보정 루프 대비 비율로 바꿔 호스트 부하(워커 13개 + llama.cpp 동시 실행)를
-    상쇄한다 — 보정 루프가 2배 느려지면 로그인 왕복도 스케줄링 경합으로
-    비례해 느려지므로 비율은 유지된다."""
-    email = _unique_email()
-    await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
-
-    async def _twenty_logins() -> None:
-        for _ in range(20):
-            response = await client.post(
-                "/auth/login", json={"email": email, "password": STRONG_PASSWORD}
-            )
-            assert response.status_code == 200
-
-    budget = RelativeBudget()
-    # 로컬 무부하 실측 ratio ~11x(20회 로그인 ~1.5s, 보정 루프 ~130ms) — 10배
-    # 이상 여유를 둔 40x를 바닥선으로 건다(순차 테이블 풀스캔 등 선형 이탈만
-    # 잡고, 호스트 부하로 인한 흔들림은 비율 상쇄로 흡수한다).
-    sample = await budget.assert_within_async(
-        _twenty_logins,
-        max_ratio=40.0,
-        n=3,
-        warmup=0,
-        calibration_n=3,
-        label="20회 로그인",
-    )
-    print(f"[auth] {budget.describe(sample, max_ratio=40.0)}")
-
-
-# ── gate-red reproduction ──────────────────────────────────────────────────
-
-
-@pytest.mark.perf
-async def test_register_perf_goes_red_with_io_delay_injection(
-    client: AsyncClient,
-    pool: asyncpg.Pool,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연(delayed_async,
-    2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
-
-    `conn.execute` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
-    주입 — register 는 I/O 바인딩 연산이므로 wall-clock 측정으로 지연을
-    검증한다. 정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가
-    아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
-
-    task-17653: delay injection uses ``delayed_async`` from
-    ``tests.support.perf_inject`` (no ``# type: ignore``).
-    """
-    from tests.support.perf_inject import delayed_async
-
-    # asyncpg.Connection.execute 를 delayed_async 로 감싸 IO 지연 주입
-    original_execute = asyncpg.Connection.execute
-    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 2.0))
-
-    budget = RelativeBudget()
-
-    async def _one_register_with_delay() -> None:
-        response = await client.post(
-            "/auth/register",
-            json={"email": _unique_email(), "password": STRONG_PASSWORD},
-        )
-        assert response.status_code == 201
-
-    # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
-    # 2.0 s 지연 >> calibration × 15 budget 이므로 AssertionError 발생해야 함
-    with pytest.raises(AssertionError, match=r"budget"):
-        await budget.assert_within_async(
-            _one_register_with_delay,
-            max_ratio=15.0,
-            n=3,
-            warmup=1,
-            calibration_n=3,
-            label="single register+delay",
-        )
-
-    # 지연 주입으로 circuit_breaker_level 이 'halted' 될 수 있으므로
-    # sentinel(gate-red reproduction) 종료 후 반드시 정상 복원
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
-            "reactivation_approval_id = NULL WHERE id = 1"
-        )
-
-
-# ── negative tests (>= 3) ──────────────────────────────────────────────────
 
 
 async def test_register_rejects_empty_email(client: AsyncClient) -> None:
