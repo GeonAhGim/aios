@@ -45,6 +45,7 @@ from src.foundation.market_data.domain.timeframe import (
     duration,
     expected_opens,
 )
+from tests.support.perf_budget import PerfBudget
 
 
 def _calendar(venue: Venue) -> VenueCalendar:
@@ -141,7 +142,7 @@ def test_detect_gaps_surfaces_corrupted_duration_lookup_as_extra_gaps_not_silent
 
 @pytest.mark.perf
 def test_detect_gaps_completes_within_budget_for_30_days_of_m1_crypto_candles(
-    perf_budget,
+    perf_budget: PerfBudget,
 ) -> None:
     """30일치 M1 24/7 캔들(43,200개 기대 open) 중 절반이 결측인 입력에서
     detect_gaps가 3초 안에 끝나고 결측 개수를 정확히 센다 — 세션마다 전체
@@ -160,7 +161,7 @@ def test_detect_gaps_completes_within_budget_for_30_days_of_m1_crypto_candles(
     key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1)
     candles = [_candle(key, ot, Timeframe.M1) for i, ot in enumerate(expected) if i % 2 == 0]
 
-    def measure() -> list:
+    def measure() -> list[Any]:
         return detect_gaps(candles, Timeframe.M1, [long_session])
 
     # batch=10: Windows process_time의 15.6ms 양자화 틱을 batch로 묶어
@@ -287,7 +288,7 @@ def test_detect_gaps_fails_closed_when_expected_opens_raises(
 
 @pytest.mark.perf
 def test_detect_gaps_handles_10k_candles_within_budget(
-    perf_budget,
+    perf_budget: PerfBudget,
 ) -> None:
     """10,000개 캔들에 대해 1초 안에 결과를 낸다 — O(캔들 수)를
     유지하는 회귀 가드다(우발적으로 O(n^2) 연산이 끼어들면 이 임계값을
@@ -304,7 +305,7 @@ def test_detect_gaps_handles_10k_candles_within_budget(
         if i not in missing_indices
     ]
 
-    def measure() -> list:
+    def measure() -> list[Any]:
         return detect_gaps(candles, Timeframe.M1, sessions)
 
     # batch=10: Windows process_time의 15.6ms 양자화 틱을 batch로 묶어
@@ -316,7 +317,7 @@ def test_detect_gaps_handles_10k_candles_within_budget(
 
 
 def test_detect_gaps_perf_budget_turns_red_with_10x_cpu_burn(
-    perf_budget,
+    perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """detect_gaps의 성능 단언이 실제로 검출력을 갖는지 확인 —
@@ -333,7 +334,7 @@ def test_detect_gaps_perf_budget_turns_red_with_10x_cpu_burn(
     # expected_opens 호출 시 CPU-burning 연산을 주입 (10배 지연)
     original_expected_opens = expected_opens
 
-    def cpu_burn_expected_opens(*args: Any, **kwargs: Any) -> list:
+    def cpu_burn_expected_opens(*args: Any, **kwargs: Any) -> list[Any]:
         # 100MB 배열 할당 + 산술 연산 → CPU 부하
         total = 0
         for _ in range(10_000_000):
@@ -345,7 +346,7 @@ def test_detect_gaps_perf_budget_turns_red_with_10x_cpu_burn(
         cpu_burn_expected_opens,
     )
 
-    def measure() -> list:
+    def measure() -> list[Any]:
         return detect_gaps(candles, Timeframe.H1, sessions)
 
     # budget 10ms — CPU 부하 주입으로 실제 CPU 시간이 10ms를 크게 넘으면 적색
