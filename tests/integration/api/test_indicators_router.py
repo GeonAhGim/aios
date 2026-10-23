@@ -313,6 +313,10 @@ async def test_catalog_list_p95_goes_red_on_10x_delay_injection(
 
     실제 API 왕복(≈50ms)의 10배인 500ms sleep 을 주입하면 p95 wall_ms가
     200ms 예산을 명확히 넘어야 한다.
+
+    CI 병렬 실행 안정성: n=10으로 줄여 직렬 실행 시간을 ~5s로 유지한다.
+    red-gate 단언은 분포 모양이 아닌 "지연 주입 여부"만 확인하므로 10 샘플로
+    충분하다(p95=10 samples → index 9 = 마지막 샘플, 500ms sleep → ~500ms).
     """
     import asyncio
 
@@ -328,7 +332,7 @@ async def test_catalog_list_p95_goes_red_on_10x_delay_injection(
         assert response.status_code == 200, response.text
         assert response.json()["data"]["items"]
 
-    n = 20
+    n = 10
     samples = await perf_budget.samples_async(_delayed_fn, n=n)
     wall_ms_list = sorted(s.wall_ms for s in samples)
     p95_ms = wall_ms_list[min(int(n * 0.95), len(wall_ms_list) - 1)]
