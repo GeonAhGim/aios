@@ -12,6 +12,10 @@ from src.main import app
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
+# Module-level registry: track emails and disclosure purposes created by
+# _register / _create_disclosure so teardown can clean them up.
+_registered_emails: list[str] = []
+
 
 def _asyncpg_dsn() -> str:
     env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
@@ -48,6 +52,7 @@ def _unique_purpose() -> str:
 
 async def _register(client) -> dict:
     email = _unique_email()
+    _registered_emails.append(email)
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
     )
@@ -63,6 +68,35 @@ async def _create_disclosure(pool: asyncpg.Pool, purpose: str) -> str:
             purpose,
         )
     return str(row["id"])
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_trust_data(pool):
+    """task-19133: DELETE registered users + their consents/disclosures so
+    the OrdersResidueSentinel never sees stale rows at module teardown.
+
+    Order: consents → disclosures → users (FK-child-first).
+    """
+
+    async def _cleanup() -> None:
+        if not _registered_emails:
+            return
+        emails = _registered_emails
+        _registered_emails.clear()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM consent_record WHERE subject_id IN "
+                "(SELECT user_id FROM users WHERE email = ANY($1::text[]))",
+                emails,
+            )
+            await conn.execute(
+                "DELETE FROM users WHERE email = ANY($1::text[])",
+                emails,
+            )
+
+    await _cleanup()
+    yield
+    await _cleanup()
 
 
 async def test_get_trust_status_requires_authentication(client):
