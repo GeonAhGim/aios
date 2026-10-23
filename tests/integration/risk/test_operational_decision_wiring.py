@@ -70,7 +70,9 @@ async def test_executor_via_submit_with_fence_fills_orders_risk_decision_id(pool
     user_id = await create_test_tenant(pool)
     execution_id = await seed_execution(pool, user_id, exchange=_PROVIDER)
 
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     allocation = AllocationDecision(
         symbol="BTC/USDT",
         strategy_id="strat-op-wiring-test",
@@ -137,7 +139,9 @@ async def test_executor_falls_back_to_plain_submit_without_fence_wiring(pool: as
         capital_pct=Decimal("10"),
     )
     adapter = RecordingAdapter()
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
 
     submitted = await Executor().execute(
         allocation,
