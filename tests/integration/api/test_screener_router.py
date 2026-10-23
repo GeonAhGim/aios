@@ -269,7 +269,7 @@ async def test_screen_run_completes_well_within_scan_timeout_budget(
 
     budget_s = SCAN_TIMEOUT_SECONDS / 10  # 1.0 s — 라우터 오버헤드 없음 증거
     sample = await perf_budget.sample_async(
-        lambda: client.post(PATH, json=_body(), headers=headers)
+        lambda: client.post(PATH, json=_body(), headers=headers), batch=8
     )
 
     assert sample.cpu_ms < budget_s * 1000, perf_budget.describe(sample, budget_ms=budget_s * 1000)
