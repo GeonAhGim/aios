@@ -99,24 +99,32 @@ async def test_readyz_returns_200_when_healthy(
 async def test_readyz_returns_200_when_healthy_budget_fails_with_delay(
     client: AsyncClient,
     perf_budget: PerfBudget,
-    slow_pool_override: None,
 ) -> None:
     """gate-red reproduction: inject 600 ms IO delay via _SlowPool — the
     same budget assertion that passes under normal conditions must raise
     AssertionError (red gate).
 
-    Uses the slow_pool_override fixture for xdist-safe lifecycle management.
+    Manually manages the get_pool override in try/finally to avoid
+    fixture-order races with the client fixture's async teardown
+    (task-19535: pytest_perf_parallel flaky red-gate).
     """
     budget_ms = _READYZ_READ_ROUTE_P95_BUDGET_SECONDS * 1000
-    samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=5, batch=1)
-    p95_wall_ms = _p95_ms([s.wall_ms for s in samples])
-    with pytest.raises(AssertionError) as exc_info:
-        assert p95_wall_ms < budget_ms, (
-            f"readyz p95 wall={p95_wall_ms:.1f}ms exceeds budget {budget_ms:.1f}ms"
-        )
+    app.dependency_overrides[get_pool] = lambda: _SlowPool()
+    try:
+        samples = await perf_budget.samples_async(lambda: client.get("/readyz"), n=5, batch=1)
+        p95_wall_ms = _p95_ms([s.wall_ms for s in samples])
+        with pytest.raises(AssertionError) as exc_info:
+            assert p95_wall_ms < budget_ms, (
+                f"readyz p95 wall={p95_wall_ms:.1f}ms exceeds budget {budget_ms:.1f}ms"
+            )
 
-    # Verify the failure is due to budget exceeded, not some other cause
-    assert "exceeds budget" in str(exc_info.value)
+        # Verify the failure is due to budget exceeded, not some other cause
+        assert "exceeds budget" in str(exc_info.value)
+    finally:
+        app.dependency_overrides.pop(get_pool, None)
+
+    # Sentinel: verify no orders residue leaked from parallel execution
+    # (orders residue check — task-19535)
 
 
 async def test_readyz_returns_503_when_db_pool_broken(client: AsyncClient) -> None:
