@@ -17,7 +17,6 @@ test below is tagged with which checklist bucket it covers.
 from __future__ import annotations
 
 import hashlib
-import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from typing import Any
@@ -31,6 +30,7 @@ from src.core.safety.liquidation_planner import (
     OpenPosition,
     plan_liquidation,
 )
+from tests.support.perf_budget import PerfBudget
 
 _BASELINE_POLICY_KWARGS = dict(
     max_participation_pct=10.0,
@@ -258,7 +258,7 @@ def test_production_empty_volume_map_pattern_stays_fail_closed_for_every_symbol(
 
 
 @pytest.mark.perf
-def test_planning_many_positions_completes_within_latency_budget() -> None:
+def test_planning_many_positions_completes_within_latency_budget(perf_budget: PerfBudget) -> None:
     policy = _policy(slice_count_min=3, slice_count_max=20, max_slice_notional=1)
     positions = [
         _position(symbol=f"SYM{i}USDT", quantity=Decimal("100"), notional=Decimal("100000"))
@@ -266,12 +266,14 @@ def test_planning_many_positions_completes_within_latency_budget() -> None:
     ]
     volume_5m = {p.symbol: None for p in positions}
 
-    start = time.perf_counter()
-    plan = plan_liquidation(positions, seed=b"perf-seed", policy=policy, volume_5m=volume_5m)
-    elapsed = time.perf_counter() - start
+    sample = perf_budget.assert_within(
+        lambda: plan_liquidation(positions, seed=b"perf-seed", policy=policy, volume_5m=volume_5m),
+        budget_ms=5000,
+    )
 
+    plan = sample.result
+    assert isinstance(plan, LiquidationPlan)
     assert len(plan.slices) == 50 * policy.slice_count_max
-    assert elapsed < 5.0
 
 
 # -- D3: multi-instance proof -- independent "planner instances" (separate
