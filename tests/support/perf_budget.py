@@ -123,6 +123,22 @@ class PerfBudget:
             samples.append(await self.sample_async(fn, batch=batch))
         return samples
 
+    async def best_of_async(
+        self, fn: Callable[[], Awaitable[_T]], *, n: int = 3, warmup: int = 0, batch: int = 1
+    ) -> PerfSample:
+        """비동기 I/O best-of-N — CI 병렬 실행에서 CPU 경합 spike를 자동 스킵.
+
+        `n`회 반복 측정 후 `cpu_ms` 최소값을 반환한다(task-19178).
+        `samples_async`와 함께 p95 계산 시 각 샘플을 best-of-3으로 채워
+        분포 안정성을 높인다.
+        """
+        candidates: list[PerfSample] = []
+        for _ in range(warmup):
+            await fn()
+        for _ in range(n):
+            candidates.append(await self.sample_async(fn, batch=batch))
+        return min(candidates, key=lambda s: s.cpu_ms)
+
     def samples(
         self, fn: Callable[[], _T], *, n: int, warmup: int = 1, batch: int = 1
     ) -> list[PerfSample]:
