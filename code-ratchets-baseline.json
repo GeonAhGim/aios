@@ -1,6 +1,6 @@
 {
   "loc_over_1000": 0,
-  "loc_over_500": 18,
+  "loc_over_500": 17,
   "loc_over_800": 0,
   "not_implemented_error": 16,
   "skip_xfail": 3,
