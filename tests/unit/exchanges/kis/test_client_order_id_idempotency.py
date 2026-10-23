@@ -63,7 +63,10 @@ def _reset_bucket_registry() -> Generator[None, None, None]:
     rate_profile.reset_token_bucket_registry_for_test()
 
 
-def _make_adapter(handler: Callable[[httpx.Request], httpx.Response]) -> KISAdapter:
+def _make_adapter(
+    handler: Callable[[httpx.Request], httpx.Response]
+    | Callable[[httpx.Request], Awaitable[httpx.Response]],
+) -> KISAdapter:
     transport = httpx.MockTransport(handler)
     http_client = httpx.AsyncClient(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
