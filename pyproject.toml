@@ -49,6 +49,10 @@ dependencies = [
     # thread reads child-process RSS -- previously only declared as an
     # optional test fixture dependency (see the mypy override below).
     "psutil>=6.0",
+    # task-18890: CVE-2026-111064, CVE-2026-111063, GHSA-2g87-pp6c-29x5
+    # (aiohttp < 3.14.4). Transitive dep of cosmic-ray; pin here so
+    # supply_chain gates see the fix at the project level.
+    "aiohttp>=3.14.4",
 ]
 
 [project.optional-dependencies]
