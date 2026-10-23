@@ -114,14 +114,13 @@ class NoopEventBus:
 async def _ensure_circuit_breaker_normal(
     request: pytest.FixtureRequest,
 ) -> AsyncIterator[None]:
-    # Some integration sub-tests (e.g. bitget mock-transport tests) do not
+    # Some integration sub-tests (e.g. bitget/nh mock-transport tests) do not
     # need a database; skip silently when pool is unavailable.
     try:
         pool = request.getfixturevalue("pool")
     except pytest.FixtureLookupError:
         yield
         return
-
     async with pool.acquire() as conn:
         has_risk_gate = await conn.fetchval(
             """
