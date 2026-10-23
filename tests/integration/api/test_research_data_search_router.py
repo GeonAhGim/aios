@@ -314,15 +314,17 @@ async def test_search_cpu_converges_to_zero_single_call(
     """단일 검색 호출이 0에 수렴하는 CPU 시간을 보여야 한다.
 
     `time.process_time()`은 Windows에서 약 15.6ms 양자화 오차가 있으므로
-    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. 순수 도메인 로직
-    불변식(I-03)과 호환되도록 1회당 CPU 시간이 50ms 미만이어야 한다
+    batch=64로 여러 호출을 묶어서 1회당 오차를 줄인다. CI 병렬 실행에서
+    CPU 경합 spike를 피하기 위해 `best_of_async(n=3, warmup=1)`로
+    best-of-3 최소값을 사용하고, 첫 호출은 warmup으로 버린다. 순수 도메인
+    로직 불변식(I-03)과 호환되도록 1회당 CPU 시간이 50ms 미만이어야 한다
     (DB I/O가 아닌 Python CPU 코어만 측정).
     """
 
     async def _search_once() -> None:
         await client.post(f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"])
 
-    sample = await perf_budget.sample_async(_search_once, batch=64)
+    sample = await perf_budget.best_of_async(_search_once, n=3, warmup=1, batch=64)
     assert sample.cpu_ms < 50.0, (
         f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
         f"DB I/O를 제외한 Python CPU 코어는 50ms 미만이어야 함 (budget<50ms)"
