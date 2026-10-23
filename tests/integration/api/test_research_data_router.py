@@ -158,11 +158,14 @@ async def test_unspecified_source_contract_denies_search(client, seeded):
     app.dependency_overrides[get_source_contract_repository] = lambda: (
         _FakeSourceContractRepository(None)
     )
-    response = await client.get(
-        f"{BASE}/items", params={"source_id": SOURCE_ID}, headers=seeded["a"]
-    )
-    assert response.status_code == 403, response.text
-    assert response.json()["error_code"] == "AUTHZ_FORBIDDEN"
+    try:
+        response = await client.get(
+            f"{BASE}/items", params={"source_id": SOURCE_ID}, headers=seeded["a"]
+        )
+        assert response.status_code == 403, response.text
+        assert response.json()["error_code"] == "AUTHZ_FORBIDDEN"
+    finally:
+        app.dependency_overrides.pop(get_source_contract_repository, None)
 
 
 async def test_internal_scope_source_denies_get_item(client, seeded):
@@ -205,9 +208,7 @@ async def test_source_contract_repository_failure_fails_closed_not_open(client, 
     try:
         response = await client.get(f"{BASE}/items/{seeded['item_id']}", headers=seeded["a"])
     finally:
-        app.dependency_overrides[get_source_contract_repository] = lambda: (
-            _FakeSourceContractRepository(_source_contract(RedistributionScope.DISPLAY))
-        )
+        app.dependency_overrides.pop(get_source_contract_repository, None)
     assert response.status_code == 500, response.text
     body = response.json()
     assert body["error_code"] == "INTERNAL_ERROR"
