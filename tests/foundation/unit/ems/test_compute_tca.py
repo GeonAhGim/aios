@@ -317,7 +317,7 @@ async def test_gate_red_repro_market_vwap_validation_is_load_bearing(
 
 @pytest.mark.perf
 async def test_compute_tca_perf_budget_many_fills_and_bars(
-    perf_budget,
+    perf_budget: PerfBudget,
 ) -> None:
     """`compute_tca` calls EM-12's `compute_vwap` twice (execution + market
     interval) and EM-13's `decompose_cost` once, each O(n) over `fills`/
