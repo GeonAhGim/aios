@@ -285,19 +285,19 @@ async def test_search_latency_stays_within_normalized_ceiling(client, seeded, pe
         )
 
     baseline_resp = await perf_budget.sample_async(lambda: client.get(f"{BASE}/sources"))
-    baseline_elapsed = baseline_resp.wall_ms / 1000
+    baseline_elapsed = baseline_resp.cpu_ms / 1000
     assert baseline_resp.result.status_code == 200, baseline_resp.result.text
 
     full_resp = await perf_budget.sample_async(
         lambda: client.post(f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"]),
     )
-    full_elapsed = full_resp.wall_ms / 1000
+    full_elapsed = full_resp.cpu_ms / 1000
     assert full_resp.result.status_code == 200, full_resp.result.text
     assert len(full_resp.result.json()["data"]["items"]) == 52
 
-    # CI 병렬 실행 CPU 경쟁 안정화: baseline이 빠르더라도 최소 30s 보장
-    # (task-15569 관례 — wall_ms는 다른 워커의 I/O 경쟁에 직접 눌림)
-    ceiling = max(baseline_elapsed * 20 + 0.5, 30.0)
+    # CI 병렬 실행(xdist)에서 wall_ms는 다른 워커의 CPU 경합으로 왜곡되므로
+    # cpu_ms(time.process_time) 기준으로 단언한다(task-19183 관례).
+    ceiling = max(baseline_elapsed * 20 + 0.5, 0.5)
     assert full_elapsed <= ceiling, (
         f"52개 항목 검색이 {full_elapsed:.3f}s 걸림 "
         f"(baseline {baseline_elapsed:.3f}s, 정규화 상한 {ceiling:.3f}s)"
