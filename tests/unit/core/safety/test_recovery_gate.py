@@ -17,11 +17,12 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from typing import TypedDict, cast
 
 import pytest
 from pydantic import ValidationError
 
-from src.core.loader.risk_policy_loader import load_risk_policy
+from src.core.loader.risk_policy_loader import CircuitBreakerPolicy, load_risk_policy
 from src.core.risk.decision import RiskOutcome
 from src.core.safety.circuit_breaker import CircuitBreakerLevel, CircuitBreakerMetrics
 from src.core.safety.recovery_gate import RecoveryDecision, can_reactivate
@@ -35,15 +36,28 @@ def _clean_history(n: int = COOLDOWN_SEC) -> list[CircuitBreakerMetrics]:
     return [CircuitBreakerMetrics() for _ in range(n)]
 
 
-def _base_kwargs() -> dict:
-    return dict(
-        current_level=CircuitBreakerLevel.HALTED,
-        metrics_history=_clean_history(),
-        cooldown_sec=COOLDOWN_SEC,
-        evidence_ref="evidence://ref-1",
-        approval_status="APPROVED",
-        fresh_risk_outcome=RiskOutcome.ALLOW,
-        policy=_POLICY,
+class _Kwargs(TypedDict, total=False):
+    current_level: CircuitBreakerLevel
+    metrics_history: list[CircuitBreakerMetrics]
+    cooldown_sec: int
+    evidence_ref: str | None
+    approval_status: str
+    fresh_risk_outcome: RiskOutcome
+    policy: CircuitBreakerPolicy
+
+
+def _base_kwargs() -> _Kwargs:
+    return cast(
+        _Kwargs,
+        dict(
+            current_level=CircuitBreakerLevel.HALTED,
+            metrics_history=_clean_history(),
+            cooldown_sec=COOLDOWN_SEC,
+            evidence_ref="evidence://ref-1",
+            approval_status="APPROVED",
+            fresh_risk_outcome=RiskOutcome.ALLOW,
+            policy=_POLICY,
+        ),
     )
 
 
