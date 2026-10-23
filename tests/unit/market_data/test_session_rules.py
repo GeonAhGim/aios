@@ -57,7 +57,7 @@ def test_krx_close_cpu_budget_passes_on_normal_input(
 ) -> None:
     """정상 입력에서 sessions_for() 호출이 CPU 예산을 통과한다.
 
-    single-call CPU 측정이 0이 되지 않도록 batch=1024로 양자화 오차를 줄이고,
+    single-call CPU 측정이 0이 되지 않도록 batch=16384로 양자화 오차를 줄이고,
     실제 CPU 시간이 0보다 큼을 확인한다. 같은 측정이 기존 예산도 통과해야 한다.
     """
     cal = _calendar(Venue.KIS_KRX)
