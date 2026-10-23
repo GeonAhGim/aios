@@ -7,6 +7,7 @@ Each call creates a separate user with a unique email to maintain test isolation
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
@@ -15,6 +16,23 @@ import asyncpg
 import pytest
 
 from tests.support.entities_seed import bootstrap_default_hierarchy
+
+
+def _asyncpg_dsn() -> str:
+    """Convert TEST_DATABASE_URL / DATABASE_URL to asyncpg DSN.
+
+    ``tests/conftest.py`` copies ``TEST_DATABASE_URL`` into ``DATABASE_URL``;
+    asyncpg cannot connect to ``postgresql+asyncpg://`` URIs directly, so the
+    prefix is stripped.
+    """
+    url = os.environ.get("DATABASE_URL", os.environ.get("TEST_DATABASE_URL", ""))
+    if not url:
+        raise RuntimeError("DATABASE_URL (or TEST_DATABASE_URL) is not set")
+    if not url.startswith(("postgresql+asyncpg://", "postgresql://", "postgres://")):
+        raise ValueError("DATABASE_URL must be an explicit PostgreSQL URL")
+    if url.startswith("postgresql+asyncpg://"):
+        return "postgresql://" + url.removeprefix("postgresql+asyncpg://")
+    return url
 
 
 async def create_test_user(pool: asyncpg.Pool) -> UUID:
@@ -91,31 +109,41 @@ class NoopEventBus:
 # in a non-normal state (halted / emergency / warning / restricted) without
 # restoring it.  Restoration is the test's responsibility; this fixture only
 # detects leakage.  Skips silently when risk_gate table does not exist.
+#
+# NOTE: this fixture creates its own transient pool rather than depending on
+# the ``pool`` fixture, because not every integration test defines ``pool``
+# (e.g. pure mock-transport tests in test_bitget_p2p.py).  The transient pool
+# is closed in the teardown below.
 @pytest.fixture(autouse=True)
-async def _ensure_circuit_breaker_normal(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as conn:
-        has_risk_gate = await conn.fetchval(
-            """
-            SELECT to_regclass('risk_gate') IS NOT NULL
-            """
-        )
-    if not has_risk_gate:
+async def _ensure_circuit_breaker_normal() -> None:
+    _dsn = _asyncpg_dsn()
+    pool = await asyncpg.create_pool(_dsn, min_size=1, max_size=1)
+    try:
+        async with pool.acquire() as conn:
+            has_risk_gate = await conn.fetchval(
+                """
+                SELECT to_regclass('risk_gate') IS NOT NULL
+                """
+            )
+        if not has_risk_gate:
+            yield
+            return
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
+                "WHERE circuit_breaker_level NOT IN ('normal',)"
+            )
         yield
-        return
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
-            "WHERE circuit_breaker_level NOT IN ('normal',)"
-        )
-    yield
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
-            "WHERE circuit_breaker_level NOT IN ('normal',)"
-        )
-        final = await conn.fetchval("SELECT circuit_breaker_level FROM risk_gate LIMIT 1")
-    if final != "normal":
-        raise AssertionError(
-            f"circuit_breaker_level not restored to 'normal' after test "
-            f"(final={final!r}). The test that raised it must restore it."
-        )
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
+                "WHERE circuit_breaker_level NOT IN ('normal',)"
+            )
+            final = await conn.fetchval("SELECT circuit_breaker_level FROM risk_gate LIMIT 1")
+        if final != "normal":
+            raise AssertionError(
+                f"circuit_breaker_level not restored to 'normal' after test "
+                f"(final={final!r}). The test that raised it must restore it."
+            )
+    finally:
+        await pool.close()
