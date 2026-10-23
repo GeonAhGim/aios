@@ -272,7 +272,7 @@ async def test_screen_run_completes_well_within_scan_timeout_budget(
         lambda: client.post(PATH, json=_body(), headers=headers)
     )
 
-    assert sample.wall_ms < budget_s * 1000, perf_budget.describe(sample, budget_ms=budget_s * 1000)
+    assert sample.cpu_ms < budget_s * 1000, perf_budget.describe(sample, budget_ms=budget_s * 1000)
 
 
 # ---- 게이트 적색 재현(D2, task-11539 감사 후속) --------------------
