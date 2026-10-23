@@ -19,6 +19,7 @@ from src.foundation.market_data.domain.candle_columns import (
     to_candle_records,
 )
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
+from tests.support.perf_budget import PerfBudget
 
 
 def _key() -> SeriesKey:
@@ -164,7 +165,7 @@ def test_to_candle_records_propagates_unknown_timeframe_error(
     key = _key()
     columns = _columns(2)
 
-    def fake_duration(timeframe):
+    def fake_duration(timeframe: Timeframe) -> None:
         raise UnknownTimeframeError(f"알 수 없는 timeframe: {timeframe!r}")
 
     monkeypatch.setattr(
@@ -185,7 +186,7 @@ def test_to_candle_records_propagates_model_construct_failure(
     key = _key()
     columns = _columns(2)
 
-    def fake_model_construct(**kwargs):
+    def fake_model_construct(**kwargs: object) -> CandleRecord:
         raise RuntimeError("simulated model_construct failure")
 
     from src.foundation.market_data.contracts.v1 import CandleRecord
@@ -206,7 +207,7 @@ def test_to_candle_records_propagates_duration_return_type_error(
     key = _key()
     columns = _columns(2)
 
-    def fake_duration_returns_string(timeframe):
+    def fake_duration_returns_string(timeframe: Timeframe) -> str:
         return "not a timedelta"
 
     monkeypatch.setattr(
@@ -222,7 +223,7 @@ def test_to_candle_records_propagates_duration_return_type_error(
 
 
 @pytest.mark.perf
-def test_to_candle_records_performance_under_10k_rows(perf_budget) -> None:
+def test_to_candle_records_performance_under_10k_rows(perf_budget: PerfBudget) -> None:
     """성능 단언: 10,000개 행을 to_candle_records로 변환하는 데
     200ms 미만이어야 한다(컬럼 기반 접근의 성능 목표, CI 병렬 실행 안정화)."""
     n = 10_000
