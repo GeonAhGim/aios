@@ -10,6 +10,7 @@ commit)"의 측정 범위를 `InboxProcessor._process_row`의 전이 커밋까�
 제외하기 위해서다 — 전량 체결(FILLED)이면 position_ledger 호출이 섞여 이
 파일들이 소유하지 않는 코드 경로의 왕복까지 회귀 가드에 들어간다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,22 +37,40 @@ from tests.support.oms_outbox_fakes import ScriptedAdapter, allow_gate
 
 def submit_profile() -> VenueCapabilityProfile:
     return VenueCapabilityProfile(
-        venue="bitget", asset_classes=[AssetClass.CRYPTO],
-        order_types={OrderType.MARKET, OrderType.LIMIT}, time_in_force={"GTC", "IOC"},
-        supports_client_order_id=True, client_order_id_max_len=40,
-        client_order_id_charset="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", id_policy="STABLE",
-        supports_modify=True, supports_cancel="YES", supports_ws_orders=True,
-        supports_batch=False, price_tick={}, qty_lot={}, min_notional={},
-        rate_limits={}, submit_timeout=TimeoutBudget(), query_timeout=TimeoutBudget(),
-        market_hours=None, max_open_orders_per_symbol=20, verified="DOC_ONLY",
+        venue="bitget",
+        asset_classes=[AssetClass.CRYPTO],
+        order_types={OrderType.MARKET, OrderType.LIMIT},
+        time_in_force={"GTC", "IOC"},
+        supports_client_order_id=True,
+        client_order_id_max_len=40,
+        client_order_id_charset="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        id_policy="STABLE",
+        supports_modify=True,
+        supports_cancel="YES",
+        supports_ws_orders=True,
+        supports_batch=False,
+        price_tick={},
+        qty_lot={},
+        min_notional={},
+        rate_limits={},
+        submit_timeout=TimeoutBudget(),
+        query_timeout=TimeoutBudget(),
+        market_hours=None,
+        max_open_orders_per_symbol=20,
+        verified="DOC_ONLY",
     )
 
 
 def submit_registry() -> SymbolRegistry:
     reg = SymbolRegistry()
     reg.register(
-        "BTC/USDT", "bitget", "BTCUSDT",
-        tick=Decimal("0.1"), lot=Decimal("0.0001"), min_notional=Decimal("5"), quote_ccy="USDT",
+        "BTC/USDT",
+        "bitget",
+        "BTCUSDT",
+        tick=Decimal("0.1"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("5"),
+        quote_ccy="USDT",
     )
     return reg
 
@@ -64,27 +83,40 @@ async def create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> in
             "market, exchange, fsm_definition, author_agent, lifecycle_status) VALUES "
             "($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', '{}'::jsonb, 'test-author', "
             "'APPROVED')",
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
         row = await conn.fetchrow(
             "INSERT INTO strategy_executions (strategy_id, strategy_version, user_id, "
             "exchange, mode, allocated_capital, currency, status) VALUES "
             "($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING') RETURNING id",
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return int(row["id"])
 
 
 def submit_command(user_id: uuid.UUID, execution_id: int, seq: int) -> SubmitOrderCommand:
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=seq,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=seq,
         window_start=datetime.now(timezone.utc),
     )
     return SubmitOrderCommand(
-        command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol="BTC/USDT",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
-        asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
+        command_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        scope=scope,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
         issued_at=datetime.now(timezone.utc),
     )
 
@@ -104,18 +136,44 @@ async def insert_open_order(
             "filled_quantity, is_liquidation, asset_class) VALUES ($1,$2,$3,'oms-perf-inbox',"
             "'1.0.0','BTC/USDT','bitget','BUY','MARKET',$4,'CREATED',0,false,'CRYPTO') "
             "RETURNING order_id",
-            user_id, client_order_id, exchange_order_id, quantity,
+            user_id,
+            client_order_id,
+            exchange_order_id,
+            quantity,
         )
+        # CREATED -> VALIDATED (event=VALIDATED)
         await PostgresOrderRepository().transition(
             conn,
             order_id=order_id,
             expected_status=OrderStatus.CREATED,
             expected_version=0,
-            new_status=OrderStatus.SUBMITTED,
+            new_status=OrderStatus.VALIDATED,
             patch={},
             event=OrderTransitionEvent(
                 order_id=order_id,
                 from_status=OrderStatus.CREATED,
+                to_status=OrderStatus.VALIDATED,
+                event=OrderEvent.VALIDATED.value,
+                reason_code="PERF_FIXTURE_VALIDATE",
+                actor_subject_id="system",
+                trace_id=uuid.uuid4(),
+                command_id=None,
+                provider_event_id=None,
+                occurred_at=datetime.now(timezone.utc),
+                payload_hash=hashlib.sha256(f"perf-fixture:v1:{order_id}".encode()).hexdigest(),
+            ),
+        )
+        # VALIDATED -> SUBMITTED (event=SENT)
+        await PostgresOrderRepository().transition(
+            conn,
+            order_id=order_id,
+            expected_status=OrderStatus.VALIDATED,
+            expected_version=1,
+            new_status=OrderStatus.SUBMITTED,
+            patch={},
+            event=OrderTransitionEvent(
+                order_id=order_id,
+                from_status=OrderStatus.VALIDATED,
                 to_status=OrderStatus.SUBMITTED,
                 event=OrderEvent.SENT.value,
                 reason_code="PERF_FIXTURE_SUBMIT",
@@ -124,9 +182,7 @@ async def insert_open_order(
                 command_id=None,
                 provider_event_id=None,
                 occurred_at=datetime.now(timezone.utc),
-                payload_hash=hashlib.sha256(
-                    f"perf-fixture:{order_id}".encode()
-                ).hexdigest(),
+                payload_hash=hashlib.sha256(f"perf-fixture:v2:{order_id}".encode()).hexdigest(),
             ),
         )
     return order_id, client_order_id, exchange_order_id
@@ -138,16 +194,32 @@ def partial_fill_event(
     fill_id = f"fill-{uuid.uuid4().hex}"
     now = datetime.now(timezone.utc)
     fill = FillEvent(
-        provider_fill_id=fill_id, venue="bitget", order_id=None,
-        exchange_order_id=exchange_order_id, symbol="BTC/USDT", side=OrderSide.BUY,
-        quantity=quantity, price=Decimal("100"), fee=Decimal("0"), fee_currency="USDT",
-        liquidity="TAKER", venue_ts=now,
+        provider_fill_id=fill_id,
+        venue="bitget",
+        order_id=None,
+        exchange_order_id=exchange_order_id,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        quantity=quantity,
+        price=Decimal("100"),
+        fee=Decimal("0"),
+        fee_currency="USDT",
+        liquidity="TAKER",
+        venue_ts=now,
     )
     return ProviderOrderEvent(
-        provider_event_id=fill_id, venue="bitget", venue_symbol="BTCUSDT",
-        exchange_order_id=exchange_order_id, client_order_id=client_order_id,
-        venue_status="PARTIALLY_FILLED", filled_quantity=quantity, average_price=Decimal("100"),
-        last_fill=fill, venue_ts=now, received_at=now, source="WS",
+        provider_event_id=fill_id,
+        venue="bitget",
+        venue_symbol="BTCUSDT",
+        exchange_order_id=exchange_order_id,
+        client_order_id=client_order_id,
+        venue_status="PARTIALLY_FILLED",
+        filled_quantity=quantity,
+        average_price=Decimal("100"),
+        last_fill=fill,
+        venue_ts=now,
+        received_at=now,
+        source="WS",
         raw_hash=hashlib.sha256(fill_id.encode()).hexdigest(),
     )
 
@@ -169,8 +241,12 @@ async def drain_outbox_backlog(pool: asyncpg.Pool, *, max_rounds: int = 20) -> N
     막지 않는다 — 그 행은 SENDING으로 남아(리스 만료돼도 `claim_batch` 재클레임
     대상이 아님) 이후 PENDING 큐에서 완전히 빠진다."""
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=OutboxRepository(), order_repo=PostgresOrderRepository(),
-        resolve_adapter=_drain_resolve_adapter, pre_send_gate=allow_gate, worker_id="perf-drain",
+        pool,
+        outbox_repo=OutboxRepository(),
+        order_repo=PostgresOrderRepository(),
+        resolve_adapter=_drain_resolve_adapter,
+        pre_send_gate=allow_gate,
+        worker_id="perf-drain",
     )
     for _ in range(max_rounds):
         report = await dispatcher.dispatch_once(limit=200)

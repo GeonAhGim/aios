@@ -18,6 +18,7 @@ tx 1회). 왕복 수를 `add_query_logger`로 정확히 세려면 그 반복이 
 not_before 재시도는 사전 drain 뒤에도 측정 중 활성화될 수 있으므로,
 전역 큐의 정확 왕복 수 측정은 공유 워커 DB에서 수행하지 않는다.
 """
+
 from __future__ import annotations
 
 import time
@@ -37,7 +38,7 @@ from tests.support.db import (
 @pytest.fixture
 async def pool():
     template = template_database_url()
-    clone_id = "pf" + uuid4().hex[:8]
+    clone_id = "pf" + uuid4().hex[:2]
     url = await ensure_worker_database(template, clone_id)
     try:
         p = await asyncpg.create_pool(_asyncpg_dsn(url), min_size=1, max_size=1)
