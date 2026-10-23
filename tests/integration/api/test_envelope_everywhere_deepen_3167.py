@@ -41,6 +41,7 @@ import asyncio
 import os
 import time
 import uuid
+from collections.abc import AsyncGenerator
 
 import asyncpg
 import pytest
@@ -62,14 +63,14 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[AsyncClient, None]:
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -81,7 +82,7 @@ def _unique_email() -> str:
     return f"test-{uuid.uuid4().hex}@example.com"
 
 
-async def _register_user(client: AsyncClient) -> dict:
+async def _register_user(client: AsyncClient) -> dict[str, str]:
     email = _unique_email()
     response = await client.post(
         "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
@@ -187,7 +188,7 @@ async def _list_for_user_p95_ms(pool: asyncpg.Pool, user_id: uuid.UUID, *, n: in
     return durations_ms[int(len(durations_ms) * 0.95)]
 
 
-async def test_list_for_user_p95_under_borrowed_single_roundtrip_budget(pool):
+async def test_list_for_user_p95_under_borrowed_single_roundtrip_budget(pool: asyncpg.Pool) -> None:
     user_id = await create_test_user(pool)
 
     p95_ms = await _list_for_user_p95_ms(pool, user_id, n=_PERF_ITERATIONS)
@@ -195,7 +196,9 @@ async def test_list_for_user_p95_under_borrowed_single_roundtrip_budget(pool):
     assert p95_ms < _PERF_BUDGET_MS
 
 
-async def test_list_for_user_budget_gate_fails_on_injected_regression(pool, monkeypatch):
+async def test_list_for_user_budget_gate_fails_on_injected_regression(
+    pool: asyncpg.Pool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """게이트 적색 재현: 위 p95 단언이 실제로 회귀를 잡는지 확인한다 —
     `asyncpg.Connection.fetch`에 60ms 인위 지연을 주입해, 같은 측정
     로직이 실제로 AssertionError를 내는지 본다(tautology가 아님을 증명)."""
