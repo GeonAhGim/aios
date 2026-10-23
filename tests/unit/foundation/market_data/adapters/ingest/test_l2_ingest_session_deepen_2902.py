@@ -327,66 +327,69 @@ async def test_binance_adapter_missing_timestamp_field_raises_not_silently_wrong
 
 
 @pytest.mark.perf
-def test_apply_diff_repeated_updates_meet_throughput_budget():
+def test_apply_diff_repeated_updates_meet_throughput_budget(perf_budget: Any) -> None:
     """실시간 수신 중인 증분을 계속 적용하는 상황을 흉내 — 반복 적용이
     처리량 예산을 지켜야 한다(24시간 연속 수집이 실용적이려면 초당
     수천~수만 건의 증분을 감당해야 한다)."""
     iterations = 10_000
-    budget_sec = 10.0  # 실측(이 머신) 약 1.5s, 느린 CI 편차 감안 넉넉히
-    book = OrderBookState.from_snapshot(
-        L2Snapshot(
-            sequence=0,
-            as_of=datetime.now(timezone.utc),
-            bids={Decimal("10.0"): Decimal("1")},
-            asks={Decimal("10.5"): Decimal("1")},
-        )
-    )
+    budget_ms = 10_000.0  # 10.0 s → ms 단위 통일
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        diff = L2Diff(
-            sequence=i + 1,
-            as_of=datetime.now(timezone.utc),
-            bid_updates=((Decimal("10.0"), Decimal(str(1 + i % 5))),),
-            ask_updates=(),
+    def _run() -> OrderBookState:
+        book = OrderBookState.from_snapshot(
+            L2Snapshot(
+                sequence=0,
+                as_of=datetime.now(timezone.utc),
+                bids={Decimal("10.0"): Decimal("1")},
+                asks={Decimal("10.5"): Decimal("1")},
+            )
         )
-        book = book.apply_diff(diff)
-    elapsed = time.perf_counter() - start
+        for i in range(iterations):
+            diff = L2Diff(
+                sequence=i + 1,
+                as_of=datetime.now(timezone.utc),
+                bid_updates=((Decimal("10.0"), Decimal(str(1 + i % 5))),),
+                ask_updates=(),
+            )
+            book = book.apply_diff(diff)
+        return book
 
-    print(f"[RD-19 l2_orderbook] apply_diff x{iterations} in {elapsed:.3f}s (budget<{budget_sec}s)")
+    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, n=1)
+    # 정확성: perf_budget.sample 는 fn 의 반환값을 sample.result 에 담는다
+    book = sample.result
     assert book.sequence == iterations
-    assert elapsed < budget_sec, (
-        f"apply_diff {iterations}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    print(
+        f"[RD-19 l2_orderbook] apply_diff x{iterations} "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms (budget<{budget_ms:.3f}ms)"
     )
 
 
 @pytest.mark.perf
-def test_large_orderbook_top_n_meets_latency_budget():
+def test_large_orderbook_top_n_meets_latency_budget(perf_budget: Any) -> None:
     """전체 호가 깊이가 큰(2만 레벨) 호가창에서 상위 N호가 추출을 반복
     호출해도 예산 내여야 한다 — 장기 보존용 다운샘플링이 매 tick마다
     이 경로를 타므로 이차 퇴화가 없어야 한다."""
     n_levels = 5_000
     repeats = 30
-    budget_sec = 10.0  # 실측(이 머신) 약 1.3s, 느린 CI 편차 감안 넉넉히
+    budget_ms = 10_000.0  # 10.0 s → ms 단위 통일
     bids = {Decimal(i): Decimal("1") for i in range(n_levels)}
     asks = {Decimal(i + n_levels): Decimal("1") for i in range(n_levels)}
     book = OrderBookState.from_snapshot(
         L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids=bids, asks=asks)
     )
 
-    start = time.perf_counter()
-    for _ in range(repeats):
-        top_bids, top_asks = book.top_n(50)
-    elapsed = time.perf_counter() - start
+    def _run() -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
+        result: tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]] = ([], [])
+        for _ in range(repeats):
+            result = book.top_n(50)
+        return result
 
-    print(
-        f"[RD-19 l2_orderbook] top_n({n_levels}x2 levels) x{repeats} in {elapsed:.3f}s "
-        f"(budget<{budget_sec}s)"
-    )
+    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, n=1)
+    top_bids, top_asks = sample.result
     assert len(top_bids) == 50
     assert len(top_asks) == 50
-    assert elapsed < budget_sec, (
-        f"top_n {repeats}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
+    print(
+        f"[RD-19 l2_orderbook] top_n({n_levels}x2 levels) x{repeats} "
+        f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms (budget<{budget_ms:.3f}ms)"
     )
 
 
