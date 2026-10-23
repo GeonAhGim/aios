@@ -23,6 +23,7 @@ from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.support.db import create_pool_with_retry
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
 async def _allow_gate(context: object) -> GateDecision:
@@ -42,10 +43,12 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool():
+async def pool(isolated_raw_orders):
     p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=2)
-    yield p
-    await p.close()
+    try:
+        yield p
+    finally:
+        await p.close()
 
 
 def _fsm_config():
