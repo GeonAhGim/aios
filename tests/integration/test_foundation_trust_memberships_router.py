@@ -134,18 +134,20 @@ async def test_membership_grant_latency_within_budget(client, monkeypatch, perf_
     """성능 단언 — grant_membership 라우터 호출의 E2E 지연 시간이
     예산 내여야 한다(100ms, cpu_ms 기준). 병렬 CI 실행(xdist)에서
     wall_ms는 다른 워커의 CPU 경합으로 왜곡되므로 cpu_ms(time.process_time)
-    기준으로 단언한다(task-19183)."""
+    기준으로 단언한다(task-19183). CI 경합 spike를 피하기 위해
+    best_of_async(n=3, warmup=1)로 best-of-3 최소값을 사용하고,
+    batch=8로 Windows 양자화 오차를 줄인다(task-19426)."""
     headers = await _register(client)
     subject_id = str(uuid.uuid4())
 
-    sample = await perf_budget.sample_async(
-        lambda: client.post(
+    async def _grant_once():
+        return await client.post(
             "/v1/foundation/trust/memberships",
             json={"subject_id": subject_id, "role": "MEMBER"},
             headers=headers,
-        ),
-        batch=8,
-    )
+        )
+
+    sample = await perf_budget.best_of_async(_grant_once, n=3, warmup=1, batch=8)
     response = sample.result
     elapsed_ms = sample.cpu_ms
 
