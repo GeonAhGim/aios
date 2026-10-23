@@ -390,3 +390,8 @@ def pytest_configure(config: pytest.Config) -> None:
     from tests.support.orders_residue import OrdersResidueSentinel
 
     config.pluginmanager.register(OrdersResidueSentinel(_TEST_DATABASE_URL), "orders-residue")
+    from tests.support.cb_residue import CircuitBreakerResidueSentinel
+
+    config.pluginmanager.register(
+        CircuitBreakerResidueSentinel(_TEST_DATABASE_URL), "circuit-breaker-residue"
+    )

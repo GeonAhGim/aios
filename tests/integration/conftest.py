@@ -8,12 +8,11 @@ Each call creates a separate user with a unique email to maintain test isolation
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
-import pytest
 
 from tests.support.entities_seed import bootstrap_default_hierarchy
 
@@ -105,45 +104,6 @@ class NoopEventBus:
         return None
 
 
-# autouse fixture — task-19018: catch any test that leaves circuit_breaker_level
-# in a non-normal state (halted / emergency / warning / restricted) without
-# restoring it.  Restoration is the test's responsibility; this fixture only
-# detects leakage.  Skips silently when risk_gate table does not exist or
-# when the test uses mock transport (no pool fixture available).
-@pytest.fixture(autouse=True)
-async def _ensure_circuit_breaker_normal(
-    request: pytest.FixtureRequest,
-) -> AsyncIterator[None]:
-    # Some integration sub-tests (e.g. bitget/nh mock-transport tests) do not
-    # need a database; skip silently when pool is unavailable.
-    try:
-        pool = request.getfixturevalue("pool")
-    except pytest.FixtureLookupError:
-        yield
-        return
-    async with pool.acquire() as conn:
-        has_risk_gate = await conn.fetchval(
-            """
-            SELECT to_regclass('risk_gate') IS NOT NULL
-            """
-        )
-    if not has_risk_gate:
-        yield
-        return
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
-            "WHERE circuit_breaker_level NOT IN ('normal',)"
-        )
-    yield
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
-            "WHERE circuit_breaker_level NOT IN ('normal',)"
-        )
-        final = await conn.fetchval("SELECT circuit_breaker_level FROM risk_gate LIMIT 1")
-    if final != "normal":
-        raise AssertionError(
-            f"circuit_breaker_level not restored to 'normal' after test "
-            f"(final={final!r}). The test that raised it must restore it."
-        )
+# circuit breaker residue is checked by the hook plugin in tests/support/cb_residue.py
+# (registered in tests/conftest.py). Requesting the async `pool` fixture from an async
+# autouse fixture raises "Runner.run() cannot be called from a running event loop".
