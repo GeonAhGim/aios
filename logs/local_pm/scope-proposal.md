@@ -191,3 +191,33 @@ baseline: 18개 → 현재: 37개 (증가 19개)
 - task-16648의 실제 목적(회귀 정정)은 이미 완료되었으므로, 새로운 분할 작업은 **예방적 복잡도 개선**으로 재정의 필요.
 - 원본 hold 해제·재큐·코드 수정은 금지 (task-16651 spec).
 - `loc_over_500` 게이트는 관찰용 aids — baseline을 올리지 말고 파일 분할로 해소해야 함.
+
+---
+
+# 파일 범위 분할 제안: task-16649
+
+## 원본 작업 분석
+
+- **task-16649**: QA(묶음 1건) — CI guards 정정 (`P5.contract_field_removed`)
+- **원본 files**: `["src/"]` — 전체 소스 디렉토리 (너무 광범위)
+- **문제**: guards 단계가 `WhitelistEntryResponse.id/exchange/destination_address` 필드 삭제를 veto
+- **원인 커밋**: `e4232f97f` (janitor가 부모와 중복되는 필드 재선언을 제거)
+- **현재 상태**: `ff856c1cb`에서 세 필드 재선언 복구 완료 (`src/api/schemas/account.py` 44-55행)
+
+## 실제 대상 파일
+
+| 파일 | LOC | 설명 |
+|------|-----|------|
+| `src/api/schemas/account.py` | 73 | `WhitelistEntryResponse` 계약 필드 재선언 |
+| `tests/unit/api/schemas/test_account.py` | - | DTO 필드 단위 테스트 (읽기 전용 확인) |
+| `src/api/routers/users.py` | - | DTO 사용처 (읽기 전용 확인) |
+
+## 분할안
+
+단일 리프로 충분. `files`를 `["src/"]` → `["src/api/schemas/account.py", "tests/unit/api/schemas/test_account.py"]`로 좁힌다.
+
+## 비고
+
+- 코드 수정은 이미 완료되어 이 task에서 추가 변경 없음. 본 문서만 산출물.
+- 기준선(baseline) 수치는 건드리지 않았다.
+- guards 광범위 범위(`e4232f97~1..HEAD`) 재실행은 120s를 넘겨 이 task에서는 생략.
