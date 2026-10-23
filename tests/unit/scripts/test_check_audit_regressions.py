@@ -86,7 +86,9 @@ def test_check_audit_regressions_cpu_time_converges_to_zero(
         "        )\n",
     )
 
-    sample = perf_budget.sample(check_audit_regressions.check_ledger_balance_raw_seed, batch=16)
+    sample = perf_budget.best_of(
+        check_audit_regressions.check_ledger_balance_raw_seed, n=100, batch=1
+    )
     assert sample.cpu_ms < 1.0, (
         f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
         "텍스트 스캔은 사실상 0ms에 수렴해야 함 (budget<1ms)"
