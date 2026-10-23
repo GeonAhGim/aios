@@ -9,6 +9,7 @@ Coverage targets:
 """
 
 import pytest
+from pydantic import ValidationError
 
 from src.core.notifications.channel_policy import (
     _DEFAULT_POLICY,
@@ -22,6 +23,14 @@ from src.core.notifications.channel_policy import (
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------
+
+
+# NOTE: The autouse fixture below clears _POLICY_TABLE so that tests in this
+# file never accidentally depend on the real table contents.  The sibling file
+# test_channel_policy_table.py exercises the real table with pinned assertions.
+# See review finding #1 (medium) — test_known_event_returns_table_entry and
+# test_all_table_events were asserting over an empty dict and never caught
+# regressions when table entries were removed.
 
 
 @pytest.fixture(autouse=True)
@@ -83,7 +92,7 @@ class TestChannelRuleModel:
 
     def test_missing_user_overridable_raises_validation(self):
         """user_overridable is required — raises ValidationError on creation."""
-        with pytest.raises(Exception):  # noqa: B017 pydantic ValidationError
+        with pytest.raises(ValidationError):
             ChannelRule(channel=NotificationChannel.EMAIL)
 
 
@@ -235,3 +244,13 @@ class TestFailureInjection:
 
         with pytest.raises(TypeError):
             get_channel_policy("any_event")
+
+    def test_unknown_event_returns_copy_not_singleton(self):
+        """get_channel_policy must return a deep copy of _DEFAULT_POLICY so
+        callers cannot mutate the module-level singleton (review finding #2, low)."""
+        result = get_channel_policy("unknown.event")
+        assert result is not _DEFAULT_POLICY
+        # Mutating the result's rules must not affect _DEFAULT_POLICY
+        result.rules.clear()
+        assert len(_DEFAULT_POLICY.rules) == 1
+        assert _DEFAULT_POLICY.rules[0].channel == NotificationChannel.EMAIL

@@ -70,8 +70,10 @@ def test_table_rules_have_unique_channels(event_type):
 def test_near_miss_event_names_do_not_inherit_forced_policy(event_type):
     """Lookup is exact-match: near-miss names fall back to the safe default."""
     result = get_channel_policy(event_type)
-    assert result is _DEFAULT_POLICY
+    # We now return a copy of _DEFAULT_POLICY (defensive copy), so check
+    # structural equivalence rather than identity.
     assert result.forced_channels == []
+    assert result.rules == _DEFAULT_POLICY.rules
 
 
 def test_default_policy_is_email_only_and_overridable():

@@ -5,6 +5,7 @@ Spec: functional design doc (see docs/design/), section FD-17.2.
 Low change frequency — start as code constants (Draft); migrate to a DB
 table if operations requires frequent runtime changes (per FD-17.2 original).
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -91,5 +92,12 @@ _DEFAULT_POLICY = ChannelPolicy(
 
 def get_channel_policy(event_type: str) -> ChannelPolicy:
     """Fail-safe default for unlisted event types (FD-17.2): email only,
-    user-overridable."""
-    return _POLICY_TABLE.get(event_type, _DEFAULT_POLICY)
+    user-overridable.
+
+    Returns a **deep copy** of _DEFAULT_POLICY so callers cannot accidentally
+    mutate the module-level singleton (review finding #2, low).
+    """
+    entry = _POLICY_TABLE.get(event_type)
+    if entry is not None:
+        return entry  # table entries are never mutated by callers
+    return _DEFAULT_POLICY.model_copy(deep=True)
