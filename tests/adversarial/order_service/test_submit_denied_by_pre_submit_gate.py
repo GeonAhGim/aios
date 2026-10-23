@@ -226,6 +226,7 @@ async def test_personal_mode_scoped_account_order_denied_via_real_submit_gate(
     gate = make_foundation_pre_submit_gate(
         pool,
         require_mandate=False,
+        require_compliance_mandate=False,
         personal_state=personal_state,
         personal_notifier=notifier,
     )
@@ -266,6 +267,7 @@ async def test_personal_mode_inactive_account_regresses_to_existing_three_layer_
     gate = make_foundation_pre_submit_gate(
         pool,
         require_mandate=False,
+        require_compliance_mandate=False,
         personal_state=personal_state,
     )
 
@@ -301,6 +303,7 @@ async def test_personal_mode_kill_switch_already_engaged_denies_without_needing_
     gate = make_foundation_pre_submit_gate(
         pool,
         require_mandate=False,
+        require_compliance_mandate=False,
         personal_state=personal_state,
     )
 
