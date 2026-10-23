@@ -173,9 +173,12 @@ async def test_internal_scope_source_denies_get_item(client, seeded):
     app.dependency_overrides[get_source_contract_repository] = lambda: (
         _FakeSourceContractRepository(_source_contract(RedistributionScope.INTERNAL))
     )
-    response = await client.get(f"{BASE}/items/{seeded['item_id']}", headers=seeded["a"])
-    assert response.status_code == 403, response.text
-    assert response.json()["error_code"] == "AUTHZ_FORBIDDEN"
+    try:
+        response = await client.get(f"{BASE}/items/{seeded['item_id']}", headers=seeded["a"])
+        assert response.status_code == 403, response.text
+        assert response.json()["error_code"] == "AUTHZ_FORBIDDEN"
+    finally:
+        app.dependency_overrides.pop(get_source_contract_repository, None)
 
 
 async def test_unauthenticated_request_is_401_envelope(client):
