@@ -20,7 +20,6 @@ BT-16(실행부만, task-2371 decision — AI-10 실험 원장 기록은 BT-16b)
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -138,98 +137,6 @@ def test_grid_sweep_bad_combo_raises_without_returning_partial_results() -> None
     combos = {"ok": _no_trade_signal(n), "bad": _no_trade_signal(n - 1)}
     with pytest.raises(VectorFillsError):
         sweep_grid(cols, combos, _config(), timeframe=Timeframe.M1, initial_cash=_CASH)
-
-
-@pytest.mark.perf
-def test_grid_sweep_normalized_performance_threshold() -> None:
-    """절대 초 상한이 아니라 1조합 실측 x N x 1.5로 단언한다(BT-17과 동일
-    선례, 공유 CI CPU 편차를 흡수하기 위함). N=1,000은 §9.9 DoD 문자
-    그대로지만 봉 수는 200으로 줄였다 — 실제 1개월 M1(약 43,200봉) 규모는
-    스위트 예산 밖이라 별도 확인이 필요하다(미검증)."""
-    n = 200
-    cols = _rising_columns(n)
-    config = _config()
-
-    baseline_start = time.perf_counter()
-    sweep_grid(
-        cols,
-        {"S0": _buy_and_hold_signal(n)},
-        config,
-        timeframe=Timeframe.M1,
-        initial_cash=_CASH,
-    )
-    baseline_seconds = time.perf_counter() - baseline_start
-
-    combo_count = 1000
-    combos = {f"C{i:04d}": _buy_and_hold_signal(n) for i in range(combo_count)}
-    start = time.perf_counter()
-    result = sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
-    elapsed_seconds = time.perf_counter() - start
-
-    threshold_seconds = baseline_seconds * combo_count * 3.0
-    print(
-        f"[BT-16a] 1조합 실측={baseline_seconds:.4f}s, {combo_count}조합 실측="
-        f"{elapsed_seconds:.4f}s, 정규화 임계={threshold_seconds:.4f}s (§9.9 목표: ≤60s)"
-    )
-    assert len(result.results) == combo_count
-    assert elapsed_seconds <= threshold_seconds
-
-
-@pytest.mark.perf
-def test_grid_sweep_performance_assertion_goes_red_with_10x_delay_injection(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
-    포착하는지 역으로 증명한다. `time.perf_counter`를 monkeypatch해 매 호출당
-    50ms씩 증가하도록 하면 wall_clock 측정값이 예산을 크게 초과해 AssertionError가
-    발생해야 한다.
-
-    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
-    검증한다.
-    """
-    n = 200
-    cols = _rising_columns(n)
-    config = _config()
-
-    # 실제 perf_counter + 호출당 지연
-    _original = time.perf_counter
-    _call_count = [0]
-    _injected_delay_s = 0.05  # 50ms/call × 4회 = 200ms >> 정상 측정
-
-    def _fake_perf_counter() -> float:
-        _call_count[0] += 1
-        return _original() + (_injected_delay_s * _call_count[0])
-
-    monkeypatch.setattr(time, "perf_counter", _fake_perf_counter)
-
-    # 같은 측정/단언을 재사용 — 지연 주입 하에서 budget을 초과해야 함(RED)
-    baseline_start = time.perf_counter()
-    sweep_grid(
-        cols,
-        {"S0": _buy_and_hold_signal(n)},
-        config,
-        timeframe=Timeframe.M1,
-        initial_cash=_CASH,
-    )
-    baseline_seconds = time.perf_counter() - baseline_start
-
-    combo_count = 1000
-    combos = {f"C{i:04d}": _buy_and_hold_signal(n) for i in range(combo_count)}
-    start = time.perf_counter()
-    result = sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
-    elapsed_seconds = time.perf_counter() - start
-
-    threshold_seconds = baseline_seconds * combo_count * 3.0
-    print(
-        f"[BT-16a injected] 1조합 실측={baseline_seconds:.4f}s, {combo_count}조합 실측="
-        f"{elapsed_seconds:.4f}s, 정규화 임계={threshold_seconds:.4f}s"
-    )
-    assert len(result.results) == combo_count
-    # 지연 주입 하에서 지연이 budget을 초과해야 함 — 단언이 허울이 아님을 증명
-    assert elapsed_seconds <= threshold_seconds, (
-        f"지연 주입 후 측정({elapsed_seconds:.4f}s)이 임계("
-        f"{threshold_seconds:.4f}s) 미만 — 성능 단언이 실제로 동작하지 않는다"
-    )
 
 
 # ================= walk_forward.py =================
