@@ -55,6 +55,7 @@ from src.services.order_service.submit import submit_order
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.foundation.execution_ownership.conftest import create_execution
+from tests.support.order_cleanup import delete_orders_by_client_order_id
 
 
 def _make_adapter(
@@ -191,14 +192,9 @@ async def test_unfilled_limit_order_does_not_write_position(pool: asyncpg.Pool) 
         position = await conn.fetchval(
             "SELECT 1 FROM positions WHERE execution_id = $1", execution_id
         )
-        # order_service/submit.py's legacy write path never appends an
-        # `order_events` row (that trail belongs to the separate OMS state
-        # machine) -- left in place, this ACKNOWLEDGED row is eventless with a
-        # non-CREATED status forever, which `tests/support/orders_residue.py`
-        # flags as residue at module teardown (no cutover exception, by that
-        # sentinel's own design). Clean up this test's own row, same
-        # convention as test_restart_recovery.py.
-        await conn.execute("DELETE FROM orders WHERE client_order_id = $1", order.client_order_id)
+        # task-16657 -- the synchronous ACK now carries its `order_events` row,
+        # so the row replays consistently; the helper only removes it if eventless.
+        await delete_orders_by_client_order_id(conn, order.client_order_id)
     assert position is None
 
 

@@ -150,10 +150,34 @@ async def update_from_exchange(
     return _row_to_order(row)
 
 
+_SYNC_RESPONSE_EVENTS: dict[OrderStatus, OmsOrderEvent] = {
+    OrderStatus.FILLED: OmsOrderEvent.FILL,
+    OrderStatus.PARTIALLY_FILLED: OmsOrderEvent.FILL,
+    OrderStatus.REJECTED: OmsOrderEvent.VENUE_REJECTED,
+    OrderStatus.SUBMITTED: OmsOrderEvent.ACK,
+    OrderStatus.ACKNOWLEDGED: OmsOrderEvent.ACK,
+    OrderStatus.CANCELLED: OmsOrderEvent.VENUE_CANCELLED,
+    OrderStatus.EXPIRED: OmsOrderEvent.VENUE_EXPIRED,
+    OrderStatus.UNKNOWN: OmsOrderEvent.RESPONSE_LOST,
+}
+
+
+def _sync_event_kind(status: OrderStatus) -> OmsOrderEvent:
+    """Event kind recorded for a synchronous place_order response; fail-closed
+    on a status with no mapped event so no eventless transition is persisted."""
+    try:
+        return _SYNC_RESPONSE_EVENTS[status]
+    except KeyError:
+        raise ValueError(
+            f"no order event mapped for synchronous response status {status.value}"
+        ) from None
+
+
 async def update_from_exchange_with_fill_event(
     conn: asyncpg.Connection, order: Order, *, expected_status: OrderStatus, actor_subject_id: UUID
 ) -> Order:
-    """task-16630 — `update_from_exchange`의 동기 체결(FILLED) 변형. 거래소가
+    """task-16630/16657 — `update_from_exchange`의 동기 응답 변형(FILLED뿐 아니라
+    REJECTED/SUBMITTED 등 모든 동기 상태에 order_events를 남긴다). 거래소가
     `place_order` 응답에서 즉시 FILLED를 돌려주는 legacy 경로(`submit.py`
     FD-4.2-c)는 `CREATED`에서 바로 `FILLED`로 넘어가는데, 이 쌍은
     `state_machine.ALLOWED[CREATED]`에 없다(그 모듈 docstring 참조 — 이
@@ -182,8 +206,8 @@ async def update_from_exchange_with_fill_event(
         order_id=order.order_id,
         from_status=expected_status,
         to_status=order.status,
-        event=OmsOrderEvent.FILL.value,
-        reason_code="SYNC_FILL",
+        event=_sync_event_kind(order.status).value,
+        reason_code="SYNC_FILL" if order.filled_quantity > 0 else "SYNC_RESPONSE",
         actor_subject_id=actor_subject_id,
         trace_id=uuid4(),
         command_id=None,
@@ -246,6 +270,41 @@ async def update_from_exchange_with_fill_event(
             },
         )
     return _row_to_order(row)
+
+
+async def fail_claim_with_event(
+    conn: asyncpg.Connection, order_id: UUID, *, reason_code: str, actor_subject_id: UUID
+) -> None:
+    """task-16657 — CREATED->FAILED for a claim row that was never sent (e.g. a
+    stale risk fence), with its `order_events` row in the same transaction so
+    the row never becomes eventless residue. Same write order as
+    `update_from_exchange_with_fill_event` (event_written flag, event, UPDATE)."""
+    now = datetime.now(timezone.utc)
+    event = OrderTransitionEvent(
+        order_id=order_id,
+        from_status=OrderStatus.CREATED,
+        to_status=OrderStatus.FAILED,
+        event=OmsOrderEvent.VALIDATION_FAILED.value,
+        reason_code=reason_code,
+        actor_subject_id=actor_subject_id,
+        trace_id=uuid4(),
+        command_id=None,
+        provider_event_id=None,
+        occurred_at=now,
+        payload_hash=hashlib.sha256(f"{order_id}:{reason_code}".encode()).hexdigest(),
+    )
+    async with conn.transaction():
+        await conn.execute("SELECT set_config('oms.event_written', '1', true)")
+        await _order_events.append(conn, event)
+        await conditional_update(
+            conn,
+            table="orders",
+            id_column="order_id",
+            id_value=order_id,
+            expected_state_column="status",
+            expected_state_value=OrderStatus.CREATED.value,
+            set_values={"status": OrderStatus.FAILED.value, "updated_at": now},
+        )
 
 
 async def update_after_modify(

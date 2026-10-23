@@ -44,14 +44,6 @@ async def pool():
         yield isolated
 
 
-async def _delete_order_and_events(pool: asyncpg.Pool, order_id: uuid.UUID) -> None:
-    """Remove the stale-status scenario inside its disposable test database."""
-    async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM order_command_outbox WHERE order_id = $1", order_id)
-        await conn.execute("DELETE FROM order_events WHERE order_id = $1", order_id)
-        await conn.execute("DELETE FROM orders WHERE order_id = $1", order_id)
-
-
 async def _create_running_execution(pool: asyncpg.Pool, user_id: uuid.UUID) -> int:
     strategy_id = f"order-svc-test-{uuid.uuid4().hex[:8]}"
     async with pool.acquire() as conn:
@@ -265,31 +257,27 @@ async def test_update_from_exchange_raises_on_status_mismatch(pool):
     )
     assert submitted.status == OrderStatus.SUBMITTED
 
-    try:
-        # 다른 경로가 먼저 CANCELLED로 바꿨다고 가정 — 이 시점에 apply_fill이
-        # (여전히 SUBMITTED인 줄 알고) FILLED로 덮어쓰려 하면 충돌해야 한다.
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE orders SET status = 'CANCELLED' WHERE order_id = $1", submitted.order_id
+    # The disposable pool is dropped at teardown, so the raw CANCELLED write
+    # (an intentional event-less reproduction) needs no cleanup.
+    # 다른 경로가 먼저 CANCELLED로 바꿨다고 가정 — 이 시점에 apply_fill이
+    # (여전히 SUBMITTED인 줄 알고) FILLED로 덮어쓰려 하면 충돌해야 한다.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE orders SET status = 'CANCELLED' WHERE order_id = $1", submitted.order_id
+        )
+
+    stale_update = submitted.model_copy(update={"status": OrderStatus.FILLED})
+    async with pool.acquire() as conn:
+        with pytest.raises(ConcurrencyConflictError):
+            await order_repository.update_from_exchange(
+                conn, stale_update, expected_status=OrderStatus.SUBMITTED
             )
 
-        stale_update = submitted.model_copy(update={"status": OrderStatus.FILLED})
-        async with pool.acquire() as conn:
-            with pytest.raises(ConcurrencyConflictError):
-                await order_repository.update_from_exchange(
-                    conn, stale_update, expected_status=OrderStatus.SUBMITTED
-                )
-
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT status FROM orders WHERE order_id = $1", submitted.order_id
-            )
-        assert row["status"] == "CANCELLED"  # 충돌한 쓰기는 반영되지 않았어야 함
-    finally:
-        # task-11356 — 위 raw UPDATE가 order_events 짝 없이 CANCELLED를 썼다
-        # (의도된 재현); 치우지 않으면 이 행이 replay_verify 불일치로 영구히
-        # 남는다(`_delete_order_and_events` 독스트링 참조).
-        await _delete_order_and_events(pool, submitted.order_id)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT status FROM orders WHERE order_id = $1", submitted.order_id
+        )
+    assert row["status"] == "CANCELLED"  # 충돌한 쓰기는 반영되지 않았어야 함
 
 
 async def test_cancel_order_acknowledged_enqueues_cancel_command(pool):

@@ -191,6 +191,8 @@ async def submit_order(
         _record_submit_outcome("failed" if status is OrderStatus.FAILED else "unknown")
         raise
 
+    # task-16657 — every synchronous response status (not only FILLED) is
+    # persisted with its order_events row in the same transaction.
     # FD-4.2-c DB 영속화 — claimed 행을 실제 거래소 응답으로 갱신한다.
     # 이벤트 발행보다 먼저 커밋(05번 §5.6).
     #
@@ -203,14 +205,9 @@ async def submit_order(
     # 기록을 같은 트랜잭션에서 원자적으로 커밋한다 — 그 외 상태(REJECTED 등)는
     # 기존 경로를 그대로 쓴다(이 task 스콥 밖).
     async with pool.acquire() as conn:
-        if submitted.status == OrderStatus.FILLED:
-            persisted = await repository.update_from_exchange_with_fill_event(
-                conn, submitted, expected_status=claimed.status, actor_subject_id=user_id
-            )
-        else:
-            persisted = await repository.update_from_exchange(
-                conn, submitted, expected_status=claimed.status
-            )
+        persisted = await repository.update_from_exchange_with_fill_event(
+            conn, submitted, expected_status=claimed.status, actor_subject_id=user_id
+        )
 
     # PM 배정(agent-platform-12, 2026-09-02) — 거래소가 place_order 응답에서
     # 즉시 FILLED를 돌려주는 동기체결 케이스. apply_fill()을 거치지 않고

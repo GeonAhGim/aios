@@ -47,12 +47,10 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.5 `order_service/fenced_submit.p
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime, timezone
 from uuid import UUID
 
 import asyncpg
 
-from src.core.db.conditional_write import conditional_update
 from src.core.logging.audit_log import record_audit_log
 from src.core.observability.metric_names import SAFETY_POST_FENCE_SIDE_EFFECT_COUNT_TOTAL
 from src.core.observability.metrics import MetricsPort, NullMetrics
@@ -141,17 +139,11 @@ async def submit_with_fence(
     stale = stale_pairs(f0, f1)
     if stale:
         async with pool.acquire() as conn, conn.transaction():
-            await conditional_update(
+            await repository.fail_claim_with_event(
                 conn,
-                table="orders",
-                id_column="order_id",
-                id_value=claimed.order_id,
-                expected_state_column="status",
-                expected_state_value=OrderStatus.CREATED.value,
-                set_values={
-                    "status": OrderStatus.FAILED.value,
-                    "updated_at": datetime.now(timezone.utc),
-                },
+                claimed.order_id,
+                reason_code="RISK_FENCE_STALE",
+                actor_subject_id=user_id,
             )
             await record_audit_log(
                 conn,
@@ -187,8 +179,8 @@ async def submit_with_fence(
     post_fence = stale_pairs(f1, f2)
 
     async with pool.acquire() as conn:
-        persisted = await repository.update_from_exchange(
-            conn, submitted, expected_status=claimed.status
+        persisted = await repository.update_from_exchange_with_fill_event(
+            conn, submitted, expected_status=claimed.status, actor_subject_id=user_id
         )
     if post_fence:
         persisted = await _contain_post_fence(
@@ -226,10 +218,11 @@ async def _contain_post_fence(
             cancel_error = repr(exc)
     async with pool.acquire() as conn, conn.transaction():
         if cancelled:
-            persisted = await repository.update_from_exchange(
+            persisted = await repository.update_from_exchange_with_fill_event(
                 conn,
                 persisted.model_copy(update={"status": OrderStatus.CANCELLED}),
                 expected_status=persisted.status,
+                actor_subject_id=user_id,
             )
         await record_audit_log(
             conn,
