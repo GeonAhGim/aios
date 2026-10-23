@@ -35,7 +35,7 @@ _NOW = datetime.now(timezone.utc)
 
 
 @pytest.fixture
-async def pool():
+async def pool() -> asyncpg.Pool:
     dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
     p = await asyncpg.create_pool(dsn, min_size=1, max_size=8)
     yield p
@@ -50,7 +50,7 @@ def repo(pool: asyncpg.Pool) -> PostgresAgentTokenRepository:
 # --- 성공 경로: 발급 -> authorize -> revoke -> authorize 재시도는 거부 ---
 
 
-async def test_issue_authorize_revoke_round_trip(repo: PostgresAgentTokenRepository):
+async def test_issue_authorize_revoke_round_trip(repo: PostgresAgentTokenRepository) -> None:
     tenant_id = uuid4()
     issued = await issue_token(
         repo,
@@ -122,7 +122,7 @@ async def test_issue_token_rejects_empty_scope_request(repo: PostgresAgentTokenR
 # --- negative #2: 알 수 없는(존재하지 않는) secret은 401 동형으로 거부 ---
 
 
-async def test_authorize_rejects_unknown_secret(repo: PostgresAgentTokenRepository):
+async def test_authorize_rejects_unknown_secret(repo: PostgresAgentTokenRepository) -> None:
     with pytest.raises(TokenRevokedError):
         await authorize(repo, token_secret="not-a-real-secret", scope=Scope.READ)
 
@@ -130,7 +130,7 @@ async def test_authorize_rejects_unknown_secret(repo: PostgresAgentTokenReposito
 # --- negative #3: 만료된 토큰은 거부 ---
 
 
-async def test_authorize_rejects_expired_token(repo: PostgresAgentTokenRepository):
+async def test_authorize_rejects_expired_token(repo: PostgresAgentTokenRepository) -> None:
     tenant_id = uuid4()
     issued = await issue_token(
         repo,
@@ -149,7 +149,7 @@ async def test_authorize_rejects_expired_token(repo: PostgresAgentTokenRepositor
 # --- negative #4: 부여되지 않은 스코프 요청은 거부(스코프 상승 없이 인가) ---
 
 
-async def test_authorize_rejects_ungranted_scope(repo: PostgresAgentTokenRepository):
+async def test_authorize_rejects_ungranted_scope(repo: PostgresAgentTokenRepository) -> None:
     tenant_id = uuid4()
     issued = await issue_token(
         repo,
@@ -170,7 +170,7 @@ async def test_authorize_rejects_ungranted_scope(repo: PostgresAgentTokenReposit
 
 async def test_direct_insert_bypassing_application_rejects_non_paper_only(
     pool: asyncpg.Pool,
-):
+) -> None:
     """실패 주입: 애플리케이션 계층(`issue_token`, 항상 paper_only=True로
     생성)을 완전히 우회해 raw SQL로 `paper_only=FALSE`를 직접 INSERT하면,
     마이그레이션의 CHECK(paper_only IS TRUE)(0895391e36f5)가 그 자체로
@@ -198,7 +198,7 @@ async def test_direct_insert_bypassing_application_rejects_non_paper_only(
 
 async def test_paper_only_check_gate_actually_fails_without_the_constraint(
     pool: asyncpg.Pool,
-):
+) -> None:
     """위 실패 주입 테스트가 tautology가 아님을 증명한다 -- 같은 컬럼에
     CHECK 제약이 없는 임시 테이블(스키마는 동일하되 `paper_only` CHECK만
     뺀 것)에서는 같은 INSERT가 성공한다는 것을 보여, `agent_token`의 CHECK가
