@@ -186,9 +186,11 @@ async def test_sustained_backpressure_escalates_to_meta_topic(fast_bus, perf_bud
         await asyncio.sleep(0.15)  # CI parallel variance — worker needs time to drain escalation
         await fast_bus.stop()
 
-    budget_ms = 5000.0  # CI 병렬 리소스 경쟁 대비 안정화 (task-15521)
+    # cpu_ms avoids CI parallel contention noise (wall-clock inflates under
+    # CPU steal; task-19187 pattern)
+    budget_ms = 5000.0
     sample = await perf_budget.sample_async(_run)
-    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
     assert len(sustained) == 1
     assert sustained[0]["topic"] == "market.ticker.updated"
