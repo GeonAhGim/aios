@@ -77,6 +77,32 @@ async def _cleanup_watchdog_state(pool):
             "WHERE actor_subject_id = $1 AND state = 'ACTIVE'",
             WATCHDOG_SYSTEM_ACTOR_ID,
         )
+        # liquidation_executor writes an orders row per slice with no order_events;
+        # OrdersResidueSentinel flags those at the next boundary, so delete them
+        # child-first (slice refs -> fills -> orders) for this suite's requests only.
+        await conn.execute(
+            "UPDATE liquidation_slice SET order_id = NULL WHERE order_id IN "
+            "(SELECT o.order_id FROM orders o WHERE o.liquidation_request_id IN "
+            "(SELECT lr.id FROM liquidation_request lr JOIN safety_control sc "
+            "ON sc.id = lr.safety_control_id WHERE sc.actor_subject_id = $1) "
+            "AND NOT EXISTS (SELECT 1 FROM order_events e WHERE e.order_id = o.order_id))",
+            WATCHDOG_SYSTEM_ACTOR_ID,
+        )
+        await conn.execute(
+            "DELETE FROM fills WHERE order_id IN "
+            "(SELECT o.order_id FROM orders o WHERE o.liquidation_request_id IN "
+            "(SELECT lr.id FROM liquidation_request lr JOIN safety_control sc "
+            "ON sc.id = lr.safety_control_id WHERE sc.actor_subject_id = $1) "
+            "AND NOT EXISTS (SELECT 1 FROM order_events e WHERE e.order_id = o.order_id))",
+            WATCHDOG_SYSTEM_ACTOR_ID,
+        )
+        await conn.execute(
+            "DELETE FROM orders o WHERE o.liquidation_request_id IN "
+            "(SELECT lr.id FROM liquidation_request lr JOIN safety_control sc "
+            "ON sc.id = lr.safety_control_id WHERE sc.actor_subject_id = $1) "
+            "AND NOT EXISTS (SELECT 1 FROM order_events e WHERE e.order_id = o.order_id)",
+            WATCHDOG_SYSTEM_ACTOR_ID,
+        )
 
 
 async def _insert_open_position(
