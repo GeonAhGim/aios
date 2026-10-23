@@ -221,3 +221,97 @@ baseline: 18개 → 현재: 37개 (증가 19개)
 - 코드 수정은 이미 완료되어 이 task에서 추가 변경 없음. 본 문서만 산출물.
 - 기준선(baseline) 수치는 건드리지 않았다.
 - guards 광범위 범위(`e4232f97~1..HEAD`) 재실행은 120s를 넘겨 이 task에서는 생략.
+
+---
+
+# task-18793: task-18421 파일 범위 triage_note
+
+## 판정
+원본은 assigned + hold=true(local_file_scope) 상태다. 이번 작업은 제안만 제출한다.
+앱 저장소는 C:/aios/wt/codex-escalation-1, origin=https://github.com/GeonAhGim/aios.git 이다.
+검사 HEAD: 331fa80f8ffa9cfd99da7ebb866a99ba6740548b. 원본의 tests/e2e/와 frontend/e2e/는 앱 저장소 경로이며 fleet 저장소 경로가 아니다.
+
+부모 task-12313은 코드 변경 없이 fleet task-15102로 이관되어 done 처리됐다. 기록된 원인은 golden DB URL 이중 접미사다.
+실제 C:/aios/pm/local_ci.py:run_golden_stage는 현재 DATABASE_URL/TEST_DATABASE_URL에 원본 url을 넣으며 PYTEST_XDIST_WORKER=golden을 유지한다.
+C:/aios/pm/tests/test_ci_golden_stage.py에는 test_run_golden_stage_env_uses_unsuffixed_url_not_golden_url 회귀 검사가 있다.
+task-15102 기록: commit c76a237e4862, 16 passed, 배포 완료. 이는 과거 증빙이며 현재 golden 성공으로 간주하지 않는다.
+
+## 우선 권고: 기존 수정 QA를 먼저 분리
+fleet 저장소 C:/aios/pm의 local_ci.py, tests/test_ci_golden_stage.py를 대상으로 기존 task-15102 증빙과 현재 golden 결과를 대조하는 QA를 제안한다.
+라이브 fleet 편집은 금지하며 수정 필요 시 별도 ops worktree 리프로 넘긴다. 원본 앱 디렉터리 전체를 수정 리프로 재발행할 근거는 없다.
+최종 검증은 같은 SHA의 backend_e2e 결과 및 orders sentinel을 확인해야 한다. 오류 원인이 달라진 것과 전체 성공을 구분한다.
+이번에는 golden 실행, DB 생성, healthcheck 실행 및 원본 종결을 수행하지 않았다.
+
+## 전체 files 범위를 유지해야 할 때의 대안
+아래는 실제 추적 파일 30개를 중복 없이 15개 묶음으로 나눈 QA 제안이다. 각 묶음은 최대 3파일이며 발행·재큐 승인이 아니다.
+B1~B5가 golden backend 고정 대상이고 F2~F3이 golden journey 대상이다. 나머지는 확대 QA로 분리한다.
+공통 지원 파일은 지정 묶음이 소유하고 다른 묶음에서는 읽기 전용으로 참조한다. B1~B6은 B0, B8은 B7, F2~F5는 F0/F1 증빙 이후 검증한다.
+실행 시간·컨텍스트 적합성은 아직 측정하지 않았으므로 파일 수만으로 로컬 레인 적합을 확정하지 않는다.
+
+### B0 공통 DB 픽스처
+- `tests/e2e/conftest.py` (36 lines)
+- `tests/e2e/test_conftest_deepen_10090.py` (150 lines)
+- `tests/e2e/__init__.py` (0 lines)
+
+### B1 golden 주문
+- `tests/e2e/test_e2e_1_paper_order_lifecycle.py` (380 lines)
+
+### B2 golden watchdog
+- `tests/e2e/test_e2e_2_watchdog_liquidate.py` (354 lines)
+- `tests/e2e/test_e2e_2_watchdog_liquidate_deepen.py` (265 lines)
+- `tests/e2e/_watchdog_liquidate_shared.py` (189 lines)
+
+### B3 golden 시장데이터
+- `tests/e2e/test_e2e_3_market_data_to_chart.py` (485 lines)
+- `tests/e2e/market_data_helpers.py` (288 lines)
+
+### B4 golden 백테스트
+- `tests/e2e/test_e2e_4_script_to_backtest_report.py` (330 lines)
+
+### B5 golden 컴플라이언스
+- `tests/e2e/test_e2e_5_compliance_report_submit.py` (500 lines)
+
+### B6 추가 안전·정산
+- `tests/e2e/test_kill_switch_blocks_submission.py` (243 lines)
+- `tests/e2e/test_order_execution_settlement.py` (284 lines)
+- `tests/e2e/test_restart_recovery.py` (317 lines)
+
+### B7 별도 demo 인증
+- `tests/e2e/bitget_demo/__init__.py` (0 lines)
+- `tests/e2e/bitget_demo/conftest.py` (56 lines)
+- `tests/e2e/bitget_demo/test_bitget_demo_credential_guard.py` (141 lines)
+
+### B8 별도 demo 파이프라인
+- `tests/e2e/bitget_demo/test_bitget_demo_pipeline.py` (287 lines)
+
+### F0 공통 브라우저 지원
+- `frontend/e2e/support/fieldControl.ts` (12 lines)
+- `frontend/e2e/support/mockBackend.ts` (283 lines)
+
+### F1 체감 성능 지원
+- `frontend/e2e/support/perceivedPerf.mjs` (118 lines)
+- `frontend/e2e/support/perceivedPerf.test.mjs` (154 lines)
+
+### F2 golden 온보딩·탐색
+- `frontend/e2e/journey-j1-onboarding-to-dashboard.spec.ts` (363 lines)
+- `frontend/e2e/journey-j2-discover-to-backtest.spec.ts` (272 lines)
+
+### F3 golden 주문·긴급중지
+- `frontend/e2e/journey-j3-paper-order-to-position.spec.ts` (398 lines)
+- `frontend/e2e/journey-j9-emergency-stop.spec.ts` (129 lines)
+
+### F4 기타 화면
+- `frontend/e2e/backtest-run.spec.ts` (21 lines)
+- `frontend/e2e/chart-indicator-overlay.spec.ts` (28 lines)
+
+### F5 기타 주문·데모
+- `frontend/e2e/demo-onboarding-flow.spec.ts` (24 lines)
+- `frontend/e2e/order-submission.spec.ts` (66 lines)
+
+## 검증 계획과 완료 범위
+백엔드: 각 묶음 test_*.py만 지정하여 격리 DB로 pytest -q -p no:cacheprovider 실행. 지원 파일은 수집 대상이 아니다.
+프론트: frontend에서 각 *.spec.ts를 Playwright 대상으로 명시하고 기존 playwright.config.ts를 사용한다. perceivedPerf.test.mjs는 Node test로 별도 검증한다.
+Bitget demo는 외부 인증이 필요한 별도 범위이며 이번 조사에서 실행하지 않았다.
+공유 읽기 의존성 tests/conftest.py, tests/support/db.py, frontend/playwright.config.ts는 원본 files 밖이므로 수정이 필요하면 별도 범위를 제안해야 한다.
+이번 산출물은 문서뿐이다. 단위/DB/실패주입/성능/replay 검증 및 ruff/mypy/zone 검사: N/A(실행 코드 변경 없음).
+파일 존재, 중복 없음, 원본 범위 전체 포함(30/30), 묶음당 최대 3파일을 프로그램으로 검증했다.
