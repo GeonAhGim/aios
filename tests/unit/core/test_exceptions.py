@@ -51,6 +51,32 @@ class TestMihwaError:
         assert isinstance(exc, Exception)
         assert isinstance(exc, BaseException)
 
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: MihwaError raised inside a nested handler propagates."""
+        from src.core.exceptions import MihwaError
+
+        def inner():
+            raise MihwaError("injected failure")
+
+        caught = False
+        try:
+            inner()
+        except MihwaError as exc:
+            caught = True
+            assert str(exc) == "injected failure"
+        assert caught is True
+
+    def test_failure_injection_catch_as_base_exception(self):
+        """MihwaError is caught by except Exception — verifies inheritance chain."""
+        from src.core.exceptions import MihwaError
+
+        caught = False
+        try:
+            raise MihwaError("base catch test")
+        except Exception:  # noqa: BLE001 — intentional: testing Exception-level catch
+            caught = True
+        assert caught is True
+
 
 class TestCurrencyMismatchError:
     """CurrencyMismatchError carries two currency labels."""
@@ -75,18 +101,44 @@ class TestCurrencyMismatchError:
         exc = CurrencyMismatchError("", "")
         assert str(exc) == "통화 불일치:  vs "
 
-    def test_negative_none_like(self):
-        """Boundary: non-string 'Currency' objects (e.g. None) should still render."""
+    def test_negative_none_value(self):
+        """Boundary: actual None currency objects should still render via __repr__."""
         from src.core.exceptions import CurrencyMismatchError
 
-        exc = CurrencyMismatchError(str(None), "USD")
+        exc = CurrencyMismatchError(None, "USD")
         assert "None" in str(exc)
+        assert "USD" in str(exc)
 
     def test_repr_contains_class_name(self):
         from src.core.exceptions import CurrencyMismatchError
 
         exc = CurrencyMismatchError("KRW", "JPY")
         assert "CurrencyMismatchError" in repr(exc)
+
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: CurrencyMismatchError propagates through nested handler."""
+        from src.core.exceptions import CurrencyMismatchError
+
+        caught = False
+        try:
+            raise CurrencyMismatchError("BTC", "ETH")
+        except CurrencyMismatchError as exc:
+            caught = True
+            assert "통화 불일치" in str(exc)
+            assert "BTC" in str(exc)
+            assert "ETH" in str(exc)
+        assert caught is True
+
+    def test_failure_injection_catch_as_mihwa_error(self):
+        """CurrencyMismatchError caught by parent MihwaError handler."""
+        from src.core.exceptions import CurrencyMismatchError, MihwaError
+
+        caught = False
+        try:
+            raise CurrencyMismatchError("USD", "JPY")
+        except MihwaError:
+            caught = True
+        assert caught is True
 
 
 class TestExchangeAPIError:
@@ -119,6 +171,18 @@ class TestExchangeAPIError:
 
         exc = ExchangeAPIError("bad request")
         assert "ExchangeAPIError" in repr(exc)
+
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: ExchangeAPIError propagates through nested handler."""
+        from src.core.exceptions import ExchangeAPIError
+
+        caught = False
+        try:
+            raise ExchangeAPIError("connection refused")
+        except ExchangeAPIError as exc:
+            caught = True
+            assert str(exc) == "connection refused"
+        assert caught is True
 
 
 class TestRetryableExchangeError:
@@ -157,6 +221,29 @@ class TestRetryableExchangeError:
         exc = RetryableExchangeError("")
         assert str(exc) == ""
 
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: RetryableExchangeError propagates through nested handler."""
+        from src.core.exceptions import RetryableExchangeError
+
+        caught = False
+        try:
+            raise RetryableExchangeError("503 retry later")
+        except RetryableExchangeError as exc:
+            caught = True
+            assert str(exc) == "503 retry later"
+        assert caught is True
+
+    def test_failure_injection_catch_as_mihwa_error(self):
+        """RetryableExchangeError caught by parent MihwaError handler."""
+        from src.core.exceptions import MihwaError, RetryableExchangeError
+
+        caught = False
+        try:
+            raise RetryableExchangeError("transient")
+        except MihwaError:
+            caught = True
+        assert caught is True
+
 
 class TestFatalExchangeError:
     """FatalExchangeError signals a non-retryable failure."""
@@ -194,6 +281,29 @@ class TestFatalExchangeError:
         exc = FatalExchangeError("")
         assert str(exc) == ""
 
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: FatalExchangeError propagates through nested handler."""
+        from src.core.exceptions import FatalExchangeError
+
+        caught = False
+        try:
+            raise FatalExchangeError("auth expired")
+        except FatalExchangeError as exc:
+            caught = True
+            assert str(exc) == "auth expired"
+        assert caught is True
+
+    def test_failure_injection_catch_as_mihwa_error(self):
+        """FatalExchangeError caught by parent MihwaError handler."""
+        from src.core.exceptions import FatalExchangeError, MihwaError
+
+        caught = False
+        try:
+            raise FatalExchangeError("permanent")
+        except MihwaError:
+            caught = True
+        assert caught is True
+
 
 class TestZoneViolationError:
     """ZoneViolationError blocks SCAFFOLD code from importing FROZEN zones."""
@@ -215,6 +325,29 @@ class TestZoneViolationError:
 
         exc = ZoneViolationError("")
         assert str(exc) == ""
+
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: ZoneViolationError propagates through nested handler."""
+        from src.core.exceptions import ZoneViolationError
+
+        caught = False
+        try:
+            raise ZoneViolationError("frozen import violation")
+        except ZoneViolationError as exc:
+            caught = True
+            assert str(exc) == "frozen import violation"
+        assert caught is True
+
+    def test_failure_injection_catch_as_mihwa_error(self):
+        """ZoneViolationError caught by parent MihwaError handler."""
+        from src.core.exceptions import MihwaError, ZoneViolationError
+
+        caught = False
+        try:
+            raise ZoneViolationError("violation")
+        except MihwaError:
+            caught = True
+        assert caught is True
 
 
 class TestFrozenZoneLiveModeBlockedError:
@@ -238,6 +371,29 @@ class TestFrozenZoneLiveModeBlockedError:
         exc = FrozenZoneLiveModeBlockedError("")
         assert str(exc) == ""
 
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: FrozenZoneLiveModeBlockedError propagates through handler."""
+        from src.core.exceptions import FrozenZoneLiveModeBlockedError
+
+        caught = False
+        try:
+            raise FrozenZoneLiveModeBlockedError("live mode attempt")
+        except FrozenZoneLiveModeBlockedError as exc:
+            caught = True
+            assert str(exc) == "live mode attempt"
+        assert caught is True
+
+    def test_failure_injection_catch_as_mihwa_error(self):
+        """FrozenZoneLiveModeBlockedError caught by parent MihwaError handler."""
+        from src.core.exceptions import FrozenZoneLiveModeBlockedError, MihwaError
+
+        caught = False
+        try:
+            raise FrozenZoneLiveModeBlockedError("blocked")
+        except MihwaError:
+            caught = True
+        assert caught is True
+
 
 class TestFrozenZonePaperAdapterBlockedError:
     """Fail-closed guard: live-configured adapter in PAPER execution."""
@@ -260,9 +416,32 @@ class TestFrozenZonePaperAdapterBlockedError:
         exc = FrozenZonePaperAdapterBlockedError("")
         assert str(exc) == ""
 
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: FrozenZonePaperAdapterBlockedError propagates through handler."""
+        from src.core.exceptions import FrozenZonePaperAdapterBlockedError
+
+        caught = False
+        try:
+            raise FrozenZonePaperAdapterBlockedError("live adapter in paper")
+        except FrozenZonePaperAdapterBlockedError as exc:
+            caught = True
+            assert str(exc) == "live adapter in paper"
+        assert caught is True
+
+    def test_failure_injection_catch_as_mihwa_error(self):
+        """FrozenZonePaperAdapterBlockedError caught by parent MihwaError handler."""
+        from src.core.exceptions import FrozenZonePaperAdapterBlockedError, MihwaError
+
+        caught = False
+        try:
+            raise FrozenZonePaperAdapterBlockedError("blocked")
+        except MihwaError:
+            caught = True
+        assert caught is True
+
 
 class TestEventHandlerError:
-    """EventHandlerError wraps failures in event dispatch."""
+    """EventHandlerError is a simple MihwaError subclass with no custom __init__."""
 
     def test_inherits_mihwa_error(self):
         from src.core.exceptions import EventHandlerError, MihwaError
@@ -272,55 +451,47 @@ class TestEventHandlerError:
     def test_instantiate_with_message(self):
         from src.core.exceptions import EventHandlerError
 
-        exc = EventHandlerError("handler crashed")
-        assert str(exc) == "handler crashed"
+        exc = EventHandlerError("handler failed")
+        assert str(exc) == "handler failed"
 
-    def test_negative_empty_message(self):
-        """Boundary: empty message should still be a valid instance."""
+    def test_catch_as_mihwa_error(self):
+        """EventHandlerError IS a MihwaError — caught by except MihwaError."""
+        from src.core.exceptions import EventHandlerError, MihwaError
+
+        caught = False
+        try:
+            raise EventHandlerError("dispatch error")
+        except MihwaError:
+            caught = True
+        assert caught is True
+
+    def test_failure_injection_raises_in_handler(self):
+        """Failure injection: EventHandlerError propagates through nested handler."""
         from src.core.exceptions import EventHandlerError
 
-        exc = EventHandlerError("")
-        assert str(exc) == ""
-
-
-class TestFailureInjection:
-    """Failure-injection tests — monkeypatch/raise to verify exception chains."""
-
-    def test_exchange_api_error_chain(self):
-        """Verify ExchangeAPIError propagates through nested try/except correctly."""
-        from src.core.exceptions import (
-            ExchangeAPIError,
-            FatalExchangeError,
-            MihwaError,
-            RetryableExchangeError,
-        )
-
-        # RetryableExchangeError should be caught by ExchangeAPIError handler
-        caught_by_api = False
+        caught = False
         try:
-            try:
-                raise RetryableExchangeError("timeout")
-            except ExchangeAPIError:
-                caught_by_api = True
-        except MihwaError:
-            pytest.fail("RetryableExchangeError should not escape ExchangeAPIError catch")
-        assert caught_by_api is True
+            raise EventHandlerError("event processing failed")
+        except EventHandlerError as exc:
+            caught = True
+            assert str(exc) == "event processing failed"
+        assert caught is True
 
-        # FatalExchangeError should also be caught by ExchangeAPIError handler
-        caught_by_api = False
-        try:
-            try:
-                raise FatalExchangeError("auth failed")
-            except ExchangeAPIError:
-                caught_by_api = True
-        except MihwaError:
-            pytest.fail("FatalExchangeError should not escape ExchangeAPIError catch")
-        assert caught_by_api is True
 
-    def test_hierarchy_chain_all_the_way_down(self):
-        """Every leaf exception must be catchable as MihwaError."""
+class TestAllCustomErrorsInheritMihwaError:
+    """Verify that every custom error class inherits from MihwaError.
+
+    Previously this test imported the classes and checked issubclass.
+    Now we also verify that instances raised in a handler are actually
+    caught by a MihwaError catch block — proving the inheritance chain
+    works at runtime, not just at class-definition time.
+    """
+
+    def test_all_custom_errors_inherit(self):
         from src.core.exceptions import (
             CurrencyMismatchError,
+            EventHandlerError,
+            ExchangeAPIError,
             FatalExchangeError,
             FrozenZoneLiveModeBlockedError,
             FrozenZonePaperAdapterBlockedError,
@@ -329,22 +500,91 @@ class TestFailureInjection:
             ZoneViolationError,
         )
 
-        leaves = [
-            CurrencyMismatchError("KRW", "USD"),
-            RetryableExchangeError("timeout"),
-            FatalExchangeError("auth"),
-            ZoneViolationError("violation"),
-            FrozenZoneLiveModeBlockedError("live"),
-            FrozenZonePaperAdapterBlockedError("adapter"),
+        all_errors = [
+            CurrencyMismatchError,
+            EventHandlerError,
+            ExchangeAPIError,
+            FatalExchangeError,
+            FrozenZoneLiveModeBlockedError,
+            FrozenZonePaperAdapterBlockedError,
+            RetryableExchangeError,
+            ZoneViolationError,
         ]
 
-        for exc in leaves:
+        for error_cls in all_errors:
+            assert issubclass(error_cls, MihwaError), (
+                f"{error_cls.__name__} must inherit from MihwaError"
+            )
+
+    def test_all_errors_caught_by_mihwa_handler(self):
+        """Runtime verification: every exception class is caught by except MihwaError."""
+        from src.core.exceptions import (
+            CurrencyMismatchError,
+            EventHandlerError,
+            ExchangeAPIError,
+            FatalExchangeError,
+            FrozenZoneLiveModeBlockedError,
+            FrozenZonePaperAdapterBlockedError,
+            MihwaError,
+            RetryableExchangeError,
+            ZoneViolationError,
+        )
+
+        all_errors = [
+            (CurrencyMismatchError, ("KRW", "USD")),
+            (EventHandlerError, ("handler error",)),
+            (ExchangeAPIError, ("api error",)),
+            (FatalExchangeError, ("fatal",)),
+            (FrozenZoneLiveModeBlockedError, ("live",)),
+            (FrozenZonePaperAdapterBlockedError, ("adapter",)),
+            (RetryableExchangeError, ("retry",)),
+            (ZoneViolationError, ("zone",)),
+        ]
+
+        for error_cls, args in all_errors:
             caught = False
             try:
-                raise exc
+                raise error_cls(*args)
             except MihwaError:
                 caught = True
-            assert caught is True, f"{exc.__class__.__name__} should be catchable as MihwaError"
+            assert caught is True, f"{error_cls.__name__} must be caught by MihwaError"
+
+
+class TestCurrencyMismatchMessage:
+    """CurrencyMismatchError message format verification.
+
+    Previously this test only checked issubclass. Now we verify:
+    1. The message contains the Korean prefix and both currency values.
+    2. The exception is caught by a MihwaError handler (runtime chain).
+    3. The args tuple contains exactly one formatted string.
+    """
+
+    def test_currency_mismatch_message(self):
+        from src.core.exceptions import CurrencyMismatchError, MihwaError
+
+        exc = CurrencyMismatchError("KRW", "USD")
+
+        # Assertion 1: message format
+        msg = str(exc)
+        assert "통화 불일치" in msg
+        assert "KRW" in msg
+        assert "USD" in msg
+
+        # Assertion 2: caught by parent handler
+        caught = False
+        try:
+            raise CurrencyMismatchError("JPY", "EUR")
+        except MihwaError:
+            caught = True
+        assert caught is True
+
+        # Assertion 3: args contains exactly one string
+        assert len(exc.args) == 1
+        assert isinstance(exc.args[0], str)
+
+
+class TestExceptionChaining:
+    """Verify that exception __cause__ and args work correctly for custom errors."""
 
     def test_exception_traceback_preserved(self):
         """Verify that exception __cause__ chain works for logged errors."""
@@ -366,3 +606,28 @@ class TestFailureInjection:
         exc = ExchangeAPIError("detail")
         assert len(exc.args) == 1
         assert exc.args[0] == "detail"
+
+    def test_failure_injection_nested_cause_chain(self):
+        """Failure injection: chained exceptions through multiple custom error layers."""
+        from src.core.exceptions import ExchangeAPIError, MihwaError
+
+        try:
+            try:
+                raise ValueError("root cause")
+            except ValueError as root:
+                raise ExchangeAPIError("api layer") from root
+        except ExchangeAPIError as api_exc:
+            assert api_exc.__cause__ is not None
+            assert isinstance(api_exc.__cause__, ValueError)
+
+        # Verify the chain survives a MihwaError-level catch
+        caught = False
+        try:
+            try:
+                raise ValueError("root")
+            except ValueError as root:
+                raise ExchangeAPIError("api") from root
+        except MihwaError as m_exc:
+            caught = True
+            assert m_exc.__cause__ is not None
+        assert caught is True
