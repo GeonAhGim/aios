@@ -142,7 +142,9 @@ async def test_two_schedulers_ticking_delayed_acquire_exceeds_budget(
         # delayed_sync는 CPU 부하를 생성하므로 async 호출에서도
         # time.process_time()이 증가한다.
         result = await original_acquire(*args, **kwargs)
-        delayed_sync(lambda: None, 1.5)()  # 1.5s CPU 부하 (2 스케줄러 합쳐서 3초 예산 초과)
+        delayed_sync(
+            lambda: None, 2.0
+        )()  # 2.0s CPU 부하 (2 스케줄러 합쳐서 4초 이상 → 3초 예산 명확 초과)
         return result
 
     monkeypatch.setattr(lease_repo, "acquire_or_renew_many", cpu_heavy_acquire)
