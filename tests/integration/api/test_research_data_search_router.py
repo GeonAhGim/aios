@@ -183,9 +183,12 @@ async def test_negative_2_unauthorized_source_items_are_silently_excluded(client
             SOURCE_B: None,  # no contract row -> denied
         }
     )
-    response = await client.post(
-        f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"]
-    )
+    try:
+        response = await client.post(
+            f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"]
+        )
+    finally:
+        app.dependency_overrides.pop(get_source_contract_repository, None)
     assert response.status_code == 200, response.text
     body = response.json()["data"]
     assert [i["item_id"] for i in body["items"]] == [str(seeded["item_a_id"])]
@@ -267,7 +270,7 @@ async def test_search_source_contract_failure_fails_closed_not_open(client, seed
             f"{BASE}/search", json={"query": "", "kinds": []}, headers=seeded["a"]
         )
     finally:
-        app.dependency_overrides[get_source_contract_repository] = _AllAllowedContractRepository
+        app.dependency_overrides.pop(get_source_contract_repository, None)
     assert response.status_code == 500, response.text
     body = response.json()
     assert body["error_code"] == "INTERNAL_ERROR"
