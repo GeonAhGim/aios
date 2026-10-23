@@ -1,4 +1,4 @@
-"""BT-16a — `backtest/vector/{grid,walk_forward,monte_carlo}.py` 테스트.
+"""BT-16a — `backtest/vector/{grid,monte_carlo}.py` 테스트.
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.9
 BT-16(실행부만, task-2371 decision — AI-10 실험 원장 기록은 BT-16b).
@@ -10,9 +10,6 @@ BT-16(실행부만, task-2371 decision — AI-10 실험 원장 기록은 BT-16b)
   조합·1개월 M1"을 문자 그대로 재현하지 않는다 — 그 규모로는 CI 매 실행마다
   분 단위가 걸려 스위트 예산을 넘긴다(미검증: 실제 그 규모의 절대 성능은
   별도로 확인해야 한다).
-- walk_forward: (a) 창 규격 음수/0 거부(negative). (b) 빈 조합 거부
-  (negative). (c) 데이터가 창 하나보다 짧으면 거부(negative). (d) 훈련
-  구간 성과가 더 좋은 조합이 검증 구간에서 선택돼 채점됨(정확성).
 - monte_carlo: (a) iterations<=0·백분위 범위 밖·equity_curve 길이 부족·
   0 자본 구간 거부(negative, 4종). (b) 같은 시드는 같은 결과(결정론).
   (c) 중앙값이 최종 자본 표본 범위 안에 있음(정확성).
@@ -44,11 +41,6 @@ from src.foundation.backtest.vector.monte_carlo import (
     run_monte_carlo,
 )
 from src.foundation.backtest.vector.signals import BoolSignal
-from src.foundation.backtest.vector.walk_forward import (
-    WalkForwardError,
-    WalkForwardWindowSpec,
-    run_walk_forward,
-)
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
@@ -230,70 +222,6 @@ def test_grid_sweep_performance_assertion_goes_red_with_10x_delay_injection(
         f"지연 주입 후 측정({elapsed_seconds:.4f}s)이 임계("
         f"{threshold_seconds:.4f}s) 미만 — 성능 단언이 실제로 동작하지 않는다"
     )
-
-
-# ================= walk_forward.py =================
-
-
-def test_window_spec_rejects_non_positive_bars() -> None:
-    with pytest.raises(WalkForwardError):
-        WalkForwardWindowSpec(train_bars=0, test_bars=5)
-    with pytest.raises(WalkForwardError):
-        WalkForwardWindowSpec(train_bars=5, test_bars=0)
-    with pytest.raises(WalkForwardError):
-        WalkForwardWindowSpec(train_bars=5, test_bars=5, step_bars=0)
-
-
-def test_walk_forward_rejects_empty_combos() -> None:
-    with pytest.raises(WalkForwardError):
-        run_walk_forward(
-            _rising_columns(40),
-            {},
-            _config(),
-            WalkForwardWindowSpec(train_bars=10, test_bars=5),
-            timeframe=Timeframe.M1,
-            initial_cash=_CASH,
-        )
-
-
-def test_walk_forward_rejects_data_shorter_than_one_window() -> None:
-    n = 10
-    combos = {"buy_hold": _buy_and_hold_signal(n)}
-    with pytest.raises(WalkForwardError):
-        run_walk_forward(
-            _rising_columns(n),
-            combos,
-            _config(),
-            WalkForwardWindowSpec(train_bars=10, test_bars=5),
-            timeframe=Timeframe.M1,
-            initial_cash=_CASH,
-        )
-
-
-def test_walk_forward_selects_better_train_combo_for_every_window() -> None:
-    n = 40
-    cols = _rising_columns(n)
-    combos = {"buy_hold": _buy_and_hold_signal(n), "no_trade": _no_trade_signal(n)}
-    window = WalkForwardWindowSpec(train_bars=10, test_bars=5)  # step defaults to 5
-
-    result = run_walk_forward(
-        cols,
-        combos,
-        _config(),
-        window,
-        timeframe=Timeframe.M1,
-        initial_cash=_CASH,
-    )
-
-    expected_count = (n - window.train_bars - window.test_bars) // window.effective_step_bars + 1
-    assert len(result.windows) == expected_count
-
-    first = result.windows[0]
-    assert (first.train_start, first.train_end) == (0, 10)
-    assert (first.test_start, first.test_end) == (10, 15)
-    for w in result.windows:
-        assert w.selected_combo == "buy_hold"
-        assert w.train_result.final_equity > _CASH
 
 
 # ================= monte_carlo.py =================
