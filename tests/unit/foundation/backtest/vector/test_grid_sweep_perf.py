@@ -76,38 +76,35 @@ def _config() -> BacktestConfigV2:
 
 
 @pytest.mark.perf
-def test_grid_sweep_normalized_performance_threshold() -> None:
-    """절대 초 상한이 아니라 1조합 실측 x N x 1.5로 단언한다(BT-17과 동일
-    선례, 공유 CI CPU 편차를 흡수하기 위함). N=1,000은 §9.9 DoD 문자
-    그대로지만 봉 수는 200으로 줄였다 — 실제 1개월 M1(약 43,200봉) 규모는
-    스위트 예산 밖이라 별도 확인이 필요하다(미검증)."""
+def test_grid_sweep_normalized_performance_threshold(perf_budget) -> None:
+    """1조합 CPU 실측 x N x 3.0 예산으로 1,000조합을 검증한다.
+
+    200봉 표본이며 실제 1개월 M1 규모의 절대 성능은 별도 확인한다.
+    배치 측정으로 Windows CPU 타이머 양자화 영향을 줄인다.
+    """
     n = 200
     cols = _rising_columns(n)
     config = _config()
+    baseline_combos = {"S0": _buy_and_hold_signal(n)}
 
-    baseline_start = time.perf_counter()
-    sweep_grid(
-        cols,
-        {"S0": _buy_and_hold_signal(n)},
-        config,
-        timeframe=Timeframe.M1,
-        initial_cash=_CASH,
-    )
-    baseline_seconds = time.perf_counter() - baseline_start
+    def run_baseline():
+        return sweep_grid(
+            cols, baseline_combos, config, timeframe=Timeframe.M1, initial_cash=_CASH
+        )
+
+    baseline = perf_budget.best_of(run_baseline, n=3, batch=128)
+    assert baseline.cpu_ms > 0, "Baseline batch must resolve the CPU timer tick"
 
     combo_count = 1000
     combos = {f"C{i:04d}": _buy_and_hold_signal(n) for i in range(combo_count)}
-    start = time.perf_counter()
-    result = sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
-    elapsed_seconds = time.perf_counter() - start
 
-    threshold_seconds = baseline_seconds * combo_count * 3.0
-    print(
-        f"[BT-16a] 1조합 실측={baseline_seconds:.4f}s, {combo_count}조합 실측="
-        f"{elapsed_seconds:.4f}s, 정규화 임계={threshold_seconds:.4f}s (§9.9 목표: ≤60s)"
-    )
-    assert len(result.results) == combo_count
-    assert elapsed_seconds <= threshold_seconds
+    def run_sweep():
+        return sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
+
+    measured = perf_budget.best_of(run_sweep, n=3, batch=2)
+    threshold_ms = baseline.cpu_ms * combo_count * 3.0
+    assert len(measured.result.results) == combo_count
+    assert measured.cpu_ms <= threshold_ms, perf_budget.describe(measured, budget_ms=threshold_ms)
 
 
 @pytest.mark.perf
