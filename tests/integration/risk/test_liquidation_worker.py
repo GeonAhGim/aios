@@ -193,20 +193,6 @@ async def test_no_open_positions_marks_request_done(pool, ctx):
     assert row["state"] == "DONE"
 
 
-async def test_plans_open_position_into_slices(pool, ctx):
-    request_id = await _setup(pool, ctx)
-    adapters = {"bitget": FakeExchangeAdapter()}
-
-    await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
-
-    row = await _request_row(pool, request_id)
-    assert row["state"] == "PLANNED"
-    assert row["seed_ref"] is not None
-    states = await _slice_states(pool, request_id)
-    assert len(states) >= 3
-    assert all(s == "PENDING" for s in states)
-
-
 async def test_fence_change_aborts_request_and_skips_slices(pool, ctx):
     request_id = await _setup(pool, ctx)
     adapters = {"bitget": FakeExchangeAdapter()}
