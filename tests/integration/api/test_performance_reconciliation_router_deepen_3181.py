@@ -158,7 +158,9 @@ async def _run_reconciliation(
 # --- 라우터 레벨 HTTP 왕복 1: performance.py — 원래 존재하지 않았던 1차 공백 ---
 
 
-async def test_compute_then_get_and_list_statement_round_trips_through_real_http(client, pool):
+async def test_compute_then_get_and_list_statement_round_trips_through_real_http(
+    client: AsyncClient, pool: object
+) -> None:
     """`POST :compute` → `GET` 단건 → `GET` 목록을 실제 ASGI 트랜스포트로
     호출해, 인증·의존성 주입·봉투 직렬화가 실제로 맞물려 동작하는지 확인한다
     — 이전에는 애플리케이션 함수를 직접 호출하는 테스트만 있었을 뿐, 이
