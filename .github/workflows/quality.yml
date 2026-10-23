@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   # ── Shared setup: runs once, produces shared environment ──────────────
-  setup:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -146,8 +146,7 @@ jobs:
       # Generate the file list for sharding
       - name: Generate test file list
         run: |
-          python -m pytest --collect-only -q -m "not perf and not nightly and not live_demo and not redis" \
-            | grep "^tests/" | sort > test_files.txt
+          python scripts/pytest_shard.py --collect-output test_files.txt
           echo "Total test files: $(wc -l < test_files.txt)"
 
       - uses: actions/upload-artifact@v4
@@ -157,7 +156,7 @@ jobs:
 
   # ── Shard matrix: parallel test execution ─────────────────────────────
   test-shard:
-    needs: setup
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -221,27 +220,28 @@ jobs:
           echo "Shard ${{ matrix.shard }}: $(wc -l < shard_files.txt) files"
 
       - name: Test (shard ${{ matrix.shard }})
+        env:
+          COVERAGE_FILE: .coverage.shard-${{ matrix.shard }}
         run: |
-          if [ -s shard_files.txt ]; then
-            pytest -q -n auto --dist loadfile \
+          test -s shard_files.txt
+          mapfile -t shard_files < shard_files.txt
+          pytest -q -n auto --dist loadfile \
               -m "not perf and not nightly and not live_demo and not redis" \
               --cov=src --cov-report=term --cov-report=xml \
-              --cov-append --cov-file=.coverage-shard-${{ matrix.shard }} \
-              $(cat shard_files.txt)
-          else
-            echo "No files for shard ${{ matrix.shard }} — skipping"
-          fi
+              "${shard_files[@]}"
 
       - name: Upload shard coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: shard-coverage-${{ matrix.shard }}
-          path: .coverage-shard-${{ matrix.shard }}
+          path: .coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
 
   # ── Coverage combine: merges shard coverage, runs ratchet ─────────────
   coverage-combine:
-    needs: [setup, test-shard]
+    needs: [verify, test-shard]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -253,7 +253,7 @@ jobs:
           cache: pip
 
       - name: Install coverage tool
-        run: python -m pip install coverage
+        run: python -m pip install -r requirements-lock.txt
 
       - uses: actions/download-artifact@v4
         with:
@@ -263,25 +263,27 @@ jobs:
 
       - name: Combine shard coverage
         run: |
-          ls -la coverage-artifacts/
-          cd coverage-artifacts/
-          # Rename shard files to .coverage.N for combine
-          i=0
-          for f in .coverage-shard-*; do
-            cp "$f" ".coverage.$i"
-            i=$((i + 1))
+          for shard in 0 1 2 3; do
+            test -s "coverage-artifacts/.coverage.shard-$shard"
           done
-          coverage combine
+          coverage combine coverage-artifacts/
           coverage xml
           coverage report
-          mv coverage.xml ../coverage.xml
 
       - name: Run coverage ratchet
         run: python scripts/coverage_ratchet.py
 
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14
+
   # ── Perf tests: serial (unchanged) ────────────────────────────────────
   perf-test:
-    needs: setup
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:

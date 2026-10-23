@@ -158,3 +158,55 @@ class TestCLI:
         lines = [line.strip() for line in captured.out.strip().splitlines()]
         # sorted: a, m, z → indices 0,1,2 → shard 1: m
         assert lines == ["m.py"]
+
+
+@pytest.mark.parametrize("total", [1, 2, 4, 9])
+def test_duplicate_paths_still_form_partition(total):
+    files = ["b.py", "a.py", "b.py", "c.py", "a.py"]
+    parts = [shard(files, i, total) for i in range(total)]
+    assert sorted(path for part in parts for path in part) == sorted(set(files))
+    assert parts == [shard(list(reversed(files)), i, total) for i in range(total)]
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_collection_manifest_subprocess(tmp_path, broken):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[3] / "scripts" / "pytest_shard.py"
+    (tmp_path / "pytest.ini").write_text(
+        "[pytest]\nmarkers =\n    perf: serial budget\n", encoding="utf-8"
+    )
+    (tmp_path / "test_sample.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('value', ['a b', 'x::y'])\n"
+        "def test_normal(value): pass\n"
+        "@pytest.mark.perf\n"
+        "def test_perf(): pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "test_perf_only.py").write_text(
+        "import pytest\n@pytest.mark.perf\ndef test_perf(): pass\n", encoding="utf-8"
+    )
+    manifest = tmp_path / "files.txt"
+    manifest.write_text("stale.py\n", encoding="utf-8")
+    if broken:
+        (tmp_path / "test_broken.py").write_text(
+            "raise RuntimeError('injected')\n", encoding="utf-8"
+        )
+    result = subprocess.run(
+        [sys.executable, str(script), "--collect-output", str(manifest)],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if broken:
+        assert result.returncode != 0
+        assert not manifest.exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert manifest.read_text(encoding="utf-8").splitlines() == ["test_sample.py"]
