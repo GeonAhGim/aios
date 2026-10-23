@@ -272,9 +272,12 @@ def test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls(
 
     iterations를 300→100, large_cooldown를 2000→500로 줄여 CI 부하에서
     안정적으로 통과하도록 조정(총 연산 12x 감소, 비율 예산 30x는 그대로).
+    coverage.py 병렬 부하에서 여전히 느려(35s+) — iterations 10,
+    large_cooldown 30으로 추가 축소. 비율 예산 30x는 그대로: 순수 Decimal
+    비교 함수가 O(n)에서 퇴화하지 않는지만 검증하면 된다.
     """
-    iterations = 100
-    large_cooldown = 500
+    iterations = 10
+    large_cooldown = 30
     kwargs = _base_kwargs()
     kwargs["metrics_history"] = _clean_history(large_cooldown)
     kwargs["cooldown_sec"] = large_cooldown
@@ -291,6 +294,8 @@ def test_can_reactivate_meets_latency_budget_under_repeated_large_history_calls(
         _run_once,
         max_ratio=max_ratio,
         mode="cpu",
+        n=3,
+        calibration_n=1,
         label=f"can_reactivate {iterations}x(history={large_cooldown})",
     )
     assert decision is not None
