@@ -39,6 +39,10 @@ from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 
+# Module-level registry: collect order_ids from _execute_once calls
+# so teardown can delete them in FK-child-first order.
+_seeded_order_ids: list[uuid.UUID] = []
+
 
 async def _allow_gate(context: object) -> GateDecision:
     return GateDecision(
@@ -58,6 +62,29 @@ async def pool():
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
     yield p
     await p.close()
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_seeded_orders(pool):
+    """task-19096: DELETE seeded orders + child rows in FK-child-first order
+    so tests never leave eventless orders residue behind.
+
+    Order: fills → order_events → orders (order_events_order_id_fkey first).
+    """
+
+    async def _cleanup() -> None:
+        if not _seeded_order_ids:
+            return
+        ids = _seeded_order_ids
+        _seeded_order_ids.clear()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM fills WHERE order_id = ANY($1::uuid[])", ids)
+            await conn.execute("DELETE FROM order_events WHERE order_id = ANY($1::uuid[])", ids)
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1::uuid[])", ids)
+
+    await _cleanup()
+    yield
+    await _cleanup()
 
 
 def _fsm_config():
@@ -124,7 +151,7 @@ async def _noop_fsm_state_writer(execution_id: int, expected: FSMState, new: FSM
 async def _execute_once(
     pool: asyncpg.Pool, adapter: FakeExchangeAdapter, execution_id: int, user_id: uuid.UUID
 ):
-    return await Executor().execute(
+    result = await Executor().execute(
         _allocation(),
         _approved_risk_result(),
         adapter,
@@ -139,6 +166,8 @@ async def _execute_once(
         pool=pool,
         pre_submit_gate=_allow_gate,
     )
+    _seeded_order_ids.append(result.order_id)
+    return result
 
 
 async def test_retrying_the_same_intent_calls_adapter_once_and_reuses_client_order_id(pool):
