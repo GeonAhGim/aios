@@ -32,6 +32,7 @@ from src.services.safety.liquidation_planning import LiquidationSeedKeyMissingEr
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.performance.oms.conftest import attach_round_trip_logger
+from tests.support.order_cleanup import cleanup_liquidation_request
 
 
 def _asyncpg_dsn() -> str:
@@ -164,12 +165,7 @@ async def _cleanup(pool, ctx):
     yield
     async with pool.acquire() as conn:
         for request_id in ctx["requests"]:
-            await conn.execute(
-                "UPDATE liquidation_slice SET order_id = NULL WHERE request_id = $1", request_id
-            )
-            await conn.execute("DELETE FROM orders WHERE liquidation_request_id = $1", request_id)
-            await conn.execute("DELETE FROM liquidation_slice WHERE request_id = $1", request_id)
-            await conn.execute("DELETE FROM liquidation_request WHERE id = $1", request_id)
+            await cleanup_liquidation_request(conn, request_id)
         for actor in ctx["actors"]:
             await conn.execute("DELETE FROM positions WHERE user_id = $1", actor)
         await conn.execute(
@@ -439,14 +435,16 @@ async def test_slice_send_tick_round_trip_budget(pool, ctx):
         assert states[0] == "SENT"  # 예산을 재는 틱이 실제로 슬라이스를 보냈는지 확인
         print(
             f"\nliquidation slice-send tick(real db): elapsed={elapsed_ms:.2f}ms(비차단, "
-            f"환경 편차) round_trips={len(queries)}(budget==19, CI 차단)"
+            f"환경 편차) round_trips={len(queries)}(budget==24, CI 차단)"
         )
         # 실측(2026-09-10, task-2844): 후보 SELECT tx(BEGIN/SELECT/COMMIT) +
         # due-slice tx(BEGIN/SELECT/conditional_update UPDATE x2/COMMIT) +
         # _submit_order tx(BEGIN/INSERT orders/UPDATE slice/audit INSERT/COMMIT)
-        # + 커넥션 반환 시 asyncpg 세션 리셋(x N) = 19.
-        assert len(queries) == 19, (
-            f"슬라이스 전송 틱의 DB 왕복 수({len(queries)})가 예산(19)과 다릅니다 -- "
+        # + 커넥션 반환 시 asyncpg 세션 리셋(x N) = 19
+        # + 5(task-18977: order_events 기록 -- set_config, event INSERT,
+        # orders 상태 UPDATE 등 같은 트랜잭션 내 추가 쓰기) = 24.
+        assert len(queries) == 24, (
+            f"슬라이스 전송 틱의 DB 왕복 수({len(queries)})가 예산(24)과 다릅니다 -- "
             "선택/전이 경로에 재시도나 추가 조회가 섞여든 회귀일 수 있습니다(리뷰 필요)."
         )
     finally:

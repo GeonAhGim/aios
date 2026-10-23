@@ -19,6 +19,7 @@ import pytest
 from src.services.safety.liquidation_executor import run_liquidation_worker_once
 from tests.integration.conftest import create_test_user
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.order_cleanup import cleanup_liquidation_request
 
 
 async def _request_row(pool: asyncpg.Pool, request_id: UUID) -> asyncpg.Record:
@@ -44,12 +45,7 @@ async def _cleanup(pool, ctx):
     yield
     async with pool.acquire() as conn:
         for request_id in ctx["requests"]:
-            await conn.execute(
-                "UPDATE liquidation_slice SET order_id = NULL WHERE request_id = $1", request_id
-            )
-            await conn.execute("DELETE FROM orders WHERE liquidation_request_id = $1", request_id)
-            await conn.execute("DELETE FROM liquidation_slice WHERE request_id = $1", request_id)
-            await conn.execute("DELETE FROM liquidation_request WHERE id = $1", request_id)
+            await cleanup_liquidation_request(conn, request_id)
         for actor in ctx["actors"]:
             await conn.execute("DELETE FROM positions WHERE user_id = $1", actor)
         await conn.execute(

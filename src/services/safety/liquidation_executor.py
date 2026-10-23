@@ -39,6 +39,10 @@ from src.core.logging.audit_log import record_audit_log
 from src.data.models.base import AssetClass, Currency, Money
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.common.adapter import ExchangeAdapter
+from src.services.order_service.repository import (
+    fail_claim_with_event,
+    update_from_exchange_with_fill_event,
+)
 from src.services.safety.liquidation_planning import plan_request, require_seed_key
 
 logger = logging.getLogger(__name__)
@@ -111,9 +115,11 @@ async def _submit_order(
         is_liquidation=True, asset_class=AssetClass.CRYPTO,
     )
     status = OrderStatus.FAILED
+    response: Order | None = None
     if adapter is not None:
         try:
-            status = (await adapter.place_order(order)).status
+            response = await adapter.place_order(order)
+            status = response.status
         except Exception:  # noqa: BLE001 -- one slice's failure must not kill the worker loop
             logger.exception("liquidation_executor: place_order failed: %s", order.client_order_id)
     new_state = "FAILED" if status == OrderStatus.FAILED else "SENT"
@@ -130,8 +136,27 @@ async def _submit_order(
             order.strategy_version, order.symbol, order.exchange, order.side.value,
             order.order_type.value, order.quantity,
             order.price.amount if order.price is not None else None,
-            status.value, order.asset_class.value, request_id,
+            OrderStatus.CREATED.value, order.asset_class.value, request_id,
         )
+        # The row is born CREATED; its final status and the matching order_events
+        # row land in this same transaction so replay_verify never sees a
+        # status change without history (I6).
+        if status == OrderStatus.FAILED:
+            await fail_claim_with_event(
+                conn, order.order_id, reason_code="LIQUIDATION_PLACE_FAILED",
+                actor_subject_id=_SYSTEM_ACTOR_ID,
+            )
+        elif response is not None:
+            await update_from_exchange_with_fill_event(
+                conn,
+                order.model_copy(update={
+                    "status": status,
+                    "exchange_order_id": response.exchange_order_id,
+                    "filled_quantity": response.filled_quantity,
+                    "average_fill_price": response.average_fill_price,
+                }),
+                expected_status=OrderStatus.CREATED, actor_subject_id=_SYSTEM_ACTOR_ID,
+            )
         await conn.execute(
             "UPDATE liquidation_slice SET state=$1, order_id=$2 WHERE id = ANY($3::bigint[])",
             new_state, order.order_id, slice_ids,

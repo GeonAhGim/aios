@@ -25,3 +25,28 @@ async def delete_orders_by_client_order_id(conn: asyncpg.Connection, client_orde
         return False
     await conn.execute("DELETE FROM orders WHERE order_id = $1", row["order_id"])
     return True
+
+
+async def cleanup_liquidation_request(conn: asyncpg.Connection, request_id: object) -> None:
+    """Tear down one `liquidation_request`'s rows (slice refs -> orders -> slices -> request).
+
+    Liquidation orders now carry WORM `order_events` (task-18977), so they cannot be
+    deleted; the request they reference is then kept, terminal (ABORTED)."""
+    await conn.execute(
+        "UPDATE liquidation_slice SET order_id = NULL WHERE request_id = $1", request_id
+    )
+    rows = await conn.fetch(
+        "SELECT client_order_id FROM orders WHERE liquidation_request_id = $1", request_id
+    )
+    for r in rows:
+        await delete_orders_by_client_order_id(conn, r["client_order_id"])
+    await conn.execute("DELETE FROM liquidation_slice WHERE request_id = $1", request_id)
+    if await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM orders WHERE liquidation_request_id = $1)", request_id
+    ):
+        await conn.execute(
+            "UPDATE liquidation_request SET state='ABORTED', completed_at=now() WHERE id = $1",
+            request_id,
+        )
+    else:
+        await conn.execute("DELETE FROM liquidation_request WHERE id = $1", request_id)
