@@ -271,3 +271,27 @@ def test_validation_result_dependency_failure_propagates(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="ValidationResult dependency failure"):
         validate_strategy_config(config)
+
+
+# ── Performance assertion (perf_budget fixture, D2) ───────────────────
+
+
+def test_validate_config_within_latency_budget(perf_budget):
+    """Perf: validating a 10-state, 30-transition FSM stays within budget."""
+    states = [FSMState.IDLE, FSMState.HOLDING, FSMState.STOP_LOSS]
+    transitions = [
+        {"from_state": FSMState.IDLE, "to_state": FSMState.HOLDING, "condition": f"c{i}"}
+        for i in range(30)
+    ]
+    config = FSMStrategyConfig(
+        strategy_id="test-012",
+        version="v1",
+        target_asset="BTC/KRW",
+        market="crypto",
+        exchange="Bithumb",
+        initial_state=FSMState.IDLE,
+        states=states,
+        transitions=transitions,
+        author_agent="researcher-1",
+    )
+    perf_budget.assert_within(lambda: validate_strategy_config(config), budget_ms=5)
