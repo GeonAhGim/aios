@@ -146,12 +146,16 @@ async def test_compute_tca_rejects_non_positive_arrival_price_cpu_time_converges
     perf_budget: PerfBudget,
 ) -> None:
     """0 수렴 검증: `compute_tca`에 음수/0 도착 가격을 넣으면 EM-12/EM-13 호출
-    전에 `InvalidArrivalPriceError`가 발생하므로 CPU 시간은 양자화 오차 범위
-    내여야 한다(약 0ms 수렴). 이 테스트는 PerfBudget.sample_async가 단일
-    호출 CPU 시간을 올바르게 계측함을 동적으로 검증한다.
+     전에 `InvalidArrivalPriceError`가 발생하므로 CPU 시간은 양자화 오차 범위
+     내여야 한다(약 0ms 수렴). 이 테스트는 PerfBudget.sample_async가 단일
+     호출 CPU 시간을 올바르게 계측함을 동적으로 검증한다.
 
-    예외가 발생해도 CPU 측정은 유효하므로, 예외를 포착한 뒤 None을 반환하는
-    래퍼로 측정 구간을 감싼다.
+     병렬 CI 실행(CI task-19694)에서 CPU 경합 spike가 single sample을 날려
+     budget 단언을 깨는 문제를 `best_of_async` 최소-N으로 필터링 — 최소값이
+    预算을 벗어나지 않으면 실제 코드에 지연이 있음을 입증한다(task-19467 패턴).
+
+     예외가 발생해도 CPU 측정은 유효하므로, 예외를 포착한 뒤 None을 반환하는
+     래퍼로 측정 구간을 감싼다.
     """
     repo = FakeTcaResultRepository()
 
@@ -161,7 +165,7 @@ async def test_compute_tca_rejects_non_positive_arrival_price_cpu_time_converges
         except InvalidArrivalPriceError:
             pass  # expected — CPU 측정은 예외 발생 전까지의 시간을 반영
 
-    sample = await perf_budget.sample_async(_call, batch=8)
+    sample = await perf_budget.best_of_async(_call, n=5, batch=8)
 
     assert sample.cpu_ms < 1.0, (
         f"InvalidArrivalPriceError 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
@@ -204,8 +208,9 @@ async def test_compute_tca_rejects_non_positive_arrival_price_cpu_budget_catches
             pass  # expected — CPU 측정은 예외 발생 전까지의 시간을 반영
 
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    # best_of_async(n=5) 최소값도 fake time 때문에 budget 초과 → inject 검증 유지
     with pytest.raises(AssertionError):
-        sample = await perf_budget.sample_async(_call, batch=8)
+        sample = await perf_budget.best_of_async(_call, n=5, batch=8)
         assert sample.cpu_ms < 1.0, (
             f"InvalidArrivalPriceError 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
             "입력 검증만 수행하므로 사실상 0ms에 수렴해야 함 (budget<1ms)"
