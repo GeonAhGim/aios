@@ -348,7 +348,9 @@ async def test_concurrent_retries_with_same_client_order_id_do_not_double_submit
     task1 = asyncio.create_task(adapter.place_order(order))
     await entered.wait()  # task1이 지금 order-cash 안에서 블록돼 있다
     task2 = asyncio.create_task(adapter.place_order(order))
-    await asyncio.sleep(0.05)  # task2가 락 대기 상태로 들어갈 시간을 준다
+    # task2는 place_order 내부의 asyncio.Lock에서 대기한다.
+    # entered.wait() 시점에 task1이 이미 lock을 획득했으므로 task2는
+    # order-cash 핸들러에 도달하지 못하고 락 대기 상태로 블록된다.
     release.set()
 
     first, second = await asyncio.gather(task1, task2)
