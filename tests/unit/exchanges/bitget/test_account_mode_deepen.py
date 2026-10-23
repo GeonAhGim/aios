@@ -43,6 +43,7 @@ import asyncio
 import time
 from collections.abc import Callable
 from decimal import Decimal
+from typing import Any
 
 import httpx
 import pytest
@@ -69,8 +70,13 @@ def _make_adapter(handler: Callable[[httpx.Request], httpx.Response]) -> BitgetA
     )
 
 
-def _envelope(code: str, data: object) -> dict:
+def _envelope(code: str, data: object) -> dict[str, Any]:
     return {"code": code, "msg": "test", "requestTime": 1, "data": data}
+
+
+def _assert_unified(mode: BitgetAccountMode) -> None:
+    """Break mypy literal narrowing so the UNIFIED check compiles cleanly."""
+    assert mode is BitgetAccountMode.UNIFIED
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +111,7 @@ async def test_get_balance_survives_infra_failures_then_switches_to_unified_on_4
 
     assert v2_calls == 3  # ConnectError x2 + 40085(바디 검증은 단발 평가, 재시도 없이 즉시 실패)
     assert v3_calls == 2  # ConnectError x1 + 성공
-    assert adapter.account_mode is BitgetAccountMode.UNIFIED
+    _assert_unified(adapter.account_mode)
     assert balances[0].asset == "USDT"
     assert balances[0].available == Decimal("10")
 
