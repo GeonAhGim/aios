@@ -340,3 +340,18 @@ async def test_catalog_list_p95_goes_red_on_10x_delay_injection(
         f"10x 지연 주입에도 p95가 예산을 넘지 않았다: {p95_ms:.2f}ms — "
         f"단언이 느린 호출을 포착하지 못한다"
     )
+    # background_loops 안전 틱이 테스트 실행 중 circuit_breaker_level을
+    # halted 등으로 격상시켰을 수 있다 — 후속 테스트를 위해 정상으로 되돌린다.
+    import os
+
+    import asyncpg
+
+    db_url = os.environ["TEST_DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+    conn = await asyncpg.connect(db_url)
+    try:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
+    finally:
+        await conn.close()
