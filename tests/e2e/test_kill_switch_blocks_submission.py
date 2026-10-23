@@ -182,7 +182,9 @@ async def test_without_active_kill_switch_same_order_is_allowed_and_fills(
     user_id = await create_test_tenant(pool)
     execution_id = await create_execution(pool, user_id)
     adapter = _make_adapter()
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     order = _make_order(execution_id, "kill-switch-control")
 
     submitted = await submit_order(
@@ -227,7 +229,9 @@ async def test_disabling_kill_switch_check_would_let_order_through(
     )
 
     adapter = _make_adapter()
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
     order = _make_order(execution_id, "kill-switch-mutation")
 
     submitted = await submit_order(

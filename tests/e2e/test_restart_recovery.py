@@ -47,6 +47,7 @@ from src.services.order_service.submit import OrderDeniedByRiskGateError, submit
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.foundation.execution_ownership.conftest import create_execution
+from tests.support.order_cleanup import delete_orders_by_client_order_id
 from tests.support.paper_sim_fakes import FakeReferenceAdapter, SeqRandom, fixed_adv, instant_sleep
 
 _NO_SLIPPAGE_FILL = FillModel(
@@ -264,13 +265,11 @@ async def test_submit_order_denied_until_recovery_completes_then_allowed(
         )
         assert submitted.status is OrderStatus.FILLED
     finally:
-        # Cleanup: update_from_exchange does not create order_events,
-        # so any order created by submit_order becomes residue for the
-        # shared DB sentinel. Always delete regardless of pass/fail.
+        # Cleanup: a synchronously filled order carries append-only order_events/
+        # fills that replay to its row (consistent, not residue) and cannot be
+        # deleted; only an eventless order (submit failed early) is removed.
         async with pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM orders WHERE client_order_id = $1", order.client_order_id
-            )
+            await delete_orders_by_client_order_id(conn, order.client_order_id)
 
 
 async def test_recovery_failure_injection_keeps_submissions_denied(

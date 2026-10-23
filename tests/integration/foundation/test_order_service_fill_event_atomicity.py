@@ -209,3 +209,27 @@ async def test_sync_fill_without_exchange_order_id_fails_closed(pool):
             "SELECT * FROM orders WHERE client_order_id = $1", order.client_order_id
         )
     assert order_row["status"] == "CREATED"
+
+
+async def test_sync_fill_replay_digest_matches_orders_row(pool):
+    """DoD(3) -- the replay_verify pair (projection of order_events + fills vs the
+    stored orders row) is byte-identical for a synchronously filled order,
+    including version and the fee fields."""
+    from scripts import replay_verify
+
+    user_id = await create_test_tenant(pool)
+    execution_id = await _create_running_execution(pool, user_id)
+    adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.FILLED)
+
+    order = _market_order(execution_id)
+    result = await submit_order(
+        order, user_id=user_id, adapter=adapter, pool=pool, pre_submit_gate=_allow_gate
+    )
+
+    async with pool.acquire() as conn:
+        pair = await replay_verify._order_pair(conn, result.order_id, cutover_at=None)
+
+    assert pair is not None
+    replayed, actual = pair
+    assert replayed == actual
+    assert actual["status"] == "FILLED"
