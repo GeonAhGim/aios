@@ -19,7 +19,7 @@ docs/audit/DEPTH_DC_RD.md#1767) D1 -> D2 증빙, 실 DB 대상.
 
 from __future__ import annotations
 
-import time
+import asyncio
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -325,7 +325,7 @@ async def test_append_delay_10x_exceeds_latency_budget(
     async def _slow_fetchrow(
         self: asyncpg.Connection, *args: object, **kwargs: object
     ) -> asyncpg.Record | None:
-        time.sleep(0.1)  # 10배 지연 주입
+        await asyncio.sleep(0.1)  # 10배 지연 주입 (non-blocking)
         return await original_fetchrow(self, *args, **kwargs)
 
     monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
@@ -399,7 +399,7 @@ async def test_list_history_delay_10x_exceeds_latency_budget(
     async def _slow_fetch(
         self: asyncpg.Connection, *args: object, **kwargs: object
     ) -> list[asyncpg.Record]:
-        time.sleep(0.5)  # 10배 지연 주입 (단건 fetch이므로 충분히 크게)
+        await asyncio.sleep(0.5)  # 10배 지연 주입 (non-blocking)
         result = await original_fetch(self, *args, **kwargs)
         return cast("list[asyncpg.Record]", result)
 
