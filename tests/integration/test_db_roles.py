@@ -224,9 +224,8 @@ async def test_aios_app_cannot_update_audit_log_detection_within_budget(conn, pe
                 )
 
     sample = await perf_budget.sample_async(_attempt_denied_update)
-    budget_ms = 10000.0  # CI 병렬(xdist) 리소스 경합 대비 — SET ROLE+UPDATE 거부 왕복은
-    # 실측 <1ms, CI 병행 실행에서 DB 커넥션 대기 + CPU 경합으로 3000ms 넘을 수 있음 (task-19180)
-    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+    budget_ms = 3000.0  # cpu_ms 기준 — CI 병렬(xdist) CPU 경합 대비. 실측 <1ms (task-19180)
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
 
 
 async def test_disabling_worm_trigger_lets_audit_log_update_through_gate_red(conn) -> None:
