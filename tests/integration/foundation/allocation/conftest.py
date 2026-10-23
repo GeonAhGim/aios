@@ -15,6 +15,10 @@ import pytest
 
 from tests.integration.conftest import create_test_user
 
+# Module-level registry: collect order_ids from create_order_with_fills
+# so teardown can delete them in FK-child-first order.
+_seeded_order_ids: list[UUID] = []
+
 
 def _asyncpg_dsn() -> str:
     url = os.environ["DATABASE_URL"]
@@ -34,6 +38,29 @@ async def pool():
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=32)
     yield p
     await p.close()
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_seeded_orders(pool):
+    """task-19092: DELETE seeded orders + child rows in FK-child-first order
+    so tests never leave eventless orders residue behind.
+
+    Order: fills → order_events → orders (order_events_order_id_fkey first).
+    """
+
+    async def _cleanup() -> None:
+        if not _seeded_order_ids:
+            return
+        ids = _seeded_order_ids
+        _seeded_order_ids.clear()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM fills WHERE order_id = ANY($1::uuid[])", ids)
+            await conn.execute("DELETE FROM order_events WHERE order_id = ANY($1::uuid[])", ids)
+            await conn.execute("DELETE FROM orders WHERE order_id = ANY($1::uuid[])", ids)
+
+    await _cleanup()
+    yield
+    await _cleanup()
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +93,7 @@ async def create_order_with_fills(
     """`orders` 1행 + `fills` N행을 시딩하고 `order_id`를 반환한다.
     `fills`는 (quantity, price) 튜플 목록이다."""
     order_id = uuid4()
+    _seeded_order_ids.append(order_id)
     total_quantity = sum((q for q, _ in fills), Decimal("0"))
     async with pool.acquire() as conn:
         await conn.execute(
