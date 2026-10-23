@@ -8,7 +8,7 @@ Each call creates a separate user with a unique email to maintain test isolation
 from __future__ import annotations
 
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -108,42 +108,43 @@ class NoopEventBus:
 # autouse fixture — task-19018: catch any test that leaves circuit_breaker_level
 # in a non-normal state (halted / emergency / warning / restricted) without
 # restoring it.  Restoration is the test's responsibility; this fixture only
-# detects leakage.  Skips silently when risk_gate table does not exist.
-#
-# NOTE: this fixture creates its own transient pool rather than depending on
-# the ``pool`` fixture, because not every integration test defines ``pool``
-# (e.g. pure mock-transport tests in test_bitget_p2p.py).  The transient pool
-# is closed in the teardown below.
+# detects leakage.  Skips silently when risk_gate table does not exist or
+# when the test uses mock transport (no pool fixture available).
 @pytest.fixture(autouse=True)
-async def _ensure_circuit_breaker_normal() -> None:
-    _dsn = _asyncpg_dsn()
-    pool = await asyncpg.create_pool(_dsn, min_size=1, max_size=1)
+async def _ensure_circuit_breaker_normal(
+    request: pytest.FixtureRequest,
+) -> AsyncIterator[None]:
+    # Some integration sub-tests (e.g. bitget mock-transport tests) do not
+    # need a database; skip silently when pool is unavailable.
     try:
-        async with pool.acquire() as conn:
-            has_risk_gate = await conn.fetchval(
-                """
-                SELECT to_regclass('risk_gate') IS NOT NULL
-                """
-            )
-        if not has_risk_gate:
-            yield
-            return
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
-                "WHERE circuit_breaker_level NOT IN ('normal',)"
-            )
+        pool = request.getfixturevalue("pool")
+    except pytest.FixtureLookupError:
         yield
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
-                "WHERE circuit_breaker_level NOT IN ('normal',)"
-            )
-            final = await conn.fetchval("SELECT circuit_breaker_level FROM risk_gate LIMIT 1")
-        if final != "normal":
-            raise AssertionError(
-                f"circuit_breaker_level not restored to 'normal' after test "
-                f"(final={final!r}). The test that raised it must restore it."
-            )
-    finally:
-        await pool.close()
+        return
+
+    async with pool.acquire() as conn:
+        has_risk_gate = await conn.fetchval(
+            """
+            SELECT to_regclass('risk_gate') IS NOT NULL
+            """
+        )
+    if not has_risk_gate:
+        yield
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
+            "WHERE circuit_breaker_level NOT IN ('normal',)"
+        )
+    yield
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
+            "WHERE circuit_breaker_level NOT IN ('normal',)"
+        )
+        final = await conn.fetchval("SELECT circuit_breaker_level FROM risk_gate LIMIT 1")
+    if final != "normal":
+        raise AssertionError(
+            f"circuit_breaker_level not restored to 'normal' after test "
+            f"(final={final!r}). The test that raised it must restore it."
+        )
