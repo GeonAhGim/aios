@@ -232,6 +232,14 @@ async def test_suspended_account_perf_goes_red_with_io_delay_injection(
             label="trust/status+delay",
         )
 
+    # 지연 주입으로 circuit_breaker_level 이 'halted' 될 수 있으므로
+    # sentinel(gate-red reproduction) 종료 후 반드시 정상 복원
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
+
 
 # ── negative tests (>= 3) ──────────────────────────────────────────────────
 
@@ -568,6 +576,14 @@ async def test_register_perf_goes_red_with_io_delay_injection(
             warmup=1,
             calibration_n=3,
             label="single register+delay",
+        )
+
+    # 지연 주입으로 circuit_breaker_level 이 'halted' 될 수 있으므로
+    # sentinel(gate-red reproduction) 종료 후 반드시 정상 복원
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
         )
 
 
