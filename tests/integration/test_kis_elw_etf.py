@@ -221,7 +221,7 @@ async def test_get_elw_price_completes_within_budget(perf_budget):
     iterations = 5
     timings_ms = []
     for _ in range(iterations):
-        measured = await perf_budget.sample_async(lambda: adapter.get_elw_price("58J300"))
+        measured = await perf_budget.sample_async(lambda: adapter.get_elw_price("58J300"), batch=8)
         timings_ms.append(measured.cpu_ms)
     elapsed_ms = sum(timings_ms) / len(timings_ms)
 
@@ -233,7 +233,8 @@ async def test_get_etf_price_completes_within_budget(perf_budget):
     """Mock transport 기반 시세 조회는 실제 I/O가 없어 CPU-only 작업이다.
     병렬 CI 실행(`pytest_perf_parallel`)에서 wall_ms는 다른 워커의 CPU
     경합으로 왜곡되므로, contamination-free한 cpu_ms(`time.process_time()`
-    기반)로 예산 단언한다."""
+    기반)로 예산 단언한다. batch=8은 Windows `time.process_time()` 약
+    15.6ms 양자화 오차를 tick/batch로 줄인다(task-19390과 동일 수법)."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -248,7 +249,7 @@ async def test_get_etf_price_completes_within_budget(perf_budget):
     iterations = 5
     timings_ms = []
     for _ in range(iterations):
-        measured = await perf_budget.sample_async(lambda: adapter.get_etf_price("069500"))
+        measured = await perf_budget.sample_async(lambda: adapter.get_etf_price("069500"), batch=8)
         timings_ms.append(measured.cpu_ms)
     elapsed_ms = sum(timings_ms) / len(timings_ms)
 
