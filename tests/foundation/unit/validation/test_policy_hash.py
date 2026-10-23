@@ -16,6 +16,7 @@ from src.foundation.validation.domain.check_result import HARD_FAIL_CODES, Check
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from src.foundation.validation.domain.rules import evaluate_validation_policy
+from tests.support.coverage_pause import paused_coverage
 from tests.support.perf_budget import PerfBudget
 
 _DOMAIN_DIR = Path(__file__).resolve().parents[4] / "src" / "foundation" / "validation" / "domain"
@@ -276,14 +277,17 @@ def test_policy_hash_sleep_injection_does_not_affect_cpu_measurement(
         _fake_sleep(0)
         return policy.policy_hash()
 
-    # best_of: 3회 샘플 중 CPU 최소값 — CI 경합 노이즈 제거
-    sample = perf_budget.best_of(_build_once, n=3, warmup=1, batch=5)
+    # CI의 --cov=src line-tracer 오버헤드로 policy_hash()가 1ms를 넘을 수 있다.
+    # paused_coverage()로 coverage를 완전히 멈춘 뒤 CPU 측정 구간을 감싼다.
+    with paused_coverage():
+        # best_of: 3회 샘플 중 CPU 최소값 — CI 경합 노이즈 제거
+        sample = perf_budget.best_of(_build_once, n=3, warmup=1, batch=5)
 
-    # sleep 주입에도 CPU 시간이 1ms 미만이어야 함
-    assert sample.cpu_ms < 1.0, (
-        f"sleep 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — "
-        f"sleep은 CPU 측정에 영향을 주지 않아야 함 (budget<1ms)"
-    )
+        # sleep 주입에도 CPU 시간이 1ms 미만이어야 함
+        assert sample.cpu_ms < 1.0, (
+            f"sleep 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — "
+            f"sleep은 CPU 측정에 영향을 주지 않아야 함 (budget<1ms)"
+        )
 
 
 # --------------------------------------------------------------------------
