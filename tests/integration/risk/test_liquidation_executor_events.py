@@ -128,6 +128,7 @@ async def test_event_write_failure_rolls_back_order_insert(pool, ctx, monkeypatc
     assert n == 0
 
 
+@pytest.mark.perf
 async def test_send_path_latency_budget(pool, ctx):
     started = time.perf_counter()
     await _send_one_slice(pool, ctx, FakeExchangeAdapter())
