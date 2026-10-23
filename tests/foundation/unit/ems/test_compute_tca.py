@@ -161,7 +161,7 @@ async def test_compute_tca_rejects_non_positive_arrival_price_cpu_time_converges
         except InvalidArrivalPriceError:
             pass  # expected — CPU 측정은 예외 발생 전까지의 시간을 반영
 
-    sample = await perf_budget.sample_async(_call, batch=1)
+    sample = await perf_budget.sample_async(_call, batch=8)
 
     assert sample.cpu_ms < 1.0, (
         f"InvalidArrivalPriceError 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
@@ -205,7 +205,7 @@ async def test_compute_tca_rejects_non_positive_arrival_price_cpu_budget_catches
 
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
     with pytest.raises(AssertionError):
-        sample = await perf_budget.sample_async(_call, batch=1)
+        sample = await perf_budget.sample_async(_call, batch=8)
         assert sample.cpu_ms < 1.0, (
             f"InvalidArrivalPriceError 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
             "입력 검증만 수행하므로 사실상 0ms에 수렴해야 함 (budget<1ms)"
