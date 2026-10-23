@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 
 import asyncpg
 import pytest
@@ -22,6 +21,7 @@ from tests.support.db import (
     ensure_worker_database,
     session_database_url,
 )
+from tests.support.perf_budget import PerfBudget
 
 # ── Negative tests: invalid inputs rejected ──────────────────────────
 
@@ -335,7 +335,7 @@ def test_with_database_preserves_query_and_fragment() -> None:
 
 @pytest.mark.perf
 @pytest.mark.asyncio
-async def test_ensure_worker_database_clone_meets_latency_budget() -> None:
+async def test_ensure_worker_database_clone_meets_latency_budget(perf_budget: PerfBudget) -> None:
     """`CREATE DATABASE ... TEMPLATE` 복제가 예산 내에 끝난다.
 
     모듈 docstring은 "마이그레이션 재실행 없이 ~1초"를 주장한다 — 이 테스트는
@@ -348,12 +348,22 @@ async def test_ensure_worker_database_clone_meets_latency_budget() -> None:
     """
     template_url = os.environ["TEST_DATABASE_URL"]
     worker_id = "permtest"
-    budget_sec = 10.0
+    budget_ms = 10.0 * 1000
 
-    start = time.perf_counter()
-    worker_url = await ensure_worker_database(template_url, worker_id)
-    elapsed = time.perf_counter() - start
-    print(f"[PLT-36 clone] ensure_worker_database elapsed={elapsed:.3f}s (budget<{budget_sec}s)")
+    # The clone runs server-side, so this process's CPU time (cpu_ms) barely
+    # moves; judge on wall_ms. One clone takes ~1s >> the 15.6ms process_time
+    # tick, so batch=1 has no quantization error. Each timed call is
+    # ensure + drop so every repeat really clones (ensure is idempotent).
+    async def _clone_once() -> str:
+        url = await ensure_worker_database(template_url, worker_id)
+        await drop_worker_database(template_url, worker_id)
+        return url
+
+    samples = await perf_budget.samples_async(_clone_once, n=3, batch=1)
+    best = min(samples, key=lambda s: s.wall_ms)
+    worker_url = str(best.result)
+    elapsed_ms = best.wall_ms
+    print(f"[PLT-36 clone] ensure+drop wall={elapsed_ms:.1f}ms (budget<{budget_ms:.0f}ms)")
 
     # `drop_worker_database` reuses `_admin_connect_with_retry` for its admin
     # connection instead of a raw `asyncpg.connect` -- this cleanup used to open
@@ -365,7 +375,10 @@ async def test_ensure_worker_database_clone_meets_latency_budget() -> None:
     assert _db_name(worker_url) == _db_name(session_database_url(template_url, worker_id))
     await drop_worker_database(template_url, worker_id)
 
-    assert elapsed < budget_sec, f"워커 DB 복제가 예산({budget_sec}s)을 초과: {elapsed:.3f}s"
+    assert elapsed_ms < budget_ms, (
+        f"워커 DB 복제가 예산({budget_ms:.0f}ms)을 초과: "
+        f"{perf_budget.describe(best, budget_ms=budget_ms)}"
+    )
 
 
 # ── Gate-red/green repro: scripts/setup_test_db.py CLI exit code 계약 ──
