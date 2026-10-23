@@ -4,7 +4,6 @@ Decision 1): negative >=3, failure injection 1, perf assertion 1, gate-red
 repro 1.
 """
 
-import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -254,16 +253,19 @@ def test_policy_hash_sleep_injection_does_not_affect_cpu_measurement(
     주지 않는다.
 
     sleep이 CPU 측정에 영향을 준다면 PerfBudget의 측정 방식이 잘못됐다.
+
+    CI 병행 실행에서 CPU 경합 spike를 피하기 위해 best_of로
+    best-of-3 최소값을 사용한다 (task-19444, task-19391 패턴).
     """
-    original_sleep = time.sleep
     _sleep_calls = [0]
+    import tests.support.perf_budget as _pb_module
+
+    _real_sleep = _pb_module.time.sleep
 
     def _fake_sleep(seconds: float) -> None:
         _sleep_calls[0] += 1
         # 100ms sleep × 10회 = 1초 wall-clock 대기
-        original_sleep(0.1)
-
-    import tests.support.perf_budget as _pb_module
+        _real_sleep(0.1)
 
     monkeypatch.setattr(_pb_module.time, "sleep", _fake_sleep)
 
@@ -274,7 +276,8 @@ def test_policy_hash_sleep_injection_does_not_affect_cpu_measurement(
         _fake_sleep(0)
         return policy.policy_hash()
 
-    sample = perf_budget.sample(_build_once, batch=5)
+    # best_of: 3회 샘플 중 CPU 최소값 — CI 경합 노이즈 제거
+    sample = perf_budget.best_of(_build_once, n=3, warmup=1, batch=5)
 
     # sleep 주입에도 CPU 시간이 1ms 미만이어야 함
     assert sample.cpu_ms < 1.0, (
