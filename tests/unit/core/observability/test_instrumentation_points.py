@@ -144,12 +144,14 @@ async def test_submit_order_accepted_records_submit_metrics(
         return order
 
     async def fake_update_from_exchange(
-        conn: object, order: Order, *, expected_status: object
+        conn: object, order: Order, *, expected_status: object, actor_subject_id: object
     ) -> Order:
         return order
 
     monkeypatch.setattr(repository_module, "insert", fake_insert)
-    monkeypatch.setattr(repository_module, "update_from_exchange", fake_update_from_exchange)
+    monkeypatch.setattr(
+        repository_module, "update_from_exchange_with_fill_event", fake_update_from_exchange
+    )
 
     adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.SUBMITTED)
     spy = _SpyMetrics()

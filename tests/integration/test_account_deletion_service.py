@@ -14,10 +14,13 @@ import pytest
 from dotenv import dotenv_values
 
 from src.core.loader.risk_policy_loader import load_risk_policy
+from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
+from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from src.services.account_deletion_service import AccountDeletionError, AccountDeletionService
 from src.services.auth_service import AuthService
 from src.services.execution_service import ExecutionService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
+from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 
 JWT_SECRET = "test-secret-key-not-for-production"
 STRONG_PASSWORD = "Str0ng!Passw0rd"
@@ -74,6 +77,9 @@ async def _create_approved_strategy(pool, owner_user_id):
 
 
 async def _create_running_execution(pool, user_id):
+    await activate_mandate_with_defaults(
+        PostgresMandateRepository(pool), PostgresTrustRepository(pool), tenant_id=user_id
+    )
     strategy_id, version = await _create_approved_strategy(pool, user_id)
     async with pool.acquire() as conn:
         await conn.execute(

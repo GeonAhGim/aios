@@ -144,16 +144,16 @@ class TestBuyExisting:
         assert sample.cpu_ms < 1.0, "control must pass budget before injection"
 
         # Inject cumulative CPU delay: each process_time() call adds
-        # 0.01 * call_count seconds. Inside sample(), the delta between
-        # start and end call gains ~0.01 s = 10 ms per batch iteration.
-        # With batch=10: cpu_ms = 10 ms * 1000 / 10 = 10 ms,
+        # 0.1 * call_count seconds. Inside sample(), the delta between
+        # start and end call gains ~0.1 s = 100 ms per measured batch.
+        # With batch=10: cpu_ms = 100 ms / 10 = 10 ms,
         # well above the 1 ms budget.
         call_count = 0
 
         def slow_process_time() -> float:
             nonlocal call_count
             call_count += 1
-            return _original_process_time() + 0.01 * call_count
+            return _original_process_time() + 0.1 * call_count
 
         with patch.object(time, "process_time", side_effect=slow_process_time):
             with pytest.raises(
@@ -335,16 +335,16 @@ class TestFailureInjectionCPU:
         assert sample.cpu_ms < 1.0, "control must pass budget before injection"
 
         # Inject cumulative CPU delay: each process_time() call adds
-        # 0.01 * call_count seconds. Inside sample(), the delta between
-        # start and end call gains ~0.01 s = 10 ms per batch iteration.
-        # With batch=10: cpu_ms = 10 ms * 1000 / 10 = 10 ms,
+        # 0.1 * call_count seconds. Inside sample(), the delta between
+        # start and end call gains ~0.1 s = 100 ms per measured batch.
+        # With batch=10: cpu_ms = 100 ms / 10 = 10 ms,
         # well above the 1 ms budget.
         call_count = 0
 
         def slow_process_time() -> float:
             nonlocal call_count
             call_count += 1
-            return _original_process_time() + 0.01 * call_count
+            return _original_process_time() + 0.1 * call_count
 
         with patch.object(time, "process_time", side_effect=slow_process_time):
             with pytest.raises(
