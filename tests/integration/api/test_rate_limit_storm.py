@@ -22,7 +22,8 @@ from src.api.contracts.error_codes import ErrorCode
 from src.core.rate_limit.limiter import Decision, InMemoryTokenBucket, set_limiter
 from src.core.rate_limit.policy import POLICIES, RateLimitPolicy
 from src.main import app
-from tests.support.perf_detection import assert_async_p99_ms, assert_slowdown_detected
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_detection import assert_slowdown_detected
 
 # ADR-2026-09-09-C Decision 1 축별 성능 예산표에 rate limiter 전용 항목이 없어
 # 가장 가까운 유사 항목("사전거래 게이트 p99 5ms" — 이쪽도 I/O 없이 인메모리
@@ -172,11 +173,23 @@ async def test_broken_limiter_backend_fails_closed_not_silently_allowed(
 
 @pytest.mark.perf
 async def test_acquire_p99_latency_within_budget() -> None:
-    """PLT-25: adaptive batch means, ms throughout, original 5ms budget."""
-    bucket = InMemoryTokenBucket(clock=time.monotonic)
-    await assert_async_p99_ms(
+    """PLT-25: cpu_ms p99, original 5ms budget.
+
+    CI 병렬 워커가 코어를 뺏으면 wall-clock이 부풀어 오른다.
+    time.process_time() 기준 cpu_ms로 재면 경합 노이즈가 제거된다.
+    예산(_ACQUIRE_P99_BUDGET_SECONDS = 0.005s)은 그대로 유지.
+    """
+    bucket = InMemoryTokenBucket(clock=time.process_time)
+    perf = PerfBudget()
+    samples = await perf.samples_async(
         lambda: bucket.acquire(POLICIES["read"], "perf:subject-1"),
-        budget_ms=_ACQUIRE_P99_BUDGET_SECONDS * 1000,
+        n=20,
+    )
+    cpu_ms_list = sorted(s.cpu_ms for s in samples)
+    p99_idx = min(int(0.99 * len(cpu_ms_list)), len(cpu_ms_list) - 1)
+    p99_ms = cpu_ms_list[p99_idx]
+    assert p99_ms < _ACQUIRE_P99_BUDGET_SECONDS * 1000, (
+        f"p99=cpu_ms={p99_ms:.6f}ms budget={_ACQUIRE_P99_BUDGET_SECONDS * 1000}ms"
     )
 
 
@@ -184,16 +197,23 @@ async def test_acquire_p99_latency_within_budget() -> None:
 async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The identical benchmark must pass normally and reject a 10x lock delay."""
+    """CPU 기반 측정: asyncio.sleep 는 CPU 시간을 안 먹으므로,
+    bucket.acquire() 앞에 동기 busy-wait(10ms) 를 주입해 CPU 시간을 부풀린다.
+    original 5ms budget 가 반드시 초과되어야 한다."""
     await test_acquire_p99_latency_within_budget()
-    original_acquire = asyncio.Lock.acquire
+    from src.core.rate_limit.limiter import InMemoryTokenBucket
 
-    async def delayed_acquire(lock: asyncio.Lock) -> bool:
-        await asyncio.sleep(_ACQUIRE_P99_BUDGET_SECONDS * 10)
-        return await original_acquire(lock)
+    original_acquire = InMemoryTokenBucket.acquire
+
+    async def slow_acquire(self, policy, key):
+        # 동기 busy-wait — CPU 시간을 실제로 소비 (asyncio.sleep 은 안消费)
+        target = time.process_time() + 0.010  # 10ms CPU
+        while time.process_time() < target:
+            pass
+        return await original_acquire(self, policy, key)
 
     with monkeypatch.context() as patch:
-        patch.setattr(asyncio.Lock, "acquire", delayed_acquire)
+        patch.setattr(InMemoryTokenBucket, "acquire", slow_acquire)
         await assert_slowdown_detected(test_acquire_p99_latency_within_budget)
 
 
