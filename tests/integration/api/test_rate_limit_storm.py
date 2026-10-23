@@ -205,7 +205,9 @@ async def test_gate_red_reproduction_acquire_p99_budget_guard_catches_lock_regre
 
     original_acquire = InMemoryTokenBucket.acquire
 
-    async def slow_acquire(self, policy, key):
+    async def slow_acquire(
+        self: InMemoryTokenBucket, policy: RateLimitPolicy, key: str
+    ) -> Decision:
         # 동기 busy-wait — CPU 시간을 실제로 소비 (asyncio.sleep 은 안消费)
         target = time.process_time() + 0.010  # 10ms CPU
         while time.process_time() < target:
