@@ -349,7 +349,10 @@ def test_detect_gaps_perf_budget_turns_red_with_10x_cpu_burn(
         return detect_gaps(candles, Timeframe.H1, sessions)
 
     # budget 10ms — CPU 부하 주입으로 실제 CPU 시간이 10ms를 크게 넘으면 적색
-    perf_budget.assert_within(measure, budget_ms=10, batch=10)
+    # failure injection: 이 테스트는 assert_within가 AssertionError를 raise하는 것을
+    # 검증한다 — 성능 게이트가 실제로 검출력을 갖는지 확인하는 실패주입 테스트
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(measure, budget_ms=10, batch=10)
 
 
 def test_detect_gaps_is_deterministic_under_concurrent_thread_access() -> None:
