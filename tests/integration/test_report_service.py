@@ -1,4 +1,5 @@
 """20.1 통합테스트 — 실제 dev DB 대상."""
+
 import json
 from datetime import date, timedelta
 from decimal import Decimal
@@ -35,7 +36,9 @@ def execution_service(pool):
     return ExecutionService(
         pool,
         load_risk_policy(),
-        pre_start_gate=make_foundation_pre_submit_gate(pool, require_mandate=False),
+        pre_start_gate=make_foundation_pre_submit_gate(
+            pool, require_mandate=False, require_compliance_mandate=False
+        ),
     )
 
 
@@ -109,9 +112,7 @@ async def _close_position(pool, user_id, execution_id, strategy_id, *, realized_
 async def test_empty_period_returns_empty_report_not_error(report_service, pool):
     user_id = await create_test_tenant(pool)
 
-    report = await report_service.generate_report(
-        user_id, date(2020, 1, 1), date(2020, 1, 31)
-    )
+    report = await report_service.generate_report(user_id, date(2020, 1, 1), date(2020, 1, 31))
 
     assert report.trade_count == 0
     assert report.total_return == Decimal("0")
@@ -125,16 +126,28 @@ async def test_report_matches_manually_computed_totals(execution_service, report
 
     today = date.today()
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("100"), closed_at=today,
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("100"),
+        closed_at=today,
     )
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("-40"), closed_at=today,
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("-40"),
+        closed_at=today,
     )
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("60"), closed_at=today,
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("60"),
+        closed_at=today,
     )
 
     report = await report_service.generate_report(
@@ -152,12 +165,20 @@ async def test_positions_outside_period_excluded(execution_service, report_servi
     today = date.today()
 
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("500"), closed_at=today - timedelta(days=100),
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("500"),
+        closed_at=today - timedelta(days=100),
     )
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("50"), closed_at=today,
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("50"),
+        closed_at=today,
     )
 
     report = await report_service.generate_report(
@@ -177,16 +198,28 @@ async def test_max_drawdown_computed_from_daily_cumulative_curve(
 
     # day0: +100 (peak=100), day1: -150 (cum=-50, drawdown=150), day2: +30 (cum=-20)
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("100"), closed_at=today - timedelta(days=2),
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("100"),
+        closed_at=today - timedelta(days=2),
     )
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("-150"), closed_at=today - timedelta(days=1),
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("-150"),
+        closed_at=today - timedelta(days=1),
     )
     await _close_position(
-        pool, user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("30"), closed_at=today,
+        pool,
+        user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("30"),
+        closed_at=today,
     )
 
     report = await report_service.generate_report(
@@ -269,9 +302,7 @@ async def test_nonexistent_execution_id_filter_returns_empty(
     assert report.total_return == Decimal("0")
 
 
-async def test_other_users_positions_excluded_from_report(
-    execution_service, report_service, pool
-):
+async def test_other_users_positions_excluded_from_report(execution_service, report_service, pool):
     """잘못된 입력/경계 케이스: 다른 tenant의 포지션이 user_id 필터를 우회해
     새어 들어가지 않는다(테넌트 격리 불변식)."""
     owner_user_id = await create_test_tenant(pool)
@@ -282,8 +313,12 @@ async def test_other_users_positions_excluded_from_report(
     today = date.today()
 
     await _close_position(
-        pool, owner_user_id, execution_id, strategy_id,
-        realized_pnl=Decimal("100"), closed_at=today,
+        pool,
+        owner_user_id,
+        execution_id,
+        strategy_id,
+        realized_pnl=Decimal("100"),
+        closed_at=today,
     )
 
     report = await report_service.generate_report(

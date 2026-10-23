@@ -93,7 +93,9 @@ async def test_cb_warning_or_restricted_does_not_regress_pre_submit(
 
     await _set_cb_level(pool, level)
 
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
 
     result = await submit_order(
         order,
@@ -115,7 +117,9 @@ async def test_cb_normal_does_not_regress_pre_submit(pool: asyncpg.Pool) -> None
     order = make_order(execution_id)
     adapter = RecordingAdapter()
 
-    gate = make_foundation_pre_submit_gate(pool, require_mandate=False)
+    gate = make_foundation_pre_submit_gate(
+        pool, require_mandate=False, require_compliance_mandate=False
+    )
 
     result = await submit_order(
         order,

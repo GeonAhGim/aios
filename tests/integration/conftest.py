@@ -4,6 +4,7 @@ After 11.1, user_id FKs span many tables. Integration tests that insert
 rows into those tables must create a users row first (to avoid FK violations).
 Each call creates a separate user with a unique email to maintain test isolation.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -11,6 +12,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import asyncpg
+import pytest
 
 from tests.support.entities_seed import bootstrap_default_hierarchy
 
@@ -46,9 +48,7 @@ async def create_test_tenant(
     un-bootstrapped branch or create the default-id rows themselves."""
     user_id = await create_test_user(pool)
     async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", user_id
-        )
+        await conn.execute("INSERT INTO tenant (id, kind) VALUES ($1, 'PERSONAL')", user_id)
     if bootstrap_default_hierarchy_rows:
         await bootstrap_default_hierarchy(pool, user_id)
     return user_id
@@ -85,3 +85,37 @@ class NoopEventBus:
 
     async def stop(self) -> None:
         return None
+
+
+# autouse fixture — task-19018: catch any test that leaves circuit_breaker_level
+# in a non-normal state (halted / emergency / warning / restricted) without
+# restoring it.  Restoration is the test's responsibility; this fixture only
+# detects leakage.  Skips silently when risk_gate table does not exist.
+@pytest.fixture(autouse=True)
+async def _ensure_circuit_breaker_normal(pool: asyncpg.Pool) -> None:
+    async with pool.acquire() as conn:
+        has_risk_gate = await conn.fetchval(
+            """
+            SELECT to_regclass('risk_gate') IS NOT NULL
+            """
+        )
+    if not has_risk_gate:
+        yield
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
+            "WHERE circuit_breaker_level NOT IN ('normal',)"
+        )
+    yield
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE risk_gate SET circuit_breaker_level = 'normal' "
+            "WHERE circuit_breaker_level NOT IN ('normal',)"
+        )
+        final = await conn.fetchval("SELECT circuit_breaker_level FROM risk_gate LIMIT 1")
+    if final != "normal":
+        raise AssertionError(
+            f"circuit_breaker_level not restored to 'normal' after test "
+            f"(final={final!r}). The test that raised it must restore it."
+        )
