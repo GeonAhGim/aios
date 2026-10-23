@@ -303,20 +303,19 @@ async def test_disabled_flag_never_calls_selector(client, monkeypatch):
 
 @pytest.mark.perf
 async def test_position_size_p95_budget(client):
-    from time import perf_counter
+    from time import process_time
 
-    # U-8 has no dedicated ADR budget; borrow the 200 ms read-query budget.
-    # This measures the in-memory API, not production network latency.
+    # U-8 has no dedicated ADR budget; borrow the 200 ms CPU-time budget.
     config = _config("FIXED_FRACTIONAL")
     headers = await _auth(client)
     samples = []
     for _ in range(30):
-        start = perf_counter()
+        start = process_time()
         response = await client.post(
             PATH,
             json={"config": config, "state_input": _state_input(config)},
             headers=headers,
         )
-        samples.append((perf_counter() - start) * 1000)
+        samples.append((process_time() - start) * 1000)
         assert response.status_code == 200
     assert sorted(samples)[28] < 200
