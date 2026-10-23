@@ -65,7 +65,7 @@ def test_krx_close_cpu_budget_passes_on_normal_input(
     def lookup() -> None:
         cal.sessions_for(date(2026, 9, 4))
 
-    sample = perf_budget.sample(lookup, batch=1024)
+    sample = perf_budget.sample(lookup, batch=16384)
     assert sample.cpu_ms > 0, (
         f"단일 호출 CPU 측정이 0 ms로 수렴했습니다. "
         f"Windows quantisation tick({sample.cpu_ms:.4f}ms)이 예산 단언을 "
