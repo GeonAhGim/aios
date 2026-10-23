@@ -189,9 +189,11 @@ async def test_compute_tca_rejects_non_positive_arrival_price_cpu_budget_catches
         _fake_time[0] += 0.01  # +10ms per call → >> 1ms budget
         return _fake_time[0]
 
-    import time
+    import sys
 
-    monkeypatch.setattr(time, "process_time", _fake_process_time)
+    perf_budget_mod = sys.modules["tests.support.perf_budget"]
+
+    monkeypatch.setattr(perf_budget_mod.time, "process_time", _fake_process_time)
 
     repo = FakeTcaResultRepository()
 
