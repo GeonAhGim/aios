@@ -113,11 +113,11 @@ async def test_replay_deterministic_gate_red_with_delayed_fills(pool, monkeypatc
         await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
 
-    # 2초 지연 주입 -- 75스트림 × 2조회 × 2초 = 300초의 CPU/CPU 대기 발생
+    # 4초 지연 주입 -- calibration 편차에도 ratio>500x 유지
     monkeypatch.setattr(
         FillsRepository,
         "list_for_order",
-        delayed_async(FillsRepository.list_for_order, 2.0),
+        delayed_async(FillsRepository.list_for_order, 4.0),
     )
 
     sample = await RelativeBudget().measure_async(
@@ -322,11 +322,11 @@ async def test_replay_verify_gate_red_reproduction_with_delayed_fills(pool, monk
         await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
 
-    # 2초 지연 주입 -- 75스트림 × 2조회 × 2초 = 300초의 CPU/CPU 대기 발생
+    # 4초 지연 주입 -- calibration 편차에도 ratio>500x 유지
     monkeypatch.setattr(
         FillsRepository,
         "list_for_order",
-        delayed_async(FillsRepository.list_for_order, 2.0),
+        delayed_async(FillsRepository.list_for_order, 4.0),
     )
 
     # 같은 단언 -- 지연 주입으로 ratio가 500x를 압도적으로 초과해야 함
