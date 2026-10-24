@@ -89,14 +89,11 @@ def test_build_graph_throughput_budget(tmp_path: Path) -> None:
     assert sample.ratio < 100.0, budget.describe(sample, max_ratio=100.0)
 
 
+@pytest.mark.parametrize("calibration_seconds", [0.05, 0.2, 1.0])
 def test_build_graph_throughput_budget_detection_fails_on_10x_delay(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, calibration_seconds: float
 ) -> None:
-    """검출력 확인: _read_file에 인위적 지연을 주입하면 CPU 예산 단언이 적색으로 떨어진다.
-
-    단언이 허울이 아닌지 검증 — 정상 입력에서 녹색인 단언이 지연을 주입한
-    입력에서 반드시 적색(assertion 실패)으로 떨어져야 한다.
-    """
+    """실제 그래프 경로의 10배 지연을 호스트 속도와 무관하게 검출한다."""
     _touch_pkg(tmp_path, "src", "foundation")
     for i in range(300):
         _write(
@@ -107,28 +104,51 @@ def test_build_graph_throughput_budget_detection_fails_on_10x_delay(
 
     budget = RelativeBudget()
     original_read_file = cil._read_file
+    elapsed = 0.0
+    slowdown = 1.0
+    reads = 0
 
-    # 300 files x 50ms = 15s serial I/O. With wall-clock mode this dwarfs
-    # the ~100ms calibration loop, pushing ratio well above 100x.
-    def _slow_read_file(path: Path) -> str:
-        time.sleep(0.05)  # 50ms per file
-        return str(original_read_file(path))
+    # This is a detector test, not a host benchmark (covered above). Fixed
+    # sleep / real calibration ratios fall below 100 on contended runners.
+    # Advance a local CPU clock at the real read boundary instead; do not
+    # stub measure(), the graph builder, or the budget assertion.
+    def _clock(mode: str):
+        assert mode == "cpu"
+        return lambda: elapsed
 
-    monkeypatch.setattr(cil, "_read_file", _slow_read_file)
-    monkeypatch.setattr(cil, "SCAN_WORKERS", 1)  # serial to amplify delay
+    def _calibrate() -> None:
+        nonlocal elapsed
+        elapsed += calibration_seconds
 
-    graph_holder: dict[str, dict[str, set[str]]] = {}
+    def _read_file(path: Path) -> str:
+        nonlocal elapsed, reads
+        text = original_read_file(path)
+        elapsed += calibration_seconds * 20 / 302 * slowdown
+        reads += 1
+        return str(text)
+
+    monkeypatch.setattr(budget, "_clock", _clock)
+    monkeypatch.setattr(cil, "_read_file", _read_file)
+    monkeypatch.setattr(cil, "SCAN_WORKERS", 1)
 
     def _build() -> None:
-        graph_holder["graph"] = cil.build_graph(tmp_path)
+        graph = cil.build_graph(tmp_path)
+        assert len(graph) == 302
+        assert "src.foundation.mod_1" in graph["src.foundation.mod_0"]
 
-    # With heavy artificial delay the ratio should exceed 100x budget.
-    # If this assertion PASSES the test itself is a defect (undetectable budget).
-    sample = budget.measure(_build, mode="wall", n=1, warmup=0)
-    assert sample.ratio >= 100.0, (
-        f"검출력 실패: 인위적 지연 주입에도 예산 100x을 초과하지 못함 — "
-        f"ratio={sample.ratio:.3f}x. 단언이 허울임을 의미."
-    )
+    def _check_budget():
+        return budget.assert_within(
+            _build, max_ratio=100.0, mode="cpu", n=1, warmup=0,
+            calibration_n=1, calibration_fn=_calibrate,
+        )
+
+    sample = _check_budget()
+    assert sample.ratio == pytest.approx(20.0)
+    assert reads == 302
+    slowdown = 10.0
+    with pytest.raises(AssertionError, match=r"ratio=200\.000x budget<100\.000x"):
+        _check_budget()
+    assert reads == 604
 
 
 @pytest.mark.perf
