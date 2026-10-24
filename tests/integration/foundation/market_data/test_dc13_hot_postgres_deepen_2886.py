@@ -268,10 +268,12 @@ async def test_write_batch_rejects_negative_volume_delay_injection_fails(
             accepted=1,
         )
 
-        # write_batch에 0.5s 지연 주입 — 정상 candle 이지만 지연으로 인해
-        # 성능 단언이 실패해야 함(gate-red 재현)
+        # write_batch에 1.0s 지연 주입 — 정상 candle 이지만 지연으로 인해
+        # 성능 단언이 실패해야 함(gate-red 재현).
+        # calibration_ms ≈ 130ms 이므로 ratio > 5.0 보장: op_ms > 650ms 필요.
+        # 0.5s 는 ratio ≈ 4.0x 로 예산을 넘지 못해 테스트가 실패했음.
         original_write_batch = hot_storage.write_batch
-        injected = delayed_async(original_write_batch, 0.5)
+        injected = delayed_async(original_write_batch, 1.0)
         monkeypatch.setattr(hot_storage, "write_batch", injected)
 
         # 지연 주입 후 — 정상 입력에서 녹색, 지연 주입에서 적색 단언 검증
