@@ -5,6 +5,7 @@ RATCHET-split(task-4222) — 원 `test_db_schema.py`(1176줄)에서 분리.
 Spec: 04_db_schema_v1.7.md.
 """
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -24,6 +25,47 @@ from src.foundation.ledger.domain.chart_of_accounts import (
     PLATFORM_REFUND_RESERVE,
 )
 from tests.integration.db_schema.conftest import insert_audit_event, insert_ledger_entry
+from tests.support.db import drop_worker_database, ensure_worker_database, template_database_url
+
+
+@pytest.fixture
+async def raw_conn():
+    """가짜 해시를 쓰는 스키마 검사는 공유 원장에 WORM 행을 남기지 않는다."""
+    template = template_database_url()
+    clone = "lc6_" + os.environ.get("PYTEST_XDIST_WORKER", "m")
+    url = await ensure_worker_database(template, clone)
+    try:
+        conn = await asyncpg.connect(url.replace("postgresql+asyncpg://", "postgresql://"))
+        try:
+            yield conn
+        finally:
+            await conn.close()
+    finally:
+        await drop_worker_database(template, clone)
+
+
+async def test_raw_ledger_seed_does_not_pollute_worker_database(raw_conn):
+    """결함 주입: 가짜 WORM 해시가 후속 LC-10 검증의 DB로 유출되면 실패한다."""
+    shared = await asyncpg.connect(
+        os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+    )
+    try:
+        assert await raw_conn.fetchval("SELECT current_database()") != await shared.fetchval(
+            "SELECT current_database()"
+        )
+        audit_id = await insert_audit_event(raw_conn)
+        entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_id)
+        assert await raw_conn.fetchval(
+            "SELECT 1 FROM ledger_journal_entry WHERE entry_id = $1", entry_id
+        ) == 1
+        assert await shared.fetchval(
+            "SELECT 1 FROM ledger_journal_entry WHERE entry_id = $1", entry_id
+        ) is None
+        assert await shared.fetchval(
+            "SELECT 1 FROM foundation_audit_event WHERE id = $1", audit_id
+        ) is None
+    finally:
+        await shared.close()
 
 # --- LC-6 (4a1d0c0de005_ledger_core) ---------------------------------------
 
