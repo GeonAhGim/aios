@@ -189,8 +189,8 @@ async def test_compute_then_get_and_list_statement_round_trips_through_real_http
 
 
 async def test_run_then_list_then_resolve_reconciliation_round_trips_through_real_http(
-    client, pool
-):
+    client: AsyncClient, pool: object
+) -> None:
     """`POST /runs` → `GET` 목록 → `POST :resolve`를 실제 ASGI 트랜스포트로
     호출해, MATERIAL_MISMATCH 판정이 목록 프로젝션에 반영되고 resolve가
     RESOLVED로 전이시키는지 확인한다."""
