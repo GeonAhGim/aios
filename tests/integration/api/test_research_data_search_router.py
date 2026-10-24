@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import asyncpg
 import jwt
@@ -70,7 +71,12 @@ class _AllAllowedContractRepository:
 
 
 @pytest.fixture
-async def client():
+async def client(monkeypatch):
+    # Search tests must not let the periodic safety tick mutate shared DB state.
+    # The delay-injection test keeps the lifespan alive long enough to run it.
+    monkeypatch.setattr(
+        "src.services.background_loops.run_circuit_breaker_tick", AsyncMock()
+    )
     async with app.router.lifespan_context(app):
         app.dependency_overrides[get_source_contract_repository] = _AllAllowedContractRepository
         transport = ASGITransport(app=app, raise_app_exceptions=False)
