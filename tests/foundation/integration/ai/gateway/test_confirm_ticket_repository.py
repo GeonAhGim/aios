@@ -122,7 +122,7 @@ async def test_issue_get_mark_consumed_round_trip_cpu_time_converges_to_zero(
         expires_at=_NOW + timedelta(minutes=5),
     )
 
-    sample = await perf_budget.sample_async(lambda: repo.get(ticket.ticket_id), batch=1)
+    sample = await perf_budget.sample_async(lambda: repo.get(ticket.ticket_id), batch=8)
     assert sample.cpu_ms < 5.0, (
         f"repo.get() 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
         "I/O 바운드 ops는 사실상 0ms에 수렴해야 함 (budget<5ms)"
