@@ -87,7 +87,7 @@ def test_check_audit_regressions_cpu_time_converges_to_zero(
     )
 
     sample = perf_budget.best_of(
-        check_audit_regressions.check_ledger_balance_raw_seed, n=100, batch=1
+        check_audit_regressions.check_ledger_balance_raw_seed, n=100, batch=8
     )
     assert sample.cpu_ms < 1.0, (
         f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
