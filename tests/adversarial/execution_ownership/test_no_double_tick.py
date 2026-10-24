@@ -14,6 +14,7 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md §8
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from decimal import Decimal
 from uuid import UUID
@@ -114,37 +115,28 @@ async def test_two_schedulers_ticking_same_execution_place_order_exactly_once(po
 async def test_two_schedulers_ticking_delayed_acquire_exceeds_budget(
     pool, perf_budget: pytest.fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Gate-red 재현 — `tick_all_running` 내부의 lease UPSERT에 지연을 주입하면
-    성능 단언이 적색으로 전환돼 테스트의 감지 능력을 증명한다.
+    """Gate-red: inject four seconds of process CPU against the 3000ms budget.
 
-    지연 주입은 `PostgresExecutionLeaseRepository.acquire_or_renew_many`에
-    `delayed_async`로 0.5s sleep을 넣는다. 정상 입력에서는 cpu_ms < 3000ms가
-    성립하지만, 지연 주입 후 측정하면 3초 예산을 명확히 초과해 적색으로
-    전환된다.
-
-    note: sample_async는 cpu_ms(time.process_time)를 측정하므로
-    asyncio.sleep(0.5)는 CPU 부하를 만들지 않는다 — 따라서 wall_ms로
-    감지해야 한다. 예산이 cpu_ms 기준이므로 delayed_sync(busy-wait)로
-    CPU 부하를 주입해 cpu_ms 단언이 적색을 보이게 한다.
+    A wall-clock busy wait can consume less CPU when parallel workers preempt
+    this process. Use the same CPU clock as PerfBudget so descheduling cannot
+    shorten the injected load. Keep the real database ownership race intact.
     """
-    from tests.support.perf_inject import delayed_sync
-
     user_id = await create_test_tenant(pool)
     _execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     shared_adapter = _filled_adapter()
     resolve_adapter = _resolver_for({user_id: shared_adapter})
     lease_repo = PostgresExecutionLeaseRepository(pool)
 
-    # acquire_or_renew_many에 0.5s CPU 부하 주입 — busy-wait로 CPU 시간을 소모
     original_acquire = lease_repo.acquire_or_renew_many
+    acquire_calls = 0
 
     async def cpu_heavy_acquire(*args, **kwargs):
-        # delayed_sync는 CPU 부하를 생성하므로 async 호출에서도
-        # time.process_time()이 증가한다.
+        nonlocal acquire_calls
         result = await original_acquire(*args, **kwargs)
-        delayed_sync(
-            lambda: None, 2.0
-        )()  # 2.0s CPU 부하 (2 스케줄러 합쳐서 4초 이상 → 3초 예산 명확 초과)
+        cpu_deadline = time.process_time() + 2.0
+        while time.process_time() < cpu_deadline:
+            pass
+        acquire_calls += 1
         return result
 
     monkeypatch.setattr(lease_repo, "acquire_or_renew_many", cpu_heavy_acquire)
@@ -174,6 +166,9 @@ async def test_two_schedulers_ticking_delayed_acquire_exceeds_budget(
             scheduler_a.tick_all_running(), scheduler_b.tick_all_running(), return_exceptions=True
         )
     )
+    assert acquire_calls == 2
+    assert all(isinstance(report, TickReport) and not report.failed for report in sample.result)
+    assert sum(_execution_id in report.ticked for report in sample.result) == 1
     assert sample.cpu_ms >= 3000, (
         f"cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms budget>=3000ms (gate-red)"
     )
