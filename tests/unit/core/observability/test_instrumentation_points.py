@@ -138,32 +138,9 @@ async def test_gate_records_decision_count_and_duration() -> None:
 async def test_submit_order_accepted_records_submit_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    order = _order()
+    from tests.unit.core.observability.instrumentation_submit_accepted import submit_accepted_order
 
-    async def fake_insert(conn: object, order: Order, *, user_id: object) -> Order:
-        return order
-
-    async def fake_update_from_exchange(
-        conn: object, order: Order, *, expected_status: object, actor_subject_id: object
-    ) -> Order:
-        return order
-
-    monkeypatch.setattr(repository_module, "insert", fake_insert)
-    monkeypatch.setattr(
-        repository_module, "update_from_exchange_with_fill_event", fake_update_from_exchange
-    )
-
-    adapter = FakeExchangeAdapter(place_order_result_status=OrderStatus.SUBMITTED)
-    spy = _SpyMetrics()
-
-    result = await submit_order(
-        order,
-        user_id=uuid4(),
-        adapter=adapter,
-        pool=_FakePool(),
-        metrics=spy,
-        pre_submit_gate=_allow_gate,
-    )
+    result, spy = await submit_accepted_order(monkeypatch)
 
     assert result.status == OrderStatus.SUBMITTED
     # task-1715(P0-B) — pre_submit_gate가 필수 인자가 된 뒤로는 항상 평가되므로
