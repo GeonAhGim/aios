@@ -33,6 +33,7 @@ from src.core.script.runtime.mtf import (
     timeframe_minutes,
 )
 from src.core.script.runtime.series import ScriptRuntimeError, Series
+from tests.support.perf_budget import PerfBudget
 
 _BAR_INDEX = st.integers(min_value=0, max_value=10_000)
 _RATIO = st.integers(min_value=1, max_value=500)
@@ -108,7 +109,9 @@ def test_resample_confirmed_rejects_length_mismatch_instead_of_truncating() -> N
 
 
 @pytest.mark.perf
-def test_resample_confirmed_latency_p95_within_runtime_budget(perf_budget) -> None:
+def test_resample_confirmed_latency_p95_within_runtime_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언(ADR-2026-09-09-C): 5,000봉 시리즈를 ratio=5로 리샘플하는
     지연이 30회 반복 p95로 20ms 안에 머무는지 확인한다(런타임 실행은 DSL 컴파일
     예산 300ms와 별개 축이지만, 봉 수에 선형 이상으로 느려지지 않음을 조기에
@@ -129,14 +132,14 @@ def test_resample_confirmed_latency_p95_within_runtime_budget(perf_budget) -> No
 
 
 def test_resample_latency_budget_actually_fails_with_delay(
-    perf_budget, monkeypatch: pytest.MonkeyPatch
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """실패 주입: resample_confirmed 경로에 예산의 10배 지연(200ms)을
     주입하면预算 단언이 AssertionError를 내는지 확인한다(항상 통과하는
     허울 단언이 아님을 검증)."""
     original_resample = resample_confirmed
 
-    def _stalled_resample(source, *, bar_count: int, ratio: int):
+    def _stalled_resample(source: Series, *, bar_count: int, ratio: int) -> Series:
         time.sleep(0.2)  # 200ms 지연 (budget 20ms의 10배)
         return original_resample(source, bar_count=bar_count, ratio=ratio)
 
