@@ -141,7 +141,7 @@ def test_numerical_assertion_exact_count_across_many_files_within_time_budget(
     tmp_path: Path, perf_budget
 ) -> None:
     """이 게이트는 커밋마다(§3) 돈다 — 전체 저장소(1200+ 소스 파일) 규모를
-    흉내낸 합성 트리에서도 집계가 정확하고 1초 안에 끝나는지 단언한다.
+    흉내낸 합성 트리에서도 집계가 정확하고 5초 CPU 예산 안에 끝나는지 단언한다.
     250개 파일 x 파일당 0~2개 ignore로 정확한 기대 합계를 미리 계산해
     두고, 실측 합계가 그 값과 정확히 일치하는지(수치 단언) + 소요 시간이
     예산 안인지(성능 단언) 둘 다 확인한다."""
@@ -154,6 +154,7 @@ def test_numerical_assertion_exact_count_across_many_files_within_time_budget(
         expected_total += ignores_in_file
         _write_py(tmp_path, f"pkg/mod_{i:03d}.py", "".join(lines))
 
+    # Regression probe: delayed_sync(count_type_ignores, 50.0) must exceed this budget.
     # batch=4: process_time ticks at ~15.6ms, so bundle calls and report per-call ms.
     sample = perf_budget.assert_within(
         lambda: check_type_ignore_budget.count_type_ignores(tmp_path),
