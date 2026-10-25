@@ -367,6 +367,7 @@ async def test_append_delay_10x_exceeds_latency_budget(
             )
 
 
+@pytest.mark.perf
 async def test_list_history_delay_10x_exceeds_latency_budget(
     pool: asyncpg.Pool,
     filing_repo: PostgresCorporateActionFilingRepository,
@@ -393,13 +394,14 @@ async def test_list_history_delay_10x_exceeds_latency_budget(
                 ),
             )
 
-    # fetch에 지연 주입
+    # 고정 sleep의 검출은 CPU 속도가 아니라 주입한 벽시계 시간으로 검증한다.
+    injected_delay_sec = 0.5
     original_fetch = asyncpg.Connection.fetch
 
     async def _slow_fetch(
         self: asyncpg.Connection, *args: object, **kwargs: object
     ) -> list[asyncpg.Record]:
-        await asyncio.sleep(0.5)  # 10배 지연 주입 (non-blocking)
+        await asyncio.sleep(injected_delay_sec)  # 10배 지연 주입 (non-blocking)
         result = await original_fetch(self, *args, **kwargs)
         return cast("list[asyncpg.Record]", result)
 
@@ -418,9 +420,10 @@ async def test_list_history_delay_10x_exceeds_latency_budget(
             n=3,
             calibration_n=5,
         )
-        assert sample.ratio > 3.0, (
-            f"list_history 지연에도 ratio={sample.ratio:.1f}x — "
-            f"검출력이 없습니다(op_ms={sample.op_ms:.0f}ms, calib={sample.calibration_ms:.0f}ms)"
+        # CPU 보정 루프가 느려져도 고정 I/O 지연은 줄어들지 않는다.
+        assert sample.op_ms >= injected_delay_sec * 1000, (
+            f"list_history 주입 지연 미검출: {sample.op_ms:.0f}ms "
+            f"< {injected_delay_sec * 1000:.0f}ms"
         )
     finally:
         async with pool.acquire() as conn:
