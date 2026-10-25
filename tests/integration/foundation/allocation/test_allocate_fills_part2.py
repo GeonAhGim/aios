@@ -110,36 +110,29 @@ async def test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool
     )
 
 
+@pytest.mark.perf
 async def test_gate_red_reproduction_allocate_fills_latency_budget_catches_db_regression(
     pool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현 — 정상 호출이 녹색인 것과 동일 단언을 10배 sleep
-    주입에서 적색으로 만든다 (task-11539 감사: 이 파일에 gate-red 테스트가
-    없었음).
+    """배분의 조회·원장 쓰기 경계에만 지연을 주입해 검출한다.
 
-    기존 `test_allocate_order_fills_latency_stays_within_normalized_ceiling`과
-    동일한 RelativeBudget 단언을 재사용한다. `allocate_order_fills` 내부의
-    DB 호출 앞에 sleep을 주입해 전체 지연이 정규화 상한을 넘게 만든 뒤,
-    같은 단언이 AssertionError로 적색이 됨을 검증한다."""
-    import asyncpg
-
+    전역 Connection 패치는 준비/정리 쿼리까지 지연시켜 120s 워커 종료를
+    유발했다. 첫 실행을 측정해야 원장 쓰기가 멱등 replay로 생략되지 않는다.
+    """
+    from src.foundation.allocation.application import allocate_fills as allocation_module
     from tests.support.perf_inject import delayed_async
 
-    # 먼저 제어 테스트: 정상 입력에서 녹색 확인
     await test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool)
-
-    # asyncpg Connection.fetch/fetchval을 클래스 레벨에서 delayed_async로
-    # monkeypatch한다. allocate_order_fills가 conn.fetch / conn.fetchval을
-    # 호출할 때마다 500ms 지연을 더해 baseline 대비 10배 이상 나가게 만든다.
-    monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(asyncpg.Connection.fetch, 0.5))
     monkeypatch.setattr(
-        asyncpg.Connection, "fetchval", delayed_async(asyncpg.Connection.fetchval, 0.5)
+        allocation_module, "_resolve_target", delayed_async(allocation_module._resolve_target, 0.5)
+    )
+    monkeypatch.setattr(
+        allocation_module,
+        "_post_allocation_entry",
+        delayed_async(allocation_module._post_allocation_entry, 0.5),
     )
 
-    # 동일한 단언이 지연 주입에서 실패해야 한다.
-    # (baseline과 p95가 모두 지연되므로 상대 ceiling가 함께 늘어나지 않도록,
-    #  _run_once의 measure_async 호출을 직접 재측정해 절대 지연을 단언한다.)
     entities, journal, balances, audit = await _ports(pool)
     hierarchy = await build_hierarchy(pool, entities)
     targets = (
@@ -172,6 +165,7 @@ async def test_gate_red_reproduction_allocate_fills_latency_budget_catches_db_re
                 trace_id=uuid4(),
             ),
             n=1,
+            warmup=0,
         )
         return sample.op_ms / 1000
 
@@ -181,7 +175,7 @@ async def test_gate_red_reproduction_allocate_fills_latency_budget_catches_db_re
     samples.sort()
     p95_delayed = samples[math.ceil(0.95 * len(samples)) - 1]
 
-    # 정상 ceiling ≈ 0.3s. 500ms sleep × 2개 이상 쿼리 → p95 > 1s.
+    # 정상 ceiling ≈ 0.3s. 500ms sleep × 조회·쓰기 경계 → p95 > 1s.
     assert p95_delayed > 1.0, (
         f"지연 주입 후 p95={p95_delayed:.3f}s가 1s를 넘지 않음 -- DB sleep 주입이 작동하지 않음"
     )

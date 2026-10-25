@@ -45,12 +45,14 @@ def _p95_latency_ms(samples: int = 20) -> float:
     return statistics.quantiles(latencies_ms, n=20)[18]  # p95
 
 
+@pytest.mark.perf
 def test_mwr_bisection_meets_latency_budget():
     """수치 성능 단언 — 월간 명세서 규모(현금흐름 11건) 이분법 호출의
     p95 지연이 예산(100ms) 안에 있어야 한다."""
     assert _p95_latency_ms() < _MWR_LATENCY_BUDGET_MS
 
 
+@pytest.mark.perf
 def test_mwr_latency_budget_actually_fails_when_bisection_regresses(monkeypatch):
     """게이트 적색 재현 — `_npv`에 인위 지연을 주입해 위 성능 단언이 실제로
     AssertionError를 내는지 확인한다(tautology가 아님을 증명, ee9e5ff1의

@@ -240,18 +240,19 @@ async def test_write_batch_rejects_negative_volume_meets_latency_budget(
         )
 
 
+@pytest.mark.parametrize("injected_delay_sec", [0.0, 0.4, 1.0])
 async def test_write_batch_rejects_negative_volume_delay_injection_fails(
     hot_storage: HotPostgresStorage,
     batch_repo: PostgresBatchRepository,
     pool: asyncpg.Pool,
     monkeypatch: pytest.MonkeyPatch,
+    injected_delay_sec: float,
 ) -> None:
-    """`write_batch` 호출에 0.5s sleep 주입하면 성능 예산을 초과해야 한다 —
-    기존 실제 성능 단언이 정상 입력에서 녹색, 지연 주입에서 적색임을
-    검증한다(audit task-11539: gate_red_result="not executed; names do not
-    prove detection" 정정). 지연 주입은 `delayed_async` 사용."""
-    from tests.support.perf_inject import delayed_async
+    """제어된 시계로 정상/예산 이내/예산 초과를 같은 5x 게이트에 통과시킨다.
 
+    실 DB 쓰기는 실행하되 지연과 보정 시간을 결정적으로 주입한다.
+    고정 sleep/가변 CPU 보정의 비율은 느린 호스트에서 적색을 보장하지 못한다.
+    """
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, prefix="DC13NEGINJ")
     t0 = datetime.now(timezone.utc).replace(microsecond=0)
@@ -268,27 +269,35 @@ async def test_write_batch_rejects_negative_volume_delay_injection_fails(
             accepted=1,
         )
 
-        # write_batch에 1.0s 지연 주입 — 정상 candle 이지만 지연으로 인해
-        # 성능 단언이 실패해야 함(gate-red 재현).
-        # calibration_ms ≈ 130ms 이므로 ratio > 5.0 보장: op_ms > 650ms 필요.
-        # 0.5s 는 ratio ≈ 4.0x 로 예산을 넘지 못해 테스트가 실패했음.
+        elapsed_sec = 0.0
+        budget = RelativeBudget()
+        monkeypatch.setattr(budget, "_clock", lambda mode: lambda: elapsed_sec)
         original_write_batch = hot_storage.write_batch
-        injected = delayed_async(original_write_batch, 1.0)
-        monkeypatch.setattr(hot_storage, "write_batch", injected)
 
-        # 지연 주입 후 — 정상 입력에서 녹색, 지연 주입에서 적색 단언 검증
-        # 지연으로 인해 성능 예산이 초과되어야 함(gate-red 재현)
-        with pytest.raises(AssertionError) as exc_info:
-            await RelativeBudget().assert_within_async(
-                lambda: hot_storage.write_batch(conn, batch.batch_id, [valid_candle]),
+        async def injected_write() -> int:
+            nonlocal elapsed_sec
+            result = await original_write_batch(conn, batch.batch_id, [valid_candle])
+            elapsed_sec += injected_delay_sec
+            return result
+
+        async def calibration() -> None:
+            nonlocal elapsed_sec
+            elapsed_sec += 0.1
+
+        async def check_budget() -> None:
+            await budget.assert_within_async(
+                injected_write,
                 max_ratio=_PERF_BUDGET_SEC,
                 n=3,
+                calibration_fn=calibration,
                 label="hot_postgres_write_batch_delayed",
             )
-        # 지연 주입 결과: ratio 가 5.0x 예산을 초과했는지 확인
-        assert "budget<" in str(exc_info.value), (
-            f"지연 주입이 성능 예산 초과를 유발하지 않았습니다: {exc_info.value}"
-        )
+
+        if injected_delay_sec > 0.5:
+            with pytest.raises(AssertionError, match="budget<5.000x"):
+                await check_budget()
+        else:
+            await check_budget()
 
 
 async def test_write_batch_rejects_unknown_instrument_fk(
