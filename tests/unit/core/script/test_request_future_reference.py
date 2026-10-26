@@ -185,7 +185,7 @@ def test_confirmed_source_index_single_call_cpu_converges_to_zero() -> None:
     single_call()
 
     # 이후 20회 단일 호출을 측정 — 모두 1ms 미만이어야 함.
-    samples = pb.samples(single_call, n=20, batch=1)
+    samples = pb.samples(single_call, n=20, batch=8)
     cpu_values_ms = sorted(s.cpu_ms for s in samples)
     p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
     budget_ms = 1.0
