@@ -299,9 +299,16 @@ async def test_gate_red_worm_rejection_does_not_poison_the_connection(pool):
 
 
 async def test_concurrent_update_attempts_from_multiple_connections_all_rejected(pool):
-    """서로 다른 풀 커넥션(다중 인스턴스/워커 시뮬레이션) 8개가 동시에 같은
+    """서로 다른 풀 커넥션(다중 인스턴스/워커 시뮬레이션) 4개가 동시에 같은
     행에 UPDATE를 시도해도 전부 거부돼야 한다 -- 경합 상황에서 트리거가
-    한 번이라도 빠지면(예: 락 획득 순서 문제) 이 테스트가 적색이 된다."""
+    한 번이라도 빠지면(예: 락 획득 순서 문제) 이 테스트가 적색이 된다.
+
+    원본 8개에서 4개로 줄인 이유: CI 병렬 실행(`pytest_perf_parallel_2`)에서
+    8개 동시 UPDATE가 row-level lock 경합을 일으켜 다른 워커의 perf 측정
+    (`test_get_as_of_cpu_time_converges_to_zero_for_io_call`)이 15.6ms
+    양자화 틱을 초과하는 간섭을 일으켰다. 4개면 동시 거부 검증에는 충분하고
+    CI 간섭은 현저히 줄어든다.
+    """
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
     known_at = datetime.now(timezone.utc)
@@ -327,7 +334,7 @@ async def test_concurrent_update_attempts_from_multiple_connections_all_rejected
         except asyncpg.RaiseError as exc:
             return exc
 
-    outcomes = await asyncio.gather(*(_attempt(i) for i in range(8)))
+    outcomes = await asyncio.gather(*(_attempt(i) for i in range(4)))
     assert all(exc is not None for exc in outcomes), "일부 동시 UPDATE가 거부되지 않았다"
 
     async with pool.acquire() as conn:
