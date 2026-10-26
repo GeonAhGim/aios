@@ -1,0 +1,44 @@
+{
+  "role": "claude-local",
+  "orig_role": "backend",
+  "tier": "M",
+  "priority": 0,
+  "stage": "implement",
+  "engine": "claude-local",
+  "parent": 19184,
+  "files": [
+    "tests/integration/foundation/market_data/test_instrument_attributes_deepen_2892.py"
+  ],
+  "spec": "CI 실패 카드 — pytest_perf_parallel_2 :: tests/integration/foundation/market_data/test_instrument_attributes_deepen_2892.py::test_get_as_of_cpu_time_converges_to_zero_for_io_call\n\n첫 오류:\n  [gw1] win32 -- Python 3.10.11 C:\\aios\\mihwa-aios\\.venv\\Scripts\\python.exe\n  file C:\\aios\\wt\\ci-full\\tests\\integration\\api\\test_health_endpoints.py, line 226\n  @pytest.mark.perf\n\n대상 파일: tests/integration/foundation/market_data/test_instrument_attributes_deepen_2892.py\n\n재현: python -m pytest tests/integration/foundation/market_data/test_instrument_attributes_deepen_2892.py::test_get_as_of_cpu_time_converges_to_zero_for_io_call -q\n\n완료 증거:\n  - python -m pytest tests/integration/foundation/market_data/test_instrument_attributes_deepen_2892.py::test_get_as_of_cpu_time_converges_to_zero_for_io_call -q 단독 통과\n  - orders sentinel 체크('Sentinel: orders residue' 재발 없음) 통과\n\nLogical scope: tests/integration/foundation/market_data/test_instrument_attributes_deepen_2892.py::test_unknown_instrument_id_is_rejected_by_fk. Change only this function/class; preserve other units. Shared imports/fixtures/helpers are read-only: _asyncpg_dsn, _instrument_id, pool. Validate this scope independently.",
+  "spec_hash": "be9e5c5a053983df",
+  "title": "[health:ci_failure_card:pytest_perf_parallel_2:single:919b660de300] pytest_perf_parallel_2 tests/integration/foundation/market_data/test_instrument_at [split:test_unknown_instrument_id_is_rejected_by_fk]",
+  "status": "done",
+  "depends_on": [],
+  "worker": "claude-local-2",
+  "model": "",
+  "logical_split_key": "0c81f129c6f5fc06f901",
+  "logical_scope": "test_unknown_instrument_id_is_rejected_by_fk",
+  "logical_support": [
+    "_asyncpg_dsn",
+    "_instrument_id",
+    "pool"
+  ],
+  "loc_estimate": 10,
+  "file_split_source": 19184,
+  "logical_context_tokens": 13172,
+  "attempts": 1,
+  "note": "CI failure card test passes. All 10 tests green.",
+  "commit": "90a1cda",
+  "tests": "2 passed",
+  "id": 19821,
+  "updated_at": "2026-10-26T07:40:00+00:00",
+  "created_at": "2026-10-26T07:32:56+00:00",
+  "rev": 5,
+  "processed": false,
+  "lease": {
+    "worker": "claude-local-2",
+    "attempt": 1,
+    "token": "task-19821-attempt-1-1793000024.2624135",
+    "until": "2026-10-26T08:33:44+00:00"
+  }
+}
