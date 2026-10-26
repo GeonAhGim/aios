@@ -175,9 +175,11 @@ async def test_get_as_of_cpu_time_converges_to_zero_for_io_call(pool, perf_budge
                 known_at=base + timedelta(seconds=i),
             )
 
-        # batch=1: 단일 호출의 CPU 시간을 직접 측정 — 양자화 오차가 그대로 드러남
+        # batch=8: Windows `time.process_time()` 약 15.6ms 양자화 오차를
+        # batch로 나누어 CI 병렬 실행에서도 안정적으로 0ms 수렴을 검증
         sample = await perf_budget.sample_async(
-            lambda: repo.get_as_of(conn, instrument_id, as_of=base + timedelta(seconds=n + 10))
+            lambda: repo.get_as_of(conn, instrument_id, as_of=base + timedelta(seconds=n + 10)),
+            batch=8,
         )
 
     # I/O 호출이므로 CPU 시간은 양자화 오차 범위(Windows ~15.6ms) 내에 수렴
@@ -188,6 +190,7 @@ async def test_get_as_of_cpu_time_converges_to_zero_for_io_call(pool, perf_budge
     # 정답 확인
     assert sample.result["lot_size"].attr_value == str(n - 1)
     # CPU 시간은 Windows 양자화 틱 내에 수렴해야 — 15.6ms(64Hz 클록) 초과 불가
+    # batch=8이므로 양자화 오차는 ~2ms로 줄어듦; 병렬 CI에서도 안정 통과
     assert sample.cpu_ms < 15.625, (
         f"get_as_of의 CPU 시간이 양자화 오차 범위를 초과했습니다(cpu={sample.cpu_ms:.3f}ms "
         f"> 15.625ms). I/O 중심 작업은 CPU 시간을 누산하지 않아야 한다."
