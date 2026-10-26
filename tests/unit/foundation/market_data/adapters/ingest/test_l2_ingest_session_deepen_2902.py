@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -353,7 +352,7 @@ def test_apply_diff_repeated_updates_meet_throughput_budget(perf_budget: Any) ->
             book = book.apply_diff(diff)
         return book
 
-    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, n=1)
+    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, n=3, batch=4)
     # 정확성: perf_budget.sample 는 fn 의 반환값을 sample.result 에 담는다
     book = sample.result
     assert book.sequence == iterations
@@ -383,7 +382,7 @@ def test_large_orderbook_top_n_meets_latency_budget(perf_budget: Any) -> None:
             result = book.top_n(50)
         return result
 
-    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, n=1)
+    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, n=3, batch=4)
     top_bids, top_asks = sample.result
     assert len(top_bids) == 50
     assert len(top_asks) == 50
@@ -394,86 +393,46 @@ def test_large_orderbook_top_n_meets_latency_budget(perf_budget: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2-b. 성능 주입 적색 — sleep monkeypatch로 예산 10배 지연 → 단언 실패
+# 2-b. 실제 성능 단언에 CPU 비용 10배 주입
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.perf
-def test_apply_diff_throughput_budget_violated_with_10x_sleep_injection():
-    """`time.sleep`을 0.0011초로 monkeypatch하면 apply_diff 10_000회가
-    10초 예산을 넘는다(11초) — 동일 측정/단언이 정상 입력에서는 녹색,
-    지연 주입에서는 적색임을 동시에 검증한다.
+@pytest.mark.parametrize(
+    ("method_name", "test_name", "calls_per_run"),
+    [
+        ("apply_diff", "test_apply_diff_repeated_updates_meet_throughput_budget", 10_000),
+        ("top_n", "test_large_orderbook_top_n_meets_latency_budget", 30),
+    ],
+)
+def test_original_budget_rejects_10x_cpu_cost(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: Any,
+    method_name: str,
+    test_name: str,
+    calls_per_run: int,
+) -> None:
+    """원래 테스트와 PerfBudget을 그대로 실행하고 연산별 CPU 비용만 주입한다.
 
-    이 테스트는 `test_apply_diff_repeated_updates_meet_throughput_budget`의
-    단언을 재사용한다: book.sequence == iterations + elapsed < budget_sec.
-    정상 입력에서 green인 단언이 sleep 주입에서 red로 전환되는지를
-    검증하는 것이 목적이다."""
-    iterations = 10_000
-    budget_sec = 10.0
-    delay_per_call = 0.0011  # 10_000 * 0.0011 = 11초 → 예산 초과
+    sleep은 CPU 예산 검출력 증거가 아니다. 가상 CPU 시계에 실제 도메인
+    호출마다 100초/반복수를 더해 10초 예산의 10배를 결정적으로 재현한다.
+    배치 정규화와 best-of의 모든 표본에도 같은 비용이 적용되어야 한다.
+    """
+    import time
 
-    book = OrderBookState.from_snapshot(
-        L2Snapshot(
-            sequence=0,
-            as_of=datetime.now(timezone.utc),
-            bids={Decimal("10.0"): Decimal("1")},
-            asks={Decimal("10.5"): Decimal("1")},
-        )
-    )
+    original = getattr(OrderBookState, method_name)
+    cpu_seconds = 0.0
+    calls = 0
 
-    start = time.perf_counter()
-    for i in range(iterations):
-        diff = L2Diff(
-            sequence=i + 1,
-            as_of=datetime.now(timezone.utc),
-            bid_updates=((Decimal("10.0"), Decimal(str(1 + i % 5))),),
-            ask_updates=(),
-        )
-        book = book.apply_diff(diff)
-        time.sleep(delay_per_call)  # 지연 주입
-    elapsed = time.perf_counter() - start
+    def expensive(self: OrderBookState, *args: Any, **kwargs: Any) -> Any:
+        nonlocal cpu_seconds, calls
+        result = original(self, *args, **kwargs)
+        cpu_seconds += 100.0 / calls_per_run
+        calls += 1
+        return result
 
-    # 동일 단언: book.sequence == iterations (정확성)
-    assert book.sequence == iterations
-    # 동일 단언: elapsed >= budget_sec (지연 주입으로 인해 예산 초과 = red)
-    assert elapsed >= budget_sec, (
-        f"지연 주입에도 elapsed={elapsed:.3f}s가 예산({budget_sec}s) 미만 — "
-        "주입이 제대로 작동하지 않음"
-    )
-
-
-@pytest.mark.perf
-def test_large_orderbook_top_n_violated_with_10x_sleep_injection():
-    """`time.sleep`을 0.35초로 monkeypatch하면 top_n 30회가
-    10초 예산을 넘는다(10.5초) — 동일 측정/단언이 정상 입력에서는 녹색,
-    지연 주입에서는 적색임을 동시에 검증한다.
-
-    이 테스트는 `test_large_orderbook_top_n_meets_latency_budget`의
-    단언을 재사용한다: len(top_bids) == 50 + elapsed < budget_sec.
-    정상 입력에서 green인 단언이 sleep 주입에서 red로 전환되는지를
-    검증하는 것이 목적이다."""
-    n_levels = 5_000
-    repeats = 30
-    budget_sec = 10.0
-    delay_per_call = 0.35  # 30 * 0.35 = 10.5초 → 예산 초과
-
-    bids = {Decimal(i): Decimal("1") for i in range(n_levels)}
-    asks = {Decimal(i + n_levels): Decimal("1") for i in range(n_levels)}
-    book = OrderBookState.from_snapshot(
-        L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids=bids, asks=asks)
-    )
-
-    start = time.perf_counter()
-    for _ in range(repeats):
-        top_bids, top_asks = book.top_n(50)
-        time.sleep(delay_per_call)  # 지연 주입
-    elapsed = time.perf_counter() - start
-
-    # 동일 단언: len(top_bids) == 50, len(top_asks) == 50 (정확성)
-    assert len(top_bids) == 50
-    assert len(top_asks) == 50
-    # 동일 단언: elapsed >= budget_sec (지연 주입으로 인해 예산 초과 = red)
-    assert elapsed >= budget_sec, (
-        f"지연 주입에도 elapsed={elapsed:.3f}s가 예산({budget_sec}s) 미만 — "
-        "주입이 제대로 작동하지 않음"
-    )
+    monkeypatch.setattr(OrderBookState, method_name, expensive)
+    monkeypatch.setattr(time, "process_time", lambda: cpu_seconds)
+    with pytest.raises(AssertionError, match=r"cpu=.*budget<10000"):
+        globals()[test_name](perf_budget)
+    assert calls >= calls_per_run
