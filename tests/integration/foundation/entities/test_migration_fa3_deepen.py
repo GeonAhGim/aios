@@ -115,6 +115,49 @@ _BACKFILL_UPDATE_SQL = """
     """
 
 
+def _alembic_python() -> str:
+    """Return the Python executable to use for alembic subprocess calls."""
+    try:
+        __import__("alembic")
+        return sys.executable
+    except ImportError:
+        pass
+    # Check known worktree venvs first.
+    for _offset in (1, 0):
+        candidate = Path(__file__).resolve().parents[_offset] / ".venv" / "Scripts" / "python.exe"
+        if candidate.is_file():
+            return str(candidate)
+    # Fallback to a known repo-level venv that CI uses.
+    known = Path(__file__).resolve().parents[4] / ".venv" / "Scripts" / "python.exe"
+    if known.is_file():
+        return str(known)
+    # Explicitly check the CI worker venv (mihwa-aios).
+    # __file__ parents[4] = worktree root, parents[6] = C:\aios
+    try:
+        aios_root = Path(__file__).resolve().parents[6]
+        ci_venv = aios_root / "mihwa-aios" / ".venv" / "Scripts" / "python.exe"
+        if ci_venv.is_file():
+            return str(ci_venv)
+    except (IndexError, OSError):
+        pass
+    # Scan PATH for a Python that has alembic installed.
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        for name in ("python.exe", "python3.exe", "python"):
+            candidate = Path(entry) / name
+            if candidate.is_file():
+                try:
+                    result = subprocess.run(
+                        [str(candidate), "-c", "import alembic"],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        return str(candidate)
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+    return "python"
+
+
 def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
 
