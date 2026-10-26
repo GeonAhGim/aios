@@ -49,6 +49,42 @@ from tests.support.deep_downgrade import purge_position_snapshots
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _DOWN_REVISION = "c9f4e2a1b6d7"
 _PERF_USER_COUNT = 50
+
+
+# When pytest runs under a system Python that lacks alembic, fall back to
+# the project venv that is guaranteed to have it installed.
+def _alembic_python() -> str:
+    """Return the Python executable to use for alembic subprocess calls."""
+    # Fast path: current interpreter has alembic.
+    try:
+        __import__("alembic")
+        return sys.executable
+    except ImportError:
+        pass
+    # Try worktree .venv first, then repo-root .venv.
+    for _offset in (1, 0):
+        candidate = Path(__file__).resolve().parents[_offset] / ".venv" / "Scripts" / "python.exe"
+        if candidate.is_file():
+            return str(candidate)
+    # Scan PATH for a Python that has alembic installed.
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        for name in ("python.exe", "python3.exe", "python"):
+            candidate = Path(entry) / name
+            if candidate.is_file():
+                try:
+                    result = subprocess.run(
+                        [str(candidate), "-c", "import alembic"],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        return str(candidate)
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+    # Last resort: hope PATH resolves (alembic module will still be needed).
+    return "python"
+
+
 _CONCURRENT_RUNNERS = 8
 # task-7674: the original absolute 10.0s budget compared `elapsed` to this
 # host's clock/disk/Postgres-lock speed, not the backfill code -- it went red
@@ -85,7 +121,7 @@ def _asyncpg_dsn() -> str:
 
 def _run_alembic(*args: str) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
+        [_alembic_python(), "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
         capture_output=True,
         text=True,
