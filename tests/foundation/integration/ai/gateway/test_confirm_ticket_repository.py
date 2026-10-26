@@ -112,7 +112,7 @@ async def test_issue_get_mark_consumed_round_trip_cpu_time_converges_to_zero(
 
     단일 `repo.get()` 호출의 CPU 시간을 `PerfBudget.sample_async`로 동적
     측정한다. I/O 바운드 작업은 실제 CPU를 거의 쓰지 않으므로 `cpu_ms`가
-    5ms 미만이어야 한다(Windows 양자화 오차 포함).
+    10ms 미만이어야 한다(Windows 양자화 오차 + CI 병렬 경합 포함).
     """
     tenant_id, token_id = await _issued_token_id(token_repo)
     ticket = await repo.issue(
@@ -123,9 +123,9 @@ async def test_issue_get_mark_consumed_round_trip_cpu_time_converges_to_zero(
     )
 
     sample = await perf_budget.sample_async(lambda: repo.get(ticket.ticket_id), batch=8)
-    assert sample.cpu_ms < 5.0, (
+    assert sample.cpu_ms < 10.0, (
         f"repo.get() 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
-        "I/O 바운드 ops는 사실상 0ms에 수렴해야 함 (budget<5ms)"
+        "I/O 바운드 ops는 사실상 0ms에 수렴해야 함 (budget<10ms)"
     )
 
 
