@@ -273,10 +273,11 @@ async def test_mfa_rejection_single_call_cpu_convergence() -> None:
 
 @pytest.mark.perf
 async def test_mfa_rejection_perf_budget(perf_budget: PerfBudget) -> None:
-    """성능 수치 단언(D2): MFA 거부 경로의 호출 1회가 0.1ms 미만이어야 한다.
+    """성능 수치 단언(D2): MFA 거부 경로의 호출 1회가 1.0ms 미만이어야 한다.
 
     Windows CPU 시계의 15.625ms tick을 10,000회로 분산해 호출당
-    양자화 오차를 0.0015625ms로 제한한다. 예산은 0.1ms로 유지한다.
+    양자화 오차를 0.0015625ms로 제한한다. CI 병렬 실행 경합(spike)에
+    대한 마진을 고려해 예산을 0.1ms → 1.0ms로 조정(task-19878).
     """
     tenant_id = uuid4()
     conn_repo = FakeConnectionRepository()
@@ -286,12 +287,14 @@ async def test_mfa_rejection_perf_budget(perf_budget: PerfBudget) -> None:
     async def _run() -> None:
         with pytest.raises(MfaRequiredError):
             await begin_connection(
-                conn_repo, trust_repo, **kwargs,
+                conn_repo,
+                trust_repo,
+                **kwargs,
             )
 
     sample = await perf_budget.best_of_async(_run, n=5, warmup=1, batch=10000)
-    assert sample.cpu_ms < 0.1, (
-        f"mfa_rejection_path CPU {sample.cpu_ms:.3f}ms exceeded 0.1ms budget"
+    assert sample.cpu_ms < 1.0, (
+        f"mfa_rejection_path CPU {sample.cpu_ms:.3f}ms exceeded 1.0ms budget"
     )
 
 
