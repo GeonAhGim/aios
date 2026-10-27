@@ -149,9 +149,9 @@ def test_perf_gate_fails_on_injected_delay(
     """
 
     def _burn_cpu() -> None:
-        # ~250 ms CPU per call; batch=10 → 2500 ms avg >> 2000 ms budget
+        # ~350 ms CPU per call; batch=10 → 3500 ms avg >> 2000 ms budget
         x = 0.0
-        for _ in range(120_000_000):
+        for _ in range(180_000_000):
             x += 0.1
 
     def slow() -> object:
