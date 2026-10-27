@@ -50,9 +50,11 @@ class CircuitBreakerResidueSentinel:
     @pytest.hookimpl(hookwrapper=True, trylast=True)
     def pytest_runtest_teardown(self, item, nextitem):
         yield
-        # 2026-10-27: 예전엔 integration/adversarial/e2e 디렉터리 모듈만 봤다 -- tests/performance 같은 다른
-        # 디렉터리 모듈이 halted를 남기면 그 다음에 검사되는 무고한 모듈(test_positions_router_performance)이
-        # 범인으로 찍혔다(full CI 0def1356). 모듈 경계 검사는 연결 1회라 값싸므로 모든 모듈에서 하고,
+        # 2026-10-27: 예전엔 integration/adversarial/e2e만 검사했다.
+        # tests/performance 등 다른 디렉터리가 halted를 남기면,
+        # 그 다음 검사되는 무고한 모듈(test_positions_router_performance)이
+        # 범인으로 오귀속됐다(full CI 0def1356).
+        # 모듈 경계 검사는 연결 1회라 값싸므로 모든 모듈에서 하고,
         # 남긴 모듈 자신이 잡히게 한다.
         if not hasattr(item, "nodeid"):
             return
