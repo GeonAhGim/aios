@@ -34,6 +34,22 @@ def test_negative_empty_message(name):
     assert isinstance(exc, exceptions.MihwaError)
 
 
+def test_failure_injection_empty_message_parent_init_fails(monkeypatch):
+    """Failure injection: parent __init__ raises even with empty message — propagates."""
+    from src.core.exceptions import MihwaError
+
+    injected = RuntimeError("injected parent init failure on empty msg")
+
+    def broken_init(self, message):
+        raise injected
+
+    with monkeypatch.context() as patch:
+        patch.setattr(MihwaError, "__init__", broken_init)
+        with pytest.raises(RuntimeError) as caught:
+            MihwaError("")
+        assert caught.value is injected
+
+
 class TestMihwaError:
     """MihwaError is the root of the custom exception tree."""
 
@@ -228,6 +244,21 @@ class TestZoneViolationError:
             caught = True
         assert caught is True
 
+    def test_failure_injection_parent_init_raises(self, monkeypatch):
+        """Failure injection: parent __init__ failure propagates through ZoneViolationError."""
+        from src.core.exceptions import MihwaError, ZoneViolationError
+
+        injected = RuntimeError("injected parent init failure")
+
+        def broken_init(self, message):
+            raise injected
+
+        with monkeypatch.context() as patch:
+            patch.setattr(MihwaError, "__init__", broken_init)
+            with pytest.raises(RuntimeError) as caught:
+                ZoneViolationError("zone breach")
+            assert caught.value is injected
+
 
 class TestFrozenZoneLiveModeBlockedError:
     """ADR-2026-08-29-E — blocks live mode for FROZEN-PAPER-ONLY."""
@@ -265,6 +296,22 @@ class TestFrozenZoneLiveModeBlockedError:
         except MihwaError:
             caught = True
         assert caught is True
+
+    def test_failure_injection_parent_init_raises(self, monkeypatch):
+        """Failure injection: parent __init__ failure propagates through
+        FrozenZoneLiveModeBlockedError."""
+        from src.core.exceptions import FrozenZoneLiveModeBlockedError, MihwaError
+
+        injected = RuntimeError("injected parent init failure")
+
+        def broken_init(self, message):
+            raise injected
+
+        with monkeypatch.context() as patch:
+            patch.setattr(MihwaError, "__init__", broken_init)
+            with pytest.raises(RuntimeError) as caught:
+                FrozenZoneLiveModeBlockedError("live mode")
+            assert caught.value is injected
 
 
 class TestFrozenZonePaperAdapterBlockedError:
@@ -304,6 +351,22 @@ class TestFrozenZonePaperAdapterBlockedError:
             caught = True
         assert caught is True
 
+    def test_failure_injection_parent_init_raises(self, monkeypatch):
+        """Failure injection: parent __init__ failure propagates through
+        FrozenZonePaperAdapterBlockedError."""
+        from src.core.exceptions import FrozenZonePaperAdapterBlockedError, MihwaError
+
+        injected = RuntimeError("injected parent init failure")
+
+        def broken_init(self, message):
+            raise injected
+
+        with monkeypatch.context() as patch:
+            patch.setattr(MihwaError, "__init__", broken_init)
+            with pytest.raises(RuntimeError) as caught:
+                FrozenZonePaperAdapterBlockedError("paper adapter")
+            assert caught.value is injected
+
 
 class TestEventHandlerError:
     """EventHandlerError is a simple MihwaError subclass with no custom __init__."""
@@ -341,6 +404,21 @@ class TestEventHandlerError:
             caught = True
             assert str(exc) == "event processing failed"
         assert caught is True
+
+    def test_failure_injection_parent_init_raises(self, monkeypatch):
+        """Failure injection: parent __init__ failure propagates through EventHandlerError."""
+        from src.core.exceptions import EventHandlerError, MihwaError
+
+        injected = RuntimeError("injected parent init failure")
+
+        def broken_init(self, message):
+            raise injected
+
+        with monkeypatch.context() as patch:
+            patch.setattr(MihwaError, "__init__", broken_init)
+            with pytest.raises(RuntimeError) as caught:
+                EventHandlerError("event error")
+            assert caught.value is injected
 
 
 class TestAllCustomErrorsInheritMihwaError:
