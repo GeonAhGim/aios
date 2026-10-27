@@ -119,10 +119,17 @@ async def test_lifespan_startup_performance_meets_budget(
     lifespan_context 는 한 번에 startup+shutdown 를 실행하므로 전체 span 을
     측정하고 합산 예산으로 체크한다. CI 병렬 실행 환경에서 안정성을 위해
     원본 7초 → 14s(task-15462) → 28s(task-15488)로 단계적 확대.
+
+    병렬 실행 격리: 공유 `app` 싱글톤을 쓰면 동시 테스트와 lifespan 상태가
+    충돌한다(task-20036). 매 샘플마다 새 FastAPI 인스턴스를 만들어 격리한다.
     """
+    from fastapi import FastAPI
+
+    from src.main import lifespan as _lifespan
 
     async def _lifespan_once() -> None:
-        async with app.router.lifespan_context(app):
+        test_app = FastAPI(lifespan=_lifespan)
+        async with test_app.router.lifespan_context(test_app):
             pass
 
     samples = await perf_budget.samples_async(_lifespan_once, n=3)
