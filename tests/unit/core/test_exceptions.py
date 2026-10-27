@@ -11,6 +11,29 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "MihwaError",
+        "ZoneViolationError",
+        "FrozenZoneLiveModeBlockedError",
+        "FrozenZonePaperAdapterBlockedError",
+        "EventHandlerError",
+        "ExchangeAPIError",
+        "RetryableExchangeError",
+        "FatalExchangeError",
+    ],
+)
+def test_negative_empty_message(name):
+    """All message-only errors preserve an explicitly empty argument."""
+    from src.core import exceptions
+
+    exc = getattr(exceptions, name)("")
+    assert str(exc) == ""
+    assert exc.args == ("",)
+    assert isinstance(exc, exceptions.MihwaError)
+
+
 class TestMihwaError:
     """MihwaError is the root of the custom exception tree."""
 
@@ -100,13 +123,41 @@ class TestCurrencyMismatchError:
         exc = CurrencyMismatchError("", "")
         assert str(exc) == "통화 불일치:  vs "
 
-    def test_negative_none_value(self):
-        """Boundary: actual None currency objects should still render via __repr__."""
+    @pytest.mark.parametrize(
+        "left,right,expected",
+        [
+            (None, "USD", "통화 불일치: None vs USD"),
+            ("KRW", None, "통화 불일치: KRW vs None"),
+            (None, None, "통화 불일치: None vs None"),
+        ],
+    )
+    def test_negative_none_value(self, left, right, expected):
+        """Pass actual None values through both constructor boundaries."""
         from src.core.exceptions import CurrencyMismatchError
 
-        exc = CurrencyMismatchError(None, "USD")
-        assert "None" in str(exc)
-        assert "USD" in str(exc)
+        exc = CurrencyMismatchError(left, right)
+        assert str(exc) == expected
+        assert exc.args == (expected,)
+
+    def test_dependency_initializer_failure(self, monkeypatch):
+        """A failing parent initializer must propagate without masking its error."""
+        from src.core.exceptions import CurrencyMismatchError, MihwaError
+
+        failure = RuntimeError("injected initializer failure")
+        calls = []
+
+        def broken_init(self, message):
+            calls.append((type(self), message))
+            raise failure
+
+        with monkeypatch.context() as patch:
+            patch.setattr(MihwaError, "__init__", broken_init)
+            with pytest.raises(RuntimeError) as caught:
+                CurrencyMismatchError(None, "KRW")
+
+        assert caught.value is failure
+        assert calls == [(CurrencyMismatchError, "통화 불일치: None vs KRW")]
+        assert CurrencyMismatchError(None, "KRW").args == ("통화 불일치: None vs KRW",)
 
     def test_repr_contains_class_name(self):
         from src.core.exceptions import CurrencyMismatchError
@@ -154,13 +205,6 @@ class TestZoneViolationError:
         exc = ZoneViolationError("core imports foundation")
         assert str(exc) == "core imports foundation"
 
-    def test_negative_empty_message(self):
-        """Boundary: empty message should still be a valid instance."""
-        from src.core.exceptions import ZoneViolationError
-
-        exc = ZoneViolationError("")
-        assert str(exc) == ""
-
     def test_failure_injection_raises_in_handler(self):
         """Failure injection: ZoneViolationError propagates through nested handler."""
         from src.core.exceptions import ZoneViolationError
@@ -199,13 +243,6 @@ class TestFrozenZoneLiveModeBlockedError:
         exc = FrozenZoneLiveModeBlockedError("mode=live")
         assert str(exc) == "mode=live"
 
-    def test_negative_empty_message(self):
-        """Boundary: empty message should still be a valid instance."""
-        from src.core.exceptions import FrozenZoneLiveModeBlockedError
-
-        exc = FrozenZoneLiveModeBlockedError("")
-        assert str(exc) == ""
-
     def test_failure_injection_raises_in_handler(self):
         """Failure injection: FrozenZoneLiveModeBlockedError propagates through handler."""
         from src.core.exceptions import FrozenZoneLiveModeBlockedError
@@ -243,13 +280,6 @@ class TestFrozenZonePaperAdapterBlockedError:
 
         exc = FrozenZonePaperAdapterBlockedError("nh adapter in paper")
         assert str(exc) == "nh adapter in paper"
-
-    def test_negative_empty_message(self):
-        """Boundary: empty message should still be a valid instance."""
-        from src.core.exceptions import FrozenZonePaperAdapterBlockedError
-
-        exc = FrozenZonePaperAdapterBlockedError("")
-        assert str(exc) == ""
 
     def test_failure_injection_raises_in_handler(self):
         """Failure injection: FrozenZonePaperAdapterBlockedError propagates through handler."""
