@@ -83,6 +83,20 @@ class TestDeviceTokenRegisterRequestNegative:
             DeviceTokenRegisterRequest(device_token="abc", platform=None)
 
 
+class TestDeviceTokenRegisterRequestFailureInjection:
+    """Failure injection — a broken validation dependency must surface, not be swallowed."""
+
+    def test_validator_failure_propagates(self, monkeypatch):
+        """If pydantic's validation entrypoint raises, the original error reaches the caller."""
+
+        def _boom(cls, *args, **kwargs):
+            raise RuntimeError("injected validator failure")
+
+        monkeypatch.setattr(DeviceTokenRegisterRequest, "model_validate", classmethod(_boom))
+        with pytest.raises(RuntimeError, match="injected validator failure"):
+            DeviceTokenRegisterRequest.model_validate({"device_token": "abc", "platform": "ios"})
+
+
 class TestDeviceTokenRegisterRequestEdgeCases:
     """Edge cases and type coercion behavior."""
 
