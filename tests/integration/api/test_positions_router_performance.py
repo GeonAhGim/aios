@@ -45,7 +45,6 @@ class _QueryCountingConnectionCtx:
         return await self._inner_ctx.__aexit__(exc_type, exc, tb)
 
 
-
 class _QueryCountingPool:
     def __init__(self, pool) -> None:
         self._pool = pool
@@ -55,21 +54,34 @@ class _QueryCountingPool:
         return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
 
 
-
 _ACCOUNT_COUNT = 5
-
 
 
 _MAX_ROUND_TRIPS = _ACCOUNT_COUNT + 3  # 1(owned account ids) + N(list_open) + 여유분
 
 
-
 _MAX_LATENCY_MS = 3000.0
 
 
+@pytest.fixture
+def _pool_override(pool):
+    """xdist 병렬 실행 안전용 get_pool 오버라이드 관리 픽스처.
+
+    `app.dependency_overrides`는 전역 단일 객체이므로 xdist 워커 간
+    충돌을 방지하기 위해 픽스처 수명 주기로 관리한다.
+    """
+    counting_pool = _QueryCountingPool(pool)
+    app.dependency_overrides[get_pool] = lambda: counting_pool
+    try:
+        yield counting_pool
+    finally:
+        app.dependency_overrides.pop(get_pool, None)
+
 
 @pytest.mark.perf
-async def test_list_positions_round_trip_and_latency_guard(client, pool, perf_budget):
+async def test_list_positions_round_trip_and_latency_guard(
+    client, pool, _pool_override, perf_budget
+):
     """수치 성능 단언 -- `list_positions`는 계정별로 순차 `list_open` 왕복을
     낸다(§9 LB-17 문서화된 N+1). 계정 수가 늘어도 왕복 수가 선형 상한
     안에 있는지(회귀 가드)와, 공유 TEST_DATABASE_URL이 계속 자라는 환경에서도
@@ -82,26 +94,22 @@ async def test_list_positions_round_trip_and_latency_guard(client, pool, perf_bu
             pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1")
         )
 
-    counting_pool = _QueryCountingPool(pool)
-    app.dependency_overrides[get_pool] = lambda: counting_pool
-    try:
-        async def _batch():
-            for _ in range(4):
-                counting_pool.queries.clear()
-                response = await client.get(BASE, headers=headers)
-                assert response.status_code == 200
-                assert len(response.json()["data"]["items"]) == _ACCOUNT_COUNT
-                assert 0 < len(counting_pool.queries) <= _MAX_ROUND_TRIPS, counting_pool.queries
+    counting_pool = _pool_override
 
-        # Async I/O uses wall time; batch totals are converted to ms/request.
-        await perf_budget.sample_async(_batch)
-        sample = await RelativeBudget().measure_async(_batch, warmup=0)
-    finally:
-        app.dependency_overrides.pop(get_pool, None)
+    async def _batch():
+        for _ in range(4):
+            counting_pool.queries.clear()
+            response = await client.get(BASE, headers=headers)
+            assert response.status_code == 200
+            assert len(response.json()["data"]["items"]) == _ACCOUNT_COUNT
+            assert 0 < len(counting_pool.queries) <= _MAX_ROUND_TRIPS, counting_pool.queries
+
+    # Async I/O uses wall time; batch totals are converted to ms/request.
+    await perf_budget.sample_async(_batch)
+    sample = await RelativeBudget().measure_async(_batch, warmup=0)
 
     elapsed_ms = sample.op_ms / 4
     assert elapsed_ms <= _MAX_LATENCY_MS, elapsed_ms
-
 
 
 @pytest.mark.perf
