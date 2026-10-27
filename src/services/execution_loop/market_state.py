@@ -80,8 +80,13 @@ def build_market_state(
     *,
     as_of: datetime,
     indicator_service: IndicatorService | None = None,
+    assume_closed: bool = False,
 ) -> MarketState:
     """Assemble the multi-timeframe market state.
+
+    `assume_closed=True` skips the per-call closed-bar filter below; the caller
+    must guarantee every candle already has `close_time <= as_of` (the backtest
+    replay verifies ordering once up front instead of re-scanning each bar).
 
     A key with insufficient indicator data (warm-up bars not met) is simply
     left out (StrategyEngine detects this as `IndicatorDataMissingError` and
@@ -108,9 +113,14 @@ def build_market_state(
     # U10 — an in-progress (not yet closed) bar must never be used in indicator
     # calculations. Excluded here even if the exchange returns an unclosed
     # bar as the last element.
-    closed_by_tf: dict[str, list[Candle]] = {
-        tf: [c for c in candles if c.close_time <= as_of] for tf, candles in candles_by_tf.items()
-    }
+    closed_by_tf: Mapping[str, Sequence[Candle]] = (
+        candles_by_tf
+        if assume_closed
+        else {
+            tf: [c for c in candles if c.close_time <= as_of]
+            for tf, candles in candles_by_tf.items()
+        }
+    )
 
     service = indicator_service or IndicatorService()
     values: dict[str, Decimal] = {}

@@ -126,6 +126,10 @@ def run_backtest(
     equity_curve: list[EquityPoint] = []
     fills: list[SimulatedFill] = []
     pending: _PendingOrder | None = None
+    # With non-decreasing close_time every window ends at the current bar, so
+    # all of its candles are already closed at `as_of`; verify once here instead
+    # of re-filtering the whole window on every bar (O(n^2) replay otherwise).
+    bars_ordered = all(a.close_time <= b.close_time for a, b in zip(bars, bars[1:], strict=False))
 
     for bar_index, bar in enumerate(bars):
         if pending is not None:
@@ -163,7 +167,11 @@ def run_backtest(
 
         window = bars[: bar_index + 1]
         market_state_dto = build_market_state(
-            fsm_config, {"1m": window}, as_of=bar.close_time, indicator_service=service
+            fsm_config,
+            {"1m": window},
+            as_of=bar.close_time,
+            indicator_service=service,
+            assume_closed=bars_ordered,
         )
         market_state = {k: float(v) for k, v in market_state_dto.values.items()}
         try:

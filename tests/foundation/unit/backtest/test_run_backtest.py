@@ -361,40 +361,35 @@ def test_throughput_meets_local_budget_floor(perf_budget: PerfBudget) -> None:
 
 
 @pytest.mark.perf
-def test_quadratic_window_rebuild_is_a_known_gate_red_against_monthly_budget(
+def test_replay_scaling_stays_near_linear_with_ordered_bars(
     perf_budget: PerfBudget,
 ) -> None:
-    """게이트 적색 재현: run_backtest()는 매 bar마다 `bars[: bar_index + 1]`로
-    전체 누적 윈도를 새로 만들어 build_market_state에 넘긴다(L28
-    series_cache의 점진적 인과 계산을 쓰지 않음) — bar 수 n에 대해 O(n^2)로
-    스케일한다.
+    """회귀 가드(구 "known gate red" 재현 테스트 갱신, task-20341): run_backtest()는
+    bar가 시간순임을 한 번만 검증한 뒤 매 bar의 닫힌-bar 재필터(O(n))를 건너뛰어
+    (`build_market_state(assume_closed=True)`) 재생 비용이 선형에 가깝다. 이전에는
+    매 bar 누적 윈도를 전부 재스캔해 O(n^2)였고 10k/1k 비율이 ~53배까지 나와
+    부하 상태에서 100배 문턱을 넘었다(pytest_perf_parallel_1 적색).
 
-    ADR-2026-09-09-C 축별 성능 예산 "백테스트 1개월 M1 1심볼 3초"는 1개월치
-    1분봉(약 43,200 bar) 기준이다. 아래에서 실측한 4배 스케일 비율(선형이면
-    4배, 실측은 그보다 뚜렷이 큼)을 43,200 bar까지 외삽하면 (43200/4000)^2
-    ≈ 116.6배 → 3초는커녕 수십 초가 걸려 예산을 위반한다(적색). 근본 수정
-    (L28 인과 캐시를 event_loop에 연결)은 이 task의 범위(D2 증빙 보강, 파일
-    분리·리팩터 없음)를 벗어나므로, 여기서는 결함을 재현·수치로 고정만 하고
-    N/A 처리하지 않는다 — 실제로 해당 실패 모드가 있기 때문이다."""
+    4배 bar에서 선형이면 ~4.0배, O(n^2)면 ~16배다(실측 4.0배) — 노이즈 여유를 두고도
+    이차 증가와 구분되는 8.0을 상한으로 건다."""
     fsm = _never_signals_fsm_config()
 
     small = _synthetic_bars(1000)
     small_result = perf_budget.best_of(
         lambda: run_backtest(_config(), fsm, small, indicator_service=_FakePriceIndicatorService()),
+        batch=8,
     )
 
     large = _synthetic_bars(4000)  # 4배 bar 수
     large_result = perf_budget.best_of(
         lambda: run_backtest(_config(), fsm, large, indicator_service=_FakePriceIndicatorService()),
+        batch=2,
     )
 
     ratio = large_result.cpu_ms / small_result.cpu_ms
-    # 선형 스케일이면 ratio ≈ 4.0. O(n^2)이면 이상적으로는 16.0에 근접해야
-    # 하지만 고정 오버헤드가 섞여 실측은 그보다 낮다 — 노이즈 여유를 두고도
-    # 선형(4.0)과는 뚜렷이 구분되는 6.0을 문턱으로 건다.
-    assert ratio > 6.0, (
-        f"4배 bar에서 소요시간이 {ratio:.2f}배만 늘었다 — O(n^2) 재현 실패 "
-        "(회귀로 이미 고쳐졌다면 이 테스트를 갱신하고 커밋 메시지에 근거를 남길 것)"
+    assert ratio < 8.0, (
+        f"4배 bar에서 소요시간이 {ratio:.2f}배 늘었다 — O(n^2) 재생 회귀 "
+        f"(cpu_ms 4k={large_result.cpu_ms:.1f} 1k={small_result.cpu_ms:.1f})"
     )
 
 
