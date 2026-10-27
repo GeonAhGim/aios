@@ -1,16 +1,16 @@
-"""19번 — 포트폴리오 API 요청 스키마."""
+"""Portfolio API request schemas."""
 from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.services.portfolio_service import RebalanceAdjustment
 
 
 class RebalanceAdjustmentRequest(BaseModel):
     execution_id: int
-    new_allocated_capital: Decimal
+    new_allocated_capital: Decimal = Field(ge=0)
 
 
 class RebalanceRequest(BaseModel):

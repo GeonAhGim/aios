@@ -2803,7 +2803,7 @@
         "type": "string"
       },
       "CandleRecord": {
-        "description": "가격·수량은 NUMERIC(30,10) 저장과 동일 정밀도로 Decimal 유지.",
+        "description": "Price/quantity stay Decimal at the same precision as the NUMERIC(30,10) storage.",
         "properties": {
           "close": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
@@ -4454,7 +4454,7 @@
         "type": "object"
       },
       "DrawingsDocumentView": {
-        "description": "CH-4 `DrawingsDocument`와 1:1 — `schema_version`(int, 드로잉 문서 자체의\n버전, 이 계약 파일의 `SCHEMA_VERSION`(str)과 별개 개념) + `drawings`.\n`revision`은 낙관적 잠금용 부가 필드(CH-4에는 없음, MINOR 확장).",
+        "description": "1:1 with CH-4 `DrawingsDocument` — `schema_version`(int, version of the\ndrawings document itself, a separate concept from this contract file's\n`SCHEMA_VERSION`(str)) + `drawings`. `revision` is an extra field for\noptimistic locking (not in CH-4, MINOR extension).",
         "properties": {
           "drawings": {
             "items": {
@@ -4494,7 +4494,7 @@
         "type": "object"
       },
       "EntitlementView": {
-        "description": "`Entitlement`(DC-9)의 허용 결과만 노출한다 — 거부는 응답이 아니라\n404로 끝나므로(타 테넌트 동형) 여기 도달하지 않는다.",
+        "description": "Exposes only the allowed outcome of `Entitlement` (DC-9) — a denial\nnever reaches here, since it ends as a 404 (isomorphic to another tenant)\ninstead of a response.",
         "properties": {
           "delayed_seconds": {
             "title": "Delayed Seconds",
@@ -5639,7 +5639,7 @@
         "type": "object"
       },
       "InstrumentListView": {
-        "description": "프론트 `toInstrumentListResult`(clients/marketData.ts)가 `items`/\n`next_cursor`를 data 안에서 읽는다 — `meta.page.next_cursor`에도 같은\n값을 싣지만 data 쪽 필드가 그 클라이언트의 계약이다.",
+        "description": "The frontend's `toInstrumentListResult` (clients/marketData.ts) reads\n`items`/`next_cursor` from inside `data` — the same value is also carried\non `meta.page.next_cursor`, but the `data`-side field is that client's\ncontract.",
         "properties": {
           "items": {
             "items": {
@@ -9387,6 +9387,7 @@
           "new_allocated_capital": {
             "anyOf": [
               {
+                "minimum": 0.0,
                 "type": "number"
               },
               {
@@ -11107,7 +11108,7 @@
         "type": "object"
       },
       "SeriesKey": {
-        "description": "캔들/틱 시계열 식별자(venue, instrument, timeframe).",
+        "description": "Candle/tick series identifier (venue, instrument, timeframe).",
         "properties": {
           "instrument_id": {
             "format": "uuid",
@@ -12317,7 +12318,7 @@
         "type": "string"
       },
       "UpdateChartLayoutRequest": {
-        "description": "부분 갱신 — `name`/`layout_state` 중 최소 하나는 있어야 한다.",
+        "description": "Partial update — at least one of `name` or `layout_state` must be provided.",
         "properties": {
           "expected_revision": {
             "title": "Expected Revision",
@@ -12985,6 +12986,7 @@
         "type": "object"
       },
       "WhitelistEntryResponse": {
+        "description": "API response DTO for withdrawal whitelist entries.\n\nExplicitly redeclares id/exchange/destination_address from the parent\nWhitelistEntry so that Pydantic treats them as direct fields in the\nJSON schema (Guard P5.contract_field_removed checks model_fields).",
         "properties": {
           "destination_address": {
             "title": "Destination Address",
@@ -13990,7 +13992,7 @@
     },
     "/admin/wallet/topups/{topup_id}/confirm": {
       "post": {
-        "description": "전수감사(2026-09-06 P0-F, task-1719) 반영 — 예전에는 원시\n`Idempotency-Key` 헤더 문자열을 그대로 `confirm_topup`에 넘길 뿐, I-03\n4중 스코프·digest 대조를 강제하지 않았다(DB `status='PENDING'` 조건부\nUPDATE만이 실질적 중복방지였다). 이제 marketplace 구매 라우터와 같은\n`require_idempotency_key`/`run_idempotent` 경로를 강제한다.",
+        "description": "Reflects full-audit requirement (2026-09-06 P0-F, task-1719) — previously the raw\n`Idempotency-Key` header string was passed through to `confirm_topup` without\nenforcing I-03's four-scope digest cross-check (DB `status='PENDING'` conditional\nUPDATE was the only real dedup guard). Now enforces the same\n`require_idempotency_key`/`run_idempotent` path as the marketplace purchase router.",
         "operationId": "confirm_topup_admin_wallet_topups__topup_id__confirm_post",
         "parameters": [
           {
@@ -15648,7 +15650,7 @@
     },
     "/marketplace/strategies/{strategy_id}/{strategy_version}": {
       "get": {
-        "description": "10.3-B 블랙박스 원칙 — 소유자이거나 결제확인된 구매자만 접근 가능.",
+        "description": "10.3-B black-box principle — only the owner or a verified purchaser may access.",
         "operationId": "get_strategy_definition_marketplace_strategies__strategy_id___strategy_version__get",
         "parameters": [
           {
@@ -16136,7 +16138,7 @@
     },
     "/strategy-builder/candles": {
       "get": {
-        "description": "편차(2026-09-01, 앱 조립 이후 발견된 갭 해소): compute_indicator/\npreview는 서버 내부에서만 캔들을 조회하고 지표값·신호만 반환한다 —\n프론트엔드가 실제 캔들스틱 차트(가격 자체)를 그릴 방법이 없었다.\n같은 CredentialResolver 패턴을 그대로 재사용해 원시 OHLCV를 그대로\n반환한다(신규 계산 로직 없음).",
+        "description": "Deviation (2026-09-01, gap discovered after app assembly): compute_indicator/\npreview only fetch candles server-side and return indicator values/signals —\nthe frontend had no way to render actual candlestick charts (price data itself).\nReuses the same CredentialResolver pattern to return raw OHLCV as-is\n(no new computation logic).",
         "operationId": "get_candles_strategy_builder_candles_get",
         "parameters": [
           {
@@ -19246,7 +19248,7 @@
     },
     "/v1/foundation/market-data/candles/replay": {
       "get": {
-        "description": "LA-17 `replay` 위임 — 결측이 하나라도 있으면 `ReplayIncompleteError`가\n409 `DATA_COVERAGE_MISSING`으로 번역된다(strict). 페이지네이션 없음(A5\n\"같은 as_of+같은 범위 → 같은 바이트\").",
+        "description": "Delegates to LA-17 `replay` — if even one candle is missing,\n`ReplayIncompleteError` is translated into 409 `DATA_COVERAGE_MISSING`\n(strict). No pagination (A5: \"same as_of + same range -> same bytes\").",
         "operationId": "replay_candles_endpoint_v1_foundation_market_data_candles_replay_get",
         "parameters": [
           {
@@ -19437,7 +19439,7 @@
     },
     "/v1/foundation/market-data/instruments": {
       "get": {
-        "description": "자기 테넌트가 등록한 벤처의 인스트루먼트만. 등록 벤처가 없으면 빈\n목록(200) — 목록은 존재 누설 문제가 없어 404가 아니다. `cursor`는 직전\n페이지 마지막 `instrument_id`(keyset).",
+        "description": "Only instruments from venues registered to this tenant. If no venue is\nregistered, returns an empty list (200) — a listing has no existence-leak\nconcern, so it's never a 404. `cursor` is the last `instrument_id` of the\nprevious page (keyset).",
         "operationId": "list_instruments_endpoint_v1_foundation_market_data_instruments_get",
         "parameters": [
           {
@@ -19537,7 +19539,7 @@
     },
     "/v1/foundation/market-data/instruments/{symbol}/aliases": {
       "get": {
-        "description": "경로 세그먼트는 벤처 심볼(이때 `venue` 쿼리 필수) 또는 md_instrument\nUUID 둘 다 받는다(프론트 `listInstrumentAliases(instrumentId)`는 UUID를\n보낸다). UUID 형식이면 id 조회, 아니면 심볼 조회.",
+        "description": "The path segment accepts either a venue symbol (in which case the\n`venue` query param is required) or an md_instrument UUID (the frontend's\n`listInstrumentAliases(instrumentId)` sends a UUID). If it parses as a\nUUID, look up by id; otherwise look up by symbol.",
         "operationId": "list_aliases_endpoint_v1_foundation_market_data_instruments__symbol__aliases_get",
         "parameters": [
           {
@@ -20666,7 +20668,7 @@
     },
     "/v1/foundation/research/items": {
       "get": {
-        "description": "`source_id`는 필수다 -- DC-27 소스 계약 판정이 소스 단위이기 때문에\n(§ module docstring), 소스를 밝히지 않은 전체 검색은 이 leaf의 스콥\n밖이다. `instruments`/`kinds`는 콤마 구분 문자열.",
+        "description": "`source_id` is required -- DC-27 source-contract judgment operates\nper source (§ module docstring), so a source-agnostic full search falls\noutside this leaf's scope. `instruments`/`kinds` are comma-separated.",
         "operationId": "search_items_endpoint_v1_foundation_research_items_get",
         "parameters": [
           {
@@ -20797,7 +20799,7 @@
     },
     "/v1/foundation/research/items/{item_id}": {
       "get": {
-        "description": "타 테넌트/미존재는 동형 404(`require_item`). 항목이 자기 테넌트\n것으로 확인된 *후에* 소스 권한을 판정해 403을 준다 -- 순서를 바꾸면\n\"이 소스는 거부됐다\"는 신호가 \"이 item_id가 존재한다\"는 사실을 먼저\n노출하게 된다.",
+        "description": "Cross-tenant/non-existent returns homomorphic 404 (`require_item`).\nSource entitlement is judged *after* confirming the item belongs to\nthe caller's tenant, returning 403 -- reversing the order would signal\n\"this source was denied\" before \"this item_id exists\".",
         "operationId": "get_item_endpoint_v1_foundation_research_items__item_id__get",
         "parameters": [
           {

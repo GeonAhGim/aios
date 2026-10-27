@@ -225,14 +225,12 @@ class TestToAdjustmentsNegative:
         assert result[0].new_allocated_capital == Decimal("0")
 
     def test_domain_item_with_negative_capital(self):
-        """Negative capital passes through (schema doesn't enforce sign)."""
-        schema_adj = RebalanceAdjustmentRequest(
-            execution_id=1,
-            new_allocated_capital=Decimal("-100"),
-        )
-        req = RebalanceRequest(adjustments=[schema_adj])
-        result = to_adjustments(req)
-        assert result[0].new_allocated_capital == Decimal("-100")
+        """Negative capital is rejected before conversion to domain adjustments."""
+        with pytest.raises(ValidationError, match="greater than or equal to 0"):
+            RebalanceAdjustmentRequest(
+                execution_id=1,
+                new_allocated_capital=Decimal("-1"),
+            )
 
     def test_large_execution_id(self):
         """Very large int should be handled without overflow."""
@@ -287,3 +285,36 @@ class TestDecimalPrecision:
             new_allocated_capital=Decimal("1E+2"),
         )
         assert adj.new_allocated_capital == Decimal("100")
+
+
+@pytest.mark.parametrize("capital", [-1, "-0.000000000000000001", "-1E+20"])
+def test_negative_capital_returns_422_without_service_call(capital):
+    from unittest.mock import AsyncMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.deps import get_current_user
+    from src.api.portfolio_deps import get_portfolio_service
+    from src.api.routers.portfolio import router
+    from src.api.service_deps import get_credential_resolver, get_exchange_credential_service
+
+    app = FastAPI()
+    app.include_router(router, prefix="/portfolio")
+    service = AsyncMock()
+    credentials = AsyncMock()
+    app.dependency_overrides[get_current_user] = lambda: object()
+    app.dependency_overrides[get_portfolio_service] = lambda: service
+    app.dependency_overrides[get_exchange_credential_service] = lambda: credentials
+    app.dependency_overrides[get_credential_resolver] = lambda: object()
+    with TestClient(app) as client:
+        response = client.post(
+            "/portfolio/rebalance",
+            json={"adjustments": [{"execution_id": 1, "new_allocated_capital": capital}]},
+        )
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "adjustments", 0, "new_allocated_capital"]
+    assert error["type"] == "greater_than_equal"
+    service.rebalance.assert_not_awaited()
+    credentials.list_for_user.assert_not_awaited()
