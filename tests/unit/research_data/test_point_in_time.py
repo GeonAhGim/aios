@@ -243,7 +243,10 @@ def test_single_call_cpu_measurement_does_not_converge_to_zero(
     # 넘어서 실제 CPU 시간을 측정할 수 있다. (기존 perf 테스트의
     # 2 000 종목이 ~400ms이므로 5 000 종목은 ~1초대 — quantisation을
     # 완전히 덮는다.)
-    n_instruments = 5_000
+    # task-19907: 5 000 instruments measured only ~9 ms wall under CI load, i.e. less than one
+    # 15.6 ms tick, so a single call read cpu_ms=0.0 (~40% per sample). 50 000 instruments
+    # (~90 ms+) spans several ticks, so a zero reading is impossible rather than unlikely.
+    n_instruments = 50_000
     base_known_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     as_of = base_known_at + timedelta(days=2)
 
@@ -283,7 +286,7 @@ def test_single_call_cpu_measurement_does_not_converge_to_zero(
     )
     # 그리고 같은 입력이 기존 예산도 통과해야 한다.
     assert sample.cpu_ms < 10_000.0, (
-        f"5 000 종목 단일 호출이 10 s를 넘었습니다({sample.cpu_ms:.4f}ms)."
+        f"50 000 종목 단일 호출이 10 s를 넘었습니다({sample.cpu_ms:.4f}ms)."
     )
 
 
