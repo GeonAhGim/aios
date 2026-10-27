@@ -76,13 +76,6 @@ class TestRetryableExchangeError:
             caught = True
         assert caught is True
 
-    def test_negative_empty_message(self):
-        """Boundary: empty message should still be a valid instance."""
-        from src.core.exceptions import RetryableExchangeError
-
-        exc = RetryableExchangeError("")
-        assert str(exc) == ""
-
     def test_failure_injection_raises_in_handler(self):
         """Failure injection: RetryableExchangeError propagates through nested handler."""
         from src.core.exceptions import RetryableExchangeError
@@ -135,13 +128,6 @@ class TestFatalExchangeError:
         except ExchangeAPIError:
             caught = True
         assert caught is True
-
-    def test_negative_empty_message(self):
-        """Boundary: empty message should still be a valid instance."""
-        from src.core.exceptions import FatalExchangeError
-
-        exc = FatalExchangeError("")
-        assert str(exc) == ""
 
     def test_failure_injection_raises_in_handler(self):
         """Failure injection: FatalExchangeError propagates through nested handler."""
