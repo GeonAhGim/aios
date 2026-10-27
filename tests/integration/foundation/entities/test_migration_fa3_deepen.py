@@ -51,40 +51,6 @@ _DOWN_REVISION = "c9f4e2a1b6d7"
 _PERF_USER_COUNT = 50
 
 
-# When pytest runs under a system Python that lacks alembic, fall back to
-# the project venv that is guaranteed to have it installed.
-def _alembic_python() -> str:
-    """Return the Python executable to use for alembic subprocess calls."""
-    # Fast path: current interpreter has alembic.
-    try:
-        __import__("alembic")
-        return sys.executable
-    except ImportError:
-        pass
-    # Try worktree .venv first, then repo-root .venv.
-    for _offset in (1, 0):
-        candidate = Path(__file__).resolve().parents[_offset] / ".venv" / "Scripts" / "python.exe"
-        if candidate.is_file():
-            return str(candidate)
-    # Scan PATH for a Python that has alembic installed.
-    for entry in os.environ.get("PATH", "").split(os.pathsep):
-        for name in ("python.exe", "python3.exe", "python"):
-            candidate = Path(entry) / name
-            if candidate.is_file():
-                try:
-                    result = subprocess.run(
-                        [str(candidate), "-c", "import alembic"],
-                        capture_output=True,
-                        timeout=5,
-                    )
-                    if result.returncode == 0:
-                        return str(candidate)
-                except (subprocess.TimeoutExpired, OSError):
-                    continue
-    # Last resort: hope PATH resolves (alembic module will still be needed).
-    return "python"
-
-
 _CONCURRENT_RUNNERS = 8
 # task-7674: the original absolute 10.0s budget compared `elapsed` to this
 # host's clock/disk/Postgres-lock speed, not the backfill code -- it went red
@@ -175,6 +141,16 @@ def _run_alembic(*args: str) -> None:
     assert result.returncode == 0, (
         f"alembic {' '.join(args)} 실패:\n{result.stdout}\n{result.stderr}"
     )
+
+
+async def _arun_alembic(*args: str) -> None:
+    """Thread-pool wrapper around _run_alembic for use inside async tests.
+
+    pytest-xdist workers on Windows crash when a blocking ``subprocess.run``
+    is called directly from an async test function (it blocks the event loop).
+    Running the call via ``asyncio.to_thread`` keeps the loop responsive.
+    """
+    await asyncio.to_thread(_run_alembic, *args)
 
 
 @pytest.fixture
@@ -336,11 +312,11 @@ async def test_backfill_is_deterministic_across_repeated_downgrade_upgrade_cycle
     results = []
     for _ in range(2):
         await purge_position_snapshots(pool)
-        _run_alembic("downgrade", _DOWN_REVISION)
+        await _arun_alembic("downgrade", _DOWN_REVISION)
         async with pool.acquire() as conn:
             order_id = await _insert_bare_order(conn, bootstrapped_user)
 
-        _run_alembic("upgrade", "head")
+        await _arun_alembic("upgrade", "head")
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
