@@ -84,6 +84,19 @@ def test_get_device_token_service_constructor_raises_no_pool() -> None:
         mock_cls.assert_called_once()
 
 
+# ── Performance test ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.perf
+def test_get_device_token_service_within_budget(perf_budget) -> None:
+    """Factory is a pure constructor call — must stay well under 1ms per call."""
+    mock_pool = MagicMock()
+    perf_budget.assert_within(
+        lambda: get_device_token_service(pool=mock_pool),
+        budget_ms=1.0,
+    )
+
+
 # ── Boundary tests ────────────────────────────────────────────────────────────
 
 
