@@ -3,12 +3,14 @@
 Covers:
 - Happy-path: get_suitability_questionnaire returns instance, get_risk_profile_service
   creates RiskProfileService with the pool
-- Negative: pool is None (stored silently, used later), pool invalid type
-- Failure injection: constructor raises
+- Negative: pool is None (stored silently, used later), pool invalid type, zero/negative
+  answer values, extreme ratios
+- Failure injection: real objects with dependency failures (pool cursor raises,
+  questionnaire evaluate with extreme answers)
 - Boundary: multiple calls create independent instances
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -57,31 +59,71 @@ def test_get_risk_profile_service_pool_invalid_type():
     assert result._pool is bad_pool
 
 
-# ── Failure injection tests ───────────────────────────────────────────────────
+# ── Failure injection tests (real objects, dependency-level injection) ────────
 
 
-def test_get_risk_profile_service_constructor_raises():
-    """RiskProfileService.__init__ raises → exception propagates to caller."""
-    with patch(
-        "src.api.suitability_deps.RiskProfileService",
-        side_effect=RuntimeError("DB connection lost"),
-    ) as mock_cls:
-        mock_pool = MagicMock()
-        with pytest.raises(RuntimeError, match="DB connection lost"):
-            get_risk_profile_service(pool=mock_pool)
-        # Source passes pool as positional arg: RiskProfileService(pool)
-        mock_cls.assert_called_once_with(mock_pool)
+def test_risk_profile_service_save_assessment_pool_cursor_raises():
+    """Pool.acquire() raises during save_assessment → exception propagates unchanged."""
+    import asyncio
+    from uuid import uuid4
+
+    mock_pool = MagicMock()
+    mock_pool.acquire = MagicMock()
+    # Simulate pool.acquire() context manager raising on enter
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(
+        side_effect=ConnectionError("pool connection dropped")
+    )
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    svc = get_risk_profile_service(pool=mock_pool)
+    user_id = uuid4()
+
+    with pytest.raises(ConnectionError, match="pool connection dropped"):
+        asyncio.run(svc.save_assessment(user_id, MagicMock()))
 
 
-def test_get_suitability_questionnaire_constructor_raises():
-    """SuitabilityQuestionnaire constructor raises → exception propagates."""
-    with patch(
-        "src.api.suitability_deps.SuitabilityQuestionnaire",
-        side_effect=RuntimeError("questionnaire init failed"),
-    ) as mock_cls:
-        with pytest.raises(RuntimeError, match="questionnaire init failed"):
-            get_suitability_questionnaire()
-        mock_cls.assert_called_once()
+def test_questionnaire_evaluate_zero_experience_returns_stable():
+    """Zero/negative experience + minimal inputs → score 3 (goal only) → stable (edge-case)."""
+    from src.services.suitability_questionnaire import (
+        InvestmentGoal,
+        LiquidityNeed,
+        SuitabilityAnswers,
+    )
+
+    q = get_suitability_questionnaire()
+    answers = SuitabilityAnswers(
+        years_of_experience=0,
+        investable_ratio_pct=0,
+        loss_tolerance_pct=0,
+        investment_goal=InvestmentGoal.SHORT_TERM_PROFIT,
+        liquidity_need=LiquidityNeed.WITHIN_1_YEAR,
+    )
+    result = q.evaluate(answers)
+    # years=0→0, ratio=0→0, loss=0→0, goal=SHORT→3, liq=WITHIN→0 = 3 → stable
+    assert result.score == 3
+    assert result.risk_profile == "안정형"
+
+
+def test_questionnaire_evaluate_max_values_returns_aggressive():
+    """Max experience + max ratios + short-term → aggressive (upper-bound injection)."""
+    from src.services.suitability_questionnaire import (
+        InvestmentGoal,
+        LiquidityNeed,
+        SuitabilityAnswers,
+    )
+
+    q = get_suitability_questionnaire()
+    answers = SuitabilityAnswers(
+        years_of_experience=100,
+        investable_ratio_pct=100,
+        loss_tolerance_pct=100,
+        investment_goal=InvestmentGoal.SHORT_TERM_PROFIT,
+        liquidity_need=LiquidityNeed.OVER_THREE_YEARS,
+    )
+    result = q.evaluate(answers)
+    # years>10→3, ratio>60→3, loss>30→3, goal=SHORT→3, liq=OVER→3 = 15 → aggressive
+    assert result.score == 15
+    assert result.risk_profile == "공격형"
 
 
 # ── Boundary tests ────────────────────────────────────────────────────────────
@@ -142,19 +184,6 @@ def test_get_risk_profile_service_pool_default_is_not_a_pool():
     assert default.dependency is get_pool
 
 
-# ── Additional failure injection (pool dependency path) ───────────────────────
-
-
-def test_get_risk_profile_service_pool_failure_propagates_as_is():
-    """RiskProfileService raising TypeError (bad pool) propagates unchanged."""
-    with patch(
-        "src.api.suitability_deps.RiskProfileService",
-        side_effect=TypeError("pool must be asyncpg.Pool"),
-    ):
-        with pytest.raises(TypeError, match="pool must be asyncpg.Pool"):
-            get_risk_profile_service(pool={"not": "a pool"})
-
-
 # ── Performance assertion (D2, via perf_budget fixture) ───────────────────────
 
 
@@ -162,6 +191,4 @@ def test_dependency_factories_within_latency_budget(perf_budget):
     """Both factories are pure object construction — p-budget check via shared perf helper."""
     mock_pool = MagicMock()
     perf_budget.assert_within(get_suitability_questionnaire, budget_ms=20.0)
-    perf_budget.assert_within(
-        lambda: get_risk_profile_service(pool=mock_pool), budget_ms=20.0
-    )
+    perf_budget.assert_within(lambda: get_risk_profile_service(pool=mock_pool), budget_ms=20.0)
