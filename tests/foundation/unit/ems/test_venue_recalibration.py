@@ -233,8 +233,10 @@ class TestPerformance:
             while _time.process_time() < end:
                 pass
 
-        # Inject 5ms CPU load per call → budget is 10ms, batch=100 calls
-        # Total injected = 500ms, budget = 10ms → must go red.
+        # 2026-10-27: 주입량(5ms)이 예산(10ms)보다 작아 정밀한 CPU 시계(Linux Actions)에서는
+        # 단언이 적색이 되지 않았다(DID NOT RAISE). Windows 15.6ms 양자화에 기댄 통과였다 --
+        # 주입을 예산의 3배(30ms)로 올려 어느 플랫폼에서나 반드시 적색이 되게 한다(예산 불변).
+        # Inject 30ms CPU load per call → budget is 10ms → must go red.
         def _recalibrate_with_cpu_load() -> None:
             recalibrate_weights(
                 [
@@ -243,7 +245,7 @@ class TestPerformance:
                 ],
                 _DEFAULT_CURRENT,
             )
-            busy_cpu(0.005)  # 5ms CPU per call
+            busy_cpu(0.03)  # 30ms CPU per call (3x the 10ms budget)
 
         perf = PerfBudget()
         sample = perf.best_of(_recalibrate_with_cpu_load, n=5, batch=1)

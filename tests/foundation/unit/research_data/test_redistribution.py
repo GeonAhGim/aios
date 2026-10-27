@@ -449,10 +449,10 @@ def test_perf_budget_goes_red_with_cpu_injection(
 
     def _call_with_cpu_load() -> None:
         assert_redistribution_allowed(item, source, grant)
-        busy_cpu(0.005)  # 5ms CPU per call
+        busy_cpu(0.03)  # 30ms CPU per call (3x the 10ms budget)
 
     sample = perf_budget.best_of(_call_with_cpu_load, n=5, batch=1)
-    # Budget is 10ms; injected 5ms CPU per call → measurement exceeds.
+    # Budget is 10ms; injected 30ms CPU per call (3x; 5ms였을 땐 Linux에서 DID NOT RAISE).
     with pytest.raises(AssertionError) as exc_info:
         assert sample.cpu_ms < 10.0, f"Expected cpu_ms={sample.cpu_ms:.3f}ms to exceed 10ms budget"
     assert "cpu_ms=" in str(exc_info.value) or "cpu=" in str(exc_info.value)

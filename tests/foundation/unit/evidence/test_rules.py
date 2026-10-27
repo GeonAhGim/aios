@@ -185,11 +185,13 @@ def test_verify_chain_budget_goes_red_with_cpu_injection(
         events.append(event)
         previous_hash = event.event_hash
 
-    # 실제 CPU 시간의 100 배를 반환하게 monkeypatch
-    original_process_time = _time.process_time
+    # 2026-10-27: 실제 CPU 시간 x100은 Windows 양자화로 실제 값이 0이면 0이라 적색이 안 됐다
+    # (full CI 플레이크). 호출마다 10초씩 늘어나는 결정적 가짜 시계로 주입한다 -- 측정값은
+    # 항상 예산(500ms)을 넘는다. 예산은 그대로다.
+    _calls = iter(range(10**9))
 
     def _slow_process_time() -> float:
-        return original_process_time() * 100.0
+        return next(_calls) * 10.0
 
     monkeypatch.setattr(_time, "process_time", _slow_process_time)
 
@@ -211,7 +213,7 @@ def test_verify_chain_budget_goes_red_with_cpu_injection(
 
 @pytest.mark.perf
 def test_verify_chain_tight_budget_fails_proves_assertion_real(
-    perf_budget: PerfBudget,
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """예산이 실제 측정값보다 작은 경우 assert_within 이 적색으로 넘어간다 —
     성능 단언이 '아무것도 잡지 못하는 허울'이 아님을 증명한다.
@@ -225,6 +227,13 @@ def test_verify_chain_tight_budget_fails_proves_assertion_real(
         event = _event(sequence_no=sequence_no, previous_hash=previous_hash)
         events.append(event)
         previous_hash = event.event_hash
+
+    # 2026-10-27: 실제 CPU가 양자화로 0.0으로 읽히면 0 < 0.001이라 적색이 안 됐다 -- 호출마다
+    # 1ms씩 늘어나는 결정적 가짜 시계로 측정값이 항상 예산(0.001ms)을 넘게 한다.
+    import time as _time
+
+    _calls = iter(range(10**9))
+    monkeypatch.setattr(_time, "process_time", lambda: next(_calls) * 0.001)
 
     with pytest.raises(AssertionError) as exc_info:
         perf_budget.assert_within(
