@@ -64,12 +64,22 @@ _MAX_LATENCY_MS = 3000.0
 
 
 @pytest.fixture
-def _pool_override(pool):
+async def _pool_override(pool):
     """xdist 병렬 실행 안전용 get_pool 오버라이드 관리 픽스처.
 
     `app.dependency_overrides`는 전역 단일 객체이므로 xdist 워커 간
     충돌을 방지하기 위해 픽스처 수명 주기로 관리한다.
+
+    system_safety_state는 전역 싱글턴 행 — 다른 파일이 남긴 CB 레벨을
+    정상으로 되돌린다(DENY로 새면 후속 테스트에서 sentinel이 걸린다).
     """
+    # Reset circuit breaker level to normal before the test.
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE system_safety_state SET circuit_breaker_level = 'normal', "
+            "reactivation_approval_id = NULL WHERE id = 1"
+        )
+
     counting_pool = _QueryCountingPool(pool)
     app.dependency_overrides[get_pool] = lambda: counting_pool
     try:
