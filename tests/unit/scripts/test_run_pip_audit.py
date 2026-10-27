@@ -336,3 +336,50 @@ def test_main_tail_notes_local_only_packages_not_covered_by_actions(
     err = capsys.readouterr().err
     assert "로컬 전용 패키지" in err
     assert "multidict" in err
+
+
+def test_main_tail_notes_locked_packages_new_message_and_exit_code(
+    mod: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """lock 안에 핀이 있는 패키지의 취약점 발견 시, 안내 문구가 새 메시지로 출력되고
+    종료 코드는 1(게이트 실패)로 불변이어야 한다(task-18795)."""
+    payload = json.dumps(
+        {
+            "dependencies": [
+                {
+                    "name": "pyjwt",
+                    "version": "2.14.0",
+                    "vulns": [
+                        {
+                            "id": "CVE-2026-101918",
+                            "aliases": [],
+                            "fix_versions": ["2.15.1"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    lock_file = tmp_path / "requirements-lock.txt"
+    lock_file.write_text("pyjwt==2.14.0\n", encoding="utf-8")
+    ignore_file = tmp_path / ".pip-audit-ignore"
+    printer = "import sys; print(" + repr(payload) + ")"
+    with patch.object(mod, "build_pip_audit_command", return_value=[sys.executable, "-c", printer]):
+        rc = mod.main(
+            [
+                "--ignore-file",
+                str(ignore_file),
+                "--lock-file",
+                str(lock_file),
+                "--python",
+                sys.executable,
+            ]
+        )
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "requirements-lock.txt를 fix 버전 이상으로 재생성" in err
+    assert "손편집 금지" in err
+    assert "exit 0" in err
+    assert "메이저 범프" in err
+    assert "머지 조건" in err

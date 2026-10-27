@@ -287,7 +287,9 @@ def main(argv: list[str] | None = None) -> int:
         if locked:
             print(
                 f"\n참고: 위 {len(locked)}건은 {args.lock_file.name}에 핀이 있다 -- "
-                "requirements-lock.txt 갱신이 필요하다(사람 결정).",
+                "requirements-lock.txt를 fix 버전 이상으로 재생성(손편집 금지)하고 "
+                "이 스크립트가 exit 0임을 확인하라. "
+                "메이저 범프는 로컬 전체 게이트 녹색이 머지 조건이다.",
                 file=sys.stderr,
             )
         return 1
