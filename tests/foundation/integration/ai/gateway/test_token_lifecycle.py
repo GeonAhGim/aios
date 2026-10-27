@@ -211,3 +211,31 @@ async def test_paper_only_check_gate_actually_fails_without_the_constraint(
         await conn.execute(f"INSERT INTO {_tbl} (paper_only) VALUES (FALSE)")  # noqa: S608
         row = await conn.fetchrow(f"SELECT paper_only FROM {_tbl}")  # noqa: S608
         assert row["paper_only"] is False  # 적색: CHECK 없이는 통과했을 것
+
+
+# --- 성능 단언: 발급->authorize 왕복이 DB 왕복 예산 안에 드는지 ---
+
+
+async def test_issue_authorize_round_trip_meets_latency_budget(
+    repo: PostgresAgentTokenRepository, perf_budget
+) -> None:
+    """성능 단언 — 발급 후 authorize를 10회 반복한 누적 지연이 예산을 지키는지
+    확인한다. authorize가 liveness/revocation 조회를 매번 추가 쿼리로 퇴화시키면
+    이 예산을 넘긴다."""
+    issued = await issue_token(
+        repo,
+        tenant_id=uuid4(),
+        scopes=frozenset({Scope.READ}),
+        allow_instruments=frozenset(),
+        notional_cap=Decimal("0"),
+        ttl=timedelta(hours=1),
+        now=_NOW,
+    )
+
+    async def _run() -> None:
+        for _ in range(10):
+            await authorize(repo, token_secret=issued.secret, scope=Scope.READ)
+
+    budget_ms = 2000.0  # 로컬 10회 왕복 실측치 대비 CI DB 지연 편차를 감안한 여유
+    sample = await perf_budget.sample_async(_run)
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
