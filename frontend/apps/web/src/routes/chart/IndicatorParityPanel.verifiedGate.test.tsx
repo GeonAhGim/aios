@@ -4,7 +4,7 @@ import type { IndicatorCatalogEntry } from "@aios/chart-engine/src/plugins/indic
 import { computeIndicatorSeries, ClientEngineError } from "@aios/chart-engine/src/compute/clientEngine";
 import { VERIFIED_KERNEL_PINS } from "@aios/chart-engine/src/compute/verifiedIndicators";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IndicatorParityPanel, type ServerIndicatorSeriesPort } from "./IndicatorParityPanel";
 import { SMA, BBANDS, manyCandles, manyBars, smaVerifiedCatalog, fakeOverlay } from "./IndicatorParityPanel.fixtures";
 
@@ -19,9 +19,15 @@ vi.mock("@aios/chart-engine/src/compute/clientEngine", async (importOriginal) =>
   return { ...actual, computeIndicatorSeries: vi.fn(actual.computeIndicatorSeries) };
 });
 
+// The whitelist-miss fallback logs a console.warn by design; silence it here.
+beforeEach(() => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+
 afterEach(() => {
   cleanup();
   vi.mocked(computeIndicatorSeries).mockClear();
+  vi.restoreAllMocks();
 });
 
 // CH-18d — verifiedIndicators.ts's whitelist gate must sit in front of
