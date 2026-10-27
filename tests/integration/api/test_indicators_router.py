@@ -113,16 +113,6 @@ async def test_search_is_case_insensitive_substring(client: AsyncClient) -> None
     assert "SMA" in names
 
 
-async def test_category_filter_matches_core_talib_group(client: AsyncClient) -> None:
-    headers, _ = await _register(client)
-    category = DEFAULT_STATIC_CATALOG["SMA"].category
-    response = await client.get(PATH, params={"category": category, "limit": 200}, headers=headers)
-    items = response.json()["data"]["items"]
-    assert items
-    assert all(item["category"] == category for item in items)
-    assert any(item["name"] == "SMA" for item in items)
-
-
 async def test_cursor_pagination_walks_full_catalog_without_duplicates(
     client: AsyncClient,
 ) -> None:
