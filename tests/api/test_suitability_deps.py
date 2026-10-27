@@ -124,3 +124,44 @@ def test_suitability_questionnaire_evaluate_works():
     assert result.score >= 0
     assert result.risk_profile in ("안정형", "중립형", "공격형")
     assert result.answers is answers
+
+
+# ── Additional negative tests (wiring) ────────────────────────────────────────
+
+
+def test_get_risk_profile_service_pool_default_is_not_a_pool():
+    """Unwired call (no pool arg) → pool default is the Depends marker, not a real pool."""
+    import inspect
+
+    from fastapi import params
+
+    from src.api.deps import get_pool
+
+    default = inspect.signature(get_risk_profile_service).parameters["pool"].default
+    assert isinstance(default, params.Depends)
+    assert default.dependency is get_pool
+
+
+# ── Additional failure injection (pool dependency path) ───────────────────────
+
+
+def test_get_risk_profile_service_pool_failure_propagates_as_is():
+    """RiskProfileService raising TypeError (bad pool) propagates unchanged."""
+    with patch(
+        "src.api.suitability_deps.RiskProfileService",
+        side_effect=TypeError("pool must be asyncpg.Pool"),
+    ):
+        with pytest.raises(TypeError, match="pool must be asyncpg.Pool"):
+            get_risk_profile_service(pool={"not": "a pool"})
+
+
+# ── Performance assertion (D2, via perf_budget fixture) ───────────────────────
+
+
+def test_dependency_factories_within_latency_budget(perf_budget):
+    """Both factories are pure object construction — p-budget check via shared perf helper."""
+    mock_pool = MagicMock()
+    perf_budget.assert_within(get_suitability_questionnaire, budget_ms=20.0)
+    perf_budget.assert_within(
+        lambda: get_risk_profile_service(pool=mock_pool), budget_ms=20.0
+    )
