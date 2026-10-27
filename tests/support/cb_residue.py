@@ -14,11 +14,40 @@ loop`` at setup and broke every integration test that uses ``pool``).
 from __future__ import annotations
 
 import asyncio
+import warnings
 
 import asyncpg
 import pytest
 
 from tests.support.orders_residue import _TRANSIENT, _can_run_asyncio
+
+
+async def heal_liquidation_residue(database_url: str, nodeid: str) -> int:
+    """Abort non-terminal ``liquidation_request`` rows a finished module left behind.
+
+    ``run_liquidation_worker_once`` advances the *oldest* non-terminal request in the DB, so a
+    leftover row from an earlier module made a later test's own request stay REQUESTED (full CI
+    90893c2a: ``test_plans_open_position_into_slices``). This heals quietly (a warning names the
+    module) instead of failing, because modules that legitimately leave rows are per-worker DB
+    harmless to everything except this global-queue worker.
+    """
+    conn = await asyncpg.connect(database_url.replace("postgresql+asyncpg://", "postgresql://"))
+    try:
+        if not await conn.fetchval("SELECT to_regclass('liquidation_request') IS NOT NULL"):
+            return 0
+        rows = await conn.fetch(
+            "UPDATE liquidation_request SET state = 'ABORTED', completed_at = now() "
+            "WHERE state IN ('REQUESTED', 'PLANNED', 'EXECUTING') RETURNING id"
+        )
+    finally:
+        await conn.close()
+    if rows:
+        warnings.warn(
+            f"liquidation_request residue: {len(rows)} non-terminal row(s) left after {nodeid} "
+            "were aborted so later tests on this worker are not shadowed.",
+            stacklevel=2,
+        )
+    return len(rows)
 
 
 async def check_circuit_breaker(database_url: str, nodeid: str) -> None:
@@ -50,11 +79,9 @@ class CircuitBreakerResidueSentinel:
     @pytest.hookimpl(hookwrapper=True, trylast=True)
     def pytest_runtest_teardown(self, item, nextitem):
         yield
-        # 2026-10-27: 예전엔 integration/adversarial/e2e만 검사했다.
-        # tests/performance 등 다른 디렉터리가 halted를 남기면,
-        # 그 다음 검사되는 무고한 모듈(test_positions_router_performance)이
-        # 범인으로 오귀속됐다(full CI 0def1356).
-        # 모듈 경계 검사는 연결 1회라 값싸므로 모든 모듈에서 하고,
+        # 2026-10-27: 예전엔 integration/adversarial/e2e 디렉터리만 검사했다. 다른 디렉터리
+        # (tests/performance 등)가 halted를 남기면 다음에 검사되는 무고한 모듈이 범인으로
+        # 찍혔다(full CI 0def1356). 모듈 경계 검사는 연결 1회로 값싸므로 모든 모듈에서 하고,
         # 남긴 모듈 자신이 잡히게 한다.
         if not hasattr(item, "nodeid"):
             return
@@ -65,6 +92,10 @@ class CircuitBreakerResidueSentinel:
             return
         if not _can_run_asyncio():
             return
+        try:
+            asyncio.run(heal_liquidation_residue(self.database_url, item.nodeid))
+        except _TRANSIENT:
+            pass
         try:
             asyncio.run(check_circuit_breaker(self.database_url, item.nodeid))
         except _TRANSIENT:
