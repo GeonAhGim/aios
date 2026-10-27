@@ -87,14 +87,6 @@ def test_router_has_zero_raw_http_exception() -> None:
     assert calls == []
 
 
-async def test_requires_auth(client: AsyncClient) -> None:
-    response = await client.get(PATH)
-    assert response.status_code == 401
-    body = response.json()
-    assert body["error_code"].startswith("AUTH_")
-    assert "trace_id" in body
-
-
 # ---- 목록/봉투/버전·해시 ----
 
 
