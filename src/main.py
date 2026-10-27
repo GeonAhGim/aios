@@ -178,7 +178,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # pool 생성 이후의 모든 단계(event_bus 시작, credential 배선, background_loops
     # 시작 등)는 실패할 수 있다. 이전에는 이 세 호출이 try/finally 바깥이라 여기서
     # raise하면 pool이 한 번도 close()되지 않고(회귀: tests/integration/
-    # test_app_lifespan.py::test_lifespan_shutdown_clean_when_background_loops_raises)
+    # test_app_lifespan_loops_failure.py::test_lifespan_shutdown_clean_when_background_loops_raises)
     # log_listener도 stop()되지 않는 결함이 있었다. 이제 그 세 호출까지 try로
     # 감싸 어느 단계에서 실패해도 finally가 pool을 닫고 listener를 멈춘다.
     event_bus: InProcessEventBus | None = None
