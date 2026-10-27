@@ -1,9 +1,8 @@
 """R-52 planning tests -- liquidation_worker slice planning only.
 
-Extracted from test_liquidation_worker.py to keep the parent file under the
-500-line ratchet threshold (task-18763).  Shared imports/fixtures/helpers are
-read-only: _asyncpg_dsn, _cleanup, _clear_stale_requests, _create_request,
-_insert_open_position, _request_row, _setup, _slice_states, ctx, pool.
+Extracted from test_liquidation_worker.py (task-18763). The worker selects
+the oldest non-terminal request across the database, so each test must
+retire leftovers before creating its own request (task-19965).
 
 Spec: docs/specs/L4_risk_and_safety_v1.0.md#R-52 (task-2358), §4
 `liquidation_request` state table rows 426-435, §9 R-52 DoD."""
@@ -40,8 +39,17 @@ def ctx():
     return {"actors": [], "requests": []}
 
 
+async def _clear_stale_requests(pool):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE liquidation_request SET state='ABORTED', completed_at=now() "
+            "WHERE state IN ('REQUESTED','PLANNED','EXECUTING')"
+        )
+
+
 @pytest.fixture(autouse=True)
 async def _cleanup(pool, ctx):
+    await _clear_stale_requests(pool)
     yield
     async with pool.acquire() as conn:
         for request_id in ctx["requests"]:
@@ -119,3 +127,36 @@ async def _create_request(pool, actor, requests):
         )
     requests.append(row["id"])
     return row["id"]
+
+
+@pytest.mark.parametrize("stale_state", ["REQUESTED", "PLANNED", "EXECUTING"])
+async def test_stale_request_cannot_steal_planning_tick(pool, ctx, stale_state):
+    """Inject a preceding suite's unfinished request; keep terminal rows intact."""
+    stale_id = await _setup(pool, ctx, with_position=False)
+    terminal_id = await _setup(pool, ctx, with_position=False)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE liquidation_request SET state=$2, requested_at=now()-interval '1 day' "
+            "WHERE id=$1",
+            stale_id,
+            stale_state,
+        )
+        await conn.execute(
+            "UPDATE liquidation_request SET state='DONE', completed_at=now() WHERE id=$1",
+            terminal_id,
+        )
+    terminal_before = dict(await _request_row(pool, terminal_id))
+
+    await _clear_stale_requests(pool)
+    request_id = await _setup(pool, ctx)
+    await run_liquidation_worker_once(
+        pool, {"bitget": FakeExchangeAdapter()}, now=datetime.now(timezone.utc)
+    )
+
+    stale = await _request_row(pool, stale_id)
+    assert stale["state"] == "ABORTED"
+    assert stale["completed_at"] is not None
+    assert await _slice_states(pool, stale_id) == []
+    assert dict(await _request_row(pool, terminal_id)) == terminal_before
+    assert (await _request_row(pool, request_id))["state"] == "PLANNED"
+    assert len(await _slice_states(pool, request_id)) >= 3
