@@ -230,8 +230,8 @@ def test_throughput_linear_scaling_1k_vs_10k_bars(perf_budget: PerfBudget) -> No
     )
 
     ratio = sample_10k.cpu_ms / sample_1k.cpu_ms if sample_1k.cpu_ms > 0 else float("inf")
-    # window 재구축이 O(n²)이므로 선형이 아님 — 실제 측정치 기준으로
-    # 100배 미만이면 상수 오버헤드가 지배적이지 않음
+    # 78607b027 이전에는 닫힌-bar 재필터가 O(n²)라 비가 60~80배(부하 시 100배
+    # 근접)였다. 현재는 선형에 가까워 ~17배 — 100배 상한은 그대로 둔다.
     assert ratio < 100.0, (
         f"10k/1k 처리량 비 {ratio:.1f}x (cpu_ms 10k={sample_10k.cpu_ms:.3f} "
         f"1k={sample_1k.cpu_ms:.3f}) — 상수 오버헤드가 지배적이지 않아야 함(100배 미만)"
