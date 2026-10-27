@@ -268,7 +268,12 @@ def test_single_call_cpu_measurement_does_not_converge_to_zero(
         )
 
     # batch=1 — 단일 호출로 측정해야 양자화 오차를 확인할 수 있다.
-    sample = perf_budget.sample(lambda: resolve_as_of(actions, as_of), batch=1)
+    # Each sample is still a single call; under xdist a tick can land
+    # between two quantisation boundaries and read 0, so take the max of 3.
+    sample = max(
+        perf_budget.samples(lambda: resolve_as_of(actions, as_of), n=3, batch=1),
+        key=lambda s: s.cpu_ms,
+    )
 
     # single-call CPU 측정값이 0이 아님을 확인 — quantisation artefact 방지
     assert sample.cpu_ms > 0, (
