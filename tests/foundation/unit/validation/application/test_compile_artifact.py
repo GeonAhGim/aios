@@ -181,7 +181,9 @@ async def test_single_call_cpu_converges_to_zero(perf_budget: PerfBudget) -> Non
             service, owner_user_id=uuid4(), strategy_id="strat-1", strategy_version="v1"
         )
 
-    sample = await perf_budget.sample_async(_fn, batch=1)
+    # batch=8: Windows process_time 양자화(15.625ms 한 틱)가 단일 호출에서 예산(5ms)을 넘겨 보이는
+    # 측정 아티팩트를 tick/8(≈1.95ms)로 줄인다. 예산 5ms는 그대로다.
+    sample = await perf_budget.sample_async(_fn, batch=8)
     assert sample.cpu_ms < 5, (
         f"single-call CPU={sample.cpu_ms:.3f}ms exceeds 5ms budget — "
         f"wall={sample.wall_ms:.3f}ms load={perf_budget.load_percent()}"
