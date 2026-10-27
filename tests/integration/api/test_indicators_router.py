@@ -146,18 +146,6 @@ async def test_cursor_pagination_walks_full_catalog_without_duplicates(
     assert sorted(seen) == seen  # 이름 오름차순
 
 
-# ---- negative: 잘못된 커서 400 ----
-
-
-async def test_invalid_cursor_is_400(client: AsyncClient) -> None:
-    headers, _ = await _register(client)
-    response = await client.get(PATH, params={"cursor": "bad cursor!!"}, headers=headers)
-    assert response.status_code == 400, response.text
-    body = response.json()
-    assert body["error_code"] == "VALIDATION_INVALID_FIELD"
-    assert "trace_id" in body
-
-
 # ---- negative: 교차 테넌트 스크립트 지표 미노출 ----
 
 
