@@ -42,8 +42,14 @@ async def test_lifespan_wires_real_distrust_provider_factory_into_execution_sche
     회귀를 못 잡는다 — 여기서는 실제 lifespan(`start_background_loops`)이
     조립한 스케줄러의 팩토리가 `DefaultDistrustProviderFactory`이고
     실제로 참조 provider를 만들어내는지 end-to-end로 증명한다."""
-    async with app.router.lifespan_context(app):
-        scheduler = app.state.execution_scheduler
+    from fastapi import FastAPI
+
+    from src.main import lifespan as _lifespan
+
+    # Fresh instance: the shared `app` singleton collides with parallel lifespans (task-20036).
+    test_app = FastAPI(lifespan=_lifespan)
+    async with test_app.router.lifespan_context(test_app):
+        scheduler = test_app.state.execution_scheduler
         factory = scheduler._distrust_provider_factory
         assert isinstance(factory, DefaultDistrustProviderFactory)
 
