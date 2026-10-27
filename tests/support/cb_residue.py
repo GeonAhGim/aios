@@ -20,13 +20,6 @@ import pytest
 
 from tests.support.orders_residue import _TRANSIENT, _can_run_asyncio
 
-_DB_TOUCHING_DIRS = ("integration", "adversarial", "e2e")
-
-
-def _db_item(item: pytest.Item) -> bool:
-    parts = {p.lower() for p in item.path.parts}
-    return any(d in parts for d in _DB_TOUCHING_DIRS)
-
 
 async def check_circuit_breaker(database_url: str, nodeid: str) -> None:
     conn = await asyncpg.connect(database_url.replace("postgresql+asyncpg://", "postgresql://"))
@@ -57,7 +50,11 @@ class CircuitBreakerResidueSentinel:
     @pytest.hookimpl(hookwrapper=True, trylast=True)
     def pytest_runtest_teardown(self, item, nextitem):
         yield
-        if not hasattr(item, "nodeid") or not _db_item(item):
+        # 2026-10-27: 예전엔 integration/adversarial/e2e 디렉터리 모듈만 봤다 -- tests/performance 같은 다른
+        # 디렉터리 모듈이 halted를 남기면 그 다음에 검사되는 무고한 모듈(test_positions_router_performance)이
+        # 범인으로 찍혔다(full CI 0def1356). 모듈 경계 검사는 연결 1회라 값싸므로 모든 모듈에서 하고,
+        # 남긴 모듈 자신이 잡히게 한다.
+        if not hasattr(item, "nodeid"):
             return
         # Check at the module boundary only: circuit-breaker feature tests (test_circuit_breaker.py)
         # intentionally carry level changes across tests inside one file and restore at module end.
