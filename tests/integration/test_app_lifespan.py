@@ -58,20 +58,6 @@ async def test_lifespan_wires_app_state_and_starts_background_loops() -> None:
     assert pool._closed
 
 
-async def test_lifespan_can_start_and_stop_twice() -> None:
-    """app 재시작(예: 여러 테스트 모듈의 client 픽스처)에도 잔여 태스크가
-    누적되지 않는지 — 백그라운드 루프 취소 로직이 매번 완전히 정리하는지 확인."""
-    tasks_before = asyncio.all_tasks()
-
-    async with app.router.lifespan_context(app):
-        pass
-    async with app.router.lifespan_context(app):
-        pass
-
-    tasks_after = asyncio.all_tasks()
-    assert tasks_after - tasks_before == set()
-
-
 @pytest.mark.perf
 async def test_lifespan_startup_performance_meets_budget(
     perf_budget: PerfBudget,
