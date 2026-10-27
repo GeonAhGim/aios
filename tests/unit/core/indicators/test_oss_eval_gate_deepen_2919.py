@@ -20,6 +20,7 @@ INDICATOR_OSS_EVAL.md, commit da52f3c)을 D2 미달로 판정했다 — 순수 �
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -149,16 +150,19 @@ def test_perf_gate_fails_on_injected_delay(
     """
 
     def _burn_cpu() -> None:
-        # ~350 ms CPU per call; batch=10 → 3500 ms avg >> 2000 ms budget
+        # perf_budget.sample은 batch 평균(호출당 CPU)을 돌려준다. 반복 횟수 고정은 머신 속도에
+        # 의존해 적색이 안 될 수 있다(full CI bc9d6d87: 평균 1754ms < 예산 2000ms).
+        # process_time 2.2초를 확실히 태우고 batch=1로 재면 측정값 > 예산 2000ms로 결정적이다.
+        end = time.process_time() + 2.2
         x = 0.0
-        for _ in range(180_000_000):
+        while time.process_time() < end:
             x += 0.1
 
     def slow() -> object:
         _burn_cpu()
         return assert_oss_eval_gate(eval_text, pyproject_text)
 
-    n = 10
+    n = 1
     budget_ms = 2000.0
     sample = perf_budget.sample(slow, batch=n)
     assert sample.cpu_ms >= budget_ms, (
