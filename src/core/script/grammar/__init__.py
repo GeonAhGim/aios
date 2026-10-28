@@ -1,4 +1,5 @@
-"""AIOS Script 문법(v1) 패키지 — 렉서(DSL-2)·파서(DSL-3)·AST(DSL-1)."""
+"""AIOS Script grammar (v1) package — lexer (DSL-2), parser (DSL-3), AST (DSL-1)."""
+
 from __future__ import annotations
 
 from src.core.script.grammar.ast import (
