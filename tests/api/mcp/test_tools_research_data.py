@@ -324,6 +324,7 @@ async def test_research_data_search_tool_latency_budget_fails_under_delay_inject
     token_repo: PostgresAgentTokenRepository,
     research_repo: PostgresResearchRepository,
     perf_budget,
+    monkeypatch: pytest.MonkeyPatch,
     baseline_delay_s,
 ):
     """failure injection — repository 호출에 지연을 주입하면 정규화 상한을
@@ -332,6 +333,10 @@ async def test_research_data_search_tool_latency_budget_fails_under_delay_inject
     지연 주입: _DelayingResearchRepository.list_by_tenant를 monkeypatch해
     각 요청에 측정된 상한보다 2s 긴 지연을 추가. baseline(지연 없음) 대비 full(지연 주입)이
     ceiling(baseline*20+0.5)를 초과해야 한다.
+
+    monkeypatch.setattr 사용 — xdist 워커 간/내 모듈 레벨 뱅킹을 pytest가
+    자동 복구하므로 try/finally 누락 시 다른 테스트가 지연에 영구 노출되는
+    결함을 방지한다(task-20480).
     """
     import asyncio
 
@@ -362,29 +367,27 @@ async def test_research_data_search_tool_latency_budget_fails_under_delay_inject
 
     ceiling = baseline_elapsed_s * 20 + 0.5
     # 예산은 유지하고 장애 주입량만 실제 예산을 확실히 넘도록 보정한다.
-    original_repo_cls = tools_research_data.PostgresResearchRepository
-    tools_research_data.PostgresResearchRepository = lambda p: _DelayingResearchRepository(
-        p, delay_ms=(ceiling + 2) * 1000
-    )  # noqa: E731
-    try:
-        full_sample = await perf_budget.sample_async(
-            lambda: client.post(
-                "/mcp/tools/research_data_search",
-                json={"source_id": SOURCE_ID},
-                headers={AGENT_TOKEN_HEADER: issued.secret},
-            ),
-            batch=1,
-        )
-        full_elapsed_s = full_sample.wall_ms / 1000
-        assert full_sample.result.status_code == 200, full_sample.result.text
-        assert len(full_sample.result.json()) == 51
+    monkeypatch.setattr(
+        tools_research_data,
+        "PostgresResearchRepository",
+        lambda p: _DelayingResearchRepository(p, delay_ms=(ceiling + 2) * 1000),
+    )
+    full_sample = await perf_budget.sample_async(
+        lambda: client.post(
+            "/mcp/tools/research_data_search",
+            json={"source_id": SOURCE_ID},
+            headers={AGENT_TOKEN_HEADER: issued.secret},
+        ),
+        batch=1,
+    )
+    full_elapsed_s = full_sample.wall_ms / 1000
+    assert full_sample.result.status_code == 200, full_sample.result.text
+    assert len(full_sample.result.json()) == 51
 
-        assert full_elapsed_s > ceiling, (
-            f"지연 주입에도 full_elapsed_s={full_elapsed_s:.3f}s <= ceiling={ceiling:.3f}s — "
-            "지연이 예산 단언을 포착하지 못함"
-        )
-    finally:
-        tools_research_data.PostgresResearchRepository = original_repo_cls
+    assert full_elapsed_s > ceiling, (
+        f"지연 주입에도 full_elapsed_s={full_elapsed_s:.3f}s <= ceiling={ceiling:.3f}s — "
+        "지연이 예산 단언을 포착하지 못함"
+    )
 
 
 # --- D2 gate-red reproduction: repository가 tenant_id를 무시하면 교차 테넌트가 샌다 ---
@@ -415,6 +418,7 @@ async def test_research_data_search_tool_gate_red_if_repository_ignores_tenant(
     pool,
     token_repo: PostgresAgentTokenRepository,
     research_repo: PostgresResearchRepository,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     import src.api.mcp.tools_research_data as tools_research_data
 
@@ -427,16 +431,16 @@ async def test_research_data_search_tool_gate_red_if_repository_ignores_tenant(
     attacker_tenant = await _make_tenant(pool)
     issued = await issue(token_repo, tenant_id=attacker_tenant, scopes=frozenset({Scope.READ}))
 
-    original = tools_research_data.PostgresResearchRepository
-    tools_research_data.PostgresResearchRepository = lambda p: _LeakyResearchRepository(p)  # noqa: E731
-    try:
-        leaked = await client.post(
-            "/mcp/tools/research_data_search",
-            json={"source_id": SOURCE_ID},
-            headers={AGENT_TOKEN_HEADER: issued.secret},
-        )
-    finally:
-        tools_research_data.PostgresResearchRepository = original
+    monkeypatch.setattr(
+        tools_research_data,
+        "PostgresResearchRepository",
+        lambda p: _LeakyResearchRepository(p),
+    )
+    leaked = await client.post(
+        "/mcp/tools/research_data_search",
+        json={"source_id": SOURCE_ID},
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
 
     assert leaked.status_code == 200, leaked.text
     assert str(item.item_id) in {row["item_id"] for row in leaked.json()}, (
@@ -459,6 +463,7 @@ async def test_research_data_search_tool_propagates_repository_failure(
     client,
     pool,
     token_repo: PostgresAgentTokenRepository,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     import src.api.mcp.tools_research_data as tools_research_data
 
@@ -466,16 +471,16 @@ async def test_research_data_search_tool_propagates_repository_failure(
     tenant_id = await _make_tenant(pool)
     issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
 
-    original = tools_research_data.PostgresResearchRepository
-    tools_research_data.PostgresResearchRepository = lambda p: _RaisingResearchRepository(p)  # noqa: E731
-    try:
-        response = await client.post(
-            "/mcp/tools/research_data_search",
-            json={"source_id": SOURCE_ID},
-            headers={AGENT_TOKEN_HEADER: issued.secret},
-        )
-    finally:
-        tools_research_data.PostgresResearchRepository = original
+    monkeypatch.setattr(
+        tools_research_data,
+        "PostgresResearchRepository",
+        lambda p: _RaisingResearchRepository(p),
+    )
+    response = await client.post(
+        "/mcp/tools/research_data_search",
+        json={"source_id": SOURCE_ID},
+        headers={AGENT_TOKEN_HEADER: issued.secret},
+    )
 
     assert response.status_code == 500, (
         "repository 의존성 예외(ConnectionError)는 fail-closed로 500 전파되어야 하며 "
