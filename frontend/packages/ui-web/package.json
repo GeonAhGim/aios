@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "react": "^19.3.0"
+    "react": "^19.3.1"
   },
   "dependencies": {
     "lightweight-charts": "^5.2.1",
