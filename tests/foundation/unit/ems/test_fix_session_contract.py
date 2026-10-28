@@ -242,5 +242,11 @@ async def test_perf_budget_detects_10x_delay_injection(
 
     sample = await perf_budget.sample_async(_run_1000)
 
-    # 1000 calls × 1ms = 1s total CPU; budget is 100ms → must fail
-    assert sample.cpu_ms < 100, f"delayed 1000 calls took {sample.cpu_ms:.1f}ms CPU (budget 100ms)"
+    # 1000 calls × 1ms = 1s total wall; budget is 100ms → perf budget must detect
+    # This is a failure-injection test: the assertion must fire (exceed budget)
+    # to prove the perf_budget catches injected delays.
+    # time.sleep does not consume CPU (cpu_ms stays ~0), so we must check wall_ms
+    # to detect injected wall-clock delays in send_order.
+    assert sample.wall_ms >= 100, (
+        f"Expected wall time >= 100ms with injected delay; got {sample.wall_ms:.1f}ms"
+    )
