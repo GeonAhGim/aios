@@ -320,14 +320,13 @@ async def test_gate_red_reproduction_p95_budget_catches_injected_delay(
         label="check_paper_trading_eligibility",
     )
 
-    # 적색 주입 — fetchval에 15초 지연을 주입하여 ratio 예산을 넘게 함
-    import asyncio
+    # 적색 주입 — fetchval에 15초 지연을 가상으로 주입하여 ratio 예산을 넘게 함
+    from tests.support.perf_inject import virtual_delayed_async
 
     original_fetchval = asyncpg.Connection.fetchval
 
     async def delayed_fetchval(self, *args, **kwargs):
-        await asyncio.sleep(15.0)
-        return await original_fetchval(self, *args, **kwargs)
+        return await virtual_delayed_async(original_fetchval, 15.0)(self, *args, **kwargs)
 
     monkeypatch.setattr(asyncpg.Connection, "fetchval", delayed_fetchval)
 
