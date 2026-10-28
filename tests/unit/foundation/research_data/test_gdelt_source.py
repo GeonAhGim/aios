@@ -6,7 +6,6 @@ DoD ("link_only 강제").
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +27,7 @@ from src.foundation.research_data.domain.source_eval_gate import (
     assert_source_eval_gate,
 )
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EVAL_PATH = _REPO_ROOT / "docs" / "design" / "RESEARCH_DATA_SOURCE_EVAL.md"
@@ -187,7 +187,7 @@ def test_parse_gdelt_gkg_export_throughput_floor_injected_delay_goes_red() -> No
 
     def slow_parse() -> None:
         parse_gdelt_gkg_export(text)
-        time.sleep(0.5)  # 10× 지연 주입
+        virtual_delayed_sync(lambda: None, 0.5)  # 10× 지연 주입 (virtual)
 
     pb = PerfBudget()
     # assert_within 는 budget 초과 시 AssertionError 를 raise — 적색 검증
