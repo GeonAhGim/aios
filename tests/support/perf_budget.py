@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from tests.support.coverage_pause import paused_coverage
+from tests.support.perf_inject import virtual_totals
 
 try:
     import psutil
@@ -70,6 +71,7 @@ class PerfBudget:
         # body (not the hot loop) is unaffected since it is retraced right
         # after restore.
         active_tracer = sys.gettrace()
+        virtual_cpu0, virtual_wall0 = virtual_totals()
         wall_start = time.perf_counter()
         cpu_start = time.process_time()
         sys.settrace(None)
@@ -78,8 +80,11 @@ class PerfBudget:
                 result = fn()
         finally:
             sys.settrace(active_tracer)
-        cpu_ms = (time.process_time() - cpu_start) * 1000 / batch
-        wall_ms = (time.perf_counter() - wall_start) * 1000 / batch
+        virtual_cpu1, virtual_wall1 = virtual_totals()
+        cpu_s = (time.process_time() - cpu_start) + (virtual_cpu1 - virtual_cpu0)
+        wall_s = (time.perf_counter() - wall_start) + (virtual_wall1 - virtual_wall0)
+        cpu_ms = cpu_s * 1000 / batch
+        wall_ms = wall_s * 1000 / batch
         return PerfSample(cpu_ms=cpu_ms, wall_ms=wall_ms, result=result)
 
     async def sample_async(self, fn: Callable[[], Awaitable[_T]], *, batch: int = 1) -> PerfSample:
@@ -95,6 +100,7 @@ class PerfBudget:
         """
         active_tracer = sys.gettrace()
         with paused_coverage():
+            virtual_cpu0, virtual_wall0 = virtual_totals()
             wall_start = time.perf_counter()
             cpu_start = time.process_time()
             sys.settrace(None)
@@ -103,9 +109,14 @@ class PerfBudget:
                     result = await fn()
             finally:
                 sys.settrace(active_tracer)
+            virtual_cpu1, virtual_wall1 = virtual_totals()
             return PerfSample(
-                cpu_ms=(time.process_time() - cpu_start) * 1000 / batch,
-                wall_ms=(time.perf_counter() - wall_start) * 1000 / batch,
+                cpu_ms=((time.process_time() - cpu_start) + (virtual_cpu1 - virtual_cpu0))
+                * 1000
+                / batch,
+                wall_ms=((time.perf_counter() - wall_start) + (virtual_wall1 - virtual_wall0))
+                * 1000
+                / batch,
                 result=result,
             )
 

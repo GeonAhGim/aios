@@ -19,6 +19,47 @@ from typing import ParamSpec, TypeVar
 P = ParamSpec("P")
 R = TypeVar("R")
 
+# Virtual delay ledger: gate-red reproduction tests only need the *measurement* to read as slow,
+# not the process to actually sleep/spin (a 10x injection used to cost up to 126s per test).
+# ``virtual_delayed_*`` add the delay to this ledger; ``PerfBudget.sample*`` adds whatever accrued
+# during a timed call to the sample it returns, so the budget assertion sees the same number a
+# real delay would have produced. No injection -> the ledger never moves -> measurements unchanged.
+_virtual_cpu_s = 0.0
+_virtual_wall_s = 0.0
+
+
+def virtual_totals() -> tuple[float, float]:
+    """Seconds of (cpu, wall) delay injected virtually so far in this process."""
+    return _virtual_cpu_s, _virtual_wall_s
+
+
+def _add_virtual(cpu_s: float, wall_s: float) -> None:
+    global _virtual_cpu_s, _virtual_wall_s
+    _virtual_cpu_s += cpu_s
+    _virtual_wall_s += wall_s
+
+
+def virtual_delayed_async(
+    original: Callable[P, Awaitable[R]], seconds: float
+) -> Callable[P, Awaitable[R]]:
+    """Like ``delayed_async`` but adds ``seconds`` to the wall reading without sleeping."""
+
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        _add_virtual(0.0, seconds)
+        return await original(*args, **kwargs)
+
+    return wrapper
+
+
+def virtual_delayed_sync(original: Callable[P, R], seconds: float) -> Callable[P, R]:
+    """Like ``delayed_sync`` but adds ``seconds`` to the cpu and wall readings without spinning."""
+
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        _add_virtual(seconds, seconds)
+        return original(*args, **kwargs)
+
+    return wrapper
+
 
 def delayed_async(original: Callable[P, Awaitable[R]], seconds: float) -> Callable[P, Awaitable[R]]:
     """Return ``original`` preceded by an ``asyncio.sleep(seconds)`` (wall-clock slowdown)."""
