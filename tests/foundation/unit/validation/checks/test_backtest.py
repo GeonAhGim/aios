@@ -159,10 +159,14 @@ def test_backtest_check_cpu_ms_converges_to_zero_for_single_run(
 
     # batch=1 is the stress case: Windows time.process_time() has ~15.6ms tick
     # resolution; a single trivial call should still read 0ms or 1 tick.
-    samples = perf_budget.samples(_run_once, n=5, warmup=1, batch=1)
-    max_cpu_ms = max(s.cpu_ms for s in samples)
-    assert max_cpu_ms < 50.0, (
-        f"backtest check cpu_ms too high for trivial work: {max_cpu_ms:.2f}ms "
+    # The invariant is about the measurement *floor*, so assert on the median:
+    # process_time() counts every thread's CPU, and one stray GC/background tick
+    # under a loaded runner (seen: 125ms, 8 ticks) must not fail a floor check.
+    samples = perf_budget.samples(_run_once, n=7, warmup=1, batch=1)
+    cpu_ms = sorted(s.cpu_ms for s in samples)
+    median_cpu_ms = cpu_ms[len(cpu_ms) // 2]
+    assert median_cpu_ms < 50.0, (
+        f"backtest check cpu_ms too high for trivial work: median {median_cpu_ms:.2f}ms "
         f"(expected <50ms, batch=1 quantization floor)"
     )
 
