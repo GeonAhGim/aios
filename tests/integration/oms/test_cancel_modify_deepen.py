@@ -69,7 +69,6 @@ from src.services.oms.contracts.v1_events import OrderTransitionEvent
 from src.services.oms.domain.errors import InvalidOrderTransitionError
 from src.services.oms.domain.venue_profile import TimeoutBudget, VenueCapabilityProfile
 from tests.integration.oms.conftest import create_test_user
-from tests.support.db import template_database_url
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
@@ -394,12 +393,20 @@ def _assert_commit_rollback_gate_flips_red(
     repo_root = str(Path.cwd())
     # A child pytest must start from the untouched template, not the parent's
     # deliberately incomplete module seed. Its autouse fixture owns a new clone.
+    # Also reset DATABASE_URL: the parent may have monkeypatched it (isolated
+    # raw-orders fixture), and conftest.py sets DATABASE_URL from TEST_DATABASE_URL;
+    # keeping a stale DATABASE_URL would cascade into double-suffix DB names that
+    # exceed the 40-char limit enforced by session_database_url().
+    # Use the original TEST_DATABASE_URL (shell-level, never monkeypatched) to
+    # guarantee a clean template name for the child's isolated_raw_orders clone.
+    _original_test_db = os.environ.get("TEST_DATABASE_URL", "")
     env = dict(
         os.environ,
         PYTHONPATH=repo_root,
         PYTEST_ADDOPTS="",
         PYTHONIOENCODING="utf-8",
-        TEST_DATABASE_URL=template_database_url(),
+        TEST_DATABASE_URL=_original_test_db,
+        DATABASE_URL=_original_test_db,
     )
     env.pop("PYTEST_XDIST_WORKER", None)
 
