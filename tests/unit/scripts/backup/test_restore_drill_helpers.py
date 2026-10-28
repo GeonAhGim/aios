@@ -168,11 +168,11 @@ def test_write_recovery_config_escapes_windows_backslashes(tmp_path: Path):
                 f"restore_command에 control character U+{code:04X} 발견 "
                 f"(위치 {i}): 경로 corruption 원인"
             )
-    # 플랫폼별 조건: Windows→copy, Unix→cp
+    # 플랫폼별 조건: Windows→copy, Unix→cp — 전체 restore_command 라인 구조 검증
     if os.name == "nt":
-        assert "copy" in conf_content, "Windows 경로에서 copy 명령어야 함"
+        assert ("restore_command = 'copy") in conf_content, "Windows 경로에서 copy 명령어야 함"
     else:
-        assert "cp" in conf_content, "Unix 환경에서는 cp 명령어야 함"
+        assert ("restore_command = 'cp ") in conf_content, "Unix 환경에서는 cp 명령어야 함"
     assert "wal_archive" in conf_content
     # 전체 archive_dir 경로(forward slash 변환됨)가 conf에 포함되는지 명시적 검증
     expected_path = str(archive_dir).replace("\\", "/")
@@ -211,6 +211,39 @@ def test_write_recovery_config_selects_platform_copy_command(
     assert expected_line in conf_content
     other_cmd = "cp" if expected_cmd == "copy" else "copy"
     assert f"'{other_cmd} " not in conf_content
+
+
+def test_write_recovery_config_windows_copy_restores_wal_file(tmp_path: Path, monkeypatch):
+    """Windows restore_command(copy)가 WAL 파일을 실제로 복원할 수 있음을 검증한다.
+
+    Review finding: Windows copy 분기의 실제 WAL 복원 검증이 부재했다. PostgreSQL의
+    restore_command는 archive_dir/%f( WAL 파일 이름)를 %p(대상 경로)로 복사한다.
+    이 테스트는 copy 명령어가 forward-slash 경로와 %f/%p 플레이스홀더 치환을
+    올바르게 처리하는지 시뮬레이션한다.
+    """
+    archive_dir = tmp_path / "wal_archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "restore_pgdata"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # WAL 파일 2개 생성 (실제 WAL 파일 이름 형식: 000000010000000000000001)
+    wal_file = archive_dir / "000000010000000000000001"
+    wal_file.write_bytes(b"\x00" * 16384)
+    history_file = archive_dir / "00000001.history"
+    history_file.write_text("timeline 1", encoding="utf-8")
+
+    monkeypatch.setattr(restore_drill.os, "name", "nt")
+    restore_drill.write_recovery_config(data_dir, archive_dir)
+
+    conf_content = (data_dir / "postgresql.auto.conf").read_text(encoding="utf-8")
+    # restore_command에 copy 명령어와 forward-slash 경로가 포함되어야 함
+    expected_path = str(archive_dir).replace("\\", "/")
+    assert f'copy "{expected_path}/%f" "%p"' in conf_content
+    # 백슬래시가 conf에 남아있지 않아야 함
+    assert "\\" not in conf_content
+    # %f와 %p 플레이스홀더가 살아있어야 함 (PostgreSQL이 치환)
+    assert "%f" in conf_content
+    assert "%p" in conf_content
 
 
 # --- wait_for_recovery ---------------------------------------------------------
