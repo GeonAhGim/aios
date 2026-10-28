@@ -44,6 +44,7 @@ _EXCLUDE_DIR_NAMES = frozenset(
     {
         ".git",
         ".venv",
+        ".lock-venv",
         "venv",
         "__pycache__",
         ".hypothesis",
