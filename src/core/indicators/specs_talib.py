@@ -37,33 +37,33 @@ def _period(name: str, default: int) -> ParamSpec:
     return ParamSpec(name=name, min=_MIN_PERIOD, max=_MAX_PERIOD, default=default)
 
 
-def _ma_lookback(p: dict[str, int]) -> int:
-    """SMA/EMA/CCI/WILLR/BBANDS — timeperiod - 1."""
-    return p["timeperiod"] - 1
+def _ma_style_lookback(params: dict[str, int]) -> int:
+    """SMA/EMA/CCI/WILLR/BBANDS — value at last bar inside window, so timeperiod - 1."""
+    return params["timeperiod"] - 1
 
 
-def _acc_lookback(p: dict[str, int]) -> int:
-    """RSI/ATR/MFI — Wilder smoothing: timeperiod."""
-    return p["timeperiod"]
+def _accumulator_style_lookback(params: dict[str, int]) -> int:
+    """RSI/ATR/MFI — Wilder smoothing consumes timeperiod change amounts, so timeperiod."""
+    return params["timeperiod"]
 
 
-def _macd_lookback(p: dict[str, int]) -> int:
-    return p["slowperiod"] + p["signalperiod"] - 2
+def _macd_lookback(params: dict[str, int]) -> int:
+    return params["slowperiod"] + params["signalperiod"] - 2
 
 
-def _stoch_lookback(p: dict[str, int]) -> int:
-    return p["fastk_period"] + p["slowk_period"] + p["slowd_period"] - 3
+def _stoch_lookback(params: dict[str, int]) -> int:
+    return params["fastk_period"] + params["slowk_period"] + params["slowd_period"] - 3
 
 
-def _obv_lookback(_p: dict[str, int]) -> int:
+def _obv_lookback(_params: dict[str, int]) -> int:
     return 0
 
 
 # scale/pane/color/precision/legend must be filled per-indicator;
-# output_flags lacks these fields.
-_OV: OutputStyle = {"scale": "overlay", "default_pane": "price"}
-_OSC: OutputStyle = {"scale": "own", "default_pane": "separate", "precision": 2}
-_OS: OutputStyle = {"scale": "own", "default_pane": "separate"}
+# (kind/fill_between only is auto-derived from output_flags — ADR-2026-09-06-F D1).
+_OVERLAY_PRICE: OutputStyle = {"scale": "overlay", "default_pane": "price"}
+_OSCILLATOR_0_100: OutputStyle = {"scale": "own", "default_pane": "separate", "precision": 2}
+_OWN_SEPARATE: OutputStyle = {"scale": "own", "default_pane": "separate"}
 
 _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
     "SMA": IndicatorSpec(
@@ -71,56 +71,56 @@ _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
         inputs=("close",),
         params=(_period("timeperiod", 20),),
         outputs=("value",),
-        lookback=_ma_lookback,
-        plots=_plots_from_talib("SMA", ("value",), {"value": _OV}),
+        lookback=_ma_style_lookback,
+        plots=_plots_from_talib("SMA", ("value",), {"value": _OVERLAY_PRICE}),
     ),
     "EMA": IndicatorSpec(
         name="EMA",
         inputs=("close",),
         params=(_period("timeperiod", 20),),
         outputs=("value",),
-        lookback=_ma_lookback,
-        plots=_plots_from_talib("EMA", ("value",), {"value": _OV}),
+        lookback=_ma_style_lookback,
+        plots=_plots_from_talib("EMA", ("value",), {"value": _OVERLAY_PRICE}),
     ),
     "RSI": IndicatorSpec(
         name="RSI",
         inputs=("close",),
         params=(_period("timeperiod", 14),),
         outputs=("value",),
-        lookback=_acc_lookback,
-        plots=_plots_from_talib("RSI", ("value",), {"value": _OSC}),
+        lookback=_accumulator_style_lookback,
+        plots=_plots_from_talib("RSI", ("value",), {"value": _OSCILLATOR_0_100}),
     ),
     "ATR": IndicatorSpec(
         name="ATR",
         inputs=("high", "low", "close"),
         params=(_period("timeperiod", 14),),
         outputs=("value",),
-        lookback=_acc_lookback,
-        plots=_plots_from_talib("ATR", ("value",), {"value": {**_OS, "precision": 4}}),
+        lookback=_accumulator_style_lookback,
+        plots=_plots_from_talib("ATR", ("value",), {"value": {**_OWN_SEPARATE, "precision": 4}}),
     ),
     "CCI": IndicatorSpec(
         name="CCI",
         inputs=("high", "low", "close"),
         params=(_period("timeperiod", 14),),
         outputs=("value",),
-        lookback=_ma_lookback,
-        plots=_plots_from_talib("CCI", ("value",), {"value": _OSC}),
+        lookback=_ma_style_lookback,
+        plots=_plots_from_talib("CCI", ("value",), {"value": _OSCILLATOR_0_100}),
     ),
     "WILLR": IndicatorSpec(
         name="WILLR",
         inputs=("high", "low", "close"),
         params=(_period("timeperiod", 14),),
         outputs=("value",),
-        lookback=_ma_lookback,
-        plots=_plots_from_talib("WILLR", ("value",), {"value": _OSC}),
+        lookback=_ma_style_lookback,
+        plots=_plots_from_talib("WILLR", ("value",), {"value": _OSCILLATOR_0_100}),
     ),
     "MFI": IndicatorSpec(
         name="MFI",
         inputs=("high", "low", "close", "volume"),
         params=(_period("timeperiod", 14),),
         outputs=("value",),
-        lookback=_acc_lookback,
-        plots=_plots_from_talib("MFI", ("value",), {"value": _OSC}),
+        lookback=_accumulator_style_lookback,
+        plots=_plots_from_talib("MFI", ("value",), {"value": _OSCILLATOR_0_100}),
     ),
     "MACD": IndicatorSpec(
         name="MACD",
@@ -136,9 +136,9 @@ _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
             "MACD",
             ("macd", "signal", "hist"),
             {
-                "macd": _OS,
-                "signal": _OS,
-                "hist": {**_OS, "color_rule": "sign"},
+                "macd": _OWN_SEPARATE,
+                "signal": _OWN_SEPARATE,
+                "hist": {**_OWN_SEPARATE, "color_rule": "sign"},
             },
         ),
     ),
@@ -147,14 +147,14 @@ _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
         inputs=("close",),
         params=(_period("timeperiod", 5),),
         outputs=("upperband", "middleband", "lowerband"),
-        lookback=_ma_lookback,
+        lookback=_ma_style_lookback,
         plots=_plots_from_talib(
             "BBANDS",
             ("upperband", "middleband", "lowerband"),
             {
-                "upperband": _OV,
-                "middleband": _OV,
-                "lowerband": _OV,
+                "upperband": _OVERLAY_PRICE,
+                "middleband": _OVERLAY_PRICE,
+                "lowerband": _OVERLAY_PRICE,
             },
         ),
     ),
@@ -171,7 +171,7 @@ _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
         plots=_plots_from_talib(
             "STOCH",
             ("slowk", "slowd"),
-            {"slowk": _OSC, "slowd": _OSC},
+            {"slowk": _OSCILLATOR_0_100, "slowd": _OSCILLATOR_0_100},
         ),
     ),
     "OBV": IndicatorSpec(
@@ -180,7 +180,7 @@ _MANUAL_OVERRIDES: dict[str, IndicatorSpec] = {
         params=(),
         outputs=("value",),
         lookback=_obv_lookback,
-        plots=_plots_from_talib("OBV", ("value",), {"value": _OS}),
+        plots=_plots_from_talib("OBV", ("value",), {"value": _OWN_SEPARATE}),
     ),
 }
 
