@@ -6,22 +6,24 @@ Always converts the Service-layer User model through this Response
 model rather than returning it directly (per 16_backend_signatures.md —
 prevents divergence between the two layers).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
+from src.api.schemas._email_type import ValidEmailType
 from src.services.auth_service import User
 
 
 class SignupRequest(BaseModel):
-    email: EmailStr
+    email: ValidEmailType
     password: str = Field(min_length=12)
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: ValidEmailType
     password: str
     totp_code: str | None = None
 
