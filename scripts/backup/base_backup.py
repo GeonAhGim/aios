@@ -64,12 +64,7 @@ def _run(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
         with tempfile.TemporaryFile(mode="w+b") as out:
             try:
                 r = subprocess.run(
-                    cmd,
-                    env=env,
-                    stdout=out,
-                    stderr=subprocess.STDOUT,
-                    timeout=timeout,
-                    check=False,
+                    cmd, env=env, stdout=out, stderr=subprocess.STDOUT, timeout=timeout, check=False
                 )
             except subprocess.TimeoutExpired:
                 return 124, f"timeout {timeout}s"
@@ -78,6 +73,28 @@ def _run(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
         return r.returncode, text[-4000:]
     except OSError as exc:
         return 1, f"{type(exc).__name__}: {exc}"
+
+
+def _drop_stale_slot(
+    dsn: str,
+    run_cmd: Callable[[list[str], dict | None, int], tuple[int, str]],
+    which: Callable[[str], str | None],
+) -> None:
+    """드릴이 중단돼 남은 복제 슬롯 aios_drill을 먼저 제거한다(없으면 no-op).
+    pg_basebackup -C -S aios_drill 은 같은 이름 슬롯이 있으면 'already exists'로 실패한다.
+    best-effort: 제거가 실패해도 pg_basebackup이 자체 오류를 보고하므로 여기서 막지 않는다."""
+    psql = which("psql")
+    if psql is None:
+        return
+    libpq_dsn = dsn.replace("postgresql+asyncpg://", "postgresql://")
+    sql = (
+        "SELECT pg_drop_replication_slot('aios_drill') "
+        "WHERE EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='aios_drill')"
+    )
+    try:
+        run_cmd([psql, libpq_dsn, "-tAc", sql], None, 30)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def run_base_backup(
@@ -100,6 +117,7 @@ def run_base_backup(
     target = dest_dir / stamp
     target.mkdir(parents=True, exist_ok=False)
     backup_label = label or f"aios-base-{stamp}"
+    _drop_stale_slot(dsn, run_cmd, which)
     cmd = [
         pg_basebackup_bin,
         *pg_conn_args(dsn),
@@ -165,8 +183,7 @@ def latest_backup_dir(dest_dir: Path) -> Path | None:
         return None
     candidates = sorted(
         (p for p in dest_dir.iterdir() if p.is_dir() and (p / "manifest.json").is_file()),
-        key=lambda p: p.name,
-        reverse=True,
+        key=lambda p: p.name, reverse=True,
     )
     for p in candidates:
         try:
@@ -196,9 +213,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"base_backup 실패: {e}", file=sys.stderr)
         return 1
     if not manifest["ok"]:
-        print(
-            f"pg_basebackup 실패(rc={manifest['returncode']}): {manifest['tail']}", file=sys.stderr
-        )
+        print(f"pg_basebackup 실패(rc={manifest['returncode']}): {manifest['tail']}",
+              file=sys.stderr)
         return 1
     print(f"base backup 완료: {manifest['dest']}")
     return 0

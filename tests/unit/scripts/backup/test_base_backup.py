@@ -3,7 +3,6 @@
 pg_basebackup 실행 파일 없이도(`which`/`run_cmd` 주입) 성공/실패 경로를 모두 검증한다.
 DB·네트워크 접근 없음.
 """
-
 from __future__ import annotations
 
 import json
@@ -31,8 +30,7 @@ def test_run_base_backup_missing_binary_raises(tmp_path: Path):
 
 def test_run_base_backup_success_writes_manifest(tmp_path: Path):
     manifest = base_backup.run_base_backup(
-        tmp_path,
-        "postgresql://x/y",
+        tmp_path, "postgresql://x/y",
         which=lambda _b: "/usr/bin/pg_basebackup",
         run_cmd=lambda cmd, env, timeout: (0, "backup done"),
     )
@@ -46,8 +44,7 @@ def test_run_base_backup_success_writes_manifest(tmp_path: Path):
 
 def test_run_base_backup_failure_removes_dir_and_records_failed_marker(tmp_path: Path):
     manifest = base_backup.run_base_backup(
-        tmp_path,
-        "postgresql://x/y",
+        tmp_path, "postgresql://x/y",
         which=lambda _b: "/usr/bin/pg_basebackup",
         run_cmd=lambda cmd, env, timeout: (1, "connection refused"),
     )
@@ -153,10 +150,57 @@ def test_pg_basebackup_command_includes_wal_method_stream_and_replication_slot(
         run_cmd=run_cmd,
     )
 
-    assert len(captured) == 1
-    cmd = captured[0]
+    basebackup_cmds = [c for c in captured if c[0] == "pg_basebackup"]
+    assert len(basebackup_cmds) == 1
+    cmd = basebackup_cmds[0]
     assert "--wal-method=stream" in cmd, "--wal-method=stream 이 없다 — WAL 소실 재발"
     assert "--checkpoint=fast" in cmd, "--checkpoint=fast 없음 — 체크포인트 대기 중 WAL 재활용"
     assert "-C" in cmd, "-C (replication slot 생성) 이 없다"
     assert "-S" in cmd, "-S 가 없다"
     assert "aios_drill" in cmd, "슬롯 이름 aios_drill 이 없다"
+
+
+def test_stale_slot_is_dropped_before_pg_basebackup(tmp_path: Path) -> None:
+    """드릴 중단으로 남은 aios_drill 슬롯은 pg_basebackup -C 전에 제거돼야 한다.
+
+    제거하지 않으면 -C 가 already exists 로 실패한다.
+    """
+    captured: list[list[str]] = []
+
+    def run_cmd(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+        captured.append(cmd)
+        return (0, "ok")
+
+    base_backup.run_base_backup(
+        tmp_path,
+        "postgresql+asyncpg://u@db:5432/aios",
+        which=lambda b: b,
+        run_cmd=run_cmd,
+    )
+
+    names = [c[0] for c in captured]
+    assert names == ["psql", "pg_basebackup"]
+    drop_cmd = captured[0]
+    assert "postgresql://u@db:5432/aios" in drop_cmd
+    assert "pg_drop_replication_slot('aios_drill')" in drop_cmd[-1]
+
+
+def test_failed_slot_drop_does_not_block_backup(tmp_path: Path) -> None:
+    """실패 주입: 슬롯 정리 명령이 OSError를 내도 백업은 계속 진행하고 manifest가 기록된다."""
+    calls: list[str] = []
+
+    def run_cmd(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+        calls.append(cmd[0])
+        if cmd[0] == "psql":
+            raise OSError("psql crashed")
+        return (0, "backup done")
+
+    manifest = base_backup.run_base_backup(
+        tmp_path,
+        "postgresql://x/y",
+        which=lambda b: b,
+        run_cmd=run_cmd,
+    )
+
+    assert calls == ["psql", "pg_basebackup"]
+    assert manifest["ok"] is True
