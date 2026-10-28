@@ -33,6 +33,7 @@ from src.foundation.research_data.adapters.postgres_repository import (
 from src.foundation.research_data.contracts.v1 import ResearchItem, SourceMeta
 from src.main import app
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_async
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 BASE = "/v1/foundation/research-data"
@@ -355,17 +356,16 @@ async def test_search_latency_budget_fails_under_10x_delay_injection(
     검증한다.
     """
     # PostgresResearchRepository.list_by_tenant_across_sources를 monkeypatch
-    # 하여 각 호출에 0.5s 지연을 추가
-    import asyncio
-
+    # 하여 각 호출에 0.5s 지연을 추가 — 가상 지연으로 측정치만 늘림 (실제 sleep 없음)
     _real_repo_class = PostgresResearchRepository
     _sleep_count = [0]
 
     class _DelayedResearchRepository(_real_repo_class):
         async def list_by_tenant_across_sources(self, tenant_id, *, limit=200) -> list:
             _sleep_count[0] += 1
-            await asyncio.sleep(5.0)  # 5s 지연 주입
-            return await super().list_by_tenant_across_sources(tenant_id, limit=limit)
+            return await virtual_delayed_async(super().list_by_tenant_across_sources, 5.0)(
+                tenant_id, limit=limit
+            )
 
     pool = app.state.pool
     app.dependency_overrides[get_research_repository] = lambda: _DelayedResearchRepository(pool)
