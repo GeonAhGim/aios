@@ -42,7 +42,7 @@ from tests.integration.eventstore._replay_verify_support import (
     _seed_order,
     assert_no_replay_window_leftovers,
 )
-from tests.support.perf_inject import delayed_async
+from tests.support.perf_inject import virtual_delayed_async
 
 
 @pytest.fixture
@@ -113,11 +113,11 @@ async def test_replay_deterministic_gate_red_with_delayed_fills(pool, monkeypatc
         await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
 
-    # 4초 지연 주입 -- calibration 편차에도 ratio>500x 유지
+    # 4초 가상 지연 주입 -- calibration 편차에도 ratio>500x 유지 (실제 sleep 없이 측정치만 느리게)
     monkeypatch.setattr(
         FillsRepository,
         "list_for_order",
-        delayed_async(FillsRepository.list_for_order, 4.0),
+        virtual_delayed_async(FillsRepository.list_for_order, 4.0),
     )
 
     sample = await RelativeBudget().measure_async(
@@ -322,11 +322,11 @@ async def test_replay_verify_gate_red_reproduction_with_delayed_fills(pool, monk
         await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
 
-    # 4초 지연 주입 -- calibration 편차에도 ratio>500x 유지
+    # 4초 가상 지연 주입 -- calibration 편차에도 ratio>500x 유지 (실제 sleep 없이 측정치만 느리게)
     monkeypatch.setattr(
         FillsRepository,
         "list_for_order",
-        delayed_async(FillsRepository.list_for_order, 4.0),
+        virtual_delayed_async(FillsRepository.list_for_order, 4.0),
     )
 
     # 같은 단언 -- 지연 주입으로 ratio가 500x를 압도적으로 초과해야 함
