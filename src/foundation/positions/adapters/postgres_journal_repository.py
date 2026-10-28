@@ -39,6 +39,7 @@ from pydantic import AwareDatetime
 
 from src.data.models.base import Currency, Money
 from src.foundation.positions.contracts.v1 import JournalEntryType, PositionJournalEntryView
+from src.foundation.positions.domain.journal_rules import ChainIntegrityError
 
 _LOCK_NAMESPACE = "pos_journal"
 
@@ -117,6 +118,37 @@ def _row_to_view(row: asyncpg.Record | dict[str, Any]) -> PositionJournalEntryVi
     )
 
 
+def _verify_tail(position_key: str, combined: asyncpg.Record) -> None:
+    """Fail-closed check of the chain tail before extending it.
+
+    `journal_rules.verify_chain` cannot be reused as-is: it recomputes hashes
+    with the domain formula (no position_key in the payload), which differs from
+    this adapter's stored `entry_hash` format. The domain `ChainIntegrityError`
+    is reused; the tail (last row linked to its predecessor, last row's own hash
+    recomputed from the stored digest) is validated, which covers tampering
+    that would otherwise be silently extended.
+    """
+    seq = combined["last_sequence_no"]
+    if combined["last_prev_hash"] != combined["prior_entry_hash"]:
+        raise ChainIntegrityError(
+            position_key, seq, "prev_hash mismatch (chain break or tampering suspected)."
+        )
+    recomputed = _entry_hash(
+        combined["last_prev_hash"],
+        position_key,
+        seq,
+        JournalEntryType(combined["last_entry_type"]),
+        combined["last_digest"],
+        combined["last_occurred_at"],
+    )
+    if recomputed != combined["last_entry_hash"]:
+        raise ChainIntegrityError(
+            position_key,
+            seq,
+            "entry_hash differs from recomputed value (content tampering suspected).",
+        )
+
+
 class PostgresJournalRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -156,11 +188,17 @@ class PostgresJournalRepository:
         # previous row (sequence_no, entry_hash) lookup into a single LEFT JOIN,
         # reducing 3 round-trips to 1. Even if the snapshot is missing (new
         # position_key), last_entry is always empty so the logic is unaffected.
+        # The tail columns (last_*, prior_entry_hash) feed the chain check below.
         combined = await conn.fetchrow(
             "SELECT "
             " snap.tenant_id AS snap_tenant_id, snap.account_id AS snap_account_id, "
             " last_entry.sequence_no AS last_sequence_no, "
             " last_entry.entry_hash AS last_entry_hash, "
+            " last_entry.prev_hash AS last_prev_hash, "
+            " last_entry.entry_type AS last_entry_type, "
+            " last_entry.digest AS last_digest, "
+            " last_entry.occurred_at AS last_occurred_at, "
+            " prior_entry.entry_hash AS prior_entry_hash, "
             " existing.id AS existing_id, existing.position_key AS existing_position_key, "
             " existing.sequence_no AS existing_sequence_no, "
             " existing.entry_type AS existing_entry_type, "
@@ -179,10 +217,16 @@ class PostgresJournalRepository:
             "FROM (SELECT $2::varchar AS position_key) AS target "
             "LEFT JOIN pos_snapshot snap ON snap.position_key = target.position_key "
             "LEFT JOIN LATERAL ("
-            "  SELECT sequence_no, entry_hash FROM pos_journal "
+            "  SELECT sequence_no, entry_hash, prev_hash, entry_type, digest, occurred_at "
+            "  FROM pos_journal "
             "  WHERE position_key = target.position_key "
             "  ORDER BY sequence_no DESC LIMIT 1"
             ") last_entry ON true "
+            "LEFT JOIN LATERAL ("
+            "  SELECT entry_hash FROM pos_journal "
+            "  WHERE position_key = target.position_key "
+            "  ORDER BY sequence_no DESC OFFSET 1 LIMIT 1"
+            ") prior_entry ON true "
             "LEFT JOIN pos_journal existing ON existing.idempotency_key = $1",
             idempotency_key,
             position_key,
@@ -220,6 +264,8 @@ class PostgresJournalRepository:
             raise UnknownPositionError(position_key)
 
         last_sequence_no = combined["last_sequence_no"]
+        if last_sequence_no is not None:
+            _verify_tail(position_key, combined)
         next_seq = 1 if last_sequence_no is None else last_sequence_no + 1
         prev_hash: str | None = combined["last_entry_hash"]
         new_hash = _entry_hash(
