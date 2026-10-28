@@ -159,13 +159,18 @@ def test_parse_candles_latency_scales_linearly_not_quadratically():
     # 워밍업 — 첫 호출의 인터프리터/캐시 워밍업 비용이 표본에 섞이지 않게 한다.
     parse_candles(small_batch, "BTC/USDT", "1m")
 
-    small_started = time.perf_counter()
-    parse_candles(small_batch, "BTC/USDT", "1m")
-    small_elapsed = time.perf_counter() - small_started
+    # best-of-5: 한 번의 GC/스케줄링 정지(실측 2ms가 133ms로 튐)가 배율을 망치지 않게 한다.
+    # 진짜 O(n^2) 회귀는 5번 모두 느려 최소값도 예산(80배)을 넘으므로 검출력은 그대로다.
+    def _best_of(batch: list, repeats: int = 5) -> float:
+        best = float("inf")
+        for _ in range(repeats):
+            started = time.perf_counter()
+            parse_candles(batch, "BTC/USDT", "1m")
+            best = min(best, time.perf_counter() - started)
+        return best
 
-    large_started = time.perf_counter()
-    parse_candles(large_batch, "BTC/USDT", "1m")
-    large_elapsed = time.perf_counter() - large_started
+    small_elapsed = _best_of(small_batch)
+    large_elapsed = _best_of(large_batch)
 
     size_ratio = len(large_batch) / len(small_batch)  # 10.0
     budget_multiplier = 8.0  # 선형(10배) 대비 넉넉한 여유 -> 총 80배까지 허용
