@@ -1,4 +1,5 @@
-"""CreateChartLayout 커맨드 — 빈 드로잉 문서를 갖는 새 레이아웃을 만든다."""
+"""CreateChartLayout command — creates a new layout with an empty drawing document."""
+
 from __future__ import annotations
 
 from typing import Any
