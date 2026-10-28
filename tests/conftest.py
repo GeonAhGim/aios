@@ -215,7 +215,7 @@ def lifespan_context_with_retry(app):
 
 def _is_nested_gate_proof(item: pytest.Item) -> bool:
     """자식 pytest로 게이트 적색 전환을 증명하는 테스트(이름 규약 `test_pytest_gate_turns_red*`)."""
-    return item.name.startswith("test_pytest_gate_turns_red")
+    return str(getattr(item, "name", "")).startswith("test_pytest_gate_turns_red")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
