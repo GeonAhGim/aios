@@ -1,4 +1,10 @@
 {
   "_설명": "pip-audit(scripts/run_pip_audit.py)이 읽는 알려진 예외 목록. id/reason/expires 모두 필수 — expires가 지나면 CI가 예외 자체를 실패시킨다(예외 방치 금지, ADR-2026-09-09-B H-5).",
-  "ignore": []
+  "ignore": [
+    {
+      "id": "CVE-2026-114605",
+      "reason": "dnspython 2.8.0(GHSA-45c3-73f7-pv4m): 악의적 DNS wire 메시지 압축 해제 시 CPU 과다 사용(DoS). 수정판 2.9.0은 Python>=3.11 전용이라 이 저장소의 지원 런타임(3.10)에 설치할 수 없다(pip index: 3.10 최신 2.8.0, 2026-10-28 실측). 도달 불가: dnspython은 email-validator의 전이 의존성뿐이고 앱은 pydantic EmailStr(check_deliverability=False, DNS 조회 없음)만 쓰며 src에서 dns 모듈을 직접 호출하지 않는다. 사용자 승인 2026-10-28(채팅), 만료 전 Python 3.11 이상 이전 또는 3.10용 패치 릴리스를 재평가한다.",
+      "expires": "2026-11-27"
+    }
+  ]
 }
