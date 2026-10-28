@@ -275,10 +275,10 @@ async def test_network_error_raises_upstream_error_with_no_status_code(
 # --- usage 토큰 누락/음수 처리 (AI-6 negative tests) ---
 
 
-async def test_generate_missing_usage_defaults_to_zero_cost(
+async def test_generate_missing_usage_raises_upstream_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """usage 필드가 아예 없으면 cost=0, tokens=0이어야 한다(과소 기록 방지)."""
+    """usage 키가 없으면 AnthropicUpstreamError를 raise한다(cost=0 반환하지 않음)."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -293,10 +293,35 @@ async def test_generate_missing_usage_defaults_to_zero_cost(
     _mock_transport(monkeypatch, httpx.MockTransport(handler))
     provider = _provider()
 
-    result = await provider.generate(_SCHEMA, _prompt(), _budget())
+    with pytest.raises(AnthropicUpstreamError) as exc_info:
+        await provider.generate(_SCHEMA, _prompt(), _budget())
 
-    assert result.cost == Decimal("0")
-    assert result.output_tokens == 0
+    assert "missing usage dict" in str(exc_info.value)
+
+
+async def test_generate_usage_not_dict_raises_upstream_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """usage가 dict가 아니면 AnthropicUpstreamError를 raise한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {"type": "tool_use", "name": "structured_output", "input": {"hypothesis": "x"}}
+                ],
+                "usage": [1, 2, 3],
+            },
+        )
+
+    _mock_transport(monkeypatch, httpx.MockTransport(handler))
+    provider = _provider()
+
+    with pytest.raises(AnthropicUpstreamError) as exc_info:
+        await provider.generate(_SCHEMA, _prompt(), _budget())
+
+    assert "missing usage dict" in str(exc_info.value)
 
 
 async def test_generate_negative_input_tokens_clamped_to_zero(
@@ -346,6 +371,56 @@ async def test_generate_negative_output_tokens_clamped_to_zero(
     result = await provider.generate(_SCHEMA, _prompt(), _budget())
 
     assert result.cost == Decimal("10") * _PRICING.input_cost_per_token
+
+
+async def test_generate_non_numeric_token_value_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """비숫자 문자열 토큰 값이 들어오면 AnthropicUpstreamError를 raise한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {"type": "tool_use", "name": "structured_output", "input": {"hypothesis": "x"}}
+                ],
+                "usage": {"input_tokens": "abc", "output_tokens": 5},
+            },
+        )
+
+    _mock_transport(monkeypatch, httpx.MockTransport(handler))
+    provider = _provider()
+
+    with pytest.raises(AnthropicUpstreamError) as exc_info:
+        await provider.generate(_SCHEMA, _prompt(), _budget())
+
+    assert "cannot be converted to int" in str(exc_info.value)
+
+
+async def test_generate_bool_token_value_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bool 토큰 값(True/False)이 들어오면 AnthropicUpstreamError를 raise한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "content": [
+                    {"type": "tool_use", "name": "structured_output", "input": {"hypothesis": "x"}}
+                ],
+                "usage": {"input_tokens": True, "output_tokens": 5},
+            },
+        )
+
+    _mock_transport(monkeypatch, httpx.MockTransport(handler))
+    provider = _provider()
+
+    with pytest.raises(AnthropicUpstreamError) as exc_info:
+        await provider.generate(_SCHEMA, _prompt(), _budget())
+
+    assert "is bool" in str(exc_info.value)
 
 
 # --- 성능 단언 + 게이트 적색 재현 ---

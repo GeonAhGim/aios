@@ -32,6 +32,9 @@ constant this module invents. The one estimate this module does make --
 (chars/4) used only to refuse an over-cap call *before* spending anything
 (`ports/model_provider.py` docstring); it never substitutes for the real
 post-call `usage` figures in the returned `StructuredOutput.cost`.
+If ``usage`` is missing, not a dict, or contains non-numeric/bool token values,
+the adapter raises ``AnthropicUpstreamError`` (fail-closed) rather than
+recording ``cost=0``, which would silently under-report actual spend.
 
 The pre-flight estimate is computed over the full request payload the wire call
 actually sends -- `prompt.template` *and* the JSON-serialized `schema` (the
@@ -119,6 +122,33 @@ def _estimate_request_input_tokens(prompt: PromptTemplate, schema: dict[str, Any
     return _estimate_input_tokens(prompt.template) + _estimate_input_tokens(json.dumps(schema))
 
 
+def _parse_token_count(usage: dict[str, Any], key: str) -> int:
+    """Parse a token-count field from usage, raising on invalid values.
+
+    Rejects ``None``, ``bool``, non-numeric types, and strings that cannot
+    be converted to ``int``.  Negative values are clamped to zero; the
+    caller already knows the API returned a token count so a negative
+    number signals a malformed response rather than legitimate underflow.
+    """
+    raw = usage.get(key)
+    if raw is None:
+        return 0
+    # bool is subclass of int in Python; int(True)==1 is silently wrong.
+    if isinstance(raw, bool):
+        raise AnthropicUpstreamError(
+            status_code=None,
+            message=f"{key!r} token value is bool ({raw!r})",
+        )
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise AnthropicUpstreamError(
+            status_code=None,
+            message=f"{key!r} token value {raw!r} cannot be converted to int: {exc}",
+        ) from exc
+    return max(0, value)
+
+
 def _extract_tool_input(body: dict[str, Any]) -> dict[str, Any]:
     for block in body.get("content", []):
         if isinstance(block, dict) and block.get("type") == "tool_use":
@@ -202,9 +232,14 @@ class AnthropicProvider:
 
         body = response.json()
         data = _extract_tool_input(body)
-        usage = body.get("usage") or {}
-        input_tokens = max(0, int(usage.get("input_tokens") or 0))
-        output_tokens = max(0, int(usage.get("output_tokens") or 0))
+        usage = body.get("usage")
+        if not isinstance(usage, dict):
+            raise AnthropicUpstreamError(
+                status_code=response.status_code,
+                message="response body missing usage dict",
+            )
+        input_tokens = _parse_token_count(usage, "input_tokens")
+        output_tokens = _parse_token_count(usage, "output_tokens")
         cost = (
             Decimal(input_tokens) * self._pricing.input_cost_per_token
             + Decimal(output_tokens) * self._pricing.output_cost_per_token
