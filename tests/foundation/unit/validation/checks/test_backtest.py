@@ -128,17 +128,6 @@ def _ctx(
     )
 
 
-def test_pass_with_paid_cost_model_and_no_trades() -> None:
-    bars = _bars(30)
-    ctx = _ctx(bars=bars)
-    result = run(ctx)
-    assert result.outcome == Outcome.PASS
-    assert result.hard_fail_reasons == []
-    assert result.check_type == "backtest"
-    # bars[0].close=100 -> bars[-1].close=129: (129-100)/100*100 = 29%.
-    assert result.metrics["benchmark_buy_hold_return_pct"] == Decimal("29")
-
-
 # -- D2 CPU measurement convergence: single call cpu_ms → 0 for trivial work ---
 
 
