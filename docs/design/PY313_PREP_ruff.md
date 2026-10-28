@@ -29,9 +29,14 @@
 
 ---
 
-## 2. 3.13에서 실제로 깨지는 것 (제거됨) — UP035, UP041
+## 2. 이전·정리 권장 항목 — UP035, UP041 (3.13에서 깨지지 않음)
 
-### UP035 deprecated-import (4건) — 3.13에서 import 실패
+> **정정(CTO 검증 2026-10-29):** 초안은 이 절을 "3.13에서 실제로 깨지는 것(제거됨)"으로 분류했으나 틀렸다.
+> Python 3.13.15에서 직접 확인: `asyncio.TimeoutError is TimeoutError`는 `True`(별칭 유지, 제거되지 않음).
+> `typing_extensions`의 `Unpack`/`Never` import도 3.13에서 성공한다. 즉 이 절의 7건은 모두 정리 권장일 뿐
+> 3.13 전환을 막지 않는다. ruff/grep으로 찾은 항목 중 3.13에서 실제로 깨지는 것은 확인되지 않았다(실제 깨짐은 그림자 실행으로 확인).
+
+### UP035 deprecated-import (4건) — import는 3.13에서도 성공(정리 권장)
 
 `typing_extensions`에서 `typing`으로 이동된 심볼을 여전히 `typing_extensions`에서 임포트하고 있음.
 
@@ -44,7 +49,7 @@
 
 **영향:** `Unpack`과 `Never`는 Python 3.11+에서 `typing` 모듈로 이동됨. 3.13에서도 `typing_extensions`에 여전히 있지만, 향후 제거될 가능성이 높으며 표준 위치에서 임포트하는 것이 올바른 방향.
 
-### UP041 timeout-error-alias (3건) — 3.13에서 `asyncio.TimeoutError` 제거
+### UP041 timeout-error-alias (3건) — `asyncio.TimeoutError`는 3.13에서도 내장 `TimeoutError`의 별칭(정리 권장)
 
 | # | 파일:줄 | 변경 |
 |---|---------|------|
@@ -52,7 +57,7 @@
 | 2 | `src/foundation/screener/application/run_screen.py:246` | `asyncio.TimeoutError` → `TimeoutError` |
 | 3 | `tests/unit/services/test_risk_alerting.py:187` | `asyncio.TimeoutError` → `TimeoutError` |
 
-**영향:** `asyncio.TimeoutError`는 3.11에서 `TimeoutError`의 별칭으로 표시되었고, 3.13에서 완전히 제거됨. 코드 수정 필수.
+**영향:** `asyncio.TimeoutError`는 3.11부터 내장 `TimeoutError`의 별칭이며 3.13에서도 같은 객체다(검증됨). 동작 변화 없음 — 수정은 선택(정리).
 
 ---
 
