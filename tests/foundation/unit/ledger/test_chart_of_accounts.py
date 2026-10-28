@@ -12,7 +12,6 @@ tests/integration/foundation/ledger/test_fa0c_account_scope.py에 있고,
 test_concurrent_inserts_for_same_scope_and_type_serialize_to_one_winner).
 """
 
-import time
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -20,6 +19,7 @@ import pytest
 
 from src.foundation.ledger.contracts.v1 import AccountType, UserSub
 from src.foundation.ledger.domain import chart_of_accounts as coa
+from tests.support.perf_budget import PerfBudget
 
 _USER_ID = UUID("12345678-1234-5678-1234-567812345678")
 
@@ -201,34 +201,32 @@ def test_default_scope_is_deterministic_across_repeated_replays() -> None:
 
 
 @pytest.mark.perf
-def test_default_scope_derivation_throughput_stays_within_budget() -> None:
+def test_default_scope_derivation_throughput_stays_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """수치 성능 단언 -- DEPTH 재감사(task-2724)가 지적한 공백을 메운다.
     `default_scope()`는 I/O 없는 순수 함수지만 계정 조회 경로마다 호출될 수
     있으므로(마이그레이션 백필, 향후 FA-4/FA-8 포트폴리오 배선), 서로 다른
     20,000개 계정코드에 대한 파싱+UUIDv5 3회 도출 처리량이 예산 아래인지
-    단언한다."""
+    단언한다.
+
+    `time.perf_counter()` 대신 `perf_budget`(`cpu_ms` 기반)를 쓴다 — CI
+    커버리지 오버헤드·병렬 워커가 wall-clock을 흔들어도 `process_time`은
+    안정적이다(task-6371, task-7253).
+    """
     n = 20_000
-    budget_sec = 2.0
-    min_ops_per_sec = 10_000.0
+    budget_ms = 2_000.0  # 2.0 s × 1000
     codes = [coa.user_account(uuid4(), UserSub.AVAILABLE) for _ in range(n)]
 
-    start = time.perf_counter()
-    for code in codes:
-        scope = coa.default_scope(code)
-        assert scope.entity_id is not None
-    elapsed = time.perf_counter() - start
-    ops_per_sec = n / elapsed
-
+    sample = perf_budget.sample(lambda: [coa.default_scope(c) for c in codes], batch=1)
+    # sample.cpu_ms is total CPU ms for all n calls (batch=1, fn runs once)
     print(
-        f"[task-1942/3031 default_scope] {n} calls {elapsed:.3f}s "
-        f"({ops_per_sec:.0f} ops/s, budget<{budget_sec}s, min>{min_ops_per_sec:.0f} ops/s)"
+        f"[task-1942/3031 default_scope] {n} calls {sample.cpu_ms / 1000:.3f}s CPU "
+        f"({n / (sample.cpu_ms / 1000):.0f} ops/s, budget<{budget_ms / 1000:.1f}s)"
     )
-    assert elapsed < budget_sec, (
-        f"{n}회 default_scope() 호출이 예산({budget_sec}s)을 넘었습니다({elapsed:.3f}s)."
-    )
-    assert ops_per_sec > min_ops_per_sec, (
-        f"default_scope() 처리량이 최소값({min_ops_per_sec:.0f} ops/s)에 "
-        f"못 미칩니다({ops_per_sec:.0f})."
+    assert sample.cpu_ms < budget_ms, (
+        f"{n}회 default_scope() 호출이 예산({budget_ms / 1000:.1f}s)을 "
+        f"넘었습니다({sample.cpu_ms / 1000:.3f}s CPU)."
     )
 
 
