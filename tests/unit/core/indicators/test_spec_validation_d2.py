@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import pytest
 
@@ -47,13 +48,15 @@ def test_negative_precision_rejected() -> None:
 
 def test_failure_injection_bad_kind_rejected() -> None:
     with pytest.raises(ValueError, match="kind"):
-        PlotSpec(kind="bogus", scale="own", default_pane="separate")  # type: ignore[arg-type]
+        bad: dict[str, Any] = {"kind": "bogus", "scale": "own", "default_pane": "separate"}
+        PlotSpec(**bad)
 
 
 def test_valid_fill_between_accepted() -> None:
     assert _spec((_plot("b"), _plot("a"))).outputs == ("a", "b")
 
 
+@pytest.mark.perf
 def test_catalog_validation_throughput() -> None:
     start = time.perf_counter()
     for spec in TALIB_SPECS.values():
