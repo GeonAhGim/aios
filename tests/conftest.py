@@ -213,6 +213,11 @@ def lifespan_context_with_retry(app):
     return _RetryingLifespanContext(app)
 
 
+def _is_nested_gate_proof(item: pytest.Item) -> bool:
+    """자식 pytest로 게이트 적색 전환을 증명하는 테스트(이름 규약 `test_pytest_gate_turns_red*`)."""
+    return item.name.startswith("test_pytest_gate_turns_red")
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """task-645(esc-ci-532f4f0f5388): `pyproject.toml`의 전역 per-test
     타임아웃(120s)은 행(hang) 하나가 CI 2400s 상한을 통째로 잡아먹지 않도록
@@ -223,6 +228,14 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if item.get_closest_marker("perf") is not None:
             item.add_marker(pytest.mark.timeout(600))
+        elif _is_nested_gate_proof(item):
+            # 2026-10-28(full CI 78607b02·aca374a8): `test_pytest_gate_turns_red_*`는 자식 pytest를
+            # 두 번 띄워 게이트 적색 전환을 증명하는 의도된 느린 테스트다(무부하 20~110초).
+            # 전역 120초(`timeout_method = "thread"`)는 부하가 조금만 늘어도 `os._exit(1)`로
+            # xdist 워커를 죽여 세션 전체(~3,000건)와 coverage를 날렸다. 행(hang) 방지는 각 자식
+            # `subprocess.run(timeout=...)`이 그대로 맡고(초과하면 *그 테스트만* 실패), 부모 상한은
+            # 자식 상한 두 번 + DB 클론/마이그레이션 여유(360초)로 둔다 -- perf 600초와 같은 선례.
+            item.add_marker(pytest.mark.timeout(360))
 
     # task-6845(esc-ci-pytest_perf): `ci_recheck.py`의 full 모드는 perf 마커
     # 테스트를 별도 직렬 단계로 돌리려고 CLI에 `-m "perf and not nightly and

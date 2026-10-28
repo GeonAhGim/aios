@@ -258,3 +258,18 @@ def test_missing_synthetic_module_path_fails_closed_instead_of_reporting_pass(
 
     with pytest.raises(OSError, match="simulated disk failure"):
         _run_synthetic_hang(tmp_path)
+
+
+def test_nested_gate_proof_tests_get_a_bounded_larger_timeout():
+    """2026-10-28: 자식 pytest를 띄우는 test_pytest_gate_turns_red*는 전역 120초에서 os._exit로
+    워커를 죽였다 -- 이름 규약으로 식별해 360초(자식 상한 2회 + 여유)를 준다. 나머지는 그대로."""
+    import types
+
+    import tests.conftest as c
+
+    def item(name):
+        return types.SimpleNamespace(name=name)
+
+    assert c._is_nested_gate_proof(item("test_pytest_gate_turns_red_when_x"))
+    assert not c._is_nested_gate_proof(item("test_perf_budget_goes_red_with_cpu_injection"))
+    assert not c._is_nested_gate_proof(item("test_something_else"))
