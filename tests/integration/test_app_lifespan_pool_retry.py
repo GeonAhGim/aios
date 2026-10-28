@@ -123,8 +123,9 @@ async def test_create_pool_with_retry_exhausts_attempts_and_raises() -> None:
 async def test_create_pool_with_retry_does_not_retry_non_retryable_error() -> None:
     """`asyncpg.PostgresError`(자격증명 오류 등 비일시적 실패)는 재시도
     대상이 아니다 — 첫 시도에서 바로 전파돼 불필요한 지연 없이 fail-closed
-    해야 한다(test_app_lifespan.py::test_lifespan_rejects_pool_creation_failure가
-    lifespan 전체 경로로 같은 계약을 확인하는 것과 짝을 이루는 단위 테스트)."""
+    해야 한다. paired with
+    test_app_lifespan_pool_creation_failure.py::test_lifespan_rejects_pool_creation_failure
+    which checks the same contract via the full lifespan path."""
     import asyncpg
 
     import src.main as main_module
