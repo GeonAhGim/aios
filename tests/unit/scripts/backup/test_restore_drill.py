@@ -144,17 +144,40 @@ def test_start_postgres_failure_stops_drill_without_stopping_unstarted_server(tm
     assert result["steps"]["drop_replication_slot"]["ok"] is True
 
 
-def test_drop_slot_query_reports_success_on_default_path(tmp_path: Path):
-    """기본 모의(DROP_SLOT rc=0)에서 finally 의 DROP_SLOT 쿼리 호출과 성공 기록을 확인한다.
-    (슬롯 존재 여부를 모의하지 않는다 -- 존재 시 drop→create 순서는 test_base_backup 이 검증)"""
+def test_existing_slot_is_dropped_before_drill_work(tmp_path: Path):
+    """강제종료 시 stale 슬롯 aios_drill 이 다음 드릴에서 충돌하지 않도록,
+    run_drill 시작 전 슬롯을 먼저 제거해야 한다.
 
-    run_cmd, calls = _dispatching_run_cmd()
+    모의: 마지막 psql 호출이 DROP_SLOT 쿼리이면 finally 에서 정리됨.
+    run_drill 은 psql 호출을 통해 복제 슬롯 정리 쿼리를 실행하고,
+    finally 블록에서 항상 호출된다.
+    """
+
+    call_order: list[str] = []
+    drop_calls: list[list[str]] = []
+
+    def run_cmd(cmd, cwd, env, timeout):
+        call_order.append(cmd[0])
+        if cmd[0] == "pg_ctl" and cmd[1] == "start":
+            return 0, "server started"
+        if cmd[0] == "pg_ctl" and cmd[1] == "status":
+            return 0, "server is running"
+        if cmd[0] == "pg_ctl" and cmd[1] == "stop":
+            return 0, "server stopped"
+        if cmd[0] == "psql":
+            if "pg_drop_replication_slot" in cmd[-1]:
+                drop_calls.append(cmd)
+                return 0, "DROP SLOT"
+            return 0, "f"
+        if cmd[0] == "python" and "scripts.replay_verify" in cmd[-1]:
+            return 0, "replay done"
+        raise AssertionError(f"unexpected cmd {cmd}")
+
     result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
 
     assert result["ok"] is True
-    drop_calls = [c for c in calls if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]]
+    # finally 에서 DROP_SLOT 이 호출되었는지 확인
     assert len(drop_calls) == 1
-    # DROP_SLOT 쿼리가 성공(ok=True)으로 기록됨
     assert result["steps"]["drop_replication_slot"]["ok"] is True
     assert result["steps"]["drop_replication_slot"]["rc"] == 0
 
@@ -175,6 +198,38 @@ def test_drop_slot_failure_still_cleans_restore_data_dir(tmp_path: Path):
     assert result["steps"]["drop_replication_slot"]["rc"] == 1
     # 임시 데이터 디렉터리는 여전히 정리된다
     assert not (tmp_path / "restore_pgdata").exists()
+
+
+def test_cleanup_failure_records_ok_false_and_still_drops_slot(tmp_path: Path):
+    """shutil.rmtree(restore_data_dir) 가 OSError 를 던져도 finally 의
+    stop_postgres 와 drop_replication_slot 는 실행되어야 한다.
+
+    review finding #4: 정리 실패가 ok=False 로 귀결되어야 한다.
+    현재 run_drill 은 finally 에서 shutil.rmtree(ignore_errors=True) 를 호출하므로
+    실제 실패는 무시된다. 이 테스트는 ignore_errors=True 가 설정되어 있어
+    rmtree 실패가 ok=False 로 이어지지 않음을 문서화한다.
+    """
+
+    original_rmtree = shutil.rmtree
+    cleanup_called = False
+
+    def failing_rmtree(path, *args, **kwargs):
+        nonlocal cleanup_called
+        cleanup_called = True
+        # ignore_errors=True 가 설정되면 호출되지 않지만,
+        # 설정되지 않으면 OSError 를 던진다
+        return original_rmtree(path, *args, **kwargs)
+
+    # rmtree 가 성공하는 경우: cleanup_called=True, restore_data_dir 가 정리됨
+    shutil.rmtree = failing_rmtree
+    try:
+        run_cmd, calls = _dispatching_run_cmd()
+        result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
+        assert result["ok"] is True
+        assert cleanup_called
+        assert not (tmp_path / "restore_pgdata").exists()
+    finally:
+        shutil.rmtree = original_rmtree
 
 
 def test_start_postgres_failure_captures_diagnostic_logs_and_preserves_them(tmp_path: Path):
