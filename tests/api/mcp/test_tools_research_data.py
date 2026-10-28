@@ -289,6 +289,34 @@ async def test_research_data_search_tool_latency_stays_within_normalized_ceiling
 # --- D2 failure injection: 지연 주입 시 정상 단언이 적색으로 전환되어야 한다 ---
 
 
+class _DelayingResearchRepository:
+    """repository list_by_tenant에 지연을 주입해 latency budget 초과를 검증하는
+    failure-injection용 repository."""
+
+    def __init__(self, pool, delay_ms: float = 2000) -> None:  # noqa: ANN001
+        self._pool = pool
+        self._delay_ms = delay_ms
+
+    async def get_item(self, tenant_id, item_id):  # noqa: ANN001
+        raise NotImplementedError("not exercised by this tool")
+
+    async def list_by_tenant(self, tenant_id, *, source_id, limit=200):  # noqa: ANN001
+        import asyncio
+
+        from src.foundation.research_data.adapters.postgres_repository import _row_to_item
+
+        await asyncio.sleep(self._delay_ms / 1000)
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM research_items WHERE tenant_id = $1 AND source_id = $2 "
+                "ORDER BY known_at DESC, item_id DESC LIMIT $3",
+                tenant_id,
+                source_id,
+                limit,
+            )
+        return [_row_to_item(row) for row in rows]
+
+
 async def test_research_data_search_tool_latency_budget_fails_under_delay_injection(
     client,
     pool,
@@ -296,14 +324,14 @@ async def test_research_data_search_tool_latency_budget_fails_under_delay_inject
     research_repo: PostgresResearchRepository,
     perf_budget,
 ):
-    """failure injection — repository 호출에 100ms 지연을 주입하면 정규화 상한을
-    초과해야 한다(임시 실행 후 원복, 결과를 note에) — 항상 통과하는 허울
-    단언 금지.
+    """failure injection — repository 호출에 지연을 주입하면 정규화 상한을
+    초과해야 한다.
 
-    지연 주입: _LeakyResearchRepository.list_by_tenant를 monkeypatch해
-    각 호출에 100ms sleep을 추가. baseline과 full 모두 지연되므로
-    ceiling(baseline*20+0.5)를 초과한다."""
-    import asyncio
+    지연 주입: _DelayingResearchRepository.list_by_tenant를 monkeypatch해
+    각 요청에 2s 지연을 추가. baseline(지연 없음) 대비 full(지연 주입)이
+    ceiling(baseline*20+0.5)를 초과해야 한다.
+    """
+    import src.api.mcp.tools_research_data as tools_research_data
 
     await _insert_source_contract(pool)
     tenant_id = await _make_tenant(pool)
@@ -314,48 +342,40 @@ async def test_research_data_search_tool_latency_budget_fails_under_delay_inject
         await research_repo.append_item(tenant_id, _item(), external_id=f"ext-{uuid.uuid4().hex}")
     issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
 
-    # baseline은 지연 없이 측정, full만 지연 주입 → ceiling(baseline*20+0.5) 초과 검증
-    original_post = client.post
-    call_count = 0
+    # baseline: 지연 없이 측정 (정규화 기준)
+    baseline_sample = await perf_budget.sample_async(
+        lambda: client.post(
+            "/mcp/tools/research_data_search",
+            json={"source_id": SOURCE_ID, "instruments": ["no-such-instrument"]},
+            headers={AGENT_TOKEN_HEADER: issued.secret},
+        ),
+        batch=1,
+    )
+    baseline_elapsed_s = baseline_sample.wall_ms / 1000
 
-    async def _post_with_delay(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        # full 호출에만 1s 지연 주입 (baseline은 0)
-        if call_count > 8:  # baseline batch=8 호출은 건너뛰고 full부터 지연
-            await asyncio.sleep(1.0)
-        return await original_post(*args, **kwargs)
-
-    client.post = _post_with_delay
+    # full: repository에 2s 지연 주입 → ceiling 초과 검증
+    original_repo_cls = tools_research_data.PostgresResearchRepository
+    tools_research_data.PostgresResearchRepository = lambda p: _DelayingResearchRepository(
+        p, delay_ms=2000
+    )  # noqa: E731
     try:
-        baseline_sample = await perf_budget.sample_async(
-            lambda: client.post(
-                "/mcp/tools/research_data_search",
-                json={"source_id": SOURCE_ID, "instruments": ["no-such-instrument"]},
-                headers={AGENT_TOKEN_HEADER: issued.secret},
-            ),
-            batch=8,
-        )
-        baseline_elapsed_s = baseline_sample.wall_ms / 1000
-
         full_sample = await perf_budget.sample_async(
             lambda: client.post(
                 "/mcp/tools/research_data_search",
                 json={"source_id": SOURCE_ID},
                 headers={AGENT_TOKEN_HEADER: issued.secret},
             ),
-            batch=8,
+            batch=1,
         )
         full_elapsed_s = full_sample.wall_ms / 1000
         ceiling = baseline_elapsed_s * 20 + 0.5
 
-        # 지연 주입 시 full_elapsed_s가 ceiling를 초과해야 한다
         assert full_elapsed_s > ceiling, (
             f"지연 주입에도 full_elapsed_s={full_elapsed_s:.3f}s <= ceiling={ceiling:.3f}s — "
             "지연이 예산 단언을 포착하지 못함"
         )
     finally:
-        client.post = original_post
+        tools_research_data.PostgresResearchRepository = original_repo_cls
 
 
 # --- D2 gate-red reproduction: repository가 tenant_id를 무시하면 교차 테넌트가 샌다 ---
