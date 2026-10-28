@@ -22,7 +22,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import time
 from collections.abc import Callable, Generator, Mapping
 from decimal import Decimal
 from pathlib import Path
@@ -40,6 +39,7 @@ from src.exchanges.kis.adapter import KISAdapter
 from src.exchanges.kis.market_data_mixin import KISMarketDataMixin
 from src.exchanges.kis.overseas_stock_mixin import KISOverseasStockMixin
 from src.exchanges.kis.trading_mixin import KISTradingMixin
+from tests.support.perf_budget import PerfBudget
 
 
 @pytest.fixture(autouse=True)
@@ -279,14 +279,16 @@ async def test_modify_order_propagates_get_order_failure_after_successful_rvsecn
 
 
 @pytest.mark.perf
-async def test_get_ohlcv_1d_parses_large_response_within_normalized_budget() -> None:
+async def test_get_ohlcv_1d_parses_large_response_within_normalized_budget(
+    perf_budget: PerfBudget,
+) -> None:
     """market_data_mixin.py::get_ohlcv(1d 경로)는 항목 수에 선형으로
     늘어야 한다. 절대 ms 상수 대신 같은 프로세스에서 잰 동일 크기
     baseline(dict 얕은 복사) 대비 정규화 배율을 쓴다(task-2807/
     bitget test_task1032_split_mixins_deepen.py와 동일 판단 — 공유 CI
-    환경에서 절대 임계는 상시 적색을 낳는다)."""
+    환경에서 절대 임계는 상시 적색을 낳는다). 측정은 `perf_budget`
+    픽스처(CPU time·coverage tracer 일시정지·best-of-N)만 경유한다."""
     n = 2000
-    repeats = 5
     rows = [
         {
             "stck_bsop_date": "20260101",
@@ -312,34 +314,20 @@ async def test_get_ohlcv_1d_parses_large_response_within_normalized_budget() -> 
         result = await adapter.get_ohlcv("005930", "1d", limit=n)
         assert len(result) == n
 
-    await _call_once()  # 워밍업(토큰 발급 지연 제외)
+    measured = await perf_budget.best_of_async(_call_once, n=5, warmup=1, batch=3)
 
-    measured_times: list[float] = []
-    for _ in range(repeats):
-        start = time.perf_counter()
-        await _call_once()
-        measured_times.append(time.perf_counter() - start)
-    measured_seconds = min(measured_times)
+    def _copy_baseline() -> list[dict[str, str]]:
+        return [dict(row) for row in rows]
 
-    baseline_times: list[float] = []
-    for _ in range(repeats):
-        start = time.perf_counter()
-        baseline = [dict(row) for row in rows]
-        baseline_times.append(time.perf_counter() - start)
-    assert len(baseline) == n
-    baseline_seconds = min(baseline_times)
+    baseline = perf_budget.best_of(_copy_baseline, n=5, warmup=1, batch=400)
 
-    assert baseline_seconds > 0.0
-    ratio = measured_seconds / baseline_seconds
+    assert baseline.cpu_ms > 0.0
+    ratio = measured.cpu_ms / baseline.cpu_ms
     budget_ratio = 30000.0
-    print(
-        f"\nget_ohlcv(1d) throughput: n={n} repeats={repeats} "
-        f"baseline={baseline_seconds * 1000:.2f}ms measured={measured_seconds * 1000:.2f}ms "
-        f"ratio={ratio:.1f} (budget={budget_ratio})"
-    )
     assert ratio < budget_ratio, (
         f"get_ohlcv(1d)(market_data_mixin.py) 대량 파싱이 baseline dict 복사 대비 "
-        f"{ratio:.1f}배로 회귀했습니다(예산 {budget_ratio}배) — 이차 이상 복잡도 유입 가능성."
+        f"{ratio:.1f}배로 회귀했습니다(예산 {budget_ratio}배) — 이차 이상 복잡도 유입 가능성. "
+        f"measured cpu={measured.cpu_ms:.3f}ms baseline cpu={baseline.cpu_ms:.3f}ms"
     )
 
 
