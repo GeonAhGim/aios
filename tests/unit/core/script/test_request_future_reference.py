@@ -20,8 +20,6 @@ D2: negative test >=3(잘못된 타임프레임 형식, 음수 봉 인덱스, ra
 
 from __future__ import annotations
 
-import time
-
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -34,6 +32,7 @@ from src.core.script.runtime.mtf import (
 )
 from src.core.script.runtime.series import ScriptRuntimeError, Series
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _BAR_INDEX = st.integers(min_value=0, max_value=10_000)
 _RATIO = st.integers(min_value=1, max_value=500)
@@ -136,12 +135,14 @@ def test_resample_latency_budget_actually_fails_with_delay(
 ) -> None:
     """실패 주입: resample_confirmed 경로에 예산의 10배 지연(200ms)을
     주입하면预算 단언이 AssertionError를 내는지 확인한다(항상 통과하는
-    허울 단언이 아님을 검증)."""
+    허울 단언이 아님을 검증).
+
+    가상 지연(virtual_delayed_sync)으로 실제 sleep 없이 측정치만 느리게 만든다.
+    PerfBudget가 virtual_totals()를 합산하므로 실제 0.2s sleep과 동일한
+    측정치를 얻고, 300회 호출(30 samples × batch=10)이 60초가 아닌 수 ms로 끝난다."""
     original_resample = resample_confirmed
 
-    def _stalled_resample(source: Series, *, bar_count: int, ratio: int) -> Series:
-        time.sleep(0.2)  # 200ms 지연 (budget 20ms의 10배)
-        return original_resample(source, bar_count=bar_count, ratio=ratio)
+    _stalled_resample = virtual_delayed_sync(original_resample, 0.2)
 
     monkeypatch.setattr(
         "tests.unit.core.script.test_request_future_reference.resample_confirmed",
@@ -158,7 +159,36 @@ def test_resample_latency_budget_actually_fails_with_delay(
     cpu_values_ms = sorted(s.cpu_ms for s in samples)
     p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
     budget_ms = 20.0
-    assert p95_ms < budget_ms  # 지연 주입으로 반드시 실패해야 한다
+    # 지연 주입으로 반드시 실패해야 한다 — 실패하지 않으면 허울 단언이다.
+    assert p95_ms >= budget_ms, (
+        f"지연 주입에도 p95={p95_ms:.3f}ms가 budget {budget_ms}ms 미만 — 단언이 작동하지 않음"
+    )
+
+
+def test_variant_zero_delay_passes_like_no_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """변형 검증: 지연 seconds를 0으로 두면 측정치에 합산될 가상 지연이 없으므로
+    预算 단언이 통과해야 한다(0초 지연은 실제 지연과 동등하지 않음)."""
+    original_resample = resample_confirmed
+
+    _zero_delay_resample = virtual_delayed_sync(original_resample, 0.0)
+
+    monkeypatch.setattr(
+        "tests.unit.core.script.test_request_future_reference.resample_confirmed",
+        _zero_delay_resample,
+    )
+
+    source = Series.of_floats(list(range(5_000)))
+    samples = perf_budget.samples(
+        lambda: resample_confirmed(source, bar_count=5_000, ratio=5),
+        n=30,
+        batch=10,
+    )
+    cpu_values_ms = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    budget_ms = 20.0
+    assert p95_ms < budget_ms  # 0초 지연 → 통과
 
 
 # ---- CPU 0 수렴: 단일 호출 측정 ----
