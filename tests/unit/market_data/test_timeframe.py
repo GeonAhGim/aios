@@ -16,7 +16,6 @@ I/O가 없어 failure-injection·성능단언·게이트 재현이 성립하기 
 동시 접근에서도 결정론을 유지하는지로 증명한다.
 """
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import cast
@@ -286,6 +285,7 @@ def test_align_open_normalizes_non_utc_tz_for_intraday_timeframes(
 # --- DEEPEN(task-2946) 게이트 적색: 지연 주입으로 예산 위반 검증 -----------------
 
 
+@pytest.mark.perf
 def test_perf_budget_fails_when_expected_opens_slowed_10x(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
@@ -293,29 +293,19 @@ def test_perf_budget_fails_when_expected_opens_slowed_10x(
     """`expected_opens`가 10배 더 많은 작업을 하면 3초 예산을 넘는다 — 게이트가
     실제로 지연을 적색으로 잡는지 검증한다.
 
-    원본 함수를 감싸서 내부에서 CPU busy-wait를 주입한 후, 같은 측정/단언
-    (`budget_ms=3000`)을 재사용해 적색을 확인한다.
+    virtual_delayed_sync로 5초 가상 CPU 지연을 주입한다. 실제 busy-wait 없이
+    virtual ledger만 쌓이므로 테스트는 수십 ms에 완료되지만, PerfBudget는
+    ledger를 읽어 cpu_ms=5000+로 측정하므로 3000ms 예산을 초과해 적색이 된다.
     작은 데이터셋(1개월 M1, 43,200 캔들)으로 원본 실행 시간이 짧아지도록 한다.
     """
+    from tests.support.perf_inject import virtual_delayed_sync
+
     start = datetime(2026, 1, 1, tzinfo=UTC)
     end = datetime(2026, 2, 1, tzinfo=UTC)
     session = _session(start, end)
 
-    # 원본 expected_opens 호출
-    original_expected_opens = expected_opens
-
-    def slow_expected_opens(
-        s: datetime, e: datetime, tf: Timeframe, sessions: list[SessionWindow]
-    ) -> list[datetime]:
-        result = original_expected_opens(s, e, tf, sessions)
-        # 10배 지연: ~5초 CPU 부하 (3초 예산을 넘기기 위해)
-        # busy-wait로 실제 CPU 시간 소모 → time.process_time() 측정값 증가
-        target_cpu_s = 5
-        deadline = time.perf_counter() + target_cpu_s
-        while time.perf_counter() < deadline:
-            pass
-        return result
-
+    # 5초 가상 지연 주입
+    slow_expected_opens = virtual_delayed_sync(expected_opens, 5.0)
     monkeypatch.setattr(
         "tests.unit.market_data.test_timeframe.expected_opens",
         slow_expected_opens,
@@ -324,9 +314,38 @@ def test_perf_budget_fails_when_expected_opens_slowed_10x(
     def run() -> list[datetime]:
         return expected_opens(start, end, Timeframe.M1, [session])
 
-    # 10배 지연 주입 → assert_within가 AssertionError를 raise해야 한다
+    # 5초 가상 지연 → cpu_ms=5000+ → budget 3000ms 초과 → AssertionError
     with pytest.raises(AssertionError):
         perf_budget.assert_within(run, budget_ms=3000)
+
+
+def test_perf_budget_passes_with_zero_delay_injection(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """가상 지연을 0초로 두면 예산 단언이 녹색으로 통과한다 — 지연 주입이
+    실제로 측정치에 영향을 주는지 변형 검증한다.
+
+    virtual_delayed_sync(expected_opens, 0.0)은 virtual ledger를 변경하지
+    않으므로 PerfBudget.sample의 cpu_ms는 실제 실행 시간만 측정된다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = datetime(2026, 2, 1, tzinfo=UTC)
+    session = _session(start, end)
+
+    zero_delay_opens = virtual_delayed_sync(expected_opens, 0.0)
+    monkeypatch.setattr(
+        "tests.unit.market_data.test_timeframe.expected_opens",
+        zero_delay_opens,
+    )
+
+    def run() -> list[datetime]:
+        return expected_opens(start, end, Timeframe.M1, [session])
+
+    # 0초 지연 → 예산 3000ms 이내 통과 (변형 검증: 주입이 없으면 녹색)
+    perf_budget.assert_within(run, budget_ms=3000)
 
 
 def test_expected_opens_deduplicates_overlapping_session_opens() -> None:
