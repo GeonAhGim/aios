@@ -25,7 +25,7 @@ import pytest
 import talib
 
 from src.core.indicators.registry import IndicatorError, IndicatorRegistry
-from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec, ParamSpec
+from src.core.indicators.spec import REGISTRY_VERSION, IndicatorSpec, ParamSpec, PlotSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 from tests._perf.relative_budget import RelativeBudget
 
@@ -410,3 +410,55 @@ def test_lookback_nan_count_gate_turns_red_when_lookback_formula_is_off_by_one()
     assert broken_spec.lookback(params) != actual_leading_nan  # sanity: 실제로 다름
     with pytest.raises(AssertionError):
         assert broken_spec.lookback(params) == actual_leading_nan
+
+
+# -- D2 실패 주입 (task-20621 review finding #4) ------------------------------
+
+
+def test_registry_rejects_fill_between_empty_string() -> None:
+    """fill_between이 빈 문자열 ''이면 `is not None` 체크가 True여야 한다.
+    If the validation used truthiness (`if plot.fill_between`), '' would pass
+    through silently and the renderer would crash on lookup. This is a direct
+    negative test for the regression fixed in commit 4c7a5c1d."""
+    with pytest.raises(ValueError, match="fill_between"):
+        IndicatorSpec(
+            name="EMPTY_FILL",
+            inputs=("close",),
+            params=(),
+            outputs=("value",),
+            lookback=lambda _p: 0,
+            plots=(PlotSpec(kind="line", scale="own", default_pane="price", fill_between=""),),
+        )
+
+
+def test_registry_rejects_fill_between_nonexistent_output() -> None:
+    """fill_between이 존재하지 않는 output 이름을 참조하면 fail-closed로
+    등록 거부한다 (IND-15)."""
+    with pytest.raises(ValueError, match="fill_between"):
+        IndicatorSpec(
+            name="BAD_REF",
+            inputs=("close",),
+            params=(),
+            outputs=("a", "b"),
+            lookback=lambda _p: 0,
+            plots=(
+                PlotSpec(kind="line", scale="own", default_pane="price", fill_between="c"),
+                PlotSpec(kind="line", scale="own", default_pane="price"),
+            ),
+        )
+
+
+def test_registry_rejects_plot_count_mismatch() -> None:
+    """outputs가 2개인데 plots가 1개면 등록 거부한다 (fail-closed, IND-15)."""
+    with pytest.raises(ValueError, match="PlotSpec count"):
+        IndicatorSpec(
+            name="MISMATCH",
+            inputs=("close",),
+            params=(),
+            outputs=("a", "b"),
+            lookback=lambda _p: 0,
+            plots=(PlotSpec(kind="line", scale="own", default_pane="price"),),
+        )
+
+
+# -- D2 성능 단언 (task-20621) ------------------------------------------------
