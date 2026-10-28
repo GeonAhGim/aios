@@ -142,8 +142,8 @@ async def test_list_reviews_perf_budget_for_1000_rows(perf_budget) -> None:
         result = await service.list_reviews(LISTING_ID)
         assert len(result) == 1000
 
-    # 2026-10-28: 병렬 CI+coverage 부하에서 단발 wall 측정이 208ms로 예산을 넘었다(full CI dd5f97fa).
-    # 독스트링의 측정 축(cpu_ms)과 저장소 표준(best-of-N: 경합 spike 제외)에 맞춘다. 예산 200ms 불변.
+    # 2026-10-28: 병렬 CI 부하에서 단발 wall 측정이 208ms로 예산을 넘었다(full CI dd5f97fa).
+    # 독스트링의 측정 축(cpu_ms)과 저장소 표준(best-of-N: spike 제외)에 맞춘다. 예산 200ms 불변.
     sample = await perf_budget.best_of_async(_batch, n=5, warmup=1)
     assert sample.cpu_ms < 200, f"list_reviews(1000 rows)={sample.cpu_ms:.1f}ms, 예산 200ms 초과"
 
