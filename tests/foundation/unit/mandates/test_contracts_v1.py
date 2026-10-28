@@ -333,7 +333,9 @@ def test_outcome_to_verdict_mapping_total_over_enum_members_ci_guard() -> None:
     assert set(_OUTCOME_TO_VERDICT.keys()) == set(PolicyOutcome)
 
 
-def _replay_in_subprocess(row: PolicyDecisionRow, out: multiprocessing.Queue) -> None:
+def _replay_in_subprocess(
+    row: PolicyDecisionRow, out: "multiprocessing.Queue[tuple[str, int]]"
+) -> None:
     """Module-level so it is picklable for the spawn start method (Windows).
     Puts a (json_bytes, pid) tuple on ``out``."""
     decision = compliance_decision_from_policy_decision(row)
@@ -361,7 +363,7 @@ def test_replay_across_independent_processes_is_byte_identical() -> None:
         evaluated_at=NOW,
     )
 
-    out: multiprocessing.Queue = multiprocessing.Queue()
+    out: multiprocessing.Queue[tuple[str, int]] = multiprocessing.Queue()
     procs = [
         multiprocessing.Process(target=_replay_in_subprocess, args=(row, out)) for _ in range(3)
     ]
