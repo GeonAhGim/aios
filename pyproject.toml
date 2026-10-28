@@ -52,6 +52,10 @@ dependencies = [
     # (aiohttp < 3.14.4). Transitive dep of cosmic-ray; pin here so
     # supply_chain gates see the fix at the project level.
     "aiohttp>=3.14.4",
+    # H-5 (ADR-2026-09-09-B): filelock 4.x requires Python>=3.11 (unavailable
+    # on 3.10). filelock 3.20.4+ has CVE-2026-112940/112913/112907 fixed only
+    # in 4.2.1 (also >=3.11). Pin to exact 3.20.3 — the last safe release.
+    "filelock==3.20.3",
 ]
 
 [project.optional-dependencies]
