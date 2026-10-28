@@ -230,7 +230,10 @@ async def test_perf_budget_detects_10x_delay_injection(
 
     class DelayedSession(FakeFixSession):
         async def send_order(self, order: ChildOrder, *, cl_ord_id: str) -> int:
-            time.sleep(0.001)  # 1ms delay per call
+            # 10ms — Windows time.sleep() resolution is ~15.6ms tick;
+            # 1ms (0.001s) can resolve to 0 on some ticks, making wall_ms
+            # drop below the 100ms threshold in CI parallel runs.
+            time.sleep(0.01)
             return await super().send_order(order, cl_ord_id=cl_ord_id)
 
     session = DelayedSession()
@@ -242,10 +245,10 @@ async def test_perf_budget_detects_10x_delay_injection(
 
     sample = await perf_budget.sample_async(_run_1000)
 
-    # 1000 calls × 1ms = 1s total wall; budget is 100ms → perf budget must detect
-    # This is a failure-injection test: the assertion must fire (exceed budget)
-    # to prove the perf_budget catches injected delays.
-    # time.sleep does not consume CPU (cpu_ms stays ~0), so we must check wall_ms
+    # 1000 calls × 10ms = 10s total wall; budget threshold is 100ms → perf budget
+    # must detect. 10ms per call guarantees measurable wall time on Windows
+    # (time.sleep() tick resolution ~15.6ms).
+    # time.sleep does not consume CPU (cpu_ms stays ~0), so we check wall_ms
     # to detect injected wall-clock delays in send_order.
     assert sample.wall_ms >= 100, (
         f"Expected wall time >= 100ms with injected delay; got {sample.wall_ms:.1f}ms"
