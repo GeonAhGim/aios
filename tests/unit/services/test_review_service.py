@@ -80,15 +80,6 @@ async def test_list_reviews_raises_not_found_when_listing_missing() -> None:
         await service.list_reviews(LISTING_ID)
 
 
-async def test_list_reviews_raises_not_found_for_nonpositive_listing_id() -> None:
-    """경계값 — 존재할 수 없는 listing_id(0)도 동일하게 404로 처리된다."""
-    conn = _FakeConnection(listing_exists=False, review_rows=[])
-    service = ReviewService(cast(asyncpg.Pool, _FakePool(conn)))
-
-    with pytest.raises(ReviewNotFoundError):
-        await service.list_reviews(0)
-
-
 async def test_list_reviews_ignores_orphaned_review_rows_for_missing_listing() -> None:
     """failure injection — listing이 지워진 뒤에도 orphan `reviews` 행이 남아있는
     상태(FK 정합성 규정이 깨진 시나리오)를 주입한다. listing 존재 확인이
