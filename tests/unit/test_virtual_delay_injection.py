@@ -23,6 +23,7 @@ async def _awork() -> int:
     return sum(range(100))
 
 
+@pytest.mark.perf
 def test_virtual_sync_delay_shows_in_cpu_and_wall_without_waiting(perf_budget: Any) -> None:
     slow = virtual_delayed_sync(_work, 30.0)
     started = time.perf_counter()
@@ -55,6 +56,7 @@ def test_no_injection_leaves_ledger_and_measurement_untouched(perf_budget: Any) 
     assert sample.cpu_ms < 1_000.0
 
 
+@pytest.mark.perf
 def test_virtual_async_delay_adds_wall_only(perf_budget: Any) -> None:
     slow = virtual_delayed_async(_awork, 20.0)
     started = time.perf_counter()
