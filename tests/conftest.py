@@ -252,11 +252,17 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     # `pytest -m redis ...`처럼 명시적으로 그 마커를 요청한 실행은 여전히
     # 그대로 동작한다.
     markexpr = config.getoption("markexpr") or ""
+    # markexpr을 공백/괄호 기준으로 토큰화해 토큰 단위로 정확히 일치한다.
+    # "not redis"에서 "redis" 토큰은 명시 언급으로 간주(부정 표현이라도
+    # 사용자가 그 마커를 직접 지정한 것이므로 기본 제외 재적용 금지).
+    # "my_redis" 등 부분문자열 위양성은 토큰 매칭으로 방지된다.
+    _explicit_tokens: set[str] = {_tok.strip("()") for _tok in markexpr.split()}
+
     kept: list[pytest.Item] = []
     deselected: list[pytest.Item] = []
     for item in items:
         hit_markers = {m.name for m in item.iter_markers()} & _DEFAULT_EXCLUDED_MARKERS
-        if hit_markers and not any(name in markexpr for name in hit_markers):
+        if hit_markers and not hit_markers & _explicit_tokens:
             deselected.append(item)
         else:
             kept.append(item)

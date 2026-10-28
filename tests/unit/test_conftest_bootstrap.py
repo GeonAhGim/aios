@@ -101,6 +101,35 @@ def test_pytest_collection_modifyitems_keeps_item_when_marker_named_in_markexpr(
     assert config.hook.deselected_calls == []
 
 
+def test_pytest_collection_modifyitems_keeps_item_when_markexpr_mentions_marker_even_if_negated():
+    """`-m "not redis"`처럼 markexpr에서 마커 이름을 **부정** 형태로 언급해도
+    redis 마커 항목은 deselect되지 않아야 한다 — substring 매칭이 "not redis"에서
+    "redis"를 위양성하는 것이 아니라 사용자가 명시적으로 마커를 언급한 것이기
+    때문이다. 기본 제외 재적용은 markexpr에 마커 이름이 아예 없을 때만 일어난다."""
+    redis_item = _FakeItem(markers=("redis",))
+    items = [redis_item]
+    config = _FakeConfig(markexpr="not redis")
+
+    pytest_collection_modifyitems(config, items)
+
+    assert items == [redis_item]
+    assert config.hook.deselected_calls == []
+
+
+def test_pytest_collection_modifyitems_deselects_when_markexpr_contains_unrelated_token():
+    """markexpr이 `"my_redis"` 등 마커 이름을 부분문자열로 포함하지만 토큰
+    단위로 일치하지 않으면 redis 마커 항목은 deselect돼야 한다
+    (위양성 방지)."""
+    redis_item = _FakeItem(markers=("redis",))
+    items = [redis_item]
+    config = _FakeConfig(markexpr="my_redis")
+
+    pytest_collection_modifyitems(config, items)
+
+    assert items == []
+    assert config.hook.deselected_calls == [[redis_item]]
+
+
 def test_pytest_collection_modifyitems_extends_perf_marker_timeout():
     """`perf` 마커 테스트는 전역 120s 타임아웃 대신 600s를 받아야 한다
     (task-645) — 아니면 100회 실 DB 왕복 같은 의도된 느림이 행(hang)으로
