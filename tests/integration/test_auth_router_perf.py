@@ -257,22 +257,22 @@ async def test_suspended_account_perf_goes_red_with_io_delay_injection(
     pool: asyncpg.Pool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연(
-    delayed_async, 2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을
-    초과해야 한다(red).
+    """gate-red reproduction: asyncpg.Connection.execute 에 가상 지연(
+    virtual_delayed_async, 2.0s)을 주입한 후 같은 성능 단언을 돌리면
+    예산을 초과해야 한다(red).
 
-    trust/status 조회가 DB execute(사용자 상태 조회)를 호출하므로 execute
-    에 2초 지연을 주입하면 wall-clock 이 budget을 초과한다. 정상 입력에서
-    통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
+    virtual_delayed_async 는 실제 sleep 없이 측정치만 늘리므로 테스트가
+    수초~수십 초를 기다리지 않는다. 정상 입력에서 통과하는 것이 테스트의
+    허수(trivial pass)가 아님을 보증한다.
     단언/마커 삭제와 예산 완화 금지.
 
-    task-17656: delay injection uses ``delayed_async`` from
+    task-20697: delay injection uses ``virtual_delayed_async`` from
     ``tests.support.perf_inject`` (no ``# type: ignore``).
     """
-    from tests.support.perf_inject import delayed_async
+    from tests.support.perf_inject import virtual_delayed_async
 
     original_execute = asyncpg.Connection.execute
-    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 2.0))
+    monkeypatch.setattr(asyncpg.Connection, "execute", virtual_delayed_async(original_execute, 2.0))
 
     email = _unique_email()
     await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
