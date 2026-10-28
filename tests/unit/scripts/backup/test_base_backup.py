@@ -3,6 +3,7 @@
 pg_basebackup 실행 파일 없이도(`which`/`run_cmd` 주입) 성공/실패 경로를 모두 검증한다.
 DB·네트워크 접근 없음.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,7 +31,8 @@ def test_run_base_backup_missing_binary_raises(tmp_path: Path):
 
 def test_run_base_backup_success_writes_manifest(tmp_path: Path):
     manifest = base_backup.run_base_backup(
-        tmp_path, "postgresql://x/y",
+        tmp_path,
+        "postgresql://x/y",
         which=lambda _b: "/usr/bin/pg_basebackup",
         run_cmd=lambda cmd, env, timeout: (0, "backup done"),
     )
@@ -44,7 +46,8 @@ def test_run_base_backup_success_writes_manifest(tmp_path: Path):
 
 def test_run_base_backup_failure_removes_dir_and_records_failed_marker(tmp_path: Path):
     manifest = base_backup.run_base_backup(
-        tmp_path, "postgresql://x/y",
+        tmp_path,
+        "postgresql://x/y",
         which=lambda _b: "/usr/bin/pg_basebackup",
         run_cmd=lambda cmd, env, timeout: (1, "connection refused"),
     )
@@ -204,3 +207,65 @@ def test_failed_slot_drop_does_not_block_backup(tmp_path: Path) -> None:
 
     assert calls == ["psql", "pg_basebackup"]
     assert manifest["ok"] is True
+
+
+def test_run_base_backup_perf_within_budget(perf_budget, tmp_path: Path) -> None:
+    """성능 단언: run_base_backup(주입된 run_cmd/which)가 1회 호출당 wall 50ms 이내여야 한다.
+
+    실제 pg_basebackup 을 호출하지 않으므로 이 수치는 파일 I/O + manifest 기록 + 슬롯 DROP
+    확인의 순수 Python 오버헤드 기준이다. ADR-2026-09-09-C Decision 1 — 백업 스크립트
+    호출 오버헤드는 사전거래 게이트(5ms)보다 느려도 되지만 50ms 를 넘지 않아야 CI 병렬
+    실행에서 병목이 되지 않는다.
+    """
+
+    import uuid
+
+    def _one_call() -> dict:
+        run_dir = tmp_path / f"perf_{uuid.uuid4().hex[:8]}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return base_backup.run_base_backup(
+            run_dir,
+            "postgresql://x/y",
+            which=lambda _b: "/usr/bin/pg_basebackup",
+            run_cmd=lambda cmd, env, timeout: (0, "ok"),
+        )
+
+    perf_budget.assert_within(
+        _one_call,
+        budget_ms=50.0,
+        n=5,
+        warmup=1,
+        label="run_base_backup",
+    )
+
+
+def test_wal_already_removed_gate_red_reproduction(tmp_path: Path) -> None:
+    """게이트 적색 재현: pg_basebackup 이 'requested WAL already removed' 로 실패하면
+    manifest.ok=False 로 기록되고 FAILED 마커가 남는다.
+
+    원본 이슈(task-4940): pg_basebackup 이 --wal-method=stream 없이 실행될 때
+    WAL 세그먼트가 회수되어 "requested WAL segment ... has already been removed"
+    오류가 발생했다. 이 테스트는 실패 시 manifest 가 정확히 기록되는지 확인하고,
+    fix(--wal-method=stream + 복제 슬롯) 이 적용된 후에도 실패 경로가 여전히
+    올바른 manifest 로 기록되는지 검증한다.
+    """
+
+    manifest = base_backup.run_base_backup(
+        tmp_path,
+        "postgresql://x/y",
+        which=lambda _b: "/usr/bin/pg_basebackup",
+        run_cmd=lambda cmd, env, timeout: (
+            1,
+            "pg_basebackup: error: could not send replication data: "
+            "requested WAL segment 00000001000000060000000B has already been removed",
+        ),
+    )
+
+    assert manifest["ok"] is False
+    assert manifest["returncode"] == 1
+    assert "already been removed" in manifest["tail"]
+    assert not Path(manifest["dest"]).exists()  # 실패 시 디렉터리 정리됨
+    failed_markers = list(tmp_path.glob("*-FAILED.json"))
+    assert len(failed_markers) == 1
+    saved = json.loads(failed_markers[0].read_text(encoding="utf-8"))
+    assert saved["ok"] is False
