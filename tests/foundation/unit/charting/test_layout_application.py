@@ -402,7 +402,59 @@ def test_layout_and_drawing_set_to_view_perf_budget_goes_red_with_10x_delay(
     2000회 호출당 0.5ms sleep = 1초 wall time로 예산(300ms)을 초과하므로
     assert_within이 적색으로 넘어간다."""
 
-    import time as _time
+    now = datetime.now(timezone.utc)
+    layout = ChartLayout(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        owner_subject_id=uuid4(),
+        name="perf",
+        layout_state={"symbol": "BTCUSDT", "timeframe": "1h", "panes": list(range(10))},
+        revision=0,
+        created_at=now,
+        updated_at=now,
+    )
+    drawing_set = ChartDrawingSet(
+        layout_id=layout.id,
+        schema_version=1,
+        drawings=tuple(
+            {"id": f"d{i}", "kind": "trendline", "points": [{"time": i, "price": 100.0 + i}]}
+            for i in range(50)
+        ),
+        revision=1,
+        updated_at=now,
+    )
+
+    # Inject 0.5ms virtual delay per layout_to_view call:
+    # 2000 calls x 0.5ms = 1s (no actual sleep/busy-wait).
+    from src.foundation.charting.application._shared import (
+        layout_to_view as _orig_layout_to_view,
+    )
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    slow_layout_to_view = virtual_delayed_sync(_orig_layout_to_view, 0.0005)
+
+    def _run_2000() -> None:
+        for _ in range(2_000):
+            slow_layout_to_view(layout)
+            drawing_set_to_view(drawing_set)
+
+    # 같은 측정/단언 — 가상 지연은 cpu_ms와 wall_ms 모두에 합산된다.
+    # 2000회 x 0.5ms = 1초로 예산(300ms)을 초과하므로 assert가 적색.
+    perf = PerfBudget()
+    sample = perf.best_of(_run_2000, n=3)
+    assert sample.wall_ms >= 300, (
+        f"Perf assertion should go red with injected delay: "
+        f"wall={sample.wall_ms:.1f}ms (expected >= 300ms)"
+    )
+
+
+@pytest.mark.perf
+def test_layout_perf_budget_goes_green_with_zero_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """변형 검증 — 주입 seconds를 0으로 두면 테스트가 녹색이어야 한다.
+    이는 가상 지연 주입이 실제 지연을 주지 않았을 때 측정치를 오염시키지
+    않음을 증명한다(task-20675 가상 지연 전환 검증)."""
 
     now = datetime.now(timezone.utc)
     layout = ChartLayout(
@@ -426,37 +478,22 @@ def test_layout_and_drawing_set_to_view_perf_budget_goes_red_with_10x_delay(
         updated_at=now,
     )
 
-    # Inject 0.5ms sleep per layout_to_view call: 2000 calls x 0.5ms = 1s
     from src.foundation.charting.application._shared import (
         layout_to_view as _orig_layout_to_view,
     )
+    from tests.support.perf_inject import virtual_delayed_sync
 
-    def slow_layout_to_view(*args: Any, **kwargs: Any) -> Any:
-        _time.sleep(0.0005)  # 0.5ms
-        return _orig_layout_to_view(*args, **kwargs)
-
-    monkeypatch.setattr(
-        "src.foundation.charting.application._shared.layout_to_view",
-        slow_layout_to_view,
-    )
+    # 0초 지연 — 실제 지연 없음
+    zero_delay_view = virtual_delayed_sync(_orig_layout_to_view, 0.0)
 
     def _run_2000() -> None:
-        # module-lookup for layout_to_view — monkeypatch가 모듈 속성을
-        # 교체했으므로 로컬 참조가 아닌 모듈에서 다시 가져와야 한다.
-        from src.foundation.charting.application._shared import (
-            layout_to_view as patched_layout_to_view,
-        )
-
         for _ in range(2_000):
-            patched_layout_to_view(layout)
+            zero_delay_view(layout)
             drawing_set_to_view(drawing_set)
 
-    # 같은 측정/단언 — sleep은 CPU 시간을 늘리지 않으므로 wall_ms로
-    # 검증한다. 2000회 x 0.5ms sleep = 1초 wall time로 예산(300ms)을
-    # 초과하므로 assert가 적색으로 넘어간다.
     perf = PerfBudget()
     sample = perf.best_of(_run_2000, n=3)
-    assert sample.wall_ms >= 300, (
-        f"Perf assertion should go red with injected delay: "
-        f"wall={sample.wall_ms:.1f}ms (expected >= 300ms)"
+    # 0초 지연이므로 예산(300ms)을 초과하면 안 됨 (녹색)
+    assert sample.wall_ms < 300, (
+        f"Zero-delay should stay green: wall={sample.wall_ms:.1f}ms (expected < 300ms)"
     )
