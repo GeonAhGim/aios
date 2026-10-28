@@ -120,7 +120,7 @@ def test_indicator_spec_plots_mismatch_outputs_raises_valueerror() -> None:
 
 def test_indicator_spec_fill_between_unknown_output_raises_valueerror() -> None:
     """fill_between이 알려지지 않은 output를 참조하면 ValueError (IND-15)."""
-    with pytest.raises(ValueError, match="fill_between.*not in outputs"):
+    with pytest.raises(ValueError, match="fill_between references unknown output"):
         IndicatorSpec(
             name="fake",
             inputs=("close",),
