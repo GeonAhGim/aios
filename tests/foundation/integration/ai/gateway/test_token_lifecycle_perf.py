@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -21,6 +20,7 @@ from src.foundation.ai.gateway.application.authorize import authorize
 from src.foundation.ai.gateway.application.issue_token import issue_token
 from src.foundation.ai.gateway.domain.token_rules import Scope
 from tests._perf.relative_budget import RelativeBudget
+from tests.support.perf_inject import virtual_delayed_async
 
 _AUTHORIZE_DB_ROUNDTRIP_P95_BUDGET_MS = 50.0
 
@@ -104,14 +104,8 @@ async def test_authorize_p95_detects_tenfold_delay_injection(
         now=_NOW,
     )
 
-    # repo.get_by_hash()에 5초 지연 주입 — asyncpg 내부 await를 직접 대체
-    original_get_by_hash = repo.get_by_hash
-
-    async def delayed_get_by_hash(token_hash: str):
-        await asyncio.sleep(5.0)
-        return await original_get_by_hash(token_hash)
-
-    monkeypatch.setattr(repo, "get_by_hash", delayed_get_by_hash)
+    # repo.get_by_hash()에 5초 지연 주입 — virtual_delayed_async로 측정치만 느리게 (task-20689)
+    monkeypatch.setattr(repo, "get_by_hash", virtual_delayed_async(repo.get_by_hash, 5.0))
 
     samples: list[float] = []
     for _ in range(5):
