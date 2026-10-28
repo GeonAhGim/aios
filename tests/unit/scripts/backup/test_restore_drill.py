@@ -125,7 +125,7 @@ def test_success_path_records_all_steps_and_stops_server(tmp_path: Path):
     assert len(stop_calls) == 1  # 성공해도 임시 인스턴스는 반드시 내린다
     # DROP_SLOT 쿼리가 호출되었는지 확인
     drop_calls = [c for c in calls if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]]
-    assert len(drop_calls) == 1
+    assert len(drop_calls) == 2  # pre-drop + finally drop
     assert not (tmp_path / "restore_pgdata").exists()  # 임시 데이터 디렉터리는 정리된다
 
 
@@ -140,46 +140,60 @@ def test_start_postgres_failure_stops_drill_without_stopping_unstarted_server(tm
     assert not any(c[0] == "pg_ctl" and c[1] == "stop" for c in calls)
     # 서버가 안 떴어도 finally 에서 DROP_SLOT 은 호출된다
     drop_calls = [c for c in calls if c[0] == "psql" and "pg_drop_replication_slot" in c[-1]]
-    assert len(drop_calls) == 1
+    assert len(drop_calls) == 2
     assert result["steps"]["drop_replication_slot"]["ok"] is True
 
 
 def test_existing_slot_is_dropped_before_drill_work(tmp_path: Path):
-    """강제종료 시 stale 슬롯 aios_drill 이 다음 드릴에서 충돌하지 않도록,
-    run_drill 시작 전 슬롯을 먼저 제거해야 한다.
-
-    모의: 마지막 psql 호출이 DROP_SLOT 쿼리이면 finally 에서 정리됨.
-    run_drill 은 psql 호출을 통해 복제 슬롯 정리 쿼리를 실행하고,
-    finally 블록에서 항상 호출된다.
-    """
-
-    call_order: list[str] = []
-    drop_calls: list[list[str]] = []
+    """A seeded stale slot is dropped by the pre-drop, before any restore work starts."""
+    slots = {"aios_drill"}
+    order: list[str] = []
 
     def run_cmd(cmd, cwd, env, timeout):
-        call_order.append(cmd[0])
-        if cmd[0] == "pg_ctl" and cmd[1] == "start":
-            return 0, "server started"
+        if cmd[0] == "psql" and "pg_drop_replication_slot" in cmd[-1]:
+            order.append(f"drop(present={'aios_drill' in slots})")
+            slots.discard("aios_drill")
+            return 0, "DROP SLOT"
+        order.append(" ".join(cmd[:2]))
         if cmd[0] == "pg_ctl" and cmd[1] == "status":
             return 0, "server is running"
-        if cmd[0] == "pg_ctl" and cmd[1] == "stop":
-            return 0, "server stopped"
         if cmd[0] == "psql":
-            if "pg_drop_replication_slot" in cmd[-1]:
-                drop_calls.append(cmd)
-                return 0, "DROP SLOT"
             return 0, "f"
-        if cmd[0] == "python" and "scripts.replay_verify" in cmd[-1]:
-            return 0, "replay done"
-        raise AssertionError(f"unexpected cmd {cmd}")
+        return 0, "ok"
 
-    result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
+    copied: list[list[str]] = []
 
-    assert result["ok"] is True
-    # finally 에서 DROP_SLOT 이 호출되었는지 확인
-    assert len(drop_calls) == 1
-    assert result["steps"]["drop_replication_slot"]["ok"] is True
-    assert result["steps"]["drop_replication_slot"]["rc"] == 0
+    def copy_tree(src, dst, timeout):
+        copied.append(list(order))
+        dst.mkdir(parents=True, exist_ok=True)
+        return True, ""
+
+    result = restore_drill.run_drill(
+        **_common_kwargs(tmp_path, run_cmd=run_cmd, copy_tree=copy_tree)
+    )
+
+    assert order[0] == "drop(present=True)"  # stale slot existed and was dropped first
+    assert copied and copied[0] == ["drop(present=True)"]  # before restore_files began
+    assert "aios_drill" not in slots
+    assert result["steps"]["pre_drop_replication_slot"]["ok"] is True
+
+
+def test_dsn_password_is_not_in_argv(tmp_path: Path):
+    seen: list[tuple[list[str], dict | None]] = []
+
+    def run_cmd(cmd, cwd, env, timeout):
+        if "pg_drop_replication_slot" in cmd[-1]:
+            seen.append((cmd, env))
+        return 0, "x"
+
+    from scripts.backup._restore_slot import drop_slot
+
+    step = drop_slot("psql", "postgresql+asyncpg://u:s3cr3t@h:5432/db", tmp_path, run_cmd)
+    cmd, env = seen[0]
+    assert step["ok"] is True
+    assert "s3cr3t" not in " ".join(cmd)
+    assert env is not None and env["PGPASSWORD"] == "s3cr3t"
+    assert cmd[1] == "postgresql://u@h:5432/db"
 
 
 def test_drop_slot_failure_still_cleans_restore_data_dir(tmp_path: Path):
@@ -188,8 +202,8 @@ def test_drop_slot_failure_still_cleans_restore_data_dir(tmp_path: Path):
     run_cmd, calls = _dispatching_run_cmd(drop_slot_rc=1)
     result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
 
-    # 서버 기동→복구→replay_verify 는 ok지만 DROP_SLOT 이 실패하면 전체 ok=False
-    assert result["ok"] is False
+    # Slot cleanup is advisory: its failure is recorded but does not flip the drill verdict.
+    assert result["ok"] is True
     assert result["steps"]["start_postgres"]["ok"] is True
     assert result["steps"]["wait_recovery"]["ok"] is True
     assert result["steps"]["replay_verify"]["ok"] is True

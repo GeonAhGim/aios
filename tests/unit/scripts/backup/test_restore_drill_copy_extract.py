@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.backup import restore_drill
+from scripts.backup import _restore_files as restore_drill
 
 
 def test_copy_backup_tree_non_windows_uses_shutil_copytree(tmp_path: Path, monkeypatch):
