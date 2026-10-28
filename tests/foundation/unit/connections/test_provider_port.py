@@ -19,6 +19,7 @@ from src.foundation.connections.ports.provider import (
     SecretLease,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def test_secret_lease_stores_lease_ref():
@@ -121,30 +122,22 @@ def test_secret_lease_and_opaque_ref_construction_0_convergence() -> None:
 def test_secret_lease_and_opaque_ref_construction_perf_budget_goes_red_with_delay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """검출력 확인 — 값 객체 생성에 sleep을 주입하면 같은 단언이 적색으로
+    """검출력 확인 — 값 객체 생성에 가상 지연을 주입하면 같은 단언이 적색으로
     넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이 아님을
     증명한다(task-11539 감사).
 
-    100회 호출당 ~100ms sleep(Windows 양자화) = 평균 100ms wall time로
+    100회 호출당 100ms 가상 지연 = 평균 100ms wall time로
     예산(50ms)을 초과하므로 assert가 적색으로 넘어간다."""
 
-    # Monkeypatch SecretLease.__init__에 sleep 주입
-    _orig_sl_init = SecretLease.__init__
-
-    def slow_sl_init(self: SecretLease, *, lease_ref: str) -> None:
-        time.sleep(0.1)  # 100ms (Windows resolution ~15ms minimum)
-        _orig_sl_init(self, lease_ref=lease_ref)
-
-    monkeypatch.setattr(SecretLease, "__init__", slow_sl_init)
+    # Monkeypatch SecretLease.__init__에 가상 지연 주입
+    monkeypatch.setattr(SecretLease, "__init__", virtual_delayed_sync(SecretLease.__init__, 0.1))
 
     def _build_100() -> None:
         for i in range(100):
             SecretLease(lease_ref=f"lease-{i}")
             OpaqueRef(f"ACCT-{i}")
 
-    # wall_ms로 검증 — sleep은 CPU 시간을 늘리지 않으므로
-    # time.process_time() 기반 assert_within은 통과할 수 있다.
-    # 그래서 best_of + wall_ms 직접 단언으로 red 전환을 확인한다.
+    # wall_ms로 검증 — virtual_delayed_sync은 cpu와 wall 모두에 지연을 합산한다.
     sample = PerfBudget().best_of(_build_100, n=3)
     assert sample.wall_ms >= 50.0, (
         f"Perf assertion should go red with injected delay: "
