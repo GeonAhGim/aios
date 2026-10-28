@@ -25,7 +25,7 @@ from src.foundation.ml.contracts.v1 import FeatureSpec, ModelCard, TrainDataLine
 from src.foundation.ml.domain.point_in_time import FutureDataLeakageError
 from src.foundation.ml.ports.feature_store import FeatureValue
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_async
+from tests.support.perf_inject import virtual_delayed_async
 
 _NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -457,8 +457,10 @@ async def test_serve_signal_latency_red_path_exceeds_budget_with_10x_delay(
         _state[0] += 1
 
     # Inject 10 ms delay on every async call inside serve_signal
-    # (load_card → registry.get/latest).
-    delayed_load_card = delayed_async(ss.load_card, seconds=0.01)
+    # (load_card → registry.get/latest). Uses virtual_delayed_async
+    # so wall-clock time stays near-zero while PerfBudget sees the
+    # same wall_ms increase as a real asyncio.sleep would produce.
+    delayed_load_card = virtual_delayed_async(ss.load_card, seconds=0.01)
     monkeypatch.setattr(ss, "load_card", delayed_load_card)
 
     budget = PerfBudget()
