@@ -144,8 +144,9 @@ def test_start_postgres_failure_stops_drill_without_stopping_unstarted_server(tm
     assert result["steps"]["drop_replication_slot"]["ok"] is True
 
 
-def test_drop_slot_called_when_existing_slot_exists(tmp_path: Path):
-    """기존 복제 슬롯 aios_drill 이 있을 때 finally 에서 DROP_SLOT 쿼리를 호출한다."""
+def test_drop_slot_query_reports_success_on_default_path(tmp_path: Path):
+    """기본 모의(DROP_SLOT rc=0)에서 finally 의 DROP_SLOT 쿼리 호출과 성공 기록을 확인한다.
+    (슬롯 존재 여부를 모의하지 않는다 -- 존재 시 drop→create 순서는 test_base_backup 이 검증)"""
 
     run_cmd, calls = _dispatching_run_cmd()
     result = restore_drill.run_drill(**_common_kwargs(tmp_path, run_cmd=run_cmd))
