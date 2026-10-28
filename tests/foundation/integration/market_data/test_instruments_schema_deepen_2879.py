@@ -329,40 +329,22 @@ async def test_perf_assertion_fails_with_10x_delay_injection(
     지연을 주입하면 RelativeBudget.assert_within_async가 예외를 던져야
     한다(단언/마커 삭제나 예산 완화가 아닌 genuine budget check임 증명).
 
-    _insert_listing 자체를 monkeypatch할 수 없으므로 asyncio.sleep을
-    주입해 각 삽입마다 0.05초 지연을 추가한다 (500개 × 0.05s = 25s 추가).
-    실제 삽입은 1-2s 소모 → 총 27-28s → 예산 15s 초과 → 적색.
+    virtual_delayed_async로 각 삽입마다 0.05초 가상 지연을 주입한다
+    (500개 × 0.05s = 25s 가상). 실제 sleep/busy-wait 없이 ledger만 증가해
+    테스트는 ~1s 만에 종료되지만 RelativeBudget은 같은 ratio를 본다.
     """
-    import asyncio as _asyncio
-
     from tests._perf.relative_budget import RelativeBudget
+    from tests.support.perf_inject import virtual_delayed_async
 
     t0_base = datetime.now(timezone.utc) - timedelta(days=2000)
     n = 500
-    injected_delay = 0.05  # 50ms per insert × 500 = 25s
+    injected_delay = 0.05  # 50ms per insert × 500 = 25s virtual
 
     # Original _insert_listing을 보존
     original_insert_listing = _insert_listing
 
-    # 지연 주입 버전
-    async def _slow_insert_listing(
-        conn: asyncpg.Connection | asyncpg.Pool,
-        *,
-        instrument_id: str,
-        venue: str,
-        venue_symbol: str,
-        listed_at: datetime,
-        delisted_at: datetime | None,
-    ) -> None:
-        await original_insert_listing(
-            conn,
-            instrument_id=instrument_id,
-            venue=venue,
-            venue_symbol=venue_symbol,
-            listed_at=listed_at,
-            delisted_at=delisted_at,
-        )
-        await _asyncio.sleep(injected_delay)
+    # 가상 지연 주입 버전 — 실제 sleep 없이 측정치만 증가
+    _slow_insert_listing = virtual_delayed_async(original_insert_listing, injected_delay)
 
     # Instrument 생성
     warmup_id = _fake_ulid()
