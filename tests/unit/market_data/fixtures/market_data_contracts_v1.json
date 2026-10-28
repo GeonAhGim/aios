@@ -270,7 +270,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -287,7 +286,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -302,7 +300,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -314,7 +311,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -331,7 +327,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           },
           {
@@ -353,7 +348,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -392,8 +386,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Close"
@@ -409,8 +402,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "High"
@@ -424,8 +416,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Low"
@@ -436,8 +427,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Open"
@@ -453,8 +443,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               },
               {
                 "type": "null"
@@ -475,8 +464,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Volume"
@@ -633,7 +621,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           },
           {
@@ -672,7 +659,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -767,7 +753,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -794,7 +779,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -1270,7 +1254,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -1302,7 +1285,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -1647,7 +1629,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -1665,7 +1646,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -1831,8 +1811,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Close"
@@ -1848,8 +1827,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "High"
@@ -1863,8 +1841,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Low"
@@ -1875,8 +1852,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Open"
@@ -1892,8 +1868,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               },
               {
                 "type": "null"
@@ -1914,8 +1889,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
+                    "type": "string"
               }
             ],
             "title": "Volume"
@@ -2412,7 +2386,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -2424,7 +2397,6 @@
             "type": "number"
           },
           {
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
