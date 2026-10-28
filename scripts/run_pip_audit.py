@@ -121,6 +121,26 @@ def build_pip_audit_command(python: str) -> list[str]:
     return [python, "-m", "pip_audit", "--skip-editable", "--format", "json"]
 
 
+def build_pip_audit_lock_command(python: str, lock_file: Path) -> list[str]:
+    """requirements-lock.txt 자체를 감사하는 pip-audit 명령을 만든다.
+
+    --no-deps: lock의 전이 의존을 다시 탐색하지 않는다(이미 venv에 설치된 패키지는
+    환경 감사에서 이미 다뤘다). --disable-pip: pip 인덱스 조회를 건너뛴다(로컬
+    offline에서도 돌 수 있게).
+    """
+    return [
+        python,
+        "-m",
+        "pip_audit",
+        "-r",
+        str(lock_file),
+        "--no-deps",
+        "--disable-pip",
+        "--format",
+        "json",
+    ]
+
+
 def _normalize_pkg_name(name: str) -> str:
     """'PyJWT' -> 'pyjwt', 'pydantic_settings' -> 'pydantic-settings' -- local_ci.py의
     _normalize_pkg_name과 같은 정규화(대소문자·구분자 차이를 다른 패키지로 보지 않는다)."""
@@ -214,7 +234,6 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    cmd = build_pip_audit_command(args.python)
     # encoding을 명시하지 않으면 Windows에서 locale.getpreferredencoding()(cp949 등)로
     # 디코딩되는데, pip-audit --format json은 UTF-8을 낸다 — 로케일이 cp949인 CI
     # 러너에서 UnicodeDecodeError로 죽는다(task-8362). pip-audit 출력은 항상 UTF-8이므로
@@ -230,6 +249,11 @@ def main(argv: list[str] | None = None) -> int:
     child_env = dict(os.environ)
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
+
+    # -----------------------------------------------------------------------
+    # 1) 환경 감사: 현재 venv에 설치된 패키지
+    # -----------------------------------------------------------------------
+    cmd = build_pip_audit_command(args.python)
     proc = subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=child_env
     )
@@ -259,11 +283,50 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        failures = evaluate_pip_audit_json(stdout, set(ignored_ids))
+        env_failures = evaluate_pip_audit_json(stdout, set(ignored_ids))
     except AuditFailure as exc:
         print(str(exc), file=sys.stderr)
         print(stderr, file=sys.stderr)
         return 1
+
+    # -----------------------------------------------------------------------
+    # 2) lock 파일 감사: requirements-lock.txt에 핀된 패키지 (있을 때만)
+    # -----------------------------------------------------------------------
+    lock_failures: list[str] = []
+    if args.lock_file.exists():
+        lock_cmd = build_pip_audit_lock_command(args.python, args.lock_file)
+        lock_proc = subprocess.run(
+            lock_cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env,
+        )
+        lock_stdout = lock_proc.stdout or ""
+        lock_stderr = lock_proc.stderr or ""
+
+        if is_network_error(lock_stdout) or is_network_error(lock_stderr):
+            print(
+                "pip-audit(lock) 네트워크 오류(pypi.org DNS/연결 실패) -- 취약점 판정 불가:",
+                file=sys.stderr,
+            )
+            print(lock_stderr, file=sys.stderr)
+            return NETWORK_ERROR_RC
+
+        if lock_stdout.strip():
+            try:
+                lock_failures = evaluate_pip_audit_json(lock_stdout, set(ignored_ids))
+            except AuditFailure as exc:
+                print(str(exc), file=sys.stderr)
+                print(lock_stderr, file=sys.stderr)
+                return 1
+        # lock_stdout이 비어 있으면 lock 패키지가 아무도 설치 안 된 상태 — 건너뜀
+
+    # -----------------------------------------------------------------------
+    # 합쳐서 판정: 환경 + lock 둘 다 같은 규칙으로
+    # -----------------------------------------------------------------------
+    failures = env_failures + lock_failures
 
     if failures:
         print("pip-audit 게이트 실패:", file=sys.stderr)
