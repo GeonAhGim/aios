@@ -317,20 +317,24 @@ class _DelayingResearchRepository:
         return [_row_to_item(row) for row in rows]
 
 
+@pytest.mark.parametrize("baseline_delay_s", [0, 0.2], ids=["normal", "loaded-baseline"])
 async def test_research_data_search_tool_latency_budget_fails_under_delay_injection(
     client,
     pool,
     token_repo: PostgresAgentTokenRepository,
     research_repo: PostgresResearchRepository,
     perf_budget,
+    baseline_delay_s,
 ):
     """failure injection — repository 호출에 지연을 주입하면 정규화 상한을
     초과해야 한다.
 
     지연 주입: _DelayingResearchRepository.list_by_tenant를 monkeypatch해
-    각 요청에 2s 지연을 추가. baseline(지연 없음) 대비 full(지연 주입)이
+    각 요청에 측정된 상한보다 2s 긴 지연을 추가. baseline(지연 없음) 대비 full(지연 주입)이
     ceiling(baseline*20+0.5)를 초과해야 한다.
     """
+    import asyncio
+
     import src.api.mcp.tools_research_data as tools_research_data
 
     await _insert_source_contract(pool)
@@ -342,21 +346,25 @@ async def test_research_data_search_tool_latency_budget_fails_under_delay_inject
         await research_repo.append_item(tenant_id, _item(), external_id=f"ext-{uuid.uuid4().hex}")
     issued = await issue(token_repo, tenant_id=tenant_id, scopes=frozenset({Scope.READ}))
 
-    # baseline: 지연 없이 측정 (정규화 기준)
-    baseline_sample = await perf_budget.sample_async(
-        lambda: client.post(
+    async def baseline_request():
+        # 재현: baseline만 느려져도 고정 2s 장애는 정규화 상한 아래로 내려간다.
+        await asyncio.sleep(baseline_delay_s)
+        return await client.post(
             "/mcp/tools/research_data_search",
             json={"source_id": SOURCE_ID, "instruments": ["no-such-instrument"]},
             headers={AGENT_TOKEN_HEADER: issued.secret},
-        ),
-        batch=1,
-    )
+        )
+
+    baseline_sample = await perf_budget.sample_async(baseline_request, batch=1)
+    assert baseline_sample.result.status_code == 200, baseline_sample.result.text
+    assert baseline_sample.result.json() == []
     baseline_elapsed_s = baseline_sample.wall_ms / 1000
 
-    # full: repository에 2s 지연 주입 → ceiling 초과 검증
+    ceiling = baseline_elapsed_s * 20 + 0.5
+    # 예산은 유지하고 장애 주입량만 실제 예산을 확실히 넘도록 보정한다.
     original_repo_cls = tools_research_data.PostgresResearchRepository
     tools_research_data.PostgresResearchRepository = lambda p: _DelayingResearchRepository(
-        p, delay_ms=2000
+        p, delay_ms=(ceiling + 2) * 1000
     )  # noqa: E731
     try:
         full_sample = await perf_budget.sample_async(
@@ -368,7 +376,8 @@ async def test_research_data_search_tool_latency_budget_fails_under_delay_inject
             batch=1,
         )
         full_elapsed_s = full_sample.wall_ms / 1000
-        ceiling = baseline_elapsed_s * 20 + 0.5
+        assert full_sample.result.status_code == 200, full_sample.result.text
+        assert len(full_sample.result.json()) == 51
 
         assert full_elapsed_s > ceiling, (
             f"지연 주입에도 full_elapsed_s={full_elapsed_s:.3f}s <= ceiling={ceiling:.3f}s — "
