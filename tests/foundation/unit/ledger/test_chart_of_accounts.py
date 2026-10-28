@@ -216,17 +216,24 @@ def test_default_scope_derivation_throughput_stays_within_budget(
     """
     n = 20_000
     budget_ms = 2_000.0  # 2.0 s × 1000
+    min_ops_per_sec = 10_000.0  # 10k ops/s 하한 — DEPTH 재감사(task-2724) 요구
     codes = [coa.user_account(uuid4(), UserSub.AVAILABLE) for _ in range(n)]
 
     sample = perf_budget.sample(lambda: [coa.default_scope(c) for c in codes], batch=1)
     # sample.cpu_ms is total CPU ms for all n calls (batch=1, fn runs once)
+    ops_per_sec = n / (sample.cpu_ms / 1000)
     print(
         f"[task-1942/3031 default_scope] {n} calls {sample.cpu_ms / 1000:.3f}s CPU "
-        f"({n / (sample.cpu_ms / 1000):.0f} ops/s, budget<{budget_ms / 1000:.1f}s)"
+        f"({ops_per_sec:.0f} ops/s, "
+        f"budget<{budget_ms / 1000:.1f}s, min>{min_ops_per_sec:.0f} ops/s)"
     )
     assert sample.cpu_ms < budget_ms, (
         f"{n}회 default_scope() 호출이 예산({budget_ms / 1000:.1f}s)을 "
         f"넘었습니다({sample.cpu_ms / 1000:.3f}s CPU)."
+    )
+    assert ops_per_sec > min_ops_per_sec, (
+        f"default_scope() 처리량이 최소값({min_ops_per_sec:.0f} ops/s)에 "
+        f"못 미칩니다({ops_per_sec:.0f})."
     )
 
 
