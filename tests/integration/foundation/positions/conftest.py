@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -29,7 +30,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool() -> asyncpg.Pool:
+async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=64)
     yield p
     await p.close()

@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
+from src.core.event_bus.policy import HandlerCriticality
 from tests.support.entities_seed import bootstrap_default_hierarchy
 
 
@@ -88,12 +89,12 @@ class NoopEventBus:
     async def publish(self, topic: str, payload: dict[str, Any]) -> None:
         self.published.append((topic, payload))
 
-    def subscribe(  # noqa: ANN001
+    def subscribe(
         self,
         topic: str,
         handler: Callable[[str, dict[str, Any]], Awaitable[None]],
         *,
-        criticality: str,
+        criticality: HandlerCriticality,
     ) -> None:
         return None
 
