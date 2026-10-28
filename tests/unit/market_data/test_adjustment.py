@@ -237,52 +237,72 @@ def test_adjust_ignores_candles_for_unregistered_instrument() -> None:
     assert adjusted[1].volume == Decimal("100")
 
 
-def test_factor_chain_raises_on_negative_float_ratio_via_monkeypatch(
+def test_factor_chain_fails_closed_when_ratio_dependency_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """negative: float ratio(음수)가 Decimal이 아닌 채로 흘러들어도
-    `ratio <= 0` 비교가 float에서도 동일하게 동작해 InvalidRatioError를 낸다.
-
-    정상 생성 경로(pyvdantic)는 float를 Decimal로 강제 변환하지만,
-    monkeypatch로 직접 float를 넣으면 Decimal이 아닌 float 타입이
-    `factor_chain`의 `action.ratio <= 0` 검사에 도달한다. 이 테스트가
-    검증하는 불변식: float 타입의 음수도 Decimal과 동일하게 `<= 0`
-    비교에서 적격해 fail-closed된다(발견: 기존 test_zero_ratio_raises는
-    Decimal(0)만 테스트, float 타입은 monkeypatch 없이는 재현 불가).
+    """failure injection: `_action_factors`(의존성)가 2번째 action에서 예외를
+    던지면 `factor_chain`은 그 예외를 삼키지 않고 전파해야 하며, 앞서 계산된
+    1번째 action의 계수를 부분 결과로 돌려주지 않아야 한다(no partial success).
     """
+    from src.foundation.market_data.domain.corporate_actions import adjustment
+
+    real_action_factors = adjustment._action_factors
+    calls = {"n": 0}
+
+    def _flaky(action: CorporateAction) -> tuple[Decimal, Decimal]:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("injected dependency failure")
+        return real_action_factors(action)
+
+    monkeypatch.setattr(adjustment, "_action_factors", _flaky)
     instrument_id = uuid4()
-    action = _split(instrument_id, date(2024, 1, 10), "1")
-    # float 타입 음수 ratio 주입 (Decimal이 아님)
-    monkeypatch.setattr(action, "ratio", -1.0)
+    actions = [
+        _split(instrument_id, date(2024, 1, 10), "2"),
+        _split(instrument_id, date(2024, 6, 10), "4"),
+    ]
 
-    with pytest.raises(InvalidRatioError):
-        factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
+    with pytest.raises(RuntimeError, match="injected dependency failure"):
+        factor_chain(actions, datetime(2024, 12, 1, tzinfo=timezone.utc))
+    assert calls["n"] == 2
 
 
-def test_adjust_zero_volume_candle_monkeypatch_injection(
+def test_adjust_failure_mid_batch_leaves_input_candles_unmutated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """negative: zero-volume candle에 corporate action 적용 시 price는 조정되지만
-    volume은 0으로 유지된다 (monkeypatch로 volume=0 주입).
-
-    실패 주입: monkeypatch로 CandleRecord의 volume을 0으로 교체한 candle를
-    inject하고, price adjustment가 volume에 의존하지 않고 price에만 적용되는
-    것을 검증한다.
+    """failure injection + invariant I-05(순수함수): `_factor_for`(의존성)가 2번째
+    캔들에서 실패하면 `adjust`는 예외를 전파해야 하고, 이미 조정된 1번째 캔들을
+    포함해 입력 원본 캔들은 한 글자도 변하지 않아야 한다(model_copy만 사용).
     """
+    from src.foundation.market_data.domain.corporate_actions import adjustment
+
     instrument_id = uuid4()
     as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
-    actions = [_split(instrument_id, date(2024, 6, 1), "2")]
-    factors = factor_chain(actions, as_of)
+    factors = factor_chain([_split(instrument_id, date(2024, 6, 1), "2")], as_of)
+    candles = [
+        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("500")),
+        _candle(instrument_id, datetime(2024, 4, 1, tzinfo=timezone.utc), Decimal("400")),
+    ]
+    real_factor_for = adjustment._factor_for
+    calls = {"n": 0}
 
-    # volume=0인 candle를 monkeypatch로 주입
-    candle = _candle(instrument_id, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("500"))
-    monkeypatch.setattr(candle, "volume", Decimal("0"))
+    def _flaky(
+        instrument: UUID,
+        open_time: datetime,
+        factors_by_instrument: dict[UUID, list[adjustment.AdjustmentFactor]],
+    ) -> tuple[Decimal, Decimal]:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("injected dependency failure")
+        return real_factor_for(instrument, open_time, factors_by_instrument)
 
-    adjusted = adjust([candle], factors)
+    monkeypatch.setattr(adjustment, "_factor_for", _flaky)
 
-    # price는 1/2로 조정 (2:1 split), volume=0 유지
-    assert adjusted[0].close == Decimal("250")
-    assert adjusted[0].volume == Decimal("0")
+    with pytest.raises(RuntimeError, match="injected dependency failure"):
+        adjust(candles, factors)
+    assert candles[0].close == Decimal("500")
+    assert candles[1].close == Decimal("400")
+    assert candles[0].volume == Decimal("100")
 
 
 @pytest.mark.perf
