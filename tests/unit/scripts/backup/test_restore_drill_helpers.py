@@ -183,6 +183,36 @@ def test_write_recovery_config_escapes_windows_backslashes(tmp_path: Path):
     assert "\\" not in conf_content or '""' in conf_content  # double-quote 내부면 허용
 
 
+@pytest.mark.parametrize(
+    ("os_name", "expected_cmd"),
+    [("nt", "copy"), ("posix", "cp")],
+)
+def test_write_recovery_config_selects_platform_copy_command(
+    tmp_path: Path, monkeypatch, os_name: str, expected_cmd: str
+):
+    """플랫폼 분기를 현재 OS와 무관하게 고정 검증한다 (Linux CI에서도 Windows 분기가 실행돼야 함).
+
+    Regression: task-5296 -- Windows에는 cp가 없어 restore_command가 실패했다. PostgreSQL은
+    Windows에서 restore_command를 cmd.exe로 실행하므로 `copy`(cmd 내장)를 써야 하고, 경로는
+    forward slash 전체 경로여야 한다. Negative: 반대 OS 명령어가 섞이면 실패해야 한다.
+    """
+    archive_dir = tmp_path / "wal_archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "restore_pgdata"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(restore_drill.os, "name", os_name)
+    restore_drill.write_recovery_config(data_dir, archive_dir)
+
+    conf_content = (data_dir / "postgresql.auto.conf").read_text(encoding="utf-8")
+    expected_line = (
+        f'restore_command = \'{expected_cmd} "{str(archive_dir).replace(chr(92), "/")}/%f" "%p"\''
+    )
+    assert expected_line in conf_content
+    other_cmd = "cp" if expected_cmd == "copy" else "copy"
+    assert f"'{other_cmd} " not in conf_content
+
+
 # --- wait_for_recovery ---------------------------------------------------------
 
 
