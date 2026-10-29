@@ -26,6 +26,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -37,6 +38,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -51,6 +53,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -66,6 +69,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -115,6 +119,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -191,6 +196,7 @@
                   "type": "number"
                 },
                 {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                   "type": "string"
                 }
               ]
@@ -201,6 +207,7 @@
                   "type": "number"
                 },
                 {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                   "type": "string"
                 }
               ]
@@ -274,7 +281,7 @@
         "type": "string"
       },
       "PostingLine": {
-        "description": "분개 행 하나. `amount`는 항상 양수 — 방향은 `side`가 표현한다\n(§3.3 원장 금액 NUMERIC(20,2) KRW quantize).",
+        "description": "\ubd84\uac1c \ud589 \ud558\ub098. `amount`\ub294 \ud56d\uc0c1 \uc591\uc218 \u2014 \ubc29\ud5a5\uc740 `side`\uac00 \ud45c\ud604\ud55c\ub2e4\n(\u00a73.3 \uc6d0\uc7a5 \uae08\uc561 NUMERIC(20,2) KRW quantize).",
         "properties": {
           "account_code": {
             "title": "Account Code",
@@ -287,6 +294,7 @@
                 "type": "number"
               },
               {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,2}0*$",
                 "type": "string"
               }
             ],
@@ -433,7 +441,7 @@
         "type": "string"
       }
     },
-    "description": "`post_entry`(LC-9)의 입력. `event_ref`는 \"purchase:123\" 형태의\n도메인 참조이며, `idempotency_key`(LC-3)는 이로부터 파생된다.",
+    "description": "`post_entry`(LC-9)\uc758 \uc785\ub825. `event_ref`\ub294 \"purchase:123\" \ud615\ud0dc\uc758\n\ub3c4\uba54\uc778 \ucc38\uc870\uc774\uba70, `idempotency_key`(LC-3)\ub294 \uc774\ub85c\ubd80\ud130 \ud30c\uc0dd\ub41c\ub2e4.",
     "properties": {
       "actor_subject_id": {
         "anyOf": [
@@ -454,6 +462,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -475,6 +484,10 @@
           "anyOf": [
             {
               "type": "number"
+            },
+            {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+              "type": "string"
             },
             {
               "type": "string"
@@ -563,6 +576,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
@@ -670,7 +684,7 @@
         "type": "string"
       }
     },
-    "description": "분개 행 하나. `amount`는 항상 양수 — 방향은 `side`가 표현한다\n(§3.3 원장 금액 NUMERIC(20,2) KRW quantize).",
+    "description": "\ubd84\uac1c \ud589 \ud558\ub098. `amount`\ub294 \ud56d\uc0c1 \uc591\uc218 \u2014 \ubc29\ud5a5\uc740 `side`\uac00 \ud45c\ud604\ud55c\ub2e4\n(\u00a73.3 \uc6d0\uc7a5 \uae08\uc561 NUMERIC(20,2) KRW quantize).",
     "properties": {
       "account_code": {
         "title": "Account Code",
@@ -683,6 +697,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,2}0*$",
             "type": "string"
           }
         ],
@@ -710,7 +725,7 @@
     "type": "object"
   },
   "TrialBalanceView": {
-    "description": "`total`은 복식부기 항등식에 의해 항상 0이어야 한다(LC-5, §4.4).",
+    "description": "`total`\uc740 \ubcf5\uc2dd\ubd80\uae30 \ud56d\ub4f1\uc2dd\uc5d0 \uc758\ud574 \ud56d\uc0c1 0\uc774\uc5b4\uc57c \ud55c\ub2e4(LC-5, \u00a74.4).",
     "properties": {
       "as_of": {
         "format": "date-time",
@@ -724,6 +739,7 @@
               "type": "number"
             },
             {
+              "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
               "type": "string"
             }
           ]
@@ -747,6 +763,7 @@
             "type": "number"
           },
           {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "type": "string"
           }
         ],
