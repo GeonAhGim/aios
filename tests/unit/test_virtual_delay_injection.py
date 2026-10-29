@@ -67,3 +67,20 @@ def test_virtual_async_delay_adds_wall_only(perf_budget: Any) -> None:
     assert time.perf_counter() - started < 5.0
     assert sample.wall_ms >= 20_000.0
     assert sample.cpu_ms < 20_000.0  # 실제 asyncio.sleep처럼 CPU는 늘지 않는다
+
+
+def test_virtual_delay_is_exact_even_after_a_large_accumulated_ledger() -> None:
+    """A 50 ms injection must read back as exactly 50.0 ms, however much was injected earlier.
+
+    The ledger used to accumulate float seconds, so ``after - before`` drifted once the per-process
+    total grew (it read 49.99999999999716 and a ``>= 50.0`` gate-red assertion failed, 2026-10-29).
+    """
+    from tests.support.perf_inject import _add_virtual, virtual_totals_ns
+
+    for _ in range(100_000):  # make the running total large, like a long xdist worker session
+        _add_virtual(0.123456789, 0.987654321)
+    before = virtual_totals_ns()
+    _add_virtual(0.05, 0.05)
+    after = virtual_totals_ns()
+    assert (after[0] - before[0]) / 1e6 == 50.0
+    assert (after[1] - before[1]) / 1e6 == 50.0

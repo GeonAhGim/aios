@@ -24,19 +24,28 @@ R = TypeVar("R")
 # ``virtual_delayed_*`` add the delay to this ledger; ``PerfBudget.sample*`` adds whatever accrued
 # during a timed call to the sample it returns, so the budget assertion sees the same number a
 # real delay would have produced. No injection -> the ledger never moves -> measurements unchanged.
-_virtual_cpu_s = 0.0
-_virtual_wall_s = 0.0
+#
+# The ledger is kept in integer nanoseconds. Accumulating float seconds made ``after - before`` lose
+# precision as the per-process total grew (a 50 ms injection read back as 49.99999999999716 ms and a
+# ``>= 50.0`` gate-red assertion failed, 2026-10-29); integer deltas are exact.
+_virtual_cpu_ns = 0
+_virtual_wall_ns = 0
+
+
+def virtual_totals_ns() -> tuple[int, int]:
+    """Nanoseconds of (cpu, wall) delay injected virtually so far (exact integers)."""
+    return _virtual_cpu_ns, _virtual_wall_ns
 
 
 def virtual_totals() -> tuple[float, float]:
     """Seconds of (cpu, wall) delay injected virtually so far in this process."""
-    return _virtual_cpu_s, _virtual_wall_s
+    return _virtual_cpu_ns / 1e9, _virtual_wall_ns / 1e9
 
 
 def _add_virtual(cpu_s: float, wall_s: float) -> None:
-    global _virtual_cpu_s, _virtual_wall_s
-    _virtual_cpu_s += cpu_s
-    _virtual_wall_s += wall_s
+    global _virtual_cpu_ns, _virtual_wall_ns
+    _virtual_cpu_ns += round(cpu_s * 1e9)
+    _virtual_wall_ns += round(wall_s * 1e9)
 
 
 def virtual_delayed_async[**P, R](

@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from tests.conftest import paused_coverage
-from tests.support.perf_inject import virtual_totals
+from tests.support.perf_inject import virtual_totals_ns
 
 _T = TypeVar("_T")
 
@@ -89,11 +89,11 @@ class RelativeBudget:
         best: float | None = None
         for _ in range(n):
             with paused_coverage():
-                virtual0 = virtual_totals()[0]  # cpu ledger for sync
+                virtual0 = virtual_totals_ns()[0]  # cpu ledger for sync
                 start = clock()
                 fn()
                 elapsed = (clock() - start) * 1000
-                elapsed += (virtual_totals()[0] - virtual0) * 1000  # add virtual delta
+                elapsed += (virtual_totals_ns()[0] - virtual0) / 1e6  # add virtual delta
             if best is None or elapsed < best:
                 best = elapsed
         assert best is not None
@@ -162,11 +162,11 @@ class RelativeBudget:
         best: float | None = None
         for _ in range(n):
             with paused_coverage():
-                virtual0 = virtual_totals()[1]  # wall ledger for async
+                virtual0 = virtual_totals_ns()[1]  # wall ledger for async
                 start = clock()
                 await fn()
                 elapsed = (clock() - start) * 1000
-                elapsed += (virtual_totals()[1] - virtual0) * 1000  # add virtual delta
+                elapsed += (virtual_totals_ns()[1] - virtual0) / 1e6  # add virtual delta
             if best is None or elapsed < best:
                 best = elapsed
         assert best is not None
@@ -251,11 +251,11 @@ class RelativeBudget:
             fn()
         samples_ms: list[float] = []
         for _ in range(n):
-            virtual0 = virtual_totals()[1]  # wall ledger
+            virtual0 = virtual_totals_ns()[1]  # wall ledger
             start = clock()
             fn()
             elapsed = (clock() - start) * 1000
-            elapsed += (virtual_totals()[1] - virtual0) * 1000  # add virtual delta
+            elapsed += (virtual_totals_ns()[1] - virtual0) / 1e6  # add virtual delta
             samples_ms.append(elapsed)
         ordered = sorted(samples_ms)
         index = max(0, -(-95 * len(ordered) // 100) - 1)
