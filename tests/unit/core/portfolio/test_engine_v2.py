@@ -392,7 +392,9 @@ def test_sleep_injection_does_not_affect_cpu_measurement(
         )
 
     # process_time 16ms 양자화 tick 때문에 단발 측정이 흔들려 best-of-5 최소값 사용
-    sample = perf_budget.best_of(allocate_with_sleep, n=5, warmup=1, batch=1)
+    # batch=8로 묶으면 15.625ms tick이 8 호출에 분산되어 호출당 ~2ms 이내로 줄어든다.
+    # allocate()는 ~0.01ms이므로 batch=8에서 cpu_ms < 1.0 단언을 안정적으로 만족한다.
+    sample = perf_budget.best_of(allocate_with_sleep, n=5, warmup=1, batch=8)
     # wall_ms는 sleep(0.1)으로 인해 ~100ms가 되어야 하지만,
     # cpu_ms는 실제 CPU 소비만 계측하므로 여전히 < 1ms여야 한다.
     assert sample.cpu_ms < 1.0, (
