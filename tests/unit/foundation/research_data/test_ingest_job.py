@@ -10,7 +10,7 @@ the idempotent-retry-after-crash guarantee is exercised without Postgres.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -26,6 +26,7 @@ from src.foundation.research_data.application.ingest_job import (
 )
 from src.foundation.research_data.contracts.v1 import ResearchItem
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_async
 
 _TENANT = uuid4()
 _SOURCE_ID = "OPENDART"
@@ -462,3 +463,33 @@ async def test_page_processing_throughput_bounded(
     best = min(samples, key=lambda s: s.wall_ms)
 
     assert best.wall_ms < 2000.0, f"throughput {best.wall_ms:.1f}ms — 예산 2000ms 초과"
+
+
+@pytest.mark.perf
+async def test_page_throughput_budget_red_with_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction: same wall budget (2000ms), normal input green,
+    a 10x (20s) virtual fetch delay red -- no real sleep."""
+    page = IngestPage(
+        items=tuple((_item(f"ext-{i}"), f"ext-{i}") for i in range(1000)), next_cursor=None
+    )
+
+    async def fetch_page(_cursor: str | None) -> IngestPage:
+        return page
+
+    def runner(
+        fetch: Callable[[str | None], Awaitable[IngestPage]],
+    ) -> Callable[[], Awaitable[None]]:
+        async def run() -> None:
+            await ingest_job(
+                tenant_id=_TENANT, source_id=_SOURCE_ID, span=_SPAN,
+                fetch_page=fetch, store=_FakeStore(), lock=_noop_lock,
+            )  # fmt: skip
+
+        return run
+
+    normal = await perf_budget.best_of_async(runner(fetch_page), n=3)
+    assert normal.wall_ms < 2000.0
+    slow = await perf_budget.best_of_async(runner(virtual_delayed_async(fetch_page, 20.0)), n=3)
+    assert slow.wall_ms >= 2000.0, "gate must go red under 10x virtual delay"
