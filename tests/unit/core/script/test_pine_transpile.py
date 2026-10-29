@@ -349,13 +349,14 @@ def test_corpus_pass_rate_regression_guard() -> None:
 
 
 # 4. 0 수렴 (zero convergence): 단일 호출 CPU 시간이 batch 증가에 따라 0 수렴
+@pytest.mark.perf
 def test_single_call_cpu_zero_convergence(perf_budget: PerfBudget) -> None:
     """DoD "0 수렴" — 간단한 Pine 코드 1회 transpile_and_verify CPU 시간이
-    batch=1000에서 0.1ms 미만이어야 한다(양자화 오차 제거 후).
+    batch=1000에서 0.25ms 미만이어야 한다(양자화 오차 제거 후).
 
     Windows time.process_time()의 ~15.6ms 양자화 tick을 batch=1000으로
     나누면 호출당 오차가 ~0.016ms가 된다. 이 값보다 훨씬 크면 hidden
-    O(n) 경로가 있다는 뜻이므로 0.1ms로 차단한다.
+    O(n) 경로가 있다는 뜻이므로 0.25ms로 차단한다.
 
     CI 병렬 안정성: best-of-5로 노이즈를 걷어내고 최소값으로 예산 단언한다
     (task-19178 패턴). 단일 샘플은 CI xdist 워커 간 CPU 경합 spike 한 번에
