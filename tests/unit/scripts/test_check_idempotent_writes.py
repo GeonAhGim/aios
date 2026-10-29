@@ -10,13 +10,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 from tests._perf.relative_budget import RelativeBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -271,22 +271,14 @@ def test_perf_budget_guard_fails_on_injected_scan_delay(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Proves the assertion above is not vacuously green -- injecting a delay
-    per scanned file must push elapsed time past the same budget. task-7434:
-    the injected delay is a real `time.sleep()`, so RelativeBudget uses
-    mode="wall" (process_time would not see the sleep).
+    per scanned file must push elapsed time past the same budget.
+    Uses ``virtual_delayed_sync`` (no real sleep/busy-wait) so the test runs
+    in milliseconds while the measurement ledger still reads 0.5s/file.
 
-    Calibration ~0.095s, 50ms/file × ~30 files ≈ 1.5s → ratio ≈ 15.8x < 150x.
-    10× injected delay (500ms/file) → ~15s → ratio ≈ 158x > 150x, proving
-    detection power. Uses RelativeBudget directly (not perf_budget fixture)
-    because PerfBudget.assert_within uses process_time which misses sleep().
+    92 files × 0.5s = 46s virtual wall → ratio ≈ 484x > 150x, proving
+    detection power. Same ledger integration as ``test_virtual_delay_injection``.
     """
-    original_scan_source = civ._scan_source
-
-    def _slow_scan_source(source: str, location: str):
-        time.sleep(0.5)  # 10× original delay to exceed ratio budget
-        return original_scan_source(source, location)
-
-    monkeypatch.setattr(civ, "_scan_source", _slow_scan_source)
+    monkeypatch.setattr(civ, "_scan_source", virtual_delayed_sync(civ._scan_source, 0.5))
 
     # 10× injected delay (500ms/file × ~30 files ≈ 15s) must exceed budget ratio
     with pytest.raises(AssertionError):
