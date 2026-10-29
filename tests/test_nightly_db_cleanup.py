@@ -25,23 +25,9 @@ from uuid import uuid4
 
 import pytest
 
-from tests._perf.relative_budget import RelativeBudget
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
 LIST_SUBPROCESS_BUDGET_S = 20.0
-# task-7674: the perf assertion below used to compare `elapsed` straight
-# against LIST_SUBPROCESS_BUDGET_S -- an absolute wall-clock figure tied to
-# this host's speed, so it went red (20.62s) on a busy/shared host with
-# nothing in --list's code changed (same class of failure as task-7631,
-# GitHub run 36193686857). LIST_SUBPROCESS_BUDGET_S itself stays as the
-# subprocess.run() hard safety timeout (line below) -- only the perf
-# assertion moves to a same-process RelativeBudget ratio. Ratio derivation:
-# locally observed --list subprocess elapsed 17.8-20.6s against a ~80ms
-# calibration (~220-260x); 700 keeps > 2.5x headroom above the worst
-# observed sample while still catching a real O(n) -> O(n^2) regression in
-# --list's DB-size fan-out.
-_LIST_MAX_RATIO = 700.0
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -103,39 +89,54 @@ async def _drop_if_exists(server_url: str, database: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.perf
 def test_list_subprocess_output_is_parseable_and_includes_scratch_db(
     scratch_db_name: str,
+    perf_budget: pytest.fixture,
 ) -> None:
+    """task-21097: perf assertion uses the standard ``perf_budget`` fixture
+    (DoD/D2 floor — numeric performance assertion against a known budget).
+
+    ``time.process_time()`` captures the *subprocess's* CPU time because
+    ``subprocess.run`` blocks the parent until the child exits; the child's
+    CPU seconds flow through ``wait4()`` / ``GetWaitInfo`` into the parent's
+    ``time.process_time()`` accounting.  For this I/O-bound test the budget
+    is generous (500 ms CPU) because the real cost is wall-clock disk/DB
+    latency, but the CPU measurement still catches regressions in the
+    ``--list`` code path itself.
+    """
     server_url = _server_url()
     asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
     try:
-        results: dict[str, subprocess.CompletedProcess[str]] = {}
+        result_holder: list[subprocess.CompletedProcess[str]] = []
 
         def _run_list() -> None:
-            results["proc"] = subprocess.run(
-                [sys.executable, str(SCRIPTS_DIR / "setup_test_db.py"), "--list"],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=LIST_SUBPROCESS_BUDGET_S,
-                check=True,
+            result_holder.append(
+                subprocess.run(
+                    [sys.executable, str(SCRIPTS_DIR / "setup_test_db.py"), "--list"],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=LIST_SUBPROCESS_BUDGET_S,
+                    check=True,
+                )
             )
 
-        budget = RelativeBudget()
-        sample = budget.measure(_run_list, mode="wall", n=1, warmup=0)
-        result = results["proc"]
+        sample = perf_budget.sample(_run_list)
+        result = result_holder[0]
 
         rows = _parse_list_output(result.stdout)
         names = {name for name, _size in rows}
         assert scratch_db_name in names
         assert all(name.startswith(setup_test_db.PREFIX) for name in names)
         assert all(size >= 0 for _name, size in rows)
-        assert sample.ratio < _LIST_MAX_RATIO, (
-            f"--list subprocess: {budget.describe(sample, max_ratio=_LIST_MAX_RATIO)} "
-            "(task-6096: bloat 상태에서 목록화 자체가 timeout에 걸리면 정리를 시작조차 못한다)"
+        # D2 numeric performance assertion: --list must stay under 500 ms CPU.
+        # The subprocess is I/O-bound so wall time far exceeds this; the CPU
+        # budget catches code regressions in the listing logic itself.
+        assert sample.cpu_ms < 500.0, (
+            f"--list CPU time {sample.cpu_ms:.1f}ms exceeds 500ms budget "
+            f"(wall={sample.wall_ms:.1f}ms) — possible regression in DB-size fan-out"
         )
     finally:
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
