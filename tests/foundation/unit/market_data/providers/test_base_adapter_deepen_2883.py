@@ -42,6 +42,7 @@ from src.foundation.market_data.ports.provider import (
     RateLimitSpec,
 )
 from tests._perf.relative_budget import RelativeBudget
+from tests.support.perf_inject import virtual_delayed_async, virtual_totals
 
 
 class _FakeClock:
@@ -111,7 +112,7 @@ async def test_many_successful_calls_stay_within_wall_clock_budget() -> None:
         for _ in range(2000):
             assert await adapter.call_with_retry(op) == 1
 
-    sample = await RelativeBudget().measure_async(batch, n=1, warmup=0, calibration_n=1)
+    sample = await RelativeBudget().measure_async(batch, n=3, warmup=1, calibration_n=3)
 
     assert sample.op_ms < 2_000, f"2000회 호출에 {sample.op_ms:.1f}ms 소요 -- 예산(2.0s) 초과"
     assert sleeper.calls == []  # 버킷 고갈 없음 -- 대기 없이 전부 즉시 통과
@@ -134,11 +135,77 @@ async def test_concurrent_calls_stay_within_wall_clock_budget() -> None:
     async def measured() -> None:
         results_holder.append(await concurrent_batch())
 
-    sample = await RelativeBudget().measure_async(measured, n=1, warmup=0, calibration_n=1)
+    sample = await RelativeBudget().measure_async(measured, n=3, warmup=1, calibration_n=3)
 
     assert results_holder[0] == [1] * 500
     assert sample.op_ms < 2_000, f"500개 동시 호출에 {sample.op_ms:.1f}ms 소요 -- 예산(2.0s) 초과"
     assert sleeper.calls == []
+
+
+# ---- 1b. 게이트 적색 재현 -- 예산 10배 가상 지연 주입 ---------------------
+# 같은 측정(RelativeBudget.measure_async)/같은 단언(op_ms < 2_000)을 재사용하고
+# op에만 virtual_delayed_async를 씌운다 -- 실제 sleep 없이 측정치에 지연이 더해진다.
+
+_BUDGET_MS = 2_000
+_INJECTED_S = 20.0  # 예산(2s)의 10배
+
+
+@pytest.mark.perf
+async def test_sequential_budget_goes_red_with_ten_x_virtual_delay() -> None:
+    adapter, _clock, _sleeper = _adapter(rate="100000", burst=100000)
+
+    async def op() -> int:
+        return 1
+
+    delayed = virtual_delayed_async(op, _INJECTED_S / 2000)
+
+    async def batch() -> None:
+        for _ in range(2000):
+            assert await adapter.call_with_retry(delayed) == 1
+
+    sample = await RelativeBudget().measure_async(batch, n=3, warmup=1, calibration_n=3)
+
+    assert sample.op_ms >= _BUDGET_MS * 10 * 0.99  # 같은 단언이 적색이 되는 수치
+    with pytest.raises(AssertionError):
+        assert sample.op_ms < _BUDGET_MS
+
+
+@pytest.mark.perf
+async def test_concurrent_budget_goes_red_with_ten_x_virtual_delay() -> None:
+    adapter, _clock, _sleeper = _adapter(rate="100000", burst=100000)
+
+    async def op() -> int:
+        return 1
+
+    delayed = virtual_delayed_async(op, _INJECTED_S / 500)
+
+    async def measured() -> None:
+        await asyncio.gather(*[adapter.call_with_retry(delayed) for _ in range(500)])
+
+    sample = await RelativeBudget().measure_async(measured, n=3, warmup=1, calibration_n=3)
+
+    assert sample.op_ms >= _BUDGET_MS * 10 * 0.99
+    with pytest.raises(AssertionError):
+        assert sample.op_ms < _BUDGET_MS
+
+
+@pytest.mark.perf
+async def test_no_injection_leaves_ledger_untouched_and_measurement_nonzero() -> None:
+    """음성 -- 주입이 없으면 가상 원장이 움직이지 않고, 측정은 0이 아닌 실측치다."""
+    adapter, _clock, _sleeper = _adapter(rate="100000", burst=100000)
+    before = virtual_totals()
+
+    async def op() -> int:
+        return 1
+
+    async def batch() -> None:
+        for _ in range(2000):
+            assert await adapter.call_with_retry(op) == 1
+
+    sample = await RelativeBudget().measure_async(batch, n=3, warmup=1, calibration_n=3)
+
+    assert virtual_totals() == before
+    assert 0 < sample.op_ms < _BUDGET_MS
 
 
 # ---- 2. 게이트 적색 재현 -- 다단계 시나리오 + retry_after_sec -------------
