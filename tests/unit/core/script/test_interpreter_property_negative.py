@@ -177,22 +177,23 @@ def test_property_suite_budget_goes_red_with_cpu_delay_injection(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """gate-red 재현(ADR-2026-09-09-C D2, DEEPEN task-4146): `delayed_sync` 로
-    `_check_program`에 CPU 부하를 주입하면 같은 p99 단언이 적색으로 전환된다.
+    """gate-red 재현(ADR-2026-09-09-C D2, DEEPEN task-4146): `virtual_delayed_sync` 로
+    `_check_program`에 CPU 지연을 주입하면 같은 p99 단언이 적색으로 전환된다.
 
-    `delayed_sync` 은 busy-wait(CPU-time slowdown) 를 주입한다.
-    `PerfBudget.sample` 는 `time.process_time()` 을 사용하므로 CPU 지연이
-    직접 포착된다. 이 테스트가 없으면 예산 단언은 항상 통과하는 hollow 가
+    `virtual_delayed_sync` 은 busy-wait 없이 가상 원장(virtual ledger)에 지연을
+    적재하므로 실제 CPU 소모 없이 같은 gate-red 단언(예산 위반 시 AssertionError)
+    을 검증한다. 이 테스트가 없으면 예산 단언은 항상 통과하는 hollow 가
     될 수 있다(호출 1회 측정의 0 수렴 문제)."""
 
-    # _check_program 전체에 50ms CPU 지연 주입 — 150 시드 × 50ms = 7.5s 이상
+    # _check_program 전체에 50ms 가상 지연 주입 — 150 시드 × 50ms = 7.5s 이상
     # 현재 측정 ~0.2s(150 시드 전체) 이므로 10배 이상 지연
+    # virtual_delayed_sync: 실제 CPU 소모 없이 PerfBudget.measure에 지연 적재
     import tests.unit.core.script.test_interpreter_property_negative as mod  # noqa: LOK100
-    from tests.support.perf_inject import delayed_sync
+    from tests.support.perf_inject import virtual_delayed_sync
 
     original_check = _check_program
     monkeypatch.setattr(
-        mod, "_check_program", lambda seed: delayed_sync(original_check, 0.05)(seed)
+        mod, "_check_program", lambda seed: virtual_delayed_sync(original_check, 0.05)(seed)
     )
 
     def _run_suite() -> None:
