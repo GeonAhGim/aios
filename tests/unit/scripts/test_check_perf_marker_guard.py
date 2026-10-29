@@ -394,3 +394,11 @@ def test_perf_budget_assert_within_not_directly_detected() -> None:
     # assert_within()는 내부에 assert가 있지만, 테스트 코드에 .cpu_ms/.wall_ms
     # 단언이 직접 나타나지 않으므로 violation 아님
     assert check_perf_marker_guard._find_violations(tree) == []
+
+
+def test_perf_marker_guard_stays_within_complexity_cap() -> None:
+    """중복 마커 판정이 complexity 게이트를 다시 적색으로 만들지 않는다."""
+    from scripts.check_complexity import scan_file
+
+    path = SCRIPTS_DIR / "check_perf_marker_guard.py"
+    assert scan_file(path.name, path.read_text(encoding="utf-8")) == []

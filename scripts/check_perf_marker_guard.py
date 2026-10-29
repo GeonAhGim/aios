@@ -163,16 +163,10 @@ def _find_violations(tree: ast.Module) -> list[str]:
                     visit(node.body, inherited_marks)
                     continue
 
-                # Branch 1: raw perf_counter()/monotonic() budget assertion
-                if _contains_timer_call(node) and _contains_assert(node):
-                    own_marks = inherited_marks | _decorator_mark_names(node.decorator_list)
-                    if own_marks & _SKIP_MARKERS or module_marks & _SKIP_MARKERS:
-                        pass  # skip — doesn't run
-                    elif "perf" not in own_marks and "perf" not in module_marks:
-                        violations.append(node.name)
-
-                # Branch 2: perf_budget.cpu_ms/wall_ms budget assertion
-                elif _contains_perf_budget_assert(node):
+                # Both budget patterns share the same marker requirements.
+                if (
+                    _contains_timer_call(node) and _contains_assert(node)
+                ) or _contains_perf_budget_assert(node):
                     own_marks = inherited_marks | _decorator_mark_names(node.decorator_list)
                     if own_marks & _SKIP_MARKERS or module_marks & _SKIP_MARKERS:
                         pass  # skip — doesn't run
