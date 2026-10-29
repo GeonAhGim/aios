@@ -6,6 +6,8 @@ import pytest
 
 from src.core.safety.data_distrust import DataDistrustLevel, DataDistrustMonitor
 from src.data.models.market_data import Candle, Ticker
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_async
 
 
 def _ticker(price: str) -> Ticker:
@@ -173,6 +175,66 @@ async def test_check_latency_stays_within_budget_under_repeated_calls(perf_budge
 
     assert sample.wall_ms < iterations * 5.0, (
         f"check() 평균 {sample.wall_ms / iterations:.3f}ms/call — 예산(5ms) 초과"
+    )
+
+
+@pytest.mark.perf
+async def test_check_latency_0_convergence_with_best_of(perf_budget: PerfBudget) -> None:
+    """단일 check() 호출 CPU 측정의 0 수렴 확인 — Windows
+    time.process_time() 약 15.6ms 양자화 tick 때문에 단발 sample이
+    흔들리지 않도록 best_of(여러 번 중 최소)로 측정한다(task-11539 감사)."""
+
+    monitor = DataDistrustMonitor()
+    candles = _flat_candles("100", n=5)
+    ticker = _ticker("100")
+    references = [_ticker("100.1"), _ticker("99.9")]
+
+    # best_of: 5회 sample_async 중 최소 CPU 값을 돌려 Windows tick 흔들림을 걷어낸다
+    samples = [
+        await perf_budget.sample_async(
+            lambda m=monitor, c=candles, t=ticker, r=references: m.check("SINGLE/USDT", t, r, c)
+        )
+        for _ in range(5)
+    ]
+    sample = min(samples, key=lambda s: s.cpu_ms)
+
+    # 단일 호출 CPU는 0에 수렴해야 함(순수 계산, I/O 없음)
+    assert sample.cpu_ms == 0.0, (
+        f"single-call CPU should converge to 0 (got {sample.cpu_ms:.3f}ms); "
+        "if it does not, the 0-convergence invariant is broken"
+    )
+
+
+@pytest.mark.perf
+async def test_check_latency_goes_red_with_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """검출력 확인 — check()에 가상 지연을 주입하면 같은 단언이 적색으로
+    넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이 아님을
+    증명한다(task-11539 감사).
+
+    virtual_delayed_async로 check()에 0.05초 가상 지연을 주입하면
+    wall_ms가 50ms 이상 증가하므로 기존 예산 단언(5ms/call)이 깨진다."""
+
+    monitor = DataDistrustMonitor()
+    candles = _flat_candles("100", n=50)
+    iterations = 500
+
+    # check() 메서드에 가상 지연 주입 — 실제 sleep 없이 ledger에만 기록
+    original_check = monitor.check
+
+    async def delayed_check(*args, **kwargs):
+        return await virtual_delayed_async(original_check, 0.05)(*args, **kwargs)
+
+    monkeypatch.setattr(monitor, "check", delayed_check)
+
+    sample = await perf_budget.sample_async(lambda: _run_batch(monitor, candles, iterations))
+
+    # 지연 주입 후 — wall_ms가 예산을 초과해야 함 (적색 재현)
+    assert sample.wall_ms >= iterations * 5.0, (
+        f"Perf assertion should go red with injected delay: "
+        f"wall={sample.wall_ms:.1f}ms (expected >= {iterations * 5.0:.0f}ms)"
     )
 
 
