@@ -44,12 +44,14 @@ def test_virtual_delay_makes_a_budget_assertion_fail_like_a_real_delay(perf_budg
         assert perf_budget.sample(slow).cpu_ms < budget_ms  # 지연 주입은 적색
 
 
+@pytest.mark.perf
 def test_batch_divides_virtual_delay_per_call(perf_budget: Any) -> None:
     slow = virtual_delayed_sync(_work, 0.4)
     sample = perf_budget.sample(slow, batch=4)
     assert 390.0 <= sample.cpu_ms < 1_000.0  # 4회 호출 평균 = 호출당 0.4s
 
 
+@pytest.mark.perf
 def test_no_injection_leaves_ledger_and_measurement_untouched(perf_budget: Any) -> None:
     before = virtual_totals()
     sample = perf_budget.sample(_work)
