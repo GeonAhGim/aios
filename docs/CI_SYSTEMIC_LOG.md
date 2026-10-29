@@ -3861,3 +3861,14 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
   다시 4회 이상 반복되면 개별 리프를 계속 발행하지 말고, 반복 원인 테스트 이름별로 한 번에 묶어
   조사하는 리프로 넘긴다.
 - D2: N/A(실행 코드/예산 변경 없음 — 문서 리프, task-12039/12047/16895/17168과 동일 선례).
+
+## task-21172 — esc-ci-pytest_perf (sha 6042c53a7) a157fc3c-fe8c-434b-baf9-9b89ddc703b6 계열 "seq=1 from_status=SUBMITTED != folded status so far (CREATED)", 비회귀 (2026-10-29)
+
+- 카드 본문은 `scripts/replay_verify.py`가 pre-cutover 주문을 skip하며 남기는 설계된 stderr 진단
+  (`EventChainBrokenError` 메시지 포맷)이며 FAILED 신호가 아니다 — task-11982/12014/12038/16895/
+  17168/17484와 동형의 stdout 오분류. 실제 실패 테스트 nodeid는 카드에 없다.
+- 지목 sha 6042c53a7(`(str, Enum)`→`StrEnum`, 87파일)은 OMS/eventstore 쓰기 경로·replay_verify를
+  건드리지 않는 값 보존 리팩터(f-string 포맷을 3.10 동작과 동일하게 복원)다.
+- 로컬 재현: `tests/unit/py313_prep` + `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,
+  scan_retry}.py` + `tests/integration/eventstore/` — **98 passed in 297.16s, exit=0**.
+- 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
