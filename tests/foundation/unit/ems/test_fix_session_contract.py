@@ -1,10 +1,13 @@
 """Reusable suite: subclass FixSessionContract and supply a fresh session fixture."""
 
 import socket
+import sys
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from itertools import count
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -238,7 +241,14 @@ async def test_cpu_convergence_clock_quantization_and_budget(
             _acc[0] += large_cpu_seconds
         return _acc[0]
 
-    monkeypatch.setattr("tests.support.perf_budget.time.process_time", _process_time)
+    # Package attributes can be shadowed during collection; use the loaded module.
+    # Replace only this helper's clock, preserving the process-wide time module.
+    perf_budget_module = sys.modules[PerfBudget.__module__]
+    monkeypatch.setattr(
+        perf_budget_module,
+        "time",
+        SimpleNamespace(process_time=_process_time, perf_counter=time.perf_counter),
+    )
     if large_cpu_seconds >= 0.1:
         with pytest.raises(AssertionError, match="budget 0.1ms"):
             await test_single_call_cpu_zero_convergence(order, PerfBudget())
@@ -283,3 +293,17 @@ async def test_perf_budget_detects_10x_delay_injection(
     assert sample.wall_ms >= 100, (
         f"Expected wall time >= 100ms with injected delay; got {sample.wall_ms:.1f}ms"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("large_cpu_seconds", [0.015625, 0.0625, 0.1, 0.125, 1.0])
+async def test_cpu_clock_injection_with_shadowed_package(
+    order: ChildOrder, monkeypatch: pytest.MonkeyPatch, large_cpu_seconds: float
+) -> None:
+    """Resolve the loaded helper even when collection shadows package attributes."""
+    real_process_time = time.process_time
+    monkeypatch.setattr(sys.modules["tests"], "support", SimpleNamespace())
+    await test_cpu_convergence_clock_quantization_and_budget(
+        order, monkeypatch, large_cpu_seconds
+    )
+    assert time.process_time is real_process_time
