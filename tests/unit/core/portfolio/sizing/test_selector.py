@@ -80,24 +80,18 @@ def test_size_for_rejects_config_input_method_mismatch(
     `SizingResultTamperedError` 를 raise 한다 — dispatch 전 비교이므로
     CPU 측정은 0 수렴해야 한다.
 
-    수치 단언: 이 경로는 산식 호출이 없으므로 pre-trade 게이트 예산(5ms)
-    대비 극히 작은 CPU 시간만 소비한다.
+    best_of(N)로 Windows 양자화 tick 1회에 흔들리지 않게 측정하고
+    최소값이 예산(1ms) 아래임을 단언한다.
     """
     cfg = _config(SizingMethod.FIXED_FRACTIONAL)
     inp = _inp(SizingMethod.VOLATILITY_TARGET)
 
-    # PerfBudget.sample does not catch exceptions; wrap so the
-    # measurement runs while the exception still propagates for the
-    # assertion below.
-    cpu_ms_values: list[float] = []
-    for _ in range(5):
-        sample = perf_budget.sample(lambda: _safe_mismatch_call(cfg, inp))
-        cpu_ms_values.append(sample.cpu_ms)
+    # best_of: 여러 sample 중 최소값을 채택해 Windows quantization tick
+    # (약 15.6ms)에 단언이 흔들리지 않도록 한다.
+    best = perf_budget.best_of(lambda: _safe_mismatch_call(cfg, inp), n=10, warmup=2)
 
-    avg_cpu_ms = sum(cpu_ms_values) / len(cpu_ms_values)
-
-    assert avg_cpu_ms < 1.0, (
-        f"mismatch rejection should be near-zero CPU; measured avg={avg_cpu_ms:.3f}ms"
+    assert best.cpu_ms < 1.0, (
+        f"mismatch rejection should be near-zero CPU; measured best_of_min={best.cpu_ms:.3f}ms"
     )
 
     with pytest.raises(SizingResultTamperedError):
@@ -109,28 +103,25 @@ def test_size_for_rejects_config_input_method_mismatch_goes_red_with_delay_injec
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gate-red reproduction: `delayed_sync` 로 `size_for` 진입 전에 CPU
-    부하를 주입하면 같은 p99 단언이 적색으로 전환된다.
+    """Gate-red reproduction: `virtual_delayed_sync` 로 `size_for` 진입 전
+    가상 지연을 주입하면 같은 p99 단언이 적색으로 전환된다.
 
-    불일치 경로는 dispatch 전 비교이므로 `delayed_sync(original_size_for)`
-    로 전체 함수를 감싸야 지연이 측정된다.
+    불일치 경로는 dispatch 전 비교이므로
+    `virtual_delayed_sync(original_size_for, 0.05)` 로 전체 함수를 감싸
+    가상 CPU 부하를 주입한다(실제 busy-wait 금지).
     """
-    from tests.support.perf_inject import delayed_sync
+    from tests.support.perf_inject import virtual_delayed_sync
 
     cfg = _config(SizingMethod.FIXED_FRACTIONAL)
     inp = _inp(SizingMethod.VOLATILITY_TARGET)
     budget_ms = 1.0
 
     original_size_for = size_for
-    delayed_size_for = delayed_sync(original_size_for, 0.05)  # 50ms CPU delay
+    delayed_size_for = virtual_delayed_sync(original_size_for, 0.05)  # 50ms virtual delay
     monkeypatch.setattr("tests.unit.core.portfolio.sizing.test_selector.size_for", delayed_size_for)
 
-    cpu_ms_values: list[float] = []
-    for _ in range(100):
-        sample = perf_budget.sample(lambda: _safe_mismatch_call(cfg, inp))
-        cpu_ms_values.append(sample.cpu_ms)
-
-    cpu_ms_values.sort()
+    samples = perf_budget.samples(lambda: _safe_mismatch_call(cfg, inp), n=100, batch=10)
+    cpu_ms_values = sorted(s.cpu_ms for s in samples)
     p99_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.99)]
 
     assert p99_ms >= budget_ms, (
