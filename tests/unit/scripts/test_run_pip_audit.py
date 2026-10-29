@@ -94,8 +94,13 @@ def test_utf8_korean_bytes_no_longer_crash_pip_audit_gate(mod: ModuleType, tmp_p
         "import sys;"
         "sys.stdout.buffer.write(" + repr(fake_stdout_bytes) + ");sys.stdout.buffer.flush()"
     )
-    with patch.object(mod, "build_pip_audit_command", return_value=[sys.executable, "-c", printer]):
-        ignore_file = tmp_path / ".pip-audit-ignore"
+    ignore_file = tmp_path / ".pip-audit-ignore"
+    with (
+        patch.object(mod, "build_pip_audit_command", return_value=[sys.executable, "-c", printer]),
+        patch.object(
+            mod, "build_pip_audit_lock_command", return_value=[sys.executable, "-c", printer]
+        ),
+    ):
         rc = mod.main(["--ignore-file", str(ignore_file), "--python", sys.executable])
 
     assert rc == 0
