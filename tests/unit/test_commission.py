@@ -1,6 +1,5 @@
 """13.7 단위테스트 — 순수 계산 로직."""
 
-import time
 from decimal import Decimal, InvalidOperation
 from unittest.mock import patch
 
@@ -113,9 +112,9 @@ def test_rate_zero_returns_zero_commission() -> None:
 # ── Failure-injection test ──────────────────────────────────────────────
 
 
-def test_split_commission_exception_propagates_as_commission_error() -> None:
+def test_split_commission_exception_propagates_unwrapped() -> None:
     """실패주입: domain/rounding.split_commission이 예외를 던지면
-    calculate_commission도 실패해야 한다 — 의존성 실패 시 fail-closed."""
+    calculate_commission도 그 예외를 삼키지 않고 전파해야 한다 — 의존성 실패 시 fail-closed."""
     with patch(
         "src.services.commission.split_commission",
         side_effect=InvalidOperation("quantize failed"),
@@ -127,19 +126,21 @@ def test_split_commission_exception_propagates_as_commission_error() -> None:
 # --- Performance assertion (DEEPEN budget: ≤500µs per call at n=1000) ---
 
 
-def test_calculate_commission_performance() -> None:
+def test_calculate_commission_performance(perf_budget) -> None:
     """Verify that 1000 commission calculations complete within 500ms total.
 
     Budget from ADR-2026-09-09-C: commission path must stay below 1 ms per call
     at p99 under normal load.  This test enforces a generous 500µs/call budget
-    (500 ms for 1000 iterations) with no I/O.
+    (500 ms for 1000 iterations) with no I/O. Measured via the perf_budget
+    fixture (task-6774) rather than a raw perf_counter assertion.
     """
     iterations = 1000
     price = Decimal("100000")
     rate = Decimal("0.05")
-    t0 = time.perf_counter_ns()
-    for _ in range(iterations):
-        calculate_commission(price, rate)
-    elapsed_ms = (time.perf_counter_ns() - t0) / 1_000_000
+
+    def _run() -> None:
+        for _ in range(iterations):
+            calculate_commission(price, rate)
+
     # Budget: 500 µs/call × 1000 = 500 ms total
-    assert elapsed_ms < 500, f"Commission calculation exceeded 500 ms budget: {elapsed_ms:.1f} ms"
+    perf_budget.assert_within(_run, budget_ms=500, label="commission x1000")
