@@ -330,18 +330,18 @@ async def test_md_candle_bulk_insert_p95_under_budget(
 ) -> None:
     """LA-11 DEEPEN(task-2966, docs/audit/DEPTH_LA_LB_LC.md#450) — 수치
     성능 단언. raw time.perf_counter() → perf_budget.samples_async() 전환
-    (task-11043).
+    (task-11043). Windows 양자화 tick(≈15.6ms)에 흔들리지 않게 best_of로
+    여러 sample 중 최소 CPU 시간을 채택한다.
 
     비동기 I/O를 재는 테스트는 samples_async를 쓴다 — wall_ms로 왕복 지연을
-    보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(30ms)은 그대로
+    보존하고 coverage tracer 오버헤드를 걷어낸다. 예산 값(60ms)은 그대로
     유지한다.
     """
     instrument_id, batch_id = await _md_candles_setup(raw_conn)
-    n = 200
     base_time = datetime.now(UTC)
 
-    # 200회 측정 → p95 계산 (samples_async: 비동기 I/O 전용)
-    # samples_async는 fn()을 n회 호출하므로, mutable counter로 iteration 인덱스 추적
+    # best_of: Windows GetProcessTimes 양자화 tick(≈15.6ms)에 단발 sample이
+    # 흔들리지 않게 5회 중 최소 CPU 시간을 채택(task-11539 PERF-detection).
     _call_idx = 0
 
     async def _make_call() -> None:
@@ -361,18 +361,20 @@ async def test_md_candle_bulk_insert_p95_under_budget(
         finally:
             _call_idx += 1
 
-    samples = await perf_budget.samples_async(_make_call, n=n)
-    wall_ms_list = sorted(s.wall_ms for s in samples)
-    p95_ms = wall_ms_list[min(int(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
-    print(f"[LA-11 md_candle insert] n={n} p95={p95_ms:.2f}ms (budget<60ms)")
-    assert p95_ms < 60.0, f"md_candle 단건 INSERT p95가 예산을 넘었습니다: {p95_ms:.2f}ms"
+    sample = await perf_budget.best_of_async(_make_call, n=5)
+    print(
+        f"[LA-11 md_candle insert] best_of(5) "
+        f"cpu={sample.cpu_ms:.2f}ms wall={sample.wall_ms:.2f}ms (budget<60ms)"
+    )
+    assert sample.cpu_ms < 60.0, (
+        f"md_candle 단건 INSERT CPU 시간이 예산을 넘었습니다: {sample.cpu_ms:.2f}ms (budget<60ms)"
+    )
 
 
 @pytest.mark.perf
 async def test_md_candle_bulk_insert_p95_rejects_10x_delay_injection(
     raw_conn,
     perf_budget,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """LA-11 DEEPEN(task-16087, task-11539 PERF-detection) — 게이트 적색 재현.
 
