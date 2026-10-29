@@ -21,8 +21,10 @@ from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.order_service.position_ledger import record_fill_in_position_ledger
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_tenant
+from tests.integration.executor_perf_support import _QueryCountingPool
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_inject import virtual_delayed_async
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
@@ -391,44 +393,6 @@ async def test_submission_failure_does_not_roll_back_fsm_state(pool):
     assert calls == []
 
 
-class _QueryCountingConnectionCtx:
-    """acquire() 컨텍스트 프록시 — 내부 connection에 query logger를 달아
-    순차 DB 왕복 수를 센다(test_perf_journal_append.py와 동일 기법, 단
-    record_fill_in_position_ledger는 connection을 노출하지 않고 자체
-    pool.acquire()를 여는 어댑터라 pool 자체를 얇게 감싼다)."""
-
-    def __init__(self, inner_ctx: object, sink: list[str]) -> None:
-        self._inner_ctx = inner_ctx
-        self._sink = sink
-        self._conn = None
-        self._log = None
-
-    async def __aenter__(self):
-        self._conn = await self._inner_ctx.__aenter__()
-        self._log = lambda record: self._sink.append(getattr(record, "query", ""))
-        self._conn.add_query_logger(self._log)
-        return self._conn
-
-    async def __aexit__(self, exc_type, exc, tb):
-        if self._conn is not None and self._log is not None:
-            self._conn.remove_query_logger(self._log)
-        return await self._inner_ctx.__aexit__(exc_type, exc, tb)
-
-
-class _QueryCountingPool:
-    """`record_fill_in_position_ledger(pool, order)`가 유일하게 쓰는
-    `pool.acquire()`만 감싼다 — 저장소들(snapshots/journal/audit)은 pool을
-    보관만 하고 재획득하지 않는다(postgres_{snapshot,journal}_repository.py
-    확인됨), 그래서 이 얇은 프록시로 전체 호출의 순차 왕복을 빠짐없이 잡는다."""
-
-    def __init__(self, pool: asyncpg.Pool) -> None:
-        self._pool = pool
-        self.queries: list[str] = []
-
-    def acquire(self) -> _QueryCountingConnectionCtx:
-        return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
-
-
 _MAX_LEDGER_ROUND_TRIPS_HOT = 20  # 실측 16(고정 경로) + 여유 4 (CI parallel 환경 왕복 변동 대응)
 _MAX_LEDGER_LATENCY_MS = 2000.0
 
@@ -496,3 +460,40 @@ async def test_record_fill_in_position_ledger_bounded_round_trips_and_latency(po
         f"record_fill_in_position_ledger 지연({elapsed_ms:.1f}ms)이 sanity 상한"
         f"({_MAX_LEDGER_LATENCY_MS}ms)을 초과했습니다."
     )
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("regression", ["wall_delay", "zero_cpu_wall_delay", "round_trips"])
+async def test_ledger_perf_gate_red(pool, perf_budget, monkeypatch, regression):
+    """Reuse the real DB measurement and assertions; virtual delay never sleeps.
+
+    CPU quantization cannot hide a wall-clock regression: even an always-zero
+    CPU clock must reject the original 2-second latency budget (I-10).
+    """
+    import sys
+
+    from tests.support import perf_budget as budget_module
+
+    module = sys.modules[__name__]
+    if regression == "round_trips":
+        original = _QueryCountingPool.acquire
+
+        def extra_round_trips(self):
+            self.queries.extend(["injected round trip"] * (_MAX_LEDGER_ROUND_TRIPS_HOT + 1))
+            return original(self)
+
+        monkeypatch.setattr(_QueryCountingPool, "acquire", extra_round_trips)
+        message = "왕복 수 회귀"
+    else:
+        if regression == "zero_cpu_wall_delay":
+            monkeypatch.setattr(budget_module.time, "process_time", lambda: 0.0)
+        monkeypatch.setattr(
+            module,
+            "record_fill_in_position_ledger",
+            virtual_delayed_async(
+                record_fill_in_position_ledger, 10 * _MAX_LEDGER_LATENCY_MS / 1000
+            ),
+        )
+        message = "sanity 상한"
+    with pytest.raises(AssertionError, match=message):
+        await test_record_fill_in_position_ledger_bounded_round_trips_and_latency(pool, perf_budget)
