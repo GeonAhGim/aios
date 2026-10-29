@@ -12,6 +12,7 @@ MIGRATED_ROUTERS는 허용목록이다 — 아직 이관되지 않은 라우터(
 admin 등)는 여기 없다. 후속 리프(PLT-21)가 이관을 끝낼 때마다 이 목록에
 파일을 추가해 검사 범위를 넓힌다.
 """
+
 from __future__ import annotations
 
 import ast
@@ -96,3 +97,31 @@ def test_detector_ignores_domain_exception_raised_from_http_exception_cause(tmp_
     )
 
     assert _raw_http_exception_raise_lines(clean_file) == []
+
+
+def test_detector_flags_qualified_fastapi_http_exception_raise(tmp_path):
+    """`raise fastapi.HTTPException(...)` 형태(qualified attribute)도 위반으로 잡혀야 한다.
+    Name 분기만 검사하면 이 우회로가 조용히 통과한다."""
+    offending_file = tmp_path / "qualified_router.py"
+    offending_file.write_text(
+        "import fastapi\n"
+        "\n"
+        "def handler():\n"
+        "    raise fastapi.HTTPException(status_code=400, detail='bad')\n",
+        encoding="utf-8",
+    )
+
+    assert _raw_http_exception_raise_lines(offending_file) == [4]
+
+
+def test_detector_failure_injection_unparseable_router_is_not_silently_clean(tmp_path):
+    """실패 주입 — 문법이 깨진 라우터는 '위반 0건'으로 보고되면 안 된다.
+    파싱 실패가 빈 목록으로 삼켜지면 검사가 조용히 무력화되므로
+    SyntaxError가 그대로 올라와야 한다."""
+    broken_file = tmp_path / "broken_router.py"
+    broken_file.write_text("def handler(:\n    raise HTTPException(400)\n", encoding="utf-8")
+
+    import pytest
+
+    with pytest.raises(SyntaxError):
+        _raw_http_exception_raise_lines(broken_file)
