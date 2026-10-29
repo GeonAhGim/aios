@@ -35,6 +35,7 @@ from src.core.script.grammar.parser import parse
 from src.core.script.typing import checker as checker_module
 from src.core.script.typing.checker import ScriptTypeError, check_program
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 # ---- 선언 등록: input/let/signal이 환경에 타입으로 남는다 ----
 
@@ -44,9 +45,58 @@ def test_input_scalar_registers_declared_type() -> None:
     assert env == {"length": "int"}
 
 
-def test_input_series_registers_declared_type() -> None:
+def test_input_series_registers_declared_type(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정상 입력: 타입 등록 + best_of 0수렴 단언 + 가상지연 적색 재현.
+
+    정상 입력에서 `check_program` 한 호출의 CPU 시간이 Windows 양자화 tick
+    (약 15.6ms) 아래로 수렴하는지를 `best_of(5)`로 검증한다(단발 sample은
+    tick 1회에 흔들린다). 동일한 입력을 `virtual_delayed_sync`로 CPU 예산의
+    10배(0.5s)만큼 가상 지연한 뒤 측정하면 `best_of` 최소값이 예산을 넘겨
+    적색으로 전환됨을 확인한다(게이트 적색 재현).
+    """
+    # --- type assertion (녹색) ---
     env = check_program(parse("input src: series<float> = 0"))
     assert env == {"src": "series<float>"}
+
+    # --- perf: best_of 0수렴 (단위 예산 5ms) ---
+    sample = perf_budget.best_of(
+        lambda: check_program(parse("input src: series<float> = 0")),
+        n=5,
+        warmup=1,
+    )
+    assert sample.cpu_ms < 5, (
+        f"simple check_program should converge to 0 CPU — "
+        f"best_of min cpu={sample.cpu_ms:.3f}ms >= 5ms budget"
+    )
+
+    # --- gate-red: 10x 예산 가상지연(monkeypatch) → 적색 ---
+    # budget 5ms의 10배 = 0.5s 가상 CPU 지연을 주입하면 best_of 최소값이
+    # 500ms에 가까워져 예산 5ms를 넘긴다(적색 재현).
+    # checker_module.check_program을 패치하고, 호출도 mod를 통해 하면
+    # monkeypatch가 즉시 반영된다.
+    import src.core.script.typing.checker as mod
+
+    monkeypatch.setattr(
+        mod,
+        "check_program",
+        virtual_delayed_sync(mod.check_program, 0.5),
+    )
+
+    # 같은 입력으로 다시 측정 — 가상 지연으로 인해 적색이어야 함
+    # check_program(로컬 이름)이 아닌 mod.check_program(모듈 속성)을 참조해야
+    # monkeypatch가 반영된다.
+    red_sample = perf_budget.best_of(
+        lambda: mod.check_program(parse("input src: series<float> = 0")),
+        n=5,
+        warmup=1,
+    )
+    assert red_sample.cpu_ms >= 5, (
+        f"virtual 500ms delay should push cpu >= 5ms budget (red repro) — "
+        f"got cpu={red_sample.cpu_ms:.3f}ms"
+    )
 
 
 def test_let_infers_type_from_expr() -> None:
@@ -309,9 +359,7 @@ def test_check_program_latency_stays_within_quarter_of_dsl_compile_budget(
     program = parse(source)
 
     # Batch CPU time spans multiple Windows timer ticks; values are ms per call.
-    sample = perf_budget.assert_within(
-        lambda: check_program(program), budget_ms=75, batch=32, n=3
-    )
+    sample = perf_budget.assert_within(lambda: check_program(program), budget_ms=75, batch=32, n=3)
 
     assert isinstance(sample.result, dict)
     assert len(sample.result) == 1000
