@@ -35,6 +35,7 @@ def test_virtual_sync_delay_shows_in_cpu_and_wall_without_waiting(perf_budget: A
     assert sample.result == 4950
 
 
+@pytest.mark.perf
 def test_virtual_delay_makes_a_budget_assertion_fail_like_a_real_delay(perf_budget: Any) -> None:
     budget_ms = 50.0
     assert perf_budget.sample(_work).cpu_ms < budget_ms  # 정상 입력은 녹색

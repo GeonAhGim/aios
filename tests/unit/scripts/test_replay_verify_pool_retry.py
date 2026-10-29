@@ -44,10 +44,7 @@ import asyncpg
 import pytest
 
 from scripts import replay_verify
-
-# Captured before any monkeypatch can replace asyncio.sleep on replay_verify.asyncio
-# (which is the same module object as asyncio). Needed for the 10x delay injection test.
-_real_asyncio_sleep = asyncio.sleep
+from tests.support.perf_inject import virtual_delayed_async
 
 
 class _FakePool:
@@ -327,11 +324,12 @@ async def test_create_pool_with_retry_red_on_10x_delay_injection(monkeypatch, pe
     path must fail when retry delays are inflated 10x -- this proves the
     budget is actually constraining sleep latency, not passing trivially.
 
-    Injects 10x delay via `asyncio.sleep` monkeypatch while forcing a retry
-    (first attempt raises `ConnectionDoesNotExistError`). The wall_ms budget
-    (50 ms) must be exceeded because the jittered sleep over [0, 10xdelay]
-    averages 5x the base delay (5 ms on attempt 0 alone), blowing past the
-    no-sleep happy path budget.
+    Injects 10x delay via `virtual_delayed_async` monkeypatch on
+    `asyncio.sleep` while forcing a retry (first attempt raises
+    `ConnectionDoesNotExistError`). The wall_ms budget (50 ms) must be
+    exceeded because the virtual ledger adds 10x jittered delay
+    (averaging 5x the base delay = 5 ms on attempt 0 alone), blowing past
+    the no-sleep happy path budget -- without any actual wall-clock sleep.
     """
 
     def _fake_create_pool(dsn: str, **kwargs: object) -> _FakePool:
@@ -341,10 +339,8 @@ async def test_create_pool_with_retry_red_on_10x_delay_injection(monkeypatch, pe
 
     async def _ten_x_sleep(delay: float) -> None:
         injected_delays.append(delay)
-        # Use the captured real sleep -- the monkeypatch replaces
-        # replay_verify.asyncio.sleep (which IS asyncio), so calling
-        # asyncio.sleep here would recurse through _ten_x_sleep.
-        await _real_asyncio_sleep(delay * 10)
+        # Add 10x delay to the virtual ledger only (no actual sleep).
+        await virtual_delayed_async(_no_sleep, delay * 10)(delay)
 
     monkeypatch.setattr(replay_verify.asyncpg, "create_pool", _fake_create_pool)
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _ten_x_sleep)
@@ -358,10 +354,10 @@ async def test_create_pool_with_retry_red_on_10x_delay_injection(monkeypatch, pe
 
     sample = await perf_budget.sample_async(_run)
 
-    # Must have actually slept (retries happened)
+    # Must have actually injected delays (retries happened)
     assert len(injected_delays) > 0, "retries must have triggered sleep"
     # The perf assertion must FAIL -- wall_ms should far exceed 50 ms
-    # because 10x jittered sleep on even the first retry (0.5 s base)
+    # because 10x virtual delay on even the first retry (0.5 s base)
     # averages 5 s, far above the 50 ms no-sleep budget.
     budget_exceeded = sample.wall_ms >= 50.0
     desc = perf_budget.describe(sample, budget_ms=50.0)
