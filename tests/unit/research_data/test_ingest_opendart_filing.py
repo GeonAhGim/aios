@@ -10,6 +10,7 @@ DEEPEN (task-10133): 빈 문서/결과셋 주입, API timeout/5xx 실패주입,
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal, cast
@@ -29,6 +30,7 @@ from src.foundation.research_data.application.ingest_opendart_filing import (
     OPENDART_SOURCE_ID,
     ingest_opendart_filing,
 )
+from tests.support.perf_inject import virtual_delayed_sync
 
 _NOW = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 
@@ -350,20 +352,13 @@ async def test_enqueue_failure_on_parse_error_propagates_not_swallowed() -> None
 
 # ---- 성능 단언 (task-10133 DEEPEN) ----
 
+_BULK_N = 5_000
+_BULK_BUDGET_MS = 12_000.0  # 12.0초 → ms (widen for CI parallel stability, task-15388)
 
-@pytest.mark.perf
-def test_normalize_filing_bulk_meets_latency_budget(perf_budget) -> None:
-    """5,000 건 공시(다종목·다유형 배치 적재 시나리오) 정규화가 절대시간
-    예산 내여야 한다."""
-    from src.foundation.market_data.domain.corporate_action.opendart_filing import (
-        normalize_filing,
-    )
 
-    n = 5_000
-    budget_ms = 12_000.0  # 12.0초 → ms (widen for CI parallel stability, task-15388)
+def _bulk_filings() -> list[OpenDartFiling]:
     instrument_id = uuid4()
-
-    filings = [
+    return [
         OpenDartFiling(
             instrument_id=instrument_id,
             rcept_no=f"20260302{i:06d}",
@@ -373,61 +368,38 @@ def test_normalize_filing_bulk_meets_latency_budget(perf_budget) -> None:
             split_ratio_before=Decimal("10000"),
             split_ratio_after=Decimal("1000"),
         )
-        for i in range(n)
+        for i in range(_BULK_N)
     ]
+
+
+def _bulk_normalize_fn(filings: list[OpenDartFiling]) -> Callable[[], None]:
+    # Resolve normalize_filing through the module on every call so monkeypatching is observed.
+    import src.foundation.market_data.domain.corporate_action.opendart_filing as mod
 
     def bulk_normalize() -> None:
         for f in filings:
-            normalize_filing(f)
+            mod.normalize_filing(f)
 
-    perf_budget.assert_within(bulk_normalize, budget_ms=budget_ms, n=1)
+    return bulk_normalize
 
 
 @pytest.mark.perf
-def test_normalize_filing_bulk_detects_ten_x_delay() -> None:
-    """예산 10배 지연 주입 → 적색 검출력 확인 (budget_ms=20_000, 2초×10).
+def test_normalize_filing_bulk_meets_latency_budget(perf_budget) -> None:
+    """5,000 건 정규화(~7ms wall)는 Windows CPU tick(15.6ms)보다 짧아 단발 측정이 0으로
+    수렴하므로 batch=8 + best_of(여러 번 중 최소)로 측정한다. 예산·단언 숫자는 불변."""
+    sample = perf_budget.assert_within(
+        _bulk_normalize_fn(_bulk_filings()), budget_ms=_BULK_BUDGET_MS, n=5, batch=8
+    )
+    assert sample.cpu_ms > 0.0, "측정이 0으로 수렴 — 단위/batch 결함"
 
-    실제 5,000건×0.5초=2,500초는 너무 길므로 샘플 50건으로 지연 검출력만
-    확인하고 (50×0.6초=30초 > budget 20초), 원본 테스트가 전체 배치 예산을
-    검증한다."""
-    import time
 
-    n = 50  # 지연 주입 테스트용 소량 샘플
-    budget_ms = 20_000.0  # 2초 × 10
-    instrument_id = uuid4()
-
-    filings = [
-        OpenDartFiling(
-            instrument_id=instrument_id,
-            rcept_no=f"20260302{i:06d}",
-            report_type="SPLIT",
-            event_date=date(2026, 4, 1),
-            known_at=_NOW,
-            split_ratio_before=Decimal("10000"),
-            split_ratio_after=Decimal("1000"),
-        )
-        for i in range(n)
-    ]
-
-    # normalize_filing을 일시적으로 치환 — 모듈 네임스페이스 직접 조작
+@pytest.mark.perf
+def test_normalize_filing_bulk_detects_ten_x_delay(perf_budget, monkeypatch) -> None:
+    """예산 10배 지연(호출당 24ms x 5,000 = 120초) 가상 주입 → 같은 측정/단언이 적색이어야 한다."""
     import src.foundation.market_data.domain.corporate_action.opendart_filing as mod
 
-    original_normalize = mod.normalize_filing
-
-    def slow_normalize(filing) -> None:
-        time.sleep(0.6)  # 600ms 지연 → 50건 × 0.6초 = 30초 (budget 20초 명확 초과)
-        original_normalize(filing)
-
-    mod.normalize_filing = slow_normalize
-    try:
-        start = time.perf_counter()
-        # 모듈 네임스페이스의 치환된 함수를 직접 호출
-        for f in filings:
-            mod.normalize_filing(f)
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        # 지연 주입으로 예산 초과 → 적색
-        assert elapsed_ms > budget_ms, (
-            f"지연 주입 후 {elapsed_ms:.0f}ms — 예산 {budget_ms:.0f}ms 초과 (적색 검출 성공)"
+    monkeypatch.setattr(mod, "normalize_filing", virtual_delayed_sync(mod.normalize_filing, 0.024))
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            _bulk_normalize_fn(_bulk_filings()), budget_ms=_BULK_BUDGET_MS, n=3
         )
-    finally:
-        mod.normalize_filing = original_normalize
