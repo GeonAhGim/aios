@@ -34,6 +34,7 @@ from src.foundation.trust.domain.models import (
 from src.services.auth_service import User
 from tests.integration.conftest import create_test_user
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_inject import virtual_delayed_async
 
 # ADR-2026-09-09-C §"축별 성능 예산" — resolve_tenant_context 전용 항목은 없으므로,
 # 가장 근접한 DB 읽기 비교축(tenant_membership INSERT p95 50ms, task-3159가 차용한
@@ -71,7 +72,14 @@ def _user(user_id) -> User:
     )
 
 
-async def test_no_requested_tenant_returns_personal_context(pool, repo):
+@pytest.mark.perf
+async def test_no_requested_tenant_returns_personal_context(pool, repo, perf_budget):
+    """personal 경로(DB 조회 없음)는 OWNER 컨텍스트를 돌려주고 CPU 비용이 0에 수렴한다.
+
+    0 수렴 단언은 단발 sample 대신 best_of_async(여러 번 중 최소, batch 평균)로 측정해
+    Windows process_time 양자화 tick 1회에 흔들리지 않게 한다. 같은 측정에 가상 지연
+    (virtual_delayed_async, 실제 sleep 없음)을 주입하면 예산 초과(적색)가 되어야 한다.
+    """
     user_id = await create_test_user(pool)
 
     async with pool.acquire() as conn:
@@ -79,10 +87,30 @@ async def test_no_requested_tenant_returns_personal_context(pool, repo):
             repo, conn, user=_user(user_id), requested_tenant_id=None, mfa_verified=False
         )
 
-    assert context.tenant_id == user_id
-    assert context.subject_id == user_id
-    assert context.role == "OWNER"
-    assert context.membership_id is None
+        assert context.tenant_id == user_id
+        assert context.subject_id == user_id
+        assert context.role == "OWNER"
+        assert context.membership_id is None
+
+        async def _call() -> None:
+            await resolve_tenant_context(
+                repo, conn, user=_user(user_id), requested_tenant_id=None, mfa_verified=False
+            )
+
+        budget_ms = RESOLVE_TENANT_CONTEXT_P95_BUDGET_MS
+        green = await perf_budget.best_of_async(_call, n=5, warmup=1, batch=20)
+        assert green.cpu_ms < budget_ms, perf_budget.describe(green, budget_ms=budget_ms)
+
+        # 적색 재현: 예산의 10배 가상 지연을 주입하면 같은 단언이 깨져야 한다.
+        slow = virtual_delayed_async(resolve_tenant_context, budget_ms * 10 / 1000.0)
+
+        async def _slow_call() -> None:
+            await slow(
+                repo, conn, user=_user(user_id), requested_tenant_id=None, mfa_verified=False
+            )
+
+        red = await perf_budget.best_of_async(_slow_call, n=3, warmup=0)
+        assert red.wall_ms >= budget_ms, perf_budget.describe(red, budget_ms=budget_ms)
 
 
 async def test_requested_tenant_with_active_membership_returns_membership_role(pool, repo):
