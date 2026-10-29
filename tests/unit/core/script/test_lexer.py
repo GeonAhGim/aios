@@ -7,6 +7,7 @@ DEPTH 감사(task-2727, docs/audit/DEPTH_DSL_IND.md) D2 보강: negative를
 """
 
 import inspect
+import sys
 from typing import cast
 
 import pytest
@@ -25,6 +26,7 @@ from src.core.script.grammar.lexer import (
     tokenize,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def _kinds(source: str) -> list[TokenKind]:
@@ -231,6 +233,20 @@ def test_invalid_emoji_character_rejected_with_correct_column():
 # --- DEPTH 감사 D2 보강: 실패 주입(장문 + 악의적 유니코드 강건성) -----------
 
 
+def _assert_pathological_budget(sample: object) -> None:
+    """공용 헬퍼: pathological 입력의 cpu_ms가 3,000ms 예산을 넘어선다."""
+    assert sample.cpu_ms < 3_000, (
+        f"대용량 입력 처리 {sample.cpu_ms:.0f}ms > 3000ms 예산(무한루프/크래시 의심)"
+    )
+
+
+def _assert_throughput(throughput_chars_per_s: float) -> None:
+    """공용 헬퍼: 처리량이 500,000 chars/s 예산을 넘어선다."""
+    assert throughput_chars_per_s >= 500_000, (
+        f"토큰화 처리량 {throughput_chars_per_s:.0f} chars/s < 500,000 chars/s 예산"
+    )
+
+
 @pytest.mark.perf
 def test_tokenize_survives_pathological_input_without_crashing_or_hanging(
     perf_budget: PerfBudget,
@@ -238,8 +254,9 @@ def test_tokenize_survives_pathological_input_without_crashing_or_hanging(
     """실패 주입(DEPTH 감사 예시): 매우 긴 입력과 악의적 유니코드를 섞어
     tokenize의 강건성을 확인한다. 두 시나리오 모두 RecursionError/IndexError
     같은 예기치 못한 크래시나 무한 루프 없이, 유한 시간 안에 정상 토큰화되거나
-    ScriptSyntaxError(fail-closed)로 끝나야 한다. task-11686: perf_budget.sample
-    batch=3으로 묶어 process_time 양자화 오차를 1/3로 줄임. 단위: cpu_ms(밀리초).
+    ScriptSyntaxError(fail-closed)로 끝나야 한다. task-11686:
+    perf_budget.best_of(n=5, warmup=1)로 Windows 양자화 오차를 최소화.
+    단위: cpu_ms(밀리초).
     """
     # 시나리오 1: 매우 긴 유효 입력(5만 개 식별자) — 정상 토큰화, 시간 예산 내.
     huge_valid_source = " ".join(f"x{i}" for i in range(50_000))
@@ -247,13 +264,11 @@ def test_tokenize_survives_pathological_input_without_crashing_or_hanging(
     def _tokenize_huge() -> list[Token]:
         return tokenize(huge_valid_source)
 
-    sample = perf_budget.sample(_tokenize_huge, batch=3)
+    sample = perf_budget.best_of(_tokenize_huge, n=5, warmup=1)
     tokens = cast(list[Token], sample.result)
     assert tokens[-1].kind is TokenKind.EOF
     assert len(tokens) == 50_001  # 식별자 5만 개 + EOF
-    assert sample.cpu_ms < 3_000, (
-        f"대용량 입력 처리 {sample.cpu_ms:.0f}ms > 3000ms 예산(무한루프/크래시 의심)"
-    )
+    _assert_pathological_budget(sample)
 
     # 시나리오 2: 악의적 유니코드(NUL, RTL override, ZWSP, BOM)는 크래시 없이
     # 항상 SCRIPT_SYNTAX(fail-closed)로 깔끔히 거부된다. 원 소스 파일에 제어
@@ -278,7 +293,7 @@ def test_tokenize_survives_pathological_input_without_crashing_or_hanging(
         except ScriptSyntaxError as exc:
             return exc
 
-    sample2 = perf_budget.sample(_tokenize_combined, batch=3)
+    sample2 = perf_budget.best_of(_tokenize_combined, n=5, warmup=1)
     assert isinstance(sample2.result, ScriptSyntaxError)
     assert sample2.cpu_ms < 3_000, f"장문+악성 유니코드 처리 {sample2.cpu_ms:.0f}ms > 3000ms 예산"
 
@@ -306,9 +321,7 @@ def test_tokenize_throughput_meets_budget(perf_budget: PerfBudget):
     sample = perf_budget.best_of(_run_once, n=5, warmup=1)
     throughput_chars_per_s = (len(source) * iterations) / (sample.cpu_ms / 1000)
     assert tokens[-1].kind is TokenKind.EOF
-    assert throughput_chars_per_s >= 500_000, (
-        f"토큰화 처리량 {throughput_chars_per_s:.0f} chars/s < 500,000 chars/s 예산"
-    )
+    _assert_throughput(throughput_chars_per_s)
 
 
 # --- DEPTH 감사 D2 보강: 게이트 적색 재현 -----------------------------------
@@ -358,3 +371,59 @@ def test_removing_unknown_character_guard_would_make_gate_red():
     # 실제 tokenize는 fail-closed로 동일 입력을 여전히 거부한다.
     with pytest.raises(ScriptSyntaxError):
         tokenize(malicious)
+
+
+# --- 적색 재현: 10배 가상 지연에서 예산 위반 -------------------------------
+
+
+def test_pathological_budget_red_under_10x_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """적색 재현: tokenize 호출에 예산의 10배(30초) 가상 지연을 주입하면
+    같은 pathological_budget 단언이 AssertionError를 낸다."""
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "tokenize",
+        virtual_delayed_sync(tokenize, 30.0),
+    )
+    huge_valid_source = " ".join(f"x{i}" for i in range(50_000))
+
+    def _tokenize_huge() -> list[Token]:
+        return tokenize(huge_valid_source)
+
+    sample = perf_budget.best_of(_tokenize_huge, n=5, warmup=1)
+    with pytest.raises(AssertionError):
+        _assert_pathological_budget(sample)
+
+
+def test_throughput_red_under_10x_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """적색 재현: 호출당 주입 지연을 10x 처리량 예산으로 계산하면
+    같은 처리량 단언이 AssertionError를 낸다."""
+    line = "let rsi_val_{i} = ta.rsi(close, length) # comment\n"
+    source = "".join(line.format(i=i) for i in range(2_000))
+    # 처리량 예산 500,000 chars/s의 1/10 = 50,000 chars/s에 해당하는 지연
+    delay_per_call = 10 * len(source) / 500_000
+
+    delayed_tokenize = virtual_delayed_sync(tokenize, delay_per_call)
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "tokenize",
+        delayed_tokenize,
+    )
+    iterations = 20
+    tokens: list = []
+
+    def _run_once() -> None:
+        nonlocal tokens
+        for _ in range(iterations):
+            tokens = tokenize(source)
+
+    sample = perf_budget.best_of(_run_once, n=5, warmup=1)
+    throughput_chars_per_s = (len(source) * iterations) / (sample.cpu_ms / 1000)
+    with pytest.raises(AssertionError):
+        _assert_throughput(throughput_chars_per_s)
