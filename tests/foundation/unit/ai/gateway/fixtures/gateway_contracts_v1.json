@@ -15,39 +15,14 @@
     },
     "description": "A closed-scope credential (§2.1 AI-1 row verbatim field list).\n\n`frozen=True` mirrors `ComplianceDecision`/`RuleHit`\n(mandates/contracts/v1.py) -- a credential must not be tamperable in\nmemory after construction; widening `.scopes` downstream must be a\n`ValidationError`, not a silent attribute assignment.\n\n`allow_instruments` empty means no instrument is authorized (fail-closed\ndefault, not \"no restriction\") -- AI-4's issuance use case is the only\nplace that is allowed to leave it non-empty.",
     "properties": {
-      "allow_instruments": {
-        "items": {
-          "type": "string"
-        },
-        "title": "Allow Instruments",
-        "type": "array",
-        "uniqueItems": true
-      },
-      "expires_at": {
-        "format": "date-time",
-        "title": "Expires At",
+      "token_id": {
+        "format": "uuid",
+        "title": "Token Id",
         "type": "string"
       },
-      "notional_cap": {
-        "anyOf": [
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          }
-        ],
-        "title": "Notional Cap"
-      },
-      "paper_only": {
-        "default": true,
-        "title": "Paper Only",
-        "type": "boolean"
-      },
-      "schema_version": {
-        "const": "v1",
-        "default": "v1",
-        "title": "Schema Version",
+      "tenant_id": {
+        "format": "uuid",
+        "title": "Tenant Id",
         "type": "string"
       },
       "scopes": {
@@ -58,14 +33,40 @@
         "type": "array",
         "uniqueItems": true
       },
-      "tenant_id": {
-        "format": "uuid",
-        "title": "Tenant Id",
+      "allow_instruments": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Allow Instruments",
+        "type": "array",
+        "uniqueItems": true
+      },
+      "notional_cap": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "type": "string"
+          }
+        ],
+        "title": "Notional Cap"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "title": "Expires At",
         "type": "string"
       },
-      "token_id": {
-        "format": "uuid",
-        "title": "Token Id",
+      "paper_only": {
+        "default": true,
+        "title": "Paper Only",
+        "type": "boolean"
+      },
+      "schema_version": {
+        "const": "v1",
+        "default": "v1",
+        "title": "Schema Version",
         "type": "string"
       }
     },
@@ -83,6 +84,11 @@
   "ConfirmTicket": {
     "description": "A one-time confirmation ticket (§2.1 AI-1 row verbatim field list).\n\n`action_digest` is the digest of the previewed action; AI-2's\n`domain/confirm.py` is the only place that compares it against the\nexecution-time digest and enforces single use.",
     "properties": {
+      "ticket_id": {
+        "format": "uuid",
+        "title": "Ticket Id",
+        "type": "string"
+      },
       "action_digest": {
         "maxLength": 64,
         "minLength": 64,
@@ -99,11 +105,6 @@
         "const": "v1",
         "default": "v1",
         "title": "Schema Version",
-        "type": "string"
-      },
-      "ticket_id": {
-        "format": "uuid",
-        "title": "Ticket Id",
         "type": "string"
       }
     },
