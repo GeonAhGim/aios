@@ -20,7 +20,7 @@ from src.foundation.market_data.domain.corporate_action import (
 )
 from src.foundation.market_data.domain.corporate_action.point_in_time import resolve_as_of
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 _EX_DATE = date(2026, 4, 1)
 
@@ -270,13 +270,9 @@ def test_single_call_cpu_measurement_does_not_converge_to_zero(
             )
         )
 
-    # batch=1 — 단일 호출로 측정해야 양자화 오차를 확인할 수 있다.
-    # Each sample is still a single call; under xdist a tick can land
-    # between two quantisation boundaries and read 0, so take the max of 3.
-    sample = max(
-        perf_budget.samples(lambda: resolve_as_of(actions, as_of), n=3, batch=1),
-        key=lambda s: s.cpu_ms,
-    )
+    # best_of: 여러 번 중 최소(cpu_ms)를 읽어 Windows 양자화 tick 1회에
+    # 흔들리지 않게 한다(예산·단언 숫자는 올리지 않음).
+    sample = perf_budget.best_of(lambda: resolve_as_of(actions, as_of), n=5, batch=1)
 
     # single-call CPU 측정값이 0이 아님을 확인 — quantisation artefact 방지
     assert sample.cpu_ms > 0, (
@@ -327,9 +323,9 @@ def test_resolve_as_of_perf_assertion_becomes_red_under_delayed_load(
             )
         )
 
-    # `resolve_as_of`를 0.5초 CPU 부하로 감싼 버전으로 교체 —
-    # delayed_sync는 억제 주석 없이 시그니처를 보존한다.
-    monkeypatch_delayed = delayed_sync(resolve_as_of, 0.5)
+    # `resolve_as_of`를 0.5초 가상 지연으로 감싼 버전 — 실제 busy-wait 없이
+    # PerfBudget가 virtual_totals()로 누계한 값을 측정치에 더한다.
+    monkeypatch_delayed = virtual_delayed_sync(resolve_as_of, 0.5)
 
     result: list[CorporateAction] = []
 
