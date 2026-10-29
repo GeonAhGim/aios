@@ -15,6 +15,7 @@ from src.foundation.evidence.domain.rules import (
     verify_chain,
 )
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 NOW = datetime(2026, 9, 2, tzinfo=UTC)
 
@@ -168,16 +169,14 @@ def test_replayed_stale_event_breaks_chain_red_gate_repro():
 def test_verify_chain_budget_goes_red_with_cpu_injection(
     perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """검출력 확인 — CPU 시간을 monkeypatch로 100배 늘리면 같은 단언이
-    적색으로 넘어간다. PerfBudget 은 time.process_time() 을 쓰므로,
-    sleep() 주입은 CPU 시간 측정에 보이지 않는다. 대신 process_time 을
-    monkeypatch 해 실제 CPU 시간의 100 배를 반환하게 한다.
+    """검출력 확인 — virtual_delayed_sync 로 CPU 시간을 주입하면 같은 단언이
+    적색으로 넘어간다. 실제 sleep/busy-wait 를 쓰지 않고 ledger 에만 지연을
+    더하므로 측정치에 지연이 추가되고 full 시간을 쓰지 않는다(10x 주입이
+    테스트를 10배 느리게 만들지 않음).
 
     예산 500ms 로 실제 verify_chain(5k) 의 CPU 시간(~10-30ms 범위) 보다
-    훨씬 크지만, 100 배 주입으로 측정값이 예산을 명확히 초과해야 한다.
+    훨씬 크지만, 1초 가상 CPU 지연으로 측정값이 예산을 명확히 초과해야 한다.
     """
-    import time as _time
-
     events: list[AuditEvent] = []
     previous_hash: str | None = None
     for sequence_no in range(1, 5001):
@@ -185,20 +184,13 @@ def test_verify_chain_budget_goes_red_with_cpu_injection(
         events.append(event)
         previous_hash = event.event_hash
 
-    # 2026-10-27: 실제 CPU 시간 x100은 Windows 양자화로 실제 값이 0이면 0이라 적색이 안 됐다
-    # (full CI 플레이크). 호출마다 10초씩 늘어나는 결정적 가짜 시계로 주입한다 -- 측정값은
-    # 항상 예산(500ms)을 넘는다. 예산은 그대로다.
-    _calls = iter(range(10**9))
-
-    def _slow_process_time() -> float:
-        return next(_calls) * 10.0
-
-    monkeypatch.setattr(_time, "process_time", _slow_process_time)
+    # virtual_delayed_sync: verify_chain 호출에 1초 CPU+wall 지연을 ledger 에 추가
+    delayed = virtual_delayed_sync(verify_chain, seconds=1.0)
 
     try:
-        # 같은 단언(budget_ms=500); CPU 100배 주입으로 반드시 적색이어야 함
+        # 같은 단언(budget_ms=500); 가상 CPU 지연으로 반드시 적색이어야 함
         perf_budget.assert_within(
-            lambda: verify_chain(events),
+            lambda: delayed(events),
             budget_ms=500,
             n=5,
             label="verify_chain(5k events, cpu_injected)",
@@ -219,7 +211,8 @@ def test_verify_chain_tight_budget_fails_proves_assertion_real(
     성능 단언이 '아무것도 잡지 못하는 허울'이 아님을 증명한다.
 
     5k 이벤트에 대해 0.001ms(1마이크로초) 예산은 현실적으로 불가능하므로
-    반드시 적색이어야 한다.
+    반드시 적색이어야 한다. virtual_delayed_sync 으로 0.1ms 가상 CPU 지연을
+    주입하면 실제 측정값(0ms 근처) + 지연 > 0.001ms 가 되어 적색이 보장된다.
     """
     events: list[AuditEvent] = []
     previous_hash: str | None = None
@@ -228,16 +221,12 @@ def test_verify_chain_tight_budget_fails_proves_assertion_real(
         events.append(event)
         previous_hash = event.event_hash
 
-    # 2026-10-27: 실제 CPU가 양자화로 0.0으로 읽히면 0 < 0.001이라 적색이 안 됐다 -- 호출마다
-    # 1ms씩 늘어나는 결정적 가짜 시계로 측정값이 항상 예산(0.001ms)을 넘게 한다.
-    import time as _time
-
-    _calls = iter(range(10**9))
-    monkeypatch.setattr(_time, "process_time", lambda: next(_calls) * 0.001)
+    # virtual_delayed_sync: 0.1ms 가상 CPU 지연 — 0.1ms > 예산 0.001ms
+    delayed = virtual_delayed_sync(verify_chain, seconds=0.0001)
 
     with pytest.raises(AssertionError) as exc_info:
         perf_budget.assert_within(
-            lambda: verify_chain(events),
+            lambda: delayed(events),
             budget_ms=0.001,
             n=3,
             label="verify_chain(5k events, impossible_budget)",
