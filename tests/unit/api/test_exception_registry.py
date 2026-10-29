@@ -41,11 +41,53 @@ def test_unrelated_exception_defaults_to_internal_error_not_an_admin_code():
     assert details == {}
 
 
-def test_user_admin_base_error_is_not_resource_not_found():
+@pytest.mark.perf
+def test_user_admin_base_error_is_not_resource_not_found(perf_budget, monkeypatch):
     """negative — 부모(UserAdminError)는 자식(UserAdminNotFoundError)의
-    404 코드를 절대 받으면 안 된다(등록 순서가 맞아도 타입 자체가 다르므로)."""
-    code, _, _ = map_exception(UserAdminError("운영자는 ACTIVE/SUSPENDED로만..."))
+    404 코드를 절대 받으면 안 된다(등록 순서가 맞아도 타입 자체가 다르므로).
+
+    perf — map_exception의 단일 호출 CPU는 Windows 양자화 tick(≈15.6ms)보다
+    훨씬 작으므로 best_of(n=5)로 최소값을 꺼내 tick 흔들림을 걷어낸다.
+    예산 1ms(인메모리 리스트 스캔 1회 기준 여유 있는 상한).
+    virtual_delayed_sync로 10ms를 주입하면 best_of 측정치가 1ms를 넘어
+    AssertionError로 적색 게이트가 확인된다."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    exc = UserAdminError("운영자는 ACTIVE/SUSPENDED로만...")
+
+    # 1) 정상 입력 — best_of 최소값이 예산을 지키는지 확인
+    code, _, _ = map_exception(exc)
     assert code != ErrorCode.RESOURCE_NOT_FOUND
+
+    perf_budget.assert_within(
+        lambda: map_exception(exc),
+        budget_ms=1,
+        n=5,
+        warmup=1,
+        batch=1,
+        label="single UserAdminError lookup",
+    )
+
+    # 2) 가상 지연 주입 — 같은 측정/단언이 적색으로 떨어지는지 gate-red 재현
+    #    map_exception은 상수 import이므로 테스트 모듈 네임스페이스에서 패치해야 함.
+    import tests.unit.api.test_exception_registry as mod
+
+    _original_map = exception_mapping_module.map_exception
+
+    def _delayed_map(e: Exception) -> tuple:
+        return virtual_delayed_sync(_original_map, 10)(e)
+
+    monkeypatch.setattr(mod, "map_exception", _delayed_map)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: mod.map_exception(exc),
+            budget_ms=1,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="single UserAdminError lookup (injected 10ms)",
+        )
 
 
 def test_verification_base_error_is_not_state_invalid_transition():
