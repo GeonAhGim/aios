@@ -43,10 +43,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10 has no stdlib tomllib
-    import tomli as tomllib
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 SCAN_SUBDIR = "src"

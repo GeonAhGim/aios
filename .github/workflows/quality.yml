@@ -57,8 +57,8 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          # CTO 2026-09-25: 로컬 게이트(pm/local_ci, venv 3.10 + requirements-lock.txt)와 동일 환경.
-          python-version: "3.10"
+          # CTO 2026-09-25: 로컬 게이트(pm/local_ci, venv 3.13 + requirements-lock.txt)와 동일 환경.
+          python-version: "3.13"
           cache: pip
 
       # pip-audit이 setuptools 자체를 감사 대상에 넣는데, actions/setup-python이 심는
@@ -187,7 +187,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.13"
           cache: pip
 
       - name: Install application and quality dependencies
@@ -249,7 +249,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.13"
           cache: pip
 
       - name: Install coverage tool
@@ -308,7 +308,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.13"
           cache: pip
 
       - name: Install application and quality dependencies
@@ -347,7 +347,7 @@ jobs:
           path: .meta
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - name: Run guards on change range
         run: |
           BASE="${{ github.event.pull_request.base.sha || github.event.before }}"

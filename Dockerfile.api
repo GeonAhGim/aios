@@ -3,7 +3,7 @@
 # migrate 서비스, profile=migrate)에서 `alembic upgrade head`로 실행한다 -- 이 이미지의
 # 기본 CMD는 절대 마이그레이션을 자동 실행하지 않는다.
 
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 WORKDIR /build
 
 RUN apt-get update \
@@ -18,7 +18,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir .
 
-FROM python:3.11-slim AS runtime
+FROM python:3.13-slim AS runtime
 RUN groupadd --system app \
     && useradd --system --gid app --no-create-home --shell /usr/sbin/nologin app
 
