@@ -143,7 +143,7 @@ def test_size_budget_fails_with_virtual_delay_injection(perf_budget):
     PerfBudget가 ledger를 측정치에 합산하므로 같은 검출력을 가진다.
     """
     # 정상 입력은 녹색 — 예산 내
-    sample_normal = perf_budget.sample(lambda: size(_inp()))
+    sample_normal = perf_budget.best_of(lambda: size(_inp()), n=5, warmup=1, batch=100)
     assert sample_normal.cpu_ms < 0.1  # 예산 0.1ms
 
     # 예산 10배(1ms) 가상 지연 주입 → 적색
