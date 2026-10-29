@@ -5,7 +5,6 @@ RATCHET-split(task-4222) — 원 `test_db_schema.py`(1176줄)에서 분리.
 Spec: 04_db_schema_v1.7.md.
 """
 
-import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -14,6 +13,7 @@ import pytest
 from sqlalchemy import text
 
 from tests.integration.db_schema.conftest import insert_audit_event
+from tests.support.perf_inject import virtual_delayed_async
 
 # --- LA-10 (4a1d0c0de007_md_reference_registry) ----------------------------
 
@@ -377,43 +377,17 @@ async def test_md_candle_bulk_insert_p95_rejects_10x_delay_injection(
     """LA-11 DEEPEN(task-16087, task-11539 PERF-detection) — 게이트 적색 재현.
 
     동일한 측정/단언이 10배 지연 주입 하에서 적색으로 전환된다 — 단언이
-    0 수렴 허울이 아님을 증명한다. DB 호출에 sleep을 주입해 실제 I/O
-    지연을 시뮬레이션하고, 같은 p95 단언이 budget(60ms)을 초과함을
-    확인한다.
+    0 수렴 허울이 아님을 증명한다. virtual_delayed_async로 가상 I/O 지연을
+    주입하고, 같은 p95 단언이 budget(60ms)을 초과함을 확인한다.
+    실제 sleep 없이 ledger만 증가시켜 200×0.5s=100s를 가상으로 측정한다.
     """
     instrument_id, batch_id = await _md_candles_setup(raw_conn)
     n = 200
     base_time = datetime.now(UTC)
     budget_p95_ms = 60.0
 
-    # 원본 _insert_md_candle를 보존
-    original_insert = _insert_md_candle
-
-    async def delayed_insert(
-        conn: asyncpg.Connection,
-        *,
-        instrument_id,
-        batch_id,
-        open_: float,
-        high: float,
-        low: float,
-        close: float,
-        volume: float,
-        open_time=None,
-    ) -> None:
-        # 200회 × 0.5s = 100s 총 지연 → p95가 60ms budget을 크게 초과
-        await asyncio.sleep(0.5)
-        return await original_insert(
-            conn,
-            instrument_id=instrument_id,
-            batch_id=batch_id,
-            open_=open_,
-            high=high,
-            low=low,
-            close=close,
-            volume=volume,
-            open_time=open_time,
-        )
+    # virtual_delayed_async: 실제 sleep 없이 perf_budget ledger에 지연을 기록
+    delayed_insert = virtual_delayed_async(_insert_md_candle, 0.5)
 
     _call_idx = 0
 
