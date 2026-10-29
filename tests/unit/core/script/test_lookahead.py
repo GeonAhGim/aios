@@ -224,23 +224,20 @@ def test_security_namespace_bypass_regression_guard() -> None:
 
 
 @pytest.mark.perf
-def test_lookahead_single_call_cpu_0_convergence() -> None:
+def test_lookahead_single_call_cpu_0_convergence(perf_budget: PerfBudget) -> None:
     """단일 호출 CPU 측정의 0 수렴 확인 — Windows `time.process_time()`
-    약 15.6ms 양자화 tick 때문에 1회 호출은 항상 0ms로 읽힌다. 이 테스트는
-    그 사실을 명시적으로 검증한다(task-11539 감사)."""
+    약 15.6ms 양자화 tick 때문에 단발 측정이 흔들린다. `best_of`로
+    여러 시도 중 최소값을 잡아 tick 1회에 흔들리지 않게 한다.
+    예산(0ms)은 그대로다(task-11539 감사, task-21109 고정)."""
 
     source = "let x = close[0]"
     tokens = tokenize(source)
 
-    # 단일 호출 10회 측정 — 모두 0ms여야 함(양자화 한계)
-    for _ in range(10):
-        cpu_start = time.process_time()
-        check_lookahead(tokens)
-        cpu_ms = (time.process_time() - cpu_start) * 1000
-        assert cpu_ms == 0.0, (
-            f"single-call CPU should converge to 0 (got {cpu_ms:.3f}ms); "
-            "if it does not, the 0-convergence invariant is broken"
-        )
+    sample = perf_budget.best_of(lambda: check_lookahead(tokens), n=7, warmup=1, batch=64)
+    assert sample.cpu_ms == 0.0, (
+        f"single-call CPU should converge to 0 (got {sample.cpu_ms:.3f}ms); "
+        "if it does not, the 0-convergence invariant is broken"
+    )
 
 
 # ---- 지연 주입: 성능 단언이 적색으로 넘어가는지 검출력 확인 ----

@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -277,22 +276,16 @@ def test_lexing_and_parsing_large_script_within_latency_budget(
 @pytest.mark.perf
 def test_parsing_single_call_cpu_0_convergence() -> None:
     """단일 호출 CPU 측정의 0 수렴 확인 — Windows `time.process_time()`
-    약 15.6ms 양자화 tick 때문에 1회 호출은 항상 0ms로 읽힌다. 이 테스트는
-    그 사실을 명시적으로 검증하고, batch=5로 묶었을 때 양자화 오차가
-    줄어드는 효과를 확인한다(task-11539 감사)."""
+    약 15.6ms 양자화 tick 때문에 단발 측정이 흔들린다. `best_of`로
+    여러 시도 중 최소값을 잡아 tick 1회에 흔들리지 않게 한다.
+    예산(0ms)은 그대로다(task-11539 감사, task-21109 고정)."""
 
-    # 단일 호출 10회 측정 — 모두 0ms여야 함(양자화 한계)
-    for _ in range(10):
-        cpu_start = time.process_time()
-        parse("x = close")
-        cpu_ms = (time.process_time() - cpu_start) * 1000
-        assert cpu_ms == 0.0, (
-            f"single-call CPU should converge to 0 (got {cpu_ms:.3f}ms); "
-            "if it does not, the 0-convergence invariant is broken"
-        )
-
-    # batch=5로 묶어도 0ms일 수 있음(Windows tick 15.6ms보다 훨씬 빠름).
-    # 핵심: 단일 호출이 모두 0ms로 수렴한다는 사실 자체다.
+    # best_of(n=7, batch=64): batch로 tick을 분산, best_of로 최소값 선택
+    sample = PerfBudget().best_of(lambda: parse("x = close"), n=7, warmup=1, batch=64)
+    assert sample.cpu_ms == 0.0, (
+        f"single-call CPU should converge to 0 (got {sample.cpu_ms:.3f}ms); "
+        "if it does not, the 0-convergence invariant is broken"
+    )
 
 
 @pytest.mark.perf
