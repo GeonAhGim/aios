@@ -94,14 +94,12 @@ async def test_backfill_job_meets_latency_budget_with_many_disjoint_gaps(
         provider = _FakeProvider(answers)
         await _run(provider, store, coverage_repo, range_start=start, range_end=end)
 
-    # Warmup iteration (not counted)
-    await _run_once()
+    # best_of_async(5, warmup=1) — Windows 양자화 tick(≈15.6ms)에 단발 sample이 흔들리지 않게
+    # 여러 번 측정해 최소(cpu) 값을 쓴다. 예산·단언 숫자는 올리지 않는다.
+    sample = await perf_budget.best_of_async(_run_once, n=5, warmup=1)
+    elapsed_ms = sample.wall_ms
 
-    samples = [await perf_budget.sample_async(_run_once) for _ in range(7)]
-    samples.sort(key=lambda s: s.wall_ms)
-    elapsed_ms = samples[len(samples) // 2].wall_ms
-
-    # Final run to capture result for assertions
+    # 결과 단언을 위해 한 번 더 실행 (sample.result는 best_of가 반환 안 함)
     start, end, covered_spans, answers = _checkerboard(n_gaps)
     store = _FakeCandleStore()
     coverage_repo = _FakeCoverageRepository()
@@ -272,15 +270,16 @@ async def test_backfill_job_scaling_assertion_goes_red_with_io_delay_injection(
     monkeypatch: pytest.MonkeyPatch,
     perf_budget,
 ) -> None:
-    """gate-red reproduction: `_FakeProvider.fetch_candles`에 IO 지연(delayed_async,
-    0.3s)을 주입하면 같은 스케일링 단언이 AssertionError로 적색이 된다.
+    """gate-red reproduction: `_FakeProvider.fetch_candles`에 가상 지연(0.3s)을
+    주입하면 같은 스케일링 단언이 AssertionError로 적색이 된다.
 
-    `delayed_async`는 wall-clock 대기를 주입한다. `PerfBudget.sample_async`는
-    wall_ms를 측정하므로 wall-clock 기반 budget 단언이 지연을 잡는다.
+    `virtual_delayed_async`는 실제 sleep 없이 virtual wall ledger에 지연을
+    더한다. `PerfBudget.sample_async`는 virtual ledger를 측정값에 더하므로
+    실제 sleep/busy-wait 없이 wall_ms가 지연만큼 늘어난다.
     정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
     단언/마커 삭제와 예산 완화 금지.
     """
-    from tests.support.perf_inject import delayed_async
+    from tests.support.perf_inject import virtual_delayed_async
 
     # 3개 갭으로 간단히 — 지연 주입으로 budget 초과 확인용
     n_gaps = 3
@@ -291,12 +290,12 @@ async def test_backfill_job_scaling_assertion_goes_red_with_io_delay_injection(
     _seed_covered_candles(store, covered_spans)
     provider = _FakeProvider(answers)
 
-    # fetch_candles 에 0.3s 지연 주입 (갭당 → 3개 갭으로 총 ~1s 이상)
+    # fetch_candles 에 0.3s 가상 지연 주입 (갭당 → 3개 갭으로 총 ~0.9s)
     original_fetch = provider.fetch_candles
     monkeypatch.setattr(
         provider,
         "fetch_candles",
-        delayed_async(original_fetch, 0.3),
+        virtual_delayed_async(original_fetch, 0.3),
     )
 
     async def _run_once() -> None:
@@ -304,7 +303,7 @@ async def test_backfill_job_scaling_assertion_goes_red_with_io_delay_injection(
 
     sample = await perf_budget.sample_async(_run_once, batch=1)
 
-    # 0.3s 지연 × 3개 갭 → wall_ms가 500ms를 넘어야 함 (budget < 500ms)
+    # 0.3s 가상 지연 × 3개 갭 → wall_ms가 500ms를 넘어야 함 (budget < 500ms)
     assert sample.wall_ms >= 500.0, (
         f"지연 주입 후 wall 시간 {sample.wall_ms:.1f}ms — "
         f"예상과 달리 green: 측정/단언이 공허함(hollow assertion, "
@@ -366,7 +365,7 @@ async def test_backfill_job_scaling_assertion_breaks_with_oversized_delay(
     반대). 지연이 budget 미만이면 green — 단언이 지연을 '잡지 못하는'
     상황을 시뮬레이션한다. 이는 gate-red 테스트가 '적절한 지연 크기'로
     작성되었음을 역으로 증명한다."""
-    from tests.support.perf_inject import delayed_async
+    from tests.support.perf_inject import virtual_delayed_async
 
     n_gaps = 3
     start, end, covered_spans, answers = _checkerboard(n_gaps)
@@ -376,12 +375,12 @@ async def test_backfill_job_scaling_assertion_breaks_with_oversized_delay(
     _seed_covered_candles(store, covered_spans)
     provider = _FakeProvider(answers)
 
-    # 0.001s 지연 × 3개 갭 = ~3ms → budget 500ms 미만 → green (정상 동작)
+    # 0.001s 가상 지연 × 3개 갭 = ~3ms → budget 500ms 미만 → green (정상 동작)
     original_fetch = provider.fetch_candles
     monkeypatch.setattr(
         provider,
         "fetch_candles",
-        delayed_async(original_fetch, 0.001),
+        virtual_delayed_async(original_fetch, 0.001),
     )
 
     async def _run_once() -> None:
