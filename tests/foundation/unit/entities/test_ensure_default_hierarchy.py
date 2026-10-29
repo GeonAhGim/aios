@@ -175,14 +175,16 @@ async def test_partial_hierarchy_only_creates_the_missing_levels_within_budget(
     repo = _FakeRepository()
     user_id = uuid4()
     complete = await _ensure(repo, user_id)
-    # simulate a bootstrap that stopped after the fund
-    del repo.portfolios[complete.portfolio.portfolio_id]
-    del repo.sub_accounts[complete.sub_account.sub_account_id]
 
-    sample = await perf_budget.sample_async(
-        lambda: _ensure(repo, user_id),
-        batch=1,
-    )
+    async def regenerate_partial() -> object:
+        # simulate a bootstrap that stopped after the fund, on every call
+        repo.portfolios.pop(complete.portfolio.portfolio_id, None)
+        repo.sub_accounts.pop(complete.sub_account.sub_account_id, None)
+        return await _ensure(repo, user_id)
+
+    # batch=64 amortizes the 15.625ms Windows CPU clock quantum; best-of-5 skips
+    # CI contention spikes (task-19178 pattern).
+    sample = await perf_budget.best_of_async(regenerate_partial, n=5, warmup=1, batch=64)
 
     assert sample.cpu_ms < 1.0, (
         f"부분 계층 재생성 CPU={sample.cpu_ms:.3f}ms — "
