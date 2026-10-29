@@ -111,17 +111,28 @@ def agg(
 # --- (b) FORBIDDEN_ASSET denies, never clamps --------------------------------
 
 
-def test_forbidden_asset_denies_exactly() -> None:
+@pytest.mark.perf
+def test_forbidden_asset_denies_exactly(perf_budget: PerfBudget) -> None:
+    m = mandate(forbidden_assets=["SANCTIONED/USDT"])
+    a = agg()
+
+    def _call_once() -> None:
+        bind(qty=Decimal("10"), price=Decimal("250"), symbol="SANCTIONED/USDT", agg=a, mandate=m)
+
     result = bind(
         qty=Decimal("10"),
         price=Decimal("250"),
         symbol="SANCTIONED/USDT",
-        agg=agg(),
-        mandate=mandate(forbidden_assets=["SANCTIONED/USDT"]),
+        agg=a,
+        mandate=m,
     )
     assert result.denied is True
     assert result.quantity == Decimal("0")
     assert result.reasons == [POLICY_FORBIDDEN_ASSET]
+
+    # best-of-5 x batch=100 so one quantized process_time tick cannot flip the result.
+    sample = perf_budget.best_of(_call_once, n=5, batch=100)
+    assert sample.cpu_ms < 5.0, perf_budget.describe(sample, budget_ms=5.0)
 
 
 # --- (c) single-instrument clamp exact value ---------------------------------
