@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import time
 import uuid
 from datetime import UTC, datetime, tzinfo
@@ -41,6 +42,7 @@ from src.services.order_service.gate import GateDecision, GateOutcome
 from src.services.preview_service import PreviewCondition
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
+from tests.support.perf_inject import virtual_delayed_sync
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
@@ -274,8 +276,35 @@ def test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_col
     cpu_ms_values.sort()
     total_ms = sum(cpu_ms_values) * batch_size
     p95_ms = cpu_ms_values[int(len(cpu_ms_values) * 0.95)]
-    assert total_ms < 1000.0  # 5,000 derivations < 1s total (budget in ms)
-    assert p95_ms < 1.0  # p95 per-derivation < 1ms (no I/O)
+    # 5,000 derivations < 1s total (budget in ms).
+    assert total_ms < 1000.0, f"total CPU {total_ms:.3f}ms exceeds 1000ms"
+    assert p95_ms < 1.0, f"p95 CPU {p95_ms:.3f}ms exceeds 1ms"  # p95 per-derivation < 1ms (no I/O)
+
+
+@pytest.mark.perf
+@pytest.mark.parametrize("delay_s", [0.002, 0.01, 0.02])
+def test_client_order_id_cpu_regression_trips_existing_budget(perf_budget, monkeypatch, delay_s):
+    # 2ms/call is 10x the total budget (1000ms / 5000); 10ms is 10x p95.
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "derive_client_order_id",
+        virtual_delayed_sync(derive_client_order_id, delay_s),
+    )
+    with pytest.raises(AssertionError, match="total CPU .* exceeds 1000ms"):
+        test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_collides(
+            perf_budget
+        )
+
+
+@pytest.mark.perf
+def test_client_order_id_batch_preserves_cpu_milliseconds(perf_budget):
+    # best-of avoids mistaking one Windows CPU tick for nonzero no-op work.
+    baseline = perf_budget.best_of(lambda: None, n=5, warmup=0, batch=100)
+    assert baseline.cpu_ms < 1.0
+    injected = perf_budget.best_of(
+        virtual_delayed_sync(lambda: None, 0.01), n=5, warmup=0, batch=100
+    )
+    assert 10.0 - 1e-6 <= injected.cpu_ms < 11.0  # Floating-point ledger subtraction.
 
 
 # ---------------------------------------------------------------------------
