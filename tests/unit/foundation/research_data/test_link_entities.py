@@ -29,6 +29,7 @@ from src.foundation.research_data.domain.entity_link import (
     link_item,
 )
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_async
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _TENANT = uuid4()
@@ -106,7 +107,12 @@ async def test_link_entities_batch_leaves_unmapped_items_unmapped_without_except
 
 async def test_link_entities_is_idempotent_on_the_second_run() -> None:
     """RD-5 DoD (e): once every item resolves, the second run's `save_links`
-    call receives an empty list -- `list_unlinked` no longer returns them."""
+    call receives an empty list -- `list_unlinked` no longer returns them.
+
+    Perf (D2): `best_of_async`로 Windows 양자화 tick(≈15.6ms)에 흔들리지 않게
+    최소(cpu) 값을 쓴다. 0 수렴 단언 — fake repo는 CPU 부하가 없으므로
+    best_of가 0에 수렴해야 한다.
+    """
     item_a = _item(instruments=("005930",))
     item_b = _item(instruments=("000660",))
     repo = _FakeEntityLinkRepository([item_a, item_b])
@@ -120,6 +126,123 @@ async def test_link_entities_is_idempotent_on_the_second_run() -> None:
     assert second_results == []
     assert repo.save_calls[0] == first_results
     assert repo.save_calls[1] == []
+
+    # Perf assertion (D2): fake repo는 실제 I/O/CPU 부하가 없음.
+    # best_of_async(5, batch=20)로 Windows tick 15.6ms를 batch 평균으로 분산.
+    perf = PerfBudget()
+
+    async def _run_once() -> None:
+        await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=10)
+
+    sample = await perf.best_of_async(_run_once, n=5, warmup=1, batch=20)
+    assert sample.cpu_ms < 1.0, (
+        f"link_entities cpu={sample.cpu_ms:.3f}ms — "
+        f"fake repo는 CPU 부하가 없어야 함 (budget 1.0 ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_link_entities_is_idempotent_catches_virtual_delay_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2): `virtual_delayed_async`로 가상 지연을 주입하면
+    같은 perf 단언이 AssertionError로 적색이 돼야 한다.
+
+    `virtual_delayed_async`는 실제 sleep 없이 virtual wall ledger에 지연을
+    더한다. `PerfBudget.best_of_async`는 virtual ledger를 측정값에 더하므로
+    실제 sleep/busy-wait 없이 wall_ms가 지연만큼 늘어난다.
+    단언/마커 삭제나 예산 완화 금지.
+    """
+    # link_entities를 가상 지연 50ms로 감싸서 virtual wall ledger에 50ms 주입
+    original_link = link_entities
+
+    async def _slow_link(*args, **kwargs) -> list[EntityLinkResult]:
+        await virtual_delayed_async(original_link, 0.05)(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "tests.unit.foundation.research_data.test_link_entities.link_entities", _slow_link
+    )
+
+    # 같은 측정/단언을 재사용 — 지연 주입으로 budget 초과 → AssertionError
+    item_a = _item(instruments=("005930",))
+    item_b = _item(instruments=("000660",))
+    repo = _FakeEntityLinkRepository([item_a, item_b])
+    resolver = _FakeResolver({"005930": "INSTR-1", "000660": "INSTR-2"})
+
+    # 첫 실행으로 repo 상태 세팅
+    await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=10)
+
+    perf = PerfBudget()
+
+    async def _run_once() -> None:
+        await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=10)
+
+    sample = await perf.best_of_async(_run_once, n=5, warmup=0, batch=1)
+    assert sample.cpu_ms < 1.0, (
+        f"지연 주입 후 cpu={sample.cpu_ms:.3f}ms — budget 1.0 ms를 초과해야 적색(re) 확인"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Negative tests for `link_entities` idempotent path
+# ---------------------------------------------------------------------------
+
+
+async def test_link_entities_partial_resolution_still_maps_remaining() -> None:
+    """Negative: 첫 실행에서 일부만 매핑되면, 두 번째 실행에서 매핑되지 않은
+    항목은 여전히 list_unlinked에 남아야 한다 (완전 idempotent 아님)."""
+    mapped_item = _item(instruments=("005930",))
+    unmapped_item = _item(instruments=("삼성전자우 유상증자",))
+    repo = _FakeEntityLinkRepository([mapped_item, unmapped_item])
+    resolver = _FakeResolver({"005930": "INSTR-1"})  # unmapped_item은 매핑 안 됨
+
+    first_results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=10)
+    second_results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=10)
+
+    # 첫 실행: mapped_item만 매핑, unmapped_item은 unmapped
+    assert len(first_results) == 2
+    mapped = [r for r in first_results if r.instrument_id is not None]
+    assert len(mapped) == 1
+
+    # 두 번째 실행: unmapped_item이 여전히 unlinked이므로 반환됨
+    assert len(second_results) == 1
+    assert second_results[0].item_id == unmapped_item.item_id
+
+
+async def test_link_entities_empty_batch_returns_empty_list() -> None:
+    """Negative: 이미 모든 항목이 매핑된 repo에 다시 호출하면 빈 리스트."""
+    item = _item(instruments=("005930",))
+    repo = _FakeEntityLinkRepository([item])
+    resolver = _FakeResolver({"005930": "INSTR-1"})
+
+    await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=10)
+    # 이미 모두 매핑됨 — 두 번째 호출은 빈 결과
+    results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=10)
+    assert results == []
+
+
+async def test_link_entities_limit_truncation_idempotent() -> None:
+    """Negative: limit이 항목 수보다 적으면, 첫 실행에서 limit만큼만 처리하고
+    두 번째 실행에서 나머지 항목을 처리해야 한다."""
+    items = [_item(instruments=(f"{i:06d}",)) for i in range(5)]
+    repo = _FakeEntityLinkRepository(items)
+    resolver = _FakeResolver({f"{i:06d}": f"INSTR-{i}" for i in range(5)})
+
+    # limit=2: 첫 실행에서 2개만 처리
+    first_results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=2)
+    assert len(first_results) == 2
+
+    # 두 번째 실행: 남은 3개 처리
+    second_results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=2)
+    assert len(second_results) == 2
+
+    # 세 번째 실행: 남은 1개 처리
+    third_results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=2)
+    assert len(third_results) == 1
+
+    # 네 번째 실행: 모두 처리됨 — 빈 리스트
+    fourth_results = await link_entities(None, repo, resolver, tenant_id=_TENANT, limit=2)
+    assert fourth_results == []
 
 
 # ---------------------------------------------------------------------------
