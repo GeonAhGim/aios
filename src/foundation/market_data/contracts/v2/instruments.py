@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel
@@ -103,7 +103,7 @@ CountryCode = Annotated[str, AfterValidator(_validate_country)]
 MIC = Annotated[str, AfterValidator(_validate_mic)]
 
 
-class InstrumentLifecycle(str, Enum):
+class InstrumentLifecycle(StrEnum):
     """States from the §4.2 symbol lifecycle transition table. The transition
     rules themselves are the responsibility of DC-3
     (`domain/instruments/lifecycle.py`); this contract defines state values only."""
@@ -114,7 +114,7 @@ class InstrumentLifecycle(str, Enum):
     DELISTED = "DELISTED"
 
 
-class InstrumentKind(str, Enum):
+class InstrumentKind(StrEnum):
     """Coarse product taxonomy (DC-20, §9.10). Optional on `Instrument` and
     `None` for records written before this field existed or for callers
     that don't need the distinction — existing spot use is unaffected."""
@@ -128,14 +128,14 @@ class InstrumentKind(str, Enum):
     INDEX = "INDEX"
 
 
-class OptionRight(str, Enum):
+class OptionRight(StrEnum):
     """`Instrument.option_right`, set only when `kind == OPTION`."""
 
     CALL = "CALL"
     PUT = "PUT"
 
 
-class SettlementType(str, Enum):
+class SettlementType(StrEnum):
     """`Instrument.settlement`, relevant for derivatives (`kind` in
     `{FUTURE, PERP, OPTION}`)."""
 

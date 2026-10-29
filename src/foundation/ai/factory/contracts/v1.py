@@ -68,7 +68,7 @@ def _validate_sha256_hex(value: str) -> str:
     return value
 
 
-class ProviderRef(str, enum.Enum):
+class ProviderRef(enum.StrEnum):
     """Which channel produced the proposal -- §2.2's four adapters
     (anthropic_provider/openai_compatible_provider/gemini_provider) plus the
     non-adapter "proposal channel" (external_agent_provider: any MCP client,
@@ -82,7 +82,7 @@ class ProviderRef(str, enum.Enum):
     EXTERNAL_AGENT = "external_agent"
 
 
-class ProposalRejectionReason(str, enum.Enum):
+class ProposalRejectionReason(enum.StrEnum):
     """The four `domain/proposal_rules.py` acceptance checks, in the order
     `evaluate_proposal_candidate` runs them. Wire-level `AI_PROPOSAL_SCHEMA`/
     `AI_PROPOSAL_COMPILE` (spec §3) mapping is the application layer's job

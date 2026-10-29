@@ -59,7 +59,7 @@ def _validate_sha256_hex(value: str) -> str:
     return value
 
 
-class ListingVisibility(str, enum.Enum):
+class ListingVisibility(enum.StrEnum):
     """spec §3.5 `Visibility = public|protected|invite|private` verbatim --
     inventing a fifth tier is forbidden, this enum is the single source of
     truth for MP-2's `domain/visibility.py`.
@@ -76,14 +76,14 @@ class ListingVisibility(str, enum.Enum):
     PRIVATE = "PRIVATE"
 
 
-class PriceKind(str, enum.Enum):
+class PriceKind(enum.StrEnum):
     """spec §3.5 `price: OneTime|Subscription{period, trial_days}`."""
 
     ONE_TIME = "ONE_TIME"
     SUBSCRIPTION = "SUBSCRIPTION"
 
 
-class MarketplaceErrorCode(str, enum.Enum):
+class MarketplaceErrorCode(enum.StrEnum):
     """spec §3.5 error taxonomy verbatim -- the plagiarism/subscription/
     visibility leaves (MP-5/6/2) raise these, this contract only names
     them so callers can match on a closed set."""

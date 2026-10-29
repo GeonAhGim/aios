@@ -22,7 +22,7 @@ domain leaf that raises them (EM-2/EM-7 etc.), same principle as FA-1's
 from __future__ import annotations
 
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -65,7 +65,7 @@ def _reject_float(value: object) -> object:
 StrictDecimal = Annotated[Decimal, BeforeValidator(_reject_float)]
 
 
-class EmsErrorCode(str, Enum):
+class EmsErrorCode(StrEnum):
     """§3 error taxonomy — must match the spec literally (snapshot test)."""
 
     ALGO_CONSTRAINT = "EM_ALGO_CONSTRAINT"  # 400 — AlgoSpec constraint violated (bad kind, etc.)
@@ -82,7 +82,7 @@ HTTP_STATUS: dict[EmsErrorCode, int] = {
 }
 
 
-class AlgoKind(str, Enum):
+class AlgoKind(StrEnum):
     """§3 `AlgoSpec.kind` — values outside this table (e.g. `sniper`) are
     rejected by pydantic."""
 

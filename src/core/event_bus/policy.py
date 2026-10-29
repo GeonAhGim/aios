@@ -4,10 +4,10 @@ Spec: 05_communication_architecture_v1.2.md#§5.5
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class HandlerCriticality(str, Enum):
+class HandlerCriticality(StrEnum):
     """Treating all handlers with log_and_continue masks failures in state-changing
     handlers (e.g. position updates), allowing internal state drift to go unnoticed
     in real time. Forces callers to declare this value at handler registration."""

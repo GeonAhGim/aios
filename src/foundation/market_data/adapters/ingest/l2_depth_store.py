@@ -82,7 +82,7 @@ class L2DepthStore:
         return [
             DepthRecordMeta(
                 record_id=record_id,
-                kind=RecordKind(meta["kind"]),
+                kind=RecordKind(str(meta["kind"])),
                 as_of=datetime.fromisoformat(str(meta["as_of"])),
                 size_bytes=int(meta["size_bytes"]),
             )
@@ -105,7 +105,7 @@ class L2DepthStore:
         deleted = downsampled = 0
         for record_id, action in plan.actions.items():
             meta = self._manifest[record_id]
-            kind = RecordKind(meta["kind"])
+            kind = RecordKind(str(meta["kind"]))
             if action is RetentionAction.DELETE:
                 self._path_for(record_id, kind).unlink(missing_ok=True)
                 del self._manifest[record_id]

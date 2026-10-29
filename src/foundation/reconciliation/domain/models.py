@@ -8,11 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class Classification(str, Enum):
+class Classification(StrEnum):
     """All 7 classifications from §1 of spec 80 — shares the same value set
     across both item (single record) and run/state (aggregate) contexts
     (verbatim from the spec)."""
@@ -26,7 +26,7 @@ class Classification(str, Enum):
     RESOLVED = "RESOLVED"
 
 
-class RunState(str, Enum):
+class RunState(StrEnum):
     COMPLETED = "COMPLETED"
     DEDUPED = "DEDUPED"
     """REC-004/006 — When a run with the same (target_ref, input_hash)

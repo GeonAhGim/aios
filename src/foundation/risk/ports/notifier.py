@@ -6,11 +6,11 @@ application know only this Protocol; the actual delivery mechanism
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
 
-class PersonalNotificationKind(str, Enum):
+class PersonalNotificationKind(StrEnum):
     FILL = "FILL"
     LIMIT_BREACH = "LIMIT_BREACH"
     KILL_SWITCH = "KILL_SWITCH"

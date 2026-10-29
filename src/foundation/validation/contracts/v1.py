@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -18,7 +18,7 @@ from pydantic import BaseModel
 SCHEMA_VERSION = "v1"
 
 
-class RunState(str, Enum):
+class RunState(StrEnum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
@@ -26,7 +26,7 @@ class RunState(str, Enum):
     CANCELLED = "CANCELLED"
 
 
-class Outcome(str, Enum):
+class Outcome(StrEnum):
     PASS = "PASS"
     FAIL = "FAIL"
     PASS_WITH_OBLIGATIONS = "PASS_WITH_OBLIGATIONS"

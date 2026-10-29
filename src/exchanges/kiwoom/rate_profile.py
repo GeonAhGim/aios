@@ -22,7 +22,7 @@ import asyncio
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from src.exchanges.common.rate_limiter import TokenBucket
@@ -31,7 +31,7 @@ from src.exchanges.common.transport import RateLimitWaitObserver
 Verified = Literal["LIVE_VERIFIED", "DOC_ONLY", "ESTIMATED"]
 
 
-class KiwoomAccountType(str, Enum):
+class KiwoomAccountType(StrEnum):
     REAL = "real"
     PAPER = "paper"
 

@@ -28,7 +28,7 @@ adapters that only know `source_id` belongs to
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import AwareDatetime, BaseModel, model_validator
 
@@ -45,14 +45,14 @@ __all__ = [
 ]
 
 
-class SourceContractTier(str, Enum):
+class SourceContractTier(StrEnum):
     FREE = "FREE"
     PERSONAL = "PERSONAL"
     BUSINESS = "BUSINESS"
     ENTERPRISE = "ENTERPRISE"
 
 
-class RedistributionScope(str, Enum):
+class RedistributionScope(StrEnum):
     """D2/D7. Unspecified is treated as `NONE` — "the same fail-closed
     discipline as existing entitlements" (D2)."""
 
@@ -63,7 +63,7 @@ class RedistributionScope(str, Enum):
     REDISTRIBUTE = "REDISTRIBUTE"
 
 
-class DataUse(str, Enum):
+class DataUse(StrEnum):
     """The enforcement points D2 pins down (read API/chart/backtest/export)
     plus D7's "display to the connection owner themself", split into
     determinable use purposes. Input to `permits_use()`; enforcement-point
@@ -137,7 +137,7 @@ class SourceContract(BaseModel, frozen=True):
         return self
 
 
-class SourceContractDenialReason(str, Enum):
+class SourceContractDenialReason(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     NOT_YET_VALID = "NOT_YET_VALID"
     EXPIRED = "EXPIRED"

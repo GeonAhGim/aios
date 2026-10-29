@@ -40,7 +40,7 @@ import json
 import threading
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -53,7 +53,7 @@ _REFERENCE_PATH = Path(__file__).resolve().parents[3] / "docs" / "design" / "kis
 Verified = Literal["LIVE_VERIFIED", "DOC_ONLY", "ESTIMATED"]
 
 
-class KisAccountType(str, Enum):
+class KisAccountType(StrEnum):
     REAL = "real"
     PAPER = "paper"
 

@@ -12,7 +12,7 @@ Venue` etc. and never need to reference this file directly.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 __all__ = [
     "Timeframe",
@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-class Timeframe(str, Enum):
+class Timeframe(StrEnum):
     M1 = "1m"
     M5 = "5m"
     M15 = "15m"
@@ -36,7 +36,7 @@ class Timeframe(str, Enum):
     L2 = "L2"  # RD-19 — marks coverage for raw L2 order book streams, which have no OHLC concept.
 
 
-class Venue(str, Enum):
+class Venue(StrEnum):
     """Lookup key for session rules (A3).
 
     KIS has different calendars per market, so KRX/US are separated.
@@ -52,19 +52,19 @@ class Venue(str, Enum):
     UPBIT = "UPBIT"  # RD-19
 
 
-class Adjustment(str, Enum):
+class Adjustment(StrEnum):
     RAW = "RAW"
     ADJUSTED = "ADJUSTED"
 
 
-class SymbolStatus(str, Enum):
+class SymbolStatus(StrEnum):
     PENDING = "PENDING"
     LISTED = "LISTED"
     SUSPENDED = "SUSPENDED"
     DELISTED = "DELISTED"
 
 
-class QualityIssueType(str, Enum):
+class QualityIssueType(StrEnum):
     OHLC_INCONSISTENT = "OHLC_INCONSISTENT"
     NEGATIVE_VOLUME = "NEGATIVE_VOLUME"
     TIME_MISALIGNED = "TIME_MISALIGNED"
@@ -77,13 +77,13 @@ class QualityIssueType(str, Enum):
     OUT_OF_SESSION = "OUT_OF_SESSION"
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     INFO = "INFO"
     WARN = "WARN"
     REJECT = "REJECT"
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     ACCEPT = "ACCEPT"
     PARTIAL = "PARTIAL"
     QUARANTINE = "QUARANTINE"

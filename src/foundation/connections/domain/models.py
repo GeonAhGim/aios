@@ -8,13 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 ConnectionId = UUID
 
 
-class ConnectionState(str, Enum):
+class ConnectionState(StrEnum):
     PENDING_CONSENT = "PENDING_CONSENT"
     CONNECTING = "CONNECTING"
     ACTIVE_READONLY = "ACTIVE_READONLY"
@@ -23,7 +23,7 @@ class ConnectionState(str, Enum):
     DISCONNECTED = "DISCONNECTED"
 
 
-class CapabilityScope(str, Enum):
+class CapabilityScope(StrEnum):
     """74 §1 "P0 capability profile is a closed enum set" — anything other than
     these three values is a hard reject (including TRADE_*, WITHDRAW, TRANSFER, SIGN_*).
     Input paths that may receive arbitrary strings instead of actual enum values
@@ -34,7 +34,7 @@ class CapabilityScope(str, Enum):
     READ_ACTIVITY = "READ_ACTIVITY"
 
 
-class CredentialClass(str, Enum):
+class CredentialClass(StrEnum):
     """74 §1 "credential class must be READONLY" — the only valid value for
     this enum at P0 is READONLY. Do not pre-create other values (35 §9.2
     "do not pre-create" principle — when actual TRADE credentials are needed,
@@ -114,7 +114,7 @@ class AccountSnapshot:
     values: tuple[SnapshotValue, ...] = field(default_factory=tuple)
 
 
-class HealthState(str, Enum):
+class HealthState(StrEnum):
     HEALTHY = "HEALTHY"
     DEGRADED = "DEGRADED"
 

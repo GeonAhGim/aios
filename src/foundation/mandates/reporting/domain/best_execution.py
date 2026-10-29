@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from src.data.models.market_data import Candle
@@ -26,7 +26,7 @@ class BestExecutionInputMissing(ValueError):
         super().__init__(code)
 
 
-class BenchmarkKind(str, Enum):
+class BenchmarkKind(StrEnum):
     ARRIVAL = "arrival"
     VWAP = "vwap"
     CLOSE = "close"

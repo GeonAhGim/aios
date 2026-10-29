@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 
 from src.foundation.market_data.contracts.v1 import CandleRecord, SessionWindow, Timeframe
 from src.foundation.market_data.contracts.v2.coverage import CoverageSpan
@@ -41,7 +41,7 @@ class IndeterminateCoverageError(ValueError):
     misread as "sufficiently covered"."""
 
 
-class GapReason(str, Enum):
+class GapReason(StrEnum):
     NOT_COVERED = "NOT_COVERED"
     MISSING_CANDLES = "MISSING_CANDLES"
 

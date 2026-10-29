@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -43,7 +43,7 @@ def _validate_tz_aware(value: datetime) -> datetime:
     return value
 
 
-class MandateRevisionState(str, Enum):
+class MandateRevisionState(StrEnum):
     DRAFT = "DRAFT"
     PROPOSED = "PROPOSED"
     ACTIVE = "ACTIVE"
@@ -52,13 +52,13 @@ class MandateRevisionState(str, Enum):
     CANCELLED = "CANCELLED"
 
 
-class Autonomy(str, Enum):
+class Autonomy(StrEnum):
     OBSERVE = "OBSERVE"
     PAPER = "PAPER"
     LIMITED_LIVE = "LIMITED_LIVE"
 
 
-class PolicyOutcome(str, Enum):
+class PolicyOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
     REQUIRE_APPROVAL = "REQUIRE_APPROVAL"
@@ -124,7 +124,7 @@ class PolicyDecisionView(BaseModel):
     schema_version: str = SCHEMA_VERSION
 
 
-class ComplianceVerdict(str, Enum):
+class ComplianceVerdict(StrEnum):
     ALLOW = "ALLOW"
     WARN = "WARN"
     DENY = "DENY"

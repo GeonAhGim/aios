@@ -16,7 +16,7 @@ Scoring: 5 items, each 0-3 points, total 0-15 mapped to 3 risk tiers
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -25,12 +25,12 @@ RISK_PROFILE_NEUTRAL = "중립형"
 RISK_PROFILE_AGGRESSIVE = "공격형"
 
 
-class InvestmentGoal(str, Enum):
+class InvestmentGoal(StrEnum):
     SHORT_TERM_PROFIT = "SHORT_TERM_PROFIT"
     LONG_TERM_GROWTH = "LONG_TERM_GROWTH"
 
 
-class LiquidityNeed(str, Enum):
+class LiquidityNeed(StrEnum):
     WITHIN_1_YEAR = "WITHIN_1_YEAR"
     ONE_TO_THREE_YEARS = "1_TO_3_YEARS"
     OVER_THREE_YEARS = "OVER_3_YEARS"

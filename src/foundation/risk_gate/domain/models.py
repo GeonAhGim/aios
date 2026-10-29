@@ -8,11 +8,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class RiskOutcome(str, Enum):
+class RiskOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
     REDUCE = "REDUCE"
@@ -20,7 +20,7 @@ class RiskOutcome(str, Enum):
     ESCALATE = "ESCALATE"
 
 
-class GateKind(str, Enum):
+class GateKind(StrEnum):
     """L4_risk_and_safety_v1.0.md §3.1/§3.8/§6(`f4b9d6e5a7c8`) 6종 그대로 —
     임의 추가·개명 금지. `evaluate_risk_gate.py`(이 리프)는 여전히
     DEPLOYMENT/PRE_INTENT만 실제로 평가한다(71번 FND-06 최소 산출물).
@@ -36,7 +36,7 @@ class GateKind(str, Enum):
     RECOVERY = "RECOVERY"
 
 
-class SafetyScope(str, Enum):
+class SafetyScope(StrEnum):
     GLOBAL = "GLOBAL"
     TENANT = "TENANT"
     ACCOUNT = "ACCOUNT"
@@ -44,7 +44,7 @@ class SafetyScope(str, Enum):
     PROVIDER = "PROVIDER"
 
 
-class SafetyControlState(str, Enum):
+class SafetyControlState(StrEnum):
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
 
@@ -127,7 +127,7 @@ class FenceSnapshot:
     tokens: Mapping[tuple[SafetyScope, str], int]
 
 
-class LimitScope(str, Enum):
+class LimitScope(StrEnum):
     """R-26 78번 §2.6 노출 한도 스코프 — `SafetyScope`와 이름이 겹치는 항목이
     있어도(TENANT/ACCOUNT/PROVIDER) 별개 enum이다. 이쪽은 "어떤 대상에 한도가
     걸리는가"이고 `SafetyScope`는 "킬스위치가 어디를 멈추는가"라 의미가 다르고,
@@ -142,7 +142,7 @@ class LimitScope(str, Enum):
     PROVIDER = "PROVIDER"
 
 
-class LimitMetric(str, Enum):
+class LimitMetric(StrEnum):
     GROSS_NOTIONAL_PCT = "GROSS_NOTIONAL_PCT"
     NET_NOTIONAL_PCT = "NET_NOTIONAL_PCT"
     MAX_ORDER_NOTIONAL = "MAX_ORDER_NOTIONAL"
@@ -151,12 +151,12 @@ class LimitMetric(str, Enum):
     MAX_LEVERAGE = "MAX_LEVERAGE"
 
 
-class LimitBreachSeverity(str, Enum):
+class LimitBreachSeverity(StrEnum):
     WARN = "WARN"
     CRITICAL = "CRITICAL"
 
 
-class RiskSignalType(str, Enum):
+class RiskSignalType(StrEnum):
     """`risk_signal.type` CHECK, the same 5 values as `d6f7b4c3e5a6` (R-46)."""
 
     DRAWDOWN = "DRAWDOWN"
@@ -166,12 +166,12 @@ class RiskSignalType(str, Enum):
     DISTRUST = "DISTRUST"
 
 
-class RiskSignalSeverity(str, Enum):
+class RiskSignalSeverity(StrEnum):
     WARN = "WARN"
     CRITICAL = "CRITICAL"
 
 
-class RiskSignalState(str, Enum):
+class RiskSignalState(StrEnum):
     OPEN = "OPEN"
     ACKED = "ACKED"
     RESOLVED = "RESOLVED"

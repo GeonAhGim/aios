@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, field_validator
@@ -33,7 +33,7 @@ def _reject_float(value: Any) -> Any:
     return value
 
 
-class SizingMethod(str, Enum):
+class SizingMethod(StrEnum):
     FIXED_FRACTIONAL = "FIXED_FRACTIONAL"
     VOLATILITY_TARGET = "VOLATILITY_TARGET"
     KELLY_CAPPED = "KELLY_CAPPED"

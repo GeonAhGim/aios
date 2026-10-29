@@ -13,12 +13,12 @@ a real-account operational fact the code cannot know on its own
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 MIN_PAPER_DAYS = 7
 
 
-class PromotionBlocker(str, Enum):
+class PromotionBlocker(StrEnum):
     ADR_0829E_CONDITION2_UNMET = "ADR_0829E_CONDITION2_UNMET"
     BUNDLE_NOT_ACTIVE = "BUNDLE_NOT_ACTIVE"
     INSUFFICIENT_PAPER_HISTORY = "INSUFFICIENT_PAPER_HISTORY"

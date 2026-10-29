@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 OcoLeg = Literal["a", "b"]
@@ -29,7 +29,7 @@ OcoLeg = Literal["a", "b"]
 __all__ = ["OcoLeg", "OcoOutcome", "OcoResolution", "resolve_oco", "OcoGroup"]
 
 
-class OcoOutcome(str, Enum):
+class OcoOutcome(StrEnum):
     TRIGGERED = "TRIGGERED"
     CANCELLED = "CANCELLED"
 

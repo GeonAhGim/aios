@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -22,7 +22,7 @@ from pydantic import BaseModel, field_validator, model_validator
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
-class RiskOutcome(str, Enum):
+class RiskOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
     REDUCE = "REDUCE"
@@ -30,7 +30,7 @@ class RiskOutcome(str, Enum):
     ESCALATE = "ESCALATE"
 
 
-class GateKind(str, Enum):
+class GateKind(StrEnum):
     DEPLOYMENT = "DEPLOYMENT"
     PRE_INTENT = "PRE_INTENT"
     PRE_TRADE = "PRE_TRADE"

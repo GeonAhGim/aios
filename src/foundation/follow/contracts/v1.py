@@ -19,12 +19,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
 
-class SizingPolicy(str, Enum):
+class SizingPolicy(StrEnum):
     """How a source signal's sizing is converted into the follower's account
     (spec §2.4 `domain/mirror_rules.py` "weight conversion")."""
 

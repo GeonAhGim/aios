@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -30,7 +30,7 @@ DEFAULT_RECOVERY_CONFIRM_SECONDS = 10.0
 DEFAULT_CHECK_TIMEOUT_SECONDS = 5.0
 
 
-class Diagnosis(str, Enum):
+class Diagnosis(StrEnum):
     NORMAL = "NORMAL"
     DB_ISOLATED_FAILURE = "DB_ISOLATED_FAILURE"  # DB만 단독 장애 — 강제청산 제외 대상
     APPLY_WATCHDOG_DECISION = "APPLY_WATCHDOG_DECISION"  # FD-9.2 기존 판정 그대로 적용

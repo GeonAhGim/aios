@@ -5,13 +5,13 @@ Spec: 01_data_models_v1.3.md#§1.2 (9.11 schema)
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
-class FSMState(str, Enum):
+class FSMState(StrEnum):
     IDLE = "IDLE"
     BUY_ORDER_PENDING = "BUY_ORDER_PENDING"
     HOLDING = "HOLDING"

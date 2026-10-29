@@ -12,7 +12,7 @@ prohibition is enforced by the DC-8 migration's EXCLUDE constraint.
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 import asyncpg
@@ -21,7 +21,7 @@ from pydantic import AwareDatetime, BaseModel
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 
 
-class CoverageQuality(str, Enum):
+class CoverageQuality(StrEnum):
     PROVISIONAL = "PROVISIONAL"
     VALIDATED = "VALIDATED"
 

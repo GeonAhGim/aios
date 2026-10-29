@@ -20,7 +20,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from statistics import median
 from typing import Any
 
@@ -37,7 +37,7 @@ DEFAULT_VOLATILITY_MULTIPLIER = Decimal("5")
 MIN_QUORUM_SOURCES = 2  # primary+참조 1개 이상이면 항상 충족(check() 참조)
 
 
-class DataDistrustLevel(str, Enum):
+class DataDistrustLevel(StrEnum):
     NORMAL = "NORMAL"
     SUSPICIOUS = "SUSPICIOUS"  # 쿼럼 불성립("판정 불가")
     DISTRUSTED = "DISTRUSTED"

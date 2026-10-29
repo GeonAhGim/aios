@@ -233,8 +233,8 @@ def _manual_adjustment(event: LedgerEvent) -> list[PostingLine]:
     # 계정코드 형식·유형 검증은 LC-2에 위임한다(재구현하지 않음).
     account_type(debit_account)
     account_type(credit_account)
-    debit_currency = Currency(event.extra.get("debit_currency", event.currency.value))
-    credit_currency = Currency(event.extra.get("credit_currency", event.currency.value))
+    debit_currency = Currency(str(event.extra.get("debit_currency", event.currency.value)))
+    credit_currency = Currency(str(event.extra.get("credit_currency", event.currency.value)))
     return _finalize(
         [
             _line(1, debit_account, Side.DEBIT, event.amount, debit_currency),

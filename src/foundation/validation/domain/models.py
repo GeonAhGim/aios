@@ -14,12 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 
-class RunState(str, Enum):
+class RunState(StrEnum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
@@ -27,7 +27,7 @@ class RunState(str, Enum):
     CANCELLED = "CANCELLED"
 
 
-class Outcome(str, Enum):
+class Outcome(StrEnum):
     """76번 §3 "PASS, FAIL, PASS_WITH_OBLIGATIONS만 반환한다."""
 
     PASS = "PASS"

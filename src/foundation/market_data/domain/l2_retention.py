@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 
 __all__ = [
     "RecordKind",
@@ -35,12 +35,12 @@ __all__ = [
 ]
 
 
-class RecordKind(str, Enum):
+class RecordKind(StrEnum):
     FULL = "FULL"
     AGGREGATE = "AGGREGATE"
 
 
-class RetentionAction(str, Enum):
+class RetentionAction(StrEnum):
     KEEP_FULL = "KEEP_FULL"
     KEEP_AGGREGATE = "KEEP_AGGREGATE"
     DOWNSAMPLE = "DOWNSAMPLE"

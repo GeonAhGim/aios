@@ -6,7 +6,7 @@ Spec: 01_data_models_v1.3.md#§1.5
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 from src.data.models.base import ProvenanceStatus
 
 
-class MemoryType(str, Enum):
+class MemoryType(StrEnum):
     SHORT_TERM = "SHORT_TERM"
     WORKING = "WORKING"
     LONG_TERM = "LONG_TERM"

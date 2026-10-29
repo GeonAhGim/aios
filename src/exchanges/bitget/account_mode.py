@@ -31,7 +31,7 @@ which would be a new adapter instance.
 from __future__ import annotations
 
 from collections.abc import Callable
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol
 
 from src.core.exceptions import FatalExchangeError
@@ -45,7 +45,7 @@ UNIFIED_ACCOUNT_REQUIRED_CODE = "40085"
 WRONG_ENVIRONMENT_CODE = "40099"
 
 
-class BitgetAccountMode(str, Enum):
+class BitgetAccountMode(StrEnum):
     CLASSIC = "classic"
     UNIFIED = "unified"
 

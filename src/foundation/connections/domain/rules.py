@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from src.foundation.connections.domain.models import CapabilityScope, ConnectionState
 
@@ -84,7 +84,7 @@ def require_transition_allowed(current: ConnectionState, target: ConnectionState
         )
 
 
-class ProviderResponseClassification(str, Enum):
+class ProviderResponseClassification(StrEnum):
     """CON-006 "malformed/stale/duplicate provider response is classified
     and does not overwrite history" — among these three classifications,
     only FRESH is a storage target."""

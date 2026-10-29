@@ -23,7 +23,7 @@ scope 매칭(§2.1 "SYMBOL 한도가 다른 심볼에 미적용" 등 6개 scope 
 from __future__ import annotations
 
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from src.core.risk.rules.base import RuleUnit
 
 
-class LimitScope(str, Enum):
+class LimitScope(StrEnum):
     TENANT = "TENANT"
     ACCOUNT = "ACCOUNT"
     STRATEGY = "STRATEGY"
@@ -45,7 +45,7 @@ class LimitScope(str, Enum):
     PROVIDER = "PROVIDER"
 
 
-class LimitMetric(str, Enum):
+class LimitMetric(StrEnum):
     GROSS_NOTIONAL_PCT = "GROSS_NOTIONAL_PCT"
     NET_NOTIONAL_PCT = "NET_NOTIONAL_PCT"
     MAX_ORDER_NOTIONAL = "MAX_ORDER_NOTIONAL"

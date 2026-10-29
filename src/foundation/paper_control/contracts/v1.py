@@ -7,7 +7,7 @@ Spec: AIOSproject 47_paper_execution_and_control_center_specification_v1.0.md,
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 SCHEMA_VERSION = "v1"
 
 
-class DeploymentState(str, Enum):
+class DeploymentState(StrEnum):
     REQUESTED = "REQUESTED"
     READY = "READY"
     RUNNING = "RUNNING"

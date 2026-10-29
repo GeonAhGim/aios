@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -18,12 +18,12 @@ from pydantic import BaseModel
 SCHEMA_VERSION = "v1"
 
 
-class StatementScope(str, Enum):
+class StatementScope(StrEnum):
     PAPER = "PAPER"
     LIVE = "LIVE"
 
 
-class StatementState(str, Enum):
+class StatementState(StrEnum):
     ESTIMATED = "ESTIMATED"
     FINAL = "FINAL"
     CORRECTED = "CORRECTED"

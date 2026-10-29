@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from src.foundation.risk.domain.models import PersonalRiskBundle
 
 
-class PersonalRiskViolation(str, Enum):
+class PersonalRiskViolation(StrEnum):
     ACCOUNT_STATE_INVALID = "ACCOUNT_STATE_INVALID"
     SYMBOL_NOT_WHITELISTED = "SYMBOL_NOT_WHITELISTED"
     POSITION_SIZE_EXCEEDED = "POSITION_SIZE_EXCEEDED"

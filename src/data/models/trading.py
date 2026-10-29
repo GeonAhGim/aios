@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, SecretStr
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, SecretStr
 from src.data.models.base import AssetClass, Money, OptionType
 
 
-class OrderStatus(str, Enum):
+class OrderStatus(StrEnum):
     """8.3 Order State Machine 1:1 implementation"""
 
     CREATED = "CREATED"
@@ -38,12 +38,12 @@ class OrderStatus(str, Enum):
     UNKNOWN = "UNKNOWN"  # 8.3 principle: do not assume UNKNOWN means failure
 
 
-class OrderSide(str, Enum):
+class OrderSide(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
 
 
-class OrderType(str, Enum):
+class OrderType(StrEnum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
     # TWAP/VWAP etc. are implemented as split orders in the 8.3-A

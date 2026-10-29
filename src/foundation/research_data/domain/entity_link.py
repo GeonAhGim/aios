@@ -59,7 +59,7 @@ class EntityKey:
     venue: Venue | None = None
 
 
-class UnmappedReason(str, enum.Enum):
+class UnmappedReason(enum.StrEnum):
     NO_DETERMINISTIC_KEY = "no_deterministic_key"
     NOT_FOUND = "not_found"
 

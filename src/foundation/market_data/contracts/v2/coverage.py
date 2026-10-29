@@ -18,7 +18,7 @@ asset_class as separate fields.
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, model_validator
@@ -30,7 +30,7 @@ from src.foundation.market_data.contracts.v2.instruments import ULID
 SCHEMA_VERSION: Literal["coverage-v2"] = "coverage-v2"
 
 
-class QualityGrade(str, Enum):
+class QualityGrade(StrEnum):
     """Trust grade of a declared coverage span. Unverified: the actual
     grading criteria per exchange/vendor are not based on any external
     contract — these three tiers are an internal grading scheme this

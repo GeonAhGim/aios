@@ -7,28 +7,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class ConsentState(str, Enum):
+class ConsentState(StrEnum):
     ACTIVE = "ACTIVE"
     REVOKED = "REVOKED"
 
 
-class TenantKind(str, Enum):
+class TenantKind(StrEnum):
     PERSONAL = "PERSONAL"
     HOUSEHOLD = "HOUSEHOLD"
     ORGANIZATION = "ORGANIZATION"
 
 
-class TenantState(str, Enum):
+class TenantState(StrEnum):
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
     DELETED = "DELETED"
 
 
-class MembershipRole(str, Enum):
+class MembershipRole(StrEnum):
     OWNER = "OWNER"
     ADMIN = "ADMIN"
     MEMBER = "MEMBER"
@@ -36,7 +36,7 @@ class MembershipRole(str, Enum):
     SERVICE = "SERVICE"
 
 
-class MembershipState(str, Enum):
+class MembershipState(StrEnum):
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
     REVOKED = "REVOKED"

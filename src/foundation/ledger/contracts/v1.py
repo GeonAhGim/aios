@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -28,7 +28,7 @@ from src.data.models.base import Currency
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
-class AccountType(str, Enum):
+class AccountType(StrEnum):
     ASSET = "ASSET"
     LIABILITY = "LIABILITY"
     REVENUE = "REVENUE"
@@ -36,19 +36,19 @@ class AccountType(str, Enum):
     CLEARING = "CLEARING"
 
 
-class UserSub(str, Enum):
+class UserSub(StrEnum):
     AVAILABLE = "AVAILABLE"
     HELD = "HELD"
     PENDING_PAYOUT = "PENDING_PAYOUT"
     RECEIVABLE = "RECEIVABLE"
 
 
-class Side(str, Enum):
+class Side(StrEnum):
     DEBIT = "DEBIT"
     CREDIT = "CREDIT"
 
 
-class LedgerEventType(str, Enum):
+class LedgerEventType(StrEnum):
     TOPUP_CONFIRMED = "TOPUP_CONFIRMED"
     HOLD_PLACED = "HOLD_PLACED"
     HOLD_CAPTURED = "HOLD_CAPTURED"
@@ -60,7 +60,7 @@ class LedgerEventType(str, Enum):
     MANUAL_ADJUSTMENT = "MANUAL_ADJUSTMENT"
 
 
-class HoldState(str, Enum):
+class HoldState(StrEnum):
     PENDING = "PENDING"
     CAPTURED = "CAPTURED"
     RELEASED = "RELEASED"

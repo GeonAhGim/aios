@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from src.core.observability.metric_names import (
@@ -25,7 +25,7 @@ from src.core.observability.metric_names import (
 from src.core.observability.metrics import MetricsPort
 
 
-class GateOutcome(str, Enum):
+class GateOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
 

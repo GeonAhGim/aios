@@ -7,18 +7,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
 
-class Outcome(str, Enum):
+class Outcome(StrEnum):
     SUCCESS = "SUCCESS"
     DENIED = "DENIED"
     ERROR = "ERROR"
 
 
-class Classification(str, Enum):
+class Classification(StrEnum):
     PUBLIC = "PUBLIC"
     INTERNAL = "INTERNAL"
     CONFIDENTIAL = "CONFIDENTIAL"

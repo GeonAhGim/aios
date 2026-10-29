@@ -19,7 +19,7 @@ the stored rows instead of being recomputed.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from src.foundation.mandates.contracts.v1 import (
@@ -32,7 +32,7 @@ from src.foundation.mandates.domain.rules import compile_rule_hash
 from src.foundation.mandates.ports.repository import MandateRepository
 
 
-class ExplainErrorCode(str, Enum):
+class ExplainErrorCode(StrEnum):
     DECISION_NOT_FOUND = "CM_EXPLAIN_DECISION_NOT_FOUND"
     BUNDLE_DRIFTED = "CM_EXPLAIN_BUNDLE_DRIFTED"
 

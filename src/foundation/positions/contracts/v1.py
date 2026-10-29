@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -32,12 +32,12 @@ from src.data.models.trading import OrderSide
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
-class CostMethod(str, Enum):
+class CostMethod(StrEnum):
     FIFO = "FIFO"
     WEIGHTED = "WEIGHTED"
 
 
-class JournalEntryType(str, Enum):
+class JournalEntryType(StrEnum):
     FILL = "FILL"
     FUNDING = "FUNDING"
     FEE = "FEE"
@@ -45,7 +45,7 @@ class JournalEntryType(str, Enum):
     CORP_ACTION = "CORP_ACTION"
 
 
-class PositionErrorCode(str, Enum):
+class PositionErrorCode(StrEnum):
     """The 8 error-taxonomy codes from §3.2 (B). See the spec body for each
     value's retryability and the caller's required action — the comments
     here just carry that text over verbatim. This contract file only

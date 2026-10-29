@@ -11,7 +11,7 @@ domain/models.py를 직접 참조하지 않는다.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -19,7 +19,7 @@ from pydantic import BaseModel
 SCHEMA_VERSION = "v1"
 
 
-class RiskOutcome(str, Enum):
+class RiskOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
     REDUCE = "REDUCE"
@@ -27,7 +27,7 @@ class RiskOutcome(str, Enum):
     ESCALATE = "ESCALATE"
 
 
-class GateKind(str, Enum):
+class GateKind(StrEnum):
     """L4_risk_and_safety_v1.0.md §3.1/§6(`f4b9d6e5a7c8`) 6종 그대로."""
 
     DEPLOYMENT = "DEPLOYMENT"
@@ -38,7 +38,7 @@ class GateKind(str, Enum):
     RECOVERY = "RECOVERY"
 
 
-class SafetyScope(str, Enum):
+class SafetyScope(StrEnum):
     GLOBAL = "GLOBAL"
     TENANT = "TENANT"
     ACCOUNT = "ACCOUNT"
@@ -46,7 +46,7 @@ class SafetyScope(str, Enum):
     PROVIDER = "PROVIDER"
 
 
-class SafetyControlState(str, Enum):
+class SafetyControlState(StrEnum):
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
 

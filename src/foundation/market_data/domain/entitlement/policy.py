@@ -34,7 +34,7 @@ allow a delayed feed, it's a partial allow (`mode="delayed"`), not a denial.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -93,7 +93,7 @@ class FeedRequest(BaseModel, frozen=True):
     want_realtime: bool
 
 
-class EntitlementDenialReason(str, Enum):
+class EntitlementDenialReason(StrEnum):
     NO_GRANT = "NO_GRANT"
     TENANT_MISMATCH = "TENANT_MISMATCH"
     EXPIRED = "EXPIRED"

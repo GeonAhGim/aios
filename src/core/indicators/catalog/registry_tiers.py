@@ -33,7 +33,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
@@ -65,7 +65,7 @@ _UNCATEGORIZED = "uncategorized"
 _SCRIPT_CATEGORY = "script"
 
 
-class Tier(str, Enum):
+class Tier(StrEnum):
     """Catalog priority order (declaration order = name collision resolution order, CORE is top)."""
 
     CORE = "core"

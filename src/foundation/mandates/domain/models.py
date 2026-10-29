@@ -8,11 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class MandateRevisionState(str, Enum):
+class MandateRevisionState(StrEnum):
     DRAFT = "DRAFT"
     PROPOSED = "PROPOSED"
     ACTIVE = "ACTIVE"
@@ -21,7 +21,7 @@ class MandateRevisionState(str, Enum):
     CANCELLED = "CANCELLED"
 
 
-class Autonomy(str, Enum):
+class Autonomy(StrEnum):
     """75번 §3 ALLOWED_AUTONOMY 규칙이 참조하는 3단계. LIMITED_LIVE라고 해서
     이 코드베이스가 실제로 LIVE를 허용한다는 뜻은 아니다 — mandate가 표현하는
     "사용자가 위임하고 싶은 상한"일 뿐이고, 실제 LIVE 게이트는 여전히 별도
@@ -76,7 +76,7 @@ class PortfolioMandate:
     created_at: datetime
 
 
-class PolicyOutcome(str, Enum):
+class PolicyOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
     REQUIRE_APPROVAL = "REQUIRE_APPROVAL"

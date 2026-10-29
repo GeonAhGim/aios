@@ -21,7 +21,7 @@ afterward (FA_HIERARCHY_VIOLATION).
 from __future__ import annotations
 
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -32,7 +32,7 @@ from src.data.models.base import Currency
 SCHEMA_VERSION: Literal["v1"] = "v1"
 
 
-class EntityErrorCode(str, Enum):
+class EntityErrorCode(StrEnum):
     """Hierarchy-related codes that this leaf (FA-1) defines out of the §3 error
     taxonomy. The actual exception classes are owned by `domain/hierarchy.py`;
     this contract only defines the code values (same principle as LB-1's

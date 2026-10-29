@@ -38,7 +38,7 @@ ResearchItemKind = Literal["filing", "news", "macro", "alt"]
 RedistributionPolicy = Literal["store_full", "store_excerpt", "link_only"]
 
 
-class ResearchDataErrorCode(str, enum.Enum):
+class ResearchDataErrorCode(enum.StrEnum):
     """§3's error taxonomy verbatim -- inventing new codes is forbidden,
     this enum is the single source of truth. The actual exception classes
     are each owned by the domain leaf that implements that rule

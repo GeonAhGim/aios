@@ -10,7 +10,7 @@ only through this file — they must not reference domain/models.py directly (71
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -19,13 +19,13 @@ from pydantic import BaseModel
 SCHEMA_VERSION = "v1"
 
 
-class Outcome(str, Enum):
+class Outcome(StrEnum):
     SUCCESS = "SUCCESS"
     DENIED = "DENIED"
     ERROR = "ERROR"
 
 
-class Classification(str, Enum):
+class Classification(StrEnum):
     PUBLIC = "PUBLIC"
     INTERNAL = "INTERNAL"
     CONFIDENTIAL = "CONFIDENTIAL"

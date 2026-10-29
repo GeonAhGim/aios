@@ -76,9 +76,12 @@ def test_submit_payload_hash_literal() -> None:
 
 
 def test_submit_negative_enum_member_would_change_key_text() -> None:
-    # NEGATIVE: the enum member itself is not the pinned text; only `.value` is.
+    # ExchangeErrorKind is a StrEnum (ADR-2026-10-29-A): str(), format() and f-string all
+    # yield the value on every Python version, so the pinned key text cannot drift.
     assert ExchangeErrorKind.AUTH.value == "AUTH"
-    assert str(ExchangeErrorKind.AUTH) == "ExchangeErrorKind.AUTH"
+    assert str(ExchangeErrorKind.AUTH) == "AUTH"
+    assert f"{ExchangeErrorKind.AUTH}" == "AUTH"
+    assert format(ExchangeErrorKind.AUTH) == "AUTH"
     assert type(ExchangeErrorKind.AUTH.value) is str
 
 
@@ -94,10 +97,11 @@ def test_safety_control_detail_and_key_literals() -> None:
 
 
 def test_safety_scope_value_is_the_only_stable_text() -> None:
-    # NEGATIVE: SafetyScope is a (str, Enum) and is NOT in the detail text; if it
-    # ever were, `.value` (not f-string) is the version-independent form.
+    # SafetyScope is a StrEnum (ADR-2026-10-29-A) and is NOT in the detail text; even if
+    # it were, str()/format()/f-string all yield the value on every Python version.
     assert SafetyScope.GLOBAL.value == "GLOBAL"
-    assert str(SafetyScope.GLOBAL) == "SafetyScope.GLOBAL"
+    assert str(SafetyScope.GLOBAL) == "GLOBAL"
+    assert f"{SafetyScope.GLOBAL}" == "GLOBAL"
 
 
 # --- json.dumps(default=str) sites ---

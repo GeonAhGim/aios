@@ -12,7 +12,7 @@ re-running the aggregation.
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -24,7 +24,7 @@ SCHEMA_VERSION: Literal["candle-lineage-v2"] = "candle-lineage-v2"
 __all__ = ["SCHEMA_VERSION", "SourceKind", "TickLineage"]
 
 
-class SourceKind(str, Enum):
+class SourceKind(StrEnum):
     """Where a stored candle's OHLCV values came from."""
 
     VENDOR = "VENDOR"

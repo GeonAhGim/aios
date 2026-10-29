@@ -9,12 +9,12 @@ Fail-closed 원칙 — 미지의 HTTP 상태코드/거래소 오류코드는 `UN
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from src.core.exceptions import ExchangeAPIError
 
 
-class ExchangeErrorKind(str, Enum):
+class ExchangeErrorKind(StrEnum):
     TRANSIENT_NETWORK = "TRANSIENT_NETWORK"
     RATE_LIMITED = "RATE_LIMITED"
     SERVER_ERROR = "SERVER_ERROR"

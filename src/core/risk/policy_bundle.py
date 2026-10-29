@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -35,7 +35,7 @@ def _require_aware_utc(value: datetime) -> datetime:
     return value
 
 
-class BundleState(str, Enum):
+class BundleState(StrEnum):
     DRAFT = "DRAFT"
     APPROVED = "APPROVED"
     ACTIVE = "ACTIVE"

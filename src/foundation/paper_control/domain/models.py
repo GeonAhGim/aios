@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class DeploymentState(str, Enum):
+class DeploymentState(StrEnum):
     REQUESTED = "REQUESTED"
     READY = "READY"
     RUNNING = "RUNNING"
@@ -21,7 +21,7 @@ class DeploymentState(str, Enum):
     RECOVERY_REVIEW = "RECOVERY_REVIEW"
 
 
-class CredentialClass(str, Enum):
+class CredentialClass(StrEnum):
     """77 §1 "credential_class=PAPER" — the only value this context handles.
     Like CredentialClass.READONLY in 74 connections, we do not pre-create
     other values here (LIVE requires separate review after gates 60-63)."""
@@ -29,12 +29,12 @@ class CredentialClass(str, Enum):
     PAPER = "PAPER"
 
 
-class CommandOutcome(str, Enum):
+class CommandOutcome(StrEnum):
     ACCEPTED = "ACCEPTED"
     DENIED = "DENIED"
 
 
-class CommandType(str, Enum):
+class CommandType(StrEnum):
     REQUEST = "REQUEST"
     START = "START"
     PAUSE = "PAUSE"

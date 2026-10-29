@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from datetime import datetime, time
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -65,27 +65,27 @@ class RuleNotFoundError(LookupError):
     """Rule not found or cross-tenant access — treat as 404, never leak existence."""
 
 
-class ConditionKind(str, Enum):
+class ConditionKind(StrEnum):
     PRICE = "price"
     INDICATOR = "indicator"
     DISCLOSURE = "disclosure"
     TIME = "time"
 
 
-class ActionKind(str, Enum):
+class ActionKind(StrEnum):
     NOTIFY = "notify"
     ORDER = "order"
     HEDGE = "hedge"
     KILL = "kill"
 
 
-class RuleStatus(str, Enum):
+class RuleStatus(StrEnum):
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     CANCELLED = "CANCELLED"
 
 
-class PriceField(str, Enum):
+class PriceField(StrEnum):
     OPEN = "open"
     HIGH = "high"
     LOW = "low"

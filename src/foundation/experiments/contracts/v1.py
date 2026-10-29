@@ -46,7 +46,7 @@ def _validate_sha256_hex(value: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a lowercase sha256 hex digest (64 hex chars)")
 
 
-class ExperimentKind(str, enum.Enum):
+class ExperimentKind(enum.StrEnum):
     BACKTEST = "backtest"
     SWEEP = "sweep"
     WALK_FORWARD = "walk_forward"

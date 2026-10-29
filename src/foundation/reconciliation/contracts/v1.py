@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -16,7 +16,7 @@ from pydantic import BaseModel
 SCHEMA_VERSION = "v1"
 
 
-class Classification(str, Enum):
+class Classification(StrEnum):
     HEALTHY = "HEALTHY"
     PENDING = "PENDING"
     MINOR_DIFFERENCE = "MINOR_DIFFERENCE"

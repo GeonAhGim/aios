@@ -44,7 +44,7 @@ lineage is entirely DC-22's responsibility, not this contract's.
 from __future__ import annotations
 
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, Field, model_validator
@@ -77,7 +77,7 @@ Nanoseconds = Annotated[int, AfterValidator(_validate_nanoseconds)]
 Seq = Annotated[int, Field(ge=0)]
 
 
-class Aggressor(str, Enum):
+class Aggressor(StrEnum):
     """Which side initiated the trade (crossed the spread). `UNKNOWN` covers
     venues that do not disclose aggressor side on their public tick feed."""
 

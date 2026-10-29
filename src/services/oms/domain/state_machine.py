@@ -26,13 +26,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from src.data.models.trading import OrderStatus
 from src.services.oms.domain.errors import InvalidOrderTransitionError
 
 
-class OrderEvent(str, Enum):
+class OrderEvent(StrEnum):
     VALIDATED = "VALIDATED"
     VALIDATION_FAILED = "VALIDATION_FAILED"
     SENT = "SENT"

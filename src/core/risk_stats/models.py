@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 
 
-class VarMethod(str, Enum):
+class VarMethod(StrEnum):
     PARAMETRIC = "PARAMETRIC"
     HISTORICAL = "HISTORICAL"
     CORNISH_FISHER = "CORNISH_FISHER"

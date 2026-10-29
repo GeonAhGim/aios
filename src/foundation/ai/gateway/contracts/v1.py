@@ -57,7 +57,7 @@ def _validate_sha256_hex(value: str) -> str:
     return value
 
 
-class Scope(str, enum.Enum):
+class Scope(enum.StrEnum):
     """§3's scope taxonomy verbatim -- inventing a fifth scope (e.g. LIVE or
     a token-management scope) is forbidden, this enum is the single source
     of truth (I-06)."""
@@ -68,7 +68,7 @@ class Scope(str, enum.Enum):
     PAPER = "paper"  # request a PAPER execution (requires a ConfirmTicket)
 
 
-class AgentGatewayErrorCode(str, enum.Enum):
+class AgentGatewayErrorCode(enum.StrEnum):
     """§3's error taxonomy, gateway-owned subset only (token issuance/scope
     checks and confirm-ticket round-trips) -- the provider-budget and
     proposal-schema codes belong to AI-5/AI-8's contracts, not this file."""

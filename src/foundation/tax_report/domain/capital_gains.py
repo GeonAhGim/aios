@@ -11,12 +11,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import MAX_EMAX, MIN_EMIN, Context, Decimal, localcontext
-from enum import Enum
+from enum import StrEnum
 
 from src.data.models.base import Currency
 
 
-class AssetClass(str, Enum):
+class AssetClass(StrEnum):
     DOMESTIC_STOCK = "DOMESTIC_STOCK"
     FOREIGN_STOCK = "FOREIGN_STOCK"
     CRYPTO = "CRYPTO"

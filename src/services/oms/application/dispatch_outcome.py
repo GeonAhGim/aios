@@ -24,7 +24,7 @@ fail-closed 원칙(I10): 주문 제출 뒤에 난 예외 중 "거래소가 이 �
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from src.data.models.trading import Order, OrderStatus
 from src.exchanges.common.error_taxonomy import (
@@ -34,7 +34,7 @@ from src.exchanges.common.error_taxonomy import (
 )
 
 
-class OutcomeKind(str, Enum):
+class OutcomeKind(StrEnum):
     ACK = "ACK"  # 거래소 수락 → ACKNOWLEDGED
     REJECTED = "REJECTED"  # 거래소 거부(확정) → REJECTED
     UNKNOWN = "UNKNOWN"  # 응답 유실/미분류 → UNKNOWN, outbox DONE(재전송 금지)

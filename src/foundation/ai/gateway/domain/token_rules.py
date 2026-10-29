@@ -21,11 +21,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class Scope(str, Enum):
+class Scope(StrEnum):
     """The full universe of scopes per spec §3 "scope semantics" -- exactly
     these four. LIVE, funds, policy, and token-management scopes do not
     exist (I-06, spec §3 "LIVE, funds, policy, and token-management scopes

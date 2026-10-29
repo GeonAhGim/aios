@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -19,7 +19,7 @@ from pydantic import BaseModel
 SCHEMA_VERSION = "v1"
 
 
-class ConnectionState(str, Enum):
+class ConnectionState(StrEnum):
     PENDING_CONSENT = "PENDING_CONSENT"
     CONNECTING = "CONNECTING"
     ACTIVE_READONLY = "ACTIVE_READONLY"
@@ -28,7 +28,7 @@ class ConnectionState(str, Enum):
     DISCONNECTED = "DISCONNECTED"
 
 
-class CapabilityScope(str, Enum):
+class CapabilityScope(StrEnum):
     READ_BALANCE = "READ_BALANCE"
     READ_POSITION = "READ_POSITION"
     READ_ACTIVITY = "READ_ACTIVITY"

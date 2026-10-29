@@ -14,22 +14,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 
-class ValuationState(str, Enum):
+class ValuationState(StrEnum):
     ESTIMATED = "ESTIMATED"
     RECONCILED = "RECONCILED"
 
 
-class StatementState(str, Enum):
+class StatementState(StrEnum):
     ESTIMATED = "ESTIMATED"
     FINAL = "FINAL"
     CORRECTED = "CORRECTED"
 
 
-class CashflowKind(str, Enum):
+class CashflowKind(StrEnum):
     DEPOSIT = "DEPOSIT"
     WITHDRAWAL = "WITHDRAWAL"
 

@@ -5,14 +5,14 @@ Spec: 01_data_models_v1.3.md#§1.1 (1:1 Pydantic implementation of section 4.3 s
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     PENDING = "PENDING"
     ASSIGNED = "ASSIGNED"
     RUNNING = "RUNNING"

@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 
 from src.core.exceptions import CurrencyMismatchError
 
 
-class ProvenanceStatus(str, Enum):
+class ProvenanceStatus(StrEnum):
     """4.6-A Memory 검증 상태 — Task/Memory/Strategy 공통 사용"""
 
     UNVERIFIED = "UNVERIFIED"
@@ -22,12 +22,12 @@ class ProvenanceStatus(str, Enum):
     DISPUTED = "DISPUTED"
 
 
-class Currency(str, Enum):
+class Currency(StrEnum):
     USDT = "USDT"
     KRW = "KRW"
 
 
-class AssetClass(str, Enum):
+class AssetClass(StrEnum):
     """AIOS가 표현할 수 있는 전체 자산군 상위집합. 개별 거래소가 이 중 무엇을
     실제로 지원하는지는 ExchangeCapability.supported_asset_classes가
     선언한다 — 이 enum에 있다고 모든 거래소에서 거래 가능하다는 뜻이 아니다."""
@@ -45,7 +45,7 @@ class AssetClass(str, Enum):
     OVERSEAS_OPTION = "OVERSEAS_OPTION"
 
 
-class OptionType(str, Enum):
+class OptionType(StrEnum):
     CALL = "CALL"
     PUT = "PUT"
 

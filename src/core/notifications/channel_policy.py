@@ -8,12 +8,12 @@ table if operations requires frequent runtime changes (per FD-17.2 original).
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class NotificationChannel(str, Enum):
+class NotificationChannel(StrEnum):
     EMAIL = "EMAIL"
     PUSH = "PUSH"
     IN_APP = "IN_APP"

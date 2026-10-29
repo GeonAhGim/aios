@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import asyncpg
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 PublishFn = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
-class CircuitBreakerLevel(str, Enum):
+class CircuitBreakerLevel(StrEnum):
     NORMAL = "normal"
     WARNING = "warning"
     RESTRICTED = "restricted"

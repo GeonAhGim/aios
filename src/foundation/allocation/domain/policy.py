@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from decimal import ROUND_HALF_EVEN, Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import ClassVar, Literal
 from uuid import UUID
 
@@ -50,7 +50,7 @@ def round_to_quantum(value: Decimal, quantum: Decimal) -> Decimal:
     return units * quantum
 
 
-class AllocationErrorCode(str, Enum):
+class AllocationErrorCode(StrEnum):
     """Allocation-related error codes defined by this leaf (FA-7) among the
     §3 error taxonomy."""
 
@@ -65,7 +65,7 @@ class AllocationResidualError(ValueError):
     code: ClassVar[AllocationErrorCode] = AllocationErrorCode.RESIDUAL
 
 
-class AllocationPolicy(str, Enum):
+class AllocationPolicy(StrEnum):
     PRO_RATA = "pro_rata"
     FIXED_WEIGHT = "fixed_weight"
     MANUAL = "manual"

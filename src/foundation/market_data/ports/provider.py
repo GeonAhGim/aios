@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import AwareDatetime, BaseModel
@@ -184,7 +184,7 @@ def require_microstructure(provider: MarketDataProvider, capability: str) -> Mic
     return provider
 
 
-class DataProviderErrorCode(str, Enum):
+class DataProviderErrorCode(StrEnum):
     """§3.1 error taxonomy. A failure outside these 4 codes must be
     propagated by the caller as the original exception — an unknown failure
     is never forced into this list (same principle as §4.1 fail-closed, in

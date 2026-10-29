@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
@@ -21,7 +21,7 @@ MIN_NOTIONAL_UNIT = Decimal("0.01")
 """Minimum tradable unit (2 decimal places) -- a conversion below this is rejected."""
 
 
-class MirrorRejectionReason(str, Enum):
+class MirrorRejectionReason(StrEnum):
     SOURCE_INACTIVE = "FOLLOW_SOURCE_INACTIVE"
     LISTING_MISMATCH = "FOLLOW_LISTING_MISMATCH"
     FLAT_SIGNAL = "FOLLOW_FLAT_SIGNAL"

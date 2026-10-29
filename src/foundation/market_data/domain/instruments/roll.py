@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Context, Decimal, DecimalException, localcontext
-from enum import Enum
+from enum import StrEnum
 
 from src.foundation.market_data.contracts.v2.instruments import Instrument, InstrumentKind
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
@@ -23,7 +23,7 @@ class RollError(ValueError):
     """Invalid contracts, calendar coverage, or prices prevent construction."""
 
 
-class Adjustment(str, Enum):
+class Adjustment(StrEnum):
     NONE = "NONE"
     RATIO = "RATIO"
     DIFFERENCE = "DIFFERENCE"

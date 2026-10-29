@@ -12,12 +12,12 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.5, §9 LC-5.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from src.foundation.ledger.contracts.v1 import HoldState
 
 
-class HoldEvent(str, Enum):
+class HoldEvent(StrEnum):
     PLACE = "PLACE"
     CAPTURE = "CAPTURE"
     RELEASE = "RELEASE"

@@ -19,7 +19,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +45,7 @@ class WatchdogSnapshot(BaseModel):
     exchange_healthy: bool
 
 
-class WatchdogAction(str, Enum):
+class WatchdogAction(StrEnum):
     NORMAL = "NORMAL"
     HALT = "HALT"
     LIQUIDATE = "LIQUIDATE"

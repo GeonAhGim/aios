@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol
 
 from scripts.canary_bitget_lib.config import CanaryLimits
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MIN_NOTIONAL_USDT = Decimal("1")
 
 
-class GateVerdict(str, Enum):
+class GateVerdict(StrEnum):
     ALLOW = "ALLOW"
     REJECT = "REJECT"
 
