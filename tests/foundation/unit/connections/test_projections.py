@@ -40,6 +40,7 @@ from src.foundation.connections.projections import (
     build_connection_list_view,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _NOW = datetime(2026, 9, 25, tzinfo=UTC)
 
@@ -288,14 +289,14 @@ async def test_gate_red_budget_actually_fails_with_cpu_injection(
 ) -> None:
     """게이트 적색 재현 -- 성능 단언이 tautology가 아님을 증명한다.
 
-    CPU 예산(p95 < 100ms)이므로 sleep 대신 실제 CPU 부하를 주입한다.
-    `sum(i*i for i in range(3_000_000))` 연산이 ~110ms CPU를 소모하므로
-    같은 p95 < 100ms 단언이 AssertionError를 일으켜야 한다(task-16005)."""
+    CPU 예산(p95 < 100ms)이므로 virtual_delayed_sync로 가상 CPU 지연을
+    주입한다. 실제 busy-wait 없이 ledger에 110ms를 더하므로 같은 p95 < 100ms
+    단언이 AssertionError를 일으켜야 한다(task-21181, task-16005 선례)."""
     tenant_id = uuid4()
 
     async def _build_with_cpu_load() -> None:
-        # CPU-bound work: ~110ms on this host (measured, task-16005)
-        _ = sum(i * i for i in range(3_000_000))
+        # virtual_delayed_sync: 0.11초 CPU+wall 지연을 ledger에 추가 (실제 busy-wait 없음)
+        virtual_delayed_sync(lambda: None, 0.11)()
         connections = [_connection(tenant_id) for _ in range(5)]
         bindings: dict[UUID, CredentialBinding | None] = {c.id: _binding(c.id) for c in connections}
         repo = FakeConnectionRepository(connections=connections, bindings=bindings)
