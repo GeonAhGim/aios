@@ -150,16 +150,17 @@ async def test_raw_http_exception_with_unmapped_status_code_keeps_envelope_shape
 
 
 # --- PATCH /users/me: envelope 없이 405 Method Not Allowed ---
-# PLT-17~21: PATCH는 /users/me 라우터에 정의되지 않음 — 415(envelope-required)가
-# 아닌 405(Method Not Allowed)를 반환해야 한다. envelope 포맷이 지원되지 않는
-# 메서드인 경우 415가 아닌 HTTP 표준 405가 우선한다.
+# PLT-17~21: PATCH는 /users/me 라우터에 정의되지 않음 — 정의되지 않은 HTTP
+# 메서드에 대해 Starlette 기본 405 응답({detail} 본문)을 반환한다. 봉투(envelope)
+# 포맷은 라우터가 정의되지 않아 적용되지 않는다.
 
 
-async def test_patch_users_me_returns_405_not_415(client: AsyncClient):
+async def test_patch_users_me_returns_405_method_not_allowed(client: AsyncClient):
     """PATCH /users/me는 정의되지 않은 메서드 — 405 Method Not Allowed.
-    envelope 포맷이 지원되지 않는 메서드인 경우 415가 아닌 HTTP 표준 405가 우선한다."""
+    라우터가 정의되지 않아 envelope 포맷이 적용되지 않고 Starlette 기본 응답을 반환한다."""
     response = await client.patch("/users/me")
     assert response.status_code == 405
+    assert response.status_code != 415
     body = response.json()
     assert "detail" in body
     assert body["detail"] == "Method Not Allowed"
