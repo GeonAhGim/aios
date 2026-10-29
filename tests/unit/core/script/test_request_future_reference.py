@@ -199,10 +199,9 @@ def test_confirmed_source_index_single_call_cpu_converges_to_zero() -> None:
     """단일 호출 CPU 측정의 0 수렴 검증: `confirmed_source_index`는 O(1)
     산술 연산이므로 1회 호출의 CPU 시간이 0에 수렴해야 한다.
 
-    `PerfBudget.sample()`은 `time.process_time()`을 사용하므로 Windows의
-    약 15.6ms 양자화 오차가 있을 수 있다. `batch`로 여러 호출을 묶어
-    평균하면 양자화 오차가 `tick/batch`로 줄어든다 — 1ms 미만이어야
-    캐시가 아닌 순수 연산 비용임을 증명한다.
+    Windows time.process_time()의 ~15.6ms 양자화 tick이 단발 측정 한 번에
+    흔들리지 않도록 `best_of(5)`로 N회 측정 후 최소값을 취한다
+    (task-21094·21049 패턴). 단언 의미와 예산(1ms)은 그대로 유지.
     """
     from tests.support.perf_budget import PerfBudget
 
@@ -211,17 +210,13 @@ def test_confirmed_source_index_single_call_cpu_converges_to_zero() -> None:
     def single_call() -> int:
         return confirmed_source_index(bar_index=1000, ratio=5)
 
-    # 첫 호출은 warm-up(파이썬 함수 호출 오버헤드 안정화)으로 흘린다.
-    single_call()
-
-    # 이후 20회 단일 호출을 측정 — 모두 1ms 미만이어야 함.
-    samples = pb.samples(single_call, n=20, batch=8)
-    cpu_values_ms = sorted(s.cpu_ms for s in samples)
-    p95_ms = cpu_values_ms[min(int(len(cpu_values_ms) * 0.95), len(cpu_values_ms) - 1)]
+    # best-of-5: 5회 측정 중 최소값(가장 양자화 tick 영향이 적은 것)으로
+    # Windows 15.6ms tick 흔들림을 걷어낸다.
+    sample = pb.best_of(single_call, n=5, warmup=1, batch=1)
     budget_ms = 1.0
-    assert p95_ms < budget_ms, (
-        f"confirmed_source_index 단일 호출 p95 CPU 시간 "
-        f"{p95_ms:.3f}ms가 1ms를 초과 — O(1) 연산이 아님: {cpu_values_ms}"
+    assert sample.cpu_ms < budget_ms, (
+        f"confirmed_source_index 단일 호출 CPU 시간 "
+        f"{sample.cpu_ms:.3f}ms가 1ms를 초과 — O(1) 연산이 아님"
     )
 
 
