@@ -10,7 +10,7 @@ not touch `models.py`, which is out of scope).
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -20,7 +20,6 @@ from src.core.risk.hashing import canonical_json, sha256_hex
 SCHEMA_VERSION = "sizing-v1"
 HUNDRED = Decimal("100")
 
-_T = TypeVar("_T")
 
 
 class PortfolioSizingError(ValueError):
@@ -57,7 +56,7 @@ class SizingResult(BaseModel):
     inputs_hash: str
 
 
-def require(value: _T | None, field: str) -> _T:
+def require[T](value: T | None, field: str) -> T:
     """Filter `None` inputs here so each formula file doesn't repeat this check."""
     if value is None:
         raise SizingInputMissingError(field)

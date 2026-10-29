@@ -33,15 +33,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import date
-from typing import Protocol, TypeVar
+from typing import Protocol
 from uuid import UUID
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.data.models.base import Currency
 from src.foundation.entities.contracts.v1 import Fund, LegalEntity, Portfolio, SubAccount
 from src.foundation.entities.domain.defaults import DefaultHierarchy, build_default_hierarchy
-
-_T = TypeVar("_T")
 
 
 class EntityBootstrapRepository(Protocol):
@@ -67,10 +65,10 @@ class EntityBootstrapRepository(Protocol):
     async def create_sub_account(self, sub_account: SubAccount) -> SubAccount: ...
 
 
-async def _get_or_create(
-    get: Callable[[], Awaitable[_T | None]],
-    create: Callable[[], Awaitable[_T]],
-) -> _T:
+async def _get_or_create[T](
+    get: Callable[[], Awaitable[T | None]],
+    create: Callable[[], Awaitable[T]],
+) -> T:
     """Get-or-create for one hierarchy level, safe against a concurrent
     bootstrap racing us to create the same deterministic id. If `create`
     loses the race it raises `ConcurrencyConflictError` (105 standard); we

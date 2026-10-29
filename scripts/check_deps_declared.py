@@ -40,10 +40,9 @@ import importlib.metadata
 import json
 import re
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-
-import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 SCAN_SUBDIR = "src"

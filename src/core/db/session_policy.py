@@ -91,7 +91,7 @@ class SessionTimeLimit:
         self._exit(exc_type)
 
 
-def enforce_session_policy(
+def enforce_session_policy[T](
     func: Callable[..., Awaitable[T]] | None = None,
     *,
     limit_seconds: float = DEFAULT_SESSION_LIMIT_SECONDS,

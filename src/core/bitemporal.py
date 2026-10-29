@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
@@ -78,7 +78,7 @@ def _require_valid_bound(from_: datetime, to: datetime | None, *, label: str) ->
 
 
 @dataclass(frozen=True, slots=True)
-class BitemporalRecord(Generic[T]):
+class BitemporalRecord[T]:
     """Pure value object corresponding to one row in a state-change table.
 
     `value` is valid only at coordinates where
@@ -129,7 +129,7 @@ def _ranges_overlap(
     return not (a_ends_before_b_starts or b_ends_before_a_starts)
 
 
-def check_no_overlap(records: Sequence[BitemporalRecord[T]]) -> None:
+def check_no_overlap[T](records: Sequence[BitemporalRecord[T]]) -> None:
     """Reject if any pair of records in the same key group has overlapping valid·tx intervals.
 
     FA-A2 (state-change table UPDATE/DELETE prohibition — corrections use a new row
@@ -145,7 +145,7 @@ def check_no_overlap(records: Sequence[BitemporalRecord[T]]) -> None:
                 raise BitemporalOverlapError(first, second)
 
 
-def as_of(
+def as_of[T](
     records: Sequence[BitemporalRecord[T]], *, valid_time: datetime, tx_time: datetime
 ) -> list[BitemporalRecord[T]]:
     """Query kernel: all records covering `(valid_time, tx_time)` coordinates.
@@ -159,12 +159,14 @@ def as_of(
     return [r for r in records if r.contains(valid_time=valid_time, tx_time=tx_time)]
 
 
-def current(records: Sequence[BitemporalRecord[T]], *, now: datetime) -> list[BitemporalRecord[T]]:
+def current[T](
+    records: Sequence[BitemporalRecord[T]], *, now: datetime
+) -> list[BitemporalRecord[T]]:
     """Query 1/4: what is true now (`now`) and known now (`now`)."""
     return as_of(records, valid_time=now, tx_time=now)
 
 
-def as_of_valid_time(
+def as_of_valid_time[T](
     records: Sequence[BitemporalRecord[T]], *, valid_time: datetime, now: datetime
 ) -> list[BitemporalRecord[T]]:
     """Query 2/4: what was true at `valid_time`, under the latest knowledge at `now`.
@@ -174,7 +176,7 @@ def as_of_valid_time(
     return as_of(records, valid_time=valid_time, tx_time=now)
 
 
-def as_of_transaction_time(
+def as_of_transaction_time[T](
     records: Sequence[BitemporalRecord[T]], *, tx_time: datetime, now: datetime
 ) -> list[BitemporalRecord[T]]:
     """Query 3/4: what the system knew "now" (`now`) about, at past system time (`tx_time`).
@@ -185,7 +187,7 @@ def as_of_transaction_time(
     return as_of(records, valid_time=now, tx_time=tx_time)
 
 
-def as_of_bitemporal(
+def as_of_bitemporal[T](
     records: Sequence[BitemporalRecord[T]], *, valid_time: datetime, tx_time: datetime
 ) -> list[BitemporalRecord[T]]:
     """Query 4/4: full retroactive — what the system believed at system time

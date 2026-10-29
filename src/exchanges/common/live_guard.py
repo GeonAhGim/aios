@@ -27,7 +27,7 @@ from src.core.exceptions import FrozenZonePaperAdapterBlockedError
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 
 
-def require_paper_sandbox(func: F) -> F:
+def require_paper_sandbox[F: Callable[..., Awaitable[Any]]](func: F) -> F:
     @functools.wraps(func)
     async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         if not (self.is_paper_trading and self.is_sandboxed):

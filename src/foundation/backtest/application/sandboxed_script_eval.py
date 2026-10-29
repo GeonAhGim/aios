@@ -36,7 +36,7 @@ from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from multiprocessing import get_context
-from typing import Any, TypeVar
+from typing import Any
 
 import psutil
 
@@ -52,7 +52,6 @@ _RSS_POLL_INTERVAL_SEC = 0.02
 # `wallclock_sec` was permanently un-killable (task-8928).
 _PID_CAPTURE_GRACE_SEC = 10.0
 
-_T = TypeVar("_T")
 
 
 class ScriptSandboxTimeoutError(Exception):
@@ -80,13 +79,13 @@ class SandboxLimits:
 _DEFAULT_LIMITS = SandboxLimits()
 
 
-def run_sandboxed(
-    fn: Callable[..., _T],
+def run_sandboxed[T](
+    fn: Callable[..., T],
     /,
     *args: Any,
     limits: SandboxLimits = _DEFAULT_LIMITS,
     **kwargs: Any,
-) -> _T:
+) -> T:
     """Run `fn(*args, **kwargs)` in a single-worker `ProcessPoolExecutor`
     under `limits`. `fn` and its arguments/return value must be picklable
     (standard `multiprocessing` constraint)."""

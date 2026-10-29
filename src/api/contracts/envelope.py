@@ -11,7 +11,7 @@ request_context.py, PLT-107)를 그대로 재사용한다 — 같은 값이 응�
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -39,7 +39,7 @@ class Meta(BaseModel):
     page: PageMeta | None = None
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class ApiResponse[T](BaseModel):
     data: T
     meta: Meta
 
@@ -52,7 +52,7 @@ class ApiError(BaseModel):
     retry_after_seconds: int | None = None
 
 
-def ok(data: T, *, page: PageMeta | None = None) -> ApiResponse[T]:
+def ok[T](data: T, *, page: PageMeta | None = None) -> ApiResponse[T]:
     return ApiResponse(
         data=data,
         meta=Meta(trace_id=current_trace_id(), as_of=datetime.now(UTC), page=page),
