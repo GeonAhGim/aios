@@ -21,6 +21,7 @@ from src.core.config.profile import (
     resolve_profile_name,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 CONFIG_DIR = Path(__file__).resolve().parents[4] / "config"
 
@@ -67,23 +68,16 @@ def test_load_staging_profile_from_repo_config_dir(perf_budget: PerfBudget) -> N
 def test_load_staging_profile_cpu_injection_raises_p95_over_50ms(
     perf_budget: PerfBudget, monkeypatch
 ) -> None:
-    """gate-red 재현 -- YAML 읽기에 0.5초 CPU 부하를 주입하면 p95 >= 50ms여야 한다.
+    """gate-red 재현 -- YAML 읽기에 0.5초 가상 CPU 부하를 주입하면 p95 >= 50ms여야 한다.
 
     정상 입력에서 녹색인 단언이 지연 입력에서 적색이면 detection capability를
-    입증한다. `delayed_sync`로 CPU busy-wait를 주입한다.
+    입증한다. `virtual_delayed_sync`로 실제 busy-wait 없이 측정치만 느리게 한다.
     """
     import src.core.config.profile as profile_module
 
-    original_read = profile_module._read_yaml_mapping
-
-    def patched_read(path):
-        # 0.5초 CPU 부하 주입 (delayed_sync 패턴)
-        end = __import__("time").perf_counter() + 0.5
-        while __import__("time").perf_counter() < end:
-            pass
-        return original_read(path)
-
-    monkeypatch.setattr(profile_module, "_read_yaml_mapping", patched_read)
+    # virtual_delayed_sync: 실제 sleep/busy-wait 없이 cpu_ms +0.5s, wall_ms +0.5s 합산
+    slow_read = virtual_delayed_sync(profile_module._read_yaml_mapping, 0.5)
+    monkeypatch.setattr(profile_module, "_read_yaml_mapping", slow_read)
 
     raw_samples: list[float] = []
     for ps in perf_budget.samples(
@@ -304,30 +298,17 @@ def test_load_profile_config_p95_latency_exceeds_when_cpu_injected(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """성능 단언이 실제로 CPU 부하를 감지하는지 검증 — 함수 실행 전에
-    CPU를 소모하는 위장 작업을 주입하면 p95가 50ms 예산을 넘어야 한다.
+    """성능 단언이 실제로 CPU 부하를 감지하는지 검증 — 가상 지연을 주입하면
+    p95가 50ms 예산을 넘어야 한다.
     이 테스트가 녹색이면 perf_budget.p95_assert가 '거짓 합격'을 하지
-    않음을 뜻한다. CPU-bound injection: time.process_time()에 직접
-    쌓이므로 sleep 주입은 효과가 없다."""
-    import time
+    않음을 뜻한다. virtual_delayed_sync로 실제 busy-wait 없이 측정치만 늘린다."""
+    import src.core.config.profile as profile_module
 
     injected_cpu_ms = 60  # 50ms 예산을 넘는 CPU 부하
 
-    def cpu_heavy_workaround() -> None:
-        """budget을 넘길 정도로 CPU를 소모 — busy-wait로 process_time()을 증가."""
-        target = time.process_time() + injected_cpu_ms / 1000
-        while time.process_time() < target:
-            pass
-
-    import src.core.config.profile as profile_module
-
-    original_read = profile_module._read_yaml_mapping
-
-    def patched_read(path: Path) -> dict:
-        cpu_heavy_workaround()
-        return original_read(path)
-
-    monkeypatch.setattr(profile_module, "_read_yaml_mapping", patched_read)
+    # virtual_delayed_sync: 실제 busy-wait 없이 cpu_ms +60ms, wall_ms +60ms 합산
+    slow_read = virtual_delayed_sync(profile_module._read_yaml_mapping, injected_cpu_ms / 1000)
+    monkeypatch.setattr(profile_module, "_read_yaml_mapping", slow_read)
 
     # 이제 측정하면 CPU 부하로 인해 p95가 50ms를 넘어야 한다.
     raw_samples: list[float] = []
