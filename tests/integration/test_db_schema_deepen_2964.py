@@ -91,7 +91,9 @@ async def _insert_md_instrument_full(
 
 
 @pytest.mark.perf
-async def test_bulk_non_overlapping_alias_inserts_meet_latency_budget(pool, perf_budget):
+async def test_bulk_non_overlapping_alias_inserts_meet_latency_budget(
+    pool, perf_budget, monkeypatch
+):
     """500개 서로 겹치지 않는 (venue, alias_symbol) 별칭을 같은 심볼에
     연속 삽입해 절대시간 예산 내임을 단언한다(실측 로컬 <2s, 예산은
     느린 CI 대비 넉넉히 잡음). EXCLUDE USING gist가 GiST 인덱스를 타지
@@ -102,11 +104,11 @@ async def test_bulk_non_overlapping_alias_inserts_meet_latency_budget(pool, perf
     coverage tracer 오버헤드를 걷어낸다. 예산 값(15초)은 그대로 유지한다.
     """
     instrument_id = await _insert_md_instrument(pool, canonical_symbol=f"TEST-{uuid4().hex}")
-    alias_symbol = f"ALIAS-{uuid4().hex}"
     t0 = datetime(2000, 1, 1, tzinfo=UTC)
     n = 500
 
     async def _insert_aliases() -> None:
+        alias_symbol = f"ALIAS-{uuid4().hex}"
         for i in range(n):
             await pool.execute(
                 "INSERT INTO md_symbol_alias "
@@ -118,22 +120,50 @@ async def test_bulk_non_overlapping_alias_inserts_meet_latency_budget(pool, perf
                 t0 + timedelta(days=i + 1),
             )
 
-    sample = await perf_budget.sample_async(_insert_aliases)
-    budget_ms = 15000.0  # 15초
+    from tests.support.perf_inject import virtual_delayed_async
 
-    print(
-        f"[LA-10 md_symbol_alias] {n} inserts wall={sample.wall_ms:.3f}ms "
-        f"({sample.wall_ms / n:.2f} ms/insert, budget<{budget_ms / 1000:.1f}s)"
-    )
-    assert sample.wall_ms < budget_ms, (
-        f"md_symbol_alias {n}건 삽입이 예산({budget_ms / 1000:.1f}s)을 넘었습니다"
-        f"(wall={sample.wall_ms:.3f}ms) — GiST 인덱스가 안 타는지 확인하세요."
-    )
+    budget_ms = 15000.0  # 15초; 500건 전체 wall 시간, CPU 단발 측정이 아님.
 
-    row = await pool.fetchrow(
-        "SELECT count(*) AS n FROM md_symbol_alias WHERE instrument_id = $1", instrument_id
-    )
-    assert row["n"] == n
+    async def measure_and_assert_budget():
+        before = await pool.fetchval(
+            "SELECT count(*) FROM md_symbol_alias WHERE instrument_id = $1", instrument_id
+        )
+        sample = await perf_budget.sample_async(_insert_aliases)
+        after = await pool.fetchval(
+            "SELECT count(*) FROM md_symbol_alias WHERE instrument_id = $1", instrument_id
+        )
+        assert after - before == n
+        print(
+            f"[LA-10 md_symbol_alias] {n} inserts wall={sample.wall_ms:.3f}ms "
+            f"({sample.wall_ms / n:.2f} ms/insert, budget<{budget_ms / 1000:.1f}s)"
+        )
+        assert sample.wall_ms < budget_ms, (
+            f"md_symbol_alias {n}건 삽입이 예산({budget_ms / 1000:.1f}s)을 넘었습니다"
+            f"(wall={sample.wall_ms:.3f}ms) — GiST 인덱스가 안 타는지 확인하세요."
+        )
+
+    await measure_and_assert_budget()
+    original_execute = asyncpg.Pool.execute
+    delayed_execute = virtual_delayed_async(original_execute, budget_ms * 10 / 1000)
+    for delayed_index in (0, n // 2, n - 1):
+        calls = 0
+
+        async def execute_with_delay(self, query, *args, target=delayed_index, **kwargs):
+            nonlocal calls
+            index = calls
+            calls += 1
+            execute = delayed_execute if index == target else original_execute
+            return await execute(self, query, *args, **kwargs)
+
+        with monkeypatch.context() as injection:
+            injection.setattr(asyncpg.Pool, "execute", execute_with_delay)
+            with pytest.raises(AssertionError, match="삽입이 예산") as red:
+                await measure_and_assert_budget()
+        assert calls == n
+        print(f"gate-red insert={delayed_index}: {red.value}")
+
+    # Patching and virtual ledger deltas must not contaminate the next sample.
+    await measure_and_assert_budget()
 
 
 # ---- 게이트 적색 재현(D2) — 위반이 트랜잭션 전체를 롤백함(부분 커밋 없음) --
