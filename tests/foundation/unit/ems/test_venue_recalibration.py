@@ -15,6 +15,7 @@ from src.foundation.ems.domain.route.venue_recalibration import (
 )
 from src.foundation.ems.domain.route.venue_scoring import VenueScoreWeights
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _DEFAULT_CURRENT = VenueScoreWeights(
     fee_weight=Decimal("0.5"),
@@ -200,17 +201,17 @@ class TestPerformance:
     def test_cpu_convergence_single_call(self) -> None:
         """Trivial work → cpu_ms converges to near-0 for a single call.
 
-        Proves the measurement captures real CPU time, not noise.
-        With batch=1 the quantization error is ~15ms on Windows;
-        with batch=100 the per-call error drops to ~0.15ms.
+        Uses best_of(5) to absorb Windows quantization tick noise rather
+        than relying on a single sample that may read 0 or 15.6ms.
         """
         samples = [
             VenueCostSample("A", Decimal("10"), Decimal("1000")),
             VenueCostSample("B", Decimal("20"), Decimal("2000")),
         ]
-        sample = PerfBudget().sample(
+        sample = PerfBudget().best_of(
             lambda: recalibrate_weights(samples, _DEFAULT_CURRENT),
-            batch=100,
+            n=5,
+            batch=1,
         )
         # Single-call CPU time for ~50 Decimal ops is well under 1ms.
         assert sample.cpu_ms < 1.0, (
@@ -218,26 +219,15 @@ class TestPerformance:
         )
 
     def test_perf_budget_goes_red_with_cpu_injection(self) -> None:
-        """검출력 확인 — CPU 부하를 주입하면 같은 단언이 적색으로 넘어간다.
+        """검출력 확인 — 가상 지연을 주입하면 같은 단언이 적색으로 넘어간다.
 
-        busy_cpu() 가 process_time() 을 증가시키므로 assert_within 이
-        적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이
-        아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함
-        방지).
+        virtual_delayed_sync() 이 cpu_ledger 에 지연을 더하므로 PerfBudget
+        측정치가 예산을 초과한다. 실제 sleep/busy-wait 를 쓰지 않는다 —
+        지연을 측정에 더하는 방식이라 full 시간을 쓰지 않는다(task-16011).
         """
-        import time as _time
 
-        def busy_cpu(duration_sec: float) -> None:
-            """CPU 부하를 생성 — time.process_time() 을 증가시킨다."""
-            end = _time.process_time() + duration_sec
-            while _time.process_time() < end:
-                pass
-
-        # 2026-10-27: 주입량(5ms)이 예산(10ms)보다 작아 정밀한 CPU 시계(Linux Actions)에서는
-        # 단언이 적색이 되지 않았다(DID NOT RAISE). Windows 15.6ms 양자화에 기댄 통과였다 --
-        # 주입을 예산의 3배(30ms)로 올려 어느 플랫폼에서나 반드시 적색이 되게 한다(예산 불변).
-        # Inject 30ms CPU load per call → budget is 10ms → must go red.
-        def _recalibrate_with_cpu_load() -> None:
+        # Inject 30ms virtual CPU delay per call → budget is 10ms → must go red.
+        def _recalibrate() -> None:
             recalibrate_weights(
                 [
                     VenueCostSample("A", Decimal("10"), Decimal("1000")),
@@ -245,13 +235,14 @@ class TestPerformance:
                 ],
                 _DEFAULT_CURRENT,
             )
-            busy_cpu(0.03)  # 30ms CPU per call (3x the 10ms budget)
+
+        recalibrate_with_delay = virtual_delayed_sync(_recalibrate, seconds=0.03)
 
         perf = PerfBudget()
-        sample = perf.best_of(_recalibrate_with_cpu_load, n=5, batch=1)
+        sample = perf.best_of(recalibrate_with_delay, n=5, batch=1)
         # Same assertion as the green test (budget_ms=10.0); with injected
-        # 5ms CPU the measurement MUST exceed budget. We expect this to
-        # fail — that's the point of this test.
+        # 30ms virtual CPU the measurement MUST exceed budget. We expect
+        # this to fail — that's the point of this test.
         with pytest.raises(AssertionError) as exc_info:
             assert sample.cpu_ms < 10.0, (
                 f"Expected cpu_ms={sample.cpu_ms:.3f}ms to exceed 10ms budget"
