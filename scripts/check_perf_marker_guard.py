@@ -89,9 +89,58 @@ def _contains_assert(node: ast.AST) -> bool:
     return any(isinstance(n, ast.Assert) for n in ast.walk(node))
 
 
+def _timer_call_inside_assert(node: ast.AST) -> bool:
+    """True if any ``perf_counter()``/``monotonic()`` call appears inside an
+    ``assert`` statement under *node*."""
+    for n in ast.walk(node):
+        if isinstance(n, ast.Assert) and _contains_timer_call(n):
+            return True
+    return False
+
+
+def _contains_perf_budget_assert(node: ast.AST) -> bool:
+    """True if the node asserts on ``perf_budget.sample(...).cpu_ms`` or
+    ``.wall_ms`` — a wall-clock budget assertion that does *not* use raw
+    ``time.perf_counter()`` but still measures elapsed time against a numeric
+    budget.
+
+    This catches tests that use the ``perf_budget`` fixture without the
+    ``perf`` marker, which would run under xdist core contention.
+    """
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Assert):
+            continue
+        for sub in ast.walk(n):
+            if isinstance(sub, ast.Attribute) and sub.attr in ("cpu_ms", "wall_ms"):
+                if _perf_budget_attr_chain(sub):
+                    return True
+    return False
+
+
+def _perf_budget_attr_chain(attr_node: ast.Attribute) -> bool:
+    """Return True when *attr_node* is ``perf_budget.X(...).cpu_ms`` where
+    *X* is ``sample`` / ``sample_async`` / ``assert_within`` / ``best_of`` /
+    ``samples``."""
+    value = attr_node.value
+    if isinstance(value, ast.Call):
+        func = value.func
+        if isinstance(func, ast.Attribute) and func.attr in (
+            "sample",
+            "sample_async",
+            "assert_within",
+            "best_of",
+            "samples",
+        ):
+            if isinstance(func.value, ast.Name) and func.value.id == "perf_budget":
+                return True
+    return False
+
+
 def _find_violations(tree: ast.Module) -> list[str]:
-    """Return the names of unmarked test functions/methods in `tree` that
-    compare a `perf_counter()`/`monotonic()` difference inside an `assert`.
+    """Return the names of unmarked test functions/methods in ``tree`` that
+    compare a ``perf_counter()``/``monotonic()`` difference or a
+    ``perf_budget.sample(...).cpu_ms``/``.wall_ms`` inside an ``assert``
+    without a ``perf`` marker.
 
     Tests marked with skip, skipif, or xfail are excluded — they don't run,
     so perf markers are not required.
@@ -110,17 +159,29 @@ def _find_violations(tree: ast.Module) -> list[str]:
                 )
                 visit(node.body, class_marks)
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if (
-                    node.name.startswith("test")
-                    and _contains_timer_call(node)
-                    and _contains_assert(node)
-                ):
+                if not node.name.startswith("test"):
+                    visit(node.body, inherited_marks)
+                    continue
+
+                # Branch 1: raw perf_counter()/monotonic() budget assertion
+                if _contains_timer_call(node) and _contains_assert(node):
                     own_marks = inherited_marks | _decorator_mark_names(node.decorator_list)
-                    # Skip tests that are marked skip, skipif, or xfail — they don't run
                     if own_marks & _SKIP_MARKERS or module_marks & _SKIP_MARKERS:
-                        continue
-                    if "perf" not in own_marks and "perf" not in module_marks:
+                        pass  # skip — doesn't run
+                    elif "perf" not in own_marks and "perf" not in module_marks:
                         violations.append(node.name)
+
+                # Branch 2: perf_budget.cpu_ms/wall_ms budget assertion
+                elif _contains_perf_budget_assert(node):
+                    own_marks = inherited_marks | _decorator_mark_names(node.decorator_list)
+                    if own_marks & _SKIP_MARKERS or module_marks & _SKIP_MARKERS:
+                        pass  # skip — doesn't run
+                    elif "perf" not in own_marks and "perf" not in module_marks:
+                        violations.append(node.name)
+
+                # Neither pattern — still recurse for nested functions/classes
+                else:
+                    visit(node.body, inherited_marks)
 
     visit(tree.body, set())
     return violations
@@ -142,12 +203,13 @@ def _scan_all(tests_root: Path = TESTS_ROOT) -> dict[str, list[str]]:
     offenders: dict[str, list[str]] = {}
     for path in _test_files(tests_root):
         source = path.read_text(encoding="utf-8")
-        # A violation requires a `perf_counter()`/`monotonic()` call somewhere in the
-        # file, so a plain substring check (no parse) rules out most files up front —
-        # ast.parse + the full tree walk in _find_violations only run on the rest.
+        # A violation requires either a `perf_counter()`/`monotonic()` call or a
+        # `perf_budget` fixture usage somewhere in the file, so a plain substring
+        # check (no parse) rules out most files up front — ast.parse + the full
+        # tree walk in _find_violations only run on the rest.
         # Cuts wall time as tests/ grows (task-9135: 60s CI budget was being approached
         # by suite growth alone, not by a single offending commit).
-        if not any(attr in source for attr in _TIMER_ATTRS):
+        if not any(attr in source for attr in _TIMER_ATTRS) and "perf_budget" not in source:
             continue
         try:
             tree = ast.parse(source, filename=str(path))
@@ -162,8 +224,9 @@ def _scan_all(tests_root: Path = TESTS_ROOT) -> dict[str, list[str]]:
 def format_offenders(offenders: dict[str, list[str]]) -> str:
     lines = [f"{path}:{func}" for path, funcs in sorted(offenders.items()) for func in funcs]
     return (
-        "wall-clock perf_counter()/monotonic() budget assertion without a `perf` marker "
-        "(runs under xdist core contention -- see task-7434):\n" + "\n".join(lines)
+        "wall-clock budget assertion without a `perf` marker "
+        "(raw perf_counter()/monotonic() diff or perf_budget.cpu_ms/wall_ms; "
+        "runs under xdist core contention -- see task-7434, task-21096):\n" + "\n".join(lines)
     )
 
 
