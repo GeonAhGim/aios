@@ -391,7 +391,8 @@ def test_sleep_injection_does_not_affect_cpu_measurement(
             _state(allocated_capital=Decimal("1000"), current_price=Decimal("50000")),
         )
 
-    sample = perf_budget.sample(allocate_with_sleep, batch=1)
+    # process_time 16ms 양자화 tick 때문에 단발 측정이 흔들려 best-of-5 최소값 사용
+    sample = perf_budget.best_of(allocate_with_sleep, n=5, warmup=1, batch=1)
     # wall_ms는 sleep(0.1)으로 인해 ~100ms가 되어야 하지만,
     # cpu_ms는 실제 CPU 소비만 계측하므로 여전히 < 1ms여야 한다.
     assert sample.cpu_ms < 1.0, (
