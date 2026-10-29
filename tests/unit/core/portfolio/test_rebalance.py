@@ -319,20 +319,20 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
 
 @pytest.mark.perf
 def test_perf_plan_rebalance_budget_assertion_catches_regression(perf_budget, monkeypatch) -> None:
-    """Gate-red reproduction: inject a 10 ms sleep inside `plan_rebalance`
-    and verify the p99 CPU budget assertion *fails* (raises AssertionError).
+    """Gate-red reproduction: inject a 5 ms virtual delay inside
+    `plan_rebalance` and verify the p99 CPU budget assertion *fails*
+    (raises AssertionError).
 
     This proves the budget assertion is not a tautology — it actually detects
     performance regression.
 
-    NOTE: `plan_rebalance` is a CPU-bound pure function (no I/O). We inject
-    `time.sleep` which affects wall-clock but not CPU time. To make the CPU
-    budget fail we instead monkey-patch the inner loop body to do a small
-    busy-loop (~5 ms CPU per symbol). This matches the pattern in
-    test_bind_p99_budget_assertion_catches_regression in
-    test_adversarial_binding.py.
+    Uses ``virtual_delayed_sync`` from ``perf_inject`` so no actual busy-loop
+    or ``time.sleep`` is executed — the delay is added to the virtual ledger
+    and ``PerfBudget.sample`` folds it into the measurement.
     """
     from unittest.mock import patch
+
+    from tests.support.perf_inject import virtual_delayed_sync
 
     cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
     symbols = [f"SYM{i}/USDT" for i in range(200)]
@@ -342,17 +342,14 @@ def test_perf_plan_rebalance_budget_assertion_catches_regression(perf_budget, mo
 
     real_plan = plan_rebalance
 
-    def _slow_plan_rebalance(*args, **kwargs):
-        """Wrapper that injects ~5 ms CPU work per symbol via busy-loop."""
+    def _delayed_plan_rebalance(*args, **kwargs):
+        """Wrapper that adds 5 ms virtual delay after the real plan."""
         result = real_plan(*args, **kwargs)
-        # Inject CPU work proportional to the number of symbols processed.
-        # ~50M multiplications ≈ 5-10 ms CPU on modern hardware.
-        x = 1.0
-        for _ in range(50_000_000):
-            x = x * 1.0001
+        # 5 ms virtual delay → PerfBudget.sample folds this into cpu_ms.
+        virtual_delayed_sync(lambda: None, 5.0)()
         return result
 
-    with patch("src.core.portfolio.rebalance.plan_rebalance", _slow_plan_rebalance):
+    with patch("src.core.portfolio.rebalance.plan_rebalance", _delayed_plan_rebalance):
         # Re-import to pick up the patched version
         from src.core.portfolio.rebalance import plan_rebalance as patched_plan
 
@@ -366,7 +363,7 @@ def test_perf_plan_rebalance_budget_assertion_catches_regression(perf_budget, mo
         p99_ms = cpu_ms_samples[p99_idx]
 
         # The budget is 5 ms p99 (ADR-2026-09-09-C Decision 1).
-        # With ~5 ms injected per call, p99 must exceed the budget.
+        # With 5 ms injected per call, p99 must exceed the budget.
         with pytest.raises(AssertionError):
             assert p99_ms < 5.0, (
                 f"p99={p99_ms:.3f}ms exceeds 5ms budget — wall={samples[-1].wall_ms:.3f}ms"
