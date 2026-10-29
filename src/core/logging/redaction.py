@@ -24,21 +24,22 @@ REDACTED: Final[str] = "<redacted>"
 # 108 §2.1: raw secrets/tokens/decrypted credentials must never land in logs —
 # any key that substring-matches one of these (case-insensitive) gets masked
 # regardless of the value's shape.
-_DEFAULT_DENY_KEYS: set[str] = {
-    "api_key",
-    "api_secret",
-    "secret",
-    "password",
-    "totp",
-    "token",
-    "authorization",
-    "private_key",
-    "raw_payload",
-    "answers",
-}
-
-# Backwards-compatible alias for callers that import `DENY_KEYS`.
-DENY_KEYS = _DEFAULT_DENY_KEYS
+# Immutable on purpose: a mutable module-level set lets any caller `.clear()` or
+# `.discard()` a key and silently turn masking off process-wide (fail-open).
+DENY_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "api_key",
+        "api_secret",
+        "secret",
+        "password",
+        "totp",
+        "token",
+        "authorization",
+        "private_key",
+        "raw_payload",
+        "answers",
+    }
+)
 
 # An opaque reference (secret_ref.py) is a value 108 §2.1 treats as safe, so
 # it is not masked even if it incidentally matches one of the value-based
