@@ -145,10 +145,10 @@ async def test_sweep_open_orders_p95_latency_detection_injected_delay(
 ):
     """검출력 확인 — sweep_open_orders에 200ms 지연을 주입하면 적색이어야 한다.
 
-    raw 단언이 허울이 아닌지 확인하는 실패주입: 어댑터 cancel에 sleep을
-    monkeypatch로 주입해 baseline 대비 10배 이상 지연을 만든다. 이 지연이
-    p95 단언을 적색으로 만들어야 perf_budget 전환의 의미가 있다."""
-    import time as _time
+    virtual_delayed_async로 측정치만 늘려 실제 sleep/spin 없이 200ms 가상
+    지연을 주입한다( task-10775, CTO 2026-10-29 결정: 워커풀 유휴 해소).
+    이 지연이 p95 단언을 적색으로 만들어야 perf_budget 전환의 의미가 있다."""
+    from tests.support.perf_inject import virtual_delayed_async
 
     user_id = await create_test_user(pool)
     adapter = _CountingCancelAdapter()
@@ -166,14 +166,8 @@ async def test_sweep_open_orders_p95_latency_detection_injected_delay(
     )
     baseline_ms = baseline_result.wall_ms
 
-    # 지연 주입: cancel 호출 시 200ms sleep
-    original_cancel = adapter.cancel_order
-
-    async def _slow_cancel(*args, **kwargs):
-        _time.sleep(0.2)
-        return await original_cancel(*args, **kwargs)
-
-    adapter.cancel_order = _slow_cancel
+    # 지연 주입: cancel 호출 시 200ms 가상 지연 (virtual_delayed_async)
+    adapter.cancel_order = virtual_delayed_async(adapter.cancel_order, seconds=0.2)
 
     # 지연 버전 p95 측정 — 각 호출 전에 주문을 다시 심어야 실제 cancel이 발생함
     async def _sweep_with_seed():
