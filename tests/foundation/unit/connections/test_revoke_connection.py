@@ -338,7 +338,7 @@ async def test_revoke_connection_raises_when_connection_not_found_0_convergence(
     그 사실을 명시적으로 검증한다(task-11539 감사).
 
     `get_connection`이 None을 반환하는 오류 경로는 매우 빠르므로
-    batch=8로 여러 호출을 묶으면 양자화 오차가 호출당 tick/8로 줄어
+    batch=32로 여러 호출을 묶으면 양자화 오차가 호출당 tick/32로 줄어
     CPU 시간을 정상 측정한다."""
     tenant_id = uuid4()
     conn_repo = FakeConnectionRepository(connection=None)
@@ -347,10 +347,10 @@ async def test_revoke_connection_raises_when_connection_not_found_0_convergence(
         with pytest.raises(ConnectionNotFoundError):
             await revoke_connection(conn_repo, tenant_id=tenant_id, connection_id=uuid4())
 
-    sample = await perf_budget.sample_async(_fn, batch=8)
+    sample = await perf_budget.sample_async(_fn, batch=32)
     # Windows `time.process_time()` 양자화 tick(~15.6ms)과 CI 병렬 실행
     # Python 인터프리터 오버헤드(비동기 태스크 스케줄링, GIL 경합)로
-    # batch=8 호출당 최대 1 tick(15.6/8≈1.95ms)까지 허용한다.
+    # batch=32 호출당 최대 1 tick(15.6/32≈0.49ms)까지 허용한다.
     assert sample.cpu_ms < 2.0, (
         f"single-call CPU should converge to near-0 "
         f"(got {sample.cpu_ms:.3f}ms; CI parallel quantization budget < 2ms)"
