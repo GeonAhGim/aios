@@ -57,9 +57,55 @@ async def test_signup_then_login_round_trip(auth):
     assert decoded["sub"] == str(user.user_id)
 
 
+_WEAK_REJECT_BUDGET_MS = 5.0
+
+
+async def _assert_weak_reject_within_budget(auth) -> None:
+    from tests.support.perf_budget import PerfBudget
+
+    async def _reject() -> None:
+        with pytest.raises(AuthError):
+            await auth.signup(_unique_email(), "short1!")
+
+    # Rejection is a pure in-process check (no DB, no hashing). A single call reads 0 on the
+    # ~15.6ms Windows process_time tick, so batch the calls and take the best of several runs.
+    sample = await PerfBudget().best_of_async(_reject, n=5, warmup=1, batch=20)
+    assert sample.cpu_ms < _WEAK_REJECT_BUDGET_MS, (
+        f"weak-password rejection cpu={sample.cpu_ms:.3f}ms budget<{_WEAK_REJECT_BUDGET_MS}ms"
+    )
+
+
+@pytest.mark.perf
 async def test_signup_rejects_weak_password(auth):
     with pytest.raises(AuthError):
         await auth.signup(_unique_email(), "short1!")
+    await _assert_weak_reject_within_budget(auth)
+
+
+async def test_signup_weak_password_budget_turns_red_under_10x_delay(auth, monkeypatch):
+    import src.services.auth_service as auth_module
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    monkeypatch.setattr(
+        auth_module,
+        "_password_strong_enough",
+        virtual_delayed_sync(
+            auth_module._password_strong_enough, _WEAK_REJECT_BUDGET_MS * 10 / 1000
+        ),
+    )
+
+    with pytest.raises(AssertionError):
+        await _assert_weak_reject_within_budget(auth)
+
+
+@pytest.mark.parametrize(
+    "password",
+    ["Ab1!abcd", "Abcdefgh12345", "Abcdefghijkl!", "abcdefgh1234!"],
+    ids=["too-short", "no-special", "no-digit", "no-uppercase"],
+)
+async def test_signup_rejects_each_weak_password_class(auth, password):
+    with pytest.raises(AuthError):
+        await auth.signup(_unique_email(), password)
 
 
 async def test_signup_rejects_duplicate_email(auth):
