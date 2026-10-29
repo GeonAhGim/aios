@@ -226,7 +226,7 @@ def test_length_mismatch_reports_shorter_length_as_divergence_index() -> None:
     assert report.first_divergence is not None
     assert report.first_divergence.index == 2
     assert report.first_divergence.field == "__length__"
-    with pytest.raises(ParityMismatchError, match="체결 개수 불일치"):
+    with pytest.raises(ParityMismatchError, match="fill count mismatch"):
         report.raise_if_mismatch()
 
 

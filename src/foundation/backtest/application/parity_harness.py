@@ -28,6 +28,7 @@ from comparison.
 Fail-closed: if the lengths differ, the shorter length is immediately
 reported as the divergence point (the tail is never silently ignored).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -113,11 +114,11 @@ class ParityMismatchError(AssertionError):
 def _format_mismatch(report: ParityReport) -> str:
     d = report.first_divergence
     if d is None:  # pragma: no cover — first_divergence always set when is_match=False
-        return "parity mismatch: 발산 지점 없이 불일치로 보고됨(호출자 오류)"
+        return "parity mismatch: mismatch reported without divergence point (caller error)"
     if d.field == _LENGTH_MISMATCH_FIELD:
         return (
-            f"parity mismatch at index {d.index}: 체결 개수 불일치 "
-            f"(paper={report.paper_fill_count}건, backtest={report.backtest_fill_count}건)"
+            f"parity mismatch at index {d.index}: fill count mismatch "
+            f"(paper={report.paper_fill_count}, backtest={report.backtest_fill_count})"
         )
     return (
         f"parity mismatch at index {d.index}: field={d.field!r} "
