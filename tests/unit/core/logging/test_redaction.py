@@ -25,13 +25,8 @@ _LOG_PAYLOAD_SAMPLE = {
 }
 
 
-def _measure_redact_cycle(n: int) -> list[float]:
-    samples = []
-    for _ in range(n):
-        start = time.perf_counter()
-        redact(_LOG_PAYLOAD_SAMPLE)
-        samples.append(time.perf_counter() - start)
-    return samples
+def _measure_redact_cycle_ms(perf_budget, n: int) -> list[float]:
+    return sorted(s.wall_ms for s in perf_budget.samples(lambda: redact(_LOG_PAYLOAD_SAMPLE), n=n))
 
 
 @pytest.mark.parametrize(
@@ -282,16 +277,16 @@ def test_redact_failure_during_key_check_propagates_instead_of_silently_leaking(
             redact(payload)
 
 
-def test_redact_meets_pretrade_gate_budget():
+def test_redact_meets_pretrade_gate_budget(perf_budget):
     """수치 성능 단언 — redact()는 구조화 로그 한 줄마다 호출되는 인프로세스 핫패스다.
     p99가 예산 안에 들어오는지 확인한다(예산 근거는 모듈 상단 주석)."""
-    samples = sorted(_measure_redact_cycle(500))
+    samples = _measure_redact_cycle_ms(perf_budget, n=500)
     p99 = samples[int(len(samples) * 0.99)]
 
-    assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC
+    assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC * 1000
 
 
-def test_redact_budget_assertion_catches_regression():
+def test_redact_budget_assertion_catches_regression(perf_budget):
     """게이트 적색 재현 — 키 검사 경로에 10ms 인위 지연을 주입해 위 p99 예산 단언이 실제로
     AssertionError를 내는지 확인한다(타우톨로지가 아님을 증명)."""
     real_key_is_denied = redaction_module._key_is_denied
@@ -301,11 +296,11 @@ def test_redact_budget_assertion_catches_regression():
         return real_key_is_denied(key)
 
     with patch("src.core.logging.redaction._key_is_denied", side_effect=_slow_key_is_denied):
-        samples = sorted(_measure_redact_cycle(20))
+        samples = _measure_redact_cycle_ms(perf_budget, n=20)
     p99 = samples[int(len(samples) * 0.99)]
 
     with pytest.raises(AssertionError):
-        assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC
+        assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC * 1000
 
 
 def test_multiple_deny_keys_share_identical_redacted_value_but_key_identity_preserved():
