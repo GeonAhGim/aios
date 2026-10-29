@@ -4,7 +4,9 @@ httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙). tr_id�
 전부 실전 기준 "T"로 시작해 모의투자(is_paper_trading=True) 헤더에선
 T→V로 치환된다(기존 KISAdapter._resolve_tr_id() 규칙 재확인).
 """
+
 import json
+import time
 from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
@@ -15,6 +17,7 @@ import pytest
 from src.data.models.base import AssetClass
 from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
 from src.exchanges.kis.adapter import KISAdapter
+from tests.support.perf_budget import PerfBudget
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -129,9 +132,7 @@ async def test_cancel_overseas_order_returns_true_on_success() -> None:
         return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output": {}})
 
     adapter = _make_adapter(
-        lambda request: _route(
-            request, {"/uapi/overseas-stock/v1/trading/order-rvsecncl": handler}
-        )
+        lambda request: _route(request, {"/uapi/overseas-stock/v1/trading/order-rvsecncl": handler})
     )
     result = await adapter.cancel_overseas_order(
         "1234:999", "AAPL", "NASD", original_quantity=Decimal("1")
@@ -149,9 +150,7 @@ async def test_get_overseas_balance_maps_holdings() -> None:
             json={
                 "rt_cd": "0",
                 "msg1": "ok",
-                "output1": [
-                    {"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "10", "ord_psbl_qty": "10"}
-                ],
+                "output1": [{"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "10", "ord_psbl_qty": "10"}],
             },
         )
 
@@ -204,8 +203,8 @@ async def test_get_overseas_ticker_raises_on_api_error() -> None:
             json={
                 "rt_cd": "-1",  # 오류 응답
                 "msg1": "Invalid parameter",
-                "output": {}
-            }
+                "output": {},
+            },
         )
 
     adapter = _make_adapter(
@@ -226,8 +225,8 @@ async def test_place_overseas_order_raises_on_api_error() -> None:
             json={
                 "rt_cd": "-1",  # 오류 코드
                 "msg1": "Insufficient funds",
-                "output": {}
-            }
+                "output": {},
+            },
         )
 
     adapter = _make_adapter(
@@ -249,17 +248,57 @@ async def test_cancel_overseas_order_raises_on_api_error() -> None:
             json={
                 "rt_cd": "-1",  # 오류 코드
                 "msg1": "Order not found",
-                "output": {}
-            }
+                "output": {},
+            },
         )
 
     adapter = _make_adapter(
-        lambda request: _route(
-            request, {"/uapi/overseas-stock/v1/trading/order-rvsecncl": handler}
-        )
+        lambda request: _route(request, {"/uapi/overseas-stock/v1/trading/order-rvsecncl": handler})
     )
 
     with pytest.raises(RetryableExchangeError):
         await adapter.cancel_overseas_order(
             "1234:999", "AAPL", "NASD", original_quantity=Decimal("1")
         )
+
+
+_TICKER_CPU_BUDGET_MS = 250.0
+
+
+def _ticker_adapter() -> KISAdapter:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"rt_cd": "0", "msg1": "ok", "output": {"last": "225.50", "tvol": "1000"}}
+        )
+
+    return _make_adapter(
+        lambda request: _route(request, {"/uapi/overseas-price/v1/quotations/price": handler})
+    )
+
+
+@pytest.mark.perf
+async def test_get_overseas_ticker_cpu_within_budget(perf_budget: PerfBudget) -> None:
+    adapter = _ticker_adapter()
+    sample = await perf_budget.best_of_async(
+        lambda: adapter.get_overseas_ticker("AAPL", "NASD"), n=3, warmup=1
+    )
+
+    assert sample.cpu_ms < _TICKER_CPU_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_TICKER_CPU_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_get_overseas_ticker_budget_red_when_busy(perf_budget: PerfBudget) -> None:
+    """Gate-red repro: burning CPU inside the call must trip the same budget."""
+    adapter = _ticker_adapter()
+
+    async def slow() -> object:
+        end = time.process_time() + (_TICKER_CPU_BUDGET_MS * 2) / 1000
+        while time.process_time() < end:
+            pass
+        return await adapter.get_overseas_ticker("AAPL", "NASD")
+
+    sample = await perf_budget.best_of_async(slow, n=2, warmup=0)
+
+    assert sample.cpu_ms >= _TICKER_CPU_BUDGET_MS
