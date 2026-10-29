@@ -34,6 +34,7 @@ from src.foundation.backtest.application.simulate_fill import simulate_fill
 from src.foundation.backtest.domain.models import (
     BacktestConfig,
     BacktestResult,
+    CostModel,
     EquityPoint,
     SimulatedFill,
 )
@@ -76,6 +77,34 @@ def _order_filled_target(fsm_config: FSMStrategyConfig, from_state: FSMState) ->
         f"{from_state}에서 ORDER_FILLED로 나가는 전이가 FSM에 없습니다 — "
         "컴파일러 계약(condition_compiler.py) 위반입니다."
     )
+
+
+def _fill_pending_order(
+    pending: _PendingOrder,
+    bar_index: int,
+    bar: Candle,
+    cost_model: CostModel,
+) -> tuple[SimulatedFill, Decimal, Decimal]:
+    """Execute a pending order on the current bar.
+
+    Returns (fill, cash_delta, position_delta) so the caller can update
+    cash / position_quantity without branching on fill.side inside the
+    replay loop (CAP-25 cognitive complexity reduction).
+    """
+    fill = simulate_fill(
+        bar=bar,
+        bar_index=bar_index,
+        side=pending.side,
+        quantity=pending.quantity,
+        cost_model=cost_model,
+    )
+    if fill.side == OrderSide.BUY:
+        cash_delta = -(fill.price * fill.quantity + fill.fee)
+        position_delta = fill.quantity
+    else:
+        cash_delta = fill.price * fill.quantity - fill.fee
+        position_delta = -fill.quantity
+    return fill, cash_delta, position_delta
 
 
 def run_backtest(
@@ -133,20 +162,15 @@ def run_backtest(
 
     for bar_index, bar in enumerate(bars):
         if pending is not None:
-            fill = simulate_fill(
-                bar=bar,
+            fill, cash_delta, pos_delta = _fill_pending_order(
+                pending=pending,
                 bar_index=bar_index,
-                side=pending.side,
-                quantity=pending.quantity,
+                bar=bar,
                 cost_model=config.cost_model,
             )
             fills.append(fill)
-            if fill.side == OrderSide.BUY:
-                cash -= fill.price * fill.quantity + fill.fee
-                position_quantity += fill.quantity
-            else:
-                cash += fill.price * fill.quantity - fill.fee
-                position_quantity -= fill.quantity
+            cash += cash_delta
+            position_quantity += pos_delta
             fsm_state = pending.filled_state
             pending = None
 
