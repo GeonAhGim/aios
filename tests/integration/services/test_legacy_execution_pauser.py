@@ -29,6 +29,7 @@ from src.services.safety.legacy_execution_pauser import (
     pause_executions_for_scope,
 )
 from tests.integration.conftest import create_test_user
+from tests.support.perf_inject import virtual_delayed_async
 
 
 def _asyncpg_dsn() -> str:
@@ -299,10 +300,8 @@ async def test_pause_executions_budget_goes_red_with_10x_delay_injection(
     """검출력 확인 — `pause_executions_for_scope`에 지연을 주입하면 같은
     단언이 적색으로 넘어간다. 이는 성능 단언이 '아무것도 잡지 못하는 허울'이
     아님을 증명한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
-    asyncpg `fetch`를 0.05초 sleep으로 monkeypatch — 10회 호출당 500ms가
-    쌓여 예산을 초과하므로 단언이 적색으로 넘어간다."""
-    import asyncio
-
+    asyncpg `fetch`에 예산(500ms)의 10배(5s) 가상 지연을 주입한다 — 실제
+    sleep 없이 측정치에 지연이 더해지므로 단언이 적색으로 넘어간다."""
     user_id = await create_test_user(pool)
     other_user = await create_test_user(pool)
     for _ in range(50):
@@ -310,15 +309,11 @@ async def test_pause_executions_budget_goes_red_with_10x_delay_injection(
     for _ in range(50):
         await _seed_execution(pool, other_user)
 
-    # asyncpg fetch를 래핑해 지연 주입 — asyncpg는 C 확장이라 asyncio.sleep
-    # 호출이 없음. 따라서 Connection.fetch 자체를 monkeypatch해야 함.
-    _real_fetch = asyncpg.connection.Connection.fetch
-
-    async def _slow_fetch(self, sql: str, *args: object, **kwargs: object) -> object:
-        await asyncio.sleep(0.6)
-        return await _real_fetch(self, sql, *args, **kwargs)
-
-    monkeypatch.setattr(asyncpg.connection.Connection, "fetch", _slow_fetch)
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetch",
+        virtual_delayed_async(asyncpg.Connection.fetch, 5.0),
+    )
 
     async with pool.acquire() as conn:
         sample = await perf_budget.sample_async(
