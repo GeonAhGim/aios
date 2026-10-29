@@ -4,6 +4,7 @@ import socket
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
+from itertools import count
 from uuid import uuid4
 
 import pytest
@@ -183,37 +184,43 @@ async def test_contract_gate_rejects_duplicate_bypass_mutant(order: ChildOrder) 
 @pytest.mark.perf
 @pytest.mark.asyncio
 async def test_single_call_cpu_zero_convergence(order: ChildOrder, perf_budget: PerfBudget) -> None:
-    """Single-call send_order CPU time converges to near-zero (no hidden O(n) path).
-
-    Measures 1회 호출당 CPU 밀리초가 batch 증가에 따라 0 수렴하는지 검증 —
-    Windows time.process_time() 양자화(15.6ms tick)를 batch로 극복한다.
-    """
+    """Measure per-call CPU with batches that amortize Windows clock ticks."""
     session = FakeFixSession()
     await session.logon()
-
-    # warmup
     await session.send_order(order, cl_ord_id="warmup")
+    identifiers = count()
 
-    # batch=1: quantization-heavy, batch=1000: quantization-smoothed
-    s1 = await perf_budget.sample_async(
-        lambda: session.send_order(order, cl_ord_id=f"b1-{id(session)}"), batch=1
+    async def send_one() -> int:
+        return await session.send_order(order, cl_ord_id=f"measured-{next(identifiers)}")
+
+    # Even the small sample must amortize the 15.625ms CPU clock quantum.
+    small = await perf_budget.sample_async(send_one, batch=32)
+    large = await perf_budget.sample_async(send_one, batch=1000)
+
+    assert large.cpu_ms < 0.1, (
+        f"single-call CPU at batch=1000 is {large.cpu_ms:.4f}ms (budget 0.1ms)"
     )
-
-    # batch=1000: run 1000 unique calls in one interval, then divide by batch
-    async def _batch_1000() -> int:
-        results = []
-        for i in range(1000):
-            results.append(await session.send_order(order, cl_ord_id=f"b1000-{id(session)}-{i}"))
-        return results[-1]
-
-    s1000 = await perf_budget.sample_async(_batch_1000, batch=1)
-
-    # CPU time per call at batch=1000 must be < 0.1ms (quantization-clean)
-    assert s1000.cpu_ms < 0.1, (
-        f"single-call CPU at batch=1000 is {s1000.cpu_ms:.4f}ms (budget 0.1ms)"
+    assert small.cpu_ms < 5.0, (
+        f"single-call CPU at batch=32 is {small.cpu_ms:.4f}ms (budget 5.0ms)"
     )
-    # batch=1 must not be wildly off from batch=1000 (no hidden O(n) per call)
-    assert s1.cpu_ms < 5.0, f"single-call CPU at batch=1 is {s1.cpu_ms:.4f}ms (budget 5.0ms)"
+    assert small.result == 33
+    assert large.result == 1033
+    assert len(session.sent) == 1033
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("large_cpu_seconds", [0.015625, 0.0625, 0.1, 0.125, 1.0])
+async def test_cpu_convergence_clock_quantization_and_budget(
+    order: ChildOrder, monkeypatch: pytest.MonkeyPatch, large_cpu_seconds: float
+) -> None:
+    """A clock tick passes; actual per-call budget breaches still fail closed."""
+    ticks = iter([0.0, 0.015625, 0.0, large_cpu_seconds])
+    monkeypatch.setattr("tests.support.perf_budget.time.process_time", lambda: next(ticks))
+    if large_cpu_seconds >= 0.1:
+        with pytest.raises(AssertionError, match="budget 0.1ms"):
+            await test_single_call_cpu_zero_convergence(order, PerfBudget())
+    else:
+        await test_single_call_cpu_zero_convergence(order, PerfBudget())
 
 
 @pytest.mark.perf
