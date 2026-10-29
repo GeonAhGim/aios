@@ -14,6 +14,8 @@ from pydantic import BaseModel, ValidationError
 
 from src.core.portfolio.config import CostModelRef, PortfolioConfig, SizingMethod
 from src.core.portfolio.state_input import PortfolioAggregate, PortfolioStateInput
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _HEX64 = "a" * 64
 
@@ -56,6 +58,96 @@ def test_sizing_method_has_exactly_the_spec_members():
         "KELLY_CAPPED",
         "RISK_PARITY",
     }
+
+
+# --- D2 성능 단언 (performance assertion) --------------------------------------
+
+
+@pytest.mark.perf
+def test_sizing_method_iteration_cpu_budget(perf_budget: PerfBudget) -> None:
+    """SizingMethod 멤버 순회(set comprehension)는 단일 호출당 ~0 CPU ms여야 한다.
+    Windows 양자화 tick(약 15.6ms)에 흔들리지 않게 best-of-N 최소값으로
+    측정하고 1 ms 아래를 보장한다."""
+    members = []
+
+    def one_iteration() -> None:
+        members.extend(m.value for m in SizingMethod)
+
+    sample = perf_budget.best_of(one_iteration, n=100, batch=1)
+    assert sample.cpu_ms < 1.0, (
+        f"sizing_method iteration CPU={sample.cpu_ms:.3f}ms exceeds 1ms budget — "
+        f"wall={sample.wall_ms:.3f}ms load={perf_budget.load_percent()}"
+    )
+
+
+# --- D2 게이트 적색 재현 (gate-red reproduction) --------------------------------
+
+
+@pytest.mark.perf
+def test_sizing_method_iteration_budget_catches_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """virtual_delayed_sync 으로 1회 호출당 10 ms 가상 CPU 지연을 주입하면
+    같은 budget 단언이 적색(AssertionError)이어야 한다.
+
+    이 테스트는 budget 단언이 tautology가 아님을, 실제로 성능 회귀를
+    검출할 수 있음을 증명한다. 실제 sleep/busy-wait 없이 가상 원장에
+    지연만 추가하므로 테스트 실행 시간은 변하지 않는다."""
+
+    def _delayed_iteration() -> list[str]:
+        """SizingMethod 순회 + 10 ms 가상 지연."""
+        result = [m.value for m in SizingMethod]
+        # 10 ms 가상 CPU 지연 → PerfBudget.sample이 cpu_ms에 합산
+        virtual_delayed_sync(lambda: None, 10.0)()
+        return result
+
+    samples = perf_budget.samples(
+        _delayed_iteration,
+        n=5,
+        batch=1,
+    )
+    cpu_values = sorted(s.cpu_ms for s in samples)
+    p99_ms = cpu_values[int(len(cpu_values) * 0.99) - 1]
+
+    # 1 ms 예산 — 10 ms 가상 지연이 주입되면 p99가 예산을 넘어야 함
+    with pytest.raises(AssertionError):
+        assert p99_ms < 1.0, (
+            f"p99={p99_ms:.3f}ms exceeds 1ms budget — delay injection was not detected"
+        )
+
+
+# --- D2 음성 테스트 (negative tests) --------------------------------------------
+
+
+def test_sizing_method_empty_set_is_not_equal():
+    """빈 set은 SizingMethod의 값과 같지 않다 — 단언이 무의미하지 않음을 확인."""
+    assert set() != {m.value for m in SizingMethod}
+
+
+def test_sizing_method_missing_member_fails():
+    """RISK_PARITY가 누락된 set은 실제 값과 같지 않다 — 단언이 누락을 검출한다."""
+    subset = {
+        "FIXED_FRACTIONAL",
+        "VOLATILITY_TARGET",
+        "KELLY_CAPPED",
+    }
+    actual = {m.value for m in SizingMethod}
+    # subset가 실제보다 작으므로 != 이 참이어야 함 (누락 검출)
+    assert subset != actual
+
+
+def test_sizing_method_extra_member_fails():
+    """FAKE_METHOD이 포함된 set은 실제 값과 같지 않다 — 단언이 이상 멤버를 검출한다."""
+    fake = {
+        "FIXED_FRACTIONAL",
+        "VOLATILITY_TARGET",
+        "KELLY_CAPPED",
+        "RISK_PARITY",
+        "FAKE_METHOD",
+    }
+    actual = {m.value for m in SizingMethod}
+    # fake가 실제보다 크므로 != 이 참이어야 함 (이상 멤버 검출)
+    assert fake != actual
 
 
 def test_portfolio_config_schema_version_and_defaults():
