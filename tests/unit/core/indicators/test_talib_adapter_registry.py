@@ -8,7 +8,7 @@ TA-Lib 네이티브 실패를 감추지 않고 그대로 전파하는지 확인�
 from __future__ import annotations
 
 import inspect
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -23,7 +23,7 @@ from src.data.models.market_data import Candle
 
 
 def _candles(n: int, *, base: float = 100.0) -> list[Candle]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out = []
     for i in range(n):
         price = base + i

@@ -26,7 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -45,7 +45,7 @@ _outbox = OutboxRepository()
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _event_payload_hash(order_id: UUID, command_id: UUID) -> str:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
@@ -136,7 +136,7 @@ def test_deletion_response_invalid_datetime_raises() -> None:
 
 
 def test_deletion_response_valid_construction() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     resp = DeletionResponse(status="scheduled", deletion_effective_at=now)
     assert resp.status == "scheduled"
     assert resp.deletion_effective_at == now

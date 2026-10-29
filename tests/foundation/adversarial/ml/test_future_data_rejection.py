@@ -12,14 +12,14 @@ rather than an honest mistake.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
 from src.foundation.ml.contracts.v1 import ModelCard, TrainDataLineage
 from src.foundation.ml.domain.point_in_time import FutureDataLeakageError, check_point_in_time
 
-_UTC_NOW = datetime.now(timezone.utc)
+_UTC_NOW = datetime.now(UTC)
 
 
 def _card(lineage_end: datetime) -> ModelCard:

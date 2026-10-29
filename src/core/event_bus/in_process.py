@@ -129,7 +129,7 @@ class InProcessEventBus(EventBus):
         while True:
             try:
                 item = await asyncio.wait_for(queue.get(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if not self._running:
                     return
                 continue

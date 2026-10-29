@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -64,7 +64,7 @@ class TestTaskConstruction:
         assert task.task_id == UUID(valid_task_kwargs["task_id"])
 
     def test_explicit_created_at_is_kept(self, valid_task_kwargs):
-        fixed_dt = datetime(2025, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        fixed_dt = datetime(2025, 6, 15, 12, 0, 0, tzinfo=UTC)
         valid_task_kwargs["created_at"] = fixed_dt
         task = AIOSTask(**valid_task_kwargs)
         assert task.created_at == fixed_dt
@@ -97,8 +97,8 @@ class TestTaskConstruction:
         assert task.input_payload == {}
 
     def test_full_construction_all_fields(self, valid_task_kwargs):
-        fixed_dt = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        completed_dt = datetime(2025, 1, 2, 0, 0, 0, tzinfo=timezone.utc)
+        fixed_dt = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
+        completed_dt = datetime(2025, 1, 2, 0, 0, 0, tzinfo=UTC)
         kwargs = {
             **valid_task_kwargs,
             "parent_task_id": "00000000-0000-0000-0000-000000000000",
@@ -345,7 +345,7 @@ class TestEdgeCases:
         assert task.completed_at is None
 
     def test_completed_at_set_explicitly(self, valid_task_kwargs):
-        valid_task_kwargs["completed_at"] = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        valid_task_kwargs["completed_at"] = datetime(2025, 6, 1, tzinfo=UTC)
         task = AIOSTask(**valid_task_kwargs)
         assert task.completed_at is not None
 

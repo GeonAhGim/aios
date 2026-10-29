@@ -5,7 +5,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -24,7 +24,7 @@ _ID_B = "01BXQR6X4TVQFP7NM5H7J1K2C3"
 
 
 def _t(day: int) -> datetime:
-    return datetime(2026, 1, day, tzinfo=timezone.utc)
+    return datetime(2026, 1, day, tzinfo=UTC)
 
 
 def _instrument(instrument_id: str, state: InstrumentLifecycle, **overrides: object) -> Instrument:

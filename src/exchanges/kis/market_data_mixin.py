@@ -14,7 +14,7 @@ Spec: 02_exchange_adapter_v1.2.md#§2.1
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
@@ -70,7 +70,7 @@ class KISMarketDataMixin:
                 bid=Decimal(book_output1["bidp1"]),
                 ask=Decimal(book_output1["askp1"]),
                 volume_24h=Decimal(price_output["acml_vol"]),
-                timestamp=datetime.now(timezone.utc),  # KIS 응답에 별도 타임스탬프 필드 없음
+                timestamp=datetime.now(UTC),  # KIS 응답에 별도 타임스탬프 필드 없음
                 source_type="primary",
             )
         except KeyError as exc:
@@ -110,7 +110,7 @@ class KISMarketDataMixin:
             exchange="kis",
             bids=bids,
             asks=asks,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     async def get_ohlcv(
@@ -126,7 +126,7 @@ class KISMarketDataMixin:
                 "(3m/5m/...)은 거래소가 직접 주지 않는다 — 필요하면 호출부가 "
                 "1분봉을 리샘플링해야 한다(02d 스펙 §2, 어댑터 스콥 밖)."
             )
-        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        today = datetime.now(UTC).strftime("%Y%m%d")
         raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
@@ -145,7 +145,7 @@ class KISMarketDataMixin:
         try:
             for row in rows:
                 day = row["stck_bsop_date"]  # "YYYYMMDD"
-                open_time = datetime.strptime(day, "%Y%m%d").replace(tzinfo=timezone.utc)
+                open_time = datetime.strptime(day, "%Y%m%d").replace(tzinfo=UTC)
                 candles.append(
                     Candle(
                         symbol=symbol,
@@ -172,7 +172,7 @@ class KISMarketDataMixin:
         최대 30건까지 한 번에 내려주는 것으로 알려져 있음(문서 관례) —
         `limit`은 응답을 자르는 용도일 뿐 요청 파라미터로 직접 전달되지
         않는다."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
@@ -192,7 +192,7 @@ class KISMarketDataMixin:
                 day = row.get("stck_bsop_date", now.strftime("%Y%m%d"))
                 hour = row["stck_cntg_hour"]  # "HHMMSS"
                 open_time = datetime.strptime(day + hour, "%Y%m%d%H%M%S").replace(
-                    tzinfo=timezone.utc
+                    tzinfo=UTC
                 )
                 candles.append(
                     Candle(

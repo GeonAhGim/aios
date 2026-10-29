@@ -5,7 +5,7 @@ Spec: AIOSproject #79 §1/§2, #71 §3 FND-03."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -25,7 +25,7 @@ from src.foundation.evidence.domain.models import AuditEvent, Classification, Ou
 from src.foundation.evidence.domain.rules import UnsafePayloadError
 from tests._perf.relative_budget import RelativeBudget
 
-NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 25, tzinfo=UTC)
 
 
 class FakeAuditEventRepository:

@@ -10,7 +10,7 @@ tests/foundation/adversarial/ai/gateway/test_cross_tenant_isolation.py에서
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -31,7 +31,7 @@ from src.foundation.ai.gateway.domain.token_rules import (
     TokenRuleError,
 )
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 @pytest.fixture

@@ -30,7 +30,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Protocol
 from uuid import UUID, uuid5
@@ -148,8 +148,8 @@ def _parse_rfc822(raw: str) -> datetime | None:
     except (TypeError, ValueError) as exc:
         raise RssParseError(f"RSS <pubDate> is not RFC 822: {raw!r}") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _parse_iso8601(raw: str) -> datetime | None:
@@ -160,8 +160,8 @@ def _parse_iso8601(raw: str) -> datetime | None:
     except ValueError as exc:
         raise RssParseError(f"Atom <updated>/<published> is not ISO 8601: {raw!r}") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _parse_rss2_items(channel: Element) -> list[RssFeedEntry]:

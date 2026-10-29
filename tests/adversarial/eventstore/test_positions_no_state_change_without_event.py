@@ -29,7 +29,7 @@ round_trip_count_stays_bounded`가 `record_fill()` 왕복 수 회귀 가드를
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -55,7 +55,7 @@ _MAX_RECORD_FILL_ROUND_TRIPS = 12
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _position_key(tenant_id: UUID) -> str:

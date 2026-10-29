@@ -7,7 +7,7 @@ always includes `as_of` so the interface can be swapped to an async projection l
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.trust.contracts.v1 import ConsentDecision, ConsentState
@@ -39,5 +39,5 @@ async def build_trust_status_view(repo: TrustRepository, tenant_id: UUID) -> Tru
             )
             for c in consents
         ],
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )

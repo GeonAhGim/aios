@@ -16,7 +16,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -92,7 +92,7 @@ class FakeHealthyConnectionRepo:
     async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
         return ConnectionHealth(
             connection_id=connection_id,
-            evaluated_at=datetime.now(timezone.utc),
+            evaluated_at=datetime.now(UTC),
             state=HealthState.HEALTHY,
         )
 
@@ -148,7 +148,7 @@ class PreTradeScenario:
             target_position=Decimal("20"),
             stop_loss=None,
             take_profit=None,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             to_state=FSMState.BUY_ORDER_PENDING,
         )
         self.allocation = AllocationDecision(
@@ -183,7 +183,7 @@ class PreTradeScenario:
             caches=self.caches,
             candle_cache=self.candle_cache,
             policy=self.policy,
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -99,13 +99,13 @@ async def test_unknown_symbol_rejected_before_any_row_and_adapter_never_called(p
     scope = OrderIdempotencyScope(
         tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
         strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     cmd = SubmitOrderCommand(
         command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope,
         symbol="ZZZUSDT", side=OrderSide.BUY, order_type=OrderType.MARKET,
         quantity=Decimal("0.01"), asset_class=AssetClass.CRYPTO,
-        actor_subject_id=user_id, issued_at=datetime.now(timezone.utc),
+        actor_subject_id=user_id, issued_at=datetime.now(UTC),
     )
 
     with pytest.raises(UnknownSymbolError):

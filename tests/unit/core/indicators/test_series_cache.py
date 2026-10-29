@@ -8,7 +8,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.2 L28, DoD:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -27,7 +27,7 @@ from src.data.models.market_data import Candle
 
 def _candles(n: int, *, seed: int = 7) -> list[Candle]:
     rng = np.random.default_rng(seed)
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, tzinfo=UTC)
     close = np.cumsum(rng.normal(size=n)) + 100.0
     out = []
     for i in range(n):

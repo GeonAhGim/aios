@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -33,7 +33,7 @@ from src.foundation.validation.contracts.v1 import Outcome, StartValidationComma
 from src.services.strategy_builder_service import StrategyBuilderService
 from tests.integration.conftest import create_test_user
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _asyncpg_dsn() -> str:

@@ -44,7 +44,7 @@ openapi.json`, `nhplug-sdk` 레포 `docs/README.md`/`AGENTS.md`가 이 URL을
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import uuid4
@@ -185,7 +185,7 @@ class NHTradingMixin:
             raise FatalExchangeError(
                 f"NH 정정 응답에 예상 필드 없음(공식 openapi.json 기준 mkt_orr_no 필요): {exc}"
             ) from exc
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return Order(
             order_id=uuid4(),
             exchange_order_id=f"{symbol}:{new_mkt_orr_no}",

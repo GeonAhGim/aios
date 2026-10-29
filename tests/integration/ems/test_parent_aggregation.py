@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -92,7 +92,7 @@ async def test_recompute_partial_fill_rolls_up_from_one_child(pool):
             conn,
             parent_order_id=parent_id,
             trace_id=uuid.uuid4(),
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
 
     assert result.status is OrderStatus.PARTIALLY_FILLED
@@ -119,7 +119,7 @@ async def test_recompute_full_fill_sums_across_children(pool):
             conn,
             parent_order_id=parent_id,
             trace_id=uuid.uuid4(),
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
 
     assert result.status is OrderStatus.FILLED
@@ -145,7 +145,7 @@ async def test_recompute_all_children_terminal_zero_fill_cancels_parent(pool):
             conn,
             parent_order_id=parent_id,
             trace_id=uuid.uuid4(),
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
 
     assert result.status is OrderStatus.CANCELLED
@@ -162,7 +162,7 @@ async def test_recompute_is_a_noop_before_any_child_exists(pool):
             conn,
             parent_order_id=parent_id,
             trace_id=uuid.uuid4(),
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
 
     assert result.status is OrderStatus.ACKNOWLEDGED

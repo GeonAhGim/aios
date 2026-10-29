@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -105,7 +105,7 @@ def submit_command(user_id: uuid.UUID, execution_id: int, seq: int) -> SubmitOrd
         strategy_version="1.0.0",
         execution_id=execution_id,
         intent_seq=seq,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid.uuid4(),
@@ -117,7 +117,7 @@ def submit_command(user_id: uuid.UUID, execution_id: int, seq: int) -> SubmitOrd
         quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 
@@ -159,7 +159,7 @@ async def insert_open_order(
                 trace_id=uuid.uuid4(),
                 command_id=None,
                 provider_event_id=None,
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
                 payload_hash=hashlib.sha256(f"perf-fixture:v1:{order_id}".encode()).hexdigest(),
             ),
         )
@@ -181,7 +181,7 @@ async def insert_open_order(
                 trace_id=uuid.uuid4(),
                 command_id=None,
                 provider_event_id=None,
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
                 payload_hash=hashlib.sha256(f"perf-fixture:v2:{order_id}".encode()).hexdigest(),
             ),
         )
@@ -192,7 +192,7 @@ def partial_fill_event(
     *, exchange_order_id: str, client_order_id: str, quantity: Decimal = Decimal("1")
 ) -> ProviderOrderEvent:
     fill_id = f"fill-{uuid.uuid4().hex}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fill = FillEvent(
         provider_fill_id=fill_id,
         venue="bitget",

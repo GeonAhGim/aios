@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import statistics
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -53,7 +53,7 @@ async def _enqueue_pending_submit(
         view = await order_repo.get_for_update(conn, order_id)
         await outbox_repo.enqueue(
             conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
-            not_before=datetime.now(timezone.utc),
+            not_before=datetime.now(UTC),
         )
     return order_id
 

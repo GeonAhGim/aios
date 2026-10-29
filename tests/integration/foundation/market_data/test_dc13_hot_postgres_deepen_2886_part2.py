@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -158,7 +158,7 @@ async def test_concurrent_write_batch_disjoint_open_times_all_succeed(
     n = 20
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, prefix="DC13PARALLEL")
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
 
     batch_ids: list[uuid.UUID] = []

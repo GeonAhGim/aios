@@ -31,7 +31,7 @@ by F1 and stay on `pool.acquire()`."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -222,7 +222,7 @@ class PostgresPaperControlRepository:
                 id_value=deployment_id,
                 expected_state_column="state",
                 expected_state_value=expected_state,
-                set_values={"state": new_state, "updated_at": datetime.now(timezone.utc)},
+                set_values={"state": new_state, "updated_at": datetime.now(UTC)},
                 extra_conditions={"tenant_id": tenant_id},
             )
         return _row_to_deployment(row)

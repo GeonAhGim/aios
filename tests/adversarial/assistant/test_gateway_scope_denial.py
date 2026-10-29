@@ -9,7 +9,7 @@ Spec: ADR-2026-09-05-A "자금 이동·LIVE·리스크 정책 변경 capability�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -25,7 +25,7 @@ from src.foundation.ai.gateway.domain.token_rules import (
     TokenRuleError,
 )
 
-NOW = datetime(2026, 9, 17, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 17, tzinfo=UTC)
 
 
 def _propose_only_token() -> AgentToken:

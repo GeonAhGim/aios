@@ -1,7 +1,7 @@
 """멱등 스코프·digest·client id 단위테스트 — L4-03. DB 없음."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -28,7 +28,7 @@ def _scope(**overrides: Any) -> OrderIdempotencyScope:
         "strategy_version": "1.0.0",
         "execution_id": 1,
         "intent_seq": 1,
-        "window_start": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "window_start": datetime(2026, 1, 1, tzinfo=UTC),
     }
     defaults.update(overrides)
     return build_scope(**defaults)
@@ -46,7 +46,7 @@ def _command(**overrides: Any) -> SubmitOrderCommand:
         "price": None,
         "asset_class": AssetClass.CRYPTO,
         "actor_subject_id": uuid4(),
-        "issued_at": datetime.now(timezone.utc),
+        "issued_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     return SubmitOrderCommand(**defaults)
@@ -105,7 +105,7 @@ def test_command_digest_stable_across_retry_metadata() -> None:
     """command_id/trace_id/actor_subject_id/issued_at만 다르면 같은
     재시도로 취급 — digest는 동일해야 한다."""
     cmd_a = _command()
-    cmd_b = _command(command_id=uuid4(), trace_id=uuid4(), issued_at=datetime.now(timezone.utc))
+    cmd_b = _command(command_id=uuid4(), trace_id=uuid4(), issued_at=datetime.now(UTC))
     assert command_digest(cmd_a) == command_digest(cmd_b)
 
 

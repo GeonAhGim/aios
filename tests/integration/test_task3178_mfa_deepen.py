@@ -15,7 +15,7 @@ D3 여부: 이 리프의 spec id(PLT-17~21/PLT-24)는 ADR-2026-09-09-C D3 축
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 import pytest
@@ -53,7 +53,7 @@ async def _register_and_enable_mfa(client, pool) -> tuple[str, str, datetime]:
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]
@@ -89,7 +89,7 @@ async def test_mfa_resetup_stays_rejected_when_reauth_raises_unexpected_error(
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         original_secret = setup_response.json()["data"]["secret"]
@@ -159,7 +159,7 @@ async def test_mfa_resetup_rejection_p95_latency_budget(client, perf_budget):
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]
@@ -201,7 +201,7 @@ async def test_perf_budget_gate_actually_fails_when_rejection_path_stalls(
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]
@@ -239,7 +239,7 @@ async def test_mfa_resetup_rejected_with_wrong_password_when_already_enabled(cli
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]
@@ -272,7 +272,7 @@ async def test_mfa_resetup_rejected_with_empty_string_password(client):
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]

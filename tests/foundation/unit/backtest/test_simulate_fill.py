@@ -1,6 +1,6 @@
 """simulate_fill() 단위테스트 — 체결가/수수료/슬리피지 계산 검증."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -12,7 +12,7 @@ from src.foundation.backtest.application.simulate_fill import simulate_fill
 from src.foundation.backtest.domain.models import CostModel
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 2, tzinfo=UTC)
 
 
 def _bar(*, open_price: str = "100") -> Candle:

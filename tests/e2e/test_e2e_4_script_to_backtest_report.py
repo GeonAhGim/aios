@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -79,7 +79,7 @@ REGISTRY_VERSION = "e" * 64
 # 6봉 결정론적 시나리오: close가 상승->상승->하락->상승->상승으로 움직여
 # go_long/go_flat 신호가 각각 정확히 두 번씩 정의된 값으로 발화한다(직전 대비
 # 비교라 0번째 봉은 na).
-_BASE_TS = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_BASE_TS = datetime(2026, 1, 1, tzinfo=UTC)
 _OPENS = [Decimal(v) for v in (100, 104, 109, 107, 111, 114)]
 _CLOSES = [Decimal(v) for v in (100, 105, 110, 108, 112, 115)]
 
@@ -259,7 +259,7 @@ async def test_script_compile_to_backtest_report_persists_reproducible_experimen
         artifacts=(),
         parent_id=None,
         created_by=tenant_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     repo = PostgresExperimentRepository(pool)
     await repo.append(experiment)

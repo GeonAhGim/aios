@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -226,7 +226,7 @@ def _match_query(*, submitted_at: datetime) -> OrderMatchQuery:
 
 
 def _matching_row(*, odno: str) -> dict:
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     kst_now = now_utc + timedelta(hours=9)
     return {
         "pdno": "005930",
@@ -258,7 +258,7 @@ async def test_find_order_by_match_escalates_on_two_candidates():
         )
 
     adapter = _make_kis_adapter(handler)
-    query = _match_query(submitted_at=datetime.now(timezone.utc))
+    query = _match_query(submitted_at=datetime.now(UTC))
 
     with pytest.raises(MultipleCandidateOrdersError) as exc_info:
         await adapter.find_order_by_match(query)
@@ -283,7 +283,7 @@ async def test_find_order_by_match_returns_single_candidate():
         )
 
     adapter = _make_kis_adapter(handler)
-    query = _match_query(submitted_at=datetime.now(timezone.utc))
+    query = _match_query(submitted_at=datetime.now(UTC))
 
     found = await adapter.find_order_by_match(query)
 
@@ -306,7 +306,7 @@ async def test_find_order_by_match_returns_none_without_candidates():
         )
 
     adapter = _make_kis_adapter(handler)
-    query = _match_query(submitted_at=datetime.now(timezone.utc))
+    query = _match_query(submitted_at=datetime.now(UTC))
 
     assert await adapter.find_order_by_match(query) is None
 

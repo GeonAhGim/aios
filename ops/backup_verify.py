@@ -49,7 +49,7 @@ DEFAULT_SCHEDULE_HOURS = 24.0
 
 
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 def _finish(steps: dict[str, dict[str, Any]], started: dt.datetime) -> dict[str, Any]:

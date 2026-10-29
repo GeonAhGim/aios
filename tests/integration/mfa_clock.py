@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pyotp
@@ -31,7 +31,7 @@ def mfa_clock_shifted(app: FastAPI, seconds: int) -> Iterator[Now]:
     offset = timedelta(seconds=seconds)
 
     def now() -> datetime:
-        return datetime.now(timezone.utc) + offset
+        return datetime.now(UTC) + offset
 
     async def _shifted_mfa_service(
         request: Request, pool: asyncpg.Pool = Depends(get_pool)
@@ -105,7 +105,7 @@ def test_negative_invalid_totp_secret() -> None:
     from binascii import Error
 
     with pytest.raises(Error, match="Non-base32"):
-        totp_at("!invalid!", datetime(2026, 1, 1, tzinfo=timezone.utc))
+        totp_at("!invalid!", datetime(2026, 1, 1, tzinfo=UTC))
 
 
 @pytest.mark.parametrize("frozen", [False, True])
@@ -128,7 +128,7 @@ async def test_failure_injection_dependency_restores_override(
         raise failure
 
     monkeypatch.setattr(secret, "get_secret_value", fail_secret)
-    when = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    when = datetime(2026, 1, 1, tzinfo=UTC)
     context = mfa_clock_frozen(app, when) if frozen else mfa_clock_shifted(app, 31)
     with pytest.raises(RuntimeError, match="injected secret provider outage") as caught:
         with context:
@@ -147,18 +147,18 @@ async def test_nested_clock_wiring_restores_outer_service() -> None:
         credential_encryption_key=SimpleNamespace(get_secret_value=lambda: "test-only")
     )
     request = Request({"type": "http", "app": app})
-    when = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    when = datetime(2026, 1, 1, tzinfo=UTC)
     with mfa_clock_shifted(app, 31) as now:
         outer = app.dependency_overrides[get_mfa_service]
         shifted = await outer(request, pool=None)
         assert shifted._now is now
-        before = datetime.now(timezone.utc) + timedelta(seconds=31)
-        assert before <= now() <= datetime.now(timezone.utc) + timedelta(seconds=31)
+        before = datetime.now(UTC) + timedelta(seconds=31)
+        assert before <= now() <= datetime.now(UTC) + timedelta(seconds=31)
         with mfa_clock_frozen(app, when):
             inner = app.dependency_overrides[get_mfa_service]
             service = await inner(request, pool=None)
             assert service._now() == when
-            assert service._now().tzinfo is timezone.utc
+            assert service._now().tzinfo is UTC
         assert app.dependency_overrides[get_mfa_service] is outer
     assert get_mfa_service not in app.dependency_overrides
 
@@ -166,7 +166,7 @@ async def test_nested_clock_wiring_restores_outer_service() -> None:
 def test_totp_known_vector_and_step_boundary() -> None:
     """RFC 6238 SHA1 vector (six digits), including the next 30-second boundary."""
     secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
-    when = datetime.fromtimestamp(59, tz=timezone.utc)
+    when = datetime.fromtimestamp(59, tz=UTC)
     assert totp_at(secret, when) == "287082"
     assert totp_at(secret, when - timedelta(seconds=29)) == "287082"
     assert totp_at(secret, when + timedelta(seconds=1)) == "359152"

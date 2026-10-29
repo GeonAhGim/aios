@@ -31,7 +31,7 @@ REST API client repo -- same source cited by trading_mixin.py, task-7571):
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -65,7 +65,7 @@ def parse_stock_trade_message(message: dict[str, Any]) -> list[Ticker]:
                     bid=Decimal(values["28"]),
                     ask=Decimal(values["27"]),
                     volume_24h=Decimal(values["15"]),
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     source_type="primary",
                 )
             )
@@ -106,7 +106,7 @@ def parse_orderbook_message(message: dict[str, Any]) -> OrderBook | None:
         exchange="kiwoom",
         bids=bids,
         asks=asks,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -146,7 +146,7 @@ def parse_order_fill_message(message: dict[str, Any]) -> Order | None:
         quantity=order_qty,
         status=status,
         filled_quantity=filled_qty,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
         asset_class=AssetClass.KR_EQUITY,
     )

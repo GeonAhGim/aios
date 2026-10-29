@@ -9,7 +9,7 @@ DoD (task-6707 / RD-18)
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -58,7 +58,7 @@ def _make_stale_tracker(now: datetime) -> DataFreshnessTracker:
     return tracker
 
 
-NOW = datetime(2026, 9, 26, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 26, 12, 0, 0, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +255,7 @@ class TestCoverageAlert:
         )
         assert alert.age_seconds is None
         assert alert.consecutive_failures is None
-        assert alert.detected_at.tzinfo == timezone.utc
+        assert alert.detected_at.tzinfo == UTC
 
     def test_frozen(self):
         """Verify immutability (frozen=True)."""

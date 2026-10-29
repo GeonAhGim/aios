@@ -7,7 +7,7 @@ Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §2.5/§9 AI-19
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -19,7 +19,7 @@ from src.foundation.ml.domain.registry_rules import (
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _card(**overrides: object) -> ModelCard:

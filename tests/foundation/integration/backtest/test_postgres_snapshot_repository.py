@@ -12,7 +12,7 @@ generator).
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -29,7 +29,7 @@ from src.foundation.backtest.domain.snapshot import (
 )
 from tests.support.db import create_pool_with_retry
 
-_AS_OF = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def repo(pool: asyncpg.Pool) -> PostgresSnapshotRepository:
 
 
 def _bars(symbol: str = "BTCUSDT", n: int = 3) -> list[Candle]:
-    open_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    open_time = datetime(2026, 1, 1, tzinfo=UTC)
     bars = []
     for i in range(n):
         bars.append(

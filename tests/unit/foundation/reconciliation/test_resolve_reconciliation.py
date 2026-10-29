@@ -3,7 +3,7 @@ repository (no DB). Covers state_to_view mapping and every guard branch."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -19,7 +19,7 @@ from src.foundation.reconciliation.domain.models import Classification, Reconcil
 
 
 def _state(**overrides) -> ReconciliationState:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults = dict(
         target_ref=uuid4(),
         target_type="PAPER_DEPLOYMENT",

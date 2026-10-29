@@ -24,7 +24,7 @@ task-2726) D1 -> D2 증빙.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import Mock
 from uuid import uuid4
 
@@ -40,7 +40,7 @@ from src.foundation.research_data.domain.entity_link import (
 )
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _VALID_ISIN = "KR7005930003"  # 미검증: 삼성전자 보통주 ISIN(공개 문헌 인용, 거래소 원문 대조 없음)
 
 

@@ -6,7 +6,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-5
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -120,7 +120,7 @@ def test_to_view_snapshots_balanced_state() -> None:
     entries = _generate_lines(_SEED, 50)
     balances = trial_balance.build_trial_balance(entries)
     view = trial_balance.to_view(
-        balances, as_of=datetime(2026, 9, 3, tzinfo=timezone.utc), last_entry_seq=50
+        balances, as_of=datetime(2026, 9, 3, tzinfo=UTC), last_entry_seq=50
     )
     assert view.total == Decimal("0")
     assert view.balances == balances
@@ -164,5 +164,5 @@ def test_to_view_raises_and_does_not_build_view_when_unbalanced() -> None:
     balances = {PLATFORM_CASH_CLEARING: Decimal("1.00")}
     with pytest.raises(trial_balance.TrialBalanceNonZeroError):
         trial_balance.to_view(
-            balances, as_of=datetime(2026, 9, 3, tzinfo=timezone.utc), last_entry_seq=1
+            balances, as_of=datetime(2026, 9, 3, tzinfo=UTC), last_entry_seq=1
         )

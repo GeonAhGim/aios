@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.automation.contracts.v1 import AutomationRule, RuleNotFoundError, RuleStatus
@@ -20,7 +20,7 @@ async def cancel_rule(
     if rule is None or rule.tenant_id != tenant_id:
         raise RuleNotFoundError(str(rule_id))
     cancelled = rule.model_copy(
-        update={"status": RuleStatus.CANCELLED, "updated_at": datetime.now(timezone.utc)}
+        update={"status": RuleStatus.CANCELLED, "updated_at": datetime.now(UTC)}
     )
     await repo.save(cancelled)
     return cancelled

@@ -4,7 +4,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L45 DoD)."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -22,7 +22,7 @@ from src.foundation.performance.contracts.v1 import (
     StatementState,
 )
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 def _money(amount: Decimal | None = Decimal("100")) -> MoneyValue:

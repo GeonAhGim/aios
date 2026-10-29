@@ -4,7 +4,7 @@ FND-07(paper_control)/order adapter 없이 재현 가능한 범위(RSK-001~005).
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -55,7 +55,7 @@ class _FakeHealthyConnectionRepo:
     async def get_latest_health(self, connection_id: UUID) -> ConnectionHealth | None:
         return ConnectionHealth(
             connection_id=connection_id,
-            evaluated_at=datetime.now(timezone.utc),
+            evaluated_at=datetime.now(UTC),
             state=HealthState.HEALTHY,
         )
 

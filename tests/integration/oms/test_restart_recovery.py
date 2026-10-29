@@ -28,7 +28,7 @@ import inspect
 import json
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -60,7 +60,7 @@ _INSERT_LEASE_SQL = """
 async def _seed_lease(
     pool: asyncpg.Pool, execution_id: int, *, owner_id: str, expired: bool
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now - timedelta(seconds=30) if expired else now + timedelta(hours=1)
     async with pool.acquire() as conn:
         await conn.execute(_INSERT_LEASE_SQL, execution_id, owner_id, expires_at)

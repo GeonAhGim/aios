@@ -6,7 +6,7 @@ DoD ("10-K/Q, 8-K normalization").
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -55,8 +55,8 @@ def test_parse_sec_edgar_submissions_normalizes_dates_and_source_id() -> None:
     ten_k = items[0]
     assert ten_k.source_id == SEC_EDGAR_SOURCE_ID
     assert ten_k.kind == "filing"
-    assert ten_k.published_at == datetime(2024, 2, 15, tzinfo=timezone.utc)
-    assert ten_k.known_at == datetime(2024, 2, 15, 18, 30, tzinfo=timezone.utc)
+    assert ten_k.published_at == datetime(2024, 2, 15, tzinfo=UTC)
+    assert ten_k.known_at == datetime(2024, 2, 15, 18, 30, tzinfo=UTC)
     assert ten_k.body_ref is None
     assert ten_k.language == "en"
 

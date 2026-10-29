@@ -5,7 +5,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-4
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -16,7 +16,7 @@ from src.data.models.base import Currency, FXRate, Money
 from src.foundation.positions.contracts.v1 import CostMethod, PositionSnapshotView
 from src.foundation.positions.domain import fx, pnl
 
-_NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 
 
 def _snapshot(

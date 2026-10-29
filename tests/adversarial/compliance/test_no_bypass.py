@@ -13,7 +13,7 @@ gate.py`)에서 판정을 지우면 방금 막혔던 시나리오가 통과로 �
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -118,7 +118,7 @@ def _submit_cmd(user_id: UUID, execution_id: int, symbol: str) -> SubmitOrderCom
         strategy_version="1.0.0",
         execution_id=execution_id,
         intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid.uuid4(),
@@ -130,7 +130,7 @@ def _submit_cmd(user_id: UUID, execution_id: int, symbol: str) -> SubmitOrderCom
         quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 

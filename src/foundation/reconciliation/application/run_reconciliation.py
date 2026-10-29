@@ -19,7 +19,7 @@ scope restriction)."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -159,7 +159,7 @@ async def run_reconciliation(
         aggregate = aggregate_classification(tuple(i.classification for i in existing.items))
         return run_to_view(existing, aggregate)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     safety_control_id: UUID | None = None
     blocking_reason: str | None = None
     if aggregate in _BLOCKING_CLASSIFICATIONS:

@@ -21,7 +21,7 @@ LA-21(ReplayVerify) 대체: as_of 스냅샷 + 재조회 결과 동일 검증(bat
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -63,7 +63,7 @@ from tests.e2e.market_data_helpers import (
 
 # Use today's date to ensure md_ensure_partitions creates the necessary partitions
 # (it only creates forward from current month, not backward)
-_BASE_DATE = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+_BASE_DATE = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 @pytest.fixture
@@ -480,6 +480,6 @@ async def test_ingest_source_mock_timeout_contract(pool: asyncpg.Pool) -> None:
             Venue.BITGET,
             "test_symbol",
             Timeframe.M1,
-            datetime.now(timezone.utc),
-            datetime.now(timezone.utc) + timedelta(minutes=1),
+            datetime.now(UTC),
+            datetime.now(UTC) + timedelta(minutes=1),
         )

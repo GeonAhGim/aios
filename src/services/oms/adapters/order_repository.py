@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -165,7 +165,7 @@ class PostgresOrderRepository:
             trace_id=uuid4(),
             command_id=None,
             provider_event_id=None,
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
             payload_hash=_child_qty_committed_payload_hash(
                 parent_order_id, expected_version, committed_child_qty
             ),
@@ -180,7 +180,7 @@ class PostgresOrderRepository:
             expected_state_value=expected_version,
             set_values={
                 "committed_child_qty": committed_child_qty,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             },
             returning="*",
         )
@@ -219,7 +219,7 @@ class PostgresOrderRepository:
         set_values: dict[str, Any] = {
             **patch,
             "status": new_status.value,
-            "updated_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(UTC),
         }
         row = await conditional_update(
             conn,

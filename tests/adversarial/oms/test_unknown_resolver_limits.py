@@ -11,7 +11,7 @@ DoD("NOT_FOUND 2회+120s → FAILED; 상한 → safety control"), I-01.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -25,7 +25,7 @@ from src.services.oms.application import unknown_resolver
 from src.services.oms.contracts.v1_views import OrderView
 from src.services.oms.domain.errors import InvalidOrderTransitionError
 
-BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+BASE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 async def _no_sleep(seconds: float) -> None:

@@ -7,7 +7,7 @@ DoD: 정정 공시 적용 후에도 정정 전 시점 질의가 정정 전 값�
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -41,19 +41,19 @@ def test_correction_is_a_new_row_and_pre_correction_query_returns_pre_correction
     original = _action(
         instrument_id=instrument_id,
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref="rcept-original",
     )
     correction = _action(
         instrument_id=instrument_id,
         ratio="5",  # 정정 공시: 실제로는 5:1 분할이었음
-        known_at=datetime(2026, 3, 10, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 10, 9, 0, tzinfo=UTC),
         source_ref="rcept-correction",
     )
     history = [original, correction]  # 둘 다 저장소에 남아 있다 — UPDATE가 아니다
 
-    before_correction = resolve_as_of(history, datetime(2026, 3, 5, tzinfo=timezone.utc))
-    after_correction = resolve_as_of(history, datetime(2026, 3, 15, tzinfo=timezone.utc))
+    before_correction = resolve_as_of(history, datetime(2026, 3, 5, tzinfo=UTC))
+    after_correction = resolve_as_of(history, datetime(2026, 3, 15, tzinfo=UTC))
 
     assert [a.ratio for a in before_correction] == [Decimal("10")]
     assert [a.source_ref for a in before_correction] == ["rcept-original"]
@@ -66,11 +66,11 @@ def test_as_of_before_known_at_returns_nothing() -> None:
     action = _action(
         instrument_id=instrument_id,
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref="rcept-original",
     )
 
-    result = resolve_as_of([action], datetime(2026, 2, 1, tzinfo=timezone.utc))
+    result = resolve_as_of([action], datetime(2026, 2, 1, tzinfo=UTC))
 
     assert result == []
 
@@ -85,7 +85,7 @@ def test_action_without_known_at_is_excluded() -> None:
         source_ref="legacy-la12-record",
     )  # known_at 없음 — 기존 LA-12 경로에서 온 레코드
 
-    result = resolve_as_of([legacy_action], datetime(2026, 12, 1, tzinfo=timezone.utc))
+    result = resolve_as_of([legacy_action], datetime(2026, 12, 1, tzinfo=UTC))
 
     assert result == []
 
@@ -94,7 +94,7 @@ def test_naive_as_of_raises() -> None:
     action = _action(
         instrument_id=uuid4(),
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref="rcept-original",
     )
 
@@ -112,7 +112,7 @@ def test_known_at_one_microsecond_after_as_of_is_strictly_excluded() -> None:
     round or truncate to second/date granularity (an off-by-one here would
     leak a not-yet-known correction into a backtest)."""
     instrument_id = uuid4()
-    as_of = datetime(2026, 3, 5, 12, 0, 0, tzinfo=timezone.utc)
+    as_of = datetime(2026, 3, 5, 12, 0, 0, tzinfo=UTC)
     action = _action(
         instrument_id=instrument_id,
         ratio="10",
@@ -157,12 +157,12 @@ def test_resolve_as_of_propagates_unexpected_sort_failure(monkeypatch: pytest.Mo
     action = _action(
         instrument_id=uuid4(),
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref="rcept-original",
     )
 
     with pytest.raises(RuntimeError, match="injected"):
-        resolve_as_of([action], datetime(2026, 3, 5, tzinfo=timezone.utc))
+        resolve_as_of([action], datetime(2026, 3, 5, tzinfo=UTC))
 
 
 @pytest.mark.perf
@@ -174,7 +174,7 @@ def test_resolve_as_of_meets_latency_budget_with_many_instruments_and_correction
     않았는지 확인한다(ADR-2026-09-09-C Decision 1)."""
     n_instruments = 2_000
     budget_ms = 2_000.0  # 실측 로컬 <0.4s(400ms)
-    base_known_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base_known_at = datetime(2026, 1, 1, tzinfo=UTC)
     as_of = base_known_at + timedelta(days=2)
 
     actions: list[CorporateAction] = []
@@ -247,7 +247,7 @@ def test_single_call_cpu_measurement_does_not_converge_to_zero(
     # 15.6 ms tick, so a single call read cpu_ms=0.0 (~40% per sample). 50 000 instruments
     # (~90 ms+) spans several ticks, so a zero reading is impossible rather than unlikely.
     n_instruments = 50_000
-    base_known_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base_known_at = datetime(2026, 1, 1, tzinfo=UTC)
     as_of = base_known_at + timedelta(days=2)
 
     actions: list[CorporateAction] = []
@@ -304,7 +304,7 @@ def test_resolve_as_of_perf_assertion_becomes_red_under_delayed_load(
     """
     n_instruments = 10
     budget_ms = 100.0
-    base_known_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base_known_at = datetime(2026, 1, 1, tzinfo=UTC)
     as_of = base_known_at + timedelta(days=2)
 
     actions: list[CorporateAction] = []

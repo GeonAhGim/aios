@@ -23,7 +23,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -84,7 +84,7 @@ def _lifecycle_cmd(instrument_id, event: str, *, source_ref: str) -> LifecycleEv
     return LifecycleEventCommand(
         instrument_id=instrument_id,
         event=event,
-        effective_at=datetime.now(timezone.utc),
+        effective_at=datetime.now(UTC),
         source_ref=source_ref,
         actor_subject_id=uuid.uuid4(),
         trace_id=uuid.uuid4(),
@@ -119,7 +119,7 @@ async def _event_count(pool, aggregate_id) -> int:
 
 
 async def _registered(pool, refs, audit, *, days_ago: int = 1):
-    listed_at = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    listed_at = datetime.now(UTC) - timedelta(days=days_ago)
     cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=listed_at)
     return await register_instrument(pool, cmd, refs=refs, audit=audit)
 
@@ -142,7 +142,7 @@ async def test_register_instrument_writes_exactly_one_audit_event(pool, refs, au
 
 
 async def test_register_instrument_duplicate_venue_symbol_rejected(pool, refs, audit):
-    cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(timezone.utc))
+    cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(UTC))
     instrument = await register_instrument(pool, cmd, refs=refs, audit=audit)
     with pytest.raises(DuplicateInstrumentError):
         await register_instrument(pool, cmd, refs=refs, audit=audit)
@@ -151,7 +151,7 @@ async def test_register_instrument_duplicate_venue_symbol_rejected(pool, refs, a
 
 
 async def test_register_instrument_invalid_symbol_format_rejected(pool, refs, audit):
-    cmd = _register_cmd(venue_symbol="NOTASIXDIGIT", listed_at=datetime.now(timezone.utc))
+    cmd = _register_cmd(venue_symbol="NOTASIXDIGIT", listed_at=datetime.now(UTC))
     with pytest.raises(SymbolNormalizationError):
         await register_instrument(pool, cmd, refs=refs, audit=audit)
 
@@ -159,7 +159,7 @@ async def test_register_instrument_invalid_symbol_format_rejected(pool, refs, au
 async def test_register_instrument_rolls_back_with_audit_failure(pool, refs):
     """append_event_in 실패 시 같은 트랜잭션의 md_instrument 행도 함께 사라져야 한다."""
     symbol = _krx_symbol()
-    cmd = _register_cmd(venue_symbol=symbol, listed_at=datetime.now(timezone.utc))
+    cmd = _register_cmd(venue_symbol=symbol, listed_at=datetime.now(UTC))
     with pytest.raises(RuntimeError):
         await register_instrument(pool, cmd, refs=refs, audit=_BoomAuditAppender())
 
@@ -224,7 +224,7 @@ async def test_delisted_symbol_reregistration_rejected(pool, refs, audit):
     with pytest.raises(DuplicateInstrumentError):
         await register_instrument(
             pool,
-            _register_cmd(venue_symbol=listed.venue_symbol, listed_at=datetime.now(timezone.utc)),
+            _register_cmd(venue_symbol=listed.venue_symbol, listed_at=datetime.now(UTC)),
             refs=refs,
             audit=audit,
         )
@@ -371,7 +371,7 @@ async def _count_register_instrument_round_trips(pool, *, refs, audit) -> int:
     동일 이유 — perf_replay_support.py 모듈 docstring)."""
     async with pool.acquire() as conn:
         pinned = _PinnedConnectionPool(conn)
-        warmup_cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(timezone.utc))
+        warmup_cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(UTC))
         await register_instrument(pinned, warmup_cmd, refs=refs, audit=audit)
 
         queries: list[str] = []
@@ -381,7 +381,7 @@ async def _count_register_instrument_round_trips(pool, *, refs, audit) -> int:
 
         conn.add_query_logger(_log)
         try:
-            cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(timezone.utc))
+            cmd = _register_cmd(venue_symbol=_krx_symbol(), listed_at=datetime.now(UTC))
             await register_instrument(pinned, cmd, refs=refs, audit=audit)
         finally:
             conn.remove_query_logger(_log)

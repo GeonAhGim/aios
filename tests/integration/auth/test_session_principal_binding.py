@@ -14,7 +14,7 @@ src/services/auth/session_repository.py(verify_principal_binding).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -45,7 +45,7 @@ async def _insert_active_session(pool, user_id):
             refresh_hash=refresh_hash,
             ip_hash=None,
             ua_hash=None,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=14),
+            expires_at=datetime.now(UTC) + timedelta(days=14),
         )
 
 

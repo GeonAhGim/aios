@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -27,7 +27,7 @@ from src.foundation.ai.gateway.domain.token_rules import (
     issue_scopes,
 )
 
-_NOW = datetime(2026, 9, 17, 0, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 17, 0, 0, 0, tzinfo=UTC)
 
 
 def _token(

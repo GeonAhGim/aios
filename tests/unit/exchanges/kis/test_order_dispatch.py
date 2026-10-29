@@ -60,7 +60,7 @@ def _verified_registry(
 
 
 @pytest.fixture(autouse=True)
-def _reset_bucket_registry() -> Generator[None, None, None]:
+def _reset_bucket_registry() -> Generator[None]:
     """BR-2b -- process-wide TokenBucket singleton isolation between tests
     (same reason as test_trading_mixin_precheck.py)."""
     rate_profile.reset_token_bucket_registry_for_test()

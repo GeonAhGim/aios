@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -68,7 +68,7 @@ def _trigger_command(tenant_id: UUID) -> SubmitOrderCommand:
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid4(),
@@ -81,7 +81,7 @@ def _trigger_command(tenant_id: UUID) -> SubmitOrderCommand:
         trigger_price=Decimal("90"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=tenant_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 

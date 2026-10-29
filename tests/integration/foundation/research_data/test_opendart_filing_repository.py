@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -53,7 +53,7 @@ async def _make_instrument(pool: asyncpg.AsyncioMCDSN) -> uuid.UUID:
                 asset_class=AssetClass.KR_EQUITY,
                 tick_size=Decimal("1"),
                 lot_size=Decimal("1"),
-                listed_at=datetime.now(timezone.utc) - timedelta(days=365),
+                listed_at=datetime.now(UTC) - timedelta(days=365),
                 actor_subject_id=uuid.uuid4(),
                 trace_id=uuid.uuid4(),
             ),
@@ -91,13 +91,13 @@ async def test_correction_appends_new_row_and_pit_query_preserves_pre_correction
     original = _split(
         instrument_id,
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-original-{instrument_id}",
     )
     correction = _split(
         instrument_id,
         ratio="5",
-        known_at=datetime(2026, 3, 10, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 10, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-correction-{instrument_id}",
     )
 
@@ -114,8 +114,8 @@ async def test_correction_appends_new_row_and_pit_query_preserves_pre_correction
     async with pool.acquire() as conn:
         history = await filing_repo.list_history(conn, instrument_id)
 
-    before = resolve_as_of(history, datetime(2026, 3, 5, tzinfo=timezone.utc))
-    after = resolve_as_of(history, datetime(2026, 3, 15, tzinfo=timezone.utc))
+    before = resolve_as_of(history, datetime(2026, 3, 5, tzinfo=UTC))
+    after = resolve_as_of(history, datetime(2026, 3, 15, tzinfo=UTC))
     assert [a.ratio for a in before] == [Decimal("10")]
     assert [a.ratio for a in after] == [Decimal("5")]
 
@@ -127,7 +127,7 @@ async def test_append_is_idempotent_on_source_ref(
     action = _split(
         instrument_id,
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-replay-{instrument_id}",
     )
 
@@ -190,7 +190,7 @@ async def test_append_rejects_unknown_instrument_id(
     action = _split(
         uuid.uuid4(),
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-unknown-instrument-{uuid.uuid4()}",
     )
 
@@ -208,7 +208,7 @@ async def test_append_rejects_non_positive_ratio(
     action = _split(
         instrument_id,
         ratio="0",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-zero-ratio-{instrument_id}",
     )
 
@@ -245,7 +245,7 @@ async def test_append_failure_injection_leaves_no_partial_row_and_retry_succeeds
     action = _split(
         instrument_id,
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-retry-{instrument_id}",
     )
 

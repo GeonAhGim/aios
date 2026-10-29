@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -105,7 +105,7 @@ def _decision(*, tenant_id: object, evaluated_at: datetime, **overrides: object)
 
 
 def _inputs(*, tenant_id: object, balance: Decimal = Decimal(_DISTINCTIVE_BALANCE)) -> RiskInputs:
-    now = datetime(2026, 9, 4, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 4, tzinfo=UTC)
     return RiskInputs(
         tenant_id=tenant_id,  # type: ignore[arg-type]
         execution_ref="exec:1",

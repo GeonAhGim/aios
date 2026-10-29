@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -51,7 +51,7 @@ def _candles_random_walk(n: int, *, seed: int = 7, base: float = 100.0) -> list[
     spread = np.abs(rng.normal(size=n)) + 0.1
     high = close + spread
     low = np.maximum(close - spread, 0.01)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out = []
     for i in range(n):
         out.append(

@@ -26,6 +26,7 @@ from __future__ import annotations
 import ast
 from collections import deque
 from collections.abc import Callable
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -183,7 +184,7 @@ class _DbAccessError(RuntimeError):
 
 def test_runtime_execution_touches_no_db_primitive(monkeypatch: pytest.MonkeyPatch) -> None:
     import asyncio
-    from datetime import datetime, timezone
+    from datetime import datetime
     from decimal import Decimal
     from uuid import UUID
 
@@ -227,7 +228,7 @@ def test_runtime_execution_touches_no_db_primitive(monkeypatch: pytest.MonkeyPat
     # past the AST scan (e.g. added dynamically) would still be caught.
     monkeypatch.setattr(asyncio, "run", _trap("asyncio.run"))
 
-    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
     before = PortfolioAggregate(
         total_equity=Decimal("1000000"),
         per_symbol_pct={"AAPL": Decimal("30")},

@@ -13,7 +13,7 @@ cannot be used to enumerate other tenants' decision ids.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -32,7 +32,7 @@ from src.foundation.mandates.domain.models import (
 from src.foundation.mandates.domain.rules import compile_rule_hash
 from src.services.auth_service import User
 
-_NOW = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 5, 5, 0, 0, tzinfo=UTC)
 
 
 def _user(user_id: UUID) -> User:

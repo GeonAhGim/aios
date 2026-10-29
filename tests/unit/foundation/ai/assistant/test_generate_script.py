@@ -7,7 +7,7 @@ DoD 대응: negative(컴파일 실패/예산 초과) 3건 이상, 실패 주입(
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -75,7 +75,7 @@ class InMemoryCounter(UsageCounterStore):
         self._counts[key] = self._counts.get(key, 0) + 1
 
 
-NOW = datetime(2026, 9, 17, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 17, tzinfo=UTC)
 
 
 async def test_valid_prompt_compiles_successfully() -> None:

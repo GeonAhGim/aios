@@ -9,7 +9,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.2 (B), §9 LB-1.
 """
 
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -48,7 +48,7 @@ _ERROR_CODES = {
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _sample_fill_command(**overrides: object) -> v1.RecordFillCommand:

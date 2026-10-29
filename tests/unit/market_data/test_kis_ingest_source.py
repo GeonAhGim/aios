@@ -17,7 +17,7 @@ D1로 판정한 4건을 아래에서 채운다: (1) failure-injection — MockTr
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -72,7 +72,7 @@ def _krx_calendar(*, holidays: frozenset[date] = frozenset()) -> VenueCalendar:
 
 
 def _intraday_row(open_time: datetime) -> dict:
-    ot_utc = open_time.astimezone(timezone.utc)
+    ot_utc = open_time.astimezone(UTC)
     return {
         "stck_bsop_date": ot_utc.strftime("%Y%m%d"),
         "stck_cntg_hour": ot_utc.strftime("%H%M%S"),
@@ -113,14 +113,14 @@ async def test_fetch_candles_maps_daily_ohlc_and_filters_range() -> None:
 
     adapter = _make_adapter(handler)
     source = KisIngestSource(adapter)
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 4, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 4, tzinfo=UTC)
 
     candles = await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
 
     assert [c.open_time for c in candles] == [
-        datetime(2026, 9, 2, tzinfo=timezone.utc),
-        datetime(2026, 9, 3, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, tzinfo=UTC),
+        datetime(2026, 9, 3, tzinfo=UTC),
     ]
     assert candles[0].close == Decimal("70050")
     assert candles[0].key.venue is Venue.KIS_KRX
@@ -128,14 +128,14 @@ async def test_fetch_candles_maps_daily_ohlc_and_filters_range() -> None:
 
 async def test_fetch_candles_rejects_unsupported_venue() -> None:
     source = KisIngestSource(_make_adapter(lambda r: httpx.Response(200, json=_TOKEN_RESPONSE)))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
     with pytest.raises(UnsupportedVenueError):
         await source.fetch_candles(Venue.BITGET, "005930", Timeframe.D1, start, start)
 
 
 async def test_fetch_candles_rejects_unsupported_timeframe() -> None:
     source = KisIngestSource(_make_adapter(lambda r: httpx.Response(200, json=_TOKEN_RESPONSE)))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
     with pytest.raises(UnsupportedTimeframeError):
         await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.M5, start, start)
 
@@ -145,7 +145,7 @@ async def test_fetch_candles_rejects_naive_datetime() -> None:
     naive = datetime(2026, 9, 2)
     with pytest.raises(ValueError, match="tz-aware"):
         await source.fetch_candles(
-            Venue.KIS_KRX, "005930", Timeframe.D1, naive, datetime(2026, 9, 3, tzinfo=timezone.utc)
+            Venue.KIS_KRX, "005930", Timeframe.D1, naive, datetime(2026, 9, 3, tzinfo=UTC)
         )
 
 
@@ -212,8 +212,8 @@ async def test_fetch_candles_raises_retryable_error_on_venue_body_error() -> Non
         return httpx.Response(200, json={"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "일시 오류"})
 
     source = KisIngestSource(_make_adapter(handler))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 4, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 4, tzinfo=UTC)
 
     with pytest.raises(RetryableExchangeError):
         await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
@@ -230,8 +230,8 @@ async def test_fetch_candles_raises_fatal_error_on_malformed_row() -> None:
         return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output2": [bad_row]})
 
     source = KisIngestSource(_make_adapter(handler))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 4, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 4, tzinfo=UTC)
 
     with pytest.raises(FatalExchangeError):
         await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
@@ -254,8 +254,8 @@ async def test_fetch_candles_repeated_calls_p95_latency_under_budget(
         )
 
     source = KisIngestSource(_make_adapter(handler))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 3, tzinfo=UTC)
     await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)  # 토큰 캐시 예열
 
     n = 50
@@ -317,15 +317,15 @@ async def test_gate_red_when_range_filter_removed_existing_test_would_fail(monke
         )
 
     source = KisIngestSource(_make_adapter(handler))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 4, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 4, tzinfo=UTC)
 
     candles = await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
 
     with pytest.raises(AssertionError):
         assert [c.open_time for c in candles] == [
-            datetime(2026, 9, 2, tzinfo=timezone.utc),
-            datetime(2026, 9, 3, tzinfo=timezone.utc),
+            datetime(2026, 9, 2, tzinfo=UTC),
+            datetime(2026, 9, 3, tzinfo=UTC),
         ]
 
 
@@ -349,15 +349,15 @@ async def test_fetch_candles_rejects_adversarial_rows_outside_requested_window()
         return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output2": rows})
 
     source = KisIngestSource(_make_adapter(handler))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 6, tzinfo=timezone.utc)  # limit=5, rows 전부 응답에 포함되도록
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 6, tzinfo=UTC)  # limit=5, rows 전부 응답에 포함되도록
 
     candles = await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
 
     assert [c.open_time for c in candles] == [
-        datetime(2026, 9, 2, tzinfo=timezone.utc),
-        datetime(2026, 9, 2, tzinfo=timezone.utc),
-        datetime(2026, 9, 3, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, tzinfo=UTC),
+        datetime(2026, 9, 2, tzinfo=UTC),
+        datetime(2026, 9, 3, tzinfo=UTC),
     ]
 
 
@@ -384,8 +384,8 @@ async def test_fetch_candles_replay_is_idempotent_and_reuses_cached_token() -> N
         "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
     )
     source = KisIngestSource(adapter)
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 3, tzinfo=UTC)
 
     first = await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
     second = await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)
@@ -428,8 +428,8 @@ async def test_fetch_candles_concurrent_symbols_no_cross_contamination_single_to
         "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
     )
     source = KisIngestSource(adapter)
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 3, tzinfo=UTC)
 
     symbols = ["005930", "000660"] * 5  # 10개 동시 요청, 심볼 교차 배치
     results = await asyncio.gather(
@@ -483,8 +483,8 @@ async def test_gate_red_when_token_lock_removed_concurrency_test_would_fail(monk
         "app", "secret", "12345678", "01", is_paper_trading=True, http_client=client
     )
     source = KisIngestSource(adapter)
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 3, tzinfo=UTC)
 
     symbols = ["005930", "000660"] * 5
     await asyncio.gather(

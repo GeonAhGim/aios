@@ -6,7 +6,7 @@ DoD ("link_only 강제").
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -32,7 +32,7 @@ from tests.support.perf_inject import virtual_delayed_sync
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EVAL_PATH = _REPO_ROOT / "docs" / "design" / "RESEARCH_DATA_SOURCE_EVAL.md"
 
-_COLLECTED_AT = datetime(2026, 9, 24, 6, 5, 0, tzinfo=timezone.utc)
+_COLLECTED_AT = datetime(2026, 9, 24, 6, 5, 0, tzinfo=UTC)
 
 
 def _row(**overrides: str) -> str:
@@ -70,7 +70,7 @@ def _row(**overrides: str) -> str:
 def test_parse_gdelt_gkg_row_parses_expected_fields() -> None:
     record = parse_gdelt_gkg_row(_row())
     assert record.record_id == "20260923060000-123"
-    assert record.published_at == datetime(2026, 9, 23, 6, 0, 0, tzinfo=timezone.utc)
+    assert record.published_at == datetime(2026, 9, 23, 6, 0, 0, tzinfo=UTC)
     assert record.source_common_name == "example.com"
     assert record.document_url == "https://example.com/article/123"
     assert record.themes == ("ECON_INFLATION", "TAX_FNCACT")

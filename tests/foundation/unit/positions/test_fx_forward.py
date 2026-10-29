@@ -9,7 +9,7 @@ DoD("헤지 미실현 FX 손익이 NAV 분해에서 자산 손익과 분리 표�
 from __future__ import annotations
 
 import decimal
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -18,7 +18,7 @@ from src.data.models.base import Currency, Money
 from src.foundation.positions.domain import fx_forward as fxf
 from tests.conftest import PerfBudget
 
-_KNOWN_AT = datetime(2026, 9, 7, 9, 0, tzinfo=timezone.utc)
+_KNOWN_AT = datetime(2026, 9, 7, 9, 0, tzinfo=UTC)
 _SETTLEMENT = date(2026, 12, 7)
 
 

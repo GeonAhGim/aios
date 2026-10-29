@@ -9,7 +9,7 @@ DoD(task-375): "동일 position_key에 동시 20건 append 시 sequence_no가
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -41,7 +41,7 @@ def _key(tenant_id: UUID) -> str:
     )
 
 
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture

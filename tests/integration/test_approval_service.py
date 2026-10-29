@@ -5,7 +5,7 @@ mandatory_wait_seconds(60/180초) 실제 대기 대신, DB의 created_at을 직�
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -52,7 +52,7 @@ async def _rewind_created_at(pool, request_id: int, seconds_ago: float) -> None:
         await conn.execute(
             "UPDATE approval_requests SET created_at = $2 WHERE id = $1",
             request_id,
-            datetime.now(timezone.utc) - timedelta(seconds=seconds_ago),
+            datetime.now(UTC) - timedelta(seconds=seconds_ago),
         )
 
 

@@ -10,7 +10,7 @@ D2 evidence: negative >=3, failure-injection 1, perf 1, gate-red repro 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
@@ -46,7 +46,7 @@ def _valid_event_kwargs(**overrides: Any) -> dict[str, Any]:
         "classification": Classification.INTERNAL,
         "previous_hash": None,
         "event_hash": "def456",
-        "occurred_at": datetime.now(timezone.utc),
+        "occurred_at": datetime.now(UTC),
         "schema_version": "v1",
         **overrides,
     }
@@ -150,7 +150,7 @@ def test_audit_timeline_page_with_items() -> None:
     page = AuditTimelinePage(
         items=[event],
         next_cursor="cursor-001",
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
 
     assert len(page.items) == 1
@@ -163,7 +163,7 @@ def test_audit_timeline_page_empty_items() -> None:
     page = AuditTimelinePage(
         items=[],
         next_cursor=None,
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
 
     assert len(page.items) == 0
@@ -177,7 +177,7 @@ def test_audit_timeline_page_multiple_events() -> None:
     page = AuditTimelinePage(
         items=events,
         next_cursor="next-page",
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
 
     assert len(page.items) == 3
@@ -192,7 +192,7 @@ def test_audit_timeline_page_none_next_cursor() -> None:
     page = AuditTimelinePage(
         items=[event],
         next_cursor=None,
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
 
     assert page.next_cursor is None
@@ -252,7 +252,7 @@ def test_model_creation_performance(perf_budget: Any) -> None:
     )
     perf_budget.assert_within(
         lambda: AuditTimelinePage(
-            items=events, next_cursor="cursor", as_of=datetime.now(timezone.utc)
+            items=events, next_cursor="cursor", as_of=datetime.now(UTC)
         ),
         budget_ms=10.0,
         batch=10,

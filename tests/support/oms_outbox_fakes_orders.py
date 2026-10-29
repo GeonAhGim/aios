@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
@@ -139,7 +139,7 @@ class ScriptedAdapter(FakeExchangeAdapter):
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def make_order_view(
@@ -246,7 +246,7 @@ async def enqueue(
         order_id=view.order_id,
         command_type=command_type,
         payload=body,
-        not_before=not_before or datetime(2000, 1, 1, tzinfo=timezone.utc),
+        not_before=not_before or datetime(2000, 1, 1, tzinfo=UTC),
     )
     return cast(UUID, result)
 

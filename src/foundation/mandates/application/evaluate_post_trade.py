@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -254,7 +254,7 @@ async def run_daily_post_trade_batch(
     `publish` (CM-12) is optional so existing callers/tests keep working unchanged."""
     # fmt: off
     resolved_params = rule_params or {}
-    day_start = datetime.combine(business_date, time.min, tzinfo=timezone.utc)
+    day_start = datetime.combine(business_date, time.min, tzinfo=UTC)
     day_end = day_start + timedelta(days=1)
 
     tenant_ids = await _tenants_with_fills(pool, day_start, day_end)

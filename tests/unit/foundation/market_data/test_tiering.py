@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -36,7 +36,7 @@ def _empty_columns() -> CandleColumns:
 
 
 def _daily_columns(year: int, days: list[int]) -> CandleColumns:
-    ts = [datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=d) for d in days]
+    ts = [datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=d) for d in days]
     n = len(ts)
     return CandleColumns(
         ts=ts,
@@ -125,7 +125,7 @@ def test_successful_promotion_moves_rows_and_records_lineage(tmp_path: Path):
     assert hot.delete_calls == [2026]
 
     loaded, missing = warm.read_columns(
-        _KEY, datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 1, tzinfo=timezone.utc)
+        _KEY, datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)
     )
     assert missing == ()
     assert len(loaded) == 3
@@ -148,7 +148,7 @@ def test_idempotent_rerun_does_not_duplicate_file_or_lineage(tmp_path: Path):
     assert first.promoted is True
 
     loaded_once, _ = warm.read_columns(
-        _KEY, datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2027, 1, 1, tzinfo=timezone.utc)
+        _KEY, datetime(2026, 1, 1, tzinfo=UTC), datetime(2027, 1, 1, tzinfo=UTC)
     )
     series_dir = tmp_path / _KEY.venue.value / _KEY.timeframe.value / str(_KEY.instrument_id)
     year_path = series_dir / "2026.parquet"
@@ -164,7 +164,7 @@ def test_idempotent_rerun_does_not_duplicate_file_or_lineage(tmp_path: Path):
     assert digest_after == digest_before
 
     loaded_twice, _ = warm.read_columns(
-        _KEY, datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2027, 1, 1, tzinfo=timezone.utc)
+        _KEY, datetime(2026, 1, 1, tzinfo=UTC), datetime(2027, 1, 1, tzinfo=UTC)
     )
     assert loaded_twice.ts == loaded_once.ts
 
@@ -214,7 +214,7 @@ def test_crash_during_write_leaves_no_partial_completion_and_retry_rebuilds(tmp_
     assert len(lineage) == 1
 
     loaded, missing = inner_warm.read_columns(
-        _KEY, datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 1, tzinfo=timezone.utc)
+        _KEY, datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)
     )
     assert missing == ()
     assert len(loaded) == 4
@@ -329,7 +329,7 @@ def test_promote_year_completes_within_budget_for_twenty_thousand_minute_bars(
     round-trip 검증+digest)이 ~0.4초대에 끝난다(로컬 실측) — print만 하지
     않고 예산 5.0초(약 10배 여유)로 실제 단언한다."""
     n = 20_000
-    ts = [datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=i) for i in range(n)]
+    ts = [datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=i) for i in range(n)]
     columns = CandleColumns(
         ts=ts,
         open=[Decimal("100.1000000000") + Decimal(i) for i in range(n)],

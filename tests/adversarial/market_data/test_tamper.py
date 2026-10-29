@@ -31,7 +31,7 @@ UPDATE가 거부된다 — `test_verify_integrity.py`(LC-10)와 같은 방식으
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -172,7 +172,7 @@ async def test_tamper_changes_replay_series_hash(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         opens = [t0, t0 + timedelta(minutes=1), t0 + timedelta(minutes=2)]
         await _seed_batch(
             conn, batch_repo, candle_store, instrument_id=instrument_id, key=key, opens=opens
@@ -226,7 +226,7 @@ async def test_worm_trigger_blocks_normal_update_without_trigger_disable(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         await _seed_batch(
             conn, batch_repo, candle_store, instrument_id=instrument_id, key=key, opens=[t0]
         )
@@ -250,7 +250,7 @@ async def test_tamper_breaks_batch_hash_reverification(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         opens = [t0, t0 + timedelta(minutes=1)]
         await _seed_batch(
             conn, batch_repo, candle_store, instrument_id=instrument_id, key=key, opens=opens
@@ -305,7 +305,7 @@ async def test_worm_trigger_blocks_normal_delete_without_trigger_disable(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         await _seed_batch(
             conn, batch_repo, candle_store, instrument_id=instrument_id, key=key, opens=[t0]
         )
@@ -333,7 +333,7 @@ async def test_upsert_batch_rejects_check_violating_candle(pool, candle_store, b
         async with pool.acquire() as conn, conn.transaction():
             instrument_id = await _instrument_id(conn)
             key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-            t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+            t0 = datetime.now(UTC).replace(second=0, microsecond=0)
             audit_event_id = await _audit_event_id(conn)
             batch = IngestBatchResult(
                 batch_id=uuid.uuid4(),
@@ -372,7 +372,7 @@ async def test_replay_fails_closed_when_batch_hash_dependency_raises(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         await _seed_batch(
             conn, batch_repo, candle_store, instrument_id=instrument_id, key=key, opens=[t0]
         )

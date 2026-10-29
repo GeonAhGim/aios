@@ -7,7 +7,7 @@ DoD(task-712): 스케줄러 1주기 후 게이지 존재, 심볼 1개 실패가 
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -36,7 +36,7 @@ from tests.foundation.integration.market_data.quality_metrics_helpers import (
 
 async def test_export_quality_metrics_reports_gauge_after_one_cycle(deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [
         _candle(t0, "100", "110", "90", "105", "10"),
         _candle(t0 + timedelta(minutes=1), "100", "110", "90", "105", "10"),
@@ -68,7 +68,7 @@ async def test_export_quality_metrics_reports_gauge_after_one_cycle(deps):
 async def test_export_quality_metrics_isolates_one_symbol_failure(deps):
     boom_instrument = await _listed_instrument(deps)
     healthy_instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
     for instrument in (boom_instrument, healthy_instrument):
         await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
@@ -92,7 +92,7 @@ async def test_export_quality_metrics_isolates_one_symbol_failure(deps):
 
 async def test_export_quality_metrics_computes_gap_and_reject_ratio(deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     good = lambda t: _candle(t, "100", "110", "90", "105", "10")  # noqa: E731
     bad = _candle(t0 + timedelta(minutes=4), "100", "90", "80", "85", "10")  # high(90) < open(100)
     candles = [
@@ -127,7 +127,7 @@ async def test_export_quality_metrics_skips_series_with_no_stored_candles(deps):
     이 스킵이 다른 시계열 처리를 막지 않아야 한다."""
     quarantined_instrument = await _listed_instrument(deps)
     healthy_instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     all_bad = [
         _candle(t0 + timedelta(minutes=i), "100", "90", "80", "85", "10")  # high<open → REJECT
         for i in range(3)
@@ -157,7 +157,7 @@ async def test_export_quality_metrics_skips_series_with_no_stored_candles(deps):
 
 async def test_scheduler_run_once_isolates_ingest_failure_and_exports_metrics(deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
 
     scheduler = MarketDataQualityScheduler(
@@ -268,7 +268,7 @@ async def test_export_quality_metrics_isolates_batches_get_dependency_failure(de
     (§9 LA-18 DoD "실패가 나머지를 막지 않는다"를 store가 아니라 batches
     의존성 경로에서 재현 — 기존 `_FlakyCandleStore`는 store 경로만 다룬다)."""
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
     await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
 
@@ -302,7 +302,7 @@ async def test_export_quality_metrics_single_series_meets_latency_budget(
     한다 — 공유 TEST_DATABASE_URL이 자라도 안정적인 상한을 위해 느슨한
     예산(여러 쿼리 round-trip 감안 1건당 1s)을 쓴다."""
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
     await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
 

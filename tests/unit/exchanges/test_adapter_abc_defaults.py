@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -106,7 +106,7 @@ async def test_default_get_open_orders_raises_explicitly():
 
 async def test_default_get_fills_raises_explicitly():
     with pytest.raises(UnsupportedCapabilityError) as info:
-        await _MinimalAdapter().get_fills("BTC/USDT", since=datetime.now(timezone.utc))
+        await _MinimalAdapter().get_fills("BTC/USDT", since=datetime.now(UTC))
     assert info.value.capability == "get_fills"
 
 
@@ -244,7 +244,7 @@ async def test_get_fills_since_sends_start_time_in_epoch_ms():
         seen.append(request)
         return _ok([{"orderId": "999", "tradeId": "t-1", "price": "80000", "size": "0.01"}])
 
-    since = datetime(2026, 9, 5, 0, 0, 0, tzinfo=timezone.utc)
+    since = datetime(2026, 9, 5, 0, 0, 0, tzinfo=UTC)
     fills = await _make_adapter(handler).get_fills("BTC/USDT", since=since)
 
     assert seen[0].url.path == "/api/v2/spot/trade/fills"

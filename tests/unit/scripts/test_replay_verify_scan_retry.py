@@ -14,7 +14,7 @@ Neither test group touches a real socket -- `replay_verify.verify` /
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 import pytest
@@ -49,7 +49,7 @@ async def test_verify_with_retry_succeeds_after_mid_scan_reset(monkeypatch) -> N
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(timezone.utc), hours=24
+        object(), as_of=datetime.now(UTC), hours=24
     )
 
     assert report is sentinel_report
@@ -80,7 +80,7 @@ async def test_verify_with_retry_succeeds_after_drop_create_race(monkeypatch) ->
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(timezone.utc), hours=24
+        object(), as_of=datetime.now(UTC), hours=24
     )
 
     assert report.streams_checked == 3
@@ -108,7 +108,7 @@ async def test_verify_with_retry_succeeds_after_connection_rejection(monkeypatch
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(timezone.utc), hours=24
+        object(), as_of=datetime.now(UTC), hours=24
     )
 
     assert report.streams_checked == 5
@@ -130,7 +130,7 @@ async def test_verify_with_retry_propagates_after_exhausting_attempts(monkeypatc
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     with pytest.raises(OSError):
-        await replay_verify._verify_with_retry(object(), as_of=datetime.now(timezone.utc), hours=24)
+        await replay_verify._verify_with_retry(object(), as_of=datetime.now(UTC), hours=24)
 
     assert attempts == replay_verify._POOL_CONNECT_ATTEMPTS
 
@@ -158,7 +158,7 @@ async def test_verify_with_retry_does_not_retry_a_real_mismatch_report(monkeypat
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(timezone.utc), hours=24
+        object(), as_of=datetime.now(UTC), hours=24
     )
 
     assert report is mismatch_report
@@ -260,7 +260,7 @@ async def test_run_propagates_real_failure_even_if_close_also_resets(monkeypatch
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
     with pytest.raises(OSError):
-        await replay_verify._run(hours=24, as_of=datetime.now(timezone.utc))
+        await replay_verify._run(hours=24, as_of=datetime.now(UTC))
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@ and cross-tenant mixing can be forced on demand without a DB.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -23,7 +23,7 @@ from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 from src.foundation.trust.projections import build_trust_status_view
 from tests.support.perf_budget import PerfBudget
 
-_NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 25, tzinfo=UTC)
 
 
 @dataclass
@@ -132,9 +132,9 @@ async def test_multiple_consents_are_all_mapped_with_correct_field_values() -> N
     other = _consent(tenant_id=tenant_id, purpose="p2", state=ConsentState.ACTIVE)
     repo = FakeTrustRepository(consents=[consent, other])
 
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     view = await build_trust_status_view(repo, tenant_id)
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
 
     assert len(view.consents) == 2
     mapped = view.consents[0]

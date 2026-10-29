@@ -24,7 +24,7 @@ foundation_audit_event(id)`이므로, 저널 엔트리를 insert하기 전에 �
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -123,7 +123,7 @@ class PostgresJournalRepository:
         next_seq = 1 if ctx["last_sequence_no"] is None else ctx["last_sequence_no"] + 1
         prev_hash: str | None = ctx["last_entry_hash"]
 
-        posted_at = datetime.now(timezone.utc)
+        posted_at = datetime.now(UTC)
         new_hash = entry_hash(
             prev_hash, next_seq, entry.event_type, entry.event_ref, new_digest, posted_at
         )

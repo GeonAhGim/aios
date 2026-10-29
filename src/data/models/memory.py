@@ -5,7 +5,7 @@ Spec: 01_data_models_v1.3.md#§1.5
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -36,7 +36,7 @@ class MemoryEntry(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)
     status: ProvenanceStatus = ProvenanceStatus.UNVERIFIED
     verified_by: str | None = None  # Agent that verified (e.g., Auditor)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     verified_at: datetime | None = None
 
     @model_validator(mode="after")

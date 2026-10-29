@@ -7,7 +7,7 @@ JSON 왕복").
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -21,7 +21,7 @@ from src.foundation.positions.domain.cost_basis.fifo import (
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _fill(side: OrderSide, quantity: str, price: str) -> FillEvent:

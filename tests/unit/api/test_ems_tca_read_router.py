@@ -13,7 +13,7 @@ must raise `TcaResultNotFoundError`, translated to 404 by the central
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -24,7 +24,7 @@ from src.foundation.ems.contracts.v1 import TcaResult
 from src.foundation.ems.ports.tca_result_repository import TcaResultNotFoundError, TcaResultRecord
 from src.services.auth_service import User
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _user() -> User:

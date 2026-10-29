@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID
@@ -33,7 +33,7 @@ from src.services.oms.application.dispatch_outcome import (
 )
 
 _ORDER_ID = UUID("00000000-0000-0000-0000-000000000001")
-_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
 
 class _Plain(Enum):

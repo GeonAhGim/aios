@@ -35,7 +35,7 @@ same reason `connections/adapters/postgres_repository.py`'s
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -157,7 +157,7 @@ class PostgresAuditEventRepository:
         next_sequence_no = 1 if prev_row is None else prev_row["sequence_no"] + 1
         previous_hash = None if prev_row is None else prev_row["event_hash"]
 
-        occurred_at = datetime.now(timezone.utc)
+        occurred_at = datetime.now(UTC)
         event_hash = compute_event_hash(
             previous_hash=previous_hash,
             tenant_id=tenant_id,

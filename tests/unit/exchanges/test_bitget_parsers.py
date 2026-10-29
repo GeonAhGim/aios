@@ -16,7 +16,7 @@ DEPTH 감사는 이 리프를 포함한 BR-9 전 테스트 파일에 수치 성�
 절대 ms 상수 대신 순수 dict/Decimal 변환치고 압도적으로 낮은 처리량
 하한 하나만 건다 — 정상 동작이라면 이 하한의 수십~수백 배가 나온다."""
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -114,7 +114,7 @@ def test_parse_candles_from_real_bitget_response():
     assert first.low == Decimal("80510")
     assert first.close == Decimal("80565")
     assert first.volume == Decimal("2.009698")
-    assert first.open_time == datetime.fromtimestamp(1787853000000 / 1000, tz=timezone.utc)
+    assert first.open_time == datetime.fromtimestamp(1787853000000 / 1000, tz=UTC)
     assert first.close_time == first.open_time + timedelta(minutes=1)
 
 

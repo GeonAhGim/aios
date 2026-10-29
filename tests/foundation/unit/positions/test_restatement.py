@@ -5,7 +5,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-11.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -35,7 +35,7 @@ _ORDER_ID = UUID("00000000-0000-0000-0000-0000000000aa")
 
 
 def _dt(y: int, m: int, d: int) -> datetime:
-    return datetime(y, m, d, tzinfo=timezone.utc)
+    return datetime(y, m, d, tzinfo=UTC)
 
 
 def _to_view(seq: int, entry: JournalEntryInput) -> PositionJournalEntryView:

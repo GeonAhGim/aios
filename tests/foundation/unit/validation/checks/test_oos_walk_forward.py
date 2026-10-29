@@ -4,7 +4,7 @@ negative >=3, 1 failure-injection, 1 perf assertion, 1 gate-red repro)."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -24,7 +24,7 @@ from src.services.condition_compiler import ORDER_FILLED
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 _CYCLE = [
     ("100", "100"),

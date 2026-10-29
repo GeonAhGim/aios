@@ -7,7 +7,7 @@ DoD (c)(d).
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -22,7 +22,7 @@ from src.foundation.research_data.domain.revision import (
 )
 from tests.support.perf_budget import PerfBudget
 
-_T0 = datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)
+_T0 = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
 
 
 def _item(*, item_id: UUID, revision_of: UUID | None, known_at: datetime) -> ResearchItem:

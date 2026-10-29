@@ -16,7 +16,7 @@ tests/integration/test_execution_monitoring_service.py가 실 DB로 검증한다
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 from uuid import uuid4
@@ -26,7 +26,7 @@ import pytest
 
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 
-_EVALUATED_AT = datetime(2026, 9, 20, 12, 0, 0, tzinfo=timezone.utc)
+_EVALUATED_AT = datetime(2026, 9, 20, 12, 0, 0, tzinfo=UTC)
 
 
 def _base_row(**overrides: Any) -> dict[str, Any]:
@@ -38,7 +38,7 @@ def _base_row(**overrides: Any) -> dict[str, Any]:
         "mode": "PAPER",
         "exchange": "bitget",
         "allocated_capital": Decimal("500"),
-        "started_at": datetime.now(timezone.utc) - timedelta(days=2),
+        "started_at": datetime.now(UTC) - timedelta(days=2),
         "max_drawdown_pct": None,
         "realized_pnl": Decimal("0"),
         "unrealized_pnl": Decimal("0"),

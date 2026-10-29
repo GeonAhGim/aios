@@ -11,7 +11,7 @@ na), (6) `ScriptRuntimeError`(및 그 하위) 전파. 컴파일·실행은 DSL-1
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -31,7 +31,7 @@ from src.foundation.backtest.application.quick_backtest import (
 from src.foundation.backtest.application.quick_backtest_fill import OrderIntent
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _REG = "r" * 64
 _D = Decimal
 _POSITION = PositionState(quantity=_D("0"), cash=_D("100000"), has_pending_order=False)

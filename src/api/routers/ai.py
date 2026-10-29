@@ -30,7 +30,7 @@ scopes/allow_instruments/notional_cap carried forward), matching AI-17's
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -97,7 +97,7 @@ async def issue_agent_token(
         allow_instruments=frozenset(body.allow_instruments),
         notional_cap=body.notional_cap,
         ttl=timedelta(seconds=body.ttl_seconds),
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     return ok(IssuedAgentTokenView.from_issued(issued))
 
@@ -139,7 +139,7 @@ async def rotate_agent_token(
         allow_instruments=old.allow_instruments,
         notional_cap=old.notional_cap,
         ttl=timedelta(seconds=body.ttl_seconds),
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     return ok(IssuedAgentTokenView.from_issued(issued))
 

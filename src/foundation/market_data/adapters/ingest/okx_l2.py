@@ -16,7 +16,7 @@ verified):
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -86,7 +86,7 @@ class OkxL2Adapter:
         row = self._first_row(message)
         if row is None:
             return None
-        as_of = datetime.fromtimestamp(int(row["ts"]) / 1000, tz=timezone.utc)
+        as_of = datetime.fromtimestamp(int(row["ts"]) / 1000, tz=UTC)
         return L2Diff(
             sequence=int(row["seqId"]),
             as_of=as_of,
@@ -104,7 +104,7 @@ class OkxL2Adapter:
         bids, asks = _levels(row["bids"]), _levels(row["asks"])
         return L2Snapshot(
             sequence=int(row["seqId"]),
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
             bids=dict(bids),
             asks=dict(asks),
         )

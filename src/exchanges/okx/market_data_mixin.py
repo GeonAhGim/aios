@@ -33,7 +33,7 @@ elsewhere in this package).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
@@ -82,7 +82,7 @@ class OKXMarketDataMixin:
                 bid=Decimal(str(bid_raw)),
                 ask=Decimal(str(ask_raw)),
                 volume_24h=Decimal(str(row.get("vol24h", "0"))),
-                timestamp=datetime.fromtimestamp(int(row["ts"]) / 1000, tz=timezone.utc),
+                timestamp=datetime.fromtimestamp(int(row["ts"]) / 1000, tz=UTC),
                 source_type="primary",
             )
         except (KeyError, InvalidOperation, ValueError) as exc:
@@ -106,7 +106,7 @@ class OKXMarketDataMixin:
                 OrderBookLevel(price=Decimal(str(level[0])), quantity=Decimal(str(level[1])))
                 for level in row["asks"]
             ]
-            timestamp = datetime.fromtimestamp(int(row["ts"]) / 1000, tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(int(row["ts"]) / 1000, tz=UTC)
         except (KeyError, IndexError, InvalidOperation, ValueError) as exc:
             raise FatalExchangeError(
                 f"OKX orderbook response missing/invalid field (bids/asks/ts required): "
@@ -130,7 +130,7 @@ class OKXMarketDataMixin:
         candles: list[Candle] = []
         try:
             for row in rows:
-                open_time = datetime.fromtimestamp(int(row[0]) / 1000, tz=timezone.utc)
+                open_time = datetime.fromtimestamp(int(row[0]) / 1000, tz=UTC)
                 candles.append(
                     Candle(
                         symbol=symbol,

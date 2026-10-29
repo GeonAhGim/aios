@@ -1,7 +1,7 @@
 """compute_metrics() 단위테스트."""
 
 import statistics
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -10,7 +10,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.backtest.application.compute_metrics import compute_metrics
 from src.foundation.backtest.domain.models import EquityPoint, SimulatedFill
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _point(i: int, equity: str, drawdown: str) -> EquityPoint:

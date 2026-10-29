@@ -20,7 +20,7 @@ negative quantity), 실패주입 1건(journal 어댑터 예외 -> 원자성 검�
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
@@ -50,12 +50,12 @@ from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 from tests.support.db import create_pool_with_retry
 
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 _CONCURRENT_FILLS = 20
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _asyncpg_dsn() -> str:

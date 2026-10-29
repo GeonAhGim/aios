@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -14,7 +14,7 @@ from src.core.portfolio.sizing.risk_parity import existing_block_weight_fraction
 from src.core.portfolio.state_input import PortfolioAggregate, PortfolioStateInput
 
 _HEX64 = "d" * 64
-_AS_OF = datetime(2026, 9, 9, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 9, 9, tzinfo=UTC)
 
 
 def _config(**overrides: Any) -> PortfolioConfig:

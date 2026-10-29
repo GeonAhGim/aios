@@ -12,7 +12,7 @@ DC-28 후속(ADR-2026-09-06-H D7) — `test_get_isolates_cache_by_owner_id`가
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -36,13 +36,13 @@ from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
 from tests.conftest import PerfBudget
 
 _OWNER = uuid4()
-_RISK_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+_RISK_NOW = datetime(2026, 9, 3, tzinfo=UTC)
 
 
 def _make_candles(
     n: int, *, symbol: str = "BTC/USDT", close: Decimal = Decimal("1")
 ) -> list[Candle]:
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     return [
         Candle(
             symbol=symbol,
@@ -128,7 +128,7 @@ class _Clock:
 
 async def test_get_fetches_from_adapter_on_first_call() -> None:
     adapter = _FakeAdapter()
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     result = await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
 
@@ -139,7 +139,7 @@ async def test_get_fetches_from_adapter_on_first_call() -> None:
 
 async def test_get_reuses_cache_within_ttl_for_same_bars() -> None:
     adapter = _FakeAdapter()
-    clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _Clock(datetime(2026, 1, 1, tzinfo=UTC))
     cache = CandleHistoryCache(now=clock)
 
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
@@ -151,7 +151,7 @@ async def test_get_reuses_cache_within_ttl_for_same_bars() -> None:
 
 async def test_get_refetches_after_ttl_expires() -> None:
     adapter = _FakeAdapter()
-    clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _Clock(datetime(2026, 1, 1, tzinfo=UTC))
     cache = CandleHistoryCache(now=clock)
 
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
@@ -163,7 +163,7 @@ async def test_get_refetches_after_ttl_expires() -> None:
 
 async def test_get_refetches_when_bars_increase_even_within_ttl() -> None:
     adapter = _FakeAdapter()
-    clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _Clock(datetime(2026, 1, 1, tzinfo=UTC))
     cache = CandleHistoryCache(now=clock)
 
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
@@ -178,7 +178,7 @@ async def test_get_refetches_when_bars_increase_even_within_ttl() -> None:
 async def test_get_returns_none_on_adapter_failure_without_prior_cache() -> None:
     adapter = _FakeAdapter()
     adapter.fail = True
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     result = await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
 
@@ -190,7 +190,7 @@ async def test_get_returns_none_instead_of_stale_cache_when_refetch_fails() -> N
     만료된) 데이터를 대신 돌려주지 않고 None을 반환해야 한다 — 호출자가
     오래된 캔들을 최신인 것처럼 쓰는 사고를 막는다."""
     adapter = _FakeAdapter()
-    clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _Clock(datetime(2026, 1, 1, tzinfo=UTC))
     cache = CandleHistoryCache(now=clock)
 
     first = await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
@@ -205,7 +205,7 @@ async def test_get_returns_none_instead_of_stale_cache_when_refetch_fails() -> N
 
 async def test_get_caches_per_symbol_independently() -> None:
     adapter = _FakeAdapter()
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
     await cache.get(adapter, "ETH/USDT", bars=30, owner_id=_OWNER)
@@ -222,7 +222,7 @@ async def test_get_isolates_cache_by_owner_id() -> None:
     owner_a, owner_b = uuid4(), uuid4()
     adapter_a = _FakeAdapter()
     adapter_b = _FakeAdapter()
-    clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _Clock(datetime(2026, 1, 1, tzinfo=UTC))
     cache = CandleHistoryCache(now=clock)
 
     result_a = await cache.get(adapter_a, "AAPL", bars=30, owner_id=owner_a)
@@ -240,7 +240,7 @@ async def test_get_isolates_cache_by_exchange() -> None:
     거래소의 가격 데이터가 다른 거래소 요청 응답으로 새어 들어갈 수 있다."""
     adapter_bitget = _FakeAdapter(exchange_name="bitget")
     adapter_kis = _FakeAdapter(exchange_name="kis")
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     await cache.get(adapter_bitget, "AAPL", bars=30, owner_id=_OWNER)
     await cache.get(adapter_kis, "AAPL", bars=30, owner_id=_OWNER)
@@ -258,7 +258,7 @@ async def test_get_propagates_cancelled_error_instead_of_swallowing_it(
     반환한 것처럼 보이는 사고로 이어진다."""
     adapter = _FakeAdapter()
     adapter.fail = True
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     async def _raise_cancelled(*args: object, **kwargs: object) -> list[Candle]:
         raise asyncio.CancelledError()
@@ -285,7 +285,7 @@ async def test_get_cache_hit_makes_no_adapter_call_and_is_fast(
     단위: cpu_ms 기준, 예산 800ms(parallel CI + coverage 오버헤드 반영).
     """
     adapter = _FakeAdapter()
-    clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _Clock(datetime(2026, 1, 1, tzinfo=UTC))
     cache = CandleHistoryCache(now=clock)
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
 
@@ -313,7 +313,7 @@ async def test_perf_gate_red_reproduction_injected_cpu_load(
     `_batch_500` 패턴이 800ms CPU 예산을 초과하도록 한다.
     """
     adapter = _FakeAdapter()
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     # 첫 호출 — adapter 호출(캐시 미스)으로 캐시 생성
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
@@ -349,7 +349,7 @@ async def test_candle_fetch_failure_chain_denies_via_var_es_gate() -> None:
     docstring이 주장하는 fail-closed 계약(R3)을 체인 전체로 재현한다."""
     adapter = _FakeAdapter()
     adapter.fail = True
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     history = await cache.get(adapter, "BTC/USDT", bars=250, owner_id=_OWNER)
     assert history is None
@@ -378,7 +378,7 @@ async def test_concurrent_gets_do_not_cross_contaminate_owners_under_interleavin
     owner_a, owner_b = uuid4(), uuid4()
     adapter_a = _FakeAdapter(delay=0.01, marker=Decimal("100"))
     adapter_b = _FakeAdapter(delay=0.01, marker=Decimal("200"))
-    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=timezone.utc)))
+    cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
     result_a, result_b = await asyncio.gather(
         cache.get(adapter_a, "AAPL", bars=5, owner_id=owner_a),

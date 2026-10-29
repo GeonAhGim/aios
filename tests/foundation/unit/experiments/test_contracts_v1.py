@@ -4,7 +4,7 @@ AI-10 DoD. Pure contract, no I/O.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from src.foundation.experiments.contracts.v1 import Experiment, ExperimentKind
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _HEX64 = "a" * 64
 
 

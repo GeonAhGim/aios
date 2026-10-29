@@ -6,7 +6,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-6
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -20,7 +20,7 @@ from src.foundation.reconciliation.contracts.v1 import EntitySnapshot
 from src.foundation.reconciliation.domain.models import Classification, MaterialityPolicy
 from src.foundation.reconciliation.domain.rules import classify_item
 
-_NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 _POLICY = MaterialityPolicy(
     absolute_tolerance=Decimal("0.01"), relative_tolerance_pct=Decimal("0.1")
 )

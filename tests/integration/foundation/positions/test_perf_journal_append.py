@@ -76,7 +76,7 @@ task-653으로 이미 끝났고, 계약·동작을 바꾸지 않는다)."""
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -104,11 +104,11 @@ _ROUND_TRIP_MULTIPLIER = 12
 _MAX_SEQUENTIAL_ROUND_TRIPS = 10
 _BASELINE_WARMUP = 5
 _BASELINE_SAMPLE_COUNT = 50
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _key(tenant_id: UUID) -> str:

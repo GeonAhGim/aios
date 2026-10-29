@@ -10,7 +10,7 @@ DEEPEN (task-10133): 빈 문서/결과셋 주입, API timeout/5xx 실패주입,
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal, cast
 from uuid import UUID, uuid4
@@ -30,7 +30,7 @@ from src.foundation.research_data.application.ingest_opendart_filing import (
     ingest_opendart_filing,
 )
 
-_NOW = datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 
 
 class _FakeSourceContractRepo:
@@ -71,7 +71,7 @@ def _allowed_contract() -> SourceContract:
         redistribution_scope=RedistributionScope.DISPLAY,
         rate_limit=1000,
         quota=10000,
-        valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        valid_from=datetime(2026, 1, 1, tzinfo=UTC),
         valid_to=None,
         capability=SourceCapability(
             asset_classes=frozenset({"EQUITY_KR"}),

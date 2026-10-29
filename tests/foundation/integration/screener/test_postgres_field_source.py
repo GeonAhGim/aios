@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -164,7 +164,7 @@ async def test_read_fields_returns_latest_close_grouped_by_venue(
     # UTC-midnight truncation used to land on the wrong side of md_candle's
     # KST-anchored monthly partition boundary near month-end; use the actual
     # instant so it always matches whatever ensure_partitions() just created.
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     async with pool.acquire() as conn:
         krx_id = await _instrument_id(conn, Venue.KIS_KRX)
         bitget_id = await _instrument_id(conn, Venue.BITGET)
@@ -207,7 +207,7 @@ async def test_read_fields_excludes_instrument_with_no_candle(pool, field_source
     result = await field_source.read_fields(
         instrument_ids_by_venue={Venue.KIS_KRX: [instrument_id]},
         field_names=frozenset({"close"}),
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
 
     assert instrument_id not in result
@@ -222,7 +222,7 @@ async def test_run_saved_screen_cross_tenant_is_404_end_to_end(
     # UTC-midnight truncation used to land on the wrong side of md_candle's
     # KST-anchored monthly partition boundary near month-end; use the actual
     # instant so it always matches whatever ensure_partitions() just created.
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, Venue.KIS_KRX)
     await _write_daily_candle(
@@ -273,7 +273,7 @@ async def test_read_fields_unknown_field_names_returns_empty(pool, field_source)
     result = await field_source.read_fields(
         instrument_ids_by_venue={Venue.KIS_KRX: [instrument_id]},
         field_names=frozenset({"not_a_real_column", "; DROP TABLE md_candle"}),
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
 
     assert result == {}
@@ -286,7 +286,7 @@ async def test_read_fields_empty_instrument_map_returns_empty(pool, field_source
     result = await field_source.read_fields(
         instrument_ids_by_venue={},
         field_names=frozenset({"close"}),
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
 
     assert result == {}
@@ -301,7 +301,7 @@ async def test_read_fields_as_of_before_candle_excludes_future_bar(
     # UTC-midnight truncation used to land on the wrong side of md_candle's
     # KST-anchored monthly partition boundary near month-end; use the actual
     # instant so it always matches whatever ensure_partitions() just created.
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, Venue.KIS_KRX)
     await _write_daily_candle(
@@ -339,7 +339,7 @@ async def test_read_fields_pool_failure_propagates_fail_closed(
         await field_source.read_fields(
             instrument_ids_by_venue={Venue.KIS_KRX: [uuid.uuid4()]},
             field_names=frozenset({"close"}),
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -353,7 +353,7 @@ async def test_read_fields_batched_lookup_perf_budget(
     # UTC-midnight truncation used to land on the wrong side of md_candle's
     # KST-anchored monthly partition boundary near month-end; use the actual
     # instant so it always matches whatever ensure_partitions() just created.
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     instrument_ids: list[uuid.UUID] = []
     async with pool.acquire() as conn:
         for _ in range(50):

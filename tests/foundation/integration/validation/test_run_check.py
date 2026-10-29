@@ -7,7 +7,7 @@ failure-injection 1, numeric performance assertion 1, gate-red repro 1.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -43,7 +43,7 @@ from src.services.strategy_builder_service import StrategyBuilderService
 from tests._perf.relative_budget import RelativeBudget
 from tests.integration.conftest import create_test_tenant
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _asyncpg_dsn() -> str:

@@ -9,7 +9,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -50,7 +50,7 @@ def _instrument(**overrides) -> Instrument:
         "lot_size": Decimal("0.0001"),
         "calendar_id": "24x7",
         "lifecycle_state": InstrumentLifecycle.ACTIVE,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     fields.update(overrides)
     return Instrument(**fields)
@@ -152,7 +152,7 @@ async def test_add_listing_then_get_listing_at_valid_time(pool, repo):
         await repo.create(conn, instrument)
 
     symbol = _venue_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=5)
+    listed_at = datetime.now(UTC) - timedelta(days=5)
     listing = VenueListing(
         instrument_id=instrument.instrument_id,
         venue=Venue.BITGET,
@@ -166,7 +166,7 @@ async def test_add_listing_then_get_listing_at_valid_time(pool, repo):
 
     async with pool.acquire() as conn, conn.transaction():
         found = await repo.get_listing(
-            conn, Venue.BITGET, symbol, datetime.now(timezone.utc)
+            conn, Venue.BITGET, symbol, datetime.now(UTC)
         )
     assert found is not None
     assert found.instrument_id == instrument.instrument_id
@@ -180,7 +180,7 @@ async def test_get_listing_before_listed_at_returns_none(pool, repo):
         await repo.create(conn, instrument)
 
     symbol = _venue_symbol()
-    listed_at = datetime.now(timezone.utc)
+    listed_at = datetime.now(UTC)
     listing = VenueListing(
         instrument_id=instrument.instrument_id,
         venue=Venue.BITGET,
@@ -205,7 +205,7 @@ async def test_get_listing_after_delisted_at_returns_none(pool, repo):
         await repo.create(conn, instrument)
 
     symbol = _venue_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=10)
+    listed_at = datetime.now(UTC) - timedelta(days=10)
     delisted_at = listed_at + timedelta(days=5)
     listing = VenueListing(
         instrument_id=instrument.instrument_id,
@@ -234,7 +234,7 @@ async def test_add_listing_overlapping_period_raises(pool, repo):
         await repo.create(conn, instrument_b)
 
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     async with pool.acquire() as conn, conn.transaction():
         await repo.add_listing(
             conn,

@@ -6,7 +6,7 @@ Spec: AIOSproject 79_audit_evidence_l3_build_and_operational_specification_v1.0.
 from __future__ import annotations
 
 import dataclasses
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -14,7 +14,7 @@ import pytest
 
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 
-NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 24, tzinfo=UTC)
 
 
 def _event(**overrides: object) -> AuditEvent:

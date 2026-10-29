@@ -13,7 +13,7 @@ Spec: 02b_bitget_api_v2_full_spec_v1.md §5.2(Account)/§5.3(Position), P0
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -258,7 +258,7 @@ class BitgetFuturesAccountMixin:
 
 
 def _row_to_position(data: dict[str, Any], symbol: str) -> Position:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Position(
         symbol=symbol,
         exchange="bitget",

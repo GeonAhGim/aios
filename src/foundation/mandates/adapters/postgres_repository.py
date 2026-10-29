@@ -18,7 +18,7 @@ active_revision_id IS NOT DISTINCT FROM $expected` 자체가 행 잠금 + 커밋
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -268,7 +268,7 @@ class PostgresMandateRepository(PostgresPolicyRepositoryMixin):
                 "RETURNING *",
                 revision_id,
                 MandateRevisionState.ACTIVE.value,
-                datetime.now(timezone.utc),
+                datetime.now(UTC),
             )
             if activated_row is None:
                 raise ConcurrencyConflictError(

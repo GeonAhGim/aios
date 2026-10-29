@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -64,7 +64,7 @@ async def _make_instrument(pool: asyncpg.Pool) -> uuid.UUID:
                 asset_class=AssetClass.KR_EQUITY,
                 tick_size=Decimal("1"),
                 lot_size=Decimal("1"),
-                listed_at=datetime.now(timezone.utc) - timedelta(days=365),
+                listed_at=datetime.now(UTC) - timedelta(days=365),
                 actor_subject_id=uuid.uuid4(),
                 trace_id=uuid.uuid4(),
             ),
@@ -113,7 +113,7 @@ async def test_append_connection_failure_leaves_no_partial_row(
     action = _split(
         instrument_id,
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-fail-append-{instrument_id}",
     )
 
@@ -176,7 +176,7 @@ async def test_bulk_append_and_pit_resolve_meets_latency_budget(
     n = 200
     budget_sec = 8.0  # 실측 로컬 <2s, CI/공유 DB 편차 감안
     instrument_id = await _make_instrument(pool)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
 
     try:
 
@@ -237,13 +237,13 @@ async def test_aios_app_cannot_update_or_delete_filing_then_pit_still_works(
     original = _split(
         instrument_id,
         ratio="10",
-        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 2, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-gate-orig-{instrument_id}",
     )
     correction = _split(
         instrument_id,
         ratio="5",
-        known_at=datetime(2026, 3, 10, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 10, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-gate-corr-{instrument_id}",
     )
 
@@ -277,8 +277,8 @@ async def test_aios_app_cannot_update_or_delete_filing_then_pit_still_works(
 
     async with pool.acquire() as conn:
         history = await filing_repo.list_history(conn, instrument_id)
-    before = resolve_as_of(history, datetime(2026, 3, 5, tzinfo=timezone.utc))
-    after = resolve_as_of(history, datetime(2026, 3, 15, tzinfo=timezone.utc))
+    before = resolve_as_of(history, datetime(2026, 3, 5, tzinfo=UTC))
+    after = resolve_as_of(history, datetime(2026, 3, 15, tzinfo=UTC))
     assert [a.ratio for a in before] == [Decimal("10")]
     assert [a.ratio for a in after] == [Decimal("5")]
 
@@ -286,7 +286,7 @@ async def test_aios_app_cannot_update_or_delete_filing_then_pit_still_works(
     third = _split(
         instrument_id,
         ratio="4",
-        known_at=datetime(2026, 3, 20, 9, 0, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 20, 9, 0, tzinfo=UTC),
         source_ref=f"rcept-gate-third-{instrument_id}",
     )
     async with pool.acquire() as conn:
@@ -296,7 +296,7 @@ async def test_aios_app_cannot_update_or_delete_filing_then_pit_still_works(
 
     async with pool.acquire() as conn:
         history = await filing_repo.list_history(conn, instrument_id)
-    latest = resolve_as_of(history, datetime(2026, 3, 25, tzinfo=timezone.utc))
+    latest = resolve_as_of(history, datetime(2026, 3, 25, tzinfo=UTC))
     assert [a.ratio for a in latest] == [Decimal("4")]
     assert len(history) == 3
 
@@ -317,7 +317,7 @@ async def test_append_delay_10x_exceeds_latency_budget(
     """
     n = 200
     instrument_id = await _make_instrument(pool)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
 
     # 원본 fetchrow를 감싸서 10배 지연(0.01초 × 10 = 0.1초 per call)
     original_fetchrow = asyncpg.Connection.fetchrow
@@ -379,7 +379,7 @@ async def test_list_history_delay_10x_exceeds_latency_budget(
     """
     n = 200
     instrument_id = await _make_instrument(pool)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
 
     # 정상 append (지연 없이)
     async with pool.acquire() as conn:

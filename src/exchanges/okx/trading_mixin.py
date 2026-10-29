@@ -113,7 +113,7 @@ guard applies to OKX with no exception once factory registration
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -165,7 +165,7 @@ def _utcnow() -> datetime:
     staleness comparison below sensitive to scheduling delays between the
     ticker fetch and this check (observed as intermittent CI failures on a
     shared, contended machine, not a real 5s-old price)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _to_okx_side(side: OrderSide) -> str:

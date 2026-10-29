@@ -6,7 +6,7 @@ fixtures/builders, not test cases.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -39,10 +39,10 @@ from src.foundation.paper_control.domain.models import (
 )
 from src.foundation.risk_gate.domain.models import RiskEvaluation, SafetyControl
 
-START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+START = datetime(2026, 1, 1, tzinfo=UTC)
 END = START + timedelta(days=30)
 INSTRUMENT = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-NOW = datetime(2026, 2, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 2, 1, tzinfo=UTC)
 DIGEST = "a" * 64
 
 

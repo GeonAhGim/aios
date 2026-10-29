@@ -12,7 +12,7 @@ and current market prices alone.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.core.strategy.condition_evaluator import ConditionEvaluator, IndicatorDataMissingError
@@ -90,7 +90,7 @@ class StrategyEngine:
                     target_position=Decimal("0"),
                     stop_loss=None,
                     take_profit=None,
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     to_state=transition.to_state,
                 )
                 break

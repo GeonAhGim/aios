@@ -19,7 +19,7 @@ posting이 생기면 `is_correction_pending`이 이를 표시해야 한다.
 from __future__ import annotations
 
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
@@ -278,7 +278,7 @@ async def test_ibor_view_recomputes_deterministically_as_of_cutoff(
         debit_code: await _account_id(pool, debit_code),
         credit_code: await _account_id(pool, credit_code),
     }
-    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    base = datetime.now(UTC) - timedelta(hours=1)
     t1, t2 = _t(base, 0), _t(base, 10)
 
     await _insert_dated_entry(
@@ -324,7 +324,7 @@ async def test_compute_ibor_view_stays_within_latency_budget_for_50_postings(
         debit_code: await _account_id(pool, debit_code),
         credit_code: await _account_id(pool, credit_code),
     }
-    base = datetime.now(timezone.utc) - timedelta(hours=2)
+    base = datetime.now(UTC) - timedelta(hours=2)
     for i in range(50):
         await _insert_dated_entry(
             pool,
@@ -356,7 +356,7 @@ async def test_compute_ibor_view_delegates_to_core_bitemporal_as_of(
         debit_code: await _account_id(pool, debit_code),
         credit_code: await _account_id(pool, credit_code),
     }
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    cutoff = datetime.now(UTC) - timedelta(hours=1)
     await _insert_dated_entry(
         pool,
         fund_id=fund_id,
@@ -397,7 +397,7 @@ async def test_close_period_persists_the_recomputed_ibor_value(
         debit_code: await _account_id(pool, debit_code),
         credit_code: await _account_id(pool, credit_code),
     }
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    cutoff = datetime.now(UTC) - timedelta(hours=1)
     await _insert_dated_entry(
         pool,
         fund_id=fund_id,
@@ -432,7 +432,7 @@ async def test_close_period_rejects_reclose_of_same_as_of_date(
         debit_code: await _account_id(pool, debit_code),
         credit_code: await _account_id(pool, credit_code),
     }
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    cutoff = datetime.now(UTC) - timedelta(hours=1)
     await _insert_dated_entry(
         pool,
         fund_id=fund_id,

@@ -15,7 +15,7 @@ file are the synthetic training samples themselves.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -32,7 +32,7 @@ from src.foundation.ml.domain.point_in_time import FutureDataLeakageError
 from src.foundation.ml.ports.feature_store import FeatureValue
 from src.foundation.ml.ports.trainer import TrainingSample
 
-_NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 6, 1, tzinfo=UTC)
 _TRAIN_START = _NOW - timedelta(days=60)
 _TRAIN_END = _NOW - timedelta(days=1)
 _PARAMS: dict[str, object] = {"num_leaves": 7, "min_data_in_leaf": 1, "learning_rate": 0.3}

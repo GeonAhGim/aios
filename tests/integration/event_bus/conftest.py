@@ -40,7 +40,7 @@ def redis_url() -> str:
     return _redis_url(os.environ)
 
 
-async def _redis_client_impl(url: str) -> AsyncGenerator[redis.Redis, None]:
+async def _redis_client_impl(url: str) -> AsyncGenerator[redis.Redis]:
     client = redis.Redis.from_url(url, decode_responses=True)
     await client.flushdb()
     yield client
@@ -49,7 +49,7 @@ async def _redis_client_impl(url: str) -> AsyncGenerator[redis.Redis, None]:
 
 
 @pytest.fixture
-async def redis_client(redis_url: str) -> AsyncGenerator[redis.Redis, None]:
+async def redis_client(redis_url: str) -> AsyncGenerator[redis.Redis]:
     async for client in _redis_client_impl(redis_url):
         yield client
 

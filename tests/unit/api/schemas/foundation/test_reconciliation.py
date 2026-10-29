@@ -7,7 +7,7 @@ model construction (ADR-2026-09-09-C Decision 1).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -23,7 +23,7 @@ from tests.conftest import PerfBudget
 
 
 def _state_view() -> ReconciliationStateView:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return ReconciliationStateView(
         target_ref=uuid4(),
         target_type="paper_deployment",
@@ -36,7 +36,7 @@ def _state_view() -> ReconciliationStateView:
 
 
 def test_reconciliation_state_list_response_valid_roundtrip() -> None:
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     resp = ReconciliationStateListResponse(states=[_state_view()], as_of=as_of)
     assert resp.as_of == as_of
     assert len(resp.states) == 1
@@ -51,7 +51,7 @@ def test_reconciliation_state_list_response_invalid_states_element_raises() -> N
     with pytest.raises(ValidationError):
         ReconciliationStateListResponse(
             states=["not-a-state-view"],
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -68,7 +68,7 @@ def test_reconciliation_state_view_missing_revision_raises() -> None:
                 "target_type": "paper_deployment",
                 "aggregate_status": Classification.HEALTHY,
                 "last_healthy_at": None,
-                "last_checked_at": datetime.now(timezone.utc),
+                "last_checked_at": datetime.now(UTC),
                 "blocking_reason": None,
             }
         )
@@ -82,7 +82,7 @@ def test_reconciliation_state_view_invalid_revision_type_raises() -> None:
                 "target_type": "paper_deployment",
                 "aggregate_status": Classification.HEALTHY,
                 "last_healthy_at": None,
-                "last_checked_at": datetime.now(timezone.utc),
+                "last_checked_at": datetime.now(UTC),
                 "blocking_reason": None,
                 "revision": "not-an-int",
             }
@@ -108,7 +108,7 @@ def test_reconciliation_state_list_response_dependency_failure_injected(
             target_type="paper_deployment",
             aggregate_status=Classification.HEALTHY,
             last_healthy_at=None,
-            last_checked_at=datetime.now(timezone.utc),
+            last_checked_at=datetime.now(UTC),
             blocking_reason=None,
             revision=1,
         )
@@ -120,7 +120,7 @@ def test_reconciliation_state_list_response_construction_throughput_budget(
 ) -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     states = [_state_view() for _ in range(5)]
 
     # batch=500: 총 500회 호출을 한 구간에 묶어 process_time 양자화 오차 제거
@@ -150,7 +150,7 @@ def test_reconciliation_construction_goes_red_with_10x_cpu_delay_injection(
     """
     budget_ms = 50.0  # 동일 예산
 
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     states = [_state_view() for _ in range(5)]
 
     def _run() -> object:

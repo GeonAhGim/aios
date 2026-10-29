@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -35,7 +35,7 @@ from src.foundation.research_data.contracts.v1 import ResearchItem, SourceMeta
 from tests.api.mcp.conftest import issue
 
 SOURCE_ID = "OPENDART"
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 async def _insert_source_contract(

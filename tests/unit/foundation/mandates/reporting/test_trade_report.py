@@ -2,7 +2,7 @@
 
 import pickle
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -27,7 +27,7 @@ def compliance_decision() -> ComplianceDecision:
         rule_hits=[],
         inputs_hash="a" * 64,
         bundle_version="b" * 64,
-        evaluated_at=datetime(2026, 9, 9, tzinfo=timezone.utc),
+        evaluated_at=datetime(2026, 9, 9, tzinfo=UTC),
     )
 
 
@@ -43,7 +43,7 @@ def inputs(compliance_decision: ComplianceDecision) -> dict[str, Any]:
         quantity=Decimal("10"),
         price=Decimal("70000"),
         currency="KRW",
-        executed_at=datetime(2026, 9, 9, 1, 2, 3, tzinfo=timezone.utc),
+        executed_at=datetime(2026, 9, 9, 1, 2, 3, tzinfo=UTC),
         trader_id="trader-1",
     )
 
@@ -84,7 +84,7 @@ def test_reproduces_identical_hash_across_calls(inputs: dict[str, Any]) -> None:
         ("quantity", Decimal("11")),
         ("price", Decimal("70001")),
         ("currency", "USD"),
-        ("executed_at", datetime(2026, 9, 9, 1, 2, 4, tzinfo=timezone.utc)),
+        ("executed_at", datetime(2026, 9, 9, 1, 2, 4, tzinfo=UTC)),
         ("trader_id", "trader-2"),
     ],
 )
@@ -127,7 +127,7 @@ def test_deny_decision_still_normalizes(inputs: dict[str, Any]) -> None:
         rule_hits=[],
         inputs_hash="c" * 64,
         bundle_version="d" * 64,
-        evaluated_at=datetime(2026, 9, 9, tzinfo=timezone.utc),
+        evaluated_at=datetime(2026, 9, 9, tzinfo=UTC),
     )
     record = normalize_trade_report(**inputs)
     assert record.compliance_decision_id == inputs["compliance_decision"].decision_id
@@ -250,7 +250,7 @@ def test_gate_red_report_hash_uniqueness_violation() -> None:
             rule_hits=[],
             inputs_hash="a" * 64,
             bundle_version="b" * 64,
-            evaluated_at=datetime(2026, 9, 9, tzinfo=timezone.utc),
+            evaluated_at=datetime(2026, 9, 9, tzinfo=UTC),
         ),
         "instrument": "005930",
         "venue": "KRX",
@@ -258,7 +258,7 @@ def test_gate_red_report_hash_uniqueness_violation() -> None:
         "quantity": Decimal("10"),
         "price": Decimal("70000"),
         "currency": "KRW",
-        "executed_at": datetime(2026, 9, 9, 1, 2, 3, tzinfo=timezone.utc),
+        "executed_at": datetime(2026, 9, 9, 1, 2, 3, tzinfo=UTC),
         "trader_id": "trader-1",
     }
     r1 = normalize_trade_report(**base_inputs)

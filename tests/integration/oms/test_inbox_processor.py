@@ -18,7 +18,7 @@ test_paused_execution_still_checks_pending_order_fill`(수정 없이 그대로
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -110,7 +110,7 @@ def _fill_event(
     price: Decimal = Decimal("100"),
 ) -> ProviderOrderEvent:
     fill_id = f"fill-{uuid4().hex}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fill = FillEvent(
         provider_fill_id=fill_id,
         venue=venue,
@@ -384,7 +384,7 @@ async def test_ingest_partial_fill_then_cancel_still_records_position(pool):
         tenant_id=user_id,
         reason="TEST_CANCEL_AFTER_PARTIAL",
         actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
     cancel_result = await cancel_order(cancel_cmd, pool=pool)
 

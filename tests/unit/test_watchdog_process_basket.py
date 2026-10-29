@@ -6,7 +6,7 @@ basket-조달 부분만 떼어 어댑터 없이(DB/네트워크 불필요) 검�
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.core.safety.watchdog_basket import BASKET_SYMBOLS, get_basket_returns
@@ -14,7 +14,7 @@ from src.data.models.market_data import Candle
 
 
 def _candle(symbol: str, *, open_: str, close: str) -> Candle:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Candle(
         symbol=symbol,
         exchange="bitget",

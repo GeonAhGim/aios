@@ -12,7 +12,7 @@ negative >=3, failure injection 1, perf assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -42,7 +42,7 @@ def _run(**overrides) -> ValidationRun:
         periods_per_year=252,
         initial_equity=Decimal("10000"),
         state=RunState.SUCCEEDED,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     kwargs.update(overrides)
     return ValidationRun(**kwargs)
@@ -55,7 +55,7 @@ def _result(**overrides) -> ValidationResult:
         outcome=Outcome.PASS,
         metrics={"sharpe": 1.2},
         result_hash="hash-1",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     kwargs.update(overrides)
     return ValidationResult(**kwargs)
@@ -74,7 +74,7 @@ def test_evidence_refs_defaults_to_empty_list() -> None:
         hard_fail_reasons=[],
         obligations=[],
         result_hash=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     assert view.evidence_refs == []
 
@@ -116,7 +116,7 @@ def test_negative_evidence_refs_must_be_a_list() -> None:
             hard_fail_reasons=[],
             obligations=[],
             result_hash=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             evidence_refs="not-a-list",
         )
 
@@ -135,7 +135,7 @@ def test_negative_evidence_refs_items_must_be_strings() -> None:
             hard_fail_reasons=[],
             obligations=[],
             result_hash=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             evidence_refs=[123],
         )
 
@@ -156,7 +156,7 @@ def test_negative_evidence_refs_none_rejected() -> None:
             hard_fail_reasons=[],
             obligations=[],
             result_hash=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             evidence_refs=None,
         )
 

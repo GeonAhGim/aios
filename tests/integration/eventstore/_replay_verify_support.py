@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -67,7 +67,7 @@ async def assert_no_replay_window_leftovers(pool, *, as_of: datetime, hours: int
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _order_event(

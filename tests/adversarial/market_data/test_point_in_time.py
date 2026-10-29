@@ -12,7 +12,7 @@ I/O.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -24,7 +24,7 @@ from src.foundation.market_data.domain.point_in_time import (
 )
 
 _INSTRUMENT_ID = "TEST-INSTRUMENT-X"
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _T1 = _T0 + timedelta(days=1)
 
 

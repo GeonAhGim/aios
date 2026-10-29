@@ -6,7 +6,7 @@ negative: "통화 혼합, 중복 payout 키").
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -37,7 +37,7 @@ def _capture(
 
 
 def _dt(day: int, hour: int = 0) -> datetime:
-    return datetime(2026, 9, day, hour, tzinfo=timezone.utc)
+    return datetime(2026, 9, day, hour, tzinfo=UTC)
 
 
 def _schedule(captures: list[ps.CaptureRecord], *, now: datetime) -> list[ps.PayoutScheduleItem]:
@@ -85,7 +85,7 @@ def test_cutoff_boundary_one_second_before_window_excluded() -> None:
 
 
 def test_outside_period_excluded_even_if_window_elapsed() -> None:
-    captured_at = datetime(2026, 8, 20, tzinfo=timezone.utc)  # period 밖
+    captured_at = datetime(2026, 8, 20, tzinfo=UTC)  # period 밖
     capture = _capture(captured_at=captured_at)
     items = _schedule([capture], now=captured_at + timedelta(days=30))
     assert items == []

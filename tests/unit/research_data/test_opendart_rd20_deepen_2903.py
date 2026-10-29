@@ -22,7 +22,7 @@ source_contract 거부·파싱 실패 큐 적재)과 PIT 정정 무결성을 단
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -47,7 +47,7 @@ from src.foundation.research_data.application.ingest_opendart_filing import (
 )
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 _EX_DATE = date(2026, 4, 1)
 
 
@@ -93,7 +93,7 @@ def _allowed_contract(*, valid_from: datetime | None = None) -> SourceContract:
         redistribution_scope=RedistributionScope.DISPLAY,
         rate_limit=1000,
         quota=10000,
-        valid_from=valid_from or datetime(2026, 1, 1, tzinfo=timezone.utc),
+        valid_from=valid_from or datetime(2026, 1, 1, tzinfo=UTC),
         valid_to=None,
         capability=SourceCapability(
             asset_classes=frozenset({"EQUITY_KR"}),
@@ -397,7 +397,7 @@ async def test_ingest_gate_lifecycle_denied_then_parse_fail_then_ok_then_correct
     assert len(queue.entries) == 2  # 성공 경로는 큐에 추가하지 않음
 
     # 4) 정정 공시 — UPDATE가 아니라 새 행
-    correction_known = datetime(2026, 3, 10, 9, 0, tzinfo=timezone.utc)
+    correction_known = datetime(2026, 3, 10, 9, 0, tzinfo=UTC)
     correction = await ingest_opendart_filing(
         conn=None,
         filing=_split_filing(
@@ -420,8 +420,8 @@ async def test_ingest_gate_lifecycle_denied_then_parse_fail_then_ok_then_correct
         "rcept-correction",
     }
 
-    before = resolve_as_of(filings.appended, datetime(2026, 3, 5, tzinfo=timezone.utc))
-    after = resolve_as_of(filings.appended, datetime(2026, 3, 15, tzinfo=timezone.utc))
+    before = resolve_as_of(filings.appended, datetime(2026, 3, 5, tzinfo=UTC))
+    after = resolve_as_of(filings.appended, datetime(2026, 3, 15, tzinfo=UTC))
     assert [a.ratio for a in before] == [Decimal("10")]
     assert [a.source_ref for a in before] == ["rcept-original"]
     assert [a.ratio for a in after] == [Decimal("5")]

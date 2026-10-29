@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -27,7 +27,7 @@ from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
-NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 BITGET = VenueCalendar(venue="bitget", tz=ZoneInfo("UTC"), regular=KNOWN_SESSIONS["BITGET"])
 
 

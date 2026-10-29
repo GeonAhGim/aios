@@ -6,7 +6,7 @@ Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-12 DoD (a)-(f).
 from __future__ import annotations
 
 import ast
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -142,7 +142,7 @@ def test_benchmarks_module_reads_no_wall_clock() -> None:
 
 
 def test_close_price_returns_the_close_of_the_last_bar() -> None:
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
     bars = [_candle(Decimal("100"), t0), _candle(Decimal("105"), t0)]
     assert close_price(bars) == Decimal("105")
 

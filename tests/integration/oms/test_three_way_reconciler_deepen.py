@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -225,7 +225,7 @@ async def test_adversarial_concurrent_submit_race_all_denied_during_material_mis
                 strategy_version="1.0.0",
                 execution_id=execution_id,
                 intent_seq=seq,
-                window_start=datetime.now(timezone.utc),
+                window_start=datetime.now(UTC),
             )
             cmd = SubmitOrderCommand(
                 command_id=uuid.uuid4(),
@@ -237,7 +237,7 @@ async def test_adversarial_concurrent_submit_race_all_denied_during_material_mis
                 quantity=Decimal("0.01"),
                 asset_class=AssetClass.CRYPTO,
                 actor_subject_id=user_id,
-                issued_at=datetime.now(timezone.utc),
+                issued_at=datetime.now(UTC),
             )
             try:
                 await submit_order(

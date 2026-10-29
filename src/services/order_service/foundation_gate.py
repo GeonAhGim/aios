@@ -70,7 +70,7 @@ fail-closed invariants unchanged): WORM `risk_decision` recording
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -238,7 +238,7 @@ def make_foundation_pre_submit_gate(
             mandate_repo,
             context,
             require_compliance_mandate=require_compliance_mandate,
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
         async def _finish_allow(*, policy_decision_id: UUID | None = None) -> GateDecision:

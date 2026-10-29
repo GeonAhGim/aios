@@ -11,7 +11,7 @@ import asyncio
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -127,7 +127,7 @@ def _command(user_id: uuid.UUID, execution_id: int) -> SubmitOrderCommand:
         strategy_version="1.0.0",
         execution_id=execution_id,
         intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid.uuid4(),
@@ -139,7 +139,7 @@ def _command(user_id: uuid.UUID, execution_id: int) -> SubmitOrderCommand:
         quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 

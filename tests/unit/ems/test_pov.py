@@ -21,7 +21,7 @@ Decision 1): p99 wall-clock latency of `plan_pov_schedule` over its full
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -56,7 +56,7 @@ from tests.support.perf_budget import PerfBudget
 @pytest.fixture()
 def parent_order() -> ParentOrder:
     """A 10 000-share parent order, 24-hour window, 5 % participation cap."""
-    now = datetime(2026, 9, 1, 9, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, 9, 30, tzinfo=UTC)
     return ParentOrder(
         parent_id=uuid4(),
         instrument_id="AAPL:NASDAQ",
@@ -84,7 +84,7 @@ def parent_order() -> ParentOrder:
 @pytest.fixture()
 def parent_order_large_qty() -> ParentOrder:
     """A 1 000 000-share parent order for numerical boundary tests."""
-    now = datetime(2026, 9, 1, 9, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, 9, 30, tzinfo=UTC)
     return ParentOrder(
         parent_id=uuid4(),
         instrument_id="SPY:ARCA",

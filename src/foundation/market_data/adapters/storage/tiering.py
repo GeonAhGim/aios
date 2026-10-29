@@ -42,7 +42,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -113,8 +113,8 @@ class PromotionOutcome:
 
 
 def _year_bounds(year: int) -> tuple[datetime, datetime]:
-    start = datetime(year, 1, 1, tzinfo=timezone.utc)
-    end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    start = datetime(year, 1, 1, tzinfo=UTC)
+    end = datetime(year + 1, 1, 1, tzinfo=UTC)
     return start, end
 
 
@@ -191,7 +191,7 @@ async def promote_year(
             "year": year,
             "digest": source_digest,
             "row_count": len(source),
-            "promoted_at": datetime.now(tz=timezone.utc).isoformat(),
+            "promoted_at": datetime.now(tz=UTC).isoformat(),
             "source_kind": SourceKind.VENDOR.value,
         },
     )

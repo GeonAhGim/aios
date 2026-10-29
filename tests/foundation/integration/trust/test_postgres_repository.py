@@ -12,7 +12,7 @@ test_postgres_repository_mutations.py로 분리했다(500줄 경고 분할, task
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import asyncpg
@@ -132,7 +132,7 @@ async def test_row_to_disclosure_preserves_retired_at_when_set(pool: asyncpg.Poo
             purpose,
             1,
             f"hash-{uuid4().hex[:8]}",
-            datetime(2025, 1, 1, tzinfo=timezone.utc),
+            datetime(2025, 1, 1, tzinfo=UTC),
         )
 
     async with pool.acquire() as conn:

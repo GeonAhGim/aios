@@ -57,7 +57,7 @@ raised had it observed that row.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
@@ -155,7 +155,7 @@ class ConfirmTicketNotFoundError(PromoteToPaperError):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def promote_to_paper(

@@ -18,7 +18,7 @@ schema, see `src/api/mcp/tools_research.py`'s request models).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -35,7 +35,7 @@ from src.foundation.experiments.adapters.postgres_repository import PostgresExpe
 from src.foundation.experiments.contracts.v1 import Experiment, ExperimentKind
 from tests.api.mcp.conftest import issue
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _experiment(tenant_id, *, reproducibility_key: str, inputs_hash: str) -> Experiment:

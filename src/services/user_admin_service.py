@@ -9,7 +9,7 @@ Operators can only toggle between ACTIVE and SUSPENDED.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -86,5 +86,5 @@ class UserAdminService:
                 decision_data={"new_status": new_status, "changed_by": str(admin_user_id)},
             )
         return UserStatusChangeResult(
-            user_id=user_id, status=new_status, changed_at=datetime.now(timezone.utc)
+            user_id=user_id, status=new_status, changed_at=datetime.now(UTC)
         )

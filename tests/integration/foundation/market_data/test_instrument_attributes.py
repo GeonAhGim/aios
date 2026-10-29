@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -100,7 +100,7 @@ async def test_upgrade_downgrade_upgrade_round_trip(pool):
 async def test_worm_rejects_update(pool):
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
-    known_at = datetime.now(timezone.utc)
+    known_at = datetime.now(UTC)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO instrument_attributes (instrument_id, attr_key, attr_value, known_at) "
@@ -120,7 +120,7 @@ async def test_worm_rejects_update(pool):
 async def test_worm_rejects_delete(pool):
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
-    known_at = datetime.now(timezone.utc)
+    known_at = datetime.now(UTC)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO instrument_attributes (instrument_id, attr_key, attr_value, known_at) "
@@ -149,7 +149,7 @@ async def test_insert_rejects_unknown_instrument_id(pool):
                 "(instrument_id, attr_key, attr_value, known_at) "
                 "VALUES ($1, 'lot_size', '10', $2)",
                 unknown_id,
-                datetime.now(timezone.utc),
+                datetime.now(UTC),
             )
 
 
@@ -159,7 +159,7 @@ async def test_insert_rejects_duplicate_primary_key(pool):
     reduction picks would be ambiguous."""
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
-    known_at = datetime.now(timezone.utc)
+    known_at = datetime.now(UTC)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO instrument_attributes "
@@ -200,7 +200,7 @@ async def test_record_propagates_connection_failure_fail_closed(pool):
                     instrument_id=instrument_id,
                     attr_key="lot_size",
                     attr_value="10",
-                    known_at=datetime.now(timezone.utc),
+                    known_at=datetime.now(UTC),
                 )
         finally:
             asyncpg.connection.Connection.execute = original_execute
@@ -212,7 +212,7 @@ async def test_repository_query_returns_value_known_at_or_before_as_of(pool):
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
     repo = PostgresInstrumentAttributesRepository(pool)
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     t1 = t0 + timedelta(seconds=5)
 
     async with pool.acquire() as conn:

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ from src.foundation.research_data.contracts import v1
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-_NOW = datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 8, 0, 0, tzinfo=UTC)
 
 
 def _base_item_kwargs(**overrides: Any) -> dict[str, Any]:

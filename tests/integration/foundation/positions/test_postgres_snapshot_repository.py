@@ -15,7 +15,7 @@ tenant's bootstrapped default portfolio.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -65,7 +65,7 @@ def _snapshot(*, tenant_id, account_id, position_key, quantity, last_journal_seq
         avg_cost=Money(amount=Decimal("100"), currency=Currency.KRW),
         cost_method=CostMethod.FIFO,
         lots=[
-            Lot(quantity=quantity, unit_cost=Decimal("100"), opened_at=datetime.now(timezone.utc))
+            Lot(quantity=quantity, unit_cost=Decimal("100"), opened_at=datetime.now(UTC))
         ]
         if quantity
         else [],
@@ -77,7 +77,7 @@ def _snapshot(*, tenant_id, account_id, position_key, quantity, last_journal_seq
         mark_at=None,
         base_currency=Currency.KRW,
         last_journal_seq=last_journal_seq,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     base.update(overrides)
     return PositionSnapshotView(**base)
@@ -222,7 +222,7 @@ async def test_upsert_preserves_full_decimal_precision_and_lots_round_trip(pool,
     quantity = Decimal("123456789012345.1234567890")
     avg_cost = Decimal("-987654321098765.9876543211")
     mark_price = Decimal("111111111111111.1111111111")
-    lot = Lot(quantity=quantity, unit_cost=avg_cost, opened_at=datetime.now(timezone.utc))
+    lot = Lot(quantity=quantity, unit_cost=avg_cost, opened_at=datetime.now(UTC))
     snapshot = _snapshot(
         tenant_id=tenant_id,
         account_id=account_id,
@@ -236,7 +236,7 @@ async def test_upsert_preserves_full_decimal_precision_and_lots_round_trip(pool,
         fees_base=Decimal("999999999999999.9999999999"),
         funding_base=Decimal("-999999999999999.9999999999"),
         mark_price=Money(amount=mark_price, currency=Currency.KRW),
-        mark_at=datetime.now(timezone.utc),
+        mark_at=datetime.now(UTC),
     )
 
     async with pool.acquire() as conn, conn.transaction():

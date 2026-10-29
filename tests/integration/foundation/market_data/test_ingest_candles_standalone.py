@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -26,7 +26,7 @@ from src.foundation.market_data.contracts.v1 import (
 
 async def test_bitget_ingest_source_fetches_and_filters_via_mock_transport():
     """bitget_ingest_source — MockTransport로만 검증(실 HTTP 금지)."""
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
     ts_ms = int(t0.timestamp() * 1000)
     rows = [
         [str(ts_ms), "100", "110", "90", "105", "10", "1000", "1000"],

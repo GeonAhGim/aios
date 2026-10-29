@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -151,7 +151,7 @@ async def create_request(
     else:
         raise ApprovalError(f"알 수 없는 scope: {scope}")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=wait_seconds + RESPONSE_WINDOW_SECONDS)
 
     # F2(task-12104) -- approval_requests is RLS-ENABLE+FORCEd (a4f27d91c6e8).
@@ -222,7 +222,7 @@ async def approve(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> App
     if request.status != "PENDING":
         raise ApprovalError(f"이미 처리된 요청: status={request.status}")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if now < request.created_at + timedelta(seconds=request.mandatory_wait_seconds):
         raise ApprovalError("강제 대기시간이 아직 지나지 않았습니다.")
     if now > request.expires_at:
@@ -294,7 +294,7 @@ async def reject(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> Appr
             "UPDATE approval_requests SET status = 'REJECTED', resolved_at = $2 "
             "WHERE id = $1 AND status = 'PENDING' RETURNING *",
             request_id,
-            datetime.now(timezone.utc),
+            datetime.now(UTC),
         )
     if row is None:
         raise ApprovalError("이미 처리된 요청입니다(동시 요청 충돌).")
@@ -305,7 +305,7 @@ async def cancel(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
     """9.4b/9.6 — auto-cancel on condition re-deterioration while pending (blocks
     the path of re-activating from a deteriorated state at the source)."""
     return await _update(
-        pool, request_id, status="CANCELLED", resolved_at=datetime.now(timezone.utc)
+        pool, request_id, status="CANCELLED", resolved_at=datetime.now(UTC)
     )
 
 

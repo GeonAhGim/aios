@@ -4,7 +4,7 @@ integration"). Test-only adapter; the only adapter until the real provider is ap
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from src.foundation.connections.domain.models import (
@@ -50,7 +50,7 @@ class FakeReadonlyAccountProvider:
         if self._fail_fetch:
             raise ConnectionError("fake provider: snapshot fetch 실패(시뮬레이션)")
         return ProviderSnapshot(
-            provider_as_of=datetime.now(timezone.utc),
+            provider_as_of=datetime.now(UTC),
             currency="USD",
             raw_payload_ref=f"fake-payload-{uuid4().hex[:8]}",
             values=self._snapshot_values,

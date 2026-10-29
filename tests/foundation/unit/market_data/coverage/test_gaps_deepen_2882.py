@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 from uuid import uuid4
@@ -59,7 +59,7 @@ def _calendar(venue: Venue = Venue.BITGET) -> VenueCalendar:
 
 
 def _dt(day: int, hour: int = 0) -> datetime:
-    return datetime(2026, 1, day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 1, day, hour, 0, tzinfo=UTC)
 
 
 def _span(*, start_at: datetime, end_at: datetime, tf: Timeframe = Timeframe.H1) -> CoverageSpan:

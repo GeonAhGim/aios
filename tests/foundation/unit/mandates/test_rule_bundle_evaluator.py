@@ -28,7 +28,7 @@ determinism test is single-process only). Added below:
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -41,7 +41,7 @@ from src.foundation.mandates.domain.evaluator import _VERDICT_RANK, evaluate_bun
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 7, 0, 0, tzinfo=UTC)
 
 
 def _allow(_params: Any, _snapshot: Any) -> RuleHit | None:

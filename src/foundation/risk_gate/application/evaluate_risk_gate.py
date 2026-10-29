@@ -11,7 +11,7 @@ judgment only through this function").
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from src.core.observability.context import current as current_request_context
@@ -154,7 +154,7 @@ async def evaluate_risk_gate(
         )
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # PLT-01 §3.1 — a new evaluation row always stamps the trace_id of the
     # current request/system context (f4b9d6e5a7c8, §3.8 tracing). Even if a
     # context was never bound, `current()` returns a fail-open fallback

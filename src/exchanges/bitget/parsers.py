@@ -15,7 +15,7 @@ BR-9(task-1787) — 이 세 함수는 원래 `src/core/parser/*`(거래소 공�
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -50,7 +50,7 @@ def _to_canonical_symbol(exchange_symbol: str) -> str:
 
 
 def _parse_ts_ms(raw_ts: str) -> datetime:
-    return datetime.fromtimestamp(int(raw_ts) / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(int(raw_ts) / 1000, tz=UTC)
 
 
 def parse_ticker(raw: dict[str, Any], *, source_type: str = "primary") -> Ticker:
@@ -94,7 +94,7 @@ def parse_orderbook(raw: dict[str, Any], symbol: str) -> OrderBook:
             exchange=_EXCHANGE,
             bids=_parse_levels(raw["bids"]),
             asks=_parse_levels(raw["asks"]),
-            timestamp=datetime.fromtimestamp(int(raw["ts"]) / 1000, tz=timezone.utc),
+            timestamp=datetime.fromtimestamp(int(raw["ts"]) / 1000, tz=UTC),
         )
     except KeyError as exc:
         raise FatalExchangeError(f"Bitget orderbook 응답에 예상 필드 없음: {exc}") from exc
@@ -118,7 +118,7 @@ def parse_candles(
         except IndexError as exc:
             raise FatalExchangeError(f"Bitget candle 행의 필드 수가 예상과 다름: {row}") from exc
 
-        open_time = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
+        open_time = datetime.fromtimestamp(int(ts_ms) / 1000, tz=UTC)
         candles.append(
             Candle(
                 symbol=symbol,

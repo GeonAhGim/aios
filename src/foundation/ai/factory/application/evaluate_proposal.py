@@ -47,7 +47,7 @@ needs to gate on before ever considering promotion.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -94,7 +94,7 @@ class DuplicateCheckTypeError(EvaluateProposalError):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _merge_check_metrics(results: Sequence[CheckResult]) -> dict[str, Any]:

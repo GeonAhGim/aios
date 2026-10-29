@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -18,7 +18,7 @@ from src.foundation.backtest.domain.param_stability import ParamGrid, ParamStabi
 from src.services.condition_compiler import ORDER_FILLED
 from tests.conftest import PerfBudget
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
 

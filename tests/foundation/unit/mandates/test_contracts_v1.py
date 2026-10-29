@@ -23,7 +23,7 @@ dataclass/mapper module can actually exercise:
 import multiprocessing
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
@@ -43,7 +43,7 @@ from src.foundation.mandates.contracts.v1 import (
     verdict_for_outcome,
 )
 
-NOW = datetime(2026, 9, 7, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 7, tzinfo=UTC)
 
 
 def _hex_digest(seed: str) -> str:

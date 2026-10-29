@@ -5,7 +5,7 @@ DoD ("빈도·단위·발표지연 정규화").
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -47,7 +47,7 @@ def test_parse_ecos_rows_normalizes_successfully() -> None:
     assert observation.period == date(2024, 1, 31)
     assert observation.value == Decimal("3.5")
     assert observation.unit == "percent"
-    assert observation.known_at == datetime(2024, 2, 20, tzinfo=timezone.utc)
+    assert observation.known_at == datetime(2024, 2, 20, tzinfo=UTC)
 
 
 def test_parse_ecos_rows_empty_row_list() -> None:

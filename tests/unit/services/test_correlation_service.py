@@ -10,7 +10,7 @@ risk_stats.correlation_matrix로 위임하는지, 미지 페어·최소 중첩 �
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -32,10 +32,10 @@ from src.data.models.market_data import Candle
 from src.services.execution_loop.correlation_service import correlated_exposure
 from tests.conftest import PerfBudget
 
-_BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, tzinfo=UTC)
 _THRESHOLD = 0.7
 _MIN_OVERLAP = 10
-_RISK_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+_RISK_NOW = datetime(2026, 9, 3, tzinfo=UTC)
 
 
 def _risk_inputs(stats: StatsInputs) -> RiskInputs:

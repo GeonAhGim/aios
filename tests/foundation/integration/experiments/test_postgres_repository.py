@@ -12,7 +12,7 @@ Follows `tests/adversarial/risk/test_worm_tables.py`'s WORM proof pattern
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ from tests.support.db import create_pool_with_retry
 from tests.support.perf_budget import PerfBudget
 from tests.support.perf_inject import delayed_async
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 @pytest.fixture

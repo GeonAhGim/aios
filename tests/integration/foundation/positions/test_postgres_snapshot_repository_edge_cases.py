@@ -8,7 +8,7 @@ under the 500-line warning threshold (ADR-2026-09-10-C).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -56,7 +56,7 @@ def _snapshot(*, tenant_id, account_id, position_key, quantity, last_journal_seq
         avg_cost=Money(amount=Decimal("100"), currency=Currency.KRW),
         cost_method=CostMethod.FIFO,
         lots=[
-            Lot(quantity=quantity, unit_cost=Decimal("100"), opened_at=datetime.now(timezone.utc))
+            Lot(quantity=quantity, unit_cost=Decimal("100"), opened_at=datetime.now(UTC))
         ]
         if quantity
         else [],
@@ -68,7 +68,7 @@ def _snapshot(*, tenant_id, account_id, position_key, quantity, last_journal_seq
         mark_at=None,
         base_currency=Currency.KRW,
         last_journal_seq=last_journal_seq,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     base.update(overrides)
     return PositionSnapshotView(**base)
@@ -149,7 +149,7 @@ async def test_upsert_rejects_nil_mark_price_when_present_in_lots(pool, repo):
         quantity=Decimal("10"),
         last_journal_seq=0,
         mark_price=Money(amount=Decimal("100"), currency=Currency.KRW),
-        mark_at=datetime.now(timezone.utc),
+        mark_at=datetime.now(UTC),
     )
     # Mutate the lot's unit_cost to None to simulate a nil mark price in lots
     snapshot.lots[0].unit_cost = None

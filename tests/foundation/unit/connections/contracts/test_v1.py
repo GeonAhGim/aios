@@ -8,7 +8,7 @@ test_v1_depth.py에 있다(CLAUDE.md §12, loc_over_800 래칫 회피를 위한 
 Validation/negative tests are in test_v1_validation.py (LOC ratchet split).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -163,7 +163,7 @@ class TestAccountConnectionView:
 
     def test_minimal_valid(self) -> None:
         conn_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         view = AccountConnectionView(
             id=conn_id,
             provider_code="BINANCE",
@@ -177,7 +177,7 @@ class TestAccountConnectionView:
 
     def test_schema_version_can_be_overridden(self) -> None:
         conn_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         view = AccountConnectionView(
             id=conn_id,
             provider_code="BINANCE",
@@ -205,7 +205,7 @@ class TestAccountConnectionView:
 
     def test_empty_capability_profile(self) -> None:
         conn_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         view = AccountConnectionView(
             id=conn_id,
             provider_code="BINANCE",
@@ -219,7 +219,7 @@ class TestAccountConnectionView:
 
     def test_scope_verified_true(self) -> None:
         conn_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         view = AccountConnectionView(
             id=conn_id,
             provider_code="BINANCE",
@@ -235,7 +235,7 @@ class TestAccountConnectionView:
     def test_all_connection_states_valid(self) -> None:
         """Every ConnectionState member must be usable as a field value."""
         conn_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for state in ConnectionState:
             view = AccountConnectionView(
                 id=conn_id,
@@ -285,7 +285,7 @@ class TestAccountSnapshotView:
     """Positive tests for AccountSnapshotView."""
 
     def test_minimal_valid(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = AccountSnapshotView(
             connection_id=uuid4(),
             captured_at=now,
@@ -299,7 +299,7 @@ class TestAccountSnapshotView:
         assert snap.schema_version == "v1"
 
     def test_with_snapshot_values(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = AccountSnapshotView(
             connection_id=uuid4(),
             captured_at=now,
@@ -315,7 +315,7 @@ class TestAccountSnapshotView:
         assert snap.values[0].entity_key == "BTC"
 
     def test_default_values_is_empty_list(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = AccountSnapshotView(
             connection_id=uuid4(),
             captured_at=now,
@@ -326,7 +326,7 @@ class TestAccountSnapshotView:
         assert snap.values == []
 
     def test_schema_version_defaults_to_v1(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = AccountSnapshotView(
             connection_id=uuid4(),
             captured_at=now,
@@ -337,7 +337,7 @@ class TestAccountSnapshotView:
         assert snap.schema_version == "v1"
 
     def test_schema_version_can_be_overridden(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         snap = AccountSnapshotView(
             connection_id=uuid4(),
             captured_at=now,

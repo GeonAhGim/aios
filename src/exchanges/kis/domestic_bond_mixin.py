@@ -14,7 +14,7 @@ api/examples_llm/domestic_bond, 2026-09-02 WebFetch 확인) 그대로:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -43,7 +43,7 @@ class KISDomesticBondMixin:
             bid=price,  # 채권 현재가 응답엔 최우선호가가 없음(문서 관례) — 근사치
             ask=price,
             volume_24h=Decimal(output.get("acml_vol", "0")),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 

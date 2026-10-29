@@ -1,7 +1,7 @@
 """DC-23 exact round trips, fail-closed partitions and million-tick streaming."""
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from threading import Barrier
@@ -84,9 +84,9 @@ def test_fail_closed_inputs(tmp_path):
     with pytest.raises(ValueError):
         store.read_columns(VENUE, ID, DAY, kind="trades", columns=["typo"])
     with pytest.raises(AsOfNotSupportedError):
-        store.read_columns(VENUE, ID, DAY, kind="trades", as_of=datetime.now(timezone.utc))
+        store.read_columns(VENUE, ID, DAY, kind="trades", as_of=datetime.now(UTC))
     with pytest.raises(AsOfNotSupportedError):
-        store.write_day(VENUE, ID, DAY, [], kind="trades", as_of=datetime.now(timezone.utc))
+        store.write_day(VENUE, ID, DAY, [], kind="trades", as_of=datetime.now(UTC))
     with pytest.raises(FileNotFoundError):
         list(store.read_columns(VENUE, ID, DAY, kind="trades"))
 

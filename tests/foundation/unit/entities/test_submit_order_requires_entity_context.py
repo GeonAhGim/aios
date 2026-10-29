@@ -9,7 +9,7 @@ negative test 1건(어댑터 INSERT 호출 0회를 카운터로 단언)".
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import NoReturn, cast
 from unittest.mock import NonCallableMagicMock, create_autospec
@@ -42,7 +42,7 @@ def _command() -> SubmitOrderCommand:
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid4(),
@@ -54,7 +54,7 @@ def _command() -> SubmitOrderCommand:
         quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 

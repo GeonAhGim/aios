@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -74,7 +74,7 @@ def _instrument(**overrides) -> Instrument:
         "lot_size": Decimal("0.0001"),
         "calendar_id": "24x7",
         "lifecycle_state": InstrumentLifecycle.ACTIVE,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     fields.update(overrides)
     return Instrument(**fields)
@@ -132,7 +132,7 @@ async def test_coverage_spans_rejects_unknown_venue(pool):
     """venue CHECK IN (...) — 심볼 마스터가 모르는 venue 문자열은 거부된다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
 
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await pool.execute(
@@ -148,7 +148,7 @@ async def test_coverage_spans_rejects_unknown_venue(pool):
 async def test_coverage_spans_rejects_unknown_instrument_id_fk(coverage_repo, pool):
     """instrument_id FK — 존재하지 않는 instrument를 참조하는 span은
     거부된다(기존 테스트는 항상 미리 instrument를 만들어 이 경로를 안 탔다)."""
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
         async with pool.acquire() as conn, conn.transaction():
             await coverage_repo.upsert_span(
@@ -161,7 +161,7 @@ async def test_coverage_spans_rejects_one_microsecond_overlap_boundary(coverage_
     경계(`[start, end)`)가 소수점 이하에서도 정확함을 증명한다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     boundary = t0 + timedelta(days=5)
 
     async with pool.acquire() as conn, conn.transaction():
@@ -186,7 +186,7 @@ async def test_coverage_spans_allows_touching_boundary_exactly(coverage_repo, po
     (half-open 경계 — 위 마이크로초 테스트의 반대쪽 경계)."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     boundary = t0 + timedelta(days=5)
 
     async with pool.acquire() as conn, conn.transaction():
@@ -226,7 +226,7 @@ async def test_entitlements_rejects_unknown_feed_type(pool):
 async def test_entitlements_rejects_expiry_equal_to_granted_at(pool):
     """CHECK (expires_at IS NULL OR expires_at > granted_at) — 등호 경계값이
     거부됨을 직접 증명한다(기존 테스트는 이전 시각만 시험했다)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await pool.execute(
             "INSERT INTO entitlements "
@@ -254,7 +254,7 @@ async def test_bulk_upsert_span_meets_latency_budget(coverage_repo, pool, perf_b
     """
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=2000)
+    t0 = datetime.now(UTC) - timedelta(days=2000)
     n = 500
     budget_sec = 15.0
 
@@ -297,7 +297,7 @@ async def test_bulk_upsert_span_latency_budget_rejects_10x_delay_injection(
     """
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=2000)
+    t0 = datetime.now(UTC) - timedelta(days=2000)
     n = 500
     budget_sec = 15.0
 
@@ -343,7 +343,7 @@ async def test_gate_red_coverage_span_overlap_rolls_back_whole_transaction(cover
     커밋되지 않아야 한다 — 게이트 적색이 원자적 전체 실패임을 증명한다."""
     instrument_a = _fake_ulid()
     await _insert_instrument(pool, instrument_a)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     async with pool.acquire() as conn, conn.transaction():
         await coverage_repo.upsert_span(
             conn, _span(instrument_id=instrument_a, start=t0, end=t0 + timedelta(days=5))
@@ -403,7 +403,7 @@ async def test_concurrent_overlapping_upsert_span_exactly_one_winner(coverage_re
     직렬화하므로 정확히 1개만 성공해야 한다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=1)
+    t0 = datetime.now(UTC) - timedelta(days=1)
     n = 10
 
     async def _attempt(i: int) -> bool:
@@ -446,7 +446,7 @@ async def test_concurrent_non_overlapping_upsert_span_all_succeed(coverage_repo,
     회귀 방지."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=100)
+    t0 = datetime.now(UTC) - timedelta(days=100)
     n = 20
 
     async def _attempt(i: int) -> None:

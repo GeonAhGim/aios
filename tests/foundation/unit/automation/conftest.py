@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -13,7 +13,7 @@ from src.foundation.automation.ports.gate import GateDecision
 from src.foundation.risk.ports.notifier import NotifyResult
 from src.foundation.risk_gate.contracts.v1 import RiskOutcome
 
-_EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)

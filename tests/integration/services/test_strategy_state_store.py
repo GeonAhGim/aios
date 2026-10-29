@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -78,7 +78,7 @@ def _memory(execution_id: int, *, state_version: int = 0) -> StrategyStateMemory
     return StrategyStateMemory(
         execution_id=execution_id,
         state_version=state_version,
-        last_bar_time={"1h": datetime(2026, 1, 1, tzinfo=timezone.utc)},
+        last_bar_time={"1h": datetime(2026, 1, 1, tzinfo=UTC)},
         prev_values={"RSI_timeperiod14@1h": Decimal("42.5")},
     )
 

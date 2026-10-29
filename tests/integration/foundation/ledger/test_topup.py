@@ -9,7 +9,7 @@ DoD(task-1761) — 같은 `topup_id`(=`event_ref` 근거, 모듈 docstring 참�
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -21,7 +21,7 @@ from tests.integration.conftest import create_test_user
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _wallet_balance(pool, user_id: UUID) -> Decimal:

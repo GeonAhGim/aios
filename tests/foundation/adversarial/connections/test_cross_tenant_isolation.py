@@ -1,6 +1,6 @@
 """Connected Asset adversarial 테스트 — 74번 §6 CON-007 "tenant A cannot
 access, label, revoke, or reference tenant B connection"."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -183,7 +183,7 @@ async def test_persist_snapshot_if_syncable_rejects_mismatched_tenant_at_repo_la
     await confirm_connection(
         repo, provider, tenant_id=owner_id, connection_id=owned.id, encryption_key=ENCRYPTION_KEY
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     with pytest.raises(ConcurrencyConflictError):
         await repo.persist_snapshot_if_syncable(

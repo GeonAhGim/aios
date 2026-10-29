@@ -7,7 +7,7 @@ DoD("단위: kid 회전·alg 고정").
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import jwt
@@ -94,7 +94,7 @@ def test_verify_rejects_unknown_kid() -> None:
 def test_verify_rejects_other_algorithm() -> None:
     """alg 고정(HS256) negative — 같은 키라도 다른 알고리즘 서명은 거부돼야 한다."""
     user_id, tenant_id, session_id = uuid4(), uuid4(), uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     claims = AccessClaims(
         sub=user_id,
         tid=tenant_id,
@@ -117,7 +117,7 @@ def test_verify_rejects_other_algorithm() -> None:
 
 def test_verify_rejects_expired_token() -> None:
     issuer = _issuer("v1")
-    past = datetime.now(timezone.utc) - timedelta(minutes=30)
+    past = datetime.now(UTC) - timedelta(minutes=30)
     token = issuer.issue_access(
         user_id=uuid4(), tenant_id=uuid4(), session_id=uuid4(), auth_level="PASSWORD", now=past
     )

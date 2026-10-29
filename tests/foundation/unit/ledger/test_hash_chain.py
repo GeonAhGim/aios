@@ -6,7 +6,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-3
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -19,7 +19,7 @@ from tests.conftest import PerfBudget
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _lines() -> list[PostingLine]:

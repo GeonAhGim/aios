@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -69,7 +69,7 @@ class RiskEngine:
         """legacy dict -> `RiskInputs`(값 변환이지 규칙 재구현이 아니다): 진입에만
         집중도 적용(reduce_only 파생), legacy capital_pct를 그대로 재현하는
         시가평가 파생, legacy에 없던 안전/VaR/상관 신규 입력은 중립값으로 채운다."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         inputs = RiskInputs.from_legacy_dict(
             allocation, account_state, tenant_id=_TENANT_ID, execution_id=0, now=now
         )

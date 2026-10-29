@@ -19,7 +19,7 @@ file's docstring for what it covers.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -51,7 +51,7 @@ from tests.api.mcp.conftest import issue
 from tests.foundation.integration.risk_gate.conftest import activate_mandate_with_defaults
 from tests.integration.conftest import create_test_tenant
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _T1 = _T0 + timedelta(days=30)
 _SCRIPT = "input length: int = 14\nsignal go_long = length > 0\n"
 
@@ -72,7 +72,7 @@ def _instrument(instrument_id: str) -> Instrument:
         lot_size=Decimal("0.0001"),
         calendar_id="24x7",
         lifecycle_state=InstrumentLifecycle.ACTIVE,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -187,7 +187,7 @@ def _accepted_experiment(tenant_id: UUID) -> Experiment:
             }
         },
         created_by=uuid4(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -208,7 +208,7 @@ def _rejected_experiment(tenant_id: UUID) -> Experiment:
             }
         },
         created_by=uuid4(),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -109,7 +109,7 @@ async def _seed_wash_trade_violation(pool: asyncpg.Pool, tenant_id: UUID) -> Non
             _EXCHANGE,
             Decimal("100"),
         )
-        venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
+        venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=UTC)
         await conn.execute(
             "INSERT INTO fills (provider_fill_id, venue, order_id, exchange_order_id, symbol, "
             "side, quantity, price, fee, fee_currency, liquidity, venue_ts) VALUES "
@@ -136,7 +136,7 @@ async def _run_batch(
         kill_switch,
         risk_gate_repo,
         business_date=_BUSINESS_DATE,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
         publish=publish,
     )
 

@@ -16,7 +16,7 @@ Endpoints (based on community SDK reference, live verification required):
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -52,7 +52,7 @@ def _rows_to_candles(rows: list[list[str]], symbol: str, timeframe: str) -> list
     candles = []
     for row in rows:
         ts_ms, o, h, low, c, base_vol = row[0], row[1], row[2], row[3], row[4], row[5]
-        open_time = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
+        open_time = datetime.fromtimestamp(int(ts_ms) / 1000, tz=UTC)
         candles.append(
             Candle(
                 symbol=symbol,
@@ -107,7 +107,7 @@ class BitgetFuturesMarketMixin:
             bid=Decimal(data.get("bidPr", data["lastPr"])),
             ask=Decimal(data.get("askPr", data["lastPr"])),
             volume_24h=Decimal(data.get("baseVolume", "0")),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 
@@ -127,7 +127,7 @@ class BitgetFuturesMarketMixin:
                 bid=Decimal(item.get("bidPr", item["lastPr"])),
                 ask=Decimal(item.get("askPr", item["lastPr"])),
                 volume_24h=Decimal(item.get("baseVolume", "0")),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_type="primary",
             )
             for item in raw["data"]
@@ -155,7 +155,7 @@ class BitgetFuturesMarketMixin:
             exchange="bitget",
             bids=[OrderBookLevel(price=Decimal(p), quantity=Decimal(q)) for p, q in data["bids"]],
             asks=[OrderBookLevel(price=Decimal(p), quantity=Decimal(q)) for p, q in data["asks"]],
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     async def get_futures_candles(
@@ -228,9 +228,9 @@ class BitgetFuturesMarketMixin:
                 exchange="bitget",
                 current_rate=Decimal(item["fundingRate"]),
                 next_funding_time=datetime.fromtimestamp(
-                    int(item["fundingTime"]) / 1000, tz=timezone.utc
+                    int(item["fundingTime"]) / 1000, tz=UTC
                 ),
-                timestamp=datetime.fromtimestamp(int(item["fundingTime"]) / 1000, tz=timezone.utc),
+                timestamp=datetime.fromtimestamp(int(item["fundingTime"]) / 1000, tz=UTC),
             )
             for item in raw["data"]
         ]
@@ -245,7 +245,7 @@ class BitgetFuturesMarketMixin:
             params={"symbol": _to_bitget_symbol(symbol), "productType": product_type},
         )
         data = raw["data"][0] if isinstance(raw["data"], list) else raw["data"]
-        return datetime.fromtimestamp(int(data["nextFundingTime"]) / 1000, tz=timezone.utc)
+        return datetime.fromtimestamp(int(data["nextFundingTime"]) / 1000, tz=UTC)
 
     async def get_futures_open_interest(
         self: SignedRequestClient, symbol: str, *, product_type: str = DEFAULT_PRODUCT_TYPE
@@ -287,9 +287,9 @@ class BitgetFuturesMarketMixin:
             exchange="bitget",
             current_rate=Decimal(data["fundingRate"]),
             next_funding_time=(
-                datetime.fromtimestamp(int(next_time) / 1000, tz=timezone.utc)
+                datetime.fromtimestamp(int(next_time) / 1000, tz=UTC)
                 if next_time is not None
-                else datetime.now(timezone.utc)
+                else datetime.now(UTC)
             ),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )

@@ -1,6 +1,6 @@
 """DC-25 exact adjustment, calendar delegation, and fail-closed evidence."""
 
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from decimal import Decimal, localcontext
 from pathlib import Path
 from unittest.mock import patch
@@ -45,19 +45,19 @@ def contract(index: int, expiry_day: int = 18) -> Instrument:
             "lot_size": D(1),
             "calendar_id": "TEST",
             "lifecycle_state": "ACTIVE",
-            "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 1, 1, tzinfo=UTC),
             "kind": "FUTURE",
             "underlying_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            "expiry": datetime(2026, 9, expiry_day, 16, tzinfo=timezone.utc),
+            "expiry": datetime(2026, 9, expiry_day, 16, tzinfo=UTC),
             "contract_multiplier": D(1),
         }
     )
 
 
 def test_roll_date_deterministic_and_holiday(calendar: VenueCalendar) -> None:
-    expiry = datetime(2026, 9, 18, 16, tzinfo=timezone.utc)
+    expiry = datetime(2026, 9, 18, 16, tzinfo=UTC)
     assert {roll_date(expiry, calendar, 5) for _ in range(100)} == {date(2026, 9, 10)}
-    assert roll_date(datetime(2026, 9, 11, tzinfo=timezone.utc), calendar, 0) == date(2026, 9, 10)
+    assert roll_date(datetime(2026, 9, 11, tzinfo=UTC), calendar, 0) == date(2026, 9, 10)
 
 
 @pytest.mark.parametrize(
@@ -119,7 +119,7 @@ def test_expiry_order_rejected(calendar: VenueCalendar, expiries: tuple[int, int
 @pytest.mark.parametrize("offset", [-1, 367, True])
 def test_invalid_offset(calendar: VenueCalendar, offset: int) -> None:
     with pytest.raises(RollError):
-        roll_date(datetime(2026, 9, 18, tzinfo=timezone.utc), calendar, offset)
+        roll_date(datetime(2026, 9, 18, tzinfo=UTC), calendar, offset)
 
 
 def test_calendar_exhaustion_and_naive_expiry(calendar: VenueCalendar) -> None:
@@ -127,7 +127,7 @@ def test_calendar_exhaustion_and_naive_expiry(calendar: VenueCalendar) -> None:
         "TEST", calendar.tz, SessionSpec(calendar.tz, time(9), time(16), frozenset())
     )
     with pytest.raises(RollError, match="insufficient"):
-        roll_date(datetime(2026, 9, 18, tzinfo=timezone.utc), empty)
+        roll_date(datetime(2026, 9, 18, tzinfo=UTC), empty)
     with pytest.raises(RollError, match="timezone"):
         roll_date(datetime(2026, 9, 18), calendar)
 
@@ -213,7 +213,7 @@ def test_incompatible_chain(calendar: VenueCalendar, changes: dict[str, object])
 def test_local_expiry_date_and_continuous_calendar() -> None:
     tz = ZoneInfo("Asia/Seoul")
     cal = VenueCalendar("TEST", tz, SessionSpec(tz, time.min, time.min, frozenset(), True))
-    expiry = datetime(2026, 9, 11, 16, tzinfo=timezone.utc)
+    expiry = datetime(2026, 9, 11, 16, tzinfo=UTC)
     assert roll_date(expiry, cal, 0) == date(2026, 9, 12)
     assert roll_date(expiry, cal, 1) == date(2026, 9, 11)
 
@@ -287,7 +287,7 @@ def test_perf_continuous_futures_budget(calendar: VenueCalendar, perf_budget) ->
 @pytest.mark.perf
 def test_perf_roll_date_budget(calendar: VenueCalendar, perf_budget) -> None:
     """DC-25 D3 성능: roll_date 단건 호출이 예산 안에서 끝난다."""
-    expiry = datetime(2026, 9, 18, 16, tzinfo=timezone.utc)
+    expiry = datetime(2026, 9, 18, 16, tzinfo=UTC)
     perf_budget.assert_within(
         lambda: roll_date(expiry, calendar, 5),
         budget_ms=5,

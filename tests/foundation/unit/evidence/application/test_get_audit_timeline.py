@@ -6,7 +6,7 @@ Spec: AIOSproject #79 §3."""
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -17,7 +17,7 @@ from src.foundation.evidence.application.get_audit_timeline import (
 )
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 
-NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 25, tzinfo=UTC)
 
 
 class FakeAuditEventRepository:

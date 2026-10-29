@@ -8,7 +8,7 @@ DoD(task-712): 스케줄러 1주기 후 게이지 존재, 심볼 1개 실패가 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from src.data.models.base import AssetClass
@@ -85,7 +85,7 @@ class _FlakyCandleStore:
 
 
 async def _listed_instrument(deps):
-    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    listed_at = datetime.now(UTC) - timedelta(days=1)
     cmd = RegisterInstrumentCommand(
         venue=Venue.BITGET,
         venue_symbol=_bitget_symbol(),
@@ -102,7 +102,7 @@ async def _listed_instrument(deps):
         LifecycleEventCommand(
             instrument_id=instrument.instrument_id,
             event="LIST",
-            effective_at=datetime.now(timezone.utc),
+            effective_at=datetime.now(UTC),
             source_ref="test:list",
             actor_subject_id=uuid.uuid4(),
             trace_id=uuid.uuid4(),

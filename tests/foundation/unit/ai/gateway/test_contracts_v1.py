@@ -19,7 +19,7 @@ research_data RD-2 DEEPEN(task-2905)과 동일하게, 여기서 "실패주입"�
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -45,7 +45,7 @@ _ERROR_CODES = {
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 17, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 17, 0, 0, tzinfo=UTC)
 
 
 def _token_kwargs(**overrides: Any) -> dict[str, Any]:

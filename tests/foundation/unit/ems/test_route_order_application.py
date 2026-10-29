@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -71,7 +71,7 @@ class FakeRouteDecisionRepository:
             score_snapshot=score_snapshot,
             weights_snapshot=weights_snapshot,
             decided_at=decided_at,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self.records[order_id] = record
         return record
@@ -105,7 +105,7 @@ async def test_route_order_rejects_duplicate_venue_candidates_no_repo_call() -> 
 
     with pytest.raises(ValueError, match="duplicate venue codes"):
         await route_order(
-            repo, order_id=uuid4(), candidates=candidates, decided_at=datetime.now(timezone.utc)
+            repo, order_id=uuid4(), candidates=candidates, decided_at=datetime.now(UTC)
         )
 
     assert repo.insert_calls == 0
@@ -123,7 +123,7 @@ async def test_route_order_propagates_repository_connection_drop_fail_closed() -
             repo,
             order_id=order_id,
             candidates=_candidates(2),
-            decided_at=datetime.now(timezone.utc),
+            decided_at=datetime.now(UTC),
         )
 
     assert await repo.get_by_order_id(order_id) is None
@@ -151,7 +151,7 @@ async def test_route_order_propagates_repository_unique_constraint_violation() -
             repo,
             order_id=order_id,
             candidates=_candidates(2),
-            decided_at=datetime.now(timezone.utc),
+            decided_at=datetime.now(UTC),
         )
 
     assert await repo.get_by_order_id(order_id) is None
@@ -176,7 +176,7 @@ async def test_gate_red_repro_duplicate_venue_guard_is_load_bearing(
     # green: guard active -- duplicate venues are rejected, nothing persisted.
     with pytest.raises(ValueError):
         await route_order(
-            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(timezone.utc)
+            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(UTC)
         )
     assert repo.insert_calls == 0
 
@@ -203,7 +203,7 @@ async def test_gate_red_repro_duplicate_venue_guard_is_load_bearing(
     monkeypatch.setattr(target, "rank_venues", _rank_without_duplicate_check)
 
     record = await route_order(
-        repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(timezone.utc)
+        repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(UTC)
     )
 
     # without the guard, a decision built from duplicate-venue candidates is
@@ -239,7 +239,7 @@ async def test_route_order_perf_budget_many_candidates(perf_budget: PerfBudget) 
                 repo,
                 order_id=uuid4(),
                 candidates=candidates,
-                decided_at=datetime.now(timezone.utc),
+                decided_at=datetime.now(UTC),
             )
 
     sample = await perf_budget.sample_async(_batch_200)
@@ -286,7 +286,7 @@ async def test_route_order_perf_budget_catches_10x_delay_injection(
                 repo,
                 order_id=uuid4(),
                 candidates=candidates,
-                decided_at=datetime.now(timezone.utc),
+                decided_at=datetime.now(UTC),
             )
 
     # 같은 측정/단언을 재사용 — budget(800ms)을 초과하므로 AssertionError
@@ -324,7 +324,7 @@ async def test_route_order_single_call_cpu_converges_to_zero(
             repo,
             order_id=uuid4(),
             candidates=candidates,
-            decided_at=datetime.now(timezone.utc),
+            decided_at=datetime.now(UTC),
         )
 
     # batch=64: Windows 15.6ms 틱 폭 오차를 1/64로 줄임

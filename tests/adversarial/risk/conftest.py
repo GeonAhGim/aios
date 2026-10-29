@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -145,7 +145,7 @@ async def insert_decision(
     테스트는 결손·변조된 스냅샷을 직접 넘긴다."""
     if inputs_snapshot is None:
         inputs_snapshot = await recorded_inputs(pool, tenant_id, execution_ref=execution_ref)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     decision = RiskDecision(
         decision_id=uuid4(),
         gate_kind=GateKind.PRE_SUBMIT,

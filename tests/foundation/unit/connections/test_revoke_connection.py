@@ -21,7 +21,7 @@ call order asserted directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -44,7 +44,7 @@ from src.foundation.connections.domain.models import (
 )
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 24, tzinfo=UTC)
 
 
 class _ConcurrencyConflictError(Exception):

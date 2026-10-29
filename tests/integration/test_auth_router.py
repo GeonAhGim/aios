@@ -30,14 +30,14 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
+async def pool() -> AsyncGenerator[asyncpg.Pool]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
     yield p
     await p.close()
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client() -> AsyncGenerator[AsyncClient]:
     async with app.router.lifespan_context(app):
         # raise_app_exceptions=False — 도메인 예외(AuthError 등)는 전역
         # Exception 핸들러(src/api/contracts/handlers.py)가 처리하는데,

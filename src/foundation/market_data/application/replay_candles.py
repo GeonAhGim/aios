@@ -15,7 +15,7 @@ storage-row insertion order or partition distribution, because
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 from pydantic import AwareDatetime
@@ -66,7 +66,7 @@ async def replay(
     `datetime.now(timezone.utc)` read against a DB-server-clock `as_of` —
     two different clock sources can disagree by sub-millisecond amounts and
     spuriously trip `AsOfInFutureError`."""
-    ensure_as_of_not_future(q.as_of, now if now is not None else datetime.now(timezone.utc))
+    ensure_as_of_not_future(q.as_of, now if now is not None else datetime.now(UTC))
 
     async with pool.acquire() as conn:
         candles, issues, expected_total = await load_series(

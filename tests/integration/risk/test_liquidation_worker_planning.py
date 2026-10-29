@@ -9,7 +9,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md#R-52 (task-2358), §4
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -67,7 +67,7 @@ async def test_plans_open_position_into_slices(pool, ctx):
     request_id = await _setup(pool, ctx)
     adapters = {"bitget": FakeExchangeAdapter()}
 
-    await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
+    await run_liquidation_worker_once(pool, adapters, now=datetime.now(UTC))
 
     row = await _request_row(pool, request_id)
     assert row["state"] == "PLANNED"
@@ -150,7 +150,7 @@ async def test_stale_request_cannot_steal_planning_tick(pool, ctx, stale_state):
     await _clear_stale_requests(pool)
     request_id = await _setup(pool, ctx)
     await run_liquidation_worker_once(
-        pool, {"bitget": FakeExchangeAdapter()}, now=datetime.now(timezone.utc)
+        pool, {"bitget": FakeExchangeAdapter()}, now=datetime.now(UTC)
     )
 
     stale = await _request_row(pool, stale_id)

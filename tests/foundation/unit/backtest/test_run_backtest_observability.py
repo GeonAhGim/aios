@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -25,7 +25,7 @@ from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransit
 from src.foundation.backtest.application.run_backtest import BacktestRunError, run_backtest
 from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
 

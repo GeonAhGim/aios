@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -232,7 +232,7 @@ async def test_success_login_update_rejects_when_concurrent_failures_lock_first(
 
 
 def test_retry_after_seconds_pure_boundaries():
-    now = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, tzinfo=UTC)
     assert lockout.retry_after_seconds(None, now) is None
     assert lockout.retry_after_seconds(now, now) is None
     assert lockout.retry_after_seconds(now - timedelta(seconds=1), now) is None

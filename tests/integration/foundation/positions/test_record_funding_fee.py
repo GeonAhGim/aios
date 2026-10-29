@@ -5,7 +5,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.3, §9.3 LB-13.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -30,13 +30,13 @@ from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 _MAX_FUNDING_ROUND_TRIPS = 12
 _MAX_FUNDING_LATENCY_MS = 2000.0
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _key(tenant_id: UUID) -> str:

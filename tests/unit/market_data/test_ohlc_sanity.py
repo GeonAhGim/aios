@@ -8,7 +8,7 @@ close_time==open_time+duration, tz-aware UTC, 값 유한성) 각각 REJECT,
 """
 
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -27,7 +27,7 @@ from src.foundation.market_data.domain.quality import ohlc_sanity
 from src.foundation.market_data.domain.quality.ohlc_sanity import check_candle
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
 
-UTC = timezone.utc
+UTC = UTC
 _KEY = SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1)
 _OPEN = datetime(2026, 9, 3, 10, 5, tzinfo=UTC)
 _CLOSE = _OPEN + timedelta(minutes=1)

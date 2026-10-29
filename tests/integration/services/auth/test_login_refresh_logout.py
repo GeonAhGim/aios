@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest import mock
 
 import asyncpg
@@ -158,7 +158,7 @@ async def test_refresh_after_absolute_expiry_revokes_session_as_expired(pool):
         await conn.execute(
             "UPDATE auth_session SET expires_at = $2 WHERE id = $1",
             pair.session_id,
-            datetime.now(timezone.utc) - timedelta(seconds=1),
+            datetime.now(UTC) - timedelta(seconds=1),
         )
 
     with pytest.raises(refresh_usecase.RefreshTokenExpiredError):
@@ -363,7 +363,7 @@ async def test_refresh_latency_p95_within_borrowed_order_ack_budget(pool, perf_b
                 refresh_hash=refresh_hash,
                 ip_hash=None,
                 ua_hash=None,
-                expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+                expires_at=datetime.now(UTC) + timedelta(days=1),
                 auth_level="PASSWORD",
             )
         await refresh_usecase.refresh(pool, issuer, session_id=session.id, refresh_token=plain)
@@ -404,7 +404,7 @@ async def test_refresh_latency_p95_detection_power_injection_makes_assertion_red
                 refresh_hash=refresh_hash,
                 ip_hash=None,
                 ua_hash=None,
-                expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+                expires_at=datetime.now(UTC) + timedelta(days=1),
                 auth_level="PASSWORD",
             )
         # 주입: 500ms 지연 → p95가 500ms가 되어 50ms 예산을 초과

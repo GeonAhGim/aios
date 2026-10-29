@@ -13,7 +13,7 @@ for the checker itself.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -38,7 +38,7 @@ from src.foundation.ledger.domain.chart_of_accounts import user_account
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _seed_ledger_entry(pool, *, amount: Decimal = Decimal("10.00")) -> str:

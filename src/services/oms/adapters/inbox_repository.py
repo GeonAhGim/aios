@@ -22,7 +22,7 @@ LOCKED`는 호출자가 커밋 전까지 붙잡는 트랜잭션 범위 안에서
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -119,6 +119,6 @@ class InboxRepository:
             id_value=id,
             expected_state_column="state",
             expected_state_value=expected_state,
-            set_values={"state": "PROCESSED", "processed_at": datetime.now(timezone.utc)},
+            set_values={"state": "PROCESSED", "processed_at": datetime.now(UTC)},
             returning="id",
         )

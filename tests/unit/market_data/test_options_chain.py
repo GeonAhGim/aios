@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -25,11 +25,11 @@ def _contract(**overrides: object) -> OptionContractView:
         "instrument_id": uuid4(),
         "underlying_id": uuid4(),
         "symbol": "OPT-C",
-        "expiry": datetime(2027, 1, 15, tzinfo=timezone.utc),
+        "expiry": datetime(2027, 1, 15, tzinfo=UTC),
         "strike": Decimal("100"),
         "option_right": "CALL",
         "contract_multiplier": Decimal("100"),
-        "observed_at": datetime(2026, 9, 21, tzinfo=timezone.utc),
+        "observed_at": datetime(2026, 9, 21, tzinfo=UTC),
     }
     values.update(overrides)
     return OptionContractView.model_validate(values)

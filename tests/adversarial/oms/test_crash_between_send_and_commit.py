@@ -18,7 +18,7 @@ import asyncio
 import inspect
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID
@@ -37,14 +37,14 @@ from tests.support.raw_order_isolation import isolated_raw_orders as isolated_ra
 
 
 def _past() -> datetime:
-    return datetime.now(timezone.utc) - timedelta(minutes=5)
+    return datetime.now(UTC) - timedelta(minutes=5)
 
 
 def _future() -> datetime:
     """호출 시점 기준 +5분. 모듈 상수로 두면 collection 시점에 고정돼, 전체
     스위트(CI 12분)에서 이 파일이 늦게 돌면 이미 과거가 된 lease를 "살아있는
     워커"로 심게 된다 — 복구가 그 행을 처리해 processed == 1로 적색(run #824·#836)."""
-    return datetime.now(timezone.utc) + timedelta(minutes=5)
+    return datetime.now(UTC) + timedelta(minutes=5)
 
 
 @pytest.fixture
@@ -134,7 +134,7 @@ async def _recover(
         resolve_adapter=_resolve_adapter(adapter),
         risk_gate_repo=PostgresRiskGateRepository(pool),
         worker_id=worker_id,
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
     )
 
 
@@ -280,7 +280,7 @@ async def test_risk_gate_repo_none_is_rejected_i01() -> None:
             outbox_repo=cast(Any, None),
             resolve_adapter=cast(Any, None),
             risk_gate_repo=cast(Any, None),
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
         )
 
 

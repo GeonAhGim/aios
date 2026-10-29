@@ -21,7 +21,7 @@ to `futures_batch_order_mixin.py` (pure move, no behavior change).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import uuid4
@@ -62,8 +62,8 @@ def _row_to_futures_order(data: dict[str, Any]) -> Order:
         quantity=Decimal(data.get("size", "0")),
         status=status,
         filled_quantity=Decimal(data.get("baseVolume", "0")),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
         asset_class=AssetClass.CRYPTO,
     )
 

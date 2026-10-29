@@ -9,7 +9,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#9 FA-15 DoD.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -33,7 +33,7 @@ async def pool(isolated_replay_pool: asyncpg.Pool) -> asyncpg.Pool:
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _order_event(

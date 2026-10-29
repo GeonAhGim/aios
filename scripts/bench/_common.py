@@ -9,7 +9,7 @@ import json
 import platform
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +57,7 @@ class BenchResult:
     def to_json(self) -> dict[str, Any]:
         payload = {
             "benchmark": self.benchmark,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "git_sha": git_sha(),
             "machine": machine_info(),
             "budget_ms": self.budget_ms,

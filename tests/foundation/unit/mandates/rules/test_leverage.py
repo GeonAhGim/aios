@@ -32,7 +32,7 @@ from __future__ import annotations
 import ast
 import time
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -46,7 +46,7 @@ from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules import leverage
 
 _MAX_LEVERAGE = Decimal("3.00")
-_NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 10, tzinfo=UTC)
 
 
 class _ExplodingDecimal(Decimal):

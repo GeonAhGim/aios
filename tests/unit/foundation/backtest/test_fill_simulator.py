@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import ast
 import inspect
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,7 +28,7 @@ from src.foundation.backtest.domain.rules import (
 from src.foundation.backtest.ports.fill_simulator import FillSimulatorPort
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 1, 2, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 2, tzinfo=UTC)
 
 
 def _bar(*, open_price: str = "100") -> Candle:

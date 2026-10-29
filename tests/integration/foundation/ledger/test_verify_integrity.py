@@ -43,7 +43,7 @@ autouse fixture가 매 테스트 전후로 무조건 원복하는 전역 안전�
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -71,7 +71,7 @@ _MAX_VERIFY_DURATION_MS = 60_000.0
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _create_user_available_account(pool, user_id: UUID) -> str:

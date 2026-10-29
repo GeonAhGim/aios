@@ -9,7 +9,7 @@ DoD(task-1753): amount>0인 CASH_DIVIDEND가 보유자 AVAILABLE에 전기,
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -32,7 +32,7 @@ from tests.integration.conftest import create_test_user
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class _RealPorts:

@@ -31,7 +31,7 @@ invariant; the source of truth is now `ledger_balance`, with
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -157,7 +157,7 @@ async def credit(
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class WalletService:

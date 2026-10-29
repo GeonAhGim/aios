@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -115,7 +115,7 @@ async def load_exposure_snapshot(
     input_refs = () if symbol in prices else ("mark:entry_fallback",)
 
     return ExposureSnapshot(
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
         gross_tenant=row["gross_tenant"],
         net_tenant=row["net_tenant"],
         gross_strategy=row["gross_strategy"],

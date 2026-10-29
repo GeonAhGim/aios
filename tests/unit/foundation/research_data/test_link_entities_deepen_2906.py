@@ -32,7 +32,7 @@ RD-4가 실제 Postgres 어댑터를 아직 소유하지 않으므로(entity_lin
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -46,7 +46,7 @@ from src.foundation.research_data.domain.entity_link import (
 )
 from tests.support.perf_budget import PerfBudget
 
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _TENANT = uuid4()
 
 

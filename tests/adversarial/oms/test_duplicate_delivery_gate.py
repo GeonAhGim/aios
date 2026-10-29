@@ -33,7 +33,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -101,7 +101,7 @@ async def _seed_order(pool: asyncpg.Pool) -> tuple[str, str]:
 
 def _full_fill_event(*, client_order_id: str, exchange_order_id: str) -> ProviderOrderEvent:
     fill_id = f"gate-fill-{uuid4().hex}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fill = FillEvent(
         provider_fill_id=fill_id,
         venue="bitget",

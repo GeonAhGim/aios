@@ -6,7 +6,7 @@ Coverage: append_audit_event(), event_to_view() with negative/edge cases.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
@@ -62,7 +62,7 @@ class MockAuditEventRepository:
 
 def _make_audit_event(**overrides: object) -> AuditEvent:
     """Factory for AuditEvent domain model."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults: dict[str, object] = dict(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -107,7 +107,7 @@ class TestEventToView:
     """event_to_view() conversion tests."""
 
     def test_event_to_view_happy_path(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(occurred_at=now)
         view = event_to_view(event)
 
@@ -129,27 +129,27 @@ class TestEventToView:
         assert view.occurred_at == now
 
     def test_event_to_view_system_event_no_tenant(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(tenant_id=None, occurred_at=now)
         view = event_to_view(event)
         assert view.tenant_id is None
         assert view.id == event.id
 
     def test_event_to_view_none_actor_subject_id(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(actor_subject_id=None, occurred_at=now)
         view = event_to_view(event)
         assert view.actor_subject_id is None
 
     def test_event_to_view_all_outcomes(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for outcome in DomainOutcome:
             event = _make_audit_event(outcome=outcome, occurred_at=now)
             view = event_to_view(event)
             assert view.outcome == Outcome(outcome.value)
 
     def test_event_to_view_all_classifications(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for classification in DomainClassification:
             event = _make_audit_event(classification=classification, occurred_at=now)
             view = event_to_view(event)
@@ -161,7 +161,7 @@ class TestEventToView:
             event_to_view(event)
 
     def test_event_to_view_complex_payload(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "order_id": "ord123",
             "details": {"qty": 100, "price": 50.25},
@@ -178,7 +178,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_happy_path(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command = _make_command()
@@ -227,7 +227,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_allows_safe_nested_payload(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         payload = {"user": {"name": "John", "email": "john@example.com"}}
@@ -239,7 +239,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_computes_payload_hash(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         payload = {"key1": "value1", "key2": "value2"}
@@ -252,7 +252,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_passes_all_command_fields_to_repo(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         tenant_id = uuid4()
@@ -287,7 +287,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_system_event_no_tenant(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(tenant_id=None, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command = _make_command(tenant_id=None)
@@ -298,7 +298,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_empty_payload(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(payload={}, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command = _make_command(payload={})
@@ -309,7 +309,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_all_outcomes(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         repo = MockAuditEventRepository(event_to_return=_make_audit_event(occurred_at=now))
         for outcome in Outcome:
             command = _make_command(outcome=outcome)
@@ -318,7 +318,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_all_classifications(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         repo = MockAuditEventRepository(event_to_return=_make_audit_event(occurred_at=now))
         for classification in Classification:
             command = _make_command(classification=classification)
@@ -327,7 +327,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_none_actor_subject_id(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(actor_subject_id=None, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command = _make_command(actor_subject_id=None)
@@ -336,7 +336,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_none_aggregate_revision(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(aggregate_revision=None, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command = _make_command(aggregate_revision=None)
@@ -375,7 +375,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_hash_deterministic(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         payload = {"a": 1, "b": 2}
@@ -391,7 +391,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_hash_different_payload(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command1 = _make_command(payload={"a": 1})
@@ -406,7 +406,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_denied_outcome(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(outcome=DomainOutcome.DENIED, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command = _make_command(outcome=Outcome.DENIED)
@@ -415,7 +415,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_error_outcome(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = _make_audit_event(outcome=DomainOutcome.ERROR, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
         command = _make_command(outcome=Outcome.ERROR)
@@ -424,7 +424,7 @@ class TestAppendAuditEvent:
 
     @pytest.mark.asyncio
     async def test_append_audit_event_large_payload(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         large_payload = {f"field_{i}": f"value_{i}" * 10 for i in range(100)}
         event = _make_audit_event(payload=large_payload, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)

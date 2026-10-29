@@ -18,7 +18,7 @@ posting이 생기면 `is_correction_pending`이 이를 표시해야 한다.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -274,7 +274,7 @@ async def test_correction_pending_true_after_closing_when_new_posting_recorded(
         debit_code: await _account_id(pool, debit_code),
         credit_code: await _account_id(pool, credit_code),
     }
-    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    base = datetime.now(UTC) - timedelta(hours=1)
     t1, t2 = _t(base, 0), _t(base, 30)
 
     await _insert_dated_entry(

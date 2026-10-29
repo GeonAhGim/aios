@@ -23,7 +23,7 @@ candle is a 409.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -145,7 +145,7 @@ async def get_candles_endpoint(
     source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
 ) -> ApiResponse[CandleSeriesView]:
     validate_span(start, end, ("as_of", as_of), ("cursor", cursor))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with pool.acquire() as conn:
         inst = await resolve_instrument(
             conn,
@@ -235,7 +235,7 @@ async def replay_candles_endpoint(
             conn,
             inst.venue.value,
             repo=source_contracts,
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             use=DataUse.SHARED_DISPLAY,
         )
     decision = await authorize_feed(
@@ -312,7 +312,7 @@ async def list_aliases_endpoint(
         instrument_id: UUID | None = UUID(symbol)
     except ValueError:
         instrument_id = None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with pool.acquire() as conn:
         inst = await resolve_instrument(
             conn,

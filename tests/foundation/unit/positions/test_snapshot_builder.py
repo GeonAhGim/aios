@@ -8,7 +8,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-5,
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from functools import reduce
 from uuid import UUID
@@ -41,7 +41,7 @@ from tests.conftest import PerfBudget
 
 _POSITION_KEY = "binance:BTCUSDT:s1:e1"
 _ORDER_ID = UUID("00000000-0000-0000-0000-0000000000aa")
-_BASE_TIME = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+_BASE_TIME = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _to_view(seq: int, entry: JournalEntryInput, prev_hash: str | None) -> PositionJournalEntryView:

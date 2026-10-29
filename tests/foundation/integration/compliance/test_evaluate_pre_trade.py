@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import asyncpg
@@ -58,7 +58,7 @@ async def test_no_mandate_raises_missing_error(pool, repo):
             tenant_id=tenant_id,
             portfolio_id=None,
             snapshot={"symbol": "BTC/USDT"},
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
 
@@ -72,7 +72,7 @@ async def test_paused_revision_raises_bundle_inactive(pool, repo, trust_repo):
             tenant_id=tenant_id,
             portfolio_id=None,
             snapshot={"symbol": "BTC/USDT"},
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
 
@@ -84,7 +84,7 @@ async def test_restricted_symbol_denies(pool, repo, trust_repo):
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     assert result.verdict == ComplianceVerdict.DENY
@@ -102,7 +102,7 @@ async def test_allowed_symbol_allows_and_persists(pool, repo, trust_repo):
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "BTC/USDT"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     assert result.verdict == ComplianceVerdict.ALLOW
@@ -122,7 +122,7 @@ async def test_no_symbol_snapshot_still_allows_with_real_decision(pool, repo, tr
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     assert result.verdict == ComplianceVerdict.ALLOW
@@ -134,7 +134,7 @@ async def test_repeated_identical_evaluation_reuses_cached_decision(pool, repo, 
     """§5 idempotency — same (bundle_version, inputs) 재평가는 같은
     `policy_decision` 행을 재사용한다(새 행을 또 만들지 않는다)."""
     tenant_id = await _active_tenant(pool, repo, trust_repo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     first = await evaluate_pre_trade(
         repo,
@@ -157,7 +157,7 @@ async def test_repeated_identical_evaluation_reuses_cached_decision(pool, repo, 
 async def test_different_tenants_get_independent_decisions(pool, repo, trust_repo):
     tenant_a = await _active_tenant(pool, repo, trust_repo)
     tenant_b = await _active_tenant(pool, repo, trust_repo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result_a = await evaluate_pre_trade(
         repo,
@@ -188,7 +188,7 @@ async def test_unrelated_random_tenant_still_raises_mandate_missing(pool, repo):
             tenant_id=uuid4(),
             portfolio_id=None,
             snapshot={"symbol": "BTC/USDT"},
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
 
@@ -223,7 +223,7 @@ async def test_real_connection_refused_propagates_fail_closed_not_swallowed():
                 tenant_id=uuid4(),
                 portfolio_id=None,
                 snapshot={"symbol": "BTC/USDT"},
-                now=datetime.now(timezone.utc),
+                now=datetime.now(UTC),
             )
     finally:
         await broken_pool.close()
@@ -239,7 +239,7 @@ async def test_evaluate_pre_trade_meets_latency_budget(pool, repo, trust_repo):
     평가한 처리량이 하한(5 evaluations/s, 예산 15.0s) 아래로 떨어지면 안
     된다 — 지금까지는 성공/거부 여부만 확인했을 뿐 수치 상한이 없었다."""
     tenant_id = await _active_tenant(pool, repo, trust_repo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     n = 100
     started = time.perf_counter()
@@ -280,7 +280,7 @@ async def test_concurrent_multi_instance_evaluation_replays_identical_verdict(
     모든 policy_decision 행(1개든 여러 개든)의 outcome/reason_codes 내용도
     서로 다른 인스턴스 사이에서 오염 없이 전부 동일해야 한다."""
     tenant_id = await _active_tenant(pool, repo, trust_repo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     snapshot = {"symbol": "XYZ"}  # default_rules가 forbidden_assets로 지정 -> DENY
 
     n_instances = 6

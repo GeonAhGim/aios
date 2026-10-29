@@ -15,7 +15,7 @@ self-service path.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
@@ -149,7 +149,7 @@ async def get_daily_report(
     """Unverified/TODO: fill/P&L source wiring is a separate leaf — for now
     the caller passes today's P&L and fill count directly as query
     parameters."""
-    effective_date = report_date if report_date is not None else datetime.now(timezone.utc).date()
+    effective_date = report_date if report_date is not None else datetime.now(UTC).date()
     report = await build_daily_report(
         report_date=effective_date,
         realized_pnl_krw=realized_pnl_krw,

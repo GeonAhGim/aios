@@ -12,7 +12,7 @@ Order 모델(01번)과 orders 테이블(04번) 사이의 매핑만 담당 — �
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -144,7 +144,7 @@ async def update_from_exchange(
             "average_fill_price": (
                 order.average_fill_price.amount if order.average_fill_price is not None else None
             ),
-            "updated_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(UTC),
         },
     )
     return _row_to_order(row)
@@ -196,7 +196,7 @@ async def update_from_exchange_with_fill_event(
     안에서 실행되므로(아래 `conn.transaction()`), 셋 중 하나라도 실패하면
     전체가 롤백돼 "FILLED로 저장됐지만 이벤트/체결 기록이 없는" 상태가
     생기지 않는다."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     provider_id = f"sync:{order.order_id}:{order.filled_quantity}"
     payload_hash = hashlib.sha256(
         f"{order.order_id}:{expected_status.value}:{order.status.value}:"
@@ -279,7 +279,7 @@ async def fail_claim_with_event(
     stale risk fence), with its `order_events` row in the same transaction so
     the row never becomes eventless residue. Same write order as
     `update_from_exchange_with_fill_event` (event_written flag, event, UPDATE)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     event = OrderTransitionEvent(
         order_id=order_id,
         from_status=OrderStatus.CREATED,
@@ -324,7 +324,7 @@ async def update_after_modify(
             "price": order.price.amount if order.price is not None else None,
             "quantity": order.quantity,
             "status": order.status.value,
-            "updated_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(UTC),
         },
     )
     return _row_to_order(row)

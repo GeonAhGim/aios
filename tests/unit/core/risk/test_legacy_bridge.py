@@ -4,7 +4,7 @@
 `test_inputs_contract.py`에 있다 — 여기서는 이 헬퍼가 반환한 값이 실제로
 `RiskInputs` 인스턴스인지, `cls` 파라미터를 실제로 사용하는지만 확인한다.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -28,7 +28,7 @@ def test_build_risk_inputs_returns_instance_of_cls():
         {},
         tenant_id=uuid4(),
         execution_id=1,
-        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        now=datetime(2026, 9, 3, tzinfo=UTC),
     )
     assert isinstance(result, RiskInputs)
 
@@ -41,7 +41,7 @@ def test_build_risk_inputs_new_entry_defaults_reduce_only_false():
         {},
         tenant_id=uuid4(),
         execution_id=1,
-        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        now=datetime(2026, 9, 3, tzinfo=UTC),
     )
     assert result.intent.reduce_only is False
 
@@ -56,7 +56,7 @@ def test_zero_position_quantity_yields_zero_open_positions_count():
         {"position_quantity": Decimal(0)},
         tenant_id=uuid4(),
         execution_id=1,
-        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        now=datetime(2026, 9, 3, tzinfo=UTC),
     )
     assert result.exposure.open_positions_count == 0
 
@@ -69,7 +69,7 @@ def test_nonzero_position_quantity_yields_one_open_position_count():
         {"position_quantity": Decimal("0.5")},
         tenant_id=uuid4(),
         execution_id=1,
-        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        now=datetime(2026, 9, 3, tzinfo=UTC),
     )
     assert result.exposure.open_positions_count == 1
 
@@ -82,7 +82,7 @@ def test_avg_trade_count_24h_int_is_converted_to_decimal():
         {"avg_trade_count_24h": 12},
         tenant_id=uuid4(),
         execution_id=1,
-        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        now=datetime(2026, 9, 3, tzinfo=UTC),
     )
     assert result.activity.trades_avg_per_hour_24h == Decimal(12)
     assert isinstance(result.activity.trades_avg_per_hour_24h, Decimal)
@@ -96,6 +96,6 @@ def test_missing_avg_trade_count_24h_stays_none():
         {},
         tenant_id=uuid4(),
         execution_id=1,
-        now=datetime(2026, 9, 3, tzinfo=timezone.utc),
+        now=datetime(2026, 9, 3, tzinfo=UTC),
     )
     assert result.activity.trades_avg_per_hour_24h is None

@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Iterable, Iterator
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -67,13 +67,13 @@ class ParquetFeatureStore:
         for row in rows:
             if row.as_of.tzinfo is None:
                 raise ValueError("FeatureValue.as_of must be timezone-aware (CLAUDE.md §3)")
-            if row.as_of.astimezone(timezone.utc).date() != day:
+            if row.as_of.astimezone(UTC).date() != day:
                 raise ValueError("FeatureValue.as_of does not fall on the partition day")
             if not row.entity_id.strip():
                 raise ValueError("entity_id must not be empty")
             validate_feature_value(spec, row.value)
             entity_ids.append(row.entity_id)
-            as_ofs.append(row.as_of.astimezone(timezone.utc).isoformat())
+            as_ofs.append(row.as_of.astimezone(UTC).isoformat())
             values.append(row.value)
 
         table = pa.table(

@@ -14,7 +14,7 @@ task-3000(DEEPEN, docs/audit/DEPTH_LA_LB_LC.md task-1752 행): 순수 도메인
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -24,7 +24,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.positions.domain import borrow
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 7, 12, 0, tzinfo=UTC)
 
 
 def _locate(

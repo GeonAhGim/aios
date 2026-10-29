@@ -6,7 +6,7 @@ gate-red reproduction 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -18,7 +18,7 @@ from src.foundation.ml.domain.point_in_time import (
 )
 from tests.support.perf_budget import PerfBudget
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 def _model_card(*, lineage_end: datetime, **overrides: Any) -> ModelCard:

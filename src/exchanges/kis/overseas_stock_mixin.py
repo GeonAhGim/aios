@@ -35,7 +35,7 @@ tr_id를 공유한다고 가정했다 — 02d_kis_api_full_spec_v1.md §4 조사
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, NamedTuple
 
@@ -102,7 +102,7 @@ class KISOverseasStockMixin:
             bid=price,  # 해외주식 현재가 응답엔 최우선호가가 없음(문서 관례) — 근사치
             ask=price,
             volume_24h=Decimal(output.get("tvol", "0")),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
             redistribution_scope="USER_SCOPED",
         )

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -168,14 +168,14 @@ class _FakeAdapter:
     def parse_event(self, message: dict[str, Any]) -> L2Diff | None:
         return L2Diff(
             sequence=int(message["seq"]),
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
             bid_updates=(),
             ask_updates=(),
         )
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
         self.snapshot_calls += 1
-        return L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids={}, asks={})
+        return L2Snapshot(sequence=0, as_of=datetime.now(UTC), bids={}, asks={})
 
 
 def _frame(seq: int) -> str:
@@ -204,7 +204,7 @@ async def test_sequence_gap_closes_span_at_gap_and_reopens_after_resync_leaving_
     adapter = _FakeAdapter()
     repo = _FakeCoverageRepo()
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     frames = [_frame(s) for s in (1, 2, 4, 5)]  # 3 누락 → 갭
     conn = _FakeConnection(frames, raise_after=_closed())
     connect_fn, calls = _connect_sequence([conn])
@@ -230,7 +230,7 @@ async def test_disconnect_then_reconnect_also_closes_and_reopens_span():
     adapter = _FakeAdapter()
     repo = _FakeCoverageRepo()
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     first_conn = _FakeConnection([_frame(1), _frame(2)], raise_after=_closed())
     second_conn = _FakeConnection([_frame(1)], raise_after=_closed())
     connect_fn, calls = _connect_sequence([first_conn, second_conn])
@@ -253,7 +253,7 @@ async def test_stream_ending_without_exception_still_closes_exactly_one_span():
     adapter = _FakeAdapter()
     repo = _FakeCoverageRepo()
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     conn = _FakeConnection([_frame(1), _frame(2), _frame(3)])  # 예외 없이 스트림 종료 → 끊김 취급
     connect_fn, calls = _connect_sequence([conn])
 
@@ -272,7 +272,7 @@ async def test_virtual_24h_replay_never_bridges_gaps_and_resyncs_every_time():
     adapter = _FakeAdapter()
     repo = _FakeCoverageRepo()
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
 
     # 1..200 연속 시퀀스에서 10군데를 의도적으로 건너뛰어 갭 10회를 만든다.
     skip_points = {20, 40, 60, 80, 100, 120, 140, 160, 180, 200}

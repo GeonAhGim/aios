@@ -21,7 +21,7 @@ adversarial test verifies this directly).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -87,7 +87,7 @@ async def generate_script(
     daily_cap: int,
     now: datetime | None = None,
 ) -> GenerateScriptResult:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     used_today = await usage_store.get_count(tenant_id=tenant_id, day=now.date())
     enforce_daily_budget(used_today=used_today, daily_cap=daily_cap)
@@ -101,7 +101,7 @@ async def generate_script(
 
     await usage_store.increment(tenant_id=tenant_id, day=now.date())
 
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     try:
         compiled = compile_source(draft.source, registry_version=registry_version)
     except ScriptCompileError as exc:
@@ -115,7 +115,7 @@ async def generate_script(
             suggestion=suggest_fix(exc.code, exc.message),
             injection=finding,
         )
-    elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+    elapsed_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
     return GenerateScriptSuccess(
         status="compiled",
         draft=draft,

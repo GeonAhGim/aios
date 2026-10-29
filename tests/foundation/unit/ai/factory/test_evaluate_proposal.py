@@ -7,7 +7,7 @@ assertion 1, gate-red reproduction 1.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -25,7 +25,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.validation.domain.check_result import CheckResult
 from src.foundation.validation.domain.models import Outcome
 
-_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_START = datetime(2026, 1, 1, tzinfo=UTC)
 _END = _START + timedelta(days=30)
 _INSTRUMENT = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 

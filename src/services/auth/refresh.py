@@ -23,7 +23,7 @@ this use case already raises for the non-racy case, keeping it distinct from
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -64,7 +64,7 @@ async def refresh(
         if session is None:
             raise RefreshSessionNotFoundError(f"session_id={session_id}: no active session")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if session.expires_at <= now:
             await session_repository.revoke(conn, session_id, reason="expired")
             raise RefreshTokenExpiredError(f"session_id={session_id}: refresh expired")

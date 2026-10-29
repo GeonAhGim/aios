@@ -27,7 +27,7 @@ thundering-herd 상황에서도 토큰 재발급이 정확히 1회만 일어남(
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -89,7 +89,7 @@ def _match_query(*, submitted_at: datetime) -> OrderMatchQuery:
 
 
 def _matching_row(*, odno: str) -> dict:
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     kst_now = now_utc + timedelta(hours=9)
     return {
         "pdno": "005930",

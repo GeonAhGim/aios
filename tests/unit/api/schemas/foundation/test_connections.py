@@ -7,7 +7,7 @@ model construction (ADR-2026-09-09-C Decision 1).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -31,13 +31,13 @@ def _connection_view() -> AccountConnectionView:
         state=ConnectionState.ACTIVE_READONLY,
         capability_profile=[CapabilityScope.READ_BALANCE],
         revision=1,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         scope_verified=False,
     )
 
 
 def test_connection_list_response_valid_roundtrip() -> None:
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     view = _connection_view()
     resp = ConnectionListResponse(connections=[view], as_of=as_of)
     assert resp.as_of == as_of
@@ -46,7 +46,7 @@ def test_connection_list_response_valid_roundtrip() -> None:
 
 
 def test_connection_list_response_empty_connections_roundtrip() -> None:
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     resp = ConnectionListResponse(connections=[], as_of=as_of)
     assert resp.connections == []
 
@@ -60,7 +60,7 @@ def test_connection_list_response_invalid_connections_element_raises() -> None:
     with pytest.raises(ValidationError):
         ConnectionListResponse(
             connections=["not-a-connection-view"],
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -93,10 +93,10 @@ def test_connection_list_response_dependency_failure_injected(
                     "state": ConnectionState.ACTIVE_READONLY,
                     "capability_profile": [CapabilityScope.READ_BALANCE],
                     "revision": 1,
-                    "created_at": datetime.now(timezone.utc),
+                    "created_at": datetime.now(UTC),
                 }
             ],
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -106,7 +106,7 @@ def test_connection_list_response_construction_throughput_budget(
 ) -> None:
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     connections = [_connection_view() for _ in range(5)]
 
     # batch=500: 총 500회 호출을 한 구간에 묶어 process_time 양자화 오차 제거
@@ -136,7 +136,7 @@ def test_connection_list_response_cpu_budget_goes_red_with_10x_delay_injection(
     """
     budget_ms = 50.0  # 동일 예산
 
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     connections = [_connection_view() for _ in range(5)]
 
     def _run() -> object:

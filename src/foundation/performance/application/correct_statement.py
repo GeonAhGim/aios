@@ -15,7 +15,7 @@ revision" (100-line cap, SCAFFOLD)."""
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from src.foundation.evidence.application.record_command_event import record_command_event
@@ -88,7 +88,7 @@ async def correct_statement(
     corrected = replace(
         latest,
         id=corrected_id,
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
         state=StatementState.CORRECTED,
         revision_no=next_revision(latest.revision_no),
         prior_statement_id=latest.id,

@@ -8,7 +8,7 @@ docs/design/INVARIANTS.md I-10(안전/정책 컴포넌트는 배선·우회불�
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -33,7 +33,7 @@ _OTHER_SUBJECT = UUID("44444444-4444-4444-4444-444444444444")
 
 
 def _dt(day: int, hour: int = 0) -> datetime:
-    return datetime(2026, 1, day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 1, day, hour, 0, tzinfo=UTC)
 
 
 def _grant(

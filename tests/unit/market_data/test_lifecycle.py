@@ -21,9 +21,9 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Never
 
 import pytest
-from typing_extensions import Never
 
 from src.foundation.market_data.contracts.v1 import SymbolStatus
 from src.foundation.market_data.domain.reference import lifecycle as lifecycle_module

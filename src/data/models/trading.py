@@ -7,7 +7,7 @@ Spec: 01_data_models_v1.4.md#§1.4, 11_implementation_rules_v1.2.md#§11.1
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
@@ -72,8 +72,8 @@ class Order(BaseModel):
     status: OrderStatus = OrderStatus.CREATED
     filled_quantity: Decimal = Decimal("0")
     average_fill_price: Money | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # 8.6-A-2 Anti-Front-Running — slice info for liquidation execution (None for normal orders)
     execution_slice_id: str | None = None
@@ -103,7 +103,7 @@ class Position(BaseModel):
     leverage: Decimal = Decimal("1")
     margin: Money | None = None
     entry_time: datetime
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # ADR-2026-08-28 multi-asset-class expansion — same principle as Order.
     asset_class: AssetClass
@@ -183,7 +183,7 @@ class AccountBalance(BaseModel):
     total: Decimal
     available: Decimal
     used_margin: Decimal = Decimal("0")
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class MarginAccountAsset(BaseModel):
@@ -203,4 +203,4 @@ class MarginAccountAsset(BaseModel):
     interest: Decimal
     net_asset: Decimal
     risk_rate: Decimal | None = None  # FD-8.3 candidate input for liquidation risk judgment
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -10,7 +10,7 @@ DoD: (1) 표현식 UNIQUE(플랫폼 기본값 tenant_id NULL 포함) 실증, (2)
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -208,7 +208,7 @@ async def test_upsert_with_stale_expected_updated_at_raises_and_leaves_row_uncha
         scope_ref=created.scope_ref,
         metric=created.metric,
         limit_value=Decimal("999"),
-        updated_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2000, 1, 1, tzinfo=UTC),
     )
     with pytest.raises(ConcurrencyConflictError):
         await repo.upsert(stale)
@@ -366,7 +366,7 @@ async def test_record_breach_inserts_row_linked_to_limit_and_decision(repo, pool
         observed=Decimal("150"),
         limit_value=saved.limit_value,
         severity="CRITICAL",
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
     )
 
     async with pool.acquire() as conn:

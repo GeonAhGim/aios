@@ -10,7 +10,7 @@ UNIQUE 제약이 구분 못함) — Phase 1과 동일하게 막지 않는다.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -127,7 +127,7 @@ async def record_fill_in_position_ledger(
                     mark_at=None,
                     base_currency=currency,
                     last_journal_seq=0,
-                    updated_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(UTC),
                 )
                 await snapshots.upsert(conn, empty, expected_seq=0)
             command = RecordFillCommand(
@@ -150,12 +150,12 @@ async def record_fill_in_position_ledger(
                 snapshots=snapshots,
                 journal=PostgresJournalRepository(pool),
                 audit=PostgresAuditEventRepository(pool),
-                clock=lambda: datetime.now(timezone.utc),
+                clock=lambda: datetime.now(UTC),
             )
             legacy_id = await conn.fetchval(
                 "SELECT legacy_position_id FROM pos_snapshot WHERE position_key = $1", position_key
             )
-            closed_at = None if snapshot.quantity != 0 else datetime.now(timezone.utc)
+            closed_at = None if snapshot.quantity != 0 else datetime.now(UTC)
             if legacy_id is None:
                 legacy_id = await conn.fetchval(
                     "INSERT INTO positions (user_id, symbol, exchange, strategy_id, "

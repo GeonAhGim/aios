@@ -23,7 +23,7 @@ not carry a `live_features` argument.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from src.foundation.ml.application.serve_signal import (
     FeatureNotFoundError,
@@ -89,7 +89,7 @@ async def serve_signal_batch(
     results: list[SignalResult] = []
     for as_of in as_of_dates:
         require_aware(as_of)
-        day = as_of.astimezone(timezone.utc).date()
+        day = as_of.astimezone(UTC).date()
         features: dict[str, float] = {}
         for spec in feature_specs:
             key = (spec.feature_id, day)

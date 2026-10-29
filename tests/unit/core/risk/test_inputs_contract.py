@@ -1,5 +1,5 @@
 """L4_risk_and_safety_v1.0.md#3.2, #9 R-03 — RiskInputs 계약 테스트."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -29,7 +29,7 @@ class _Allocation:
 
 
 def _sample_inputs(**overrides: object) -> RiskInputs:
-    now = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
     base: dict[str, object] = dict(
         tenant_id=uuid4(),
         execution_ref="exec:1",
@@ -67,7 +67,7 @@ def test_naive_as_of_rejected():
 
 
 def test_pct_quantized_to_six_decimals():
-    as_of = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    as_of = datetime(2026, 9, 3, tzinfo=UTC)
     inputs = _sample_inputs(
         equity=EquityInputs(daily_pnl_pct=Decimal("-1.123456789"), as_of=as_of)
     )
@@ -80,7 +80,7 @@ def test_inputs_hash_is_stable_across_calls():
 
 
 def test_inputs_hash_normalizes_decimal_trailing_zeros():
-    now = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, tzinfo=UTC)
     a = _sample_inputs(allocated_capital=Decimal("1000"))
     b = _sample_inputs(allocated_capital=Decimal("1000.00"))
     # tenant_id/decision 필드가 uuid4()로 서로 달라지므로 hash 비교 전 동일화한다.
@@ -90,7 +90,7 @@ def test_inputs_hash_normalizes_decimal_trailing_zeros():
 
 
 def test_inputs_hash_changes_with_different_intent():
-    now = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, tzinfo=UTC)
     tenant_id = uuid4()
     a = _sample_inputs(tenant_id=tenant_id, as_of=now)
     b = _sample_inputs(
@@ -127,7 +127,7 @@ def test_exposure_limit_roundtrip():
 
 def test_from_legacy_dict_roundtrips_equity_and_safety_fields():
     tenant_id = uuid4()
-    now = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, tzinfo=UTC)
     allocation = _Allocation("BTC/USDT", "strat-1", Decimal("0.1"), Decimal("10"))
     account_state = {
         "daily_pnl_pct": Decimal("-2.5"),
@@ -176,7 +176,7 @@ def test_from_legacy_dict_roundtrips_equity_and_safety_fields():
 
 def test_from_legacy_dict_missing_fields_become_none():
     tenant_id = uuid4()
-    now = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, tzinfo=UTC)
     allocation = _Allocation("BTC/USDT", "strat-1", Decimal("0.1"), Decimal("10"))
     inputs = RiskInputs.from_legacy_dict(
         allocation, {}, tenant_id=tenant_id, execution_id=1, now=now
@@ -190,7 +190,7 @@ def test_from_legacy_dict_missing_fields_become_none():
 
 def test_from_legacy_dict_nonzero_position_counts_as_open():
     tenant_id = uuid4()
-    now = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, tzinfo=UTC)
     allocation = _Allocation("BTC/USDT", "strat-1", Decimal("0.1"), Decimal("10"))
     inputs = RiskInputs.from_legacy_dict(
         allocation,

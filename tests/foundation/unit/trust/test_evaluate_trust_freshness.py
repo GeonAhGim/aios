@@ -16,7 +16,7 @@ the reason_code branching asserted without a DB.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,7 +26,7 @@ from src.foundation.trust.contracts.v1 import TenantContext
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 25, tzinfo=UTC)
 
 
 @dataclass

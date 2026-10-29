@@ -11,7 +11,7 @@ GET /uapi/domestic-stock/v1/quotations/inquire-elw-price (FHKEW15010000).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.data.models.market_data import Ticker
@@ -37,6 +37,6 @@ class KISElwMixin:
             bid=price,  # 응답에 최우선호가 없음(문서 관례) — 근사치
             ask=price,
             volume_24h=Decimal(output.get("acml_vol", "0")),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )

@@ -6,7 +6,7 @@ Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-7 DoD (a)-(g).
 from __future__ import annotations
 
 import ast
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,7 +22,7 @@ from src.foundation.ems.domain.algo.guard import (
 )
 
 _GUARD_PATH = Path(__file__).resolve().parents[4] / "src/foundation/ems/domain/algo/guard.py"
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 # -- (a) participation cap: boundary + fail-closed on zero volume ----------

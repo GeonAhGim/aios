@@ -7,7 +7,7 @@ kill)".
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.foundation.risk.domain.models import PersonalRiskBundle
 from src.foundation.risk.domain.rules import (
@@ -38,7 +38,7 @@ async def check_personal_order(
 
     if decision.violations:
         reasons = ", ".join(v.value for v in decision.violations)
-        await state.record_violation(occurred_on=datetime.now(timezone.utc).date())
+        await state.record_violation(occurred_on=datetime.now(UTC).date())
         await notifier.send(
             PersonalNotification(
                 kind=PersonalNotificationKind.LIMIT_BREACH,

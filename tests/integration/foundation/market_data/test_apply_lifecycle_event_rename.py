@@ -19,7 +19,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.2, §9.2 LA-14.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -53,7 +53,7 @@ def _register_cmd(*, venue_symbol: str) -> RegisterInstrumentCommand:
         asset_class=AssetClass.CRYPTO,
         tick_size=Decimal("0.01"),
         lot_size=Decimal("0.0001"),
-        listed_at=datetime.now(timezone.utc) - timedelta(days=1),
+        listed_at=datetime.now(UTC) - timedelta(days=1),
         actor_subject_id=uuid.uuid4(),
         trace_id=uuid.uuid4(),
     )
@@ -63,7 +63,7 @@ def _lifecycle_cmd(instrument_id, event: str, *, new_venue_symbol: str | None = 
     return LifecycleEventCommand(
         instrument_id=instrument_id,
         event=event,
-        effective_at=datetime.now(timezone.utc),
+        effective_at=datetime.now(UTC),
         new_venue_symbol=new_venue_symbol,
         source_ref=f"test:{event.lower()}",
         actor_subject_id=uuid.uuid4(),
@@ -117,7 +117,7 @@ async def test_rename_writes_alias_and_audits_once(pool, refs, audit):
 
     async with pool.acquire() as conn:
         found = await refs.get_instrument(
-            conn, Venue.BITGET, new_symbol, datetime.now(timezone.utc)
+            conn, Venue.BITGET, new_symbol, datetime.now(UTC)
         )
     assert found is not None
     assert found.instrument_id == listed.instrument_id

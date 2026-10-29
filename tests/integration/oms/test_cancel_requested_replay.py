@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -47,7 +47,7 @@ async def pool() -> AsyncIterator[asyncpg.Pool]:
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _order_event(

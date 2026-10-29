@@ -6,7 +6,7 @@
 변경이므로 허용되고, 그 경우에만 fixture를 함께 갱신한다.
 """
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "risk_decision_v1.json"
 
 
 def _sample_decision(**overrides: object) -> RiskDecision:
-    now = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
     base: dict[str, Any] = dict(
         decision_id=uuid4(),
         gate_kind=GateKind.PRE_TRADE,
@@ -64,22 +64,22 @@ def test_naive_expires_at_rejected():
 
 
 def test_is_actionable_true_for_allow_before_expiry():
-    now = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
-    later = datetime(2026, 9, 3, 0, 0, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
+    later = datetime(2026, 9, 3, 0, 0, 1, tzinfo=UTC)
     decision = _sample_decision(evaluated_at=now, expires_at=later)
     assert decision.is_actionable(now) is True
 
 
 def test_is_actionable_false_after_expiry():
-    now = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
-    past = datetime(2026, 9, 2, 23, 59, 59, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
+    past = datetime(2026, 9, 2, 23, 59, 59, tzinfo=UTC)
     decision = _sample_decision(evaluated_at=past, expires_at=past)
     assert decision.is_actionable(now) is False
 
 
 def test_is_actionable_false_for_deny():
-    now = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
-    later = datetime(2026, 9, 3, 0, 0, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
+    later = datetime(2026, 9, 3, 0, 0, 1, tzinfo=UTC)
     decision = _sample_decision(outcome=RiskOutcome.DENY, evaluated_at=now, expires_at=later)
     assert decision.is_actionable(now) is False
 

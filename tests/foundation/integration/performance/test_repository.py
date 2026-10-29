@@ -5,7 +5,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §9 (L47 DoD:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -27,7 +27,7 @@ from src.foundation.performance.domain.models import (
 )
 from tests.integration.conftest import create_test_tenant
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 def _asyncpg_dsn() -> str:

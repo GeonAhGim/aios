@@ -30,7 +30,7 @@ import dataclasses
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -50,7 +50,7 @@ _MANUAL_OVERRIDE_NAMES = frozenset(
 
 
 def _candles(n: int, base: float = 100.0) -> list[Candle]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out = []
     for i in range(n):
         price = base + i

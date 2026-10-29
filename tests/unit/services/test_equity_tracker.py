@@ -14,7 +14,7 @@ DEEPEN(task-3188, docs/audit/DEPTH_PLT.md leaf 1615): D1이었던 이 리프에
 
 import ast
 import itertools
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -96,7 +96,7 @@ def test_default_clock_is_utc_fixed_not_local() -> None:
     """`date.today()`(OS 로컬 tz) 대신 UTC 고정 기본 clock을 쓴다."""
     tracker = ExecutionEquityTracker()
     assert tracker._today is _utc_today
-    assert tracker._today() == datetime.now(timezone.utc).date()
+    assert tracker._today() == datetime.now(UTC).date()
 
 
 def test_day_start_before_any_record_or_seed_raises_key_error() -> None:
@@ -127,7 +127,7 @@ def test_utc_today_diverges_from_os_local_timezone_at_day_boundary() -> None:
     시각을 고정하면, UTC-8 로컬 벽시계는 아직 전날(16:30, 전날 날짜)이다.
     `date.today()`(OS 로컬 tz)를 썼다면 day boundary가 하루 늦게
     잡혔을 것이라는 걸 같은 순간의 로컬 환산값과 대조해 증명한다."""
-    fixed_instant = datetime(2026, 9, 10, 0, 30, tzinfo=timezone.utc)
+    fixed_instant = datetime(2026, 9, 10, 0, 30, tzinfo=UTC)
     local_equivalent = fixed_instant.astimezone(timezone(timedelta(hours=-8)))
     assert local_equivalent.date() == date(2026, 9, 9)
 

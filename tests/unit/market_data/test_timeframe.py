@@ -17,7 +17,7 @@ I/O가 없어 failure-injection·성능단언·게이트 재현이 성립하기 
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import cast
 
 import pytest
@@ -32,7 +32,7 @@ from src.foundation.market_data.domain.timeframe import (
 )
 from tests.conftest import PerfBudget
 
-UTC = timezone.utc
+UTC = UTC
 
 
 def _session(open_at: datetime, close_at: datetime) -> SessionWindow:

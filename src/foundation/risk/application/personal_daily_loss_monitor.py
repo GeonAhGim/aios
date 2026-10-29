@@ -15,7 +15,7 @@ safety component must be wired, not merely implementable).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 
@@ -52,7 +52,7 @@ async def run_personal_daily_loss_monitor_tick(
     if scoped_account_id is None:
         return False
 
-    moment = now if now is not None else datetime.now(timezone.utc)
+    moment = now if now is not None else datetime.now(UTC)
     daily_input = await compute_personal_daily_loss_input(
         pool, scoped_account_id, moment.date(), nav_repo=nav_repo
     )

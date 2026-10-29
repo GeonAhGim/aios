@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 from decimal import Decimal
 
 import pytest
@@ -68,14 +68,14 @@ def test_disclosure_condition() -> None:
 
 
 def test_time_condition_matches_time_and_weekday() -> None:
-    monday = datetime(2026, 1, 5, 9, 0, tzinfo=timezone.utc)  # 2026-01-05는 월요일
+    monday = datetime(2026, 1, 5, 9, 0, tzinfo=UTC)  # 2026-01-05는 월요일
     condition = TimeCondition(at=time(9, 0), days_of_week=(0,))
     snapshot = MarketSnapshot(
         candle=make_candle(close=Decimal("100")).model_copy(update={"open_time": monday})
     )
     assert evaluate_condition(condition, {"005930": snapshot}, {}) is True
 
-    tuesday = datetime(2026, 1, 6, 9, 0, tzinfo=timezone.utc)
+    tuesday = datetime(2026, 1, 6, 9, 0, tzinfo=UTC)
     snapshot2 = MarketSnapshot(
         candle=make_candle(close=Decimal("100")).model_copy(update={"open_time": tuesday})
     )
@@ -144,7 +144,7 @@ def test_automation_rule_rejects_empty_conditions() -> None:
         RuleStatus,
     )
 
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, tzinfo=UTC)
     with pytest.raises(pydantic.ValidationError, match="최소 1개 필요"):
         AutomationRule(
             rule_id=uuid4(),

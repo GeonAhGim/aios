@@ -60,7 +60,7 @@ import json
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -166,7 +166,7 @@ async def _transition_to_cancel_requested(
             id_value=order_id,
             expected_state_column="status",
             expected_state_value=from_status,
-            set_values={"status": _TO_STATUS, "updated_at": datetime.now(timezone.utc)},
+            set_values={"status": _TO_STATUS, "updated_at": datetime.now(UTC)},
             returning="order_id, exchange, exchange_order_id",
         )
 

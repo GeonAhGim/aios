@@ -20,7 +20,7 @@ IGNORED/PROCESSED로만 남긴다, 위조 이벤트 하나가 배경 드레인 �
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -91,7 +91,7 @@ def _fill_event(
     quantity: Decimal,
     provider_event_id: str,
 ) -> ProviderOrderEvent:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fill = FillEvent(
         provider_fill_id=provider_event_id,
         venue=venue,

@@ -7,7 +7,7 @@ their state enums.
 
 import dataclasses
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 from uuid import uuid4
@@ -24,7 +24,7 @@ from src.foundation.reconciliation.domain.models import (
 )
 from tests.support.perf_budget import PerfBudget
 
-NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 24, tzinfo=UTC)
 
 
 def _policy(**overrides: Any) -> MaterialityPolicy:

@@ -9,7 +9,7 @@ input ledger, or accepting a float amount must each fail some test here.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -26,7 +26,7 @@ from src.data.models.trading import OrderSide
 from src.foundation.backtest.domain.models import SimulatedFill
 from tests.conftest import PerfBudget
 
-_TS = datetime(2026, 9, 9, tzinfo=timezone.utc)
+_TS = datetime(2026, 9, 9, tzinfo=UTC)
 
 
 def _fill(

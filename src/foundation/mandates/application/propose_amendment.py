@@ -21,7 +21,7 @@ against and passes through (same semantics as
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -80,7 +80,7 @@ async def propose_amendment(
     proposed = replace(proposed, revision_hash=compute_revision_hash(proposed))
 
     if detect_material_change(current_active, proposed):
-        proposed = replace(proposed, cooling_off_started_at=datetime.now(timezone.utc))
+        proposed = replace(proposed, cooling_off_started_at=datetime.now(UTC))
 
     created = await repo.insert_draft_revision(
         mandate_id=mandate.id, revision_no=next_revision_no, rules=proposed

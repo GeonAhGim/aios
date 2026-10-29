@@ -24,7 +24,7 @@ DEPTH 감사(task-2723, docs/audit/DEPTH_LA_LB_LC.md #349) 보강분: 아래
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -48,7 +48,7 @@ from src.foundation.ledger.domain.rounding import split_commission
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class _IdSeq:

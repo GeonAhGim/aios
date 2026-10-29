@@ -16,7 +16,7 @@ DoD 셋을 각각 다른 각도에서 증명한다:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -235,7 +235,7 @@ def _submit_command(asset_class: AssetClass, symbol: str) -> SubmitOrderCommand:
             strategy_version="1.0.0",
             execution_id=1,
             intent_seq=1,
-            window_start=datetime.now(timezone.utc),
+            window_start=datetime.now(UTC),
         ),
         symbol=symbol,
         side=OrderSide.BUY,
@@ -245,7 +245,7 @@ def _submit_command(asset_class: AssetClass, symbol: str) -> SubmitOrderCommand:
         time_in_force="GTC",
         asset_class=asset_class,
         actor_subject_id=uuid4(),
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 

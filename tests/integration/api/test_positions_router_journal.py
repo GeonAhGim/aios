@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -42,7 +42,7 @@ async def _append_fills(pool: asyncpg.Pool, position_key: str, count: int) -> No
                 source_event_type="fill",
                 source_event_id=f"{position_key}:{i}",
                 idempotency_key=f"fill:{position_key}:{i}",
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
             )
 
 

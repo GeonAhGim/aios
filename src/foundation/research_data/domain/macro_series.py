@@ -24,7 +24,7 @@ import calendar
 import enum
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 __all__ = [
@@ -211,7 +211,7 @@ def compute_known_at(period_ended: date, *, publication_lag_days: int) -> dateti
             "future fact before its own reporting period ends)"
         )
     known_date = period_ended + timedelta(days=publication_lag_days)
-    return datetime(known_date.year, known_date.month, known_date.day, tzinfo=timezone.utc)
+    return datetime(known_date.year, known_date.month, known_date.day, tzinfo=UTC)
 
 
 def _parse_value(raw_value: str) -> Decimal:

@@ -9,7 +9,7 @@ negative: 같은 batch_id 재삽입 거부, tenant 불일치는 조회 시 존�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -92,7 +92,7 @@ def _tick_batch(
 
 
 async def test_create_tick_batch_then_get_roundtrips_verdict_and_issues(pool, batch_repo):
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         audit_event_id = await _audit_event_id(conn)
@@ -126,7 +126,7 @@ async def test_create_tick_batch_then_get_roundtrips_verdict_and_issues(pool, ba
 
 
 async def test_create_tick_batch_duplicate_batch_id_raises(pool, batch_repo):
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         audit_event_id = await _audit_event_id(conn)
@@ -148,7 +148,7 @@ async def test_create_tick_batch_duplicate_batch_id_raises(pool, batch_repo):
 async def test_create_tick_batch_without_audit_event_id_raises(pool, batch_repo):
     """negative: audit_event_id가 None이면 §4.1 fail-closed 불변식 위반 —
     DB에 보내기 전에 ValueError로 거부해야 한다(감사 이벤트 없는 배치 금지)."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         batch = _tick_batch(
@@ -180,7 +180,7 @@ async def test_create_tick_batch_unexpected_db_error_propagates(pool, batch_repo
     """실패주입: `UniqueViolationError`가 아닌 예외(예: 연결 끊김)는
     `DuplicateBatchError`로 둔갑시키지 않고 그대로 전파해야 한다
     — fail-closed 기본, 에러를 숨겨 성공으로 위장하지 않는다."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
 
     class _BoomConnection:
         def __init__(self, real: asyncpg.Connection) -> None:
@@ -212,7 +212,7 @@ async def test_get_tick_batch_cross_tenant_lookup_returns_none(pool, batch_repo)
     것이라 None인지 호출부가 구분할 수 없어야 한다."""
     owner_tenant = await create_test_tenant(pool)
     other_tenant = await create_test_tenant(pool)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         audit_event_id = await _audit_event_id(conn)
@@ -239,7 +239,7 @@ async def test_get_tick_batch_cross_tenant_lookup_returns_none(pool, batch_repo)
 async def test_tick_batch_operations_within_performance_budget(pool, batch_repo, perf_budget):
     """성능단언: create_tick_batch + get_tick_batch의 합산 p95는 50ms 이내
     (§4.2 performance budget LA-16a, ADR-2026-09-09-C Decision 1)."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         audit_event_id = await _audit_event_id(conn)

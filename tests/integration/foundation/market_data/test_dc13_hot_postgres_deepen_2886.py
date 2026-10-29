@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -161,7 +161,7 @@ async def test_write_batch_rejects_high_less_than_open(
     최후 방어선으로 막아야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -183,7 +183,7 @@ async def test_write_batch_rejects_negative_volume(
     """`ck_md_candle_volume_nonneg` — 음수 거래량은 거부된다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -213,7 +213,7 @@ async def test_write_batch_rejects_negative_volume_meets_latency_budget(
     측정 후, 음수 volume candle 은 별도 negative test 에서 검증한다."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, prefix="DC13NEGPERF")
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
     valid_candle = _candle(key, t0, o=100, h=110, low=90, c=105, v=10)
 
@@ -255,7 +255,7 @@ async def test_write_batch_rejects_negative_volume_delay_injection_fails(
     """
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, prefix="DC13NEGINJ")
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
     valid_candle = _candle(key, t0, o=100, h=110, low=90, c=105, v=10)
 
@@ -308,7 +308,7 @@ async def test_write_batch_rejects_unknown_instrument_fk(
     배치 자체는 유효해도 거부된다."""
     async with pool.acquire() as conn, conn.transaction():
         real_instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -333,7 +333,7 @@ async def test_write_batch_rejects_unknown_batch_id_fk(
     `batch_id`로는 아무리 유효한 candle이라도 쓸 수 없다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
         candle = _candle(key, t0, o=100, h=110, low=90, c=105, v=10)
 
@@ -354,7 +354,7 @@ async def test_write_batch_bulk_meets_latency_budget(
     1회가 예산 안에 드는지를 직접 차단 assert로 건다."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, prefix="DC13PERFWRITE")
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
     candles = [
         _candle(key, t0 + timedelta(minutes=i), o=100, h=110, low=90, c=105, v=10)
@@ -390,7 +390,7 @@ async def test_gate_red_single_call_check_violation_rolls_back_whole_insert(
     않아야 한다(부분 성공 없음)."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -420,7 +420,7 @@ async def test_gate_red_transaction_fk_violation_rolls_back_prior_write(
     증명한다."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
 
         with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
@@ -463,7 +463,7 @@ async def test_concurrent_write_batch_same_open_time_exactly_one_winner(
     instrument_id: uuid.UUID
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, prefix="DC13RACE")
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
 
     batch_ids: list[uuid.UUID] = []

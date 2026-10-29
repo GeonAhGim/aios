@@ -22,7 +22,7 @@ cancel_algo and AlgoScheduler tests moved to test_algo_cancel.py.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -47,7 +47,7 @@ from tests.support.raw_order_isolation import isolated_raw_orders as isolated_ra
 async def test_tick_algo_submits_due_slices_and_marks_them(pool):
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[
@@ -71,7 +71,7 @@ async def test_tick_algo_submits_due_slices_and_marks_them(pool):
 async def test_tick_algo_skips_slices_not_yet_due(pool):
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[
@@ -95,7 +95,7 @@ async def test_tick_algo_denies_when_parent_is_terminal(pool):
     """Negative 2 -- EM-A4: a terminal parent rejects new child reservation."""
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"), status="FILLED")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[_child(parent_id, 0, Decimal("5"), scheduled_at=now - timedelta(seconds=1))],
@@ -115,7 +115,7 @@ async def test_tick_algo_is_a_noop_once_plan_is_marked_cancelled(pool):
     """Negative 3 -- a cancelled plan schedules nothing further (EM-A4)."""
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[_child(parent_id, 0, Decimal("10"), scheduled_at=now - timedelta(seconds=1))],
@@ -138,7 +138,7 @@ async def test_tick_algo_releases_reservation_on_gate_deny(pool):
     not leave `committed_child_qty` stuck above what was actually placed."""
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[_child(parent_id, 0, Decimal("5"), scheduled_at=now - timedelta(seconds=1))],
@@ -161,7 +161,7 @@ async def test_tick_algo_releases_reservation_on_unexpected_submit_failure_and_k
     must not stop the rest of the tick's slices from being processed."""
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[
@@ -193,7 +193,7 @@ async def test_tick_algo_processes_many_due_slices_within_latency_budget(pool, p
     (task-15507), 40->60s (task-15577) as CI parallel load keeps increasing."""
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("500"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     children = [
         _child(parent_id, i, Decimal("1"), scheduled_at=now - timedelta(seconds=1))
         for i in range(100)
@@ -252,7 +252,7 @@ async def test_tick_algo_red_with_10x_delay_injection(pool, perf_budget):
     # Green control: separate parent, normal submitter
     user_id = await create_test_user(pool)
     parent_green = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     normal_submitter = _RecordingSubmitter()
     baseline_sample = await perf_budget.sample_async(
         lambda: _run_tick(parent_green, now, normal_submitter)
@@ -262,7 +262,7 @@ async def test_tick_algo_red_with_10x_delay_injection(pool, perf_budget):
 
     # Red injection: separate parent, slow submitter
     parent_red = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now_red = datetime.now(timezone.utc)
+    now_red = datetime.now(UTC)
     slow_submitter = _SlowSubmitter(_RecordingSubmitter())
 
     sample = await perf_budget.sample_async(lambda: _run_tick(parent_red, now_red, slow_submitter))

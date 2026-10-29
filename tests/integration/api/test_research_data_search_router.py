@@ -11,7 +11,7 @@ research_sources는 `PostgresResearchRepository`로 직접 시딩)을 재사용�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import asyncpg
@@ -42,7 +42,7 @@ SOURCE_B = "GDELT"
 
 
 def _contract(scope: RedistributionScope, *, source_id: str) -> SourceContract:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return SourceContract(
         source_id=source_id,
         tier=SourceContractTier.ENTERPRISE,
@@ -97,7 +97,7 @@ async def _register(client: AsyncClient) -> tuple[dict, uuid.UUID]:
 def _item(
     *, source_id: str, title: str = "Test filing", known_at: datetime | None = None
 ) -> ResearchItem:
-    now = known_at if known_at is not None else datetime.now(timezone.utc)
+    now = known_at if known_at is not None else datetime.now(UTC)
     return ResearchItem(
         item_id=uuid.uuid4(),
         source_id=source_id,

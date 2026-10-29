@@ -26,12 +26,11 @@ proof. This module is pure (no I/O), so those are added as:
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import FrozenInstanceError, replace
-from datetime import datetime, timezone
-from typing import Any, TypedDict, cast
+from datetime import UTC, datetime
+from typing import Any, TypedDict, Unpack, cast
 from uuid import UUID, uuid4
 
 import pytest
-from typing_extensions import Unpack
 
 import src.foundation.mandates.domain.exclusion as exclusion_module
 from src.foundation.mandates.domain.exclusion import (
@@ -48,7 +47,7 @@ from src.foundation.mandates.domain.models import (
     PolicyOutcome,
 )
 
-NOW = datetime(2026, 9, 7, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 7, tzinfo=UTC)
 
 _DEFAULT_REVISION = MandateRevision(
     id=uuid4(),

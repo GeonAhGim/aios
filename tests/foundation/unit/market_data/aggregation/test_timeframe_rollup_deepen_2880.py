@@ -31,7 +31,7 @@ docs/audit/DEPTH_DC_RD.md#1154) D1/D0 -> D3 증빙.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -53,7 +53,7 @@ from src.foundation.market_data.domain.candle_columns import (
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError
 from tests.conftest import PerfBudget
 
-UTC = timezone.utc
+UTC = UTC
 
 
 def _bitget_calendar() -> VenueCalendar:

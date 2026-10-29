@@ -8,7 +8,7 @@ CLAUDE.md §5 / ADR-2026-09-10-C Decision 4.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -64,14 +64,14 @@ async def test_fetch_snapshot_fails_when_configured():
     provider = FakeReadonlyAccountProvider(fail_fetch=True)
 
     with pytest.raises(ConnectionError, match="snapshot fetch"):
-        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
 
 async def test_fetch_snapshot_returns_configured_values():
     values = (SnapshotValue(entity_type="BALANCE", entity_key="USDT", value=Decimal("100.5")),)
     provider = FakeReadonlyAccountProvider(snapshot_values=values)
 
-    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
     assert snapshot.values == values
     assert snapshot.currency == "USD"
@@ -82,7 +82,7 @@ async def test_fetch_snapshot_defaults_to_empty_values_boundary():
     """경계값 — snapshot_values를 지정하지 않으면 빈 튜플이 그대로 반환된다."""
     provider = FakeReadonlyAccountProvider()
 
-    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
     assert snapshot.values == ()
 
@@ -190,7 +190,7 @@ async def test_fetch_snapshot_perf_budget_p95_latency(perf_budget) -> None:
     provider = FakeReadonlyAccountProvider()
 
     samples = await perf_budget.samples_async(
-        lambda: provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc)),
+        lambda: provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC)),
         n=sample_count,
     )
     durations_ms = sorted(s.wall_ms for s in samples)

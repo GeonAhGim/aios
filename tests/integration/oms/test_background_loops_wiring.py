@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import src.foundation.risk.application.personal_daily_loss_monitor as pdl_monitor_module
@@ -60,7 +60,7 @@ async def _enqueue_submit(pool, user_id: UUID) -> tuple[UUID, str]:
             order_id=order_id,
             command_type="SUBMIT",
             payload=submit_payload(view),
-            not_before=datetime.now(timezone.utc),
+            not_before=datetime.now(UTC),
         )
     return order_id, view.client_order_id
 

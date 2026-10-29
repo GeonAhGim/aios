@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -82,7 +82,7 @@ async def _run(deps, ticks, *, audit=None, tenant_id=None) -> object:
 async def test_ingest_accepts_and_stores_ticks_with_one_audit_event(pool, deps):
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     ticks = [
         _tick(instrument_id, "1", t0),
         _tick(instrument_id, "2", t0 + timedelta(seconds=1)),
@@ -111,7 +111,7 @@ async def test_ingest_propagates_tenant_id_to_stored_ticks(pool, deps):
     tenant_id = await create_test_tenant(pool, bootstrap_default_hierarchy_rows=False)
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     ticks = [_tick(instrument_id, "1", t0)]
 
     result = await _run(deps, ticks, tenant_id=tenant_id)
@@ -129,7 +129,7 @@ async def test_ingest_leaves_tick_tenant_id_null_for_platform_shared_data(pool, 
     이 의미를 깨고 NULL을 다른 값으로 지어내 저장하면 안 된다)."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     ticks = [_tick(instrument_id, "1", t0)]
 
     result = await _run(deps, ticks)
@@ -145,7 +145,7 @@ async def test_ingest_leaves_tick_tenant_id_null_for_platform_shared_data(pool, 
 async def test_ingest_rejects_whole_batch_on_trade_id_regression(pool, deps):
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     first = [
         _tick(instrument_id, "1", t0),
         _tick(instrument_id, "3", t0 + timedelta(seconds=2)),
@@ -176,7 +176,7 @@ async def test_ingest_rejects_whole_batch_on_trade_id_regression(pool, deps):
 async def test_ingest_reingest_is_idempotent_and_creates_new_batch_row(pool, deps):
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     ticks = [_tick(instrument_id, "1", t0), _tick(instrument_id, "2", t0 + timedelta(seconds=1))]
 
     first = await _run(deps, ticks)
@@ -202,7 +202,7 @@ async def test_ingest_rejects_regression_hidden_by_same_timestamp_tie(pool, deps
     한다(QA 발견, task-1004)."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
 
     first = [_tick(instrument_id, "5", t0), _tick(instrument_id, "9", t0)]
     r1 = await _run(deps, first)
@@ -229,7 +229,7 @@ async def test_ingest_rejects_regression_when_same_trade_id_reused_at_earlier_ti
     남기지 않아야 한다."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
 
     first = [_tick(instrument_id, "1", t0), _tick(instrument_id, "5", t0 + timedelta(seconds=5))]
     r1 = await _run(deps, first)
@@ -263,7 +263,7 @@ async def test_ingest_preserves_original_row_on_colliding_trade_id_content_misma
     `DUPLICATE_CONFLICT` issue (quarantined, not silently accepted)."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     original = _tick(instrument_id, "1", t0, price="100")
     first = await _run(deps, [original])
     assert first.verdict.verdict == Verdict.ACCEPT
@@ -292,7 +292,7 @@ async def test_ingest_preserves_original_row_on_colliding_trade_id_content_misma
 async def test_ingest_rolls_back_md_tick_on_audit_failure(pool, deps):
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     ticks = [_tick(instrument_id, "1", t0)]
 
     with pytest.raises(RuntimeError):
@@ -354,7 +354,7 @@ async def test_ingest_round_trip_count_regression_guard(pool, deps):
     하게 1왕복)."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     ticks = [_tick(instrument_id, str(i), t0 + timedelta(seconds=i)) for i in range(20)]
     queries: list[str] = []
     counting_deps = SimpleNamespace(
@@ -397,7 +397,7 @@ async def test_concurrent_conflicting_batches_serialize_via_advisory_lock(pool, 
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn)
         other_instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
 
     baseline = [_tick(instrument_id, str(i), t0 + timedelta(seconds=i)) for i in range(1, 11)]
     baseline_result = await _run(deps, baseline)

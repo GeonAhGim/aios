@@ -12,7 +12,7 @@ tenant 관점에서 조회 함수 3개(get_order/list_orders/list_order_events)�
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -58,7 +58,7 @@ async def test_get_order_missing_id_returns_none(pool) -> None:
 
 async def test_list_orders_pages_newest_first_with_keyset_cursor(pool) -> None:
     user_id = await create_test_user(pool)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     order_ids = []
     async with pool.acquire() as conn:
         for i in range(3):
@@ -141,7 +141,7 @@ async def test_list_orders_cursor_with_valid_alphabet_leading_garbage_raises(poo
     strict 디코드 이후의 partition/fromisoformat/UUID 파싱 경로를 실제로
     거치지 않는다 — 이 케이스가 그 경로를 검증한다."""
     user_id = await create_test_user(pool)
-    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    valid_cursor = order_query._encode_cursor(datetime.now(UTC), uuid4())
     with pytest.raises(order_query.InvalidOrderCursorError):
         await order_query.list_orders(pool, tenant_id=user_id, cursor="AAAA" + valid_cursor)
 
@@ -149,7 +149,7 @@ async def test_list_orders_cursor_with_valid_alphabet_leading_garbage_raises(poo
 async def test_list_orders_cursor_with_valid_alphabet_trailing_garbage_raises(pool) -> None:
     """negative — task-4964: 위와 동일하되 뒤에 붙는 경우."""
     user_id = await create_test_user(pool)
-    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    valid_cursor = order_query._encode_cursor(datetime.now(UTC), uuid4())
     with pytest.raises(order_query.InvalidOrderCursorError):
         await order_query.list_orders(pool, tenant_id=user_id, cursor=valid_cursor + "AAAA")
 
@@ -159,7 +159,7 @@ async def test_list_orders_cursor_with_leading_garbage_raises(pool) -> None:
     lenient urlsafe_b64decode가 관대하게 무시하고 정상 페이지를 반환하면
     안 된다(fail-closed 계약 위반)."""
     user_id = await create_test_user(pool)
-    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    valid_cursor = order_query._encode_cursor(datetime.now(UTC), uuid4())
     with pytest.raises(order_query.InvalidOrderCursorError):
         await order_query.list_orders(
             pool, tenant_id=user_id, cursor="!!!garbage!!!" + valid_cursor
@@ -170,7 +170,7 @@ async def test_list_orders_cursor_with_trailing_garbage_raises(pool) -> None:
     """negative — task-4897 REJECT: 뒤에 쓰레기 문자가 섞인 커서도 동일하게
     거부되어야 한다."""
     user_id = await create_test_user(pool)
-    valid_cursor = order_query._encode_cursor(datetime.now(timezone.utc), uuid4())
+    valid_cursor = order_query._encode_cursor(datetime.now(UTC), uuid4())
     with pytest.raises(order_query.InvalidOrderCursorError):
         await order_query.list_orders(
             pool, tenant_id=user_id, cursor=valid_cursor + "!!!garbage!!!"
@@ -192,7 +192,7 @@ async def test_list_orders_non_utc_offset_cursor_paginates_correctly(pool) -> No
     """negative-adjacent — UTC가 아닌 offset(+09:00)이 붙은 cursor는
     거부되지 않고, 정보 손실 없이 올바른 순서로 keyset 비교된다."""
     user_id = await create_test_user(pool)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     order_ids = []
     async with pool.acquire() as conn:
         for i in range(3):

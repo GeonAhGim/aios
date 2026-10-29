@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -67,7 +67,7 @@ def _transition_event(
         trace_id=uuid4(),
         command_id=None,
         provider_event_id=None,
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         payload_hash="e" * 64,
     )
 

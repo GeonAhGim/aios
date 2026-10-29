@@ -15,7 +15,7 @@ import asyncio
 import json
 import time
 import uuid
-from datetime import datetime, timezone, tzinfo
+from datetime import UTC, datetime, tzinfo
 from decimal import Decimal
 from pathlib import Path
 
@@ -168,7 +168,7 @@ def test_derive_client_order_id_rejects_non_positive_max_len():
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=0,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     with pytest.raises(ValueError, match="max_len"):
         derive_client_order_id(scope, max_len=0, charset=_CLIENT_ORDER_ID_CHARSET)
@@ -183,7 +183,7 @@ def test_derive_client_order_id_rejects_empty_charset():
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=0,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     with pytest.raises(ValueError, match="charset"):
         derive_client_order_id(scope, max_len=_CLIENT_ORDER_ID_MAX_LEN, charset="")
@@ -229,7 +229,7 @@ def test_deriving_5000_client_order_ids_stays_under_latency_budget_and_never_col
     perf_budget,
 ):
     tenant_id = uuid.uuid4()
-    window_start = datetime.now(timezone.utc)
+    window_start = datetime.now(UTC)
     ids: set[str] = set()
     cpu_ms_values: list[float] = []
 
@@ -315,10 +315,10 @@ async def test_wall_clock_drift_inside_one_window_does_not_break_idempotency_but
 
     now_epoch = int(time.time())
     window_start_epoch = now_epoch - (now_epoch % _IDEMPOTENCY_WINDOW_SECONDS)
-    t_a = datetime.fromtimestamp(window_start_epoch + 1, tz=timezone.utc)
-    t_b = datetime.fromtimestamp(window_start_epoch + 55, tz=timezone.utc)
+    t_a = datetime.fromtimestamp(window_start_epoch + 1, tz=UTC)
+    t_b = datetime.fromtimestamp(window_start_epoch + 55, tz=UTC)
     t_c = datetime.fromtimestamp(
-        window_start_epoch + _IDEMPOTENCY_WINDOW_SECONDS + 5, tz=timezone.utc
+        window_start_epoch + _IDEMPOTENCY_WINDOW_SECONDS + 5, tz=UTC
     )
 
     monkeypatch.setattr("src.core.executor.executor.datetime", _ScriptedClock([t_a, t_b, t_c]))

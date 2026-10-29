@@ -1,7 +1,7 @@
 """20번대 통합테스트 — /reports 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -106,7 +106,7 @@ async def test_report_empty_period_returns_zeroed_summary(client):
 
 async def test_report_aggregates_closed_positions(client, pool):
     headers, user_id = await _register(client)
-    today = datetime.now(timezone.utc)
+    today = datetime.now(UTC)
     await _insert_closed_position(
         pool, user_id, realized_pnl=Decimal("100"), closed_at=today, strategy_id="strat-a"
     )
@@ -144,7 +144,7 @@ async def test_report_buckets_by_utc_date_regardless_of_session_timezone(client,
     2020-01-01 UTC -- a session-local cast would bucket the row into 2020-01-02 and drop it.
     """
     headers, user_id = await _register(client)
-    closed_at = datetime(2020, 1, 1, 20, 0, 0, tzinfo=timezone.utc)
+    closed_at = datetime(2020, 1, 1, 20, 0, 0, tzinfo=UTC)
     strategy_id = f"strat-{uuid.uuid4().hex}"
     await _insert_closed_position(
         pool, user_id, realized_pnl=Decimal("10"), closed_at=closed_at, strategy_id=strategy_id

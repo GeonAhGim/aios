@@ -6,7 +6,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-3,
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -20,7 +20,7 @@ from tests.support.perf_budget import PerfBudget
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _fill(side: OrderSide, quantity: str, price: str) -> FillEvent:

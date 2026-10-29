@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.foundation.ml.contracts.v1 import FeatureSpec, ModelCard
 from src.foundation.ml.domain.drift import (
@@ -125,7 +125,7 @@ def select_most_recent(rows: Sequence[FeatureValue], entity_id: str, as_of: date
 def _read_one(
     feature_store: FeatureStorePort, spec: FeatureSpec, entity_id: str, as_of: datetime
 ) -> float:
-    day = as_of.astimezone(timezone.utc).date()
+    day = as_of.astimezone(UTC).date()
     try:
         rows = list(feature_store.read_batch(spec, day))
     except FileNotFoundError:

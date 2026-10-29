@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -118,7 +118,7 @@ async def test_create_tick_batch_negative_accepted_count_rejected_by_db_check(po
     CHECK 제약이 DB 계층에서 막는다. PK 위반과 같은 이유로 abort된 트랜잭션
     안 이후 COMMIT을 깨뜨리므로 전체를 `pytest.raises`로 감싼다(같은 파일
     `test_create_tick_batch_duplicate_batch_id_raises`와 동일 패턴)."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         async with pool.acquire() as conn, conn.transaction():
             instrument_id = await _instrument_id(conn)
@@ -137,7 +137,7 @@ async def test_create_tick_batch_negative_accepted_count_rejected_by_db_check(po
 async def test_create_and_get_tick_batch_round_trip_count_bounded(pool, batch_repo):
     """수치 성능 단언(D2): create_tick_batch/get_tick_batch가 각각 정확히
     DB 왕복 1회만 내는지 증명한다."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         audit_event_id = await _audit_event_id(conn)
@@ -195,7 +195,7 @@ async def test_get_tick_batch_round_trip_gate_detects_extra_query(pool, batch_re
     """게이트 적색 재현(D3): 왕복을 하나 더 내는 저장소를 끼우면 위 상한(1)
     게이트가 실제로 넘는지 증명한다(I-10 — 게이트는 "있다"가 아니라
     "작동함이 증명됨"이어야 한다)."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         audit_event_id = await _audit_event_id(conn)
@@ -227,7 +227,7 @@ async def test_concurrent_create_tick_batch_same_batch_id_exactly_one_succeeds(p
     보내면 정확히 1건만 성공하고 나머지 4건은 DuplicateBatchError로
     거부된다 — PK UNIQUE 제약이 경합 상황에서도 fail-closed로 작동함을
     증명한다(task-424/614와 동일 패턴)."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
 

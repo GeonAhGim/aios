@@ -9,7 +9,7 @@ BT-17. DoD: (a) 메모리 상한 반증(경계 직전/직후). (b) 100종목×1�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -36,7 +36,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 from tests.conftest import PerfBudget
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _D = Decimal
 _CASH = _D("100000")
 

@@ -1,6 +1,6 @@
 """79번 §1/§2 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -16,7 +16,7 @@ from src.foundation.evidence.domain.rules import (
 )
 from tests.support.perf_budget import PerfBudget
 
-NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 2, tzinfo=UTC)
 
 
 def test_safe_payload_passes():

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import asyncpg
@@ -41,7 +41,7 @@ async def test_explain_real_denied_decision_reproduces_red_gate_verdict(pool, re
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert evaluated.verdict == ComplianceVerdict.DENY
 
@@ -60,7 +60,7 @@ async def test_explain_real_allowed_decision_reproduces_green_gate_verdict(pool,
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "BTC/USDT"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert evaluated.verdict == ComplianceVerdict.ALLOW
 
@@ -108,7 +108,7 @@ async def test_explain_meets_throughput_budget_over_repeated_real_calls(pool, re
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "BTC/USDT"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     n = 100
@@ -140,7 +140,7 @@ async def test_concurrent_multi_instance_explain_replays_byte_identical_output(
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     n_instances = 6
@@ -178,7 +178,7 @@ async def test_worm_trigger_blocks_tamper_and_explain_still_replays_original_ver
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert evaluated.verdict == ComplianceVerdict.DENY
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
@@ -35,7 +35,7 @@ from tests.support.perf_budget import PerfBudget
 
 _TENANT = UUID("22222222-2222-2222-2222-222222222222")
 _SUBJECT = UUID("44444444-4444-4444-4444-444444444444")
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class _FakeWebSocket:
@@ -304,7 +304,7 @@ def _active_user(user_id: UUID) -> User:
 def _active_session(
     *, session_id: UUID, user_id: UUID, tenant_id: UUID, auth_level: AuthLevel
 ) -> session_repository.Session:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return session_repository.Session(
         id=session_id,
         user_id=user_id,

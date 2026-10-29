@@ -25,7 +25,7 @@ import asyncio
 import contextlib
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -231,7 +231,7 @@ async def test_event_missing_order_identifiers_is_not_silently_dropped(pool):
         "_test_nonce": uuid4().hex,
     }
     expected_provider_event_id = parse_private_order_row(
-        row, received_at=datetime.now(timezone.utc)
+        row, received_at=datetime.now(UTC)
     ).provider_event_id
     message = _envelope([row])
     connection = _FakeConnection([message], raise_after=ConnectionClosed(None, None))

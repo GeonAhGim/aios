@@ -31,7 +31,7 @@ tenant B's items by naming a different `tenant_id`).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import asyncpg
@@ -83,7 +83,7 @@ def build_router(require_scope: Callable[[Scope], ScopeDependency]) -> APIRouter
         pool: asyncpg.Pool = request.app.state.pool
         repo = PostgresResearchRepository(pool)
         source_contracts = PostgresSourceContractRepository()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         try:
             async with pool.acquire() as conn:
                 await authorize_source_read(

@@ -14,7 +14,7 @@ When no strategies are running, returns an empty list rather than raising an err
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -81,7 +81,7 @@ class ExecutionMonitoringService:
                 user_id,
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cards = []
         for row in rows:
             started_at = row["started_at"]

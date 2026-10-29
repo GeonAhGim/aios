@@ -28,7 +28,7 @@ misreport how much of the parent is actually still live.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -43,7 +43,7 @@ CancelChild = Callable[[CancelOrderCommand], Awaitable[OrderView]]
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def cancel_algo(

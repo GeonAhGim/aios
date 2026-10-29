@@ -20,7 +20,7 @@ read-modify-write 대신 §5 표의 단일 조건부 UPDATE(GREATEST + day 변�
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -29,7 +29,7 @@ Clock = Callable[[], date]
 
 
 def _utc_today() -> date:
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 class ExecutionEquityTracker:

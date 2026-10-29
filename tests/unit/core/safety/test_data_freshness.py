@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -51,12 +51,12 @@ def _as_exchange_adapter(fake: object) -> ExchangeAdapter:
 def test_no_observations_returns_none() -> None:
     tracker = DataFreshnessTracker()
 
-    assert tracker.max_delay_sec(datetime.now(timezone.utc)) is None
+    assert tracker.max_delay_sec(datetime.now(UTC)) is None
 
 
 def test_record_then_max_delay_sec_reflects_elapsed_time() -> None:
     tracker = DataFreshnessTracker()
-    close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+    close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=UTC)
     now = close_time + timedelta(seconds=30)
 
     tracker.record("bitget", "BTC/USDT", close_time)
@@ -66,7 +66,7 @@ def test_record_then_max_delay_sec_reflects_elapsed_time() -> None:
 
 def test_max_delay_sec_takes_worst_across_symbols() -> None:
     tracker = DataFreshnessTracker()
-    now = datetime(2026, 9, 4, 0, 1, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 4, 0, 1, 0, tzinfo=UTC)
     tracker.record("bitget", "BTC/USDT", now - timedelta(seconds=5))
     tracker.record("bitget", "ETH/USDT", now - timedelta(seconds=90))
 
@@ -82,7 +82,7 @@ def test_record_rejects_naive_close_time() -> None:
 
 def test_max_delay_sec_rejects_naive_now() -> None:
     tracker = DataFreshnessTracker()
-    tracker.record("bitget", "BTC/USDT", datetime.now(timezone.utc))
+    tracker.record("bitget", "BTC/USDT", datetime.now(UTC))
 
     with pytest.raises(ValueError, match="tz-aware"):
         tracker.max_delay_sec(datetime(2026, 9, 4, 0, 0, 0))
@@ -90,7 +90,7 @@ def test_max_delay_sec_rejects_naive_now() -> None:
 
 def test_record_overwrites_previous_value_for_same_key() -> None:
     tracker = DataFreshnessTracker()
-    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=UTC)
     tracker.record("bitget", "BTC/USDT", now - timedelta(seconds=100))
     tracker.record("bitget", "BTC/USDT", now - timedelta(seconds=1))
 
@@ -114,7 +114,7 @@ class _FakeAdapterWithOhlcv:
 
 
 async def test_get_ohlcv_records_last_candle_close_time_via_instrumented_adapter() -> None:
-    close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+    close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=UTC)
     candles = [
         _FakeCandle("bitget", "BTC/USDT", close_time - timedelta(minutes=1)),
         _FakeCandle("bitget", "BTC/USDT", close_time),
@@ -133,7 +133,7 @@ async def test_get_ohlcv_records_last_candle_close_time_via_instrumented_adapter
 
 
 async def test_get_ohlcv_without_freshness_arg_does_not_raise() -> None:
-    close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+    close_time = datetime(2026, 9, 4, 0, 0, 0, tzinfo=UTC)
     candles = [_FakeCandle("bitget", "BTC/USDT", close_time)]
     wrapped = InstrumentedAdapter(
         _as_exchange_adapter(_FakeAdapterWithOhlcv(candles)),
@@ -156,7 +156,7 @@ async def test_get_ohlcv_empty_result_does_not_record() -> None:
     result = await wrapped.get_ohlcv("BTC/USDT", "1m")
 
     assert result == []
-    assert freshness.max_delay_sec(datetime.now(timezone.utc)) is None
+    assert freshness.max_delay_sec(datetime.now(UTC)) is None
 
 
 async def test_get_ohlcv_rejects_naive_close_time_from_candle() -> None:
@@ -179,7 +179,7 @@ def test_stale_observation_drives_circuit_breaker_to_halted() -> None:
     halted 임계(config/risk_policy.yaml: 5.0초)를 훌쩍 넘는 600초 지연."""
     policy = load_risk_policy().circuit_breaker
     tracker = DataFreshnessTracker()
-    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=UTC)
     tracker.record("bitget", "BTC/USDT", now - timedelta(seconds=600))
 
     metrics = CircuitBreakerMetrics(data_delay_sec=tracker.max_delay_sec(now))
@@ -206,7 +206,7 @@ async def test_get_ohlcv_failure_does_not_record_and_propagates() -> None:
     with pytest.raises(ConnectionError, match="simulated exchange timeout"):
         await wrapped.get_ohlcv("BTC/USDT", "1m")
 
-    assert freshness.max_delay_sec(datetime.now(timezone.utc)) is None
+    assert freshness.max_delay_sec(datetime.now(UTC)) is None
     assert tracker.error_rate_pct() == Decimal("100")
 
 
@@ -217,7 +217,7 @@ def test_max_delay_sec_scales_to_many_symbols_within_budget() -> None:
     매 record()마다 정렬하거나 전체를 재계산하는 식으로 퇴화하면(예: 매번
     O(n log n) 정렬) 이 예산을 넘긴다."""
     tracker = DataFreshnessTracker()
-    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=UTC)
     for i in range(10_000):
         tracker.record("bitget", f"SYM-{i}/USDT", now - timedelta(seconds=i % 50))
 
@@ -248,7 +248,7 @@ async def test_concurrent_instrumented_adapters_share_tracker_without_clobbering
     공유한다. 두 get_ohlcv 호출을 실제로 동시에(asyncio.gather) 실행해도
     (exchange, symbol) 키가 서로를 덮어쓰지 않고 둘 다 정확히 관측돼야
     한다."""
-    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 4, 0, 0, 0, tzinfo=UTC)
     freshness = DataFreshnessTracker()
     tracker = ApiCallTracker()
     bitget = InstrumentedAdapter(

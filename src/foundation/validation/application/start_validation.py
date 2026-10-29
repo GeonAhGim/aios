@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from src.core.db.conditional_write import ConcurrencyConflictError
@@ -217,7 +217,7 @@ async def start_validation(
         hard_fail_reasons=tuple(hard_fail_reasons),
         obligations=tuple(obligations),
         result_hash=compute_result_hash(metrics_payload),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     completed_run, saved_result = await validation_repo.complete_with_result(run.id, result)
 

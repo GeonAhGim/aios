@@ -40,7 +40,7 @@ class _BrokenLimiter:
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client() -> AsyncGenerator[AsyncClient]:
     # 고정 시계 — `/openapi.json`은 프로세스 전체에서 최초 1회만 스키마를 만들고
     # 캐시하므로(FastAPI 내부) 이후 호출은 빠르지만, 이 파일이 그 최초 호출을
     # 트리거하는 첫 테스트가 되면 스키마 생성 자체가 초 단위로 걸릴 수 있다 —

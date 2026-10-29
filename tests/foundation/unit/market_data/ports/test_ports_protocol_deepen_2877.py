@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -54,7 +54,7 @@ _IID = "0" * 25 + "1"
 
 
 def _aware(day: int = 3) -> datetime:
-    return datetime(2026, 9, day, tzinfo=timezone.utc)
+    return datetime(2026, 9, day, tzinfo=UTC)
 
 
 def _naive(day: int = 3) -> datetime:
@@ -401,7 +401,7 @@ async def test_gate_red_multi_step_scenario_rejects_illegal_steps_without_silent
     assert len(columns) == 1
 
     # 불법 1: 커버리지 밖 구간 -- 빈 CandleColumns가 아니라 예외로 거부돼야 한다.
-    uncovered_span = TimeSpan(start=datetime(2020, 1, 1, tzinfo=timezone.utc), end=_aware(1))
+    uncovered_span = TimeSpan(start=datetime(2020, 1, 1, tzinfo=UTC), end=_aware(1))
     with pytest.raises(DataProviderError) as exc_info:
         await provider.fetch_candles(covered_listing, Timeframe.M1, uncovered_span)
     assert exc_info.value.code is DataProviderErrorCode.DATA_COVERAGE_MISSING

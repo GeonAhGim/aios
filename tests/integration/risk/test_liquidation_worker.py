@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -176,14 +176,14 @@ async def _cleanup(pool, ctx):
 async def test_seed_key_missing_fails_closed(pool, monkeypatch):
     monkeypatch.delenv("AIOS_LIQUIDATION_SEED_KEY", raising=False)
     with pytest.raises(LiquidationSeedKeyMissingError):
-        await run_liquidation_worker_once(pool, {}, now=datetime.now(timezone.utc))
+        await run_liquidation_worker_once(pool, {}, now=datetime.now(UTC))
 
 
 async def test_no_open_positions_marks_request_done(pool, ctx):
     request_id = await _setup(pool, ctx, with_position=False)
     adapters = {"bitget": FakeExchangeAdapter()}
 
-    await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
+    await run_liquidation_worker_once(pool, adapters, now=datetime.now(UTC))
 
     row = await _request_row(pool, request_id)
     assert row["state"] == "DONE"
@@ -195,13 +195,13 @@ async def test_fence_change_aborts_request_and_skips_slices(pool, ctx):
     actor = ctx["actors"][0]
 
     # Plan it first so there are PENDING slices to abort.
-    await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
+    await run_liquidation_worker_once(pool, adapters, now=datetime.now(UTC))
     assert (await _request_row(pool, request_id))["state"] == "PLANNED"
 
     # A brand-new control bumps this ACCOUNT's fence past the request's snapshot.
     await _supersede_account_control(pool, actor)
 
-    await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
+    await run_liquidation_worker_once(pool, adapters, now=datetime.now(UTC))
 
     row = await _request_row(pool, request_id)
     assert row["state"] == "ABORTED"
@@ -212,7 +212,7 @@ async def test_fence_change_aborts_request_and_skips_slices(pool, ctx):
 async def test_due_slice_sends_liquidation_order_referencing_request(pool, ctx):
     request_id = await _setup(pool, ctx)
     adapters = {"bitget": FakeExchangeAdapter()}
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
 
     await run_liquidation_worker_once(pool, adapters, now=t0)  # REQUESTED -> PLANNED
     await run_liquidation_worker_once(pool, adapters, now=t0 + timedelta(seconds=60))  # send seq 0
@@ -237,7 +237,7 @@ async def test_due_slice_sends_liquidation_order_referencing_request(pool, ctx):
 async def test_deadline_sends_single_market_fallback_and_completes(pool, ctx):
     request_id = await _setup(pool, ctx)
     adapters = {"bitget": FakeExchangeAdapter()}
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
 
     await run_liquidation_worker_once(pool, adapters, now=t0)  # REQUESTED -> PLANNED
     row = await _request_row(pool, request_id)
@@ -300,7 +300,7 @@ async def test_two_concurrent_workers_racing_same_requested_row_plan_it_exactly_
     started, release = asyncio.Event(), asyncio.Event()
     adapter_a = _GatedTickerAdapter(started=started, release=release)
     adapter_b = FakeExchangeAdapter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     task_a = asyncio.create_task(run_liquidation_worker_once(pool, {"bitget": adapter_a}, now=now))
     await asyncio.wait_for(started.wait(), timeout=5)
@@ -338,7 +338,7 @@ async def test_locked_candidate_row_is_skipped_not_double_processed(pool, ctx):
         )
         try:
             adapters = {"bitget": FakeExchangeAdapter()}
-            await run_liquidation_worker_once(pool, adapters, now=datetime.now(timezone.utc))
+            await run_liquidation_worker_once(pool, adapters, now=datetime.now(UTC))
         finally:
             await tx.rollback()
     finally:
@@ -361,7 +361,7 @@ async def test_stale_planned_snapshot_cannot_resurrect_an_aborted_request(pool, 
     request_id = await _setup(pool, ctx)
     adapters = {"bitget": FakeExchangeAdapter()}
     actor = ctx["actors"][0]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     await run_liquidation_worker_once(pool, adapters, now=now)  # REQUESTED -> PLANNED
     stale_row = await _select_candidate(pool)
@@ -394,7 +394,7 @@ async def test_place_order_exception_marks_order_and_slice_failed_not_silent_suc
 
     request_id = await _setup(pool, ctx)
     adapters = {"bitget": FakeExchangeAdapter(on_place_order=_boom)}
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
 
     await run_liquidation_worker_once(pool, adapters, now=t0)  # REQUESTED -> PLANNED
     await run_liquidation_worker_once(pool, adapters, now=t0 + timedelta(seconds=60))  # send seq 0
@@ -420,7 +420,7 @@ async def test_slice_send_tick_round_trip_budget(pool, ctx):
     단일-커넥션 풀을 쓴다."""
     request_id = await _setup(pool, ctx)
     adapters = {"bitget": FakeExchangeAdapter()}
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     await run_liquidation_worker_once(pool, adapters, now=t0)  # REQUESTED -> PLANNED(공용 풀)
 
     perf_pool = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=1)

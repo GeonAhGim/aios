@@ -10,7 +10,7 @@ object and a fake `User` exercises the same code path without I/O. Mirrors
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,7 +33,7 @@ from src.foundation.ems.contracts.v1 import (
 )
 from src.services.auth_service import User
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _user() -> User:

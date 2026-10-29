@@ -32,7 +32,7 @@ changed_with_no_entry`가 소스를 건드리지 않고 "append가 실제로 쓰
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -57,7 +57,7 @@ _MAX_POST_ENTRY_ROUND_TRIPS = 23
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _create_user_available_account(pool: asyncpg.Pool, user_id: UUID) -> str:

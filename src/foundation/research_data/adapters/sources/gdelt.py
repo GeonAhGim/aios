@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID, uuid5
 
@@ -118,7 +118,7 @@ class GdeltGkgRecord:
 
 def _parse_gkg_date(raw: str) -> datetime:
     try:
-        return datetime.strptime(raw, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+        return datetime.strptime(raw, "%Y%m%d%H%M%S").replace(tzinfo=UTC)
     except ValueError as exc:
         raise GdeltParseError(f"GKG DATE is not YYYYMMDDHHMMSS: {raw!r}") from exc
 

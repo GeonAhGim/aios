@@ -5,7 +5,7 @@ Failure injection, trace ID correlation, and enum value coverage.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -128,7 +128,7 @@ class TestRecordCommandEventTraceIdInjection:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(trace_id=trace_id, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -171,7 +171,7 @@ class TestRecordCommandEventTraceIdInjection:
             mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         event1 = make_audit_event(trace_id=trace_id_1, occurred_at=now)
         repo1 = MockAuditEventRepository(event_to_return=event1)
@@ -222,7 +222,7 @@ class TestRecordCommandEventAllOutcomeValues:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for outcome in Outcome:
             domain_outcome = DomainOutcome(outcome.value)
             event = make_audit_event(outcome=domain_outcome, occurred_at=now)
@@ -259,7 +259,7 @@ class TestRecordCommandEventAllClassificationValues:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for classification in Classification:
             domain_classification = DomainClassification(classification.value)
             event = make_audit_event(classification=domain_classification, occurred_at=now)

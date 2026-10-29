@@ -13,7 +13,7 @@ base_adapter.py::NormalizationNotImplementedError`와 같은 전례.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -42,7 +42,7 @@ _TS_RECV = _TS_EVENT + 1_000_000
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 23, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 23, 0, 0, tzinfo=UTC)
 
 
 def _listing() -> VenueListing:

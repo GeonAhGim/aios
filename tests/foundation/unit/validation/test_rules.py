@@ -1,6 +1,6 @@
 """76번 §1/§3/§6 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -16,7 +16,7 @@ from src.foundation.validation.domain.rules import (
     evaluate_validation_policy,
 )
 
-NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 2, tzinfo=UTC)
 
 
 def _bar(close: str = "100") -> Candle:

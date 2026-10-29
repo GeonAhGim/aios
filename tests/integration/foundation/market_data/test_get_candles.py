@@ -15,7 +15,7 @@ task-10929: 실패주입(D3)은 `test_get_candles_failure_injection.py`로,
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -84,7 +84,7 @@ async def test_get_candles_as_of_equal_to_close_time_includes_candle(
 
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = (datetime.now(timezone.utc) - timedelta(minutes=2)).replace(second=0, microsecond=0)
+        t0 = (datetime.now(UTC) - timedelta(minutes=2)).replace(second=0, microsecond=0)
         close_time = t0 + timedelta(minutes=1)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
         event_id = await audit_event_id(conn)
@@ -159,7 +159,7 @@ async def test_get_candles_adjustment_ignores_action_after_as_of(
     제외한다 — as_of 시점에는 아직 일어나지 않은 조정이므로."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        as_of = (await conn.fetchval("SELECT now()")).astimezone(timezone.utc)
+        as_of = (await conn.fetchval("SELECT now()")).astimezone(UTC)
         # 월초로 고정 — md_candle 파티션은 현재~+N개월만 존재하므로(과거 달
         # 파티션 없음) 이번 달 안에서만 "과거" 캔들을 만든다.
         t0 = as_of.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -196,7 +196,7 @@ async def test_get_candles_adjustment_applies_action_before_as_of(
     """`ex_date`가 `as_of` 이전(<=)이고 캔들 날짜보다는 이후면 조정이 반영된다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        as_of = (await conn.fetchval("SELECT now()")).astimezone(timezone.utc)
+        as_of = (await conn.fetchval("SELECT now()")).astimezone(UTC)
         # 월초로 고정(위 테스트와 같은 이유) — ex_date는 캔들(월초)보다는
         # 늦고 as_of(오늘)보다는 이르거나 같아야 하므로 오늘 날짜를 쓴다.
         t0 = await candle_open_time_before_today(conn, as_of)

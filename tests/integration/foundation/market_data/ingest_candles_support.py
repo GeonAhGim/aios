@@ -9,7 +9,7 @@ loc_over_500 래칫: F1(M) tenant_id 전파 테스트 2건을 추가하면서 te
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -103,7 +103,7 @@ def deps(pool):
 
 
 async def _listed_instrument(deps):
-    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    listed_at = datetime.now(UTC) - timedelta(days=1)
     cmd = RegisterInstrumentCommand(
         venue=Venue.BITGET,
         venue_symbol=_bitget_symbol(),
@@ -120,7 +120,7 @@ async def _listed_instrument(deps):
         LifecycleEventCommand(
             instrument_id=instrument.instrument_id,
             event="LIST",
-            effective_at=datetime.now(timezone.utc),
+            effective_at=datetime.now(UTC),
             source_ref="test:list",
             actor_subject_id=uuid.uuid4(),
             trace_id=uuid.uuid4(),

@@ -12,7 +12,7 @@ DoD(task-726): FakeAdapter로 거래소 응답을 대역하되(#4 PM 정책, 실
 from __future__ import annotations
 
 import functools
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -104,7 +104,7 @@ async def _open_position(
         mark_at=None,
         base_currency=Currency.USDT,
         last_journal_seq=0,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     repo = PostgresSnapshotRepository(pool)
     async with pool.acquire() as conn, conn.transaction():

@@ -119,7 +119,7 @@ def _run_alembic(*args: str, database_url: str) -> None:
 
 
 @pytest.fixture
-async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str, None]:
+async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str]:
     # CTO 2026-09-30: hash()는 프로세스마다 시드가 달라(PYTHONHASHSEED) 실행할 때마다 DB 이름이
     # 바뀌었고, 같은 이름만 DROP 후 재생성하는 ensure_worker_database가 옛 DB를 못 지워 CI 한 번에
     # 수십 개씩 누적됐다(클러스터 460개 → 복구 리허설 실패). crc32로 이름을 고정해 재사용한다.
@@ -129,7 +129,7 @@ async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str
 
 
 @pytest.fixture
-async def pool(migration_db_url: str) -> AsyncGenerator[asyncpg.Pool, None]:
+async def pool(migration_db_url: str) -> AsyncGenerator[asyncpg.Pool]:
     p = await asyncpg.create_pool(_asyncpg_dsn(migration_db_url), min_size=1, max_size=4)
     yield p
     await p.close()

@@ -22,7 +22,7 @@ import hashlib
 import math
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -112,7 +112,7 @@ async def _insert_active_session(pool, *, user_id: UUID, tenant_id: UUID) -> UUI
             user_id,
             tenant_id,
             refresh_hash,
-            datetime.now(timezone.utc) + timedelta(days=1),
+            datetime.now(UTC) + timedelta(days=1),
         )
     session_id: UUID = row["id"]
     return session_id

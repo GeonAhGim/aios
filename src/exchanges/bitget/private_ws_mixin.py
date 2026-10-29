@@ -40,7 +40,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal, Protocol
 
@@ -191,7 +191,7 @@ async def subscribe_bitget_orders_to_inbox(
         for row in message.get("data", []):
             if not isinstance(row, dict):
                 continue
-            ev = parse_private_order_row(row, received_at=datetime.now(timezone.utc))
+            ev = parse_private_order_row(row, received_at=datetime.now(UTC))
             await inbox.ingest(ev)
 
     await _run_ws_subscription(

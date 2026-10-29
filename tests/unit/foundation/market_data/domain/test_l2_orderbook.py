@@ -9,12 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TypedDict
+from typing import TypedDict, Unpack
 
 import pytest
-from typing_extensions import Unpack
 
 from src.foundation.market_data.domain.l2_orderbook import (
     L2Diff,
@@ -23,8 +22,8 @@ from src.foundation.market_data.domain.l2_orderbook import (
     OrderBookState,
 )
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-_T1 = datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
+_T1 = datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC)
 
 _DEFAULT_SNAPSHOT = L2Snapshot(
     sequence=100,

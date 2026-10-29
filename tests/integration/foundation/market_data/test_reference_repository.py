@@ -8,7 +8,7 @@ DoD(task-451): "심볼 RENAME 별칭이 기간(valid_from/valid_to)으로 정확
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -53,7 +53,7 @@ def repo(pool):
 
 async def test_register_then_get_instrument_resolves_current_symbol(pool, repo):
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    listed_at = datetime.now(UTC) - timedelta(days=1)
     async with pool.acquire() as conn, conn.transaction():
         instrument = await repo.register(
             conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at)
@@ -63,7 +63,7 @@ async def test_register_then_get_instrument_resolves_current_symbol(pool, repo):
     assert instrument.canonical_symbol == symbol
 
     async with pool.acquire() as conn, conn.transaction():
-        found = await repo.get_instrument(conn, Venue.KIS_KRX, symbol, datetime.now(timezone.utc))
+        found = await repo.get_instrument(conn, Venue.KIS_KRX, symbol, datetime.now(UTC))
 
     assert found is not None
     assert found.instrument_id == instrument.instrument_id
@@ -72,14 +72,14 @@ async def test_register_then_get_instrument_resolves_current_symbol(pool, repo):
 async def test_get_instrument_returns_none_for_unknown_symbol(pool, repo):
     async with pool.acquire() as conn, conn.transaction():
         found = await repo.get_instrument(
-            conn, Venue.KIS_KRX, _krx_symbol(), datetime.now(timezone.utc)
+            conn, Venue.KIS_KRX, _krx_symbol(), datetime.now(UTC)
         )
     assert found is None
 
 
 async def test_register_duplicate_venue_symbol_raises(pool, repo):
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc)
+    listed_at = datetime.now(UTC)
     async with pool.acquire() as conn, conn.transaction():
         await repo.register(conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at))
 
@@ -92,7 +92,7 @@ async def test_rename_alias_resolves_only_within_its_own_period(pool, repo):
     """DoD 핵심: RENAME 별칭이 valid_from/valid_to 기간으로 정확히 해석된다."""
     old_symbol = _krx_symbol()
     new_symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=10)
+    listed_at = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         instrument = await repo.register(
@@ -114,7 +114,7 @@ async def test_rename_alias_resolves_only_within_its_own_period(pool, repo):
     # this flaky on Windows: `datetime.now()` ticks every ~15.6ms, so it could return an instant
     # that is still before the rename's DB timestamp. Ask the same clock that stamped it.
     async with pool.acquire() as conn:
-        after_rename = (await conn.fetchval("SELECT clock_timestamp()")).astimezone(timezone.utc)
+        after_rename = (await conn.fetchval("SELECT clock_timestamp()")).astimezone(UTC)
     async with pool.acquire() as conn, conn.transaction():
         via_old_after_rename = await repo.get_instrument(
             conn, Venue.KIS_KRX, old_symbol, after_rename
@@ -139,7 +139,7 @@ async def test_add_alias_overlapping_period_raises_exclusion_violation(pool, rep
     """negative: 서로 다른 인스트루먼트가 같은 (venue, alias_symbol)에 겹치는
     유효기간을 주장하면 md_symbol_alias의 EXCLUDE 제약이 막아야 한다."""
     shared_symbol = _krx_symbol()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     async with pool.acquire() as conn, conn.transaction():
         await repo.register(
@@ -160,7 +160,7 @@ async def test_add_alias_overlapping_period_raises_exclusion_violation(pool, rep
 
 async def test_record_action_is_idempotent_on_replay(pool, repo):
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=30)
+    listed_at = datetime.now(UTC) - timedelta(days=30)
     async with pool.acquire() as conn, conn.transaction():
         instrument = await repo.register(
             conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at)
@@ -188,7 +188,7 @@ async def test_record_action_is_idempotent_on_replay(pool, repo):
 
 async def test_record_action_different_content_same_key_raises(pool, repo):
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=30)
+    listed_at = datetime.now(UTC) - timedelta(days=30)
     async with pool.acquire() as conn, conn.transaction():
         instrument = await repo.register(
             conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at)
@@ -224,7 +224,7 @@ async def test_register_alias_insert_connection_failure_leaves_no_orphan_instrum
     장애(커넥션 단절 흉내)로 별칭 INSERT가 실패하면, 같은 트랜잭션 안에서
     instrument 행만 남고 별칭 없는 고아 레코드가 생기지 않아야 한다."""
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc)
+    listed_at = datetime.now(UTC)
 
     original_execute = asyncpg.Connection.execute
 
@@ -243,7 +243,7 @@ async def test_register_alias_insert_connection_failure_leaves_no_orphan_instrum
     monkeypatch.undo()
 
     async with pool.acquire() as conn, conn.transaction():
-        found = await repo.get_instrument(conn, Venue.KIS_KRX, symbol, datetime.now(timezone.utc))
+        found = await repo.get_instrument(conn, Venue.KIS_KRX, symbol, datetime.now(UTC))
     assert found is None, "롤백되지 않으면 별칭 없는 고아 instrument가 조회될 것이다"
 
 
@@ -260,13 +260,13 @@ async def test_get_instrument_lookup_p95_under_budget(pool, repo, perf_budget):
     유지한다.
     """
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    listed_at = datetime.now(UTC) - timedelta(days=1)
     async with pool.acquire() as conn, conn.transaction():
         await repo.register(conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at))
 
     n = 200
     budget_p95_ms = 30.0
-    at = datetime.now(timezone.utc)
+    at = datetime.now(UTC)
 
     # 200회 측정 → p95 계산 (samples_async: 비동기 I/O 전용)
     async def _probe():
@@ -293,14 +293,14 @@ async def test_get_instrument_cpu_ms_converges_below_quantization_noise(
     "cpu_ms 가 양자화 오차 범위 내에 있다"는 것을 검증한다.
     """
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    listed_at = datetime.now(UTC) - timedelta(days=1)
     async with pool.acquire() as conn, conn.transaction():
         await repo.register(conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at))
 
     n = 50
     # Windows tick(15.6ms) / batch(8) ≈ 2ms 양자화 오차 한도
     cpu_budget_ms = 2.0
-    at = datetime.now(timezone.utc)
+    at = datetime.now(UTC)
 
     async def _probe():
         async with pool.acquire() as conn, conn.transaction():
@@ -332,12 +332,12 @@ async def test_get_instrument_lookup_p95_goes_red_on_10x_delay_injection(
     import asyncio
 
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
+    listed_at = datetime.now(UTC) - timedelta(days=1)
     async with pool.acquire() as conn, conn.transaction():
         await repo.register(conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at))
 
     budget_p95_ms = 30.0
-    at = datetime.now(timezone.utc)
+    at = datetime.now(UTC)
     original_get_instrument = repo.get_instrument
 
     async def _delayed_get_instrument(*args, **kwargs):
@@ -372,7 +372,7 @@ async def test_gate_red_when_digest_check_removed_negative_test_would_fail(pool,
     `pytest.raises(CorporateActionDigestMismatchError)` 블록이 그 회귀
     아래에서 green에서 red로 뒤집힘을 이 자리에서 직접 재현한다."""
     symbol = _krx_symbol()
-    listed_at = datetime.now(timezone.utc) - timedelta(days=30)
+    listed_at = datetime.now(UTC) - timedelta(days=30)
     async with pool.acquire() as conn, conn.transaction():
         instrument = await repo.register(
             conn, _register_cmd(venue_symbol=symbol, listed_at=listed_at)

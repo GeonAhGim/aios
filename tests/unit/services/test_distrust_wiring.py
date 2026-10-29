@@ -8,7 +8,7 @@ migration 9744695fa220(data_distrust_state)가 아직 origin/main에 없어
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -29,7 +29,7 @@ def _ticker(price: str) -> Ticker:
         bid=Decimal(price),
         ask=Decimal(price),
         volume_24h=Decimal("1"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         source_type="primary",
     )
 
@@ -148,7 +148,7 @@ async def test_provider_exception_propagates_instead_of_silently_persisting():
 
 
 async def test_restore_distrust_state_restores_each_row_into_monitor():
-    since = datetime.now(timezone.utc) - timedelta(seconds=90)
+    since = datetime.now(UTC) - timedelta(seconds=90)
     rows = [
         {"symbol": "BTC/USDT", "level": "DISTRUSTED", "since": since},
         {"symbol": "ETH/USDT", "level": "NORMAL", "since": since},
@@ -173,7 +173,7 @@ async def test_restore_distrust_state_rejects_unknown_level_value():
     """DB 행에 DataDistrustLevel enum에 없는 값이 들어있으면(스키마 드리프트,
     수동 DML 오염 등 불변식 위반) 조용히 무시하거나 임의 기본값으로 복원하지
     않고 ValueError로 즉시 실패해야 한다 — fail-closed."""
-    since = datetime.now(timezone.utc) - timedelta(seconds=10)
+    since = datetime.now(UTC) - timedelta(seconds=10)
     rows = [{"symbol": "BTC/USDT", "level": "NOT_A_REAL_LEVEL", "since": since}]
     pool = _FakePool(fetch_rows=rows)
     monitor = DataDistrustMonitor()

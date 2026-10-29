@@ -39,7 +39,7 @@ import sys
 import types
 from collections import deque
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -81,7 +81,7 @@ _DYNAMIC_IMPORT_CALLS = frozenset({"__import__", "import_module"})
 
 Violation = tuple[str, str, tuple[str, ...]]  # (file, banned module, import chain)
 
-_NOW = datetime(2026, 9, 10, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 10, 0, 0, tzinfo=UTC)
 
 
 # --- 1. 정적 추이적 import 그래프 (R-56과 동형) ------------------------------

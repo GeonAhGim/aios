@@ -20,7 +20,7 @@ DEEPEN(task-3039, ADR-2026-09-09-C D2): depth=D2 증빙.
   테스트가 런타임 가드를 직접 실행한다).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -42,7 +42,7 @@ from tests.conftest import PerfBudget
 _FUNDING_ON = CostsConfig(funding=True, borrow_apr=None)
 _FUNDING_OFF = CostsConfig(funding=False, borrow_apr=None)
 
-_D0 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)  # 정산 시각(00:00 UTC)
+_D0 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)  # 정산 시각(00:00 UTC)
 
 
 def test_count_funding_settlements_entry_exact_boundary_is_included() -> None:
@@ -185,8 +185,8 @@ def test_compute_borrow_cost_exact_value_non_leap_full_year() -> None:
     cost = compute_borrow_cost(
         _BORROW_ON,
         notional=Decimal("1000000"),
-        entry_time=datetime(2023, 1, 1, tzinfo=timezone.utc),
-        exit_time=datetime(2024, 1, 1, tzinfo=timezone.utc),  # 2023은 365일
+        entry_time=datetime(2023, 1, 1, tzinfo=UTC),
+        exit_time=datetime(2024, 1, 1, tzinfo=UTC),  # 2023은 365일
     )
     assert cost == Decimal("100000")
 
@@ -198,8 +198,8 @@ def test_compute_borrow_cost_leap_year_uses_366_actual_days_over_fixed_365_denom
     cost = compute_borrow_cost(
         _BORROW_ON,
         notional=Decimal("1000000"),
-        entry_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        exit_time=datetime(2025, 1, 1, tzinfo=timezone.utc),  # 2024는 366일(윤년)
+        entry_time=datetime(2024, 1, 1, tzinfo=UTC),
+        exit_time=datetime(2025, 1, 1, tzinfo=UTC),  # 2024는 366일(윤년)
     )
     expected = round_cost(Decimal("1000000") * Decimal("0.10") * Decimal(366) / Decimal(365))
     assert cost == expected
@@ -274,8 +274,8 @@ def test_exact_total_seconds_avoids_float_precision_loss() -> None:
     `seconds`/`microseconds` 정수 필드를 직접 조합해 그 float 나눗셈을
     완전히 피한다."""
 
-    far_future = datetime(2300, 1, 1, 1, 2, 3, 456789, tzinfo=timezone.utc)
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    far_future = datetime(2300, 1, 1, 1, 2, 3, 456789, tzinfo=UTC)
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
     delta = far_future - epoch
 
     float_based = Decimal(delta.total_seconds())
@@ -293,7 +293,7 @@ def test_compute_funding_cost_far_future_settlement_count_is_exact() -> None:
     바꾼 뒤에도 정상 범위 결과가 그대로 유지되는지 잠근다) — 진입이 정확히
     정산 시각이면 그 정산이 정확히 1회 포함돼야 한다."""
 
-    entry = datetime(2300, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    entry = datetime(2300, 1, 1, 0, 0, 0, tzinfo=UTC)
     exit_ = entry + timedelta(hours=7)
     count = count_funding_settlements(entry_time=entry, exit_time=exit_)
     assert count == 1
@@ -308,8 +308,8 @@ def test_compute_borrow_cost_perf_budget(perf_budget: PerfBudget) -> None:
     raw time.perf_counter() → perf_budget.assert_within(process_time 기반) 전환(task-10944)."""
 
     config = CostsConfig(funding=False, borrow_apr=Decimal("0.10"))
-    entry = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    exit_ = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    entry = datetime(2026, 1, 1, tzinfo=UTC)
+    exit_ = datetime(2026, 6, 1, tzinfo=UTC)
 
     def run_batch() -> None:
         for _ in range(10_000):

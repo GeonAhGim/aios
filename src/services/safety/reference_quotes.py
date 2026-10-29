@@ -22,7 +22,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.3/§9(R-47), §10 "참조 시세
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
@@ -94,7 +94,7 @@ class BinancePublicTickerReference:
             bid=price,
             ask=price,
             volume_24h=Decimal("0"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="reference",
         )
 

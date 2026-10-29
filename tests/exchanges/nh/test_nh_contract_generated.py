@@ -7,7 +7,7 @@ Uses fixtures derived from openapi.json schemas; does NOT hit real API.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -203,8 +203,8 @@ async def test_get_ohlcv_field_mapping(
         # Timestamps: both set to same date (bsop_date)
         assert candle.open_time.date().isoformat() == "2026-09-24"
         assert candle.close_time.date().isoformat() == "2026-09-24"
-        assert candle.open_time.tzinfo == timezone.utc
-        assert candle.close_time.tzinfo == timezone.utc
+        assert candle.open_time.tzinfo == UTC
+        assert candle.close_time.tzinfo == UTC
 
 
 @pytest.mark.asyncio
@@ -218,10 +218,10 @@ async def test_get_ohlcv_date_parsing(
         result = await nh_adapter.get_ohlcv("005930", "1d", limit=2)
 
         # First candle: 2026-09-24
-        assert result[0].open_time == datetime(2026, 9, 24, tzinfo=timezone.utc)
+        assert result[0].open_time == datetime(2026, 9, 24, tzinfo=UTC)
 
         # Second candle: 2026-09-23
-        assert result[1].open_time == datetime(2026, 9, 23, tzinfo=timezone.utc)
+        assert result[1].open_time == datetime(2026, 9, 23, tzinfo=UTC)
 
 
 # ============================================================================

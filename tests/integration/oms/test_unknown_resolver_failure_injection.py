@@ -51,7 +51,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -157,7 +157,7 @@ async def _order_status(pool: asyncpg.Pool, order_id: UUID) -> str:
 async def test_simulated_network_drop_during_lookup_leaves_order_untouched(pool: asyncpg.Pool):
     user_id = await create_test_user(pool)
     order_id, _ = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(timezone.utc)
+        pool, user_id, unknown_since=datetime.now(UTC)
     )
 
     with pytest.raises(ConnectionResetError):
@@ -166,7 +166,7 @@ async def test_simulated_network_drop_during_lookup_leaves_order_untouched(pool:
             adapter=_CrashingAdapter(),
             pool=pool,
             risk_gate_repo=PostgresRiskGateRepository(pool),
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
         )
 
@@ -182,7 +182,7 @@ async def test_simulated_db_connection_drop_during_resolved_as_transition_rolls_
     도달했으므로 그 tx는 통째로 버려져야 한다."""
     user_id = await create_test_user(pool)
     order_id, client_order_id = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(timezone.utc)
+        pool, user_id, unknown_since=datetime.now(UTC)
     )
     found = _found_order(client_order_id, exchange_order_id="ex-fi-1")
     adapter = _LookupAdapter(results=[found])
@@ -200,7 +200,7 @@ async def test_simulated_db_connection_drop_during_resolved_as_transition_rolls_
             adapter=adapter,
             pool=pool,
             risk_gate_repo=PostgresRiskGateRepository(pool),
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
         )
 
@@ -216,7 +216,7 @@ async def test_simulated_dropped_message_during_resolved_absent_transition_rolls
     UNKNOWN이어야 하고(§5.3이 금지하는 "유령 FAILED" 없음), 재시도 시
     다시 이 경로를 탈 수 있어야 한다."""
     user_id = await create_test_user(pool)
-    stale_since = datetime.now(timezone.utc) - timedelta(seconds=200)
+    stale_since = datetime.now(UTC) - timedelta(seconds=200)
     order_id, _client_order_id = await _insert_unknown_order(
         pool, user_id, unknown_since=stale_since
     )
@@ -233,7 +233,7 @@ async def test_simulated_dropped_message_during_resolved_absent_transition_rolls
             adapter=adapter,
             pool=pool,
             risk_gate_repo=PostgresRiskGateRepository(pool),
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
             max_attempts=2,
             backoff=(0.0, 0.0),
@@ -253,7 +253,7 @@ async def test_simulated_worker_crash_during_escalate_transition_rolls_back_and_
     없이 안전 통제만 걸림" 같은 불일치 상태가 없다는 뜻)."""
     user_id = await create_test_user(pool)
     order_id, _client_order_id = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(timezone.utc)
+        pool, user_id, unknown_since=datetime.now(UTC)
     )
     adapter = _LookupAdapter(results=[None, None])
     risk_gate_repo = PostgresRiskGateRepository(pool)
@@ -272,7 +272,7 @@ async def test_simulated_worker_crash_during_escalate_transition_rolls_back_and_
             adapter=adapter,
             pool=pool,
             risk_gate_repo=risk_gate_repo,
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
             max_attempts=2,
             backoff=(0.0, 0.0),
@@ -313,7 +313,7 @@ async def test_resolved_as_fast_path_latency_within_normalized_budget(pool: asyn
 
     async def _one_resolved_as() -> None:
         order_id, client_order_id = await _insert_unknown_order(
-            pool, user_id, unknown_since=datetime.now(timezone.utc)
+            pool, user_id, unknown_since=datetime.now(UTC)
         )
         found = _found_order(client_order_id, exchange_order_id=f"ex-perf-{uuid4().hex[:8]}")
         await unknown_resolver.resolve_unknown(
@@ -321,7 +321,7 @@ async def test_resolved_as_fast_path_latency_within_normalized_budget(pool: asyn
             adapter=_LookupAdapter(results=[found]),
             pool=pool,
             risk_gate_repo=risk_gate_repo,
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
         )
 
@@ -418,7 +418,7 @@ async def test_concurrent_resolvers_resolved_as_race_is_idempotent_no_duplicate_
     order_events는 정확히 1행이어야 한다(중복 없음)."""
     user_id = await create_test_user(pool)
     order_id, client_order_id = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(timezone.utc)
+        pool, user_id, unknown_since=datetime.now(UTC)
     )
     found = _found_order(client_order_id, exchange_order_id="ex-race-1")
     risk_gate_repo = PostgresRiskGateRepository(pool)
@@ -429,7 +429,7 @@ async def test_concurrent_resolvers_resolved_as_race_is_idempotent_no_duplicate_
             adapter=_LookupAdapter(results=[found]),
             pool=pool,
             risk_gate_repo=risk_gate_repo,
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
         )
         return result.status
@@ -453,7 +453,7 @@ async def test_concurrent_resolvers_escalate_race_never_loses_the_safety_control
     0건이 되는(안전장치가 조용히 사라지는) 경로가 없다는 것이다."""
     user_id = await create_test_user(pool)
     order_id, _client_order_id = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(timezone.utc)
+        pool, user_id, unknown_since=datetime.now(UTC)
     )
     risk_gate_repo = PostgresRiskGateRepository(pool)
 
@@ -463,7 +463,7 @@ async def test_concurrent_resolvers_escalate_race_never_loses_the_safety_control
             adapter=_LookupAdapter(results=[None, None]),
             pool=pool,
             risk_gate_repo=risk_gate_repo,
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
             max_attempts=2,
             backoff=(0.0, 0.0),

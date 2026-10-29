@@ -24,7 +24,7 @@ field schema, so it no longer needs to stay fail-closed.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Protocol
 
@@ -72,7 +72,7 @@ class NHMarketDataMixin:
                 bid=Decimal(str(output.get("bidp", output["stck_prpr"]))),
                 ask=Decimal(str(output.get("askp", output["stck_prpr"]))),
                 volume_24h=Decimal(str(output.get("acml_vol", "0"))),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_type="primary",
             )
         except KeyError as exc:
@@ -122,7 +122,7 @@ class NHMarketDataMixin:
             exchange="nh",
             bids=bids[:depth],
             asks=asks[:depth],
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     async def get_ohlcv(
@@ -167,7 +167,7 @@ class NHMarketDataMixin:
                 year = int(date_str[:4])
                 month = int(date_str[4:6])
                 day = int(date_str[6:8])
-                candle_date = datetime(year, month, day, tzinfo=timezone.utc)
+                candle_date = datetime(year, month, day, tzinfo=UTC)
 
                 candle = Candle(
                     symbol=symbol,

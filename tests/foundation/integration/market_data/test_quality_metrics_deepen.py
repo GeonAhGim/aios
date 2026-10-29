@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -64,7 +64,7 @@ async def test_export_quality_metrics_gate_red_if_tenant_id_not_threaded_to_batc
     0(초록)이 보고됨을 대조한다."""
     tenant_id = await create_test_tenant(deps.pool)
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     good = lambda t: _candle(t, "100", "110", "90", "105", "10")  # noqa: E731
     bad = _candle(t0 + timedelta(minutes=3), "100", "90", "80", "85", "10")  # high<open → REJECT
     # 6건 중 1건만 REJECT(<20%) — 배치 전체 QUARANTINE(부분 저장 금지)을
@@ -143,7 +143,7 @@ async def test_export_quality_metrics_ratio_round_trips_through_independent_quer
     수동으로 계산한 값과 Decimal 정밀도까지 정확히 일치하는지 검증한다
     (LB-11/task-2956와 동일한 "반환값 vs 독립 재조회" round-trip 패턴)."""
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     good = lambda t: _candle(t, "100", "110", "90", "105", "10")  # noqa: E731
     bad = _candle(t0 + timedelta(minutes=4), "100", "90", "80", "85", "10")  # high<open → REJECT
     candles = [
@@ -217,7 +217,7 @@ async def test_export_quality_metrics_latency_stays_within_normalized_ceiling(de
 
     series_count = 15
     instruments = []
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     for _ in range(series_count):
         instrument = await _listed_instrument(deps)
         candles = [_candle(t0, "100", "110", "90", "105", "10")]
@@ -290,7 +290,7 @@ async def test_scheduler_concurrent_run_once_invocations_do_not_corrupt_shared_p
     전제의 직접 증명)."""
     instrument_a = await _listed_instrument(deps)
     instrument_b = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
 
     def _make_scheduler(instrument) -> MarketDataQualityScheduler:

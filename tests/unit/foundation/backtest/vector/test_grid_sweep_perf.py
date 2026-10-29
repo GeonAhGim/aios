@@ -9,7 +9,7 @@ test_vector_sweeps.py와 공유 — 여기서는 같은 정의를 재사용.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -30,7 +30,7 @@ from src.foundation.backtest.vector.signals import BoolSignal
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _D = Decimal
 _CASH = _D("100000")
 

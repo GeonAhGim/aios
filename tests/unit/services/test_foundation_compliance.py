@@ -11,7 +11,7 @@ port type.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -28,7 +28,7 @@ from src.services.order_service import foundation_compliance
 from src.services.order_service.foundation_compliance import evaluate_compliance_gate
 from src.services.order_service.gate import OrderContext
 
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _context(user_id: UUID) -> OrderContext:

@@ -28,7 +28,7 @@ import asyncio
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -114,7 +114,7 @@ def _ensure_head(monkeypatch):
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _create_user_available_account(pool: asyncpg.Pool, user_id: UUID) -> str:
@@ -191,7 +191,7 @@ async def _insert_pre_fa4_ledger_entry(pool: asyncpg.Pool, event_ref: str, user_
     digest = lines_digest(lines)
     key = idempotency_key(event)
     entry_id = uuid4()
-    posted_at = datetime.now(timezone.utc)
+    posted_at = datetime.now(UTC)
 
     async with pool.acquire() as conn, conn.transaction():
         last = await conn.fetchrow(

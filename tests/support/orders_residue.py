@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 import pytest
@@ -39,7 +39,7 @@ async def check_orders(database_url: str, boundary: str) -> None:
         max_size=1,
     )
     try:
-        report = await replay_verify.verify(pool, as_of=datetime.now(timezone.utc), hours=24)
+        report = await replay_verify.verify(pool, as_of=datetime.now(UTC), hours=24)
         mismatches = [m for m in report.mismatches if m.domain == "orders"]
         # Event-window enumeration cannot discover a row with no events at all.
         # Use the same projection and comparison fields, with no cutover exception.

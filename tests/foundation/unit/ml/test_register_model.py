@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -31,7 +31,7 @@ from src.foundation.ml.ports.train_job_repository import TrainJobState, TrainJob
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_async
 
-_NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 6, 1, tzinfo=UTC)
 _LINEAGE = TrainDataLineage(
     start=_NOW - timedelta(days=30), end=_NOW - timedelta(days=1), source_ref="s3://x"
 )

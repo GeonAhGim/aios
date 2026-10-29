@@ -10,7 +10,7 @@ performance assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -29,7 +29,7 @@ from src.foundation.validation.domain.models import Outcome, ValidationResult
 from src.services.strategy_builder_service import StrategyBuilderService
 from tests.integration.conftest import create_test_tenant
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _asyncpg_dsn() -> str:

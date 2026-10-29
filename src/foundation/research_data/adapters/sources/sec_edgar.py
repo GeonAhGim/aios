@@ -34,8 +34,8 @@ import hashlib
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from datetime import date as date_
-from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from src.foundation.research_data.contracts.v1 import ResearchItem
@@ -117,8 +117,8 @@ def _parse_acceptance_datetime(raw: str) -> datetime:
             f"SEC EDGAR acceptanceDateTime is not a valid ISO datetime: {raw!r}"
         ) from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _parse_filing_date(raw: str) -> datetime:
@@ -129,7 +129,7 @@ def _parse_filing_date(raw: str) -> datetime:
         raise SecEdgarParseError(
             f"SEC EDGAR filingDate is not a valid ISO date: {raw!r}"
         ) from exc
-    return datetime(parsed.year, parsed.month, parsed.day, tzinfo=timezone.utc)
+    return datetime(parsed.year, parsed.month, parsed.day, tzinfo=UTC)
 
 
 def _build_url(cik10: str, accession: str, primary_document: str) -> str:

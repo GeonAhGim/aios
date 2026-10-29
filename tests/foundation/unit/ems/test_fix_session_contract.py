@@ -2,7 +2,7 @@
 
 import socket
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -55,7 +55,7 @@ def order() -> ChildOrder:
         instrument_id="BTC-USDT",
         side=OrderSide.BUY,
         planned_qty=Decimal("1"),
-        scheduled_at=datetime(2026, 9, 9, tzinfo=timezone.utc),
+        scheduled_at=datetime(2026, 9, 9, tzinfo=UTC),
         order_id=uuid4(),
     )
 

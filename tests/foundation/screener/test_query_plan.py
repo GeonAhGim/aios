@@ -6,7 +6,7 @@ Spec: task-2628(U-1a) decision, L4_product_experience_and_discovery_v1.0.md
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -46,7 +46,7 @@ def test_build_query_plan_compiles_all_four_filter_kinds() -> None:
             FundamentalFilter(condition="per < 15 and roe > 0.1"),
             ResearchFilter(
                 condition="eps_surprise > 0",
-                as_of=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                as_of=datetime(2026, 9, 1, tzinfo=UTC),
             ),
             BacktestStatFilter(condition="sharpe_ratio > 1.5"),
         ),

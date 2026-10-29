@@ -18,7 +18,7 @@ switch, 자기 결정 — 로 B를 제약하거나 B의 상태를 읽으려 한�
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -58,7 +58,7 @@ from src.foundation.risk_gate.domain.models import LimitMetric, LimitScope, Risk
 from tests.adversarial.risk.conftest import insert_decision
 from tests.integration.conftest import create_test_tenant
 
-_NOW = datetime(2026, 9, 5, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 5, tzinfo=UTC)
 _PROVIDER = "bitget"
 _SYMBOL = "BTC/USDT"
 _STRATEGY = "strat-shared"

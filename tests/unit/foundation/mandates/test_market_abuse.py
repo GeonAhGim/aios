@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import ast
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -54,8 +54,8 @@ from src.foundation.mandates.domain.market_abuse import (
     detect,
 )
 
-_T0 = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
-_CLOSE = datetime(2026, 1, 5, 6, 0, 0, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 5, 5, 0, 0, tzinfo=UTC)
+_CLOSE = datetime(2026, 1, 5, 6, 0, 0, tzinfo=UTC)
 
 
 def _fill(**kwargs: object) -> dict[str, object]:
@@ -361,7 +361,7 @@ def test_wash_trade_corrupted_executed_at_fails_closed_not_a_crash():
         _fill(
             fill_id="f1",
             side="BUY",
-            executed_at=_ExplodingDatetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc),
+            executed_at=_ExplodingDatetime(2026, 1, 5, 5, 0, 0, tzinfo=UTC),
         ),
         _fill(fill_id="f2", side="SELL", executed_at=_T0 + timedelta(seconds=1)),
     ]

@@ -14,7 +14,7 @@ DB 영속화, 이벤트 발행, FSM 전이)는 그대로 검증 가능하다.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -94,7 +94,7 @@ class FakeExchangeAdapter(ExchangeAdapter):
             bid=price,
             ask=price,
             volume_24h=Decimal("0"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 
@@ -102,7 +102,7 @@ class FakeExchangeAdapter(ExchangeAdapter):
         raise NotImplementedError
 
     async def get_ohlcv(self, symbol: str, timeframe: str, limit: int = 100) -> list[Candle]:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             Candle(
                 symbol=symbol,

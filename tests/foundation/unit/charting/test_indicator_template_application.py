@@ -17,7 +17,7 @@ scope for this leaf."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -80,7 +80,7 @@ class FakeChartingRepository:
     ) -> ChartIndicatorTemplate:
         if self.create_exc is not None:
             raise self.create_exc
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         created = ChartIndicatorTemplate(
             id=uuid4(),
             tenant_id=tenant_id,
@@ -128,7 +128,7 @@ def test_get_indicator_template_cpu_converges_to_zero(
     최소 입력(best-of-N)에서 best 값이 예산 내여야 한다."""
     budget_ms = 50.0
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     template = ChartIndicatorTemplate(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -166,7 +166,7 @@ def test_get_indicator_template_gate_red_sleep_injection(
 
     monkeypatch.setattr("time.process_time", _fake_process_time)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     template = ChartIndicatorTemplate(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -262,7 +262,7 @@ def test_indicator_template_to_view_perf_budget(perf_budget: PerfBudget) -> None
     task-10956: raw `time.perf_counter()`를 `perf_budget`(CPU 시간 기준)로
     전환 — 워커 다수·로컬 LLM 동시 실행 호스트에서 wall-clock이 다른
     프로세스에 코어를 뺏겨 대기한 시간이 섞이지 않게 한다."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     template = ChartIndicatorTemplate(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -309,7 +309,7 @@ def test_indicator_template_to_view_perf_assertion_fails_with_10x_delay_injectio
 
     monkeypatch.setattr("time.process_time", _fake_process_time)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     template = ChartIndicatorTemplate(
         id=uuid4(),
         tenant_id=uuid4(),

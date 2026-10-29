@@ -22,14 +22,14 @@ order direction).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.data.models.trading import OrderSide
 from src.foundation.backtest.domain.costs import exact_total_seconds, round_cost
 from src.foundation.backtest.domain.models_v2 import CostsConfig
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _DEFAULT_INTERVAL_HOURS = 8
 
 

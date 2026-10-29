@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
@@ -45,7 +45,7 @@ class MockAuditEventRepository:
 
 def make_audit_event(**overrides: object) -> AuditEvent:
     """Factory for AuditEvent domain model."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults: dict[str, object] = dict(
         id=uuid4(),
         tenant_id=uuid4(),

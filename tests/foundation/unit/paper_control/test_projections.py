@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -83,16 +83,16 @@ async def test_build_deployment_list_view_empty_repo_as_of_is_tz_aware_utc():
     repo = FakeRepo([])
     view = await build_deployment_list_view(repo, _TENANT_ID)
     assert view.as_of.tzinfo is not None
-    assert view.as_of.utcoffset() == timezone.utc.utcoffset(None)
+    assert view.as_of.utcoffset() == UTC.utcoffset(None)
 
 
 async def test_build_deployment_list_view_empty_repo_as_of_is_recent():
     """음성 테스트 2 — as_of는 호출 시점으로부터 1초 이내여야 한다
     (stale projection은 spec 71 §4 위반)."""
     repo = FakeRepo([])
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     view = await build_deployment_list_view(repo, _TENANT_ID)
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
     assert before <= view.as_of <= after
 
 
@@ -163,11 +163,11 @@ async def test_build_deployment_list_view_maps_all_deployments_in_order():
 async def test_build_deployment_list_view_as_of_is_tz_aware_utc_and_current():
     """INVARIANTS — 모든 datetime은 tz-aware UTC. as_of는 호출 시점 근방이어야 한다."""
     repo = FakeRepo([])
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     view = await build_deployment_list_view(repo, _TENANT_ID)
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
     assert view.as_of.tzinfo is not None
-    assert view.as_of.utcoffset() == timezone.utc.utcoffset(None)
+    assert view.as_of.utcoffset() == UTC.utcoffset(None)
     assert before <= view.as_of <= after
 
 

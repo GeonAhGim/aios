@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -29,7 +29,7 @@ from src.foundation.market_data.domain.point_in_time import (
 from tests.conftest import PerfBudget
 
 _INSTRUMENT_ID = "TEST-INSTRUMENT-DEEPEN"
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _attr(*, key: str, value: str, known_at: datetime) -> ReferenceAttribute:
@@ -73,7 +73,7 @@ def test_far_future_known_at_never_leaks_into_present_query() -> None:
     오판정되지 않는지 확인한다."""
     present = _attr(key="lot_size", value="10", known_at=_T0)
     far_future = _attr(
-        key="lot_size", value="9999", known_at=datetime(3000, 1, 1, tzinfo=timezone.utc)
+        key="lot_size", value="9999", known_at=datetime(3000, 1, 1, tzinfo=UTC)
     )
 
     result = latest_attributes_as_of([present, far_future], as_of=_T0)

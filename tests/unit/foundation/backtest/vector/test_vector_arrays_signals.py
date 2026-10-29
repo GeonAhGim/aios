@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import fields
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -28,7 +28,7 @@ from src.foundation.market_data.domain.candle_columns import (
 )
 
 _D = Decimal
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _columns(n: int) -> CandleColumns:
@@ -103,7 +103,7 @@ def test_from_candle_columns_epoch_ns_is_exact_and_monotonic() -> None:
     columns = _columns(3)
     out = arrays.from_candle_columns(columns)
 
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
     expected0 = int((_T0 - epoch).total_seconds()) * 1_000_000_000
     assert out.ts[0] == expected0
     assert out.ts[1] - out.ts[0] == 60_000_000_000  # 1분 = 60e9 ns

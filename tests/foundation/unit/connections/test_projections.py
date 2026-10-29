@@ -21,7 +21,7 @@ Connections is not itself a safety/execution/ledger/compliance/data axis
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -41,7 +41,7 @@ from src.foundation.connections.projections import (
 )
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 25, tzinfo=UTC)
 
 
 def _connection(tenant_id: UUID, *, provider_code: str = "BITGET") -> AccountConnection:
@@ -236,7 +236,7 @@ async def test_build_connection_list_view_success_maps_binding_scope_verified() 
 
 
 def test_connection_list_view_constructor_stores_fields_verbatim() -> None:
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     view = ConnectionListView(connections=[], as_of=as_of)
 
     assert view.connections == []

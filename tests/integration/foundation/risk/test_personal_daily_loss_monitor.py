@@ -13,7 +13,7 @@ monitor_tick`)은 모킹하지 않는다. `PersonalOperationStatePort`/
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -33,7 +33,7 @@ from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
 _NAV_DATE = date(2026, 6, 1)
-_MOMENT = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+_MOMENT = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 
 
 class _FakeNotifier:

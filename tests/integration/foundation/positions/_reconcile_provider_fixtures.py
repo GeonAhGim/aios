@@ -6,7 +6,7 @@ Imported by test_reconcile_provider.py and test_reconcile_provider_edge.py.
 from __future__ import annotations
 
 import functools
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -93,7 +93,7 @@ async def _open_position(
         mark_at=None,
         base_currency=Currency.USDT,
         last_journal_seq=0,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     repo = PostgresSnapshotRepository(pool)
     async with pool.acquire() as conn, conn.transaction():

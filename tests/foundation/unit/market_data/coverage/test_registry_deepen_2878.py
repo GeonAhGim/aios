@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -43,7 +43,7 @@ _VALID_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
 
 def _dt(day: int, hour: int = 0) -> datetime:
-    return datetime(2026, 1, day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 1, day, hour, 0, tzinfo=UTC)
 
 
 def _span(

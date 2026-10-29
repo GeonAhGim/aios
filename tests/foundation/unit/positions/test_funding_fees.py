@@ -6,7 +6,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-4.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,7 +16,7 @@ from src.foundation.positions.domain import funding_fees
 from src.foundation.positions.domain import fx as fx_module
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 
 
 def _rate(*, age: timedelta = timedelta()) -> FXRate:

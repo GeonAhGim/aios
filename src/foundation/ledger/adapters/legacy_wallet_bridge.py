@@ -29,7 +29,7 @@ CASH_CLEARING에 부호까지 그대로 미러링) — 개별 사용자 잔액�
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
@@ -87,7 +87,7 @@ class BridgeInsufficientBalanceError(Exception):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _reconcile_ledger_with_projection(

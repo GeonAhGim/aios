@@ -9,7 +9,7 @@ instrument/timeframe의 coverage를 반환하지 않으며, 커버리지가 없�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -59,7 +59,7 @@ def repo(pool):
 async def test_upsert_then_list_spans_round_trips(pool, repo):
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         saved = await repo.upsert_span(
@@ -77,7 +77,7 @@ async def test_upsert_overlapping_span_raises(pool, repo):
     """negative: 파이썬 선검사가 아니라 실DB INSERT로 EXCLUDE 위반을 단언."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert_span(
@@ -103,7 +103,7 @@ async def test_list_spans_does_not_return_other_instruments_coverage(pool, repo)
     instrument_b = _fake_ulid()
     await _insert_instrument(pool, instrument_a)
     await _insert_instrument(pool, instrument_b)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert_span(
@@ -123,7 +123,7 @@ async def test_list_spans_does_not_return_other_instruments_coverage(pool, repo)
 async def test_list_spans_does_not_return_other_timeframes_coverage(pool, repo):
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert_span(
@@ -172,7 +172,7 @@ async def test_upsert_span_with_end_before_start_raises(pool, repo):
     로 DB가 막는다(9049e2b6b0b7 마이그레이션 CHECK 제약)."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         async with pool.acquire() as conn, conn.transaction():
@@ -186,7 +186,7 @@ async def test_upsert_span_with_unknown_instrument_raises(pool, repo):
     선언하면 FK 위반으로 거부되어야 한다 — 존재하지 않는 종목의 커버리지가
     조용히 저장되면 안 된다."""
     unknown_instrument = _fake_ulid()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
         async with pool.acquire() as conn, conn.transaction():
@@ -203,7 +203,7 @@ async def test_upsert_span_unexpected_db_error_propagates_unmapped(pool, repo, m
     잘못된 복구 경로(재병합)를 타게 된다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async def _boom(*args, **kwargs):
         raise asyncpg.exceptions.ConnectionDoesNotExistError("simulated connection loss")
@@ -227,7 +227,7 @@ async def test_list_spans_p95_latency_within_budget(pool, repo, perf_budget):
     인해 예상 소요 시간을 초과할 수 있으므로 nightly로 표시하여 기본 실행에서 제외한다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    base = datetime.now(timezone.utc) - timedelta(days=400)
+    base = datetime.now(UTC) - timedelta(days=400)
 
     async with pool.acquire() as conn, conn.transaction():
         for i in range(50):

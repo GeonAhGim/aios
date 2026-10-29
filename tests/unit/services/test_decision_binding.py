@@ -2,7 +2,7 @@
 (task-1532, I1/I4/I10). DB 없음 — WORM 행·스냅샷·주문을 손으로 만든다."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -32,7 +32,7 @@ def _order(**update: Any) -> Order:
 
 
 def _decision(execution_ref: str | None = "exec:7") -> RiskDecision:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return RiskDecision(
         decision_id=uuid4(), gate_kind=GateKind.PRE_SUBMIT, tenant_id=uuid4(),
         execution_ref=execution_ref, subject_fingerprint="a" * 64, outcome=RiskOutcome.ALLOW,

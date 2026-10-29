@@ -35,7 +35,7 @@ was numeric perf assertions and a gate-red reproduction):
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -80,7 +80,7 @@ def _source(source_id: str, *, redistribution: RedistributionPolicy = "store_ful
 def _item(
     *, source_id: str, revision_of: UUID | None = None, known_at: datetime | None = None
 ) -> ResearchItem:
-    now = known_at if known_at is not None else datetime.now(timezone.utc)
+    now = known_at if known_at is not None else datetime.now(UTC)
     return ResearchItem(
         item_id=uuid4(),
         source_id=source_id,
@@ -208,13 +208,13 @@ async def test_correction_is_a_new_row_and_original_is_unchanged(
 ) -> None:
     source_id = await _seed_source(repo)
     tenant_id = await create_test_tenant(pool)
-    original = _item(source_id=source_id, known_at=datetime(2026, 3, 1, tzinfo=timezone.utc))
+    original = _item(source_id=source_id, known_at=datetime(2026, 3, 1, tzinfo=UTC))
     original_id = await repo.append_item(tenant_id, original, external_id="ext-orig")
 
     correction = _item(
         source_id=source_id,
         revision_of=original_id,
-        known_at=datetime(2026, 3, 10, tzinfo=timezone.utc),
+        known_at=datetime(2026, 3, 10, tzinfo=UTC),
     )
     correction_id = await repo.append_item(tenant_id, correction, external_id="ext-correction")
 

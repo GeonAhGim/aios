@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -143,7 +143,7 @@ async def test_unknown_resolver_returns_resolved_order_despite_metrics_observe_f
         adapter=adapter,
         pool=_UnknownFakePool(),
         risk_gate_repo=risk_gate_repo,
-        clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
         order_repo=repo,
         metrics=_RaisingMetrics(),
     )
@@ -198,12 +198,12 @@ def test_dispatch_log_extra_json_serialization_meets_borrowed_latency_budget() -
         payload={},
         state="SENDING",
         attempt=3,
-        not_before=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        not_before=datetime(2026, 1, 1, tzinfo=UTC),
         lease_until=None,
         worker_id="w1",
         last_error=None,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     extra = _dispatch_log_extra("oms.outbox.dispatch_failed", row, worker_id="w1")
     formatter = JSONLinesFormatter()

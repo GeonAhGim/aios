@@ -8,7 +8,7 @@ adapter로만 확인한다(ADR-2026-09-06-I D3).
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -34,7 +34,7 @@ _FAR_FUTURE_EXPIRY = date(2099, 12, 1)
 def _today_kst() -> date:
     """`domestic_futureoption_mixin._reject_if_expired`와 동일하게 KST 달력일
     기준 — 로컬 머신 타임존과 무관하게 결정적인 경계값 테스트를 만든다."""
-    return datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul")).date()
+    return datetime.now(UTC).astimezone(ZoneInfo("Asia/Seoul")).date()
 
 
 def _make_paper_adapter(captured: list[httpx.Request]) -> KISAdapter:

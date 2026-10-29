@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -118,7 +118,7 @@ async def test_closed_position_reports_closed_at_and_matches_legacy(pool, projec
         quantity=Decimal("0"),
         price=Decimal("20"),
         realized_pnl=Decimal("15"),
-        closed_at=datetime.now(timezone.utc),
+        closed_at=datetime.now(UTC),
     )
 
     projected = await _project(projection, pool, user_id=tenant_id, symbol=symbol)
@@ -235,7 +235,7 @@ async def test_get_positions_completes_within_latency_budget_for_many_reentries(
     """
     tenant_id, account_id = await _setup_account(pool)
     symbol = f"SYM{uuid.uuid4().hex[:8]}"
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
     reentry_count = 300
 
     async with pool.acquire() as conn:

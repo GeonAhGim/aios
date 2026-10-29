@@ -4,7 +4,7 @@ provider/real infra 없이 재현 가능한 범위."""
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -213,7 +213,7 @@ async def test_concurrent_revoke_during_sync_discards_snapshot(pool, repo, trust
             # 가정한다.
             await revoke_connection(repo, tenant_id=tenant_id, connection_id=created.id)
             return ProviderSnapshot(
-                provider_as_of=datetime.now(timezone.utc), currency="USD", raw_payload_ref="x"
+                provider_as_of=datetime.now(UTC), currency="USD", raw_payload_ref="x"
             )
 
     revoking_provider: ReadonlyAccountProvider = RevokingProvider()
@@ -306,7 +306,7 @@ async def test_real_concurrent_revoke_and_sync_never_leaves_post_revocation_snap
             # 도착할 확률을 높인다 — 어느 쪽이 이기든 결과가 일관되어야 한다.
             await asyncio.sleep(0.05)
             return ProviderSnapshot(
-                provider_as_of=datetime.now(timezone.utc), currency="USD", raw_payload_ref="x"
+                provider_as_of=datetime.now(UTC), currency="USD", raw_payload_ref="x"
             )
 
     slow_provider: ReadonlyAccountProvider = _SlowProvider()
@@ -377,7 +377,7 @@ async def test_stale_provider_response_does_not_overwrite_latest_snapshot(pool, 
         repo, provider, tenant_id=tenant_id, connection_id=created.id, encryption_key=ENCRYPTION_KEY
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fresh_provider: ReadonlyAccountProvider = _FixedAsOfProvider(now)
     first = await sync_snapshot(repo, fresh_provider, tenant_id=tenant_id, connection_id=created.id)
 
@@ -410,7 +410,7 @@ async def test_future_dated_provider_response_is_rejected(pool, repo, trust_repo
     )
 
     future_provider: ReadonlyAccountProvider = _FixedAsOfProvider(
-        datetime.now(timezone.utc) + timedelta(days=1)
+        datetime.now(UTC) + timedelta(days=1)
     )
     with pytest.raises(MalformedProviderResponseError):
         await sync_snapshot(repo, future_provider, tenant_id=tenant_id, connection_id=created.id)
@@ -478,7 +478,7 @@ async def test_duplicate_sync_does_not_duplicate_snapshot_values(pool, repo, tru
         encryption_key=ENCRYPTION_KEY,
     )
 
-    fixed_as_of = datetime.now(timezone.utc)
+    fixed_as_of = datetime.now(UTC)
     provider = _FixedAsOfProvider(
         fixed_as_of,
         raw_payload_ref="dup-test",

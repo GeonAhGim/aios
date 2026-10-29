@@ -6,7 +6,7 @@ Spec: AIOSproject 76번 §1/§2, 105번(동시성 표준).
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -165,7 +165,7 @@ class PostgresValidationRepository:
                 expected_state_value=RunState.RUNNING.value,
                 set_values={
                     "state": RunState.FAILED.value,
-                    "completed_at": datetime.now(timezone.utc),
+                    "completed_at": datetime.now(UTC),
                 },
             )
         return _row_to_run(row)
@@ -183,7 +183,7 @@ class PostgresValidationRepository:
                 expected_state_value=RunState.RUNNING.value,
                 set_values={
                     "state": RunState.SUCCEEDED.value,
-                    "completed_at": datetime.now(timezone.utc),
+                    "completed_at": datetime.now(UTC),
                 },
             )
             result_row = await conn.fetchrow(

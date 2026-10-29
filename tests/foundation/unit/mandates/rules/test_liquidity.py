@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -43,7 +43,7 @@ from src.foundation.mandates.domain.rules import liquidity
 
 _MAX_PCT = Decimal("10.00")
 _ADV = Decimal("1000000.00")  # average daily traded value
-_NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 10, tzinfo=UTC)
 
 
 class _ExplodingDecimal(Decimal):

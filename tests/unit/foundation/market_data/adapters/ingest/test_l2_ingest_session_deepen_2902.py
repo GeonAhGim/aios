@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -198,7 +198,7 @@ class _FakeAdapter:
         if self._raise_on_parse_seq == seq:
             raise ValueError(f"모의 파싱 실패(seq={seq}) — 손상된 프레임")
         return L2Diff(
-            sequence=seq, as_of=datetime.now(timezone.utc), bid_updates=(), ask_updates=()
+            sequence=seq, as_of=datetime.now(UTC), bid_updates=(), ask_updates=()
         )
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
@@ -211,7 +211,7 @@ class _FakeAdapter:
             # 증명하려는 것은 정반대(표면화)이므로 의도적으로 그 목록 밖의
             # 예외를 던진다.
             raise SnapshotFetchError(f"모의 REST 스냅샷 실패(#{self.snapshot_calls})")
-        return L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids={}, asks={})
+        return L2Snapshot(sequence=0, as_of=datetime.now(UTC), bids={}, asks={})
 
 
 def _frame(seq: int) -> str:
@@ -246,7 +246,7 @@ async def test_adapter_parse_event_exception_propagates_not_swallowed():
     adapter = _FakeAdapter(raise_on_parse_seq=2)
     repo = _FakeCoverageRepo()
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     frames = [_frame(s) for s in (1, 2, 3)]
     conn = _FakeConnection(frames, raise_after=_closed())
     connect_fn, _ = _connect_sequence([conn])
@@ -265,7 +265,7 @@ async def test_resync_snapshot_failure_during_gap_propagates_and_leaves_no_extra
     adapter = _FakeAdapter(fail_on_nth_snapshot=2)  # 최초 스냅샷은 성공, 갭 재동기화가 실패
     repo = _FakeCoverageRepo()
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     frames = [_frame(s) for s in (1, 2, 4, 5)]  # 3 누락 -> 갭
     conn = _FakeConnection(frames, raise_after=_closed())
     connect_fn, _ = _connect_sequence([conn])
@@ -291,7 +291,7 @@ async def test_coverage_repo_write_failure_propagates_not_swallowed():
     adapter = _FakeAdapter()
     repo = _FakeCoverageRepo(fail_on_nth_upsert=1)  # 첫 span 저장부터 실패
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     frames = [_frame(s) for s in (1, 2, 4, 5)]  # 갭 발생 -> 첫 close_span 트리거
     conn = _FakeConnection(frames, raise_after=_closed())
     connect_fn, _ = _connect_sequence([conn])
@@ -337,7 +337,7 @@ def test_apply_diff_repeated_updates_meet_throughput_budget(perf_budget: Any) ->
         book = OrderBookState.from_snapshot(
             L2Snapshot(
                 sequence=0,
-                as_of=datetime.now(timezone.utc),
+                as_of=datetime.now(UTC),
                 bids={Decimal("10.0"): Decimal("1")},
                 asks={Decimal("10.5"): Decimal("1")},
             )
@@ -345,7 +345,7 @@ def test_apply_diff_repeated_updates_meet_throughput_budget(perf_budget: Any) ->
         for i in range(iterations):
             diff = L2Diff(
                 sequence=i + 1,
-                as_of=datetime.now(timezone.utc),
+                as_of=datetime.now(UTC),
                 bid_updates=((Decimal("10.0"), Decimal(str(1 + i % 5))),),
                 ask_updates=(),
             )
@@ -373,7 +373,7 @@ def test_large_orderbook_top_n_meets_latency_budget(perf_budget: Any) -> None:
     bids = {Decimal(i): Decimal("1") for i in range(n_levels)}
     asks = {Decimal(i + n_levels): Decimal("1") for i in range(n_levels)}
     book = OrderBookState.from_snapshot(
-        L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids=bids, asks=asks)
+        L2Snapshot(sequence=0, as_of=datetime.now(UTC), bids=bids, asks=asks)
     )
 
     def _run() -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:

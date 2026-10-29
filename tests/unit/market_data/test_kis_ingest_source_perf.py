@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -101,8 +101,8 @@ async def test_fetch_candles_p95_latency_detection_power_10x_delay_goes_red(
     이 테스트는 거짓 녹색(undetectable regression) 증거다.
     """
     source = KisIngestSource(_make_adapter_with_delay(delay_sec=0.3))
-    start = datetime(2026, 9, 2, tzinfo=timezone.utc)
-    end = datetime(2026, 9, 3, tzinfo=timezone.utc)
+    start = datetime(2026, 9, 2, tzinfo=UTC)
+    end = datetime(2026, 9, 3, tzinfo=UTC)
     await source.fetch_candles(Venue.KIS_KRX, "005930", Timeframe.D1, start, end)  # 토큰 캐시 예열
 
     n = 10

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -24,7 +24,7 @@ from src.foundation.ml.contracts.v1 import ModelCard, TrainDataLineage
 from src.foundation.ml.domain.registry_rules import ModelHashMismatchError
 from tests.support.db import create_pool_with_retry
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 @pytest.fixture

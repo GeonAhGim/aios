@@ -6,7 +6,7 @@ failure injection 1, numeric performance assertion 1, gate-red reproduction
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -19,7 +19,7 @@ from src.foundation.ai.factory.domain.schema import (
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
 
-_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_START = datetime(2026, 1, 1, tzinfo=UTC)
 _END = _START + timedelta(days=30)
 
 

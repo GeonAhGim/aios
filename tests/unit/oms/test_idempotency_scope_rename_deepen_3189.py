@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import statistics
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -66,7 +66,7 @@ def _order_scope_kwargs(**overrides: Any) -> dict[str, Any]:
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=1,
-        window_start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        window_start=datetime(2026, 1, 1, tzinfo=UTC),
     )
     defaults.update(overrides)
     return defaults
@@ -84,7 +84,7 @@ def _command_kwargs(scope: Any) -> dict[str, Any]:
         price=None,
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=uuid4(),
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 
@@ -172,7 +172,7 @@ def test_scope_hash_and_client_order_id_and_command_digest_meet_borrowed_p99_bud
             strategy_version="1.0.0",
             execution_id=i,
             intent_seq=i,
-            window_start=datetime.now(timezone.utc),
+            window_start=datetime.now(UTC),
         )
         for i in range(_PERF_ITERATIONS)
     ]

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -46,7 +46,7 @@ from tests.foundation.integration.performance.conftest import (
 )
 from tests.integration.conftest import create_test_tenant
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _PERIOD_START = _NOW - timedelta(days=1)
 
 

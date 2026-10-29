@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -82,7 +82,7 @@ class FakeChartingRepository:
         name: str,
         layout_state: dict[str, Any],
     ) -> ChartLayout:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         layout = ChartLayout(
             id=uuid4(),
             tenant_id=tenant_id,
@@ -135,7 +135,7 @@ class FakeChartingRepository:
             layout_state=layout_state if layout_state is not None else current.layout_state,
             revision=current.revision + 1,
             created_at=current.created_at,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         self.layouts[layout_id] = updated
         return updated
@@ -169,7 +169,7 @@ class FakeChartingRepository:
             schema_version=schema_version,
             drawings=tuple(drawings),
             revision=current.revision + 1,
-            updated_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
         )
         self.drawing_sets[layout_id] = updated
         return updated
@@ -315,7 +315,7 @@ def test_layout_and_drawing_set_to_view_perf_budget(perf_budget: PerfBudget) -> 
     여유 포함, test_indicator_template_application.py의 동일 예산과 대칭).
 
     raw time.perf_counter() → perf_budget.assert_within() 전환(task-10957)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     layout = ChartLayout(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -356,7 +356,7 @@ def test_layout_and_drawing_set_to_view_0_convergence() -> None:
     약 15.6ms 양자화tick 때문에 1회 호출은 항상 0ms로 읽힌다. 이 테스트는
     그 사실을 명시적으로 검증하고, batch(2000회)가 그 양자화 오차를
     호출당 ~0.008ms로 줄여준다는 사실을 문서화한다(task-11539 감사)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     layout = ChartLayout(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -402,7 +402,7 @@ def test_layout_and_drawing_set_to_view_perf_budget_goes_red_with_10x_delay(
     2000회 호출당 0.5ms sleep = 1초 wall time로 예산(300ms)을 초과하므로
     assert_within이 적색으로 넘어간다."""
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     layout = ChartLayout(
         id=uuid4(),
         tenant_id=uuid4(),
@@ -456,7 +456,7 @@ def test_layout_perf_budget_goes_green_with_zero_virtual_delay(
     이는 가상 지연 주입이 실제 지연을 주지 않았을 때 측정치를 오염시키지
     않음을 증명한다(task-20675 가상 지연 전환 검증)."""
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     layout = ChartLayout(
         id=uuid4(),
         tenant_id=uuid4(),

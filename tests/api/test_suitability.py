@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -20,8 +20,8 @@ from src.api.schemas.suitability import (
 )
 from src.services.risk_profile_service import RiskProfileRecord
 
-_ASSESSED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
-_NEXT_DUE = datetime(2027, 1, 1, tzinfo=timezone.utc)
+_ASSESSED_AT = datetime(2026, 1, 1, tzinfo=UTC)
+_NEXT_DUE = datetime(2027, 1, 1, tzinfo=UTC)
 
 
 def _record(**overrides: Any) -> RiskProfileRecord:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -21,7 +21,7 @@ from src.foundation.ai.gateway.domain.confirm import (
     verify_and_consume,
 )
 
-_NOW = datetime(2026, 9, 17, 0, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 17, 0, 0, 0, tzinfo=UTC)
 _DIGEST = "sha256:" + "ab" * 32
 
 

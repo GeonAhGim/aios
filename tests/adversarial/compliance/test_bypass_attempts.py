@@ -23,7 +23,7 @@ DEEPEN(task-10492, D2→D3): 실패 주입/성능 예산/게이트 적색 재현
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import asyncpg
@@ -171,7 +171,7 @@ async def test_mandate_tightening_invalidates_cached_allow_before_ttl_expiry(
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "ABC"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert allowed.verdict == ComplianceVerdict.ALLOW
 
@@ -192,7 +192,7 @@ async def test_mandate_tightening_invalidates_cached_allow_before_ttl_expiry(
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "ABC"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert replay.verdict == ComplianceVerdict.DENY
     assert "restricted_list" in replay.reason_codes
@@ -223,7 +223,7 @@ async def test_paused_bundle_denies_even_with_permissive_compliance_mandate_flag
         mandate_revision_id=None,
         symbol="BTC/USDT",
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     permissive = await evaluate_compliance_gate(
         repo, context, require_compliance_mandate=False, now=now
@@ -264,7 +264,7 @@ async def test_worm_trigger_blocks_policy_bundle_rule_hash_tamper(pool, repo, tr
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     stored = await repo.get_policy_decision(decided.compliance_decision_id)
     assert stored is not None
@@ -296,7 +296,7 @@ async def test_worm_trigger_blocks_policy_decision_delete(pool, repo, trust_repo
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert denied.verdict == ComplianceVerdict.DENY
 
@@ -332,7 +332,7 @@ async def test_explicit_none_symbol_snapshot_fails_closed_not_silently_skipped(
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": None},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     assert result.verdict == ComplianceVerdict.DENY
@@ -351,7 +351,7 @@ async def test_concurrent_restricted_and_allowed_evaluations_do_not_cross_contam
     심볼의 ALLOW 판정을 가로채는 경합을 노리는 시도. `evaluate_pre_trade`는
     스냅샷마다 다른 지문을 쓰므로 어떤 인터리빙에서도 섞이면 안 된다."""
     tenant_id = await _active_tenant(pool, repo, trust_repo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     denied, allowed = await asyncio.gather(
         evaluate_pre_trade(
@@ -391,7 +391,7 @@ async def test_concurrent_pause_and_pretrade_evaluation_denies_race(pool, repo, 
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "BTC/USDT"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert warm.verdict == ComplianceVerdict.ALLOW  # pause 전 캐시를 실제로 데운다
 
@@ -402,7 +402,7 @@ async def test_concurrent_pause_and_pretrade_evaluation_denies_race(pool, repo, 
                 tenant_id=tenant_id,
                 portfolio_id=None,
                 snapshot={"symbol": "ETH/USDT"},
-                now=datetime.now(timezone.utc),
+                now=datetime.now(UTC),
             )
         except ComplianceBundleInactiveError:
             pass  # 인터리빙에 따라 ALLOW/DENY 둘 다 정당할 수 있다 — 강제하지 않는다.
@@ -415,7 +415,7 @@ async def test_concurrent_pause_and_pretrade_evaluation_denies_race(pool, repo, 
             tenant_id=tenant_id,
             portfolio_id=None,
             snapshot={"symbol": "BTC/USDT"},
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
 
@@ -437,7 +437,7 @@ async def test_cross_tenant_explain_lookup_rejected_at_application_layer(pool, r
         tenant_id=owner_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     with pytest.raises(ExplainDecisionNotFoundError):
@@ -465,7 +465,7 @@ async def test_explain_refuses_to_reproduce_when_bundle_hash_has_drifted(
         tenant_id=tenant_id,
         portfolio_id=None,
         snapshot={"symbol": "XYZ"},
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     monkeypatch.setattr(explain_module, "compile_rule_hash", lambda revision: "drifted-hash")

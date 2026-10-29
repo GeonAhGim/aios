@@ -5,7 +5,7 @@ wrong type, or breaking a value rule must fail some test in this file.
 """
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -195,7 +195,7 @@ def test_portfolio_state_input_accepts_exposures_aggregate():
         per_strategy_pct={"strat-1": Decimal("10")},
         total_exposure_pct=Decimal("10"),
         cash_pct=Decimal("90"),
-        as_of=datetime(2026, 9, 9, tzinfo=timezone.utc),
+        as_of=datetime(2026, 9, 9, tzinfo=UTC),
     )
     inp = PortfolioStateInput(
         allocated_capital=Decimal("1000"),

@@ -22,7 +22,7 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -105,7 +105,7 @@ def _decision(tenant_id: UUID, bundle_id: UUID, fingerprint: str) -> PolicyDecis
         outcome=PolicyOutcome.ALLOW,
         reason_codes=(),
         obligations=(),
-        evaluated_at=datetime.now(timezone.utc),
+        evaluated_at=datetime.now(UTC),
         expires_at=None,
     )
 

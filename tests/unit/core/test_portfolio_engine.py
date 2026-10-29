@@ -9,7 +9,7 @@ engine.py는 FROZEN_PAPER_ONLY이고 이 task(decision)에 명시적 FROZEN 승�
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L22.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, DivisionByZero
 from typing import Any
 
@@ -35,7 +35,7 @@ def _signal(direction: OrderSide) -> Signal:
         target_position=Decimal("0"),
         stop_loss=None,
         take_profit=None,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         to_state=to_state,
     )
 

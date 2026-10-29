@@ -12,7 +12,7 @@ Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §9 AI-4 DoD
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -30,7 +30,7 @@ from src.foundation.ai.gateway.application.issue_token import issue_token
 from src.foundation.ai.gateway.application.revoke_token import revoke_token
 from src.foundation.ai.gateway.domain.token_rules import Scope
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 @pytest.fixture

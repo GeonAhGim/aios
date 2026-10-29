@@ -29,7 +29,7 @@ import asyncio
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -53,7 +53,7 @@ from tests.integration.oms.conftest import create_test_user
 from tests.support.db import create_pool_with_retry
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _CONCURRENT_RUNS = 15
 
 
@@ -142,7 +142,7 @@ def _child(
 
 
 def _order_view(order_id: uuid.UUID) -> OrderView:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return OrderView(
         order_id=order_id,
         tenant_id=uuid.uuid4(),
@@ -197,7 +197,7 @@ async def _status(pool: asyncpg.Pool, order_id: uuid.UUID) -> str:
 
 
 def _plan_with_one_slice(parent_id: uuid.UUID, qty: Decimal, slice_seq: int = 0) -> AlgoRunPlan:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[_child(parent_id, slice_seq, qty, scheduled_at=now - timedelta(seconds=1))],
@@ -225,7 +225,7 @@ async def test_concurrent_overcommit_only_lets_capacity_through(pool):
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
     repo = PostgresOrderRepository()
     submitter_a, submitter_b = _Submitter(), _Submitter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result_a, result_b = await asyncio.gather(
         _tick(_plan_with_one_slice(parent_id, Decimal("6")), pool, repo, submitter_a, now),
@@ -249,7 +249,7 @@ async def test_concurrent_overcommit_at_exact_boundary_admits_both_no_lost_updat
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
     repo = PostgresOrderRepository()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result_a, result_b = await asyncio.gather(
         _tick(_plan_with_one_slice(parent_id, Decimal("5")), pool, repo, _Submitter(), now),
@@ -268,7 +268,7 @@ async def test_single_tick_burst_admits_up_to_capacity_then_denies_rest(pool):
     one tick call must stop exactly at capacity."""
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[
@@ -295,7 +295,7 @@ async def test_concurrent_reservations_against_already_terminal_parent_all_denie
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"), status="CANCELLED")
     repo = PostgresOrderRepository()
     submitter_a, submitter_b = _Submitter(), _Submitter()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result_a, result_b = await asyncio.gather(
         _tick(_plan_with_one_slice(parent_id, Decimal("1")), pool, repo, submitter_a, now),
@@ -328,7 +328,7 @@ async def test_concurrent_terminal_transition_races_reservation_then_blocks_all_
         pool, user_id, quantity=Decimal("3"), status="CANCELLED", parent_order_id=parent_id
     )
     repo = PostgresOrderRepository()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     async def _cancel_rollup() -> None:
         async with pool.acquire() as conn, conn.transaction():
@@ -365,7 +365,7 @@ async def test_concurrent_boundary_reservation_with_injected_submit_failure_full
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
     repo = PostgresOrderRepository()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     failing = _Submitter(fail_with={0: ConnectionError("simulated venue outage")})
     healthy = _Submitter()
 
@@ -392,7 +392,7 @@ async def test_concurrent_boundary_reservation_with_gate_deny_releases_under_loa
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
     repo = PostgresOrderRepository()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     denied_submitter = _Submitter(fail_with={0: OrderSubmitDeniedError(("RESTRICTED_LIST",))})
     allowed_submitter = _Submitter()
 
@@ -419,7 +419,7 @@ async def test_many_concurrent_algo_runs_stay_within_latency_budget(pool, perf_b
     to avoid CI flakiness while still catching an O(n^2) regression."""
     user_id = await create_test_user(pool)
     repo = PostgresOrderRepository()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     parent_ids = [
         await _insert_order(pool, user_id, quantity=Decimal("10")) for _ in range(_CONCURRENT_RUNS)
     ]

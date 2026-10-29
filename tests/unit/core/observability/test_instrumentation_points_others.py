@@ -10,7 +10,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §7.2, §9 PLT-10
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -268,7 +268,7 @@ async def test_submit_paper_intent_records_order_intent_metric(
             reason_codes=[],
             obligations=[],
             rule_version="v1",
-            evaluated_at=datetime.now(timezone.utc),
+            evaluated_at=datetime.now(UTC),
             expires_at=None,
         )
 
@@ -313,7 +313,7 @@ async def test_submit_paper_intent_denied_by_risk_gate_records_no_metric(
             reason_codes=["RISK_KILL_SWITCH_GLOBAL"],
             obligations=[],
             rule_version="v1",
-            evaluated_at=datetime.now(timezone.utc),
+            evaluated_at=datetime.now(UTC),
             expires_at=None,
         )
 

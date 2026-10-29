@@ -23,7 +23,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from functools import partial
 from pathlib import Path
@@ -187,7 +187,7 @@ async def test_insert_with_nonexistent_tenant_id_raises_fk_violation(pool):
 async def test_insert_if_new_second_call_with_same_dedupe_key_returns_false(pool, signal_repo):
     tenant_id = await create_test_tenant(pool)
     dedupe_key = f"DRAWDOWN:acct-{uuid4().hex}:bucket"
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
 
     first = await signal_repo.insert_if_new(
         signal_id=uuid4(),
@@ -220,8 +220,8 @@ async def test_insert_if_new_second_call_with_same_dedupe_key_returns_false(pool
 async def test_dedupe_key_boundary_04_59_59_and_05_00_00_are_different_keys(pool, signal_repo):
     tenant_id = await create_test_tenant(pool)
     scope_ref = f"acct-{uuid4().hex}"
-    before = datetime(2026, 1, 1, 4, 59, 59, tzinfo=timezone.utc)
-    at_boundary = datetime(2026, 1, 1, 5, 0, 0, tzinfo=timezone.utc)
+    before = datetime(2026, 1, 1, 4, 59, 59, tzinfo=UTC)
+    at_boundary = datetime(2026, 1, 1, 5, 0, 0, tzinfo=UTC)
 
     key_before = dedupe_key_for("STALE_DATA", scope_ref, before)
     key_at = dedupe_key_for("STALE_DATA", scope_ref, at_boundary)
@@ -249,8 +249,8 @@ async def test_dedupe_key_boundary_04_59_59_and_05_00_00_are_different_keys(pool
 async def test_dedupe_key_boundary_05_00_00_and_05_04_59_are_same_key(pool, signal_repo):
     tenant_id = await create_test_tenant(pool)
     scope_ref = f"acct-{uuid4().hex}"
-    at_boundary = datetime(2026, 1, 1, 5, 0, 0, tzinfo=timezone.utc)
-    just_before_next = datetime(2026, 1, 1, 5, 4, 59, tzinfo=timezone.utc)
+    at_boundary = datetime(2026, 1, 1, 5, 0, 0, tzinfo=UTC)
+    just_before_next = datetime(2026, 1, 1, 5, 4, 59, tzinfo=UTC)
 
     key_at = dedupe_key_for("STALE_DATA", scope_ref, at_boundary)
     key_late = dedupe_key_for("STALE_DATA", scope_ref, just_before_next)
@@ -296,7 +296,7 @@ async def test_list_open_returns_zero_rows_for_other_tenant(pool, signal_repo):
         tenant_id=tenant_a,
         signal_type="DRAWDOWN",
         severity="CRITICAL",
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
         source="test",
     )
 
@@ -314,7 +314,7 @@ async def test_list_open_returns_only_this_tenants_signals(pool, signal_repo):
         tenant_id=tenant_a,
         signal_type="DRAWDOWN",
         severity="CRITICAL",
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
         source="test",
     )
     await signal_repo.insert_if_new(
@@ -323,7 +323,7 @@ async def test_list_open_returns_only_this_tenants_signals(pool, signal_repo):
         tenant_id=tenant_b,
         signal_type="DRAWDOWN",
         severity="CRITICAL",
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
         source="test",
     )
 
@@ -352,7 +352,7 @@ async def test_stale_candle_creates_signal_and_account_pause_via_kill_switch(
     repos = IntradayMonitorRepos(
         metrics=[metrics], signals=signal_repo, kill_switch=kill_switch_service
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result = await run_intraday_monitor_once(repos, now=now)
 
@@ -396,8 +396,8 @@ async def test_stale_candle_second_pass_same_window_does_not_pause_again(
     repos = IntradayMonitorRepos(
         metrics=[metrics], signals=signal_repo, kill_switch=kill_switch_service
     )
-    now = datetime(2026, 1, 1, 5, 1, 0, tzinfo=timezone.utc)
-    same_window_later = datetime(2026, 1, 1, 5, 4, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, 5, 1, 0, tzinfo=UTC)
+    same_window_later = datetime(2026, 1, 1, 5, 4, 0, tzinfo=UTC)
 
     first = await run_intraday_monitor_once(repos, now=now)
     second = await run_intraday_monitor_once(repos, now=same_window_later)
@@ -416,7 +416,7 @@ async def test_no_breach_emits_no_signal(pool, signal_repo, kill_switch_service)
         metrics=[metrics], signals=signal_repo, kill_switch=kill_switch_service
     )
 
-    result = await run_intraday_monitor_once(repos, now=datetime.now(timezone.utc))
+    result = await run_intraday_monitor_once(repos, now=datetime.now(UTC))
 
     assert result == []
 
@@ -488,7 +488,7 @@ async def test_recon_mismatch_breach_creates_signal_only_never_triggers_pause(
         metrics=[metrics], signals=signal_repo, kill_switch=kill_switch_service
     )
 
-    result = await run_intraday_monitor_once(repos, now=datetime.now(timezone.utc))
+    result = await run_intraday_monitor_once(repos, now=datetime.now(UTC))
 
     assert len(result) == 1
     assert result[0].type == RiskSignalType.RECON_MISMATCH
@@ -531,7 +531,7 @@ async def test_kill_switch_activation_failure_still_commits_signal_and_continues
     repos = IntradayMonitorRepos(
         metrics=[metrics_a, metrics_b], signals=signal_repo, kill_switch=kill_switch_service
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result = await run_intraday_monitor_once(repos, now=now)
 
@@ -576,7 +576,7 @@ async def test_many_accounts_completes_within_latency_budget(
     )
 
     start = time.perf_counter()
-    result = await run_intraday_monitor_once(repos, now=datetime.now(timezone.utc))
+    result = await run_intraday_monitor_once(repos, now=datetime.now(UTC))
     elapsed = time.perf_counter() - start
 
     assert len(result) == 25
@@ -607,7 +607,7 @@ async def test_provider_outage_same_window_only_first_tenant_triggers_pause(
     repos = IntradayMonitorRepos(
         metrics=[metrics_a, metrics_b], signals=signal_repo, kill_switch=kill_switch_service
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     result = await run_intraday_monitor_once(repos, now=now)
 
@@ -632,7 +632,7 @@ async def test_provider_outage_same_window_only_first_tenant_triggers_pause(
 async def test_concurrent_insert_if_new_calls_with_same_dedupe_key_only_one_wins(pool, signal_repo):
     tenant_id = await create_test_tenant(pool)
     dedupe_key = f"DRAWDOWN:race-{uuid4().hex}:bucket"
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
 
     async def _attempt() -> bool:
         return await signal_repo.insert_if_new(
@@ -664,7 +664,7 @@ async def test_concurrent_insert_if_new_different_pool_connections_only_one_wins
     하나만 이기는지 확인한다."""
     tenant_id = await create_test_tenant(pool)
     dedupe_key = f"STALE_DATA:race-instances-{uuid4().hex}:bucket"
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     repos = [PostgresSignalRepository(pool) for _ in range(8)]
 
     async def _attempt(repo: PostgresSignalRepository) -> bool:

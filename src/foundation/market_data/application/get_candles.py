@@ -21,7 +21,7 @@ first), so this is sufficient as a fail-closed signal.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import asyncpg
 
@@ -235,7 +235,7 @@ async def get_candles(
     """§9.2 LA-17: Query batches saved before `as_of`, RAW|ADJUSTED per
     `adjustment`. Gaps are returned as information only (strict exceptions
     are the responsibility of `replay_candles`)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     effective_as_of = _effective_as_of(q.as_of, now)
 
     async with pool.acquire() as conn:

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -71,11 +71,11 @@ from tests.integration.foundation.positions.conftest import (
     open_position,
 )
 
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _recon(pool: asyncpg.Pool) -> Any:

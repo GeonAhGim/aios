@@ -22,7 +22,7 @@ import asyncio
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -76,7 +76,7 @@ async def _measure(iterations: int) -> list[float]:
             try:
                 refs = PostgresReferenceRepository(pool=pool)
                 reader = PostgresReferenceReader(pool=pool)
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 inst = await refs.register(
                     conn,
                     RegisterInstrumentCommand(

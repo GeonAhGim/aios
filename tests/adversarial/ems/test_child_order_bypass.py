@@ -20,7 +20,7 @@ so the repository is mocked (`AsyncMock`) instead.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -139,7 +139,7 @@ def _parent(
     filled_quantity: Decimal = Decimal("0"),
     version: int = 3,
 ) -> OrderView:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return OrderView(
         order_id=uuid4(),
         tenant_id=uuid4(),
@@ -261,7 +261,7 @@ async def test_recompute_parent_aggregate_propagates_connection_failure_on_child
             conn,
             parent_order_id=parent.order_id,
             trace_id=uuid4(),
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
     repo.transition.assert_not_awaited()
 
@@ -350,7 +350,7 @@ async def test_recompute_parent_aggregate_fails_closed_on_version_conflict() -> 
             conn,
             parent_order_id=parent.order_id,
             trace_id=uuid4(),
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
         )
 
 
@@ -399,7 +399,7 @@ async def test_recompute_parent_aggregate_perf_budget_many_children(
                 conn,
                 parent_order_id=parent.order_id,
                 trace_id=uuid4(),
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
             )
 
     budget_ms = 800.0
@@ -448,7 +448,7 @@ async def test_recompute_parent_aggregate_perf_budget_goes_red_with_10x_delay(
                 conn,
                 parent_order_id=parent.order_id,
                 trace_id=uuid4(),
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
             )
 
     budget_ms = 800.0

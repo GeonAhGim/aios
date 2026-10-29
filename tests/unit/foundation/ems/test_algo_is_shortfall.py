@@ -8,7 +8,7 @@ function tests only.
 from __future__ import annotations
 
 import ast
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -36,7 +36,7 @@ from src.foundation.ems.domain.algo.twap import ParentTerminalError as TwapParen
 from tests.conftest import PerfBudget
 
 _IS_PATH = Path(__file__).resolve().parents[4] / "src/foundation/ems/domain/algo/is_shortfall.py"
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _algo(**overrides: object) -> AlgoSpec:

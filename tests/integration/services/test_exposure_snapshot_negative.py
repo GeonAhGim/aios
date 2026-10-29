@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -57,7 +57,7 @@ async def test_closed_position_is_excluded_from_exposure(pool):
         strategy_id=strategy_id,
         quantity=Decimal("5"),
         average_entry_price=Decimal("40000"),
-        closed_at=datetime.now(timezone.utc),
+        closed_at=datetime.now(UTC),
     )
 
     async with pool.acquire() as conn:

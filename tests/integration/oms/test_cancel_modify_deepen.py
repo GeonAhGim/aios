@@ -50,7 +50,7 @@ import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -141,7 +141,7 @@ def _cancel_command(
         "tenant_id": tenant_id,
         "reason": "TEST_CANCEL",
         "actor_subject_id": tenant_id,
-        "issued_at": datetime.now(timezone.utc),
+        "issued_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     return CancelOrderCommand.model_validate(defaults)
@@ -157,7 +157,7 @@ def _modify_command(
         "tenant_id": tenant_id,
         "reason": "TEST_MODIFY",
         "actor_subject_id": tenant_id,
-        "issued_at": datetime.now(timezone.utc),
+        "issued_at": datetime.now(UTC),
         "new_price": Decimal("110"),
         "new_quantity": None,
     }
@@ -541,7 +541,7 @@ async def test_concurrent_cancel_races_with_venue_expiry_never_corrupts_state(po
                     trace_id=uuid.uuid4(),
                     command_id=None,
                     provider_event_id="venue-expiry-sim",
-                    occurred_at=datetime.now(timezone.utc),
+                    occurred_at=datetime.now(UTC),
                     payload_hash="e" * 64,
                 )
                 result = await repo.transition(

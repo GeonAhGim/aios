@@ -39,7 +39,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid5
 
@@ -140,7 +140,7 @@ async def evaluate_recovery(
     if control is None:
         raise SafetyControlNotFoundError(str(control_id))
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     request = await repos.get_approval_request(approval_id)
     approval_status = _effective_approval_status(request, ttl_sec=repos.approval_ttl_sec, now=now)
 

@@ -8,7 +8,7 @@ Spec: 기능설계문서_v1.21.md#FD-4.2
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -58,7 +58,7 @@ async def apply_fill(
     else:
         price_amount, fee_currency = Decimal("0"), Currency.USDT.value
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     provider_id = f"poll:{order.order_id}:{filled_qty}"
     fill = FillEvent(
         provider_fill_id=provider_id,

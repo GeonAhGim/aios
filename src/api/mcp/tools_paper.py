@@ -67,7 +67,7 @@ passes `actor_subject_id=tenant_id` for tenant-initiated commands.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -186,7 +186,7 @@ def build_router(require_scope: Callable[[Scope], ScopeDependency]) -> APIRouter
     ) -> PreviewPromotionResponse:
         pool: asyncpg.Pool = request.app.state.pool
         confirm_repo = PostgresConfirmTicketRepository(pool)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ticket = await confirm_repo.issue(
             tenant_id=token.tenant_id,
             created_by_token=token.token_id,

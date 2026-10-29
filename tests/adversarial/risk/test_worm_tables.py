@@ -11,7 +11,7 @@ UPDATE해 트리거 자체가 살아있음을 증명" 재현을 `risk_decision`�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -43,7 +43,7 @@ def repo(pool: asyncpg.Pool) -> PostgresDecisionRepository:
 def _decision(
     *, tenant_id: object, execution_ref: str = "exec:1", **overrides: Any
 ) -> RiskDecision:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     base: dict[str, Any] = dict(
         decision_id=uuid4(),
         gate_kind=GateKind.PRE_TRADE,

@@ -46,7 +46,7 @@ def _verified_registry() -> SymbolRegistry:
 
 
 @pytest.fixture(autouse=True)
-def _reset_bucket_registry() -> Generator[None, None, None]:
+def _reset_bucket_registry() -> Generator[None]:
     """BR-2b — process-wide TokenBucket 싱글턴을 테스트 간 격리한다
     (test_trading_mixin_precheck.py와 동일 이유)."""
     rate_profile.reset_token_bucket_registry_for_test()

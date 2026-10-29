@@ -30,7 +30,7 @@ CTFO6118R, 시세 FHMIF10000000 — 전부 실전 tr_id이고 모의투자 치�
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -71,7 +71,7 @@ def _reject_if_expired(expiry_date: date | None, *, now: datetime | None = None)
     한국 자정 전후 몇 시간 동안 하루 오차가 생긴다."""
     if expiry_date is None:
         return
-    today = (now or datetime.now(timezone.utc)).astimezone(_KST).date()
+    today = (now or datetime.now(UTC)).astimezone(_KST).date()
     if expiry_date < today:
         raise ContractExpiredError(
             f"만기 지난 선물옵션 종목은 주문할 수 없습니다: "
@@ -125,7 +125,7 @@ class KISDomesticFutureoptionMixin:
             bid=price,  # 응답에 최우선호가 없음(문서 관례) — 근사치
             ask=price,
             volume_24h=Decimal(output.get("acml_vol", "0")),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 

@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -288,6 +288,6 @@ class InboxProcessor:
             id_value=row_id,
             expected_state_column="state",
             expected_state_value="NEW",
-            set_values={"state": "IGNORED", "processed_at": datetime.now(timezone.utc)},
+            set_values={"state": "IGNORED", "processed_at": datetime.now(UTC)},
             returning="id",
         )

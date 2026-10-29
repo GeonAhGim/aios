@@ -19,7 +19,7 @@ negative≥3·failure-injection(재처리 시 `ConcurrencyConflictError`)·repla
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -53,7 +53,7 @@ _WINDOW = timedelta(days=7)
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class _RealPorts:

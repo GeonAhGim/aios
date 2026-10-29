@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -30,7 +30,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
+async def pool() -> AsyncGenerator[asyncpg.Pool]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=64)
     yield p
     await p.close()
@@ -84,7 +84,7 @@ async def open_position(
         mark_at=None,
         base_currency=base_currency,
         last_journal_seq=0,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     repo = PostgresSnapshotRepository(pool)
     async with pool.acquire() as conn, conn.transaction():

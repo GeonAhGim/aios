@@ -9,7 +9,7 @@ D1. DoD(task-1764): 등급 승격이 `source_contract` 행의 UPDATE만으로
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -24,7 +24,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     authorize_source,
 )
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 async def _insert_contract(

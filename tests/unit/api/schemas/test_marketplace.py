@@ -7,7 +7,7 @@ converters against their upstream service models.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -36,7 +36,7 @@ from src.services.listing_service import Listing
 from src.services.purchase_service import PurchaseResult
 from src.services.review_service import Review
 
-NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 24, tzinfo=UTC)
 
 
 def _call_untyped(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:

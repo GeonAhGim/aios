@@ -14,7 +14,7 @@ mypy --strict(파라미터·반환 타입 정적 검사)가 메운다는 것을 
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -37,7 +37,7 @@ from src.foundation.positions.ports.snapshot_repository import SnapshotRepositor
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 class _FullJournalRepo:

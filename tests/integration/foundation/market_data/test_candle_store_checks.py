@@ -5,7 +5,7 @@ CTO 2026-09-23, loc_over_500 래칫(ddb6ebea 504줄). 헬퍼는 candle_store_sup
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -34,7 +34,7 @@ async def test_upsert_batch_rejects_low_below_high_check_violation(
     """negative: low > high인 캔들은 md_candle의 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -58,7 +58,7 @@ async def test_upsert_batch_rejects_close_outside_range_check_violation(
     """negative: close가 high와 low 사이에 없으면 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -82,7 +82,7 @@ async def test_upsert_batch_rejects_negative_volume(
     """negative: 음수 거래량은 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -104,7 +104,7 @@ async def test_query_with_empty_time_range(
     batch_repo: PostgresBatchRepository,
 ) -> None:
     """negative: start > end인 시간 범위 조회는 빈 결과를 반환해야 한다."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     t1 = t0 + timedelta(minutes=5)
 
     async with pool.acquire() as conn, conn.transaction():

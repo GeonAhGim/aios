@@ -26,7 +26,7 @@ decision to extend the core (out of scope for this leaf)."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -49,7 +49,7 @@ router = APIRouter(prefix="/admin/ledger/payouts", tags=["foundation:ledger-admi
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class MarkPayoutPaidRequest(BaseModel):

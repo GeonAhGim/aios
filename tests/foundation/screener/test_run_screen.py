@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -37,7 +37,7 @@ from src.foundation.screener.contracts.v1 import (
 from src.foundation.screener.domain.evaluate import ScreenerEvaluationError
 from tests.conftest import PerfBudget
 
-_LISTED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
+_LISTED_AT = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def _instrument(instrument_id: UUID, *, venue: Venue = Venue.KIS_KRX, symbol: str) -> InstrumentRef:
@@ -113,7 +113,7 @@ class FakeSavedScreenerRepository:
     async def save(self, *, tenant_id: UUID, name: str, definition: ScreenDefinition):
         from src.foundation.screener.contracts.v1 import SavedScreenerView
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         view = SavedScreenerView(
             id=uuid4(),
             tenant_id=tenant_id,

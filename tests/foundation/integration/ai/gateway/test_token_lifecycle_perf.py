@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -24,7 +24,7 @@ from tests.support.perf_inject import virtual_delayed_async
 
 _AUTHORIZE_DB_ROUNDTRIP_P95_BUDGET_MS = 50.0
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 @pytest.fixture

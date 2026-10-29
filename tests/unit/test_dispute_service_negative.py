@@ -5,7 +5,7 @@ pool/connection을 asyncpg 없이 흉내내는 이유: 실 DB 없이도 검증 �
 매핑을 커버하기 위함. 실 DB 대상 통합테스트는
 tests/integration/test_dispute_service.py 가 담당한다.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import asyncpg
@@ -106,7 +106,7 @@ async def test_submit_returns_dispute_on_success():
         "submitted_by": buyer,
         "reason": "표시된 성과와 실제 결과가 다릅니다",
         "status": "OPEN",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     conn = _FakeConn(purchase_row={"buyer_user_id": buyer}, insert_row=insert_row)
     service = _service(conn)

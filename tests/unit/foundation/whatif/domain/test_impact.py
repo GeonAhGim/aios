@@ -10,7 +10,7 @@ Depth=D2 — per ADR-2026-09-09-C Decision 1:
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from time import process_time as _original_process_time
 from unittest.mock import patch
@@ -39,7 +39,7 @@ def _make_state(
         per_strategy_pct=per_strategy_pct or {"STRAT_A": Decimal("60")},
         total_exposure_pct=total_exposure_pct,
         cash_pct=cash_pct,
-        as_of=datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc),
+        as_of=datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC),
     )
 
 

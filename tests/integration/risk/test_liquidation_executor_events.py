@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -69,7 +69,7 @@ async def _orders_and_replay(pool, request_id):
 
 async def _send_one_slice(pool, ctx, adapter):
     request_id = await _setup(pool, ctx)
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     await run_liquidation_worker_once(pool, {"bitget": adapter}, now=t0)
     await run_liquidation_worker_once(pool, {"bitget": adapter},
                                       now=t0 + timedelta(seconds=60))
@@ -115,7 +115,7 @@ async def test_event_write_failure_rolls_back_order_insert(pool, ctx, monkeypatc
 
     monkeypatch.setattr(mod, "update_from_exchange_with_fill_event", bad)
     request_id = await _setup(pool, ctx)
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
     await run_liquidation_worker_once(pool, {"bitget": FakeExchangeAdapter()}, now=t0)
     with pytest.raises(RuntimeError):
         await run_liquidation_worker_once(

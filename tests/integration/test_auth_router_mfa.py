@@ -11,7 +11,7 @@ app.router.lifespan_context로 main.py의 lifespan(asyncpg pool 생성)을
 
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -32,7 +32,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client() -> AsyncGenerator[AsyncClient]:
     async with app.router.lifespan_context(app):
         # raise_app_exceptions=False — 도메인 예외(AuthError 등)는 전역
         # Exception 핸들러(src/api/contracts/handlers.py)가 처리하는데,
@@ -64,7 +64,7 @@ async def test_mfa_setup_and_verify_round_trip(client: AsyncClient) -> None:
 
     # esc-ci-cbb8b9c62497 — 실시간 코드는 서버 검증과의 30초 구간 경계 레이스가
     # 있어(valid_window=0) 시계를 고정한다.
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         verify_response = await client.post(
             "/auth/mfa/verify", json={"totp_code": totp_at(secret, frozen_now)}, headers=headers
@@ -113,7 +113,7 @@ async def test_mfa_resetup_without_password_rejected_when_already_enabled(
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]
@@ -139,7 +139,7 @@ async def test_mfa_resetup_with_correct_password_succeeds(client: AsyncClient) -
     token = register_response.json()["data"]["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         old_secret = setup_response.json()["data"]["secret"]
@@ -212,7 +212,7 @@ async def test_mfa_code_from_previous_timestep_is_rejected_at_frozen_clock(
 
     # Server clock sits 1s past a 30s step boundary; the code was minted 2s earlier
     # (previous step) -- exactly the boundary crossing the race produces.
-    base = datetime.now(timezone.utc).replace(microsecond=0)
+    base = datetime.now(UTC).replace(microsecond=0)
     server_now = base - timedelta(seconds=base.second % 30) + timedelta(seconds=1)
     stale_code = totp_at(secret, server_now - timedelta(seconds=2))
     with mfa_clock_frozen(app, server_now):

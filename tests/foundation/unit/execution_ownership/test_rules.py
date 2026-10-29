@@ -17,7 +17,7 @@ DEEPEN(task-17094, task-11539 감사 후속):
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 
 import pytest
 
@@ -26,7 +26,7 @@ from src.foundation.execution_ownership.domain.rules import is_lease_available
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-_NOW = datetime(2026, 9, 4, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 4, 12, 0, 0, tzinfo=UTC)
 
 
 def _lease(owner_id: str, expires_at: datetime) -> ExecutionLease:

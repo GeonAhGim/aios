@@ -19,7 +19,7 @@ transition order asserted directly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -47,7 +47,7 @@ from src.foundation.connections.domain.models import (
 )
 from src.foundation.connections.domain.rules import compute_scope_fingerprint
 
-_NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 24, tzinfo=UTC)
 _ENCRYPTION_KEY = "22" * 32
 
 

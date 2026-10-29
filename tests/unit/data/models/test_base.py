@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -67,7 +67,7 @@ def test_fxrate_invalid_currency_raises_validation_error():
             base="NOT_A_CURRENCY",
             quote=Currency.USDT,
             rate=Decimal("1350.5"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="test",
         )
 
@@ -113,7 +113,7 @@ def test_fxrate_invalid_rate_type_raises_validation_error():
             base=Currency.KRW,
             quote=Currency.USDT,
             rate="not-a-number",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="test",
         )
 
@@ -124,7 +124,7 @@ def test_fxrate_missing_source_raises_validation_error():
             base=Currency.KRW,
             quote=Currency.USDT,
             rate=Decimal("1350.5"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
 
@@ -144,7 +144,7 @@ def test_fxrate_construction_failure_injection_propagates(monkeypatch):
             base=Currency.KRW,
             quote=Currency.USDT,
             rate=Decimal("1350.5"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source="test",
         )
 

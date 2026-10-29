@@ -10,7 +10,7 @@ _compute_daily_nav_fixtures.py`와 같은 패턴).
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -25,7 +25,7 @@ from src.services.execution_loop.equity_tracker import ExecutionEquityTracker
 from src.services.execution_loop.risk_inputs_assembler import RiskInputCaches
 
 POLICY = load_risk_policy()
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 def asyncpg_dsn() -> str:
@@ -82,7 +82,7 @@ async def insert_position(
 
 
 def candles(symbol: str, exchange: str, n: int) -> list[Candle]:
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     return [
         Candle(
             symbol=symbol,

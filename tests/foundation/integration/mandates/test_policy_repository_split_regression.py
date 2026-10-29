@@ -12,7 +12,7 @@ get_cached_decision의 만료 처리)을 실 DB로 확인한다."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -106,7 +106,7 @@ async def test_get_cached_decision_excludes_expired_row(pool, repo, trust_repo):
         repo, tenant_id=tenant_id, subject=PolicyEvaluationSubject(command_type="expiry-test")
     )
     fingerprint = f"expired-fp-{uuid4()}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await repo.insert_policy_decision(
         PolicyDecision(
             id=uuid4(),

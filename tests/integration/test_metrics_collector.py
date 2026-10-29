@@ -5,7 +5,7 @@
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -178,7 +178,7 @@ async def test_collect_circuit_breaker_metrics_uses_tracker_for_api_fields(pool)
 
 async def test_collect_circuit_breaker_metrics_reads_data_delay_from_freshness_tracker(pool):
     freshness = DataFreshnessTracker()
-    close_time = datetime.now(timezone.utc) - timedelta(seconds=30)
+    close_time = datetime.now(UTC) - timedelta(seconds=30)
     freshness.record("bitget", "BTC/USDT", close_time)
 
     metrics = await collect_circuit_breaker_metrics(pool, ApiCallTracker(), freshness)

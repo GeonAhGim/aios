@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -16,13 +16,13 @@ def _ticker(price: str) -> Ticker:
         bid=Decimal(price),
         ask=Decimal(price),
         volume_24h=Decimal("100"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         source_type="primary",
     )
 
 
 def _flat_candles(price: str, n: int = 5) -> list[Candle]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return [
         Candle(
             symbol="BTC/USDT",

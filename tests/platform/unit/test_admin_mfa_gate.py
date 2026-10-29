@@ -24,7 +24,7 @@ MFA 여부와 무관하게 통과)를 재현한다 -- `get_current_mfa_admin` �
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -54,7 +54,7 @@ def _admin(*, mfa_verified_at: datetime | None) -> AuthenticatedUser:
 
 
 async def test_fresh_mfa_verified_admin_passes():
-    admin = _admin(mfa_verified_at=datetime.now(timezone.utc))
+    admin = _admin(mfa_verified_at=datetime.now(UTC))
     result = await get_current_mfa_admin(admin=admin)
     assert result is admin
 
@@ -71,13 +71,13 @@ async def test_stale_mfa_verified_at_rejected():
     """task-3795/task-6482 DoD -- 16분 전에 TOTP를 통과한 세션은 JWT
     `auth_level`이 여전히 "MFA_VERIFIED"라 하더라도(로그인 이후 refresh로
     최대 14일간 그 값을 그대로 들고 다닐 수 있음) 403이어야 한다."""
-    admin = _admin(mfa_verified_at=datetime.now(timezone.utc) - timedelta(minutes=16))
+    admin = _admin(mfa_verified_at=datetime.now(UTC) - timedelta(minutes=16))
     with pytest.raises(AdminMfaRequiredError, match=str(admin.user_id)):
         await get_current_mfa_admin(admin=admin)
 
 
 async def test_mfa_verified_at_exactly_at_window_boundary_passes():
-    admin = _admin(mfa_verified_at=datetime.now(timezone.utc) - timedelta(minutes=14, seconds=59))
+    admin = _admin(mfa_verified_at=datetime.now(UTC) - timedelta(minutes=14, seconds=59))
     result = await get_current_mfa_admin(admin=admin)
     assert result is admin
 
@@ -89,14 +89,14 @@ async def test_mfa_verified_just_past_15min_boundary_rejected():
     Windows의 `datetime.now()` 해상도(약 15.6ms)에서는 두 번의 now()가 같은 값을 돌려줘
     경과가 정확히 15분(= 창 안, `<=`)이 되어 간헐적으로 통과했다. 경계는 아래 순수 함수
     테스트가 주입한 시각으로 고정하고, 게이트는 창을 확실히 넘긴 입력으로 검증한다."""
-    admin = _admin(mfa_verified_at=datetime.now(timezone.utc) - timedelta(minutes=15, seconds=1))
+    admin = _admin(mfa_verified_at=datetime.now(UTC) - timedelta(minutes=15, seconds=1))
     with pytest.raises(AdminMfaRequiredError, match=str(admin.user_id)):
         await get_current_mfa_admin(admin=admin)
 
 
 def test_mfa_step_up_window_boundary_is_inclusive_and_exact():
     """경계 고정(시각 주입) — 정확히 15분은 창 안(`<=`), 1마이크로초라도 넘으면 창 밖."""
-    now = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 1, 12, 0, 0, tzinfo=UTC)
     window = break_glass.MFA_STEP_UP_WINDOW
     assert break_glass.mfa_step_up_fresh(now - window, now=now) is True
     assert break_glass.mfa_step_up_fresh(now - window - timedelta(microseconds=1), now=now) is False
@@ -125,7 +125,7 @@ async def test_mfa_enabled_but_never_verified_rejected():
 async def test_mfa_step_up_fresh_monkeypatch_raises():
     """실패주입 — monkeypatch로 break_glass.mfa_step_up_fresh 가 예외를
     유발할 때 게이트가 그 예외를 그대로 전파한다."""
-    admin = _admin(mfa_verified_at=datetime.now(timezone.utc))
+    admin = _admin(mfa_verified_at=datetime.now(UTC))
     import src.core.security.break_glass as bg_module
 
     with pytest.raises(ValueError, match="injected"):

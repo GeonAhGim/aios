@@ -21,7 +21,7 @@ DoD(1) 필드 단위 동일(불일치 1건이면 FAIL). DoD(2) 배선증명 nega
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -39,7 +39,7 @@ from tests.integration.oms.conftest import insert_order
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------- orders ---
@@ -159,7 +159,7 @@ def _provider_fill_event(
     `InboxProcessor._resolve_order_id` (`exchange_order_id` is a fresh
     unrelated string — the OR-clause still matches on `client_order_id`)."""
     fill_id = f"fill-{uuid4().hex}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fill = FillEvent(
         provider_fill_id=fill_id,
         venue="bitget",
@@ -375,7 +375,7 @@ async def test_projection_with_fills_but_no_events_uses_fills_only(pool) -> None
             fee=Decimal("0.5"),
             fee_currency="USDT",
             liquidity="TAKER",
-            venue_ts=datetime.now(timezone.utc),
+            venue_ts=datetime.now(UTC),
         ),
     ]
 

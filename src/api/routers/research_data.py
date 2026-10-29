@@ -21,7 +21,7 @@ The mount path follows the same namespace as other foundation routers
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -93,7 +93,7 @@ async def search_items_endpoint(
     """`source_id` is required -- DC-27 source-contract judgment operates
     per source (§ module docstring), so a source-agnostic full search falls
     outside this leaf's scope. `instruments`/`kinds` are comma-separated."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with pool.acquire() as conn:
         await authorize_source_read(
             conn, source_id, repo=source_contracts, clock=lambda: now, use=DataUse.USER_OWN_DISPLAY
@@ -129,7 +129,7 @@ async def get_item_endpoint(
     the caller's tenant, returning 403 -- reversing the order would signal
     "this source was denied" before "this item_id exists"."""
     item = require_item(await repo.get_item(context.tenant_id, item_id))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with pool.acquire() as conn:
         await authorize_source_read(
             conn,
@@ -196,7 +196,7 @@ async def search_research_data_endpoint(
     actually appears, silently filtering out items from unauthorized sources
     (the denial itself is never disclosed -- unlike the single-source lookup's
     403, here a denial is just part of the search result)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     candidates = await repo.list_by_tenant_across_sources(
         context.tenant_id, limit=_SEARCH_CANDIDATE_LIMIT
     )

@@ -1,7 +1,7 @@
 """FD-14 통합테스트 — /alerts 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -17,7 +17,7 @@ STRONG_PASSWORD = "Str0ng!Passw0rd"
 
 
 def _make_candles(closes: list[float]) -> list[Candle]:
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     candles = []
     for i, close in enumerate(closes):
         open_time = base + timedelta(hours=i)

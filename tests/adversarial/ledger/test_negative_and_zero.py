@@ -31,7 +31,7 @@ ms 상수는 `tests/integration/foundation/ledger/test_perf_journal.py`
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -57,7 +57,7 @@ from tests.integration.conftest import create_test_user
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _always_eligible(strategy_id: str, version: str, seller_user_id: object = None) -> bool:

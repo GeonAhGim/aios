@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -199,7 +199,7 @@ async def test_recovery_closed_row_rejects_stale_ack_real_db(pool):
         view = await order_repo.get_for_update(conn, order_id)
         row_id = await outbox_repo.enqueue(
             conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
-            not_before=datetime.now(timezone.utc),
+            not_before=datetime.now(UTC),
         )
 
     gate = _RealGate()
@@ -279,7 +279,7 @@ async def test_stale_write_rejection_round_trip_budget_real_db() -> None:
             view = await order_repo.get_for_update(conn, order_id)
             row_id = await outbox_repo.enqueue(
                 conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
-                not_before=datetime.now(timezone.utc),
+                not_before=datetime.now(UTC),
             )
 
         gate = _RealGate()
@@ -368,7 +368,7 @@ async def test_broken_fence_lets_stale_write_corrupt_recovered_order_real_db(
         view = await order_repo.get_for_update(conn, order_id)
         row_id = await outbox_repo.enqueue(
             conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
-            not_before=datetime.now(timezone.utc),
+            not_before=datetime.now(UTC),
         )
 
     gate = _RealGate()

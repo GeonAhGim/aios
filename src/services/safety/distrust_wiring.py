@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 
@@ -70,7 +70,7 @@ async def restore_distrust_state(pool: asyncpg.Pool, monitor: DataDistrustMonito
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT symbol, level, since FROM data_distrust_state")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for row in rows:
         elapsed = max((now - row["since"]).total_seconds(), 0.0)
         monitor.restore(row["symbol"], DataDistrustLevel(row["level"]), since=elapsed)

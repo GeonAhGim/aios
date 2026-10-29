@@ -14,7 +14,7 @@ test_ingest_candles_tenant.py에 있다(공용 헬퍼는 ingest_candles_support.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -41,7 +41,7 @@ __all__ = ["deps"]
 
 async def test_ingest_accepts_and_stores_batch_with_one_audit_event(pool, deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [
         _candle(t0, "100", "110", "90", "105", "10"),
         _candle(t0 + timedelta(minutes=1), "105", "115", "95", "110", "12"),
@@ -72,7 +72,7 @@ async def test_ingest_accepts_and_stores_batch_with_one_audit_event(pool, deps):
 
 async def test_ingest_reingest_is_idempotent_and_creates_new_batch_row(pool, deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
     cmd = _cmd(instrument, t0, t0 + timedelta(minutes=1))
 
@@ -94,7 +94,7 @@ async def test_ingest_reingest_is_idempotent_and_creates_new_batch_row(pool, dep
 
 async def test_ingest_quarantines_duplicate_conflict_candles(pool, deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     conflicting = [
         _candle(t0, "100", "110", "90", "105", "10"),
         _candle(t0, "100", "120", "90", "115", "10"),  # 같은 open_time, 내용 다름
@@ -133,7 +133,7 @@ async def test_ingest_cross_batch_conflict_corrects_accepted_and_audits_it(pool,
     한다(원래 이벤트는 WORM이라 그대로 두고, 추가 이벤트로 진실을 보강한다).
     """
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candle = _candle(t0, "100", "110", "90", "105", "10")
     cmd = _cmd(instrument, t0, t0 + timedelta(minutes=1))
 
@@ -172,7 +172,7 @@ async def test_ingest_cross_batch_conflict_corrects_accepted_and_audits_it(pool,
 
 async def test_ingest_quarantines_ohlc_violation_candle_and_stores_rest(pool, deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     good = [_candle(t0 + timedelta(minutes=i), "100", "110", "90", "105", "10") for i in range(4)]
     bad = _candle(t0 + timedelta(minutes=4), "100", "90", "80", "85", "10")  # high(90) < open(100)
     result = await _run(
@@ -198,7 +198,7 @@ async def test_ingest_quarantines_ohlc_violation_candle_and_stores_rest(pool, de
 
 async def test_ingest_rolls_back_everything_on_audit_failure(pool, deps):
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
     cmd = _cmd(instrument, t0, t0 + timedelta(minutes=1))
 
@@ -272,7 +272,7 @@ async def test_ingest_round_trip_count_regression_guard(pool, deps):
     드러났으므로 게이트로 쓰지 않고, 호출당 순차 DB 왕복 수(구조 회귀 —
     N+1 조회가 다시 생기는 실제 코드 결함)만 차단 게이트로 잡는다."""
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [
         _candle(t0 + timedelta(minutes=i), "100", "110", "90", "105", "10") for i in range(20)
     ]
@@ -310,7 +310,7 @@ async def test_ingest_quarantines_entire_batch_when_reject_ratio_gate_turns_red(
     (2/5, 상한 20% 초과)로 만들어 게이트를 적색으로 뒤집고 "좋은" 캔들까지
     포함한 배치 전체가 저장 대신 격리되는지 증명한다."""
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     good = [_candle(t0 + timedelta(minutes=i), "100", "110", "90", "105", "10") for i in range(3)]
     # high(90) < open(100) — test_ingest_quarantines_ohlc_violation... 와 동일한
     # 캔들로, check_candle이 REJECT 이슈를 정확히 1개만 내는 것이 이미 검증됨.
@@ -365,7 +365,7 @@ async def test_f9_toctou_delisted_during_fetch_rejects_write(pool, deps):
     SymbolNotTradableError로 거부해야 한다(AUDIT_2026-10-01_data_ingest_replay §4 F9, L등급).
     """
     instrument = await _listed_instrument(deps)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candles = [_candle(t0, "100", "110", "90", "105", "10")]
     source = _DelistingDuringFetchSource(candles, pool, instrument.instrument_id)
 

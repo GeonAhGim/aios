@@ -7,7 +7,7 @@ budget for repeated model construction (ADR-2026-09-09-C Decision 1).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # PerfBudget: lazy import so ruff does not flag the type annotation (F821).
 # Real type is from tests.conftest; string annotation avoids the import at runtime.
@@ -36,7 +36,7 @@ def _consent_decision() -> ConsentDecision:
         disclosure_id=uuid4(),
         disclosure_revision=1,
         state=ConsentState.ACTIVE,
-        accepted_at=datetime.now(timezone.utc),
+        accepted_at=datetime.now(UTC),
         revoked_at=None,
         expires_at=None,
     )
@@ -65,7 +65,7 @@ def test_accept_disclosure_request_invalid_purpose_type_raises() -> None:
 
 def test_trust_status_response_valid_roundtrip() -> None:
     tenant_id = uuid4()
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     resp = TrustStatusResponse(
         tenant_id=tenant_id,
         consents=[_consent_decision()],
@@ -81,7 +81,7 @@ def test_trust_status_response_invalid_tenant_id_raises() -> None:
         TrustStatusResponse(
             tenant_id="not-a-uuid",
             consents=[],
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -90,7 +90,7 @@ def test_trust_status_response_invalid_consents_element_raises() -> None:
         TrustStatusResponse(
             tenant_id=uuid4(),
             consents=["not-a-consent-decision"],
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -114,7 +114,7 @@ def test_trust_status_response_dependency_failure_injected(monkeypatch: pytest.M
         trust_schema.TrustStatusResponse(
             tenant_id=uuid4(),
             consents=[],
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -125,7 +125,7 @@ def test_trust_status_response_construction_throughput_budget(
     """p95 construction latency for 500 responses stays under 50ms/op budget
     (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""
     tenant_id = uuid4()
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     consents = [_consent_decision() for _ in range(5)]
 
     # batch=500: 총 500회 호출을 한 구간에 묶어 process_time 양자화 오차 제거
@@ -152,7 +152,7 @@ def test_cpu_measurement_converges_to_zero_for_fast_call(
     불변식(I-03): 순수 도메인 로직은 1ms 미만이어야 한다.
     """
     tenant_id = uuid4()
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     consents = [_consent_decision() for _ in range(5)]
 
     def _one_call() -> None:
@@ -192,7 +192,7 @@ def test_gate_red_budget_catches_10x_delay_injection(
     monkeypatch.setattr("time.process_time", _fake_process_time)
 
     tenant_id = uuid4()
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     consents = [_consent_decision() for _ in range(5)]
 
     def _one_call() -> None:

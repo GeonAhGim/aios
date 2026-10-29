@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -28,7 +28,7 @@ from src.foundation.ai.gateway.domain.token_rules import Scope
 from tests._perf.relative_budget import RelativeBudget
 from tests.support.perf_budget import PerfBudget
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _DIGEST = "a" * 64
 
 
@@ -87,14 +87,14 @@ async def test_issue_get_mark_consumed_round_trip(
     assert fetched.consumed_at is None
 
     consumed = await repo.mark_consumed(
-        ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(timezone.utc)
+        ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)
     )
     assert consumed is not None
     assert consumed.consumed_at is not None
 
     # already consumed -- WHERE consumed_at IS NULL matches zero rows
     replay = await repo.mark_consumed(
-        ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(timezone.utc)
+        ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)
     )
     assert replay is None
 
@@ -237,10 +237,10 @@ async def test_concurrent_mark_consumed_only_one_request_wins(
 
     results = await asyncio.gather(
         repo.mark_consumed(
-            ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(timezone.utc)
+            ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)
         ),
         repo.mark_consumed(
-            ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(timezone.utc)
+            ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)
         ),
     )
     winners = [r for r in results if r is not None]

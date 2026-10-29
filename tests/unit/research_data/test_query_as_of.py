@@ -16,7 +16,7 @@ DoD (D2 minimum):
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -32,7 +32,7 @@ from tests.conftest import PerfBudget
 
 # --- fixtures ---
 
-_BASE_TIME = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+_BASE_TIME = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def _item(
@@ -71,11 +71,11 @@ def test_naive_as_of_raises() -> None:
 
 def test_future_item_excluded_by_as_of() -> None:
     """RD-A1: item with known_at > as_of is never returned."""
-    future_item = _item(known_at=datetime(2026, 7, 1, tzinfo=timezone.utc))
-    past_item = _item(known_at=datetime(2026, 5, 1, tzinfo=timezone.utc))
+    future_item = _item(known_at=datetime(2026, 7, 1, tzinfo=UTC))
+    past_item = _item(known_at=datetime(2026, 5, 1, tzinfo=UTC))
     items = [future_item, past_item]
 
-    result = search(items, as_of=datetime(2026, 6, 15, tzinfo=timezone.utc))
+    result = search(items, as_of=datetime(2026, 6, 15, tzinfo=UTC))
 
     assert len(result) == 1
     assert result[0] is past_item
@@ -137,11 +137,11 @@ def test_future_item_leak_injection() -> None:
     by caller assumptions."""
     # Simulate a "corrupted" list where a future item slipped in
     future_item = _item(
-        known_at=datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
+        known_at=datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC),
         instruments=("KR:A005930", "KR:A070000"),
     )
     valid_item = _item(
-        known_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        known_at=datetime(2026, 6, 1, tzinfo=UTC),
         instruments=("KR:A005930",),
     )
     items = [valid_item, future_item]
@@ -150,7 +150,7 @@ def test_future_item_leak_injection() -> None:
     result = search(
         items,
         instruments=["KR:A005930", "KR:A070000"],
-        as_of=datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc),
+        as_of=datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC),
     )
 
     assert len(result) == 1
@@ -171,7 +171,7 @@ def test_search_latency_under_budget(perf_budget: PerfBudget) -> None:
     """
     items = [
         _item(
-            known_at=datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(days=i),
+            known_at=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=i),
             instruments=(f"KR:SYM{i:04d}",),
             kind=["filing", "news", "macro", "alt"][i % 4],
         )
@@ -183,7 +183,7 @@ def test_search_latency_under_budget(perf_budget: PerfBudget) -> None:
             items,
             instruments=["KR:SYM0500"],
             kinds=["news"],
-            as_of=datetime(2026, 6, 15, tzinfo=timezone.utc),
+            as_of=datetime(2026, 6, 15, tzinfo=UTC),
         ),
         budget_ms=300.0,
         n=5,
@@ -208,7 +208,7 @@ def test_perf_budget_catches_10x_delay_injection(
 
     items = [
         _item(
-            known_at=datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(days=i),
+            known_at=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=i),
             instruments=(f"KR:SYM{i:04d}",),
             kind=["filing", "news", "macro", "alt"][i % 4],
         )
@@ -234,7 +234,7 @@ def test_perf_budget_catches_10x_delay_injection(
                 items,
                 instruments=["KR:SYM0500"],
                 kinds=["news"],
-                as_of=datetime(2026, 6, 15, tzinfo=timezone.utc),
+                as_of=datetime(2026, 6, 15, tzinfo=UTC),
             ),
             budget_ms=budget_ms,
             n=5,
@@ -256,9 +256,9 @@ def test_gate_red_reproduction() -> None:
     a naive string/attribute comparison but fail the bitemporal check.
     """
     # Item exactly at the boundary
-    boundary_item = _item(known_at=datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc))
+    boundary_item = _item(known_at=datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC))
     # Item 1 microsecond after as_of — should be excluded
-    as_of_time = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+    as_of_time = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
     just_after_item = _item(
         known_at=as_of_time + timedelta(microseconds=1),
     )
@@ -303,7 +303,7 @@ def test_query_filter_defaults_to_now() -> None:
     f = QueryFilter()
     now = f.as_of_now
     # Should be close to current time (within 1 second)
-    diff = abs((now - datetime.now(timezone.utc)).total_seconds())
+    diff = abs((now - datetime.now(UTC)).total_seconds())
     assert diff < 1
 
 
@@ -311,7 +311,7 @@ def test_query_filter_as_of_now_uses_injected_clock_deterministically() -> None:
     """QueryFilter.as_of_now resolves via the injected `clock` callable, not
     a fresh `datetime.now()` read each call -- fixing the clock makes
     `as_of_now` deterministic (task-10468, F4: PIT auto-bind non-determinism)."""
-    fixed = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    fixed = datetime(2030, 1, 1, tzinfo=UTC)
     f = QueryFilter(clock=lambda: fixed)
     assert f.as_of_now == fixed
     assert f.as_of_now == f.as_of_now
@@ -321,7 +321,7 @@ def test_search_as_of_uses_injected_clock_deterministically() -> None:
     """search() omitting `as_of` resolves via the injected `clock`, not the
     real wall clock -- same inputs + same fixed clock => same result set
     across repeated calls (point-in-time query determinism)."""
-    fixed = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    fixed = datetime(2030, 1, 1, tzinfo=UTC)
     items = (
         _item(known_at=fixed - timedelta(days=1)),
         _item(known_at=fixed + timedelta(days=1)),
@@ -338,24 +338,24 @@ def test_query_filter_with_values() -> None:
     f = QueryFilter(
         instruments=["KR:A005930"],
         kinds=["filing"],
-        span=(datetime(2026, 1, 1, tzinfo=timezone.utc), None),
-        as_of=datetime(2026, 6, 15, tzinfo=timezone.utc),
+        span=(datetime(2026, 1, 1, tzinfo=UTC), None),
+        as_of=datetime(2026, 6, 15, tzinfo=UTC),
     )
     assert f.instruments == ("KR:A005930",)
     assert f.kinds == ("filing",)
-    assert f.span == (datetime(2026, 1, 1, tzinfo=timezone.utc), None)
-    assert f.as_of == datetime(2026, 6, 15, tzinfo=timezone.utc)
+    assert f.span == (datetime(2026, 1, 1, tzinfo=UTC), None)
+    assert f.as_of == datetime(2026, 6, 15, tzinfo=UTC)
 
 
 def test_span_filter_range() -> None:
     """Span filter: published_at must fall within [start, end]."""
-    old_item = _item(published_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-    mid_item = _item(published_at=datetime(2026, 6, 15, tzinfo=timezone.utc))
-    new_item = _item(published_at=datetime(2026, 12, 1, tzinfo=timezone.utc))
+    old_item = _item(published_at=datetime(2026, 1, 1, tzinfo=UTC))
+    mid_item = _item(published_at=datetime(2026, 6, 15, tzinfo=UTC))
+    new_item = _item(published_at=datetime(2026, 12, 1, tzinfo=UTC))
     items = [old_item, mid_item, new_item]
 
-    span_start = datetime(2026, 3, 1, tzinfo=timezone.utc)
-    span_end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    span_start = datetime(2026, 3, 1, tzinfo=UTC)
+    span_end = datetime(2026, 9, 1, tzinfo=UTC)
 
     result = search(items, span=(span_start, span_end), as_of=_BASE_TIME)
 
@@ -365,11 +365,11 @@ def test_span_filter_range() -> None:
 
 def test_span_filter_with_only_start() -> None:
     """Span filter: only start bound set (open-ended end)."""
-    old_item = _item(published_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-    new_item = _item(published_at=datetime(2026, 6, 15, tzinfo=timezone.utc))
+    old_item = _item(published_at=datetime(2026, 1, 1, tzinfo=UTC))
+    new_item = _item(published_at=datetime(2026, 6, 15, tzinfo=UTC))
     items = [old_item, new_item]
 
-    span_start = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    span_start = datetime(2026, 3, 1, tzinfo=UTC)
 
     result = search(items, span=(span_start, None), as_of=_BASE_TIME)
 
@@ -380,17 +380,17 @@ def test_span_filter_with_only_start() -> None:
 def test_combined_filters_all_must_match() -> None:
     """Combined filters: AND logic — all filters must match."""
     item_a = _item(
-        known_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        known_at=datetime(2026, 5, 1, tzinfo=UTC),
         instruments=("KR:A005930",),
         kind="filing",
     )
     item_b = _item(
-        known_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        known_at=datetime(2026, 5, 1, tzinfo=UTC),
         instruments=("KR:A070000",),
         kind="filing",
     )
     item_c = _item(
-        known_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        known_at=datetime(2026, 5, 1, tzinfo=UTC),
         instruments=("KR:A005930",),
         kind="news",
     )

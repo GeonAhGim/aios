@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -70,7 +70,7 @@ async def _enqueue(pool, repo, order_id, *, not_before=None) -> object:
             order_id=order_id,
             command_type="SUBMIT",
             payload={"order": {"symbol": "BTC/USDT"}},
-            not_before=not_before or datetime.now(timezone.utc),
+            not_before=not_before or datetime.now(UTC),
         )
 
 
@@ -93,14 +93,14 @@ async def test_enqueue_then_claim_batch_marks_sending(pool):
     row = claimed[0]
     assert row.state == "SENDING"
     assert row.worker_id == "w1"
-    assert row.lease_until is not None and row.lease_until > datetime.now(timezone.utc)
+    assert row.lease_until is not None and row.lease_until > datetime.now(UTC)
     assert row.payload == {"order": {"symbol": "BTC/USDT"}}
 
 
 async def test_claim_batch_skips_rows_not_yet_due(pool):
     repo = OutboxRepository()
     order_id = await _order_id(pool)
-    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    future = datetime.now(UTC) + timedelta(hours=1)
     row_id = await _enqueue(pool, repo, order_id, not_before=future)
 
     async with pool.acquire() as conn:
@@ -297,7 +297,7 @@ async def test_mark_retry_returns_row_to_pending(pool):
     repo = OutboxRepository()
     order_id = await _order_id(pool)
     row_id = await _enqueue(pool, repo, order_id)
-    not_before = datetime.now(timezone.utc) + timedelta(seconds=5)
+    not_before = datetime.now(UTC) + timedelta(seconds=5)
 
     async with pool.acquire() as conn:
         await repo.claim_batch(conn, worker_id="A", limit=10, lease_sec=30)
@@ -326,7 +326,7 @@ async def test_mark_retry_rejected_for_stale_worker(pool):
         await repo.claim_batch(conn, worker_id="A", limit=10, lease_sec=30)
         with pytest.raises(ConcurrencyConflictError):
             await repo.mark_retry(
-                conn, row_id, attempt=1, not_before=datetime.now(timezone.utc),
+                conn, row_id, attempt=1, not_before=datetime.now(UTC),
                 last_error="x", expected_worker="B",
             )
 

@@ -19,7 +19,7 @@ Postgres에 심어 두고, 새 프로세스(새 `PaperSimulatorAdapter` 인스�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -66,7 +66,7 @@ _INSERT_LEASE_SQL = """
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _make_adapter(pool: asyncpg.Pool, account_id: UUID) -> PaperSimulatorAdapter:

@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.mandates.application.create_draft_mandate import revision_to_view
@@ -34,7 +34,7 @@ async def build_mandate_status_view(repo: MandateRepository, tenant_id: UUID) ->
             tenant_id=tenant_id,
             active_revision=None,
             pending_revision=None,
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
     active = await repo.get_active_revision(mandate.id)
@@ -47,5 +47,5 @@ async def build_mandate_status_view(repo: MandateRepository, tenant_id: UUID) ->
         tenant_id=tenant_id,
         active_revision=revision_to_view(active) if active is not None else None,
         pending_revision=revision_to_view(pending) if pending is not None else None,
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )

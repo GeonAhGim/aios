@@ -11,7 +11,7 @@ REQUESTED로 INSERT되고 (2) `run_liquidation_worker_once`(실행 루프의 소
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -124,7 +124,7 @@ async def test_market_wide_correlated_loss_creates_and_the_execution_loop_consum
     """전체 경로: 시장 전체 급변 basket + 계좌 손실 -> decide()가 실제로
     LIQUIDATE 판정 -> `liquidation_request` REQUESTED INSERT ->
     `run_liquidation_worker_once`(실행 루프)가 그 행을 소비해 PLANNED로 전이."""
-    test_start = datetime.now(timezone.utc)
+    test_start = datetime.now(UTC)
     user_id = await create_test_user(pool)
     symbol = f"WD{uuid4().hex[:10]}/USDT"
     await _insert_open_position(pool, user_id, symbol)
@@ -226,7 +226,7 @@ async def test_isolated_loss_without_market_wide_move_does_not_liquidate(
     """대조군(negative) — 같은 90% 손실이라도 basket이 고립 하락(과반 미만)이면
     LIQUIDATE가 아니라 HALT(조작 의심)만 나가야 하고 liquidation_request는
     생기지 않아야 한다."""
-    test_start = datetime.now(timezone.utc)
+    test_start = datetime.now(UTC)
     heartbeat = tmp_path / "hb"
     write_heartbeat(heartbeat)
     equity_readings = iter([Decimal("10000"), Decimal("1000")])

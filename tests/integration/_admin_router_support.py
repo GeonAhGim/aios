@@ -8,7 +8,7 @@ RATCHET-split(task-10201): test_admin_router.py가 500줄 경고를 넘어 책�
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -123,7 +123,7 @@ async def _mfa_verified_admin_headers(client, pool) -> dict:
     # esc-ci-cbb8b9c62497 -- 실시간 코드 생성은 서버 검증과의 30초 구간 경계 레이스가
     # 있어(valid_window=0) 시계를 고정한다. 로그인 코드는 재사용 거부(RED_TEAM #13)
     # 때문에 다음 구간(+31s)으로 고정한다.
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]

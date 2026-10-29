@@ -9,7 +9,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L10.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -21,7 +21,7 @@ from src.core.strategy.market_state import MarketState
 from src.core.strategy.risk_params import StrategyRiskParams, derive_levels
 from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransition
 
-_AS_OF = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _market_state(values: dict[str, Decimal] | None = None) -> MarketState:

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import statistics
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,7 +16,7 @@ from src.foundation.performance.domain import twr as twr_module
 from src.foundation.performance.domain.models import Cashflow, CashflowKind
 from src.foundation.performance.domain.twr import MissingInputError, twr
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _T1 = _T0 + timedelta(days=15)
 _T2 = _T0 + timedelta(days=30)
 

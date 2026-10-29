@@ -3,7 +3,7 @@
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L29 DoD.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -17,7 +17,7 @@ from src.foundation.backtest.domain.universe import (
 )
 from tests.conftest import PerfBudget
 
-_UTC = timezone.utc
+_UTC = UTC
 _AS_OF = datetime(2026, 3, 1, tzinfo=_UTC)
 _LISTED_FROM = datetime(2026, 1, 1, tzinfo=_UTC)
 _DELISTED_AT = datetime(2026, 2, 15, tzinfo=_UTC)

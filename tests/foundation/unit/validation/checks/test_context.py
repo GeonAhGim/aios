@@ -8,7 +8,7 @@ immutable too).
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, fields
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -21,7 +21,7 @@ from src.foundation.validation.checks.context import CheckContext
 from src.foundation.validation.domain.artifact import build_artifact
 from src.foundation.validation.domain.policy import ValidationPolicy
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _ctx() -> CheckContext:

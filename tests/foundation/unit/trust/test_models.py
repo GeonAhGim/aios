@@ -5,7 +5,7 @@ Disclosure/Consent/Tenant/Membership and their state enums.
 """
 
 import dataclasses
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -25,7 +25,7 @@ from src.foundation.trust.domain.models import (
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 24, tzinfo=UTC)
 
 
 def _disclosure(**overrides: Any) -> Disclosure:

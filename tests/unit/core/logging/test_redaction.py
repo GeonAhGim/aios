@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -376,7 +376,7 @@ class TestStructuredLogLineRejectsUnknownLevel:
         """An unknown level string must raise ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 level="critical",
                 message="test message",
                 component="test",
@@ -391,7 +391,7 @@ class TestStructuredLogLineRejectsUnknownLevel:
         """An empty string for level must raise ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 level="",
                 message="test message",
                 component="test",
@@ -406,7 +406,7 @@ class TestStructuredLogLineRejectsUnknownLevel:
         """All valid levels must be accepted without error."""
         for valid_level in ("debug", "info", "warn", "error"):
             log = StructuredLogLine(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 level=valid_level,
                 message="test message",
                 component="test",
@@ -426,7 +426,7 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
         """actor_subject_id is a required field — omitting it raises ValueError."""
         with pytest.raises(ValueError):
             StructuredLogLine(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 level="info",
                 message="test message",
                 component="test",
@@ -440,7 +440,7 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
         """actor_subject_id=None must be rejected (not silently stored as 'None')."""
         with pytest.raises(ValueError):
             StructuredLogLine(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 level="info",
                 message="test message",
                 component="test",
@@ -457,7 +457,7 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
         id (e.g. a DB PK) fails loudly instead of silently storing the wrong type."""
         with pytest.raises(ValueError):
             StructuredLogLine(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 level="info",
                 message="test message",
                 component="test",
@@ -475,7 +475,7 @@ class TestStructuredLogLineRejectsMissingActorSubjectId:
         actually break if the field were renamed or the validation moved elsewhere."""
         with pytest.raises(ValueError) as exc_info:
             StructuredLogLine(
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 level="info",
                 message="test message",
                 component="test",

@@ -14,7 +14,7 @@ BT-19, docs/design/INVARIANTS.md I-05. DoD: 고정 PAPER 추적 1건에 대해
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import Mock
 from uuid import uuid4
@@ -48,7 +48,7 @@ def _paper_fill(
         fee=fee,
         fee_currency="USDT",
         liquidity="TAKER",
-        venue_ts=datetime(2026, 9, 1, 0, 0, seq, tzinfo=timezone.utc),
+        venue_ts=datetime(2026, 9, 1, 0, 0, seq, tzinfo=UTC),
     )
 
 
@@ -59,7 +59,7 @@ def _backtest_fill(
         bar_index=bar_index,
         # 리플레이 타임스탬프는 PAPER venue_ts와 구조적으로 다른 시계열
         # (봉 종가 시각)이다 — 비교에서 제외되는 필드임을 픽스처로도 보여준다.
-        timestamp=datetime(2026, 9, 1, 1, bar_index, tzinfo=timezone.utc) + timedelta(seconds=1),
+        timestamp=datetime(2026, 9, 1, 1, bar_index, tzinfo=UTC) + timedelta(seconds=1),
         symbol=_SYMBOL,
         side=side,
         price=price,

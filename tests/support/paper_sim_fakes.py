@@ -9,7 +9,7 @@ orderbook이 필요하다. `SeqRandom`은 `fill_model`/`latency_model`이 요구
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.data.models.market_data import OrderBook, OrderBookLevel
@@ -31,7 +31,7 @@ class FakeReferenceAdapter(FakeExchangeAdapter):
             exchange=self._exchange_name,
             bids=[OrderBookLevel(price=self._bid, quantity=self._depth_qty)],
             asks=[OrderBookLevel(price=self._ask, quantity=self._depth_qty)],
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
 

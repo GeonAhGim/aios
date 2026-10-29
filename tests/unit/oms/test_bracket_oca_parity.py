@@ -12,6 +12,7 @@ Spec: ADR-2026-09-09-B. `src/foundation/backtest/domain/fill/order_types.py`
 
 from __future__ import annotations
 
+from datetime import UTC
 from decimal import Decimal
 
 import pytest
@@ -73,7 +74,7 @@ def test_partial_entry_fill_produces_matching_bracket_exit_log_on_both_sides() -
     Both backtest (via run_quick_backtest + resolve_oca/bracket_quantity_for_fill)
     and paper (via direct EM-19 function calls with SAME numbers) must produce
     identical exit decisions and quantities, verifying parity between bounded contexts."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.core.script.artifact.compile import compile_source
     from src.foundation.backtest.application.quick_backtest import run_quick_backtest
@@ -108,7 +109,7 @@ let bracket_id = strategy.bracket(10, 120, 95, 0.05)
     # Bar 1: 100, 100, 100, 100 (entry execution + partial fill due to low volume)
     # Bar 2: 100, 100, 94, 100 (touches loss price 95 — bracket exit triggers loss leg)
     # Partial fill: max 40% participation → 10 * 0.4 = 4 shares fill in bar 1 (volume 10)
-    base_time = datetime(2025, 1, 1, 9, 30, tzinfo=timezone.utc)
+    base_time = datetime(2025, 1, 1, 9, 30, tzinfo=UTC)
 
     columns = CandleColumns(
         ts=[

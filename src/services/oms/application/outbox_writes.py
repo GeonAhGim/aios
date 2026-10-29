@@ -20,7 +20,7 @@ import hashlib
 import json
 import random
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -45,7 +45,7 @@ SENT_PREFIX = "SENT:"
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class OutboxWrites:

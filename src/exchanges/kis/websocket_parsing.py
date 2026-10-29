@@ -17,7 +17,7 @@ github.com/koreainvestment/open-trading-api/examples_llm/overseas_stock/
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -134,7 +134,7 @@ def parse_realtime_price_message(raw: str) -> list[Ticker]:
                 bid=Decimal(row["BIDP1"]),
                 ask=Decimal(row["ASKP1"]),
                 volume_24h=Decimal(row["ACML_VOL"]),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_type="primary",
             )
         )
@@ -167,7 +167,7 @@ def parse_realtime_orderbook_message(raw: str) -> OrderBook | None:
         exchange="kis",
         bids=bids,
         asks=asks,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -188,7 +188,7 @@ def parse_realtime_overseas_price_message(raw: str) -> list[Ticker]:
                 bid=Decimal(row["PBID"]),
                 ask=Decimal(row["PASK"]),
                 volume_24h=Decimal(row["TVOL"]),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_type="primary",
             )
         )
@@ -221,7 +221,7 @@ def parse_realtime_overseas_orderbook_message(raw: str) -> OrderBook | None:
         exchange="kis",
         bids=bids,
         asks=asks,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -269,8 +269,8 @@ def parse_order_notification_message(raw: str, *, key: str, iv: str) -> Order | 
         quantity=Decimal(row.get("ODER_QTY", "0") or "0"),
         status=OrderStatus.FILLED if row.get("CNTG_YN") == "1" else OrderStatus.ACKNOWLEDGED,
         filled_quantity=Decimal(row.get("CNTG_QTY", "0") or "0"),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
         asset_class=AssetClass.KR_EQUITY,
     )
 

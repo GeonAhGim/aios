@@ -8,7 +8,7 @@ DoD(task-615): ON CONFLICT DO NOTHING(재수집 멱등) + 파티션 경계 넘�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -44,7 +44,7 @@ async def test_upsert_batch_is_idempotent_on_reingest(
 ) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -77,7 +77,7 @@ async def test_upsert_batch_across_partition_boundary(
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute("SELECT md_ensure_partitions(6)")
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         t1 = t0 + timedelta(days=40)  # 어떤 시작일이든 최소 한 달 경계는 넘는다
         batch = await _create_batch(
             conn,
@@ -106,7 +106,7 @@ async def test_query_as_of_snapshot_isolation_ignores_later_insert(
     candle_store: PostgresCandleStore,
     batch_repo: PostgresBatchRepository,
 ) -> None:
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     t1 = t0 + timedelta(minutes=1)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
@@ -151,7 +151,7 @@ async def test_upsert_batch_rejects_ohlc_check_violation(
     """negative: high < open인 캔들은 md_candle의 CHECK 위반으로 거부되어야 한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -176,7 +176,7 @@ async def test_quarantine_writes_only_quarantine_table(
 ) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -214,7 +214,7 @@ async def test_last_open_time_tracks_latest_stored_candle(
         empty = await candle_store.last_open_time(conn, key)
         assert empty is None
 
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         t1 = t0 + timedelta(minutes=1)
         batch = await _create_batch(
             conn,
@@ -240,7 +240,7 @@ async def test_batch_create_then_get_reconstructs_verdict_from_stored_candles(
 ) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -267,7 +267,7 @@ async def test_batch_create_duplicate_batch_id_raises(
 ) -> None:
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -290,7 +290,7 @@ async def test_batch_repo_handles_verdict_transitions(
     """failure-injection: 배치 생성 중 verdict 상태 전이를 검증하고 저장한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         audit_event_id = await _audit_event_id(conn)
 
         # PARTIAL verdict로 배치 생성
@@ -329,7 +329,7 @@ async def test_quarantine_with_multiple_candles(
     """failure-injection: 격리 시 여러 캔들을 정확히 기록하는지 확인."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,

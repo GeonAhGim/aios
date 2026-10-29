@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC
 from decimal import Decimal
 from uuid import uuid4
 
@@ -80,7 +81,7 @@ async def test_cancel_rule_unknown_id_denied(tenant_id) -> None:
 
 def test_empty_conditions_rejected(tenant_id) -> None:
     """규칙 스키마 자체가 조건 0개를 거부한다(negative test)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     from uuid import uuid4 as _uuid4
 
     with pytest.raises(ValidationError, match="최소 1개"):
@@ -91,6 +92,6 @@ def test_empty_conditions_rejected(tenant_id) -> None:
             conditions=(),
             action=_action(),
             status=RuleStatus.ACTIVE,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )

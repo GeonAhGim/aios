@@ -1,6 +1,6 @@
 """FD-14 통합테스트 — 실제 dev DB 대상 (AlertService)."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -29,7 +29,7 @@ async def pool():
 
 
 def _make_candles(closes: list[float]) -> list[Candle]:
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     candles = []
     for i, close in enumerate(closes):
         open_time = base + timedelta(hours=i)

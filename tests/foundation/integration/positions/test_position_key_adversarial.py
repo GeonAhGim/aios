@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
@@ -49,7 +49,7 @@ from tests.integration.foundation.positions.conftest import create_pos_account, 
 from tests.support.db import create_pool_with_retry
 from tests.support.entities_seed import bootstrap_default_hierarchy
 
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 _SHARED_STRATEGY = dict(venue="TESTVENUE", strategy_id="shared-strat", execution_id="paper")
 
 
@@ -65,7 +65,7 @@ async def pool():
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _create_portfolio(pool, *, fund_id: UUID) -> UUID:

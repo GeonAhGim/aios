@@ -56,7 +56,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import NamedTuple, Protocol, runtime_checkable
 from uuid import UUID, uuid4
@@ -97,7 +97,7 @@ NAV_LAG_AFTER_CLOSE = timedelta(minutes=5)
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class RollForwardValues(NamedTuple):

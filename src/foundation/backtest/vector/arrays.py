@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, fields
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -45,7 +45,7 @@ __all__ = ["ArrayDtypeError", "CandleArrays", "NaiveDatetimeError", "from_candle
 FloatArray = np.ndarray[Any, np.dtype[np.float64]]
 TimestampArray = np.ndarray[Any, np.dtype[np.int64]]
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _PRICE_FIELDS = ("open", "high", "low", "close", "volume", "quote_volume")
 
 
@@ -125,7 +125,7 @@ def _to_epoch_ns(values: Sequence[datetime]) -> TimestampArray:
                 f"CandleColumns.ts[{i}]가 naive datetime이다(tzinfo=None) — "
                 "tz-aware UTC datetime만 허용된다"
             )
-        if ts.tzinfo != timezone.utc:
+        if ts.tzinfo != UTC:
             raise NaiveDatetimeError(
                 f"CandleColumns.ts[{i}]의 timezone이 UTC가 아니다(tzinfo={ts.tzinfo}) — "
                 "tz-aware UTC datetime만 허용된다"

@@ -16,7 +16,7 @@ there is no stream to replay).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -32,7 +32,7 @@ from src.foundation.entities.domain.region import (
 )
 from tests.conftest import PerfBudget
 
-NOW = datetime(2026, 9, 26, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 26, tzinfo=UTC)
 
 
 def _entity(**overrides: Any) -> LegalEntity:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.data.models.base import AssetClass, Currency, Money
@@ -57,7 +57,7 @@ def make_book(bid: str | None = "100", ask: str | None = "101") -> OrderBook:
         exchange="paper_sim",
         bids=bids,
         asks=asks,
-        timestamp=datetime(2026, 9, 5, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 9, 5, tzinfo=UTC),
     )
 
 

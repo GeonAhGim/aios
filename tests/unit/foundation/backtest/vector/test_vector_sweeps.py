@@ -20,7 +20,7 @@ BT-16(실행부만, task-2371 decision — AI-10 실험 원장 기록은 BT-16b)
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -51,7 +51,7 @@ from src.foundation.backtest.vector.walk_forward import (
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _D = Decimal
 _CASH = _D("100000")
 

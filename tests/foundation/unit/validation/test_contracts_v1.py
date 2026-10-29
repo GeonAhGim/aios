@@ -13,7 +13,7 @@ D2 evidence: negative >=3, failure-injection 1, perf 1, gate-red repro 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -138,7 +138,7 @@ def _valid_result_kwargs(**overrides) -> dict[str, Any]:
         "hard_fail_reasons": [],
         "obligations": [],
         "result_hash": "abc123",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "evidence_refs": [],
         **overrides,
     }
@@ -196,7 +196,7 @@ def _valid_bundle_kwargs(**overrides) -> dict[str, Any]:
         "bundle_hash": "bundle-hash-1",
         "hard_fail_reasons": [],
         "obligations": [],
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         **overrides,
     }
 

@@ -1,7 +1,7 @@
 """L4_risk_and_safety_v1.0.md#9 R-11 — `rules/correlation.py` 단위 테스트."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -18,7 +18,7 @@ from src.core.risk.inputs import (
 )
 from src.core.risk.rules.correlation import correlation
 
-_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 3, tzinfo=UTC)
 # threshold=0.7, aggregate_exposure_max_pct=30.0
 _POLICY: RiskPolicy = load_risk_policy()
 

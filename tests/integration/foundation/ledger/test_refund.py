@@ -8,7 +8,7 @@ DoD(task-453): R1/R2/R3 세 환불 시나리오 각각 Σ차=Σ대 + 환불 전�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -40,7 +40,7 @@ _TEST_PURPOSE = "TEST_REFUND_PURCHASE"
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _new_purchase_id() -> int:

@@ -6,7 +6,7 @@ DoD: 실제 공시 유형 3종(액면분할·현금배당·합병) 정규화가 
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -18,7 +18,7 @@ from src.foundation.market_data.domain.corporate_action.opendart_filing import (
     normalize_filing,
 )
 
-_KNOWN_AT = datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc)
+_KNOWN_AT = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 
 
 def test_split_filing_normalizes_ratio_from_par_value_change() -> None:

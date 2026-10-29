@@ -1,7 +1,7 @@
 """L4_risk_and_safety_v1.0.md#9 R-11 — `rules/var_es.py` 단위 테스트."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -18,7 +18,7 @@ from src.core.risk.inputs import (
 )
 from src.core.risk.rules.var_es import var_es
 
-_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 3, tzinfo=UTC)
 _POLICY: RiskPolicy = load_risk_policy()  # var.max_pct=5.0, es_max_pct=7.0, min_bars=60
 
 

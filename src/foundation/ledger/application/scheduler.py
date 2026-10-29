@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import asyncpg
@@ -61,7 +61,7 @@ _PAYOUT_CAPTURE_LOOKBACK = timedelta(days=3650)
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _seconds_until_next_run(now: datetime, run_time: time) -> float:

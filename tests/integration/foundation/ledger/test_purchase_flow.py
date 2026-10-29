@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -44,7 +44,7 @@ _TEST_PURPOSE = "TEST_MARKETPLACE_PURCHASE"
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class _RealPorts:

@@ -13,7 +13,7 @@ across the queue.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -46,7 +46,7 @@ def wrap(topic: str, payload: Any) -> EventEnvelope:
         trace_id=ctx.trace_id,
         tenant_id=ctx.tenant_id,
         actor_subject_id=ctx.actor_subject_id,
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         payload=payload,
     )
 

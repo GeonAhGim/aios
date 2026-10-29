@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -17,7 +17,7 @@ def _valid_kwargs(**overrides):
         source_agent="strategy-agent",
     )
     # Default timestamps for override-friendly base
-    base_created = datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
+    base_created = datetime(2026, 9, 30, 12, 0, 0, tzinfo=UTC)
     kwargs["created_at"] = base_created
     kwargs.update(overrides)
     return kwargs
@@ -68,8 +68,8 @@ def test_memory_entry_dependency_failure_propagates_fail_closed(monkeypatch):
 
 def test_memory_verified_at_before_created_at_raises():
     """negative: verified_at cannot precede created_at (provenance ordering invariant)."""
-    created = datetime(2026, 9, 30, 12, 0, 0, tzinfo=timezone.utc)
-    verified = datetime(2026, 9, 30, 11, 59, 59, tzinfo=timezone.utc)  # 1s earlier
+    created = datetime(2026, 9, 30, 12, 0, 0, tzinfo=UTC)
+    verified = datetime(2026, 9, 30, 11, 59, 59, tzinfo=UTC)  # 1s earlier
     with pytest.raises(ValidationError):
         MemoryEntry(
             **_valid_kwargs(created_at=created, verified_at=verified),

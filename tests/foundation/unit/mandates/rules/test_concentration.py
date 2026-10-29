@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -40,7 +40,7 @@ from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules.concentration import RULE_ID, check
 
 _PARAMS = {"max_single_instrument_pct": 25.0}
-_NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 10, tzinfo=UTC)
 
 
 def test_below_limit_allows():

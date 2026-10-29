@@ -5,7 +5,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 
 모든 기대 순서는 손으로 계산해 `Decimal` exact 비교로 단언한다.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -21,7 +21,7 @@ from src.foundation.backtest.domain.magnifier import (
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 _UP_BAR = HigherBar(
     open_time=_T0,

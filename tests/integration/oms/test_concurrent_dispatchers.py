@@ -40,7 +40,7 @@ import asyncio
 import json
 import time
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -283,7 +283,7 @@ async def _setup_real_orders(
                 order_id=order_id,
                 command_type="SUBMIT",
                 payload=submit_payload(view),
-                not_before=datetime.now(timezone.utc),
+                not_before=datetime.now(UTC),
             )
             order_ids.append(order_id)
             client_order_ids.add(view.client_order_id)

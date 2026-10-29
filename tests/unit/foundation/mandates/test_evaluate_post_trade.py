@@ -11,7 +11,7 @@ fails closed into a blocking violation, not a silent empty result.
 from __future__ import annotations
 
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -25,8 +25,8 @@ from src.foundation.mandates.domain import market_abuse
 from src.foundation.mandates.domain.rules.short_sale import RULE_ID as SHORT_SALE_RULE_ID
 from src.foundation.mandates.domain.rules.wash_trade import RULE_ID as WASH_TRADE_RULE_ID
 
-_NOW = datetime(2026, 1, 5, 6, 0, 0, tzinfo=timezone.utc)
-_CLOSE = datetime(2026, 1, 5, 7, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 5, 6, 0, 0, tzinfo=UTC)
+_CLOSE = datetime(2026, 1, 5, 7, 0, 0, tzinfo=UTC)
 _TENANT = uuid4()
 
 

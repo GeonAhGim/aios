@@ -15,7 +15,7 @@ task-1768: `KRX_2026.yaml`의 `source`는 더 이상 `UNVERIFIED` placeholder가
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import asyncpg
@@ -47,8 +47,8 @@ async def test_upsert_then_load_builds_calendar_with_holiday_and_early_close(poo
     year = 2101  # 실제 데이터와 겹치지 않는 먼 미래 테스트 전용 연도
     holiday = date(year, 1, 1)
     early_close_day = date(year, 6, 15)
-    open_at = datetime(year, 6, 15, 13, 30, tzinfo=timezone.utc)
-    close_at = datetime(year, 6, 15, 18, 0, tzinfo=timezone.utc)
+    open_at = datetime(year, 6, 15, 13, 30, tzinfo=UTC)
+    close_at = datetime(year, 6, 15, 18, 0, tzinfo=UTC)
     days = [
         CalendarDay(
             venue=Venue.KIS_US,

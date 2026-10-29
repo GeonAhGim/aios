@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -65,7 +65,7 @@ class TestNegativeTraceIdNone:
     def test_meta_rejects_explicit_none_trace_id(self):
         """Meta(trace_id=None) → ValidationError 로 거부."""
         with pytest.raises(ValidationError):
-            Meta(trace_id=None, as_of=datetime.now(timezone.utc))
+            Meta(trace_id=None, as_of=datetime.now(UTC))
 
     @pytest.mark.perf
     def test_api_error_rejects_explicit_none_trace_id(self):
@@ -93,7 +93,7 @@ class TestNegativeAsOfType:
     @pytest.mark.perf
     def test_meta_accepts_tz_aware_utc_as_of(self):
         """Meta(as_of=...+00:00) → 정상 통과 (양성 확인)."""
-        meta = Meta(trace_id=UUID(int=0), as_of=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        meta = Meta(trace_id=UUID(int=0), as_of=datetime(2026, 1, 1, tzinfo=UTC))
         assert meta.as_of.tzinfo is not None
 
 

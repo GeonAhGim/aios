@@ -22,7 +22,7 @@ that also holds once the role is non-superuser. `disclosure` has no
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -183,7 +183,7 @@ class PostgresTrustRepository:
                 expected_state_value=ConsentState.ACTIVE.value,
                 set_values={
                     "state": ConsentState.REVOKED.value,
-                    "revoked_at": datetime.now(timezone.utc),
+                    "revoked_at": datetime.now(UTC),
                 },
                 extra_conditions={"tenant_id": tenant_id},
             )

@@ -411,7 +411,7 @@ async def create_pool_with_retry(dsn: str, **kwargs: Any) -> asyncpg.Pool:
 
 
 @pytest.fixture
-async def tx_conn(pool: Any) -> AsyncGenerator[Any, None]:
+async def tx_conn(pool: Any) -> AsyncGenerator[Any]:
     """단일 커넥션 트랜잭션 픽스처 — 테스트 종료 시 항상 ROLLBACK.
 
     커넥션 풀 전체가 아니라 한 커넥션 안에서만 격리하면 되는 가벼운 테스트용

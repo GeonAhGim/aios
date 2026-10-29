@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -29,7 +29,7 @@ def test_list_connections(client: TestClient, monkeypatch) -> None:
         state=ConnectionState.ACTIVE_READONLY,
         capability_profile=[CapabilityScope.READ_BALANCE],
         revision=1,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     async def mock_build(repo: Any, user_id: Any):
@@ -37,7 +37,7 @@ def test_list_connections(client: TestClient, monkeypatch) -> None:
 
         return ConnectionListView(
             connections=[conn],
-            as_of=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            as_of=datetime(2026, 1, 1, tzinfo=UTC),
         )
 
     from src.api.routers.foundation import connections
@@ -53,7 +53,7 @@ def test_list_connections_empty(client: TestClient, monkeypatch) -> None:
     async def mock_build(repo: Any, user_id: Any):
         from src.foundation.connections.projections import ConnectionListView
 
-        return ConnectionListView(connections=[], as_of=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        return ConnectionListView(connections=[], as_of=datetime(2026, 1, 1, tzinfo=UTC))
 
     from src.api.routers.foundation import connections
 
@@ -71,7 +71,7 @@ def test_post_begin_connection(client: TestClient, monkeypatch) -> None:
         state=ConnectionState.PENDING_CONSENT,
         capability_profile=[CapabilityScope.READ_BALANCE],
         revision=1,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     async def mock_begin(repo: Any, trust_repo: Any, **kwargs: Any):
@@ -105,7 +105,7 @@ def test_post_confirm_connection(client: TestClient, monkeypatch) -> None:
         state=ConnectionState.ACTIVE_READONLY,
         capability_profile=[CapabilityScope.READ_BALANCE],
         revision=1,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     async def mock_confirm(repo: Any, provider: Any, **kwargs: Any):
@@ -132,8 +132,8 @@ def test_post_sync_connection(client: TestClient, monkeypatch) -> None:
     cid = UUID("550e8400-e29b-41d4-a716-446655440001")
     snap = AccountSnapshotView(
         connection_id=cid,
-        captured_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        provider_as_of=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        captured_at=datetime(2026, 1, 1, tzinfo=UTC),
+        provider_as_of=datetime(2026, 1, 1, tzinfo=UTC),
         freshness="1h",
         currency="USD",
         values=[SnapshotValueView(entity_type="bal", entity_key="key", value=Decimal("100"))],
@@ -165,7 +165,7 @@ def test_post_revoke_connection(client: TestClient, monkeypatch) -> None:
         state=ConnectionState.REVOKED,
         capability_profile=[CapabilityScope.READ_BALANCE],
         revision=2,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     async def mock_revoke(repo: Any, **kwargs: Any):

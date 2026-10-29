@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -217,7 +217,7 @@ class AuthService:
                     },
                 )
                 raise AuthError(_GENERIC_AUTH_ERROR)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if row["locked_until"] is not None and now < row["locked_until"]:
                 _consume_verify_timing(password)
                 await record_audit_log(
@@ -323,7 +323,7 @@ class AuthService:
     def issue_token(self, user: User) -> str:
         payload = {
             "sub": str(user.user_id),
-            "exp": datetime.now(timezone.utc) + timedelta(minutes=self._jwt_expire_minutes),
+            "exp": datetime.now(UTC) + timedelta(minutes=self._jwt_expire_minutes),
         }
         return jwt.encode(payload, self._jwt_secret_key, algorithm=self._jwt_algorithm)
 

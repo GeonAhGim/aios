@@ -13,7 +13,7 @@ task-11539 후속: 호출 1회 CPU 측정의 0 수렴과 단위/예산 불변을
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -31,7 +31,7 @@ from tests.support.perf_budget import PerfBudget
 
 
 def _dt(y: int, m: int, d: int) -> datetime:
-    return datetime(y, m, d, tzinfo=timezone.utc)
+    return datetime(y, m, d, tzinfo=UTC)
 
 
 def _naive(y: int, m: int, d: int) -> datetime:

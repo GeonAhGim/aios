@@ -7,7 +7,7 @@ from __future__ import annotations
 import statistics
 import time
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -16,7 +16,7 @@ from src.foundation.performance.domain import mwr as mwr_module
 from src.foundation.performance.domain.models import Cashflow, CashflowKind
 from src.foundation.performance.domain.mwr import mwr
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _T1 = _T0 + timedelta(days=365)
 
 # ADR-2026-09-09-C Decision 1 예산표에 순수 계산 함수 전용 항목이 없다 —

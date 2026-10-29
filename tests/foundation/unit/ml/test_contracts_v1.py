@@ -5,7 +5,7 @@ Spec: docs/specs/L4_ai_research_strategy_factory_v1.0.md §2.5 AI-18.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from src.foundation.ml.contracts.v1 import FeatureSpec, ModelCard, TrainDataLineage
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _LINEAGE_START = _NOW - timedelta(days=30)
 _LINEAGE_END = _NOW - timedelta(days=1)
 

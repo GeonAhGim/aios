@@ -38,7 +38,7 @@ fail-closed rules (DoD):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from src.foundation.market_data.contracts.v1 import SessionWindow, Timeframe
@@ -57,7 +57,7 @@ __all__ = [
     "ticks_to_candles",
 ]
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 class UnsortedTicksError(ValueError):

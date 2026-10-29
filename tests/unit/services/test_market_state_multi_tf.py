@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -27,7 +27,7 @@ from src.services.execution_loop.market_state import (
 )
 from tests.support.perf_budget import PerfBudget
 
-_BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, tzinfo=UTC)
 _MARKET_STATE_PATH = (
     Path(__file__).resolve().parents[3] / "src/services/execution_loop/market_state.py"
 )

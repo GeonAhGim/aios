@@ -14,7 +14,7 @@ docstring).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -132,7 +132,7 @@ class BitgetAccountMixin:
         balances = await self.get_balance(asset_filter)
 
         positions = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for balance in balances:
             if balance.asset in _QUOTE_CURRENCIES or balance.total == 0:
                 continue

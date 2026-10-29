@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -85,7 +85,7 @@ async def _mark_claim_send_outcome(
         trace_id=uuid4(),
         command_id=None,
         provider_event_id=None,
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         payload_hash=hashlib.sha256(f"{claimed.order_id}:{outcome.reason}".encode()).hexdigest(),
     )
     await _oms_orders.transition(

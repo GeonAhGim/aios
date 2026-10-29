@@ -18,7 +18,7 @@ Spec: docs/design/ADR-2026-09-09-B(H-8) + docs/specs/L4_risk_and_safety_v1.0.md#
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -38,7 +38,7 @@ from src.core.risk.inputs import (
 )
 from src.core.risk.limits import ExposureLimit, LimitMetric, LimitScope, check_exposure_limits
 
-_NOW = datetime(2026, 9, 16, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 16, tzinfo=UTC)
 _TENANT_ID: UUID = uuid4()
 
 # NUMERIC(20,2) 규모를 넘지 않는 범위 — `notional`/`limit_value` 둘 다 이

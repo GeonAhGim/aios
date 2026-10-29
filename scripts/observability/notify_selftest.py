@@ -34,7 +34,7 @@ LOCAL_REPORT_PATH = ROOT / "runtime" / "notify" / "selftest_latest.json"
 
 
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 async def run_selftest(adapter: NotifyPort) -> dict[str, object]:

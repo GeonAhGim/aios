@@ -7,7 +7,7 @@ need to check "does this tenant hold valid consent for this purpose"
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.foundation.trust.contracts.v1 import TenantContext, TrustFreshnessDecision
 from src.foundation.trust.domain.models import Consent, Disclosure
@@ -18,7 +18,7 @@ from src.foundation.trust.ports.repository import TrustRepository
 async def evaluate_trust_freshness(
     repo: TrustRepository, context: TenantContext, *, purpose: str
 ) -> TrustFreshnessDecision:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     disclosure: Disclosure | None = await repo.get_active_disclosure(purpose)
     # Use get_latest_consent, not get_active_consent — we must distinguish
     # "never consented" from "consented then revoked" to return the correct

@@ -1,10 +1,8 @@
 """75번 §2/§3 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
 from dataclasses import replace
-from datetime import datetime, timezone
-from typing import TypedDict
+from datetime import UTC, datetime
+from typing import TypedDict, Unpack
 from uuid import UUID, uuid4
-
-from typing_extensions import Unpack
 
 from src.foundation.mandates.domain.models import (
     Autonomy,
@@ -19,7 +17,7 @@ from src.foundation.mandates.domain.rules import (
     evaluate_policy,
 )
 
-NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 2, tzinfo=UTC)
 
 _DEFAULT_REVISION = MandateRevision(
     id=uuid4(),

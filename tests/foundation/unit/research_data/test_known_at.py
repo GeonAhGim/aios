@@ -7,7 +7,7 @@ Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §4 RD-A1,
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -41,7 +41,7 @@ def _item(*, known_at: datetime) -> ResearchItem:
 
 def test_known_at_equal_as_of_passes() -> None:
     """RD-2 DoD (c) — 경계 포함: `known_at == as_of`는 통과."""
-    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
     item = _item(known_at=as_of_time)
     assert_point_in_time(item, as_of_time)  # raise 없음
 
@@ -50,7 +50,7 @@ def test_known_at_one_microsecond_after_as_of_rejected() -> None:
     """RD-2 DoD (c) — `known_at`이 `as_of`보다 1마이크로초라도 뒤면 거부.
     `>=`/`>`를 손으로 뒤집으면(예: `known_at < as_of`로 잘못 판정) 이
     테스트가 실패한다."""
-    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
     item = _item(known_at=as_of_time + timedelta(microseconds=1))
     with pytest.raises(PointInTimeViolationError) as exc_info:
         assert_point_in_time(item, as_of_time)
@@ -58,7 +58,7 @@ def test_known_at_one_microsecond_after_as_of_rejected() -> None:
 
 
 def test_known_at_before_as_of_passes() -> None:
-    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
     item = _item(known_at=as_of_time - timedelta(days=1))
     assert_point_in_time(item, as_of_time)  # raise 없음
 
@@ -71,7 +71,7 @@ def test_delegates_to_fa9_bitemporal_as_of_not_reimplemented(
     그대로 따라 바뀌어야 한다. 이 함수가 이 모듈 안에서 자체 시각 비교
     규칙을 다시 짰다면(위임하지 않았다면) 아래 두 patch 모두 결과에 아무
     영향을 주지 못해 이 테스트가 실패한다."""
-    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
 
     # 원래는 통과해야 하는 좌표(known_at < as_of)인데, as_of가 항상 "커버 없음"을
     # 반환하도록 바꾸면 위임하는 구현은 거부로 뒤집힌다.
@@ -108,7 +108,7 @@ def test_delegates_to_fa9_bitemporal_as_of_not_reimplemented(
 def test_naive_as_of_rejected_by_fa9_kernel() -> None:
     """`as_of_time`이 naive면 FA-9 `as_of`가 `ValueError`로 거부한다(위임 증거 —
     이 모듈이 자체 naive 검사를 두지 않아도 FA-9가 대신 막는다)."""
-    item = _item(known_at=datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc))
+    item = _item(known_at=datetime(2026, 9, 8, 12, 0, tzinfo=UTC))
     with pytest.raises(ValueError):
         assert_point_in_time(item, datetime(2026, 9, 8, 12, 0))
 
@@ -123,7 +123,7 @@ def test_assert_point_in_time_hot_path_performance(
     # assert_point_in_time은 모든 read path가 아이템을 반환하기 전에 호출하는
     # 순수 함수(BitemporalRecord 구성 + FA-9 as_of 위임)다. 10,000회 호출이
     # 1s 내로 끝나야 한다 -- I/O 없는 순수 계약의 실측 증명.
-    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
     item = _item(known_at=as_of_time - timedelta(days=1))
     iterations = 10_000
 
@@ -162,7 +162,7 @@ def test_assert_point_in_time_budget_catches_10x_delay_injection(
     monkeypatch.setattr("time.process_time", _fake_process_time)
 
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
-    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+    as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
     item = _item(known_at=as_of_time - timedelta(days=1))
 
     with pytest.raises(AssertionError):

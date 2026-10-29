@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -128,7 +128,7 @@ async def test_resolve_context_rejects_closed_fund():
     user_id = uuid4()
     tenant_id = uuid4()
     repo, hierarchy = _seeded_repo(user_id, tenant_id)
-    closed_fund = hierarchy.fund.model_copy(update={"closed_at": datetime.now(timezone.utc)})
+    closed_fund = hierarchy.fund.model_copy(update={"closed_at": datetime.now(UTC)})
     repo.funds[closed_fund.fund_id] = closed_fund
 
     with pytest.raises(EntityContextResolutionError):
@@ -173,7 +173,7 @@ async def test_resolve_portfolio_scope_rejects_closed_portfolio():
     tenant_id = uuid4()
     repo, hierarchy = _seeded_repo(user_id, tenant_id)
     closed_portfolio = hierarchy.portfolio.model_copy(
-        update={"closed_at": datetime.now(timezone.utc)}
+        update={"closed_at": datetime.now(UTC)}
     )
     repo.portfolios[closed_portfolio.portfolio_id] = closed_portfolio
 
@@ -187,7 +187,7 @@ async def test_resolve_portfolio_scope_rejects_closed_parent_fund():
     user_id = uuid4()
     tenant_id = uuid4()
     repo, hierarchy = _seeded_repo(user_id, tenant_id)
-    closed_fund = hierarchy.fund.model_copy(update={"closed_at": datetime.now(timezone.utc)})
+    closed_fund = hierarchy.fund.model_copy(update={"closed_at": datetime.now(UTC)})
     repo.funds[closed_fund.fund_id] = closed_fund
 
     with pytest.raises(EntityContextResolutionError):

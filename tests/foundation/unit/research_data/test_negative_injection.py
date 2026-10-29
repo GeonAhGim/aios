@@ -13,7 +13,7 @@ RD는 ADR-2026-09-09-C의 D3 필수 축(R, L4, LA/LB/LC, FA, CM, EO, DC) 목록�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -29,7 +29,7 @@ from src.foundation.research_data.domain.as_of_binding import AsOfBindingError, 
 from tests.conftest import PerfBudget
 
 _INSTRUMENT = "KR:A005930"
-_BASE = datetime(2026, 6, 1, tzinfo=timezone.utc)
+_BASE = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def _item(
@@ -86,7 +86,7 @@ def test_naive_column_timestamp_propagates_as_tzaware_rejection_through_builtin(
 def test_far_future_known_at_item_never_leaks_into_any_early_bar() -> None:
     """`known_at`이 수백 년 뒤인 항목이 섞여도(정수 오버플로/비교 실수
     없이) 그 어떤 과거 bar에도 새어들면 안 된다(RD-A1 극단값 테스트)."""
-    far_future_item = _item(known_at=datetime(3000, 1, 1, tzinfo=timezone.utc))
+    far_future_item = _item(known_at=datetime(3000, 1, 1, tzinfo=UTC))
     columns = _columns(_linear_ts(5))
     table = research_builtins([far_future_item], columns, instrument=_INSTRUMENT)
     builtin = table[("research", "filing_count")]

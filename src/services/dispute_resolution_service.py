@@ -18,7 +18,7 @@ Monetary/trust operator decisions are recorded in audit_log per §8.10
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -50,7 +50,7 @@ VALID_DECISIONS = ("NORMAL_RISK_REALIZATION", "DELISTED_AND_REFUND")
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class DisputeResolutionResult(BaseModel):

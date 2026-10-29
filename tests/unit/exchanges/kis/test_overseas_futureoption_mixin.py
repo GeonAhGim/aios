@@ -12,7 +12,7 @@ docstring에 적었듯 이 도메인 전체는 kis_tr_reference.json에 V-접두
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -34,7 +34,7 @@ _FAR_FUTURE_EXPIRY = date(2099, 12, 1)
 
 def _today_utc() -> date:
     """`overseas_futureoption_mixin._reject_if_expired`와 동일 기준(UTC 달력일)."""
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 def _make_paper_adapter(captured: list[httpx.Request]) -> KISAdapter:

@@ -31,7 +31,7 @@ not written anywhere. Unrelated to the LIVE path; no real orders are placed.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -115,7 +115,7 @@ async def quick_backtest_endpoint(
     source_contracts: SourceContractRepository = Depends(get_source_contract_repository),
 ) -> ApiResponse[QuickBacktestResultView]:
     async with pool.acquire() as conn:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         inst = await resolve_instrument(
             conn,
             refs=refs,
@@ -190,7 +190,7 @@ async def sweep_backtest_endpoint(
     grid = ParamGrid(axes={axis.name: axis.values for axis in body.axes})
 
     async with pool.acquire() as conn:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         inst = await resolve_instrument(
             conn,
             refs=refs,

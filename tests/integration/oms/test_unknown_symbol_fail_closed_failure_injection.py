@@ -42,7 +42,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -125,13 +125,13 @@ def _command(
     scope = OrderIdempotencyScope(
         tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
         strategy_version="1.0.0", execution_id=execution_id, intent_seq=intent_seq,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope, symbol=symbol,
         side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO, actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 

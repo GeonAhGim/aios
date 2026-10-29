@@ -13,7 +13,7 @@ FA/CM/EO/DC, so D3 does not apply).
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -42,7 +42,7 @@ from src.foundation.screener.domain.query_plan import ScreenerConditionError
 from src.foundation.screener.ports.repository import ScreenAlertLimitError
 from tests.integration.conftest import create_test_tenant
 
-_LISTED_AT_DATETIME = datetime(2020, 1, 1, tzinfo=timezone.utc)
+_LISTED_AT_DATETIME = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def _asyncpg_dsn() -> str:

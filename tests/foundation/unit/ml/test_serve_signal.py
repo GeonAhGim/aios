@@ -13,7 +13,7 @@ is scoped to `serve_signal`'s own composition/guard logic.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +27,7 @@ from src.foundation.ml.ports.feature_store import FeatureValue
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import virtual_delayed_async
 
-_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _card(**overrides: Any) -> ModelCard:

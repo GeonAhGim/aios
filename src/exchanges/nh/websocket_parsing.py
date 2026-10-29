@@ -28,7 +28,7 @@ deliberate choice after confirming the schema, not a guess).
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -73,7 +73,7 @@ def parse_mc_ticker_frame(raw: str, *, exchange: str = "nh") -> Ticker | None:
             bid=Decimal(str(body["bid"])),
             ask=Decimal(str(body["offer"])),
             volume_24h=Decimal(str(body["volume"])),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
     except KeyError as exc:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -45,8 +45,8 @@ def _order_view(**overrides: object) -> OrderView:
         "algo_run_id": None,
         "unknown_since": None,
         "provider_order_date": None,
-        "created_at": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     return OrderView.model_validate(defaults)
@@ -106,7 +106,7 @@ def test_fill_missing_internal_when_order_unknown() -> None:
         fee=Decimal("0"),
         fee_currency="USDT",
         liquidity="TAKER",
-        venue_ts=datetime.now(timezone.utc),
+        venue_ts=datetime.now(UTC),
     )
     result = compare_triple([], [], [fill], {}, {}, _POLICY)
     assert any(d.kind == "FILL_MISSING_INTERNAL" for d in result)

@@ -7,7 +7,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 비교 금지).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -29,9 +29,9 @@ from tests._perf.relative_budget import RelativeBudget
 _ADJ_ON = AdjustmentsConfig(splits=True, dividends=True)
 _ADJ_OFF = AdjustmentsConfig(splits=False, dividends=False)
 
-_BEFORE = datetime(2026, 2, 1, tzinfo=timezone.utc)
-_SPLIT_EX_DATE = datetime(2026, 3, 1, tzinfo=timezone.utc)
-_AFTER = datetime(2026, 4, 1, tzinfo=timezone.utc)
+_BEFORE = datetime(2026, 2, 1, tzinfo=UTC)
+_SPLIT_EX_DATE = datetime(2026, 3, 1, tzinfo=UTC)
+_AFTER = datetime(2026, 4, 1, tzinfo=UTC)
 
 _TWO_FOR_ONE = StockSplit(ex_date=_SPLIT_EX_DATE, ratio=Decimal(2))
 
@@ -54,15 +54,15 @@ def test_split_factor_bar_after_ex_date_is_unaffected() -> None:
 def test_split_factor_as_of_before_ex_date_is_unaffected() -> None:
     """as_of가 낙일(ex_date) 이전이면 그 분할은 아직 반영 대상이 아니다."""
     factor = split_factor(
-        [_TWO_FOR_ONE], bar_time=_BEFORE, as_of=datetime(2026, 2, 15, tzinfo=timezone.utc)
+        [_TWO_FOR_ONE], bar_time=_BEFORE, as_of=datetime(2026, 2, 15, tzinfo=UTC)
     )
     assert factor == Decimal(1)
 
 
 def test_split_factor_multiple_splits_compound() -> None:
-    second = StockSplit(ex_date=datetime(2026, 5, 1, tzinfo=timezone.utc), ratio=Decimal(3))
+    second = StockSplit(ex_date=datetime(2026, 5, 1, tzinfo=UTC), ratio=Decimal(3))
     factor = split_factor(
-        [_TWO_FOR_ONE, second], bar_time=_BEFORE, as_of=datetime(2026, 6, 1, tzinfo=timezone.utc)
+        [_TWO_FOR_ONE, second], bar_time=_BEFORE, as_of=datetime(2026, 6, 1, tzinfo=UTC)
     )
     assert factor == Decimal(6)
 
@@ -97,12 +97,12 @@ def test_dividend_factor_applies_crsp_style_reduction() -> None:
 def test_dividend_factor_multiple_dividends_compound() -> None:
     first = CashDividend(ex_date=_SPLIT_EX_DATE, amount=Decimal(2), prior_close=Decimal(100))
     second = CashDividend(
-        ex_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        ex_date=datetime(2026, 5, 1, tzinfo=UTC),
         amount=Decimal(1),
         prior_close=Decimal(50),
     )
     factor = dividend_factor(
-        [first, second], bar_time=_BEFORE, as_of=datetime(2026, 6, 1, tzinfo=timezone.utc)
+        [first, second], bar_time=_BEFORE, as_of=datetime(2026, 6, 1, tzinfo=UTC)
     )
     assert factor == Decimal("0.98") * Decimal("0.98")
 
@@ -375,10 +375,10 @@ def test_split_factor_fails_on_incorrect_ratio_order() -> None:
 
     # 2:1 split (ratio=2, historical price÷2)과 3:1 split (ratio=3)이 순서대로 적용.
     splits = [
-        StockSplit(ex_date=datetime(2026, 2, 15, tzinfo=timezone.utc), ratio=Decimal(2)),
-        StockSplit(ex_date=datetime(2026, 3, 15, tzinfo=timezone.utc), ratio=Decimal(3)),
+        StockSplit(ex_date=datetime(2026, 2, 15, tzinfo=UTC), ratio=Decimal(2)),
+        StockSplit(ex_date=datetime(2026, 3, 15, tzinfo=UTC), ratio=Decimal(3)),
     ]
-    factor = split_factor(splits, bar_time=_BEFORE, as_of=datetime(2026, 4, 1, tzinfo=timezone.utc))
+    factor = split_factor(splits, bar_time=_BEFORE, as_of=datetime(2026, 4, 1, tzinfo=UTC))
 
     # 2 × 3 = 6. 비율이 정확히 누적되어야 함.
     assert factor == Decimal(6), f"Expected factor 6 (2×3), got {factor}"

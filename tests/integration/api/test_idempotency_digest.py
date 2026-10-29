@@ -13,7 +13,7 @@ import math
 import os
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 import pytest
@@ -204,7 +204,7 @@ async def test_purge_expired_removes_only_past_rows(pool):
             "INSERT INTO idempotency_keys (key, status_code, response_body, expires_at) "
             "VALUES ($1, 201, '{}'::jsonb, $2)",
             expired_key,
-            datetime(2000, 1, 1, tzinfo=timezone.utc),
+            datetime(2000, 1, 1, tzinfo=UTC),
         )
 
     deleted = await purge_expired(pool)

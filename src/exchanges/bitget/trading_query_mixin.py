@@ -23,7 +23,7 @@ LA-19(`bitget/symbols.py`)가 이미 R8을 `symbol_normalizer` 단일 규칙으�
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import uuid4
@@ -64,8 +64,8 @@ def _parse_bitget_timestamp(raw_ts: str | None) -> datetime:
     호출 시점으로 안전하게 폴백한다(8.3 원칙 — 모르는 값을 실패로
     단정하지 않는다)."""
     if not raw_ts:
-        return datetime.now(timezone.utc)
-    return datetime.fromtimestamp(int(raw_ts) / 1000, tz=timezone.utc)
+        return datetime.now(UTC)
+    return datetime.fromtimestamp(int(raw_ts) / 1000, tz=UTC)
 
 
 def _to_epoch_ms(since: datetime) -> str:

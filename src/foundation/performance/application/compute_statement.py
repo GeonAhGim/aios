@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -201,7 +201,7 @@ async def compute_statement(
         scope_ref=cmd.scope_ref,
         period_start=cmd.period_start,
         period_end=cmd.period_end,
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
         methodology_version=methodology.version,
         methodology_hash=methodology.methodology_hash,
         input_refs=tuple(input_refs),

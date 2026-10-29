@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
@@ -334,7 +334,7 @@ def test_aware_utc_datetime_accepted_for_effective_from():
     bundle = _sample_bundle(
         state=BundleState.APPROVED,
         approved_by=uuid4(),
-        effective_from=datetime(2026, 9, 4, 0, 0, tzinfo=timezone.utc),
+        effective_from=datetime(2026, 9, 4, 0, 0, tzinfo=UTC),
     )
     assert bundle.effective_from is not None
     assert bundle.effective_from.tzinfo is not None

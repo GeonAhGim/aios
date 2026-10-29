@@ -56,7 +56,7 @@ LOCAL_REPORT_PATH = ROOT / "runtime" / "backup" / "drill_latest.json"
 
 
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 def _run(cmd: list[str], cwd: Path, env: dict | None, timeout: int) -> tuple[int, str]:

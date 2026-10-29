@@ -18,7 +18,7 @@ adapters/postgres_repository.py for details.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from src.core.db.conditional_write import ConcurrencyConflictError
@@ -90,7 +90,7 @@ async def sync_snapshot(
             f"{connection.state.value} 상태는 동기화 대상이 아닙니다."
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         provider_snapshot = await provider.fetch_snapshot(
             OpaqueRef(connection.opaque_account_ref), now
@@ -122,7 +122,7 @@ async def sync_snapshot(
     # provider call finishes — if we reused the `now` captured before the call, even a
     # short provider round-trip could make a normal response look future-dated vs. our
     # stale `now`, causing a false FUTURE_DATED classification (discovered during review).
-    classification_now = datetime.now(timezone.utc)
+    classification_now = datetime.now(UTC)
     latest = await repo.get_latest_snapshot(connection_id)
     classification = classify_provider_response(
         provider_as_of=provider_snapshot.provider_as_of,

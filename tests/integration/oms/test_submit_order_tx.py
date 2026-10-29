@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -92,7 +92,7 @@ def _command(user_id: uuid.UUID, execution_id: int, **overrides: object) -> Subm
     scope = OrderIdempotencyScope(
         tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
         strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     defaults: dict[str, object] = {
         "command_id": uuid.uuid4(),
@@ -104,7 +104,7 @@ def _command(user_id: uuid.UUID, execution_id: int, **overrides: object) -> Subm
         "quantity": Decimal("0.01"),
         "asset_class": AssetClass.CRYPTO,
         "actor_subject_id": user_id,
-        "issued_at": datetime.now(timezone.utc),
+        "issued_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     return SubmitOrderCommand(**defaults)  # type: ignore[arg-type]

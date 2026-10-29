@@ -30,7 +30,7 @@ import importlib
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -46,7 +46,7 @@ from src.foundation.market_data.ports.provider import DataProviderError, TimeSpa
 from tests.conftest import PerfBudget
 
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-_BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class _FakeBitgetAdapter:

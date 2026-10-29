@@ -7,7 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-4, §8.1, §9.
 """
 
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 from uuid import uuid4
@@ -25,7 +25,7 @@ from src.foundation.market_data.contracts.v1 import (
 from src.foundation.market_data.domain.quality.dedupe import DedupeResult, dedupe
 from tests.conftest import PerfBudget
 
-UTC = timezone.utc
+UTC = UTC
 _KEY = SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1)
 _OPEN = datetime(2026, 9, 3, 10, 5, tzinfo=UTC)
 

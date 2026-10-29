@@ -11,7 +11,7 @@ _exposure_snapshot_fixtures.py 공유 모듈로 뺐다."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -234,7 +234,7 @@ async def test_trades_counts_and_safety_fields_are_populated(pool):
                 symbol="BTC/USDT",
                 exchange="bitget",
                 strategy_id=strategy_id,
-                created_at=datetime.now(timezone.utc) - timedelta(hours=25),
+                created_at=datetime.now(UTC) - timedelta(hours=25),
             )
         )
 

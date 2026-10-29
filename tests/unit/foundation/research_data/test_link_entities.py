@@ -11,7 +11,7 @@ entry point.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -30,7 +30,7 @@ from src.foundation.research_data.domain.entity_link import (
 )
 from tests.support.perf_budget import PerfBudget
 
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _TENANT = uuid4()
 
 

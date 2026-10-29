@@ -13,7 +13,7 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -367,7 +367,7 @@ async def test_delegates_outcome_to_can_reactivate(
 
 
 def _fake_deny_decision(*, tenant_id: UUID) -> RiskDecision:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return RiskDecision(
         decision_id=uuid4(),
         gate_kind=GateKind.RECOVERY,
@@ -644,7 +644,7 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
         grant = await break_glass.request_grant(
             conn,
             requester_id=actor_id,
-            requester_mfa_verified_at=datetime.now(timezone.utc),
+            requester_mfa_verified_at=datetime.now(UTC),
             scope="kill_switch_override",
             reason="test_recovery_gate",
         )
@@ -652,7 +652,7 @@ async def test_router_recovery_denied_end_to_end_returns_403_rsk007_envelope(
             conn,
             grant_id=grant.id,
             approver_id=approver_id,
-            approver_mfa_verified_at=datetime.now(timezone.utc),
+            approver_mfa_verified_at=datetime.now(UTC),
             check_segregation_of_duty=assert_actor_not_counterparty,
         )
 

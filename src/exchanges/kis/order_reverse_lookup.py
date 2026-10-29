@@ -22,7 +22,7 @@ trading_query_mixin.py).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -78,7 +78,7 @@ def _parse_ord_tmd(order_date: str, ord_tmd: str | None) -> datetime | None:
         naive_kst = datetime.strptime(order_date + ord_tmd, "%Y%m%d%H%M%S")
     except ValueError:
         return None
-    return (naive_kst - _KST_OFFSET).replace(tzinfo=timezone.utc)
+    return (naive_kst - _KST_OFFSET).replace(tzinfo=UTC)
 
 
 def row_to_order(row: dict[str, Any], *, order_date: str) -> Order:
@@ -101,7 +101,7 @@ def row_to_order(row: dict[str, Any], *, order_date: str) -> Order:
         if Decimal(price_raw) != 0
         else None
     )
-    created_at = _parse_ord_tmd(order_date, row.get("ord_tmd")) or datetime.now(timezone.utc)
+    created_at = _parse_ord_tmd(order_date, row.get("ord_tmd")) or datetime.now(UTC)
     return Order(
         order_id=uuid4(),
         exchange_order_id=f"{row.get('krx_fwdg_ord_orgno', '')}:{row.get('odno', '')}",

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -38,7 +38,7 @@ BASE = "/v1/foundation/market-data"
 
 
 def _source_contract(scope: RedistributionScope, *, source_id: str = "BITGET") -> SourceContract:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return SourceContract(
         source_id=source_id,
         tier=SourceContractTier.ENTERPRISE,
@@ -169,7 +169,7 @@ async def _grant_venue(conn: asyncpg.Connection, tenant_id: uuid.UUID) -> None:
 async def seeded(client: AsyncClient) -> dict:
     headers_a, tenant_a = await _register(client)
     headers_b, _tenant_b = await _register(client)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=30)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=30)
     pool = app.state.pool
     async with pool.acquire() as conn, conn.transaction():
         instrument_id, symbol = await _seed_instrument(conn, t0 - timedelta(days=1))

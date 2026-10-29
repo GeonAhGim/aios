@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 
@@ -57,7 +57,7 @@ async def run_circuit_breaker_tick(
     policy: RiskPolicy,
     *,
     history: MetricsHistory,
-    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> None:
     metrics = await collect_circuit_breaker_metrics(pool, tracker, freshness)
     history.append(metrics)

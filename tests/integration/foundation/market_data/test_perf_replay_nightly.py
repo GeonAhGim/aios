@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 
 import asyncpg
@@ -128,12 +128,12 @@ async def _timed_replay(
 def _next_utc_midnight() -> datetime:
     """`Venue.BITGET`은 24×7 CONTINUOUS라 UTC 자정 기준 하루 = 세션 정확히
     1개(task-826 decision "세션 1개" 전제). 파티션 제약(현재 이후)도 만족."""
-    today = datetime.now(timezone.utc).date()
-    return datetime.combine(today, dt_time.min, tzinfo=timezone.utc) + timedelta(days=1)
+    today = datetime.now(UTC).date()
+    return datetime.combine(today, dt_time.min, tzinfo=UTC) + timedelta(days=1)
 
 
 def _next_minute() -> datetime:
-    return datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    return datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
 
 
 @pytest.mark.perf

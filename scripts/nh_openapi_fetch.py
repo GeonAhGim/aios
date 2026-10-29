@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -143,7 +143,7 @@ def fetch_and_save(output: Path = DEFAULT_OUTPUT) -> int:
         # Build reference
         reference = {
             "source_url": OPENAPI_URL,
-            "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "spec_version": openapi_data.get("info", {}).get("version"),
             "spec_title": openapi_data.get("info", {}).get("title"),
             "endpoint_count": len(endpoints),

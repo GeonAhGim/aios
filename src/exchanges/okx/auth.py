@@ -34,7 +34,7 @@ import hashlib
 import hmac
 import json
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -74,7 +74,7 @@ def iso_timestamp_from_epoch_ms(epoch_ms: int) -> str:
     format. Kept separate from `sign_request` so a caller can reuse a
     `ServerClock`-corrected epoch value (same pattern as bitget/adapter.py's
     `self._transport.clock.now_ms()`) instead of the raw system clock."""
-    dt = datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
+    dt = datetime.fromtimestamp(epoch_ms / 1000, tz=UTC)
     return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
 

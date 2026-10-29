@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -20,7 +20,7 @@ from src.core.risk.inputs import (
     StatsInputs,
 )
 
-NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 3, tzinfo=UTC)
 POLICY = load_risk_policy()
 
 

@@ -15,7 +15,7 @@ user_id` is fixed (same convention as session_repository integration tests).
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 
@@ -55,7 +55,7 @@ async def issue_token_pair(
     client = client or ClientInfo()
     refresh_plain, refresh_hash = TokenIssuer.issue_refresh()
     auth_level = _auth_level_for(user)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TTL_DAYS)
+    expires_at = datetime.now(UTC) + timedelta(days=REFRESH_TTL_DAYS)
 
     async with pool.acquire() as conn:
         session = await session_repository.insert_session(

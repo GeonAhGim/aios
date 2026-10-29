@@ -15,7 +15,7 @@ import asyncio
 import os
 import time as time_module
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -143,7 +143,7 @@ async def test_wash_trade_violation_blocks_next_order_at_pre_submit_gate(
     fill_order_id = await _seed_order(
         pool, tenant_id, side="BUY", price=Decimal("100"), status="FILLED"
     )
-    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
+    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=UTC)
     await _seed_fill(pool, fill_order_id, side="BUY", price=Decimal("100"), venue_ts=venue_ts)
 
     report = await run_daily_post_trade_batch(
@@ -151,7 +151,7 @@ async def test_wash_trade_violation_blocks_next_order_at_pre_submit_gate(
         kill_switch,
         risk_gate_repo,
         business_date=_BUSINESS_DATE,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert report.blocked.get(tenant_id) == ("WASH_TRADE",)
 
@@ -173,10 +173,10 @@ async def test_rerunning_same_batch_keeps_a_single_violation_record(
     fill_order_id = await _seed_order(
         pool, tenant_id, side="BUY", price=Decimal("100"), status="FILLED"
     )
-    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
+    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=UTC)
     await _seed_fill(pool, fill_order_id, side="BUY", price=Decimal("100"), venue_ts=venue_ts)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await run_daily_post_trade_batch(
         pool, kill_switch, risk_gate_repo, business_date=_BUSINESS_DATE, now=now
     )
@@ -198,7 +198,7 @@ async def test_no_violation_leaves_gate_open(
     # this scenario only exercises post-trade safety controls.
     await activate_mandate_with_defaults(mandate_repo, trust_repo, tenant_id=tenant_id)
     order_id = await _seed_order(pool, tenant_id, side="BUY", price=Decimal("100"), status="FILLED")
-    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
+    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=UTC)
     await _seed_fill(pool, order_id, side="BUY", price=Decimal("100"), venue_ts=venue_ts)
 
     report = await run_daily_post_trade_batch(
@@ -206,7 +206,7 @@ async def test_no_violation_leaves_gate_open(
         kill_switch,
         risk_gate_repo,
         business_date=_BUSINESS_DATE,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert tenant_id not in report.blocked
 
@@ -240,7 +240,7 @@ async def test_market_abuse_warn_only_leaves_gate_open(
     sell_order_id = await _seed_order(
         pool, tenant_id, side="SELL", price=Decimal("100"), status="FILLED"
     )
-    base_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
+    base_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=UTC)
     await _seed_fill(pool, buy_order_id, side="BUY", price=Decimal("100"), venue_ts=base_ts)
     await _seed_fill(
         pool,
@@ -255,7 +255,7 @@ async def test_market_abuse_warn_only_leaves_gate_open(
         kill_switch,
         risk_gate_repo,
         business_date=_BUSINESS_DATE,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert tenant_id not in report.blocked
     assert "market_abuse.wash_trade" in report.warnings.get(tenant_id, ())
@@ -283,7 +283,7 @@ async def test_batch_meets_tenant_throughput_floor(
     고정된 전체 tenant 수가 아니라 `report.tenants_evaluated`로 나눈 평균에
     대해 단언해야 반복 실행에도 흔들리지 않는다."""
     tenant_ids = [await create_test_tenant(pool) for _ in range(20)]
-    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
+    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=UTC)
     for tenant_id in tenant_ids:
         order_id = await _seed_order(
             pool, tenant_id, side="BUY", price=Decimal("100"), status="FILLED"
@@ -296,7 +296,7 @@ async def test_batch_meets_tenant_throughput_floor(
         kill_switch,
         risk_gate_repo,
         business_date=_BUSINESS_DATE,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     elapsed = time_module.perf_counter() - start
 
@@ -320,7 +320,7 @@ async def test_concurrent_batch_instances_do_not_double_activate(pool: asyncpg.P
     fill_order_id = await _seed_order(
         pool, tenant_id, side="BUY", price=Decimal("100"), status="FILLED"
     )
-    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=timezone.utc)
+    venue_ts = datetime.combine(_BUSINESS_DATE, time(12, 0), tzinfo=UTC)
     await _seed_fill(pool, fill_order_id, side="BUY", price=Decimal("100"), venue_ts=venue_ts)
 
     pool_a = await asyncpg.create_pool(_asyncpg_dsn(), min_size=2, max_size=8)
@@ -342,7 +342,7 @@ async def test_concurrent_batch_instances_do_not_double_activate(pool: asyncpg.P
             exchange_adapters={},
             audit_repo=PostgresAuditEventRepository(pool_b),
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await asyncio.gather(
             run_daily_post_trade_batch(
                 pool_a, kill_switch_a, repo_a, business_date=_BUSINESS_DATE, now=now

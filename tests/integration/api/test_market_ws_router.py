@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -50,7 +50,7 @@ class _FakeSourceContractRepository:
     실DB에 BITGET 행을 심으면 다른 테스트와 공유돼 오염된다."""
 
     async def get(self, conn: asyncpg.Connection, source_id: str) -> SourceContract | None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return SourceContract(
             source_id=source_id,
             tier=SourceContractTier.ENTERPRISE,
@@ -125,8 +125,8 @@ async def _seed_instrument_with_one_candle(symbol: str, *, venue: str = "BITGET"
         Verdict,
     )
 
-    listed_at = datetime.now(timezone.utc) - timedelta(days=1)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=3)
+    listed_at = datetime.now(UTC) - timedelta(days=1)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=3)
     pool = await asyncpg.create_pool(_asyncpg_dsn())
     try:
         async with pool.acquire() as conn, conn.transaction():

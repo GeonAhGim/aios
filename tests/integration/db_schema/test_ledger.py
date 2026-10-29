@@ -6,7 +6,7 @@ Spec: 04_db_schema_v1.7.md.
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -375,7 +375,7 @@ async def test_ledger_hold_duplicate_purpose_reference_rejected(
     audit_event_id = await insert_audit_event(raw_conn)
     entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
     account_id = await _cash_clearing_account_id(raw_conn)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    expires_at = datetime.now(UTC) + timedelta(days=1)
     purpose = f"test-purpose-{uuid4().hex}"
     reference = f"test-ref-{uuid4().hex}"
 
@@ -408,7 +408,7 @@ async def test_ledger_hold_invalid_state_rejected(raw_conn: asyncpg.Connection) 
     audit_event_id = await insert_audit_event(raw_conn)
     entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_event_id)
     account_id = await _cash_clearing_account_id(raw_conn)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    expires_at = datetime.now(UTC) + timedelta(days=1)
 
     with pytest.raises(asyncpg.CheckViolationError):
         await raw_conn.execute(

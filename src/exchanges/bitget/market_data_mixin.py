@@ -32,7 +32,7 @@ import base64
 import hashlib
 import hmac
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -180,7 +180,7 @@ class BitgetMarketDataMixin:
         """02b 스펙 §7(P1) — 타임스탬프 서명 오차 디버깅에 유용."""
         raw = await self._request("GET", "/api/v2/public/time")
         data = raw["data"]
-        return datetime.fromtimestamp(int(data["serverTime"]) / 1000, tz=timezone.utc)
+        return datetime.fromtimestamp(int(data["serverTime"]) / 1000, tz=UTC)
 
     async def get_public_trades(
         self: SignedRequestClient,
@@ -203,7 +203,7 @@ class BitgetMarketDataMixin:
                 price=Decimal(item["price"]),
                 quantity=Decimal(item["size"]),
                 side=item.get("side", ""),
-                timestamp=datetime.fromtimestamp(int(item["ts"]) / 1000, tz=timezone.utc),
+                timestamp=datetime.fromtimestamp(int(item["ts"]) / 1000, tz=UTC),
             )
             for item in raw["data"]
         ]

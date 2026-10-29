@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -126,7 +126,7 @@ async def _open_position(
         mark_at=None,
         base_currency=Currency.KRW,
         last_journal_seq=0,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     repo = PostgresSnapshotRepository(pool)
     async with pool.acquire() as conn, conn.transaction():
@@ -150,7 +150,7 @@ async def _append_fills(pool: asyncpg.Pool, position_key: str, count: int) -> No
                 source_event_type="fill",
                 source_event_id=f"{position_key}:{i}",
                 idempotency_key=f"fill:{position_key}:{i}",
-                occurred_at=datetime.now(timezone.utc),
+                occurred_at=datetime.now(UTC),
             )
 
 

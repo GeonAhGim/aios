@@ -11,7 +11,7 @@ adapter's `root`, no custom fixtures or filesystem mocking.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -29,7 +29,7 @@ _SPEC = FeatureSpec(feature_id="rsi_14", dtype="float", source_ref="src://x")
 def _row(entity_id: str = "AAPL", hour: int = 10, value: str = "1.5") -> FeatureValue:
     return FeatureValue(
         entity_id=entity_id,
-        as_of=datetime(_DAY.year, _DAY.month, _DAY.day, hour, tzinfo=timezone.utc),
+        as_of=datetime(_DAY.year, _DAY.month, _DAY.day, hour, tzinfo=UTC),
         value=value,
     )
 
@@ -84,7 +84,7 @@ def test_write_rejects_naive_as_of(tmp_path: Path) -> None:
 
 def test_write_rejects_as_of_outside_partition_day(tmp_path: Path) -> None:
     store = ParquetFeatureStore(tmp_path)
-    wrong_day_row = _row(hour=10)._replace(as_of=datetime(2026, 1, 16, 10, tzinfo=timezone.utc))
+    wrong_day_row = _row(hour=10)._replace(as_of=datetime(2026, 1, 16, 10, tzinfo=UTC))
     with pytest.raises(ValueError, match="partition day"):
         store.write_batch(_SPEC, _DAY, [wrong_day_row])
 

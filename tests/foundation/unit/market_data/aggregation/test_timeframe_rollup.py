@@ -10,7 +10,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -30,7 +30,7 @@ from src.foundation.market_data.domain.candle_columns import (
     MismatchedColumnLengthError,
 )
 
-UTC = timezone.utc
+UTC = UTC
 KST = ZoneInfo("Asia/Seoul")
 
 

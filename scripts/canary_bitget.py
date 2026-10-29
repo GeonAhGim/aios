@@ -57,7 +57,7 @@ import argparse
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -172,7 +172,7 @@ async def run_canary_session(
     state.fills += 1
 
     return CanaryReport(
-        run_date=datetime.now(timezone.utc).date().isoformat(),
+        run_date=datetime.now(UTC).date().isoformat(),
         account_mode=preflight.account_mode,
         rejected_cases=tuple(rejected),
         limit_roundtrip=limit_result,

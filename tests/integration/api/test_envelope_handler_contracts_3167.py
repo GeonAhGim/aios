@@ -50,7 +50,7 @@ def _build_bare_envelope_app() -> FastAPI:
 
 
 @pytest.fixture
-async def bare_client() -> AsyncGenerator[AsyncClient, None]:
+async def bare_client() -> AsyncGenerator[AsyncClient]:
     bare_app = _build_bare_envelope_app()
     transport = ASGITransport(app=bare_app, raise_app_exceptions=False)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

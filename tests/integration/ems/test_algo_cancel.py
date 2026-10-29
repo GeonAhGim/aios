@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -121,7 +121,7 @@ async def test_cancel_algo_propagates_a_child_cancel_failure_and_stops(pool):
 async def test_algo_scheduler_ticks_and_unregisters_a_completed_run(pool):
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[_child(parent_id, 0, Decimal("10"), scheduled_at=now - timedelta(seconds=1))],
@@ -138,7 +138,7 @@ async def test_algo_scheduler_ticks_and_unregisters_a_completed_run(pool):
 async def test_algo_scheduler_ignores_slices_already_submitted(pool):
     user_id = await create_test_user(pool)
     parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     plan = AlgoRunPlan(
         parent=_parent_order(parent_id, qty=Decimal("10")),
         children=[
@@ -166,7 +166,7 @@ async def test_algo_scheduler_handles_missing_parent_gracefully(pool):
     user_id = await create_test_user(pool)
     missing_parent_id = uuid.uuid4()
     healthy_parent_id = await _insert_order(pool, user_id, quantity=Decimal("10"))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     broken_plan = AlgoRunPlan(
         parent=_parent_order(missing_parent_id, qty=Decimal("10")),

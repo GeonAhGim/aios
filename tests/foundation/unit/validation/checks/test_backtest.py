@@ -9,7 +9,7 @@ numeric performance assertion 1, gate-red repro 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -32,7 +32,7 @@ from src.foundation.validation.domain.check_result import CheckResult
 from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _PAID_COST = CostModel(fee_bps=Decimal("10"), slippage_bps=Decimal("5"))
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 

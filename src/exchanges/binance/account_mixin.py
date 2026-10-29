@@ -32,7 +32,7 @@ callers merge this with their own DB row.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -89,7 +89,7 @@ def _split_exchange_order_id(exchange_order_id: str) -> tuple[str, str]:
 
 
 def _parse_epoch_ms(raw_ms: Any) -> datetime:
-    return datetime.fromtimestamp(int(raw_ms) / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(int(raw_ms) / 1000, tz=UTC)
 
 
 def _average_fill_price(symbol: str, data: dict[str, Any]) -> Money | None:

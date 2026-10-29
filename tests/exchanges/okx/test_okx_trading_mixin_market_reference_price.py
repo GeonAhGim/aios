@@ -10,7 +10,7 @@ task-8454(스테일니티 검사의 벽시계 의존 제거) 계열.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -79,7 +79,7 @@ async def test_place_order_accepts_market_order_with_reference_price_just_under_
     `_utcnow`를 고정하고 티커 타임스탬프도 그 동일한 고정 시각 기준으로
     직접 지정해(`ticker_timestamp`), 실행이 아무리 느려도 age가 정확히
     4.9초로 고정되게 한다 -- 실제 벽시계를 두 번 읽는 지점을 아예 없앤다."""
-    frozen = datetime.now(timezone.utc)
+    frozen = datetime.now(UTC)
     monkeypatch.setattr(
         "src.exchanges.okx.trading_mixin._utcnow",
         lambda: frozen,
@@ -131,7 +131,7 @@ async def test_market_order_not_falsely_rejected_regardless_of_real_test_wall_cl
     좌우됐다) -- 이것이 간헐적 CI red의 회귀 지점이었다."""
     from src.exchanges.okx import trading_mixin as okx_trading_mixin
 
-    frozen = datetime.now(timezone.utc)
+    frozen = datetime.now(UTC)
     monkeypatch.setattr(okx_trading_mixin, "_utcnow", lambda: frozen)
     client = _paper_client(ticker_price=Decimal("50000"), ticker_age=timedelta(seconds=0))
     order = _order(order_type=OrderType.MARKET).model_copy(update={"quantity": Decimal("0.1")})

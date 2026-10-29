@@ -9,7 +9,7 @@ D3 replay_verify N/A(주문/원장 이벤트를 생성하지 않는 U-8 계산 A
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -78,7 +78,7 @@ async def client(monkeypatch):
         is_platform_admin=False,
     )
     monkeypatch.setattr(deps, "get_user_by_id", AsyncMock(return_value=user))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session = Session(
         id=SESSION_ID,
         user_id=USER_ID,

@@ -5,7 +5,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2.1(A) PLT-06
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -27,7 +27,7 @@ def _envelope_kwargs(**overrides):
         "trace_id": uuid.uuid4(),
         "tenant_id": None,
         "actor_subject_id": "system",
-        "occurred_at": datetime.now(timezone.utc),
+        "occurred_at": datetime.now(UTC),
         "payload": {},
     }
     kwargs.update(overrides)

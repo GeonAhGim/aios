@@ -7,7 +7,7 @@ model construction (ADR-2026-09-09-C Decision 1).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -25,7 +25,7 @@ from tests.support.perf_budget import PerfBudget
 
 
 def _deployment_view() -> PaperDeploymentView:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return PaperDeploymentView(
         id=uuid4(),
         package_ref="pkg://strategy/1",
@@ -38,7 +38,7 @@ def _deployment_view() -> PaperDeploymentView:
 
 
 def test_deployment_list_response_valid_roundtrip() -> None:
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     resp = DeploymentListResponse(deployments=[_deployment_view()], as_of=as_of)
     assert resp.as_of == as_of
     assert len(resp.deployments) == 1
@@ -53,7 +53,7 @@ def test_deployment_list_response_invalid_deployments_element_raises() -> None:
     with pytest.raises(ValidationError):
         DeploymentListResponse(
             deployments=["not-a-deployment-view"],  # type: ignore[list-item]
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
         )
 
 
@@ -117,7 +117,7 @@ def test_deployment_list_response_construction_throughput_budget(
     깨는 원인을 batch 증가로 막는다(task-15090).
     단위는 samples.cpu_ms가 ms이므로 예산도 ms(80.0 → 150.0ms, task-15385 CI parallel 안정화).
     """
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     deployments = [_deployment_view() for _ in range(5)]
 
     samples = perf_budget.samples(
@@ -146,7 +146,7 @@ def test_deployment_list_response_construction_budget_goes_red_with_10x_cpu_dela
     """
     budget_ms = 150.0
 
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     deployments = [_deployment_view() for _ in range(5)]
 
     def _run() -> object:

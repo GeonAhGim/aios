@@ -5,7 +5,7 @@ Covers decimal coercion, negative/zero/large amounts, and model_validate paths.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -19,7 +19,7 @@ from src.foundation.reconciliation.contracts.v1 import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-_OK_NOW = datetime(2026, 9, 24, 12, 0, 0, tzinfo=timezone.utc)
+_OK_NOW = datetime(2026, 9, 24, 12, 0, 0, tzinfo=UTC)
 _FAKE_UUID = uuid4()
 
 

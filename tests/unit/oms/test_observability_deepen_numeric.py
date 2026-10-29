@@ -7,7 +7,7 @@ multi-instance, adversarial/replay.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -95,7 +95,7 @@ async def test_unknown_resolution_duration_metric_is_deterministic(
     result = await resolve_unknown(
         view.order_id, adapter=adapter, pool=_UnknownFakePool(),
         risk_gate_repo=risk_gate_repo,
-        clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
         order_repo=repo, metrics=spy,
     )
 

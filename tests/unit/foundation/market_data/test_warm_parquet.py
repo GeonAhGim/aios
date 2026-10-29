@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -53,7 +53,7 @@ _KEY = SeriesKey(venue=Venue.BINANCE, instrument_id=uuid4(), timeframe=Timeframe
 
 
 def _daily_columns(year: int, days: list[int]) -> CandleColumns:
-    ts = [datetime(year, 1, 1, tzinfo=timezone.utc) + timedelta(days=d) for d in days]
+    ts = [datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=d) for d in days]
     n = len(ts)
     return CandleColumns(
         ts=ts,
@@ -91,8 +91,8 @@ def test_round_trip_is_byte_identical(tmp_path: Path) -> None:
 
     loaded, missing = store.read_columns(
         _KEY,
-        datetime(2026, 1, 1, tzinfo=timezone.utc),
-        datetime(2026, 1, 6, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 6, tzinfo=UTC),
     )
 
     assert missing == ()
@@ -112,15 +112,15 @@ def test_partial_range_reports_explicit_missing_months(tmp_path: Path) -> None:
 
     loaded, missing = store.read_columns(
         _KEY,
-        datetime(2026, 1, 1, tzinfo=timezone.utc),
-        datetime(2026, 4, 1, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 4, 1, tzinfo=UTC),
     )
 
     assert len(loaded) == 3
     assert all(ts.month == 2 for ts in loaded.ts)
     assert missing == (
-        (datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 2, 1, tzinfo=timezone.utc)),
-        (datetime(2026, 3, 1, tzinfo=timezone.utc), datetime(2026, 4, 1, tzinfo=timezone.utc)),
+        (datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)),
+        (datetime(2026, 3, 1, tzinfo=UTC), datetime(2026, 4, 1, tzinfo=UTC)),
     )
 
 
@@ -129,13 +129,13 @@ def test_missing_year_file_reports_whole_range_missing(tmp_path: Path) -> None:
 
     loaded, missing = store.read_columns(
         _KEY,
-        datetime(2020, 1, 1, tzinfo=timezone.utc),
-        datetime(2020, 3, 1, tzinfo=timezone.utc),
+        datetime(2020, 1, 1, tzinfo=UTC),
+        datetime(2020, 3, 1, tzinfo=UTC),
     )
 
     assert len(loaded) == 0
     assert missing == (
-        (datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2020, 3, 1, tzinfo=timezone.utc)),
+        (datetime(2020, 1, 1, tzinfo=UTC), datetime(2020, 3, 1, tzinfo=UTC)),
     )
 
 
@@ -150,8 +150,8 @@ def test_reuses_candle_store_port_read_candles_columnar(tmp_path: Path) -> None:
         return await store.read_candles_columnar(
             None,
             _KEY,
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
-            datetime(2026, 1, 5, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 5, tzinfo=UTC),
             None,
         )
 
@@ -168,9 +168,9 @@ def test_read_candles_columnar_rejects_as_of(tmp_path: Path) -> None:
         await store.read_candles_columnar(
             None,
             _KEY,
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
-            datetime(2026, 1, 2, tzinfo=timezone.utc),
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 2, tzinfo=UTC),
+            datetime(2026, 1, 1, tzinfo=UTC),
         )
 
     with pytest.raises(AsOfNotSupportedError):
@@ -188,8 +188,8 @@ def test_truncated_parquet_file_raises_instead_of_returning_empty(tmp_path: Path
     with pytest.raises(Exception):  # noqa: B017 — pyarrow의 정확한 예외 타입은 버전 의존
         store.read_columns(
             _KEY,
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
-            datetime(2026, 1, 5, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 5, tzinfo=UTC),
         )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
@@ -23,7 +23,7 @@ from src.foundation.entities.domain.hierarchy import (
     validate_new_sub_account,
 )
 
-NOW = datetime(2026, 9, 6, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 6, tzinfo=UTC)
 
 
 def _entity(**overrides: object) -> LegalEntity:

@@ -52,7 +52,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 
 import asyncpg
@@ -116,8 +116,8 @@ def _next_utc_midnight() -> datetime:
     위해 `t0`를 다음 UTC 자정으로 고정한다. `seed_candles`가 현재 월부터
     미래로만 파티션을 만들 수 있으므로 t0는 현재 이후여야 하는 제약도 함께
     만족한다."""
-    today = datetime.now(timezone.utc).date()
-    return datetime.combine(today, dt_time.min, tzinfo=timezone.utc) + timedelta(days=1)
+    today = datetime.now(UTC).date()
+    return datetime.combine(today, dt_time.min, tzinfo=UTC) + timedelta(days=1)
 
 
 async def _seeded_request(
@@ -209,7 +209,7 @@ async def test_replay_43200_candles_under_5s(
 
     게이트는 (1) CPU 예산 단언 + (2) 왕복 수(≤2)+정합성. 5s wall-clock 목표는
     nightly로 옮겼다(모듈 docstring, task-1405)."""
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
     request, _ = await _seeded_request(pool, batch_repo, t0=t0, row_count=MONTH_ROW_COUNT)
 
     # CPU 측정: batch=8 로 양자화 오차 축소 → 0 수렴 해소
@@ -258,7 +258,7 @@ async def test_replay_43200_goes_red_with_io_delay_injection(
     original_fetch = asyncpg.Connection.fetch
     monkeypatch.setattr(asyncpg.Connection, "fetch", delayed_async(original_fetch, 2.0))
 
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
     request, _ = await _seeded_request(pool, batch_repo, t0=t0, row_count=MONTH_ROW_COUNT)
 
     sample = await perf_budget.sample_async(

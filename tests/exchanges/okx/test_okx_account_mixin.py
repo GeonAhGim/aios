@@ -10,7 +10,7 @@ methods fail with `UnsupportedCapabilityError`, never a silent [].
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -173,7 +173,7 @@ async def test_get_fills_happy_path_returns_raw_rows():
             }
         }
     )
-    fills = await client.get_fills("BTC-USDT", since=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    fills = await client.get_fills("BTC-USDT", since=datetime(2020, 1, 1, tzinfo=UTC))
     assert fills == [
         {
             "instId": "BTC-USDT",

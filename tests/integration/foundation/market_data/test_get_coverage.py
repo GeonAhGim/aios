@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -51,7 +51,7 @@ def _instrument(instrument_id: str) -> Instrument:
         lot_size=Decimal("0.0001"),
         calendar_id="24x7",
         lifecycle_state=InstrumentLifecycle.ACTIVE,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 
@@ -118,7 +118,7 @@ async def test_get_coverage_merges_adjacent_spans_and_keeps_quality_axes_separat
 ):
     tenant_id = uuid.uuid4()
     instrument_id = _fake_ulid()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await instrument_repo.create(conn, _instrument(instrument_id))
@@ -276,7 +276,7 @@ async def test_get_coverage_returns_empty_list_for_tenant_without_entitlement(
     (= 다른 테넌트의 instrument_id 조회 동형) — 0행, 예외/500 아님."""
     other_tenant_id = uuid.uuid4()
     instrument_id = _fake_ulid()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await instrument_repo.create(conn, _instrument(instrument_id))
@@ -307,7 +307,7 @@ async def test_get_coverage_ignores_spans_from_other_venues(
     시그니처에 venue가 없다) `get_coverage`가 직접 걸러야 한다."""
     tenant_id = uuid.uuid4()
     instrument_id = _fake_ulid()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await instrument_repo.create(conn, _instrument(instrument_id))
@@ -347,7 +347,7 @@ async def test_get_coverage_ignores_spans_declared_for_other_timeframe(
     다른 축(timeframe)을 겨냥한다."""
     tenant_id = uuid.uuid4()
     instrument_id = _fake_ulid()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await instrument_repo.create(conn, _instrument(instrument_id))
@@ -392,7 +392,7 @@ async def test_get_coverage_instrument_lookup_failure_propagates_fail_closed(
     즉시 적색이 된다(게이트재현)."""
     tenant_id = uuid.uuid4()
     instrument_id = _fake_ulid()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     async with pool.acquire() as conn, conn.transaction():
         await instrument_repo.create(conn, _instrument(instrument_id))
@@ -441,7 +441,7 @@ async def test_get_coverage_latency_stays_within_normalized_ceiling_as_span_coun
     tenant_id = uuid.uuid4()
     baseline_id = _fake_ulid()
     scaled_id = _fake_ulid()
-    t0 = datetime.now(timezone.utc) - timedelta(days=400)
+    t0 = datetime.now(UTC) - timedelta(days=400)
 
     async with pool.acquire() as conn, conn.transaction():
         await instrument_repo.create(conn, _instrument(baseline_id))

@@ -2,7 +2,7 @@
 /users/me/delete 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -171,7 +171,7 @@ async def test_register_whitelist_entry_with_mfa_requires_totp(client):
 
     # esc-ci-cbb8b9c62497 — 실시간 코드는 서버 검증과의 30초 구간 경계 레이스가
     # 있어(valid_window=0) 시계를 고정한다.
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]
@@ -265,13 +265,13 @@ async def test_relogin_after_deletion_request_cancels_it(client):
 
 
 async def _rewind_created_at(pool, request_id: int, seconds_ago: float) -> None:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE approval_requests SET created_at = $2 WHERE id = $1",
             request_id,
-            datetime.now(timezone.utc) - timedelta(seconds=seconds_ago),
+            datetime.now(UTC) - timedelta(seconds=seconds_ago),
         )
 
 

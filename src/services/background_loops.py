@@ -19,7 +19,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -255,7 +255,7 @@ async def start_background_loops(
     liquidation_adapters = {"bitget": BitgetAdapter("", "", "", demo_mode=True)}
 
     async def _liquidation_tick() -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await run_liquidation_worker_once(pool, liquidation_adapters, now=now)
 
     liquidation_task: asyncio.Task[None] | None = None
@@ -269,7 +269,7 @@ async def start_background_loops(
 
     # CM-11/12 -- a DENY blocks(KillSwitchService) + notifies. See test_post_trade_batch.py.
     async def _post_trade_batch_tick() -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         business_date = (now - timedelta(days=1)).date()
         await run_daily_post_trade_batch(
             pool, kill_switch_service, risk_gate_repo, business_date=business_date, now=now,

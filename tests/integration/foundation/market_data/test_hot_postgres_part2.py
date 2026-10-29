@@ -19,7 +19,7 @@ p50/p95를 print로 남기고, (b) 이 어댑터가 `PostgresCandleStore`에
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -227,7 +227,7 @@ async def test_read_columns_5000_candles_p95_measured(pool, hot_storage, batch_r
     게이트는 순차 DB 왕복 수(<=1)로만 건다."""
     async with pool.acquire() as conn:
         instrument_id = await _instrument_id(conn, prefix="DC13PERF")
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
     await _seed_5000_candles(pool, batch_repo, instrument_id=instrument_id, t0=t0)
     end = t0 + timedelta(minutes=_SAMPLE_ROW_COUNT)
 

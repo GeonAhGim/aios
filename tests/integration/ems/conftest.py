@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -21,7 +21,7 @@ from src.foundation.ems.contracts.v1 import (
 )
 from src.services.oms.contracts.v1_views import OrderView
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _dsn() -> str:
@@ -73,7 +73,7 @@ def _child(
 
 
 def _order_view(order_id: uuid.UUID) -> OrderView:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return OrderView(
         order_id=order_id,
         tenant_id=uuid.uuid4(),

@@ -45,7 +45,7 @@ dispatch_once`)의 증명이다.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -95,7 +95,7 @@ async def _seed_outbox_batch(pool: asyncpg.Pool, n: int) -> None:
                 order_id=order_id,
                 command_type="SUBMIT",
                 payload=submit_payload(view),
-                not_before=datetime.now(timezone.utc),
+                not_before=datetime.now(UTC),
             )
 
 
@@ -222,7 +222,7 @@ async def test_outbox_batch_dispatch_survives_one_row_adapter_failure(pool: asyn
             order_id=failing_order_id,
             command_type="SUBMIT",
             payload=submit_payload(view),
-            not_before=datetime.now(timezone.utc),
+            not_before=datetime.now(UTC),
         )
 
     async def _flaky_place_order(order: Order) -> Order:

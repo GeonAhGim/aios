@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 def server_url() -> str:

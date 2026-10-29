@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -93,7 +93,7 @@ async def test_unknown_instrument_id_is_rejected_by_fk(pool):
 async def test_duplicate_known_at_for_same_key_is_rejected_by_pk(pool):
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
-    known_at = datetime.now(timezone.utc)
+    known_at = datetime.now(UTC)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO instrument_attributes (instrument_id, attr_key, attr_value, known_at) "
@@ -123,7 +123,7 @@ async def test_get_as_of_meets_latency_budget_with_many_corrections(pool, perf_b
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
     repo = PostgresInstrumentAttributesRepository(pool)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     n = 500
     budget_ms = 3_000.0  # 실측 로컬 <0.5s, CI 편차 감안
 
@@ -162,7 +162,7 @@ async def test_get_as_of_cpu_time_converges_to_zero_for_io_call(pool, perf_budge
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
     repo = PostgresInstrumentAttributesRepository(pool)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     n = 500
 
     async with pool.acquire() as conn:
@@ -212,7 +212,7 @@ async def test_get_as_of_budget_injection_fails_with_delayed_io(pool, monkeypatc
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
     repo = PostgresInstrumentAttributesRepository(pool)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     n = 500
     budget_ms = 3_000.0
 
@@ -263,7 +263,7 @@ async def test_gate_red_worm_rejection_does_not_poison_the_connection(pool):
     된다."""
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
-    known_at = datetime.now(timezone.utc)
+    known_at = datetime.now(UTC)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO instrument_attributes (instrument_id, attr_key, attr_value, known_at) "
@@ -311,7 +311,7 @@ async def test_concurrent_update_attempts_from_multiple_connections_all_rejected
     """
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
-    known_at = datetime.now(timezone.utc)
+    known_at = datetime.now(UTC)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO instrument_attributes (instrument_id, attr_key, attr_value, known_at) "
@@ -353,7 +353,7 @@ async def test_concurrent_duplicate_known_at_insert_exactly_one_winner(pool):
     거부해야 한다(TOCTOU로 두 건 이상이 슬쩍 통과하면 안 된다)."""
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
-    known_at = datetime.now(timezone.utc)
+    known_at = datetime.now(UTC)
 
     async def _attempt(i: int) -> str:
         try:
@@ -384,7 +384,7 @@ async def test_concurrent_inserts_across_workers_converge_to_consistent_replay(p
     instrument_id = _instrument_id()
     await _seed_instrument(pool, instrument_id)
     repo = PostgresInstrumentAttributesRepository(pool)
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     n = 20
 
     async def _insert(i: int) -> None:

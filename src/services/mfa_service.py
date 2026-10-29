@@ -22,7 +22,7 @@ a half-activated state).
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -57,7 +57,7 @@ class MfaService:
         pool: asyncpg.Pool,
         *,
         encryption_key: str,
-        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._pool = pool
         self._encryption_key = encryption_key

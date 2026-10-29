@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -70,7 +70,7 @@ async def _insert_span(
 async def test_coverage_spans_rejects_overlapping_period_same_axis(pool):
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_span(
         pool, instrument_id=instrument_id, start_at=t0, end_at=t0 + timedelta(days=5)
@@ -90,7 +90,7 @@ async def test_coverage_spans_allows_adjacent_non_overlapping_periods(pool):
     한다 — DC-6 `merge_spans`가 병합 대상으로 삼는 바로 그 상황."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     t1 = t0 + timedelta(days=5)
 
     await _insert_span(pool, instrument_id=instrument_id, start_at=t0, end_at=t1)
@@ -111,7 +111,7 @@ async def test_coverage_spans_allows_overlap_across_different_quality(pool):
     겹쳐도 막히지 않아야 한다(과도한 배제 방지 회귀)."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_span(
         pool, instrument_id=instrument_id, quality="PROVISIONAL",
@@ -131,7 +131,7 @@ async def test_coverage_spans_allows_overlap_across_different_quality(pool):
 async def test_coverage_spans_rejects_start_after_end(pool):
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
 
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await _insert_span(
@@ -186,7 +186,7 @@ async def test_entitlements_scoped_query_never_returns_other_subjects_rows(pool)
 async def test_entitlements_rejects_expiry_before_grant(pool):
     tenant_id = uuid.uuid4()
     subject_id = uuid.uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await pool.execute(

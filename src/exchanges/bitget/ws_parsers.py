@@ -15,7 +15,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§2-E (`bitget/ws_parsers
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -162,7 +162,7 @@ def parse_orderbook_ws_message(message: dict[str, Any], *, symbol: str) -> Order
     if not rows:
         return None
     raw = rows[0]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     bids = [OrderBookLevel(price=Decimal(p), quantity=Decimal(q)) for p, q in raw.get("bids", [])]
     asks = [OrderBookLevel(price=Decimal(p), quantity=Decimal(q)) for p, q in raw.get("asks", [])]
     return OrderBook(symbol=symbol, exchange="bitget", bids=bids, asks=asks, timestamp=now)

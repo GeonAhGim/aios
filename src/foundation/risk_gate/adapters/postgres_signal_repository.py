@@ -16,7 +16,7 @@ place rules that out.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -34,7 +34,7 @@ def dedupe_key_for(signal_type: str, scope_ref: str, as_of: datetime) -> str:
 
     Converts to UTC before flooring so the same instant always lands in
     the same 5-minute bucket regardless of the caller's input tz."""
-    utc = as_of.astimezone(timezone.utc)
+    utc = as_of.astimezone(UTC)
     floored = utc.replace(minute=(utc.minute // 5) * 5, second=0, microsecond=0)
     return f"{signal_type}:{scope_ref}:{floored.isoformat()}"
 

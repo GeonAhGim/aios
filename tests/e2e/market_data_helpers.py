@@ -10,7 +10,7 @@ ingest_candles 호출을 위한 상장 상품/커맨드 조립은 E2E-3의 5개 
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -209,8 +209,8 @@ async def test_mock_ingest_source_fail_mode_http_error() -> None:
             Venue.BITGET,
             "TESTUSDT",
             Timeframe.M1,
-            datetime(2026, 1, 1, tzinfo=timezone.utc),
-            datetime(2026, 1, 2, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 2, tzinfo=UTC),
         )
 
 
@@ -222,15 +222,15 @@ async def test_mock_ingest_source_fail_mode_unknown_ignores() -> None:
         Venue.BITGET,
         "TESTUSDT",
         Timeframe.M1,
-        datetime(2026, 1, 1, tzinfo=timezone.utc),
-        datetime(2026, 1, 2, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 2, tzinfo=UTC),
     )
     assert result == []
 
 
 def test_clock_returns_consistent_time() -> None:
     """불변식: 고정 clock은 항상 동일한 시각을 반환한다."""
-    t0 = datetime(2026, 6, 15, 12, 30, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 6, 15, 12, 30, 0, tzinfo=UTC)
     clock = _clock(t0)
     assert clock() == t0
     assert clock() == t0  # 재호출해도 동일
@@ -242,7 +242,7 @@ async def test_run_ingest_monkeypatch_source_raises_connection_error() -> None:
     ConnectionError를 raise하면 해당 예외가 전파된다."""
     from src.foundation.market_data.contracts.v1 import CandleRecord, SeriesKey
 
-    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base_time = datetime(2026, 1, 1, tzinfo=UTC)
     test_candle = CandleRecord(
         key=SeriesKey(venue=Venue.BITGET, instrument_id=uuid4(), timeframe=Timeframe.M1),
         open_time=base_time,
@@ -275,8 +275,8 @@ def test_ingest_cmd_produces_valid_command() -> None:
         instrument_id=uuid4(),
         canonical_symbol="TESTUSDT",
     )
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    end = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = datetime(2026, 1, 2, tzinfo=UTC)
 
     cmd = ingest_cmd(instrument, start, end)
 

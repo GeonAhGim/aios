@@ -13,7 +13,7 @@ DEEPEN(task-3054): negative 1건(빈 equity_curve)만 있어 D2 하한(negative
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -27,7 +27,7 @@ from src.foundation.backtest.domain.models import (
     EquityPoint,
 )
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _point(i: int, equity: str, drawdown: str = "0") -> EquityPoint:

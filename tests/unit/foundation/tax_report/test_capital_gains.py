@@ -1,7 +1,7 @@
 """U-9 exact aggregation, malformed input and determinism evidence."""
 
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal, localcontext
 from random import Random
 from typing import Any
@@ -18,7 +18,7 @@ from tests.conftest import PerfBudget
 
 START = date(2026, 1, 1)
 END = date(2026, 12, 31)
-CLOSED = datetime(2026, 6, 1, tzinfo=timezone.utc)
+CLOSED = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def entry(amount: str = "1", asset: AssetClass = AssetClass.CRYPTO) -> RealizedGainEntry:
@@ -47,8 +47,8 @@ def test_hand_calculated_all_asset_classes(gains: list[RealizedGainEntry]) -> No
 
 
 def test_inclusive_period_boundaries() -> None:
-    first = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    last = datetime(2026, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc)
+    first = datetime(2026, 1, 1, tzinfo=UTC)
+    last = datetime(2026, 12, 31, 23, 59, 59, 999999, tzinfo=UTC)
     entries = [
         replace(entry(str(i)), closed_at=at)
         for i, at in enumerate(

@@ -7,7 +7,7 @@ D5 "전체 깊이는 단기 보존, 상위 N호가·집계는 장기 보존" + �
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -19,7 +19,7 @@ from src.foundation.market_data.domain.l2_retention import (
     plan_retention,
 )
 
-_NOW = datetime(2026, 1, 30, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 30, tzinfo=UTC)
 _POLICY = RetentionPolicy(
     full_depth_ttl=timedelta(days=2),
     aggregate_ttl=timedelta(days=30),

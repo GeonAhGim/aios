@@ -5,7 +5,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (PRF-004), §9
 (L49 DoD)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -30,7 +30,7 @@ from src.foundation.performance.domain.models import StatementState
 from tests.foundation.integration.performance.conftest import set_reconciliation_state
 from tests.integration.conftest import create_test_tenant
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _PERIOD_START = _NOW - timedelta(days=1)
 
 

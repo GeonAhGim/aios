@@ -33,7 +33,7 @@ DEPTH_DC_RD.md#1124) D1 -> D3 증빙.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -55,7 +55,7 @@ _ID_B = "01BXQR6X4TVQFP7NM5H7J1K2C3"
 
 
 def _t(day: int) -> datetime:
-    return datetime(2026, 1, day, tzinfo=timezone.utc)
+    return datetime(2026, 1, day, tzinfo=UTC)
 
 
 def _ulid(n: int) -> str:

@@ -15,7 +15,7 @@ risk/compliance gate composition.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -43,7 +43,7 @@ from src.foundation.whatif.application.preview_order import (
 )
 from src.foundation.whatif.domain.impact import ProposedTrade
 
-_NOW = datetime(2026, 9, 17, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
 _TENANT = UUID(int=7)
 
 # ---------------------------------------------------------------------------

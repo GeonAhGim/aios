@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.risk_gate.application.activate_safety_control import control_to_view
@@ -28,5 +28,5 @@ async def build_safety_control_list_view(
     controls = await repo.list_active_controls(tenant_id=tenant_id, include_all_providers=True)
     return SafetyControlListView(
         controls=[control_to_view(c) for c in controls],
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )

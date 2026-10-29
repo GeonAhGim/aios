@@ -25,7 +25,7 @@ import json
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -240,10 +240,10 @@ async def run_screen(
     else:
         try:
             rows, truncated = await asyncio.wait_for(
-                _scan_universe(plan, venues, field_source, datetime.now(timezone.utc)),
+                _scan_universe(plan, venues, field_source, datetime.now(UTC)),
                 timeout=timeout_seconds,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise ScreenTimeoutError(
                 f"screen scan exceeded {timeout_seconds}s (§3 UX_SCREEN_TIMEOUT)"
             ) from exc

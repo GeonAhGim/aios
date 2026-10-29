@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -13,7 +13,7 @@ from src.core.strategy.market_state import MarketState
 from src.core.strategy.state_memory import StrategyStateMemory, advance
 from tests.support.perf_budget import PerfBudget
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _T1 = _T0 + timedelta(hours=1)
 _T2 = _T1 + timedelta(hours=1)
 

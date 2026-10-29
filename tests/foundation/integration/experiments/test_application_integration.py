@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -47,7 +47,7 @@ from src.foundation.experiments.domain.lineage import (
 from tests.conftest import PerfBudget
 from tests.support.db import create_pool_with_retry
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 @pytest.fixture

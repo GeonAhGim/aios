@@ -17,7 +17,7 @@ reproduction (the `_MAD_FLOOR` guard), replay, and concurrency.
 
 import random
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
@@ -35,7 +35,7 @@ from src.foundation.market_data.domain.quality import outlier_detector as _outli
 from src.foundation.market_data.domain.quality.outlier_detector import detect_spikes
 from tests.conftest import PerfBudget
 
-UTC = timezone.utc
+UTC = UTC
 _KEY = SeriesKey(venue=Venue.BITGET, instrument_id=UUID(int=1), timeframe=Timeframe.M1)
 _START = datetime(2026, 9, 1, tzinfo=UTC)
 

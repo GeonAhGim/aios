@@ -35,7 +35,7 @@ from "this adapter's scope doesn't have a positions concept yet"
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 from uuid import uuid4
@@ -155,8 +155,8 @@ def row_to_order(row: dict[str, Any]) -> Order:
 
 def _epoch_ms_to_datetime(raw: str | None) -> datetime:
     if not raw:
-        return datetime.now(timezone.utc)
-    return datetime.fromtimestamp(int(raw) / 1000, tz=timezone.utc)
+        return datetime.now(UTC)
+    return datetime.fromtimestamp(int(raw) / 1000, tz=UTC)
 
 
 class OKXAccountMixin:

@@ -36,14 +36,14 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
+async def pool() -> AsyncGenerator[asyncpg.Pool]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=2)
     yield p
     await p.close()
 
 
 @pytest.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client() -> AsyncGenerator[AsyncClient]:
     async with app.router.lifespan_context(app):
         # raise_app_exceptions=False — tests/integration/test_auth_router.py의
         # client 픽스처 주석 참조(4xx로 정상 처리된 도메인 예외를 httpx가

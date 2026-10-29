@@ -6,7 +6,7 @@ Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-10 DoD
 from __future__ import annotations
 
 import ast
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -29,7 +29,7 @@ from src.foundation.ems.domain.algo.pov import (
 )
 
 _POV_PATH = Path(__file__).resolve().parents[4] / "src/foundation/ems/domain/algo/pov.py"
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _algo(**overrides: object) -> AlgoSpec:

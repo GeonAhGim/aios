@@ -21,7 +21,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.4/§9 R-23.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.core.risk.policy_bundle import BundleState, RiskRuleBundle
@@ -77,7 +77,7 @@ async def approve_rule_bundle(
         new_state=BundleState.APPROVED,
         approved_by=approver_subject_id,
         approval_ref=approval_ref,
-        approved_at=datetime.now(timezone.utc),
+        approved_at=datetime.now(UTC),
     )
 
     await record_command_event(
@@ -110,7 +110,7 @@ async def activate_rule_bundle(
             f"{actor_subject_id}: risk officer만 rule bundle을 활성화할 수 있습니다."
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     activated = await repo.transition(
         bundle_id,
         expected_state=BundleState.APPROVED,

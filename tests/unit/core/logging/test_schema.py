@@ -2,7 +2,7 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import QueueHandler
 
 import pytest
@@ -202,7 +202,7 @@ def test_log_entry_rejects_missing_required_field():
     (07 §7.1 계약 필드 누락을 fail-closed로 처리)."""
     with pytest.raises(ValidationError):
         LogEntry(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             level="WARNING",
             module="m",
             event_type="e",
@@ -215,7 +215,7 @@ def test_log_entry_rejects_non_dict_extra():
     한다."""
     with pytest.raises(ValidationError):
         LogEntry(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             level="WARNING",
             module="m",
             event_type="e",

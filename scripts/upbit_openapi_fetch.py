@@ -34,7 +34,7 @@ import ssl
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -260,7 +260,7 @@ def fetch_and_save(output: Path = DEFAULT_OUTPUT) -> int:
     for candidate, why in dropped:
         print(f"DROP: {candidate.method} {candidate.path} ({why}) -- 기준 목록에서 제외")
 
-    reference = build_reference(confirmed, datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    reference = build_reference(confirmed, datetime.now(UTC).isoformat(timespec="seconds"))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(reference, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

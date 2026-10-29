@@ -1,7 +1,7 @@
 """거래소 원시 체결 정규화·집계 단위테스트 — L4-05. DB 없음."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -66,7 +66,7 @@ def _raw_fill(**overrides: object) -> dict[str, object]:
         "price": "50000",
         "fee": "0.5",
         "fee_currency": "USDT",
-        "venue_ts": datetime.now(timezone.utc),
+        "venue_ts": datetime.now(UTC),
     }
     defaults.update(overrides)
     return defaults
@@ -122,7 +122,7 @@ def _fill(quantity: str, price: str, fee: str = "0", fee_currency: str = "USDT")
         fee=Decimal(fee),
         fee_currency=fee_currency,
         liquidity="TAKER",
-        venue_ts=datetime.now(timezone.utc),
+        venue_ts=datetime.now(UTC),
     )
 
 

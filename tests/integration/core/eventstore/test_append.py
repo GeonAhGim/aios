@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import asyncpg
@@ -28,8 +28,8 @@ from src.core.eventstore.append import (
 )
 from tests._perf.relative_budget import RelativeBudget
 
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
-_RECORDED_AT = datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
+_RECORDED_AT = datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC)
 
 
 def _stream() -> str:

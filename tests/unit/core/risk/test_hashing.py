@@ -1,6 +1,6 @@
 """L4_risk_and_safety_v1.0.md#9 R-01 — hashing.py canonical JSON 결정론 테스트."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -38,7 +38,7 @@ def test_different_values_hash_differently():
 
 
 def test_aware_datetime_normalized_to_utc_iso():
-    a = datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    a = datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
     payload = canonical_json({"t": a})
     assert b"2026-09-03T00:00:00+00:00" in payload
 
@@ -140,13 +140,13 @@ def test_replay_verify_recompute_matches_stored_hash_across_construction_paths()
     stored_payload = {
         "tenant_id": "11111111-1111-1111-1111-111111111111",
         "intent": {"symbol": "BTC/USDT", "notional": Decimal("5000.00")},
-        "as_of": datetime(2026, 9, 3, tzinfo=timezone.utc),
+        "as_of": datetime(2026, 9, 3, tzinfo=UTC),
     }
     stored_hash = sha256_hex(canonical_json(stored_payload))
 
     # replay 시점: 같은 논리값을 다른 삽입 순서·다른 Decimal 표현으로 재구성.
     replayed_payload = {
-        "as_of": datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc),
+        "as_of": datetime(2026, 9, 3, 0, 0, tzinfo=UTC),
         "intent": {"notional": Decimal("5000"), "symbol": "BTC/USDT"},
         "tenant_id": "11111111-1111-1111-1111-111111111111",
     }
@@ -164,14 +164,14 @@ def test_replay_verify_detects_tampered_snapshot_as_mismatch():
     stored_payload = {
         "tenant_id": "11111111-1111-1111-1111-111111111111",
         "intent": {"symbol": "BTC/USDT", "notional": Decimal("5000.00")},
-        "as_of": datetime(2026, 9, 3, tzinfo=timezone.utc),
+        "as_of": datetime(2026, 9, 3, tzinfo=UTC),
     }
     stored_hash = sha256_hex(canonical_json(stored_payload))
 
     tampered_payload = {
         "tenant_id": "11111111-1111-1111-1111-111111111111",
         "intent": {"symbol": "BTC/USDT", "notional": Decimal("5000.01")},
-        "as_of": datetime(2026, 9, 3, tzinfo=timezone.utc),
+        "as_of": datetime(2026, 9, 3, tzinfo=UTC),
     }
     tampered_hash = sha256_hex(canonical_json(tampered_payload))
 

@@ -31,7 +31,7 @@ to what a pure pydantic-contract module can actually exercise:
 
 import json
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -69,7 +69,7 @@ def _ulid_for(index: int) -> str:
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _sample_instrument(**overrides: object) -> v2.Instrument:
@@ -226,7 +226,7 @@ def test_spot_instrument_unchanged_without_derivative_fields() -> None:
 
 
 def test_option_instrument_creation() -> None:
-    expiry = datetime(2026, 12, 18, 8, 30, tzinfo=timezone.utc)
+    expiry = datetime(2026, 12, 18, 8, 30, tzinfo=UTC)
     option = _sample_instrument(
         instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB1",
         kind=v2.InstrumentKind.OPTION,
@@ -253,7 +253,7 @@ def test_option_instrument_creation() -> None:
 
 
 def test_future_instrument_creation() -> None:
-    expiry = datetime(2026, 9, 26, 8, 30, tzinfo=timezone.utc)
+    expiry = datetime(2026, 9, 26, 8, 30, tzinfo=UTC)
     future = _sample_instrument(
         instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB2",
         kind=v2.InstrumentKind.FUTURE,
@@ -276,8 +276,8 @@ def test_future_instrument_creation() -> None:
 
 
 def test_underlying_id_and_expiry_chain_query() -> None:
-    near_expiry = datetime(2026, 9, 26, 8, 30, tzinfo=timezone.utc)
-    far_expiry = datetime(2026, 12, 18, 8, 30, tzinfo=timezone.utc)
+    near_expiry = datetime(2026, 9, 26, 8, 30, tzinfo=UTC)
+    far_expiry = datetime(2026, 12, 18, 8, 30, tzinfo=UTC)
     chain = [
         _sample_instrument(
             instrument_id="01ARZ3NDEKTSV4RRFFQ69G5FB3",

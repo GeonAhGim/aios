@@ -14,7 +14,7 @@ D4): 테스트 픽스처가 `ledger_balance`에 raw INSERT로 잔액을 직접 �
 드리프트가 애초에 생기지 않는다)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -28,7 +28,7 @@ from src.foundation.ledger.application.topup import post_topup
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def seed_user_available_balance(

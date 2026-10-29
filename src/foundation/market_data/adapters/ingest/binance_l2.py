@@ -20,7 +20,7 @@ verified):
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -67,7 +67,7 @@ class BinanceL2Adapter:
     def parse_event(self, message: dict[str, Any]) -> L2Diff | None:
         if message.get("e") != "depthUpdate":
             return None
-        as_of = datetime.fromtimestamp(message["E"] / 1000, tz=timezone.utc)
+        as_of = datetime.fromtimestamp(message["E"] / 1000, tz=UTC)
         return L2Diff(
             sequence=int(message["u"]),
             as_of=as_of,
@@ -83,7 +83,7 @@ class BinanceL2Adapter:
         data = resp.json()
         return L2Snapshot(
             sequence=int(data["lastUpdateId"]),
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
             bids={Decimal(p): Decimal(q) for p, q in data["bids"]},
             asks={Decimal(p): Decimal(q) for p, q in data["asks"]},
         )

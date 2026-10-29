@@ -12,7 +12,7 @@ new logic in this leaf (§6 F5-b UNKNOWN reverse lookup).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -34,7 +34,7 @@ def _kst_today() -> str:
     yesterday's date and miss today's orders (this must also line up with the
     order_date assumption in order_reverse_lookup.row_to_order, which treats
     this value as a KST calendar day)."""
-    return (datetime.now(timezone.utc) + timedelta(hours=_KST_OFFSET_HOURS)).strftime("%Y%m%d")
+    return (datetime.now(UTC) + timedelta(hours=_KST_OFFSET_HOURS)).strftime("%Y%m%d")
 
 
 class _ReverseLookupClient(KISHTTPClient, Protocol):
@@ -120,7 +120,7 @@ class KISTradingQueryMixin:
         (inquire_balance_rlz_pl); needs live verification.
         `start_date`/`end_date` are "YYYYMMDD"; default to today if
         omitted."""
-        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        today = datetime.now(UTC).strftime("%Y%m%d")
         raw = await self._request(
             "GET",
             "/uapi/domestic-stock/v1/trading/inquire-balance-rlz-pl",

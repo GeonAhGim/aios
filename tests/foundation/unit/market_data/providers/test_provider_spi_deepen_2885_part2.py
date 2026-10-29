@@ -26,7 +26,7 @@ BR-8/`capabilities()` 회귀 판정이었지만 실패주입+성능단언 항목
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -39,7 +39,7 @@ from src.foundation.market_data.ports.provider import TimeSpan
 from tests.conftest import PerfBudget
 
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-_BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class _FakeBitgetAdapter:

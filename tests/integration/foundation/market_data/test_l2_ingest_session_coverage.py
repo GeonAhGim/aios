@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -114,13 +114,13 @@ class _FakeBinanceAdapter:
     def parse_event(self, message: dict[str, Any]) -> L2Diff | None:
         return L2Diff(
             sequence=int(message["seq"]),
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
             bid_updates=(),
             ask_updates=(),
         )
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
-        return L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids={}, asks={})
+        return L2Snapshot(sequence=0, as_of=datetime.now(UTC), bids={}, asks={})
 
 
 def _fake_ulid() -> str:
@@ -158,7 +158,7 @@ async def test_gap_produces_two_non_overlapping_spans_with_a_real_hole_between(p
     await _insert_instrument(pool, instrument_id)
     repo = PostgresCoverageRepository(pool)
     adapter = _FakeBinanceAdapter()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     frames = [json.dumps({"seq": s}) for s in (1, 2, 4, 5)]  # 3 누락 → 갭
     conn = _FakeConnection(frames, raise_after=ConnectionClosed(None, None))
     connect_fn = _connect_sequence([conn])
@@ -198,7 +198,7 @@ async def test_overlapping_span_insert_rejected_fail_closed(pool: asyncpg.Pool):
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
     repo = PostgresCoverageRepository(pool)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     span_a = CoverageSpan(
         instrument_id=instrument_id,
         venue=Venue.BINANCE,
@@ -233,7 +233,7 @@ async def test_zero_duration_gap_records_no_phantom_span(pool: asyncpg.Pool):
     await _insert_instrument(pool, instrument_id)
     repo = PostgresCoverageRepository(pool)
     adapter = _FakeBinanceAdapter()
-    frozen = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    frozen = datetime(2026, 1, 1, tzinfo=UTC)
 
     def clock() -> datetime:
         return frozen
@@ -281,7 +281,7 @@ async def test_coverage_write_failure_propagates_not_swallowed(
     monkeypatch.setattr(repo, "upsert_span", _boom)
 
     adapter = _FakeBinanceAdapter()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     frames = [
         json.dumps({"seq": s}) for s in (1, 2, 4)
     ]  # 갭 → on_resync → _close_span → upsert_span

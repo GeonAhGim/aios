@@ -35,7 +35,7 @@ import os
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -148,7 +148,7 @@ async def _insert_batch(pool: asyncpg.Pool, instrument_id: UUID) -> UUID:
 async def _insert_candle(
     pool: asyncpg.Pool, *, instrument_id: UUID, batch_id: UUID, tenant_id: UUID | None
 ) -> None:
-    open_time = datetime.now(timezone.utc)
+    open_time = datetime.now(UTC)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO md_candle "

@@ -27,7 +27,7 @@ I/O가 없어 DB/네트워크 실패주입은 원천적으로 성립하지 않�
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -54,7 +54,7 @@ def _ulid(seed: int) -> str:
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _sample_instrument(**overrides: Any) -> v2.Instrument:
@@ -211,7 +211,7 @@ def test_gate_red_pre_dc20_schema_silently_drops_derivative_fields() -> None:
         created_at=_now(),
         kind=v2.InstrumentKind.OPTION,
         underlying_id=_ulid(2),
-        expiry=datetime(2026, 12, 18, 8, 30, tzinfo=timezone.utc),
+        expiry=datetime(2026, 12, 18, 8, 30, tzinfo=UTC),
         strike=Decimal("70000"),
         option_right=v2.OptionRight.CALL,
     )
@@ -239,7 +239,7 @@ def test_gate_red_pre_dc20_schema_silently_drops_derivative_fields() -> None:
 
 def _build_option(underlying_index: int, expiry_index: int, strike_index: int) -> v2.Instrument:
     underlying_id = _ulid(1_000 + underlying_index)
-    expiry = datetime(2026, 9 + expiry_index, 26, 8, 30, tzinfo=timezone.utc)
+    expiry = datetime(2026, 9 + expiry_index, 26, 8, 30, tzinfo=UTC)
     strike = Decimal(60_000 + strike_index * 5_000)
     seed = underlying_index * 10_000 + expiry_index * 100 + strike_index
     return _sample_instrument(
@@ -267,7 +267,7 @@ def test_concurrent_option_chain_construction_does_not_cross_contaminate() -> No
         assert instrument.underlying_id == _ulid(1_000 + underlying_index), (
             "다른 스레드의 underlying_id와 섞였습니다"
         )
-        assert instrument.expiry == datetime(2026, 9 + expiry_index, 26, 8, 30, tzinfo=timezone.utc)
+        assert instrument.expiry == datetime(2026, 9 + expiry_index, 26, 8, 30, tzinfo=UTC)
         assert instrument.strike == Decimal(60_000 + strike_index * 5_000)
 
     return None
@@ -283,7 +283,7 @@ def test_concurrent_built_chain_supports_correct_underlying_expiry_query() -> No
         chain = list(pool.map(lambda c: _build_option(*c), coordinates))
 
     target_underlying = _ulid(1_000 + 2)  # underlying_index=2
-    target_expiry = datetime(2026, 9 + 1, 26, 8, 30, tzinfo=timezone.utc)  # expiry_index=1
+    target_expiry = datetime(2026, 9 + 1, 26, 8, 30, tzinfo=UTC)  # expiry_index=1
 
     matches = [
         instrument

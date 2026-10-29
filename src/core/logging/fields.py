@@ -13,7 +13,7 @@ these 8 fields.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -89,7 +89,7 @@ def from_record(record: logging.LogRecord, ctx: RequestContext) -> StructuredLog
     """
     raw_duration = getattr(record, "duration_ms", None)
     return StructuredLogLine(
-        timestamp=datetime.fromtimestamp(record.created, tz=timezone.utc),
+        timestamp=datetime.fromtimestamp(record.created, tz=UTC),
         level=_LEVEL_MAP.get(record.levelname, "info"),
         trace_id=str(ctx.trace_id),
         tenant_id=str(ctx.tenant_id) if ctx.tenant_id is not None else None,

@@ -15,7 +15,7 @@ import os
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -140,7 +140,7 @@ async def test_replay_series_hash_is_deterministic_across_calls(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         opens = [t0, t0 + timedelta(minutes=1), t0 + timedelta(minutes=2)]
         await _seed_candles(
             conn, batch_repo, candle_store, instrument_id=instrument_id, key=key, opens=opens
@@ -168,7 +168,7 @@ async def test_replay_strict_gap_raises_incomplete(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         # t0+1분을 건너뛴다 — 3분짜리 창에 2개만 저장.
         opens = [t0, t0 + timedelta(minutes=2)]
         await _seed_candles(
@@ -188,7 +188,7 @@ async def test_replay_unknown_series_raises(pool, candle_store, reference_repo, 
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     request = ReplayRequest(key=key, start=t0, end=t0 + timedelta(minutes=1), as_of=t0)
     with pytest.raises(UnknownSeriesError):
         await replay(request, store=candle_store, refs=reference_repo, cal=calendar_repo, pool=pool)
@@ -198,7 +198,7 @@ async def test_replay_as_of_in_future_raises(pool, candle_store, reference_repo,
     """negative: `as_of`가 현재보다 미래면 조회 전에 즉시 거부한다(스토어를
     건드리지 않으므로 미등록 instrument여도 무방)."""
     key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid.uuid4(), timeframe=Timeframe.M1)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     future_as_of = t0 + timedelta(days=1)
     request = ReplayRequest(key=key, start=t0, end=t0 + timedelta(minutes=1), as_of=future_as_of)
     with pytest.raises(AsOfInFutureError):
@@ -246,7 +246,7 @@ async def test_replay_raises_when_store_returns_mismatched_columns(
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-        t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+        t0 = datetime.now(UTC).replace(second=0, microsecond=0)
         await _seed_candles(
             conn, batch_repo, corrupted_store, instrument_id=instrument_id, key=key, opens=[t0]
         )

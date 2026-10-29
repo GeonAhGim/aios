@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -133,11 +133,11 @@ async def evaluate(
                 mandate_revision_id=revision.id,
                 compiler_version=compiler_version(),
                 rule_hash=compile_rule_hash(revision),
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     decision = await repo.insert_policy_decision(
         DomainDecision(
             id=uuid4(),

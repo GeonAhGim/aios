@@ -28,7 +28,7 @@ counterparty to compare against and the check passes through, same as
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.evidence.application.record_command_event import record_command_event
@@ -153,7 +153,7 @@ async def activate_revision(
             if revision.cooling_off_started_at is None:
                 raise CoolingOffNotElapsedError(remaining_seconds=MIN_COOLING_OFF_SECONDS)
             elapsed = (
-                datetime.now(timezone.utc) - revision.cooling_off_started_at
+                datetime.now(UTC) - revision.cooling_off_started_at
             ).total_seconds()
             if elapsed < MIN_COOLING_OFF_SECONDS:
                 raise CoolingOffNotElapsedError(

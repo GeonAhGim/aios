@@ -9,7 +9,7 @@ DoD를 채운다.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.api.foundation_deps import get_entitlement_port, get_venue_registry_source
 from src.api.routers.market_data import get_source_contract_repository
@@ -49,7 +49,7 @@ async def test_internal_scope_source_denies_replay(client, seeded):
     app.dependency_overrides[get_source_contract_repository] = lambda: (
         _FakeSourceContractRepository(_source_contract(RedistributionScope.INTERNAL))
     )
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     response = await client.get(
         f"{BASE}/candles/replay",
         params={

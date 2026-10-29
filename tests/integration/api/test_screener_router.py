@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -48,7 +48,7 @@ def _instrument(symbol: str, *, venue: Venue = Venue.BITGET) -> InstrumentRef:
         tick_size=Decimal("0.01"),
         lot_size=Decimal("0.0001"),
         status=SymbolStatus.LISTED,
-        listed_at=datetime.now(timezone.utc),
+        listed_at=datetime.now(UTC),
         delisted_at=None,
     )
 

@@ -43,7 +43,7 @@ from tests.support.perf_budget import PerfBudget
 
 
 @pytest.fixture(autouse=True)
-def _reset_bucket_registry() -> Generator[None, None, None]:
+def _reset_bucket_registry() -> Generator[None]:
     """`rate_profile.py`'s (account_type, tr_group) `TokenBucket` is a
     process-wide singleton (BR-2b) — whichever test creates it first locks in
     its `sleep` callable for every later test sharing the key. Reset before/

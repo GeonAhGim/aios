@@ -24,7 +24,7 @@ LC-17 extra 화이트리스트) + 실패주입 2건(감사 append 실패 롤백,
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -50,7 +50,7 @@ from tests.integration.conftest import create_test_user
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _new_topup_id() -> int:

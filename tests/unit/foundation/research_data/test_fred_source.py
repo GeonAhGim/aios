@@ -6,7 +6,7 @@ DoD ("거시 시계열").
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -53,7 +53,7 @@ def test_parse_fred_observations_normalizes_successfully() -> None:
     assert observation.period == date(2024, 1, 31)
     assert observation.value == Decimal("3.5")
     assert observation.unit == "index"
-    assert observation.known_at == datetime(2024, 2, 20, tzinfo=timezone.utc)
+    assert observation.known_at == datetime(2024, 2, 20, tzinfo=UTC)
 
 
 def test_parse_fred_observations_drops_missing_value_sentinel() -> None:

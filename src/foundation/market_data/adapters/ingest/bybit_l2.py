@@ -16,7 +16,7 @@ verified):
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -70,7 +70,7 @@ class BybitL2Adapter:
         data = message.get("data")
         if message.get("topic") is None or not isinstance(data, dict):
             return None
-        as_of = datetime.fromtimestamp(message["ts"] / 1000, tz=timezone.utc)
+        as_of = datetime.fromtimestamp(message["ts"] / 1000, tz=UTC)
         return L2Diff(
             sequence=int(data["u"]),
             as_of=as_of,
@@ -87,7 +87,7 @@ class BybitL2Adapter:
         result = resp.json()["result"]
         return L2Snapshot(
             sequence=int(result["u"]),
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
             bids={Decimal(p): Decimal(q) for p, q in result["b"]},
             asks={Decimal(p): Decimal(q) for p, q in result["a"]},
         )

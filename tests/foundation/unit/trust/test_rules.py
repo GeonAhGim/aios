@@ -1,5 +1,5 @@
 """Trust Core domain/rules.py 단위테스트 — DB 없이 순수 함수만 검증."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from time import perf_counter_ns
 from uuid import uuid4
 
@@ -12,7 +12,7 @@ from src.foundation.trust.domain.rules import (
     is_disclosure_acceptable,
 )
 
-NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 2, tzinfo=UTC)
 
 
 def _disclosure(*, revision: int = 1, retired_at: datetime | None = None) -> Disclosure:

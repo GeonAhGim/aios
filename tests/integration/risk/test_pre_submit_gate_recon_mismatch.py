@@ -9,7 +9,7 @@ DENY하고, 다른 심볼에는 영향을 주지 않는다(심볼단위 격리).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from src.core.risk.decision import RiskOutcome
@@ -38,7 +38,7 @@ def _unique_symbol(prefix: str) -> str:
 
 async def _open_recon_mismatch(pool, *, tenant_id, symbol: str) -> None:
     repo = PostgresSignalRepository(pool)
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     await repo.insert_if_new(
         signal_id=uuid4(),
         dedupe_key=dedupe_key_for(RiskSignalType.RECON_MISMATCH.value, symbol, as_of),

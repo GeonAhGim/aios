@@ -1,7 +1,7 @@
 """FND-05 Connected Asset 순수 규칙 단위테스트 — DB 없음."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -18,7 +18,7 @@ from src.foundation.connections.domain.rules import (
     validate_capability_profile,
 )
 
-_NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 2, tzinfo=UTC)
 
 
 def test_validate_capability_profile_accepts_p0_scopes():

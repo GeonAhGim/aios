@@ -31,7 +31,7 @@ ADR-2026-09-09-C D2 증빙:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -103,7 +103,7 @@ async def _register_mfa_admin(client, pool) -> tuple[dict, str]:
     # esc-ci-cbb8b9c62497 -- 실시간(`pyotp...now()` / `mfa_clock_shifted`)으로 코드를
     # 만들면 코드 생성과 서버 검증 사이에 30초 TOTP 구간 경계를 넘을 수 있어
     # (valid_window=0) verify·login이 드물게 무효 처리된다. 시계를 고정해 결정론화한다.
-    frozen_now = datetime.now(timezone.utc)
+    frozen_now = datetime.now(UTC)
     with mfa_clock_frozen(app, frozen_now):
         setup_response = await client.post("/auth/mfa/setup", headers=headers)
         secret = setup_response.json()["data"]["secret"]

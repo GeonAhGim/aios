@@ -28,7 +28,7 @@ docs/audit/DEPTH_DC_RD.md#1179) D1 -> D3 증빙.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -51,7 +51,7 @@ _SUBJECT = UUID("33333333-3333-3333-3333-333333333333")
 
 
 def _dt(day: int, hour: int = 0) -> datetime:
-    return datetime(2026, 1, day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 1, day, hour, 0, tzinfo=UTC)
 
 
 def _grant(

@@ -10,7 +10,7 @@ scripts/check_import_linter.py의 `.importlinter` `[boundary:foundation-aggregat
 
 import importlib.util
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
@@ -168,7 +168,7 @@ class TestContractValidationPerf:
     def test_account_connection_view_construction_latency(self, perf_budget) -> None:
         iterations = 2_000
         conn_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         def _run() -> None:
             for _ in range(iterations):
@@ -192,7 +192,7 @@ class TestContractValidationPerf:
     def test_account_snapshot_view_with_values_construction_latency(self, perf_budget) -> None:
         iterations = 1_000
         conn_id = uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         values = [
             SnapshotValueView(entity_type="ASSET", entity_key=f"TOK{i}", value=Decimal("1.5"))
             for i in range(10)

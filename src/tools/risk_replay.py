@@ -28,7 +28,7 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -107,7 +107,7 @@ def main() -> int:
     decision_id = UUID(args.decision_id) if args.decision_id else None
     since = datetime.fromisoformat(args.since) if args.since else None
     if since is not None and since.tzinfo is None:
-        since = since.replace(tzinfo=timezone.utc)
+        since = since.replace(tzinfo=UTC)
     return asyncio.run(_run(decision_id=decision_id, since=since))
 
 

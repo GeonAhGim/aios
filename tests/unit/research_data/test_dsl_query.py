@@ -12,7 +12,7 @@ arity/shape rejection and the auto-binding behaviour end to end.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -27,7 +27,7 @@ from src.foundation.research_data.adapters.dsl_query import (
 from src.foundation.research_data.contracts.v1 import ResearchItem
 
 _INSTRUMENT = "KR:A005930"
-_BASE = datetime(2026, 6, 1, tzinfo=timezone.utc)
+_BASE = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def _item(*, known_at: datetime, kind: str = "filing") -> ResearchItem:

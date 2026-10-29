@@ -31,7 +31,7 @@ already applies to foundation routes.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -66,7 +66,7 @@ def mfa_step_up_fresh(mfa_verified_at: datetime | None, *, now: datetime | None 
     `mfa_verified_at is None` (MFA never verified this session) is always False."""
     if mfa_verified_at is None:
         return False
-    now = now if now is not None else datetime.now(timezone.utc)
+    now = now if now is not None else datetime.now(UTC)
     return (now - mfa_verified_at) <= MFA_STEP_UP_WINDOW
 
 _RETURNING_COLUMNS = (
@@ -149,7 +149,7 @@ async def request_grant(
     if ttl_minutes <= 0 or ttl_minutes > MAX_GRANT_MINUTES:
         raise ValueError(f"ttl_minutes={ttl_minutes}: 0 초과 {MAX_GRANT_MINUTES} 이하여야 합니다.")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + timedelta(minutes=ttl_minutes)
     row = await conn.fetchrow(
         f"""
@@ -255,7 +255,7 @@ async def consume(conn: asyncpg.Connection, *, grant_id: UUID, admin_id: UUID) -
     `expires_at > now()` are checked in the same WHERE clause, atomically
     ruling out "already used" and "expired" without a separate SELECT -- if
     two callers race to consume the same grant, exactly one succeeds."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     row = await conn.fetchrow(
         f"""
         UPDATE break_glass_grant

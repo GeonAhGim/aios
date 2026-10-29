@@ -21,7 +21,7 @@ CLAUDE.md #12: 원본 파일이 500줄 경계를 넘기지 않도록 새 D3 증�
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 import pytest
@@ -63,7 +63,7 @@ async def test_persist_failure_during_deny_propagates_instead_of_silent_allow(
             tenant_id=tenant_id,
             portfolio_id=None,
             snapshot={"symbol": "XYZ"},
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
     async with pool.acquire() as conn:
@@ -84,7 +84,7 @@ async def test_cached_decision_lookup_meets_latency_budget(pool, repo, trust_rep
     룰 재평가 + 추가 쿼리로 퇴화하면(구현 변경으로 인한 회귀), 10회
     왕복의 누적 지연이 눈에 띄게 늘어나 이 예산을 넘긴다."""
     tenant_id = await _active_tenant(pool, repo, trust_repo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     warm = await evaluate_pre_trade(
         repo, tenant_id=tenant_id, portfolio_id=None, snapshot={"symbol": "XYZ"}, now=now

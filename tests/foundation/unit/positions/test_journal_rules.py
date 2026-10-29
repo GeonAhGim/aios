@@ -7,7 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-5,
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -33,7 +33,7 @@ _ORDER_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _now(offset_seconds: int = 0) -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc) + timedelta(seconds=offset_seconds)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC) + timedelta(seconds=offset_seconds)
 
 
 def _money(amount: str, currency: Currency = Currency.USDT) -> Money:

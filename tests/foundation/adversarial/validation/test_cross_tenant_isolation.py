@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -30,7 +30,7 @@ from src.services.strategy_builder_service import (
 )
 from tests.integration.conftest import create_test_user
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _asyncpg_dsn() -> str:
@@ -41,7 +41,7 @@ def _asyncpg_dsn() -> str:
 
 
 @pytest.fixture
-async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
+async def pool() -> AsyncGenerator[asyncpg.Pool]:
     p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()

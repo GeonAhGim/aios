@@ -11,7 +11,7 @@ fixture를 함께 갱신한다.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -35,7 +35,7 @@ _ERROR_CODES = {
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 8, 0, 0, tzinfo=UTC)
 
 
 def _sample_item(**overrides: object) -> v1.ResearchItem:

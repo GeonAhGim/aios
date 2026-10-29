@@ -13,7 +13,7 @@ CHECK 위반을 검증할 뿐, 헬퍼 자신이 의존하는 FK/UNIQUE 제약이
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -150,7 +150,7 @@ async def test_create_batch_rejects_unknown_instrument_id(
     """negative: `_create_batch`에 `md_instrument`에 없는 instrument_id를
     넘기면 `md_ingest_batch.instrument_id` FK 위반으로 거부돼야 한다 — 헬퍼가
     DB 제약을 우회하지 않는다는 증명."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(asyncpg.ForeignKeyViolationError):
             await _create_batch(
@@ -168,7 +168,7 @@ async def test_create_batch_rejects_unknown_audit_event_id(
     """negative: `audit_event_id`가 `foundation_audit_event`에 실재하지 않으면
     (`_audit_event_id` 헬퍼를 우회해 직접 조작한 값) `md_ingest_batch.audit_event_id`
     FK 위반으로 거부돼야 한다 — None 거부(기존 테스트)와는 다른 제약 경로."""
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
         batch = IngestBatchResult(
@@ -199,7 +199,7 @@ async def test_instrument_id_rejects_duplicate_symbol_same_listed_at(
     삽입하면 두 번째가 UNIQUE 위반으로 거부돼야 한다(헬퍼의 uuid 기반 심볼 무작위성이
     이 제약을 우회하지 않는다는 증명)."""
     symbol = f"TEST-DUP-{uuid.uuid4().hex}"
-    listed_at = datetime.now(timezone.utc).replace(microsecond=0)
+    listed_at = datetime.now(UTC).replace(microsecond=0)
 
     async def _insert(conn: asyncpg.Connection) -> uuid.UUID:
         return cast(

@@ -10,7 +10,7 @@ Spec: docs/FULL_AUDIT_2026-09-06.md P0-F(I-03) — `idempotency_keys`가
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -47,7 +47,7 @@ async def test_run_once_purges_expired_idempotency_keys(pool, scheduler):
             "INSERT INTO idempotency_keys (key, status_code, response_body, expires_at) "
             "VALUES ($1, 201, '{}'::jsonb, $2)",
             expired_key,
-            datetime(2000, 1, 1, tzinfo=timezone.utc),
+            datetime(2000, 1, 1, tzinfo=UTC),
         )
 
     report = await scheduler.run_once()

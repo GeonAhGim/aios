@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -74,7 +74,7 @@ async def _heal_confirmed_cancel(conn: asyncpg.Connection, order_id: UUID) -> bo
     try:
         order = await _orders_repo.get_for_update(conn, order_id)
         new_status = next_status(order.status, OrderEvent.VENUE_CANCELLED)
-        occurred_at = datetime.now(timezone.utc)
+        occurred_at = datetime.now(UTC)
         event = OrderTransitionEvent(
             order_id=order_id,
             from_status=order.status,

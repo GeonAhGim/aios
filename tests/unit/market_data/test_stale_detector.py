@@ -17,7 +17,7 @@ tzinfo·threshold=0 경계에서의 회귀 클래스를, 동시성/replay는 스
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import cast
 
 import pytest
@@ -28,7 +28,7 @@ from src.foundation.market_data.domain.quality.stale_detector import detect_stal
 from src.foundation.market_data.domain.timeframe import UnknownTimeframeError, duration
 from tests.conftest import PerfBudget
 
-UTC = timezone.utc
+UTC = UTC
 _LAST = datetime(2026, 9, 3, 10, 0, tzinfo=UTC)
 
 

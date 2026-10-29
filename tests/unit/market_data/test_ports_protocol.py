@@ -20,7 +20,7 @@ DEPTH 감사(task-2723, docs/audit/DEPTH_LA_LB_LC.md 417)가 지적한 4개 공�
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -36,7 +36,7 @@ from tests.conftest import PerfBudget
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 class _FullCandleStore:

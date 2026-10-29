@@ -10,7 +10,7 @@ request_context.py, PLT-107)를 그대로 재사용한다 — 같은 값이 응�
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 from uuid import UUID, uuid4
 
@@ -55,5 +55,5 @@ class ApiError(BaseModel):
 def ok(data: T, *, page: PageMeta | None = None) -> ApiResponse[T]:
     return ApiResponse(
         data=data,
-        meta=Meta(trace_id=current_trace_id(), as_of=datetime.now(timezone.utc), page=page),
+        meta=Meta(trace_id=current_trace_id(), as_of=datetime.now(UTC), page=page),
     )

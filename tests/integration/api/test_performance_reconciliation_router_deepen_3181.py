@@ -52,7 +52,7 @@ import asyncio
 import os
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -73,7 +73,7 @@ STRONG_PASSWORD = "Str0ng!Passw0rd"
 PERF_BASE = "/v1/foundation/performance-statements"
 REC_BASE = "/v1/foundation/reconciliation"
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _PERIOD_START = _NOW - timedelta(days=1)
 
 

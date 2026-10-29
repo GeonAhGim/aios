@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -60,12 +60,12 @@ class _RaisingMembershipRepo:
 
 
 def test_recent_totp_within_window_is_verified():
-    user = _user(mfa_enabled=True, mfa_verified_at=datetime.now(timezone.utc))
+    user = _user(mfa_enabled=True, mfa_verified_at=datetime.now(UTC))
     assert _compute_mfa_verified(user) is True
 
 
 def test_totp_older_than_step_up_window_is_not_verified():
-    stale_at = datetime.now(timezone.utc) - MFA_STEP_UP_WINDOW - timedelta(seconds=1)
+    stale_at = datetime.now(UTC) - MFA_STEP_UP_WINDOW - timedelta(seconds=1)
     user = _user(mfa_enabled=True, mfa_verified_at=stale_at)
     assert _compute_mfa_verified(user) is False
 
@@ -80,7 +80,7 @@ def test_mfa_enabled_but_never_verified_is_not_verified():
 def test_mfa_disabled_is_never_verified_even_with_a_recent_timestamp():
     """mfa_enabled=False면 애초에 검증할 대상이 없다 — timestamp가 있어도
     (예: 과거에 MFA를 껐다 켰다 한 흔적) 무시한다."""
-    user = _user(mfa_enabled=False, mfa_verified_at=datetime.now(timezone.utc))
+    user = _user(mfa_enabled=False, mfa_verified_at=datetime.now(UTC))
     assert _compute_mfa_verified(user) is False
 
 

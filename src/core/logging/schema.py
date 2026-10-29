@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from logging.handlers import QueueHandler, QueueListener
 from typing import Any
 
@@ -71,7 +71,7 @@ class JSONLinesFormatter(logging.Formatter):
         # request_id populated by request middleware (still None outside HTTP request context).
         correlation_id = getattr(record, "correlation_id", None) or get_current_request_id()
         entry = LogEntry(
-            timestamp=datetime.fromtimestamp(record.created, tz=timezone.utc),
+            timestamp=datetime.fromtimestamp(record.created, tz=UTC),
             level=record.levelname,
             module=record.name,
             event_type=getattr(record, "event_type", "log.unstructured"),

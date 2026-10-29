@@ -6,7 +6,7 @@ Spec: 04_db_schema_v1.7.md.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -67,7 +67,7 @@ async def test_md_symbol_alias_overlapping_period_rejected(raw_conn):
     거부되어야 한다."""
     instrument_id = await _insert_md_instrument(raw_conn, canonical_symbol=f"TEST-{uuid4().hex}")
     alias_symbol = f"ALIAS-{uuid4().hex}"
-    valid_from = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    valid_from = datetime(2026, 1, 1, tzinfo=UTC)
 
     await raw_conn.execute(
         "INSERT INTO md_symbol_alias (instrument_id, venue, alias_symbol, valid_from) "
@@ -167,7 +167,7 @@ async def _insert_md_candle(
     volume: float,
     open_time: datetime | None = None,
 ) -> None:
-    open_time = open_time or datetime.now(timezone.utc)
+    open_time = open_time or datetime.now(UTC)
     close_time = open_time + timedelta(minutes=1)
     await conn.execute(
         "INSERT INTO md_candle "
@@ -242,7 +242,7 @@ async def test_aios_app_cannot_update_md_candle(raw_conn):
     (지금 달 파티션이 아니라) 미래 달 파티션에 저장된 행에도 적용되는지까지
     함께 증명한다(PG11+ 트리거 클로닝, 마이그레이션 docstring 참조)."""
     instrument_id, batch_id = await _md_candles_setup(raw_conn)
-    future_open_time = datetime.now(timezone.utc) + timedelta(days=90)
+    future_open_time = datetime.now(UTC) + timedelta(days=90)
     # 마이그레이션 upgrade()가 만든 파티션은 +3개월까지뿐이라 90일 뒤가 그
     # 경계를 넘을 수 있다(월별 경계는 날짜와 무관) — 먼저 여유 있게 확장한다.
     await raw_conn.execute("SELECT md_ensure_partitions(6)")
@@ -338,7 +338,7 @@ async def test_md_candle_bulk_insert_p95_under_budget(
     """
     instrument_id, batch_id = await _md_candles_setup(raw_conn)
     n = 200
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     # 200회 측정 → p95 계산 (samples_async: 비동기 I/O 전용)
     # samples_async는 fn()을 n회 호출하므로, mutable counter로 iteration 인덱스 추적
@@ -383,7 +383,7 @@ async def test_md_candle_bulk_insert_p95_rejects_10x_delay_injection(
     """
     instrument_id, batch_id = await _md_candles_setup(raw_conn)
     n = 200
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
     budget_p95_ms = 60.0
 
     # 원본 _insert_md_candle를 보존

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -252,7 +252,7 @@ async def test_client_order_id_rejects_zero_max_len(pool):
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=0,
-        window_start=_floor_to_window(datetime.now(timezone.utc)),
+        window_start=_floor_to_window(datetime.now(UTC)),
     )
     with pytest.raises(ValueError, match="max_len은 1 이상이어야 합니다."):
         _client_order_id_fn(scope, max_len=0, charset=_CLIENT_ORDER_ID_CHARSET)
@@ -271,7 +271,7 @@ async def test_client_order_id_rejects_empty_charset(pool):
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=0,
-        window_start=_floor_to_window(datetime.now(timezone.utc)),
+        window_start=_floor_to_window(datetime.now(UTC)),
     )
     with pytest.raises(ValueError, match="charset은 비어 있을 수 없습니다."):
         _client_order_id_fn(scope, max_len=10, charset="")
@@ -345,7 +345,7 @@ async def test_deterministic_client_order_id_same_scope(pool):
         strategy_version="1.0.0",
         execution_id=42,
         intent_seq=0,
-        window_start=datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        window_start=datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
     )
     first = _client_order_id_fn(scope, max_len=40, charset=_CLIENT_ORDER_ID_CHARSET)
     second = _client_order_id_fn(scope, max_len=40, charset=_CLIENT_ORDER_ID_CHARSET)

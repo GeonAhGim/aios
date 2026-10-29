@@ -13,7 +13,7 @@ only the D2 floor applies here -- D3 is out of scope for this leaf.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -69,7 +69,7 @@ class FakeTcaResultRepository:
             revision=revision,
             result=result,
             computed_at=computed_at,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self.records[key] = record
         return record
@@ -92,8 +92,8 @@ def _bar(close: Decimal, volume: Decimal) -> Candle:
         low=close,
         close=close,
         volume=volume,
-        open_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        close_time=datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc),
+        open_time=datetime(2026, 1, 1, tzinfo=UTC),
+        close_time=datetime(2026, 1, 1, 0, 1, tzinfo=UTC),
     )
 
 
@@ -113,7 +113,7 @@ _DEFAULT_KWARGS = dict(
     fees=Decimal("2"),
     total_cost=Decimal("50"),
     revision=1,
-    computed_at=datetime.now(timezone.utc),
+    computed_at=datetime.now(UTC),
 )
 
 

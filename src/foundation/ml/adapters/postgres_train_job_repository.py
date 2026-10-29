@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 
@@ -83,7 +83,7 @@ class PostgresTrainJobRepository:
                 set_values={
                     "rounds_completed": rounds_completed,
                     "checkpoint": checkpoint,
-                    "updated_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(UTC),
                 },
                 extra_conditions={"status": "running"},
             )
@@ -107,7 +107,7 @@ class PostgresTrainJobRepository:
                 set_values={
                     "status": "completed",
                     "metrics": json.dumps(dict(metrics)),
-                    "updated_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(UTC),
                 },
                 extra_conditions={"status": "running"},
             )

@@ -34,7 +34,7 @@ this code will need no changes.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.connections.domain.models import (
@@ -90,7 +90,7 @@ class LiveReadonlyAccountProvider:
         )
         currency = balances[0].asset[:_CURRENCY_FIELD_MAX_LEN] if balances else _NO_BALANCE_CURRENCY
         return ProviderSnapshot(
-            provider_as_of=datetime.now(timezone.utc),
+            provider_as_of=datetime.now(UTC),
             currency=currency,
             raw_payload_ref=f"live:{self._exchange}:{account_ref.value}:{as_of.isoformat()}",
             values=values,

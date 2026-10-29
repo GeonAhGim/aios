@@ -18,7 +18,7 @@ Decimal/Enum을 monkeypatch해도 pydantic-core는 스키마 컴파일 시점에
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -28,7 +28,7 @@ from src.core.strategy.models import Signal
 from src.data.models.strategy_fsm import FSMState
 from src.data.models.trading import OrderSide
 
-_AS_OF = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _valid_kwargs() -> dict:

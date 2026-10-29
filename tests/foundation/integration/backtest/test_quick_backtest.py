@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -134,7 +134,7 @@ def _rows(instrument_id: uuid.UUID, batch_id: uuid.UUID, t0: datetime, n: int) -
 async def _seed(pool, *, row_count: int) -> tuple[SeriesKey, datetime, datetime]:
     """COPY 시딩(perf_replay_support 선례) — 파티션은 현재 월부터 미래로만 있으므로
     t0는 현재 이후. 반환: (key, t0, as_of)."""
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
     async with pool.acquire() as conn:
         await conn.execute("SELECT md_ensure_partitions(13)")
         instrument_id = await new_instrument_id(conn)

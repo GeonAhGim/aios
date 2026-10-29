@@ -6,7 +6,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L25.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -29,7 +29,7 @@ from src.foundation.backtest.domain.rules import (
     assert_fill_after_signal,
 )
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _bar(index: int) -> Candle:

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.core.safety.data_freshness import DataFreshnessTracker
@@ -46,7 +46,7 @@ class CoverageAlert:
     message: str
     age_seconds: Decimal | None = None
     consecutive_failures: int | None = None
-    detected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    detected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ def check_freshness_alerts(
         Maximum acceptable age in seconds (Decimal).
     """
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
     alerts: list[CoverageAlert] = []
     max_delay = tracker.max_delay_sec(now)

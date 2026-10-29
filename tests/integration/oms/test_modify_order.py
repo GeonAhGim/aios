@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -105,7 +105,7 @@ def _command(order_id: uuid.UUID, tenant_id: uuid.UUID, **overrides: object) -> 
         "tenant_id": tenant_id,
         "reason": "TEST_MODIFY",
         "actor_subject_id": tenant_id,
-        "issued_at": datetime.now(timezone.utc),
+        "issued_at": datetime.now(UTC),
         "new_price": Decimal("110"),
         "new_quantity": None,
     }

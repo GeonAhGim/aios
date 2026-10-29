@@ -242,7 +242,7 @@ def main(
         print("no vulnerabilities in input; nothing to propose")
         return 0
     print(render_table(proposals))
-    drafts = draft_ignore_entries(proposals, today or dt.datetime.now(dt.timezone.utc).date())
+    drafts = draft_ignore_entries(proposals, today or dt.datetime.now(dt.UTC).date())
     if drafts:
         print("\n# DRAFT .pip-audit-ignore entries (NOT applied; human review required):")
         print(json.dumps({"ignore": drafts}, indent=2, ensure_ascii=False))

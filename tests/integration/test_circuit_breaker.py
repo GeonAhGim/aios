@@ -5,7 +5,7 @@
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -192,7 +192,7 @@ async def test_operational_metrics_with_fresh_observation_avoids_permanent_halt(
     (재가동 승인이 떠도 다음 tick이 다시 halted로 되돌린다). 실제 운영에서
     처럼 최근 관측 하나만 있어도 그 고착이 사라짐을 확인한다."""
     freshness = DataFreshnessTracker()
-    freshness.record("bitget", "BTC/USDT", datetime.now(timezone.utc))
+    freshness.record("bitget", "BTC/USDT", datetime.now(UTC))
     tracker = ApiCallTracker()
     tracker.record_success()
 
@@ -219,7 +219,7 @@ async def test_instrumented_adapter_get_ohlcv_feeds_freshness_into_circuit_break
 
     class _FakeAdapter:
         async def get_ohlcv(self, symbol: str, timeframe: str) -> list[Candle]:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             return [
                 Candle(
                     symbol=symbol,
@@ -333,7 +333,7 @@ def test_data_freshness_max_delay_sec_rejects_naive_now():
     관측은 정상(tz-aware)으로 하나 있어도, 호출자가 naive `now`를 넘기면
     거부해야 한다(호출부 실수가 조용히 잘못된 지연값으로 새지 않도록)."""
     tracker = DataFreshnessTracker()
-    tracker.record("bitget", "BTC/USDT", datetime.now(timezone.utc))
+    tracker.record("bitget", "BTC/USDT", datetime.now(UTC))
     naive_now = datetime(2026, 1, 1, 0, 0, 0)
 
     with pytest.raises(ValueError):

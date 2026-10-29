@@ -5,7 +5,7 @@ Split from test_v1.py to keep each file under the 500-line warn threshold.
 See test_v1.py for positive/boundary tests.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -67,7 +67,7 @@ class TestAccountConnectionViewValidation:
                 state=ConnectionState.ACTIVE_READONLY,
                 capability_profile=[],
                 revision=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     def test_missing_provider_code_raises(self) -> None:
@@ -78,7 +78,7 @@ class TestAccountConnectionViewValidation:
                 state=ConnectionState.ACTIVE_READONLY,
                 capability_profile=[],
                 revision=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     def test_missing_masked_account_label_raises(self) -> None:
@@ -89,7 +89,7 @@ class TestAccountConnectionViewValidation:
                 state=ConnectionState.ACTIVE_READONLY,
                 capability_profile=[],
                 revision=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     def test_missing_state_raises(self) -> None:
@@ -100,7 +100,7 @@ class TestAccountConnectionViewValidation:
                 masked_account_label="****1234",
                 capability_profile=[],
                 revision=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     def test_missing_capability_profile_raises(self) -> None:
@@ -111,7 +111,7 @@ class TestAccountConnectionViewValidation:
                 masked_account_label="****1234",
                 state=ConnectionState.ACTIVE_READONLY,
                 revision=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
     def test_missing_revision_raises(self) -> None:
@@ -122,7 +122,7 @@ class TestAccountConnectionViewValidation:
                 masked_account_label="****1234",
                 state=ConnectionState.ACTIVE_READONLY,
                 capability_profile=[],
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
 
@@ -156,7 +156,7 @@ class TestAccountSnapshotViewValidation:
     """Negative tests: field validation rules."""
 
     def test_missing_connection_id_raises(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with pytest.raises(ValidationError):
             AccountSnapshotView(
                 captured_at=now,
@@ -169,7 +169,7 @@ class TestAccountSnapshotViewValidation:
         with pytest.raises(ValidationError):
             AccountSnapshotView(
                 connection_id=uuid4(),
-                provider_as_of=datetime.now(timezone.utc),
+                provider_as_of=datetime.now(UTC),
                 freshness="1m",
                 currency="USD",
             )
@@ -178,13 +178,13 @@ class TestAccountSnapshotViewValidation:
         with pytest.raises(ValidationError):
             AccountSnapshotView(
                 connection_id=uuid4(),
-                captured_at=datetime.now(timezone.utc),
+                captured_at=datetime.now(UTC),
                 freshness="1m",
                 currency="USD",
             )
 
     def test_missing_freshness_raises(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with pytest.raises(ValidationError):
             AccountSnapshotView(
                 connection_id=uuid4(),
@@ -194,7 +194,7 @@ class TestAccountSnapshotViewValidation:
             )
 
     def test_missing_currency_raises(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with pytest.raises(ValidationError):
             AccountSnapshotView(
                 connection_id=uuid4(),
@@ -225,7 +225,7 @@ class TestFailureInjection:
 
     def test_account_snapshot_with_invalid_values_list(self) -> None:
         """values list must only contain SnapshotValueView instances."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with pytest.raises(ValidationError):
             AccountSnapshotView(
                 connection_id=uuid4(),
@@ -246,5 +246,5 @@ class TestFailureInjection:
                 state="ACTIVE",
                 capability_profile=[],
                 revision=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )

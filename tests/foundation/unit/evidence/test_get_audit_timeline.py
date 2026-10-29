@@ -9,7 +9,7 @@ Spec: 79_audit_evidence_l3_build_and_operational_specification_v1.0.md §3
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -64,7 +64,7 @@ def _sample_event(
         classification=Classification.INTERNAL,
         previous_hash=None if sequence_no == 1 else "prev_hash",
         event_hash="event_hash",
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
     )
 
 
@@ -147,9 +147,9 @@ class TestGetAuditTimelinePositivePath:
         tenant_id = uuid4()
         repo.list_timeline.return_value = ([], None)
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         result = await get_audit_timeline(repo, tenant_id=tenant_id)
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
 
         assert before <= result.as_of <= after
 

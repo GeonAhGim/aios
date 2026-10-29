@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -142,7 +142,7 @@ async def test_halted_never_auto_downgrades_only_creates_request(pool, cb, polic
     없이는 halted가 그대로다. 만들어지는 것은 재가동 요청뿐."""
     request_id = await _make_halted_with_pending_request(pool, cb)
 
-    far_future = lambda: datetime.now(timezone.utc) + timedelta(hours=1)  # noqa: E731
+    far_future = lambda: datetime.now(UTC) + timedelta(hours=1)  # noqa: E731
     await _check_reactivation(
         pool, cb, CircuitBreakerMetrics(), policy, history=_full_history(policy), now=far_future
     )
@@ -183,7 +183,7 @@ async def test_approved_evidence_cooldown_transitions_to_normal_and_deactivates_
         CircuitBreakerMetrics(),
         policy,
         history=_full_history(policy),
-        now=lambda: datetime.now(timezone.utc),
+        now=lambda: datetime.now(UTC),
     )
 
     state = await cb.get_state()
@@ -217,9 +217,9 @@ async def test_four_rejections_delegate_to_can_reactivate_and_block_normal(
     if case != "cooldown_not_met":
         history = _full_history(policy)
 
-    now = lambda: datetime.now(timezone.utc)  # noqa: E731
+    now = lambda: datetime.now(UTC)  # noqa: E731
     if case == "approval_expired":
-        now = lambda: datetime.now(timezone.utc) + timedelta(seconds=10_000)  # noqa: E731
+        now = lambda: datetime.now(UTC) + timedelta(seconds=10_000)  # noqa: E731
 
     fresh = _BAD_METRICS if case == "fresh_deny" else CircuitBreakerMetrics()
 
@@ -249,7 +249,7 @@ def _fresh_freshness_tracker() -> DataFreshnessTracker:
     항상 halted를 관측하게 돼 무의미해진다. 실측을 흉내내 최근 close_time을
     기록해둔다."""
     tracker = DataFreshnessTracker()
-    tracker.record("binance", "BTC/USDT", datetime.now(timezone.utc))
+    tracker.record("binance", "BTC/USDT", datetime.now(UTC))
     return tracker
 
 
@@ -281,7 +281,7 @@ async def test_run_circuit_breaker_tick_drives_full_reactivation_end_to_end(
     await _approve(pool, request_id, evidence_ref="ev-1")
 
     history = _full_history(policy)
-    later = lambda: datetime.now(timezone.utc)  # noqa: E731
+    later = lambda: datetime.now(UTC)  # noqa: E731
 
     await run_circuit_breaker_tick(
         pool,
@@ -367,7 +367,7 @@ async def test_check_reactivation_meets_latency_budget_with_large_history(pool, 
 
     n = 5000
     history: deque[CircuitBreakerMetrics] = deque([CircuitBreakerMetrics()] * n, maxlen=n)
-    now = lambda: datetime.now(timezone.utc)  # noqa: E731
+    now = lambda: datetime.now(UTC)  # noqa: E731
     iterations = 10
     budget_sec = 5.0
 
@@ -405,7 +405,7 @@ async def test_concurrent_reactivation_checks_only_one_instance_wins_the_transit
     await _approve(pool, request_id, evidence_ref="ev-1")
 
     history = _full_history(policy)
-    now = lambda: datetime.now(timezone.utc)  # noqa: E731
+    now = lambda: datetime.now(UTC)  # noqa: E731
 
     results = await asyncio.gather(
         _check_reactivation(pool, cb_a, CircuitBreakerMetrics(), policy, history=history, now=now),

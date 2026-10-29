@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -31,7 +31,7 @@ from src.foundation.reconciliation.contracts.v1 import (
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
-NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 BITGET = VenueCalendar(venue="bitget", tz=ZoneInfo("UTC"), regular=KNOWN_SESSIONS["BITGET"])
 
 

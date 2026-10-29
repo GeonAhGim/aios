@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -129,7 +129,7 @@ async def run_execution_tick(
 
     symbol = fsm_config.target_asset
     candles = await adapter.get_ohlcv(symbol, "1m", limit=100)
-    as_of = datetime.now(timezone.utc)
+    as_of = datetime.now(UTC)
     market_state_dto = build_market_state(fsm_config, {"1m": candles}, as_of=as_of)
     market_state = {k: float(v) for k, v in market_state_dto.values.items()}
 
@@ -210,7 +210,7 @@ async def run_execution_tick(
         caches=RiskInputCaches(equity_tracker=equity_tracker),
         candle_cache=candle_cache if candle_cache is not None else CandleHistoryCache(),
         policy=policy,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     if phase is None:
         return  # 다음 틱 재평가 — fsm_state는 IDLE/HOLDING 그대로

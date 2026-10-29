@@ -39,7 +39,7 @@ pool, 재시도 없음)이 아예 열리지 않는다. 원래 순서(`pool` 먼�
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -280,7 +280,7 @@ async def test_pipeline_write_replays_byte_identical(
     assert persisted.exchange_order_id is not None
     await demo_adapter.cancel_order(persisted.exchange_order_id)
 
-    as_of = datetime.now(timezone.utc) + timedelta(minutes=1)
+    as_of = datetime.now(UTC) + timedelta(minutes=1)
     report = await replay_verify.verify(pool, as_of=as_of, hours=1)
 
     mismatched_keys = {diff.key for diff in report.mismatches}

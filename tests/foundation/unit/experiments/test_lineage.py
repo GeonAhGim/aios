@@ -5,7 +5,7 @@ failure injection 1, numeric performance assertion 1, gate-red reproduction 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -21,7 +21,7 @@ from src.foundation.experiments.domain.lineage import (
 )
 from tests.conftest import PerfBudget
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 def _experiment(**overrides: Any) -> Experiment:

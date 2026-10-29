@@ -6,7 +6,7 @@ docs/specs/L4_market_data_positions_ledger_v1.0.md#§8.4.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ def _key() -> SeriesKey:
 
 
 def _columns(n: int) -> CandleColumns:
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     return CandleColumns(
         ts=[base + timedelta(minutes=i) for i in range(n)],
         open=[Decimal(100 + i) for i in range(n)],
@@ -118,7 +118,7 @@ def test_to_candle_records_rejects_negative_prices() -> None:
     """
     key = _key()
     columns = CandleColumns(
-        ts=[datetime(2026, 1, 1, tzinfo=timezone.utc)],
+        ts=[datetime(2026, 1, 1, tzinfo=UTC)],
         open=[Decimal(100)],
         high=[Decimal(90)],  # high < open — 이상하지만 candle_columns은 검증 안 함
         low=[Decimal(80)],
@@ -140,7 +140,7 @@ def test_to_candle_records_rejects_zero_volume() -> None:
     이 테스트는 candle_columns의 검증 범위를 명시한다."""
     key = _key()
     columns = CandleColumns(
-        ts=[datetime(2026, 1, 1, tzinfo=timezone.utc)],
+        ts=[datetime(2026, 1, 1, tzinfo=UTC)],
         open=[Decimal(100)],
         high=[Decimal(110)],
         low=[Decimal(90)],
@@ -227,7 +227,7 @@ def test_to_candle_records_performance_under_10k_rows(perf_budget: PerfBudget) -
     """성능 단언: 10,000개 행을 to_candle_records로 변환하는 데
     200ms 미만이어야 한다(컬럼 기반 접근의 성능 목표, CI 병렬 실행 안정화)."""
     n = 10_000
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     columns = CandleColumns(
         ts=[base + timedelta(minutes=i) for i in range(n)],
         open=[Decimal(100 + i % 100) for i in range(n)],

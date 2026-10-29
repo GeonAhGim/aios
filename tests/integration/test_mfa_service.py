@@ -1,5 +1,5 @@
 """11.3 통합테스트 — 실제 dev DB 대상."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -40,7 +40,7 @@ class _MutableClock:
     clock과 동일 원칙)."""
 
     def __init__(self) -> None:
-        self.current = datetime.now(timezone.utc)
+        self.current = datetime.now(UTC)
 
     def __call__(self) -> datetime:
         return self.current

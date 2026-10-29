@@ -4,7 +4,7 @@ Spec: 01_data_models_v1.3.md#§1.1 (1:1 Pydantic implementation of section 4.3 s
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -39,7 +39,7 @@ class AIOSTask(BaseModel):
     input_payload: dict[str, Any] = Field(default_factory=dict)
     output_result: dict[str, Any] | None = None
     retry_count: int = 0
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
 
     model_config = {"use_enum_values": True}

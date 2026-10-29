@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -142,7 +142,7 @@ def test_position_requires_money_fields():
         current_price=_money("65000"),
         unrealized_pnl=_money("2500"),
         realized_pnl=_money("0"),
-        entry_time=datetime.now(timezone.utc),
+        entry_time=datetime.now(UTC),
         asset_class=AssetClass.CRYPTO,
     )
     assert position.current_price.currency == Currency.USDT

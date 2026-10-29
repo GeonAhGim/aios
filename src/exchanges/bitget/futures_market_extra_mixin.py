@@ -16,7 +16,7 @@ Endpoints (best-effort from community SDK reference, unverified live):
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -34,7 +34,7 @@ def _row_to_public_trade(row: dict[str, Any], symbol: str) -> PublicTrade:
         price=Decimal(row["price"]),
         quantity=Decimal(row["size"]),
         side=row.get("side", ""),
-        timestamp=datetime.fromtimestamp(int(row["ts"]) / 1000, tz=timezone.utc),
+        timestamp=datetime.fromtimestamp(int(row["ts"]) / 1000, tz=UTC),
     )
 
 

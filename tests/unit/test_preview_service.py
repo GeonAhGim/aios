@@ -1,6 +1,6 @@
 """14.4 단위테스트 — 순수 계산 로직."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -21,7 +21,7 @@ class _TruncatedIndicatorService:
 
 
 def _candles(prices: list[float]) -> list[Candle]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out = []
     for i, price in enumerate(prices):
         out.append(

@@ -5,7 +5,7 @@ RATCHET-split(task-4222) — 원 `test_db_schema.py`(1176줄)에서 분리.
 Spec: 04_db_schema_v1.7.md.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -81,7 +81,7 @@ async def _insert_md_candle(
     volume: float,
     open_time: datetime | None = None,
 ) -> None:
-    open_time = open_time or datetime.now(timezone.utc)
+    open_time = open_time or datetime.now(UTC)
     close_time = open_time + timedelta(minutes=1)
     await conn.execute(
         "INSERT INTO md_candle "
@@ -110,7 +110,7 @@ async def test_md_candle_lifecycle_replayed_quarantine_then_accept_does_not_leak
     사이에 상태가 새지 않고, 승격된 행에도 WORM이 그대로 걸리는지까지
     증명한다."""
     instrument_id = await _insert_md_instrument(raw_conn, canonical_symbol=f"TEST-{uuid4().hex}")
-    open_time = datetime.now(timezone.utc)
+    open_time = datetime.now(UTC)
     close_time = open_time + timedelta(minutes=1)
 
     # 1단계: 1차 배치 REJECT — 위반 캔들은 md_quarantine_candle에만 격리.

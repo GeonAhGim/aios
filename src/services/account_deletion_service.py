@@ -24,7 +24,7 @@ we only handle the transition to PENDING_DELETION.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -74,7 +74,7 @@ class AccountDeletionService:
                     f"실행중인 전략을 먼저 중지(FD-16.3)해주세요: {blocking}"
                 )
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             await conn.execute(
                 "UPDATE users SET status = 'PENDING_DELETION', deletion_requested_at = $2 "
                 "WHERE user_id = $1",

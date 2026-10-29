@@ -11,7 +11,7 @@ All adapters require a ``KISAdapter`` (or compatible) instance as ``client``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -132,7 +132,7 @@ class KRXIndexAdapter:
             high=Decimal(str(row.get("hts_hgpr", 0))),
             low=Decimal(str(row.get("hts_lwpr", 0))),
             volume=int(row.get("hts_vol", 0)),
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
         )
 
     async def get_index_trend(
@@ -192,7 +192,7 @@ class KRXInvestorAdapter:
         ``date`` format: "YYYYMMDD". If omitted, uses today.
         """
         if date is None:
-            date = datetime.now(timezone.utc).strftime("%Y%m%d")
+            date = datetime.now(UTC).strftime("%Y%m%d")
         raw = await self._client._request(
             "GET",
             "/uapi/domestic-stock/v1/quotations/inquire-trend-investor",

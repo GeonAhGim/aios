@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID, uuid4
@@ -71,7 +71,7 @@ async def record_decision(
     fence: Mapping[str, int],
     start_ns: int,
 ) -> UUID:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # task-2395 — measured from gate() entry, same max(1, ...) convention as evaluator.py.
     latency_us = max(1, (time.perf_counter_ns() - start_ns) // 1000)
     execution_ref = f"exec:{context.execution_id}"

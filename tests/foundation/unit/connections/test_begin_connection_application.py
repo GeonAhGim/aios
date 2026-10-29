@@ -21,7 +21,7 @@ Connections is not itself the safety/execution/ledger/compliance/data axis
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -47,7 +47,7 @@ from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-_NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 24, tzinfo=UTC)
 _PURPOSE = "account_read_connection"
 
 

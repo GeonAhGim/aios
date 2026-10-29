@@ -25,7 +25,7 @@ import json
 import sys
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -109,7 +109,7 @@ def build_reference(ref: str = REF) -> dict[str, Any]:
         "source_repo": REPO,
         "source_ref": ref,
         "source_commit": commit_sha,
-        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "file_count": len(paths),
         "trs": trs,
     }

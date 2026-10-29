@@ -1,7 +1,7 @@
 """Shared dependencies for foundation/* routers — same pattern as src/api/suitability_deps.py."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -245,7 +245,7 @@ def _compute_mfa_verified(user: User) -> bool:
     return bool(
         user.mfa_enabled
         and user.mfa_verified_at is not None
-        and (datetime.now(timezone.utc) - user.mfa_verified_at) <= MFA_STEP_UP_WINDOW
+        and (datetime.now(UTC) - user.mfa_verified_at) <= MFA_STEP_UP_WINDOW
     )
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -53,7 +53,7 @@ def _checkerboard(
     매 홀수 시간마다 별도 `CoverageGap`을 내도록 한다(연속 구간이면
     `_coalesce`가 하나로 합쳐 갭 수를 인위적으로 부풀릴 수 없다 -- 이렇게
     하면 처리 비용이 실제 gap 개수에 비례하도록 강제된다)."""
-    base = datetime(2026, 9, 4, 0, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 9, 4, 0, 0, tzinfo=UTC)
     start = base
     end = base + timedelta(hours=2 * n_gaps)
     covered_spans = [

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -24,7 +24,7 @@ def _normalize(obj: Any) -> Any:
     if isinstance(obj, datetime):
         if obj.tzinfo is None:
             raise ValueError("canonical_json: naive datetime은 허용하지 않는다")
-        return obj.astimezone(timezone.utc).isoformat()
+        return obj.astimezone(UTC).isoformat()
     if isinstance(obj, UUID):
         return str(obj)
     if isinstance(obj, dict):

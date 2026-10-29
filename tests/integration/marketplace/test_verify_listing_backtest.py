@@ -11,7 +11,7 @@ DoD: 리스팅이 주장한 `result_hash`와 플랫폼 재현 결과가 비트 �
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -30,7 +30,7 @@ from src.foundation.marketplace.application.verify_listing_backtest import (
 )
 from src.services.condition_compiler import ORDER_FILLED
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
 

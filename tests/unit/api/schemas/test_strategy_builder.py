@@ -7,7 +7,7 @@ rather than DB/network failure modes.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -44,8 +44,8 @@ def _candle(**overrides: object) -> Candle:
         low=Decimal("1"),
         close=Decimal("1.5"),
         volume=Decimal("10"),
-        open_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        close_time=datetime(2026, 1, 1, 1, tzinfo=timezone.utc),
+        open_time=datetime(2026, 1, 1, tzinfo=UTC),
+        close_time=datetime(2026, 1, 1, 1, tzinfo=UTC),
     )
     fields.update(overrides)
     return Candle(**fields)

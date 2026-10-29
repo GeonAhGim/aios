@@ -1,7 +1,7 @@
 """GetAuditTimeline 쿼리 — 79번 §3 tenant-scoped 페이지 조회."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.evidence.application.append_audit_event import event_to_view
@@ -33,5 +33,5 @@ async def get_audit_timeline(
     return AuditTimelinePage(
         items=[event_to_view(e) for e in events],
         next_cursor=next_cursor,
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -20,7 +20,7 @@ from tests.integration.conftest import create_test_user
 
 
 def _expires_at() -> datetime:
-    return datetime.now(timezone.utc) + timedelta(days=14)
+    return datetime.now(UTC) + timedelta(days=14)
 
 
 async def _insert_session(pool, user_id):

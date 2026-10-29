@@ -33,7 +33,7 @@ import asyncio
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -265,7 +265,7 @@ async def test_adversarial_direct_update_of_pos_journal_fund_id_blocked_by_worm_
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _create_user_available_account(pool: asyncpg.Pool, user_id: UUID) -> str:

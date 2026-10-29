@@ -14,7 +14,7 @@ DENIED 감사 행도 함께 사라진다).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -32,7 +32,7 @@ from tests.integration.conftest import create_test_user
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class _Ports:

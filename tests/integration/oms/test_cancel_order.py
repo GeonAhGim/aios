@@ -6,7 +6,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-17 DoD("부분체�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -61,7 +61,7 @@ def _command(order_id: uuid.UUID, tenant_id: uuid.UUID, **overrides: object) -> 
         "tenant_id": tenant_id,
         "reason": "TEST_CANCEL",
         "actor_subject_id": tenant_id,
-        "issued_at": datetime.now(timezone.utc),
+        "issued_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     return CancelOrderCommand(**defaults)  # type: ignore[arg-type]

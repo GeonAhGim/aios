@@ -3,7 +3,7 @@
 주입한다(test_strategy_builder_router.py와 동일 패턴)."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -37,7 +37,7 @@ async def pool():
 
 
 def _flat_candles(count: int = 30) -> list[Candle]:
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     return [
         Candle(
             symbol="BTC/USDT",

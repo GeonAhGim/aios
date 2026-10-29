@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -89,7 +89,7 @@ def _floor_to_window(now: datetime) -> datetime:
     semantics (shared by every OMS caller), not a new tradeoff."""
     epoch_seconds = int(now.timestamp())
     floored = epoch_seconds - (epoch_seconds % _IDEMPOTENCY_WINDOW_SECONDS)
-    return datetime.fromtimestamp(floored, tz=timezone.utc)
+    return datetime.fromtimestamp(floored, tz=UTC)
 
 
 async def _read_intent_counter(pool: asyncpg.Pool, execution_id: int) -> int:
@@ -170,7 +170,7 @@ class Executor:
             strategy_version=strategy_version,
             execution_id=execution_id,
             intent_seq=intent_seq,
-            window_start=_floor_to_window(datetime.now(timezone.utc)),
+            window_start=_floor_to_window(datetime.now(UTC)),
         )
         client_order_id = derive_client_order_id(
             scope, max_len=_CLIENT_ORDER_ID_MAX_LEN, charset=_CLIENT_ORDER_ID_CHARSET

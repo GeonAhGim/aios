@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -30,7 +30,7 @@ from tests.conftest import PerfBudget
 _TENANT = uuid4()
 _SOURCE_ID = "OPENDART"
 _SPAN = "2026-03"
-_NOW = datetime(2026, 3, 2, 9, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 
 
 def _item(external_id: str, *, item_id: UUID | None = None) -> ResearchItem:

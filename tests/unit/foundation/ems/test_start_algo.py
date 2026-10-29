@@ -6,7 +6,7 @@ Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-15 DoD
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -27,7 +27,7 @@ from src.foundation.ems.contracts.v1 import (
 )
 from src.foundation.ems.domain.algo.twap import ParentTerminalError
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _algo(**overrides: object) -> AlgoSpec:

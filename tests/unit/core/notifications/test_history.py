@@ -10,7 +10,7 @@ Coverage targets:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -75,7 +75,7 @@ class TestListNotificationHistoryFilters:
         user_id = await create_test_user(pool)
         await _insert(pool, user_id, "approval.request.created")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start = now - timedelta(minutes=5)
         end = now + timedelta(minutes=5)
 
@@ -124,7 +124,7 @@ class TestListNotificationHistoryNegativeAndBoundary:
         user_id = await create_test_user(pool)
         await _insert(pool, user_id, "approval.request.created")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         history = await list_notification_history(
             pool, user_id, start=now + timedelta(minutes=5), end=now - timedelta(minutes=5)
         )
@@ -135,7 +135,7 @@ class TestListNotificationHistoryNegativeAndBoundary:
         user_id = await create_test_user(pool)
         await _insert(pool, user_id, "approval.request.created")
 
-        far_past = datetime.now(timezone.utc) - timedelta(days=365)
+        far_past = datetime.now(UTC) - timedelta(days=365)
         history = await list_notification_history(pool, user_id, end=far_past)
 
         assert history == []

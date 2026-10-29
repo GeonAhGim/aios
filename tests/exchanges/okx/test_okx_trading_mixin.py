@@ -17,7 +17,7 @@ task-7868(BR-21 정정, 리뷰 REJECT 7802) — `order.symbol`은 canonical
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -87,7 +87,7 @@ class _StubClient(OKXTradingMixin):
             volume_24h=Decimal("0"),
             timestamp=self._ticker_timestamp
             if self._ticker_timestamp is not None
-            else datetime.now(timezone.utc) - self._ticker_age,
+            else datetime.now(UTC) - self._ticker_age,
             source_type="reference",
         )
 

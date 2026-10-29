@@ -4,7 +4,7 @@ import pickle
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
@@ -27,7 +27,7 @@ from src.foundation.mandates.reporting.domain.best_execution import (
 
 @pytest.fixture
 def inputs() -> dict[str, Any]:
-    now = datetime(2026, 9, 9, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 9, tzinfo=UTC)
     order_id = uuid4()
     route = RouteDecisionRecord(
         decision_id=uuid4(), order_id=order_id,

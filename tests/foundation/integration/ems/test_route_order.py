@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -64,7 +64,7 @@ async def test_route_order_persists_reproducible_decision(pool, repo):
         VenueCandidate(venue="CHARLIE", fee_bps=Decimal("0.5"), liquidity_score=Decimal("0.2")),
     ]
     weights = VenueScoreWeights(fee_weight=Decimal("2"), liquidity_weight=Decimal("50"))
-    decided_at = datetime(2026, 9, 8, 12, 0, 0, tzinfo=timezone.utc)
+    decided_at = datetime(2026, 9, 8, 12, 0, 0, tzinfo=UTC)
 
     record = await route_order(
         repo, order_id=order_id, candidates=candidates, decided_at=decided_at, weights=weights
@@ -107,7 +107,7 @@ async def test_route_order_single_candidate_fallback(pool, repo):
         repo,
         order_id=order_id,
         candidates=candidates,
-        decided_at=datetime.now(timezone.utc),
+        decided_at=datetime.now(UTC),
     )
 
     assert record.decision.venue == "LONE"
@@ -121,7 +121,7 @@ async def test_route_order_rejects_empty_candidates(pool, repo):
 
     with pytest.raises(NoRouteAvailableError):
         await route_order(
-            repo, order_id=order_id, candidates=[], decided_at=datetime.now(timezone.utc)
+            repo, order_id=order_id, candidates=[], decided_at=datetime.now(UTC)
         )
 
     assert await _row_count(pool, order_id) == 0
@@ -140,7 +140,7 @@ async def test_route_order_rejects_duplicate_venue_candidates(pool, repo):
 
     with pytest.raises(ValueError, match="duplicate venue codes"):
         await route_order(
-            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(timezone.utc)
+            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(UTC)
         )
 
     assert await _row_count(pool, order_id) == 0
@@ -161,7 +161,7 @@ async def test_route_order_rejects_negative_weights(pool, repo):
             repo,
             order_id=order_id,
             candidates=candidates,
-            decided_at=datetime.now(timezone.utc),
+            decided_at=datetime.now(UTC),
             weights=VenueScoreWeights(fee_weight=Decimal("-1"), liquidity_weight=Decimal("1")),
         )
 
@@ -185,7 +185,7 @@ async def test_route_order_repository_failure_raises(pool, repo):
 
     with pytest.raises(OSError, match="connection refused"):
         await route_order(
-            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(timezone.utc)
+            repo, order_id=order_id, candidates=candidates, decided_at=datetime.now(UTC)
         )
 
     assert await _row_count(pool, order_id) == 0
@@ -200,7 +200,7 @@ async def test_route_order_concurrent_calls_are_idempotent(pool, repo):
         VenueCandidate(venue="ALPHA", fee_bps=Decimal("2.5"), liquidity_score=Decimal("0.6")),
         VenueCandidate(venue="BRAVO", fee_bps=Decimal("1.0"), liquidity_score=Decimal("0.9")),
     ]
-    decided_at = datetime.now(timezone.utc)
+    decided_at = datetime.now(UTC)
 
     results = await asyncio.gather(
         *(

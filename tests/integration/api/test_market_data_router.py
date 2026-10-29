@@ -9,7 +9,7 @@ coverage-gap 409, instruments/aliases 목록, 입력 검증, 수치 성능.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -217,7 +217,7 @@ async def test_span_outside_coverage_is_409_data_coverage_missing(client, seeded
 
 
 async def test_replay_complete_span_ok_and_gap_span_409(client, seeded):
-    as_of = datetime.now(timezone.utc).isoformat()
+    as_of = datetime.now(UTC).isoformat()
     base = {"venue": "BITGET", "timeframe": "1m", "symbol": seeded["symbol"], "as_of": as_of}
     complete = await client.get(
         f"{BASE}/candles/replay", params={**base, **_span(seeded["t0"], 0, 3)}, headers=seeded["a"]
@@ -302,7 +302,7 @@ async def test_negative_missing_identifier_and_future_as_of_are_400(client, seed
             "timeframe": "1m",
             "symbol": seeded["symbol"],
             **span,
-            "as_of": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "as_of": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
         },
         headers=seeded["a"],
     )

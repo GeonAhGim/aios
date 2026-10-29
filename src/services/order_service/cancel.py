@@ -9,7 +9,7 @@ task-1603(L4-17) 편차 — 이 함수는 더 이상 거래소를 직접 부르�
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -30,7 +30,7 @@ class OrderCancelError(Exception):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def cancel_order(

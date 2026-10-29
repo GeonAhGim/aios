@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -120,13 +120,13 @@ class _FakeBinanceAdapter:
     def parse_event(self, message: dict[str, Any]) -> L2Diff | None:
         return L2Diff(
             sequence=int(message["seq"]),
-            as_of=datetime.now(timezone.utc),
+            as_of=datetime.now(UTC),
             bid_updates=(),
             ask_updates=(),
         )
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
-        return L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids={}, asks={})
+        return L2Snapshot(sequence=0, as_of=datetime.now(UTC), bids={}, asks={})
 
 
 def _fake_ulid() -> str:
@@ -192,7 +192,7 @@ async def test_real_db_overlap_violation_propagates_out_of_session_run(pool: asy
     repo = PostgresCoverageRepository(pool)
 
     # 세션이 열려는 span과 정확히 겹치도록, 미리 넓은 기존 span을 심어 둔다.
-    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
     async with pool.acquire() as conn, conn.transaction():
         await repo.upsert_span(
             conn,
@@ -245,8 +245,8 @@ async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_con
     await _insert_instrument(pool, instrument_b)
     repo = PostgresCoverageRepository(pool)
 
-    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
-    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=timezone.utc))  # 겹치지 않는 시간대
+    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=UTC))
+    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=UTC))  # 겹치지 않는 시간대
     frames_a = [_frame(s) for s in (1, 2, 4, 5)]  # 갭 1회
     frames_b = [_frame(s) for s in (1, 3, 4, 6)]  # 갭 2회(2, 5 누락)
     conn_a = _FakeConnection(frames_a, raise_after=ConnectionClosed(None, None))
@@ -319,8 +319,8 @@ async def test_two_concurrent_sessions_goes_red_with_io_delay_injection(
     await _insert_instrument(pool, instrument_b)
     repo = PostgresCoverageRepository(pool)
 
-    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
-    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=timezone.utc))
+    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=UTC))
+    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=UTC))
     frames_a = [_frame(s) for s in (1, 2, 4, 5)]
     frames_b = [_frame(s) for s in (1, 3, 4, 6)]
     conn_a = _FakeConnection(frames_a, raise_after=ConnectionClosed(None, None))
@@ -358,13 +358,13 @@ async def test_concurrent_sessions_reject_same_instrument_id(pool: asyncpg.Pool)
     await _insert_instrument(pool, instrument)
     repo = PostgresCoverageRepository(pool)
 
-    clock = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 2, 1, tzinfo=UTC))
     frames = [_frame(s) for s in (1, 2, 4, 5)]
     conn = _FakeConnection(frames, raise_after=ConnectionClosed(None, None))
 
     session_a = _session(instrument, pool, repo, clock, _connect_sequence([conn]))
     # 두 번째 세션은 동일한 instrument_id + 같은 시간대
-    clock2 = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
+    clock2 = _TickingClock(datetime(2026, 2, 1, tzinfo=UTC))
     conn2 = _FakeConnection(frames, raise_after=ConnectionClosed(None, None))
     session_b = _session(instrument, pool, repo, clock2, _connect_sequence([conn2]))
 
@@ -389,8 +389,8 @@ async def test_concurrent_sessions_handle_empty_messages_gracefully(
     await _insert_instrument(pool, instrument_b)
     repo = PostgresCoverageRepository(pool)
 
-    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=timezone.utc))
-    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=timezone.utc))
+    clock_a = _TickingClock(datetime(2026, 2, 1, tzinfo=UTC))
+    clock_b = _TickingClock(datetime(2026, 3, 1, tzinfo=UTC))
     # 빈 메시지 — 아무런 데이터도 없음
     conn_a = _FakeConnection([], raise_after=ConnectionClosed(None, None))
     conn_b = _FakeConnection([], raise_after=ConnectionClosed(None, None))
@@ -427,7 +427,7 @@ async def test_repeated_gap_cycles_meet_real_db_write_latency_budget(
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
     repo = PostgresCoverageRepository(pool)
-    clock = _TickingClock(datetime(2026, 4, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 4, 1, tzinfo=UTC))
 
     n_gaps = 30
     budget_sec = 10.0  # 실측 로컬 <2s, CI/네트워크 편차 감안

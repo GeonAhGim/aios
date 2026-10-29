@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 
@@ -127,7 +127,7 @@ def parse_ticker_message(message: dict[str, Any]) -> list[Ticker]:
                     bid=Decimal(str(row.get("bidPx") or row["last"])),
                     ask=Decimal(str(row.get("askPx") or row["last"])),
                     volume_24h=Decimal(str(row.get("vol24h", "0"))),
-                    timestamp=datetime.fromtimestamp(int(row["ts"]) / 1000, tz=timezone.utc),
+                    timestamp=datetime.fromtimestamp(int(row["ts"]) / 1000, tz=UTC),
                     source_type="primary",
                 )
             )
@@ -153,7 +153,7 @@ def parse_orderbook_message(message: dict[str, Any]) -> list[OrderBook]:
                 OrderBookLevel(price=Decimal(str(level[0])), quantity=Decimal(str(level[1])))
                 for level in row["asks"]
             ]
-            timestamp = datetime.fromtimestamp(int(row["ts"]) / 1000, tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(int(row["ts"]) / 1000, tz=UTC)
         except (KeyError, IndexError, InvalidOperation, ValueError) as exc:
             raise FatalExchangeError(
                 f"OKX books WS frame missing/invalid field: {exc}, row={row!r}"

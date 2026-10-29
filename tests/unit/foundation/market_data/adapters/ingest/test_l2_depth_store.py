@@ -10,7 +10,7 @@ D5. DoD: "보존 정책이 디스크 증가를 상한 안에 유지" — 여러 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,7 @@ import pytest
 from src.foundation.market_data.adapters.ingest.l2_depth_store import L2DepthStore
 from src.foundation.market_data.domain.l2_retention import RecordKind, RetentionPolicy
 
-_NOW = datetime(2026, 2, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 2, 1, tzinfo=UTC)
 _POLICY = RetentionPolicy(
     full_depth_ttl=timedelta(days=2),
     aggregate_ttl=timedelta(days=14),

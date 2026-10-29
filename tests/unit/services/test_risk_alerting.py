@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -28,7 +28,7 @@ USER_A = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 LIMIT_1 = "SYMBOL:BTC-USDT:GROSS_NOTIONAL_PCT"
 LIMIT_2 = "SYMBOL:ETH-USDT:GROSS_NOTIONAL_PCT"
 
-_BASE = datetime(2026, 9, 8, 0, 0, 0, tzinfo=timezone.utc)
+_BASE = datetime(2026, 9, 8, 0, 0, 0, tzinfo=UTC)
 
 
 @dataclass
@@ -184,7 +184,7 @@ async def test_gateway_timeout_does_not_propagate_to_caller_and_is_not_cached() 
     times out rather than raising immediately; the fail-closed contract
     must hold for this failure mode too, and the failed attempt must not
     be cached (immediate retry must still go through)."""
-    gateway = FakeGateway(raise_on_call=True, exception=asyncio.TimeoutError())
+    gateway = FakeGateway(raise_on_call=True, exception=TimeoutError())
     service = RiskAlertService(gateway, _clock([0, 0.001]))
 
     await service.on_breach(_event(hard=True))  # times out, swallowed

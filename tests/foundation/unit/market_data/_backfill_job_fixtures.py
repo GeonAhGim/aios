@@ -12,7 +12,7 @@ _exposure_snapshot_fixtures.py와 같은 선례 패턴).
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 from uuid import UUID
@@ -54,7 +54,7 @@ _INSTRUMENT_ID = UUID("11111111-1111-1111-1111-111111111111")
 
 
 def _dt(hour: int, day: int = 4) -> datetime:
-    return datetime(2026, 9, day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, day, hour, 0, tzinfo=UTC)
 
 
 def _calendar() -> VenueCalendar:

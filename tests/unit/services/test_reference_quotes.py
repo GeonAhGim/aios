@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -41,13 +41,13 @@ def _primary_ticker(price: str) -> Ticker:
         bid=Decimal(price),
         ask=Decimal(price),
         volume_24h=Decimal("100"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         source_type="primary",
     )
 
 
 def _flat_candles(price: str, n: int = 10) -> list[Candle]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return [
         Candle(
             symbol="BTC/USDT",
@@ -71,7 +71,7 @@ class _FakeBitgetAdapter:
         self._raises = raises
 
     async def get_futures_ticker(self, symbol: str):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from src.data.models.market_data import Ticker
 
@@ -84,7 +84,7 @@ class _FakeBitgetAdapter:
             bid=Decimal(self._price),
             ask=Decimal(self._price),
             volume_24h=Decimal("10"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 

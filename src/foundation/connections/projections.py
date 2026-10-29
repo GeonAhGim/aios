@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.connections.application.begin_connection import connection_to_view
@@ -27,4 +27,4 @@ async def build_connection_list_view(
     for c in connections:
         binding = await repo.get_credential_binding(c.id)
         views.append(connection_to_view(c, binding))
-    return ConnectionListView(connections=views, as_of=datetime.now(timezone.utc))
+    return ConnectionListView(connections=views, as_of=datetime.now(UTC))

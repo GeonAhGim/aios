@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -196,7 +196,7 @@ async def rotate_refresh(
     expected_hash: str,
     new_hash: str,
 ) -> Session:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         row = await conditional_update(
             conn,

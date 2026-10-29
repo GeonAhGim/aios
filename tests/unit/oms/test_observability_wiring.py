@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -110,8 +110,8 @@ def _provider_event(**overrides: Any) -> ProviderOrderEvent:
         filled_quantity=Decimal("1"),
         average_price=None,
         last_fill=None,
-        venue_ts=datetime.now(timezone.utc),
-        received_at=datetime.now(timezone.utc),
+        venue_ts=datetime.now(UTC),
+        received_at=datetime.now(UTC),
         source="WS",
         raw_hash="deadbeef",
     )
@@ -269,7 +269,7 @@ class _UnusedRiskGateRepo:
 
 
 def _order_view() -> OrderView:
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, tzinfo=UTC)
     return OrderView(
         order_id=uuid4(), tenant_id=uuid4(), execution_id=1, client_order_id=f"c-{uuid4().hex}",
         exchange_order_id=None, symbol="BTC/USDT", venue_symbol="BTCUSDT", exchange="bitget",
@@ -300,7 +300,7 @@ async def test_unknown_resolver_observes_resolution_duration_once() -> None:
     result = await resolve_unknown(
         view.order_id, adapter=adapter, pool=_UnknownFakePool(),
         risk_gate_repo=risk_gate_repo,
-        clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=timezone.utc),
+        clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
         order_repo=repo, metrics=spy,
     )
 

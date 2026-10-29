@@ -6,7 +6,7 @@ but `as_of` must always be included (spec 108 §2).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.paper_control.application.request_deployment import deployment_to_view
@@ -26,5 +26,5 @@ async def build_deployment_list_view(
     deployments = await repo.list_deployments(tenant_id)
     return DeploymentListView(
         deployments=[deployment_to_view(d) for d in deployments],
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )

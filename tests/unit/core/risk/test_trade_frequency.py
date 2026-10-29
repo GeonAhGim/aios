@@ -1,7 +1,7 @@
 """L4_risk_and_safety_v1.0.md#9 R-12 — `rules/trade_frequency.py` 단위 테스트."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 from uuid import uuid4
@@ -21,7 +21,7 @@ from src.core.risk.inputs import (
 )
 from src.core.risk.rules.trade_frequency import trade_frequency
 
-_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 3, tzinfo=UTC)
 # anomaly_multiplier=3.0, max_trades_per_hour=60
 _POLICY: RiskPolicy = load_risk_policy()
 

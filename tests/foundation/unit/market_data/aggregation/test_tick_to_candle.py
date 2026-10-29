@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -42,7 +42,7 @@ from src.foundation.market_data.domain.timeframe import (
     expected_opens as timeframe_expected_opens,
 )
 
-UTC = timezone.utc
+UTC = UTC
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _BASE_NS = 1_767_225_600_000_000_000  # 2026-01-01T00:00:00Z (Thursday)
 

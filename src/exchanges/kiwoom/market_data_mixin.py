@@ -34,7 +34,7 @@ model), mirroring `kis/market_data_mixin.py`.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -96,7 +96,7 @@ class KiwoomMarketDataMixin:
                 bid=_decimal(raw["buy_1bid"]),
                 ask=_decimal(raw["sel_1bid"]),
                 volume_24h=_decimal(raw["trde_qty"]),
-                timestamp=datetime.now(timezone.utc),  # no separate timestamp field in the response
+                timestamp=datetime.now(UTC),  # no separate timestamp field in the response
                 source_type="primary",
             )
         except (KeyError, TypeError) as exc:
@@ -134,7 +134,7 @@ class KiwoomMarketDataMixin:
             exchange="kiwoom",
             bids=bids,
             asks=asks,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     async def get_ohlcv(
@@ -146,7 +146,7 @@ class KiwoomMarketDataMixin:
                 f"KiwoomAdapter currently only supports daily (1d) candles — got {timeframe!r}. "
                 "Intraday timeframes are out of this leaf's scope."
             )
-        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        today = datetime.now(UTC).strftime("%Y%m%d")
         raw = await self._request(
             "POST",
             _CHART_PATH,
@@ -158,7 +158,7 @@ class KiwoomMarketDataMixin:
         try:
             for row in rows:
                 day = row["dt"]  # "YYYYMMDD"
-                open_time = datetime.strptime(day, "%Y%m%d").replace(tzinfo=timezone.utc)
+                open_time = datetime.strptime(day, "%Y%m%d").replace(tzinfo=UTC)
                 candles.append(
                     Candle(
                         symbol=symbol,

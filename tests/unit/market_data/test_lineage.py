@@ -21,7 +21,7 @@ task-1136(QA): `_canonical_json`이 재사용 `JSONEncoder`로 바뀐 뒤에도
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -53,16 +53,16 @@ def _candle(open_time: datetime, close: str) -> CandleRecord:
 
 
 def test_batch_hash_is_order_independent() -> None:
-    a = _candle(datetime(2024, 1, 1, tzinfo=timezone.utc), "100")
-    b = _candle(datetime(2024, 1, 2, tzinfo=timezone.utc), "200")
+    a = _candle(datetime(2024, 1, 1, tzinfo=UTC), "100")
+    b = _candle(datetime(2024, 1, 2, tzinfo=UTC), "200")
 
     assert batch_hash([a, b]) == batch_hash([b, a])
 
 
 def test_batch_hash_changes_when_one_value_changes() -> None:
-    a = _candle(datetime(2024, 1, 1, tzinfo=timezone.utc), "100")
-    b = _candle(datetime(2024, 1, 2, tzinfo=timezone.utc), "200")
-    b_changed = _candle(datetime(2024, 1, 2, tzinfo=timezone.utc), "201")
+    a = _candle(datetime(2024, 1, 1, tzinfo=UTC), "100")
+    b = _candle(datetime(2024, 1, 2, tzinfo=UTC), "200")
+    b_changed = _candle(datetime(2024, 1, 2, tzinfo=UTC), "201")
 
     assert batch_hash([a, b]) != batch_hash([a, b_changed])
 
@@ -109,7 +109,7 @@ def test_batch_hash_streaming_matches_reference_property() -> None:
     저장된 해시를 재계산하지 않고도(P3 WORM) 안전하게 교체할 수 있다는
     증거."""
     rng = random.Random(20260904)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
 
     for _ in range(200):
         size = rng.randint(0, 30)
@@ -126,7 +126,7 @@ def test_batch_hash_streaming_matches_reference_for_empty_and_singleton() -> Non
     assert batch_hash([]) == _batch_hash_reference([])
 
     rng = random.Random(1)
-    solo = [_random_candle(rng, datetime(2026, 1, 1, tzinfo=timezone.utc))]
+    solo = [_random_candle(rng, datetime(2026, 1, 1, tzinfo=UTC))]
     assert batch_hash(solo) == _batch_hash_reference(solo)
 
 
@@ -143,7 +143,7 @@ def test_batch_hash_large_batch_stays_order_independent(perf_budget: PerfBudget)
     `sort_keys=True` 출력과 바이트가 달라 `hash_version=2` 없이는 저장된
     해시(P3 WORM)와 어긋난다(task-1081 note와 동일 결론)."""
     rng = random.Random(20260904)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     records = [_random_candle(rng, base) for _ in range(20_000)]
 
     # task-11808: raw `time.perf_counter()` → `perf_budget.sample(batch=N)` 전환.
@@ -168,7 +168,7 @@ def _fixed_candle(day: int, close: str) -> CandleRecord:
         instrument_id=UUID("00000000-0000-0000-0000-000000000001"),
         timeframe=Timeframe.D1,
     )
-    at = datetime(2026, 1, day, tzinfo=timezone.utc)
+    at = datetime(2026, 1, day, tzinfo=UTC)
     return CandleRecord(
         key=key,
         open_time=at,
@@ -209,7 +209,7 @@ def test_canonical_json_matches_json_dumps_reference() -> None:
     `request_fingerprint`가 넘기는 평범한 dict(중첩·Decimal·None·datetime·UUID·
     비ASCII 키·키 정렬)도 포함한다."""
     rng = random.Random(1136)
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     for _ in range(100):
         record = _random_candle(rng, base)
         assert _canonical_json(record) == _canonical_json_reference(record)

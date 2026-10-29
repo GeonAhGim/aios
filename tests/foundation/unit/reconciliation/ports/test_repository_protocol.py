@@ -14,7 +14,7 @@ ports/test_ports_protocol.py`와 같은 패턴). negative test는 메서드 하�
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -172,8 +172,8 @@ def _make_state() -> ReconciliationState:
         target_type="mandate",
         tenant_id=uuid4(),
         aggregate_status=Classification.HEALTHY,
-        last_healthy_at=datetime.now(timezone.utc),
-        last_checked_at=datetime.now(timezone.utc),
+        last_healthy_at=datetime.now(UTC),
+        last_checked_at=datetime.now(UTC),
         blocking_reason=None,
         revision=1,
         safety_control_id=None,

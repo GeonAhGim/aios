@@ -19,7 +19,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -129,7 +129,7 @@ async def collect_circuit_breaker_metrics(
     None을 0으로 뭉개면 CB가 stale 데이터에서도 절대 트립하지 않는 fail-open
     결함(§9 R-43 원문)이 재발한다."""
     data_delay_sec = (
-        freshness_tracker.max_delay_sec(datetime.now(timezone.utc))
+        freshness_tracker.max_delay_sec(datetime.now(UTC))
         if freshness_tracker is not None
         else None
     )

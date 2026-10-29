@@ -9,7 +9,7 @@ CHECK(closing_nav = cash + positions_mv) 위반은 asyncpg 예외로 거부.
 from __future__ import annotations
 
 import hashlib
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 
 import asyncpg
 import pytest
@@ -127,7 +127,7 @@ async def test_insert_preserves_full_decimal_precision_and_fx_rates_round_trip(p
     소수부 10자리(음수 포함) 값이 INSERT...RETURNING 경로(`insert`가
     반환하는 뷰)와 별도 SELECT 경로(`get`) 양쪽에서 원본 Decimal과 정확히
     일치해야 한다(perf 단언 아님 — p95는 이 리프 소관이 아니다)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     from decimal import Decimal
 
     from src.data.models.base import FXRate
@@ -142,7 +142,7 @@ async def test_insert_preserves_full_decimal_precision_and_fx_rates_round_trip(p
         base=Currency.USDT,
         quote=Currency.KRW,
         rate=Decimal("1234.0987654321"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         source="test",
     )
     nav = NAVSnapshot(

@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -122,7 +122,7 @@ def _command(user_id: uuid.UUID, execution_id: int, intent_seq: int = 1) -> Subm
         strategy_version="1.0.0",
         execution_id=execution_id,
         intent_seq=intent_seq,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid.uuid4(),
@@ -134,7 +134,7 @@ def _command(user_id: uuid.UUID, execution_id: int, intent_seq: int = 1) -> Subm
         quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 
@@ -188,12 +188,12 @@ async def test_submit_order_rejects_closed_fund_in_entity_context(pool):
     # 상위 폐쇄는 활성 하위가 없어야 하므로(NOT EXISTS 절, FA-2) 최하위부터
     # 순서대로 닫는다.
     await entity_repo.close_sub_account(
-        tenant_id, context.sub_account_id, closed_at=datetime.now(timezone.utc)
+        tenant_id, context.sub_account_id, closed_at=datetime.now(UTC)
     )
     await entity_repo.close_portfolio(
-        tenant_id, context.portfolio_id, closed_at=datetime.now(timezone.utc)
+        tenant_id, context.portfolio_id, closed_at=datetime.now(UTC)
     )
-    await entity_repo.close_fund(tenant_id, context.fund_id, closed_at=datetime.now(timezone.utc))
+    await entity_repo.close_fund(tenant_id, context.fund_id, closed_at=datetime.now(UTC))
 
     with pytest.raises(EntityContextResolutionError):
         await submit_order(

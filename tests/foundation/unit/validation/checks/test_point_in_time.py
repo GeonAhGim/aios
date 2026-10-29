@@ -11,7 +11,7 @@ failure-injection 1, numeric performance assertion 1, gate-red repro 1.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -28,7 +28,7 @@ from src.foundation.validation.domain.models import Outcome
 from src.foundation.validation.domain.policy import ValidationPolicy
 from tests.conftest import PerfBudget
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _bar(index: int, *, minutes: int = 60) -> Candle:

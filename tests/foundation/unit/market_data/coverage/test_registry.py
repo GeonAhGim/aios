@@ -6,7 +6,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -23,7 +23,7 @@ _OTHER_ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
 
 
 def _dt(day: int, hour: int = 0) -> datetime:
-    return datetime(2026, 1, day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 1, day, hour, 0, tzinfo=UTC)
 
 
 def _span(

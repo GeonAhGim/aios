@@ -7,7 +7,7 @@ DoD ("빈도·단위·발표지연 정규화").
 from __future__ import annotations
 
 import time
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -102,8 +102,8 @@ def test_period_end_rejects_invalid_calendar_date() -> None:
 
 def test_compute_known_at_adds_lag_at_utc_midnight() -> None:
     known_at = compute_known_at(date(2024, 1, 31), publication_lag_days=15)
-    assert known_at == datetime(2024, 2, 15, tzinfo=timezone.utc)
-    assert known_at.tzinfo is timezone.utc
+    assert known_at == datetime(2024, 2, 15, tzinfo=UTC)
+    assert known_at.tzinfo is UTC
 
 
 def test_compute_known_at_rejects_negative_lag() -> None:
@@ -131,7 +131,7 @@ def test_normalize_macro_observation_composes_all_axes() -> None:
     assert observation.value == Decimal("3.5")
     assert observation.unit == "percent"
     assert observation.seasonally_adjusted is True
-    assert observation.known_at == datetime(2024, 2, 20, tzinfo=timezone.utc)
+    assert observation.known_at == datetime(2024, 2, 20, tzinfo=UTC)
 
 
 def test_normalize_macro_observation_applies_unit_scale_to_value() -> None:

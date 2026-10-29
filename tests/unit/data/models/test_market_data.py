@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -15,7 +15,7 @@ def test_ticker_construction():
         bid=Decimal("65000.0"),
         ask=Decimal("65001.0"),
         volume_24h=Decimal("1234.5"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         source_type="primary",
     )
     assert ticker.symbol == "BTC/USDT"
@@ -27,7 +27,7 @@ def test_orderbook_levels():
         exchange="bitget",
         bids=[OrderBookLevel(price=Decimal("100"), quantity=Decimal("1"))],
         asks=[OrderBookLevel(price=Decimal("101"), quantity=Decimal("1"))],
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
     assert book.bids[0].price < book.asks[0].price
 
@@ -42,8 +42,8 @@ def test_candle_ohlc():
         low=Decimal("90"),
         close=Decimal("105"),
         volume=Decimal("50"),
-        open_time=datetime.now(timezone.utc),
-        close_time=datetime.now(timezone.utc),
+        open_time=datetime.now(UTC),
+        close_time=datetime.now(UTC),
     )
     assert candle.low <= candle.open <= candle.high
 
@@ -58,7 +58,7 @@ def test_ticker_invalid_price_type_raises_validation_error():
             bid=Decimal("65000.0"),
             ask=Decimal("65001.0"),
             volume_24h=Decimal("1234.5"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 
@@ -72,7 +72,7 @@ def test_ticker_missing_required_field_raises_validation_error():
             bid=Decimal("65000.0"),
             ask=Decimal("65001.0"),
             volume_24h=Decimal("1234.5"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 
@@ -109,8 +109,8 @@ def test_candle_missing_required_field_raises_validation_error():
             high=Decimal("110"),
             low=Decimal("90"),
             volume=Decimal("50"),
-            open_time=datetime.now(timezone.utc),
-            close_time=datetime.now(timezone.utc),
+            open_time=datetime.now(UTC),
+            close_time=datetime.now(UTC),
         )
 
 
@@ -136,7 +136,7 @@ def test_ticker_upstream_validation_failure_is_not_swallowed(monkeypatch):
             bid=Decimal("65000.0"),
             ask=Decimal("65001.0"),
             volume_24h=Decimal("1234.5"),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 
@@ -154,7 +154,7 @@ def test_perf_construct_1000_tickers(perf_budget):
                 bid=Decimal(f"{i}.0"),
                 ask=Decimal(f"{i}.5"),
                 volume_24h=Decimal("1234.5"),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 source_type="primary",
             )
 

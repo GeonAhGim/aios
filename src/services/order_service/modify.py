@@ -9,7 +9,7 @@ task-1603(L4-17) 편차 — cancel.py와 동일 이유(모듈 상단 참조)로
 `OrderModifyError` 하나뿐이었다)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -29,7 +29,7 @@ class OrderModifyError(Exception):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def modify_order(

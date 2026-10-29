@@ -8,7 +8,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 모듈별 섹션을 독립적으로 구성한다.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -191,7 +191,7 @@ def test_venue_tier_commission_model_rejects_negative_min_fee() -> None:
 # BT-4 latency
 # --------------------------------------------------------------------------
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_delayed_arrival_time_exact_value() -> None:

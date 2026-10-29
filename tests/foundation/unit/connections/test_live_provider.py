@@ -6,7 +6,7 @@ FakeReadonlyAccountProvider만 반환하던 갭을 메운 실 어댑터."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -57,7 +57,7 @@ def _position(symbol: str, quantity: Decimal) -> Position:
         current_price=Money(amount=Decimal("100"), currency=Currency.USDT),
         unrealized_pnl=Money(amount=Decimal("0"), currency=Currency.USDT),
         realized_pnl=Money(amount=Decimal("0"), currency=Currency.USDT),
-        entry_time=datetime.now(timezone.utc),
+        entry_time=datetime.now(UTC),
         asset_class=AssetClass.CRYPTO,
     )
 
@@ -80,7 +80,7 @@ async def test_fetch_snapshot_maps_balances_to_values():
         requested_capability_profile=(CapabilityScope.READ_BALANCE,),
     )
 
-    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
     assert resolver.requested == (user_id, "bitget")
     value_by_key = {v.entity_key: v for v in snapshot.values}
@@ -107,7 +107,7 @@ async def test_fetch_snapshot_merges_positions_without_special_casing():
         requested_capability_profile=(CapabilityScope.READ_BALANCE, CapabilityScope.READ_POSITION),
     )
 
-    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
     value_by_key = {v.entity_key: v for v in snapshot.values}
     assert value_by_key["BTCUSDT"].entity_type == "POSITION"
@@ -121,7 +121,7 @@ async def test_fetch_snapshot_with_no_balances_uses_placeholder_currency():
         resolver, user_id=uuid4(), exchange="bitget", requested_capability_profile=()
     )
 
-    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
     assert snapshot.values == ()
     assert snapshot.currency == "MULTI"
@@ -181,7 +181,7 @@ async def test_fetch_snapshot_rejects_unregistered_credential():
     )
 
     with pytest.raises(CredentialNotFoundError):
-        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
 
 async def test_fetch_snapshot_truncates_currency_to_field_max_length():
@@ -200,7 +200,7 @@ async def test_fetch_snapshot_truncates_currency_to_field_max_length():
         resolver, user_id=uuid4(), exchange="bitget", requested_capability_profile=()
     )
 
-    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
     assert len(snapshot.currency) == 10
     assert snapshot.currency == "SUPERLONGT"
@@ -225,4 +225,4 @@ async def test_fetch_snapshot_propagates_positions_failure():
     )
 
     with pytest.raises(ConnectionError):
-        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+        await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))

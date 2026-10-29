@@ -7,7 +7,7 @@ test_market_data_router_entitlement.py, 공유 헬퍼는 conftest.py.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.foundation.market_data.application.read_api import paginate_candles
 from src.foundation.market_data.contracts.v1 import SeriesKey, Timeframe, Venue
@@ -15,7 +15,7 @@ from tests.integration.api.conftest import _candle
 
 
 def test_paginate_candles_pure_cursor_semantics():
-    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    t0 = datetime(2026, 9, 1, tzinfo=UTC)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=uuid.uuid4(), timeframe=Timeframe.M1)
     candles = [_candle(key, t0 + timedelta(minutes=i), 100) for i in range(5)]
 

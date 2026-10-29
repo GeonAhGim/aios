@@ -6,7 +6,7 @@ Spec: AIOSproject #79 §4 SLI "chain verification success"."""
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from statistics import stdev
 from uuid import uuid4
 
@@ -16,7 +16,7 @@ from src.foundation.evidence.application.verify_audit_chain import verify_audit_
 from src.foundation.evidence.domain.models import AuditEvent, Classification, Outcome
 from src.foundation.evidence.domain.rules import ChainIntegrityError, compute_event_hash
 
-NOW = datetime(2026, 9, 25, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 25, tzinfo=UTC)
 
 
 class FakeAuditEventRepository:

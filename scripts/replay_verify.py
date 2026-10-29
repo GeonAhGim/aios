@@ -10,7 +10,7 @@ import asyncio
 import os
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
@@ -443,7 +443,7 @@ def main() -> int:
         help="Window end, ISO 8601 (default: now, UTC). Fixing this makes reruns reproducible.",
     )
     args = parser.parse_args()
-    as_of = datetime.now(timezone.utc) if args.as_of is None else datetime.fromisoformat(args.as_of)
+    as_of = datetime.now(UTC) if args.as_of is None else datetime.fromisoformat(args.as_of)
     return asyncio.run(_run(hours=args.hours, as_of=as_of))
 
 

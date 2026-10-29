@@ -10,7 +10,7 @@ None을 반환하는지(R3 fail-closed), 포트폴리오 VaR ≤ Σ 개별 VaR�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -35,8 +35,8 @@ from src.data.models.market_data import Candle
 from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
 from tests.support.perf_budget import PerfBudget
 
-_BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
-_RISK_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, tzinfo=UTC)
+_RISK_NOW = datetime(2026, 9, 3, tzinfo=UTC)
 
 
 def _risk_inputs(stats: StatsInputs) -> RiskInputs:

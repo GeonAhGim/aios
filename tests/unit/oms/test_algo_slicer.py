@@ -7,7 +7,7 @@ import random
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from time import process_time
@@ -31,12 +31,12 @@ def _scope() -> OrderIdempotencyScope:
         strategy_version="1.0.0",
         execution_id=1,
         intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
 
 
 def _request(**overrides: object) -> AlgoRequest:
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     defaults: dict[str, object] = {
         "algo_run_id": uuid4(),
         "trace_id": uuid4(),
@@ -121,7 +121,7 @@ def test_last_slice_absorbs_remainder_even_under_participation_cap() -> None:
 
 
 def test_invalid_time_window_raises() -> None:
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     req = _request(start_at=start, end_at=start)
     with pytest.raises(ValueError, match="end_at"):
         plan_slices(req, now=start, volume_profile=None, rng=random.Random(req.seed))
@@ -129,7 +129,7 @@ def test_invalid_time_window_raises() -> None:
 
 def test_end_at_before_start_at_raises() -> None:
     """등호(==)가 아니라 end_at < start_at인 별도 경계도 거부돼야 한다."""
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     req = _request(start_at=start, end_at=start - timedelta(minutes=1))
     with pytest.raises(ValueError, match="end_at"):
         plan_slices(req, now=start, volume_profile=None, rng=random.Random(req.seed))

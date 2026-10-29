@@ -19,7 +19,7 @@ p50/p95를 print로 남기고, (b) 이 어댑터가 `PostgresCandleStore`에
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -144,7 +144,7 @@ async def test_read_columns_across_partition_boundary_sorted_no_gaps_no_dupes(
     async with pool.acquire() as conn, conn.transaction():
         await hot_storage.ensure_partitions(conn, months_ahead=6)
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         t1 = t0 + timedelta(days=40)  # 어떤 시작일이든 최소 한 달 파티션 경계를 넘는다
         batch = await _create_batch(
             conn,
@@ -195,7 +195,7 @@ async def test_read_columns_cpu_time_converges_to_zero_for_small_input(
     async with pool.acquire() as conn, conn.transaction():
         await hot_storage.ensure_partitions(conn, months_ahead=6)
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         t1 = t0 + timedelta(days=40)
         batch = await _create_batch(
             conn,
@@ -242,7 +242,7 @@ async def test_read_columns_latency_within_budget(
     async with pool.acquire() as conn, conn.transaction():
         await hot_storage.ensure_partitions(conn, months_ahead=6)
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         t1 = t0 + timedelta(days=40)
         batch = await _create_batch(
             conn,
@@ -300,7 +300,7 @@ async def test_read_columns_goes_red_with_io_delay_injection(
     async with pool.acquire() as conn, conn.transaction():
         await hot_storage.ensure_partitions(conn, months_ahead=6)
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         t1 = t0 + timedelta(days=40)
         batch = await _create_batch(
             conn,
@@ -339,7 +339,7 @@ async def test_read_columns_goes_red_with_io_delay_injection(
 
 async def test_read_columns_nonexistent_instrument_returns_empty_not_error(pool, hot_storage):
     async with pool.acquire() as conn, conn.transaction():
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         columns = await hot_storage.read_columns(
             conn,
             uuid.uuid4(),
@@ -355,7 +355,7 @@ async def test_read_columns_nonexistent_instrument_returns_empty_not_error(pool,
 async def test_read_columns_empty_range_returns_empty_not_error(pool, hot_storage, batch_repo):
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         await _create_batch(
             conn,
             batch_repo,
@@ -375,7 +375,7 @@ async def test_read_columns_future_range_returns_empty_not_error(pool, hot_stora
     async with pool.acquire() as conn, conn.transaction():
         await hot_storage.ensure_partitions(conn, months_ahead=3)
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,

@@ -65,7 +65,7 @@ def _run_alembic(*args: str, database_url: str) -> None:
 
 
 @pytest.fixture
-async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str, None]:
+async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str]:
     # 테스트별 고유 접미사 -- 이 파일 안의 다른 왕복 테스트와도 DB를
     # 공유하지 않는다(각자 자기 downgrade 창을 스스로만 겪는다).
     # CTO 2026-09-30: hash()는 프로세스마다 시드가 달라(PYTHONHASHSEED) 실행할 때마다 DB 이름이
@@ -77,14 +77,14 @@ async def migration_db_url(request: pytest.FixtureRequest) -> AsyncGenerator[str
 
 
 @pytest.fixture
-async def pool(migration_db_url: str) -> AsyncGenerator[asyncpg.Pool, None]:
+async def pool(migration_db_url: str) -> AsyncGenerator[asyncpg.Pool]:
     p = await asyncpg.create_pool(_asyncpg_dsn(migration_db_url), min_size=1, max_size=4)
     yield p
     await p.close()
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head(migration_db_url: str) -> Generator[None, None, None]:
+def _ensure_head(migration_db_url: str) -> Generator[None]:
     _run_alembic("upgrade", "head", database_url=migration_db_url)
     yield
     _run_alembic("upgrade", "head", database_url=migration_db_url)

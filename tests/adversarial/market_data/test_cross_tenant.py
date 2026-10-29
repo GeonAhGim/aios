@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -85,7 +85,7 @@ async def _seed_owner_batch(
 ) -> IngestBatchResult:
     audit_event_id = await _audit_event_id(conn)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-    t0 = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
     candle = CandleRecord(
         key=key,
         open_time=t0,
@@ -122,7 +122,7 @@ async def _seed_owner_tick_batch(
     conn: asyncpg.Connection, batch_repo, *, tenant_id, instrument_id
 ) -> TickIngestBatchResult:
     audit_event_id = await _audit_event_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     batch = TickIngestBatchResult(
         batch_id=uuid.uuid4(),
         tenant_id=tenant_id,

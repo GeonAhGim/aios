@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -106,7 +106,7 @@ def test_incomplete_implementation_fails_port_check() -> None:
 
 
 def test_outbox_row_rejects_unknown_command_type() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with pytest.raises(ValidationError):
         OutboxRow(
             id=uuid4(),
@@ -133,7 +133,7 @@ def test_mark_retry_and_mark_dead_require_expected_worker() -> None:
     """366행 규칙표: done/retry/dead 모두 `worker_id=$2` 펜싱 — expected_worker
     없이 호출하면(늦은 워커의 조건 없는 쓰기 시도에 대응) TypeError로 막혀야 한다."""
     repo = _StrictOutboxRepo()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with pytest.raises(TypeError):
         repo.mark_retry(None, uuid4(), attempt=1, not_before=now, last_error="x")
     with pytest.raises(TypeError):
@@ -192,7 +192,7 @@ async def test_mark_done_propagates_simulated_connection_drop() -> None:
 async def test_mark_retry_and_mark_dead_propagate_simulated_connection_drop() -> None:
     repo = _NetworkFailureOutboxRepo()
     conn = _DroppedConnection()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
         await repo.mark_retry(
             conn, uuid4(), attempt=1, not_before=now, last_error="x", expected_worker="A"
@@ -205,7 +205,7 @@ async def test_mark_retry_and_mark_dead_propagate_simulated_connection_drop() ->
 def test_outbox_row_bulk_validation_latency_budget() -> None:
     """`claim_batch`가 돌려주는 배치를 `OutboxRow`로 파싱하는 비용 — 로컬
     회귀 예산이며 SLO 단언은 아니다(headless worker 지침)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def _build() -> OutboxRow:
         return OutboxRow(

@@ -6,7 +6,7 @@ DoD "resumable" equivalence proof.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import lightgbm as lgb
 import pytest
@@ -17,7 +17,7 @@ from src.foundation.ml.ports.trainer import TrainingSample
 from tests.support.perf_budget import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-_NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 6, 1, tzinfo=UTC)
 _PARAMS: dict[str, object] = {"num_leaves": 7, "min_data_in_leaf": 1, "learning_rate": 0.3}
 
 

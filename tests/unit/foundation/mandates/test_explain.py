@@ -12,7 +12,7 @@ suite uses a fake `MandateRepository` and never calls the rule engine.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -35,7 +35,7 @@ from src.foundation.mandates.domain.models import (
 )
 from src.foundation.mandates.domain.rules import compile_rule_hash
 
-_NOW = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 5, 5, 0, 0, tzinfo=UTC)
 
 
 def _revision(**overrides: object) -> MandateRevision:

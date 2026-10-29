@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -29,7 +29,7 @@ from src.foundation.research_data.domain.known_at import (
 )
 from tests.conftest import PerfBudget
 
-_T0 = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+_T0 = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
 
 
 def _item(*, known_at: datetime) -> ResearchItem:
@@ -76,7 +76,7 @@ def test_fractional_offset_timezone_one_microsecond_after_is_rejected() -> None:
 def test_minimum_datetime_known_at_is_always_knowable() -> None:
     """`datetime.min`에 가까운 `known_at`(연대 경계)도 FA-9 커널이 오버플로
     없이 처리하고, 항상 과거이므로 어떤 `as_of`에도 통과해야 한다."""
-    item = _item(known_at=datetime(1, 1, 1, tzinfo=timezone.utc))
+    item = _item(known_at=datetime(1, 1, 1, tzinfo=UTC))
     assert_point_in_time(item, _T0)  # raise 없음
 
 
@@ -84,7 +84,7 @@ def test_maximum_datetime_known_at_is_rejected_against_any_realistic_as_of() -> 
     """`datetime.max`에 가까운 `known_at`(연대 경계)은 어떤 현실적인
     `as_of`보다도 미래이므로 항상 거부돼야 한다 -- 극단값이 정수 오버플로로
     "항상 통과"로 오판정되지 않는지 확인한다."""
-    item = _item(known_at=datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=timezone.utc))
+    item = _item(known_at=datetime(9999, 12, 31, 23, 59, 59, 999999, tzinfo=UTC))
     with pytest.raises(PointInTimeViolationError):
         assert_point_in_time(item, _T0)
 

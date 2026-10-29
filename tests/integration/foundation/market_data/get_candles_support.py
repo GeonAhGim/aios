@@ -9,7 +9,7 @@ task-10929: `test_get_candles.py` 분할(loc_over_500)로 핵심/실패주입/�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -121,4 +121,4 @@ async def candle_open_time_before_today(conn: asyncpg.Connection, as_of: datetim
 
 
 def utc_minute_now() -> datetime:
-    return datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    return datetime.now(UTC).replace(second=0, microsecond=0)

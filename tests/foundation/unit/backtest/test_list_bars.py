@@ -6,7 +6,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#L26 DoD (b)(c)(d).
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -18,7 +18,7 @@ from tests.conftest import PerfBudget
 
 
 def _candle(index: int) -> Candle:
-    open_time = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=index)
+    open_time = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(minutes=index)
     price = Decimal(index + 1)
     return Candle(
         symbol="BTCUSDT",

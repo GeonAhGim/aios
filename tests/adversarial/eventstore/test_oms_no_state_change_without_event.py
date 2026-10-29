@@ -39,7 +39,7 @@ repository.transition()`) 왕복 수 회귀 가드를 더한다(절대 ms 대신
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -161,7 +161,7 @@ async def _submit_command(pool: asyncpg.Pool, user_id: UUID) -> SubmitOrderComma
         strategy_version="1.0.0",
         execution_id=execution_id,
         intent_seq=1,
-        window_start=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
     )
     return SubmitOrderCommand(
         command_id=uuid4(),
@@ -173,7 +173,7 @@ async def _submit_command(pool: asyncpg.Pool, user_id: UUID) -> SubmitOrderComma
         quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=user_id,
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
 
 
@@ -223,7 +223,7 @@ async def test_oms_submit_cancel_modify_each_produce_exactly_one_order_event(poo
             tenant_id=user_id,
             reason="fa16-adv-test",
             actor_subject_id=user_id,
-            issued_at=datetime.now(timezone.utc),
+            issued_at=datetime.now(UTC),
         ),
         pool=pool,
     )
@@ -251,7 +251,7 @@ async def test_oms_submit_cancel_modify_each_produce_exactly_one_order_event(poo
             tenant_id=user_id,
             reason="fa16-adv-test",
             actor_subject_id=user_id,
-            issued_at=datetime.now(timezone.utc),
+            issued_at=datetime.now(UTC),
             new_price=Decimal("101"),
         ),
         pool=pool,
@@ -315,7 +315,7 @@ async def test_oms_transaction_rollback_removes_event_and_state_together(pool, m
                 tenant_id=user_id,
                 reason="fa16-adv-rollback",
                 actor_subject_id=user_id,
-                issued_at=datetime.now(timezone.utc),
+                issued_at=datetime.now(UTC),
             ),
             pool=pool,
         )
@@ -335,7 +335,7 @@ def _transition_event(order_id: UUID, user_id: UUID) -> OrderTransitionEvent:
         trace_id=uuid4(),
         command_id=None,
         provider_event_id=None,
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
         payload_hash="a" * 64,
     )
 

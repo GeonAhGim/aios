@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import itertools
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -49,7 +49,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
 )
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 7, 0, 0, tzinfo=UTC)
 
 _EXPLICITLY_PERMITTED: frozenset[tuple[RedistributionScope, DataUse]] = frozenset(
     {

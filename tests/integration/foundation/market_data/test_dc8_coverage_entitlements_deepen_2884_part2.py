@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import asyncpg
@@ -74,7 +74,7 @@ def _instrument(**overrides) -> Instrument:
         "lot_size": Decimal("0.0001"),
         "calendar_id": "24x7",
         "lifecycle_state": InstrumentLifecycle.ACTIVE,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
     fields.update(overrides)
     return Instrument(**fields)

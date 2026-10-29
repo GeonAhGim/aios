@@ -17,7 +17,7 @@ import hashlib
 import os
 import secrets
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -145,7 +145,7 @@ class TokenIssuer:
         auth_level: AuthLevel,
         now: datetime | None = None,
     ) -> str:
-        moment = now if now is not None else datetime.now(timezone.utc)
+        moment = now if now is not None else datetime.now(UTC)
         claims = AccessClaims(
             sub=user_id,
             tid=tenant_id,

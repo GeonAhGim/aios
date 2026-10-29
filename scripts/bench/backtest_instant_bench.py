@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -45,7 +45,7 @@ from src.foundation.market_data.domain.candle_columns import CandleColumns  # no
 
 BUDGET_MS = 5_000.0
 BARS_PER_YEAR = 365
-_T0 = datetime(2025, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2025, 1, 1, tzinfo=UTC)
 _CASH = Decimal("100000")
 _D = Decimal
 DEFAULT_OUT = ROOT / "docs" / "perf" / "backtest_instant_bench.json"

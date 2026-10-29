@@ -14,7 +14,7 @@ CLAUDE.md ADR-2026-09-10-C §7).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -29,7 +29,7 @@ from src.foundation.ledger.domain.chart_of_accounts import user_account
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ----------------------------------------------------------------ledger ---

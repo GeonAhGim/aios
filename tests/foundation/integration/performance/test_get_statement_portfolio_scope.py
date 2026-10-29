@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -40,7 +40,7 @@ from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.entities.conftest import build_hierarchy
 from tests.support.db import create_pool_with_retry
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 
 
 def _asyncpg_dsn() -> str:

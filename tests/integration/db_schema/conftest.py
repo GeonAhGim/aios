@@ -32,7 +32,7 @@ def _database_url() -> str:
     return url
 
 
-async def _db_conn_impl() -> AbcAsyncGenerator["AsyncConnection", None]:
+async def _db_conn_impl() -> AbcAsyncGenerator["AsyncConnection"]:
     # 이벤트 루프마다 새 엔진 필요 — pytest-asyncio가 테스트별 새 루프를 만들고
     # asyncpg 커넥션은 루프에 종속되기 때문(NullPool로 커넥션 재사용 방지).
     engine = create_async_engine(_database_url(), poolclass=NullPool)
@@ -42,12 +42,12 @@ async def _db_conn_impl() -> AbcAsyncGenerator["AsyncConnection", None]:
 
 
 @pytest.fixture
-async def db_conn() -> AbcAsyncGenerator["AsyncConnection", None]:
+async def db_conn() -> AbcAsyncGenerator["AsyncConnection"]:
     async for conn in _db_conn_impl():
         yield conn
 
 
-async def _raw_conn_impl() -> AbcAsyncGenerator[asyncpg.Connection, None]:
+async def _raw_conn_impl() -> AbcAsyncGenerator[asyncpg.Connection]:
     dsn = _database_url().replace("postgresql+asyncpg://", "postgresql://")
     connection = await asyncpg.connect(dsn)
     yield connection
@@ -55,7 +55,7 @@ async def _raw_conn_impl() -> AbcAsyncGenerator[asyncpg.Connection, None]:
 
 
 @pytest.fixture
-async def raw_conn() -> AbcAsyncGenerator[asyncpg.Connection, None]:
+async def raw_conn() -> AbcAsyncGenerator[asyncpg.Connection]:
     """LC-6 트랜잭션·롤 테스트용 — deferred 트리거의 커밋 시점 동작과
     `SET ROLE`은 asyncpg 원시 커넥션(`test_db_roles.py`와 동일 패턴)으로만
     직접 검증할 수 있다(SQLAlchemy `AsyncConnection`은 커밋 시점을 감춘다)."""

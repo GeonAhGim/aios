@@ -16,7 +16,7 @@ import asyncio
 import math
 import os
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -125,7 +125,7 @@ async def _open_position(
         mark_at=None,
         base_currency=currency,
         last_journal_seq=0,
-        updated_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(UTC),
     )
     repo = PostgresSnapshotRepository(pool)
     async with pool.acquire() as conn, conn.transaction():

@@ -7,7 +7,7 @@ fills/idempotency 행, §5.2(스코프·digest), §6 F9(중복 전달 흡수).
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -51,8 +51,8 @@ def _provider_event() -> ProviderOrderEvent:
         filled_quantity=Decimal("1"),
         average_price=Decimal("100"),
         last_fill=None,
-        venue_ts=datetime.now(timezone.utc),
-        received_at=datetime.now(timezone.utc),
+        venue_ts=datetime.now(UTC),
+        received_at=datetime.now(UTC),
         source="WS",
         raw_hash=_hash("raw"),
     )
@@ -140,7 +140,7 @@ async def test_fills_insert_if_absent_duplicate_fill_absorbed_1000_times(pool):
         fee=Decimal("0.01"),
         fee_currency="USDT",
         liquidity="TAKER",
-        venue_ts=datetime.now(timezone.utc),
+        venue_ts=datetime.now(UTC),
     )
 
     async with pool.acquire() as conn:
@@ -165,7 +165,7 @@ async def test_fills_insert_recomputes_filled_quantity_from_sum_not_increment(po
             provider_fill_id=fill_id, venue="bitget", order_id=order_id,
             exchange_order_id="ex-1", symbol="BTC/USDT", side="BUY", quantity=qty,
             price=Decimal("100"), fee=Decimal("0"), fee_currency="USDT",
-            liquidity="TAKER", venue_ts=datetime.now(timezone.utc),
+            liquidity="TAKER", venue_ts=datetime.now(UTC),
         )
         async with pool.acquire() as conn:
             assert await repo.insert_if_absent(conn, fill) is True
@@ -190,7 +190,7 @@ async def test_fills_insert_without_order_id_skips_recalc(pool):
         provider_fill_id=f"fill-{uuid4().hex}", venue="bitget", order_id=None,
         exchange_order_id="ex-unmatched", symbol="BTC/USDT", side="SELL",
         quantity=Decimal("1"), price=Decimal("100"), fee=Decimal("0"),
-        fee_currency="USDT", liquidity="MAKER", venue_ts=datetime.now(timezone.utc),
+        fee_currency="USDT", liquidity="MAKER", venue_ts=datetime.now(UTC),
     )
     async with pool.acquire() as conn:
         assert await repo.insert_if_absent(conn, fill) is True

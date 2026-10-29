@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -182,7 +182,7 @@ def test_scenario_failure_aborts_before_returning_partial_report() -> None:
         )
 
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _COST = CostModel(fee_bps=Decimal("10"), slippage_bps=Decimal("5"))
 
 

@@ -8,7 +8,7 @@ DEEPEN(task-9398): negative test ≥3, failure-injection ≥1 추가.
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -46,7 +46,7 @@ def _ticker(price: str) -> Ticker:
         bid=Decimal(price),
         ask=Decimal(price),
         volume_24h=Decimal("1"),
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         source_type="primary",
     )
 

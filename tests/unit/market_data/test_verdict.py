@@ -25,7 +25,7 @@ from a looser/older schema) could carry the plain string `"REJECT"`, which
 """
 
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -40,7 +40,7 @@ from src.foundation.market_data.domain.quality.verdict import decide
 from tests.conftest import PerfBudget
 from tests.support.perf_inject import delayed_sync
 
-UTC = timezone.utc
+UTC = UTC
 
 
 def _reject_issue(n: int) -> QualityIssue:

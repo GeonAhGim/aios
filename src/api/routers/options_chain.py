@@ -7,7 +7,7 @@ is performed here; IND owns that boundary (see ``greek_calculator.py``).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -89,7 +89,7 @@ async def get_options_chain(
     The read/write reference port resolves symbols; the read-only port resolves
     UUIDs. Both are injected so the existing tenant-safe seams remain usable.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with pool.acquire() as conn:
         underlying = await resolve_instrument(
             conn,

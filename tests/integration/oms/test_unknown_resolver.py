@@ -12,7 +12,7 @@ test_unknown_resolver_limits.py`가 다룬다 — 이 파일은 실 Postgres에 
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -99,7 +99,7 @@ async def _order_event_rows(pool: asyncpg.Pool, order_id: UUID) -> list[asyncpg.
 async def test_resolved_as_lookup_match_transitions_order(pool: asyncpg.Pool) -> None:
     user_id = await create_test_user(pool)
     order_id, client_order_id = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(timezone.utc)
+        pool, user_id, unknown_since=datetime.now(UTC)
     )
     found = _found_order(
         client_order_id, status=OrderStatus.ACKNOWLEDGED, exchange_order_id="ex-live-1"
@@ -111,7 +111,7 @@ async def test_resolved_as_lookup_match_transitions_order(pool: asyncpg.Pool) ->
         adapter=adapter,
         pool=pool,
         risk_gate_repo=PostgresRiskGateRepository(pool),
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         sleep=_no_sleep,
     )
 
@@ -125,7 +125,7 @@ async def test_resolved_as_lookup_match_transitions_order(pool: asyncpg.Pool) ->
 
 async def test_not_found_twice_past_120s_and_not_open_becomes_failed(pool: asyncpg.Pool) -> None:
     user_id = await create_test_user(pool)
-    stale_since = datetime.now(timezone.utc) - timedelta(seconds=200)
+    stale_since = datetime.now(UTC) - timedelta(seconds=200)
     order_id, _client_order_id = await _insert_unknown_order(
         pool, user_id, unknown_since=stale_since
     )
@@ -136,7 +136,7 @@ async def test_not_found_twice_past_120s_and_not_open_becomes_failed(pool: async
         adapter=adapter,
         pool=pool,
         risk_gate_repo=PostgresRiskGateRepository(pool),
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         sleep=_no_sleep,
         max_attempts=2,
         backoff=(0.0, 0.0),
@@ -152,7 +152,7 @@ async def test_not_found_twice_past_120s_and_not_open_becomes_failed(pool: async
 async def test_retry_limit_exhausted_activates_account_safety_control(pool: asyncpg.Pool) -> None:
     user_id = await create_test_user(pool)
     order_id, _client_order_id = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(timezone.utc)
+        pool, user_id, unknown_since=datetime.now(UTC)
     )
     adapter = _LookupAdapter(results=[None, None])
     risk_gate_repo = PostgresRiskGateRepository(pool)
@@ -162,7 +162,7 @@ async def test_retry_limit_exhausted_activates_account_safety_control(pool: asyn
         adapter=adapter,
         pool=pool,
         risk_gate_repo=risk_gate_repo,
-        clock=lambda: datetime.now(timezone.utc),
+        clock=lambda: datetime.now(UTC),
         sleep=_no_sleep,
         max_attempts=2,
         backoff=(0.0, 0.0),
@@ -204,7 +204,7 @@ async def test_missing_unknown_since_is_fail_closed(pool: asyncpg.Pool) -> None:
             adapter=_LookupAdapter(results=[None]),
             pool=pool,
             risk_gate_repo=PostgresRiskGateRepository(pool),
-            clock=lambda: datetime.now(timezone.utc),
+            clock=lambda: datetime.now(UTC),
             sleep=_no_sleep,
         )
         raised = False

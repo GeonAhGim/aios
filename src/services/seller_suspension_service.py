@@ -13,7 +13,7 @@ but recorded internally — written to audit_log per 8.10 principle
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import asyncpg
@@ -60,5 +60,5 @@ class SellerSuspensionService:
         return SellerSuspensionResult(
             user_id=user_id,
             seller_suspended=row["seller_suspended"],
-            suspended_at=datetime.now(timezone.utc),
+            suspended_at=datetime.now(UTC),
         )

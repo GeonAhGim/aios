@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -59,7 +59,7 @@ def _command(**overrides: object) -> SubmitOrderCommand:
             strategy_version="1.0.0",
             execution_id=1,
             intent_seq=1,
-            window_start=datetime.now(timezone.utc),
+            window_start=datetime.now(UTC),
         ),
         "symbol": "BTC/USDT",
         "side": OrderSide.BUY,
@@ -69,7 +69,7 @@ def _command(**overrides: object) -> SubmitOrderCommand:
         "time_in_force": "GTC",
         "asset_class": AssetClass.CRYPTO,
         "actor_subject_id": uuid4(),
-        "issued_at": datetime.now(timezone.utc),
+        "issued_at": datetime.now(UTC),
     }
     defaults.update(overrides)
     return SubmitOrderCommand.model_validate(defaults)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -24,7 +24,7 @@ def mock_user() -> User:
         email="test@example.com",
         display_name="Test User",
         mfa_enabled=True,
-        mfa_verified_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        mfa_verified_at=datetime(2026, 1, 1, tzinfo=UTC),
         status="active",
         is_verifier=True,
         is_platform_admin=False,

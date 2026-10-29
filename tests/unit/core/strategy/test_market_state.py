@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -32,7 +32,7 @@ def test_market_state_fields_match_spec() -> None:
 
 
 def test_assert_no_future_rejects_bar_close_time_one_second_ahead() -> None:
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     state = MarketState(
         as_of=as_of,
         values={},
@@ -43,7 +43,7 @@ def test_assert_no_future_rejects_bar_close_time_one_second_ahead() -> None:
 
 
 def test_assert_no_future_allows_bar_close_time_equal_to_as_of() -> None:
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     state = MarketState(as_of=as_of, values={}, bar_close_time={"1h": as_of})
     assert_no_future(state)  # must not raise
 
@@ -58,7 +58,7 @@ def test_no_indicator_key_regex_defined_in_module(module: str) -> None:
 
 
 def test_market_state_rejects_malformed_indicator_key() -> None:
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     with pytest.raises(ValidationError):
         MarketState(as_of=as_of, values={"RSI@": Decimal("1")}, bar_close_time={})
 
@@ -69,19 +69,19 @@ def test_market_state_rejects_naive_as_of() -> None:
 
 
 def test_market_state_rejects_naive_bar_close_time() -> None:
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     with pytest.raises(ValidationError):
         MarketState(as_of=as_of, values={}, bar_close_time={"1h": datetime(2026, 1, 1)})
 
 
 def test_market_state_rejects_float_values() -> None:
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     with pytest.raises(ValidationError):
         MarketState(as_of=as_of, values={"RSI_timeperiod14": 55.0}, bar_close_time={})
 
 
 def test_from_flat_builds_single_timeframe_state() -> None:
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     state = MarketState.from_flat({"RSI_timeperiod14": 55.0}, as_of=as_of, tf="1h")
     assert state.values == {"RSI_timeperiod14": Decimal("55.0")}
     assert state.bar_close_time == {"1h": as_of}
@@ -107,7 +107,7 @@ def test_construction_propagates_upstream_indicator_stream_failure() -> None:
     채워진 `values`를 가진 `MarketState`가 만들어지는 게 아니라(look-ahead
     무결성 검증 자체가 훼손된 채로 통과하는 것), 생성자 호출 지점까지
     fail-closed로 전파돼야 한다."""
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     flaky_values = _FlakyValuesDict(
         {
             "RSI_timeperiod14@1h": Decimal("50"),
@@ -131,7 +131,7 @@ def test_market_state_construction_p95_latency_within_budget_for_many_keys(
     `MarketState` 생성(키 1,000개 각각 `parse_key` 검증 포함)이 가장 빠듯한
     축인 사전거래 게이트(p99 5ms)에 준하는 CI 여유 10배(50ms) 예산 안에
     든다."""
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     values = {f"RSI_timeperiod{i}@1h": Decimal(i) for i in range(1_000)}
 
     # batch=200: 총 200회 호출 시간을 틱의 수 배로 만들어 호출당 양자화 오차 제거
@@ -152,7 +152,7 @@ def test_gate_red_repro_single_timeframe_check_misses_future_violation() -> None
     재현한다. 그 회귀본은 다른 tf 아래 숨어 있는 미래 위반(I1)을 놓치고
     조용히 통과시킨다 -- 실제 구현은 `bar_close_time.items()` 전체를 순회해
     fail-closed로 잡아낸다."""
-    as_of = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, tzinfo=UTC)
     future = as_of + timedelta(days=1)
 
     def _regressed_assert_no_future_single_tf(state: MarketState) -> None:

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -37,7 +37,7 @@ from src.foundation.backtest.application.run_backtest import (
 from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from tests.conftest import PerfBudget
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
 # task-7434: this whole module measures wall-clock throughput budgets, so it

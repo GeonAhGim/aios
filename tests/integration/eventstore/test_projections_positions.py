@@ -13,7 +13,7 @@ CLAUDE.md ADR-2026-09-10-C §7).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -42,11 +42,11 @@ from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 
-_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ------------------------------------------------------------- positions ---
@@ -245,7 +245,7 @@ def test_positions_projection_folds_ten_thousand_fee_entries_under_budget(
     단위는 samples.cpu_ms가 ms이므로 예산도 ms(초预算은 *1000 한 번).
     """
     position_key = f"perf-{uuid4().hex}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     entries = [
         PositionJournalEntryView(
             id=seq,

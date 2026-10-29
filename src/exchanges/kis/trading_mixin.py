@@ -19,7 +19,7 @@ cancel_order/modify_order가 그 형식을 기대한다(문서화된 편의 규�
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import uuid4
@@ -371,7 +371,7 @@ class KISTradingMixin:
         """편차: BitgetAdapter.get_order()와 동일 이유로 AIOS 전용 필드
         (strategy_id 등)는 자리표시자 — 호출부가 DB 행과 병합해야 한다."""
         _, odno = _split_exchange_order_id(order_id)
-        today = datetime.now(timezone.utc)
+        today = datetime.now(UTC)
         start = (today - timedelta(days=7)).strftime("%Y%m%d")
         raw = await self._request(
             "GET",
@@ -422,8 +422,8 @@ class KISTradingMixin:
             quantity=ord_qty,
             status=status,
             filled_quantity=filled_qty,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
             asset_class=AssetClass.KR_EQUITY,
         )
 

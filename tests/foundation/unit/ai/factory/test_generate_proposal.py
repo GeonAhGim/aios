@@ -7,7 +7,7 @@ performance assertion 1, gate-red reproduction 1.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -30,7 +30,7 @@ from src.foundation.market_data.contracts.v2.coverage import CoverageSpan, Quali
 
 REG = "r" * 64
 _INSTRUMENT = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_START = datetime(2026, 1, 1, tzinfo=UTC)
 _END = _START + timedelta(days=30)
 
 VALID_SCRIPT = (

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from src.foundation.automation.contracts.v1 import Action, AutomationRule, Condition, RuleStatus
@@ -19,7 +19,7 @@ async def create_rule(
     action: Action,
 ) -> AutomationRule:
     require_flag_enabled()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rule = AutomationRule(
         rule_id=uuid4(),
         tenant_id=tenant_id,

@@ -18,7 +18,7 @@ e894792)을 D1로 판정했다 — 부족했던 3가지: (1) 수치 성능 단�
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -43,7 +43,7 @@ _PLATFORM_CASH_CLEARING = "PLATFORM:CASH_CLEARING"
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _create_user_available_account(pool, user_id: UUID) -> str:

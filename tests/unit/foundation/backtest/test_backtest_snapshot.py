@@ -9,7 +9,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§9 L25.
 from __future__ import annotations
 
 import ast
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -28,7 +28,7 @@ from src.foundation.backtest.domain.snapshot import (
 )
 from tests.conftest import PerfBudget
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 _DOMAIN_DIR = Path(__file__).resolve().parents[4] / "src" / "foundation" / "backtest" / "domain"
 _CHECKED_FILES = ("models.py", "snapshot.py", "events.py")

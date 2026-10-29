@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -40,7 +40,7 @@ from src.foundation.mandates.domain.evaluator import evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
 from src.foundation.mandates.domain.rules.restricted_list import RULE_ID, check
 
-_NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 10, tzinfo=UTC)
 
 
 def test_symbol_on_restricted_list_denies():

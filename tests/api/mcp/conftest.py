@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -40,7 +40,7 @@ from src.foundation.market_data.adapters.postgres_instrument_repository import (
 )
 from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 
-NOW = datetime.now(timezone.utc)
+NOW = datetime.now(UTC)
 
 
 @pytest.fixture

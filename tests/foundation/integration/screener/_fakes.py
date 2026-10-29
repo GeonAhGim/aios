@@ -9,7 +9,7 @@ responsibility from the test cases that consume them).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
@@ -26,7 +26,7 @@ from src.foundation.screener.contracts.v1 import (
 )
 from src.foundation.screener.ports.repository import ScreenAlertLimitError
 
-_LISTED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
+_LISTED_AT = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 def instrument(instrument_id: UUID, *, venue: Venue = Venue.KIS_KRX, symbol: str) -> InstrumentRef:
@@ -65,7 +65,7 @@ class FakeSavedScreenerRepository:
         self.save_calls += 1
         if self._raise_on_save is not None:
             raise self._raise_on_save
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         view = SavedScreenerView(
             id=uuid4(),
             tenant_id=tenant_id,
@@ -108,7 +108,7 @@ class FakeSharedScreenerRepository:
             name=name,
             definition=definition,
             version=next_version,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         existing.append(view)
         return view
@@ -147,7 +147,7 @@ class FakeScreenAlertRepository:
             operator=cast(ScreenAlertOperator, operator),
             threshold=threshold,
             status="ACTIVE",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self._rows[view.id] = view
         return view
@@ -175,7 +175,7 @@ class FakeScreenAlertRepository:
         updated = row.model_copy(
             update={
                 "status": "TRIGGERED",
-                "triggered_at": datetime.now(timezone.utc),
+                "triggered_at": datetime.now(UTC),
                 "triggered_count": matched_count,
             }
         )

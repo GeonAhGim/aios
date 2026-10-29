@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -45,7 +45,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
 )
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 10, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 10, tzinfo=UTC)
 
 
 def _contract(

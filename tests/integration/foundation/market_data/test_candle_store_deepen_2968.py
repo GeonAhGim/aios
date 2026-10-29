@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -176,7 +176,7 @@ async def test_create_rejects_missing_audit_event_id_before_db_write(pool, batch
     행이 생기면 안 된다(fail-fast와 실패 후 청소의 구분)."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch_id = uuid.uuid4()
         batch = _batch(
             batch_id=batch_id,
@@ -201,7 +201,7 @@ async def test_upsert_batch_rejects_negative_volume_check_violation(pool, candle
     막는지 증명한다(기존 high>=open 위반 테스트와 다른 CHECK 제약)."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -227,7 +227,7 @@ async def test_upsert_batch_round_trip_count_bounded(pool, candle_store, batch_r
     증명한다 — 행별 루프로 회귀하면 이 상한이 깨진다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         row_count = 200
         batch = await _create_batch(
             conn,
@@ -268,7 +268,7 @@ async def test_batch_get_round_trip_count_bounded(pool, candle_store, batch_repo
     않는지 증명한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -320,7 +320,7 @@ async def test_upsert_batch_round_trip_gate_detects_extra_query(pool, candle_sto
     "작동함이 증명됨"이어야 한다)."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -362,7 +362,7 @@ async def test_batch_get_round_trip_gate_detects_extra_query(pool, candle_store,
     실제 적색이 나는지 증명한다."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-        t0 = datetime.now(timezone.utc).replace(microsecond=0)
+        t0 = datetime.now(UTC).replace(microsecond=0)
         batch = await _create_batch(
             conn,
             batch_repo,
@@ -402,7 +402,7 @@ async def test_concurrent_create_same_batch_id_exactly_one_succeeds(pool, batch_
     경로 적용)."""
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     batch_id = uuid.uuid4()
 
     async def _attempt() -> str:
@@ -442,7 +442,7 @@ async def test_concurrent_upsert_batch_overlapping_candles_no_duplicate_no_crash
     async with pool.acquire() as conn, conn.transaction():
         instrument_id = await _instrument_id(conn)
     key = SeriesKey(venue=Venue.BITGET, instrument_id=instrument_id, timeframe=Timeframe.M1)
-    t0 = datetime.now(timezone.utc).replace(microsecond=0)
+    t0 = datetime.now(UTC).replace(microsecond=0)
     open_times = [t0 + timedelta(minutes=i) for i in range(5)]
     candles = [_candle(key, ot, 100, 110, 90, 105, 10) for ot in open_times]
 

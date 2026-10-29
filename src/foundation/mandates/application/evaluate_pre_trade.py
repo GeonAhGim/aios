@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -172,7 +172,7 @@ async def _ensure_bundle_row(
             mandate_revision_id=revision.id,
             compiler_version=compiler_version(),
             rule_hash=compile_rule_hash(revision),
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
 

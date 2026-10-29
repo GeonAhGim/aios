@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -84,7 +84,7 @@ async def test_venue_listings_rejects_delisted_at_equal_to_listed_at(pool: async
     거부됨을 직접 증명한다(기존 테스트는 이 CHECK를 전혀 건드리지 않았다)."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=1)
+    t0 = datetime.now(UTC) - timedelta(days=1)
 
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await _insert_listing(
@@ -100,7 +100,7 @@ async def test_venue_listings_rejects_delisted_at_equal_to_listed_at(pool: async
 async def test_venue_listings_rejects_delisted_at_before_listed_at(pool: asyncpg.Pool) -> None:
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc) - timedelta(days=1)
+    t0 = datetime.now(UTC) - timedelta(days=1)
 
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await _insert_listing(
@@ -117,7 +117,7 @@ async def test_venue_listings_rejects_unknown_venue(pool: asyncpg.Pool) -> None:
     """venue CHECK IN (...) — 심볼 마스터가 모르는 venue 문자열은 거부된다."""
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(timezone.utc)
+    t0 = datetime.now(UTC)
 
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await _insert_listing(
@@ -139,7 +139,7 @@ async def test_venue_listings_rejects_unknown_instrument_id_fk(pool: asyncpg.Poo
             instrument_id=_fake_ulid(),
             venue="BITGET",
             venue_symbol=_venue_symbol(),
-            listed_at=datetime.now(timezone.utc),
+            listed_at=datetime.now(UTC),
             delisted_at=None,
         )
 
@@ -155,7 +155,7 @@ async def test_venue_listings_rejects_exact_duplicate_start_same_symbol(pool: as
     await _insert_instrument(pool, instrument_a)
     await _insert_instrument(pool, instrument_b)
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
         pool,
@@ -199,7 +199,7 @@ async def test_venue_listings_rejects_one_microsecond_overlap(pool: asyncpg.Pool
     await _insert_instrument(pool, instrument_a)
     await _insert_instrument(pool, instrument_b)
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     boundary = t0 + timedelta(days=5)
 
     await _insert_listing(
@@ -229,7 +229,7 @@ async def test_venue_listings_allows_touching_boundary_exactly(pool: asyncpg.Poo
     await _insert_instrument(pool, instrument_a)
     await _insert_instrument(pool, instrument_b)
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     boundary = t0 + timedelta(days=5)
 
     await _insert_listing(
@@ -266,7 +266,7 @@ async def test_bulk_non_overlapping_inserts_meet_latency_budget(
     """
     from tests._perf.relative_budget import RelativeBudget
 
-    t0_base = datetime.now(timezone.utc) - timedelta(days=2000)
+    t0_base = datetime.now(UTC) - timedelta(days=2000)
     n = 500
     budget_sec = 15.0
 
@@ -336,7 +336,7 @@ async def test_perf_assertion_fails_with_10x_delay_injection(
     from tests._perf.relative_budget import RelativeBudget
     from tests.support.perf_inject import virtual_delayed_async
 
-    t0_base = datetime.now(timezone.utc) - timedelta(days=2000)
+    t0_base = datetime.now(UTC) - timedelta(days=2000)
     n = 500
     injected_delay = 0.05  # 50ms per insert × 500 = 25s virtual
 
@@ -408,7 +408,7 @@ async def test_gate_red_exclusion_violation_rolls_back_whole_transaction(
     instrument_a = _fake_ulid()
     await _insert_instrument(pool, instrument_a)
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
     await _insert_listing(
         pool,
         instrument_id=instrument_a,
@@ -482,7 +482,7 @@ async def test_concurrent_overlapping_inserts_exactly_one_winner(pool: asyncpg.P
     전부 "안 겹침"을 보고 통과할 수 있는 TOCTOU 경합이지만, EXCLUDE USING
     gist는 DB가 직렬화하므로 정확히 1개만 성공해야 한다."""
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=1)
+    t0 = datetime.now(UTC) - timedelta(days=1)
     n = 10
     instrument_ids = [_fake_ulid() for _ in range(n)]
     for iid in instrument_ids:
@@ -522,7 +522,7 @@ async def test_concurrent_non_overlapping_inserts_all_succeed(pool: asyncpg.Pool
     """겹치지 않는 기간이면 동시에 삽입해도 전부 성공해야 한다 — EXCLUDE가
     과도하게 넓게 직렬화(모든 동시 쓰기를 막음)하지 않는다는 회귀 방지."""
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=100)
+    t0 = datetime.now(UTC) - timedelta(days=100)
     n = 20
     instrument_ids = [_fake_ulid() for _ in range(n)]
     for iid in instrument_ids:

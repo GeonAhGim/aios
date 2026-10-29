@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -31,7 +31,7 @@ from src.foundation.evidence.domain.models import AuditEvent, Classification, Ou
 from src.foundation.evidence.domain.rules import compute_event_hash, compute_payload_hash
 from tests.conftest import PerfBudget
 
-NOW = datetime(2026, 9, 2, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 2, tzinfo=UTC)
 
 
 def _event(**overrides: object) -> AuditEvent:

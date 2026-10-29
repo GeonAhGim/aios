@@ -6,7 +6,7 @@ DoD ("link_only 강제, 사용자 RSS 등록").
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -24,7 +24,7 @@ from src.foundation.research_data.adapters.sources.rss_generic import (
 )
 from tests.support.perf_budget import PerfBudget
 
-_COLLECTED_AT = datetime(2026, 9, 24, 6, 5, 0, tzinfo=timezone.utc)
+_COLLECTED_AT = datetime(2026, 9, 24, 6, 5, 0, tzinfo=UTC)
 
 _RSS2_FEED = """<?xml version="1.0"?>
 <rss version="2.0">
@@ -64,7 +64,7 @@ def test_parse_rss_feed_parses_rss2_items() -> None:
     assert len(entries) == 2
     assert entries[0].guid == "guid-1"
     assert entries[0].link == "https://example.com/1"
-    assert entries[0].published_at == datetime(2026, 9, 23, 6, 0, 0, tzinfo=timezone.utc)
+    assert entries[0].published_at == datetime(2026, 9, 23, 6, 0, 0, tzinfo=UTC)
 
 
 def test_parse_rss_feed_parses_atom_entries() -> None:
@@ -72,7 +72,7 @@ def test_parse_rss_feed_parses_atom_entries() -> None:
     assert len(entries) == 1
     assert entries[0].guid == "urn:uuid:atom-1"
     assert entries[0].link == "https://example.com/atom/1"
-    assert entries[0].published_at == datetime(2026, 9, 23, 6, 0, 0, tzinfo=timezone.utc)
+    assert entries[0].published_at == datetime(2026, 9, 23, 6, 0, 0, tzinfo=UTC)
 
 
 def test_build_research_item_from_entry_forces_link_only() -> None:

@@ -4,7 +4,7 @@
 실패주입 테스트 1건 이상.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -24,7 +24,7 @@ def _context(tenant_id=None) -> TenantContext:
 
 
 def _consent(tenant_id, *, state=DomainConsentState.REVOKED) -> Consent:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Consent(
         id=uuid4(),
         tenant_id=tenant_id,

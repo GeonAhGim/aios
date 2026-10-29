@@ -20,7 +20,7 @@ Postgres 어댑터(L4-08)와 `order_command_outbox`/`order_events` 스키마(L4-
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -40,12 +40,12 @@ _PATCHABLE_COLUMNS = frozenset(OrderView.model_fields) | {"sent_at"}
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class FixedClock:
     def __init__(self, start: datetime | None = None) -> None:
-        self.now = start or datetime(2026, 9, 6, 0, 0, tzinfo=timezone.utc)
+        self.now = start or datetime(2026, 9, 6, 0, 0, tzinfo=UTC)
 
     def __call__(self) -> datetime:
         return self.now

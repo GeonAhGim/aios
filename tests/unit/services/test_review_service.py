@@ -9,7 +9,7 @@ tests/integration/test_marketplace_router.py에 있다.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
@@ -30,7 +30,7 @@ def _review_row(listing_id: int = LISTING_ID) -> dict[str, object]:
         "reviewer_user_id": uuid4(),
         "rating": 5,
         "comment": "좋음",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
 
 

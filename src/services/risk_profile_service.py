@@ -16,7 +16,7 @@ to this return value must be done when FD-16 is implemented.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -72,7 +72,7 @@ class RiskProfileService:
                 and _SEVERITY[result.risk_profile] > _SEVERITY[previous_profile]
             )
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             await conn.execute(
                 "UPDATE users SET risk_profile = $2, risk_profile_assessed_at = $3 "
                 "WHERE user_id = $1",

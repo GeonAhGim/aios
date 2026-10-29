@@ -16,7 +16,7 @@ aios_app`을 거치는 전용 풀로 호출해 리포지토리 코드 경로 자
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -166,7 +166,7 @@ async def test_insert_evaluation_under_app_role_persists_and_is_tenant_scoped(
         reason_codes=(),
         obligations=(),
         rule_version="v1",
-        evaluated_at=datetime.now(timezone.utc),
+        evaluated_at=datetime.now(UTC),
         expires_at=None,
         trace_id=uuid4(),
     )

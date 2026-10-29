@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -90,7 +90,7 @@ def _full_fill_event(
     """스톰 전체가 재전송하는 **같은** 이벤트 — `provider_event_id`/
     `provider_fill_id`가 매 호출 동일해야 DoD의 "같은 체결 이벤트"가 된다."""
     fill_id = f"storm-fill-{uuid4().hex}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fill = FillEvent(
         provider_fill_id=fill_id,
         venue="bitget",

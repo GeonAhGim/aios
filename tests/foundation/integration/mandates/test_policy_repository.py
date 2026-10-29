@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -212,7 +212,7 @@ async def test_insert_policy_bundle_race_returns_existing_row_without_update(
             mandate_revision_id=revision.id,
             compiler_version="v1",
             rule_hash="a" * 64,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     second = await repo.insert_policy_bundle(
@@ -221,7 +221,7 @@ async def test_insert_policy_bundle_race_returns_existing_row_without_update(
             mandate_revision_id=revision.id,
             compiler_version="v2-should-be-ignored",
             rule_hash="b" * 64,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
 
@@ -257,7 +257,7 @@ async def test_insert_policy_decision_meets_throughput_budget(pool, repo, trust_
                 outcome=PolicyOutcome.ALLOW,
                 reason_codes=(),
                 obligations=(),
-                evaluated_at=datetime.now(timezone.utc),
+                evaluated_at=datetime.now(UTC),
                 expires_at=None,
             )
         )
@@ -304,7 +304,7 @@ async def test_insert_policy_bundle_true_concurrent_race_converges_on_single_row
                     mandate_revision_id=revision.id,
                     compiler_version=f"v{i}",
                     rule_hash=f"{i}" * 64,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
 

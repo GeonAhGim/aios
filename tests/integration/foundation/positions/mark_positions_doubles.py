@@ -9,7 +9,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9.3 LB-14.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -34,7 +34,7 @@ from src.foundation.positions.domain.position_key import PositionKey
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
 
-NOW = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 M1 = Timeframe.M1
 MAX_POOL_ACQUIRE_CALLS = 12
 

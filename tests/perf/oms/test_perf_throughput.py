@@ -22,7 +22,7 @@ commit `034fed00`)와 동일하게 "총 DB 왕복 수 == 고정 오버헤드 + N
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -75,7 +75,7 @@ async def _seed_outbox_batch(pool: asyncpg.Pool, n: int) -> list[UUID]:
                 order_id=order_id,
                 command_type="SUBMIT",
                 payload=submit_payload(view),
-                not_before=datetime.now(timezone.utc),
+                not_before=datetime.now(UTC),
             )
         order_ids.append(order_id)
     return order_ids

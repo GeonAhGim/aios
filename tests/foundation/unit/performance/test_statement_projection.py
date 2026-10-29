@@ -10,7 +10,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §9 PLT-44.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -29,7 +29,7 @@ from src.foundation.performance.domain.models import (
     StatementState,
 )
 
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _breakdown(**overrides) -> ComponentBreakdown:

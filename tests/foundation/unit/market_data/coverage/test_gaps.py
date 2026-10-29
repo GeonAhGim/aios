@@ -9,7 +9,7 @@ DoD: 커버리지 선언 없음·부분 커버·세션 휴장(갭 아님) 세 �
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from random import Random
 from uuid import uuid4
@@ -39,7 +39,7 @@ def _calendar(venue: Venue) -> VenueCalendar:
 
 
 def _dt(hour: int, day: int = 4) -> datetime:
-    return datetime(2026, 9, day, hour, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, day, hour, 0, tzinfo=UTC)
 
 
 def _span(
@@ -132,8 +132,8 @@ def test_market_closed_period_is_not_a_gap_even_without_coverage() -> None:
         candles=[],
         tf=Timeframe.H1,
         calendar=_calendar(Venue.KIS_KRX),
-        range_start=datetime(2026, 9, 5, 0, 0, tzinfo=timezone.utc),
-        range_end=datetime(2026, 9, 6, 0, 0, tzinfo=timezone.utc),
+        range_start=datetime(2026, 9, 5, 0, 0, tzinfo=UTC),
+        range_end=datetime(2026, 9, 6, 0, 0, tzinfo=UTC),
     )
     assert gaps == []
 

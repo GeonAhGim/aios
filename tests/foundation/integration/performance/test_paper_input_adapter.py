@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import asyncpg
@@ -32,7 +32,7 @@ from tests.foundation.integration.performance.conftest import (
 from tests.integration.conftest import create_test_tenant
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
-_NOW = datetime.now(timezone.utc)
+_NOW = datetime.now(UTC)
 _PERIOD_START = _NOW - timedelta(days=1)
 
 
@@ -76,7 +76,7 @@ async def test_load_reconciled_snapshots_returns_snapshot_when_healthy(pool, ada
         realized_pnl=Decimal("1"),
     )
 
-    period_end = datetime.now(timezone.utc) + timedelta(minutes=1)
+    period_end = datetime.now(UTC) + timedelta(minutes=1)
     snapshots = await adapter.load_reconciled_snapshots(
         scope_ref=str(user_id), period_start=_PERIOD_START, period_end=period_end
     )
@@ -115,7 +115,7 @@ async def test_load_fills_returns_only_filled_paper_orders(pool, adapter):
     fills = await adapter.load_fills(
         scope_ref=str(user_id),
         period_start=_PERIOD_START,
-        period_end=datetime.now(timezone.utc) + timedelta(minutes=1),
+        period_end=datetime.now(UTC) + timedelta(minutes=1),
     )
 
     assert len(fills) == 1

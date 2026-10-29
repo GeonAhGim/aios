@@ -25,7 +25,7 @@ MY SELLER 몫의 후보가 더 없어 빈 배치 목록을 돌려줘야 한다.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -106,7 +106,7 @@ async def _quarantine_unsettleable_candidates(pool, payouts: PostgresPayoutRepos
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _seed_available(pool, user_id, amount: Decimal) -> None:

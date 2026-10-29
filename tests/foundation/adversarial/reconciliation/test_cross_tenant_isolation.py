@@ -4,7 +4,7 @@ isolation ... hold": 다른 tenant의 reconciliation state를 조회/resolve할 
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -52,7 +52,7 @@ def repo(pool):
 
 
 async def _seed_material_mismatch(repo, tenant_id):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     run = ReconciliationRun(
         id=uuid4(),
         tenant_id=tenant_id,

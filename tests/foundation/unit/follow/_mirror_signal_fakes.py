@@ -5,7 +5,7 @@ _promote_to_paper_fakes.py`와 동일한 분리 관례).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -19,7 +19,7 @@ from src.foundation.mandates.domain.models import (
 )
 from src.foundation.risk_gate.domain.models import RiskEvaluation, SafetyControl
 
-NOW = datetime(2026, 2, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 2, 1, tzinfo=UTC)
 
 
 class FakeRiskGateRepository:

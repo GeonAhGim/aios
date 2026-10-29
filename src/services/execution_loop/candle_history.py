@@ -24,7 +24,7 @@ A public feed with no owner distinction, like Bitget, explicitly passes
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.data.models.market_data import Candle
@@ -35,7 +35,7 @@ _TTL_SECONDS = 60.0
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class _CacheEntry:

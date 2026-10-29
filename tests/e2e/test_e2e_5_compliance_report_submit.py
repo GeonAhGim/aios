@@ -32,7 +32,7 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -127,7 +127,7 @@ class MockRegulatorySubmissionPort:
         return SubmissionReceipt(
             trade_id=record.trade_id,
             confirmation_id=f"CONF-{record.trade_id.hex[:8]}",
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(UTC),
         )
 
 
@@ -225,7 +225,7 @@ def _post_trade_compliance_decision() -> ComplianceDecision:
         reason_codes=["POST_TRADE_REVIEW_PASSED"],
         inputs_hash="a" * 64,
         bundle_version="b" * 64,
-        evaluated_at=datetime(2026, 9, 24, 6, 0, 0, tzinfo=timezone.utc),
+        evaluated_at=datetime(2026, 9, 24, 6, 0, 0, tzinfo=UTC),
     )
     return compliance_decision_from_policy_decision(row)
 
@@ -241,13 +241,13 @@ def _trade_report(order_id: UUID, compliance_decision: ComplianceDecision) -> Tr
         quantity=Decimal("10"),
         price=Decimal("70000"),
         currency="KRW",
-        executed_at=datetime(2026, 9, 24, 6, 0, 5, tzinfo=timezone.utc),
+        executed_at=datetime(2026, 9, 24, 6, 0, 5, tzinfo=UTC),
         trader_id="e2e-5-trader",
     )
 
 
 def _best_execution_evidence(order_id: UUID) -> BestExecutionEvidence:
-    now = datetime(2026, 9, 24, 6, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 24, 6, 0, 0, tzinfo=UTC)
     route = RouteDecisionRecord(
         decision_id=uuid4(),
         order_id=order_id,
@@ -281,7 +281,7 @@ async def _generated_report() -> tuple[UUID, GeneratedReportRecord, InMemoryWorm
         store,
         trade_report=trade_report,
         best_execution=evidence,
-        generated_at=datetime(2026, 9, 24, 6, 0, 10, tzinfo=timezone.utc),
+        generated_at=datetime(2026, 9, 24, 6, 0, 10, tzinfo=UTC),
     )
     return order_id, record, store
 

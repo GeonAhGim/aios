@@ -7,7 +7,7 @@ DoD (a)(b).
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 from uuid import uuid4
 
@@ -32,7 +32,7 @@ from src.foundation.research_data.domain.redistribution import (
 )
 from tests.conftest import PerfBudget
 
-_KNOWN_AT = datetime(2026, 9, 8, 12, 0, tzinfo=timezone.utc)
+_KNOWN_AT = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
 _CAPABILITY = SourceCapability(
     asset_classes=frozenset({"EQUITY_KR"}), resolutions=frozenset({"1d"})
 )

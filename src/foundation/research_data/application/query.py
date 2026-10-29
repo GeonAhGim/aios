@@ -22,7 +22,7 @@ time-comparison logic (RD-2 DoD (d), RD-3 DoD (d)).
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.core.bitemporal import BitemporalRecord
 from src.core.bitemporal import as_of as _bitemporal_as_of
@@ -37,7 +37,7 @@ def _default_clock() -> datetime:
     instead of patching `datetime.now`, mirroring the existing
     `clock: Callable[[], float] = time.monotonic` pattern in
     `src/core/rate_limit/limiter.py`."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class QueryFilter:

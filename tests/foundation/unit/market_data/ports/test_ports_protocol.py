@@ -14,7 +14,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
@@ -53,7 +53,7 @@ _IID = "0" * 25 + "1"
 
 
 def _now() -> datetime:
-    return datetime(2026, 9, 3, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 3, 0, 0, tzinfo=UTC)
 
 
 def _listing() -> VenueListing:

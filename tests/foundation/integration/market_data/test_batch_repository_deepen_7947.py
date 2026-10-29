@@ -18,7 +18,7 @@ negative/실패주입 테스트를 담기에 부적절한 위치다 — pytest �
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -39,7 +39,7 @@ from src.foundation.market_data.contracts.v1 import (
 
 
 def _batch(*, audit_event_id: uuid.UUID | None) -> IngestBatchResult:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return IngestBatchResult(
         batch_id=uuid.uuid4(),
         tenant_id=None,
@@ -79,7 +79,7 @@ async def test_create_tick_batch_rejects_missing_audit_event_id(deps):
     from src.foundation.market_data.contracts.v1 import TickIngestBatchResult
 
     repo = PostgresBatchRepository(deps.pool)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     tick_batch = TickIngestBatchResult(
         batch_id=uuid.uuid4(),
         tenant_id=None,
@@ -109,7 +109,7 @@ async def test_calendar_upsert_days_rejects_venue_mismatch(deps):
 
     day = CalendarDay(
         venue=Venue.KIS_KRX,
-        trade_date=datetime.now(timezone.utc).date(),
+        trade_date=datetime.now(UTC).date(),
         is_trading_day=True,
         open_at=None,
         close_at=None,
@@ -160,7 +160,7 @@ async def test_create_raises_duplicate_batch_error_on_pk_collision(deps):
         asset_class=AssetClass.CRYPTO,
         tick_size=Decimal("0.01"),
         lot_size=Decimal("0.0001"),
-        listed_at=datetime.now(timezone.utc) - timedelta(days=1),
+        listed_at=datetime.now(UTC) - timedelta(days=1),
         actor_subject_id=uuid.uuid4(),
         trace_id=uuid.uuid4(),
     )

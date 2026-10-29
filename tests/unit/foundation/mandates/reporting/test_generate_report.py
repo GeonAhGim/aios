@@ -16,7 +16,7 @@ import pickle
 import subprocess
 import sys
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from time import perf_counter
@@ -78,7 +78,7 @@ def _compliance_decision() -> ComplianceDecision:
         rule_hits=[],
         inputs_hash="a" * 64,
         bundle_version="b" * 64,
-        evaluated_at=datetime(2026, 9, 9, tzinfo=timezone.utc),
+        evaluated_at=datetime(2026, 9, 9, tzinfo=UTC),
     )
 
 
@@ -99,14 +99,14 @@ def trade_report(order_id: UUID) -> Any:
         quantity=Decimal("10"),
         price=Decimal("70000"),
         currency="KRW",
-        executed_at=datetime(2026, 9, 9, 1, 2, 3, tzinfo=timezone.utc),
+        executed_at=datetime(2026, 9, 9, 1, 2, 3, tzinfo=UTC),
         trader_id="trader-1",
     )
 
 
 @pytest.fixture
 def best_execution_evidence(order_id: UUID) -> Any:
-    now = datetime(2026, 9, 9, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 9, tzinfo=UTC)
     route = RouteDecisionRecord(
         decision_id=uuid4(),
         order_id=order_id,
@@ -132,7 +132,7 @@ def best_execution_evidence(order_id: UUID) -> Any:
 
 @pytest.fixture
 def generated_at() -> datetime:
-    return datetime(2026, 9, 9, 2, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 9, 9, 2, 0, 0, tzinfo=UTC)
 
 
 async def test_builds_exact_fields_and_hash(
@@ -172,7 +172,7 @@ async def test_regenerate_same_inputs_identical_hash(
         FakeReportStore(),
         trade_report=trade_report,
         best_execution=best_execution_evidence,
-        generated_at=datetime(2099, 1, 1, tzinfo=timezone.utc),  # different clock, same inputs
+        generated_at=datetime(2099, 1, 1, tzinfo=UTC),  # different clock, same inputs
     )
     assert first.content_hash == second.content_hash
     assert first.fields == second.fields

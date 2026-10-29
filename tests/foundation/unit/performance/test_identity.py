@@ -9,7 +9,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L46 DoD).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -18,7 +18,7 @@ from src.foundation.performance.domain import identity
 from src.foundation.performance.domain.identity import _require, check_identity
 from src.foundation.performance.domain.models import Cashflow, CashflowKind, ComponentBreakdown
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _T1 = _T0 + timedelta(days=30)
 
 

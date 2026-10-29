@@ -15,7 +15,7 @@ import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -116,8 +116,8 @@ def _state(
         target_type="PAPER_DEPLOYMENT",
         tenant_id=tenant_id,
         aggregate_status=status,
-        last_healthy_at=datetime.now(timezone.utc) if status == Classification.HEALTHY else None,
-        last_checked_at=datetime.now(timezone.utc),
+        last_healthy_at=datetime.now(UTC) if status == Classification.HEALTHY else None,
+        last_checked_at=datetime.now(UTC),
         blocking_reason=None,
         revision=0,
         safety_control_id=None,

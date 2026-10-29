@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -103,7 +103,7 @@ async def test_bulk_non_overlapping_alias_inserts_meet_latency_budget(pool, perf
     """
     instrument_id = await _insert_md_instrument(pool, canonical_symbol=f"TEST-{uuid4().hex}")
     alias_symbol = f"ALIAS-{uuid4().hex}"
-    t0 = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    t0 = datetime(2000, 1, 1, tzinfo=UTC)
     n = 500
 
     async def _insert_aliases() -> None:
@@ -172,7 +172,7 @@ async def test_md_instrument_duplicate_venue_canonical_listed_at_rejected(pool):
     (복합 UNIQUE)이라 별개로 증명이 필요하다. `venue_symbol`은 이
     제약에 없으므로 서로 달라도 거부되어야 한다."""
     canonical_symbol = f"TEST-{uuid4().hex}"
-    listed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    listed_at = datetime(2026, 1, 1, tzinfo=UTC)
     await _insert_md_instrument_full(
         pool, canonical_symbol=canonical_symbol, venue_symbol="orig-symbol", listed_at=listed_at
     )
@@ -261,7 +261,7 @@ async def test_concurrent_duplicate_instrument_insert_only_one_commits(pool):
     증명한다(동시 삽입 2건 중 1건만 살아남는지를 실제 동시 실행으로
     확인, 코드 흐름만 읽어서는 보증되지 않는 축)."""
     canonical_symbol = f"TEST-{uuid4().hex}"
-    listed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    listed_at = datetime(2026, 1, 1, tzinfo=UTC)
 
     results = await asyncio.gather(
         _insert_md_instrument_full(

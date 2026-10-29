@@ -14,7 +14,7 @@ test_registry.py에서 다룬 L01/L02 경계(파라미터 범위·lookback·regi
 """
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -26,7 +26,7 @@ from src.data.models.market_data import Candle
 
 
 def _candles(n: int, *, base=100.0, volume=1000.0) -> list[Candle]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out = []
     for i in range(n):
         price = base + i

@@ -13,13 +13,13 @@ auto-bind/pass-through behaviour.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from src.foundation.research_data.domain.as_of_binding import AsOfBindingError, bind_as_of
 
-_BAR_TS = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+_BAR_TS = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def test_auto_binds_to_bar_ts_when_omitted() -> None:

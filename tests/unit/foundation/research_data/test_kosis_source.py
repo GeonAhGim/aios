@@ -5,7 +5,7 @@ DoD ("빈도·단위·발표지연 정규화").
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -46,7 +46,7 @@ def test_parse_kosis_rows_normalizes_successfully() -> None:
     assert observation.period == date(2024, 12, 31)
     assert observation.value == Decimal("123400000000")
     assert observation.unit == "krw"
-    assert observation.known_at == datetime(2025, 3, 31, tzinfo=timezone.utc)
+    assert observation.known_at == datetime(2025, 3, 31, tzinfo=UTC)
 
 
 def test_parse_kosis_rows_series_id_without_obj_l1() -> None:

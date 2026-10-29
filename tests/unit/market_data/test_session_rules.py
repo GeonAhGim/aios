@@ -8,7 +8,7 @@ DoD 행 전부: KRX 15:30 KST 마감 == 06:30 UTC, DST 전후 US 마감(EST/EDT 
 from __future__ import annotations
 
 import threading
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -46,8 +46,8 @@ def test_krx_close_15_30_kst_equals_06_30_utc() -> None:
     cal = _calendar(Venue.KIS_KRX)
     windows = cal.sessions_for(date(2026, 9, 4))  # 금요일, 정규 거래일
     assert len(windows) == 1
-    assert windows[0].close_at.astimezone(timezone.utc) == datetime(
-        2026, 9, 4, 6, 30, tzinfo=timezone.utc
+    assert windows[0].close_at.astimezone(UTC) == datetime(
+        2026, 9, 4, 6, 30, tzinfo=UTC
     )
 
 
@@ -132,16 +132,16 @@ def test_krx_close_single_window_per_trading_day() -> None:
 def test_us_close_est_before_dst() -> None:
     cal = _calendar(Venue.KIS_US)
     windows = cal.sessions_for(date(2026, 1, 6))  # 화요일, 겨울(EST, UTC-5)
-    assert windows[0].close_at.astimezone(timezone.utc) == datetime(
-        2026, 1, 6, 21, 0, tzinfo=timezone.utc
+    assert windows[0].close_at.astimezone(UTC) == datetime(
+        2026, 1, 6, 21, 0, tzinfo=UTC
     )
 
 
 def test_us_close_edt_after_dst() -> None:
     cal = _calendar(Venue.KIS_US)
     windows = cal.sessions_for(date(2026, 7, 7))  # 화요일, 여름(EDT, UTC-4)
-    assert windows[0].close_at.astimezone(timezone.utc) == datetime(
-        2026, 7, 7, 20, 0, tzinfo=timezone.utc
+    assert windows[0].close_at.astimezone(UTC) == datetime(
+        2026, 7, 7, 20, 0, tzinfo=UTC
     )
 
 
@@ -170,7 +170,7 @@ def test_regular_trading_day_is_open_during_session() -> None:
 
 def test_crypto_next_open_equals_at() -> None:
     cal = _calendar(Venue.BITGET)
-    at = datetime(2026, 9, 4, 3, 17, tzinfo=timezone.utc)
+    at = datetime(2026, 9, 4, 3, 17, tzinfo=UTC)
     assert cal.next_open(at) == at
     assert cal.is_open(at) is True
 
@@ -181,8 +181,8 @@ def test_crypto_sessions_for_spans_full_day() -> None:
     windows = cal.sessions_for(day)
     assert len(windows) == 1
     assert windows[0].kind == "CONTINUOUS"
-    assert windows[0].open_at == datetime(2026, 9, 4, tzinfo=timezone.utc)
-    assert windows[0].close_at == datetime(2026, 9, 5, tzinfo=timezone.utc)
+    assert windows[0].open_at == datetime(2026, 9, 4, tzinfo=UTC)
+    assert windows[0].close_at == datetime(2026, 9, 5, tzinfo=UTC)
 
 
 def test_next_open_returns_at_when_already_in_session() -> None:

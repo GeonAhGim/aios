@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -30,7 +30,7 @@ from src.foundation.ems.domain.parent_child import (
     assert_slice_within_parent_qty,
 )
 
-_NOW = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 7, 0, 0, tzinfo=UTC)
 
 
 def _algo_spec(**overrides: object) -> AlgoSpec:

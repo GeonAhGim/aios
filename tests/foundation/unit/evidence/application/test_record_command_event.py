@@ -8,7 +8,7 @@ Coverage: happy path scenarios and boundary cases (None tenant/payload/actor).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -48,7 +48,7 @@ class TestRecordCommandEventHappyPath:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(trace_id=trace_id, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -83,7 +83,7 @@ class TestRecordCommandEventHappyPath:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(
             outcome=DomainOutcome.DENIED,
             classification=DomainClassification.CONFIDENTIAL,
@@ -127,7 +127,7 @@ class TestRecordCommandEventHappyPath:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(outcome=DomainOutcome.SUCCESS, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -163,7 +163,7 @@ class TestRecordCommandEventHappyPath:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(classification=DomainClassification.INTERNAL, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -200,7 +200,7 @@ class TestRecordCommandEventBoundaryConditions:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(tenant_id=None, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -233,7 +233,7 @@ class TestRecordCommandEventBoundaryConditions:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(actor_subject_id=None, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -267,7 +267,7 @@ class TestRecordCommandEventBoundaryConditions:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(payload={}, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -301,7 +301,7 @@ class TestRecordCommandEventBoundaryConditions:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(payload={}, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 
@@ -334,7 +334,7 @@ class TestRecordCommandEventBoundaryConditions:
             lambda: mock_context,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = make_audit_event(aggregate_revision=None, occurred_at=now)
         repo = MockAuditEventRepository(event_to_return=event)
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -70,7 +70,7 @@ def _result(**overrides: Decimal) -> TcaResult:
 
 async def test_insert_or_get_persists_and_round_trips(pool, repo):
     parent_id = uuid4()
-    computed_at = datetime(2026, 9, 23, 12, 0, 0, tzinfo=timezone.utc)
+    computed_at = datetime(2026, 9, 23, 12, 0, 0, tzinfo=UTC)
     result = _result()
 
     record = await repo.insert_or_get(
@@ -99,7 +99,7 @@ async def test_get_latest_returns_highest_revision(pool, repo):
             parent_id=parent_id,
             revision=revision,
             result=_result(arrival_bps=Decimal(revision)),
-            computed_at=datetime.now(timezone.utc),
+            computed_at=datetime.now(UTC),
         )
 
     latest = await repo.get_latest(parent_id)
@@ -128,7 +128,7 @@ async def test_get_by_revision_does_not_leak_across_revisions(pool, repo):
     not `parent_id` alone."""
     parent_id = uuid4()
     await repo.insert_or_get(
-        parent_id=parent_id, revision=1, result=_result(), computed_at=datetime.now(timezone.utc)
+        parent_id=parent_id, revision=1, result=_result(), computed_at=datetime.now(UTC)
     )
 
     assert await repo.get_by_revision(parent_id, 2) is None
@@ -143,7 +143,7 @@ async def test_insert_or_get_does_not_leak_across_parent_ids(pool, repo):
     result_a = _result(arrival_bps=Decimal("1"))
     result_b = _result(arrival_bps=Decimal("2"))
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     await repo.insert_or_get(
         parent_id=parent_a, revision=revision, result=result_a, computed_at=now
     )
@@ -171,7 +171,7 @@ async def test_insert_or_get_concurrent_calls_are_idempotent(pool, repo):
     proves the advisory-lock serialization documented in the module
     docstring, not a formality inherited from `route_decisions`."""
     parent_id = uuid4()
-    computed_at = datetime.now(timezone.utc)
+    computed_at = datetime.now(UTC)
     result = _result()
 
     results = await asyncio.gather(
@@ -209,7 +209,7 @@ async def test_insert_or_get_propagates_connection_failure_without_partial_write
             parent_id=parent_id,
             revision=1,
             result=_result(),
-            computed_at=datetime.now(timezone.utc),
+            computed_at=datetime.now(UTC),
         )
 
     assert await _row_count(pool, parent_id) == 0
@@ -234,7 +234,7 @@ async def test_insert_or_get_perf_budget_sequential_inserts(pool, repo, perf_bud
                 parent_id=uuid4(),
                 revision=1,
                 result=_result(),
-                computed_at=datetime.now(timezone.utc),
+                computed_at=datetime.now(UTC),
             )
 
     sample = await perf_budget.sample_async(_batch)
@@ -262,7 +262,7 @@ async def test_insert_or_get_single_call_cpu_nonzero(pool, repo, perf_budget):
             parent_id=uuid4(),
             revision=1,
             result=_result(),
-            computed_at=datetime.now(timezone.utc),
+            computed_at=datetime.now(UTC),
         ),
         batch=32,
     )
@@ -299,7 +299,7 @@ async def test_insert_or_get_perf_budget_goes_red_with_sleep_injection(
                 parent_id=uuid4(),
                 revision=1,
                 result=_result(),
-                computed_at=datetime.now(timezone.utc),
+                computed_at=datetime.now(UTC),
             )
 
     sample = await perf_budget.sample_async(_batch)

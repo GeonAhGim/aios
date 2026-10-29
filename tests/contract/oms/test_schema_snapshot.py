@@ -10,7 +10,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §3.1/§3.3, §9 L4-01.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -183,7 +183,7 @@ def test_submit_order_command_rejects_live_mode() -> None:
             strategy_version="1.0.0",
             execution_id=1,
             intent_seq=1,
-            window_start=datetime.now(timezone.utc),
+            window_start=datetime.now(UTC),
         ),
         symbol="BTC/USDT",
         side=OrderSide.BUY,
@@ -191,7 +191,7 @@ def test_submit_order_command_rejects_live_mode() -> None:
         quantity=Decimal("0.01"),
         asset_class=AssetClass.CRYPTO,
         actor_subject_id=uuid4(),
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
     )
     assert payload.mode == "PAPER"
     dumped = payload.model_dump()
@@ -211,7 +211,7 @@ def test_submit_order_command_quantity_must_be_positive() -> None:
                 strategy_version="1.0.0",
                 execution_id=1,
                 intent_seq=1,
-                window_start=datetime.now(timezone.utc),
+                window_start=datetime.now(UTC),
             ),
             symbol="BTC/USDT",
             side=OrderSide.BUY,
@@ -219,7 +219,7 @@ def test_submit_order_command_quantity_must_be_positive() -> None:
             quantity=Decimal("0"),
             asset_class=AssetClass.CRYPTO,
             actor_subject_id=uuid4(),
-            issued_at=datetime.now(timezone.utc),
+            issued_at=datetime.now(UTC),
         )
 
 
@@ -273,8 +273,8 @@ def test_views_construct_from_minimal_fields() -> None:
         algo_run_id=None,
         unknown_since=None,
         provider_order_date=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     timeline = OrderTimelineView(order=view, events=[], fills=[])
     assert timeline.order.order_id == order_id
@@ -289,17 +289,17 @@ def test_views_construct_from_minimal_fields() -> None:
         state="PENDING",
         slice_count=5,
         slices_submitted=0,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     assert algo_run.slice_count == 5
 
     summary = ReconcileSummaryView(
         account_ref="acct-1",
-        window_start=datetime.now(timezone.utc),
-        window_end=datetime.now(timezone.utc),
+        window_start=datetime.now(UTC),
+        window_end=datetime.now(UTC),
         discrepancies=[],
         overall_classification="HEALTHY",
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
     assert summary.discrepancies == []

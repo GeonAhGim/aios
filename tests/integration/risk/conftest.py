@@ -10,7 +10,7 @@ fixture를 복제하면 조회 조건(예: `_RiskRepoWithFixedSafetyState`)이 �
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -67,7 +67,7 @@ class FakeConnectionRepo:
         if self._health is None:
             return None
         return ConnectionHealth(
-            connection_id=connection_id, evaluated_at=datetime.now(timezone.utc), state=self._health
+            connection_id=connection_id, evaluated_at=datetime.now(UTC), state=self._health
         )
 
 

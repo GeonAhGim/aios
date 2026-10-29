@@ -17,7 +17,7 @@ sub_account 거부(negative 3번째), 루프 중간 인프라 장애 시 트랜�
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -44,7 +44,7 @@ from tests.support.raw_order_isolation import isolated_raw_orders as isolated_ra
 
 
 def _clock() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _ports(pool):

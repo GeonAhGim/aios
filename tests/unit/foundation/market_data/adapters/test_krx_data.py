@@ -9,7 +9,7 @@ DoD (D2 floor):
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -156,7 +156,7 @@ class TestKRXIndexAdapter:
         assert quote.low == Decimal("2650.10")
         assert quote.volume == 450000
         assert isinstance(quote.observed_at, datetime)
-        assert quote.observed_at.tzinfo == timezone.utc
+        assert quote.observed_at.tzinfo == UTC
 
     async def test_get_index_price_empty_response(self, fake_client: _FakeKISClient) -> None:
         fake_client.responses["INDI000R"] = {}
@@ -228,7 +228,7 @@ class TestKRXInvestorAdapter:
         fake_client.responses["FHKST030301R"] = investor_response
         adapter = KRXInvestorAdapter(fake_client)
         trend = await adapter.get_investor_trend()
-        expected = datetime.now(timezone.utc).strftime("%Y%m%d")
+        expected = datetime.now(UTC).strftime("%Y%m%d")
         assert trend.date == expected
 
 
@@ -340,10 +340,10 @@ class TestPerformance:
         import asyncio
 
         adapter = KRXIndexAdapter(fake_client)
-        start = datetime.now(timezone.utc)
+        start = datetime.now(UTC)
         tasks = [adapter.get_index_price("00001") for _ in range(100)]
         await asyncio.gather(*tasks)
-        elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+        elapsed = (datetime.now(UTC) - start).total_seconds()
         assert elapsed < 5.0, f"100 concurrent index requests took {elapsed:.2f}s (budget: 5s)"
 
 

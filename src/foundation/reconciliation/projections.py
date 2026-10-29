@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.foundation.reconciliation.application.resolve_reconciliation import state_to_view
@@ -26,5 +26,5 @@ async def build_reconciliation_state_list_view(
     states = await repo.list_states(tenant_id)
     return ReconciliationStateListView(
         states=[state_to_view(s) for s in states],
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )

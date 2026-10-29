@@ -8,7 +8,7 @@ pure functions only — no I/O or global clock calls, timestamps always passed a
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.foundation.market_data.contracts.v1 import SessionWindow, Timeframe
 
@@ -21,7 +21,7 @@ __all__ = [
     "expected_opens",
 ]
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 _DURATIONS: dict[Timeframe, timedelta] = {
     Timeframe.M1: timedelta(minutes=1),
@@ -56,7 +56,7 @@ def align_open(ts: datetime, tf: Timeframe) -> datetime:
     """
     if ts.tzinfo is None:
         raise ValueError("align_open은 tz-aware datetime만 받는다")
-    ts_utc = ts.astimezone(timezone.utc)
+    ts_utc = ts.astimezone(UTC)
     if tf is Timeframe.D1:
         return ts_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     step = duration(tf)

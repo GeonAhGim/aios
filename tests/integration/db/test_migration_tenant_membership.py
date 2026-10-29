@@ -67,14 +67,14 @@ def _run_alembic(*args: str, database_url: str | None = None) -> None:
 
 
 @pytest.fixture
-async def pool() -> AsyncGenerator[asyncpg.Pool, None]:
+async def pool() -> AsyncGenerator[asyncpg.Pool]:
     p = await create_pool_with_retry(_asyncpg_dsn(), min_size=1, max_size=4)
     yield p
     await p.close()
 
 
 @pytest.fixture(autouse=True)
-def _ensure_head() -> Generator[None, None, None]:
+def _ensure_head() -> Generator[None]:
     """각 테스트 시작 시 head 상태를 보장한다 — 정의 순서에 의존하지 않고,
     라운드트립 테스트가 assert 실패로 중단돼도 다음 테스트가 downgrade된
     스키마를 보지 않게 한다."""

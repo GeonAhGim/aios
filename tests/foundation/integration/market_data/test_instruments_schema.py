@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import pytest
@@ -75,7 +75,7 @@ async def test_venue_listings_rejects_overlapping_period_same_venue_symbol(pool)
     await _insert_instrument(pool, instrument_a)
     await _insert_instrument(pool, instrument_b)
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
         pool, instrument_id=instrument_a, venue="BITGET", venue_symbol=symbol,
@@ -97,7 +97,7 @@ async def test_venue_listings_rejects_overlap_against_open_ended_listing(pool):
     await _insert_instrument(pool, instrument_a)
     await _insert_instrument(pool, instrument_b)
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
         pool, instrument_id=instrument_a, venue="BITGET", venue_symbol=symbol,
@@ -117,7 +117,7 @@ async def test_venue_listings_allows_sequential_non_overlapping_periods(pool):
     instrument_id = _fake_ulid()
     await _insert_instrument(pool, instrument_id)
     symbol = _venue_symbol()
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
         pool, instrument_id=instrument_id, venue="BITGET", venue_symbol=symbol,
@@ -143,7 +143,7 @@ async def test_venue_listings_allows_overlap_across_different_venue_symbol(pool)
     instrument_b = _fake_ulid()
     await _insert_instrument(pool, instrument_a)
     await _insert_instrument(pool, instrument_b)
-    t0 = datetime.now(timezone.utc) - timedelta(days=10)
+    t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
         pool, instrument_id=instrument_a, venue="BITGET", venue_symbol=_venue_symbol(),

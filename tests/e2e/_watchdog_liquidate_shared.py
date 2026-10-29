@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -180,7 +180,7 @@ async def _run_liquidate_cycle(
         "get_basket_returns": get_basket_returns or _market_wide_basket,
     }
 
-    test_start = datetime.now(timezone.utc)
+    test_start = datetime.now(UTC)
     # 1회차 -- peak 기록, 손실률 0% -> NORMAL.
     await run_one_cycle(pool, service, split_brain, **cycle_kwargs)
     # 2회차 -- 90% 손실 + market-wide 급변 basket -> LIQUIDATE 발동(조건에 따라).

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -56,7 +56,7 @@ def test_dispute_resolve_request_valid() -> None:
 def test_to_dispute_summary_maps_fields() -> None:
     submitted_by = uuid4()
     resolved_by = uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     row = {
         "id": 1,
         "purchase_id": 42,
@@ -88,7 +88,7 @@ def test_to_dispute_summary_optional_fields_none() -> None:
         "resolution_decision": None,
         "resolution_reason": None,
         "resolved_by": None,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "resolved_at": None,
     }
     summary = to_dispute_summary(row)
@@ -107,7 +107,7 @@ def test_to_dispute_summary_missing_required_field_raises() -> None:
         "resolution_decision": None,
         "resolution_reason": None,
         "resolved_by": None,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "resolved_at": None,
     }
     with pytest.raises(ValidationError):
@@ -125,6 +125,6 @@ def test_dispute_summary_invalid_uuid_raises() -> None:
             resolution_decision=None,
             resolution_reason=None,
             resolved_by=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             resolved_at=None,
         )

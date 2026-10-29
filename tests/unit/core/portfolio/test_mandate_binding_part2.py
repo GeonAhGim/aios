@@ -10,7 +10,7 @@ calls must each fail some test here.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ from src.foundation.mandates.contracts.v1 import (
 )
 from tests.conftest import PerfBudget
 
-_AS_OF = datetime(2026, 9, 9, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 9, 9, tzinfo=UTC)
 
 
 def _revision_hash(

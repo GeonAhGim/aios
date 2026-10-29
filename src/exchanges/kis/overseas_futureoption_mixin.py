@@ -49,7 +49,7 @@ API 패밀리 안에 있을 가능성이 국내파생과의 유사성보다 높�
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -83,7 +83,7 @@ def _reject_if_expired(expiry_date: date | None, *, now: datetime | None = None)
     기준으로 쓴다(미검증 — docstring 상단 참조)."""
     if expiry_date is None:
         return
-    today = (now or datetime.now(timezone.utc)).date()
+    today = (now or datetime.now(UTC)).date()
     if expiry_date < today:
         raise OverseasContractExpiredError(
             f"만기 지난 해외선물옵션 종목은 주문할 수 없습니다: "
@@ -120,7 +120,7 @@ class KISOverseasFutureoptionMixin:
             bid=price,  # 응답에 최우선호가 없음(overseas_stock 관례 연장) — 근사치
             ask=price,
             volume_24h=Decimal(output.get("tvol", "0")),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             source_type="primary",
         )
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import random
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -44,7 +44,7 @@ from src.foundation.market_data.domain.calendar.known_venues import KNOWN_SESSIO
 from src.foundation.market_data.domain.calendar.session_rules import VenueCalendar
 from tests.conftest import PerfBudget
 
-UTC = timezone.utc
+UTC = UTC
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _BASE_NS = 1_767_225_600_000_000_000  # 2026-01-01T00:00:00Z (Thursday)
 

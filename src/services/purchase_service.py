@@ -28,7 +28,7 @@ unchanged.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -60,7 +60,7 @@ _HOLD_TTL_MINUTES = 15
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 CheckRiskWarningFn = Callable[[UUID, str, str], Awaitable[str | None]]

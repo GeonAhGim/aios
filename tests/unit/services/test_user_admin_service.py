@@ -7,7 +7,7 @@ asyncpg pool/connection으로 분기 로직(DELETED/PENDING_DELETION 거부,
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import uuid4
 
@@ -30,7 +30,7 @@ def _user_row(user_id: object) -> dict[str, Any]:
         "user_id": user_id,
         "email": "user@example.com",
         "status": "ACTIVE",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
     }
 
 

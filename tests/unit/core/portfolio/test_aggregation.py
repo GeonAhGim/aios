@@ -7,7 +7,7 @@ the sum identity, defaulting `as_of`, or letting `total_equity<=0` reach a
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import cast
 
@@ -22,7 +22,7 @@ from src.core.portfolio.aggregation import (
 )
 from tests.conftest import PerfBudget
 
-_AS_OF = datetime(2026, 9, 9, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 9, 9, tzinfo=UTC)
 
 
 def _exposures() -> list[ExecutionExposure]:

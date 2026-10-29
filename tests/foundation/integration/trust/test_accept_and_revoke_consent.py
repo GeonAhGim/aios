@@ -1,6 +1,6 @@
 """Trust Core 통합테스트 — 실제 dev DB 대상. 71번 §7 "정상 흐름 + negative test"."""
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -182,7 +182,7 @@ async def test_accept_disclosure_sets_a_real_default_expiry(pool, repo, purpose)
     실제로는 한 번도 발동할 데이터가 없었다. 이제는 실제 미래 시각이 들어간다."""
     context = await _context_for(pool)
     await create_disclosure(pool, purpose=purpose, revision=1)
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
 
     accepted = await accept_disclosure(repo, context, purpose=purpose, disclosure_revision=1)
 
@@ -204,7 +204,7 @@ async def test_expired_consent_is_not_fresh_even_if_not_revoked(pool, repo, purp
         await conn.execute(
             "UPDATE consent_record SET expires_at = $2 WHERE id = $1",
             accepted.consent_id,
-            datetime.now(timezone.utc) - timedelta(seconds=1),
+            datetime.now(UTC) - timedelta(seconds=1),
         )
 
     decision = await evaluate_trust_freshness(repo, context, purpose=purpose)

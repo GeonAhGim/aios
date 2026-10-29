@@ -22,7 +22,7 @@ CI-red, precedent 3ea1fc1/9bdcd21).
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
@@ -74,7 +74,7 @@ def test_two_consecutive_splits_accumulate_price_factor() -> None:
     # "정확"을 정밀하게 검증할 수 있다(1/6처럼 순환소수인 비율은 Decimal
     # context precision에서 반올림되므로 이 테스트의 목적에 맞지 않는다).
     instrument_id = uuid4()
-    as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
+    as_of = datetime(2024, 12, 1, tzinfo=UTC)
     actions = [
         _split(instrument_id, date(2024, 1, 10), "2"),
         _split(instrument_id, date(2024, 6, 10), "4"),
@@ -93,16 +93,16 @@ def test_two_consecutive_splits_accumulate_price_factor() -> None:
 
 def test_adjust_applies_cumulative_factor_only_for_bars_before_each_split() -> None:
     instrument_id = uuid4()
-    as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
+    as_of = datetime(2024, 12, 1, tzinfo=UTC)
     actions = [
         _split(instrument_id, date(2024, 1, 10), "2"),
         _split(instrument_id, date(2024, 6, 10), "4"),
     ]
     factors = factor_chain(actions, as_of)
     candles = [
-        _candle(instrument_id, datetime(2024, 1, 5, tzinfo=timezone.utc), Decimal("600")),
-        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("300")),
-        _candle(instrument_id, datetime(2024, 7, 1, tzinfo=timezone.utc), Decimal("100")),
+        _candle(instrument_id, datetime(2024, 1, 5, tzinfo=UTC), Decimal("600")),
+        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=UTC), Decimal("300")),
+        _candle(instrument_id, datetime(2024, 7, 1, tzinfo=UTC), Decimal("100")),
     ]
 
     adjusted = adjust(candles, factors)
@@ -115,7 +115,7 @@ def test_adjust_applies_cumulative_factor_only_for_bars_before_each_split() -> N
 
 def test_factor_chain_ignores_actions_after_as_of() -> None:
     instrument_id = uuid4()
-    as_of = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    as_of = datetime(2024, 3, 1, tzinfo=UTC)
     actions = [
         _split(instrument_id, date(2024, 1, 10), "2"),
         _split(instrument_id, date(2024, 6, 10), "3"),
@@ -130,7 +130,7 @@ def test_factor_chain_ignores_actions_after_as_of() -> None:
 
 def test_reverse_split_scales_price_up_and_volume_down() -> None:
     instrument_id = uuid4()
-    as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
+    as_of = datetime(2024, 12, 1, tzinfo=UTC)
     action = CorporateAction(
         action_type="REVERSE_SPLIT",
         instrument_id=instrument_id,
@@ -148,13 +148,13 @@ def test_reverse_split_scales_price_up_and_volume_down() -> None:
 def test_zero_ratio_raises() -> None:
     action = _split(uuid4(), date(2024, 1, 1), "0")
     with pytest.raises(InvalidRatioError):
-        factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
+        factor_chain([action], datetime(2024, 12, 1, tzinfo=UTC))
 
 
 def test_negative_ratio_raises() -> None:
     action = _split(uuid4(), date(2024, 1, 1), "-1")
     with pytest.raises(InvalidRatioError):
-        factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
+        factor_chain([action], datetime(2024, 12, 1, tzinfo=UTC))
 
 
 def test_factor_chain_fails_closed_when_one_action_among_many_is_invalid() -> None:
@@ -166,7 +166,7 @@ def test_factor_chain_fails_closed_when_one_action_among_many_is_invalid() -> No
     bad = _split(uuid4(), date(2024, 3, 1), "0")
 
     with pytest.raises(InvalidRatioError):
-        factor_chain([good, bad], datetime(2024, 12, 1, tzinfo=timezone.utc))
+        factor_chain([good, bad], datetime(2024, 12, 1, tzinfo=UTC))
 
 
 def test_factor_chain_fails_closed_on_corrupted_action_type() -> None:
@@ -188,7 +188,7 @@ def test_factor_chain_fails_closed_on_corrupted_action_type() -> None:
     )
 
     with pytest.raises(InvalidActionTypeError):
-        factor_chain([action], datetime(2024, 12, 1, tzinfo=timezone.utc))
+        factor_chain([action], datetime(2024, 12, 1, tzinfo=UTC))
 
 
 def test_adjust_returns_unchanged_when_no_factors_exist() -> None:
@@ -197,8 +197,8 @@ def test_adjust_returns_unchanged_when_no_factors_exist() -> None:
     상황(신규 상장 종목 등)에서 partial mutation이 일어나지 않음을 명시적으로 검증한다."""
     instrument_id = uuid4()
     candles = [
-        _candle(instrument_id, datetime(2024, 1, 5, tzinfo=timezone.utc), Decimal("500")),
-        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("300")),
+        _candle(instrument_id, datetime(2024, 1, 5, tzinfo=UTC), Decimal("500")),
+        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=UTC), Decimal("300")),
     ]
 
     adjusted = adjust(candles, [])
@@ -218,14 +218,14 @@ def test_adjust_ignores_candles_for_unregistered_instrument() -> None:
     해당 candle는 무조정 원본 그대로 반환된다(계수=1 path)."""
     good_instrument = uuid4()
     unknown_instrument = uuid4()
-    as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
+    as_of = datetime(2024, 12, 1, tzinfo=UTC)
 
     actions = [_split(good_instrument, date(2024, 6, 1), "2")]
     factors = factor_chain(actions, as_of)
 
     candles = [
-        _candle(good_instrument, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("400")),
-        _candle(unknown_instrument, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("999")),
+        _candle(good_instrument, datetime(2024, 3, 1, tzinfo=UTC), Decimal("400")),
+        _candle(unknown_instrument, datetime(2024, 3, 1, tzinfo=UTC), Decimal("999")),
     ]
 
     adjusted = adjust(candles, factors)
@@ -263,7 +263,7 @@ def test_factor_chain_fails_closed_when_ratio_dependency_raises(
     ]
 
     with pytest.raises(RuntimeError, match="injected dependency failure"):
-        factor_chain(actions, datetime(2024, 12, 1, tzinfo=timezone.utc))
+        factor_chain(actions, datetime(2024, 12, 1, tzinfo=UTC))
     assert calls["n"] == 2
 
 
@@ -277,11 +277,11 @@ def test_adjust_failure_mid_batch_leaves_input_candles_unmutated(
     from src.foundation.market_data.domain.corporate_actions import adjustment
 
     instrument_id = uuid4()
-    as_of = datetime(2024, 12, 1, tzinfo=timezone.utc)
+    as_of = datetime(2024, 12, 1, tzinfo=UTC)
     factors = factor_chain([_split(instrument_id, date(2024, 6, 1), "2")], as_of)
     candles = [
-        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=timezone.utc), Decimal("500")),
-        _candle(instrument_id, datetime(2024, 4, 1, tzinfo=timezone.utc), Decimal("400")),
+        _candle(instrument_id, datetime(2024, 3, 1, tzinfo=UTC), Decimal("500")),
+        _candle(instrument_id, datetime(2024, 4, 1, tzinfo=UTC), Decimal("400")),
     ]
     real_factor_for = adjustment._factor_for
     calls = {"n": 0}
@@ -323,11 +323,11 @@ def test_factor_chain_and_adjust_large_batch_stays_correct(perf_budget: PerfBudg
     # batches mix adjustments for many instruments.
     actions = [_split(instrument_id, base_date + timedelta(days=i), "2") for i in range(40)]
     actions += [_split(uuid4(), base_date + timedelta(days=i), "2") for i in range(460)]
-    as_of = datetime(2021, 6, 1, tzinfo=timezone.utc)
+    as_of = datetime(2021, 6, 1, tzinfo=UTC)
     candles = [
         _candle(
             instrument_id,
-            datetime(2019, 12, 31, tzinfo=timezone.utc) + timedelta(days=i),
+            datetime(2019, 12, 31, tzinfo=UTC) + timedelta(days=i),
             Decimal("100"),
         )
         for i in range(2_000)

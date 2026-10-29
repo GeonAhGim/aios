@@ -37,7 +37,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -49,8 +49,8 @@ from src.foundation.mandates.domain.market_abuse import (
     detect,
 )
 
-_T0 = datetime(2026, 1, 5, 5, 0, 0, tzinfo=timezone.utc)
-_CLOSE = datetime(2026, 1, 5, 6, 0, 0, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 5, 5, 0, 0, tzinfo=UTC)
+_CLOSE = datetime(2026, 1, 5, 6, 0, 0, tzinfo=UTC)
 
 
 def _fill(**kwargs: object) -> dict[str, object]:

@@ -3,7 +3,7 @@
 DoD: negative tests >=3, failure-injection >=1, coverage >=70%.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -19,7 +19,7 @@ from src.foundation.evidence.contracts.v1 import (
     RecordAuditEventCommand,
 )
 
-NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 24, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------

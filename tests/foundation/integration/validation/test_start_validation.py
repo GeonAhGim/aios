@@ -4,7 +4,7 @@
 만들지 않은 기존/병행 구현이며, 이 테스트는 그 둘을 잇는 배선을 검증)."""
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock
@@ -28,7 +28,7 @@ from src.foundation.validation.contracts.v1 import Outcome, RunState, StartValid
 from src.services.strategy_builder_service import StrategyBuilderService
 from tests.integration.conftest import create_test_user
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _asyncpg_dsn() -> str:

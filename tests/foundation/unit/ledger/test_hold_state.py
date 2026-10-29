@@ -7,7 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-5
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -15,7 +15,7 @@ from src.foundation.ledger.contracts.v1 import HoldState
 from src.foundation.ledger.domain import hold_state as hs
 from tests.conftest import PerfBudget
 
-_NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
+_NOW = datetime(2026, 9, 3, tzinfo=UTC)
 _NOT_EXPIRED = _NOW + timedelta(days=1)
 _ALREADY_EXPIRED = _NOW - timedelta(days=1)
 

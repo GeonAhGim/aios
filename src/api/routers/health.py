@@ -21,7 +21,7 @@ docstring ("to let the readyz age < 3×interval check fail naturally").
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 import asyncpg
@@ -93,7 +93,7 @@ async def readyz(pool: asyncpg.Pool = Depends(get_pool)) -> JSONResponse:
     report = ReadinessReport(
         status="ready" if ready else "not_ready",
         checks=checks,
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
     )
     status_code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(status_code=status_code, content=report.model_dump(mode="json"))

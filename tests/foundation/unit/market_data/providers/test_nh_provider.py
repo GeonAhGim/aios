@@ -12,7 +12,7 @@ negative test, src/exchanges/** 변경 0줄).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -33,7 +33,7 @@ from src.foundation.market_data.ports.provider import (
 )
 
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-_BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_BASE = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class _FakeNHAdapter:

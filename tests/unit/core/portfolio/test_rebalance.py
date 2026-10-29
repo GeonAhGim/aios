@@ -9,7 +9,7 @@ fail some test here.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -24,7 +24,7 @@ from src.core.portfolio.state_input import PortfolioAggregate
 from src.data.models.trading import OrderSide
 
 _HEX64 = "a" * 64
-_AS_OF = datetime(2026, 9, 9, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 9, 9, tzinfo=UTC)
 
 
 def _cost_model_ref() -> CostModelRef:

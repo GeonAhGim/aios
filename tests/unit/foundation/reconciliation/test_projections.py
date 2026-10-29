@@ -5,7 +5,7 @@ tenant scoping, and repository failure propagation."""
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import patch
 from uuid import uuid4
@@ -21,7 +21,7 @@ from tests.conftest import PerfBudget
 
 
 def _state(**overrides: object) -> ReconciliationState:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     defaults: dict[str, object] = dict(
         target_ref=uuid4(),
         target_type="PAPER_DEPLOYMENT",
@@ -92,15 +92,15 @@ async def test_build_reconciliation_state_list_view_passes_tenant_id_to_repo() -
 
 async def test_build_reconciliation_state_list_view_as_of_is_utc_aware() -> None:
     repo = _FakeRepo(())
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
 
     view = cast(
         ReconciliationStateListView, await build_reconciliation_state_list_view(repo, uuid4())
     )
 
-    after = datetime.now(timezone.utc)
+    after = datetime.now(UTC)
     assert view.as_of.tzinfo is not None
-    assert view.as_of.utcoffset() == timezone.utc.utcoffset(None)
+    assert view.as_of.utcoffset() == UTC.utcoffset(None)
     assert before <= view.as_of <= after
 
 

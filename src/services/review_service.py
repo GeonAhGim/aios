@@ -13,7 +13,7 @@ UNIQUE 제약이 최종 방어선).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -71,7 +71,7 @@ class ReviewService:
             if purchase is None:
                 raise ReviewError("이 리스팅에 대한 구매 이력이 없어 리뷰를 작성할 수 없습니다.")
 
-            elapsed = datetime.now(timezone.utc) - purchase["purchased_at"]
+            elapsed = datetime.now(UTC) - purchase["purchased_at"]
             if elapsed < timedelta(days=MIN_DAYS_AFTER_PURCHASE):
                 raise ReviewError(
                     f"구매 후 {MIN_DAYS_AFTER_PURCHASE}일이 지나야 리뷰를 작성할 수 있습니다."

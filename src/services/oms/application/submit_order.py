@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -95,7 +95,7 @@ INSERT INTO orders (
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class OrderSubmitDeniedError(Exception):

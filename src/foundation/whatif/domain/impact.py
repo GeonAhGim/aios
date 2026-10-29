@@ -14,7 +14,7 @@ the arithmetic delta so the UI can render "what if this order fills".
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from src.core.portfolio.state_input import PortfolioAggregate
@@ -212,7 +212,7 @@ def delta_impact(
     )
 
     return TradeImpact(
-        as_of=datetime.now(timezone.utc),
+        as_of=datetime.now(UTC),
         symbol=trade.symbol,
         notional_delta=trade.notional,
         cash_delta=cash_delta,

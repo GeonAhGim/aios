@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from src.foundation.risk.domain.promotion import (
     PromotionBlocker,
@@ -29,7 +29,7 @@ def _condition2_met() -> bool:
 
 
 def _today() -> date:
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 @dataclass(frozen=True)

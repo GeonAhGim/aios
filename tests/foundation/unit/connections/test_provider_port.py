@@ -8,7 +8,7 @@ FakeReadonlyAccountProvider 의존성 전파도 커버한다.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -79,7 +79,7 @@ async def test_readonly_account_provider_fetch_snapshot_conforms_to_protocol_sig
     """양성 케이스 — Protocol 시그니처대로 구현체를 통해 호출 가능함을 확인한다."""
     provider: ReadonlyAccountProvider = FakeReadonlyAccountProvider()
 
-    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(timezone.utc))
+    snapshot = await provider.fetch_snapshot(OpaqueRef("ACCT-1"), datetime.now(UTC))
 
     assert snapshot.currency == "USD"
 

@@ -58,7 +58,7 @@ LC-13/15의 holds/payouts와 달리 전용 포트가 없다(LC-7 설계) — 이
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -141,7 +141,7 @@ async def verify_ledger_integrity(
 
         fully_clean = chain_ok and zero_sum_ok and not drifts
         must_freeze = not chain_ok or not zero_sum_ok
-        checked_at = datetime.now(timezone.utc)
+        checked_at = datetime.now(UTC)
         last_seq = entries[-1].sequence_no if entries else 0
 
         registry.counter("ledger_integrity_checks_total", labels=("result",)).inc(

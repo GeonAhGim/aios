@@ -23,7 +23,7 @@ ADR-2026-09-09-C D2 증빙:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import asyncpg
@@ -90,7 +90,7 @@ def _mfa_admin(user_id) -> AuthenticatedUser:
         email="admin@example.com",
         display_name="admin",
         mfa_enabled=True,
-        mfa_verified_at=datetime.now(timezone.utc),
+        mfa_verified_at=datetime.now(UTC),
         status="ACTIVE",
         is_verifier=False,
         is_platform_admin=True,
@@ -100,14 +100,14 @@ def _mfa_admin(user_id) -> AuthenticatedUser:
 
 
 def _fresh() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _stale() -> datetime:
     """Just past MFA_STEP_UP_WINDOW (15min) -- task-3795: a session that
     passed TOTP 16 minutes ago must be treated as unverified, not as the
     still-"MFA_VERIFIED" JWT claim it would carry for up to 14 days."""
-    return datetime.now(timezone.utc) - timedelta(minutes=16)
+    return datetime.now(UTC) - timedelta(minutes=16)
 
 
 async def _request(pool, conn, requester_id, *, scope="credential_revoke", ttl_minutes=60):

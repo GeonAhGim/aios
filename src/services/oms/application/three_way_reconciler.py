@@ -40,7 +40,7 @@ scope rationale.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -189,7 +189,7 @@ async def reconcile_account(
     window: timedelta,
     policy: MaterialityPolicy = DEFAULT_POLICY,
 ) -> ReconcileSummaryView:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_start = now - window
     risk_repo = PostgresRiskGateRepository(pool)
 

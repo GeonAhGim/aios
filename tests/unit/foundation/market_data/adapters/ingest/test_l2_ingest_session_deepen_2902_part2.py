@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -198,7 +198,7 @@ class _FakeAdapter:
         if self._raise_on_parse_seq == seq:
             raise ValueError(f"모의 파싱 실패(seq={seq}) — 손상된 프레임")
         return L2Diff(
-            sequence=seq, as_of=datetime.now(timezone.utc), bid_updates=(), ask_updates=()
+            sequence=seq, as_of=datetime.now(UTC), bid_updates=(), ask_updates=()
         )
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
@@ -211,7 +211,7 @@ class _FakeAdapter:
             # 증명하려는 것은 정반대(표면화)이므로 의도적으로 그 목록 밖의
             # 예외를 던진다.
             raise SnapshotFetchError(f"모의 REST 스냅샷 실패(#{self.snapshot_calls})")
-        return L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids={}, asks={})
+        return L2Snapshot(sequence=0, as_of=datetime.now(UTC), bids={}, asks={})
 
 
 def _frame(seq: int) -> str:
@@ -251,7 +251,7 @@ async def test_gate_red_second_resync_failure_does_not_corrupt_first_recorded_sp
     )  # 최초+1차 갭 재동기화 성공, 2차 갭 재동기화 실패
     repo = _FakeCoverageRepo()
     pool = _FakePool()
-    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    clock = _TickingClock(datetime(2026, 1, 1, tzinfo=UTC))
     # 1..3 정상, 4 누락(1차 갭), 5..6 정상, 8 누락(2차 갭 — 재동기화가 실패로 죽음)
     frames = [_frame(s) for s in (1, 2, 3, 5, 6, 8)]
     conn = _FakeConnection(frames, raise_after=_closed())
@@ -285,7 +285,7 @@ def test_concurrent_threads_applying_diffs_to_independent_books_never_cross_cont
         book = OrderBookState.from_snapshot(
             L2Snapshot(
                 sequence=0,
-                as_of=datetime.now(timezone.utc),
+                as_of=datetime.now(UTC),
                 bids={base_price: Decimal("1")},
                 asks={base_price + 1: Decimal("1")},
             )
@@ -293,7 +293,7 @@ def test_concurrent_threads_applying_diffs_to_independent_books_never_cross_cont
         for i in range(repeat):
             diff = L2Diff(
                 sequence=i + 1,
-                as_of=datetime.now(timezone.utc),
+                as_of=datetime.now(UTC),
                 bid_updates=((base_price, Decimal(str(i + 1))),),
                 ask_updates=(),
             )

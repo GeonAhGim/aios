@@ -26,7 +26,7 @@ recorder의 `inputs: BaseModel` 계약에 맞춰 `_PreSubmitInputs`(안전 상�
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID, uuid5
@@ -201,7 +201,7 @@ async def evaluate_pre_submit(
         connection_fresh=connection_fresh,
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     inputs = _PreSubmitInputs(
         tenant_id=tenant_id,
         execution_ref=execution_ref,

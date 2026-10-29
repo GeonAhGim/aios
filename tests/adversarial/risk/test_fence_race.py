@@ -58,7 +58,7 @@ _N_UNSTAGED = 8
 
 
 @pytest.fixture
-async def _fence_race_cleanup(pool: asyncpg.Pool) -> AsyncGenerator[None, None]:
+async def _fence_race_cleanup(pool: asyncpg.Pool) -> AsyncGenerator[None]:
     """Cleanup eventless orders created by this test module on teardown.
 
     `submit_with_fence` fence-stale path (fenced_submit.py:142-172) updates

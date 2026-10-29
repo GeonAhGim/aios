@@ -10,7 +10,7 @@ paper executor for the same artifact/window, timestamps excluded).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -25,7 +25,7 @@ from src.foundation.backtest.domain.models import BacktestConfig, CostModel
 from src.services.condition_compiler import ORDER_FILLED
 from src.services.oms.contracts.v1_events import FillEvent
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _QTY = Decimal("9.090909090909090909090909091")
 
 

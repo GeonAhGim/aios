@@ -27,7 +27,7 @@ been checked against a live feed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -91,9 +91,9 @@ class UpbitL2Adapter:
         bids, asks = _levels_from_units(units)
         timestamp_ms = message.get("timestamp")
         as_of = (
-            datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+            datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
             if timestamp_ms is not None
-            else datetime.now(timezone.utc)
+            else datetime.now(UTC)
         )
         return L2Snapshot(sequence=0, as_of=as_of, bids=bids, asks=asks)
 
@@ -103,4 +103,4 @@ class UpbitL2Adapter:
         resp.raise_for_status()
         row = resp.json()[0]
         bids, asks = _levels_from_units(row["orderbook_units"])
-        return L2Snapshot(sequence=0, as_of=datetime.now(timezone.utc), bids=bids, asks=asks)
+        return L2Snapshot(sequence=0, as_of=datetime.now(UTC), bids=bids, asks=asks)

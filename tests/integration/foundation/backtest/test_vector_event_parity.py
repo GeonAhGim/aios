@@ -10,7 +10,7 @@ equity가 소수 8자리까지(사실은 정확히) 일치한다 — 부분체�
 from __future__ import annotations
 
 import inspect
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -45,7 +45,7 @@ from src.foundation.backtest.vector.signals import BoolSignal
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
 
-_T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _CASH = Decimal("100000")
 _D = Decimal
 

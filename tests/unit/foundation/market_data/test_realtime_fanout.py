@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -36,7 +36,7 @@ from tests.support.perf_budget import PerfBudget
 
 _TENANT = UUID("11111111-1111-1111-1111-111111111111")
 _SUBJECT = UUID("33333333-3333-3333-3333-333333333333")
-_AS_OF = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_AS_OF = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @dataclass
