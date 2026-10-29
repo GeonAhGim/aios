@@ -2,6 +2,7 @@
 dev DB. 쓰기 API는 없다(스키마 docstring 참조) — 이 라우터는 읽기 전용이라
 직접 이벤트를 만들려면 application 계층(append_audit_event)을 통해야 한다."""
 
+import math
 import uuid
 from pathlib import Path
 from uuid import uuid4
@@ -235,3 +236,28 @@ async def test_failure_db_error_returns_500(client, monkeypatch):
         headers=headers,
     )
     assert response.status_code == 500
+
+
+# ── 수치 성능 단언 (D2 — perf_budget 픽스처 경유, raw 타이머 금지) ──
+
+
+@pytest.mark.perf
+async def test_timeline_p95_latency_stays_within_normalized_ceiling(client, perf_budget):
+    """공유 테스트 DB의 절대 지연 변동성 때문에 절대 ms 임계 대신, baseline
+    1건 대비 정규화한 상한만 게이트로 쓴다(test_dashboard_router.py 동일 결정)."""
+    headers, _ = await _register(client)
+
+    async def _call() -> None:
+        response = await client.get("/v1/foundation/evidence/timeline", headers=headers)
+        assert response.status_code == 200
+
+    baseline_ms = (await perf_budget.sample_async(_call)).wall_ms
+    samples = await perf_budget.samples_async(_call, n=20)
+    wall_ms_list = sorted(s.wall_ms for s in samples)
+    p95_ms = wall_ms_list[min(math.ceil(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+
+    ceiling_ms = baseline_ms * 5 + 50
+    assert p95_ms <= ceiling_ms, (
+        f"GET /v1/foundation/evidence/timeline p95 {p95_ms:.2f}ms가 정규화 상한 "
+        f"{ceiling_ms:.2f}ms(baseline {baseline_ms:.2f}ms)를 초과했습니다"
+    )
