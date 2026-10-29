@@ -330,7 +330,7 @@ def test_parity_throughput_within_monthly_backtest_budget(perf_budget) -> None:
 
     sample = perf_budget.assert_within(
         lambda: check_parity(paper, backtest),
-        budget_ms=10000.0,
+        budget_ms=3000.0,
         n=3,
         warmup=0,
         batch=8,
