@@ -26,6 +26,8 @@ from src.foundation.marketplace.domain.visibility import (
     validate_source_retention,
     validate_visibility_grade,
 )
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def _call_untyped(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -129,13 +131,39 @@ def test_corrupted_retention_fails_closed_and_reproduces_on_repeat():
 
 @pytest.mark.perf
 def test_validate_source_retention_hot_path_performance(perf_budget):
-    # raw perf_counter → perf_budget.assert_within(batch) 전환:
+    # best_of(5) 최소값으로 Windows 양자화 tick 1회에 흔들리지 않게 한다.
     # process_time은 ~15.6ms 틱이므로 batch=10_000이면 총 156ms가 돼
     # 호출당 15.6μs로 분할 가능. 예산 1000ms = 1.0s(ms 단위 일치).
     perf_budget.assert_within(
         lambda: validate_source_retention(ListingVisibility.PROTECTED, "IR_ONLY"),
         budget_ms=1000.0,
         n=5,
+        warmup=1,
         batch=10_000,
         label="validate_source_retention",
     )
+
+
+@pytest.mark.perf
+def test_validate_source_retention_gate_red_reproduces_with_virtual_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate-red 재현(ADR-2026-09-09-C D2): virtual_delayed_sync로 CPU 지연을
+    주입하면 같은 성능 단언이 AssertionError로 적색 전환된다. 실제 busy-wait
+    없이 가상 원장에 지연만 더해 측정치만 늘린다."""
+    # 예산 1000ms의 10배 = 10s 가상 CPU 지연 — 순수 함수이므로 virtual_delayed_sync
+    delayed = virtual_delayed_sync(
+        lambda: validate_source_retention(ListingVisibility.PROTECTED, "IR_ONLY"),
+        10.0,
+    )
+    # best_of(5) 최소값이 예산 1000ms를 초과해야 함
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            delayed,
+            budget_ms=1000.0,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="gate-red 10s virtual delay",
+        )
