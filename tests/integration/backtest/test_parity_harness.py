@@ -28,6 +28,7 @@ from src.foundation.backtest.application.parity_harness import (
 )
 from src.foundation.backtest.domain.models import SimulatedFill
 from src.services.oms.contracts.v1_events import FillEvent
+from tests.support.perf_inject import virtual_delayed_sync
 
 _SYMBOL = "BTC-USDT"
 _ONE_TICK = Decimal("0.01")
@@ -340,3 +341,76 @@ def test_parity_throughput_within_monthly_backtest_budget(perf_budget) -> None:
     report = sample.result
     report.raise_if_mismatch()
     assert report.paper_fill_count == report.backtest_fill_count == 43_200
+
+
+@pytest.mark.perf
+def test_parity_cpu_converges_to_zero_under_best_of(perf_budget) -> None:
+    """Windows `time.process_time()` ~15.6ms 양자화 tick이 단일 샘플을 흔들어도
+    `best_of`(여러 번 중 최소)는 CPU 0 수렴을 안정적으로 보여준다.
+
+    단발 sample이 15.6ms tick에 걸리면 예산 단언이 거짓으로 실패한다(task-15506).
+    `best_of(n=10)`는 10회 측정 중 최소값을 돌려 그 흔들림을 걷어낸다.
+    """
+    sample = perf_budget.best_of(
+        lambda: check_parity(_PAPER_TRACE, _matching_backtest_fills()),
+        n=10,
+        warmup=2,
+        batch=8,
+    )
+    # 예산 단언: 3건 비교는 마이크로초 단위여야 한다(예산 3s의 0.001% 미만)
+    assert sample.cpu_ms < 3.0, perf_budget.describe(sample, budget_ms=3.0)
+    assert sample.wall_ms < 50.0  # wall도 양자화tick 4회 분以内
+
+    report = sample.result
+    report.raise_if_mismatch()
+
+
+@pytest.mark.perf
+def test_parity_virtual_delay_injection_detects_budget_exceedance(perf_budget) -> None:
+    """가상 지연 주입으로 게이트 적색 재현 — 실제 sleep/busy-wait 없이.
+
+    정상 입력은 녹색, 예산 10배 지연 주입은 적색(예상 실패)이어야 한다.
+    `virtual_delayed_sync`는 CPU+wall ledger에 지연만 더하고 실제 대기하지 않는다.
+    """
+    # 정상 입력 — 녹색
+    normal = perf_budget.assert_within(
+        lambda: check_parity(_PAPER_TRACE, _matching_backtest_fills()),
+        budget_ms=3000.0,
+        n=3,
+        batch=8,
+        label="3-fill parity normal (green)",
+    )
+    assert normal.cpu_ms < 100.0  # 3건 비교는 100ms 미만
+
+    # 예산 10배 지연 주입 — 적색
+    delayed = virtual_delayed_sync(
+        lambda: check_parity(_PAPER_TRACE, _matching_backtest_fills()),
+        seconds=30.0,  # 예산 3s의 10배
+    )
+    with pytest.raises(AssertionError) as exc_info:
+        perf_budget.assert_within(
+            delayed,
+            budget_ms=3000.0,
+            n=3,
+            batch=8,
+            label="3-fill parity 10x virtual delay (red)",
+        )
+    # 적색 메시지에 지연이 반영됐음을 확인
+    assert "cpu=" in str(exc_info.value)
+
+
+@pytest.mark.perf
+def test_parity_no_virtual_injection_leaves_measurement_untouched(perf_budget) -> None:
+    """지연 주입이 없으면 측정치와 virtual ledger가 변경되지 않는다.
+
+    injection failure test: 주입 함수가 호출되지 않았음을 ledger 변화 0으로 단언.
+    """
+    from tests.support.perf_inject import virtual_totals
+
+    before = virtual_totals()
+    sample = perf_budget.sample(lambda: check_parity(_PAPER_TRACE, _matching_backtest_fills()))
+    after = virtual_totals()
+
+    assert after == before, "virtual ledger must not move without injection"
+    assert sample.cpu_ms < 100.0  # 정상 측정치
+    sample.result.raise_if_mismatch()
