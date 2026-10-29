@@ -37,6 +37,7 @@ from src.core.strategy.script_facade import (
     script_signal_series,
 )
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def _candles(n: int) -> list[dict[str, float]]:
@@ -93,11 +94,25 @@ def test_script_path_fires_on_exactly_the_same_bars_as_cond_v2(expression: str) 
     assert True in _fires(cond_v2) and False in _fires(cond_v2)
 
 
-def test_both_paths_agree_on_the_first_bar_that_fires() -> None:
+def test_both_paths_agree_on_the_first_bar_that_fires(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The bulk parity above isn't a coincidence of loose thresholds — both
     paths are built from the same `IncrementalIndicator` instances, so they
     agree on the exact bar index of the first `True` fire, not just on
-    aggregate counts."""
+    aggregate counts.
+
+    0-convergence (task-18393): the first-bar assertion is repeated with
+    `perf_budget.best_of()` (N=5, take minimum) so Windows quantisation
+    tick (15.6 ms) cannot shake the measurement — the budget/assertion
+    numbers stay unchanged.
+
+    Gate-red reproduction (task-18395): inject 10× virtual delay via
+    `virtual_delayed_sync` on the script path; the same budget assertion
+    must go red, proving the check is a real regression detector, not
+    vacuously green.
+    """
     expression = "RSI > 50 AND SMA_timeperiod10 > 90"
     cond_v2 = condition_signal_series(expression, CANDLES)
     script = script_signal_series(expression, CANDLES)
@@ -105,6 +120,27 @@ def test_both_paths_agree_on_the_first_bar_that_fires() -> None:
     assert script[first_true] is True
     assert all(v is not True for v in cond_v2[:first_true])
     assert all(v is not True for v in script[:first_true])
+
+    # 0-convergence: best_of(N=5) picks the minimum cpu_ms across runs,
+    # stabilising the measurement against Windows 15.6 ms quantisation.
+    normal = perf_budget.best_of(lambda: script_signal_series(expression, CANDLES), n=5, warmup=1)
+    # Budget floor: a single call must finish well under 50 ms CPU.
+    assert normal.cpu_ms < 50.0, f"0-convergence budget exceeded: {normal.cpu_ms:.3f}ms"
+
+    # Gate-red: inject 10× virtual CPU delay into the script path.
+    # The real script_signal_series calls bridge_cond_v2 → compile → execute;
+    # we patch the execute step to add 0.5 s virtual CPU per call (10× budget).
+    original_execute = script_facade.execute
+
+    def _delayed_execute(*args: object, **kwargs: object) -> object:
+        return virtual_delayed_sync(original_execute, 0.5)(*args, **kwargs)
+
+    monkeypatch.setattr(script_facade, "execute", _delayed_execute)
+
+    delayed = perf_budget.best_of(lambda: script_signal_series(expression, CANDLES), n=5, warmup=1)
+    assert delayed.cpu_ms >= 500.0, (
+        f"virtual delay not injected: cpu={delayed.cpu_ms:.3f}ms expected ≥500ms"
+    )
 
 
 # ---- (c) fail-closed: no silent fallback ----
