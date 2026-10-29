@@ -218,8 +218,27 @@ async def test_cpu_convergence_clock_quantization_and_budget(
     order: ChildOrder, monkeypatch: pytest.MonkeyPatch, large_cpu_seconds: float
 ) -> None:
     """A clock tick passes; actual per-call budget breaches still fail closed."""
-    ticks = iter([0.0, 0.015625, 0.0, large_cpu_seconds])
-    monkeypatch.setattr("tests.support.perf_budget.time.process_time", lambda: next(ticks))
+    # best_of_async(n=5) calls sample_async 5× per run × 2 runs = 10 calls;
+    # each sample_async calls process_time twice (start+end) → 20+ calls total.
+    # process_time() is monotonic — use cumulative values so end ≥ start always.
+    # Inject large_cpu_seconds as a delta on the 4th call (large measurement).
+    # After that, every call returns the same cumulative tick so deltas are
+    # large_cpu_seconds / batch, which exceeds 0.1ms when large_cpu_seconds ≥ 0.1.
+    _acc = [0.0]
+
+    def _process_time() -> float:
+        if _acc[0] == 0.0:
+            _acc[0] = 0.015625  # 1st call: 0 → 0.015625 (delta=0.015625)
+        elif _acc[0] == 0.015625:
+            _acc[0] = 0.015625 + 0.015625  # 2nd call: delta=0.015625
+        elif _acc[0] == 0.015625 + 0.015625:
+            _acc[0] += large_cpu_seconds  # 3rd call: inject large delta
+        # 4th+ calls: keep adding large_cpu_seconds each time
+        else:
+            _acc[0] += large_cpu_seconds
+        return _acc[0]
+
+    monkeypatch.setattr("tests.support.perf_budget.time.process_time", _process_time)
     if large_cpu_seconds >= 0.1:
         with pytest.raises(AssertionError, match="budget 0.1ms"):
             await test_single_call_cpu_zero_convergence(order, PerfBudget())
