@@ -155,7 +155,10 @@ async def test_tick_all_running_ticks_every_paper_execution(pool):
     assert await _fsm_state(pool, exec_b) == "HOLDING"
 
 
-async def test_one_failing_execution_does_not_block_the_others(pool):
+@pytest.mark.parametrize("failure", [RuntimeError, ValueError, TimeoutError])
+async def test_one_failing_execution_does_not_block_the_others(pool, monkeypatch, failure):
+    from tests.support.perf_inject import virtual_delayed_async
+
     # risk_decision.tenant_id FK가 tenant(id)를 가리킨다(94da854f522f) — 두
     # 실행 모두 위험 단계에 도달하므로 tenant 행이 있는 사용자가 필요하다.
     user_ok = await create_test_tenant(pool)
@@ -165,7 +168,7 @@ async def test_one_failing_execution_does_not_block_the_others(pool):
 
     class ExplodingAdapter(FakeExchangeAdapter):
         async def get_ohlcv(self, symbol, timeframe, limit=100):
-            raise RuntimeError("거래소 장애(테스트)")
+            raise failure("거래소 장애(테스트)")
 
     scheduler = _scheduler(
         pool,
@@ -174,13 +177,30 @@ async def test_one_failing_execution_does_not_block_the_others(pool):
         ),
     )
 
-    report = await scheduler.tick_all_running()
+    async def measure_and_assert_budget():
+        # DB I/O uses wall seconds, not quantized process CPU time. Keep 2.0s.
+        elapsed_sec, report = await _measure_tick_all_running_seconds(scheduler)
+        assert exec_ok in report.ticked
+        assert exec_broken in report.failed
+        assert failure.__name__ in report.failed[exec_broken]
+        assert exec_ok not in report.failed
+        assert exec_broken not in report.ticked
+        assert await _fsm_state(pool, exec_ok) == "HOLDING"
+        assert await _fsm_state(pool, exec_broken) == "IDLE"
+        assert elapsed_sec < 2.0, f"latency {elapsed_sec:.3f}s exceeded 2.0s budget"
+        return elapsed_sec
 
-    assert exec_ok in report.ticked
-    assert exec_broken in report.failed
-    assert "RuntimeError" in report.failed[exec_broken]
-    assert await _fsm_state(pool, exec_ok) == "HOLDING"
-    assert await _fsm_state(pool, exec_broken) == "IDLE"
+    elapsed_sec = await measure_and_assert_budget()
+    print(f"scheduler wall latency={elapsed_sec:.6f}s budget=2.0s")
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            scheduler,
+            "tick_all_running",
+            virtual_delayed_async(scheduler.tick_all_running, 20.0),
+        )
+        with pytest.raises(AssertionError, match="exceeded 2.0s budget") as red:
+            await measure_and_assert_budget()
+        print(f"gate-red: {red.value}")
 
 
 @pytest.mark.perf
