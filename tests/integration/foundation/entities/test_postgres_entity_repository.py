@@ -35,7 +35,7 @@ from src.foundation.entities.domain.hierarchy import HierarchyViolationError
 from tests.integration.conftest import create_test_tenant, create_test_user
 from tests.integration.foundation.entities.conftest import build_hierarchy, now_utc
 from tests.support.perf_budget import PerfBudget
-from tests.support.perf_inject import delayed_async
+from tests.support.perf_inject import virtual_delayed_async
 
 
 async def test_create_and_get_roundtrip_across_all_four_levels(pool, repo):
@@ -54,7 +54,13 @@ async def test_create_and_get_roundtrip_across_all_four_levels(pool, repo):
     assert fetched_sub_account == seeded.sub_account
 
 
-async def test_get_nonexistent_id_returns_none_at_every_level(pool, repo):
+async def test_get_nonexistent_id_returns_none_at_every_level(pool, repo, perf_budget: PerfBudget):
+    """음성 테스트 0: nonexistent ID 조회는 항상 None이며, CPU 부하도 0에 수렴한다.
+
+    CPU 양자화 검증: 단일 호출의 CPU 시간은 Windows에서 15.6ms 틱으로 양자화되므로
+    단발 sample이 0이 아닐 수 있다. samples_async(5) 최소값으로 양자화 노이즈를
+    견뎌낸다.
+    """
     tenant_id = await create_test_user(pool)
     missing = uuid4()
 
@@ -62,6 +68,16 @@ async def test_get_nonexistent_id_returns_none_at_every_level(pool, repo):
     assert await repo.get_fund(tenant_id, missing) is None
     assert await repo.get_portfolio(tenant_id, missing) is None
     assert await repo.get_sub_account(tenant_id, missing) is None
+
+    # CPU 0 수렴 — samples_async(5) 최소값이 양자화 tick에 흔들리지 않게
+    samples = await perf_budget.samples_async(
+        lambda: repo.get_legal_entity(tenant_id, missing), n=5
+    )
+    cpu_sample = min(samples, key=lambda s: s.cpu_ms)
+    assert cpu_sample.cpu_ms < 5.0, (
+        f"get_legal_entity(nonexistent) CPU 시간 {cpu_sample.cpu_ms:.3f}ms가 "
+        f"예산 5ms를 초과했습니다 — 단일 SELECT이므로 CPU 부하가 없어야 합니다"
+    )
 
 
 @pytest.mark.perf
@@ -111,20 +127,23 @@ async def test_get_nonexistent_id_goes_red_with_io_delay_injection(
     """gate-red reproduction: asyncpg.Connection.fetchrow 에 IO 지연(2.0s)을
     주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
 
-    `fetchrow` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
-    주입 — nonexistent 조회는 I/O 바인딩 연산이므로 wall-clock 기반
-    PerfBudget이 지연을 잡는다. 정상 입력에서 통과하는 것이 테스트의 허수
-    (trivial pass)가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    `fetchrow` 를 `virtual_delayed_async` 로 감싸 1회 호출당 2초 가상 IO 지연을
+    주입 — 실제 sleep 없이 virtual ledger에 wall_ms를 더한다. PerfBudget이
+    virtual_totals()를 읽어 sample에 합치므로 실제 지연 없이도 red 경로를
+    검증한다. (실제 sleep은 CI 턴 예산을 태우므로 금지.) 단언/마커 삭제와
+    예산 완화 금지.
     """
     original_fetchrow = asyncpg.Connection.fetchrow
-    monkeypatch.setattr(asyncpg.Connection, "fetchrow", delayed_async(original_fetchrow, 2.0))
+    monkeypatch.setattr(
+        asyncpg.Connection, "fetchrow", virtual_delayed_async(original_fetchrow, 2.0)
+    )
 
     tenant_id = await create_test_user(pool)
     missing = uuid4()
 
     # 지연 주입 후 → wall-clock 이 예산 초과해야 함 (red)
     sample = await perf_budget.sample_async(lambda: repo.get_legal_entity(tenant_id, missing))
-    # 2초 지연 × 1회 → wall_ms는 최소 1500ms 이상이어야 함
+    # 2초 가상 지연 → wall_ms는 최소 1500ms 이상이어야 함
     assert sample.wall_ms >= 1500, (
         f"지연 주입 후 wall 시간 {sample.wall_ms:.1f}ms — "
         f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion)"
