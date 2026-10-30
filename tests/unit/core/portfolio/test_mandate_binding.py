@@ -161,6 +161,41 @@ def test_forbidden_asset_denies_exactly(
     )
 
 
+@pytest.mark.perf
+def test_forbidden_asset_gate_red_with_virtual_delay(perf_budget: PerfBudget) -> None:
+    """ADR-2026-09-09-C D2 gate-red reproduction: inject 10x budget (50ms) via
+    ``virtual_delayed_sync`` and assert the same ``< 5.0`` check turns red.
+
+    ``virtual_delayed_sync`` adds delay to the virtual ledger (cpu+wall) without
+    busy-waiting or sleeping — the test completes in < 100ms while the measurement
+    reads 50ms.  This proves the budget assertion has *detection power*, not just
+    a vacuous ``< 5.0`` that always passes.
+    """
+    m = mandate(forbidden_assets=["SANCTIONED/USDT"])
+    a = agg()
+
+    # 10× the 5ms budget → 50ms virtual CPU/wall delay.
+    delayed_bind = virtual_delayed_sync(bind, seconds=0.05)
+
+    # 정상 입력은 녹색 (budget 5ms)
+    sample_ok = perf_budget.sample(
+        lambda: bind(
+            qty=Decimal("10"), price=Decimal("250"), symbol="SANCTIONED/USDT", agg=a, mandate=m
+        )
+    )
+    assert sample_ok.cpu_ms < 5.0, perf_budget.describe(sample_ok, budget_ms=5.0)
+
+    # 지연 주입은 적색 — 같은 단언이 AssertionError를 일으켜야 함.
+    with pytest.raises(AssertionError):
+        sample_delayed = perf_budget.sample(
+            lambda: delayed_bind(
+                qty=Decimal("10"), price=Decimal("250"), symbol="SANCTIONED/USDT", agg=a, mandate=m
+            )
+        )
+        assert sample_delayed.cpu_ms < 5.0, perf_budget.describe(sample_delayed, budget_ms=5.0)
+    # budget 5ms 의 10배 지연 → 측정치 ≥ 50ms 이므로 < 5.0 단언이 반드시 실패함.
+
+
 # --- (c) single-instrument clamp exact value ---------------------------------
 
 
