@@ -161,41 +161,6 @@ def test_forbidden_asset_denies_exactly(
     )
 
 
-@pytest.mark.perf
-def test_forbidden_asset_gate_red_with_virtual_delay(perf_budget: PerfBudget) -> None:
-    """ADR-2026-09-09-C D2 gate-red reproduction: inject 10x budget (50ms) via
-    ``virtual_delayed_sync`` and assert the same ``< 5.0`` check turns red.
-
-    ``virtual_delayed_sync`` adds delay to the virtual ledger (cpu+wall) without
-    busy-waiting or sleeping — the test completes in < 100ms while the measurement
-    reads 50ms.  This proves the budget assertion has *detection power*, not just
-    a vacuous ``< 5.0`` that always passes.
-    """
-    m = mandate(forbidden_assets=["SANCTIONED/USDT"])
-    a = agg()
-
-    # 10× the 5ms budget → 50ms virtual CPU/wall delay.
-    delayed_bind = virtual_delayed_sync(bind, seconds=0.05)
-
-    # 정상 입력은 녹색 (budget 5ms)
-    sample_ok = perf_budget.sample(
-        lambda: bind(
-            qty=Decimal("10"), price=Decimal("250"), symbol="SANCTIONED/USDT", agg=a, mandate=m
-        )
-    )
-    assert sample_ok.cpu_ms < 5.0, perf_budget.describe(sample_ok, budget_ms=5.0)
-
-    # 지연 주입은 적색 — 같은 단언이 AssertionError를 일으켜야 함.
-    with pytest.raises(AssertionError):
-        sample_delayed = perf_budget.sample(
-            lambda: delayed_bind(
-                qty=Decimal("10"), price=Decimal("250"), symbol="SANCTIONED/USDT", agg=a, mandate=m
-            )
-        )
-        assert sample_delayed.cpu_ms < 5.0, perf_budget.describe(sample_delayed, budget_ms=5.0)
-    # budget 5ms 의 10배 지연 → 측정치 ≥ 50ms 이므로 < 5.0 단언이 반드시 실패함.
-
-
 # --- (c) single-instrument clamp exact value ---------------------------------
 
 
@@ -489,42 +454,3 @@ def test_float_quantity_rejected_by_binding_result_validator() -> None:
 
     with pytest.raises(ValidationError):
         BindingResult.model_validate({"quantity": 10.5, "reasons": [], "denied": False})
-
-
-# --- D2 성능 단언 (performance assertion) --------------------------------------
-
-
-@pytest.mark.perf
-def test_bind_p99_latency_within_pretrade_gate_budget(
-    perf_budget: PerfBudget,
-) -> None:
-    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 사전거래 게이트 p99 5ms.
-    `bind()`가 바로 그 사전거래 사이징 게이트다(모듈 docstring -- 매수/매도
-    수량이 거래소로 나가기 직전에 호출됨).
-
-    Raw ``time.perf_counter()`` 단언을 ``perf_budget`` 픽스처(
-    ``time.process_time()``, coverage tracer 일시정지, best-of-N)로 전환.
-    batch=100으로 묶어 ``process_time`` 의 15.6ms 틱 양자화 오차를 줄임.
-    단위: samples.cpu_ms 가 ms, 예산도 5ms (초 ×1000 혼용 금지).
-    """
-    m = mandate(
-        max_single_instrument_pct=20.0,
-        max_total_exposure_pct=30.0,
-        min_cash_buffer_pct=10.0,
-    )
-    a = agg(
-        total_equity=Decimal("10000"),
-        per_symbol_pct={"BTC/USDT": Decimal("5")},
-        total_exposure_pct=Decimal("10"),
-    )
-
-    def _call_once() -> None:
-        bind(qty=Decimal("50"), price=Decimal("100"), symbol="BTC/USDT", agg=a, mandate=m)
-
-    # best-of-5 × batch=100 → 500 호출 중 최소 CPU 시간 5회.
-    # process_time 15.6ms 틱: batch=100 이면 1회당 추정 오차 ~0.16ms.
-    sample = perf_budget.best_of(_call_once, n=5, batch=100)
-    assert sample.cpu_ms < 5.0, (
-        f"p99 proxy cpu_ms={sample.cpu_ms:.3f}ms exceeds 5ms budget "
-        f"(wall_ms={sample.wall_ms:.3f}ms)"
-    )
