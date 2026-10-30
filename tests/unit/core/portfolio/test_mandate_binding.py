@@ -10,6 +10,7 @@ calls must each fail some test here.
 from __future__ import annotations
 
 import hashlib
+import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -30,6 +31,7 @@ from src.foundation.mandates.contracts.v1 import (
     MandateRevisionView,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _AS_OF = datetime(2026, 9, 9, tzinfo=UTC)
 
@@ -112,7 +114,10 @@ def agg(
 
 
 @pytest.mark.perf
-def test_forbidden_asset_denies_exactly(perf_budget: PerfBudget) -> None:
+def test_forbidden_asset_denies_exactly(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     m = mandate(forbidden_assets=["SANCTIONED/USDT"])
     a = agg()
 
@@ -133,6 +138,27 @@ def test_forbidden_asset_denies_exactly(perf_budget: PerfBudget) -> None:
     # best-of-5 x batch=100 so one quantized process_time tick cannot flip the result.
     sample = perf_budget.best_of(_call_once, n=5, batch=100)
     assert sample.cpu_ms < 5.0, perf_budget.describe(sample, budget_ms=5.0)
+
+    # Gate-red reproduction: inject 50 ms virtual CPU delay (10x the 5 ms budget).
+    # The measurement must read >= 5.0 ms, proving the budget gate detects delay.
+    slow_bind = virtual_delayed_sync(bind, 0.05)  # noqa: F841
+    monkeypatch.setattr(sys.modules[__name__], "bind", slow_bind)
+
+    result_red = bind(
+        qty=Decimal("10"),
+        price=Decimal("250"),
+        symbol="SANCTIONED/USDT",
+        agg=a,
+        mandate=m,
+    )
+    assert result_red.denied is True
+    assert result_red.quantity == Decimal("0")
+    assert result_red.reasons == [POLICY_FORBIDDEN_ASSET]
+
+    sample_red = perf_budget.best_of(_call_once, n=5, batch=100)
+    assert sample_red.cpu_ms >= 5.0, (
+        f"gate-red failed: cpu_ms={sample_red.cpu_ms:.3f}ms expected >= 5.0ms (virtual delay 50 ms)"
+    )
 
 
 # --- (c) single-instrument clamp exact value ---------------------------------
