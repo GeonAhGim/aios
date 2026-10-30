@@ -48,7 +48,7 @@ def _add_virtual(cpu_s: float, wall_s: float) -> None:
     _virtual_wall_ns += round(wall_s * 1e9)
 
 
-def virtual_delayed_async[**P, R](
+def virtual_delayed_async(  # noqa: UP047
     original: Callable[P, Awaitable[R]], seconds: float
 ) -> Callable[P, Awaitable[R]]:
     """Like ``delayed_async`` but adds ``seconds`` to the wall reading without sleeping."""
@@ -60,7 +60,9 @@ def virtual_delayed_async[**P, R](
     return wrapper
 
 
-def virtual_delayed_sync[**P, R](original: Callable[P, R], seconds: float) -> Callable[P, R]:
+def virtual_delayed_sync(  # noqa: UP047
+    original: Callable[P, R], seconds: float
+) -> Callable[P, R]:
     """Like ``delayed_sync`` but adds ``seconds`` to the cpu and wall readings without spinning."""
 
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -70,7 +72,7 @@ def virtual_delayed_sync[**P, R](original: Callable[P, R], seconds: float) -> Ca
     return wrapper
 
 
-def delayed_async[**P, R](
+def delayed_async(  # noqa: UP047
     original: Callable[P, Awaitable[R]], seconds: float
 ) -> Callable[P, Awaitable[R]]:
     """Return ``original`` preceded by an ``asyncio.sleep(seconds)`` (wall-clock slowdown)."""
@@ -82,7 +84,9 @@ def delayed_async[**P, R](
     return wrapper
 
 
-def delayed_sync[**P, R](original: Callable[P, R], seconds: float) -> Callable[P, R]:
+def delayed_sync(  # noqa: UP047
+    original: Callable[P, R], seconds: float
+) -> Callable[P, R]:
     """Return ``original`` preceded by a busy wait of ``seconds`` (CPU-time slowdown)."""
 
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
