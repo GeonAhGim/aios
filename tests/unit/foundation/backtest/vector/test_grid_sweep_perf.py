@@ -88,11 +88,9 @@ def test_grid_sweep_normalized_performance_threshold(perf_budget) -> None:
     baseline_combos = {"S0": _buy_and_hold_signal(n)}
 
     def run_baseline():
-        return sweep_grid(
-            cols, baseline_combos, config, timeframe=Timeframe.M1, initial_cash=_CASH
-        )
+        return sweep_grid(cols, baseline_combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
 
-    baseline = perf_budget.best_of(run_baseline, n=3, batch=128)
+    baseline = perf_budget.best_of(run_baseline, n=5, batch=128)
     assert baseline.cpu_ms > 0, "Baseline batch must resolve the CPU timer tick"
 
     combo_count = 1000
@@ -101,7 +99,7 @@ def test_grid_sweep_normalized_performance_threshold(perf_budget) -> None:
     def run_sweep():
         return sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
 
-    measured = perf_budget.best_of(run_sweep, n=3, batch=2)
+    measured = perf_budget.best_of(run_sweep, n=5, batch=2)
     threshold_ms = baseline.cpu_ms * combo_count * 3.0
     assert len(measured.result.results) == combo_count
     assert measured.cpu_ms <= threshold_ms, perf_budget.describe(measured, budget_ms=threshold_ms)
