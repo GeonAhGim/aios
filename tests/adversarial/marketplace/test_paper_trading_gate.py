@@ -339,3 +339,37 @@ async def test_gate_red_reproduction_p95_budget_catches_injected_delay(
         )
 
     assert "ratio" in str(exc_info.value), "AssertionError가 'ratio' 단언에서 발생해야 함"
+
+
+@pytest.mark.perf
+async def test_zero_virtual_delay_does_not_trigger_budget_assertion(
+    pool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """변형 검증 — 주입 seconds를 0으로 두면 지연 주입에도 예산 단언이 통과해야 한다.
+
+    virtual_delayed_async가 실제로 sleep/busy-wait 없이 ledger만 조작함을 증명한다.
+    seconds=0일 때 virtual_totals()가 0이므로 RelativeBudget은 정상 시간만 측정한다.
+    """
+    seller = await create_test_user(pool)
+    strategy_id, version = await _create_strategy(pool, seller)
+    await _insert_execution(pool, strategy_id, version, seller, days_ago=120)
+
+    eligibility_fn = partial(check_paper_trading_eligibility, pool, strategy_id, version, seller)
+
+    from tests.support.perf_inject import virtual_delayed_async
+
+    original_fetchval = asyncpg.Connection.fetchval
+
+    async def zero_delay_fetchval(self, *args, **kwargs):
+        return await virtual_delayed_async(original_fetchval, 0.0)(self, *args, **kwargs)
+
+    monkeypatch.setattr(asyncpg.Connection, "fetchval", zero_delay_fetchval)
+
+    # seconds=0이면 budget.assert_within_async가 AssertionError를 던지지 않아야 함
+    await RelativeBudget().assert_within_async(
+        eligibility_fn,
+        n=5,
+        max_ratio=40,
+        label="check_paper_trading_eligibility(zero-delay)",
+    )
