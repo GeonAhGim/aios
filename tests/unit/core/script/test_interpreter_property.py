@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import random
+import sys
 from fractions import Fraction
 from typing import cast
 
@@ -56,6 +57,8 @@ from src.core.script.runtime import (
     execute,
 )
 from src.core.script.typing.types import Type, cmp_result, promote_bool, promote_numeric
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 BARS = 24
 SERIES_INPUTS = ("close", "high")
@@ -344,7 +347,18 @@ def test_interpreter_matches_reference_on_random_programs(seed: int) -> None:
     assert _check_program(seed) >= 3
 
 
-def test_generator_exercises_every_construct() -> None:
+def test_generator_exercises_every_construct(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정상 입력: 생성기 모든 AST.construct 탐색 + best_of 0수렴 단언 + 가상지연 적색 재현.
+
+    정상 입력에서 `Gen.program()` 한 호출의 CPU 시간이 Windows 양자화 tick
+    (약 15.6ms) 아래로 수렴하는지를 `best_of(5)`로 검증한다(단발 sample은
+    tick 1회에 흔들린다). 동일한 입력을 `virtual_delayed_sync`로 CPU 예산의
+    10배(0.5s)만큼 가상 지연한 뒤 측정하면 `best_of` 최소값이 예산을 넘겨
+    적색으로 전환됨을 확인한다(게이트 적색 재현).
+    """
     kinds: set[str] = set()
     ops: set[str] = set()
 
@@ -383,6 +397,38 @@ def test_generator_exercises_every_construct() -> None:
         "math.max",
         "ta.sma",
     }
+
+    # --- perf: best_of 0수렴 (단위 예산 5ms) ---
+    sample = perf_budget.best_of(
+        lambda: Gen(random.Random(42)).program(),
+        n=5,
+        warmup=1,
+    )
+    assert sample.cpu_ms < 5, (
+        f"Gen.program() should converge to 0 CPU — "
+        f"best_of min cpu={sample.cpu_ms:.3f}ms >= 5ms budget"
+    )
+
+    # --- gate-red: 10x 예산 가상지연(monkeypatch) → 적색 ---
+    # budget 5ms의 10배 = 0.5s 가상 CPU 지연을 주입하면 best_of 최소값이
+    # 500ms에 가까워져 예산 5ms를 넘긴다(적색 재현).
+    # Gen.program()에서 Program을 직접 import했으므로 이 모듈 네임스페이스를
+    # 패치해야 반영된다.
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "Program",
+        virtual_delayed_sync(Program, 0.5),
+    )
+
+    red_sample = perf_budget.best_of(
+        lambda: Gen(random.Random(42)).program(),
+        n=5,
+        warmup=1,
+    )
+    assert red_sample.cpu_ms >= 5, (
+        f"virtual 500ms delay should push cpu >= 5ms budget (red repro) — "
+        f"got cpu={red_sample.cpu_ms:.3f}ms"
+    )
 
 
 def test_reference_detects_a_deliberately_wrong_semantics() -> None:
