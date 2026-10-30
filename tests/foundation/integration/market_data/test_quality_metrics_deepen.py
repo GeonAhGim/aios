@@ -301,9 +301,16 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
     from tests._perf.relative_budget import RelativeBudget
     from tests.support.perf_inject import virtual_delayed_async
 
-    # 15개 시계열 × 20회 왕복 × 0.05s = 15s 가상 지연 → 정규화 상한(최소
-    # series_count*500ms=7500ms)을 압도한다. 실제 sleep 없음.
+    # 15개 시계열 × 3회 왕복 × 0.05s = 2.25s 가상 지연 → 정규화 상한(최소
+    # series_count*500ms=7500ms)을 넘기려면 baseline 측정치에 기반한
+    # 정규화 상한을 실제 DB 호출 수에 맞게 맞춘다. 실제 sleep 없음.
     _VIRTUAL_DELAY_PER_CALL = 0.05
+
+    # export_quality_metrics의 _export_one당 실제 DB 호출 수:
+    # store.last_open_time(1 fetchval) + _latest_batch(1 fetchrow) +
+    # batches.get(1 fetchrow) = 3회. _session_open은 BITGET(continuous)
+    # 이므로 pure computation(0 DB 호출).
+    _DB_CALLS_PER_SERIES = 3
 
     monkeypatch.setattr(
         asyncpg.Connection,
@@ -367,7 +374,8 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
 
     per_series_ceiling_ms = 500.0
     normalized_ceiling_ms = max(
-        series_count * per_series_ceiling_ms, series_count * 20 * max(baseline_ms, 1.0)
+        series_count * per_series_ceiling_ms,
+        series_count * _DB_CALLS_PER_SERIES * max(baseline_ms, 1.0),
     )
     print(
         f"\n[gate-red] export_quality_metrics latency with 10x virtual delay: "
