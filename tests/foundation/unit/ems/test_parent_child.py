@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable
 from decimal import Decimal
 from unittest.mock import patch
 from uuid import uuid4
@@ -23,6 +21,8 @@ from src.foundation.ems.domain.parent_child import (
     compute_child_state,
     validate_aggregate_fills,
 )
+from tests._perf.relative_budget import RelativeBudget
+from tests.support.perf_budget import PerfBudget
 
 _PARENT_QTY = Decimal("100")
 
@@ -187,19 +187,6 @@ def test_failure_injection_audit_appender_defect_rejects_on_domain() -> None:
         assert_slice_within_parent_qty(_PARENT_QTY, Decimal("60"), Decimal("50"))
 
 
-def _median_elapsed_seconds(fn: Callable[[], None], *, trials: int = 3) -> float:
-    """3-trial median wall-clock elapsed time for `fn()` -- a single trial
-    is vulnerable to one scheduling hiccup (GC pause, CI host contention);
-    the median of 3 discards a single outlier trial in either direction."""
-    samples = []
-    for _ in range(trials):
-        start = time.perf_counter()
-        fn()
-        samples.append(time.perf_counter() - start)
-    samples.sort()
-    return samples[len(samples) // 2]
-
-
 def test_numerical_performance_assertion_baseline_ratio() -> None:
     """Numerical performance assertion: aggregate computation on
     10,000 children must complete within a baseline ratio.
@@ -238,19 +225,17 @@ def test_numerical_performance_assertion_baseline_ratio() -> None:
     def _aggregate() -> None:
         aggregate_parent_state(_PARENT_QTY, OrderStatus.SUBMITTED, large_children)
 
-    reference_elapsed = _median_elapsed_seconds(_reference_loop)
-    aggregate_elapsed = _median_elapsed_seconds(_aggregate)
-
-    # Ratio assertion: the real aggregation (fill-qty summation + status
-    # rollup) must not cost more than 20x a trivial per-item loop over the
-    # same n -- generous slack for the extra branching/comparisons
-    # aggregate_parent_state does per child, without pinning an absolute
-    # per-item cost that would vary across CI hosts.
-    ratio = aggregate_elapsed / reference_elapsed if reference_elapsed > 0 else 0
-    assert ratio < 20, (
-        f"Performance regression: aggregating {n_large} children took {ratio:.1f}x "
-        f"the reference per-item loop over the same n (reference="
-        f"{reference_elapsed:.4f}s, aggregate={aggregate_elapsed:.4f}s)"
+    # Ratio assertion via RelativeBudget (self-calibrating): the real aggregation
+    # (fill-qty summation + status rollup) must not cost more than 20x a trivial
+    # per-item loop over the same n -- generous slack for the extra
+    # branching/comparisons, without pinning an absolute per-item cost that would
+    # vary across CI hosts.
+    RelativeBudget().assert_within(
+        _aggregate,
+        max_ratio=20,
+        mode="wall",
+        calibration_fn=_reference_loop,
+        label=f"aggregate_parent_state over {n_large} children",
     )
 
 
@@ -431,64 +416,41 @@ class TestAggregateParentStateEdgeCases:
 # covers aggregate_parent_state.
 
 
-def _best_of_n_elapsed_seconds(fn: Callable[[], None], *, trials: int = 5) -> float:
-    """Best-of-`trials` (minimum) wall-clock elapsed time for `fn()`.
-
-    The minimum, rather than a mean or a single sample, discards scheduling
-    noise (GC pause, CI host contention) that can only ever slow a trial
-    down, never speed it up -- so the fastest observed trial is the closest
-    proxy for the function's own cost.
-    """
-    return min(_timed_trial(fn) for _ in range(trials))
-
-
-def _timed_trial(fn: Callable[[], None]) -> float:
-    start = time.perf_counter()
-    fn()
-    return time.perf_counter() - start
-
-
-def test_validate_aggregate_fills_performance_bounded_for_1000_children() -> None:
+def test_validate_aggregate_fills_performance_bounded_for_1000_children(
+    perf_budget: PerfBudget,
+) -> None:
     """Numeric performance assertion (D2 floor): `validate_aggregate_fills`
     over 1,000 children must stay well under a tolerant absolute budget.
 
-    Best-of-5 avoids a flaky tight wall-clock assertion -- a single slow
-    trial (GC pause, CI host contention) would otherwise fail a healthy
-    implementation. The 250ms budget is generous relative to the ~0.1ms
-    this function actually takes on 1,000 children (measured locally); it
-    exists to catch an accidental O(n^2) regression or a stray I/O call,
-    not to pin a tight per-item cost that would vary across CI hosts.
+    Measured through the `perf_budget` fixture (best-of-N, CPU time). The
+    250ms budget is generous relative to the ~0.1ms this function takes on
+    1,000 children; it exists to catch an accidental O(n^2) regression or a
+    stray I/O call, not to pin a tight per-item cost across CI hosts.
     """
     parent_id = uuid4()
     children = [ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(1_000)]
 
-    elapsed = _best_of_n_elapsed_seconds(
-        lambda: validate_aggregate_fills(parent_id, children, Decimal("1000"))
-    )
-
-    assert elapsed < 0.25, (
-        f"Performance regression: validate_aggregate_fills over 1,000 children "
-        f"took {elapsed * 1000:.1f}ms (best of 5), exceeding the 250ms budget"
+    perf_budget.assert_within(
+        lambda: validate_aggregate_fills(parent_id, children, Decimal("1000")),
+        budget_ms=250,
+        label="validate_aggregate_fills over 1,000 children",
     )
 
 
-def test_compute_child_state_performance_bounded_for_1000_children() -> None:
+def test_compute_child_state_performance_bounded_for_1000_children(
+    perf_budget: PerfBudget,
+) -> None:
     """Numeric performance assertion (D2 floor): `compute_child_state` over
     1,000 children must stay well under a tolerant absolute budget.
 
-    See `test_validate_aggregate_fills_performance_bounded_for_1000_children`
-    for the best-of-5/absolute-budget rationale -- `compute_child_state` is a
-    thin wrapper around `validate_aggregate_fills`, so its own budget mirrors
-    that test's.
+    `compute_child_state` is a thin wrapper around `validate_aggregate_fills`,
+    so its budget mirrors that test's (measured via `perf_budget`).
     """
     parent_id = uuid4()
     children = [ChildFillState(uuid4(), Decimal("1"), OrderStatus.FILLED) for _ in range(1_000)]
 
-    elapsed = _best_of_n_elapsed_seconds(
-        lambda: compute_child_state(parent_id, children, Decimal("1000"))
-    )
-
-    assert elapsed < 0.25, (
-        f"Performance regression: compute_child_state over 1,000 children "
-        f"took {elapsed * 1000:.1f}ms (best of 5), exceeding the 250ms budget"
+    perf_budget.assert_within(
+        lambda: compute_child_state(parent_id, children, Decimal("1000")),
+        budget_ms=250,
+        label="compute_child_state over 1,000 children",
     )
