@@ -152,7 +152,6 @@ def run_base_backup(
         # 원인 제거 — B-2).
         "-Ft",
         "-z",
-        "-Xs",
         "-P",
         "-l",
         backup_label,
