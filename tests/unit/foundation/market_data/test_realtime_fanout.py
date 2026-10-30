@@ -33,6 +33,7 @@ from src.foundation.market_data.domain.entitlement.policy import (
     FeedRequest,
 )
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_async
 
 _TENANT = UUID("11111111-1111-1111-1111-111111111111")
 _SUBJECT = UUID("33333333-3333-3333-3333-333333333333")
@@ -102,7 +103,16 @@ async def test_unauthorized_subscriber_receives_zero_of_100_and_leaves_denial_re
         assert labels == {"reason": EntitlementDenialReason.NO_GRANT.value}
 
 
-async def test_authorized_subscriber_receives_all_published_within_capacity() -> None:
+@pytest.mark.perf
+async def test_authorized_subscriber_receives_all_published_within_capacity(
+    perf_budget: PerfBudget,
+) -> None:
+    """CPU 예산 단언: `publish()` 호출 1회당 CPU 시간이 양자화 오차로 0ms 수렴하지
+    않도록 `best_of_async(5)`로 최소값을 채택한다. 예산은 1ms — 단일 구독자·단일
+    feed 경로에서 이보다 느리다면 hot path 레그레션이다.
+
+    기존 정적 단언(queue 크기·메트릭 카운터)은 그대로 유지하고, CPU 측정을
+    추가로 넣는다(단언/마커 삭제·예산 완화 금지)."""
     spy = _SpyMetrics()
     fanout = RealtimeFanout(metrics=spy)
     feed = _feed()
@@ -115,6 +125,52 @@ async def test_authorized_subscriber_receives_all_published_within_capacity() ->
     assert len(spy.counters) == 10
     published = metric_names.MARKET_DATA_FANOUT_PUBLISHED_COUNT_TOTAL
     assert all(name == published for name, _ in spy.counters)
+
+    # CPU 예산 단언 — best_of_async로 Windows 양자화 tick에 흔들리지 않게 한다.
+    sample = await perf_budget.best_of_async(
+        lambda: fanout.publish(feed, {"px": 0}, as_of=_AS_OF),
+        n=5,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"publish 1회 CPU 시간이 예산(1ms)을 넘었습니다: {sample.cpu_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_gate_red_repro_virtual_delay_exceeds_budget(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현 — `virtual_delayed_async`로 0.5ms 가상 지연을 주입하면
+    같은 측정/단언이 적색으로 전환된다. 지연 주입이 측정치에 반영되는지
+    검증하는 gate-red reproduction 테스트."""
+    spy = _SpyMetrics()
+    fanout = RealtimeFanout(metrics=spy)
+    feed = _feed()
+    subscription = fanout.subscribe(_subject(grants=(_grant(),)), feed)
+
+    # publish 메서드를 virtual_delayed_async로 래핑 — 실제 sleep 금지
+    original_publish = fanout.publish
+    monkeypatch.setattr(
+        fanout,
+        "publish",
+        virtual_delayed_async(original_publish, 0.5),
+    )
+
+    # 정상 입력에서는 budget 통과
+    for i in range(10):
+        await fanout.publish(feed, {"px": i}, as_of=_AS_OF)
+    assert subscription.queue.qsize() == 10
+
+    # 지연 주입된 publish는 wall 시간 예산을 넘는다.
+    sample = await perf_budget.best_of_async(
+        lambda: fanout.publish(feed, {"px": 0}, as_of=_AS_OF),
+        n=5,
+    )
+    assert sample.wall_ms >= 400, (
+        f"virtual_delayed_async 주입 후 wall 시간이 예산 근처 이상이어야 한다: "
+        f"{sample.wall_ms:.3f}ms"
+    )
 
 
 async def test_backpressure_drops_oldest_and_counts_exact_overflow() -> None:
