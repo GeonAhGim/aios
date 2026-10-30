@@ -20,6 +20,7 @@ from src.foundation.research_data.domain.known_at import (
     assert_point_in_time,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def _item(*, known_at: datetime) -> ResearchItem:
@@ -130,11 +131,11 @@ def test_assert_point_in_time_hot_path_performance(
     perf_budget.assert_within(
         lambda: [assert_point_in_time(item, as_of_time) for _ in range(iterations)],
         budget_ms=1000.0,
-        n=1,
+        n=5,
     )
 
 
-# ---- gate-red 재현(D2): 10x 지연 monkeypatch → 적색 --------------------------
+# ---- gate-red 재현(D2): virtual_delayed_sync → 적색 --------------------------
 
 
 @pytest.mark.perf
@@ -142,33 +143,34 @@ def test_assert_point_in_time_budget_catches_10x_delay_injection(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `time.process_time`을
-    monkeypatch해 1회 호출당 예산(1000ms/10000회 = 0.1ms/회)을 1000배 초과하는
-    CPU 시간을 가장하면 같은 단언이 AssertionError로 적색이 돼야 한다.
+    """게이트 적색 재현(D2): CPU 예산 테스트이므로 `virtual_delayed_sync`로
+    가상 CPU 지연(예산 10배)을 주입하고, 같은 단언이 AssertionError로
+    적색이 돼야 한다.
+
+    실제 sleep·busy-wait 금지 — virtual_delayed_sync가 virtual ledger에
+    나노초만 더하므로 측정치에 지연을 더할 뿐 실제 테스트 시간이 늘어나지
+    않는다. Windows 양자화 tick에 흔들리지 않도록 best_of(여러 번 중 최소)
+    측정과 함께 쓴다.
 
     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
-    역으로 증명한다. fake process_time이 호출당 100ms를 반환하므로
-    best_of(p95) > 0.1ms budget로 적색 확정.
+    역으로 증명한다.
     """
-    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
-    # 이를 monkeypatch해 항상 100ms를 반환하게 한다.
-    _fake_time = 0.0
+    reset_virtual_totals()
 
-    def _fake_process_time() -> float:
-        nonlocal _fake_time
-        _fake_time += 0.1  # 100ms = 0.1s per call
-        return _fake_time
+    budget_ms = 0.1  # 1회 호출당 예산(ms)
+    # 10배 가상 지연 — budget_ms * 10 / 1000 → 초 단위
+    injected_delay_s = budget_ms * 10 / 1000.0
 
-    monkeypatch.setattr("time.process_time", _fake_process_time)
-
-    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
     as_of_time = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
     item = _item(known_at=as_of_time - timedelta(days=1))
 
+    # virtual_delayed_sync로 CPU+wall 가상 지연 주입
+    wrapped = virtual_delayed_sync(assert_point_in_time, injected_delay_s)
+
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
-            lambda: assert_point_in_time(item, as_of_time),
-            budget_ms=0.1,
+            lambda: wrapped(item, as_of_time),
+            budget_ms=budget_ms,
             n=5,
             batch=1,
         )
