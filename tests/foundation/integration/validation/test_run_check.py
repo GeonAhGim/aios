@@ -220,21 +220,36 @@ async def test_repeat_request_returns_cached_result_without_rerunning(
 
 
 async def test_unknown_check_type_is_rejected_before_any_write(
-    pool, validation_repo, strategy_service
+    pool, validation_repo, strategy_service, monkeypatch
 ):
+    from tests.support.perf_inject import virtual_delayed_async
+
     owner_id, strategy_id, version = await _saved_strategy(pool, strategy_service)
     ctx = await _ctx_for(strategy_service, owner_id, strategy_id, version)
 
-    with pytest.raises(UnknownCheckTypeError):
-        await run_check(
-            validation_repo, check_type="not_a_real_check", ctx=ctx, owner_user_id=owner_id
-        )
+    for check_type in ("not_a_real_check", "", "BACKTEST"):
+        with pytest.raises(UnknownCheckTypeError) as rejected:
+            await run_check(
+                validation_repo, check_type=check_type, ctx=ctx, owner_user_id=owner_id
+            )
+        assert rejected.value.args == (check_type,)
 
     async with pool.acquire() as conn:
         count = await conn.fetchval(
             "SELECT count(*) FROM strategy_validation_run WHERE strategy_id = $1", strategy_id
         )
     assert count == 0
+
+    # The audited assertion measures wall time in ms, then converts to seconds.
+    # Reuse its real backtest path and unchanged 2s budget, including fresh inputs.
+    # CPU zero-convergence/batching is N/A: this path uses perf_counter, not CPU ticks.
+    await test_p95_latency_within_local_run_check_budget(pool, validation_repo, strategy_service)
+    with monkeypatch.context() as delayed:
+        delayed.setitem(globals(), "run_check", virtual_delayed_async(run_check, 20.0))
+        with pytest.raises(AssertionError, match=r"p95=.* exceeds 2000ms budget"):
+            await test_p95_latency_within_local_run_check_budget(
+                pool, validation_repo, strategy_service
+            )
 
 
 async def test_compile_artifact_on_unknown_strategy_is_rejected(pool, strategy_service):
