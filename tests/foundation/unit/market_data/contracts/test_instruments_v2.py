@@ -87,7 +87,7 @@ def _sample_instrument(**overrides: object) -> v2.Instrument:
         created_at=_now(),
     )
     base.update(overrides)
-    return v2.Instrument(**base)  # type: ignore[arg-type]
+    return v2.Instrument.model_validate(base)
 
 
 def _sample_listing(**overrides: object) -> v2.VenueListing:
@@ -100,7 +100,7 @@ def _sample_listing(**overrides: object) -> v2.VenueListing:
         is_primary=True,
     )
     base.update(overrides)
-    return v2.VenueListing(**base)  # type: ignore[arg-type]
+    return v2.VenueListing.model_validate(base)
 
 
 def test_schema_snapshot_matches_fixture() -> None:
