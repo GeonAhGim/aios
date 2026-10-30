@@ -3,12 +3,13 @@
 test_equity_baseline_persists_and_survives_simulated_restart의
 negative/실패주입/성능 보강. 공용 픽스처/헬퍼는
 _execution_tick_helpers.py. 이 파일은 equity baseline 관련
-negative(매우 낮은 equity)·실패주입(DB 저장 실패)·성능 단언을 담당한다.
+negative(매우 낮은 equity)·성능 단언을 담당한다.
+
+save_failure_raises 테스트는 test_equity_baseline_save_failure.py로 분리(task-21699).
 """
 
 from decimal import Decimal
 
-import asyncpg
 import pytest
 
 from src.data.models.trading import AccountBalance
@@ -70,13 +71,15 @@ async def test_equity_baseline_persists_with_very_low_equity(pool):
     assert row_after_restart["equity_peak_value"] == Decimal("50.0000000000")
 
 
-async def test_equity_baseline_save_failure_raises(pool, monkeypatch):
-    """실패주입 — save_equity_baseline()가 예외를 던지면 tick 전체가
-    실패해야 한다(FSM 상태 변경 없이 예외가 외부로 전파).
-    equity_tracker.record_and_persist_equity가 DB 저장 실패 시
-    계산된 daily_pnl/drawdown도 유실된다."""
-    from src.services.execution_loop import equity_tracker
+@pytest.mark.perf
+async def test_equity_baseline_persist_performance_under_200ms(pool, perf_budget):
+    """성능 단언 — equity baseline record+persist가 200ms(CPU) 이내여야 한다.
 
+    ADR-2026-09-09-C Decision 1 성능 예산 준수 확인.
+    wall-clock(time.perf_counter()) 대신 CPU 시간(time.process_time())을
+    사용한다 — CI 러너의 부하/IO 대기 시간이 측정치에 섞리지 않도록
+    (task-6371, task-8356). best_of-5로 CI 노이즈를 한 번 더 걷어낸다.
+    """
     user_id = await create_test_tenant(pool)
     execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     adapter = FakeExchangeAdapter(
@@ -85,50 +88,16 @@ async def test_equity_baseline_save_failure_raises(pool, monkeypatch):
             exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
         ),
     )
+
     engines = _engines()
 
-    def fake_save(*args, **kwargs):
-        raise asyncpg.UniqueViolationError("23505", "constraint", "simulated DB save failure")
-
-    monkeypatch.setattr(equity_tracker, "save_equity_baseline", fake_save)
-
-    with pytest.raises(asyncpg.UniqueViolationError):
-        await run_execution_tick(pool, adapter, execution_id, **engines)
-
-    # FSM이 IDLE 그대로 남아있어야 함(중간 상태 갱신 없음).
-    async with pool.acquire() as conn:
-        fsm_state = await conn.fetchval(
-            "SELECT fsm_state FROM strategy_executions WHERE id = $1", execution_id
-        )
-    assert fsm_state == "IDLE"
-
-
-@pytest.mark.perf
-async def test_equity_baseline_persist_performance_under_200ms(pool):
-    """성능 단언 — equity baseline record+persist가 200ms 이내여야 한다.
-    ADR-2026-09-09-C Decision 1 성능 예산 준수 확인.
-
-    CI 병렬 실행에서 DB 컨테이너 부하로 wall-clock이 변동되는 것을 방지하기
-    위해 PerfBudget.best_of_async(cpu_ms 기준 최소값)로 노이즈를 제거한다.
-    """
-    from tests.support.perf_budget import PerfBudget
-
-    user_id = await create_test_tenant(pool)
-    execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
-    adapter = FakeExchangeAdapter(
-        closes=[Decimal("50")] * 65,
-        usdt_balance=AccountBalance(
-            exchange="bitget", asset="USDT", total=Decimal("10000"), available=Decimal("10000")
-        ),
-    )
-
-    pb = PerfBudget()
-    sample = await pb.best_of_async(
-        lambda: run_execution_tick(pool, adapter, execution_id, **_engines()),
+    sample = await perf_budget.best_of_async(
+        lambda: run_execution_tick(pool, adapter, execution_id, **engines),
         n=5,
         warmup=1,
     )
+
     assert sample.cpu_ms < 200, (
-        f"Equity baseline persist cpu={sample.cpu_ms:.1f}ms wall={sample.wall_ms:.1f}ms, "
-        f"exceeds 200ms budget"
+        f"Equity baseline persist took {sample.cpu_ms:.1f}ms CPU "
+        f"(wall={sample.wall_ms:.1f}ms), exceeds 200ms CPU budget"
     )

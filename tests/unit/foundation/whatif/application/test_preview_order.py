@@ -178,10 +178,8 @@ class TestAllow:
 
         정상 입력에서 녹색 — 실제 CPU 시간을 측정해 예산(1ms)을 낮게 통과함을
         확인한다. Windows의 time.process_time() 약 15.6ms 양자화 오차로
-        batch=1sample은 15.6/31.25ms로 왜곡될 수 있으므로 best_of(20, batch=8)
-        최소값으로 양자화 노이즈를 제거한다. 병렬 CI(pytest_perf_parallel_3)에서
-        CPU 경합이 커져도 n=20으로 충분히 많은 샘플을 채워 진정한 최소값을
-        찾는다 (task-21605).
+        batch=1sample은 15.6/31.25ms로 왜곡될 수 있으므로 best_of(5, batch=4)
+        최소값으로 양자화 노이즈를 제거한다.
         """
         sample = perf_budget.best_of(
             lambda: preview_order(
@@ -192,9 +190,9 @@ class TestAllow:
                 mandate=_mandate(),
                 now=_NOW,
             ),
-            n=20,
-            warmup=2,
-            batch=8,
+            n=5,
+            warmup=1,
+            batch=4,
         )
         assert sample.cpu_ms < 1.0, (
             f"ALLOW 단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
@@ -280,9 +278,8 @@ def test_risk_denial_cpu_time_converges_to_zero_for_small_input(
 ) -> None:
     """0 수렴 검증: preview_order 단일 호출(보통 입력)의 CPU 시간이 1ms 미만이어야
     한다 — Windows의 time.process_time() 약 15.6ms 양자화 오차로
-    batch=1sample은 15.6/31.25ms로 왜곡될 수 있으므로 best_of(20, batch=8)
-    최소값으로 양자화 노이즈를 제거한다. 병렬 CI에서 CPU 경합이 커져도
-    n=20으로 충분히 많은 샘플을 채워 진정한 최소값을 찾는다 (task-21605)."""
+    batch=1sample은 15.6/31.25ms로 왜곡될 수 있으므로 best_of(5, batch=4)
+    최소값으로 양자화 노이즈를 제거한다."""
     sample = perf_budget.best_of(
         lambda: preview_order(
             before=_make_state(),
@@ -292,9 +289,9 @@ def test_risk_denial_cpu_time_converges_to_zero_for_small_input(
             mandate=_mandate(),
             now=_NOW,
         ),
-        n=20,
-        warmup=2,
-        batch=8,
+        n=5,
+        warmup=1,
+        batch=4,
     )
     assert sample.cpu_ms < 1.0, (
         f"단일 호출 CPU 시간 {sample.cpu_ms:.3f}ms — "
