@@ -162,7 +162,13 @@ def test_size_budget_fails_with_virtual_delay_injection(perf_budget):
 @pytest.mark.perf
 def test_size_gate_red_reproduction_via_virtual_delay(perf_budget):
     """gate-red 재현(ADR-2026-09-09-C D2): virtual_delayed_sync로 CPU 부하를 주입해
-    게이트가 적색으로 전환됨을 확인한다. 실제 busy-wait 없이 측정치만 늘린다."""
+    게이트가 적색으로 전환됨을 확인한다. 실제 busy-wait 없이 측정치만 늘린다.
+
+    전역 가상 지연 레저를 초기화해 선행 테스트의 상태가 본 테스트에 영향을 주지 않게 한다.
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
     # 50ms 가상 CPU 지연 — 예산(0.1ms)의 500배
     slow_size = virtual_delayed_sync(lambda: size(_inp()), 0.05)
     sample = perf_budget.sample(slow_size)

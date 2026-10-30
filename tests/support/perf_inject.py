@@ -37,6 +37,14 @@ def virtual_totals_ns() -> tuple[int, int]:
     return _virtual_cpu_ns, _virtual_wall_ns
 
 
+def reset_virtual_totals() -> None:
+    """Zero the virtual delay ledger. Call at the start of gate-red tests
+    so they remain idempotent regardless of prior test state."""
+    global _virtual_cpu_ns, _virtual_wall_ns
+    _virtual_cpu_ns = 0
+    _virtual_wall_ns = 0
+
+
 def virtual_totals() -> tuple[float, float]:
     """Seconds of (cpu, wall) delay injected virtually so far in this process."""
     return _virtual_cpu_ns / 1e9, _virtual_wall_ns / 1e9
