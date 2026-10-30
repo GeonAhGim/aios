@@ -80,7 +80,27 @@ def _pristine_replay_template_url() -> str:
     inherited = os.environ.get(TEMPLATE_DATABASE_URL_ENV)
     if inherited:
         return inherited
-    return asyncio.run(ensure_worker_database(template_database_url(), _PRISTINE_CLONE_WORKER_ID))
+    return asyncio.run(_clone_and_scrub_live_db())
+
+
+async def _clone_and_scrub_live_db() -> str:
+    """Clone the live DB, then drop the order/journal rows it inherited.
+
+    The live DB is shared across back-to-back local_ci cycles in master mode,
+    so a perf step that ran minutes earlier leaves committed `order_events` /
+    ledger rows inside the replay window; cloning them verbatim makes every
+    `isolated_replay_db_url` test fail `assert_no_replay_window_leftovers` (and
+    replay_verify floods stderr with one "pre-cutover skipped" line per
+    leftover order, burying the failure in the step's tail). Only the clone is
+    truncated -- the live DB is never touched.
+    """
+    url = await ensure_worker_database(template_database_url(), _PRISTINE_CLONE_WORKER_ID)
+    conn = await asyncpg.connect(_clone_dsn(url))
+    try:
+        await conn.execute("TRUNCATE order_events, orders, ledger_journal_entry CASCADE")
+    finally:
+        await conn.close()
+    return url
 
 
 _PRISTINE_REPLAY_TEMPLATE_URL = _pristine_replay_template_url()
