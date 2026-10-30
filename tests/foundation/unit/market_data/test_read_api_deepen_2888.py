@@ -44,6 +44,7 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     permits_use,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 _NOW = datetime(2026, 9, 10, tzinfo=UTC)
 
@@ -111,6 +112,43 @@ async def test_missing_contract_row_denies_as_none_scope() -> None:
         )
 
 
+async def test_expired_contract_denies_redistribution() -> None:
+    """만료된 계약(valid_to < now)은 NONE과 동일하게 처리돼 거부된다 —
+    계약이 등록돼 있어도 만료되면 게이트는 조용히 허용하지 않는다."""
+    from src.foundation.market_data.domain.entitlement.source_contract import (
+        SourceContract as _SC,
+    )
+
+    expired = _SC(
+        source_id="BITGET",
+        tier=SourceContractTier.ENTERPRISE,
+        credential_ref="vault:bitget:v1",
+        redistribution_scope=RedistributionScope.DISPLAY,
+        rate_limit=1000,
+        quota=1_000_000,
+        valid_from=_NOW - timedelta(days=30),
+        valid_to=_NOW - timedelta(days=1),  # 이미 만료됨
+        capability=SourceCapability(
+            asset_classes=frozenset({"CRYPTO"}), resolutions=frozenset({"1m"})
+        ),
+    )
+    repo = _FakeSourceContractRepository({"BITGET": expired})
+    with pytest.raises(MarketDataNotFoundError):
+        await authorize_redistribution(
+            None, "BITGET", repo=repo, clock=_clock, use=DataUse.INTERNAL_CALC
+        )
+
+
+async def test_none_scope_denies_all_data_uses() -> None:
+    """NONE redistribution_scope는 모든 DataUse 값을 거부해야 한다 —
+    INTERNAL_CALC, SHARED_DISPLAY, EXPORT_OR_RESELL 모두."""
+    none_contract = _contract(scope=RedistributionScope.NONE)
+    repo = _FakeSourceContractRepository({"BITGET": none_contract})
+    for use in (DataUse.INTERNAL_CALC, DataUse.SHARED_DISPLAY, DataUse.EXPORT_OR_RESELL):
+        with pytest.raises(MarketDataNotFoundError):
+            await authorize_redistribution(None, "BITGET", repo=repo, clock=_clock, use=use)
+
+
 # ---- 성능 단언 ----
 
 
@@ -119,40 +157,84 @@ async def test_repeated_gate_calls_meet_latency_budget_allow_and_deny(
     perf_budget: PerfBudget,
 ) -> None:
     """허용 경로(DISPLAY+SHARED_DISPLAY)와 거부 경로(NONE+SHARED_DISPLAY)
-    양쪽 다 반복 호출이 절대시간 예산 내에 있어야 한다 — 페이지네이션된
+    양쪽 다 게이트 1회 호출이 절대시간 예산 내에 있어야 한다 — 페이지네이션된
     캔들 조회마다 이 게이트가 매번 재호출되므로, 여기서 선형 이상의 비용이
-    생기면 차트 API 지연 SLA 전체에 영향을 준다."""
-    iterations = 2_000
-    budget_sec = 3.0  # 실측 로컬 <0.2s, 이벤트루프 스케줄링 오버헤드 감안
+    생기면 차트 API 지연 SLA 전체에 영향을 준다.
+
+    0 수렴 방지: Windows process_time 양자화 tick(~15.6ms)에 흔들리지 않게
+    best_of_async(여러 번 중 최소, batch 평균)로 측정한다.
+    """
+    budget_ms = 3_000.0  # 실측 로컬 <1ms, 이벤트루프 스케줄링 오버헤드 감안
     allow_repo = _FakeSourceContractRepository({"BITGET": _contract()})
     deny_repo = _FakeSourceContractRepository({"BITGET": _contract(scope=RedistributionScope.NONE)})
 
-    # PerfBudget.sample_async: process_time + coverage tracer-pause + best-of-N
-    total_wall_ms = 0.0
-    for _ in range(iterations):
-        # allow 호출
-        sample = await perf_budget.sample_async(
-            lambda: authorize_redistribution(
-                None, "BITGET", repo=allow_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
-            )
+    async def _allow_call() -> None:
+        await authorize_redistribution(
+            None, "BITGET", repo=allow_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
         )
-        total_wall_ms += sample.wall_ms
-        # deny 호출
-        with pytest.raises(MarketDataNotFoundError):
-            sample = await perf_budget.sample_async(
-                lambda: authorize_redistribution(
-                    None, "BITGET", repo=deny_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
-                )
-            )
-        total_wall_ms += sample.wall_ms
 
-    elapsed_sec = total_wall_ms / 1000.0
+    async def _deny_call() -> None:
+        try:
+            await authorize_redistribution(
+                None, "BITGET", repo=deny_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
+            )
+        except MarketDataNotFoundError:
+            pass
+
+    # allow 경로: best_of(5회 중 최소) + batch=20으로 양자화 오차 줄임
+    green_allow = await perf_budget.best_of_async(_allow_call, n=5, warmup=1, batch=20)
+    # deny 경로: 동일 측정 방식
+    green_deny = await perf_budget.best_of_async(_deny_call, n=5, warmup=1, batch=20)
+
     print(
-        f"[DC-28 read_api] authorize_redistribution() x{iterations * 2}(allow+deny) in "
-        f"{elapsed_sec:.4f}s (budget<{budget_sec}s)"
+        f"[DC-28 read_api] allow cpu={green_allow.cpu_ms:.3f}ms wall={green_allow.wall_ms:.3f}ms "
+        f"deny cpu={green_deny.cpu_ms:.3f}ms wall={green_deny.wall_ms:.3f}ms "
+        f"budget<{budget_ms:.3f}ms"
     )
-    assert elapsed_sec < budget_sec, (
-        f"게이트 {iterations * 2}회 반복이 예산({budget_sec}s)을 넘었습니다({elapsed_sec:.4f}s)."
+    assert green_allow.cpu_ms < budget_ms, (
+        f"allow 경로가 예산을 넘었습니다: {perf_budget.describe(green_allow, budget_ms=budget_ms)}"
+    )
+    assert green_deny.cpu_ms < budget_ms, (
+        f"deny 경로가 예산을 넘었습니다: {perf_budget.describe(green_deny, budget_ms=budget_ms)}"
+    )
+
+
+@pytest.mark.perf
+async def test_gate_red_virtual_delay_exceeds_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): virtual_delayed_async로
+    가상 지연(예산 10배)을 주입하고, 같은 단언이 초과함을 확인한다.
+
+    실제 sleep·busy-wait 금지 — virtual_delayed_async가 virtual ledger에
+    나노초만 더하므로 측정치에 지연을 더할 뿐 실제 테스트 시간이 늘어나지
+    않는다. Windows 양자화 tick에 흔들리지 않도록 best_of(여러 번 중 최소)
+    측정과 함께 쓴다.
+    """
+    reset_virtual_totals()
+
+    budget_ms = 3_000.0
+    # 10배 가상 지연 (budget_ms * 10 / 1000 → 초 단위)
+    injected_delay_s = budget_ms * 10 / 1000.0
+
+    allow_repo = _FakeSourceContractRepository({"BITGET": _contract()})
+    # repo.get에 가상 지연 주입 — 실제 sleep 없이 측정치에만 영향
+    monkeypatch.setattr(
+        allow_repo,
+        "get",
+        virtual_delayed_async(allow_repo.get, injected_delay_s),
+    )
+
+    async def _delayed_call() -> None:
+        await authorize_redistribution(
+            None, "BITGET", repo=allow_repo, clock=_clock, use=DataUse.SHARED_DISPLAY
+        )
+
+    red = await perf_budget.best_of_async(_delayed_call, n=3, warmup=0)
+    # virtual_delayed_async는 virtual wall ledger에만 기록하므로 wall_ms로 단언
+    assert red.wall_ms >= budget_ms, (
+        f"가상 지연 주입에도 예산 미만: {perf_budget.describe(red, budget_ms=budget_ms)}"
     )
 
 
