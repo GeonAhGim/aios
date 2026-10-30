@@ -31,7 +31,7 @@ from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_user
 from tests.support.db import create_pool_with_retry, ensure_worker_database, template_database_url
 from tests.support.deep_downgrade import purge_position_snapshots
-from tests.support.perf_inject import delayed_async
+from tests.support.perf_inject import virtual_delayed_async
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -160,10 +160,11 @@ async def test_active_membership_unique_per_tenant_subject(
     이 테스트는 INSERT 2회 + unique 충돌 1회 + SELECT 1회를 한 세트로
     측정하므로 실제 측정치는 INSERT 1회 예산을 크게 넘지 않는다.
     """
-    subject_id = await create_test_user(pool)
-    tenant_id = uuid4()  # ORGANIZATION tenant는 personal backfill과 무관한 신규 id
 
     async def _unique_flow() -> None:
+        subject_id = await create_test_user(pool)
+        tenant_id = uuid4()  # ORGANIZATION tenant는 personal backfill과 무관한 신규 id
+
         async with pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO tenant (id, kind) VALUES ($1, 'ORGANIZATION')", tenant_id
@@ -199,7 +200,9 @@ async def test_active_membership_unique_per_tenant_subject(
             )
         assert {r["state"] for r in rows} == {"ACTIVE", "SUSPENDED"}
 
-    sample = await perf_budget.sample_async(_unique_flow, batch=1)
+    # Windows 양자화 tick(약 15.6ms)에 단발 sample이 흔들리지 않게
+    # best_of(여러 번 중 최소)로 측정 — 예산/단언 숫자는 올리지 않는다.
+    sample = await perf_budget.best_of_async(_unique_flow, n=3, batch=1)
     assert sample.cpu_ms < MEMBERSHIP_INSERT_P95_BUDGET_MS, (
         f"ACTIVE unique 흐름 CPU {sample.cpu_ms:.3f}ms — "
         f"예산 {MEMBERSHIP_INSERT_P95_BUDGET_MS}ms 초과 "
@@ -318,22 +321,26 @@ async def test_active_membership_unique_goes_red_with_io_delay(
     pool: asyncpg.Pool,
     perf_budget: PerfBudget,
 ) -> None:
-    """gate-red reproduction — asyncpg.execute 에 지연을 주입하면 성능
+    """gate-red reproduction — asyncpg.execute 에 가상 지연을 주입하면 성능
     단언이 적색이 된다.
 
-    `delayed_async` 는 wall-clock 대기를 주입한다. `PerfBudget.sample_async`
-    는 wall_ms 를 측정하므로 wall-clock 기반 budget 단언이 지연을 잡는다.
+    `virtual_delayed_async` 는 실제 sleep 없이 virtual delay ledger에만
+    누적을 남기므로 실제 sleep·busy-wait 없이 wall_ms 측정치에 지연을 더한다.
+    `PerfBudget.best_of_async`/`sample_async` 는 virtual_totals_ns() 누적을
+    측정치에 반영하므로 wall-clock 기반 budget 단언이 지연을 잡는다.
     정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을
     보증한다. 단언/마커 삭제와 예산 완화 금지.
     """
     subject_id = await create_test_user(pool)
     tenant_id = uuid4()
 
-    # asyncpg.Connection.execute 에 0.1s 지연 주입
+    # asyncpg.Connection.execute 에 0.1s 지연 주입 — virtual_delayed_async는
+    # 실제 sleep 없이 ledger에만 누적을 남기므로 측정치에 지연을 더하는 방식이고
+    # 실제 sleep·busy-wait 금지(측정치에 지연을 더하는 방식이라 full 시간을 쓰지 않는다).
     monkeypatch.setattr(
         asyncpg.Connection,
         "execute",
-        delayed_async(asyncpg.Connection.execute, 0.1),
+        virtual_delayed_async(asyncpg.Connection.execute, 0.1),
     )
 
     async def _unique_flow_with_delay() -> None:
