@@ -1,12 +1,10 @@
 """Integration tests — StrategyBuilderService lifecycle & condition validation."""
 
 import asyncio
-from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
 import pytest
-from dotenv import dotenv_values
 
 from src.services.strategy_builder_service import (
     LIFECYCLE_ORDER,
@@ -14,14 +12,7 @@ from src.services.strategy_builder_service import (
     StrategyLifecycleError,
     assert_executable,
 )
-from tests.integration.conftest import create_test_user
-
-
-def _asyncpg_dsn() -> str:
-    env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
-    url = env.get("DATABASE_URL")
-    assert url
-    return url.replace("postgresql+asyncpg://", "postgresql://")
+from tests.integration.conftest import _asyncpg_dsn, create_test_user
 
 
 @pytest.fixture

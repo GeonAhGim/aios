@@ -9,22 +9,14 @@ Per ADR-2026-09-09-C Decision 1, D2 requires:
 """
 
 import asyncio
-from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
 import pytest
-from dotenv import dotenv_values
 
 from src.services.strategy_builder_service import StrategyBuilderService
-from tests.integration.conftest import create_test_user
-
-
-def _asyncpg_dsn() -> str:
-    env = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
-    url = env.get("DATABASE_URL")
-    assert url
-    return url.replace("postgresql+asyncpg://", "postgresql://")
+from tests.integration.conftest import _asyncpg_dsn, create_test_user
+from tests.support.perf_inject import virtual_delayed_async
 
 
 @pytest.fixture
@@ -45,7 +37,10 @@ def service(pool):
 
 
 @pytest.mark.perf
-async def test_save_strategy_p95_latency_within_normalized_budget(service, pool, perf_budget):
+@pytest.mark.parametrize("inject_delay", [False, True], ids=["normal", "gate-red"])
+async def test_save_strategy_p95_latency_within_normalized_budget(
+    service, pool, perf_budget, monkeypatch, inject_delay
+):
     """성능 단언 — ADR-2026-09-09-C Decision 1 예산표에는 전략 저장 전용
     항목이 없다(가장 가까운 DSL 컴파일 300ms는 별도 컴파일 단계라 여기엔
     안 맞는다). save_strategy()는 105번 표준(존재 여부 SELECT + 조건부
@@ -76,13 +71,30 @@ async def test_save_strategy_p95_latency_within_normalized_budget(service, pool,
     baseline_samples = await perf_budget.samples_async(_baseline_once, n=35)
     baseline_wall_ms = sorted(s.wall_ms for s in baseline_samples)[30]
 
+    # Wall-clock I/O budget: CPU tick quantization does not apply.
+    budget_ms = baseline_wall_ms * 80
+    if inject_delay:
+        monkeypatch.setattr(
+            service, "save_strategy",
+            virtual_delayed_async(service.save_strategy, budget_ms * 10 / 1000),
+        )
+
     save_samples = await perf_budget.samples_async(_save_once, n=30)
     save_p95_ms = sorted(s.wall_ms for s in save_samples)[28]
 
     # p95는 기준 DB 왕복 p95의 80배 미만이어야 함 (CI 병렬 실행 안정성, task-15522)
-    assert save_p95_ms < baseline_wall_ms * 80, (
-        f"p95={save_p95_ms:.1f}ms가 기준 p95({baseline_wall_ms:.1f}ms)*80을 초과"
-    )
+    def assert_budget() -> None:
+        assert save_p95_ms < baseline_wall_ms * 80, (
+            f"p95={save_p95_ms:.1f}ms가 기준 p95({baseline_wall_ms:.1f}ms)*80을 초과"
+        )
+
+    print(f"save p95={save_p95_ms:.3f}ms budget={budget_ms:.3f}ms injected={inject_delay}")
+    if inject_delay:
+        assert save_p95_ms >= budget_ms * 10
+        with pytest.raises(AssertionError, match="p95=.*초과"):
+            assert_budget()
+    else:
+        assert_budget()
 
 
 # ---------------------------------------------------------------------------
