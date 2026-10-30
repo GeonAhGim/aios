@@ -306,26 +306,34 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
     # 정규화 상한을 실제 DB 호출 수에 맞게 맞춘다. 실제 sleep 없음.
     _VIRTUAL_DELAY_PER_CALL = 0.05
 
-    # export_quality_metrics의 _export_one당 실제 DB 호출 수:
-    # store.last_open_time(1 fetchval) + _latest_batch(1 fetchrow) +
-    # batches.get(1 fetchrow) = 3회. _session_open은 BITGET(continuous)
-    # 이므로 pure computation(0 DB 호출).
-    _DB_CALLS_PER_SERIES = 3
+    # Count the real round trips instead of assuming a per-series figure: a skipped series
+    # (``_export_one`` logs and skips on a compute failure) would otherwise read as a missing
+    # injection.
+    _call_counter = {"n": 0}
+
+    def _counted(original):
+        delayed = virtual_delayed_async(original, _VIRTUAL_DELAY_PER_CALL)
+
+        async def wrapper(*args, **kwargs):
+            _call_counter["n"] += 1
+            return await delayed(*args, **kwargs)
+
+        return wrapper
 
     monkeypatch.setattr(
         asyncpg.Connection,
         "fetch",
-        virtual_delayed_async(asyncpg.Connection.fetch, _VIRTUAL_DELAY_PER_CALL),
+        _counted(asyncpg.Connection.fetch),
     )
     monkeypatch.setattr(
         asyncpg.Connection,
         "fetchrow",
-        virtual_delayed_async(asyncpg.Connection.fetchrow, _VIRTUAL_DELAY_PER_CALL),
+        _counted(asyncpg.Connection.fetchrow),
     )
     monkeypatch.setattr(
         asyncpg.Connection,
         "fetchval",
-        virtual_delayed_async(asyncpg.Connection.fetchval, _VIRTUAL_DELAY_PER_CALL),
+        _counted(asyncpg.Connection.fetchval),
     )
 
     series_count = 15
@@ -354,8 +362,12 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
 
     later = _clock(t0 + timedelta(minutes=10))
 
+    run_calls: list[int] = []
+    run_result_ids: list[set[object]] = []
+
     async def _run_export():
-        return await export_quality_metrics(
+        before = _call_counter["n"]
+        results = await export_quality_metrics(
             batches=deps.batches,
             store=deps.store,
             cal=deps.cal,
@@ -363,6 +375,9 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
             registry=MetricsRegistry(),
             clock=later,
         )
+        run_calls.append(_call_counter["n"] - before)
+        run_result_ids.append({m.key.instrument_id for m in results})
+        return results
 
     export_sample = await rb.measure_async(
         _run_export,
@@ -372,10 +387,32 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
     )
     elapsed_ms = export_sample.op_ms
 
+    # No series may be skipped (``_export_one`` logs and skips a failed series); name the
+    # skipped ones so a contention-induced skip is not misread as a lost injection.
+    expected_ids = {i.instrument_id for i in instruments}
+    for run_no, ids in enumerate(run_result_ids):
+        skipped = sorted(str(x) for x in expected_ids - ids)
+        assert not skipped, (
+            f"export run {run_no} skipped {len(skipped)}/{series_count} series "
+            f"(instrument_id={skipped}); observed calls per run={run_calls}"
+        )
+    observed_calls = min(run_calls)
+    assert observed_calls >= series_count, (
+        f"observed {observed_calls} DB round trips per export, fewer than {series_count} series "
+        f"(calls per run={run_calls})"
+    )
+    # The measured latency must reflect every observed round trip's injected delay.
+    injected_floor_ms = observed_calls * _VIRTUAL_DELAY_PER_CALL * 1000.0 * 0.95
+    assert elapsed_ms >= injected_floor_ms, (
+        f"measured {elapsed_ms:.1f}ms < {observed_calls} observed round trips x "
+        f"{_VIRTUAL_DELAY_PER_CALL * 1000:.0f}ms x 0.95 = {injected_floor_ms:.1f}ms "
+        "-- the injection did not reach the measurement"
+    )
+
     per_series_ceiling_ms = 500.0
     normalized_ceiling_ms = max(
         series_count * per_series_ceiling_ms,
-        series_count * _DB_CALLS_PER_SERIES * max(baseline_ms, 1.0),
+        series_count * 3 * max(baseline_ms, 1.0),
     )
     print(
         f"\n[gate-red] export_quality_metrics latency with 10x virtual delay: "
