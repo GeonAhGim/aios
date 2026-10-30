@@ -28,7 +28,7 @@ import asyncpg
 import pytest
 
 from tests._perf.relative_budget import RelativeBudget
-from tests.support.perf_inject import delayed_async
+from tests.support.perf_inject import virtual_delayed_sync
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
@@ -133,23 +133,19 @@ def test_ensure_database_creates_when_missing_gate_red(
     scratch_db_name: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """gate-red: injecting 2.0 s sleep via ``delayed_async`` must breach the
-    ``max_ratio=10.0`` budget, proving the assertion in
+    """gate-red: injecting a 60 s *virtual* delay via ``virtual_delayed_sync`` must
+    breach the ``max_ratio=10.0`` budget, proving the assertion in
     ``test_ensure_database_creates_when_missing`` actually detects slowdowns.
 
-    task-17471: delay injection uses ``delayed_async`` from
-    ``tests.support.perf_inject`` (no ``# type: ignore``).
+    task-21510: virtual delay (no real sleep); no ``# type: ignore``.
     """
     server_url = _server_url()
     try:
-        # Patch fetchval — the exists check in _ensure_database.
-        # 2.0 s delay on a single fetchval call exceeds the typical
-        # calibration time (~0.08 s) × 10 = 0.8 s budget, so the
-        # RelativeBudget assertion must raise.
+        # Patch fetchval (the exists check); 60 s virtual >> calibration × 10.
         monkeypatch.setattr(
             asyncpg.Connection,
             "fetchval",
-            delayed_async(asyncpg.Connection.fetchval, 2.0),
+            virtual_delayed_sync(asyncpg.Connection.fetchval, 60.0),
         )
 
         budget = RelativeBudget()
@@ -157,8 +153,6 @@ def test_ensure_database_creates_when_missing_gate_red(
         def _ensure_one() -> None:
             asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=False))
 
-        # Same budget as the green test — this must FAIL (breach) because
-        # 2.0 s delay >> calibration × 10.
         with pytest.raises(AssertionError, match=r"budget"):
             budget.assert_within(
                 _ensure_one,
@@ -400,6 +394,41 @@ def test_ensure_database_concurrent_reset_with_migrate_survives_race(
         assert asyncio.run(_read_alembic_version()) is not None
     finally:
         asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+@pytest.mark.perf
+def test_ensure_database_concurrent_reset_with_migrate_gate_red(scratch_db_name: str) -> None:
+    """gate-red (task-21510): a 600 s virtual delay (``virtual_delayed_sync``, no real
+    sleep) on the 4-way leg must breach the same ``max_ratio=30.0`` assertion that
+    guards the survives_race test; calibration is one reset call (no alembic)."""
+    server_url = _server_url()
+
+    def _four_way() -> None:
+        asyncio.run(_gather_resets(server_url, scratch_db_name))
+
+    def _single_reset_call() -> None:
+        asyncio.run(setup_test_db._ensure_database(server_url, scratch_db_name, reset=True))
+
+    try:
+        with pytest.raises(AssertionError, match=r"budget"):
+            RelativeBudget().assert_within(
+                virtual_delayed_sync(_four_way, 600.0),
+                max_ratio=30.0,
+                mode="wall",
+                n=2,
+                warmup=0,
+                calibration_n=2,
+                calibration_fn=_single_reset_call,
+                label="4-way reset+delay vs 1x reset",
+            )
+    finally:
+        asyncio.run(_drop_if_exists(server_url, scratch_db_name))
+
+
+async def _gather_resets(server_url: str, name: str) -> None:
+    await asyncio.gather(
+        *[setup_test_db._ensure_database(server_url, name, reset=True) for _ in range(4)]
+    )
 
 
 def test_drop_database_removes_existing(scratch_db_name: str) -> None:
