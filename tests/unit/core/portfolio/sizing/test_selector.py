@@ -75,27 +75,42 @@ def test_size_for_dispatches_to_the_matching_module(method: SizingMethod):
 @pytest.mark.perf
 def test_size_for_rejects_config_input_method_mismatch(
     perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """음성: config.method ≠ inp.portfolio_config.method 일 때 즉시
-    `SizingResultTamperedError` 를 raise 한다 — dispatch 전 비교이므로
-    CPU 측정은 0 수렴해야 한다.
+    """불일치 3종을 거부하고 동일한 CPU 예산 단언의 검출력을 검증한다."""
+    from src.core.portfolio.sizing import selector
+    from tests.support.perf_inject import virtual_delayed_sync
 
-    best_of(N)로 Windows 양자화 tick 1회에 흔들리지 않게 측정하고
-    최소값이 예산(1ms) 아래임을 단언한다.
-    """
     cfg = _config(SizingMethod.FIXED_FRACTIONAL)
-    inp = _inp(SizingMethod.VOLATILITY_TARGET)
+    original = selector.size_for
 
-    # best_of: 여러 sample 중 최소값을 채택해 Windows quantization tick
-    # (약 15.6ms)에 단언이 흔들리지 않도록 한다.
-    best = perf_budget.best_of(lambda: _safe_mismatch_call(cfg, inp), n=10, warmup=2)
+    def reject() -> None:
+        with pytest.raises(SizingResultTamperedError, match="config.method="):
+            selector.size_for(cfg, inp)
 
-    assert best.cpu_ms < 1.0, (
-        f"mismatch rejection should be near-zero CPU; measured best_of_min={best.cpu_ms:.3f}ms"
-    )
+    def assert_budget() -> float:
+        # best_of removes isolated Windows ticks; batch preserves per-call ms.
+        best = perf_budget.best_of(reject, n=10, warmup=2, batch=100)
+        assert best.cpu_ms < 1.0, (
+            f"mismatch rejection should be near-zero CPU; "
+            f"measured best_of_min={best.cpu_ms:.3f}ms"
+        )
+        return best.cpu_ms
 
-    with pytest.raises(SizingResultTamperedError):
-        size_for(cfg, inp)
+    for method in (
+        SizingMethod.VOLATILITY_TARGET,
+        SizingMethod.KELLY_CAPPED,
+        SizingMethod.RISK_PARITY,
+    ):
+        inp = _inp(method)
+        normal_ms = assert_budget()
+        with monkeypatch.context() as patch:
+            # Virtual CPU load: exactly 10 times the unchanged 1 ms budget.
+            patch.setattr(selector, "size_for", virtual_delayed_sync(original, 0.010))
+            with pytest.raises(AssertionError, match="mismatch rejection should") as red:
+                assert_budget()
+        assert_budget()  # Restoration must also restore the green result.
+        print(f"{method.value}: normal={normal_ms:.6f}ms; gate-red={red.value}")
 
 
 @pytest.mark.perf
