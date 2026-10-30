@@ -171,11 +171,21 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
     perf_budget: PerfBudget,
 ) -> None:
     """절대 초 상한이 아니라 1종목 실측 x 100 x 1.5로 단언한다 — 공유 CI의
-    CPU 시간 편차에 흔들리지 않기 위함(BT-16a와 동일 선례, docs/specs 참고)."""
+    CPU 시간 편차에 흔들리지 않기 위함(BT-16a와 동일 선례, docs/specs 참고).
+
+    baseline은 batch=500(양자화 오차 해소), 100종목은 batch=10으로 측정한다.
+    Windows에서 time.process_time() 해상도가 ~15.6ms이므로 baseline처럼
+    1ms 미만 작업은 batch를 키워야 의미 있는 값을 얻는다(task-21518).
+    """
     baseline_cols = _columns(_YEAR_D1_BARS, step=timedelta(days=1))
     baseline_universe = {"S000": (baseline_cols, _no_signal(_YEAR_D1_BARS))}
 
-    baseline_sample = perf_budget.sample(lambda: _sweep(baseline_universe), batch=200)
+    # warmup: interpreter/CPU frequency state를 안정화
+    for _ in range(5):
+        _sweep(baseline_universe)
+
+    # baseline: batch=500으로 15.6ms tick 양자화 오차를 1/500 수준으로 줄임
+    baseline_sample = perf_budget.sample(lambda: _sweep(baseline_universe), batch=500)
     baseline_ms = baseline_sample.cpu_ms
 
     universe = {
