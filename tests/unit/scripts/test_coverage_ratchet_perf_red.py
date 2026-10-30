@@ -54,3 +54,21 @@ def test_main_budget_injection_red(
 
     with pytest.raises(AssertionError):
         perf_budget.assert_within(lambda: delayed_fn(args), budget_ms=50, batch=10)
+
+
+def test_main_drop_within_tolerance_budget_injection_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
+) -> None:
+    """예산 50ms의 10배(500ms) 지연 주입 → AssertionError (tolerance 내 통과 경로)."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    baseline = tmp_path / "coverage-baseline.txt"
+    args = [
+        "--coverage-xml",
+        str(_xml(tmp_path, 0.7970)),  # 80.00 - 0.30%p (tolerance 내)
+        "--baseline",
+        str(baseline),
+    ]
+    delayed_fn = virtual_delayed_sync(coverage_ratchet.main, 0.5)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(lambda: delayed_fn(args), budget_ms=50, batch=10)

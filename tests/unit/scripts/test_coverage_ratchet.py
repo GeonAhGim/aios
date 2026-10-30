@@ -200,15 +200,27 @@ def test_baseline_not_changed_on_failure(tmp_path: Path, perf_budget: PerfBudget
     assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"  # 실패 시 baseline 미변경
 
 
-def test_drop_within_tolerance_passes_and_keeps_baseline(tmp_path: Path) -> None:
+@pytest.mark.perf
+def test_drop_within_tolerance_passes_and_keeps_baseline(
+    tmp_path: Path, perf_budget: PerfBudget
+) -> None:
+    """Numeric performance assertion: main() 전체 파이프라인(CPU) 예산 50ms 안에 끝남.
+
+    ``perf_budget.assert_within()`` 경유. ``batch=10``으로 호출당 양자화 오차를
+    ``15.6ms/10 ≈ 1.6ms`` 이하로 낮춤. 단위는 전량 ms 통일.
+    """
     xml_path = _write_coverage_xml(tmp_path, 0.7970)  # 80.00 - 0.30%p
     baseline_path = _write_baseline(tmp_path, 80.00)
 
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
-    assert exit_code == 0
+    assert sample.result == 0
     assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"
 
 
