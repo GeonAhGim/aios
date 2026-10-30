@@ -53,7 +53,7 @@ def pg_conn_args(url: str) -> list[str]:
     return args
 
 
-def _run(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
+def _run(cmd: list[str], env: dict[str, str] | None, timeout: int) -> tuple[int, str]:
     """CTO 2026-09-23: PIPE 대신 임시 파일로 stdout/stderr를 받는다. pg_basebackup -Xs·pg_ctl은
     자식(WAL 수신기/서버)이 파이프 핸들을 상속해 부모가 끝나도 communicate()가 EOF를 못 받아
     Windows에서 무기한 멈춘다(task-5350의 pg_ctl 데드락과 같은 부류 — 직접 실행 82초 vs
@@ -77,7 +77,7 @@ def _run(cmd: list[str], env: dict | None, timeout: int) -> tuple[int, str]:
 
 def _drop_stale_slot(
     dsn: str,
-    run_cmd: Callable[[list[str], dict | None, int], tuple[int, str]],
+    run_cmd: Callable[[list[str], dict[str, str] | None, int], tuple[int, str]],
     which: Callable[[str], str | None],
 ) -> None:
     """드릴이 중단돼 남은 복제 슬롯 aios_drill을 먼저 제거한다(없으면 no-op).
@@ -103,10 +103,10 @@ def run_base_backup(
     *,
     label: str | None = None,
     pg_basebackup_bin: str = "pg_basebackup",
-    run_cmd: Callable[[list[str], dict | None, int], tuple[int, str]] = _run,
+    run_cmd: Callable[[list[str], dict[str, str] | None, int], tuple[int, str]] = _run,
     which: Callable[[str], str | None] = shutil.which,
     timeout: int = 3600,
-) -> dict:
+) -> dict[str, object]:
     """베이스 백업 1회 실행 + manifest 기록. `run_cmd`/`which`는 실제 pg_basebackup 없이
     성공/실패 경로를 검증하기 위한 주입 지점이다(H-4 DoD: 실패 주입 테스트)."""
     if which(pg_basebackup_bin) is None:
