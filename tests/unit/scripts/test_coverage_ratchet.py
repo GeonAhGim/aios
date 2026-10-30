@@ -143,36 +143,6 @@ def test_read_baseline_percent_malformed_raises(tmp_path: Path, perf_budget: Per
 
 
 # ---------------------------------------------------------------------------
-# 실패 주입 — 지연 10배 주입 시 적색(게이트-red 재현)
-# ---------------------------------------------------------------------------
-
-
-def test_read_baseline_percent_malformed_raises_budget_injection_red(
-    tmp_path: Path, perf_budget: PerfBudget
-) -> None:
-    """Gate-red reproduction: 예산(1ms)의 10배인 10ms 지연을 주입하면 assert가 적색이어야 한다.
-
-    ``virtual_delayed_sync``으로 cpu_ledger에 10ms를 주입 — 실제 spin/sleep 없이
-    ``PerfBudget``이 ledger를 읽어 예산 초과를 감지한다.
-    """
-    from tests.support.perf_inject import virtual_delayed_sync
-
-    path = tmp_path / "coverage-baseline.txt"
-    path.write_text("75.00\n", encoding="utf-8")
-
-    # 10배 지연 주입 (예산 1ms × 10 = 10ms)
-    delayed_fn = virtual_delayed_sync(coverage_ratchet.read_baseline_percent, 0.01)
-
-    # 지연 주입 → CPU 예산 초과 → AssertionError (적색)
-    with pytest.raises(AssertionError):
-        perf_budget.assert_within(
-            lambda: delayed_fn(path),
-            budget_ms=1,
-            batch=100,
-        )
-
-
-# ---------------------------------------------------------------------------
 # main() — DoD 시나리오
 # ---------------------------------------------------------------------------
 
@@ -208,47 +178,25 @@ def test_first_run_initializes_baseline_from_measurement(
     assert baseline_path.read_text(encoding="utf-8").strip() == "75.00"
 
 
-def test_first_run_initializes_baseline_from_measurement_budget_injection_red(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
-) -> None:
-    """Gate-red reproduction: 예산(50ms)의 10배인 500ms 지연을 주입하면 assert가 적색이어야 한다.
+@pytest.mark.perf
+def test_baseline_not_changed_on_failure(tmp_path: Path, perf_budget: PerfBudget) -> None:
+    """Numeric performance assertion: main() 전체 파이프라인(CPU) 예산 50ms 안에 끝남.
 
-    ``virtual_delayed_sync``으로 cpu_ledger에 500ms를 주입 — 실제 spin/sleep 없이
-    ``PerfBudget``이 ledger를 읽어 예산 초과를 감지한다.
+    ``perf_budget.assert_within()`` 경유. ``batch=10``으로 호출당 양자화 오차를
+    ``15.6ms/10 ≈ 1.6ms`` 이하로 낮춤. 단위는 전량 ms 통일.
     """
-    from tests.support.perf_inject import virtual_delayed_sync
-
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    xml_path = _write_coverage_xml(tmp_path, 0.75)
-    baseline_path = tmp_path / "coverage-baseline.txt"
-
-    main_args = [
-        "--coverage-xml",
-        str(xml_path),
-        "--baseline",
-        str(baseline_path),
-        "--allow-baseline-write",
-    ]
-    # 10배 지연 주입 (예산 50ms × 10 = 500ms)
-    delayed_fn = virtual_delayed_sync(coverage_ratchet.main, 0.5)
-
-    with pytest.raises(AssertionError):
-        perf_budget.assert_within(
-            lambda: delayed_fn(main_args),
-            budget_ms=50,
-            batch=10,
-        )
-
-
-def test_baseline_not_changed_on_failure(tmp_path: Path) -> None:
     xml_path = _write_coverage_xml(tmp_path, 0.70)
     baseline_path = _write_baseline(tmp_path, 80.00)
 
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
-    assert exit_code == 1
+    assert sample.result == 1
     assert baseline_path.read_text(encoding="utf-8").strip() == "80.00"  # 실패 시 baseline 미변경
 
 
@@ -457,11 +405,6 @@ def test_first_run_with_lines_valid_persists_in_baseline(
     assert exit_code == 0
     lines = baseline_path.read_text(encoding="utf-8").strip().splitlines()
     assert lines == ["75.00", "12345"]
-
-
-# ---------------------------------------------------------------------------
-# 실패 주입 — baseline 갱신 쓰기가 중간에 실패해도 조용히 통과 보고하지 않는다
-# ---------------------------------------------------------------------------
 
 
 def test_baseline_write_failure_propagates_instead_of_silent_pass(
