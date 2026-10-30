@@ -213,6 +213,7 @@ async def test_export_quality_metrics_latency_stays_within_normalized_ceiling(de
     비동기 I/O(DB 조회)이므로 process_time 기반 PerfBudget이 아닌
     wall-clock 기반 RelativeBudget을 사용한다.
     """
+
     from tests._perf.relative_budget import RelativeBudget
 
     series_count = 15
@@ -277,6 +278,107 @@ async def test_export_quality_metrics_latency_stays_within_normalized_ceiling(de
         f"{series_count}개 시계열 export가 정규화 상한({normalized_ceiling_ms:.1f}ms)을 "
         f"초과했습니다(실측 {elapsed_ms:.1f}ms) — 시계열 수 대비 선형이 아닌 비용 회귀 의심"
         "(모듈 docstring 34행 근사치 설계 근거 참고)"
+    )
+
+
+@pytest.mark.perf
+async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_injection(
+    deps,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현(D2, task-11539 감사 후속): 성능 단언이 실제로 지연을
+    포착하는지 역으로 증명한다. asyncpg Connection.fetch/fetchrow에
+    virtual_delayed_async로 가상 지연(예산 10배)을 주입하고, 같은 정규화
+    상한 단언이 초과함을 확인한다.
+
+    실제 sleep·busy-wait 금지 — virtual_delayed_async가 virtual ledger에
+    나노초만 더하므로 측정치에 지연을 더할 뿐 실제 테스트 시간이 늘어나지
+    않는다. Windows 양자화 tick에 흔들리지 않도록 best_of(여러 번 중 최소)
+    측정과 함께 쓴다.
+    """
+    import asyncpg
+
+    from tests._perf.relative_budget import RelativeBudget
+    from tests.support.perf_inject import virtual_delayed_async
+
+    # 15개 시계열 × 20회 왕복 × 0.05s = 15s 가상 지연 → 정규화 상한(최소
+    # series_count*500ms=7500ms)을 압도한다. 실제 sleep 없음.
+    _VIRTUAL_DELAY_PER_CALL = 0.05
+
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetch",
+        virtual_delayed_async(asyncpg.Connection.fetch, _VIRTUAL_DELAY_PER_CALL),
+    )
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetchrow",
+        virtual_delayed_async(asyncpg.Connection.fetchrow, _VIRTUAL_DELAY_PER_CALL),
+    )
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetchval",
+        virtual_delayed_async(asyncpg.Connection.fetchval, _VIRTUAL_DELAY_PER_CALL),
+    )
+
+    series_count = 15
+    instruments = []
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    for _ in range(series_count):
+        instrument = await _listed_instrument(deps)
+        candles = [_candle(t0, "100", "110", "90", "105", "10")]
+        await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
+        instruments.append(instrument)
+
+    rb = RelativeBudget()
+
+    # Baseline with injection: same SELECT 1, now reads delayed.
+    async def _baseline_select() -> None:
+        async with deps.pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+
+    baseline_sample = await rb.measure_async(
+        _baseline_select,
+        n=3,
+        warmup=1,
+        calibration_n=3,
+    )
+    baseline_ms = baseline_sample.op_ms
+
+    later = _clock(t0 + timedelta(minutes=10))
+
+    async def _run_export():
+        return await export_quality_metrics(
+            batches=deps.batches,
+            store=deps.store,
+            cal=deps.cal,
+            pool=deps.pool,
+            registry=MetricsRegistry(),
+            clock=later,
+        )
+
+    export_sample = await rb.measure_async(
+        _run_export,
+        n=3,
+        warmup=1,
+        calibration_n=3,
+    )
+    elapsed_ms = export_sample.op_ms
+
+    per_series_ceiling_ms = 500.0
+    normalized_ceiling_ms = max(
+        series_count * per_series_ceiling_ms, series_count * 20 * max(baseline_ms, 1.0)
+    )
+    print(
+        f"\n[gate-red] export_quality_metrics latency with 10x virtual delay: "
+        f"{elapsed_ms:.3f}ms for {series_count} series "
+        f"(baseline injected={baseline_ms:.3f}ms; normalized ceiling={normalized_ceiling_ms:.3f}ms)"
+    )
+    assert elapsed_ms >= normalized_ceiling_ms, (
+        f"가상 지연 주입 후 {series_count}개 시계열 export가 정규화 상한("
+        f"{normalized_ceiling_ms:.1f}ms)을 넘어야 하는데 실측 {elapsed_ms:.1f}ms로 "
+        f"통과했습니다 — 지연 주입이 ledger에 반영되지 않았거나 측정 경로가 "
+        "monkeypatched 메서드를 타지 않습니다"
     )
 
 
