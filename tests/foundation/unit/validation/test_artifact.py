@@ -14,7 +14,7 @@ from src.foundation.validation.domain.artifact import (
     verify,
 )
 from tests.support.perf_budget import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 FSM_DEFINITION = {
     "states": ["IDLE", "IN_POSITION"],
@@ -51,9 +51,14 @@ def test_artifact_hash_changes_when_fsm_threshold_changes():
 
 @pytest.mark.perf
 def test_artifact_registry_version_delegates_to_l02_registry_hash(perf_budget):
+    # batch=100으로 Windows quantization tick(≈15.6ms) 아래 단일 sample이 0ms
+    # 읽히는 0수렴을 막는다. best_of(5) 최소값이 안정된 non-zero CPU 측정을 준다.
     perf_budget.assert_within(
         lambda: _artifact(),
         budget_ms=5,
+        n=5,
+        warmup=2,
+        batch=100,
         label="registry_version delegation",
     )
     artifact = _artifact()
@@ -63,14 +68,15 @@ def test_artifact_registry_version_delegates_to_l02_registry_hash(perf_budget):
 def test_artifact_registry_version_delay_injection_fails_redgate(monkeypatch):
     """Budget 10배 지연 주입 — 같은 측정/단언이 적색으로 떨어지는지 검증(gate-red repro).
 
-    CPU 예산이므로 delayed_sync로 CPU 부하를 주입하고, perf_budget.assert_within이
-    AssertionError를 일으켜 fail-closed로 검출됨을 확인한다.
+    CPU 예산이므로 virtual_delayed_sync로 가상 CPU 지연을 주입하고(실제 busy-wait
+    없이 가상 원장에 0.05s 추가), perf_budget.assert_within이 AssertionError를
+    일으켜 fail-closed로 검출됨을 확인한다.
     """
 
     original_hash = IndicatorRegistry.registry_hash
 
     def _slow_hash(self) -> str:
-        return delayed_sync(original_hash, 0.05)(self)
+        return virtual_delayed_sync(original_hash, 0.05)(self)
 
     monkeypatch.setattr(IndicatorRegistry, "registry_hash", _slow_hash)
 
@@ -79,6 +85,9 @@ def test_artifact_registry_version_delay_injection_fails_redgate(monkeypatch):
         perf_budget_fixture.assert_within(
             lambda: _artifact(),
             budget_ms=5,
+            n=5,
+            warmup=2,
+            batch=100,
             label="registry_version delegation (delayed)",
         )
 
