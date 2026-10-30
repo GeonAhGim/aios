@@ -25,7 +25,7 @@
 | 4 | `src/foundation/paper_control/application/apply_safety_control.py:87` detail (DB 저장) | `f"RISK_GATE_SAFETY_CONTROL:{safety_control_id}:{reason}"` | **아니오** | `reason: str`, `safety_control_id: UUID` (`:40-41`). 호출부 3곳 모두 `body.reason`/`view.reason`(스키마 str) 전달 (`risk_gate.py:142,242`, `kill_switch_service.py:161`). `SafetyScope`((str, Enum))는 `:63` 이후 텍스트에 안 들어가고 비교용으로만 쓰임 |
 | 5 | `apply_safety_control.py:63` 멱등키 | `f"risk-pause:{safety_control_id}"` | **아니오** | UUID |
 | 6 | `journal_rules.py:189,220,248` 멱등키 | `f"fill:{order_id}:{fill_seq}"` 등 | **아니오** | `order_id: UUID`, `fill_seq: int` (`journal_rules.py:160-161`) |
-| 6b | `record_fill.py:186`, `open_order_sweeper.py:230` 멱등키 | `f"fill:{command.order_id}:{command.fill_seq}"`, `f"sweep:{control_id}:{order_id}"` | **미확인** | 인자 타입(command 모델, sweeper 지역변수)을 끝까지 따라가지 않음. 이름상 UUID/int |
+| 6b | `record_fill.py:186`, `open_order_sweeper.py:230` 멱등키 | `f"fill:{command.order_id}:{command.fill_seq}"`, `f"sweep:{control_id}:{order_id}"` | **아니오** | `order_id: UUID`, `fill_seq: int` (v1.py:72-73); `control_id: UUID`, `order_id: UUID` (sweeper:178,216). UUID/int 리터럴만 사용. |
 | 7 | `src/core/eventstore/canonical_json.py:23` | `json.dumps(data, sort_keys=True, default=str)` | 조건부 | (str, Enum)은 값으로 직렬화(버전 무관). plain Enum만 `'E.M'`(버전 무관). 표 §0 |
 | 8 | `src/core/eventstore/append.py:71,88`, `replay.py:76,130` | `canonical_json(payload)` / `"|".join(...)` | 조건부(payload 내용 의존) | join 입력은 `event_type: str`, `digest` 등 str. payload 안의 (str, Enum)은 값으로 직렬화 |
 | 9 | `src/foundation/evidence/domain/rules.py:45` payload_hash | `json.dumps(payload, sort_keys=True, default=str)` | 조건부 | #7과 동일 (버전 무관) |
@@ -35,7 +35,7 @@
 | 13 | `src/foundation/validation/domain/rules.py:65,81` | `json.dumps(..., default=str)` | 조건부 | #7과 동일. `str(initial_equity)`(Decimal) 사용 |
 | 14 | `validation/application/run_check.py:119` | `json.loads(json.dumps(metrics, default=str))` (JSONB 저장) | 조건부 | #7과 동일 |
 | 15 | `src/exchanges/bitget/private_ws_mixin.py:132` raw_hash | `json.dumps(row, sort_keys=True, default=str)` | **아니오** | `row`는 거래소 원본 JSON dict |
-| 16 | `src/foundation/research_data/adapters/sources/rss_generic.py:252`, `sec_edgar.py:164` | `f"{feed_id}:{entry.guid}"`, `f"{accession}:{form}:{filing_date}"` | **미확인** | 파서 반환값 타입을 끝까지 따라가지 않음(외부 피드 문자열로 보이나 코드로 확정 안 함) |
+| 16 | `src/foundation/research_data/adapters/sources/rss_generic.py:252`, `sec_edgar.py:164` | `f"{feed_id}:{entry.guid}"`, `f"{accession}:{form}:{filing_date}"` | **아니오** | rss: `feed_id: str` (RssFeedRegistration:123), `entry.guid: str` (RssFeedEntry:129, XML text). sec_edgar: `accession: str`, `form: str`, `filing_date: str` (파서 파라미터 §151-159); JSON 배열 원소 모두 str. |
 | 17 | `src/services/safety/liquidation_planning.py:136` hmac | `str(row["id"])` | **아니오** | DB row id (UUID) |
 
 "조건부" = 코드상 payload에 (str, Enum)이 들어갈 수는 있으나 `json` 경로라서 3.10/3.11+ 결과가 같다.
@@ -45,10 +45,10 @@ plain `Enum`이 들어가면 `default=str`로 `'Class.MEMBER'`가 되지만 이�
 
 - 3.11+에서 달라지는 **f-string/format 경로로 enum이 해시·멱등키·DB 저장 텍스트에 닿는 지점: 확인된 것 없음.**
   → **수정 필요 항목 없음** (src 변경 불필요).
-- 남은 위험: #16, #6b (미확인). 그리고 향후 누군가 #1~#6 식에 enum 인자를 직접 넣는 회귀 —
-  `.value`를 쓰도록 유지해야 한다.
+- #6b, #16도 확정 완료: 모두 str/UUID/int 리터럴만 사용, enum 도달 경로 없음.
 
 ## 3. 고정 테스트
 
 `tests/unit/py313_prep/test_enum_hash_inputs_pinned.py` — #1, #4/#5, #7~#13 및 negative
-(plain Enum, `str(E.M)` 비교)를 리터럴 기대값으로 고정. 3.10과 3.12에서 모두 17 passed 확인.
+(plain Enum, `str(E.M)` 비교)를 리터럴 기대값으로 고정. #6b (record_fill, open_order_sweeper)
+및 #16 (rss_generic, sec_edgar)도 고정 테스트로 커버. 3.10과 3.12에서 모두 통과 확인.

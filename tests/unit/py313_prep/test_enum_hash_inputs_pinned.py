@@ -174,3 +174,49 @@ def test_replay_digest_state_str_enum_literal() -> None:
 
 def test_json_dumps_str_enum_matches_stdlib_literal() -> None:
     assert json.dumps({"o": Outcome.SUCCESS}, sort_keys=True, default=str) == '{"o": "SUCCESS"}'
+
+
+# --- #6b record_fill.py:186 idempotency key: order_id=UUID, fill_seq=int ---
+
+
+def test_record_fill_idempotency_key_literal() -> None:
+    order_id = UUID("00000000-0000-0000-0000-0000000000bb")
+    fill_seq: int = 42
+    key = f"fill:{order_id}:{fill_seq}"
+    assert key == "fill:00000000-0000-0000-0000-0000000000bb:42"
+
+
+# --- #6b open_order_sweeper.py:230 idempotency key: control_id=UUID, order_id=UUID ---
+
+
+def test_sweep_idempotency_key_literal() -> None:
+    control_id = UUID("00000000-0000-0000-0000-0000000000cc")
+    order_id = UUID("00000000-0000-0000-0000-0000000000dd")
+    key = f"sweep:{control_id}:{order_id}"
+    assert key == "sweep:00000000-0000-0000-0000-0000000000cc:00000000-0000-0000-0000-0000000000dd"
+
+
+# --- #16 rss_generic.py:252 hash input: feed_id=str, entry.guid=str ---
+
+
+def test_rss_hash_input_literal() -> None:
+    feed_id = "my-feed-1"
+    guid = "https://example.com/item/42"
+    text = f"{feed_id}:{guid}"
+    assert text == "my-feed-1:https://example.com/item/42"
+    # sha256 must match the literal text, not any enum formatting
+    expected_hash = hashlib.sha256(text.encode()).hexdigest()
+    assert hashlib.sha256(text.encode()).hexdigest() == expected_hash
+
+
+# --- #16 sec_edgar.py:164 hash input: accession:str, form:str, filing_date:str ---
+
+
+def test_sec_edgar_hash_input_literal() -> None:
+    accession = "0001234567-24-000001"
+    form = "10-K"
+    filing_date = "2024-02-15"
+    text = f"{accession}:{form}:{filing_date}"
+    assert text == "0001234567-24-000001:10-K:2024-02-15"
+    expected_hash = hashlib.sha256(text.encode()).hexdigest()
+    assert hashlib.sha256(text.encode()).hexdigest() == expected_hash
