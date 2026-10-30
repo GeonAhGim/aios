@@ -173,9 +173,10 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
     """절대 초 상한이 아니라 1종목 실측 x 100 x 1.5로 단언한다 — 공유 CI의
     CPU 시간 편차에 흔들리지 않기 위함(BT-16a와 동일 선례, docs/specs 참고).
 
-    baseline은 batch=500(양자화 오차 해소), 100종목은 batch=10으로 측정한다.
-    Windows에서 time.process_time() 해상도가 ~15.6ms이므로 baseline처럼
-    1ms 미만 작업은 batch를 키워야 의미 있는 값을 얻는다(task-21518).
+    병렬 CI(pytest_perf_parallel_3)에서 CPU 경합으로 100종목 측정이
+    baseline 대비 1.5x를 초과하는 날림 실패가 발생했다. fix: baseline과
+    100종목 모두 best_of(n=3)로 최소값 채택, batch=200/3으로 tick 양자화
+    오차를 줄인다.
     """
     baseline_cols = _columns(_YEAR_D1_BARS, step=timedelta(days=1))
     baseline_universe = {"S000": (baseline_cols, _no_signal(_YEAR_D1_BARS))}
@@ -184,9 +185,9 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
     for _ in range(5):
         _sweep(baseline_universe)
 
-    # baseline: batch=500으로 15.6ms tick 양자화 오차를 1/500 수준으로 줄임
-    baseline_sample = perf_budget.sample(lambda: _sweep(baseline_universe), batch=500)
-    baseline_ms = baseline_sample.cpu_ms
+    # best_of(3)로 CI 경합 노이즈를 걷어내고 batch=200으로 tick 양자화 오차 줄임
+    baseline = perf_budget.best_of(lambda: _sweep(baseline_universe), n=3, batch=200)
+    baseline_ms = baseline.cpu_ms
 
     universe = {
         f"S{i:03d}": (
@@ -195,9 +196,12 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
         )
         for i in range(100)
     }
-    result = _sweep(universe)
-    elapsed_sample = perf_budget.sample(lambda: _sweep(universe), batch=10)
-    elapsed_ms = elapsed_sample.cpu_ms
+
+    # best_of(3)로 CI 경합 노이즈를 최소화 — 병렬 워커가 CPU를 뺏어가도
+    # 최소 3회 중 가장 낮은 값을 채택하므로 날림 실패가 줄어든다.
+    measured = perf_budget.best_of(lambda: _sweep(universe), n=3, batch=3)
+    elapsed_ms = measured.cpu_ms
+    result = measured.result
 
     threshold_ms = baseline_ms * 100 * 1.5
     print(
