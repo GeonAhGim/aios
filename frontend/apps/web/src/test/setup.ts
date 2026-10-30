@@ -14,3 +14,14 @@ configure({ asyncUtilTimeout: 10000 });
 afterEach(() => {
   cleanup();
 });
+
+// task-21547: React Router v6 prints these two upgrade notices once per MemoryRouter
+// instance (14x per file in some suites), flooding stderr and burying real failures in the
+// CI stage tail. They only announce the v7 opt-in flags and carry no test signal; every
+// other console.warn still passes through untouched.
+const RR_FUTURE_FLAG_WARNING = /React Router Future Flag Warning/;
+const originalWarn = console.warn.bind(console);
+console.warn = (...args: unknown[]) => {
+  if (typeof args[0] === "string" && RR_FUTURE_FLAG_WARNING.test(args[0])) return;
+  originalWarn(...args);
+};
