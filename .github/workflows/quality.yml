@@ -285,7 +285,9 @@ jobs:
   perf-test:
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 2026-10-30: 20분 한도에서 최근 실행 10건 모두 취소(timeout)돼 다른 잡이 전부 성공해도 run이 적색이었다.
+    # 이 잡의 perf 단계는 continue-on-error(warn)이므로 한도만 키워 실제 소요시간을 먼저 관측한다(예산 불변).
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16
