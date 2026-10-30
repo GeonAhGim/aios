@@ -26,7 +26,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from dotenv import dotenv_values
 
@@ -82,17 +82,37 @@ def _drop_stale_slot(
 ) -> None:
     """드릴이 중단돼 남은 복제 슬롯 aios_drill을 먼저 제거한다(없으면 no-op).
     pg_basebackup -C -S aios_drill 은 같은 이름 슬롯이 있으면 'already exists'로 실패한다.
-    best-effort: 제거가 실패해도 pg_basebackup이 자체 오류를 보고하므로 여기서 막지 않는다."""
+    best-effort: 제거가 실패해도 pg_basebackup이 자체 오류를 보고하므로 여기서 막지 않는다.
+
+    CTO 2026-10-30 (task-21543): DSN에 비밀번호가 포함되면 `psql <dsn>` 형태로 argv에 노출된다.
+    비밀번호를 PGPASSWORD 환경변수로 전달하고 URL에서 제거해 argv 노출을 막는다.
+    """
     psql = which("psql")
     if psql is None:
         return
-    libpq_dsn = dsn.replace("postgresql+asyncpg://", "postgresql://")
+    # Extract password into PGPASSWORD env var to avoid argv exposure.
+    url = dsn.replace("postgresql+asyncpg://", "postgresql://", 1)
+    parts = urlsplit(url)
+    env: dict[str, str] = dict(os.environ)
+    if parts.password is not None:
+        host = parts.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        netloc = (
+            quote(unquote(parts.username or ""), safe="") + "@" if parts.username else ""
+        ) + host
+        if parts.port:
+            netloc += f":{parts.port}"
+        env["PGPASSWORD"] = unquote(parts.password)
+        url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    else:
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, parts.fragment))
     sql = (
         "SELECT pg_drop_replication_slot('aios_drill') "
         "WHERE EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='aios_drill')"
     )
     try:
-        run_cmd([psql, libpq_dsn, "-tAc", sql], None, 30)
+        run_cmd([psql, url, "-tAc", sql], env, 30)
     except (OSError, subprocess.TimeoutExpired):
         pass
 
@@ -183,7 +203,8 @@ def latest_backup_dir(dest_dir: Path) -> Path | None:
         return None
     candidates = sorted(
         (p for p in dest_dir.iterdir() if p.is_dir() and (p / "manifest.json").is_file()),
-        key=lambda p: p.name, reverse=True,
+        key=lambda p: p.name,
+        reverse=True,
     )
     for p in candidates:
         try:
@@ -213,8 +234,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"base_backup 실패: {e}", file=sys.stderr)
         return 1
     if not manifest["ok"]:
-        print(f"pg_basebackup 실패(rc={manifest['returncode']}): {manifest['tail']}",
-              file=sys.stderr)
+        print(
+            f"pg_basebackup 실패(rc={manifest['returncode']}): {manifest['tail']}", file=sys.stderr
+        )
         return 1
     print(f"base backup 완료: {manifest['dest']}")
     return 0

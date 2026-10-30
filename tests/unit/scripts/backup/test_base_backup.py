@@ -269,3 +269,29 @@ def test_wal_already_removed_gate_red_reproduction(tmp_path: Path) -> None:
     assert len(failed_markers) == 1
     saved = json.loads(failed_markers[0].read_text(encoding="utf-8"))
     assert saved["ok"] is False
+
+
+def test_drop_stale_slot_passes_password_via_env_not_argv(tmp_path: Path) -> None:
+    """_drop_stale_slot이 DSN 비밀번호를 argv가 아닌 PGPASSWORD env로 전달하는지 검증.
+
+    task-21543: psql <dsn> 형태로 argv에 비밀번호가 노출되면 ps 목록에 드러난다.
+    """
+    calls: list[tuple[list[str], dict | None]] = []
+
+    def mock_run(cmd, env, timeout):
+        calls.append((list(cmd), env))
+        return (0, "")
+
+    base_backup.run_base_backup(
+        tmp_path,
+        "postgresql://user:secret123@db:5432/aios",
+        which=lambda b: "/usr/bin/pg_basebackup" if "pg_basebackup" in b else "/usr/bin/psql",
+        run_cmd=mock_run,
+    )
+    # psql 호출 (첫 번째) 에서 비밀번호가 argv에 없어야 함
+    psql_calls = [c for c in calls if "psql" in c[0][0]]
+    assert len(psql_calls) == 1
+    psql_argv, psql_env = psql_calls[0]
+    assert "secret123" not in psql_argv
+    assert psql_env is not None
+    assert psql_env.get("PGPASSWORD") == "secret123"
