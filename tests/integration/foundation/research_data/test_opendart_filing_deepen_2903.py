@@ -19,11 +19,9 @@ docs/audit/DEPTH_DC_RD.md#1767) D1 -> D2 증빙, 실 DB 대상.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import cast
 
 import asyncpg
 import pytest
@@ -45,6 +43,7 @@ from src.foundation.research_data.adapters.opendart.postgres_unprocessed_queue i
     PostgresUnprocessedFilingQueue,
 )
 from tests._perf.relative_budget import RelativeBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 _EX_DATE = date(2026, 4, 1)
 
@@ -304,31 +303,28 @@ async def test_aios_app_cannot_update_or_delete_filing_then_pit_still_works(
 # ---- 검출력 확인 — 예산 10배 지연 주입으로 적색 검증 ----
 
 
+@pytest.mark.perf
 async def test_append_delay_10x_exceeds_latency_budget(
     pool: asyncpg.Pool,
     filing_repo: PostgresCorporateActionFilingRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DB 호출에 10배 sleep을 주입하면 성능 단언이 적색이어야 한다.
+    """DB 호출에 10배 지연을 주입하면 성능 단언이 적색이어야 한다.
 
-       RelativeBudget.measure_async는 wall-clock(perf_counter)를 쓰므로
-       sleep 지연이 op_ms에 직접 반영되고 calibration은 순수 CPU라 변하지
-    않아 — ratio가 예산 max_ratio를 넘어야 한다.
+    virtual_delayed_async로 실제 sleep 없이 ledger에만 지연을 더해
+    gate-red 단언을 수 초 안에 증명한다(task-21634).
     """
+    reset_virtual_totals()
     n = 200
     instrument_id = await _make_instrument(pool)
     base = datetime(2026, 1, 1, tzinfo=UTC)
 
-    # 원본 fetchrow를 감싸서 10배 지연(0.01초 × 10 = 0.1초 per call)
-    original_fetchrow = asyncpg.Connection.fetchrow
-
-    async def _slow_fetchrow(
-        self: asyncpg.Connection, *args: object, **kwargs: object
-    ) -> asyncpg.Record | None:
-        await asyncio.sleep(0.1)  # 10배 지연 주입 (non-blocking)
-        return await original_fetchrow(self, *args, **kwargs)
-
-    monkeypatch.setattr(asyncpg.Connection, "fetchrow", _slow_fetchrow)
+    # virtual_delayed_async: 실제 sleep 없이 ledger에 0.1초 추가 (non-blocking)
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetchrow",
+        virtual_delayed_async(asyncpg.Connection.fetchrow, 0.1),
+    )
 
     try:
 
@@ -394,18 +390,13 @@ async def test_list_history_delay_10x_exceeds_latency_budget(
                 ),
             )
 
-    # 고정 sleep의 검출은 CPU 속도가 아니라 주입한 벽시계 시간으로 검증한다.
+    # virtual_delayed_async: 실제 sleep 없이 ledger에 0.5초 추가 (non-blocking)
     injected_delay_sec = 0.5
-    original_fetch = asyncpg.Connection.fetch
-
-    async def _slow_fetch(
-        self: asyncpg.Connection, *args: object, **kwargs: object
-    ) -> list[asyncpg.Record]:
-        await asyncio.sleep(injected_delay_sec)  # 10배 지연 주입 (non-blocking)
-        result = await original_fetch(self, *args, **kwargs)
-        return cast("list[asyncpg.Record]", result)
-
-    monkeypatch.setattr(asyncpg.Connection, "fetch", _slow_fetch)
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetch",
+        virtual_delayed_async(asyncpg.Connection.fetch, injected_delay_sec),
+    )
 
     try:
 
