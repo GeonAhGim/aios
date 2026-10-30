@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.support.perf_budget import PerfBudget
 from tests.unit.scripts.test_coverage_ratchet import (
     _load_module,
     _write_baseline,
@@ -157,26 +158,28 @@ def test_explicit_allow_flag_allows_ratchet_up_locally(
 
 @pytest.mark.perf
 def test_performance_assertion_baseline_write_under_100ms(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
 ) -> None:
     """성능 예산: baseline 쓰기 연산(측정+비교+쓰기)이 100ms 이하여야 한다.
-    CI에서 수백~수천 건의 테스트를 돌릴 때 스토리지 I/O가 병목되지 않도록."""
+
+    raw ``time.perf_counter()`` 단언을 ``perf_budget.assert_within()``로 전환.
+    ``batch=100``으로 호출당 양자화 오차를 낮춤. 단위는 전량 ms 통일.
+    """
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     xml_path = _write_coverage_xml(tmp_path, 0.75)
     baseline_path = tmp_path / "coverage-baseline.txt"
 
-    import time
-
-    start = time.perf_counter()
-    for _ in range(100):
-        coverage_ratchet.main(
+    perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
             [
                 "--coverage-xml",
                 str(xml_path),
                 "--baseline",
                 str(baseline_path),
             ]
-        )
-    elapsed_ms = (time.perf_counter() - start) / 100 * 1000
-
-    assert elapsed_ms < 100, f"baseline 쓰기 평균 {elapsed_ms:.1f}ms — 예산 100ms 초과"
+        ),
+        budget_ms=100,
+        batch=100,
+    )
