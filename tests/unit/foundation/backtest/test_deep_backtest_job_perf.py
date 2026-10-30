@@ -115,7 +115,10 @@ def _deep_job_latencies_ms(
             chunk_bars=200,
         )
 
-    samples = [s.cpu_ms for s in perf_budget.samples(_run_once, n=iterations)]
+    # batch=8: Windows process_time() quantization tick is 15.625ms.
+    # PerfBudget.sample() docstring recommends batch>1 to reduce quantization
+    # error from ~tick to ~tick/batch (task-6371, task-7253). batch=8 → ~2ms.
+    samples = [s.cpu_ms for s in perf_budget.samples(_run_once, n=iterations, batch=8)]
     samples.sort()
     return samples
 
