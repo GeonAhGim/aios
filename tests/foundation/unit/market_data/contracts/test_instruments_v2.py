@@ -398,6 +398,24 @@ def test_currency_country_mic_validator_failure_injection_fails_closed(
         _sample_instrument(mic="XNAS")
 
 
+_BULK_BUDGET_MS = 2_000.0  # 2.0s — budget 값 불변
+
+
+def _build_bulk_instruments() -> list[v2.Instrument]:
+    return [_sample_instrument(instrument_id=_ulid_for(i)) for i in range(5000)]
+
+
+def _assert_bulk_construction_within_budget(perf_budget: PerfBudget, build: Any) -> None:
+    # best_of (min of several runs) keeps one coarse Windows process_time tick from skewing it.
+    sample = perf_budget.best_of(build, n=5, warmup=1, batch=1)
+
+    assert len(sample.result) == 5000
+    assert sample.cpu_ms < _BULK_BUDGET_MS, (
+        f"constructing 5,000 Instruments took {sample.cpu_ms:.1f}ms "
+        f"(budget {_BULK_BUDGET_MS:.0f}ms)"
+    )
+
+
 @pytest.mark.perf
 def test_bulk_instrument_construction_completes_within_latency_budget(
     perf_budget: PerfBudget,
@@ -406,16 +424,19 @@ def test_bulk_instrument_construction_completes_within_latency_budget(
     process_time 기반 측정으로 부하 민감 호스트에서 다른 프로세스에 코어를
     뺏겨 대기한 시간이 wall-clock에 섞이지 않게 한다.
     """
-    sample = perf_budget.sample(
-        lambda: [_sample_instrument(instrument_id=_ulid_for(i)) for i in range(5000)],
-        batch=1,
-    )
+    _assert_bulk_construction_within_budget(perf_budget, _build_bulk_instruments)
 
-    assert len(sample.result) == 5000
-    budget_ms = 2_000.0  # 2.0s — budget 값 불변
-    assert sample.cpu_ms < budget_ms, (
-        f"constructing 5,000 Instruments took {sample.cpu_ms:.1f}ms (budget {budget_ms:.0f}ms)"
-    )
+
+@pytest.mark.perf
+def test_bulk_instrument_construction_budget_assertion_catches_10x_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red repro: a virtual 10x-budget delay trips the same assertion (no real sleep)."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    delayed = virtual_delayed_sync(_build_bulk_instruments, seconds=_BULK_BUDGET_MS * 10 / 1000)
+    with pytest.raises(AssertionError, match="budget 2000ms"):
+        _assert_bulk_construction_within_budget(perf_budget, delayed)
 
 
 def test_instrument_required_fields_match_dc1_contract_table_ci_guard() -> None:
