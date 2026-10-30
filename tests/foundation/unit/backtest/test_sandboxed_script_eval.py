@@ -29,6 +29,7 @@ from src.core.script.runtime.interpreter_types import ExecutionResult
 from src.core.script.runtime.series import Series, Value
 from src.foundation.backtest.application import sandboxed_script_eval
 from src.foundation.backtest.application.sandboxed_script_eval import (
+    _DEFAULT_LIMITS,
     SandboxLimits,
     ScriptSandboxCrashError,
     ScriptSandboxMemoryExceededError,
@@ -36,6 +37,7 @@ from src.foundation.backtest.application.sandboxed_script_eval import (
     run_sandboxed,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _SAMPLE = (
     "input close: series<float> = 0\n"
@@ -109,6 +111,80 @@ def test_fast_script_matches_direct_call_byte_identical() -> None:
     assert sandboxed.bindings == direct.bindings
     assert sandboxed.signals == direct.signals
     assert sandboxed.orders == direct.orders
+
+
+@pytest.mark.perf
+def test_sandboxed_fast_script_0_convergence(perf_budget: PerfBudget) -> None:
+    """0-convergence (task-21238): a fast sandboxed call's best-of-N CPU measurement
+    converges to near-zero across runs, proving Windows 15.6 ms quantisation tick
+    cannot shake the measurement when the script is genuinely fast.
+
+    Uses ``perf_budget.best_of()`` (N=5, take minimum) so the quantisation
+    error is divided by the batch window; the budget/assertion numbers stay
+    unchanged.
+    """
+    ir = lower_program(parse(_SAMPLE))
+
+    def _run_sandboxed_fast() -> ExecutionResult:
+        return run_sandboxed(
+            _execute_ir,
+            ir,
+            bar_count=5,
+            inputs={"close": _CLOSE},
+            limits=SandboxLimits(wallclock_sec=120, rss_mb=512),
+        )
+
+    # 0-convergence: best_of(N=5) picks the minimum cpu_ms across runs.
+    sample = perf_budget.best_of(_run_sandboxed_fast, n=5, warmup=1)
+    # Budget floor: a single fast-script sandbox call must finish well under
+    # 50 ms CPU (the spawn/import overhead is measured in wall-clock, not CPU).
+    assert sample.cpu_ms < 50.0, (
+        f"0-convergence budget exceeded: {sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_sandboxed_delay_injection_makes_measurement_red(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate-red reproduction (task-21238): inject 10× virtual delay via
+    ``virtual_delayed_sync`` on the sandbox path; the same budget assertion
+    must go red, proving the check is a real regression detector, not
+    vacuously green.
+
+    Because ``run_sandboxed`` spawns a child process, the child has its own
+    virtual ledger.  We monkeypatch ``run_sandboxed`` at the module level so
+    that *before* the child is spawned, the parent's ledger receives the
+    virtual delay — the same ledger that ``PerfBudget.sample()`` reads.
+    """
+    ir = lower_program(parse(_SAMPLE))
+    from src.foundation.backtest.application import sandboxed_script_eval
+
+    _original_run_sandboxed = sandboxed_script_eval.run_sandboxed
+
+    def _delayed_run_sandboxed(fn, /, *args, limits=_DEFAULT_LIMITS, **kwargs):
+        # Inject 500 ms virtual CPU + wall delay into the parent's ledger.
+        # This simulates a 10× delay for a ~50 ms budget.
+        virtual_delayed_sync(lambda: None, 0.5)()
+        return _original_run_sandboxed(fn, *args, limits=limits, **kwargs)
+
+    monkeypatch.setattr(sandboxed_script_eval, "run_sandboxed", _delayed_run_sandboxed)
+
+    def _run_sandboxed_delayed() -> ExecutionResult:
+        return sandboxed_script_eval.run_sandboxed(
+            _execute_ir,
+            ir,
+            bar_count=5,
+            inputs={"close": _CLOSE},
+            limits=SandboxLimits(wallclock_sec=120, rss_mb=512),
+        )
+
+    # Same best_of pattern as the 0-convergence test; must now read ≥500 ms.
+    delayed = perf_budget.best_of(_run_sandboxed_delayed, n=5, warmup=1)
+    assert delayed.cpu_ms >= 500.0, (
+        f"virtual delay not injected: cpu={delayed.cpu_ms:.3f}ms expected ≥500ms"
+    )
 
 
 @pytest.mark.perf
