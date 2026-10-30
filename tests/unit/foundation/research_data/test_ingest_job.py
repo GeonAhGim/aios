@@ -456,9 +456,8 @@ async def test_page_processing_throughput_bounded(
             lock=_noop_lock,
         )
 
-    # batch=N: process_time tick(15.6ms)이 빠른 호출을 가리는 것을 방지 —
-    # total이 tick의 수 배가 되게 묶어 호출당 평균을 재고, budget_ms는
-    # 단일 호출 기준(2000ms)으로 단언한다.
+    # n=3 최소값: wall_ms(perf_counter 기준)는 process_time 틱과 무관하며,
+    # 여러 시도 중 최소값으로 단일 호출 노이즈를 줄인다.
     samples = await perf_budget.samples_async(run_ingest, n=3)
     best = min(samples, key=lambda s: s.wall_ms)
 
@@ -489,7 +488,11 @@ async def test_page_throughput_budget_red_with_virtual_delay(
 
         return run
 
-    normal = await perf_budget.best_of_async(runner(fetch_page), n=3)
+    normal_samples = await perf_budget.samples_async(runner(fetch_page), n=3)
+    normal = min(normal_samples, key=lambda s: s.wall_ms)
     assert normal.wall_ms < 2000.0
-    slow = await perf_budget.best_of_async(runner(virtual_delayed_async(fetch_page, 20.0)), n=3)
+    slow_samples = await perf_budget.samples_async(
+        runner(virtual_delayed_async(fetch_page, 20.0)), n=3
+    )
+    slow = min(slow_samples, key=lambda s: s.wall_ms)
     assert slow.wall_ms >= 2000.0, "gate must go red under 10x virtual delay"
