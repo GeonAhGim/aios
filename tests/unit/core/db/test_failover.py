@@ -403,7 +403,11 @@ async def test_gate_red_all_hosts_stuck_read_only_raises_exhausted() -> None:
     read_only=True permanently — the failover gate MUST raise
     FailoverExhaustedError instead of silently returning a read-only
     connection. This test verifies the gate *fails* (raises) under
-    injected bad state, proving the safety invariant is enforced."""
+    injected bad state, proving the safety invariant is enforced.
+
+    Uses ceiling_seconds=1.0 to keep the gate-red measurement under 10s
+    (real 60s ceiling would take ~60s because backoff is 10ms per sweep).
+    """
     conns = {
         "h1": FakeConnection("h1", read_only=True),
         "h2": FakeConnection("h2", read_only=True),
@@ -420,7 +424,12 @@ async def test_gate_red_all_hosts_stuck_read_only_raises_exhausted() -> None:
             HostEndpoint("h3", priority=2),
         ],
         connect=connect,
-        backoff=BackoffPolicy(initial_seconds=0.01, max_seconds=0.01, multiplier=2.0),
+        backoff=BackoffPolicy(
+            initial_seconds=0.01,
+            max_seconds=0.01,
+            multiplier=2.0,
+            ceiling_seconds=1.0,
+        ),
     )
 
     with pytest.raises(FailoverExhaustedError) as exc_info:
