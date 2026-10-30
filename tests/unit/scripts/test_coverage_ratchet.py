@@ -122,12 +122,54 @@ def test_read_baseline_percent_missing_file_returns_none(tmp_path: Path) -> None
     assert coverage_ratchet.read_baseline_percent(tmp_path / "coverage-baseline.txt") is None
 
 
-def test_read_baseline_percent_malformed_raises(tmp_path: Path) -> None:
+@pytest.mark.perf
+def test_read_baseline_percent_malformed_raises(tmp_path: Path, perf_budget: PerfBudget) -> None:
+    """Numeric performance assertion: malformed baseline 파일 읽기·파싱이 CPU 예산 1ms 안에 끝남.
+
+    raw ``time.perf_counter()`` 단언 대신 ``perf_budget.assert_within()`` 경유.
+    ``batch=100``으로 호출당 양자화 오차를 ``15.6ms/100 ≈ 0.16ms`` 이하로 낮춤.
+    단위는 전량 ms 통일.
+    """
     path = tmp_path / "coverage-baseline.txt"
     path.write_text("not-a-number\n", encoding="utf-8")
 
+    # perf_budget.assert_within는 fn을 여러 회 호출하므로 예외 전파가 맞음
     with pytest.raises(coverage_ratchet.CoverageRatchetError):
-        coverage_ratchet.read_baseline_percent(path)
+        perf_budget.assert_within(
+            lambda: coverage_ratchet.read_baseline_percent(path),
+            budget_ms=1,
+            batch=100,
+        )
+
+
+# ---------------------------------------------------------------------------
+# 실패 주입 — 지연 10배 주입 시 적색(게이트-red 재현)
+# ---------------------------------------------------------------------------
+
+
+def test_read_baseline_percent_malformed_raises_budget_injection_red(
+    tmp_path: Path, perf_budget: PerfBudget
+) -> None:
+    """Gate-red reproduction: 예산(1ms)의 10배인 10ms 지연을 주입하면 assert가 적색이어야 한다.
+
+    ``virtual_delayed_sync``으로 cpu_ledger에 10ms를 주입 — 실제 spin/sleep 없이
+    ``PerfBudget``이 ledger를 읽어 예산 초과를 감지한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    path = tmp_path / "coverage-baseline.txt"
+    path.write_text("75.00\n", encoding="utf-8")
+
+    # 10배 지연 주입 (예산 1ms × 10 = 10ms)
+    delayed_fn = virtual_delayed_sync(coverage_ratchet.read_baseline_percent, 0.01)
+
+    # 지연 주입 → CPU 예산 초과 → AssertionError (적색)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: delayed_fn(path),
+            budget_ms=1,
+            batch=100,
+        )
 
 
 # ---------------------------------------------------------------------------
