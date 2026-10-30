@@ -26,7 +26,8 @@ buy&hold 조합을 sweep_grid에 늘려가며 재 보면 조합당 비용이 선
 **게이트 = 정규화 임계(실측 200조합 기준), §9.9의 60s/1,000외삽은 print(비차단)**:
 test_perf_journal.py(LC-17)·test_pre_trade_latency.py(R-57) 선례와 동일한 이유
 -- 공유 CI의 CPU 배정은 이 파일이 통제할 수 없는 변동성이라 절대 초 단언은
-상시 적색이 된다. 실행하는 200조합 중 앞 20개를 baseline으로 재고(같은 실행의
+상시 적색이 된다. perf_budget의 CPU 시간(ms)을 batch=2로 측정한다.
+실행하는 200조합 중 앞 20개를 baseline으로 재고(같은 실행의
 일부를 재사용 -- 별도 워밍업이 아니다), 그 값을 200개로 선형 외삽한 뒤 9배
 여유를 곱해 `max(spec_target_for_200, 9*baseline_extrapolated)`를 임계로 쓴다
 (test_perf_journal.py "정규화 임계 = max(스펙임계, 배수*기준측정치)"와 동일한
@@ -37,9 +38,9 @@ test_perf_journal.py(LC-17)·test_pre_trade_latency.py(R-57) 선례와 동일한
 """
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import cast
 
 import numpy as np
 import pytest
@@ -54,10 +55,11 @@ from src.foundation.backtest.domain.models_v2 import (
     VenueTierCommission,
 )
 from src.foundation.backtest.vector.fills import VectorSignal
-from src.foundation.backtest.vector.grid import sweep_grid
+from src.foundation.backtest.vector.grid import GridSweepResult, sweep_grid
 from src.foundation.backtest.vector.signals import BoolSignal
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from tests.support.perf_budget import PerfBudget
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _D = Decimal
@@ -115,7 +117,7 @@ def _config() -> BacktestConfigV2:
 @pytest.mark.perf
 @pytest.mark.nightly
 @pytest.mark.timeout(540)  # 43,200봉 x 200조합 실측은 기본 120s 타임아웃을 넘는다
-def test_grid_sweep_full_month_m1_throughput() -> None:
+def test_grid_sweep_full_month_m1_throughput(perf_budget: PerfBudget) -> None:
     cols = _one_month_m1_columns()
     config = _config()
     combos = {
@@ -126,21 +128,26 @@ def test_grid_sweep_full_month_m1_throughput() -> None:
     baseline_keys = combo_keys[:_BASELINE_COMBO_COUNT]
     remaining_keys = combo_keys[_BASELINE_COMBO_COUNT:]
 
-    baseline_start = time.perf_counter()
-    baseline_result = sweep_grid(
-        cols, {k: combos[k] for k in baseline_keys}, config,
-        timeframe=Timeframe.M1, initial_cash=_CASH,
+    # Repeat each multi-combination sweep to amortize the Windows CPU clock tick.
+    baseline_sample = perf_budget.sample(
+        lambda: sweep_grid(
+            cols, {k: combos[k] for k in baseline_keys}, config,
+            timeframe=Timeframe.M1, initial_cash=_CASH,
+        ),
+        batch=2,
     )
-    baseline_elapsed_seconds = time.perf_counter() - baseline_start
-
-    remaining_start = time.perf_counter()
-    remaining_result = sweep_grid(
-        cols, {k: combos[k] for k in remaining_keys}, config,
-        timeframe=Timeframe.M1, initial_cash=_CASH,
+    remaining_sample = perf_budget.sample(
+        lambda: sweep_grid(
+            cols, {k: combos[k] for k in remaining_keys}, config,
+            timeframe=Timeframe.M1, initial_cash=_CASH,
+        ),
+        batch=2,
     )
-    remaining_elapsed_seconds = time.perf_counter() - remaining_start
-
-    total_elapsed_seconds = baseline_elapsed_seconds + remaining_elapsed_seconds
+    baseline_result = cast(GridSweepResult, baseline_sample.result)
+    remaining_result = cast(GridSweepResult, remaining_sample.result)
+    baseline_elapsed_seconds = baseline_sample.cpu_ms / 1000
+    total_elapsed_ms = baseline_sample.cpu_ms + remaining_sample.cpu_ms
+    total_elapsed_seconds = total_elapsed_ms / 1000
     total_results = {**baseline_result.results, **remaining_result.results}
 
     baseline_per_combo_seconds = baseline_elapsed_seconds / _BASELINE_COMBO_COUNT
@@ -168,7 +175,7 @@ def test_grid_sweep_full_month_m1_throughput() -> None:
     )
 
     assert len(total_results) == _MEASURED_COMBO_COUNT
-    assert total_elapsed_seconds <= normalized_target_seconds, (
+    assert total_elapsed_ms <= normalized_target_seconds * 1000, (
         f"grid sweep {_MEASURED_COMBO_COUNT}조합 x {_BAR_COUNT}봉 실측"
         f"({total_elapsed_seconds:.3f}s)이 정규화 임계({normalized_target_seconds:.3f}s)를 "
         "초과했습니다 — 처리량 회귀입니다."
