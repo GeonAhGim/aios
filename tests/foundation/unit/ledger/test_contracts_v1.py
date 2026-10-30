@@ -50,7 +50,7 @@ def _sample_event(**overrides: object) -> v1.LedgerEvent:
         parties={"user": uuid4()},
     )
     base.update(overrides)
-    return v1.LedgerEvent(**base)  # type: ignore[arg-type]
+    return v1.LedgerEvent(**base)
 
 
 def _sample_line(**overrides: object) -> v1.PostingLine:
@@ -62,7 +62,7 @@ def _sample_line(**overrides: object) -> v1.PostingLine:
         currency=Currency.KRW,
     )
     base.update(overrides)
-    return v1.PostingLine(**base)  # type: ignore[arg-type]
+    return v1.PostingLine(**base)
 
 
 def test_schema_snapshot_matches_fixture() -> None:
@@ -167,7 +167,7 @@ def test_payout_batch_view_state_literal_rejects_unknown() -> None:
             period_start=date(2026, 8, 1),
             period_end=date(2026, 8, 31),
             amount=Decimal("500.00"),
-            state="UNKNOWN",  # type: ignore[arg-type]
+            state="UNKNOWN",
             capture_entry_ids=[],
             release_entry_id=None,
             paid_entry_id=None,
