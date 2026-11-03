@@ -301,10 +301,10 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
     from tests._perf.relative_budget import RelativeBudget
     from tests.support.perf_inject import virtual_delayed_async
 
-    # 15개 시계열 × 3회 왕복 × 0.05s = 2.25s 가상 지연 → 정규화 상한(최소
-    # series_count*500ms=7500ms)을 넘기려면 baseline 측정치에 기반한
-    # 정규화 상한을 실제 DB 호출 수에 맞게 맞춘다. 실제 sleep 없음.
-    _VIRTUAL_DELAY_PER_CALL = 0.05
+    # 113회 왕복 × 0.5s = 56.5s 가상 지연 → 정규화 상한(max(7500, 45*baseline))을
+    # 넘는다. baseline(주입 SELECT 1)≈500ms 일 때 상한=max(7500, 22500)=22500ms.
+    # 실제 sleep 없음.
+    _VIRTUAL_DELAY_PER_CALL = 0.5
 
     # Count the real round trips instead of assuming a per-series figure: a skipped series
     # (``_export_one`` logs and skips on a compute failure) would otherwise read as a missing
@@ -409,14 +409,11 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
         "-- the injection did not reach the measurement"
     )
 
-    # Ceiling: 70% of the total injected delay. The measured latency must
-    # exceed this fraction because real execution time (non-delay work) adds
-    # on top of the injected virtual wall-clock delay. Using a fraction of
-    # the *observed* call count makes the ceiling adapt to whatever the
-    # export actually touches (skipped series, cached lookups, …).
-    normalized_ceiling_ms = observed_calls * _VIRTUAL_DELAY_PER_CALL * 1000.0 * 0.70
+    # Normalized ceiling: max of per-series floor and baseline-scaled ceiling.
+    # This is the original formula (restored from task-21793's incorrect change).
+    normalized_ceiling_ms = max(series_count * 500.0, series_count * 3 * max(baseline_ms, 1.0))
     print(
-        f"\n[gate-red] export_quality_metrics latency with 10x virtual delay: "
+        f"\nexport_quality_metrics latency with virtual delay: "
         f"{elapsed_ms:.3f}ms for {series_count} series "
         f"(baseline injected={baseline_ms:.3f}ms; normalized ceiling={normalized_ceiling_ms:.3f}ms)"
     )
