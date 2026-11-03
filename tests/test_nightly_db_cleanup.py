@@ -25,6 +25,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.perf_budget import PerfBudget
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
 LIST_SUBPROCESS_BUDGET_S = 20.0
@@ -91,7 +93,7 @@ async def _drop_if_exists(server_url: str, database: str) -> None:
 
 def test_list_subprocess_output_is_parseable_and_includes_scratch_db(
     scratch_db_name: str,
-    perf_budget: pytest.fixture,
+    perf_budget: PerfBudget,
 ) -> None:
     """task-21097: perf assertion uses the standard ``perf_budget`` fixture
     (DoD/D2 floor — numeric performance assertion against a known budget).
