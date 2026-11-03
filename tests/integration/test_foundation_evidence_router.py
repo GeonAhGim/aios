@@ -207,17 +207,22 @@ async def test_failure_db_error_returns_500(client, monkeypatch):
 @pytest.mark.perf
 async def test_timeline_p95_latency_stays_within_normalized_ceiling(client, perf_budget):
     """공유 테스트 DB의 절대 지연 변동성 때문에 절대 ms 임계 대신, baseline
-    1건 대비 정규화한 상한만 게이트로 쓴다(test_dashboard_router.py 동일 결정)."""
+    1건 대비 정규화한 상한만 게이트로 쓴다(test_dashboard_router.py 동일 결정).
+
+    CI 병렬 실행 안정성: wall_ms는 다른 워커의 CPU 경합으로 왜곡된다(task-6371).
+    cpu_ms만 사용 — time.process_time()은 다른 프로세스의 대기 시간을 포함하지
+    않는다. baseline과 p95 모두 cpu_ms 기준(일관성).
+    """
     headers, _ = await _register(client)
 
     async def _call() -> None:
         response = await client.get("/v1/foundation/evidence/timeline", headers=headers)
         assert response.status_code == 200
 
-    baseline_ms = (await perf_budget.sample_async(_call)).wall_ms
+    baseline_ms = (await perf_budget.sample_async(_call)).cpu_ms
     samples = await perf_budget.samples_async(_call, n=20)
-    wall_ms_list = sorted(s.wall_ms for s in samples)
-    p95_ms = wall_ms_list[min(math.ceil(0.95 * len(wall_ms_list)), len(wall_ms_list) - 1)]
+    cpu_ms_list = sorted(s.cpu_ms for s in samples)
+    p95_ms = cpu_ms_list[min(math.ceil(0.95 * len(cpu_ms_list)), len(cpu_ms_list) - 1)]
 
     ceiling_ms = baseline_ms * 5 + 50
     assert p95_ms <= ceiling_ms, (
