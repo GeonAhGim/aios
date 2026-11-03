@@ -135,15 +135,43 @@ async def verify_entity_context(repo: EntityRepository, ctx: EntityContext) -> N
     cross-tenant; FA-2 lookups fold into 404-isomorphic) or closed, the
     value is not trusted and is rejected with `EntityContextResolutionError`
     (fail-closed). Reuses the same `_require_open` composition rule as
-    `resolve_context()` rather than inventing a new resolution rule."""
+    `resolve_context()` rather than inventing a new resolution rule.
+
+    After confirming each row exists, is open, and belongs to the tenant,
+    this function also validates the hierarchy linkage:
+    `fund.entity_id == ctx.legal_entity_id`,
+    `portfolio.fund_id == ctx.fund_id`, and
+    `sub_account.portfolio_id == ctx.portfolio_id`.
+    Mismatched links (same-tenant forged ctx) raise
+    `EntityContextResolutionError`."""
     entity = await repo.get_legal_entity(ctx.tenant_id, ctx.legal_entity_id)
     _require_open(entity, kind="LegalEntity", entity_id=ctx.legal_entity_id)
     fund = await repo.get_fund(ctx.tenant_id, ctx.fund_id)
     _require_open(fund, kind="Fund", entity_id=ctx.fund_id)
+    fund = cast(Fund, fund)
+    if fund.entity_id != ctx.legal_entity_id:
+        raise EntityContextResolutionError(
+            f"Fund {ctx.fund_id}의 entity_id({fund.entity_id})가 "
+            f"ctx.legal_entity_id({ctx.legal_entity_id})와 일치하지 않습니다."
+        )
+
     portfolio = await repo.get_portfolio(ctx.tenant_id, ctx.portfolio_id)
     _require_open(portfolio, kind="Portfolio", entity_id=ctx.portfolio_id)
+    portfolio = cast(Portfolio, portfolio)
+    if portfolio.fund_id != ctx.fund_id:
+        raise EntityContextResolutionError(
+            f"Portfolio {ctx.portfolio_id}의 fund_id({portfolio.fund_id})가 "
+            f"ctx.fund_id({ctx.fund_id})와 일치하지 않습니다."
+        )
+
     sub_account = await repo.get_sub_account(ctx.tenant_id, ctx.sub_account_id)
     _require_open(sub_account, kind="SubAccount", entity_id=ctx.sub_account_id)
+    sub_account = cast(SubAccount, sub_account)
+    if sub_account.portfolio_id != ctx.portfolio_id:
+        raise EntityContextResolutionError(
+            f"SubAccount {ctx.sub_account_id}의 portfolio_id({sub_account.portfolio_id})가 "
+            f"ctx.portfolio_id({ctx.portfolio_id})와 일치하지 않습니다."
+        )
 
 
 async def resolve_portfolio_scope(
