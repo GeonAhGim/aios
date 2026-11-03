@@ -7,9 +7,13 @@ DoD: task-7637 DEEPEN of task-905 (PLT-16 API versioning + OpenAPI snapshot).
 """
 
 import json
-from unittest.mock import patch
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-import pytest
+ROOT = Path(__file__).resolve().parents[1]
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -124,7 +128,7 @@ class TestFindViolationsNegativeCases:
         from scripts.check_openapi_compat import find_violations
 
         violations = find_violations({}, {})
-        assert len(violations) == 0, (
+        assert violations == [], (
             "Two empty specs produce no violations — find_violations only detects differences"
         )
 
@@ -144,21 +148,29 @@ class TestFindViolationsNegativeCases:
 
     def test_main_with_corrupt_json_file(self):
         """If the baseline file contains corrupt JSON, main() should exit
-        with code 1 and print a clean error (no traceback)."""
-        import tempfile
+        with code 1 and print a clean error (no traceback).
 
-        from scripts import check_openapi_compat
+        Uses subprocess to test the real exit code. No _load patch — the
+        corrupt file is read directly by main()."""
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write("{not valid json!!!")
             f.flush()
-            with patch.object(
-                check_openapi_compat,
-                "_load",
-                side_effect=json.JSONDecodeError("Expecting value", f.name, 1),
-            ):
-                with pytest.raises(json.JSONDecodeError):
-                    check_openapi_compat.main(argv=["--baseline", f.name])
+            result = subprocess.run(
+                [sys.executable, "-m", "scripts.check_openapi_compat", "--baseline", f.name],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            # _load() raises JSONDecodeError which propagates through main()
+            # → sys.exit() gets an int from main() only via __main__ block;
+            # the unhandled exception produces exit code 1 on CPython.
+            assert result.returncode == 1, (
+                f"Expected exit code 1 on corrupt JSON, got {result.returncode}. "
+                f"stderr: {result.stderr}"
+            )
+            # Should NOT contain a Python traceback
+            assert "Traceback" not in result.stderr, "Should not print a Python traceback"
 
     def test_main_with_missing_baseline_file(self):
         """If the baseline file doesn't exist, main() should exit with code 1."""
@@ -169,23 +181,30 @@ class TestFindViolationsNegativeCases:
 
     def test_main_with_broken_app_import(self):
         """If the FastAPI app cannot be imported (missing deps), main() should
-        exit with code 1 — not crash with a Python traceback."""
-        import os
-        import tempfile
+        exit with code 1 — not crash with a Python traceback.
 
-        from scripts import check_openapi_compat
+        Uses subprocess so we test the real exit code path (sys.exit(main())).
+        A valid baseline forces main() past the file-exists check into
+        _export_current(), which fails on import."""
 
         with tempfile.TemporaryDirectory() as tmp:
             baseline = os.path.join(tmp, "v1.json")
             with open(baseline, "w") as f:
                 json.dump(_valid_spec(), f)
-            with patch.object(
-                check_openapi_compat,
-                "_export_current",
-                side_effect=ImportError("No module named 'app'"),
-            ):
-                with pytest.raises(ImportError):
-                    check_openapi_compat.main(argv=["--baseline", baseline])
+            # --current points to a non-module path so export_openapi.py
+            # will still try to import src.main and fail.
+            result = subprocess.run(
+                [sys.executable, "-m", "scripts.check_openapi_compat", "--baseline", baseline],
+                capture_output=True,
+                text=True,
+                cwd=str(ROOT),
+            )
+            assert result.returncode == 1, (
+                f"Expected exit code 1 on import failure, got {result.returncode}. "
+                f"stderr: {result.stderr}"
+            )
+            # Should NOT contain a Python traceback
+            assert "Traceback" not in result.stderr, "Should not print a Python traceback"
 
 
 # ---------------------------------------------------------------------------
