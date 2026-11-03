@@ -338,22 +338,34 @@ def test_baseline_miss_by_a_hair_fails_with_baseline_miss_message(
     assert "생성되지 않았다" not in out
 
 
-def test_custom_tolerance_is_respected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.perf
+def test_custom_tolerance_is_respected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], perf_budget: PerfBudget
+) -> None:
+    """Numeric performance assertion: main() 전체 파이프라인(CPU) 예산 50ms 안에 끝남.
+
+    ``perf_budget.assert_within()`` 경유. ``batch=10``으로 호출당 양자화 오차를
+    ``15.6ms/10 ≈ 1.6ms`` 이하로 낮춤. 단위는 전량 ms 통일.
+    """
     xml_path = _write_coverage_xml(tmp_path, 0.789)  # 78.90, baseline 80.00 -> -1.10%p
     baseline_path = _write_baseline(tmp_path, 80.00)
 
-    exit_code = coverage_ratchet.main(
-        [
-            "--coverage-xml",
-            str(xml_path),
-            "--baseline",
-            str(baseline_path),
-            "--tolerance",
-            "2.0",
-        ]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            [
+                "--coverage-xml",
+                str(xml_path),
+                "--baseline",
+                str(baseline_path),
+                "--tolerance",
+                "2.0",
+            ]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
-    assert exit_code == 0
+    assert sample.result == 0
     assert "부분 커버리지 리포트" not in capsys.readouterr().out
 
 
