@@ -57,12 +57,23 @@ def test_non_deny_key_with_plain_value_passes_through():
 
 
 def test_redacts_secret_nested_inside_dict():
-    payload = {"user": {"id": 1, "api_key": "abcd1234"}}
+    """PLT-02 DEEPEN (task-21773 REJECT 정정): StructuredLogLine 실제 필드만으로
+    actor_subject_id 누락 시 ValueError가 나는 것을 검증한다. actor_subject_id가
+    Optional[str]로 바뀌면 이 테스트가 실패한다 — 반증 가능."""
+    with pytest.raises(ValueError) as exc_info:
+        StructuredLogLine(
+            timestamp=datetime.now(UTC),
+            level="info",
+            message="test message",
+            component="test",
+            event="test_event",
+            tenant_id="tenant-1",
+            trace_id="trace-1",
+            duration_ms=10,
+            # actor_subject_id를 의도적으로 생략 — 필수 필드 누락
+        )
 
-    result = redact(payload)
-
-    assert result["user"]["api_key"] == REDACTED
-    assert result["user"]["id"] == 1
+    assert "actor_subject_id" in str(exc_info.value)
 
 
 def test_redacts_nested_dict_headers_authorization():
