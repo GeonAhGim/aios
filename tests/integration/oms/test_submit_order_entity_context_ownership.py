@@ -190,9 +190,7 @@ async def test_submit_order_rejects_closed_fund_in_entity_context(pool):
     await entity_repo.close_sub_account(
         tenant_id, context.sub_account_id, closed_at=datetime.now(UTC)
     )
-    await entity_repo.close_portfolio(
-        tenant_id, context.portfolio_id, closed_at=datetime.now(UTC)
-    )
+    await entity_repo.close_portfolio(tenant_id, context.portfolio_id, closed_at=datetime.now(UTC))
     await entity_repo.close_fund(tenant_id, context.fund_id, closed_at=datetime.now(UTC))
 
     with pytest.raises(EntityContextResolutionError):
@@ -272,6 +270,7 @@ async def test_verify_entity_context_latency_under_budget(
         f"verify_entity_context p99={p99_ms:.1f}ms > 2×budget {budget_sec * 2000:.0f}ms (n={n})"
     )
 
+
 @pytest.mark.perf
 async def test_submit_order_throughput_with_entity_context_verification(pool):
     """수치 성능 단언 — `entity_repo` 실소유권 재검증이 배선된 `submit_order()`
@@ -316,3 +315,9 @@ async def test_submit_order_throughput_with_entity_context_verification(pool):
     assert ops_per_sec > min_ops_per_sec, (
         f"submit_order 처리량이 최소값({min_ops_per_sec} ops/s)에 못 미칩니다({ops_per_sec:.1f})."
     )
+
+    async with pool.acquire() as conn:
+        order_count = await conn.fetchval(
+            "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
+        )
+    assert order_count == n
