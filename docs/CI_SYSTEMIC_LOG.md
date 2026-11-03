@@ -3872,3 +3872,15 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 로컬 재현: `tests/unit/py313_prep` + `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,
   scan_retry}.py` + `tests/integration/eventstore/` — **98 passed in 297.16s, exit=0**.
 - 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
+
+## task-21849 — esc-ci-pytest (sha 04216ffe2) "seq=3 from_status=SUBMITTED != folded status so far (CREATED)", 비회귀 (2026-11-03)
+
+- spec 본문은 task-11982/12011/12038/12311/21172와 동일한 `scripts/replay_verify.py::_order_pair`의
+  설계된 pre-cutover skip 진단 stderr(`EventChainBrokenError` 메시지 포맷)이며 FAILED 신호가 아니다.
+  esc 파일은 이미 status=resolved다.
+- 지목 sha 04216ffe2는 `tests/unit/api/test_openapi_compat.py`만 건드리는 테스트 리뷰 수정이라
+  OMS/eventstore/replay_verify 경로와 무관하다. 이전 시도 보존 패치는 logs/local_pm/scope-proposal.md
+  삭제분뿐이라 반영하지 않았다.
+- 로컬 재현: `tests/unit/api/test_openapi_compat.py` + `tests/unit/scripts/test_replay_verify_{pool_retry,
+  db_pressure,scan_retry}.py` — **51 passed in 37.18s, exit=0**.
+- 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
