@@ -255,20 +255,30 @@ def test_risen_coverage_ratchets_baseline_up(
     assert baseline_path.read_text(encoding="utf-8").strip() == "85.00"
 
 
+@pytest.mark.perf
 def test_zero_byte_coverage_xml_fails_with_not_generated_message(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], perf_budget: PerfBudget
 ) -> None:
     """DoD: a 0-byte coverage.xml must fail with a 'report not generated'
     message, not the raw XML parse error, and must not read like a baseline
-    miss."""
+    miss.
+
+    Numeric performance assertion: main() 실패 경로(CPU) 예산 50ms 안에 끝남.
+    ``batch=10``으로 호출당 양자화 오차를 낮춤. 단위는 전량 ms 통일.
+    """
     xml_path = tmp_path / "coverage.xml"
     xml_path.write_bytes(b"")
     baseline_path = _write_baseline(tmp_path, 80.00)
 
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
+    exit_code = sample.result
     assert exit_code == 1
     out = capsys.readouterr().out
     assert "생성되지 않았다" in out
