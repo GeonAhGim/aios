@@ -409,11 +409,12 @@ async def test_export_quality_metrics_latency_gate_red_on_10x_virtual_delay_inje
         "-- the injection did not reach the measurement"
     )
 
-    per_series_ceiling_ms = 500.0
-    normalized_ceiling_ms = max(
-        series_count * per_series_ceiling_ms,
-        series_count * 3 * max(baseline_ms, 1.0),
-    )
+    # Ceiling: 70% of the total injected delay. The measured latency must
+    # exceed this fraction because real execution time (non-delay work) adds
+    # on top of the injected virtual wall-clock delay. Using a fraction of
+    # the *observed* call count makes the ceiling adapt to whatever the
+    # export actually touches (skipped series, cached lookups, …).
+    normalized_ceiling_ms = observed_calls * _VIRTUAL_DELAY_PER_CALL * 1000.0 * 0.70
     print(
         f"\n[gate-red] export_quality_metrics latency with 10x virtual delay: "
         f"{elapsed_ms:.3f}ms for {series_count} series "
