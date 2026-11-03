@@ -80,7 +80,8 @@ def test_grid_sweep_normalized_performance_threshold(perf_budget) -> None:
     """1조합 CPU 실측 x N x 3.0 예산으로 1,000조합을 검증한다.
 
     200봉 표본이며 실제 1개월 M1 규모의 절대 성능은 별도 확인한다.
-    배치 측정으로 Windows CPU 타이머 양자화 영향을 줄인다.
+    baseline은 batch=128(1조합 양자화 해소), measured는 batch=8(1,000조합은 충분히 빠름)로
+    서로 다른 배치 크기를 써도 양자화 오차가 임계에 영향을 주지 않도록 한다.
     """
     n = 200
     cols = _rising_columns(n)
@@ -99,7 +100,7 @@ def test_grid_sweep_normalized_performance_threshold(perf_budget) -> None:
     def run_sweep():
         return sweep_grid(cols, combos, config, timeframe=Timeframe.M1, initial_cash=_CASH)
 
-    measured = perf_budget.best_of(run_sweep, n=5, batch=2)
+    measured = perf_budget.best_of(run_sweep, n=5, batch=8)
     threshold_ms = baseline.cpu_ms * combo_count * 3.0
     assert len(measured.result.results) == combo_count
     assert measured.cpu_ms <= threshold_ms, perf_budget.describe(measured, budget_ms=threshold_ms)
