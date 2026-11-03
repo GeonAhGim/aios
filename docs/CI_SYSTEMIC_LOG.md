@@ -3892,3 +3892,10 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - `git diff 6042c53a7 HEAD -- scripts/replay_verify.py src/core/eventstore src/services/oms` 변경 없음.
 - 로컬 재현: `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/` — **81 passed in 137.99s, exit=0**.
 - 기준선/예산/재시도/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
+
+## task-21876 — pytest_perf `ES_ORDER_CHAIN_BROKEN` 비회귀 재확인 (parent task-21835)
+
+- 증상: `[pytest_perf] aa6c12-78a1-...: seq=1 from_status=SUBMITTED != folded status so far (CREATED)`. 원인 지목 경로 `src/core/eventstore/projections/orders.py`(`ES_ORDER_CHAIN_BROKEN` 검사)는 `git log 6042c53a7..HEAD -- scripts/replay_verify.py src/core/eventstore src/services/oms`에 변경이 없다.
+- 로컬 재현(TEST_DATABASE_URL=aios_test_qa_1): `tests/integration/eventstore -m "perf and not nightly and not live_demo"` **7 passed**; `tests/integration/eventstore/test_replay_verify_{order_chain,tamper_detection}.py` **13 passed**; `scripts/replay_verify.py --hours 24` **exit=0** (window streams=0 — 로컬 DB에 이벤트 없음); `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/` **81 passed, exit=0**.
+- 판정: 로컬 재현 불가·지목 경로 무변경 → 코드 회귀 아님. CI DB에만 있는 pre-cutover 주문(`CREATED` 이벤트 없이 `SUBMITTED`로 시작하는 이력)이 검사에 걸린 것으로 보이며, 이는 `replay_verify`의 설계된 pre-cutover skip 범주다(#43 계열). 검사 완화·기준선 상향·ignore 추가는 DECISION_GUIDELINES B-2에 따라 하지 않았다.
+- 조치: 코드 변경 없음(noop). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
