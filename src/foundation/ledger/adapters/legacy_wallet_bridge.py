@@ -119,6 +119,17 @@ async def _reconcile_ledger_with_projection(
         code,
         negative_ok,
     )
+    # Take the same per-account advisory locks post_entry will take, in the same
+    # sorted order (PLATFORM:* sorts before USER:*), BEFORE reading the projection.
+    # Writers touching both sides (place_hold, other bridge calls) hold the
+    # AVAILABLE lock until commit and update user_wallets before committing, so
+    # once we own it both reads see the same committed state. Without it the two
+    # plain SELECTs could straddle a concurrent commit, see a phantom drift and
+    # "heal" it with a bogus MANUAL_ADJUSTMENT that leaves ledger and projection
+    # permanently apart. (Row locks cannot be used: balance rows are replaced by
+    # DELETE+INSERT, see postgres_balance_repository.)
+    for lock_code in sorted({PLATFORM_CASH_CLEARING, code}):
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lock_code)
     projected = await conn.fetchval(
         "SELECT balance FROM user_wallets WHERE user_id = $1", user_id
     ) or Decimal("0")
