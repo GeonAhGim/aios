@@ -164,7 +164,7 @@ def test_calculate_raises_when_talib_output_count_mismatches_spec_outputs(
 # --- DEEPEN(task-3200): 수치 성능 단언 — calculate() 자체 핫 패스 ----------
 
 
-def _calculate_latencies_ms(iterations: int = 50) -> list[float]:
+def _calculate_latencies_ms(iterations: int = 200) -> list[float]:
     candles = _candles(200)
     service = IndicatorService()
     samples = []
