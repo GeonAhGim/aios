@@ -186,3 +186,31 @@ class TestFindViolationsNegativeCases:
             ):
                 with pytest.raises(ImportError):
                     check_openapi_compat.main(argv=["--baseline", baseline])
+
+
+# ---------------------------------------------------------------------------
+# Performance assertion — numeric budget via perf_budget fixture (D2 floor)
+# ---------------------------------------------------------------------------
+
+
+class TestFindViolationsPerformance:
+    """find_violations must stay cheap on a realistically sized spec."""
+
+    def test_large_spec_compare_within_budget(self, perf_budget):
+        from scripts.check_openapi_compat import find_violations
+
+        paths = {
+            f"/v1/resource_{i}": {"get": {"responses": {"200": {"description": "OK"}}}}
+            for i in range(300)
+        }
+        prev = {"openapi": "3.1.0", "info": {"title": "T", "version": "1"}, "paths": paths}
+        curr = json.loads(json.dumps(prev))
+        del curr["paths"]["/v1/resource_0"]
+
+        perf_budget.assert_within(
+            lambda: find_violations(prev, curr),
+            budget_ms=200.0,
+            label="find_violations(300 paths)",
+        )
+        violations = find_violations(prev, curr)
+        assert any("/v1/resource_0" in v for v in violations)
