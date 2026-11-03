@@ -102,6 +102,12 @@ async def _reconcile_available(
     설명이 그대로 적용된다)."""
     code = ua(user_id, UserSub.AVAILABLE)
     await ensure_account(conn, code, currency)
+    # 브리지(`legacy_wallet_bridge._reconcile_ledger_with_projection`)와 같은 advisory
+    # lock을 같은 정렬 순서로 먼저 잡은 뒤 두 값을 읽는다. 락 없이 읽으면 두 SELECT
+    # 사이에 다른 쓰기 트랜잭션이 커밋돼 서로 다른 시점의 값을 비교하고, 위양성
+    # drift를 MANUAL_ADJUSTMENT로 영구 기록할 수 있다.
+    for lock_code in sorted({PLATFORM_CASH_CLEARING, code}):
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lock_code)
     projected = await conn.fetchval(
         "SELECT balance FROM user_wallets WHERE user_id = $1", user_id
     ) or Decimal("0")
