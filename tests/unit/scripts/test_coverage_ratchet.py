@@ -285,16 +285,26 @@ def test_zero_byte_coverage_xml_fails_with_not_generated_message(
     assert "기준선 미달" not in out
 
 
+@pytest.mark.perf
 def test_missing_coverage_xml_fails_with_not_generated_message(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], perf_budget: PerfBudget
 ) -> None:
+    """Numeric performance assertion: main() 실패 경로(CPU) 예산 50ms.
+
+    ``batch=10``으로 호출당 양자화 오차를 낮춤. 단위는 전량 ms 통일.
+    """
     xml_path = tmp_path / "does-not-exist.xml"
     baseline_path = _write_baseline(tmp_path, 80.00)
 
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
+    exit_code = sample.result
     assert exit_code == 1
     out = capsys.readouterr().out
     assert "생성되지 않았다" in out
