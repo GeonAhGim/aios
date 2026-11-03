@@ -130,7 +130,22 @@ class FailoverConnectionManager:
         sweeps again, until `backoff.ceiling_seconds` elapses, at which
         point it raises `FailoverExhaustedError` rather than retrying
         forever in a hot write path.
+
+        FA-18 write gate: ``write_available()`` is checked before entering
+        the sweep loop. If writes are blocked (recovery window not elapsed),
+        this method waits in a loop until ``write_available()`` returns True
+        or the ceiling elapses, raising ``FailoverExhaustedError`` on timeout.
         """
+        # FA-18 write gate: block writes during recovery window
+        if not self.write_available():
+            gate_deadline = self._clock() + self._backoff.ceiling_seconds
+            delays = self._backoff.delays()
+            while True:
+                if self.write_available():
+                    break
+                if self._clock() >= gate_deadline:
+                    raise FailoverExhaustedError("write gate still closed past ceiling")
+                await self._sleep(next(delays))
         deadline = self._clock() + self._backoff.ceiling_seconds
         delays = self._backoff.delays()
         last_error: Exception | None = None
