@@ -325,5 +325,83 @@ def test_equity_curve_with_negative_values_raises() -> None:
     result = _result(curve, config=config)
 
     # build_tearsheet가 음수 equity 값을 가진 equity_curve를 거부해야 한다.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="equity_curve\\[2\\] has invalid equity"):
         build_tearsheet(result)
+
+
+def test_equity_curve_with_nan_value_raises() -> None:
+    """NaN equity 값은 불변식 위반 — build_tearsheet가 명시적으로 거부해야 한다.
+    (negative test)
+
+    Decimal('nan')은 < 0 비교에서 False를 반환하므로 음수 검증만으로는
+    잡지 못한다. build_tearsheet가 NaN도 함께 거부하는지 확인한다.
+    Pydantic v2는 기본적으로 Decimal에 finite_number 검사를 적용하므로,
+    model_construct으로 검증을 우회해 NaN 값을 직접 주입한다.
+    """
+    curve = [
+        _point(0, "100"),
+        _point(1, "110"),
+    ]
+    config = _config()
+    metrics = compute_metrics(
+        equity_curve=curve,
+        fills=[],
+        initial_equity=config.initial_equity,
+        periods_per_year=config.periods_per_year,
+    )
+    # Pydantic이 Decimal('nan')을 finite_number 위반으로 거르는 것을 우회하기 위해
+    # model_construct으로 equity_curve에 NaN 값을 직접 주입한다.
+    nan_point = EquityPoint.model_construct(
+        bar_index=2,
+        timestamp=_T0 + timedelta(hours=2),
+        equity=Decimal("nan"),
+        drawdown_pct=Decimal("0"),
+    )
+    result = BacktestResult.model_construct(
+        config=config, fills=[], equity_curve=curve + [nan_point], metrics=metrics, warnings=[]
+    )
+
+    with pytest.raises(ValueError, match="equity_curve\\[2\\] has invalid equity"):
+        build_tearsheet(result)
+
+
+# ---- DEEPEN(task-7698): 실패 주입 ----
+
+
+def test_build_tearsheet_uses_precomputed_metrics_not_recomputed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입: BacktestResult.metrics가 손상된 값을 담고 있어도
+    build_tearsheet가 그 값을 그대로 사용하는지 확인한다. 만약
+    build_tearsheet가 내부에서 compute_metrics()를 다시 호출한다면
+    monkeypatch된 metrics가 덮어씌워지고 테스트가 실패해야 한다 —
+    build_tearsheet는 metrics를 '이미 계산된 값'으로 받아야 한다.
+
+    BacktestResult.metrics.sharpe_ratio를 monkeypatch로 손상시킨 후
+    build_tearsheet()가 손상된 값을 report에 그대로 반영하는지 확인한다.
+    build_tearsheet가 metrics를 재계산하면 손상된 값이 사라지고
+    assert가 실패(AssertionError) — 이것이 의도된 결과다."""
+    curve = [_point(0, "100"), _point(1, "110"), _point(2, "120")]
+    config = _config()
+    result = _result(curve, config=config)
+
+    # metrics.sharpe_ratio를 손상시킨다
+    corrupted_metrics = result.metrics.model_copy(update={"sharpe_ratio": Decimal("999999")})
+    corrupted_result = BacktestResult.model_construct(
+        config=result.config,
+        fills=result.fills,
+        equity_curve=result.equity_curve,
+        metrics=corrupted_metrics,
+        warnings=result.warnings,
+    )
+
+    view = build_tearsheet(corrupted_result)
+
+    # build_tearsheet가 metrics를 재계산하지 않고 그대로 전달하면
+    # view.sharpe_ratio는 손상된 값 999999가 된다.
+    # 이 assert는 999999 != 원래 sharpe_ratio 이므로 실패한다.
+    # (즉, build_tearsheet가 metrics를 그대로 사용함을 역으로 증명)
+    with pytest.raises(AssertionError, match="build_tearsheet가 metrics를 재계산했다"):
+        assert view.sharpe_ratio != Decimal("999999"), (
+            "build_tearsheet가 metrics를 재계산했다 — monkeypatch가 반영되지 않음"
+        )

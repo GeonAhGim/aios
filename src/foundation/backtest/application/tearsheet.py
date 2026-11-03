@@ -19,7 +19,7 @@ persistence) are out of scope for this leaf (a follow-up leaf).
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 from pydantic import BaseModel
@@ -62,13 +62,20 @@ def build_tearsheet(result: BacktestResult) -> TearsheetView:
     if not result.equity_curve:
         raise ValueError("빈 equity_curve로는 리포트를 만들 수 없습니다.")
 
-    # Validate: equity must never be negative (capital loss cannot exceed initial investment)
+    # Validate: equity must never be negative or NaN (capital loss cannot exceed initial investment)
     for i, point in enumerate(result.equity_curve):
-        if point.equity < 0:
+        eq = point.equity
+        try:
+            if eq < 0 or eq.is_nan():
+                raise ValueError(
+                    f"equity_curve[{i}] has invalid equity ({eq}): "
+                    "equity must be a non-negative finite number"
+                )
+        except InvalidOperation:
             raise ValueError(
-                f"equity_curve[{i}] has negative equity ({point.equity}): "
-                "capital loss cannot exceed initial investment"
-            )
+                f"equity_curve[{i}] has invalid equity ({eq}): "
+                "equity must be a non-negative finite number"
+            ) from None
 
     metrics = result.metrics
     config = result.config
