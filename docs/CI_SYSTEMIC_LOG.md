@@ -3884,3 +3884,11 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 로컬 재현: `tests/unit/api/test_openapi_compat.py` + `tests/unit/scripts/test_replay_verify_{pool_retry,
   db_pressure,scan_retry}.py` — **51 passed in 37.18s, exit=0**.
 - 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
+
+## task-21877 — esc-ci-pytest_perf (order 0adb51-8c8e-402c-9a34-62296b9fbfba) "seq=1 from_status=SUBMITTED != folded status so far (CREATED)", 비회귀 (2026-11-04)
+
+- 카드 본문은 `scripts/replay_verify.py`의 설계된 pre-cutover skip 진단(`replay_verify: order_id=... skipped -- pre-cutover order`)과 `EventChainBrokenError` 메시지 포맷이며 FAILED 신호가 아니다 — task-21172/21849와 동형.
+- 묶음 부모 task-21770/21772/21797은 코드 변경 없는 재확인/정정 기록이다(21772는 prepare 원격 장애, 21797은 fddfe3cfd 후속 커밋으로 이미 정정). 지목 sha 중 fddfe3cfd(test_coverage_ratchet.py), 291b78a46(test_quality_metrics_deepen.py)은 OMS/eventstore/replay_verify 경로를 건드리지 않는다.
+- `git diff 6042c53a7 HEAD -- scripts/replay_verify.py src/core/eventstore src/services/oms` 변경 없음.
+- 로컬 재현: `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/` — **81 passed in 137.99s, exit=0**.
+- 기준선/예산/재시도/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
