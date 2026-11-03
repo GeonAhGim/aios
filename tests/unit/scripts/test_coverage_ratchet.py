@@ -310,20 +310,29 @@ def test_missing_coverage_xml_fails_with_not_generated_message(
     assert "생성되지 않았다" in out
 
 
+@pytest.mark.perf
 def test_baseline_miss_by_a_hair_fails_with_baseline_miss_message(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], perf_budget: PerfBudget
 ) -> None:
     """DoD: a well-formed coverage.xml whose line-rate is even 0.01%p past
     tolerance must fail with a 'baseline miss' message distinct from the
-    'report not generated' message used for empty/missing input."""
+    'report not generated' message used for empty/missing input.
+
+    Numeric performance assertion: main() 실패 경로(CPU) 예산 50ms 안에 끝남.
+    ``batch=10``으로 호출당 양자화 오차를 낮춤. 단위는 전량 ms 통일.
+    """
     xml_path = _write_coverage_xml(tmp_path, 0.7949)  # 79.49, baseline 80.00 -> -0.51%p
     baseline_path = _write_baseline(tmp_path, 80.00)
 
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
-    assert exit_code == 1
+    assert sample.result == 1
     out = capsys.readouterr().out
     assert "기준선 미달" in out
     assert "생성되지 않았다" not in out
@@ -398,4 +407,27 @@ def test_baseline_write_failure_propagates_instead_of_silent_pass(
                 str(baseline_path),
                 "--allow-baseline-write",
             ]
+        )
+
+
+@pytest.mark.perf
+def test_baseline_miss_by_a_hair_budget_injection_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], perf_budget: PerfBudget
+) -> None:
+    """게이트-Red 재현: 예산 50ms의 10배(500ms) 지연 주입 → AssertionError.
+
+    ``virtual_delayed_sync``으로 CPU에 0.5초 가상 지연을 주입하면
+    ``perf_budget.assert_within(budget_ms=50)``이 예산을 넘어 적색이어야 한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    xml_path = _write_coverage_xml(tmp_path, 0.7949)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+    delayed_fn = virtual_delayed_sync(lambda args: coverage_ratchet.main(args), 0.5)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: delayed_fn(["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]),
+            budget_ms=50,
+            batch=10,
         )
