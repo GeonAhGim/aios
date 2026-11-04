@@ -38,6 +38,8 @@ from src.foundation.backtest.domain.models_v2 import (
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
 from src.foundation.market_data.domain.candle_columns import CandleColumns
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 _CASH = Decimal("100000")
@@ -190,6 +192,107 @@ def test_resume_with_mismatched_config_hash_is_rejected_fail_closed() -> None:
     assert stored is not None and stored.bars_processed == 200
 
 
+def _reject_mismatched_resume(store: InMemoryCheckpointStore, cols: CandleColumns) -> None:
+    changed_cfg = _config(
+        commission=VenueTierCommission(
+            venue="BITGET", maker_bps=_D("2"), taker_bps=_D("5"), min_fee=_D("0.001")
+        )
+    )
+    with pytest.raises(BacktestCheckpointMismatchError):
+        run_deep_backtest_job(
+            changed_cfg,
+            cols,
+            timeframe=Timeframe.M1,
+            strategy=_Scripted({}),
+            initial_cash=_CASH,
+            job_id="job-mismatch-perf",
+            checkpoints=store,
+            chunk_bars=200,
+        )
+
+
+def _suspended_store(cols: CandleColumns) -> InMemoryCheckpointStore:
+    store = InMemoryCheckpointStore()
+    calls = {"n": 0}
+
+    def _stop_after_one_chunk() -> bool:
+        calls["n"] += 1
+        return calls["n"] <= 1
+
+    run_deep_backtest_job(
+        _config(),
+        cols,
+        timeframe=Timeframe.M1,
+        strategy=_Scripted({}),
+        initial_cash=_CASH,
+        job_id="job-mismatch-perf",
+        checkpoints=store,
+        chunk_bars=200,
+        should_continue=_stop_after_one_chunk,
+    )
+    return store
+
+
+@pytest.mark.perf
+def test_mismatched_resume_rejection_stays_within_budget(perf_budget: PerfBudget) -> None:
+    """Perf: the fail-closed rejection (checkpoint load + hash compare) is far under 5 ms CPU.
+    best_of (minimum of several runs) keeps one Windows process_time tick from flipping it."""
+    cols = _columns(1000)
+    store = _suspended_store(cols)
+    sample = perf_budget.best_of(lambda: _reject_mismatched_resume(store, cols), n=7, batch=4)
+    assert sample.cpu_ms < 5.0, perf_budget.describe(sample, budget_ms=5.0)
+    stored = store.load("job-mismatch-perf")
+    assert stored is not None and stored.bars_processed == 200
+
+
+@pytest.mark.perf
+def test_mismatched_resume_rejection_virtual_delay_trips_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate-red repro: a 50 ms (10x budget) virtual delay on checkpoint load turns it red."""
+    reset_virtual_totals()
+    monkeypatch.setattr(
+        InMemoryCheckpointStore, "load", virtual_delayed_sync(InMemoryCheckpointStore.load, 0.05)
+    )
+    cols = _columns(1000)
+    store = _suspended_store(cols)
+    sample = perf_budget.best_of(lambda: _reject_mismatched_resume(store, cols), n=3, batch=1)
+    assert sample.cpu_ms >= 50.0
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < 5.0, perf_budget.describe(sample, budget_ms=5.0)
+    reset_virtual_totals()
+
+
+@pytest.mark.parametrize("config_hash", ["", "x" * 64])
+def test_mismatched_resume_rejected_for_unrelated_hashes(config_hash: str) -> None:
+    """Negative: a stored checkpoint with a foreign/blank config hash is never resumed."""
+    cols = _columns(1000)
+    store = InMemoryCheckpointStore()
+    store.save(
+        "job-foreign",
+        DeepBacktestCheckpoint(
+            config_hash=config_hash,
+            last_processed_ts=_T0,
+            bars_processed=200,
+            total_bars=1000,
+            state_hash="d" * 64,
+        ),
+    )
+    with pytest.raises(BacktestCheckpointMismatchError):
+        run_deep_backtest_job(
+            _config(),
+            cols,
+            timeframe=Timeframe.M1,
+            strategy=_Scripted({}),
+            initial_cash=_CASH,
+            job_id="job-foreign",
+            checkpoints=store,
+            chunk_bars=200,
+        )
+    stored = store.load("job-foreign")
+    assert stored is not None and stored.bars_processed == 200
+
+
 def test_progress_is_monotonic_and_interruption_progress_is_point_four() -> None:
     cfg, cols = _config(), _columns(1000)
     store = InMemoryCheckpointStore()
@@ -241,6 +344,68 @@ def test_checkpoint_progress_property_is_bars_processed_over_total() -> None:
         state_hash="d" * 64,
     )
     assert checkpoint.progress == 0.4
+
+
+def _progress_checkpoint(bars: int, total: int) -> DeepBacktestCheckpoint:
+    return DeepBacktestCheckpoint(
+        config_hash="c" * 64,
+        last_processed_ts=_T0,
+        bars_processed=bars,
+        total_bars=total,
+        state_hash="d" * 64,
+    )
+
+
+@pytest.mark.perf
+def test_checkpoint_progress_property_stays_within_budget(perf_budget: PerfBudget) -> None:
+    """Perf: 1000 progress reads stay under 1 ms CPU (best_of, not a single sample)."""
+    checkpoint = _progress_checkpoint(400, 1000)
+
+    def _read_many() -> float:
+        value = 0.0
+        for _ in range(1000):
+            value = checkpoint.progress
+        return value
+
+    sample = perf_budget.best_of(_read_many, n=7)
+    assert sample.cpu_ms < 1.0, perf_budget.describe(sample, budget_ms=1.0)
+
+
+@pytest.mark.perf
+def test_checkpoint_progress_virtual_delay_trips_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate-red repro: a 10 ms (10x budget) virtual delay per read turns the budget red."""
+    reset_virtual_totals()
+    original = DeepBacktestCheckpoint.__dict__["progress"].fget
+    monkeypatch.setattr(
+        DeepBacktestCheckpoint, "progress", property(virtual_delayed_sync(original, 0.01))
+    )
+    checkpoint = _progress_checkpoint(400, 1000)
+    sample = perf_budget.best_of(lambda: checkpoint.progress, n=3)
+    assert sample.cpu_ms >= 10.0
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < 1.0, perf_budget.describe(sample, budget_ms=1.0)
+    reset_virtual_totals()
+
+
+@pytest.mark.parametrize(
+    ("bars", "total", "expected"), [(0, 1000, 0.0), (1000, 1000, 1.0), (1, 4, 0.25)]
+)
+def test_checkpoint_progress_boundaries(bars: int, total: int, expected: float) -> None:
+    """Negative/boundary: empty, complete and fractional progress are exact."""
+    assert _progress_checkpoint(bars, total).progress == expected
+
+
+def test_checkpoint_progress_zero_total_fails_closed() -> None:
+    """Negative: total_bars == 0 raises instead of reporting a fake progress value."""
+    with pytest.raises(ZeroDivisionError):
+        _ = _progress_checkpoint(0, 0).progress
+
+
+def test_checkpoint_progress_is_not_clamped_above_one() -> None:
+    """Negative: over-counted bars are visible (> 1.0), never silently clamped."""
+    assert _progress_checkpoint(1100, 1000).progress > 1.0
 
 
 def test_does_not_reimplement_fill_or_cost_math() -> None:
