@@ -6,15 +6,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 
-import asyncpg
 import pytest
-from dotenv import dotenv_values
 
 from src.core.security.encryption import legacy_decrypt
 from src.foundation.connections.adapters.fake_provider import FakeReadonlyAccountProvider
-from src.foundation.connections.adapters.postgres_repository import PostgresConnectionRepository
 from src.foundation.connections.application.begin_connection import (
     ConsentRequiredError,
     MfaRequiredError,
@@ -47,35 +43,12 @@ from src.foundation.connections.ports.provider import (
     ReadonlyAccountProvider,
     SecretLease,
 )
-from src.foundation.trust.adapters.postgres_repository import PostgresTrustRepository
 from tests.foundation.integration.connections.conftest import grant_account_read_consent
 from tests.integration.conftest import create_test_tenant
 
+# pool, repo, trust_repo fixtures moved to conftest.py
+
 ENCRYPTION_KEY = "22" * 32
-
-
-def _asyncpg_dsn() -> str:
-    env = dotenv_values(Path(__file__).resolve().parents[4] / ".env")
-    url = env.get("DATABASE_URL")
-    assert url
-    return url.replace("postgresql+asyncpg://", "postgresql://")
-
-
-@pytest.fixture
-async def pool():
-    p = await asyncpg.create_pool(_asyncpg_dsn(), min_size=1, max_size=4)
-    yield p
-    await p.close()
-
-
-@pytest.fixture
-def repo(pool):
-    return PostgresConnectionRepository(pool)
-
-
-@pytest.fixture
-def trust_repo(pool):
-    return PostgresTrustRepository(pool)
 
 
 async def _tenant(pool):
