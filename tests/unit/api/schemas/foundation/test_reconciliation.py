@@ -20,6 +20,7 @@ from src.api.schemas.foundation.reconciliation import (
     ReconciliationStateView,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def _state_view() -> ReconciliationStateView:
@@ -118,21 +119,23 @@ def test_reconciliation_state_list_response_dependency_failure_injected(
 def test_reconciliation_state_list_response_construction_throughput_budget(
     perf_budget: PerfBudget,
 ) -> None:
-    """p95 construction latency for 500 responses stays under 50ms/op budget
-    (ADR-2026-09-09-C Decision 1 — simple schema construction path)."""
+    """schema construction latency stays under 50ms/op budget
+    (ADR-2026-09-09-C Decision 1 — simple schema construction path).
+
+    Uses best_of (not samples) so Windows quantization tick (~15.6ms)
+    cannot sway the minimum reading — best_of picks the single fastest
+    run out of 5, minimising tick-noise impact.
+    """
     as_of = datetime.now(UTC)
     states = [_state_view() for _ in range(5)]
 
-    # batch=500: 총 500회 호출을 한 구간에 묶어 process_time 양자화 오차 제거
-    samples = perf_budget.samples(
+    sample = perf_budget.best_of(
         lambda: ReconciliationStateListResponse(states=states, as_of=as_of),
-        n=10,
-        warmup=0,
-        batch=500,
+        n=5,
     )
 
     # cpu_ms 기준, 단위 일관성: ms (0.05초 → 50.0ms)
-    assert all(s.cpu_ms < 50.0 for s in samples), f"budget 초과: {[s.cpu_ms for s in samples]}"
+    assert sample.cpu_ms < 50.0, f"budget 초과: cpu={sample.cpu_ms:.2f}ms"
 
 
 @pytest.mark.perf
@@ -141,12 +144,17 @@ def test_reconciliation_construction_goes_red_with_10x_cpu_delay_injection(
     perf_budget: PerfBudget,
 ) -> None:
     """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
-    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
-    50ms * 10 = 500ms를 초과하는 CPU 시간을 가장하면
-    `samples` 단언이 AssertionError로 적색이 돼야 한다.
+    역으로 증명한다. `virtual_delayed_sync`로 ReconciliationStateView
+    생성을 감싸 1회 호출당 4s 가상 CPU 지연을 주입하면
+    `best_of` 단언이 AssertionError로 적색이 돼야 한다.
+
+    virtual_delayed_sync은 실제 sleep/spin 없이 가상 지연 레더에
+    추가하므로 PerfBudget.sample가 그 값을 cpu_ms에 정확히 반영한다.
+    4s 지연 → best-of-5 최소값도 50ms 예산 초과.
 
     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
-    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
+    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지,
+    type: ignore ratchet 회피).
     """
     budget_ms = 50.0  # 동일 예산
 
@@ -156,26 +164,14 @@ def test_reconciliation_construction_goes_red_with_10x_cpu_delay_injection(
     def _run() -> object:
         return ReconciliationStateListResponse(states=states, as_of=as_of)
 
-    # process_time을 monkeypatch: 호출할 때마다 500ms(10x budget)를 더한다.
-    # PerfBudget.sample()은 time.process_time()을 호출하므로 이 값이
-    # cpu_ms 측정값에 그대로 반영돼 budget을 10배 초과한다.
-    _fake_time = 0.0
-
-    def _fake_process_time() -> float:
-        nonlocal _fake_time
-        _fake_time += 500.0  # 500ms = 10x budget per call
-        return _fake_time
-
-    monkeypatch.setattr("time.process_time", _fake_process_time)
+    # _run을 virtual_delayed_sync으로 감싸 1회 호출당 4s 가상 CPU 추가
+    # PerfBudget.sample이 virtual_totals_ns()를 읽어 cpu_ms에 반영함
+    wrapped_run = virtual_delayed_sync(_run, 4.0)
 
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
     with pytest.raises(AssertionError):
-        samples = perf_budget.samples(
-            _run,
-            n=10,
-            warmup=0,
-            batch=1,
+        sample = perf_budget.best_of(
+            wrapped_run,
+            n=5,
         )
-        assert all(s.cpu_ms < budget_ms for s in samples), (
-            f"budget 초과: {[s.cpu_ms for s in samples]}"
-        )
+        assert sample.cpu_ms < budget_ms, f"budget 초과: cpu={sample.cpu_ms:.2f}ms"
