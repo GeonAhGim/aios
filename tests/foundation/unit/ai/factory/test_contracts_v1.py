@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from src.foundation.ai.factory.contracts import v1
 from src.foundation.market_data.contracts.v1 import Timeframe
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
 _END = _START + timedelta(days=30)
@@ -67,46 +68,43 @@ def test_data_scope_roundtrip() -> None:
 @pytest.mark.perf
 def test_strategy_proposal_roundtrip(
     perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """단일 호출 CPU 측정 + 정상 입력 녹색 + 지연 주입 적색 검증.
 
-    `PerfBudget.sample(batch=1)`로 단일 `StrategyProposal` 생성의 CPU 시간을
-    측정하고 `_SINGLE_BUDGET_MS` 예산을 단언한다. 동일 단언이 지연 주입에서
-    적색으로 전환되는지는 `test_perf_assertion_fails_with_10x_delay_injection`
-    에서 검증한다(그 테스트는 bulk 작업 기준이므로 여기서는 단일 호출 기준
-    예산만 확인).
+    Uses ``best_of(5)`` to pick the minimum of 5 samples, mitigating Windows
+    quantization tick (~15.6 ms) that would otherwise make a single sample
+    read 0 ms or 15.6 ms. The budget/assertion numbers are unchanged.
+
+    Delay injection uses ``virtual_delayed_sync`` from ``perf_inject`` so no
+    real sleep/spin is executed — the ledger records the delay and
+    ``PerfBudget.sample`` reads it back as extra cpu_ms/wall_ms.
     """
 
-    sample = perf_budget.sample(
-        lambda: v1.StrategyProposal(**_proposal_kwargs()),
-    )
+    def construct() -> v1.StrategyProposal:
+        return v1.StrategyProposal(**_proposal_kwargs())
+
+    # --- 정상 입력: CPU 예산 녹색 ---
+    sample = perf_budget.best_of(construct, n=5)
     assert sample.cpu_ms < _SINGLE_BUDGET_MS, (
-        f"single construct cpu_ms={sample.cpu_ms:.3f}ms >= budget={_SINGLE_BUDGET_MS}ms"
+        f"best-of-5 cpu_ms={sample.cpu_ms:.3f}ms >= budget={_SINGLE_BUDGET_MS}ms"
     )
-    proposal = sample.result
-    assert proposal.provider_ref == v1.ProviderRef.ANTHROPIC
-    assert proposal.params == {"length": 14}
+    assert sample.result.provider_ref == v1.ProviderRef.ANTHROPIC
+    assert sample.result.params == {"length": 14}
 
-    # 지연 주입 — 동일한 측정/단언이 적색으로 전환됨을 검증
-    import time as _time
+    # --- 지연 주입 — 동일한 측정/단언이 적색으로 전환됨을 검증 ---
+    # Wrap construct with virtual_delayed_sync to inject 10 ms virtual delay
+    # (2× the 5 ms budget) into both cpu and wall readings.
+    original_construct = construct
 
-    _call_num = 0
+    def _delayed_construct() -> v1.StrategyProposal:
+        return virtual_delayed_sync(original_construct, 0.01)()
 
-    def _slow_perf_counter() -> float:
-        nonlocal _call_num
-        _call_num += 1
-        return 0.0 if _call_num == 1 else 10.0
-
-    from unittest.mock import patch
-
-    with patch.object(_time, "perf_counter", side_effect=_slow_perf_counter):
-        sample_delayed = perf_budget.sample(
-            lambda: v1.StrategyProposal(**_proposal_kwargs()),
-        )
-        assert sample_delayed.wall_ms >= _SINGLE_BUDGET_MS, (
-            f"delay injection should exceed budget: "
-            f"wall_ms={sample_delayed.wall_ms:.3f}ms >= budget={_SINGLE_BUDGET_MS}ms"
-        )
+    sample_delayed = perf_budget.best_of(_delayed_construct, n=5)
+    assert sample_delayed.cpu_ms >= _SINGLE_BUDGET_MS, (
+        f"delay injection should exceed budget: "
+        f"cpu_ms={sample_delayed.cpu_ms:.3f}ms >= budget={_SINGLE_BUDGET_MS}ms"
+    )
 
 
 def test_rejected_outcome_roundtrip() -> None:
