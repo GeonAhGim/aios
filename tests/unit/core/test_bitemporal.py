@@ -356,9 +356,13 @@ def test_sleep_injection_does_not_affect_cpu_measurement() -> None:
 
         sample = PerfBudget().sample(with_sleep, batch=1)
         # sleep 100ms가 cpu_ms에 반영되면 안 됨
-        assert sample.cpu_ms < 10.0, (
+        # Windows time.process_time 해상도: 15.625ms (1/64초 tick)
+        # 실제 CPU 사용은 ~0ms지만 tick 경계를 넘으면 15.625ms로 읽힘
+        # sleep이 CPU로 새면 ~100ms가 되므로 2 tick (31.25ms)을 하한으로 설정
+        TICK_MS = 15.625
+        assert sample.cpu_ms <= 2 * TICK_MS, (
             f"sleep injected {sleep_duration}s but cpu_ms={sample.cpu_ms:.3f}ms — "
-            f"process_time is leaking wall-clock"
+            f"process_time is leaking wall-clock (tick={TICK_MS}ms, 2×tick={2 * TICK_MS}ms)"
         )
         # wall_ms는 sleep 영향을 받아야 함
         assert sample.wall_ms > 50.0, (
