@@ -42,6 +42,7 @@ from src.foundation.reconciliation.contracts.v1 import Classification
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 # -- internal fixtures (kept here for backward compat; moved to _reconcile_provider_fixtures.py) --
 
@@ -140,7 +141,8 @@ async def test_material_mismatch_bumps_metric(pool):
     assert registry.counter(POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL).samples() == {(): 1.0}
 
 
-async def test_matching_balance_does_not_bump_metric(pool):
+@pytest.mark.perf
+async def test_matching_balance_does_not_bump_metric(pool, perf_budget):
     registry = MetricsRegistry()
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id, venue="bitget")
@@ -151,19 +153,33 @@ async def test_matching_balance_does_not_bump_metric(pool):
     connection_id = uuid4()
     provider = ExchangeBalanceSource({connection_id: FakeAdapter([_balance(asset, Decimal("10"))])})
 
-    result = await reconcile_account(
-        tenant_id,
-        account_id,
-        connection_id=connection_id,
-        snapshots=PostgresSnapshotRepository(pool),
-        provider=provider,
-        recon=_recon(pool),
-        pool=pool,
-        registry=registry,
-    )
+    def _call():
+        return reconcile_account(
+            tenant_id,
+            account_id,
+            connection_id=connection_id,
+            snapshots=PostgresSnapshotRepository(pool),
+            provider=provider,
+            recon=_recon(pool),
+            pool=pool,
+            registry=registry,
+        )
 
-    assert result.aggregate_classification == Classification.HEALTHY
+    budget_ms = 5_000.0
+    reset_virtual_totals()
+    # best_of + batch keeps the Windows ~15.6ms process_time tick from skewing the reading.
+    sample = await perf_budget.best_of_async(_call, n=3, batch=4)
+
+    assert sample.result.aggregate_classification == Classification.HEALTHY
     assert registry.counter(POSITIONS_RECONCILIATION_MISMATCH_COUNT_TOTAL).samples() == {}
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+
+    # Gate-red: a virtual 10x-budget delay (no real sleep) must trip the same assertion.
+    delayed = virtual_delayed_sync(_call, budget_ms * 10 / 1000)
+    red = await perf_budget.best_of_async(delayed, n=3, batch=1)
+    reset_virtual_totals()
+    assert red.cpu_ms >= budget_ms
+    assert red.result.aggregate_classification == Classification.HEALTHY
 
 
 async def test_adapter_exception_propagates(pool):
@@ -186,7 +202,10 @@ async def test_adapter_exception_propagates(pool):
         )
 
 
-async def test_one_account_failure_does_not_block_another_accounts_reconciliation(pool):
+@pytest.mark.perf
+async def test_one_account_failure_does_not_block_another_accounts_reconciliation(
+    pool, perf_budget
+):
     """DoD #5 negative test — 한 계좌의 잔고 조회 실패가 다른 계좌 대사를
     막지 않는다(공유 상태 없음을 증명)."""
     registry = MetricsRegistry()
@@ -219,18 +238,31 @@ async def test_one_account_failure_does_not_block_another_accounts_reconciliatio
         {healthy_connection: FakeAdapter([_balance(asset, Decimal("5"))])}
     )
 
-    result = await reconcile_account(
-        tenant_id,
-        healthy_account,
-        connection_id=healthy_connection,
-        snapshots=PostgresSnapshotRepository(pool),
-        provider=healthy_provider,
-        recon=_recon(pool),
-        pool=pool,
-        registry=registry,
-    )
+    def _call():
+        return reconcile_account(
+            tenant_id,
+            healthy_account,
+            connection_id=healthy_connection,
+            snapshots=PostgresSnapshotRepository(pool),
+            provider=healthy_provider,
+            recon=_recon(pool),
+            pool=pool,
+            registry=registry,
+        )
 
-    assert result.aggregate_classification == Classification.HEALTHY
+    budget_ms = 5_000.0
+    reset_virtual_totals()
+    sample = await perf_budget.best_of_async(_call, n=3, batch=4)
+
+    assert sample.result.aggregate_classification == Classification.HEALTHY
+    assert sample.cpu_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+
+    # Gate-red: a virtual 10x-budget delay (no real sleep) must trip the same assertion.
+    delayed = virtual_delayed_sync(_call, budget_ms * 10 / 1000)
+    red = await perf_budget.best_of_async(delayed, n=3, batch=1)
+    reset_virtual_totals()
+    assert red.cpu_ms >= budget_ms
+    assert red.result.aggregate_classification == Classification.HEALTHY
 
 
 async def test_unknown_connection_id_raises_unknown_connection_error(pool):
