@@ -44,7 +44,10 @@ from src.foundation.market_data.domain.entitlement.source_contract import (
     permits_use,
 )
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+from tests.support.perf_inject import (
+    reset_virtual_totals,
+    virtual_delayed_sync,
+)
 
 _NOW = datetime(2026, 9, 10, tzinfo=UTC)
 
@@ -204,13 +207,13 @@ async def test_gate_red_virtual_delay_exceeds_budget(
     monkeypatch: pytest.MonkeyPatch,
     perf_budget: PerfBudget,
 ) -> None:
-    """게이트 적색 재현(D2, task-11539 감사 후속): virtual_delayed_async로
-    가상 지연(예산 10배)을 주입하고, 같은 단언이 초과함을 확인한다.
+    """게이트 적색 재현(D2, task-11539 감사 후속): virtual_delayed_sync로
+    가상 지연(예산 10배)을 주입하고, 같은 CPU 단언이 초과함을 확인한다.
 
-    실제 sleep·busy-wait 금지 — virtual_delayed_async가 virtual ledger에
+    실제 sleep·busy-wait 금지 — virtual_delayed_sync가 virtual ledger에
     나노초만 더하므로 측정치에 지연을 더할 뿐 실제 테스트 시간이 늘어나지
-    않는다. Windows 양자화 tick에 흔들리지 않도록 best_of(여러 번 중 최소)
-    측정과 함께 쓴다.
+    않는다. green 테스트와 동일한 `cpu_ms < budget_ms` 단언을 쓰고,
+    지연 주입 시 `cpu_ms >= budget_ms`로 적색을 재현한다.
     """
     reset_virtual_totals()
 
@@ -219,11 +222,11 @@ async def test_gate_red_virtual_delay_exceeds_budget(
     injected_delay_s = budget_ms * 10 / 1000.0
 
     allow_repo = _FakeSourceContractRepository({"BITGET": _contract()})
-    # repo.get에 가상 지연 주입 — 실제 sleep 없이 측정치에만 영향
+    # repo.get에 가상 지연 주입 — virtual_delayed_sync가 cpu+wall 양쪽에 기록
     monkeypatch.setattr(
         allow_repo,
         "get",
-        virtual_delayed_async(allow_repo.get, injected_delay_s),
+        virtual_delayed_sync(allow_repo.get, injected_delay_s),
     )
 
     async def _delayed_call() -> None:
@@ -232,9 +235,10 @@ async def test_gate_red_virtual_delay_exceeds_budget(
         )
 
     red = await perf_budget.best_of_async(_delayed_call, n=3, warmup=0)
-    # virtual_delayed_async는 virtual wall ledger에만 기록하므로 wall_ms로 단언
-    assert red.wall_ms >= budget_ms, (
-        f"가상 지연 주입에도 예산 미만: {perf_budget.describe(red, budget_ms=budget_ms)}"
+    # virtual_delayed_sync는 cpu ledger에도 기록하므로 cpu_ms로 단언 —
+    # green 테스트와 동일한 단언이 적색으로 전환됨을 확인한다.
+    assert red.cpu_ms >= budget_ms, (
+        f"가상 지연 주입에도 CPU 예산 미만: {perf_budget.describe(red, budget_ms=budget_ms)}"
     )
 
 
