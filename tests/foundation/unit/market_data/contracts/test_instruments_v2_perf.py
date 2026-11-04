@@ -182,6 +182,63 @@ def test_instrument_invalid_ulid_virtual_delay_trips_budget(
         test_instrument_invalid_ulid_rejected_within_budget(perf_budget)
 
 
+def _missing_required_payload(missing: str) -> dict[str, Any]:
+    payload: dict[str, Any] = dict(
+        instrument_id=_VALID_ULID,
+        asset_class=AssetClass.CRYPTO,
+        base="BTC",
+        quote="USDT",
+        isin=None,
+        figi=None,
+        tick_size=Decimal("0.01"),
+        lot_size=Decimal("0.0001"),
+        calendar_id="24x7",
+        lifecycle_state=v2.InstrumentLifecycle.ACTIVE,
+        created_at=_now(),
+    )
+    del payload[missing]
+    return payload
+
+
+@pytest.mark.parametrize("missing", ["lifecycle_state", "created_at", "tick_size"])
+def test_instrument_missing_required_field_rejected_per_field(missing: str) -> None:
+    """Negative: dropping any required field is a ValidationError naming that field."""
+    with pytest.raises(ValidationError) as exc:
+        v2.Instrument.model_validate(_missing_required_payload(missing))
+    assert [e["loc"] for e in exc.value.errors()] == [(missing,)]
+
+
+@pytest.mark.perf
+def test_instrument_missing_required_field_rejected_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """Negative test: missing required field is rejected, and rejection stays under 1 ms CPU.
+    best_of (min of several runs) avoids Windows CPU-quantisation noise."""
+    with pytest.raises(ValidationError):
+        v2.Instrument.model_validate(_missing_required_payload("lifecycle_state"))
+    sample = perf_budget.best_of(
+        lambda: pytest.raises(
+            ValidationError,
+            lambda: v2.Instrument.model_validate(_missing_required_payload("lifecycle_state")),
+        ),
+        n=5,
+    )
+    assert sample.cpu_ms < 1.0, f"missing field rejection took {sample.cpu_ms:.3f}ms (budget 1ms)"
+
+
+@pytest.mark.perf
+def test_instrument_missing_required_field_virtual_delay_trips_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate-red reproduction: 5 ms virtual CPU delay in `_now` trips the budget."""
+    monkeypatch.setattr(
+        "tests.foundation.unit.market_data.contracts.test_instruments_v2_perf._now",
+        virtual_delayed_sync(_now, 0.005),
+    )
+    with pytest.raises(AssertionError, match="budget 1ms"):
+        test_instrument_missing_required_field_rejected_within_budget(perf_budget)
+
+
 # --- Numeric performance: bulk construction ---
 
 
