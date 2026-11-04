@@ -14,6 +14,8 @@ from types import ModuleType
 
 import pytest
 
+from tests.support.perf_budget import PerfBudget
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -121,17 +123,47 @@ def test_lines_valid_drop_within_min_ratio_still_compares_normally(
     assert "부분 커버리지 리포트" not in capsys.readouterr().out
 
 
+@pytest.mark.perf
 def test_lines_valid_not_set_still_compares_normally(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    perf_budget: PerfBudget,
 ) -> None:
     """DoD: lines-valid 속성이 coverage.xml에 없으면(구 Cobertura) 비교 자체를
-    멈추지 않고 평소대로 line-rate 비교만 수행한다."""
+    멈추지 않고 평소대로 line-rate 비교만 수행한다.
+
+    main() 호출당 CPU 예산 50ms — ``perf_budget.assert_within()`` 경유, ``batch=10``
+    으로 process_time 틱 양자화를 낮추고 단위는 ms로 통일.
+    """
     xml_path = _write_coverage_xml(tmp_path, 0.789)  # lines_valid=None
     baseline_path = _write_baseline(tmp_path, 80.00)
 
-    exit_code = coverage_ratchet.main(
-        ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
-    assert exit_code == 1
+    assert sample.result == 1
+    assert "부분 커버리지 리포트" not in capsys.readouterr().out
+
+
+def test_lines_valid_not_set_budget_injection_red(
+    tmp_path: Path,
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red: 예산 50ms의 10배(500ms) 가상 지연 주입 → AssertionError."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    xml_path = _write_coverage_xml(tmp_path, 0.789)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+    delayed_fn = virtual_delayed_sync(lambda args: coverage_ratchet.main(args), 0.5)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: delayed_fn(["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]),
+            budget_ms=50,
+            batch=10,
+        )
