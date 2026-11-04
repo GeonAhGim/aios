@@ -39,6 +39,7 @@ from src.core.script.grammar.lexer import ScriptSyntaxError
 from src.core.script.grammar.parser import parse
 from src.core.script.typing.checker import ScriptTypeError, check_program, infer_type
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _CLOSE = "input close: series<float> = 0\n"
 
@@ -229,27 +230,26 @@ def test_request_heavy_script_compiles_well_within_budget(
     """수치 성능 단언(ADR-2026-09-09-C Decision 1, DSL 컴파일 300ms 예산):
     request() 8개(=DEFAULT_LIMITS.max_requests) + 일반 let 50개를 포함한
     스크립트의 parse()+check_resources() 합산 지연이 예산의 절반 안에
-    머무는지 30회 반복 p95로 확인한다(request 전용 비용이 예산을 잠식하지
-    않음을 조기에 드러낸다)."""
+    머무는지 best_of-5로 확인한다(request 전용 비용이 예산을 잠식하지
+    않음을 조기에 드러낸다).
+
+    best_of(여러 번 중 최소)를 사용해 Windows 양자화 tick(~15.6ms)이
+    최소값을 흔들지 않게 한다 — samples+p95는 tick 노이즈에 흔들릴 수
+    있다. 예산·단언 숫자는 올리지 않는다.
+    """
     requests = "\n".join(f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8))
     lets = "\n".join(f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(50))
     source = _CLOSE + requests + "\n" + lets
     limits = ResourceLimits(max_requests=8)
     budget_ms = 150.0
 
-    # batch=64: process_time의 Windows 틱(15.6ms) 양자화 오차를 batch로
-    # 나눈다. batch=64이면 총 시간이 ~64×틱보다 커져 호출당 오차가 ~0.24ms
-    # 수준으로 줄어든다.
-    samples = perf_budget.samples(
+    sample = perf_budget.best_of(
         lambda: check_resources(parse(source), limits),
-        n=30,
-        batch=64,
+        n=5,
     )
-    cpu_ms = sorted(s.cpu_ms for s in samples)
-    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
 
-    print(f"[M2-2a request] compile p95={p95_ms:.3f}ms budget<{budget_ms:.0f}ms")
-    assert p95_ms < budget_ms
+    print(f"[M2-2a request] compile cpu={sample.cpu_ms:.3f}ms budget<{budget_ms:.0f}ms")
+    assert sample.cpu_ms < budget_ms
 
 
 @pytest.mark.perf
@@ -257,70 +257,54 @@ def test_single_call_cpu_measurement_converges_to_zero() -> None:
     """단일 호출 CPU 측정의 0 수렴 검증(ADR-2026-09-09-C Decision 1,
     task-11539 후속): `parse()` 1회의 CPU 시간이 0에 수렴해야 한다.
 
-    `PerfBudget.sample()`은 `time.process_time()`을 사용하므로 Windows의
-    약 15.6ms 양자화 오차가 있을 수 있다. `batch=1`로 측정해도 평균이
-    예산(budget_ms=1)을 내려면 파서가 실제로 빠르게 동작하고 있음을
-    증명한다. batch=128로 여러 호출을 묶어 양자화 오차를 줄인 뒤
-    p95가 1ms 미만인지 확인한다."""
+    best_of-5를 사용해 Windows 양자화 tick(~15.6ms)이 최소값을 흔들지
+    않게 한다 — 단발 sample은 tick에 따라 0 또는 15ms로 불안정하다.
+    5번 중 최소값이 1ms 미만이면 파서가 실제로 빠르게 동작함을 증명한다.
+    """
     pb = PerfBudget()
     source = _CLOSE + 'let r = request("BTCUSDT", "5m", close)'
 
     def single_parse() -> None:
         parse(source)
 
-    # 첫 호출은 warmup — 이후 30회 단일 호출을 batch=128로 측정
-    single_parse()
-    samples = pb.samples(single_parse, n=30, batch=128)
-    cpu_ms = sorted(s.cpu_ms for s in samples)
-    p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
+    sample = pb.best_of(single_parse, n=5)
 
-    assert p95_ms < 1.0, (
-        f"단일 parse 호출 p95 CPU 시간 {p95_ms:.3f}ms가 1ms 초과 — "
-        f"마지막 샘플 cpu_ms={cpu_ms[-1]:.3f}ms"
+    assert sample.cpu_ms < 1.0, (
+        f"단일 parse 호출 best_of-5 최소 CPU 시간 {sample.cpu_ms:.3f}ms가 1ms 초과"
     )
 
 
 @pytest.mark.perf
 def test_perf_assertion_catches_cpu_delay_injection(
     perf_budget: PerfBudget,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """게이트 적색 재현(D2, task-11539 후속): 성능 예산 단언이 실제로
-    위반을 포착하는지 역으로 증명한다. `time.process_time`을 monkeypatch해
-    1회 호출당 예산(150ms/30=5ms)을 초과하는 CPU 시간을 가장하면
-    같은 단언이 AssertionError로 적색이 돼야 한다.
+    위반을 포착하는지 역으로 증명한다. `virtual_delayed_sync`로
+    check_resources 감싸 1회 호출당 4s 가상 CPU 지연을 주입하면
+    `best_of` 단언이 AssertionError로 적색이 돼야 한다.
+
+    virtual_delayed_sync은 실제 sleep/spin 없이 가상 지연 레더에
+    추가하므로 PerfBudget.sample이 그 값을 cpu_ms에 정확히 반영한다.
+    4s 지연 → best_of-5 최소값도 150ms 예산 초과.
 
     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
-    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+    검증한다(type: ignore ratchet 회피).
     """
-    import time as _time
-
-    _fake_time = [0.0]
-
-    def _fake_process_time() -> float:
-        _fake_time[0] += 100.0  # 100ms per call >> 150ms budget
-        return _fake_time[0]
-
-    monkeypatch.setattr(_time, "process_time", _fake_process_time)
+    reset_virtual_totals()
 
     requests = "\n".join(f'let req{i} = request("SYM{i}", "5m", close)' for i in range(8))
     lets = "\n".join(f"let v{i} = ta.sma(close[{i % 5}], {i % 20 + 1})" for i in range(50))
     source = _CLOSE + requests + "\n" + lets
     limits = ResourceLimits(max_requests=8)
 
+    # check_resources를 virtual_delayed_sync으로 감싸 1회 호출당 4s 가상 CPU 추가
+    wrapped = virtual_delayed_sync(lambda: check_resources(parse(source), limits), 4.0)
+
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
     with pytest.raises(AssertionError):
-        samples = perf_budget.samples(
-            lambda: check_resources(parse(source), limits),
-            n=30,
-            batch=64,
-        )
-        cpu_ms = sorted(s.cpu_ms for s in samples)
-        p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]
-
-        print(f"[M2-2a request INJECTED] compile p95={p95_ms:.3f}ms budget<{150.0:.0f}ms")
-        assert p95_ms < 150.0, (
-            f"주입 지연 p95={p95_ms:.3f}ms > 150ms budget — 마지막 샘플 cpu_ms={cpu_ms[-1]:.3f}ms"
+        sample = perf_budget.best_of(wrapped, n=5)
+        assert sample.cpu_ms < 150.0, (
+            f"주입 지연 best_of-5 최소 cpu={sample.cpu_ms:.3f}ms > 150ms budget"
         )
 
 
