@@ -27,6 +27,8 @@ from pydantic import ValidationError
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts.v1 import Venue
 from src.foundation.market_data.contracts.v2 import instruments as v2
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 FIXTURE = Path(__file__).parent / "fixtures" / "market_data_contracts_v2_instruments.json"
 
@@ -104,6 +106,30 @@ def test_instrument_naive_created_at_rejected() -> None:
         _sample_instrument(created_at=datetime(2026, 9, 3, 0, 0))
 
 
+def test_instrument_naive_created_at_rejected_within_budget(perf_budget: PerfBudget) -> None:
+    """Negative test: naive datetime is rejected, and rejection stays under 1 ms CPU.
+    best_of avoids Windows CPU-quantisation noise."""
+    sample = perf_budget.best_of(
+        lambda: pytest.raises(
+            ValidationError, lambda: _sample_instrument(created_at=datetime(2026, 9, 3, 0, 0))
+        ),
+        n=5,
+    )
+    assert sample.cpu_ms < 1.0, f"naive datetime rejection took {sample.cpu_ms:.3f}ms (budget 1ms)"
+
+
+def test_instrument_naive_created_at_virtual_delay_trips_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate-red reproduction: 5 ms virtual CPU delay in `_now` trips the budget."""
+    monkeypatch.setattr(
+        "tests.foundation.unit.market_data.contracts.test_instruments_v2._now",
+        virtual_delayed_sync(_now, 0.005),
+    )
+    with pytest.raises(AssertionError, match="budget 1ms"):
+        test_instrument_naive_created_at_rejected_within_budget(perf_budget)
+
+
 def test_instrument_invalid_ulid_rejected() -> None:
     with pytest.raises(ValidationError):
         _sample_instrument(instrument_id="not-a-ulid")
@@ -131,6 +157,49 @@ def test_instrument_missing_required_field_rejected() -> None:
                 "created_at": _now(),
             }
         )
+
+
+def test_instrument_missing_required_field_rejected_within_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """Negative test: missing required field is rejected, and rejection stays under 1 ms CPU.
+    best_of avoids Windows CPU-quantisation noise."""
+    sample = perf_budget.best_of(
+        lambda: pytest.raises(
+            ValidationError,
+            lambda: v2.Instrument.model_validate(
+                {
+                    "instrument_id": _VALID_ULID,
+                    "asset_class": AssetClass.CRYPTO,
+                    "base": "BTC",
+                    "quote": "USDT",
+                    "isin": None,
+                    "figi": None,
+                    "tick_size": Decimal("0.01"),
+                    "lot_size": Decimal("0.0001"),
+                    "calendar_id": "24x7",
+                    # lifecycle_state 누락
+                    "created_at": _now(),
+                }
+            ),
+        ),
+        n=5,
+    )
+    assert sample.cpu_ms < 1.0, (
+        f"missing required field rejection took {sample.cpu_ms:.3f}ms (budget 1ms)"
+    )
+
+
+def test_instrument_missing_required_field_virtual_delay_trips_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate-red reproduction: 5 ms virtual CPU delay in `_now` trips the budget."""
+    monkeypatch.setattr(
+        "tests.foundation.unit.market_data.contracts.test_instruments_v2._now",
+        virtual_delayed_sync(_now, 0.005),
+    )
+    with pytest.raises(AssertionError, match="budget 1ms"):
+        test_instrument_missing_required_field_rejected_within_budget(perf_budget)
 
 
 def test_instrument_optional_identifiers_accept_none() -> None:
