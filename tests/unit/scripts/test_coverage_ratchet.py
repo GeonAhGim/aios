@@ -369,26 +369,35 @@ def test_custom_tolerance_is_respected(
     assert "부분 커버리지 리포트" not in capsys.readouterr().out
 
 
+@pytest.mark.perf
 def test_first_run_with_lines_valid_persists_in_baseline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, perf_budget: PerfBudget
 ) -> None:
     """DoD: 첫 실행에서 --allow-baseline-write와 함께 lines-valid가 있는 XML을
-    읽으면 baseline도 percent + lines_valid 두 줄로 기록한다."""
+    읽으면 baseline도 percent + lines_valid 두 줄로 기록한다.
+
+    Numeric performance assertion: main() 첫 기록 경로(CPU) 예산 50ms.
+    ``batch=10``으로 호출당 양자화 오차를 낮춤. 단위는 전량 ms 통일.
+    """
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     xml_path = _write_coverage_xml(tmp_path, 0.75, lines_valid=12345)
     baseline_path = tmp_path / "coverage-baseline.txt"
 
-    exit_code = coverage_ratchet.main(
-        [
-            "--coverage-xml",
-            str(xml_path),
-            "--baseline",
-            str(baseline_path),
-            "--allow-baseline-write",
-        ]
+    sample = perf_budget.assert_within(
+        lambda: coverage_ratchet.main(
+            [
+                "--coverage-xml",
+                str(xml_path),
+                "--baseline",
+                str(baseline_path),
+                "--allow-baseline-write",
+            ]
+        ),
+        budget_ms=50,
+        batch=10,
     )
 
-    assert exit_code == 0
+    assert sample.result == 0
     lines = baseline_path.read_text(encoding="utf-8").strip().splitlines()
     assert lines == ["75.00", "12345"]
 
