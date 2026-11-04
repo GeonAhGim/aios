@@ -131,3 +131,37 @@ async def test_writer_committing_between_reconcile_reads_records_no_drift(
         f"{'+' if writer_kind == 'credit' else '-'}{_DELTA} -> "
         f"drift rows (side, amount)={drift}; expected 0 rows"
     )
+
+
+async def test_genuine_drift_is_still_recorded_without_concurrent_writer(
+    pool,
+    ports,  # noqa: F811
+):
+    """Positive control: with no concurrent writer, a real projection-only
+    drift must still produce exactly one MANUAL_ADJUSTMENT line. Otherwise the
+    `== []` assertions above could pass just because reconcile became a no-op."""
+    buyer = await create_test_user(pool)
+    async with pool.acquire() as conn, conn.transaction():
+        await bridge_credit(conn, buyer, _START, "TOPUP")
+        await conn.execute(
+            "UPDATE user_wallets SET balance = balance + $2 WHERE user_id = $1",
+            buyer,
+            _DELTA,
+        )
+
+    async with pool.acquire() as raw, raw.transaction():
+        await _reconcile_available(
+            raw,
+            buyer,
+            Currency.KRW,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=ports.clock,
+        )
+
+    drift = await _drift_rows(pool, buyer)
+    assert drift == [("CREDIT", _DELTA)], (
+        f"expected one +{_DELTA} projection-only drift line (CREDIT on buyer AVAILABLE), "
+        f"got {drift}"
+    )
