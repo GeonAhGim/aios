@@ -125,6 +125,12 @@ async def test_healthy_snapshot_has_no_drift(
 
     # best_of(N) — Windows 양자화 tick(≈15.6 ms)에 흔들리지 않게 최소 5회 중 최소값 채택.
     sample = await perf_budget.best_of_async(_run, n=5, warmup=1)
+    # CPU 측정도 예산 내여야 한다 — audit(task-11539)에서 cpu_ms가 0 수렴하는 것을 발견했으나
+    # best_of(5)로 양자화 오차를 줄였으므로 여전히 예산 단언으로 correctness를 검증한다.
+    assert sample.cpu_ms < _MAX_REBUILD_LATENCY_MS, (
+        f"정상 rebuild_snapshot이 CPU 예산을 초과합니다: "
+        f"{perf_budget.describe(sample, budget_ms=_MAX_REBUILD_LATENCY_MS)}"
+    )
     assert sample.wall_ms < _MAX_REBUILD_LATENCY_MS, (
         f"정상 rebuild_snapshot이 예산을 초과합니다: "
         f"{perf_budget.describe(sample, budget_ms=_MAX_REBUILD_LATENCY_MS)}"
