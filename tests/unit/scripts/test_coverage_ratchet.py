@@ -79,6 +79,47 @@ def test_read_current_coverage_percent_converts_line_rate(tmp_path: Path) -> Non
 
 
 @pytest.mark.perf
+def test_main_p95_latency_within_budget(tmp_path: Path, perf_budget: PerfBudget) -> None:
+    """Numeric performance assertion: coverage.xml 파싱 + baseline 비교 전체 파이프라인의
+    p95 CPU 시간이 50ms 안에 끝남.
+
+    raw ``time.perf_counter()`` 단언을 ``perf_budget.assert_within()``로 전환.
+    ``batch=10``으로 호출당 양자화 오차를 ``15.6ms/10 ≈ 1.6ms`` 이하로 낮춤.
+    단위는 전량 ms 통일.
+    """
+    xml_path = _write_coverage_xml(tmp_path, 0.80)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+    args = ["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]
+
+    perf_budget.assert_within(
+        lambda: coverage_ratchet.main(args),
+        budget_ms=50,
+        batch=10,
+    )
+
+
+@pytest.mark.perf
+def test_main_p95_latency_budget_injection_red(tmp_path: Path, perf_budget: PerfBudget) -> None:
+    """게이트-Red 재현: 예산 50ms의 10배(500ms) 지연 주입 → AssertionError.
+
+    ``virtual_delayed_sync``으로 CPU에 0.5초 가상 지연을 주입하면
+    ``perf_budget.assert_within(budget_ms=50)``이 예산을 넘어 적색이어야 한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    xml_path = _write_coverage_xml(tmp_path, 0.80)
+    baseline_path = _write_baseline(tmp_path, 80.00)
+    delayed_fn = virtual_delayed_sync(lambda args: coverage_ratchet.main(args), 0.5)
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: delayed_fn(["--coverage-xml", str(xml_path), "--baseline", str(baseline_path)]),
+            budget_ms=50,
+            batch=10,
+        )
+
+
+@pytest.mark.perf
 def test_read_current_coverage_percent_performance(tmp_path: Path, perf_budget: PerfBudget) -> None:
     """Numeric performance assertion: XML 파싱 1회가 CPU 예산 10ms 안에 끝남.
 
