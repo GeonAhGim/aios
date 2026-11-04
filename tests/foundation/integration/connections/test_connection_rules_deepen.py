@@ -6,6 +6,8 @@ conftest.py는 픽스처 헬퍼만 담으므로, 불변식 위반 거부(negativ
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from src.foundation.connections.domain import rules
@@ -63,6 +65,7 @@ def test_fingerprint_hash_failure_propagates_instead_of_reporting_no_drift(
 # --- performance: perf_budget 픽스처 경유 예산 단언 -----------------------------------
 
 
+@pytest.mark.perf
 def test_scope_fingerprint_within_budget(perf_budget: PerfBudget) -> None:
     scopes = (
         CapabilityScope.READ_BALANCE,
@@ -74,3 +77,30 @@ def test_scope_fingerprint_within_budget(perf_budget: PerfBudget) -> None:
         budget_ms=5.0,
         label="compute_scope_fingerprint",
     )
+
+
+# --- gate-red reproduction: 지연 주입 시 동일 단언이 적색으로 전환됨 -------------------
+
+
+@pytest.mark.perf
+def test_scope_fingerprint_budget_catches_delay_injection(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Injecting a 50ms delay into compute_scope_fingerprint must turn the same
+    5ms budget assertion red, proving the gate can actually fail."""
+    real = rules.compute_scope_fingerprint
+
+    def _slow(scopes: tuple[CapabilityScope, ...]) -> str:
+        # Busy-wait: the budget measures CPU time, which sleep() would not consume.
+        end = time.process_time() + 0.05
+        while time.process_time() < end:
+            pass
+        return real(scopes)
+
+    monkeypatch.setattr(rules, "compute_scope_fingerprint", _slow)
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: rules.compute_scope_fingerprint((CapabilityScope.READ_BALANCE,)),
+            budget_ms=5.0,
+            label="compute_scope_fingerprint",
+        )
