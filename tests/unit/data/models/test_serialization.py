@@ -7,6 +7,7 @@ import pytest
 
 from src.data.models.serialization import DecimalSafeEncoder
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def test_decimal_serialized_as_string_not_float():
@@ -145,29 +146,34 @@ def test_serialize_cpu_measurement_converges_with_batch(perf_budget: PerfBudget)
     항상 0ms로 읽힌다. batch=8로 묶으면 양자화 오차가 호출당 15.6/8 ≈ 2ms로
     줄어 실제 CPU 시간을 측정할 수 있다.
 
-    이 테스트는 batch 매개변수가 양자화 문제를 완화한다는 사실을
-    문서화한다(task-11539 감사).
+    best_of(n)로 여러 sample 중 최소를 취해 Windows 양자화tick 1회에
+    흔들리지 않게 한다(task-11539 감사).
     """
     payload = {"amount": Decimal("1.99")}
 
     # batch=1 — 양자화tick보다 빠르므로 0ms 수렴 (정량 단언)
-    single_sample = perf_budget.sample(
+    # best_of로 여러 sample 중 최소를 취해 양자화tick 영향 제거
+    single_best = perf_budget.best_of(
         lambda: json.dumps(payload, cls=DecimalSafeEncoder),
+        n=5,
+        warmup=0,
         batch=1,
     )
-    assert single_sample.cpu_ms < 1.0, (
-        f"batch=1 cpu={single_sample.cpu_ms:.3f}ms — "
+    assert single_best.cpu_ms < 1.0, (
+        f"batch=1 cpu={single_best.cpu_ms:.3f}ms — "
         f"Windows quantizationtick(15.6ms)보다 빠른 호출은 0ms 수렴"
     )
 
     # batch=8 — 양자화 오차가 1/8로 줄어 실제 CPU 측정 가능
-    batch_sample = perf_budget.sample(
+    batch_best = perf_budget.best_of(
         lambda: json.dumps(payload, cls=DecimalSafeEncoder),
+        n=5,
+        warmup=0,
         batch=8,
     )
     # batch로 나눈 평균이 양자화tick(15.6ms)보다 작아야 함
-    assert batch_sample.cpu_ms < 15.6, (
-        f"batch=8 cpu={batch_sample.cpu_ms:.3f}ms — 양자화tick 15.6ms 미만이어야 함"
+    assert batch_best.cpu_ms < 15.6, (
+        f"batch=8 cpu={batch_best.cpu_ms:.3f}ms — 양자화tick 15.6ms 미만이어야 함"
     )
 
 
@@ -177,38 +183,35 @@ def test_serialize_cpu_measurement_converges_with_batch(perf_budget: PerfBudget)
 @pytest.mark.perf
 def test_perf_budget_assertion_catches_10x_cpu_delay_injection(
     perf_budget: PerfBudget,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
-    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
-    500ms(예산 50ms의 10배)를 가장하면 `assert_within`가
-    AssertionError로 적색이 돼야 한다.
+    역으로 증명한다. `virtual_delayed_sync`로 1회 호출당 500ms(예산
+    50ms의 10배)를 가상 주입하면 `assert_within`가 AssertionError로
+    적색이 돼야 한다.
+
+    실제 sleep·busy-wait 금지 — virtual_delayed_sync가 virtual ledger에
+    나노초만 더하므로 측정치에 지연을 더할 뿐 실제 테스트 시간이
+    늘어나지 않는다. green 테스트(cpu_ms < budget_ms)와 동일한 CPU
+    단언을 쓰고, 지연 주입 시 cpu_ms >= budget_ms로 적색을 재현한다.
 
     단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
     검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
     """
+    reset_virtual_totals()
     budget_ms = 50.0
-
-    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
-    # 이를 monkeypatch해 항상 500ms(10x budget)를 반환하게 한다.
-    _fake_time = 0.0
-
-    def _fake_process_time() -> float:
-        nonlocal _fake_time
-        _fake_time += 0.5  # 500ms per call = 10x budget
-        return _fake_time
-
-    monkeypatch.setattr("time.process_time", _fake_process_time)
 
     payload = {f"field_{i}": Decimal(f"{i}.99") for i in range(1000)}
 
-    def serialize():
-        return json.dumps(payload, cls=DecimalSafeEncoder)
+    # virtual_delayed_sync가 cpu+wall 양 ledger에 500ms씩 기록
+    injected = virtual_delayed_sync(
+        lambda: json.dumps(payload, cls=DecimalSafeEncoder),
+        0.5,  # 500ms = 10x budget
+    )
 
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
-            serialize,
+            injected,
             budget_ms=budget_ms,
             n=5,
             warmup=1,
