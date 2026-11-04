@@ -186,3 +186,87 @@ async def test_verify_chain_detects_tampered_event_hash(pool, repo):
 
     with pytest.raises(ChainIntegrityError):
         verify_chain(tampered)
+
+
+async def test_verify_chain_detects_sequence_no_mismatch(pool, repo):
+    """AUD-003 negative — sequence_no가 연속되지 않으면(예: 1, 3으로 건너뜀)
+    verify_chain은 ChainIntegrityError를 던져야 한다. DB는 append-only라
+    직접 시퀀스를 조작할 수 없으므로, 정상 체인을 만든 뒤 sequence_no를
+    메모리에서 손상시켜 verify_chain에 전달한다."""
+
+    tenant_id = await create_test_tenant(pool)
+    await append_audit_event(repo, _command(tenant_id))
+    await append_audit_event(repo, _command(tenant_id))
+    await append_audit_event(repo, _command(tenant_id))
+
+    events = await repo.list_chain_for_verification(tenant_id)
+    # sequence_no 2를 4로 변경 → 1, 4, 3이 되어 시퀀스 불연속
+    tampered = [
+        events[0],
+        dataclasses.replace(events[1], sequence_no=4),
+        events[2],
+    ]
+
+    with pytest.raises(ChainIntegrityError):
+        verify_chain(tampered)
+
+
+async def test_verify_chain_detects_previous_hash_mismatch(pool, repo):
+    """AUD-003 negative — previous_hash가 이전 이벤트의 event_hash와 다르면
+    verify_chain은 ChainIntegrityError를 던져야 한다. DB 변조 대신
+    메모리에서 previous_hash만 변경한다."""
+
+    tenant_id = await create_test_tenant(pool)
+    await append_audit_event(repo, _command(tenant_id))
+    await append_audit_event(repo, _command(tenant_id))
+
+    events = await repo.list_chain_for_verification(tenant_id)
+    # 두 번째 이벤트의 previous_hash를 임의 값으로 변경
+    tampered = [
+        events[0],
+        dataclasses.replace(events[1], previous_hash="0" * 64),
+    ]
+
+    with pytest.raises(ChainIntegrityError):
+        verify_chain(tampered)
+
+
+async def test_unknown_evidence_lookup_returns_none(pool, repo):
+    """unknown evidence lookup rejected — 존재하지 않는 event ID로 조회하면
+    None을 반환해야 한다 (fail-closed: 존재하지 않는 증거를 허용하지 않음)."""
+
+    tenant_id = await create_test_tenant(pool)
+    await append_audit_event(repo, _command(tenant_id))
+
+    # get_latest_event는 aggregate_type/aggregate_id/action 기반이므로
+    # 다른 aggregate로 조회하면 None이어야 한다
+    fake_id = uuid4()
+    result = await repo.get_latest_event(
+        aggregate_type="nonexistent_type",
+        aggregate_id=fake_id,
+        action="nonexistent_action",
+    )
+    assert result is None
+
+
+async def test_append_event_failure_injection_repo_raises(pool, repo, monkeypatch):
+    """failure-injection: repo.append_event가 예외를 던지면 append_audit_event도
+    같은 예외를 전파해야 한다. monkeypatch는 테스트 종료 후 자동 복원된다.
+    원본 복원은 monkeypatch.setattr cleanup hook이 맡는다."""
+
+    tenant_id = await create_test_tenant(pool)
+
+    async def _failing_append(*args, **kwargs):
+        raise ConnectionError("simulated DB connection failure")
+
+    monkeypatch.setattr(repo, "append_event", _failing_append)
+
+    with pytest.raises(ConnectionError, match="simulated DB connection failure"):
+        await append_audit_event(repo, _command(tenant_id))
+
+    # monkeypatch는 테스트 종료 후 자동 복원되므로, 같은 테스트 내에서
+    # 원본 동작을 검증하려면 별도 새 repo 인스턴스를 쓴다.
+    fresh_repo = PostgresAuditEventRepository(pool)
+    await append_audit_event(fresh_repo, _command(tenant_id))
+    events = await fresh_repo.list_chain_for_verification(tenant_id)
+    assert len(events) == 1
