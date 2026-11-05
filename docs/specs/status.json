@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-11-05T16:05:42+00:00",
+ "refreshed_at": "2026-11-05T17:26:42+00:00",
  "specs": [
   {
    "below_floor": 7,
@@ -43,7 +43,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 1,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
     "D1": 1,
     "D2": 2,
@@ -75,7 +75,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 4,
    "depth": {
     "D1": 6,
     "D2": 1,
@@ -106,7 +106,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 3,
    "depth": {
     "D1": 2,
     "D3": 27
@@ -121,7 +121,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 2,
    "depth": {
     "D1": 4,
     "D2": 1,
