@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from src.data.models.base import AssetClass
 from src.foundation.market_data.contracts import v1
+from tests.conftest import PerfBudget
 
 FIXTURE = Path(__file__).parent / "fixtures" / "market_data_contracts_v1.json"
 
@@ -85,10 +86,23 @@ def test_candle_record_naive_open_time_rejected() -> None:
         _sample_candle(open_time=datetime(2026, 9, 3, 0, 0))
 
 
-def test_candle_record_accepts_aware_open_time() -> None:
+def test_candle_record_accepts_aware_open_time(perf_budget: PerfBudget) -> None:
+    """aware datetime을 수용하고 schema_version을 설정한다 — CPU 예산 내 단일 호출.
+
+    PerfBudget.best_of(n=5)로 Windows process_time() 양자화 tick(≈15.6ms) 노이즈를
+    걷어내고 최소 cpu_ms로 0 수렴 단언을 안정화한다.
+    """
     candle = _sample_candle()
     assert candle.open_time.tzinfo is not None
     assert candle.schema_version == "v1"
+
+    # perf: 단일 호출 CPU 시간이 예산(2ms) 내에 수렴 — best_of로 0 수렴 안정화
+    sample = perf_budget.best_of(
+        lambda: _sample_candle(),
+        n=5,
+        batch=1,
+    )
+    assert sample.cpu_ms < 2.0, f"CandleRecord 생성 CPU 시간이 예산 초과: {sample.cpu_ms:.3f}ms"
 
 
 def test_candle_record_missing_required_field_rejected() -> None:
