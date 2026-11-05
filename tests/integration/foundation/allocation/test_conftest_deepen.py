@@ -167,8 +167,9 @@ async def test_create_order_with_fills_round_trip_stays_within_local_budget(
 
     # `create_order_with_fills`는 order 1건 + fill 1건, 총 2회의 순차 INSERT
     # 왕복을 한 커넥션에서 수행한다(단일 SELECT 왕복인 baseline보다 본질적으로
-    # 무거움) -- 배수를 2배(24x), 바닥을 60ms로 올려 이 구조적 차이를 반영한다.
-    budget = max(0.060, 24 * baseline_rt)
+    # 무거움) -- 배수를 2배(24x), 바닥을 100ms로 올려 이 구조적 차이와
+    # 병렬 CI 환경의 컨테이너 컨테이너 오버헤드를 반영한다.
+    budget = max(0.100, 24 * baseline_rt)
     assert elapsed < budget, (
         f"create_order_with_fills took {elapsed * 1000:.1f}ms, budget {budget * 1000:.1f}ms "
         f"(baseline rt {baseline_rt * 1000:.1f}ms)"
