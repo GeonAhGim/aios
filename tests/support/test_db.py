@@ -350,6 +350,14 @@ async def test_ensure_worker_database_clone_meets_latency_budget(perf_budget: Pe
     worker_id = "permtest"
     budget_ms = 10.0 * 1000
 
+    # Global virtual-delay ledger must be cleared before measurement so that
+    # prior tests using ``virtual_delayed_sync``/``virtual_delayed_async`` in
+    # the same xdist worker process do not inflate ``cpu_ms``/``wall_ms``
+    # readings (task-22280 / task-22329).
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
     # The clone runs server-side, so this process's CPU time (cpu_ms) barely
     # moves; judge on wall_ms. One clone takes ~1s >> the 15.6ms process_time
     # tick, so batch=1 has no quantization error. Each timed call is
