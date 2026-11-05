@@ -72,6 +72,8 @@ from src.foundation.market_data.adapters.providers.kis_provider import KISProvid
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.instruments import VenueListing
 from src.foundation.market_data.ports.provider import TimeSpan
+from tests.support.perf_budget import PerfBudget, PerfSample
+from tests.support.perf_inject import virtual_delayed_async
 
 _ULID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _BASE = datetime(2026, 1, 1, tzinfo=UTC)
@@ -131,7 +133,9 @@ def _candle(day: int) -> Candle:
 # ---------------------------------------------------------------------------
 
 
-async def test_fetch_candles_network_failure_is_not_swallowed_into_coverage_missing() -> None:
+async def test_fetch_candles_network_failure_is_not_swallowed_into_coverage_missing(
+    perf_budget: PerfBudget,
+) -> None:
     """`get_ohlcv`가 네트워크 단절로 `RetryableExchangeError`를 던지면
     `call_with_retry`(base_adapter.py, `except DataProviderError`만 잡음)가
     이를 그대로 전파해야 한다 — `DATA_COVERAGE_MISSING`(정상적인 "그 구간에
@@ -146,6 +150,33 @@ async def test_fetch_candles_network_failure_is_not_swallowed_into_coverage_miss
         await provider.fetch_candles(_listing(), Timeframe.D1, span)
 
     assert len(fake.calls) == 1  # 실제로 위임을 시도했다(조용히 건너뛰지 않음)
+
+    # PERF-detection: the failure path must stay cheap. Measured with best_of_async (min of 5)
+    # so one quantized Windows CPU tick cannot flip the 0-convergent reading.
+    budget_ms = 5.0
+
+    async def _measure(adapter: _FakeKISAdapter) -> PerfSample:
+        prov = KISProvider(adapter)
+
+        async def _call_once() -> None:
+            with pytest.raises(RetryableExchangeError):
+                await prov.fetch_candles(_listing(), Timeframe.D1, span)
+
+        return await perf_budget.best_of_async(_call_once, n=5)
+
+    def _failing() -> _FakeKISAdapter:
+        return _FakeKISAdapter({}, raise_on_call=RetryableExchangeError("simulated network outage"))
+
+    green = await _measure(_failing())
+    assert green.cpu_ms < budget_ms, perf_budget.describe(green, budget_ms=budget_ms)
+    assert green.wall_ms < budget_ms, perf_budget.describe(green, budget_ms=budget_ms)
+
+    # Gate-red: inject a virtual 10x-budget delay into the same call; the same assertion must trip.
+    slow = _failing()
+    vars(slow)["get_ohlcv"] = virtual_delayed_async(slow.get_ohlcv, budget_ms * 10 / 1000)
+    red = await _measure(slow)
+    assert red.wall_ms >= budget_ms * 10, perf_budget.describe(red, budget_ms=budget_ms)
+    assert not (red.wall_ms < budget_ms)
 
 
 # ---------------------------------------------------------------------------
