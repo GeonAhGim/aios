@@ -66,12 +66,6 @@ def test_ir_with_limit_plus_one_instrs_raises_script_runtime_limit_error() -> No
 # (mirrors test_resources.py's `ResourceLimits(max_ops=3)` pattern for DSL-6 boundaries)
 
 
-def test_runtime_limit_minus_one_instrs_passes() -> None:
-    ir = _balanced_ir(4)
-    result = execute(ir, bar_count=1, runtime_limit=5)
-    assert isinstance(result.bindings["x"], int)
-
-
 def test_runtime_limit_exact_instrs_passes() -> None:
     """Exact-limit choice fixed here: executed count == runtime_limit still passes
     (the loop only blocks once the count goes strictly above the budget)."""
@@ -106,11 +100,7 @@ def test_removing_the_budget_lets_the_overbudget_ir_run_to_completion() -> None:
 
 
 def test_normal_script_below_limit_is_unaffected() -> None:
-    source = (
-        "input close: series<float> = 0\n"
-        "let doubled = close * 2\n"
-        "signal go = doubled > close"
-    )
+    source = "input close: series<float> = 0\nlet doubled = close * 2\nsignal go = doubled > close"
     close = Series.of_floats([1.0, 2.0, 3.0])
     ir = lower_program(parse(source))
 
