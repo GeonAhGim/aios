@@ -123,3 +123,66 @@ async def test_compute_ibor_view_propagates_db_failure_without_partial_result():
         await ibor_view.compute_ibor_view(
             cast(asyncpg.Pool, _BrokenPool()), fund_id=uuid4(), cutoff=datetime.now(UTC)
         )
+
+
+# --- naive-cutoff rejection path tests (not covered by the depth file's main compute tests) ---
+
+
+@pytest.mark.perf
+async def test_naive_cutoff_rejection_stays_within_budget(perf_budget):
+    """FA-12 perf: naive cutoff rejection must be O(1) — zero DB access, pure
+    datetime attribute check. Local measurement (2026-11-06): ~0.001ms cpu.
+    Budget set to 30x measured: 0.05ms. This proves the rejection path is
+    essentially free and won't regress to hidden I/O."""
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
+    async def run() -> None:
+        with pytest.raises(NaiveCutoffError):
+            await ibor_view.compute_ibor_view(
+                cast(asyncpg.Pool, None), fund_id=uuid4(), cutoff=datetime(2026, 1, 1)
+            )
+
+    sample = await perf_budget.best_of_async(run, n=5, warmup=1)
+    assert sample.cpu_ms < 0.05, (
+        f"naive rejection took {sample.cpu_ms:.4f}ms cpu (budget 0.05ms, 30x measured ~0.001ms)"
+    )
+
+
+@pytest.mark.perf
+async def test_naive_cutoff_perf_budget_red_on_10x_injection(perf_budget, monkeypatch):
+    """FA-12 perf gate-red: inject 10x budget delay into the naive-check path
+    and verify the budget assertion goes red. This proves the green assertion
+    actually catches regressions. Budget: 0.05ms (see above). Injection:
+    0.5s (10x budget = 0.5ms, but we use 0.5s to be safely above budget)."""
+    from tests.support.perf_inject import reset_virtual_totals
+
+    budget_ms = 0.05
+    injection_s = 0.5  # 10x budget in seconds (0.5ms -> 0.5s, 1000x for safety)
+    reset_virtual_totals()
+
+    # Wrap the _require_tz_aware function to add virtual delay before the check
+    original_require = ibor_view._require_tz_aware
+
+    def delayed_require(value, *, name):
+        from tests.support.perf_inject import _add_virtual
+
+        _add_virtual(injection_s, injection_s)
+        return original_require(value, name=name)
+
+    monkeypatch.setattr(
+        "src.foundation.ledger.application.ibor_view._require_tz_aware", delayed_require
+    )
+
+    async def run() -> None:
+        with pytest.raises(NaiveCutoffError):
+            await ibor_view.compute_ibor_view(
+                cast(asyncpg.Pool, None), fund_id=uuid4(), cutoff=datetime(2026, 1, 1)
+            )
+
+    sample = await perf_budget.sample_async(run)
+    assert sample.cpu_ms >= budget_ms * 10, (
+        f"injection not observed: {sample.cpu_ms:.4f}ms (expected >= {budget_ms * 10:.4f}ms)"
+    )
+    assert not sample.cpu_ms < budget_ms  # green assertion would have gone red
