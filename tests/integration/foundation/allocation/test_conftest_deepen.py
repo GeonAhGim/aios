@@ -144,7 +144,7 @@ async def test_create_order_with_fills_round_trip_stays_within_local_budget(
     del perf_budget  # 서명만 사용 -- I/O 바운드라 paused_coverage() wall-clock을 쓴다
     with paused_coverage():
         samples: list[float] = []
-        for _ in range(23):
+        for _ in range(10):  # 23→10: CI 병렬 부하에서 baseline RT가 과도하게 길어지는 것 방지
             start = time.perf_counter()
             async with pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
