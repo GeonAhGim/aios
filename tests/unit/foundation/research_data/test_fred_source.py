@@ -207,8 +207,11 @@ def test_parse_fred_observations_meets_throughput_budget(perf_budget: PerfBudget
     """반복 수신(폴링) 패턴에서 `parse_fred_observations`가 처리량 예산을
     지키는지 확인한다 -- `perf_budget` 픽스처로만 측정한다(raw
     `time.perf_counter()` 직접 비교 금지, perf-measurement 래칫)."""
-    iterations = 2_000
-    budget_ms = 3000.0  # 실측 로컬 <400ms, CI 편차 감안
+    # Short samples + many repeats: a 0.4s sample is long enough for CPU contention on a
+    # loaded CI worker to inflate it; best_of over short samples keeps the per-parse budget
+    # (1.5ms/parse, unchanged from the former 3000ms/2000 parses) without widening it.
+    iterations = 200
+    budget_ms = 300.0  # 1.5ms per parse x 200; measured local ~0.2ms per parse
     payload = {
         "observations": [_observation(date=f"2024-{(i % 12) + 1:02d}-01") for i in range(50)]
     }
@@ -223,7 +226,9 @@ def test_parse_fred_observations_meets_throughput_budget(perf_budget: PerfBudget
             )
             assert len(observations) == 50
 
-    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, label="fred_parse_throughput")
+    sample = perf_budget.assert_within(
+        _run, budget_ms=budget_ms, n=15, warmup=2, label="fred_parse_throughput"
+    )
     print(
         f"[RD-13 fred] {iterations} parses x 50 obs in {sample.cpu_ms:.1f}ms (budget<{budget_ms}ms)"
     )
