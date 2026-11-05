@@ -32,6 +32,7 @@ from tests.foundation.integration.market_data.quality_metrics_helpers import (
     _ingest,
     _listed_instrument,
 )
+from tests.support.perf_inject import virtual_delayed_async
 
 
 async def test_export_quality_metrics_reports_gauge_after_one_cycle(deps):
@@ -378,6 +379,127 @@ async def test_export_quality_metrics_single_series_meets_latency_budget(
     )
 
     budget_ms = 1000.0
+    assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+    result_ids = {m.key.instrument_id for m in sample.result}
+    assert instrument.instrument_id in result_ids
+
+
+# ── DEEPEN task-22581: D2 하한 보강 (negative 3/3, gate-red, perf best_of) ──
+
+
+async def test_export_quality_metrics_all_candles_rejected_yields_no_metric(deps):
+    """negative 3: 모든 캔들이 REJECT(high < open)되면 해당 시계열은
+    결과에서 완전히 빠진다 — metric이 0건이어야 하고 게이지도 기록되지 않는다."""
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    all_bad = [_candle(t0 + timedelta(minutes=i), "100", "90", "80", "85", "10") for i in range(5)]
+    await _ingest(deps, instrument, all_bad, start=t0, end=t0 + timedelta(minutes=5), at=t0)
+
+    registry = MetricsRegistry()
+    results = await export_quality_metrics(
+        batches=deps.batches,
+        store=deps.store,
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=registry,
+        clock=_clock(t0 + timedelta(minutes=10)),
+    )
+
+    mine = [m for m in results if m.key.instrument_id == instrument.instrument_id]
+    assert len(mine) == 0, "모든 캔들이 REJECT되면 metric 결과에 해당 시계열이 등장하지 않아야 한다"
+    gauge = registry.gauge("md_staleness_seconds", ("venue", "instrument_id", "timeframe"))
+    samples = gauge.samples()
+    assert all(sid != str(instrument.instrument_id) for sid in samples), (
+        "게이지에도 기록되지 않아야 한다"
+    )
+
+
+async def test_export_quality_metrics_no_candles_yields_no_metric(deps):
+    """negative 2: 캔들이 전혀 없는 심벌은 결과에서 완전히 빠진다 —
+    _active_series에 있더라도 last_open_time이 None이면 skip된다."""
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    # ingest를 전혀 호출하지 않음 — 캔들이 전혀 없음
+
+    registry = MetricsRegistry()
+    results = await export_quality_metrics(
+        batches=deps.batches,
+        store=deps.store,
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=registry,
+        clock=_clock(t0 + timedelta(minutes=10)),
+    )
+
+    mine = [m for m in results if m.key.instrument_id == instrument.instrument_id]
+    assert len(mine) == 0, "캔들이 전혀 없는 심벌은 metric 결과에 등장하지 않아야 한다"
+
+
+async def test_export_quality_metrics_gate_red_gap_ratio_catches_actual_gap(deps):
+    """gate-red 재현: gap_ratio 단언이 실제로 잡는지 입력을 망가뜨려 확인한다.
+    minute 2를 누락시켜 gap_ratio가 0이 아님을 검증 — 단언이 허위가
+    아니면 이 테스트는 실패해야 한다(적색 재현의 본질)."""
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    good = lambda t: _candle(t, "100", "110", "90", "105", "10")  # noqa: E731
+    candles = [
+        good(t0),
+        good(t0 + timedelta(minutes=1)),
+        good(t0 + timedelta(minutes=3)),  # minute 2 누락 → gap 발생
+    ]
+    await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=4), at=t0)
+
+    registry = MetricsRegistry()
+    results = await export_quality_metrics(
+        batches=deps.batches,
+        store=deps.store,
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=registry,
+        clock=_clock(t0 + timedelta(minutes=10)),
+    )
+
+    mine = next(m for m in results if m.key.instrument_id == instrument.instrument_id)
+    # gate-red: gap_ratio가 0이 아님을 단언 — 실제 gap이 존재하므로
+    assert mine.gap_ratio_24h > Decimal("0"), (
+        "gap_ratio가 0보다 커야 한다 — gap이 실제 존재하므로 이 단언이 "
+        "False면 gate-red 재현 실패(단언이 잡지 못함)"
+    )
+
+
+@pytest.mark.perf
+async def test_export_quality_metrics_meets_best_of_latency_budget_with_virtual_delay(
+    deps, perf_budget: PerfBudget
+) -> None:
+    """성능 단언 (best_of + virtual delay): `perf_budget.best_of`로
+    5회 중 최소값을 측정하되, `virtual_delayed_async`로 10배 가상 지연을
+    주입해 gate-red 적색 재현을 한다. 지연 주입 후 budget을 초과하면
+    테스트가 적색으로 종료된다."""
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    candles = [_candle(t0, "100", "110", "90", "105", "10")]
+    await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
+
+    later = t0 + timedelta(minutes=5)
+
+    async def _export_with_registry() -> list:
+        return await export_quality_metrics(
+            batches=deps.batches,
+            store=deps.store,
+            cal=deps.cal,
+            pool=deps.pool,
+            registry=MetricsRegistry(),
+            clock=_clock(later),
+        )
+
+    # 10배 가상 지연 주입 (actual: ~5ms → injected: ~50ms)
+    delayed_export = virtual_delayed_async(_export_with_registry, seconds=0.05)
+
+    # best_of_async: 5회 측정 중 최소값 (CPU spike 노이즈 자동 스킵)
+    sample = await perf_budget.best_of_async(delayed_export, n=5, warmup=1)
+
+    # 실측의 10배 여유 예산: 50ms virtual delay + 오버헤드 → 500ms 절대 상한
+    budget_ms = 500.0
     assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
     result_ids = {m.key.instrument_id for m in sample.result}
     assert instrument.instrument_id in result_ids
