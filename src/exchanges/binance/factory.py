@@ -7,8 +7,7 @@ calls `register_exchange_adapter_factory("binance", ...)` at import time;
 `src/exchanges/factory.py`'s `if exchange == ...` branches are untouched.
 
 Unsupported in this leaf (fail-closed via `_unsupported`, never an empty
-success): `get_balance`, `get_positions`, `subscribe_ticker_stream` -- no
-Binance account-balance/WS mixin exists yet.
+success): `subscribe_ticker_stream` -- no Binance WS mixin is wired yet.
 """
 
 from __future__ import annotations
@@ -64,12 +63,6 @@ class BinanceAdapter(
         """Wires the `binance/venue_profile.py` constant -- the ABC default
         raises `UnsupportedCapabilityError`, so this override is required."""
         return BINANCE_SPOT_PROFILE
-
-    async def get_balance(self, asset: str | None = None) -> Any:  # noqa: ARG002
-        raise self._unsupported("get_balance")
-
-    async def get_positions(self, symbol: str | None = None) -> Any:  # noqa: ARG002
-        raise self._unsupported("get_positions")
 
     async def subscribe_ticker_stream(self, symbol: str, callback: Any) -> None:  # noqa: ARG002
         raise self._unsupported("subscribe_ticker_stream")
