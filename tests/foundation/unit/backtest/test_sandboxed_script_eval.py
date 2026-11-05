@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 
 import psutil
@@ -377,3 +378,117 @@ def test_process_tree_assertion_detects_disabled_kill(monkeypatch: pytest.Monkey
             except psutil.NoSuchProcess:
                 pass
         psutil.wait_procs(children, timeout=5)
+
+
+# ── Negative tests for BrokenProcessPool classification ──────────────────
+
+
+def test_broken_process_pool_raises_crash_not_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BrokenProcessPool without `exceeded` set → ScriptSandboxCrashError.
+
+    We patch `future.result` to raise BrokenProcessPool directly, simulating
+    a worker that died without the RSS watcher having time to set `exceeded`.
+    """
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+
+    class BrokenFuture(Future):
+        def result(self, timeout=None):
+            raise BrokenProcessPool("worker died")
+
+        def cancel(self):
+            return False
+
+        def cancelled(self):
+            return False
+
+        def done(self):
+            return True
+
+        def exception(self, timeout=None):
+            return BrokenProcessPool("worker died")
+
+    # Patch ProcessPoolExecutor.submit to return our broken future.
+    import concurrent.futures
+
+    def _patched_submit(self, fn, /, *args, **kwargs):
+        return BrokenFuture()
+
+    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "submit", _patched_submit)
+    # No real process will be created, so pid capture must return None quickly.
+    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **kw: None)
+
+    with pytest.raises(ScriptSandboxCrashError, match="worker died"):
+        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
+
+
+def test_broken_process_pool_with_exceeded_raises_memory_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BrokenProcessPool after watcher killed child → ScriptSandboxMemoryExceededError.
+
+    We patch `_watch_rss` to set `exceeded` immediately, then patch the future
+    to raise BrokenProcessPool. This simulates the watcher killing the child
+    for RSS violation before the main thread reads the result.
+    """
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+
+    class BrokenFuture(Future):
+        def __init__(self, exceeded_event: threading.Event):
+            super().__init__()
+            self._exceeded = exceeded_event
+
+        def result(self, timeout=None):
+            raise BrokenProcessPool("worker died")
+
+        def cancel(self):
+            return False
+
+        def cancelled(self):
+            return False
+
+        def done(self):
+            return True
+
+        def exception(self, timeout=None):
+            return BrokenProcessPool("worker died")
+
+    # Patch _watch_rss to set exceeded immediately.
+    def _patched_watch(pid, limit_mb, stop, exceeded):
+        exceeded.set()  # Pretend RSS was exceeded
+
+    monkeypatch.setattr(sandboxed_script_eval, "_watch_rss", _patched_watch)
+
+    # Patch submit to return a BrokenFuture.
+    import concurrent.futures
+
+    def _patched_submit(self, fn, /, *args, **kwargs):
+        fut = BrokenFuture(threading.Event())
+        return fut
+
+    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "submit", _patched_submit)
+    # No real process will be created, so pid capture must return None quickly.
+    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **kw: None)
+
+    with pytest.raises(ScriptSandboxMemoryExceededError):
+        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
+
+
+def test_start_method_is_spawn() -> None:
+    """_MP_START_METHOD constant must be 'spawn' so tests can verify it."""
+    assert sandboxed_script_eval._MP_START_METHOD == "spawn"
+
+
+def test_sandbox_passes_with_absolute_rss_under_limit() -> None:
+    """Absolute RSS: a tiny script should pass when its RSS stays below ceiling."""
+    ir = lower_program(parse(_SAMPLE))
+    direct = _execute_ir(ir, bar_count=5, inputs={"close": _CLOSE})
+    sandboxed = run_sandboxed(
+        _execute_ir,
+        ir,
+        bar_count=5,
+        inputs={"close": _CLOSE},
+        limits=SandboxLimits(wallclock_sec=120, rss_mb=512),
+    )
+    assert sandboxed == direct
