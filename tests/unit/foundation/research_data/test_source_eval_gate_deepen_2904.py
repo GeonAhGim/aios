@@ -147,11 +147,13 @@ def test_perf_parse_eval_markdown_under_budget(eval_text: str, perf_budget: Perf
     # budget=2.0s → 2000ms for 1000 parses; batch=10 so total CPU time
     # exceeds process_time tick (15.6ms) and quantisation error drops to
     # ~1.6ms per call (15.6/10).
+    # best_of_async(여러 번 중 최소)로 CI 병렬 CPU 경합 spike를 피한다
+    # (task-22049: pytest_perf_parallel_2 false red).
     def parse_100() -> None:
         for _ in range(100):
             assert_source_eval_gate(eval_text)
 
-    sample = perf_budget.sample(parse_100, batch=10)  # 10×100=1000 total
+    sample = perf_budget.best_of(parse_100, n=5, batch=10)  # 5×10×100=5000 total
     budget_ms = 200.0  # 2000ms / 10 batches = 200ms per parse_100 (100 inner calls)
     print(
         f"[RD-1 source_eval_gate] 1000 parses cpu={sample.cpu_ms:.3f}ms (budget<{budget_ms:.3f}ms)"
@@ -190,7 +192,8 @@ def test_perf_parse_eval_markdown_budget_injection_fails_red(
         for _ in range(100):
             mod.assert_source_eval_gate(eval_text)
 
-    sample = perf_budget.sample(parse_100, batch=10)
+    sample = perf_budget.best_of(parse_100, n=5, batch=10)  # best_of: injection이 예산을
+    # 넘는지 검증 — best_of(최소)라도 budget을 넘으면 민감도 확보.
     budget_ms = 200.0  # 2000ms / 10 batches = 200ms per parse_100 (100 inner calls)
     assert sample.cpu_ms >= budget_ms, (
         f"Injection test failed: cpu={sample.cpu_ms:.3f}ms did not exceed "
