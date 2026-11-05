@@ -151,8 +151,11 @@ def test_serialize_cpu_measurement_converges_with_batch(perf_budget: PerfBudget)
     payload = {"amount": Decimal("1.99")}
 
     # batch=1 — 양자화tick보다 빠르므로 0ms 수렴 (정량 단언)
-    single_sample = perf_budget.sample(
+    # 단일 샘플은 tick 경계에 걸리면 15.6ms로 읽히므로 best-of-N 최소값을 쓴다.
+    single_sample = perf_budget.best_of(
         lambda: json.dumps(payload, cls=DecimalSafeEncoder),
+        n=20,
+        warmup=1,
         batch=1,
     )
     assert single_sample.cpu_ms < 1.0, (
