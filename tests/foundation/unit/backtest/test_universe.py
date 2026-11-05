@@ -17,6 +17,11 @@ from src.foundation.backtest.domain.universe import (
 )
 from tests.conftest import PerfBudget
 
+# Windows `time.process_time()` has ~15.6ms (64Hz) resolution: with batch=1 samples
+# read 0 or 15.625ms only and p95 breaches the 10ms budget. Batching 50 calls per
+# sample shrinks the per-call quantisation error to ~0.3ms.
+_PERF_BATCH = 50
+
 _UTC = UTC
 _AS_OF = datetime(2026, 3, 1, tzinfo=_UTC)
 _LISTED_FROM = datetime(2026, 1, 1, tzinfo=_UTC)
@@ -159,7 +164,7 @@ def test_is_member_p95_latency_within_budget_for_large_snapshot(
     target_symbol = "SYM04999"  # 선형 탐색 최악 경로(리스트 끝)
 
     samples = perf_budget.samples(
-        lambda: is_member(snap, target_symbol, _LISTED_FROM), n=200, batch=1
+        lambda: is_member(snap, target_symbol, _LISTED_FROM), n=200, batch=_PERF_BATCH
     )
     cpu_ms_values = [s.cpu_ms for s in samples]
     cpu_ms_values.sort()
@@ -192,7 +197,7 @@ def test_perf_budget_catches_10x_delay_injection(
 
     def _fake_process_time() -> float:
         nonlocal _fake_time
-        _fake_time += 0.1  # 100ms = 0.1s per call
+        _fake_time += _PERF_BATCH * 0.1  # batch=50 -> 5.0s per sample = 100ms per call
         return _fake_time
 
     monkeypatch.setattr("time.process_time", _fake_process_time)
@@ -207,7 +212,7 @@ def test_perf_budget_catches_10x_delay_injection(
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
     with pytest.raises(AssertionError, match=r"p95=\d+\.\d+ms exceeds 10ms budget"):
         samples = perf_budget.samples(
-            lambda: is_member(snap, target_symbol, _LISTED_FROM), n=200, batch=1
+            lambda: is_member(snap, target_symbol, _LISTED_FROM), n=200, batch=_PERF_BATCH
         )
         cpu_ms_values = [s.cpu_ms for s in samples]
         cpu_ms_values.sort()
