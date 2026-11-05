@@ -34,11 +34,14 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from concurrent.futures import process as _concurrent_process
 from dataclasses import dataclass
 from multiprocessing import get_context
 from typing import Any
 
 import psutil
+
+_MP_START_METHOD: str = "spawn"
 
 DEFAULT_WALLCLOCK_LIMIT_SEC: float = float(os.environ.get("SCRIPT_WALLCLOCK_LIMIT_SEC", "30"))
 DEFAULT_RSS_LIMIT_MB: float = float(os.environ.get("SCRIPT_RSS_LIMIT_MB", "512"))
@@ -51,7 +54,6 @@ _RSS_POLL_INTERVAL_SEC = 0.02
 # in this file); without this, a pid that never registered within
 # `wallclock_sec` was permanently un-killable (task-8928).
 _PID_CAPTURE_GRACE_SEC = 10.0
-
 
 
 class ScriptSandboxTimeoutError(Exception):
@@ -90,7 +92,7 @@ def run_sandboxed[T](
     under `limits`. `fn` and its arguments/return value must be picklable
     (standard `multiprocessing` constraint)."""
     own_pid = os.getpid()
-    executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+    executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context(_MP_START_METHOD))
     try:
         # Executor construction starts the shared resource tracker on POSIX.
         # Snapshot before submit starts our worker so shared helpers survive.
@@ -133,6 +135,17 @@ def run_sandboxed[T](
             raise ScriptSandboxTimeoutError(
                 f"script sandbox exceeded wall-clock limit ({limits.wallclock_sec}s)"
             ) from None
+        except _concurrent_process.BrokenProcessPool as exc:
+            # The worker process died (crash, OOM kill, killed by watcher).
+            # The watcher sets `exceeded` before calling _kill_pid, so if it
+            # is already set the child was killed for RSS violation.
+            if exceeded.is_set():
+                raise ScriptSandboxMemoryExceededError(
+                    f"script sandbox exceeded RSS limit ({limits.rss_mb}MB)"
+                ) from exc
+            raise ScriptSandboxCrashError(
+                f"script sandbox child process died unexpectedly: {exc}"
+            ) from exc
         except Exception as exc:
             # The child may have just been killed by the watcher; give it a
             # brief window to flip `exceeded` before we classify the failure
@@ -206,9 +219,9 @@ def _watch_rss(
 ) -> None:
     """Monitor child process RSS and kill if ``limit_mb`` is exceeded.
 
-    Uses delta-based comparison (RSS increase from baseline) so that a fresh spawn
-    worker on Linux/fork doesn't get killed immediately due to inheriting the parent's
-    RSS footprint.
+    Uses absolute RSS comparison. With the ``spawn`` start method the child
+    does not inherit the parent's RSS, so its baseline (~100 MB with the DSL
+    runtime) is well below the default 512 MB ceiling.
     """
     if pid is None:
         return
@@ -217,17 +230,12 @@ def _watch_rss(
         process = psutil.Process(pid)
     except psutil.NoSuchProcess:
         return
-    baseline_rss: int | None = None
     while not stop.is_set():
         try:
             rss = process.memory_info().rss
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return
-        if baseline_rss is None:
-            baseline_rss = rss
-            stop.wait(_RSS_POLL_INTERVAL_SEC)
-            continue
-        if (rss - baseline_rss) > limit_bytes:
+        if rss > limit_bytes:
             exceeded.set()
             _kill_pid(pid)
             return
