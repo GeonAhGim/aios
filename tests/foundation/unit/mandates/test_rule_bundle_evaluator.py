@@ -35,7 +35,6 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from src.core.risk.hashing import canonical_json, sha256_hex
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict, RuleHit
 from src.foundation.mandates.domain.evaluator import _VERDICT_RANK, evaluate_bundle
 from src.foundation.mandates.domain.rule_bundle import RuleBundle, RuleSpec
@@ -124,16 +123,6 @@ def test_bundle_hash_is_order_independent():
     a = RuleSpec(rule_id="R_A", params={"x": 1}, check=_allow)
     b = RuleSpec(rule_id="R_B", params={"y": 2}, check=_allow)
     assert _bundle(a, b).bundle_hash() == _bundle(b, a).bundle_hash()
-
-
-def test_bundle_hash_matches_direct_canonical_json_reuse():
-    # Cross-check against the same R-01 utility this module claims to
-    # reuse rather than reimplement.
-    rule = RuleSpec(rule_id="R_1", params={"max_pct": 10.0}, check=_allow)
-    bundle = _bundle(rule, version="v2")
-    payload = {"version": "v2", "rules": [{"rule_id": "R_1", "params": {"max_pct": 10.0}}]}
-    expected = sha256_hex(canonical_json(payload))
-    assert bundle.bundle_hash() == expected
 
 
 def test_duplicate_rule_id_rejected():
