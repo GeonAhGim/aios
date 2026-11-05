@@ -90,6 +90,95 @@ async def test_export_quality_metrics_isolates_one_symbol_failure(deps):
     assert healthy_instrument.instrument_id in result_ids, "나머지 심볼은 차단되지 않는다"
 
 
+async def _two_series_with_flaky_first(deps):
+    boom = await _listed_instrument(deps)
+    healthy = await _listed_instrument(deps)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    candles = [_candle(t0, "100", "110", "90", "105", "10")]
+    for instrument in (boom, healthy):
+        await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=1), at=t0)
+    return boom, healthy, t0
+
+
+async def test_isolation_negative_failed_symbol_emits_no_gauge_sample(deps):
+    """음성: 실패한 심볼은 게이지 샘플도 남기지 않고, 정상 심볼은 남긴다."""
+    boom, healthy, t0 = await _two_series_with_flaky_first(deps)
+    registry = MetricsRegistry()
+    await export_quality_metrics(
+        batches=deps.batches,
+        store=_FlakyCandleStore(deps.store, boom.instrument_id),
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=registry,
+        clock=_clock(t0 + timedelta(minutes=5)),
+    )
+    samples = registry.gauge(
+        "md_staleness_seconds", ("venue", "instrument_id", "timeframe")
+    ).samples()
+    assert ("BITGET", str(boom.instrument_id), "1m") not in samples
+    assert ("BITGET", str(healthy.instrument_id), "1m") in samples
+
+
+async def test_isolation_negative_healthy_symbol_metrics_unaffected_by_failure(deps):
+    """음성: 이웃 심볼 실패가 정상 심볼의 staleness 값을 오염시키지 않는다."""
+    boom, healthy, t0 = await _two_series_with_flaky_first(deps)
+    later = t0 + timedelta(minutes=5)
+    results = await export_quality_metrics(
+        batches=deps.batches,
+        store=_FlakyCandleStore(deps.store, boom.instrument_id),
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=MetricsRegistry(),
+        clock=_clock(later),
+    )
+    mine = [m for m in results if m.key.instrument_id == healthy.instrument_id]
+    assert len(mine) == 1
+    assert mine[0].staleness_s == int((later - t0).total_seconds())
+
+
+async def test_isolation_negative_all_symbols_failing_yields_no_results(deps):
+    """음성: 모든 심볼이 실패해도 크래시 없이 해당 심볼들이 전부 빠진다."""
+    boom, healthy, t0 = await _two_series_with_flaky_first(deps)
+
+    class _AlwaysBoom(_FlakyCandleStore):
+        async def last_open_time(self, conn, key):
+            raise RuntimeError("injected store failure")
+
+    results = await export_quality_metrics(
+        batches=deps.batches,
+        store=_AlwaysBoom(deps.store, boom.instrument_id),
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=MetricsRegistry(),
+        clock=_clock(t0 + timedelta(minutes=5)),
+    )
+    ids = {m.key.instrument_id for m in results}
+    assert boom.instrument_id not in ids
+    assert healthy.instrument_id not in ids
+
+
+async def test_isolation_gate_red_assertion_catches_blocked_healthy_symbol(deps):
+    """게이트 적색 재현: 격리가 깨져 정상 심볼까지 빠지는 입력(두 심볼 모두 실패)에서는
+    본 테스트와 같은 `healthy in result_ids` 단언이 실제로 실패해야 한다."""
+    boom, healthy, t0 = await _two_series_with_flaky_first(deps)
+
+    class _AlwaysBoom(_FlakyCandleStore):
+        async def last_open_time(self, conn, key):
+            raise RuntimeError("injected store failure")
+
+    results = await export_quality_metrics(
+        batches=deps.batches,
+        store=_AlwaysBoom(deps.store, boom.instrument_id),
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=MetricsRegistry(),
+        clock=_clock(t0 + timedelta(minutes=5)),
+    )
+    result_ids = {m.key.instrument_id for m in results}
+    with pytest.raises(AssertionError):
+        assert healthy.instrument_id in result_ids, "나머지 심볼은 차단되지 않는다"
+
+
 async def test_export_quality_metrics_computes_gap_and_reject_ratio(deps):
     instrument = await _listed_instrument(deps)
     t0 = datetime.now(UTC).replace(second=0, microsecond=0)
