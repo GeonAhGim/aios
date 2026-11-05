@@ -27,6 +27,7 @@ from src.core.script.artifact.hash import script_hash
 from src.core.script.grammar.ast import GRAMMAR_VERSION
 from src.core.script.ir.ops import IR_VERSION, DeclareInput, IRProgram, Plot
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 REG = "r" * 64
 
@@ -250,31 +251,19 @@ def test_import_linter_core_no_io_catches_dsl_indicator_foundation_import_regres
 
 
 @pytest.mark.perf
-def test_perf_assertion_catches_10x_cpu_delay_injection(
-    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
-    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
-    예산(300ms)을 초과하는 CPU 시간을 가장하면 `assert_within`가
-    AssertionError로 적색이 돼야 한다.
-
-    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
-    검증한다. CPU 예산이므로 sleep이 아닌 process_time 교체를 사용한다.
+def test_perf_assertion_catches_10x_cpu_delay_injection(perf_budget: PerfBudget) -> None:
+    """게이트 적색 재현(D2): 같은 예산 단언(`assert_within`, 300ms)이 예산의 10배
+    가상 CPU 지연(3s)에서 적색이 되는지 검증한다. `virtual_delayed_sync`는
+    측정치에 지연을 더할 뿐 실제 sleep/busy-wait를 하지 않는다. 예산·단언은
+    정상 입력 테스트와 동일하며 완화하지 않는다.
     """
     tenant_id = uuid.uuid4()
     budget_ms = 300.0
 
-    _fake_time = 0.0
-
-    def _fake_process_time() -> float:
-        nonlocal _fake_time
-        _fake_time += 500.0  # 500ms per call > 300ms budget
-        return _fake_time
-
-    monkeypatch.setattr("time.process_time", _fake_process_time)
-
     def _compile() -> None:
         compile_script_indicator("perf", VALID_SOURCE, tenant_id=tenant_id, registry_version=REG)
 
+    slowed = virtual_delayed_sync(_compile, budget_ms * 10 / 1000.0)
+
     with pytest.raises(AssertionError):
-        perf_budget.assert_within(_compile, budget_ms=budget_ms, batch=8)
+        perf_budget.assert_within(slowed, budget_ms=budget_ms, batch=8)
