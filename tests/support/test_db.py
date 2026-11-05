@@ -347,7 +347,10 @@ async def test_ensure_worker_database_clone_meets_latency_budget(perf_budget: Pe
     다른 세션의 `aios_test_*` 목록을 오염시키지 않는다.
     """
     template_url = os.environ["TEST_DATABASE_URL"]
-    worker_id = "permtest"
+    # Use xdist worker name for uniqueness in parallel CI; falls back to "permtest"
+    # when run standalone (no xdist) — avoids UniqueViolationError collisions.
+    xdist_worker = os.environ.get("PYTEST_XDIST_WORKER", "master")
+    worker_id = f"permtest_{xdist_worker}" if xdist_worker != "master" else "permtest"
     budget_ms = 10.0 * 1000
 
     # Global virtual-delay ledger must be cleared before measurement so that
