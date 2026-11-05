@@ -46,6 +46,7 @@ _EXCLUDE_DIR_NAMES = frozenset(
         ".venv",
         ".lock-venv",
         "venv",
+        "test-venv313",
         "__pycache__",
         ".hypothesis",
         ".mypy_cache",
