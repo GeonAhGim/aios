@@ -120,6 +120,63 @@ async def test_export_quality_metrics_computes_gap_and_reject_ratio(deps):
     assert mine.reject_ratio_24h == Decimal(1) / Decimal(6)
 
 
+async def _gap_reject_metric(deps, offsets, bad_offsets=()):
+    """Ingest 1m candles at `offsets` (bad_offsets get high<open) over a 7-minute
+    window and return the exported metric for that instrument."""
+    instrument = await _listed_instrument(deps)
+    t0 = datetime.now(UTC).replace(second=0, microsecond=0)
+    candles = [
+        _candle(t0 + timedelta(minutes=m), "100", "90", "80", "85", "10")
+        if m in bad_offsets
+        else _candle(t0 + timedelta(minutes=m), "100", "110", "90", "105", "10")
+        for m in offsets
+    ]
+    await _ingest(deps, instrument, candles, start=t0, end=t0 + timedelta(minutes=7), at=t0)
+    results = await export_quality_metrics(
+        batches=deps.batches,
+        store=deps.store,
+        cal=deps.cal,
+        pool=deps.pool,
+        registry=MetricsRegistry(),
+        clock=_clock(t0 + timedelta(minutes=10)),
+    )
+    return next(m for m in results if m.key.instrument_id == instrument.instrument_id)
+
+
+async def test_gap_and_reject_ratio_are_zero_for_contiguous_clean_candles(deps):
+    """Negative: no gap and no reject -> both ratios exactly 0, not the 1/7, 1/6
+    values the mixed-defect scenario produces."""
+    metric = await _gap_reject_metric(deps, range(7))
+    assert metric.gap_ratio_24h == Decimal(0)
+    assert metric.reject_ratio_24h == Decimal(0)
+
+
+async def test_gap_ratio_ignores_rejected_candle_when_slot_is_present(deps):
+    """Negative: a rejected candle is a reject, not a gap -- gap ratio must not
+    count its slot (1 rejected, 0 missing)."""
+    metric = await _gap_reject_metric(deps, range(7), bad_offsets={4})
+    assert metric.gap_ratio_24h != Decimal(1) / Decimal(7)
+    assert metric.reject_ratio_24h == Decimal(1) / Decimal(7)
+
+
+async def test_reject_ratio_not_inflated_by_missing_candles(deps):
+    """Negative: two missing slots and no bad candle -> reject ratio stays 0."""
+    metric = await _gap_reject_metric(deps, [0, 1, 2, 3, 6])
+    assert metric.reject_ratio_24h == Decimal(0)
+    assert metric.gap_ratio_24h == Decimal(2) / Decimal(7)
+
+
+async def test_gap_ratio_assertion_detects_broken_input_red_gate(deps):
+    """Gate-red repro: with the mixed-defect scenario of
+    test_export_quality_metrics_computes_gap_and_reject_ratio broken (one more
+    slot dropped), the original 1/7 gap assertion must fail -- proving it bites."""
+    metric = await _gap_reject_metric(deps, [0, 1, 2, 3, 4, 6], bad_offsets={4})
+    broken = await _gap_reject_metric(deps, [0, 1, 2, 3, 4], bad_offsets={4})
+    assert metric.gap_ratio_24h == Decimal(1) / Decimal(7)
+    with pytest.raises(AssertionError):
+        assert broken.gap_ratio_24h == Decimal(1) / Decimal(7)
+
+
 async def test_export_quality_metrics_skips_series_with_no_stored_candles(deps):
     """REJECT 비율 > 20%면 배치 전체가 QUARANTINE되어 `md_ingest_batch`는
     생기지만 `md_candle`은 비어 있다(§4.1 "부분 저장 금지") — `_active_series`는

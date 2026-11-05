@@ -17,7 +17,7 @@ import hashlib
 from datetime import datetime
 from typing import ClassVar
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, PrivateAttr, field_validator
 
 __all__ = [
     "SurvivorshipUnknownError",
@@ -74,11 +74,20 @@ class UniverseSnapshot(BaseModel):
     as_of: datetime
     members: list[UniverseMember]
     snapshot_hash: str
+    # O(1) symbol index built once at init; keeps `members` (serialization and
+    # hash input) untouched while is_member() avoids a per-call linear scan.
+    _index: dict[str, UniverseMember] = PrivateAttr(default_factory=dict)
 
     @field_validator("as_of")
     @classmethod
     def _as_of_tz_aware(cls, v: datetime) -> datetime:
         return _require_tz_aware(v, name="as_of")
+
+    def model_post_init(self, __context: object) -> None:
+        index: dict[str, UniverseMember] = {}
+        for m in self.members:
+            index.setdefault(m.symbol, m)  # first occurrence wins, as the old scan did
+        self._index = index
 
 
 class SurvivorshipUnknownError(ValueError):
@@ -102,7 +111,7 @@ def is_member(u: UniverseSnapshot, symbol: str, at: datetime) -> bool:
     _require_tz_aware(at, name="at")
     if at > u.as_of:
         raise SurvivorshipUnknownError(symbol=symbol, at=at)
-    member = next((m for m in u.members if m.symbol == symbol), None)
+    member = u._index.get(symbol)
     if member is None:
         raise SurvivorshipUnknownError(symbol=symbol, at=at)
     if at < member.listed_from:
