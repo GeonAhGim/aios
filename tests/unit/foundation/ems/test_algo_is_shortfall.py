@@ -369,7 +369,15 @@ def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count(
     per-slice O(n) loop, weight computation, or the guard calls into
     something O(n^2) would blow well past this on 500 slices. task-7434:
     measured via the shared process_time-based perf_budget fixture instead
-    of raw wall-clock perf_counter()."""
+    of raw wall-clock perf_counter().
+
+    Global virtual-delay ledger must be cleared before measurement so that
+    prior tests using ``virtual_delayed_sync`` in the same xdist worker
+    process do not inflate ``cpu_ms`` readings (task-22280).
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
     parent = _parent(
         qty=Decimal("1000000"),
         algo=_algo(
