@@ -8,7 +8,6 @@ performance assertion 1, gate-red reproduction 1, plus the AI-21 DoD
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -26,20 +25,7 @@ from src.core.indicators.catalog.ml import (
 )
 from src.core.indicators.registry import IndicatorError, IndicatorRegistry
 from tests.support.perf_budget import PerfBudget
-
-
-def _delayed_scorer(base_scorer: MlScorer, delay_us: float) -> MlScorer:
-    """Scorer that burns CPU for `delay_us` µs per call to inject
-    budget-violating latency (measurable by time.process_time)."""
-
-    def scored(features: Mapping[str, float]) -> float:
-        # Busy-wait in CPU-time-visible loop (process_time counts this).
-        target = time.process_time() + delay_us / 1_000_000
-        while time.process_time() < target:
-            pass
-        return base_scorer(features)
-
-    return scored
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def _linear_scorer(weights: dict[str, float], bias: float = 0.0) -> MlScorer:
@@ -169,47 +155,46 @@ def test_gate_red_a_scorer_with_hidden_state_is_caught_by_equivalence_check() ->
 # --- numeric performance assertion ---
 
 
+_PER_ROW_BUDGET_MS = 0.050  # 50 us per incremental row
+
+
+def _per_row_cpu_ms(perf_budget: PerfBudget, scorer: MlScorer, n: int) -> float:
+    """Best-of-N per-row CPU ms of the incremental path over `n` rows.
+
+    One timed call covers all `n` rows and is repeated `batch` times, so the
+    Windows ~15.6 ms process_time tick cannot collapse the reading to 0.
+    """
+    columns = _columns(n, seed=1)
+    spec = build_ml_indicator_spec("momentum-lgbm", ["rsi_14", "atr_14"])
+    arrays = {k: np.asarray(v, dtype=np.float64) for k, v in columns.items()}
+    batch = 4
+
+    def _pass() -> float:
+        total = 0.0
+        for row_idx in range(n):
+            bar = {key: float(arrays[key][row_idx]) for key in spec.inputs}
+            total += scorer(bar)
+        return total
+
+    sample = perf_budget.best_of(_pass, n=5, warmup=1, batch=batch)
+    return sample.cpu_ms / n
+
+
 @pytest.mark.perf
 def test_compute_ml_signal_latency_p99_within_budget(
     perf_budget: PerfBudget,
 ) -> None:
-    """Mirrors `tests/unit/core/indicators/test_engine_equivalence.py::
-    test_incremental_update_latency_p99_within_streaming_budget`'s approach:
-    5,000 rows through both compute paths, per-row latency measured for the
-    incremental path (the one a live/replay loop actually calls once per
-    bar), p99 asserted against a budget with wide CI headroom. A linear
-    scorer over 2 features is a handful of float multiplies -- local
-    measurement is ~1-2us/row; 50us leaves >25x headroom.
-
-    Uses `perf_budget.sample(batch=N)` to amortise the ~15.6 ms process_time
-    tick so that total time exceeds one tick and per-call estimate is stable.
-    Budget is expressed in ms to match `PerfSample.cpu_ms` units.
-    """
+    """5,000 rows through the incremental path (the one a live/replay loop
+    calls once per bar); per-row latency asserted against a 50 us budget. A
+    linear scorer over 2 features is a handful of float multiplies -- local
+    measurement is ~1-2us/row, leaving >25x headroom. Measured with
+    `perf_budget.best_of` so one quantized tick cannot flip the result."""
     n = 5000
     columns = _columns(n, seed=1)
-    spec = build_ml_indicator_spec("momentum-lgbm", ["rsi_14", "atr_14"])
     scorer = _linear_scorer({"rsi_14": 1.0, "atr_14": 2.0}, bias=0.5)
-    arrays = {k: np.asarray(v, dtype=np.float64) for k, v in columns.items()}
-    # 50 µs = 0.050 ms budget (same as original 50e-6 s)
-    budget_ms = 0.050
-    batch = 1000  # total window ~15-50 ms > one 15.6 ms tick
-    samples_ms: list[float] = []
-    for _ in range(n // batch):
-
-        def _batch_call() -> float:
-            for j in range(batch):
-                row_idx = (len(samples_ms) * batch + j) % n
-                bar = {key: float(arrays[key][row_idx]) for key in spec.inputs}
-                scorer(bar)
-            return 0.0
-
-        result = perf_budget.sample(_batch_call, batch=1)
-        samples_ms.append(result.cpu_ms / batch)
-    samples_ms.sort()
-    p99_idx = max(0, int(len(samples_ms) * 0.99) - 1)
-    p99_ms = samples_ms[p99_idx]
-    print(f"[AI-21 ml catalog] n={n} p99={p99_ms * 1000:.2f}us budget<{budget_ms * 1000:.0f}us")
-    assert p99_ms < budget_ms
+    per_row_ms = _per_row_cpu_ms(perf_budget, scorer, n)
+    print(f"[AI-21 ml catalog] n={n} per_row={per_row_ms * 1000:.2f}us budget<50us")
+    assert per_row_ms < _PER_ROW_BUDGET_MS
     worst_case = check_ml_signal_equivalence("momentum-lgbm", ["rsi_14", "atr_14"], columns, scorer)
     assert 0.0 <= worst_case <= EQUIVALENCE_TOLERANCE
 
@@ -218,33 +203,14 @@ def test_compute_ml_signal_latency_p99_within_budget(
 def test_compute_ml_signal_latency_budget_violation_detected(
     perf_budget: PerfBudget,
 ) -> None:
-    """Verify detection power: inject 10× budget delay (500 µs > 50 µs) and
-    assert the test turns red. Then restore and confirm green."""
-    n = 500
-    columns = _columns(n, seed=1)
-    spec = build_ml_indicator_spec("momentum-lgbm", ["rsi_14", "atr_14"])
+    """Gate-red repro: inject a virtual 10x-budget (500 us) delay per scorer
+    call -- same measurement and assertion as the green test -- and require
+    the budget to be exceeded. No real sleep/spin."""
+    reset_virtual_totals()
     base_scorer = _linear_scorer({"rsi_14": 1.0, "atr_14": 2.0}, bias=0.5)
-    delayed = _delayed_scorer(base_scorer, delay_us=500)  # 500 µs per call
-    arrays = {k: np.asarray(v, dtype=np.float64) for k, v in columns.items()}
-    budget_ms = 0.050
-    batch = 100
-    samples_ms: list[float] = []
-    for _ in range(n // batch):
-
-        def _batch_call() -> float:
-            for j in range(batch):
-                row_idx = (len(samples_ms) * batch + j) % n
-                bar = {key: float(arrays[key][row_idx]) for key in spec.inputs}
-                delayed(bar)
-            return 0.0
-
-        result = perf_budget.sample(_batch_call, batch=1)
-        samples_ms.append(result.cpu_ms / batch)
-    samples_ms.sort()
-    p99_idx = max(0, int(len(samples_ms) * 0.99) - 1)
-    p99_ms = samples_ms[p99_idx]
-    # 500 µs injected >> 50 µs budget → should fail
-    assert p99_ms >= budget_ms, (
-        f"Detection power failed: p99={p99_ms * 1000:.0f}us "
-        f"should exceed budget={budget_ms * 1000:.0f}us with 500µs delay"
+    delayed = virtual_delayed_sync(base_scorer, 500e-6)
+    per_row_ms = _per_row_cpu_ms(perf_budget, delayed, 500)
+    assert per_row_ms >= _PER_ROW_BUDGET_MS, (
+        f"Detection power failed: per_row={per_row_ms * 1000:.0f}us "
+        f"should exceed budget={_PER_ROW_BUDGET_MS * 1000:.0f}us with 500us delay"
     )
