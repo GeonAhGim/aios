@@ -2,7 +2,7 @@
 
 이 문서는 `scripts/gen_adr_index.py`가 `docs/design/ADR-*.md`에서 자동 생성한다(ADR-2026-09-09-F). 직접 수정하지 말 것 — 스크립트를 다시 실행해 갱신하고 커밋한다.
 
-전체 46건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 2건: ADR-2026-08-28, ADR-2026-08-29.
+전체 50건. 상태 없음(`## Status` 절 없음 또는 파싱 불가) 6건: ADR-2026-08-28, ADR-2026-08-29, ADR-2026-10-15-A, ADR-2026-10-23-A, ADR-2026-10-28-A, ADR-2026-10-29-A.
 
 | ID | Title | Status | Date | Supersedes | Superseded By | Amended | File |
 |---|---|---|---|---|---|---|---|
@@ -45,12 +45,14 @@
 | ADR-2026-09-24-A | MVP-1 종료 순서(검증 우선)와 함대 조직의 재사용 자산화(DevEngine 기초) | Accepted | 2026-09-24 |  |  |  | ADR-2026-09-24-A-mvp1-exit-order-and-fleet-kit.md |
 | ADR-2026-09-26-A | MVP-2 우선 2의 클라우드 전용 조건부 선착수 (ADR-2026-09-24-A Decision 1-1 개정) | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-A-mvp2-priority2-cloud-early.md |
 | ADR-2026-09-26-B | 전략 실행 격리·소스 보호·AI/매매 분리 명문화·도메인 경계 계약 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-B-strategy-sandbox-source-protection-ai-separation-domain-boundaries.md |
-| ADR-2026-09-26-C | MVP-1 안정화 단계 — 리프 수가 아니라 지표로 종결한다 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-C-stabilization-phase-exit-by-metrics.md |
+| ADR-2026-09-26-C | MVP-1 안정화 단계 — 리프 수가 아니라 지표로 종결한다 | Accepted | 2026-09-26 |  |  | 2026-11-06 | ADR-2026-09-26-C-stabilization-phase-exit-by-metrics.md |
 | ADR-2026-09-26-D | 통합테스트 DB 격리 — 창(window) 스캔·전역 상태 테스트는 모듈별 템플릿 클론에서 돈다 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-D-test-db-isolation-per-module-clone.md |
 | ADR-2026-09-26-E | 지표 플랫폼 통합 — TA-Lib WASM 클라이언트 계산 · OSS 계층 확장 · 검증 폭 확장 | Accepted | 2026-09-26 |  |  |  | ADR-2026-09-26-E-indicator-platform-wasm-oss-verification.md |
 | ADR-2026-09-29-A | MVP-2 내장 전략 지능 엔진(분석·생성·고도화·자가학습) — 무료 벤더만, 가상자산 우선 프로덕션 수준 | Proposed | 2026-09-29 |  |  |  | ADR-2026-09-29-A-mvp2-builtin-strategy-intelligence-engine.md |
 | ADR-2026-09-30-A | 로컬 PM 대리 임무 — 대시보드 호출·로컬 워커풀 자가복구 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-A-local-pm-delegate-and-self-recovery.md |
 | ADR-2026-09-30-B | 머지 큐·기계 검증 정정·게이트 캐시 — 함대 처리 효율 | Accepted | 2026-09-30 |  |  |  | ADR-2026-09-30-B-merge-queue-and-throughput.md |
 | ADR-2026-10-01-A | 사용자 관점 1등급 지표 축 — 체감 성능·기능 범위·편리함·전략 성과 (MVP-2 종결 조건 보강) | Accepted | 2026-10-01 |  |  |  | ADR-2026-10-01-A-user-facing-tier1-metrics.md |
-| ADR-2026-10-15-A | 수렴 모드 — CI 3계층 · 골든패스 판정 · 좁은 실패 카드 | Accepted | 2026-10-15 |  |  |  | ADR-2026-10-15-A-convergence-mode-ci-tiers-golden-path.md |
-| ADR-2026-10-23-A | CI 수리 템플릿 · 발행 규율 · 보안 범프 허용 | Accepted | 2026-10-23 |  |  |  | ADR-2026-10-23-A-ci-repair-templates-and-issuance-discipline.md |
+| ADR-2026-10-15-A | — 수렴 모드: CI 계층화 · 골든패스 판정 · 좁은 실패 카드 | **MISSING** |  |  |  |  | ADR-2026-10-15-A-convergence-mode-ci-tiers-golden-path.md |
+| ADR-2026-10-23-A | — CI 수리 템플릿 · 발행 규율 · 보안 범프 허용 | **MISSING** |  |  |  |  | ADR-2026-10-23-A-ci-repair-templates-and-issuance-discipline.md |
+| ADR-2026-10-28-A | — 공급망 보안 범프 처리·기한부 예외 정책 | **MISSING** |  |  |  |  | ADR-2026-10-28-A-supply-chain-bump-and-waiver-policy.md |
+| ADR-2026-10-29-A | — Python 3.13 단일 지원 버전 전환 | **MISSING** |  |  |  |  | ADR-2026-10-29-A-python-313-single-version.md |
