@@ -206,7 +206,12 @@ def test_evaluate_fred_series_notice_no_marker() -> None:
 def test_parse_fred_observations_meets_throughput_budget(perf_budget: PerfBudget) -> None:
     """반복 수신(폴링) 패턴에서 `parse_fred_observations`가 처리량 예산을
     지키는지 확인한다 -- `perf_budget` 픽스처로만 측정한다(raw
-    `time.perf_counter()` 직접 비교 금지, perf-measurement 래칫)."""
+    `time.perf_counter()` 직접 비교 금지, perf-measurement 래칫).
+
+    CI `pytest_perf_parallel` 단계에서 CPU 경합이 발생해도 `best_of(n=10)`가
+    최소값을 찾아 예산 판정을 안정화한다(task-22168). Windows `time.process_time()`
+    양자화tick(≈15.6ms)는 batch=10으로 줄인다.
+    """
     iterations = 2_000
     budget_ms = 6000.0  # 실측 로컬 <600ms, CI 병렬(CPU 경합) 편차 감안
     payload = {
@@ -223,7 +228,16 @@ def test_parse_fred_observations_meets_throughput_budget(perf_budget: PerfBudget
             )
             assert len(observations) == 50
 
-    sample = perf_budget.assert_within(_run, budget_ms=budget_ms, label="fred_parse_throughput")
+    # best_of(n=10) — CI 병렬 부하에서 10회 측정 중 최소값이 예산을 지키는지 확인
+    # batch=10 — Windows 양자화 tick(≈15.6ms) 오차를 1/10로 줄임
+    sample = perf_budget.assert_within(
+        _run,
+        budget_ms=budget_ms,
+        n=10,
+        warmup=2,
+        batch=10,
+        label="fred_parse_throughput",
+    )
     print(
         f"[RD-13 fred] {iterations} parses x 50 obs in {sample.cpu_ms:.1f}ms (budget<{budget_ms}ms)"
     )
