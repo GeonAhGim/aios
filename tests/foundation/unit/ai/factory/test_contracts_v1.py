@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from src.foundation.ai.factory.contracts import v1
 from src.foundation.market_data.contracts.v1 import Timeframe
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
 _END = _START + timedelta(days=30)
@@ -68,45 +69,32 @@ def test_data_scope_roundtrip() -> None:
 def test_strategy_proposal_roundtrip(
     perf_budget: PerfBudget,
 ) -> None:
-    """단일 호출 CPU 측정 + 정상 입력 녹색 + 지연 주입 적색 검증.
+    """단일 생성 CPU 예산 단언: 정상 입력 녹색, 예산 10배 가상 CPU 지연에서 적색.
 
-    `PerfBudget.sample(batch=1)`로 단일 `StrategyProposal` 생성의 CPU 시간을
-    측정하고 `_SINGLE_BUDGET_MS` 예산을 단언한다. 동일 단언이 지연 주입에서
-    적색으로 전환되는지는 `test_perf_assertion_fails_with_10x_delay_injection`
-    에서 검증한다(그 테스트는 bulk 작업 기준이므로 여기서는 단일 호출 기준
-    예산만 확인).
+    호출 1회는 Windows 15.6ms 틱보다 훨씬 빨라 0으로 수렴하므로 `best_of`
+    (여러 번 중 최소, batch=8)로 측정한다. 같은 단언을 `virtual_delayed_sync`
+    (실제 sleep/busy-wait 없이 측정치에 지연을 더함)로 감싼 호출에도 적용해
+    예산 위반이 실제로 적색이 됨을 확인한다. 예산은 완화하지 않는다.
     """
 
-    sample = perf_budget.sample(
-        lambda: v1.StrategyProposal(**_proposal_kwargs()),
-    )
-    assert sample.cpu_ms < _SINGLE_BUDGET_MS, (
-        f"single construct cpu_ms={sample.cpu_ms:.3f}ms >= budget={_SINGLE_BUDGET_MS}ms"
-    )
+    def _construct() -> v1.StrategyProposal:
+        return v1.StrategyProposal(**_proposal_kwargs())
+
+    def _assert_budget(sample: Any) -> None:
+        assert sample.cpu_ms < _SINGLE_BUDGET_MS, (
+            f"single construct cpu_ms={sample.cpu_ms:.3f}ms >= budget={_SINGLE_BUDGET_MS}ms"
+        )
+
+    sample = perf_budget.best_of(_construct, n=5, batch=8)
+    _assert_budget(sample)
     proposal = sample.result
     assert proposal.provider_ref == v1.ProviderRef.ANTHROPIC
     assert proposal.params == {"length": 14}
 
-    # 지연 주입 — 동일한 측정/단언이 적색으로 전환됨을 검증
-    import time as _time
-
-    _call_num = 0
-
-    def _slow_perf_counter() -> float:
-        nonlocal _call_num
-        _call_num += 1
-        return 0.0 if _call_num == 1 else 10.0
-
-    from unittest.mock import patch
-
-    with patch.object(_time, "perf_counter", side_effect=_slow_perf_counter):
-        sample_delayed = perf_budget.sample(
-            lambda: v1.StrategyProposal(**_proposal_kwargs()),
-        )
-        assert sample_delayed.wall_ms >= _SINGLE_BUDGET_MS, (
-            f"delay injection should exceed budget: "
-            f"wall_ms={sample_delayed.wall_ms:.3f}ms >= budget={_SINGLE_BUDGET_MS}ms"
-        )
+    slowed = virtual_delayed_sync(_construct, _SINGLE_BUDGET_MS * 10 / 1000.0)
+    slow_sample = perf_budget.best_of(slowed, n=5, batch=8)
+    with pytest.raises(AssertionError):
+        _assert_budget(slow_sample)
 
 
 def test_rejected_outcome_roundtrip() -> None:
