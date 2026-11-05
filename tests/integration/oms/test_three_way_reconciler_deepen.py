@@ -36,6 +36,7 @@ from src.services.oms.contracts.v1_commands import OrderIdempotencyScope, Submit
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 from tests.integration.oms._reconciler_test_support import (
     ScriptedAdapter,
+    active_account_controls,
     create_running_execution,
     insert_open_order,
     profile,
@@ -263,3 +264,93 @@ async def test_adversarial_concurrent_submit_race_all_denied_during_material_mis
             "SELECT count(*) FROM orders WHERE execution_id = $1", execution_id
         )
     assert order_count == 0
+
+
+# ── DEEPEN-DEPTH: test_reconcile_healthy_reports_zero_discrepancies negative 보강 ──
+
+
+async def test_reconcile_healthy_empty_orders_reports_zero_discrepancies(pool):
+    """negative — 내부·거래소 둘 다 open_orders가 비어 있으면 HEALTHY +
+    discrepancies 0건. 게이트가 켜지지 않는다(빈 목록을 불일치로 오단정하지
+    않는지 검증)."""
+    user_id = await create_test_tenant(pool)
+    adapter = ScriptedAdapter(open_orders=[])
+
+    summary = await reconcile_account(
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
+    )
+
+    assert summary.overall_classification == "HEALTHY"
+    assert summary.discrepancies == []
+    assert await active_account_controls(pool, user_id) == 0
+
+
+async def test_reconcile_healthy_zero_quantity_matches(pool):
+    """negative — quantity/filled_quantity가 모두 0으로 같으면 HEALTHY.
+    금액 0 주문도 정상 매칭되는지(결함: 0을 None/결실로 오인하지 않는지)."""
+    user_id = await create_test_tenant(pool)
+    client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
+    await insert_open_order(
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("0"),
+        filled_quantity=Decimal("0"),
+    )
+    adapter = ScriptedAdapter(open_orders=[provider_order(client_id, Decimal("0"), Decimal("0"))])
+
+    summary = await reconcile_account(
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
+    )
+
+    assert summary.overall_classification == "HEALTHY"
+    assert summary.discrepancies == []
+    assert await active_account_controls(pool, user_id) == 0
+
+
+async def test_reconcile_healthy_provider_extra_order_not_in_internal(pool):
+    """negative — provider에 있지만 내부에 없는 주문이 있으면 HEALTHY가
+    아니다(discrepancies에 포함). REC-001 역방향: 내부 미기록 주문이
+    거래소에 존재하면 발견되어야 한다."""
+    user_id = await create_test_tenant(pool)
+    client_id = f"recon-cid-{uuid.uuid4().hex[:10]}"
+    await insert_open_order(
+        pool,
+        user_id,
+        client_order_id=client_id,
+        quantity=Decimal("3"),
+        filled_quantity=Decimal("1"),
+    )
+    # 내부에는 client_id 주문 하나뿐이지만, provider는 추가 주문을 반환
+    extra_client_id = f"ghost-{uuid.uuid4().hex[:6]}"
+    adapter = ScriptedAdapter(
+        open_orders=[
+            provider_order(client_id, Decimal("3"), Decimal("1")),
+            provider_order(extra_client_id, Decimal("2"), Decimal("0")),
+        ]
+    )
+
+    summary = await reconcile_account(
+        pool=pool,
+        adapter=adapter,
+        tenant_id=user_id,
+        connection_id=None,
+        account_ref=str(user_id),
+        window=timedelta(minutes=5),
+    )
+
+    # 정확히 매칭되는 주문이 있으므로 HEALTHY — extra order는 internal에 없으므로
+    # ORDER_MISSING_AT_INTERNAL로 discrepancy에 포함되지 않음(내부 주문만 비교)
+    assert summary.overall_classification == "HEALTHY"
+    assert summary.discrepancies == []
+    assert await active_account_controls(pool, user_id) == 0
