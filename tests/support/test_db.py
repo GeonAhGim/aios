@@ -23,41 +23,8 @@ from tests.support.db import (
 )
 from tests.support.perf_budget import PerfBudget
 
-# ── Negative tests: invalid inputs rejected ──────────────────────────
-
-
-def test_session_database_url_rejects_uppercase_db_name() -> None:
-    """DB 이름에 대문자가混入되면 ValueError로 거부한다."""
-    with pytest.raises(ValueError, match="예상치 못한 템플릿 DB 이름"):
-        session_database_url("postgresql://user:pass@localhost/MyDB", "gw0")
-
-
-def test_session_database_url_rejects_special_chars_in_db_name() -> None:
-    """DB 이름에 특수문자(-)가 있으면 ValueError로 거부한다."""
-    with pytest.raises(ValueError, match="예상치 못한 템플릿 DB 이름"):
-        session_database_url("postgresql://user:pass@localhost/my-db", "gw0")
-
-
-def test_session_database_url_rejects_db_name_exceeding_40_chars() -> None:
-    """DB 이름이 40자를 초과하면 ValueError로 거부한다."""
-    long_name = "a" * 41
-    with pytest.raises(ValueError, match="예상치 못한 템플릿 DB 이름"):
-        session_database_url(f"postgresql://user:pass@localhost/{long_name}", "gw0")
-
-
-def test_session_database_url_rejects_long_worker_db_name() -> None:
-    """템플릿+워커 접미사가 40자를 초과하면 ValueError로 거부한다."""
-    # template 36 chars + "_gw0" = 40 chars exactly — OK
-    # template 37 chars + "_gw0" = 41 chars — should fail
-    long_template = "a" * 37
-    with pytest.raises(ValueError, match="워커 DB 이름이 규칙"):
-        session_database_url(f"postgresql://user:pass@localhost/{long_template}", "gw0")
-
-
-def test_session_database_url_master_returns_template_unchanged() -> None:
-    """worker_id == "master"면 template URL을 그대로 반환한다."""
-    url = "postgresql://user:pass@localhost:5432/aios_test"
-    assert session_database_url(url, "master") == url
+# ── Negative tests: invalid inputs rejected (session_database_url tests
+#    split to tests/support/test_session_database_url.py) ─────────────
 
 
 def test_db_name_strips_leading_slash() -> None:
