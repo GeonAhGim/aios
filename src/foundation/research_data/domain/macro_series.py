@@ -18,6 +18,7 @@ with a typed error rather than coerced with a best-effort guess -- I2's
 "do not guess a wire fact" posture applies just as much to a public
 government statistics API as it does to an undocumented exchange endpoint.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -26,6 +27,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 
 __all__ = [
     "MacroFrequency",
@@ -116,6 +118,7 @@ _MONTHLY_RE = re.compile(r"(\d{4})(\d{2})")
 _DAILY_RE = re.compile(r"(\d{4})(\d{2})(\d{2})")
 
 
+@lru_cache(maxsize=256)
 def normalize_unit(raw_unit: str) -> NormalizedUnit:
     """Resolve `raw_unit` (e.g. `"%"`, `"억원"`, `"십억달러"`, `"지수"`) to a
     canonical unit name plus the `Decimal` multiplier that converts the raw
@@ -125,6 +128,10 @@ def normalize_unit(raw_unit: str) -> NormalizedUnit:
     alias/magnitude tables -- there is no fallback that returns `scale=1`
     for an unrecognized string, since that would silently under-report a
     value by whatever magnitude prefix was missed.
+
+    Cached: unit strings repeat heavily across observations in a single
+    polling batch (same series → same unit), so the LRU avoids repeated
+    string matching and dict lookups.
     """
     candidate = raw_unit.strip()
     if not candidate:
@@ -144,6 +151,7 @@ def normalize_unit(raw_unit: str) -> NormalizedUnit:
     return NormalizedUnit(unit=canonical, scale=Decimal(scale))
 
 
+@lru_cache(maxsize=256)
 def period_end(raw_period: str, frequency: MacroFrequency) -> date:
     """Parse a source's raw period code into the calendar date on which
     that reporting period ends, given its already-known `MacroFrequency`.
@@ -195,7 +203,8 @@ def period_end(raw_period: str, frequency: MacroFrequency) -> date:
     raise FrequencyNormalizationError(f"unsupported frequency: {frequency!r}")
 
 
-def compute_known_at(period_ended: date, *, publication_lag_days: int) -> datetime:
+@lru_cache(maxsize=256)
+def compute_known_at(period_ended: date, publication_lag_days: int) -> datetime:
     """`known_at` (RD-A1 point-in-time semantics) for a macro observation is
     the reporting period's end date plus the source's declared publication
     lag, at UTC midnight -- a backtest reading `as_of` any earlier than this
