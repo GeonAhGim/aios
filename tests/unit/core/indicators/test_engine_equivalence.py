@@ -33,6 +33,7 @@ from src.core.indicators.registry import DEFAULT_REGISTRY, IndicatorError
 from src.core.indicators.spec import IndicatorSpec
 from src.core.indicators.specs_talib import TALIB_SPECS
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 # IND-10(task-1729)이 TALIB_SPECS를 161종으로 넓혔지만 이 엔진(IND-1)은 여전히
 # 11개 지표만 `_KERNELS`/`_STATES`에 손으로 구현돼 있다 — 나머지 150종의 증분=
@@ -284,38 +285,88 @@ def test_incremental_update_latency_p99_within_streaming_budget(
     전부에 5,000 bar를 흘려 넣고 update() 호출별 지연을 재 p99를 구한다 — 로컬 실측
     (EMA 1.1us ~ STOCH 3.2us, 창·Wilder·EMA 전부 O(period) 또는 O(1) 갱신이라 5,000
     bar에서도 안 늘어난다)에 CI 기계 편차 감안 30배 이상 여유를 둔 100us를 예산으로
-    건다."""
+    건다.
+
+    CPU 틱·일시 지연 1회에 흔들리지 않게 `perf_budget.best_of`로 여러 번 측정해
+    최소 p99를 단언에 쓴다(단발 최댓값이 아니라 반복 중 최소).
+    """
     rng = np.random.default_rng(21)
     n = 5000
     cols = _ohlcv(rng, n, 100.0)
     budget_ms = 100e-6 * 1000
     batch = 1000
-    for name in NAMES:
+
+    def _measure_p99(name: str) -> float:
+        """한 번의 측정: fresh indicator에 5000 bar 흘려넣고 chunk별 p99를 반환."""
         spec = TALIB_SPECS[name]
         params = {p.name: p.default for p in spec.params}
         keys = IncrementalIndicator(name, params).spec.inputs
         rows = [{k: float(cols[k][i]) for k in keys} for i in range(n)]
-        # process_time ticks at ~15.6ms, so each sample times `batch` update() calls and
-        # divides; the p99 is taken over the per-call means of the n/batch chunks. A
-        # co-tenant CPU stall inflates one whole chunk (task-22324: 9 ticks in one chunk),
-        # so the budget is judged best-of-3 on fresh indicators, like `assert_within`.
-        p99s: list[float] = []
-        for _ in range(3):
-            ind = IncrementalIndicator(name, params)
-            bars = iter(rows)
-            chunk_ms = sorted(
-                perf_budget.sample(partial(_feed_next, ind, bars), batch=batch).cpu_ms
-                for _ in range(n // batch)
-            )
-            p99s.append(chunk_ms[min(len(chunk_ms) - 1, int(len(chunk_ms) * 0.99))])
-            if p99s[-1] < budget_ms:
-                break
-        p99_ms = min(p99s)
+        ind = IncrementalIndicator(name, params)
+        bars = iter(rows)
+        # batch=1000: process_time(~15.6ms tick) 양자화 오차를 batch로 줄인다.
+        chunk_ms = sorted(
+            perf_budget.sample(partial(_feed_next, ind, bars), batch=batch).cpu_ms
+            for _ in range(n // batch)
+        )
+        return chunk_ms[min(len(chunk_ms) - 1, int(len(chunk_ms) * 0.99))]
+
+    for name in NAMES:
+        # best_of(n=5) 여러 측정 중 최소 p99 — CPU 틱 1회에 흔들리지 않게.
+        sample = perf_budget.best_of(lambda nm=name: _measure_p99(nm), n=5, warmup=1, batch=1)
+        p99_ms = sample.cpu_ms
         p99_us = p99_ms * 1000
         print(
             f"[IND-1 incremental] {name} n={n} p99={p99_us:.2f}us budget<{budget_ms * 1000:.0f}us"
         )
-        assert p99_ms < budget_ms, (name, p99s)
+        assert p99_ms < budget_ms, (name, f"p99={p99_us:.2f}us")
+
+
+# ---- DEEPEN(task-22323): 지연 주입 게이트 적색 재현 ----
+
+
+@pytest.mark.perf
+def test_incremental_update_latency_p99_injected_delay_raises_red(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """gate-red 재현 -- update()에 10배 가상 지연(1ms)을 주입하면 100us 예산 단언이
+    적색이어야 한다. 정상 입력에서 녹색인 단언이 지연 입력에서 적색이면 detection
+    capability를 입증한다. `virtual_delayed_sync`로 실제 busy-wait 없이 측정치만
+    느리게 한다."""
+    import src.core.indicators.engine.incremental as incremental_module
+
+    reset_virtual_totals()
+    # 1ms 가상 CPU 지연 = 10x 예산(100us) -- 단언이 적색이어야 함.
+    original_update = incremental_module.IncrementalIndicator.update
+    slow_update = virtual_delayed_sync(original_update, 0.001)  # 1ms
+    monkeypatch.setattr(incremental_module.IncrementalIndicator, "update", slow_update)
+
+    # SMA 하나만 측정해도 지연 주입 효과가 명확히 드러남.
+    rng = np.random.default_rng(21)
+    n = 500
+    cols = _ohlcv(rng, n, 100.0)
+    name = "SMA"
+    params = {"timeperiod": 10}
+    keys = ["open", "high", "low", "close"]
+    rows = [{k: float(cols[k][i]) for k in keys} for i in range(n)]
+    ind = incremental_module.IncrementalIndicator(name, params)
+    bars = iter(rows)
+
+    # 지연 주입된 update()로 500회 흘려넣고 p99 측정.
+    samples = perf_budget.samples(
+        lambda: partial(_feed_next, ind, bars)(),
+        n=n,
+        warmup=0,
+        batch=1,
+    )
+    chunk_ms = sorted(s.cpu_ms for s in samples)
+    p99_ms = chunk_ms[min(len(chunk_ms) - 1, int(len(chunk_ms) * 0.99))]
+    assert p99_ms >= 0.1, (
+        f"CPU injection failed: p99={p99_ms:.4f}ms is still under 0.1ms — "
+        "the perf assertion does not detect slowdown"
+    )
+    reset_virtual_totals()
 
 
 # ---- DEEPEN(task-2916): 게이트 적색 재현(증분 준비도 자기검증) ----
