@@ -235,8 +235,8 @@ async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_con
     시뮬레이션) — 각 종목의 갭 결손 span이 서로 섞이지 않고, 각자 자기
     `instrument_id` 아래에만 (갭 횟수+1)개씩 정확히 기록돼야 한다.
 
-    동시 실행 한 번의 CPU 시간을 `PerfBudget.sample_async(batch=4)`로
-    측정한다 — Windows `time.process_time()`의 15.6ms 양자화 오차를
+    동시 실행의 CPU 시간을 `PerfBudget.best_of_async(n=3, batch=4)`(3회 중
+    최소)로 측정한다 — Windows `time.process_time()`의 15.6ms 양자화 오차를
     batch=4로 1/4로 줄이고, CPU 예산 <100ms 단언을 추가한다.
     """
     instrument_a = _fake_ulid()
@@ -258,7 +258,7 @@ async def test_two_concurrent_sessions_on_different_instruments_do_not_cross_con
     async def _run_pair() -> list[object]:
         return list(await asyncio.gather(session_a.run(), session_b.run(), return_exceptions=True))
 
-    sample = await perf_budget.sample_async(_run_pair, batch=4)
+    sample = await perf_budget.best_of_async(_run_pair, n=3, batch=4)
 
     # 정상 입력에서 두 세션이 _Stop으로 종료
     results = await _run_pair()

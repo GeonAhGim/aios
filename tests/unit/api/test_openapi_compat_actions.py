@@ -20,6 +20,7 @@ import pytest
 import scripts.check_openapi_compat as compat_module
 from scripts.check_openapi_compat import find_violations, main
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def _schema(*, paths: dict[str, Any], schemas: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -268,28 +269,17 @@ def test_performance_assertion_nested_ref_recursion_budget(
     assert sample.result == [], f"동일 스키마에서 위반이 없어야 함: {sample.result}"
 
 
+@pytest.mark.perf
 def test_performance_assertion_fails_with_cpu_delay_injection(
-    monkeypatch: Any,
+    perf_budget: PerfBudget,
 ) -> None:
-    """성능 단언이 실제로 예산을 검증하는지 확인한다 — 동일 호출에 지연을
-    주입하면 PerfBudget.assert_within가 AssertionError를 던져야 한다
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — 동일 호출에 10배 가상
+    지연을 주입하면 PerfBudget.assert_within가 AssertionError를 던져야 한다
     (단언/마커 삭제나 예산 완화가 아닌 genuine budget check임 증명).
 
-    time.process_time()을 monkeypatch해 매 호출 시 누적 50ms를 추가하면
-    측정 구간(start→end)의 차이에 50ms가 더해져 budget_ms=10을 초과한다.
+    `virtual_delayed_sync`는 busy-wait 없이 측정치에만 100ms를 더해
+    budget_ms=10을 초과시킨다.
     """
-    import time as _time
-
-    from tests.support.perf_budget import PerfBudget as _PerfBudget
-
-    original_process_time = _time.process_time
-    _offset = [0.0]
-
-    def _slow_process_time() -> float:
-        t = original_process_time()
-        _offset[0] += 0.05
-        return t + _offset[0]
-
     # 100개의 중첩 스키마 체인 생성 (기존 테스트와 동일)
     schemas = {"Meta": _meta_schema()}
     paths: dict[str, Any] = {}
@@ -317,17 +307,10 @@ def test_performance_assertion_fails_with_cpu_delay_injection(
     baseline = _schema(paths=paths, schemas=schemas)
     current = json.loads(json.dumps(baseline))
 
-    # process_time을 지연 시키도록 monkeypatch
-    monkeypatch.setattr(_time, "process_time", _slow_process_time)
-
-    # PerfBudget 직접 생성 (monkeypatch된 time.process_time을 사용)
-    pb = _PerfBudget()
+    reset_virtual_totals()
+    slow_fn = virtual_delayed_sync(lambda: find_violations(baseline, current), 0.10)
     with pytest.raises(AssertionError) as exc_info:
-        pb.assert_within(
-            lambda: find_violations(baseline, current),
-            budget_ms=10.0,
-            batch=1,
-        )
+        perf_budget.assert_within(slow_fn, budget_ms=10.0, batch=1)
 
     # AssertionError가 budget 관련 단언 실패임을 확인
     assert "budget" in str(exc_info.value).lower() or "cpu" in str(exc_info.value).lower(), (
