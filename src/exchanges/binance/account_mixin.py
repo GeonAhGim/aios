@@ -38,9 +38,18 @@ from typing import Any, Protocol
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass, Currency, Money
-from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.data.models.trading import (
+    AccountBalance,
+    Order,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+)
 
 _ORDER_PATH = "/api/v3/order"
+_ACCOUNT_PATH = "/api/v3/account"
+_OPEN_ORDERS_PATH = "/api/v3/openOrders"
+_MY_TRADES_PATH = "/api/v3/myTrades"
 _QUOTE_CURRENCIES = ("USDT",)  # Phase 1 scope (bitget/kis account_mixin.py precedent)
 
 _STATUS_MAP = {
@@ -59,6 +68,36 @@ _ORDER_TYPE_MAP = {
     "LIMIT": OrderType.LIMIT,
     "MARKET": OrderType.MARKET,
 }
+
+
+def _order_from_raw(symbol: str, binance_order_id: Any, raw: dict[str, Any]) -> Order:
+    try:
+        status = _map_status(raw["status"])
+        order_type = _map_order_type(raw["type"])
+        side = OrderSide(raw["side"])
+        quantity = Decimal(str(raw["origQty"]))
+        filled_quantity = Decimal(str(raw["executedQty"]))
+        created_at = _parse_epoch_ms(raw["time"])
+        updated_at = _parse_epoch_ms(raw["updateTime"])
+    except KeyError as exc:
+        raise FatalExchangeError(f"Binance order response missing expected field: {exc}") from exc
+    return Order(
+        exchange_order_id=f"{symbol}:{raw.get('orderId', binance_order_id)}",
+        client_order_id=raw.get("clientOrderId", ""),
+        strategy_id="",  # placeholder -- caller must fill from a DB lookup
+        strategy_version="",
+        symbol=symbol,
+        exchange="binance",
+        side=side,
+        order_type=order_type,
+        quantity=quantity,
+        status=status,
+        filled_quantity=filled_quantity,
+        average_fill_price=_average_fill_price(symbol, raw),
+        created_at=created_at,
+        updated_at=updated_at,
+        asset_class=AssetClass.CRYPTO,
+    )
 
 
 def _map_status(raw_status: str) -> OrderStatus:
@@ -120,7 +159,9 @@ class _BinanceAccountClient(Protocol):
         path: str,
         *,
         params: dict[str, Any] | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> Any: ...
+
+    def _unsupported(self, capability: str) -> Exception: ...
 
 
 class BinanceAccountMixin:
@@ -131,33 +172,72 @@ class BinanceAccountMixin:
             _ORDER_PATH,
             params={"symbol": symbol, "orderId": binance_order_id},
         )
-        try:
-            status = _map_status(raw["status"])
-            order_type = _map_order_type(raw["type"])
-            side = OrderSide(raw["side"])
-            quantity = Decimal(str(raw["origQty"]))
-            filled_quantity = Decimal(str(raw["executedQty"]))
-            created_at = _parse_epoch_ms(raw["time"])
-            updated_at = _parse_epoch_ms(raw["updateTime"])
-        except KeyError as exc:
-            raise FatalExchangeError(
-                f"Binance order response missing expected field: {exc}"
-            ) from exc
+        return _order_from_raw(symbol, binance_order_id, raw)
 
-        return Order(
-            exchange_order_id=f"{symbol}:{raw.get('orderId', binance_order_id)}",
-            client_order_id=raw.get("clientOrderId", ""),
-            strategy_id="",  # placeholder -- caller must fill from a DB lookup
-            strategy_version="",
-            symbol=symbol,
-            exchange="binance",
-            side=side,
-            order_type=order_type,
-            quantity=quantity,
-            status=status,
-            filled_quantity=filled_quantity,
-            average_fill_price=_average_fill_price(symbol, raw),
-            created_at=created_at,
-            updated_at=updated_at,
-            asset_class=AssetClass.CRYPTO,
-        )
+    async def get_balance(
+        self: _BinanceAccountClient, asset: str | None = None
+    ) -> list[AccountBalance]:
+        """GET /api/v3/account `balances[]` (asset/free/locked). Unverified
+        against live API: shapes follow the public Spot docs."""
+        raw = await self._request("GET", _ACCOUNT_PATH, params={})
+        try:
+            rows = raw["balances"]
+            updated_at = _parse_epoch_ms(raw["updateTime"])
+            result = []
+            for row in rows:
+                if asset is not None and row["asset"] != asset:
+                    continue
+                free = Decimal(str(row["free"]))
+                locked = Decimal(str(row["locked"]))
+                result.append(
+                    AccountBalance(
+                        exchange="binance",
+                        asset=row["asset"],
+                        total=free + locked,
+                        available=free,
+                        updated_at=updated_at,
+                    )
+                )
+        except (KeyError, TypeError, ArithmeticError) as exc:
+            raise FatalExchangeError(f"Binance account response malformed: {exc!r}") from exc
+        return result
+
+    async def get_positions(self: _BinanceAccountClient, symbol: str | None = None) -> Any:  # noqa: ARG002
+        """Spot has no position concept (holdings are balances); fail-closed
+        rather than fabricating entry price/PnL."""
+        raise self._unsupported("get_positions")
+
+    async def get_open_orders(
+        self: _BinanceAccountClient, symbol: str | None = None
+    ) -> list[Order]:
+        params = {"symbol": symbol} if symbol else {}
+        raw = await self._request("GET", _OPEN_ORDERS_PATH, params=params)
+        if not isinstance(raw, list):
+            raise FatalExchangeError("Binance openOrders response is not a list")
+        try:
+            return [_order_from_raw(row["symbol"], row.get("orderId"), row) for row in raw]
+        except (KeyError, TypeError) as exc:
+            raise FatalExchangeError(f"Binance openOrders row malformed: {exc!r}") from exc
+
+    async def get_fills(
+        self: _BinanceAccountClient,
+        symbol: str | None = None,
+        *,
+        order_id: str | None = None,
+        since: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """GET /api/v3/myTrades -- raw rows; `symbol` is mandatory on Binance
+        (fail-closed rather than guessing a symbol set)."""
+        if not symbol:
+            raise FatalExchangeError("Binance myTrades requires a symbol")
+        params: dict[str, Any] = {"symbol": symbol}
+        if order_id is not None:
+            params["orderId"] = order_id.split(":", 1)[-1]
+        if since is not None:
+            if since.tzinfo is None:
+                raise FatalExchangeError("get_fills since must be timezone-aware")
+            params["startTime"] = int(since.timestamp() * 1000)
+        raw = await self._request("GET", _MY_TRADES_PATH, params=params)
+        if not isinstance(raw, list):
+            raise FatalExchangeError("Binance myTrades response is not a list")
+        return raw
