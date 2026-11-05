@@ -679,3 +679,94 @@ async def test_ws_fill_ingest_throughput_within_normalized_budget(pool):
             order_ids,
         )
     assert filled_count == n_events
+
+
+async def test_fill_ingest_failure_propagates_and_leaves_order_untouched(pool):
+    """DEEPEN-DEPTH failure injection for the fill->FILLED path -- an inbox
+    write failure must surface (fail-closed) and must not leave the order
+    partially transitioned or any fill row behind."""
+
+    class _BoomInbox(InboxProcessor):
+        def __init__(self) -> None:
+            pass
+
+        async def ingest(self, ev):
+            raise RuntimeError("injected inbox failure")
+
+    user_id = await create_test_user(pool)
+    exchange_order_id = f"ex-{uuid4().hex}"
+    client_order_id = f"cid-{uuid4().hex}"
+    order_id = await _insert_order(
+        pool,
+        user_id,
+        quantity=Decimal("2"),
+        exchange_order_id=exchange_order_id,
+        client_order_id=client_order_id,
+    )
+    message = _envelope([_order_row(order_id=exchange_order_id, client_id=client_order_id)])
+    connection = _FakeConnection([message], hang=True)
+
+    with pytest.raises(RuntimeError, match="injected inbox failure"):
+        await subscribe_bitget_orders_to_inbox(
+            _no_rest_calls_adapter(),
+            _BoomInbox(),
+            connect_fn=lambda url: _TrackingConnectCtx(connection),
+            ping_sleep_fn=_never,
+        )
+
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            "SELECT status, filled_quantity FROM orders WHERE order_id = $1", order_id
+        )
+        fills_count = await conn.fetchval(
+            "SELECT count(*) FROM fills WHERE order_id = $1", order_id
+        )
+    assert order["status"] == "SUBMITTED"
+    assert order["filled_quantity"] == Decimal("0")
+    assert fills_count == 0
+
+
+async def test_fill_assertions_go_red_when_event_targets_wrong_order(pool):
+    """DEEPEN-DEPTH gate-red repro -- corrupt the input (event carries a
+    different exchange order id) and show the FILLED / fills==1 assertions of
+    the end-to-end test really fail, i.e. they are not vacuous."""
+    user_id = await create_test_user(pool)
+    exchange_order_id = f"ex-{uuid4().hex}"
+    client_order_id = f"cid-{uuid4().hex}"
+    order_id = await _insert_order(
+        pool,
+        user_id,
+        quantity=Decimal("2"),
+        exchange_order_id=exchange_order_id,
+        client_order_id=client_order_id,
+    )
+    broken = _order_row(order_id=f"ex-{uuid4().hex}", client_id=f"cid-{uuid4().hex}")
+    connection = _FakeConnection([_envelope([broken])], raise_after=ConnectionClosed(None, None))
+    call_count = {"n": 0}
+
+    def connect_fn(url: str):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return _TrackingConnectCtx(connection)
+        raise _StopTest
+
+    with pytest.raises(_StopTest):
+        await subscribe_bitget_orders_to_inbox(
+            _no_rest_calls_adapter(),
+            InboxProcessor(pool),
+            connect_fn=connect_fn,
+            sleep_fn=_instant,
+            ping_sleep_fn=_never,
+        )
+
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            "SELECT status, filled_quantity FROM orders WHERE order_id = $1", order_id
+        )
+        fills_count = await conn.fetchval(
+            "SELECT count(*) FROM fills WHERE order_id = $1", order_id
+        )
+    with pytest.raises(AssertionError):
+        assert order["status"] == "FILLED"
+    with pytest.raises(AssertionError):
+        assert fills_count == 1
