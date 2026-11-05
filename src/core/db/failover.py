@@ -136,34 +136,14 @@ class FailoverConnectionManager:
         this method waits in a loop until ``write_available()`` returns True
         or the ceiling elapses, raising ``FailoverExhaustedError`` on timeout.
         """
-        # FA-18 write gate: block writes during recovery window
-        if not self.write_available():
-            gate_deadline = self._clock() + self._backoff.ceiling_seconds
-            delays = self._backoff.delays()
-            while True:
-                if self.write_available():
-                    break
-                if self._clock() >= gate_deadline:
-                    raise FailoverExhaustedError("write gate still closed past ceiling")
-                await self._sleep(next(delays))
+        await self._wait_for_write_gate()
         deadline = self._clock() + self._backoff.ceiling_seconds
         delays = self._backoff.delays()
         last_error: Exception | None = None
         while True:
             for host in self._hosts:
-                try:
-                    conn = await self._connect(host.host)
-                except Exception as exc:  # noqa: BLE001 -- any driver failure (refused/timeout/DNS) means "try the next host", not a crash
-                    last_error = exc
-                    continue
-                try:
-                    read_only = await conn.is_read_only()
-                except Exception as exc:  # noqa: BLE001 -- a probe failure must not be trusted as writable; fail closed to the next host
-                    await conn.close()
-                    last_error = exc
-                    continue
-                if read_only:
-                    await conn.close()
+                conn, last_error = await self._probe_writable(host.host, last_error)
+                if conn is None:
                     continue
                 if self._current_host is not None and self._current_host != host.host:
                     self._last_failover_at = self._clock()
@@ -176,6 +156,35 @@ class FailoverConnectionManager:
                     f"no writable host among {tried} within {self._backoff.ceiling_seconds:.0f}s"
                 ) from last_error
             await self._sleep(next(delays))
+
+    async def _wait_for_write_gate(self) -> None:
+        """Block until ``write_available()`` or raise once the ceiling elapses."""
+        if self.write_available():
+            return
+        gate_deadline = self._clock() + self._backoff.ceiling_seconds
+        delays = self._backoff.delays()
+        while not self.write_available():
+            if self._clock() >= gate_deadline:
+                raise FailoverExhaustedError("write gate still closed past ceiling")
+            await self._sleep(next(delays))
+
+    async def _probe_writable(
+        self, host: str, last_error: Exception | None
+    ) -> tuple[DbConnection | None, Exception | None]:
+        """Connect to ``host``; return (conn, last_error) with conn None unless writable."""
+        try:
+            conn = await self._connect(host)
+        except Exception as exc:  # noqa: BLE001 -- any driver failure (refused/timeout/DNS) means "try the next host", not a crash
+            return None, exc
+        try:
+            read_only = await conn.is_read_only()
+        except Exception as exc:  # noqa: BLE001 -- a probe failure must not be trusted as writable; fail closed to the next host
+            await conn.close()
+            return None, exc
+        if read_only:
+            await conn.close()
+            return None, last_error
+        return conn, last_error
 
     async def close(self) -> None:
         if self._conn is not None:
