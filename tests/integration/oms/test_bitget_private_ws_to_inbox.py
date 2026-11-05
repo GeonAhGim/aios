@@ -259,6 +259,127 @@ async def test_event_missing_order_identifiers_is_not_silently_dropped(pool):
     assert state == "IGNORED"  # 드롭이 아니라 inbox 행 생성(fail-closed)
 
 
+@pytest.mark.parametrize("blank", [None, "", 0])
+def test_missing_identifier_blank_values_yield_unresolved_event_not_exception(blank):
+    """DEEPEN-DEPTH negative 1 -- orderId/clientOid present-but-blank
+    (None / "" / 0) must be treated like absent: no exception, no ids, and
+    the auditable `unresolved` provider_event_id."""
+    row = {"instId": "BTCUSDT", "status": "live", "orderId": blank, "clientOid": blank}
+    ev = parse_private_order_row(row, received_at=datetime.now(UTC))
+    assert ev.exchange_order_id is None
+    assert ev.client_order_id is None
+    assert ev.last_fill is None
+    assert ev.filled_quantity == Decimal("0")
+    assert ev.provider_event_id == f"bitget:orders:unresolved:{ev.raw_hash}"
+
+
+def test_missing_identifier_events_with_different_payloads_get_distinct_ids():
+    """DEEPEN-DEPTH negative 2 -- two distinct id-less events must not
+    collapse into one inbox key (that would be a silent drop by dedup),
+    while a byte-identical redelivery must map to the same key."""
+    now = datetime.now(UTC)
+    a = {"instId": "BTCUSDT", "status": "live"}
+    b = {"instId": "BTCUSDT", "status": "cancelled"}
+    ev_a1 = parse_private_order_row(a, received_at=now)
+    ev_a2 = parse_private_order_row(dict(a), received_at=now)
+    ev_b = parse_private_order_row(b, received_at=now)
+    assert ev_a1.provider_event_id == ev_a2.provider_event_id
+    assert ev_a1.provider_event_id != ev_b.provider_event_id
+
+
+async def test_missing_identifier_non_dict_rows_are_skipped_but_valid_rows_still_land(pool):
+    """DEEPEN-DEPTH negative 3 / failure injection -- a malformed envelope
+    (non-dict rows mixed in) must not abort the stream: the garbage rows are
+    skipped and the id-less dict row still produces an IGNORED inbox row."""
+    row = {"instId": "ETHUSDT", "status": "live", "_test_nonce": uuid4().hex}
+    expected = parse_private_order_row(row, received_at=datetime.now(UTC)).provider_event_id
+    message = _envelope(["garbage", 7, None, row])
+    connection = _FakeConnection([message], raise_after=ConnectionClosed(None, None))
+    calls = {"n": 0}
+
+    def connect_fn(url: str):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _TrackingConnectCtx(connection)
+        raise _StopTest
+
+    with pytest.raises(_StopTest):
+        await subscribe_bitget_orders_to_inbox(
+            _no_rest_calls_adapter(),
+            InboxProcessor(pool),
+            connect_fn=connect_fn,
+            ping_sleep_fn=_never,
+        )
+    async with pool.acquire() as conn:
+        state = await conn.fetchval(
+            "SELECT state FROM provider_event_inbox WHERE provider_event_id = $1", expected
+        )
+    assert state == "IGNORED"
+
+
+async def test_missing_identifier_ingest_failure_propagates_not_swallowed(pool):
+    """DEEPEN-DEPTH failure injection -- if the inbox write itself fails the
+    error must surface (fail-closed), never be swallowed as a silent drop."""
+
+    class _BoomInbox(InboxProcessor):
+        def __init__(self) -> None:
+            pass
+
+        async def ingest(self, ev):
+            raise RuntimeError("injected inbox failure")
+
+    row = {"instId": "BTCUSDT", "status": "live", "_test_nonce": uuid4().hex}
+    connection = _FakeConnection([_envelope([row])], hang=True)
+
+    with pytest.raises(RuntimeError, match="injected inbox failure"):
+        await subscribe_bitget_orders_to_inbox(
+            _no_rest_calls_adapter(),
+            _BoomInbox(),
+            connect_fn=lambda url: _TrackingConnectCtx(connection),
+            ping_sleep_fn=_never,
+        )
+
+
+_MISSING_ID_PARSE_BUDGET_MS = 50.0
+
+
+def _parse_missing_id_batch() -> None:
+    """200 id-less parses. Local measurement (best-of-5 cpu): ~1-2 ms, so
+    the 50 ms budget leaves >=25x headroom (rounded to the 30x rule by the
+    10x virtual-delay red check below)."""
+    now = datetime.now(UTC)
+    for i in range(200):
+        parse_private_order_row({"instId": "BTCUSDT", "status": "live", "seq": i}, received_at=now)
+
+
+@pytest.mark.perf
+def test_missing_identifier_parse_within_budget(perf_budget):
+    """DEEPEN-DEPTH perf -- best-of-N cpu budget for the id-less parse path."""
+    perf_budget.assert_within(
+        _parse_missing_id_batch,
+        budget_ms=_MISSING_ID_PARSE_BUDGET_MS,
+        n=5,
+        label="missing_id_parse",
+    )
+
+
+@pytest.mark.perf
+def test_missing_identifier_parse_budget_goes_red_under_10x_virtual_delay(perf_budget):
+    """DEEPEN-DEPTH gate-red repro -- inject a virtual delay of 10x the
+    budget; the same assertion must fail, proving it actually catches
+    slowdowns."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    slow = virtual_delayed_sync(_parse_missing_id_batch, _MISSING_ID_PARSE_BUDGET_MS * 10 / 1000)
+    with pytest.raises(AssertionError, match="missing_id_parse"):
+        perf_budget.assert_within(
+            slow,
+            budget_ms=_MISSING_ID_PARSE_BUDGET_MS,
+            n=3,
+            label="missing_id_parse",
+        )
+
+
 async def test_event_pointing_at_unknown_order_id_is_not_silently_dropped(pool):
     """DoD(b)/2 — 알 수 없는 주문 ID를 가리키는 이벤트도 inbox 행을
     남긴다(IGNORED, L4-15의 fail-closed 매칭 경로를 그대로 탄다)."""
