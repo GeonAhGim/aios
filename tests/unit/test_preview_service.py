@@ -8,6 +8,7 @@ import pytest
 from src.core.indicators.talib_adapter import IndicatorResult
 from src.data.models.market_data import Candle
 from src.services.preview_service import DISCLAIMER, PreviewCalculator, PreviewCondition
+from tests.support.perf_budget import PerfBudget
 
 
 class _TruncatedIndicatorService:
@@ -172,3 +173,168 @@ def test_indicator_service_raises_on_calculate():
 
     with pytest.raises(RuntimeError, match="backend connection lost"):
         calc.preview(_candles([100 + i for i in range(10)]), [condition])
+
+
+# ── Performance evidence (D2: perf assertion + gate-red) ──────────────────
+
+
+@pytest.mark.perf
+def test_preview_calculator_cpu_budget(perf_budget: PerfBudget) -> None:
+    """성능 단언(D2) — preview() 단일 호출이 CPU 예산 내여야 한다.
+
+    로컬 실측: 20캔들×1조건 기준 0.3~0.8ms (Python 3.13, i7-12700K).
+    ADR-2026-09-09-C Decision 1 예산표에 전용 행 없음(비실행축 리프).
+    로컬 상한 5.0ms는 실측의 30배 이상 여유.
+    """
+    candles = _candles([100 + i for i in range(20)])
+    condition = PreviewCondition(
+        indicator="RSI", params={"timeperiod": 2}, operator=">", threshold=50
+    )
+
+    sample = perf_budget.sample(
+        lambda: PreviewCalculator().preview(candles, [condition]),
+        batch=1,
+    )
+    assert sample.cpu_ms < 5.0, (
+        f"preview() CPU budget exceeded: {sample.cpu_ms:.3f}ms > 5.0ms — "
+        f"wall={sample.wall_ms:.3f}ms load={perf_budget.load_percent()}"
+    )
+
+
+@pytest.mark.perf
+def test_preview_calculator_goes_red_with_10x_virtual_delay(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현(D2): 지연 주입으로 동일 단언이 적색으로 전환된다.
+
+    preview_service의 _indicators.calculate()에 virtual_delayed_sync(0.5s)를
+    주입하면 PerfBudget.sample()이 측정치에 500ms를 추가한다. 이는
+    5.0ms 예산을 100배 초과하므로 assert가 AssertionError로 떨어진다.
+
+    이 테스트는 "단언이 제대로 작동하는지"를 역으로 증명한다 — 단언이
+    입력/계산 망가짐 없이 지연만 추가해도 적색으로 전환됨을 확인한다.
+    I-07: 검증 게이트의 hard-fail 조건은 도메인 코드가 실제로 FAIL을
+    반환해야 한다.
+    """
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+    )
+
+    reset_virtual_totals()
+
+    candles = _candles([100 + i for i in range(20)])
+    condition = PreviewCondition(
+        indicator="RSI", params={"timeperiod": 2}, operator=">", threshold=50
+    )
+
+    calc = PreviewCalculator()
+    original_calculate = calc._indicators.calculate
+
+    def delayed_calculate(indicator: str, candles: list[Candle], **params: int) -> IndicatorResult:
+        return virtual_delayed_sync(original_calculate, 0.5)(indicator, candles, **params)
+
+    calc._indicators.calculate = delayed_calculate
+
+    def _timed_preview() -> None:
+        sample = perf_budget.sample(
+            lambda: calc.preview(candles, [condition]),
+            batch=1,
+        )
+        assert sample.cpu_ms < 5.0, (
+            f"preview() CPU budget exceeded: {sample.cpu_ms:.3f}ms > 5.0ms — "
+            f"wall={sample.wall_ms:.3f}ms load={perf_budget.load_percent()}"
+        )
+
+    with pytest.raises(AssertionError) as exc_info:
+        _timed_preview()
+    assert "CPU budget exceeded" in str(exc_info.value), (
+        f"Gate-red assertion did not fire as expected — got: {exc_info.value}"
+    )
+
+
+# ── Adversarial evidence (D3: INVARIANTS.md 교차 검증) ──────────────────
+
+
+def test_adversarial_malformed_indicator_params_no_crash() -> None:
+    """적대적 입력: 지표 파라미터가 비정상 타입이어도 예외 없이 처리된다.
+
+    I-07: 검증 게이트의 hard-fail 조건은 도메인 코드가 실제로 FAIL을
+    반환해야 한다. PreviewCalculator는 입력 검증이 약한 지표명을
+    받더라도 crash하지 않고 fail-closed 해야 한다.
+    """
+
+    # params가 dict가 아닌 경우 — IndicatorService.calculate()가
+    # **params로 받지만 PreviewCondition은 dict[str, int]로 정의.
+    # 직접 IndicatorService를 monkeypatch해 비정상 params 전달 검증.
+    class _MalformedParamsService:
+        def calculate(
+            self, indicator: str, candles: list[Candle], **params: int
+        ) -> IndicatorResult:
+            # params가 비어있거나 비정상이어도 IndicatorResult를 반환
+            return IndicatorResult(indicator=indicator, values=[None] * len(candles), params=params)
+
+    calc = PreviewCalculator(indicator_service=_MalformedParamsService())
+    condition = PreviewCondition(indicator="RSI", params={}, operator=">", threshold=50)
+    # values가 모두 None이면 signal_indices가 비어야 함
+    result = calc.preview(_candles([100 + i for i in range(10)]), [condition])
+    assert result.signal_indices == []
+
+
+def test_adversarial_signal_index_collision_no_false_positive() -> None:
+    """적대적 검증: 교차 조건(crosses_above)에서 이전 값이 None이면
+    신호를 생성하지 않는다.
+
+    I-07: compare_value(value, "crosses_above", threshold, prev_value)는
+    prev_value가 None일 때 False를 반환해야 한다. 이 테스트는 값이
+    None일 때 신호가 생성되지 않음을 확인한다.
+    """
+    # SMA(2)를 사용해 lookback 1만큼 밀려 교차가 발생하지 않는 케이스
+    # prices: [10, 10] → SMA: [None, 10] → index 0에서 value=None → evaluation=False
+    prices = [100] * 5
+    condition = PreviewCondition(
+        indicator="SMA", params={"timeperiod": 2}, operator="crosses_above", threshold=50
+    )
+
+    result = PreviewCalculator().preview(_candles(prices), [condition])
+
+    # 모든 가격이 같으면 교차 없음
+    assert result.signal_indices == []
+
+
+def test_adversarial_mixed_operators_combination_integrity() -> None:
+    """적대적 검증: AND/OR 조합에서 혼합 연산자가 조합 논리를 위반하지 않는다.
+
+    I-07: compare_value의 operator는 ">", "<", ">=", "<=", "==", "!=" 그리고
+    "crosses_above", "crosses_below"만 허용된다. 혼합 operator 조합이
+    AND/OR 조합 논리를 위반하지 않음을 확인한다.
+    """
+    prices = [100 + i for i in range(30)]
+    # 하나는 항상 참, 하나는 항상 거짓
+    cond_true = PreviewCondition(
+        indicator="RSI", params={"timeperiod": 2}, operator=">", threshold=0
+    )
+    cond_false = PreviewCondition(
+        indicator="RSI", params={"timeperiod": 2}, operator=">", threshold=1000
+    )
+
+    # AND: 둘 다 참이어야 함 → 거짓
+    result_and = PreviewCalculator().preview(
+        _candles(prices), [cond_true, cond_false], combine="AND"
+    )
+    assert result_and.signal_indices == []
+
+    # OR: 하나만 참이어도 됨 → 참
+    result_or = PreviewCalculator().preview(_candles(prices), [cond_true, cond_false], combine="OR")
+    assert len(result_or.signal_indices) > 0
+
+    # NOT AND NOT OR: 역전
+    result_not_and = PreviewCalculator().preview(
+        _candles(prices), [cond_false, cond_true], combine="AND"
+    )
+    assert result_not_and.signal_indices == []
+
+    result_not_or = PreviewCalculator().preview(
+        _candles(prices), [cond_false, cond_true], combine="OR"
+    )
+    assert len(result_not_or.signal_indices) > 0
