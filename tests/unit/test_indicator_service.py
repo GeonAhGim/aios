@@ -183,6 +183,8 @@ def _p95(samples: list[float]) -> float:
 _CALCULATE_BUDGET_MS = 5.0
 
 
+# Wall-clock budgets belong to the serial perf stage (docs/TESTING.md).
+@pytest.mark.perf
 def test_calculate_p95_latency_within_self_declared_budget():
     """수치 성능 단언: ADR-2026-09-09-C Decision 1 예산표에 `calculate()`
     전용 항목이 없다(가장 가까운 항목은 "지표 증분=일괄 동일", 지연 예산은
@@ -202,6 +204,7 @@ def test_calculate_p95_latency_within_self_declared_budget():
 # --- DEEPEN(task-3200): 게이트 적색 재현 — 위 성능 단언의 tautology 여부 ---
 
 
+@pytest.mark.perf
 def test_calculate_budget_gate_actually_fails_past_budget(monkeypatch: pytest.MonkeyPatch):
     """게이트 적색 재현: 실제 성능 테스트를 호출하여 TA-Lib 호출 경로가
     예산을 넘기도록 지연을 주입했을 때 `AssertionError`를 내는지(= CI가
