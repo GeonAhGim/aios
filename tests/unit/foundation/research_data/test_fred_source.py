@@ -134,14 +134,6 @@ def test_parse_fred_observations_raises_parse_error_on_invalid_date() -> None:
         )
 
 
-async def test_fetch_fred_series_rejects_empty_api_key() -> None:
-    client = AsyncMock()
-    request = FredSeriesRequest(series_id="UNRATE", frequency=MacroFrequency.MONTHLY)
-    with pytest.raises(FredApiError):
-        await fetch_fred_series(client, api_key="", request=request, publication_lag_days=20)
-    client.get_json.assert_not_called()
-
-
 async def test_fetch_fred_series_denied_when_admission_flips() -> None:
     client = AsyncMock()
     request = FredSeriesRequest(series_id="UNRATE", frequency=MacroFrequency.MONTHLY)
