@@ -12,6 +12,7 @@ adapter method that writes nothing to the DB/eventstore).
 from __future__ import annotations
 
 import time
+from datetime import UTC
 from decimal import Decimal
 from typing import Any
 
@@ -228,3 +229,154 @@ async def test_get_order_latency_budget():
         await client.get_order("BTCUSDT:1234567")
     elapsed = time.perf_counter() - start
     assert elapsed / 100 < 0.001
+
+
+# ---- get_balance ----
+
+BALANCE_RESPONSE = {
+    "balances": [
+        {"asset": "USDT", "free": "1000.00000000", "locked": "50.00000000"},
+        {"asset": "BTC", "free": "0.50000000", "locked": "0.10000000"},
+        {"asset": "ETH", "free": "0.00000000", "locked": "0.00000000"},  # zero
+    ]
+}
+
+
+async def test_get_balance_returns_nonzero_assets():
+    """Happy path: get_balance() returns only assets with nonzero free+locked."""
+    client = _StubClient(response=BALANCE_RESPONSE)
+    balances = await client.get_balance()
+    assert len(balances) == 2
+    assets = {b.asset: b for b in balances}
+    usdt = assets["USDT"]
+    assert usdt.exchange == "binance"
+    assert usdt.total == Decimal("1050.00000000")
+    assert usdt.available == Decimal("1000.00000000")
+    assert usdt.used_margin == Decimal("50.00000000")
+    btc = assets["BTC"]
+    assert btc.total == Decimal("0.60000000")
+    assert btc.available == Decimal("0.50000000")
+
+
+async def test_get_balance_filters_by_asset():
+    """Happy path: get_balance(asset='BTC') returns only BTC."""
+    client = _StubClient(response=BALANCE_RESPONSE)
+    balances = await client.get_balance(asset="BTC")
+    assert len(balances) == 1
+    assert balances[0].asset == "BTC"
+
+
+async def test_get_balance_empty_when_all_zero():
+    """Negative: response with only zero-balance assets returns []."""
+    client = _StubClient(response={"balances": [{"asset": "XYZ", "free": "0", "locked": "0"}]})
+    balances = await client.get_balance()
+    assert balances == []
+
+
+# ---- get_positions ----
+
+
+async def test_get_positions_returns_empty_list():
+    """Happy path: Binance spot has no position concept -- returns []."""
+    client = _StubClient(response={})
+    positions = await client.get_positions()
+    assert positions == []
+
+
+async def test_get_positions_ignores_symbol_param():
+    """Negative: symbol param is accepted but ignored (spot has no positions)."""
+    client = _StubClient(response={})
+    positions = await client.get_positions(symbol="BTCUSDT")
+    assert positions == []
+
+
+# ---- get_open_orders ----
+
+
+async def test_get_open_orders_returns_list():
+    """Happy path: get_open_orders() returns parsed Order list."""
+    client = _StubClient(response=[_order_response(status="NEW", orderId=1)])
+    orders = await client.get_open_orders("BTCUSDT")
+    assert len(orders) == 1
+    assert orders[0].status == OrderStatus.ACKNOWLEDGED
+    assert orders[0].symbol == "BTCUSDT"
+
+
+async def test_get_open_orders_empty_when_no_data():
+    """Negative: response with empty data array returns []."""
+    client = _StubClient(response={"data": []})
+    orders = await client.get_open_orders("BTCUSDT")
+    assert orders == []
+
+
+# ---- get_fills ----
+
+
+FILLS_RESPONSE = {
+    "data": [
+        {
+            "id": "100",
+            "symbol": "BTCUSDT",
+            "price": "60000.00",
+            "qty": "0.01",
+            "commission": "0.00001000",
+            "orderId": "1234567",
+            "time": 1_700_000_000_000,
+        }
+    ]
+}
+
+
+async def test_get_fills_returns_raw_rows():
+    """Happy path: get_fills() returns raw fill dicts."""
+    client = _StubClient(response=FILLS_RESPONSE)
+    fills = await client.get_fills(symbol="BTCUSDT")
+    assert len(fills) == 1
+    assert fills[0]["symbol"] == "BTCUSDT"
+    assert fills[0]["orderId"] == "1234567"
+
+
+async def test_get_fills_empty_when_no_data():
+    """Negative: response with empty data array returns []."""
+    client = _StubClient(response={"data": []})
+    fills = await client.get_fills(symbol="BTCUSDT")
+    assert fills == []
+
+
+async def test_get_fills_since_param_converts_to_epoch_ms():
+    """Happy path: since=datetime is converted to ms-epoch startTime param."""
+    from datetime import datetime as _dt
+
+    client = _StubClient(response={"data": []})
+    since = _dt(2024, 1, 1, tzinfo=UTC)
+    await client.get_fills(symbol="BTCUSDT", since=since)
+    _, _, params = client.calls[0]
+    assert params is not None
+    assert params["startTime"] == 1704067200000
+
+
+# ---- performance assertion ----
+
+
+@pytest.mark.perf
+async def test_get_balance_latency_budget():
+    """Numeric performance assertion: get_balance() over 1000 calls must
+    average under 1ms -- pure stub, no network."""
+    client = _StubClient(response=BALANCE_RESPONSE)
+    start = time.perf_counter()
+    for _ in range(1000):
+        await client.get_balance()
+    elapsed = time.perf_counter() - start
+    assert elapsed / 1000 < 0.001
+
+
+@pytest.mark.perf
+async def test_get_open_orders_latency_budget():
+    """Numeric performance assertion: get_open_orders() over 1000 calls
+    must average under 1ms."""
+    client = _StubClient(response=[_order_response(status="NEW", orderId=1)])
+    start = time.perf_counter()
+    for _ in range(1000):
+        await client.get_open_orders("BTCUSDT")
+    elapsed = time.perf_counter() - start
+    assert elapsed / 1000 < 0.001
