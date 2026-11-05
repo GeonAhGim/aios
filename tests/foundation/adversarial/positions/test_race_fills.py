@@ -49,6 +49,7 @@ from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_inject import virtual_delayed_async
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 _CONCURRENT_FILLS = 20
@@ -129,7 +130,7 @@ async def _fill_once(
 # ---------------------------------------------------------------------------
 
 
-async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
+async def test_malformed_position_key_rejected(pool: asyncpg.Pool, perf_budget: PerfBudget) -> None:
     """LB-18 negative: f-string/concat로 만든 position_key -> InvalidPositionKeyError."""
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
@@ -151,17 +152,33 @@ async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)
     audit = PostgresAuditEventRepository(pool)
-    with pytest.raises(ValueError):
-        async with pool.acquire() as conn, conn.transaction():
-            await record_fill(
-                conn,
-                command,
-                asset_class=AssetClass.CRYPTO,
-                journal=journal,
-                snapshots=snapshots,
-                audit=audit,
-                clock=_clock,
-            )
+
+    async def _reject_once() -> None:
+        with pytest.raises(ValueError):
+            async with pool.acquire() as conn, conn.transaction():
+                await record_fill(
+                    conn,
+                    command,
+                    asset_class=AssetClass.CRYPTO,
+                    journal=journal,
+                    snapshots=snapshots,
+                    audit=audit,
+                    clock=_clock,
+                )
+
+    await _reject_once()
+    # PERF-detection: best_of_async (min of 5) so one quantized Windows CPU tick cannot flip
+    # the 0-convergent reading; the CPU budget is unchanged by the gate-red below.
+    budget_ms = 50.0
+    green = await perf_budget.best_of_async(_reject_once, n=5, warmup=1)
+    assert green.cpu_ms < budget_ms, perf_budget.describe(green, budget_ms=budget_ms)
+
+    # Gate-red: a virtual 10x-budget delay on the same call must trip the same wall assertion.
+    red = await perf_budget.best_of_async(
+        virtual_delayed_async(_reject_once, budget_ms * 10 / 1000), n=5
+    )
+    assert red.wall_ms >= budget_ms * 10, perf_budget.describe(red, budget_ms=budget_ms)
+    assert not (red.wall_ms < budget_ms)
 
 
 async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
@@ -243,7 +260,7 @@ async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
         await _delete_pos_snapshot(pool, position_key=position_key)
 
 
-async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
+async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool, perf_budget: PerfBudget) -> None:
     """LB-18 negative: 현재 포지션 수량보다 큰 Sell -> NegativeQuantityError."""
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
@@ -297,17 +314,32 @@ async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
         journal = PostgresJournalRepository(pool)
         snapshots = PostgresSnapshotRepository(pool)
         audit = PostgresAuditEventRepository(pool)
-        with pytest.raises(NegativeQuantityError):
-            async with pool.acquire() as conn, conn.transaction():
-                await record_fill(
-                    conn,
-                    command,
-                    asset_class=AssetClass.CRYPTO,
-                    journal=journal,
-                    snapshots=snapshots,
-                    audit=audit,
-                    clock=_clock,
-                )
+
+        async def _reject_once() -> None:
+            with pytest.raises(NegativeQuantityError):
+                async with pool.acquire() as conn, conn.transaction():
+                    await record_fill(
+                        conn,
+                        command,
+                        asset_class=AssetClass.CRYPTO,
+                        journal=journal,
+                        snapshots=snapshots,
+                        audit=audit,
+                        clock=_clock,
+                    )
+
+        await _reject_once()  # the rejection rolls back, so repeating it is state-neutral
+        # PERF-detection: best_of_async (min of 5) against Windows CPU tick quantization.
+        budget_ms = 50.0
+        green = await perf_budget.best_of_async(_reject_once, n=5, warmup=1)
+        assert green.cpu_ms < budget_ms, perf_budget.describe(green, budget_ms=budget_ms)
+
+        # Gate-red: a virtual 10x-budget delay on the same call must trip the same wall assertion.
+        red = await perf_budget.best_of_async(
+            virtual_delayed_async(_reject_once, budget_ms * 10 / 1000), n=5
+        )
+        assert red.wall_ms >= budget_ms * 10, perf_budget.describe(red, budget_ms=budget_ms)
+        assert not (red.wall_ms < budget_ms)
     finally:
         await _delete_pos_snapshot(pool, position_key=position_key)
 
