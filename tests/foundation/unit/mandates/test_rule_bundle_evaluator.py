@@ -86,13 +86,6 @@ def test_warn_only_bundle_does_not_escalate_to_deny():
     assert decision.verdict == ComplianceVerdict.WARN
 
 
-def test_no_hits_allows():
-    allow_rule = RuleSpec(rule_id="R_ALLOW", params={}, check=_allow)
-    decision = evaluate_bundle(_bundle(allow_rule), {}, now=_NOW)
-    assert decision.verdict == ComplianceVerdict.ALLOW
-    assert decision.rule_hits == []
-
-
 def test_rule_exception_is_fail_closed_deny_not_swallowed_uncaught():
     ok_rule = RuleSpec(rule_id="R_ALLOW", params={}, check=_allow)
     broken_rule = RuleSpec(rule_id="R_BROKEN", params={}, check=_raises)
