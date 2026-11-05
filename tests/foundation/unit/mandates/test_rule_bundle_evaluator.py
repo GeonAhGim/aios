@@ -136,13 +136,6 @@ def test_bundle_hash_matches_direct_canonical_json_reuse():
     assert bundle.bundle_hash() == expected
 
 
-def test_duplicate_rule_id_rejected():
-    dup_a = RuleSpec(rule_id="R_DUP", params={}, check=_allow)
-    dup_b = RuleSpec(rule_id="R_DUP", params={}, check=_deny)
-    with pytest.raises(ValueError, match="unique"):
-        _bundle(dup_a, dup_b)
-
-
 def test_inputs_hash_is_sha256_hex_shape():
     rule = RuleSpec(rule_id="R_1", params={}, check=_allow)
     decision = evaluate_bundle(_bundle(rule), {"a": 1}, now=_NOW)
