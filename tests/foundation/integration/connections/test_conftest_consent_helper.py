@@ -15,6 +15,9 @@ from tests.foundation.integration.connections import conftest as helper
 from tests.support.perf_budget import PerfBudget
 from tests.support.perf_inject import virtual_delayed_sync
 
+_POOL: Any = object()
+_REPO: Any = object()
+
 
 class _Recorder:
     def __init__(self) -> None:
@@ -46,8 +49,8 @@ def test_next_revision_is_strictly_monotonic_never_repeats() -> None:
 
 async def test_each_grant_uses_a_fresh_revision_to_avoid_unique_collision(rec: _Recorder) -> None:
     tenant = uuid4()
-    await helper.grant_account_read_consent(object(), object(), tenant_id=tenant)  # type: ignore[arg-type]
-    await helper.grant_account_read_consent(object(), object(), tenant_id=tenant)  # type: ignore[arg-type]
+    await helper.grant_account_read_consent(_POOL, _REPO, tenant_id=tenant)
+    await helper.grant_account_read_consent(_POOL, _REPO, tenant_id=tenant)
     first, second = (rev for _, rev in rec.disclosures)
     assert first != second
     assert [a["disclosure_revision"] for a in rec.accepts] == [first, second]
@@ -55,7 +58,7 @@ async def test_each_grant_uses_a_fresh_revision_to_avoid_unique_collision(rec: _
 
 async def test_consent_is_scoped_to_given_tenant_with_mfa_verified(rec: _Recorder) -> None:
     tenant = uuid4()
-    await helper.grant_account_read_consent(object(), object(), tenant_id=tenant)  # type: ignore[arg-type]
+    await helper.grant_account_read_consent(_POOL, _REPO, tenant_id=tenant)
     ctx = rec.accepts[0]["ctx"]
     assert ctx.tenant_id == tenant and ctx.subject_id == tenant and ctx.mfa_verified is True
     assert rec.accepts[0]["purpose"] == helper.ACCOUNT_READ_CONSENT_PURPOSE
@@ -69,7 +72,7 @@ async def test_accept_is_not_attempted_when_disclosure_creation_fails(
 
     monkeypatch.setattr(helper, "create_disclosure", _boom)
     with pytest.raises(RuntimeError, match="disclosure insert failed"):
-        await helper.grant_account_read_consent(object(), object(), tenant_id=uuid4())  # type: ignore[arg-type]
+        await helper.grant_account_read_consent(_POOL, _REPO, tenant_id=uuid4())
     assert rec.accepts == []
 
 
@@ -84,7 +87,7 @@ async def test_accept_failure_propagates_instead_of_silent_consent(
 
     monkeypatch.setattr(helper, "accept_disclosure", _boom)
     with pytest.raises(RuntimeError, match="trust repo down"):
-        await helper.grant_account_read_consent(object(), object(), tenant_id=uuid4())  # type: ignore[arg-type]
+        await helper.grant_account_read_consent(_POOL, _REPO, tenant_id=uuid4())
 
 
 # --- performance + gate-red ---------------------------------------------------------
