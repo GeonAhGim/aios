@@ -54,6 +54,10 @@ regexes = [
   '''\bpw\d{8,}\b''',
   '''\{uuid4\(\)\.hex\}''',
   '''secref://[A-Za-z0-9_./-]+''',
+  # 2026-11-06: Binance 공식 API 문서(HMAC SHA256 signature 예시)에 공개된 예시 비밀키 -- 실제 자격증명이 아니다.
+  # tests/exchanges/binance/test_binance_auth.py(task-7600)의 서명 고정 벡터가 문서의 기대 서명과 일치하는지 검증하는 데 쓴다.
+  # 경로 단위가 아니라 이 정확한 값 하나만 허용한다 -- 같은 파일에 다른 비밀이 들어오면 여전히 잡힌다.
+  '''NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j''',
   # .env.example은 변수명만 나열하고 값은 비워 둔다(실제 키 없음).
   '''(CREDENTIAL_ENCRYPTION_KEY|CREDENTIAL_ENCRYPTION_KEYS_(PAPER|LIVE)|BITGET_API_(KEY|SECRET)|KIS_APP_(KEY|SECRET)|NH_APP_(KEY|SECRET))\s*=\s*(#.*)?$''',
 ]
