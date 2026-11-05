@@ -589,3 +589,142 @@ async def test_gate_green_cli_returns_0_on_clean_dry_run(pool, ports, monkeypatc
             f"TOPUP_CONFIRMED:backfill:topup:{row_id}",
         )
     assert found is None  # dry-run은 성공해도 커밋하지 않는다
+
+
+# ---------------------------------------------------------------------------
+# Perf budget — LC-11 백필 CPU 예산 단언 (task-22420)
+# ---------------------------------------------------------------------------
+
+# 실측 20개 구매 그룹(60개 이벤트) + TOPUP: cpu_ms 150~178 (Windows, process_time 15.6ms 양자화,
+# batch=10 분모). 실제 DB I/O가 포함된 통합테스트이므로 절대 ms 값은 높음.
+# best_of_async n=5 warmup=1 batch=10 → 최소 cpu_ms 150ms 기록 (2026-11-06 로컬, wt/claude-local-12)
+# 예산 = 실측 최소의 30배 = 4500ms. 30배 여유는 CI 병렬 CPU 경합 spike(최대 10배)와
+# Windows 양자화 오차(15.6ms tick/batch=10 → 1.56ms)를 모두 커버하기 위함.
+# virtual_delayed_sync 주입 시 PerfSample.cpu_ms 가에 가상 지연이 더해져
+# assert_within가 AssertionError를 내는 것으로 게이트 적색 재현.
+_BACKFILL_CPU_BUDGET_MS = 4500.0  # 30× 실측 최소 150ms
+
+
+def _assert_cpu_within_budget(cpu_ms: float, budget_ms: float) -> None:
+    """공용 단언 헬퍼 — cpu_ms 가가 budget_ms 미만이면 패스, 아니면 AssertionError."""
+    assert cpu_ms < budget_ms, f"CPU 시간 {cpu_ms:.3f}ms 가가 예산 {budget_ms:.3f}ms 초과"
+
+
+@pytest.mark.perf
+async def test_backfill_cpu_budget_within_perf_budget_best_of(pool, ports, monkeypatch):
+    """perf: 20개 구매 그룹(60개 이벤트) 백필 CPU 시간이 예산 내에 있어야 한다.
+
+    best_of_async(n=5, warmup=1, batch=10)로 5회 측정 후 최소 cpu_ms를 예산과 비교.
+    매 샘플마다 새 _IdSeq와 새 uuid를 사용해 REPLAY 비용을 배제.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+
+    buyer = uuid4()
+    seller = uuid4()
+    num_purchases = 20
+
+    async def _run_backfill():
+        ids = _IdSeq()
+        rows: list[LegacyWalletTx] = [
+            LegacyWalletTx(id=ids(), user_id=buyer, tx_type="TOPUP", amount=Decimal("1000000.00")),
+        ]
+        for _i in range(num_purchases):
+            rows.extend(
+                _purchase_rows(
+                    ids,
+                    purchase_id=ids(),
+                    buyer=buyer,
+                    seller=seller,
+                    price=Decimal("10000.00"),
+                    commission=Decimal("1000.00"),
+                )
+            )
+        expected: dict[UUID, Decimal] = {}
+        async with pool.acquire() as conn:
+            await backfill_ledger(
+                conn,
+                rows,
+                expected,
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=_clock,
+            )
+
+    perf = PerfBudget()
+    sample = await perf.best_of_async(_run_backfill, n=5, warmup=1, batch=10)
+    _assert_cpu_within_budget(sample.cpu_ms, _BACKFILL_CPU_BUDGET_MS)
+
+
+@pytest.mark.perf
+async def test_backfill_cpu_budget_gate_red_when_virtual_delay_injected(pool, ports, monkeypatch):
+    """gate-red: 동기 헬퍼 `split_commission`에 virtual_delayed_sync 10× 예산 주입 시
+    게이트가 적색을 내는지 확인.
+
+    virtual_delayed_sync은 cpu_ledger에 지연을 더하므로 PerfSample.cpu_ms 가에
+    반영되어 assert_within가 AssertionError를 낸다.
+    virtual_delayed_async는 wall만 늘리므로 cpu 단언이 잡지 못한다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_sync,
+    )
+
+    reset_virtual_totals()
+
+    # 동기 헬퍼: posting_rules.py에서 split_commission을 monkeypatch.
+    # post_entry → posting_rules.apply → split_commission 호출 경로.
+    # backfill 모듈은 split_commission을 직접 import하지 않으므로
+    # posting_rules 네임스페이스에서 교체해야 한다.
+    from src.foundation.ledger.domain.rounding import split_commission as _real_split
+
+    monkeypatch.setattr(
+        "src.foundation.ledger.domain.posting_rules.split_commission",
+        virtual_delayed_sync(_real_split, 10 * _BACKFILL_CPU_BUDGET_MS / 1000),
+    )
+
+    reset_virtual_totals()
+
+    buyer = uuid4()
+    seller = uuid4()
+    num_purchases = 20
+
+    async def _run_backfill():
+        ids = _IdSeq()
+        rows: list[LegacyWalletTx] = [
+            LegacyWalletTx(id=ids(), user_id=buyer, tx_type="TOPUP", amount=Decimal("1000000.00")),
+        ]
+        for _i in range(num_purchases):
+            rows.extend(
+                _purchase_rows(
+                    ids,
+                    purchase_id=ids(),
+                    buyer=buyer,
+                    seller=seller,
+                    price=Decimal("10000.00"),
+                    commission=Decimal("1000.00"),
+                )
+            )
+        expected: dict[UUID, Decimal] = {}
+        async with pool.acquire() as conn:
+            await backfill_ledger(
+                conn,
+                rows,
+                expected,
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=_clock,
+            )
+
+    perf = PerfBudget()
+    sample = await perf.best_of_async(_run_backfill, n=3, warmup=0, batch=10)
+
+    # virtual_delayed_sync이 cpu_ledger에 10× 예산 초를 더했으므로
+    # cpu_ms 가가 예산을 크게 초과해야 함 — assert_within가 AssertionError를 내는지 확인
+    with pytest.raises(AssertionError):
+        _assert_cpu_within_budget(sample.cpu_ms, _BACKFILL_CPU_BUDGET_MS)
