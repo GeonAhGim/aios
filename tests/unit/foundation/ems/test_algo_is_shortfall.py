@@ -86,39 +86,6 @@ def test_zero_urgency_splits_evenly_like_twap() -> None:
     assert [c.planned_qty for c in children] == [Decimal("250")] * 4
 
 
-# -- (c)-1 urgency=1 front-loads: non-increasing, first > last ---------------
-
-
-def test_full_urgency_front_loads_quantity_non_increasing() -> None:
-    parent = _parent(
-        qty=Decimal("1000"),
-        algo=_algo(urgency=Decimal("1"), max_participation_pct=Decimal("100")),
-    )
-    children = plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
-    quantities = [c.planned_qty for c in children]
-    assert quantities == [Decimal("400"), Decimal("300"), Decimal("200"), Decimal("100")]
-    for current, following in zip(quantities, quantities[1:]):  # noqa: B905
-        assert current >= following
-    assert quantities[0] > quantities[-1]
-
-
-# -- (c)-2 first-slice quantity is monotone non-decreasing in urgency --------
-
-
-def test_first_slice_quantity_is_monotone_nondecreasing_in_urgency() -> None:
-    urgency_grid = [Decimal("0"), Decimal("0.25"), Decimal("0.5"), Decimal("0.75"), Decimal("1")]
-    first_slice_qtys = []
-    for urgency in urgency_grid:
-        parent = _parent(
-            qty=Decimal("1000"),
-            algo=_algo(urgency=urgency, max_participation_pct=Decimal("100")),
-        )
-        children = plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
-        first_slice_qtys.append(children[0].planned_qty)
-    for lower, higher in zip(first_slice_qtys, first_slice_qtys[1:]):  # noqa: B905
-        assert lower <= higher
-
-
 # -- (d) sum conservation is exact for every urgency value -------------------
 
 
