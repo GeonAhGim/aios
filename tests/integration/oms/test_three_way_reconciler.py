@@ -89,7 +89,9 @@ async def test_reconcile_healthy_reports_zero_discrepancies(pool):
 
 
 async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(
-    pool, mandate_repo, trust_repo,  # noqa: F811
+    pool,
+    mandate_repo,  # noqa: F811
+    trust_repo,  # noqa: F811
 ):
     """REC-002 + DoD (b) — 체결수량 불일치는 MATERIAL_MISMATCH, 그동안 같은
     계정의 신규 submit_order는 DENY, 해소되면 같은 명령이 다시 허용된다."""
@@ -172,7 +174,9 @@ async def test_reconcile_material_mismatch_denies_and_resolving_allows_submit(
 
 
 async def test_reconcile_confirmed_cancel_self_heals_and_reopens_gate(
-    pool, mandate_repo, trust_repo,  # noqa: F811
+    pool,
+    mandate_repo,  # noqa: F811
+    trust_repo,  # noqa: F811
 ):
     """task-7978 F1 — 거래소가 실제로 취소를 확정한 주문(체결 없이 open-orders
     에서 사라짐)이 `CANCEL_REQUESTED` 이력을 갖고 있으면 대사가 스스로
@@ -257,6 +261,17 @@ async def test_reconcile_missing_without_cancel_history_stays_material_mismatch(
     assert summary.discrepancies[0].kind == "ORDER_MISSING_AT_PROVIDER"
     assert await order_status(pool, order_id) == "ACKNOWLEDGED"
     assert await active_account_controls(pool, user_id) == 1
+    # negative 3 — self-heal 이력이 전혀 없는 missing 주문에 VENUE_CANCELLED
+    # 이벤트가order_events에 기록되지 않는다(스파이킹 방지).
+    async with pool.acquire() as conn:
+        venue_cancel_events = await conn.fetchval(
+            """
+            SELECT count(*) FROM order_events
+            WHERE order_id = $1 AND event = 'VENUE_CANCELLED'
+            """,
+            order_id,
+        )
+    assert venue_cancel_events == 0
 
 
 async def test_reconcile_provider_unavailable_never_assumes_zero(pool):
@@ -425,7 +440,10 @@ async def test_reconcile_fails_closed_when_risk_gate_repository_raises(pool, mon
 
 
 async def test_reconcile_gate_red_when_account_gate_wiring_removed_allows_submit_during_mismatch(
-    pool, monkeypatch, mandate_repo, trust_repo,  # noqa: F811
+    pool,
+    monkeypatch,
+    mandate_repo,  # noqa: F811
+    trust_repo,  # noqa: F811
 ):
     """게이트 적색 재현 — 모듈 docstring의 경고("`activate_safety_control` 호출을
     지우면 DENY 단언이 실패한다")를 실제로 재현한다. `_apply_account_gate`
