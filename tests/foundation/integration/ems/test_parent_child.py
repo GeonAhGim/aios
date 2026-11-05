@@ -150,6 +150,7 @@ class TestParentChildLifecyclePositive:
         ]
         validate_aggregate_fills(uuid4(), children, Decimal("100"))  # no exception
 
+    @pytest.mark.perf
     def test_performance_aggregate_large_tree(self):
         """Aggregate parent state over 1000 children — O(1) per child, total < 100ms."""
         import time
