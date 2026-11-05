@@ -43,6 +43,7 @@ from src.foundation.market_data.domain.corporate_actions.adjustment import (
     factor_chain,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def _candle(instrument_id: UUID, open_time: datetime, close: Decimal) -> CandleRecord:
@@ -338,12 +339,12 @@ def test_factor_chain_and_adjust_large_batch_stays_correct(perf_budget: PerfBudg
         return adjust(candles, factors)
 
     # Performance assertion (ADR-2026-09-09-C D2): 500 actions + 2000 candles
-    # must complete under 10 seconds on CI-grade hardware.  Measured p95 ~0.08s
-    # on a M2 Mac (2024-04); widened from 1s to 3s to 6s to 10s to absorb CI
-    # parallel variance (task-15117, task-15512, task-15530).  `batch=5` bundles
-    # calls so the total CPU time clears Windows' ~15.6ms process_time tick
-    # (task-11802).
-    sample = perf_budget.assert_within(_run, budget_ms=10000.0, batch=5)
+    # must complete under 1 second (CPU time, best-of-5) -- restored from the
+    # 10s widening (task-15117/15512/15530 only cited CI parallel variance, no
+    # measurement; CPU-time budgets are immune to that).  Measured p95 ~0.08s.
+    # `batch=5` bundles calls so the total CPU time clears Windows' ~15.6ms
+    # process_time tick (task-11802).
+    sample = perf_budget.assert_within(_run, budget_ms=1000.0, batch=5)
     adjusted = cast(list[CandleRecord], sample.result)
 
     # The earliest candle reflects all 40 splits (2:1 each): divided by 2^40.
@@ -351,3 +352,22 @@ def test_factor_chain_and_adjust_large_batch_stays_correct(perf_budget: PerfBudg
     # An adjustment past `as_of` is not reflected.
     assert adjusted[-1].close == Decimal("100")
     print(f"\nfactor_chain+adjust latency (500 splits, 2000 candles): {sample.cpu_ms:.4f}ms")
+
+
+@pytest.mark.perf
+def test_large_batch_budget_assertion_goes_red_on_10x_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red repro (D2): the same 1000ms assert_within goes red when a 10x
+    virtual CPU delay (10s, no real sleep) is added to each call."""
+    instrument_id = uuid4()
+    actions = [_split(instrument_id, date(2020, 1, 1) + timedelta(days=i), "2") for i in range(40)]
+    as_of = datetime(2021, 6, 1, tzinfo=UTC)
+    candles = [_candle(instrument_id, datetime(2019, 12, 31, tzinfo=UTC), Decimal("100"))]
+
+    def _run() -> list[CandleRecord]:
+        return adjust(candles, factor_chain(actions, as_of))
+
+    delayed = virtual_delayed_sync(_run, 10.0)
+    with pytest.raises(AssertionError, match="budget<1000"):
+        perf_budget.assert_within(delayed, budget_ms=1000.0, batch=5)
