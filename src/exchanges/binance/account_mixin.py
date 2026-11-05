@@ -1,28 +1,32 @@
-"""BR-22c -- BinanceAccountMixin: get_order.
+"""BR-22c -- BinanceAccountMixin: get_balance/get_positions/get_open_orders/get_fills/get_order.
 
-Spec: docs/audits/AUDIT_2026-09-26_order_path.md §3 F2(S), task-7997.
+Spec: docs/exchanges/ADDING_AN_EXCHANGE.md step 1,
+      docs/audits/AUDIT_2026-09-26_order_path.md §3 F2(S), task-7997.
 
-Endpoint (verified 2026-09-26 against the official Binance Spot API
-documentation, github.com/binance/binance-spot-api-docs, `rest-api.md`
-§"Query order (USER_DATA)"):
-- GET /api/v3/order -- required: symbol, orderId. Response fields used
-  here: `symbol`, `orderId`, `clientOrderId`, `price`, `origQty`,
-  `executedQty`, `cummulativeQuoteQty`, `status`, `type`, `side`, `time`
-  (creation, ms epoch), `updateTime` (ms epoch). `status` enumerates NEW /
-  PENDING_NEW / PARTIALLY_FILLED / FILLED / CANCELED / PENDING_CANCEL /
-  REJECTED / EXPIRED / EXPIRED_IN_MATCH -- all mapped below, unmapped
-  values fall back to UNKNOWN (8.3 principle: an unrecognized value is not
-  assumed to mean failure).
+Endpoints (verified 2026-09-26 against the official Binance Spot API
+documentation, github.com/binance/binance-spot-api-docs, `rest-api.md`):
+- GET /api/v3/account -- account status and balances. Used fields:
+  `balances[]`: `asset`, `free`, `locked`.
+- GET /api/v3/openOrders -- all open orders. Same field shape as
+  /api/v3/order (see ``row_to_order`` helper).
+- GET /api/v3/myTrades -- filled trades for a symbol. Fields:
+  `id` (trade id), `symbol`, `price`, `qty`, `commission`, `orderId`,
+  `time` (ms epoch). `isBuyer` flag distinguishes side.
+- GET /api/v3/order -- single order status lookup (existing).
 
 Deviation: same "{symbol}:{orderId}" composite `exchange_order_id`
 convention as `trading_mixin.py::place_order`/`cancel_order`/
 `modify_order` (docstring there) -- this closes the loop
 `trading_mixin.BinanceTradingMixin`'s `_OrderMutatingClient` Protocol
 already declared (`modify_order` calling `self.get_order(...)` after a
-cancelReplace) but had no implementation for until now. Before this leaf,
-Binance had no way to resolve an UNKNOWN order (unknown_resolver), recover
-state after a restart (restart_recovery), or reverse-lookup by clientOid
--- all three require this method to exist (task-7978 F2 finding).
+cancelReplace) but had no implementation for until now.
+
+get_positions(): Binance spot (cash mode) has no per-symbol position
+concept -- holdings live in balances instead. Returns [] (empty list)
+rather than raising ``UnsupportedCapabilityError``, because spot
+positions are genuinely empty (not "we don't know how to query them").
+This matches OKX's spot-mode convention
+(`okx/account_mixin.py` docstring).
 
 Every field this method trusts comes from the exchange's own response;
 AIOS-only context (strategy_id/strategy_version/asset_class) is left as a
@@ -38,8 +42,18 @@ from typing import Any, Protocol
 
 from src.core.exceptions import FatalExchangeError
 from src.data.models.base import AssetClass, Currency, Money
-from src.data.models.trading import Order, OrderSide, OrderStatus, OrderType
+from src.data.models.trading import (
+    AccountBalance,
+    Order,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Position,
+)
 
+_ACCOUNT_PATH = "/api/v3/account"
+_OPEN_ORDERS_PATH = "/api/v3/openOrders"
+_FILLS_PATH = "/api/v3/myTrades"
 _ORDER_PATH = "/api/v3/order"
 _QUOTE_CURRENCIES = ("USDT",)  # Phase 1 scope (bitget/kis account_mixin.py precedent)
 
@@ -93,12 +107,10 @@ def _parse_epoch_ms(raw_ms: Any) -> datetime:
 
 
 def _average_fill_price(symbol: str, data: dict[str, Any]) -> Money | None:
-    """`cummulativeQuoteQty / executedQty` is Binance's own documented way
-    to derive the average fill price (no separate `avgPrice` field on this
-    endpoint). Only computed for USDT-quoted symbols (Phase 1 scope,
-    `_QUOTE_CURRENCIES`) since `Money` has no currency for other quotes
-    yet -- other symbols keep this `None` rather than mislabel the
-    currency."""
+    """`cummulativeQuoteQty / executedQty` is Binance's own average fill
+    price. Returns None when executedQty is zero (order not yet filled) or
+    when the symbol is not a known quote currency (USDT phase-1 scope) --
+    the caller can fill currency from context."""
     if not symbol.endswith(_QUOTE_CURRENCIES):
         return None
     executed_qty = Decimal(str(data.get("executedQty", "0")))
@@ -106,6 +118,40 @@ def _average_fill_price(symbol: str, data: dict[str, Any]) -> Money | None:
         return None
     cumulative_quote = Decimal(str(data.get("cummulativeQuoteQty", "0")))
     return Money(amount=cumulative_quote / executed_qty, currency=Currency.USDT)
+
+
+def _row_to_order(row: dict[str, Any]) -> Order:
+    """Convert a raw Binance order row (from get_order or get_open_orders)
+    into a domain ``Order``."""
+    symbol = row["symbol"]
+    try:
+        status = _map_status(row["status"])
+        order_type = _map_order_type(row["type"])
+        side = OrderSide(row["side"])
+    except KeyError as exc:
+        raise FatalExchangeError(f"Binance order row missing expected field: {exc}") from exc
+    except ValueError:
+        raise FatalExchangeError(
+            f"Binance order row has unrecognized side: {row['side']!r}"
+        ) from None
+
+    return Order(
+        exchange_order_id=f"{symbol}:{row.get('orderId', '')}",
+        client_order_id=row.get("clientOrderId", ""),
+        strategy_id="",  # placeholder -- caller must fill from a DB lookup
+        strategy_version="",
+        symbol=symbol,
+        exchange="binance",
+        side=side,
+        order_type=order_type,
+        quantity=Decimal(str(row["origQty"])),
+        status=status,
+        filled_quantity=Decimal(str(row["executedQty"])),
+        average_fill_price=_average_fill_price(symbol, row),
+        created_at=_parse_epoch_ms(row["time"]),
+        updated_at=_parse_epoch_ms(row.get("updateTime", row["time"])),
+        asset_class=AssetClass.CRYPTO,
+    )
 
 
 class _BinanceAccountClient(Protocol):
@@ -124,6 +170,76 @@ class _BinanceAccountClient(Protocol):
 
 
 class BinanceAccountMixin:
+    async def get_balance(
+        self: _BinanceAccountClient,
+        asset: str | None = None,
+    ) -> list[AccountBalance]:
+        raw = await self._request("GET", _ACCOUNT_PATH)
+        balances: list[dict[str, Any]] = raw.get("balances", [])
+        result: list[AccountBalance] = []
+        for item in balances:
+            free = Decimal(item["free"])
+            locked = Decimal(item["locked"])
+            if free == 0 and locked == 0:
+                continue  # skip zero-balance assets
+            if asset is not None and item["asset"] != asset:
+                continue
+            result.append(
+                AccountBalance(
+                    exchange="binance",
+                    asset=item["asset"],
+                    total=free + locked,
+                    available=free,
+                    used_margin=locked,
+                )
+            )
+        return result
+
+    async def get_positions(
+        self: _BinanceAccountClient,
+        symbol: str | None = None,  # noqa: ARG002
+    ) -> list[Position]:
+        """Binance spot (cash mode) has no per-symbol position concept.
+        Holdings are tracked via ``get_balance()`` instead. Returns [] --
+        this is a factual empty set, not an unsupported operation."""
+        return []
+
+    async def get_open_orders(
+        self: _BinanceAccountClient,
+        symbol: str | None = None,
+    ) -> list[Order]:
+        params: dict[str, Any] | None = {"symbol": symbol} if symbol else None
+        raw = await self._request("GET", _OPEN_ORDERS_PATH, params=params)
+        if isinstance(raw, list):
+            rows = raw
+        elif isinstance(raw, dict):
+            rows = raw.get("data", [])
+        else:
+            rows = []
+        return [_row_to_order(row) for row in rows]
+
+    async def get_fills(
+        self: _BinanceAccountClient,
+        symbol: str | None = None,
+        *,
+        order_id: str | None = None,
+        since: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {}
+        if symbol is not None:
+            params["symbol"] = symbol
+        if order_id is not None:
+            params["orderId"] = order_id
+        if since is not None:
+            params["startTime"] = int(since.timestamp() * 1000)
+        raw = await self._request("GET", _FILLS_PATH, params=params or None)
+        rows: list[dict[str, Any]] = raw.get("data", raw)
+        if isinstance(raw, list):
+            rows = raw
+        if isinstance(rows, dict):
+            rows = rows.get("data", [])
+        return list(rows)
+
     async def get_order(self: _BinanceAccountClient, order_id: str) -> Order:
         symbol, binance_order_id = _split_exchange_order_id(order_id)
         raw = await self._request(
