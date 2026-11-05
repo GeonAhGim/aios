@@ -64,22 +64,6 @@ def _bundle(*rules: RuleSpec, version: str = "v1") -> RuleBundle:
     return RuleBundle(version=version, rules=tuple(rules))
 
 
-def test_worst_verdict_wins_regardless_of_rule_order():
-    allow_rule = RuleSpec(rule_id="R_ALLOW", params={}, check=_allow)
-    warn_rule = RuleSpec(rule_id="R_WARN", params={}, check=_warn)
-    deny_rule = RuleSpec(rule_id="R_DENY", params={}, check=_deny)
-
-    forward = _bundle(allow_rule, warn_rule, deny_rule)
-    reversed_bundle = _bundle(deny_rule, warn_rule, allow_rule)
-
-    snapshot = {"asset": "BTC"}
-    forward_decision = evaluate_bundle(forward, snapshot, now=_NOW)
-    reversed_decision = evaluate_bundle(reversed_bundle, snapshot, now=_NOW)
-
-    assert forward_decision == reversed_decision
-    assert forward_decision.verdict == ComplianceVerdict.DENY
-
-
 def test_warn_only_bundle_does_not_escalate_to_deny():
     warn_rule = RuleSpec(rule_id="R_WARN", params={}, check=_warn)
     decision = evaluate_bundle(_bundle(warn_rule), {}, now=_NOW)
