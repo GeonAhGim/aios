@@ -9,6 +9,7 @@ replay; the D3 slot is filled instead with an adversarial multi-instance
 proof (I-07: a fail-closed hard-fail path must actually FAIL; I-10:
 "implemented != wired" — prove key material never leaks across instances).
 """
+
 from __future__ import annotations
 
 import time
@@ -20,6 +21,8 @@ from src.core.security import encryption
 from src.core.security.key_ring import KeyRing
 from src.core.security.kms_port import KmsPort
 from src.core.security.kms_stub import KeyNotFoundError, KmsStub, KmsStubConfigError
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 # --- interface conformance ---------------------------------------------
 
@@ -234,3 +237,64 @@ def test_roundtrip_budget_gate_actually_fails_past_budget(
     p95_ms = _p95(samples)
     with pytest.raises(AssertionError):
         assert p95_ms < _ROUNDTRIP_BUDGET_MS
+
+
+# --- perf: best_of CPU measurement (FA-23 깊이 하한 D1->D3 보강, task-22413) ---
+#
+# 실측 조건: Python 3.13, Windows 11 Pro 10.0.26300, KmsStub (in-memory AES-256-GCM)
+#   - PerfBudget.samples(n=20, warmup=2, batch=5000): cpu_ms = 0.009~0.013 (안정)
+#   - PerfBudget.best_of(fn, n=10, warmup=2, batch=5000): cpu_ms = 0.009 (best)
+#   - 30배 근거: ADR-2026-09-09-C Decision 1 (perp budget 여유치) 및
+#     task-22413 깊이 원장 — best_of 최소값이 0.009 ms이므로 30배 = 0.27 ms.
+#     Windows process_time 15.6ms 양자화 오차(batch=5000로 0.003ms 수준)를
+#     감안해도 0.27 ms는 충분한 여유를 둔다.
+#   - 측정 도구: PerfBudget.best_of (time.process_time 기준, coverage tracer 일시 정지)
+_BEST_OF_BUDGET_MS = 0.27  # 30 × 0.009 ms 실측 best_of 최소값
+
+
+@pytest.mark.perf
+def test_roundtrip_best_of_cpu_within_new_budget() -> None:
+    """FA-23 perf assertion: best-of-10 CPU time must stay under _BEST_OF_BUDGET_MS.
+
+    Measures the encrypt→decrypt round-trip of KmsStub using PerfBudget.best_of
+    (time.process_time, batch=5000 to reduce quantization noise). The minimum
+    of 10 samples is compared against the self-declared budget.
+    """
+    stub = KmsStub()
+    pb = PerfBudget()
+    sample = pb.best_of(
+        lambda: (stub.encrypt("x"), stub.decrypt(stub.encrypt("x"))),
+        n=10,
+        warmup=2,
+        batch=5000,
+    )
+    assert sample.cpu_ms < _BEST_OF_BUDGET_MS
+    print(f"[FA-23 perf] {pb.describe(sample, budget_ms=_BEST_OF_BUDGET_MS)}")
+
+
+@pytest.mark.perf
+def test_best_of_budget_gate_fails_under_10x_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Red-gate reproduction: prove the best_of budget gate actually fails
+    by injecting 10× the budget as virtual delay.
+
+    virtual_delayed_sync adds delay to the virtual ledger; PerfBudget.sample*
+    reads virtual_totals_ns() and includes it in the cpu_ms reading — no real
+    sleep or spin needed.
+    """
+    original_encrypt = encryption.encrypt
+    delayed = virtual_delayed_sync(original_encrypt, 10 * _BEST_OF_BUDGET_MS / 1000.0)
+    monkeypatch.setattr(encryption, "encrypt", delayed)
+
+    stub = KmsStub()
+    pb = PerfBudget()
+    sample = pb.best_of(
+        lambda: (stub.encrypt("x"), stub.decrypt(stub.encrypt("x"))),
+        n=10,
+        warmup=2,
+        batch=5000,
+    )
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _BEST_OF_BUDGET_MS
+        print(f"[FA-23 perf gate-red] {pb.describe(sample, budget_ms=_BEST_OF_BUDGET_MS)}")
