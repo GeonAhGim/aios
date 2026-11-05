@@ -1,6 +1,7 @@
 """BR-22e -- Binance WS parser tests with fake frames (no real socket)."""
 
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -90,6 +91,6 @@ def test_malformed_orderbook_raises(bad: object) -> None:
         {"e": "listenKeyExpired", "E": 1},
     ],
 )
-def test_malformed_order_raises(bad: dict) -> None:
+def test_malformed_order_raises(bad: dict[str, Any]) -> None:
     with pytest.raises(FatalExchangeError):
         parse_order_ws_message(bad)
