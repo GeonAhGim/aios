@@ -364,7 +364,7 @@ def test_corrupted_participation_cap_is_rejected_even_when_every_slice_qty_is_ze
 def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count(
     perf_budget: PerfBudget,
 ) -> None:
-    """500 slices (the module's own `_MAX_SLICE_COUNT` cap) x 50 calls must
+    """500 slices (the module's own `_MAX_SLICE_COUNT` cap) x 10 calls must
     finish well under a generous budget -- a regression that turned the
     per-slice O(n) loop, weight computation, or the guard calls into
     something O(n^2) would blow well past this on 500 slices. task-7434:
@@ -383,11 +383,13 @@ def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count(
     profile = [Decimal("100000")] * 500
 
     def _run_once() -> None:
-        for _ in range(50):
+        for _ in range(10):
             plan_is_schedule(parent, volume_profile=profile)
 
+    # Same 16ms/call budget as before (was 50 calls / 800ms); a shorter timed
+    # window is less exposed to CPU-time inflation when workers share cores.
     perf_budget.assert_within(
-        _run_once, budget_ms=800.0, label="50 plan_is_schedule calls at 500 slices"
+        _run_once, budget_ms=160.0, n=7, label="10 plan_is_schedule calls at 500 slices"
     )
 
 
