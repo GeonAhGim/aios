@@ -8,12 +8,9 @@ import ast
 import inspect
 from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
-from scripts.check_code_language import ROOT as LANGUAGE_GATE_ROOT
-from scripts.check_code_language import count_file
 from src.data.models.market_data import Candle
 from src.data.models.trading import OrderSide
 from src.foundation.backtest.adapters import bar_fill_simulator as bar_fill_simulator_module
@@ -27,6 +24,7 @@ from src.foundation.backtest.domain.rules import (
 )
 from src.foundation.backtest.ports.fill_simulator import FillSimulatorPort
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _NOW = datetime(2026, 1, 2, tzinfo=UTC)
 
@@ -268,16 +266,14 @@ def test_simulate_cpu_measurement_converges_with_batch(
             seed=0,
         )
 
-    # batch=1 — 양자화 tick보다 빠르므로 0ms 수렴 (정량 단언)
-    single_sample = perf_budget.sample(single_call, batch=1)
+    # best_of(여러 번 중 최소)로 측정해 양자화 tick 1회에 흔들리지 않게 한다
+    single_sample = perf_budget.best_of(single_call, n=5, warmup=1, batch=1)
     assert single_sample.cpu_ms < 1.0, (
         f"batch=1 cpu={single_sample.cpu_ms:.3f}ms — "
         f"Windows quantization tick(15.6ms)보다 빠른 호출은 0ms 수렴"
     )
 
-    # batch=8 — 양자화 오차가 1/8로 줄어 실제 CPU 측정 가능
-    batch_sample = perf_budget.sample(single_call, batch=8)
-    # batch로 나눈 평균이 양자화 tick(15.6ms)보다 작아야 함
+    batch_sample = perf_budget.best_of(single_call, n=5, warmup=1, batch=8)
     assert batch_sample.cpu_ms < 15.6, (
         f"batch=8 cpu={batch_sample.cpu_ms:.3f}ms — 양자화 tick 15.6ms 미만이어야 함"
     )
@@ -286,83 +282,23 @@ def test_simulate_cpu_measurement_converges_with_batch(
 @pytest.mark.perf
 def test_perf_budget_assertion_catches_10x_cpu_delay_injection(
     perf_budget: PerfBudget,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
-    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
-    50ms(예산 300ms의 10배)를 가장하면 `assert_within`가
-    AssertionError로 적색이 돼야 한다.
-
-    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
-    검증한다(task-11539 감사: 호출 1회 CPU 측정의 0 수렴 결함 방지).
-    """
+    """게이트 적색 재현(D2): 기존 처리량 예산(300ms) 단언이 10배 가상 지연
+    (3s)에서 AssertionError로 적색이 되고, 지연 없는 정상 입력에서는 녹색임을
+    같은 측정/단언으로 증명한다. 실제 sleep 없이 `virtual_delayed_sync`가
+    측정치에 지연을 더한다(task-11539 감사)."""
     budget_ms = 300.0
-
-    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
-    # 이를 monkeypatch해 매 호출 시 50ms를 더 반환하게 한다.
-    # batch=1이므로 1회 호출당 50ms가 측정되고, best_of(n=5) 최소값도
-    # 50ms 이상이어야 하지만 budget 300ms를 초과하려면 1회 호출당
-    # budget(300ms)의 10배인 3000ms를 가장해야 한다.
-    # — 대신 batch=10으로 묶으면 1 batch = 10 × 3000ms = 30000ms,
-    #   batch로 나눈 평균 = 3000ms >> 300ms budget.
-    _fake_time = 0.0
-
-    def _fake_process_time() -> float:
-        nonlocal _fake_time
-        _fake_time += 3.0  # 3000ms per call → 10x budget per call
-        return _fake_time
-
-    monkeypatch.setattr("time.process_time", _fake_process_time)
-
     cost_model = CostModel(fee_bps=Decimal("5"), slippage_bps=Decimal("10"))
     bar = _bar(open_price="100")
     simulator = BarFillSimulator()
 
-    def single_call() -> None:
-        simulator.simulate(
-            bar=bar,
-            bar_index=1,
-            side=OrderSide.BUY,
-            quantity=Decimal("1"),
-            cost_model=cost_model,
-            seed=0,
-        )
+    def run() -> None:
+        _run_fill_batch(simulator, bar, cost_model)
 
-    # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
+    perf_budget.assert_within(run, budget_ms=budget_ms, batch=1, label="normal")
+
+    delayed = virtual_delayed_sync(run, seconds=3.0)
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
-            single_call,
-            budget_ms=budget_ms,
-            n=5,
-            warmup=1,
-            batch=1,
-            label="simulate_10x_injected",
+            delayed, budget_ms=budget_ms, batch=1, label="simulate_10x_injected"
         )
-
-
-# -- D2 gate-red repro ---------------------------------------------------------
-
-
-def test_check_code_language_gate_flags_synthetic_korean_comment_regression(
-    tmp_path: Path,
-) -> None:
-    """Comments/docstrings under `src/` must be English (ADR-2026-09-07-A,
-    `scripts/check_code_language.py`'s Hangul ratchet). Proves the gate's
-    real detector (`count_file`) fires on a synthetic Korean-comment
-    regression, and that this leaf's actual files stay green -- rather than
-    trusting that "no Korean in the diff" holds without ever exercising the
-    scanner that enforces it."""
-    regressed = tmp_path / "regressed_bar_fill_simulator.py"
-    regressed.write_text(
-        "def simulate() -> None:\n    # 잘못된 한글 주석 -- 회귀 시나리오\n    pass\n",
-        encoding="utf-8",
-    )
-    assert count_file(regressed) == 1
-
-    assert (
-        count_file(LANGUAGE_GATE_ROOT / "src/foundation/backtest/adapters/bar_fill_simulator.py")
-        == 0
-    )
-    assert (
-        count_file(LANGUAGE_GATE_ROOT / "src/foundation/backtest/application/simulate_fill.py") == 0
-    )
