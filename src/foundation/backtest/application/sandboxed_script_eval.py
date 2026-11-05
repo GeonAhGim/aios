@@ -32,7 +32,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from multiprocessing import get_context
@@ -51,7 +51,6 @@ _RSS_POLL_INTERVAL_SEC = 0.02
 # in this file); without this, a pid that never registered within
 # `wallclock_sec` was permanently un-killable (task-8928).
 _PID_CAPTURE_GRACE_SEC = 10.0
-
 
 
 class ScriptSandboxTimeoutError(Exception):
@@ -133,6 +132,15 @@ def run_sandboxed[T](
             raise ScriptSandboxTimeoutError(
                 f"script sandbox exceeded wall-clock limit ({limits.wallclock_sec}s)"
             ) from None
+        except BrokenExecutor as exc:
+            # The executor's worker crashed (OOM kill, segfault, os._exit, etc.).
+            # If the RSS watcher already flagged an exceed, classify as memory.
+            # Otherwise it is an unexplained crash (fail-closed: never a success).
+            if exceeded.wait(timeout=0.5):
+                raise ScriptSandboxMemoryExceededError(
+                    f"script sandbox exceeded RSS limit ({limits.rss_mb}MB)"
+                ) from exc
+            raise ScriptSandboxCrashError(f"script sandbox executor broke: {exc}") from exc
         except Exception as exc:
             # The child may have just been killed by the watcher; give it a
             # brief window to flip `exceeded` before we classify the failure
@@ -218,12 +226,21 @@ def _watch_rss(
     except psutil.NoSuchProcess:
         return
     baseline_rss: int | None = None
+    # Warm-up window: the first reading captures spawn import overhead
+    # (DSL runtime imports, bytecode compilation). Skip it so the baseline
+    # reflects the script's actual memory, not the worker's cold-start cost.
+    _warmup_ticks = 5  # 5 * 20ms = 100ms warm-up
+    tick = 0
     while not stop.is_set():
         try:
             rss = process.memory_info().rss
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return
         if baseline_rss is None:
+            if tick < _warmup_ticks:
+                tick += 1
+                stop.wait(_RSS_POLL_INTERVAL_SEC)
+                continue
             baseline_rss = rss
             stop.wait(_RSS_POLL_INTERVAL_SEC)
             continue
