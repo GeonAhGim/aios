@@ -28,6 +28,7 @@ from src.data.models.strategy_fsm import FSMState, FSMStrategyConfig, FSMTransit
 from src.services.condition_compiler import ORDER_FILLED, ConditionCompiler
 from src.services.preview_service import PreviewCondition
 from tests.support.perf_budget import PerfBudget, PerfSample
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def _compile_config() -> FSMStrategyConfig:
@@ -64,13 +65,62 @@ def _manual_config(transitions: list[FSMTransition]) -> FSMStrategyConfig:
 # --- negative (>= 3) ---------------------------------------------------
 
 
-def test_negative_empty_transitions_returns_none_without_raising():
+@pytest.mark.perf
+def test_negative_empty_transitions_returns_none_without_raising(
+    perf_budget: PerfBudget,
+) -> None:
+    """빈 전이 리스트가 None을 반환하고 예외를 던지지 않는다(음성 테스트).
+
+    동시에 CPU 성능 단언을 검증 — best_of로 여러 회 측정해 Windows 양자화 tick
+    1회(15.6ms)에 0ms가 수렴하지 않도록 한다. 같은 측정/단언이 가상 지연 주입
+    테스트(gate-red)에서 적색을 내는지를 확인한다.
+    """
     engine = StrategyEngine()
     config = _manual_config([])
 
-    signal = engine.evaluate(config, {"RSI": 25.0}, execution_id=500, fsm_state=FSMState.IDLE)
+    # 정상 입력: 빈 전이 → None, CPU 예산(5ms) 내
+    result = perf_budget.best_of(
+        lambda: engine.evaluate(config, {"RSI": 25.0}, execution_id=500, fsm_state=FSMState.IDLE),
+        n=5,
+        warmup=1,
+        batch=1,
+    )
+    assert result.result is None
+    assert result.cpu_ms < 5.0, f"cpu={result.cpu_ms:.3f}ms — 사전거래 게이트 5ms 예산 초과"
 
-    assert signal is None
+
+@pytest.mark.perf
+def test_negative_empty_transitions_delay_injection_causes_red(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """가상 지연 주입으로 gate-red 재현: evaluate 호출에 10x 예산(50ms) 가상
+    지연을 주입하면 best_of 단언이 적색이어야 한다.
+
+    virtual_delayed_sync은 실제 sleep/spin 없이 가상 레지스터에 지연만 누적하므로
+    PerfBudget.sample가 측정치에 그대로 반영한다(실제 sleep·busy-wait 금지).
+    """
+    engine = StrategyEngine()
+    config = _manual_config([])
+
+    reset_virtual_totals()
+    monkeypatch.setattr(
+        engine,
+        "evaluate",
+        virtual_delayed_sync(engine.evaluate, 0.05),  # 50ms 가상 지연 (예산 5ms의 10배)
+    )
+
+    with pytest.raises(AssertionError, match="budget"):
+        perf_budget.assert_within(
+            lambda: engine.evaluate(
+                config, {"RSI": 25.0}, execution_id=500, fsm_state=FSMState.IDLE
+            ),
+            budget_ms=5.0,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="delay-injected",
+        )
 
 
 def test_negative_order_filled_literal_never_self_triggers_even_when_from_state_matches():
