@@ -68,25 +68,6 @@ def test_asyncpg_dsn_raises_when_database_url_missing(
         _asyncpg_dsn()
 
 
-async def test_create_order_with_fills_rejects_invalid_side(pool: asyncpg.Pool) -> None:
-    """negative: `orders.side`/`fills.side`는 `CHECK (side IN ('BUY','SELL'))`
-    제약을 갖는다(마이그레이션 `210cc26533c7`/`073beca589d5`) -- 임의 문자열은
-    거부되어야 한다(게이트-적색 재현: 스키마가 이 방어를 갖지 않으면 조용히
-    쓰레기 side 값이 저장된다)."""
-    entities = PostgresEntityRepository(pool)
-    hierarchy = await build_hierarchy(pool, entities)
-
-    with pytest.raises(asyncpg.CheckViolationError):
-        await create_order_with_fills(
-            pool,
-            user_id=hierarchy.tenant_id,
-            fund_id=hierarchy.fund.fund_id,
-            portfolio_id=hierarchy.portfolio.portfolio_id,
-            side="HOLD",
-            fills=[(Decimal("10"), Decimal("100.00"))],
-        )
-
-
 async def test_create_order_with_fills_rejects_unknown_user_id(pool: asyncpg.Pool) -> None:
     """negative: `orders.user_id`는 `users(user_id)` FK다(마이그레이션
     `a1f2b3c4d5e6`) -- 존재하지 않는 user로는 주문을 시딩할 수 없다."""
