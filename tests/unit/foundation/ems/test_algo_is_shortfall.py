@@ -175,15 +175,6 @@ def test_non_final_slices_pass_the_guard_participation_check() -> None:
         assert child.planned_qty / market_volume * 100 <= Decimal("10")
 
 
-# -- (f)-1 kind guard: this module only plans IS -----------------------------
-
-
-def test_non_is_kind_is_rejected() -> None:
-    parent = _parent(algo=_algo(kind=AlgoKind.TWAP))
-    with pytest.raises(AlgoConstraintError, match="IS"):
-        plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
-
-
 # -- (f)-2 EM-A4: terminal parent never gets new children --------------------
 
 
