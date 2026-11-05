@@ -45,6 +45,7 @@ from src.foundation.market_data.domain.reference.symbol_normalizer import (
     to_canonical,
     to_venue,
 )
+from tests.support.perf_budget import PerfBudget
 
 TOKEN_RESPONSE = {"access_token": "tok-1", "access_token_token_expired": "2099-01-01 00:00:00"}
 
@@ -77,6 +78,22 @@ def _fail_if_called(_request: httpx.Request) -> httpx.Response:
 
 def test_to_bitget_symbol_matches_normalizer() -> None:
     assert to_bitget_symbol("BTC/USDT") == to_venue(Venue.BITGET, "BTC/USDT") == "BTCUSDT"
+
+
+@pytest.mark.perf
+def test_to_bitget_symbol_performance_under_budget() -> None:
+    """to_bitget_symbol은 순수 문자열 연산(I/O 없음)으로 매우 빠르다.
+
+    성능 예산: 1회 호출당 CPU 0.5ms — 정규화 배율 처리량 회귀를 잡는다.
+    symbols.py는 symbol_normalizer 위임만 하므로, baseline(문자열 replace)
+    대비 10배 이내여야 한다.
+    """
+    perf = PerfBudget()
+    to_bitget_symbol("BTC/USDT")  # warmup
+    sample = perf.best_of(lambda: to_bitget_symbol("BTC/USDT"), n=5, batch=100)
+    assert sample.cpu_ms < 0.5, (
+        f"to_bitget_symbol 처리량 회귀: {perf.describe(sample, budget_ms=0.5)}"
+    )
 
 
 def test_to_canonical_symbol_matches_normalizer() -> None:
