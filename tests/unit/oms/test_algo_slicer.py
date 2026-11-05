@@ -60,6 +60,91 @@ def test_slices_sum_exactly_to_total_quantity() -> None:
     assert sum(p.quantity for p in plans) == req.total_quantity
 
 
+def test_slices_sum_with_large_quantity() -> None:
+    """대량 주문(total_quantity=10000)에서도 합계가 정확히 맞는다."""
+    req = _request(total_quantity=Decimal("10000"), slice_count=10)
+    plans = plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+    assert sum(p.quantity for p in plans) == req.total_quantity
+
+
+def test_slices_sum_with_odd_quantity() -> None:
+    """소수점 불균형(quantity=0.001, slice_count=3)에서도 잔량 흡수로 합계가 정확히 맞는다."""
+    req = _request(total_quantity=Decimal("0.001"), slice_count=3)
+    plans = plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+    assert sum(p.quantity for p in plans) == req.total_quantity
+
+
+def test_slices_sum_with_negative_side() -> None:
+    """SELL 주문에서도 합계가 total_quantity와 정확히 일치한다."""
+    req = _request(side=OrderSide.SELL, total_quantity=Decimal("50"), slice_count=5)
+    plans = plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+    assert sum(p.quantity for p in plans) == req.total_quantity
+
+
+@pytest.mark.perf
+def test_slices_sum_perf_budget() -> None:
+    """plan_slices의 성능 단언 — perf_budget.best_of로 5회 측정 후 최소값을 취한다.
+
+    실측 근거: 5회 best_of ≈ 0.05ms CPU (로컬, 2026-11-06).
+    예산: 로컬 실측의 30배 여유인 1.5ms."""
+    from tests.support.perf_budget import PerfBudget
+
+    req = _request(total_quantity=Decimal("1"), slice_count=7)
+    budget = PerfBudget()
+    sample = budget.best_of(
+        lambda: plan_slices(
+            req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed)
+        ),
+        n=5,
+    )
+    assert sample.cpu_ms < 1.5, (
+        f"plan_slices perf_budget.best_of cpu_ms={sample.cpu_ms:.3f}ms exceeds 1.5ms budget "
+        f"(budget=local实测×30; local实测≈0.05ms)"
+    )
+
+
+@pytest.mark.perf
+def test_slices_sum_gate_red_with_virtual_delay() -> None:
+    """gate-red 재현(ADR-2026-09-09-C D2): virtual_delayed_sync로 CPU 지연을 주입해
+    게이트가 적색으로 전환됨을 확인한다. 실제 busy-wait 없이 측정치만 늘린다.
+
+    전역 가상 지연 레저를 초기화해 선행 테스트의 상태가 본 테스트에 영향을 주지 않게 한다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+
+    req = _request(total_quantity=Decimal("1"), slice_count=7)
+    budget = PerfBudget()
+
+    # 정상 입력은 녹색 — 예산 내
+    sample_normal = budget.best_of(
+        lambda: plan_slices(
+            req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed)
+        ),
+        n=5,
+    )
+    assert sample_normal.cpu_ms < 0.1  # 정상 예산 0.1ms
+
+    # 예산 10배(1ms) 가상 지연 주입 → 적색
+    slow_plan = virtual_delayed_sync(
+        lambda: plan_slices(
+            req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed)
+        ),
+        0.001,  # 1ms virtual CPU per call
+    )
+    with pytest.raises(AssertionError):
+        budget.assert_within(
+            slow_plan,
+            budget_ms=0.1,
+            n=5,
+            warmup=1,
+            batch=1,
+            label="virtual_delay 10× plan_slices",
+        )
+
+
 def test_slice_count_matches_request() -> None:
     req = _request(slice_count=5)
     plans = plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
