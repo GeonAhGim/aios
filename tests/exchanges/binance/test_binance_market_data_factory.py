@@ -77,6 +77,11 @@ def test_registered_via_br9_extension_point():
     assert isinstance(build_adapter("binance", "k", "s", {}, demo_mode=True), BinanceAdapter)
 
 
-async def test_balance_unsupported_fail_closed():
-    with pytest.raises(Exception, match="get_balance"):
-        await BinanceAdapter("k", "s").get_balance()
+async def test_ticker_stream_unsupported_fail_closed():
+    with pytest.raises(Exception, match="subscribe_ticker_stream"):
+        await BinanceAdapter("k", "s").subscribe_ticker_stream("BTC/USDT", lambda _t: None)
+
+
+async def test_extension_query_unsupported_fail_closed():
+    with pytest.raises(Exception, match="find_order_by_client_id"):
+        await BinanceAdapter("k", "s").find_order_by_client_id("cid")
