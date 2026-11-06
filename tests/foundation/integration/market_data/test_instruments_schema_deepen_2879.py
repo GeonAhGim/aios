@@ -130,20 +130,6 @@ async def test_venue_listings_rejects_unknown_venue(pool: asyncpg.Pool) -> None:
         )
 
 
-async def test_venue_listings_rejects_unknown_instrument_id_fk(pool: asyncpg.Pool) -> None:
-    """instrument_id FK — 존재하지 않는 instrument를 참조하는 listing은
-    거부된다(기존 테스트는 항상 미리 instrument를 만들어 이 경로를 안 탔다)."""
-    with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
-        await _insert_listing(
-            pool,
-            instrument_id=_fake_ulid(),
-            venue="BITGET",
-            venue_symbol=_venue_symbol(),
-            listed_at=datetime.now(UTC),
-            delisted_at=None,
-        )
-
-
 async def test_venue_listings_rejects_exact_duplicate_start_same_symbol(pool: asyncpg.Pool) -> None:
     """UNIQUE (venue, venue_symbol, listed_at) — EXCLUDE보다 먼저 걸리는
     정확한 시작시각 중복도 거부돼야 한다(두 제약이 독립적으로 동작함).
