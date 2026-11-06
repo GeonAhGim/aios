@@ -6,7 +6,10 @@ child is killed and reported as `ScriptSandboxTimeoutError` within the
 budget + 2s, (3) an RSS-exceeding child is killed and reported as
 `ScriptSandboxMemoryExceededError`, (4) a child that crashes for an
 unrelated reason (`os._exit`) never hangs the parent and is reported as
-`ScriptSandboxCrashError`.
+`ScriptSandboxCrashError`, (5) the executor uses `spawn` start method to
+isolate child RSS from parent, (6) `BrokenProcessPool` from a crashed child
+maps to `ScriptSandboxCrashError` with the original executor exception as
+`__cause__`.
 
 Fixture functions used as the sandboxed callable must be picklable
 (`multiprocessing` constraint on Windows' `spawn` start method), so they are
@@ -18,6 +21,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from concurrent.futures import BrokenExecutor
 
 import psutil
 import pytest
@@ -265,6 +269,61 @@ def test_child_crash_does_not_hang_parent(perf_budget: PerfBudget) -> None:
             run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
 
     perf_budget.assert_within(_run, budget_ms=budget_ms, label="crash_no_hang")
+
+
+def test_sandbox_forces_spawn_start_method(monkeypatch: pytest.MonkeyPatch) -> None:
+    """I-07: the sandbox must use `spawn` to isolate child RSS from parent.
+
+    Regression guard: if the implementation ever falls back to `fork` (or
+    respects an environment default), the child inherits the parent's RSS
+    and the RSS-limit check becomes meaningless.
+    """
+    captured_start_method: list[str | None] = [None]
+
+    # Spy on get_context calls to record which start method the sandbox uses.
+    # Must patch on the sandboxed_script_eval module because it imports
+    # `get_context` directly (from multiprocessing import get_context).
+    orig_context = sandboxed_script_eval.get_context
+
+    def _spy_context(*args, **kwargs) -> object:
+        captured_start_method[0] = args[0] if args else kwargs.get("method")
+        return orig_context(*args, **kwargs)
+
+    monkeypatch.setattr(sandboxed_script_eval, "get_context", _spy_context)
+
+    with pytest.raises(ScriptSandboxCrashError):
+        run_sandboxed(
+            _crash_immediately,
+            limits=SandboxLimits(wallclock_sec=10, rss_mb=512),
+        )
+
+    assert captured_start_method[0] == "spawn", (
+        f"Expected 'spawn' but got '{captured_start_method[0]}' — child RSS will leak from parent"
+    )
+
+
+def test_broken_pool_maps_to_crash_error_with_broken_executor_cause() -> None:
+    """N/A: BrokenProcessPool → ScriptSandboxCrashError with BrokenExecutor __cause__.
+
+    Negative test: a child that calls `os._exit` produces `BrokenProcessPool`
+    from `Executor.map`. The sandbox must re-raise as `ScriptSandboxCrashError`
+    and preserve the original `BrokenExecutor` (or `BrokenProcessPool`) as
+    `__cause__`, so operators do not misdiagnose it as a memory error.
+    """
+    with pytest.raises(ScriptSandboxCrashError) as info:
+        run_sandboxed(
+            _crash_immediately,
+            limits=SandboxLimits(wallclock_sec=10, rss_mb=512),
+        )
+    # The __cause__ must be the executor exception, not a generic error.
+    assert info.value.__cause__ is not None, (
+        "ScriptSandboxCrashError.__cause__ must carry the BrokenExecutor"
+    )
+    # BrokenProcessPool wraps BrokenExecutor; check the chain.
+    cause = info.value.__cause__
+    assert isinstance(cause, BrokenExecutor) or hasattr(cause, "exception"), (
+        f"Expected BrokenExecutor or BrokenProcessPool __cause__, got {type(cause).__name__}"
+    )
 
 
 def test_find_new_child_pid_identifies_only_the_new_process() -> None:
