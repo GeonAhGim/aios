@@ -1,0 +1,217 @@
+"""FA-12 dated journal setup preserving audit, hash-chain and balance consistency."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from decimal import Decimal
+from uuid import UUID, uuid4
+
+import asyncpg
+
+from src.data.models.base import Currency
+from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository
+from src.foundation.evidence.domain.models import Classification, Outcome
+from src.foundation.evidence.domain.rules import compute_payload_hash
+from src.foundation.ledger.adapters.postgres_balance_repository import PostgresBalanceRepository
+from src.foundation.ledger.contracts.v1 import (
+    AccountType,
+    LedgerEventType,
+    PostingLine,
+    Side,
+    UserSub,
+)
+from src.foundation.ledger.domain.chart_of_accounts import account_type, user_account
+from src.foundation.ledger.domain.hash_chain import entry_hash as compute_entry_hash
+from src.foundation.ledger.domain.hash_chain import lines_digest
+
+_DEBIT_NORMAL_TYPES = frozenset({AccountType.ASSET, AccountType.EXPENSE})
+
+
+def _signed_delta(line: PostingLine) -> Decimal:
+    """Same §4.4 sign convention `post_entry._signed_delta`/`projections.ledger.
+    _signed_delta` apply -- reused here (not imported, both are module-private)
+    so `_insert_dated_entry`'s direct-SQL bypass of `post_entry` still keeps
+    `ledger_balance` in the same fold `post_entry` would have produced."""
+    debit_increases = account_type(line.account_code) in _DEBIT_NORMAL_TYPES
+    increases = (line.side is Side.DEBIT) == debit_increases
+    return line.amount if increases else -line.amount
+
+
+async def _account_id(pool: asyncpg.Pool, account_code: str) -> UUID:
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT account_id FROM ledger_account WHERE account_code = $1", account_code
+        )
+    assert value is not None
+    return value
+
+
+async def _insert_dated_entry(
+    pool: asyncpg.Pool,
+    *,
+    fund_id: UUID,
+    portfolio_id: UUID,
+    posted_at: datetime,
+    lines: list[PostingLine],
+    account_ids: dict[str, UUID],
+) -> UUID:
+    """`ledger_journal_entry`/`ledger_posting_line`에 `posted_at`을 직접
+    지정해 삽입한다 -- 실제 `PostgresJournalRepository.append`와 같은 순서
+    (advisory lock -> 감사 이벤트 -> 저널 -> 포스팅 행)를 그대로 밟되,
+    `posted_at`만 테스트가 통제한다. 잔액 트리거(`ledger_entry_balanced_trg`,
+    DEFERRABLE)가 커밋 시점에 균형을 검증하므로 `lines`는 항상 균형이어야
+    한다.
+
+    FA-15a(esc-2115) 정리 중 발견: `prev_hash`/`entry_hash`를 placeholder
+    문자열로 심으면 `hash_chain.verify_chain`이 재계산한 값과 영원히
+    어긋난다 -- `ledger_journal_entry`는 WORM이라 한 번 이렇게 심으면 이
+    워커의 테스트 DB가 영구히 오염된다(`test_migration_fa4_worm_no_backfill.
+    py` 모듈 docstring이 경고하는 바로 그 사고). 실제 체인을 그대로
+    재현한다: 직전 sequence_no의 `entry_hash`를 `prev_hash`로 읽고,
+    `hash_chain.entry_hash`로 진짜 값을 계산한다.
+
+    esc-ci-replay_verify 근본원인 수정(task-5687): 이 helper는 `post_entry`
+    (LC-9)를 거치지 않고 저널 행을 직접 삽입하므로, 원래 `ledger_balance`가
+    갱신되지 않은 채로 남았다 -- task-5309가 이미 `PLATFORM:CASH_CLEARING`에서
+    고친 것과 정확히 같은 드리프트 클래스(저널은 자라는데 잔액은 그대로)를,
+    이 파일은 매 호출마다 신선한 `USER:*` 계정에 남겨 FA-15 `replay_verify`의
+    창(기본 24시간)에 걸릴 때마다 거짓 MISMATCH를 냈다. 저널 삽입 직후 같은
+    트랜잭션에서 `_signed_delta`(§4.4, `post_entry`/`projections.ledger`와
+    동일 부호 규약)로 순 델타를 접어 `PostgresBalanceRepository.apply`로
+    반영한다 -- `posted_at`을 과거로 통제하는 이 파일의 목적은 그대로 두고,
+    `post_entry`가 그 시각에 실제로 실행됐다면 남겼을 `ledger_balance` 상태만
+    재현한다."""
+    audit_repo = PostgresAuditEventRepository(pool)
+    entry_id = uuid4()
+    event_ref = f"test-fa12:{entry_id}"
+    digest = lines_digest(lines)
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext('ledger_journal'))")
+        next_seq = await conn.fetchval(
+            "SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM ledger_journal_entry"
+        )
+        prev_hash = await conn.fetchval(
+            "SELECT entry_hash FROM ledger_journal_entry WHERE sequence_no = $1", next_seq - 1
+        )
+        new_hash = compute_entry_hash(
+            prev_hash, next_seq, LedgerEventType.MANUAL_ADJUSTMENT, event_ref, digest, posted_at
+        )
+        audit_event = await audit_repo.append_event_in(
+            conn,
+            tenant_id=None,
+            aggregate_type="ledger_journal_entry",
+            aggregate_id=entry_id,
+            aggregate_revision=None,
+            action=LedgerEventType.MANUAL_ADJUSTMENT.value,
+            outcome=Outcome.SUCCESS,
+            actor_subject_id=None,
+            trace_id=uuid4(),
+            payload_hash=compute_payload_hash({"test": "fa12_dated_entry"}),
+            payload={"test": "fa12_dated_entry"},
+            classification=Classification.INTERNAL,
+        )
+        await conn.execute(
+            "INSERT INTO ledger_journal_entry "
+            "(entry_id, sequence_no, event_type, event_ref, idempotency_key, "
+            " lines_digest, prev_hash, entry_hash, audit_event_id, posted_at, "
+            " fund_id, portfolio_id) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+            entry_id,
+            next_seq,
+            LedgerEventType.MANUAL_ADJUSTMENT.value,
+            event_ref,
+            f"test-fa12-idem:{entry_id}",
+            digest,
+            prev_hash,
+            new_hash,
+            audit_event.id,
+            posted_at,
+            fund_id,
+            portfolio_id,
+        )
+        for line in lines:
+            await conn.execute(
+                "INSERT INTO ledger_posting_line "
+                "(entry_id, line_no, account_id, side, amount, currency, "
+                " fund_id, portfolio_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                entry_id,
+                line.line_no,
+                account_ids[line.account_code],
+                line.side.value,
+                line.amount,
+                line.currency.value,
+                fund_id,
+                portfolio_id,
+            )
+        deltas: dict[str, Decimal] = {}
+        for line in lines:
+            deltas[line.account_code] = deltas.get(line.account_code, Decimal("0")) + _signed_delta(
+                line
+            )
+        balances = PostgresBalanceRepository(pool)
+        current = await balances.get_for_update(conn, sorted(deltas))
+        for code, delta in deltas.items():
+            await balances.apply(
+                conn,
+                code,
+                delta_balance=delta,
+                delta_held=Decimal("0"),
+                expected_seq=current[code].last_entry_seq,
+            )
+    return entry_id
+
+
+def _balanced_pair(debit_code: str, credit_code: str, amount: Decimal) -> list[PostingLine]:
+    return [
+        PostingLine(
+            line_no=1,
+            account_code=debit_code,
+            side=Side.DEBIT,
+            amount=amount,
+            currency=Currency.KRW,
+        ),
+        PostingLine(
+            line_no=2,
+            account_code=credit_code,
+            side=Side.CREDIT,
+            amount=amount,
+            currency=Currency.KRW,
+        ),
+    ]
+
+
+async def _create_user_ledger_account(
+    pool: asyncpg.Pool, sub: UserSub, *, allow_negative: bool
+) -> str:
+    """FA-12 IBOR/ABOR 전용 계정 생성 — `PLATFORM:TEST_*`(다른 디렉터리의
+    `create_ledger_account`)는 `chart_of_accounts`가 모르는 이름이라,
+    `_insert_dated_entry`가 남긴 실제 `ledger_posting_line`을
+    `scripts/replay_verify.py`의 원장 프로젝션(`account_type()` 필요)이
+    되짚을 때 `InvalidAccountCodeError`로 죽는다(esc-2115와 같은 계열의
+    결함 — FA-15a 정리 과정에서 발견). `USER:*` 계정코드는 항상 인식되므로
+    이 값을 쓴다. `allow_negative`는 `ledger_balance` 행의 컬럼값이라
+    `chart_of_accounts.allows_negative()`(코드 레벨, RECEIVABLE만 True)와
+    무관하게 이 테스트가 원하는 대로 설정할 수 있다 — 이 파일은 `post_entry`/
+    `balance_rules.apply`를 거치지 않고 원장 행을 직접 읽고 쓰기 때문이다."""
+    code = user_account(uuid4(), sub)
+    async with pool.acquire() as conn:
+        account_id = await conn.fetchval(
+            "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
+            "VALUES ($1, $2, $3, $4) RETURNING account_id",
+            code,
+            (AccountType.ASSET if sub is UserSub.RECEIVABLE else AccountType.LIABILITY).value,
+            Currency.KRW.value,
+            allow_negative,
+        )
+        await conn.execute(
+            "INSERT INTO ledger_balance (account_id, allow_negative, last_entry_seq) "
+            "VALUES ($1, $2, 0)",
+            account_id,
+            allow_negative,
+        )
+    return code
+
+
+def _t(base: datetime, minutes: int) -> datetime:
+    return base + timedelta(minutes=minutes)
