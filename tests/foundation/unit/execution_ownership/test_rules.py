@@ -24,7 +24,7 @@ import pytest
 from src.foundation.execution_ownership.domain.models import ExecutionLease
 from src.foundation.execution_ownership.domain.rules import is_lease_available
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _NOW = datetime(2026, 9, 4, 12, 0, 0, tzinfo=UTC)
 
@@ -92,8 +92,9 @@ def test_is_lease_available_no_existing_lease_perf_injection_exceeds_budget(
     """
     import src.foundation.execution_ownership.domain.rules as rules_mod
 
-    # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
-    slow_is_lease_available = delayed_sync(rules_mod.is_lease_available, 0.05)
+    reset_virtual_totals()
+    # 0.05s = 50ms 가상 CPU 부하 — 예산 0.1ms를 500배 초과
+    slow_is_lease_available = virtual_delayed_sync(rules_mod.is_lease_available, 0.05)
 
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
@@ -159,8 +160,9 @@ def test_is_lease_available_expired_lease_perf_injection_exceeds_budget(
     """
     import src.foundation.execution_ownership.domain.rules as rules_mod
 
-    # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
-    slow_is_lease_available = delayed_sync(rules_mod.is_lease_available, 0.05)
+    reset_virtual_totals()
+    # 0.05s = 50ms 가상 CPU 부하 — 예산 0.1ms를 500배 초과
+    slow_is_lease_available = virtual_delayed_sync(rules_mod.is_lease_available, 0.05)
 
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
