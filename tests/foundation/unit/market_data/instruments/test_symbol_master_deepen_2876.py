@@ -48,7 +48,7 @@ from src.foundation.market_data.contracts.v2.instruments import (
 )
 from src.foundation.market_data.domain.instruments import symbol_master as sm
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 _ID_A = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 _ID_B = "01BXQR6X4TVQFP7NM5H7J1K2C3"
@@ -169,7 +169,7 @@ def test_resolve_rejects_non_str_symbol_fail_closed_perf_injection_exceeds_budge
     import src.foundation.market_data.domain.instruments.symbol_master as sm_mod
 
     # 0.05s = 50ms CPU 부하 — best_of(5) 최소값이 1ms 예산 초과
-    slow_normalize = delayed_sync(sm_mod._normalize_symbol, 0.05)
+    slow_normalize = virtual_delayed_sync(sm_mod._normalize_symbol, 0.05)
     monkeypatch.setattr(sm_mod, "_normalize_symbol", slow_normalize)
 
     def _work() -> None:

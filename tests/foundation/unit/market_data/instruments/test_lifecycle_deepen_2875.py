@@ -44,7 +44,7 @@ from src.foundation.market_data.domain.instruments.lifecycle import (
     transition,
 )
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 # ---- 실패 주입(D2) — 표에 없는 임의 입력이 fail-closed로 거부됨 ----
 
@@ -164,7 +164,7 @@ def test_transition_perf_injection_exceeds_budget(
     import src.foundation.market_data.domain.instruments.lifecycle as lifecycle_mod
 
     # 0.05s = 50ms CPU 부하 — best_of(5) 최소값이 100ms 예산 초과
-    slow_transition = delayed_sync(lifecycle_mod.transition, 0.05)
+    slow_transition = virtual_delayed_sync(lifecycle_mod.transition, 0.05)
     monkeypatch.setattr(lifecycle_mod, "transition", slow_transition)
 
     # 정상 입력으로 측정: PENDING→listed 전이는 50ms 소모 → 100ms 예산 초과

@@ -45,7 +45,7 @@ from src.foundation.connections.domain.models import (
 from src.foundation.connections.domain.rules import ForbiddenCapabilityScopeError
 from src.foundation.trust.domain.models import Consent, ConsentState, Disclosure
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 _NOW = datetime(2026, 9, 24, tzinfo=UTC)
 _PURPOSE = "account_read_connection"
@@ -314,7 +314,7 @@ async def test_mfa_rejection_perf_injection_exceeds_budget(
     import src.foundation.connections.application.begin_connection as target
 
     # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
-    slow_begin_connection = delayed_sync(target.begin_connection, 0.05)
+    slow_begin_connection = virtual_delayed_sync(target.begin_connection, 0.05)
 
     tenant_id = uuid4()
 
