@@ -234,7 +234,11 @@ confirm/risk/mandate/paper 저장소 왕복만 하므로 AI-9의 500ms 공급자
 상한보다 훨씬 좁게 잡는다."""
 
 
-async def _promote_latencies_ms(iterations: int = 20) -> list[float]:
+async def _promote_latencies_ms(iterations: int = 100) -> list[float]:
+    # One unmeasured warm-up absorbs lazy imports / first-call setup; 100 samples make
+    # p95 a real percentile instead of the max, so one scheduler stall under xdist
+    # load cannot decide the result.
+    await _promote(Deps())
     samples: list[float] = []
     for _ in range(iterations):
         deps = Deps()
