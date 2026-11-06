@@ -1,4 +1,4 @@
-"""QA diagnostic: check placed_at / updated_at timestamps for known orders."""
+"""QA diagnostic: check created_at timestamps for known orders."""
 
 from __future__ import annotations
 
