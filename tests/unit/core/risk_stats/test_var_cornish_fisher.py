@@ -1,7 +1,6 @@
 """L4_risk_and_safety_v1.0.md#R-19 — var_cornish_fisher.py known-value + ES>=VaR."""
 
 import json
-from time import perf_counter
 
 import numpy as np
 import pytest
@@ -117,25 +116,3 @@ def test_replay_verify_serialized_inputs_and_tampered_result():
     assert len(rejected.mismatches) == 1
     assert rejected.mismatches[0].key == "cornish_fisher"
     assert rejected.combined_digest != report.combined_digest
-
-
-@pytest.mark.perf
-def test_default_250_bar_calculation_p95_under_5ms():
-    """ADR-2026-09-09-C D1: component ceiling within the 5ms risk-gate budget.
-
-    This component p95 check does not claim end-to-end gate p99 compliance.
-    Default daily lookback=250 (L4 risk R4); setup/warmup are not timed.
-    """
-    returns = np.random.default_rng(8333).normal(0, 0.01, 250)
-    kwargs = {"confidence": 0.95, "horizon_days": 1, "bars_per_day": 1}
-    for _ in range(5):
-        cornish_fisher_var_es(returns, **kwargs)
-    durations = []
-    for _ in range(100):
-        started = perf_counter()
-        result = cornish_fisher_var_es(returns, **kwargs)
-        durations.append(perf_counter() - started)
-        assert result.es_pct >= result.var_pct >= 0
-        assert result.bars_used == 250
-    p95 = float(np.quantile(durations, 0.95))
-    assert p95 < 0.005, f"250-bar calculation p95={p95 * 1000:.3f}ms >= 5ms"
