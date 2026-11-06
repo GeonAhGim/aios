@@ -143,6 +143,13 @@ async def test_create_order_with_fills_round_trip_stays_within_local_budget(
     task-9464와 같은 근거)."""
     del perf_budget  # 서명만 사용 -- I/O 바운드라 paused_coverage() wall-clock을 쓴다
     with paused_coverage():
+        entities = PostgresEntityRepository(pool)
+        hierarchy = await build_hierarchy(pool, entities)
+
+        # baseline을 build_hierarchy 이후에 재측정: 병렬 CI 부하에서
+        # 테이블 상태/컨테션이 measurement 시점과 동일해야 24x 배수가
+        # 의미 있는 상한선이 된다(이전: build_hierarchy 전 baseline →
+        # CI 병렬 부하 시 baseline은 낮고 measurement만 느려짐).
         samples: list[float] = []
         for _ in range(23):  # positions/test_conftest_deepen_perf.py와 동일한 23회 측정
             start = time.perf_counter()
@@ -150,9 +157,6 @@ async def test_create_order_with_fills_round_trip_stays_within_local_budget(
                 await conn.fetchval("SELECT 1")
             samples.append(time.perf_counter() - start)
         baseline_rt = sorted(samples[3:])[-1]  # 워밍업 3회 버리고 최댓값(보수적 rt)
-
-        entities = PostgresEntityRepository(pool)
-        hierarchy = await build_hierarchy(pool, entities)
 
         start = time.perf_counter()
         await create_order_with_fills(
