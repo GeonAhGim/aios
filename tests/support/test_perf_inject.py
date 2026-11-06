@@ -31,6 +31,7 @@ def test_delayed_async_keeps_result_and_adds_delay() -> None:
     assert time.perf_counter() - start >= 0.02
 
 
+@pytest.mark.perf
 def test_delayed_sync_injects_cpu_time_even_when_the_process_is_descheduled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -52,6 +53,7 @@ def test_delayed_sync_injects_cpu_time_even_when_the_process_is_descheduled(
     assert real_perf() - wall_before >= 0.05 * 4 - 0.01  # 그만큼 벽시계는 더 걸렸다
 
 
+@pytest.mark.perf
 def test_delayed_sync_gives_up_on_a_fully_starved_cpu_clock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -62,6 +64,7 @@ def test_delayed_sync_gives_up_on_a_fully_starved_cpu_clock(
     assert time.perf_counter() - started < 0.002 * 50 + 0.5
 
 
+@pytest.mark.perf
 def test_delayed_sync_still_waits_the_full_wall_time_when_cpu_clock_runs_ahead(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
