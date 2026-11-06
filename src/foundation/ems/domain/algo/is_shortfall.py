@@ -56,7 +56,13 @@ from src.foundation.ems.domain.algo.guard import (
     check_slice_interval,
     plan_residual,
 )
-from src.foundation.ems.domain.algo.twap import AlgoConstraintError, ParentTerminalError
+from src.foundation.ems.domain.algo.twap import (
+    AlgoConstraintError,
+    ParentTerminalError,
+)
+
+# Re-export for downstream imports (test files, other algos).
+__all__ = ["AlgoConstraintError", "ParentTerminalError"]
 
 _MAX_SLICE_COUNT = 500
 """Same bound as EM-8's twap.py / EM-10's pov.py."""
