@@ -22,6 +22,7 @@ Pure module -- no I/O.
 """
 from __future__ import annotations
 
+import gc
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
@@ -63,13 +64,24 @@ def sweep_grid(
     (only the signal differs, over the same `columns`). An empty `combos` yields an
     empty result (same precedent as `universe.sweep_universe` allowing an empty
     universe)."""
-    results = {
-        key: run_vector_backtest(
-            config, columns, signal, timeframe=timeframe,
-            initial_cash=initial_cash, funding_rate=funding_rate,
-        )
-        for key, signal in combos.items()
-    }
+    # Each combo allocates ~bars short-lived container objects while the retained results
+    # keep growing, so the cyclic GC rescans the ever-larger result set on every
+    # generation-0/1 trip (superlinear cost under CPU contention). The sweep builds no
+    # reference cycles, so pause the collector for its duration and restore the caller's
+    # prior state afterwards.
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        results = {
+            key: run_vector_backtest(
+                config, columns, signal, timeframe=timeframe,
+                initial_cash=initial_cash, funding_rate=funding_rate,
+            )
+            for key, signal in combos.items()
+        }
+    finally:
+        if gc_was_enabled:
+            gc.enable()
     return GridSweepResult(results=results)
 
 
