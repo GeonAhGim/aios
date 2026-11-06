@@ -330,8 +330,16 @@ async def test_bridge_credit_latency_within_budget(pool, perf_budget):
     상한으로 잡고 있으므로, 여기서는 그 왕복들이 실제 걸린 시간(wall
     clock)이 예산을 넘지 않는지를 `perf_budget.sample_async`로 잰다
     (raw `time.perf_counter()` 직접 단언은 perf-measurement 래칫 위반)."""
+    # The first call pays one-time pool/prepared-statement setup, and with only
+    # 5 samples the "p95" was the max, so a single contended sample (parallel
+    # perf stage) failed the run. Warm up, then take enough samples that p95
+    # is a real percentile. The budget itself is unchanged.
+    warm_user = await create_test_user(pool)
+    async with pool.acquire() as conn, conn.transaction():
+        await bridge_credit(conn, warm_user, Decimal("15.00"), "TOPUP")
+
     samples_ms: list[float] = []
-    for _ in range(5):
+    for _ in range(40):
         user = await create_test_user(pool)
 
         async def _credit(user=user):
