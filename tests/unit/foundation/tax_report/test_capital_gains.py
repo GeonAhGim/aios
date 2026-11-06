@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import tests.unit.foundation.tax_report.test_capital_gains as _mod
 from src.data.models.base import Currency
 from src.foundation.tax_report.domain.capital_gains import (
     AssetClass,
@@ -15,6 +16,7 @@ from src.foundation.tax_report.domain.capital_gains import (
     summarize_realized_gains,
 )
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync, virtual_totals_ns
 
 START = date(2026, 1, 1)
 END = date(2026, 12, 31)
@@ -181,3 +183,108 @@ def test_5000_entries_p95_budget(perf_budget: PerfBudget) -> None:
         assert s.result.total == Decimal("-61.5000")
     sorted_cpu = sorted(s.cpu_ms for s in samples)
     assert sorted_cpu[18] < 200
+    # best_of minimum must also be under budget (proves 0-convergence is not masking slow paths)
+    best = perf_budget.best_of(measure, n=5, batch=8)
+    assert best.cpu_ms < 200, f"best_of minimum cpu_ms={best.cpu_ms:.3f} exceeds 200ms budget"
+
+
+# --- gate-red reproduction and negative tests (task-22370) ---
+
+
+def test_gate_red_repro_10x_delay_raises(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inject 10x budget (2 s) via virtual_delayed_sync and expect AssertionError."""
+    reset_virtual_totals()
+    original = summarize_realized_gains
+    patched = virtual_delayed_sync(original, 2.0)
+    monkeypatch.setattr(_mod, "summarize_realized_gains", patched)
+    try:
+        entries = [entry("-0.0123", list(AssetClass)[i % 3]) for i in range(5000)]
+
+        def measure() -> Any:
+            return _mod.summarize_realized_gains(entries, START, END)
+
+        with pytest.raises(AssertionError):
+            perf_budget.assert_within(measure, budget_ms=200, n=3, batch=8)
+    finally:
+        reset_virtual_totals()
+
+
+def test_mutation_injection_fails_green(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inject a function that corrupts the result; the total assertion must turn red."""
+    reset_virtual_totals()
+    original = summarize_realized_gains
+    monkeypatch.setattr(
+        _mod,
+        "summarize_realized_gains",
+        lambda *a, **k: _mutated_result(original(*a, **k)),
+    )
+    try:
+        entries = [entry("-0.0123", list(AssetClass)[i % 3]) for i in range(5000)]
+
+        def measure() -> Any:
+            return _mod.summarize_realized_gains(entries, START, END)
+
+        samples = perf_budget.samples(measure, n=3, batch=8)
+        with pytest.raises(AssertionError):
+            for s in samples:
+                assert s.result.total == Decimal("-61.5000")
+    finally:
+        reset_virtual_totals()
+
+
+def _mutated_result(result: object) -> object:
+    """Return a copy of result with total set to a wrong value."""
+    return replace(result, total=Decimal("9999"))
+
+
+def test_reduced_input_count_fails(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Supply 4999 entries instead of 5000; the total must not match."""
+    reset_virtual_totals()
+    original = summarize_realized_gains
+    monkeypatch.setattr(
+        _mod,
+        "summarize_realized_gains",
+        lambda *a, **k: original(a[0][:4999] if a else [], *a[1:]),
+    )
+    try:
+        entries = [entry("-0.0123", list(AssetClass)[i % 3]) for i in range(5000)]
+
+        def measure() -> Any:
+            return _mod.summarize_realized_gains(entries, START, END)
+
+        samples = perf_budget.samples(measure, n=3, batch=8)
+        with pytest.raises(AssertionError):
+            for s in samples:
+                assert s.result.total == Decimal("-61.5000")
+    finally:
+        reset_virtual_totals()
+
+
+def test_injection_ledger_delta_matches(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify that the virtual ledger actually moves by the expected amount."""
+    reset_virtual_totals()
+    original = summarize_realized_gains
+    inject_seconds = 2.0
+    patched = virtual_delayed_sync(original, inject_seconds)
+    monkeypatch.setattr(_mod, "summarize_realized_gains", patched)
+    try:
+        entries = [entry("-0.0123", list(AssetClass)[i % 3]) for i in range(5000)]
+        before_cpu, before_wall = virtual_totals_ns()
+        _mod.summarize_realized_gains(entries, START, END)
+        after_cpu, after_wall = virtual_totals_ns()
+        delta_cpu_ns = after_cpu - before_cpu
+        # each call adds inject_seconds as both cpu and wall delay
+        expected_delta_ns = round(inject_seconds * 1e9)
+        assert delta_cpu_ns == expected_delta_ns, (
+            f"ledger delta {delta_cpu_ns} ns != expected {expected_delta_ns} ns"
+        )
+    finally:
+        reset_virtual_totals()
