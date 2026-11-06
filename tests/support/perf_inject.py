@@ -92,14 +92,37 @@ def delayed_async(  # noqa: UP047
     return wrapper
 
 
+# Wall-clock safety cap for the CPU spin below: a process starved of CPU entirely must not hang
+# the test. 50x is far beyond any contention seen on the CI host (4 busy competitors on one
+# core gave ~5x), and a capped spin still leaves the sample slower than the budget in wall terms.
+_SPIN_WALL_CAP_FACTOR = 50.0
+
+
 def delayed_sync(  # noqa: UP047
     original: Callable[P, R], seconds: float
 ) -> Callable[P, R]:
-    """Return ``original`` preceded by a busy wait of ``seconds`` (CPU-time slowdown)."""
+    """Return ``original`` preceded by a busy wait that burns ``seconds`` of *CPU time*.
+
+    The spin ends when ``time.process_time()`` has advanced by ``seconds`` -- not when the wall
+    clock has. Spinning on the wall clock under-injects whenever the process is descheduled: with
+    four competitors on the same core a 200 ms injection accrued only 31-172 ms of CPU (idle:
+    188-203 ms), so PERF-detection tests asserting "the injected delay breaks the CPU budget"
+    raised nothing (``DID NOT RAISE``; ``109.375 > 150``) in full CI runs 106662982 and e001874dc,
+    while passing 6/6 on pinned idle cores. Wall time is always >= CPU time, so wall-budget
+    assertions still trip.
+    """
 
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-        end = time.perf_counter() + seconds
-        while time.perf_counter() < end:
+        cpu_end = time.process_time() + seconds
+        wall_start = time.perf_counter()
+        wall_end = wall_start + seconds
+        wall_cap = wall_start + seconds * _SPIN_WALL_CAP_FACTOR
+        # Both clocks must reach the target: process_time ticks coarsely on Windows (15.6 ms), so
+        # it alone can report ``seconds`` of CPU before ``seconds`` of wall time have passed (wall
+        # 48.7 ms for a 50 ms injection) and break ``wall >= seconds`` gate-red assertions.
+        while (
+            time.process_time() < cpu_end or time.perf_counter() < wall_end
+        ) and time.perf_counter() < wall_cap:
             pass
         return original(*args, **kwargs)
 
