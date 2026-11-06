@@ -389,6 +389,45 @@ async def test_ibor_view_rejects_naive_cutoff():
         )
 
 
+class _NoPool:
+    def acquire(self) -> None:
+        raise AssertionError("pool.acquire() reached")
+
+
+_POOL = cast(asyncpg.Pool, _NoPool())
+
+
+@pytest.mark.parametrize("naive", [datetime(2026, 1, 1, 0, 0, 0, 1), datetime.min, datetime.max])
+async def test_ibor_view_naive_cutoff_variants_rejected_before_pool(naive: datetime):
+    with pytest.raises(NaiveCutoffError, match="cutoff"):
+        await ibor_view.compute_ibor_view(_POOL, fund_id=uuid4(), cutoff=naive)
+
+
+async def test_ibor_view_aware_cutoff_injected_pool_failure_propagates():
+    with pytest.raises(AssertionError, match="acquire"):
+        await ibor_view.compute_ibor_view(_POOL, fund_id=uuid4(), cutoff=datetime.now(UTC))
+
+
+async def _reject_naive() -> None:
+    with pytest.raises(NaiveCutoffError):
+        await ibor_view.compute_ibor_view(_POOL, fund_id=uuid4(), cutoff=datetime.min)
+
+
+@pytest.mark.perf
+async def test_ibor_view_naive_rejection_budget_and_10x_delay_red(perf_budget, monkeypatch):
+    """Perf: local best-of-3 ~0.1ms cpu, 50ms budget (>30x headroom). Gate-red: 10x delay."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    reset_virtual_totals()
+    ok = await perf_budget.best_of_async(_reject_naive, n=3, warmup=1, batch=8)
+    assert ok.cpu_ms < 50.0, perf_budget.describe(ok, budget_ms=50.0)
+    guard = virtual_delayed_sync(ibor_view._require_tz_aware, 0.5)
+    monkeypatch.setattr(ibor_view, "_require_tz_aware", guard)
+    slow = await perf_budget.best_of_async(_reject_naive, n=3, warmup=1, batch=8)
+    reset_virtual_totals()
+    assert slow.cpu_ms >= 50.0, "injected delay did not breach the budget"
+
+
 async def test_close_period_persists_the_recomputed_ibor_value(
     pool, fund_id, portfolio_id, accounts
 ):
