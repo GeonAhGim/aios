@@ -23,6 +23,7 @@ from src.data.models.base import Currency, Money
 from src.data.models.trading import OrderSide
 from src.foundation.positions.domain import borrow
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import delayed_sync
 
 _NOW = datetime(2026, 9, 7, 12, 0, tzinfo=UTC)
 
@@ -132,7 +133,7 @@ def test_locate_rejects_non_positive_quantity_perf_injection_exceeds_budget(
     """`Locate.__post_init__`에 CPU 지연(delayed_sync, 0.05s)을 주입한 후
     assert_within가 AssertionError를 발생시켜야 한다(red).
 
-    정상 입력(quantity=0)으로 0.05s CPU 부하를 주입 — 예산 0.1ms보다 500배
+    거부 입력(quantity=0)으로 0.05s CPU 부하를 주입 — 예산 0.1ms보다 500배
     커서 assert_within가 실패한다. 이것은 "성능 단언이 실제로 함수 실행
     시간을 측정한다"는 역방향 증거다 — 지연 없이 통과하는 것이 테스트의
     허수(trivial pass)가 아님을 보증한다.
@@ -140,15 +141,10 @@ def test_locate_rejects_non_positive_quantity_perf_injection_exceeds_budget(
     # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
     original_post_init = borrow.Locate.__post_init__
 
-    def delayed_post_init(self) -> None:
-        import time
-
-        end = time.perf_counter() + 0.05
-        while time.perf_counter() < end:
-            pass
-        original_post_init(self)
-
-    monkeypatch.setattr(borrow.Locate, "__post_init__", delayed_post_init)
+    # Match PerfBudget's CPU clock: descheduling must not consume the injected delay.
+    monkeypatch.setattr(
+        borrow.Locate, "__post_init__", delayed_sync(original_post_init, seconds=0.05)
+    )
 
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
