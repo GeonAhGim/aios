@@ -7,6 +7,7 @@ import pytest
 
 from src.data.models.serialization import DecimalSafeEncoder
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def test_decimal_serialized_as_string_not_float():
@@ -180,10 +181,9 @@ def test_serialize_cpu_measurement_converges_with_batch(perf_budget: PerfBudget)
 @pytest.mark.perf
 def test_perf_budget_assertion_catches_10x_cpu_delay_injection(
     perf_budget: PerfBudget,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
-    역으로 증명한다. `time.process_time`을 monkeypatch해 1회 호출당
+    역으로 증명한다. `virtual_delayed_sync`로 1회 호출당
     500ms(예산 50ms의 10배)를 가장하면 `assert_within`가
     AssertionError로 적색이 돼야 한다.
 
@@ -192,26 +192,18 @@ def test_perf_budget_assertion_catches_10x_cpu_delay_injection(
     """
     budget_ms = 50.0
 
-    # PerfBudget.sample() 내부에서 time.process_time()을 호출하므로
-    # 이를 monkeypatch해 항상 500ms(10x budget)를 반환하게 한다.
-    _fake_time = 0.0
-
-    def _fake_process_time() -> float:
-        nonlocal _fake_time
-        _fake_time += 0.5  # 500ms per call = 10x budget
-        return _fake_time
-
-    monkeypatch.setattr("time.process_time", _fake_process_time)
-
     payload = {f"field_{i}": Decimal(f"{i}.99") for i in range(1000)}
 
     def serialize():
         return json.dumps(payload, cls=DecimalSafeEncoder)
 
+    # 가상 지연: 측정치에 호출당 500ms(예산의 10배)를 더한다(실제 sleep 없음).
+    delayed = virtual_delayed_sync(serialize, budget_ms * 10 / 1000)
+
     # 같은 측정/단언을 재사용 — budget을 초과하므로 AssertionError가 있어야 함
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
-            serialize,
+            delayed,
             budget_ms=budget_ms,
             n=5,
             warmup=1,
