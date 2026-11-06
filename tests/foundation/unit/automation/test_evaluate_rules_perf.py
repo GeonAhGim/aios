@@ -182,15 +182,16 @@ async def test_delay_injection_proves_budget_fails(tenant_id, perf_budget, monke
         )
 
 
-# ── CPU 부하 주입 — delayed_sync로 실제 CPU 소모 유도 ────────────────────────
+# ── CPU 부하 주입 — virtual_delayed_sync로 CI 병목 없이 결정론적 측정 ──────────
 
 
 @pytest.mark.perf
 @pytest.mark.asyncio
 async def test_cpu_load_injection_proves_budget_fails(tenant_id, perf_budget, monkeypatch) -> None:
-    """적색 재현 2: delayed_sync로 CPU 부하를 주입하면 p95가 예산을 초과한다.
-    evaluate_rules.application의 evaluate_rule import를 delayed_sync로
-    감싸서 실제 CPU 소모를 유도한다.
+    """적색 재현 2: virtual_delayed_sync로 CPU 부하를 주입하면 p95가 예산을 초과한다.
+    evaluate_rules.application의 evaluate_rule import를 virtual_delayed_sync로
+    감싸서 실제 CPU 소모 없이 가상 지연만 누적한다( CI 병렬 실행 시 busy-wait
+    부딪혀 p95 측정이 흔들리는 문제를 해결 — task-22738).
     """
     from tests.support.perf_inject import virtual_delayed_sync
 
@@ -212,7 +213,8 @@ async def test_cpu_load_injection_proves_budget_fails(tenant_id, perf_budget, mo
     from src.foundation.automation.application import evaluate_rules as eval_app_mod
 
     original_evaluate_rule = eval_app_mod.evaluate_rule
-    # 15ms CPU 부하 per rule 호출 → 100개 규칙 × 15ms = 1500ms 총 부하
+    # 15ms 가상 CPU 부하 per rule 호출 → 100개 규칙 × 15ms = 1500ms 총 부하
+    # virtual_delayed_sync는 실제 busy-wait 없이 ledger만 증가 → CI 병렬 실행에서도 결정론적
     monkeypatch.setattr(
         eval_app_mod,
         "evaluate_rule",
