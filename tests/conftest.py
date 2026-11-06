@@ -30,7 +30,9 @@ from tests.support.db import (
     worker_owner_marker,
 )
 from tests.support.db import tx_conn as tx_conn  # noqa: F401 -- re-exported fixture
-from tests.support.perf_budget import PerfBudget
+from tests.support.perf_budget import (
+    PerfBudget as PerfBudget,  # noqa: F401 -- re-exported for test imports
+)
 from tests.support.perf_budget import PerfSample as PerfSample  # noqa: F401 -- re-exported
 from tests.support.talib_cache import (
     reset_talib_metadata_cache as reset_talib_metadata_cache,  # noqa: F401 -- re-exported fixture
