@@ -82,13 +82,14 @@ def test_is_lease_available_no_existing_lease_perf_budget(
 def test_is_lease_available_no_existing_lease_perf_injection_exceeds_budget(
     perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`is_lease_available`에 CPU 지연(delayed_sync, 0.05s)을 주입한 후
+    """`is_lease_available`에 CPU 지연(virtual_delayed_sync, 0.05s)을 주입한 후
     assert_within가 AssertionError를 발생시켜야 한다(red).
 
-    정상 입력(None)으로 0.05s CPU 부하를 주입 — 예산 0.1ms보다 500배
-    커서 assert_within가 실패한다. 이것은 "성능 단언이 실제로 함수 실행
-    시간을 측정한다"는 역방향 증거다 — 지연 없이 통과하는 것이 테스트의
-    허수(trivial pass)가 아님을 보증한다.
+    정상 입력(None)으로 0.05s CPU 부하를 가상 주입 — 예산 0.1ms보다 500배
+    커서 assert_within가 실패한다. virtual_delayed_sync는 실제 spin-wait 없이
+    virtual ledger에만 추가하므로 병렬 CI 실행 시 CPU 경합으로 인한 플레키가 없다.
+    이것은 "성능 단언이 실제로 함수 실행 시간을 측정한다"는 역방향 증거다 —
+    지연 없이 통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
     """
     import src.foundation.execution_ownership.domain.rules as rules_mod
 
@@ -149,13 +150,14 @@ def test_is_lease_available_expired_lease_perf_budget(
 def test_is_lease_available_expired_lease_perf_injection_exceeds_budget(
     perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`is_lease_available`에 CPU 지연(delayed_sync, 0.05s)을 주입한 후
+    """`is_lease_available`에 CPU 지연(virtual_delayed_sync, 0.05s)을 주입한 후
     assert_within가 AssertionError를 발생시켜야 한다(red).
 
-    정상 입력(expired lease)으로 0.05s CPU 부하를 주입 — 예산 0.1ms보다 500배
-    커서 assert_within가 실패한다. 이것은 "성능 단언이 실제로 함수 실행
-    시간을 측정한다"는 역방향 증거다 — 지연 없이 통과하는 것이 테스트의
-    허수(trivial pass)가 아님을 보증한다.
+    정상 입력(expired lease)으로 0.05s CPU 부하를 가상 주입 — 예산 0.1ms보다 500배
+    커서 assert_within가 실패한다. virtual_delayed_sync는 실제 spin-wait 없이
+    virtual ledger에만 추가하므로 병렬 CI 실행 시 CPU 경합으로 인한 플레키가 없다.
+    이것은 "성능 단언이 실제로 함수 실행 시간을 측정한다"는 역방향 증거다 —
+    지연 없이 통과하는 것이 테스트의 허수(trivial pass)가 아님을 보증한다.
     """
     import src.foundation.execution_ownership.domain.rules as rules_mod
 
