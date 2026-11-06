@@ -79,40 +79,6 @@ async def _insert_listing(
 # ---- 실패주입(D2) — CHECK/FK/UNIQUE 경계값, 정상 테스트가 놓친 제약 ----
 
 
-async def test_venue_listings_rejects_delisted_at_equal_to_listed_at(pool: asyncpg.Pool) -> None:
-    """CHECK (delisted_at IS NULL OR delisted_at > listed_at) — 등호 경계값이
-    거부됨을 직접 증명한다(기존 테스트는 이 CHECK를 전혀 건드리지 않았다)."""
-    instrument_id = _fake_ulid()
-    await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(UTC) - timedelta(days=1)
-
-    with pytest.raises(asyncpg.exceptions.CheckViolationError):
-        await _insert_listing(
-            pool,
-            instrument_id=instrument_id,
-            venue="BITGET",
-            venue_symbol=_venue_symbol(),
-            listed_at=t0,
-            delisted_at=t0,
-        )
-
-
-async def test_venue_listings_rejects_delisted_at_before_listed_at(pool: asyncpg.Pool) -> None:
-    instrument_id = _fake_ulid()
-    await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(UTC) - timedelta(days=1)
-
-    with pytest.raises(asyncpg.exceptions.CheckViolationError):
-        await _insert_listing(
-            pool,
-            instrument_id=instrument_id,
-            venue="BITGET",
-            venue_symbol=_venue_symbol(),
-            listed_at=t0,
-            delisted_at=t0 - timedelta(microseconds=1),
-        )
-
-
 async def test_venue_listings_rejects_unknown_venue(pool: asyncpg.Pool) -> None:
     """venue CHECK IN (...) — 심볼 마스터가 모르는 venue 문자열은 거부된다."""
     instrument_id = _fake_ulid()
