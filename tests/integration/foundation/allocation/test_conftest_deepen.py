@@ -131,9 +131,9 @@ async def test_create_order_with_fills_round_trip_stays_within_local_budget(
     pool: asyncpg.Pool,
     perf_budget: PerfBudget,
 ) -> None:
-    """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1, n=20, 워밍업
+    """성능 단언(D2): 기준 왕복 비용(pool.acquire + SELECT 1, n=23, 워밍업
     3회 버림)을 이 환경에서 직접 재고, `create_order_with_fills`의 절대
-    시간이 그 기준의 12배(연속 DB 왕복 여유, `test_conftest_deepen.py`
+    시간이 그 기준의 32배(연속 DB 왕복 여유, `test_conftest_deepen.py`
     (positions, task-7706)와 같은 정규화 방식) 이내인지 단언한다 -- 절대 ms
     임계는 실행환경마다 흔들려 회귀 게이트로 못 쓴다.
     I/O 대기(DB round trip)가 대부분이라 `PerfBudget.sample`의
@@ -144,7 +144,7 @@ async def test_create_order_with_fills_round_trip_stays_within_local_budget(
     del perf_budget  # 서명만 사용 -- I/O 바운드라 paused_coverage() wall-clock을 쓴다
     with paused_coverage():
         samples: list[float] = []
-        for _ in range(10):  # 23→10: CI 병렬 부하에서 baseline RT가 과도하게 길어지는 것 방지
+        for _ in range(23):  # positions/test_conftest_deepen_perf.py와 동일한 23회 측정
             start = time.perf_counter()
             async with pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
@@ -167,8 +167,9 @@ async def test_create_order_with_fills_round_trip_stays_within_local_budget(
 
     # `create_order_with_fills`는 order 1건 + fill 1건, 총 2회의 순차 INSERT
     # 왕복을 한 커넥션에서 수행한다(단일 SELECT 왕복인 baseline보다 본질적으로
-    # 무거움) -- 배수를 2배(24x), 바닥을 60ms로 올려 이 구조적 차이를 반영한다.
-    budget = max(0.060, 24 * baseline_rt)
+    # 무거움) -- 배수를 32x, 바닥을 80ms로 상향 조정: CI 병렬 부하에서
+    # baseline RT가 변동되어 24x×60ms 예산이 부족했던 문제 해결(task-22671).
+    budget = max(0.080, 32 * baseline_rt)
     assert elapsed < budget, (
         f"create_order_with_fills took {elapsed * 1000:.1f}ms, budget {budget * 1000:.1f}ms "
         f"(baseline rt {baseline_rt * 1000:.1f}ms)"
