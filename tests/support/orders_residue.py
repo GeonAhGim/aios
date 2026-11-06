@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover — py<3.11; project requires >=3.13 but
     # may resolve `python` to an older runtime.
     from zoneinfo import ZoneInfo as _ZoneInfo
 
-    UTC = _ZoneInfo("UTC")  # type: ignore[assignment,misc]
+    UTC = _ZoneInfo("UTC")  # noqa: F841
 
 from datetime import datetime
 
