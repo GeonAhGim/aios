@@ -17,7 +17,7 @@ from src.foundation.ml.domain.registry_rules import (
     validate_new_registration,
 )
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -97,7 +97,7 @@ def test_first_registration_has_no_existing_and_passes_perf_injection_exceeds_bu
     import src.foundation.ml.domain.registry_rules as registry_rules_mod
 
     # 0.05s = 50ms CPU 부하 — 예산 0.1ms를 500배 초과
-    slow_validate = delayed_sync(registry_rules_mod.validate_new_registration, 0.05)
+    slow_validate = virtual_delayed_sync(registry_rules_mod.validate_new_registration, 0.05)
 
     with pytest.raises(AssertionError):
         PerfBudget().assert_within(

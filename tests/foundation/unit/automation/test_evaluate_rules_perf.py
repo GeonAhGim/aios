@@ -192,7 +192,7 @@ async def test_cpu_load_injection_proves_budget_fails(tenant_id, perf_budget, mo
     evaluate_rules.application의 evaluate_rule import를 delayed_sync로
     감싸서 실제 CPU 소모를 유도한다.
     """
-    from tests.support.perf_inject import delayed_sync
+    from tests.support.perf_inject import virtual_delayed_sync
 
     repo = InMemoryAutomationRuleRepository()
     for i in range(RULE_COUNT):
@@ -216,7 +216,7 @@ async def test_cpu_load_injection_proves_budget_fails(tenant_id, perf_budget, mo
     monkeypatch.setattr(
         eval_app_mod,
         "evaluate_rule",
-        delayed_sync(original_evaluate_rule, 0.015),
+        virtual_delayed_sync(original_evaluate_rule, 0.015),
     )
 
     durations = []
