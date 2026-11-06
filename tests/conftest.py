@@ -90,7 +90,7 @@ def _drop_nested_worker_db() -> None:
         return
     try:
         asyncio.run(drop_worker_database(_TEMPLATE_URL_FOR_CLEANUP, _WORKER_ID))
-    except (OSError, asyncpg.PostgresError):
+    except (OSError, asyncpg.PostgresError, asyncpg.InterfaceError):
         pass
 
 
