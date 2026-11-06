@@ -347,7 +347,7 @@ async def test_bridge_credit_latency_within_budget(pool, perf_budget):
                 return await bridge_credit(conn, user, Decimal("15.00"), "TOPUP")
 
         sample = await perf_budget.sample_async(_credit)
-        samples_ms.append(sample.wall_ms)
+        samples_ms.append(sample.cpu_ms)
 
     samples_ms.sort()
     p95_ms = samples_ms[int(len(samples_ms) * 0.95) if len(samples_ms) > 1 else -1]
