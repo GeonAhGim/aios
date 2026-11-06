@@ -9,7 +9,8 @@ unrelated reason (`os._exit`) never hangs the parent and is reported as
 `ScriptSandboxCrashError`, (5) the executor uses `spawn` start method to
 isolate child RSS from parent, (6) `BrokenProcessPool` from a crashed child
 maps to `ScriptSandboxCrashError` with the original executor exception as
-`__cause__`.
+`__cause__`, (7) `BrokenProcessPool` + memory-exceeded maps to
+`ScriptSandboxMemoryExceededError` (fail-closed priority).
 
 Fixture functions used as the sandboxed callable must be picklable
 (`multiprocessing` constraint on Windows' `spawn` start method), so they are
@@ -497,4 +498,58 @@ def test_broken_process_pool_raises_crash_error_fail_closed(
     monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **kw: None)
 
     with pytest.raises(ScriptSandboxCrashError, match="worker died unexpectedly"):
+        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
+
+
+def test_broken_process_pool_with_memory_exceeded_raises_memory_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BrokenProcessPool + exceeded → ScriptSandboxMemoryExceededError (fail-closed).
+
+    Simulates a child that exceeded RSS (setting the ``exceeded`` event) and then
+    the process pool detected the worker died. The sandbox must classify this as a
+    memory error, not a generic crash, so the caller knows the RSS ceiling worked.
+
+    Strategy: patch ``_watch_rss`` so it immediately sets ``exceeded``, and patch
+    ``submit`` to raise ``BrokenProcessPool``. The ``run_sandboxed`` handler at
+    line 139 checks ``exceeded.wait(timeout=0.5)`` — with the patched watcher it
+    will be True, so the error is classified as memory-exceeded.
+    """
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+
+    class BrokenFuture(Future):
+        def result(self, timeout=None):
+            raise BrokenProcessPool("worker died after memory kill")
+
+        def cancel(self):
+            return False
+
+        def cancelled(self):
+            return False
+
+        def done(self):
+            return True
+
+        def exception(self, timeout=None):
+            return BrokenProcessPool("worker died after memory kill")
+
+    # Patch submit to return our broken future.
+    import concurrent.futures
+
+    def _patched_submit(self, fn, /, *args, **kwargs):
+        return BrokenFuture()
+
+    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "submit", _patched_submit)
+    # No real process will be created, so pid capture returns None.
+    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **kw: None)
+
+    # Patch _watch_rss so it immediately sets ``exceeded`` (simulating RSS
+    # watcher having flagged the exceed before the process pool noticed).
+    def _fake_watcher(pid, rss_mb, stop_watching, exceeded):
+        exceeded.set()
+
+    monkeypatch.setattr(sandboxed_script_eval, "_watch_rss", _fake_watcher)
+
+    with pytest.raises(ScriptSandboxMemoryExceededError, match="RSS limit"):
         run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
