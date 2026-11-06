@@ -144,7 +144,7 @@ def _order_notional_limit(limit_value: Decimal, *, hard: bool = True) -> Exposur
 
 
 class TestAllow:
-    def test_no_limits_no_restrictions_allows_both(self):
+    def test_no_limits_no_restrictions_allows_both(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -159,7 +159,7 @@ class TestAllow:
         assert result.compliance_verdict == ComplianceVerdict.ALLOW
         assert result.impact.symbol == "AAPL"
 
-    def test_risk_limit_within_bound_allows(self):
+    def test_risk_limit_within_bound_allows(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -241,7 +241,7 @@ class TestAllow:
 
 
 class TestRiskDenial:
-    def test_hard_limit_breach_denies_by_risk(self):
+    def test_hard_limit_breach_denies_by_risk(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -254,7 +254,7 @@ class TestRiskDenial:
         assert result.reason_codes["risk"][0].startswith("RISK_LIMIT_BREACH")
         assert result.risk_outcome == RiskOutcome.DENY
 
-    def test_soft_limit_breach_escalates_and_is_still_flagged(self):
+    def test_soft_limit_breach_escalates_and_is_still_flagged(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -350,7 +350,7 @@ def test_risk_denial_cpu_budget_catches_10x_delay_injection(
 
 
 class TestComplianceDenial:
-    def test_restricted_symbol_denies_by_compliance(self):
+    def test_restricted_symbol_denies_by_compliance(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -363,7 +363,7 @@ class TestComplianceDenial:
         assert result.reason_codes["compliance"] == ("restricted_list",)
         assert result.compliance_verdict == ComplianceVerdict.DENY
 
-    def test_concentration_breach_denies_by_compliance(self):
+    def test_concentration_breach_denies_by_compliance(self) -> None:
         # AAPL goes from 30% to a much larger pct after a big BUY; cap it at 1%.
         big_buy = ProposedTrade(
             symbol="AAPL", notional=Decimal("500000"), side="BUY", strategy_id="STRAT_A"
@@ -379,7 +379,7 @@ class TestComplianceDenial:
         assert "compliance" in result.would_be_denied_by
         assert "concentration" in result.reason_codes["compliance"]
 
-    def test_both_authorities_deny_simultaneously(self):
+    def test_both_authorities_deny_simultaneously(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -398,7 +398,7 @@ class TestComplianceDenial:
 
 
 class TestNegativeFailClosed:
-    def test_missing_risk_inputs_denies_by_risk(self):
+    def test_missing_risk_inputs_denies_by_risk(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -411,7 +411,7 @@ class TestNegativeFailClosed:
         assert result.reason_codes["risk"] == (RISK_INPUTS_UNAVAILABLE,)
         assert result.risk_outcome is None
 
-    def test_missing_mandate_denies_by_compliance(self):
+    def test_missing_mandate_denies_by_compliance(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -424,7 +424,7 @@ class TestNegativeFailClosed:
         assert result.reason_codes["compliance"] == (COMPLIANCE_MANDATE_MISSING,)
         assert result.compliance_verdict is None
 
-    def test_inactive_mandate_denies_by_compliance(self):
+    def test_inactive_mandate_denies_by_compliance(self) -> None:
         result = preview_order(
             before=_make_state(),
             trade=BUY_AAPL,
@@ -436,7 +436,7 @@ class TestNegativeFailClosed:
         assert result.would_be_denied_by == ("compliance",)
         assert result.reason_codes["compliance"] == (COMPLIANCE_BUNDLE_INACTIVE,)
 
-    def test_invalid_trade_notional_raises_before_any_gate_runs(self):
+    def test_invalid_trade_notional_raises_before_any_gate_runs(self) -> None:
         """Negative: a structurally invalid trade must fail loud (ValueError
         from UX-9's delta_impact), never silently produce an ALLOW result."""
         bad_trade = ProposedTrade(symbol="AAPL", notional=Decimal("0"), side="BUY")
