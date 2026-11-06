@@ -26,7 +26,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 
-from src.api.deps import get_current_user
+from src.api.deps import get_auth_service, get_current_user, reauthenticate
 from src.api.execution_deps import (
     get_execution_monitoring_service,
     get_execution_service,
@@ -44,7 +44,7 @@ from src.api.schemas.execution import (
 )
 from src.api.schemas.live_readiness import LiveReadinessResponse, to_live_readiness_response
 from src.api.service_deps import get_credential_resolver
-from src.services.auth_service import User
+from src.services.auth_service import AuthService, User
 from src.services.credential_resolver import CredentialResolver
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
@@ -152,9 +152,17 @@ async def convert_to_live(
     execution_id: int,
     body: ConvertToLiveRequest,
     user: User = Depends(get_current_user),
+    auth: AuthService = Depends(get_auth_service),
     resolver: CredentialResolver = Depends(get_credential_resolver),
     service: ExecutionService = Depends(get_execution_service),
+    readiness_service: LiveReadinessService = Depends(get_live_readiness_service),
 ) -> ExecutionResponse:
+    # 자금이 실제로 배정되는 행동 -- 세션 탈취로는 못 하게
+    # 비밀번호(MFA면 TOTP)를 다시 확인한다(J8 LP-3).
+    await reauthenticate(auth, user, body.password, body.totp_code)
+    # 사용자가 결정 시 본 근거를 감사 기록에 남긴다. 소유자·PAPER 검증도 여기서 같이 된다.
+    readiness = await readiness_service.for_execution(execution_id, user.user_id)
+    evidence = to_live_readiness_response(readiness).model_dump(mode="json")
     available = await _available_balance(resolver, user.user_id, body.exchange, body.currency)
     summary = await service.convert_to_live(
         user.user_id,
@@ -163,5 +171,8 @@ async def convert_to_live(
         currency=body.currency,
         exchange=body.exchange,
         available_balance=available,
+        max_loss_amount=body.max_loss_amount,
+        initial_exposure_pct=body.initial_exposure_pct,
+        readiness_evidence=evidence,
     )
     return to_execution_response(summary)

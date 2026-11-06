@@ -35,6 +35,7 @@ mode validation, LIVE approval) — approval cannot be skipped.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -239,6 +240,9 @@ class ExecutionService:
         currency: str,
         exchange: str,
         available_balance: Decimal,
+        max_loss_amount: Decimal,
+        initial_exposure_pct: Decimal,
+        readiness_evidence: dict[str, Any] | None = None,
     ) -> ExecutionSummary:
         async with self._pool.acquire() as conn:
             source = await conn.fetchrow(
@@ -285,6 +289,13 @@ class ExecutionService:
                     "exchange": exchange,
                     "mode_before": "PAPER",
                     "mode_after": "LIVE",
+                    # J8 LP-3 -- 사용자가 명시한 한도와 결정 시 본 근거 요약
+                    # (전략 버전과 함께 결정 계보를 이룬다).
+                    "strategy_id": source["strategy_id"],
+                    "strategy_version": source["strategy_version"],
+                    "max_loss_amount": max_loss_amount,
+                    "initial_exposure_pct": initial_exposure_pct,
+                    "readiness_evidence": readiness_evidence,
                 },
                 user_id=user_id,
                 target_type="strategy_execution",

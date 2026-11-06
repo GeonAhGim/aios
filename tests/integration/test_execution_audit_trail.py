@@ -173,6 +173,9 @@ async def test_convert_to_live_writes_audit_row(service, pool):
         currency="USDT",
         exchange="bitget",
         available_balance=Decimal("10000"),
+        max_loss_amount=Decimal("100"),
+        initial_exposure_pct=Decimal("10"),
+        readiness_evidence={"order_count": 3, "unavailable": {"net_pnl": "원천 미배선"}},
     )
 
     conversion_rows = await _audit_rows(
@@ -183,6 +186,13 @@ async def test_convert_to_live_writes_audit_row(service, pool):
     assert data["source_execution_id"] == paper.id
     assert data["mode_before"] == "PAPER"
     assert data["mode_after"] == "LIVE"
+    # J8 LP-3: 사용자가 명시한 한도, 전략 버전, 결정 시 본 근거 스냅샷이
+    # 감사 기록에 남는다(결정 계보).
+    assert Decimal(str(data["max_loss_amount"])) == Decimal("100")
+    assert Decimal(str(data["initial_exposure_pct"])) == Decimal("10")
+    assert data["strategy_id"] and data["strategy_version"]
+    assert data["readiness_evidence"]["order_count"] == 3
+    assert data["readiness_evidence"]["unavailable"]["net_pnl"] == "원천 미배선"
 
     # convert_to_live()가 재사용하는 create_execution()도 자기 몫의 감사 행을 남긴다.
     creation_rows = await _audit_rows(pool, action_type="execution.created", target_id=str(live.id))

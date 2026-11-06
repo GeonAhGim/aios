@@ -311,13 +311,78 @@ async def test_convert_paper_to_live(client, pool):
 
     response = await client.post(
         f"/executions/{execution_id}/convert-to-live",
-        json={"allocated_capital": "500", "currency": "USDT", "exchange": "bitget"},
+        json={
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "max_loss_amount": "100",
+            "initial_exposure_pct": "10",
+            "password": STRONG_PASSWORD,
+        },
         headers=headers,
     )
 
     assert response.status_code == 201
     assert response.json()["mode"] == "LIVE"
     assert response.json()["approval_request_id"] is not None
+
+
+async def test_convert_to_live_rejects_wrong_password_and_creates_nothing(client, pool):
+    """J8 LP-3: 세션 탈취로는 전환할 수 없다 -- 재인증 실패는 403이고 LIVE 실행이 생기지 않는다."""
+    headers, user_id = await _register(client)
+    strategy_id, version = await _create_approved_strategy(pool, user_id, certified_badge=True)
+    await _link_credential(pool, user_id)
+    create_response = await client.post(
+        "/executions",
+        json={
+            "strategy_id": strategy_id,
+            "strategy_version": version,
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "mode": "PAPER",
+        },
+        headers=headers,
+    )
+    execution_id = create_response.json()["id"]
+
+    response = await client.post(
+        f"/executions/{execution_id}/convert-to-live",
+        json={
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "max_loss_amount": "100",
+            "initial_exposure_pct": "10",
+            "password": "Wr0ng!Passw0rd",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 403
+    async with pool.acquire() as conn:
+        live_count = await conn.fetchval(
+            "SELECT count(*) FROM strategy_executions WHERE converted_from_execution_id = $1",
+            execution_id,
+        )
+    assert live_count == 0
+
+
+async def test_convert_to_live_rejects_loss_limit_above_allocation(client, pool):
+    headers, user_id = await _register(client)
+    response = await client.post(
+        "/executions/1/convert-to-live",
+        json={
+            "allocated_capital": "500",
+            "currency": "USDT",
+            "exchange": "bitget",
+            "max_loss_amount": "501",
+            "initial_exposure_pct": "10",
+            "password": STRONG_PASSWORD,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 400  # 스키마 검증 -- 서비스·재인증까지 가지 않는다
 
 
 async def test_set_and_view_risk_guard(client, pool):

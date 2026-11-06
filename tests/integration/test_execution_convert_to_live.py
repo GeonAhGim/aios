@@ -106,6 +106,8 @@ async def test_convert_creates_new_live_execution_and_preserves_paper(service, p
         currency="USDT",
         exchange="bitget",
         available_balance=Decimal("10000"),
+        max_loss_amount=Decimal("100"),
+        initial_exposure_pct=Decimal("10"),
     )
 
     assert live.id != paper.id
@@ -134,6 +136,8 @@ async def test_convert_requires_full_approval_flow_again(service, pool):
         currency="USDT",
         exchange="bitget",
         available_balance=Decimal("10000"),
+        max_loss_amount=Decimal("100"),
+        initial_exposure_pct=Decimal("10"),
     )
 
     with pytest.raises(ExecutionControlError):
@@ -163,6 +167,8 @@ async def test_cannot_convert_already_live_execution(service, pool):
             currency="USDT",
             exchange="bitget",
             available_balance=Decimal("10000"),
+            max_loss_amount=Decimal("100"),
+            initial_exposure_pct=Decimal("10"),
         )
 
 
@@ -179,4 +185,6 @@ async def test_convert_rejects_non_owner(service, pool):
             currency="USDT",
             exchange="bitget",
             available_balance=Decimal("10000"),
+            max_loss_amount=Decimal("100"),
+            initial_exposure_pct=Decimal("10"),
         )

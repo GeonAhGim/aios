@@ -3,6 +3,7 @@
 Covers request/response schema validation (incl. negative/boundary cases) and
 the to_*_response converters against their upstream service models.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -72,14 +73,80 @@ def test_execution_create_request_rejects_non_decimal_capital() -> None:
         )
 
 
-def test_convert_to_live_request_accepts_zero_capital_boundary() -> None:
-    req = ConvertToLiveRequest(allocated_capital=Decimal("0"), currency="USD", exchange="bitget")
-    assert req.allocated_capital == Decimal("0")
+def _live_kwargs(**overrides):
+    base = {
+        "allocated_capital": Decimal("500"),
+        "currency": "USD",
+        "exchange": "bitget",
+        "max_loss_amount": Decimal("100"),
+        "initial_exposure_pct": Decimal("10"),
+        "password": "pw",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_convert_to_live_request_accepts_a_fully_specified_request() -> None:
+    req = ConvertToLiveRequest(**_live_kwargs())
+    assert req.max_loss_amount == Decimal("100") and req.initial_exposure_pct == Decimal("10")
+    assert req.totp_code is None
+
+
+def test_convert_to_live_request_rejects_zero_capital_because_no_positive_loss_cap_fits() -> None:
+    # J8 LP-3: 이전엔 0을 허용했다. 양수 손실 한도는 0 이하 자금 안에 들어갈 수 없다.
+    with pytest.raises(ValidationError):
+        ConvertToLiveRequest(**_live_kwargs(allocated_capital=Decimal("0")))
+
+
+@pytest.mark.parametrize("missing", ["max_loss_amount", "initial_exposure_pct", "password"])
+def test_convert_to_live_request_requires_the_explicit_approval_inputs(missing) -> None:
+    kwargs = _live_kwargs()
+    del kwargs[missing]
+    with pytest.raises(ValidationError):
+        _call_untyped(ConvertToLiveRequest, **kwargs)
+
+
+@pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-1")])
+def test_convert_to_live_request_rejects_non_positive_loss_limit(bad) -> None:
+    with pytest.raises(ValidationError):
+        ConvertToLiveRequest(**_live_kwargs(max_loss_amount=bad))
+
+
+def test_convert_to_live_request_rejects_loss_limit_above_allocation() -> None:
+    with pytest.raises(ValidationError, match="max_loss_amount"):
+        ConvertToLiveRequest(**_live_kwargs(max_loss_amount=Decimal("501")))
+    # 경계: 배정 자금과 같은 손실 한도는 허용한다(전액 손실 한도).
+    assert ConvertToLiveRequest(
+        **_live_kwargs(max_loss_amount=Decimal("500"))
+    ).max_loss_amount == Decimal("500")
+
+
+@pytest.mark.parametrize("bad", [Decimal("0"), Decimal("0.5"), Decimal("100.01"), Decimal("-5")])
+def test_convert_to_live_request_rejects_out_of_range_initial_exposure(bad) -> None:
+    with pytest.raises(ValidationError):
+        ConvertToLiveRequest(**_live_kwargs(initial_exposure_pct=bad))
+
+
+@pytest.mark.parametrize("ok", [Decimal("1"), Decimal("100")])
+def test_convert_to_live_request_accepts_exposure_boundaries(ok) -> None:
+    assert ConvertToLiveRequest(**_live_kwargs(initial_exposure_pct=ok)).initial_exposure_pct == ok
+
+
+def test_convert_to_live_request_rejects_empty_password() -> None:
+    with pytest.raises(ValidationError):
+        ConvertToLiveRequest(**_live_kwargs(password=""))
 
 
 def test_convert_to_live_request_rejects_missing_exchange() -> None:
     with pytest.raises(ValidationError):
-        _call_untyped(ConvertToLiveRequest, allocated_capital=Decimal("100"), currency="USD")
+        _call_untyped(
+            ConvertToLiveRequest,
+            allocated_capital=Decimal("100"),
+            currency="USD",
+            max_loss_amount=Decimal("10"),
+            initial_exposure_pct=Decimal("10"),
+            password="pw",
+        )
 
 
 def test_retire_request_defaults_to_keep_positions() -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from src.services.execution_monitoring_service import ExecutionCard, LastRiskVerdict
 from src.services.execution_service import ExecutionSummary
@@ -20,9 +20,22 @@ class ExecutionCreateRequest(BaseModel):
 
 
 class ConvertToLiveRequest(BaseModel):
+    """모의 -> 실전 전환 요청 (J8 LP-3).
+    사용자가 명시한 손실 한도·초기 노출과 재인증이 필수다."""
+
     allocated_capital: Decimal
     currency: str
     exchange: str
+    max_loss_amount: Decimal = Field(gt=0)
+    initial_exposure_pct: Decimal = Field(ge=1, le=100)
+    password: str = Field(min_length=1)
+    totp_code: str | None = None
+
+    @model_validator(mode="after")
+    def _loss_limit_within_allocation(self) -> ConvertToLiveRequest:
+        if self.max_loss_amount > self.allocated_capital:
+            raise ValueError("max_loss_amount는 배정 자금(allocated_capital) 이하여야 합니다.")
+        return self
 
 
 class RetireRequest(BaseModel):
