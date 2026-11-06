@@ -7,6 +7,7 @@ DoD "resumable" equivalence proof.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 
 import lightgbm as lgb
 import pytest
@@ -251,14 +252,15 @@ def test_train_step_perf_budget_goes_red_with_cpu_delay_injection(
     주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
 
     `lgb.train` 을 `virtual_delayed_sync` 로 감싸 1회 호출당 6초 CPU 지연을 가상 장부로
-    주입 — 3라운드 × 6초 = 18초 CPU 소모로 5000ms 예산을 크게 초과해
+    주입 — 3라운드는 lgb.train 한 번으로 실행되므로 6초로 5000ms 예산을 초과해
     assert_within/assert 가 적색이 된다.
 
     정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을
     보증한다. 단언/마커 삭제와 예산 완화 금지.
     """
     # lgb.train 을 virtual_delayed_sync 로 감싸 CPU 지연 주입 (6초/회, 가상 장부)
-    slow_train = virtual_delayed_sync(lgb.train, 6.0)
+    train_spy = Mock(wraps=lgb.train)
+    slow_train = virtual_delayed_sync(train_spy, 6.0)
     monkeypatch.setattr(lgb, "train", slow_train)
 
     trainer = LocalTrainer(tmp_path)
@@ -268,8 +270,13 @@ def test_train_step_perf_budget_goes_red_with_cpu_delay_injection(
     def _one_step_with_delay() -> str:
         return trainer.train_step(None, samples, num_boost_round=3, params=_PARAMS)
 
-    # 3라운드 × 6초 = 18초 CPU 소모 → 5000ms 예산 초과
+    # 실제 학습 1회 + 가상 CPU 지연 6초 → 5000ms 예산 초과
     sample = perf_budget.sample(_one_step_with_delay, batch=1)
+    train_spy.assert_called_once()
+    assert train_spy.call_args.kwargs["num_boost_round"] == 3
+    assert isinstance(sample.result, str) and sample.result
+    print(f"[AI-20 injected] {perf_budget.describe(sample, budget_ms=_TRAIN_STEP_P95_BUDGET_MS)}")
+    assert sample.cpu_ms >= 6000.0, "가상 CPU 지연 6초가 측정에 반영되어야 한다"
     assert sample.cpu_ms >= _TRAIN_STEP_P95_BUDGET_MS, (
         f"지연 주입 후 CPU 시간 {sample.cpu_ms:.3f}ms — "
         f"예상과 달리 녹색: 측정/단언이 공허함(hollow assertion, "
