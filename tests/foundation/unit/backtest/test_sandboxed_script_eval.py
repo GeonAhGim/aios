@@ -72,6 +72,16 @@ def _crash_immediately() -> None:
     os._exit(1)  # noqa: SLF001 -- deliberate hard-crash fixture, not a real callsite
 
 
+def _report_own_rss_mb() -> float:
+    """Return this process's resident set size in MB.
+
+    Module-level (not a lambda/closure) because spawn-pickle cannot
+    serialise closures.  Used as the callable in the RSS-ceiling test
+    so the child reports its own RSS back to the parent.
+    """
+    return psutil.Process().memory_info().rss / (1024 * 1024)
+
+
 def _live_child_pids() -> set[int]:
     """Exited, unreaped children cannot execute sandbox code."""
     result = set()
@@ -204,14 +214,10 @@ def test_wallclock_limit_exceeded_raises_timeout_error(perf_budget: PerfBudget) 
 
 @pytest.mark.perf
 def test_rss_limit_exceeded_raises_memory_error() -> None:
-    # Limit sits well above a fresh spawned child's baseline (~100MB with the
-    # DSL runtime imported) so the kill is caused by the allocation, not by
-    # interpreter startup. wallclock_sec is generous for the same reason as
-    # `test_fast_script_matches_direct_call_byte_identical` -- the spawned
-    # child re-imports this whole test module (including the DSL runtime
-    # imports at module scope) before `_allocate_and_hold` ever runs, and a
-    # cold Windows CI checkout pays the full bytecode-compile cost every
-    # single spawn.
+    # The sandbox watches RSS delta from a warm-up baseline; 400 MB of
+    # allocation far exceeds any baseline variance, so the delta-based
+    # check reliably triggers. wallclock_sec is generous for the same
+    # reason as `test_fast_script_matches_direct_call_byte_identical`.
     with pytest.raises(ScriptSandboxMemoryExceededError):
         run_sandboxed(
             _allocate_and_hold,
@@ -224,28 +230,56 @@ def test_rss_limit_exceeded_raises_memory_error() -> None:
 def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
     """Gate-red reproduction (CI run 36237321056, main 16063c7a): a pytest-xdist
     worker whose own RSS had grown past 512MB ran the 5-bar sample script and
-    the sandbox killed the child at birth. With the `fork` start method the
-    child's RSS is the parent's RSS, so the ceiling measured the host. Hold a
-    committed ballast larger than the limit in this process and require the
-    tiny script to still run: fails under `fork`, passes under `spawn`."""
+    the sandbox killed the child at birth.
+
+    With the `fork` start method the child inherits the parent's RSS, so the
+    ceiling measured the host.  Hold a committed ballast larger than the limit
+    in this process and call run_sandboxed with a tiny fixture that only
+    reports its own RSS: the child's reported RSS must stay below the limit.
+    Under fork the child RSS ≈ parent RSS (>384 MB) and this assertion fails;
+    under spawn the child RSS is small and it passes.  This is the actual
+    discriminating check.
+    """
     limit_mb = 256
     ballast = b"\x01" * ((limit_mb + 128) * 1024 * 1024)
     try:
         assert ballast[-1] == 1
         parent_rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
         assert parent_rss_mb > limit_mb, parent_rss_mb  # precondition of the reproduction
-        ir = lower_program(parse(_SAMPLE))
-        direct = _execute_ir(ir, bar_count=5, inputs={"close": _CLOSE})
-        sandboxed = run_sandboxed(
-            _execute_ir,
-            ir,
-            bar_count=5,
-            inputs={"close": _CLOSE},
+        child_rss_mb = run_sandboxed(
+            _report_own_rss_mb,
             limits=SandboxLimits(wallclock_sec=120, rss_mb=limit_mb),
         )
     finally:
         del ballast
-    assert sandboxed == direct
+    assert child_rss_mb < limit_mb, (
+        f"child RSS {child_rss_mb:.1f} MB >= limit {limit_mb} MB "
+        "(fork inherited parent RSS — spawn not enforced?)"
+    )
+
+
+def test_spawn_start_method_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: if the source is changed away from get_context("spawn"),
+    this test catches it — the child RSS would exceed the limit under fork.
+
+    Uses the same create-executor wrapper pattern as
+    test_pid_capture_exhausted_still_kills_child_via_process_tree.
+    """
+    start_method_seen: list[str] = []
+
+    original_get_context = sandboxed_script_eval.get_context
+
+    def track_get_context(method: str) -> object:
+        start_method_seen.append(method)
+        return original_get_context(method)
+
+    monkeypatch.setattr(sandboxed_script_eval, "get_context", track_get_context)
+
+    # Call run_sandboxed with a trivial picklable fixture
+    result = run_sandboxed(_report_own_rss_mb, limits=SandboxLimits(wallclock_sec=30, rss_mb=512))
+    assert isinstance(result, float)
+
+    assert start_method_seen == ["spawn"], f"expected spawn start method, got: {start_method_seen}"
 
 
 @pytest.mark.perf
