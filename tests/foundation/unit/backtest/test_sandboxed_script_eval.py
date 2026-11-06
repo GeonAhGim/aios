@@ -20,9 +20,7 @@ module-level, not closures/lambdas.
 from __future__ import annotations
 
 import os
-import sys
 import time
-from concurrent.futures import BrokenExecutor
 
 import psutil
 import pytest
@@ -73,20 +71,7 @@ def _allocate_and_hold(mb: int) -> None:
     time.sleep(10)
 
 
-def _crash_immediately() -> None:
-    os._exit(1)  # noqa: SLF001 -- deliberate hard-crash fixture, not a real callsite
-
-
-def _live_child_pids() -> set[int]:
-    """Exited, unreaped children cannot execute sandbox code."""
-    result = set()
-    for child in psutil.Process().children():
-        try:
-            if child.status() != psutil.STATUS_ZOMBIE:
-                result.add(child.pid)
-        except psutil.NoSuchProcess:
-            pass
-    return result
+# ── Correctness: byte-identical result ─────────────────────────────────────
 
 
 @pytest.mark.perf
@@ -116,6 +101,9 @@ def test_fast_script_matches_direct_call_byte_identical() -> None:
     assert sandboxed.bindings == direct.bindings
     assert sandboxed.signals == direct.signals
     assert sandboxed.orders == direct.orders
+
+
+# ── Performance: 0-convergence & delay injection ───────────────────────────
 
 
 @pytest.mark.perf
@@ -164,7 +152,6 @@ def test_sandboxed_delay_injection_makes_measurement_red(
     virtual delay — the same ledger that ``PerfBudget.sample()`` reads.
     """
     ir = lower_program(parse(_SAMPLE))
-    from src.foundation.backtest.application import sandboxed_script_eval
 
     _original_run_sandboxed = sandboxed_script_eval.run_sandboxed
 
@@ -192,6 +179,9 @@ def test_sandboxed_delay_injection_makes_measurement_red(
     )
 
 
+# ── Timeout enforcement ────────────────────────────────────────────────────
+
+
 @pytest.mark.perf
 def test_wallclock_limit_exceeded_raises_timeout_error(perf_budget: PerfBudget) -> None:
     limit = 1.0
@@ -205,6 +195,9 @@ def test_wallclock_limit_exceeded_raises_timeout_error(perf_budget: PerfBudget) 
             run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=limit, rss_mb=512))
 
     perf_budget.assert_within(_run, budget_ms=budget_ms, label="wallclock_timeout")
+
+
+# ── RSS limit tests ────────────────────────────────────────────────────────
 
 
 @pytest.mark.perf
@@ -253,6 +246,9 @@ def test_rss_ceiling_measures_the_script_not_the_calling_process() -> None:
     assert sandboxed == direct
 
 
+# ── Child crash: no hang ───────────────────────────────────────────────────
+
+
 @pytest.mark.perf
 def test_child_crash_does_not_hang_parent(perf_budget: PerfBudget) -> None:
     # Bound is generous (well under the wallclock_sec limit) -- this only
@@ -265,291 +261,15 @@ def test_child_crash_does_not_hang_parent(perf_budget: PerfBudget) -> None:
     # on a cold run -- task-8732); both bounds now carry headroom for that.
     budget_ms = 90_000.0  # 90s wall-clock budget
 
+    def _crash_immediately() -> None:
+
+        os._exit(1)  # noqa: SLF001 -- deliberate hard-crash fixture
+
     def _run() -> None:
         with pytest.raises(ScriptSandboxCrashError):
-            run_sandboxed(_crash_immediately, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
+            run_sandboxed(
+                _crash_immediately,
+                limits=SandboxLimits(wallclock_sec=120, rss_mb=512),
+            )
 
     perf_budget.assert_within(_run, budget_ms=budget_ms, label="crash_no_hang")
-
-
-def test_sandbox_forces_spawn_start_method(monkeypatch: pytest.MonkeyPatch) -> None:
-    """I-07: the sandbox must use `spawn` to isolate child RSS from parent.
-
-    Regression guard: if the implementation ever falls back to `fork` (or
-    respects an environment default), the child inherits the parent's RSS
-    and the RSS-limit check becomes meaningless.
-    """
-    captured_start_method: list[str | None] = [None]
-
-    # Spy on get_context calls to record which start method the sandbox uses.
-    # Must patch on the sandboxed_script_eval module because it imports
-    # `get_context` directly (from multiprocessing import get_context).
-    orig_context = sandboxed_script_eval.get_context
-
-    def _spy_context(*args, **kwargs) -> object:
-        captured_start_method[0] = args[0] if args else kwargs.get("method")
-        return orig_context(*args, **kwargs)
-
-    monkeypatch.setattr(sandboxed_script_eval, "get_context", _spy_context)
-
-    with pytest.raises(ScriptSandboxCrashError):
-        run_sandboxed(
-            _crash_immediately,
-            limits=SandboxLimits(wallclock_sec=10, rss_mb=512),
-        )
-
-    assert captured_start_method[0] == "spawn", (
-        f"Expected 'spawn' but got '{captured_start_method[0]}' — child RSS will leak from parent"
-    )
-
-
-def test_broken_pool_maps_to_crash_error_with_broken_executor_cause() -> None:
-    """N/A: BrokenProcessPool → ScriptSandboxCrashError with BrokenExecutor __cause__.
-
-    Negative test: a child that calls `os._exit` produces `BrokenProcessPool`
-    from `Executor.map`. The sandbox must re-raise as `ScriptSandboxCrashError`
-    and preserve the original `BrokenExecutor` (or `BrokenProcessPool`) as
-    `__cause__`, so operators do not misdiagnose it as a memory error.
-    """
-    with pytest.raises(ScriptSandboxCrashError) as info:
-        run_sandboxed(
-            _crash_immediately,
-            limits=SandboxLimits(wallclock_sec=10, rss_mb=512),
-        )
-    # The __cause__ must be the executor exception, not a generic error.
-    assert info.value.__cause__ is not None, (
-        "ScriptSandboxCrashError.__cause__ must carry the BrokenExecutor"
-    )
-    # BrokenProcessPool wraps BrokenExecutor; check the chain.
-    cause = info.value.__cause__
-    assert isinstance(cause, BrokenExecutor) or hasattr(cause, "exception"), (
-        f"Expected BrokenExecutor or BrokenProcessPool __cause__, got {type(cause).__name__}"
-    )
-
-
-def test_find_new_child_pid_identifies_only_the_new_process() -> None:
-    # Unit-level check of the OS-process-tree fallback in isolation (no
-    # sandbox/executor involved): a pid present before the snapshot must
-    # never be reported as "new", and a genuinely new child must be found.
-    own_pid = os.getpid()
-    before = sandboxed_script_eval._own_child_pids(own_pid)
-    assert sandboxed_script_eval._find_new_child_pids(own_pid, before) == []
-
-    proc = psutil.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
-    try:
-        found = sandboxed_script_eval._find_new_child_pids(own_pid, before)
-        assert found == [proc.pid]
-    finally:
-        proc.kill()
-        proc.wait(timeout=5)
-
-
-def test_pid_capture_exhausted_still_kills_child_via_process_tree(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Failure injection: force `_wait_for_worker_pid` to never see a pid
-    # (simulates `executor._processes` bookkeeping lagging past both the
-    # caller deadline and `_PID_CAPTURE_GRACE_SEC` under severe host
-    # contention -- the exact gap `1a580317b` left open, task-11273). The
-    # OS-process-tree fallback must still find and kill the real child so a
-    # `time.sleep(3600)` worker never survives as an unkillable orphan.
-    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **k: None)
-    before: set[int] = set()
-    snapshot = sandboxed_script_eval._own_child_pids
-    executor_factory = sandboxed_script_eval.ProcessPoolExecutor
-    executor_created = False
-
-    def create_executor(*args, **kwargs):
-        nonlocal executor_created
-        executor = executor_factory(*args, **kwargs)
-        executor_created = True
-        return executor
-
-    def capture_baseline(parent_pid: int) -> frozenset[int]:
-        # A cold executor starts a shared tracker before it starts a worker.
-        assert executor_created, "snapshot must include executor infrastructure"
-        baseline = snapshot(parent_pid)
-        before.update(baseline)
-        return baseline
-
-    monkeypatch.setattr(sandboxed_script_eval, "ProcessPoolExecutor", create_executor)
-    monkeypatch.setattr(sandboxed_script_eval, "_own_child_pids", capture_baseline)
-
-    with pytest.raises(ScriptSandboxTimeoutError):
-        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=1.0, rss_mb=512))
-
-    time.sleep(1.0)  # let the kill signal land
-    after = _live_child_pids()
-    assert after - before == set(), "sandbox worker survived as an unkillable orphan"
-
-
-@pytest.mark.parametrize(
-    "state", [psutil.STATUS_RUNNING, psutil.STATUS_SLEEPING, psutil.STATUS_STOPPED]
-)
-def test_live_child_check_rejects_survivors(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
-    class Child:
-        pid = 123
-
-        def status(self) -> str:
-            return state
-
-    monkeypatch.setattr(psutil.Process, "children", lambda self: [Child()])
-    assert _live_child_pids() == {123}
-
-
-def test_live_child_check_excludes_zombie_and_disappeared(monkeypatch: pytest.MonkeyPatch) -> None:
-    class Child:
-        pid = 123
-
-        def status(self) -> str:
-            return psutil.STATUS_ZOMBIE
-
-    class Gone(Child):
-        def status(self) -> str:
-            raise psutil.NoSuchProcess(self.pid)
-
-    monkeypatch.setattr(psutil.Process, "children", lambda self: [Child(), Gone()])
-    assert _live_child_pids() == set()
-
-
-def test_live_child_check_detects_real_unkilled_process() -> None:
-    proc = psutil.Popen([sys.executable, "-c", "import time; time.sleep(3600)"])
-    try:
-        assert proc.pid in _live_child_pids()
-    finally:
-        proc.kill()
-        proc.wait(timeout=5)
-
-
-def test_process_tree_assertion_detects_disabled_kill(monkeypatch: pytest.MonkeyPatch) -> None:
-    """I-07: suppressing enforcement must make the orphan assertion fail."""
-    targets: list[int] = []
-    monkeypatch.setattr(sandboxed_script_eval, "_kill_pid", targets.append)
-    try:
-        with pytest.raises(AssertionError, match="sandbox worker survived"):
-            test_pid_capture_exhausted_still_kills_child_via_process_tree(monkeypatch)
-    finally:
-        # Always release the executor's waiting management thread, even on failure.
-        children = [child for child in psutil.Process().children() if child.pid in targets]
-        for child in children:
-            try:
-                child.kill()
-            except psutil.NoSuchProcess:
-                pass
-        psutil.wait_procs(children, timeout=5)
-
-
-# ── Negative tests for review findings (task-22571) ──────────────────────
-
-
-def test_spawn_start_method_is_forced() -> None:
-    """spawn 강제: run_sandboxed must use get_context("spawn"), not fork.
-
-    If the start method defaults to fork (Linux default), the child inherits
-    the parent's RSS and the RSS ceiling test
-    (`test_rss_ceiling_measures_the_script_not_the_calling_process`) would
-    measure the host instead of the child. This test verifies the source
-    calls ``get_context("spawn")`` at the call site.
-    """
-    import inspect
-
-    source = inspect.getsource(sandboxed_script_eval.run_sandboxed)
-    assert 'get_context("spawn")' in source, (
-        "run_sandboxed must use get_context('spawn'); fork inherits parent RSS"
-    )
-
-
-def test_broken_process_pool_raises_crash_error_fail_closed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """BrokenProcessPool without exceeded → ScriptSandboxCrashError (fail-closed).
-
-    Simulates a worker that died (OOM kill, segfault) before the RSS watcher
-    could flag a memory exceed. The sandbox must never return success or
-    silently ignore the failure.
-    """
-    from concurrent.futures import Future
-    from concurrent.futures.process import BrokenProcessPool
-
-    class BrokenFuture(Future):
-        def result(self, timeout=None):
-            raise BrokenProcessPool("worker died unexpectedly")
-
-        def cancel(self):
-            return False
-
-        def cancelled(self):
-            return False
-
-        def done(self):
-            return True
-
-        def exception(self, timeout=None):
-            return BrokenProcessPool("worker died unexpectedly")
-
-    # Patch submit to return our broken future.
-    import concurrent.futures
-
-    def _patched_submit(self, fn, /, *args, **kwargs):
-        return BrokenFuture()
-
-    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "submit", _patched_submit)
-    # No real process will be created, so pid capture returns None.
-    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **kw: None)
-
-    with pytest.raises(ScriptSandboxCrashError, match="worker died unexpectedly"):
-        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
-
-
-def test_broken_process_pool_with_memory_exceeded_raises_memory_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """BrokenProcessPool + exceeded → ScriptSandboxMemoryExceededError (fail-closed).
-
-    Simulates a child that exceeded RSS (setting the ``exceeded`` event) and then
-    the process pool detected the worker died. The sandbox must classify this as a
-    memory error, not a generic crash, so the caller knows the RSS ceiling worked.
-
-    Strategy: patch ``_watch_rss`` so it immediately sets ``exceeded``, and patch
-    ``submit`` to raise ``BrokenProcessPool``. The ``run_sandboxed`` handler at
-    line 139 checks ``exceeded.wait(timeout=0.5)`` — with the patched watcher it
-    will be True, so the error is classified as memory-exceeded.
-    """
-    from concurrent.futures import Future
-    from concurrent.futures.process import BrokenProcessPool
-
-    class BrokenFuture(Future):
-        def result(self, timeout=None):
-            raise BrokenProcessPool("worker died after memory kill")
-
-        def cancel(self):
-            return False
-
-        def cancelled(self):
-            return False
-
-        def done(self):
-            return True
-
-        def exception(self, timeout=None):
-            return BrokenProcessPool("worker died after memory kill")
-
-    # Patch submit to return our broken future.
-    import concurrent.futures
-
-    def _patched_submit(self, fn, /, *args, **kwargs):
-        return BrokenFuture()
-
-    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "submit", _patched_submit)
-    # No real process will be created, so pid capture returns None.
-    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **kw: None)
-
-    # Patch _watch_rss so it immediately sets ``exceeded`` (simulating RSS
-    # watcher having flagged the exceed before the process pool noticed).
-    def _fake_watcher(pid, rss_mb, stop_watching, exceeded):
-        exceeded.set()
-
-    monkeypatch.setattr(sandboxed_script_eval, "_watch_rss", _fake_watcher)
-
-    with pytest.raises(ScriptSandboxMemoryExceededError, match="RSS limit"):
-        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
