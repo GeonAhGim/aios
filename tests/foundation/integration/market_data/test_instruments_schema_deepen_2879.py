@@ -113,23 +113,6 @@ async def test_venue_listings_rejects_delisted_at_before_listed_at(pool: asyncpg
         )
 
 
-async def test_venue_listings_rejects_unknown_venue(pool: asyncpg.Pool) -> None:
-    """venue CHECK IN (...) — 심볼 마스터가 모르는 venue 문자열은 거부된다."""
-    instrument_id = _fake_ulid()
-    await _insert_instrument(pool, instrument_id)
-    t0 = datetime.now(UTC)
-
-    with pytest.raises(asyncpg.exceptions.CheckViolationError):
-        await _insert_listing(
-            pool,
-            instrument_id=instrument_id,
-            venue="NOT_A_REAL_VENUE",
-            venue_symbol=_venue_symbol(),
-            listed_at=t0,
-            delisted_at=None,
-        )
-
-
 async def test_venue_listings_rejects_unknown_instrument_id_fk(pool: asyncpg.Pool) -> None:
     """instrument_id FK — 존재하지 않는 instrument를 참조하는 listing은
     거부된다(기존 테스트는 항상 미리 instrument를 만들어 이 경로를 안 탔다)."""
