@@ -53,80 +53,53 @@ _MAX_WEIGHT_CHANGE = Decimal("0.20")
 def recalibrate_weights(
     samples: Sequence[VenueCostSample],
     current: VenueScoreWeights,
-) -> VenueScoreWeights:
-    """Recompute venue ``fee_weight`` from cost samples, preserve ``liquidity_weight``.
+) -> dict[str, VenueScoreWeights]:
+    """Return independent venue weights targeting mean(cost / notional).
 
-    Algorithm
-    ---------
-    1. Group samples by ``venue``.
-    2. For each venue compute ``avg_cost_ratio = mean(total_cost / notional)``.
-       Raises ``ValueError`` on empty groups, zero, or negative ``notional``.
-    3. Compare the highest-ratio venue to the mean ratio across all venues.
-    4. Scale ``current.fee_weight`` by this calibration factor, clamped to
-       ±20 % per call to limit volatility.
-    5. Return a new ``VenueScoreWeights`` with the updated ``fee_weight``.
+    Each venue's observed cost ratio is its absolute target fee weight;
+    other venues cannot dilute that target. Clamp to +/-20% of the current
+    weight per call and preserve liquidity_weight. The positive floor takes
+    precedence when repairing a current weight already below 0.0001.
 
-    Constraints
-    -----------
-    - Result ``fee_weight`` is always ``> 0`` (floored at ``Decimal("0.0001")``).
-    - ``total_cost`` and ``notional`` must be positive; zero or negative raises
-      ``ValueError``.
-    - ``samples`` must be non-empty; empty sequence raises ``ValueError``.
-    - NaN / Inf values in any numeric field raise ``ValueError``.
+    Reject non-finite values before ordering or arithmetic. This is a pure
+    calibration primitive, not a routing or order-submission entry point.
     """
-
     if not samples:
         raise ValueError("recalibrate_weights requires at least one sample")
 
-    # --- validate --------------------------------------------------------
-    for s in samples:
-        tc = s.total_cost
-        nt = s.notional
-        # NaN guard first: Decimal ordering comparisons raise InvalidOperation on NaN.
-        if tc.is_nan() or nt.is_nan():
-            raise ValueError("total_cost and notional must not be NaN")
-        if abs(tc) == Decimal("Infinity") or abs(nt) == Decimal("Infinity"):
-            raise ValueError("total_cost and notional must not be Infinity")
-        if tc <= Decimal("0"):
-            raise ValueError(f"total_cost must be positive, got {tc}")
-        if nt <= Decimal("0"):
-            raise ValueError(f"notional must be positive, got {nt}")
+    for name, value in (
+        ("fee_weight", current.fee_weight),
+        ("liquidity_weight", current.liquidity_weight),
+    ):
+        if not value.is_finite():
+            raise ValueError(f"{name} must be finite")
+        if value < 0:
+            raise ValueError(f"{name} must be non-negative")
 
-    # --- group by venue, compute avg cost ratio --------------------------
-    _venue_ratios: list[Decimal] = []
-    _samples_by_venue: dict[str, list[Decimal]] = {}
-    for s in samples:
-        _samples_by_venue.setdefault(s.venue, []).append(s.total_cost / s.notional)
+    samples_by_venue: dict[str, list[Decimal]] = {}
+    for sample in samples:
+        for name, value in (
+            ("total_cost", sample.total_cost),
+            ("notional", sample.notional),
+        ):
+            if not value.is_finite():
+                raise ValueError(f"{name} must be finite")
+            if value <= 0:
+                raise ValueError(f"{name} must be positive")
+        samples_by_venue.setdefault(sample.venue, []).append(
+            sample.total_cost / sample.notional
+        )
 
-    for _venue, _ratios in _samples_by_venue.items():
-        _avg = statistics.mean(_ratios)
-        if _avg <= Decimal("0") or _avg != _avg:
-            raise ValueError(f"computed ratio for venue {_venue} is invalid")
-        _venue_ratios.append(_avg)
-
-    # --- calibration factor ----------------------------------------------
-    _total_ratio = sum(_venue_ratios, Decimal("0"))
-    _n_venues = len(_venue_ratios)
-    _mean_ratio = _total_ratio / Decimal(str(_n_venues))
-    _max_ratio = max(_venue_ratios)
-
-    # If all venues have equal ratio, factor = 1 (no change).
-    if _mean_ratio > Decimal("0"):
-        _calibration_factor = _max_ratio / _mean_ratio
-    else:
-        _calibration_factor = Decimal("1")
-
-    # Clamp calibration factor to ±20 % of current value.
-    _delta = _calibration_factor - Decimal("1")
-    if abs(_delta) > _MAX_WEIGHT_CHANGE:
-        _delta = _MAX_WEIGHT_CHANGE if _delta > 0 else -_MAX_WEIGHT_CHANGE
-    _new_fee_weight = current.fee_weight * (Decimal("1") + _delta)
-
-    # Ensure strictly positive (floor at 0.0001).
-    if _new_fee_weight <= Decimal("0"):
-        _new_fee_weight = Decimal("0.0001")
-
-    return VenueScoreWeights(
-        fee_weight=_new_fee_weight,
-        liquidity_weight=current.liquidity_weight,
-    )
+    lower = current.fee_weight * (Decimal("1") - _MAX_WEIGHT_CHANGE)
+    upper = current.fee_weight * (Decimal("1") + _MAX_WEIGHT_CHANGE)
+    result: dict[str, VenueScoreWeights] = {}
+    for venue, ratios in samples_by_venue.items():
+        average = statistics.mean(ratios)
+        if not average.is_finite() or average <= 0:
+            raise ValueError(f"computed ratio for venue {venue} is invalid")
+        fee_weight = max(Decimal("0.0001"), min(upper, max(lower, average)))
+        result[venue] = VenueScoreWeights(
+            fee_weight=fee_weight,
+            liquidity_weight=current.liquidity_weight,
+        )
+    return result
