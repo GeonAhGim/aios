@@ -15,7 +15,7 @@ from src.foundation.ml.adapters.local_trainer import LocalTrainer, ModelArtifact
 from src.foundation.ml.contracts.v1 import ModelCard, TrainDataLineage
 from src.foundation.ml.ports.trainer import TrainingSample
 from tests.support.perf_budget import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 _NOW = datetime(2026, 6, 1, tzinfo=UTC)
 _PARAMS: dict[str, object] = {"num_leaves": 7, "min_data_in_leaf": 1, "learning_rate": 0.3}
@@ -247,18 +247,18 @@ def test_train_step_perf_budget_goes_red_with_cpu_delay_injection(
     perf_budget: PerfBudget,
     tmp_path,
 ) -> None:
-    """gate-red reproduction: lgb.train 에 CPU 지연(delayed_sync, 6.0s)을
+    """gate-red reproduction: lgb.train 에 CPU 지연(virtual_delayed_sync, 6.0s)을
     주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
 
-    `lgb.train` 을 `delayed_sync` 로 감싸 1회 호출당 6초 CPU 부하를
+    `lgb.train` 을 `virtual_delayed_sync` 로 감싸 1회 호출당 6초 CPU 지연을 가상 장부로
     주입 — 3라운드 × 6초 = 18초 CPU 소모로 5000ms 예산을 크게 초과해
     assert_within/assert 가 적색이 된다.
 
     정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가 아님을
     보증한다. 단언/마커 삭제와 예산 완화 금지.
     """
-    # lgb.train 을 delayed_sync 로 감싸 CPU 지연 주입 (6초/회)
-    slow_train = delayed_sync(lgb.train, 6.0)
+    # lgb.train 을 virtual_delayed_sync 로 감싸 CPU 지연 주입 (6초/회, 가상 장부)
+    slow_train = virtual_delayed_sync(lgb.train, 6.0)
     monkeypatch.setattr(lgb, "train", slow_train)
 
     trainer = LocalTrainer(tmp_path)
