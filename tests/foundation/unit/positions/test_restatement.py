@@ -28,7 +28,7 @@ from src.foundation.positions.domain.restatement import (
 )
 from src.foundation.positions.domain.snapshot_builder import SnapshotFold, fold
 from tests.conftest import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 _POSITION_KEY = "binance:BTCUSDT:s1:e1"
 _ORDER_ID = UUID("00000000-0000-0000-0000-0000000000aa")
@@ -274,12 +274,12 @@ def test_is_retroactive_perf_budget_catches_delay_injection(
     """게이트 적색 재현(D2, task-11539 감사 후속): `is_retroactive`에 CPU 지연을 주입하면
     assert_within가 AssertionError로 적색이 돼야 한다.
 
-    지연 주입은 delayed_sync 헬퍼를 사용한다(type: ignore 예산 보호).
+    지연 주입은 virtual_delayed_sync 헬퍼를 사용한다(type: ignore 예산 보호).
     """
     import src.foundation.positions.domain.restatement as mod
 
     original_is_retroactive = mod.is_retroactive
-    monkeypatch.setattr(mod, "is_retroactive", delayed_sync(original_is_retroactive, 0.05))
+    monkeypatch.setattr(mod, "is_retroactive", virtual_delayed_sync(original_is_retroactive, 0.05))
 
     with pytest.raises(AssertionError):
         perf_budget.assert_within(
