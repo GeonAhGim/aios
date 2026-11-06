@@ -436,3 +436,65 @@ def test_process_tree_assertion_detects_disabled_kill(monkeypatch: pytest.Monkey
             except psutil.NoSuchProcess:
                 pass
         psutil.wait_procs(children, timeout=5)
+
+
+# ── Negative tests for review findings (task-22571) ──────────────────────
+
+
+def test_spawn_start_method_is_forced() -> None:
+    """spawn 강제: run_sandboxed must use get_context("spawn"), not fork.
+
+    If the start method defaults to fork (Linux default), the child inherits
+    the parent's RSS and the RSS ceiling test
+    (`test_rss_ceiling_measures_the_script_not_the_calling_process`) would
+    measure the host instead of the child. This test verifies the source
+    calls ``get_context("spawn")`` at the call site.
+    """
+    import inspect
+
+    source = inspect.getsource(sandboxed_script_eval.run_sandboxed)
+    assert 'get_context("spawn")' in source, (
+        "run_sandboxed must use get_context('spawn'); fork inherits parent RSS"
+    )
+
+
+def test_broken_process_pool_raises_crash_error_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BrokenProcessPool without exceeded → ScriptSandboxCrashError (fail-closed).
+
+    Simulates a worker that died (OOM kill, segfault) before the RSS watcher
+    could flag a memory exceed. The sandbox must never return success or
+    silently ignore the failure.
+    """
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+
+    class BrokenFuture(Future):
+        def result(self, timeout=None):
+            raise BrokenProcessPool("worker died unexpectedly")
+
+        def cancel(self):
+            return False
+
+        def cancelled(self):
+            return False
+
+        def done(self):
+            return True
+
+        def exception(self, timeout=None):
+            return BrokenProcessPool("worker died unexpectedly")
+
+    # Patch submit to return our broken future.
+    import concurrent.futures
+
+    def _patched_submit(self, fn, /, *args, **kwargs):
+        return BrokenFuture()
+
+    monkeypatch.setattr(concurrent.futures.ProcessPoolExecutor, "submit", _patched_submit)
+    # No real process will be created, so pid capture returns None.
+    monkeypatch.setattr(sandboxed_script_eval, "_wait_for_worker_pid", lambda *a, **kw: None)
+
+    with pytest.raises(ScriptSandboxCrashError, match="worker died unexpectedly"):
+        run_sandboxed(_hang_forever, limits=SandboxLimits(wallclock_sec=120, rss_mb=512))
