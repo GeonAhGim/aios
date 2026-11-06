@@ -165,14 +165,33 @@ def test_participation_cap_binds_ahead_of_urgency_front_loading() -> None:
 
 
 def test_non_final_slices_pass_the_guard_participation_check() -> None:
+    from src.foundation.ems.domain.algo.guard import check_participation
+
     parent = _parent(
         qty=Decimal("1000"),
         algo=_algo(urgency=Decimal("1"), max_participation_pct=Decimal("10")),
     )
     tight_profile = [Decimal("1000")] * 4
     children = plan_is_schedule(parent, volume_profile=tight_profile)
-    for child, market_volume in zip(children[:-1], tight_profile[:-1]):  # noqa: B905
-        assert child.planned_qty / market_volume * 100 <= Decimal("10")
+    assert len(children) == len(tight_profile) == 4
+    assert [child.slice_seq for child in children] == list(range(4))
+    assert sum(child.planned_qty for child in children) == parent.qty
+    for child, market_volume in zip(children[:-1], tight_profile[:-1], strict=True):
+        assert child.planned_qty == Decimal("100")
+        check_participation(child.planned_qty, market_volume, parent.algo.max_participation_pct)
+        # I-07: an injected over-cap quantity must fail the real domain guard.
+        with pytest.raises(ParticipationExceededError, match="exceeding the cap"):
+            check_participation(
+                child.planned_qty + Decimal("0.0001"),
+                market_volume,
+                parent.algo.max_participation_pct,
+            )
+    # The final residual is exempt in the planner, not in the guard itself.
+    assert children[-1].planned_qty == Decimal("700")
+    with pytest.raises(ParticipationExceededError, match="exceeding the cap"):
+        check_participation(
+            children[-1].planned_qty, tight_profile[-1], parent.algo.max_participation_pct
+        )
 
 
 # -- (f)-1 kind guard: this module only plans IS -----------------------------
