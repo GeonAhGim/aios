@@ -284,30 +284,37 @@ def test_incremental_update_latency_p99_within_streaming_budget(
     전부에 5,000 bar를 흘려 넣고 update() 호출별 지연을 재 p99를 구한다 — 로컬 실측
     (EMA 1.1us ~ STOCH 3.2us, 창·Wilder·EMA 전부 O(period) 또는 O(1) 갱신이라 5,000
     bar에서도 안 늘어난다)에 CI 기계 편차 감안 30배 이상 여유를 둔 100us를 예산으로
-    건다."""
+    건다.
+
+    CPU 틱(Windows ~15.6ms)이나 일시 지연 1회가 p99 단언을 흔들지 않도록
+    `perf_budget.best_of`와 동일한 패턴을 따른다: 지표별로 5덩어리(1000 bar/덩어리)
+    측정을 여러 번(3회) 반복해 그중 최소 p99를 단언에 쓴다. 정확한 예산(100us)·
+    단언식·대상 지표 11개·bar 수는 바꾸지 않는다."""
     rng = np.random.default_rng(21)
     n = 5000
     cols = _ohlcv(rng, n, 100.0)
     budget_ms = 100e-6 * 1000
     batch = 1000
+    num_chunks = n // batch  # 5
     for name in NAMES:
         spec = TALIB_SPECS[name]
         params = {p.name: p.default for p in spec.params}
         keys = IncrementalIndicator(name, params).spec.inputs
         rows = [{k: float(cols[k][i]) for k in keys} for i in range(n)]
-        # process_time ticks at ~15.6ms, so each sample times `batch` update() calls and
-        # divides; the p99 is taken over the per-call means of the n/batch chunks. A
-        # co-tenant CPU stall inflates one whole chunk (task-22324: 9 ticks in one chunk),
-        # so the budget is judged best-of-3 on fresh indicators, like `assert_within`.
+        # best_of: 여러 번 측정 중 최소 p99를 선택해 CPU tick/일시 지연 1회에
+        # 흔들리지 않게 한다(task-22905). 각 반복은 새 Indicator로 5덩어리를
+        # 측정한 뒤 p99(=chunks[min(4,int(5*0.99))]=chunks[4]=최댓값)를 내고,
+        # 3회 중 최소값을 최종 p99로 쓴다.
         p99s: list[float] = []
-        for _ in range(3):
+        for _run in range(3):
             ind = IncrementalIndicator(name, params)
             bars = iter(rows)
             chunk_ms = sorted(
                 perf_budget.sample(partial(_feed_next, ind, bars), batch=batch).cpu_ms
-                for _ in range(n // batch)
+                for _ in range(num_chunks)
             )
-            p99s.append(chunk_ms[min(len(chunk_ms) - 1, int(len(chunk_ms) * 0.99))])
+            p99_idx = min(len(chunk_ms) - 1, int(len(chunk_ms) * 0.99))
+            p99s.append(chunk_ms[p99_idx])
             if p99s[-1] < budget_ms:
                 break
         p99_ms = min(p99s)
@@ -316,6 +323,60 @@ def test_incremental_update_latency_p99_within_streaming_budget(
             f"[IND-1 incremental] {name} n={n} p99={p99_us:.2f}us budget<{budget_ms * 1000:.0f}us"
         )
         assert p99_ms < budget_ms, (name, p99s)
+
+
+@pytest.mark.perf
+def test_incremental_update_latency_p99_red_with_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트가 실제로 성능을 잡는지(적색 재현) 확인한다 — `IncrementalIndicator.update()`에
+    10배 지연(0.01s = 10,000us)을 가상 주입했을 때 p99 단언이 실패함을 확인한다.
+    `virtual_delayed_sync`는 실제 busy-wait 없이 virtual ledger만 증가시키므로
+    CI 병렬 실행(-n xdist)에서도 결정론적으로 동작한다(task-22794)."""
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    rng = np.random.default_rng(21)
+    n = 5000
+    cols = _ohlcv(rng, n, 100.0)
+    budget_ms = 100e-6 * 1000
+    batch = 1000
+    num_chunks = n // batch
+
+    # SMA는 기본 timeperiod=10 — 가장 간단한 지표로 게이트 적색 재현
+    name = "SMA"
+    params = {"timeperiod": 10}
+
+    # 10ms 가상 CPU 지연이 주입된 update 루프 — chunk 단위로 측정
+    def _delayed_chunk(ind: IncrementalIndicator, bars_iter, count: int) -> list[dict]:
+        result: list[dict] = []
+        for _ in range(count):
+            row = next(bars_iter)
+            result.append(virtual_delayed_sync(lambda r=row: ind.update(r), 0.01)())
+        return result
+
+    p99s: list[float] = []
+    for _run in range(3):
+        ind = IncrementalIndicator(name, params)
+        bars_iter = iter([{k: float(cols[k][i]) for k in ind.spec.inputs} for i in range(n)])
+        chunk_ms = sorted(
+            perf_budget.sample(
+                lambda i=ind, b=bars_iter: _delayed_chunk(i, b, batch), batch=1
+            ).cpu_ms
+            for _ in range(num_chunks)
+        )
+        p99_idx = min(len(chunk_ms) - 1, int(len(chunk_ms) * 0.99))
+        p99s.append(chunk_ms[p99_idx])
+
+    p99_ms = min(p99s)
+    print(
+        f"[IND-1 incremental RED] {name} n={n} p99={p99_ms * 1000:.2f}us "
+        f"budget<{budget_ms * 1000:.0f}us"
+    )
+    # 10ms 가상 지연이 주입되면 p99가 100us 예산을 반드시 넘어야 한다 —
+    # 게이트가 아무 효과 없이 통과하면 이 단언은 실패한다.
+    assert p99_ms >= budget_ms, (
+        f"게이트가 지연을 잡지 못함: p99={p99_ms * 1000:.2f}us budget={budget_ms * 1000:.0f}us"
+    )
 
 
 # ---- DEEPEN(task-2916): 게이트 적색 재현(증분 준비도 자기검증) ----
