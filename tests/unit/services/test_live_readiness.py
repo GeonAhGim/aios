@@ -140,3 +140,10 @@ def test_period_spans_first_creation_to_last_update() -> None:
 def test_invalid_rows_are_rejected_loudly(bad) -> None:
     with pytest.raises(LiveReadinessInputError):
         compute_live_readiness([_row(**bad)])
+
+
+def test_partial_fee_coverage_is_unavailable_not_an_underreported_total() -> None:
+    """일부 주문에만 수수료가 있으면 합계를 내지 않는다 -- 과소 보고가 좋은 숫자로 안 보이게."""
+    r = compute_live_readiness([_row(fee_total="1", fee_currency="USDT"), _row()])
+    assert r.fee_totals is None
+    assert "일부" in r.unavailable["fee_totals"]

@@ -1,4 +1,5 @@
 """16번대 — 실행 제어판 서비스 팩토리 의존성."""
+
 from __future__ import annotations
 
 import asyncpg
@@ -9,6 +10,7 @@ from src.core.event_bus.bus import EventBus
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
+from src.services.live_readiness_service import LiveReadinessService
 from src.services.order_service.foundation_gate import make_foundation_pre_submit_gate
 
 from .deps import get_event_bus, get_pool
@@ -29,6 +31,12 @@ def get_execution_service(
         pre_start_gate=make_foundation_pre_submit_gate(pool, require_mandate=True),
         publish=event_bus.publish,
     )
+
+
+def get_live_readiness_service(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> LiveReadinessService:
+    return LiveReadinessService(pool)
 
 
 def get_execution_monitoring_service(

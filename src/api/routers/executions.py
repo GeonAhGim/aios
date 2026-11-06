@@ -18,6 +18,7 @@ EXCEPTION_MAP in exception_mapping.py to the same status codes (400/404). Deferr
 wrapping this router's success responses follows the same rationale as PLT-17 decision
 (see exchange_credentials.py module docstring).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -26,7 +27,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_current_user
-from src.api.execution_deps import get_execution_monitoring_service, get_execution_service
+from src.api.execution_deps import (
+    get_execution_monitoring_service,
+    get_execution_service,
+    get_live_readiness_service,
+)
 from src.api.schemas.execution import (
     ConvertToLiveRequest,
     ExecutionCardResponse,
@@ -37,11 +42,13 @@ from src.api.schemas.execution import (
     to_execution_card_response,
     to_execution_response,
 )
+from src.api.schemas.live_readiness import LiveReadinessResponse, to_live_readiness_response
 from src.api.service_deps import get_credential_resolver
 from src.services.auth_service import User
 from src.services.credential_resolver import CredentialResolver
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
+from src.services.live_readiness_service import LiveReadinessService
 
 router = APIRouter()
 
@@ -85,6 +92,17 @@ async def list_executions(
 ) -> list[ExecutionCardResponse]:
     cards = await service.list_for_user(user.user_id)
     return [to_execution_card_response(card) for card in cards]
+
+
+@router.get("/{execution_id}/live-readiness")
+async def get_live_readiness(
+    execution_id: int,
+    user: User = Depends(get_current_user),
+    service: LiveReadinessService = Depends(get_live_readiness_service),
+) -> LiveReadinessResponse:
+    """모의 -> 실전 전환 근거(J8 LP-2). 본인의 PAPER 실행만.
+    자료가 없는 항목은 null이고 사유는 unavailable에 있다."""
+    return to_live_readiness_response(await service.for_execution(execution_id, user.user_id))
 
 
 @router.post("/{execution_id}/start")

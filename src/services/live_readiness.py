@@ -32,6 +32,7 @@ UNAVAILABLE_NET_PNL = "주문 행만으로는 순손익을 알 수 없다(포지
 UNAVAILABLE_RECOVERY = "장애 복구 이벤트 원천 미배선"
 UNAVAILABLE_NO_TERMINAL = "끝난 주문이 없어 비율을 계산할 수 없다"
 UNAVAILABLE_NO_FEE_COLUMN = "주문 행에 수수료 열이 없다"
+UNAVAILABLE_PARTIAL_FEE = "일부 주문에만 수수료가 있어 합계를 내면 과소 보고가 된다"
 UNAVAILABLE_NO_SLIPPAGE_SAMPLE = "가격과 평균 체결가가 둘 다 있는 체결된 지정가 주문이 없다"
 
 
@@ -85,7 +86,7 @@ def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
     filled = partial = unfilled = rejected = terminal = 0
     starts: list[datetime] = []
     ends: list[datetime] = []
-    fee_seen = False
+    fee_rows = 0
     fee_totals: dict[str, Decimal] = {}
     slip_weighted = Decimal(0)
     slip_qty = Decimal(0)
@@ -111,7 +112,7 @@ def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
             ends.append(updated)
 
         if "fee_total" in row and row.get("fee_total") is not None:
-            fee_seen = True
+            fee_rows += 1
             ccy = str(row.get("fee_currency") or "UNKNOWN")
             fee_totals[ccy] = fee_totals.get(ccy, Decimal(0)) + (
                 _dec(row["fee_total"], "fee_total") or Decimal(0)
@@ -148,8 +149,12 @@ def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
     if terminal == 0:
         for key in ("fill_ratio", "partial_fill_ratio", "unfilled_ratio", "reject_ratio"):
             unavailable[key] = UNAVAILABLE_NO_TERMINAL
-    if not fee_seen:
+    # 수수료는 모든 주문에 있을 때만 합계를 낸다 -- 일부만 합하면 과소 보고가 좋은 숫자로 보인다.
+    fee_complete = order_count > 0 and fee_rows == order_count
+    if fee_rows == 0:
         unavailable["fee_totals"] = UNAVAILABLE_NO_FEE_COLUMN
+    elif not fee_complete:
+        unavailable["fee_totals"] = UNAVAILABLE_PARTIAL_FEE
     avg_slippage = (slip_weighted / slip_qty) if slip_qty > 0 else None
     if avg_slippage is None:
         unavailable["avg_slippage_bps"] = UNAVAILABLE_NO_SLIPPAGE_SAMPLE
@@ -177,7 +182,7 @@ def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
         period_days=period_days,
         avg_slippage_bps=avg_slippage,
         slippage_sample_size=slip_n,
-        fee_totals=dict(fee_totals) if fee_seen else None,
+        fee_totals=dict(fee_totals) if fee_complete else None,
         net_pnl=None,
         recovery_event_count=None,
         unavailable=unavailable,
