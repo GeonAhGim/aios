@@ -265,10 +265,11 @@ def test_full_validation_pipeline_goes_red_with_delay_injection(
     적색(AssertionError)으로 전환되는지 확인 — 성능 단언이 실제로 실행 시간을
     측정하는지 증명한다(단언/마커 삭제나 예산 완화 아님).
 
-    `_unknown_metric_tokens`에 0.05초 CPU 부하를 주입하면 전체 측정 시간이
-    100ms 예산을 넘어서야 한다. delayed_sync는 busy-wait로 time.process_time()을
-    직접 증가시키므로 PerfBudget.sample의 CPU 측정과 호환된다."""
-    from tests.support.perf_inject import delayed_sync
+    `_unknown_metric_tokens`에 0.2초 CPU 부하를 주입하면 전체 측정 시간이
+    100ms 예산을 넘어서야 한다. virtual_delayed_sync는 실제 busy-wait 없이
+    virtual ledger만 증가시키므로 CI 병렬 실행(-n 2)에서도 결정론적으로
+    동작한다(task-22794)."""
+    from tests.support.perf_inject import virtual_delayed_sync
 
     rules = _load_rules()
     runbook_exists = {
@@ -278,7 +279,7 @@ def test_full_validation_pipeline_goes_red_with_delay_injection(
     }
 
     original_func = _unknown_metric_tokens
-    slow_func = delayed_sync(original_func, 0.2)
+    slow_func = virtual_delayed_sync(original_func, 0.2)
     monkeypatch.setattr(
         "tests.platform.unit.test_alert_rules_reference_known_metrics._unknown_metric_tokens",
         lambda rules_arg: slow_func(rules_arg),
