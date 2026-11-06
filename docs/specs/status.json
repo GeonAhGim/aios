@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-11-05T17:26:42+00:00",
+ "refreshed_at": "2026-11-06T17:15:37+00:00",
  "specs": [
   {
    "below_floor": 7,
@@ -43,7 +43,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 1,
-   "reopened": 1,
+   "reopened": 0,
    "depth": {
     "D1": 1,
     "D2": 2,
@@ -51,7 +51,7 @@
    }
   },
   {
-   "below_floor": 1,
+   "below_floor": 2,
    "file": "L4_ems_routing_algos_and_tca_v1.0.md",
    "spec": "ems_routing_algos_and_tca",
    "total": 18,
@@ -61,8 +61,9 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
+    "D1": 1,
     "D2": 7,
-    "D3": 10,
+    "D3": 9,
     "D?": 1
    }
   },
@@ -75,7 +76,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 4,
+   "reopened": 2,
    "depth": {
     "D1": 6,
     "D2": 1,
@@ -98,7 +99,7 @@
    }
   },
   {
-   "below_floor": 2,
+   "below_floor": 1,
    "file": "L4_ibor_fund_accounting_and_resilience_v1.0.md",
    "spec": "ibor_fund_accounting_and_resilience",
    "total": 29,
@@ -106,10 +107,10 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 3,
+   "reopened": 0,
    "depth": {
-    "D1": 2,
-    "D3": 27
+    "D1": 1,
+    "D3": 28
    }
   },
   {
@@ -121,7 +122,7 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 2,
+   "reopened": 0,
    "depth": {
     "D1": 4,
     "D2": 1,
