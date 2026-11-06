@@ -236,7 +236,7 @@ def test_long_volume_profile_is_rejected() -> None:
 
 def test_slice_count_over_the_cap_is_rejected() -> None:
     parent = _parent(algo=_algo(start=_T0, end=_T0 + timedelta(seconds=1000), slice_interval_sec=1))
-    with pytest.raises(AlgoConstraintError, match="500"):
+    with pytest.raises(AlgoConstraintError, match=r"slice_count 1000 exceeds the 500 cap"):
         plan_is_schedule(parent, volume_profile=_abundant_volume_profile(1000))
 
 
