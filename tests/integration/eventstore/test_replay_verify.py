@@ -63,14 +63,11 @@ async def test_replay_matches_current_tables_for_orders_and_ledger(pool):
     assert debit_code  # sanity: the seeded ledger account was actually created
 
 
-@pytest.mark.perf
 async def test_replay_is_deterministic_across_repeated_runs(pool):
-    """DoD(3) determinism + numeric performance assertion.
+    """DoD(3) determinism -- replaying the same window twice yields the same
+    ``combined_digest`` (no clock/dict-order dependence).
 
-    Replaying the same window twice yields the same ``combined_digest``
-    (no clock/dict-order dependence).  A ``RelativeBudget`` wall-clock
-    measurement proves the operation stays within a self-calibrated ratio
-    budget, and a 10× fill-delay injection forces a gate-red (ratio > 500x).
+    Performance assertion is in ``test_replay_deterministic_performance_budget``.
     """
     await _seed_order(pool)
     await _seed_ledger_entry(pool)
@@ -82,7 +79,19 @@ async def test_replay_is_deterministic_across_repeated_runs(pool):
     assert first.combined_digest == second.combined_digest
     assert first.streams_checked == second.streams_checked
 
-    # numeric performance assertion -- wall-clock (I/O-bound operation)
+
+@pytest.mark.perf
+async def test_replay_deterministic_performance_budget(pool):
+    """DoD(3) numeric performance assertion -- wall-clock (I/O-bound).
+
+    A ``RelativeBudget`` measurement proves the operation stays within a
+    self-calibrated ratio budget.  The gate-red variant is in
+    ``test_replay_deterministic_gate_red_with_delayed_fills``.
+    """
+    await _seed_order(pool)
+    await _seed_ledger_entry(pool)
+    as_of = _clock() + timedelta(minutes=1)
+
     sample = await RelativeBudget().measure_async(
         lambda: replay_verify.verify(pool, as_of=as_of, hours=1),
         n=1,
