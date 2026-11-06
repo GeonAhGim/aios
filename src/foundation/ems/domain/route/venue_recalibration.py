@@ -82,14 +82,15 @@ def recalibrate_weights(
     for s in samples:
         tc = s.total_cost
         nt = s.notional
+        # NaN guard first: Decimal ordering comparisons raise InvalidOperation on NaN.
+        if tc.is_nan() or nt.is_nan():
+            raise ValueError("total_cost and notional must not be NaN")
+        if abs(tc) == Decimal("Infinity") or abs(nt) == Decimal("Infinity"):
+            raise ValueError("total_cost and notional must not be Infinity")
         if tc <= Decimal("0"):
             raise ValueError(f"total_cost must be positive, got {tc}")
         if nt <= Decimal("0"):
             raise ValueError(f"notional must be positive, got {nt}")
-        if tc != tc or nt != nt:  # NaN guard
-            raise ValueError("total_cost and notional must not be NaN")
-        if abs(tc) == Decimal("Infinity") or abs(nt) == Decimal("Infinity"):
-            raise ValueError("total_cost and notional must not be Infinity")
 
     # --- group by venue, compute avg cost ratio --------------------------
     _venue_ratios: list[Decimal] = []

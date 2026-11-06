@@ -159,6 +159,14 @@ class TestNegative:
         with pytest.raises(ValueError, match="total_cost must be positive"):
             recalibrate_weights(samples, _DEFAULT_CURRENT)
 
+    def test_nan_total_cost_raises_value_error(self) -> None:
+        """NaN total_cost → ValueError (not decimal.InvalidOperation from ordering)."""
+        samples = [
+            VenueCostSample("A", Decimal("NaN"), Decimal("1000")),
+        ]
+        with pytest.raises(ValueError, match="must not be NaN"):
+            recalibrate_weights(samples, _DEFAULT_CURRENT)
+
 
 # ---------------------------------------------------------------------------
 # Failure injection
