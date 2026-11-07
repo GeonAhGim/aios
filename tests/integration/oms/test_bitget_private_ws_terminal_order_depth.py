@@ -1,7 +1,7 @@
 """L4-20 `bitget/private_ws_mixin.py` -- late fill for a terminal order (D3).
 
 Split from test_bitget_private_ws_to_inbox.py (file is near the 800-line
-ratchet). Shared helpers are imported from that module unchanged. Extends
+ratchet). Shared helpers live in bitget_private_ws_support. Extends
 `test_fill_event_for_terminal_order_does_not_resurrect_it` (CANCELLED only)
 with every other terminal status, a mixed-batch case, failure injection,
 a perf budget and its gate-red reproduction.
@@ -21,8 +21,7 @@ from src.exchanges.bitget.private_ws_mixin import (
     subscribe_bitget_orders_to_inbox,
 )
 from src.services.oms.application.inbox_processor import InboxProcessor
-from tests.integration.oms.conftest import create_test_user
-from tests.integration.oms.test_bitget_private_ws_to_inbox import (
+from tests.integration.oms.bitget_private_ws_support import (
     _envelope,
     _FakeConnection,
     _insert_order,
@@ -32,6 +31,7 @@ from tests.integration.oms.test_bitget_private_ws_to_inbox import (
     _StopTest,
     _TrackingConnectCtx,
 )
+from tests.integration.oms.conftest import create_test_user
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 

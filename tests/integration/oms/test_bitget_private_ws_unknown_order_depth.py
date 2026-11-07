@@ -1,7 +1,7 @@
 """L4-20 `bitget/private_ws_mixin.py` -- unknown-order-id path depth (D3).
 
 Split from test_bitget_private_ws_to_inbox.py (file would exceed the 800-line
-ratchet). Shared helpers are imported from that module unchanged.
+ratchet). Shared helpers live in bitget_private_ws_support.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from src.exchanges.bitget.private_ws_mixin import (
     subscribe_bitget_orders_to_inbox,
 )
 from src.services.oms.application.inbox_processor import InboxProcessor
-from tests.integration.oms.test_bitget_private_ws_to_inbox import (
+from tests.integration.oms.bitget_private_ws_support import (
     _envelope,
     _FakeConnection,
     _never,
