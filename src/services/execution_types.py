@@ -18,6 +18,10 @@ class ExecutionControlError(Exception):
     """FD-16.3 failure — start/pause/stop rejected. Router converts to 400/403/404."""
 
 
+class ExecutionEndpointRetiredError(ExecutionControlError):
+    """폐기된 전환 경로 호출 -- 라우터가 410(Gone)으로 변환한다(J8: live-conversion으로 대체)."""
+
+
 class ExecutionSummary(BaseModel):
     id: int
     status: str

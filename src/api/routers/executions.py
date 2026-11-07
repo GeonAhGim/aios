@@ -24,7 +24,7 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_auth_service, get_current_user, reauthenticate
 from src.api.execution_deps import (
@@ -50,6 +50,7 @@ from src.services.auth_service import AuthService, User
 from src.services.credential_resolver import CredentialResolver
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
+from src.services.execution_types import ExecutionEndpointRetiredError
 from src.services.live_readiness_service import LiveReadinessService
 
 router = APIRouter()
@@ -187,10 +188,9 @@ async def convert_to_live(
     (소비자가 없음을 확인했다: 프런트엔드 0건. 107 §4 폐기 절차의 deprecated 단계.)
     """
     del execution_id, body, user  # OpenAPI 계약 모양(경로 파라미터·본문·인증)을 유지하려고 받는다
-    raise HTTPException(
-        status.HTTP_410_GONE,
+    raise ExecutionEndpointRetiredError(
         "convert-to-live는 폐기됐습니다. POST /executions/{id}/live-conversion을 사용하세요"
-        "(손실 한도·초기 노출·재인증 필요).",
+        "(손실 한도·초기 노출·재인증 필요)."
     )
 
 

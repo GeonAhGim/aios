@@ -42,6 +42,7 @@ from src.services.exchange_credential_service import (
     ExchangeCredentialNotFoundError,
 )
 from src.services.execution_service import ExecutionControlError, ExecutionCreateError
+from src.services.execution_types import ExecutionEndpointRetiredError
 from src.services.listing_service import ListingError
 from src.services.mfa_service import MfaError, MfaReauthenticationRequiredError
 from src.services.portfolio_service import RebalanceError
@@ -151,6 +152,7 @@ EXCEPTION_MAP_SERVICES: list[tuple[type[Exception], ErrorCode]] = [
 ]
 
 STATUS_OVERRIDE_SERVICES: list[tuple[type[Exception], int]] = [
+    (ExecutionEndpointRetiredError, status.HTTP_410_GONE),
     (InsufficientWalletBalanceError, status.HTTP_402_PAYMENT_REQUIRED),
     (PromptGenerationUnavailableError, status.HTTP_501_NOT_IMPLEMENTED),
 ]
