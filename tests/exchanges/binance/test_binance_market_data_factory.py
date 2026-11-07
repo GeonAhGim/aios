@@ -61,6 +61,50 @@ async def test_malformed_ticker_is_fatal():
         await _adapter({"lastPrice": "x"}).get_ticker("BTC/USDT")
 
 
+async def test_get_ticker_bidPrice_missing_raises():
+    """bidPrice 누락 → 예외 (silent fallback 제거)."""
+    with pytest.raises(FatalExchangeError, match="bidPrice"):
+        await _adapter(
+            {"lastPrice": "100", "askPrice": "101", "volume": "5", "closeTime": 1700000000000}
+        ).get_ticker("BTC/USDT")
+
+
+async def test_get_ticker_askPrice_missing_raises():
+    """askPrice 누락 → 예외 (silent fallback 제거)."""
+    with pytest.raises(FatalExchangeError, match="askPrice"):
+        await _adapter(
+            {"lastPrice": "100", "bidPrice": "99", "volume": "5", "closeTime": 1700000000000}
+        ).get_ticker("BTC/USDT")
+
+
+async def test_get_ticker_bidPrice_empty_string_raises():
+    """bidPrice가 빈 문자열 → 예외."""
+    with pytest.raises(FatalExchangeError, match="bidPrice"):
+        await _adapter(
+            {
+                "lastPrice": "100",
+                "bidPrice": "",
+                "askPrice": "101",
+                "volume": "5",
+                "closeTime": 1700000000000,
+            }
+        ).get_ticker("BTC/USDT")
+
+
+async def test_get_ticker_bidPrice_zero_raises():
+    """bidPrice가 '0' → 예외."""
+    with pytest.raises(FatalExchangeError, match="bidPrice"):
+        await _adapter(
+            {
+                "lastPrice": "100",
+                "bidPrice": "0",
+                "askPrice": "101",
+                "volume": "5",
+                "closeTime": 1700000000000,
+            }
+        ).get_ticker("BTC/USDT")
+
+
 async def test_malformed_klines_is_fatal():
     with pytest.raises(FatalExchangeError):
         await _adapter([[1]]).get_ohlcv("BTC/USDT", "1m")

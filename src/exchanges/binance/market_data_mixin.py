@@ -47,12 +47,18 @@ class BinanceMarketDataMixin:
         )
         try:
             last = Decimal(str(raw["lastPrice"]))
+            bid_raw = raw.get("bidPrice")
+            ask_raw = raw.get("askPrice")
+            # Reject: missing, empty string, or "0" — no silent fallback to lastPrice
+            for label, value in (("bidPrice", bid_raw), ("askPrice", ask_raw)):
+                if value is None or str(value).strip() == "" or Decimal(str(value)) <= 0:
+                    raise FatalExchangeError(f"Binance ticker missing or invalid {label}: {raw!r}")
             return Ticker(
                 symbol=symbol,
                 exchange="binance",
                 price=last,
-                bid=Decimal(str(raw.get("bidPrice") or raw["lastPrice"])),
-                ask=Decimal(str(raw.get("askPrice") or raw["lastPrice"])),
+                bid=Decimal(str(bid_raw)),
+                ask=Decimal(str(ask_raw)),
                 volume_24h=Decimal(str(raw.get("volume", "0"))),
                 timestamp=_utc_from_ms(raw["closeTime"]),
                 source_type="primary",
