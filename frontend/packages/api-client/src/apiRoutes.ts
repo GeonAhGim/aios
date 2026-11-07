@@ -88,13 +88,16 @@ export const API_ROUTES = defineApiRoutes({
   "exchange.credentials.positions": route("/exchange-credentials/:exchange/positions", false),
   "exchange.credentials.capabilities": route("/exchange-credentials/:exchange/capabilities", false),
 
-  // task-1333: §9 PLT-15 금전 라우트(create/start/convertToLive) — idempotencyRequired=true.
+  // task-1333: §9 PLT-15 금전 라우트(create/start/liveConversion) — idempotencyRequired=true.
   // pause/retire/riskGuard는 PLT-15 대상이 아니다(spec §9 표 참조) — 표식 없음.
   "executions.base": route("/executions", false, undefined, undefined, true),
   "executions.start": route("/executions/:executionId/start", false, undefined, undefined, true),
   "executions.pause": route("/executions/:executionId/pause", false),
   "executions.retire": route("/executions/:executionId/retire", false),
-  "executions.convertToLive": route("/executions/:executionId/convert-to-live", false, undefined, undefined, true),
+  // J8 LP-3/4: convert-to-live는 폐기(410)됐다 -- 손실 한도·초기 노출·재인증이 필요한 live-conversion으로 대체.
+  "executions.liveConversion": route("/executions/:executionId/live-conversion", false, undefined, undefined, true),
+  "executions.liveReadiness": route("/executions/:executionId/live-readiness", false),
+  "executions.expandExposure": route("/executions/:executionId/expand-exposure", false),
   "executions.riskGuard": route("/executions/:executionId/risk-guard", false),
 
   "marketplace.listings.base": route("/marketplace/listings", false),

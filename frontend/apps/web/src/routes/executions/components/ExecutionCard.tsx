@@ -12,6 +12,7 @@ import { DuplicateSubmitError, useIdempotentSubmit } from "../../../hooks/useIde
 import { exchangeLabel } from "../../../lib/exchangeLabels";
 import { ErrorMessage } from "../../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../../components/ForbiddenNotice";
+import { LiveConversionDialog } from "./LiveConversionDialog";
 import { useTranslation } from "react-i18next";
 
 interface ExecutionCardProps {
@@ -47,6 +48,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
   const setRiskGuard = useSetExecutionRiskGuard();
   const { submit: submitStart } = useIdempotentSubmit(`executions.start:${execution.executionId}`);
   const [maxDrawdown, setMaxDrawdown] = useState(execution.maxDrawdownPct ?? "");
+  const [showLiveConversion, setShowLiveConversion] = useState(false);
 
   const realized = Number(execution.realizedPnl);
   const unrealized = Number(execution.unrealizedPnl);
@@ -141,6 +143,16 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
           >
             {t("legacy.executionCard.t8")}</Button>
         )}
+        {execution.mode === "PAPER" && execution.status !== "RETIRED" && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowLiveConversion(true)}
+          >
+            {t("liveConversion.openButton")}
+          </Button>
+        )}
         {execution.status !== "RETIRED" && (
           <Button
             type="button"
@@ -152,6 +164,12 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
             {t("legacy.executionCard.t9")}</Button>
         )}
       </div>
+      {showLiveConversion && (
+        <LiveConversionDialog
+          execution={execution}
+          onClose={() => setShowLiveConversion(false)}
+        />
+      )}
     </div>
   );
 }

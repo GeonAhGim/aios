@@ -1,5 +1,7 @@
 import type {
   ExecutionCreateRequest,
+  ExpandExposureRequest,
+  LiveConversionRequest,
   RebalanceRequest,
   SetMaxDrawdownRequest,
 } from "@aios/shared-types";
@@ -70,8 +72,8 @@ export function useStartExecution() {
 }
 
 // spec §9 PLT-15: 실행을 LIVE로 전환하는 금전 라우트 — idempotencyKey 필수(호출부가
-// useIdempotentSubmit으로 키 수명주기를 관리해 넘긴다).
-export function useConvertToLive() {
+// useIdempotentSubmit으로 키 수명주기를 관리해 넘긴다). J8 LP-3: 손실 한도·초기 노출·재인증 필수.
+export function useLiveConversion() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -80,9 +82,28 @@ export function useConvertToLive() {
       idempotencyKey,
     }: {
       executionId: number;
-      body: { allocatedCapital: string; currency: string; exchange: string };
+      body: LiveConversionRequest;
       idempotencyKey: string;
-    }) => apiClient.convertToLive(executionId, body, idempotencyKey),
+    }) => apiClient.liveConversion(executionId, body, idempotencyKey),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
+  });
+}
+
+// J8 LP-2: 전환 근거(모의 운용 실적). 전환 대화상자가 열려 있을 때만 조회한다.
+export function useLiveReadiness(executionId: number, enabled = true) {
+  return useQuery({
+    queryKey: ["executions", executionId, "live-readiness"],
+    queryFn: () => apiClient.getLiveReadiness(executionId),
+    enabled,
+  });
+}
+
+// J8 LP-4: 초기 노출 단계의 허용 자본 확대(확대만 가능, 재인증 필수).
+export function useExpandExposure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ executionId, body }: { executionId: number; body: ExpandExposureRequest }) =>
+      apiClient.expandExposure(executionId, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["executions"] }),
   });
 }

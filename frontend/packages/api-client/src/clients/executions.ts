@@ -2,9 +2,12 @@ import type {
   ExecutionCardResponse,
   ExecutionCreateRequest,
   ExecutionResponse,
+  ExpandExposureRequest,
+  LiveConversionRequest,
+  LiveReadinessResponse,
   SetMaxDrawdownRequest,
 } from "@aios/shared-types";
-import { resolvePath } from "../apiPaths";
+import { resolveEnvelope, resolvePath } from "../apiPaths";
 import type { AnyConstructor } from "../http";
 
 // FD-16 실행 제어판 — executions.py 라우터는 봉투 미적용, 기존 경로 유지.
@@ -46,13 +49,32 @@ export function withExecutions<TBase extends AnyConstructor>(Base: TBase) {
 
     // spec §9 PLT-15: idempotencyKey를 필수 인자로 받아 호출부(useIdempotentSubmit)가
     // 키 수명주기를 직접 관리하도록 강제한다 — 누락 시 타입 에러.
-    async convertToLive(
+    // J8 LP-3: 모의 -> 실전 전환. 손실 한도·초기 노출·재인증이 없으면 서버가 거부한다.
+    async liveConversion(
       executionId: number,
-      body: { allocatedCapital: string; currency: string; exchange: string },
+      body: LiveConversionRequest,
       idempotencyKey: string,
     ): Promise<ExecutionResponse> {
-      const path = resolvePath("executions.convertToLive").replace(":executionId", String(executionId));
+      const path = resolvePath("executions.liveConversion").replace(":executionId", String(executionId));
       return this.postIdempotent(path, body, idempotencyKey);
+    }
+
+    // J8 LP-2: 전환 근거(모의 운용 실적). 값이 없는 항목은 null + unavailable 사유다.
+    async getLiveReadiness(executionId: number): Promise<LiveReadinessResponse> {
+      const path = resolvePath("executions.liveReadiness").replace(":executionId", String(executionId));
+      return resolveEnvelope("executions.liveReadiness")
+        ? this.requestEnvelope(path)
+        : this.request(path);
+    }
+
+    // J8 LP-4: 초기 노출 단계에서 허용 자본을 늘린다(확대만 가능, 재인증 필수).
+    // 요청이 절대 목표 비율이라 같은 값을 다시 보내도 결과가 같아 멱등 표식은 두지 않는다.
+    async expandExposure(
+      executionId: number,
+      body: ExpandExposureRequest,
+    ): Promise<ExecutionResponse> {
+      const path = resolvePath("executions.expandExposure").replace(":executionId", String(executionId));
+      return this.post(path, body);
     }
 
     async setExecutionRiskGuard(

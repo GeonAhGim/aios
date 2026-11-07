@@ -23,6 +23,8 @@ vi.mock("@aios/shared-hooks", () => ({
   usePauseExecution: () => ({ mutate: pauseMutate, isPending: false }),
   useRetireExecution: () => ({ mutate: retireMutate, isPending: false }),
   useSetExecutionRiskGuard: () => ({ mutate: setRiskGuardMutate, isPending: false }),
+  useLiveReadiness: () => ({ isLoading: true, isError: false, data: undefined }),
+  useLiveConversion: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 afterEach(() => {
@@ -204,5 +206,32 @@ describe("ExecutionCard 시작 실패 에러 표시", () => {
     render(<ExecutionCard execution={execution({ status: "PENDING" })} />);
 
     expect(screen.getByText("ECONNRESET")).toBeInTheDocument();
+  });
+});
+
+describe("ExecutionCard 실전 전환 진입 (J8 LP-5)", () => {
+  it("모의 실행에는 '실전 전환' 버튼이 있고 누르면 전환 대화상자가 열린다", () => {
+    render(<ExecutionCard execution={execution({ mode: "PAPER" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "실전 전환" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(/실전 주문은 안전 장치로 차단되어 있습니다/)).toBeInTheDocument();
+  });
+
+  it("[부정] 이미 실전인 실행이나 종료된 실행에는 '실전 전환' 버튼이 없다", () => {
+    const { rerender } = render(<ExecutionCard execution={execution({ mode: "LIVE" })} />);
+    expect(screen.queryByRole("button", { name: "실전 전환" })).not.toBeInTheDocument();
+
+    rerender(<ExecutionCard execution={execution({ mode: "PAPER", status: "RETIRED" })} />);
+    expect(screen.queryByRole("button", { name: "실전 전환" })).not.toBeInTheDocument();
+  });
+
+  it("대화상자의 취소로 닫힌다", () => {
+    render(<ExecutionCard execution={execution({ mode: "PAPER" })} />);
+    fireEvent.click(screen.getByRole("button", { name: "실전 전환" }));
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

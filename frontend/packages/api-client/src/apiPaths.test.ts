@@ -99,8 +99,14 @@ describe("apiPaths — clients 배선(task-840) 회귀 가드", () => {
     expect(resolvePath("executions.start").replace(":executionId", "7")).toBe("/executions/7/start");
     expect(resolvePath("executions.pause").replace(":executionId", "7")).toBe("/executions/7/pause");
     expect(resolvePath("executions.retire").replace(":executionId", "7")).toBe("/executions/7/retire");
-    expect(resolvePath("executions.convertToLive").replace(":executionId", "7")).toBe(
-      "/executions/7/convert-to-live",
+    expect(resolvePath("executions.liveConversion").replace(":executionId", "7")).toBe(
+      "/executions/7/live-conversion",
+    );
+    expect(resolvePath("executions.liveReadiness").replace(":executionId", "7")).toBe(
+      "/executions/7/live-readiness",
+    );
+    expect(resolvePath("executions.expandExposure").replace(":executionId", "7")).toBe(
+      "/executions/7/expand-exposure",
     );
     expect(resolvePath("executions.riskGuard").replace(":executionId", "7")).toBe("/executions/7/risk-guard");
   });
@@ -277,7 +283,9 @@ describe("apiPaths — task-1107 봉투 미적용 상태 고정(executions/portf
     "executions.start",
     "executions.pause",
     "executions.retire",
-    "executions.convertToLive",
+    "executions.liveConversion",
+    "executions.liveReadiness",
+    "executions.expandExposure",
     "executions.riskGuard",
     "portfolio.get",
     "portfolio.rebalance",

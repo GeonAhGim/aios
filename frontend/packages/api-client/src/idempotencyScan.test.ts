@@ -192,7 +192,7 @@ const PLT15_MONEY_ROUTES: readonly ApiRouteName[] = [
   "wallet.topupRequests",
   "executions.base",
   "executions.start",
-  "executions.convertToLive",
+  "executions.liveConversion",
   "portfolio.rebalance",
   "exchange.credentials.base",
   "foundation.paperDeployments.request",

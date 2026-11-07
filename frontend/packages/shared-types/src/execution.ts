@@ -45,6 +45,53 @@ export interface ExecutionCardResponse {
   lastRiskVerdict: LastRiskVerdict | null;
 }
 
+// src/api/schemas/execution.py LiveConversionRequest 1:1 대응 (J8 LP-3) -- 모의 -> 실전 전환.
+// 손실 한도·초기 노출·재인증(비밀번호, MFA 사용자는 TOTP)이 모두 필수다.
+export interface LiveConversionRequest {
+  allocatedCapital: string;
+  currency: string;
+  exchange: string;
+  maxLossAmount: string;
+  initialExposurePct: string;
+  password: string;
+  totpCode?: string | null;
+}
+
+// src/api/schemas/execution.py ExpandExposureRequest 1:1 대응 (J8 LP-4) -- 확대만 가능하다.
+export interface ExpandExposureRequest {
+  exposurePct: string;
+  currency: string;
+  exchange: string;
+  password: string;
+  totpCode?: string | null;
+}
+
+// src/api/schemas/live_readiness.py 1:1 대응 (J8 LP-2) -- 값이 없는 항목은 null이고
+// 사유가 unavailable에 있다. 없는 데이터를 좋은 성과로 보이게 하지 않는다.
+export interface LiveReadinessResponse {
+  orderCount: number;
+  terminalCount: number;
+  openCount: number;
+  unknownCount: number;
+  filledCount: number;
+  partialFillCount: number;
+  unfilledCount: number;
+  rejectedCount: number;
+  fillRatio: string | null;
+  partialFillRatio: string | null;
+  unfilledRatio: string | null;
+  rejectRatio: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  periodDays: string | null;
+  avgSlippageBps: string | null;
+  slippageSampleSize: number;
+  feeTotals: Record<string, string> | null;
+  netPnl: string | null;
+  recoveryEventCount: number | null;
+  unavailable: Record<string, string>;
+}
+
 export interface SetMaxDrawdownRequest {
   maxDrawdownPct: string | null;
 }

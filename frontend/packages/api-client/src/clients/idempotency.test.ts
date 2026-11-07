@@ -77,7 +77,7 @@ describe("금전 라우트의 Idempotency-Key 자동 부착", () => {
     expect(idempotencyKeyOf(fetchMock)).toMatch(UUID_RE);
   });
 
-  // startExecution/convertToLive/rebalancePortfolio/requestTopup: idempotencyKey가
+  // startExecution/liveConversion/rebalancePortfolio/requestTopup: idempotencyKey가
   // 필수 인자다(누락 시 타입 에러) — 호출부(useIdempotentSubmit)가 넘긴 키를 그대로 싣는지만 확인.
   it("startExecution: 넘긴 키를 그대로 헤더에 싣는다", async () => {
     const startFetch = stubFetch({ id: 1, status: "RUNNING" });
@@ -85,11 +85,18 @@ describe("금전 라우트의 Idempotency-Key 자동 부착", () => {
     expect(idempotencyKeyOf(startFetch)).toBe("caller-supplied-key-0005");
   });
 
-  it("convertToLive: 넘긴 키를 그대로 헤더에 싣는다", async () => {
+  it("liveConversion: 넘긴 키를 그대로 헤더에 싣는다", async () => {
     const convertFetch = stubFetch({ id: 1, status: "LIVE" });
-    await makeClient().convertToLive(
+    await makeClient().liveConversion(
       1,
-      { allocatedCapital: "100", currency: "USDT", exchange: "bitget" },
+      {
+        allocatedCapital: "100",
+        currency: "USDT",
+        exchange: "bitget",
+        maxLossAmount: "20",
+        initialExposurePct: "10",
+        password: "pw",
+      },
       "caller-supplied-key-0002",
     );
     expect(idempotencyKeyOf(convertFetch)).toBe("caller-supplied-key-0002");
