@@ -33,6 +33,7 @@ vi.mock("@aios/shared-hooks", () => ({
   useEvaluateRiskGate: () => ({ mutate: evaluateRiskGateMutate, ...evaluateRiskGateState }),
   useMe: () => ({ data: { email: "a@example.com", isPlatformAdmin: false } }),
   useLogout: () => vi.fn(),
+  usePauseExecution: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 afterEach(() => {

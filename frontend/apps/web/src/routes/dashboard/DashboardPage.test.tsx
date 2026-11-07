@@ -32,7 +32,11 @@ vi.mock("@aios/shared-hooks", () => ({
   useNotificationHistory: () => notificationsResult,
   useMe: () => ({ data: { email: "a@example.com" } }),
   useLogout: () => vi.fn(),
-  usePauseExecution: () => ({ mutate: pauseExecutionMutate, isPending: false }),
+  usePauseExecution: () => ({
+    mutate: pauseExecutionMutate,
+    mutateAsync: pauseExecutionMutate,
+    isPending: false,
+  }),
   useStartExecution: () => ({ mutateAsync: startExecutionMutateAsync, isPending: false }),
 }));
 

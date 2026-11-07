@@ -25,6 +25,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { BadRequestNotice } from "../../components/BadRequestNotice";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { OperationStatusBar } from "../../components/OperationStatusBar";
 import { NotFoundState } from "../../components/NotFoundState";
 import { DuplicateSubmitError, useIdempotentSubmit } from "../../hooks/useIdempotentSubmit";
 import { useConflictRetry } from "../../hooks/useConflictRetry";
@@ -231,6 +232,12 @@ export function ExecutionControlPage() {
     <AppShell>
       <div className="space-y-8">
         <PageHeader title={t("legacy.executionControlPage.title2")} />
+
+        <OperationStatusBar
+          executions={executions}
+          isLoading={isLoading}
+          isError={executionsIsError}
+        />
 
         <Card>
           <CardTitle>{t("legacy.executionControlPage.t3")}</CardTitle>

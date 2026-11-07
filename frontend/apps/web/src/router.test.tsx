@@ -41,6 +41,8 @@ vi.mock("@aios/shared-hooks", () => ({
   useNotificationHistory: () => ({ data: undefined, isLoading: false, isError: false, error: null }),
   useLogout: () => vi.fn(),
   useLogin: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  usePauseExecution: () => ({ mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false }),
+  useStartExecution: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 const { router } = await import("./router");

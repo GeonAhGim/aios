@@ -26,6 +26,7 @@ import { AppShell } from "../../components/layout/AppShell";
 import { DataFreshness } from "../../components/DataFreshness";
 import { ErrorMessage } from "../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../components/ForbiddenNotice";
+import { OperationStatusBar } from "../../components/OperationStatusBar";
 import { exchangeLabel } from "../../lib/exchangeLabels";
 import { useTranslation } from "react-i18next";
 
@@ -138,7 +139,7 @@ export function DashboardPage() {
     isError: portfolioError,
     error: portfolioErrorObj,
   } = usePortfolio();
-  const { data: executions, isLoading: executionsLoading } = useExecutions();
+  const { data: executions, isLoading: executionsLoading, isError: executionsIsError } = useExecutions();
   const {
     data: recentNotifications,
     isLoading: notificationsLoading,
@@ -152,6 +153,12 @@ export function DashboardPage() {
         <PageHeader
           title={t("legacy.dashboardPage.title1")}
           action={riskProfile && <Badge tone="accent">{t("legacy.dashboardPage.t2", { riskProfile: riskProfile.riskProfile })}</Badge>}
+        />
+
+        <OperationStatusBar
+          executions={executions}
+          isLoading={executionsLoading}
+          isError={executionsIsError === true}
         />
 
         {executions && <EmergencyStopPanel executions={executions} />}
