@@ -548,7 +548,11 @@ async def test_negative_venue_fee_is_stored_as_positive_gate_red_regression(pool
     assert order["fee_total"] > 0
 
 
-async def test_concurrent_duplicate_fill_from_two_ws_instances_applies_exactly_once(pool):
+@pytest.mark.perf
+@pytest.mark.parametrize("failure_point", [None, "before_ingest", "after_ingest"])
+async def test_concurrent_duplicate_fill_from_two_ws_instances_applies_exactly_once(
+    pool, perf_budget, failure_point
+):
     """DEEPEN(4) — adversarial/다중 인스턴스/리플레이 테스트. 기존
     idempotency 테스트(위 test_fill_event_reaches_inbox_and_marks_order_
     filled_idempotently)는 같은 커넥션 하나가 순차로 중복 전달하는
@@ -556,7 +560,19 @@ async def test_concurrent_duplicate_fill_from_two_ws_instances_applies_exactly_o
     failover로 신·구 워커가 짧게 겹치는 상황)가 정확히 동시에
     (asyncio.gather) 같은 체결 이벤트를 전달해도 UNIQUE(venue,
     provider_event_id) 경합 아래에서 fills 행이 정확히 1개만 생성됨을
-    증명한다 — 순차 중복이 아니라 실제 동시성 경쟁 조건."""
+    증명한다 — 순차 중복이 아니라 실제 동시성 경쟁 조건.
+
+    I-10 배선 검증: 한 구독의 ingest 전/후 실패에도 다른 구독과 재전달로
+    체결이 정확히 한 번 반영되어야 한다. 공유 헬퍼와 기존 단언은 유지한다.
+    성능 측정은 두 WS의 동일 이벤트 재전달이며 best_of_async(n=3)를 사용한다.
+    2026-11-07 Windows/Python 3.13, 격리 PostgreSQL DB에서 각 시나리오의
+    best-of-3 wall 실측은 2.030/82.820/1.918ms. 신규 3000ms 예산은
+    최대 실측의 36배 여유로 DB/호스트 경합을 허용한다. 예산 10배 가상
+    지연을 실제 재전달 경로에 주입하여 동일 단언의 적색을 재현한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_async
+
+    failure_hits = []
     user_id = await create_test_user(pool)
     exchange_order_id = f"ex-{uuid4().hex}"
     client_order_id = f"cid-{uuid4().hex}"
@@ -570,7 +586,7 @@ async def test_concurrent_duplicate_fill_from_two_ws_instances_applies_exactly_o
     row = _order_row(order_id=exchange_order_id, client_id=client_order_id)
     message = _envelope([row])
 
-    async def run_one_instance() -> None:
+    async def run_one_instance(inject_failure=False) -> None:
         connection = _FakeConnection([message], raise_after=ConnectionClosed(None, None))
         call_count = {"n": 0}
 
@@ -582,12 +598,32 @@ async def test_concurrent_duplicate_fill_from_two_ws_instances_applies_exactly_o
 
         adapter = _no_rest_calls_adapter()
         inbox = InboxProcessor(pool)
-        with pytest.raises(_StopTest):
+        original_ingest = inbox.ingest
+
+        async def failing_ingest(event):
+            failure_hits.append(failure_point)
+            if failure_point == "after_ingest":
+                await original_ingest(event)
+            raise RuntimeError("injected inbox failure")
+
+        if inject_failure:
+            inbox.ingest = failing_ingest
+        expected = RuntimeError if inject_failure else _StopTest
+        with pytest.raises(expected) as caught:
             await subscribe_bitget_orders_to_inbox(
-                adapter, inbox, connect_fn=connect_fn, ping_sleep_fn=_never
+                adapter, inbox, connect_fn=connect_fn, sleep_fn=_instant, ping_sleep_fn=_never
             )
 
-    await asyncio.gather(run_one_instance(), run_one_instance())
+        if inject_failure:
+            assert str(caught.value) == "injected inbox failure"
+
+    await asyncio.gather(run_one_instance(failure_point is not None), run_one_instance())
+    assert failure_hits == ([] if failure_point is None else [failure_point])
+
+    async def replay_verify():
+        await asyncio.gather(run_one_instance(), run_one_instance())
+
+    sample = await perf_budget.best_of_async(replay_verify, n=3)
 
     async with pool.acquire() as conn:
         order = await conn.fetchrow(
@@ -599,6 +635,21 @@ async def test_concurrent_duplicate_fill_from_two_ws_instances_applies_exactly_o
     assert order["status"] == "FILLED"
     assert order["filled_quantity"] == Decimal("2")
     assert fills_count == 1  # 동시 경합에서도 정확히 1건(멱등)
+
+    budget_ms = 3000.0
+
+    def assert_budget(measurement):
+        assert measurement.wall_ms < budget_ms, "duplicate WS replay budget exceeded"
+
+    assert_budget(sample)
+    delayed_replay = virtual_delayed_async(replay_verify, budget_ms * 10 / 1000)
+    slow = await perf_budget.best_of_async(delayed_replay, n=3)
+    with pytest.raises(AssertionError, match="duplicate WS replay budget exceeded"):
+        assert_budget(slow)
+    async with pool.acquire() as conn:
+        assert await conn.fetchval(
+            "SELECT count(*) FROM fills WHERE order_id = $1", order_id
+        ) == 1
 
 
 @pytest.mark.perf
