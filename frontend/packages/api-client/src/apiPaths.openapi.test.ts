@@ -150,7 +150,7 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // task-4001(FE-OPS-10a): exchange.credentials.positions로 apiRoutes.ts에 등록했다 —
   // 여기 있던 항목을 제거한다(실제 화면 배선은 FE-OPS-10b 소관, §E는 등록 여부만 본다).
   // J8 LP-3(2026-11-07): convert-to-live는 폐기(deprecated, 410)됐다 -- 프런트는 live-conversion만 쓴다.
-  "/executions/{execution_id}/convert-to-live": "폐기된 경로(410) -- live-conversion으로 대체됐다",
+  "/executions/{execution_id}/convert-to-live": "폐기된 경로(deprecated, 410) -- 프런트 소비자 없음; /live-conversion으로 대체",
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
   "/metrics": "인프라 메트릭 엔드포인트다(모니터링 전용) — 앱 API 표면이 아니다",
   "/readyz": "인프라 헬스체크 프로브다(k8s readiness) — 앱 API 표면이 아니다",

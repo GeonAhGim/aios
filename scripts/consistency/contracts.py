@@ -253,6 +253,10 @@ _OPENAPI_NO_FRONTEND_UI_ALLOWLIST: dict[str, str] = {
     "/exchange-credentials/{exchange}/positions": (
         "src/api/routers/exchange_credentials.py:97 -- exchange.ts에 positions 조회 없음"
     ),
+    # task-23056, J8 LP-3: frontend whitelist와 같은 폐기 경로·사유를 유지한다.
+    "/executions/{execution_id}/convert-to-live": (
+        "폐기된 경로(deprecated, 410) -- 프런트 소비자 없음; /live-conversion으로 대체"
+    ),
     "/livez": "src/api/routers/health.py:79 -- k8s liveness 프로브, 앱 API 표면 아님",
     "/metrics": "src/api/routers/metrics.py:36 -- 모니터링 전용 엔드포인트, 앱 API 표면 아님",
     "/readyz": "src/api/routers/health.py:85 -- k8s readiness 프로브, 앱 API 표면 아님",
