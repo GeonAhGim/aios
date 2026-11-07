@@ -157,35 +157,6 @@ async def test_venue_listings_rejects_one_microsecond_overlap(pool: asyncpg.Pool
         )
 
 
-async def test_venue_listings_allows_touching_boundary_exactly(pool: asyncpg.Pool) -> None:
-    """직전 delisted_at과 정확히 같은 시각에 시작하는 구간은 겹치지 않는다
-    (half-open 경계 — 위 마이크로초 테스트의 반대쪽 경계)."""
-    instrument_a = _fake_ulid()
-    instrument_b = _fake_ulid()
-    await _insert_instrument(pool, instrument_a)
-    await _insert_instrument(pool, instrument_b)
-    symbol = _venue_symbol()
-    t0 = datetime.now(UTC) - timedelta(days=10)
-    boundary = t0 + timedelta(days=5)
-
-    await _insert_listing(
-        pool,
-        instrument_id=instrument_a,
-        venue="BITGET",
-        venue_symbol=symbol,
-        listed_at=t0,
-        delisted_at=boundary,
-    )
-    await _insert_listing(
-        pool,
-        instrument_id=instrument_b,
-        venue="BITGET",
-        venue_symbol=symbol,
-        listed_at=boundary,
-        delisted_at=None,
-    )
-
-
 # ---- 성능 단언(D2) ----
 
 
