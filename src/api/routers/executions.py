@@ -37,6 +37,7 @@ from src.api.schemas.execution import (
     ExecutionCardResponse,
     ExecutionCreateRequest,
     ExecutionResponse,
+    ExpandExposureRequest,
     RetireRequest,
     SetMaxDrawdownRequest,
     to_execution_card_response,
@@ -103,6 +104,27 @@ async def get_live_readiness(
     """모의 -> 실전 전환 근거(J8 LP-2). 본인의 PAPER 실행만.
     자료가 없는 항목은 null이고 사유는 unavailable에 있다."""
     return to_live_readiness_response(await service.for_execution(execution_id, user.user_id))
+
+
+@router.post("/{execution_id}/expand-exposure")
+async def expand_exposure(
+    execution_id: int,
+    body: ExpandExposureRequest,
+    user: User = Depends(get_current_user),
+    auth: AuthService = Depends(get_auth_service),
+    resolver: CredentialResolver = Depends(get_credential_resolver),
+    service: ExecutionService = Depends(get_execution_service),
+) -> ExecutionResponse:
+    """J8 LP-4: 단계적 노출 확대. 자금 노출이 커지는 행동이라 재인증을 요구하고 자동 확대는 없다."""
+    await reauthenticate(auth, user, body.password, body.totp_code)
+    available = await _available_balance(resolver, user.user_id, body.exchange, body.currency)
+    summary = await service.expand_exposure(
+        execution_id,
+        user.user_id,
+        new_exposure_pct=body.exposure_pct,
+        available_balance=available,
+    )
+    return to_execution_response(summary)
 
 
 @router.post("/{execution_id}/start")

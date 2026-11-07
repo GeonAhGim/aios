@@ -38,6 +38,16 @@ class ConvertToLiveRequest(BaseModel):
         return self
 
 
+class ExpandExposureRequest(BaseModel):
+    """LIVE 실행의 허용 자본 확대 (J8 LP-4). 재인증 필수, 확대만 가능하다."""
+
+    exposure_pct: Decimal = Field(gt=0, le=100)
+    currency: str
+    exchange: str
+    password: str = Field(min_length=1)
+    totp_code: str | None = None
+
+
 class RetireRequest(BaseModel):
     liquidation: str = "KEEP_POSITIONS"
 

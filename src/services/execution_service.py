@@ -43,7 +43,7 @@ import asyncpg
 from src.core.approval import service as approval
 from src.core.loader.risk_policy_loader import RiskPolicy
 from src.core.logging.audit_log import record_audit_log
-from src.services import execution_control
+from src.services import execution_control, execution_exposure
 from src.services.approval_settings_service import ApprovalSettingsService
 from src.services.capital_allocation import validate_capital_allocation
 from src.services.execution_types import (
@@ -224,6 +224,25 @@ class ExecutionService:
             self._pool, execution_id, user_id, max_drawdown_pct
         )
 
+    async def expand_exposure(
+        self,
+        execution_id: int,
+        user_id: UUID,
+        *,
+        new_exposure_pct: Decimal,
+        available_balance: Decimal,
+    ) -> ExecutionSummary:
+        """J8 LP-4: LIVE 실행의 허용 자본을 목표의 new_exposure_pct%로 올린다.
+        확대만 가능하고 자동 확대는 없다."""
+        return await execution_exposure.expand(
+            self._pool,
+            self._risk_policy,
+            user_id,
+            execution_id,
+            new_exposure_pct=new_exposure_pct,
+            available_balance=available_balance,
+        )
+
     async def retire(
         self, execution_id: int, user_id: UUID, *, liquidation: str = "KEEP_POSITIONS"
     ) -> ExecutionSummary:
@@ -274,6 +293,18 @@ class ExecutionService:
                 result.id,
                 source_execution_id,
             )
+            # J8 LP-4 -- 목표 자본의 초기 노출%로 내려 시작하고,
+            # 손실 한도는 기존 실행별 가드(max_drawdown_pct)로 환산한다.
+            staged, guard_pct = await execution_exposure.apply_initial_stage(
+                conn,
+                result.id,
+                target_capital=allocated_capital,
+                initial_exposure_pct=initial_exposure_pct,
+                max_loss_amount=max_loss_amount,
+            )
+            result = result.model_copy(
+                update={"allocated_capital": staged, "max_drawdown_pct": guard_pct}
+            )
             # G5-1/P0-3(AUDIT-6, task-10779) — the LIVE conversion itself (distinct
             # from the create_execution() call above, which already logs its own
             # "execution.created" row) needs its own audited before/after state.
@@ -284,7 +315,9 @@ class ExecutionService:
                 decision_data={
                     "source_execution_id": source_execution_id,
                     "new_execution_id": result.id,
-                    "allocated_capital": allocated_capital,
+                    "allocated_capital": staged,
+                    "target_capital": allocated_capital,
+                    "max_drawdown_pct": guard_pct,
                     "currency": currency,
                     "exchange": exchange,
                     "mode_before": "PAPER",

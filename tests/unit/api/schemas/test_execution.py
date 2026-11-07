@@ -18,6 +18,7 @@ from src.api.schemas.execution import (
     ExecutionCardResponse,
     ExecutionCreateRequest,
     ExecutionResponse,
+    ExpandExposureRequest,
     RetireRequest,
     SetMaxDrawdownRequest,
     to_execution_card_response,
@@ -245,3 +246,42 @@ def test_to_execution_card_response_maps_all_fields_from_card() -> None:
     assert resp.realized_pnl == Decimal("1.5")
     assert resp.unrealized_pnl == Decimal("-0.5")
     assert resp.max_drawdown_pct == Decimal("2.5")
+
+
+def _expand_kwargs(**overrides):
+    base = {
+        "exposure_pct": Decimal("50"),
+        "currency": "USDT",
+        "exchange": "bitget",
+        "password": "pw",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_expand_exposure_request_accepts_a_valid_request() -> None:
+    req = ExpandExposureRequest(**_expand_kwargs())
+    assert req.exposure_pct == Decimal("50") and req.totp_code is None
+
+
+@pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-1"), Decimal("100.01")])
+def test_expand_exposure_request_rejects_out_of_range_exposure(bad) -> None:
+    with pytest.raises(ValidationError):
+        ExpandExposureRequest(**_expand_kwargs(exposure_pct=bad))
+
+
+def test_expand_exposure_request_accepts_the_full_target_boundary() -> None:
+    assert ExpandExposureRequest(**_expand_kwargs(exposure_pct=Decimal("100"))).exposure_pct == 100
+
+
+@pytest.mark.parametrize("missing", ["exposure_pct", "currency", "exchange", "password"])
+def test_expand_exposure_request_requires_its_fields(missing) -> None:
+    kwargs = _expand_kwargs()
+    del kwargs[missing]
+    with pytest.raises(ValidationError):
+        _call_untyped(ExpandExposureRequest, **kwargs)
+
+
+def test_expand_exposure_request_rejects_empty_password() -> None:
+    with pytest.raises(ValidationError):
+        ExpandExposureRequest(**_expand_kwargs(password=""))
