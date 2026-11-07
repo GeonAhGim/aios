@@ -20,8 +20,20 @@ class ExecutionCreateRequest(BaseModel):
 
 
 class ConvertToLiveRequest(BaseModel):
-    """모의 -> 실전 전환 요청 (J8 LP-3).
-    사용자가 명시한 손실 한도·초기 노출과 재인증이 필수다."""
+    """폐기됨(deprecated) -- 호환성 계약(v1) 때문에 요청 모양을 그대로 둔다.
+
+    이 모양으로는 더 이상 전환되지 않는다:
+    손실 한도·초기 노출·재인증이 없는 전환은 J8 안전장치를 우회하기 때문이다.
+    POST /executions/{id}/live-conversion(LiveConversionRequest)을 쓴다.
+    """
+
+    allocated_capital: Decimal
+    currency: str
+    exchange: str
+
+
+class LiveConversionRequest(BaseModel):
+    """모의 -> 실전 전환 요청 (J8 LP-3). 사용자가 명시한 손실 한도·초기 노출과 재인증이 필수다."""
 
     allocated_capital: Decimal
     currency: str
@@ -32,7 +44,7 @@ class ConvertToLiveRequest(BaseModel):
     totp_code: str | None = None
 
     @model_validator(mode="after")
-    def _loss_limit_within_allocation(self) -> ConvertToLiveRequest:
+    def _loss_limit_within_allocation(self) -> LiveConversionRequest:
         if self.max_loss_amount > self.allocated_capital:
             raise ValueError("max_loss_amount는 배정 자금(allocated_capital) 이하여야 합니다.")
         return self

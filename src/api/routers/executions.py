@@ -24,7 +24,7 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.deps import get_auth_service, get_current_user, reauthenticate
 from src.api.execution_deps import (
@@ -38,6 +38,7 @@ from src.api.schemas.execution import (
     ExecutionCreateRequest,
     ExecutionResponse,
     ExpandExposureRequest,
+    LiveConversionRequest,
     RetireRequest,
     SetMaxDrawdownRequest,
     to_execution_card_response,
@@ -169,10 +170,34 @@ async def retire_execution(
     return to_execution_response(summary)
 
 
-@router.post("/{execution_id}/convert-to-live", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{execution_id}/convert-to-live",
+    deprecated=True,
+    status_code=status.HTTP_201_CREATED,  # v1 성공 선언 유지(폐기 표시이지 제거가 아니다)
+    responses={status.HTTP_410_GONE: {"description": "폐기됨 -- /live-conversion을 사용한다"}},
+)
 async def convert_to_live(
     execution_id: int,
     body: ConvertToLiveRequest,
+    user: User = Depends(get_current_user),
+) -> ExecutionResponse:
+    """폐기됨. 호환성 계약(v1) 때문에 경로와 요청 모양은 남기되, 이 경로로는 전환하지 않는다.
+
+    손실 한도·초기 노출·재인증이 없는 전환은 J8 안전장치를 우회한다 -- /live-conversion을 쓴다.
+    (소비자가 없음을 확인했다: 프런트엔드 0건. 107 §4 폐기 절차의 deprecated 단계.)
+    """
+    del execution_id, body, user  # OpenAPI 계약 모양(경로 파라미터·본문·인증)을 유지하려고 받는다
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "convert-to-live는 폐기됐습니다. POST /executions/{id}/live-conversion을 사용하세요"
+        "(손실 한도·초기 노출·재인증 필요).",
+    )
+
+
+@router.post("/{execution_id}/live-conversion", status_code=status.HTTP_201_CREATED)
+async def live_conversion(
+    execution_id: int,
+    body: LiveConversionRequest,
     user: User = Depends(get_current_user),
     auth: AuthService = Depends(get_auth_service),
     resolver: CredentialResolver = Depends(get_credential_resolver),

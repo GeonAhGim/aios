@@ -4871,6 +4871,56 @@
         "title": "ExecutionResponse",
         "type": "object"
       },
+      "ExpandExposureRequest": {
+        "description": "LIVE 실행의 허용 자본 확대 (J8 LP-4). 재인증 필수, 확대만 가능하다.",
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "exchange": {
+            "title": "Exchange",
+            "type": "string"
+          },
+          "exposure_pct": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Exposure Pct"
+          },
+          "password": {
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "totp_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp Code"
+          }
+        },
+        "required": [
+          "exposure_pct",
+          "currency",
+          "exchange",
+          "password"
+        ],
+        "title": "ExpandExposureRequest",
+        "type": "object"
+      },
       "Experiment": {
         "description": "§2.4 AI-10 row verbatim field list, plus `tenant_id`/`created_at`\n(persistence metadata every foundation aggregate carries -- not spec-\nnamed, but required by the WORM table's tenant isolation and insertion-\norder columns).",
         "properties": {
@@ -6151,6 +6201,278 @@
           "sharpe_ratio"
         ],
         "title": "ListingSummary",
+        "type": "object"
+      },
+      "LiveConversionRequest": {
+        "description": "모의 -> 실전 전환 요청 (J8 LP-3). 사용자가 명시한 손실 한도·초기 노출과 재인증이 필수다.",
+        "properties": {
+          "allocated_capital": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Allocated Capital"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "exchange": {
+            "title": "Exchange",
+            "type": "string"
+          },
+          "initial_exposure_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Initial Exposure Pct"
+          },
+          "max_loss_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Max Loss Amount"
+          },
+          "password": {
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "totp_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp Code"
+          }
+        },
+        "required": [
+          "allocated_capital",
+          "currency",
+          "exchange",
+          "max_loss_amount",
+          "initial_exposure_pct",
+          "password"
+        ],
+        "title": "LiveConversionRequest",
+        "type": "object"
+      },
+      "LiveReadinessResponse": {
+        "properties": {
+          "avg_slippage_bps": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Slippage Bps"
+          },
+          "fee_totals": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fee Totals"
+          },
+          "fill_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fill Ratio"
+          },
+          "filled_count": {
+            "title": "Filled Count",
+            "type": "integer"
+          },
+          "net_pnl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Pnl"
+          },
+          "open_count": {
+            "title": "Open Count",
+            "type": "integer"
+          },
+          "order_count": {
+            "title": "Order Count",
+            "type": "integer"
+          },
+          "partial_fill_count": {
+            "title": "Partial Fill Count",
+            "type": "integer"
+          },
+          "partial_fill_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Partial Fill Ratio"
+          },
+          "period_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Days"
+          },
+          "period_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period End"
+          },
+          "period_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Start"
+          },
+          "recovery_event_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Event Count"
+          },
+          "reject_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject Ratio"
+          },
+          "rejected_count": {
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "slippage_sample_size": {
+            "title": "Slippage Sample Size",
+            "type": "integer"
+          },
+          "terminal_count": {
+            "title": "Terminal Count",
+            "type": "integer"
+          },
+          "unavailable": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Unavailable",
+            "type": "object"
+          },
+          "unfilled_count": {
+            "title": "Unfilled Count",
+            "type": "integer"
+          },
+          "unfilled_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unfilled Ratio"
+          },
+          "unknown_count": {
+            "title": "Unknown Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "order_count",
+          "terminal_count",
+          "open_count",
+          "unknown_count",
+          "filled_count",
+          "partial_fill_count",
+          "unfilled_count",
+          "rejected_count",
+          "fill_ratio",
+          "partial_fill_ratio",
+          "unfilled_ratio",
+          "reject_ratio",
+          "period_start",
+          "period_end",
+          "period_days",
+          "avg_slippage_bps",
+          "slippage_sample_size",
+          "fee_totals",
+          "net_pnl",
+          "recovery_event_count"
+        ],
+        "title": "LiveReadinessResponse",
         "type": "object"
       },
       "LoginRequest": {
@@ -14880,6 +15202,8 @@
     },
     "/executions/{execution_id}/convert-to-live": {
       "post": {
+        "deprecated": true,
+        "description": "폐기됨. 호환성 계약(v1) 때문에 경로와 요청 모양은 남기되, 이 경로로는 전환하지 않는다.\n\n손실 한도·초기 노출·재인증이 없는 전환은 J8 안전장치를 우회한다 -- /live-conversion을 쓴다.\n(소비자가 없음을 확인했다: 프런트엔드 0건. 107 §4 폐기 절차의 deprecated 단계.)",
         "operationId": "convert_to_live_executions__execution_id__convert_to_live_post",
         "parameters": [
           {
@@ -14913,6 +15237,9 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "description": "폐기됨 -- /live-conversion을 사용한다"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -14930,6 +15257,169 @@
           }
         ],
         "summary": "Convert To Live",
+        "tags": [
+          "executions"
+        ]
+      }
+    },
+    "/executions/{execution_id}/expand-exposure": {
+      "post": {
+        "description": "J8 LP-4: 단계적 노출 확대. 자금 노출이 커지는 행동이라 재인증을 요구하고 자동 확대는 없다.",
+        "operationId": "expand_exposure_executions__execution_id__expand_exposure_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "execution_id",
+            "required": true,
+            "schema": {
+              "title": "Execution Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpandExposureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Expand Exposure",
+        "tags": [
+          "executions"
+        ]
+      }
+    },
+    "/executions/{execution_id}/live-conversion": {
+      "post": {
+        "operationId": "live_conversion_executions__execution_id__live_conversion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "execution_id",
+            "required": true,
+            "schema": {
+              "title": "Execution Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveConversionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Live Conversion",
+        "tags": [
+          "executions"
+        ]
+      }
+    },
+    "/executions/{execution_id}/live-readiness": {
+      "get": {
+        "description": "모의 -> 실전 전환 근거(J8 LP-2). 본인의 PAPER 실행만.\n자료가 없는 항목은 null이고 사유는 unavailable에 있다.",
+        "operationId": "get_live_readiness_executions__execution_id__live_readiness_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "execution_id",
+            "required": true,
+            "schema": {
+              "title": "Execution Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Live Readiness",
         "tags": [
           "executions"
         ]
