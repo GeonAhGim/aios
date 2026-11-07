@@ -56,7 +56,7 @@ function ConnectionRow({
 }) {
   const { t } = useTranslation();
   return (
-    <li className="rounded-lg border border-border bg-surface p-4">
+    <div className="rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -92,7 +92,7 @@ function ConnectionRow({
           </ul>
         </div>
       )}
-    </li>
+    </div>
   );
 }
 

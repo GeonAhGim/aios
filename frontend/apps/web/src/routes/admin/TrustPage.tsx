@@ -60,7 +60,7 @@ function ConsentRow({
 }) {
   const { t } = useTranslation();
   return (
-    <li className="rounded-lg border border-border bg-surface p-4">
+    <div className="rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -76,7 +76,7 @@ function ConsentRow({
         <Button type="button" variant="secondary" size="sm" loading={revoking} onClick={onRevoke}>
           {t("legacy.trustPage.t2")}</Button>
       </div>
-    </li>
+    </div>
   );
 }
 
