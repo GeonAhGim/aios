@@ -1,4 +1,4 @@
-"""task-7997(F2) -- BinanceAccountMixin.get_order tests.
+"""task-7997(F2) -- BinanceAccountMixin account/position/order/fill read tests.
 
 No BinanceAdapter assembly yet (auth.py/factory.py not wired for Binance),
 so this mirrors Kiwoom/KIS account_mixin tests and this exchange's own
@@ -12,6 +12,7 @@ adapter method that writes nothing to the DB/eventstore).
 from __future__ import annotations
 
 import time
+from datetime import UTC
 from decimal import Decimal
 from typing import Any
 
@@ -28,16 +29,16 @@ class _StubClient(BinanceAccountMixin):
     def __init__(
         self,
         *,
-        response: dict[str, Any] | None = None,
+        response: dict[str, Any] | list[Any] | None = None,
         raise_error: Exception | None = None,
     ) -> None:
-        self._response = response or {}
+        self._response = response if response is not None else {}
         self._raise_error = raise_error
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
 
     async def _request(
         self, method: str, path: str, *, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[Any]:
         self.calls.append((method, path, params))
         if self._raise_error is not None:
             raise self._raise_error
@@ -226,5 +227,205 @@ async def test_get_order_latency_budget():
     start = time.perf_counter()
     for _ in range(100):
         await client.get_order("BTCUSDT:1234567")
+    elapsed = time.perf_counter() - start
+    assert elapsed / 100 < 0.001
+
+
+# ---- get_balance ----
+
+
+def _balance_response(**overrides: Any) -> dict[str, Any]:
+    """Minimal Binance /api/v3/account response shape."""
+    base: dict[str, Any] = {
+        "balances": [
+            {"asset": "USDT", "free": "1000.50000000", "locked": "0.50000000"},
+            {"asset": "BTC", "free": "0.50000000", "locked": "0"},
+            {"asset": "ETH", "free": "0", "locked": "0"},
+        ],
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_get_balance_parses_usdt_and_btc():
+    client = _StubClient(response=_balance_response())
+    balances = await client.get_balance()
+    assert len(balances) == 2  # ETH (zero total) is filtered out
+    usdt = next(b for b in balances if b.asset == "USDT")
+    assert usdt.total == Decimal("1001.00000000")
+    assert usdt.available == Decimal("1000.50000000")
+    btc = next(b for b in balances if b.asset == "BTC")
+    assert btc.total == Decimal("0.50000000")
+    assert btc.available == Decimal("0.50000000")
+
+
+async def test_get_balance_filters_by_asset():
+    client = _StubClient(response=_balance_response())
+    balances = await client.get_balance(asset="BTC")
+    assert len(balances) == 1
+    assert balances[0].asset == "BTC"
+
+
+async def test_get_balance_returns_zero_balances_when_asset_specified():
+    """When `asset` is specified, zero balances must be included (caller
+    may want to record a zero balance, not skip it silently)."""
+    client = _StubClient(response=_balance_response())
+    balances = await client.get_balance(asset="ETH")
+    assert len(balances) == 1
+    assert balances[0].total == Decimal("0")
+
+
+async def test_get_balance_raises_fatal_on_malformed_response():
+    """Negative 1: a response missing the `balances` key must raise
+    FatalExchangeError (fail-closed, not an empty list)."""
+    client = _StubClient(response={})
+    with pytest.raises(FatalExchangeError):
+        await client.get_balance()
+
+
+# ---- get_positions ----
+
+
+class _StubClientWithTicker(_StubClient):
+    """Extends _StubClient to also stub get_ticker (needed by get_positions)."""
+
+    def __init__(self, ticker_price: Decimal = Decimal("30000.00")) -> None:
+        super().__init__(response=_balance_response())
+        self._ticker_price = ticker_price
+
+    async def get_ticker(self, symbol: str) -> Any:
+        from datetime import datetime
+
+        from src.data.models.market_data import Ticker
+
+        return Ticker(
+            symbol=symbol,
+            exchange="binance",
+            price=self._ticker_price,
+            bid=self._ticker_price,
+            ask=self._ticker_price,
+            volume_24h=Decimal("0"),
+            timestamp=datetime.now(UTC),
+            source_type="primary",
+        )
+
+
+async def test_get_positions_synthesizes_from_non_zero_balances():
+    client = _StubClientWithTicker()
+    positions = await client.get_positions()
+    # USDT is skipped (_QUOTE_ASSET); ETH (zero) is skipped; only BTC
+    assert len(positions) == 1
+    assert positions[0].symbol == "BTC/USDT"
+    assert positions[0].quantity == Decimal("0.50000000")
+
+
+async def test_get_positions_skips_unpriced_ticker_fail_closed():
+    """Negative 1: when get_ticker raises ExchangeAPIError the position
+    must be silently skipped (one unpriced coin must not fail the whole
+    query, per account_mixin.py docstring)."""
+
+    class _NoTickerClient(_StubClientWithTicker):
+        async def get_ticker(self, symbol: str) -> Any:
+            raise ExchangeAPIError("200: Symbol not found")
+
+    client = _NoTickerClient()
+    positions = await client.get_positions()
+    # BTC's ticker fails -> skipped; only zero-balance ETH remains but
+    # it is also zero so result is empty
+    assert len(positions) == 0
+
+
+# ---- get_open_orders ----
+
+
+def _open_order_response(**overrides: Any) -> dict[str, Any]:
+    base = {
+        "symbol": "BTCUSDT",
+        "orderId": 789,
+        "clientOrderId": "open-1",
+        "price": "55000.00",
+        "origQty": "0.02000000",
+        "executedQty": "0.00000000",
+        "status": "NEW",
+        "type": "LIMIT",
+        "side": "SELL",
+        "time": 1_700_001_000_000,
+        "updateTime": 1_700_001_000_000,
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_get_open_orders_parses_list():
+    client = _StubClient(response=[_open_order_response()])
+    orders = await client.get_open_orders(symbol="BTC/USDT")
+    assert len(orders) == 1
+    assert orders[0].symbol == "BTCUSDT"
+    assert orders[0].exchange_order_id == "BTCUSDT:789"
+    assert orders[0].status == OrderStatus.ACKNOWLEDGED
+
+
+async def test_get_open_orders_handles_empty_list():
+    client = _StubClient(response=[])
+    orders = await client.get_open_orders(symbol="BTC/USDT")
+    assert orders == []
+
+
+async def test_get_open_orders_raises_on_non_list_response():
+    """Negative 1: a non-list response must raise FatalExchangeError."""
+    client = _StubClient(response={"error": "bad"})
+    with pytest.raises(FatalExchangeError):
+        await client.get_open_orders(symbol="BTC/USDT")
+
+
+# ---- get_fills ----
+
+
+async def test_get_fills_requires_symbol():
+    """Negative 1: `symbol` is required by Binance myTrades endpoint."""
+    client = _StubClient(response=[])
+    with pytest.raises(FatalExchangeError):
+        await client.get_fills()
+
+
+async def test_get_fills_passes_since_as_millis():
+    from datetime import datetime
+
+    client = _StubClient(response=[])
+    since = datetime(2024, 1, 1, tzinfo=UTC)
+    await client.get_fills(symbol="BTC/USDT", since=since)
+    _, _, params = client.calls[0]
+    assert params is not None
+    assert params["startTime"] == 1704067200000
+
+
+async def test_get_fills_raises_on_naive_since():
+    """Negative 2: naive datetime for `since` must be rejected (fail-closed)."""
+    from datetime import datetime
+
+    client = _StubClient(response=[])
+    since = datetime(2024, 1, 1)  # naive
+    with pytest.raises(FatalExchangeError):
+        await client.get_fills(symbol="BTC/USDT", since=since)
+
+
+async def test_get_fills_raises_on_non_list_response():
+    """Negative 3: a non-list response must raise FatalExchangeError."""
+    client = _StubClient(response={"error": "bad"})
+    with pytest.raises(FatalExchangeError):
+        await client.get_fills(symbol="BTC/USDT")
+
+
+# ---- performance assertion ----
+
+
+@pytest.mark.perf
+async def test_get_balance_latency_budget():
+    """Numeric performance assertion: get_balance() against a pure stub
+    client (no network) must average under 1ms/call over 100 calls."""
+    client = _StubClient(response=_balance_response())
+    start = time.perf_counter()
+    for _ in range(100):
+        await client.get_balance()
     elapsed = time.perf_counter() - start
     assert elapsed / 100 < 0.001
