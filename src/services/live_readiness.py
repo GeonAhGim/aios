@@ -79,11 +79,66 @@ def _ratio(count: int, total: int) -> Decimal | None:
     return None if total <= 0 else Decimal(count) / Decimal(total)
 
 
+def _validate_order(row: Mapping[str, Any]) -> tuple[Decimal, Decimal, str]:
+    """Validate quantities and side before accumulating any evidence."""
+    quantity = _dec(row.get("quantity"), "quantity")
+    done = _dec(row.get("filled_quantity"), "filled_quantity") or Decimal(0)
+    if quantity is None or quantity <= 0:
+        raise LiveReadinessInputError(f"quantity는 0보다 커야 한다: {row.get('quantity')!r}")
+    if done < 0 or done > quantity:
+        raise LiveReadinessInputError(f"filled_quantity가 범위를 벗어났다: {done} / {quantity}")
+    side = str(row.get("side") or "").upper()
+    if side not in ("BUY", "SELL"):
+        raise LiveReadinessInputError(f"알 수 없는 side: {row.get('side')!r}")
+    return quantity, done, side
+
+
+@dataclass
+class _OrderCounts:
+    """Keep status classification independent of price and fee evidence."""
+
+    unknown_count: int = 0
+    open_count: int = 0
+    terminal: int = 0
+    filled: int = 0
+    rejected: int = 0
+    unfilled: int = 0
+    partial: int = 0
+
+    def add(self, status: str, quantity: Decimal, done: Decimal) -> None:
+        if status == "UNKNOWN":
+            self.unknown_count += 1
+        elif status not in _TERMINAL:
+            self.open_count += 1
+        else:
+            self.terminal += 1
+            if status == "FILLED":
+                self.filled += 1
+            elif status == "REJECTED":
+                self.rejected += 1
+            elif status in _NOT_FILLED_TERMINAL and done == 0:
+                self.unfilled += 1
+        if 0 < done < quantity:
+            self.partial += 1
+
+
+def _slippage_sample(
+    row: Mapping[str, Any], done: Decimal, side: str
+) -> tuple[Decimal, Decimal, int]:
+    """Return quantity-weighted adverse slippage and its sample weight."""
+    price = _dec(row.get("price"), "price")
+    avg = _dec(row.get("average_fill_price"), "average_fill_price")
+    if done > 0 and price is not None and price > 0 and avg is not None:
+        diff = (avg - price) if side == "BUY" else (price - avg)
+        return diff / price * _BPS * done, done, 1
+    return Decimal(0), Decimal(0), 0
+
+
 def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
     """주문 행들에서 전환 근거를 계산한다. 행 키: status, side, quantity, filled_quantity, price,
     average_fill_price, created_at, updated_at, (선택) fee_total, fee_currency."""
-    order_count = open_count = unknown_count = 0
-    filled = partial = unfilled = rejected = terminal = 0
+    order_count = 0
+    counts = _OrderCounts()
     starts: list[datetime] = []
     ends: list[datetime] = []
     fee_rows = 0
@@ -95,15 +150,7 @@ def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
     for row in rows:
         order_count += 1
         status = str(row.get("status") or "").upper()
-        quantity = _dec(row.get("quantity"), "quantity")
-        done = _dec(row.get("filled_quantity"), "filled_quantity") or Decimal(0)
-        if quantity is None or quantity <= 0:
-            raise LiveReadinessInputError(f"quantity는 0보다 커야 한다: {row.get('quantity')!r}")
-        if done < 0 or done > quantity:
-            raise LiveReadinessInputError(f"filled_quantity가 범위를 벗어났다: {done} / {quantity}")
-        side = str(row.get("side") or "").upper()
-        if side not in ("BUY", "SELL"):
-            raise LiveReadinessInputError(f"알 수 없는 side: {row.get('side')!r}")
+        quantity, done, side = _validate_order(row)
 
         created, updated = row.get("created_at"), row.get("updated_at")
         if isinstance(created, datetime):
@@ -118,35 +165,18 @@ def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
                 _dec(row["fee_total"], "fee_total") or Decimal(0)
             )
 
-        if status == "UNKNOWN":
-            unknown_count += 1
-        elif status not in _TERMINAL:
-            open_count += 1
-        else:
-            terminal += 1
-            if status == "FILLED":
-                filled += 1
-            elif status == "REJECTED":
-                rejected += 1
-            elif status in _NOT_FILLED_TERMINAL and done == 0:
-                unfilled += 1
-        if 0 < done < quantity:
-            partial += 1  # 진행 중이든 끝났든 일부만 체결된 주문
+        counts.add(status, quantity, done)
 
-        price = _dec(row.get("price"), "price")
-        avg = _dec(row.get("average_fill_price"), "average_fill_price")
-        if done > 0 and price is not None and price > 0 and avg is not None:
-            # 불리한 방향이 양수: 매수는 비싸게, 매도는 싸게 체결될수록 크다.
-            diff = (avg - price) if side == "BUY" else (price - avg)
-            slip_weighted += diff / price * _BPS * done
-            slip_qty += done
-            slip_n += 1
+        weighted, weight, samples = _slippage_sample(row, done, side)
+        slip_weighted += weighted
+        slip_qty += weight
+        slip_n += samples
 
     unavailable: dict[str, str] = {
         "net_pnl": UNAVAILABLE_NET_PNL,
         "recovery_event_count": UNAVAILABLE_RECOVERY,
     }
-    if terminal == 0:
+    if counts.terminal == 0:
         for key in ("fill_ratio", "partial_fill_ratio", "unfilled_ratio", "reject_ratio"):
             unavailable[key] = UNAVAILABLE_NO_TERMINAL
     # 수수료는 모든 주문에 있을 때만 합계를 낸다 -- 일부만 합하면 과소 보고가 좋은 숫자로 보인다.
@@ -166,17 +196,17 @@ def compute_live_readiness(rows: Iterable[Mapping[str, Any]]) -> LiveReadiness:
         period_days = Decimal(str((end - start).total_seconds())) / Decimal(86400)
     return LiveReadiness(
         order_count=order_count,
-        terminal_count=terminal,
-        open_count=open_count,
-        unknown_count=unknown_count,
-        filled_count=filled,
-        partial_fill_count=partial,
-        unfilled_count=unfilled,
-        rejected_count=rejected,
-        fill_ratio=_ratio(filled, terminal),
-        partial_fill_ratio=_ratio(partial, order_count),
-        unfilled_ratio=_ratio(unfilled, terminal),
-        reject_ratio=_ratio(rejected, terminal),
+        terminal_count=counts.terminal,
+        open_count=counts.open_count,
+        unknown_count=counts.unknown_count,
+        filled_count=counts.filled,
+        partial_fill_count=counts.partial,
+        unfilled_count=counts.unfilled,
+        rejected_count=counts.rejected,
+        fill_ratio=_ratio(counts.filled, counts.terminal),
+        partial_fill_ratio=_ratio(counts.partial, order_count),
+        unfilled_ratio=_ratio(counts.unfilled, counts.terminal),
+        reject_ratio=_ratio(counts.rejected, counts.terminal),
         period_start=start,
         period_end=end,
         period_days=period_days,

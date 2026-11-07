@@ -147,3 +147,31 @@ def test_partial_fee_coverage_is_unavailable_not_an_underreported_total() -> Non
     r = compute_live_readiness([_row(fee_total="1", fee_currency="USDT"), _row()])
     assert r.fee_totals is None
     assert "일부" in r.unavailable["fee_totals"]
+
+
+def test_input_stream_failure_does_not_return_partial_evidence() -> None:
+    def rows():
+        yield _row(fee_total="1", fee_currency="USDT")
+        raise RuntimeError("injected source failure")
+
+    with pytest.raises(RuntimeError, match="injected source failure"):
+        compute_live_readiness(rows())
+
+
+@pytest.mark.parametrize("status", ["CANCELLED", "EXPIRED", "FAILED"])
+def test_terminal_without_fill_is_unfilled(status: str) -> None:
+    r = compute_live_readiness(iter([_row(status=status, filled_quantity="0")]))
+    assert r.unfilled_count == r.terminal_count == 1
+    assert r.filled_count == r.partial_fill_count == r.open_count == 0
+    assert r.unfilled_ratio == Decimal(1)
+    assert r.slippage_sample_size == 0
+
+
+def test_readiness_functions_remain_within_complexity_cap() -> None:
+    from pathlib import Path
+
+    import src.services.live_readiness as module
+    from scripts.check_complexity import scan_file
+
+    path = Path(module.__file__)
+    assert scan_file(path.name, path.read_text(encoding="utf-8")) == []
