@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-11-06T17:15:37+00:00",
+ "refreshed_at": "2026-11-08T09:24:52+00:00",
  "specs": [
   {
    "below_floor": 7,
@@ -68,7 +68,7 @@
    }
   },
   {
-   "below_floor": 7,
+   "below_floor": 6,
    "file": "L4_execution_oms_and_exchange_v1.0.md",
    "spec": "execution_oms_and_exchange",
    "total": 30,
@@ -76,11 +76,11 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 2,
+   "reopened": 0,
    "depth": {
-    "D1": 6,
+    "D1": 5,
     "D2": 1,
-    "D3": 23
+    "D3": 24
    }
   },
   {
