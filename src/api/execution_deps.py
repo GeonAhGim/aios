@@ -8,6 +8,7 @@ from fastapi import Depends
 from src.api.service_deps import get_risk_policy
 from src.core.event_bus.bus import EventBus
 from src.core.loader.risk_policy_loader import RiskPolicy
+from src.services.decision_trail_service import DecisionTrailService
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
 from src.services.live_readiness_service import LiveReadinessService
@@ -31,6 +32,12 @@ def get_execution_service(
         pre_start_gate=make_foundation_pre_submit_gate(pool, require_mandate=True),
         publish=event_bus.publish,
     )
+
+
+def get_decision_trail_service(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> DecisionTrailService:
+    return DecisionTrailService(pool)
 
 
 def get_live_readiness_service(
