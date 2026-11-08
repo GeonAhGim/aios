@@ -45,6 +45,22 @@ export const catalogEnLive = {
     cancel: "Cancel",
     submit: "Switch to live",
   },
+  exposureExpand: {
+    openButton: "Expand exposure",
+    title: "Expand exposure",
+    guardNotice:
+      "Live orders are currently blocked by a safety guard. Expanding exposure does not send real orders until a separate approval.",
+    currentCapital: "Current allowed capital",
+    currentCapitalValue: "{{amount}} USDT",
+    newExposure: "New exposure (%)",
+    onlyIncrease: "Exposure can only be increased. To reduce it, pause the run.",
+    password: "Password",
+    totp: "Verification code (if MFA is on)",
+    reauthHint: "To increase exposure, enter your password again to confirm it is you.",
+    invalidExposure: "New exposure must be between 1 and 100.",
+    cancel: "Cancel",
+    submit: "Expand exposure",
+  },
   operationStatusBar: {
     label: "Operation status",
     modePaper: "Paper",
