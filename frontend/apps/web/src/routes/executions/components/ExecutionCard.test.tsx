@@ -6,6 +6,7 @@ import { ApiError } from "@aios/api-client";
 import type { ExecutionCardResponse } from "@aios/shared-types";
 import { ExecutionCard } from "./ExecutionCard";
 
+const expandMutateAsync = vi.fn();
 const startMutateAsync = vi.fn();
 const pauseMutate = vi.fn();
 const retireMutate = vi.fn();
@@ -25,10 +26,12 @@ vi.mock("@aios/shared-hooks", () => ({
   useSetExecutionRiskGuard: () => ({ mutate: setRiskGuardMutate, isPending: false }),
   useLiveReadiness: () => ({ isLoading: true, isError: false, data: undefined }),
   useLiveConversion: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useExpandExposure: () => ({ mutateAsync: expandMutateAsync, isPending: false }),
 }));
 
 afterEach(() => {
   cleanup();
+  expandMutateAsync.mockReset();
   startMutateAsync.mockReset();
   pauseMutate.mockReset();
   retireMutate.mockReset();
@@ -233,5 +236,44 @@ describe("ExecutionCard 실전 전환 진입 (J8 LP-5)", () => {
     fireEvent.click(screen.getByRole("button", { name: "취소" }));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("ExecutionCard 노출 확대 진입 (J8 LP-4, W4c)", () => {
+  it("LIVE 실행에는 '노출 확대' 버튼이 있고 누르면 대화상자가 열린다", () => {
+    render(<ExecutionCard execution={execution({ mode: "LIVE", status: "RUNNING" })} />);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "노출 확대" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "노출 확대" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("[부정] PAPER 실행에는 '노출 확대' 버튼이 없다", () => {
+    render(<ExecutionCard execution={execution({ mode: "PAPER" })} />);
+
+    expect(screen.queryByRole("button", { name: "노출 확대" })).not.toBeInTheDocument();
+  });
+
+  it("[부정] RETIRED 실행에는 '노출 확대' 버튼이 없다", () => {
+    render(
+      <ExecutionCard execution={execution({ mode: "LIVE", status: "RETIRED" })} />,
+    );
+
+    expect(screen.queryByRole("button", { name: "노출 확대" })).not.toBeInTheDocument();
+  });
+
+  it.each([0, 1])("[부정] 취소 버튼 %i로 확대 요청 없이 대화상자가 닫힌다", (index) => {
+    render(<ExecutionCard execution={execution({ mode: "LIVE", status: "RUNNING" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "노출 확대" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "취소" })[index]);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(expandMutateAsync).not.toHaveBeenCalled();
   });
 });
