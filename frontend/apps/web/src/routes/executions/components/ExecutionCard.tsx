@@ -13,6 +13,7 @@ import { exchangeLabel } from "../../../lib/exchangeLabels";
 import { ErrorMessage } from "../../../components/ErrorMessage";
 import { ForbiddenNotice } from "../../../components/ForbiddenNotice";
 import { LiveConversionDialog } from "./LiveConversionDialog";
+import { ExposureExpandDialog } from "./ExposureExpandDialog";
 import { useTranslation } from "react-i18next";
 
 interface ExecutionCardProps {
@@ -49,6 +50,7 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
   const { submit: submitStart } = useIdempotentSubmit(`executions.start:${execution.executionId}`);
   const [maxDrawdown, setMaxDrawdown] = useState(execution.maxDrawdownPct ?? "");
   const [showLiveConversion, setShowLiveConversion] = useState(false);
+  const [showExposureExpand, setShowExposureExpand] = useState(false);
 
   const realized = Number(execution.realizedPnl);
   const unrealized = Number(execution.unrealizedPnl);
@@ -153,6 +155,16 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
             {t("liveConversion.openButton")}
           </Button>
         )}
+        {execution.mode === "LIVE" && execution.status !== "RETIRED" && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowExposureExpand(true)}
+          >
+            {t("exposureExpand.openButton")}
+          </Button>
+        )}
         {execution.status !== "RETIRED" && (
           <Button
             type="button"
@@ -164,6 +176,12 @@ export function ExecutionCard({ execution }: ExecutionCardProps) {
             {t("legacy.executionCard.t9")}</Button>
         )}
       </div>
+      {showExposureExpand && (
+        <ExposureExpandDialog
+          execution={execution}
+          onClose={() => setShowExposureExpand(false)}
+        />
+      )}
       {showLiveConversion && (
         <LiveConversionDialog
           execution={execution}
