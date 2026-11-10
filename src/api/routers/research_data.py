@@ -22,13 +22,14 @@ The mount path follows the same namespace as other foundation routers
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends
 from pydantic import AwareDatetime, BaseModel
 
-from src.api.contracts.envelope import ApiResponse, ok
+from src.api.contracts.envelope import ApiError, ApiResponse, ok
 from src.api.deps import get_pool
 from src.api.foundation_deps import get_tenant_context
 from src.api.schemas.research_data import ResearchItemView, ResearchSearchResponseView
@@ -48,14 +49,27 @@ from src.foundation.research_data.contracts.v1 import ResearchItem, ResearchItem
 from src.foundation.research_data.domain.entity_link import UnmappedReason, extract_entity_key
 from src.foundation.trust.contracts.v1 import TenantContext
 
-router = APIRouter(prefix="/v1/foundation/research", tags=["foundation:research-data"])
+_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    400: {"model": ApiError, "description": "Invalid request field (VALIDATION_INVALID_FIELD)"},
+    "default": {"model": ApiError, "description": "Standard error envelope"},
+}
+
+router = APIRouter(
+    prefix="/v1/foundation/research",
+    tags=["foundation:research-data"],
+    responses=_ERROR_RESPONSES,
+)
 
 # RD-17(task-7775) -- separate namespace (/v1/foundation/research-data/*)
 # expected by the frontend's apiRoutes.ts. Different contract from RD-8's
 # /v1/foundation/research/items* (single required source_id vs. cross-source
 # search), so instead of adding to that router this is a second router with
 # its own prefix (router_registry.py includes both).
-search_router = APIRouter(prefix="/v1/foundation/research-data", tags=["foundation:research-data"])
+search_router = APIRouter(
+    prefix="/v1/foundation/research-data",
+    tags=["foundation:research-data"],
+    responses=_ERROR_RESPONSES,
+)
 
 _SEARCH_CANDIDATE_LIMIT = 200
 
@@ -82,9 +96,9 @@ async def search_items_endpoint(
     source_id: str,
     instruments: str | None = None,
     kinds: str | None = None,
-    published_from: datetime | None = None,
-    published_to: datetime | None = None,
-    as_of: datetime | None = None,
+    published_from: AwareDatetime | None = None,
+    published_to: AwareDatetime | None = None,
+    as_of: AwareDatetime | None = None,
     context: TenantContext = Depends(get_tenant_context),
     pool: asyncpg.Pool = Depends(get_pool),
     repo: PostgresResearchRepository = Depends(get_research_repository),
