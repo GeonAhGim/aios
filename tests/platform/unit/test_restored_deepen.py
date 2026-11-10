@@ -321,25 +321,24 @@ class TestPerformance:
     """
 
     @pytest.mark.perf
-    def test_mfa_step_up_fresh_within_budget(self):
-        """mfa_step_up_fresh() 호출 10만 건이 1초 미만이어야 한다
-        (p95 ≤ 0.1 ms 가정)."""
+    def test_mfa_step_up_fresh_within_budget(self, perf_budget):
+        """mfa_step_up_fresh() 10만 건(x2 호출)이 CPU 50ms 미만이어야 한다.
+
+        wall-clock 단발 측정은 full CI에서 코어를 뺏기면 실제 비용과 무관하게 예산을 넘었다
+        (2026-11-10 full 79315f41f 적색). 프로세스 CPU 시간 best-of-N으로 재고 예산은 그대로 둔다.
+        """
         now = _now()
         iterations = 100_000
-        # Warm-up
-        mfa_step_up_fresh(now)
-        mfa_step_up_fresh(None)
 
-        import time
+        def batch() -> None:
+            for _ in range(iterations):
+                mfa_step_up_fresh(now)
+                mfa_step_up_fresh(None)
 
-        start = time.monotonic()
-        for _ in range(iterations):
-            mfa_step_up_fresh(now)
-            mfa_step_up_fresh(None)
-        elapsed_ms = (time.monotonic() - start) * 1000
+        sample = perf_budget.best_of(batch, n=5)
 
         # 10만 건 * 2 호출 = 20만 호출, budget: 50ms 미만
-        assert elapsed_ms < 50, (
+        assert sample.cpu_ms < 50, (
             f"mfa_step_up_fresh perf budget exceeded: "
-            f"{elapsed_ms:.1f}ms for {iterations * 2} calls (budget: 50ms)"
+            f"{sample.cpu_ms:.1f}ms CPU for {iterations * 2} calls (budget: 50ms)"
         )
