@@ -173,10 +173,11 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
     """절대 초 상한이 아니라 1종목 실측 x 100 x 1.5로 단언한다 — 공유 CI의
     CPU 시간 편차에 흔들리지 않기 위함(BT-16a와 동일 선례, docs/specs 참고).
 
-    병렬 CI(pytest_perf_parallel_3)에서 CPU 경합으로 100종목 측정이
-    baseline 대비 1.5x를 초과하는 날림 실패가 발생했다. fix: baseline과
-    100종목 모두 best_of(n=3)로 최소값 채택, batch=200/3으로 tick 양자화
-    오차를 줄인다.
+    fix: baseline과 100종목 모두 best_of(n=3)로 최소값 채택.
+    baseline=batch=200, 100종목=batch=10으로 Windows time.process_time()
+    (~15.6ms) 양자화 오차를 줄였다. batch=3일 때 baseline 최소값(0.23ms)
+    대비 100종목 측정(36ms)이 150x 임계 초과하는 양자화 노이즈 실패가
+    재현됐으므로 batch를 늘려 측정 분산을 줄인다.
     """
     baseline_cols = _columns(_YEAR_D1_BARS, step=timedelta(days=1))
     baseline_universe = {"S000": (baseline_cols, _no_signal(_YEAR_D1_BARS))}
@@ -199,7 +200,12 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
 
     # best_of(3)로 CI 경합 노이즈를 최소화 — 병렬 워커가 CPU를 뺏어가도
     # 최소 3회 중 가장 낮은 값을 채택하므로 날림 실패가 줄어든다.
-    measured = perf_budget.best_of(lambda: _sweep(universe), n=3, batch=3)
+    # batch=10: Windows time.process_time() 해상도(~15.6ms) 양자화 오차를
+    # 줄이기 위해 baseline(batch=200)과 동일한 원리로 batch를 키운다.
+    # batch=3일 때 총 측정 시간이 2~8 tick(31~125ms)에 불과해 노이즈가 크고,
+    # baseline이 0.23ms(1 tick/200)로 최소화되면 임계값이 35ms로 좁아져
+    # 36ms 측정치가 실패하는 원인이 됐다 — 근본 원인(양자화 노이즈) 제거.
+    measured = perf_budget.best_of(lambda: _sweep(universe), n=3, batch=10)
     elapsed_ms = measured.cpu_ms
     result = measured.result
 
