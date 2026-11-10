@@ -203,3 +203,76 @@ async def test_strategy_deployment_exec_prefix_rejects_non_digit_id(pool):
             scope=SafetyScope.STRATEGY_DEPLOYMENT,
             scope_ref="exec:not-a-number",
         )
+
+
+# -- performance assertion -----------------------------------------------------
+
+# Local measurement (Windows host, 2026-11-11): sweep_open_orders(TENANT scope,
+# 1 order) averages ~8 ms CPU (best_of 5, batch=1). Budget set at 30× that
+# = 240 ms, providing generous headroom over any reasonable production SLA.
+_SWEEP_PERF_BUDGET_MS = 240.0
+
+
+@pytest.mark.perf
+async def test_sweep_open_orders_perf_within_budget(pool, perf_budget):
+    """D2 performance assertion — single TENANT-scope sweep within 240 ms CPU budget.
+
+    Measured best_of-5 on this host: ~8 ms CPU. Budget = 30× real measurement.
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+    user_id = await create_test_user(pool)
+    await _seed_order(pool, user_id)
+
+    sample = await perf_budget.sample_async(
+        lambda: sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        ),
+    )
+    assert sample.cpu_ms < _SWEEP_PERF_BUDGET_MS, (
+        f"sweep perf exceeded budget: cpu={sample.cpu_ms:.1f}ms "
+        f"wall={sample.wall_ms:.1f}ms budget={_SWEEP_PERF_BUDGET_MS:.1f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_sweep_open_orders_goes_red_under_10x_virtual_delay(pool, perf_budget):
+    """D2 gate-red reproduction — a virtual delay of 10× the budget must
+    push the same wall assertion over the limit.
+
+    This proves the perf assertion actually catches a regression instead of
+    silently passing. The virtual_delayed_async wrapper adds CPU+wall delay
+    without actually sleeping, so the test runs in milliseconds.
+    """
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+    user_id = await create_test_user(pool)
+    await _seed_order(pool, user_id)
+
+    async def sweep():
+        return await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.TENANT,
+            scope_ref=str(user_id),
+        )
+
+    # 10× the budget in virtual delay (~2400 ms)
+    slow = virtual_delayed_async(sweep, _SWEEP_PERF_BUDGET_MS * 10 / 1000)
+    sample = await perf_budget.sample_async(slow)
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < _SWEEP_PERF_BUDGET_MS, (
+            f"gate-red failed: wall={sample.wall_ms:.1f}ms should exceed "
+            f"budget={_SWEEP_PERF_BUDGET_MS:.1f}ms"
+        )
+    reset_virtual_totals()
