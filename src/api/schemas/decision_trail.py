@@ -1,6 +1,7 @@
 """Decision trail response schemas (J8 trail).
 
-Mirrors ``TrailEntry`` fields; ``kind`` stays ``str``.
+Legacy response contract: mirrors ``RiskTrailEntry`` fields (not the chronological
+``TrailEntry``); ``kind`` stays ``str``.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from src.services.decision_trail import RiskTrailEntry as TrailEntry
+from src.services.decision_trail import RiskTrailEntry
 
 
 class DecisionTrailEntryResponse(BaseModel):
@@ -31,7 +32,7 @@ class DecisionTrailResponse(BaseModel):
 
 
 def to_decision_trail_response(
-    entries: Sequence[TrailEntry],
+    entries: Sequence[RiskTrailEntry],
 ) -> DecisionTrailResponse:
     return DecisionTrailResponse(
         entries=[
