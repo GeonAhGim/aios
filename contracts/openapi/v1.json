@@ -4122,6 +4122,79 @@
         "title": "DataScope",
         "type": "object"
       },
+      "DecisionTrailEntryResponse": {
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "title": "Summary",
+            "type": "object"
+          },
+          "unavailable": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Unavailable",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "occurred_at",
+          "actor",
+          "summary",
+          "evidence"
+        ],
+        "title": "DecisionTrailEntryResponse",
+        "type": "object"
+      },
+      "DecisionTrailResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionTrailEntryResponse"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "DecisionTrailResponse",
+        "type": "object"
+      },
       "DeletionRequest": {
         "properties": {
           "password": {
@@ -15297,6 +15370,54 @@
           }
         ],
         "summary": "Convert To Live",
+        "tags": [
+          "executions"
+        ]
+      }
+    },
+    "/executions/{execution_id}/decision-trail": {
+      "get": {
+        "description": "전환·노출 확대 기록을 시간순으로 돌려준다(J8). 본인 실행만.",
+        "operationId": "get_decision_trail_executions__execution_id__decision_trail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "execution_id",
+            "required": true,
+            "schema": {
+              "title": "Execution Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionTrailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Decision Trail",
         "tags": [
           "executions"
         ]

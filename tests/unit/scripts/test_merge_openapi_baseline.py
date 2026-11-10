@@ -72,3 +72,18 @@ def test_cli_preserves_crlf_and_reports_failure_without_writing(
     written = baseline.read_bytes()
     assert b"\r\n" in written and b"\n" not in written.replace(b"\r\n", b"")
     assert json.loads(written.decode("utf-8"))["paths"]["/b"] == {"get": {"y": 2}}
+
+
+def test_cli_reports_normalization_of_mixed_line_endings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline = tmp_path / "v1.json"
+    mixed = render(BASE, crlf=True)
+    baseline.write_bytes(mixed[:-2] + b"\n")  # 마지막 줄만 LF 단독 -- 섞인 줄바꿈
+    current = tmp_path / "cur.json"
+    current.write_text(json.dumps(CURRENT), encoding="utf-8")
+    assert main(["--current", str(current), "--baseline", str(baseline), "--path", "/b"]) == 0
+    assert "정규화" in capsys.readouterr().out
+    assert b"\r\n" in baseline.read_bytes() and b"\n" not in baseline.read_bytes().replace(
+        b"\r\n", b""
+    )

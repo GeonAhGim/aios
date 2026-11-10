@@ -90,7 +90,11 @@ def main(argv: list[str] | None = None) -> int:
     except MergeError as exc:
         print(f"FAIL: {exc}")
         return 1
+    mixed = raw.count(b"\n") - raw.count(b"\r\n")
     args.baseline.write_bytes(render(merged, crlf=b"\r\n" in raw))
+    if raw.count(b"\r\n") and mixed:
+        # 줄바꿈이 섞인 기준선은 한 형식으로 정규화된다 -- git diff에 의미 없는 줄 변경이 보인다.
+        print(f"NOTE: 기준선에 LF 단독 줄 {mixed}개가 섞여 있어 CRLF로 정규화했다(내용 변경 아님)")
     print(f"OK: 경로 {len(args.paths)}개·스키마 {len(args.schemas)}개 추가 — {args.baseline}")
     return 0
 
