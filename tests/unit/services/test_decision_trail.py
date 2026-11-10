@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -178,11 +178,11 @@ async def test_legacy_service_response_unchanged():
 
     entries = await DecisionTrailService(Pool()).get_trail(execution_id, user_id)
     response = to_decision_trail_response(entries).entries[0]
-    assert response.decision_id == row["decision_id"]
     assert response.kind == "RISK_DECISION"
-    assert response.outcome == "DENY"
-    assert response.reason_codes == ["LIMIT"]
-    assert response.rule_version == "v1"
+    assert response.summary["decision_id"] == row["decision_id"]
+    assert response.summary["outcome"] == "DENY"
+    assert response.summary["reason_codes"] == ["LIMIT"]
+    assert response.summary["rule_version"] == "v1"
 
 
 def test_empty_entries_produces_empty_response():
@@ -190,25 +190,23 @@ def test_empty_entries_produces_empty_response():
     assert response.entries == []
 
 
-def test_conversion_entry_maps_safe_defaults_for_risk_fields():
-    """CONVERSION/EXPANSION entries lack risk fields — mapper must not raise."""
+def test_conversion_entry_keeps_its_own_payload_and_invents_no_risk_fields():
+    """CONVERSION/EXPANSION entries have no risk fields -- the mapper keeps their payload and fills nothing."""
     entry = TrailEntry(
         kind=TrailKind.CONVERSION,
         occurred_at=NOW,
         actor="human",
         summary={"strategy_id": 1},
         evidence=None,
+        unavailable={"readiness_evidence": "기록 없음"},
     )
     response = to_decision_trail_response([entry]).entries[0]
     assert response.kind == "CONVERSION"
-    assert response.decision_id == UUID(int=0)
-    assert response.outcome == ""
-    assert response.reason_codes == []
-    assert response.rule_version == ""
-    assert response.evaluated_at == ""
-    assert response.expires_at is None
-    assert response.trace_id is None
-    assert response.summary == ""
+    assert response.actor == "human"
+    assert response.summary == {"strategy_id": 1}
+    assert response.evidence is None
+    assert response.unavailable == {"readiness_evidence": "기록 없음"}
+    assert not hasattr(response, "decision_id")  # 위험 판정 필드를 지어내지 않는다
 
 
 def test_mixed_conversion_and_risk_entries():
@@ -240,8 +238,9 @@ def test_mixed_conversion_and_risk_entries():
     assert len(response) == 2
     assert response[0].kind == "CONVERSION"
     assert response[1].kind == "RISK_DECISION"
-    assert response[1].outcome == "PASS"
-    assert response[1].trace_id is not None
+    assert response[0].actor == "agent" and response[0].summary["target_capital"] == Decimal("1000")
+    assert response[1].summary["outcome"] == "PASS"
+    assert response[1].summary["trace_id"] is not None
 
 
 @pytest.mark.perf
