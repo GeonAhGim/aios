@@ -36,6 +36,7 @@ from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.domain.l2_orderbook import L2Diff, L2Snapshot
 from src.foundation.market_data.ports.coverage_repository import CoverageQuality, CoverageSpan
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 
 class _Stop(Exception):
@@ -296,22 +297,23 @@ async def test_two_concurrent_sessions_goes_red_with_io_delay_injection(
     perf_budget: PerfBudget,
 ) -> None:
     """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연
-    (delayed_async, 1.0s) 을 주입한 후 같은 동시 실행을 돌리면 wall-clock
-    이 예산을 초과해야 한다(red).
+    (virtual_delayed_async, 1.0s) 을 주입한 후 같은 동시 실행을 돌리면
+    wall-clock 이 예산을 초과해야 한다(red).
 
-    `conn.execute` 를 `delayed_async` 로 감싸 1회 호출당 1초 IO 지연을
-    주입 — L2IngestSession 은 DB 쓰기(I/O 바인딩)를 하므로 wall-clock
-    측정으로 지연을 검증한다. 정상 입력에서 통과하는 것이 테스트의 허수
-    (trivial pass) 가 아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
+    `asyncpg.Connection.execute` 를 `virtual_delayed_async` 로 감싸 1회
+    호출당 1초 IO 지연을 가상 주입 — 실제 sleep 없이 virtual_ledger에
+    추가하므로 측정치만 지연을 반영한다. 정상 입력에서 통과하는 것이
+    테스트의 허수(trivial pass) 아님을 보증한다.
+    단언/마커 삭제와 예산 완화 금지.
     """
-    # asyncpg.Connection.execute 를 delayed_async 로 감싸 IO 지연 주입 (1초/회)
-    original_execute = asyncpg.Connection.execute
+    reset_virtual_totals()
 
-    async def _delayed_execute(*args, **kwargs):
-        await asyncio.sleep(1.0)
-        return await original_execute(*args, **kwargs)
-
-    monkeypatch.setattr(asyncpg.Connection, "execute", _delayed_execute)
+    # asyncpg.Connection.execute 를 virtual_delayed_async 로 감싸 IO 지연 주입 (1초/회)
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "execute",
+        virtual_delayed_async(asyncpg.Connection.execute, 1.0),
+    )
 
     instrument_a = _fake_ulid()
     instrument_b = _fake_ulid()
