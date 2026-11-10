@@ -29,7 +29,6 @@ import importlib
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import httpx
@@ -261,8 +260,8 @@ async def test_kis_get_ohlcv_intraday_malformed_response_missing_field_raises_fa
 
 # ---------- 수치 성능 단언 — symbols.py 순수 함수 처리량(정규화 배율) ----------
 
-_N_SYMBOLS = 2000
-_N_ITERATIONS = 5
+_N_SYMBOLS = 20000
+_N_ITERATIONS = 10
 _RAW_SYMBOLS = [f"SYM{i}USDT" for i in range(_N_SYMBOLS)]
 _CANONICAL_SYMBOLS = [f"SYM{i}/USDT" for i in range(_N_SYMBOLS)]
 
@@ -273,6 +272,7 @@ def test_bitget_symbol_conversion_throughput_bounded_vs_trivial_baseline() -> No
     공유 CI 환경에서 절대 ms 임계는 상시 적색을 낳으므로(선례:
     test_provider_spi_deepen_2885.py), 같은 프로세스가 방금 측정한 구조적으로
     동등한 트리비얼 문자열 조작 베이스라인 대비 정규화 배율을 쓴다."""
+    perf = PerfBudget()
     to_bitget_symbol("BTC/USDT")  # 워밍업 — import/최초 호출 1회성 비용 배제
     to_canonical_symbol("BTCUSDT")
 
@@ -291,22 +291,21 @@ def test_bitget_symbol_conversion_throughput_bounded_vs_trivial_baseline() -> No
             for canonical in _CANONICAL_SYMBOLS:
                 _, _, _ = canonical.partition("/")
 
-    baseline_start = time.perf_counter()
-    run_baseline()
-    baseline_seconds = time.perf_counter() - baseline_start
+    # CPU 시간 기반 측정(coverage 트레이서 오버헤드 제외, OS 스케줄링 노이즈 배제)
+    baseline_samples = perf.samples(run_baseline, n=3)
+    baseline_ms = sorted(s.cpu_ms for s in baseline_samples)[len(baseline_samples) // 2]
 
-    conversion_start = time.perf_counter()
-    run_conversion()
-    conversion_seconds = time.perf_counter() - conversion_start
+    conversion_samples = perf.samples(run_conversion, n=3)
+    conversion_ms = sorted(s.cpu_ms for s in conversion_samples)[len(conversion_samples) // 2]
 
-    assert baseline_seconds > 0.0
-    ratio = conversion_seconds / baseline_seconds
+    assert baseline_ms > 0.0
+    ratio = conversion_ms / baseline_ms
     budget_ratio = 20.0  # to_venue/to_canonical는 quote 목록 정렬+순회를 더 하므로
     # 트리비얼 endswith/partition보다 근본적으로 느리다.
     print(
         f"\nBitget symbol conversion throughput vs trivial baseline: "
         f"n_symbols={_N_SYMBOLS} n_iterations={_N_ITERATIONS} "
-        f"baseline={baseline_seconds * 1000:.1f}ms conversion={conversion_seconds * 1000:.1f}ms "
+        f"baseline={baseline_ms:.1f}ms conversion={conversion_ms:.1f}ms "
         f"ratio={ratio:.2f} (budget={budget_ratio})"
     )
     assert ratio < budget_ratio, (
