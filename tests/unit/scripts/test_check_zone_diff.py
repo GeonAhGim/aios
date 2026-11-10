@@ -166,8 +166,8 @@ def test_find_frozen_violations_delay_injection_fails_red_gate(
     PerfBudget.assert_within은 process_time 기준이라 time.sleep()을 보지 못한다.
     그래서 RelativeBudget(mode="wall")로 wall-clock 지연을 계측하고,
     지연 주입 후 같은 함수가 절대 wall-budget(1.0s)을 넘으면 적색이다.
-    calibration_n=1로 비율 오차를 줄이고 max_ratio를 매우 낮게 설정해
-    sleep 1.5s이 반드시 예산을 넘게 한다.
+    calibration_n=10으로 보정 분산을 줄이고 n=3으로 측정 안정성을 확보한 뒤,
+    max_ratio=10.0을 설정해 sleep 1.5s이 반드시 예산을 넘게 한다.
     """
     import time
 
@@ -188,14 +188,15 @@ def test_find_frozen_violations_delay_injection_fails_red_gate(
 
     # 지연 주입된 함수는 wall-clock 예산을 넘어야 한다 → 적색
     # calibration loop가 ~50-100ms이므로 max_ratio=10이면 1.5s는 15-30x로 명확 초과
+    # calibration_n=10, n=3으로 Windows 부하에서도 비율 오차를 최소화
     with pytest.raises(AssertionError):
         RelativeBudget().assert_within(
             lambda: check_zone_diff.find_frozen_violations(changed_files, frozen_patterns),
             max_ratio=10.0,
             mode="wall",
-            n=1,
+            n=3,
             warmup=0,
-            calibration_n=1,
+            calibration_n=10,
             label="지연 주입 스캔(적색 확인)",
         )
 
