@@ -191,7 +191,7 @@ def test_empty_entries_produces_empty_response():
 
 
 def test_conversion_entry_keeps_its_own_payload_and_invents_no_risk_fields():
-    """CONVERSION/EXPANSION entries have no risk fields -- the mapper keeps their payload and fills nothing."""
+    """CONVERSION and EXPANSION entries carry no risk fields; the mapper keeps their payload."""
     entry = TrailEntry(
         kind=TrailKind.CONVERSION,
         occurred_at=NOW,
