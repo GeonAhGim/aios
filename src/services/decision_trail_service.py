@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncpg
 
-from src.services.decision_trail import TrailEntry
+from src.services.decision_trail import RiskTrailEntry as TrailEntry
 
 _TRAIL_SQL = """
 SELECT decision_id, gate_kind, outcome, reason_codes, rule_version,

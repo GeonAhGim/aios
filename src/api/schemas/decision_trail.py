@@ -11,7 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from src.services.decision_trail import TrailEntry
+from src.services.decision_trail import RiskTrailEntry as TrailEntry
 
 
 class DecisionTrailEntryResponse(BaseModel):
