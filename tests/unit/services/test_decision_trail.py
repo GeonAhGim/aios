@@ -40,7 +40,8 @@ def test_chronological_order_and_ties():
         TrailKind.EXPANSION,
         TrailKind.RISK_DECISION,
     ]
-    assert entries[-1].summary == risk
+    assert entries[-1].summary["outcome"] == "DENY"
+    assert entries[-1].summary["reason_codes"] == ["LIMIT"]
     assert entries[-1].actor is None
     assert entries[0].actor == "human"
 
@@ -88,6 +89,72 @@ def test_missing_risk_fields():
     assert entry.summary["outcome"] is None
     assert entry.unavailable["outcome"] == "기록 없음"
     assert entry.evidence is None
+    # summary derived from empty reason_codes → empty string, not unavailable
+    assert entry.summary["summary"] == ""
+    assert "summary" not in entry.unavailable
+    # expires_at/trace_id missing → recorded as unavailable
+    assert entry.summary["expires_at"] is None
+    assert entry.summary["trace_id"] is None
+    assert "expires_at" in entry.unavailable
+    assert "trace_id" in entry.unavailable
+
+
+def test_risk_trace_id_preserved():
+    """negative: risk_decision 행에 trace_id가 있으면 summary에 보존된다."""
+    tid = uuid4()
+    entry = build_decision_trail(
+        [],
+        [
+            {
+                "evaluated_at": NOW,
+                "decision_id": uuid4(),
+                "trace_id": tid,
+                "outcome": "PASS",
+                "gate_kind": "PRE_TRADE",
+                "reason_codes": [],
+                "rule_version": "v1",
+            }
+        ],
+    )[0]
+    assert entry.summary["trace_id"] == tid
+
+
+def test_risk_expires_at_preserved():
+    """negative: risk_decision 행에 expires_at가 있으면 summary에 보존된다."""
+    exp = NOW + timedelta(seconds=30)
+    entry = build_decision_trail(
+        [],
+        [
+            {
+                "evaluated_at": NOW,
+                "decision_id": uuid4(),
+                "expires_at": exp,
+                "outcome": "PASS",
+                "gate_kind": "PRE_TRADE",
+                "reason_codes": [],
+                "rule_version": "v1",
+            }
+        ],
+    )[0]
+    assert entry.summary["expires_at"] == exp
+
+
+def test_risk_summary_derived_from_reason_codes():
+    """negative: reason_codes가 있으면 summary에 문자열로 도출된다."""
+    entry = build_decision_trail(
+        [],
+        [
+            {
+                "evaluated_at": NOW,
+                "decision_id": uuid4(),
+                "outcome": "DENY",
+                "gate_kind": "PRE_TRADE",
+                "reason_codes": ["LIMIT", "BALANCE"],
+                "rule_version": "v1",
+            }
+        ],
+    )[0]
+    assert entry.summary["summary"] == "LIMIT, BALANCE"
 
 
 def test_json_string_preserves_money():

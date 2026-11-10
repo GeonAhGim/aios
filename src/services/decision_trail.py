@@ -66,15 +66,31 @@ class TrailEntry(BaseModel, frozen=True):
 
 
 _CONVERSION_KEYS = (
-    "strategy_id", "strategy_version", "new_execution_id", "target_capital",
-    "allocated_capital", "max_loss_amount", "initial_exposure_pct", "max_drawdown_pct",
+    "strategy_id",
+    "strategy_version",
+    "new_execution_id",
+    "target_capital",
+    "allocated_capital",
+    "max_loss_amount",
+    "initial_exposure_pct",
+    "max_drawdown_pct",
 )
 _EXPANSION_KEYS = (
-    "allocated_capital_before", "allocated_capital_after",
-    "exposure_pct_after", "max_drawdown_pct_after",
+    "allocated_capital_before",
+    "allocated_capital_after",
+    "exposure_pct_after",
+    "max_drawdown_pct_after",
 )
 _RISK_KEYS = (
-    "decision_id", "gate_kind", "outcome", "reason_codes", "rule_version", "evaluated_at",
+    "decision_id",
+    "gate_kind",
+    "outcome",
+    "reason_codes",
+    "rule_version",
+    "evaluated_at",
+    "expires_at",
+    "trace_id",
+    "summary",
 )
 _ACTIONS = {
     "execution.converted_to_live": (TrailKind.CONVERSION, _CONVERSION_KEYS),
@@ -84,7 +100,9 @@ _KIND_ORDER = {kind: index for index, kind in enumerate(TrailKind)}
 
 
 def _summary(
-    data: Mapping[str, Any], keys: tuple[str, ...], unavailable: dict[str, str],
+    data: Mapping[str, Any],
+    keys: tuple[str, ...],
+    unavailable: dict[str, str],
 ) -> dict[str, Any]:
     for key in keys:
         if data.get(key) is None:
@@ -93,7 +111,8 @@ def _summary(
 
 
 def build_decision_trail(
-    audit_rows: Sequence[Mapping[str, Any]], risk_rows: Sequence[Mapping[str, Any]],
+    audit_rows: Sequence[Mapping[str, Any]],
+    risk_rows: Sequence[Mapping[str, Any]],
 ) -> list[TrailEntry]:
     """Merge audit and risk snapshots without I/O or modifying input rows."""
     entries: list[TrailEntry] = []
@@ -118,16 +137,35 @@ def build_decision_trail(
             evidence = None
             if kind == TrailKind.CONVERSION:
                 unavailable["readiness_evidence"] = "기록 없음"
-        entries.append(TrailEntry(
-            kind=kind, occurred_at=row["created_at"], actor=row.get("actor_agent"),
-            summary=_summary(data, keys, unavailable), evidence=deepcopy(evidence),
-            unavailable=unavailable,
-        ))
+        entries.append(
+            TrailEntry(
+                kind=kind,
+                occurred_at=row["created_at"],
+                actor=row.get("actor_agent"),
+                summary=_summary(data, keys, unavailable),
+                evidence=deepcopy(evidence),
+                unavailable=unavailable,
+            )
+        )
     for row in risk_rows:
         unavailable = {}
-        entries.append(TrailEntry(
-            kind=TrailKind.RISK_DECISION, occurred_at=row["evaluated_at"], actor=None,
-            summary=_summary(row, _RISK_KEYS, unavailable), evidence=None,
-            unavailable=unavailable,
-        ))
+        summary = _summary(row, _RISK_KEYS, unavailable)
+        # Derive summary string from reason_codes when not provided.
+        if summary.get("summary") is None:
+            codes = row.get("reason_codes")
+            if isinstance(codes, (list, tuple)) and len(codes) > 0:
+                summary["summary"] = ", ".join(str(c) for c in codes)
+            else:
+                summary["summary"] = ""
+            unavailable.pop("summary", None)
+        entries.append(
+            TrailEntry(
+                kind=TrailKind.RISK_DECISION,
+                occurred_at=row["evaluated_at"],
+                actor=None,
+                summary=summary,
+                evidence=None,
+                unavailable=unavailable,
+            )
+        )
     return sorted(entries, key=lambda entry: (entry.occurred_at, _KIND_ORDER[entry.kind]))
