@@ -51,8 +51,24 @@ _CLOSE = "input close: series<float> = 0\n"
 # ---- 파싱: request(symbol, timeframe, expr) 성공 케이스 ----
 
 
-def test_request_parses_symbol_timeframe_and_expr() -> None:
-    program = parse(_CLOSE + 'let r = request("BTCUSDT", "5m", close)')
+def test_request_parses_symbol_timeframe_and_expr(
+    perf_budget: PerfBudget,
+) -> None:
+    """request(symbol, timeframe, expr) 파싱 검증 + 성능 단언(DoD).
+
+    Windows의 약 15.6ms 양자화 오차 때문에 단일 sample은 흔들릴 수 있다.
+    `best_of`로 여러 번 측정해 최소 cpu_ms가 1ms 미만인지 확인한다.
+    """
+    source = _CLOSE + 'let r = request("BTCUSDT", "5m", close)'
+
+    def single_parse() -> None:
+        parse(source)
+
+    sample = perf_budget.best_of(single_parse, n=5, batch=128)
+
+    assert sample.cpu_ms < 1.0, f"단일 parse 호출 best-of CPU 시간 {sample.cpu_ms:.3f}ms가 1ms 초과"
+
+    program = parse(source)
     decl = program.decls[1]
     assert isinstance(decl, LetDecl)
     assert decl.expr == RequestExpr(symbol="BTCUSDT", timeframe="5m", expr=Identifier(name="close"))
