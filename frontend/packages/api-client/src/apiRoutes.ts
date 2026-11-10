@@ -99,6 +99,7 @@ export const API_ROUTES = defineApiRoutes({
   "executions.liveReadiness": route("/executions/:executionId/live-readiness", false),
   "executions.expandExposure": route("/executions/:executionId/expand-exposure", false),
   "executions.riskGuard": route("/executions/:executionId/risk-guard", false),
+  "executions.decisionTrail": route("/executions/:executionId/decision-trail", false),
 
   "marketplace.listings.base": route("/marketplace/listings", false),
   "marketplace.listings.submitVerification": route("/marketplace/listings/:listingId/submit-verification", false),

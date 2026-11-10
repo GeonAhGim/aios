@@ -1,4 +1,5 @@
 import type {
+  DecisionTrailResponse,
   ExecutionCardResponse,
   ExecutionCreateRequest,
   ExecutionResponse,
@@ -75,6 +76,12 @@ export function withExecutions<TBase extends AnyConstructor>(Base: TBase) {
     ): Promise<ExecutionResponse> {
       const path = resolvePath("executions.expandExposure").replace(":executionId", String(executionId));
       return this.post(path, body);
+    }
+
+    // 실행 한 건의 의사결정 이력(읽기 전용). 값이 없는 항목은 unavailable 사유로 온다.
+    async getDecisionTrail(executionId: number): Promise<DecisionTrailResponse> {
+      const path = resolvePath("executions.decisionTrail").replace(":executionId", String(executionId));
+      return this.request(path);
     }
 
     async setExecutionRiskGuard(

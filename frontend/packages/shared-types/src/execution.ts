@@ -95,3 +95,17 @@ export interface LiveReadinessResponse {
 export interface SetMaxDrawdownRequest {
   maxDrawdownPct: string | null;
 }
+
+// src/api/schemas/decision_trail.py 1:1 대응 -- 값이 없는 항목의 사유는 unavailable에 있다.
+export interface DecisionTrailEntryResponse {
+  kind: string;
+  occurredAt: string;
+  actor: string | null;
+  summary: Record<string, unknown>;
+  evidence: Record<string, unknown> | null;
+  unavailable?: Record<string, string>;
+}
+
+export interface DecisionTrailResponse {
+  entries: DecisionTrailEntryResponse[];
+}
