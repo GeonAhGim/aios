@@ -169,9 +169,8 @@ def test_find_frozen_violations_delay_injection_fails_red_gate(
     calibration_n=1로 비율 오차를 줄이고 max_ratio를 매우 낮게 설정해
     sleep 1.5s이 반드시 예산을 넘게 한다.
     """
-    import time
-
     from tests._perf.relative_budget import RelativeBudget
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
     original_fn = check_zone_diff.find_frozen_violations
     frozen_patterns = ["aios/kernel/**", "src/core/strategy/**"]
@@ -179,15 +178,22 @@ def test_find_frozen_violations_delay_injection_fails_red_gate(
     changed_files += [f"tests/unit/generated/test_{i}.py" for i in range(4000)]
     changed_files.append("aios/kernel/policy/rule.py")
 
-    # 약 1.5s 지연 주입 (원본 ~0.1s → 10x 초과)
-    def _slow_violations(files: list[str], patterns: list[str]) -> list[str]:
-        time.sleep(1.5)
-        return original_fn(files, patterns)
+    # 1.5s 가상 지연 주입(원장에 더해져 wall 측정값에만 반영, 실제로 자지 않음)
+    reset_virtual_totals()
+    monkeypatch.setattr(
+        check_zone_diff,
+        "find_frozen_violations",
+        virtual_delayed_sync(original_fn, 1.5),
+    )
 
-    monkeypatch.setattr(check_zone_diff, "find_frozen_violations", _slow_violations)
+    # 보정 루프를 경량(약 1~3ms)으로 고정: 기본 200만 회 루프는 CI 부하에서 150ms+로
+    # 늘어나 1.5s/보정 비율이 10x 아래로 내려가 DID NOT RAISE가 났다(host-load 의존).
+    def _light_calibration() -> int:
+        total = 0
+        for i in range(20_000):
+            total += i * i % 7
+        return total
 
-    # 지연 주입된 함수는 wall-clock 예산을 넘어야 한다 → 적색
-    # calibration loop가 ~50-100ms이므로 max_ratio=10이면 1.5s는 15-30x로 명확 초과
     with pytest.raises(AssertionError):
         RelativeBudget().assert_within(
             lambda: check_zone_diff.find_frozen_violations(changed_files, frozen_patterns),
@@ -196,6 +202,7 @@ def test_find_frozen_violations_delay_injection_fails_red_gate(
             n=1,
             warmup=0,
             calibration_n=1,
+            calibration_fn=_light_calibration,
             label="지연 주입 스캔(적색 확인)",
         )
 
