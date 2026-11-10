@@ -1,26 +1,42 @@
-# 파일 범위 분할 제안: task-23113
+# task-23246 파일 범위 분할 제안
 
-## 분석
+## 개요
+task-23246 spec: "Fix review findings: consistency 24h 5회 반복 — 단계 규칙/기준선 설계 결함 조사"
+현재 실패: `openapi_client_mismatch` 34→35 증가 (단일 게이트)
 
-- 원본 files: `["src/", "type-ignore-budget.txt"]` — `src/`는 디렉터리라 파일 범위로 해석 불가(`unresolved_path_scope`).
-- 원본 spec(리뷰어 소견): 원인 커밋 `deacc374`는 `scripts/check_zone_manifest.py`만 변경, type_ignore와 무관.
-- 실측(2026-11-10, origin/main 기준): `scripts/check_type_ignore_budget.py` → `OK: type: ignore 109개 (budget 109개 이내)`. 예산 `type-ignore-budget.txt` = 109. 게이트는 이미 녹색이며 timeout 사유도 재현되지 않음.
-- `src/`의 `type: ignore` 실제 보유 파일은 5개뿐(총 8건):
-  - `src/core/indicators/generate_specs.py` (4)
-  - `src/exchanges/nh/websocket_mixin.py` (1)
-  - `src/exchanges/kis/websocket_connection.py` (1)
-  - `src/exchanges/kis/generated/_protocols.py` (1)
-  - `src/exchanges/common/http_client.py` (1)
-  (나머지 합계는 tests/scripts 쪽이다.)
+## 실제 영향 파일
 
-## 제안 (파일별 분할)
+### 1. `scripts/consistency/contracts.py` (주요 수정)
+- `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST` 딕셔너리에 19개 OpenAPI 전용 백엔드 경로 추가
+- 19개 경로 모두 `check_openapi_frontend()`에서 allowlist 누락으로 오탐
+- 예: `/executions/{execution_id}/decision-trail`, `/risk-coach/position-size`, `/v1/accounts/summary` 등
 
-수정할 코드가 확인되지 않으므로 코드 분할은 불필요하다. 권고:
+### 2. `frontend/packages/api-client/src/apiRoutes.ts` (선택적 수정)
+- 16개 프론트엔드 전용 경로가 OpenAPI에 없음
+- 이 경로들이 실제 백엔드 라우터에 매핑되어 있다면 `contracts/openapi/v1.json`에 추가 필요
+- 아니면 프론트엔드 전용 경로이므로 allowlist에 추가 가능
 
-1. **task-23113 폐기(또는 noop done)** — 근거: 게이트 녹색(109/109), 원인 커밋 무관. 재발행 중단.
-2. 굳이 유지한다면 files를 아래로 한정:
-   - `type-ignore-budget.txt` (예산 값 확인/동기화만)
-   - 필요 시 위 5개 `src/` 파일 중 실제로 제거할 파일만 개별 지정(한 task당 1~2개).
-3. 간헐적 timeout이 실제 문제라면 별도 ops task로 `scripts/check_type_ignore_budget.py` 실행시간 계측(현재 약 2초)을 요청.
+### 3. `contracts/openapi/v1.json` (선택적 수정)
+- 16개 프론트엔드 전용 경로를 OpenAPI에 추가하거나, 프론트엔드 allowlist에 추가
 
-원본 hold 해제·재큐·코드 수정은 하지 않았다.
+## 분할안
+
+### 단일 파일 작업 권장 (추천)
+task-23246의 실제 변경 범위는 **`scripts/consistency/contracts.py` 1파일**의 allowlist 보강에 집중됨.
+16개 프론트엔드 경로는 백엔드 라우터에 존재하면 OpenAPI 추가, 존재하지 않으면 프론트엔드 allowlist 추가.
+모두 `contracts.py`의 `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에 추가하는 것으로 해결 가능.
+
+### 분할안 (필요시)
+| 작업 | 파일 | 설명 |
+|------|------|------|
+| A | `scripts/consistency/contracts.py` | 19개 OpenAPI 전용 경로 allowlist 추가 |
+| B | `scripts/consistency/contracts.py` | 16개 프론트엔드 전용 경로 allowlist 추가 |
+| C | `contracts/openapi/v1.json` | 프론트엔드 전용 경로가 실제 API라면 추가 (선택) |
+
+**A+B는 같은 파일이므로 단일 커밋 권장. C는 B와 독립적.**
+
+## 결론
+- **권장: 단일 파일 `scripts/consistency/contracts.py` 수정 1건**
+- allowlist 추가만 하면 35개→0개 해결 (기존 baseline 34는 유지)
+- 프론트엔드 경로 16개도 allowlist에 추가하면 해결
+- `src/` 전체 범위는 불필요하게 넓음 — 실제 변경은 contracts.py 1파일
