@@ -19,6 +19,8 @@ from src.services.safety.distrust_wiring import (
     check_and_persist_distrust,
     restore_distrust_state,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def _ticker(price: str) -> Ticker:
@@ -217,3 +219,143 @@ async def test_check_and_persist_propagates_db_write_failure():
             primary=_ticker("100"),
             candles=[],
         )
+
+
+# ---------------------------------------------------------------------------
+# DEEPEN-DEPTH R-48 깊이 하한 보강 D1->D3 (task-23226)
+# ---------------------------------------------------------------------------
+
+# 신설 예산: 로컬 실측(2026-11-11, best_of n=10 batch=8) cpu_ms≈0.0(Windows process_time
+# 15.6ms 양자화 미만). 양자화 1틱 근처인 15ms를 예산으로 두면 실측 대비 30배 이상 여유이고,
+# 가상 지연 10배(150ms) 주입 시 적색이 된다. 기존 단언·예산은 건드리지 않는다.
+_DISTRUST_CPU_BUDGET_MS = 15.0
+
+
+async def _best_cpu_ms(providers: list) -> float:
+    async def work() -> None:
+        await check_and_persist_distrust(
+            _FakePool(),
+            DataDistrustMonitor(),
+            providers,
+            exchange="bitget",
+            symbol="BTC/USDT",
+            primary=_ticker("100"),
+            candles=[],
+        )
+
+    return (await PerfBudget().best_of_async(work, n=10, batch=8)).cpu_ms
+
+
+@pytest.mark.perf
+async def test_check_and_persist_best_of_cpu_within_budget():
+    """성능 단언 — best-of-10 단일 check_and_persist CPU 시간이 신설 예산 미만."""
+    reset_virtual_totals()
+    cpu_ms = await _best_cpu_ms([_FakeProvider(_ticker("100.1")), _FakeProvider(None)])
+    assert cpu_ms < _DISTRUST_CPU_BUDGET_MS, f"cpu_ms={cpu_ms:.3f} >= {_DISTRUST_CPU_BUDGET_MS}"
+
+
+class _VirtualSlowProvider(_FakeProvider):
+    async def get_reference_ticker(self, symbol: str) -> Ticker | None:
+        virtual_delayed_sync(lambda: None, _DISTRUST_CPU_BUDGET_MS * 10 / 1000)()
+        return await super().get_reference_ticker(symbol)
+
+
+@pytest.mark.perf
+async def test_check_and_persist_cpu_budget_red_with_virtual_delay_10x():
+    """게이트 적색 재현 — 참조 소스에 가상 지연(예산 10배)을 주입하면 위 단언이 적색."""
+    reset_virtual_totals()
+    try:
+        cpu_ms = await _best_cpu_ms([_VirtualSlowProvider(_ticker("100.1"))])
+    finally:
+        reset_virtual_totals()
+    with pytest.raises(AssertionError):
+        assert cpu_ms < _DISTRUST_CPU_BUDGET_MS
+
+
+async def test_negative_no_providers_reports_single_source_degraded():
+    """negative — 참조 소스가 하나도 없으면 NORMAL이 아니라 단일 소스 강등."""
+    pool = _FakePool()
+    level = await check_and_persist_distrust(
+        pool,
+        DataDistrustMonitor(),
+        [],
+        exchange="bitget",
+        symbol="BTC/USDT",
+        primary=_ticker("100"),
+        candles=[],
+    )
+    assert level == DataDistrustLevel.DEGRADED_SINGLE_SOURCE
+    assert pool.conn.executed[0][1][3] == 1
+
+
+async def test_negative_large_deviation_is_not_normal():
+    """negative — 참조가 primary와 크게 어긋나면 NORMAL로 판정하지 않는다."""
+    pool = _FakePool()
+    level = await check_and_persist_distrust(
+        pool,
+        DataDistrustMonitor(),
+        [_FakeProvider(_ticker("150")), _FakeProvider(_ticker("150"))],
+        exchange="bitget",
+        symbol="BTC/USDT",
+        primary=_ticker("100"),
+        candles=[],
+    )
+    assert level != DataDistrustLevel.NORMAL
+    assert pool.conn.executed[0][1][2] == level.value
+
+
+async def test_negative_all_providers_none_still_upserts_exactly_once():
+    """negative — 참조가 전부 None이어도 UPSERT는 정확히 1회(중복/누락 없음)."""
+    pool = _FakePool()
+    await check_and_persist_distrust(
+        pool,
+        DataDistrustMonitor(),
+        [_FakeProvider(None)] * 3,
+        exchange="bitget",
+        symbol="BTC/USDT",
+        primary=_ticker("100"),
+        candles=[],
+    )
+    assert len(pool.conn.executed) == 1
+
+
+async def test_adversarial_concurrent_symbols_do_not_cross_contaminate_and_replay_is_stable():
+    """동시성+리플레이 — 같은 monitor를 공유해 서로 다른 심볼 20건을 동시에 돌려도
+    각 UPSERT는 자기 심볼만 담고, 같은 입력 재실행은 동일 인자를 낸다."""
+    import asyncio
+
+    monitor = DataDistrustMonitor()
+    pool = _FakePool()
+    symbols = [f"S{i}/USDT" for i in range(20)]
+
+    async def run(sym: str) -> DataDistrustLevel:
+        return await check_and_persist_distrust(
+            pool,
+            monitor,
+            [_FakeProvider(_ticker("100.1"))],
+            exchange="bitget",
+            symbol=sym,
+            primary=_ticker("100"),
+            candles=[],
+        )
+
+    levels = await asyncio.gather(*(run(s) for s in symbols))
+    assert set(levels) == {DataDistrustLevel.NORMAL}
+    persisted = sorted(args[1] for _q, args in pool.conn.executed)
+    assert persisted == sorted(symbols)
+    assert all(args[3] == 2 for _q, args in pool.conn.executed)
+
+    replay_pool = _FakePool()
+    replay_args = []
+    for _ in range(2):
+        await check_and_persist_distrust(
+            replay_pool,
+            DataDistrustMonitor(),
+            [_FakeProvider(_ticker("100.1"))],
+            exchange="bitget",
+            symbol="BTC/USDT",
+            primary=_ticker("100"),
+            candles=[],
+        )
+        replay_args.append(replay_pool.conn.executed[-1][1])
+    assert replay_args[0] == replay_args[1]
