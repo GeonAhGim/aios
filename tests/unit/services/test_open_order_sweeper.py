@@ -126,7 +126,7 @@ async def test_provider_scope_skips_terminal_orders_of_matching_exchange(pool):
     assert await _status_of(pool, filled) == "FILLED"
 
 
-async def test_provider_scope_fails_closed_when_adapter_cancel_raises(pool):
+async def test_provider_scope_fails_closed_when_adapter_cancel_raises(pool, monkeypatch):
     """failure injection — 어댑터 cancel 실패는 성공으로 위장되지 않는다."""
     user_id = await create_test_user(pool)
     order_id = await _seed_order(pool, user_id, exchange="bitget")
@@ -136,7 +136,7 @@ async def test_provider_scope_fails_closed_when_adapter_cancel_raises(pool):
         raise RuntimeError("injected cancel failure")
 
     for adapter in adapters.values():
-        adapter.cancel_order = _boom  # type: ignore[method-assign]
+        monkeypatch.setattr(adapter, "cancel_order", _boom)
 
     report = await sweep_open_orders(
         pool,
