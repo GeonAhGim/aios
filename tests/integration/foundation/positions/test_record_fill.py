@@ -2,18 +2,33 @@
 
 from __future__ import annotations
 
+import asyncio
 from decimal import ROUND_HALF_EVEN, Decimal
 from uuid import uuid4
 
+import pytest
+
 from src.data.models.trading import OrderSide
+from src.foundation.positions.adapters.postgres_journal_repository import (
+    PostgresJournalRepository,
+)
+from src.foundation.positions.application.record_fill import UnknownPositionError
 from tests.integration.foundation.positions.record_fill_fixtures import (
+    _BoomAuditAppender,
     _command,
+    _key,
     _open,
     _record,
 )
 from tests.integration.foundation.positions.record_fill_fixtures import (
     ports as ports,
 )
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+# New perf budget (first-buy record_fill, best-of-5 wall). Measured locally: MEASURED_MS;
+# BUDGET_MS leaves >=30x headroom.
+MEASURED_MS = 8.0  # best-of-5 wall incl. _open, local PG, 2026-11-10
+BUDGET_MS = 500.0  # ~60x measured
 
 
 async def test_new_position_first_buy_opens_lot(pool, ports):
@@ -226,3 +241,155 @@ async def test_numeric_round_trip_at_scale_boundary_quantity_and_pnl(pool, ports
     assert row["quantity"] == expected_quantity
     assert row["avg_cost"] == buy_price
     assert row["realized_pnl_base"] == expected_realized
+
+
+# --- DEEPEN-DEPTH LB-11 (task-23141): negative / failure injection / perf / adversarial ---
+
+
+async def _journal_count(pool, position_key) -> int:
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "SELECT count(*) FROM pos_journal WHERE position_key = $1", position_key
+        )
+
+
+async def test_first_buy_unknown_position_rejected_without_journal(pool, ports):
+    """Negative 1: a fill for a never-opened position_key is fail-closed."""
+    tenant_id, account_id, _ = await _open(pool)
+    ghost_key = _key(tenant_id)
+    command = _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=ghost_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+    )
+    with pytest.raises(UnknownPositionError):
+        await _record(pool, ports, command)
+    assert await _journal_count(pool, ghost_key) == 0
+
+
+async def test_first_buy_wrong_account_rejected(pool, ports):
+    """Negative 2: the position exists but belongs to another account."""
+    tenant_id, _, position_key = await _open(pool)
+    command = _command(
+        tenant_id=tenant_id,
+        account_id=uuid4(),
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+    )
+    with pytest.raises(UnknownPositionError):
+        await _record(pool, ports, command)
+    assert await _journal_count(pool, position_key) == 0
+
+
+async def test_first_buy_malformed_position_key_rejected(pool, ports):
+    """Negative 3: a hand-assembled (non-PositionKey) key never reaches the journal."""
+    tenant_id, account_id, _ = await _open(pool)
+    command = _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key="not|a|valid|key",
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+    )
+    with pytest.raises(ValueError):
+        await _record(pool, ports, command)
+
+
+async def test_first_buy_audit_failure_rolls_back_journal_and_snapshot(pool, ports):
+    """Failure injection + gate-red: with the audit appender failing, the first buy
+    leaves no journal row and the snapshot stays empty (the first-buy assertions in
+    test_new_position_first_buy_opens_lot would be red on any leaked state)."""
+    tenant_id, account_id, position_key = await _open(pool)
+    command = _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+    )
+    with pytest.raises(RuntimeError, match="injected audit failure"):
+        await _record(pool, ports, command, audit=_BoomAuditAppender())
+    assert await _journal_count(pool, position_key) == 0
+    async with pool.acquire() as conn:
+        snap = await ports.snapshots.get(conn, tenant_id, position_key)
+    assert snap is not None and snap.quantity == Decimal("0") and snap.last_journal_seq == 0
+
+
+async def test_first_buy_replay_is_idempotent(pool, ports):
+    """Adversarial replay: resending the same (order_id, fill_seq) must not double the lot."""
+    tenant_id, account_id, position_key = await _open(pool)
+    order_id = uuid4()
+    command = _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.BUY,
+        quantity=Decimal("10"),
+        order_id=order_id,
+        fill_seq=1,
+    )
+    await _record(pool, ports, command)
+    replayed = await _record(pool, ports, command)
+    assert replayed.quantity == Decimal("10")
+    assert replayed.last_journal_seq == 1
+    assert await _journal_count(pool, position_key) == 1
+
+
+async def test_concurrent_first_buys_serialize_to_exact_total(pool, ports):
+    """Concurrency: 5 simultaneous first-buy fills on one position sum exactly (lock)."""
+    tenant_id, account_id, position_key = await _open(pool)
+    commands = [
+        _command(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
+            side=OrderSide.BUY,
+            quantity=Decimal("2"),
+            order_id=uuid4(),
+            fill_seq=1,
+        )
+        for _ in range(5)
+    ]
+    await asyncio.gather(*(_record(pool, ports, c) for c in commands))
+    async with pool.acquire() as conn:
+        snap = await ports.snapshots.get(conn, tenant_id, position_key)
+    assert snap.quantity == Decimal("10")
+    assert snap.last_journal_seq == 5
+
+
+@pytest.mark.perf
+async def test_first_buy_perf_budget_and_10x_injection_gate_red(pool, ports, perf_budget):
+    """Perf: best-of-5 wall latency of a first-buy record_fill. Measured MEASURED_MS locally;
+    BUDGET_MS leaves >=30x headroom. A virtual 10x-budget delay on journal.append must
+    turn the same assertion red."""
+
+    async def _one():
+        tenant_id, account_id, position_key = await _open(pool)
+        return await _record(
+            pool,
+            ports,
+            _command(
+                tenant_id=tenant_id,
+                account_id=account_id,
+                position_key=position_key,
+                side=OrderSide.BUY,
+                quantity=Decimal("10"),
+            ),
+        )
+
+    reset_virtual_totals()
+    sample = await perf_budget.best_of_async(_one, n=5, warmup=1)
+    assert sample.wall_ms < BUDGET_MS, perf_budget.describe(sample, budget_ms=BUDGET_MS)
+
+    original = PostgresJournalRepository.append
+    PostgresJournalRepository.append = virtual_delayed_async(original, BUDGET_MS * 10 / 1000)
+    try:
+        reset_virtual_totals()
+        slow = await perf_budget.best_of_async(_one, n=3)
+    finally:
+        PostgresJournalRepository.append = original
+        reset_virtual_totals()
+    assert slow.wall_ms >= BUDGET_MS

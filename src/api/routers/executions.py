@@ -28,10 +28,12 @@ from fastapi import APIRouter, Depends, status
 
 from src.api.deps import get_auth_service, get_current_user, reauthenticate
 from src.api.execution_deps import (
+    get_decision_trail_service,
     get_execution_monitoring_service,
     get_execution_service,
     get_live_readiness_service,
 )
+from src.api.schemas.decision_trail import DecisionTrailResponse, to_decision_trail_response
 from src.api.schemas.execution import (
     ConvertToLiveRequest,
     ExecutionCardResponse,
@@ -48,6 +50,7 @@ from src.api.schemas.live_readiness import LiveReadinessResponse, to_live_readin
 from src.api.service_deps import get_credential_resolver
 from src.services.auth_service import AuthService, User
 from src.services.credential_resolver import CredentialResolver
+from src.services.decision_trail_service import DecisionTrailService
 from src.services.execution_monitoring_service import ExecutionMonitoringService
 from src.services.execution_service import ExecutionService
 from src.services.execution_types import ExecutionEndpointRetiredError
@@ -106,6 +109,16 @@ async def get_live_readiness(
     """모의 -> 실전 전환 근거(J8 LP-2). 본인의 PAPER 실행만.
     자료가 없는 항목은 null이고 사유는 unavailable에 있다."""
     return to_live_readiness_response(await service.for_execution(execution_id, user.user_id))
+
+
+@router.get("/{execution_id}/decision-trail")
+async def get_decision_trail(
+    execution_id: int,
+    user: User = Depends(get_current_user),
+    service: DecisionTrailService = Depends(get_decision_trail_service),
+) -> DecisionTrailResponse:
+    """전환·노출 확대 기록을 시간순으로 돌려준다(J8). 본인 실행만."""
+    return to_decision_trail_response(await service.get_trail(execution_id, user.user_id))
 
 
 @router.post("/{execution_id}/expand-exposure")
