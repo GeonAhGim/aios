@@ -110,6 +110,22 @@ def _summary(
     return {key: deepcopy(data.get(key)) for key in keys}
 
 
+def _risk_summary(
+    row: Mapping[str, Any], unavailable: dict[str, str],
+) -> dict[str, Any]:
+    """Preserve recorded risk summaries or derive them from reason codes."""
+    summary = _summary(row, _RISK_KEYS, unavailable)
+    # Derive summary string from reason_codes when not provided.
+    if summary.get("summary") is None:
+        codes = row.get("reason_codes")
+        if isinstance(codes, (list, tuple)) and len(codes) > 0:
+            summary["summary"] = ", ".join(str(c) for c in codes)
+        else:
+            summary["summary"] = ""
+        unavailable.pop("summary", None)
+    return summary
+
+
 def build_decision_trail(
     audit_rows: Sequence[Mapping[str, Any]],
     risk_rows: Sequence[Mapping[str, Any]],
@@ -149,15 +165,7 @@ def build_decision_trail(
         )
     for row in risk_rows:
         unavailable = {}
-        summary = _summary(row, _RISK_KEYS, unavailable)
-        # Derive summary string from reason_codes when not provided.
-        if summary.get("summary") is None:
-            codes = row.get("reason_codes")
-            if isinstance(codes, (list, tuple)) and len(codes) > 0:
-                summary["summary"] = ", ".join(str(c) for c in codes)
-            else:
-                summary["summary"] = ""
-            unavailable.pop("summary", None)
+        summary = _risk_summary(row, unavailable)
         entries.append(
             TrailEntry(
                 kind=TrailKind.RISK_DECISION,

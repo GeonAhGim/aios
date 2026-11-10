@@ -326,3 +326,28 @@ def test_5000_entries_within_query_budget(perf_budget):
     ]
     perf_budget.assert_within(lambda: build_decision_trail([], rows), budget_ms=200)
     assert len(build_decision_trail([], rows)) == 5000
+
+
+@pytest.mark.parametrize("codes", [None, [], (), "LIMIT", {"code": "LIMIT"}])
+def test_invalid_or_empty_reason_codes_do_not_invent_summary(codes):
+    row = {"evaluated_at": NOW, "reason_codes": codes}
+    entry = build_decision_trail([], [row])[0]
+    assert entry.summary["summary"] == ""
+    assert "summary" not in entry.unavailable
+    assert "summary" not in row
+
+
+@pytest.mark.parametrize("summary", ["recorded explanation", ""])
+def test_recorded_summary_is_not_overwritten(summary):
+    row = {"evaluated_at": NOW, "reason_codes": ["LIMIT"], "summary": summary}
+    entry = build_decision_trail([], [row])[0]
+    assert entry.summary["summary"] == summary
+    assert "summary" not in entry.unavailable
+
+
+def test_tuple_reason_codes_are_rendered_without_mutating_input():
+    row = {"evaluated_at": NOW, "reason_codes": ("LIMIT", 7)}
+    entry = build_decision_trail([], [row])[0]
+    assert entry.summary["summary"] == "LIMIT, 7"
+    assert row["reason_codes"] == ("LIMIT", 7)
+    assert "summary" not in row
