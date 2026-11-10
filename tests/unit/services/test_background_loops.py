@@ -22,6 +22,8 @@ import pytest
 
 from src.core.observability.loop_health import LoopHealth
 from src.services.background_loops import _run_instrumented, run_periodic_loop
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 pytestmark = pytest.mark.asyncio
 
@@ -157,6 +159,7 @@ async def _measure_p95_overhead(health: LoopHealth, *, iterations: int = 30) -> 
     return durations[int(len(durations) * 0.95)]
 
 
+@pytest.mark.perf
 async def test_run_instrumented_overhead_p95_within_budget() -> None:
     """수치 성능 단언 — no-op tick을 감싸는 계측 오버헤드(bind_system +
     record_tick) 자체의 p95가 예산 내인지 본다."""
@@ -187,3 +190,95 @@ async def test_run_instrumented_overhead_assertion_fails_when_health_is_slow() -
 
     with pytest.raises(AssertionError):
         assert p95 < _INSTRUMENTATION_OVERHEAD_BUDGET_S
+
+
+# ---------------------------------------------------------------------------
+# CM-11 깊이 하한 보강 (task-23134)
+# ---------------------------------------------------------------------------
+
+# 신설 예산: 로컬 실측(2026-11-10, best_of n=10 batch=8) cpu_ms≈0.0(Windows process_time
+# 15.6ms 양자화 하한 미만, 5회 모두 0.0). 양자화 1틱(15.6ms)에 근접한 15ms를 예산으로 두면
+# 실측 대비 30배 이상 여유이고, 가상 지연 10배(150ms) 주입 시 적색이 된다.
+_LOOP_CPU_BUDGET_MS = 15.0
+
+
+async def _noop() -> None:
+    return None
+
+
+async def _best_cpu_ms(health: LoopHealth) -> float:
+    async def work() -> None:
+        await _run_instrumented("perf", 1.0, _noop, health=health, on_error="boom")
+
+    return (await PerfBudget().best_of_async(work, n=10, batch=8)).cpu_ms
+
+
+@pytest.mark.perf
+async def test_run_instrumented_best_of_cpu_within_budget() -> None:
+    """성능 단언 — best-of-10 1회 계측 CPU 시간이 신설 예산 미만."""
+    reset_virtual_totals()
+    cpu_ms = await _best_cpu_ms(LoopHealth())
+    assert cpu_ms < _LOOP_CPU_BUDGET_MS, f"cpu_ms={cpu_ms:.3f} >= {_LOOP_CPU_BUDGET_MS}"
+
+
+@pytest.mark.perf
+async def test_run_instrumented_cpu_budget_red_with_virtual_delay_10x() -> None:
+    """게이트 적색 재현 — record_tick에 가상 지연(예산의 10배)을 주입하면 위 단언이 적색."""
+
+    class _VirtualSlow(LoopHealth):
+        def record_tick(
+            self, loop: str, ok: bool, duration_s: float, *, interval_sec: float | None = None
+        ) -> None:
+            virtual_delayed_sync(super().record_tick, _LOOP_CPU_BUDGET_MS * 10 / 1000)(
+                loop, ok, duration_s, interval_sec=interval_sec
+            )
+
+    reset_virtual_totals()
+    try:
+        cpu_ms = await _best_cpu_ms(_VirtualSlow())
+    finally:
+        reset_virtual_totals()
+    with pytest.raises(AssertionError):
+        assert cpu_ms < _LOOP_CPU_BUDGET_MS
+
+
+async def test_negative_failed_tick_keeps_last_success_at() -> None:
+    """negative — 성공 뒤 실패 tick이 마지막 성공 시각을 지우지 않는다."""
+    health = LoopHealth()
+    await _run_instrumented("probe", 1.0, _noop, health=health, on_error="boom")
+    first = health.snapshot()["probe"].last_success_at
+    assert first is not None
+
+    async def bad() -> None:
+        raise RuntimeError("tick failure")
+
+    await _run_instrumented("probe", 1.0, bad, health=health, on_error="boom")
+    snap = health.snapshot()["probe"]
+    assert snap.last_success_at == first
+    assert snap.consecutive_failures == 1
+
+
+async def test_negative_success_tick_logs_no_error(caplog: pytest.LogCaptureFixture) -> None:
+    """negative — 성공 tick 경로에서는 on_error 문구가 ERROR 로그로 남지 않는다."""
+    with caplog.at_level(logging.ERROR):
+        await _run_instrumented("probe", 1.0, _noop, health=LoopHealth(), on_error="SENTINEL_ERR")
+    assert "SENTINEL_ERR" not in caplog.text
+
+
+async def test_negative_failed_tick_logs_on_error_and_survives(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """negative/failure-injection — 실패 tick은 예외를 삼키고 on_error를 로그하며,
+    다음 성공 tick에서 consecutive_failures가 0으로 복구된다."""
+    health = LoopHealth()
+
+    async def bad() -> None:
+        raise ValueError("injected")
+
+    with caplog.at_level(logging.ERROR):
+        await _run_instrumented("probe", 1.0, bad, health=health, on_error="SENTINEL_ERR")
+    assert "SENTINEL_ERR" in caplog.text
+    assert health.snapshot()["probe"].consecutive_failures == 1
+
+    await _run_instrumented("probe", 1.0, _noop, health=health, on_error="boom")
+    assert health.snapshot()["probe"].consecutive_failures == 0
