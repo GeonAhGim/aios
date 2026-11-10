@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -183,6 +183,65 @@ async def test_legacy_service_response_unchanged():
     assert response.outcome == "DENY"
     assert response.reason_codes == ["LIMIT"]
     assert response.rule_version == "v1"
+
+
+def test_empty_entries_produces_empty_response():
+    response = to_decision_trail_response([])
+    assert response.entries == []
+
+
+def test_conversion_entry_maps_safe_defaults_for_risk_fields():
+    """CONVERSION/EXPANSION entries lack risk fields — mapper must not raise."""
+    entry = TrailEntry(
+        kind=TrailKind.CONVERSION,
+        occurred_at=NOW,
+        actor="human",
+        summary={"strategy_id": 1},
+        evidence=None,
+    )
+    response = to_decision_trail_response([entry]).entries[0]
+    assert response.kind == "CONVERSION"
+    assert response.decision_id == UUID(int=0)
+    assert response.outcome == ""
+    assert response.reason_codes == []
+    assert response.rule_version == ""
+    assert response.evaluated_at == ""
+    assert response.expires_at is None
+    assert response.trace_id is None
+    assert response.summary == ""
+
+
+def test_mixed_conversion_and_risk_entries():
+    """Mixed trail: conversion first, risk decision second — all map cleanly."""
+    conversion = TrailEntry(
+        kind=TrailKind.CONVERSION,
+        occurred_at=NOW - timedelta(seconds=1),
+        actor="agent",
+        summary={"target_capital": Decimal("1000")},
+        evidence=None,
+    )
+    risk = TrailEntry(
+        kind=TrailKind.RISK_DECISION,
+        occurred_at=NOW,
+        actor=None,
+        summary={
+            "decision_id": uuid4(),
+            "outcome": "PASS",
+            "reason_codes": ["SINGLE"],
+            "rule_version": "v2",
+            "evaluated_at": NOW,
+            "expires_at": NOW + timedelta(seconds=30),
+            "trace_id": uuid4(),
+            "summary": "all clear",
+        },
+        evidence=None,
+    )
+    response = to_decision_trail_response([conversion, risk]).entries
+    assert len(response) == 2
+    assert response[0].kind == "CONVERSION"
+    assert response[1].kind == "RISK_DECISION"
+    assert response[1].outcome == "PASS"
+    assert response[1].trace_id is not None
 
 
 @pytest.mark.perf
