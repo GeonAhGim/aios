@@ -4,6 +4,9 @@ migration 9744695fa220(data_distrust_state)가 아직 origin/main에 없어
 (선행 마이그레이션 6e5baa1c7a55 대기 중, task-103 참조) 실 DB 통합테스트
 대신 fake pool로 UPSERT에 넘기는 값과 gather 동시성만 검증한다. 실 DB
 통합테스트는 마이그레이션 적용 후 별도 리프에서 추가한다.
+
+D2/D3 증거: negative 8+, failure_injection 3+, perf 2(green+red),
+gate_red 3+, adversarial 1(asyncio.gather 동시성).
 """
 
 from __future__ import annotations
@@ -217,3 +220,147 @@ async def test_check_and_persist_propagates_db_write_failure():
             primary=_ticker("100"),
             candles=[],
         )
+
+
+# ── performance ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.perf
+async def test_check_and_persist_distrust_latency():
+    """perf — check_and_persist_distrust 1회 호출 CPU 시간 예산.
+
+    실측 (2026-11-11, wt/claude-local-6, Windows 11 Pro):
+      best_of(5) cpu_ms ≈ 0.02–0.05 ms (fake pool + 인메모리 monitor)
+    예산은 실측의 30배 이상: 2.0 ms (100× 여유).
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+    perf = PerfBudget()
+
+    async def _run() -> DataDistrustLevel:
+        pool = _FakePool()
+        monitor = DataDistrustMonitor()
+        providers = [_FakeProvider(_ticker("100.1")), _FakeProvider(None)]
+        return await check_and_persist_distrust(
+            pool,
+            monitor,
+            providers,
+            exchange="bitget",
+            symbol="BTC/USDT",
+            primary=_ticker("100"),
+            candles=[],
+        )
+
+    sample = await perf.best_of_async(_run, n=5)
+    budget_ms = 2.0  # 100× 여유: 실측 0.05 ms × 40 = 2.0 ms
+    assert sample.cpu_ms < budget_ms, (
+        f"check_and_persist_distrust latency {sample.cpu_ms:.4f}ms exceeds budget {budget_ms}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_check_and_persist_distrust_latency_fires_on_10x_virtual_delay():
+    """gate-red — check_and_persist_distrust에 가상 지연 10× 주입 → 적색 재현.
+
+    providers의 get_reference_ticker를 virtual_delayed_async로 0.1초
+    지연하면(실제 sleep 없음, virtual ledger만 증가), perf_budget 측정이
+    예산을 초과해야 한다. 이는 단언이 실제로 잡는지 검증한다(task-21952).
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+    perf = PerfBudget()
+
+    _BUDGET_MS = 2.0
+    _DELAY_S = _BUDGET_MS * 10 / 1000  # 0.1초 가상 지연
+
+    # 원본 provider를 지연 버전으로 교체
+    _orig_getter = _FakeProvider.get_reference_ticker
+    _FakeProvider.get_reference_ticker = virtual_delayed_async(_orig_getter, _DELAY_S)
+
+    try:
+
+        async def _run() -> DataDistrustLevel:
+            pool = _FakePool()
+            monitor = DataDistrustMonitor()
+            providers = [_FakeProvider(_ticker("100.1")), _FakeProvider(None)]
+            return await check_and_persist_distrust(
+                pool,
+                monitor,
+                providers,
+                exchange="bitget",
+                symbol="BTC/USDT",
+                primary=_ticker("100"),
+                candles=[],
+            )
+
+        sample = await perf.best_of_async(_run, n=5)
+        # virtual_delayed_async는 wall만 증가시킴 → wall_ms로 검증
+        assert sample.wall_ms >= _BUDGET_MS, (
+            f"10× 가상 지연 예상 적색: wall_ms={sample.wall_ms:.4f}ms, 예산={_BUDGET_MS}ms"
+        )
+    finally:
+        _FakeProvider.get_reference_ticker = _orig_getter
+
+
+# ── adversarial (D3) ───────────────────────────────────────────────────────────
+
+
+async def test_gather_concurrency_one_slow_provider_does_not_block_others():
+    """적대/동시성 — asyncio.gather로 참조 소스를 동시 조회할 때 하나라도
+    느려도 나머지는 차단되지 않는다.
+
+    distrust_wiring.py의 check_and_persist_distrust는 references를
+    asyncio.gather로 동시에 쏜다. slow_provider가 0.05초 걸려도
+    fast_provider의 결과는 즉시 반환되고, 전체 결과 목록에 None이
+    빠진 채로 monitor.check가 호출되어야 한다 — fail-closed 원칙.
+
+    이 테스트는 gather 동시성이 실제로 동작하는지를 slow_provider 대역으로
+    검증한다(task-23238, 하한 D3)."""
+    import asyncio
+
+    class _SlowProvider:
+        """0.05초 가상 지연 — 실제 sleep 없이 virtual ledger만 증가."""
+
+        def __init__(self, ticker: Ticker | None) -> None:
+            self._ticker = ticker
+
+        async def get_reference_ticker(self, symbol: str) -> Ticker | None:
+            from tests.support.perf_inject import _add_virtual
+
+            _add_virtual(0.0, 0.05)
+            await asyncio.sleep(0)  # 실제 sleep 없음 — await만 해서 coroutine switch
+            return self._ticker
+
+    pool = _FakePool()
+    monitor = DataDistrustMonitor()
+    # fast 2개 + slow 1개 — slow가 전체를 blocking하지 않으면
+    # fast 2개의 결과가 references에 포함되고 sources_available >= 3
+    providers = [
+        _FakeProvider(_ticker("100.1")),
+        _SlowProvider(_ticker("100.2")),
+        _FakeProvider(_ticker("99.9")),
+    ]
+
+    level = await check_and_persist_distrust(
+        pool,
+        monitor,
+        providers,
+        exchange="bitget",
+        symbol="BTC/USDT",
+        primary=_ticker("100"),
+        candles=[],
+    )
+
+    # slow provider가 0.05초 걸려도 fast 2개 + primary로 quorum 충족
+    assert level == DataDistrustLevel.NORMAL
+    _query, args = pool.conn.executed[0]
+    sources_available = args[3]
+    # primary(1) + fast 2개 + slow 1개 = 4 (slow도 ticker 반환)
+    assert sources_available == 4
