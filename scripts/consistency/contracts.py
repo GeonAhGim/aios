@@ -257,6 +257,10 @@ _OPENAPI_NO_FRONTEND_UI_ALLOWLIST: dict[str, str] = {
     "/executions/{execution_id}/convert-to-live": (
         "폐기된 경로(deprecated, 410) -- 프런트 소비자 없음; /live-conversion으로 대체"
     ),
+    # e8fefe509: 백엔드 경계(GET)만 먼저 열렸고 화면은 후속 리프(frontend whitelist와 같은 사유).
+    "/executions/{execution_id}/decision-trail": (
+        "실행 의사결정 이력(decision-trail) 화면이 없다(백엔드 경로만 추가)"
+    ),
     "/livez": "src/api/routers/health.py:79 -- k8s liveness 프로브, 앱 API 표면 아님",
     "/metrics": "src/api/routers/metrics.py:36 -- 모니터링 전용 엔드포인트, 앱 API 표면 아님",
     "/readyz": "src/api/routers/health.py:85 -- k8s readiness 프로브, 앱 API 표면 아님",
