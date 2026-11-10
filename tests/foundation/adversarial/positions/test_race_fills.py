@@ -41,6 +41,7 @@ from src.foundation.positions.adapters.postgres_journal_repository import (
 from src.foundation.positions.adapters.postgres_snapshot_repository import (
     PostgresSnapshotRepository,
 )
+from src.foundation.positions.application import record_fill as record_fill_module
 from src.foundation.positions.application.record_fill import UnknownPositionError, record_fill
 from src.foundation.positions.contracts.v1 import RecordFillCommand
 from src.foundation.positions.domain.cost_basis.fifo import NegativeQuantityError
@@ -49,6 +50,7 @@ from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_inject import virtual_delayed_async, virtual_delayed_sync
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 _CONCURRENT_FILLS = 20
@@ -129,8 +131,12 @@ async def _fill_once(
 # ---------------------------------------------------------------------------
 
 
-async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
-    """LB-18 negative: f-string/concat로 만든 position_key -> InvalidPositionKeyError."""
+async def test_malformed_position_key_rejected(pool: asyncpg.Pool, perf_budget: PerfBudget) -> None:
+    """LB-18 negative: f-string/concat로 만든 position_key -> InvalidPositionKeyError.
+
+    성능 단언: 거부 경로 CPU < 50ms(best_of_async 최소값). 500ms 가상 CPU 지연
+    (PositionKey.parse)을 주입하면 같은 측정이 예산을 초과해야 한다(gate-red).
+    """
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     # 의도적으로 broken key - PositionKey.parse()가 reject해야 함
@@ -151,17 +157,34 @@ async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)
     audit = PostgresAuditEventRepository(pool)
-    with pytest.raises(ValueError):
-        async with pool.acquire() as conn, conn.transaction():
-            await record_fill(
-                conn,
-                command,
-                asset_class=AssetClass.CRYPTO,
-                journal=journal,
-                snapshots=snapshots,
-                audit=audit,
-                clock=_clock,
-            )
+
+    async def _reject_once() -> bool:
+        try:
+            async with pool.acquire() as conn, conn.transaction():
+                await record_fill(
+                    conn,
+                    command,
+                    asset_class=AssetClass.CRYPTO,
+                    journal=journal,
+                    snapshots=snapshots,
+                    audit=audit,
+                    clock=_clock,
+                )
+        except ValueError:
+            return True
+        return False
+
+    budget_ms = 50.0
+    green = await perf_budget.best_of_async(_reject_once, n=5, warmup=1)
+    assert green.result is True
+    assert green.cpu_ms < budget_ms, perf_budget.describe(green, budget_ms=budget_ms)
+
+    with patch.object(
+        record_fill_module.PositionKey, "parse", virtual_delayed_sync(PositionKey.parse, 0.5)
+    ):
+        red = await perf_budget.best_of_async(_reject_once, n=3, warmup=0)
+    assert red.result is True
+    assert red.cpu_ms >= budget_ms, perf_budget.describe(red, budget_ms=budget_ms)
 
 
 async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
@@ -243,8 +266,12 @@ async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
         await _delete_pos_snapshot(pool, position_key=position_key)
 
 
-async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
-    """LB-18 negative: 현재 포지션 수량보다 큰 Sell -> NegativeQuantityError."""
+async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool, perf_budget: PerfBudget) -> None:
+    """LB-18 negative: 현재 포지션 수량보다 큰 Sell -> NegativeQuantityError.
+
+    성능 단언: 거부 경로 wall < 250ms(best_of_async 최소값). snapshots.get에 500ms
+    가상 대기 지연을 주입하면 같은 측정이 예산을 초과해야 한다(gate-red).
+    """
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key(tenant_id)
@@ -297,17 +324,32 @@ async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
         journal = PostgresJournalRepository(pool)
         snapshots = PostgresSnapshotRepository(pool)
         audit = PostgresAuditEventRepository(pool)
-        with pytest.raises(NegativeQuantityError):
-            async with pool.acquire() as conn, conn.transaction():
-                await record_fill(
-                    conn,
-                    command,
-                    asset_class=AssetClass.CRYPTO,
-                    journal=journal,
-                    snapshots=snapshots,
-                    audit=audit,
-                    clock=_clock,
-                )
+
+        async def _reject_once() -> bool:
+            try:
+                async with pool.acquire() as conn, conn.transaction():
+                    await record_fill(
+                        conn,
+                        command,
+                        asset_class=AssetClass.CRYPTO,
+                        journal=journal,
+                        snapshots=snapshots,
+                        audit=audit,
+                        clock=_clock,
+                    )
+            except NegativeQuantityError:
+                return True
+            return False
+
+        wall_budget_ms = 250.0
+        green = await perf_budget.best_of_async(_reject_once, n=5, warmup=1)
+        assert green.result is True
+        assert green.wall_ms < wall_budget_ms, perf_budget.describe(green, budget_ms=wall_budget_ms)
+
+        with patch.object(snapshots, "get", virtual_delayed_async(snapshots.get, 0.5)):
+            red = await perf_budget.best_of_async(_reject_once, n=3, warmup=0)
+        assert red.result is True
+        assert red.wall_ms >= wall_budget_ms, perf_budget.describe(red, budget_ms=wall_budget_ms)
     finally:
         await _delete_pos_snapshot(pool, position_key=position_key)
 
