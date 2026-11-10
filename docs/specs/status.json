@@ -1,5 +1,5 @@
 {
- "refreshed_at": "2026-11-10T03:03:01+00:00",
+ "refreshed_at": "2026-11-10T18:32:53+00:00",
  "specs": [
   {
    "below_floor": 7,
@@ -84,7 +84,7 @@
    }
   },
   {
-   "below_floor": 1,
+   "below_floor": 0,
    "file": "L4_execution_ownership_and_safety_gate_wiring_v1.0.md",
    "spec": "execution_ownership_and_safety_gate_wiring",
    "total": 6,
@@ -92,10 +92,9 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 0,
-   "reopened": 0,
+   "reopened": 1,
    "depth": {
-    "D1": 1,
-    "D3": 5
+    "D3": 6
    }
   },
   {
@@ -114,7 +113,7 @@
    }
   },
   {
-   "below_floor": 6,
+   "below_floor": 5,
    "file": "L4_market_data_positions_ledger_v1.0.md",
    "spec": "market_data_positions_ledger",
    "total": 63,
@@ -124,9 +123,9 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D1": 4,
+    "D1": 3,
     "D2": 1,
-    "D3": 56,
+    "D3": 57,
     "D?": 2
    }
   },
@@ -143,7 +142,7 @@
    "depth": {}
   },
   {
-   "below_floor": 13,
+   "below_floor": 12,
    "file": "L4_platform_observability_tenancy_api_v1.0.md",
    "spec": "platform_observability_tenancy_api",
    "total": 42,
@@ -153,9 +152,9 @@
    "hold": 0,
    "reopened": 0,
    "depth": {
-    "D1": 10,
+    "D1": 9,
     "D2": 8,
-    "D3": 21,
+    "D3": 22,
     "D?": 3
    }
   },
@@ -192,7 +191,7 @@
    }
   },
   {
-   "below_floor": 5,
+   "below_floor": 4,
    "file": "L4_risk_and_safety_v1.0.md",
    "spec": "risk_and_safety",
    "total": 58,
@@ -200,10 +199,10 @@
    "inflight": 0,
    "untouched": 0,
    "hold": 5,
-   "reopened": 0,
+   "reopened": 3,
    "depth": {
-    "D1": 5,
-    "D3": 48
+    "D1": 4,
+    "D3": 49
    }
   },
   {
