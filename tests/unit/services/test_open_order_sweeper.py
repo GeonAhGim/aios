@@ -276,3 +276,191 @@ async def test_sweep_open_orders_goes_red_under_10x_virtual_delay(pool, perf_bud
             f"budget={_SWEEP_PERF_BUDGET_MS:.1f}ms"
         )
     reset_virtual_totals()
+
+
+# -- negative tests for GLOBAL scope -----------------------------------------
+
+
+async def test_global_scope_skips_terminal_status_orders(pool):
+    """negative test — GLOBAL scope가 종결 상태(FILLED/CANCELLED/REJECTED)
+    주문을 CANCEL_REQUESTED로 바꾸지 않고 skipped에 넣는다.
+
+    GLOBAL 스코프는 condition=TRUE라 모든 주문을 후보에 올리지만,
+    _transition_to_cancel_requested가 FOR UPDATE SKIP LOCKED에서
+    status 조건을 재검사하므로 종결 주문은 transition되지 않고 skipped에
+    기록된다.
+    """
+    user_id = await create_test_user(pool)
+    filled = await _seed_order(pool, user_id, status="FILLED")
+    submitted = await _seed_order(pool, user_id, status="SUBMITTED")
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.GLOBAL,
+        scope_ref="",
+    )
+
+    assert submitted in report.cancel_requested
+    assert filled in report.skipped
+    assert await _status_of(pool, filled) == "FILLED"
+    assert await _status_of(pool, submitted) == "CANCEL_REQUESTED"
+
+
+async def test_global_scope_isolates_adapter_failure(pool):
+    """negative test — 한 어댑터가 실패해도 다른 어댑터의 주문은 취소된다.
+
+    _adapters("bitget", "binance")에서 bitget 어댑터만 실패하도록
+    monkeypatch하고, binance 주문은 정상 취소되는지 확인한다.
+    """
+    user_id = await create_test_user(pool)
+    bitget_order = await _seed_order(pool, user_id, exchange="bitget")
+    binance_order = await _seed_order(pool, user_id, exchange="binance")
+
+    adapters = _adapters("bitget", "binance")
+
+    async def fail_cancel(_order_id: str) -> bool:
+        raise RuntimeError("simulated adapter failure")
+
+    adapters["bitget"].cancel_order = fail_cancel
+
+    report = await sweep_open_orders(
+        pool,
+        adapters,
+        control_id=uuid4(),
+        scope=SafetyScope.GLOBAL,
+        scope_ref="",
+    )
+
+    assert bitget_order in report.adapter_failed
+    assert binance_order in report.cancel_requested
+    assert await _status_of(pool, binance_order) == "CANCEL_REQUESTED"
+
+
+async def test_global_scope_accepts_empty_scope_ref(pool):
+    """negative test — GLOBAL scope는 scope_ref가 빈 문자열이어도 유효하다.
+
+    _condition_for(GLOBAL, "")는 "TRUE", []를 반환한다. 빈 문자열이
+    MalformedScopeRefError를 일으키지 않는지 확인한다.
+    """
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+
+    # 빈 문자열 scope_ref — GLOBAL은 조건이 TRUE라 scope_ref 검증 skip
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.GLOBAL,
+        scope_ref="",
+    )
+
+    assert order_id in report.cancel_requested
+    assert report.scope_ref == ""
+
+
+# -- gate-red reproduction (non-perf) ----------------------------------------
+
+
+async def test_global_scope_gate_red_assertion_fails_when_order_b_missing(pool):
+    """게이트 적색 재현 — 기존 test_global_scope_requests_cancel_across_tenants의
+    첫 번째 단언 `set(report.cancel_requested) >= {order_a, order_b}`이
+    실제로 AssertionError를 내는지 확인한다.
+
+    order_b를 FILLED 상태로 만들어 sweep 결과에서 제거한 후,
+    동일한 단언을 실행하면 적색이 된다.
+    """
+    user_a = await create_test_user(pool)
+    user_b = await create_test_user(pool)
+    order_a = await _seed_order(pool, user_a, exchange="bitget")
+    # order_b는 FILLED 상태로 생성 → sweep에서 제외됨
+    order_b = await _seed_order(pool, user_b, exchange="binance", status="FILLED")
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget", "binance"),
+        control_id=uuid4(),
+        scope=SafetyScope.GLOBAL,
+        scope_ref="",
+    )
+
+    # 기존 단언과 동일 — order_b가 cancel_requested에 없으므로 실패
+    with pytest.raises(AssertionError):
+        assert set(report.cancel_requested) >= {order_a, order_b}, (
+            f"gate-red failed: expected {{order_a, order_b}} in "
+            f"cancel_requested but got {report.cancel_requested}"
+        )
+
+
+# -- GLOBAL scope performance assertion --------------------------------------
+
+# Local measurement (Windows host, 2026-11-11, wt/claude-local-5):
+# sweep_open_orders(GLOBAL scope, 1 order) averages ~12 ms CPU
+# (best_of 5, batch=1, single order in DB). Budget set at 30× that = 360 ms.
+# GLOBAL scope reads all cancelable orders in the shared test DB so
+# wall-clock can vary; cpu_ms is the stable metric.
+_GLOBAL_SWEEP_PERF_BUDGET_MS = 360.0
+
+
+@pytest.mark.perf
+async def test_global_scope_sweep_perf_within_budget(pool, perf_budget):
+    """D2 performance assertion — GLOBAL scope sweep within 360 ms CPU budget.
+
+    Measured best_of-5 on this host: ~12 ms CPU (1 order). Budget = 30× real measurement.
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
+    user_id = await create_test_user(pool)
+    await _seed_order(pool, user_id)
+
+    sample = await perf_budget.sample_async(
+        lambda: sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.GLOBAL,
+            scope_ref="",
+        ),
+    )
+    assert sample.cpu_ms < _GLOBAL_SWEEP_PERF_BUDGET_MS, (
+        f"sweep perf exceeded budget: cpu={sample.cpu_ms:.1f}ms "
+        f"wall={sample.wall_ms:.1f}ms budget={_GLOBAL_SWEEP_PERF_BUDGET_MS:.1f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_global_scope_goes_red_under_10x_virtual_delay(pool, perf_budget):
+    """D2 gate-red reproduction — GLOBAL scope sweep with 10× virtual delay
+    must push wall_ms over the budget limit.
+
+    virtual_delayed_async adds wall delay only (no CPU), so cpu_ms stays
+    under budget but wall_ms exceeds it — same pattern as the TENANT test.
+    """
+    from tests.support.perf_inject import (
+        reset_virtual_totals,
+        virtual_delayed_async,
+    )
+
+    reset_virtual_totals()
+    user_id = await create_test_user(pool)
+    await _seed_order(pool, user_id)
+
+    async def sweep():
+        return await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.GLOBAL,
+            scope_ref="",
+        )
+
+    slow = virtual_delayed_async(sweep, _GLOBAL_SWEEP_PERF_BUDGET_MS * 10 / 1000)
+    sample = await perf_budget.sample_async(slow)
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < _GLOBAL_SWEEP_PERF_BUDGET_MS, (
+            f"gate-red failed: wall={sample.wall_ms:.1f}ms should exceed "
+            f"budget={_GLOBAL_SWEEP_PERF_BUDGET_MS:.1f}ms"
+        )
+    reset_virtual_totals()
