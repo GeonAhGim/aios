@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from src.api.schemas.decision_trail import to_decision_trail_response
 from src.services.decision_trail import TrailEntry, TrailKind, build_decision_trail
 from src.services.decision_trail_service import DecisionTrailService
+from src.services.execution_types import ExecutionControlError
 
 NOW = datetime(2026, 11, 10, tzinfo=UTC)
 
@@ -111,23 +111,43 @@ def test_no_input_or_default_aliasing():
 
 
 @pytest.mark.asyncio
-async def test_legacy_service_response_unchanged():
+async def test_service_composes_owner_checked_trail():
     row = dict(decision_id=uuid4(), gate_kind="PRE_TRADE", outcome="DENY",
                reason_codes=["LIMIT"], rule_version="v1", evaluated_at=NOW,
                expires_at=NOW + timedelta(seconds=10), trace_id=uuid4(), summary="limit")
 
-    class Pool:
-        async def fetch(self, sql, execution_id):
-            assert "risk_decision" in sql
-            assert execution_id == 7
-            return [row]
+    owner = uuid4()
 
-    entries = await DecisionTrailService(Pool()).get_trail(7)
-    response = to_decision_trail_response(entries).entries[0]
-    assert response.decision_id == row["decision_id"]
-    assert response.kind == "PRE_TRADE"
-    assert response.summary == "limit"
-    assert response.reason_codes == ["LIMIT"]
+    class Conn:
+        async def fetchrow(self, sql, execution_id):
+            assert execution_id == 7
+            return {"user_id": owner, "mode": "LIVE"}
+
+        async def fetch(self, sql, *args):
+            if "risk_decision" in sql:
+                assert args[0] == "7"
+                return [row]
+            return []
+
+    class Acquire:
+        async def __aenter__(self):
+            return Conn()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class Pool:
+        def acquire(self):
+            return Acquire()
+
+    entries = await DecisionTrailService(Pool()).get_trail(7, owner)
+    with pytest.raises(ExecutionControlError):
+        await DecisionTrailService(Pool()).get_trail(7, uuid4())
+    assert len(entries) == 1
+    assert entries[0].kind is TrailKind.RISK_DECISION
+    assert entries[0].summary["decision_id"] == row["decision_id"]
+    assert entries[0].summary["gate_kind"] == "PRE_TRADE"
+    assert entries[0].summary["reason_codes"] == ["LIMIT"]
 
 
 @pytest.mark.perf
