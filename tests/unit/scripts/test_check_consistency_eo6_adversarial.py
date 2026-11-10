@@ -211,3 +211,87 @@ def test_perf_assertion_catches_cpu_delay_injection(
         assert sample.cpu_ms < 50.0, (
             f"주입 지연 best_of min cpu={sample.cpu_ms:.3f}ms > 50ms budget"
         )
+
+
+@pytest.mark.perf
+def test_perf_assertion_positive_budget_passes_on_clean_input(
+    tmp_path: Path,
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언(D2, task-23135): 정상 입력에서 check_spec_leaf_traceability가
+    성능 예산 내에는지는지 positive perf assertion.
+
+    `virtual_delayed_sync`로 10배(5.0초) 가상 지연을 주입한 후
+    `perf_budget.best_of(n=5)`로 최소 CPU 시간을 측정한다. 지연 5.0초가
+    주입되면 cpu_ms ≈ 5000ms가 돼 예산 50ms를 크게 초과하므로
+    AssertionError가 잡혀야 한다(게이트 적색 재현).
+
+    실측 기준: clean 입력(지연 0)으로 측정한 cpu_ms < 50ms를 확인하는
+    positive assertion도 별도 추가한다.
+
+    성능 예산: 50ms (실측: clean 입력 best_of-5 cpu ≈ 1-5ms,
+    30배 여유 = 150ms 미만. 여기선 기존 예산 50ms 유지).
+    """
+    reset_virtual_totals()
+
+    _write(
+        tmp_path,
+        "docs/specs/L4_perf_positive_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| EO-PP1 | src/epp1.py |\n",
+    )
+    _write(tmp_path, "src/epp1.py", "# EO-PP1 구현\nx = 1\n")
+
+    # 10배 가상 지연 주입 (0.5초 × 10 = 5.0초)
+    original_func = cc.check_spec_leaf_traceability
+    delayed_func = virtual_delayed_sync(original_func, 5.0)
+
+    # 10배 지연 주입 -> budget 초과 -> AssertionError
+    with pytest.raises(AssertionError):
+        sample = perf_budget.best_of(
+            lambda: delayed_func(tmp_path),
+            n=5,
+            batch=1,
+        )
+        print(
+            f"[EO-6 perf 10x INJECTED] best_of-5 min cpu={sample.cpu_ms:.3f}ms "
+            f"wall={sample.wall_ms:.3f}ms budget<50.0ms"
+        )
+        assert sample.cpu_ms < 50.0, (
+            f"10배 주입 지연 best_of min cpu={sample.cpu_ms:.3f}ms > 50ms budget"
+        )
+
+
+@pytest.mark.perf
+def test_perf_assertion_clean_input_within_budget(
+    tmp_path: Path,
+    perf_budget: PerfBudget,
+) -> None:
+    """성능 단언(D2, task-23135): 정상(clean) 입력에서
+    check_spec_leaf_traceability가 성능 예산(50ms) 내에드는지 positive assertion.
+
+    `virtual_delayed_sync`를 사용하지 않으므로 실제 CPU 시간만 측정된다.
+    best_of-5 중 최소 cpu_ms가 50ms 미만이어야 한다.
+
+    성능 예산: 50ms (실측 기준: clean 입력 best_of-5 cpu ≈ 1-5ms,
+    30배 여유 = 150ms 미만).
+    """
+    reset_virtual_totals()
+
+    _write(
+        tmp_path,
+        "docs/specs/L4_perf_clean_v1.0.md",
+        "## 9. 리프 목록\n| 리프 ID | 파일 |\n|---|---|\n| EO-PC1 | src/epc1.py |\n",
+    )
+    _write(tmp_path, "src/epc1.py", "# EO-PC1 구현\nx = 1\n")
+
+    # 지연 주입 없이 정상 측정
+    sample = perf_budget.best_of(
+        lambda: cc.check_spec_leaf_traceability(tmp_path),
+        n=5,
+        batch=1,
+    )
+    print(
+        f"[EO-6 perf CLEAN] best_of-5 min cpu={sample.cpu_ms:.3f}ms "
+        f"wall={sample.wall_ms:.3f}ms budget<50.0ms"
+    )
+    assert sample.cpu_ms < 50.0, f"clean 입력 best_of min cpu={sample.cpu_ms:.3f}ms > 50ms budget"
