@@ -151,6 +151,8 @@ const UNREGISTERED_ROUTE_WHITELIST: Readonly<Record<string, string>> = {
   // 여기 있던 항목을 제거한다(실제 화면 배선은 FE-OPS-10b 소관, §E는 등록 여부만 본다).
   // J8 LP-3(2026-11-07): convert-to-live는 폐기(deprecated, 410)됐다 -- 프런트는 live-conversion만 쓴다.
   "/executions/{execution_id}/convert-to-live": "폐기된 경로(deprecated, 410) -- 프런트 소비자 없음; /live-conversion으로 대체",
+  // e8fefe509: GET /executions/{id}/decision-trail이 기준선에 추가됐다 -- 백엔드 경계만 먼저 열렸고 화면은 후속 리프.
+  "/executions/{execution_id}/decision-trail": "실행 의사결정 이력(decision-trail) 화면이 없다(백엔드 경로만 추가)",
   "/livez": "인프라 헬스체크 프로브다(k8s liveness) — 앱 API 표면이 아니다",
   "/metrics": "인프라 메트릭 엔드포인트다(모니터링 전용) — 앱 API 표면이 아니다",
   "/readyz": "인프라 헬스체크 프로브다(k8s readiness) — 앱 API 표면이 아니다",
