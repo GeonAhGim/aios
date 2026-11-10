@@ -12,6 +12,7 @@ DoD checklist (task-9981):
 from __future__ import annotations
 
 import time
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -124,7 +125,10 @@ class TestIndicatorSpecNegative:
     def test_plot_spec_invalid_kind_raises(self) -> None:
         """PlotSpec.kind가 허용 리터럴 밖이면 ValueError."""
         with pytest.raises(ValueError, match="unknown PlotSpec.kind"):
-            PlotSpec(kind="bogus", scale="own", default_pane="separate")  # type: ignore[arg-type]
+            invalid_fields: dict[str, Any] = {
+                "kind": "bogus", "scale": "own", "default_pane": "separate"
+            }
+            PlotSpec(**invalid_fields)
 
 
 class TestChainNegative:

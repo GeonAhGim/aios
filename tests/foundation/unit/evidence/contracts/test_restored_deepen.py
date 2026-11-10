@@ -21,6 +21,7 @@ docstring "다른 바운디드 컨텍스트는 오직 이 파일을 통해서만
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -41,7 +42,7 @@ NOW = datetime(2026, 9, 30, tzinfo=UTC)
 
 
 def _event(**overrides: object) -> AuditEvent:
-    defaults: dict[str, object] = dict(
+    base = AuditEvent(
         id=uuid4(),
         tenant_id=uuid4(),
         sequence_no=1,
@@ -59,8 +60,7 @@ def _event(**overrides: object) -> AuditEvent:
         event_hash="event-hash",
         occurred_at=NOW,
     )
-    defaults.update(overrides)
-    return AuditEvent(**defaults)  # type: ignore[arg-type]
+    return replace(base, **overrides)
 
 
 def _command(**overrides: object) -> RecordAuditEventCommand:

@@ -75,7 +75,7 @@ def test_rejects_fullwidth_unicode_digits_mimicking_hex() -> None:
 # --- failure injection ---
 
 
-def test_regex_engine_failure_propagates_uncaught() -> None:
+def test_regex_engine_failure_propagates_uncaught(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_validate_sha256_hex` has no try/except around the `fullmatch`
     call. If the compiled pattern itself misbehaves (e.g. a corrupted
     `re` extension, or a future refactor that swaps in a user-supplied
@@ -88,10 +88,6 @@ def test_regex_engine_failure_propagates_uncaught() -> None:
         def fullmatch(self, *args: Any, **kwargs: Any) -> None:
             raise RuntimeError("regex engine exploded")
 
-    original = contracts_v1._SHA256_HEX_RE
-    contracts_v1._SHA256_HEX_RE = _BoomPattern()  # type: ignore[assignment]
-    try:
-        with pytest.raises(RuntimeError, match="regex engine exploded"):
-            _card("a" * 64)
-    finally:
-        contracts_v1._SHA256_HEX_RE = original
+    monkeypatch.setattr(contracts_v1, "_SHA256_HEX_RE", _BoomPattern())
+    with pytest.raises(RuntimeError, match="regex engine exploded"):
+        _card("a" * 64)

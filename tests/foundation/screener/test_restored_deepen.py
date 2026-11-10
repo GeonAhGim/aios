@@ -74,7 +74,7 @@ def test_negative_whitespace_only_condition_rejected_at_contract() -> None:
 def test_negative_sort_direction_outside_asc_desc_rejected() -> None:
     """부정: SortSpec.direction은 Literal["asc","desc"] 밖의 값을 받지 않는다."""
     with pytest.raises(ValidationError):
-        SortSpec(field="close", direction="ascending")  # type: ignore[arg-type]
+        SortSpec.model_validate({"field": "close", "direction": "ascending"})
 
 
 def test_negative_sort_field_outside_registry_rejected_end_to_end() -> None:

@@ -14,8 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.data.models.asset_class import AssetClass  # type: ignore[attr-defined]
-from src.data.models.base import Currency, Money
+from src.data.models.base import AssetClass, Currency, Money
 
 # ── Negative tests: invariant-violating inputs ───────────────────────────
 
@@ -23,7 +22,7 @@ from src.data.models.base import Currency, Money
 def test_money_string_currency_rejected() -> None:
     """Money must reject string currency codes — only Currency enum allowed."""
     with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError
-        Money(amount=Decimal("100"), currency="USD")  # type: ignore[arg-type]
+        Money.model_validate({"amount": Decimal("100"), "currency": "USD"})
 
 
 def test_asset_class_invalid_string_rejected() -> None:
@@ -40,7 +39,7 @@ def test_asset_class_case_sensitive() -> None:
 
 def test_money_decimal_coercion_from_int() -> None:
     """Money accepts int amounts and coerces to Decimal."""
-    m = Money(amount=100, currency=Currency.USDT)  # type: ignore[arg-type]
+    m = Money.model_validate({"amount": 100, "currency": Currency.USDT})
     assert m.amount == Decimal("100")
 
 
@@ -87,19 +86,9 @@ def test_money_arithmetic_performance_budget() -> None:
 def test_models_package_exports_base_and_asset_class() -> None:
     """The models package must export base and asset_class submodules
     since they are imported at the package level."""
-    # Reload fresh to avoid side effects from other tests
     import importlib
-    import sys
 
-    # Remove cached submodules
-    cached = [k for k in sys.modules if k.startswith("src.data.models.")]
-    for k in cached:
-        del sys.modules[k]
-
-    # Re-import the package fresh
-    importlib.import_module("src.data.models")
-    fresh_pkg = sys.modules["src.data.models"]
-
-    exported = [n for n in dir(fresh_pkg) if not n.startswith("_")]
-    assert "base" in exported, "base must be exported by models package"
-    assert "asset_class" in exported, "asset_class must be exported by models package"
+    package = importlib.import_module("src.data.models")
+    for name in ("base", "asset_class"):
+        module = importlib.import_module(f"src.data.models.{name}")
+        assert getattr(package, name) is module

@@ -9,6 +9,7 @@ domain logic (INVARIANTS.md I-06, I-11).
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -44,7 +45,7 @@ UTC = UTC
 
 
 def _token(**overrides: object) -> AgentToken:
-    fields: dict[str, object] = dict(
+    base = AgentToken(
         token_id=uuid4(),
         tenant_id=uuid4(),
         scopes=frozenset({Scope.READ}),
@@ -54,8 +55,7 @@ def _token(**overrides: object) -> AgentToken:
         paper_only=True,
         revoked_at=None,
     )
-    fields.update(overrides)
-    return AgentToken(**fields)  # type: ignore[arg-type]
+    return replace(base, **overrides)
 
 
 # -- Negative tests (invariant-violating inputs -> rejection) ----------------
@@ -195,7 +195,7 @@ class TestFailureInjectionToken:
         swallow it -- fail-closed means a broken time source surfaces
         instead of silently granting access."""
 
-        class BrokenClock:
+        class BrokenClock(datetime):
             def __eq__(self, other):
                 raise RuntimeError("clock_unavailable")
 
@@ -207,7 +207,7 @@ class TestFailureInjectionToken:
 
         token = _token()
         with pytest.raises(RuntimeError, match="clock_unavailable"):
-            authorize(token, Scope.READ, BrokenClock())  # type: ignore[arg-type]
+            authorize(token, Scope.READ, BrokenClock(2026, 1, 1, tzinfo=UTC))
 
 
 class TestFailureInjectionConfirm:

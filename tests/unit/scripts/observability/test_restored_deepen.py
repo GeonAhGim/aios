@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import time as time_module
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -118,7 +119,8 @@ def test_write_report_rejects_non_list_paths() -> None:
     bare string (iterable of chars, not Path objects) must fail fast rather
     than silently writing to nonsense locations."""
     with pytest.raises(AttributeError):
-        notify_selftest.write_report({"ok": True}, "not-a-list-of-paths")  # type: ignore[arg-type]
+        invalid_paths: Any = "not-a-list-of-paths"
+        notify_selftest.write_report({"ok": True}, invalid_paths)
 
 
 # -- failure-injection: unexpected exception from the send dependency must propagate --
