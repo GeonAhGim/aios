@@ -287,6 +287,7 @@ describe("apiPaths — task-1107 봉투 미적용 상태 고정(executions/portf
     "executions.liveReadiness",
     "executions.expandExposure",
     "executions.riskGuard",
+    "executions.decisionTrail",
     "portfolio.get",
     "portfolio.rebalance",
     "wallet.balance",
