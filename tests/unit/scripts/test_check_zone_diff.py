@@ -169,9 +169,8 @@ def test_find_frozen_violations_delay_injection_fails_red_gate(
     calibration_n=1로 비율 오차를 줄이고 max_ratio를 매우 낮게 설정해
     sleep 1.5s이 반드시 예산을 넘게 한다.
     """
-    import time
-
     from tests._perf.relative_budget import RelativeBudget
+    from tests.support.perf_inject import virtual_delayed_sync
 
     original_fn = check_zone_diff.find_frozen_violations
     frozen_patterns = ["aios/kernel/**", "src/core/strategy/**"]
@@ -179,15 +178,15 @@ def test_find_frozen_violations_delay_injection_fails_red_gate(
     changed_files += [f"tests/unit/generated/test_{i}.py" for i in range(4000)]
     changed_files.append("aios/kernel/policy/rule.py")
 
-    # 약 1.5s 지연 주입 (원본 ~0.1s → 10x 초과)
-    def _slow_violations(files: list[str], patterns: list[str]) -> list[str]:
-        time.sleep(1.5)
-        return original_fn(files, patterns)
-
-    monkeypatch.setattr(check_zone_diff, "find_frozen_violations", _slow_violations)
+    # Virtual 5s delay: RelativeBudget adds it to the sample without sleeping, so the ratio
+    # (5s / calibration loop) stays far above max_ratio=10 even when the host is loaded
+    # (a real 1.5s sleep landed at ~10x on a busy host and did not raise).
+    monkeypatch.setattr(
+        check_zone_diff, "find_frozen_violations", virtual_delayed_sync(original_fn, 5.0)
+    )
 
     # 지연 주입된 함수는 wall-clock 예산을 넘어야 한다 → 적색
-    # calibration loop가 ~50-100ms이므로 max_ratio=10이면 1.5s는 15-30x로 명확 초과
+    # calibration loop가 ~50-300ms이므로 가상 5s는 max_ratio=10을 항상 초과
     with pytest.raises(AssertionError):
         RelativeBudget().assert_within(
             lambda: check_zone_diff.find_frozen_violations(changed_files, frozen_patterns),
