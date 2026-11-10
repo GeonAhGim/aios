@@ -46,7 +46,18 @@ async def isolated_event_pool():
         await drop_worker_database(template, clone_id)
 
 
-async def test_get_order_cross_tenant_does_not_leak_existence(pool) -> None:
+@pytest.mark.perf
+async def test_get_order_cross_tenant_does_not_leak_existence(
+    pool, perf_budget, monkeypatch
+) -> None:
+    """L4-26 / INVARIANTS I-10: exercise the real tenant filter and its mutant.
+
+    Local PostgreSQL lookup pair: best-of-5 wall 0.561 ms (2026-11-10).
+    New 1000 ms pair budget gives >30x headroom for shared-host DB contention;
+    it bounds both SELECT round trips, not a timing side-channel guarantee.
+    Async best_of_async is the awaited equivalent of perf_budget.best_of.
+    """
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
     owner_id = await create_test_user(pool)
     attacker_id = await create_test_user(pool)
     async with pool.acquire() as conn:
@@ -67,6 +78,51 @@ async def test_get_order_cross_tenant_does_not_leak_existence(pool) -> None:
         "타 tenant 소유 주문과 존재하지 않는 주문이 같은 None으로 동형이어야 합니다"
         "(§8.3 '존재 자체 비노출')"
     )
+
+    async def checked_lookup():
+        hidden = await order_query.get_order(pool, order_id, tenant_id=attacker_id)
+        missing = await order_query.get_order(pool, missing_id, tenant_id=attacker_id)
+        assert hidden is None, "tenant isolation gate: foreign order exposed"
+        assert missing is None, "tenant isolation gate: missing order fabricated"
+        return hidden, missing
+
+    missing_id = uuid4()
+    budget_ms = 1000.0
+
+    async def check_latency():
+        sample = await perf_budget.best_of_async(checked_lookup, n=5, warmup=1)
+        assert sample.result == (None, None)
+        assert sample.wall_ms < budget_ms, perf_budget.describe(sample, budget_ms=budget_ms)
+        return sample
+
+    await check_latency()
+
+    # Corrupt the tenant binding at the actual DB boundary, retaining the order id.
+    original_fetchrow = asyncpg.Connection.fetchrow
+
+    async def bypass_tenant(conn, query, *args, **kwargs):
+        if query == "SELECT * FROM orders WHERE order_id = $1 AND user_id = $2":
+            args = (args[0], owner_id)
+        return await original_fetchrow(conn, query, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(asyncpg.Connection, "fetchrow", bypass_tenant)
+        with pytest.raises(AssertionError, match="tenant isolation gate: foreign order exposed"):
+            await checked_lookup()
+
+    # The same latency assertion must reject a 10x-budget delay without sleeping.
+    reset_virtual_totals()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                asyncpg.Connection, "fetchrow",
+                virtual_delayed_async(original_fetchrow, budget_ms / 1000 * 10),
+            )
+            with pytest.raises(AssertionError, match="budget<1000.000ms"):
+                await check_latency()
+    finally:
+        reset_virtual_totals()
+    await checked_lookup()
 
 
 async def test_list_orders_excludes_other_tenant_rows(pool) -> None:
