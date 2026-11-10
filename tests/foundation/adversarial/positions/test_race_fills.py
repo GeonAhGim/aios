@@ -49,6 +49,10 @@ from tests.conftest import PerfBudget
 from tests.integration.conftest import create_test_tenant
 from tests.integration.foundation.positions.conftest import create_pos_account, open_position
 from tests.support.db import create_pool_with_retry
+from tests.support.perf_inject import (
+    reset_virtual_totals,
+    virtual_delayed_async,
+)
 
 _OCCURRED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 _CONCURRENT_FILLS = 20
@@ -129,8 +133,12 @@ async def _fill_once(
 # ---------------------------------------------------------------------------
 
 
-async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
-    """LB-18 negative: f-string/concat로 만든 position_key -> InvalidPositionKeyError."""
+async def test_malformed_position_key_rejected(pool: asyncpg.Pool, perf_budget: PerfBudget) -> None:
+    """LB-18 negative: f-string/concat로 만든 position_key -> InvalidPositionKeyError.
+
+    성능 단언: malformed key 파싱/거부는 CPU 예산 5ms 이내.
+    virtual_delayed_async로 0.5s 지연 주입 시 예산 초과로 적색 재현.
+    """
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     # 의도적으로 broken key - PositionKey.parse()가 reject해야 함
@@ -151,7 +159,8 @@ async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
     journal = PostgresJournalRepository(pool)
     snapshots = PostgresSnapshotRepository(pool)
     audit = PostgresAuditEventRepository(pool)
-    with pytest.raises(ValueError):
+
+    async def _reject_once() -> None:
         async with pool.acquire() as conn, conn.transaction():
             await record_fill(
                 conn,
@@ -162,6 +171,18 @@ async def test_malformed_position_key_rejected(pool: asyncpg.Pool) -> None:
                 audit=audit,
                 clock=_clock,
             )
+
+    # ── 녹색 단언: best_of로 0 수렴 검증 (Windows 양자화 tick 흔들림 방지) ──
+    sample = perf_budget.best_of(_reject_once, n=5)
+    assert sample.cpu_ms < 5.0, (
+        f"malformed key 거부 CPU 시간 {sample.cpu_ms:.3f}ms가 예산(5ms) 초과"
+    )
+
+    # ── 적색 재현: virtual_delayed_async로 0.5s 지연 주입 ──
+    reset_virtual_totals()
+    with patch.object(snapshots, "get", virtual_delayed_async(snapshots.get, 0.5)):
+        with pytest.raises(ValueError):
+            await perf_budget.sample_async(_reject_once)
 
 
 async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
@@ -217,7 +238,9 @@ async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
             await perf_budget.sample_async(_reject_once)
 
         # ── 적색 재현: 지연 주입으로 예산 초과 검증 ──────────────────────
-        from tests.support.perf_inject import delayed_async
+        from tests.support.perf_inject import (
+            delayed_async,
+        )
 
         # snapshots.get을 0.5s 지연 -> CPU 예산 5ms를 크게 초과
         original_get = snapshots.get
@@ -243,8 +266,12 @@ async def test_account_mismatch_rejected(pool: asyncpg.Pool) -> None:
         await _delete_pos_snapshot(pool, position_key=position_key)
 
 
-async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
-    """LB-18 negative: 현재 포지션 수량보다 큰 Sell -> NegativeQuantityError."""
+async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool, perf_budget: PerfBudget) -> None:
+    """LB-18 negative: 현재 포지션 수량보다 큰 Sell -> NegativeQuantityError.
+
+    성능 단언: Sell 10 on qty=5 검증(Check)은 CPU 예산 5ms 이내.
+    virtual_delayed_async로 0.5s 지연 주입 시 예산 초과로 적색 재현.
+    """
     tenant_id = await create_test_tenant(pool)
     account_id = await create_pos_account(pool, tenant_id)
     position_key = _key(tenant_id)
@@ -297,7 +324,8 @@ async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
         journal = PostgresJournalRepository(pool)
         snapshots = PostgresSnapshotRepository(pool)
         audit = PostgresAuditEventRepository(pool)
-        with pytest.raises(NegativeQuantityError):
+
+        async def _reject_sell() -> None:
             async with pool.acquire() as conn, conn.transaction():
                 await record_fill(
                     conn,
@@ -308,6 +336,18 @@ async def test_sell_beyond_quantity_rejected(pool: asyncpg.Pool) -> None:
                     audit=audit,
                     clock=_clock,
                 )
+
+        # ── 녹색 단언: best_of로 0 수렴 검증 ──
+        sample = perf_budget.best_of(_reject_sell, n=5)
+        assert sample.cpu_ms < 5.0, (
+            f"Sell beyond qty 거부 CPU 시간 {sample.cpu_ms:.3f}ms가 예산(5ms) 초과"
+        )
+
+        # ── 적색 재현: virtual_delayed_async로 0.5s 지연 주입 ──
+        reset_virtual_totals()
+        with patch.object(snapshots, "get", virtual_delayed_async(snapshots.get, 0.5)):
+            with pytest.raises(NegativeQuantityError):
+                await perf_budget.sample_async(_reject_sell)
     finally:
         await _delete_pos_snapshot(pool, position_key=position_key)
 
