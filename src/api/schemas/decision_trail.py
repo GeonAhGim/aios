@@ -1,51 +1,45 @@
 """Decision trail response schemas (J8 trail).
 
-Wraps ``TrailEntry`` fields into API response shape.
+Carries ``TrailEntry`` (src/services/decision_trail.py) to the API shape without losing data.
+Conversion, expansion and risk-decision entries have different summary keys, so flattening
+them into one record drops values: ``summary`` and ``evidence`` stay objects, and values that
+are missing are listed in ``unavailable`` with a reason instead of being filled with zero.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from uuid import UUID
+from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from src.services.decision_trail import TrailEntry as _TrailEntry
+from src.services.decision_trail import TrailEntry
 
 
 class DecisionTrailEntryResponse(BaseModel):
-    decision_id: UUID
     kind: str
-    outcome: str
-    reason_codes: list[str]
-    rule_version: str
-    evaluated_at: str
-    expires_at: str | None
-    trace_id: UUID | None
-    summary: str
+    occurred_at: datetime
+    actor: str | None
+    summary: dict[str, Any]
+    evidence: dict[str, Any] | None
+    unavailable: dict[str, str] = Field(default_factory=dict)
 
 
 class DecisionTrailResponse(BaseModel):
     entries: list[DecisionTrailEntryResponse]
 
 
-def to_decision_trail_response(
-    entries: Sequence[_TrailEntry],
-) -> DecisionTrailResponse:
+def to_decision_trail_response(entries: Sequence[TrailEntry]) -> DecisionTrailResponse:
     return DecisionTrailResponse(
         entries=[
             DecisionTrailEntryResponse(
-                decision_id=e.summary.get("decision_id", UUID(int=0)),
                 kind=e.kind.value,
-                outcome=e.summary.get("outcome", ""),
-                reason_codes=list(e.summary.get("reason_codes", [])),
-                rule_version=e.summary.get("rule_version", ""),
-                evaluated_at=str(e.summary.get("evaluated_at", "")),
-                expires_at=str(e.summary.get("expires_at"))
-                if e.summary.get("expires_at")
-                else None,
-                trace_id=e.summary.get("trace_id"),
-                summary=e.summary.get("summary", ""),
+                occurred_at=e.occurred_at,
+                actor=e.actor,
+                summary=dict(e.summary),
+                evidence=dict(e.evidence) if e.evidence is not None else None,
+                unavailable=dict(e.unavailable),
             )
             for e in entries
         ]
