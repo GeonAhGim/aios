@@ -401,9 +401,6 @@ def test_parser_output_round_trips_through_dsl1_serialization() -> None:
     assert to_dict(restored) == to_dict(program)
 
 
-# ---- DEEPEN(task-2911): 실패 주입(파서 재귀 한도/스택 고갈 시뮬레이션) ----
-
-
 def _current_frame_depth() -> int:
     depth, frame = 0, sys._getframe()  # noqa: SLF001
     while frame is not None:
