@@ -10,7 +10,16 @@ import asyncio
 import os
 import random
 import sys
-from datetime import UTC, datetime, timedelta
+
+try:
+    from datetime import UTC
+except ImportError:  # pragma: no cover — py<3.11; project requires >=3.13 but
+    # conftest loads before the venv is guaranteed, so guard for CI environments.
+    from zoneinfo import ZoneInfo as _ZoneInfo
+
+    UTC = _ZoneInfo("UTC")  # noqa: F841
+
+from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 

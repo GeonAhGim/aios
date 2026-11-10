@@ -408,6 +408,10 @@ def perf_budget() -> PerfBudget:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    # UTC sentinel plugins require datetime.UTC (py>=3.11); project requires >=3.13
+    # but the system `python` may resolve to an older runtime at CI bootstrap time.
+    if sys.version_info < (3, 11):  # noqa: UP036
+        return
     from tests.support.orders_residue import OrdersResidueSentinel
 
     config.pluginmanager.register(OrdersResidueSentinel(_TEST_DATABASE_URL), "orders-residue")
