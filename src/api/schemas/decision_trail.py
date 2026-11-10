@@ -1,17 +1,16 @@
 """Decision trail response schemas (J8 trail).
 
-Mirrors ``TrailEntry`` fields; ``kind`` stays ``str``.
+Wraps ``TrailEntry`` fields into API response shape.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from src.services.decision_trail import RiskTrailEntry as TrailEntry
+from src.services.decision_trail import TrailEntry as _TrailEntry
 
 
 class DecisionTrailEntryResponse(BaseModel):
@@ -20,9 +19,9 @@ class DecisionTrailEntryResponse(BaseModel):
     outcome: str
     reason_codes: list[str]
     rule_version: str
-    evaluated_at: datetime
-    expires_at: datetime
-    trace_id: UUID
+    evaluated_at: str
+    expires_at: str | None
+    trace_id: UUID | None
     summary: str
 
 
@@ -31,20 +30,22 @@ class DecisionTrailResponse(BaseModel):
 
 
 def to_decision_trail_response(
-    entries: Sequence[TrailEntry],
+    entries: Sequence[_TrailEntry],
 ) -> DecisionTrailResponse:
     return DecisionTrailResponse(
         entries=[
             DecisionTrailEntryResponse(
-                decision_id=e.decision_id,
-                kind=e.kind,
-                outcome=e.outcome,
-                reason_codes=list(e.reason_codes),
-                rule_version=e.rule_version,
-                evaluated_at=e.evaluated_at,
-                expires_at=e.expires_at,
-                trace_id=e.trace_id,
-                summary=e.summary,
+                decision_id=e.summary.get("decision_id", UUID(int=0)),
+                kind=e.kind.value,
+                outcome=e.summary.get("outcome", ""),
+                reason_codes=list(e.summary.get("reason_codes", [])),
+                rule_version=e.summary.get("rule_version", ""),
+                evaluated_at=str(e.summary.get("evaluated_at", "")),
+                expires_at=str(e.summary.get("expires_at"))
+                if e.summary.get("expires_at")
+                else None,
+                trace_id=e.summary.get("trace_id"),
+                summary=e.summary.get("summary", ""),
             )
             for e in entries
         ]
