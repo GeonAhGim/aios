@@ -185,8 +185,9 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
     for _ in range(5):
         _sweep(baseline_universe)
 
-    # best_of(3)로 CI 경합 노이즈를 걷어내고 batch=200으로 tick 양자화 오차 줄임
-    baseline = perf_budget.best_of(lambda: _sweep(baseline_universe), n=3, batch=200)
+    # best_of(3)로 CI 경합 노이즈를 걷어내고, 1종목(0.25ms)이 CPU 시계 눈금(15.6ms) 20개 이상인
+    # 창이 되게 batch=1200으로 묶는다(200이면 눈금 3개라 +-33% 흔들려 임계가 35ms로 내려앉았다).
+    baseline = perf_budget.best_of(lambda: _sweep(baseline_universe), n=3, batch=1200)
     baseline_ms = baseline.cpu_ms
 
     universe = {
@@ -199,7 +200,7 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
 
     # best_of(3)로 CI 경합 노이즈를 최소화 — 병렬 워커가 CPU를 뺏어가도
     # 최소 3회 중 가장 낮은 값을 채택하므로 날림 실패가 줄어든다.
-    measured = perf_budget.best_of(lambda: _sweep(universe), n=3, batch=3)
+    measured = perf_budget.best_of(lambda: _sweep(universe), n=3, batch=8)
     elapsed_ms = measured.cpu_ms
     result = measured.result
 

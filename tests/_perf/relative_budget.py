@@ -54,6 +54,16 @@ _T = TypeVar("_T")
 _CALIBRATION_ITERATIONS = 2_000_000
 
 
+# CPU 시계 눈금(~15.6ms) 대비 측정 창 목표 길이: 눈금 오차가 창의 ~10% 이하가 되게 한다.
+_WINDOW_TARGET_MS = 150
+_MAX_BATCH = 16
+
+
+def _batch_for(first_ms: float) -> int:
+    """1회가 first_ms인 작업을 _WINDOW_TARGET_MS 이상 창으로 묶는 횟수(1.._MAX_BATCH)."""
+    return max(1, min(_MAX_BATCH, -(-_WINDOW_TARGET_MS // max(1, int(first_ms)))))
+
+
 def _calibration_loop() -> int:
     total = 0
     for i in range(_CALIBRATION_ITERATIONS):
@@ -85,15 +95,36 @@ class RelativeBudget:
             return time.perf_counter
         raise ValueError(f"unknown mode: {mode!r}")
 
-    def _best_of(self, fn: Callable[[], object], *, clock: Callable[[], float], n: int) -> float:
+    def _timed(self, fn: Callable[[], object], *, clock: Callable[[], float], batch: int) -> float:
+        """fn을 batch번 이어 돌려 1회당 ms를 돌려준다(가상 지연 포함)."""
+        with paused_coverage():
+            virtual0 = virtual_totals_ns()[0]  # cpu ledger for sync
+            start = clock()
+            for _ in range(batch):
+                fn()
+            elapsed = (clock() - start) * 1000
+            elapsed += (virtual_totals_ns()[0] - virtual0) / 1e6  # add virtual delta
+        return elapsed / batch
+
+    def _best_of(
+        self,
+        fn: Callable[[], object],
+        *,
+        clock: Callable[[], float],
+        n: int,
+        quantized: bool = False,
+    ) -> float:
+        """n회 중 최소 1회당 ms. quantized=True(CPU 시계)면 눈금(15.6ms)에 몇 개 안 들어가는 짧은
+        작업을 여러 번 묶어 눈금 오차를 줄인다 -- 1회 47ms 보정 루프는 눈금 3개라 +-33% 흔들려
+        비율 예산(1.6x)이 날림으로 적색이 됐다(2026-11-10 test_parser 2.000x). 예산 숫자는 그대로고
+        측정만 정확해진다. 묶는 횟수를 정하는 첫 호출은 최소값에 넣지 않는다
+        (눈금 내림으로 낮게 나온다)."""
+        batch = 1
+        if quantized:
+            batch = _batch_for(self._timed(fn, clock=clock, batch=1))
         best: float | None = None
         for _ in range(n):
-            with paused_coverage():
-                virtual0 = virtual_totals_ns()[0]  # cpu ledger for sync
-                start = clock()
-                fn()
-                elapsed = (clock() - start) * 1000
-                elapsed += (virtual_totals_ns()[0] - virtual0) / 1e6  # add virtual delta
+            elapsed = self._timed(fn, clock=clock, batch=batch)
             if best is None or elapsed < best:
                 best = elapsed
         assert best is not None
@@ -119,9 +150,12 @@ class RelativeBudget:
         clock = self._clock(mode)
         for _ in range(warmup):
             fn()
-        op_ms = self._best_of(fn, clock=clock, n=n)
+        # 눈금 보정 묶음은 실제 time.process_time에만 쓴다 -- 주입된 시계(감지 테스트의 가짜 시계)는
+        # 눈금이 없고 호출 횟수를 단언하는 테스트도 있어서 그대로 1회씩 잰다.
+        quantized = clock is time.process_time
+        op_ms = self._best_of(fn, clock=clock, n=n, quantized=quantized)
         calibration_ms = self._best_of(
-            calibration_fn or _calibration_loop, clock=clock, n=calibration_n
+            calibration_fn or _calibration_loop, clock=clock, n=calibration_n, quantized=quantized
         )
         ratio = op_ms / calibration_ms if calibration_ms else float("inf")
         return RelativeSample(op_ms=op_ms, calibration_ms=calibration_ms, ratio=ratio)

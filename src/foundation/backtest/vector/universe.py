@@ -32,6 +32,7 @@ Pure module — no I/O.
 """
 from __future__ import annotations
 
+import gc
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
@@ -94,12 +95,23 @@ def sweep_universe(
 
     results: dict[str, QuickBacktestResult] = {}
     skipped: list[str] = []
-    for symbol, (columns, signal) in universe.items():
-        if len(columns) == 0:
-            skipped.append(symbol)
-            continue
-        results[symbol] = run_vector_backtest(
-            config, columns, signal, timeframe=timeframe,
-            initial_cash=initial_cash, funding_rate=funding_rate,
-        )
+    # Every symbol allocates ~bars short-lived container objects while the retained results keep
+    # growing, so the cyclic GC rescans the ever-larger result set on every generation-0/1 trip
+    # (superlinear cost under CPU contention: the 100-symbol sweep exceeded 1.5x the single-symbol
+    # baseline on a loaded host). The sweep builds no reference cycles, so pause the collector
+    # for its duration and restore the caller's prior state afterwards (same fix as sweep_grid).
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        for symbol, (columns, signal) in universe.items():
+            if len(columns) == 0:
+                skipped.append(symbol)
+                continue
+            results[symbol] = run_vector_backtest(
+                config, columns, signal, timeframe=timeframe,
+                initial_cash=initial_cash, funding_rate=funding_rate,
+            )
+    finally:
+        if gc_was_enabled:
+            gc.enable()
     return UniverseSweepResult(results=results, skipped=tuple(skipped))

@@ -145,3 +145,54 @@ def test_relative_sample_is_frozen_dataclass() -> None:
     sample = RelativeSample(op_ms=1.0, calibration_ms=2.0, ratio=0.5)
     with pytest.raises(AttributeError):
         sample.op_ms = 5.0
+
+
+class _TickClock:
+    """15.625ms 눈금으로만 읽히는 가짜 CPU 시계(Windows time.process_time 모사)."""
+
+    TICK = 0.015625
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def read(self) -> float:
+        return (self.now // self.TICK) * self.TICK
+
+
+def test_cpu_measurement_batches_short_ops_so_tick_quantization_does_not_bias_low() -> None:
+    """회귀(2026-11-10 test_parser 2.000x): 22ms 작업을 눈금 시계로 1회씩 재면 최소값이 15.6ms로
+    내림돼 29% 낮게 나온다. 묶어서 재면 진짜 값(22ms)에 10% 이내로 붙는다."""
+    clock = _TickClock()
+
+    def _op() -> None:
+        clock.now += 0.022
+
+    budget = RelativeBudget()
+    unbatched = budget._best_of(_op, clock=clock.read, n=5, quantized=False)
+    batched = budget._best_of(_op, clock=clock.read, n=5, quantized=True)
+    assert unbatched == pytest.approx(15.625)  # 눈금 내림 -- 문제의 재현
+    assert batched == pytest.approx(22.0, rel=0.10)
+
+
+def test_cpu_measurement_still_detects_a_real_slowdown_after_batching() -> None:
+    """적색 재현: 10배 느려진 작업은 묶어 재도 10배로 보인다(측정이 둔해지지 않았다)."""
+    clock = _TickClock()
+    budget = RelativeBudget()
+
+    def _fast() -> None:
+        clock.now += 0.020
+
+    def _slow() -> None:
+        clock.now += 0.200
+
+    fast = budget._best_of(_fast, clock=clock.read, n=3, quantized=True)
+    slow = budget._best_of(_slow, clock=clock.read, n=3, quantized=True)
+    assert slow / fast == pytest.approx(10.0, rel=0.15)
+
+
+def test_batch_size_is_bounded_and_covers_the_window() -> None:
+    from tests._perf.relative_budget import _MAX_BATCH, _WINDOW_TARGET_MS, _batch_for
+
+    assert _batch_for(0.0) == _MAX_BATCH  # 눈금 아래로 0ms로 읽힌 작업
+    assert _batch_for(47.0) * 47.0 >= _WINDOW_TARGET_MS
+    assert _batch_for(500.0) == 1  # 이미 창보다 긴 작업은 묶지 않는다
