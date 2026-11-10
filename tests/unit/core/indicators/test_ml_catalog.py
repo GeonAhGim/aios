@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from src.core.indicators.catalog import ml
 from src.core.indicators.catalog.ml import (
     EQUIVALENCE_TOLERANCE,
     MlScorer,
@@ -165,18 +166,11 @@ def _per_row_cpu_ms(perf_budget: PerfBudget, scorer: MlScorer, n: int) -> float:
     Windows ~15.6 ms process_time tick cannot collapse the reading to 0.
     """
     columns = _columns(n, seed=1)
-    spec = build_ml_indicator_spec("momentum-lgbm", ["rsi_14", "atr_14"])
-    arrays = {k: np.asarray(v, dtype=np.float64) for k, v in columns.items()}
-    batch = 4
 
-    def _pass() -> float:
-        total = 0.0
-        for row_idx in range(n):
-            bar = {key: float(arrays[key][row_idx]) for key in spec.inputs}
-            total += scorer(bar)
-        return total
+    def _pass() -> np.ndarray[Any, np.dtype[np.float64]]:
+        return ml.run_ml_signal_incremental("momentum-lgbm", ["rsi_14", "atr_14"], columns, scorer)
 
-    sample = perf_budget.best_of(_pass, n=5, warmup=1, batch=batch)
+    sample = perf_budget.best_of(_pass, n=5, warmup=1, batch=32)
     return sample.cpu_ms / n
 
 
@@ -194,23 +188,40 @@ def test_compute_ml_signal_latency_p99_within_budget(
     scorer = _linear_scorer({"rsi_14": 1.0, "atr_14": 2.0}, bias=0.5)
     per_row_ms = _per_row_cpu_ms(perf_budget, scorer, n)
     print(f"[AI-21 ml catalog] n={n} per_row={per_row_ms * 1000:.2f}us budget<50us")
-    assert per_row_ms < _PER_ROW_BUDGET_MS
+    _assert_per_row_budget(per_row_ms)
     worst_case = check_ml_signal_equivalence("momentum-lgbm", ["rsi_14", "atr_14"], columns, scorer)
     assert 0.0 <= worst_case <= EQUIVALENCE_TOLERANCE
+
+
+def _assert_per_row_budget(per_row_ms: float) -> None:
+    assert per_row_ms < _PER_ROW_BUDGET_MS, f"per-row CPU budget exceeded: {per_row_ms}ms"
+
+
+@pytest.mark.perf
+def test_compute_ml_signal_cpu_batch_does_not_collapse_to_zero(
+    perf_budget: PerfBudget,
+) -> None:
+    """Even the minimum of five batches must span a CPU clock tick."""
+    scorer = _linear_scorer({"rsi_14": 1.0, "atr_14": 2.0}, bias=0.5)
+    assert _per_row_cpu_ms(perf_budget, scorer, 5000) > 0.0
 
 
 @pytest.mark.perf
 def test_compute_ml_signal_latency_budget_violation_detected(
     perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gate-red repro: inject a virtual 10x-budget (500 us) delay per scorer
-    call -- same measurement and assertion as the green test -- and require
-    the budget to be exceeded. No real sleep/spin."""
+    """The actual green test must reject a virtual 10x CPU budget regression."""
     reset_virtual_totals()
-    base_scorer = _linear_scorer({"rsi_14": 1.0, "atr_14": 2.0}, bias=0.5)
-    delayed = virtual_delayed_sync(base_scorer, 500e-6)
-    per_row_ms = _per_row_cpu_ms(perf_budget, delayed, 500)
-    assert per_row_ms >= _PER_ROW_BUDGET_MS, (
-        f"Detection power failed: per_row={per_row_ms * 1000:.0f}us "
-        f"should exceed budget={_PER_ROW_BUDGET_MS * 1000:.0f}us with 500us delay"
+    # 5,000 rows * 50 us/row * 10; PerfBudget normalizes the outer batch.
+    delay_seconds = 5000 * _PER_ROW_BUDGET_MS * 10 / 1000
+    monkeypatch.setattr(
+        ml,
+        "run_ml_signal_incremental",
+        virtual_delayed_sync(ml.run_ml_signal_incremental, delay_seconds),
     )
+    try:
+        with pytest.raises(AssertionError, match="per-row CPU budget exceeded"):
+            test_compute_ml_signal_latency_p99_within_budget(perf_budget)
+    finally:
+        reset_virtual_totals()
