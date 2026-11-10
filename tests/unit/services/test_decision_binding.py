@@ -246,27 +246,54 @@ def test_negative_verify_with_completely_null_snapshot() -> None:
 # ── D2 보강: 실패 주입 1종 ─────────────────────────────────────────────────
 
 
-def test_failure_injection_corrupted_subject_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
-    """실패 주입 — subject_fingerprint를 64자보다 짧게 주입하면 불일치로 이어진다.
+def test_failure_injection_corrupted_fence_via_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입 — _fence_from_snapshot이 유효한 fence를 None으로 반환하도록
+    monkeypatch하면 fence_snapshot_missing 불일치가 트리거된다.
 
-    verify_decision_binding는 fingerprint를 직접 검사하지 않지만,
-    RiskDecision 생성 시 fingerprint 길이 검증이 깨지면 downstream에서
-    INTEGRITY_RISK_FINGERPRINT_MISMATCH가 트리거된다.
+    verify_decision_binding 내부의 _fence_from_snapshot을 가로채서
+    유효한 inputs_snapshot에서도 fence가 없다고 위장하면, 실제 게이트에서
+    WORM fence를 읽지 못하는 상황을 재현한다.
     """
+    # _fence_from_snapshot을 항상 None을 반환하도록 주입
     monkeypatch.setattr(
-        "src.services.order_service.decision_binding.verify_decision_binding",
-        lambda *a, **kw: verify_decision_binding(
-            *a, recorded=_decision(), inputs_snapshot=_snapshot(), **kw
-        ),
+        "src.services.order_service.decision_binding._fence_from_snapshot",
+        lambda snap: None,
     )
-    # 실제 주입: fingerprint를 무효한 값으로 교체
     result = verify_decision_binding(
         _order(),
         caller_fence=_F0,
         recorded=_decision(),
         inputs_snapshot=_snapshot(),
     )
-    assert result.ok  # 정상 입력은 통과 — 주입 테스트의 기준선
+    # fence_snapshot_missing이 반드시 잡혀야 한다 — 실제 게이트 적색
+    assert not result.ok
+    assert "fence_snapshot_missing" in result.mismatches
+    assert result.fence_snapshot == {}  # 불일치 시 fence는 항상 비어 있다
+
+
+def test_failure_injection_corrupted_execution_ref_via_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패 주입 — execution_ref_for가 다른 값을 반환하도록 주입하면
+    execution_ref 불일치가 트리거된다.
+
+    주문의 execution_id=7이지만 execution_ref_for가 "exec:999"를 반환하면
+    recorded decision의 "exec:7"와 불일치한다.
+    """
+    monkeypatch.setattr(
+        "src.services.order_service.decision_binding.execution_ref_for",
+        lambda order: "exec:999",
+    )
+    result = verify_decision_binding(
+        _order(),
+        caller_fence=_F0,
+        recorded=_decision(),
+        inputs_snapshot=_snapshot(),
+    )
+    assert not result.ok
+    assert "execution_ref" in result.mismatches
 
 
 # ── D2 보강: 게이트 적색 재현 1종 ───────────────────────────────────────────
