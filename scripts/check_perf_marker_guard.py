@@ -89,15 +89,6 @@ def _contains_assert(node: ast.AST) -> bool:
     return any(isinstance(n, ast.Assert) for n in ast.walk(node))
 
 
-def _timer_call_inside_assert(node: ast.AST) -> bool:
-    """True if any ``perf_counter()``/``monotonic()`` call appears inside an
-    ``assert`` statement under *node*."""
-    for n in ast.walk(node):
-        if isinstance(n, ast.Assert) and _contains_timer_call(n):
-            return True
-    return False
-
-
 def _contains_perf_budget_assert(node: ast.AST) -> bool:
     """True if the node asserts on ``perf_budget.sample(...).cpu_ms`` or
     ``.wall_ms`` — a wall-clock budget assertion that does *not* use raw
