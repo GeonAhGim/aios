@@ -277,7 +277,10 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     The actual CPU budget test below uses batch=8 to avoid this pitfall.
     """
     cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
-    symbols = [f"SYM{i}/USDT" for i in range(200)]
+    # 1000 symbols — 200 was too fast for time.process_time() quantization
+    # on Windows (~15.6 ms tick); 1000 yields ~0.4 ms/call (batch=8) that
+    # exceeds the 0.01 ms floor while staying well under the 5 ms budget.
+    symbols = [f"SYM{i}/USDT" for i in range(1000)]
     current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("1000000"))
     targets = {s: Decimal("0.6") for s in symbols}
     prices = {s: Decimal("100") for s in symbols}
@@ -303,7 +306,7 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     )
 
     # batch=8 average must be non-zero and within budget.
-    # With 200 symbols the real CPU cost is measurable; batch=8 should
+    # With 1000 symbols the real CPU cost is measurable; batch=8 should
     # capture it without the zero-convergence artifact.
     assert avg_batch8 > 0.01, (
         f"batch=8 avg {avg_batch8:.3f}ms near-zero — batching did not recover quantization loss"
