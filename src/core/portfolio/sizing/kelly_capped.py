@@ -4,6 +4,7 @@
 probability, `avg_win_loss_ratio`(b) is the average win/loss ratio — reject outright
 rather than substituting 0/1 etc. if either is `None`.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -26,9 +27,7 @@ _ONE = Decimal("1")
 def size(inp: PortfolioStateInput) -> SizingResult:
     win_rate = require(inp.win_rate, "win_rate")
     payoff_ratio = require(inp.avg_win_loss_ratio, "avg_win_loss_ratio")
-    kelly_cap_pct = require(
-        inp.portfolio_config.kelly_cap_pct, "portfolio_config.kelly_cap_pct"
-    )
+    kelly_cap_pct = require(inp.portfolio_config.kelly_cap_pct, "portfolio_config.kelly_cap_pct")
     require_positive(payoff_ratio, "avg_win_loss_ratio")
     require_positive(inp.current_price, "current_price")
     require_positive(inp.total_equity, "total_equity")

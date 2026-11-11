@@ -8,6 +8,7 @@
 따라 unverified/certified 상한을 고른다)를 재정의하지 않고 그대로
 위임한다. 입력 결손은 base.missing()으로 DENY(I2).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

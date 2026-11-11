@@ -6,6 +6,7 @@ Replaces the `current_portfolio_state: dict` accepted by
 `from_dict()` accepts that dict as-is — wiring `engine.py` itself is out
 of scope for this leaf.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

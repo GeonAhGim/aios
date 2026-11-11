@@ -7,6 +7,7 @@ this module only defines the shape and the pure state transition.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§2 row 63, §3.2.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

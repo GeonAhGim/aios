@@ -3,6 +3,7 @@
 L4_risk_and_safety_v1.0.md#9 R-17 — `decision_id`는 R-16 evaluator가 만든
 `RiskDecision.decision_id`를 그대로 실어 나르는 옵션 필드다(기본값
 `None`으로 기존 호출부의 인자 없는 생성을 깨지 않는다)."""
+
 from __future__ import annotations
 
 from uuid import UUID

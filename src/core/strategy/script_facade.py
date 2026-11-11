@@ -24,6 +24,7 @@ Fail-closed: `script_signal_series` and `compile_script_source` propagate
 `CondV2BridgeError` / `ScriptCompileError` unchanged. There is no
 except-and-fall-back-to-cond-v2 anywhere in this module.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

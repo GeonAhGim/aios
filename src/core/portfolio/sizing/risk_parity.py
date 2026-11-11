@@ -16,6 +16,7 @@
 전략별 vol 필드를 추가하기 전까지는 이 시그니처(`size(inp)`, 단일 실행 입력
 하나)로 계산할 수 없다 — 미검증.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

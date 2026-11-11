@@ -9,6 +9,7 @@ calls Executor. No LLM/Agent judgment is involved — decisions are made
 deterministically from conditions fixed at compile time by FSMStrategyConfig
 and current market prices alone.
 """
+
 from __future__ import annotations
 
 import logging

@@ -9,6 +9,7 @@ trace_id·TTL을 하나의 계약으로 묶어 재생(replay)과 감사를 가�
 호환 규칙(107번): 필드 추가는 MINOR(기본값 필수). `RiskOutcome`/`GateKind`
 값 추가는 MINOR, 제거·의미 변경은 MAJOR(`v2`, `schema_version` 갱신).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

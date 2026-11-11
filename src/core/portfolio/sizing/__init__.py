@@ -7,6 +7,7 @@ commit for L17 (task-2452) did not make that extension, and this leaf's
 owns its own public result type and shared exception directly here (it does
 not touch `models.py`, which is out of scope).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -19,7 +20,6 @@ from src.core.risk.hashing import canonical_json, sha256_hex
 
 SCHEMA_VERSION = "sizing-v1"
 HUNDRED = Decimal("100")
-
 
 
 class PortfolioSizingError(ValueError):

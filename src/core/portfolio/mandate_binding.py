@@ -7,6 +7,7 @@ then MAX_SINGLE_INSTRUMENT -> MAX_TOTAL_EXPOSURE -> MIN_CASH_BUFFER clamps
 in that sequence. The order is hardcoded rather than data-driven because
 changing it changes the result when more than one constraint binds at once.
 """
+
 from __future__ import annotations
 
 import hashlib

@@ -4,6 +4,7 @@
 느슨한 dict라서 조립 후 사라진다(재생 불가, R2 위반). 이 모듈은 그
 dict를 규칙이 실제로 소비하는 값 전부를 갖춘 불변 스냅샷으로 대체한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

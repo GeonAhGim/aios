@@ -15,6 +15,7 @@ ACTIVE 번들의 `rule_hash`와 비교(엔진이 불일치 시 DENY)할 수 있�
 제약이라 여기서는 표현하지 않는다(모순 없음: 이 모델은 스코프 간
 비교를 하지 않으므로 partial unique 전제를 침해하지 않는다).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -97,9 +98,7 @@ class RiskRuleBundle(BaseModel, frozen=True):
             raise ValueError("rule_hash는 소문자 hex sha256(64자)여야 한다")
         return value
 
-    @field_validator(
-        "effective_from", "effective_to", "approved_at", "activated_at", "retired_at"
-    )
+    @field_validator("effective_from", "effective_to", "approved_at", "activated_at", "retired_at")
     @classmethod
     def _validate_aware_utc(cls, value: datetime | None) -> datetime | None:
         if value is None:

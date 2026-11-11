@@ -5,6 +5,7 @@ Structured signal produced by FD-8.1 (StrategyEngine.evaluate). Contains
 overwritten by FD-8.2 (PortfolioEngine) with the actual quantity
 (8.2-A Master Authority — this layer does not decide how much to buy).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

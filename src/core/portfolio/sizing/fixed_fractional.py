@@ -5,6 +5,7 @@
 아님) 필드로 강제하므로, 여기서는 0으로 나누거나 음수 비중이 나오지 않도록
 `price`/`total_equity` > 0만 fail-closed로 추가 검증한다.
 """
+
 from __future__ import annotations
 
 from src.core.portfolio.config import SizingMethod

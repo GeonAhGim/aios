@@ -4,6 +4,7 @@
 `warning_pct`와 `hard_stop_pct` 사이면 ESCALATE(`RISK_MDD_WARN`).
 `warning_pct` 이하면 ALLOW. 입력 결손은 base.missing()으로 DENY(I2).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

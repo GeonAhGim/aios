@@ -9,6 +9,7 @@ R-04(`rules/base.py`)의 `rule_error()`, R-05~R-13 규칙 10종, R-14
 `decision_id`는 `trace_id`·`gate_kind`·`inputs_hash`로부터 결정론적으로
 파생한다 — 같은 입력이면 항상 같은 결정을 재생할 수 있다, R2).
 """
+
 from __future__ import annotations
 
 import time

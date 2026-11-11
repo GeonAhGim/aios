@@ -5,6 +5,7 @@ Versioned per-execution sizing config contract (R2) that will be stored in
 wiring belongs to L23 — this file owns only the pure type and the hash
 recipe.
 """
+
 from __future__ import annotations
 
 import re

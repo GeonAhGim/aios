@@ -6,6 +6,7 @@ Grammar: `{INDICATOR}{_paramName<int>}*[.output][@timeframe]`, e.g.
 `market_state.py:_KEY_RE` and `condition_evaluator.extract_indicator_keys` are
 replaced by this module (spec row 62/65) so the grammar has exactly one owner.
 """
+
 from __future__ import annotations
 
 import re

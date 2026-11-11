@@ -20,6 +20,7 @@ scope 매칭(§2.1 "SYMBOL 한도가 다른 심볼에 미적용" 등 6개 scope 
 같은 컨벤션으로 `"<SCOPE>:<scope_ref>"` 키를 쓴다고 가정한다(미검증 —
 조립기가 이 키 규칙을 따라야 값이 채워진다).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

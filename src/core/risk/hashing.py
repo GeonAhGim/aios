@@ -6,6 +6,7 @@ dict 키 순서와 `Decimal`의 원래 문자열 표현(trailing zero 등)에 �
 출력이 달라지므로 그대로는 쓸 수 없다 — 여기서 키 정렬과 `Decimal`
 정규화를 강제한다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -37,9 +38,9 @@ def _normalize(obj: Any) -> Any:
 def canonical_json(obj: Any) -> bytes:
     """키 정렬 + `Decimal`/`datetime`/`UUID` 정규화가 적용된 결정론적 JSON 바이트열."""
     normalized = _normalize(obj)
-    return json.dumps(
-        normalized, sort_keys=True, ensure_ascii=True, separators=(",", ":")
-    ).encode("utf-8")
+    return json.dumps(normalized, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
 
 
 def sha256_hex(data: bytes) -> str:

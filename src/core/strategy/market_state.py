@@ -5,6 +5,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#§2 row 66, §3.2.
 Key grammar is not re-implemented here -- `values` keys are validated via
 `indicator_key.parse_key`, the single source of truth (row 62/65).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -33,36 +33,12 @@ def test_default_scope_is_tests_and_currently_clean() -> None:
     assert code == 0, out[-800:]
 
 
-def test_protected_dirs_come_from_the_zone_manifest() -> None:
-    """제외 목록을 손으로 따로 적지 않는다 -- .aios-zone의 FROZEN_PAPER_ONLY와 같아야 한다."""
-    from scripts.check_format import protected_dirs
+def test_frozen_paper_only_zone_is_inside_the_default_scope() -> None:
+    """FROZEN_PAPER_ONLY 구역도 정리를 마쳐 기본 범위에 들어간다(제외 목록은 생성기 출력뿐)."""
+    from scripts.check_format import DEFAULT_PATHS, GENERATED_DIRS
 
-    dirs = protected_dirs()
-    assert set(dirs) == {
-        "src/core/strategy",
-        "src/core/portfolio",
-        "src/core/risk",
-        "src/core/executor",
-    }
-
-
-def test_protected_dirs_parses_only_the_frozen_paper_only_block(tmp_path: Path) -> None:
-    from scripts.check_format import protected_dirs
-
-    zone = tmp_path / ".aios-zone"
-    zone.write_text(
-        "zones:\n"
-        "  FROZEN:\n"
-        '    - "aios/kernel/policy/**"\n'
-        "  FROZEN_PAPER_ONLY:\n"
-        '    - "src/a/**"\n'
-        '    - "src/b/**"\n'
-        "  SCAFFOLD:\n"
-        '    - "src/c/**"\n',
-        encoding="utf-8",
-    )
-    assert protected_dirs(zone) == ["src/a", "src/b"]
-    assert protected_dirs(tmp_path / "missing") == []
+    assert "src" in DEFAULT_PATHS
+    assert not any(d.startswith("src/core/") for d in GENERATED_DIRS)
 
 
 def test_generated_dirs_exist_and_match_the_generator_contract() -> None:

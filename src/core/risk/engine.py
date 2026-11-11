@@ -4,6 +4,7 @@
 `check()`는 legacy dict->`RiskInputs` 변환 위임 어댑터, `check_decision()`이 신규
 공개 계약이다. (I9: LLM 미import.)
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -26,15 +27,21 @@ _APPROVER_ID = UUID("5d4c3b2a-1e0f-4a9b-8c7d-6e5f4a3b2c1d")
 
 # legacy checked_rules 이름 -> R-16 규칙 id, legacy 평가 순서 그대로.
 _LEGACY_ORDER = (
-    ("daily_loss", "daily_loss"), ("max_drawdown", "max_drawdown"), ("leverage", "leverage"),
-    ("position_concentration", "concentration"), ("strategy_allocation", "strategy_allocation"),
-    ("var", "var_es"), ("correlation_risk", "correlation"), ("trade_frequency", "trade_frequency"),
+    ("daily_loss", "daily_loss"),
+    ("max_drawdown", "max_drawdown"),
+    ("leverage", "leverage"),
+    ("position_concentration", "concentration"),
+    ("strategy_allocation", "strategy_allocation"),
+    ("var", "var_es"),
+    ("correlation_risk", "correlation"),
+    ("trade_frequency", "trade_frequency"),
     ("safety_state", "safety_state"),
 )
 
 # legacy엔 warning 구간이 없어 규칙당 문구 하나로 합류(나머지는 "_exceeded" 기본값).
 _EXCEEDED_SUFFIX = {
-    "daily_loss": "halt_exceeded", "max_drawdown": "hard_stop_exceeded",
+    "daily_loss": "halt_exceeded",
+    "max_drawdown": "hard_stop_exceeded",
     "trade_frequency": "anomaly",
 }
 
@@ -53,14 +60,22 @@ class RiskEngine:
         """R-17 신규 공개 계약 — R-16 `evaluate()`를 그대로 호출·위임한다."""
         policy = self._policy
         bundle = RiskRuleBundle(
-            id=_BUNDLE_ID, version=policy.version, state=BundleState.ACTIVE,
-            rule_hash=compute_rule_hash(policy, _ENGINE_VERSION), engine_version=_ENGINE_VERSION,
+            id=_BUNDLE_ID,
+            version=policy.version,
+            state=BundleState.ACTIVE,
+            rule_hash=compute_rule_hash(policy, _ENGINE_VERSION),
+            engine_version=_ENGINE_VERSION,
             policy_snapshot=policy.model_dump(mode="python"),
-            created_by=_APPROVER_ID, approved_by=_APPROVER_ID,
+            created_by=_APPROVER_ID,
+            approved_by=_APPROVER_ID,
         )
         return evaluate(
-            inputs, bundle, gate_kind=GateKind.PRE_TRADE, trace_id=uuid4(),
-            now=inputs.as_of, ttl=policy.decision_ttl.pre_trade_sec,
+            inputs,
+            bundle,
+            gate_kind=GateKind.PRE_TRADE,
+            trace_id=uuid4(),
+            now=inputs.as_of,
+            ttl=policy.decision_ttl.pre_trade_sec,
         )
 
     def _bridge_legacy_inputs(
@@ -77,18 +92,27 @@ class RiskEngine:
         reduce_only = qty is not None and qty != 0
         total_equity = inputs.equity.total_equity
         smv = total_equity * inputs.intent.capital_pct / Decimal("100") if total_equity else None
-        return inputs.model_copy(update={
-            "intent": inputs.intent.model_copy(update={"reduce_only": reduce_only}),
-            "exposure": inputs.exposure.model_copy(update={"symbol_market_value": smv}),
-            "stats": inputs.stats.model_copy(update={
-                "es_pct": inputs.stats.var_pct, "var_method": "legacy_facade",
-                "bars_used": self._policy.var.min_bars, "max_correlation": 1.0,
-            }),
-            "safety": inputs.safety.model_copy(update={
-                "active_control_scopes": (), "data_distrust_level": "TRUSTED",
-                "connection_fresh": True,
-            }),
-        })
+        return inputs.model_copy(
+            update={
+                "intent": inputs.intent.model_copy(update={"reduce_only": reduce_only}),
+                "exposure": inputs.exposure.model_copy(update={"symbol_market_value": smv}),
+                "stats": inputs.stats.model_copy(
+                    update={
+                        "es_pct": inputs.stats.var_pct,
+                        "var_method": "legacy_facade",
+                        "bars_used": self._policy.var.min_bars,
+                        "max_correlation": 1.0,
+                    }
+                ),
+                "safety": inputs.safety.model_copy(
+                    update={
+                        "active_control_scopes": (),
+                        "data_distrust_level": "TRUSTED",
+                        "connection_fresh": True,
+                    }
+                ),
+            }
+        )
 
 
 def _to_legacy_result(decision: RiskDecision) -> RiskCheckResult:
@@ -105,8 +129,10 @@ def _to_legacy_result(decision: RiskDecision) -> RiskCheckResult:
             break
     approved = decision.outcome == RiskOutcome.ALLOW
     return RiskCheckResult(
-        approved=approved, rejection_reason=None if approved else rejection_reason,
-        checked_rules=checked_rules, decision_id=decision.decision_id,
+        approved=approved,
+        rejection_reason=None if approved else rejection_reason,
+        checked_rules=checked_rules,
+        decision_id=decision.decision_id,
     )
 
 

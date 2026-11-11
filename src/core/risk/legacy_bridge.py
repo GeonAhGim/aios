@@ -11,6 +11,7 @@
 (R-31)가 대체하며, 그 전까지 notional에 의존하는 규칙은 이 경로로
 정확히 재현되지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

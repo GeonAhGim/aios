@@ -5,6 +5,7 @@
 절대 상한만 쓰면 원래 활발한 전략을 오탐하므로 둘 중 큰 값을 상한으로
 취한다(§9 R-12 DoD). 순수(I/O 금지), 상한 60줄.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

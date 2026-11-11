@@ -8,6 +8,7 @@ could desynchronize it. Phase 1 is spot-only so `margin_used` is always 0,
 but the field exists because the spec (row 98) requires it for a future
 margin phase to populate without changing this module's public contract.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

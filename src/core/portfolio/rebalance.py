@@ -14,6 +14,7 @@ FROZEN_PAPER_ONLY leaf must not import). So `plan_rebalance` takes the
 already-resolved `cost_rate` as an explicit argument instead of reaching
 into `cfg.cost_model` for a rate that field does not carry.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

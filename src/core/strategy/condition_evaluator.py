@@ -7,6 +7,7 @@ ConditionCompiler가 만든 문자열("{indicator}{params_suffix} {연산자} {t
 문법은 컴파일러가 고정한 형태만 지원 — 이 세션이 임의 표현식 파서를
 새로 설계하지 않고, 컴파일러가 실제로 만드는 문자열만 정확히 되돌린다.
 """
+
 from __future__ import annotations
 
 import re

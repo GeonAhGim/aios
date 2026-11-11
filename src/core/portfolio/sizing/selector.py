@@ -6,6 +6,7 @@ immediately when `config.method` and `inp.portfolio_config.method` disagree
 `SizingResult.method` differs from the requested method or when `inputs_hash`
 is not a valid sha256 hex digest (implementation error / tampering).
 """
+
 from __future__ import annotations
 
 import re

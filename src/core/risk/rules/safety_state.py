@@ -6,6 +6,7 @@ CB level·활성 kill-switch control·데이터 불신 레벨·안전계층에 �
 책임이라 이 함수는 판정 결과 하나만 반환한다(decision 각주). 순수(I/O 금지),
 상한 90줄.
 """
+
 from __future__ import annotations
 
 from src.core.loader.risk_policy_loader import RiskPolicy

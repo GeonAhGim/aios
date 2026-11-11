@@ -4,6 +4,7 @@ fail-closed 헬퍼(`missing`, `rule_error`)·`pct` 정밀도.
 R-05~R-13 규칙 9종이 이 시그니처에 직렬 의존한다(§2.1 rules/*.py). 판단
 자체는 하지 않는다 — 순수(I/O·DB 금지), 상한 60줄.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation

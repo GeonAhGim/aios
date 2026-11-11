@@ -9,6 +9,7 @@
 생기면 이 파일이 곱셈으로 확장된다. 입력 결손은 base.missing()으로
 DENY(I2).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

@@ -4,6 +4,7 @@
 is None, reject with `PORTFOLIO_SIZING_INPUT_MISSING` instead of replacing with 0
 (negative case as per spec).
 """
+
 from __future__ import annotations
 
 from src.core.portfolio.config import SizingMethod
@@ -20,9 +21,7 @@ from src.core.portfolio.state_input import PortfolioStateInput
 def size(inp: PortfolioStateInput) -> SizingResult:
     realized_vol_pct = require(inp.realized_vol_pct, "realized_vol_pct")
     require_positive(realized_vol_pct, "realized_vol_pct")
-    target_vol_pct = require(
-        inp.portfolio_config.target_vol_pct, "portfolio_config.target_vol_pct"
-    )
+    target_vol_pct = require(inp.portfolio_config.target_vol_pct, "portfolio_config.target_vol_pct")
     require_positive(inp.current_price, "current_price")
     require_positive(inp.total_equity, "total_equity")
 

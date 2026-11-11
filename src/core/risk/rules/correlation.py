@@ -6,6 +6,7 @@ risk_stats(R-18~R-20, 5ec19fb)가 계산한 `StatsInputs.correlated_exposure_pct
 으로 암묵 치환해 통과시키던 결함(R3 감사 지적, decision 각주)을 반복하지 않는다.
 순수(I/O 금지), 상한 70줄.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

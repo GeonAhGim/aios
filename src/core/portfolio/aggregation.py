@@ -15,6 +15,7 @@
 `Decimal` 컨텍스트 정밀도(기본 28자리)에서 반올림돼 항등식이 근사값이 될 수
 있음 — 이 계약은 그 경우를 다루지 않는다).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

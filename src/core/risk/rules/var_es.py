@@ -6,6 +6,7 @@ max_pct **and** ES ≤ es_max_pct를 동시에 요구하고, `bars_used`가 `min
 미달이면 "계산은 됐지만 표본이 부족해 신뢰할 수 없다"를 결손과 동일하게
 DENY한다(R3 fail-closed). 순수(I/O 금지), 상한 90줄.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

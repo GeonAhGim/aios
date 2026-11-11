@@ -8,6 +8,7 @@
 같은 주문이 reduce_only면 통과). reduce_only가 아닐 때 입력 결손은
 base.missing()으로 DENY(I2).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
