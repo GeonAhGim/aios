@@ -209,8 +209,13 @@ class TestUpdateNotificationPreferencesPerformance:
 
     @pytest.mark.perf
     async def test_p95_latency_detects_budget_violation(self, perf_budget, pool):
-        """Failure-injection: 1s delay pushes p95 over 1000ms budget (red gate)."""
-        import asyncio as _asyncio
+        """Failure-injection: 1s delay pushes p95 over 1000ms budget (red gate).
+
+        Uses ``virtual_delayed_async``-style ledger injection (via ``_add_virtual``) so the
+        measurement reads 1 s per call without actually sleeping — the test finishes in
+        milliseconds while the budget assertion sees the same wall time as a real delay.
+        """
+        from tests.support.perf_inject import _add_virtual
 
         user_id = await create_test_user(pool)
         counter = 0
@@ -218,7 +223,7 @@ class TestUpdateNotificationPreferencesPerformance:
         async def slow_upsert_closure():
             nonlocal counter
             counter += 1
-            await _asyncio.sleep(1)  # 1s per call → p95 ≈ 1000ms, exceeds 1000ms budget
+            _add_virtual(0, 1)  # 1 s wall injection → p95 ≈ 1000 ms, exceeds 1000 ms budget
             await update_notification_preferences(
                 pool, user_id, {"risk_mismatch_email": bool(counter % 2)}
             )
