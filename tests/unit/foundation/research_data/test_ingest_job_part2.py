@@ -116,7 +116,7 @@ async def test_page_processing_throughput_gate_red_with_io_delay_injection(
 
     DoD 요구: failure-injection 1, gate-red reproduction 1.
     """
-    from tests.support.perf_inject import delayed_async
+    from tests.support.perf_inject import virtual_delayed_async
 
     items = tuple((_item(f"ext-{i}"), f"ext-{i}") for i in range(1000))
     page = IngestPage(items=items, next_cursor=None)
@@ -126,7 +126,9 @@ async def test_page_processing_throughput_gate_red_with_io_delay_injection(
 
     store = _FakeStore()
     # 1000 items × 0.005s = 5s — 예산(2s)의 2.5배 이상
-    monkeypatch.setattr(store, "append_item", delayed_async(store.append_item, 0.005))
+    # virtual_delayed_async는 실제 sleep 없이 virtual wall ledger에 지연만
+    # 기록하므로, 측정만 늘리고 실제로 안 잔다 (task-23461).
+    monkeypatch.setattr(store, "append_item", virtual_delayed_async(store.append_item, 0.005))
 
     async def run_ingest() -> None:
         await ingest_job(
