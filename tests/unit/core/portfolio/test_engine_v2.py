@@ -269,10 +269,12 @@ def _allocate_p99_ms(perf_budget: PerfBudget, engine: PortfolioEngine) -> float:
             break
 
     # Each sample is already milliseconds per call, not total batch time.
+    # n=50 gives a stable p99 estimate for allocate() (~0.01ms, budget 5ms → 500x margin);
+    # 500 samples at batch=16384 took ~48s with no precision gain (p99 variance < 10%).
     latencies_ms = sorted(
-        sample.cpu_ms for sample in perf_budget.samples(allocate_once, n=100, batch=batch)
+        sample.cpu_ms for sample in perf_budget.samples(allocate_once, n=50, batch=batch)
     )
-    return latencies_ms[int(100 * 0.99) - 1]
+    return latencies_ms[int(50 * 0.99) - 1]
 
 
 @pytest.mark.perf
