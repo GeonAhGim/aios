@@ -22,7 +22,8 @@ from tests.integration.eventstore import conftest as eventstore_conftest
 
 
 def _request_for_module(module_name: str) -> pytest.FixtureRequest:
-    return cast(pytest.FixtureRequest, SimpleNamespace(module=SimpleNamespace(__name__=module_name)))
+    module = SimpleNamespace(__name__=module_name)
+    return cast(pytest.FixtureRequest, SimpleNamespace(module=module))
 
 
 def test_unregistered_replay_module_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
