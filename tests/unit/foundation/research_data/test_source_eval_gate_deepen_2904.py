@@ -173,20 +173,21 @@ def test_perf_parse_eval_markdown_budget_injection_fails_red(
 
     Confirms the perf assertion is *sensitive* — a sufficiently slowed hot path
     must go red, not pass silently.
+
+    Uses ``virtual_delayed_sync`` so the injection adds to the CPU ledger
+    without actually spinning (real spin used ~140s per test).
     """
     from src.foundation.research_data.domain.source_eval_gate import (
         assert_source_eval_gate as _orig,
     )
+    from tests.support.perf_inject import virtual_delayed_sync
 
-    def _slow(*args: object, **kwargs: object) -> object:
-        result = _orig(*args, **kwargs)
-        # ~15ms CPU work per call → ~1500ms for 100 calls (>> 200ms budget)
-        _ = sum(i * i for i in range(600000))
-        return result
+    # 0.015s × 100 calls = 1.5s >> 200ms budget (same effect as the old 600k spin)
+    slow = virtual_delayed_sync(_orig, 0.015)
 
     import src.foundation.research_data.domain.source_eval_gate as mod
 
-    monkeypatch.setattr(mod, "assert_source_eval_gate", _slow)
+    monkeypatch.setattr(mod, "assert_source_eval_gate", slow)
 
     def parse_100() -> None:
         for _ in range(100):
