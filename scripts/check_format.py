@@ -6,8 +6,9 @@ scripts/ 29개 파일이 어긋나 있었다(일괄 정리 3cac9e272·후속). �
 곧바로 게이트다: 한 건이라도 있으면 FAIL.
 
 범위: tests · src · scripts. 단 생성기 출력(GENERATED_DIRS)은 제외한다 -- 재생성 결과와
-바이트 비교하는 테스트가 있어 포맷하면 깨진다. FROZEN_PAPER_ONLY 구역(src/core/{strategy,portfolio,risk,executor})은
-사용자 승인(2026-11-11)으로 포맷-only 정리를 마쳐 범위에 포함한다.
+바이트 비교하는 테스트가 있어 포맷하면 깨진다.
+FROZEN_PAPER_ONLY 구역(src/core/{strategy,portfolio,risk,executor})은 사용자 승인(2026-11-11)으로
+포맷-only 정리를 마쳐 범위에 포함한다.
 
 사용: `python scripts/check_format.py [경로 ...]` (기본 tests src scripts). 종료코드 0=통과,
 1=어긋난 파일 있음, 2=ruff 실행 실패. 고치는 법: `python -m ruff format <표시된 파일>`.
