@@ -14,6 +14,7 @@ from uuid import UUID
 
 import asyncpg
 import pytest
+import pytest_asyncio
 
 from src.core.safety.heartbeat import write_heartbeat
 from src.core.safety.split_brain import SplitBrainDiagnostics
@@ -41,7 +42,7 @@ def kill_switch(pool):
     return build_kill_switch_service(pool)
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest_asyncio.fixture(scope="module", loop_scope="module", autouse=True)
 async def _clear_stale_liquidation_requests():
     """`_select_candidate`의 SELECT...FOR UPDATE SKIP LOCKED LIMIT 1은 전역에서
     가장 오래된 non-terminal 행을 고른다 -- 같은 공유 TEST_DATABASE_URL의 다른

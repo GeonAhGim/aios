@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
+import pytest_asyncio
 
 from src.core.db.conditional_write import ConcurrencyConflictError
 from src.foundation.risk_gate.adapters.postgres_repository import PostgresRiskGateRepository
@@ -46,7 +47,7 @@ async def pool():
     await p.close()
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest_asyncio.fixture(scope="module", loop_scope="module", autouse=True)
 async def _clear_stale_requests():
     """`_select_candidate`'s SELECT...FOR UPDATE SKIP LOCKED LIMIT 1 has no
     per-test scoping (the frozen contract has no request_id param) -- it
