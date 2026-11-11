@@ -51,7 +51,8 @@ def git_deleted_files(base: str, head: str, repo: Path) -> list[str]:
             "diff",
             "--no-renames",
             "--name-status",
-            f"{base}..{head}",
+            # three-dot: base가 분기 이후 전진해도 merge-base 대비 브랜치 쪽 삭제만 본다
+            f"{base}...{head}",
         ],
         cwd=repo,
         capture_output=True,

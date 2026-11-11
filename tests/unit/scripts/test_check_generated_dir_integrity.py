@@ -110,6 +110,32 @@ def test_deleting_generated_file_fails(tmp_path: Path) -> None:
     assert exit_code == 1
 
 
+def test_base_advanced_past_branch_point_is_not_flagged(tmp_path: Path) -> None:
+    """negative 경계(오탐): base(main)가 브랜치 분기 이후 generated/ 파일을 새로 추가해도
+    브랜치 쪽에서 그 파일이 "삭제"된 것은 아니다.
+    two-dot(base..head)은 이를 삭제로 잘못 보고한다."""
+    _init_repo_with_generated_file(tmp_path)
+
+    _run_git(tmp_path, "checkout", "-q", "-b", "feature")
+    (tmp_path / "src" / "exchanges" / "kis" / "account_mixin.py").write_text(
+        "# handwritten, edited on feature\n", encoding="utf-8"
+    )
+    _run_git(tmp_path, "add", "-A")
+    _run_git(tmp_path, "commit", "-q", "-m", "feature edit")
+
+    _run_git(tmp_path, "checkout", "-q", "base")
+    new_gen = tmp_path / "src" / "exchanges" / "kis" / "generated" / "order_tr_labels.py"
+    new_gen.write_text('LABELS = {"TTTC0001": "order"}\n', encoding="utf-8")
+    _run_git(tmp_path, "add", "-A")
+    _run_git(tmp_path, "commit", "-q", "-m", "base: add generated file")
+
+    exit_code = check_generated_dir_integrity.main(
+        ["--base", "base", "--head", "feature", "--repo", str(tmp_path)]
+    )
+
+    assert exit_code == 0
+
+
 def test_deleting_generated_file_prints_offending_path(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
