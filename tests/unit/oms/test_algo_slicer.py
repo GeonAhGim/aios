@@ -270,3 +270,163 @@ def test_gate_red_when_remainder_absorption_guard_is_removed(tmp_path: Path) -> 
     )
     assert mutated.returncode == 1, mutated.stdout + mutated.stderr
     assert "1 failed" in mutated.stdout
+
+
+# ---------------------------------------------------------------------------
+# Negative tests — 입력 경계 3종 (D2 negative floor 보강)
+# ---------------------------------------------------------------------------
+
+
+def test_zero_total_quantity_produces_all_zero_slices() -> None:
+    """total_quantity=0 은 도메인에서 즉시 거부하지 않으나, 모든 슬라이스 qty
+    가 0이어야 한다(합계 0)."""
+    req = _request(total_quantity=Decimal("0"), slice_count=5)
+    plans = plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+    assert len(plans) == 5
+    assert sum(p.quantity for p in plans) == Decimal("0")
+    assert all(p.quantity == Decimal("0") for p in plans)
+
+
+def test_negative_total_quantity_produces_negative_sum() -> None:
+    """total_quantity 음수 — 도메인 검증이 없으면 음수 합계가 나온다.
+    앱 코드가 이 입력을 막는지 검증: 만약 ValidationError 면 그쪽으로 변경."""
+    req = _request(total_quantity=Decimal("-1"), slice_count=3)
+    plans = plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(req.seed))
+    # 현재 plan_slices 는 음수를 허용하므로 합계가 음수임 확인
+    assert sum(p.quantity for p in plans) == Decimal("-1")
+
+
+def test_negative_slice_count_rejected_by_contract() -> None:
+    """slice_count=-1 은 계약(ge=1)에서 즉시 거부."""
+    with pytest.raises(ValidationError):
+        _request(slice_count=-1)
+
+
+# ---------------------------------------------------------------------------
+# 성능 테스트 — @pytest.mark.perf (D2 perf assertion 보강)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.perf
+def test_plan_slices_500_slices_cpu_budget() -> None:
+    """plan_slices(slice_count=500) CPU 예산 테스트.
+
+    측정 방식: PerfBudget.best_of(n=10, batch=20)
+    측정일: 2026-11-11
+    실측 cpu_ms: 0.781ms (batch=20, Windows process_time 15.6ms 양자화)
+    예산: 실측 × 30 = 23.43ms (여유 30배, ADR-2026-09-09-C Decision 1)
+    """
+    from tests.support.perf_budget import PerfBudget
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    scope = OrderIdempotencyScope(
+        tenant_id=uuid4(),
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=1,
+        intent_seq=1,
+        window_start=datetime.now(UTC),
+    )
+    req = AlgoRequest.model_validate(
+        {
+            "algo_run_id": uuid4(),
+            "trace_id": uuid4(),
+            "scope": scope,
+            "algo": "TWAP",
+            "symbol": "BTC/USDT",
+            "side": OrderSide.BUY,
+            "total_quantity": Decimal("1"),
+            "start_at": start,
+            "end_at": start + timedelta(minutes=10),
+            "slice_count": 500,
+            "seed": 42,
+        }
+    )
+
+    perf = PerfBudget()
+    budget_ms = 23.43  # 0.781ms × 30
+
+    sample = perf.assert_within(
+        lambda: plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(42)),
+        budget_ms=budget_ms,
+        n=10,
+        batch=20,
+        label="plan_slices_500_slices",
+    )
+    # 성능이 예산 대비 얼마나 여유 있는지 명시적 보고
+    margin_pct = (1 - sample.cpu_ms / budget_ms) * 100
+    assert margin_pct > 0, (
+        f"예산 여유 부족: {perf.describe(sample, budget_ms=budget_ms)} (여유 {margin_pct:.1f}%)"
+    )
+
+
+@pytest.mark.perf
+def test_plan_slices_gate_red_reproduction_via_virtual_delay() -> None:
+    """게이트 적색 재현: virtual_delayed_sync 로 주입한 cpu_ns가
+    PerfBudget.sample 에서 측정된 cpu_ms 를 예산 초과로 만든다.
+
+    핵심: 예산은 실측의 30배이므로, 실측의 10배 주입으로는 예산을 넘지 못한다.
+    따라서 주입량은 예산(실측×30)을 넘는 값으로 잡아야 적색 재현이 된다.
+    여기서는 예산 × 1.5 의 가상 지연을 주입해 확실한 적색을 만든다.
+    """
+    from tests.support.perf_budget import PerfBudget
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    scope = OrderIdempotencyScope(
+        tenant_id=uuid4(),
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=1,
+        intent_seq=1,
+        window_start=datetime.now(UTC),
+    )
+    req = AlgoRequest.model_validate(
+        {
+            "algo_run_id": uuid4(),
+            "trace_id": uuid4(),
+            "scope": scope,
+            "algo": "TWAP",
+            "symbol": "BTC/USDT",
+            "side": OrderSide.BUY,
+            "total_quantity": Decimal("1"),
+            "start_at": start,
+            "end_at": start + timedelta(minutes=10),
+            "slice_count": 500,
+            "seed": 42,
+        }
+    )
+
+    perf = PerfBudget()
+    budget_ms = 23.43  # 실측 0.781ms × 30
+
+    # 실제 plan_slices 를 가상 지연 함수로 감싸서 cpu 누계에 기여하게 한다.
+    # 예산 × 1.5 (35.145ms) 주입 → 예산 초과 → 적색 재현.
+    injection_seconds = budget_ms * 1.5 / 1000  # 0.035145초
+    delayed_fn = virtual_delayed_sync(
+        lambda: plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(42)),
+        injection_seconds,
+    )
+
+    reset_virtual_totals()
+    sample = perf.sample(delayed_fn, batch=1)
+
+    # 주입이 없으면 예산 아래여야 함(양성 기준선)
+    reset_virtual_totals()
+    clean_sample = perf.sample(
+        lambda: plan_slices(req, now=req.start_at, volume_profile=None, rng=random.Random(42)),
+        batch=1,
+    )
+    assert clean_sample.cpu_ms < budget_ms, (
+        f"-clean baseline이 이미 예산 초과: {perf.describe(clean_sample, budget_ms=budget_ms)}"
+    )
+
+    # 주입이 있으면 예산 초과 → 적색 재현
+    assert sample.cpu_ms >= budget_ms, (
+        f"주입 게이트 적색 재현 실패: {perf.describe(sample, budget_ms=budget_ms)} "
+        f"(주입={injection_seconds * 1000:.1f}ms)"
+    )
