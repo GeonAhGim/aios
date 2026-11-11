@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from src.core.observability import metric_names
+from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _METRIC_NAME_RE = re.compile(r"^aios\.[a-z_]+\.[a-z_]+\.[a-z_]+(_total|_seconds|_bytes|\.gauge)?$")
 
@@ -76,3 +80,55 @@ def test_all_metric_names_are_nonempty_and_unique() -> None:
     names = list(metric_names.ALL_METRIC_NAMES)
     assert len(names) > 0
     assert len(names) == len(set(names))
+
+
+# ---- 성능 테스트 (D2 perf assertion 보강, task-23695) ----
+
+
+@pytest.mark.perf
+def test_all_metric_names_match_naming_regex_perf_budget() -> None:
+    """정규식 전수 검증의 CPU 예산 단언.
+
+    ALL_METRIC_NAMES(45개)를 정규식으로 매칭하는 비용이 로컬 실측의
+    30배 이상 여유 내에 있어야 한다.
+
+    실측: best_of(5) cpu_ms ≈ 0.015ms (M2 Mac, Python 3.13).
+    예산: 0.5ms (실측의 ≈33배, 로컬 회귀 예산).
+    """
+    perf_budget = PerfBudget()
+    perf_budget.assert_within(
+        lambda: [n for n in metric_names.ALL_METRIC_NAMES if not _METRIC_NAME_RE.match(n)],
+        budget_ms=0.5,
+        n=5,
+        batch=1,
+        label="metric_names regex scan",
+    )
+
+
+@pytest.mark.perf
+def test_perf_assertion_catches_injected_delay(
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """게이트 적색 재현: virtual_delayed_sync 로 주입한 지연이
+    PerfBudget.sample.cpu_ms 를 예산 초과로 만들어야 한다.
+
+    1.0초 가상 지연을 주입하면 ledger가 1000ms 이상 쌓여
+    예산(0.5ms)을 명확히 초과한다. 실제 sleep 없이 가상 지연만 사용.
+    """
+    reset_virtual_totals()
+
+    # 정규식 매칭을 1.0초 가상 지연으로 감싼 버전
+    def delayed_scan() -> list[str]:
+        return [n for n in metric_names.ALL_METRIC_NAMES if not _METRIC_NAME_RE.match(n)]
+
+    delayed_scan_wrapped = virtual_delayed_sync(delayed_scan, 1.0)
+
+    with pytest.raises(AssertionError):
+        sample = perf_budget.best_of(
+            delayed_scan_wrapped,
+            n=5,
+            batch=1,
+        )
+        # 이 단언이 AssertionError로 적색이 돼야 함
+        assert sample.cpu_ms < 0.5, f"주입 지연 CPU {sample.cpu_ms:.4f}ms > 0.5ms budget"
