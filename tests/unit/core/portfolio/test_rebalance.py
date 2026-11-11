@@ -9,6 +9,7 @@ fail some test here.
 
 from __future__ import annotations
 
+import gc
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -285,15 +286,27 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     def measure_once() -> None:
         plan_rebalance(targets, current, cfg, prices, Decimal("2"))
 
-    # batch=1: quantization likely reads 0 ms most of the time
-    samples_batch1 = perf_budget.samples(measure_once, n=40, batch=1)
-    cpu_ms_batch1 = [s.cpu_ms for s in samples_batch1]
-    avg_batch1 = sum(cpu_ms_batch1) / len(cpu_ms_batch1)
+    # Collect once before the distribution, then preserve the caller's GC
+    # state. Collecting the entire pytest heap before each of 80 samples
+    # makes harness cost dominate execution; batch alone does not reduce
+    # collections. This mirrors the fix in test_list_bars.py (task-23326).
+    gc_was_enabled = gc.isenabled()
+    if gc_was_enabled:
+        gc.collect()
+        gc.disable()
+    try:
+        # batch=1: quantization likely reads 0 ms most of the time
+        samples_batch1 = perf_budget.samples(measure_once, n=40, batch=1)
+        cpu_ms_batch1 = [s.cpu_ms for s in samples_batch1]
+        avg_batch1 = sum(cpu_ms_batch1) / len(cpu_ms_batch1)
 
-    # batch=8: quantization error reduced by ~8x
-    samples_batch8 = perf_budget.samples(measure_once, n=40, batch=8)
-    cpu_ms_batch8 = [s.cpu_ms for s in samples_batch8]
-    avg_batch8 = sum(cpu_ms_batch8) / len(cpu_ms_batch8)
+        # batch=8: quantization error reduced by ~8x
+        samples_batch8 = perf_budget.samples(measure_once, n=40, batch=8)
+        cpu_ms_batch8 = [s.cpu_ms for s in samples_batch8]
+        avg_batch8 = sum(cpu_ms_batch8) / len(cpu_ms_batch8)
+    finally:
+        if gc_was_enabled:
+            gc.enable()
 
     # batch=1 average must be near-zero (quantization artifact).
     # Under Windows quantization, a fast function reads 0 ms most of the time;
