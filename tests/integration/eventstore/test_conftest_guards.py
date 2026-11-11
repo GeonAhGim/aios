@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
+from typing import cast
 
 import asyncpg
 import pytest
@@ -20,8 +21,8 @@ import pytest
 from tests.integration.eventstore import conftest as eventstore_conftest
 
 
-def _request_for_module(module_name: str) -> SimpleNamespace:
-    return SimpleNamespace(module=SimpleNamespace(__name__=module_name))
+def _request_for_module(module_name: str) -> pytest.FixtureRequest:
+    return cast(pytest.FixtureRequest, SimpleNamespace(module=SimpleNamespace(__name__=module_name)))
 
 
 def test_unregistered_replay_module_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -29,7 +30,7 @@ def test_unregistered_replay_module_is_rejected(monkeypatch: pytest.MonkeyPatch)
     request = _request_for_module("tests.integration.eventstore.test_not_registered")
 
     with pytest.raises(ValueError, match="no replay clone suffix registered"):
-        eventstore_conftest._replay_clone_id(request)  # type: ignore[arg-type]
+        eventstore_conftest._replay_clone_id(request)
 
 
 def test_registered_replay_module_gets_distinct_clone_ids(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,7 +38,7 @@ def test_registered_replay_module_gets_distinct_clone_ids(monkeypatch: pytest.Mo
     monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
     ids = {
         eventstore_conftest._replay_clone_id(
-            _request_for_module(f"tests.integration.eventstore.{module}")  # type: ignore[arg-type]
+            _request_for_module(f"tests.integration.eventstore.{module}")
         )
         for module in eventstore_conftest._REPLAY_CLONE_SUFFIX
     }
