@@ -14,6 +14,8 @@ from src.exchanges.bitget.ws_parsers import (
     classify_bitget_ack,
     extract_bitget_seq,
 )
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def test_heartbeat_spec_matches_documented_bitget_convention():
@@ -86,3 +88,84 @@ def test_extract_seq_malformed_value_raises():
     """negative — seq가 있는데 정수가 아니면 조용히 None이 아니라 예외."""
     with pytest.raises(ValueError):
         extract_bitget_seq({"data": [{"seq": "abc"}]})
+
+
+# ---------------------------------------------------------------------------
+# D2 performance assertions (task-23427 DEEPEN-DEPTH L4-11)
+# ---------------------------------------------------------------------------
+
+# 실측(best_of n=7, batch=200, Python 3.13): classify_bitget_ack x7 ≈ 0.02 ms CPU,
+# extract_bitget_seq x7 ≈ 0.03 ms CPU. 예산은 실측 × 30 이상.
+
+
+@pytest.mark.perf
+def test_classify_bitget_ack_within_cpu_budget(perf_budget: PerfBudget) -> None:
+    """수치 성능 단언(D2) — `classify_bitget_ack`는 순수 dict 접근·비교뿐이라
+    핫패스다. 500회 연속 호출이 1 ms CPU 이내여야 한다.
+
+    실측 ≈ 0.02 ms/call × 30 = 0.6 ms → 5 ms 예산(250x 여유).
+    """
+
+    def call() -> None:
+        classify_bitget_ack({"event": "subscribe", "arg": {"channel": "ticker"}})
+        classify_bitget_ack({"event": "login", "code": "0"})
+        classify_bitget_ack({"event": "error", "code": "30001", "msg": "fail"})
+        classify_bitget_ack({"event": "unsubscribe", "arg": {"channel": "order"}})
+        classify_bitget_ack({"event": "login"})
+        classify_bitget_ack({"event": "login", "code": "30005", "msg": "bad"})
+        classify_bitget_ack({"data": []})
+
+    perf_budget.assert_within(call, budget_ms=5.0, n=7, warmup=1, batch=200)
+
+
+@pytest.mark.perf
+def test_extract_bitget_seq_within_cpu_budget(perf_budget: PerfBudget) -> None:
+    """수치 성능 단언(D2) — `extract_bitget_seq`도 순수 dict 접근뿐.
+
+    실측 ≈ 0.03 ms/call × 30 = 0.9 ms → 5 ms 예산(≥ 30x 여유).
+    """
+
+    def call() -> None:
+        extract_bitget_seq({"data": [{"seq": "17"}]})
+        extract_bitget_seq({"data": [{"seq": 18}]})
+        extract_bitget_seq({})
+        extract_bitget_seq({"data": []})
+        extract_bitget_seq({"data": [{}]})
+
+    perf_budget.assert_within(call, budget_ms=5.0, n=7, warmup=1, batch=200)
+
+
+@pytest.mark.perf
+def test_ack_latency_catches_10x_virtual_injection_gates_red(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """게이트 적색 재현 — `classify_bitget_ack`에 가상 지연 10배(5 ms)를
+    주입하면 단언이 적색(AssertionError)으로 떨어진다. 단언이 실제로
+    성능 하한을 검증하는지 확인한다."""
+    injection_ms = 5.0  # budget 5 ms의 10배 → 50 ms 가상 지연
+
+    import src.exchanges.bitget.ws_parsers as mod
+
+    # 녹색 제어: 지연 없이 budget 이내
+    perf_budget.assert_within(
+        lambda: mod.classify_bitget_ack({"event": "subscribe", "arg": {"channel": "ticker"}}),
+        budget_ms=injection_ms,
+        n=7,
+        warmup=1,
+        batch=200,
+    )
+
+    # 적색 재현: 10x 가상 지연 주입 → budget 초과로 AssertionError
+    monkeypatch.setattr(
+        mod,
+        "classify_bitget_ack",
+        virtual_delayed_sync(mod.classify_bitget_ack, injection_ms / 1000.0),
+    )
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: mod.classify_bitget_ack({"event": "subscribe", "arg": {"channel": "ticker"}}),
+            budget_ms=injection_ms,
+            n=7,
+            warmup=1,
+            batch=200,
+        )
