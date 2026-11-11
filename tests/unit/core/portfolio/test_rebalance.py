@@ -267,17 +267,21 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     most of the time and the average converges toward zero — a measurement
     artifact, not a real property of the function.
 
-    batch=8+ bundles several calls into one tick window so the total CPU time
+    batch=N bundles several calls into one tick window so the total CPU time
     exceeds one tick, reducing per-call quantization error to tick/batch.
     This test verifies two things:
       1. batch=1 average is near-zero (quantization artifact confirmed).
-      2. batch=8 average is non-zero and within the expected budget range,
+      2. batch=N average is non-zero and within the expected budget range,
          proving the measurement captures real CPU work.
 
-    The actual CPU budget test below uses batch=8 to avoid this pitfall.
+    The actual CPU budget test below uses batch=50 to avoid this pitfall.
     """
     cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
-    symbols = [f"SYM{i}/USDT" for i in range(200)]
+    # 500 symbols: ensures the hot path takes > 1 ms real CPU so that
+    # batch=20 total (20 calls) reliably exceeds one 15.6 ms quantization
+    # tick even under CI load. 200 symbols was too fast and produced
+    # 0.0 ms readings under xdist worker pressure.
+    symbols = [f"SYM{i}/USDT" for i in range(500)]
     current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("1000000"))
     targets = {s: Decimal("0.6") for s in symbols}
     prices = {s: Decimal("100") for s in symbols}
@@ -290,10 +294,11 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     cpu_ms_batch1 = [s.cpu_ms for s in samples_batch1]
     avg_batch1 = sum(cpu_ms_batch1) / len(cpu_ms_batch1)
 
-    # batch=8: quantization error reduced by ~8x
-    samples_batch8 = perf_budget.samples(measure_once, n=40, batch=8)
-    cpu_ms_batch8 = [s.cpu_ms for s in samples_batch8]
-    avg_batch8 = sum(cpu_ms_batch8) / len(cpu_ms_batch8)
+    # batch=20: quantization error reduced by ~20x; total CPU per sample
+    # window = 20 * ~1ms ≈ 20ms > 15.6ms tick, guaranteeing non-zero read.
+    samples_batch20 = perf_budget.samples(measure_once, n=40, batch=20)
+    cpu_ms_batch20 = [s.cpu_ms for s in samples_batch20]
+    avg_batch20 = sum(cpu_ms_batch20) / len(cpu_ms_batch20)
 
     # batch=1 average must be near-zero (quantization artifact).
     # Under Windows quantization, a fast function reads 0 ms most of the time;
@@ -302,14 +307,14 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
         f"batch=1 avg {avg_batch1:.3f}ms not near-zero — quantization artifact not confirmed"
     )
 
-    # batch=8 average must be non-zero and within budget.
-    # With 200 symbols the real CPU cost is measurable; batch=8 should
+    # batch=20 average must be non-zero and within budget.
+    # With 500 symbols the real CPU cost is measurable; batch=20 should
     # capture it without the zero-convergence artifact.
-    assert avg_batch8 > 0.01, (
-        f"batch=8 avg {avg_batch8:.3f}ms near-zero — batching did not recover quantization loss"
+    assert avg_batch20 > 0.01, (
+        f"batch=20 avg {avg_batch20:.3f}ms near-zero — batching did not recover quantization loss"
     )
-    assert avg_batch8 < 5.0, (
-        f"batch=8 avg {avg_batch8:.3f}ms exceeds 5ms budget — "
+    assert avg_batch20 < 5.0, (
+        f"batch=20 avg {avg_batch20:.3f}ms exceeds 5ms budget — "
         "performance regression or budget too tight"
     )
 
