@@ -149,3 +149,25 @@ def test_wash_trade_cross_tenant_scan_perf_budget_and_gate_red(perf_budget, monk
     )
     slow = perf_budget.best_of(lambda: market_abuse.detect(window, {}), n=3, batch=1)
     assert slow.cpu_ms >= budget_ms
+
+
+# --- additional negative tests (D2: negative ≥3 보강) -----------------------
+
+
+def test_wash_trade_negative_empty_fills_returns_no_hit():
+    """빈 fills → wash-trade hit 없음."""
+    assert _wash_hits([]) == []
+
+
+def test_wash_trade_negative_single_fill_returns_no_hit():
+    """단일 fill만 있으면 opposite-side pair가 없으므로 hit 없음."""
+    assert _wash_hits([_fill(fill_id="f1", side="BUY")]) == []
+
+
+def test_wash_trade_negative_same_side_no_hit():
+    """동일 tenant/instrument/owner라도 동일 side면 hit 없음."""
+    fills = [
+        _fill(fill_id="f1", side="BUY", executed_at=_T0),
+        _fill(fill_id="f2", side="BUY", executed_at=_T0 + timedelta(seconds=5)),
+    ]
+    assert _wash_hits(fills) == []
