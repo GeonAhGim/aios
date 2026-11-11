@@ -115,3 +115,80 @@ def test_chain_contract_validation_perf_budget_catches_10x_delay_injection(
             batch=500,
             label="contract validation delay-injected",
         )
+
+
+# --- negative tests (D2) — additional schema rejection ----------------------
+
+
+def test_chain_rejects_non_positive_multiplier() -> None:
+    with pytest.raises(ValidationError):
+        _contract(contract_multiplier=Decimal("0"))
+
+
+def test_chain_rejects_negative_bid() -> None:
+    with pytest.raises(ValidationError):
+        _contract(bid=Decimal("-1"))
+
+
+def test_chain_rejects_naive_observed_at() -> None:
+    with pytest.raises(ValidationError):
+        _contract(observed_at=datetime(2026, 9, 21))
+
+
+# --- failure injection: delegate raises ------------------------------------
+
+
+def test_greek_failure_injection_delegate_raises_is_fail_closed() -> None:
+    """실패주입 — IND 데리게이트가 예외를 던지면 GreekCalculator는 그대로 전파한다(fail-closed)."""
+    from uuid import uuid4
+
+    class _FailingDelegate:
+        async def request_greeks(self, _request: GreekIndicatorRequest) -> str:
+            raise RuntimeError("IND backend unreachable")
+
+    async def _go() -> None:
+        calc = GreekCalculator(delegate=_FailingDelegate())
+        await calc.calculate(GreekIndicatorRequest(uuid4(), uuid4()))
+
+    with pytest.raises(RuntimeError, match="IND backend unreachable"):
+        asyncio.run(_go())
+
+
+# --- adversarial test (D3) — no IND delegate = hard error -------------------
+
+
+def test_adversarial_no_indicator_delegate_raises_not_empty() -> None:
+    """적대(D3): IND(지표 서브시스템)가 사용 불가할 때 GreekCalculator는
+    빈 문자열이나 '0'을 반환하지 않고 GreekCalculationUnavailableError를
+    던져야 한다 — fail-closed의 핵심.
+
+    Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md#DC-26
+    ("그리스 계산은 지표(IND)로 위임하는 경계 문서화").
+    """
+    calc = GreekCalculator(delegate=None)
+    with pytest.raises(GreekCalculationUnavailableError):
+        asyncio.run(calc.calculate(GreekIndicatorRequest(uuid4(), uuid4())))
+
+
+# --- replay test (D3) — deterministic validation ---------------------------
+
+
+def test_chain_contract_validation_replay_is_identical() -> None:
+    """리플레이(D3): 같은 입력으로 두 번 검증하면 동일한 결과 객체가 나온다.
+
+    OptionContractView는 frozen=True이므로 — 같은 필드 값이면 == 가 True다.
+    이 테스트는 검증 로직이 결정론적임을(랜덤/시간 의존 없이) 보장한다.
+    """
+    base = {
+        "instrument_id": uuid4(),
+        "underlying_id": uuid4(),
+        "symbol": "OPT-R",
+        "expiry": datetime(2027, 6, 15, tzinfo=UTC),
+        "strike": Decimal("150"),
+        "option_right": "PUT",
+        "contract_multiplier": Decimal("50"),
+        "observed_at": datetime(2026, 10, 1, tzinfo=UTC),
+    }
+    a = OptionContractView.model_validate(base)
+    b = OptionContractView.model_validate(base)
+    assert a == b, "리플레이: 같은 입력이 다른 결과를 생산함"
