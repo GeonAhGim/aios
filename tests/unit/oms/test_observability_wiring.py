@@ -7,6 +7,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §7.2, §7.3, §9 L4-27 D
 PLT-02 `RedactionFilter`가 이 모듈들이 실제로 쓰는 `extra={"payload": {...}}`
 채널에 마스킹을 적용함을 확인한다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -72,8 +73,9 @@ async def test_outbox_dispatcher_observes_dispatch_duration_once_per_row() -> No
     await enqueue(outbox, view)
     adapter = ScriptedAdapter()
     spy = _SpyMetrics()
-    dispatcher = make_dispatcher(outbox=outbox, orders=orders, adapter=adapter, clock=clock,
-                                  metrics=spy)
+    dispatcher = make_dispatcher(
+        outbox=outbox, orders=orders, adapter=adapter, clock=clock, metrics=spy
+    )
 
     report = await dispatcher.dispatch_once()
 
@@ -202,8 +204,15 @@ class _SingleOrderRepo:
         raise NotImplementedError
 
     async def transition(
-        self, conn: object, *, order_id: UUID, expected_status: OrderStatus,
-        expected_version: int, new_status: OrderStatus, patch: dict[str, Any], event: Any,
+        self,
+        conn: object,
+        *,
+        order_id: UUID,
+        expected_status: OrderStatus,
+        expected_version: int,
+        new_status: OrderStatus,
+        patch: dict[str, Any],
+        event: Any,
     ) -> OrderView:
         self.order = self.order.model_copy(
             update={**patch, "status": new_status, "version": self.order.version + 1}
@@ -225,13 +234,21 @@ class _UnusedRiskGateRepo:
     던진다(호출되면 테스트가 그 자리에서 실패해 가정이 깨졌음을 드러낸다)."""
 
     async def list_active_controls(
-        self, *, tenant_id: UUID, provider_code: str | None = None,
+        self,
+        *,
+        tenant_id: UUID,
+        provider_code: str | None = None,
         include_all_providers: bool = False,
     ) -> tuple[SafetyControl, ...]:
         raise NotImplementedError
 
     async def insert_safety_control(
-        self, *, scope: SafetyScope, scope_ref: str, reason: str, actor_subject_id: UUID,
+        self,
+        *,
+        scope: SafetyScope,
+        scope_ref: str,
+        reason: str,
+        actor_subject_id: UUID,
     ) -> SafetyControl:
         raise NotImplementedError
 
@@ -249,9 +266,7 @@ class _UnusedRiskGateRepo:
     ) -> RiskEvaluation | None:
         raise NotImplementedError
 
-    async def read_fences(
-        self, pairs: tuple[tuple[SafetyScope, str], ...]
-    ) -> FenceSnapshot:
+    async def read_fences(self, pairs: tuple[tuple[SafetyScope, str], ...]) -> FenceSnapshot:
         raise NotImplementedError
 
     async def invalidate_evaluations(self, *, tenant_id: UUID | None) -> None:
@@ -271,22 +286,49 @@ class _UnusedRiskGateRepo:
 def _order_view() -> OrderView:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     return OrderView(
-        order_id=uuid4(), tenant_id=uuid4(), execution_id=1, client_order_id=f"c-{uuid4().hex}",
-        exchange_order_id=None, symbol="BTC/USDT", venue_symbol="BTCUSDT", exchange="bitget",
-        side=OrderSide.BUY, order_type=OrderType.MARKET, time_in_force="GTC",
-        quantity=Decimal("1"), price=None, status=OrderStatus.UNKNOWN,
-        filled_quantity=Decimal("0"), average_fill_price=None, fee_total=None, fee_currency=None,
-        version=3, parent_order_id=None, algo_run_id=None, unknown_since=now,
-        provider_order_date=None, created_at=now, updated_at=now,
+        order_id=uuid4(),
+        tenant_id=uuid4(),
+        execution_id=1,
+        client_order_id=f"c-{uuid4().hex}",
+        exchange_order_id=None,
+        symbol="BTC/USDT",
+        venue_symbol="BTCUSDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        time_in_force="GTC",
+        quantity=Decimal("1"),
+        price=None,
+        status=OrderStatus.UNKNOWN,
+        filled_quantity=Decimal("0"),
+        average_fill_price=None,
+        fee_total=None,
+        fee_currency=None,
+        version=3,
+        parent_order_id=None,
+        algo_run_id=None,
+        unknown_since=now,
+        provider_order_date=None,
+        created_at=now,
+        updated_at=now,
     )
 
 
 def _found_order() -> Order:
     return Order(
-        client_order_id=f"c-{uuid4().hex}", strategy_id="s", strategy_version="1.0.0",
-        execution_id=1, symbol="BTC/USDT", exchange="bitget", side=OrderSide.BUY,
-        order_type=OrderType.MARKET, quantity=Decimal("1"), asset_class=AssetClass.CRYPTO,
-        status=OrderStatus.ACKNOWLEDGED, filled_quantity=Decimal("0"), exchange_order_id="ex-9",
+        client_order_id=f"c-{uuid4().hex}",
+        strategy_id="s",
+        strategy_version="1.0.0",
+        execution_id=1,
+        symbol="BTC/USDT",
+        exchange="bitget",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("1"),
+        asset_class=AssetClass.CRYPTO,
+        status=OrderStatus.ACKNOWLEDGED,
+        filled_quantity=Decimal("0"),
+        exchange_order_id="ex-9",
     )
 
 
@@ -298,10 +340,13 @@ async def test_unknown_resolver_observes_resolution_duration_once() -> None:
 
     risk_gate_repo: RiskGateRepository = _UnusedRiskGateRepo()
     result = await resolve_unknown(
-        view.order_id, adapter=adapter, pool=_UnknownFakePool(),
+        view.order_id,
+        adapter=adapter,
+        pool=_UnknownFakePool(),
         risk_gate_repo=risk_gate_repo,
         clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
-        order_repo=repo, metrics=spy,
+        order_repo=repo,
+        metrics=spy,
     )
 
     assert result.status is OrderStatus.ACKNOWLEDGED
@@ -321,8 +366,13 @@ def test_redaction_filter_masks_forbidden_fields_in_oms_log_payload() -> None:
     order_id/outbox_id 같은 §7.3 도메인 필드는 그대로 남아야 한다."""
     logger = logging.getLogger("test.oms.redaction")
     record = logger.makeRecord(
-        logger.name, logging.INFO, __file__, 0, "outbox_dispatcher: dispatch",
-        (), None,
+        logger.name,
+        logging.INFO,
+        __file__,
+        0,
+        "outbox_dispatcher: dispatch",
+        (),
+        None,
         extra={
             "event": "oms.outbox.dispatch_failed",
             "payload": {

@@ -126,7 +126,9 @@ class TestIndicatorSpecNegative:
         """PlotSpec.kind가 허용 리터럴 밖이면 ValueError."""
         with pytest.raises(ValueError, match="unknown PlotSpec.kind"):
             invalid_fields: dict[str, Any] = {
-                "kind": "bogus", "scale": "own", "default_pane": "separate"
+                "kind": "bogus",
+                "scale": "own",
+                "default_pane": "separate",
             }
             PlotSpec(**invalid_fields)
 

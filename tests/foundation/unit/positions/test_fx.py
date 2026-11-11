@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-4
 ("환율 없음 → 예외").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

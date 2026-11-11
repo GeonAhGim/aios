@@ -55,9 +55,7 @@ def _snapshot(*, tenant_id, account_id, position_key, quantity, last_journal_seq
         quantity=quantity,
         avg_cost=Money(amount=Decimal("100"), currency=Currency.KRW),
         cost_method=CostMethod.FIFO,
-        lots=[
-            Lot(quantity=quantity, unit_cost=Decimal("100"), opened_at=datetime.now(UTC))
-        ]
+        lots=[Lot(quantity=quantity, unit_cost=Decimal("100"), opened_at=datetime.now(UTC))]
         if quantity
         else [],
         realized_pnl_base=Decimal("0"),

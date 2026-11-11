@@ -1,4 +1,5 @@
 """21번대 통합테스트 — /device-tokens 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import uuid
 
 import pytest

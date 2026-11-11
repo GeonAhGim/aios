@@ -4,6 +4,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§9 L4-11
 DoD: 429+Retry-After, 500/502/503, 401/403, 비JSON, 미지 코드 →
 UNKNOWN_RESPONSE(retryable=False).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -109,16 +110,27 @@ def test_pytest_gate_turns_red_when_unknown_response_retryable_guard_is_removed(
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\n", encoding="utf-8")
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "-c", str(config), "--confcutdir", str(tmp_path),
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
         f"{test_copy}::test_unknown_response_is_not_retryable_fail_closed",
     ]
-    env = dict(
-        os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8"
-    )
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -136,8 +148,13 @@ def test_pytest_gate_turns_red_when_unknown_response_retryable_guard_is_removed(
         encoding="utf-8",
     )
     mutated = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert mutated.returncode == 1, mutated.stdout + mutated.stderr
     assert "1 failed" in mutated.stdout

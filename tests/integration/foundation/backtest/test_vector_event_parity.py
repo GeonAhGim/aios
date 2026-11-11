@@ -7,6 +7,7 @@ equity가 소수 8자리까지(사실은 정확히) 일치한다 — 부분체�
 슬리피지 부호 반전 1건 포함. (c) 벡터 경로가 t+1 봉(캔들·신호 모두)을 체결
 판정에 쓰면 실패하는 반증 테스트.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -56,10 +57,13 @@ def _columns(
     c = [_D(x) for x in closes]
     o = [_D(x) for x in opens] if opens else [c[0], *c[:-1]] if c else []
     return CandleColumns(
-        ts=[_T0 + timedelta(minutes=i) for i in range(len(c))], open=o,
+        ts=[_T0 + timedelta(minutes=i) for i in range(len(c))],
+        open=o,
         high=[max(a, b) + 1 for a, b in zip(o, c, strict=True)],
-        low=[min(a, b) - 1 for a, b in zip(o, c, strict=True)], close=c,
-        volume=[_D(volume)] * len(c), quote_volume=[None] * len(c),
+        low=[min(a, b) - 1 for a, b in zip(o, c, strict=True)],
+        close=c,
+        volume=[_D(volume)] * len(c),
+        quote_volume=[None] * len(c),
     )
 
 
@@ -69,10 +73,13 @@ def _config(**overrides: Any) -> BacktestConfigV2:
         commission=VenueTierCommission(
             venue="BITGET", maker_bps=_D("2"), taker_bps=_D("5"), min_fee=_D("0")
         ),
-        latency_ms=0, partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
+        latency_ms=0,
+        partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
         order_types=OrderTypesConfig(limit=True, stop=True, oco=True, trailing=True),
-        magnifier_tf=None, costs=CostsConfig(funding=False, borrow_apr=None),
-        adjustments=AdjustmentsConfig(splits=False, dividends=False), calendar="24x7",
+        magnifier_tf=None,
+        costs=CostsConfig(funding=False, borrow_apr=None),
+        adjustments=AdjustmentsConfig(splits=False, dividends=False),
+        calendar="24x7",
     )
     base.update(overrides)
     return BacktestConfigV2(**base)
@@ -106,17 +113,27 @@ def test_vector_matches_event_on_full_round_trip_with_sell_slippage_sign_flip() 
     cfg, cols = _config(), _columns(_CLOSES)
     qty = _D("10")
     signal = VectorSignal(
-        entries=_bool_signal(len(cols), {1}), exits=_bool_signal(len(cols), {4}), quantity=qty,
+        entries=_bool_signal(len(cols), {1}),
+        exits=_bool_signal(len(cols), {4}),
+        quantity=qty,
     )
     vector_result = run_vector_backtest(
-        cfg, cols, signal, timeframe=Timeframe.M1, initial_cash=_CASH,
+        cfg,
+        cols,
+        signal,
+        timeframe=Timeframe.M1,
+        initial_cash=_CASH,
     )
     event_plan = {
         1: OrderIntent(side=OrderSide.BUY, quantity=qty),
         4: OrderIntent(side=OrderSide.SELL, quantity=qty),
     }
     event_result = run_quick_backtest(
-        cfg, cols, timeframe=Timeframe.M1, strategy=_Scripted(event_plan), initial_cash=_CASH,
+        cfg,
+        cols,
+        timeframe=Timeframe.M1,
+        strategy=_Scripted(event_plan),
+        initial_cash=_CASH,
     )
 
     assert vector_result.fills == event_result.fills
@@ -127,11 +144,17 @@ def test_vector_matches_event_on_full_round_trip_with_sell_slippage_sign_flip() 
     entry, exit_ = vector_result.fills
     assert entry.side == OrderSide.BUY and exit_.side == OrderSide.SELL
     assert entry.price == apply_slippage(
-        cfg.slippage, side=OrderSide.BUY, reference_price=cols.open[2], quantity=qty,
+        cfg.slippage,
+        side=OrderSide.BUY,
+        reference_price=cols.open[2],
+        quantity=qty,
         bar_volume=cols.volume[2],
     )
     assert exit_.price == apply_slippage(
-        cfg.slippage, side=OrderSide.SELL, reference_price=cols.open[5], quantity=qty,
+        cfg.slippage,
+        side=OrderSide.SELL,
+        reference_price=cols.open[5],
+        quantity=qty,
         bar_volume=cols.volume[5],
     )
     # 매수는 기준가보다 비싸게, 매도는 싸게 — 슬리피지 부호가 실제로 반전됐다.
@@ -145,19 +168,28 @@ def test_vector_matches_event_at_partial_fill_boundary() -> None:
     cols = _columns(_CLOSES, volume="10")
     qty = _D("8")
     signal = VectorSignal(
-        entries=_bool_signal(len(cols), {2}), exits=_bool_signal(len(cols), set()), quantity=qty,
+        entries=_bool_signal(len(cols), {2}),
+        exits=_bool_signal(len(cols), set()),
+        quantity=qty,
     )
     vector_result = run_vector_backtest(
-        cfg, cols, signal, timeframe=Timeframe.M1, initial_cash=_CASH,
+        cfg,
+        cols,
+        signal,
+        timeframe=Timeframe.M1,
+        initial_cash=_CASH,
     )
     event_result = run_quick_backtest(
-        cfg, cols, timeframe=Timeframe.M1,
+        cfg,
+        cols,
+        timeframe=Timeframe.M1,
         strategy=_Scripted({2: OrderIntent(side=OrderSide.BUY, quantity=qty)}),
         initial_cash=_CASH,
     )
 
     assert [(f.bar_index, f.quantity, f.remaining_quantity) for f in vector_result.fills] == [
-        (3, _D("5"), _D("3")), (4, _D("3"), _D("0")),
+        (3, _D("5"), _D("3")),
+        (4, _D("3"), _D("0")),
     ]
     assert vector_result.fills == event_result.fills
     assert vector_result.final_equity == event_result.final_equity
@@ -172,8 +204,12 @@ def test_future_candle_values_after_execution_do_not_change_earlier_fill() -> No
     cfg = _config()
     baseline = _columns(_CLOSES)
     poisoned = CandleColumns(
-        ts=baseline.ts, open=list(baseline.open), high=list(baseline.high),
-        low=list(baseline.low), close=list(baseline.close), volume=list(baseline.volume),
+        ts=baseline.ts,
+        open=list(baseline.open),
+        high=list(baseline.high),
+        low=list(baseline.low),
+        close=list(baseline.close),
+        volume=list(baseline.volume),
         quote_volume=list(baseline.quote_volume),
     )
     # entries[1]=True -> 봉1에서 제출 -> 봉2에서 체결(BT-4 엄격 초과). 봉3(체결
@@ -182,14 +218,23 @@ def test_future_candle_values_after_execution_do_not_change_earlier_fill() -> No
     poisoned.volume[3] = _D("0.0000001")
 
     signal = VectorSignal(
-        entries=_bool_signal(len(baseline), {1}), exits=_bool_signal(len(baseline), set()),
+        entries=_bool_signal(len(baseline), {1}),
+        exits=_bool_signal(len(baseline), set()),
         quantity=_D("10"),
     )
     baseline_result = run_vector_backtest(
-        cfg, baseline, signal, timeframe=Timeframe.M1, initial_cash=_CASH,
+        cfg,
+        baseline,
+        signal,
+        timeframe=Timeframe.M1,
+        initial_cash=_CASH,
     )
     poisoned_result = run_vector_backtest(
-        cfg, poisoned, signal, timeframe=Timeframe.M1, initial_cash=_CASH,
+        cfg,
+        poisoned,
+        signal,
+        timeframe=Timeframe.M1,
+        initial_cash=_CASH,
     )
 
     assert len(baseline_result.fills) == len(poisoned_result.fills) == 1
@@ -202,7 +247,9 @@ def test_signal_indexing_never_reads_next_bar_signal_value() -> None:
     안 된다 — `_VectorSignalSource`를 직접 호출해 확인한다."""
     cols = _columns(["100", "101", "102"])
     signal = VectorSignal(
-        entries=_bool_signal(3, {1}), exits=_bool_signal(3, set()), quantity=_D("1"),
+        entries=_bool_signal(3, {1}),
+        exits=_bool_signal(3, set()),
+        quantity=_D("1"),
     )
     source = _VectorSignalSource(signal)
     zero_position = PositionState(quantity=_D("0"), cash=_D("0"), has_pending_order=False)
@@ -221,21 +268,28 @@ def test_signal_length_mismatch_is_rejected() -> None:
     cols = _columns(_CLOSES)
     with pytest.raises(VectorFillsError):
         VectorSignal(
-            entries=_bool_signal(len(cols), set()), exits=_bool_signal(len(cols) - 1, set()),
+            entries=_bool_signal(len(cols), set()),
+            exits=_bool_signal(len(cols) - 1, set()),
             quantity=_D("1"),
         )
     with pytest.raises(VectorFillsError):
         VectorSignal(
-            entries=_bool_signal(len(cols), set()), exits=_bool_signal(len(cols), set()),
+            entries=_bool_signal(len(cols), set()),
+            exits=_bool_signal(len(cols), set()),
             quantity=_D("0"),
         )
     short_signal = VectorSignal(
-        entries=_bool_signal(len(cols) - 1, set()), exits=_bool_signal(len(cols) - 1, set()),
+        entries=_bool_signal(len(cols) - 1, set()),
+        exits=_bool_signal(len(cols) - 1, set()),
         quantity=_D("1"),
     )
     with pytest.raises(VectorFillsError):
         run_vector_backtest(
-            _config(), cols, short_signal, timeframe=Timeframe.M1, initial_cash=_CASH,
+            _config(),
+            cols,
+            short_signal,
+            timeframe=Timeframe.M1,
+            initial_cash=_CASH,
         )
 
 

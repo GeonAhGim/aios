@@ -6,6 +6,7 @@ DoD(task-1761) — 같은 `topup_id`(=`event_ref` 근거, 모듈 docstring 참�
 `user_wallets.balance`를 다시 증가시키지 않아야 한다(§4.3 멱등 계약의 원장
 레벨 방어선 — `wallet_service.confirm_topup`의 상위 상태 체크와는 별개).
 """
+
 from __future__ import annotations
 
 import random
@@ -26,9 +27,7 @@ def _clock() -> datetime:
 
 async def _wallet_balance(pool, user_id: UUID) -> Decimal:
     async with pool.acquire() as conn:
-        value = await conn.fetchval(
-            "SELECT balance FROM user_wallets WHERE user_id = $1", user_id
-        )
+        value = await conn.fetchval("SELECT balance FROM user_wallets WHERE user_id = $1", user_id)
     return value if value is not None else Decimal("0")
 
 

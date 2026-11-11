@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#9 R-12 — `rules/trade_frequency.py` 단위 테스트."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

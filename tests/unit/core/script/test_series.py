@@ -4,6 +4,7 @@
 절삭·교차·nz)을 값 단위로 단언하고, negative(길이 불일치·도메인 위반·음수
 오프셋·범위 밖 접근·비유한 입력)가 전부 `ScriptRuntimeError`인지 확인한다.
 """
+
 from __future__ import annotations
 
 import math

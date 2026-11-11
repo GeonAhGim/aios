@@ -5,6 +5,7 @@ DB/네트워크 없이 순수 함수라 단위테스트로 검증한다. `run()`
 budget_ms/samples/p50_ms/p95_ms/max_ms/passed)를 지키는 JSON을 쓰는지, 예산을
 초과하면 `passed=false`로 fail-closed 기록되는지(적색 재현) 확인한다.
 """
+
 from __future__ import annotations
 
 import json

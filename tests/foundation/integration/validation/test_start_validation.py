@@ -2,6 +2,7 @@
 흐름 + negative test". `strategy_builder_service.py`의 실제 9.9 절대원칙
 생애주기와 FND-10 백테스트 엔진을 함께 검증한다(둘 다 이 리프가 새로
 만들지 않은 기존/병행 구현이며, 이 테스트는 그 둘을 잇는 배선을 검증)."""
+
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -61,7 +62,7 @@ class _FakeIndicatorResult:
 
 
 class _FakePriceIndicatorService:
-    """"PRICE" 키를 창(window)의 마지막 종가로 되돌린다 — TA-Lib 의존 없이
+    """ "PRICE" 키를 창(window)의 마지막 종가로 되돌린다 — TA-Lib 의존 없이
     오케스트레이션만 검증(tests/foundation/unit/backtest/test_run_backtest.py와
     동일 원칙)."""
 
@@ -308,11 +309,7 @@ async def test_concurrent_identical_requests_only_one_computes_the_rest_attach(
 
     results = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
 
-    run_ids = {
-        r.run_id
-        for r in results
-        if not isinstance(r, Exception)
-    }
+    run_ids = {r.run_id for r in results if not isinstance(r, Exception)}
     assert len(run_ids) <= 1  # 서로 다른 두 run이 생기는 것만은 절대 안 됨
     for r in results:
         if isinstance(r, Exception):
@@ -380,9 +377,12 @@ async def test_negative_validation_rejects_unauthorized_or_missing_strategy(
 
     engine.assert_not_called()
     async with pool.acquire() as conn:
-        assert await conn.fetchval(
-            "SELECT count(*) FROM strategy_validation_run WHERE strategy_id = $1", strategy_id
-        ) == 0
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM strategy_validation_run WHERE strategy_id = $1", strategy_id
+            )
+            == 0
+        )
     detail = await strategy_service.get_strategy(owner_id, strategy_id, version)
     assert detail.lifecycle_status == "BACKTESTING"
 

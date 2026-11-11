@@ -1,4 +1,5 @@
 """18.2 통합테스트 — 실제 dev DB 대상."""
+
 import asyncio
 import json
 from decimal import Decimal
@@ -92,9 +93,7 @@ async def _open_dispute(pool):
     dispute_service = DisputeService(pool)
 
     strategy_id, version = await _create_strategy(pool, seller)
-    listing = await listing_service.create_listing(
-        seller, strategy_id, version, _PURCHASE_PRICE
-    )
+    listing = await listing_service.create_listing(seller, strategy_id, version, _PURCHASE_PRICE)
     submitted = await listing_service.submit_for_verification(listing.id, seller)
     verifier = await create_test_user(pool)
     approved = await verification_service.decide(submitted.id, verifier, "APPROVE")

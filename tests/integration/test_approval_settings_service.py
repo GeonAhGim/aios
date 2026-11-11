@@ -1,4 +1,5 @@
 """11.4 통합테스트 — 실제 dev DB 대상."""
+
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -96,9 +97,7 @@ async def test_update_accepts_mismatch_when_acknowledged(service, pool):
     user_id = await create_test_user(pool)
     await _set_risk_profile(pool, user_id, "안정형")
 
-    settings = await service.update(
-        user_id, mode="SOLO", risk_warning_acknowledged=True
-    )
+    settings = await service.update(user_id, mode="SOLO", risk_warning_acknowledged=True)
 
     assert settings.mode == "SOLO"
     assert settings.risk_warning is not None

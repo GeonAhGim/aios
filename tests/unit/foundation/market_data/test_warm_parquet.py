@@ -134,9 +134,7 @@ def test_missing_year_file_reports_whole_range_missing(tmp_path: Path) -> None:
     )
 
     assert len(loaded) == 0
-    assert missing == (
-        (datetime(2020, 1, 1, tzinfo=UTC), datetime(2020, 3, 1, tzinfo=UTC)),
-    )
+    assert missing == ((datetime(2020, 1, 1, tzinfo=UTC), datetime(2020, 3, 1, tzinfo=UTC)),)
 
 
 def test_reuses_candle_store_port_read_candles_columnar(tmp_path: Path) -> None:

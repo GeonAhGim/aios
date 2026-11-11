@@ -447,13 +447,12 @@ def test_gate_turns_red_when_a_write_call_is_injected_into_the_real_file(
 def test_performance_ast_scan_under_10ms(perf_budget) -> None:
     """AST scan CPU budget excludes unrelated xdist scheduling delays."""
     tree = ast.parse(TARGET.read_text(encoding="utf-8"))
-    perf_budget.assert_within(
-        lambda: find_direct_violations(tree), budget_ms=10, batch=100
-    )
+    perf_budget.assert_within(lambda: find_direct_violations(tree), budget_ms=10, batch=100)
 
 
 def test_performance_import_scan_under_200ms(perf_budget) -> None:
     """Measure the complete import graph with the unchanged 200ms CPU budget."""
+
     def scan():
         violations, reached = scan_import_graph(TARGET, ROOT, BANNED_MODULES)
         assert not violations

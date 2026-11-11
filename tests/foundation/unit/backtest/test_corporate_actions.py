@@ -53,9 +53,7 @@ def test_split_factor_bar_after_ex_date_is_unaffected() -> None:
 
 def test_split_factor_as_of_before_ex_date_is_unaffected() -> None:
     """as_of가 낙일(ex_date) 이전이면 그 분할은 아직 반영 대상이 아니다."""
-    factor = split_factor(
-        [_TWO_FOR_ONE], bar_time=_BEFORE, as_of=datetime(2026, 2, 15, tzinfo=UTC)
-    )
+    factor = split_factor([_TWO_FOR_ONE], bar_time=_BEFORE, as_of=datetime(2026, 2, 15, tzinfo=UTC))
     assert factor == Decimal(1)
 
 

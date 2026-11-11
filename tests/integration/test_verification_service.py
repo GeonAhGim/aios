@@ -1,4 +1,5 @@
 """13.3 통합테스트 — 실제 dev DB 대상."""
+
 import asyncio
 import json
 from pathlib import Path
@@ -113,9 +114,7 @@ async def test_reject_returns_to_draft_with_reason(service, pool):
     listing = await _pending_listing(pool, seller)
     verifier = await create_test_user(pool)
 
-    result = await service.decide(
-        listing.id, verifier, "REJECT", rejection_reason="오버피팅 의심"
-    )
+    result = await service.decide(listing.id, verifier, "REJECT", rejection_reason="오버피팅 의심")
 
     assert result.status == "DRAFT"
     assert result.rejection_reason == "오버피팅 의심"
@@ -134,9 +133,7 @@ async def test_reject_reason_is_persisted_and_published(pool):
     listing = await _pending_listing(pool, seller)
     verifier = await create_test_user(pool)
 
-    await service.decide(
-        listing.id, verifier, "REJECT", rejection_reason="Look-ahead Bias 의심"
-    )
+    await service.decide(listing.id, verifier, "REJECT", rejection_reason="Look-ahead Bias 의심")
 
     async with pool.acquire() as conn:
         stored = await conn.fetchval(

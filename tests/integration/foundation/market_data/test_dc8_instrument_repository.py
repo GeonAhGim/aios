@@ -6,6 +6,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 위반을 도메인 예외로 정확히 변환하는지, 그리고 `get_listing`의 `at` 시점
 스코프가 유효기간 밖 조회를 정확히 `None`으로 구분하는지 단언한다.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -165,9 +166,7 @@ async def test_add_listing_then_get_listing_at_valid_time(pool, repo):
         await repo.add_listing(conn, listing)
 
     async with pool.acquire() as conn, conn.transaction():
-        found = await repo.get_listing(
-            conn, Venue.BITGET, symbol, datetime.now(UTC)
-        )
+        found = await repo.get_listing(conn, Venue.BITGET, symbol, datetime.now(UTC))
     assert found is not None
     assert found.instrument_id == instrument.instrument_id
 
@@ -193,9 +192,7 @@ async def test_get_listing_before_listed_at_returns_none(pool, repo):
         await repo.add_listing(conn, listing)
 
     async with pool.acquire() as conn, conn.transaction():
-        found = await repo.get_listing(
-            conn, Venue.BITGET, symbol, listed_at - timedelta(days=1)
-        )
+        found = await repo.get_listing(conn, Venue.BITGET, symbol, listed_at - timedelta(days=1))
     assert found is None
 
 

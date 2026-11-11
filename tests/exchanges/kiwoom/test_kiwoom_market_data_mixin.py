@@ -8,6 +8,7 @@ BR-23(task-7569), exchange onboarding step (b). Uses a hand-written fake
 `market_data_mixin.py`'s module docstring (ka10007/ka10081, verified via
 WebFetch against github.com/Kiwoom-Securities/Kiwoom-REST-API).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

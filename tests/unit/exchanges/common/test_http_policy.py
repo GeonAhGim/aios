@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§9 L4-11
 DoD: full-jitter 범위, Retry-After 우선, cap, 주문 정책 max_attempts=1.
 """
+
 from __future__ import annotations
 
 import os
@@ -89,16 +90,27 @@ def test_pytest_gate_turns_red_when_cap_clamp_is_removed(tmp_path: Path) -> None
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\n", encoding="utf-8")
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "-c", str(config), "--confcutdir", str(tmp_path),
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
         f"{test_copy}::test_backoff_respects_cap_at_high_attempt",
     ]
-    env = dict(
-        os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8"
-    )
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -117,8 +129,13 @@ def test_pytest_gate_turns_red_when_cap_clamp_is_removed(tmp_path: Path) -> None
         encoding="utf-8",
     )
     mutated = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert mutated.returncode == 1, mutated.stdout + mutated.stderr
     assert "1 failed" in mutated.stdout
@@ -147,8 +164,8 @@ def test_multiple_retry_policies_do_not_cross_contaminate_via_shared_rng() -> No
         order_delay = backoff_delay(order_policy, 1, None, rng=rng.random)
         stream_delay = backoff_delay(stream_policy, attempt, None, rng=rng.random)
         assert 0.0 <= order_delay <= order_policy.cap
-        assert 0.0 <= stream_delay <= min(
-            stream_policy.cap, stream_policy.base * (2 ** (attempt - 1))
+        assert (
+            0.0 <= stream_delay <= min(stream_policy.cap, stream_policy.base * (2 ** (attempt - 1)))
         )
     # 두 정책 dataclass 자체는 불변이므로 반복 호출 뒤에도 원래 값 그대로다.
     assert order_policy.base == 0.1 and order_policy.cap == 1.0

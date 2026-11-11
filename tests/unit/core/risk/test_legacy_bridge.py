@@ -4,6 +4,7 @@
 `test_inputs_contract.py`에 있다 — 여기서는 이 헬퍼가 반환한 값이 실제로
 `RiskInputs` 인스턴스인지, `cls` 파라미터를 실제로 사용하는지만 확인한다.
 """
+
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4

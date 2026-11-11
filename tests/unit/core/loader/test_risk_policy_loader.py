@@ -218,9 +218,7 @@ def test_verify_policy_against_bundle_raises_on_hash_mismatch():
 def test_verify_policy_against_bundle_raises_when_engine_version_differs():
     policy = load_risk_policy()
     bundle = _sample_bundle(policy, "engine-v1")
-    other_engine_bundle = RiskRuleBundle(
-        **{**bundle.model_dump(), "engine_version": "engine-v2"}
-    )
+    other_engine_bundle = RiskRuleBundle(**{**bundle.model_dump(), "engine_version": "engine-v2"})
 
     with pytest.raises(BundleMismatchError):
         verify_policy_against_bundle(policy, other_engine_bundle)

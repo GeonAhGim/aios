@@ -13,7 +13,8 @@ from tests.support import coverage_pause
 async def test_async_sample_restores_coverage(perf_budget, monkeypatch, failure):
     active = Mock()
     monkeypatch.setattr(
-        coverage_pause, "coverage",
+        coverage_pause,
+        "coverage",
         SimpleNamespace(Coverage=SimpleNamespace(current=lambda: active)),
     )
     result = object()

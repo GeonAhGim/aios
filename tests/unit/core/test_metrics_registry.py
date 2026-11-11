@@ -4,6 +4,7 @@ DoD(docs/specs/L4_market_data_positions_ledger_v1.0.md §9 L0-1):
 render_text()가 Prometheus 텍스트 형식으로 파싱 가능하고, 라벨 키 불일치 시
 ValueError.
 """
+
 from __future__ import annotations
 
 import re

@@ -26,6 +26,7 @@ NOW = datetime(2026, 9, 24, tzinfo=UTC)
 # Outcome enum
 # ---------------------------------------------------------------------------
 
+
 class TestOutcome:
     def test_all_expected_members_exist(self) -> None:
         expected = {"SUCCESS", "DENIED", "ERROR"}
@@ -44,6 +45,7 @@ class TestOutcome:
 # ---------------------------------------------------------------------------
 # Classification enum
 # ---------------------------------------------------------------------------
+
 
 class TestClassification:
     def test_all_expected_members_exist(self) -> None:
@@ -68,6 +70,7 @@ class TestClassification:
 # SCHEMA_VERSION constant
 # ---------------------------------------------------------------------------
 
+
 def test_schema_version_value() -> None:
     assert SCHEMA_VERSION == "v1"
 
@@ -75,6 +78,7 @@ def test_schema_version_value() -> None:
 # ---------------------------------------------------------------------------
 # RecordAuditEventCommand
 # ---------------------------------------------------------------------------
+
 
 def _command_kwargs(**overrides: object) -> dict[str, object]:
     defaults: dict[str, object] = dict(
@@ -146,6 +150,7 @@ class TestRecordAuditEventCommand:
 # AuditEventView
 # ---------------------------------------------------------------------------
 
+
 def _view_kwargs(**overrides: object) -> dict[str, object]:
     defaults: dict[str, object] = dict(
         id=uuid4(),
@@ -204,6 +209,7 @@ class TestAuditEventView:
 # AuditTimelinePage
 # ---------------------------------------------------------------------------
 
+
 class TestAuditTimelinePage:
     def test_construct_with_items(self) -> None:
         item = AuditEventView(**_view_kwargs())
@@ -232,6 +238,7 @@ class TestAuditTimelinePage:
 # Failure injection - construction must not silently swallow a dependency
 # failure raised inside pydantic's own validation machinery.
 # ---------------------------------------------------------------------------
+
 
 class TestFailureInjection:
     def test_validation_error_from_pydantic_internals_propagates(

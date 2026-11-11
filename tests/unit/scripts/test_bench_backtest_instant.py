@@ -3,6 +3,7 @@
 순수(no I/O) `run_quick_backtest` 위에서 인메모리 1년 일봉을 도는 벤치라
 DB/네트워크 없이 단위테스트로 검증한다.
 """
+
 from __future__ import annotations
 
 import json

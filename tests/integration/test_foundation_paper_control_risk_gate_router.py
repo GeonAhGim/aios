@@ -16,6 +16,7 @@
 task-1217이 paper_control.py를 `ApiResponse[...]` 봉투로 이관하면서
 이 파일의 응답 파싱을 data 키 기준으로 갱신했다(task-1108이 mandates
 쪽에서 했던 것과 동일 근거)."""
+
 from __future__ import annotations
 
 import uuid
@@ -133,9 +134,9 @@ async def test_self_service_kill_switch_pauses_running_deployment(client):
     )
     assert kill_switch_response.status_code == 201, kill_switch_response.text
 
-    listed = (
-        await client.get("/v1/foundation/paper-deployments", headers=headers)
-    ).json()["data"]["deployments"]
+    listed = (await client.get("/v1/foundation/paper-deployments", headers=headers)).json()["data"][
+        "deployments"
+    ]
     matching = [d for d in listed if d["id"] == deployment_id]
     assert len(matching) == 1
     assert matching[0]["state"] == "PAUSED"

@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §9.6
 CH-5 DoD "낙관적 잠금 409, 타 테넌트 404"."""
+
 from __future__ import annotations
 
 from pathlib import Path

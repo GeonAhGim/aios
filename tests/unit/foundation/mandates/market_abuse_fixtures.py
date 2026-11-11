@@ -38,5 +38,3 @@ def _window(**kwargs: object) -> dict[str, object]:
     base: dict[str, object] = {"fills": [], "orders": [], "market_close_at": _CLOSE}
     base.update(kwargs)
     return base
-
-

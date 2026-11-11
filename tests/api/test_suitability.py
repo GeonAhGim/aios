@@ -3,6 +3,7 @@
 순수 변환 함수(to_risk_profile_response/to_history_entry)라 DB 없이 단위테스트로
 충분하다 — I/O 없는 pydantic 모델 매핑.
 """
+
 from __future__ import annotations
 
 import json

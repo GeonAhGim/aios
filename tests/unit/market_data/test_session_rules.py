@@ -46,9 +46,7 @@ def test_krx_close_15_30_kst_equals_06_30_utc() -> None:
     cal = _calendar(Venue.KIS_KRX)
     windows = cal.sessions_for(date(2026, 9, 4))  # 금요일, 정규 거래일
     assert len(windows) == 1
-    assert windows[0].close_at.astimezone(UTC) == datetime(
-        2026, 9, 4, 6, 30, tzinfo=UTC
-    )
+    assert windows[0].close_at.astimezone(UTC) == datetime(2026, 9, 4, 6, 30, tzinfo=UTC)
 
 
 @pytest.mark.perf
@@ -132,17 +130,13 @@ def test_krx_close_single_window_per_trading_day() -> None:
 def test_us_close_est_before_dst() -> None:
     cal = _calendar(Venue.KIS_US)
     windows = cal.sessions_for(date(2026, 1, 6))  # 화요일, 겨울(EST, UTC-5)
-    assert windows[0].close_at.astimezone(UTC) == datetime(
-        2026, 1, 6, 21, 0, tzinfo=UTC
-    )
+    assert windows[0].close_at.astimezone(UTC) == datetime(2026, 1, 6, 21, 0, tzinfo=UTC)
 
 
 def test_us_close_edt_after_dst() -> None:
     cal = _calendar(Venue.KIS_US)
     windows = cal.sessions_for(date(2026, 7, 7))  # 화요일, 여름(EDT, UTC-4)
-    assert windows[0].close_at.astimezone(UTC) == datetime(
-        2026, 7, 7, 20, 0, tzinfo=UTC
-    )
+    assert windows[0].close_at.astimezone(UTC) == datetime(2026, 7, 7, 20, 0, tzinfo=UTC)
 
 
 def test_early_close_day_shortens_session() -> None:

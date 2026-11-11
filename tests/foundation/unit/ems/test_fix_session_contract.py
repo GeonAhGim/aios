@@ -293,7 +293,5 @@ async def test_cpu_clock_injection_with_shadowed_package(
     """Resolve the loaded helper even when collection shadows package attributes."""
     real_process_time = time.process_time
     monkeypatch.setattr(sys.modules["tests"], "support", SimpleNamespace())
-    await test_cpu_convergence_clock_quantization_and_budget(
-        order, monkeypatch, large_cpu_seconds
-    )
+    await test_cpu_convergence_clock_quantization_and_budget(order, monkeypatch, large_cpu_seconds)
     assert time.process_time is real_process_time

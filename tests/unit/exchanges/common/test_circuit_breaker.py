@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§9 L4-11
 DoD: 임계 초과 OPEN, open_sec 후 HALF_OPEN, half-open 실패 재OPEN.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -133,16 +134,27 @@ def test_pytest_gate_turns_red_when_threshold_check_is_removed(tmp_path: Path) -
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\n", encoding="utf-8")
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "-c", str(config), "--confcutdir", str(tmp_path),
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
         f"{test_copy}::test_failure_threshold_exceeded_opens_circuit",
     ]
-    env = dict(
-        os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8"
-    )
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -161,8 +173,13 @@ def test_pytest_gate_turns_red_when_threshold_check_is_removed(tmp_path: Path) -
         encoding="utf-8",
     )
     mutated = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert mutated.returncode == 1, mutated.stdout + mutated.stderr
     assert "1 failed" in mutated.stdout

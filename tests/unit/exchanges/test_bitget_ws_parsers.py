@@ -4,6 +4,7 @@
 `market_data_mixin` 경로로 계속 검증한다 — 여기서는 task-1551이 추가한
 `classify_bitget_ack`/`extract_bitget_seq`/`BITGET_HEARTBEAT`만 다룬다.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -47,8 +48,13 @@ def test_login_failure_code_is_ack_failure():
 
 
 def test_error_event_is_ack_failure_with_code_only_in_detail():
-    message = {"event": "error", "code": "30001", "msg": "channel does not exist",
-               "arg": {"channel": "nope"}, "secret": "SHOULD-NOT-LEAK"}
+    message = {
+        "event": "error",
+        "code": "30001",
+        "msg": "channel does not exist",
+        "arg": {"channel": "nope"},
+        "secret": "SHOULD-NOT-LEAK",
+    }
     result = classify_bitget_ack(message)
     assert result.is_ack and not result.ok
     assert "30001" in result.detail

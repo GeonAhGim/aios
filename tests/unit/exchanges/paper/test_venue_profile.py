@@ -1,4 +1,5 @@
 """paper venue_profile 단위테스트 — L4-22."""
+
 from __future__ import annotations
 
 from decimal import Decimal

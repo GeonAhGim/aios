@@ -235,9 +235,7 @@ async def test_compute_daily_loss_input_aggregates_across_multiple_accounts(pool
             ),
         )
 
-    result = await compute_personal_daily_loss_input(
-        pool, tenant_id, _NAV_DATE, nav_repo=repo
-    )
+    result = await compute_personal_daily_loss_input(pool, tenant_id, _NAV_DATE, nav_repo=repo)
 
     assert result is not None
     assert result.account_equity_krw == Decimal("950000")

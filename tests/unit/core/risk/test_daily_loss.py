@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#2.1, §8, §9 R-05 — daily_loss 규칙 테스트."""
+
 from decimal import Decimal
 
 import pytest

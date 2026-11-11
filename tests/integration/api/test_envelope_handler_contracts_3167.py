@@ -3,6 +3,7 @@
 미분류 예외 정보 비노출, 성공/실패 봉투, 검증 오류와 HTTP 상태 매핑을 검증한다.
 Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator

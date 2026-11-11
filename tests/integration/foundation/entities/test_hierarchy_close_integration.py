@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-1 §4
 "폐쇄 규칙". 활성 하위가 남은 상위는 도메인 계층이 폐쇄를 거부해야
 하고, 하위부터 순서대로 폐쇄하면 실DB 상태에도 정확히 반영돼야 한다."""
+
 from __future__ import annotations
 
 import pytest
@@ -44,9 +45,7 @@ async def test_close_blocked_while_active_children_exist_then_succeeds_bottom_up
         seeded.tenant_id, seeded.portfolio.portfolio_id
     )
     validate_close_portfolio(seeded.portfolio, portfolios_after)
-    await repo.close_portfolio(
-        seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc()
-    )
+    await repo.close_portfolio(seeded.tenant_id, seeded.portfolio.portfolio_id, closed_at=now_utc())
 
     funds_after = await repo.list_portfolios_by_fund(seeded.tenant_id, seeded.fund.fund_id)
     validate_close_fund(seeded.fund, funds_after)

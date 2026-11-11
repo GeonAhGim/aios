@@ -7,6 +7,7 @@ task-420(`tests/integration/foundation/ledger/conftest.py`)의 `pool`·
 설명하는 "이전 실행의 write_frozen 잔류가 재실행을 깨뜨리는" 격리
 결함이 다시 생긴다. 새 로직을 추가하지 않고 import re-export만 한다.
 """
+
 from __future__ import annotations
 
 from tests.integration.foundation.ledger.conftest import (

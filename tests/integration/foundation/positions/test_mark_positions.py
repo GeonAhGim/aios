@@ -317,4 +317,3 @@ async def test_unknown_venue_position_key_yields_none_mark(pool, refs, store, ca
     )
 
     assert result.mark_price is None
-

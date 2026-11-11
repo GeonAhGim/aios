@@ -5,6 +5,7 @@
 관례) — 이 디렉터리가 별도 사본을 만들면 DSN 변환 로직이 두 곳에서
 따로 관리된다. 새 로직을 추가하지 않고 import re-export만 한다.
 """
+
 from __future__ import annotations
 
 from tests.integration.foundation.execution_ownership.conftest import pool

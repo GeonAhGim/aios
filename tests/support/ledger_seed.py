@@ -12,6 +12,7 @@ D4): 테스트 픽스처가 `ledger_balance`에 raw INSERT로 잔액을 직접 �
 호출 안에서 함께 맞춰지므로, 이 헬퍼를 쓰는 테스트는 실제 충전 진입점과
 동일한 경로를 탄다(raw SQL로 두 테이블을 따로 맞추던 예전 방식과 달리
 드리프트가 애초에 생기지 않는다)."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

@@ -1,4 +1,5 @@
 """task-11513: FA-3 backfills must not change another module's orders."""
+
 import os
 
 import asyncpg
@@ -18,7 +19,8 @@ from tests.integration.foundation.entities.test_migration_fa3_orders_fills_colum
 async def test_backfill_does_not_increment_shared_order_version(pool):
     shared = await asyncpg.create_pool(
         _TEST_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://"),
-        min_size=1, max_size=2,
+        min_size=1,
+        max_size=2,
     )
     order_id = None
     try:

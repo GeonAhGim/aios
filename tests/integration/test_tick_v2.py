@@ -178,9 +178,7 @@ async def test_gate_red_restart_loses_crossover_signal_at_tick_level(pool):
         pool, FakeExchangeAdapter(closes=[Decimal("60")] * 65), red_execution_id, **_engines()
     )
     red_below_adapter = _filled_adapter(Decimal("40"))
-    await run_execution_tick(
-        pool, red_below_adapter, red_execution_id, **_engines()
-    )  # "재시작"
+    await run_execution_tick(pool, red_below_adapter, red_execution_id, **_engines())  # "재시작"
     assert red_below_adapter.place_order_call_count == 0, (
         "적색 재현 실패 — 재시작 후에도 crossover 신호가 살아있다면 L13가 이미 배선된 것이다"
     )
@@ -231,8 +229,7 @@ async def test_gate_red_mandate_clamp_never_applied_to_submitted_quantity(pool):
     submitted_quantity = adapter.placed_orders[-1].quantity
     assert submitted_quantity == unclamped_quantity  # mandate 클램프가 전혀 반영되지 않음
     assert submitted_quantity != green.quantity, (
-        "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 "
-        "L23가 이미 배선된 것이다"
+        "적색 재현 실패 — 실제 제출 수량이 mandate 클램프 결과(4)와 같다면 L23가 이미 배선된 것이다"
     )
 
 
@@ -367,10 +364,7 @@ async def test_performance_no_signal_tick_round_trips_and_latency(pool, perf_bud
 
     # Best-of-three batches rejects transient host contention, not sustained delays.
     n = 3
-    samples = [
-        await RelativeBudget().measure_async(measure_batch, n=3, warmup=0)
-        for _ in range(n)
-    ]
+    samples = [await RelativeBudget().measure_async(measure_batch, n=3, warmup=0) for _ in range(n)]
     samples_ms = [sample.op_ms / batch for sample in samples]
 
     budget_ms = _NO_SIGNAL_LATENCY_CEILING_SECONDS * 1000

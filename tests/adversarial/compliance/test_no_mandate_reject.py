@@ -18,6 +18,7 @@ RISK_MANDATE_REVISION_STALE)이므로 각각 독립적으로 REJECT를 재현해
 `RISK_MANDATE_REQUIRED` DENY 대신 `_finish_allow()`로 빠지므로) — 이
 테스트가 진짜로 그 분기를 붙잡고 있다는 뜻이다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -106,8 +107,12 @@ async def test_expired_revision_rejects(pool, repo, trust_repo):
     # activate된다(activate_revision.py의 detect_material_change=[] 경로).
     proposed = await propose_amendment(repo, tenant_id=user_id, rules=default_rules())
     await activate_revision_command(
-        repo, trust_repo, tenant_id=user_id, subject_id=user_id,
-        revision_id=proposed.id, reauthenticated=False,
+        repo,
+        trust_repo,
+        tenant_id=user_id,
+        subject_id=user_id,
+        revision_id=proposed.id,
+        reauthenticated=False,
     )
 
     gate = make_foundation_pre_submit_gate(pool, require_mandate=True)
@@ -136,7 +141,8 @@ async def test_concurrent_pause_and_submit_denies_race(pool, repo, trust_repo):
     assert warm.outcome == GateOutcome.ALLOW  # pause 전 캐시를 실제로 데운다
 
     pause_result, race_decision = await asyncio.gather(
-        pause_mandate(repo, tenant_id=user_id), gate(context),
+        pause_mandate(repo, tenant_id=user_id),
+        gate(context),
     )
     assert pause_result.state.value == "PAUSED"
     # race_decision은 인터리빙에 따라 ALLOW/DENY 둘 다 정당할 수 있다(요청이

@@ -172,9 +172,7 @@ async def test_resolve_portfolio_scope_rejects_closed_portfolio():
     user_id = uuid4()
     tenant_id = uuid4()
     repo, hierarchy = _seeded_repo(user_id, tenant_id)
-    closed_portfolio = hierarchy.portfolio.model_copy(
-        update={"closed_at": datetime.now(UTC)}
-    )
+    closed_portfolio = hierarchy.portfolio.model_copy(update={"closed_at": datetime.now(UTC)})
     repo.portfolios[closed_portfolio.portfolio_id] = closed_portfolio
 
     with pytest.raises(EntityContextResolutionError):

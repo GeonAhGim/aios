@@ -22,12 +22,8 @@ def _sample(venue: str, cost: str, notional: str = "100") -> VenueCostSample:
 @pytest.mark.parametrize("cost", ["45", "50", "55", "100", "999999"])
 def test_venue_cost_increase_never_reduces_weight(cost: str) -> None:
     # Old max/mean fell from 0.578947... to 0.5 when A rose from 40 to 55.
-    before = recalibrate_weights(
-        [_sample("A", "40"), _sample("B", "55")], _DEFAULT_CURRENT
-    )
-    after = recalibrate_weights(
-        [_sample("A", cost), _sample("B", "55")], _DEFAULT_CURRENT
-    )
+    before = recalibrate_weights([_sample("A", "40"), _sample("B", "55")], _DEFAULT_CURRENT)
+    after = recalibrate_weights([_sample("A", cost), _sample("B", "55")], _DEFAULT_CURRENT)
     assert after["A"].fee_weight > before["A"].fee_weight
     assert after["B"] == before["B"]
     assert Decimal("0.4") <= after["A"].fee_weight <= Decimal("0.6")
@@ -44,9 +40,7 @@ def test_venue_means_are_independent_of_other_venues_and_sample_counts() -> None
     assert _DEFAULT_CURRENT.fee_weight == Decimal("0.5")
 
 
-@pytest.mark.parametrize(
-    ("cost", "expected"), [("1", "0.4"), ("50", "0.5"), ("999999", "0.6")]
-)
+@pytest.mark.parametrize(("cost", "expected"), [("1", "0.4"), ("50", "0.5"), ("999999", "0.6")])
 def test_single_venue_target_and_both_change_caps(cost: str, expected: str) -> None:
     result = recalibrate_weights([_sample("A", cost)], _DEFAULT_CURRENT)
     assert result["A"].fee_weight == Decimal(expected)

@@ -138,8 +138,13 @@ def test_build_graph_throughput_budget_detection_fails_on_10x_delay(
 
     def _check_budget():
         return budget.assert_within(
-            _build, max_ratio=100.0, mode="cpu", n=1, warmup=0,
-            calibration_n=1, calibration_fn=_calibrate,
+            _build,
+            max_ratio=100.0,
+            mode="cpu",
+            n=1,
+            warmup=0,
+            calibration_n=1,
+            calibration_fn=_calibrate,
         )
 
     sample = _check_budget()

@@ -11,6 +11,7 @@ timeframe, quality) 축 안의 겹침을 DB 레벨에서 거부함을 단언한�
 UNIQUE 제약과, 스코프 쿼리(tenant_id/subject_id로 필터링)가 다른 주체의
 행을 반환하지 않음을 단언한다.
 """
+
 from __future__ import annotations
 
 import os
@@ -63,7 +64,12 @@ async def _insert_span(
         INSERT INTO coverage_spans (instrument_id, venue, timeframe, quality, start_at, end_at)
         VALUES ($1, $2, $3, $4, $5, $6)
         """,
-        instrument_id, venue, timeframe, quality, start_at, end_at,
+        instrument_id,
+        venue,
+        timeframe,
+        quality,
+        start_at,
+        end_at,
     )
 
 
@@ -114,12 +120,18 @@ async def test_coverage_spans_allows_overlap_across_different_quality(pool):
     t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_span(
-        pool, instrument_id=instrument_id, quality="PROVISIONAL",
-        start_at=t0, end_at=t0 + timedelta(days=5),
+        pool,
+        instrument_id=instrument_id,
+        quality="PROVISIONAL",
+        start_at=t0,
+        end_at=t0 + timedelta(days=5),
     )
     await _insert_span(
-        pool, instrument_id=instrument_id, quality="VALIDATED",
-        start_at=t0, end_at=t0 + timedelta(days=5),
+        pool,
+        instrument_id=instrument_id,
+        quality="VALIDATED",
+        start_at=t0,
+        end_at=t0 + timedelta(days=5),
     )
 
     rows = await pool.fetch(
@@ -147,7 +159,8 @@ async def test_entitlements_unique_constraint_rejects_duplicate_grant(pool):
         await pool.execute(
             "INSERT INTO entitlements (tenant_id, subject_id, venue, timeframe, feed_type) "
             "VALUES ($1, $2, 'BITGET', '1m', 'REALTIME')",
-            tenant_id, subject_id,
+            tenant_id,
+            subject_id,
         )
 
     await _grant()
@@ -166,17 +179,20 @@ async def test_entitlements_scoped_query_never_returns_other_subjects_rows(pool)
     await pool.execute(
         "INSERT INTO entitlements (tenant_id, subject_id, venue, timeframe, feed_type) "
         "VALUES ($1, $2, 'BITGET', '1m', 'REALTIME')",
-        tenant_id, subject_a,
+        tenant_id,
+        subject_a,
     )
     await pool.execute(
         "INSERT INTO entitlements (tenant_id, subject_id, venue, timeframe, feed_type) "
         "VALUES ($1, $2, 'BITGET', '1m', 'DELAYED')",
-        tenant_id, subject_b,
+        tenant_id,
+        subject_b,
     )
 
     rows = await pool.fetch(
         "SELECT subject_id, feed_type FROM entitlements WHERE tenant_id = $1 AND subject_id = $2",
-        tenant_id, subject_a,
+        tenant_id,
+        subject_a,
     )
     assert len(rows) == 1
     assert rows[0]["subject_id"] == subject_a
@@ -193,5 +209,8 @@ async def test_entitlements_rejects_expiry_before_grant(pool):
             "INSERT INTO entitlements "
             "(tenant_id, subject_id, venue, timeframe, feed_type, granted_at, expires_at) "
             "VALUES ($1, $2, 'BITGET', '1m', 'REALTIME', $3, $4)",
-            tenant_id, subject_id, now, now - timedelta(days=1),
+            tenant_id,
+            subject_id,
+            now,
+            now - timedelta(days=1),
         )

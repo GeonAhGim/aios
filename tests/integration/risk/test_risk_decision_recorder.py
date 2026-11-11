@@ -11,6 +11,7 @@ audit_log에 잔고 원값·inputs_snapshot 전문이 실리지 않음, (5) 롤�
 않는다(ADR-2026-09-09-C D3 — 적대적 리플레이 + 다중 인스턴스 동시성 증명,
 task-2824).
 """
+
 from __future__ import annotations
 
 import asyncio

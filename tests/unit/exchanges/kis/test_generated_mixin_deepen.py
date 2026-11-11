@@ -10,6 +10,7 @@ throughput assertion. This file adds exactly those two, against real
 `KISGeneratedDomesticStock01Mixin` methods reached through `KISAdapter` — the
 generator script and the committed generated/*.py files are not touched.
 """
+
 from __future__ import annotations
 
 import time

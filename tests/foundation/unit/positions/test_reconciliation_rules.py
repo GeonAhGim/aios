@@ -4,6 +4,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-6
 (`unit/positions/test_reconciliation_rules.py`:
 "공급자 불일치 → MATERIAL 판정 경계값").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

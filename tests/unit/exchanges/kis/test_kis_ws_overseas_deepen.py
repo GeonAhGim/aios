@@ -21,6 +21,7 @@ negative/boundary 테스트와 시뮬레이션된 `ConnectionClosed` 실패주�
    green(1 passed)에서 red(1 failed)로 뒤집힘을 증명한다(동일 기법,
    test_kis_overseas_deepen.py/task-2772 선례).
 """
+
 from __future__ import annotations
 
 import os
@@ -134,10 +135,7 @@ def test_parse_overseas_price_throughput_bounded_vs_domestic_baseline() -> None:
 #    tr_id 가드 제거
 # ---------------------------------------------------------------------------
 
-_GUARD = (
-    '    if tr_id != "HDFSCNT0":\n'
-    "        return []\n"
-)
+_GUARD = '    if tr_id != "HDFSCNT0":\n        return []\n'
 _MUTATED = ""
 
 
@@ -178,8 +176,13 @@ def test_pytest_gate_turns_red_when_overseas_price_tr_id_guard_is_removed(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -191,8 +194,12 @@ def test_pytest_gate_turns_red_when_overseas_price_tr_id_guard_is_removed(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

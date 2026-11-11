@@ -75,7 +75,8 @@ async def test_save_strategy_p95_latency_within_normalized_budget(
     budget_ms = baseline_wall_ms * 80
     if inject_delay:
         monkeypatch.setattr(
-            service, "save_strategy",
+            service,
+            "save_strategy",
             virtual_delayed_async(service.save_strategy, budget_ms * 10 / 1000),
         )
 

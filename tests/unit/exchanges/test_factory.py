@@ -3,6 +3,7 @@
 PM 배정 지침 ③ — "nh" 등록 검증(기존 bitget/kis 분기는 이 세션이
 새로 만든 게 아니라 회귀 범위 밖).
 """
+
 import pytest
 
 from src.exchanges.factory import SUPPORTED_EXCHANGES, UnsupportedExchangeError, build_adapter

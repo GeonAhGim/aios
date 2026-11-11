@@ -116,9 +116,7 @@ async def test_rename_writes_alias_and_audits_once(pool, refs, audit):
     assert await _event_count(pool, listed.instrument_id) == 3  # registered + listed + renamed
 
     async with pool.acquire() as conn:
-        found = await refs.get_instrument(
-            conn, Venue.BITGET, new_symbol, datetime.now(UTC)
-        )
+        found = await refs.get_instrument(conn, Venue.BITGET, new_symbol, datetime.now(UTC))
     assert found is not None
     assert found.instrument_id == listed.instrument_id
 

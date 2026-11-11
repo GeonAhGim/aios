@@ -130,9 +130,7 @@ class TestAuditEventRepositoryProtocol:
                 payload_hash: str,
                 payload: dict[str, object],
                 classification: Classification,
-            ) -> (
-                AuditEvent
-            ):
+            ) -> AuditEvent:
                 raise AssertionError("unreached: isinstance() checks structure, not behavior")
 
             async def list_chain_for_verification(self, tenant_id: UUID | None) -> list[AuditEvent]:
@@ -164,9 +162,7 @@ class TestAuditEventRepositoryProtocol:
                 payload_hash: str,
                 payload: dict[str, object],
                 classification: Classification,
-            ) -> (
-                AuditEvent
-            ):
+            ) -> AuditEvent:
                 raise AssertionError("unreached: isinstance() checks structure, not behavior")
 
             async def list_timeline(
@@ -206,9 +202,7 @@ class TestAuditEventRepositoryProtocol:
                 payload_hash: str,
                 payload: dict[str, object],
                 classification: Classification,
-            ) -> (
-                AuditEvent
-            ):
+            ) -> AuditEvent:
                 raise AssertionError("unreached: isinstance() checks structure, not behavior")
 
             async def list_timeline(
@@ -245,9 +239,7 @@ class TestAuditEventRepositoryProtocol:
                 payload_hash: str,
                 payload: dict[str, object],
                 classification: Classification,
-            ) -> (
-                AuditEvent
-            ):
+            ) -> AuditEvent:
                 raise AssertionError("unreached: isinstance() checks structure, not behavior")
 
             async def list_timeline(

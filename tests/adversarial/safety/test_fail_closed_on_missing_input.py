@@ -6,6 +6,7 @@
 fail-open이 된다 — `_exceeds_or_unknown`/`_is_baseline`가 그 결함을
 막는다는 것이 이 파일의 대상 불변식이다.
 """
+
 from __future__ import annotations
 
 from src.core.loader.risk_policy_loader import load_risk_policy

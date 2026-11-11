@@ -1,6 +1,7 @@
 """Shared fixtures/helpers for the paper_control lifecycle integration tests
 (`test_paper_deployment_lifecycle.py`, `test_paper_deployment_idempotency.py`,
 `test_paper_deployment_safety.py`) — 실제 dev DB 대상."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#9 R-13 — `rules/safety_state.py` 단위 테스트."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -90,9 +91,7 @@ def test_denies_on_distrusted_data_level_for_new_entry():
 
 
 def test_allows_distrusted_data_level_when_reduce_only():
-    result = safety_state(
-        _inputs(data_distrust_level="DISTRUSTED", reduce_only=True), _POLICY
-    )
+    result = safety_state(_inputs(data_distrust_level="DISTRUSTED", reduce_only=True), _POLICY)
     assert result.outcome == RiskOutcome.ALLOW
 
 

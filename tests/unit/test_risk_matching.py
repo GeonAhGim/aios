@@ -1,4 +1,5 @@
 """15.3 단위테스트 — 순수 비교 로직."""
+
 import pytest
 
 from src.services.risk_matching import RiskMatchingError, check_mismatch

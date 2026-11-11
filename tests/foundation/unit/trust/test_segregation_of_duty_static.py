@@ -265,9 +265,7 @@ def test_failure_injection_tokenizer_error_preserves_violation_detection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """토큰화 실패 후에도 원문 비교를 검사하여 위반을 거부한다."""
-    (tmp_path / "feature.py").write_text(
-        "if actor_id == requester_id: pass\n", encoding="utf-8"
-    )
+    (tmp_path / "feature.py").write_text("if actor_id == requester_id: pass\n", encoding="utf-8")
 
     def fail_tokenize(*args: object, **kwargs: object) -> None:
         raise tokenize.TokenError("injected tokenizer failure", (1, 0))

@@ -10,6 +10,7 @@ negative test, src/exchanges/** 변경 0줄).
 테스트는 실 네트워크를 타지 않도록 `get_history_candles`만 흉내 내는
 페이크 어댑터를 주입한다(provider는 어댑터를 덕타이핑으로만 호출한다).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

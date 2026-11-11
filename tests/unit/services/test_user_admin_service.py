@@ -5,6 +5,7 @@ tests/integration/test_user_admin_service.py에 있다. 여기서는 fake
 asyncpg pool/connection으로 분기 로직(DELETED/PENDING_DELETION 거부,
 404, 실패주입)만 실DB 없이 고정한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

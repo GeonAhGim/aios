@@ -55,17 +55,25 @@ async def test_raw_ledger_seed_does_not_pollute_worker_database(raw_conn):
         )
         audit_id = await insert_audit_event(raw_conn)
         entry_id = await insert_ledger_entry(raw_conn, audit_event_id=audit_id)
-        assert await raw_conn.fetchval(
-            "SELECT 1 FROM ledger_journal_entry WHERE entry_id = $1", entry_id
-        ) == 1
-        assert await shared.fetchval(
-            "SELECT 1 FROM ledger_journal_entry WHERE entry_id = $1", entry_id
-        ) is None
-        assert await shared.fetchval(
-            "SELECT 1 FROM foundation_audit_event WHERE id = $1", audit_id
-        ) is None
+        assert (
+            await raw_conn.fetchval(
+                "SELECT 1 FROM ledger_journal_entry WHERE entry_id = $1", entry_id
+            )
+            == 1
+        )
+        assert (
+            await shared.fetchval(
+                "SELECT 1 FROM ledger_journal_entry WHERE entry_id = $1", entry_id
+            )
+            is None
+        )
+        assert (
+            await shared.fetchval("SELECT 1 FROM foundation_audit_event WHERE id = $1", audit_id)
+            is None
+        )
     finally:
         await shared.close()
+
 
 # --- LC-6 (4a1d0c0de005_ledger_core) ---------------------------------------
 

@@ -19,6 +19,7 @@ docs/benchmarks/event_bus_latency.md는 더 이상 테스트 실행마다 덮어
 최초 측정치를 기록해둔 정적 스냅샷으로 고정하고, 실행 시 최신 수치는
 stdout(-s 옵션 시 표시)으로만 확인한다.
 """
+
 from __future__ import annotations
 
 import asyncio

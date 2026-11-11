@@ -2,6 +2,7 @@
 
 httpx.MockTransport 기반 검증(test_kis_adapter.py와 동일 원칙).
 """
+
 import httpx
 import pytest
 
@@ -130,9 +131,7 @@ async def test_get_credit_balance_ranking_returns_both_outputs():
         )
 
     adapter = _make_adapter(
-        lambda request: _route(
-            request, {"/uapi/domestic-stock/v1/ranking/credit-balance": handler}
-        )
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/ranking/credit-balance": handler})
     )
     result = await adapter.get_credit_balance_ranking()
 
@@ -144,14 +143,10 @@ async def test_get_credit_balance_ranking_returns_both_outputs():
 
 async def test_get_credit_balance_ranking_missing_output2_raises():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json={"rt_cd": "0", "msg1": "ok", "output1": []}
-        )
+        return httpx.Response(200, json={"rt_cd": "0", "msg1": "ok", "output1": []})
 
     adapter = _make_adapter(
-        lambda request: _route(
-            request, {"/uapi/domestic-stock/v1/ranking/credit-balance": handler}
-        )
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/ranking/credit-balance": handler})
     )
     with pytest.raises(FatalExchangeError):
         await adapter.get_credit_balance_ranking()
@@ -253,9 +248,7 @@ async def test_get_financial_balance_sheet_returns_raw_rows():
         )
 
     adapter = _make_adapter(
-        lambda request: _route(
-            request, {"/uapi/domestic-stock/v1/finance/balance-sheet": handler}
-        )
+        lambda request: _route(request, {"/uapi/domestic-stock/v1/finance/balance-sheet": handler})
     )
     result = await adapter.get_financial_balance_sheet("000660")
 

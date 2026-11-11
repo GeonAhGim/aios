@@ -7,6 +7,7 @@
 DEEPEN(task-2784, docs/audit/DEPTH_L4_BR.md #1928, D1 실측 -> D2 하한): 원 커밋(92c3cac)의
 정규식 파서에 수치 성능 단언이 없었다는 공백을 아래 스케일링 테스트로 채운다.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -62,7 +63,7 @@ def inquire_price(
         return current_data
 '''
 
-_REST_POST_ORDER_FILE = '''
+_REST_POST_ORDER_FILE = """
 ##############################################################################################
 # [국내주식] 주문/계좌 > 주식주문(현금) [v1_국내주식-001]
 ##############################################################################################
@@ -97,9 +98,9 @@ def order_cash(
     if res.isOK():
         current_data = pd.DataFrame([res.getBody().output])
         return current_data
-'''
+"""
 
-_WEBSOCKET_FILE = '''
+_WEBSOCKET_FILE = """
 ##############################################################################################
 # [국내선물옵션] 실시간시세 > 상품선물 실시간체결가[실시간-022]
 ##############################################################################################
@@ -123,14 +124,14 @@ def commodity_futures_realtime_conclusion(
     ]
 
     return msg, columns
-'''
+"""
 
-_NO_PATTERN_FILE = '''
+_NO_PATTERN_FILE = """
 # [인증] 접근토큰발급[인증-001]
 def auth_token(appkey: str, appsecret: str) -> None:
     tr_id = "AUTHTKN1"
     return requests.post("https://openapi.koreainvestment.com/oauth2/tokenP")
-'''
+"""
 
 
 def test_extract_request_meta_rest_get() -> None:
@@ -238,7 +239,7 @@ def test_extract_trs_from_text_surfaces_extraction_error_not_silently() -> None:
 def _params_block_text(param_count: int) -> str:
     params_lines = "\n".join(f'        "P{i}": p{i},' for i in range(param_count))
     signature = ", ".join(f"p{i}: str" for i in range(param_count))
-    return f'''
+    return f"""
 API_URL = "/uapi/domestic-stock/v1/quotations/inquire-price"
 
 def inquire_price({signature}):
@@ -249,7 +250,7 @@ def inquire_price({signature}):
     res = ka._url_fetch(API_URL, tr_id, "", params)
     if res.isOK():
         return res.getBody().output
-'''
+"""
 
 
 @pytest.mark.perf

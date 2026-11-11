@@ -156,9 +156,7 @@ async def _order_status(pool: asyncpg.Pool, order_id: UUID) -> str:
 
 async def test_simulated_network_drop_during_lookup_leaves_order_untouched(pool: asyncpg.Pool):
     user_id = await create_test_user(pool)
-    order_id, _ = await _insert_unknown_order(
-        pool, user_id, unknown_since=datetime.now(UTC)
-    )
+    order_id, _ = await _insert_unknown_order(pool, user_id, unknown_since=datetime.now(UTC))
 
     with pytest.raises(ConnectionResetError):
         await unknown_resolver.resolve_unknown(
@@ -370,7 +368,10 @@ def test_pytest_gate_turns_red_when_still_open_guard_is_removed(tmp_path: Path) 
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", _TARGET_TEST]
     repo_root = str(Path.cwd())
     env = dict(
-        os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8",
+        os.environ,
+        PYTHONPATH=repo_root,
+        PYTEST_ADDOPTS="",
+        PYTHONIOENCODING="utf-8",
         TEST_DATABASE_URL=template_database_url(),
     )
     env.pop("PYTEST_XDIST_WORKER", None)

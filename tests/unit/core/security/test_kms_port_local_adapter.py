@@ -6,6 +6,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-22
 byte-identical results to calling `src.core.security.encryption` directly —
 the port is a pure indirection, not a behaviour change.
 """
+
 from __future__ import annotations
 
 import time

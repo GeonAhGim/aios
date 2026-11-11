@@ -6,6 +6,7 @@
 던져 500이 났다(실DB로 재현 확인됨, task-2083). 지금은 그 위반만 골라
 `ConcurrencyConflictError`(§3.3 STATE_CONCURRENCY_CONFLICT/409)로 바꾼다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -47,17 +48,13 @@ async def client():
 
 
 async def _register(client: AsyncClient, email: str):
-    return await client.post(
-        "/auth/register", json={"email": email, "password": STRONG_PASSWORD}
-    )
+    return await client.post("/auth/register", json={"email": email, "password": STRONG_PASSWORD})
 
 
 async def test_concurrent_signup_same_email_is_one_201_one_409_never_500(client, pool):
     email = f"test-{uuid.uuid4().hex}@example.com"
 
-    first, second = await asyncio.gather(
-        _register(client, email), _register(client, email)
-    )
+    first, second = await asyncio.gather(_register(client, email), _register(client, email))
     responses = [first, second]
 
     statuses = sorted(r.status_code for r in responses)
@@ -67,9 +64,7 @@ async def test_concurrent_signup_same_email_is_one_201_one_409_never_500(client,
     assert loser.json()["error_code"] == "STATE_CONCURRENCY_CONFLICT", loser.text
 
     async with pool.acquire() as conn:
-        user_rows = await conn.fetch(
-            "SELECT user_id FROM users WHERE email = $1", email
-        )
+        user_rows = await conn.fetch("SELECT user_id FROM users WHERE email = $1", email)
         tenant_count = await conn.fetchval(
             "SELECT count(*) FROM tenant t JOIN users u ON u.user_id = t.id "
             "WHERE u.email = $1 AND t.kind = 'PERSONAL'",
@@ -84,9 +79,7 @@ async def test_concurrent_signup_different_emails_both_succeed(client):
     email_a = f"test-{uuid.uuid4().hex}@example.com"
     email_b = f"test-{uuid.uuid4().hex}@example.com"
 
-    responses = await asyncio.gather(
-        _register(client, email_a), _register(client, email_b)
-    )
+    responses = await asyncio.gather(_register(client, email_a), _register(client, email_b))
 
     assert [r.status_code for r in responses] == [201, 201], [
         (r.status_code, r.text) for r in responses
@@ -104,9 +97,7 @@ async def test_concurrent_signup_different_emails_both_succeed(client):
 async def test_negative_signup_rejects_weak_password_without_user(client, pool, password):
     """I-10: HTTP wiring must enforce each independent password strength rule."""
     email = f"test-{uuid.uuid4().hex}@example.com"
-    response = await client.post(
-        "/auth/register", json={"email": email, "password": password}
-    )
+    response = await client.post("/auth/register", json={"email": email, "password": password})
     assert response.status_code == 401, response.text
     assert response.json()["error_code"] == "AUTH_INVALID_CREDENTIALS"
     async with pool.acquire() as conn:
@@ -134,14 +125,18 @@ async def test_failure_injection_tenant_insert_rolls_back_signup(client, pool, m
     assert len(inserted_ids) == 1, "The failure must occur after the real database writes."
     async with pool.acquire() as conn:
         assert await conn.fetchval("SELECT count(*) FROM users WHERE email = $1", email) == 0
-        assert await conn.fetchval(
-            "SELECT count(*) FROM tenant WHERE id = $1", inserted_ids[0]
-        ) == 0
+        assert (
+            await conn.fetchval("SELECT count(*) FROM tenant WHERE id = $1", inserted_ids[0]) == 0
+        )
 
     retry = await _register(client, email)
     assert retry.status_code == 201, retry.text
     async with pool.acquire() as conn:
-        assert await conn.fetchval(
-            "SELECT count(*) FROM users u JOIN tenant t ON t.id = u.user_id "
-            "WHERE u.email = $1 AND t.kind = 'PERSONAL'", email,
-        ) == 1
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM users u JOIN tenant t ON t.id = u.user_id "
+                "WHERE u.email = $1 AND t.kind = 'PERSONAL'",
+                email,
+            )
+            == 1
+        )

@@ -1,5 +1,6 @@
 """Portfolio Mandate adversarial 테스트 — 75번 §5 MAN-007 "tenant/subject
 mismatch and foreign mandate ref are denied without existence leak"."""
+
 from pathlib import Path
 from uuid import uuid4
 
@@ -84,9 +85,7 @@ async def test_activating_nonexistent_revision_raises_lookup_error(pool, repo, t
 async def test_tenant_status_view_never_includes_another_tenants_mandate(pool, repo):
     tenant_a = await create_test_tenant(pool)
     tenant_b = await create_test_tenant(pool)
-    await create_draft_mandate(
-        repo, tenant_id=tenant_a, subject_id=tenant_a, rules=default_rules()
-    )
+    await create_draft_mandate(repo, tenant_id=tenant_a, subject_id=tenant_a, rules=default_rules())
 
     view_b = await build_mandate_status_view(repo, tenant_b)
 

@@ -1,4 +1,5 @@
 """정규 심볼 ↔ 거래소 심볼 레지스트리 단위테스트 — L4-04. DB 없음."""
+
 from __future__ import annotations
 
 from decimal import Decimal

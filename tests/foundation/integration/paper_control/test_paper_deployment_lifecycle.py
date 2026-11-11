@@ -1,5 +1,6 @@
 """FND-07 Paper Execution & Control 통합테스트 — 실제 dev DB 대상. 47번 §5/77번
 §6 core 상태머신(request/start/pause/resume/stop, PAP-001/002/006)."""
+
 from __future__ import annotations
 
 import pytest

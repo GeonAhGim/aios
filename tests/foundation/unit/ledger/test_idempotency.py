@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-3
 ("idempotency_key 결정적 생성", negative: "같은 이벤트 두 번의 키 불일치").
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

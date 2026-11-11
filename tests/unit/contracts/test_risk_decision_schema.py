@@ -5,6 +5,7 @@
 (§8 "필드 제거 시 실패"). 필드를 의도적으로 추가하는 것은 107번 MINOR
 변경이므로 허용되고, 그 경우에만 fixture를 함께 갱신한다.
 """
+
 import json
 from datetime import UTC, datetime
 from decimal import Decimal

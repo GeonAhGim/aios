@@ -5,6 +5,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§9 L4-11
 가짜 clock/sleep을 주입해 실제 대기 없이 결정론적으로 검증한다(sleep 금지
 규칙 — task-423 d3227c9 패턴).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -98,16 +99,27 @@ def test_pytest_gate_turns_red_when_timeout_check_is_removed(tmp_path: Path) -> 
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\nasyncio_mode = auto\n", encoding="utf-8")
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "-c", str(config), "--confcutdir", str(tmp_path),
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
         f"{test_copy}::test_acquire_raises_rate_limited_when_wait_exceeds_timeout",
     ]
-    env = dict(
-        os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8"
-    )
+    env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -126,8 +138,13 @@ def test_pytest_gate_turns_red_when_timeout_check_is_removed(tmp_path: Path) -> 
         encoding="utf-8",
     )
     mutated = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=60, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=60,
+        check=False,
     )
     assert mutated.returncode == 1, mutated.stdout + mutated.stderr
     assert "1 failed" in mutated.stdout

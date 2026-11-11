@@ -1,4 +1,5 @@
 """FND-08 Reconciliation & Resilience 순수 규칙 단위테스트 — DB 없음."""
+
 from __future__ import annotations
 
 import json
@@ -28,9 +29,7 @@ def test_classify_item_exact_match_is_healthy():
 
 def test_classify_item_missing_provider_value_is_unavailable():
     """REC-003 — never assumes zero balance/fill."""
-    assert (
-        classify_item(Decimal("100.00"), None, _POLICY) == Classification.PROVIDER_UNAVAILABLE
-    )
+    assert classify_item(Decimal("100.00"), None, _POLICY) == Classification.PROVIDER_UNAVAILABLE
 
 
 def test_classify_item_within_absolute_tolerance_is_minor():
@@ -141,9 +140,9 @@ def test_compute_input_hash_payload_matches_expected_json_shape():
     """해시 입력 payload가 target_ref/entities를 정렬된 키로 직렬화한다는
     내부 계약 확인 — dedup 안정성의 근거."""
     entities = {"B": ("1", "2"), "A": ("3", "4")}
-    expected_payload = json.dumps(
-        {"target_ref": "t", "entities": entities}, sort_keys=True
-    ).encode("utf-8")
+    expected_payload = json.dumps({"target_ref": "t", "entities": entities}, sort_keys=True).encode(
+        "utf-8"
+    )
     import hashlib as real_hashlib
 
     assert compute_input_hash("t", entities) == real_hashlib.sha256(expected_payload).hexdigest()

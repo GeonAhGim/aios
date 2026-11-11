@@ -1,4 +1,5 @@
 """L4_risk_and_safety_v1.0.md#3.2, #9 R-03 — RiskInputs 계약 테스트."""
+
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -68,9 +69,7 @@ def test_naive_as_of_rejected():
 
 def test_pct_quantized_to_six_decimals():
     as_of = datetime(2026, 9, 3, tzinfo=UTC)
-    inputs = _sample_inputs(
-        equity=EquityInputs(daily_pnl_pct=Decimal("-1.123456789"), as_of=as_of)
-    )
+    inputs = _sample_inputs(equity=EquityInputs(daily_pnl_pct=Decimal("-1.123456789"), as_of=as_of))
     assert inputs.equity.daily_pnl_pct == Decimal("-1.123457")
 
 

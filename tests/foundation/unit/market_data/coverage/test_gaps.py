@@ -7,6 +7,7 @@ DoD: 커버리지 선언 없음·부분 커버·세션 휴장(갭 아님) 세 �
 판정 불가가 fail-closed(예외)로 떨어지는 것, 갭 목록이 결정론적으로
 정렬되는 것을 negative 테스트로 단언한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime

@@ -17,6 +17,7 @@ DoD가 요구하는 두 케이스를 절대 한 테스트로 묶지 않는다 �
 결론을 내는지 대조한다(§C 중복 컨텍스트 금지 — 판정은 `dispatch_outcome.
 classify_submit_failure` 하나뿐, 두 경로 모두 그것을 재사용한다).
 """
+
 from __future__ import annotations
 
 import json
@@ -133,9 +134,7 @@ async def test_not_sent_failure_stays_failed(pool):
     execution_id = await _create_running_execution(pool, user_id)
 
     async def circuit_open(order: Order) -> Order:
-        raise ExchangeError(
-            ExchangeErrorKind.TRANSIENT_NETWORK, circuit_open=True, venue="bitget"
-        )
+        raise ExchangeError(ExchangeErrorKind.TRANSIENT_NETWORK, circuit_open=True, venue="bitget")
 
     adapter = FakeExchangeAdapter(on_place_order=circuit_open)
     order = _market_order(execution_id)
@@ -175,7 +174,12 @@ async def test_fenced_submit_response_lost_after_send_becomes_unknown(pool):
 
     with pytest.raises(httpx.ReadTimeout):
         await submit_with_fence(
-            pool, adapter, order, user_id=user_id, gate_decision=gate, read_fences=read,
+            pool,
+            adapter,
+            order,
+            user_id=user_id,
+            gate_decision=gate,
+            read_fences=read,
             decision_reader=PostgresDecisionRepository(pool),
         )
 

@@ -2,6 +2,7 @@
 
 DoD: "체결 후 예측 비중" — 기존 30% + 신규 5% → 35% 거부, 감소 주문은 통과.
 """
+
 from decimal import Decimal
 
 from src.core.risk.decision import RiskOutcome
@@ -57,9 +58,7 @@ def test_reduce_only_order_always_passes():
 
 
 def test_reduce_only_bypasses_missing_data():
-    inputs = _inputs(
-        symbol_market_value=None, notional="500", total_equity=None, reduce_only=True
-    )
+    inputs = _inputs(symbol_market_value=None, notional="500", total_equity=None, reduce_only=True)
     result = concentration.check(inputs, POLICY)
     assert result.outcome == RiskOutcome.ALLOW
 

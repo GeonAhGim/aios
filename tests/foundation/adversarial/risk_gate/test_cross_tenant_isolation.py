@@ -1,6 +1,7 @@
 """Risk & Safety Gate adversarial 테스트 — 다른 tenant의 안전 통제를
 읽거나 해제할 수 없어야 한다(73번 TRU-006과 동일 원칙), 그리고 다른
 tenant의 connection을 게이트 평가에 끼워 넣을 수 없어야 한다."""
+
 from pathlib import Path
 from uuid import uuid4
 

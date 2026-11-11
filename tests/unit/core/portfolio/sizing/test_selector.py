@@ -92,8 +92,7 @@ def test_size_for_rejects_config_input_method_mismatch(
         # best_of removes isolated Windows ticks; batch preserves per-call ms.
         best = perf_budget.best_of(reject, n=10, warmup=2, batch=100)
         assert best.cpu_ms < 1.0, (
-            f"mismatch rejection should be near-zero CPU; "
-            f"measured best_of_min={best.cpu_ms:.3f}ms"
+            f"mismatch rejection should be near-zero CPU; measured best_of_min={best.cpu_ms:.3f}ms"
         )
         return best.cpu_ms
 

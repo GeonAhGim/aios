@@ -6,6 +6,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-E, §9 L4-30
 tests/integration/exchanges/bitget/test_live_demo_roundtrip.py(`live_demo`
 마커)의 책임이다.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

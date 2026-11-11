@@ -57,9 +57,7 @@ async def test_aios_app_cannot_create_permissive_bypass_policy(pool):
     시도 — `CREATE POLICY`도 DDL이라 소유자 전용이다."""
     async with pool.acquire() as conn, AppRoleTx(conn):
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
-            await conn.execute(
-                "CREATE POLICY bypass_everything ON consent_record USING (true)"
-            )
+            await conn.execute("CREATE POLICY bypass_everything ON consent_record USING (true)")
 
 
 async def test_tenant_transaction_guc_does_not_leak_to_next_transaction(pool):
@@ -88,12 +86,8 @@ async def test_second_set_local_within_same_transaction_does_not_survive_commit(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute(
-                "SELECT set_config('app.tenant_id', $1, true)", str(tenant_a)
-            )
-            await conn.execute(
-                "SELECT set_config('app.tenant_id', $1, true)", str(tenant_b)
-            )
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_a))
+            await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_b))
             current = await conn.fetchval("SELECT current_setting('app.tenant_id', true)")
             assert current == str(tenant_b)
 

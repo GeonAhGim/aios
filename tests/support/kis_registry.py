@@ -11,6 +11,7 @@ copy for the integration modules (adapter routing, capability matrix) whose
 concern is dispatch, not verification-gating. Assign the *function* as the
 adapter's `symbol_registry` attribute -- the mixin calls it with no arguments.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

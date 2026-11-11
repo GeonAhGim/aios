@@ -7,6 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.4, §9 LC-8.
 `tests/foundation/unit/positions/test_ports_protocol.py`와 같은 패턴. 메서드
 하나라도 빠지면 어댑터는 포트를 만족하지 못한다는 것을 fail-closed로 실증한다.
 """
+
 from __future__ import annotations
 
 from src.foundation.ledger.ports.balance_repository import BalanceRepository

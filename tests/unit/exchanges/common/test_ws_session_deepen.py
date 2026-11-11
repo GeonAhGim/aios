@@ -17,6 +17,7 @@
 `_never`/`_closed`/`SUB`/`_Stop`/`_Harness`)는 재사용하고 재정의하지 않는다
 (task-2804 OMS DEEPEN과 동일한 재노출 패턴).
 """
+
 from __future__ import annotations
 
 import asyncio

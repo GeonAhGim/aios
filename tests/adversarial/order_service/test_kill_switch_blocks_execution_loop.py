@@ -16,6 +16,7 @@ closes=[50]*30을 돌려주면 BUY 신호가 매 tick 발화)를 그대로 재�
 kill switch가 없으면 이 설정으로 `place_order`가 반드시 1회 호출된다는
 것은 `test_two_schedulers_ticking_same_execution_place_order_exactly_once`
 (EO-04)가 이미 증명했다. 이 테스트는 그 대조군에 kill switch만 추가한다."""
+
 from __future__ import annotations
 
 import uuid

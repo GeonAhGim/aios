@@ -1,4 +1,5 @@
 """L4-22 paper 모델 테스트 공용 빌더 — DB 없음, 전역 난수 없음."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence

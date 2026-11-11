@@ -6,6 +6,7 @@ DoD: (1) 커버리지 하락 시 FAIL, (2) 사유 없는 미구현 TR은 존재�
 docs/audit/DEPTH_L4_BR.md #1779). 전부 합성 데이터(tmp_path)로 검증 — 네트워크·실제
 저장소 접근 없음.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -308,7 +309,7 @@ def test_first_run_initializes_baseline(tmp_path: Path) -> None:
     exit_code = _run_main(tmp_path, reference_path, adapter_dir, coverage_txt)
 
     assert exit_code == 0
-    assert coverage_txt.read_text(encoding="utf-8").strip() == f"{round(1/3*100, 2):.2f}"
+    assert coverage_txt.read_text(encoding="utf-8").strip() == f"{round(1 / 3 * 100, 2):.2f}"
     assert (tmp_path / "MATRIX.md").exists()
 
 
@@ -339,7 +340,7 @@ def test_risen_coverage_ratchets_baseline_up(tmp_path: Path) -> None:
     exit_code = _run_main(tmp_path, reference_path, adapter_dir, coverage_txt)
 
     assert exit_code == 0
-    assert coverage_txt.read_text(encoding="utf-8").strip() == f"{round(2/3*100, 2):.2f}"
+    assert coverage_txt.read_text(encoding="utf-8").strip() == f"{round(2 / 3 * 100, 2):.2f}"
 
 
 def test_equal_coverage_passes_and_keeps_baseline(tmp_path: Path) -> None:
@@ -348,7 +349,7 @@ def test_equal_coverage_passes_and_keeps_baseline(tmp_path: Path) -> None:
     adapter_dir.mkdir()
     (adapter_dir / "a.py").write_text('tr_id = "TTTC0011U"\n', encoding="utf-8")
     coverage_txt = tmp_path / "kis-tr-coverage.txt"
-    baseline_value = f"{round(1/3*100, 2):.2f}"
+    baseline_value = f"{round(1 / 3 * 100, 2):.2f}"
     coverage_txt.write_text(baseline_value + "\n", encoding="utf-8")
 
     exit_code = _run_main(tmp_path, reference_path, adapter_dir, coverage_txt)

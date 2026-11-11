@@ -158,6 +158,7 @@ async def test_scan_market_volume_boundary_below_min():
 
 async def test_scan_market_fetch_tickers_raises():
     """fetch_tickers raises → error should propagate"""
+
     async def fetch_tickers(exchange):
         raise ConnectionError("exchange unreachable")
 
@@ -170,6 +171,7 @@ async def test_scan_market_fetch_tickers_raises():
 
 async def test_scan_market_fetch_candles_raises():
     """fetch_candles raises during volatility scan → error should propagate"""
+
     async def fetch_tickers(exchange):
         return [_ticker("BTC/USDT", "1000")]
 

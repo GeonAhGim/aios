@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §2 표 136행(R-40), §4.3
 상태표 412~413행, §9 R-40 DoD("5범위 통합, 타 테넌트 미영향,
 `INSERT INTO safety_control` 호출부 1곳 grep")."""
+
 from __future__ import annotations
 
 import os
@@ -280,8 +281,7 @@ async def test_deactivate_marks_inactive_and_records_evidence_audit_event(pool, 
     matching = [
         e
         for e in page.items
-        if e.action == "safety_control_deactivation_evidence_recorded"
-        and e.aggregate_id == view.id
+        if e.action == "safety_control_deactivation_evidence_recorded" and e.aggregate_id == view.id
     ]
     assert len(matching) == 1
     assert matching[0].payload == {"evidence_ref": "incident-report:INC-42"}

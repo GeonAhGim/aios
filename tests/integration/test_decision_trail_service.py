@@ -217,7 +217,9 @@ async def test_trail_merges_risk_decision(service, pool, trail_service):
     risk_entries = [e for e in entries if e.kind == TrailKind.RISK_DECISION]
     assert len(risk_entries) == 2
     assert [e.kind for e in entries] == [
-        TrailKind.RISK_DECISION, TrailKind.CONVERSION, TrailKind.RISK_DECISION
+        TrailKind.RISK_DECISION,
+        TrailKind.CONVERSION,
+        TrailKind.RISK_DECISION,
     ]
     # 시간순 정렬 확인
     for i in range(len(risk_entries) - 1):
@@ -241,7 +243,8 @@ async def test_trail_propagates_database_failure(service, pool, trail_service, m
     owner = await create_test_tenant(pool)
     paper = await _paper(service, pool, owner)
     monkeypatch.setattr(
-        module, "_RISK_DECISION_SQL",
+        module,
+        "_RISK_DECISION_SQL",
         "SELECT 1 / (length($1::text) - length($1::text)), $2::uuid",
     )
     with pytest.raises(asyncpg.DivisionByZeroError):

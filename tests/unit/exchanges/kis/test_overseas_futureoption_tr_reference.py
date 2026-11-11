@@ -17,6 +17,7 @@ DoD(c) 모의투자 분기 회귀: 이 도메인 5개 TR은 전부 O/H 접두이
 True로 호출해도 tr_id가 원문 그대로 실려야 하고, 치환 규칙에 "O"나 "H"를
 잘못 추가하면 이 단언이 깨진다는 것을 별도 테스트로 실증한다.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

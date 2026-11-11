@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md sec.9 RD-11
 DoD ("빈도·단위·발표지연 정규화").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime

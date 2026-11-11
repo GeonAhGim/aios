@@ -4,6 +4,7 @@
 호출을 가로채는 가짜 adapter_factory를 주입해 검증한다(이 세션에서 반복
 적용한 DI 패턴).
 """
+
 from pathlib import Path
 
 import asyncpg

@@ -195,7 +195,10 @@ def test_bridge_budget_gate_actually_fails_when_batch_stalls_past_20ms(
 
     monkeypatch.setattr(bridge_mod, "parse", _stalled_parse)
     samples = perf_budget.samples(
-        lambda: bridge_cond_v2(ALL_CASES[0][0]), n=3, batch=4, warmup=0,
+        lambda: bridge_cond_v2(ALL_CASES[0][0]),
+        n=3,
+        batch=4,
+        warmup=0,
     )
     cpu_ms = sorted(sample.cpu_ms for sample in samples)
     p95_ms = cpu_ms[min(int(len(cpu_ms) * 0.95), len(cpu_ms) - 1)]

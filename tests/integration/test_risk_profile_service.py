@@ -1,4 +1,5 @@
 """15.2 통합테스트 — 실제 dev DB 대상."""
+
 from pathlib import Path
 
 import asyncpg

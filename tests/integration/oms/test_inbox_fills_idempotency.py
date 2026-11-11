@@ -4,6 +4,7 @@ ON CONFLICT 중복 흡수, 스코프 선점(NEW/EXISTING/DIGEST_MISMATCH), ttl �
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-08, §5.1 inbox/
 fills/idempotency 행, §5.2(스코프·digest), §6 F9(중복 전달 흡수).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -162,10 +163,18 @@ async def test_fills_insert_recomputes_filled_quantity_from_sum_not_increment(po
 
     async def _insert(qty: Decimal, fill_id: str) -> None:
         fill = FillEvent(
-            provider_fill_id=fill_id, venue="bitget", order_id=order_id,
-            exchange_order_id="ex-1", symbol="BTC/USDT", side="BUY", quantity=qty,
-            price=Decimal("100"), fee=Decimal("0"), fee_currency="USDT",
-            liquidity="TAKER", venue_ts=datetime.now(UTC),
+            provider_fill_id=fill_id,
+            venue="bitget",
+            order_id=order_id,
+            exchange_order_id="ex-1",
+            symbol="BTC/USDT",
+            side="BUY",
+            quantity=qty,
+            price=Decimal("100"),
+            fee=Decimal("0"),
+            fee_currency="USDT",
+            liquidity="TAKER",
+            venue_ts=datetime.now(UTC),
         )
         async with pool.acquire() as conn:
             assert await repo.insert_if_absent(conn, fill) is True
@@ -187,10 +196,18 @@ async def test_fills_insert_without_order_id_skips_recalc(pool):
     """order_id가 없는(미매칭) fill은 재계산을 건드리지 않는다(NULL FK 허용)."""
     repo = FillsRepository()
     fill = FillEvent(
-        provider_fill_id=f"fill-{uuid4().hex}", venue="bitget", order_id=None,
-        exchange_order_id="ex-unmatched", symbol="BTC/USDT", side="SELL",
-        quantity=Decimal("1"), price=Decimal("100"), fee=Decimal("0"),
-        fee_currency="USDT", liquidity="MAKER", venue_ts=datetime.now(UTC),
+        provider_fill_id=f"fill-{uuid4().hex}",
+        venue="bitget",
+        order_id=None,
+        exchange_order_id="ex-unmatched",
+        symbol="BTC/USDT",
+        side="SELL",
+        quantity=Decimal("1"),
+        price=Decimal("100"),
+        fee=Decimal("0"),
+        fee_currency="USDT",
+        liquidity="MAKER",
+        venue_ts=datetime.now(UTC),
     )
     async with pool.acquire() as conn:
         assert await repo.insert_if_absent(conn, fill) is True
@@ -208,12 +225,18 @@ async def test_idempotency_claim_new_then_existing_for_same_digest(pool):
 
     async with pool.acquire() as conn:
         first = await repo.claim(
-            conn, scope_hash=scope_hash, digest=digest, order_id=order_a,
+            conn,
+            scope_hash=scope_hash,
+            digest=digest,
+            order_id=order_a,
             ttl=timedelta(minutes=5),
         )
         # 다른 order_id로 재시도해도(예: 재시도 경로) 최초 선점을 덮어쓰지 않는다.
         second = await repo.claim(
-            conn, scope_hash=scope_hash, digest=digest, order_id=order_b,
+            conn,
+            scope_hash=scope_hash,
+            digest=digest,
+            order_id=order_b,
             ttl=timedelta(minutes=5),
         )
 
@@ -230,12 +253,18 @@ async def test_idempotency_claim_digest_mismatch_raises(pool):
 
     async with pool.acquire() as conn:
         await repo.claim(
-            conn, scope_hash=scope_hash, digest=_hash("digest-A"), order_id=order_a,
+            conn,
+            scope_hash=scope_hash,
+            digest=_hash("digest-A"),
+            order_id=order_a,
             ttl=timedelta(minutes=5),
         )
         with pytest.raises(IdempotencyDigestMismatchError):
             await repo.claim(
-                conn, scope_hash=scope_hash, digest=_hash("digest-B"), order_id=order_b,
+                conn,
+                scope_hash=scope_hash,
+                digest=_hash("digest-B"),
+                order_id=order_b,
                 ttl=timedelta(minutes=5),
             )
 
@@ -249,7 +278,10 @@ async def test_idempotency_claim_reclaims_after_ttl_expiry(pool):
 
     async with pool.acquire() as conn:
         first = await repo.claim(
-            conn, scope_hash=scope_hash, digest=_hash("digest-A"), order_id=order_a,
+            conn,
+            scope_hash=scope_hash,
+            digest=_hash("digest-A"),
+            order_id=order_a,
             ttl=timedelta(minutes=5),
         )
         assert first.kind == "NEW"
@@ -259,7 +291,10 @@ async def test_idempotency_claim_reclaims_after_ttl_expiry(pool):
             scope_hash,
         )
         reclaimed = await repo.claim(
-            conn, scope_hash=scope_hash, digest=_hash("digest-B"), order_id=order_b,
+            conn,
+            scope_hash=scope_hash,
+            digest=_hash("digest-B"),
+            order_id=order_b,
             ttl=timedelta(minutes=5),
         )
 

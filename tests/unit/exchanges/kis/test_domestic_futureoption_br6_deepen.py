@@ -33,6 +33,7 @@ task-2778(test_domestic_futureoption_deepen.py)이 이미 같은 mixin에 대해
      정규화한 배율로 단언한다(task-2773/2777/2778과 동일 판단 —
      절대 ms 상수는 공유 CI에서 상시 적색을 낳는다).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -62,6 +63,7 @@ def _reset_bucket_registry() -> None:
     rate_profile.reset_token_bucket_registry_for_test()
     yield
     rate_profile.reset_token_bucket_registry_for_test()
+
 
 _ORDER_PATH = "/uapi/domestic-futureoption/v1/trading/order"
 _CANCEL_PATH = "/uapi/domestic-futureoption/v1/trading/order-rvsecncl"

@@ -3,6 +3,7 @@
 결정 틱 리플레이 픽스처: 고정된 틱 시퀀스를 재생해 트리거가 정확히
 트리거가에서(경계 포함) 발동하고 그 이전 틱에서는 발동하지 않음을
 증명한다."""
+
 from __future__ import annotations
 
 from decimal import Decimal

@@ -13,6 +13,7 @@ This module is a thin adapter over the production
 `ensure_default_hierarchy` (idempotent: safe to call again for a tenant that
 already has some or all of the four levels) -- no test-only seeding rule.
 """
+
 from __future__ import annotations
 
 from datetime import date

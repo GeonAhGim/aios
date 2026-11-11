@@ -21,6 +21,7 @@ DEPTH_L4_BR(task-2722)가 원 리프(task-1565, 232cd45)를 D1로 판정 — 3�
   "행당 정확히 1회" 단언들이 장식이 아니라 그 회귀(중복 클레임)를 실제로
   관측 가능하게 만드는 게이트임을 증명한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -264,18 +265,14 @@ async def test_stale_worker_mark_done_rejected(pool):
     async with pool.acquire() as conn:
         await repo.claim_batch(conn, worker_id="A", limit=10, lease_sec=30)
         # 다른 워커가 이미 이 행을 마무리했다고 가정(B로 강제 전환).
-        await conn.execute(
-            "UPDATE order_command_outbox SET worker_id='B' WHERE id=$1", row_id
-        )
+        await conn.execute("UPDATE order_command_outbox SET worker_id='B' WHERE id=$1", row_id)
 
     async with pool.acquire() as conn:
         with pytest.raises(ConcurrencyConflictError):
             await repo.mark_done(conn, row_id, expected_worker="A")
 
     async with pool.acquire() as conn:
-        state = await conn.fetchval(
-            "SELECT state FROM order_command_outbox WHERE id=$1", row_id
-        )
+        state = await conn.fetchval("SELECT state FROM order_command_outbox WHERE id=$1", row_id)
     assert state == "SENDING"  # A의 늦은 쓰기는 반영되지 않았다
 
 
@@ -287,9 +284,7 @@ async def test_mark_done_succeeds_for_matching_worker(pool):
     async with pool.acquire() as conn:
         await repo.claim_batch(conn, worker_id="A", limit=10, lease_sec=30)
         await repo.mark_done(conn, row_id, expected_worker="A")
-        state = await conn.fetchval(
-            "SELECT state FROM order_command_outbox WHERE id=$1", row_id
-        )
+        state = await conn.fetchval("SELECT state FROM order_command_outbox WHERE id=$1", row_id)
     assert state == "DONE"
 
 
@@ -302,7 +297,11 @@ async def test_mark_retry_returns_row_to_pending(pool):
     async with pool.acquire() as conn:
         await repo.claim_batch(conn, worker_id="A", limit=10, lease_sec=30)
         await repo.mark_retry(
-            conn, row_id, attempt=1, not_before=not_before, last_error="TIMEOUT",
+            conn,
+            row_id,
+            attempt=1,
+            not_before=not_before,
+            last_error="TIMEOUT",
             expected_worker="A",
         )
         row = await conn.fetchrow(
@@ -326,8 +325,12 @@ async def test_mark_retry_rejected_for_stale_worker(pool):
         await repo.claim_batch(conn, worker_id="A", limit=10, lease_sec=30)
         with pytest.raises(ConcurrencyConflictError):
             await repo.mark_retry(
-                conn, row_id, attempt=1, not_before=datetime.now(UTC),
-                last_error="x", expected_worker="B",
+                conn,
+                row_id,
+                attempt=1,
+                not_before=datetime.now(UTC),
+                last_error="x",
+                expected_worker="B",
             )
 
 
@@ -339,9 +342,7 @@ async def test_mark_dead_succeeds_then_rejects_second_call(pool):
     async with pool.acquire() as conn:
         await repo.claim_batch(conn, worker_id="A", limit=10, lease_sec=30)
         await repo.mark_dead(conn, row_id, reason="MAX_ATTEMPTS", expected_worker="A")
-        state = await conn.fetchval(
-            "SELECT state FROM order_command_outbox WHERE id=$1", row_id
-        )
+        state = await conn.fetchval("SELECT state FROM order_command_outbox WHERE id=$1", row_id)
     assert state == "DEAD"
 
     async with pool.acquire() as conn:

@@ -22,6 +22,7 @@ test_adapter_oauth_wiring.py)을 갖췄지만 D2 하한에 필요한 두 가지�
    green(1 passed)에서 red(1 failed)로 뒤집힘을 증명한다(동일 기법,
    test_kis_ws_overseas_deepen.py/task-2777 선례).
 """
+
 from __future__ import annotations
 
 import os
@@ -53,10 +54,7 @@ def _make_adapter(handler) -> NHAdapter:
 
 
 def _synthetic_holdings(n: int) -> list[dict[str, str]]:
-    return [
-        {"iem_cd": f"00{i:05d}", "itg_bnc_qty": "10", "rsdl_qty": "8"}
-        for i in range(n)
-    ]
+    return [{"iem_cd": f"00{i:05d}", "itg_bnc_qty": "10", "rsdl_qty": "8"} for i in range(n)]
 
 
 def _make_balance_adapter(n: int) -> NHAdapter:
@@ -126,7 +124,7 @@ async def test_balance_parsing_throughput_within_normalized_budget() -> None:
 # ---------------------------------------------------------------------------
 
 _GUARD = '        if rsp_cd in _SUCCESS_CODES or "완료" in rsp_msg:\n'
-_MUTATED = '        if rsp_cd in _SUCCESS_CODES:\n'
+_MUTATED = "        if rsp_cd in _SUCCESS_CODES:\n"
 
 
 def _plugin_source() -> str:
@@ -167,8 +165,13 @@ def test_pytest_gate_turns_red_when_wanryo_fallback_guard_is_removed(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -180,8 +183,12 @@ def test_pytest_gate_turns_red_when_wanryo_fallback_guard_is_removed(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

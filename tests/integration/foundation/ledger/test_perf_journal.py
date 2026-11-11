@@ -38,8 +38,7 @@ strict 모드에서 실패로 보고되는 pytest 동작이다(왕복 축소가 
 py`, LB-11)와 동일한 근본 원인·동일한 decision(c)이라 같은 처방을
 적용했다: 절대 임계(30ms)를 xfail로 숨기는 대신, 이 환경의 기준 DB
 왕복비용(rt) 대비 p95 < max(30ms, k*rt)로 정규화하고, 왕복 수 자체를
-asyncpg 쿼리 로거로 세어 <= 7(위 계산)을 단언하는 구조 회귀 가드를
-더했다.
+asyncpg 쿼리 로거로 세어 <= 7(위 계산)을 단언하는 구조 회귀 가드를 더했다.
 
 task-1029(CI 상시 적색 재발): 정규화 후에도 CI 실측 p95=172.7ms가
 정규화 목표 74.9ms(기준왕복 p95=8.3ms)를 넘겨 여전히 FAILED로
@@ -373,8 +372,12 @@ async def test_journal_append_rejects_tampered_resend_as_digest_mismatch(pool, p
     )
     async with pool.acquire() as conn, conn.transaction():
         await post_entry(
-            conn, first_event, journal=journal, balances=ports.balances,
-            audit=ports.audit, clock=_clock,
+            conn,
+            first_event,
+            journal=journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=_clock,
         )
 
     tampered_event = first_event.model_copy(update={"amount": Decimal("999.00")})
@@ -417,8 +420,12 @@ async def test_journal_append_concurrent_tampered_resend_rejects_loser(pool, por
         )
         async with pool.acquire() as conn, conn.transaction():
             return await post_entry(
-                conn, event, journal=journal, balances=ports.balances,
-                audit=ports.audit, clock=_clock,
+                conn,
+                event,
+                journal=journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=_clock,
             )
 
     results = await asyncio.gather(
@@ -482,8 +489,12 @@ async def test_journal_append_rolls_back_entirely_when_audit_append_fails(
     monkeypatch.undo()
     async with pool.acquire() as conn, conn.transaction():
         retried = await post_entry(
-            conn, event, journal=journal, balances=ports.balances,
-            audit=ports.audit, clock=_clock,
+            conn,
+            event,
+            journal=journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=_clock,
         )
     assert retried.replayed is False
     assert retried.sequence_no >= 1

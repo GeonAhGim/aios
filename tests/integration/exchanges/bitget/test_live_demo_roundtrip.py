@@ -31,6 +31,7 @@ ADR-2026-09-06-G §11 "통과하지 않고 값만 바꾸는 것은 금지").
 보간하지 않는다. skip 사유는 "어떤 변수가 없는지"만 말하지, 값은 절대
 말하지 않는다.
 """
+
 from __future__ import annotations
 
 import os

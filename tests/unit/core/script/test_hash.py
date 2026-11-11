@@ -6,6 +6,7 @@ DoD(task-1535 note): 같은 입력=같은 해시, 레지스트리 버전 변경=
 negative(빈 소스·빈 레지스트리 버전·IRProgram 아님)를 단언한다. 입력은
 DSL-3 `parse()`→DSL-7 `lower_program()`의 실제 산출물이다.
 """
+
 from __future__ import annotations
 
 import re

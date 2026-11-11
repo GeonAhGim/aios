@@ -48,9 +48,7 @@ async def test_verify_with_retry_succeeds_after_mid_scan_reset(monkeypatch) -> N
     monkeypatch.setattr(replay_verify, "verify", _fake_verify)
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
-    report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(UTC), hours=24
-    )
+    report = await replay_verify._verify_with_retry(object(), as_of=datetime.now(UTC), hours=24)
 
     assert report is sentinel_report
     assert attempts == 3
@@ -79,9 +77,7 @@ async def test_verify_with_retry_succeeds_after_drop_create_race(monkeypatch) ->
     monkeypatch.setattr(replay_verify, "verify", _fake_verify)
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
-    report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(UTC), hours=24
-    )
+    report = await replay_verify._verify_with_retry(object(), as_of=datetime.now(UTC), hours=24)
 
     assert report.streams_checked == 3
     assert attempts == 3
@@ -107,9 +103,7 @@ async def test_verify_with_retry_succeeds_after_connection_rejection(monkeypatch
     monkeypatch.setattr(replay_verify, "verify", _fake_verify)
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
-    report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(UTC), hours=24
-    )
+    report = await replay_verify._verify_with_retry(object(), as_of=datetime.now(UTC), hours=24)
 
     assert report.streams_checked == 5
     assert attempts == 2
@@ -157,9 +151,7 @@ async def test_verify_with_retry_does_not_retry_a_real_mismatch_report(monkeypat
     monkeypatch.setattr(replay_verify, "verify", _fake_verify)
     monkeypatch.setattr(replay_verify.asyncio, "sleep", _no_sleep)
 
-    report = await replay_verify._verify_with_retry(
-        object(), as_of=datetime.now(UTC), hours=24
-    )
+    report = await replay_verify._verify_with_retry(object(), as_of=datetime.now(UTC), hours=24)
 
     assert report is mismatch_report
     assert attempts == 1

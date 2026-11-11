@@ -28,14 +28,11 @@ from tests.support.entities_seed import bootstrap_default_portfolio
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
 
-
 BASE = "/v1/positions"
-
 
 
 def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
-
 
 
 @pytest.fixture
@@ -45,7 +42,6 @@ async def pool():
     )
     yield p
     await p.close()
-
 
 
 @pytest.fixture
@@ -58,7 +54,6 @@ async def client():
             yield ac
 
 
-
 async def _register(client: AsyncClient) -> tuple[dict, UUID]:
     response = await client.post(
         "/auth/register",
@@ -67,7 +62,6 @@ async def _register(client: AsyncClient) -> tuple[dict, UUID]:
     headers = {"Authorization": f"Bearer {response.json()['data']['access_token']}"}
     me = await client.get("/users/me", headers=headers)
     return headers, UUID(me.json()["data"]["user_id"])
-
 
 
 async def _create_account(pool: asyncpg.Pool, tenant_id: UUID) -> UUID:
@@ -81,7 +75,6 @@ async def _create_account(pool: asyncpg.Pool, tenant_id: UUID) -> UUID:
             CostMethod.FIFO.value,
         )
     return account_id
-
 
 
 async def _open_position(
@@ -133,7 +126,6 @@ async def _open_position(
     repo = PostgresSnapshotRepository(pool)
     async with pool.acquire() as conn, conn.transaction():
         return await repo.upsert(conn, snapshot, expected_seq=0)
-
 
 
 def _assert_error_envelope(body: dict, code: str) -> None:

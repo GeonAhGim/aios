@@ -136,5 +136,3 @@ async def _ingest(deps, instrument, candles, *, start, end, at):
         pool=deps.pool,
         clock=_clock(at),
     )
-
-

@@ -1,4 +1,5 @@
 """19.1 통합테스트 — 실제 dev DB 대상."""
+
 import asyncio
 import json
 from decimal import Decimal
@@ -121,9 +122,7 @@ async def test_three_executions_weights_sum_to_100_percent(
 
     view = await portfolio_service.get_portfolio(user_id, total_cash_balance=Decimal("10000"))
 
-    total_weight = view.unallocated_cash_weight_pct + sum(
-        a.weight_pct for a in view.allocations
-    )
+    total_weight = view.unallocated_cash_weight_pct + sum(a.weight_pct for a in view.allocations)
     assert round(total_weight, 6) == Decimal("100")
     assert len(view.allocations) == 3
 
@@ -278,11 +277,7 @@ async def test_rebalance_rejects_total_exceeding_balance(
     with pytest.raises(RebalanceError):
         await portfolio_service.rebalance(
             user_id,
-            [
-                RebalanceAdjustment(
-                    execution_id=execution_id, new_allocated_capital=Decimal("2000")
-                )
-            ],
+            [RebalanceAdjustment(execution_id=execution_id, new_allocated_capital=Decimal("2000"))],
             total_cash_balance=Decimal("1000"),
         )
 
@@ -301,11 +296,7 @@ async def test_rebalance_rejects_non_owner(execution_service, portfolio_service,
     with pytest.raises(RebalanceError):
         await portfolio_service.rebalance(
             other_user,
-            [
-                RebalanceAdjustment(
-                    execution_id=execution_id, new_allocated_capital=Decimal("100")
-                )
-            ],
+            [RebalanceAdjustment(execution_id=execution_id, new_allocated_capital=Decimal("100"))],
             total_cash_balance=Decimal("10000"),
         )
 
@@ -318,11 +309,7 @@ async def test_rebalance_rejects_retired_execution(execution_service, portfolio_
     with pytest.raises(RebalanceError):
         await portfolio_service.rebalance(
             user_id,
-            [
-                RebalanceAdjustment(
-                    execution_id=execution_id, new_allocated_capital=Decimal("100")
-                )
-            ],
+            [RebalanceAdjustment(execution_id=execution_id, new_allocated_capital=Decimal("100"))],
             total_cash_balance=Decimal("10000"),
         )
 
@@ -345,9 +332,7 @@ async def test_concurrent_rebalance_does_not_allow_combined_total_to_exceed_bala
     # 미인증 전략 배분 상한(10%, config/risk_policy.yaml)을 개별 조정 각각은
     # 넘지 않으면서(90/1000=9%) A+B 합산은 잔고를 초과하도록, 이미 잔고
     # 대부분을 쓰는 실행 C를 함께 둔다(850 + 90 + 90 = 1030 > 1000).
-    await _create_running_execution(
-        execution_service, pool, user_id, capital=Decimal("850")
-    )
+    await _create_running_execution(execution_service, pool, user_id, capital=Decimal("850"))
     exec_a = await _create_running_execution(
         execution_service, pool, user_id, capital=Decimal("50"), link_credential=False
     )

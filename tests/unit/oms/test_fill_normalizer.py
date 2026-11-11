@@ -1,4 +1,5 @@
 """거래소 원시 체결 정규화·집계 단위테스트 — L4-05. DB 없음."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

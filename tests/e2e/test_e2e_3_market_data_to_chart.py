@@ -425,9 +425,7 @@ async def test_rollup_m1_to_m5_aggregation_deterministic(
     # M5[0]: open=M1[0].open, high=max(M1[0..4].high), low=min(M1[0..4].low), close=M1[4].close
     assert m5_columns.open[0] == Decimal("100"), "M5 open = first M1 open"
     assert m5_columns.high[0] == max(h for _, h, _, _ in m1_prices), "M5 high = max"
-    assert (
-        m5_columns.low[0] == min(low_v for _, _, low_v, _ in m1_prices)
-    ), "M5 low = min"
+    assert m5_columns.low[0] == min(low_v for _, _, low_v, _ in m1_prices), "M5 low = min"
     assert m5_columns.close[0] == Decimal("111"), "M5 close = last M1 close"
     assert m5_columns.volume[0] == Decimal("5000"), "M5 volume = sum (5 * 1000)"
     assert m5_columns.quote_volume[0] == Decimal("500000"), "M5 quote_volume = sum (5 * 100000)"

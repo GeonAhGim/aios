@@ -16,6 +16,7 @@ hash 불일치의 재현: WORM에 존재하지 않는 decision_id(어떤 fingerp
 대응하지 않는 "지어낸 결정")와, 기록된 DENY/만료 결정의 hash·outcome·
 tenant·expires_at을 주문에 맞게 고쳐 쓰려는 직접 SQL — 둘 다 거부.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -94,8 +95,12 @@ async def _attack(
     before = await _orders_for(pool, victim.user_id)
     with pytest.raises(expected) as exc_info:
         await submit_with_fence(
-            pool, adapter, make_order(victim.execution_id), user_id=victim.user_id,
-            gate_decision=gate, read_fences=fence_reader(pool, victim.user_id, victim.execution_id),
+            pool,
+            adapter,
+            make_order(victim.execution_id),
+            user_id=victim.user_id,
+            gate_decision=gate,
+            read_fences=fence_reader(pool, victim.user_id, victim.execution_id),
             decision_reader=PostgresDecisionRepository(pool),
         )
     assert adapter.place_order_call_count == 0, "위조 결정으로 거래소에 도달했다(I1 위반)"
@@ -188,10 +193,16 @@ async def _tamper(pool: asyncpg.Pool, sql: str, *args: object) -> None:
     ("setup", "sql"),
     [
         ("deny", "UPDATE risk_decision SET outcome = 'ALLOW' WHERE decision_id = $1"),
-        ("deny", "UPDATE risk_decision SET subject_fingerprint = repeat('f', 64), "
-                 "inputs_hash = repeat('f', 64) WHERE decision_id = $1"),
-        ("expired", "UPDATE risk_decision SET expires_at = now() + interval '1 hour' "
-                    "WHERE decision_id = $1"),
+        (
+            "deny",
+            "UPDATE risk_decision SET subject_fingerprint = repeat('f', 64), "
+            "inputs_hash = repeat('f', 64) WHERE decision_id = $1",
+        ),
+        (
+            "expired",
+            "UPDATE risk_decision SET expires_at = now() + interval '1 hour' "
+            "WHERE decision_id = $1",
+        ),
         ("other_tenant", "UPDATE risk_decision SET tenant_id = $2 WHERE decision_id = $1"),
         ("deny", "DELETE FROM risk_decision WHERE decision_id = $1"),
     ],
@@ -229,7 +240,10 @@ async def test_control_genuine_allow_passes_the_same_path(pool, victim, decision
     genuine = await insert_decision(pool, victim.user_id, execution_ref=ref)
     adapter = RecordingAdapter()
     submitted = await submit_with_fence(
-        pool, adapter, make_order(victim.execution_id), user_id=victim.user_id,
+        pool,
+        adapter,
+        make_order(victim.execution_id),
+        user_id=victim.user_id,
         gate_decision=_forged_gate(genuine.decision_id, victim.f0),
         read_fences=fence_reader(pool, victim.user_id, victim.execution_id),
         decision_reader=PostgresDecisionRepository(pool),

@@ -49,6 +49,7 @@ tx 시작 전 단계(§ 위 docstring)라 정상 흐름에서도 롤백할 tx �
 "재시도가 안전하다(고아 idempotency claim이 없다)"는 이 함수의 핵심 불변식을
 증명한다.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -119,14 +120,22 @@ async def _count_submit_round_trips(
     queries = await attach_round_trip_logger(pool)
 
     await submit_order(  # 워밍업 — 커넥션의 1회성 드라이버 오버헤드 흡수
-        submit_command(user_id, execution_id, 1), pool=pool, profile=submit_profile(),
-        registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+        submit_command(user_id, execution_id, 1),
+        pool=pool,
+        profile=submit_profile(),
+        registry=submit_registry(),
+        pre_submit_gate=allow_gate,
+        entity_context=entity_context,
         entity_repo=entity_repo,
     )
     queries.clear()
     await submit_order(
-        submit_command(user_id, execution_id, 2), pool=pool, profile=submit_profile(),
-        registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+        submit_command(user_id, execution_id, 2),
+        pool=pool,
+        profile=submit_profile(),
+        registry=submit_registry(),
+        pre_submit_gate=allow_gate,
+        entity_context=entity_context,
         entity_repo=entity_repo,
     )
     return len(queries)
@@ -144,8 +153,12 @@ async def test_submit_internal_p99_measured_and_round_trips_exact(pool: asyncpg.
     for seq in range(_SAMPLE_COUNT):
         started = time.perf_counter()
         result = await submit_order(
-            submit_command(user_id, execution_id, seq + 100), pool=pool, profile=submit_profile(),
-            registry=submit_registry(), pre_submit_gate=allow_gate, entity_context=entity_context,
+            submit_command(user_id, execution_id, seq + 100),
+            pool=pool,
+            profile=submit_profile(),
+            registry=submit_registry(),
+            pre_submit_gate=allow_gate,
+            entity_context=entity_context,
             entity_repo=entity_repo,
         )
         latencies_ms.append((time.perf_counter() - started) * 1000.0)
@@ -208,8 +221,12 @@ async def test_submit_fails_closed_with_no_partial_state_on_entity_repo_failure(
 
     with pytest.raises(ConnectionError):
         await submit_order(
-            cmd, pool=pool, profile=profile, registry=submit_registry(),
-            pre_submit_gate=allow_gate, entity_context=entity_context,
+            cmd,
+            pool=pool,
+            profile=profile,
+            registry=submit_registry(),
+            pre_submit_gate=allow_gate,
+            entity_context=entity_context,
             entity_repo=_FailingEntityRepo(pool),
         )
 

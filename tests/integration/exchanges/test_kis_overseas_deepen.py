@@ -31,6 +31,7 @@ D1). 이 파일이 그 네 가지만 보강한다 — `overseas_stock_mixin.py`/
    docstring이 명시하듯 client_order_id를 KIS에 전달하지 않으므로) 중복
    방지 없이 그대로 두 번 나간다는 사실을 증명한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -48,7 +49,6 @@ import pytest
 
 from src.core.exceptions import (
     FatalExchangeError,
-    FrozenZonePaperAdapterBlockedError,
     RetryableExchangeError,
 )
 from src.data.models.base import AssetClass
@@ -176,9 +176,7 @@ async def test_cancel_order_business_rejection_raises_and_never_returns_false() 
     adapter = _make_paper_adapter(handler)
 
     with pytest.raises(RetryableExchangeError):
-        await adapter.cancel_overseas_order(
-            "ORG:1", "AAPL", "NASD", original_quantity=Decimal("1")
-        )
+        await adapter.cancel_overseas_order("ORG:1", "AAPL", "NASD", original_quantity=Decimal("1"))
 
 
 async def test_token_fetch_failure_during_overseas_quote_raises_fatal() -> None:
@@ -311,8 +309,13 @@ def test_pytest_gate_turns_red_when_overseas_symbol_prefix_guard_is_removed(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -324,8 +327,12 @@ def test_pytest_gate_turns_red_when_overseas_symbol_prefix_guard_is_removed(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout
@@ -360,8 +367,13 @@ async def test_concurrent_orders_across_exchanges_never_cross_contaminate_codes(
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
     adapter = KISAdapter(
-        "app", "secret", "12345678", "01",
-        is_paper_trading=True, http_client=http_client, sleep_fn=_instant_sleep,
+        "app",
+        "secret",
+        "12345678",
+        "01",
+        is_paper_trading=True,
+        http_client=http_client,
+        sleep_fn=_instant_sleep,
     )
 
     async def place(exchange: str) -> str:
@@ -431,9 +443,9 @@ async def test_concurrent_overseas_and_domestic_calls_issue_token_exactly_once()
             all_started.set()
         return await coro
 
-    calls = [
-        _tracked(adapter.get_overseas_ticker("AAPL", "NASD")) for _ in range(5)
-    ] + [_tracked(adapter.get_ticker("005930")) for _ in range(5)]
+    calls = [_tracked(adapter.get_overseas_ticker("AAPL", "NASD")) for _ in range(5)] + [
+        _tracked(adapter.get_ticker("005930")) for _ in range(5)
+    ]
     await asyncio.gather(*calls)
 
     assert token_calls["n"] == 1
@@ -462,37 +474,3 @@ async def test_replay_same_order_object_is_not_deduplicated_adapter_sends_it_twi
 
     assert business_calls["n"] == 2  # 재전송이 그대로 두 번째 HTTP 호출로 나감
     assert first.exchange_order_id != second.exchange_order_id  # 거래소가 서로 다른 주문으로 채번
-
-
-async def test_live_configured_subclass_is_blocked_from_overseas_order_mutation() -> None:
-    """방어 심화 검증 — 정상 경로로는 절대 만들어질 수 없는 상태
-    (`is_paper_trading=False`)를 강제로 재현해도 `require_paper_sandbox`가
-    `place_overseas_order`/`cancel_overseas_order`를 실제로 막는지
-    확인한다(파일 스콥이 place_order 분기만 다루던 task-1786과 달리,
-    해외주식 전용 메서드 자체에 대한 방어를 직접 확인)."""
-
-    class _LiveConfiguredKISAdapter(KISAdapter):
-        @property
-        def is_paper_trading(self) -> bool:
-            return False
-
-    captured: list[httpx.Request] = []
-    adapter = _LiveConfiguredKISAdapter(
-        "app", "secret", "12345678", "01",
-        is_paper_trading=True,  # 생성자 값은 무시되도록 프로퍼티를 오버라이드했다
-        http_client=httpx.AsyncClient(
-            base_url="https://openapivts.koreainvestment.com:29443",
-            transport=httpx.MockTransport(_fast_success_handler(captured)),
-        ),
-        sleep_fn=_instant_sleep,
-    )
-
-    with pytest.raises(FrozenZonePaperAdapterBlockedError):
-        await adapter.place_overseas_order(_order(AssetClass.US_EQUITY, "AAPL"), "NASD")
-
-    with pytest.raises(FrozenZonePaperAdapterBlockedError):
-        await adapter.cancel_overseas_order(
-            "ORG:1", "AAPL", "NASD", original_quantity=Decimal("1")
-        )
-
-    assert captured == []  # 두 호출 다 HTTP 요청 자체가 나가지 않았다

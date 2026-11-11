@@ -1,4 +1,5 @@
 """D2 evidence for L01 IndicatorSpec/PlotSpec fail-closed validation (IND-15)."""
+
 from __future__ import annotations
 
 import time

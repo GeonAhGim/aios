@@ -7,6 +7,7 @@ scope`에 구조로 남겨, 공유 캐시·스크리너가 나중에 이 값을 
 수 있게 한다(값을 소비해 실제로 막는 로직은 별도 리프 몫, 이 리프는
 태깅만 증명한다).
 """
+
 from __future__ import annotations
 
 import httpx

@@ -35,7 +35,7 @@ def test_page_meta_allows_total_none_for_cursor_style_lists():
 def test_size_below_one_rejected(size):
     with pytest.raises(ValidationError) as exc_info:
         PageParams(size=size)
-    error, = exc_info.value.errors()
+    (error,) = exc_info.value.errors()
     assert error["loc"] == ("size",)
     assert error["type"] == "greater_than_equal"
 
@@ -45,7 +45,7 @@ def test_size_below_one_rejected(size):
 def test_invalid_pagination_field_rejected(field, value):
     with pytest.raises(ValidationError) as exc_info:
         PageParams.model_validate({field: value})
-    error, = exc_info.value.errors()
+    (error,) = exc_info.value.errors()
     assert error["loc"] == (field,)
     assert error["type"] in {"int_type", "int_parsing", "int_from_float"}
 
@@ -65,7 +65,7 @@ def test_attribute_read_failure_injection_rejected(monkeypatch, field):
         patch.setattr(PaginationInput, field, property(fail_read))
         with pytest.raises(ValidationError) as exc_info:
             PageParams.model_validate(source, from_attributes=True)
-        error, = exc_info.value.errors()
+        (error,) = exc_info.value.errors()
         assert error["loc"] == (field,)
         assert error["type"] == "get_attribute_error"
         assert "injected pagination input failure" in error["msg"]

@@ -5,6 +5,7 @@
 `risk_decision`)을 만드는 최소 헬퍼만 둔다. 다른 adversarial 디렉터리
 (`execution_ownership/conftest.py`)와 같은 관례.
 """
+
 from __future__ import annotations
 
 import os

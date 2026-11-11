@@ -2,6 +2,7 @@
 
 정적(소스 검사) + 동적(전역을 폭탄으로 바꿔도 동작) 두 겹으로 증명한다.
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -39,5 +39,3 @@ class _QueryCountingPool:
 
     def acquire(self) -> _QueryCountingConnectionCtx:
         return _QueryCountingConnectionCtx(self._pool.acquire(), self.queries)
-
-

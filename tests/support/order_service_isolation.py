@@ -1,4 +1,5 @@
 """Disposable databases for legacy order-service writers without complete events."""
+
 from __future__ import annotations
 
 import os
@@ -17,7 +18,8 @@ async def isolated_order_service_pool():
     try:
         pool = await asyncpg.create_pool(
             database_url.replace("postgresql+asyncpg://", "postgresql://"),
-            min_size=1, max_size=2,
+            min_size=1,
+            max_size=2,
         )
         try:
             yield pool

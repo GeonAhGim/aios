@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_ems_routing_algos_and_tca_v1.0.md #9 EM-10 DoD
 ("real-time participation tracking"). No DB -- pure function tests only.
 """
+
 from __future__ import annotations
 
 import ast

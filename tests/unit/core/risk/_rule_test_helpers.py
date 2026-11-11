@@ -3,6 +3,7 @@
 테스트 파일이 아니라 헬퍼 모듈이므로 `test_` 접두어를 쓰지 않는다
 (pytest가 수집 대상으로 보지 않도록).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

@@ -7,6 +7,7 @@ src 안에 그 메서드를 `NHAdapter` 타입으로 직접 호출하는 코드�
 `@runtime_checkable` Protocol의 isinstance로 실제 조립체가 계약을
 만족하는지, 그리고 계약이 진짜로 무언가를 거르는지(negative)를 고정한다.
 """
+
 import httpx
 
 from src.exchanges.common.http_client import NHHTTPClient

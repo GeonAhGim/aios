@@ -361,9 +361,7 @@ def pytest_configure(config):
 """
 
 
-def test_pytest_gate_turns_red_when_get_order_not_found_guard_is_removed(
-    tmp_path: Path
-) -> None:
+def test_pytest_gate_turns_red_when_get_order_not_found_guard_is_removed(tmp_path: Path) -> None:
     """`get_order`의 "주문 없음" fail-closed 가드(`_OrderMutatingClient`
     Protocol이 `modify_order`에 노출하는 바로 그 메서드)를 자식 pytest
     프로세스 안에서만 구세대 `or [{}]` 관례로 되돌리면(프로덕션 소스는

@@ -4,6 +4,7 @@
 옮겨 두므로, 여기서는 PostgreSQL URL을 검증한 뒤 asyncpg DSN으로 변환한다
 (패턴은 `tests/integration/foundation/ledger/conftest.py`와 동일).
 """
+
 from __future__ import annotations
 
 import os
@@ -67,7 +68,9 @@ async def test_failure_injection_pool_creation_error_propagates(monkeypatch):
         await anext(pool.__wrapped__())
     assert caught.value is failure
     create.assert_awaited_once_with(
-        "postgresql://localhost/aios_test", min_size=1, max_size=8,
+        "postgresql://localhost/aios_test",
+        min_size=1,
+        max_size=8,
     )
 
 

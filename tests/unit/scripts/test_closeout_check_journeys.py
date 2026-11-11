@@ -144,6 +144,7 @@ def test_journeys_present_against_real_repo_without_fixme_but_ci_unverified() ->
 def test_run_all_includes_13th_item_last(tmp_path: Path, monkeypatch) -> None:
     """`run_all`이 13번 항목을 12번(HEAD Actions) 다음, 표의 13번째 행으로
     덧붙이는지 배선을 확인한다."""
+
     def _fixed(key: str) -> object:
         return lambda *a, **k: cc.CheckResult(key, f"t{key}", True, (), "")
 

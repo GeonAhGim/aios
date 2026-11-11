@@ -5,6 +5,7 @@ Spec: docs/design/ADR-2026-09-09-B-mvp1-hardening-and-mvp2-scope.md H-1
 버킷이 실제로 총 함수인지(negative), 커넥션 실패를 삼키지 않는지(실패 주입),
 호출 1회 지연(성능 단언)을 더한다.
 """
+
 from __future__ import annotations
 
 import os

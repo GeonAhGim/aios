@@ -41,6 +41,7 @@ DEEPEN(task-2802) — DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md#2323)
 확정한다 — 응답 유실 시 안전한 쪽(중복 전송 금지)으로 fail-close한다는
 불변식의 증명이다.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -76,7 +77,10 @@ async def _enqueue_pending_submit(
         order_id = await insert_order(conn, user_id, status="VALIDATED")
         view = await order_repo.get_for_update(conn, order_id)
         await outbox_repo.enqueue(
-            conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
+            conn,
+            order_id=order_id,
+            command_type="SUBMIT",
+            payload=submit_payload(view),
             not_before=datetime.now(UTC),
         )
     return order_id
@@ -105,8 +109,12 @@ async def _count_dispatch_once_round_trips(
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="w-count",
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-count",
     )
     queries = await attach_round_trip_logger(pool)
 
@@ -129,8 +137,12 @@ async def test_outbox_dispatch_p99_measured_and_round_trips_exact(pool: asyncpg.
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="w-latency",
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-latency",
     )
     baseline_p95_ms = await measure_baseline_round_trip_p95_ms(pool)
 
@@ -199,8 +211,12 @@ async def test_dispatch_classifies_adapter_failure_as_unknown_and_marks_outbox_d
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="w-failure",
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-failure",
     )
     order_id = await _enqueue_pending_submit(pool, order_repo, outbox_repo)
 

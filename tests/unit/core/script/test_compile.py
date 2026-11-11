@@ -123,9 +123,7 @@ def test_compile_still_returns_correct_result_when_a_pipeline_stage_stalls(
 
     # Sleep is observable only in wall time; CPU time excludes this injected stall.
     # Batch averaging preserves the original 90% lower bound in milliseconds.
-    sample = perf_budget.sample(
-        lambda: compile_source(SAMPLE, registry_version=REG), batch=128
-    )
+    sample = perf_budget.sample(lambda: compile_source(SAMPLE, registry_version=REG), batch=128)
     assert sample.wall_ms >= delay_s * 1000 * 0.9
     compiled = sample.result
     assert isinstance(compiled, CompiledScript)

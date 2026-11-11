@@ -405,4 +405,3 @@ async def test_concurrent_resync_is_serialized_by_position_lock(pool: asyncpg.Po
                 "SELECT quantity FROM pos_snapshot WHERE position_key = $1", position_key
             )
         assert quantity == Decimal("100"), "동시 재동기화 후에도 저널 진실값으로 수렴해야 한다"
-

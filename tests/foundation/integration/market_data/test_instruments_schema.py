@@ -9,6 +9,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 venue_listing은 `EXCLUDE USING gist` 위반으로 거부되고, (2)
 `instruments.instrument_id`는 트리거로 UPDATE 자체가 거부된다.
 """
+
 from __future__ import annotations
 
 import os
@@ -65,7 +66,11 @@ async def _insert_listing(
             instrument_id, venue, venue_symbol, listed_at, delisted_at, is_primary
         ) VALUES ($1, $2, $3, $4, $5, TRUE)
         """,
-        instrument_id, venue, venue_symbol, listed_at, delisted_at,
+        instrument_id,
+        venue,
+        venue_symbol,
+        listed_at,
+        delisted_at,
     )
 
 
@@ -78,14 +83,22 @@ async def test_venue_listings_rejects_overlapping_period_same_venue_symbol(pool)
     t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
-        pool, instrument_id=instrument_a, venue="BITGET", venue_symbol=symbol,
-        listed_at=t0, delisted_at=t0 + timedelta(days=5),
+        pool,
+        instrument_id=instrument_a,
+        venue="BITGET",
+        venue_symbol=symbol,
+        listed_at=t0,
+        delisted_at=t0 + timedelta(days=5),
     )
 
     with pytest.raises(asyncpg.exceptions.ExclusionViolationError):
         await _insert_listing(
-            pool, instrument_id=instrument_b, venue="BITGET", venue_symbol=symbol,
-            listed_at=t0 + timedelta(days=2), delisted_at=None,
+            pool,
+            instrument_id=instrument_b,
+            venue="BITGET",
+            venue_symbol=symbol,
+            listed_at=t0 + timedelta(days=2),
+            delisted_at=None,
         )
 
 
@@ -100,14 +113,22 @@ async def test_venue_listings_rejects_overlap_against_open_ended_listing(pool):
     t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
-        pool, instrument_id=instrument_a, venue="BITGET", venue_symbol=symbol,
-        listed_at=t0, delisted_at=None,
+        pool,
+        instrument_id=instrument_a,
+        venue="BITGET",
+        venue_symbol=symbol,
+        listed_at=t0,
+        delisted_at=None,
     )
 
     with pytest.raises(asyncpg.exceptions.ExclusionViolationError):
         await _insert_listing(
-            pool, instrument_id=instrument_b, venue="BITGET", venue_symbol=symbol,
-            listed_at=t0 + timedelta(days=100), delisted_at=None,
+            pool,
+            instrument_id=instrument_b,
+            venue="BITGET",
+            venue_symbol=symbol,
+            listed_at=t0 + timedelta(days=100),
+            delisted_at=None,
         )
 
 
@@ -120,12 +141,20 @@ async def test_venue_listings_allows_sequential_non_overlapping_periods(pool):
     t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
-        pool, instrument_id=instrument_id, venue="BITGET", venue_symbol=symbol,
-        listed_at=t0, delisted_at=t0 + timedelta(days=5),
+        pool,
+        instrument_id=instrument_id,
+        venue="BITGET",
+        venue_symbol=symbol,
+        listed_at=t0,
+        delisted_at=t0 + timedelta(days=5),
     )
     await _insert_listing(
-        pool, instrument_id=instrument_id, venue="BITGET", venue_symbol=symbol,
-        listed_at=t0 + timedelta(days=5), delisted_at=None,
+        pool,
+        instrument_id=instrument_id,
+        venue="BITGET",
+        venue_symbol=symbol,
+        listed_at=t0 + timedelta(days=5),
+        delisted_at=None,
     )
 
     rows = await pool.fetch(
@@ -146,12 +175,20 @@ async def test_venue_listings_allows_overlap_across_different_venue_symbol(pool)
     t0 = datetime.now(UTC) - timedelta(days=10)
 
     await _insert_listing(
-        pool, instrument_id=instrument_a, venue="BITGET", venue_symbol=_venue_symbol(),
-        listed_at=t0, delisted_at=None,
+        pool,
+        instrument_id=instrument_a,
+        venue="BITGET",
+        venue_symbol=_venue_symbol(),
+        listed_at=t0,
+        delisted_at=None,
     )
     await _insert_listing(
-        pool, instrument_id=instrument_b, venue="BITGET", venue_symbol=_venue_symbol(),
-        listed_at=t0, delisted_at=None,
+        pool,
+        instrument_id=instrument_b,
+        venue="BITGET",
+        venue_symbol=_venue_symbol(),
+        listed_at=t0,
+        delisted_at=None,
     )
 
 
@@ -162,7 +199,8 @@ async def test_instruments_instrument_id_is_immutable(pool):
     with pytest.raises(asyncpg.exceptions.CheckViolationError):
         await pool.execute(
             "UPDATE instruments SET instrument_id = $1 WHERE instrument_id = $2",
-            _fake_ulid(), instrument_id,
+            _fake_ulid(),
+            instrument_id,
         )
 
 

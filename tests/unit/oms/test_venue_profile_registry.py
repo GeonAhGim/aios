@@ -7,6 +7,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-04 DoD (a)(c).
 않았다) — `wiring.build_production_symbol_registry()`가 그 유일한 production
 인스턴스화 지점이 된다(이 파일이 그것을 증명한다).
 """
+
 from __future__ import annotations
 
 import pytest

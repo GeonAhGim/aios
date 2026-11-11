@@ -4,6 +4,7 @@ UNIQUE(tenant_id, portfolio_id)) 이전 스키마에서는 두 번째
 `get_or_create_mandate` 호출이 UniqueViolationError로 죽는다 — 이 마이그레이션을
 되돌리면(`alembic downgrade -1`) 이 테스트가 실제로 FAIL한다(수동 확인,
 task-1941 note)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -52,9 +53,7 @@ async def _cleanup_mandates(pool: asyncpg.Pool, mandate_ids: list[UUID]) -> None
         await conn.execute(
             "DELETE FROM mandate_revision WHERE mandate_id = ANY($1::uuid[])", mandate_ids
         )
-        await conn.execute(
-            "DELETE FROM portfolio_mandate WHERE id = ANY($1::uuid[])", mandate_ids
-        )
+        await conn.execute("DELETE FROM portfolio_mandate WHERE id = ANY($1::uuid[])", mandate_ids)
 
 
 def _draft_revision() -> MandateRevision:

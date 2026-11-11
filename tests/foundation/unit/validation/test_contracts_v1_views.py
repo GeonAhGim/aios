@@ -251,9 +251,7 @@ def test_model_creation_performance(perf_budget: Any) -> None:
         lambda: AuditEventView(**event_kwargs), budget_ms=2.0, batch=50, label="Event"
     )
     perf_budget.assert_within(
-        lambda: AuditTimelinePage(
-            items=events, next_cursor="cursor", as_of=datetime.now(UTC)
-        ),
+        lambda: AuditTimelinePage(items=events, next_cursor="cursor", as_of=datetime.now(UTC)),
         budget_ms=10.0,
         batch=10,
         label="Page",

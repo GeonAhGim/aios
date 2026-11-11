@@ -7,6 +7,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C, §9 L4-07.
 갖췄는가"는 여기서 실행 시점에 증명할 수 있다 — fail-closed 원칙대로, 메서드
 하나라도 빠지면 어댑터는 포트를 만족하지 못한다는 것을 실증한다.
 """
+
 from __future__ import annotations
 
 import os
@@ -75,9 +76,7 @@ class _StrictOutboxRepo:
     async def claim_batch(self, conn, **kwargs): ...
     async def reclaim_stuck_sending(self, conn, **kwargs): ...
     async def mark_done(self, conn, id, *, expected_worker): ...
-    async def mark_retry(
-        self, conn, id, *, attempt, not_before, last_error, expected_worker
-    ): ...
+    async def mark_retry(self, conn, id, *, attempt, not_before, last_error, expected_worker): ...
     async def mark_dead(self, conn, id, *, reason, expected_worker): ...
 
 
@@ -169,9 +168,7 @@ class _NetworkFailureOutboxRepo:
     async def mark_done(self, conn, id, *, expected_worker):
         raise conn.simulated_failure
 
-    async def mark_retry(
-        self, conn, id, *, attempt, not_before, last_error, expected_worker
-    ):
+    async def mark_retry(self, conn, id, *, attempt, not_before, last_error, expected_worker):
         raise conn.simulated_failure
 
     async def mark_dead(self, conn, id, *, reason, expected_worker):
@@ -242,8 +239,16 @@ def test_pytest_gate_turns_red_when_command_type_literal_is_widened(
     config = tmp_path / "pytest.ini"
     config.write_text("[pytest]\n", encoding="utf-8")
     command = [
-        sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-        "-c", str(config), "--confcutdir", str(tmp_path),
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-c",
+        str(config),
+        "--confcutdir",
+        str(tmp_path),
         f"{test_copy}::test_outbox_row_rejects_unknown_command_type",
     ]
     env = dict(os.environ, PYTHONPATH=str(Path.cwd()), PYTEST_ADDOPTS="")
@@ -259,7 +264,7 @@ def test_pytest_gate_turns_red_when_command_type_literal_is_widened(
         "name = 'src.services.oms.ports.repository'\n"
         "module = importlib.import_module(name)\n"
         "source = Path(module.__file__).read_text(encoding='utf-8')\n"
-        "guard = 'CommandType = Literal[\"SUBMIT\", \"CANCEL\", \"MODIFY\"]'\n"
+        'guard = \'CommandType = Literal["SUBMIT", "CANCEL", "MODIFY"]\'\n'
         "assert source.count(guard) == 1\n"
         "mutant = compile(source.replace(guard, 'CommandType = str'), module.__file__, 'exec')\n"
         "exec(mutant, module.__dict__)\n",

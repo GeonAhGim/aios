@@ -19,6 +19,7 @@ docs/design/INVARIANTS.md I-10("구현됨 ≠ 작동함" — 정적 검사로 �
    TYPE_CHECKING 블록)을 심어 체커가 반드시 잡는지 확인한다. 체커가 위조를
    놓치면 이 테스트 자체가 실패한다.
 """
+
 from __future__ import annotations
 
 import ast

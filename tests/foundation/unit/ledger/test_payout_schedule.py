@@ -4,6 +4,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-5
 ("창 미경과 제외, 판매자별 합산, cutoff 경계",
 negative: "통화 혼합, 중복 payout 키").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta

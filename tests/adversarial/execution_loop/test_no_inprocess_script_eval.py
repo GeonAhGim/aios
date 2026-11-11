@@ -58,9 +58,7 @@ def _find_forbidden_imports(
     return [
         module_name
         for module_name in _imported_module_names(tree)
-        if any(
-            module_name == prefix or module_name.startswith(prefix + ".") for prefix in prefixes
-        )
+        if any(module_name == prefix or module_name.startswith(prefix + ".") for prefix in prefixes)
     ]
 
 

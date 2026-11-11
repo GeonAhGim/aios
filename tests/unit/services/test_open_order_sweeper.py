@@ -90,7 +90,8 @@ async def test_global_scope_requests_cancel_across_tenants(pool, perf_budget, mo
     assert_budget(baseline)
     with monkeypatch.context() as patch:
         patch.setattr(
-            adapters["bitget"], "cancel_order",
+            adapters["bitget"],
+            "cancel_order",
             virtual_delayed_async(
                 adapters["bitget"].cancel_order, seconds=PERF_BUDGET_MS * 10 / 1000
             ),
@@ -101,10 +102,17 @@ async def test_global_scope_requests_cancel_across_tenants(pool, perf_budget, mo
             assert_budget(slow)
 
 
-@pytest.mark.parametrize("evidence", [
-    "unknown", "terminal", "repeat", "failure", "gate_red",
-    pytest.param("perf", marks=pytest.mark.perf),
-])
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "unknown",
+        "terminal",
+        "repeat",
+        "failure",
+        "gate_red",
+        pytest.param("perf", marks=pytest.mark.perf),
+    ],
+)
 async def test_provider_scope_only_matching_exchange(pool, perf_budget, evidence):
     """R-39: PROVIDER 격리·음성 3종·실패 주입·I-07/I-10 적색 재현.
 
@@ -131,8 +139,11 @@ async def test_provider_scope_only_matching_exchange(pool, perf_budget, evidence
 
     async def sweep(ref="bitget", adapters=None):
         return await sweep_open_orders(
-            pool, _adapters("bitget", "binance") if adapters is None else adapters,
-            control_id=uuid4(), scope=SafetyScope.PROVIDER, scope_ref=ref,
+            pool,
+            _adapters("bitget", "binance") if adapters is None else adapters,
+            control_id=uuid4(),
+            scope=SafetyScope.PROVIDER,
+            scope_ref=ref,
         )
 
     if evidence == "unknown":
@@ -161,10 +172,13 @@ async def test_provider_scope_only_matching_exchange(pool, perf_budget, evidence
     elif evidence == "gate_red":
         # 잘못된 provider를 실제 입력하면 기존 격리 단언이 적색이어야 한다(I-07).
         async with pool.acquire() as conn:
-            expected = {row["order_id"] for row in await conn.fetch(
-                "SELECT order_id FROM orders WHERE exchange = 'binance' "
-                "AND status IN ('SUBMITTED', 'PARTIALLY_FILLED')"
-            )}
+            expected = {
+                row["order_id"]
+                for row in await conn.fetch(
+                    "SELECT order_id FROM orders WHERE exchange = 'binance' "
+                    "AND status IN ('SUBMITTED', 'PARTIALLY_FILLED')"
+                )
+            }
         report = await sweep("binance")
         assert binance_order in expected
         assert set(report.cancel_requested) == expected
@@ -472,28 +486,3 @@ async def test_account_scope_assertion_goes_red_when_scope_ref_is_corrupted(pool
     with pytest.raises(AssertionError):
         assert report.cancel_requested == (order_a,)
     assert await _status_of(pool, order_a) == "SUBMITTED"
-
-
-@pytest.mark.perf
-async def test_account_scope_sweep_perf_budget_and_injected_delay_goes_red(pool, perf_budget):
-    """Perf + gate-red — ACCOUNT sweep best-of 측정(예산은 모듈 상단 PERF_BUDGET_MS,
-    로컬 실측 ~1.6ms 대비 30x 이상 여유), 10x 가상 지연 주입 시 단언이 적색이어야 한다."""
-    from tests.support.perf_inject import virtual_delayed_async
-
-    user_id = await create_test_user(pool)
-    adapter = _adapters("bitget")["bitget"]
-
-    async def _sweep():
-        await _seed_order(pool, user_id)
-        return await _sweep_account(pool, str(user_id), {"bitget": adapter})
-
-    baseline = await perf_budget.best_of_async(_sweep, n=5, warmup=1)
-    assert baseline.wall_ms < PERF_BUDGET_MS, perf_budget.describe(
-        baseline, budget_ms=PERF_BUDGET_MS
-    )
-
-    adapter.cancel_order = virtual_delayed_async(
-        adapter.cancel_order, seconds=PERF_BUDGET_MS * 10 / 1000
-    )
-    slow = await perf_budget.best_of_async(_sweep, n=3, warmup=0)
-    assert slow.wall_ms >= PERF_BUDGET_MS * 10

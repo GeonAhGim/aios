@@ -24,6 +24,7 @@ place/cancel 경로에 한정된 failure-injection과 numeric perf)을 마무리
    루프에 정규화한 배율로 단언한다(절대 ms 상수 대신 — task-2773/2777/2778과
    동일 판단).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -111,9 +112,7 @@ async def test_place_order_ord_dvsn_cd_survives_retry_after_transient_failure() 
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                200, json={"access_token": "t", "access_token_token_expired": ""}
-            )
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
         captured.append(request)
         if len(captured) < 4:
             raise httpx.ConnectError("simulated network failure", request=request)
@@ -145,9 +144,7 @@ async def test_cancel_order_rmn_qty_yn_survives_retry_after_transient_failure() 
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                200, json={"access_token": "t", "access_token_token_expired": ""}
-            )
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
         nonlocal cancel_attempts
         cancel_attempts += 1
         captured.append(request)
@@ -182,9 +179,7 @@ async def test_place_and_cancel_order_roundtrip_throughput_within_normalized_bud
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                200, json={"access_token": "t", "access_token_token_expired": ""}
-            )
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
         if request.url.path == _ORDER_PATH:
             output = {"KRX_FWDG_ORD_ORGNO": "ORG", "ODNO": "1"}
         else:
@@ -214,8 +209,7 @@ async def test_place_and_cancel_order_roundtrip_throughput_within_normalized_bud
     for _ in range(repeats):
         start = time.perf_counter()
         baseline = [
-            {"ORD_DVSN_CD": "01", "RMN_QTY_YN": "N", "SHTN_PDNO": f"10{i:05d}"}
-            for i in range(n)
+            {"ORD_DVSN_CD": "01", "RMN_QTY_YN": "N", "SHTN_PDNO": f"10{i:05d}"} for i in range(n)
         ]
         baseline_times.append(time.perf_counter() - start)
     assert len(baseline) == n

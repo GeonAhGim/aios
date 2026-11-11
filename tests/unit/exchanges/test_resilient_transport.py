@@ -9,6 +9,7 @@ DoD: 429/5xx/비JSON/서명-타임스탬프 4케이스. negative: 429에 재시�
 실키가 없으므로 e2e가 아니라 httpx.MockTransport/직접 send_once 스텁으로
 검증한다(decision 참고).
 """
+
 from __future__ import annotations
 
 import asyncio

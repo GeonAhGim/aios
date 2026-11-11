@@ -12,6 +12,7 @@ HTTP 409로의 실제 매핑은 라우터 계층(이 리프 범위 밖)의 책�
 `conn.transaction()` 블록 안에 둔다(바깥에 두면 예외가 트랜잭션을 롤백시켜
 DENIED 감사 행도 함께 사라진다).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -81,8 +82,12 @@ async def test_same_event_ref_different_amount_is_denied_with_audit_trail(pool, 
     )
     async with pool.acquire() as conn, conn.transaction():
         first_entry = await post_entry(
-            conn, first_event, journal=ports.journal, balances=ports.balances,
-            audit=ports.audit, clock=_clock,
+            conn,
+            first_event,
+            journal=ports.journal,
+            balances=ports.balances,
+            audit=ports.audit,
+            clock=_clock,
         )
 
     replay_event = first_event.model_copy(update={"amount": Decimal("999999.00")})
@@ -90,8 +95,12 @@ async def test_same_event_ref_different_amount_is_denied_with_audit_trail(pool, 
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(IdempotencyDigestMismatchError):
             await post_entry(
-                conn, replay_event, journal=ports.journal, balances=ports.balances,
-                audit=ports.audit, clock=_clock,
+                conn,
+                replay_event,
+                journal=ports.journal,
+                balances=ports.balances,
+                audit=ports.audit,
+                clock=_clock,
             )
 
     async with pool.acquire() as conn:

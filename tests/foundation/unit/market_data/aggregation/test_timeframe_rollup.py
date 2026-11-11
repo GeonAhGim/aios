@@ -8,6 +8,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 0/NaN으로 채우지 않고(§4.1 fail-closed) rollup_version 없는 산출을 만들지
 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
@@ -63,10 +64,7 @@ def _minute(i: int) -> datetime:
 
 
 def _minutes_rows(n: int) -> list[tuple[datetime, int, int, int, int, int, int | None]]:
-    return [
-        (_minute(i), 100 + i, 110 + i, 90 + i, 105 + i, 10, 1)
-        for i in range(n)
-    ]
+    return [(_minute(i), 100 + i, 110 + i, 90 + i, 105 + i, 10, 1) for i in range(n)]
 
 
 # ---- 기본 집계 정확성 ----

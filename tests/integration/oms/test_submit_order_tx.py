@@ -4,6 +4,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §9 L4-09 DoD("gate
 DENY 시 0행"), §2-C 시그니처, §5.2. 동시 50 submit → 1행은
 `tests/adversarial/oms/test_concurrent_submit.py`(적대적 전용 파일).
 """
+
 from __future__ import annotations
 
 import json
@@ -56,8 +57,13 @@ def _profile(**overrides: object) -> VenueCapabilityProfile:
 def _registry() -> SymbolRegistry:
     reg = SymbolRegistry()
     reg.register(
-        "BTC/USDT", "bitget", "BTCUSDT",
-        tick=Decimal("0.1"), lot=Decimal("0.0001"), min_notional=Decimal("5"), quote_ccy="USDT",
+        "BTC/USDT",
+        "bitget",
+        "BTCUSDT",
+        tick=Decimal("0.1"),
+        lot=Decimal("0.0001"),
+        min_notional=Decimal("5"),
+        quote_ccy="USDT",
     )
     return reg
 
@@ -73,7 +79,9 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', $3::jsonb,
                     'test-author', 'APPROVED')
             """,
-            strategy_id, user_id, json.dumps({}),
+            strategy_id,
+            user_id,
+            json.dumps({}),
         )
         row = await conn.fetchrow(
             """
@@ -83,15 +91,21 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING')
             RETURNING id
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return row["id"]
 
 
 def _command(user_id: uuid.UUID, execution_id: int, **overrides: object) -> SubmitOrderCommand:
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=1,
         window_start=datetime.now(UTC),
     )
     defaults: dict[str, object] = {
@@ -127,8 +141,13 @@ async def test_submit_order_new_creates_validated_row_and_enqueues_outbox(pool):
     entity_context = await seed_entity_context(pool, user_id)
 
     result = await submit_order(
-        cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+        cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry(),
+        pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
+        entity_repo=PostgresEntityRepository(pool),
     )
 
     assert result.status == OrderStatus.VALIDATED
@@ -158,12 +177,22 @@ async def test_submit_order_existing_replay_returns_same_order_no_extra_row(pool
     entity_context = await seed_entity_context(pool, user_id)
 
     first = await submit_order(
-        cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+        cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry(),
+        pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
+        entity_repo=PostgresEntityRepository(pool),
     )
     second = await submit_order(
-        cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+        cmd,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry(),
+        pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
+        entity_repo=PostgresEntityRepository(pool),
     )
 
     assert first.order_id == second.order_id
@@ -188,8 +217,13 @@ async def test_submit_order_gate_deny_leaves_zero_rows(pool):
 
     with pytest.raises(OrderSubmitDeniedError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_deny_gate,
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_deny_gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
 
     async with pool.acquire() as conn:
@@ -213,15 +247,25 @@ async def test_submit_order_digest_mismatch_raises_and_rolls_back(pool):
     cmd1 = _command(user_id, execution_id, quantity=Decimal("0.01"))
     entity_context = await seed_entity_context(pool, user_id)
     await submit_order(
-        cmd1, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-        entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+        cmd1,
+        pool=pool,
+        profile=_profile(),
+        registry=_registry(),
+        pre_submit_gate=_allow_gate,
+        entity_context=entity_context,
+        entity_repo=PostgresEntityRepository(pool),
     )
     cmd2 = cmd1.model_copy(update={"command_id": uuid.uuid4(), "quantity": Decimal("0.02")})
 
     with pytest.raises(IdempotencyDigestMismatchError):
         await submit_order(
-            cmd2, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            cmd2,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
 
     async with pool.acquire() as conn:
@@ -241,8 +285,13 @@ async def test_submit_order_unknown_symbol_writes_nothing(pool):
 
     with pytest.raises(UnknownSymbolError):
         await submit_order(
-            cmd, pool=pool, profile=_profile(), registry=_registry(), pre_submit_gate=_allow_gate,
-            entity_context=entity_context, entity_repo=PostgresEntityRepository(pool),
+            cmd,
+            pool=pool,
+            profile=_profile(),
+            registry=_registry(),
+            pre_submit_gate=_allow_gate,
+            entity_context=entity_context,
+            entity_repo=PostgresEntityRepository(pool),
         )
 
     async with pool.acquire() as conn:

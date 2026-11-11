@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-5
 ("합계 보존 증명: 무작위 사건열 1,000건 fold → Σ=0 항상; 각 사건 후에도 Σ=0").
 """
+
 from __future__ import annotations
 
 import random
@@ -163,6 +164,4 @@ def test_verify_zero_sum_rejects_nonzero_total() -> None:
 def test_to_view_raises_and_does_not_build_view_when_unbalanced() -> None:
     balances = {PLATFORM_CASH_CLEARING: Decimal("1.00")}
     with pytest.raises(trial_balance.TrialBalanceNonZeroError):
-        trial_balance.to_view(
-            balances, as_of=datetime(2026, 9, 3, tzinfo=UTC), last_entry_seq=1
-        )
+        trial_balance.to_view(balances, as_of=datetime(2026, 9, 3, tzinfo=UTC), last_entry_seq=1)

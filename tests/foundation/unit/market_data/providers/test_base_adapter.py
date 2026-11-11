@@ -9,6 +9,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 같은 양만큼 전진시켜 `TokenBucket`의 보충 계산과 일관되게 맞춘다
 (L4-11 task-423 d3227c9 패턴).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

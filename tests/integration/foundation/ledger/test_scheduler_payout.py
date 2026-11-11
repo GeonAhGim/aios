@@ -23,6 +23,7 @@ MY SELLER 몫의 후보가 더 없어 빈 배치 목록을 돌려줘야 한다.
 잔액은 건드리지 않음) 이 테스트가 그 오염과 무관하게 결정적으로 동작하게
 한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
@@ -155,15 +156,33 @@ async def test_run_payout_once_twice_in_same_window_does_not_duplicate_rows(pool
 
     async with pool.acquire() as conn, conn.transaction():
         hold = await place_hold(
-            conn, buyer_id=buyer, amount=price, purpose=_TEST_PURPOSE, reference=reference,
-            expires_at=captured_at + timedelta(minutes=15), actor_subject_id=buyer,
-            trace_id=uuid4(), journal=journal, balances=balances, audit=audit,
-            clock=_clock, holds=holds,
+            conn,
+            buyer_id=buyer,
+            amount=price,
+            purpose=_TEST_PURPOSE,
+            reference=reference,
+            expires_at=captured_at + timedelta(minutes=15),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            journal=journal,
+            balances=balances,
+            audit=audit,
+            clock=_clock,
+            holds=holds,
         )
         await capture_hold(
-            conn, hold, seller_id=seller, commission_rate=Decimal("0.15"),
-            actor_subject_id=buyer, trace_id=uuid4(), now=captured_at,
-            journal=journal, balances=balances, audit=audit, clock=_clock, holds=holds,
+            conn,
+            hold,
+            seller_id=seller,
+            commission_rate=Decimal("0.15"),
+            actor_subject_id=buyer,
+            trace_id=uuid4(),
+            now=captured_at,
+            journal=journal,
+            balances=balances,
+            audit=audit,
+            clock=_clock,
+            holds=holds,
         )
 
     seller_pending = ua(seller, UserSub.PENDING_PAYOUT)

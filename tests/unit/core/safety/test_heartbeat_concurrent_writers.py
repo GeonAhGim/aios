@@ -1,4 +1,5 @@
 """Two writers sharing one heartbeat path must never crash each other (unique temp names)."""
+
 from __future__ import annotations
 
 import threading

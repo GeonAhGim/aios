@@ -131,9 +131,7 @@ async def test_get_ticker_raises_fatal_on_missing_last_field():
 async def test_get_orderbook_raises_fatal_on_missing_bids_field():
     """Negative 3: missing bids/asks fields must fail closed, not return an
     empty book silently."""
-    client = _StubClient(
-        {"/api/v5/market/books": {"code": "0", "data": [{"asks": [], "ts": "1"}]}}
-    )
+    client = _StubClient({"/api/v5/market/books": {"code": "0", "data": [{"asks": [], "ts": "1"}]}})
     with pytest.raises(FatalExchangeError):
         await client.get_orderbook("BTC-USDT")
 

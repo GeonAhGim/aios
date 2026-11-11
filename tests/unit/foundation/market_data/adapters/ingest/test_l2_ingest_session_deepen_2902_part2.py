@@ -197,9 +197,7 @@ class _FakeAdapter:
         seq = int(message["seq"])
         if self._raise_on_parse_seq == seq:
             raise ValueError(f"모의 파싱 실패(seq={seq}) — 손상된 프레임")
-        return L2Diff(
-            sequence=seq, as_of=datetime.now(UTC), bid_updates=(), ask_updates=()
-        )
+        return L2Diff(sequence=seq, as_of=datetime.now(UTC), bid_updates=(), ask_updates=())
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
         self.snapshot_calls += 1

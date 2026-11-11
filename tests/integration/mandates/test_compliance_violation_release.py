@@ -217,8 +217,12 @@ async def test_release_without_evidence_ref_is_rejected(
 
 
 async def test_release_with_evidence_ref_reopens_gate_and_is_audited(
-    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo, audit_repo,
-    mandate_repo, trust_repo,  # noqa: F811 -- imported fixtures
+    pool: asyncpg.Pool,
+    kill_switch: KillSwitchService,
+    risk_gate_repo,
+    audit_repo,
+    mandate_repo,  # noqa: F811 -- imported fixtures
+    trust_repo,  # noqa: F811 -- imported fixtures
 ) -> None:
     tenant_id = await create_test_tenant(pool)
     # The independent compliance gate requires an active mandate even when

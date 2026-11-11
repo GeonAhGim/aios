@@ -5,6 +5,7 @@ get_listing_service/get_purchase_service가 functools.partial로 바인딩하는
 check_paper_trading_eligibility/check_purchase_risk_warning 콜백은 partial
 바인딩을 거쳐도 원래 fail-closed 계약(전자는 예외 흡수 후 False, 후자는
 RiskMatchingError·DB 예외를 그대로 전파)이 유지되는지 실제로 호출해 검증한다."""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager

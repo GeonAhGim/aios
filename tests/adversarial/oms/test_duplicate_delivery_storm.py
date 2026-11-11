@@ -15,6 +15,7 @@ DO NOTHING RETURNING`가 유일한 동시성 관문이다 — 3개의 `InboxProc
 하나만 커밋시키므로 `_process_row`(fills 삽입·state_machine 전이·
 position_ledger 반영)는 정확히 한 번만 실행된다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -128,20 +129,25 @@ async def test_1000_duplicate_deliveries_across_3_workers_produce_exactly_one_fi
     quantity = Decimal("5")
     exchange_order_id = f"ex-storm-{uuid4().hex}"
     order_id, client_order_id = await _insert_order(
-        pool, user_id, execution_id=execution_id, quantity=quantity,
+        pool,
+        user_id,
+        execution_id=execution_id,
+        quantity=quantity,
         exchange_order_id=exchange_order_id,
     )
     ev = _full_fill_event(
-        client_order_id=client_order_id, quantity=quantity, exchange_order_id=exchange_order_id,
+        client_order_id=client_order_id,
+        quantity=quantity,
+        exchange_order_id=exchange_order_id,
     )
     workers = [InboxProcessor(pool) for _ in range(_WORKERS)]
 
-    results = await asyncio.gather(
-        *[workers[i % _WORKERS].ingest(ev) for i in range(_STORM_SIZE)]
-    )
+    results = await asyncio.gather(*[workers[i % _WORKERS].ingest(ev) for i in range(_STORM_SIZE)])
 
-    print(f"duplicate_delivery_storm: size={_STORM_SIZE} workers={_WORKERS} "
-          f"absorbed_true={sum(results)}")
+    print(
+        f"duplicate_delivery_storm: size={_STORM_SIZE} workers={_WORKERS} "
+        f"absorbed_true={sum(results)}"
+    )
     assert sum(results) == 1  # 승자 정확히 1명 — 나머지는 전부 흡수(F9)
 
     async with pool.acquire() as conn:
@@ -165,14 +171,13 @@ async def test_1000_duplicate_deliveries_of_unmatched_event_never_apply(pool):
     inbox 행도 1개로 수렴한다 — fail-closed 경로도 흡수가 그대로 작동한다."""
     exchange_order_id = f"ex-storm-unmatched-{uuid4().hex}"
     ev = _full_fill_event(
-        client_order_id="cid-storm-unmatched", quantity=Decimal("1"),
+        client_order_id="cid-storm-unmatched",
+        quantity=Decimal("1"),
         exchange_order_id=exchange_order_id,
     )
     workers = [InboxProcessor(pool) for _ in range(_WORKERS)]
 
-    results = await asyncio.gather(
-        *[workers[i % _WORKERS].ingest(ev) for i in range(_STORM_SIZE)]
-    )
+    results = await asyncio.gather(*[workers[i % _WORKERS].ingest(ev) for i in range(_STORM_SIZE)])
 
     print(f"duplicate_delivery_storm(unmatched): absorbed_true={sum(results)}")
     assert sum(results) == 1

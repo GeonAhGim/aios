@@ -44,10 +44,8 @@ async def _insert_nav(pool: asyncpg.Pool, account_id: UUID, day: date, cash: Dec
         await PostgresNavRepository(pool).insert(conn, nav)
 
 
-
 def _nav_params(account_id: UUID, start: str, end: str) -> dict[str, str]:
     return {"account_id": str(account_id), "start_date": start, "end_date": end}
-
 
 
 async def test_nav_series_is_ascending_and_exposes_missing_days(client, pool):
@@ -66,7 +64,6 @@ async def test_nav_series_is_ascending_and_exposes_missing_days(client, pool):
     assert [item["nav_date"] for item in data["items"]] == ["2026-09-01", "2026-09-03"]
     assert Decimal(data["items"][0]["closing_nav"]) == Decimal("900")
     assert data["missing_dates"] == ["2026-09-02"]
-
 
 
 async def test_nav_cross_tenant_is_404_and_bad_range_is_rejected(client, pool):

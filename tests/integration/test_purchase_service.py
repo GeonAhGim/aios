@@ -3,6 +3,7 @@
 ADR-2026-08-29 §1 반영 — 구매는 이제 지갑 잔액을 즉시 차감하고 그 자리
 에서 CONFIRMED로 확정된다(구 PENDING_PAYMENT 중간 상태 제거).
 """
+
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -280,8 +281,7 @@ async def test_same_buyer_cannot_purchase_same_listing_twice(service, pool):
     assert await _wallet_balance(pool, buyer) == Decimal("50.00")
     async with pool.acquire() as conn:
         count = await conn.fetchval(
-            "SELECT COUNT(*) FROM strategy_purchases "
-            "WHERE listing_id = $1 AND buyer_user_id = $2",
+            "SELECT COUNT(*) FROM strategy_purchases WHERE listing_id = $1 AND buyer_user_id = $2",
             listing.listing_id,
             buyer,
         )

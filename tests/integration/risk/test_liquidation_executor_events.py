@@ -71,8 +71,7 @@ async def _send_one_slice(pool, ctx, adapter):
     request_id = await _setup(pool, ctx)
     t0 = datetime.now(UTC)
     await run_liquidation_worker_once(pool, {"bitget": adapter}, now=t0)
-    await run_liquidation_worker_once(pool, {"bitget": adapter},
-                                      now=t0 + timedelta(seconds=60))
+    await run_liquidation_worker_once(pool, {"bitget": adapter}, now=t0 + timedelta(seconds=60))
     return request_id
 
 

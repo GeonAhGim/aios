@@ -1,4 +1,5 @@
 """FND-06 Risk & Safety Gate 순수 규칙 단위테스트 — DB 없음."""
+
 from __future__ import annotations
 
 from uuid import uuid4

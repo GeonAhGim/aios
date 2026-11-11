@@ -46,7 +46,6 @@ async def _append_fills(pool: asyncpg.Pool, position_key: str, count: int) -> No
             )
 
 
-
 async def test_journal_cursor_pagination_walks_in_sequence_order(client, pool):
     headers, tenant_id = await _register(client)
     account_id = await _create_account(pool, tenant_id)
@@ -75,7 +74,6 @@ async def test_journal_cursor_pagination_walks_in_sequence_order(client, pool):
     assert body2["meta"]["page"]["next_cursor"] is None
 
 
-
 async def test_journal_cross_tenant_is_404_isomorphic_with_unknown_key(client, pool):
     _, victim_id = await _register(client)
     attacker_headers, _ = await _register(client)
@@ -90,7 +88,6 @@ async def test_journal_cross_tenant_is_404_isomorphic_with_unknown_key(client, p
     assert cross.status_code == ghost.status_code == 404
     _assert_error_envelope(cross.json(), "RESOURCE_NOT_FOUND")
     assert cross.json()["error_code"] == ghost.json()["error_code"]
-
 
 
 async def test_journal_rejects_malformed_cursor(client, pool):

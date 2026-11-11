@@ -229,9 +229,7 @@ async def test_unknown_check_type_is_rejected_before_any_write(
 
     for check_type in ("not_a_real_check", "", "BACKTEST"):
         with pytest.raises(UnknownCheckTypeError) as rejected:
-            await run_check(
-                validation_repo, check_type=check_type, ctx=ctx, owner_user_id=owner_id
-            )
+            await run_check(validation_repo, check_type=check_type, ctx=ctx, owner_user_id=owner_id)
         assert rejected.value.args == (check_type,)
 
     async with pool.acquire() as conn:

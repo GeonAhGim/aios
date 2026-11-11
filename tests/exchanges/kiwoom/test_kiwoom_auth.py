@@ -6,6 +6,7 @@ pattern -- no real network call, no real wall-clock wait (a fake `sleep_fn`
 is injected everywhere `ResilientTransport`/`TokenBucket` would otherwise
 sleep).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -48,7 +49,8 @@ def _clean_bucket_registry():
 
 
 def _token_response(
-    token: str = "tok-1", expires_dt: str = "99991231235959"  # noqa: S107
+    token: str = "tok-1",  # noqa: S107
+    expires_dt: str = "99991231235959",  # noqa: S107
 ) -> httpx.Response:
     return httpx.Response(200, json={"token": token, "expires_dt": expires_dt})
 

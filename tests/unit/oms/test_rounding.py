@@ -1,4 +1,5 @@
 """tick/lot/min-notional 라운딩 단위테스트 — L4-03. DB 없음."""
+
 from __future__ import annotations
 
 from decimal import Decimal

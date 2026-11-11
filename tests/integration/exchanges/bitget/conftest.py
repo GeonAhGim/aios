@@ -4,6 +4,7 @@ Split out of the former single `tests/integration/test_bitget_adapter.py`
 (788 lines) into `test_bitget_market_data.py`, `test_bitget_orders.py`, and
 `test_bitget_retry.py`, each under the 500-line warn threshold.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

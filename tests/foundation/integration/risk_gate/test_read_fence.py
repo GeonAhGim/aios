@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.4, §3.6.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -112,9 +113,7 @@ async def test_read_fence_snapshot_uses_the_fixed_five_pairs(pool, repo):
         repo, tenant_id=tenant_id, provider_code="binance", execution_ref=execution_ref
     )
 
-    assert set(snapshot.tokens.keys()) == set(
-        fence_pairs_for(tenant_id, "binance", execution_ref)
-    )
+    assert set(snapshot.tokens.keys()) == set(fence_pairs_for(tenant_id, "binance", execution_ref))
 
 
 async def test_is_stale_detects_activation_between_two_snapshots(pool, repo):

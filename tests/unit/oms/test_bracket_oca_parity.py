@@ -126,9 +126,7 @@ let bracket_id = strategy.bracket(10, 120, 95, 0.05)
     )
 
     # Build signal source (compiles the script and sets up bracket metadata)
-    signal_source = build_script_signal_source(
-        compiled.ir, bar_count=len(columns), columns=columns
-    )
+    signal_source = build_script_signal_source(compiled.ir, bar_count=len(columns), columns=columns)
 
     # Run backtest with partial fill config to trigger 40% (4 out of 10)
     from src.foundation.backtest.domain.models_v2 import (
@@ -189,25 +187,15 @@ let bracket_id = strategy.bracket(10, 120, 95, 0.05)
     requested_qty = Decimal("10")
     triggered_paper = {"profit": False, "loss": True, "trail": False}
 
-    backtest_qty = bt6.bracket_quantity_for_fill(
-        requested_qty=requested_qty, filled_qty=filled_qty
-    )
-    paper_qty = em19.bracket_quantity_for_fill(
-        requested_qty=requested_qty, filled_qty=filled_qty
-    )
+    backtest_qty = bt6.bracket_quantity_for_fill(requested_qty=requested_qty, filled_qty=filled_qty)
+    paper_qty = em19.bracket_quantity_for_fill(requested_qty=requested_qty, filled_qty=filled_qty)
     assert backtest_qty == paper_qty == filled_qty, (
         f"bracket_quantity_for_fill parity: BT={backtest_qty}, EM={paper_qty}"
     )
 
-    backtest_resolution = bt6.resolve_oca(
-        triggered=triggered_paper, priority_order=_PRIORITY_ORDER
-    )
-    paper_resolution = em19.resolve_oca(
-        triggered=triggered_paper, priority_order=_PRIORITY_ORDER
-    )
+    backtest_resolution = bt6.resolve_oca(triggered=triggered_paper, priority_order=_PRIORITY_ORDER)
+    paper_resolution = em19.resolve_oca(triggered=triggered_paper, priority_order=_PRIORITY_ORDER)
     assert backtest_resolution.triggered_leg == paper_resolution.triggered_leg == "loss"
     assert (
-        backtest_resolution.cancelled_legs
-        == paper_resolution.cancelled_legs
-        == ("profit", "trail")
+        backtest_resolution.cancelled_legs == paper_resolution.cancelled_legs == ("profit", "trail")
     )

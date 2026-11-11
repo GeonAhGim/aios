@@ -9,6 +9,7 @@ delisted+relisted)까지 합치면 7개 조합이 표에 정의돼 있다. 4개 
 6개 event = 24 조합을 전수 검사해 이 7개는 표대로, 나머지 17개는 전부
 거부됨을 증명한다.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -61,9 +62,7 @@ _RELIST_KEY = (InstrumentLifecycle.DELISTED, "relisted")
 
 @pytest.mark.parametrize("state", list(InstrumentLifecycle))
 @pytest.mark.parametrize("event", _EVENTS)
-def test_transition_matches_table(
-    state: InstrumentLifecycle, event: LifecycleEvent
-) -> None:
+def test_transition_matches_table(state: InstrumentLifecycle, event: LifecycleEvent) -> None:
     key = (state, event)
     if key in _ALLOWED:
         assert transition(state, event) == _ALLOWED[key]
@@ -96,9 +95,7 @@ def test_delisted_rejects_every_other_event() -> None:
 
 @pytest.mark.parametrize("state", list(InstrumentLifecycle))
 @pytest.mark.parametrize("event", _EVENTS)
-def test_audit_event_for_matches_table(
-    state: InstrumentLifecycle, event: LifecycleEvent
-) -> None:
+def test_audit_event_for_matches_table(state: InstrumentLifecycle, event: LifecycleEvent) -> None:
     key = (state, event)
     if key in _AUDIT_TABLE:
         assert audit_event_for(state, event) == _AUDIT_TABLE[key]

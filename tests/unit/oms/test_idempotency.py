@@ -1,4 +1,5 @@
 """멱등 스코프·digest·client id 단위테스트 — L4-03. DB 없음."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

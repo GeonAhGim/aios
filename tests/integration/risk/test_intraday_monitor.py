@@ -65,9 +65,7 @@ def _asyncpg_dsn() -> str:
     return os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
 
 
-def _run_alembic(
-    *args: str, database_url: str | None = None
-) -> subprocess.CompletedProcess[str]:
+def _run_alembic(*args: str, database_url: str | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=_PROJECT_ROOT,
@@ -149,7 +147,8 @@ async def test_upgrade_downgrade_upgrade_round_trip_recreates_risk_signal():
     migration_url = await ensure_worker_database(template_database_url(), "intradayrt")
     migration_pool = await asyncpg.create_pool(
         migration_url.replace("postgresql+asyncpg://", "postgresql://"),
-        min_size=1, max_size=2,
+        min_size=1,
+        max_size=2,
     )
     run_alembic = partial(_run_alembic, database_url=migration_url)
     try:

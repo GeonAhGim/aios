@@ -36,6 +36,7 @@ test_perf_journal.py(LC-17)·test_pre_trade_latency.py(R-57) 선례와 동일한
 대비 200조합 비율로 축소한 값(12s)이다 -- 이미 실측이 그보다 훨씬 크므로
 이 값 자체는 정보용이고 실제 게이트는 9배 정규화 쪽이 좌우한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -70,9 +71,7 @@ _SPEC_COMBO_COUNT = 1_000  # §9.9 "1,000 조합" -- 참고용 외삽 목표치
 _MEASURED_COMBO_COUNT = 200  # 실제로 실행하는 조합 수 (docstring 실측 근거)
 _BASELINE_COMBO_COUNT = 20
 _SPEC_TARGET_SECONDS = 60.0
-_SPEC_TARGET_SECONDS_FOR_MEASURED = (
-    _SPEC_TARGET_SECONDS * _MEASURED_COMBO_COUNT / _SPEC_COMBO_COUNT
-)
+_SPEC_TARGET_SECONDS_FOR_MEASURED = _SPEC_TARGET_SECONDS * _MEASURED_COMBO_COUNT / _SPEC_COMBO_COUNT
 _NORMALIZATION_MULTIPLIER = 9
 
 
@@ -107,10 +106,13 @@ def _config() -> BacktestConfigV2:
         commission=VenueTierCommission(
             venue="BITGET", maker_bps=_D("2"), taker_bps=_D("5"), min_fee=_D("0")
         ),
-        latency_ms=0, partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
+        latency_ms=0,
+        partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
         order_types=OrderTypesConfig(limit=True, stop=True, oco=True, trailing=True),
-        magnifier_tf=None, costs=CostsConfig(funding=False, borrow_apr=None),
-        adjustments=AdjustmentsConfig(splits=False, dividends=False), calendar="24x7",
+        magnifier_tf=None,
+        costs=CostsConfig(funding=False, borrow_apr=None),
+        adjustments=AdjustmentsConfig(splits=False, dividends=False),
+        calendar="24x7",
     )
 
 
@@ -131,15 +133,21 @@ def test_grid_sweep_full_month_m1_throughput(perf_budget: PerfBudget) -> None:
     # Repeat each multi-combination sweep to amortize the Windows CPU clock tick.
     baseline_sample = perf_budget.sample(
         lambda: sweep_grid(
-            cols, {k: combos[k] for k in baseline_keys}, config,
-            timeframe=Timeframe.M1, initial_cash=_CASH,
+            cols,
+            {k: combos[k] for k in baseline_keys},
+            config,
+            timeframe=Timeframe.M1,
+            initial_cash=_CASH,
         ),
         batch=2,
     )
     remaining_sample = perf_budget.sample(
         lambda: sweep_grid(
-            cols, {k: combos[k] for k in remaining_keys}, config,
-            timeframe=Timeframe.M1, initial_cash=_CASH,
+            cols,
+            {k: combos[k] for k in remaining_keys},
+            config,
+            timeframe=Timeframe.M1,
+            initial_cash=_CASH,
         ),
         batch=2,
     )
@@ -158,7 +166,8 @@ def test_grid_sweep_full_month_m1_throughput(perf_budget: PerfBudget) -> None:
     )
     extrapolated_1000_seconds = baseline_per_combo_seconds * _SPEC_COMBO_COUNT
     spec_met = (
-        "충족" if extrapolated_1000_seconds <= _SPEC_TARGET_SECONDS
+        "충족"
+        if extrapolated_1000_seconds <= _SPEC_TARGET_SECONDS
         else "미충족(비차단, 참고용 선형 외삽 -- 실측 초선형 추세상 실제로는 더 나쁠 수 있음)"
     )
 

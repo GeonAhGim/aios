@@ -312,8 +312,8 @@ async def test_post_trade_determination_report_submit_and_audit_trail_happy_path
     assert stored is not None
     assert stored.fields["수량"] == "10"
     assert stored.fields["단가"] == "70000"
-    expected_slippage_bps = (Decimal("70000") - Decimal("69950")) / Decimal("69950") * Decimal(
-        "10000"
+    expected_slippage_bps = (
+        (Decimal("70000") - Decimal("69950")) / Decimal("69950") * Decimal("10000")
     )
     assert stored.fields["집행_벤치마크가격"] == "69950"
     assert stored.fields["집행_슬리피지_bp"] == str(expected_slippage_bps)

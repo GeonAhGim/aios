@@ -1,4 +1,5 @@
 """FND-05 Connected Asset 순수 규칙 단위테스트 — DB 없음."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -92,9 +93,7 @@ def test_require_transition_allowed_raises_on_invalid_transition():
 
 def test_classify_first_ever_response_is_fresh():
     """CON-006 — 이전 스냅샷이 없으면(첫 sync) 비교 대상이 없으니 FRESH."""
-    result = classify_provider_response(
-        provider_as_of=_NOW, latest_known_as_of=None, now=_NOW
-    )
+    result = classify_provider_response(provider_as_of=_NOW, latest_known_as_of=None, now=_NOW)
     assert result == ProviderResponseClassification.FRESH
 
 
@@ -114,9 +113,7 @@ def test_classify_older_than_latest_is_stale():
 
 
 def test_classify_exact_duplicate_timestamp_is_stale():
-    result = classify_provider_response(
-        provider_as_of=_NOW, latest_known_as_of=_NOW, now=_NOW
-    )
+    result = classify_provider_response(provider_as_of=_NOW, latest_known_as_of=_NOW, now=_NOW)
     assert result == ProviderResponseClassification.STALE
 
 

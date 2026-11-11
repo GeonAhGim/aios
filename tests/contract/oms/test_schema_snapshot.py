@@ -8,6 +8,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §3.1/§3.3, §9 L4-01.
 추가(MINOR)는 이 테스트를 건드리지 않는다(필드 목록에 없는 새 필드는
 버스 검사 대상이 아님 — `model_fields` 서브셋 검사).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

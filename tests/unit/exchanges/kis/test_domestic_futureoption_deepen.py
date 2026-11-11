@@ -30,6 +30,7 @@ REST 왕복만 하고 자체적으로 DB에 쓰지 않으므로(주문 영속화
    test_kis_ws_overseas_deepen.py와 동일 판단, 공유 CI 환경에서 절대
    임계는 상시 적색을 낳는다).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,6 +59,7 @@ def _reset_bucket_registry() -> None:
     rate_profile.reset_token_bucket_registry_for_test()
     yield
     rate_profile.reset_token_bucket_registry_for_test()
+
 
 _QUOTE_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-price"
 _ORDER_PATH = "/uapi/domestic-futureoption/v1/trading/order"
@@ -118,9 +120,7 @@ async def test_place_order_network_failure_propagates_fail_closed_after_retries(
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                200, json={"access_token": "t", "access_token_token_expired": ""}
-            )
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
         nonlocal attempt_count
         attempt_count += 1
         raise httpx.ConnectError("simulated network failure", request=request)
@@ -154,9 +154,7 @@ async def test_cancel_order_simulated_crash_propagates_unmasked() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                200, json={"access_token": "t", "access_token_token_expired": ""}
-            )
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
         if request.url.path == _CANCEL_PATH:
             raise _SimulatedCrash("simulated worker crash mid-request")
         return httpx.Response(200, json={"rt_cd": "0", "msg1": "OK", "output": {}})
@@ -195,9 +193,7 @@ async def test_balance_parsing_throughput_within_normalized_budget() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                200, json={"access_token": "t", "access_token_token_expired": ""}
-            )
+            return httpx.Response(200, json={"access_token": "t", "access_token_token_expired": ""})
         payload = {"rt_cd": "0", "msg1": "OK", "output": {}, "output1": _synthetic_balance_rows(n)}
         return httpx.Response(200, json=payload)
 

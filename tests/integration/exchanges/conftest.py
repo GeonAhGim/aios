@@ -4,6 +4,7 @@
 `paper_sim_orders`는 `account_id`에 FK가 없어(마이그레이션 d0a580db5ce8
 docstring) `create_test_user` 등 선행 픽스처가 필요 없다.
 """
+
 from __future__ import annotations
 
 import os

@@ -1,4 +1,5 @@
 """스톱리밋 주문 단위테스트 — EM-19. DB 없음."""
+
 from __future__ import annotations
 
 from decimal import Decimal

@@ -13,6 +13,7 @@ normalized_budget`가 그 한 항목만 보강한다 — `place_order`의 시장
 풀의 `SELECT 1` p95에 정규화한 임계로 단언한다(절대 ms 상수는 공유 CI
 변동에 취약하다는 task-2765/2767/2768 동일 전례).
 """
+
 from __future__ import annotations
 
 import time

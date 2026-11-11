@@ -3,6 +3,7 @@
 전부 순수 조립 함수(생성자만 호출, I/O 없음)라 실DB 없이 단위테스트 가능.
 KeyRing.from_legacy_hex 경로(get_exchange_credential_service)만 잘못된 hex
 입력에 fail-closed로 반응하는지 검증한다."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock

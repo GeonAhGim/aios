@@ -1,4 +1,5 @@
 """FND-02 통합테스트 — /v1/foundation/mandates 라우터. 실제 FastAPI 앱 + 실제 dev DB."""
+
 import uuid
 from pathlib import Path
 

@@ -27,6 +27,7 @@ REJECT path-mismatch 재포착)를 갖췄지만 D2 하한에 필요한 두 가�
    를 베이스라인으로 삼아 정규화한 배율 임계를 쓴다(task-2777/2774 선례와
    동일 판단 — 공유 CI 환경에서 절대 임계는 상시 적색을 낳는다).
 """
+
 from __future__ import annotations
 
 import time
@@ -61,6 +62,7 @@ def _reset_bucket_registry() -> None:
     rate_profile.reset_token_bucket_registry_for_test()
     yield
     rate_profile.reset_token_bucket_registry_for_test()
+
 
 _FAR_FUTURE_EXPIRY = date(2099, 12, 1)
 
@@ -211,8 +213,7 @@ def _futureoption_balance_payload() -> dict[str, object]:
 
 def _stock_balance_payload() -> dict[str, object]:
     rows = [
-        {"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "10", "ord_psbl_qty": "10"}
-        for _ in range(_N_ROWS)
+        {"ovrs_pdno": "AAPL", "ovrs_cblc_qty": "10", "ord_psbl_qty": "10"} for _ in range(_N_ROWS)
     ]
     return {"rt_cd": "0", "msg1": "OK", "output1": rows}
 

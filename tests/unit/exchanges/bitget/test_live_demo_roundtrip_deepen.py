@@ -35,6 +35,7 @@ KIS `test_domestic_futureoption_wiring_deepen.py` 패턴 참고).
    자격증명이 서로 새면 조용한 오발주/오조회로 이어지는 adversarial
    시나리오다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -196,9 +197,7 @@ async def test_place_get_cancel_roundtrip_throughput_within_normalized_budget() 
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v2/spot/trade/place-order":
-            return httpx.Response(
-                200, json=_success_envelope({"orderId": "999", "clientOid": "c"})
-            )
+            return httpx.Response(200, json=_success_envelope({"orderId": "999", "clientOid": "c"}))
         if request.url.path == "/api/v2/spot/trade/orderInfo":
             return httpx.Response(200, json=_success_envelope([_order_row()]))
         assert request.url.path == "/api/v2/spot/trade/cancel-order"

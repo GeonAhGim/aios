@@ -1,4 +1,5 @@
 """LatencyModel 단위테스트 — L4-22. 절대 지연(벽시계) 단언 없음 — sleeper 대역."""
+
 from __future__ import annotations
 
 import pytest

@@ -8,6 +8,7 @@ order_command_outbox 어느 쪽에도 행이 남지 않는다 — 그 결과 `Ou
 그 뒤에 한 틱을 돌려도 처리할 outbox 행이 없으므로 어댑터 spy 호출 횟수는
 정확히 0이다(로그만 남기고 통과하면 이 마지막 단언이 실패한다).
 """
+
 from __future__ import annotations
 
 import json
@@ -76,7 +77,9 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'BTC/USDT', 'crypto', 'bitget', $3::jsonb,
                     'test-author', 'APPROVED')
             """,
-            strategy_id, user_id, json.dumps({}),
+            strategy_id,
+            user_id,
+            json.dumps({}),
         )
         row = await conn.fetchrow(
             """
@@ -86,7 +89,8 @@ async def _create_running_execution(pool, user_id: uuid.UUID) -> int:
             VALUES ($1, '1.0.0', $2, 'bitget', 'PAPER', 100, 'USDT', 'RUNNING')
             RETURNING id
             """,
-            strategy_id, user_id,
+            strategy_id,
+            user_id,
         )
     return row["id"]
 
@@ -97,15 +101,26 @@ async def test_unknown_symbol_rejected_before_any_row_and_adapter_never_called(p
     execution_id = await _create_running_execution(pool, user_id)
     entity_context = await seed_entity_context(pool, user_id)
     scope = OrderIdempotencyScope(
-        tenant_id=user_id, account_ref="acct-1", provider="bitget", strategy_id="s1",
-        strategy_version="1.0.0", execution_id=execution_id, intent_seq=1,
+        tenant_id=user_id,
+        account_ref="acct-1",
+        provider="bitget",
+        strategy_id="s1",
+        strategy_version="1.0.0",
+        execution_id=execution_id,
+        intent_seq=1,
         window_start=datetime.now(UTC),
     )
     cmd = SubmitOrderCommand(
-        command_id=uuid.uuid4(), trace_id=uuid.uuid4(), scope=scope,
-        symbol="ZZZUSDT", side=OrderSide.BUY, order_type=OrderType.MARKET,
-        quantity=Decimal("0.01"), asset_class=AssetClass.CRYPTO,
-        actor_subject_id=user_id, issued_at=datetime.now(UTC),
+        command_id=uuid.uuid4(),
+        trace_id=uuid.uuid4(),
+        scope=scope,
+        symbol="ZZZUSDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.MARKET,
+        quantity=Decimal("0.01"),
+        asset_class=AssetClass.CRYPTO,
+        actor_subject_id=user_id,
+        issued_at=datetime.now(UTC),
     )
 
     with pytest.raises(UnknownSymbolError):

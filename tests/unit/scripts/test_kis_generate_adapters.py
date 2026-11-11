@@ -6,6 +6,7 @@ DoD: (1) 같은 기준 목록 + 같은 수기 파일이면 바이트 동일(결�
 `src/exchanges/kis/generated/`가 이 스크립트 + 기준 목록으로 재생성한 결과와 바이트
 동일(드리프트 없음), (6) 재생성 후 `kis_tr_coverage`의 미착수가 0이 된다.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -241,9 +242,7 @@ def test_committed_generated_dir_matches_fresh_regeneration() -> None:
     handwritten_source = gen.scan_handwritten_source(gen.ADAPTER_DIR)
     expected = gen.generate_files(reference, handwritten_source)
 
-    committed = {
-        p.name: p.read_text(encoding="utf-8") for p in gen.GENERATED_DIR.glob("*.py")
-    }
+    committed = {p.name: p.read_text(encoding="utf-8") for p in gen.GENERATED_DIR.glob("*.py")}
 
     assert committed == expected
 

@@ -5,6 +5,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 
 모든 기대 순서는 손으로 계산해 `Decimal` exact 비교로 단언한다.
 """
+
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -74,7 +75,10 @@ def test_magnify_down_bar_no_lower_bars_visits_high_before_low() -> None:
 
 def test_magnify_doji_close_equals_open_treated_as_up_bar() -> None:
     bar = HigherBar(
-        open_time=_T0, open=Decimal("100"), high=Decimal("108"), low=Decimal("92"),
+        open_time=_T0,
+        open=Decimal("100"),
+        high=Decimal("108"),
+        low=Decimal("92"),
         close=Decimal("100"),
     )
     order = magnify(bar, higher_tf=Timeframe.M5, magnifier_tf=None)
@@ -84,9 +88,7 @@ def test_magnify_doji_close_equals_open_treated_as_up_bar() -> None:
 def test_magnify_none_magnifier_tf_ignores_provided_lower_bars() -> None:
     """magnifier_tf=None이면 lower_bars가 있어도 무시하고 봉 단위로 되돌아간다
     (예외 아님, §DoD (4))."""
-    lower = _m1_columns(
-        [(_T0, Decimal("999"), Decimal("999"), Decimal("999"), Decimal("999"))]
-    )
+    lower = _m1_columns([(_T0, Decimal("999"), Decimal("999"), Decimal("999"), Decimal("999"))])
     order = magnify(_UP_BAR, higher_tf=Timeframe.M5, magnifier_tf=None, lower_bars=lower)
     assert order == (Decimal("100"), Decimal("95"), Decimal("110"), Decimal("105"))
 
@@ -128,11 +130,26 @@ def test_magnify_uses_real_lower_bars_when_present_concatenated_in_order() -> No
         _UP_BAR, higher_tf=Timeframe.M5, magnifier_tf=Timeframe.M1, lower_bars=_m1_columns(rows)
     )
     assert order == (
-        Decimal("100"), Decimal("99"), Decimal("102"), Decimal("101"),   # up
-        Decimal("101"), Decimal("101"), Decimal("98"), Decimal("99"),    # down
-        Decimal("99"), Decimal("99"), Decimal("105"), Decimal("104"),    # up
-        Decimal("104"), Decimal("106"), Decimal("103"), Decimal("103"),  # down
-        Decimal("103"), Decimal("102"), Decimal("110"), Decimal("108"),  # up
+        Decimal("100"),
+        Decimal("99"),
+        Decimal("102"),
+        Decimal("101"),  # up
+        Decimal("101"),
+        Decimal("101"),
+        Decimal("98"),
+        Decimal("99"),  # down
+        Decimal("99"),
+        Decimal("99"),
+        Decimal("105"),
+        Decimal("104"),  # up
+        Decimal("104"),
+        Decimal("106"),
+        Decimal("103"),
+        Decimal("103"),  # down
+        Decimal("103"),
+        Decimal("102"),
+        Decimal("110"),
+        Decimal("108"),  # up
     )
 
 
@@ -214,11 +231,17 @@ def test_magnify_rejects_unsorted_lower_bars_even_when_all_within_window() -> No
     rows = [
         (
             _T0 + timedelta(minutes=3),
-            Decimal("103"), Decimal("106"), Decimal("102"), Decimal("104"),
+            Decimal("103"),
+            Decimal("106"),
+            Decimal("102"),
+            Decimal("104"),
         ),
         (
             _T0 + timedelta(minutes=1),
-            Decimal("100"), Decimal("102"), Decimal("99"), Decimal("101"),
+            Decimal("100"),
+            Decimal("102"),
+            Decimal("99"),
+            Decimal("101"),
         ),
     ]
     with pytest.raises(UnsortedLowerBarsError):
@@ -241,8 +264,14 @@ def test_magnify_accepts_two_lower_bars_with_equal_timestamps() -> None:
         _UP_BAR, higher_tf=Timeframe.M5, magnifier_tf=Timeframe.M1, lower_bars=_m1_columns(rows)
     )
     assert order == (
-        Decimal("100"), Decimal("99"), Decimal("102"), Decimal("101"),
-        Decimal("101"), Decimal("100"), Decimal("103"), Decimal("102"),
+        Decimal("100"),
+        Decimal("99"),
+        Decimal("102"),
+        Decimal("101"),
+        Decimal("101"),
+        Decimal("100"),
+        Decimal("103"),
+        Decimal("102"),
     )
 
 

@@ -4,6 +4,7 @@ Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20.
 DoD: 실제 공시 유형 3종(액면분할·현금배당·합병) 정규화가 정확함 + 파싱
 실패는 조용히 무시되지 않고 `FilingParseError`로 알려짐(적대적 입력 포함).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime

@@ -26,6 +26,7 @@ mode != "PAPER": raise ...`가 별도 심볼 없는 인라인 조건이라 몽�
 mock으로 실증한다 — 이게 이 데코레이터의 한계(자기신고만 본다)이기도 하고, 그래서
 (3)의 독립적인 mode 검사가 필요한 이유이기도 하다.
 """
+
 from __future__ import annotations
 
 import json
@@ -161,6 +162,7 @@ async def _execute(
 # 경로 (1) — RUNTIME_MODE(strategy_executions.mode)를 LIVE로 두고 제출 시도.
 # ---------------------------------------------------------------------------
 
+
 async def test_path1_live_mode_execution_is_hard_blocked_before_any_order(pool):
     user_id = await create_test_tenant(pool)
     execution_id = await _seed_execution(pool, user_id, mode="LIVE")
@@ -189,6 +191,7 @@ async def test_path1_wiring_proof_same_adapter_succeeds_when_mode_is_paper(pool)
 # ---------------------------------------------------------------------------
 # 경로 (2) — Executor를 거치지 않고 거래소 어댑터 확장 메서드를 직접 호출.
 # ---------------------------------------------------------------------------
+
 
 def _order() -> Order:
     return Order(
@@ -251,6 +254,7 @@ async def test_path2_wiring_proof_disabling_is_paper_trading_lets_request_throug
 # ---------------------------------------------------------------------------
 # 경로 (3) — is_paper_trading/is_sandboxed를 True로 위조한 가짜 어댑터 주입.
 # ---------------------------------------------------------------------------
+
 
 async def test_path3_fake_adapter_spoofing_paper_flags_is_still_blocked_by_live_mode(pool):
     """공격자가 어댑터 객체를 완전히 통제해 `is_paper_trading=True`/

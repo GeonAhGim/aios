@@ -12,6 +12,7 @@ negative, (3) 예외 계층 조작을 통한 failure-injection, (4) 순수 함�
 하한(스레드/DB 없이 수만 회 분류가 예산 내), (5) 스레드 간 동시 호출로
 공유 가변 상태가 없음을 증명하는 멀티-인스턴스 proof.
 """
+
 from __future__ import annotations
 
 import time

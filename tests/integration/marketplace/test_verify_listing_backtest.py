@@ -9,6 +9,7 @@ DoD: 리스팅이 주장한 `result_hash`와 플랫폼 재현 결과가 비트 �
 증명하는 것이 이 테스트의 목적이라 integration으로 분류한다(BT-19
 `test_parity_harness.py`와 동일한 분류 근거).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -35,7 +36,7 @@ _ZERO_COST = CostModel(fee_bps=Decimal("0"), slippage_bps=Decimal("0"))
 
 
 class _FakePriceIndicatorService:
-    """"PRICE" 키를 창(window)의 마지막 종가로 되돌린다 — TA-Lib 의존 없음
+    """ "PRICE" 키를 창(window)의 마지막 종가로 되돌린다 — TA-Lib 의존 없음
     (test_run_backtest.py와 동일한 배선 분리 목적)."""
 
     def calculate(self, indicator: str, candles: list[Candle], **params: int) -> object:

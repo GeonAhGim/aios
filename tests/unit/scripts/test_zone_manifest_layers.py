@@ -90,9 +90,7 @@ def test_scaffold_reasons_non_string_entry_fails(tmp_path: Path) -> None:
 
 def test_scaffold_reasons_ignores_complete_context(tmp_path: Path) -> None:
     """A context with all five layers present needs no entry, even if absent."""
-    _make_context(
-        tmp_path, "complete", ("domain", "application", "ports", "adapters", "contracts")
-    )
+    _make_context(tmp_path, "complete", ("domain", "application", "ports", "adapters", "contracts"))
     manifest: dict[str, object] = {"scaffold_reasons": {}}
     assert check_zone_manifest.check_scaffold_reasons(tmp_path, manifest) == []
 

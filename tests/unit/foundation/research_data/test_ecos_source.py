@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md sec.9 RD-11
 DoD ("빈도·단위·발표지연 정규화").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
@@ -157,5 +158,7 @@ async def test_fetch_ecos_series_builds_path_segments_and_normalizes() -> None:
         )
     assert len(observations) == 1
     called_url = client.get_json.call_args.args[0]
-    assert called_url.startswith("https://ecos.bok.or.kr/api/StatisticSearch/mykey/json/kr/1/10000/")
+    assert called_url.startswith(
+        "https://ecos.bok.or.kr/api/StatisticSearch/mykey/json/kr/1/10000/"
+    )
     assert called_url.endswith("722Y001/M/202401/202401/0101000")

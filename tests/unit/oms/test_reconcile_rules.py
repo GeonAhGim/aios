@@ -1,4 +1,5 @@
 """3자 대사 비교 규칙 단위테스트 — L4-05. DB 없음."""
+
 from __future__ import annotations
 
 import time

@@ -220,9 +220,7 @@ async def test_script_compile_to_backtest_report_persists_reproducible_experimen
     assert pbo == Decimal(0)
 
     # ---- BT-9 재현성 키 + AI-10 실험 원장 append -----------------------------
-    data_lineage_hash = hashlib.sha256(
-        repr(tuple(columns.close)).encode("utf-8")
-    ).hexdigest()
+    data_lineage_hash = hashlib.sha256(repr(tuple(columns.close)).encode("utf-8")).hexdigest()
     rollup_version = "rollup-v1"
     repro_key = reproducibility_key(
         script_hash=compiled.script_hash,

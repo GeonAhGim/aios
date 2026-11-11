@@ -17,6 +17,7 @@ INSERT/UPDATE/DELETE)만 갖고 테이블 소유권이 없어 `ALTER TABLE`(DDL,
 함께 원복된다(`test_db_roles.py`와 동일 근거 — PostgreSQL 문서, `SET
 ROLE`은 트랜잭션 로컬).
 """
+
 from __future__ import annotations
 
 import asyncpg

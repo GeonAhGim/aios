@@ -2,6 +2,7 @@
 
 DoD: 분모는 available_balance가 아니라 total_equity다.
 """
+
 from decimal import Decimal
 
 from src.core.risk.decision import RiskOutcome
@@ -18,9 +19,7 @@ def _inputs(
 ) -> object:
     return sample_inputs(
         certified_badge=certified_badge,
-        allocated_capital=(
-            Decimal(allocated_capital) if allocated_capital is not None else None
-        ),
+        allocated_capital=(Decimal(allocated_capital) if allocated_capital is not None else None),
         equity=EquityInputs(
             total_equity=Decimal(total_equity) if total_equity is not None else None, as_of=NOW
         ),

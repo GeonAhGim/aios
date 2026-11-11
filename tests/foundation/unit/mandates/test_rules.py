@@ -1,4 +1,5 @@
 """75번 §2/§3 규칙의 단위테스트 — DB 없이 순수 함수만 검증한다."""
+
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TypedDict, Unpack
@@ -165,4 +166,3 @@ def test_detect_material_change_is_empty_when_strictly_more_conservative():
         forbidden_assets=("XYZ", "ABC"),  # 확대(더 제한적)
     )
     assert detect_material_change(current, proposed) == []
-

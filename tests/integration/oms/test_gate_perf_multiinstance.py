@@ -13,6 +13,7 @@ ledger/test_perf_journal.py`(task-920/1029/1038)가 이 저장소의 공유 CI
 환경에서 절대 임계가 로컬 대비 최대 20배 변동해 상시 적색을 낳은 전례를
 남겼다. 대신 같은 연결의 기준 왕복비용(`SELECT 1`)에 정규화한 임계를 쓴다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -88,9 +89,7 @@ async def test_gate_red_disabling_trigger_lets_terminal_reversal_through(pool):
             await conn.execute(
                 "UPDATE orders SET status = 'SUBMITTED' WHERE order_id = $1", order_id
             )
-            status = await conn.fetchval(
-                "SELECT status FROM orders WHERE order_id = $1", order_id
-            )
+            status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
             assert status == "SUBMITTED"
         finally:
             # DISABLE TRIGGER는 세션이 아니라 카탈로그 상태다 — 트랜잭션 롤백이

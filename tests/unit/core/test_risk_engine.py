@@ -113,9 +113,7 @@ def test_position_concentration_skipped_on_exit(policy, allocation):
     engine = RiskEngine(policy)
     exit_allocation = allocation.model_copy(update={"capital_pct": Decimal("25")})
 
-    result = engine.check(
-        exit_allocation, _valid_account_state(position_quantity=Decimal("0.1"))
-    )
+    result = engine.check(exit_allocation, _valid_account_state(position_quantity=Decimal("0.1")))
 
     assert result.approved is True
 
@@ -201,9 +199,7 @@ def test_trade_frequency_zero_baseline_does_not_reject(policy, allocation):
 def test_safety_state_rejects_when_circuit_breaker_restricted(policy, allocation):
     engine = RiskEngine(policy)
 
-    result = engine.check(
-        allocation, _valid_account_state(circuit_breaker_level="restricted")
-    )
+    result = engine.check(allocation, _valid_account_state(circuit_breaker_level="restricted"))
 
     assert result.approved is False
     assert result.rejection_reason == "safety_state_blocked"
@@ -212,9 +208,7 @@ def test_safety_state_rejects_when_circuit_breaker_restricted(policy, allocation
 def test_safety_state_rejects_when_execution_paused_by_safety(policy, allocation):
     engine = RiskEngine(policy)
 
-    result = engine.check(
-        allocation, _valid_account_state(execution_paused_by_safety=True)
-    )
+    result = engine.check(allocation, _valid_account_state(execution_paused_by_safety=True))
 
     assert result.approved is False
     assert result.rejection_reason == "safety_state_blocked"
@@ -225,9 +219,7 @@ def test_safety_state_checked_last_even_if_it_would_reject(policy, allocation):
     거부되는지 확인 — FD-8.3 완료조건."""
     engine = RiskEngine(policy)
 
-    result = engine.check(
-        allocation, _valid_account_state(circuit_breaker_level="emergency")
-    )
+    result = engine.check(allocation, _valid_account_state(circuit_breaker_level="emergency"))
 
     assert result.approved is False
     assert result.checked_rules[-1] == "safety_state"
@@ -316,9 +308,7 @@ def test_check_decision_gate_turns_red_when_only_last_rule_fails(policy, allocat
     되고, `is_actionable()`이 실행 불가를 정확히 신호하는지 확인한다(execution_loop
     tick_risk_phase.py t5가 그대로 의존하는 계약)."""
     engine = RiskEngine(policy)
-    inputs = _bridged_inputs(
-        policy, allocation, recent_trade_count_1h=100, avg_trade_count_24h=5.0
-    )
+    inputs = _bridged_inputs(policy, allocation, recent_trade_count_1h=100, avg_trade_count_24h=5.0)
 
     decision = engine.check_decision(inputs)
 

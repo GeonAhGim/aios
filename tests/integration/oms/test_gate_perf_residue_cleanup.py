@@ -3,6 +3,7 @@
 FA-15 / INVARIANTS I-07, I-10: reproduce assertion and writer failures
 against the real source, then inspect the same shared worker database.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -41,6 +42,7 @@ async def test_concurrent_source_cleans_eventless_order_even_on_failure(pool, mo
         await source.test_concurrent_conditional_update_multi_instance_exactly_one_wins(pool)
     assert len(order_ids) == 1
     async with pool.acquire() as conn:
-        assert await conn.fetchval(
-            "SELECT count(*) FROM orders WHERE order_id = $1", order_ids[0]
-        ) == 0
+        assert (
+            await conn.fetchval("SELECT count(*) FROM orders WHERE order_id = $1", order_ids[0])
+            == 0
+        )

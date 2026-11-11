@@ -4,6 +4,7 @@ multi-instance, adversarial/replay.
 `test_observability_deepen.py`(failure-injection 절)에서 파일 크기 래칫
 (ADR-2026-09-10-C §7) 때문에 책임 단위로 분리했다. 공용 fake/헬퍼는 원본
 모듈에서 가져온다 — 설계 배경은 원본 docstring 참조."""
+
 from __future__ import annotations
 
 import asyncio
@@ -93,16 +94,18 @@ async def test_unknown_resolution_duration_metric_is_deterministic(
     risk_gate_repo: RiskGateRepository = _UnusedRiskGateRepo()
 
     result = await resolve_unknown(
-        view.order_id, adapter=adapter, pool=_UnknownFakePool(),
+        view.order_id,
+        adapter=adapter,
+        pool=_UnknownFakePool(),
         risk_gate_repo=risk_gate_repo,
         clock=lambda: datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
-        order_repo=repo, metrics=spy,
+        order_repo=repo,
+        metrics=spy,
     )
 
     assert result.status is OrderStatus.ACKNOWLEDGED
     durations = [
-        v for name, v, _ in spy.observations
-        if name == OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS
+        v for name, v, _ in spy.observations if name == OMS_UNKNOWN_RESOLUTION_DURATION_SECONDS
     ]
     assert durations == [step]
 

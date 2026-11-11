@@ -26,6 +26,7 @@ DEPTH_L4_BR(task-2722)가 원 리프(task-1567, 46ace35)를 D1로 판정 — 실
   "거부됨" 단언들이 장식이 아니라 회귀를 실제로 적색으로 만드는 게이트임을
   보인다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -198,7 +199,10 @@ async def test_recovery_closed_row_rejects_stale_ack_real_db(pool):
         order_id = await insert_order(conn, user_id, status="VALIDATED")
         view = await order_repo.get_for_update(conn, order_id)
         row_id = await outbox_repo.enqueue(
-            conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
+            conn,
+            order_id=order_id,
+            command_type="SUBMIT",
+            payload=submit_payload(view),
             not_before=datetime.now(UTC),
         )
 
@@ -209,8 +213,13 @@ async def test_recovery_closed_row_rejects_stale_ack_real_db(pool):
         return adapter
 
     worker_a = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="A", lease_sec=30,
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="A",
+        lease_sec=30,
     )
     task = asyncio.create_task(worker_a.dispatch_once())
     await asyncio.wait_for(gate.started.wait(), timeout=5)
@@ -278,7 +287,10 @@ async def test_stale_write_rejection_round_trip_budget_real_db() -> None:
             order_id = await insert_order(conn, user_id, status="VALIDATED")
             view = await order_repo.get_for_update(conn, order_id)
             row_id = await outbox_repo.enqueue(
-                conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
+                conn,
+                order_id=order_id,
+                command_type="SUBMIT",
+                payload=submit_payload(view),
                 not_before=datetime.now(UTC),
             )
 
@@ -289,8 +301,13 @@ async def test_stale_write_rejection_round_trip_budget_real_db() -> None:
             return adapter
 
         worker_a = OutboxDispatcher(
-            pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-            pre_send_gate=allow_gate, worker_id="A", lease_sec=30,
+            pool,
+            outbox_repo=outbox_repo,
+            order_repo=order_repo,
+            resolve_adapter=resolve,
+            pre_send_gate=allow_gate,
+            worker_id="A",
+            lease_sec=30,
         )
         task = asyncio.create_task(worker_a.dispatch_once())
         await asyncio.wait_for(gate.started.wait(), timeout=5)
@@ -333,9 +350,7 @@ class _UnfencedOutboxRepository(OutboxRepository):
     (`orders.version`)이 함께 걸리지 않도록 주문 자체는 건드리지 않는다 —
     건드리면 이중 방어(105번 §2)라 펜스 제거만의 효과가 가려진다."""
 
-    async def mark_done(
-        self, conn: asyncpg.Connection, id: UUID, *, expected_worker: str
-    ) -> None:
+    async def mark_done(self, conn: asyncpg.Connection, id: UUID, *, expected_worker: str) -> None:
         row = await conn.fetchrow(
             "UPDATE order_command_outbox SET state = 'DONE', updated_at = now() "
             "WHERE id = $1 "  # 의도적으로 state='SENDING'/worker_id=$2 재확인 생략
@@ -367,7 +382,10 @@ async def test_broken_fence_lets_stale_write_corrupt_recovered_order_real_db(
         order_id = await insert_order(conn, user_id, status="VALIDATED")
         view = await order_repo.get_for_update(conn, order_id)
         row_id = await outbox_repo.enqueue(
-            conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
+            conn,
+            order_id=order_id,
+            command_type="SUBMIT",
+            payload=submit_payload(view),
             not_before=datetime.now(UTC),
         )
 
@@ -378,8 +396,13 @@ async def test_broken_fence_lets_stale_write_corrupt_recovered_order_real_db(
         return adapter
 
     worker_a = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="A", lease_sec=30,
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="A",
+        lease_sec=30,
     )
     task = asyncio.create_task(worker_a.dispatch_once())
     await asyncio.wait_for(gate.started.wait(), timeout=5)

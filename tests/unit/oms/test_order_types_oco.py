@@ -1,6 +1,7 @@
 """OCO 형제 조정 단위테스트 — EM-19. DB 없음.
 
 DoD: OCO 형제 취소가 원자적(1000회 적대 실행에서 이중 체결 0)."""
+
 from __future__ import annotations
 
 import threading
@@ -61,9 +62,7 @@ def test_oco_group_atomic_under_1000_adversarial_concurrent_triggers() -> None:
             outcomes[leg].append(outcome)
 
     threads = [
-        threading.Thread(target=_attempt, args=(leg,))
-        for _ in range(500)
-        for leg in ("a", "b")
+        threading.Thread(target=_attempt, args=(leg,)) for _ in range(500) for leg in ("a", "b")
     ]
     for t in threads:
         t.start()

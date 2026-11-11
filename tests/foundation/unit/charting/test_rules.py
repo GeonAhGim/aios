@@ -1,6 +1,7 @@
 """domain/rules.py 순수 검증 단위테스트 — CH-4 `serialize.ts`(8bd4077)
 `fromDrawingsDocument`/`decodeDrawing`과 1:1 실패 사유를 확인한다. DB 없이
 동작(도메인 계층은 I/O가 없다)."""
+
 from __future__ import annotations
 
 import pytest

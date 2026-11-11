@@ -7,6 +7,7 @@ Bitget 실키(2026-09-09)가 Classic v2 엔드포인트에서 40085
 로직만 고정 픽스처로 검증한다 — 어댑터 전체를 띄우는 계약 테스트는
 `tests/unit/exchanges/bitget/test_uta_v3_dispatch.py`가 담당한다.
 """
+
 from __future__ import annotations
 
 from typing import Any

@@ -1,4 +1,5 @@
 """Failure injection for the raw-order module clone lifecycle."""
+
 import os
 from unittest.mock import AsyncMock
 

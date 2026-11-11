@@ -6,6 +6,7 @@
 인스트루먼트는 트랜잭션 롤백으로 정리되므로 다른 테스트의 DB 상태를
 오염시키지 않는다.
 """
+
 from __future__ import annotations
 
 import json

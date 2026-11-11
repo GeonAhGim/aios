@@ -1,4 +1,5 @@
 """Boundary ordering and fail-closed checks for the worker sentinel."""
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -101,7 +102,8 @@ async def test_eventless_state_mismatch_fails_at_source(scan, monkeypatch, field
     conn = pool.acquire.return_value.__aenter__.return_value
     conn.fetch.return_value = [{"order_id": "raw-order"}]
     monkeypatch.setattr(
-        sentinel.replay_verify, "_order_pair",
+        sentinel.replay_verify,
+        "_order_pair",
         AsyncMock(return_value=({field: "expected"}, {field: "changed"})),
     )
     with pytest.raises(AssertionError, match="eventless.*raw writer.*raw-order"):

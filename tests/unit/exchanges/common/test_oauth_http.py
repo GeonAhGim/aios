@@ -3,6 +3,7 @@
 KIS/NH가 공유하는 두 책임(monotonic 토큰 캐시, 전송 오류 변환)을 각
 어댑터의 네트워크 계층 없이 순수하게 검증한다.
 """
+
 from __future__ import annotations
 
 import httpx

@@ -1,5 +1,6 @@
 """FND-02 Portfolio Mandate 통합테스트 — 실제 dev DB 대상. 71번 §7 "정상 흐름 +
 negative test"."""
+
 import asyncio
 from pathlib import Path
 
@@ -107,9 +108,7 @@ async def _consent_to_material_change_disclosure(pool, trust_repo, tenant_id) ->
     그리고 "최신" 판정이 항상 이 호출 쪽을 가리키게 한다."""
     revision = await _next_material_change_disclosure_revision(pool)
     await create_disclosure(pool, purpose="portfolio_mandate_material_change", revision=revision)
-    trust_context = TrustTenantContext(
-        tenant_id=tenant_id, subject_id=tenant_id, mfa_verified=True
-    )
+    trust_context = TrustTenantContext(tenant_id=tenant_id, subject_id=tenant_id, mfa_verified=True)
     await accept_disclosure(
         trust_repo,
         trust_context,

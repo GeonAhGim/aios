@@ -4,6 +4,7 @@ Covers request/response schema validation (incl. negative/boundary cases per
 docs/FULL_AUDIT_2026-09-02.md §2 negative-price rule) and the to_*_response
 converters against their upstream service models.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -118,9 +119,7 @@ def test_to_listing_response_preserves_none_price() -> None:
 
 def test_listing_search_response_requires_items_list() -> None:
     with pytest.raises(ValidationError):
-        _call_untyped(
-            ListingSearchResponse, items="not-a-list", total=0, page=1, page_size=10
-        )
+        _call_untyped(ListingSearchResponse, items="not-a-list", total=0, page=1, page_size=10)
 
 
 def test_verification_decision_request_rejects_non_string_decision() -> None:
@@ -161,9 +160,7 @@ def test_to_purchase_response_risk_warning_false_when_none() -> None:
 
 def test_purchase_response_rejects_non_decimal_commission() -> None:
     with pytest.raises(ValidationError):
-        _call_untyped(
-            PurchaseResponse, purchase_id=1, status="x", platform_commission_amount="abc"
-        )
+        _call_untyped(PurchaseResponse, purchase_id=1, status="x", platform_commission_amount="abc")
 
 
 def test_review_create_request_rejects_missing_rating() -> None:

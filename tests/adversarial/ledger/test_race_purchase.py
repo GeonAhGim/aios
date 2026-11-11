@@ -14,6 +14,7 @@ only_one_succeeds`가 이미 검증) — 여기서 재현하려는 레이스는 
 `InsufficientWalletBalanceError`(402, `purchase_service.py`)로 거부돼야
 한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -91,9 +92,7 @@ async def test_five_concurrent_purchases_against_9000_hold_exactly_one_succeeds(
     buyer = await create_test_user(pool)
     seller = await create_test_user(pool)
     await _seed_available(pool, buyer, _STARTING_BALANCE)
-    listing_ids = [
-        await _listed_listing(pool, seller, _PRICE) for _ in range(_CONCURRENT_ATTEMPTS)
-    ]
+    listing_ids = [await _listed_listing(pool, seller, _PRICE) for _ in range(_CONCURRENT_ATTEMPTS)]
     service = PurchaseService(pool)
 
     results = await asyncio.gather(

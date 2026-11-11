@@ -119,9 +119,7 @@ def test_select_registered_drops_candidates_the_installed_talib_provides() -> No
     registered, superseded = bridge.select_registered(bridge.CANDIDATE_SPECS, frozenset())
     assert registered == {} and superseded == bridge.CANDIDATE_INDICATORS
 
-    registered, superseded = bridge.select_registered(
-        bridge.CANDIDATE_SPECS, all_net - {"dpo"}
-    )
+    registered, superseded = bridge.select_registered(bridge.CANDIDATE_SPECS, all_net - {"dpo"})
     assert set(registered) == set(bridge.CANDIDATE_INDICATORS) - {"dpo"}
     assert superseded == ("dpo",)
 
@@ -175,9 +173,7 @@ def test_superseded_candidate_is_refused_not_computed_twice() -> None:
 
 def test_unknown_param_raises() -> None:
     with pytest.raises(IndicatorError) as exc:
-        _candidate_service().calculate(
-            "dpo", _candles_random_walk(50), not_a_real_param=3
-        )
+        _candidate_service().calculate("dpo", _candles_random_walk(50), not_a_real_param=3)
     assert exc.value.code == "STRATEGY_PARAM_UNKNOWN"
 
 
@@ -264,9 +260,7 @@ def test_massi_matches_talib_ema_oracle_and_independent_rolling_sum() -> None:
 def test_coppock_matches_independent_reimplementation() -> None:
     candles = _candles_random_walk(300, seed=3)
     length, fast, slow = 10, 11, 14
-    result = _candidate_service().calculate(
-        "coppock", candles, length=length, fast=fast, slow=slow
-    )
+    result = _candidate_service().calculate("coppock", candles, length=length, fast=fast, slow=slow)
 
     close = pd.Series([float(c.close) for c in candles])
     roc_fast = 100 * (close / close.shift(fast) - 1)

@@ -4,6 +4,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-32.
 핵심 불변: seal→open은 항상 동일 평문을 돌려주고, rewrap 이후에는 새 kid로만
 복호되며(옛 kid로 감싼 wrapped_dek는 폐기), 위·변조는 InvalidTag로 실패한다.
 """
+
 from __future__ import annotations
 
 import pytest

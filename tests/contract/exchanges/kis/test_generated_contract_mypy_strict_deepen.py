@@ -28,6 +28,7 @@ task-2096/task-2021 어느 쪽 커밋에도 "이 파일이 실제로 mypy --stri
 한다 -- 실제 리포 파일을 임시로 덮어썼다 복원하는 방식보다 안전하다(테스트
 중간에 죽어도 리포가 변형된 채 남지 않는다).
 """
+
 from __future__ import annotations
 
 import subprocess

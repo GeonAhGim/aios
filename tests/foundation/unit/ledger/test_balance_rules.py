@@ -4,6 +4,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-3
 ("음수/초과 인출 거부: allow_negative=False면 balance-held<0 금지",
 negative: "held>balance").
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

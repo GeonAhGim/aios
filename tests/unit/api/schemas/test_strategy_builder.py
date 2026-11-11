@@ -5,6 +5,7 @@ target construction-time validation and the two mapper functions
 (`to_candle_response`, `to_strategy_response`, `to_strategy_detail_response`)
 rather than DB/network failure modes.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

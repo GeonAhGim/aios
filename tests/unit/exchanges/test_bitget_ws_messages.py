@@ -3,6 +3,7 @@
 실제 소켓 없이도 검증 가능한 부분(순수 파싱 함수)만 다룬다 — 연결관리/
 재연결 루프는 tests/integration/test_bitget_websocket.py 참조.
 """
+
 from decimal import Decimal
 
 from src.data.models.trading import OrderStatus

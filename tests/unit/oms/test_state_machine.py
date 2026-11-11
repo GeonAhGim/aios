@@ -1,4 +1,5 @@
 """주문 상태 전이표 단위테스트 — L4-02. DB 없음."""
+
 from __future__ import annotations
 
 import time
@@ -149,9 +150,7 @@ def test_partially_filled_can_receive_another_partial_fill() -> None:
     assert OrderStatus.PARTIALLY_FILLED in ALLOWED[OrderStatus.PARTIALLY_FILLED]
 
 
-@pytest.mark.parametrize(
-    "event", (OrderEvent.RESOLVED_AS, OrderEvent.RECONCILE_CORRECTION)
-)
+@pytest.mark.parametrize("event", (OrderEvent.RESOLVED_AS, OrderEvent.RECONCILE_CORRECTION))
 def test_dynamic_target_events_are_rejected_by_next_status(event: OrderEvent) -> None:
     with pytest.raises(InvalidOrderTransitionError):
         next_status(OrderStatus.UNKNOWN, event)

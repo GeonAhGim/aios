@@ -7,6 +7,7 @@
 좁게 확인한다(negative: 배선이 빠지면 전송 오류가 조용히 다른 예외로
 새거나 그대로 전파돼야 함).
 """
+
 from __future__ import annotations
 
 import httpx

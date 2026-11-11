@@ -36,7 +36,6 @@ class _OutageSnapshotRepository:
         raise asyncpg.PostgresConnectionError("simulated adapter outage")
 
 
-
 async def test_list_positions_snapshot_adapter_outage_is_fail_closed_500(client, pool):
     """failure-injection -- SnapshotRepository 어댑터가 커넥션 예외를 던지면
     부분 데이터나 200을 흘리지 않고 500/INTERNAL_ERROR 봉투로 fail-closed
@@ -59,7 +58,6 @@ async def test_list_positions_snapshot_adapter_outage_is_fail_closed_500(client,
     assert "simulated adapter outage" not in body["message"]
 
 
-
 class _OutageEntityRepository:
     """FA-6 실패주입 -- entities 저장소가 `resolve_portfolio_scope` 조회
     도중 커넥션 예외를 던지는 인프라 장애를 흉내낸다(도메인 예외가 아니라
@@ -78,7 +76,6 @@ class _OutageEntityRepository:
 
     async def get_sub_account(self, tenant_id, sub_account_id):
         raise asyncpg.PostgresConnectionError("simulated entities adapter outage")
-
 
 
 async def test_list_positions_portfolio_id_entities_outage_is_fail_closed_500(client, pool):

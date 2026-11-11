@@ -45,6 +45,7 @@ docs/design/KIS_TR_COVERAGE.md "왕복 검증" 절 참조) — 모든 테스트�
 보간하지 않는다. skip 사유는 "어떤 변수가 없는지"만 말하지, 값은 절대
 말하지 않는다.
 """
+
 from __future__ import annotations
 
 import os

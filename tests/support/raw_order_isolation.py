@@ -1,4 +1,5 @@
 """Disposable module databases for tests that deliberately seed incomplete orders."""
+
 from __future__ import annotations
 
 import asyncio

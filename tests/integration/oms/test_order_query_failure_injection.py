@@ -35,6 +35,7 @@ multi-worker/adversarial-bypass 증명: (1) 여러 독립 커넥션(서로 다�
 않음을 증명한다 — LA-22(task-825)류 결함의 또 다른 변종(다른 tenant 소유
 페이지네이션 토큰 재사용 우회 시도).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -238,8 +239,13 @@ def test_pytest_gate_turns_red_when_tenant_filter_is_disabled(tmp_path: Path) ->
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -250,8 +256,12 @@ def test_pytest_gate_turns_red_when_tenant_filter_is_disabled(tmp_path: Path) ->
 
     mutated = subprocess.run(
         [*command[:-1], "-p", _MUTATED_MODULE_NAME, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

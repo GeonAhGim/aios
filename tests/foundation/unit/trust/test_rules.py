@@ -1,4 +1,5 @@
 """Trust Core domain/rules.py 단위테스트 — DB 없이 순수 함수만 검증."""
+
 from datetime import UTC, datetime, timedelta
 from time import perf_counter_ns
 from uuid import uuid4

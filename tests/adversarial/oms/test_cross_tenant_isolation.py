@@ -12,6 +12,7 @@ RLS가 없다(073beca589d5 note — `_LEGACY_TABLES_POLICY_ONLY`) — 이
 테스트가 실DB로 단언하는 tenant_id 필터가 지금은 **유일한** 방어선이고,
 PLT-30이 나중에 RLS를 켜면 이중 방어가 된다.
 """
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -58,6 +59,7 @@ async def test_get_order_cross_tenant_does_not_leak_existence(
     Async best_of_async is the awaited equivalent of perf_budget.best_of.
     """
     from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
     owner_id = await create_test_user(pool)
     attacker_id = await create_test_user(pool)
     async with pool.acquire() as conn:
@@ -115,7 +117,8 @@ async def test_get_order_cross_tenant_does_not_leak_existence(
     try:
         with monkeypatch.context() as patch:
             patch.setattr(
-                asyncpg.Connection, "fetchrow",
+                asyncpg.Connection,
+                "fetchrow",
                 virtual_delayed_async(original_fetchrow, budget_ms / 1000 * 10),
             )
             with pytest.raises(AssertionError, match="budget<1000.000ms"):
@@ -136,8 +139,7 @@ async def test_list_orders_excludes_other_tenant_rows(pool) -> None:
     items, _ = await order_query.list_orders(pool, tenant_id=attacker_id)
 
     assert [v.order_id for v in items] == [own_order_id], (
-        "list_orders()가 tenant_id로 필터되지 않아 다른 tenant의 주문이 "
-        "목록에 섞여 나옵니다"
+        "list_orders()가 tenant_id로 필터되지 않아 다른 tenant의 주문이 목록에 섞여 나옵니다"
     )
 
 

@@ -7,6 +7,7 @@ modify_order에 대한 @require_paper_sandbox 회귀 가드.
 adapter에서 호출 자체가 FrozenZonePaperAdapterBlockedError로 막혀야 한다
 — bitget(test_bitget_live_guard.py, task-1045)과 동일한 패턴.
 """
+
 from decimal import Decimal
 
 import httpx

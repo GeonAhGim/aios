@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-4
 ("사건 9종 × Σ차=Σ대, 필수 parties 누락 → 예외, R1/R2/R3 분기").
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

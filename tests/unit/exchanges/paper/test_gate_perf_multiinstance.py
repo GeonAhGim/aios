@@ -8,6 +8,7 @@ random 오염 실패주입은 있었으나(docs/audit/DEPTH_L4_BR.md #1534) 다�
   D3: 다중 인스턴스/리플레이 적대적 증명 1건
 이 파일이 그 세 가지만 보강한다. 모델 코드는 손대지 않는다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -101,9 +102,7 @@ _FEE_BPS = ["0", "1", "50"]
 _FEE_QTYS = ["0.000001", "1", "1000"]
 
 
-@pytest.mark.parametrize(
-    "maker_bps,taker_bps,qty", list(product(_FEE_BPS, _FEE_BPS, _FEE_QTYS))
-)
+@pytest.mark.parametrize("maker_bps,taker_bps,qty", list(product(_FEE_BPS, _FEE_BPS, _FEE_QTYS)))
 def test_gate_red_line_fee_never_negative_or_rebate(
     maker_bps: str, taker_bps: str, qty: str
 ) -> None:

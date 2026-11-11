@@ -6,6 +6,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 docs/design/INVARIANTS.md I-10(안전/정책 컴포넌트는 배선·우회불가·증명) —
 이 테스트가 그 증명이다(순수 판정 결과가 결정론적으로 거부/허용됨을 확인).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

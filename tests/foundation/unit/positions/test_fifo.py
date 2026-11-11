@@ -5,6 +5,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-2,
 (12: 10@100+2@110), 로트 잔량 3@110; 초과 매도 → `POS_NEGATIVE_QUANTITY`;
 JSON 왕복").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

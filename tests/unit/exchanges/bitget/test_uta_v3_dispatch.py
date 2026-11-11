@@ -6,6 +6,7 @@
 않는다는 회귀 보장) — 이 파일은 UNIFIED 분기와 40085 자동 전환만 추가로
 다룬다.
 """
+
 from __future__ import annotations
 
 import json

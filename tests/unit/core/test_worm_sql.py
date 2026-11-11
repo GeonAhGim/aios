@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md §9 L0-3
 DoD: 생성 SQL 스냅샷 일치, 테이블/역할명에 `;` 등 인젝션성 식별자는 거부.
 """
+
 import pytest
 
 from src.core.db.append_only import InvalidIdentifierError as AppendOnlyIdentifierError

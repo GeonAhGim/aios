@@ -71,9 +71,7 @@ async def test_register_then_get_instrument_resolves_current_symbol(pool, repo):
 
 async def test_get_instrument_returns_none_for_unknown_symbol(pool, repo):
     async with pool.acquire() as conn, conn.transaction():
-        found = await repo.get_instrument(
-            conn, Venue.KIS_KRX, _krx_symbol(), datetime.now(UTC)
-        )
+        found = await repo.get_instrument(conn, Venue.KIS_KRX, _krx_symbol(), datetime.now(UTC))
     assert found is None
 
 

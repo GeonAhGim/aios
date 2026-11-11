@@ -1,4 +1,5 @@
 """Failure injection for the legacy writer's disposable database lifecycle."""
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 

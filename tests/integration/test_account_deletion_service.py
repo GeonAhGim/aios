@@ -4,6 +4,7 @@
 전이. 유예기간 중 재로그인 시 탈퇴 자동취소는 AuthService(11.2)와의
 연동으로 검증한다.
 """
+
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -131,9 +132,7 @@ async def test_request_deletion_blocked_by_running_execution(service, auth, pool
         await service.request_deletion(user.user_id, STRONG_PASSWORD)
 
     async with pool.acquire() as conn:
-        status = await conn.fetchval(
-            "SELECT status FROM users WHERE user_id = $1", user.user_id
-        )
+        status = await conn.fetchval("SELECT status FROM users WHERE user_id = $1", user.user_id)
     assert status == "ACTIVE"
 
 

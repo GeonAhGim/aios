@@ -6,6 +6,7 @@ trail is still caught as a mismatch.
 Spec: docs/specs/execution_oms_and_exchange.md#§2-C 상태기계 표 · §9 L4-06 +
 docs/specs/ibor_fund_accounting_and_resilience.md#§9 FA-16.
 """
+
 from __future__ import annotations
 
 import os
@@ -84,7 +85,9 @@ async def _to_submitted_via_complete_chain(conn, order_id: UUID) -> None:
         new_status=OrderStatus.VALIDATED,
         patch={},
         event=_order_event(
-            order_id, from_status=OrderStatus.CREATED, to_status=OrderStatus.VALIDATED,
+            order_id,
+            from_status=OrderStatus.CREATED,
+            to_status=OrderStatus.VALIDATED,
             event="VALIDATED",
         ),
     )
@@ -96,7 +99,9 @@ async def _to_submitted_via_complete_chain(conn, order_id: UUID) -> None:
         new_status=OrderStatus.SUBMITTED,
         patch={"exchange_order_id": f"ex-{uuid4().hex[:12]}"},
         event=_order_event(
-            order_id, from_status=OrderStatus.VALIDATED, to_status=OrderStatus.SUBMITTED,
+            order_id,
+            from_status=OrderStatus.VALIDATED,
+            to_status=OrderStatus.SUBMITTED,
             event="SENT",
         ),
     )

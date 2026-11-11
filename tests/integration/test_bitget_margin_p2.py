@@ -8,6 +8,7 @@ history quartet). Split from test_bitget_margin.py to stay under the
 Same httpx.MockTransport pattern as test_bitget_margin.py — no real Bitget
 Demo account available.
 """
+
 import json
 from decimal import Decimal
 
@@ -110,9 +111,7 @@ async def test_flash_repay_margin_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
 
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
         await live_adapter.flash_repay_margin(CROSSED, ["usdt"])
@@ -209,9 +208,7 @@ async def test_get_margin_history_borrow():
 async def test_get_margin_history_liquidation():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/margin/isolated/liquidation-history"
-        return _json_response(
-            {"code": "00000", "msg": "success", "requestTime": 1, "data": []}
-        )
+        return _json_response({"code": "00000", "msg": "success", "requestTime": 1, "data": []})
 
     adapter = _make_adapter(handler)
     rows = await adapter.get_margin_history(ISOLATED, "liquidation", symbol="BTC/USDT")

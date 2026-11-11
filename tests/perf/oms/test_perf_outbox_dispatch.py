@@ -18,6 +18,7 @@ test_outbox_dispatch_latency.py`, commit `034fed00`)와 동일하게
 
 왕복 수 예산(28)은 원 리프 산출과 동일 — task-2804 작업 중 재확인했다.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -52,7 +53,10 @@ async def _enqueue_pending_submit(
         order_id = await insert_order(conn, user_id, status="VALIDATED")
         view = await order_repo.get_for_update(conn, order_id)
         await outbox_repo.enqueue(
-            conn, order_id=order_id, command_type="SUBMIT", payload=submit_payload(view),
+            conn,
+            order_id=order_id,
+            command_type="SUBMIT",
+            payload=submit_payload(view),
             not_before=datetime.now(UTC),
         )
     return order_id
@@ -66,8 +70,12 @@ async def _count_dispatch_once_round_trips(pool: asyncpg.Pool) -> int:
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="w-count",
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-count",
     )
     queries = await attach_round_trip_logger(pool)
 
@@ -92,8 +100,12 @@ async def test_outbox_dispatch_latency_within_environment_normalized_bound(
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="w-latency",
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-latency",
     )
     baseline_p95_ms = await measure_baseline_round_trip_p95_ms(pool)
 
@@ -146,8 +158,12 @@ async def test_outbox_dispatch_fails_closed_when_adapter_drops_response(
         return adapter
 
     dispatcher = OutboxDispatcher(
-        pool, outbox_repo=outbox_repo, order_repo=order_repo, resolve_adapter=resolve,
-        pre_send_gate=allow_gate, worker_id="w-drop",
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-drop",
     )
     order_id = await _enqueue_pending_submit(pool, order_repo, outbox_repo)
 

@@ -1,4 +1,5 @@
 """11.3 통합테스트 — 실제 dev DB 대상."""
+
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -81,9 +82,7 @@ async def test_verify_with_correct_code_enables_mfa(mfa, pool):
     await mfa.verify(user_id, code)
 
     async with pool.acquire() as conn:
-        enabled = await conn.fetchval(
-            "SELECT mfa_enabled FROM users WHERE user_id = $1", user_id
-        )
+        enabled = await conn.fetchval("SELECT mfa_enabled FROM users WHERE user_id = $1", user_id)
     assert enabled is True
 
 
@@ -143,9 +142,7 @@ async def test_verify_rejects_replaying_the_same_totp_code(pool):
     await mfa.verify(user_id, code)
 
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE users SET mfa_enabled = false WHERE user_id = $1", user_id
-        )
+        await conn.execute("UPDATE users SET mfa_enabled = false WHERE user_id = $1", user_id)
 
     # 코드 자체는 올바른 재사용이므로, "코드가 틀렸다"는 오인을 막기 위해
     # 일반 실패와는 다른 메시지여야 한다 — 사용자가 방금 전송 실패로
@@ -192,9 +189,7 @@ async def test_login_with_mfa_enabled_uses_verify_totp_for_login_callback(pool):
     code = pyotp.totp.TOTP(result.secret).at(clock.current)
     await mfa.verify(user_id, code)
 
-    auth = AuthService(
-        pool, jwt_secret_key=JWT_SECRET, verify_totp=mfa.verify_totp_for_login
-    )
+    auth = AuthService(pool, jwt_secret_key=JWT_SECRET, verify_totp=mfa.verify_totp_for_login)
 
     async with pool.acquire() as conn:
         await conn.execute(

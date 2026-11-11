@@ -87,9 +87,7 @@ def test_build_adapter_still_blocked_by_live_guard_without_env():
     """Negative -- the BR-9 extension point sits behind the fail-closed LIVE
     guard, same as every other exchange (ADDING_AN_EXCHANGE.md step 6)."""
     with pytest.raises(FrozenZonePaperAdapterBlockedError):
-        build_adapter(
-            "okx", "key", "secret", {"api_passphrase": "phrase"}, demo_mode=False
-        )
+        build_adapter("okx", "key", "secret", {"api_passphrase": "phrase"}, demo_mode=False)
 
 
 async def test_okx_adapter_live_mode_blocks_trading_calls():

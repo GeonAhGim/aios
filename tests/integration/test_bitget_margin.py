@@ -4,6 +4,7 @@
 형태를 재현해 검증한다(test_bitget_adapter.py와 동일 원칙) — 필드명은
 커뮤니티 SDK 레퍼런스 기준 최선 추정치라 라이브 검증 전까지는 확정 아님.
 """
+
 import json
 from decimal import Decimal
 
@@ -66,9 +67,7 @@ async def test_get_margin_account_assets_isolated_with_symbol():
                 "code": "00000",
                 "msg": "success",
                 "requestTime": 1,
-                "data": [
-                    {"symbol": "BTCUSDT", "coin": "usdt", "available": "50", "borrow": "0"}
-                ],
+                "data": [{"symbol": "BTCUSDT", "coin": "usdt", "available": "50", "borrow": "0"}],
             }
         )
 
@@ -140,9 +139,7 @@ async def test_place_margin_order_blocked_on_live_configured_adapter():
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=transport)
-    live_adapter = BitgetAdapter(
-        "key", "secret", "passphrase", demo_mode=False, http_client=client
-    )
+    live_adapter = BitgetAdapter("key", "secret", "passphrase", demo_mode=False, http_client=client)
     order = Order(
         client_order_id="c-1",
         strategy_id="s-1",

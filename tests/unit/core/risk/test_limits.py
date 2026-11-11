@@ -5,6 +5,7 @@ PROVIDER) 각각 매칭·비매칭(특히 SYMBOL 한도가 다른 심볼에 미�
 hard=DENY·soft=ESCALATE, 한도 경계값(=통과, 초과=거부), 입력 결손
 fail-closed DENY.
 """
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
@@ -261,9 +262,7 @@ def test_corrupted_nan_gross_leverage_raises_instead_of_silently_allowing():
     (`finite_number`), 신뢰 경계 안쪽(캐시 역직렬화, 다른 프로세스의 부분
     적으로 구성된 스냅샷 등)에서 검증을 우회해 들어온 값을 흉내내려면
     `model_construct`로 검증을 건너뛴 적대적 이중체가 필요하다."""
-    corrupted_exposure = ExposureSnapshot.model_construct(
-        gross_leverage=Decimal("NaN"), as_of=NOW
-    )
+    corrupted_exposure = ExposureSnapshot.model_construct(gross_leverage=Decimal("NaN"), as_of=NOW)
     inputs = sample_inputs(exposure=corrupted_exposure)
     limit = ExposureLimit(
         scope=LimitScope.TENANT,
@@ -287,8 +286,7 @@ def test_bulk_evaluation_against_many_non_matching_limits_stays_within_perf_budg
     선형 스캔하는 비용이 병적으로 커지지 않아야 한다."""
     inputs = sample_inputs()
     non_matching = tuple(
-        _order_limit(scope=LimitScope.SYMBOL, scope_ref=f"OTHER-{i}/USDT")
-        for i in range(50)
+        _order_limit(scope=LimitScope.SYMBOL, scope_ref=f"OTHER-{i}/USDT") for i in range(50)
     )
 
     start = time.perf_counter()

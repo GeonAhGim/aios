@@ -30,8 +30,6 @@ def nh_adapter() -> NHAdapter:
     )
 
 
-
-
 @pytest.mark.asyncio
 async def test_get_after_hours_current_happy_path(nh_adapter: NHAdapter) -> None:
     with patch.object(nh_adapter, "_request", new_callable=AsyncMock) as mock_request:

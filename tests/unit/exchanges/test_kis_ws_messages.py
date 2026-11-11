@@ -3,6 +3,7 @@
 실제 소켓 없이도 검증 가능한 부분(순수 파싱 함수 + AES 왕복)만 다룬다 —
 연결관리/재연결 루프는 tests/integration/test_kis_websocket.py 참조.
 """
+
 import base64
 
 from cryptography.hazmat.primitives import padding
@@ -54,12 +55,29 @@ def test_parse_realtime_price_message_ignores_malformed_frame():
 
 def test_parse_realtime_orderbook_message_parses_frame():
     fields = [
-        "005930", "091500", "0",
+        "005930",
+        "091500",
+        "0",
         *[f"{70100 + i * 10}" for i in range(10)],  # ASKP1..10
         *[f"{69900 - i * 10}" for i in range(10)],  # BIDP1..10
         *["10"] * 10,  # ASKP_RSQN1..10
         *["20"] * 10,  # BIDP_RSQN1..10
-        "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
     ]
     body = "^".join(fields)
     frame = f"0|H0STASP0|001|{body}"

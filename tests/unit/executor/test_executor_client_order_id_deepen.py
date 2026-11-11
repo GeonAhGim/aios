@@ -346,9 +346,7 @@ async def test_wall_clock_drift_inside_one_window_does_not_break_idempotency_but
     window_start_epoch = now_epoch - (now_epoch % _IDEMPOTENCY_WINDOW_SECONDS)
     t_a = datetime.fromtimestamp(window_start_epoch + 1, tz=UTC)
     t_b = datetime.fromtimestamp(window_start_epoch + 55, tz=UTC)
-    t_c = datetime.fromtimestamp(
-        window_start_epoch + _IDEMPOTENCY_WINDOW_SECONDS + 5, tz=UTC
-    )
+    t_c = datetime.fromtimestamp(window_start_epoch + _IDEMPOTENCY_WINDOW_SECONDS + 5, tz=UTC)
 
     monkeypatch.setattr("src.core.executor.executor.datetime", _ScriptedClock([t_a, t_b, t_c]))
 

@@ -5,6 +5,7 @@ task-904 redaction 원칙(`KeyRing._redact_entry`와 동일한 정신)을 creden
 감사로그 어디에도 api_key/api_secret 원문이나 원본 암호문(base64) 전체가
 그대로 노출돼서는 안 된다.
 """
+
 from __future__ import annotations
 
 import os
@@ -88,9 +89,7 @@ async def test_audit_log_omits_credentials(service, pool):
     await service.revoke(user_id, "bitget")
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT decision_data FROM audit_log WHERE user_id = $1", user_id
-        )
+        rows = await conn.fetch("SELECT decision_data FROM audit_log WHERE user_id = $1", user_id)
     for row in rows:
         payload = str(row["decision_data"])
         assert _SECRET_API_KEY not in payload

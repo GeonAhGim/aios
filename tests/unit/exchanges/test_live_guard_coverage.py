@@ -27,6 +27,7 @@ esc-2514 guard flag 후속(task-2530) — `_FUND_MOVING_NAME`은 주문/포지�
 패턴을 추가한다 — 이름 규칙 하나에 fail-open하는 결함 클래스를
 반복하지 않도록, 이번에도 화이트리스트가 아니라 판별식 자체를 넓힌다.
 """
+
 from __future__ import annotations
 
 import ast
@@ -82,9 +83,12 @@ def _is_stub_body(body: list[ast.stmt]) -> bool:
     (선택적 docstring 뒤에) `...`만 있는 함수는 가드를 붙일 대상이
     아니다 — 호출 가능한 코드가 없다."""
     stmts = list(body)
-    if stmts and isinstance(stmts[0], ast.Expr) and isinstance(
-        stmts[0].value, ast.Constant
-    ) and isinstance(stmts[0].value.value, str):
+    if (
+        stmts
+        and isinstance(stmts[0], ast.Expr)
+        and isinstance(stmts[0].value, ast.Constant)
+        and isinstance(stmts[0].value.value, str)
+    ):
         stmts = stmts[1:]  # docstring 제외
     if len(stmts) != 1:
         return False
@@ -137,19 +141,14 @@ def test_all_fund_moving_methods_have_paper_sandbox_guard():
     violations = _find_unguarded_fund_moving_methods()
     assert not violations, (
         "다음 주문성 메서드에 @require_paper_sandbox가 없습니다"
-        "(레드팀 #2026-09-02-32와 동일 결함 클래스):\n"
-        + "\n".join(violations)
+        "(레드팀 #2026-09-02-32와 동일 결함 클래스):\n" + "\n".join(violations)
     )
 
 
 def test_scanner_actually_detects_missing_decorator():
     """스캐너 자체의 회귀 방지 — 가드가 없는 메서드를 만들면 실제로
     잡아내는지 확인한다(거짓 초록 방지)."""
-    src = (
-        "class X:\n"
-        "    async def cancel_order(self, order_id):\n"
-        "        return True\n"
-    )
+    src = "class X:\n    async def cancel_order(self, order_id):\n        return True\n"
     tree = ast.parse(src)
     node = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef))
     assert _FUND_MOVING_NAME.match(node.name)
@@ -205,9 +204,7 @@ def _make_live_nh_adapter() -> NHAdapter:
 
     transport = httpx.MockTransport(handler)
     http_client = httpx.AsyncClient(base_url="https://api.nhplug.com", transport=transport)
-    return NHAdapter(
-        "app", "secret", "12345678", is_paper_trading=True, http_client=http_client
-    )
+    return NHAdapter("app", "secret", "12345678", is_paper_trading=True, http_client=http_client)
 
 
 async def test_nh_place_order_rejects_adapter():

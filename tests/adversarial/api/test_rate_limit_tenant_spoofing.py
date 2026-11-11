@@ -93,9 +93,7 @@ def test_forged_tenant_header_without_bearer_falls_back_to_ip_key() -> None:
     """(a) An unauthenticated /admin/* request with a forged `X-Tenant-Id`
     does not get the "tenant:<id>" bucket key — it falls back to "ip:...",
     exactly like the "subject" branch does for an anonymous caller."""
-    request = _make_request(
-        headers={"X-Tenant-Id": "victim-tenant"}, client_host="198.51.100.1"
-    )
+    request = _make_request(headers={"X-Tenant-Id": "victim-tenant"}, client_host="198.51.100.1")
 
     key = _resolve_key(request, POLICIES["admin"])
 
@@ -112,9 +110,7 @@ async def test_forged_requests_do_not_exhaust_victim_tenant_bucket() -> None:
     bucket = InMemoryTokenBucket(clock=time.monotonic)
 
     for _ in range(policy.limit + 10):
-        forged = _make_request(
-            headers={"X-Tenant-Id": "victim-tenant"}, client_host="198.51.100.1"
-        )
+        forged = _make_request(headers={"X-Tenant-Id": "victim-tenant"}, client_host="198.51.100.1")
         key = _resolve_key(forged, policy)
         assert key == "ip:198.51.100.1"
         await bucket.acquire(policy, key)

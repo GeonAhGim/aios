@@ -18,6 +18,7 @@ docstring이 같은 계정에 대해 이미 문서화한 것과 동일한 드리
 원자적으로 갱신된다(esc-2115가 `USER:*` 계정에 이미 정한 것과 같은
 "공유 시드 계정에 원장 경로 밖의 쓰기를 남기지 않는다" 관례).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -143,12 +144,18 @@ async def test_append_raises_on_unknown_account_and_rolls_back(pool, repo):
     event = _event()
     bad_lines = [
         PostingLine(
-            line_no=1, account_code="PLATFORM:DOES_NOT_EXIST", side=Side.DEBIT,
-            amount=Decimal("5.00"), currency=Currency.KRW,
+            line_no=1,
+            account_code="PLATFORM:DOES_NOT_EXIST",
+            side=Side.DEBIT,
+            amount=Decimal("5.00"),
+            currency=Currency.KRW,
         ),
         PostingLine(
-            line_no=2, account_code=_CREDIT_ACCOUNT, side=Side.CREDIT,
-            amount=Decimal("5.00"), currency=Currency.KRW,
+            line_no=2,
+            account_code=_CREDIT_ACCOUNT,
+            side=Side.CREDIT,
+            amount=Decimal("5.00"),
+            currency=Currency.KRW,
         ),
     ]
 

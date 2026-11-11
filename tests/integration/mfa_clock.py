@@ -7,6 +7,7 @@
 오버라이드로 같은 시계를 주입한다. `get_auth_service`는 `get_mfa_service`에
 `Depends`로 의존하므로 로그인 경로에도 자동으로 전파된다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
@@ -111,7 +112,9 @@ def test_negative_invalid_totp_secret() -> None:
 @pytest.mark.parametrize("frozen", [False, True])
 @pytest.mark.parametrize("existing", [False, True])
 async def test_failure_injection_dependency_restores_override(
-    monkeypatch: pytest.MonkeyPatch, frozen: bool, existing: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    frozen: bool,
+    existing: bool,
 ) -> None:
     """A failed secret provider must propagate and leave no clock override behind."""
     from types import SimpleNamespace

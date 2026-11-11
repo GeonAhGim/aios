@@ -18,6 +18,7 @@ metrics_history를 반복 스캔해도 예산 내에 끝나는지(성능 단언)
 쳐도 CAS(105번 §4.2 형태 B)가 정확히 한 번만 전이시키고 나머지는 조용히
 성공한 척 흘리지 않는지(다중 인스턴스 동시성, D3).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -206,9 +207,7 @@ async def test_approved_evidence_cooldown_transitions_to_normal_and_deactivates_
     "case",
     ["missing_evidence", "cooldown_not_met", "approval_expired", "fresh_deny"],
 )
-async def test_four_rejections_delegate_to_can_reactivate_and_block_normal(
-    pool, cb, policy, case
-):
+async def test_four_rejections_delegate_to_can_reactivate_and_block_normal(pool, cb, policy, case):
     request_id = await _make_halted_with_pending_request(pool, cb)
     evidence_ref = None if case == "missing_evidence" else "ev-1"
     await _approve(pool, request_id, evidence_ref=evidence_ref)

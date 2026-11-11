@@ -1,4 +1,5 @@
 """FA-15 / I-07, I-10: a real pytest teardown attributes residue to its writer."""
+
 import os
 import subprocess
 import sys
@@ -14,7 +15,9 @@ from tests.adversarial.oms.test_cross_tenant_isolation import (
 
 @pytest.mark.parametrize("leave_residue", [False, True])
 async def test_pytest_reports_the_polluting_module_after_finalizers(
-    isolated_event_pool, tmp_path, leave_residue,  # noqa: F811
+    isolated_event_pool,  # noqa: F811
+    tmp_path,
+    leave_residue,
 ):
     async with isolated_event_pool.acquire() as conn:
         database = await conn.fetchval("SELECT current_database()")
@@ -47,13 +50,29 @@ async def test_pytest_reports_the_polluting_module_after_finalizers(
         "    assert True\n",
         encoding="utf-8",
     )
-    env = dict(os.environ, SENTINEL_TEST_URL=clone_url,
-               LEAVE_RESIDUE=str(int(leave_residue)),
-               PYTHONPATH=str(Path(__file__).resolve().parents[3]))
+    env = dict(
+        os.environ,
+        SENTINEL_TEST_URL=clone_url,
+        LEAVE_RESIDUE=str(int(leave_residue)),
+        PYTHONPATH=str(Path(__file__).resolve().parents[3]),
+    )
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-         "--confcutdir", str(tmp_path), str(tmp_path / "test_dummy_writer.py")],
-        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--confcutdir",
+            str(tmp_path),
+            str(tmp_path / "test_dummy_writer.py"),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     output = result.stdout + result.stderr
     if leave_residue:

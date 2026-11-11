@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 §2.1 DC-2, §3.2, §4.2, §9.2 DC-2("충돌·대소문자·재상장 규칙").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -115,9 +116,7 @@ def test_resolve_missing_raises_not_found() -> None:
 
 def test_resolve_naive_as_of_rejected() -> None:
     with pytest.raises(sm.SymbolMasterError):
-        sm.resolve(
-            Venue.BITGET, "BTCUSDT", instruments=[], listings=[], as_of=datetime(2026, 1, 1)
-        )
+        sm.resolve(Venue.BITGET, "BTCUSDT", instruments=[], listings=[], as_of=datetime(2026, 1, 1))
 
 
 def test_resolve_invalid_symbol_format_rejected() -> None:

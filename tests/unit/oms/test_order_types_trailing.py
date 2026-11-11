@@ -3,6 +3,7 @@
 DoD: 트리거가가 단조 갱신된다 — 시퀀스 전체에서 SELL은 절대 감소하지
 않고, BUY는 절대 증가하지 않는다(가격이 되돌아가도 트리거가는 그대로거나
 더 유리해질 뿐 후퇴하지 않는다)."""
+
 from __future__ import annotations
 
 from decimal import Decimal

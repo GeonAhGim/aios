@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover -- coverage.py ships with pytest-cov
     # that lacks it instead of failing perf tests over a missing optional dep.
     coverage = None
 
+
 @contextmanager
 def paused_coverage() -> Iterator[None]:
     """task-7250(esc-ci-coverage) — `pytest --cov=src`가 걸어 둔 전역

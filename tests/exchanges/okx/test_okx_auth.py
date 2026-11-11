@@ -27,9 +27,7 @@ def test_sign_request_fixed_input_get_no_body():
     """Independently computed via Python's own hmac/hashlib/base64 outside
     this codebase (see task notes) -- a fixed input must always reproduce
     this exact signature, or the signing function has silently changed."""
-    sig = sign_request(
-        "mysecretkey", "2020-12-08T09:08:57.715Z", "GET", "/api/v5/account/balance"
-    )
+    sig = sign_request("mysecretkey", "2020-12-08T09:08:57.715Z", "GET", "/api/v5/account/balance")
     assert sig == "RVdxQo0JNusP1O6Zsu6zd9fqQpRvDApYjcSPk8hKqYQ="
 
 

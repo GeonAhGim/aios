@@ -7,6 +7,7 @@ Spec: docs/FULL_AUDIT_2026-09-06.md P0-F(I-03) — `idempotency_keys`가
 얹었다(scheduler.py) — 정리가 무결성 검증 실행 자체를 막지 않는지도
 함께 확인한다.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -54,9 +55,8 @@ async def test_run_once_purges_expired_idempotency_keys(pool, scheduler):
 
     assert report.chain_ok  # 정리 작업이 무결성 검증 자체를 막지 않았다
     async with pool.acquire() as conn:
-        assert await conn.fetchval(
-            "SELECT 1 FROM idempotency_keys WHERE key = $1", expired_key
-        ) is None
-        assert await conn.fetchval(
-            "SELECT 1 FROM idempotency_keys WHERE key = $1", live_key
-        ) == 1
+        assert (
+            await conn.fetchval("SELECT 1 FROM idempotency_keys WHERE key = $1", expired_key)
+            is None
+        )
+        assert await conn.fetchval("SELECT 1 FROM idempotency_keys WHERE key = $1", live_key) == 1

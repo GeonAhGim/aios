@@ -1,4 +1,5 @@
 """15.3 통합테스트 — 3개 훅 지점(구매/배포승인/ApprovalMode 변경) 실제 dev DB 대상."""
+
 import json
 from decimal import Decimal
 from functools import partial

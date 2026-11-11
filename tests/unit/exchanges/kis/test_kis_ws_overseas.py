@@ -3,6 +3,7 @@
 파싱은 실제 소켓 없이(순수 함수), 구독은 가짜 connect_fn으로(결정적)
 검증한다 — tests/integration/test_kis_websocket.py와 동일 패턴.
 """
+
 import asyncio
 import json
 
@@ -181,7 +182,7 @@ async def test_subscribe_overseas_ticker_stream_sends_subscribe_message():
 
 
 async def test_subscribe_overseas_orderbook_stream_resubscribes_after_disconnect():
-    """"시퀀스 결손 시 재구독" — 연결이 끊기면(서버 측 갭 유발이든 네트워크
+    """ "시퀀스 결손 시 재구독" — 연결이 끊기면(서버 측 갭 유발이든 네트워크
     단절이든) 기존 `_run_kis_ws_subscription` 재연결 루프가 재연결 시마다
     구독 메시지를 다시 보낸다. 두 번째 연결에서도 구독 메시지가 다시
     전송됨을 확인해 이 보증이 해외 스트림에도 그대로 적용됨을 증명한다."""
@@ -221,7 +222,7 @@ async def test_subscribe_overseas_orderbook_stream_resubscribes_after_disconnect
 
 
 async def test_subscribe_overseas_ticker_stream_stops_callbacks_after_unsubscribe():
-    """"구독 해제 후 콜백 0건" — 호출부가 구독 태스크를 취소하면(코루틴
+    """ "구독 해제 후 콜백 0건" — 호출부가 구독 태스크를 취소하면(코루틴
     기반 스트림의 통상적 해제 방식) 그 이후로는 콜백이 전혀 호출되지
     않는다(추가 프레임이 도착해도 코루틴 자체가 더 이상 실행되지 않음)."""
     connection = _FakeConnection([], hold_open=True)

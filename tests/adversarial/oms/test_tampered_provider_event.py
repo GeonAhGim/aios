@@ -17,6 +17,7 @@ IGNORED/PROCESSED로만 남긴다, 위조 이벤트 하나가 배경 드레인 �
       부풀린 두 번째 체결 이벤트를 보낸다. `is_terminal(order.status)`가
       걸려 fills 삽입 자체가 일어나지 않는다.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -150,7 +151,10 @@ async def test_venue_spoofed_fill_event_is_rejected_no_state_change(pool):
     quantity = Decimal("5")
     exchange_order_id = f"ex-tamper-venue-{uuid4().hex}"
     order_id, client_order_id = await _insert_order(
-        pool, user_id, execution_id=execution_id, quantity=quantity,
+        pool,
+        user_id,
+        execution_id=execution_id,
+        quantity=quantity,
         exchange_order_id=exchange_order_id,
     )
     tampered = _fill_event(
@@ -187,7 +191,10 @@ async def test_forged_order_reference_is_rejected_no_orphan_state(pool):
     quantity = Decimal("3")
     exchange_order_id = f"ex-tamper-real-{uuid4().hex}"
     order_id, _client_order_id = await _insert_order(
-        pool, user_id, execution_id=execution_id, quantity=quantity,
+        pool,
+        user_id,
+        execution_id=execution_id,
+        quantity=quantity,
         exchange_order_id=exchange_order_id,
     )
     forged = _fill_event(
@@ -224,7 +231,10 @@ async def test_replay_after_terminal_fill_does_not_double_apply(pool):
     quantity = Decimal("5")
     exchange_order_id = f"ex-tamper-replay-{uuid4().hex}"
     order_id, client_order_id = await _insert_order(
-        pool, user_id, execution_id=execution_id, quantity=quantity,
+        pool,
+        user_id,
+        execution_id=execution_id,
+        quantity=quantity,
         exchange_order_id=exchange_order_id,
     )
     legit = _fill_event(

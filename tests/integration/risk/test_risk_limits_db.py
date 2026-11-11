@@ -8,6 +8,7 @@ DoD: (1) 표현식 UNIQUE(플랫폼 기본값 tenant_id NULL 포함) 실증, (2)
 `upsert_risk_limit`은 운영자·risk officer가 아니면 거부 + tenant 스코프 검증
 + 감사 1행, (5) `limit_value` 음수·미지 scope/metric은 CHECK로 거부.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -233,9 +234,7 @@ async def test_upsert_risk_limit_rejects_non_operator_non_officer(repo, audit_re
     actor = LimitActor(subject_id=tenant_a, is_operator=False, is_risk_officer=False)
     limit = _new_limit(tenant_id=tenant_a)
     with pytest.raises(UnauthorizedLimitActorError):
-        await upsert_risk_limit(
-            repo, audit_repo, tenant_id=tenant_a, actor=actor, limit=limit
-        )
+        await upsert_risk_limit(repo, audit_repo, tenant_id=tenant_a, actor=actor, limit=limit)
     assert await _count_audit_rows(repo._pool, limit.id) == 0
 
 
@@ -267,9 +266,7 @@ async def test_upsert_risk_limit_allows_risk_officer_within_own_tenant_and_audit
 ):
     actor = LimitActor(subject_id=tenant_a, is_operator=False, is_risk_officer=True)
     limit = _new_limit(tenant_id=tenant_a)
-    saved = await upsert_risk_limit(
-        repo, audit_repo, tenant_id=tenant_a, actor=actor, limit=limit
-    )
+    saved = await upsert_risk_limit(repo, audit_repo, tenant_id=tenant_a, actor=actor, limit=limit)
     assert saved.id == limit.id
     assert await _count_audit_rows(repo._pool, limit.id) == 1
 

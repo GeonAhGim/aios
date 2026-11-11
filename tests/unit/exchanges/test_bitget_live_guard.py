@@ -8,6 +8,7 @@ modify_order에 대한 @require_paper_sandbox 회귀 가드.
 형제 믹스인(margin/grid/futures_trading 등, test_bitget_margin.py 참고)과
 동일한 패턴.
 """
+
 from decimal import Decimal
 
 import httpx

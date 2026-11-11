@@ -1,6 +1,7 @@
 """변동성·MDD·Sharpe·Calmar — backtest.compute_metrics와 정의를 공유한다.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6 (L46)."""
+
 from __future__ import annotations
 
 from decimal import Decimal

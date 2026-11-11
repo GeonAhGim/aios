@@ -5,6 +5,7 @@ DoD(task-1784): (1) 시세·주문·취소·잔고 왕복이 모의투자에서 
 sandbox`가 막으므로 매매 계열 호출은 전부 모의투자(is_paper_trading=True)
 adapter로만 확인한다(ADR-2026-09-06-I D3).
 """
+
 from __future__ import annotations
 
 import json

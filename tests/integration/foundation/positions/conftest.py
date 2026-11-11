@@ -4,6 +4,7 @@
 옮겨 두므로, 여기서는 그 값을 asyncpg DSN으로 변환하고 `pos_account`/
 `pos_snapshot`(어댑터가 검증하는 최소 선행 상태) 생성 헬퍼만 둔다.
 """
+
 from __future__ import annotations
 
 import uuid

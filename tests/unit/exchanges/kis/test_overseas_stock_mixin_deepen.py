@@ -28,6 +28,7 @@ mixin.py`는 손대지 않는다. `test_overseas_stock_mixin.py`(왕복/negative
    (동일 기법, test_kis_overseas_deepen.py/test_paper_drop_injection.py
    선례).
 """
+
 from __future__ import annotations
 
 import os
@@ -148,9 +149,7 @@ async def test_cancel_overseas_order_malformed_json_raises_without_returning_boo
     adapter = _make_paper_adapter(handler)
 
     with pytest.raises(RetryableExchangeError):
-        await adapter.cancel_overseas_order(
-            "ORG:1", "AAPL", "NASD", original_quantity=Decimal("1")
-        )
+        await adapter.cancel_overseas_order("ORG:1", "AAPL", "NASD", original_quantity=Decimal("1"))
 
     # 바디 레벨 실패(HTTP 200 + 비JSON)는 단발, 불리언으로 삼켜지지 않음
     assert business_calls["n"] == 1
@@ -206,9 +205,7 @@ async def test_place_overseas_order_overhead_bounded_vs_raw_request_baseline() -
     n = 100
 
     # 워밍업 — 토큰 발급 지연이 표본에 섞이지 않게 미리 한 번 태운다.
-    await adapter._request(
-        "POST", _ORDER_PATH, "TTTT1002U", body={"warmup": "1"}
-    )
+    await adapter._request("POST", _ORDER_PATH, "TTTT1002U", body={"warmup": "1"})
     captured.clear()
 
     baseline_started = time.perf_counter()
@@ -242,10 +239,10 @@ async def test_place_overseas_order_overhead_bounded_vs_raw_request_baseline() -
 _GUARD = (
     "    if codes is None:\n"
     "        raise ValueError(\n"
-    "            f\"지원하지 않는 해외주식 거래소입니다: {exchange!r} \"\n"
+    '            f"지원하지 않는 해외주식 거래소입니다: {exchange!r} "\n'
     "            f\"(지원: {', '.join(_EXCHANGES)}) — 시세조회용 3자리 코드(EXCD, \"\n"
-    "            \"예: NAS)가 아니라 주문용 4자리 코드(OVRS_EXCG_CD, 예: NASD)를 \"\n"
-    "            \"써야 합니다.\"\n"
+    '            "예: NAS)가 아니라 주문용 4자리 코드(OVRS_EXCG_CD, 예: NASD)를 "\n'
+    '            "써야 합니다."\n'
     "        )\n"
 )
 _MUTATED = ""
@@ -285,8 +282,13 @@ def test_pytest_gate_turns_red_when_unsupported_exchange_guard_is_removed(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -298,8 +300,12 @@ def test_pytest_gate_turns_red_when_unsupported_exchange_guard_is_removed(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

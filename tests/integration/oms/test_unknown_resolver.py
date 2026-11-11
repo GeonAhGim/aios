@@ -10,6 +10,7 @@ test_unknown_resolver_limits.py`가 다룬다 — 이 파일은 실 Postgres에 
 쓰이는지(RESOLVED_AS 전이, RESOLVED_ABSENT 전이, ACCOUNT safety control
 활성화)만 좁게 증명한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

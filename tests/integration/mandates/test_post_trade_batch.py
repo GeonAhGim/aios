@@ -189,8 +189,11 @@ async def test_rerunning_same_batch_keeps_a_single_violation_record(
 
 
 async def test_no_violation_leaves_gate_open(
-    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo,
-    mandate_repo, trust_repo,  # noqa: F811 -- imported fixtures
+    pool: asyncpg.Pool,
+    kill_switch: KillSwitchService,
+    risk_gate_repo,
+    mandate_repo,  # noqa: F811 -- imported fixtures
+    trust_repo,  # noqa: F811 -- imported fixtures
 ) -> None:
     """negative test -- 정상 체결만 있으면 아무것도 차단하지 않는다."""
     tenant_id = await create_test_tenant(pool)
@@ -220,8 +223,11 @@ async def test_no_violation_leaves_gate_open(
 
 
 async def test_market_abuse_warn_only_leaves_gate_open(
-    pool: asyncpg.Pool, kill_switch: KillSwitchService, risk_gate_repo,
-    mandate_repo, trust_repo,  # noqa: F811 -- imported fixtures
+    pool: asyncpg.Pool,
+    kill_switch: KillSwitchService,
+    risk_gate_repo,
+    mandate_repo,  # noqa: F811 -- imported fixtures
+    trust_repo,  # noqa: F811 -- imported fixtures
 ) -> None:
     """게이트/CI 적색 회귀 -- CM-10 market_abuse.wash_trade는 WARN 전용(§3
     "WARN은 통과시키되 기록")이라, 반대 방향 체결 두 건이 60초 안에 잡혀도

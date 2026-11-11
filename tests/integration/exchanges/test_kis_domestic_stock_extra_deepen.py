@@ -25,6 +25,7 @@ DEPTH 감사(task-2722, docs/audit/DEPTH_L4_BR.md #1781)는 원 커밋(179a8e1)�
    red(1 failed)로 뒤집힘을 증명한다(동일 기법, test_kis_overseas_deepen.py
    선례).
 """
+
 from __future__ import annotations
 
 import os
@@ -74,8 +75,13 @@ def _make_adapter(handler) -> KISAdapter:
         base_url="https://openapivts.koreainvestment.com:29443", transport=transport
     )
     return KISAdapter(
-        "app", "secret", "12345678", "01",
-        is_paper_trading=True, http_client=http_client, sleep_fn=_instant_sleep,
+        "app",
+        "secret",
+        "12345678",
+        "01",
+        is_paper_trading=True,
+        http_client=http_client,
+        sleep_fn=_instant_sleep,
     )
 
 
@@ -184,7 +190,8 @@ async def test_credit_balance_ranking_overhead_bounded_vs_raw_request_baseline()
             return httpx.Response(
                 200,
                 json={
-                    "rt_cd": "0", "msg1": "OK",
+                    "rt_cd": "0",
+                    "msg1": "OK",
                     "output1": [{"mksc_shrn_iscd": "005930"}],
                     "output2": [{"mksc_shrn_iscd": "000660"}],
                 },
@@ -199,9 +206,7 @@ async def test_credit_balance_ranking_overhead_bounded_vs_raw_request_baseline()
 
     baseline_started = time.perf_counter()
     for _ in range(n):
-        await adapter._request(
-            "GET", _CREDIT_RANKING_PATH, "FHKST17010000", params={}
-        )
+        await adapter._request("GET", _CREDIT_RANKING_PATH, "FHKST17010000", params={})
     baseline_elapsed = time.perf_counter() - baseline_started
 
     call_started = time.perf_counter()
@@ -233,8 +238,7 @@ _GUARD = (
     "    return raw[key]\n"
 )
 _MUTATED = (
-    "def _require(raw: dict[str, Any], key: str, tr_id: str) -> Any:\n"
-    "    return raw.get(key, [])\n"
+    "def _require(raw: dict[str, Any], key: str, tr_id: str) -> Any:\n    return raw.get(key, [])\n"
 )
 
 
@@ -273,8 +277,13 @@ def test_pytest_gate_turns_red_when_require_guard_is_removed(tmp_path: Path) -> 
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -286,8 +295,12 @@ def test_pytest_gate_turns_red_when_require_guard_is_removed(tmp_path: Path) -> 
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

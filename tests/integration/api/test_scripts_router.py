@@ -8,6 +8,7 @@ INVARIANTS I-10(배선 증명): 라우트가 실제 앱에 마운트돼 있고, 
 거부되며, 컴파일 오류가 전역 핸들러 봉투로 나오는지 앱 왕복으로 단언한다.
 성능은 응답의 `elapsed_ms`를 print만 한다(지연 단언 금지).
 """
+
 from __future__ import annotations
 
 import ast

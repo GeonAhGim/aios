@@ -200,9 +200,9 @@ def test_count_ignore_comments_tokenize_failure_fails_closed(
 def test_invalid_source_preserves_budget(tmp_path: Path, content: str) -> None:
     _write_py(tmp_path, "broken.py", content)
     budget = _write_budget(tmp_path, 5)
-    assert check_type_ignore_budget.main(
-        ["--root", str(tmp_path), "--budget-file", str(budget)]
-    ) == 1
+    assert (
+        check_type_ignore_budget.main(["--root", str(tmp_path), "--budget-file", str(budget)]) == 1
+    )
     assert budget.read_text(encoding="utf-8") == "5\n"
 
 
@@ -214,7 +214,8 @@ def test_nested_source_directory_is_counted(tmp_path: Path, name: str) -> None:
 
 
 def test_replace_failure_preserves_budget_and_cleans_temp(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     budget = _write_budget(tmp_path, 5)
 
@@ -222,23 +223,27 @@ def test_replace_failure_preserves_budget_and_cleans_temp(
         raise OSError("injected replacement failure")
 
     monkeypatch.setattr(check_type_ignore_budget.os, "replace", fail_replace)
-    assert check_type_ignore_budget.main(
-        ["--root", str(tmp_path), "--budget-file", str(budget)]
-    ) == 1
+    assert (
+        check_type_ignore_budget.main(["--root", str(tmp_path), "--budget-file", str(budget)]) == 1
+    )
     assert budget.read_text(encoding="utf-8") == "5\n"
     assert list(tmp_path.glob(".*.tmp")) == []
 
 
 def test_missing_root_does_not_lower_budget(tmp_path: Path) -> None:
     budget = _write_budget(tmp_path, 5)
-    assert check_type_ignore_budget.main(
-        ["--root", str(tmp_path / "missing"), "--budget-file", str(budget)]
-    ) == 1
+    assert (
+        check_type_ignore_budget.main(
+            ["--root", str(tmp_path / "missing"), "--budget-file", str(budget)]
+        )
+        == 1
+    )
     assert budget.read_text(encoding="utf-8") == "5\n"
 
 
 def test_directory_read_failure_preserves_budget(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     budget = _write_budget(tmp_path, 5)
 
@@ -247,16 +252,16 @@ def test_directory_read_failure_preserves_budget(
         return []
 
     monkeypatch.setattr(check_type_ignore_budget.os, "walk", fail_walk)
-    assert check_type_ignore_budget.main(
-        ["--root", str(tmp_path), "--budget-file", str(budget)]
-    ) == 1
+    assert (
+        check_type_ignore_budget.main(["--root", str(tmp_path), "--budget-file", str(budget)]) == 1
+    )
     assert budget.read_text(encoding="utf-8") == "5\n"
 
 
 def test_invalid_encoding_preserves_budget(tmp_path: Path) -> None:
     (tmp_path / "broken.py").write_bytes(b"x = '\xff'\n")
     budget = _write_budget(tmp_path, 5)
-    assert check_type_ignore_budget.main(
-        ["--root", str(tmp_path), "--budget-file", str(budget)]
-    ) == 1
+    assert (
+        check_type_ignore_budget.main(["--root", str(tmp_path), "--budget-file", str(budget)]) == 1
+    )
     assert budget.read_text(encoding="utf-8") == "5\n"

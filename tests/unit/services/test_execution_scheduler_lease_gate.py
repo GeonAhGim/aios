@@ -19,6 +19,7 @@ execution은 tick되지 않는다"를 증명하지만, 주입한 `pre_submit_gat
   ticked/failed/skipped 전부 비어 있다(§4.1 "예외 없이 이번 주기 건너뜀").
 - RUNNING 행이 0건이면 리포지토리 왕복 자체를 하지 않는다.
 """
+
 from __future__ import annotations
 
 import uuid

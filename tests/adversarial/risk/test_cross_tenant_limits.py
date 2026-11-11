@@ -16,6 +16,7 @@ switch, 자기 결정 — 로 B를 제약하거나 B의 상태를 읽으려 한�
 대해 단언한다. 이 두 테스트는 한 쌍이다 — 앞의 것이 없으면 뒤의 것은
 "막을 필요가 없는 것을 막았다"일 수 있다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -93,33 +94,53 @@ def _limit(
     value: str = "1",
 ) -> RiskLimit:
     return RiskLimit(
-        id=uuid4(), tenant_id=tenant_id, scope=scope, scope_ref=scope_ref,
-        metric=metric, limit_value=Decimal(value), hard=True,
+        id=uuid4(),
+        tenant_id=tenant_id,
+        scope=scope,
+        scope_ref=scope_ref,
+        metric=metric,
+        limit_value=Decimal(value),
+        hard=True,
     )
 
 
 def _as_exposure(limit: RiskLimit) -> ExposureLimit:
     """조립기(R-27)가 저장소 행을 순수 규칙 입력으로 바꾸는 것과 같은 변환."""
     return ExposureLimit(
-        scope=CoreScope(limit.scope.value), scope_ref=limit.scope_ref,
-        metric=CoreMetric(limit.metric.value), limit_value=limit.limit_value,
-        hard=limit.hard, limit_id=limit.id,
+        scope=CoreScope(limit.scope.value),
+        scope_ref=limit.scope_ref,
+        metric=CoreMetric(limit.metric.value),
+        limit_value=limit.limit_value,
+        hard=limit.hard,
+        limit_id=limit.id,
     )
 
 
 def _inputs(tenant_id: UUID, limits: tuple[ExposureLimit, ...]) -> RiskInputs:
     return RiskInputs(
-        tenant_id=tenant_id, execution_ref=_PROVIDER, certified_badge=True,
+        tenant_id=tenant_id,
+        execution_ref=_PROVIDER,
+        certified_badge=True,
         allocated_capital=Decimal("1000"),
         intent=OrderIntent(
-            symbol=_SYMBOL, asset_class="CRYPTO_SPOT", side="BUY", quantity=Decimal("0.1"),
-            ref_price=Decimal("50000"), notional=Decimal("5000"), reduce_only=False,
-            strategy_id=_STRATEGY, strategy_version="1.0", capital_pct=Decimal("10"),
+            symbol=_SYMBOL,
+            asset_class="CRYPTO_SPOT",
+            side="BUY",
+            quantity=Decimal("0.1"),
+            ref_price=Decimal("50000"),
+            notional=Decimal("5000"),
+            reduce_only=False,
+            strategy_id=_STRATEGY,
+            strategy_version="1.0",
+            capital_pct=Decimal("10"),
         ),
         equity=EquityInputs(total_equity=Decimal("10000"), as_of=_NOW),
         exposure=ExposureSnapshot(position_quantity=Decimal("0"), as_of=_NOW),
-        stats=StatsInputs(as_of=_NOW), activity=ActivityInputs(), safety=SafetyInputs(),
-        limits=limits, as_of=_NOW,
+        stats=StatsInputs(as_of=_NOW),
+        activity=ActivityInputs(),
+        safety=SafetyInputs(),
+        limits=limits,
+        as_of=_NOW,
     )
 
 
@@ -195,8 +216,11 @@ async def test_rsk_i8_risk_officer_of_a_cannot_plant_limit_in_b(
     planted = _limit(tenant_b, LimitScope.SYMBOL, _SYMBOL)
     with pytest.raises(CrossTenantLimitScopeError):
         await upsert_risk_limit(
-            limit_repo, PostgresAuditEventRepository(pool),
-            tenant_id=tenant_a, actor=officer_a, limit=planted,
+            limit_repo,
+            PostgresAuditEventRepository(pool),
+            tenant_id=tenant_a,
+            actor=officer_a,
+            limit=planted,
         )
     assert all(limit.id != planted.id for limit in await _effective(limit_repo, tenant_b))
     async with pool.acquire() as conn:
@@ -228,8 +252,14 @@ async def test_rsk_i8_tenant_a_kill_switch_does_not_reach_tenant_b(
     b_fence_before, b_controls_before = await _b_view(gate_repo, tenant_b)
 
     control = await activate_safety_control(
-        gate_repo, tenant_id=tenant_a, actor_subject_id=tenant_a, actor_is_admin=is_admin,
-        scope=scope, scope_ref=str(tenant_a), reason="rsk-i8", trace_id=uuid4(),
+        gate_repo,
+        tenant_id=tenant_a,
+        actor_subject_id=tenant_a,
+        actor_is_admin=is_admin,
+        scope=scope,
+        scope_ref=str(tenant_a),
+        reason="rsk-i8",
+        trace_id=uuid4(),
     )
 
     b_fence_after, b_controls_after = await _b_view(gate_repo, tenant_b)
@@ -248,8 +278,14 @@ async def test_rsk_i8_tenant_a_cannot_aim_kill_switch_at_tenant_b(
     b_fence_before, b_controls_before = await _b_view(gate_repo, tenant_b)
     with pytest.raises(UnauthorizedSafetyControlScopeError):
         await activate_safety_control(
-            gate_repo, tenant_id=tenant_a, actor_subject_id=tenant_a, actor_is_admin=False,
-            scope=scope, scope_ref=str(tenant_b), reason="hijack", trace_id=uuid4(),
+            gate_repo,
+            tenant_id=tenant_a,
+            actor_subject_id=tenant_a,
+            actor_is_admin=False,
+            scope=scope,
+            scope_ref=str(tenant_b),
+            reason="hijack",
+            trace_id=uuid4(),
         )
     assert await _b_view(gate_repo, tenant_b) == (b_fence_before, b_controls_before)
 

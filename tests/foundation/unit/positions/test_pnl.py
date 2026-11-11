@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LB-4
 (`unit/positions/test_pnl.py`: "multiplier·FX 결합, quantize").
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

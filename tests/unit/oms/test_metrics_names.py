@@ -8,15 +8,14 @@ PLT-04 단일 출처(`metric_names.py`)를 그대로 재사용한다 — 이 파
 전수가 정규식을 만족하는지, 그리고 규칙을 어긴 이름을 넣으면 실제로
 실패하는지(반증)를 함께 단언한다.
 """
+
 from __future__ import annotations
 
 import re
 
 from src.core.observability import metric_names
 
-_METRIC_NAME_RE = re.compile(
-    r"^aios\.[a-z_]+\.[a-z_]+\.[a-z_]+(_total|_seconds|_bytes|\.gauge)?$"
-)
+_METRIC_NAME_RE = re.compile(r"^aios\.[a-z_]+\.[a-z_]+\.[a-z_]+(_total|_seconds|_bytes|\.gauge)?$")
 
 # §7.2 원문 그대로라 4세그먼트라서 정규식을 위반하는 이름들 — metric_names.py가
 # 이걸 그대로 등재하지 않고 정규화했음을 반증으로 확인한다.

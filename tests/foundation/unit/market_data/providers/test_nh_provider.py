@@ -10,6 +10,7 @@ negative test, src/exchanges/** 변경 0줄).
 대조 테스트에 실 인스턴스를 쓴다. `fetch_candles`는 `get_ohlcv`만 흉내
 내는 페이크로 네트워크를 피한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

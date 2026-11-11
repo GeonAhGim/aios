@@ -227,6 +227,7 @@ async def test_run_one_cycle_does_not_reapply_same_decision_twice(pool, kill_swi
     last_action = _LastAppliedAction()
 
     before_controls, _ = await _counts(pool)
+
     async def get_basket_returns() -> dict[str, Decimal]:
         return {}
 

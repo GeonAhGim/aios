@@ -4,6 +4,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.7 `test_fenced_submit.py`,
 §3.6 시퀀스 2~10, §4.1 I1/I4, §6 두 fence 행. 경합·트리거는
 `tests/adversarial/risk/test_fence_race.py`.
 """
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -60,8 +61,14 @@ async def ctx(pool: asyncpg.Pool) -> dict[str, Any]:
     gate = GateDecision(
         outcome=GateOutcome.ALLOW, fence_snapshot=f0, decision_id=decision.decision_id
     )
-    return {"user_id": user_id, "execution_id": execution_id, "decision": decision,
-            "f0": f0, "read": read, "gate": gate}
+    return {
+        "user_id": user_id,
+        "execution_id": execution_id,
+        "decision": decision,
+        "f0": f0,
+        "read": read,
+        "gate": gate,
+    }
 
 
 def _allow(ctx: dict[str, Any], decision_id: Any) -> GateDecision:
@@ -75,15 +82,21 @@ def _allow(ctx: dict[str, Any], decision_id: Any) -> GateDecision:
 _ISOLATED_SCOPES = (SafetyScope.STRATEGY_DEPLOYMENT, SafetyScope.TENANT, SafetyScope.ACCOUNT)
 
 
-async def _activate_scope(
-    pool: asyncpg.Pool, ctx: dict[str, Any], scope: SafetyScope
-) -> None:
-    ref = {SafetyScope.TENANT: str(ctx["user_id"]), SafetyScope.ACCOUNT: str(ctx["user_id"]),
-           SafetyScope.STRATEGY_DEPLOYMENT: f"exec:{ctx['execution_id']}"}[scope]
+async def _activate_scope(pool: asyncpg.Pool, ctx: dict[str, Any], scope: SafetyScope) -> None:
+    ref = {
+        SafetyScope.TENANT: str(ctx["user_id"]),
+        SafetyScope.ACCOUNT: str(ctx["user_id"]),
+        SafetyScope.STRATEGY_DEPLOYMENT: f"exec:{ctx['execution_id']}",
+    }[scope]
     await activate_safety_control(
-        PostgresRiskGateRepository(pool), tenant_id=ctx["user_id"],
-        actor_subject_id=ctx["user_id"], actor_is_admin=True, scope=scope, scope_ref=ref,
-        reason="fenced-submit-test", trace_id=uuid4(),
+        PostgresRiskGateRepository(pool),
+        tenant_id=ctx["user_id"],
+        actor_subject_id=ctx["user_id"],
+        actor_is_admin=True,
+        scope=scope,
+        scope_ref=ref,
+        reason="fenced-submit-test",
+        trace_id=uuid4(),
     )
 
 
@@ -96,12 +109,23 @@ async def _count_by_client_id(pool: asyncpg.Pool, client_order_id: str) -> int:
 
 
 async def _submit(
-    pool: asyncpg.Pool, ctx: dict[str, Any], adapter: Any, order: Order,
-    *, gate: Any = None, read: Any = None, metrics: Any = None
+    pool: asyncpg.Pool,
+    ctx: dict[str, Any],
+    adapter: Any,
+    order: Order,
+    *,
+    gate: Any = None,
+    read: Any = None,
+    metrics: Any = None,
 ) -> Order:
     return await submit_with_fence(
-        pool, adapter, order, user_id=ctx["user_id"], gate_decision=gate or ctx["gate"],
-        read_fences=read or ctx["read"], decision_reader=PostgresDecisionRepository(pool),
+        pool,
+        adapter,
+        order,
+        user_id=ctx["user_id"],
+        gate_decision=gate or ctx["gate"],
+        read_fences=read or ctx["read"],
+        decision_reader=PostgresDecisionRepository(pool),
         metrics=metrics,
     )
 
@@ -117,8 +141,10 @@ async def test_denied_gate_raises_before_claim(pool: asyncpg.Pool, ctx: dict[str
     adapter = RecordingAdapter()
     order = make_order(ctx["execution_id"])
     denied = GateDecision(
-        outcome=GateOutcome.DENY, reason_codes=("RISK_KILL_SWITCH_ACTIVE_GLOBAL",),
-        fence_snapshot=ctx["f0"], decision_id=ctx["decision"].decision_id,
+        outcome=GateOutcome.DENY,
+        reason_codes=("RISK_KILL_SWITCH_ACTIVE_GLOBAL",),
+        fence_snapshot=ctx["f0"],
+        decision_id=ctx["decision"].decision_id,
     )
     with pytest.raises(OrderDeniedByRiskGateError):
         await _submit(pool, ctx, adapter, order, gate=denied)
@@ -126,9 +152,7 @@ async def test_denied_gate_raises_before_claim(pool: asyncpg.Pool, ctx: dict[str
     assert await _count_by_client_id(pool, order.client_order_id) == 0
 
 
-async def test_missing_decision_id_is_fail_closed(
-    pool: asyncpg.Pool, ctx: dict[str, Any]
-) -> None:
+async def test_missing_decision_id_is_fail_closed(pool: asyncpg.Pool, ctx: dict[str, Any]) -> None:
     """negative — I1: 결정 참조 없는 ALLOW는 claim조차 못 한다."""
     adapter = RecordingAdapter()
     order = make_order(ctx["execution_id"])
@@ -217,9 +241,7 @@ async def test_duplicate_client_order_id_returns_existing_without_second_place(
     assert await _count_by_client_id(pool, order.client_order_id) == 1
 
 
-async def test_adapter_error_marks_claim_unknown(
-    pool: asyncpg.Pool, ctx: dict[str, Any]
-) -> None:
+async def test_adapter_error_marks_claim_unknown(pool: asyncpg.Pool, ctx: dict[str, Any]) -> None:
     """task-1566(L4-09) 편차 — claim 행을 지우던 이전 동작을 CREATED→
     {FAILED,UNKNOWN} 확정으로 교체(submit.py `_mark_claim_send_outcome`와
     동일 패턴, 감사 흔적 보존).
@@ -229,6 +251,7 @@ async def test_adapter_error_marks_claim_unknown(
     이어야 한다(이전엔 무조건 FAILED로 확정해 실제 체결이 있어도 복구 불가한
     결함이었다). `dispatch_outcome.classify_submit_failure`가 fail-closed로
     이렇게 분류한다."""
+
     async def boom(order: Order) -> Order:
         raise RuntimeError("network")
 
@@ -249,7 +272,9 @@ async def test_expired_decision_reference_rejected_at_claim(
 ) -> None:
     """negative — 만료된 결정으로는 claim 불가(트리거 `created_at < expires_at`)."""
     expired = await insert_decision(
-        pool, ctx["user_id"], ttl=timedelta(seconds=-1),
+        pool,
+        ctx["user_id"],
+        ttl=timedelta(seconds=-1),
         execution_ref=f"exec:{ctx['execution_id']}",
     )
     adapter = RecordingAdapter()

@@ -9,6 +9,7 @@ docstring에 적었듯 이 도메인 전체는 kis_tr_reference.json에 V-접두
 처리하는지는 이 mock 테스트가 증명하지 못한다 — 우리 코드의 요청 조립/응답
 파싱 경로만 검증한다. 실계좌 확보 후 실서버 왕복 검증은 별도 리프로 남는다.
 """
+
 from __future__ import annotations
 
 import json

@@ -5,6 +5,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-32
 kind·빈 id/kid 위반은 전부 `SecretRefParseError`로 fail-closed하며 원본
 문자열을 메시지에 echo하지 않는다(호출부가 실수로 평문을 담아 부를 가능성).
 """
+
 from __future__ import annotations
 
 import pytest

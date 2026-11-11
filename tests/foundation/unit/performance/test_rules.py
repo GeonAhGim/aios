@@ -1,6 +1,7 @@
 """Performance 순수 규칙 — PAPER/LIVE 혼합 거부, 정밀도 위반.
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §8 (L46 DoD)."""
+
 from __future__ import annotations
 
 from decimal import Decimal

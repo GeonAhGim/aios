@@ -3,6 +3,7 @@
 완료조건(SUSPENDED 사용자 로그인 거부)은 AuthService(11.2)와의 연동을
 실제로 실증한다.
 """
+
 import uuid
 from pathlib import Path
 

@@ -120,9 +120,7 @@ async def test_route_order_rejects_empty_candidates(pool, repo):
     order_id = uuid4()
 
     with pytest.raises(NoRouteAvailableError):
-        await route_order(
-            repo, order_id=order_id, candidates=[], decided_at=datetime.now(UTC)
-        )
+        await route_order(repo, order_id=order_id, candidates=[], decided_at=datetime.now(UTC))
 
     assert await _row_count(pool, order_id) == 0
     assert await repo.get_by_order_id(order_id) is None

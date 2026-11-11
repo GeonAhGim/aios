@@ -10,6 +10,7 @@ common/test_ws_session.py`가 이미 하트비트·ack·백오프를 검증) —
 `L2IngestSession`이 그 훅(`on_resync`/`on_distrust`)을 받아 커버리지
 span을 정확히 여닫는지만 검증한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -109,9 +110,7 @@ class _FakeCoverageRepo(CoverageRepository):
         self, conn: object, instrument_id: str, timeframe: Timeframe
     ) -> list[CoverageSpan]:
         return [
-            s
-            for s in self.spans
-            if s.instrument_id == instrument_id and s.timeframe == timeframe
+            s for s in self.spans if s.instrument_id == instrument_id and s.timeframe == timeframe
         ]
 
 

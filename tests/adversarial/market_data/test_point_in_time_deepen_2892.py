@@ -72,9 +72,7 @@ def test_far_future_known_at_never_leaks_into_present_query() -> None:
     안 된다 -- 정수 오버플로/비교 연산자 실수로 극단값이 항상 "최신"으로
     오판정되지 않는지 확인한다."""
     present = _attr(key="lot_size", value="10", known_at=_T0)
-    far_future = _attr(
-        key="lot_size", value="9999", known_at=datetime(3000, 1, 1, tzinfo=UTC)
-    )
+    far_future = _attr(key="lot_size", value="9999", known_at=datetime(3000, 1, 1, tzinfo=UTC))
 
     result = latest_attributes_as_of([present, far_future], as_of=_T0)
     assert result["lot_size"].attr_value == "10"

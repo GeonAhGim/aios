@@ -25,6 +25,7 @@ injection·수치 성능/지연 단언·이전에 적색이었던 CI 게이트 �
    green(1 passed)에서 red(1 failed)로 뒤집힘을 증명한다(동일 기법,
    test_paper_drop_injection.py/task-1605 선례).
 """
+
 from __future__ import annotations
 
 import importlib
@@ -237,9 +238,7 @@ async def test_place_order_domestic_futures_dispatch_overhead_bounded_vs_raw_req
 
     baseline_started = time.perf_counter()
     for _ in range(n):
-        await adapter._request(
-            "POST", _DOMESTIC_FO_ORDER_PATH, "TTTO1101U", body={"noop": "1"}
-        )
+        await adapter._request("POST", _DOMESTIC_FO_ORDER_PATH, "TTTO1101U", body={"noop": "1"})
     baseline_elapsed = time.perf_counter() - baseline_started
 
     dispatch_started = time.perf_counter()
@@ -325,8 +324,13 @@ def test_pytest_gate_turns_red_when_dispatch_fail_closed_guard_is_removed(
     env = dict(os.environ, PYTHONPATH=repo_root, PYTEST_ADDOPTS="", PYTHONIOENCODING="utf-8")
 
     baseline = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace",
-        env=env, timeout=120, check=False,
+        command,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=120,
+        check=False,
     )
     assert baseline.returncode == 0, baseline.stdout + baseline.stderr
     assert "1 passed" in baseline.stdout
@@ -338,8 +342,12 @@ def test_pytest_gate_turns_red_when_dispatch_fail_closed_guard_is_removed(
 
     mutated = subprocess.run(
         [*command[:-1], "-p", plugin_module_name, command[-1]],
-        capture_output=True, encoding="utf-8", errors="replace",
-        env=mutated_env, timeout=120, check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env=mutated_env,
+        timeout=120,
+        check=False,
     )
     assert mutated.returncode != 0, mutated.stdout + mutated.stderr
     assert "1 passed" not in mutated.stdout

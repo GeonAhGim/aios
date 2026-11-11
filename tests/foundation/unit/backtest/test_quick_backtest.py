@@ -5,6 +5,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.5 BT-10
 값을 내면 "재구현이 아니라 위임"이라는 증명이다. 실DB 컬럼 경로·1개월 M1
 측정은 tests/foundation/integration/backtest/test_quick_backtest.py.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -53,10 +54,13 @@ def _columns(
     c = [_D(x) for x in closes]
     o = [_D(x) for x in opens] if opens else [c[0], *c[:-1]] if c else []
     return CandleColumns(
-        ts=[_T0 + timedelta(minutes=i) for i in range(len(c))], open=o,
+        ts=[_T0 + timedelta(minutes=i) for i in range(len(c))],
+        open=o,
         high=[max(a, b) + 1 for a, b in zip(o, c, strict=True)],
-        low=[min(a, b) - 1 for a, b in zip(o, c, strict=True)], close=c,
-        volume=[_D(volume)] * len(c), quote_volume=[None] * len(c),
+        low=[min(a, b) - 1 for a, b in zip(o, c, strict=True)],
+        close=c,
+        volume=[_D(volume)] * len(c),
+        quote_volume=[None] * len(c),
     )
 
 
@@ -66,10 +70,13 @@ def _config(**overrides: object) -> BacktestConfigV2:
         commission=VenueTierCommission(
             venue="BITGET", maker_bps=_D("2"), taker_bps=_D("5"), min_fee=_D("0")
         ),
-        latency_ms=0, partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
+        latency_ms=0,
+        partial_fill=PartialFillConfig(max_participation_pct=_D("1")),
         order_types=OrderTypesConfig(limit=True, stop=True, oco=True, trailing=True),
-        magnifier_tf=None, costs=CostsConfig(funding=False, borrow_apr=None),
-        adjustments=AdjustmentsConfig(splits=False, dividends=False), calendar="24x7",
+        magnifier_tf=None,
+        costs=CostsConfig(funding=False, borrow_apr=None),
+        adjustments=AdjustmentsConfig(splits=False, dividends=False),
+        calendar="24x7",
     )
     base.update(overrides)
     return BacktestConfigV2(**base)  # type: ignore[arg-type]
@@ -104,7 +111,10 @@ def test_market_order_fills_next_bar_with_bt2_bt3_values() -> None:
     assert [f.bar_index for f in result.fills] == [3]  # 신호 봉 2 → 체결 봉 3(look-ahead 안전)
     fill = result.fills[0]
     expected_price = apply_slippage(
-        cfg.slippage, side=OrderSide.BUY, reference_price=cols.open[3], quantity=_D("10"),
+        cfg.slippage,
+        side=OrderSide.BUY,
+        reference_price=cols.open[3],
+        quantity=_D("10"),
         bar_volume=cols.volume[3],
     )
     assert fill.price == expected_price
@@ -121,9 +131,15 @@ def test_market_order_fills_next_bar_with_bt2_bt3_values() -> None:
 def test_every_fill_model_is_delegated_not_reimplemented(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, int] = {}
     for name in (
-        "apply_slippage", "compute_commission", "resolve_execution_bar_index",
-        "compute_partial_fill", "magnify", "compute_funding_cost", "compute_borrow_cost",
-        "ensure_order_type_enabled", "is_limit_triggered",
+        "apply_slippage",
+        "compute_commission",
+        "resolve_execution_bar_index",
+        "compute_partial_fill",
+        "magnify",
+        "compute_funding_cost",
+        "compute_borrow_cost",
+        "ensure_order_type_enabled",
+        "is_limit_triggered",
     ):
         original = getattr(qf, name)
 
@@ -136,8 +152,12 @@ def test_every_fill_model_is_delegated_not_reimplemented(monkeypatch: pytest.Mon
     limit_sell = OrderIntent(
         side=OrderSide.SELL, quantity=_D("10"), order_type="limit", trigger_price=_D("104")
     )
-    result = _run(_config(costs=CostsConfig(funding=True, borrow_apr=_D("0.1"))),
-                  _columns(_CLOSES), {1: _BUY10, 3: limit_sell}, funding_rate=_D("0.0001"))
+    result = _run(
+        _config(costs=CostsConfig(funding=True, borrow_apr=_D("0.1"))),
+        _columns(_CLOSES),
+        {1: _BUY10, 3: limit_sell},
+        funding_rate=_D("0.0001"),
+    )
 
     assert [f.bar_index for f in result.fills] == [2, 4]
     # 주문 수(2) = 체결 모델 호출 수 — 봉 수(8)와 무관
@@ -162,7 +182,8 @@ def test_partial_fill_carries_remaining_to_next_bar() -> None:
     cfg = _config(partial_fill=PartialFillConfig(max_participation_pct=_D("0.5")))
     result = _run(cfg, _columns(_CLOSES, volume="10"), {2: OrderIntent(OrderSide.BUY, _D("8"))})
     assert [(f.bar_index, f.quantity, f.remaining_quantity) for f in result.fills] == [
-        (3, _D("5"), _D("3")), (4, _D("3"), _D("0")),
+        (3, _D("5"), _D("3")),
+        (4, _D("3"), _D("0")),
     ]
     assert result.position_quantity == _D("8") and result.expired_orders == 0
 
@@ -175,7 +196,10 @@ def test_limit_order_waits_for_trigger_and_pays_maker_fee() -> None:
     assert [f.bar_index for f in result.fills] == [5]
     fill = result.fills[0]
     assert fill.price == apply_slippage(
-        cfg.slippage, side=OrderSide.BUY, reference_price=_D("90"), quantity=_D("1"),
+        cfg.slippage,
+        side=OrderSide.BUY,
+        reference_price=_D("90"),
+        quantity=_D("1"),
         bar_volume=cols.volume[5],
     )
     assert fill.commission == compute_commission(cfg.commission, is_maker=True, notional=fill.price)
@@ -187,7 +211,10 @@ def test_stop_order_gapping_through_fills_at_bar_open() -> None:
     result = _run(_config(), cols, {2: intent})
     assert result.fills[0].bar_index == 3
     assert result.fills[0].price == apply_slippage(
-        _config().slippage, side=OrderSide.BUY, reference_price=_D("108"), quantity=_D("1"),
+        _config().slippage,
+        side=OrderSide.BUY,
+        reference_price=_D("108"),
+        quantity=_D("1"),
         bar_volume=cols.volume[3],
     )
 
@@ -242,8 +269,11 @@ def test_negative_inputs_fail_closed() -> None:
     with pytest.raises(QuickBacktestInputError):
         _run(_config(), _columns([]), {})
     with pytest.raises(OrderTypeDisabledError):
-        _run(_config(order_types=OrderTypesConfig(limit=False, stop=True, oco=True, trailing=True)),
-             cols, {1: OrderIntent(OrderSide.BUY, _D("1"), "limit", _D("90"))})
+        _run(
+            _config(order_types=OrderTypesConfig(limit=False, stop=True, oco=True, trailing=True)),
+            cols,
+            {1: OrderIntent(OrderSide.BUY, _D("1"), "limit", _D("90"))},
+        )
     with pytest.raises(QuickBacktestInputError):
         _run(_config(), cols, {1: OrderIntent(OrderSide.BUY, _D("1"), "limit", None)})
     with pytest.raises(QuickBacktestInputError):
@@ -254,9 +284,13 @@ def test_negative_inputs_fail_closed() -> None:
 
 def test_magnifier_without_lower_columns_warns_and_uses_lower_when_given() -> None:
     m5 = CandleColumns(
-        ts=[_T0, _T0 + timedelta(minutes=5)], open=[_D("100"), _D("100")],
-        high=[_D("110"), _D("110")], low=[_D("90"), _D("90")], close=[_D("105"), _D("105")],
-        volume=[_D("1000")] * 2, quote_volume=[None] * 2,
+        ts=[_T0, _T0 + timedelta(minutes=5)],
+        open=[_D("100"), _D("100")],
+        high=[_D("110"), _D("110")],
+        low=[_D("90"), _D("90")],
+        close=[_D("105"), _D("105")],
+        volume=[_D("1000")] * 2,
+        quote_volume=[None] * 2,
     )
     cfg = _config(magnifier_tf=Timeframe.M1)
     fallback = run_quick_backtest(
@@ -268,16 +302,28 @@ def test_magnifier_without_lower_columns_warns_and_uses_lower_when_given() -> No
     # 매수 스탑 105는 하위 봉 순서상 108 세그먼트에서 트리거(봉 단위 확대라면 low→high 순서).
     lower = _columns(["100", "108", "104", "91", "105"], volume="1000")
     lower = CandleColumns(
-        ts=[m5.ts[1] + timedelta(minutes=i) for i in range(5)], open=lower.open, high=lower.high,
-        low=lower.low, close=lower.close, volume=lower.volume, quote_volume=lower.quote_volume,
+        ts=[m5.ts[1] + timedelta(minutes=i) for i in range(5)],
+        open=lower.open,
+        high=lower.high,
+        low=lower.low,
+        close=lower.close,
+        volume=lower.volume,
+        quote_volume=lower.quote_volume,
     )
     stop = OrderIntent(OrderSide.BUY, _D("1"), order_type="stop", trigger_price=_D("105"))
     magnified = run_quick_backtest(
-        cfg, m5, timeframe=Timeframe.M5, strategy=_Scripted({0: stop}), initial_cash=_CASH,
+        cfg,
+        m5,
+        timeframe=Timeframe.M5,
+        strategy=_Scripted({0: stop}),
+        initial_cash=_CASH,
         lower_columns=lower,
     )
     assert magnified.warnings == () and [f.bar_index for f in magnified.fills] == [1]
     assert magnified.fills[0].price == apply_slippage(
-        cfg.slippage, side=OrderSide.BUY, reference_price=_D("105"), quantity=_D("1"),
+        cfg.slippage,
+        side=OrderSide.BUY,
+        reference_price=_D("105"),
+        quantity=_D("1"),
         bar_volume=m5.volume[1],
     )

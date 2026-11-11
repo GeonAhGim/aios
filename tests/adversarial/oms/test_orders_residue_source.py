@@ -3,6 +3,7 @@
 FA-15 replay parity and INVARIANTS I-07/I-10: the wired gate must fail
 on the actual cross-tenant test seed, even though its assertions pass.
 """
+
 import os
 from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
@@ -23,9 +24,7 @@ async def test_actual_source_has_incident_digest_but_shared_worker_stays_clean(
     isolated_event_pool,  # noqa: F811 -- imported fixture
 ):
     await run_source(isolated_event_pool)
-    report = await replay_verify.verify(
-        isolated_event_pool, as_of=datetime.now(UTC), hours=24
-    )
+    report = await replay_verify.verify(isolated_event_pool, as_of=datetime.now(UTC), hours=24)
     mismatches = [m for m in report.mismatches if m.domain == "orders"]
     assert len(mismatches) == 1
     assert mismatches[0].replayed_digest.startswith("b5073f2d")
