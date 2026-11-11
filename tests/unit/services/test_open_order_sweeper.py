@@ -342,3 +342,123 @@ async def test_provider_scope_sweep_wall_within_budget_and_injected_delay_trips_
     delayed = virtual_delayed_async(_seed_and_sweep, seconds=_PROVIDER_SWEEP_BUDGET_MS * 10 / 1000)
     slow = await perf_budget.best_of_async(delayed, n=3)
     assert slow.wall_ms >= _PROVIDER_SWEEP_BUDGET_MS
+
+
+async def test_account_scope_rejects_non_uuid_scope_ref(pool):
+    """negative — ACCOUNT scope_ref가 UUID가 아니면 fail-closed로 거부한다."""
+    with pytest.raises(MalformedScopeRefError):
+        await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.ACCOUNT,
+            scope_ref="not-a-uuid",
+        )
+
+
+async def test_account_scope_unknown_account_matches_nothing_and_leaves_orders(pool):
+    """negative — 주문이 없는 계정을 지목하면 0건이고 다른 계정 주문은 그대로다."""
+    tenant = await create_test_user(pool)
+    order = await _seed_order(pool, tenant)
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(uuid4()),
+    )
+
+    assert report.cancel_requested == ()
+    assert await _status_of(pool, order) == "SUBMITTED"
+
+
+async def test_account_scope_skips_terminal_orders_of_that_account(pool):
+    """negative — 해당 계정의 종결 상태 주문은 skipped로만 보고되고 불변이다."""
+    tenant = await create_test_user(pool)
+    live = await _seed_order(pool, tenant)
+    filled = await _seed_order(pool, tenant, status="FILLED")
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant),
+    )
+
+    assert live in report.cancel_requested
+    assert filled in report.skipped
+    assert await _status_of(pool, filled) == "FILLED"
+
+
+async def test_account_scope_adapter_failure_does_not_leak_to_other_account(pool):
+    """실패주입 — 어댑터 cancel 예외는 adapter_failed로 기록되고 타 계정 주문은 불변."""
+    tenant_a = await create_test_user(pool)
+    tenant_b = await create_test_user(pool)
+    order_a = await _seed_order(pool, tenant_a)
+    order_b = await _seed_order(pool, tenant_b)
+
+    report = await sweep_open_orders(
+        pool,
+        {"bitget": _RaisingCancelAdapter(exchange_name="bitget")},
+        control_id=uuid4(),
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_a),
+    )
+
+    assert report.adapter_failed == (order_a,)
+    assert await _status_of(pool, order_b) == "SUBMITTED"
+
+
+async def test_account_scope_assertion_catches_broken_scope_ref(pool):
+    """게이트 적색 재현 — scope_ref를 타 계정으로 망가뜨리면
+    test_account_scope_only_that_accounts_order의 단언이 실제로 적색이 된다."""
+    tenant_a = await create_test_user(pool)
+    tenant_b = await create_test_user(pool)
+    order_a = await _seed_order(pool, tenant_a)
+    await _seed_order(pool, tenant_b)
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=str(tenant_b),
+    )
+
+    with pytest.raises(AssertionError):
+        assert report.cancel_requested == (order_a,)
+    assert await _status_of(pool, order_a) == "SUBMITTED"
+
+
+# 실측(로컬 Windows, PG, best-of-3 wall): seed+sweep 1건 ≈ 2.5 ms(PROVIDER와 동급).
+# 예산 100ms는 실측의 40배 여유(CI 경합 흡수), 예산 10배 가상 지연으로 적색 검출.
+_ACCOUNT_SWEEP_BUDGET_MS = 100.0
+
+
+@pytest.mark.perf
+async def test_account_scope_sweep_wall_within_budget_and_injected_delay_trips_it(
+    pool, perf_budget
+):
+    """성능 단언 + 검출력 — 정상 호출은 예산 이내, 10배 가상 지연은 적색."""
+    from tests.support.perf_inject import virtual_delayed_async
+
+    tenant = await create_test_user(pool)
+
+    async def _seed_and_sweep():
+        await _seed_order(pool, tenant)
+        return await sweep_open_orders(
+            pool,
+            _adapters("bitget"),
+            control_id=uuid4(),
+            scope=SafetyScope.ACCOUNT,
+            scope_ref=str(tenant),
+        )
+
+    sample = await perf_budget.best_of_async(_seed_and_sweep, n=3, warmup=1)
+    assert sample.wall_ms < _ACCOUNT_SWEEP_BUDGET_MS, sample.wall_ms
+
+    delayed = virtual_delayed_async(_seed_and_sweep, seconds=_ACCOUNT_SWEEP_BUDGET_MS * 10 / 1000)
+    slow = await perf_budget.best_of_async(delayed, n=3)
+    assert slow.wall_ms >= _ACCOUNT_SWEEP_BUDGET_MS
