@@ -13,6 +13,7 @@ from src.foundation.positions.adapters.postgres_journal_repository import (
     PostgresJournalRepository,
 )
 from src.foundation.positions.application.record_fill import UnknownPositionError
+from src.foundation.positions.domain.cost_basis.fifo import NegativeQuantityError
 from tests.integration.foundation.positions.record_fill_fixtures import (
     _BoomAuditAppender,
     _command,
@@ -393,3 +394,107 @@ async def test_first_buy_perf_budget_and_10x_injection_gate_red(pool, ports, per
         PostgresJournalRepository.append = original
         reset_virtual_totals()
     assert slow.wall_ms >= BUDGET_MS
+
+
+# --- DEEPEN-DEPTH LB-11 partial close (negative / failure injection / replay) ---
+
+
+async def _seed_long_10(pool, ports):
+    tenant_id, account_id, position_key = await _open(pool)
+    order_id = uuid4()
+    await _record(
+        pool,
+        ports,
+        _command(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            position_key=position_key,
+            side=OrderSide.BUY,
+            quantity=Decimal("10"),
+            order_id=order_id,
+            fill_seq=1,
+        ),
+    )
+    return tenant_id, account_id, position_key, order_id
+
+
+def _partial_sell(tenant_id, account_id, position_key, order_id, quantity, fill_seq=2):
+    return _command(
+        tenant_id=tenant_id,
+        account_id=account_id,
+        position_key=position_key,
+        side=OrderSide.SELL,
+        quantity=quantity,
+        price=Decimal("120"),
+        order_id=order_id,
+        fill_seq=fill_seq,
+    )
+
+
+async def test_partial_close_oversell_of_remainder_rejected(pool, ports):
+    """Negative 1: after a partial close (10 -> 6), selling 7 is an over-sell and is rejected."""
+    tenant_id, account_id, position_key, order_id = await _seed_long_10(pool, ports)
+    await _record(
+        pool, ports, _partial_sell(tenant_id, account_id, position_key, order_id, Decimal("4"))
+    )
+    with pytest.raises(NegativeQuantityError):
+        await _record(
+            pool,
+            ports,
+            _partial_sell(tenant_id, account_id, position_key, order_id, Decimal("7"), fill_seq=3),
+        )
+    assert await _journal_count(pool, position_key) == 2
+    async with pool.acquire() as conn:
+        snap = await ports.snapshots.get(conn, tenant_id, position_key)
+    assert snap.quantity == Decimal("6") and snap.last_journal_seq == 2
+
+
+async def test_partial_close_on_empty_position_rejected(pool, ports):
+    """Negative 2: a sell on a freshly opened (no lots) position is rejected."""
+    tenant_id, account_id, position_key = await _open(pool)
+    with pytest.raises(NegativeQuantityError):
+        await _record(
+            pool,
+            ports,
+            _partial_sell(tenant_id, account_id, position_key, uuid4(), Decimal("4")),
+        )
+    assert await _journal_count(pool, position_key) == 0
+
+
+async def test_partial_close_wrong_account_rejected(pool, ports):
+    """Negative 3: a partial close from another account is UnknownPositionError."""
+    tenant_id, _, position_key, order_id = await _seed_long_10(pool, ports)
+    with pytest.raises(UnknownPositionError):
+        await _record(
+            pool,
+            ports,
+            _partial_sell(tenant_id, uuid4(), position_key, order_id, Decimal("4")),
+        )
+    assert await _journal_count(pool, position_key) == 1
+    async with pool.acquire() as conn:
+        snap = await ports.snapshots.get(conn, tenant_id, position_key)
+    assert snap.quantity == Decimal("10") and snap.realized_pnl_base == Decimal("0")
+
+
+async def test_partial_close_audit_failure_rolls_back_remainder(pool, ports):
+    """Failure injection: audit failure on a partial close keeps the 10-lot snapshot."""
+    tenant_id, account_id, position_key, order_id = await _seed_long_10(pool, ports)
+    command = _partial_sell(tenant_id, account_id, position_key, order_id, Decimal("4"))
+    with pytest.raises(RuntimeError, match="injected audit failure"):
+        await _record(pool, ports, command, audit=_BoomAuditAppender())
+    assert await _journal_count(pool, position_key) == 1
+    async with pool.acquire() as conn:
+        snap = await ports.snapshots.get(conn, tenant_id, position_key)
+    assert snap.quantity == Decimal("10") and snap.last_journal_seq == 1
+    assert snap.realized_pnl_base == Decimal("0")
+
+
+async def test_partial_close_replay_keeps_remainder_and_pnl(pool, ports):
+    """Adversarial replay: a resent partial close neither re-closes lots nor re-realizes PnL."""
+    tenant_id, account_id, position_key, order_id = await _seed_long_10(pool, ports)
+    command = _partial_sell(tenant_id, account_id, position_key, order_id, Decimal("4"))
+    first = await _record(pool, ports, command)
+    replayed = await _record(pool, ports, command)
+    assert replayed.quantity == Decimal("6") == first.quantity
+    assert replayed.realized_pnl_base == first.realized_pnl_base == Decimal("80")
+    assert await _journal_count(pool, position_key) == 2
