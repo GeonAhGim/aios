@@ -29,6 +29,7 @@ from tests.foundation.integration.reconciliation._reconciliation_test_support im
     risk_repo,
     tenant,
 )
+from tests.support.perf_inject import virtual_delayed_async
 
 __all__ = ["pool", "repo", "connection_repo", "risk_repo"]
 
@@ -269,7 +270,8 @@ async def test_resolve_missing_target_rejection_budget_injection_detects_delay(
 async def test_resolve_missing_target_rejection_budget_self_validates(pool, repo, perf_budget):
     """PLT mutation budget: the budget assertion itself is self-validating.
 
-    Run with a 1-second sleep — the p95 must exceed the 800 ms budget.
+    Uses virtual_delayed_async to inject 1 s of wall-clock delay without
+    actually sleeping — the p95 must still exceed the 800 ms budget.
     This proves the assertion fires red when latency is artificially high.
 
     DoD: gate-red reproduction (task-15971).
@@ -277,9 +279,11 @@ async def test_resolve_missing_target_rejection_budget_self_validates(pool, repo
     tenant_id = await tenant(pool)
 
     async def _probe_once_slow() -> None:
-        await asyncio.sleep(1.0)
         with pytest.raises(ReconciliationStateNotFoundError):
-            await resolve_reconciliation(
+            await virtual_delayed_async(
+                resolve_reconciliation,
+                1.0,
+            )(
                 repo,
                 tenant_id=tenant_id,
                 actor_subject_id=tenant_id,
