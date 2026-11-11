@@ -32,6 +32,10 @@ from tests.integration.conftest import create_test_user
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 from tests.unit.services.conftest import _adapters, _seed_execution, _seed_order, _status_of
 
+# Local measurement (2026-11-11): seed + sweep of one order, best-of-5 wall ~1.6ms.
+# Budget 100ms = ~60x headroom (>=30x rule); cpu_ms reads 0 (clock tick), so wall_ms is gated.
+PERF_BUDGET_MS = 100.0
+
 
 async def test_global_scope_requests_cancel_across_tenants(pool):
     user_a = await create_test_user(pool)
@@ -203,3 +207,74 @@ async def test_strategy_deployment_exec_prefix_rejects_non_digit_id(pool):
             scope=SafetyScope.STRATEGY_DEPLOYMENT,
             scope_ref="exec:not-a-number",
         )
+
+
+async def test_global_scope_leaves_terminal_orders_untouched(pool):
+    """Negative — GLOBAL의 TRUE 조건이 종결 주문까지 되살리면 안 된다."""
+    user_id = await create_test_user(pool)
+    filled = await _seed_order(pool, user_id, status="FILLED")
+    cancelled = await _seed_order(pool, user_id, status="CANCELLED")
+
+    report = await sweep_open_orders(
+        pool, _adapters("bitget"), control_id=uuid4(), scope=SafetyScope.GLOBAL, scope_ref=""
+    )
+
+    assert not {filled, cancelled} & set(report.cancel_requested)
+    assert await _status_of(pool, filled) == "FILLED"
+    assert await _status_of(pool, cancelled) == "CANCELLED"
+
+
+async def test_global_scope_without_adapter_never_reports_cancel_requested_as_failed_open(pool):
+    """Negative — 어댑터가 없는 거래소의 열린 주문은 조용히 성공 처리되면 안 된다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id, exchange="bitget")
+
+    report = await sweep_open_orders(
+        pool, {}, control_id=uuid4(), scope=SafetyScope.GLOBAL, scope_ref=""
+    )
+
+    assert order_id not in report.cancel_requested or order_id in report.adapter_failed
+    assert order_id in set(report.cancel_requested) | set(report.adapter_failed)
+
+
+async def test_global_scope_second_sweep_does_not_rerequest_cancel(pool):
+    """Negative — 이미 CANCEL_REQUESTED인 주문은 두 번째 GLOBAL sweep에서 재요청되지 않는다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+    kwargs = {"control_id": uuid4(), "scope": SafetyScope.GLOBAL, "scope_ref": ""}
+
+    await sweep_open_orders(pool, _adapters("bitget"), **kwargs)
+    second = await sweep_open_orders(pool, _adapters("bitget"), **kwargs)
+
+    assert order_id not in second.cancel_requested
+    assert await _status_of(pool, order_id) == "CANCEL_REQUESTED"
+
+
+@pytest.mark.perf
+async def test_global_scope_sweep_perf_budget_and_injected_delay_goes_red(pool, perf_budget):
+    """Perf + gate-red — 단일 주문 sweep을 best_of_async로 측정해 예산 단언을 걸고,
+    virtual_delayed_async 10x 지연 주입 시 같은 단언이 실제로 적색이 되는지 확인한다.
+    예산 근거: 모듈 상단 PERF_BUDGET_MS 주석의 로컬 실측(~1.6ms) 대비 30x 이상 여유."""
+    from tests.support.perf_inject import virtual_delayed_async
+
+    user_id = await create_test_user(pool)
+    adapter = _adapters("bitget")["bitget"]
+
+    async def _sweep():
+        await _seed_order(pool, user_id)
+        return await sweep_open_orders(
+            pool, {"bitget": adapter}, control_id=uuid4(),
+            scope=SafetyScope.TENANT, scope_ref=str(user_id),
+        )  # fmt: skip
+
+    baseline = await perf_budget.best_of_async(_sweep, n=5, warmup=1)
+    assert baseline.wall_ms < PERF_BUDGET_MS, perf_budget.describe(
+        baseline, budget_ms=PERF_BUDGET_MS
+    )
+
+    adapter.cancel_order = virtual_delayed_async(
+        adapter.cancel_order, seconds=PERF_BUDGET_MS * 10 / 1000
+    )
+    slow = await perf_budget.best_of_async(_sweep, n=3, warmup=0)
+    assert slow.wall_ms >= PERF_BUDGET_MS * 10, "delay injection must be visible to the gate"
+    assert slow.wall_ms > PERF_BUDGET_MS
