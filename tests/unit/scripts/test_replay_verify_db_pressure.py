@@ -11,7 +11,6 @@ no real socket or TEST_DATABASE_URL needed.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -69,41 +68,35 @@ async def test_await_db_capacity_returns_immediately_under_threshold(
 @pytest.mark.asyncio
 async def test_perf_budget_guard_fails_on_injected_sleep_delay(
     perf_budget: Any,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Gate-red reproduction: injecting a real sleep delay larger than the
+    """Gate-red reproduction: injecting a virtual sleep delay larger than the
     50 ms budget must push wall_ms past the same assertion, proving the green
     test is not vacuously passing.
 
-    Uses `delayed_async` from perf_inject to wrap the real `asyncio.sleep`,
-    adding ~60 ms of wall-clock delay per backoff step — the first backoff
-    step alone exceeds the 50 ms budget. The probe returns over-threshold
-    so the backoff path fires.
+    Uses a virtual sleep callable that records wall time to the perf_inject
+    ledger without actually sleeping — `PerfBudget.sample_async` reads the
+    ledger and includes the delta in the returned sample, so the assertion
+    sees the same wall time a real delay would have produced.
 
-    We pass the delayed sleep directly (not via monkeypatch) to avoid
-    recursion: `delayed_async` internally calls `asyncio.sleep`, and a
-    global monkeypatch on `asyncio.sleep` would make that internal call
-    resolve to the wrapped version again.
+    Each backoff step records 60 ms of virtual wall time; 3 steps → 180 ms
+    virtual wall, well above the 50 ms budget.
     """
-    import asyncio as aio
+    from tests.support.perf_inject import _add_virtual
 
-    from tests.support.perf_inject import delayed_async
-
-    # Build a sleep callable that adds ~60 ms wall-clock delay per call
-    # without touching the module-level asyncio.sleep (avoids recursion
-    # since delayed_async itself calls asyncio.sleep internally).
-    _real_sleep = aio.sleep
-    delayed_sleep: Callable[[float], Awaitable[None]] = delayed_async(_real_sleep, 0.06)
+    async def _virtual_sleep(delay: float) -> None:
+        # Record 60 ms virtual wall time per call (matches the original
+        # delayed_async(0.06) intent) — no real sleep occurs.
+        _add_virtual(0.0, 0.06)
 
     probe, calls = _make_probe([(80, 100)])
 
     async def _once() -> None:
         await pressure.await_db_capacity(
-            "postgresql://u:p@localhost/db", sleep=delayed_sleep, probe=probe
+            "postgresql://u:p@localhost/db", sleep=_virtual_sleep, probe=probe
         )
 
     sample = await perf_budget.sample_async(_once)
-    # 60 ms injected delay >> 50 ms budget → wall_ms must blow past it.
+    # 60 ms × 3 backoff steps = 180 ms virtual wall >> 50 ms budget.
     assert sample.wall_ms >= 50, (
         f"budget guard did not fire: wall={sample.wall_ms:.3f}ms < 50ms "
         f"(cpu={sample.cpu_ms:.3f}ms, calls={calls()})"
