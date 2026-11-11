@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -29,6 +31,7 @@ from tests.integration.oms.conftest import create_test_user
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 _MISSING_ID_PARSE_BUDGET_MS = 50.0
+_FILL_FLOW_BUDGET_MS = 500.0
 
 
 async def test_fill_event_reaches_inbox_and_marks_order_filled_idempotently(pool):
@@ -420,3 +423,53 @@ async def test_fill_assertions_go_red_when_event_targets_wrong_order(pool):
         assert order["status"] == "FILLED"
     with pytest.raises(AssertionError):
         assert fills_count == 1
+
+
+async def _run_fill_flow(pool) -> None:
+    """One fresh order + one FILL event through WS -> inbox -> FILLED."""
+    user_id = await create_test_user(pool)
+    ex_id, cid = f"ex-{uuid4().hex}", f"cid-{uuid4().hex}"
+    order_id = await _insert_order(
+        pool, user_id, quantity=Decimal("2"), exchange_order_id=ex_id, client_order_id=cid
+    )
+    message = _envelope([_order_row(order_id=ex_id, client_id=cid)])
+    connection = _FakeConnection([message], hang=True)
+    task = asyncio.create_task(
+        subscribe_bitget_orders_to_inbox(
+            _no_rest_calls_adapter(),
+            InboxProcessor(pool),
+            connect_fn=lambda url: _TrackingConnectCtx(connection),
+            ping_sleep_fn=_never,
+        )
+    )
+    status = "SUBMITTED"
+    for _ in range(200):
+        async with pool.acquire() as conn:
+            status = await conn.fetchval("SELECT status FROM orders WHERE order_id = $1", order_id)
+        if status == "FILLED":
+            break
+        await asyncio.sleep(0.005)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert status == "FILLED"
+
+
+@pytest.mark.perf
+async def test_fill_event_flow_within_budget(pool, perf_budget):
+    """Perf -- best-of-N wall budget for the fill->inbox->FILLED flow. Local
+    best-of-3 measurement: ~15 ms wall (2026-11-12); 500 ms budget = ~33x headroom."""
+    sample = await perf_budget.best_of_async(lambda: _run_fill_flow(pool), n=3, warmup=1)
+    print(f"fill_flow wall_ms={sample.wall_ms:.3f}")
+    assert sample.wall_ms < _FILL_FLOW_BUDGET_MS, f"fill_flow wall={sample.wall_ms:.3f}ms"
+
+
+@pytest.mark.perf
+async def test_fill_event_flow_budget_goes_red_under_10x_virtual_delay(pool, perf_budget):
+    """Gate-red repro -- 10x virtual delay must trip the same assertion."""
+    from tests.support.perf_inject import virtual_delayed_async
+
+    slow = virtual_delayed_async(lambda: _run_fill_flow(pool), _FILL_FLOW_BUDGET_MS * 10 / 1000)
+    sample = await perf_budget.best_of_async(slow, n=2)
+    with pytest.raises(AssertionError, match="fill_flow"):
+        assert sample.wall_ms < _FILL_FLOW_BUDGET_MS, f"fill_flow wall={sample.wall_ms:.3f}ms"
