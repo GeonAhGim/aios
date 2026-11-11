@@ -82,6 +82,7 @@ def test_legacy_baseline_warns_without_write_then_migrates(tmp_path: Path, capsy
     assert json.loads(baseline.read_text())['file_locs'] == {'src/a.py': 520}
 
 
+@pytest.mark.perf
 def test_budget_check_reuses_scan_and_stays_within_gate_budget(tmp_path: Path, monkeypatch) -> None:
     _, _, args = setup_tree(tmp_path)
     def unexpected_scan(*args, **kwargs):
