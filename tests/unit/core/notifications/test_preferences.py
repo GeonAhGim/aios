@@ -210,18 +210,20 @@ class TestUpdateNotificationPreferencesPerformance:
     @pytest.mark.perf
     async def test_p95_latency_detects_budget_violation(self, perf_budget, pool):
         """Failure-injection: 1s delay pushes p95 over 1000ms budget (red gate)."""
-        import asyncio as _asyncio
+        from tests.support.perf_inject import virtual_delayed_async
 
         user_id = await create_test_user(pool)
         counter = 0
 
-        async def slow_upsert_closure():
+        async def upsert_closure():
             nonlocal counter
             counter += 1
-            await _asyncio.sleep(1)  # 1s per call → p95 ≈ 1000ms, exceeds 1000ms budget
             await update_notification_preferences(
                 pool, user_id, {"risk_mismatch_email": bool(counter % 2)}
             )
+
+        # 1s virtual delay per call → p95 ≈ 1000ms+, exceeds 1000ms budget (no real sleep)
+        slow_upsert_closure = virtual_delayed_async(upsert_closure, 1.0)
 
         samples = await perf_budget.samples_async(slow_upsert_closure, n=20)
         wall_ms_list = sorted(s.wall_ms for s in samples)
