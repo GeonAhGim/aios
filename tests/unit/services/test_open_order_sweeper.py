@@ -101,7 +101,19 @@ async def test_global_scope_requests_cancel_across_tenants(pool, perf_budget, mo
             assert_budget(slow)
 
 
-async def test_provider_scope_only_matching_exchange(pool):
+@pytest.mark.parametrize("evidence", [
+    "unknown", "terminal", "repeat", "failure", "gate_red",
+    pytest.param("perf", marks=pytest.mark.perf),
+])
+async def test_provider_scope_only_matching_exchange(pool, perf_budget, evidence):
+    """R-39: PROVIDER 격리·음성 3종·실패 주입·I-07/I-10 적색 재현.
+
+    기존 100ms 예산을 그대로 사용한다(모듈의 로컬 실측 1.6ms, 60배 여유).
+    비동기 DB 왕복은 best_of_async로 측정하고 10배 가상 지연을 주입한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_async
+    from tests.unit.services.conftest import _RaisingCancelAdapter
+
     user_id = await create_test_user(pool)
     bitget_order = await _seed_order(pool, user_id, exchange="bitget")
     binance_order = await _seed_order(pool, user_id, exchange="binance")
@@ -116,6 +128,75 @@ async def test_provider_scope_only_matching_exchange(pool):
 
     assert report.cancel_requested == (bitget_order,)
     assert await _status_of(pool, binance_order) == "SUBMITTED"
+
+    async def sweep(ref="bitget", adapters=None):
+        return await sweep_open_orders(
+            pool, _adapters("bitget", "binance") if adapters is None else adapters,
+            control_id=uuid4(), scope=SafetyScope.PROVIDER, scope_ref=ref,
+        )
+
+    if evidence == "unknown":
+        # SQL 공격 문자열도 거래소 이름으로 바인딩되어 어떤 주문도 선택하지 않는다.
+        result = await sweep("bitget' OR TRUE --")
+        assert result.cancel_requested == ()
+        assert await _status_of(pool, binance_order) == "SUBMITTED"
+    elif evidence == "terminal":
+        terminal = await _seed_order(pool, user_id, exchange="bitget", status="FILLED")
+        result = await sweep()
+        assert terminal in result.skipped
+        assert terminal not in result.cancel_requested
+        assert await _status_of(pool, terminal) == "FILLED"
+    elif evidence == "repeat":
+        result = await sweep()
+        assert result.cancel_requested == ()
+        assert await _status_of(pool, bitget_order) == "CANCEL_REQUESTED"
+    elif evidence == "failure":
+        pending = await _seed_order(pool, user_id, exchange="bitget")
+        adapter = _RaisingCancelAdapter(exchange_name="bitget")
+        result = await sweep(adapters={"bitget": adapter})
+        assert result.adapter_failed == (pending,)
+        assert adapter.cancel_call_count == 1
+        assert await _status_of(pool, pending) == "CANCEL_REQUESTED"
+        assert await _status_of(pool, binance_order) == "SUBMITTED"
+    elif evidence == "gate_red":
+        # 잘못된 provider를 실제 입력하면 기존 격리 단언이 적색이어야 한다(I-07).
+        async with pool.acquire() as conn:
+            expected = {row["order_id"] for row in await conn.fetch(
+                "SELECT order_id FROM orders WHERE exchange = 'binance' "
+                "AND status IN ('SUBMITTED', 'PARTIALLY_FILLED')"
+            )}
+        report = await sweep("binance")
+        assert binance_order in expected
+        assert set(report.cancel_requested) == expected
+        with pytest.raises(AssertionError):
+            assert report.cancel_requested == (bitget_order,)
+        with pytest.raises(AssertionError):
+            assert await _status_of(pool, binance_order) == "SUBMITTED"
+    else:
+        adapter = _adapters("bitget")["bitget"]
+
+        async def measured_sweep():
+            pending = await _seed_order(pool, user_id, exchange="bitget")
+            result = await sweep(adapters={"bitget": adapter})
+            assert result.cancel_requested == (pending,)
+            assert result.adapter_failed == ()
+            return result
+
+        def assert_budget(sample):
+            assert sample.wall_ms < PERF_BUDGET_MS, perf_budget.describe(
+                sample, budget_ms=PERF_BUDGET_MS
+            )
+
+        baseline = await perf_budget.best_of_async(measured_sweep, n=5, warmup=1)
+        assert_budget(baseline)
+        adapter.cancel_order = virtual_delayed_async(
+            adapter.cancel_order, seconds=PERF_BUDGET_MS * 10 / 1000
+        )
+        slow = await perf_budget.best_of_async(measured_sweep, n=3, warmup=0)
+        assert slow.wall_ms >= PERF_BUDGET_MS * 10
+        with pytest.raises(AssertionError, match="budget<"):
+            assert_budget(slow)
+        assert await _status_of(pool, binance_order) == "SUBMITTED"
 
 
 async def test_tenant_scope_does_not_affect_other_tenants_order(pool):
