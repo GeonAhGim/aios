@@ -311,3 +311,124 @@ async def test_close_period_rejects_reclose_of_same_as_of_date(
     still_there = await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=as_of_date)
     assert still_there is not None
     assert still_there.balances[debit_code] == Decimal("10.00")
+
+
+async def _seed_close_fixture(pool, fund_id, portfolio_id, accounts, amount: str) -> datetime:
+    debit_code, credit_code = accounts
+    account_ids = {
+        debit_code: await _account_id(pool, debit_code),
+        credit_code: await _account_id(pool, credit_code),
+    }
+    cutoff = datetime.now(UTC) - timedelta(hours=1)
+    await _insert_dated_entry(
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=cutoff,
+        lines=_balanced_pair(debit_code, credit_code, Decimal(amount)),
+        account_ids=account_ids,
+    )
+    return cutoff
+
+
+async def test_close_period_rejects_naive_closing_recorded_at_and_persists_nothing(
+    pool, fund_id, portfolio_id, accounts
+):
+    """Negative: a naive closing cutoff is refused and no snapshot row is written."""
+    as_of_date = date(2026, 9, 3)
+    with pytest.raises(NaiveCutoffError):
+        await abor_snapshot.close_period(
+            pool,
+            fund_id=fund_id,
+            as_of_date=as_of_date,
+            closing_recorded_at=datetime(2026, 1, 1),
+        )
+    assert await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=as_of_date) is None
+
+
+async def test_get_snapshot_of_unclosed_date_is_none_and_other_date_is_isolated(
+    pool, fund_id, portfolio_id, accounts
+):
+    """Negative: closing one as_of_date never makes a different date look closed."""
+    cutoff = await _seed_close_fixture(pool, fund_id, portfolio_id, accounts, "5.00")
+    await abor_snapshot.close_period(
+        pool, fund_id=fund_id, as_of_date=date(2026, 9, 4), closing_recorded_at=cutoff
+    )
+    assert (
+        await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=date(2026, 9, 5)) is None
+    )
+    assert (
+        await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=date(2026, 9, 4))
+        is not None
+    )
+
+
+async def test_close_period_ibor_failure_injection_persists_no_snapshot(
+    pool, fund_id, portfolio_id, accounts, monkeypatch
+):
+    """Failure injection: the IBOR recompute fails -> the error propagates and nothing is persisted."""
+    cutoff = await _seed_close_fixture(pool, fund_id, portfolio_id, accounts, "7.00")
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("injected ibor failure")
+
+    monkeypatch.setattr(ibor_view, "compute_ibor_view", _boom)
+    as_of_date = date(2026, 9, 6)
+    with pytest.raises(RuntimeError, match="injected ibor failure"):
+        await abor_snapshot.close_period(
+            pool, fund_id=fund_id, as_of_date=as_of_date, closing_recorded_at=cutoff
+        )
+    monkeypatch.undo()
+    assert await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=as_of_date) is None
+
+
+async def test_close_period_persisted_value_assertion_catches_a_corrupted_snapshot(
+    pool, fund_id, portfolio_id, accounts
+):
+    """Gate-red repro: the persisted-equals-recomputed assertion fails on a tampered balance,
+    and the snapshot hash changes with it."""
+    cutoff = await _seed_close_fixture(pool, fund_id, portfolio_id, accounts, "42.00")
+    closed = await abor_snapshot.close_period(
+        pool, fund_id=fund_id, as_of_date=date(2026, 9, 7), closing_recorded_at=cutoff
+    )
+    expected = await ibor_view.compute_ibor_view(pool, fund_id=fund_id, cutoff=cutoff)
+    assert closed.balances == expected.balances
+
+    code = accounts[0]
+    corrupted = {**closed.balances, code: closed.balances[code] + Decimal("0.01")}
+    assert corrupted != expected.balances
+    assert abor_snapshot._snapshot_hash(corrupted) != closed.snapshot_hash
+    assert abor_snapshot._snapshot_hash(expected.balances) == closed.snapshot_hash
+
+
+async def _close_once(pool, fund_id, cutoff, as_of_date: date) -> None:
+    await abor_snapshot.close_period(
+        pool, fund_id=fund_id, as_of_date=as_of_date, closing_recorded_at=cutoff
+    )
+
+
+@pytest.mark.perf
+async def test_close_period_budget_and_10x_delay_red(
+    pool, fund_id, portfolio_id, accounts, perf_budget, monkeypatch
+):
+    """Perf: close_period over one posting pair, best-of-3 wall_ms (real DB round trips), local
+    measurement ~1 ms vs a 1500ms budget (>30x headroom). Gate-red: a virtual delay
+    (>10x the measurement) on the IBOR recompute must breach it."""
+    from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
+
+    budget_ms = 1500.0
+    cutoff = await _seed_close_fixture(pool, fund_id, portfolio_id, accounts, "3.00")
+    counter = iter(range(1, 1000))
+
+    async def _one() -> None:
+        await _close_once(pool, fund_id, cutoff, date(2030, 1, 1) + timedelta(days=next(counter)))
+
+    reset_virtual_totals()
+    ok = await perf_budget.best_of_async(_one, n=3, warmup=1)
+    assert ok.wall_ms < budget_ms, perf_budget.describe(ok, budget_ms=budget_ms)
+
+    slow_ibor = virtual_delayed_async(ibor_view.compute_ibor_view, budget_ms / 1000)
+    monkeypatch.setattr(ibor_view, "compute_ibor_view", slow_ibor)
+    slow = await perf_budget.best_of_async(_one, n=3, warmup=1)
+    reset_virtual_totals()
+    assert slow.wall_ms >= budget_ms, "injected delay did not breach the budget"
