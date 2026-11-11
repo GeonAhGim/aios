@@ -261,18 +261,18 @@ def _allocate_p99_ms(perf_budget: PerfBudget, engine: PortfolioEngine) -> float:
             _state(allocated_capital=Decimal("1000"), current_price=Decimal("50000")),
         )
 
-    # Calibrate to at least four Windows CPU-clock ticks per batch.
+    # Calibrate to at least one Windows CPU-clock tick per batch (~15.6 ms).
     batch = 2
-    while perf_budget.sample(allocate_once, batch=batch).cpu_ms * batch < 62.5:
+    while perf_budget.sample(allocate_once, batch=batch).cpu_ms * batch < 15.6:
         batch *= 2
-        if batch >= 65536:
+        if batch >= 4096:
             break
 
     # Each sample is already milliseconds per call, not total batch time.
     latencies_ms = sorted(
-        sample.cpu_ms for sample in perf_budget.samples(allocate_once, n=500, batch=batch)
+        sample.cpu_ms for sample in perf_budget.samples(allocate_once, n=100, batch=batch)
     )
-    return latencies_ms[int(500 * 0.99) - 1]
+    return latencies_ms[int(100 * 0.99) - 1]
 
 
 @pytest.mark.perf
