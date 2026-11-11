@@ -312,7 +312,7 @@ async def test_evaluate_trust_freshness_perf_budget_catches_10x_delay_injection(
     예산 경계 (p95 단언이 적색) — wall-clock 예산이므로 sleep 으로
             충분히 검출 가능.
     """
-    import asyncio
+    from tests.support.perf_inject import virtual_delayed_async
 
     context = _context()
     disclosure = _disclosure(purpose="p1")
@@ -321,18 +321,15 @@ async def test_evaluate_trust_freshness_perf_budget_catches_10x_delay_injection(
 
     async def _run_once() -> None:
         repo = FakeTrustRepository(disclosure=disclosure, consent=consent)
-        # Patch the instance methods with delayed versions (instance-level
-        # patching avoids class-level descriptor issues with dataclasses).
+        # Patch the instance methods with virtual-delayed versions.
+        # virtual_delayed_async adds 50 ms to the wall ledger without
+        # actually sleeping, so the perf-budget measurement sees the same
+        # delay a real asyncio.sleep(0.05) would produce — in ~0 wall time.
         orig_disc = repo.get_active_disclosure
         orig_consent = repo.get_latest_consent
 
-        async def delayed_disc(purpose: str) -> Disclosure | None:
-            await asyncio.sleep(0.05)
-            return await orig_disc(purpose)
-
-        async def delayed_consent(tenant_id: UUID, purpose: str) -> Consent | None:
-            await asyncio.sleep(0.05)
-            return await orig_consent(tenant_id, purpose)
+        delayed_disc = virtual_delayed_async(orig_disc, 0.05)
+        delayed_consent = virtual_delayed_async(orig_consent, 0.05)
 
         monkeypatch.setattr(repo, "get_active_disclosure", delayed_disc)
         monkeypatch.setattr(repo, "get_latest_consent", delayed_consent)
