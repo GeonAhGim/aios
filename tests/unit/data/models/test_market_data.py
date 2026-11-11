@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.data.models.market_data import Candle, OrderBook, OrderBookLevel, Ticker
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 
 def test_ticker_construction():
@@ -159,3 +160,67 @@ def test_perf_construct_1000_tickers(perf_budget):
             )
 
     perf_budget.assert_within(_run, budget_ms=200, label="construct 1000 Tickers")
+
+
+@pytest.mark.perf
+def test_perf_gate_red_when_ticker_construction_is_10x_over_budget(
+    perf_budget, monkeypatch
+) -> None:
+    """performance gate-red: 10x injection (0.002 s x 1000 = 2000 ms virtual) must
+    exceed the 200 ms budget, proving the gate fires on real overload."""
+
+    reset_virtual_totals()
+
+    from src.data.models.market_data import Ticker as _Ticker
+
+    monkeypatch.setattr(_Ticker, "__init__", virtual_delayed_sync(_Ticker.__init__, 0.002))
+
+    def _run() -> None:
+        for i in range(1000):
+            _Ticker(
+                symbol="BTC/USDT",
+                exchange="bitget",
+                price=Decimal(f"{i}.5"),
+                bid=Decimal(f"{i}.0"),
+                ask=Decimal(f"{i}.5"),
+                volume_24h=Decimal("1234.5"),
+                timestamp=datetime.now(UTC),
+                source_type="primary",
+            )
+
+    sample = perf_budget.best_of(_run, n=3, warmup=0)
+    assert sample.cpu_ms >= 200, (
+        f"injected 2000 ms virtual delay but measured only {sample.cpu_ms:.0f} ms"
+    )
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(_run, budget_ms=200, n=1, warmup=0)
+
+
+def test_replay_round_trip_reproduces_identical_ticker() -> None:
+    """replay D3: serialise → deserialise must yield an identical object, and
+    two independent replays of the same payload must also be identical.
+    Decimal and tz-aware datetime must survive the round-trip intact."""
+
+    payload = {
+        "symbol": "ETH/USDT",
+        "exchange": "bitget",
+        "price": Decimal("3250.75"),
+        "bid": Decimal("3250.50"),
+        "ask": Decimal("3251.00"),
+        "volume_24h": Decimal("9876.543"),
+        "timestamp": datetime(2025, 6, 15, 12, 30, 0, tzinfo=UTC),
+        "source_type": "primary",
+    }
+
+    original = Ticker(**payload)
+    dumped = original.model_dump_json()
+    restored = Ticker.model_validate_json(dumped)
+
+    assert restored == original
+    assert restored.price == Decimal("3250.75")
+    assert restored.timestamp.tzinfo is not None
+
+    # Two independent replays of the same payload must match
+    replay_a = Ticker.model_validate_json(dumped)
+    replay_b = Ticker.model_validate_json(dumped)
+    assert replay_a == replay_b
