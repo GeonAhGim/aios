@@ -46,7 +46,9 @@ def test_local_adapter_satisfies_kms_port_protocol_statically() -> None:
 @pytest.mark.perf
 @pytest.mark.parametrize("inject_delay", [False, True], ids=["budget", "gate-red-10x"])
 def test_encrypt_decrypt_roundtrip_via_port_matches_direct_encryption_call(
-    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch, inject_delay: bool,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+    inject_delay: bool,
 ) -> None:
     """Reuse the existing 5ms budget; verify parity and reject 10x virtual delay."""
     ring = _ring()
@@ -73,7 +75,8 @@ def test_encrypt_decrypt_roundtrip_via_port_matches_direct_encryption_call(
     try:
         if inject_delay:
             monkeypatch.setattr(
-                encryption, "encrypt",
+                encryption,
+                "encrypt",
                 virtual_delayed_sync(encryption.encrypt, 10 * _ROUNDTRIP_BUDGET_MS / 1000),
             )
         sample = perf_budget.best_of(roundtrip, n=5, batch=256)

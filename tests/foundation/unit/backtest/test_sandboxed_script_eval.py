@@ -281,7 +281,9 @@ def test_sandbox_forces_spawn_start_method(monkeypatch: pytest.MonkeyPatch) -> N
     with pytest.raises(ScriptSandboxCrashError):
         run_sandboxed(
             _crash_immediately,
-            limits=SandboxLimits(wallclock_sec=10, rss_mb=512),
+            # start method만 보는 테스트라 시간 상한은 hang 방지용이다. 10초는 호스트 부하로 spawn
+            # 자식 기동이 늦으면 ScriptSandboxTimeoutError가 먼저 났다(full CI 1f9eb9e9d).
+            limits=SandboxLimits(wallclock_sec=60, rss_mb=512),
         )
 
     assert captured_start_method[0] == "spawn", (

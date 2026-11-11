@@ -122,11 +122,13 @@ async def test_replay_deterministic_gate_red_with_delayed_fills(pool, monkeypatc
         await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
 
-    # 4초 가상 지연 주입 -- calibration 편차에도 ratio>500x 유지 (실제 sleep 없이 측정치만 느리게)
+    # 40초 가상 지연 주입 -- calibration 편차에도 ratio>500x 유지 (실제 sleep 없이 측정치만 느리게).
+    # 4초였을 때 호스트 부하로 calibration이 ~50ms에서 370~630ms가 되면 ratio가 158~272x로 내려가
+    # 500x를 못 넘었다(full CI 1f9eb9e9d). 녹색 단언(<500x)은 그대로, 적색 증명의 주입량만 키운다.
     monkeypatch.setattr(
         FillsRepository,
         "list_for_order",
-        virtual_delayed_async(FillsRepository.list_for_order, 4.0),
+        virtual_delayed_async(FillsRepository.list_for_order, 40.0),
     )
 
     sample = await RelativeBudget().measure_async(
@@ -331,11 +333,13 @@ async def test_replay_verify_gate_red_reproduction_with_delayed_fills(pool, monk
         await _seed_ledger_entry(pool)
     as_of = _clock() + timedelta(minutes=1)
 
-    # 4초 가상 지연 주입 -- calibration 편차에도 ratio>500x 유지 (실제 sleep 없이 측정치만 느리게)
+    # 40초 가상 지연 주입 -- calibration 편차에도 ratio>500x 유지 (실제 sleep 없이 측정치만 느리게).
+    # 4초였을 때 호스트 부하로 calibration이 ~50ms에서 370~630ms가 되면 ratio가 158~272x로 내려가
+    # 500x를 못 넘었다(full CI 1f9eb9e9d). 녹색 단언(<500x)은 그대로, 적색 증명의 주입량만 키운다.
     monkeypatch.setattr(
         FillsRepository,
         "list_for_order",
-        virtual_delayed_async(FillsRepository.list_for_order, 4.0),
+        virtual_delayed_async(FillsRepository.list_for_order, 40.0),
     )
 
     # 같은 단언 -- 지연 주입으로 ratio가 500x를 압도적으로 초과해야 함
