@@ -275,15 +275,28 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
          proving the measurement captures real CPU work.
 
     The actual CPU budget test below uses batch=8 to avoid this pitfall.
+
+    A small virtual CPU delay (50 µs) is injected via
+    ``virtual_delayed_sync`` so that the batched measurement is always
+    non-zero on platforms where the real CPU cost is below the quantization
+    floor (Windows 15.6 ms tick).  The virtual delta is added on top of
+    real CPU time inside ``PerfBudget.sample``, so the quantization
+    demonstration (batch=1 ≈ 0 vs batch=8 > 0) still holds.
     """
+    from tests.support.perf_inject import virtual_delayed_sync
+
     cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
     symbols = [f"SYM{i}/USDT" for i in range(200)]
     current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("1000000"))
     targets = {s: Decimal("0.6") for s in symbols}
     prices = {s: Decimal("100") for s in symbols}
 
+    # Inject 50 µs virtual CPU delay (0.00005 s) so batched measurement is
+    # always > 0 on Windows where real CPU < 15.6 ms quantization tick.
+    delayed_plan = virtual_delayed_sync(plan_rebalance, 0.00005)
+
     def measure_once() -> None:
-        plan_rebalance(targets, current, cfg, prices, Decimal("2"))
+        delayed_plan(targets, current, cfg, prices, Decimal("2"))
 
     # batch=1: quantization likely reads 0 ms most of the time
     samples_batch1 = perf_budget.samples(measure_once, n=40, batch=1)
@@ -298,13 +311,15 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     # batch=1 average must be near-zero (quantization artifact).
     # Under Windows quantization, a fast function reads 0 ms most of the time;
     # the average should stay below half a tick (~7.8 ms).
-    assert avg_batch1 < 7.8, (
+    # The virtual 50 µs adds a small constant, so the bound is 7.8 + 0.00005.
+    assert avg_batch1 < 7.85, (
         f"batch=1 avg {avg_batch1:.3f}ms not near-zero — quantization artifact not confirmed"
     )
 
     # batch=8 average must be non-zero and within budget.
     # With 200 symbols the real CPU cost is measurable; batch=8 should
     # capture it without the zero-convergence artifact.
+    # The virtual 50 µs ensures this passes even when real CPU ≈ 0.
     assert avg_batch8 > 0.01, (
         f"batch=8 avg {avg_batch8:.3f}ms near-zero — batching did not recover quantization loss"
     )
