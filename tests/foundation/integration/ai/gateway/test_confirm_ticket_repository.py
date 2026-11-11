@@ -235,12 +235,8 @@ async def test_concurrent_mark_consumed_only_one_request_wins(
     )
 
     results = await asyncio.gather(
-        repo.mark_consumed(
-            ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)
-        ),
-        repo.mark_consumed(
-            ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)
-        ),
+        repo.mark_consumed(ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)),
+        repo.mark_consumed(ticket.ticket_id, execute_digest=_DIGEST, now=datetime.now(UTC)),
     )
     winners = [r for r in results if r is not None]
     assert len(winners) == 1
