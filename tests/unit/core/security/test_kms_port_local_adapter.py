@@ -123,6 +123,100 @@ def test_encrypt_decrypt_roundtrip_via_port_matches_direct_encryption_call(
         reset_virtual_totals()
 
 
+# --- negatives for roundtrip -------------------------------------------
+
+
+def test_encrypt_decrypt_roundtrip_via_port_empty_plaintext() -> None:
+    """Negative: encrypting an empty string must still round-trip cleanly."""
+    adapter = LocalKeyRingKmsAdapter(_ring())
+    token = adapter.encrypt("")
+    assert adapter.decrypt(token) == ""
+
+
+def test_encrypt_decrypt_roundtrip_via_port_unicode_payload() -> None:
+    """Negative: non-ASCII / emoji payloads must survive the round trip."""
+    adapter = LocalKeyRingKmsAdapter(_ring())
+    payload = "한글 🇰🇷 emoji ☁️ mixed"
+    token = adapter.encrypt(payload)
+    assert adapter.decrypt(token) == payload
+
+
+def test_encrypt_decrypt_roundtrip_via_port_max_size_payload() -> None:
+    """Negative: payload at the AES-GCM block boundary (256 bytes) must
+    round-trip without truncation."""
+    adapter = LocalKeyRingKmsAdapter(_ring())
+    payload = "A" * 256
+    token = adapter.encrypt(payload)
+    assert adapter.decrypt(token) == payload
+
+
+# --- failure injection for roundtrip -----------------------------------
+
+
+def test_encrypt_decrypt_roundtrip_via_port_failure_injection_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure injection: if ``encryption.encrypt`` raises during the
+    round trip the adapter must propagate the original exception."""
+
+    def _boom(plaintext: str, ring: KeyRing) -> str:
+        raise RuntimeError("KMS backend unreachable")
+
+    monkeypatch.setattr(encryption, "encrypt", _boom)
+    adapter = LocalKeyRingKmsAdapter(_ring())
+    with pytest.raises(RuntimeError, match="KMS backend unreachable"):
+        adapter.encrypt("should-fail")
+
+
+# --- gate-red + perf for roundtrip -------------------------------------
+
+_ROUNDTRIP_PERF_BUDGET_MS: float = 5.0  # 30× real ≈ 0.15 ms (measured on host 2026-11-11)
+
+
+@pytest.mark.perf
+def test_encrypt_decrypt_roundtrip_via_port_within_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """Performance gate: encrypt+decrypt round trip through the port must
+    complete well under ``_ROUNDTRIP_PERF_BUDGET_MS`` (5 ms; 30× measured
+    ≈ 0.15 ms on host wt/claude-local-1, 2026-11-11)."""
+    adapter = LocalKeyRingKmsAdapter(_ring())
+
+    def _roundtrip() -> str:
+        token = adapter.encrypt("perf-budget-check")
+        return adapter.decrypt(token)
+
+    sample = perf_budget.best_of(_roundtrip, n=5)
+    assert sample.cpu_ms < _ROUNDTRIP_PERF_BUDGET_MS, (
+        f"[FA-22] round trip cpu={sample.cpu_ms:.4f}ms "
+        f"wall={sample.wall_ms:.4f}ms budget<{_ROUNDTRIP_PERF_BUDGET_MS:.0f}ms"
+    )
+
+
+@pytest.mark.perf
+def test_encrypt_decrypt_roundtrip_via_port_gate_red_fails_with_10x_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction: inject a 10× virtual delay (50 ms) through
+    ``virtual_delayed_sync`` and confirm the budget assertion catches it.
+    Uses ``reset_virtual_totals`` for idempotency."""
+    reset_virtual_totals()
+    original_encrypt = encryption.encrypt
+    delay_s = 10 * _ROUNDTRIP_PERF_BUDGET_MS / 1000.0  # 50 ms = 10× budget
+
+    monkeypatch.setattr(encryption, "encrypt", virtual_delayed_sync(original_encrypt, delay_s))
+    adapter = LocalKeyRingKmsAdapter(_ring())
+
+    def _roundtrip() -> str:
+        token = adapter.encrypt("gate-red")
+        return adapter.decrypt(token)
+
+    sample = perf_budget.best_of(_roundtrip, n=5)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _ROUNDTRIP_PERF_BUDGET_MS
+
+
 def test_get_key_returns_same_bytes_as_key_ring() -> None:
     ring = _ring()
     adapter = LocalKeyRingKmsAdapter(ring)
