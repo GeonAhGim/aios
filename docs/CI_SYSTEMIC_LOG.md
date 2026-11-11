@@ -3899,3 +3899,13 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 로컬 재현(TEST_DATABASE_URL=aios_test_qa_1): `tests/integration/eventstore -m "perf and not nightly and not live_demo"` **7 passed**; `tests/integration/eventstore/test_replay_verify_{order_chain,tamper_detection}.py` **13 passed**; `scripts/replay_verify.py --hours 24` **exit=0** (window streams=0 — 로컬 DB에 이벤트 없음); `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/` **81 passed, exit=0**.
 - 판정: 로컬 재현 불가·지목 경로 무변경 → 코드 회귀 아님. CI DB에만 있는 pre-cutover 주문(`CREATED` 이벤트 없이 `SUBMITTED`로 시작하는 이력)이 검사에 걸린 것으로 보이며, 이는 `replay_verify`의 설계된 pre-cutover skip 범주다(#43 계열). 검사 완화·기준선 상향·ignore 추가는 DECISION_GUIDELINES B-2에 따라 하지 않았다.
 - 조치: 코드 변경 없음(noop). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
+
+
+## task-23137 — type_ignore 리뷰 후속 수정 (2026-11-11)
+
+- CLAUDE.md §6 #14 조사문은 현재 HEAD `7eafcae2dbfc655fa7f4472518b2e4b269ba445e`에서 이미 이 문서 #14로 이관되어 있다. 자동 로드 지침에 조사 기록을 다시 넣지 않는다.
+- #14 등의 142/142는 당시 조사 수치이며 현재 HEAD의 수치가 아니다. 위 HEAD 작업트리에서 수정된 게이트로 재측정한 값은 **109/109**다. 예산은 올리지 않았다.
+- PLT-40: 토큰화·디코딩·파일/디렉터리 읽기 실패 및 없는 루트는 FAIL로 종료하고 예산을 보존한다. Python 선언 인코딩을 읽으며 측정 불가 파일을 0으로 취급하지 않는다.
+- build/dist 제외는 저장소 루트 산출물로 한정한다. src 아래 동명 소스 디렉터리는 집계한다. 기존 캐시 가지치기는 유지한다.
+- 예산 갱신은 같은 디렉터리 임시 파일에 flush/fsync 후 os.replace하며 실패 시 기존 파일을 보존하고 임시 파일을 정리한다.
+- 검증: 관련 30 tests passed(손상 입력 3종, 디코딩/순회/replace 실패 주입, root 경계, 적색 재현, 기존 250파일 5초 성능 예산 포함). D3/replay_verify=N/A(정적 CI 집계이며 주문·원장·시장데이터 경로 변경 없음).

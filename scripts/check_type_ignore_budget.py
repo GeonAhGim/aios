@@ -18,6 +18,7 @@ import io
 import os
 import re
 import sys
+import tempfile
 import tokenize
 from pathlib import Path
 
@@ -56,20 +57,28 @@ _EXCLUDE_DIR_NAMES = frozenset(
         ".turbo",
         "htmlcov",
         "node_modules",
-        "dist",
-        "build",
     }
 )
 
 
 class TypeIgnoreBudgetError(ValueError):
-    """budget 파일 형식 오류."""
+    """스캔 또는 budget 입력 오류."""
 
 
 def _iter_python_files(root: Path) -> list[Path]:
     out: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _EXCLUDE_DIR_NAMES]
+    if not root.is_dir():
+        raise TypeIgnoreBudgetError(f"스캔 루트가 디렉터리가 아님: {root}")
+
+    def onerror(error: OSError) -> None:
+        raise error
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=onerror):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _EXCLUDE_DIR_NAMES
+            and not (Path(dirpath) == root and d in {"build", "dist"})
+        ]
         out.extend(Path(dirpath) / f for f in filenames if f.endswith(".py"))
     return out
 
@@ -84,18 +93,19 @@ def _count_ignore_comments(text: str) -> int:
         for tok in tokenize.generate_tokens(io.StringIO(text).readline):
             if tok.type == tokenize.COMMENT and _IGNORE_COMMENT_RE.search(tok.string):
                 count += 1
-    except (tokenize.TokenError, SyntaxError, IndentationError):
-        # 파싱 불가한 파일은 안전하게 건너뛴다(8.3 원칙 — 모르는 상태를
-        # 실패로 단정하지 않는다).
-        return 0
+    except (tokenize.TokenError, SyntaxError) as exc:
+        raise TypeIgnoreBudgetError(f"토큰화 실패: {exc}") from exc
     return count
 
 
 def count_type_ignores(root: Path) -> int:
     total = 0
     for path in _iter_python_files(root):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        total += _count_ignore_comments(text)
+        try:
+            with tokenize.open(path) as source:
+                total += _count_ignore_comments(source.read())
+        except (TypeIgnoreBudgetError, OSError, UnicodeError, SyntaxError) as exc:
+            raise TypeIgnoreBudgetError(f"스캔 실패: {path}: {exc}") from exc
     return total
 
 
@@ -113,7 +123,20 @@ def read_budget(budget_path: Path) -> int | None:
 
 
 def write_budget(budget_path: Path, value: int) -> None:
-    budget_path.write_text(f"{value}\n", encoding="utf-8")
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=budget_path.parent,
+            prefix=f".{budget_path.name}.", suffix=".tmp", delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            output.write(f"{value}\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, budget_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -127,12 +150,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         current = count_type_ignores(args.root)
         budget = read_budget(args.budget_file)
-    except TypeIgnoreBudgetError as exc:
+    except (TypeIgnoreBudgetError, OSError, UnicodeError) as exc:
         print(f"FAIL: {exc}")
         return 1
 
     if budget is None:
-        write_budget(args.budget_file, current)
+        try:
+            write_budget(args.budget_file, current)
+        except OSError as exc:
+            print(f"FAIL: budget 저장 실패: {exc}")
+            return 1
         print(f"BASELINE 초기화: {current}개 -> {args.budget_file}")
         return 0
 
@@ -141,7 +168,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if current < budget:
-        write_budget(args.budget_file, current)
+        try:
+            write_budget(args.budget_file, current)
+        except OSError as exc:
+            print(f"FAIL: budget 저장 실패: {exc}")
+            return 1
         print(f"OK: type: ignore 개수 감소, budget 갱신 {budget}개 -> {current}개")
         return 0
 

@@ -114,21 +114,15 @@ def test_negative_budget_below_zero_still_fails_closed(
 # ---------------------------------------------------------------------------
 
 
-def test_failure_injection_corrupted_python_file_does_not_crash_scan(tmp_path: Path) -> None:
-    """실제 저장소에는 이번 리프처럼 대규모 수정 도중 일시적으로 문법이
-    깨진 `.py`가 커밋 전 작업트리에 섞일 수 있다 — `tokenize`가
-    `TokenError`/`SyntaxError`를 던지는 손상 파일을 주입해도 스캔 전체가
-    죽지 않고(예외 전파 없음) 그 파일만 0으로 건너뛰며 나머지 파일은
-    정상 집계되는지 확인한다(8.3 원칙 — 모르는 상태를 크래시로 만들지
-    않는다)."""
+def test_failure_injection_corrupted_python_file_rejects_scan(tmp_path: Path) -> None:
+    """손상 파일은 전체 측정을 실패시켜 예산 하향 오염을 막는다."""
     _write_py(tmp_path, "broken.py", "def f(:\n    pass\n")  # 괄호 불일치 -> TokenError
     _write_py(tmp_path, "also_broken.py", "x = (1 + \n")  # 미종결 표현식
     _write_py(tmp_path, "ok_a.py", "y = 1  # type: ignore\n")
     _write_py(tmp_path, "ok_b.py", "z = 2  # type: ignore\nw = 3  # type: ignore\n")
 
-    total = check_type_ignore_budget.count_type_ignores(tmp_path)
-
-    assert total == 3  # 손상 파일 2개는 0으로 건너뛰고 정상 파일만 집계
+    with pytest.raises(check_type_ignore_budget.TypeIgnoreBudgetError):
+        check_type_ignore_budget.count_type_ignores(tmp_path)
 
 
 # ---------------------------------------------------------------------------
