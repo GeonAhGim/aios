@@ -43,7 +43,12 @@ def test_local_adapter_satisfies_kms_port_protocol_statically() -> None:
 # --- round trip parity (behaviour must not change through the port) ----
 
 
-def test_encrypt_decrypt_roundtrip_via_port_matches_direct_encryption_call() -> None:
+@pytest.mark.perf
+@pytest.mark.parametrize("inject_delay", [False, True], ids=["budget", "gate-red-10x"])
+def test_encrypt_decrypt_roundtrip_via_port_matches_direct_encryption_call(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch, inject_delay: bool,
+) -> None:
+    """Reuse the existing 5ms budget; verify parity and reject 10x virtual delay."""
     ring = _ring()
     adapter = LocalKeyRingKmsAdapter(ring)
 
@@ -55,6 +60,32 @@ def test_encrypt_decrypt_roundtrip_via_port_matches_direct_encryption_call() -> 
     direct_token = encryption.encrypt("hello FA-22", ring)
     assert encryption.decrypt(token, ring) == "hello FA-22"
     assert encryption.decrypt(direct_token, ring) == adapter.decrypt(direct_token)
+
+    def roundtrip() -> str:
+        encrypted = adapter.encrypt("hello FA-22")
+        assert encryption.decrypt(encrypted, ring) == "hello FA-22"
+        return adapter.decrypt(encrypted)
+
+    def check_budget(cpu_ms: float) -> None:
+        assert cpu_ms < _ROUNDTRIP_BUDGET_MS, "FA-22 roundtrip budget exceeded"
+
+    reset_virtual_totals()
+    try:
+        if inject_delay:
+            monkeypatch.setattr(
+                encryption, "encrypt",
+                virtual_delayed_sync(encryption.encrypt, 10 * _ROUNDTRIP_BUDGET_MS / 1000),
+            )
+        sample = perf_budget.best_of(roundtrip, n=5, batch=256)
+        assert sample.result == "hello FA-22"
+        if inject_delay:
+            assert sample.cpu_ms >= 10 * _ROUNDTRIP_BUDGET_MS
+            with pytest.raises(AssertionError, match="FA-22 roundtrip budget exceeded"):
+                check_budget(sample.cpu_ms)
+        else:
+            check_budget(sample.cpu_ms)
+    finally:
+        reset_virtual_totals()
 
 
 def test_get_key_returns_same_bytes_as_key_ring() -> None:
