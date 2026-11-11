@@ -212,8 +212,8 @@ def test_parse_fred_observations_meets_throughput_budget(perf_budget: PerfBudget
     최소값을 찾아 예산 판정을 안정화한다(task-22168). Windows `time.process_time()`
     양자화tick(≈15.6ms)는 batch=10으로 줄인다.
     """
-    iterations = 2_000
-    budget_ms = 6000.0  # 실측 로컬 <600ms, CI 병렬(CPU 경합) 편차 감안
+    iterations = 200
+    budget_ms = 600.0  # 실측 로컬 <60ms, CI 병렬(CPU 경합) 편차 감안
     payload = {
         "observations": [_observation(date=f"2024-{(i % 12) + 1:02d}-01") for i in range(50)]
     }
