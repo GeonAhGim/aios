@@ -19,6 +19,7 @@ import asyncpg
 import pytest
 
 from tests.integration.eventstore import conftest as eventstore_conftest
+from tests.support.perf_budget import PerfBudget
 
 
 def _request_for_module(module_name: str) -> pytest.FixtureRequest:
@@ -70,3 +71,37 @@ def test_missing_database_url_propagates_keyerror(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(KeyError, match="DATABASE_URL"):
         eventstore_conftest._asyncpg_dsn()
+
+
+# ---------------------------------------------------------------------------
+# D2 performance assertion (task-23420)
+# ---------------------------------------------------------------------------
+
+
+def test_conftest_guards_complete_within_latency_budget(
+    perf_budget: PerfBudget, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All guard functions (no-DB path) must finish under 5 ms CPU each.
+
+    These are pure fixture-guards — they read env vars, build strings, and
+    raise on bad input. Any regression past 5 ms signals unintended I/O or
+    heavy computation in the guard path.
+    """
+
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+
+    def _run_all() -> None:
+        # _replay_clone_id with a registered module name (no ValueError).
+        eventstore_conftest._replay_clone_id(
+            _request_for_module("tests.integration.eventstore.test_replay_verify")
+        )
+        # _asyncpg_dsn reads DATABASE_URL from env — already set by test harness.
+        eventstore_conftest._asyncpg_dsn()
+
+    # D2 perf assertion: p95 CPU must be < 5 ms for the guard path.
+    samples = perf_budget.samples(_run_all, n=20)
+    p95_ms = sorted(s.cpu_ms for s in samples)[18]  # 19th of 20
+    assert p95_ms < 5.0, (
+        f"guard path p95={p95_ms:.1f}ms exceeds 5ms budget — "
+        "regression: guard functions must stay I/O-free"
+    )
