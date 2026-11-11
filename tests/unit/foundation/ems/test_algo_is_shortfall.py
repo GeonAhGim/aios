@@ -7,7 +7,6 @@ function tests only.
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -32,6 +31,7 @@ from src.foundation.ems.domain.algo.is_shortfall import (
 )
 from src.foundation.ems.domain.algo.twap import AlgoConstraintError as TwapAlgoConstraintError
 from src.foundation.ems.domain.algo.twap import ParentTerminalError as TwapParentTerminalError
+from tests.support.perf_budget import PerfBudget
 
 _IS_PATH = Path(__file__).resolve().parents[4] / "src/foundation/ems/domain/algo/is_shortfall.py"
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -272,11 +272,22 @@ def test_different_parent_id_changes_child_id_but_not_quantities_or_times() -> N
 
 
 @pytest.mark.perf
-def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count() -> None:
-    """500 slices (the module's own `_MAX_SLICE_COUNT` cap) x 50 calls must
-    finish well under a generous wall-clock budget -- a regression that
-    turned the per-slice O(n) loop, weight computation, or the guard calls
-    into something O(n^2) would blow well past this on 500 slices."""
+def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count(
+    perf_budget: PerfBudget,
+) -> None:
+    """One ``plan_is_schedule`` call at 500 slices (the module's
+    ``_MAX_SLICE_COUNT`` cap) must stay far under budget -- an O(n^2)
+    regression in the per-slice loop, weights, or guard calls would blow
+    past it. Measures a single call per sample (best of 5) so xdist CPU
+    contention spikes cannot accumulate across a long sample; the budget is
+    ~10x the local single-call CPU time, not inflated.
+
+    The global virtual-delay ledger is cleared first so earlier tests in the
+    same xdist worker cannot inflate ``cpu_ms`` (task-22280).
+    """
+    from tests.support.perf_inject import reset_virtual_totals
+
+    reset_virtual_totals()
     parent = _parent(
         qty=Decimal("1000000"),
         algo=_algo(
@@ -288,13 +299,16 @@ def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count() -> None:
         ),
     )
     profile = [Decimal("100000")] * 500
-    started = time.perf_counter()
-    for _ in range(50):
-        plan_is_schedule(parent, volume_profile=profile)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    assert elapsed_ms < 800, (
-        f"plan_is_schedule took {elapsed_ms:.1f}ms for 50 calls at 500 slices, "
-        "exceeding the 800ms budget."
+
+    children = plan_is_schedule(parent, volume_profile=profile)
+    assert len(children) == 500
+    assert abs(sum(c.planned_qty for c in children) - Decimal("1000000")) < Decimal("0.000001")
+
+    perf_budget.assert_within(
+        lambda: plan_is_schedule(parent, volume_profile=profile),
+        budget_ms=25.0,
+        n=5,
+        label="plan_is_schedule at 500 slices",
     )
 
 
