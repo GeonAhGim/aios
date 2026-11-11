@@ -35,6 +35,7 @@ from src.foundation.market_data.adapters.postgres_instrument_repository import (
 from src.foundation.market_data.contracts.v1 import Timeframe, Venue
 from src.foundation.market_data.contracts.v2.instruments import Instrument, InstrumentLifecycle
 from src.foundation.market_data.ports.coverage_repository import CoverageQuality, CoverageSpan
+from tests.support.perf_inject import virtual_delayed_async
 
 
 def _asyncpg_dsn() -> str:
@@ -292,7 +293,7 @@ async def test_bulk_upsert_span_latency_budget_rejects_10x_delay_injection(
 ):
     """동일한 측정/단언이 10배 지연 주입 하에서 적색으로 전환된다 —
     단언이 0 수렴 허울이 아님을 증명한다( task-11539 PERF-detection ).
-    DB 호출에 sleep을 주입해 실제 I/O 지연을 시뮬레이션하고, 같은
+    virtual_delayed_async로 20s 지연을 ledger에 기록하고, 같은
     perf_budget.sample_async() 단언이 budget을 초과함을 확인한다.
     """
     instrument_id = _fake_ulid()
@@ -301,16 +302,11 @@ async def test_bulk_upsert_span_latency_budget_rejects_10x_delay_injection(
     n = 500
     budget_sec = 15.0
 
-    # 원본 upsert_span을 보존
-    original_upsert = coverage_repo.upsert_span
-
-    async def delayed_upsert(self, conn, span, **kwargs) -> None:
-        # 500회 호출 × 0.04s = 20s 총 지연 → budget 15s 초과 (검출력 검증)
-        await asyncio.sleep(0.04)
-        return await original_upsert(conn, span, **kwargs)
+    # 가상 지연: 500회 × 0.04s = 20s (실제 sleep 없음, PerfBudget이 ledger로 측정)
+    cls = coverage_repo.__class__
 
     with monkeypatch.context() as patch:
-        patch.setattr(coverage_repo.__class__, "upsert_span", delayed_upsert)
+        patch.setattr(cls, "upsert_span", virtual_delayed_async(cls.upsert_span, 0.04))
 
         async def _bulk_upsert() -> None:
             for i in range(n):
