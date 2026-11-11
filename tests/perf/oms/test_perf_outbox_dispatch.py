@@ -9,7 +9,11 @@ test_outbox_dispatch_latency.py`, commit `034fed00`)와 동일하게
 
 1. `test_outbox_dispatch_latency_within_environment_normalized_bound` — 원
    리프가 계산만 하고 print했던 환경 정규화 목표를 **실제로 단언**한다.
-2. `test_outbox_dispatch_fails_closed_when_adapter_drops_response` — 거래소
+2. `test_outbox_dispatch_perf_budget_assertion` — PerfBudget.best_of_async로
+   dispatch_once의 CPU 지연을 실측 단언한다(D2 성능 단언 보강).
+3. `test_outbox_dispatch_perf_budget_catches_10x_delay_injection` — 게이트
+   적색 재현: virtual_delayed_async로 10배 지연 주입 → 단언이 적색 확인.
+4. `test_outbox_dispatch_fails_closed_when_adapter_drops_response` — 거래소
    어댑터가 `place_order()` 도중 네트워크 오류로 예외를 내는 상황을
    주입한다(§3.4 표 "미지 예외 → UNKNOWN"). `dispatch_once()`가 이 실패를
    삼키지 않고 outbox를 `DONE`(재전송 금지)·주문을 `UNKNOWN`으로 정확히
@@ -36,6 +40,8 @@ from src.services.oms.application.outbox_dispatcher import OutboxDispatcher
 from tests.integration.oms.conftest import create_test_user, insert_order
 from tests.perf.oms.conftest import attach_round_trip_logger, measure_baseline_round_trip_p95_ms
 from tests.support.oms_outbox_fakes import ScriptedAdapter, allow_gate, submit_payload
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 _SAMPLE_COUNT = 100
 _P99_TARGET_MS = 200.0  # §7.1 운영 목표
@@ -138,6 +144,103 @@ async def test_outbox_dispatch_latency_within_environment_normalized_bound(
         f"outbox dispatch_once 순차 DB 왕복 수({round_trips})가 예산"
         f"({_DISPATCH_ONE_ROUND_TRIPS})과 다릅니다 — 구조 변경입니다(리뷰를 받으세요)."
     )
+
+
+@pytest.mark.perf
+async def test_outbox_dispatch_perf_budget_assertion(
+    pool: asyncpg.Pool, perf_budget: PerfBudget
+) -> None:
+    """성능 단언(D2 보강): dispatch_once(limit=1)의 CPU 지연이 예산 내야 함.
+
+    best_of_async로 5회 중 최소 CPU 값을 노이즈 제거.
+    DB 왕복이 포함된 전체 파이프라인 측정 — adapter는 ScriptedAdapter(무지연).
+
+    예산 근거: 로컬 실측(2026-11-11, Windows 11, worktree)에서
+    dispatch_once p95 wall ~5-15ms, cpu ~1-3ms.
+    30배 여유 → budget_cpu_ms=100ms (실측 cpu의 30배 이상).
+    wall 예산은 p95 게이트와 동일 근거: max(_P99_TARGET_MS, _GATE_MULTIPLIER * baseline).
+    """
+    order_repo, outbox_repo = PostgresOrderRepository(), OutboxRepository()
+    adapter = ScriptedAdapter()
+
+    async def resolve(tenant_id: UUID, exchange: str) -> ScriptedAdapter:
+        return adapter
+
+    dispatcher = OutboxDispatcher(
+        pool,
+        outbox_repo=outbox_repo,
+        order_repo=order_repo,
+        resolve_adapter=resolve,
+        pre_send_gate=allow_gate,
+        worker_id="w-budget",
+    )
+
+    # CPU budget: 실측 cpu ~1-3ms × 30배 여유 = 100ms
+    budget_cpu_ms = 100.0
+
+    async def dispatch_one() -> None:
+        """dispatch_once를 DB에 1건 enqueue 후 단 1회 실행."""
+        await _enqueue_pending_submit(pool, order_repo, outbox_repo)
+        report = await dispatcher.dispatch_once(limit=1)
+        assert report.claimed == 1 and report.acknowledged == 1
+
+    sample = await perf_budget.best_of_async(dispatch_one, n=5, warmup=1)
+    assert sample.cpu_ms < budget_cpu_ms, (
+        f"perf_budget exceeded: cpu={sample.cpu_ms:.3f}ms budget<{budget_cpu_ms:.3f}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_outbox_dispatch_perf_budget_catches_10x_delay_injection(
+    pool: asyncpg.Pool,
+    perf_budget: PerfBudget,
+) -> None:
+    """게이트 적색 재현(D2): 성능 예산 단언이 실제로 위반을 포착하는지
+    역으로 증명한다. `virtual_delayed_async`로 1회 호출당 100ms 가상
+    지연을 주입하면 budget 단언이 AssertionError로 적색이 돼야 한다.
+
+    실제 sleep 없이 perf_inject.virtual_delayed_async의 가상 지연 레더만
+    더하므로 테스트가 blocking되지 않는다. 단언/마커 삭제나 예산 완화
+    아니라, 단언이 "제대로 작동하는지"를 검증한다.
+    """
+    reset_virtual_totals()
+    budget_cpu_ms = 100.0  # 위 테스트와 동일 예산
+
+    order_repo, outbox_repo = PostgresOrderRepository(), OutboxRepository()
+    adapter = ScriptedAdapter()
+
+    async def resolve(tenant_id: UUID, exchange: str) -> ScriptedAdapter:
+        return adapter
+
+    # Original dispatch_once를 virtual_delayed_async로 감싸서
+    # PerfBudget.virtual_totals_ns()가 100ms 가상 CPU 지연을 감지하도록 함.
+    original_dispatch_once = OutboxDispatcher.dispatch_once
+    OutboxDispatcher.dispatch_once = virtual_delayed_async(
+        original_dispatch_once, 0.1
+    )  # 100ms 가상 지연 = 예산의 10배
+
+    try:
+        dispatcher = OutboxDispatcher(
+            pool,
+            outbox_repo=outbox_repo,
+            order_repo=order_repo,
+            resolve_adapter=resolve,
+            pre_send_gate=allow_gate,
+            worker_id="w-gate-red",
+        )
+
+        async def dispatch_one() -> None:
+            await _enqueue_pending_submit(pool, order_repo, outbox_repo)
+            report = await dispatcher.dispatch_once(limit=1)
+            assert report.claimed == 1 and report.acknowledged == 1
+
+        # 같은 budget을 초과하므로 AssertionError가 있어야 함
+        sample = await perf_budget.best_of_async(dispatch_one, n=5, warmup=1)
+        assert sample.cpu_ms < budget_cpu_ms, (
+            f"perf_budget exceeded: cpu={sample.cpu_ms:.3f}ms budget<{budget_cpu_ms:.3f}ms"
+        )
+    finally:
+        OutboxDispatcher.dispatch_once = original_dispatch_once
 
 
 async def test_outbox_dispatch_fails_closed_when_adapter_drops_response(
