@@ -175,7 +175,7 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
 
     병렬 CI(pytest_perf_parallel_3)에서 CPU 경합으로 100종목 측정이
     baseline 대비 1.5x를 초과하는 날림 실패가 발생했다. fix: baseline과
-    100종목 모두 best_of(n=3)로 최소값 채택, batch=200/3으로 tick 양자화
+    100종목 모두 best_of(n=3)로 최소값 채택, batch=1200/16으로 tick 양자화
     오차를 줄인다.
     """
     baseline_cols = _columns(_YEAR_D1_BARS, step=timedelta(days=1))
@@ -200,7 +200,9 @@ def test_sweep_100_symbols_1y_d1_within_normalized_threshold(
 
     # best_of(3)로 CI 경합 노이즈를 최소화 — 병렬 워커가 CPU를 뺏어가도
     # 최소 3회 중 가장 낮은 값을 채택하므로 날림 실패가 줄어든다.
-    measured = perf_budget.best_of(lambda: _sweep(universe), n=3, batch=8)
+    # batch=16: 100종목 sweep은 ~25ms이므로 batch=16으로 묶으면 총 400ms,
+    # Windows 15.6ms tick 폭의 오차가 ~1ms로 떨어진다(batch=8이면 ~2ms).
+    measured = perf_budget.best_of(lambda: _sweep(universe), n=3, batch=16)
     elapsed_ms = measured.cpu_ms
     result = measured.result
 
