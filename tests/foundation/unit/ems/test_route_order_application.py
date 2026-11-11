@@ -17,7 +17,6 @@ for this leaf.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -270,14 +269,16 @@ async def test_route_order_perf_budget_catches_10x_delay_injection(
     candidates = _candidates(100)
     repo = FakeRouteDecisionRepository()
 
-    # insert_or_get에 100ms 지연 주입
-    original_insert = repo.insert_or_get
+    # insert_or_get에 100ms 지연 주입 — virtual_delayed_async는 실제 sleep 없이
+    # virtual wall ledger에 100ms를 적재하므로 200 calls × 100ms = 20s 측정만
+    # 생성하고 실제로는 0초가 걸린다.
+    from tests.support.perf_inject import virtual_delayed_async
 
-    async def _insert_with_delay(*args: object, **kwargs: object) -> RouteDecisionRecord:
-        await asyncio.sleep(0.1)  # 100ms per call
-        return await original_insert(*args, **kwargs)
-
-    monkeypatch.setattr(repo, "insert_or_get", _insert_with_delay)
+    monkeypatch.setattr(
+        repo,
+        "insert_or_get",
+        virtual_delayed_async(repo.insert_or_get, 0.1),
+    )
 
     async def _batch_200_delayed() -> None:
         for _ in range(200):
