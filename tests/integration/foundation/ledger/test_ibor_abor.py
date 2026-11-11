@@ -366,7 +366,7 @@ async def test_get_snapshot_of_unclosed_date_is_none_and_other_date_is_isolated(
 async def test_close_period_ibor_failure_injection_persists_no_snapshot(
     pool, fund_id, portfolio_id, accounts, monkeypatch
 ):
-    """Failure injection: the IBOR recompute fails -> the error propagates and nothing is persisted."""
+    """Failure injection: IBOR recompute fails -> error propagates, nothing persisted."""
     cutoff = await _seed_close_fixture(pool, fund_id, portfolio_id, accounts, "7.00")
 
     async def _boom(*args, **kwargs):
