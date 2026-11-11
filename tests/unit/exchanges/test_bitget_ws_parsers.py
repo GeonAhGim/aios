@@ -125,7 +125,7 @@ def test_heartbeat_spec_is_frozen_dataclass():
     assert dataclasses.is_dataclass(BITGET_HEARTBEAT)
     # frozen dataclass는 직접 setattr에 AttributeError를 던진다
     with pytest.raises(AttributeError):
-        BITGET_HEARTBEAT.interval_sec = 99.0  # type: ignore[assignment]
+        BITGET_HEARTBEAT.interval_sec = 99.0
 
 
 def test_classify_ack_with_empty_dict():
