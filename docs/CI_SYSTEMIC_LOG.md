@@ -3909,3 +3909,10 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - build/dist 제외는 저장소 루트 산출물로 한정한다. src 아래 동명 소스 디렉터리는 집계한다. 기존 캐시 가지치기는 유지한다.
 - 예산 갱신은 같은 디렉터리 임시 파일에 flush/fsync 후 os.replace하며 실패 시 기존 파일을 보존하고 임시 파일을 정리한다.
 - 검증: 관련 30 tests passed(손상 입력 3종, 디코딩/순회/replace 실패 주입, root 경계, 적색 재현, 기존 250파일 5초 성능 예산 포함). D3/replay_verify=N/A(정적 CI 집계이며 주문·원장·시장데이터 경로 변경 없음).
+
+## task-23313 — pytest_perf 24h 4회 반복 (task-23193/23257/23307/23311), 측정 설계 결함 조사 (2026-11-11)
+- 이전 조사(#43/#63/#72/#90/#101)와 달리 이번엔 실제 설계 결함이 있었다: `scripts/check_pytest_perf.py`는 여전히 없고(`pytest -m perf` 단계), 결함은 perf 테스트의 **측정기**에 있었다. 예산 숫자가 아니라 측정값이 작업 비용이 아닌 환경 잡음을 재고 있었다.
+- 원인 1(CPU 시계 눈금): Windows `time.process_time` 눈금 15.6ms — 47ms 보정 루프가 눈금 3개라 비율이 ±33% 흔들림(test_parser 2.0x > 1.6x). 수정 d3ea4fb8e: RelativeBudget이 실제 시계로 짧은 작업을 150ms 창으로 묶어 측정.
+- 원인 2(순환 GC 재스캔): 결과/AST 캐시가 쌓인 힙을 GC가 측정 구간 안에서 재스캔 — sweep_universe 100종목 초선형 비용(d3ea4fb8e), env_keys perf가 앞선 테스트의 힙 크기를 잼(c0d7cba54: PerfBudget.sample이 timeit처럼 collect 후 구간 동안 GC off).
+- 임계값·기준선 완화 없음(B-2 준수). 매번 다른 테스트가 적색이던 이유 = 공통 측정기의 잡음 두 종류. 두 근본 수정이 HEAD에 있으므로 재발 시 task 인용: 먼저 해당 테스트가 RelativeBudget/PerfBudget.sample을 쓰는지, 짧은 작업(<150ms)을 묶음 없이 재는지 확인.
+- D2: N/A(조사·로그 리프, 코드 수정은 위 두 커밋이 수행·테스트 포함).
