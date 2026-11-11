@@ -45,6 +45,7 @@ from src.data.models.trading import OrderSide
 from src.services.oms.application.inbox_processor import InboxProcessor
 from src.services.oms.contracts.v1_events import FillEvent, ProviderOrderEvent
 from tests.integration.oms.conftest import create_test_user
+from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 # ---- D2: 수치 성능/처리량 단언 (CI 게이트) ---------------------------------
 
