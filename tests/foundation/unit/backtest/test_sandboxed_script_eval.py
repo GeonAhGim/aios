@@ -265,30 +265,20 @@ def test_sandbox_forces_spawn_start_method(monkeypatch: pytest.MonkeyPatch) -> N
     respects an environment default), the child inherits the parent's RSS
     and the RSS-limit check becomes meaningless.
     """
-    captured_start_method: list[str | None] = [None]
+    class ExecutorContextCaptured(Exception):
+        pass
 
-    # Spy on get_context calls to record which start method the sandbox uses.
-    # Must patch on the sandboxed_script_eval module because it imports
-    # `get_context` directly (from multiprocessing import get_context).
-    orig_context = sandboxed_script_eval.get_context
+    def capture_executor(*, max_workers, mp_context):
+        # Inspect the context actually passed to the executor, before any
+        # process starts. Child startup latency is unrelated to this contract.
+        assert max_workers == 1
+        assert mp_context.get_start_method() == "spawn"
+        raise ExecutorContextCaptured
 
-    def _spy_context(*args, **kwargs) -> object:
-        captured_start_method[0] = args[0] if args else kwargs.get("method")
-        return orig_context(*args, **kwargs)
+    monkeypatch.setattr(sandboxed_script_eval, "ProcessPoolExecutor", capture_executor)
 
-    monkeypatch.setattr(sandboxed_script_eval, "get_context", _spy_context)
-
-    with pytest.raises(ScriptSandboxCrashError):
-        run_sandboxed(
-            _crash_immediately,
-            # start method만 보는 테스트라 시간 상한은 hang 방지용이다. 10초는 호스트 부하로 spawn
-            # 자식 기동이 늦으면 ScriptSandboxTimeoutError가 먼저 났다(full CI 1f9eb9e9d).
-            limits=SandboxLimits(wallclock_sec=60, rss_mb=512),
-        )
-
-    assert captured_start_method[0] == "spawn", (
-        f"Expected 'spawn' but got '{captured_start_method[0]}' — child RSS will leak from parent"
-    )
+    with pytest.raises(ExecutorContextCaptured):
+        run_sandboxed(_crash_immediately)
 
 
 def test_broken_pool_maps_to_crash_error_with_broken_executor_cause() -> None:
