@@ -27,6 +27,7 @@ from src.foundation.ai.gateway.application.issue_token import issue_token
 from src.foundation.ai.gateway.domain.token_rules import Scope
 from tests._perf.relative_budget import RelativeBudget
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import virtual_delayed_async
 
 _NOW = datetime.now(UTC)
 _DIGEST = "a" * 64
@@ -162,14 +163,12 @@ async def test_issue_get_mark_consumed_round_trip_budget_catches_10x_delay_injec
         label="repo.get(normal)",
     )
 
-    # 적색 주입 — fetchrow에 10초 지연을 주입
-    original_fetchrow = asyncpg.Connection.fetchrow
-
-    async def delayed_fetchrow(self, *args, **kwargs):
-        await asyncio.sleep(10.0)
-        return await original_fetchrow(self, *args, **kwargs)
-
-    monkeypatch.setattr(asyncpg.Connection, "fetchrow", delayed_fetchrow)
+    # 적색 주입 — fetchrow에 10초 가상 지연을 주입(실제 sleep 없음, 측정치에만 더해진다)
+    monkeypatch.setattr(
+        asyncpg.Connection,
+        "fetchrow",
+        virtual_delayed_async(asyncpg.Connection.fetchrow, 10.0),
+    )
 
     with pytest.raises(AssertionError) as exc_info:
         await RelativeBudget().assert_within_async(

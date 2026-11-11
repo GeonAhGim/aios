@@ -204,22 +204,22 @@ async def test_register_perf_goes_red_with_io_delay_injection(
     pool: asyncpg.Pool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """gate-red reproduction: asyncpg.Connection.execute 에 IO 지연(delayed_async,
-    2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
+    """gate-red reproduction: asyncpg.Connection.execute 에 가상 IO 지연(
+    virtual_delayed_async, 2.0s)을 주입한 후 같은 성능 단언을 돌리면 예산을 초과해야 한다(red).
 
-    `conn.execute` 를 `delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
-    주입 — register 는 I/O 바인딩 연산이므로 wall-clock 측정으로 지연을
+    `conn.execute` 를 `virtual_delayed_async` 로 감싸 1회 호출당 2초 IO 지연을
+    측정치에 주입(실제 sleep 없음) — register 는 I/O 바인딩 연산이므로 wall-clock 측정으로 지연을
     검증한다. 정상 입력에서 통과하는 것이 테스트의 허수(trivial pass)가
     아님을 보증한다. 단언/마커 삭제와 예산 완화 금지.
 
-    task-17653: delay injection uses ``delayed_async`` from
+    task-17653: delay injection uses ``virtual_delayed_async`` from
     ``tests.support.perf_inject`` (no ``# type: ignore``).
     """
-    from tests.support.perf_inject import delayed_async
+    from tests.support.perf_inject import virtual_delayed_async
 
-    # asyncpg.Connection.execute 를 delayed_async 로 감싸 IO 지연 주입
+    # asyncpg.Connection.execute 를 virtual_delayed_async 로 감싸 IO 지연 주입
     original_execute = asyncpg.Connection.execute
-    monkeypatch.setattr(asyncpg.Connection, "execute", delayed_async(original_execute, 2.0))
+    monkeypatch.setattr(asyncpg.Connection, "execute", virtual_delayed_async(original_execute, 2.0))
 
     budget = RelativeBudget()
 

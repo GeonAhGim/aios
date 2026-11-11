@@ -121,16 +121,18 @@ async def test_gate_red_reproduction_allocate_fills_latency_budget_catches_db_re
     유발했다. 첫 실행을 측정해야 원장 쓰기가 멱등 replay로 생략되지 않는다.
     """
     from src.foundation.allocation.application import allocate_fills as allocation_module
-    from tests.support.perf_inject import delayed_async
+    from tests.support.perf_inject import virtual_delayed_async
 
     await test_allocate_order_fills_latency_stays_within_normalized_ceiling(pool)
     monkeypatch.setattr(
-        allocation_module, "_resolve_target", delayed_async(allocation_module._resolve_target, 0.5)
+        allocation_module,
+        "_resolve_target",
+        virtual_delayed_async(allocation_module._resolve_target, 0.5),
     )
     monkeypatch.setattr(
         allocation_module,
         "_post_allocation_entry",
-        delayed_async(allocation_module._post_allocation_entry, 0.5),
+        virtual_delayed_async(allocation_module._post_allocation_entry, 0.5),
     )
 
     entities, journal, balances, audit = await _ports(pool)
