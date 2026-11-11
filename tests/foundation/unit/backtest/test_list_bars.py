@@ -178,11 +178,17 @@ def test_construction_propagates_upstream_bar_source_failure() -> None:
 
 @pytest.mark.perf
 def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
-    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms."""
+    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms.
+
+    Each ``PerfBudget.sample()`` runs ``gc.collect()`` around the timed region;
+    sampling all 5 000 indices means 5 000 full collections, which crashed the
+    xdist worker under load. A stratified subset (every 5th bar, 1 000 samples)
+    still spans the whole index range, so the p95 estimate stays meaningful.
+    """
     fixture = _bars(5_000)
     bars = ListBars(fixture)
     samples_ms: list[float] = []
-    for bar_index in range(len(fixture)):
+    for bar_index in range(0, len(fixture), 5):
 
         def _call(idx: int = bar_index) -> Sequence[Candle]:
             return bars.upto(idx)
