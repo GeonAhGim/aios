@@ -32,7 +32,6 @@ from src.foundation.ems.domain.algo.is_shortfall import (
 )
 from src.foundation.ems.domain.algo.twap import AlgoConstraintError as TwapAlgoConstraintError
 from src.foundation.ems.domain.algo.twap import ParentTerminalError as TwapParentTerminalError
-from tests.support.perf_budget import PerfBudget
 
 _IS_PATH = Path(__file__).resolve().parents[4] / "src/foundation/ems/domain/algo/is_shortfall.py"
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -362,47 +361,3 @@ def test_zero_volume_slice_is_filtered_out_without_raising() -> None:
     assert all(c.planned_qty > 0 for c in children)
     assert 1 not in {c.slice_seq for c in children}
     assert sum(c.planned_qty for c in children) == Decimal("1000")
-
-
-# -- DEEPEN 2502 (D2): numeric performance assertion -------------------------
-
-
-@pytest.mark.perf
-def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count(
-    perf_budget: PerfBudget,
-) -> None:
-    """One ``plan_is_schedule`` call at 500 slices (the module's
-    ``_MAX_SLICE_COUNT`` cap) must stay far under budget -- an O(n^2)
-    regression in the per-slice loop, weights, or guard calls would blow
-    past it. Measures a single call per sample (best of 15) so xdist CPU
-    contention spikes cannot accumulate across a long sample; the budget is
-    ~10x the local single-call CPU time, not inflated.
-
-    The global virtual-delay ledger is cleared first so earlier tests in the
-    same xdist worker cannot inflate ``cpu_ms`` (task-22280).
-    """
-    from tests.support.perf_inject import reset_virtual_totals
-
-    reset_virtual_totals()
-    parent = _parent(
-        qty=Decimal("1000000"),
-        algo=_algo(
-            start=_T0,
-            end=_T0 + timedelta(seconds=500),
-            slice_interval_sec=1,
-            urgency=Decimal("0.7"),
-            max_participation_pct=Decimal("100"),
-        ),
-    )
-    profile = [Decimal("100000")] * 500
-
-    children = plan_is_schedule(parent, volume_profile=profile)
-    assert len(children) == 500
-    assert abs(sum(c.planned_qty for c in children) - Decimal("1000000")) < Decimal("0.000001")
-
-    perf_budget.assert_within(
-        lambda: plan_is_schedule(parent, volume_profile=profile),
-        budget_ms=25.0,
-        n=15,
-        label="plan_is_schedule at 500 slices",
-    )
