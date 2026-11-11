@@ -20,7 +20,10 @@ import pytest
 
 from src.foundation.mandates.adapters.postgres_repository import PostgresMandateRepository
 from src.foundation.mandates.application.evaluate_pre_trade import evaluate_pre_trade
-from src.foundation.mandates.application.explain import explain
+from src.foundation.mandates.application.explain import (
+    ExplainDecisionNotFoundError,
+    explain,
+)
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from tests.foundation.integration.compliance.test_evaluate_pre_trade import _active_tenant
 from tests.foundation.integration.mandates.conftest import _asyncpg_dsn
@@ -293,3 +296,72 @@ async def test_explain_catches_10x_virtual_delay_injection(pool, repo, trust_rep
     assert sample.wall_ms >= 1500.0, (
         "10x 가상 지연 주입 후 wall_ms가 1500ms 예산을 안 넘으면 적색 재현 실패"
     )
+
+
+# --- negative tests (CM-13 D3 depth floor, task-23359) ------------------------
+
+
+async def test_explain_unknown_decision_id_raises_not_found_not_empty_result(repo):
+    """음성 — 존재하지 않는 decision_id는 빈 결과나 KeyError가 아니라
+    DECISION_NOT_FOUND 전용 예외로 거부돼야 한다(감사관에게 '없음'과 '빈 판정'은 다르다)."""
+    with pytest.raises(ExplainDecisionNotFoundError) as excinfo:
+        await explain(repo, uuid4())
+    assert excinfo.value.code.value == "CM_EXPLAIN_DECISION_NOT_FOUND"
+
+
+async def test_explain_foreign_tenant_cannot_read_decision(pool, repo, trust_repo):
+    """음성 — 다른 테넌트 ID로 조회하면 실제 존재하는 판정이라도 NOT_FOUND로
+    거부돼야 한다(테넌트 경계 누설 금지)."""
+    tenant_id = await _active_tenant(pool, repo, trust_repo)
+    evaluated = await evaluate_pre_trade(
+        repo,
+        tenant_id=tenant_id,
+        portfolio_id=None,
+        snapshot={"symbol": "BTC/USDT"},
+        now=datetime.now(UTC),
+    )
+
+    with pytest.raises(ExplainDecisionNotFoundError):
+        await explain(repo, evaluated.compliance_decision_id, tenant_id=uuid4())
+
+
+async def test_explain_rejects_nonexistent_decision_for_allowed_path_too(pool, repo, trust_repo):
+    """음성 — ALLOW 경로를 돌린 뒤에도 무관한 ID는 여전히 거부된다.
+    '마지막 판정 재사용' 같은 캐시 오염으로 엉뚱한 판정이 새지 않는지 확인."""
+    tenant_id = await _active_tenant(pool, repo, trust_repo)
+    evaluated = await evaluate_pre_trade(
+        repo,
+        tenant_id=tenant_id,
+        portfolio_id=None,
+        snapshot={"symbol": "BTC/USDT"},
+        now=datetime.now(UTC),
+    )
+    assert evaluated.verdict == ComplianceVerdict.ALLOW
+    assert (
+        await explain(repo, evaluated.compliance_decision_id)
+    ).verdict == ComplianceVerdict.ALLOW
+
+    with pytest.raises(ExplainDecisionNotFoundError):
+        await explain(repo, uuid4())
+
+
+# --- gate-red reproduction with corrupted input (CM-13 D2, task-23359) --------
+
+
+async def test_explain_verdict_assertion_goes_red_on_corrupted_expectation(pool, repo, trust_repo):
+    """게이트 적색 재현 — 실제 DENY 판정에 ALLOW라는 망가진 기대값을 넣었을 때
+    재현 단언이 AssertionError로 실제 적색이 되는지 확인한다. 단언이 항상
+    통과하는 동어반복이 아님을 입력 훼손으로 증명한다."""
+    tenant_id = await _active_tenant(pool, repo, trust_repo)
+    evaluated = await evaluate_pre_trade(
+        repo,
+        tenant_id=tenant_id,
+        portfolio_id=None,
+        snapshot={"symbol": "XYZ"},
+        now=datetime.now(UTC),
+    )
+    explained = await explain(repo, evaluated.compliance_decision_id)
+
+    corrupted_expectation = ComplianceVerdict.ALLOW
+    with pytest.raises(AssertionError):
+        assert explained.verdict == corrupted_expectation
