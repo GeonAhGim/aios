@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -251,3 +253,89 @@ def test_openapi_flags_compound_colon_verb_mismatch(tmp_path: Path) -> None:
     hits = cc.check_openapi_frontend(tmp_path)
     assert ("contracts/openapi/v1.json#/foo/{id}:confirm", 0) in hits
     assert ("frontend/packages/api-client/src/apiRoutes.ts#/foo/:id:approve", 0) in hits
+
+
+# ---------------------------------------------------------------------------
+# 감소 지표 경고 -- CONSIST-1 decrease-warn (task-23415)
+# ---------------------------------------------------------------------------
+
+
+def _write_baseline(tmp_path: Path, data: dict) -> Path:
+    p = tmp_path / "consistency-baseline.json"
+    p.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return p
+
+
+def test_decrease_no_update_returns_0_and_warns(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """감소 지표를 `--update` 없이 실행하면 exit 0, 경고 문구 출력."""
+    baseline = {
+        "router_unregistered": 0,
+        "port_method_unimplemented": 0,
+        "port_protocol_unimplemented": 0,
+        "env_key_undocumented": 4,
+        "feature_flag_undocumented": 0,
+        "event_type_unconsumed": 4,
+        "migration_hygiene": 0,
+        "openapi_client_mismatch": 34,
+        "spec_leaf_untraced": 32,
+        "naive_datetime": 0,
+        "money_float": 0,
+        "symbol_id_assembly": 1,
+        "spec_template_incomplete": 0,
+        "authority_duplication": 4,
+    }
+    _write_baseline(tmp_path, baseline)
+    # root에 .env.example만 두고 실제 baseline은 tmp_path 사용
+    (tmp_path / ".env.example").write_text("", encoding="utf-8")
+    exit_code = cc.main(
+        ["--root", str(tmp_path), "--baseline", str(tmp_path / "consistency-baseline.json")]
+    )
+    assert exit_code == 0
+    captured = capfd.readouterr()
+    assert "WARN" in captured.out
+    assert "env_key_undocumented" in captured.out
+
+
+def test_decrease_with_update_resets_baseline(tmp_path: Path) -> None:
+    """감소 지표를 `--update`와 함께 실행하면 baseline이 현재값으로 갱신."""
+    baseline = {
+        "router_unregistered": 0,
+        "port_method_unimplemented": 0,
+        "port_protocol_unimplemented": 0,
+        "env_key_undocumented": 4,
+        "feature_flag_undocumented": 0,
+        "event_type_unconsumed": 4,
+        "migration_hygiene": 0,
+        "openapi_client_mismatch": 34,
+        "spec_leaf_untraced": 32,
+        "naive_datetime": 0,
+        "money_float": 0,
+        "symbol_id_assembly": 1,
+        "spec_template_incomplete": 0,
+        "authority_duplication": 4,
+    }
+    _write_baseline(tmp_path, baseline)
+    (tmp_path / ".env.example").write_text("", encoding="utf-8")
+    bl_path = tmp_path / "consistency-baseline.json"
+    exit_code = cc.main(
+        [
+            "--root",
+            str(tmp_path),
+            "--baseline",
+            str(bl_path),
+            "--update",
+        ]
+    )
+    assert exit_code == 0
+    updated = json.loads(bl_path.read_text(encoding="utf-8"))
+    assert updated["env_key_undocumented"] == 0
+
+
+def test_baseline_corrupted_returns_1(tmp_path: Path) -> None:
+    """baseline JSON이 손상되면 exit 1."""
+    bad = tmp_path / "consistency-baseline.json"
+    bad.write_text("{broken json!!!", encoding="utf-8")
+    exit_code = cc.main(["--baseline", str(bad)])
+    assert exit_code == 1
