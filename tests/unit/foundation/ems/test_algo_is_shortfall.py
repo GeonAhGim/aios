@@ -268,6 +268,58 @@ def test_different_parent_id_changes_child_id_but_not_quantities_or_times() -> N
     assert [c.scheduled_at for c in children_a] == [c.scheduled_at for c in children_b]
 
 
+# -- DEEPEN 2502 (D2): numeric performance assertion -------------------------
+
+
+@pytest.mark.perf
+def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count(
+    perf_budget: PerfBudget,
+) -> None:
+    """500 slices (the module's own `_MAX_SLICE_COUNT` cap) x 50 calls must
+    finish well under a generous budget -- a regression that turned the
+    per-slice O(n) loop, weight computation, or the guard calls into
+    something O(n^2) would blow well past this on 500 slices. task-7434:
+    measured via the shared process_time-based perf_budget fixture instead
+    of raw wall-clock perf_counter()."""
+    parent = _parent(
+        qty=Decimal("1000000"),
+        algo=_algo(
+            start=_T0,
+            end=_T0 + timedelta(seconds=500),
+            slice_interval_sec=1,
+            urgency=Decimal("0.7"),
+            max_participation_pct=Decimal("100"),
+        ),
+    )
+    profile = [Decimal("100000")] * 500
+
+    def _run_once() -> None:
+        for _ in range(50):
+            plan_is_schedule(parent, volume_profile=profile)
+
+    perf_budget.assert_within(
+        _run_once, budget_ms=800.0, label="50 plan_is_schedule calls at 500 slices"
+    )
+
+
+# -- DEEPEN 2502 (D2): gate-red repro -----------------------------------------
+
+
+def test_gate_red_without_the_upfront_cap_validation_the_corrupted_cap_passes_silently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing `_validate_participation_cap`'s upfront call lets a negative
+    `max_participation_pct` slip through and crash later in the planner.
+    be rejected via `_validate_participation_cap`'s up-front call."""
+    parent = _parent(
+        qty=Decimal("1000"),
+        algo=_algo(urgency=Decimal("0.5"), max_participation_pct=Decimal("10")),
+    )
+    object.__setattr__(parent.algo, "max_participation_pct", Decimal("-5"))
+    with pytest.raises(ParticipationExceededError):
+        plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
+
+
 # -- schedule snapshot: window bounds, slice pacing ---------------------------
 
 
