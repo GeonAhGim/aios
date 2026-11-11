@@ -24,6 +24,10 @@ A legitimate ``raise NotImplementedError`` (a fail-closed adapter stub) is
 excluded from the ``not_implemented_error`` count for a whole file if that
 file's first 20 lines contain a comment ``# ratchet-allow: <reason>``.
 
+Per-file LOC budgets above 500 lines prevent intra-tier growth and replacement
+from being hidden by unchanged aggregate counts (task-23318, finding 393).
+Legacy baselines warn until explicitly migrated; normal runs never rewrite them.
+
 Usage: `python scripts/check_code_ratchets.py [--update] [--near N]` (repo root).
 Exit code: 0 = pass, 2 = a count increased beyond baseline, 1 = input error.
 
@@ -307,7 +311,7 @@ def read_baseline(path: Path) -> dict[str, int] | None:
         raise CodeRatchetsError(f"baseline JSON 파싱 실패: {exc}") from exc
     if not isinstance(data, dict):
         raise CodeRatchetsError("baseline JSON은 객체여야 함")
-    unknown = sorted(set(data) - set(METRICS))
+    unknown = sorted(set(data) - set(METRICS) - {"file_locs"})
     if unknown:
         raise CodeRatchetsError(f"baseline JSON에 정의되지 않은 키: {unknown}")
     result: dict[str, int] = {}
@@ -316,11 +320,31 @@ def read_baseline(path: Path) -> dict[str, int] | None:
         if not isinstance(value, int) or isinstance(value, bool):
             raise CodeRatchetsError(f"baseline 값이 정수가 아님: {metric}={value!r}")
         result[metric] = value
+    read_file_locs(path)
     return result
 
 
-def write_baseline(path: Path, counts: dict[str, int]) -> None:
-    payload = {metric: counts[metric] for metric in METRICS}
+def read_file_locs(path: Path) -> dict[str, int] | None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if "file_locs" not in data:
+        return None
+    budgets = data["file_locs"]
+    if not isinstance(budgets, dict):
+        raise CodeRatchetsError("file_locs must be an object")
+    for rel, loc in budgets.items():
+        if (not isinstance(loc, int) or isinstance(loc, bool) or loc <= 500
+                or not rel.endswith(".py") or "\\" in rel
+                or rel.startswith("/") or ".." in rel.split("/")):
+            raise CodeRatchetsError(f"invalid file_locs entry: {rel!r}={loc!r}")
+    return budgets
+
+
+def write_baseline(
+    path: Path, counts: dict[str, int], file_locs: dict[str, int] | None = None
+) -> None:
+    payload: dict[str, object] = {metric: counts[metric] for metric in METRICS}
+    if file_locs is not None:
+        payload["file_locs"] = file_locs
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -346,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         baseline = read_baseline(args.baseline)
+        budgets = read_file_locs(args.baseline) if baseline is not None else None
     except CodeRatchetsError as exc:
         print(f"FAIL: {exc}")
         return 1
@@ -364,9 +389,20 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"    {rel}:{loc} ({threshold - loc}줄 남음)")
 
     if baseline is None:
-        write_baseline(args.baseline, current)
+        write_baseline(args.baseline, current, dict(hits["loc_over_500"]))
         print(f"BASELINE 초기화: {current} -> {args.baseline}")
         return 0
+
+    current_locs = dict(hits["loc_over_500"])
+    if budgets is None:
+        print("WARN: per-file LOC baseline absent; --update initializes measured budgets")
+    else:
+        grown = [(rel, budgets.get(rel, 500), loc) for rel, loc in current_locs.items()
+                 if loc > budgets.get(rel, 500)]
+        if grown:
+            for rel, before, after in grown:
+                print(f"FAIL: loc_growth {rel}: {before} -> {after}")
+            return 2
 
     increased = {m: (baseline[m], current[m]) for m in METRICS if current[m] > baseline[m]}
     if increased:
@@ -380,8 +416,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     decreased = {m for m in METRICS if current[m] < baseline[m]}
-    if decreased and args.update:
-        write_baseline(args.baseline, current)
+    if args.update:
+        write_baseline(args.baseline, current, current_locs)
         print(f"OK: 감소, baseline 갱신 {baseline} -> {current}")
         return 0
 

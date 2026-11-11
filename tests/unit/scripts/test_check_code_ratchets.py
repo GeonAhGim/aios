@@ -179,6 +179,7 @@ def test_first_run_initializes_baseline_from_measurement(tmp_path: Path) -> None
     assert exit_code == 0
     data = json.loads(baseline_path.read_text(encoding="utf-8"))
     assert data == {
+        "file_locs": {},
         "skip_xfail": 0,
         "todo_fixme_xxx": 0,
         "not_implemented_error": 1,

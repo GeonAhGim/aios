@@ -1,4 +1,21 @@
 {
+  "file_locs": {
+    "tests/adversarial/compliance/test_rule_purity.py": 580,
+    "tests/foundation/integration/risk_gate/test_recovery_gate.py": 678,
+    "tests/foundation/integration/risk_gate/test_risk_gate_lifecycle.py": 638,
+    "tests/foundation/unit/connections/test_begin_connection_application.py": 589,
+    "tests/integration/db/test_migration_tenant_membership.py": 568,
+    "tests/integration/foundation/entities/test_postgres_entity_repository.py": 636,
+    "tests/integration/foundation/ledger/test_backfill.py": 730,
+    "tests/integration/foundation/ledger/test_chargeback.py": 629,
+    "tests/integration/foundation/ledger/test_post_entry.py": 573,
+    "tests/integration/foundation/ledger/test_purchase_flow.py": 757,
+    "tests/integration/foundation/ledger/test_refund.py": 667,
+    "tests/integration/oms/test_cancel_modify_deepen.py": 596,
+    "tests/integration/risk/test_intraday_monitor.py": 688,
+    "tests/integration/test_order_service.py": 547,
+    "tests/unit/core/test_exceptions.py": 576
+  },
   "loc_over_1000": 0,
   "loc_over_500": 15,
   "loc_over_800": 0,
