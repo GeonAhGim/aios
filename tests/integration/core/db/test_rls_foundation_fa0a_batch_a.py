@@ -46,16 +46,28 @@ async def _seed_risk_evaluation(pool: asyncpg.Pool, tenant_id: UUID) -> None:
 
 
 async def test_account_connection_cross_tenant_select_returns_zero_rows(pool):
+    """FA-0a / task-1814 DoD(c): enforce tenant isolation through real DB RLS.
+
+    Query without a tenant filter as aios_app so application filtering cannot
+    hide a missing policy (INVARIANTS I-10). Rebind the same connection to prove
+    isolation in both directions and reject explicitly requested foreign rows.
+    """
     tenant_a = await create_test_tenant(pool)
     tenant_b = await create_test_tenant(pool)
     await _seed_account_connection(pool, tenant_a)
     await _seed_account_connection(pool, tenant_b)
 
-    async with pool.acquire() as conn, AppRoleTx(conn, tenant_id=tenant_a):
-        rows = await conn.fetch("SELECT tenant_id FROM account_connection")
-
-    assert rows
-    assert {r["tenant_id"] for r in rows} == {tenant_a}
+    async with pool.acquire() as conn:
+        for own_tenant, other_tenant in ((tenant_a, tenant_b), (tenant_b, tenant_a)):
+            async with AppRoleTx(conn, tenant_id=own_tenant):
+                assert await conn.fetchval("SELECT current_user") == "aios_app"
+                rows = await conn.fetch("SELECT tenant_id FROM account_connection")
+                assert [row["tenant_id"] for row in rows] == [own_tenant]
+                foreign_rows = await conn.fetch(
+                    "SELECT tenant_id FROM account_connection WHERE tenant_id = $1",
+                    other_tenant,
+                )
+                assert foreign_rows == []
 
 
 async def test_account_connection_select_bound_to_other_tenant_excludes_all(pool):
