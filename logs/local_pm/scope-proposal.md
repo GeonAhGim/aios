@@ -1,26 +1,78 @@
-# 파일 범위 분할 제안: task-23113
+# 파일 범위 분할 제안: task-23246 [재투입]
 
 ## 분석
 
-- 원본 files: `["src/", "type-ignore-budget.txt"]` — `src/`는 디렉터리라 파일 범위로 해석 불가(`unresolved_path_scope`).
-- 원본 spec(리뷰어 소견): 원인 커밋 `deacc374`는 `scripts/check_zone_manifest.py`만 변경, type_ignore와 무관.
-- 실측(2026-11-10, origin/main 기준): `scripts/check_type_ignore_budget.py` → `OK: type: ignore 109개 (budget 109개 이내)`. 예산 `type-ignore-budget.txt` = 109. 게이트는 이미 녹색이며 timeout 사유도 재현되지 않음.
-- `src/`의 `type: ignore` 실제 보유 파일은 5개뿐(총 8건):
-  - `src/core/indicators/generate_specs.py` (4)
-  - `src/exchanges/nh/websocket_mixin.py` (1)
-  - `src/exchanges/kis/websocket_connection.py` (1)
-  - `src/exchanges/kis/generated/_protocols.py` (1)
-  - `src/exchanges/common/http_client.py` (1)
-  (나머지 합계는 tests/scripts 쪽이다.)
+- 원본 files: `["scripts/check_consistency.py", "src/"]` — `src/`는 디렉터리라 파일 범위로 해석 불가(`unresolved_path_scope`).
+- 원본 spec: "Fix review findings: consistency 24h 5회 반복 — 단계 규칙/기준선 설계 결함 조사"
+- 실제 실패 게이트: `openapi_client_mismatch` 34건 (baseline 34, 현재 34 — 드리프트 없음)
+- 34건 내역:
+  - **18건**: OpenAPI에 있으나 프론트엔드(apiRoutes.ts)에서 호출하지 않는 백엔드 전용 경로
+  - **16건**: 프론트엔드에서 호출하나 OpenAPI에 없는 프론트엔드 전용 경로
+- 18개 백엔드 전용 경로는 모두 실제 API(POST/GET)가 존재하며, 프론트엔드 UI 화면이 없는 경우들
+- 16개 프론트엔드 전용 경로는 `apiRoutes.ts`에 있으나 실제 백엔드 라우터가 없음(프론트엔드 전용)
 
-## 제안 (파일별 분할)
+## 실제 변경 파일
 
-수정할 코드가 확인되지 않으므로 코드 분할은 불필요하다. 권고:
+**`scripts/consistency/contracts.py`** 1파일 — `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에 다음 34개 경로 추가:
 
-1. **task-23113 폐기(또는 noop done)** — 근거: 게이트 녹색(109/109), 원인 커밋 무관. 재발행 중단.
-2. 굳이 유지한다면 files를 아래로 한정:
-   - `type-ignore-budget.txt` (예산 값 확인/동기화만)
-   - 필요 시 위 5개 `src/` 파일 중 실제로 제거할 파일만 개별 지정(한 task당 1~2개).
-3. 간헐적 timeout이 실제 문제라면 별도 ops task로 `scripts/check_type_ignore_budget.py` 실행시간 계측(현재 약 2초)을 요청.
+### 백엔드 전용 (18개) — 프론트엔드 UI 없음 사유
+```
+/risk-coach/position-size
+/v1/accounts/summary
+/v1/ai/experiments/{experiment_id}
+/v1/ai/experiments/{experiment_id}/lineage
+/v1/ai/proposals/{proposal_id}
+/v1/ai/tokens/{token_id}:rotate
+/v1/assistant/explain-backtest
+/v1/assistant/explain-script
+/v1/assistant/generate-script
+/v1/foundation/compliance/mandate/status
+/v1/foundation/market-data/options/chain
+/v1/foundation/personal/bundle
+/v1/foundation/personal/daily-report
+/v1/foundation/personal/kill
+/v1/foundation/personal/promote
+/v1/foundation/personal/promotion-checklist
+/v1/foundation/research/items
+/v1/foundation/research/items/{item_id}
+```
+
+### 프론트엔드 전용 (16개) — 백엔드 라우터 없음 사유
+```
+/auth/sessions
+/auth/sessions/:sessionId
+/v1/ai/experiments
+/v1/ai/proposals/:proposalId:promote
+/v1/ai/proposals/:proposalId:promote-ticket
+/v1/ai/providers
+/v1/ai/providers/:provider
+/v1/foundation/follow/subscriptions
+/v1/foundation/follow/subscriptions/:subscriptionId
+/v1/foundation/follow/subscriptions/:subscriptionId/performance
+/v1/foundation/signals/sources
+/v1/foundation/signals/sources/:sourceId/receipts
+/v1/foundation/signals/sources/:sourceId:disable
+/v1/foundation/signals/sources/:sourceId:rotate
+/v1/foundation/whatif/preview-order
+/v1/foundation/whatif/rebalance-plan
+```
+
+## 분할안
+
+### 권장: 단일 파일·단일 커밋
+`scripts/consistency/contracts.py` 1건에 34개 allowlist 항목 추가. 기존 allowlist 패턴(경로: 사유 주석)과 동일.
+
+### 분할안 (필요시)
+| 작업 | 파일 | 설명 |
+|------|------|------|
+| A | `scripts/consistency/contracts.py` | 18개 백엔드 전용 경로 allowlist 추가 |
+| B | `scripts/consistency/contracts.py` | 16개 프론트엔드 전용 경로 allowlist 추가 |
+
+A·B는 같은 파일이므로 단일 커밋 권장. 분할해도 독립성이 낮음.
+
+## 결론
+- **권장: `scripts/consistency/contracts.py` 단일 수정 1건** (allowlist 34개 추가)
+- `src/` 전체 범위는 불필요 — 실제 변경은 contracts.py 1파일
+- baseline(34)과 현재(34)가 동일하므로 드리프트는 없음. 기존 게이트 녹색 유지 목적
 
 원본 hold 해제·재큐·코드 수정은 하지 않았다.
