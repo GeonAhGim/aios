@@ -3916,3 +3916,11 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 원인 2(순환 GC 재스캔): 결과/AST 캐시가 쌓인 힙을 GC가 측정 구간 안에서 재스캔 — sweep_universe 100종목 초선형 비용(d3ea4fb8e), env_keys perf가 앞선 테스트의 힙 크기를 잼(c0d7cba54: PerfBudget.sample이 timeit처럼 collect 후 구간 동안 GC off).
 - 임계값·기준선 완화 없음(B-2 준수). 매번 다른 테스트가 적색이던 이유 = 공통 측정기의 잡음 두 종류. 두 근본 수정이 HEAD에 있으므로 재발 시 task 인용: 먼저 해당 테스트가 RelativeBudget/PerfBudget.sample을 쓰는지, 짧은 작업(<150ms)을 묶음 없이 재는지 확인.
 - D2: N/A(조사·로그 리프, 코드 수정은 위 두 커밋이 수행·테스트 포함).
+
+## task-23608 — esc-ci-pytest_perf (order 6690be-30f8-462c-954b-629a17073a43) "seq=1 from_status=SUBMITTED != folded status so far (CREATED)", 비회귀 (2026-11-11)
+
+- 카드 본문의 `replay_verify: ... skipped -- pre-cutover order` 줄은 `scripts/replay_verify.py`(`_order_pair`)의 설계된 skip 진단이고, 지목된 `EventChainBrokenError` 문구는 `src/core/eventstore/projections/orders.py`의 fail-closed 메시지다. 둘 다 실패 신호가 아니라 pre-cutover 주문의 이벤트 이력 불완전성을 알리는 진단이다.
+- 지목 sha `7bad50d32`는 HEAD의 조상이며 해당 커밋은 consistency 허용 목록 변경뿐이다. `git diff 7bad50d32 HEAD -- scripts/replay_verify.py src/core/eventstore src/services/oms` 기준 replay·eventstore 경로 변경 없음(ced43a395 이후 잔여 주문 정리 커밋이 이 경로의 대응이다).
+- 로컬 재현(TEST_DATABASE_URL=aios_test_qa_2): `tests/performance/oms` + `tests/integration/eventstore/test_replay_verify.py` + `test_replay_verify_order_chain.py` → **29 passed**; `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure}.py` + `tests/integration/eventstore/` → **75 passed**, 둘 다 exit 0.
+- 기준선·예산·재시도·ignore 변경 없음(DECISION_GUIDELINES B-2 준수). 코드 수정 없음 — 이 리프의 산출물은 본 기록뿐이다.
+- D2: N/A(실행 코드 변경 없는 비회귀 재확인; 로컬 재현 104 passed 수치로 대체).
