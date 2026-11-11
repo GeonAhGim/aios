@@ -193,11 +193,7 @@ async def _ledger_control_clean_slate(pool):
     await _reset()
 
 
-# ---------------------------------------------------------------------------
-# Negative tests (task-9233 DEEPEN)
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Failure injection (task-9233 DEEPEN)
-# ---------------------------------------------------------------------------
+# Note: negative/failure-injection tests for this conftest live in
+# `test_conftest_guards.py` (sibling file) — `__init__.py` cannot hold
+# collectable tests, and the conftest itself is a fixture provider, not a
+# test module. See test_conftest_guards.py for the full DEEPEN coverage.
