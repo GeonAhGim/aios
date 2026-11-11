@@ -3899,3 +3899,10 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - 로컬 재현(TEST_DATABASE_URL=aios_test_qa_1): `tests/integration/eventstore -m "perf and not nightly and not live_demo"` **7 passed**; `tests/integration/eventstore/test_replay_verify_{order_chain,tamper_detection}.py` **13 passed**; `scripts/replay_verify.py --hours 24` **exit=0** (window streams=0 — 로컬 DB에 이벤트 없음); `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/` **81 passed, exit=0**.
 - 판정: 로컬 재현 불가·지목 경로 무변경 → 코드 회귀 아님. CI DB에만 있는 pre-cutover 주문(`CREATED` 이벤트 없이 `SUBMITTED`로 시작하는 이력)이 검사에 걸린 것으로 보이며, 이는 `replay_verify`의 설계된 pre-cutover skip 범주다(#43 계열). 검사 완화·기준선 상향·ignore 추가는 DECISION_GUIDELINES B-2에 따라 하지 않았다.
 - 조치: 코드 변경 없음(noop). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
+
+## task-23313 — pytest_perf 24h 4회 반복 (task-23193/23257/23307/23311), 측정 설계 결함 조사 (2026-11-11)
+- 이전 조사(#43/#63/#72/#90/#101)와 달리 이번엔 실제 설계 결함이 있었다: `scripts/check_pytest_perf.py`는 여전히 없고(`pytest -m perf` 단계), 결함은 perf 테스트의 **측정기**에 있었다. 예산 숫자가 아니라 측정값이 작업 비용이 아닌 환경 잡음을 재고 있었다.
+- 원인 1(CPU 시계 눈금): Windows `time.process_time` 눈금 15.6ms — 47ms 보정 루프가 눈금 3개라 비율이 ±33% 흔들림(test_parser 2.0x > 1.6x). 수정 d3ea4fb8e: RelativeBudget이 실제 시계로 짧은 작업을 150ms 창으로 묶어 측정.
+- 원인 2(순환 GC 재스캔): 결과/AST 캐시가 쌓인 힙을 GC가 측정 구간 안에서 재스캔 — sweep_universe 100종목 초선형 비용(d3ea4fb8e), env_keys perf가 앞선 테스트의 힙 크기를 잼(748427d5e: PerfBudget.sample이 timeit처럼 collect 후 구간 동안 GC off).
+- 임계값·기준선 완화 없음(B-2 준수). 매번 다른 테스트가 적색이던 이유 = 공통 측정기의 잡음 두 종류. 두 근본 수정이 HEAD에 있으므로 재발 시 task 인용: 먼저 해당 테스트가 RelativeBudget/PerfBudget.sample을 쓰는지, 짧은 작업(<150ms)을 묶음 없이 재는지 확인.
+- D2: N/A(조사·로그 리프, 코드 수정은 위 두 커밋이 수행·테스트 포함).
