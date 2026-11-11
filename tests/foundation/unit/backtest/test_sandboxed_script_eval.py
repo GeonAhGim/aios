@@ -265,6 +265,7 @@ def test_sandbox_forces_spawn_start_method(monkeypatch: pytest.MonkeyPatch) -> N
     respects an environment default), the child inherits the parent's RSS
     and the RSS-limit check becomes meaningless.
     """
+
     class ExecutorContextCaptured(Exception):
         pass
 
