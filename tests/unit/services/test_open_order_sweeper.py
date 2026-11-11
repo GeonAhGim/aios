@@ -203,3 +203,82 @@ async def test_strategy_deployment_exec_prefix_rejects_non_digit_id(pool):
             scope=SafetyScope.STRATEGY_DEPLOYMENT,
             scope_ref="exec:not-a-number",
         )
+
+
+# 성능 예산(task-23201): exec: 접두사 sweep 1회(주문 1건 시드 + cancel 요청)의
+# best-of-5 wall 시간 상한. 로컬 실측 2.25ms(2026-11-11, best-of-5) 대비
+# 약 67배 여유(요구 30배 이상) — CI 부하 spike는 best-of로 흡수한다.
+_EXEC_SWEEP_CEILING_MS = 150.0
+
+
+async def _exec_sweep_once(pool, user_id, execution_id):
+    await _seed_order(pool, user_id, execution_id=execution_id)
+    return await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.STRATEGY_DEPLOYMENT,
+        scope_ref=f"exec:{execution_id}",
+    )
+
+
+@pytest.mark.perf
+async def test_strategy_deployment_exec_prefix_best_of_latency_within_budget(pool, perf_budget):
+    user_id = await create_test_user(pool)
+    target_exec = await _seed_execution(pool, user_id)
+
+    best = await perf_budget.best_of_async(
+        lambda: _exec_sweep_once(pool, user_id, target_exec), n=5, warmup=1
+    )
+
+    assert len(best.result.cancel_requested) == 1
+    assert best.wall_ms <= _EXEC_SWEEP_CEILING_MS, (
+        f"exec: sweep best wall {best.wall_ms:.1f}ms > {_EXEC_SWEEP_CEILING_MS}ms"
+    )
+
+
+@pytest.mark.perf
+async def test_strategy_deployment_exec_prefix_budget_red_with_10x_virtual_delay(pool, perf_budget):
+    """게이트 적색 재현 — 예산의 10배 가상 지연을 주입하면 같은 단언이 적색이어야 한다."""
+    from tests.support.perf_inject import virtual_delayed_async
+
+    user_id = await create_test_user(pool)
+    target_exec = await _seed_execution(pool, user_id)
+    slow_sweep = virtual_delayed_async(_exec_sweep_once, seconds=_EXEC_SWEEP_CEILING_MS * 10 / 1000)
+
+    best = await perf_budget.best_of_async(
+        lambda: slow_sweep(pool, user_id, target_exec), n=3, warmup=0
+    )
+
+    assert best.wall_ms > _EXEC_SWEEP_CEILING_MS
+
+
+async def test_strategy_deployment_exec_prefix_unknown_execution_matches_nothing(pool):
+    """negative: 존재하지 않는 execution id는 다른 execution 주문을 건드리지 않는다."""
+    user_id = await create_test_user(pool)
+    real_exec = await _seed_execution(pool, user_id)
+    order = await _seed_order(pool, user_id, execution_id=real_exec)
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.STRATEGY_DEPLOYMENT,
+        scope_ref=f"exec:{real_exec + 10_000_000}",
+    )
+
+    assert report.cancel_requested == ()
+    assert await _status_of(pool, order) == "SUBMITTED"
+
+
+async def test_strategy_deployment_exec_prefix_rejects_negative_and_empty_id(pool):
+    """negative: `exec:` 뒤가 비었거나 음수 부호면 형식 위반으로 거부한다."""
+    for bad in ("exec:", "exec:-1", "exec: 1"):
+        with pytest.raises(MalformedScopeRefError):
+            await sweep_open_orders(
+                pool,
+                _adapters("bitget"),
+                control_id=uuid4(),
+                scope=SafetyScope.STRATEGY_DEPLOYMENT,
+                scope_ref=bad,
+            )
