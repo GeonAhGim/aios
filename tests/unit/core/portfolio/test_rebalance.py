@@ -267,14 +267,18 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     most of the time and the average converges toward zero — a measurement
     artifact, not a real property of the function.
 
-    batch=8+ bundles several calls into one tick window so the total CPU time
+    batch=N bundles several calls into one tick window so the total CPU time
     exceeds one tick, reducing per-call quantization error to tick/batch.
     This test verifies two things:
       1. batch=1 average is near-zero (quantization artifact confirmed).
-      2. batch=8 average is non-zero and within the expected budget range,
+      2. batch=256 average is non-zero and within the expected budget range,
          proving the measurement captures real CPU work.
 
-    The actual CPU budget test below uses batch=8 to avoid this pitfall.
+    The actual CPU budget test below uses batch=256 to avoid this pitfall.
+
+    Note: batch=8 is too small for a 200-symbol rebalance (~0.06ms/call).
+    8 calls × 0.06ms = 0.48ms < 15.6ms tick → rounds to 0.
+    batch=256 × 0.06ms = 15.36ms ≈ 1 tick → avg ≈ 0.06ms, reliably > 0.01.
     """
     cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
     symbols = [f"SYM{i}/USDT" for i in range(200)]
@@ -290,10 +294,10 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     cpu_ms_batch1 = [s.cpu_ms for s in samples_batch1]
     avg_batch1 = sum(cpu_ms_batch1) / len(cpu_ms_batch1)
 
-    # batch=8: quantization error reduced by ~8x
-    samples_batch8 = perf_budget.samples(measure_once, n=40, batch=8)
-    cpu_ms_batch8 = [s.cpu_ms for s in samples_batch8]
-    avg_batch8 = sum(cpu_ms_batch8) / len(cpu_ms_batch8)
+    # batch=256: quantization error reduced by ~256x; total > 1 tick
+    samples_batch256 = perf_budget.samples(measure_once, n=40, batch=256)
+    cpu_ms_batch256 = [s.cpu_ms for s in samples_batch256]
+    avg_batch256 = sum(cpu_ms_batch256) / len(cpu_ms_batch256)
 
     # batch=1 average must be near-zero (quantization artifact).
     # Under Windows quantization, a fast function reads 0 ms most of the time;
@@ -302,14 +306,14 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
         f"batch=1 avg {avg_batch1:.3f}ms not near-zero — quantization artifact not confirmed"
     )
 
-    # batch=8 average must be non-zero and within budget.
-    # With 200 symbols the real CPU cost is measurable; batch=8 should
-    # capture it without the zero-convergence artifact.
-    assert avg_batch8 > 0.01, (
-        f"batch=8 avg {avg_batch8:.3f}ms near-zero — batching did not recover quantization loss"
+    # batch=256 average must be non-zero and within budget.
+    # With 200 symbols the real CPU cost is ~0.06ms/call; batch=256
+    # accumulates ~15ms total (≈1 tick), yielding avg ≈ 0.06ms > 0.01.
+    assert avg_batch256 > 0.01, (
+        f"batch=256 avg {avg_batch256:.3f}ms near-zero — batching did not recover quantization loss"
     )
-    assert avg_batch8 < 5.0, (
-        f"batch=8 avg {avg_batch8:.3f}ms exceeds 5ms budget — "
+    assert avg_batch256 < 5.0, (
+        f"batch=256 avg {avg_batch256:.3f}ms exceeds 5ms budget — "
         "performance regression or budget too tight"
     )
 
