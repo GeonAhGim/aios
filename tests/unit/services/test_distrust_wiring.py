@@ -119,6 +119,82 @@ async def test_check_and_persist_with_zero_references_reports_one_source():
     assert args[3] == 1  # primary만
 
 
+async def test_negative_zero_references_with_empty_candles_still_upserts_once():
+    """negative — 참조도 candle도 모두 빈 상태에서도 UPSERT는 정확히 1회(중복/누락 없음)."""
+    pool = _FakePool()
+    level = await check_and_persist_distrust(
+        pool,
+        DataDistrustMonitor(),
+        [_FakeProvider(None)],
+        exchange="bitget",
+        symbol="ETH/USDT",
+        primary=_ticker("2000"),
+        candles=[],
+    )
+    assert level == DataDistrustLevel.DEGRADED_SINGLE_SOURCE
+    assert len(pool.conn.executed) == 1
+    _query, args = pool.conn.executed[0]
+    assert args[1] == "ETH/USDT"
+    assert args[3] == 1
+
+
+async def test_negative_zero_references_different_symbols_do_not_merge():
+    """negative — 서로 다른 심볼에 zero references를 돌려도 DB 행이 합쳐지지 않는다."""
+    pool = _FakePool()
+    monitor = DataDistrustMonitor()
+    # ETH: 참조 0개, BTC: 참조 0개 — 서로 다른 monitor 없이 같은 monitor로 동시 실행
+    await check_and_persist_distrust(
+        pool,
+        monitor,
+        [_FakeProvider(None)],
+        exchange="bitget",
+        symbol="ETH/USDT",
+        primary=_ticker("2000"),
+        candles=[],
+    )
+    await check_and_persist_distrust(
+        pool,
+        monitor,
+        [_FakeProvider(None)],
+        exchange="bitget",
+        symbol="SOL/USDT",
+        primary=_ticker("100"),
+        candles=[],
+    )
+    assert len(pool.conn.executed) == 2
+    symbols = {args[1] for _q, args in pool.conn.executed}
+    assert symbols == {"ETH/USDT", "SOL/USDT"}
+    assert all(args[3] == 1 for _q, args in pool.conn.executed)
+
+
+async def test_negative_single_provider_returns_none_same_as_zero_providers():
+    """negative — 참조 provider가 1개이고 None을 반환하는 것, provider가 0개인 것은
+    sources_available가 모두 1(primary only)로 동일하게 DEGRADED_SINGLE_SOURCE여야 한다."""
+    pool_1 = _FakePool()
+    pool_0 = _FakePool()
+    level_1 = await check_and_persist_distrust(
+        pool_1,
+        DataDistrustMonitor(),
+        [_FakeProvider(None)],  # provider 1개, None 반환
+        exchange="bitget",
+        symbol="BTC/USDT",
+        primary=_ticker("100"),
+        candles=[],
+    )
+    level_0 = await check_and_persist_distrust(
+        pool_0,
+        DataDistrustMonitor(),
+        [],  # provider 0개
+        exchange="bitget",
+        symbol="BTC/USDT",
+        primary=_ticker("100"),
+        candles=[],
+    )
+    assert level_1 == level_0 == DataDistrustLevel.DEGRADED_SINGLE_SOURCE
+    assert pool_1.conn.executed[0][1][3] == 1
+    assert pool_0.conn.executed[0][1][3] == 1
+
+
 class _RaisingProvider:
     """계약 위반 대역 — reference_quotes.py의 두 구현체는 실패를 항상 None
     으로 흡수하지만(모듈 docstring), 미래의 세 번째 구현이 그 계약을 어길
