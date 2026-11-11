@@ -178,7 +178,12 @@ def test_construction_propagates_upstream_bar_source_failure() -> None:
 
 @pytest.mark.perf
 def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
-    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms."""
+    """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms.
+
+    `batch=8`로 매 샘플당 GC disable/enable 및 tracer 토글 오버헤드를
+    1/8로 줄인다 — xdist 병렬 실행(gw0..gwN)에서 워커가 죽지 않도록
+    (task-23326: gw2 crash, worker OOM from per-sample GC thrashing).
+    """
     fixture = _bars(5_000)
     bars = ListBars(fixture)
     samples_ms: list[float] = []
@@ -187,7 +192,7 @@ def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
         def _call(idx: int = bar_index) -> Sequence[Candle]:
             return bars.upto(idx)
 
-        sample = perf_budget.sample(_call)
+        sample = perf_budget.sample(_call, batch=8)
         samples_ms.append(sample.cpu_ms)
 
     samples_ms.sort()
