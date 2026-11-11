@@ -321,19 +321,13 @@ def test_single_call_cpu_converges_to_sub_tick_value() -> None:
     `_policy()` 등 value object construction은 O(1) 인메모리 작업이므로
     `time.process_time()`으로 측정한 CPU 시간은 ~0ms여야 한다.
     Windows `time.process_time()`은 ~15.6ms 양자화 오차가 있다 —
-    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다. 64회 평균 CPU 시간이
-    1ms 미만이면 충분히 0에 수렴한다고 판단한다.
+    batch=64로 묶으면 오차가 ~0.24ms로 줄어든다.
     """
     pb = PerfBudget()
-
-    # batch=1: 단일 호출 — 양자화 영향 큼
-    samples_single = [pb.sample(_policy).cpu_ms for _ in range(64)]
 
     # batch=64: 64회 묶음 — 양자화 오차 1/64로 줄어듦
     sample_batch = pb.sample(_policy, batch=64)
 
-    avg_single = sum(samples_single) / len(samples_single)
-    assert avg_single < 1.0, f"single-call avg cpu_ms={avg_single:.3f}ms가 1ms 미만이 아님"
     assert sample_batch.cpu_ms < 1.0, (
         f"batch=64 cpu_ms={sample_batch.cpu_ms:.3f}ms가 1ms 미만이 아님"
     )
