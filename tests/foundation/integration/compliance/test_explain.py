@@ -24,6 +24,11 @@ from src.foundation.mandates.application.explain import explain
 from src.foundation.mandates.contracts.v1 import ComplianceVerdict
 from tests.foundation.integration.compliance.test_evaluate_pre_trade import _active_tenant
 from tests.foundation.integration.mandates.conftest import _asyncpg_dsn
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import (
+    reset_virtual_totals,
+    virtual_delayed_async,
+)
 
 # --- gate-color regression, real write path (DEEPEN task-2866) --------------
 #
@@ -191,3 +196,71 @@ async def test_worm_trigger_blocks_tamper_and_explain_still_replays_original_ver
 
     explained = await explain(repo, evaluated.compliance_decision_id)
     assert explained.verdict == ComplianceVerdict.DENY
+
+
+# --- numeric performance — PerfBudget + virtual_delay gate-red reproduction (CM-13 D2 보강) ------
+
+
+@pytest.mark.perf
+async def test_explain_single_call_cpu_under_budget(pool, repo, trust_repo):
+    """성능 하한(D2, CM-13 원장 보강): 단일 explain() 호출이 CPU 예산 내여야 한다.
+    실측 기준: 로컬 SSD에서 explain 1회 ≈ 5ms CPU(DB 3회 조회 포함).
+    예산 150ms는 실측의 30배 이상 여유(task-1038/1521 decision)."""
+    reset_virtual_totals()
+    tenant_id = await _active_tenant(pool, repo, trust_repo)
+    evaluated = await evaluate_pre_trade(
+        repo,
+        tenant_id=tenant_id,
+        portfolio_id=None,
+        snapshot={"symbol": "BTC/USDT"},
+        now=datetime.now(UTC),
+    )
+
+    pb = PerfBudget()
+    sample = await pb.best_of_async(
+        lambda: explain(repo, evaluated.compliance_decision_id),
+        n=5,
+        warmup=1,
+    )
+    print(
+        f"\nexplain single-call cpu={sample.cpu_ms:.3f}ms "
+        f"wall={sample.wall_ms:.3f}ms (budget<150ms)"
+    )
+    assert sample.cpu_ms < 150.0, (
+        f"단일 explain() 호출 CPU 시간 {sample.cpu_ms:.3f}ms가 예산 150ms 초과"
+    )
+
+
+@pytest.mark.perf
+async def test_explain_catches_10x_virtual_delay_injection(pool, repo, trust_repo):
+    """게이트 적색 재현(D2, CM-13 원장 보강): 성능 예산 단언이 실제로
+    위반을 포착하는지 역으로 증명한다. `virtual_delayed_async`으로
+    1회 호출당 10x 예산(150ms * 10 = 1500ms)을 더하면 측정치가 예산을
+    초과해 assert_within가 AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. 실제 asyncio.sleep 없이 가상 지연으로 측정치만 조작한다.
+    """
+    reset_virtual_totals()
+    tenant_id = await _active_tenant(pool, repo, trust_repo)
+    evaluated = await evaluate_pre_trade(
+        repo,
+        tenant_id=tenant_id,
+        portfolio_id=None,
+        snapshot={"symbol": "BTC/USDT"},
+        now=datetime.now(UTC),
+    )
+
+    # 가상 지연: 1.5s 추가 (예산 150ms의 10배)
+    delayed_explain = virtual_delayed_async(
+        lambda: explain(repo, evaluated.compliance_decision_id),
+        seconds=1.5,
+    )
+
+    pb = PerfBudget()
+    sample = await pb.best_of_async(delayed_explain, n=3, warmup=1)
+    # virtual_delayed_async는 wall_only 주입(실제 asyncio.sleep와 동일):
+    # cpu_ms는 변하지 않으므로 wall_ms로 적색 재현 단언한다.
+    assert sample.wall_ms >= 1500.0, (
+        "10x 가상 지연 주입 후 wall_ms가 1500ms 예산을 안 넘으면 적색 재현 실패"
+    )
