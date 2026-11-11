@@ -1,78 +1,24 @@
-# 파일 범위 분할 제안: task-23246 [재투입]
+# 파일 범위 분할 제안: task-23334
 
 ## 분석
 
 - 원본 files: `["scripts/check_consistency.py", "src/"]` — `src/`는 디렉터리라 파일 범위로 해석 불가(`unresolved_path_scope`).
-- 원본 spec: "Fix review findings: consistency 24h 5회 반복 — 단계 규칙/기준선 설계 결함 조사"
-- 실제 실패 게이트: `openapi_client_mismatch` 34건 (baseline 34, 현재 34 — 드리프트 없음)
-- 34건 내역:
-  - **18건**: OpenAPI에 있으나 프론트엔드(apiRoutes.ts)에서 호출하지 않는 백엔드 전용 경로
-  - **16건**: 프론트엔드에서 호출하나 OpenAPI에 없는 프론트엔드 전용 경로
-- 18개 백엔드 전용 경로는 모두 실제 API(POST/GET)가 존재하며, 프론트엔드 UI 화면이 없는 경우들
-- 16개 프론트엔드 전용 경로는 `apiRoutes.ts`에 있으나 실제 백엔드 라우터가 없음(프론트엔드 전용)
+- 원본 spec 요지: consistency 24h 5회 반복 조사. 부모 9083 커밋은 미확정. HEAD에서 `check_consistency.py`는 exit 0이고 `openapi_client_mismatch` 34건은 기준선 34와 같아 드리프트가 없다. 기준선을 완화한 곳도 없다.
+- 실제로 남은 발견은 1건이다. 기준선이 감소해도 자동 갱신되지 않아 래칫 슬랙이 생긴다. `env_key_undocumented`는 `consistency-baseline.json`에 4로 남아 있으나 실측은 0이다.
+- `scripts/check_consistency.py`는 167줄이다. 감소 시 기준선 유지는 의도된 동작이고 `--update`로 반영한다(155~159행). 구조 결함이 아니다.
+- 따라서 `src/` 하위 수정이 필요한 실제 근거는 없다. 이 task는 코드 수정이 아니라 기준선 운영 문제다.
 
-## 실제 변경 파일
+## 실제 변경 파일 (분할안)
 
-**`scripts/consistency/contracts.py`** 1파일 — `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에 다음 34개 경로 추가:
+| 순서 | 파일 | 내용 | 비고 |
+|---|---|---|---|
+| 1 | `consistency-baseline.json` | `python scripts/check_consistency.py --update`로 감소분만 반영(`env_key_undocumented` 4->0). 증가·완화는 금지. | 1파일 |
+| 2 | `tests/unit/scripts/test_check_consistency.py` (경로는 `Glob`으로 확인 후 확정) | 감소 시 `--update` 없으면 유지, 있으면 갱신하는 음성/경계 테스트 1~2개 | 기존 테스트가 이미 있으면 생략 |
 
-### 백엔드 전용 (18개) — 프론트엔드 UI 없음 사유
-```
-/risk-coach/position-size
-/v1/accounts/summary
-/v1/ai/experiments/{experiment_id}
-/v1/ai/experiments/{experiment_id}/lineage
-/v1/ai/proposals/{proposal_id}
-/v1/ai/tokens/{token_id}:rotate
-/v1/assistant/explain-backtest
-/v1/assistant/explain-script
-/v1/assistant/generate-script
-/v1/foundation/compliance/mandate/status
-/v1/foundation/market-data/options/chain
-/v1/foundation/personal/bundle
-/v1/foundation/personal/daily-report
-/v1/foundation/personal/kill
-/v1/foundation/personal/promote
-/v1/foundation/personal/promotion-checklist
-/v1/foundation/research/items
-/v1/foundation/research/items/{item_id}
-```
+- `src/`는 범위에서 제외한다. `src/` 수정이 필요해 보이면 별도 task에서 구체 파일명으로 다시 제안한다.
+- `scripts/check_consistency.py`와 `scripts/consistency/*.py`는 변경하지 않는다. 변경이 필요하면 `contracts.py`(351줄)나 `registry.py`(89줄) 중 해당 검사 그룹 파일 하나만 지정한다.
+- 기준선 값은 올리지 않는다. 감소만 반영한다(baseline 규칙).
 
-### 프론트엔드 전용 (16개) — 백엔드 라우터 없음 사유
-```
-/auth/sessions
-/auth/sessions/:sessionId
-/v1/ai/experiments
-/v1/ai/proposals/:proposalId:promote
-/v1/ai/proposals/:proposalId:promote-ticket
-/v1/ai/providers
-/v1/ai/providers/:provider
-/v1/foundation/follow/subscriptions
-/v1/foundation/follow/subscriptions/:subscriptionId
-/v1/foundation/follow/subscriptions/:subscriptionId/performance
-/v1/foundation/signals/sources
-/v1/foundation/signals/sources/:sourceId/receipts
-/v1/foundation/signals/sources/:sourceId:disable
-/v1/foundation/signals/sources/:sourceId:rotate
-/v1/foundation/whatif/preview-order
-/v1/foundation/whatif/rebalance-plan
-```
+## 제약
 
-## 분할안
-
-### 권장: 단일 파일·단일 커밋
-`scripts/consistency/contracts.py` 1건에 34개 allowlist 항목 추가. 기존 allowlist 패턴(경로: 사유 주석)과 동일.
-
-### 분할안 (필요시)
-| 작업 | 파일 | 설명 |
-|------|------|------|
-| A | `scripts/consistency/contracts.py` | 18개 백엔드 전용 경로 allowlist 추가 |
-| B | `scripts/consistency/contracts.py` | 16개 프론트엔드 전용 경로 allowlist 추가 |
-
-A·B는 같은 파일이므로 단일 커밋 권장. 분할해도 독립성이 낮음.
-
-## 결론
-- **권장: `scripts/consistency/contracts.py` 단일 수정 1건** (allowlist 34개 추가)
-- `src/` 전체 범위는 불필요 — 실제 변경은 contracts.py 1파일
-- baseline(34)과 현재(34)가 동일하므로 드리프트는 없음. 기존 게이트 녹색 유지 목적
-
-원본 hold 해제·재큐·코드 수정은 하지 않았다.
+원본 hold 해제, 재큐, 코드 수정은 하지 않았다. 이 파일은 제안서만 담는다.
