@@ -288,6 +288,7 @@ def test_redact_failure_during_key_check_propagates_instead_of_silently_leaking(
             redact(payload)
 
 
+@pytest.mark.perf
 def test_redact_meets_pretrade_gate_budget(perf_budget):
     """수치 성능 단언 — redact()는 구조화 로그 한 줄마다 호출되는 인프로세스 핫패스다.
     p99가 예산 안에 들어오는지 확인한다(예산 근거는 모듈 상단 주석)."""
@@ -297,6 +298,7 @@ def test_redact_meets_pretrade_gate_budget(perf_budget):
     assert p99 < _PRETRADE_GATE_P99_BUDGET_SEC * 1000
 
 
+@pytest.mark.perf
 def test_redact_budget_assertion_catches_regression(perf_budget):
     """게이트 적색 재현 — 키 검사 경로에 10ms 인위 지연을 주입해 위 p99 예산 단언이 실제로
     AssertionError를 내는지 확인한다(타우톨로지가 아님을 증명)."""
