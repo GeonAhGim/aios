@@ -404,10 +404,8 @@ def test_adapter_missing_member_after_injected_removal_fails_conformance(
     adapter = LocalKeyRingKmsAdapter(_ring())
     assert isinstance(adapter, KmsPort) is True
 
-    class _BrokenAdapter(LocalKeyRingKmsAdapter):
-        encrypt = None  # type: ignore[assignment]
-
-    broken = _BrokenAdapter(_ring())
+    broken_cls = type("_BrokenAdapter", (LocalKeyRingKmsAdapter,), {"encrypt": None})
+    broken = broken_cls(_ring())
     assert isinstance(broken, KmsPort) is False
 
 
