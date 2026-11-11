@@ -37,7 +37,15 @@ from tests.unit.services.conftest import _adapters, _seed_execution, _seed_order
 PERF_BUDGET_MS = 100.0
 
 
-async def test_global_scope_requests_cancel_across_tenants(pool):
+@pytest.mark.perf
+async def test_global_scope_requests_cancel_across_tenants(pool, perf_budget, monkeypatch):
+    """R-39: GLOBAL multi-tenant cancellation, best-of timing and gate-red injection.
+
+    Reuse the existing 100ms budget; no budget increase. Each timed run seeds
+    fresh orders so retries cannot benchmark only the CANCEL_REQUESTED skip path.
+    """
+    from tests.support.perf_inject import virtual_delayed_async
+
     user_a = await create_test_user(pool)
     user_b = await create_test_user(pool)
     order_a = await _seed_order(pool, user_a, exchange="bitget")
@@ -59,6 +67,38 @@ async def test_global_scope_requests_cancel_across_tenants(pool):
     assert not {order_a, order_b} & set(report.adapter_failed)
     assert await _status_of(pool, order_a) == "CANCEL_REQUESTED"
     assert await _status_of(pool, order_b) == "CANCEL_REQUESTED"
+
+    adapters = _adapters("bitget", "binance")
+
+    async def measured_sweep():
+        fresh_a = await _seed_order(pool, user_a, exchange="bitget")
+        fresh_b = await _seed_order(pool, user_b, exchange="binance")
+        result = await sweep_open_orders(
+            pool, adapters, control_id=uuid4(), scope=SafetyScope.GLOBAL, scope_ref=""
+        )
+        assert {fresh_a, fresh_b} <= set(result.cancel_requested)
+        assert not {fresh_a, fresh_b} & set(result.adapter_failed)
+        assert await _status_of(pool, fresh_a) == "CANCEL_REQUESTED"
+        assert await _status_of(pool, fresh_b) == "CANCEL_REQUESTED"
+
+    def assert_budget(sample):
+        assert sample.wall_ms < PERF_BUDGET_MS, perf_budget.describe(
+            sample, budget_ms=PERF_BUDGET_MS
+        )
+
+    baseline = await perf_budget.best_of_async(measured_sweep, n=5, warmup=1)
+    assert_budget(baseline)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            adapters["bitget"], "cancel_order",
+            virtual_delayed_async(
+                adapters["bitget"].cancel_order, seconds=PERF_BUDGET_MS * 10 / 1000
+            ),
+        )
+        slow = await perf_budget.best_of_async(measured_sweep, n=3, warmup=0)
+        assert slow.wall_ms >= PERF_BUDGET_MS * 10
+        with pytest.raises(AssertionError):
+            assert_budget(slow)
 
 
 async def test_provider_scope_only_matching_exchange(pool):
