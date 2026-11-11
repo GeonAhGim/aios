@@ -23,6 +23,25 @@ except ImportError:  # pragma: no cover -- psutil is not a declared hard
 
 _T = TypeVar("_T")
 
+# Windows time.process_time()은 ~15.6ms 눈금으로만 올라간다. 측정 구간의 실제 벽시계가 눈금
+# 절반(7.8ms)보다 짧은데 CPU가 그보다 크게 읽히면 눈금 경계를 걸친 양자화 산물이다(0.3ms 호출이
+# 15.625ms로 읽힘 -- full CI c65ab2ea9 test_dedupe). 단일 스레드 호출의 CPU는 벽시계를 넘을 수
+# 없으므로 그 경우에만 벽시계로 눈금 오차를 잘라낸다. 더 긴 구간(벽시계 >= 7.8ms)과 가상 지연
+# 합산은 건드리지 않는다.
+_CPU_TICK_MS = 15.625
+# monkeypatch로 process_time을 가짜로 바꾸는 적색 재현 테스트(수만 ms를 가장)를 깎지 않도록, 진짜
+# 시계일 때만 잘라낸다. import 시점의 원본을 기억해 둔다.
+_REAL_PROCESS_TIME = time.process_time
+_QUANTIZED_WALL_LIMIT_MS = _CPU_TICK_MS / 2
+
+
+def _clip_quantized_cpu(real_cpu_ms: float, real_wall_ms: float) -> float:
+    if time.process_time is not _REAL_PROCESS_TIME:
+        return real_cpu_ms
+    if real_wall_ms < _QUANTIZED_WALL_LIMIT_MS and real_cpu_ms > real_wall_ms:
+        return real_wall_ms
+    return real_cpu_ms
+
 
 @dataclass(frozen=True)
 class PerfSample:
@@ -98,6 +117,7 @@ class PerfBudget:
         # Virtual delay is added as an exact integer-ns delta (see perf_inject): 50 ms reads 50.0.
         real_cpu_ms = (time.process_time() - cpu_start) * 1000
         real_wall_ms = (time.perf_counter() - wall_start) * 1000
+        real_cpu_ms = _clip_quantized_cpu(real_cpu_ms, real_wall_ms)
         cpu_ms = (real_cpu_ms + (virtual_cpu1 - virtual_cpu0) / 1e6) / batch
         wall_ms = (real_wall_ms + (virtual_wall1 - virtual_wall0) / 1e6) / batch
         return PerfSample(cpu_ms=cpu_ms, wall_ms=wall_ms, result=result)
@@ -127,6 +147,7 @@ class PerfBudget:
             virtual_cpu1, virtual_wall1 = virtual_totals_ns()
             real_cpu_ms = (time.process_time() - cpu_start) * 1000
             real_wall_ms = (time.perf_counter() - wall_start) * 1000
+            real_cpu_ms = _clip_quantized_cpu(real_cpu_ms, real_wall_ms)
             return PerfSample(
                 cpu_ms=(real_cpu_ms + (virtual_cpu1 - virtual_cpu0) / 1e6) / batch,
                 wall_ms=(real_wall_ms + (virtual_wall1 - virtual_wall0) / 1e6) / batch,
