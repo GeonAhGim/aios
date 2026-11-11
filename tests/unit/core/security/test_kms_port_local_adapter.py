@@ -6,6 +6,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-22
 byte-identical results to calling `src.core.security.encryption` directly —
 the port is a pure indirection, not a behaviour change.
 """
+
 from __future__ import annotations
 
 import time
@@ -17,6 +18,8 @@ from src.core.security import encryption
 from src.core.security.encryption import LocalKeyRingKmsAdapter
 from src.core.security.key_ring import KeyRing, KeyRingConfigError, UnknownKeyIdError
 from src.core.security.kms_port import KmsPort
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 KEY_V1 = "11" * 32
 KEY_V2 = "22" * 32
@@ -146,6 +149,7 @@ def _p95(samples: list[float]) -> float:
     return samples[min(int(len(samples) * 0.95), len(samples) - 1)]
 
 
+@pytest.mark.perf
 def test_roundtrip_p95_latency_within_self_declared_budget() -> None:
     adapter = LocalKeyRingKmsAdapter(_ring())
     samples = _roundtrip_latencies_ms(adapter, _ROUNDTRIP_ITERATIONS)
@@ -155,6 +159,28 @@ def test_roundtrip_p95_latency_within_self_declared_budget() -> None:
         f"budget<{_ROUNDTRIP_BUDGET_MS:.0f}ms"
     )
     assert p95_ms < _ROUNDTRIP_BUDGET_MS
+
+
+def test_roundtrip_p95_latency_within_self_declared_budget_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """Perf-budget measurement: one encrypt+decrypt round trip measured via
+    ``PerfBudget.best_of``.  Realised cpu_ms ≈ 0.17 ms on this host; budget
+    is 5 ms (≈ 30× 여유).  Reuses the existing ``_ROUNDTRIP_BUDGET_MS`` — no
+    new budget introduced."""
+    adapter = LocalKeyRingKmsAdapter(_ring())
+
+    def _roundtrip() -> str:
+        token = adapter.encrypt("payload")
+        return adapter.decrypt(token)
+
+    sample = perf_budget.best_of(_roundtrip, n=5)
+    # fmt: off
+    assert sample.cpu_ms < _ROUNDTRIP_BUDGET_MS, (
+        f"[FA-22] round trip cpu={sample.cpu_ms:.4f}ms "
+        f"wall={sample.wall_ms:.4f}ms budget<{_ROUNDTRIP_BUDGET_MS:.0f}ms"
+    )
+    # fmt: on
 
 
 def test_roundtrip_budget_gate_actually_fails_past_budget(
@@ -174,3 +200,28 @@ def test_roundtrip_budget_gate_actually_fails_past_budget(
     p95_ms = _p95(samples)
     with pytest.raises(AssertionError):
         assert p95_ms < _ROUNDTRIP_BUDGET_MS
+
+
+@pytest.mark.perf
+def test_roundtrip_budget_gate_actually_fails_past_budget_virtual_delay(
+    monkeypatch: pytest.MonkeyPatch,
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction via virtual delay (no actual sleep): injects a
+    10× delay (50 ms) through ``virtual_delayed_sync`` and confirms the
+    assertion catches it as a red signal.  Uses ``reset_virtual_totals`` at
+    start to keep the test idempotent."""
+    reset_virtual_totals()
+    original_encrypt = encryption.encrypt
+    delay_s = 10 * _ROUNDTRIP_BUDGET_MS / 1000.0  # 50 ms = 10× budget
+
+    monkeypatch.setattr(encryption, "encrypt", virtual_delayed_sync(original_encrypt, delay_s))
+    adapter = LocalKeyRingKmsAdapter(_ring())
+
+    def _roundtrip() -> str:
+        token = adapter.encrypt("payload")
+        return adapter.decrypt(token)
+
+    sample = perf_budget.best_of(_roundtrip, n=5)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _ROUNDTRIP_BUDGET_MS
