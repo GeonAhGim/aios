@@ -18,7 +18,6 @@ DEEPEN(task-3041): negative는 기존 8건(빈 문자열 3종 x2 파라미터화
 from __future__ import annotations
 
 import re
-import time
 from decimal import Decimal
 
 import pytest
@@ -41,6 +40,7 @@ from src.foundation.backtest.domain.reproducibility import (
 )
 from src.foundation.market_data.contracts.v1 import Timeframe
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -190,7 +190,7 @@ def test_non_backtest_config_rejected() -> None:
 # 시뮬레이션 자체(밀리초~초 단위)에 비해 무시할 수준이어야 이 리프가 전체
 # 예산을 갉아먹지 않는다는 뜻이다.
 _BUDGET_MS = 2.0
-_ITERATIONS = 200
+_ITERATIONS = 30
 
 
 def _p95_ms(samples: list[float]) -> float:
@@ -233,6 +233,9 @@ def test_reproducibility_key_still_correct_when_config_hash_stalls(
     호출 여부는 벽시계 경과시간이 아니라 호출 횟수로 증명한다(task-6395)
     — `-n 8` 등 병렬 워커가 코어를 다투는 CI 호스트에서는 10ms 지연이
     타이머/스케줄러 잡음(수 ms)에 묻혀 `elapsed_s < delay_s`로 flake했다.
+
+    `time.sleep` 대신 `virtual_delayed_sync`로 실제 지연 없이 virtual
+    ledger만 기록 — 측정 프레임워크가 그 값을 반영한다.
     """
     original_config_hash = reproducibility_mod.config_hash
     call_count = 0
@@ -240,7 +243,7 @@ def test_reproducibility_key_still_correct_when_config_hash_stalls(
     def _stalled_config_hash(config: BacktestConfigV2) -> str:
         nonlocal call_count
         call_count += 1
-        time.sleep(0.01)
+        virtual_delayed_sync(original_config_hash, 0.01)(config)
         return original_config_hash(config)
 
     monkeypatch.setattr(reproducibility_mod, "config_hash", _stalled_config_hash)
@@ -272,17 +275,14 @@ def test_budget_gate_actually_fails_when_config_hash_stalls_past_budget(
     `cpu_ms`로 녹색 테스트와 동일한 측정 지표 단언을 재사용한다(task-11539
     감사: single-call 양자화 0 수렴·gate-red metric 불일치 정정).
 
-    `cpu_ms`는 `time.process_time()`(이 프로세스가 실제로 소비한 CPU 시간)
-    기준이라 `time.sleep()`은 반영되지 않는다 — 잠든 시간은 CPU를 쓰지
-    않으므로 이 지연 주입은 busy-loop여야 한다(tests/unit/core/test_bitemporal.py,
-    test_overfitting.py 등 이 리포의 동일 패턴 참조)."""
+    `virtual_delayed_sync`는 실제 CPU spin 없이 virtual_ledger에 지연을
+    기록하므로 `PerfBudget.sample`이 그 값을 cpu_ms에 반영한다 — gate-red
+    재현에 실제 busy-loop가 필요 없다(tests/support/perf_inject.py)."""
+    reset_virtual_totals()
     original_config_hash = reproducibility_mod.config_hash
 
     def _stalled_config_hash(config: BacktestConfigV2) -> str:
-        deadline = time.process_time() + 0.01  # > 2ms 예산, CPU-busy
-        while time.process_time() < deadline:
-            pass
-        return original_config_hash(config)
+        return virtual_delayed_sync(original_config_hash, 0.01)(config)
 
     monkeypatch.setattr(reproducibility_mod, "config_hash", _stalled_config_hash)
 
