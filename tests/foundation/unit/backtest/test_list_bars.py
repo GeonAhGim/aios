@@ -200,6 +200,12 @@ def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
 
             sample = perf_budget.sample(_call, batch=8)
             samples_ms.append(sample.cpu_ms)
+            # Periodic GC to prevent unbounded garbage accumulation across
+            # 5,000 iterations (each creates a growing list of size 1..5000);
+            # collecting every 500 samples keeps peak resident set low enough
+            # to survive pytest-xdist parallel workers under --cov.
+            if (bar_index + 1) % 500 == 0:
+                gc.collect()
     finally:
         if gc_was_enabled:
             gc.enable()
@@ -329,5 +335,8 @@ def test_upto_distribution_collects_once_and_restores_gc(
     else:
         test_upto_p95_latency_within_5k_bar_budget(budget)
     assert state["enabled"] is initially_enabled
-    assert state["collections"] == int(initially_enabled)
+    # 1 initial collect (if enabled) + 10 periodic collects (every 500 iterations)
+    # — periodic collects are added to prevent unbounded memory growth under xdist
+    expected_collections = int(initially_enabled) + (0 if fail_sample else 10)
+    assert state["collections"] == expected_collections
     assert state["samples"] == (1 if fail_sample else 5_000)
