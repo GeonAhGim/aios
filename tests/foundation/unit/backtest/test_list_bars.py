@@ -182,7 +182,9 @@ def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
     fixture = _bars(5_000)
     bars = ListBars(fixture)
     samples_ms: list[float] = []
-    for bar_index in range(len(fixture)):
+    # Stride sampling spans the whole index range (incl. the last, costliest bar);
+    # sample() runs gc.collect per call, so 5k samples took ~3 min and crashed xdist workers.
+    for bar_index in (*range(0, len(fixture), 25), len(fixture) - 1):
 
         def _call(idx: int = bar_index) -> Sequence[Candle]:
             return bars.upto(idx)
