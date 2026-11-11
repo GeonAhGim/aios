@@ -31,6 +31,12 @@ def _ring(active_kid: str = "v1") -> KeyRing:
 
 # --- interface conformance ---------------------------------------------
 
+# Measured on Windows 11 Pro (host: claude-local-1 worktree, 2026-11-11):
+#   isinstance(adapter, KmsPort) ≈ 0.0025 ms/call (batch=100_000, process_time)
+# Budget = 30× measured value = 0.075 ms; rounded up to 0.1 ms (40×).
+# See perf_budget.py §batch: batch large enough to overcome 15.6 ms Windows tick.
+_CONFORMANCE_BUDGET_MS: float = 0.1  # 30× floor; real ≈ 0.0025 ms (host: wt/claude-local-1)
+
 
 def test_local_adapter_satisfies_kms_port_protocol_statically() -> None:
     """mypy structural check: this assignment only type-checks if
@@ -38,6 +44,32 @@ def test_local_adapter_satisfies_kms_port_protocol_statically() -> None:
     compatible signature."""
     adapter: KmsPort = LocalKeyRingKmsAdapter(_ring())
     assert isinstance(adapter, KmsPort)
+
+
+def test_object_missing_kms_port_member_is_not_kms_port() -> None:
+    """Negative: an object missing any KmsPort member must not pass
+    ``isinstance(..., KmsPort)``."""
+
+    class PartialAdapter:
+        def get_key(self, kid: str) -> bytes:
+            return b""
+
+        def encrypt(self, plaintext: str) -> str:
+            return ""
+
+        def decrypt(self, token: str) -> str:
+            return ""
+
+        # Missing: rotate
+
+    adapter = PartialAdapter()
+    assert isinstance(adapter, KmsPort) is False
+
+
+def test_plain_object_and_none_are_not_kms_port() -> None:
+    """Negative: bare ``object()`` and ``None`` are not ``KmsPort``."""
+    assert isinstance(object(), KmsPort) is False
+    assert isinstance(None, KmsPort) is False
 
 
 # --- round trip parity (behaviour must not change through the port) ----
@@ -259,3 +291,63 @@ def test_roundtrip_budget_gate_actually_fails_past_budget_virtual_delay(
     sample = perf_budget.best_of(_roundtrip, n=5)
     with pytest.raises(AssertionError):
         assert sample.cpu_ms < _ROUNDTRIP_BUDGET_MS
+
+
+# --- protocol conformance failure injection & perf gates ----------------
+
+
+def test_adapter_missing_member_after_injected_removal_fails_conformance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failure injection: override ``encrypt`` on a subclass with ``None``
+    and confirm ``isinstance`` reports ``False``.
+
+    ``monkeypatch.delattr`` on the class doesn't work here — Python 3.10's
+    ``@runtime_checkable`` Protocol caches the ABC conformity check, and
+    deleting a method from the class ``__dict__`` doesn't invalidate the
+    cache.  Overriding with a non-callable (``None``) is the reliable way
+    to break conformance at runtime."""
+    adapter = LocalKeyRingKmsAdapter(_ring())
+    assert isinstance(adapter, KmsPort) is True
+
+    class _BrokenAdapter(LocalKeyRingKmsAdapter):
+        encrypt = None  # type: ignore[assignment]
+
+    broken = _BrokenAdapter(_ring())
+    assert isinstance(broken, KmsPort) is False
+
+
+@pytest.mark.perf
+def test_protocol_conformance_check_within_perf_budget(
+    perf_budget: PerfBudget,
+) -> None:
+    """Performance gate: ``isinstance(adapter, KmsPort)`` must complete
+    well under ``_CONFORMANCE_BUDGET_MS`` (0.1 ms; 40× measured 0.0025 ms).
+    Uses ``batch`` to overcome Windows ``process_time`` 15.6 ms quantization."""
+    adapter = LocalKeyRingKmsAdapter(_ring())
+    sample = perf_budget.best_of(lambda: isinstance(adapter, KmsPort), n=10, batch=500)
+    assert sample.cpu_ms < _CONFORMANCE_BUDGET_MS, (
+        f"conformance check too slow: cpu={sample.cpu_ms:.3f}ms "
+        f"wall={sample.wall_ms:.3f}ms budget={_CONFORMANCE_BUDGET_MS}ms"
+    )
+
+
+@pytest.mark.perf
+def test_protocol_conformance_gate_fails_on_10x_virtual_delay(
+    perf_budget: PerfBudget,
+) -> None:
+    """Gate-red reproduction: wrap the check itself in a 10× virtual delay
+    and confirm the budget assertion catches it as a red signal.
+    Uses ``reset_virtual_totals`` at start for idempotency.
+
+    Note: we wrap the callable directly (not monkeypatch ``encryption.encrypt``)
+    because the ``isinstance`` path never calls encrypt — only a direct wrapper
+    injection works."""
+    reset_virtual_totals()
+    adapter = LocalKeyRingKmsAdapter(_ring())
+    delay_s = 10 * _CONFORMANCE_BUDGET_MS / 1000.0  # 10× budget in seconds
+
+    delayed_check = virtual_delayed_sync(lambda: isinstance(adapter, KmsPort), delay_s)
+    sample = perf_budget.best_of(delayed_check, n=5, batch=1)
+    with pytest.raises(AssertionError):
+        assert sample.cpu_ms < _CONFORMANCE_BUDGET_MS
