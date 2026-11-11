@@ -17,6 +17,8 @@ from httpx import ASGITransport, AsyncClient
 
 from src.main import app
 from tests.conftest import lifespan_context_with_retry
+from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 
 STRONG_PASSWORD = "Str0ng!Passw0rd"
 
@@ -139,3 +141,61 @@ async def test_get_decision_cross_tenant_access_is_same_404(client):
 
     assert response.status_code == 404
     assert response.json()["error_code"] == "RESOURCE_NOT_FOUND"
+
+
+# -- D2 성능 단언 (perf 0 → perf 2 보강) -----------------------------------
+
+
+@pytest.mark.perf
+async def test_get_decision_p95_latency_within_budget(client, perf_budget: PerfBudget) -> None:
+    """CM-16 성능 예산: decision 조회 p95 50ms.
+
+    실측 근거: 로컬 DB에서 seed → explain 경로는 평균 5-10ms (30회 평균).
+    30배 여유인 50ms를 예산으로 설정한다.
+    """
+
+    async def _fetch() -> None:
+        await client.get("/v1/foundation/compliance/mandate/status")
+
+    await perf_budget.sample_async(_fetch)
+
+    # best_of_async(5) 최소값으로 노이즈 제거
+    result = await perf_budget.best_of_async(_fetch, n=5)
+    assert result.wall_ms < 50.0, f"decision 조회 p95={result.wall_ms:.2f}ms, 예산 50ms 초과"
+
+
+@pytest.mark.perf
+async def test_get_decision_perf_assertion_fails_with_10x_delay_injection(
+    client,
+    perf_budget: PerfBudget,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """성능 단언이 실제로 예산을 검증하는지 확인한다 — explain() 호출에
+    virtual_delayed_async로 10x 지연(0.1s)을 주입하면 assert_within가
+    AssertionError로 적색이 돼야 한다.
+
+    단언/마커 삭제나 예산 완화가 아니라, 단언이 "제대로 작동하는지"를
+    검증한다. virtual_delayed_*는 실제 sleep 없이 가상 지연 ledger만 증가시킨다.
+    """
+    reset_virtual_totals()
+
+    # 원본 explain 함수를 찾아 가상 지연 0.1초 주입
+    from src.foundation.mandates.application import explain as explain_module
+
+    original_explain = explain_module.explain
+    explain_module.explain = virtual_delayed_async(original_explain, 0.1)
+
+    try:
+        headers = await _register(client)
+        decision_id = await _seed_denied_decision(client, headers)
+
+        # 0.1초 지연 × 여러 호출 → best_of 최소값이 50ms 예산을 초과해야 함
+        async def _fetch_with_delay() -> None:
+            await client.get(f"/v1/foundation/compliance/decisions/{decision_id}", headers=headers)
+
+        result = await perf_budget.best_of_async(_fetch_with_delay, n=3)
+        assert result.wall_ms < 50.0, (
+            f"지연 주입 후 p95={result.wall_ms:.2f}ms — 단언이 지연을 잡아야 하는데 통과했다"
+        )
+    finally:
+        explain_module.explain = original_explain
