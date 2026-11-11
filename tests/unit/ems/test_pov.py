@@ -20,11 +20,8 @@ Decision 1): p99 wall-clock latency of `plan_pov_schedule` over its full
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
-from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -47,6 +44,7 @@ from src.foundation.ems.domain.algo.pov import (
     plan_pov_schedule,
 )
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -378,27 +376,25 @@ class TestPerformanceBenchmark:
     def test_plan_pov_schedule_p99_budget_catches_regression(
         self, parent_order: ParentOrder, perf_budget: PerfBudget
     ) -> None:
-        """게이트 적색 재현 — plan_pov_schedule 내부에 인위 지연을 주입해 p99
-        예산 단언이 실제로 AssertionError를 내는지 확인한다.
+        """게이트 적색 재현 — virtual_delayed_sync로 50ms 가상 지연을 주입해
+        p99 예산 단언이 실제로 AssertionError를 내는지 확인한다.
 
-        10배 지연(0.5s sleep)을 주입하면 batch=10로 나눠도 50ms > 50ms 예산
-        단언이 실패해야 한다(타우톨로지 아님을 증명).
+        virtual_delayed_sync는 실제 sleep/spin 없이 virtual ledger에만 누적을
+        넣으므로 테스트 실행 시간은 0에 가깝다. PerfBudget.samples()가 ledger를
+        읽어 cpu_ms/wall_ms에 합산하므로, 지연 주입 시 p99 > 50ms 단언이
+        적색이어야 한다(타우톨로지 아님을 증명).
         """
-        real_plan = plan_pov_schedule
-
-        def _slow_plan(*args: Any, **kwargs: Any) -> Any:
-            time.sleep(0.5)  # 500ms 지연 → budget 50ms 단언이 적색이어야 함
-            return real_plan(*args, **kwargs)
+        reset_virtual_totals()
 
         slice_count = _slice_count(parent_order)
         volume_profile = [Decimal("10000000")] * slice_count
 
-        with patch(__name__ + ".plan_pov_schedule", _slow_plan):
-            raw_samples = perf_budget.samples(
-                lambda: plan_pov_schedule(parent_order, volume_profile=volume_profile),
-                n=5,
-                batch=10,
-            )
+        # 50ms 가상 CPU+wall 지연 주입 → budget 50ms 단언이 적색이어야 함
+        delayed_fn = virtual_delayed_sync(
+            lambda: plan_pov_schedule(parent_order, volume_profile=volume_profile), 0.050
+        )
+
+        raw_samples = perf_budget.samples(lambda: delayed_fn(), n=5, batch=10)
 
         wall_ms_samples = sorted(s.wall_ms for s in raw_samples)
         p99_ms = wall_ms_samples[min(len(wall_ms_samples) - 1, int(len(wall_ms_samples) * 0.99))]
