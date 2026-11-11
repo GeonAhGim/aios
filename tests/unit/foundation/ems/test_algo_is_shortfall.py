@@ -7,6 +7,7 @@ function tests only.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -266,6 +267,63 @@ def test_different_parent_id_changes_child_id_but_not_quantities_or_times() -> N
     assert [c.child_id for c in children_a] != [c.child_id for c in children_b]
     assert [c.planned_qty for c in children_a] == [c.planned_qty for c in children_b]
     assert [c.scheduled_at for c in children_a] == [c.scheduled_at for c in children_b]
+
+
+# -- DEEPEN 2502 (D2): numeric performance assertion -------------------------
+
+
+@pytest.mark.perf
+def test_plan_is_schedule_stays_under_budget_at_the_max_slice_count() -> None:
+    """500 slices (the module's own `_MAX_SLICE_COUNT` cap) x 50 calls must
+    finish well under a generous wall-clock budget -- a regression that
+    turned the per-slice O(n) loop, weight computation, or the guard calls
+    into something O(n^2) would blow well past this on 500 slices."""
+    parent = _parent(
+        qty=Decimal("1000000"),
+        algo=_algo(
+            start=_T0,
+            end=_T0 + timedelta(seconds=500),
+            slice_interval_sec=1,
+            urgency=Decimal("0.7"),
+            max_participation_pct=Decimal("100"),
+        ),
+    )
+    profile = [Decimal("100000")] * 500
+    started = time.perf_counter()
+    for _ in range(50):
+        plan_is_schedule(parent, volume_profile=profile)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    assert elapsed_ms < 800, (
+        f"plan_is_schedule took {elapsed_ms:.1f}ms for 50 calls at 500 slices, "
+        "exceeding the 800ms budget."
+    )
+
+
+# -- DEEPEN 2502 (D2): gate-red repro -----------------------------------------
+
+
+def test_gate_red_without_the_upfront_cap_validation_the_corrupted_cap_passes_silently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Before/after proof that `_validate_participation_cap`'s call is
+    load-bearing, not decorative: disable only that one guard call
+    (monkeypatched to a no-op, leaving every per-slice
+    `guard.check_participation` call untouched) and replay the exact
+    corrupted-cap scenario from the failure-injection test above. Without
+    the up-front call, nothing else in `plan_is_schedule` ever notices --
+    the whole order is silently dumped into the exempt final slice."""
+    from src.foundation.ems.domain.algo import is_shortfall as is_shortfall_module
+
+    monkeypatch.setattr(is_shortfall_module, "_validate_participation_cap", lambda _pct: None)
+    parent = _parent(
+        qty=Decimal("1000"),
+        algo=_algo(urgency=Decimal("0.5"), max_participation_pct=Decimal("10")),
+    )
+    object.__setattr__(parent.algo, "max_participation_pct", Decimal("-5"))
+    children = plan_is_schedule(parent, volume_profile=_abundant_volume_profile(4))
+    quantities = [c.planned_qty for c in children]
+    assert quantities == [Decimal("1000")]
+    assert sum(quantities) == Decimal("1000")
 
 
 # -- schedule snapshot: window bounds, slice pacing ---------------------------
