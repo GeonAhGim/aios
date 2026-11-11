@@ -278,3 +278,101 @@ async def test_global_scope_sweep_perf_budget_and_injected_delay_goes_red(pool, 
     slow = await perf_budget.best_of_async(_sweep, n=3, warmup=0)
     assert slow.wall_ms >= PERF_BUDGET_MS * 10, "delay injection must be visible to the gate"
     assert slow.wall_ms > PERF_BUDGET_MS
+
+
+async def _sweep_account(pool, scope_ref, adapters=None):
+    return await sweep_open_orders(
+        pool,
+        adapters if adapters is not None else _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.ACCOUNT,
+        scope_ref=scope_ref,
+    )
+
+
+async def test_account_scope_unknown_account_matches_nothing(pool):
+    """negative — 주문이 없는 계정 uuid는 어떤 주문도 건드리지 않는다."""
+    user_id = await create_test_user(pool)
+    order_id = await _seed_order(pool, user_id)
+
+    report = await _sweep_account(pool, str(uuid4()))
+
+    assert report.cancel_requested == ()
+    assert await _status_of(pool, order_id) == "SUBMITTED"
+
+
+async def test_account_scope_rejects_non_uuid_scope_ref(pool):
+    """negative — uuid가 아닌 scope_ref는 조용히 0건이 아니라 fail-closed 거부."""
+    for ref in ("not-a-uuid", "", "exec:1"):
+        with pytest.raises(MalformedScopeRefError):
+            await _sweep_account(pool, ref)
+
+
+async def test_account_scope_terminal_orders_of_that_account_are_skipped(pool):
+    """negative — 해당 계정이라도 종결 주문은 취소 요청 대상이 아니다."""
+    user_id = await create_test_user(pool)
+    filled = await _seed_order(pool, user_id, status="FILLED")
+    open_order = await _seed_order(pool, user_id)
+
+    report = await _sweep_account(pool, str(user_id))
+
+    assert open_order in report.cancel_requested
+    assert filled not in report.cancel_requested
+    assert await _status_of(pool, filled) == "FILLED"
+
+
+async def test_account_scope_adapter_failure_leaves_other_account_untouched(pool):
+    """failure injection — cancel_order 예외는 adapter_failed로 보고되고 타 계정은 무영향."""
+    from tests.unit.services.conftest import _RaisingCancelAdapter
+
+    tenant_a = await create_test_user(pool)
+    tenant_b = await create_test_user(pool)
+    order_a = await _seed_order(pool, tenant_a)
+    order_b = await _seed_order(pool, tenant_b)
+
+    report = await _sweep_account(
+        pool, str(tenant_a), {"bitget": _RaisingCancelAdapter(exchange_name="bitget")}
+    )
+
+    assert order_a in report.adapter_failed
+    assert order_b not in report.adapter_failed
+    assert await _status_of(pool, order_b) == "SUBMITTED"
+
+
+async def test_account_scope_assertion_goes_red_when_scope_ref_is_corrupted(pool):
+    """gate-red — scope_ref를 타 계정으로 망가뜨리면 원 단언이 실제로 실패해야 한다."""
+    tenant_a = await create_test_user(pool)
+    tenant_b = await create_test_user(pool)
+    order_a = await _seed_order(pool, tenant_a)
+    await _seed_order(pool, tenant_b)
+
+    report = await _sweep_account(pool, str(tenant_b))
+
+    with pytest.raises(AssertionError):
+        assert report.cancel_requested == (order_a,)
+    assert await _status_of(pool, order_a) == "SUBMITTED"
+
+
+@pytest.mark.perf
+async def test_account_scope_sweep_perf_budget_and_injected_delay_goes_red(pool, perf_budget):
+    """Perf + gate-red — ACCOUNT sweep best-of 측정(예산은 모듈 상단 PERF_BUDGET_MS,
+    로컬 실측 ~1.6ms 대비 30x 이상 여유), 10x 가상 지연 주입 시 단언이 적색이어야 한다."""
+    from tests.support.perf_inject import virtual_delayed_async
+
+    user_id = await create_test_user(pool)
+    adapter = _adapters("bitget")["bitget"]
+
+    async def _sweep():
+        await _seed_order(pool, user_id)
+        return await _sweep_account(pool, str(user_id), {"bitget": adapter})
+
+    baseline = await perf_budget.best_of_async(_sweep, n=5, warmup=1)
+    assert baseline.wall_ms < PERF_BUDGET_MS, perf_budget.describe(
+        baseline, budget_ms=PERF_BUDGET_MS
+    )
+
+    adapter.cancel_order = virtual_delayed_async(
+        adapter.cancel_order, seconds=PERF_BUDGET_MS * 10 / 1000
+    )
+    slow = await perf_budget.best_of_async(_sweep, n=3, warmup=0)
+    assert slow.wall_ms >= PERF_BUDGET_MS * 10
