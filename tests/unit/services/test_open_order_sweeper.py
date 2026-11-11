@@ -29,8 +29,15 @@ from src.services.safety.legacy_execution_pauser import (
 )
 from src.services.safety.open_order_sweeper import sweep_open_orders
 from tests.integration.conftest import create_test_user
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_async
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
-from tests.unit.services.conftest import _adapters, _seed_execution, _seed_order, _status_of
+from tests.unit.services.conftest import (
+    _adapters,
+    _RaisingCancelAdapter,
+    _seed_execution,
+    _seed_order,
+    _status_of,
+)
 
 
 async def test_global_scope_requests_cancel_across_tenants(pool):
@@ -202,4 +209,135 @@ async def test_strategy_deployment_exec_prefix_rejects_non_digit_id(pool):
             control_id=uuid4(),
             scope=SafetyScope.STRATEGY_DEPLOYMENT,
             scope_ref="exec:not-a-number",
+        )
+
+
+# ---- DEEPEN-DEPTH R-39 (task-23314): test_provider_scope_only_matching_exchange 보강 ----
+
+
+async def test_provider_scope_unknown_provider_cancels_nothing(pool):
+    """negative — 어떤 주문의 거래소와도 맞지 않는 scope_ref는 0건, 주문 불변."""
+    user_id = await create_test_user(pool)
+    order = await _seed_order(pool, user_id, exchange="bitget")
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.PROVIDER,
+        scope_ref=f"no-such-{uuid4().hex}",
+    )
+
+    assert report.cancel_requested == ()
+    assert await _status_of(pool, order) == "SUBMITTED"
+
+
+async def test_provider_scope_is_case_sensitive_exact_match(pool):
+    """negative — 'BITGET' 대문자 scope_ref가 소문자 'bitget' 주문을 쓸어가면 안 된다."""
+    user_id = await create_test_user(pool)
+    order = await _seed_order(pool, user_id, exchange="bitget")
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.PROVIDER,
+        scope_ref="BITGET",
+    )
+
+    assert order not in report.cancel_requested
+    assert await _status_of(pool, order) == "SUBMITTED"
+
+
+async def test_provider_scope_terminal_orders_of_matching_exchange_untouched(pool):
+    """negative — 일치 거래소라도 종결 상태 주문은 취소 요청 대신 skipped."""
+    user_id = await create_test_user(pool)
+    filled = await _seed_order(pool, user_id, exchange="bitget", status="FILLED")
+    cancelled = await _seed_order(pool, user_id, exchange="bitget", status="CANCELLED")
+
+    report = await sweep_open_orders(
+        pool,
+        _adapters("bitget"),
+        control_id=uuid4(),
+        scope=SafetyScope.PROVIDER,
+        scope_ref="bitget",
+    )
+
+    assert not {filled, cancelled} & set(report.cancel_requested)
+    assert await _status_of(pool, filled) == "FILLED"
+    assert await _status_of(pool, cancelled) == "CANCELLED"
+
+
+async def test_provider_scope_adapter_exception_recorded_and_other_exchange_untouched(pool):
+    """failure injection — 일치 거래소 어댑터 cancel이 예외를 던져도 스윕은 완주하고
+    adapter_failed에 기록되며(주문은 CANCEL_REQUESTED 유지), 타 거래소 주문은 불변."""
+    user_id = await create_test_user(pool)
+    bitget_order = await _seed_order(pool, user_id, exchange="bitget")
+    binance_order = await _seed_order(pool, user_id, exchange="binance")
+    adapters = _adapters("binance")
+    adapters["bitget"] = _RaisingCancelAdapter(exchange_name="bitget")
+
+    report = await sweep_open_orders(
+        pool,
+        adapters,
+        control_id=uuid4(),
+        scope=SafetyScope.PROVIDER,
+        scope_ref="bitget",
+    )
+
+    assert report.cancel_requested == (bitget_order,)
+    assert report.adapter_failed == (bitget_order,)
+    assert await _status_of(pool, bitget_order) == "CANCEL_REQUESTED"
+    assert await _status_of(pool, binance_order) == "SUBMITTED"
+
+
+# 신설 예산(기존 예산 아님): PROVIDER 스윕 1회(주문 시드 + sweep) CPU 예산.
+# 로컬 실측(2026-11-11) best_of(n=5, batch=4): cpu_ms=0.0(15.6ms 틱 양자화로 0 판독),
+# wall_ms≈2.5. 예산 100ms는 wall 실측의 40배(30배 이상 여유)이며 cpu·wall 양쪽에 적용한다.
+_PROVIDER_SWEEP_CPU_BUDGET_MS = 100.0
+
+
+async def _seed_and_sweep_provider(pool, adapters):
+    user_id = await create_test_user(pool)
+    await _seed_order(pool, user_id, exchange="bitget")
+    return await sweep_open_orders(
+        pool,
+        adapters,
+        control_id=uuid4(),
+        scope=SafetyScope.PROVIDER,
+        scope_ref="bitget",
+    )
+
+
+@pytest.mark.perf
+async def test_provider_scope_sweep_best_of_cpu_within_budget(pool, perf_budget):
+    """성능 단언 — best_of(여러 번 중 최소) CPU가 신설 예산 미만."""
+    sample = await perf_budget.best_of_async(
+        lambda: _seed_and_sweep_provider(pool, _adapters("bitget")), n=5, warmup=1, batch=4
+    )
+    assert sample.cpu_ms < _PROVIDER_SWEEP_CPU_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_PROVIDER_SWEEP_CPU_BUDGET_MS
+    )
+    assert sample.wall_ms < _PROVIDER_SWEEP_CPU_BUDGET_MS, perf_budget.describe(
+        sample, budget_ms=_PROVIDER_SWEEP_CPU_BUDGET_MS
+    )
+
+
+@pytest.mark.perf
+async def test_provider_scope_sweep_gate_red_with_virtual_delay_10x(pool, perf_budget):
+    """게이트 적색 재현 — 예산의 10배 가상 지연을 주입하면 같은 단언이 실제로 적색이 된다."""
+    reset_virtual_totals()
+    try:
+        slow = virtual_delayed_async(
+            lambda: _seed_and_sweep_provider(pool, _adapters("bitget")),
+            _PROVIDER_SWEEP_CPU_BUDGET_MS * 10 / 1000,
+        )
+        sample = await perf_budget.best_of_async(slow, n=3, warmup=0, batch=2)
+    finally:
+        reset_virtual_totals()
+
+    assert sample.wall_ms >= _PROVIDER_SWEEP_CPU_BUDGET_MS * 10
+    with pytest.raises(AssertionError):
+        assert sample.wall_ms < _PROVIDER_SWEEP_CPU_BUDGET_MS, perf_budget.describe(
+            sample, budget_ms=_PROVIDER_SWEEP_CPU_BUDGET_MS
         )
