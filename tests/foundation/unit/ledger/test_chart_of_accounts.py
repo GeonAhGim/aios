@@ -20,6 +20,7 @@ import pytest
 from src.foundation.ledger.contracts.v1 import AccountType, UserSub
 from src.foundation.ledger.domain import chart_of_accounts as coa
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _USER_ID = UUID("12345678-1234-5678-1234-567812345678")
 
@@ -254,3 +255,59 @@ def test_gate_red_default_scope_budget_actually_fails_past_budget(perf_budget: A
             budget_ms=-1.0,
             label="gate_red default_scope",
         )
+
+
+# --- 실패 주입 (failure injection) ---
+
+
+@pytest.mark.perf
+def test_injected_10x_delay_in_default_scope_turns_budget_red(
+    perf_budget: Any, monkeypatch: Any
+) -> None:
+    """DEPTH 하한 보강(task-23425) — 실패 주입 0을 메운다. `default_scope` 호출
+    당 가상 CPU 지연을 주입하면 `perf_budget.best_of`가 읽는 cpu_ms가 기준 대비
+    10배 이상 커져 예산 적색을 보인다.
+
+    기준 호출 시간(Windows 양자화 15.6ms)으로 먼저 잰 뒤, 호출당 지연을
+    기준값의 10배로 설정해 주입한다. 주입 후 10배 이상 증가했거나, 기준×5를
+    예산으로 썼을 때 `assert_within`이 `AssertionError`를 내면 적색 입증.
+    """
+    # --- 설정 ---
+    n_codes = 2_000
+    codes = [coa.user_account(uuid4(), UserSub.AVAILABLE) for _ in range(n_codes)]
+
+    # --- 기준 측정 ---
+    reset_virtual_totals()
+    base = perf_budget.best_of(lambda: [coa.default_scope(c) for c in codes], batch=1)
+    base_cpu = base.cpu_ms
+    # Windows 양자화 때문에 0 또는 15.6ms가 읽힘; 0이면 고정 1ms로 간주
+    effective_base = max(base_cpu, 1.0)
+    target_delay = effective_base * 10 / n_codes  # 호출당 지연(ms) → 초 단위 변환
+    delay_s = target_delay / 1000 if target_delay > 0 else 0.001  # 최소 1ms
+
+    # --- 주입: default_scope를 virtual_delayed_sync로 감싸 호출당 지연 추가 ---
+    original_default_scope = coa.default_scope
+    coa.default_scope = virtual_delayed_sync(original_default_scope, delay_s)
+
+    try:
+        # --- 주입 후 측정 ---
+        injected = perf_budget.best_of(lambda: [coa.default_scope(c) for c in codes], batch=1)
+        injected_cpu = injected.cpu_ms
+
+        # 주입 후 cpu_ms가 기준의 10배 이상인지 확인
+        assert injected_cpu >= effective_base * 10, (
+            f"주입 후 cpu_ms({injected_cpu:.3f})가 기준({effective_base:.3f})의 "
+            f"10배({effective_base * 10:.3f}) 미만 — 주입 실패"
+        )
+
+        # 게이트 적색 재현: 기준×5를 예산으로 쓰면 assert_within이 AssertionError를 낸다
+        with pytest.raises(AssertionError):
+            perf_budget.assert_within(
+                lambda: [coa.default_scope(c) for c in codes],
+                batch=1,
+                budget_ms=effective_base * 5,
+                label="gate_red_repro injected",
+            )
+    finally:
+        coa.default_scope = original_default_scope
+        reset_virtual_totals()
