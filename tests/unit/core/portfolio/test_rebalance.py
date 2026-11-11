@@ -283,7 +283,12 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     prices = {s: Decimal("100") for s in symbols}
 
     def measure_once() -> None:
-        plan_rebalance(targets, current, cfg, prices, Decimal("2"))
+        # Run 50 iterations per sample call so the total CPU time comfortably
+        # exceeds one 15.6 ms tick even under xdist load.  Without this, a
+        # single plan_rebalance call on 200 symbols takes < 1 ms CPU and
+        # batch=8 still reads 0 ms when the OS quantises to 64 Hz.
+        for _ in range(50):
+            plan_rebalance(targets, current, cfg, prices, Decimal("2"))
 
     # batch=1: quantization likely reads 0 ms most of the time
     samples_batch1 = perf_budget.samples(measure_once, n=40, batch=1)
@@ -303,13 +308,13 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     )
 
     # batch=8 average must be non-zero and within budget.
-    # With 200 symbols the real CPU cost is measurable; batch=8 should
-    # capture it without the zero-convergence artifact.
-    assert avg_batch8 > 0.01, (
+    # With 200 symbols × 50 iterations the real CPU cost is measurable;
+    # batch=8 should capture it without the zero-convergence artifact.
+    assert avg_batch8 > 0.5, (
         f"batch=8 avg {avg_batch8:.3f}ms near-zero — batching did not recover quantization loss"
     )
-    assert avg_batch8 < 5.0, (
-        f"batch=8 avg {avg_batch8:.3f}ms exceeds 5ms budget — "
+    assert avg_batch8 < 50.0, (
+        f"batch=8 avg {avg_batch8:.3f}ms exceeds 50ms budget — "
         "performance regression or budget too tight"
     )
 
