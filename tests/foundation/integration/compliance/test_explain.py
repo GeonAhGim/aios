@@ -38,7 +38,16 @@ from tests.support.perf_inject import (
 # 색이 안 바뀐다")은 이 경로로만 증명된다.
 
 
+@pytest.mark.perf
 async def test_explain_real_denied_decision_reproduces_red_gate_verdict(pool, repo, trust_repo):
+    """DENY 재현에도 기존 단일 호출 CPU 예산 150ms를 적용한다.
+
+    기존 예산을 재사용하며 best-of-5로 측정한다. 동일 단언에 예산의
+    10배 CPU 가상 지연을 주입하여 성능 회귀가 실제 적색임을 검증한다.
+    """
+    from tests.support.perf_inject import virtual_delayed_sync
+
+    reset_virtual_totals()
     tenant_id = await _active_tenant(pool, repo, trust_repo)  # default_rules forbids "XYZ"
 
     evaluated = await evaluate_pre_trade(
@@ -55,6 +64,26 @@ async def test_explain_real_denied_decision_reproduces_red_gate_verdict(pool, re
     assert explained.decision_id == evaluated.compliance_decision_id
     assert explained.verdict == ComplianceVerdict.DENY
     assert [hit.rule_id for hit in explained.rule_hits] == list(evaluated.reason_codes)
+
+    async def replay():
+        result = await explain(repo, evaluated.compliance_decision_id)
+        assert result.model_dump() == explained.model_dump()
+        return result
+
+    def assert_budget(sample):
+        assert sample.cpu_ms < 150.0, "DENY replay CPU budget exceeded"
+
+    pb = PerfBudget()
+    sample = await pb.best_of_async(replay, n=5, warmup=1, batch=10)
+    print(f"DENY replay cpu={sample.cpu_ms:.3f}ms wall={sample.wall_ms:.3f}ms")
+    assert_budget(sample)
+    try:
+        delayed_replay = virtual_delayed_sync(replay, seconds=1.5)
+        delayed_sample = await pb.best_of_async(delayed_replay, n=3, warmup=1)
+        with pytest.raises(AssertionError, match="DENY replay CPU budget exceeded"):
+            assert_budget(delayed_sample)
+    finally:
+        reset_virtual_totals()
 
 
 async def test_explain_real_allowed_decision_reproduces_green_gate_verdict(pool, repo, trust_repo):
