@@ -3,6 +3,7 @@ tests/conftest.py가 500줄 임계값을 넘겨 분할, task-12088)."""
 
 from __future__ import annotations
 
+import gc
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -70,7 +71,17 @@ class PerfBudget:
         # tracing for the timed section only; coverage of the surrounding test
         # body (not the hot loop) is unaffected since it is retraced right
         # after restore.
+        # task-23258: the cyclic GC rescans every live container each time it
+        # fires; a test that keeps a huge cached heap alive (e.g. the
+        # consistency checks' module-wide AST caches, millions of nodes) pays
+        # that rescan inside the timed window, so cpu_ms measures the heap
+        # size of whatever ran earlier in the xdist worker, not `fn`. Like
+        # `timeit`, collect before and keep the collector off while timing.
         active_tracer = sys.gettrace()
+        gc_was_enabled = gc.isenabled()
+        if gc_was_enabled:
+            gc.collect()
+            gc.disable()
         virtual_cpu0, virtual_wall0 = virtual_totals_ns()
         wall_start = time.perf_counter()
         cpu_start = time.process_time()
@@ -80,6 +91,8 @@ class PerfBudget:
                 result = fn()
         finally:
             sys.settrace(active_tracer)
+            if gc_was_enabled:
+                gc.enable()
         virtual_cpu1, virtual_wall1 = virtual_totals_ns()
         # Virtual delay is added as an exact integer-ns delta (see perf_inject): 50 ms reads 50.0.
         real_cpu_ms = (time.process_time() - cpu_start) * 1000
