@@ -312,6 +312,36 @@ async def test_close_period_rejects_reclose_of_same_as_of_date(
     assert still_there is not None
     assert still_there.balances[debit_code] == Decimal("10.00")
 
+    # Negative 2: a re-close with a later cutoff (new posting visible) is still refused and the
+    # frozen snapshot hash is unchanged.
+    later = cutoff + timedelta(minutes=30)
+    await _insert_dated_entry(
+        pool,
+        fund_id=fund_id,
+        portfolio_id=portfolio_id,
+        posted_at=cutoff + timedelta(minutes=10),
+        lines=_balanced_pair(debit_code, credit_code, Decimal("99.00")),
+        account_ids=account_ids,
+    )
+    with pytest.raises(AlreadyClosedError):
+        await abor_snapshot.close_period(
+            pool, fund_id=fund_id, as_of_date=as_of_date, closing_recorded_at=later
+        )
+    after = await abor_snapshot.get_snapshot(pool, fund_id=fund_id, as_of_date=as_of_date)
+    assert after is not None
+    assert after.snapshot_hash == still_there.snapshot_hash
+    assert after.balances == still_there.balances
+
+    # Negative 3: a third attempt is refused identically (rejection is stable, not one-shot).
+    with pytest.raises(AlreadyClosedError):
+        await abor_snapshot.close_period(
+            pool, fund_id=fund_id, as_of_date=as_of_date, closing_recorded_at=cutoff
+        )
+
+    # Gate-red repro: the frozen-value assertion would catch a tampered snapshot.
+    tampered = {**after.balances, debit_code: after.balances[debit_code] + Decimal("0.01")}
+    assert abor_snapshot._snapshot_hash(tampered) != still_there.snapshot_hash
+
 
 async def _seed_close_fixture(pool, fund_id, portfolio_id, accounts, amount: str) -> datetime:
     debit_code, credit_code = accounts
