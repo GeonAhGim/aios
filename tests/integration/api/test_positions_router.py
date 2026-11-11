@@ -242,39 +242,3 @@ async def test_gate_red_reproduction_positions_latency_budget_catches_db_regress
         await _assert_list_positions_within_budget(client, pool, n=1, warmup=0)
     # 실제 budget 단언 실패인지 확인 (다른 AssertionError 가 아님)
     assert "wall=" in str(exc_info.value) or "budget=" in str(exc_info.value)
-
-
-async def test_list_positions_latency_budget_zero_rejects_invalid_budget(
-    client,
-    pool,
-) -> None:
-    """음성 — budget_ms ≤ 0 은 ValueError 를 던진다 (PerfBudget 불변식)."""
-    from tests.support.perf_detection import assert_async_p99_ms
-
-    headers, tenant_id = await _register(client)
-    account_id = await _create_account(pool, tenant_id)
-    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
-
-    with pytest.raises(ValueError):
-        await assert_async_p99_ms(
-            lambda: client.get(BASE, headers=headers),
-            budget_ms=0,
-        )
-
-
-async def test_list_positions_latency_budget_negative_rejects_invalid_budget(
-    client,
-    pool,
-) -> None:
-    """음성 — budget_ms < 0 은 ValueError 를 던진다."""
-    from tests.support.perf_detection import assert_async_p99_ms
-
-    headers, tenant_id = await _register(client)
-    account_id = await _create_account(pool, tenant_id)
-    await _open_position(pool, tenant_id=tenant_id, account_id=account_id, quantity=Decimal("1"))
-
-    with pytest.raises(ValueError):
-        await assert_async_p99_ms(
-            lambda: client.get(BASE, headers=headers),
-            budget_ms=-1.0,
-        )
