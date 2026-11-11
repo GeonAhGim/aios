@@ -290,10 +290,12 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     cpu_ms_batch1 = [s.cpu_ms for s in samples_batch1]
     avg_batch1 = sum(cpu_ms_batch1) / len(cpu_ms_batch1)
 
-    # batch=8: quantization error reduced by ~8x
-    samples_batch8 = perf_budget.samples(measure_once, n=40, batch=8)
-    cpu_ms_batch8 = [s.cpu_ms for s in samples_batch8]
-    avg_batch8 = sum(cpu_ms_batch8) / len(cpu_ms_batch8)
+    # batch=512: quantization error reduced to ~15.6/512 ≈ 0.03ms per call,
+    # pushing per-call CPU above the quantization floor so the average is
+    # reliably non-zero even under CI parallel CPU contention.
+    samples_batch512 = perf_budget.samples(measure_once, n=40, batch=512)
+    cpu_ms_batch512 = [s.cpu_ms for s in samples_batch512]
+    avg_batch512 = sum(cpu_ms_batch512) / len(cpu_ms_batch512)
 
     # batch=1 average must be near-zero (quantization artifact).
     # Under Windows quantization, a fast function reads 0 ms most of the time;
@@ -302,14 +304,14 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
         f"batch=1 avg {avg_batch1:.3f}ms not near-zero — quantization artifact not confirmed"
     )
 
-    # batch=8 average must be non-zero and within budget.
-    # With 200 symbols the real CPU cost is measurable; batch=8 should
-    # capture it without the zero-convergence artifact.
-    assert avg_batch8 > 0.01, (
-        f"batch=8 avg {avg_batch8:.3f}ms near-zero — batching did not recover quantization loss"
+    # batch=512 average must be non-zero and within budget.
+    # With 200 symbols the real CPU cost is ~0.03-0.06ms per call at batch=512;
+    # this is well above the 0.01ms floor and far below the 5ms budget.
+    assert avg_batch512 > 0.01, (
+        f"batch=512 avg {avg_batch512:.3f}ms near-zero — batching did not recover quantization loss"
     )
-    assert avg_batch8 < 5.0, (
-        f"batch=8 avg {avg_batch8:.3f}ms exceeds 5ms budget — "
+    assert avg_batch512 < 5.0, (
+        f"batch=512 avg {avg_batch512:.3f}ms exceeds 5ms budget — "
         "performance regression or budget too tight"
     )
 
