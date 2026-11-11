@@ -34,6 +34,7 @@ from src.data.models.market_data import Candle
 from src.services.execution_loop.candle_history import CandleHistoryCache
 from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import virtual_delayed_sync
 
 _OWNER = uuid4()
 _RISK_NOW = datetime(2026, 9, 3, tzinfo=UTC)
@@ -309,25 +310,22 @@ async def test_perf_gate_red_reproduction_injected_cpu_load(
     """게이트 적색 재현(D2): CPU 예산 테스트이므로 CPU 부하를 주입하고
     같은 측정/단언이 적색으로 전환되는지 검증한다.
 
-    캐시 _entries를 CPU 부하를 simulate하는 dict로 교체해, 같은
-    `_batch_500` 패턴이 800ms CPU 예산을 초과하도록 한다.
+    `virtual_delayed_sync`로 500회 호출 각각에 2ms 가상 CPU 부하를
+    주입한다(500x2ms=1000ms>800ms 예산). 실제 CPU spin 또는
+    asyncio.sleep 없이 ledger만 증가하므로 27s->0.3s 내외로 끝난다.
     """
     adapter = _FakeAdapter()
     cache = CandleHistoryCache(now=_Clock(datetime(2026, 1, 1, tzinfo=UTC)))
 
-    # 첫 호출 — adapter 호출(캐시 미스)으로 캐시 생성
+    # 첫 호출 - adapter 호출(캐시 미스)로 캐시 생성
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
 
-    # CPU 부하 주입: _entries.get() 호출마다 ~3ms CPU 작업 추가
-    _original_entries = cache._entries
-
-    class _CPUHeavyDict(dict):
+    # 가상 CPU 부하 주입: dict 서브클래스로 get()을 가상 지연 감싸서 500회 호출당 2ms
+    class _VirtualDelayDict(dict):
         def get(self, key, default=None):
-            # 3ms CPU 작업 — 500회 × 3ms = 1500ms > 800ms 예산
-            _ = sum(i * i for i in range(500_000))
-            return super().get(key, default)
+            return virtual_delayed_sync(dict.get, 0.002)(self, key, default)
 
-    cache._entries = _CPUHeavyDict(_original_entries)
+    cache._entries = _VirtualDelayDict(cache._entries)
 
     async def _batch_500_delayed() -> None:
         for _ in range(500):
@@ -335,7 +333,7 @@ async def test_perf_gate_red_reproduction_injected_cpu_load(
             assert result is not None
 
     sample = await perf_budget.sample_async(_batch_500_delayed)
-    # 이 단언은 적색이어야 함 — 지연 주입으로 예산 초과
+    # 이 단언은 적색이어야 함 - 지연 주입으로 예산 초과
     assert sample.cpu_ms >= 800.0, (
         f"예상 적색 실패: cpu={sample.cpu_ms:.2f}ms wall={sample.wall_ms:.2f}ms"
     )

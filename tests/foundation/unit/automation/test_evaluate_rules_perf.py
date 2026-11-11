@@ -139,10 +139,10 @@ async def test_delay_injection_proves_budget_fails(tenant_id, perf_budget, monke
     """적색 재현: evaluate_rules 내부에 지연을 주입하면 p95 단언이 AssertionError를
     일으킨다 — 즉 테스트가 진짜로 예산 위반을 잡아내는지를 검증한다.
 
-    delayed_async(asyncio.sleep)는 wall-clock 대기를 주입한다.
-    sample_async는 wall_ms를 측정하므로 wall_ms로 단언한다.
+    virtual_delayed_async는 실제 asyncio.sleep 없이 virtual wall ledger만 증가한다.
+    sample_async는 virtual ledger를 읽으므로 wall_ms로 단언한다.
     """
-    from tests.support.perf_inject import delayed_async
+    from tests.support.perf_inject import virtual_delayed_async
 
     repo = InMemoryAutomationRuleRepository()
     for i in range(RULE_COUNT):
@@ -158,11 +158,12 @@ async def test_delay_injection_proves_budget_fails(tenant_id, perf_budget, monke
     snapshots = {"005930": snapshot}
 
     # list_by_tenant을 지연시켜 전체 호출 시간을 예산(1초)보다 길게 만든다.
-    # 1.1초 지연 → p95 wall-clock이 1000ms를 넘어야 한다.
+    # 1.1초 가상 지연 → p95 wall-clock이 1000ms를 넘어야 한다.
+    # virtual_delayed_async는 실제 asyncio.sleep 없이 ledger만 증가 → CI 병렬 실행에서도 즉시 종료
     monkeypatch.setattr(
         repo,
         "list_by_tenant",
-        delayed_async(repo.list_by_tenant, 1.1),
+        virtual_delayed_async(repo.list_by_tenant, 1.1),
     )
 
     wall_durations = []
