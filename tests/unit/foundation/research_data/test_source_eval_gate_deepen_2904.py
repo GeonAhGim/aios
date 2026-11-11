@@ -169,24 +169,25 @@ def test_perf_parse_eval_markdown_budget_injection_fails_red(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Budget injection: add ~15× CPU work per parse so total exceeds 200ms.
+    """Budget injection: add ~15ms virtual CPU delay per parse so total exceeds 200ms.
 
     Confirms the perf assertion is *sensitive* — a sufficiently slowed hot path
     must go red, not pass silently.
+
+    Uses ``virtual_delayed_sync`` so the ledger reads +15ms per call without
+    actually spinning (a 10× real spin used to cost ~140s per test).
     """
     from src.foundation.research_data.domain.source_eval_gate import (
         assert_source_eval_gate as _orig,
     )
+    from tests.support.perf_inject import virtual_delayed_sync
 
-    def _slow(*args: object, **kwargs: object) -> object:
-        result = _orig(*args, **kwargs)
-        # ~15ms CPU work per call → ~1500ms for 100 calls (>> 200ms budget)
-        _ = sum(i * i for i in range(600000))
-        return result
+    # ~15ms virtual CPU delay per call → ~1500ms for 100 calls (>> 200ms budget)
+    delayed = virtual_delayed_sync(_orig, 0.015)
 
     import src.foundation.research_data.domain.source_eval_gate as mod
 
-    monkeypatch.setattr(mod, "assert_source_eval_gate", _slow)
+    monkeypatch.setattr(mod, "assert_source_eval_gate", delayed)
 
     def parse_100() -> None:
         for _ in range(100):
