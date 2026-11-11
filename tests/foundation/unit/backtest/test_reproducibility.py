@@ -210,10 +210,9 @@ def test_reproducibility_key_p95_latency_within_backtest_budget_slice(
     `batch=8`로 Windows `process_time()` 약 15.6ms 양자화 오차를 호출당
     ~2ms로 줄인다 — 대상 함수가 2ms 미만이면 batch=1로 모든 샘플이 0ms에
     수렴하여 p95=0이 된다(task-11539 감사)."""
-    raw_samples: list[float] = []
-    for _ in range(_ITERATIONS):
-        sample = perf_budget.sample(_key, batch=8)
-        raw_samples.append(sample.cpu_ms)
+    # samples() collects garbage once per series (not per sample), keeping the
+    # GC pause out of the timed window without 200 full gc.collect() passes.
+    raw_samples = [s.cpu_ms for s in perf_budget.samples(_key, n=_ITERATIONS, batch=8)]
     p95_ms = _p95_ms(raw_samples)
     print(f"[BT-9] reproducibility_key p95={p95_ms:.4f}ms budget<{_BUDGET_MS:.0f}ms")
     assert p95_ms < _BUDGET_MS
