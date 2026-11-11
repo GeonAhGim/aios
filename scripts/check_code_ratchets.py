@@ -372,7 +372,10 @@ def main(argv: list[str] | None = None) -> int:
     if increased:
         for metric, (before, after) in increased.items():
             print(f"FAIL: {metric} {before}개 -> {after}개 (증가)")
-            for rel, lineno in hits[metric][: args.top]:
+            # loc_over_* 목록은 임계값을 넘긴 파일만 담아 짧고, 경로 사전순 --top 절단 시
+            # 방금 임계값을 넘긴 파일이 잘려 나가 실패 원인이 보이지 않는다(task-23304). 전부 출력.
+            shown = hits[metric] if metric.startswith("loc_over_") else hits[metric][: args.top]
+            for rel, lineno in shown:
                 print(f"    {rel}:{lineno}")
         return 2
 
