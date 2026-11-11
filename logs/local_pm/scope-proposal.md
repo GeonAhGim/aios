@@ -1,89 +1,35 @@
-# 파일 범위 분할 제안: task-23246 [재투입]
+# 파일 범위 분할 제안: task-23846 (QA, coverage 적색)
 
 ## 분석
 
-- 원본 files: `["scripts/check_consistency.py", "src/"]` — `src/`는 디렉터리라 파일 범위로 해석 불가(`unresolved_path_scope`).
-- 원본 spec: "Fix review findings: consistency 24h 5회 반복 — 단계 규칙/기준선 설계 결함 조사"
-- 실제 실패 게이트: `openapi_client_mismatch` 34건 (baseline 34, 현재 34 — 드리프트 없음)
-- 34건 내역 (실제 `check_openapi_frontend()` 함수 결과):
-  - **18건**: OpenAPI(`contracts/openapi/v1.json`)에 있으나 프론트엔드(`apiRoutes.ts`)에서 호출하지 않는 백엔드 전용 경로
-  - **16건**: 프론트엔드에서 호출하나 OpenAPI에 없는 프론트엔드 전용 경로
+- 원본 files: `["src/"]` — 디렉터리라 파일 범위로 해석 불가(`unresolved_path_scope`).
+- 원본 증상: `[coverage] FAIL: 기준선 미달 94.83% -> 56.76% (-38.07%p)` (esc-ci-coverage).
+- `scripts/coverage_ratchet.py`는 `coverage.xml`만 읽는다. 94.83 -> 56.76 급락은 `src/` 한 파일의 회귀가 아니라
+  pytest가 중도 종료된 partial report(분모 `lines-valid` 축소 또는 일부 패키지 미임포트)일 가능성이 높다.
+  동일 패턴 선례: task-7644/7670, task-8680, task-9052, task-9120 (`coverage_ratchet.py` 모듈 docstring 참조).
+- 따라서 `src/` 전체를 한 리프로 두면 안 되고, "측정 신뢰성 판정" -> "패키지별 실제 미커버 파일 정정" 순으로 쪼갠다.
+  기준선 하향·ignore 추가는 금지(DECISION_GUIDELINES B-2).
 
-### 18개 백엔드 전용 경로 (OpenAPI→Frontend 불일치)
+## 제안 분할 (실제 파일 단위)
 
-실제 API(POST/GET)가 존재하며, 프론트엔드 UI 화면이 없는 경우들:
+1. **리프 A — 측정 신뢰성 판정 (코드 수정 없음 가능)**
+   - files: `scripts/coverage_ratchet.py`, `coverage-baseline.txt` (읽기 전용 확인)
+   - 작업: 최신 `coverage.xml`의 `lines-valid`를 baseline 측정 시점과 비교, `gh run download`의 GitHub Actions 값과 대조.
+     partial run이면 noop-reason에 수치와 함께 done, 아니면 리프 B~E 발행.
+2. **리프 B — `src/core/` 하위 (FROZEN_PAPER_ONLY 제외)**
+   - files: `src/core/indicators/`, `src/core/eventstore/`, `src/core/safety/`, `src/core/security/`,
+     `src/core/validator/`, `src/core/scanner/`, `src/core/risk_stats/` 중 `coverage.xml`에서 line-rate 급락 클래스로 확인된 파일만
+   - 주의: `src/core/strategy|portfolio|risk|executor`는 FROZEN 승인 없이 수정 불가.
+3. **리프 C — `src/foundation/`** (리프 A에서 급락 확인된 aggregate 파일만 지정, 테스트는 `tests/unit/foundation/...`)
+4. **리프 D — `src/services/` 및 `src/api/`** (`router_registry.py`, `routers/`, `schemas/`) — 급락 확인된 모듈만.
+5. **리프 E — `src/exchanges/`, `src/db/`** — 급락 확인된 모듈만.
 
-```
-/risk-coach/position-size                    -- 리스크 코치 위치 크기 계산 API
-/v1/accounts/summary                        -- 계정 요약 API
-/v1/ai/experiments/{experiment_id}          -- AI 실험 상세 API
-/v1/ai/experiments/{experiment_id}/lineage  -- AI 실험 계보 API
-/v1/ai/proposals/{proposal_id}              -- AI 제안 상세 API
-/v1/ai/tokens/{token_id}:rotate             -- AI 토큰 회전 API
-/v1/assistant/explain-backtest              -- 백테스트 설명 API
-/v1/assistant/explain-script                -- 스크립트 설명 API
-/v1/assistant/generate-script               -- 스크립트 생성 API
-/v1/foundation/compliance/mandate/status    -- 규정 준수 명령 상태 API
-/v1/foundation/market-data/options/chain    -- 옵션 체인 데이터 API
-/v1/foundation/personal/bundle              -- 개인 번들 API
-/v1/foundation/personal/daily-report        -- 일일 리포트 API
-/v1/foundation/personal/kill                -- 개인 키일 API
-/v1/foundation/personal/promote             -- 개인 승진 API
-/v1/foundation/personal/promotion-checklist -- 승진 체크리스트 API
-/v1/foundation/research/items               -- 연구 항목 목록 API
-/v1/foundation/research/items/{item_id}     -- 연구 항목 상세 API
-```
+## 선행 조건
 
-### 16개 프론트엔드 전용 경로 (Frontend→OpenAPI 불일치)
+리프 A의 결과(급락 클래스 목록: `coverage.xml`에서 line-rate 0 또는 미임포트 파일)가 B~E의 files 목록을 확정한다.
+A 없이 B~E를 발행하면 다시 `src/` 수준 범위가 되므로 A를 `depends_on`으로 둘 것.
 
-`apiRoutes.ts`에 있으나 실제 백엔드 라우터가 없는 유령 경로들:
+## 비고
 
-```
-/auth/sessions                              -- 세션 조회 (백엔드 라우터 없음)
-/auth/sessions/:sessionId                   -- 세션 회수 (백엔드 라우터 없음)
-/v1/ai/experiments                          -- AI 실험 목록 (백엔드 라우터 없음)
-/v1/ai/proposals/:proposalId:promote        -- AI 제안 승진 (백엔드 라우터 없음)
-/v1/ai/proposals/:proposalId:promote-ticket -- AI 제안 승진 티켓 (백엔드 라우터 없음)
-/v1/ai/providers                            -- AI 제공자 목록 (백엔드 라우터 없음)
-/v1/ai/providers/:provider                  -- AI 제공자 상세 (백엔드 라우터 없음)
-/v1/foundation/follow/subscriptions         -- 팔로우 구독 목록 (백엔드 라우터 없음)
-/v1/foundation/follow/subscriptions/:subscriptionId         -- 구독 상세 (백엔드 라우터 없음)
-/v1/foundation/follow/subscriptions/:subscriptionId/performance -- 구독 성과 (백엔드 라우터 없음)
-/v1/foundation/signals/sources              -- 신호 소스 목록 (백엔드 라우터 없음)
-/v1/foundation/signals/sources/:sourceId/receipts             -- 신호 영수증 (백엔드 라우터 없음)
-/v1/foundation/signals/sources/:sourceId/disable              -- 신호 비활성화 (백엔드 라우터 없음)
-/v1/foundation/signals/sources/:sourceId:rotate               -- 신호 회전 (백엔드 라우터 없음)
-/v1/foundation/whatif/preview-order       -- 주문 미리보기 (백엔드 라우터 없음)
-/v1/foundation/whatif/rebalance-plan      -- 재조정 계획 (백엔드 라우터 없음)
-```
-
-## 실제 변경 파일
-
-**`scripts/consistency/contracts.py`** 1파일 — 두 개의 allowlist 추가 필요:
-
-1. `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`에 18개 백엔드 전용 경로 추가 (기존 패턴과 동일: 경로: 사유 주석)
-2. 프론트엔드 전용 경로용 새 allowlist 필요 (`_FRONTEND_NO_OPENAPI_ALLOWLIST` 또는 기존 함수 수정) — 16개 경로
-
-## 분할안
-
-### 권장: 단일 파일·단일 커밋
-
-`scripts/consistency/contracts.py` 1건에 두 allowlist 추가 + `check_openapi_frontend()` 함수에 프론트엔드 전용 allowlist 체크 추가.
-
-### 분할안 (필요시)
-
-| 작업 | 파일 | 설명 |
-|------|------|------|
-| A | `scripts/consistency/contracts.py` | 18개 백엔드 전용 경로 `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST` 추가 |
-| B | `scripts/consistency/contracts.py` | 16개 프론트엔드 전용 경로용 allowlist + 체크 로직 추가 |
-
-A·B는 같은 파일이므로 단일 커밋 권장. 분할해도 독립성이 낮음.
-
-## 결론
-
-- **권장: `scripts/consistency/contracts.py` 단일 수정 1건** (두 allowlist 34개 추가 + 체크 로직 수정)
-- `src/` 전체 범위는 불필요 — 실제 변경은 contracts.py 1파일
-- baseline(34)과 현재(34)가 동일하므로 드리프트는 없음. 기존 게이트 녹색 유지 목적
-- 프론트엔드 전용 16건은 `_OPENAPI_NO_FRONTEND_UI_ALLOWLIST`만으로는 해결 불가 — `check_openapi_frontend()`의 프론트엔드→OpenAPI 체크에도 allowlist 적용 필요
-
-원본 hold 해제·재큐·코드 수정은 하지 않았다.
+- 원본(task-23846) hold 해제·재큐·코드 수정은 하지 않았다(본 task는 제안만).
+- 이 환경에서는 coverage 실측(`pytest --cov=src`, 약 26분)을 돌리지 않았다. 위 원인은 스크립트 docstring과 선례 기반 추정이며 리프 A에서 검증한다.
