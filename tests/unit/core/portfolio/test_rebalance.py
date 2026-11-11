@@ -277,8 +277,11 @@ def test_cpu_measurement_converges_away_from_zero_with_batch(perf_budget) -> Non
     The actual CPU budget test below uses batch=8 to avoid this pitfall.
     """
     cfg = _config(rebalance_band_pct=Decimal("1"), min_trade_notional=Decimal("1"))
-    symbols = [f"SYM{i}/USDT" for i in range(200)]
-    current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("1000000"))
+    # 1000 symbols → ~0.4ms/call on Linux (measurable above 0.01ms floor).
+    # On Windows the same workload quantizes to 0 or 15.6ms with batch=1;
+    # batch=8 reduces per-call quantization error to ~2ms.
+    symbols = [f"SYM{i}/USDT" for i in range(1000)]
+    current = _aggregate({s: Decimal("0.4") for s in symbols}, total_equity=Decimal("10000000"))
     targets = {s: Decimal("0.6") for s in symbols}
     prices = {s: Decimal("100") for s in symbols}
 
