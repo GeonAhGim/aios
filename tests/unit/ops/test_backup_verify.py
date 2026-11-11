@@ -25,7 +25,7 @@ import pytest
 
 from ops import backup_verify
 from tests.support.perf_budget import PerfBudget
-from tests.support.perf_inject import delayed_sync
+from tests.support.perf_inject import virtual_delayed_sync
 
 
 def _ok_base_backup(dest_dir: Path, dsn: str) -> dict[str, Any]:
@@ -302,11 +302,11 @@ def test_run_backup_verify_orchestration_overhead_fails_with_10x_delay(
 ) -> None:
     """Failure injection -- CPU-bound 지연 주입 시 적색 확인.
 
-    delayed_sync(0.002)를 각 호출에 추가하면 2000회 × 2ms CPU 부하 = 4000ms CPU
-    가 되어 2000ms CPU 예산을 초과한다. 이 지연을 제거하면 다시 녹색이 된다.
-    time.sleep 대신 delayed_sync를 쓰는 이유: time.sleep은 CPU 시간을 늘리지
-    않으므로 CPU 예산 단언을 검증할 수 없다. delayed_sync는 busy-wait로 실제
-    CPU 시간을 소모하므로 process_time 기반 측정이 예산 초과를 감지한다.
+    virtual_delayed_sync(0.002)를 각 호출에 추가하면 2000회 × 2ms = 4000ms CPU
+    가 되어 2000ms CPU 예산을 초과한다. 실제 spin 없이 가상 ledger에만 추가하므로
+    테스트는 즉시 끝나고, PerfBudget.sample() 이 가상 지연을 cpu_ms 에 합산해
+    예산 초과를 적색으로 검출한다. delayed_sync(busy-wait)를 쓰면 실제 CPU
+    spin 으로 30s 이상 걸리지만 virtual_delayed_sync 는 즉시 끝난다.
     """
 
     iterations = 2_000
@@ -316,11 +316,11 @@ def test_run_backup_verify_orchestration_overhead_fails_with_10x_delay(
         for _ in range(iterations):
             result = backup_verify.run_backup_verify(**kwargs)
             assert result["ok"] is True
-            delayed_sync(lambda: None, 0.002)()  # 2ms CPU 부하 주입 → 2000회 × 2ms = 4000ms CPU
+            virtual_delayed_sync(lambda: None, 0.002)()  # 2ms CPU 부하 가상 주입 → 실제 spin 없음
 
     sample = perf_budget.sample(_batch_delayed, batch=1)
-    # delayed_sync는 CPU 시간을 늘리므로 cpu_ms 로 단언.
-    # 4000ms CPU > 2000ms budget → 적색 검출력 확인
+    # virtual_delayed_sync는 가상 ledger에 CPU 시간을 더하므로 cpu_ms 로 단언.
+    # 4000ms 가상 CPU > 2000ms budget → 적색 검출력 확인
     assert sample.cpu_ms > 2000.0, f"delay injection failed to exceed budget: {sample.cpu_ms:.1f}ms"
 
 
