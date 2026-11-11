@@ -14,7 +14,6 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md §8
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from decimal import Decimal
 from uuid import UUID
@@ -36,6 +35,7 @@ from src.services.order_service.gate import GateDecision, GateOutcome, OrderCont
 from tests.integration.conftest import create_test_tenant
 from tests.integration.fake_exchange_adapter import FakeExchangeAdapter
 from tests.integration.test_execution_tick import _create_execution
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 from tests.support.raw_order_isolation import isolated_raw_orders as isolated_raw_orders
 
 
@@ -115,12 +115,12 @@ async def test_two_schedulers_ticking_same_execution_place_order_exactly_once(po
 async def test_two_schedulers_ticking_delayed_acquire_exceeds_budget(
     pool, perf_budget: pytest.fixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Gate-red: inject four seconds of process CPU against the 3000ms budget.
+    """Gate-red: inject four seconds of virtual CPU against the 3000ms budget.
 
-    A wall-clock busy wait can consume less CPU when parallel workers preempt
-    this process. Use the same CPU clock as PerfBudget so descheduling cannot
-    shorten the injected load. Keep the real database ownership race intact.
+    Real spinning under parallel workers is nondeterministic; the virtual ledger
+    adds the delay to the sample exactly. The real database ownership race stays intact.
     """
+    reset_virtual_totals()
     user_id = await create_test_tenant(pool)
     _execution_id = await _create_execution(pool, user_id, entry_threshold=100.0)
     shared_adapter = _filled_adapter()
@@ -130,14 +130,17 @@ async def test_two_schedulers_ticking_delayed_acquire_exceeds_budget(
     original_acquire = lease_repo.acquire_or_renew_many
     acquire_calls = 0
 
-    async def cpu_heavy_acquire(*args, **kwargs):
+    async def counted_acquire(*args, **kwargs):
         nonlocal acquire_calls
-        result = await original_acquire(*args, **kwargs)
-        cpu_deadline = time.process_time() + 2.0
-        while time.process_time() < cpu_deadline:
-            pass
         acquire_calls += 1
-        return result
+        return await original_acquire(*args, **kwargs)
+
+    # Two schedulers x 2.0s = 4s virtual CPU, over the 3000ms budget.
+    delayed = virtual_delayed_sync(lambda: None, 2.0)
+
+    async def cpu_heavy_acquire(*args, **kwargs):
+        delayed()
+        return await counted_acquire(*args, **kwargs)
 
     monkeypatch.setattr(lease_repo, "acquire_or_renew_many", cpu_heavy_acquire)
 
