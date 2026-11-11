@@ -20,6 +20,7 @@ import pytest
 from src.foundation.ledger.contracts.v1 import AccountType, UserSub
 from src.foundation.ledger.domain import chart_of_accounts as coa
 from tests.support.perf_budget import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _USER_ID = UUID("12345678-1234-5678-1234-567812345678")
 
@@ -254,3 +255,47 @@ def test_gate_red_default_scope_budget_actually_fails_past_budget(perf_budget: A
             budget_ms=-1.0,
             label="gate_red default_scope",
         )
+
+
+# --- 실패 주입 (task-23424 D2 보강) ---
+
+
+@pytest.mark.perf
+def test_default_scope_failure_injection_10x_delay_turns_budget_red(
+    perf_budget: Any, monkeypatch: Any
+) -> None:
+    """task-23424 실패 주입 — 호출당 1ms 가상 지연(기반 0.1ms의 10배)을
+    주입해 2000ms 예산을 초과하게 만든다. 20,000 계정 × 1ms = 20,000ms
+    가상 지연으로 반드시 적색이어야 한다. 기존 예산 2000ms÷20000회=호출당
+    0.1ms의 10배이므로 새 예산 필요 없음."""
+    reset_virtual_totals()
+    monkeypatch.setattr(coa, "default_scope", virtual_delayed_sync(coa.default_scope, 0.001))
+    n = 20_000
+    budget_ms = 2_000.0
+    codes = [coa.user_account(uuid4(), UserSub.AVAILABLE) for _ in range(n)]
+
+    with pytest.raises(AssertionError):
+        perf_budget.assert_within(
+            lambda: [coa.default_scope(c) for c in codes],
+            budget_ms=budget_ms,
+            label="failure_injection 10x delayed default_scope",
+        )
+
+
+@pytest.mark.perf
+def test_default_scope_without_injection_stays_green_under_same_budget(
+    perf_budget: Any,
+) -> None:
+    """task-23424 대조군 — 주입 없이 같은 2000ms 예산 아래 녹색을 유지한다.
+    테스트 A가 주입 때문에 빨개진다는 점을 증명한다. 기존 perf 테스트와
+    중복되므로 n=3으로 작게 유지한다."""
+    reset_virtual_totals()
+    n = 20_000
+    budget_ms = 2_000.0
+    codes = [coa.user_account(uuid4(), UserSub.AVAILABLE) for _ in range(n)]
+
+    sample = perf_budget.best_of(lambda: [coa.default_scope(c) for c in codes], n=3)
+    assert sample.cpu_ms < budget_ms, (
+        f"{n}회 default_scope() 호출이 예산({budget_ms / 1000:.1f}s)을 "
+        f"넘었습니다({sample.cpu_ms / 1000:.3f}s CPU). 대조군이 실패함."
+    )
