@@ -34,6 +34,7 @@ from src.data.models.market_data import Candle
 from src.services.execution_loop.candle_history import CandleHistoryCache
 from src.services.execution_loop.var_estimator import estimate_portfolio_var_es
 from tests.conftest import PerfBudget
+from tests.support.perf_inject import reset_virtual_totals, virtual_delayed_sync
 
 _OWNER = uuid4()
 _RISK_NOW = datetime(2026, 9, 3, tzinfo=UTC)
@@ -318,16 +319,18 @@ async def test_perf_gate_red_reproduction_injected_cpu_load(
     # 첫 호출 — adapter 호출(캐시 미스)으로 캐시 생성
     await cache.get(adapter, "BTC/USDT", bars=30, owner_id=_OWNER)
 
-    # CPU 부하 주입: _entries.get() 호출마다 ~3ms CPU 작업 추가
+    # CPU 부하 주입: _entries.get() 호출마다 가상 지연 추가 (실제 CPU 스핀 없음)
+    # 500회 × 3ms = 1500ms > 800ms 예산 — virtual_delayed_sync로 측정만 늘림
+    reset_virtual_totals()
     _original_entries = cache._entries
 
-    class _CPUHeavyDict(dict):
+    class _VirtualHeavyDict(dict):
         def get(self, key, default=None):
-            # 3ms CPU 작업 — 500회 × 3ms = 1500ms > 800ms 예산
-            _ = sum(i * i for i in range(500_000))
+            # 3ms 가상 CPU 지연 — 500회 × 3ms = 1500ms > 800ms 예산
+            virtual_delayed_sync(lambda: None, 0.003)()
             return super().get(key, default)
 
-    cache._entries = _CPUHeavyDict(_original_entries)
+    cache._entries = _VirtualHeavyDict(_original_entries)
 
     async def _batch_500_delayed() -> None:
         for _ in range(500):
