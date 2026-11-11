@@ -12,6 +12,7 @@
 사용: `python scripts/bench/backtest_instant_bench.py [--out PATH] [--iterations N]`.
 DB/네트워크 불필요. 종료코드는 항상 0 — 예산 초과는 `passed=false`로 기록된다.
 """
+
 from __future__ import annotations
 
 import argparse

@@ -44,6 +44,7 @@ taxonomy 금지), ERRCODE는 기존과 같이 `check_violation`(23514)이다.
 downgrade는 부모 리비전 파일의 `_GUARD_FN_SQL`·`_TRIGGER_SQL`을 그대로 로드해
 원 함수 본문·원 트리거 정의로 복원한다(복사본 불일치 방지).
 """
+
 from __future__ import annotations
 
 import importlib.util

@@ -11,6 +11,7 @@ created their own merge stub, producing yet another dual head
 task-1987-side merge). This is a pure merge stub (empty
 upgrade/downgrade) that folds it back into a single head again.
 """
+
 from collections.abc import Sequence
 
 revision: str = "bd931e3aa0d4"

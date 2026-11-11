@@ -29,6 +29,7 @@ BR-9(task-1787, ADR-2026-09-06-I D5) — `register_exchange_adapter_factory()`�
 `tests/unit/exchanges/test_factory_spi_extension.py`가 더미 어댑터로
 증명한다.
 """
+
 from __future__ import annotations
 
 import os
@@ -131,9 +132,7 @@ def build_adapter(
         try:
             api_passphrase = extra["api_passphrase"]
         except KeyError as exc:
-            raise UnsupportedExchangeError(
-                "Bitget은 api_passphrase가 필요합니다."
-            ) from exc
+            raise UnsupportedExchangeError("Bitget은 api_passphrase가 필요합니다.") from exc
         return BitgetAdapter(api_key, api_secret, api_passphrase, demo_mode=demo_mode)
 
     if exchange == "kis":
@@ -141,9 +140,7 @@ def build_adapter(
             cano = extra["cano"]
             acnt_prdt_cd = extra["acnt_prdt_cd"]
         except KeyError as exc:
-            raise UnsupportedExchangeError(
-                "KIS는 cano/acnt_prdt_cd가 필요합니다."
-            ) from exc
+            raise UnsupportedExchangeError("KIS는 cano/acnt_prdt_cd가 필요합니다.") from exc
         return KISAdapter(api_key, api_secret, cano, acnt_prdt_cd, is_paper_trading=demo_mode)
 
     if exchange == "nh":

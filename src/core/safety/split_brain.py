@@ -11,6 +11,7 @@ State DB 연결 단절과 메인 프로세스 장애를 구분한다 — DB만 �
 짧은 값이라 "호출 횟수"가 아니라 "실제 경과 시간"으로 판정한다(주기가
 불규칙해도 일관되게 동작).
 """
+
 from __future__ import annotations
 
 import asyncio

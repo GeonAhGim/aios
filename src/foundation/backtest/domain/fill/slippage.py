@@ -14,6 +14,7 @@ calibrated against specific exchange microstructure data — we explicitly adopt
 the assumption of linear proportionality to participation (§3.4 defines fields
 only and leaves the formula open).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

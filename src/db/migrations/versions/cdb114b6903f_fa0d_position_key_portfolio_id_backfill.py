@@ -60,6 +60,7 @@ blocks changing the PK `position_key` via UPDATE -- this is replaced with the
 same DELETE(old) + INSERT(new, other columns identical) pattern that
 `position_ledger.py` uses when updating `legacy_position_id`.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -72,10 +73,29 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _COLUMNS = (
-    "position_key", "tenant_id", "account_id", "instrument_id", "quantity", "avg_cost",
-    "cost_method", "lots", "realized_pnl_base", "unrealized_pnl_base", "fees_base",
-    "funding_base", "mark_price", "mark_at", "last_journal_seq", "legacy_position_id",
-    "fund_id", "portfolio_id", "valid_from", "valid_to", "tx_from", "tx_to", "updated_at",
+    "position_key",
+    "tenant_id",
+    "account_id",
+    "instrument_id",
+    "quantity",
+    "avg_cost",
+    "cost_method",
+    "lots",
+    "realized_pnl_base",
+    "unrealized_pnl_base",
+    "fees_base",
+    "funding_base",
+    "mark_price",
+    "mark_at",
+    "last_journal_seq",
+    "legacy_position_id",
+    "fund_id",
+    "portfolio_id",
+    "valid_from",
+    "valid_to",
+    "tx_from",
+    "tx_to",
+    "updated_at",
 )
 _OTHER_COLUMNS = ", ".join(c for c in _COLUMNS if c != "position_key")
 

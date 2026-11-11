@@ -1,4 +1,5 @@
 """13번대 — 마켓플레이스 서비스 팩토리 의존성."""
+
 from __future__ import annotations
 
 from functools import partial

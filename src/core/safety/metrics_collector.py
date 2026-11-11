@@ -14,6 +14,7 @@ data_delay_sec)는 실시간 관측이 필요해 이 모듈 스스로 "만들지
 관측이 0건이면 `None`을 그대로 돌려준다("모름"을 "지연 0초"로 뭉개지
 않는다, fail-closed는 circuit_breaker.compute_level의 몫).
 """
+
 from __future__ import annotations
 
 import time

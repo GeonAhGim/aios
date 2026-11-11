@@ -10,6 +10,7 @@
 DB/네트워크 불필요. 종료코드는 항상 0 — 예산 초과는 `passed=false`로 JSON에
 기록되고, 게이트 판정은 `closeout_check.py`가 그 필드를 읽어서 한다.
 """
+
 from __future__ import annotations
 
 import argparse

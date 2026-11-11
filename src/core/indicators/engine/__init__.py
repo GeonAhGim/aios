@@ -24,6 +24,7 @@ be circular). New error code:
   composite lookback (`registry.resolve_chain`); fail-closed, no silent
   zero/NaN result.
 """
+
 from __future__ import annotations
 
 import math

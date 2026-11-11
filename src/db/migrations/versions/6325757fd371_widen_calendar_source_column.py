@@ -13,6 +13,7 @@ with the collection timestamp (`yaml_calendar_source.load_calendar`
 concatenates the two into a single string for this column — a PM
 decision ruled that adding a separate column is out of scope for RD-21).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

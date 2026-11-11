@@ -5,6 +5,7 @@ this function after high-risk commands to record audit events (wiring is not yet
 complete — #71 §3 FND-03 deliverable stops at "envelope + in-memory adapter";
 actual integration into existing contexts is a follow-up leaf).
 """
+
 from __future__ import annotations
 
 from src.foundation.evidence.contracts.v1 import AuditEventView, RecordAuditEventCommand

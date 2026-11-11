@@ -21,6 +21,7 @@ breaking the period accuracy of RENAME aliases).
 Basis for this design: §9.2 LA-12 DoD — "symbol RENAME aliases are
 correctly interpreted via period (valid_from/valid_to)".
 """
+
 from __future__ import annotations
 
 from uuid import UUID

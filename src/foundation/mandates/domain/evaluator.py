@@ -9,6 +9,7 @@ silently let an order through. Pure function, no I/O, no LLM call (I-09):
 so replaying the same `(bundle, snapshot, now)` always reproduces the same
 `ComplianceDecision` (CM-A4 "explain() always reproduces the same result").
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

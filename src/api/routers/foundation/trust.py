@@ -8,6 +8,7 @@ task-1218). 단 `revoke_consent()`가 postgres_repository.py에서 그대로
 전파시키는 raw `LookupError`만 예외 — application 모듈(revoke_consent.py)은
 이 리프의 파일 목록 밖이라 고칠 수 없어, 여기서 이름 있는 예외
 (`exception_mapping.ConsentNotFoundError`)로 감싼다."""
+
 from __future__ import annotations
 
 from uuid import UUID

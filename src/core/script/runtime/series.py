@@ -29,6 +29,7 @@ the same definitions to cross-check):
 Pure, no I/O, no recursion. Operations between series of different lengths raise
 `ScriptRuntimeError` (fail-closed — never silently truncate or pad).
 """
+
 from __future__ import annotations
 
 import math

@@ -12,6 +12,7 @@ and limit price differs per exchange — this only validates direction
 (protective vs. adverse) and does not enforce the width (unverified:
 requires cross-checking against actual exchange documentation).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

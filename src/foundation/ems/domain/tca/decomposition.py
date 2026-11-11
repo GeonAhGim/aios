@@ -29,6 +29,7 @@ same "no I/O in this module" convention `benchmarks.py` uses.
 No I/O: no clock, no snapshot store, no database. All arithmetic is
 `Decimal`-only (project-wide convention, standard 105).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

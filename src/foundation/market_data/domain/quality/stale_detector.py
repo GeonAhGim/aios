@@ -6,6 +6,7 @@ When the session is closed, no new candles can form, so that is not staleness â€
 `session_open` is decided by the caller via `calendar.VenueCalendar.is_open`
 (this module does not reimplement session adjudication).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

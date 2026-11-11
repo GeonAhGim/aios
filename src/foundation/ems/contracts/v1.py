@@ -19,6 +19,7 @@ defined here as values only; the actual exception classes belong to the
 domain leaf that raises them (EM-2/EM-7 etc.), same principle as FA-1's
 `EntityErrorCode`.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

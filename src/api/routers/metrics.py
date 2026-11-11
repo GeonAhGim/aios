@@ -16,6 +16,7 @@ though it remains compatible with them). Uses `hmac.compare_digest` to prevent t
 side-channel attacks, and never includes the token value itself in logs or responses
 (PLT-02 redaction).
 """
+
 from __future__ import annotations
 
 import hmac

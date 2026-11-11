@@ -7,6 +7,7 @@ LC-8b/task-320)은 모른다(71번 §4). `account_ids`/`account_id`는 항상
 `account_code` 문자열(§3.3 `"USER:{uuid}:{UserSub}"` | `"PLATFORM:{NAME}"`)이다
 — DB PK인 내부 `ledger_account.account_id` UUID가 아니다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

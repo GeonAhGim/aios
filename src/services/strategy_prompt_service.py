@@ -16,6 +16,7 @@ loaded, only the Anthropic client call inside this service needs to be
 replaced — the router and schema are already in their final form
 (return type of generate() is GeneratedConditions as-is).
 """
+
 from __future__ import annotations
 
 from src.services.strategy_wizard_service import GeneratedConditions

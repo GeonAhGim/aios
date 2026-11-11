@@ -12,6 +12,7 @@ ALTER TABLE로 미룰 필요 없음). 삭제(revoke)는 의도적으로 미제�
 화이트리스트에서 빼는 것도 위기 상황 중에는 공격 표면이 될 수 있어
 착수 시 "평상시만 삭제 가능" 원칙 검토가 필요하다는 04번 원문 그대로.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

@@ -5,6 +5,7 @@ handler so there is no lag (single Postgres, no separate projection worker), but
 always includes `as_of` so the interface can be swapped to an async projection later
 (108 §2 field standard).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

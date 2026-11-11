@@ -13,6 +13,7 @@ logs with that single ID when filing an incident report.
 Registration via `app.add_middleware(RequestIdMiddleware)` happens at the
 app assembly point in main.py (this file provides only the middleware itself).
 """
+
 from __future__ import annotations
 
 import uuid

@@ -21,6 +21,7 @@ continuously applying fills in journal-fold order is the reason this type
 exists, so mutability is intentional. It performs no I/O — timestamps,
 currency conversion, and persistence are the caller's responsibility.
 """
+
 from __future__ import annotations
 
 import json

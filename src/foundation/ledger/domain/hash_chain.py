@@ -11,6 +11,7 @@ FND-03(`src/foundation/evidence/domain/rules.py`)과 같은 방식: 이전 엔�
 넘겨도 동일한 다이제스트가 나온다(호출자가 DB에서 다른 정렬로 읽어와도
 검증이 흔들리지 않도록).
 """
+
 from __future__ import annotations
 
 import hashlib

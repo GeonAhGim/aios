@@ -36,6 +36,7 @@ ledger/application/post_entry.py`는 결정(decision) §2가 "3개 쓰기 진입
 사용: `python scripts/check_entity_context.py` (저장소 루트에서). 종료코드
 0=위반 없음, 1=위반 있음(각 위반을 표준출력에 나열).
 """
+
 from __future__ import annotations
 
 import ast
@@ -47,9 +48,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _TARGET_FILES = ("src/services/oms/application/submit_order.py",)
 
-_WRITE_CALL_MARKERS = frozenset(
-    {"execute", "append", "transition", "claim", "enqueue", "upsert"}
-)
+_WRITE_CALL_MARKERS = frozenset({"execute", "append", "transition", "claim", "enqueue", "upsert"})
 _CONTEXT_MARKER = "context"
 
 
@@ -89,9 +88,7 @@ def _has_context_param(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return any(_CONTEXT_MARKER in name.lower() for name in _param_names(func))
 
 
-def _scan_function(
-    func: ast.FunctionDef | ast.AsyncFunctionDef, location: str
-) -> Violation | None:
+def _scan_function(func: ast.FunctionDef | ast.AsyncFunctionDef, location: str) -> Violation | None:
     if not _has_write_call(func):
         return None
     if _has_context_param(func):

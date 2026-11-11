@@ -94,8 +94,7 @@ class PostgresAgentTokenRepository:
         in CI (esc-ci-pytest.json)."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT *, clock_timestamp() AS server_now FROM agent_token "
-                "WHERE token_hash = $1",
+                "SELECT *, clock_timestamp() AS server_now FROM agent_token WHERE token_hash = $1",
                 token_hash,
             )
         return None if row is None else (_row_to_token(row), row["server_now"])

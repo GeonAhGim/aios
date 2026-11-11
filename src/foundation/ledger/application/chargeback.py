@@ -39,6 +39,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.4 CHARGEBACK, §9 L
 L78-79)이 `('PENDING','CONFIRMED')`만 허용해 `CHARGED_BACK` 상태를 추가하려면
 새 마이그레이션이 필요하기 때문이다 — PM 승인(parent revision) 없이 이
 리프에서 마이그레이션을 만들지 않는다(헤드리스 워커 프로토콜)."""
+
 from __future__ import annotations
 
 from decimal import Decimal

@@ -26,6 +26,7 @@ REPLAY로 받고 `PayoutRepository.create_batch`도 기존 배치를 그대로
 `purchase_flow.ensure_account`(모듈 private 아님, 그대로 재사용)로 만들어
 둔다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

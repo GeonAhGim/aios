@@ -15,6 +15,7 @@ Spec: 04_db_schema_v1.6.md (Audit Log, 8.10 — Append-only, WORM)
 테이블 소유자가 아닌 별도 역할로 접속해야 한다 — 이 역할 분리는 아직 이
 프로젝트에 존재하지 않아 인프라 셋업 단계에서 별도로 다뤄야 한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

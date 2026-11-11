@@ -7,6 +7,7 @@ resolution, cycle/version-conflict rejection, and DSL-12 hash pinning.
 Marketplace-backed registry adapter (HTTP/DB) is MP-3 follow-up
 (DSL-16b) — out of scope here by decision (task-2373).
 """
+
 from __future__ import annotations
 
 from src.core.script.library.imports import (

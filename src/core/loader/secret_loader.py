@@ -6,6 +6,7 @@ Spec: 03_core_modules_v1.1.md#§3.1, 07_logging_config_v1.3.md#§7.3
 7.4 Principle — this function's return value (SecretBundle) is never printed
 in plaintext to logs (SecretBundle.__repr__ already masks, 01 §1.4).
 """
+
 from __future__ import annotations
 
 import os

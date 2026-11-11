@@ -1,4 +1,5 @@
 """Shared dependencies for foundation/* routers — same pattern as src/api/suitability_deps.py."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

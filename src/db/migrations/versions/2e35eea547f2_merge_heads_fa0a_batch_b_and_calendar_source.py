@@ -9,6 +9,7 @@ touch disjoint tables (tenant_id FK correction on ledger/positions/
 market-data tables vs. `md_venue_calendar_day.source` column width), so
 there is nothing to reconcile.
 """
+
 from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.

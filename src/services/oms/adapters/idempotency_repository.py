@@ -17,6 +17,7 @@ kind="DIGEST_MISMATCH"는 예외로만 신호하고 `ClaimResult`로는 반환�
 시간 비교는 전부 Postgres `now()`로 한다(애플리케이션-DB 시계 드리프트를
 피한다) — `ttl`은 `make_interval(secs => ...)`로 변환.
 """
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -65,16 +66,12 @@ class IdempotencyRepository:
             existing = await conn.fetchrow(_SELECT_SQL, scope_hash)
             if existing is None:
                 # 동시 만료청소/삭제 경합 — 처음부터 다시 선점 시도.
-                inserted = await conn.fetchval(
-                    _INSERT_SQL, scope_hash, digest, order_id, ttl_sec
-                )
+                inserted = await conn.fetchval(_INSERT_SQL, scope_hash, digest, order_id, ttl_sec)
                 if inserted is not None:
                     return ClaimResult(kind="NEW", order_id=inserted)
                 continue
             if existing["expired"]:
-                reclaimed = await conn.fetchval(
-                    _RECLAIM_SQL, scope_hash, digest, order_id, ttl_sec
-                )
+                reclaimed = await conn.fetchval(_RECLAIM_SQL, scope_hash, digest, order_id, ttl_sec)
                 if reclaimed is not None:
                     return ClaimResult(kind="NEW", order_id=reclaimed)
                 continue  # 다른 워커가 먼저 재선점 — 다시 읽어 판단.

@@ -9,6 +9,7 @@ repository's idempotency key: inserting the same filing (same receipt
 number) twice does not create a new row, it just returns the existing
 row unchanged.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -23,9 +24,7 @@ __all__ = ["CorporateActionFilingRepository"]
 
 @runtime_checkable
 class CorporateActionFilingRepository(Protocol):
-    async def append(
-        self, conn: asyncpg.Connection, action: CorporateAction
-    ) -> CorporateAction:
+    async def append(self, conn: asyncpg.Connection, action: CorporateAction) -> CorporateAction:
         """Idempotent on `source_ref` — if it already exists, the existing value
         is returned unchanged (no new row is created). A different `source_ref`
         (a corrective filing) always results in a new row."""

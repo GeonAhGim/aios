@@ -9,6 +9,7 @@ Domain exceptions are not caught here — the `EXCEPTION_MAP` in
 `src/api/contracts/exception_mapping.py` translates them in the global
 handler (§9 PLT-29 decision).
 """
+
 from __future__ import annotations
 
 from uuid import UUID

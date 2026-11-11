@@ -39,6 +39,7 @@ lets the checker recognize that a table has already been corrected and
 stop counting the stale definition in the original file as an open
 defect (see check_audit_regressions.py).
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -76,9 +77,7 @@ def upgrade() -> None:
         "FOREIGN KEY (tenant_id) REFERENCES tenant(id)"
     )
 
-    op.execute(
-        "ALTER TABLE portfolio_mandate DROP CONSTRAINT portfolio_mandate_tenant_id_fkey"
-    )
+    op.execute("ALTER TABLE portfolio_mandate DROP CONSTRAINT portfolio_mandate_tenant_id_fkey")
     _backfill("portfolio_mandate")
     op.execute(
         "ALTER TABLE portfolio_mandate ADD CONSTRAINT portfolio_mandate_tenant_id_fkey "
@@ -100,9 +99,7 @@ def downgrade() -> None:
         "FOREIGN KEY (tenant_id) REFERENCES users(user_id)"
     )
 
-    op.execute(
-        "ALTER TABLE portfolio_mandate DROP CONSTRAINT portfolio_mandate_tenant_id_fkey"
-    )
+    op.execute("ALTER TABLE portfolio_mandate DROP CONSTRAINT portfolio_mandate_tenant_id_fkey")
     op.execute(
         "ALTER TABLE portfolio_mandate ADD CONSTRAINT portfolio_mandate_tenant_id_fkey "
         "FOREIGN KEY (tenant_id) REFERENCES users(user_id)"

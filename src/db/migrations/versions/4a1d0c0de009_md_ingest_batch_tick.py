@@ -20,6 +20,7 @@ WORM은 `md_ingest_batch`와 같은 근거(§4.1 배치 판정은 append-only
 감사 대상)로 적용한다. 파티셔닝은 하지 않는다 — `md_ingest_batch`도
 배치당 한 행뿐이라 파티션 대상이 아니다.
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

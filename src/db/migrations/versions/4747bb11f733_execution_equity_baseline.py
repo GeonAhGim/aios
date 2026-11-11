@@ -12,6 +12,7 @@ strategy_executions에 저장한다. 전부 nullable — 기존 실행 행은 NU
 (ExecutionEquityTracker.seed()가 NULL을 "아직 기준점 없음"으로 정확히
 처리하도록 이미 구현돼 있다).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

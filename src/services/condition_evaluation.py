@@ -3,6 +3,7 @@ use the same "indicator value vs threshold" verdict. This is the private `_compa
 from preview_service.py moved into a shared module when a second call site
 appeared with the alert feature (no logic changes).
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -10,9 +11,7 @@ from typing import Literal
 Operator = Literal[">", "<", ">=", "<=", "==", "crosses_above", "crosses_below"]
 
 
-def compare_value(
-    value: float, operator: str, threshold: float, prev_value: float | None
-) -> bool:
+def compare_value(value: float, operator: str, threshold: float, prev_value: float | None) -> bool:
     if operator == ">":
         return value > threshold
     if operator == "<":

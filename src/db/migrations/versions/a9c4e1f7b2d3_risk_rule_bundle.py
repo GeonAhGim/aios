@@ -22,6 +22,7 @@ I7(`rule_hash`·`policy_snapshot`는 WORM)은 L0-3([[src/core/db/append_only.py]
 `version`도 같이 잠그는 이유: `UNIQUE(scope, version)`이 발행 이력의
 정체성이라 사후 변경은 이력 위조와 같다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -61,8 +62,7 @@ def upgrade() -> None:
     # I6 — scope당 ACTIVE 번들은 최대 1개. 이 인덱스 자체가 get_active(scope)의
     # 조회 경로이기도 하다.
     op.execute(
-        "CREATE UNIQUE INDEX ux_bundle_active ON risk_rule_bundle (scope) "
-        "WHERE state = 'ACTIVE'"
+        "CREATE UNIQUE INDEX ux_bundle_active ON risk_rule_bundle (scope) WHERE state = 'ACTIVE'"
     )
     # I7 — rule_hash/policy_snapshot/version은 발행 후 불변(WORM). 모듈
     # docstring 참고: 전체 행이 아니라 이 3개 컬럼만 잠근다.

@@ -13,6 +13,7 @@ scope_ref, period_start, period_end, methodology_version, revision_no)`가
 같은 기간·방법론에 같은 리비전 번호가 두 번 만들어지는 걸 DB 레벨에서
 막는다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

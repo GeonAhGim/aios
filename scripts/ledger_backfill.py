@@ -15,6 +15,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-11.
 DATABASE_URL(`postgresql+asyncpg://...`)을 asyncpg DSN으로 바꿔 접속한다 —
 `scripts/setup_test_db.py`와 같은 관례.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,8 +77,13 @@ async def _run(*, apply: bool) -> int:
             await tx.start()
             try:
                 report = await backfill_ledger(
-                    conn, rows, expected,
-                    journal=journal, balances=balances, audit=audit, clock=_clock,
+                    conn,
+                    rows,
+                    expected,
+                    journal=journal,
+                    balances=balances,
+                    audit=audit,
+                    clock=_clock,
                 )
             except (BackfillMismatchError, UnrecognizedTxGroupError) as exc:
                 await tx.rollback()
@@ -106,9 +112,7 @@ async def _run(*, apply: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--apply", action="store_true", help="실제 커밋(기본은 dry-run 후 롤백)"
-    )
+    parser.add_argument("--apply", action="store_true", help="실제 커밋(기본은 dry-run 후 롤백)")
     args = parser.parse_args()
     return asyncio.run(_run(apply=args.apply))
 

@@ -13,6 +13,7 @@ scope를 보내지 않으므로 기존 행은 전부 `scope='PAPER'`로 백필�
 로 생성된 접두 없는 토큰이므로 kid="legacy"로 백필한다(PLT-34 회전 스크립트가
 복호 없이 회전 대상을 찾는 인덱스로 재사용).
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -34,8 +35,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "ALTER TABLE exchange_credentials "
-        "DROP CONSTRAINT exchange_credentials_user_id_exchange_key"
+        "ALTER TABLE exchange_credentials DROP CONSTRAINT exchange_credentials_user_id_exchange_key"
     )
     op.execute(
         "ALTER TABLE exchange_credentials "
@@ -54,6 +54,4 @@ def downgrade() -> None:
         "ADD CONSTRAINT exchange_credentials_user_id_exchange_key "
         "UNIQUE (user_id, exchange)"
     )
-    op.execute(
-        "ALTER TABLE exchange_credentials DROP COLUMN scope, DROP COLUMN key_version"
-    )
+    op.execute("ALTER TABLE exchange_credentials DROP COLUMN scope, DROP COLUMN key_version")

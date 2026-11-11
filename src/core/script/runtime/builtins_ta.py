@@ -41,6 +41,7 @@ Call convention `ta.<ident>(<inputs...>, <params...>)`:
 All errors are `BuiltinCallError` (subclass of `ScriptRuntimeError`, `reason`=code).
 `IndicatorError.code` from the registry/engine is passed through as `reason` unchanged.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -241,4 +242,3 @@ def _leading_na(columns: Mapping[str, tuple[float | None, ...]], bar_count: int)
         if all(col[t] is not None for col in columns.values()):
             return t
     return bar_count
-

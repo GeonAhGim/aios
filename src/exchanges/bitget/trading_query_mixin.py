@@ -21,6 +21,7 @@ LA-19(`bitget/symbols.py`)가 이미 R8을 `symbol_normalizer` 단일 규칙으�
 통과시킬 수 없다(DoD 충돌). 여기서는 LA-19 위임을 유지한다 — 레지스트리
 주입은 L4-16/24 호출부가 정규 심볼을 넘기는 시점에 결정한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -91,7 +92,9 @@ def _row_to_order(data: dict[str, Any]) -> Order:
     filled_quantity = (
         Decimal(data["fillSize"])
         if "fillSize" in data
-        else Decimal(data["size"]) if status == OrderStatus.FILLED else Decimal("0")
+        else Decimal(data["size"])
+        if status == OrderStatus.FILLED
+        else Decimal("0")
     )
     avg_price_raw = data.get("priceAvg") or data.get("price")
     average_fill_price = (
@@ -189,9 +192,7 @@ class BitgetTradingQueryMixin:
         row = _first_row(raw.get("data"))
         return None if row is None else _row_to_order(row)
 
-    async def get_open_orders(
-        self: SignedRequestClient, symbol: str | None = None
-    ) -> list[Order]:
+    async def get_open_orders(self: SignedRequestClient, symbol: str | None = None) -> list[Order]:
         """02b 스펙 §3.2 — FD-4.5(UNKNOWN 재조회)/FD-16.4(실행 모니터링)
         보강용. L4-13부터 `ExchangeAdapter` ABC 계약(기본 구현 override)."""
         params: dict[str, Any] = {}
@@ -209,9 +210,7 @@ class BitgetTradingQueryMixin:
         params: dict[str, Any] = {"limit": str(limit)}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/spot/trade/history-orders", params=params
-        )
+        raw = await self._request("GET", "/api/v2/spot/trade/history-orders", params=params)
         return [_row_to_order(row) for row in raw["data"]]
 
     async def get_fills(
@@ -235,7 +234,5 @@ class BitgetTradingQueryMixin:
             params["orderId"] = order_id
         if since is not None:
             params["startTime"] = _to_epoch_ms(since)
-        raw = await self._request(
-            "GET", "/api/v2/spot/trade/fills", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/spot/trade/fills", params=params or None)
         return list(raw["data"])

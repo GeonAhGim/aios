@@ -15,6 +15,7 @@ Margin의 "마진 대출"(거래용 신용)과 달리, 담보를 맡기고 다�
 - GET  /api/v2/loan/repay-history
 - GET  /api/v2/loan/liquidation-records
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -33,9 +34,7 @@ class BitgetLoanMixin:
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(
-            "GET", "/api/v2/loan/coin-info", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/loan/coin-info", params=params or None)
         return list(raw["data"])
 
     async def get_loan_hourly_interest_rate(
@@ -107,9 +106,7 @@ class BitgetLoanMixin:
         params: dict[str, Any] = {}
         if order_id is not None:
             params["orderId"] = order_id
-        raw = await self._request(
-            "GET", "/api/v2/loan/ongoing-orders", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/loan/ongoing-orders", params=params or None)
         return list(raw["data"])
 
     async def get_loan_repay_history(
@@ -118,9 +115,7 @@ class BitgetLoanMixin:
         params: dict[str, Any] = {"limit": str(limit)}
         if order_id is not None:
             params["orderId"] = order_id
-        raw = await self._request(
-            "GET", "/api/v2/loan/repay-history", params=params
-        )
+        raw = await self._request("GET", "/api/v2/loan/repay-history", params=params)
         return list(raw["data"])
 
     async def get_loan_liquidation_records(

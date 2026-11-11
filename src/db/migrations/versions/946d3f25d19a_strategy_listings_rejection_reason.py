@@ -7,6 +7,7 @@ Create Date: 2026-09-01 00:00:00.000002
 Spec: docs/RED_TEAM_FINDINGS.md #16 — VerificationService.decide()의
 REJECT 사유가 어디에도 저장되지 않아 응답이 나간 순간 사라졌다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

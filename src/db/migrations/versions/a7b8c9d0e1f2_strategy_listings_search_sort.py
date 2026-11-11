@@ -12,6 +12,7 @@ Spec: 기능설계문서_v1.20.md#FD-13.8, 14번 문서 §14.4
 - sharpe_ratio: 실제 백테스트 엔진이 아직 없어(설계 스콥 밖) 채워주는
   곳이 없는 Draft 컬럼 — NULL은 정렬 쿼리에서 항상 마지막으로 밀린다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

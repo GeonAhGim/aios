@@ -6,6 +6,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§2-D, §9 L4-11
 인자로 주입받는다(task-423 d3227c9 패턴 재사용) — 테스트가 가짜 시계를
 전진시켜 OPEN→HALF_OPEN 전이를 실제 대기 없이 결정론적으로 검증한다.
 """
+
 from __future__ import annotations
 
 import time

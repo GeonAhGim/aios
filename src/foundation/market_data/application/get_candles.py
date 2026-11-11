@@ -19,6 +19,7 @@ distinguish "never registered" from "registered but never collected". Both
 cases require the same caller action (check reference data, run collection
 first), so this is sufficient as a fail-closed signal.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta

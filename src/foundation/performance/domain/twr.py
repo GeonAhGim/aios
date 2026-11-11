@@ -14,6 +14,7 @@ The valuation at boundary `t_k` is taken **just before** the cash flow at that t
 The returned value is a ratio (0.0523 = 5.23%), not a percentage number — the `%` display is
 the responsibility of the contracts layer (`ReturnValue.value_pct`).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -48,9 +49,7 @@ def twr(
     cashflow_by_time: dict[datetime, Decimal] = {}
     for cf in cashflows:
         if cf.at not in valuation_times:
-            raise MissingInputError(
-                f"No matching valuation at cash flow time {cf.at.isoformat()}."
-            )
+            raise MissingInputError(f"No matching valuation at cash flow time {cf.at.isoformat()}.")
         cashflow_by_time[cf.at] = cashflow_by_time.get(cf.at, Decimal(0)) + _signed(cf)
 
     linked = Decimal(1)

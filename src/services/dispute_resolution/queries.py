@@ -2,6 +2,7 @@
 
 Spec: functional_spec_v1.20.md#FD-18.2, document #14 §14.5.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

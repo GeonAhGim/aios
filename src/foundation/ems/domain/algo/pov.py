@@ -17,6 +17,7 @@ themselves. This module never divides a planned quantity by a market
 volume to compare against the cap directly; that comparison is only ever
 evaluated by `guard.check_participation`.
 """
+
 from __future__ import annotations
 
 import math
@@ -133,8 +134,6 @@ def plan_pov_schedule(
             scheduled_at=scheduled_at,
             limit_price=parent.algo.limit_price,
         )
-        for index, (qty, scheduled_at) in enumerate(
-            zip(planned_qtys, scheduled_ats, strict=True)
-        )
+        for index, (qty, scheduled_at) in enumerate(zip(planned_qtys, scheduled_ats, strict=True))
         if qty > 0
     ]

@@ -31,6 +31,7 @@ retrieving and decompressing the daily zip is the caller's I/O detail and is
 not guessed at here (unverified specifics about GDELT's file transport are
 out of this leaf's scope).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -170,9 +171,7 @@ def parse_gdelt_gkg_export(text: str) -> list[GdeltGkgRecord]:
     return [parse_gdelt_gkg_row(line) for line in text.splitlines() if line.strip()]
 
 
-def build_research_item_from_gkg(
-    record: GdeltGkgRecord, *, collected_at: datetime
-) -> ResearchItem:
+def build_research_item_from_gkg(record: GdeltGkgRecord, *, collected_at: datetime) -> ResearchItem:
     """Build a `ResearchItem` for one GKG record. `body_ref` is always
     `None` -- there is no parameter through which a caller could set it,
     which is the point (RD-1 sec.7(b), link_only enforced structurally).

@@ -10,6 +10,7 @@ DataDistrustMonitor(src/core/safety/data_distrust.py)는 인메모리 상태라
 재시작 한 번에 무력화되는 결함(전수감사 §R9). (exchange, symbol) 단일
 행에 최신 판정만 유지하는 상태 테이블 — 이력이 아니라 스냅샷.
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa

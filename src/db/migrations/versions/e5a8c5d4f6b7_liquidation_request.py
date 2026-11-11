@@ -36,6 +36,7 @@ accepts `status='ACTIVE'`) and `password_hash` is not a syntactically valid
 bcrypt hash, so this row can never authenticate even if the status check
 were ever bypassed.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

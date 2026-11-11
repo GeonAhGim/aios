@@ -7,6 +7,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.2,
 Fail-closed — unknown version, missing fields, unknown fields, type mismatch
 all raise `DrawingValidationError`. Never silently drop or coerce like the TS
 side does. Contains only pure functions (adapter writes results directly to jsonb)."""
+
 from __future__ import annotations
 
 from typing import Any, NoReturn
@@ -128,9 +129,7 @@ def _validate_drawing(index: int, value: Any) -> dict[str, Any]:
             f"{drawing_id}.price", _require_field(drawing_id, obj, "price")
         )
     elif kind == "vertical-line":
-        out["time"] = _finite_number(
-            f"{drawing_id}.time", _require_field(drawing_id, obj, "time")
-        )
+        out["time"] = _finite_number(f"{drawing_id}.time", _require_field(drawing_id, obj, "time"))
 
     if "locked" in obj:
         if not isinstance(obj["locked"], bool):

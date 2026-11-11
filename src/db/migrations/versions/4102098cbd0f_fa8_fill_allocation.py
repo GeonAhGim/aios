@@ -27,6 +27,7 @@ No RLS: both `order_id` (-> `orders`) and `sub_account_id` (->
 principle as 789c138f13fe/963d5f3cfb1b - a child table indirectly isolated
 through its parent is exempt from RLS).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

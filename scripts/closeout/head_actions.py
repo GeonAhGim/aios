@@ -151,9 +151,7 @@ def check_12_head_actions_green(
     return CheckResult(key, title, passed, evidence, detail)
 
 
-def trigger_head_workflow_dispatch(
-    gh_run: GhRunner = default_gh_run, *, ref: str = "main"
-) -> bool:
+def trigger_head_workflow_dispatch(gh_run: GhRunner = default_gh_run, *, ref: str = "main") -> bool:
     """`quality.yml`을 workflow_dispatch로 수동 트리거한다(HEAD 재검증 스크립트)."""
     result = gh_run(["workflow", "run", GH_QUALITY_WORKFLOW, "--ref", ref])
     return result.returncode == 0

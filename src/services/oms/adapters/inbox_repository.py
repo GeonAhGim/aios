@@ -19,6 +19,7 @@ LOCKED`는 호출자가 커밋 전까지 붙잡는 트랜잭션 범위 안에서
 `mark_processed`는 `expected_state`(기본 `NEW`) 조건부 UPDATE — 105번
 헬퍼(`conditional_update`)를 그대로 쓴다.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,9 +73,7 @@ def _row_to_inbox_row(record: asyncpg.Record) -> InboxRow:
 class InboxRepository:
     """`InboxRepoPort` 구현체 — I/O 전부 이 클래스 안에만 있다."""
 
-    async def insert_if_absent(
-        self, conn: asyncpg.Connection, ev: ProviderOrderEvent
-    ) -> bool:
+    async def insert_if_absent(self, conn: asyncpg.Connection, ev: ProviderOrderEvent) -> bool:
         last_fill = (
             json.dumps(ev.last_fill.model_dump(mode="json")) if ev.last_fill is not None else None
         )
@@ -101,9 +100,7 @@ class InboxRepository:
         )
         return row is not None
 
-    async def claim_unprocessed(
-        self, conn: asyncpg.Connection, *, limit: int
-    ) -> list[InboxRow]:
+    async def claim_unprocessed(self, conn: asyncpg.Connection, *, limit: int) -> list[InboxRow]:
         records = await conn.fetch(_CLAIM_UNPROCESSED_SQL, limit)
         return [_row_to_inbox_row(r) for r in records]
 

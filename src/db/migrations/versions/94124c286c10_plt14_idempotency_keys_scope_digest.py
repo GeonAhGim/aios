@@ -12,6 +12,7 @@ I8 불변조건("같은 Idempotency-Key + 다른 digest는 409")을 DB에도 남
 `expires_at` 기본값 24시간은 §2.3(C) 표의 `purge_expired(pool)` 배치가
 지울 대상을 고르는 기준이다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

@@ -33,6 +33,7 @@ Pure functions and value objects only — no direct I/O or clock calls (the
 caller passes `as_of`). `Decimal` only, no `float` (same principle as
 standard 105).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -25,6 +25,7 @@ rules, the strength of the "same input = same hash" contract varies per leaf.
 Fail-closed: if any of the four inputs is empty or has the wrong type, reject
 with `ValueError` — do not disguise "reproduced" with an incomplete key.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -52,9 +53,7 @@ def config_hash(config: BacktestConfigV2) -> str:
     only hash its bytes here.
     """
     if not isinstance(config, BacktestConfigV2):
-        raise ValueError(
-            f"config_hash: BacktestConfigV2가 아닙니다: {type(config).__name__}"
-        )
+        raise ValueError(f"config_hash: BacktestConfigV2가 아닙니다: {type(config).__name__}")
     canonical = config.canonical_json()
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

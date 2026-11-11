@@ -21,6 +21,7 @@ the `realized_pnl_base` column of `FUNDING` entries (reused; see
 
 Pure domain (zero DB/HTTP imports).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -22,6 +22,7 @@ in quantum-sized steps from the largest-weight targets downward — so the
 target with the least relative distortion absorbs the remainder first.
 Pure domain (zero I/O / DB imports).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -191,8 +192,7 @@ def _allocate_by_weight(
     weight_sum = sum((t.weight for t in targets), Decimal("0"))
 
     quantized = [
-        (t, round_to_quantum(total_quantity * t.weight / weight_sum, quantum))
-        for t in targets
+        (t, round_to_quantum(total_quantity * t.weight / weight_sum, quantum)) for t in targets
     ]
     allocated_sum = sum((q for _, q in quantized), Decimal("0"))
     residual = total_quantity - allocated_sum
@@ -228,7 +228,5 @@ def _allocate_by_weight(
             )
     final_sum = sum((line.quantity for line in lines), Decimal("0"))
     if final_sum != total_quantity:
-        raise AllocationResidualError(
-            f"배분 합({final_sum}) != 체결 수량({total_quantity})"
-        )
+        raise AllocationResidualError(f"배분 합({final_sum}) != 체결 수량({total_quantity})")
     return lines

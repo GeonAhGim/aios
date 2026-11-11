@@ -5,6 +5,7 @@ standalone; `postgres_repository.PostgresEntityRepository` composes all 4
 mixins. See that file's module docstring for the concurrency/tenant
 isolation contract.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

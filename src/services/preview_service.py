@@ -13,6 +13,7 @@ Signals produced by this calculator are unrelated to FD-8 (FROZEN,
 actual trade decisions) — no code path places real orders from these
 results.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -56,9 +57,7 @@ class PreviewCalculator:
 
         series_by_condition: list[tuple[PreviewCondition, list[float | None]]] = []
         for condition in conditions:
-            result = self._indicators.calculate(
-                condition.indicator, candles, **condition.params
-            )
+            result = self._indicators.calculate(condition.indicator, candles, **condition.params)
             if not result.values:
                 return PreviewResult(signal_indices=[], signal_times=[], message=result.message)
             series_by_condition.append((condition, result.values))

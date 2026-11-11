@@ -3,6 +3,7 @@
 Only stdlib + subprocess (git). No DB/network — individual bench scripts opt into
 those themselves when the measured operation requires it (e.g. instrument lookup).
 """
+
 from __future__ import annotations
 
 import json

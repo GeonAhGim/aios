@@ -29,6 +29,7 @@ corrupt row like that makes `_row_to_decision` raise `DecisionCorruptError`
 for that one row instead of a `pydantic.ValidationError` killing the whole
 caller.
 """
+
 from __future__ import annotations
 
 import json

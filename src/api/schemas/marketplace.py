@@ -1,4 +1,5 @@
 """Schema #13 — Marketplace API request/response models."""
+
 from __future__ import annotations
 
 from datetime import datetime

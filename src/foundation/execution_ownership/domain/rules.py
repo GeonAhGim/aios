@@ -5,6 +5,7 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md
 actual acquisition/renewal is the responsibility of the EO-02 repository adapter
 (§5.1 conditional UPSERT); this function only decides "may this lease be requested?".
 """
+
 from __future__ import annotations
 
 from datetime import datetime

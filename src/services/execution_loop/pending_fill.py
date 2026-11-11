@@ -4,6 +4,7 @@ PENDING 상태 실행은 새 신호를 평가하지 않고 이전 주문의 체�
 (FD-3.4 재사용). 체결 없이 종결(REJECTED 등)되면 신호평가 이전 상태로 되돌려
 fsm_state가 PENDING에 영구히 갇히는 결함(#2026-09-02-39류)을 막는다.
 """
+
 from __future__ import annotations
 
 import logging

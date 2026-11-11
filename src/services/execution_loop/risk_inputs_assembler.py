@@ -26,6 +26,7 @@ R-30이 이미 책임지는 기존 경로이지 이 리프가 새로 만드는 �
 gross_symbol`(전체 노출이 이 심볼에만 있음)일 때만 상관을 계산하고, 그 외엔
 0.0으로 암묵 치환하지 않고 `missing_pairs`를 채워 DENY로 보낸다(I2/R3).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -166,9 +167,7 @@ async def assemble_risk_inputs(
         f"TENANT:{user_id}": exposure_row.net_tenant,
         f"ACCOUNT:{user_id}": exposure_row.net_tenant,
     }
-    fence_snapshot = {
-        f"{scope.value}:{ref}": token for (scope, ref), token in fence.tokens.items()
-    }
+    fence_snapshot = {f"{scope.value}:{ref}": token for (scope, ref), token in fence.tokens.items()}
 
     return RiskInputs(
         tenant_id=user_id,

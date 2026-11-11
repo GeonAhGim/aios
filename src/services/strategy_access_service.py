@@ -24,6 +24,7 @@ authority for an already CONFIRMED purchase is maintained — this is
 naturally guaranteed because this determination logic does not inspect
 listing.status at all.
 """
+
 from __future__ import annotations
 
 import json

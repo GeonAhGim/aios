@@ -9,6 +9,7 @@ Spec: 04_db_schema_v1.6.md (Strategies, 9.11 FSMStrategyConfig)
 편차: owner_user_id의 REFERENCES users(user_id)는 11.1에서 ALTER TABLE로
 추가한다(tasks.user_id와 동일 이유 — a7c02fa80d22 참조).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

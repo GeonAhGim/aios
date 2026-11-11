@@ -12,6 +12,7 @@ retroactively registering a row the spec did not have (ADR-2026-09-06-G
 거래소 호출 자체(§5.1 tx 밖)만 여기서 한다 — 트랜잭션·outbox 펜스·주문 전이는
 `outbox_dispatcher.py`가 맡는다(I8 유일 호출 지점은 그대로 유지된다).
 """
+
 from __future__ import annotations
 
 from src.data.models.trading import Order

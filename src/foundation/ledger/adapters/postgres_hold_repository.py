@@ -18,6 +18,7 @@ UNIQUE 위반 → 도메인 에러 변환).
 조건부 UPDATE한다 — 실패하면 `ConcurrencyConflictError`(포트 docstring
 계약, `LEDGER_HOLD_STATE_INVALID` 매핑은 호출자 책임).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,9 +30,7 @@ import asyncpg
 from src.core.db.conditional_write import conditional_update
 from src.foundation.ledger.contracts.v1 import HoldState, HoldView
 
-_RETURNING_COLUMNS = (
-    "hold_id, account_id, amount, purpose, reference, state, expires_at, entry_id"
-)
+_RETURNING_COLUMNS = "hold_id, account_id, amount, purpose, reference, state, expires_at, entry_id"
 
 
 class UnknownHoldAccountError(Exception):

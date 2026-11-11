@@ -12,6 +12,7 @@ and (3) attaches the quote's source (`source`) and as-of timestamp
 silently absorb triangulation or tenor mismatches. Pure functions only — no
 direct I/O or clock calls.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

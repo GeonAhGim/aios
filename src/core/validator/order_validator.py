@@ -12,6 +12,7 @@ injected by the caller, since their values will be provided by ExchangeAdapter
 skipped — this does not mean it is safe to omit validation; always populate
 these values after the Adapter is implemented and call accordingly.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

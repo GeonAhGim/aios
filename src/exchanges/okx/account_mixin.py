@@ -199,9 +199,7 @@ class OKXAccountMixin:
         directly keeps the exact same (capability, adapter) shape."""
         raise UnsupportedCapabilityError("get_positions", type(self).__name__)
 
-    async def get_open_orders(
-        self: _OKXAccountClient, symbol: str | None = None
-    ) -> list[Order]:
+    async def get_open_orders(self: _OKXAccountClient, symbol: str | None = None) -> list[Order]:
         params = {"instId": symbol} if symbol is not None else None
         raw = await self._request("GET", _OPEN_ORDERS_PATH, params=params)
         data = raw.get("data")
@@ -231,9 +229,7 @@ class OKXAccountMixin:
 
     async def get_order(self: _OKXAccountClient, order_id: str) -> Order:
         inst_id, ord_id = _split_exchange_order_id(order_id)
-        raw = await self._request(
-            "GET", _ORDER_PATH, params={"instId": inst_id, "ordId": ord_id}
-        )
+        raw = await self._request("GET", _ORDER_PATH, params={"instId": inst_id, "ordId": ord_id})
         data = raw.get("data")
         if not data:
             raise FatalExchangeError(f"OKX order not found: order_id={order_id}")

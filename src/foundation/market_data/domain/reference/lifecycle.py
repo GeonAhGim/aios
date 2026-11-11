@@ -13,6 +13,7 @@ possibility from state×event alone; guards are the responsibility of
 the application layer
 (`register_instrument.apply_lifecycle_event`, follow-up leaf).
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -42,6 +43,4 @@ def transition(state: SymbolStatus, event: LifecycleEvent) -> SymbolStatus:
     try:
         return _TRANSITIONS[(state, event)]
     except KeyError as exc:
-        raise LifecycleTransitionError(
-            f"허용되지 않는 전이: {state.value} + {event}"
-        ) from exc
+        raise LifecycleTransitionError(f"허용되지 않는 전이: {state.value} + {event}") from exc

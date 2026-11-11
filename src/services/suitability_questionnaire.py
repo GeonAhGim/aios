@@ -14,6 +14,7 @@ the user's own risk profile (FD-15.3). Not a hard block.
 Scoring: 5 items, each 0-3 points, total 0-15 mapped to 3 risk tiers
 (Draft thresholds): 0-5 Stable, 6-10 Neutral, 11-15 Aggressive.
 """
+
 from __future__ import annotations
 
 from enum import StrEnum

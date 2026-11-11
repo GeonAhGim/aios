@@ -21,6 +21,7 @@ append-only가 아니다. 073beca589d5의 `order_command_outbox`/
 `provider_event_inbox`와 같은 관례로 `aios_app`에 SELECT/INSERT/UPDATE만
 GRANT하고 DELETE는 주지 않는다(방어 심화, L0-3/L0-5 관례).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

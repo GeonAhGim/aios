@@ -17,6 +17,7 @@ control_id로 반복 호출해도 매번 안전하게 빈 배치로 수렴한다
 컬럼(§3.8 본문이 언급하는 마이그레이션)이 아직 이 저장소에 없다. 감사
 로그(구조화 로그)에만 남기고, 컬럼이 생기면 그 UPDATE의 SET 절에
 추가하면 된다."""
+
 from __future__ import annotations
 
 import logging

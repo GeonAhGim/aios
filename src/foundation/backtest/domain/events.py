@@ -10,6 +10,7 @@ the whole replay log and a tz-aware `occurred_at` (a naive datetime could
 mix up past and future, so it is rejected). `append_event` is the single
 assembly point that enforces that ordering.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -71,8 +72,7 @@ def append_event(
     order broke, so it is rejected with an exception."""
     if events and event.sequence_no <= events[-1].sequence_no:
         raise ValueError(
-            "sequence_no는 단조 증가해야 한다: "
-            f"{event.sequence_no} <= {events[-1].sequence_no}"
+            f"sequence_no는 단조 증가해야 한다: {event.sequence_no} <= {events[-1].sequence_no}"
         )
     return (*events, event)
 

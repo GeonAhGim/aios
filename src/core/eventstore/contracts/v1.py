@@ -13,6 +13,7 @@ new `v2` module.
 hash-chain links assigned by the adapter (`append.py`) via a
 `(stream_id, seq)` UNIQUE constraint + conditional INSERT (§5).
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal

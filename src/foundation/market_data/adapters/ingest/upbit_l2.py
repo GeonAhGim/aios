@@ -24,6 +24,7 @@ Unverified: the subscription frame format (`[{"ticket": ...}, {"type":
 (`orderbook_units`) are based on public documentation memory and have not
 been checked against a live feed.
 """
+
 from __future__ import annotations
 
 import uuid

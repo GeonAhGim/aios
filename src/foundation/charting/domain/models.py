@@ -7,6 +7,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md §2.2,
 `drawings[i]` carries `id`/`kind`/kind-specific fields/`locked`/`style` keys
 as-is. This file holds pure dataclasses only and contains no storage
 (adapters/) I/O or validation (rules.py) logic."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

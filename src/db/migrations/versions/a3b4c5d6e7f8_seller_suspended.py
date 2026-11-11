@@ -9,6 +9,7 @@ Spec: 13_multi_tenancy_auth_v1.4.md#§13.5, 14번 문서 §14.5.3
 13.1에서 명시적으로 미뤄뒀던 컬럼 — FD-18.4(판매자 정지)가 실제로
 필요해진 지금 착수한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

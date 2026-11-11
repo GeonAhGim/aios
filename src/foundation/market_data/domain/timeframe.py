@@ -6,6 +6,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2 LA-2, §9.2 LA-2.
 (FND-03: domain imports contracts but never redefines them). This module provides
 pure functions only — no I/O or global clock calls, timestamps always passed as arguments.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

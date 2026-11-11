@@ -21,6 +21,7 @@ Single-candidate fallback (DoD 2) and empty-candidate rejection are already
 calls the repository when there is nothing to route (fail-closed: no
 `route_decisions` row is written for a rejected routing attempt).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

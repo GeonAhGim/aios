@@ -10,6 +10,7 @@ REPLAY로 처리되게 한다(이중 방어 — 실제로는 상위 상태 체�
 `self._pool`로 만들어 둔 실제 포트를 그대로 받는다 — `legacy_wallet_bridge.py`
 와 달리 이 계층은 `conn`만 받는 제약이 없다(모듈 docstring 참고, 신규
 경로라 시그니처를 자유롭게 정할 수 있다)."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -49,13 +50,17 @@ async def _reconcile_ledger_with_projection(
     await conn.execute(
         "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
         "VALUES ($1, $2, $3, $4) ON CONFLICT (account_code) DO NOTHING",
-        code, account_type(code).value, currency.value, negative_ok,
+        code,
+        account_type(code).value,
+        currency.value,
+        negative_ok,
     )
     await conn.execute(
         "INSERT INTO ledger_balance (account_id, allow_negative) "
         "SELECT account_id, $2 FROM ledger_account WHERE account_code = $1 "
         "ON CONFLICT (account_id) DO NOTHING",
-        code, negative_ok,
+        code,
+        negative_ok,
     )
     projected = await conn.fetchval(
         "SELECT balance FROM user_wallets WHERE user_id = $1", user_id
@@ -129,18 +134,22 @@ async def post_topup(
     row = await conn.fetchrow(
         "UPDATE user_wallets SET balance = balance + $2, updated_at = now() "
         "WHERE user_id = $1 RETURNING balance",
-        user_id, amount,
+        user_id,
+        amount,
     )
     if row is None:
         row = await conn.fetchrow(
             "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) RETURNING balance",
-            user_id, amount,
+            user_id,
+            amount,
         )
     await conn.execute(
         "INSERT INTO wallet_transactions "
         "(user_id, tx_type, amount, balance_after, related_purchase_id) "
         "VALUES ($1, 'TOPUP', $2, $3, NULL)",
-        user_id, amount, row["balance"],
+        user_id,
+        amount,
+        row["balance"],
     )
     balance: Decimal = row["balance"]
     return balance

@@ -25,6 +25,7 @@ UUID5 derived deterministically from `(venue, year)` — the same
 aggregate_id is produced for every `(venue, year)` pair, allowing the
 audit history for that venue and year to be tracked under a single id.
 """
+
 from __future__ import annotations
 
 import uuid

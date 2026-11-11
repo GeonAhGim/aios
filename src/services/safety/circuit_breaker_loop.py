@@ -14,6 +14,7 @@ Spec: §2 표 139행, §4.3 CB 상태표 422~424행, §3.4 reactivation 정책, 
 3. fresh_risk_outcome — RECOVERY 실평가(R-53) 없어 수집 metrics를
    `compute_level()`로 재평가해 halted/emergency 아니면 ALLOW로 본다.
 """
+
 from __future__ import annotations
 
 from collections import deque

@@ -38,6 +38,7 @@ since §4.1 GAP/REJECT determinations are themselves batch-scoped,
 reflecting this batch's state is the right direction (Draft, §10
 unspecified).
 """
+
 from __future__ import annotations
 
 import logging
@@ -85,9 +86,7 @@ async def _session_open(
     return calendar.is_open(at)
 
 
-async def _active_series(
-    conn: asyncpg.Connection, window_start: datetime
-) -> list[SeriesKey]:
+async def _active_series(conn: asyncpg.Connection, window_start: datetime) -> list[SeriesKey]:
     """Series that have at least one row in `md_ingest_batch` within the last `_ACTIVITY_WINDOW`."""
     rows = await conn.fetch(
         "SELECT DISTINCT venue, instrument_id, timeframe FROM md_ingest_batch "
@@ -171,9 +170,7 @@ async def _export_one(
             # issues list. A single candle can produce multiple issues
             # (e.g., high<open and volume<0 violations simultaneously),
             # so we deduplicate by open_time.
-            gap_count = len(
-                {i.open_time for i in verdict.issues if i.type is QualityIssueType.GAP}
-            )
+            gap_count = len({i.open_time for i in verdict.issues if i.type is QualityIssueType.GAP})
             reject_count = len(
                 {i.open_time for i in verdict.issues if i.severity is Severity.REJECT}
             )
@@ -230,8 +227,14 @@ async def export_quality_metrics(
         for key in await _active_series(conn, window_start):
             try:
                 metrics = await _export_one(
-                    conn, key, window_start, now,
-                    batches=batches, store=store, cal=cal, registry=registry,
+                    conn,
+                    key,
+                    window_start,
+                    now,
+                    batches=batches,
+                    store=store,
+                    cal=cal,
+                    registry=registry,
                 )
             except Exception:
                 logger.exception(

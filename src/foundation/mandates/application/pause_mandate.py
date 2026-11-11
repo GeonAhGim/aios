@@ -10,6 +10,7 @@ resume 시 "fresh policy evaluation"을 강제하는 방법(75번 §2)은 이 �
 PolicyDecision을 재사용하지 않는다 — get_cached_decision()은 fingerprint가
 같을 때만 히트한다).
 """
+
 from __future__ import annotations
 
 from uuid import UUID

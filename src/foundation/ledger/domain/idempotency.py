@@ -7,6 +7,7 @@ digest 동일해야"). 같은 키로 재전송된 이벤트가 이전과 다른 
 당사자 등)이면 `LEDGER_IDEMPOTENCY_DIGEST_MISMATCH` — 호출자 버그이므로
 재시도 불가(§3.3 에러 taxonomy). 순수 함수만 — I/O·시계 직접 호출 금지.
 """
+
 from __future__ import annotations
 
 import hashlib

@@ -25,6 +25,7 @@ them explicitly in a separate leaf; don't build it now on speculation).
 
 Pure module — no I/O.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -112,10 +113,13 @@ def run_vector_backtest(
     (delegating to BT-2~6) — this function only differs in how it looks up
     signals (a precomputed array instead of a DSL strategy callback)."""
     if len(signal.entries) != len(columns):
-        raise VectorFillsError(
-            f"signal 길이 {len(signal.entries)} != 캔들 수 {len(columns)}"
-        )
+        raise VectorFillsError(f"signal 길이 {len(signal.entries)} != 캔들 수 {len(columns)}")
     return run_quick_backtest(
-        config, columns, timeframe=timeframe, strategy=_VectorSignalSource(signal),
-        initial_cash=initial_cash, funding_rate=funding_rate, lower_columns=lower_columns,
+        config,
+        columns,
+        timeframe=timeframe,
+        strategy=_VectorSignalSource(signal),
+        initial_cash=initial_cash,
+        funding_rate=funding_rate,
+        lower_columns=lower_columns,
     )

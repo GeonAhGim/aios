@@ -6,6 +6,7 @@ Create Date: 2026-08-28 00:26:09.061936
 
 Spec: 04_db_schema_v1.6.md (Capability Tokens, 16.2)
 """
+
 from collections.abc import Sequence
 
 from alembic import op

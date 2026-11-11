@@ -14,6 +14,7 @@ task-489/LB-18 cross_tenant adversarial test — previously queries used only
 `position_key` to read that snapshot directly). If the owner differs,
 returns `None` indistinguishably from "not found" — hiding the existence of
 someone else's position is the safer default."""
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

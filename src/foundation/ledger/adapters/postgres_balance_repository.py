@@ -42,6 +42,7 @@ the same lock key. Locking in sorted (`account_code` ascending) order is
 the same deadlock-avoidance discipline the old `ORDER BY la.account_code`
 provided.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

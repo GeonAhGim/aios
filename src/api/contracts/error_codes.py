@@ -6,6 +6,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§3.3 표
 RISK_/EXCHANGE_/RATE_LIMIT_/INTERNAL_/DEPENDENCY_ 외 금지 —
 test_error_codes.py가 이 규칙을 강제한다.
 """
+
 from __future__ import annotations
 
 import enum

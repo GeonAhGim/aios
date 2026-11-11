@@ -50,6 +50,7 @@ already declare (no `params` -- every Kiwoom TR call observed in the
 verified source sends its arguments in the JSON body, never as a query
 string).
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -37,6 +37,7 @@ primitive that core code elsewhere needs — it is ledger-aggregate business
 logic, so it belongs in `src.foundation.ledger.domain` rather than behind a
 core-owned port.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

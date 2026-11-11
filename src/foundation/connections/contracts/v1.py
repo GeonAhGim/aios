@@ -7,6 +7,7 @@ Spec: AIOSproject 44_connected_asset_readonly_connection_specification_v1.0.md,
 다른 bounded context(mandates/risk_gate/reconciliation)는 이 파일을 소비하고,
 domain/models.py를 직접 참조하지 않는다(71번 §4, 106번 §5).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

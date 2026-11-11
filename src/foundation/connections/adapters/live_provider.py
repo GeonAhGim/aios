@@ -32,6 +32,7 @@ adapter does not skip the call based on that fact — it calls anyway and merges
 result. If other exchanges or contract types start populating real values later,
 this code will need no changes.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

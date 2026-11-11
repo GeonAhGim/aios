@@ -9,6 +9,7 @@ auth/users/admin 라우터까지)는 페이지 번호 방식(PageParams)만 실�
 생기는 시점에 필요해질 것이라 지금은 만들지 않는다(과잉설계 방지,
 17.9-A 원칙 — 이 세션 다른 곳에서도 반복 적용됨).
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

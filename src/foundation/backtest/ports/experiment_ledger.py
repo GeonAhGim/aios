@@ -11,6 +11,7 @@ ports/journal_repository.py`.
 Protocol declaration and `...` bodies only -- no I/O, no default implementation
 (same rule as `ports/fill_simulator.py`/`ports/bar_source.py`, L26 DoD (b)).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

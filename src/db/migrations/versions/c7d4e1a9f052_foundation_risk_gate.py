@@ -33,6 +33,7 @@ Spec: AIOSproject 48_risk_safety_gate_and_kill_switch_specification_v1.0.md,
   대체하거나 수정하지 않는다. 이 리프의 안전 통제는 아직 실제 주문
   제출 경로에 배선돼 있지 않다(71번 §1 FROZEN 영역 미변경).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

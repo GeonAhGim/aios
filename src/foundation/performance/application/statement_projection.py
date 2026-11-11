@@ -11,6 +11,7 @@ is denominated in a single currency (KRW), matching the default of
 expansion in ADR-2026-08-28). Scenarios that mix currencies in computation
 are out of scope for this leaf (§10 unverified items).
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -38,6 +39,7 @@ def _return_method(value: str) -> Literal["TWR", "MWR"]:
     if value == "MWR":
         return "MWR"
     raise ValueError(f"invalid return method: {value!r}")
+
 
 _BREAKDOWN_FIELDS = (
     "gross_pnl",

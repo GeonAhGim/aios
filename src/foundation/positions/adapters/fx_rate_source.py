@@ -17,6 +17,7 @@ Stale detection reuses the same LA-5 `detect_stale`(k=3) as
 series is stale/missing, its value is excluded and the median is computed from
 the remaining series. If all are absent, the result is `None` (not replaced with
 `0`) — see the port contract `ports/fx_rate_source.py` docstring."""
+
 from __future__ import annotations
 
 from decimal import Decimal

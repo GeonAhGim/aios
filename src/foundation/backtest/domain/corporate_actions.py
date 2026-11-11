@@ -33,6 +33,7 @@ module is a pure function that does not query a quote store, so the dividend
 event carries the prior-close before the ex-date (`prior_close`) directly —
 the caller passes that close along with it.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -125,14 +126,10 @@ def _require_ordered_window(bar_time: datetime, as_of: datetime) -> None:
     _require_utc(bar_time, "bar_time")
     _require_utc(as_of, "as_of")
     if as_of < bar_time:
-        raise ValueError(
-            f"as_of는 bar_time보다 앞일 수 없다: bar_time={bar_time}, as_of={as_of}"
-        )
+        raise ValueError(f"as_of는 bar_time보다 앞일 수 없다: bar_time={bar_time}, as_of={as_of}")
 
 
-def split_factor(
-    splits: Sequence[StockSplit], *, bar_time: datetime, as_of: datetime
-) -> Decimal:
+def split_factor(splits: Sequence[StockSplit], *, bar_time: datetime, as_of: datetime) -> Decimal:
     """Cumulative multiplier that rebases the raw price at `bar_time` to the
     share count as of `as_of`. Only splits whose ex_date falls in
     (`bar_time`, `as_of`] are reflected — a half-open interval (same

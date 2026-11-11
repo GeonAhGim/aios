@@ -28,12 +28,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.execute("ALTER TABLE strategy_executions ADD COLUMN portfolio_config JSONB")
     op.execute(
-        "ALTER TABLE strategy_executions ADD COLUMN portfolio_config JSONB"
-    )
-    op.execute(
-        "ALTER TABLE strategy_executions "
-        "ADD COLUMN portfolio_config_version INT NOT NULL DEFAULT 0"
+        "ALTER TABLE strategy_executions ADD COLUMN portfolio_config_version INT NOT NULL DEFAULT 0"
     )
 
 

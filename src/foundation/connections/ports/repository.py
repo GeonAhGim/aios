@@ -1,5 +1,6 @@
 """Connected Asset repository port. The domain knows only this Protocol;
 actual implementations (adapters/) remain hidden(71 §4)."""
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -44,9 +45,7 @@ class ConnectionRepository(Protocol):
 
     async def insert_consent_link(self, link: ConnectionConsent) -> ConnectionConsent: ...
 
-    async def insert_credential_binding(
-        self, binding: CredentialBinding
-    ) -> CredentialBinding: ...
+    async def insert_credential_binding(self, binding: CredentialBinding) -> CredentialBinding: ...
 
     async def get_credential_binding(self, connection_id: UUID) -> CredentialBinding | None: ...
 

@@ -11,6 +11,7 @@ WORM 삽입 자체는 R-24 `PostgresDecisionRepository.insert()`만 쓴다 — �
 105번 §2 P1 교착 금지: 커넥션을 쥔 채로 `decision_repo.insert()`(자기
 커넥션을 따로 얻는다)를 부르지 않는다 — 매번 풀에서 새로 빌리고 반납한다.
 """
+
 from __future__ import annotations
 
 import logging

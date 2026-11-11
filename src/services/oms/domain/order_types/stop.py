@@ -15,6 +15,7 @@ is rewritten on a per-tick basis — the two modules are independent
 determinations in different layers (backtest vs. live) and do not import
 each other.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

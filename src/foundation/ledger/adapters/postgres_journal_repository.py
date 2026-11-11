@@ -22,6 +22,7 @@ foundation_audit_event(id)`이므로, 저널 엔트리를 insert하기 전에 �
 비교해 재전송 판정한다. 같은 `idempotency_key`로 다른 내용의 `lines`가
 들어오면 `IdempotencyDigestMismatchError`(재시도 불가).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

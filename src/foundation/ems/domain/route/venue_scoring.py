@@ -18,6 +18,7 @@ score descending, and ties are broken by venue code ascending
 insertion order, so the winner is reproducible regardless of how the
 caller assembled the candidate sequence.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

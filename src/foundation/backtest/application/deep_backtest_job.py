@@ -30,6 +30,7 @@ stored `config_hash`. Any mismatch (e.g. a changed commission) raises
 `BacktestCheckpointMismatchError` instead of silently restarting from
 scratch or silently continuing under the new config.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -140,8 +141,13 @@ def _state_digest(result: QuickBacktestResult) -> str:
         "expired_orders": result.expired_orders,
         "fills": [
             [
-                f.bar_index, f.side.value, f.order_type, str(f.quantity), str(f.price),
-                str(f.commission), str(f.remaining_quantity),
+                f.bar_index,
+                f.side.value,
+                f.order_type,
+                str(f.quantity),
+                str(f.price),
+                str(f.commission),
+                str(f.remaining_quantity),
             ]
             for f in result.fills
         ],
@@ -154,8 +160,12 @@ def _state_digest(result: QuickBacktestResult) -> str:
 
 def _prefix(columns: CandleColumns, end: int) -> CandleColumns:
     return CandleColumns(
-        ts=columns.ts[:end], open=columns.open[:end], high=columns.high[:end],
-        low=columns.low[:end], close=columns.close[:end], volume=columns.volume[:end],
+        ts=columns.ts[:end],
+        open=columns.open[:end],
+        high=columns.high[:end],
+        low=columns.low[:end],
+        close=columns.close[:end],
+        volume=columns.volume[:end],
         quote_volume=columns.quote_volume[:end],
     )
 
@@ -190,13 +200,21 @@ def run_deep_backtest_job(
 
     def _run_chunk(end: int) -> tuple[DeepBacktestCheckpoint, QuickBacktestResult]:
         chunk_result = run_quick_backtest(
-            config, _prefix(columns, end), timeframe=timeframe, strategy=strategy,
-            initial_cash=initial_cash, funding_rate=funding_rate,
-            lower_columns=lower_columns, max_bars=n,
+            config,
+            _prefix(columns, end),
+            timeframe=timeframe,
+            strategy=strategy,
+            initial_cash=initial_cash,
+            funding_rate=funding_rate,
+            lower_columns=lower_columns,
+            max_bars=n,
         )
         chunk_checkpoint = DeepBacktestCheckpoint(
-            config_hash=current_hash, last_processed_ts=columns.ts[end - 1],
-            bars_processed=end, total_bars=n, state_hash=_state_digest(chunk_result),
+            config_hash=current_hash,
+            last_processed_ts=columns.ts[end - 1],
+            bars_processed=end,
+            total_bars=n,
+            state_hash=_state_digest(chunk_result),
         )
         return chunk_checkpoint, chunk_result
 

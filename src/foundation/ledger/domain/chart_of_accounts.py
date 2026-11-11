@@ -8,6 +8,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.3, §4.4, §9 LC-2.
 부채·수익은 대변 증가. `USER:*:RECEIVABLE`만 음수 잔액을 허용하는 유일한
 계정(대손 이연을 나타내는 자산)이다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -53,7 +54,7 @@ class ParsedAccountCode:
 
 
 def user_account(user_id: UUID, sub: UserSub) -> str:
-    """"USER:{uuid}:{UserSub}" 계정코드를 생성한다."""
+    """ "USER:{uuid}:{UserSub}" 계정코드를 생성한다."""
     return f"USER:{user_id}:{sub.value}"
 
 

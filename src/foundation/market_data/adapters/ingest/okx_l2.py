@@ -14,6 +14,7 @@ verified):
 - The REST snapshot (`/api/v5/market/books`) `sz` upper bound (400 per
   the docs) has not been verified.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -96,9 +97,7 @@ class OkxL2Adapter:
 
     async def fetch_snapshot(self, instrument_symbol: str) -> L2Snapshot:
         inst_id = _to_inst_id(instrument_symbol)
-        resp = await self._http.get(
-            "/api/v5/market/books", params={"instId": inst_id, "sz": _SZ}
-        )
+        resp = await self._http.get("/api/v5/market/books", params={"instId": inst_id, "sz": _SZ})
         resp.raise_for_status()
         row = resp.json()["data"][0]
         bids, asks = _levels(row["bids"]), _levels(row["asks"])

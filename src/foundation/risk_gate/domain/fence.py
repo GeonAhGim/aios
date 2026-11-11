@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.4 `domain/fence.py`, §3.6.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

@@ -6,6 +6,7 @@ paper_control(FND-07)이 없어 "RUNNING 상태를 만들 수 없다"는 제약�
 지켜진다(만들 대상 자체가 없음). 이 커맨드는 그저 control을 INACTIVE로
 표시할 뿐, 정지됐던 무언가를 다시 켜지 않는다.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

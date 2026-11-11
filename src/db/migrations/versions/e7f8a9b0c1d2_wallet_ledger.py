@@ -19,6 +19,7 @@ UUID)을 함께 시드한다 — 커미션 수취 + seller_type='PLATFORM' 리�
 해시 형식이 아닌 사용 불가 마커를 넣는다(users.password_hash NOT NULL
 제약 충족용, auth_service의 해시 검증이 이 값으로 절대 통과하지 못함).
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -83,9 +84,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX idx_wallet_topup_requests_user ON wallet_topup_requests(user_id)"
-    )
+    op.execute("CREATE INDEX idx_wallet_topup_requests_user ON wallet_topup_requests(user_id)")
 
 
 def downgrade() -> None:

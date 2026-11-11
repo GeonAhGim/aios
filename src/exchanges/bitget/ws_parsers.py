@@ -13,6 +13,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§2-E (`bitget/ws_parsers
 §2-E 파일명 정합) + ack 분류·seq 추출 추가. 기존 테스트가 참조하는 모듈 경로
 (`market_data_mixin`)는 그 파일에서 이 모듈의 이름들을 재-import해 유지한다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

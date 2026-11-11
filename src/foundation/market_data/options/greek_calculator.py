@@ -5,6 +5,7 @@ formula.  Option-chain transport may create an indicator request, while the
 IND subsystem remains authoritative for formulas, inputs, versioning, and
 provenance.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

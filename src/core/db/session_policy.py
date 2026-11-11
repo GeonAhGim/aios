@@ -10,6 +10,7 @@ itself -- it only detects and fails loudly when a caller's session/decorator
 scope overruns the ceiling, so the violation surfaces in tests and logs
 instead of silently degrading the pool under load.
 """
+
 from __future__ import annotations
 
 import functools

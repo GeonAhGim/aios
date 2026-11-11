@@ -22,6 +22,7 @@ Numerical rules (both engines use the same formula for 1e-9 identity):
 - Zero-division guard uses exact 0 comparison (not TA-Lib's 1e-8 approximation).
   MFI: when total flow < 1.0, return 0, matching TA-Lib.
 """
+
 from __future__ import annotations
 
 import math

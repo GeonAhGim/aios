@@ -18,6 +18,7 @@ this leaf's scope — for the same reason as `wiring.py`'s
 changes are limited to a single registration assembly function"; a follow-up
 leaf actually attaches it as a task in main.py/background_loops.py).
 """
+
 from __future__ import annotations
 
 import asyncio

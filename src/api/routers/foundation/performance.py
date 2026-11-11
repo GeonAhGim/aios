@@ -20,6 +20,7 @@ FA-6: an optional `portfolio_id` query parameter was added to both GET
 endpoints (not a new route) — scope validation is done by
 `get_statement.py`. Omitting it makes the response byte-identical to the
 previous leaf."""
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4

@@ -27,6 +27,7 @@ Fail-closed: refuses under `ledger_control.write_frozen` (same posture as
 heard of. Idempotent: computing zero drift is a no-op, so re-running this
 against an already-clean account never touches the row.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -91,9 +92,7 @@ async def compute_drift(
     replayed_seq = 0 if replayed is None else replayed.last_entry_seq
 
     actual = current[account_code]
-    resynced = (
-        replayed_balance != actual.balance or replayed_seq != actual.last_entry_seq
-    )
+    resynced = replayed_balance != actual.balance or replayed_seq != actual.last_entry_seq
     return DriftReport(
         account_code=account_code,
         replayed_balance=replayed_balance,

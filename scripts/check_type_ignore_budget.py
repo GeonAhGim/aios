@@ -75,7 +75,8 @@ def _iter_python_files(root: Path) -> list[Path]:
 
     for dirpath, dirnames, filenames in os.walk(root, onerror=onerror):
         dirnames[:] = [
-            d for d in dirnames
+            d
+            for d in dirnames
             if d not in _EXCLUDE_DIR_NAMES
             and not (Path(dirpath) == root and d in {"build", "dist"})
         ]
@@ -126,8 +127,12 @@ def write_budget(budget_path: Path, value: int) -> None:
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=budget_path.parent,
-            prefix=f".{budget_path.name}.", suffix=".tmp", delete=False,
+            mode="w",
+            encoding="utf-8",
+            dir=budget_path.parent,
+            prefix=f".{budget_path.name}.",
+            suffix=".tmp",
+            delete=False,
         ) as output:
             temporary = Path(output.name)
             output.write(f"{value}\n")

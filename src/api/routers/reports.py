@@ -11,6 +11,7 @@ PLT-19(task-1016): 이 라우터는 원래부터 raw HTTPException을 던지지
 (executions.py/portfolio.py)와 함께 tests/integration/api/
 test_no_raw_http_exception.py의 MIGRATED_ROUTERS에 등재만 한다.
 """
+
 from __future__ import annotations
 
 from datetime import date

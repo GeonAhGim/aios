@@ -10,6 +10,7 @@ Spec: 04_db_schema_v1.7.md (Notifications, FD-17). 작업트리 3.15 —
 편차: user_id의 REFERENCES users(user_id)는 11.1에서 ALTER TABLE로 추가한다
 (a7c02fa80d22 참조 — users 테이블이 아직 없음).
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -35,9 +36,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX idx_notifications_user ON notifications(user_id, created_at DESC)"
-    )
+    op.execute("CREATE INDEX idx_notifications_user ON notifications(user_id, created_at DESC)")
     op.execute(
         """
         CREATE TABLE notification_preferences (

@@ -13,6 +13,7 @@ implemented the PAPER_ELIGIBLE package lifecycle itself (only up to validation-r
 so this leaf cannot actually validate package existence. When the package
 lifecycle is implemented, only the package validation portion of this
 function needs to be replaced."""
+
 from __future__ import annotations
 
 import hashlib

@@ -28,6 +28,7 @@ This module only builds the request and parses the response envelope --
 entity linking (RD-5) and redistribution enforcement (RD-3) are both the
 caller's job, not this adapter's.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -62,7 +63,9 @@ _SEC_EDGAR_ADMISSION_KEY = "SEC EDGAR"
 
 _SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik10}.json"
 
-_ARCHIVE_URL_TEMPLATE = "https://www.sec.gov/Archives/edgar/data/{cik_no_zeros}/{accession_no_dash}/"
+_ARCHIVE_URL_TEMPLATE = (
+    "https://www.sec.gov/Archives/edgar/data/{cik_no_zeros}/{accession_no_dash}/"
+)
 
 _CIK_DIGITS = 10
 
@@ -126,9 +129,7 @@ def _parse_filing_date(raw: str) -> datetime:
         year, month, day = (int(part) for part in str(raw).split("-"))
         parsed = date_(year, month, day)
     except ValueError as exc:
-        raise SecEdgarParseError(
-            f"SEC EDGAR filingDate is not a valid ISO date: {raw!r}"
-        ) from exc
+        raise SecEdgarParseError(f"SEC EDGAR filingDate is not a valid ISO date: {raw!r}") from exc
     return datetime(parsed.year, parsed.month, parsed.day, tzinfo=UTC)
 
 

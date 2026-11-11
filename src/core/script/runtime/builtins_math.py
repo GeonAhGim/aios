@@ -33,6 +33,7 @@ default fill 0).
 (Pine's `math.round`), and since either convention preserves determinism as long
 as one rule is picked, the documented one was chosen.
 """
+
 from __future__ import annotations
 
 import math

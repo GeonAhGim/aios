@@ -9,6 +9,7 @@ module only adds the "+1 warm-up bar" convention (the current bar itself,
 on top of the prior bars the indicator consumes) and the per-timeframe max
 aggregation across several indicator keys.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping

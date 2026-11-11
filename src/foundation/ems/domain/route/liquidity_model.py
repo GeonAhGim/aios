@@ -13,6 +13,7 @@ recent fill rate into one venue ranking -- that synthesis is EM-5's
 `venue_scoring.py`, per the 2026-09-08 leaf decision. The book snapshot
 is a caller-supplied argument, not a new market-data client here.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

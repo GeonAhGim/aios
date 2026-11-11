@@ -5,6 +5,7 @@ standalone; `postgres_repository.PostgresEntityRepository` composes all 4
 mixins. See that file's module docstring for the concurrency/tenant
 isolation contract.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -33,8 +34,7 @@ class PortfolioRepositoryMixin:
                 )
         except asyncpg.UniqueViolationError as exc:
             raise ConcurrencyConflictError(
-                f"portfolio.portfolio_id={portfolio.portfolio_id}: 다른 요청이 먼저 "
-                "생성했습니다."
+                f"portfolio.portfolio_id={portfolio.portfolio_id}: 다른 요청이 먼저 생성했습니다."
             ) from exc
         return row_to_portfolio(row)
 

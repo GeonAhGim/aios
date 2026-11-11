@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 73번 §4 (`RevokeConsent` -> `trust.consent_revoked.v1`).
 """
+
 from __future__ import annotations
 
 from uuid import UUID

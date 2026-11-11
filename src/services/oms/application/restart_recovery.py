@@ -20,6 +20,7 @@ complete) is carried out by the existing assembly point,
 `execution_loop/recovery_wiring.py` (§C forbids duplicate context -- do not
 build another orchestrator here).
 """
+
 from __future__ import annotations
 
 import logging
@@ -149,9 +150,7 @@ async def recover_stuck_outbox_commands(
     task-1604).
     """
     if risk_gate_repo is None:  # I-01 -- the safety-gate argument has no None default
-        raise TypeError(
-            "risk_gate_repo는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다."
-        )
+        raise TypeError("risk_gate_repo는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다.")
     async with pool.acquire() as conn, conn.transaction():
         rows = await outbox_repo.reclaim_stuck_sending(
             conn, worker_id=worker_id, limit=limit, lease_sec=lease_sec
@@ -164,8 +163,12 @@ async def recover_stuck_outbox_commands(
         if row.command_type != "SUBMIT":
             async with pool.acquire() as conn, conn.transaction():
                 await outbox_repo.mark_retry(
-                    conn, row.id, attempt=row.attempt, not_before=clock(),
-                    last_error=_REENTRY_REASON, expected_worker=worker_id,
+                    conn,
+                    row.id,
+                    attempt=row.attempt,
+                    not_before=clock(),
+                    last_error=_REENTRY_REASON,
+                    expected_worker=worker_id,
                 )
             continue
         order = await _recover_stuck_submit(pool, order_repo, outbox_repo, writes, row, clock)
@@ -200,12 +203,21 @@ async def _recover_stuck_submit(
             return None
         if order.status is OrderStatus.VALIDATED:
             await outbox_repo.mark_retry(
-                conn, row.id, attempt=row.attempt, not_before=clock(),
-                last_error=_REENTRY_REASON, expected_worker=writes.worker_id,
+                conn,
+                row.id,
+                attempt=row.attempt,
+                not_before=clock(),
+                last_error=_REENTRY_REASON,
+                expected_worker=writes.worker_id,
             )
             return None
         await writes.done(conn, row)  # fence first (§5.1) -- no resend
         return await writes.transition(
-            conn, row, order, OrderStatus.UNKNOWN, OrderEvent.RESPONSE_LOST,
-            _LEASE_EXPIRED_UNKNOWN_REASON, {"unknown_since": clock()},
+            conn,
+            row,
+            order,
+            OrderStatus.UNKNOWN,
+            OrderEvent.RESPONSE_LOST,
+            _LEASE_EXPIRED_UNKNOWN_REASON,
+            {"unknown_since": clock()},
         )

@@ -5,6 +5,7 @@ Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20 DoD
 the unprocessed queue" — this table
 (`research_opendart_unprocessed_filing`) is the proof of that.
 """
+
 from __future__ import annotations
 
 import json

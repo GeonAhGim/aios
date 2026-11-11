@@ -26,6 +26,7 @@ instrument_id itself is missing, `InstrumentNotFoundError` is raised instead
 (same pattern as `postgres_balance_repository.apply` — on failure, verify
 existence with an extra SELECT).
 """
+
 from __future__ import annotations
 
 import asyncpg
@@ -182,7 +183,6 @@ class PostgresInstrumentRepository:
             )
         except asyncpg.exceptions.ExclusionViolationError as exc:
             raise VenueListingOverlapError(
-                f"겹치는 상장 기간: venue={listing.venue.value} "
-                f"venue_symbol={listing.venue_symbol}"
+                f"겹치는 상장 기간: venue={listing.venue.value} venue_symbol={listing.venue_symbol}"
             ) from exc
         return _row_to_listing(row)

@@ -16,6 +16,7 @@ immediately before ... persistence"). We discovered during review that separatin
 and persistence into two DB round-trips leaves a TOCTOU gap, so we fixed it — see
 adapters/postgres_repository.py for details.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -86,9 +87,7 @@ async def sync_snapshot(
     if connection.tenant_id != tenant_id:
         raise CrossTenantConnectionAccessError(str(connection_id))
     if connection.state not in _SYNCABLE_STATES:
-        raise ConnectionNotSyncableError(
-            f"{connection.state.value} 상태는 동기화 대상이 아닙니다."
-        )
+        raise ConnectionNotSyncableError(f"{connection.state.value} 상태는 동기화 대상이 아닙니다.")
 
     now = datetime.now(UTC)
     try:

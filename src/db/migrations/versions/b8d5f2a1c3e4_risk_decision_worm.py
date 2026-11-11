@@ -29,6 +29,7 @@ REVOKE(PUBLIC 대상, 방어 심화)·트리거를 얹는다.
 인덱스 3종은 스펙 그대로: tenant별 최신순(`list_recent`), trace_id 단건 조회
 (재생/디버깅), execution_ref별 최신순(같은 실행에 대한 결정 이력).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

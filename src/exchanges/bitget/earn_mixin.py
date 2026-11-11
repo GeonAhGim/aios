@@ -12,6 +12,7 @@ Spec: 02c_bitget_api_v2_extended_spec_v1.md §1.4, §2(작업 분해 4번)
 - GET  /api/v2/earn/savings/assets
 - GET  /api/v2/earn/savings/records
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -29,9 +30,7 @@ class BitgetEarnMixin:
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(
-            "GET", "/api/v2/earn/savings/product", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/earn/savings/product", params=params or None)
         return list(raw["data"])
 
     async def subscribe_earn_product(
@@ -76,7 +75,5 @@ class BitgetEarnMixin:
         params: dict[str, Any] = {"limit": str(limit)}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(
-            "GET", "/api/v2/earn/savings/records", params=params
-        )
+        raw = await self._request("GET", "/api/v2/earn/savings/records", params=params)
         return list(raw["data"])

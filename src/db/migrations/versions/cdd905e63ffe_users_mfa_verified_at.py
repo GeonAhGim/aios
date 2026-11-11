@@ -20,6 +20,7 @@ configured step-up window."
 남기지 않았으므로) — fail-closed: 다음 로그인 전까지는 mfa_enabled=True인
 계정도 step-up 미검증으로 취급된다(auth_service.py 상단 "검증 불가를
 통과로 취급하지 않는다"는 기존 fail-safe 원칙과 동일한 방향)."""
+
 from collections.abc import Sequence
 
 from alembic import op

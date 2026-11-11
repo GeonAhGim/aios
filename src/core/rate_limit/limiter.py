@@ -12,6 +12,7 @@ Following the same pattern as `metrics()/set_metrics()` in `observability/metric
 current implementation via this function on every request, so integration tests can
 isolate behavior with `set_limiter(...)` without restructuring the app.
 """
+
 from __future__ import annotations
 
 import asyncio

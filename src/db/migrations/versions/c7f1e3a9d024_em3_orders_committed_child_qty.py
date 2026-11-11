@@ -26,6 +26,7 @@ a `committed_child_qty`-only UPDATE still gets the optimistic-lock bump for
 free without needing an `order_events` row (only a `status` change needs
 one, per I6).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

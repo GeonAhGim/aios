@@ -9,6 +9,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§3.7 Idempotency
 라우트 이관(PLT-15, `Idempotency-Replayed` 응답 헤더 배선 포함)은 이 모듈
 밖이다 — 헤더 파싱·digest 계산·`core/idempotency.py` 위의 digest 대조까지만.
 """
+
 from __future__ import annotations
 
 import hashlib

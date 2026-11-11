@@ -5,6 +5,7 @@ Reads the eval markdown and runs `assert_source_eval_gate`. Exit 0 = pass,
 register as warn in fleet `ci_recheck.STEP_MODE` before promoting to gate.
 Pytest covers the same pure function directly.
 """
+
 from __future__ import annotations
 
 import sys

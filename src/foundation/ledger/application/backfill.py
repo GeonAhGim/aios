@@ -37,6 +37,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§9 LC-11, R1~R3.
 불일치가 있으면 `BackfillMismatchError`를 던지고, 호출자가 잡지 않고
 전파해야 트랜잭션 전체가 롤백된다(부분 적재 금지).
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -141,8 +142,12 @@ def _purchase_events(
     return [
         _event(LedgerEventType.HOLD_PLACED, ref, price, currency, {"buyer": buyer}, {}),
         _event(
-            LedgerEventType.HOLD_CAPTURED, ref, price, currency,
-            {"buyer": buyer, "seller": seller}, {"commission_rate": rate},
+            LedgerEventType.HOLD_CAPTURED,
+            ref,
+            price,
+            currency,
+            {"buyer": buyer, "seller": seller},
+            {"commission_rate": rate},
         ),
         _event(LedgerEventType.PAYOUT_RELEASE, ref, payout, currency, {"seller": seller}, {}),
     ]
@@ -162,7 +167,11 @@ def _refund_events(
         # 클로백 행이 전혀 없는 이력 = 레드팀 #41 이전 자금창출형 환불(R1).
         return [
             _event(
-                LedgerEventType.MANUAL_ADJUSTMENT, ref, price, currency, {},
+                LedgerEventType.MANUAL_ADJUSTMENT,
+                ref,
+                price,
+                currency,
+                {},
                 {
                     "debit_account": PLATFORM_REFUND_RESERVE,
                     "credit_account": ua(buyer, UserSub.AVAILABLE),
@@ -201,10 +210,19 @@ def _build_events(rows: list[LegacyWalletTx], currency: Currency) -> list[Ledger
         if row.related_purchase_id is None:
             if row.tx_type != "TOPUP":
                 raise UnrecognizedTxGroupError(f"row {row.id}: 그룹 없는 {row.tx_type!r}")
-            ordered.append(((row.id, 0), _event(
-                LedgerEventType.TOPUP_CONFIRMED, f"backfill:topup:{row.id}", row.amount,
-                currency, {"user": row.user_id}, {},
-            )))
+            ordered.append(
+                (
+                    (row.id, 0),
+                    _event(
+                        LedgerEventType.TOPUP_CONFIRMED,
+                        f"backfill:topup:{row.id}",
+                        row.amount,
+                        currency,
+                        {"user": row.user_id},
+                        {},
+                    ),
+                )
+            )
             continue
         unknown = row.tx_type not in _KNOWN_TX_TYPES
         if unknown:
@@ -250,13 +268,17 @@ async def _ensure_user_account(
     await conn.execute(
         "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
         "VALUES ($1, $2, $3, $4) ON CONFLICT (account_code) DO NOTHING",
-        account_code, account_type(account_code).value, currency.value, negative_ok,
+        account_code,
+        account_type(account_code).value,
+        currency.value,
+        negative_ok,
     )
     await conn.execute(
         "INSERT INTO ledger_balance (account_id, allow_negative) "
         "SELECT account_id, $2 FROM ledger_account WHERE account_code = $1 "
         "ON CONFLICT (account_id) DO NOTHING",
-        account_code, negative_ok,
+        account_code,
+        negative_ok,
     )
 
 

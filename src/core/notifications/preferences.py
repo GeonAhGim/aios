@@ -8,6 +8,7 @@ Any request fields outside the whitelist are reported as rejected (the calling A
 decides whether to return 403 alongside this list; FD-17.4 original: "process allowed
 fields without rejecting the entire request").
 """
+
 from __future__ import annotations
 
 from uuid import UUID

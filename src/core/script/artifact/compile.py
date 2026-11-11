@@ -29,6 +29,7 @@ taxonomy — a §3.3 AST that has passed type checking must always lower
 successfully, so a lowering failure is a contract violation; it is not
 wrapped here and propagates as-is (500 INTERNAL_ERROR at the API layer).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

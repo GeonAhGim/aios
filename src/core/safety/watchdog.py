@@ -13,6 +13,7 @@ FD-9.2: 위 관측치로 HALT/LIQUIDATE/NORMAL을 판정한다. Griefing 방어 
 주입받아 "단일 기준 통화로 이미 환산된 총자산"을 호출부가 책임지고
 넘기도록 했다(11번 §11.1 FX 원칙이 실제 구현되기 전까지의 임시 경계).
 """
+
 from __future__ import annotations
 
 import logging

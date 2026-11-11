@@ -12,6 +12,7 @@ invokes compute_statement.py to produce a new revision for the same period
 is the caller's responsibility. This command only handles the administrative
 procedure of "marking the result as CORRECTED and linking it to the prior
 revision" (100-line cap, SCAFFOLD)."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -56,14 +57,17 @@ async def correct_statement(
     if original.tenant_id != tenant_id:
         raise CrossTenantStatementAccessError(statement_id)
 
-    latest = await repo.get_latest_statement(
-        tenant_id=tenant_id,
-        scope=original.scope,
-        scope_ref=original.scope_ref,
-        period_start=original.period_start,
-        period_end=original.period_end,
-        methodology_version=original.methodology_version,
-    ) or original
+    latest = (
+        await repo.get_latest_statement(
+            tenant_id=tenant_id,
+            scope=original.scope,
+            scope_ref=original.scope_ref,
+            period_start=original.period_start,
+            period_end=original.period_end,
+            methodology_version=original.methodology_version,
+        )
+        or original
+    )
 
     reason_note = f"CORRECTED(prior={latest.id}): {reason}"
     corrected_id = uuid4()

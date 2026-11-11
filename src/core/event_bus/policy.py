@@ -2,6 +2,7 @@
 
 Spec: 05_communication_architecture_v1.2.md#§5.5
 """
+
 from __future__ import annotations
 
 from enum import StrEnum

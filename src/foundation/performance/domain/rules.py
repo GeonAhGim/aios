@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -25,8 +26,7 @@ class PrecisionError(Exception):
 
     def __init__(self, amount: Decimal, expected_exponent: int) -> None:
         super().__init__(
-            f"INTEGRITY_CURRENCY_PRECISION: {amount}는 소수 {expected_exponent}자리를 "
-            "초과합니다."
+            f"INTEGRITY_CURRENCY_PRECISION: {amount}는 소수 {expected_exponent}자리를 초과합니다."
         )
         self.reason_code = "INTEGRITY_CURRENCY_PRECISION"
 

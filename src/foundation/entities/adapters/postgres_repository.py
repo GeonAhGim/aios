@@ -33,6 +33,7 @@ per-entity-level mixins (`_legal_entity_repository.py`,
 `_sub_account_repository.py`) because of the 300-line cap (P6) -- the query
 logic lives in those files.
 """
+
 from __future__ import annotations
 
 import asyncpg

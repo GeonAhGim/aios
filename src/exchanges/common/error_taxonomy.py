@@ -7,6 +7,7 @@ Fail-closed 원칙 — 미지의 HTTP 상태코드/거래소 오류코드는 `UN
 사고를 막기 위해, "모른다"는 "재시도해도 된다"가 아니라 "재시도하면 안 된다"로
 해석한다).
 """
+
 from __future__ import annotations
 
 from enum import StrEnum

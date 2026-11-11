@@ -18,6 +18,7 @@ projections that LC-12 bridge cannot express are projected directly using
 the same pattern as `purchase_service._project` (side-effect entries after
 the ledger has already recorded the truth — no double-counting).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -72,13 +73,23 @@ async def _balance(
 
 
 async def _move(
-    conn: asyncpg.Connection, debit_account: str, credit_account: str,
-    amount: Decimal, ref: str, ports: dict[str, Any], trace_id: UUID | None = None,
+    conn: asyncpg.Connection,
+    debit_account: str,
+    credit_account: str,
+    amount: Decimal,
+    ref: str,
+    ports: dict[str, Any],
+    trace_id: UUID | None = None,
 ) -> None:
     event = LedgerEvent(
-        event_type=LedgerEventType.MANUAL_ADJUSTMENT, event_ref=ref, tenant_id=None,
-        actor_subject_id=None, trace_id=trace_id or uuid4(), amount=amount,
-        currency=Currency.KRW, parties={},
+        event_type=LedgerEventType.MANUAL_ADJUSTMENT,
+        event_ref=ref,
+        tenant_id=None,
+        actor_subject_id=None,
+        trace_id=trace_id or uuid4(),
+        amount=amount,
+        currency=Currency.KRW,
+        parties={},
         extra={"debit_account": debit_account, "credit_account": credit_account},
     )
     await post_entry(conn, event, **ports)
@@ -91,23 +102,35 @@ async def project(
     row = await conn.fetchrow(
         "UPDATE user_wallets SET balance = balance + $2, updated_at = now() "
         "WHERE user_id = $1 RETURNING balance",
-        user_id, delta,
+        user_id,
+        delta,
     )
     if row is None:
         row = await conn.fetchrow(
             "INSERT INTO user_wallets (user_id, balance) VALUES ($1, $2) RETURNING balance",
-            user_id, delta,
+            user_id,
+            delta,
         )
     await conn.execute(
         "INSERT INTO wallet_transactions (user_id, tx_type, amount, balance_after, "
         "related_purchase_id) VALUES ($1, $2, $3, $4, $5)",
-        user_id, tx_type, delta, row["balance"], purchase_id,
+        user_id,
+        tx_type,
+        delta,
+        row["balance"],
+        purchase_id,
     )
 
 
 async def refund_with_clawback(
-    conn: asyncpg.Connection, *, purchase_id: int, buyer_user_id: UUID,
-    seller_user_id: UUID, price_paid: Decimal, commission_rate: Decimal | None, admin_id: UUID,
+    conn: asyncpg.Connection,
+    *,
+    purchase_id: int,
+    buyer_user_id: UUID,
+    seller_user_id: UUID,
+    price_paid: Decimal,
+    commission_rate: Decimal | None,
+    admin_id: UUID,
     ports: dict[str, Any],
 ) -> Decimal:
     """Red team #41 / §4.4 REFUND — total balance conservation (see module docstring)."""
@@ -137,12 +160,23 @@ async def refund_with_clawback(
                 )
         if commission_amount > 0:
             await _move(
-                conn, house, PLATFORM_COMMISSION_REVENUE, commission_amount,
-                f"{ref}:commission_unsweep", ports, trace_id,
+                conn,
+                house,
+                PLATFORM_COMMISSION_REVENUE,
+                commission_amount,
+                f"{ref}:commission_unsweep",
+                ports,
+                trace_id,
             )
         await post_refund(
-            conn, purchase_id=purchase_id, buyer_id=buyer_user_id, seller_id=seller_user_id,
-            price=price_paid, commission_rate=rate, admin_id=admin_id, trace_id=trace_id,
+            conn,
+            purchase_id=purchase_id,
+            buyer_id=buyer_user_id,
+            seller_id=seller_user_id,
+            price=price_paid,
+            commission_rate=rate,
+            admin_id=admin_id,
+            trace_id=trace_id,
             **ports,
         )
     except InsufficientAvailableError as exc:

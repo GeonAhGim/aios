@@ -7,6 +7,7 @@ Spec: AIOSproject 49_audit_evidence_and_explainability_specification_v1.0.md,
 Other bounded contexts (FND-01/02, etc.) record and query audit events
 only through this file — they must not reference domain/models.py directly (71st §4).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

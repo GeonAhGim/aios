@@ -42,6 +42,7 @@ append-only 테이블은 물리적으로 UPDATE가 불가하다"는 서술이 fi
 INSERT 시점에 값을 채움, 이 리프 범위 밖)부터는 값이 채워지고, 기존 행은
 영구히 NULL로 남는다(잔여 건수를 테스트로 단언한다).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

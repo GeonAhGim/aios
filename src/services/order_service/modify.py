@@ -7,6 +7,7 @@ task-1603(L4-17) 편차 — cancel.py와 동일 이유(모듈 상단 참조)로
 `UnsupportedCapabilityError`이고, 이 래퍼는 그것도 `OrderModifyError`로
 통일해 던진다(호출자 시그니처 유지 — 이 함수가 던지는 예외 표면은 항상
 `OrderModifyError` 하나뿐이었다)."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

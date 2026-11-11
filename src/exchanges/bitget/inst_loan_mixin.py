@@ -15,6 +15,7 @@ Spec: 02c_bitget_api_v2_extended_spec_v1.md §1.11, §2(작업 분해 11번)
 - GET /api/v2/ins-loan/loan-order
 - GET /api/v2/ins-loan/repaid-history
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -29,9 +30,7 @@ class BitgetInstLoanMixin:
 
     async def get_inst_loan_ensure_coins(self: SignedRequestClient) -> list[dict[str, Any]]:
         """담보 코인 목록 및 환산율 조회."""
-        raw = await self._request(
-            "GET", "/api/v2/ins-loan/ensure-coins-convert"
-        )
+        raw = await self._request("GET", "/api/v2/ins-loan/ensure-coins-convert")
         return list(raw["data"])
 
     async def get_inst_loan_orders(

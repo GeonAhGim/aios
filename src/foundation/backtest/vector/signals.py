@@ -34,6 +34,7 @@ now — if it's ever needed, it will be handled explicitly in a new leaf
 
 Pure module — no I/O.
 """
+
 from __future__ import annotations
 
 import math
@@ -66,6 +67,7 @@ __all__ = [
 
 FloatArray = np.ndarray[Any, np.dtype[np.float64]]
 BoolArray = np.ndarray[Any, np.dtype[np.bool_]]
+
 
 class VectorSignalError(ValueError):
     """`BT_VECTOR_SIGNAL` — fail-closed rejection for array length mismatches, negative
@@ -105,9 +107,7 @@ def _same_length(left: Any, right: Any) -> None:
 
 def numeric_from_series(series: Series) -> FloatArray:
     """`series<float>` -> `FloatArray`(na=`None` -> `NaN`)."""
-    return np.array(
-        [np.nan if v is None else float(v) for v in series.values], dtype=np.float64
-    )
+    return np.array([np.nan if v is None else float(v) for v in series.values], dtype=np.float64)
 
 
 def numeric_to_series(values: FloatArray) -> Series:

@@ -27,6 +27,7 @@ no entitlement for folds into the same empty result as genuinely-uncovered
 venues, so this endpoint never leaks "exists but not yours" vs. "doesn't
 exist" (same existence-leak discipline as `application/read_api.py`).
 """
+
 from __future__ import annotations
 
 from uuid import UUID

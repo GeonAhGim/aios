@@ -14,6 +14,7 @@ This module only defines the type. `src.foundation.validation.domain.rules`
 (task-1114's `evaluate_validation_policy`, kept as-is) still owns the
 3-tuple bundle-evaluation contract -- nothing here changes it.
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -60,9 +61,7 @@ class CheckResult(BaseModel):
     def _reject_unknown_hard_fail_codes(cls, value: list[str]) -> list[str]:
         unknown = [code for code in value if code not in HARD_FAIL_CODES]
         if unknown:
-            raise ValueError(
-                f"hard_fail_reasons contains codes outside HARD_FAIL_CODES: {unknown}"
-            )
+            raise ValueError(f"hard_fail_reasons contains codes outside HARD_FAIL_CODES: {unknown}")
         return value
 
 

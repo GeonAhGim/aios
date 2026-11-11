@@ -12,6 +12,7 @@ Spec: 04_db_schema_v1.6.md (Tasks, 4.3 AIOSTask)
 ALTER TABLE로 제약을 추가한다(capability_token_id를 3.3에서 다루는 것과
 동일한 순환참조 회피 기법).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

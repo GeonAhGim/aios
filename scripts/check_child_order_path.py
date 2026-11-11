@@ -20,6 +20,7 @@ still allowed to exist elsewhere (`order_service/repository.py`,
 `safety/liquidation_executor.py` predate L4-09 and never touch those two
 columns) -- this check only forbids the *combination*.
 """
+
 from __future__ import annotations
 
 import re

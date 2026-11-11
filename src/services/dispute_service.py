@@ -11,6 +11,7 @@ Dispute submission for another buyer's purchase is blocked (purchase ownership
 check); at most one OPEN dispute per purchase — the DB partial unique index
 (idx_disputes_open_per_purchase) is the final defense line.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -60,8 +61,6 @@ class DisputeService:
                     reason,
                 )
             except asyncpg.UniqueViolationError as exc:
-                raise DisputeError(
-                    "이미 이 구매 건에 대해 진행중인 분쟁이 있습니다."
-                ) from exc
+                raise DisputeError("이미 이 구매 건에 대해 진행중인 분쟁이 있습니다.") from exc
 
         return Dispute(**dict(row))

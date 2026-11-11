@@ -6,6 +6,7 @@ Enables post-hoc proof of when approval requests were actually delivered — the
 reliability of 4.9 forced-wait and dual-signature procedures depends on the fact
 that "the notification actually reached the recipient."
 """
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -4,6 +4,7 @@ Greeks are deliberately absent from ``OptionContract``.  The chain endpoint
 returns market/reference data only; IND owns Greek calculation and callers
 request it through ``greeks_indicator_ref``.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

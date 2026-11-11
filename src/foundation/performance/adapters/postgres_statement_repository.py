@@ -8,6 +8,7 @@ values are serialized to strings to avoid floating-point representation errors
 `compute_input_hash`).
 `PostgresPerformanceRepository` in postgres_repository.py calls these functions
 to read and write statement rows (P6: split at 300+ lines)."""
+
 from __future__ import annotations
 
 import json

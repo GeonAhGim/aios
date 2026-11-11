@@ -5,6 +5,7 @@ reference persistence is not part of this leaf.  The default source is
 fail-closed and empty until that adapter is installed.  No Greek calculation
 is performed here; IND owns that boundary (see ``greek_calculator.py``).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

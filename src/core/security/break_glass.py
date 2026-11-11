@@ -69,6 +69,7 @@ def mfa_step_up_fresh(mfa_verified_at: datetime | None, *, now: datetime | None 
     now = now if now is not None else datetime.now(UTC)
     return (now - mfa_verified_at) <= MFA_STEP_UP_WINDOW
 
+
 _RETURNING_COLUMNS = (
     "id, requester_id, approver_id, scope, reason, state, created_at, expires_at, used_at"
 )

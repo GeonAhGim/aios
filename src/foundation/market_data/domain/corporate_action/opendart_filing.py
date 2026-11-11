@@ -22,6 +22,7 @@ the existing row. Append-only storage (no UPDATE) is guaranteed by
 `adapters/opendart/postgres_filing_repository.py`; this function only
 purely computes the values to be passed to that storage.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -68,9 +69,7 @@ class FilingParseError(ValueError):
     unprocessed queue (RD-20 DoD)."""
 
     def __init__(self, filing: OpenDartFiling, reason: str) -> None:
-        super().__init__(
-            f"rcept_no={filing.rcept_no} report_type={filing.report_type}: {reason}"
-        )
+        super().__init__(f"rcept_no={filing.rcept_no} report_type={filing.report_type}: {reason}")
         self.filing = filing
         self.reason = reason
 

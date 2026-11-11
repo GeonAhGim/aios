@@ -7,6 +7,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C
 control)로 위임한다. 이 모듈은 기존 호출자 시그니처(`Order` 반환, `publish`/
 `metrics` 옵션)를 유지하는 얇은 어댑터일 뿐이다.
 """
+
 from __future__ import annotations
 
 import asyncio

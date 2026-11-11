@@ -12,6 +12,7 @@ Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md
 `strategy_executions` 행이 지워지면 리스도 함께 정리되도록 한다(고아 리스
 방지). `ix_execution_leases_expires_at`는 만료된 리스를 찾는 정리/관측
 쿼리를 위한 색인(§6, §7)."""
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -35,9 +36,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX ix_execution_leases_expires_at ON execution_leases (expires_at)"
-    )
+    op.execute("CREATE INDEX ix_execution_leases_expires_at ON execution_leases (expires_at)")
 
 
 def downgrade() -> None:

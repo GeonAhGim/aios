@@ -25,6 +25,7 @@ already-fetched list of `CoverageSpan` objects. Filling periods outside
 coverage with 0/NaN is not this module's responsibility (§4.1) — DC-7
 `gaps.py` takes over that fail-closed determination.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict

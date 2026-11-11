@@ -7,6 +7,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C, §4.1 I6, §4.2,
 `SET LOCAL oms.event_written='1'` 직후에 호출한다(호출 순서는 이 파일이
 아니라 호출부 책임) — 그래야 I6 트리거가 그 UPDATE를 통과시킨다.
 """
+
 from __future__ import annotations
 
 from typing import Literal

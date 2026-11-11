@@ -11,6 +11,7 @@ Spec: 02b_bitget_api_v2_full_spec_v1.md §5.2(Account)/§5.3(Position), P0
 - GET  /api/v2/mix/position/single-position
 - GET  /api/v2/mix/position/all-position
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -174,9 +175,7 @@ class BitgetFuturesAccountMixin:
         }
         if hold_side is not None:
             body["holdSide"] = hold_side
-        await self._request(
-            "POST", "/api/v2/mix/account/set-margin", body=body
-        )
+        await self._request("POST", "/api/v2/mix/account/set-margin", body=body)
 
     async def get_futures_max_open_amount(
         self: SignedRequestClient,
@@ -222,9 +221,7 @@ class BitgetFuturesAccountMixin:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/mix/position/history-position", params=params
-        )
+        raw = await self._request("GET", "/api/v2/mix/position/history-position", params=params)
         return list(raw["data"])
 
     async def get_futures_position(

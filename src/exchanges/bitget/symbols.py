@@ -10,6 +10,7 @@ FULL_AUDIT_2026-09-02.md §7 — 어댑터 자체 변환과 LA-7 단일 규칙(s
 이전 판 참조) 공개 시그니처(이름·인자·반환 타입)는 그대로 유지해 호출부를
 건드리지 않는다(하위호환).
 """
+
 from __future__ import annotations
 
 from src.foundation.market_data.contracts.v1 import Venue
@@ -24,10 +25,10 @@ __all__ = ["to_bitget_symbol", "to_canonical_symbol"]
 
 
 def to_bitget_symbol(canonical_symbol: str) -> str:
-    """"BTC/USDT" -> "BTCUSDT" """
+    """ "BTC/USDT" -> "BTCUSDT" """
     return _to_venue(Venue.BITGET, canonical_symbol)
 
 
 def to_canonical_symbol(bitget_symbol: str) -> str:
-    """"BTCUSDT" -> "BTC/USDT" """
+    """ "BTCUSDT" -> "BTC/USDT" """
     return _to_canonical(Venue.BITGET, bitget_symbol)

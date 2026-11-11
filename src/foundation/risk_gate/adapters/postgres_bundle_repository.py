@@ -16,6 +16,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.4/§9 R-22 (선행 R-15 9a1737a
 커밋 시점에 강제한다 — 서로 다른 두 번들을 같은 scope로 동시에 ACTIVE
 전이시키면 나중에 커밋하는 트랜잭션이 `UniqueViolationError`를 받는다.
 """
+
 from __future__ import annotations
 
 import json
@@ -65,9 +66,7 @@ class PostgresBundleRepository:
         """R-23 승인 전(DRAFT/APPROVED) 번들 조회 — `get_active`는 ACTIVE만
         보므로 승인자=작성자 검사(호출자 책임)에는 이 메서드가 필요하다."""
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM risk_rule_bundle WHERE id = $1", bundle_id
-            )
+            row = await conn.fetchrow("SELECT * FROM risk_rule_bundle WHERE id = $1", bundle_id)
         return _row_to_bundle(row) if row is not None else None
 
     async def get_by_rule_hash(self, rule_hash: str) -> RiskRuleBundle | None:

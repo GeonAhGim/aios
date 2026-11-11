@@ -44,6 +44,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.5 `order_service/fenced_submit.p
      "막지 못한 것을 반드시 계수·되돌린다"는 보루다.
  10  기존 영속화·포지션 기록 경로.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
@@ -90,9 +91,7 @@ class RiskDecisionMissingError(Exception):
 def stale_pairs(observed: Mapping[str, int], current: Mapping[str, int]) -> tuple[str, ...]:
     """§3.6 — 토큰 *증가*만 stale이다(감소는 DB 제약상 불가). `current`에만
     있는 pair는 0→N 증가로 본다. 순수 함수, 결정론적 정렬."""
-    return tuple(
-        sorted(pair for pair, token in current.items() if token > observed.get(pair, 0))
-    )
+    return tuple(sorted(pair for pair, token in current.items() if token > observed.get(pair, 0)))
 
 
 async def submit_with_fence(
@@ -118,8 +117,13 @@ async def submit_with_fence(
 
     # 3' — WORM 재조회·결속 대조. F0의 출처는 여기서부터 WORM 행이다.
     f0 = await bind_to_worm_decision(
-        pool, order, user_id=user_id, actor=_ACTOR, gate_decision=gate_decision,
-        decision_reader=decision_reader, trace_id=trace_id,
+        pool,
+        order,
+        user_id=user_id,
+        actor=_ACTOR,
+        gate_decision=gate_decision,
+        decision_reader=decision_reader,
+        trace_id=trace_id,
     )
 
     # 4 — claim(멱등). submit.py FD-4.2-a와 동일한 UNIQUE 선점.
@@ -184,8 +188,15 @@ async def submit_with_fence(
         )
     if post_fence:
         persisted = await _contain_post_fence(
-            pool, adapter, persisted, metrics=metrics, user_id=user_id,
-            stale=post_fence, before=f1, after=f2, trace_id=trace_id,
+            pool,
+            adapter,
+            persisted,
+            metrics=metrics,
+            user_id=user_id,
+            stale=post_fence,
+            before=f1,
+            after=f2,
+            trace_id=trace_id,
         )
     await record_fill_in_position_ledger(pool, persisted, metrics=metrics)
     return persisted

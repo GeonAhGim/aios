@@ -7,6 +7,7 @@ The domain/application layer knows only this Protocol; the actual implementation
 defaulting to `0` — triangular conversion is also left to the caller (§4
 domain/fx.py `FxRateMissingError`).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -18,9 +19,7 @@ from src.data.models.base import Currency, FXRate
 
 @runtime_checkable
 class FxRateSource(Protocol):
-    async def rate(
-        self, base: Currency, quote: Currency, at: AwareDatetime
-    ) -> FXRate | None:
+    async def rate(self, base: Currency, quote: Currency, at: AwareDatetime) -> FXRate | None:
         """FX rate for `base/quote` at the given `at` timestamp.
 
         Returns `None` if not found (POS_FX_RATE_MISSING).

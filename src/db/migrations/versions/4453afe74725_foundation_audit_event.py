@@ -22,6 +22,7 @@ watchdog 등 6개 이상의 기존 서비스가 그 테이블에 직접 쓰고 �
 Foundation(FND-01 이후) bounded context 전용이며, 79번이 요구하는 tenant별
 해시 체인·checkpoint는 legacy 테이블에는 소급 적용하지 않는다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

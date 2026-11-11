@@ -21,6 +21,7 @@ DROP 의미론(`latency_model` 모듈 docstring 그대로) — 요청은 나갔�
 안 움직인다. 이 편차(미검증) 때문에 동시에 여러 미체결 주문이 같은
 잔고를 초과 배분할 수 있다는 한계가 있다 — 사전 예약은 L4-30+ 범위.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

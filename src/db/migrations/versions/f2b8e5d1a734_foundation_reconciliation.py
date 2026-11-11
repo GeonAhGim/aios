@@ -27,6 +27,7 @@ Spec: AIOSproject 50_reconciliation_resilience_specification_v1.0.md,
   `UNIQUE(target_ref, input_hash)` 제약 하나로 구현한다(같은 입력이면
   같은 해시 → 같은 행, 두 번째 삽입 시도는 기존 행을 반환).
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -105,9 +106,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX ix_reconciliation_state_tenant_id ON reconciliation_state (tenant_id)"
-    )
+    op.execute("CREATE INDEX ix_reconciliation_state_tenant_id ON reconciliation_state (tenant_id)")
 
 
 def downgrade() -> None:

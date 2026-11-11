@@ -10,6 +10,7 @@ context than the publish call). Therefore the `RequestContext` at
 publish time is explicitly packed into the envelope to carry it
 across the queue.
 """
+
 from __future__ import annotations
 
 import uuid

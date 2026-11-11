@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 78_risk_safety_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

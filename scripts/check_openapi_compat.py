@@ -62,9 +62,7 @@ def _resolve(schema: dict[str, Any], components: dict[str, Any]) -> dict[str, An
     return schema
 
 
-def _content_schema(
-    content: dict[str, Any], components: dict[str, Any]
-) -> dict[str, Any] | None:
+def _content_schema(content: dict[str, Any], components: dict[str, Any]) -> dict[str, Any] | None:
     media = content.get("application/json")
     if media is None:
         return None
@@ -128,9 +126,7 @@ def _leaf_violations(
     return violations
 
 
-def _ref_target(
-    node: Any, components: dict[str, Any]
-) -> tuple[str | None, dict[str, Any]]:
+def _ref_target(node: Any, components: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
     """`$ref` 1단계 해석 + Optional(anyOf) 벗기기를 마친 노드를 반환한다.
 
     반환된 `ref_name`은 `$ref`가 직접 가리킨 컴포넌트 이름(순환 가드용 방문집합

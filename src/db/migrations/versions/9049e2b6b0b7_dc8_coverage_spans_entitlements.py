@@ -40,6 +40,7 @@ downgrade는 확장을 DROP하지 않는다(dbaf260f2917과 동일 정책 — �
 객체가 이미 의존할 수 있는 공유 확장을 리프 하나가 되돌리는 건 안전하지
 않다).
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

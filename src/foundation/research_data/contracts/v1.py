@@ -15,6 +15,7 @@ without known_at is rejected at storage") -- pydantic enforces it as a
 required field, so `pydantic.ValidationError` blocks it before it ever
 reaches the read/write path.
 """
+
 from __future__ import annotations
 
 import enum

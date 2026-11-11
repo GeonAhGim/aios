@@ -22,6 +22,7 @@ ltg_aot_dit_cd:"9", aet_bse:"2", qut_dit_cd:"UNT"}.
 필드 누락 시 조용히 0으로 채우지 않고 FatalExchangeError로 실패한다
 (PM 배정 지침 (2)).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -32,9 +33,7 @@ from src.exchanges.common.http_client import NHHTTPClient
 
 
 class NHAccountMixin:
-    async def get_balance(
-        self: NHHTTPClient, asset: str | None = None
-    ) -> list[AccountBalance]:
+    async def get_balance(self: NHHTTPClient, asset: str | None = None) -> list[AccountBalance]:
         raw = await self._request(
             "POST",
             "/krstock/inquiry/v1/balance",
@@ -69,7 +68,10 @@ class NHAccountMixin:
                 cash = Decimal(str(summary["dca"]))
                 balances.append(
                     AccountBalance(
-                        exchange="nh", asset="KRW", total=cash, available=cash,
+                        exchange="nh",
+                        asset="KRW",
+                        total=cash,
+                        available=cash,
                         used_margin=Decimal("0"),
                     )
                 )

@@ -2,6 +2,7 @@
 
 Spec: 01_data_models_v1.3.md#§1.3
 """
+
 from __future__ import annotations
 
 from datetime import datetime

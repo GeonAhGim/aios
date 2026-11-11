@@ -11,6 +11,7 @@ Interpreting APPROVAL_MODE_RISK_LEVEL, SOLO maps to the "aggressive" tier and is
 cross-referenced against the user's risk_profile (warning on mismatch; save rejected
 without explicit consent).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -64,9 +65,7 @@ class ApprovalSettingsService:
         if mode not in APPROVAL_MODES:
             raise ApprovalSettingsError(f"알 수 없는 승인 모드: {mode}")
         if mode == "DUAL" and not second_approver_contact:
-            raise ApprovalSettingsError(
-                "DUAL 모드는 second_approver_contact가 반드시 필요합니다."
-            )
+            raise ApprovalSettingsError("DUAL 모드는 second_approver_contact가 반드시 필요합니다.")
 
         async with self._pool.acquire() as conn:
             user_risk_profile = await conn.fetchval(
@@ -74,9 +73,7 @@ class ApprovalSettingsService:
             )
             risk_warning = None
             if user_risk_profile is not None:
-                risk_warning = check_mismatch(
-                    user_risk_profile, APPROVAL_MODE_RISK_LEVEL.get(mode)
-                )
+                risk_warning = check_mismatch(user_risk_profile, APPROVAL_MODE_RISK_LEVEL.get(mode))
                 if risk_warning is not None and not risk_warning_acknowledged:
                     raise ApprovalSettingsError(risk_warning)
 

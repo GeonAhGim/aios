@@ -12,6 +12,7 @@ schedule and does not touch `src/services/oms/domain/algo_slicer.py` (the
 DTOs). Every check here is fail-closed (EM-A2): a missing, `None`, or
 out-of-range cap is a rejection, never an "unlimited" interpretation.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

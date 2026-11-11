@@ -45,6 +45,7 @@ Deriving `IndicatorSpec` (L01) from a `CompiledScript`:
   a TA-Lib `IndicatorSpec.lookback`, the incoming `params` dict cannot change
   a script indicator's lookback after the fact.
 """
+
 from __future__ import annotations
 
 import threading

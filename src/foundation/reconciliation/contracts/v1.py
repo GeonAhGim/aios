@@ -4,6 +4,7 @@ Spec: AIOSproject 50_reconciliation_resilience_specification_v1.0.md,
 80_reconciliation_resilience_l3_build_and_operational_specification_v1.0.md §3,
 107_contract_versioning_and_compatibility_standard_v1.0.md.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -12,6 +12,7 @@ pydantic 재선언이라, 다른 bounded context가 실제 domain 타입(`Backte
 아니므로(교차 애그리게잇일 때만 검사됨) 여기서는 그대로 재노출만 한다 —
 객체 identity가 그대로 유지되어 런타임 동작은 바뀌지 않는다.
 """
+
 from __future__ import annotations
 
 from src.foundation.backtest.adapters.list_bars import ListBars

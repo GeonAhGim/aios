@@ -28,6 +28,7 @@ I/O가 필요한 케이스 선택은 여기가 한다).
 또는(그 사이 잔액이 바뀌어 케이스가 달라졌다면) DIGEST_MISMATCH(409, DENIED
 감사)로 거부한다 — 이 함수는 재시도 루프를 두지 않는다(호출자 책임).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

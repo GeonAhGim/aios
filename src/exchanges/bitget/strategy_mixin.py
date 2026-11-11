@@ -11,6 +11,7 @@ Spot의 Plan(Trigger) 주문(trading_mixin.py::place_plan_order)과는 다른
 - GET  /api/v2/trace/strategy/current-order
 - GET  /api/v2/trace/strategy/history-order
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -55,9 +56,7 @@ class BitgetStrategyMixin:
             body["price"] = str(price)
         if duration_seconds is not None:
             body["duration"] = str(duration_seconds)
-        raw = await self._request(
-            "POST", "/api/v2/trace/strategy/place-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/trace/strategy/place-order", body=body)
         return dict(raw["data"])
 
     @require_paper_sandbox
@@ -91,7 +90,5 @@ class BitgetStrategyMixin:
         params: dict[str, Any] = {"limit": str(limit)}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/trace/strategy/history-order", params=params
-        )
+        raw = await self._request("GET", "/api/v2/trace/strategy/history-order", params=params)
         return list(raw["data"])

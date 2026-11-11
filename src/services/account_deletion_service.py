@@ -22,6 +22,7 @@ Actual purge procedures (PII anonymization after grace period expires,
 etc.) fall under scope 19.4 legal review and are out of scope here —
 we only handle the transition to PENDING_DELETION.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -52,9 +53,7 @@ class AccountDeletionService:
 
     async def request_deletion(self, user_id: UUID, password: str) -> DeletionResult:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT password_hash FROM users WHERE user_id = $1", user_id
-            )
+            row = await conn.fetchrow("SELECT password_hash FROM users WHERE user_id = $1", user_id)
             if row is None:
                 raise AccountDeletionError("존재하지 않는 사용자입니다.")
 

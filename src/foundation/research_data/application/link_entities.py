@@ -10,6 +10,7 @@ once an item is mapped, the repository stops returning it from
 `list_unlinked`, so re-running with nothing new to link saves an empty
 batch.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

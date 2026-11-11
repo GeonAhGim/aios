@@ -1,4 +1,5 @@
 """14번대 — 전략 편집기 서비스 팩토리 의존성."""
+
 from __future__ import annotations
 
 import asyncpg

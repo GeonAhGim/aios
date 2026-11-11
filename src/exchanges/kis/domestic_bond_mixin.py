@@ -12,6 +12,7 @@ api/examples_llm/domestic_bond, 2026-09-02 WebFetch 확인) 그대로:
 - POST /uapi/domestic-bond/v1/trading/sell (TTTC0958U)
 - GET  /uapi/domestic-bond/v1/trading/inquire-balance (CTSC8407R)
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

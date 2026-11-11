@@ -13,6 +13,7 @@ Spec: 기능설계문서_v1.20.md#FD-15.3, 9.4(MDD/VaR 등)
 구현·테스트 가능하다. 13.8의 sharpe_ratio와 동일 원칙 — nullable Draft
 컬럼으로 신설하고, 백테스트 엔진이 생기면 그때 채운다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

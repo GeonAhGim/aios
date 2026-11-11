@@ -4,6 +4,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§4.1 Membership,
 §9 PLT-29. Session invalidation side-effect delegates to PLT-24 `logout_all`
 (services/auth/logout.py) — never UPDATEs `auth_session` directly.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -49,8 +50,7 @@ async def suspend_membership(
         )
         if membership is None:
             raise SuspendTargetNotFoundError(
-                f"tenant_id={context.tenant_id} subject_id={subject_id}: ACTIVE 멤버십이 "
-                "없습니다."
+                f"tenant_id={context.tenant_id} subject_id={subject_id}: ACTIVE 멤버십이 없습니다."
             )
         if not is_membership_transition_allowed(
             MembershipState.ACTIVE, MembershipState.SUSPENDED, actor_role=actor_role

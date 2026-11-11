@@ -18,6 +18,7 @@
 
 사용: `python scripts/kis_tr_coverage.py`(저장소 루트에서). 종료코드 0=통과, 1=하락/오류.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -64,58 +65,82 @@ class LiveDemoTr:
 LIVE_DEMO_MATRIX: dict[str, tuple[LiveDemoTr, ...]] = {
     "domestic_stock": (
         LiveDemoTr(
-            "TTTC0012U/TTTC0011U", "place(매수/매도)", "미실행(계좌없음)",
+            "TTTC0012U/TTTC0011U",
+            "place(매수/매도)",
+            "미실행(계좌없음)",
             "test_domestic_stock_place_get_cancel_roundtrip",
         ),
         LiveDemoTr(
-            "TTTC0013U", "cancel", "미실행(계좌없음)",
+            "TTTC0013U",
+            "cancel",
+            "미실행(계좌없음)",
             "test_domestic_stock_place_get_cancel_roundtrip",
         ),
         LiveDemoTr(
-            "TTTC0081R", "get(체결조회)", "미실행(계좌없음)",
+            "TTTC0081R",
+            "get(체결조회)",
+            "미실행(계좌없음)",
             "test_domestic_stock_place_get_cancel_roundtrip",
         ),
     ),
     "overseas_stock": (
         LiveDemoTr(
-            "TTTT1002U/TTTT1006U", "place(매수/매도)", "미실행(계좌없음)",
+            "TTTT1002U/TTTT1006U",
+            "place(매수/매도)",
+            "미실행(계좌없음)",
             "test_overseas_stock_place_cancel_balance_roundtrip",
         ),
         LiveDemoTr(
-            "TTTT1004U", "cancel", "미실행(계좌없음)",
+            "TTTT1004U",
+            "cancel",
+            "미실행(계좌없음)",
             "test_overseas_stock_place_cancel_balance_roundtrip",
         ),
         LiveDemoTr(
-            "TTTS3012R", "balance", "미실행(계좌없음)",
+            "TTTS3012R",
+            "balance",
+            "미실행(계좌없음)",
             "test_overseas_stock_place_cancel_balance_roundtrip",
         ),
     ),
     "domestic_futureoption": (
         LiveDemoTr(
-            "TTTO1101U", "place", "미실행(계좌없음)",
+            "TTTO1101U",
+            "place",
+            "미실행(계좌없음)",
             "test_domestic_futureoption_place_cancel_balance_roundtrip"
             "(월물 심볼 KIS_LIVE_DEMO_KR_FUTURES_SYMBOL 별도 필요)",
         ),
         LiveDemoTr(
-            "TTTO1103U", "cancel", "미실행(계좌없음)",
+            "TTTO1103U",
+            "cancel",
+            "미실행(계좌없음)",
             "test_domestic_futureoption_place_cancel_balance_roundtrip",
         ),
         LiveDemoTr(
-            "CTFO6118R", "balance", "미실행(계좌없음)",
+            "CTFO6118R",
+            "balance",
+            "미실행(계좌없음)",
             "test_domestic_futureoption_place_cancel_balance_roundtrip",
         ),
     ),
     "overseas_futureoption": (
         LiveDemoTr(
-            "OTFM3001U", "place", "미지원(모의투자, 구조적 증거)",
+            "OTFM3001U",
+            "place",
+            "미지원(모의투자, 구조적 증거)",
             "O-접두 — adapter.py _PAPER_SWAP_PREFIXES(T/J/C)에 없어 V-치환 불가",
         ),
         LiveDemoTr(
-            "OTFM3003U", "cancel", "미지원(모의투자, 구조적 증거)",
+            "OTFM3003U",
+            "cancel",
+            "미지원(모의투자, 구조적 증거)",
             "O-접두 — 위와 동일",
         ),
         LiveDemoTr(
-            "OTFM1412R", "balance", "미지원(모의투자, 구조적 증거)",
+            "OTFM1412R",
+            "balance",
+            "미지원(모의투자, 구조적 증거)",
             "O-접두 — 위와 동일",
         ),
     ),

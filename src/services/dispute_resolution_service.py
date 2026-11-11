@@ -16,6 +16,7 @@ accounting rationale).
 Monetary/trust operator decisions are recorded in audit_log per §8.10
 (reusing FD-7.2 record_audit_log).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -69,8 +70,12 @@ class DisputeResolutionService:
 
     @property
     def _ports(self) -> dict[str, Any]:
-        return {"journal": self._journal, "balances": self._balances,
-                "audit": self._audit, "clock": _utcnow}
+        return {
+            "journal": self._journal,
+            "balances": self._balances,
+            "audit": self._audit,
+            "clock": _utcnow,
+        }
 
     async def list_disputes(self, status: str | None = None) -> list[dict[str, Any]]:
         return await list_disputes(self._pool, status)
@@ -100,7 +105,10 @@ class DisputeResolutionService:
                 "UPDATE disputes SET status = 'RESOLVED', resolution_decision = $2, "
                 "resolution_reason = $3, resolved_by = $4, resolved_at = now() "
                 "WHERE id = $1 AND status = 'OPEN' RETURNING resolved_at",
-                dispute_id, decision, reason, admin_user_id,
+                dispute_id,
+                decision,
+                reason,
+                admin_user_id,
             )
             if row is None:
                 raise DisputeResolutionError("이미 다른 관리자가 처리했습니다(동시 처리 충돌).")
@@ -126,20 +134,31 @@ class DisputeResolutionService:
                 price_paid = purchase["price_paid"]
                 if price_paid is not None:
                     refund_amount = await refund_with_clawback(
-                        conn, purchase_id=detail.purchase_id, buyer_user_id=detail.buyer_user_id,
-                        seller_user_id=detail.seller_user_id, price_paid=price_paid,
+                        conn,
+                        purchase_id=detail.purchase_id,
+                        buyer_user_id=detail.buyer_user_id,
+                        seller_user_id=detail.seller_user_id,
+                        price_paid=price_paid,
                         commission_rate=purchase["platform_commission_rate"],
-                        admin_id=admin_user_id, ports=self._ports,
+                        admin_id=admin_user_id,
+                        ports=self._ports,
                     )
 
             decision_data = {
-                "dispute_id": dispute_id, "decision": decision, "reason": reason,
-                "listing_id": detail.listing_id, "new_listing_status": new_listing_status,
+                "dispute_id": dispute_id,
+                "decision": decision,
+                "reason": reason,
+                "listing_id": detail.listing_id,
+                "new_listing_status": new_listing_status,
                 "refund_amount": str(refund_amount) if refund_amount is not None else None,
             }
             await record_audit_log(
-                conn, actor_agent=str(admin_user_id), action_type="dispute.resolved",
-                decision_data=decision_data, target_type="dispute", target_id=str(dispute_id),
+                conn,
+                actor_agent=str(admin_user_id),
+                action_type="dispute.resolved",
+                decision_data=decision_data,
+                target_type="dispute",
+                target_id=str(dispute_id),
             )
 
         return DisputeResolutionResult(

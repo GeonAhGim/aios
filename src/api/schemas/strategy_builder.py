@@ -7,6 +7,7 @@ conditions combined with AND/OR logic (see services/condition_compiler.py,
 services/preview_service.py — an actual contract completed this session and
 tested). This module follows the real service signatures, not the Draft.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

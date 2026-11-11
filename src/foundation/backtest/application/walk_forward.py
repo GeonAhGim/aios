@@ -20,6 +20,7 @@ history carried across splits) -- the current `run_backtest` recomputes indicato
 from bar 0 of whatever list it's given, so windows can't share indicator warmup
 without leaking future bars into an earlier split's replay.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -87,8 +88,8 @@ def run_walk_forward(
     oos_curves: list[list[EquityPoint]] = []
     oos_fills: list[SimulatedFill] = []
     for split in splits:
-        train_bars = bars[split.train.start:split.train.stop]
-        test_bars = bars[split.test.start:split.test.stop]
+        train_bars = bars[split.train.start : split.train.stop]
+        test_bars = bars[split.test.start : split.test.stop]
 
         best_key = (False, _NEG_INF)
         best_params: dict[str, int] | None = None
@@ -111,17 +112,23 @@ def run_walk_forward(
         oos_result = run_backtest(
             best_config, fsm_config, test_bars, indicator_service=indicator_service
         )
-        windows.append(WindowOutcome(
-            split=split, selected_params=best_params,
-            is_metrics=best_is_metrics, oos_metrics=oos_result.metrics,
-        ))
+        windows.append(
+            WindowOutcome(
+                split=split,
+                selected_params=best_params,
+                is_metrics=best_is_metrics,
+                oos_metrics=oos_result.metrics,
+            )
+        )
         oos_curves.append(oos_result.equity_curve)
         oos_fills.extend(oos_result.fills)
 
     stitched = _stitch(oos_curves, base_config.initial_equity)
     oos_stitched_metrics = compute_metrics(
-        equity_curve=stitched, fills=oos_fills,
-        initial_equity=base_config.initial_equity, periods_per_year=base_config.periods_per_year,
+        equity_curve=stitched,
+        fills=oos_fills,
+        initial_equity=base_config.initial_equity,
+        periods_per_year=base_config.periods_per_year,
     )
     return WalkForwardReport(windows=tuple(windows), oos_stitched_metrics=oos_stitched_metrics)
 
@@ -139,10 +146,14 @@ def _stitch(curves: list[list[EquityPoint]], initial_equity: Decimal) -> list[Eq
         start_equity = curve[0].equity
         scale = Decimal("1") if start_equity == 0 else running_equity / start_equity
         for point in curve:
-            stitched.append(EquityPoint(
-                bar_index=next_bar_index, timestamp=point.timestamp,
-                equity=point.equity * scale, drawdown_pct=Decimal("0"),
-            ))
+            stitched.append(
+                EquityPoint(
+                    bar_index=next_bar_index,
+                    timestamp=point.timestamp,
+                    equity=point.equity * scale,
+                    drawdown_pct=Decimal("0"),
+                )
+            )
             next_bar_index += 1
         running_equity = curve[-1].equity * scale
     peak = stitched[0].equity
@@ -150,7 +161,9 @@ def _stitch(curves: list[list[EquityPoint]], initial_equity: Decimal) -> list[Eq
         peak = max(peak, point.equity)
         drawdown = Decimal("0") if peak <= 0 else (peak - point.equity) / peak * 100
         stitched[i] = EquityPoint(
-            bar_index=point.bar_index, timestamp=point.timestamp,
-            equity=point.equity, drawdown_pct=drawdown,
+            bar_index=point.bar_index,
+            timestamp=point.timestamp,
+            equity=point.equity,
+            drawdown_pct=drawdown,
         )
     return stitched

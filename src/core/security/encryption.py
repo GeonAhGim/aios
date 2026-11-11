@@ -14,6 +14,7 @@ The original `encrypt(plaintext, key: str)` / `decrypt(token, key: str)` were re
 `legacy_encrypt` / `legacy_decrypt` (PLT-31) — persisted ciphertext still uses the format
 produced by those two functions, so never change their signatures.
 """
+
 from __future__ import annotations
 
 import base64

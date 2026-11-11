@@ -11,6 +11,7 @@ pyotp.TOTP.verify()는 valid_window(기본 0) 안에서만 검증할 뿐, 이미
 반복 재사용될 수 있었다. 사용자별 마지막으로 성공한 TOTP 타임코드를
 저장해두고, 이미 사용한 타임코드와 같으면 같은 구간 안이라도 거부한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

@@ -17,6 +17,7 @@ get_algo_progress.py) reads the in-memory `AlgoRunPlan` `AlgoScheduler`
 (tick_algo.py) holds for the parent_id, same "no durable algo_runs table"
 scope as `start_algo.py`.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

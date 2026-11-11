@@ -15,6 +15,7 @@
 `TEST_DATABASE_URL`이 없으면 measured=0으로 종료하지 않고 명시적으로 실패(exit 1) —
 "DB 없이 조용히 스킵"은 이 벤치의 목적(실DB 경로 측정)과 모순되기 때문이다.
 """
+
 from __future__ import annotations
 
 import argparse

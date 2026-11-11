@@ -22,6 +22,7 @@ bars + source + as_of always yield the identical hash, so a second save
 under that same hash is always a duplicate of the first, never a
 legitimate distinct version -- there is nothing to reconcile).
 """
+
 from __future__ import annotations
 
 import json
@@ -77,9 +78,7 @@ class PostgresSnapshotRepository:
                 json.dumps([_bar_to_json(bar) for bar in bars]),
             )
 
-    async def load(
-        self, snapshot_hash: str
-    ) -> tuple[BarSnapshotRef, list[Candle]] | None:
+    async def load(self, snapshot_hash: str) -> tuple[BarSnapshotRef, list[Candle]] | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(_SELECT_SQL, snapshot_hash)
         if row is None:

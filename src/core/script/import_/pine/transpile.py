@@ -34,6 +34,7 @@ Lookahead (DSL-5) is not re-verified here: the Pine parser already rejects negat
 postfix indices and `request.*`/`security`-style namespaces outright, so any `Program` this
 module can produce could not constitute a `SCRIPT_LOOKAHEAD` violation in the first place.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -237,8 +238,7 @@ def _transpile_expr(expr: pine_ast.Expr) -> Expr:
         return _transpile_call(expr)
     if isinstance(expr, pine_ast.StringLiteral):
         raise PineTranspileError(
-            "AIOS Script 문법에는 문자열 리터럴 표현식이 없어(DSL-1 decision) 변환할 수 "
-            "없습니다"
+            "AIOS Script 문법에는 문자열 리터럴 표현식이 없어(DSL-1 decision) 변환할 수 없습니다"
         )
     if isinstance(expr, pine_ast.BoolLiteral):
         raise PineTranspileError(

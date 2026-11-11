@@ -7,6 +7,7 @@ withdrawal flow and cannot be set directly by operators — do not
 create a forced-withdrawal path independent of the user's own consent.
 Operators can only toggle between ACTIVE and SUSPENDED.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -56,8 +57,7 @@ class UserAdminService:
                 )
             else:
                 rows = await conn.fetch(
-                    "SELECT user_id, email, status, created_at FROM users "
-                    "ORDER BY created_at DESC"
+                    "SELECT user_id, email, status, created_at FROM users ORDER BY created_at DESC"
                 )
         return [UserSummary(**dict(row)) for row in rows]
 
@@ -81,7 +81,9 @@ class UserAdminService:
             # actor_agent is the operator who executed this change, not the target user themselves —
             # same principle as dispute_resolution_service.resolve().
             await record_audit_log(
-                conn, actor_agent=str(admin_user_id), action_type="user.status_changed",
+                conn,
+                actor_agent=str(admin_user_id),
+                action_type="user.status_changed",
                 user_id=user_id,
                 decision_data={"new_status": new_status, "changed_by": str(admin_user_id)},
             )

@@ -12,6 +12,7 @@ Lookup failures propagate as exceptions — replacing them with an empty
 list would be indistinguishable from "no data" (same principle as
 positions `ProviderBalanceSource`).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

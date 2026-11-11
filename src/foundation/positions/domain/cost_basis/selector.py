@@ -21,6 +21,7 @@ prevent misclassification from silently choosing the wrong cost-basis method.
 Pure domain (0 I/O imports) — returns a freshly created [[fifo]] or [[weighted]]
 instance.
 """
+
 from __future__ import annotations
 
 from src.data.models.base import AssetClass

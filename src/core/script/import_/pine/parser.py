@@ -20,6 +20,7 @@ allowed); bare function calls other than `plot` (`indicator()`/`strategy()` decl
 — out of scope, decision); user function definitions (`f(x) => ...`); `if`/`for`/`while`/`switch`
 blocks; `:=`; `var`/`varip` declarations; the ternary operator `?:`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -252,9 +253,7 @@ class _Parser:
         strategy allows only entry/exit. A non-call `ns.ident` value reference is rejected."""
         ns_tok = self._advance()
         self._advance()  # "."
-        ident_tok = self._expect(
-            TokenKind.IDENT, None, "네임스페이스 뒤에는 식별자가 필요합니다"
-        )
+        ident_tok = self._expect(TokenKind.IDENT, None, "네임스페이스 뒤에는 식별자가 필요합니다")
         if not self._check(TokenKind.DELIM, "("):
             raise PineSyntaxError(
                 f"{ns_tok.value}.{ident_tok.value}처럼 호출 없이 네임스페이스 값을"
@@ -265,8 +264,7 @@ class _Parser:
         if ns_tok.value == _STRATEGY_NAMESPACE:
             if ident_tok.value not in _STRATEGY_ALLOWED_CALLS:
                 raise PineSyntaxError(
-                    f"strategy.{ident_tok.value}()는 지원하지 않습니다"
-                    "(strategy.entry/exit만 허용)",
+                    f"strategy.{ident_tok.value}()는 지원하지 않습니다(strategy.entry/exit만 허용)",
                     ns_tok.line,
                     ns_tok.col,
                 )

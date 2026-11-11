@@ -20,6 +20,7 @@ None)은 전부 불일치로 본다 — fail-closed(I-01).
 taxonomy는 §3.4 `INTEGRITY_RISK_FINGERPRINT_MISMATCH`를 재사용한다(신설
 금지, task-1532 decision).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -75,9 +76,9 @@ def _intent_mismatches(order: Order, inputs_snapshot: Mapping[str, Any]) -> list
         mismatches.append("side")
     recorded_quantity = inputs_snapshot.get("quantity")
     try:
-        quantity_ok = recorded_quantity is not None and Decimal(
-            str(recorded_quantity)
-        ) == order.quantity
+        quantity_ok = (
+            recorded_quantity is not None and Decimal(str(recorded_quantity)) == order.quantity
+        )
     except InvalidOperation:
         quantity_ok = False
     if not quantity_ok:

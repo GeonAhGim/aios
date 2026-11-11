@@ -10,6 +10,7 @@ Error`. `fenced_submit.submit_with_fence`가 claim(orders INSERT) *전에*
 `DecisionReader`는 `PostgresDecisionRepository.get_for_tenant`와 같은
 시그니처의 구조적 Protocol이고 조립부가 주입한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

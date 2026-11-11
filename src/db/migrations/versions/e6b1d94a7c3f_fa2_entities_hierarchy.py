@@ -24,6 +24,7 @@ Portfolio/SubAccount는 tenant_id 필드가 없음) — 하위 테이블의 교�
 참조한다 — nullable(계약과 동일, "펀드 생성 시점에 mandate가 아직 없을
 수 있음").
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

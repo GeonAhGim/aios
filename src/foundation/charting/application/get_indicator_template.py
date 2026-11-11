@@ -2,6 +2,7 @@
 another tenant are 404
 (`ChartIndicatorTemplateNotFoundError`/`CrossTenantChartIndicatorTemplateAccessError`,
 both map to RESOURCE_NOT_FOUND)."""
+
 from __future__ import annotations
 
 from uuid import UUID

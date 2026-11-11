@@ -11,6 +11,7 @@ Spec: 04_db_schema_v1.7.md (Device Tokens, FD-21.1). 작업트리 3.16 —
 같은 토큰으로 재등록해도 INSERT 자체가 막히지 않도록(v1.3 재점검
 라운드 정정, 04번 원문 그대로).
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -39,9 +40,7 @@ def upgrade() -> None:
         "CREATE UNIQUE INDEX idx_device_tokens_active_unique "
         "ON device_tokens(user_id, device_token) WHERE is_active"
     )
-    op.execute(
-        "CREATE INDEX idx_device_tokens_user ON device_tokens(user_id) WHERE is_active"
-    )
+    op.execute("CREATE INDEX idx_device_tokens_user ON device_tokens(user_id) WHERE is_active")
 
 
 def downgrade() -> None:

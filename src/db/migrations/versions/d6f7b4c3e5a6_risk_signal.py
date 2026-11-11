@@ -47,6 +47,7 @@ No RLS policy -- sibling tables in this schema (`risk_limit`,
 `postgres_limit_repository.list_effective`); `list_open(tenant_id)`
 follows the same convention.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

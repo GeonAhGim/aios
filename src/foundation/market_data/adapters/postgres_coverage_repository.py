@@ -23,6 +23,7 @@ overlapping spans is rejected by the DB EXCLUDE constraint(DC-8
 migration); merging before insert is the caller's responsibility
 (upper application layer).
 """
+
 from __future__ import annotations
 
 import asyncpg

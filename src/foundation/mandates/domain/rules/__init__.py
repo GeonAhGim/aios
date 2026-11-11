@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 75_portfolio_mandate_l3_build_and_operational_specification_v1.0.md §2/§3.
 """
+
 from __future__ import annotations
 
 import hashlib

@@ -35,6 +35,7 @@ actually executes an UPDATE against itself — so together with this leaf,
 the adapter is also changed to `DO NOTHING` plus a re-fetch on failure,
 so that no UPDATE is ever issued (same commit, same leaf).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

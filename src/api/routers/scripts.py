@@ -20,6 +20,7 @@ log fields (tenant_id, script_hash) per §5. Registry version uses IND-1
 Performance (DoD "compile ≤300ms"): `elapsed_ms` is included in the response so
 clients and tests can measure it empirically — this router does not assert latency.
 """
+
 from __future__ import annotations
 
 import logging

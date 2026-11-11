@@ -43,6 +43,7 @@ submit-time scope is assigned later, per child, when
 only place scope is meaningful (spec #3: "child orders pass through
 submit_order with no exception").
 """
+
 from __future__ import annotations
 
 import math
@@ -152,9 +153,7 @@ def plan_twap_schedule(
     "unlimited volume" for the missing tail).
     """
     if parent.algo.kind != AlgoKind.TWAP:
-        raise AlgoConstraintError(
-            f"twap.py only plans AlgoKind.TWAP, got {parent.algo.kind!r}."
-        )
+        raise AlgoConstraintError(f"twap.py only plans AlgoKind.TWAP, got {parent.algo.kind!r}.")
     if parent.status in TERMINAL_ORDER_STATUSES:
         raise ParentTerminalError(
             f"parent {parent.parent_id} is terminal ({parent.status!r}); "
@@ -170,9 +169,7 @@ def plan_twap_schedule(
 
     algo_request = _to_algo_request(parent, slice_count=slice_count)
     rng = random.Random(parent.algo.seed)  # noqa: S311 -- reproducible jitter, not crypto (EM-A3)
-    slice_plans = plan_slices(
-        algo_request, now=parent.algo.start, volume_profile=None, rng=rng
-    )
+    slice_plans = plan_slices(algo_request, now=parent.algo.start, volume_profile=None, rng=rng)
 
     for prev, nxt in zip(slice_plans, slice_plans[1:]):  # noqa: B905 -- pairwise, lengths differ by design
         check_slice_interval(prev.scheduled_at, nxt.scheduled_at, parent.algo.slice_interval_sec)

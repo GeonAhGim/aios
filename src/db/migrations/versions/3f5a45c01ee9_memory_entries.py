@@ -10,6 +10,7 @@ Spec: 04_db_schema_v1.6.md (Memory Entries, 4.6-A)
 테이블을 FK로 참조하므로 실제 실행 순서상 먼저 적용한다(10번 문서 3.5 각주
 "3.4, 3.9 이후 — memory_entries 먼저 필요"에 따름).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

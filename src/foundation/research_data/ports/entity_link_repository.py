@@ -7,6 +7,7 @@ Pure interface only -- RD-4 owns the migration and Postgres adapter. This
 leaf never touches a database; tests exercise it through an in-memory
 fake.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

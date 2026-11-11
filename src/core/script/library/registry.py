@@ -10,6 +10,7 @@ registered, its body is fixed. Re-registering the same key with a
 different body is rejected and the stored body is left untouched
 (fail-closed) — only a byte-identical re-register is a no-op.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -41,9 +42,7 @@ class ScriptLibraryVersionConflictError(Exception):
     """Raised when `name@version` is already registered with a different body."""
 
     def __init__(self, ref: LibraryRef) -> None:
-        super().__init__(
-            f"library version conflict for {ref.key()}: registered body hash differs"
-        )
+        super().__init__(f"library version conflict for {ref.key()}: registered body hash differs")
         self.ref = ref
 
 

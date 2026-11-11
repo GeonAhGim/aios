@@ -7,6 +7,7 @@ These are caller-selected rules, not exchange-specific expiry conventions.
 Exchange-specific expiry conventions are unverified; callers supply expiries.
 Prices must use the same quote/currency units across the contract chain.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -37,7 +38,9 @@ class CloseBar:
 
 
 def roll_date(
-    expiry: datetime, calendar: VenueCalendar, offset_trading_days: int = 5,
+    expiry: datetime,
+    calendar: VenueCalendar,
+    offset_trading_days: int = 5,
 ) -> date:
     """Count actual sessions backwards, with a bounded calendar search."""
     if expiry.tzinfo is None or expiry.utcoffset() is None:
@@ -69,14 +72,20 @@ def _contracts(contracts: Sequence[Instrument], calendar: VenueCalendar) -> None
         if previous is not None and contract.expiry <= previous:
             raise RollError("Expiries must be strictly increasing")
         multiplier = contract.contract_multiplier
-        if (contract.underlying_id is None or multiplier is None
-                or not multiplier.is_finite() or multiplier <= 0):
+        if (
+            contract.underlying_id is None
+            or multiplier is None
+            or not multiplier.is_finite()
+            or multiplier <= 0
+        ):
             raise RollError("Underlying and positive finite multiplier are required")
-        if (contract.underlying_id != first.underlying_id
-                or multiplier != first.contract_multiplier
-                or contract.quote != first.quote
-                or contract.currency != first.currency
-                or contract.calendar_id != calendar.venue):
+        if (
+            contract.underlying_id != first.underlying_id
+            or multiplier != first.contract_multiplier
+            or contract.quote != first.quote
+            or contract.currency != first.currency
+            or contract.calendar_id != calendar.venue
+        ):
             raise RollError("Contracts must share underlying, multiplier, units, and calendar")
         if contract.instrument_id in ids:
             raise RollError("Contract identifiers must be unique")
@@ -94,10 +103,10 @@ def continuous_futures(
 ) -> tuple[CloseBar, ...]:
     """Build daily closes on explicit ascending session dates, without filling gaps.
 
-Only rolls within the requested history are applied. The final contract is
-usable through its expiry trading day; later dates require another contract.
-Decimal arithmetic uses a fixed 38-digit context, independent of the caller.
-"""
+    Only rolls within the requested history are applied. The final contract is
+    usable through its expiry trading day; later dates require another contract.
+    Decimal arithmetic uses a fixed 38-digit context, independent of the caller.
+    """
     _contracts(contracts, calendar)
     if not isinstance(adjustment, Adjustment):
         raise RollError("Unknown adjustment method")
@@ -133,8 +142,10 @@ Decimal arithmetic uses a fixed 38-digit context, independent of the caller.
                             factor, shift = far / near, Decimal(0)
                         else:
                             factor, shift = Decimal(1), far - near
-                        result = [CloseBar(b.day, b.close * factor + shift, b.instrument_id)
-                                  for b in result]
+                        result = [
+                            CloseBar(b.day, b.close * factor + shift, b.instrument_id)
+                            for b in result
+                        ]
                     active += 1
                 result.append(CloseBar(day, price(active, day), contracts[active].instrument_id))
     except DecimalException as exc:

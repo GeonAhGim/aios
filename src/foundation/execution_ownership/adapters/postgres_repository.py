@@ -20,6 +20,7 @@ intentionally not filtered out — the §5.1 SQL is used as-is, and the
 contract is that the caller (EO-03 `list_candidates`) passes only ids read
 from `strategy_executions`.
 """
+
 from __future__ import annotations
 
 import asyncpg

@@ -25,6 +25,7 @@ RD-1 sec.8(c) notes there is no common rate limit across this source group
 (`429`/`Retry-After`). `fetch_rss_feed` surfaces that as `RssRateLimited`
 rather than guessing a shared number.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -280,9 +281,7 @@ async def fetch_rss_feed(
             retry_after_seconds=_retry_after_seconds(response.headers),
         )
     if not 200 <= response.status_code < 300:
-        raise RssApiError(
-            f"RSS feed {registration.feed_id!r} returned HTTP {response.status_code}"
-        )
+        raise RssApiError(f"RSS feed {registration.feed_id!r} returned HTTP {response.status_code}")
     entries = parse_rss_feed(response.text)
     return [
         build_research_item_from_entry(e, feed_id=registration.feed_id, collected_at=collected_at)

@@ -7,6 +7,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.3 (C), §9 LC-2.
 계산한다 — 이렇게 정산액을 반올림 결과의 나머지로 정의해야 두 값의 합이
 분배 후에도 항상 `price`와 정확히 일치한다(잔차 없음).
 """
+
 from __future__ import annotations
 
 from decimal import ROUND_HALF_EVEN, Decimal

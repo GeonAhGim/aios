@@ -10,6 +10,7 @@ responsibility of FND-08 `domain.rules.classify_item`; this leaf only
 produces the inputs (single responsibility). Pure functions only — no
 direct I/O or clock calls.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

@@ -15,6 +15,7 @@ ws_session.py::WsSession`으로 끌어올렸다(재구현 아님). 이 모듈에
 - subscribe/login 실패·error 이벤트 → `WsAckError` 표면화(이전엔 경고 로그 후 계속).
 - 로그에 raw payload를 남기지 않는다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,8 +60,13 @@ async def _send_periodic_pings(
     """task-105 호환 — pong 감시 없는 순수 ping 루프(`monitor=None`).
     `WsSession`은 monitor를 붙인 `send_periodic_pings`를 직접 쓴다."""
     await send_periodic_pings(
-        ws, HeartbeatSpec(interval_sec=interval, ping_message=BITGET_HEARTBEAT.ping_message,
-                          pong_message=BITGET_HEARTBEAT.pong_message), ping_sleep_fn,
+        ws,
+        HeartbeatSpec(
+            interval_sec=interval,
+            ping_message=BITGET_HEARTBEAT.ping_message,
+            pong_message=BITGET_HEARTBEAT.pong_message,
+        ),
+        ping_sleep_fn,
     )
 
 

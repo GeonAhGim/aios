@@ -18,6 +18,7 @@ verified):
   single integer per message, this uses the approximation of comparing
   only the final update ID (`u`) (strict `U` validation is out of scope).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

@@ -16,6 +16,7 @@ conservative fallback" discipline (`kis/rate_profile.py`'s
 reference table for Kiwoom to group by, so this profile has a single bucket
 per account type rather than per (account_type, tr_group).
 """
+
 from __future__ import annotations
 
 import asyncio

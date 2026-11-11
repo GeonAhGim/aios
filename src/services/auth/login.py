@@ -12,6 +12,7 @@ reuses it unchanged.
 Pre-PLT-26 (tenancy) scope — only personal tenants exist, so `tenant_id ==
 user_id` is fixed (same convention as session_repository integration tests).
 """
+
 from __future__ import annotations
 
 import hashlib

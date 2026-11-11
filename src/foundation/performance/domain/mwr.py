@@ -12,6 +12,7 @@ value of this stream zero is the IRR. Time is normalised to [0, 1]
 (period length = 1); annualisation is the caller's responsibility
 (risk_metrics.py consumer).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

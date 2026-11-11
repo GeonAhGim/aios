@@ -14,6 +14,7 @@ that constraint with plain re-exports would either force copies out of
 contracts file. This module carries no version/schema guarantee, only
 import-path indirection.
 """
+
 from __future__ import annotations
 
 from src.foundation.research_data.adapters.dsl_query import research_builtins

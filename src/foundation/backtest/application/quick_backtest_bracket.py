@@ -4,6 +4,7 @@
 trigger checking and fill generation here so the main loop stays readable —
 same fill-model contract as `quick_backtest_fill.py` (BT-2~8), no reimplementation.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ class BracketMetadata:
     All prices are limit/stop prices for the respective exit leg.
     trail_pct is a trailing stop percentage (e.g., Decimal("0.05") = 5% trail).
     """
+
     requested_qty: Decimal  # Requested exit quantity (before partial-fill adjustment)
     profit_price: Decimal | None  # Take-profit limit price (sell at >= this for BUY position)
     loss_price: Decimal | None  # Stop-loss limit price (sell at <= this for BUY position)
@@ -35,6 +37,7 @@ class BracketMetadata:
 @dataclass(slots=True)
 class BracketExitState:
     """Mutable state for tracking bracket exit resolution (used internally in quick_backtest)."""
+
     requested_qty: Decimal
     filled_qty: Decimal
     profit_price: Decimal | None

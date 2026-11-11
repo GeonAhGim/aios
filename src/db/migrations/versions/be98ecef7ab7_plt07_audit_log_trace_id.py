@@ -16,6 +16,7 @@ NULL을 허용한다: 기존 행은 trace_id가 없던 시절에 쓰였고, back
 소급 적용됐다 — `ALTER TABLE ... ADD COLUMN`은 트리거·REVOKE에 영향을 주지
 않는다(트리거는 컬럼이 아니라 UPDATE/DELETE 연산 자체에 걸림).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

@@ -32,6 +32,7 @@ REJECT). 한 문장으로 합치면 Postgres가 문장 시작 시점의 스냅�
 취급한다(활동이 없던 신규 사용자에게 0이 아닌 다른 값을 기대할 근거가
 없으므로 이건 드리프트가 아니다).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -116,9 +117,7 @@ async def get_balance(
     available = by_code[available_code] if by_code[available_code] is not None else Decimal("0")
     held = by_code[held_code] if by_code[held_code] is not None else Decimal("0")
     pending_payout = (
-        by_code[pending_payout_code]
-        if by_code[pending_payout_code] is not None
-        else Decimal("0")
+        by_code[pending_payout_code] if by_code[pending_payout_code] is not None else Decimal("0")
     )
 
     if legacy_balance != available:

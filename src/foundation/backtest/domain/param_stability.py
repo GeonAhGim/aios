@@ -10,6 +10,7 @@ should keep performing reasonably well on nearby grid points. `stability_score` 
 the best point, averages the metric over its immediate axis-wise neighbors, and flags
 `isolated=True` when that neighbor average drops far below the best point's own value.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

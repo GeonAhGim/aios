@@ -18,6 +18,7 @@ comparison here, so a later revision's `known_at` is validated by treating
 the earlier revision as the "item" and the later revision's `known_at` as
 the `as_of_time` probe.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict

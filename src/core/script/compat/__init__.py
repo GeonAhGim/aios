@@ -3,6 +3,7 @@ legacy cond-v2 conditionals to DSL-1 AST. New package, `src/core/**` SCAFFOLD zo
 (no I/O). `src/core/strategy/**` (FROZEN_PAPER_ONLY) is read-only — do not modify.
 Consumers: DSL-11 `script_facade.py`, artifact `compat_map` field.
 """
+
 from __future__ import annotations
 
 from src.core.script.compat.cond_v2_bridge import (

@@ -9,6 +9,7 @@ the cursor is the last `instrument_id` of the previous page, and the sort
 keys of that row are retrieved via a subquery for `>` comparison (no OFFSET;
 no duplicates or gaps even if inserts occur).
 """
+
 from __future__ import annotations
 
 from uuid import UUID

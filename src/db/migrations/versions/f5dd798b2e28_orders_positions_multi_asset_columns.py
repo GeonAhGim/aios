@@ -10,6 +10,7 @@ Spec: 04_db_schema_v1.7.md (다자산군 확장, ADR-2026-08-28)
 마이그레이션으로 컬럼을 추가한다(10번 문서 3.20 리프 — 이력은 항상
 순방향으로만 추가하는 원칙). 전부 nullable — 기존 크립토 행은 그대로 NULL.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -34,8 +35,7 @@ def upgrade() -> None:
     op.execute(f"ALTER TABLE orders {_NEW_COLUMNS_SQL}")
     op.execute(f"ALTER TABLE positions {_NEW_COLUMNS_SQL}")
     op.execute(
-        "CREATE INDEX idx_orders_asset_class ON orders(asset_class) "
-        "WHERE asset_class IS NOT NULL"
+        "CREATE INDEX idx_orders_asset_class ON orders(asset_class) WHERE asset_class IS NOT NULL"
     )
 
 

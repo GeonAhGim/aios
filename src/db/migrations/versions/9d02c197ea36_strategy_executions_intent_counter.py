@@ -13,6 +13,7 @@ timestamp. Defaults to 0 for existing rows; incrementing it when a new
 intent begins (FSM transition into a PENDING state) is a follow-up leaf --
 this migration only adds the column, `Executor` only reads it.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

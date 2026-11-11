@@ -21,6 +21,7 @@ task-1002 note에 기록했다. raw HTTPException 제거(이 리프의 핵심 Do
 이 보류와 무관하게 완료했다 — 도메인 예외가 동일한 상태코드/error_code로
 매핑되므로 에러 응답 모양은 이번 변경 전후로 동일하다.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, status

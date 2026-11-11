@@ -10,6 +10,7 @@ Spec: 04_db_schema_v1.6.md (Positions)
 (a7c02fa80d22 참조). execution_id 컬럼은 3.14에서 ALTER TABLE로 추가한다
 (orders와 동일 이유 — 210cc26533c7 참조).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

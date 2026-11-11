@@ -19,6 +19,7 @@ returning the whole tenant, it is rejected (prevents cross-portfolio
 leakage, "no full-return fallback"). Omitting `portfolio_id` (existing
 callers) makes this module behave byte-identically to the previous
 leaf."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -33,9 +34,7 @@ from src.foundation.performance.application.statement_projection import statemen
 from src.foundation.performance.contracts.v1 import PerformanceStatementView, StatementState
 from src.foundation.performance.ports.repository import PerformanceRepository
 
-_ESTIMATE_DISCLAIMER = (
-    "이 값은 추정치이며 확정 성과·보장 수익을 의미하지 않습니다(ESTIMATED)."
-)
+_ESTIMATE_DISCLAIMER = "이 값은 추정치이며 확정 성과·보장 수익을 의미하지 않습니다(ESTIMATED)."
 
 
 class StatementNotFoundError(Exception):

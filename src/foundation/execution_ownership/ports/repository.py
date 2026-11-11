@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_execution_ownership_and_safety_gate_wiring_v1.0.md
 §2-A, §3.2. The domain knows only this Protocol; actual implementations
 (in adapters/) remain unknown to it (§4)."""
+
 from __future__ import annotations
 
 from typing import Protocol

@@ -19,6 +19,7 @@ ADR D7의 전제다 — 그래서 모든 정규식은 코드 리터럴(`API_URL 
   - WebSocket: `ka.data_fetch(tr_id, tr_type, params)` + 리턴 직전 `columns = [...]` 리스트
     — 이 경우에만 필드명이 예제에 그대로 있다.
 """
+
 from __future__ import annotations
 
 import re

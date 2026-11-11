@@ -29,6 +29,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.4, §9 LC-4.
 후에도 Σ가 어긋나면(코드 버그) `_finalize`의 `check_balanced` 호출이
 fail-closed로 막는다.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

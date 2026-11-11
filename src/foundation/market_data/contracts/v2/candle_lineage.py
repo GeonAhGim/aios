@@ -10,6 +10,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 to each derived bar, so a reader can tell which trades built a bar without
 re-running the aggregation.
 """
+
 from __future__ import annotations
 
 from enum import StrEnum

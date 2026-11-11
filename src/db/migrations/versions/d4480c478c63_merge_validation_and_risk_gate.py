@@ -10,6 +10,7 @@ FND-04(strategy_validation, 3b244535b311)와 FND-06(risk_gate, c7d4e1a9f052)가
 `alembic merge`로 만든 순수 병합 지점이라 upgrade/downgrade에 실행할 내용이
 없다.
 """
+
 from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.

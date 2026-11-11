@@ -36,6 +36,7 @@ see that module's docstring). `aios.oms.unknown_resolution.duration_seconds
 whole retry loop finishes) — `outcome` is the final branch name
 (RESOLVED_AS/RESOLVED_ABSENT/UNRESOLVED_LIMIT) verbatim.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -93,9 +94,7 @@ async def resolve_unknown(
     metrics: MetricsPort | None = None,
 ) -> OrderView:
     if risk_gate_repo is None:  # I-01 — 안전 게이트 인자는 None 기본값을 갖지 않는다
-        raise TypeError(
-            "risk_gate_repo는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다."
-        )
+        raise TypeError("risk_gate_repo는 필수입니다(I-01) — None을 명시적으로 넘길 수 없습니다.")
     repo = order_repo if order_repo is not None else _orders
     m = metrics if metrics is not None else NullMetrics()
 

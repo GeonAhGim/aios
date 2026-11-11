@@ -14,6 +14,7 @@ physically impossible, enforced the same way `append_only.py` enforces WORM:
 a trigger that fires unconditionally, including for the table owner (REVOKE
 alone never binds an owning role -- only a trigger does).
 """
+
 from __future__ import annotations
 
 import re

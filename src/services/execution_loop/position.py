@@ -5,6 +5,7 @@ positions 테이블에 아직 아무 서비스도 쓰지 않는다(이 세션 �
 (FD-4.2-c)에서 체결된 주문만 집계해 파생한다. Phase 1은 실행당 종목 1개,
 분할청산 없음(전량청산만)이라 이 파생만으로 충분하다.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

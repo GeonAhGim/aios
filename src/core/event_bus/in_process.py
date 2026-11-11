@@ -11,6 +11,7 @@ once 7.4 is ready, only pass its implementation through (same principle as §5.1
 of hiding the EventBus itself behind an interface). The default falls back to
 standard logging for recording.
 """
+
 from __future__ import annotations
 
 import asyncio

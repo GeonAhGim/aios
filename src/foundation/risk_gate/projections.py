@@ -4,6 +4,7 @@
 워커 없이 같은 DB를 직접 읽으므로 지연이 없지만, `as_of`는 항상
 포함한다(108번 §2).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

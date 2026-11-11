@@ -6,6 +6,7 @@ Spec: 03_core_modules_v1.1.md#§3.3, 08_test_plan_v1.2.md#§8.2
 9.11 FSM 구조 자체의 무결성만 검증한다 — 조건식(condition 문자열) 자체의
 평가는 FROZEN Zone(Strategy Engine)의 책임(03번 §3.9 Zone 경계).
 """
+
 from __future__ import annotations
 
 from src.core.validator.result import ValidationResult
@@ -36,8 +37,7 @@ def validate_strategy_config(config: FSMStrategyConfig) -> ValidationResult:
         key = (t.from_state, t.to_state, t.condition)
         if key in seen_transitions:
             errors.append(
-                f"중복 transition 발견: {t.from_state.value} -> {t.to_state.value} "
-                f"({t.condition})"
+                f"중복 transition 발견: {t.from_state.value} -> {t.to_state.value} ({t.condition})"
             )
         seen_transitions.add(key)
 

@@ -15,6 +15,7 @@ lexer (the resource ceiling is enforced separately by DSL-6 on AST
 counts). Over-limit payloads are rejected by pydantic as
 `VALIDATION_INVALID_FIELD` (`details.fields`).
 """
+
 from __future__ import annotations
 
 import hashlib

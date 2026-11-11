@@ -21,6 +21,7 @@ this module imports nothing from `src.core.risk` — copying that rule's
 threshold or logic here would silently collapse the two authorities into
 one, which is exactly what CM-A5 forbids.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

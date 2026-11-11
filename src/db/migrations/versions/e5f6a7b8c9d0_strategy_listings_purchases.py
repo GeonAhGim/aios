@@ -17,6 +17,7 @@ seller_suspended(users 컬럼, §14.5.3 분쟁 판매자 제재)도 이 섹션(1
 어디에서도 쓰이지 않고 FD-18.4(판매자 정지 API)에서 처음 필요해지므로
 같은 원칙으로 지금 만들지 않는다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -45,9 +46,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX idx_strategy_listings_seller ON strategy_listings(seller_user_id)"
-    )
+    op.execute("CREATE INDEX idx_strategy_listings_seller ON strategy_listings(seller_user_id)")
     op.execute(
         """
         CREATE TABLE strategy_purchases (
@@ -61,12 +60,8 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX idx_strategy_purchases_buyer ON strategy_purchases(buyer_user_id)"
-    )
-    op.execute(
-        "CREATE INDEX idx_strategy_purchases_listing ON strategy_purchases(listing_id)"
-    )
+    op.execute("CREATE INDEX idx_strategy_purchases_buyer ON strategy_purchases(buyer_user_id)")
+    op.execute("CREATE INDEX idx_strategy_purchases_listing ON strategy_purchases(listing_id)")
 
 
 def downgrade() -> None:

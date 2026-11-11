@@ -31,6 +31,7 @@ this logic never touches the positions table at all. If the rebalanced
 allocation total exceeds the balance, the entire write is rejected
 (no partial updates, atomic).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -87,9 +88,7 @@ class PortfolioService:
         self._pool = pool
         self._risk_policy = risk_policy
 
-    async def get_portfolio(
-        self, user_id: UUID, *, total_cash_balance: Decimal
-    ) -> PortfolioView:
+    async def get_portfolio(self, user_id: UUID, *, total_cash_balance: Decimal) -> PortfolioView:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """

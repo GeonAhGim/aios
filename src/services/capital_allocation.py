@@ -10,6 +10,7 @@ Allocation requests exceeding the cap are rejected at storage — the UI cannot 
 FROZEN Risk policy. The error reports the exact overage and current cap
 (FD-1.2 "Do not make users guess" principle).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

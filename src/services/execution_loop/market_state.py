@@ -10,6 +10,7 @@ I/O (fetching exchange candles) is the caller's (tick.py/run_backtest.py)
 responsibility — this module only does pure computation over the
 `candles_by_tf` it is already given.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

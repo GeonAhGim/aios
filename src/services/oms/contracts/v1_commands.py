@@ -6,6 +6,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §3.1, §9 L4-01.
 필드 추가는 MINOR(버전 불변). `Order`/`OrderStatus`(01번) 자체는 공유접점
 §2.3 동결 계약이라 여기서 재정의하지 않고 그대로 참조한다(§3.3).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

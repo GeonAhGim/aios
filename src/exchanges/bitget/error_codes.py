@@ -24,6 +24,7 @@ these as AUTH and set `retryable=False` explicitly — read not narrowly as
 used by `account_mode.requires_unified_switch()` as an account-mode-switch
 signal.
 """
+
 from __future__ import annotations
 
 from src.exchanges.common.error_taxonomy import ExchangeErrorKind

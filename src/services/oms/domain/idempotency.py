@@ -6,6 +6,7 @@ R4 — "멱등성 스코프가 전역이 아님" — tenant/account/provider/str
 version/time-window 단위로 좁힌다(기존 `client_order_id` UNIQUE 하나뿐이던
 전역 스코프 결함의 근본 수정).
 """
+
 from __future__ import annotations
 
 import hashlib

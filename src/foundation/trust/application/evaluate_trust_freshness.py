@@ -5,6 +5,7 @@ Entry point used by other FND contexts (Mandate/Package/Paper Control, etc.) whe
 need to check "does this tenant hold valid consent for this purpose"
 (#71 §4 Contract ownership — trust is the owner, other contexts are consumers).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -38,8 +39,8 @@ async def evaluate_trust_freshness(
         )
 
     fresh = is_consent_fresh(consent, required_disclosure=disclosure, now=now)
-    reason = None if fresh else freshness_denial_reason(
-        consent, required_disclosure=disclosure, now=now
+    reason = (
+        None if fresh else freshness_denial_reason(consent, required_disclosure=disclosure, now=now)
     )
     return TrustFreshnessDecision(
         tenant_id=context.tenant_id,

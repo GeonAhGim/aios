@@ -18,6 +18,7 @@ check_compliance_gate.py`로 실행(종료코드 0=통과), pytest로도 그대�
    그 값이 무엇이든(다른 팩토리·람다) 사람이 확인해야 하므로 실패시킨다.
    `make_foundation_pre_submit_gate` 자신은 예외(자기 자신을 정의하는 파일).
 """
+
 from __future__ import annotations
 
 import ast
@@ -38,9 +39,7 @@ def _find_function(tree: ast.AST, name: str) -> ast.AsyncFunctionDef | ast.Funct
 
 def _attribute_reads(node: ast.AST, attr: str) -> list[ast.Attribute]:
     return [
-        child
-        for child in ast.walk(node)
-        if isinstance(child, ast.Attribute) and child.attr == attr
+        child for child in ast.walk(node) if isinstance(child, ast.Attribute) and child.attr == attr
     ]
 
 

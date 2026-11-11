@@ -34,6 +34,7 @@ This leaf only assembles, persists, and records evidence:
    EXCEPTION_MAP (the same convention as `RiskGateDeniedError`, see
    start_deployment.py) — raw HTTPException is forbidden.
 """
+
 from __future__ import annotations
 
 import time
@@ -111,9 +112,7 @@ class _RecoveryInputs(BaseModel, frozen=True):
     as_of: datetime
 
 
-def _effective_approval_status(
-    request: ApprovalRequest, *, ttl_sec: int, now: datetime
-) -> str:
+def _effective_approval_status(request: ApprovalRequest, *, ttl_sec: int, now: datetime) -> str:
     """Same rule as R-45's `circuit_breaker_loop._effective_status`."""
     if request.status == "APPROVED" and request.resolved_at is not None:
         if now - request.resolved_at > timedelta(seconds=ttl_sec):

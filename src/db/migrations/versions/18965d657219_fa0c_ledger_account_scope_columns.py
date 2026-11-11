@@ -62,6 +62,7 @@ row cannot be reverse-derived (i.e. `account_code` does not match the known
 grammar), the exception is propagated as-is and fails the migration (no
 silent defaulting).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

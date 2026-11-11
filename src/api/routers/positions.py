@@ -23,6 +23,7 @@ a `position_key` value.
 FA-6: an optional `portfolio_id` query parameter was added to
 `GET /positions` (not a new route). Omitting it makes the response
 byte-identical to the previous leaf."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -156,7 +157,5 @@ async def get_position_journal(
         snapshots=snapshots,
         journal=journal,
     )
-    page = PageMeta(
-        size=limit, next_cursor=None if next_seq is None else encode_cursor(next_seq)
-    )
+    page = PageMeta(size=limit, next_cursor=None if next_seq is None else encode_cursor(next_seq))
     return ok(PositionJournalResponse(position_key=position_key, items=entries), page=page)

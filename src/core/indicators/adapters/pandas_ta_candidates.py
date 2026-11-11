@@ -10,6 +10,7 @@ TA-Lib (`select_registered`) — this module holds no TA-Lib policy, so the two
 change axes (adding a candidate vs. deciding overlap) stay in separate files
 (ADR-2026-09-10-C Decision 2).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -83,9 +84,7 @@ def _calc_massi(columns: dict[str, np.ndarray[Any, Any]], params: dict[str, int]
 
 def _calc_coppock(columns: dict[str, np.ndarray[Any, Any]], params: dict[str, int]) -> pd.Series:
     close = pd.Series(columns["close"])
-    result = pta.coppock(
-        close, length=params["length"], fast=params["fast"], slow=params["slow"]
-    )
+    result = pta.coppock(close, length=params["length"], fast=params["fast"], slow=params["slow"])
     if result is None:
         raise IndicatorError("STRATEGY_INDICATOR_COMPUTE_FAILED")
     return result

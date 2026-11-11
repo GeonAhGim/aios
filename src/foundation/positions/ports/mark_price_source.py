@@ -7,6 +7,7 @@ The domain/application layer knows only this Protocol; actual implementations
 cannot be retrieved (including stale data), return `None` instead of substituting `0`
 — unrealized PnL is not computed without a mark price (§4 domain/pnl.py).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

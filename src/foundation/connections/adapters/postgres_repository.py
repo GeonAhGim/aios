@@ -25,6 +25,7 @@ non-superuser role, that WHERE condition is the actual line of defense, and
 is in the scope of the concurrently in-progress P0-B/P0-D (task-1715/1717), so
 this leaf does not change the signature (see task note).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -111,9 +112,7 @@ class PostgresConnectionRepository(_SnapshotHealthMixin):
             )
         return [_row_to_connection(row) for row in rows]
 
-    async def insert_pending_connection(
-        self, connection: AccountConnection
-    ) -> AccountConnection:
+    async def insert_pending_connection(self, connection: AccountConnection) -> AccountConnection:
         async with tenant_transaction(self._pool, connection.tenant_id) as conn:
             row = await conn.fetchrow(
                 "INSERT INTO account_connection "

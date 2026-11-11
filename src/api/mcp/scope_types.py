@@ -6,6 +6,7 @@ parameters without importing `server` (which itself imports every
 cycle, not just a lint artifact (`check_import_linter.py` walks all
 `ImportFrom` targets including `TYPE_CHECKING`-guarded ones).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

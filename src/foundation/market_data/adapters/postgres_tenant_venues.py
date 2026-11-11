@@ -7,6 +7,7 @@ DC-8 (9049e2b6b0b7): reads only the set of non-expired `venue` rows from the
 out of scope for this leaf). No decision logic —
 `PaperTenantVenueEntitlement` uses this set for its entitlement check.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

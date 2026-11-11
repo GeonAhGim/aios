@@ -7,6 +7,7 @@ LC-15/task 후속)은 모른다(71번 §4). 배치를 언제·얼마나 묶을�
 `domain/payout_schedule.py`(LC-5)의 순수 계산 책임이고, 이 포트는 그 결과를
 저장·조회만 한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

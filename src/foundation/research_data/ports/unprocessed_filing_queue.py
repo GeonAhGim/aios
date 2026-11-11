@@ -4,6 +4,7 @@ Spec: docs/specs/L4_research_data_and_market_ecosystem_v1.0.md §9 RD-20 DoD
 "filings that fail to parse are not silently dropped; they are left in
 the unprocessed queue".
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

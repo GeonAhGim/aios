@@ -20,6 +20,7 @@ All arithmetic is `Decimal`-only (project-wide convention, standard 105)
 floating-point type, since that round-trip would introduce error into a
 cost benchmark.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

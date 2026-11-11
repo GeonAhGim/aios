@@ -29,6 +29,7 @@ safety_control.idempotency_digest, UNIQUE, sha256(scope,ref,reason,actor)
 멈췄는지 추적" — legacy 실행 정지 시(`safety/legacy_execution_pauser.py`,
 아직 없음) 이 컬럼에 `safety_control.id`를 남긴다. FK만 여기서 만든다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

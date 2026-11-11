@@ -17,6 +17,7 @@ NULL 허용, DEFAULT 없음 — 073beca589d5의 나머지 §3.3 신규 컬럼과
 (073beca589d5의 `oms_enforce_order_transition_trg`는 컬럼 목록이 아니라
 `status`/`version`/`filled_quantity`만 검사하므로 이 추가로 영향받지 않는다).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

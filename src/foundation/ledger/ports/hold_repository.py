@@ -6,6 +6,7 @@ domain/application은 이 Protocol만 알고, 실제 구현(adapters/postgres_ho
 LC-13/task 후속)은 모른다(71번 §4). 상태기계 자체(허용 전이)는
 `domain/hold_state.py`(LC-5)의 책임이고, 이 포트는 그 결과를 저장만 한다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

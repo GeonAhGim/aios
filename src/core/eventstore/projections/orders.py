@@ -35,6 +35,7 @@ only on the ones that carry an event. So one `FILL` event corresponds to
 once any fill has been recorded — exactly the kind of discrepancy this
 leaf's DoD(1) full-field-parity test is meant to catch.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -115,9 +116,7 @@ def project(
         state = apply_one(state, event)
 
     agg = aggregate(fills)
-    fee_currency, fee_total = (
-        next(iter(agg.fee_total.items())) if agg.fee_total else (None, None)
-    )
+    fee_currency, fee_total = next(iter(agg.fee_total.items())) if agg.fee_total else (None, None)
     return replace(
         state,
         filled_quantity=agg.filled_qty,

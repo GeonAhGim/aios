@@ -24,6 +24,7 @@ are named aliases of those combinations):
   3. `as_of_transaction_time`— (valid=now,   tx=given) "now" under past knowledge
   4. `as_of_bitemporal`      — (valid=given, tx=given) full retroactive (rollback) query
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -72,8 +73,7 @@ def _require_valid_bound(from_: datetime, to: datetime | None, *, label: str) ->
         _require_tz_aware(to, name=f"{label}_to")
         if to <= from_:
             raise ValueError(
-                f"{label}_to must be after {label}_from "
-                "(half-open interval must be non-empty)"
+                f"{label}_to must be after {label}_from (half-open interval must be non-empty)"
             )
 
 
@@ -120,8 +120,10 @@ class BitemporalRecord[T]:
 
 
 def _ranges_overlap(
-    a_from: datetime, a_to: datetime | None,
-    b_from: datetime, b_to: datetime | None,
+    a_from: datetime,
+    a_to: datetime | None,
+    b_from: datetime,
+    b_to: datetime | None,
 ) -> bool:
     """Check whether two half-open intervals `[from, to)` overlap."""
     a_ends_before_b_starts = a_to is not None and a_to <= b_from

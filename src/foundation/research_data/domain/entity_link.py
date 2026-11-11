@@ -17,6 +17,7 @@ the injected `EntityResolver` (a real implementation would compose
 `symbol_master.resolve()` for venue/symbol shapes); this module never
 touches instrument/listing master data itself (I/O-free, L0-2).
 """
+
 from __future__ import annotations
 
 import enum
@@ -87,11 +88,7 @@ def is_valid_isin(candidate: str) -> bool:
     Not delegated to LA-7 -- an ISIN checksum is not a venue/symbol rule and
     no existing module in this repo implements it.
     """
-    if (
-        len(candidate) != _ISIN_LEN
-        or not candidate[:2].isalpha()
-        or not candidate[2:].isalnum()
-    ):
+    if len(candidate) != _ISIN_LEN or not candidate[:2].isalpha() or not candidate[2:].isalnum():
         return False
     body, check_digit = candidate[:11], candidate[11]
     if not check_digit.isdigit():
@@ -169,9 +166,7 @@ def link_item(item: ResearchItem, resolver: EntityResolver) -> EntityLinkResult:
     Never raises for an unmapped item -- unmapped is a normal, expected
     outcome (RD-5 DoD (c)), not an error.
     """
-    keys = [
-        key for key in (extract_entity_key(raw) for raw in item.instruments) if key is not None
-    ]
+    keys = [key for key in (extract_entity_key(raw) for raw in item.instruments) if key is not None]
     if not keys:
         return EntityLinkResult(item.item_id, None, UnmappedReason.NO_DETERMINISTIC_KEY)
     for key in keys:

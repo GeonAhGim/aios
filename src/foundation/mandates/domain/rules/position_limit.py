@@ -10,6 +10,7 @@ concentration.py`, R-08) — same authority-separation reasoning as
 `leverage.py` in this package, so this module does not import from
 `src.core.risk`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

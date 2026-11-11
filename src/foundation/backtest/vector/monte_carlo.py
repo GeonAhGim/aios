@@ -28,6 +28,7 @@ statistical distribution summary, not a fill log that needs accounting precision
 Pure module -- no I/O (the random generator is injected as an argument, so this has no
 hidden side effect).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -88,9 +89,7 @@ def run_monte_carlo(
 
     return MonteCarloResult(
         final_equities=tuple(Decimal(str(v)) for v in final_equities),
-        percentiles={
-            p: Decimal(str(np.percentile(final_equities, p))) for p in percentiles
-        },
+        percentiles={p: Decimal(str(np.percentile(final_equities, p))) for p in percentiles},
     )
 
 

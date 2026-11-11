@@ -6,6 +6,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-F, §9 L4-22.
 항상 `"ESTIMATED"` — 시뮬레이터는 어떤 capability도 라이브 검증하지 않는다
 (§10 정직 표기). 참조 객체는 변경하지 않는다(깊은 복사).
 """
+
 from __future__ import annotations
 
 from src.services.oms.domain.venue_profile import VenueCapabilityProfile

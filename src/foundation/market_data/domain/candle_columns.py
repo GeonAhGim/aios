@@ -20,6 +20,7 @@ identity (P3 WORM, same ADR #2) — a documented deviation kept openly.
 
 No I/O — holds pure data holders and pure transformation functions only.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

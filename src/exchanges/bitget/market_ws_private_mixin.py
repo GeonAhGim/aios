@@ -17,6 +17,7 @@ line_cap 초과)에서 순수 이동(동작 변경 0). 연결관리는
 로그인 실패(`event=login`, code≠0)·error 이벤트는 이제 `WsAckError`로
 표면화된다(이전엔 경고 로그 후 계속).
 """
+
 from __future__ import annotations
 
 import logging
@@ -59,9 +60,7 @@ class _PrivateWsClient(SignedRequestClient, Protocol):
 
     async def get_open_orders(self, symbol: str | None = None) -> list[Order]: ...
     async def get_balance(self, asset: str | None = None) -> list[AccountBalance]: ...
-    async def get_futures_positions(
-        self, *, product_type: str = ...
-    ) -> list[Position]: ...
+    async def get_futures_positions(self, *, product_type: str = ...) -> list[Position]: ...
 
 
 class BitgetMarketDataWsPrivateMixin:
@@ -81,6 +80,7 @@ class BitgetMarketDataWsPrivateMixin:
         별도 leaf). 로그인 메커니즘은 `_build_login_message()` docstring
         참조 — 라이브 검증 전까지 최선 추정치. `ExchangeAdapter` ABC에는
         아직 없음(다른 확장 메서드들과 동일 원칙, 모듈 docstring 참조)."""
+
         def _login() -> list[dict[str, Any]]:
             return [
                 _build_login_message(
@@ -135,6 +135,7 @@ class BitgetMarketDataWsPrivateMixin:
         있는 후보(호출부 연결은 별도 leaf). 로그인은
         `subscribe_order_stream`과 동일 메커니즘(§6 "Private 채널 로그인"
         절) — 라이브 검증 전까지 최선 추정치."""
+
         def _login() -> list[dict[str, Any]]:
             return [
                 _build_login_message(
@@ -185,6 +186,7 @@ class BitgetMarketDataWsPrivateMixin:
         """02b 스펙 §6(P1) — Private `positions` 채널(선물 전용). Phase 1은
         크립토 현물 전용(06번 §6.1)이라 아직 소비하는 호출부가 없다 —
         API 연동만 우선 완료해둔다(다른 확장 메서드와 동일 원칙)."""
+
         def _login() -> list[dict[str, Any]]:
             return [
                 _build_login_message(

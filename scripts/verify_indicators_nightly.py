@@ -18,6 +18,7 @@ every mismatch is a cited, pre-known exclusion
 (`verify_job.KNOWN_UNVERIFIED`). Exit 1 = at least one indicator diverged
 outside that allowlist -- printed as `MISMATCH <name> ...` lines.
 """
+
 from __future__ import annotations
 
 import logging

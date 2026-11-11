@@ -11,6 +11,7 @@ task-104 5ec19fb)에 위임한다 — 재구현하지 않는다.
 최소 중첩(`min_overlap`) 미달을 None으로 반환해 호출자가 DENY로 처리하게
 한다 — 절대 0.0으로 암묵 치환하지 않는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

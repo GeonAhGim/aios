@@ -39,6 +39,7 @@ house 계정(`e7f8a9b0c1d2_wallet_ledger.py`가 만든
 대신 문자열로 고정한다). `tests/integration/test_db_schema.py`가 두 값의
 일치를 확인한다.
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

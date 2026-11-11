@@ -5,6 +5,7 @@ The repository translates a DB UNIQUE(tenant_id, name) violation into
 `ConcurrencyConflictError` (same pattern as
 trust/postgres_membership_repository.py; no new taxonomy — task-1904
 decision)."""
+
 from __future__ import annotations
 
 from typing import Any

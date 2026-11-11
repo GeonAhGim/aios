@@ -7,6 +7,7 @@ directly (`boundary:foundation-aggregates`, task-5418). Pure re-export, no
 behavior change: this is the same class object as
 `domain.models.ConnectionState`/`HealthState`, not a converted copy.
 """
+
 from __future__ import annotations
 
 from src.foundation.connections.domain.models import ConnectionState, HealthState

@@ -18,6 +18,7 @@ this module does not call it, to avoid importing back into
 `src.exchanges.factory` (that file already imports `kiwoom_factory` from
 here) and creating a cycle.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast

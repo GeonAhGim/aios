@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 74_connected_asset_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
+
 from __future__ import annotations
 
 import hashlib

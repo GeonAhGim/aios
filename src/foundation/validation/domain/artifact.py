@@ -22,6 +22,7 @@ sibling leaf) can supply its own version without this module changing.
 returned by L02 `IndicatorRegistry.registry_hash()`, delegated to
 verbatim (no local reimplementation of indicator-spec hashing).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

@@ -25,6 +25,7 @@ passes.
 프로젝트의 다른 어댑터도 동일, 예: `src/core/idempotency.py`) — 쓸 때
 `json.dumps` + `$N::jsonb`, 읽을 때 `json.loads`를 수동으로 맞춘다.
 """
+
 from __future__ import annotations
 
 import json
@@ -126,9 +127,7 @@ class OutboxRepository:
         records = await conn.fetch(_RECLAIM_STUCK_SENDING_SQL, worker_id, lease_sec, limit)
         return [_row_to_outbox_row(r) for r in records]
 
-    async def mark_done(
-        self, conn: asyncpg.Connection, id: UUID, *, expected_worker: str
-    ) -> None:
+    async def mark_done(self, conn: asyncpg.Connection, id: UUID, *, expected_worker: str) -> None:
         await self._fence(
             conn, id, expected_worker, set_clause="state = 'DONE', updated_at = now()"
         )

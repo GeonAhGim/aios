@@ -17,6 +17,7 @@ Delegation table (domain leaf each function calls):
 
 Pure functions only — no I/O, no clock, no randomness; amounts are all `Decimal`.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -90,8 +91,12 @@ class Holding:
 
 
 def submit_order(
-    config: BacktestConfigV2, intent: OrderIntent, columns: CandleColumns, signal_index: int,
-    *, timeframe: Timeframe,
+    config: BacktestConfigV2,
+    intent: OrderIntent,
+    columns: CandleColumns,
+    signal_index: int,
+    *,
+    timeframe: Timeframe,
 ) -> PendingOrder | None:
     """Determines the first fillable bar for an order submitted at the open_time of
     bar `signal_index`, per BT-4. Returns `None` if no such bar exists within the
@@ -137,23 +142,35 @@ def _slice_lower(
     while stop < len(lower) and lower.ts[stop] < end:
         stop += 1
     sliced = CandleColumns(
-        ts=lower.ts[cursor:stop], open=lower.open[cursor:stop], high=lower.high[cursor:stop],
-        low=lower.low[cursor:stop], close=lower.close[cursor:stop],
-        volume=lower.volume[cursor:stop], quote_volume=lower.quote_volume[cursor:stop],
+        ts=lower.ts[cursor:stop],
+        open=lower.open[cursor:stop],
+        high=lower.high[cursor:stop],
+        low=lower.low[cursor:stop],
+        close=lower.close[cursor:stop],
+        volume=lower.volume[cursor:stop],
+        quote_volume=lower.quote_volume[cursor:stop],
     )
     return sliced, stop
 
 
 def price_path(
-    config: BacktestConfigV2, columns: CandleColumns, i: int, *, timeframe: Timeframe,
-    lower_columns: CandleColumns | None, lower_cursor: int,
+    config: BacktestConfigV2,
+    columns: CandleColumns,
+    i: int,
+    *,
+    timeframe: Timeframe,
+    lower_columns: CandleColumns | None,
+    lower_cursor: int,
 ) -> tuple[tuple[Decimal, ...], int]:
     """Price visit order on bar `i` (BT-7) and the advanced sub-bar cursor. Sub-bars
     are assumed sorted chronologically (adapter ORDER BY); the cursor only moves
     forward, yielding O(n) total."""
     bar = HigherBar(
-        open_time=columns.ts[i], open=columns.open[i], high=columns.high[i],
-        low=columns.low[i], close=columns.close[i],
+        open_time=columns.ts[i],
+        open=columns.open[i],
+        high=columns.high[i],
+        low=columns.low[i],
+        close=columns.close[i],
     )
     lower_slice = None
     if config.magnifier_tf is not None and lower_columns is not None:
@@ -190,7 +207,10 @@ def _reference_price(intent: OrderIntent, path: tuple[Decimal, ...]) -> Decimal 
 
 
 def try_fill(
-    config: BacktestConfigV2, pending: PendingOrder, i: int, columns: CandleColumns,
+    config: BacktestConfigV2,
+    pending: PendingOrder,
+    i: int,
+    columns: CandleColumns,
     path: tuple[Decimal, ...],
 ) -> FillEvent | None:
     """Attempt to fill the pending order on bar `i`. Returns `None` if the trigger
@@ -206,16 +226,25 @@ def try_fill(
     if outcome.filled_quantity == 0:
         return None
     price = apply_slippage(
-        config.slippage, side=intent.side, reference_price=reference,
-        quantity=outcome.filled_quantity, bar_volume=volume,
+        config.slippage,
+        side=intent.side,
+        reference_price=reference,
+        quantity=outcome.filled_quantity,
+        bar_volume=volume,
     )
     commission = compute_commission(
-        config.commission, is_maker=intent.order_type == "limit",
+        config.commission,
+        is_maker=intent.order_type == "limit",
         notional=price * outcome.filled_quantity,
     )
     return FillEvent(
-        bar_index=i, open_time=columns.ts[i], side=intent.side, order_type=intent.order_type,
-        quantity=outcome.filled_quantity, price=price, commission=commission,
+        bar_index=i,
+        open_time=columns.ts[i],
+        side=intent.side,
+        order_type=intent.order_type,
+        quantity=outcome.filled_quantity,
+        price=price,
+        commission=commission,
         remaining_quantity=outcome.remaining_quantity,
     )
 
@@ -228,13 +257,19 @@ def settle_costs(
     a rate exists."""
     rate = funding_rate if funding_rate is not None else _ZERO
     funding = compute_funding_cost(
-        config.costs, side=holding.side, notional=holding.notional, funding_rate=rate,
-        entry_time=holding.opened_at, exit_time=exit_time,
+        config.costs,
+        side=holding.side,
+        notional=holding.notional,
+        funding_rate=rate,
+        entry_time=holding.opened_at,
+        exit_time=exit_time,
     )
     borrow = _ZERO
     if holding.side == OrderSide.SELL:  # borrow cost applies to short (sell) positions only
         borrow = compute_borrow_cost(
-            config.costs, notional=holding.notional, entry_time=holding.opened_at,
+            config.costs,
+            notional=holding.notional,
+            entry_time=holding.opened_at,
             exit_time=exit_time,
         )
     return funding, borrow

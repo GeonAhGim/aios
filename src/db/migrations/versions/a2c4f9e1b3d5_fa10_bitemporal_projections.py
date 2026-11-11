@@ -42,6 +42,7 @@ INSERT the same id=X, inside one transaction) does not trip a FK violation
 at the DELETE step -- Postgres only re-checks a deferred constraint at
 COMMIT, by which time a row with that id exists again.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

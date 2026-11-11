@@ -3,6 +3,7 @@
 Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.4 `application/read_fence.py`,
 §3.6 F0/F1/F2.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

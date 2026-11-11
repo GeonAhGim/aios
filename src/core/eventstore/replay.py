@@ -21,6 +21,7 @@ iterates `sorted(streams)` rather than `streams.items()` so `combined_digest`
 is independent of the order asyncpg happened to return rows in. Same input
 -> same digest, every time.
 """
+
 from __future__ import annotations
 
 import hashlib

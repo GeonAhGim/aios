@@ -12,6 +12,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md#§9 R-42.
 상수 0을 이 실측값으로 교체하는 배선(circuit_breaker.py)은 R-43 몫이며
 이 리프는 관측점만 만든다 — 아직 아무 곳도 이 트래커를 읽지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

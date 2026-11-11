@@ -20,6 +20,7 @@ excluded, because those go through i18n instead.
 
 Usage: `python scripts/check_code_language.py`. Exit code 0 = pass.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,8 +47,11 @@ def _docstring_lines(tree: ast.AST) -> set[int]:
         if not body:
             continue
         first = body[0]
-        if not (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
-                and isinstance(first.value.value, str)):
+        if not (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
             continue
         start = first.lineno
         end = getattr(first, "end_lineno", start) or start
@@ -105,10 +109,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--target", type=Path, default=DEFAULT_TARGET)
     ap.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     ap.add_argument("--top", type=int, default=10, help="show the N worst files")
-    ap.add_argument("--update-baseline", action="store_true",
-                     help="write the measured total to --baseline when it legitimately "
-                          "improves (or bootstrap a missing baseline). Without this flag "
-                          "the script only ever reports, it never writes.")
+    ap.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="write the measured total to --baseline when it legitimately "
+        "improves (or bootstrap a missing baseline). Without this flag "
+        "the script only ever reports, it never writes.",
+    )
     a = ap.parse_args(argv)
 
     total, per_file, scanned = count_tree(a.target)
@@ -119,8 +126,10 @@ def main(argv: list[str] | None = None) -> int:
     # subsequent push then failed against the unrelated pre-existing Hangul in the repo.
     # A target that yields no .py files at all is never a real measurement.
     if scanned == 0:
-        print(f"FAIL: --target {a.target} contains no .py files -- refusing to trust "
-              "this measurement (wrong cwd or path?). Baseline left untouched.")
+        print(
+            f"FAIL: --target {a.target} contains no .py files -- refusing to trust "
+            "this measurement (wrong cwd or path?). Baseline left untouched."
+        )
         return 1
 
     try:
@@ -137,16 +146,20 @@ def main(argv: list[str] | None = None) -> int:
     # one leaf. Refuse to trust either, and never write the baseline for them, with or
     # without --update-baseline.
     if total == 0 or (baseline is not None and baseline > 0 and total < baseline * 0.5):
-        print(f"FAIL: measured {total} Hangul comment/docstring lines is implausible "
-              f"(baseline {baseline}) -- refusing to write the baseline. Confirm this by "
-              "hand before touching code-language-baseline.txt; a run this low is almost "
-              "always a broken measurement, not a real fix.")
+        print(
+            f"FAIL: measured {total} Hangul comment/docstring lines is implausible "
+            f"(baseline {baseline}) -- refusing to write the baseline. Confirm this by "
+            "hand before touching code-language-baseline.txt; a run this low is almost "
+            "always a broken measurement, not a real fix."
+        )
         return 2
 
     if baseline is None:
         if not a.update_baseline:
-            print(f"FAIL: no baseline at {a.baseline} -- re-run with --update-baseline to "
-                  f"bootstrap it at the measured {total}.")
+            print(
+                f"FAIL: no baseline at {a.baseline} -- re-run with --update-baseline to "
+                f"bootstrap it at the measured {total}."
+            )
             return 2
         a.baseline.write_text(f"{total}\n", encoding="utf-8")
         print(f"OK: baseline created at {total}")
@@ -156,14 +169,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL: Hangul comment/docstring lines {baseline} -> {total} (limit exceeded)")
         print("Write new comments and docstrings in English (ADR-2026-09-07-A).")
         print("Existing Korean is not retro-converted; only growth is blocked.")
-        for name, n in per_file[:a.top]:
+        for name, n in per_file[: a.top]:
             print(f"    {n:>5}  {name}")
         return 1
 
     if total < baseline:
         if not a.update_baseline:
-            print(f"OK: Hangul comment/docstring lines reduced {baseline} -> {total} "
-                  "(re-run with --update-baseline to record it)")
+            print(
+                f"OK: Hangul comment/docstring lines reduced {baseline} -> {total} "
+                "(re-run with --update-baseline to record it)"
+            )
             return 0
         a.baseline.write_text(f"{total}\n", encoding="utf-8")
         print(f"OK: reduced, baseline updated {baseline} -> {total}")

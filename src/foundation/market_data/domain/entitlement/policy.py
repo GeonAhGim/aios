@@ -31,6 +31,7 @@ denial (fail-closed — missing entitlement info means deny, not allow). At
 stage ④, if realtime was requested but the entitlements matching scope only
 allow a delayed feed, it's a partial allow (`mode="delayed"`), not a denial.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

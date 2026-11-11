@@ -9,6 +9,7 @@ the session range are never part of the expected set in the first place. This mo
 does not reimplement business-day/session logic — that judgment is already made by
 the caller via `VenueCalendar`; only the resulting sessions are passed here.
 """
+
 from __future__ import annotations
 
 from src.foundation.market_data.contracts.v1 import (

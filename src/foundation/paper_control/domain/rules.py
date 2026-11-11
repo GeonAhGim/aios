@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 77_paper_execution_control_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
+
 from __future__ import annotations
 
 from src.foundation.paper_control.domain.models import (
@@ -24,9 +25,7 @@ _ALLOWED_TRANSITIONS: dict[DeploymentState, frozenset[DeploymentState]] = {
     DeploymentState.PAUSED: frozenset(
         {DeploymentState.RUNNING, DeploymentState.STOPPED, DeploymentState.DEGRADED}
     ),
-    DeploymentState.DEGRADED: frozenset(
-        {DeploymentState.STOPPED, DeploymentState.RECOVERY_REVIEW}
-    ),
+    DeploymentState.DEGRADED: frozenset({DeploymentState.STOPPED, DeploymentState.RECOVERY_REVIEW}),
     DeploymentState.RECOVERY_REVIEW: frozenset({DeploymentState.STOPPED}),
     DeploymentState.STOPPED: frozenset(),
     DeploymentState.FAILED: frozenset(),

@@ -8,6 +8,7 @@ D6's "don't pre-register adapters before a contract exists": the write path
 is added in a later leaf once the actual contract-registration operational
 procedure is decided).
 """
+
 from __future__ import annotations
 
 import json
@@ -48,9 +49,7 @@ def _row_to_contract(row: asyncpg.Record) -> SourceContract:
 
 class PostgresSourceContractRepository:
     async def get(self, conn: asyncpg.Connection, source_id: str) -> SourceContract | None:
-        row = await conn.fetchrow(
-            "SELECT * FROM source_contract WHERE source_id = $1", source_id
-        )
+        row = await conn.fetchrow("SELECT * FROM source_contract WHERE source_id = $1", source_id)
         if row is None:
             return None
         return _row_to_contract(row)

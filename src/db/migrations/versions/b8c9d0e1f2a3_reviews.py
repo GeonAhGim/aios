@@ -7,6 +7,7 @@ Create Date: 2026-08-28 00:26:09.061936
 Spec: 04_db_schema_v1.7.md (Reviews, FD-13.9), 14번 문서 §14.2. 작업트리
 3.17 — 13.9 착수 전 선행 필요(10번 문서 각주에 따라 지금 적용).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

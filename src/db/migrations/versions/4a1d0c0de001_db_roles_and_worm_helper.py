@@ -34,6 +34,7 @@ UPDATE/DELETE 재부여)을 그대로 실행하면 이 리프 적용 이전 상�
 권한만 REVOKE한다 — round-trip(upgrade → downgrade → upgrade)에는 영향 없다
 (역할이 이미 있으면 `CREATE ROLE ... IF NOT EXISTS` 대체 DO 블록이 스킵된다).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

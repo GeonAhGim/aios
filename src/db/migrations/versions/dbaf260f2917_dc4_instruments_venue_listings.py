@@ -21,6 +21,7 @@ Spec: docs/specs/L4_analytics_authoring_backtest_marketplace_v1.0.md
 이미 의존할 수 있는 공유 확장을 리프 하나가 되돌리는 건 안전하지 않다 —
 4a1d0c0de007과 동일 정책).
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

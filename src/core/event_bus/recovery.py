@@ -10,6 +10,7 @@ when the relevant sections are complete, only the actual implementation needs
 to be plugged in (same pattern as the §5.1 principle of hiding the Event Bus
 behind its interface).
 """
+
 from __future__ import annotations
 
 import logging

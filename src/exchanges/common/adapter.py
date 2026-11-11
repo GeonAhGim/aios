@@ -24,6 +24,7 @@ UNKNOWN resolver가 "거래소에 주문이 없다"로 오해해 `RESOLVED_ABSEN
 (예: `subscribe_ticker_stream` 미지원 → REST 폴링)와 섞이면 "미구현"과
 "이 venue는 그 capability가 없음"이 구분되지 않는다.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -163,7 +164,8 @@ class ExchangeAdapter(ABC):
         raise self._unsupported("get_fills")
 
     async def find_order_by_client_id(
-        self, client_order_id: str  # noqa: ARG002
+        self,
+        client_order_id: str,  # noqa: ARG002
     ) -> Order | None:
         """client id 역조회(§6 F5-a, F14 DUPLICATE_CLIENT_ID 채택). 반환
         `None`은 "거래소가 그 id를 모른다"는 **사실**이므로, client id를

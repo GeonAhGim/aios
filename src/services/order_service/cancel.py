@@ -7,6 +7,7 @@ task-1603(L4-17) 편차 — 이 함수는 더 이상 거래소를 직접 부르�
 시그니처(라우터/Watchdog 등 기존·향후 호출부)를 그대로 유지한 위임 래퍼다
 — 판단·전이 로직은 재구현하지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

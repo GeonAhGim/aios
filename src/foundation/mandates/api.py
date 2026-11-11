@@ -7,6 +7,7 @@ import them from here instead of reaching into `mandates.domain.*` directly
 change: this is the same class object as `domain.models.
 MandateRevisionState`, not a converted copy.
 """
+
 from __future__ import annotations
 
 from src.foundation.mandates.domain.models import MandateRevisionState

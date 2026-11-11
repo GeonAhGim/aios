@@ -7,6 +7,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#§9 FA-23
 (task-5916, re-issue of task-2680 — the prior leaf was marked done without
 the `files` it claimed to add). Depends on FA-22 (`kms_port.KmsPort`).
 """
+
 from __future__ import annotations
 
 import os

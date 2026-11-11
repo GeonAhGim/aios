@@ -25,6 +25,7 @@ trade-off left as-is).
 Uses pyarrow only (Apache-2.0) — bringing in ArcticDB (BSL 1.1) or a
 Timescale column store (Timescale License) is prohibited (decision, note (e)).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

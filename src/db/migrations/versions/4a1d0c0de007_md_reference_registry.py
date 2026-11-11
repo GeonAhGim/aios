@@ -28,6 +28,7 @@ EXISTS`). downgrade는 이 확장을 DROP하지 않는다 — 다른 객체가 �
 이 네 테이블은 WORM이 아니다(LA-11 캔들과 달리 참조데이터는
 RENAME/SUSPEND/DELIST 전이와 캘린더 재적재(upsert)로 정상 갱신된다).
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

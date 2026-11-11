@@ -46,6 +46,7 @@ rounded once to 0.01 (`policy.round_to_quantum`) to satisfy
 `PostingLine.amount`'s `decimal_places=2` contract; `fill_allocation.
 quantity`/`average_price` keep the original NUMERIC(30,10) precision.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -147,13 +148,17 @@ async def _ensure_user_account(conn: asyncpg.Connection, code: str, currency: Cu
     await conn.execute(
         "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
         "VALUES ($1, $2, $3, $4) ON CONFLICT (account_code) DO NOTHING",
-        code, account_type(code).value, currency.value, negative_ok,
+        code,
+        account_type(code).value,
+        currency.value,
+        negative_ok,
     )
     await conn.execute(
         "INSERT INTO ledger_balance (account_id, allow_negative) "
         "SELECT account_id, $2 FROM ledger_account WHERE account_code = $1 "
         "ON CONFLICT (account_id) DO NOTHING",
-        code, negative_ok,
+        code,
+        negative_ok,
     )
 
 
@@ -251,9 +256,7 @@ async def allocate_order_fills(
     per sub_account. Reuses the caller's already-open `conn`/transaction
     (same contract as post_entry - this function does not decide
     commit/rollback)."""
-    fill_rows = await conn.fetch(
-        "SELECT quantity, price FROM fills WHERE order_id = $1", order_id
-    )
+    fill_rows = await conn.fetch("SELECT quantity, price FROM fills WHERE order_id = $1", order_id)
     if not fill_rows:
         raise NoFillsError(f"order_id={order_id}: no fills to allocate")
     side = await conn.fetchval("SELECT side FROM orders WHERE order_id = $1", order_id)

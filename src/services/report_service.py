@@ -18,6 +18,7 @@ of the daily cumulative PnL curve within this report period — expressed
 as an absolute amount rather than a percentage because a starting capital
 baseline is not available in this query scope (Draft).
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -116,9 +117,7 @@ class ReportService:
         for row in rows:
             version = exec_versions.get(row["execution_id"], "")
             key = (row["strategy_id"], version)
-            entry = contributions.setdefault(
-                key, {"realized_pnl": Decimal("0"), "trade_count": 0}
-            )
+            entry = contributions.setdefault(key, {"realized_pnl": Decimal("0"), "trade_count": 0})
             entry["realized_pnl"] += row["realized_pnl"]
             entry["trade_count"] += 1
 

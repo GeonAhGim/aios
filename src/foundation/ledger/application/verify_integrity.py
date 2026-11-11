@@ -55,6 +55,7 @@ LC-13/15의 holds/payouts와 달리 전용 포트가 없다(LC-7 설계) — 이
 트랜잭션이 없다 — `postgres_journal_repository.append`가 자체 타임스탬프를
 찍는 것과 같은 선례를 따른다).
 """
+
 from __future__ import annotations
 
 import re

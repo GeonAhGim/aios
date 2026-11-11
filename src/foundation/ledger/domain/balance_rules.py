@@ -18,6 +18,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.3, §4.3, §4.4, §
 모양 — 이 함수는 그 호출 직전에 서는 순수 검증 계층이다). 순수 함수만 —
 I/O·시계 직접 호출 금지.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -55,9 +56,7 @@ def check_balanced(lines: Sequence[PostingLine]) -> None:
     debit_total = sum((line.amount for line in lines if line.side is Side.DEBIT), Decimal("0"))
     credit_total = sum((line.amount for line in lines if line.side is Side.CREDIT), Decimal("0"))
     if debit_total != credit_total:
-        raise UnbalancedEntryError(
-            f"차변 합({debit_total}) != 대변 합({credit_total})"
-        )
+        raise UnbalancedEntryError(f"차변 합({debit_total}) != 대변 합({credit_total})")
 
 
 @dataclass(frozen=True, slots=True)

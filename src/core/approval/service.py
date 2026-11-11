@@ -304,9 +304,7 @@ async def reject(pool: asyncpg.Pool, request_id: int, approver_id: UUID) -> Appr
 async def cancel(pool: asyncpg.Pool, request_id: int) -> ApprovalRequest:
     """9.4b/9.6 — auto-cancel on condition re-deterioration while pending (blocks
     the path of re-activating from a deteriorated state at the source)."""
-    return await _update(
-        pool, request_id, status="CANCELLED", resolved_at=datetime.now(UTC)
-    )
+    return await _update(pool, request_id, status="CANCELLED", resolved_at=datetime.now(UTC))
 
 
 async def expire_pending(pool: asyncpg.Pool) -> list[int]:

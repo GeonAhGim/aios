@@ -18,6 +18,7 @@ ASSET_CLASS 집계용 심볼별 소계(`gross_by_symbol`)도 같은 왕복에 �
 그러지 않으면 각주가 요구하는 심볼별 원자료를 얻으려 두 번째 쿼리가
 필요해져 "단일 쿼리" DoD를 어긴다.
 """
+
 from __future__ import annotations
 
 import json

@@ -11,6 +11,7 @@ another verifier" is UI text shown by the frontend for an empty list,
 so there is no separate field to distinguish this here (an empty list
 itself is the completion condition).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -7,6 +7,7 @@ Does not call `time.monotonic`/`asyncio.sleep` directly; injects
 fake sleep that returns immediately, verifying deterministically with no
 real waiting (reusing the task-423 d3227c9 pattern).
 """
+
 from __future__ import annotations
 
 import asyncio

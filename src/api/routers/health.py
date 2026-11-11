@@ -19,6 +19,7 @@ docstring ("to let the readyz age < 3×interval check fail naturally").
 `migration_head` and `event_bus` checks are out of scope for this leaf
 (decision: "minimum DB pool and loop freshness") — to be added in a follow-up leaf.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

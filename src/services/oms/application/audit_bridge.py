@@ -20,6 +20,7 @@ tenant_id: `OrderTransitionEvent`엔 tenant 정보가 없다(§2-C 시그니처�
 (`tenant_id=None`)에 기록한다. tenant별 체인이 필요해지면 시그니처 확장이
 필요하다(이 리프 스코프 밖).
 """
+
 from __future__ import annotations
 
 from typing import cast

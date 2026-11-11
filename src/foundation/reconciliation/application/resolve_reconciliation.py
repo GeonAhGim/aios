@@ -11,6 +11,7 @@ and the actual resumption must then go through a full re-evaluation
 (mandate+risk+connection) as required by paper_control.resume_deployment() —
 the principle that "resolve alone" auto-resumes nothing is upheld across
 independent contexts."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -67,9 +68,7 @@ async def resolve_reconciliation(
     if state.tenant_id != tenant_id:
         raise CrossTenantReconciliationAccessError(str(target_ref))
     if state.aggregate_status not in _RESOLVABLE_STATUSES:
-        raise NotResolvableError(
-            f"{state.aggregate_status.value} status is not a resolve target."
-        )
+        raise NotResolvableError(f"{state.aggregate_status.value} status is not a resolve target.")
 
     updated = await repo.transition_state_status(
         target_ref,

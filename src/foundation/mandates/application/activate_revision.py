@@ -26,6 +26,7 @@ context ban). If no proposer was recorded (e.g. the first revision from
 counterparty to compare against and the check passes through, same as
 `assert_actor_not_counterparty`'s own `counterparty_id=None` semantics.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -128,9 +129,7 @@ async def activate_revision(
         )
         proposer_id = proposal_event.actor_subject_id if proposal_event is not None else None
     try:
-        assert_actor_not_counterparty(
-            subject_id, proposer_id, action="mandate_revision.activate"
-        )
+        assert_actor_not_counterparty(subject_id, proposer_id, action="mandate_revision.activate")
     except SegregationOfDutyViolation as exc:
         raise SelfApprovalNotAllowedError(proposer_id, subject_id) from exc
 
@@ -152,13 +151,9 @@ async def activate_revision(
 
             if revision.cooling_off_started_at is None:
                 raise CoolingOffNotElapsedError(remaining_seconds=MIN_COOLING_OFF_SECONDS)
-            elapsed = (
-                datetime.now(UTC) - revision.cooling_off_started_at
-            ).total_seconds()
+            elapsed = (datetime.now(UTC) - revision.cooling_off_started_at).total_seconds()
             if elapsed < MIN_COOLING_OFF_SECONDS:
-                raise CoolingOffNotElapsedError(
-                    remaining_seconds=MIN_COOLING_OFF_SECONDS - elapsed
-                )
+                raise CoolingOffNotElapsedError(remaining_seconds=MIN_COOLING_OFF_SECONDS - elapsed)
 
     activated = await mandate_repo.activate_revision(
         mandate.id,

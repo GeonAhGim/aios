@@ -29,6 +29,7 @@ modules' docstrings). Public signatures and `InsufficientBalanceError` are
 invariant; the source of truth is now `ledger_balance`, with
 `user_wallets`/`wallet_transactions` as projections.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -183,7 +184,8 @@ class WalletService:
             row = await conn.fetchrow(
                 "INSERT INTO wallet_topup_requests (user_id, requested_amount) "
                 "VALUES ($1, $2) RETURNING *",
-                user_id, amount,
+                user_id,
+                amount,
             )
         return WalletTopupRequest(**dict(row))
 
@@ -197,7 +199,8 @@ class WalletService:
             rows = await conn.fetch(
                 "SELECT * FROM wallet_topup_requests WHERE status = 'PENDING' "
                 "ORDER BY requested_at ASC LIMIT $1 OFFSET $2",
-                page_size, (page - 1) * page_size,
+                page_size,
+                (page - 1) * page_size,
             )
         return WalletTopupPage(
             items=[WalletTopupRequest(**dict(row)) for row in rows],
@@ -224,14 +227,17 @@ class WalletService:
 
             if current["status"] == "CONFIRMED":
                 return WalletTopupConfirmResult(
-                    id=topup_id, status="CONFIRMED", balance_after=None,
+                    id=topup_id,
+                    status="CONFIRMED",
+                    balance_after=None,
                     confirmed_at=current["confirmed_at"],
                 )
 
             updated = await conn.fetchrow(
                 "UPDATE wallet_topup_requests SET status = 'CONFIRMED', confirmed_at = now(), "
                 "confirmed_by = $2 WHERE id = $1 AND status = 'PENDING' RETURNING confirmed_at",
-                topup_id, admin_user_id,
+                topup_id,
+                admin_user_id,
             )
             if updated is None:
                 raise WalletTopupInvalidTransitionError(
@@ -239,20 +245,33 @@ class WalletService:
                 )
 
             balance_after = await post_topup(
-                conn, topup_id, current["user_id"], current["requested_amount"], admin_user_id,
-                journal=self._journal, balances=self._balances, audit=self._audit, clock=_utcnow,
+                conn,
+                topup_id,
+                current["user_id"],
+                current["requested_amount"],
+                admin_user_id,
+                journal=self._journal,
+                balances=self._balances,
+                audit=self._audit,
+                clock=_utcnow,
             )
 
             await record_audit_log(
-                conn, actor_agent=str(admin_user_id), action_type="wallet.topup.confirmed",
+                conn,
+                actor_agent=str(admin_user_id),
+                action_type="wallet.topup.confirmed",
                 decision_data={
-                    "topup_id": topup_id, "user_id": str(current["user_id"]),
+                    "topup_id": topup_id,
+                    "user_id": str(current["user_id"]),
                     "amount": str(current["requested_amount"]),
                 },
-                target_type="wallet_topup_request", target_id=str(topup_id),
+                target_type="wallet_topup_request",
+                target_id=str(topup_id),
             )
 
         return WalletTopupConfirmResult(
-            id=topup_id, status="CONFIRMED", balance_after=balance_after,
+            id=topup_id,
+            status="CONFIRMED",
+            balance_after=balance_after,
             confirmed_at=updated["confirmed_at"],
         )

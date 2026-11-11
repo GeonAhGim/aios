@@ -14,6 +14,7 @@ API at all to look up an index greater than bar_index, the look-ahead path is
 structurally absent (an out-of-declared-range index is rejected fail-closed with
 `SeriesCacheError`).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

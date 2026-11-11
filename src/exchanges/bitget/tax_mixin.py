@@ -11,6 +11,7 @@ FD-20(운용보고서) 보강용 — `account_mixin.py::get_account_bills()`보�
 - GET /api/v2/tax/margin-record
 - GET /api/v2/tax/p2p-record
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -31,9 +32,7 @@ class BitgetTaxMixin:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(
-            "GET", "/api/v2/tax/spot-record", params=params
-        )
+        raw = await self._request("GET", "/api/v2/tax/spot-record", params=params)
         return list(raw["data"])
 
     async def get_futures_tax_records(
@@ -48,9 +47,7 @@ class BitgetTaxMixin:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(
-            "GET", "/api/v2/tax/future-record", params=params
-        )
+        raw = await self._request("GET", "/api/v2/tax/future-record", params=params)
         return list(raw["data"])
 
     async def get_margin_tax_records(
@@ -65,9 +62,7 @@ class BitgetTaxMixin:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(
-            "GET", "/api/v2/tax/margin-record", params=params
-        )
+        raw = await self._request("GET", "/api/v2/tax/margin-record", params=params)
         return list(raw["data"])
 
     async def get_p2p_tax_records(
@@ -82,7 +77,5 @@ class BitgetTaxMixin:
             params["startTime"] = start_time
         if end_time is not None:
             params["endTime"] = end_time
-        raw = await self._request(
-            "GET", "/api/v2/tax/p2p-record", params=params
-        )
+        raw = await self._request("GET", "/api/v2/tax/p2p-record", params=params)
         return list(raw["data"])

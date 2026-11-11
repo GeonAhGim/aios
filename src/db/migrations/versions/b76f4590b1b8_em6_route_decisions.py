@@ -35,6 +35,7 @@ raw EM-4 inputs, EM-5's full ranked output, and the weights used --
 together sufficient to re-run `domain.route.venue_scoring.rank_venues` and
 reproduce `venue`/`reason_codes`/`expected_cost_bps` exactly (DoD 1).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

@@ -11,6 +11,7 @@ Spec: ADR-2026-08-29-wallet-marketplace-dual-seller-strategy-authoring.md §2
 wallet_service.PLATFORM_HOUSE_USER_ID(하우스 계정)를 넣어 FK 제약을
 그대로 충족하고 정산 로직(purchase_service.py)을 분기 없이 재사용한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

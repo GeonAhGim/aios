@@ -36,6 +36,7 @@ control 자체(권위 있는 차단)는 이미 커밋돼 있으므로 fan-out �
 없다(`risk_alerting.py`는 R-55, 미착수) — 이 리프에서는 구조화 로그로
 대체하고, R-55가 생기면 그 지점에서 실제 채널로 바꾸면 된다.
 """
+
 from __future__ import annotations
 
 import logging

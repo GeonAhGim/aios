@@ -10,6 +10,7 @@ without a read path defeats that purpose. The WORM principle
 (REVOKE UPDATE/DELETE FROM PUBLIC, see migration 9ec8a1ee28d7) does not block
 reads — this service performs SELECT only.
 """
+
 from __future__ import annotations
 
 import json
@@ -69,9 +70,7 @@ class AuditLogReadService:
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         async with self._pool.acquire() as conn:
-            total = await conn.fetchval(
-                f"SELECT COUNT(*) FROM audit_log {where_clause}", *params
-            )
+            total = await conn.fetchval(f"SELECT COUNT(*) FROM audit_log {where_clause}", *params)
             limit_param = len(params) + 1
             offset_param = len(params) + 2
             rows = await conn.fetch(

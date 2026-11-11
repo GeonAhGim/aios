@@ -42,6 +42,7 @@ cutover 처리(§10, PM 결정 사항): 스펙은 "cutover_at은 마이그레이
 RAISE는 ERRCODE `check_violation`(23514)으로 던진다 — asyncpg에서
 `CheckViolationError`로 잡혀 호출부가 다른 무결성 오류와 구분할 수 있다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -113,8 +114,7 @@ _TRIGGER_SQL = (
 
 def upgrade() -> None:
     op.execute(
-        "ALTER TABLE orders ADD COLUMN risk_decision_id UUID "
-        "REFERENCES risk_decision(decision_id)"
+        "ALTER TABLE orders ADD COLUMN risk_decision_id UUID REFERENCES risk_decision(decision_id)"
     )
     op.execute("ALTER TABLE orders ADD COLUMN liquidation_request_id UUID")
     op.execute(

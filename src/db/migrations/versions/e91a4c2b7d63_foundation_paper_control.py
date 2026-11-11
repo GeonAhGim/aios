@@ -27,6 +27,7 @@ Spec: AIOSproject 47_paper_execution_and_control_center_specification_v1.0.md,
   연동하지만, 기존 실행 엔진(`src/services/execution_loop/`,
   `src/services/order_service/`, FROZEN)은 전혀 건드리지 않는다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

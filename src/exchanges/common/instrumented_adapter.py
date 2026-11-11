@@ -31,6 +31,7 @@ R-42(2026-09-04) — `freshness` 옵션 인자(기본 None, 하위호환). 값�
 갖고 있어 별도로 어댑터의 거래소 이름을 조회할 필요가 없다. 빈 목록은
 아무것도 기록하지 않는다(관측 0건은 트래커가 이미 `None`으로 구분).
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -16,6 +16,7 @@ warm-up 구간의 `== 0`)은 `tests/unit/core/script/test_request_future_referen
 기준 봉보다 더 잘게 쪼갤 데이터를 만들어낼 I/O가 없다), 배수가 아니면
 거부한다(fail-closed, 조용한 반올림 없음).
 """
+
 from __future__ import annotations
 
 import re
@@ -81,9 +82,7 @@ def resample_confirmed(source: Series, *, bar_count: int, ratio: int) -> Series:
     (기준 봉마다 하나씩 채워 넣는 sample-and-hold — 스칼라 승격과 동일한
     "봉 차원" 규칙을 따른다)."""
     if len(source) != bar_count:
-        raise ScriptRuntimeError(
-            f"request() 내부 시리즈 길이 {len(source)} != 봉 수 {bar_count}"
-        )
+        raise ScriptRuntimeError(f"request() 내부 시리즈 길이 {len(source)} != 봉 수 {bar_count}")
     values = source.values
     return Series(tuple(values[confirmed_source_index(i, ratio)] for i in range(bar_count)))
 

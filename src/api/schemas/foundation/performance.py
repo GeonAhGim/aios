@@ -6,6 +6,7 @@ caller's own `user_id` (P0 scope: tenant_id == user_id). Allowing clients to
 send arbitrary `scope_ref` values would let them scrape another tenant's
 ledger and fabricate a statement under their own name — the router fills this
 on the server side."""
+
 from __future__ import annotations
 
 from datetime import datetime

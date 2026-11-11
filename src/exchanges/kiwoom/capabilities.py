@@ -22,6 +22,7 @@ now on main) give real, non-`_unsupported()` implementations of
 `modify_order`/`cancel_order`/`subscribe_order_stream`, so the profile
 declares what the assembled `KiwoomAdapter` (`factory.py`) actually does.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

@@ -11,6 +11,7 @@ the correlation-coefficient math itself (Pearson, etc.) belongs to
 This leaf owns only the narrower boolean decision — "did the basket move
 sharply" — that the consumer of the result (watchdog) needs.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

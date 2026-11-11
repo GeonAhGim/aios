@@ -24,6 +24,7 @@ point-in-time lookup relies on (`ORDER BY known_at DESC LIMIT 1` per
 `attr_key`), since a plain ascending PK index still requires a backward
 scan for that access pattern.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -54,8 +55,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        f"CREATE INDEX ix_{_TABLE}_lookup "
-        f"ON {_TABLE} (instrument_id, attr_key, known_at DESC)"
+        f"CREATE INDEX ix_{_TABLE}_lookup ON {_TABLE} (instrument_id, attr_key, known_at DESC)"
     )
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {_TABLE} TO {_APP_ROLE}")
 

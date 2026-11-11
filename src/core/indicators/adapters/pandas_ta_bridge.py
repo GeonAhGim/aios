@@ -36,6 +36,7 @@ holds no TA-Lib version literal. 이 3종은
 대상)는 다중 출력·비인과적(forward-shift) 계산이 섞여 있어 이번 leaf 범위
 밖이다(§9.9 DoD는 "순증분 종수 보고"이지 "전량 등록"이 아니다).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -175,9 +176,7 @@ class PandasTaBridgeService:
     def __init__(self, registry: IndicatorRegistry = PANDAS_TA_REGISTRY) -> None:
         self._registry = registry
 
-    def calculate(
-        self, indicator: str, candles: Sequence[Candle], **params: int
-    ) -> PandasTaResult:
+    def calculate(self, indicator: str, candles: Sequence[Candle], **params: int) -> PandasTaResult:
         if indicator not in CALCULATORS:
             raise IndicatorError("STRATEGY_INDICATOR_UNKNOWN")
         try:

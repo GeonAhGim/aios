@@ -191,9 +191,7 @@ class KISMarketDataMixin:
             for row in rows:
                 day = row.get("stck_bsop_date", now.strftime("%Y%m%d"))
                 hour = row["stck_cntg_hour"]  # "HHMMSS"
-                open_time = datetime.strptime(day + hour, "%Y%m%d%H%M%S").replace(
-                    tzinfo=UTC
-                )
+                open_time = datetime.strptime(day + hour, "%Y%m%d%H%M%S").replace(tzinfo=UTC)
                 candles.append(
                     Candle(
                         symbol=symbol,

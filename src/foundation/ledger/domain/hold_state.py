@@ -9,6 +9,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§4.5, §9 LC-5.
 비교만으로 판정 가능한 만료 가드만 강제한다. 순수 함수만: I/O·시계 직접
 호출 금지, `now`는 항상 인자로 받는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

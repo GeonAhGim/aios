@@ -9,6 +9,7 @@ Spec: 13_multi_tenancy_auth_v1.4.md#§13.2, 04_db_schema_v1.7.md (FD-15.2)
 10번 문서가 11.1 당시 명시적으로 미뤄뒀던 리프(3.11/3.12, "11.1 이후") —
 FD-15가 실제로 필요해진 지금 착수한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

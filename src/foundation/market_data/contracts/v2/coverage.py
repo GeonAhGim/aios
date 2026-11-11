@@ -16,6 +16,7 @@ quality_grade) axis. `instrument_id` was added for use as the query key
 venue (venue belongs to `VenueListing`), this contract carries venue and
 asset_class as separate fields.
 """
+
 from __future__ import annotations
 
 from enum import StrEnum

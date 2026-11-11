@@ -10,6 +10,7 @@ DB에는 절대 저장하지 않는다(§3.4). `revoked_at IS NULL` 부분 인�
 "활성 세션 조회"가 이 테이블의 가장 빈번한 접근 패턴이라(§3.4 매 요청
 JOIN) 풀 스캔을 피하기 위함이다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

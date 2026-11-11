@@ -13,6 +13,7 @@ SUBMIT과 달리 취소·정정은 멱등 계열이라 응답 유실 시 같은 
 여기서 전이하지 않는다 — 거래소 이벤트가 inbox(L4-15)로 들어와 확정한다.
 정정은 응답의 price/qty를 `MODIFIED` 이벤트로 즉시 반영한다(§4.2).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -140,8 +141,13 @@ async def send_modify(
         if outcome.kind is OutcomeKind.ACK:
             await writes.done(conn, row)  # 펜스 먼저(§5.1) — 0행이면 아래 전이는 롤백
             await writes.transition(
-                conn, row, order, OrderStatus.ACKNOWLEDGED, OrderEvent.MODIFIED,
-                outcome.reason, patch,
+                conn,
+                row,
+                order,
+                OrderStatus.ACKNOWLEDGED,
+                OrderEvent.MODIFIED,
+                outcome.reason,
+                patch,
             )
             counters.acknowledged += 1
         else:

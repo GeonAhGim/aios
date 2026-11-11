@@ -31,6 +31,7 @@ capability 거부(DoD "NH supports_modify=False 거부"): `profile.supports_modi
 b8b3d6d)를 던진다 — 거래소 호출 0회가 구조적으로 보장된다(이 계층은 애초에
 거래소를 호출하지 않는다).
 """
+
 from __future__ import annotations
 
 import hashlib

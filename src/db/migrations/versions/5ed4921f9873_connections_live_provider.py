@@ -24,6 +24,7 @@ Spec: AIOSproject 74_connected_asset_l3_build_and_operational_specification_v1.0
   provider로 만들어졌던 것)은 DEFAULT true로 백필한다 — 그 경로는 실제로
   시뮬레이션이 "검증됨"을 가정하고 만든 값이었으므로.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -52,8 +53,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE INDEX ix_account_snapshot_value_snapshot_id "
-        "ON account_snapshot_value (snapshot_id)"
+        "CREATE INDEX ix_account_snapshot_value_snapshot_id ON account_snapshot_value (snapshot_id)"
     )
 
 

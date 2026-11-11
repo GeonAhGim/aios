@@ -17,6 +17,7 @@ R-30(task-1220) — 일경계는 서버 로컬 시간대와 무관하게 UTC 자
 read-modify-write 대신 §5 표의 단일 조건부 UPDATE(GREATEST + day 변경
 여부에 따른 CASE)로 peak 역행·day_start 덮어쓰기 lost update를 DB
 트랜잭션 안에서 원천 차단한다."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -149,9 +150,7 @@ async def record_and_persist_equity(
     """`assemble_account_state`가 부르는 진입점 — 최초 1회 DB에서
     기준점을 복구(seed)하고, 매번 계산 후 write-through로 저장한다."""
     if not tracker.is_seeded(execution_id):
-        day_start_date, day_start_value, peak_value = await load_equity_baseline(
-            pool, execution_id
-        )
+        day_start_date, day_start_value, peak_value = await load_equity_baseline(pool, execution_id)
         tracker.seed(
             execution_id,
             day_start_date=day_start_date,

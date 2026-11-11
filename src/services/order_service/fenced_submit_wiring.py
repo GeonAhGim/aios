@@ -4,6 +4,7 @@
 직접 import한다 — `executor.py`/`fenced_submit.py`는 이 모듈이 돌려준
 값(클로저·구조적 Protocol 구현체)만 받는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping

@@ -30,6 +30,7 @@ no data".
 
 Pure module — no I/O.
 """
+
 from __future__ import annotations
 
 import gc
@@ -108,8 +109,12 @@ def sweep_universe(
                 skipped.append(symbol)
                 continue
             results[symbol] = run_vector_backtest(
-                config, columns, signal, timeframe=timeframe,
-                initial_cash=initial_cash, funding_rate=funding_rate,
+                config,
+                columns,
+                signal,
+                timeframe=timeframe,
+                initial_cash=initial_cash,
+                funding_rate=funding_rate,
             )
     finally:
         if gc_was_enabled:

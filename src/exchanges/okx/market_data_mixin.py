@@ -90,9 +90,7 @@ class OKXMarketDataMixin:
                 f"OKX ticker response missing/invalid field (last/ts required): {exc}, row={row!r}"
             ) from exc
 
-    async def get_orderbook(
-        self: _OKXMarketDataClient, symbol: str, depth: int = 20
-    ) -> OrderBook:
+    async def get_orderbook(self: _OKXMarketDataClient, symbol: str, depth: int = 20) -> OrderBook:
         raw = await self._request(
             "GET", "/api/v5/market/books", params={"instId": symbol, "sz": str(depth)}
         )

@@ -14,6 +14,7 @@ Usage: python scripts/check_baseline_raise.py [--target src] [--baseline code-la
 Exit 0 = committed baseline >= measured total (push allowed).
 Exit 2 = committed baseline < measured total, or unreadable (push rejected).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,23 +42,29 @@ def main(argv: list[str] | None = None) -> int:
 
     total, _per_file, scanned = ccl.count_tree(a.target)
     if scanned == 0:
-        print(f"FAIL: --target {a.target} contains no .py files -- refusing to trust "
-              "this measurement (wrong cwd or path?).")
+        print(
+            f"FAIL: --target {a.target} contains no .py files -- refusing to trust "
+            "this measurement (wrong cwd or path?)."
+        )
         return 1
 
     try:
         baseline = int(a.baseline.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
-        print(f"FAIL: {a.baseline} missing or unreadable -- cannot verify it against "
-              f"the measured {total}.")
+        print(
+            f"FAIL: {a.baseline} missing or unreadable -- cannot verify it against "
+            f"the measured {total}."
+        )
         return 2
 
     if baseline < total:
-        print(f"FAIL: {a.baseline.name}={baseline} understates the measured Hangul "
-              f"comment/docstring lines {total} -- push rejected. This baseline would "
-              "make the code-language gate permanently red for every push after it. "
-              "Run `python scripts/check_code_language.py --update-baseline` and commit "
-              "the result instead of editing the baseline file directly.")
+        print(
+            f"FAIL: {a.baseline.name}={baseline} understates the measured Hangul "
+            f"comment/docstring lines {total} -- push rejected. This baseline would "
+            "make the code-language gate permanently red for every push after it. "
+            "Run `python scripts/check_code_language.py --update-baseline` and commit "
+            "the result instead of editing the baseline file directly."
+        )
         return 2
 
     print(f"OK: {a.baseline.name}={baseline} >= measured {total}")

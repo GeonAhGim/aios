@@ -14,6 +14,7 @@ verified):
   (`/v5/market/orderbook`) (spot=200 per the docs) has not been verified,
   so a conservative value of 50 is used.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

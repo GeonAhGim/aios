@@ -21,6 +21,7 @@ paper/backtest-only venue string — the lookup is never attempted and `None` is
 returned immediately; this means no candle source exists for that venue yet,
 not an error.
 """
+
 from __future__ import annotations
 
 import asyncpg
@@ -78,9 +79,7 @@ class CandleMarkPriceSource:
             last_open = await self._store.last_open_time(conn, series_key)
             if last_open is None:
                 return None
-            candles = await self._store.query(
-                conn, series_key, last_open, last_open + step, None
-            )
+            candles = await self._store.query(conn, series_key, last_open, last_open + step, None)
             if not candles:
                 return None
             candle = candles[-1]

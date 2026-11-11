@@ -13,6 +13,7 @@ PostgreSQL does not support `CREATE ROLE IF NOT EXISTS`, so we check
 existence inside a `DO` block. This module only generates SQL strings —
 execution is delegated to L0-5.
 """
+
 from __future__ import annotations
 
 import re

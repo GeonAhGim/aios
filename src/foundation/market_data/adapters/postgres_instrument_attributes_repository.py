@@ -11,6 +11,7 @@ attr_key, latest known_at wins" reduction is reference-data policy, not a
 SQL concern, and it delegates its instant comparison to FA-9's
 `core.bitemporal.as_of` rather than reimplementing it here.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -67,8 +68,7 @@ class PostgresInstrumentAttributesRepository:
     ) -> dict[str, ReferenceAttribute]:
         """Latest known value per `attr_key` visible at `as_of` (§9.10 DC-21 DoD)."""
         rows = await conn.fetch(
-            "SELECT * FROM instrument_attributes "
-            "WHERE instrument_id = $1 AND known_at <= $2",
+            "SELECT * FROM instrument_attributes WHERE instrument_id = $1 AND known_at <= $2",
             instrument_id,
             as_of,
         )

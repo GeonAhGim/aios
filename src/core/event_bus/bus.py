@@ -6,6 +6,7 @@ Phase 1 provides only a single-process in-memory implementation (InProcessEventB
 but hiding it behind this interface allows swapping in a RedisEventBus later
 without modifying subscriber code (§5.1 principle).
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

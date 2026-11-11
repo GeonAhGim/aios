@@ -23,6 +23,7 @@ Postgres에서 `NULL <> NULL`이라 플랫폼 기본값 행이 무제한으로 �
 한도 기본값 시드는 넣지 않는다 — §10에서 Risk officer 미승인(Draft) 상태로
 남아 있다(task decision 참고).
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -49,9 +50,7 @@ _SEVERITIES = ("WARN", "CRITICAL")
 _NIL_UUID = "00000000-0000-0000-0000-000000000000"
 
 # 표현식 UNIQUE와 upsert()의 ON CONFLICT가 문자 그대로 공유하는 표현식.
-_CONFLICT_EXPR = (
-    f"COALESCE(tenant_id, '{_NIL_UUID}'::uuid), scope, scope_ref, metric"
-)
+_CONFLICT_EXPR = f"COALESCE(tenant_id, '{_NIL_UUID}'::uuid), scope, scope_ref, metric"
 
 
 def _sql_list(values: tuple[str, ...]) -> str:
@@ -80,9 +79,7 @@ def upgrade() -> None:
         """
     )
     op.execute(f"CREATE UNIQUE INDEX ux_risk_limit_scope ON risk_limit ({_CONFLICT_EXPR})")
-    op.execute(
-        "CREATE INDEX ix_risk_limit_scope_ref ON risk_limit (scope, scope_ref)"
-    )
+    op.execute("CREATE INDEX ix_risk_limit_scope_ref ON risk_limit (scope, scope_ref)")
 
     op.execute(
         f"""
@@ -99,8 +96,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE INDEX ix_risk_limit_breach_limit ON risk_limit_breach "
-        "(limit_id, occurred_at DESC)"
+        "CREATE INDEX ix_risk_limit_breach_limit ON risk_limit_breach (limit_id, occurred_at DESC)"
     )
 
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON risk_limit TO {_APP_ROLE}")

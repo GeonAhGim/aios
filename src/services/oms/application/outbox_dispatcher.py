@@ -28,6 +28,7 @@ outbox DEAD 시점에 주문이 아직 `VALIDATED`면(어댑터 호출 0회 확�
 (reason=AUTH) 그대로 — 어댑터 호출 후(이미 SUBMITTED)라 `_finalize_submit`의
 `VENUE_REJECTED` 경로를 쓴다(`dispatch_outcome._VENUE_REJECT_KINDS` 참조).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -140,7 +141,9 @@ class OutboxDispatcher:
             )
         report.claimed = len(rows)
         send = {
-            "SUBMIT": self._send_submit, "CANCEL": self._send_cancel, "MODIFY": self._send_modify
+            "SUBMIT": self._send_submit,
+            "CANCEL": self._send_cancel,
+            "MODIFY": self._send_modify,
         }
         for row in rows:
             try:
@@ -149,7 +152,9 @@ class OutboxDispatcher:
                 # 리스를 잃은 뒤의 늦은 쓰기 — 다른 워커/복구가 이미 처리했다.
                 report.conflicts += 1
                 logger.warning(
-                    "outbox_dispatcher: 늦은 쓰기 거부 id=%s worker=%s", row.id, self._worker_id,
+                    "outbox_dispatcher: 늦은 쓰기 거부 id=%s worker=%s",
+                    row.id,
+                    self._worker_id,
                     extra=_dispatch_log_extra(
                         "oms.outbox.late_write_rejected", row, worker_id=self._worker_id
                     ),
@@ -158,7 +163,8 @@ class OutboxDispatcher:
                 # 행은 SENDING+lease로 남는다 → lease 만료 시 복구(§6 F2)가 UNKNOWN 처리.
                 report.errors += 1
                 logger.exception(
-                    "outbox_dispatcher: outbox_id=%s 처리 실패", row.id,
+                    "outbox_dispatcher: outbox_id=%s 처리 실패",
+                    row.id,
                     extra=_dispatch_log_extra("oms.outbox.dispatch_failed", row),
                 )
         return report
@@ -198,7 +204,12 @@ class OutboxDispatcher:
             ).startswith(NOT_SENT_PREFIX)
             if order.status is OrderStatus.VALIDATED:
                 order = await self._writes.transition(
-                    conn, row, order, OrderStatus.SUBMITTED, OrderEvent.SENT, None,
+                    conn,
+                    row,
+                    order,
+                    OrderStatus.SUBMITTED,
+                    OrderEvent.SENT,
+                    None,
                     {"sent_at": self._writes.clock()},
                 )
         adapter = await self._resolve_adapter(order.tenant_id, order.exchange)
@@ -218,11 +229,22 @@ class OutboxDispatcher:
         확정 불가 → `UNKNOWN`(resolver 대상)."""
         if order.status is OrderStatus.VALIDATED:
             await self._writes.transition(
-                conn, row, order, OrderStatus.FAILED, OrderEvent.SEND_ABANDONED, reason, {},
+                conn,
+                row,
+                order,
+                OrderStatus.FAILED,
+                OrderEvent.SEND_ABANDONED,
+                reason,
+                {},
             )
         else:
             await self._writes.transition(
-                conn, row, order, OrderStatus.UNKNOWN, OrderEvent.RESPONSE_LOST, reason,
+                conn,
+                row,
+                order,
+                OrderStatus.UNKNOWN,
+                OrderEvent.RESPONSE_LOST,
+                reason,
                 {"unknown_since": self._writes.clock()},
             )
 
@@ -236,8 +258,11 @@ class OutboxDispatcher:
             )
         )
         if decision.outcome is not GateOutcome.ALLOW:
-            logger.warning("outbox_dispatcher: 전송 게이트 거부 order_id=%s reasons=%s",
-                           order.order_id, decision.reason_codes)
+            logger.warning(
+                "outbox_dispatcher: 전송 게이트 거부 order_id=%s reasons=%s",
+                order.order_id,
+                decision.reason_codes,
+            )
             return False
         return True
 
@@ -255,22 +280,37 @@ class OutboxDispatcher:
         if kind is OutcomeKind.ACK:
             await w.done(conn, row)
             await w.transition(
-                conn, row, order, OrderStatus.ACKNOWLEDGED, OrderEvent.ACK, outcome.reason,
+                conn,
+                row,
+                order,
+                OrderStatus.ACKNOWLEDGED,
+                OrderEvent.ACK,
+                outcome.reason,
                 {"exchange_order_id": outcome.exchange_order_id},
             )
             report.acknowledged += 1
         elif kind is OutcomeKind.REJECTED:
             await w.done(conn, row)
             await w.transition(
-                conn, row, order, OrderStatus.REJECTED, OrderEvent.VENUE_REJECTED,
-                outcome.reason, {},
+                conn,
+                row,
+                order,
+                OrderStatus.REJECTED,
+                OrderEvent.VENUE_REJECTED,
+                outcome.reason,
+                {},
             )
             report.rejected += 1
         elif kind is OutcomeKind.UNKNOWN:  # §6 F3 — DONE(재전송 금지) + UNKNOWN
             await w.done(conn, row)
             await w.transition(
-                conn, row, order, OrderStatus.UNKNOWN, OrderEvent.RESPONSE_LOST,
-                outcome.reason, {"unknown_since": w.clock()},
+                conn,
+                row,
+                order,
+                OrderStatus.UNKNOWN,
+                OrderEvent.RESPONSE_LOST,
+                outcome.reason,
+                {"unknown_since": w.clock()},
             )
             report.unknown += 1
         elif kind is OutcomeKind.DEFER:  # §6 F4/F13 — attempt 불변, not_before 연기
@@ -278,8 +318,13 @@ class OutboxDispatcher:
             report.deferred += 1
         elif await w.retry_or_dead(conn, row, outcome):
             await w.transition(
-                conn, row, order, OrderStatus.UNKNOWN, OrderEvent.RESPONSE_LOST,
-                "OUTBOX_DEAD", {"unknown_since": w.clock()},
+                conn,
+                row,
+                order,
+                OrderStatus.UNKNOWN,
+                OrderEvent.RESPONSE_LOST,
+                "OUTBOX_DEAD",
+                {"unknown_since": w.clock()},
             )
             report.dead += 1
         else:
@@ -287,12 +332,20 @@ class OutboxDispatcher:
 
     async def _send_cancel(self, row: OutboxRow, report: DispatchReport) -> None:
         await send_cancel(
-            pool=self._pool, writes=self._writes, orders=self._orders,
-            resolve_adapter=self._resolve_adapter, row=row, counters=report,
+            pool=self._pool,
+            writes=self._writes,
+            orders=self._orders,
+            resolve_adapter=self._resolve_adapter,
+            row=row,
+            counters=report,
         )
 
     async def _send_modify(self, row: OutboxRow, report: DispatchReport) -> None:
         await send_modify(
-            pool=self._pool, writes=self._writes, orders=self._orders,
-            resolve_adapter=self._resolve_adapter, row=row, counters=report,
+            pool=self._pool,
+            writes=self._writes,
+            orders=self._orders,
+            resolve_adapter=self._resolve_adapter,
+            row=row,
+            counters=report,
         )

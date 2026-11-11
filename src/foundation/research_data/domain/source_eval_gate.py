@@ -5,6 +5,7 @@ Parsing lives in `source_eval_parse.py`; this module applies DoD invariants
 (a)/(c)/(e)/(f) fail-closed. No I/O. Public API re-exports parse types so
 callers/tests keep importing from this module.
 """
+
 from __future__ import annotations
 
 from src.foundation.research_data.domain.source_eval_parse import (

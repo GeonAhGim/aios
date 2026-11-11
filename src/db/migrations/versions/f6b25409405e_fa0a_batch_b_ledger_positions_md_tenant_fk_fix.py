@@ -37,6 +37,7 @@ REFERENCES tenant(` text lets the checker recognize that a table has
 already been corrected and stop counting the stale definition in the
 original file as an open defect (see check_audit_regressions.py).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

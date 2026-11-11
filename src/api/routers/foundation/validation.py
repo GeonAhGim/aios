@@ -8,6 +8,7 @@ strategy_id/version은 path에 둔다(어느 전략의 검증인지 URL만 보�
 도메인 예외는 여기서 잡지 않는다 — `src/api/contracts/exception_mapping.py`의
 `EXCEPTION_MAP`이 전역 핸들러에서 봉투로 번역한다(§9 PLT-21b decision,
 task-1218)."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

@@ -46,6 +46,7 @@ zero over time rather than in one leaf (task-2676 decision).
 Usage: `python scripts/check_idempotent_writes.py [--update]` (repo root).
 Exit code: 0 = pass, 2 = unexempted hits exceed baseline, 1 = input error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,9 +62,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASELINE = ROOT / "idempotent-writes-baseline.json"
 DEFAULT_SCAN_ROOTS = ("src", "scripts")
 
-_EXCLUDE_DIR_PARTS = (
-    ("src", "db", "migrations"),
-)
+_EXCLUDE_DIR_PARTS = (("src", "db", "migrations"),)
 _EXCLUDE_DIR_NAMES = frozenset(
     {".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache"}
 )

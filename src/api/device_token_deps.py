@@ -1,4 +1,5 @@
 """21번대 — 디바이스 토큰 서비스 팩토리 의존성."""
+
 from __future__ import annotations
 
 import asyncpg

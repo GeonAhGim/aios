@@ -13,6 +13,7 @@ a time after returns the corrected value — this is possible because both
 remain in the store (had it been an UPDATE, the pre-correction value would
 have been lost forever).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

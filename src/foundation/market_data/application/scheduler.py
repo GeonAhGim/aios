@@ -21,6 +21,7 @@ so it operates only on the `watched: Sequence[WatchedSeries]` passed explicitly
 by the caller (default empty sequence — performs quality metrics export only).
 Operational symbol lists and credential wiring are subsequent (§10, undetermined).
 """
+
 from __future__ import annotations
 
 import asyncio

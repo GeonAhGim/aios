@@ -20,6 +20,7 @@ This module only builds the request and parses the response envelope --
 normalization of frequency/unit/publication-lag is fully delegated to
 `domain/macro_series.py` (this file may do I/O, that one may not, L0-2).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

@@ -1,6 +1,7 @@
 """GetChartLayout query — returns 404 for both not-found and cross-tenant
 (`ChartLayoutNotFoundError`/`CrossTenantChartLayoutAccessError`, both
 mapped to RESOURCE_NOT_FOUND)."""
+
 from __future__ import annotations
 
 from uuid import UUID

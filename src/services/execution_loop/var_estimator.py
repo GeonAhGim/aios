@@ -10,6 +10,7 @@ var_cornish_fisher}.py`(R-18~R-20, task-104 5ec19fb)에 위임한다 — VaR/ES
 스케일링은 전부 `risk_stats.returns.scale_sigma`(하위 호출부에서 사용)에
 위임되므로 이 어댑터가 직접 시간 단위를 계산하지 않는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -66,16 +67,22 @@ def estimate_portfolio_var_es(
         r = returns_by_symbol[symbols[0]]
         if method == VarMethod.PARAMETRIC:
             return parametric_var_es(
-                r, confidence=policy.confidence, horizon_days=horizon_days,
+                r,
+                confidence=policy.confidence,
+                horizon_days=horizon_days,
                 bars_per_day=bars_per_day_count,
             )
         if method == VarMethod.HISTORICAL:
             return historical_var_es(
-                r, confidence=policy.confidence, horizon_days=horizon_days,
+                r,
+                confidence=policy.confidence,
+                horizon_days=horizon_days,
                 bars_per_day=bars_per_day_count,
             )
         return cornish_fisher_var_es(
-            r, confidence=policy.confidence, horizon_days=horizon_days,
+            r,
+            confidence=policy.confidence,
+            horizon_days=horizon_days,
             bars_per_day=bars_per_day_count,
         )
 
@@ -85,7 +92,11 @@ def estimate_portfolio_var_es(
 
     if method in (VarMethod.PARAMETRIC, VarMethod.HISTORICAL):
         return portfolio_var_es(
-            method, R, w, confidence=policy.confidence, horizon_days=horizon_days,
+            method,
+            R,
+            w,
+            confidence=policy.confidence,
+            horizon_days=horizon_days,
             bars_per_day=bars_per_day_count,
         )
 
@@ -96,6 +107,8 @@ def estimate_portfolio_var_es(
     if pr.size < 3:
         return None
     return cornish_fisher_var_es(
-        pr, confidence=policy.confidence, horizon_days=horizon_days,
+        pr,
+        confidence=policy.confidence,
+        horizon_days=horizon_days,
         bars_per_day=bars_per_day_count,
     )

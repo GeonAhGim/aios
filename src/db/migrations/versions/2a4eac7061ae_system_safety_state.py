@@ -11,6 +11,7 @@ Spec: 04_db_schema_v1.7.md (System Safety State, FD-9.4/9.4b)
 reactivation_approval_id의 FK는 approval_requests 테이블 생성 후(다음
 마이그레이션) ALTER TABLE로 추가한다(순환 없음 — 단순히 순서 문제).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

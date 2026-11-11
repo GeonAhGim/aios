@@ -22,6 +22,7 @@ MIN_CASH_BUFFER, ALLOWED_AUTONOMY, FORBIDDEN_ASSET, MAX_DAILY_LOSS)만
 구현한다 — 45번 §1의 8개 section(Objective/Risk Budget/Liquidity/Universe/
 Exposure/Leverage/Autonomy/Values·Tax) 전체를 지금 다 만들지 않는다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -80,9 +81,7 @@ def upgrade() -> None:
         "ALTER TABLE portfolio_mandate ADD CONSTRAINT fk_portfolio_mandate_active_revision "
         "FOREIGN KEY (active_revision_id) REFERENCES mandate_revision(id)"
     )
-    op.execute(
-        "CREATE INDEX ix_mandate_revision_mandate_id ON mandate_revision (mandate_id)"
-    )
+    op.execute("CREATE INDEX ix_mandate_revision_mandate_id ON mandate_revision (mandate_id)")
     op.execute(
         """
         CREATE TABLE policy_bundle (
@@ -125,8 +124,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP TABLE policy_decision")
     op.execute("DROP TABLE policy_bundle")
-    op.execute(
-        "ALTER TABLE portfolio_mandate DROP CONSTRAINT fk_portfolio_mandate_active_revision"
-    )
+    op.execute("ALTER TABLE portfolio_mandate DROP CONSTRAINT fk_portfolio_mandate_active_revision")
     op.execute("DROP TABLE mandate_revision")
     op.execute("DROP TABLE portfolio_mandate")

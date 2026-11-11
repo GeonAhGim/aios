@@ -14,6 +14,7 @@ R-48(PM 결정, 2026-09-03) — 참조가 *하나도* 없으면(크립토는 독
 — 게이트가 신규 진입을 영구히 막게 된다. 대신 `DEGRADED_SINGLE_SOURCE`로
 분리해 피드 비교는 건너뛰고 통계 검사만 적용, 실패 시에만(이례적 급변)
 DISTRUSTED로 격상한다."""
+
 from __future__ import annotations
 
 import logging
@@ -50,9 +51,7 @@ def _realized_volatility(candles: list[Candle]) -> Decimal:
     closes = [c.close for c in candles]
     returns = [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
     mean_return: Decimal = sum(returns, Decimal("0")) / len(returns)
-    variance: Decimal = sum(((r - mean_return) ** 2 for r in returns), Decimal("0")) / len(
-        returns
-    )
+    variance: Decimal = sum(((r - mean_return) ** 2 for r in returns), Decimal("0")) / len(returns)
     result: Decimal = variance.sqrt()
     return result
 
@@ -78,9 +77,7 @@ class DataDistrustMonitor:
     def current_level(self, symbol: str) -> DataDistrustLevel:
         return self._level.get(symbol, DataDistrustLevel.NORMAL)
 
-    def restore(
-        self, symbol: str, level: DataDistrustLevel, since: float | None = None
-    ) -> None:
+    def restore(self, symbol: str, level: DataDistrustLevel, since: float | None = None) -> None:
         """R-48 — 재시작 후 영속 상태에서 인메모리 상태를 복원(기동 시 1회,
         distrust_wiring.py). `since`는 절대시각이 아니라 EXIT 타이머 경과
         초(모노토닉은 재시작마다 0 리셋 — wall-clock 직접대입 불가, 호출부가

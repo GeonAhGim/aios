@@ -44,13 +44,10 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE INDEX idx_chart_indicator_template_tenant "
-        "ON chart_indicator_template(tenant_id)"
+        "CREATE INDEX idx_chart_indicator_template_tenant ON chart_indicator_template(tenant_id)"
     )
 
-    op.execute(
-        f"GRANT SELECT, INSERT, UPDATE, DELETE ON chart_indicator_template TO {_APP_ROLE}"
-    )
+    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON chart_indicator_template TO {_APP_ROLE}")
 
     # Same tenant_isolation policy as PLT-30 M5 (b3c7f19ad2e6) / CH-5 (e1d9b5ed8d7d).
     op.execute(

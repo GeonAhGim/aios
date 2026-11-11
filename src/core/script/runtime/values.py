@@ -10,6 +10,7 @@ fall within the domain. All mismatches raise `ScriptRuntimeError` (fail-closed).
 Called at host inputs, builtin return values, and declaration boundaries
 (let/signal/plot/order).
 """
+
 from __future__ import annotations
 
 from src.core.script.runtime.series import ScriptRuntimeError, Series, Value

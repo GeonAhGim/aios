@@ -9,6 +9,7 @@ R7 — "체결 정규화 정밀도" — Decimal, 부분체결 누적 평균가·
 이 domain 함수는 그 믹스인이 만들어 넘겨줄 **venue-중립 최소 키 집합**만
 계약으로 받는다(아래 필수 키 목록) — I/O도, venue별 분기도 없다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

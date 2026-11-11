@@ -25,6 +25,7 @@ the same `RedistributionViolationError` (RD_REDISTRIBUTION_DENIED, 403) --
 the caller does not get to distinguish "wrong license" from "wrong tier"
 and retry, both are not-retryable denials.
 """
+
 from __future__ import annotations
 
 from src.foundation.market_data.api import DataUse, SourceContractGrant, permits_use

@@ -37,6 +37,7 @@ persist it itself (no I/O, pure function per module-table `domain/`
 convention) -- the caller decides what "recording" the reason means
 (an audit row, a structured log line).
 """
+
 from __future__ import annotations
 
 import math
@@ -212,9 +213,7 @@ def plan_vwap_schedule(
             scheduled_at=scheduled_at,
             limit_price=parent.algo.limit_price,
         )
-        for index, (qty, scheduled_at) in enumerate(
-            zip(planned_qtys, scheduled_ats, strict=True)
-        )
+        for index, (qty, scheduled_at) in enumerate(zip(planned_qtys, scheduled_ats, strict=True))
         if qty > 0
     ]
     return VwapPlanResult(

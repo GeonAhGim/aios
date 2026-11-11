@@ -9,6 +9,7 @@ validation itself is a pure function independent of layout_id, so swapping
 the order would produce the same result — but we still explicitly follow
 the order of calling `load_owned_layout()` first (same principle as
 get_drawings.py and update_layout.py)."""
+
 from __future__ import annotations
 
 from typing import Any

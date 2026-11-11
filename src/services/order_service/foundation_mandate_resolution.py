@@ -10,6 +10,7 @@ calls this at `gate()` entry to ask H-1a's `resolve_binding.
 resolve_mandate_revision` for the tenant's currently bound revision before
 falling through to its own "no mandate" branch.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace

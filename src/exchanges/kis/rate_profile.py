@@ -168,9 +168,7 @@ def build_token_bucket(
     with _BUCKET_REGISTRY_LOCK:
         bucket = _BUCKET_REGISTRY.get(key)
         if bucket is None:
-            bucket = get_rate_limit(account_type, group).new_bucket(
-                observer=observer, sleep=sleep
-            )
+            bucket = get_rate_limit(account_type, group).new_bucket(observer=observer, sleep=sleep)
             _BUCKET_REGISTRY[key] = bucket
         return bucket
 

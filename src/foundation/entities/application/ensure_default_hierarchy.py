@@ -29,6 +29,7 @@ documented contract ("caller must re-query and retry") -- the winner's row
 is what both callers converge on, so the function stays idempotent under
 concurrency and not just under sequential retries.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -58,9 +59,7 @@ class EntityBootstrapRepository(Protocol):
 
     async def create_portfolio(self, portfolio: Portfolio) -> Portfolio: ...
 
-    async def get_sub_account(
-        self, tenant_id: UUID, sub_account_id: UUID
-    ) -> SubAccount | None: ...
+    async def get_sub_account(self, tenant_id: UUID, sub_account_id: UUID) -> SubAccount | None: ...
 
     async def create_sub_account(self, sub_account: SubAccount) -> SubAccount: ...
 

@@ -36,6 +36,7 @@ tr_id 오름차순 정렬, 고정 폭 텍스트랩(textwrap), 라인 예산 기�
 사용: `python scripts/kis_generate_adapters.py` (저장소 루트에서). 종료코드
 0=생성 완료, 1=입력 오류(기준 목록 없음/형식 오류/미지원 메서드).
 """
+
 from __future__ import annotations
 
 import importlib.util

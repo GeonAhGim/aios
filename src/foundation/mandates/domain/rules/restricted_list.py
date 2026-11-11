@@ -12,6 +12,7 @@ un-checkable order through).
 match — no ticker/exchange-suffix normalization (that belongs to a future
 market-abuse/exclusion-list-source leaf, not this one).
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping

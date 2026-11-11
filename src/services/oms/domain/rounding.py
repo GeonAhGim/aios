@@ -2,6 +2,7 @@
 
 Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-A, §9 L4-03.
 """
+
 from __future__ import annotations
 
 from decimal import ROUND_DOWN, ROUND_UP, Decimal

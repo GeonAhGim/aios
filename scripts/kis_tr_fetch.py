@@ -19,6 +19,7 @@ BR-11(ADR-2026-09-06-I D7). 어댑터 메서드를 생성하려면 tr_id만으�
 path·method·params·응답필드까지 스냅샷에 박혀 있으므로, 이후 어댑터 생성(BR-12)은
 이 JSON만 읽으면 되고 다시 네트워크를 탈 필요가 없다(오프라인 재생성 가능).
 """
+
 from __future__ import annotations
 
 import json

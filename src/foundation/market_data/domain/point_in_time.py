@@ -14,6 +14,7 @@ open at a given instant -- is not reimplemented here. It is delegated to
 out-ranks it by carrying a later `known_at`). No I/O happens in this
 module; reading/writing rows is the adapter's job.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

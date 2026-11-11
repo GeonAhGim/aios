@@ -6,6 +6,7 @@ Delegates directly to `session_repository.revoke()` / `revoke_all_for_user()` (P
 both are already idempotent (condition on `revoked_at IS NULL`), so this layer
 adds only a reason string and ownership check.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

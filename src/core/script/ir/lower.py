@@ -30,6 +30,7 @@ lower. `ScriptLowerError` signals that this contract was broken (or an
 unspecified constant was encountered); HTTP mapping (400 / 500) is defined
 by the `POST /scripts/compile` (DSL-12) contract (TBD).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

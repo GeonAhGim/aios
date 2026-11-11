@@ -22,6 +22,7 @@ outside this module that assembles a `position_key` string directly via
 f-string/concat — this class (and `.parse()`) is the only legitimate
 construction path.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -57,14 +58,17 @@ class PositionKey:
                     f"{name}에 구분자({_DELIMITER!r})를 포함할 수 없습니다: {value!r}"
                 )
         if not isinstance(self.portfolio_id, UUID):
-            raise InvalidPositionKeyError(
-                f"portfolio_id는 UUID여야 합니다: {self.portfolio_id!r}"
-            )
+            raise InvalidPositionKeyError(f"portfolio_id는 UUID여야 합니다: {self.portfolio_id!r}")
 
     def __str__(self) -> str:
         return _DELIMITER.join(
-            (self.venue, self.instrument_id, self.strategy_id, self.execution_id,
-             str(self.portfolio_id))
+            (
+                self.venue,
+                self.instrument_id,
+                self.strategy_id,
+                self.execution_id,
+                str(self.portfolio_id),
+            )
         )
 
     @classmethod

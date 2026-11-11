@@ -7,6 +7,7 @@ Does not call `time.time` directly; injects `clock: Callable[[], float]`
 so tests can deterministically reproduce round-trip time and skew with a
 fake clock.
 """
+
 from __future__ import annotations
 
 import asyncio

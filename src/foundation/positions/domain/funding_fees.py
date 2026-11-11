@@ -15,6 +15,7 @@ to [[fx.convert]] — if the rate is missing or stale, an exception propagates
 (no silent fallback), using the same taxonomy as [[fx]] (`POS_FX_RATE_MISSING`).
 Pure functions only — no direct I/O or clock calls.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta

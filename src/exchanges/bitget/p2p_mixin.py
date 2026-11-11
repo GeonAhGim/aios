@@ -10,6 +10,7 @@ Spec: 02c_bitget_api_v2_extended_spec_v1.md §1.3, §2(작업 분해 8번)
 - GET /api/v2/p2p/orderList
 - GET /api/v2/p2p/merchantList
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -27,9 +28,7 @@ class BitgetP2PMixin:
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(
-            "GET", "/api/v2/p2p/advList", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/p2p/advList", params=params or None)
         return list(raw["data"])
 
     async def get_p2p_merchant_info(self: SignedRequestClient) -> dict[str, Any]:
@@ -42,9 +41,7 @@ class BitgetP2PMixin:
         params: dict[str, Any] = {"limit": str(limit)}
         if status is not None:
             params["status"] = status
-        raw = await self._request(
-            "GET", "/api/v2/p2p/orderList", params=params
-        )
+        raw = await self._request("GET", "/api/v2/p2p/orderList", params=params)
         return list(raw["data"])
 
     async def get_p2p_merchants(
@@ -55,7 +52,5 @@ class BitgetP2PMixin:
         params: dict[str, Any] = {}
         if coin is not None:
             params["coin"] = coin.upper()
-        raw = await self._request(
-            "GET", "/api/v2/p2p/merchantList", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/p2p/merchantList", params=params or None)
         return list(raw["data"])

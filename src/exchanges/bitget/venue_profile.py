@@ -44,6 +44,7 @@ unchanged from Classic (`account_mode.py`/`adapter.py` reuse `_headers()`
 as-is); only the account-mode-specific endpoint paths differ (see
 `docs/design/02d_bitget_uta_v3_spec_v1.md`).
 """
+
 from __future__ import annotations
 
 from datetime import date

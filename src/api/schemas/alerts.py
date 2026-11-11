@@ -1,4 +1,5 @@
 """FD-14(신설) — 가격/지표 알림 API 요청 스키마."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel

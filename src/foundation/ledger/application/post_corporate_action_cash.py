@@ -34,6 +34,7 @@ requires posting "CASH_DIVIDEND with amount>0"; there is no basis for
 turning a non-positive amount into a journal entry (`PostingLine.amount`
 must also always be `> 0`, §3.3).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

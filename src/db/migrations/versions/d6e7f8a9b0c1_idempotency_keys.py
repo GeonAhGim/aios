@@ -12,6 +12,7 @@ Spec: 15번 문서 §15.1(금전 관련 POST에 Idempotency-Key 적용 원칙)
 필요해져 지금 신설한다. 응답을 그대로 캐시해뒀다가 동일 키 재요청 시
 새 부작용(예: 중복 구매) 없이 그대로 반환한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

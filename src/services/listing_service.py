@@ -22,6 +22,7 @@ instead, admin registration publishes directly to LISTED (see method docstring).
 commission.py is still reused — we decided to treat it under the same commission
 structure.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -138,9 +139,7 @@ class ListingService:
 
     async def submit_for_verification(self, listing_id: int, seller_user_id: UUID) -> Listing:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM strategy_listings WHERE id = $1", listing_id
-            )
+            row = await conn.fetchrow("SELECT * FROM strategy_listings WHERE id = $1", listing_id)
             if row is None:
                 raise ListingError("존재하지 않는 리스팅입니다.")
             if row["seller_user_id"] != seller_user_id:

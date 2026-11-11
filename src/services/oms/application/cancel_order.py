@@ -21,6 +21,7 @@ fail-closed 거부된다(DoD "이미 종료된 주문의 취소는 표 밖 전�
 전혀 건드리지 않으므로 PARTIALLY_FILLED 주문의 취소는 이미 체결된 수량을
 되돌리지 않고 그대로 둔 채 취소 요청만 기록한다.
 """
+
 from __future__ import annotations
 
 import hashlib

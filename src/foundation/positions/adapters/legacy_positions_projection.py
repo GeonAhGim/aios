@@ -19,6 +19,7 @@ uses `INNER JOIN`, snapshots whose legacy row is not yet linked quietly
 drop from results (empty list, not an exception) — callers need not
 prepare for exceptions assuming existence.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

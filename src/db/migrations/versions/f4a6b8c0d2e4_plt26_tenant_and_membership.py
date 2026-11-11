@@ -10,6 +10,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md §2 DDL, §9 PLT-
 OWNER membership을 함께 만든다(§3.5 "PERSONAL tenant에 한해 유지"). 신규
 household/organization tenant 생성은 이 리프의 범위 밖(PLT-27~29).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

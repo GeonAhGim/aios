@@ -13,6 +13,7 @@ adapter 클래스(`PostgresAuditEventRepository`)·순수 함수
 아니므로(교차 애그리게잇일 때만 검사됨) 여기서는 그대로 재노출만 한다 —
 객체 identity가 그대로 유지되어 런타임 동작은 바뀌지 않는다.
 """
+
 from __future__ import annotations
 
 from src.foundation.evidence.adapters.postgres_repository import PostgresAuditEventRepository

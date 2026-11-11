@@ -21,6 +21,7 @@ this signature, so wiring is possible. However, the real trigger for this genera
 an API without knowing who fills in the corroboration signals would be speculative
 implementation.)
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

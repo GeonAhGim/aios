@@ -17,6 +17,7 @@ actually produces. Documented simplification, not verified against a two-sided
 count to day count, so "day" here means "bar"; documented simplification, matches
 the constant name literally rather than guessing a timeframe).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,7 +32,11 @@ from src.foundation.backtest.domain.models import BacktestConfig, BacktestMetric
 __all__ = ["REQUIRED_SCENARIOS", "StressError", "StressReport", "run_stress"]
 
 REQUIRED_SCENARIOS: tuple[str, ...] = (
-    "COST_X2", "COST_X3", "SLIPPAGE_PLUS_50BPS", "WORST_5_DAYS_REMOVED", "GAP_2PCT",
+    "COST_X2",
+    "COST_X3",
+    "SLIPPAGE_PLUS_50BPS",
+    "WORST_5_DAYS_REMOVED",
+    "GAP_2PCT",
 )
 
 _GAP_PCT = Decimal("0.02")
@@ -69,7 +74,9 @@ def run_stress(
 
 
 def _apply_scenario(
-    name: str, base_config: BacktestConfig, bars: list[Candle],
+    name: str,
+    base_config: BacktestConfig,
+    bars: list[Candle],
 ) -> tuple[BacktestConfig, list[Candle]]:
     if name == "COST_X2":
         return _scaled_cost(base_config, Decimal(2)), bars
@@ -89,9 +96,12 @@ def _apply_scenario(
 
 def _scaled_cost(base_config: BacktestConfig, multiplier: Decimal) -> BacktestConfig:
     cost = base_config.cost_model
-    scaled = cost.model_copy(update={
-        "fee_bps": cost.fee_bps * multiplier, "slippage_bps": cost.slippage_bps * multiplier,
-    })
+    scaled = cost.model_copy(
+        update={
+            "fee_bps": cost.fee_bps * multiplier,
+            "slippage_bps": cost.slippage_bps * multiplier,
+        }
+    )
     return base_config.model_copy(update={"cost_model": scaled})
 
 

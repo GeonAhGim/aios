@@ -26,6 +26,7 @@ CONFLICT DO NOTHING"을 그대로 구현한다: 충돌 시 새로 만들지 않�
 어댑터는 그 값을 영속화하지 않는다(호출자의 `PAYOUT_PAID` 분개 사건이
 이미 그 값을 검증했다, `posting_rules._payout_paid`).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

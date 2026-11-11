@@ -7,6 +7,7 @@ string and knows nothing about this port — this port is the storage
 contract the `application/authorize_source_access.py` gate reads before a
 call.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

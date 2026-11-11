@@ -31,6 +31,7 @@ table is a decision of this leaf (the spec §9 row does not specify a storage
 source). The DC-9 policy implementation reads the same table more granularly,
 so the source will match.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

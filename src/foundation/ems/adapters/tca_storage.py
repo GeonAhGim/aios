@@ -44,6 +44,7 @@ action)` (it is a general-purpose audit log, many actions can share an
 aggregate_revision), so without holding that lock across both steps two
 concurrent calls could both pass the existence check and each insert a row.
 """
+
 from __future__ import annotations
 
 import json

@@ -13,6 +13,7 @@ AIOS 자체 멀티테넌시(FD-11/12)와는 별개 개념 — 이건 **Bitget �
 - GET  /api/v2/account/sub-account-assets
 - POST /api/v2/spot/wallet/subaccount-transfer
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -58,8 +59,8 @@ class BitgetSubaccountMixin:
         """레드팀 #2026-09-02-34 — `permissions`를 생략해도 Bitget의
         미지정 시 기본값에 맡기지 않고 명시적으로 최소권한(read)을
         보낸다. 실제 필요한 권한을 아는 호출부는 그대로 지정하면 된다."""
-        resolved_permissions = permissions if permissions is not None else (
-            _DEFAULT_SUBACCOUNT_PERMISSIONS
+        resolved_permissions = (
+            permissions if permissions is not None else (_DEFAULT_SUBACCOUNT_PERMISSIONS)
         )
         body: dict[str, Any] = {
             "subAccountUid": subaccount_uid,

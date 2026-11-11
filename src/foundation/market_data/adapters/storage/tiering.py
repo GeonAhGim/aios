@@ -37,6 +37,7 @@ the `hot.read_year` snapshot, those rows can be deleted too (without ever
 being promoted) — serializing against concurrent backfills is out of scope
 for this leaf (it assumes a single-worker batch job).
 """
+
 from __future__ import annotations
 
 import hashlib

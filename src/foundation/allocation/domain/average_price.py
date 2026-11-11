@@ -19,6 +19,7 @@ FA-A3 "average-price weighted-sum error ≤ 1 minimum unit" is verified by
 that leak into the price side are caught here. Decimal-only arithmetic
 (quantize applied exactly once during final average-price computation; floats prohibited).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

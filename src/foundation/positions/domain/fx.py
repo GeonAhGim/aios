@@ -12,6 +12,7 @@ directly express the `(m.currency, to)` pair (base→quote) or in reverse
 in advance. Pure function only — no I/O or clock calls; staleness judgment
 is passed by the caller via the `now` argument.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

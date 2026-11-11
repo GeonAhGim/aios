@@ -26,6 +26,7 @@ masquerading as a pass. On mismatch it is flagged `MP_UNVERIFIED_RESULT`,
 and `count_verified_backtests()` excludes that entry from the reputation
 tally — when in doubt, do not add it.
 """
+
 from __future__ import annotations
 
 import hashlib

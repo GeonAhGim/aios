@@ -2,6 +2,7 @@
 
 Spec: 03_core_modules_v1.1.md#§3.3
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field

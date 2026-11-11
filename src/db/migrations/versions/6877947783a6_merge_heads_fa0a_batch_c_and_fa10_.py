@@ -7,6 +7,7 @@ Create Date: 2026-09-07 15:28:48.259852
 No-op merge: both branches landed independently on top of c6a3d8f14b92 and
 touch disjoint tables, so there is nothing to reconcile.
 """
+
 from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.

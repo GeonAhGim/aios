@@ -9,6 +9,7 @@ the day-of-week + exception combination. `load()` queries only that exception se
 assemble the `VenueCalendar`; regular session specs (tz/open time/day-of-week) are
 reused directly from `known_venues.KNOWN_SESSIONS`(LA-3) (no duplicate value definitions).
 """
+
 from __future__ import annotations
 
 from datetime import date, time

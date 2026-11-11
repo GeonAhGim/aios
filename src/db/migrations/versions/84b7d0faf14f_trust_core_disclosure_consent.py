@@ -26,6 +26,7 @@ FND-01 범위로 명시하지만, 이 리프는 그 둘을 의도적으로 제�
 이번 리프는 disclosure/consent만 다룬다 — Trust Core 중 지금 코드베이스에
 정말로 없는, 순수하게 새로운 부분이다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

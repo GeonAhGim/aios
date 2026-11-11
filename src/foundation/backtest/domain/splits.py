@@ -11,6 +11,7 @@ test folds. Anchored mode keeps every split's train window starting at bar 0
 forward with the test folds. Either way `test.start - train.stop == purge + embargo`
 exactly, by construction, for every split.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -98,10 +99,14 @@ def make_splits(
         test_end = test_start + this_test_size
         train_end = test_start - gap
         train_start = 0 if mode == "anchored" else train_end - min_train
-        splits.append(Split(
-            train=range(train_start, train_end), test=range(test_start, test_end),
-            purge=purge, embargo=embargo,
-        ))
+        splits.append(
+            Split(
+                train=range(train_start, train_end),
+                test=range(test_start, test_end),
+                purge=purge,
+                embargo=embargo,
+            )
+        )
     return splits
 
 

@@ -22,6 +22,7 @@ PLT-33(§10-8): `exchange_credentials` UNIQUE가 (user_id, exchange, scope)로
 API가 권한범위 조회를 지원하지 않는 경우 → 경고 문구로 대체") 항상
 경고를 반환한다(거짓으로 "확인됨"이라 주장하지 않는다).
 """
+
 from __future__ import annotations
 
 import json
@@ -162,8 +163,11 @@ class ExchangeCredentialService:
             # api_key/api_secret/extra 값은 절대 남기지 않는다 — 어느
             # 거래소에 등록했는지와 결과만.
             await record_audit_log(
-                conn, actor_agent=str(user_id), action_type="exchange_credential.registered",
-                user_id=user_id, decision_data={"exchange": exchange, "scope": _SCOPE},
+                conn,
+                actor_agent=str(user_id),
+                action_type="exchange_credential.registered",
+                user_id=user_id,
+                decision_data={"exchange": exchange, "scope": _SCOPE},
             )
         return CredentialSummary(
             id=row["id"],
@@ -188,8 +192,11 @@ class ExchangeCredentialService:
                     f"활성 상태인 {exchange} 자격증명이 없습니다."
                 )
             await record_audit_log(
-                conn, actor_agent=str(user_id), action_type="exchange_credential.revoked",
-                user_id=user_id, decision_data={"exchange": exchange, "scope": _SCOPE},
+                conn,
+                actor_agent=str(user_id),
+                action_type="exchange_credential.revoked",
+                user_id=user_id,
+                decision_data={"exchange": exchange, "scope": _SCOPE},
             )
 
     async def list_for_user(self, user_id: UUID) -> list[CredentialSummary]:

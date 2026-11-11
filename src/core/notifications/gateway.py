@@ -13,6 +13,7 @@ Deviation: Actual email/push senders (SMTP · FCM/APNs) are still undetermined
 (worktree #16) does not exist yet, so notification table records receive the
 asyncpg pool directly (same pattern as audit_log.py).
 """
+
 from __future__ import annotations
 
 import json

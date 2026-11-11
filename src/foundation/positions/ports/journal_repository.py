@@ -11,6 +11,7 @@ assumes the adapter will fill in as-yet-unassigned fields (`sequence_no`/`prev_h
 `entry_hash`/`id`/`recorded_at`) under an advisory lock scoped to `position_key`,
 so those fields appear only in the returned `PositionJournalEntryView`, not as inputs.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

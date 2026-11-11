@@ -4,6 +4,7 @@ Spec: 03_core_modules_v1.1.md#§3.1
 
 Principle 6.5 — Do not interpret data or make investment decisions. Read only.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

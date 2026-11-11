@@ -24,6 +24,7 @@ tenant_transaction() serves as a second defense line for when the production
 DSN switches to a non-superuser role (same rationale as
 `transition_connection_state` in postgres_repository.py).
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -86,8 +87,7 @@ class _SnapshotHealthMixin:
             # (same target row). No separate round-trip between re-assertion and
             # write means no TOCTOU gap.
             row = await conn.fetchrow(
-                "SELECT state FROM account_connection WHERE id = $1 AND tenant_id = $2 "
-                "FOR UPDATE",
+                "SELECT state FROM account_connection WHERE id = $1 AND tenant_id = $2 FOR UPDATE",
                 connection_id,
                 tenant_id,
             )

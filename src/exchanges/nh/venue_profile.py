@@ -23,6 +23,7 @@ published tick-size rule -- a broker-agnostic exchange rule) -- see the
 `kis/venue_profile.py` docstring. Not queried live in this session, so
 `verified=False` (§9 L4-04 DoD c, subject to adversarial testing).
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -39,9 +40,7 @@ from src.services.oms.domain.venue_profile import (
 
 VENUE = "nh"
 
-_KRX_TICK_RULE_URL = (
-    "https://law.krx.co.kr (유가증권시장 업무규정 시행세칙 별표 - 호가가격단위)"
-)
+_KRX_TICK_RULE_URL = "https://law.krx.co.kr (유가증권시장 업무규정 시행세칙 별표 - 호가가격단위)"
 
 NH_SYMBOL_SNAPSHOTS: dict[str, SymbolSnapshot] = {
     "005930.KS": SymbolSnapshot(

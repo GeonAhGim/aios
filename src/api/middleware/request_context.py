@@ -12,6 +12,7 @@ At request end, emits one `event=http_request_completed` log line (108 §2 8 fie
 is registered in `main.py` — registering the parent `RequestIdMiddleware` separately
 would set `X-Request-ID` twice (harmless but unnecessary, see §2.1 table).
 """
+
 from __future__ import annotations
 
 import logging

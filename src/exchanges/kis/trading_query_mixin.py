@@ -10,6 +10,7 @@ precedent). The existing 4 methods (get_buyable_amount, etc.) are a pure
 move; `get_open_orders`/`get_order_history`/`find_order_by_match` are the
 new logic in this leaf (§6 F5-b UNKNOWN reverse lookup).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -189,9 +190,7 @@ class KISTradingQueryMixin:
                 "EXCG_ID_DVSN_CD": _EXCHANGE_ID,
             },
         )
-        orders = [
-            row_to_order(row, order_date=order_date) for row in raw.get("output1", [])
-        ]
+        orders = [row_to_order(row, order_date=order_date) for row in raw.get("output1", [])]
         return [o for o in orders if symbol is None or o.symbol == symbol]
 
     async def find_order_by_match(

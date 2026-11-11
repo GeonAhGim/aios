@@ -11,6 +11,7 @@
 DB에 연결하지 않는다 — CI worktree에 DB가 없어도 동작해야 한다(PLT-38 decision).
 사용: `python scripts/check_migration_chain.py`. 종료코드 0=통과.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -130,9 +131,9 @@ def find_chain_issues(versions_dir: Path) -> list[str]:
             issues.append(f"revision 식별 불가(정적 파싱 실패): {path.name}")
             continue
         if record.revision in records:
-            duplicate_paths.setdefault(
-                record.revision, [records[record.revision].path]
-            ).append(path)
+            duplicate_paths.setdefault(record.revision, [records[record.revision].path]).append(
+                path
+            )
             continue
         records[record.revision] = record
 

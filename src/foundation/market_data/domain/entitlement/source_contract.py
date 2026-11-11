@@ -25,6 +25,7 @@ table) belongs to `ports/source_contract_repository.py` +
 adapters that only know `source_id` belongs to
 `application/authorize_source_access.py`.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

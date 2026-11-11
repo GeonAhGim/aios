@@ -9,6 +9,7 @@ Spec: 02d_kis_api_full_spec_v1.md §4, §7(작업 분해 5번)
 domestic_stock/inquire_elw_price, 2026-09-02 WebFetch 확인) 그대로:
 GET /uapi/domestic-stock/v1/quotations/inquire-elw-price (FHKEW15010000).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

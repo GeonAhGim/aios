@@ -32,6 +32,7 @@ WORM 충돌 사전 결정(decision에 명시된 사실 확인, information_schem
 `orders.user_id`와 같은 역할(사용자 식별)을 한다 — 백필 조회 키로 그대로
 쓴다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

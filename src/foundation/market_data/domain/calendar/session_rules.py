@@ -6,6 +6,7 @@ DB·yaml 읽기는 `adapters/postgres_calendar_repository.py`·
 `adapters/yaml_calendar_source.py`(LA-12) 소관). 타임존은 표준 `zoneinfo`만
 쓴다(107번: 새 의존성 추가 금지).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

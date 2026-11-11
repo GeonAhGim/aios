@@ -12,6 +12,7 @@ override language.
 rows are grid points in `points` order, columns are per-block total-return-pct over
 `n_blocks` equal contiguous slices of each point's equity curve.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

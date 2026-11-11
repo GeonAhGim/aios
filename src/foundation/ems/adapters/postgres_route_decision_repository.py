@@ -10,6 +10,7 @@ pattern as `foundation/connections/adapters/postgres_snapshot_mixin.py` --
 the losing side of a race is not an error, it is a normal duplicate-attempt
 outcome and gets back the row the winner inserted.
 """
+
 from __future__ import annotations
 
 import json
@@ -80,7 +81,5 @@ class PostgresRouteDecisionRepository:
 
     async def get_by_order_id(self, order_id: UUID) -> RouteDecisionRecord | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM route_decisions WHERE order_id = $1", order_id
-            )
+            row = await conn.fetchrow("SELECT * FROM route_decisions WHERE order_id = $1", order_id)
         return _row_to_record(row) if row is not None else None

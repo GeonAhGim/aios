@@ -3,6 +3,7 @@
 Spec: AIOSproject 73_trust_core_l3_build_and_operational_specification_v1.0.md §2.1,
 106_module_scaffold_and_naming_standard_v1.0.md §2.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

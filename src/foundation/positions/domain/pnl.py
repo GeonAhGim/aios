@@ -19,6 +19,7 @@ way that creates a residual). Per §3.4, base-currency PnL amounts are never
 rounded at storage time, so this function does not round/quantize either —
 it sums the raw Decimals. Pure function only — no I/O or direct clock calls.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -66,10 +67,7 @@ def unrealized(
         fx_rates_used = [converted.rate] if converted.rate is not None else []
 
     total = (
-        snapshot.realized_pnl_base
-        + unrealized_amount
-        + snapshot.fees_base
-        + snapshot.funding_base
+        snapshot.realized_pnl_base + unrealized_amount + snapshot.fees_base + snapshot.funding_base
     )
 
     return PnLBreakdown(

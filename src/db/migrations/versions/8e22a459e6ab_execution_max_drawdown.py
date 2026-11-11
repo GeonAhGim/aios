@@ -24,6 +24,7 @@ paused_by='SAFETY_LAYER'를 1급 값으로 지원하도록 설계돼 있었고(�
 max_drawdown_pct가 NULL이면 리스크 가드 비활성(기본값) — 사용자가
 명시적으로 설정해야만 자동 정지가 켜진다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

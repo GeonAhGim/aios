@@ -31,6 +31,7 @@ exceptions that are not `DataProviderError` are propagated immediately (no
 infinite retries — same fail-closed principle as L4-11 `error_taxonomy.py`:
 "do not retry if you don't know").
 """
+
 from __future__ import annotations
 
 import asyncio

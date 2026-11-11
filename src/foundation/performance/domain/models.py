@@ -9,6 +9,7 @@ in `Decimal | None` always means PENDING (not yet computable / not yet
 reconciled) — it is never substituted with 0 (same "never assume zero"
 principle as reconciliation, see identity.py).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

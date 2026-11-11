@@ -19,6 +19,7 @@ only — over-sell raises `NegativeQuantityError`, same as FIFO. Pure domain (ze
 imports) — time formatting, currency conversion, and persistence are the caller's
 responsibility.
 """
+
 from __future__ import annotations
 
 from decimal import ROUND_HALF_EVEN, Decimal

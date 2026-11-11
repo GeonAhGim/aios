@@ -10,6 +10,7 @@ KRX에 상장된 종목코드 매매라 별도 주문 엔드포인트가 없음,
 api/examples_llm/etfetn/inquire_price, 2026-09-02 WebFetch 확인) 그대로:
 GET /uapi/etfetn/v1/quotations/inquire-price (FHPST02400000).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

@@ -109,9 +109,7 @@ def build_script_signal_source(
     builtins = dict(default_builtins())
     builtins.update(strategy_builtins.table)
     if research_instrument is not None:
-        builtins.update(
-            research_builtins(research_items, columns, instrument=research_instrument)
-        )
+        builtins.update(research_builtins(research_items, columns, instrument=research_instrument))
     result = execute(ir, bar_count=bar_count, inputs=merged_inputs, builtins=builtins)
     plan, bracket = _materialize_plan(result, bar_count, strategy_builtins.intents)
     return _MaterializedSignalSource(plan, bracket)
@@ -150,4 +148,3 @@ def _market_inputs(ir: IRProgram, columns: CandleColumns) -> dict[str, Value]:
         for name, values in candidates.items()
         if name in declared_series
     }
-

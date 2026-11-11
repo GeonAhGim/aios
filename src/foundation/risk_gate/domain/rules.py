@@ -3,6 +3,7 @@
 Spec: AIOSproject 78_risk_safety_l3_build_and_operational_specification_v1.0.md §2/§3,
 48_risk_safety_gate_and_kill_switch_specification_v1.0.md §5.
 """
+
 from __future__ import annotations
 
 import hashlib

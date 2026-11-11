@@ -2,6 +2,7 @@
 
 `_make_fsm_state_writer` 이름은 기존 호출부·테스트 호환을 위해 그대로 둔다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

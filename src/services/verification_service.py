@@ -19,6 +19,7 @@ creation date, to prevent re-registration manipulation).
 FD-17.1 event publishing — on verification completion (approve or reject),
 publishes "strategy.verification.completed" to the listing owner.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

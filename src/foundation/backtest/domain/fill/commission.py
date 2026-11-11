@@ -8,6 +8,7 @@ floor (`min_fee`) applies ceiling when the rate-based fee falls below it
 (not floor), reflecting the minimum fee exchanges actually charge on
 small trades.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

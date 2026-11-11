@@ -4,6 +4,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§4.1 Membership,
 §9 PLT-29. Session termination reuses PLT-24 `logout_all`, same as
 `suspend_membership.py`.
 """
+
 from __future__ import annotations
 
 from uuid import UUID

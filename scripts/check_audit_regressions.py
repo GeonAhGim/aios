@@ -13,6 +13,7 @@ ADR-E 발행 당일에 같은 결함으로 다시 만들어졌다). 발견을 �
 DB·네트워크·모듈 임포트를 하지 않는다. 순수 텍스트 스캔이라 어떤 환경에서도 돈다.
 사용: `python scripts/check_audit_regressions.py`. 종료코드 0=통과.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,15 +67,19 @@ def _py(*rel: str) -> list[Path]:
 
 # --------------------------------------------------------------------------- 검사
 
+
 def check_optional_safety_gate() -> Finding | None:
     """I-01 — 안전 게이트 인자가 Optional이면 넘기지 않아도 통과한다(P0-B 양식)."""
-    hits = _hits(r"(pre_submit_gate|pre_send_gate|pre_start_gate)\s*:\s*[^=\n]*\|\s*None",
-                 _py("src/services/order_service", "src/services/oms",
-                     "src/services/execution_loop"))
+    hits = _hits(
+        r"(pre_submit_gate|pre_send_gate|pre_start_gate)\s*:\s*[^=\n]*\|\s*None",
+        _py("src/services/order_service", "src/services/oms", "src/services/execution_loop"),
+    )
     if hits:
         return Finding(
             "optional_safety_gate",
-        "안전 게이트 인자가 Optional이다 — 안 넘겨도 통과한다(I-01 위반).", hits)
+            "안전 게이트 인자가 Optional이다 — 안 넘겨도 통과한다(I-01 위반).",
+            hits,
+        )
     return None
 
 
@@ -85,7 +90,9 @@ def check_require_mandate_false() -> Finding | None:
     if hits:
         return Finding(
             "require_mandate_false",
-        "운영 조립이 require_mandate=False다 — 컴플라이언스 판정이 무력하다.", hits)
+            "운영 조립이 require_mandate=False다 — 컴플라이언스 판정이 무력하다.",
+            hits,
+        )
     return None
 
 
@@ -96,9 +103,11 @@ def check_executor_gate() -> Finding | None:
     if not body:
         return None
     if "submit_order(" in body and "pre_submit_gate" not in body:
-        return Finding("executor_gate_missing",
-                       "Executor가 submit_order를 부르면서 pre_submit_gate를 넘기지 않는다.",
-                       [f"{p.relative_to(ROOT).as_posix()}"])
+        return Finding(
+            "executor_gate_missing",
+            "Executor가 submit_order를 부르면서 pre_submit_gate를 넘기지 않는다.",
+            [f"{p.relative_to(ROOT).as_posix()}"],
+        )
     return None
 
 
@@ -108,22 +117,27 @@ def check_freshness_tracker() -> Finding | None:
     if body and "freshness_tracker" not in body:
         return Finding(
             "freshness_tracker_unwired",
-        "main.py가 DataFreshnessTracker를 안 만든다 — 기동 직후 영구 HALTED.",
-                       ["src/main.py"])
+            "main.py가 DataFreshnessTracker를 안 만든다 — 기동 직후 영구 HALTED.",
+            ["src/main.py"],
+        )
     return None
 
 
 def check_xfail_in_gate_tests() -> Finding | None:
     """검사가 자기 자신을 무력화하는 형태(P0-C)."""
     hits = _hits(r"xfail", _py("tests/unit/test_gate_params_required.py"))
+
     def _is_real(h: str) -> bool:
         path, num = h.split(":")[0], int(h.split(":")[1])
         return "xfail 없음" not in _read(ROOT / path).splitlines()[num - 1]
 
     hits = [h for h in hits if _is_real(h)]
     if hits:
-        return Finding("xfail_in_gate_tests",
-                       "I-01 정적 검사에 xfail이 있다 — 위반이 있어도 CI가 녹색이 된다.", hits)
+        return Finding(
+            "xfail_in_gate_tests",
+            "I-01 정적 검사에 xfail이 있다 — 위반이 있어도 CI가 녹색이 된다.",
+            hits,
+        )
     return None
 
 
@@ -177,7 +191,9 @@ def check_tenant_fk_to_users() -> Finding | None:
     if hits:
         return Finding(
             "tenant_fk_to_users",
-        "tenant_id가 users를 FK한다 — 실제 테넌트 테이블은 tenant다(ADR-G D0).", hits)
+            "tenant_id가 users를 FK한다 — 실제 테넌트 테이블은 tenant다(ADR-G D0).",
+            hits,
+        )
     return None
 
 
@@ -199,8 +215,9 @@ def check_rls_enable_without_force() -> Finding | None:
     if missing and "__loop__" not in forced:
         return Finding(
             "rls_enable_without_force",
-        f"RLS ENABLE만 하고 FORCE 안 함: {', '.join(missing)} — 소유자가 우회한다.",
-                       missing)
+            f"RLS ENABLE만 하고 FORCE 안 함: {', '.join(missing)} — 소유자가 우회한다.",
+            missing,
+        )
     return None
 
 
@@ -215,7 +232,9 @@ def check_duplicate_type_names() -> Finding | None:
     if out:
         return Finding(
             "duplicate_type_names",
-        "동명이의 계약 타입이 있다 — 잘못 임포트해도 타입검사를 통과한다.", out)
+            "동명이의 계약 타입이 있다 — 잘못 임포트해도 타입검사를 통과한다.",
+            out,
+        )
     return None
 
 
@@ -280,6 +299,7 @@ CHECKS = [
 
 # --------------------------------------------------------------------------- 실행
 
+
 def run() -> list[Finding]:
     out: list[Finding] = []
     for fn in CHECKS:
@@ -313,8 +333,17 @@ def main() -> int:
     fixed = [c for c in known if c not in found]
 
     if a.json:
-        print(json.dumps({"found": {c: f.evidence[:20] for c, f in found.items()},
-                          "new": new, "fixed": fixed}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "found": {c: f.evidence[:20] for c, f in found.items()},
+                    "new": new,
+                    "fixed": fixed,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
 
     for code, f in found.items():
         mark = "신규" if code in new else f"기지({known.get(code, {}).get('task', '-')})"

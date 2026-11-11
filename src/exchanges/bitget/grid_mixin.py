@@ -14,6 +14,7 @@ FD-8 전략 엔진과 개념적으로 경쟁 관계이지만, API 연동 자체�
 - GET  /api/v2/spot/grid/grid-history
 - GET  /api/v2/spot/grid/grid-profit
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -106,9 +107,7 @@ class BitgetGridMixin:
         return dict(raw["data"])
 
     async def close_grid(self: SignedRequestClient, grid_id: str) -> bool:
-        raw = await self._request(
-            "POST", "/api/v2/spot/grid/close-grid", body={"gridId": grid_id}
-        )
+        raw = await self._request("POST", "/api/v2/spot/grid/close-grid", body={"gridId": grid_id})
         return bool(raw.get("code") == "00000")
 
     async def get_current_grids(
@@ -119,9 +118,7 @@ class BitgetGridMixin:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/spot/grid/current-grid", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/spot/grid/current-grid", params=params or None)
         return list(raw["data"])
 
     async def get_grid_history(
@@ -132,9 +129,7 @@ class BitgetGridMixin:
         params: dict[str, Any] = {}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/spot/grid/grid-history", params=params or None
-        )
+        raw = await self._request("GET", "/api/v2/spot/grid/grid-history", params=params or None)
         return list(raw["data"])
 
     async def get_grid_profit(self: SignedRequestClient, grid_id: str) -> dict[str, Any]:

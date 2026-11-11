@@ -11,6 +11,7 @@ is not "not a member" -- it is unknown, and unknown must fail closed
 a symbol the snapshot does know about, queried at or before `as_of`, can
 return a plain `True`/`False` for whether it was listed at that instant.
 """
+
 from __future__ import annotations
 
 import hashlib

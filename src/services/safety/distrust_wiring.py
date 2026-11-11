@@ -14,6 +14,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.5/§9(R-48).
 유지됐는지"를 정확히 복원할 수 있다 — DB 쿼리 왕복 없이 UPSERT 한
 번으로 처리, 105번 조건부 쓰기와 같은 "쿼리 최소화" 원칙).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -37,9 +38,7 @@ async def check_and_persist_distrust(
     primary: Ticker,
     candles: list[Candle],
 ) -> DataDistrustLevel:
-    references = list(
-        await asyncio.gather(*(p.get_reference_ticker(symbol) for p in providers))
-    )
+    references = list(await asyncio.gather(*(p.get_reference_ticker(symbol) for p in providers)))
     level = await monitor.check(symbol, primary, references, candles)
     sources_available = 1 + sum(1 for r in references if r is not None)
 

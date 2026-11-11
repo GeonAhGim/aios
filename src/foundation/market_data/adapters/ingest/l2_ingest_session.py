@@ -29,6 +29,7 @@ This class's behavior given the `WsSession` callback order (source:
   `on_resync()` (opens a new span after resync) ->
   `on_distrust(False)` (a span is already open, so this does nothing).
 """
+
 from __future__ import annotations
 
 import logging
@@ -159,6 +160,9 @@ class L2IngestSession:
                 logger.exception(
                     "L2 커버리지 span 기록 실패(venue=%s instrument_id=%s start=%s end=%s) — "
                     "손실 구간이 조용히 사라지지 않도록 예외를 다시 던진다",
-                    self._adapter.venue.value, self._instrument_id, start, end_at,
+                    self._adapter.venue.value,
+                    self._instrument_id,
+                    start,
+                    end_at,
                 )
                 raise

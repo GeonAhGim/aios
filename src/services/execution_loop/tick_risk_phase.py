@@ -11,6 +11,7 @@ pre_trade_sec를 내부 고정한다. `OrderIntent.from_allocation`은 FPO `inpu
 관측), connection_fresh(이 tick의 adapter 호출이 방금 성공), active_control_scopes
 (`list_active_controls` 1회 — kill switch 우회불가), gross_leverage(포지션 0개=1x).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -63,10 +64,15 @@ def build_order_intent(
 ) -> OrderIntent:
     """t0 — asset_class는 Phase 1 크립토 현물 고정(executor.py와 동일)."""
     return OrderIntent(
-        symbol=allocation.symbol, asset_class="CRYPTO_SPOT", side=signal.direction.value,
-        quantity=allocation.approved_quantity, ref_price=ref_price,
-        notional=allocation.approved_quantity * ref_price, reduce_only=reduce_only,
-        strategy_id=allocation.strategy_id, strategy_version=signal.strategy_version,
+        symbol=allocation.symbol,
+        asset_class="CRYPTO_SPOT",
+        side=signal.direction.value,
+        quantity=allocation.approved_quantity,
+        ref_price=ref_price,
+        notional=allocation.approved_quantity * ref_price,
+        reduce_only=reduce_only,
+        strategy_id=allocation.strategy_id,
+        strategy_version=signal.strategy_version,
         capital_pct=allocation.capital_pct,
     )
 
@@ -75,17 +81,30 @@ def reduced_quantity(decision: RiskDecision) -> Decimal:
     """t6 — `REDUCE_QUANTITY_TO:<qty>` obligation이 없으면 fail-closed 예외."""
     for obligation in decision.obligations:
         if obligation.startswith(_REDUCE_PREFIX):
-            return Decimal(obligation[len(_REDUCE_PREFIX):])
+            return Decimal(obligation[len(_REDUCE_PREFIX) :])
     raise ValueError(f"REDUCE 결정 {decision.decision_id}에 {_REDUCE_PREFIX} obligation 없음")
 
 
 async def run_pre_trade_risk_phase(
-    pool: asyncpg.Pool, adapter: ExchangeAdapter, *, execution_id: int, user_id: UUID,
-    certified_badge: bool, allocated_capital: Decimal, signal: Signal,
-    allocation: AllocationDecision, candles: list[Candle], balances: Sequence[AccountBalance],
-    position_quantity: Decimal, distrust_level: str, risk_engine: RiskEngine,
-    recorder: RiskDecisionRecorder, caches: RiskInputCaches, candle_cache: CandleHistoryCache,
-    policy: RiskPolicy, now: datetime,
+    pool: asyncpg.Pool,
+    adapter: ExchangeAdapter,
+    *,
+    execution_id: int,
+    user_id: UUID,
+    certified_badge: bool,
+    allocated_capital: Decimal,
+    signal: Signal,
+    allocation: AllocationDecision,
+    candles: list[Candle],
+    balances: Sequence[AccountBalance],
+    position_quantity: Decimal,
+    distrust_level: str,
+    risk_engine: RiskEngine,
+    recorder: RiskDecisionRecorder,
+    caches: RiskInputCaches,
+    candle_cache: CandleHistoryCache,
+    policy: RiskPolicy,
+    now: datetime,
 ) -> RiskPhaseOutcome | None:
     """None이면 호출자는 FSM을 건드리지 않고 이번 tick을 끝낸다(t5)."""
     intent = build_order_intent(  # t0
@@ -95,8 +114,15 @@ async def run_pre_trade_risk_phase(
         adapter, intent.symbol, bars=policy.var.lookback_bars + 1, owner_id=user_id
     )
     inputs = await assemble_risk_inputs(  # t2 — t1 실패(None)는 VaR 결손 → I2 DENY
-        pool, caches, execution_id=execution_id, user_id=user_id, intent=intent,
-        balances=balances, candles=history if history is not None else [], policy=policy, now=now,
+        pool,
+        caches,
+        execution_id=execution_id,
+        user_id=user_id,
+        intent=intent,
+        balances=balances,
+        candles=history if history is not None else [],
+        policy=policy,
+        now=now,
     )
     controls = await PostgresRiskGateRepository(pool).list_active_controls(
         tenant_id=user_id, provider_code=adapter.get_capabilities().exchange_name
@@ -104,12 +130,20 @@ async def run_pre_trade_risk_phase(
     exposure = inputs.exposure  # 포지션 0개=무레버리지(R-31 to_legacy_dict와 동일 규칙)
     if exposure.gross_leverage is None and exposure.open_positions_count == 0:
         exposure = exposure.model_copy(update={"gross_leverage": Decimal("1")})
-    inputs = inputs.model_copy(update={
-        "certified_badge": certified_badge, "allocated_capital": allocated_capital,
-        "exposure": exposure, "safety": inputs.safety.model_copy(update={
-            "active_control_scopes": tuple(c.scope.value for c in controls),
-            "data_distrust_level": distrust_level, "connection_fresh": True}),
-    })
+    inputs = inputs.model_copy(
+        update={
+            "certified_badge": certified_badge,
+            "allocated_capital": allocated_capital,
+            "exposure": exposure,
+            "safety": inputs.safety.model_copy(
+                update={
+                    "active_control_scopes": tuple(c.scope.value for c in controls),
+                    "data_distrust_level": distrust_level,
+                    "connection_fresh": True,
+                }
+            ),
+        }
+    )
     decision = risk_engine.check_decision(inputs)  # t3
     await recorder.record(decision, inputs, actor=RECORDER_ACTOR)  # t4 — 거부도 기록
     if not decision.is_actionable(now):
@@ -117,6 +151,8 @@ async def run_pre_trade_risk_phase(
     if decision.outcome == RiskOutcome.REDUCE:  # t6
         allocation = allocation.model_copy(update={"approved_quantity": reduced_quantity(decision)})
     return RiskPhaseOutcome(
-        allocation, RiskCheckResult(approved=True, decision_id=decision.decision_id), decision,
+        allocation,
+        RiskCheckResult(approved=True, decision_id=decision.decision_id),
+        decision,
         dict(inputs.safety.fence_snapshot or {}),
     )

@@ -12,6 +12,7 @@ R13 — "실행 알고리즘" — 참여율 상한(anti-front-running), 슬라�
 같은 `req.seed`로 만든 `random.Random(req.seed)`를 넘기면 재현 가능한
 무작위화가 된다(§3.1 `AlgoRequest.seed` "재현 가능한 무작위화").
 """
+
 from __future__ import annotations
 
 import random
@@ -64,9 +65,7 @@ def plan_slices(
         remaining = req.total_quantity - allocated
 
         nominal_offset_sec = base_interval_sec * sequence
-        time_jitter_sec = base_interval_sec * float(time_jitter_fraction) * (
-            rng.uniform(-1.0, 1.0)
-        )
+        time_jitter_sec = base_interval_sec * float(time_jitter_fraction) * (rng.uniform(-1.0, 1.0))
         scheduled_at = req.start_at + timedelta(seconds=nominal_offset_sec + time_jitter_sec)
         scheduled_at = max(req.start_at, min(req.end_at, scheduled_at))
 

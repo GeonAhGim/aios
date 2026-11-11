@@ -14,6 +14,7 @@ and a ratio (trail_pct), but here the live tick and absolute-price offset
 (trailing_offset) map directly onto the contract field
 (`SubmitOrderCommand.trailing_offset`).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

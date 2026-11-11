@@ -4,6 +4,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-31
 (+ §2 100 lines, §6 I7). The legacy single `CREDENTIAL_ENCRYPTION_KEY` (07th §7.3) is
 absorbed as `kid="legacy"` so existing ciphertexts continue to decrypt.
 """
+
 from __future__ import annotations
 
 import os
@@ -32,9 +33,7 @@ class KeyRing:
 
     def __init__(self, keys: Mapping[str, bytes], active_kid: str) -> None:
         if active_kid not in keys:
-            raise KeyRingConfigError(
-                f"active_kid={active_kid!r}가 keys에 없습니다: {sorted(keys)}"
-            )
+            raise KeyRingConfigError(f"active_kid={active_kid!r}가 keys에 없습니다: {sorted(keys)}")
         self._keys = dict(keys)
         self._active_kid = active_kid
 
@@ -141,9 +140,7 @@ def _parse_kid_pairs(raw: str, var_name: str) -> list[tuple[str, str]]:
         kid, hex_key = entry.split(":", 1)
         kid = kid.strip()
         if not kid:
-            raise KeyRingConfigError(
-                f"{var_name}에 빈 kid가 있습니다: {_redact_entry(entry)}"
-            )
+            raise KeyRingConfigError(f"{var_name}에 빈 kid가 있습니다: {_redact_entry(entry)}")
         if kid == _LEGACY_KID:
             raise KeyRingConfigError(f"{var_name}: kid={_LEGACY_KID!r}는 예약어입니다.")
         if kid in seen:

@@ -30,6 +30,7 @@ CI/nightly split: `sample_names()` draws a fixed-seed subset — with only 11
 indicators today, a sample of 30 equals the full set, but the sampling path
 is opened up in advance for when IND-13 grows the catalog.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -209,8 +210,15 @@ def verify_indicator(name: str, datasets: Sequence[Dataset]) -> list[Mismatch]:
                     idx = int(np.flatnonzero(finite)[int(np.argmax(err))])
                     mismatches.append(
                         Mismatch(
-                            name, dataset.id, params, key, idx,
-                            float(ref[idx]), float(strm[idx]), float(bat[idx]), worst,
+                            name,
+                            dataset.id,
+                            params,
+                            key,
+                            idx,
+                            float(ref[idx]),
+                            float(strm[idx]),
+                            float(bat[idx]),
+                            worst,
                         )
                     )
     return mismatches
@@ -221,9 +229,7 @@ def reference_vector(name: str, dataset: Dataset) -> dict[str, list[float | None
     spec = TALIB_SPECS[name]
     params = {p.name: p.default for p in spec.params}
     values = compute(name, dataset.columns, params)
-    return {
-        key: [None if np.isnan(v) else float(v) for v in arr] for key, arr in values.items()
-    }
+    return {key: [None if np.isnan(v) else float(v) for v in arr] for key, arr in values.items()}
 
 
 def write_snapshot(name: str, dataset: Dataset, *, vectors_dir: Path | None = None) -> Path:

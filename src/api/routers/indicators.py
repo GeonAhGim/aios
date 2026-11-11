@@ -15,6 +15,7 @@ empty list. When a real storage backend appears, only the `get_script_indicator_
 dependency needs replacement (tests also swap it via `dependency_overrides` to verify
 cross-tenant isolation).
 """
+
 from __future__ import annotations
 
 from uuid import UUID

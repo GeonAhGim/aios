@@ -59,8 +59,7 @@ def _policy_predicate(table: str, column: str) -> str:
     predicate = f"{column}::text = current_setting('app.tenant_id', true)"
     if table in _NULL_TENANT_SYSTEM_EXCEPTION:
         predicate = (
-            f"({predicate}) OR "
-            f"({column} IS NULL AND current_setting('app.role', true) = 'system')"
+            f"({predicate}) OR ({column} IS NULL AND current_setting('app.role', true) = 'system')"
         )
     return predicate
 

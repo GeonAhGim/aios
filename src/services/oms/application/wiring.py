@@ -29,6 +29,7 @@ task-1720(P1-A, 감사 2026-09-06) — 위 task-1538 decision이 실제로는 �
 고른다 — `background_loops.py`(P6 300줄 캡)가 그 선택까지 떠안지 않도록
 이 모듈이 대신 진다.
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -22,6 +22,7 @@ in this table (D1 "the real key is not here").
 covered, D6) — vocabularies differ per source, so there is no fixed
 enumeration to enforce via a CHECK constraint.
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

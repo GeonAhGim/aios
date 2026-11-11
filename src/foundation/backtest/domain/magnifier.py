@@ -54,6 +54,7 @@ Pure domain — no I/O/DB/clock access (all timestamps/data come via arguments).
 Does not rely on dict/set iteration — inputs and outputs are always ordered
 list/tuple, so the same input always produces byte-identical output.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -114,8 +115,7 @@ def validate_magnifier_config(*, higher_tf: Timeframe, magnifier_tf: Timeframe |
     lower_step = duration(magnifier_tf)
     if lower_step >= higher_step:
         raise IncompatibleMagnifierTimeframeError(
-            f"magnifier_tf({magnifier_tf!r})는 상위 TF({higher_tf!r})보다 "
-            "짧아야 한다"
+            f"magnifier_tf({magnifier_tf!r})는 상위 TF({higher_tf!r})보다 짧아야 한다"
         )
     if higher_step % lower_step != timedelta(0):
         raise IncompatibleMagnifierTimeframeError(

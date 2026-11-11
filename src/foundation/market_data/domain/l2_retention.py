@@ -18,6 +18,7 @@ is guaranteed" just because the cap is exceeded (instead it surfaces
 No I/O — actual file deletion / downsample conversion is the
 responsibility of `adapters/ingest/l2_depth_store.py`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

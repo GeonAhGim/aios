@@ -21,6 +21,7 @@ just array slicing over `CandleColumns`/`VectorSignal` (same approach as the BT-
 
 Pure module -- no I/O.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -126,8 +127,12 @@ def run_walk_forward(
         train_columns = _slice_columns(columns, train_start, train_end)
         train_results = {
             key: run_vector_backtest(
-                config, train_columns, _slice_signal(signal, train_start, train_end),
-                timeframe=timeframe, initial_cash=initial_cash, funding_rate=funding_rate,
+                config,
+                train_columns,
+                _slice_signal(signal, train_start, train_end),
+                timeframe=timeframe,
+                initial_cash=initial_cash,
+                funding_rate=funding_rate,
             )
             for key, signal in combos.items()
         }
@@ -135,15 +140,24 @@ def run_walk_forward(
 
         test_columns = _slice_columns(columns, train_end, test_end)
         test_result = run_vector_backtest(
-            config, test_columns, _slice_signal(combos[best_key], train_end, test_end),
-            timeframe=timeframe, initial_cash=initial_cash, funding_rate=funding_rate,
+            config,
+            test_columns,
+            _slice_signal(combos[best_key], train_end, test_end),
+            timeframe=timeframe,
+            initial_cash=initial_cash,
+            funding_rate=funding_rate,
         )
-        windows.append(WalkForwardWindow(
-            train_start=train_start, train_end=train_end,
-            test_start=train_end, test_end=test_end,
-            selected_combo=best_key,
-            train_result=train_results[best_key], test_result=test_result,
-        ))
+        windows.append(
+            WalkForwardWindow(
+                train_start=train_start,
+                train_end=train_end,
+                test_start=train_end,
+                test_end=test_end,
+                selected_combo=best_key,
+                train_result=train_results[best_key],
+                test_result=test_result,
+            )
+        )
         train_start += step
 
     if not windows:
@@ -158,19 +172,25 @@ def _slice_columns(columns: CandleColumns, start: int, end: int) -> CandleColumn
     """Manual per-field slicing, same approach as BT-11 `deep_backtest_job._prefix` --
     `CandleColumns` is a pure data-holder dataclass with no slicing helper."""
     return CandleColumns(
-        ts=columns.ts[start:end], open=columns.open[start:end], high=columns.high[start:end],
-        low=columns.low[start:end], close=columns.close[start:end],
-        volume=columns.volume[start:end], quote_volume=columns.quote_volume[start:end],
+        ts=columns.ts[start:end],
+        open=columns.open[start:end],
+        high=columns.high[start:end],
+        low=columns.low[start:end],
+        close=columns.close[start:end],
+        volume=columns.volume[start:end],
+        quote_volume=columns.quote_volume[start:end],
     )
 
 
 def _slice_signal(signal: VectorSignal, start: int, end: int) -> VectorSignal:
     return VectorSignal(
         entries=BoolSignal(
-            values=signal.entries.values[start:end], na=signal.entries.na[start:end],
+            values=signal.entries.values[start:end],
+            na=signal.entries.na[start:end],
         ),
         exits=BoolSignal(
-            values=signal.exits.values[start:end], na=signal.exits.na[start:end],
+            values=signal.exits.values[start:end],
+            na=signal.exits.na[start:end],
         ),
         quantity=signal.quantity,
     )

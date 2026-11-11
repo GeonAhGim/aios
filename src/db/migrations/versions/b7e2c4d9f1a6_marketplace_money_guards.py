@@ -17,6 +17,7 @@ Spec: docs/FULL_AUDIT_2026-09-02.md §2 (P0 결함), 14_marketplace_detailed_v1.
    환불은 DELISTED와 함께만 일어나므로 재구매가 필요한 경우 자체가 없다.
 3. strategy_purchases.refunded_at — 환불 1회 보장의 조건부 UPDATE 대상.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

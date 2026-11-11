@@ -5,6 +5,7 @@ and was split into per-entity-level mixins -- each mixin needs not only its
 own level's converter but also its child level's (for list_*_by_* return
 types), so they were collected in one place.
 """
+
 from __future__ import annotations
 
 import asyncpg

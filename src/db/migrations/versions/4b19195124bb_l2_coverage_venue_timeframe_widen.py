@@ -23,6 +23,7 @@ leaves it alone since the L2 collection session doesn't write to that
 table (only to coverage_spans) — a separate leaf will expand it if that
 becomes necessary.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

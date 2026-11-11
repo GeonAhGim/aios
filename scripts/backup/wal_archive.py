@@ -10,6 +10,7 @@ archive_mode/archive_command)를 읽어 PITR 전제조건이 실제로 켜져 �
 실행: `python -m scripts.backup.wal_archive` (저장소 루트, DATABASE_URL은 .env에서).
 종료코드 0=정상, 1=위반 발견.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,8 @@ async def _fetch_settings(dsn: str) -> dict[str, str]:
     try:
         names = ("wal_level", "archive_mode", "archive_command")
         rows = await conn.fetch(
-            "SELECT name, setting FROM pg_settings WHERE name = ANY($1::text[])", list(names))
+            "SELECT name, setting FROM pg_settings WHERE name = ANY($1::text[])", list(names)
+        )
         return {r["name"]: r["setting"] for r in rows}
     finally:
         await conn.close()
@@ -120,10 +122,14 @@ def verify_archiving_advances(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--dsn", help="생략하면 DATABASE_URL(.env)을 쓴다")
-    parser.add_argument("--verify-write", metavar="ARCHIVE_DIR",
-                         help="이 디렉터리를 감시해 WAL 스위치 후 실제로 아카이브되는지 확인한다")
+    parser.add_argument(
+        "--verify-write",
+        metavar="ARCHIVE_DIR",
+        help="이 디렉터리를 감시해 WAL 스위치 후 실제로 아카이브되는지 확인한다",
+    )
     args = parser.parse_args(argv)
 
     dsn = asyncpg_dsn(args.dsn or server_url())

@@ -10,6 +10,7 @@ and how a set of them is identified (`bundle_hash`). Hashing reuses R-01's
 normalization or sha256 (decision note: "reuse R-01/R-15's policy-bundle
 hash util, do not reimplement").
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -65,8 +66,7 @@ class RuleBundle:
         payload = {
             "version": self.version,
             "rules": [
-                {"rule_id": rule.rule_id, "params": dict(rule.params)}
-                for rule in sorted_rules
+                {"rule_id": rule.rule_id, "params": dict(rule.params)} for rule in sorted_rules
             ],
         }
         return sha256_hex(canonical_json(payload))

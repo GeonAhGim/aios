@@ -22,6 +22,7 @@ script and runtime code each compute it without a lookup, they always agree
 the default hierarchy ids for all existing users would change and FA-3
 backfill would break).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

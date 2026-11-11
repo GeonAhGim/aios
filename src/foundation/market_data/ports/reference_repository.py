@@ -5,6 +5,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§2.2, §9.2 LA-9.
 domain/application knows only this Protocol; the actual implementation
 (adapters/postgres_reference_repository.py, LA-12) does not (71 §4).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

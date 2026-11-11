@@ -23,6 +23,7 @@ this module supports it too with no further changes.
 
 Pure functions only — no I/O, time is only accepted via the `now` argument.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace

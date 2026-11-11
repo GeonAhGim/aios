@@ -31,6 +31,7 @@ query — LA-14 depends only on LA-12/L0-4 and not on positions (task-616 depend
 this guard is out of scope for this leaf (**unverified**, must be added in a subsequent
 leaf after receiving a positions port injection).
 """
+
 from __future__ import annotations
 
 from typing import Protocol

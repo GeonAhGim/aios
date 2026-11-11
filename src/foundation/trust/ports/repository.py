@@ -1,5 +1,6 @@
 """Trust Core repository port. domain은 이 Protocol만 알고, 실제 구현(adapters/)은
 모른다 — 71번 §4 "domain은 FastAPI·SQLAlchemy·외부 HTTP에 의존하지 않는다"."""
+
 from __future__ import annotations
 
 from datetime import datetime

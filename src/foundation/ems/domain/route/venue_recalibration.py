@@ -86,9 +86,7 @@ def recalibrate_weights(
                 raise ValueError(f"{name} must be finite")
             if value <= 0:
                 raise ValueError(f"{name} must be positive")
-        samples_by_venue.setdefault(sample.venue, []).append(
-            sample.total_cost / sample.notional
-        )
+        samples_by_venue.setdefault(sample.venue, []).append(sample.total_cost / sample.notional)
 
     lower = current.fee_weight * (Decimal("1") - _MAX_WEIGHT_CHANGE)
     upper = current.fee_weight * (Decimal("1") + _MAX_WEIGHT_CHANGE)

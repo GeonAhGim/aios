@@ -16,6 +16,7 @@ task-456, b638afc) — 이 모듈은 그것들의 공개 시그니처를 바꾸�
 루프에 태우면 사고로 이어진다. 재시도가 필요한 바디 레벨 실패(예: outbox
 RETRY)는 상위 애플리케이션 계층 책임이다.
 """
+
 from __future__ import annotations
 
 import asyncio

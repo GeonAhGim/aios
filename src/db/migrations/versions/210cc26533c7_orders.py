@@ -11,6 +11,7 @@ Spec: 04_db_schema_v1.6.md (Orders, 8.3 Order State Machine)
 시점(작업트리 3.14, FD-16 착수 직전)에 별도 ALTER TABLE로 추가한다 — 04번
 문서 자체도 이 컬럼을 base DDL이 아니라 후속 ALTER TABLE로 추가한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

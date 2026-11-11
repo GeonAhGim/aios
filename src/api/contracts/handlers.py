@@ -9,6 +9,7 @@ Spec: docs/specs/L4_platform_observability_tenancy_api_v1.0.md#§2.3
 예외까지 전부 처리한다 — MihwaError를 상속하는 예외가 생기면 그것도
 그대로 이 경로를 탄다(타입 매칭이라 상속 관계와 무관하게 동작).
 """
+
 from __future__ import annotations
 
 import logging

@@ -27,6 +27,7 @@ determination (`permits_use`) belongs to
 just combines the two into a single gate shared by the enforcement points
 (read API, chart, backtest, export).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -145,7 +146,11 @@ async def resolve_instrument(
 
 
 async def authorize_feed(
-    port: EntitlementPort, *, tenant_id: UUID, subject_id: UUID, inst: InstrumentRef,
+    port: EntitlementPort,
+    *,
+    tenant_id: UUID,
+    subject_id: UUID,
+    inst: InstrumentRef,
     timeframe: Timeframe,
 ) -> Entitlement:
     """Candle feed queries the port across (venue, asset_class, instrument, timeframe) axes."""

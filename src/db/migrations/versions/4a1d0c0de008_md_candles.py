@@ -49,6 +49,7 @@ WORM: `md_candle`·`md_ingest_batch`·`md_quality_issue`만(명세 표 그대로
 판정(ACCEPT부터 REJECT까지)은 전부 감사 이벤트를 낸다는 fail-closed
 원칙(LC-6 `ledger_journal_entry.audit_event_id`와 동일 근거)이다.
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

@@ -8,6 +8,7 @@ market arrival time", then selects the first bar that opens after that
 arrival time as the fill target. The bar list and submission time are
 injected by the caller (no clock access — pure).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

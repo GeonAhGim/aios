@@ -5,6 +5,7 @@ standalone; `postgres_repository.PostgresEntityRepository` composes all 4
 mixins. See that file's module docstring for the concurrency/tenant
 isolation contract. Being the lowest level, it has no `list_*_by_*`/
 `NOT EXISTS` child check."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -70,7 +71,6 @@ class SubAccountRepositoryMixin:
                 if await self.get_sub_account(tenant_id, sub_account_id) is None:
                     raise LookupError(f"존재하지 않는 SubAccount입니다: {sub_account_id}")
                 raise ConcurrencyConflictError(
-                    f"sub_account.sub_account_id={sub_account_id}: "
-                    "다른 요청이 먼저 폐쇄했습니다."
+                    f"sub_account.sub_account_id={sub_account_id}: 다른 요청이 먼저 폐쇄했습니다."
                 )
         return row_to_sub_account(row)

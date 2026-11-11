@@ -11,6 +11,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.4/§9 R-26.
 — 한도 변경은 반드시 감사 1행을 남겨야 하는 커맨드라(DoD) 호출자가 실수로
 감사 없이 호출하는 경로 자체를 타입으로 막는다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

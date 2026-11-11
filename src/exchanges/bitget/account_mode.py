@@ -28,6 +28,7 @@ investigated 2026-09-09), the same API key cannot revert from UNIFIED to
 CLASSIC mid-session — if it ever did, that would mean a new key was issued,
 which would be a new adapter instance.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

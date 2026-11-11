@@ -15,6 +15,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-C, §5.1 fills 행
 I5(version+1)를 강제하지만, `status`가 그대로라 I2/I4/I6(전이표·이벤트
 동반)는 건드리지 않는다.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -60,9 +61,7 @@ class FillsRepository:
             await conn.execute(_RECALC_UPDATE_SQL, fill.order_id)
         return inserted
 
-    async def list_for_order(
-        self, conn: asyncpg.Connection, order_id: UUID
-    ) -> list[FillEvent]:
+    async def list_for_order(self, conn: asyncpg.Connection, order_id: UUID) -> list[FillEvent]:
         records = await conn.fetch(
             "SELECT provider_fill_id, venue, order_id, exchange_order_id, symbol, side, "
             "quantity, price, fee, fee_currency, liquidity, venue_ts "

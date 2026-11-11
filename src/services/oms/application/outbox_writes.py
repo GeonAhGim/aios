@@ -14,6 +14,7 @@ registering a row the spec did not have (ADR-2026-09-06-G §10).
 (L4-08)가 `ConcurrencyConflictError`를 던져 같은 tx의 주문 전이가 함께
 롤백된다 — 이 모듈은 그 순서(펜스 먼저)를 강제하지 않고 호출부가 지킨다.
 """
+
 from __future__ import annotations
 
 import hashlib

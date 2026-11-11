@@ -2,6 +2,7 @@
 
 Spec: 11_implementation_rules_v1.2.md#§11.3
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -23,8 +24,7 @@ class ExchangeAPIError(MihwaError):
     """Common parent for exchange API call failures. Subclasses distinguish retryability."""
 
 
-class RetryableExchangeError(ExchangeAPIError):
-    ...
+class RetryableExchangeError(ExchangeAPIError): ...
 
 
 class FatalExchangeError(ExchangeAPIError):
@@ -48,5 +48,4 @@ class FrozenZonePaperAdapterBlockedError(MihwaError):
     """Fail-closed guard: live-configured adapter injected into PAPER execution."""
 
 
-class EventHandlerError(MihwaError):
-    ...
+class EventHandlerError(MihwaError): ...

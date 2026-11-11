@@ -15,6 +15,7 @@ Spec: L4_platform_observability_tenancy_api_v1.0.md#§9 PLT-40
 모든 구현체가 구조적으로 불일치해 오히려 새 mypy 오류를 만들므로, 실제
 계약대로 메서드로 선언한다.
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable

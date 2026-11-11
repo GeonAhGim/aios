@@ -13,6 +13,7 @@ If equal, it is a retry of the same recomputation, so returns the existing row a
 call skips that check and data is identical, we silently accept it here). Other
 constraint violations such as `CHECK(closing_nav = cash + positions_mv)` propagate as
 raw asyncpg exceptions (fail-closed, no custom wrapping)."""
+
 from __future__ import annotations
 
 import json

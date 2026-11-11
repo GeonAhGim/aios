@@ -25,6 +25,7 @@ gets a real, reproducible portfolio_id — none are guessed and none are
 left NULL, since NULL wouldn't actually be constrained by the new UNIQUE
 (Postgres treats each NULL as distinct).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

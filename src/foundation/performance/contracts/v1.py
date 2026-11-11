@@ -5,6 +5,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6/§3.4.
 Other bounded contexts consume this file and must not reference domain/models.py
 directly (§4 Contract ownership rule 71, §5 rule 106).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

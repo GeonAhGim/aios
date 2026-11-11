@@ -11,6 +11,7 @@ expansion) touch different tables, so there's no schema conflict. This
 is a pure merge stub (empty upgrade/downgrade) that folds the DAG back
 into a single head — the same pattern as 3819cf8a5373.
 """
+
 from collections.abc import Sequence
 
 revision: str = "7020473c9e74"

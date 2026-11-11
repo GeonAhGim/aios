@@ -26,6 +26,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-0d
 사용: `python scripts/check_position_key_central.py` (저장소 루트에서).
 종료코드 0=위반 없음, 1=위반 있음(각 위반을 표준출력에 나열).
 """
+
 from __future__ import annotations
 
 import ast
@@ -35,9 +36,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCAN_ROOT = "src"
-_EXEMPT_PATH_PARTS = (
-    ("src", "foundation", "positions", "domain", "position_key.py"),
-)
+_EXEMPT_PATH_PARTS = (("src", "foundation", "positions", "domain", "position_key.py"),)
 _EXEMPT_DIR_PARTS = (("src", "db", "migrations"),)
 _TARGET_NAME = "position_key"
 

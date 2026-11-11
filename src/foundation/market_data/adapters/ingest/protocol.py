@@ -11,6 +11,7 @@ abstraction).
 reconnection/heartbeat/backoff/sequence-gap-detection logic of their own
 (that is entirely `WsSession`'s responsibility).
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol

@@ -8,6 +8,7 @@ ledger-integration table that manages "the single currently valid
 value," while this table is the RD-20-only table that appends "the
 full filing history, including corrections."
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -32,9 +33,7 @@ def _row_to_action(row: asyncpg.Record) -> CorporateAction:
 
 
 class PostgresCorporateActionFilingRepository:
-    async def append(
-        self, conn: asyncpg.Connection, action: CorporateAction
-    ) -> CorporateAction:
+    async def append(self, conn: asyncpg.Connection, action: CorporateAction) -> CorporateAction:
         if action.known_at is None:
             raise ValueError("known_at 없는 CorporateAction은 RD-20 저장소에 넣을 수 없다")
 

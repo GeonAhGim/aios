@@ -6,6 +6,7 @@ domain/application은 이 Protocol만 알고, 실제 구현(adapters/exchange_ba
 LB-16)은 모른다(71번 §4). 조회 실패는 예외로 전파해야 한다 — 빈 리스트로
 대체하면 실제 잔고 0과 구분할 수 없다(FD-3.3, §2.3 adapters 행).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

@@ -20,6 +20,7 @@ to the BT-2~6 event fill engine) once per combo, unchanged.
 
 Pure module -- no I/O.
 """
+
 from __future__ import annotations
 
 import gc
@@ -74,8 +75,12 @@ def sweep_grid(
     try:
         results = {
             key: run_vector_backtest(
-                config, columns, signal, timeframe=timeframe,
-                initial_cash=initial_cash, funding_rate=funding_rate,
+                config,
+                columns,
+                signal,
+                timeframe=timeframe,
+                initial_cash=initial_cash,
+                funding_rate=funding_rate,
             )
             for key, signal in combos.items()
         }
@@ -113,14 +118,22 @@ def sweep_grid_and_record(
             f"extra={sorted(script_hashes.keys() - combos.keys())}"
         )
     result = sweep_grid(
-        columns, combos, config,
-        timeframe=timeframe, initial_cash=initial_cash, funding_rate=funding_rate,
+        columns,
+        combos,
+        config,
+        timeframe=timeframe,
+        initial_cash=initial_cash,
+        funding_rate=funding_rate,
     )
     entries = tuple(
         record_grid_entry(
-            combo_key=key, combo_index=index, script_hash=script_hashes[key],
-            data_lineage_hash=data_lineage_hash, rollup_version=rollup_version,
-            config=config, seed=seed,
+            combo_key=key,
+            combo_index=index,
+            script_hash=script_hashes[key],
+            data_lineage_hash=data_lineage_hash,
+            rollup_version=rollup_version,
+            config=config,
+            seed=seed,
         )
         for index, key in enumerate(combos)
     )

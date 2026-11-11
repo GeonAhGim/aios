@@ -5,6 +5,7 @@ REST/WS 메서드 하나(행 1개)를 코드 텍스트(줄 리스트)로 렌더�
 모은다. 주문성 판정(`is_order_method`)과 언어 정책 가드(`_docstring_lines`)도
 여기 있다 -- 둘 다 메서드 렌더링과 같은 변경 축이라 분리하지 않는다.
 """
+
 from __future__ import annotations
 
 import re

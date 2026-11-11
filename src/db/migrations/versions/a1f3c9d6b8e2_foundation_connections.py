@@ -25,6 +25,7 @@ Spec: AIOSproject 44_connected_asset_readonly_connection_specification_v1.0.md,
   (71번 §4), 이 테이블은 "이 connection이 지금 근거로 삼는 동의가 무엇인가"
   포인터만 필요하고 이력 보존은 Trust 쪽 책임이다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -97,9 +98,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX ix_account_snapshot_connection_id ON account_snapshot (connection_id)"
-    )
+    op.execute("CREATE INDEX ix_account_snapshot_connection_id ON account_snapshot (connection_id)")
 
     # 74번 §1 "one latest projection + append history" — append-only, id는
     # 이력 각 행의 PK일 뿐 최신값 선택은 evaluated_at 정렬로 한다.

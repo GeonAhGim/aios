@@ -9,6 +9,7 @@ foundation_deps.py). Consent reuses the existing mechanism from Trust Core
 (FND-01) without introducing a separate consent flow (#71 §4 Contract
 ownership — trust is the owner, connections are consumers only).
 """
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4

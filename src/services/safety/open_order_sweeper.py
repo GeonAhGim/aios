@@ -53,6 +53,7 @@ CANCEL_REQUESTED) rather than the self-loop this module previously used to
 avoid crashing `PostgresOrderEventRepository._row_to_event()`'s
 `OrderStatus(...)` cast — `scripts/replay_verify.py`'s orders projection now
 folds to CANCEL_REQUESTED and byte-matches the real row."""
+
 from __future__ import annotations
 
 import hashlib
@@ -233,8 +234,7 @@ async def sweep_open_orders(
         if adapter is None or exchange_order_id is None:
             adapter_failed.append(order_id)
             logger.warning(
-                "sweep_open_orders(%s): 취소 불가 — adapter_configured=%s "
-                "exchange_order_id=%s",
+                "sweep_open_orders(%s): 취소 불가 — adapter_configured=%s exchange_order_id=%s",
                 idempotency_key,
                 adapter is not None,
                 exchange_order_id,

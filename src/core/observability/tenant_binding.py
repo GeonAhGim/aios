@@ -13,6 +13,7 @@ performed by the outer `with bind(...)` block held by `RequestContextMiddleware`
 the request finishes. Values created by this function are safe because they sit as
 one layer on top of the "previous value" that the reset will restore.
 """
+
 from __future__ import annotations
 
 import logging

@@ -7,6 +7,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6.
 Never raises an exception — if any input is `None` (unrealised PnL), returns
 `ok=False` and reports exactly which fields are missing via `pending_fields`.
 Never substitutes zero to force the identity through."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -53,9 +54,7 @@ def check_identity(
     end_value: Decimal,
     cashflows: Sequence[Cashflow],
 ) -> IdentityResult:
-    pending = tuple(
-        name for name in _BREAKDOWN_FIELDS if getattr(b, name) is None
-    )
+    pending = tuple(name for name in _BREAKDOWN_FIELDS if getattr(b, name) is None)
     if pending:
         return IdentityResult(ok=False, residual=None, pending_fields=pending)
 

@@ -9,6 +9,7 @@ architecture guard P6.line_cap, following the precedent of AIOS Script's
 discriminant instead of a discriminated union — a JSON round trip is not a
 requirement for this leaf (transpile is DSL-15's job).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

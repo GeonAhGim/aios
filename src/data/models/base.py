@@ -3,6 +3,7 @@
 Spec: 01_data_models_v1.3.md#§1 (ProvenanceStatus),
 11_implementation_rules_v1.2.md#§11.1 (Currency/Money/FXRate)
 """
+
 from __future__ import annotations
 
 from datetime import datetime

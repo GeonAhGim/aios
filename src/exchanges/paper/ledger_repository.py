@@ -7,6 +7,7 @@
 (`WHERE available >= $amount`)로 fail-closed. `paper_sim_orders` 갱신은
 073beca589d5 `orders.version` 관례를 재사용한 낙관적 락(CAS)이다.
 """
+
 from __future__ import annotations
 
 import json

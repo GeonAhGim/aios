@@ -9,6 +9,7 @@ implementation (adapters/storage/*) (71 §4). Reuses `contracts/v2/instruments`(
 actually enforced by the DB EXCLUDE constraint (DC-4); this Protocol
 expresses only the contract shape.
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

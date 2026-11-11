@@ -15,6 +15,7 @@ Spec: docs/specs/L4_ibor_fund_accounting_and_resilience_v1.0.md#FA-1 (§2.1·§4
 호출자(조회/영속화)는 `adapters/postgres_repository.py`(FA-2)의 책임이다 —
 이 모듈은 이미 로드된 객체(또는 부재를 뜻하는 `None`)만 받는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -114,9 +115,7 @@ def validate_close_portfolio(portfolio: Portfolio, sub_accounts: Iterable[SubAcc
     if portfolio.closed_at is not None:
         raise AlreadyClosedError(f"Portfolio {portfolio.portfolio_id}는 이미 폐쇄됨")
     active = [
-        s
-        for s in sub_accounts
-        if s.portfolio_id == portfolio.portfolio_id and s.closed_at is None
+        s for s in sub_accounts if s.portfolio_id == portfolio.portfolio_id and s.closed_at is None
     ]
     if active:
         raise CloseBlockedByChildError(

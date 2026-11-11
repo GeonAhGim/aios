@@ -2,6 +2,7 @@
 
 Spec: AIOSproject §4 (`AcceptDisclosure` -> `trust.consent_accepted.v1`).
 """
+
 from __future__ import annotations
 
 from datetime import timedelta

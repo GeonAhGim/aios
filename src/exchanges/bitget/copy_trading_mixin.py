@@ -15,6 +15,7 @@ Bitget 자체 카피트레이딩 마켓플레이스 — 트레이더(팔로우 �
 - POST /api/v2/copy/mix-trader/config-settings-base
 - GET  /api/v2/copy/mix-trader/order-profit-history-summary
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -47,9 +48,7 @@ class BitgetCopyTradingMixin:
         body: dict[str, Any] = {"traderId": trader_id, "marginCoin": margin_coin}
         if copy_amount is not None:
             body["copyAmount"] = str(copy_amount)
-        raw = await self._request(
-            "POST", "/api/v2/copy/mix-follower/setting", body=body
-        )
+        raw = await self._request("POST", "/api/v2/copy/mix-follower/setting", body=body)
         return dict(raw["data"])
 
     async def unfollow_copy_trader(self: SignedRequestClient, trader_id: str) -> bool:
@@ -106,7 +105,5 @@ class BitgetCopyTradingMixin:
         return dict(raw["data"])
 
     async def get_copy_trading_profit_summary(self: SignedRequestClient) -> dict[str, Any]:
-        raw = await self._request(
-            "GET", "/api/v2/copy/mix-trader/order-profit-history-summary"
-        )
+        raw = await self._request("GET", "/api/v2/copy/mix-trader/order-profit-history-summary")
         return dict(raw["data"])

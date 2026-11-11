@@ -24,6 +24,7 @@ because it changes the script's compiled bytes.
 
 Pure module -- no I/O.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -75,5 +76,8 @@ def record_grid_entry(
         config=config,
     )
     return ExperimentLedgerEntry(
-        combo_key=combo_key, combo_index=combo_index, seed=seed, reproducibility_key=key,
+        combo_key=combo_key,
+        combo_index=combo_index,
+        seed=seed,
+        reproducibility_key=key,
     )

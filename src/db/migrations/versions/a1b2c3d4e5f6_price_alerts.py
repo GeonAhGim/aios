@@ -10,6 +10,7 @@ condition_compiler.py/preview_service.py가 이미 쓰는 지표+연산자+임�
 그 파라미터, 예: {"timeperiod": 14}). status='ACTIVE'인 행만 백그라운드
 평가 루프(alert_service.py::evaluate_all_active)가 주기적으로 검사한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

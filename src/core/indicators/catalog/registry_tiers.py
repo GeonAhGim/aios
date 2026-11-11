@@ -27,6 +27,7 @@ single indicator changed, unlike the full registry hash
 (``IndicatorRegistry.registry_hash()``). The SCRIPT tier does not double-hash
 ``script_hash`` (duplicate hash schemes prohibited, decision).
 """
+
 from __future__ import annotations
 
 import hashlib

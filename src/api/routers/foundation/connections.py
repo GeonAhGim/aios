@@ -5,6 +5,7 @@ Domain exceptions are not caught here — `EXCEPTION_MAP` in
 `src/api/contracts/exception_mapping.py` translates them to envelopes via
 the global handler (§9 PLT-21 decision, task-1108).
 """
+
 from __future__ import annotations
 
 from uuid import UUID

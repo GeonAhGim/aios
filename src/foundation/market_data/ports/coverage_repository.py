@@ -10,6 +10,7 @@ the storage contract (see §2.1 table "venture×asset_class×TF×period×quality
 because DC-6 does not exist yet; DC-6 will consume this type. Overlap
 prohibition is enforced by the DC-8 migration's EXCLUDE constraint.
 """
+
 from __future__ import annotations
 
 from enum import StrEnum

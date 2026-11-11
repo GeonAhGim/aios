@@ -27,6 +27,7 @@ Value provenance (honest labeling, §10 principle):
   that KRX sets no separate minimum order amount for domestic equity cash
   trading.
 """
+
 from __future__ import annotations
 
 from datetime import date
@@ -43,9 +44,7 @@ from src.services.oms.domain.venue_profile import (
 
 VENUE = "kis"
 
-_KRX_TICK_RULE_URL = (
-    "https://law.krx.co.kr (유가증권시장 업무규정 시행세칙 별표 - 호가가격단위)"
-)
+_KRX_TICK_RULE_URL = "https://law.krx.co.kr (유가증권시장 업무규정 시행세칙 별표 - 호가가격단위)"
 
 # 005930 (Samsung Electronics) tick follows the price-band step table --
 # verified=False (§9 L4-04 DoD c) since the snapshot-day price was not

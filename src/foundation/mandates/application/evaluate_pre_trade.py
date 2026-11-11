@@ -20,6 +20,7 @@ without touching this module again, but by default they are omitted from
 the bundle (never silently run with a missing/zero limit, which would either
 false-deny every order or, if defaulted permissively, defeat CM-A2).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

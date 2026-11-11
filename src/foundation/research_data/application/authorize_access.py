@@ -31,6 +31,7 @@ purpose:
   404 here would misreport a real, actionable permission gap as
   nonexistence.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

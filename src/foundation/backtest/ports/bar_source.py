@@ -8,6 +8,7 @@ outside the replayable range with `BACKTEST_LOOKAHEAD_VIOLATION` (I2).
 Only the Protocol declaration and `...` bodies belong here -- no I/O,
 logging, or default implementation (L26 DoD (b)).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

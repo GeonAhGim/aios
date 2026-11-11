@@ -9,6 +9,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md#§2-D, §9 L4-11
 실패는 outbox 재처리가 책임지며, 이 모듈이 자체 재시도하면 이중 제출
 위험이 생긴다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

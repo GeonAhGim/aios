@@ -22,6 +22,7 @@ owning tenant. (2) `adverse_move_abort_pct` (§4 row 434's other trigger)
 isn't evaluated -- only the DoD-required `deadline` fallback is. (3)
 `slice_ttl_sec` isn't enforced (no TTL param on `Order`/`place_order`).
 """
+
 from __future__ import annotations
 
 import json
@@ -73,8 +74,12 @@ async def _abort(pool: asyncpg.Pool, row: asyncpg.Record, now: datetime) -> None
     """§4 row 435 -- a newer control superseded this request's fence."""
     async with pool.acquire() as conn, conn.transaction():
         await conditional_update(
-            conn, table="liquidation_request", id_column="id", id_value=row["id"],
-            expected_state_column="state", expected_state_value=row["state"],
+            conn,
+            table="liquidation_request",
+            id_column="id",
+            id_value=row["id"],
+            expected_state_column="state",
+            expected_state_value=row["state"],
             set_values={"state": "ABORTED", "completed_at": now},
         )
         await conn.execute(
@@ -82,16 +87,28 @@ async def _abort(pool: asyncpg.Pool, row: asyncpg.Record, now: datetime) -> None
             row["id"],
         )
         await record_audit_log(
-            conn, actor_agent="liquidation_executor", action_type="liquidation_aborted",
+            conn,
+            actor_agent="liquidation_executor",
+            action_type="liquidation_aborted",
             decision_data={"request_id": str(row["id"]), "reason": "fence_changed"},
-            target_type="liquidation_request", target_id=str(row["id"]),
+            target_type="liquidation_request",
+            target_id=str(row["id"]),
         )
 
 
 async def _submit_order(
-    pool: asyncpg.Pool, adapters: Mapping[str, ExchangeAdapter], request_id: UUID, *,
-    symbol: str, exchange: str, side: str, quantity: Decimal, order_type: OrderType,
-    tolerance_bps: Decimal, slice_ids: list[int], event: str,
+    pool: asyncpg.Pool,
+    adapters: Mapping[str, ExchangeAdapter],
+    request_id: UUID,
+    *,
+    symbol: str,
+    exchange: str,
+    side: str,
+    quantity: Decimal,
+    order_type: OrderType,
+    tolerance_bps: Decimal,
+    slice_ids: list[int],
+    event: str,
 ) -> None:
     """One adapter call outside any DB transaction (§2-B P1 -- never hold a
     connection across network I/O); a short transaction then persists the
@@ -110,9 +127,16 @@ async def _submit_order(
         )
     order = Order(
         client_order_id=f"liq:{request_id}:{event}:{symbol}:{slice_ids[0]}",
-        strategy_id="liquidation", strategy_version="1", symbol=symbol, exchange=exchange,
-        side=OrderSide(side), order_type=order_type, quantity=quantity, price=price,
-        is_liquidation=True, asset_class=AssetClass.CRYPTO,
+        strategy_id="liquidation",
+        strategy_version="1",
+        symbol=symbol,
+        exchange=exchange,
+        side=OrderSide(side),
+        order_type=order_type,
+        quantity=quantity,
+        price=price,
+        is_liquidation=True,
+        asset_class=AssetClass.CRYPTO,
     )
     status = OrderStatus.FAILED
     response: Order | None = None
@@ -132,45 +156,67 @@ async def _submit_order(
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
             insert_orders_sql,
-            order.order_id, _SYSTEM_ACTOR_ID, order.client_order_id, order.strategy_id,
-            order.strategy_version, order.symbol, order.exchange, order.side.value,
-            order.order_type.value, order.quantity,
+            order.order_id,
+            _SYSTEM_ACTOR_ID,
+            order.client_order_id,
+            order.strategy_id,
+            order.strategy_version,
+            order.symbol,
+            order.exchange,
+            order.side.value,
+            order.order_type.value,
+            order.quantity,
             order.price.amount if order.price is not None else None,
-            OrderStatus.CREATED.value, order.asset_class.value, request_id,
+            OrderStatus.CREATED.value,
+            order.asset_class.value,
+            request_id,
         )
         # The row is born CREATED; its final status and the matching order_events
         # row land in this same transaction so replay_verify never sees a
         # status change without history (I6).
         if status == OrderStatus.FAILED:
             await fail_claim_with_event(
-                conn, order.order_id, reason_code="LIQUIDATION_PLACE_FAILED",
+                conn,
+                order.order_id,
+                reason_code="LIQUIDATION_PLACE_FAILED",
                 actor_subject_id=_SYSTEM_ACTOR_ID,
             )
         elif response is not None:
             await update_from_exchange_with_fill_event(
                 conn,
-                order.model_copy(update={
-                    "status": status,
-                    "exchange_order_id": response.exchange_order_id,
-                    "filled_quantity": response.filled_quantity,
-                    "average_fill_price": response.average_fill_price,
-                }),
-                expected_status=OrderStatus.CREATED, actor_subject_id=_SYSTEM_ACTOR_ID,
+                order.model_copy(
+                    update={
+                        "status": status,
+                        "exchange_order_id": response.exchange_order_id,
+                        "filled_quantity": response.filled_quantity,
+                        "average_fill_price": response.average_fill_price,
+                    }
+                ),
+                expected_status=OrderStatus.CREATED,
+                actor_subject_id=_SYSTEM_ACTOR_ID,
             )
         await conn.execute(
             "UPDATE liquidation_slice SET state=$1, order_id=$2 WHERE id = ANY($3::bigint[])",
-            new_state, order.order_id, slice_ids,
+            new_state,
+            order.order_id,
+            slice_ids,
         )
         event_type = (
             "liquidation_fallback_market" if event == "fallback" else "liquidation_slice_sent"
         )
         await record_audit_log(
-            conn, actor_agent="liquidation_executor", action_type=event_type,
+            conn,
+            actor_agent="liquidation_executor",
+            action_type=event_type,
             decision_data={
-                "request_id": str(request_id), "symbol": symbol, "quantity": str(quantity),
-                "status": status.value, "slice_ids": slice_ids,
+                "request_id": str(request_id),
+                "symbol": symbol,
+                "quantity": str(quantity),
+                "status": status.value,
+                "slice_ids": slice_ids,
             },
-            target_type="liquidation_request", target_id=str(request_id),
+            target_type="liquidation_request",
+            target_id=str(request_id),
         )
 
 
@@ -191,20 +237,30 @@ async def _finish_if_drained(
     )
     new_state = "PARTIAL" if failed else "DONE"
     await conditional_update(
-        conn, table="liquidation_request", id_column="id", id_value=request_id,
-        expected_state_column="state", expected_state_value=current_state,
+        conn,
+        table="liquidation_request",
+        id_column="id",
+        id_value=request_id,
+        expected_state_column="state",
+        expected_state_value=current_state,
         set_values={"state": new_state, "completed_at": now},
     )
     await record_audit_log(
-        conn, actor_agent="liquidation_executor", action_type="liquidation_completed",
+        conn,
+        actor_agent="liquidation_executor",
+        action_type="liquidation_completed",
         decision_data={"request_id": str(request_id), "state": new_state},
-        target_type="liquidation_request", target_id=str(request_id),
+        target_type="liquidation_request",
+        target_id=str(request_id),
     )
 
 
 async def _fallback_market(
-    pool: asyncpg.Pool, adapters: Mapping[str, ExchangeAdapter], row: asyncpg.Record,
-    exchange_by_symbol: dict[str, str], side_by_symbol: dict[str, str],
+    pool: asyncpg.Pool,
+    adapters: Mapping[str, ExchangeAdapter],
+    row: asyncpg.Record,
+    exchange_by_symbol: dict[str, str],
+    side_by_symbol: dict[str, str],
 ) -> None:
     """§4 row 434 -- deadline exceeded: claim every remaining PENDING slice
     (-> SENT, so a second tick can't re-claim it) before any adapter call,
@@ -225,10 +281,17 @@ async def _fallback_market(
         by_symbol[r["symbol"]].append(r)
     for symbol, slices in by_symbol.items():
         await _submit_order(
-            pool, adapters, row["id"], symbol=symbol, exchange=exchange_by_symbol[symbol],
-            side=side_by_symbol[symbol], quantity=sum((s["quantity"] for s in slices), Decimal(0)),
-            order_type=OrderType.MARKET, tolerance_bps=Decimal(0),
-            slice_ids=[s["id"] for s in slices], event="fallback",
+            pool,
+            adapters,
+            row["id"],
+            symbol=symbol,
+            exchange=exchange_by_symbol[symbol],
+            side=side_by_symbol[symbol],
+            quantity=sum((s["quantity"] for s in slices), Decimal(0)),
+            order_type=OrderType.MARKET,
+            tolerance_bps=Decimal(0),
+            slice_ids=[s["id"] for s in slices],
+            event="fallback",
         )
 
 
@@ -254,30 +317,45 @@ async def _advance(
             "SELECT id, seq, symbol, quantity FROM liquidation_slice WHERE request_id=$1 "
             "AND state='PENDING' AND (not_before IS NULL OR not_before <= $2) "
             "ORDER BY seq FOR UPDATE SKIP LOCKED LIMIT 1",
-            row["id"], now,
+            row["id"],
+            now,
         )
         if due is None:
             await _finish_if_drained(conn, row["id"], row["state"], now)
             return
         await conditional_update(
-            conn, table="liquidation_slice", id_column="id", id_value=due["id"],
-            expected_state_column="state", expected_state_value="PENDING",
+            conn,
+            table="liquidation_slice",
+            id_column="id",
+            id_value=due["id"],
+            expected_state_column="state",
+            expected_state_value="PENDING",
             set_values={"state": "SENT"},
         )
         if row["state"] == "PLANNED":
             await conditional_update(
-                conn, table="liquidation_request", id_column="id", id_value=row["id"],
-                expected_state_column="state", expected_state_value="PLANNED",
+                conn,
+                table="liquidation_request",
+                id_column="id",
+                id_value=row["id"],
+                expected_state_column="state",
+                expected_state_value="PLANNED",
                 set_values={"state": "EXECUTING"},
             )
 
     order_meta = next(s for s in plan_meta["slices"] if s["seq"] == due["seq"])
     await _submit_order(
-        pool, adapters, row["id"], symbol=due["symbol"], exchange=exchange_by_symbol[due["symbol"]],
-        side=side_by_symbol[due["symbol"]], quantity=due["quantity"],
+        pool,
+        adapters,
+        row["id"],
+        symbol=due["symbol"],
+        exchange=exchange_by_symbol[due["symbol"]],
+        side=side_by_symbol[due["symbol"]],
+        quantity=due["quantity"],
         order_type=OrderType(order_meta["order_type"]),
         tolerance_bps=Decimal(order_meta["limit_tolerance_bps"]),
-        slice_ids=[due["id"]], event="slice",
+        slice_ids=[due["id"]],
+        event="slice",
     )
 
 

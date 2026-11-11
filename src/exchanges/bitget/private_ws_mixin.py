@@ -33,6 +33,7 @@ it is not repeated here -- unmatched events ride the same fail-closed
 path `InboxProcessor._process_row` already uses to leave them IGNORED
 (an auditable row, not a silent counter).
 """
+
 from __future__ import annotations
 
 import asyncio

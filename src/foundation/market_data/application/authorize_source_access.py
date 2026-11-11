@@ -8,6 +8,7 @@ capability, and redistribution scope. Since a tier upgrade is only an
 UPDATE to that row, neither this function nor adapter code changes
 (task-1764 DoD).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

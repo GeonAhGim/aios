@@ -1,4 +1,5 @@
 """19번대 — 포트폴리오 서비스 팩토리 의존성."""
+
 from __future__ import annotations
 
 import asyncpg

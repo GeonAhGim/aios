@@ -8,6 +8,7 @@ request_context.py, PLT-107)를 그대로 재사용한다 — 같은 값이 응�
 헤더 X-Request-ID와 봉투 meta.trace_id 양쪽에 찍혀야 클라이언트가
 장애 신고 시 둘 중 뭘 봐도 같은 요청을 가리킨다.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

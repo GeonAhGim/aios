@@ -16,6 +16,7 @@ are stored as NUMERIC(30,10) and never rounded." Every `datetime` field is
 `AwareDatetime`, rejecting naive values (a tz-naive value signals a
 misparsed exchange response, not a valid input).
 """
+
 from __future__ import annotations
 
 from datetime import date

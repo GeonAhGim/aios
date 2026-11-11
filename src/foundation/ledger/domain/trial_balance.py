@@ -10,6 +10,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.3 `TrialBalanceView
 않고 LC-3/LC-4에 맡긴다. 순수 함수만: I/O·시계 직접 호출 금지, `as_of`는
 인자로 받는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence

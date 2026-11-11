@@ -4,6 +4,7 @@
 from the same DB directly without a projection worker, so there is no latency,
 but `as_of` must always be included (spec 108 §2).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

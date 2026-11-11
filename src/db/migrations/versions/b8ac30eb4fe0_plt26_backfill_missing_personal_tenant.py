@@ -17,6 +17,7 @@ has no matching `tenant` row, so their first foundation write
 inserts zero rows the second time, and round-tripping upgrade/downgrade/
 upgrade leaves the same set of tenant rows both times.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

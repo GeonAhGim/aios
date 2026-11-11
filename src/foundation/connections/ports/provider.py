@@ -2,6 +2,7 @@
 credential lookup methods live on this Protocol (CON-009 pins it as a contract
 test). Real provider integration follows task-71 §6 "decide after provider/legal
 review" — this leaf only implements the fake adapter (adapters/fake_provider.py)."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -26,6 +27,4 @@ class OpaqueRef:
 class ReadonlyAccountProvider(Protocol):
     async def verify_readonly_scope(self, lease: SecretLease) -> ScopeProof: ...
 
-    async def fetch_snapshot(
-        self, account_ref: OpaqueRef, as_of: datetime
-    ) -> ProviderSnapshot: ...
+    async def fetch_snapshot(self, account_ref: OpaqueRef, as_of: datetime) -> ProviderSnapshot: ...

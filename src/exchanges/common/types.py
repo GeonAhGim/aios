@@ -2,6 +2,7 @@
 
 Spec: 02_exchange_adapter_v1.2.md#§2.1, §2.0-A (다자산군 확장, ADR-2026-08-28)
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

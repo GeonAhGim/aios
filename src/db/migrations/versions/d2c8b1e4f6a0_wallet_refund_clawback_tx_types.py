@@ -8,6 +8,7 @@ Create Date: 2026-09-03 01:00:00
 시스템 총잔액이 price_paid만큼 증가하던 결함(docs/specs/L4_market_data_
 positions_ledger_v1.0.md R1)의 수정에 필요한 거래 유형을 CHECK 제약에 추가.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

@@ -11,6 +11,7 @@ Spec: docs/specs/L4_market_data_positions_ledger_v1.0.md#§3.3 `PayoutBatchView`
 `UNIQUE(seller_user_id, period_end)`와 같은 모양의 중복 지급 방지 키다.
 순수 함수만: I/O·시계·랜덤 직접 호출 금지, `now`는 인자로 받는다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

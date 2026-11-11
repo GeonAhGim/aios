@@ -12,6 +12,7 @@ Spec: 02b_bitget_api_v2_full_spec_v1.md §5.4, P1
 2026-09-03 task-1032(PLT-40a 선행) — `futures_trading_mixin.py`(357줄, P6
 line_cap 초과)에서 Plan/TPSL 메서드군만 순수 이동(동작 변경 0).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -58,9 +59,7 @@ class BitgetFuturesPlanMixin:
             body["size"] = str(size)
         if hold_side is not None:
             body["holdSide"] = hold_side
-        raw = await self._request(
-            "POST", "/api/v2/mix/order/place-tpsl-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/mix/order/place-tpsl-order", body=body)
         return dict(raw["data"])
 
     @require_paper_sandbox
@@ -94,9 +93,7 @@ class BitgetFuturesPlanMixin:
             body["stopLossTriggerPrice"] = str(stop_loss_trigger)
         if hold_side is not None:
             body["holdSide"] = hold_side
-        raw = await self._request(
-            "POST", "/api/v2/mix/order/place-pos-tpsl", body=body
-        )
+        raw = await self._request("POST", "/api/v2/mix/order/place-pos-tpsl", body=body)
         return dict(raw["data"])
 
     @require_paper_sandbox
@@ -128,9 +125,7 @@ class BitgetFuturesPlanMixin:
         }
         if order.price is not None:
             body["executePrice"] = str(order.price.amount)
-        raw = await self._request(
-            "POST", "/api/v2/mix/order/place-plan-order", body=body
-        )
+        raw = await self._request("POST", "/api/v2/mix/order/place-plan-order", body=body)
         return dict(raw["data"])
 
     @require_paper_sandbox
@@ -163,7 +158,5 @@ class BitgetFuturesPlanMixin:
         params: dict[str, Any] = {"productType": product_type}
         if symbol is not None:
             params["symbol"] = _to_bitget_symbol(symbol)
-        raw = await self._request(
-            "GET", "/api/v2/mix/order/orders-plan-pending", params=params
-        )
+        raw = await self._request("GET", "/api/v2/mix/order/orders-plan-pending", params=params)
         return list(raw["data"].get("entrustedList") or [])

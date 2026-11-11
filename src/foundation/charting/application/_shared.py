@@ -5,6 +5,7 @@ a non-existent layout_id and a layout_id owned by another tenant identically,
 returning the same exception/string form so the response reveals no
 "exists but unauthorized" information (same pattern as reconciliation
 `resolve_reconciliation.py`)."""
+
 from __future__ import annotations
 
 from uuid import UUID

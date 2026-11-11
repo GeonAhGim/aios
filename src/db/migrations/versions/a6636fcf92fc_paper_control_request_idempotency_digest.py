@@ -31,6 +31,7 @@ deployment_id)이 없다 — 같은 idempotency_key로 REQUEST를 재시도하�
 NULL은 유니크 검사에서 자연히 제외한다(Postgres 기본 동작, `WHERE` 없이도
 NULL != NULL). 새 REQUEST부터는 애플리케이션이 항상 두 값을 채운다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

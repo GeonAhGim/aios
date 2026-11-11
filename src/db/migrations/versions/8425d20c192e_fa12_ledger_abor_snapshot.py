@@ -31,6 +31,7 @@ attempt for the same (fund_id, as_of_date) hits this constraint, and
 to a domain `AlreadyClosedError` (decision item 4) instead of letting the
 raw DB error leak.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

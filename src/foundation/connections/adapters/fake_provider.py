@@ -2,6 +2,7 @@
 this leaf (task-71 §6, task-74 §7 "This specification does not authorize trading
 integration"). Test-only adapter; the only adapter until the real provider is approved.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

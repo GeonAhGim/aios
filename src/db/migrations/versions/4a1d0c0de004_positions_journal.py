@@ -40,6 +40,7 @@ CHECK로 강제하지 않는다 — `asset_class`는 `pos_snapshot`의 컬럼이
 전용이라 이 저장소의 마이그레이션 실행 계정에는 적용되지 않음, R9
 미해결).
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

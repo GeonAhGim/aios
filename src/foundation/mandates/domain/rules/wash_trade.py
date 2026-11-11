@@ -12,6 +12,7 @@ the other side of a trade is exactly what a market is for — so this rule
 only ever compares open orders whose `tenant_id` matches the incoming
 order's `tenant_id`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

@@ -13,6 +13,7 @@ import하지만, 이 파일은 `domain/`을 import하지 않는다(71번 §4, FN
 `domain/chart_of_accounts.py`(LC-2)의 책임이며 계약 계층에서는 강제하지
 않는다 — 계약은 domain을 모르기 때문이다.
 """
+
 from __future__ import annotations
 
 from datetime import date

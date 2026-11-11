@@ -27,6 +27,7 @@ heartbeat 파일의 벽시계 타임스탬프를 직접 과거로 써서 재현�
 (read_heartbeat_age_seconds가 time.time() 기준이라 이쪽은 clock 주입
 대상이 아님, watchdog_process.py 통합테스트와 동일 기법).
 """
+
 from __future__ import annotations
 
 import time
@@ -95,8 +96,7 @@ class SimulationReport:
             flag = " ← FP" if r.is_false_positive else (" ← FN" if r.is_false_negative else "")
             expected = "발동" if r.expect_trigger else "정상"
             lines.append(
-                f"{r.scenario:<28} {expected:<8} {r.final_action.value:<10} "
-                f"{r.final_reason}{flag}"
+                f"{r.scenario:<28} {expected:<8} {r.final_action.value:<10} {r.final_reason}{flag}"
             )
         lines.append("")
         lines.append(

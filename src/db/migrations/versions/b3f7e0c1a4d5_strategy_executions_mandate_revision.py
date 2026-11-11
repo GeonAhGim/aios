@@ -19,6 +19,7 @@ nullable, 아무도 자동으로 채우지 않는다 — 기존 실행은 계속
 지정하지 않는다(mandate revision은 현재 삭제 경로가 없음 — 상태 전이만
 존재, FND-02 참조).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

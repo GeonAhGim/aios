@@ -22,6 +22,7 @@ Fail-closed: an empty source, empty registry version, or a non-IRProgram
 value is rejected with `ValueError` — a plausible-looking hash is never
 built from bad input.
 """
+
 from __future__ import annotations
 
 import hashlib

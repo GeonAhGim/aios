@@ -6,6 +6,7 @@ The future src/exchanges/paper_sim/adapter.py (a separate L4) must implement thi
 Only the Protocol declaration and `...` bodies belong here -- no I/O,
 logging, or default implementation (L26 DoD (b)).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

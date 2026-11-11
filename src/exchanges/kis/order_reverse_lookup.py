@@ -19,6 +19,7 @@ ORD_TMD) and has not been confirmed by a real-account round trip
 (**unverified** — same principle as the other query methods, see
 trading_query_mixin.py).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -97,9 +98,7 @@ def row_to_order(row: dict[str, Any], *, order_date: str) -> Order:
 
     price_raw = row.get("ord_unpr") or "0"
     price = (
-        Money(amount=Decimal(price_raw), currency=Currency.KRW)
-        if Decimal(price_raw) != 0
-        else None
+        Money(amount=Decimal(price_raw), currency=Currency.KRW) if Decimal(price_raw) != 0 else None
     )
     created_at = _parse_ord_tmd(order_date, row.get("ord_tmd")) or datetime.now(UTC)
     return Order(

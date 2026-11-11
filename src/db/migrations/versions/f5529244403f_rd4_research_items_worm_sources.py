@@ -41,6 +41,7 @@ granted `aios_app` DML on tables that existed at that migration's run
 time) never covered it — this leaf GRANTs `aios_app` explicitly first,
 then layers WORM on top, exactly like `b8d5f2a1c3e4`.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -104,12 +105,9 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE INDEX ix_research_items_tenant_known "
-        "ON research_items (tenant_id, known_at DESC)"
+        "CREATE INDEX ix_research_items_tenant_known ON research_items (tenant_id, known_at DESC)"
     )
-    op.execute(
-        "CREATE INDEX ix_research_items_revision_of ON research_items (revision_of)"
-    )
+    op.execute("CREATE INDEX ix_research_items_revision_of ON research_items (revision_of)")
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON research_items TO {_APP_ROLE}")
     for statement in worm_sql("research_items"):
         op.execute(statement)
@@ -130,9 +128,7 @@ def upgrade() -> None:
         "CREATE INDEX ix_research_item_instruments_instrument "
         "ON research_item_instruments (instrument_id)"
     )
-    op.execute(
-        f"GRANT SELECT, INSERT, UPDATE, DELETE ON research_item_instruments TO {_APP_ROLE}"
-    )
+    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON research_item_instruments TO {_APP_ROLE}")
 
 
 def downgrade() -> None:

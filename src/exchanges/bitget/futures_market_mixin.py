@@ -227,9 +227,7 @@ class BitgetFuturesMarketMixin:
                 symbol=symbol,
                 exchange="bitget",
                 current_rate=Decimal(item["fundingRate"]),
-                next_funding_time=datetime.fromtimestamp(
-                    int(item["fundingTime"]) / 1000, tz=UTC
-                ),
+                next_funding_time=datetime.fromtimestamp(int(item["fundingTime"]) / 1000, tz=UTC),
                 timestamp=datetime.fromtimestamp(int(item["fundingTime"]) / 1000, tz=UTC),
             )
             for item in raw["data"]

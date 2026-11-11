@@ -11,6 +11,7 @@ api_key/api_secret은 각자 암호화(BYTEA)로 저장, extra_encrypted는 거�
 묶어 암호화한 것 — 거래소마다 필요한 필드 개수가 달라 컬럼을 늘리지 않고
 여기 하나로 흡수한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -39,9 +40,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        "CREATE INDEX idx_exchange_credentials_user ON exchange_credentials(user_id)"
-    )
+    op.execute("CREATE INDEX idx_exchange_credentials_user ON exchange_credentials(user_id)")
 
 
 def downgrade() -> None:

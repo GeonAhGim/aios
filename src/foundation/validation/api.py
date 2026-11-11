@@ -14,6 +14,7 @@ force copies out of `domain/` for no benefit or quietly smuggle `domain`
 imports behind the contracts file. This module carries no version/schema
 guarantee, only import-path indirection.
 """
+
 from __future__ import annotations
 
 from src.foundation.validation.domain.check_result import CheckResult

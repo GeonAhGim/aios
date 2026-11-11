@@ -9,6 +9,7 @@ Deviation: ExchangeAdapter (worktree 6) does not exist yet, so this is
 designed as a pure orchestration function that receives live quote lookups
 via injected callbacks (same pattern as recovery.py).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

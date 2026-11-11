@@ -31,6 +31,7 @@ Spec: 기능설계문서_v1.20.md#FD-15.3, 10.3-B 면책조항, 9.4
 FD-15.3 예외상황 — 위험등급 미지정 사용자(FD-15.1이 필수라 이론상
 발생하지 않아야 함)가 이 경로에 도달하면 시스템 오류로 취급한다.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -76,9 +77,7 @@ async def check_purchase_risk_warning(
             "SELECT risk_profile FROM users WHERE user_id = $1", buyer_user_id
         )
         if user_risk_profile is None:
-            raise RiskMatchingError(
-                "위험등급이 지정되지 않은 사용자입니다 — 재평가가 필요합니다."
-            )
+            raise RiskMatchingError("위험등급이 지정되지 않은 사용자입니다 — 재평가가 필요합니다.")
         target_risk_level = await conn.fetchval(
             "SELECT risk_level FROM strategies WHERE strategy_id = $1 AND version = $2",
             strategy_id,

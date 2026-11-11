@@ -13,6 +13,7 @@ Usage:
     python scripts/ledger_resync_drift.py                      # dry-run, PLATFORM house accounts
     python scripts/ledger_resync_drift.py --account PLATFORM:CASH_CLEARING --apply
 """
+
 from __future__ import annotations
 
 import argparse

@@ -20,6 +20,7 @@ identical to the original down to the digest, it's rejected as not being a
 `hash_chain.lines_digest`. Pure functions only — no I/O, no direct clock
 calls.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

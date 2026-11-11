@@ -16,6 +16,7 @@ in-memory가 아니다.
 여러 지표가 서로 다른 단계를 가리키면 가장 높은(위험한) 단계를 채택한다
 (다수결/평균이 아니라 최댓값 — 안전장치는 항상 보수적으로).
 """
+
 from __future__ import annotations
 
 import logging

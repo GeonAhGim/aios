@@ -8,6 +8,7 @@ independently of price-based limits — it is unrelated to the risk axis's
 position-sizing rules and does not import from `src.core.risk` (same
 authority-separation reasoning as `leverage.py` in this package).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

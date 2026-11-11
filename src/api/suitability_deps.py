@@ -1,4 +1,5 @@
 """15번대 — 적합성평가 서비스 팩토리 의존성."""
+
 from __future__ import annotations
 
 import asyncpg

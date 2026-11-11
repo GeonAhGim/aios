@@ -16,6 +16,7 @@ into a separate session window.
 (Reference: https://easylaw.go.kr/CSP/CnpClsMain.laf?csmSeq=1701 —
 "trading days, trading hours, and trading principles, etc.")
 """
+
 from __future__ import annotations
 
 from datetime import time

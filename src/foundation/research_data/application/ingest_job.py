@@ -46,6 +46,7 @@ is exhausted, does not raise out of `ingest_job` and is never dropped
 silently (§6, "조용한 결측 금지") -- it comes back as `IngestJobResult.gap`
 so the caller (backfill retry, coverage dashboard) can act on it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -93,9 +94,7 @@ PageFetcher = Callable[[str | None], Awaitable[IngestPage]]
 
 @runtime_checkable
 class ResearchItemStore(Protocol):
-    async def append_item(
-        self, tenant_id: UUID, item: ResearchItem, *, external_id: str
-    ) -> UUID:
+    async def append_item(self, tenant_id: UUID, item: ResearchItem, *, external_id: str) -> UUID:
         """Matches `PostgresResearchRepository.append_item` (RD-4) exactly, so
         a real repository instance satisfies this Protocol unmodified;
         unit tests pass an in-memory fake instead."""
@@ -189,9 +188,7 @@ async def ingest_job(
                 fetch_page, resume_cursor, retry_policy=policy, sleep=sleep, rng=rng
             )
         except ExchangeError as exc:
-            gap = CoverageGap(
-                source_id=source_id, span=span, cursor=resume_cursor, reason=str(exc)
-            )
+            gap = CoverageGap(source_id=source_id, span=span, cursor=resume_cursor, reason=str(exc))
             return IngestJobResult(
                 source_id=source_id,
                 span=span,

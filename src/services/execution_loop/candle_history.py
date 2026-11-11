@@ -21,6 +21,7 @@ cache without tagging is blocked by static checking", via type checking.
 A public feed with no owner distinction, like Bitget, explicitly passes
 `owner_id=None` — not an omission, but a declaration of "public data".
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

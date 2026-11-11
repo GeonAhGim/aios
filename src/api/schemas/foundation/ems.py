@@ -6,6 +6,7 @@ contracts/v1.py::TcaResult` (106 §2), wrapped rather than duplicated.
 one-to-one so the router does no translation beyond building `Fill`/
 `Candle` domain objects out of the wire `Decimal`s.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

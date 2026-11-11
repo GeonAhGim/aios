@@ -2,6 +2,7 @@
 
 Spec: AIOSproject No. 79 §4 SLI "chain verification success".
 """
+
 from __future__ import annotations
 
 from uuid import UUID

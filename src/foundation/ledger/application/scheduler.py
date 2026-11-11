@@ -25,6 +25,7 @@ Draft 7일)·전이 규칙은 재구현하지 않는다. 정산 후보(`CaptureR
 `NOT EXISTS`가 걸러내므로 이중 지급 위험은 없다(§4.4 `ledger_payout_item.
 capture_entry_id UNIQUE`와 별개의 독립된 방어선).
 """
+
 from __future__ import annotations
 
 import asyncio

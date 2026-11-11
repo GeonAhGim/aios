@@ -33,6 +33,7 @@ tr_id를 공유한다고 가정했다 — 02d_kis_api_full_spec_v1.md §4 조사
 예제로 직접 확인하지 못했다(**미검증**, 8.3 원칙: 틀리면 거래소가
 오류를 반환할 뿐 잘못된 주문이 나가지는 않는다).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -124,9 +125,7 @@ class KISOverseasStockMixin:
             "ORD_SVR_DVSN_CD": "0",
             "ORD_DVSN": "00",
         }
-        raw = await self._request(
-            "POST", "/uapi/overseas-stock/v1/trading/order", tr_id, body=body
-        )
+        raw = await self._request("POST", "/uapi/overseas-stock/v1/trading/order", tr_id, body=body)
         output = raw.get("output", {})
         exchange_order_id = f"{output.get('KRX_FWDG_ORD_ORGNO', '')}:{output.get('ODNO', '')}"
         return order.model_copy(
@@ -166,9 +165,7 @@ class KISOverseasStockMixin:
         )
         return bool(raw.get("rt_cd") == "0")
 
-    async def get_overseas_balance(
-        self: KISHTTPClient, exchange: str
-    ) -> list[AccountBalance]:
+    async def get_overseas_balance(self: KISHTTPClient, exchange: str) -> list[AccountBalance]:
         codes = _exchange_codes(exchange)
         raw = await self._request(
             "GET",

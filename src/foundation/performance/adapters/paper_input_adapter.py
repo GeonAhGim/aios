@@ -26,6 +26,7 @@ across tickets 71/80/81):
   two limitations above, leave `price_evidence=()` to explicitly state
   "no price evidence").
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -51,9 +52,9 @@ _TRUSTED_STATUSES = frozenset({Classification.HEALTHY, Classification.RESOLVED})
 
 class UnreconciledInputError(Exception):
     """72 error taxonomy `INTEGRITY_STATEMENT_INPUT_UNRECONCILED` — router maps to 409.
-The reconciliation state is either absent (never reconciled) or not
-HEALTHY/RESOLVED (an active discrepancy exists), meaning this statement's
-input cannot be trusted."""
+    The reconciliation state is either absent (never reconciled) or not
+    HEALTHY/RESOLVED (an active discrepancy exists), meaning this statement's
+    input cannot be trusted."""
 
     def __init__(self, scope_ref: str) -> None:
         super().__init__(f"INTEGRITY_STATEMENT_INPUT_UNRECONCILED: scope_ref={scope_ref}")

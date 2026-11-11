@@ -25,6 +25,7 @@ OOS/robustness/stress 체크가 생겨도 이 테이블을 재사용하기 위�
 (같은 강도로 "validation_run/validation_result" 이름·상태를 76번 §1과
 맞춰뒀다 — 나중에 진짜 FND-04 패키지 레이어가 필요해지면 그때 흡수).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

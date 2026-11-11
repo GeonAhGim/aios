@@ -19,6 +19,7 @@ Two defect fixes from task-1803 (follow-up to review task-1799 REJECT):
     (strategy_id/strategy_version/seller_user_id only, no credentials or query
     text) (fail-closed).
 """
+
 from __future__ import annotations
 
 import logging

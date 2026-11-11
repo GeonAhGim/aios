@@ -4,6 +4,7 @@ Callers resolve the arrival snapshot and chronological benchmark window before
 calling this pure function. Persistence and report submission belong to CM-16.
 Positive slippage is an execution cost; negative slippage is price improvement.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

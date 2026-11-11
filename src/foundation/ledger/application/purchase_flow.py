@@ -24,6 +24,7 @@ buyer 잔액을 차감하려 시도한다(buyer 계정 `FOR UPDATE`로 순서만
 `release_hold`는 이 leaf 자체의 호출부는 없지만(구매는 즉시 capture),
 LC-14(환불) 재사용을 위해 스펙 시그니처대로 구현해 둔다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -75,13 +76,17 @@ async def ensure_account(conn: asyncpg.Connection, account_code: str, currency: 
     await conn.execute(
         "INSERT INTO ledger_account (account_code, account_type, currency, allow_negative) "
         "VALUES ($1, $2, $3, $4) ON CONFLICT (account_code) DO NOTHING",
-        account_code, account_type(account_code).value, currency.value, negative_ok,
+        account_code,
+        account_type(account_code).value,
+        currency.value,
+        negative_ok,
     )
     await conn.execute(
         "INSERT INTO ledger_balance (account_id, allow_negative) "
         "SELECT account_id, $2 FROM ledger_account WHERE account_code = $1 "
         "ON CONFLICT (account_id) DO NOTHING",
-        account_code, negative_ok,
+        account_code,
+        negative_ok,
     )
 
 

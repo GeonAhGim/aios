@@ -9,6 +9,7 @@ LC-8b/task-320)은 모른다(71번 §4). 이 파일 자체는 I/O를 하지 않�
 않은 `LedgerEvent`(LC-1 계약)이고, 반환값 `JournalEntryView`가 실제 저장된
 분개다 — 이 포트는 새 DTO를 정의하지 않는다(LC-1 재사용).
 """
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

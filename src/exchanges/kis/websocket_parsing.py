@@ -14,6 +14,7 @@ github.com/koreainvestment/open-trading-api/examples_llm/overseas_stock/
 그대로 — 새 파서 계층을 만들지 않고 기존 `_split_ws_frame`/`_split_records`
 그대로 재사용한다.
 """
+
 from __future__ import annotations
 
 import base64

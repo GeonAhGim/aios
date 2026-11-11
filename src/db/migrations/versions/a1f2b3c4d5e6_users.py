@@ -15,6 +15,7 @@ risk_profile/risk_profile_assessed_at 컬럼과 risk_profile_history 테이블�
 제외 — 10번 문서가 이를 별도 리프(3.11/3.12, "11.1 이후")로 명시적으로
 분리해뒀다(FD-15.2 착수 시 추가).
 """
+
 from collections.abc import Sequence
 
 from alembic import op

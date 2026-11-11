@@ -8,6 +8,7 @@ main.py assembles pool/event_bus/credential_resolver etc. and passes them to
 :class:`BackgroundLoops`.stop. Every loop is instrumented via `LoopHealth.record_tick`, except
 execution_loop, which has its own scheduler (`ExecutionLoopScheduler`) outside this leaf.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -100,8 +101,12 @@ class BackgroundLoops:
 
 
 async def _run_instrumented(
-    name: str, interval_sec: float, tick: Callable[[], Awaitable[Any]], *,
-    health: LoopHealth, on_error: str,
+    name: str,
+    interval_sec: float,
+    tick: Callable[[], Awaitable[Any]],
+    *,
+    health: LoopHealth,
+    on_error: str,
 ) -> None:
     """PLT-08 shared instrumentation wrapper — swallows exceptions (logs only) so loop survives."""
     start = time.monotonic()
@@ -117,8 +122,12 @@ async def _run_instrumented(
 
 
 async def run_periodic_loop(
-    name: str, interval_sec: float, tick: Callable[[], Awaitable[Any]], *,
-    health: LoopHealth, on_error: str,
+    name: str,
+    interval_sec: float,
+    tick: Callable[[], Awaitable[Any]],
+    *,
+    health: LoopHealth,
+    on_error: str,
 ) -> None:
     """`sleep(interval_sec)` -> one instrumented tick, forever (exported — main.py uses it too)."""
     while True:
@@ -163,13 +172,16 @@ async def start_background_loops(
 
     # FD-14 — price/indicator alert evaluation loop (one alert failing still continues next cycle).
     alert_service = AlertService(
-        pool, credential_resolver=credential_resolver, publish=event_bus.publish)
+        pool, credential_resolver=credential_resolver, publish=event_bus.publish
+    )
 
     # Red team #2026-09-02-21 — even if evaluate_all_active() raises, run_periodic_loop catches it.
     alert_task = asyncio.create_task(
         run_periodic_loop(
-            "alert_evaluation", ALERT_EVALUATION_INTERVAL_SECONDS,
-            alert_service.evaluate_all_active, health=health,
+            "alert_evaluation",
+            ALERT_EVALUATION_INTERVAL_SECONDS,
+            alert_service.evaluate_all_active,
+            health=health,
             on_error="alert_evaluation_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다.",
         )
     )
@@ -178,17 +190,21 @@ async def start_background_loops(
     # global credentials, so exchange_adapters is empty. risk_gate_repo is shared by CM-11 too.
     risk_gate_repo = PostgresRiskGateRepository(pool)
     kill_switch_service = KillSwitchService(
-        risk_gate_repo=risk_gate_repo, pg_pool=pool,
+        risk_gate_repo=risk_gate_repo,
+        pg_pool=pool,
         paper_control_repo=PostgresPaperControlRepository(pool),
-        exchange_adapters={}, audit_repo=PostgresAuditEventRepository(pool),
+        exchange_adapters={},
+        audit_repo=PostgresAuditEventRepository(pool),
     )
     risk_guard_service = RiskGuardService(pool, kill_switch_service, publish=event_bus.publish)
 
     # Red team #25 — same defense line as the alert loop (a raise here kills it permanently).
     risk_guard_task = asyncio.create_task(
         run_periodic_loop(
-            "risk_guard", RISK_GUARD_INTERVAL_SECONDS,
-            risk_guard_service.evaluate_all_running, health=health,
+            "risk_guard",
+            RISK_GUARD_INTERVAL_SECONDS,
+            risk_guard_service.evaluate_all_running,
+            health=health,
             on_error="risk_guard_loop: 이번 주기 평가 실패 — 다음 주기에 재시도합니다.",
         )
     )
@@ -210,14 +226,17 @@ async def start_background_loops(
     owner_id = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
     lease_repo = PostgresExecutionLeaseRepository(pool)
     execution_scheduler = ExecutionLoopScheduler(
-        pool, resolve_adapter=credential_resolver.get_adapter, policy=policy,
+        pool,
+        resolve_adapter=credential_resolver.get_adapter,
+        policy=policy,
         publish=event_bus.publish,
         pre_submit_gate=make_recovery_gate(
             recovery_state, make_foundation_pre_submit_gate(pool, require_mandate=True)
         ),
         distrust_monitor=DataDistrustMonitor(publish=event_bus.publish),
         distrust_provider_factory=DefaultDistrustProviderFactory(),  # R-48/task-2810
-        lease_repo=lease_repo, owner_id=owner_id,
+        lease_repo=lease_repo,
+        owner_id=owner_id,
         fence_reader_factory=fsw.make_fence_reader_factory(pool),  # task-1717 P0-D
         decision_reader=fsw.make_decision_reader(pool),
     )
@@ -245,8 +264,11 @@ async def start_background_loops(
 
     safety_task = asyncio.create_task(
         run_periodic_loop(
-            "safety_reactivation", SAFETY_REACTIVATION_INTERVAL_SECONDS, _safety_tick,
-            health=health, on_error="safety_reactivation_loop: 이번 주기 실패 — 다음 주기에 재시도",
+            "safety_reactivation",
+            SAFETY_REACTIVATION_INTERVAL_SECONDS,
+            _safety_tick,
+            health=health,
+            on_error="safety_reactivation_loop: 이번 주기 실패 — 다음 주기에 재시도",
         )
     )
 
@@ -262,8 +284,11 @@ async def start_background_loops(
     if flag_enabled("AIOS_LIQUIDATION_WORKER_ENABLED"):
         liquidation_task = asyncio.create_task(
             run_periodic_loop(
-                "liquidation_worker", LIQUIDATION_WORKER_INTERVAL_SECONDS, _liquidation_tick,
-                health=health, on_error="liquidation_worker_loop: 이번 주기 실패 — 재시도",
+                "liquidation_worker",
+                LIQUIDATION_WORKER_INTERVAL_SECONDS,
+                _liquidation_tick,
+                health=health,
+                on_error="liquidation_worker_loop: 이번 주기 실패 — 재시도",
             )
         )
 
@@ -272,7 +297,11 @@ async def start_background_loops(
         now = datetime.now(UTC)
         business_date = (now - timedelta(days=1)).date()
         await run_daily_post_trade_batch(
-            pool, kill_switch_service, risk_gate_repo, business_date=business_date, now=now,
+            pool,
+            kill_switch_service,
+            risk_gate_repo,
+            business_date=business_date,
+            now=now,
             publish=event_bus.publish,
         )
 
@@ -280,8 +309,11 @@ async def start_background_loops(
     if flag_enabled("AIOS_POST_TRADE_BATCH_ENABLED"):
         post_trade_batch_task = asyncio.create_task(
             run_periodic_loop(
-                "post_trade_batch", POST_TRADE_BATCH_INTERVAL_SECONDS, _post_trade_batch_tick,
-                health=health, on_error="post_trade_batch_loop: 이번 주기 실패 — 재시도",
+                "post_trade_batch",
+                POST_TRADE_BATCH_INTERVAL_SECONDS,
+                _post_trade_batch_tick,
+                health=health,
+                on_error="post_trade_batch_loop: 이번 주기 실패 — 재시도",
             )
         )
 

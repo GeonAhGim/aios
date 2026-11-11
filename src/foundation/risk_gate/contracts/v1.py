@@ -8,6 +8,7 @@ Spec: AIOSproject 48_risk_safety_gate_and_kill_switch_specification_v1.0.md,
 소비하는 "adapter 전 final veto"다. 다른 컨텍스트는 이 파일을 소비하고
 domain/models.py를 직접 참조하지 않는다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

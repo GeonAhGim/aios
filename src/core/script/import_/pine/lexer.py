@@ -22,6 +22,7 @@ Unverified: this parser follows only the commonly known lexical rules
 reference, not TradingView's private grammar spec — it does not guarantee a
 100% match with the original grammar's EBNF.
 """
+
 from __future__ import annotations
 
 import enum
@@ -208,9 +209,7 @@ def tokenize(source: str) -> list[Token]:
                 chars.append(cur)
                 pos += 1
                 col += 1
-            tokens.append(
-                Token(TokenKind.STRING, "".join(chars), "", start_line, start_col)
-            )
+            tokens.append(Token(TokenKind.STRING, "".join(chars), "", start_line, start_col))
             continue
 
         two = ch + peek(1)

@@ -15,6 +15,7 @@ across more than one exchange at once can't be represented by a single
 is skipped, logged; lot size is approximated from
 `ExchangeCapability.min_order_size` rather than a real instrument lookup.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -107,8 +108,11 @@ async def load_positions(
 
 
 async def plan_request(
-    pool: asyncpg.Pool, adapters: Mapping[str, ExchangeAdapter], row: asyncpg.Record,
-    seed_key: bytes, now: datetime,
+    pool: asyncpg.Pool,
+    adapters: Mapping[str, ExchangeAdapter],
+    row: asyncpg.Record,
+    seed_key: bytes,
+    now: datetime,
 ) -> None:
     """§4 row 431 -- REQUESTED -> PLANNED (or straight to DONE if nothing is
     open to liquidate): `plan_liquidation(seed=HMAC(secret, request_id))`,
@@ -120,27 +124,38 @@ async def plan_request(
     if not positions:
         async with pool.acquire() as conn, conn.transaction():
             await conditional_update(
-                conn, table="liquidation_request", id_column="id", id_value=row["id"],
-                expected_state_column="state", expected_state_value="REQUESTED",
+                conn,
+                table="liquidation_request",
+                id_column="id",
+                id_value=row["id"],
+                expected_state_column="state",
+                expected_state_value="REQUESTED",
                 set_values={"state": "DONE", "completed_at": now},
             )
             await record_audit_log(
-                conn, actor_agent="liquidation_executor", action_type="liquidation_completed",
+                conn,
+                actor_agent="liquidation_executor",
+                action_type="liquidation_completed",
                 decision_data={
-                    "request_id": str(row["id"]), "state": "DONE", "reason": "no_open_positions"
+                    "request_id": str(row["id"]),
+                    "state": "DONE",
+                    "reason": "no_open_positions",
                 },
-                target_type="liquidation_request", target_id=str(row["id"]),
+                target_type="liquidation_request",
+                target_id=str(row["id"]),
             )
         return
 
     seed = hmac.new(seed_key, str(row["id"]).encode(), hashlib.sha256).digest()
     policy = load_risk_policy().liquidation
     plan = plan_liquidation(positions=positions, seed=seed, policy=policy, volume_5m={})
-    plan_json = json.dumps({
-        "plan": plan.model_dump(mode="json"),
-        "exchange_by_symbol": exchange_by_symbol,
-        "side_by_symbol": side_by_symbol,
-    })
+    plan_json = json.dumps(
+        {
+            "plan": plan.model_dump(mode="json"),
+            "exchange_by_symbol": exchange_by_symbol,
+            "side_by_symbol": side_by_symbol,
+        }
+    )
     async with pool.acquire() as conn, conn.transaction():
         for s in plan.slices:
             not_before = now + timedelta(seconds=s.not_before_offset_sec)
@@ -148,18 +163,30 @@ async def plan_request(
                 "INSERT INTO liquidation_slice "
                 "(request_id, seq, symbol, quantity, not_before, state) "
                 "VALUES ($1,$2,$3,$4,$5,'PENDING')",
-                row["id"], s.seq, s.symbol, s.quantity, not_before,
+                row["id"],
+                s.seq,
+                s.symbol,
+                s.quantity,
+                not_before,
             )
         await conditional_update(
-            conn, table="liquidation_request", id_column="id", id_value=row["id"],
-            expected_state_column="state", expected_state_value="REQUESTED",
+            conn,
+            table="liquidation_request",
+            id_column="id",
+            id_value=row["id"],
+            expected_state_column="state",
+            expected_state_value="REQUESTED",
             set_values={"state": "PLANNED", "plan": plan_json, "seed_ref": plan.seed_hash},
         )
         await record_audit_log(
-            conn, actor_agent="liquidation_executor", action_type="liquidation_planned",
+            conn,
+            actor_agent="liquidation_executor",
+            action_type="liquidation_planned",
             decision_data={
-                "request_id": str(row["id"]), "slice_count": len(plan.slices),
+                "request_id": str(row["id"]),
+                "slice_count": len(plan.slices),
                 "seed_hash": plan.seed_hash,
             },
-            target_type="liquidation_request", target_id=str(row["id"]),
+            target_type="liquidation_request",
+            target_id=str(row["id"]),
         )

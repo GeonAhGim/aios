@@ -1,4 +1,5 @@
 """GetAuditTimeline 쿼리 — 79번 §3 tenant-scoped 페이지 조회."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

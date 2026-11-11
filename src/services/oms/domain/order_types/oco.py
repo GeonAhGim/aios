@@ -17,6 +17,7 @@ Two forms of determination are needed.
   across 1000 concurrent calls, zero cases where both legs become TRIGGERED
   at once (prevents double fills).
 """
+
 from __future__ import annotations
 
 import threading

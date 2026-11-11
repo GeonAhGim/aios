@@ -28,6 +28,7 @@ lookup endpoint isn't specified anywhere in the spec, so the marketplace
 listing registration screen (SellStrategyPage.tsx) had users type in
 strategy_id/version by hand — list_strategies() fills that gap.
 """
+
 from __future__ import annotations
 
 import json
@@ -177,9 +178,7 @@ class StrategyBuilderService:
                 json.dumps(fsm_definition),
                 author_agent,
             )
-        return SavedStrategy(
-            strategy_id=strategy_id, version=version, lifecycle_status="GENERATED"
-        )
+        return SavedStrategy(strategy_id=strategy_id, version=version, lifecycle_status="GENERATED")
 
     async def get_strategy(
         self, owner_user_id: UUID, strategy_id: str, version: str

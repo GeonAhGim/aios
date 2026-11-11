@@ -13,6 +13,7 @@ Probability of Backtest Overfitting" Algorithm 2.3 (CSCV) -- both match `ofit-v1
 bit for bit; see tests/foundation/unit/backtest/test_overfitting.py. No correction
 needed.
 """
+
 from __future__ import annotations
 
 import math
@@ -79,9 +80,7 @@ def pbo_cscv(perf_matrix: list[list[Decimal]], n_blocks: int) -> Decimal:
     n_rows = len(perf_matrix)
     n_cols = row_length
     if n_blocks < 2 or n_blocks % 2 != 0 or n_blocks > n_rows:
-        raise OverfittingError(
-            f"n_blocks must be even, >= 2, and <= T ({n_rows}), got {n_blocks}"
-        )
+        raise OverfittingError(f"n_blocks must be even, >= 2, and <= T ({n_rows}), got {n_blocks}")
 
     blocks = _split_blocks(n_rows, n_blocks)
     below_zero = 0

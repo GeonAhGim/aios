@@ -7,6 +7,7 @@ Writes publish complete immutable partitions using an atomic hard link: identica
 retries succeed, conflicting content fails closed (105 idempotent writes).
 Missing partitions and corrupt files raise; hot snapshot metadata is unsupported.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -66,8 +67,13 @@ class TickParquetStorage:
         return self._root / venue.value / instrument_id / day.isoformat() / f"{kind}.parquet"
 
     def write_day(
-        self, venue: Venue, instrument_id: str, day: date,
-        records: Iterable[TradeTick] | Iterable[QuoteL1], *, kind: Kind,
+        self,
+        venue: Venue,
+        instrument_id: str,
+        day: date,
+        records: Iterable[TradeTick] | Iterable[QuoteL1],
+        *,
+        kind: Kind,
         as_of: datetime | None = None,
     ) -> Path:
         """Stream existing DC-19 DTOs; publish only after every record validates."""
@@ -91,8 +97,11 @@ class TickParquetStorage:
                     # bypass validation. The field mapping avoids two complete
                     # serialization passes before Arrow receives string columns.
                     record = model.model_validate(vars(record))
-                    if (record.venue != venue or record.instrument_id != instrument_id
-                            or record.ts_event // _DAY_NS != day_number):
+                    if (
+                        record.venue != venue
+                        or record.instrument_id != instrument_id
+                        or record.ts_event // _DAY_NS != day_number
+                    ):
                         raise ValueError("record does not match UTC day/venue/instrument partition")
                     values = vars(record)
                     for name in names:
@@ -113,8 +122,14 @@ class TickParquetStorage:
             temporary.unlink(missing_ok=True)
 
     def read_columns(
-        self, venue: Venue, instrument_id: str, day: date, *, kind: Kind,
-        columns: list[str] | None = None, as_of: datetime | None = None,
+        self,
+        venue: Venue,
+        instrument_id: str,
+        day: date,
+        *,
+        kind: Kind,
+        columns: list[str] | None = None,
+        as_of: datetime | None = None,
     ) -> Iterator[pa.RecordBatch]:
         """Project columns directly from Parquet in bounded Arrow batches.
 
@@ -125,13 +140,19 @@ class TickParquetStorage:
             raise AsOfNotSupportedError("tick parquet does not support as_of")
         path = self._path(venue, instrument_id, day, kind)
         schema = _schema(kind)
-        if columns is not None and (not columns or len(set(columns)) != len(columns)
-                                    or any(name not in schema.names for name in columns)):
+        if columns is not None and (
+            not columns
+            or len(set(columns)) != len(columns)
+            or any(name not in schema.names for name in columns)
+        ):
             raise ValueError("projection must contain unique known columns")
         return self._batches(path, schema, columns)
 
     def _batches(
-        self, path: Path, schema: pa.Schema, columns: list[str] | None,
+        self,
+        path: Path,
+        schema: pa.Schema,
+        columns: list[str] | None,
     ) -> Iterator[pa.RecordBatch]:
         with pq.ParquetFile(path) as parquet:
             if not parquet.schema_arrow.equals(schema):

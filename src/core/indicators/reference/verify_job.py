@@ -16,6 +16,7 @@ regression -- so the CI sample does not flap on them. See
 `verify_all.py::test_full_verification_matches_known_state` for the
 underlying TA-Lib-vs-our-implementation cause.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

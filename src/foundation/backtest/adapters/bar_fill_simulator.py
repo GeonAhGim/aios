@@ -10,6 +10,7 @@ bar after the signal bar"). `signal_bar_index`, when given, is checked
 against I-05 look-ahead safety via domain/rules.is_look_ahead_safe --
 this adapter does not define a new violation error.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -43,9 +44,7 @@ class BarFillSimulator:
         if quantity <= 0:
             raise ValueError(f"quantity는 0보다 커야 한다: {quantity}")
         if cost_model.slippage_bps < 0:
-            raise ValueError(
-                f"slippage_bps는 음수를 허용하지 않는다: {cost_model.slippage_bps}"
-            )
+            raise ValueError(f"slippage_bps는 음수를 허용하지 않는다: {cost_model.slippage_bps}")
         if signal_bar_index is not None and not is_look_ahead_safe(
             signal_bar_index=signal_bar_index, fill_bar_index=bar_index
         ):

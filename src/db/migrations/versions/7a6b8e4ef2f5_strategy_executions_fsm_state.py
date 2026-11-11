@@ -12,6 +12,7 @@ BUY_ORDER_PENDING/HOLDING/SELL_ORDER_PENDING/STOP_LOSS/EMERGENCY_EXIT) 중
 지금 어디에 있는지는 별도 컬럼이 필요하다 — FD-16 구현 시점엔 FD-8이
 FROZEN이라 이 필요성이 드러나지 않았다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

@@ -27,6 +27,7 @@ letting them silently disappear. `raw_payload` holds only
 `OpenDartFiling`'s structured fields (no raw filing text), so it does
 not violate the DC-27 redistribution restriction.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -62,9 +63,7 @@ def upgrade() -> None:
         "CREATE INDEX ix_md_corporate_action_filing_instrument "
         "ON md_corporate_action_filing (instrument_id, action_type, ex_date, known_at)"
     )
-    op.execute(
-        f"GRANT SELECT, INSERT ON md_corporate_action_filing TO {_APP_ROLE}"
-    )
+    op.execute(f"GRANT SELECT, INSERT ON md_corporate_action_filing TO {_APP_ROLE}")
 
     op.execute(
         """
@@ -82,9 +81,7 @@ def upgrade() -> None:
     op.execute(
         f"GRANT SELECT, INSERT, UPDATE ON research_opendart_unprocessed_filing TO {_APP_ROLE}"
     )
-    op.execute(
-        f"GRANT USAGE, SELECT ON research_opendart_unprocessed_filing_id_seq TO {_APP_ROLE}"
-    )
+    op.execute(f"GRANT USAGE, SELECT ON research_opendart_unprocessed_filing_id_seq TO {_APP_ROLE}")
 
 
 def downgrade() -> None:

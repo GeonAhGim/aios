@@ -17,6 +17,7 @@ the PLT-01 request context
 (`src.core.observability.context.current()`) so that the `audit_event` row
 written by this function shares the same `trace_id` as the `audit_log` row
 recorded within the same request."""
+
 from __future__ import annotations
 
 from uuid import UUID

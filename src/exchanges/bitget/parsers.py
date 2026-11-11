@@ -13,6 +13,7 @@ BR-9(task-1787) — 이 세 함수는 원래 `src/core/parser/*`(거래소 공�
 지운다(이 모듈은 이미 `src/exchanges/bitget/` 소속이므로 "bitget"임을
 증명할 문자열 비교가 애초에 필요 없다).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -41,7 +42,7 @@ _KNOWN_QUOTE_SUFFIXES = ("USDT",)
 
 
 def _to_canonical_symbol(exchange_symbol: str) -> str:
-    """"BTCUSDT" -> "BTC/USDT". Phase 1은 USDT 마켓만 지원(06번 §6.1)."""
+    """ "BTCUSDT" -> "BTC/USDT". Phase 1은 USDT 마켓만 지원(06번 §6.1)."""
     for quote in _KNOWN_QUOTE_SUFFIXES:
         if exchange_symbol.endswith(quote):
             base = exchange_symbol[: -len(quote)]
@@ -100,9 +101,7 @@ def parse_orderbook(raw: dict[str, Any], symbol: str) -> OrderBook:
         raise FatalExchangeError(f"Bitget orderbook 응답에 예상 필드 없음: {exc}") from exc
 
 
-def parse_candles(
-    raw: list[list[Any]], symbol: str, timeframe: str
-) -> list[Candle]:
+def parse_candles(raw: list[list[Any]], symbol: str, timeframe: str) -> list[Candle]:
     """Bitget v2 실제 응답(2026-08-28, `GET /api/v2/spot/market/candles`
     라이브 확인)은 포지셔널 배열의 리스트다 — `[[ts, open, high, low,
     close, baseVolume, quoteVolume, usdtVolume], ...]`(dict 아님). 각 행에

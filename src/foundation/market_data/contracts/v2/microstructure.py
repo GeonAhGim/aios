@@ -41,6 +41,7 @@ close/volume. Building that aggregation, replaying gaps/duplicates/
 out-of-order ticks deterministically, and recording `source_kind`
 lineage is entirely DC-22's responsibility, not this contract's.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -142,12 +143,8 @@ class BookL2(BaseModel, frozen=True):
     def _levels_sorted_best_first(self) -> BookL2:
         bid_prices = [level.price for level in self.bids]
         if bid_prices != sorted(bid_prices, reverse=True):
-            raise ValueError(
-                "BookL2.bids must be sorted by price descending (best bid first)"
-            )
+            raise ValueError("BookL2.bids must be sorted by price descending (best bid first)")
         ask_prices = [level.price for level in self.asks]
         if ask_prices != sorted(ask_prices):
-            raise ValueError(
-                "BookL2.asks must be sorted by price ascending (best ask first)"
-            )
+            raise ValueError("BookL2.asks must be sorted by price ascending (best ask first)")
         return self

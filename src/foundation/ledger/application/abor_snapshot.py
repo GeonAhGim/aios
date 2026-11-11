@@ -21,6 +21,7 @@ The snapshot hash reuses the exact construction `domain/hash_chain.lines_digest`
 already uses (`hashlib.sha256` over `canonical_json`, LC-3) -- no new
 hashing scheme, per decision item 3.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -43,8 +44,7 @@ class AlreadyClosedError(ValueError):
 
     def __init__(self, fund_id: UUID, as_of_date: date) -> None:
         super().__init__(
-            f"fund_id={fund_id} as_of_date={as_of_date}: 이미 마감된 ABOR 기간입니다 "
-            "(재마감 거부)."
+            f"fund_id={fund_id} as_of_date={as_of_date}: 이미 마감된 ABOR 기간입니다 (재마감 거부)."
         )
         self.fund_id = fund_id
         self.as_of_date = as_of_date
@@ -133,9 +133,7 @@ async def get_snapshot(
     return _row_to_view(row) if row is not None else None
 
 
-async def is_correction_pending(
-    pool: asyncpg.Pool, *, fund_id: UUID, as_of_date: date
-) -> bool:
+async def is_correction_pending(pool: asyncpg.Pool, *, fund_id: UUID, as_of_date: date) -> bool:
     """DoD -- 마감된 `as_of_date`에 대해, 그 마감의 `closing_recorded_at`
     이후 새로 기록된 posting이 있으면 `True`(§9 FA-12, decision item 5).
     실제 판정은 `ibor_view.correction_pending`(WORM 저널 재조회)에 위임한다

@@ -19,6 +19,7 @@ Spec: docs/specs/L4_risk_and_safety_v1.0.md §2.4/§9 R-23.
 근사해 넘긴다 — 이 코드베이스에는 아직 전용 risk officer 역할 필드가 없다
 (78번 §2.6 risk officer는 policy 기획서 상의 역할일 뿐 인증 계층에 없음).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

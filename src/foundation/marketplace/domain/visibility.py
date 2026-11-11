@@ -71,9 +71,7 @@ class VisibilityDecision:
     source_visible: bool
 
 
-def validate_visibility_grade(
-    visibility: ListingVisibility, *, has_protected_source: bool
-) -> None:
+def validate_visibility_grade(visibility: ListingVisibility, *, has_protected_source: bool) -> None:
     """Reject visibility grades that are structurally impossible given the
     listing's protected-source fact.
 
@@ -174,6 +172,5 @@ def resolve_visibility(
         return VisibilityDecision(listing_visible=False, source_visible=False)
 
     raise ValueError(
-        f"{MarketplaceErrorCode.VISIBILITY_DENIED.value}: "
-        f"unknown visibility grade {visibility!r}"
+        f"{MarketplaceErrorCode.VISIBILITY_DENIED.value}: unknown visibility grade {visibility!r}"
     )

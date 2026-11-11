@@ -1,4 +1,5 @@
 """12.1~12.4 — 거래소 자격증명 API 요청·응답 스키마."""
+
 from __future__ import annotations
 
 from datetime import datetime

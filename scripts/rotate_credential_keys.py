@@ -22,6 +22,7 @@ traceback 프레임이 평문 인자를 붙들 수 있어 로그·stderr로 새�
 재실행은 이미 회전된 행을 다시 건드리지 않고 남은 행만 처리한다(멱등).
 LIVE 스코프 행은 조회 대상에서 아예 제외한다(PLT-33 §10-8, ADR-2026-08-29-E).
 """
+
 from __future__ import annotations
 
 import argparse

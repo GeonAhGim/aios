@@ -12,6 +12,7 @@ and the full ranking (`score_snapshot`) needed to reproduce the decision
 later (DoD 1), without this leaf recomputing or re-storing the scoring
 logic itself (that stays EM-4/EM-5's job).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

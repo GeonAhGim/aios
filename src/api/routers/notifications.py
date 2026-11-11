@@ -7,6 +7,7 @@ FD-17.1(이벤트 발행)/17.2(발송 게이트웨이)는 다른 서비스가 �
 사용자 대면 HTTP 엔드포인트가 없다 — 여기서는 사용자가 직접 조회·설정하는
 17.3(이력 조회)/17.4(수신설정)만 노출한다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

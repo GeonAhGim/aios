@@ -9,6 +9,7 @@ of this leaf). Thresholds (default `k_mad`, MAD floor, high/low ratio cap) are
 marked "Draft" in the spec and have not been validated against real exchange data
 (unverified).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

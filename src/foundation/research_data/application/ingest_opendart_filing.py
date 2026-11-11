@@ -14,6 +14,7 @@ exception that aborts the whole batch — nor should it be silently
 dropped: every failure must leave exactly one row in the unprocessed
 queue.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

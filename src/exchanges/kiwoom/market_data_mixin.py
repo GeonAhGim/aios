@@ -31,6 +31,7 @@ KeyError on missing expected fields raises `FatalExchangeError` (fail-closed
 — a malformed/partial payload must not silently produce a half-populated
 model), mirroring `kis/market_data_mixin.py`.
 """
+
 from __future__ import annotations
 
 import re

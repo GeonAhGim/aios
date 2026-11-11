@@ -2,6 +2,7 @@
 결과·빌트인 디스패치 타입. `interpreter.py`를 300줄 캡(P6.line_cap, `src/core/script`)
 아래로 유지하기 위해 분리했다 — `_Machine` 실행 로직과는 다른 변경 축(값 모양)이다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

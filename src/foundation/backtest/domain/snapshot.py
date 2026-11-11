@@ -14,6 +14,7 @@ Normalization reuses R-01 `src.core.risk.hashing.canonical_json` --
 and that utility already rejects naive datetimes (no new hash recipe is
 invented here).
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -59,9 +60,7 @@ def _bar_fingerprint(bar: Candle) -> dict[str, object]:
     }
 
 
-def compute_bar_snapshot_hash(
-    bars: Sequence[Candle], *, source: str, as_of: datetime
-) -> str:
+def compute_bar_snapshot_hash(bars: Sequence[Candle], *, source: str, as_of: datetime) -> str:
     """bar sequence + source + as-of time -> sha256 hex (64 chars). Same
     values yield the same hash; a single field change on a single bar
     yields a different one (R1)."""

@@ -19,6 +19,7 @@ INSERT하고 있으면 조건부 UPDATE하는 단일 문장이 필요해 `condit
 `RETURNING`이 빈 결과를 낸다 — 그걸 무조건 성공으로 위장하지 않고
 `ConcurrencyConflictError`로 호출자에게 알린다.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

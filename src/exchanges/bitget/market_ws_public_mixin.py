@@ -14,6 +14,7 @@ line_cap 초과)에서 순수 이동(동작 변경 0). 연결관리는
 `on_reconnected` 안에 끼워 넣던 것을 `on_resync` 훅으로 분리 — 세션이
 재연결 직후와 seq 갭 감지 시 같은 경로로 호출한다(F10·F11).
 """
+
 from __future__ import annotations
 
 import logging

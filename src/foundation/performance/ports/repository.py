@@ -3,6 +3,7 @@ Protocol; actual implementations (adapters/) remain unknown (71 §4).
 
 Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md §2.6.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -34,17 +35,21 @@ class PerformanceRepository(Protocol):
         revision (state=CORRECTED) (correct_statement.py, L49)."""
         ...
 
-    async def get_statement(
-        self, statement_id: UUID
-    ) -> PerformanceStatement | None: ...
+    async def get_statement(self, statement_id: UUID) -> PerformanceStatement | None: ...
 
     async def list_statements(
         self, *, tenant_id: UUID, scope: str | None = None
     ) -> tuple[PerformanceStatement, ...]: ...
 
     async def get_latest_statement(
-        self, *, tenant_id: UUID, scope: str, scope_ref: str, period_start: datetime,
-        period_end: datetime, methodology_version: str,
+        self,
+        *,
+        tenant_id: UUID,
+        scope: str,
+        scope_ref: str,
+        period_start: datetime,
+        period_end: datetime,
+        methodology_version: str,
     ) -> PerformanceStatement | None:
         """The latest revision for the same (tenant, scope, scope_ref, period,
         methodology_version) — used to check whether a correction exists or to

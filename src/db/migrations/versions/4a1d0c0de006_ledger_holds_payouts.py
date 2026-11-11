@@ -27,6 +27,7 @@ WORM을 걸지 않는다.
 (`4a1d0c0de001`의 `ALTER DEFAULT PRIVILEGES`가 `aios_migrator` 전용이라
 이 저장소의 마이그레이션 실행 계정에는 적용되지 않음, R9 미해결).
 """
+
 from collections.abc import Sequence
 from enum import Enum
 

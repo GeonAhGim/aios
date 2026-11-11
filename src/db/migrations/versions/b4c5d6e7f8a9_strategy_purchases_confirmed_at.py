@@ -11,6 +11,7 @@ Spec: 기능설계문서_v1.20.md#FD-18.5b
 (설계 누락) — 신설. 이미 CONFIRMED인 건을 재확인(멱등) 요청해도 이
 컬럼 덕분에 실제 확인 시각을 정직하게 다시 반환할 수 있다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

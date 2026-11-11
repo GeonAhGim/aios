@@ -5,6 +5,7 @@
 mixin 파일 텍스트로, 그리고 청크 목록을 `__init__.py` 파사드로 조립한다.
 메서드 한 개짜리 텍스트 렌더링은 `kis_rendering.py`가 맡는다.
 """
+
 from __future__ import annotations
 
 import importlib.util

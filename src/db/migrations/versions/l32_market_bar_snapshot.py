@@ -30,6 +30,7 @@ was marked done but its commit is not an ancestor of `origin/main`
 (`done_commit_unreachable`), so neither this migration nor the adapter it
 backs ever actually landed.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -64,9 +65,7 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute(
-        f"CREATE INDEX ix_{_TABLE}_symbol_tf ON {_TABLE} (symbol, exchange, timeframe)"
-    )
+    op.execute(f"CREATE INDEX ix_{_TABLE}_symbol_tf ON {_TABLE} (symbol, exchange, timeframe)")
     op.execute(f"GRANT SELECT, INSERT ON {_TABLE} TO {_APP_ROLE}")
 
     for statement in worm_sql(_TABLE):

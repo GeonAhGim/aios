@@ -111,7 +111,8 @@ def _summary(
 
 
 def _risk_summary(
-    row: Mapping[str, Any], unavailable: dict[str, str],
+    row: Mapping[str, Any],
+    unavailable: dict[str, str],
 ) -> dict[str, Any]:
     """Preserve recorded risk summaries or derive them from reason codes."""
     summary = _summary(row, _RISK_KEYS, unavailable)

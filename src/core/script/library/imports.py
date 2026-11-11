@@ -19,6 +19,7 @@ Fail-closed (DoD d): resolution either fully succeeds or raises — a
 cycle or missing library is never silently skipped to compile with a
 partial/empty import table.
 """
+
 from __future__ import annotations
 
 import re
@@ -105,8 +106,7 @@ def _rewrite_source(
     for directive in directives:
         entry = resolved[directive.ref.key()]
         lines[directive.line_no - 1] = (
-            f"# import lib.{directive.ref.name}@{directive.ref.version}"
-            f" body_hash={entry.body_hash}"
+            f"# import lib.{directive.ref.name}@{directive.ref.version} body_hash={entry.body_hash}"
         )
     return "\n".join(lines)
 

@@ -9,6 +9,7 @@ answerable (R2), so the whole policy is content-addressed via
 the pattern already used by `src.core.portfolio.config` and
 `src.foundation.backtest.domain.models` for their own hash methods.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

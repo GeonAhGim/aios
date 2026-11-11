@@ -2,6 +2,7 @@
 
 Spec: AIOSproject 80_reconciliation_resilience_l3_build_and_operational_specification_v1.0.md §1/§2.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -53,9 +54,7 @@ def aggregate_classification(items: tuple[Classification, ...]) -> Classificatio
     return Classification.HEALTHY
 
 
-def compute_input_hash(
-    target_ref: str, entities: dict[str, tuple[str, str]]
-) -> str:
+def compute_input_hash(target_ref: str, entities: dict[str, tuple[str, str]]) -> str:
     """REC-004/006 "concurrent scheduled/manual runs dedupe ... safe retry
     does not duplicate" — same target + same internal/provider value combo produces the
     same hash. `entities` is `{entity_key: (internal_value_str, provider_value_str)}` —

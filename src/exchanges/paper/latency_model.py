@@ -13,6 +13,7 @@ DROP 의미: 요청은 나갔고 응답만 유실 — 지연은 그대로 발생
 지연 분포: (0,0)·(0.5,p50)·(0.99,p99)·(1.0,2·p99)를 잇는 구간선형 분위함수.
 실측 분포가 아닌 합성 모델이다(미검증).
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

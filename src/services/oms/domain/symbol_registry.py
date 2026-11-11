@@ -6,6 +6,7 @@ R8 — "주문 시 BTC/USDT, 조회 시 BTCUSDT"를 각 믹스인이 손으로
 `replace("/", "")`하던 결함의 근본 수정. 미등록 심볼은 fail-closed
 (`UnknownSymbolError`) — 등록되지 않은 심볼로는 주문 자체가 불가능하다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

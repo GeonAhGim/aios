@@ -21,6 +21,7 @@ fail-closed 원칙(I10): 주문 제출 뒤에 난 예외 중 "거래소가 이 �
 분류 불가 → `UNKNOWN`으로 보낸다 — 잔고 부족을 UNKNOWN으로 두는 비용보다
 응답 유실을 재전송하는 비용(중복 주문)이 훨씬 크다.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -78,9 +79,7 @@ def classify_submit_response(submitted: Order) -> SendOutcome:
         return SendOutcome(OutcomeKind.REJECTED, "VENUE_REJECTED")
     if not submitted.exchange_order_id:
         return SendOutcome(OutcomeKind.UNKNOWN, "ACK_WITHOUT_EXCHANGE_ORDER_ID")
-    return SendOutcome(
-        OutcomeKind.ACK, "VENUE_ACK", exchange_order_id=submitted.exchange_order_id
-    )
+    return SendOutcome(OutcomeKind.ACK, "VENUE_ACK", exchange_order_id=submitted.exchange_order_id)
 
 
 def classify_submit_failure(exc: BaseException) -> SendOutcome:
@@ -115,9 +114,7 @@ def classify_lookup_failure(exc: BaseException) -> SendOutcome:
     아무것도 보내지 않았으므로 항상 not_sent."""
     if isinstance(exc, ExchangeError) and exc.circuit_open:
         return SendOutcome(OutcomeKind.DEFER, "CIRCUIT_OPEN", not_sent=True)
-    return SendOutcome(
-        OutcomeKind.RETRY, f"LOOKUP_FAILED:{type(exc).__name__}", not_sent=True
-    )
+    return SendOutcome(OutcomeKind.RETRY, f"LOOKUP_FAILED:{type(exc).__name__}", not_sent=True)
 
 
 def classify_idempotent_failure(exc: BaseException) -> SendOutcome:

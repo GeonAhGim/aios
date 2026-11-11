@@ -20,6 +20,7 @@ If the two equations diverge (exact `Decimal` equality comparison, not rounded)
 signals that the write must be rejected. Pure functions only — no I/O or
 direct clock calls.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -114,12 +115,7 @@ def verify_chain(prev: NAVSnapshot, cur: NAVSnapshot) -> None:
         )
 
     expected_closing = (
-        cur.opening_nav
-        + cur.realized
-        + cur.unrealized_delta
-        + cur.funding
-        - cur.fees
-        + cur.flows
+        cur.opening_nav + cur.realized + cur.unrealized_delta + cur.funding - cur.fees + cur.flows
     )
     if cur.closing_nav != expected_closing:
         raise NavChainBrokenError(

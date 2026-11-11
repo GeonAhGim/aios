@@ -15,6 +15,7 @@ upserted (common exchange convention). Negative quantities are an exchange
 protocol violation, so instead of silently ignoring them this surfaces a
 `NegativeQuantityError` (fail-closed).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping

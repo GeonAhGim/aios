@@ -5,6 +5,7 @@ Fill arithmetic itself lives in adapters/bar_fill_simulator.py
 keeping the `simulate_fill(*, bar, bar_index, side, quantity, cost_model)`
 signature do not need to change.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

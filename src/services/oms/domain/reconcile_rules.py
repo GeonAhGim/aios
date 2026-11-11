@@ -7,6 +7,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-A, §9 L4-05.
 이 모듈은 그 분류를 "주문/체결/잔고 3자 비교"라는 OMS 전용 도메인에
 적용하는 규칙만 추가한다.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence

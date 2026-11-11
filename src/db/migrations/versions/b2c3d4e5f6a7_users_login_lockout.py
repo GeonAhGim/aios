@@ -10,6 +10,7 @@ Spec: 기능설계문서_v1.20.md#FD-11.1, 13_multi_tenancy_auth_v1.4.md#§13.2
 15분 계정 잠금" 상태를 저장할 컬럼이 없었다(설계 누락) — 여기서 신설,
 13번 문서를 v1.4로 갱신.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
@@ -22,9 +23,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TABLE users ADD COLUMN failed_login_attempts SMALLINT NOT NULL DEFAULT 0"
-    )
+    op.execute("ALTER TABLE users ADD COLUMN failed_login_attempts SMALLINT NOT NULL DEFAULT 0")
     op.execute("ALTER TABLE users ADD COLUMN locked_until TIMESTAMPTZ")
 
 

@@ -18,6 +18,7 @@ No new event bus or envelope type is introduced — PLT-06 `wrap()` builds the
 `EventEnvelope` carrying the publish-time PLT-01 `RequestContext`
 (trace_id/tenant_id) as-is into each subscriber's queue.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -77,7 +78,9 @@ class RealtimeFanout:
 
     def subscribe(self, subject: EntitlementSubject, feed: FeedRequest) -> Subscription:
         subscription = Subscription(
-            subscription_id=uuid.uuid4(), subject=subject, feed=feed,
+            subscription_id=uuid.uuid4(),
+            subject=subject,
+            feed=feed,
             queue=asyncio.Queue(maxsize=self._max_queue_depth),
         )
         self._subscriptions[subscription.subscription_id] = subscription

@@ -15,6 +15,7 @@ real id lives upstream, where `seed = HMAC(secret, request_id)` is computed
 `LiquidationPlan.request_id` is derived from `seed` alone; the persistence
 caller (R-51, out of scope) should re-tag it with the real row id.
 """
+
 from __future__ import annotations
 
 import hashlib

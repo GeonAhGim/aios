@@ -10,6 +10,7 @@ accidentally references a future bar, it must fail-closed with
 prevention). This file is the single source of truth for that error code
 string -- do not redefine the same string elsewhere.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

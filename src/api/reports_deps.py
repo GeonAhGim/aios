@@ -1,4 +1,5 @@
 """20번대 — 보고서 서비스 팩토리 의존성."""
+
 from __future__ import annotations
 
 import asyncpg

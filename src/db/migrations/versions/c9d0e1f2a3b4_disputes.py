@@ -11,6 +11,7 @@ resolution_decision/resolution_reason/resolved_by/resolved_at은 FD-18.2
 (운영자 분쟁 처리, 아직 없음) 소관 — 지금은 컬럼만 마련해두고 이 leaf
 (13.10, 분쟁 접수)에서는 INSERT하지 않는다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

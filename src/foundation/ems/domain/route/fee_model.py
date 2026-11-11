@@ -14,6 +14,7 @@ decision). The tier schedule itself is a caller-supplied argument, not a
 new config file here -- which real source (BR-9 exchange matrix vs.
 DC-27 source_contract) feeds it is settled by EM-6's wiring leaf.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -15,6 +15,7 @@ task-1781(BR-3) — get_period_trade_profit/get_period_profit 추가.
 투자 서버가 실제로 이 TR에 응답하는지는 미검증이다. 어댑터의 표준
 T→V 치환 규칙(adapter.py `_resolve_tr_id`)은 그대로 적용된다.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

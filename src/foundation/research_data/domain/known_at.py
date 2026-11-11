@@ -17,6 +17,7 @@ kinds, but it shares the same comparison kernel.
 domain/** may not import I/O (L0-2) -- this file contains only pure
 functions.
 """
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -18,6 +18,7 @@ ADR-2026-09-06-G §2 D0. `e6b1d94a7c3f:53`이 오늘 병합되면서
 그 불변조건이 깨진 행(예: 나중에 tenant가 삭제된 경우)만 첫 번째
 tenant(단일 사용자 환경의 기본 tenant)로 재매핑한다.
 """
+
 from collections.abc import Sequence
 
 from alembic import op

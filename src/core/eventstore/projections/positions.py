@@ -10,6 +10,7 @@ FA-14 asks for — a pure projection from the event source to state — is that
 same function, re-exposed under the eventstore projections namespace instead
 of re-implemented (task-1703/decision precedent: reuse, don't rebuild).
 """
+
 from __future__ import annotations
 
 from src.foundation.positions.domain.snapshot_builder import (

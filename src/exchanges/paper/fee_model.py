@@ -7,6 +7,7 @@ Spec: docs/specs/L4_execution_oms_and_exchange_v1.0.md §2-F, §9 L4-22.
 라운딩은 ROUND_UP(수수료가 트레이더에게 유리하게 깎이지 않음).
 음수 bps(리베이트)는 거부한다 — 시뮬 낙관 금지.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -33,7 +34,5 @@ class FeeModel:
         if fill.quantity <= 0 or fill.price <= 0:
             raise ValueError("fee: 체결 수량·가격은 양수여야 합니다.")
         bps = self.maker_bps if fill.liquidity == "MAKER" else self.taker_bps
-        amount = (fill.price * fill.quantity * bps / _BPS).quantize(
-            _FEE_QUANTUM, rounding=ROUND_UP
-        )
+        amount = (fill.price * fill.quantity * bps / _BPS).quantize(_FEE_QUANTUM, rounding=ROUND_UP)
         return Money(amount=amount, currency=self.fee_currency)

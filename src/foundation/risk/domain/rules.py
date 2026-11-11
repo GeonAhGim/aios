@@ -42,9 +42,7 @@ class OrderRiskDecision:
     should_kill: bool
 
 
-def should_kill_for_daily_loss(
-    bundle: PersonalRiskBundle, daily_realized_pnl_pct: Decimal
-) -> bool:
+def should_kill_for_daily_loss(bundle: PersonalRiskBundle, daily_realized_pnl_pct: Decimal) -> bool:
     """task-6510 — split out of `evaluate_personal_order` so the periodic
     always-on monitor (`application/personal_daily_loss_monitor.py`) can
     reuse the exact same kill threshold without an `OrderRiskCheckInput`

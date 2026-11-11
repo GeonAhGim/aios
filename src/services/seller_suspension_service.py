@@ -11,6 +11,7 @@ The reason is private to end users (dispute reasons may be sensitive)
 but recorded internally — written to audit_log per 8.10 principle
 (reusing record_audit_log, same as 18.2).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

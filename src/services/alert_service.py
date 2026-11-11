@@ -19,6 +19,7 @@ other FD-17 events), the send itself is honestly recorded as "failed", but the
 fire fact remains in the DB via triggered_at/triggered_value so users can see
 it on the alert list screen.
 """
+
 from __future__ import annotations
 
 import json

@@ -14,6 +14,7 @@ adapter can support the virtual-clock determinism tests required by
 `domain/l2_retention.plan_retention`. The manifest (`manifest.json`) is
 the SSOT for record metadata; the actual files hold only the payload.
 """
+
 from __future__ import annotations
 
 import json
@@ -126,7 +127,8 @@ class L2DepthStore:
             logger.warning(
                 "L2 보존 정책 적용 후에도 디스크 상한 초과(projected_bytes=%d, cap=%d) — "
                 "단기 전체 깊이 보존 구간(KEEP_FULL)은 이 정책이 스스로 지우지 않는다",
-                plan.projected_bytes, policy.disk_cap_bytes,
+                plan.projected_bytes,
+                policy.disk_cap_bytes,
             )
         return RetentionResult(
             deleted=deleted,

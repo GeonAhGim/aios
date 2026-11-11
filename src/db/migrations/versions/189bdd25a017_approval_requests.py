@@ -12,6 +12,7 @@ DUAL, 60초 하한)과 플랫폼 레벨(1인 조건부 확정, 180초 하한, AD
 한 테이블로 표현한다. provenance는 FD-10.2 SURGE 배치승인의 Trigger
 Provenance 태그.
 """
+
 from collections.abc import Sequence
 
 from alembic import op
