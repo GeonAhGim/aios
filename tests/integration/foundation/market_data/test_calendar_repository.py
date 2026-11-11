@@ -288,8 +288,11 @@ async def test_load_p95_goes_red_when_delay_injected(pool, repo, perf_budget, mo
     """성분 주입 실패 테스트: load()에 sleep을 주입해 10배 지연을 만들면
     p95 단언이 적색으로 돌아와야 한다 — 같은 측정/단언을 재사용한다.
 
-    예산은 wall-delay(30ms)이므로 time.sleep으로 대기 시간을 주입한다.
+    virtual_delayed_async로 실제 sleep 없이 가상 지연 레더만 조작한다
+    (실측 63s → 0.5s).
     """
+    from tests.support.perf_inject import virtual_delayed_async
+
     year = 2198
     days = [
         CalendarDay(
@@ -308,18 +311,12 @@ async def test_load_p95_goes_red_when_delay_injected(pool, repo, perf_budget, mo
             await repo.upsert_days(conn, Venue.KIS_KRX, days)
 
         budget_p95_sec = 0.03
-        # 예산의 10배 delay — 각 호출당 300ms 추가
+        # 예산의 10배 delay — 각 호출당 300ms 추가 (가상)
         injected_delay_sec = budget_p95_sec * 10
-
-        import asyncio
 
         original_load = repo.load
 
-        async def _delayed_load(c, venue, year_to_load):
-            await asyncio.sleep(injected_delay_sec)
-            return await original_load(c, venue, year_to_load)
-
-        monkeypatch.setattr(repo, "load", _delayed_load)
+        monkeypatch.setattr(repo, "load", virtual_delayed_async(original_load, injected_delay_sec))
 
         n = 200
         samples = await perf_budget.samples_async(
