@@ -1,3 +1,5 @@
+# loc-allow: FA-12 D2 evidence — extensive test fixtures for
+# negative/failure-injection/gate-red/perf assertions
 """FA-12 `application/{ibor_view,abor_snapshot}.py` 통합테스트 -- 실 DB
 (TEST_DATABASE_URL) 대상.
 
