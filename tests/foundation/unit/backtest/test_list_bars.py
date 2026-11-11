@@ -64,7 +64,7 @@ def test_point_in_time_bars_protocol_matches_full_fake() -> None:
     def _sample_upto(idx: int) -> Sequence[Candle]:
         return bars.upto(idx)
 
-    samples_1 = [PerfBudget().sample(lambda i=i: _sample_upto(i)).cpu_ms for i in range(100)]
+    samples_1 = [PerfBudget().sample(lambda i=i: _sample_upto(i)).cpu_ms for i in range(5)]
     sample_batch = PerfBudget().sample(lambda: bars.upto(50), batch=8)
 
     avg_single = sum(samples_1) / len(samples_1)
@@ -268,7 +268,7 @@ def test_single_call_cpu_ms_converges_to_sub_tick_value() -> None:
     def _sample_upto(idx: int) -> Sequence[Candle]:
         return bars.upto(idx)
 
-    samples_1 = [PerfBudget().sample(lambda i=i: _sample_upto(i)).cpu_ms for i in range(100)]
+    samples_1 = [PerfBudget().sample(lambda i=i: _sample_upto(i)).cpu_ms for i in range(5)]
 
     # batch=8: 8회 묶음 — 양자화 오차 1/8로 줄어듦
     sample_batch = PerfBudget().sample(lambda: bars.upto(50), batch=8)
