@@ -3931,3 +3931,10 @@ negative/실패주입/성능 assertion/red 재현, 변경 코드 pytest 및 D3 r
 - pytest_perf: task-23313이 이미 측정기 설계 결함(Windows CPU 시계 눈금 15.6ms, 순환 GC 재스캔)을 찾아 `d3ea4fb8e`에서 수정했다. `git merge-base --is-ancestor d3ea4fb8e HEAD`로 HEAD 포함을 확인했다. 재발 시 먼저 해당 테스트가 RelativeBudget/PerfBudget.sample을 쓰는지, 150ms 미만 작업을 묶음 없이 재는지 확인한다.
 - frontend: #16/#39/#52/#64/#66/#84/#89/#97/#101/#102와 같은 결론 — `pm/auto_decision.py`의 stderr 잡음 오분류(의도된 `console.error` 음성 테스트 출력을 실패로 집계)이며 저장소 frontend 코드 결함이 아니다. 이 리프에서는 재실행하지 않고 기존 기록을 인용한다.
 - 판정: 저장소 측 설계 결함 신규 없음 → 코드 변경 없음(noop). 기준선·임계값·ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(조사·기록 리프, 실행 코드 변경 없음).
+
+## task-23884 — esc-ci-pytest "from_status=SUBMITTED != folded status so far (CREATED)", 비회귀 (2026-11-12)
+
+- 카드 본문은 `scripts/replay_verify.py::_order_pair`의 설계된 pre-cutover skip 진단(`skipped -- pre-cutover order`)과 `src/core/eventstore/projections/orders.py`의 `EventChainBrokenError` 메시지 포맷이며 FAILED 신호가 아니다 — task-21172/21849/21877/23608과 동형. 실제 실패 nodeid는 카드에 없다.
+- 직전 커밋 c6f4737b9(test_redaction perf 마커), d751d9133(ledger FA-12 테스트 추가)은 OMS/eventstore/replay_verify 경로를 건드리지 않는다.
+- 로컬 재현(aios_test_backend_2): `tests/unit/scripts/test_replay_verify_{pool_retry,db_pressure,scan_retry}.py` + `tests/integration/eventstore/test_replay_verify_order_chain.py` **46 passed**; `test_redaction.py` **48 passed**; `test_ibor_abor_close_persisted.py` **1 passed**; `PYTHONPATH=. scripts/replay_verify.py --hours 24` **OK, exit=0**.
+- 기준선/예산/ignore 변경 없음(DECISION_GUIDELINES B-2). D2: N/A(실행 코드 변경 없는 비회귀 재확인).
