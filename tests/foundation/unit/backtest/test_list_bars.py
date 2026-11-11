@@ -5,6 +5,7 @@ Spec: docs/specs/L4_strategy_portfolio_backtest_v1.0.md#L26 DoD (b)(c)(d).
 
 from __future__ import annotations
 
+import gc
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -180,20 +181,28 @@ def test_construction_propagates_upstream_bar_source_failure() -> None:
 def test_upto_p95_latency_within_5k_bar_budget(perf_budget: PerfBudget) -> None:
     """ADR-2026-09-09-C Decision 1 축별 성능 예산: 5k봉 조회 p95 200ms.
 
-    `batch=8`로 매 샘플당 GC disable/enable 및 tracer 토글 오버헤드를
-    1/8로 줄인다 — xdist 병렬 실행(gw0..gwN)에서 워커가 죽지 않도록
-    (task-23326: gw2 crash, worker OOM from per-sample GC thrashing).
+    Collect once before the distribution, then preserve the caller's GC state.
+    Collecting the entire pytest heap before each of 5,000 samples makes
+    harness cost dominate execution; batch alone does not reduce collections.
     """
     fixture = _bars(5_000)
     bars = ListBars(fixture)
     samples_ms: list[float] = []
-    for bar_index in range(len(fixture)):
+    gc_was_enabled = gc.isenabled()
+    if gc_was_enabled:
+        gc.collect()
+        gc.disable()
+    try:
+        for bar_index in range(len(fixture)):
 
-        def _call(idx: int = bar_index) -> Sequence[Candle]:
-            return bars.upto(idx)
+            def _call(idx: int = bar_index) -> Sequence[Candle]:
+                return bars.upto(idx)
 
-        sample = perf_budget.sample(_call, batch=8)
-        samples_ms.append(sample.cpu_ms)
+            sample = perf_budget.sample(_call, batch=8)
+            samples_ms.append(sample.cpu_ms)
+    finally:
+        if gc_was_enabled:
+            gc.enable()
 
     samples_ms.sort()
     p95_index = int(len(samples_ms) * 0.95)
@@ -286,3 +295,39 @@ def test_bounds_check_gate_catches_removal_regression() -> None:
     with pytest.raises(BacktestLookaheadError) as exc_info:
         bars.at(-1)
     assert exc_info.value.error_code == "BACKTEST_LOOKAHEAD_VIOLATION"
+
+
+@pytest.mark.parametrize("initially_enabled", [False, True])
+@pytest.mark.parametrize("fail_sample", [False, True])
+def test_upto_distribution_collects_once_and_restores_gc(
+    monkeypatch: pytest.MonkeyPatch, initially_enabled: bool, fail_sample: bool
+) -> None:
+    from types import SimpleNamespace
+
+    state = {"enabled": initially_enabled, "collections": 0, "samples": 0}
+
+    def collect() -> int:
+        state["collections"] += 1
+        return 0
+
+    def sample(fn, *, batch):
+        state["samples"] += 1
+        assert not gc.isenabled()
+        assert batch == 8
+        if fail_sample:
+            raise RuntimeError("injected sampler failure")
+        return SimpleNamespace(cpu_ms=0.0, result=fn())
+
+    monkeypatch.setattr(gc, "isenabled", lambda: state["enabled"])
+    monkeypatch.setattr(gc, "collect", collect)
+    monkeypatch.setattr(gc, "enable", lambda: state.update(enabled=True))
+    monkeypatch.setattr(gc, "disable", lambda: state.update(enabled=False))
+    budget = SimpleNamespace(sample=sample)
+    if fail_sample:
+        with pytest.raises(RuntimeError, match="injected sampler failure"):
+            test_upto_p95_latency_within_5k_bar_budget(budget)
+    else:
+        test_upto_p95_latency_within_5k_bar_budget(budget)
+    assert state["enabled"] is initially_enabled
+    assert state["collections"] == int(initially_enabled)
+    assert state["samples"] == (1 if fail_sample else 5_000)
