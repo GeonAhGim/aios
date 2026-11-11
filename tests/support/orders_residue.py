@@ -25,11 +25,10 @@ from scripts import replay_verify
 def _can_run_asyncio() -> bool:
     """Return True when asyncio.run() is safe to call right now."""
     try:
-        loop = asyncio.get_event_loop()
+        asyncio.get_running_loop()
+        return False  # loop already running — asyncio.run() would fail
     except RuntimeError:
-        # No current loop — safe.
-        return True
-    return not loop.is_running()
+        return True  # no current loop — asyncio.run() is safe
 
 
 # Exceptions that indicate a transient/environmental failure, not a real
