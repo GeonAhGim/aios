@@ -256,22 +256,22 @@ def test_size_for_p99_budget_goes_red_with_cpu_delay_injection(
     perf_budget: PerfBudget,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Gate-red reproduction: `delayed_sync` 로 dispatch 함수에 CPU 부하를
-    주입하면 같은 p99 단언이 적색으로 전환된다.
+    """Gate-red reproduction: `virtual_delayed_sync` 로 dispatch 함수에
+    가상 CPU 부하를 주입하면 같은 p99 단언이 적색으로 전환된다.
 
-    `delayed_sync` 은 busy-wait(CPU-time slowdown) 를 주입한다.
-    `PerfBudget.sample` 는 `time.process_time()` 을 사용하므로 CPU 지연이
-    직접 포착된다. 이 테스트가 없으면 예산 단언은 항상 통과하는 hollow 가
-    될 수 있다.
+    `virtual_delayed_sync` 은 busy-wait 없이 virtual ledger 에만 지연을
+    기록한다. `PerfBudget.sample` 는 이 ledger delta 를 cpu_ms 에
+    더하므로 실제 지연과 동일한 측정 결과를 얻는다. 실제 spin 이 없어
+    테스트가 70s -> 1s 미만으로 빠르다.
     """
-    from tests.support.perf_inject import delayed_sync
+    from tests.support.perf_inject import virtual_delayed_sync
 
     cfg = _config(SizingMethod.FIXED_FRACTIONAL)
     inp = _inp(SizingMethod.FIXED_FRACTIONAL)
     budget_ms = 5.0
 
     original_fn = _DISPATCH[SizingMethod.FIXED_FRACTIONAL]
-    delayed_fn = delayed_sync(original_fn, 0.05)  # 50ms CPU delay
+    delayed_fn = virtual_delayed_sync(original_fn, 0.05)  # 50ms virtual delay
     monkeypatch.setitem(_DISPATCH, SizingMethod.FIXED_FRACTIONAL, delayed_fn)
 
     samples = perf_budget.samples(lambda: size_for(cfg, inp), n=100, batch=10)
