@@ -332,9 +332,15 @@ def read_file_locs(path: Path) -> dict[str, int] | None:
     if not isinstance(budgets, dict):
         raise CodeRatchetsError("file_locs must be an object")
     for rel, loc in budgets.items():
-        if (not isinstance(loc, int) or isinstance(loc, bool) or loc <= 500
-                or not rel.endswith(".py") or "\\" in rel
-                or rel.startswith("/") or ".." in rel.split("/")):
+        if (
+            not isinstance(loc, int)
+            or isinstance(loc, bool)
+            or loc <= 500
+            or not rel.endswith(".py")
+            or "\\" in rel
+            or rel.startswith("/")
+            or ".." in rel.split("/")
+        ):
             raise CodeRatchetsError(f"invalid file_locs entry: {rel!r}={loc!r}")
     return budgets
 
@@ -346,6 +352,40 @@ def write_baseline(
     if file_locs is not None:
         payload["file_locs"] = file_locs
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _print_near(root: Path, near_margin: int, top: int) -> None:
+    near = near_threshold_files(scan_locs(root), near_margin)
+    for threshold in _LOC_THRESHOLDS:
+        files = near[threshold]
+        if not files:
+            continue
+        print(f"NEAR loc_over_{threshold} (임계값 {near_margin}줄 이내, 아직 위반 아님):")
+        for rel, loc in files[:top]:
+            print(f"    {rel}:{loc} ({threshold - loc}줄 남음)")
+
+
+def _loc_growth_failed(budgets: dict[str, int], current_locs: dict[str, int]) -> bool:
+    grown = [
+        (rel, budgets.get(rel, 500), loc)
+        for rel, loc in current_locs.items()
+        if loc > budgets.get(rel, 500)
+    ]
+    for rel, before, after in grown:
+        print(f"FAIL: loc_growth {rel}: {before} -> {after}")
+    return bool(grown)
+
+
+def _print_increased(
+    increased: dict[str, tuple[int, int]], hits: dict[str, list[Hit]], top: int
+) -> None:
+    for metric, (before, after) in increased.items():
+        print(f"FAIL: {metric} {before}개 -> {after}개 (증가)")
+        # loc_over_* 목록은 임계값을 넘긴 파일만 담아 짧고, 경로 사전순 --top 절단 시
+        # 방금 임계값을 넘긴 파일이 잘려 나가 실패 원인이 보이지 않는다(task-23304). 전부 출력.
+        shown = hits[metric] if metric.startswith("loc_over_") else hits[metric][:top]
+        for rel, lineno in shown:
+            print(f"    {rel}:{lineno}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -379,14 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     current = counts_of(hits)
 
     if args.near > 0:
-        near = near_threshold_files(scan_locs(args.root), args.near)
-        for threshold in _LOC_THRESHOLDS:
-            files = near[threshold]
-            if not files:
-                continue
-            print(f"NEAR loc_over_{threshold} (임계값 {args.near}줄 이내, 아직 위반 아님):")
-            for rel, loc in files[: args.top]:
-                print(f"    {rel}:{loc} ({threshold - loc}줄 남음)")
+        _print_near(args.root, args.near, args.top)
 
     if baseline is None:
         write_baseline(args.baseline, current, dict(hits["loc_over_500"]))
@@ -396,23 +429,12 @@ def main(argv: list[str] | None = None) -> int:
     current_locs = dict(hits["loc_over_500"])
     if budgets is None:
         print("WARN: per-file LOC baseline absent; --update initializes measured budgets")
-    else:
-        grown = [(rel, budgets.get(rel, 500), loc) for rel, loc in current_locs.items()
-                 if loc > budgets.get(rel, 500)]
-        if grown:
-            for rel, before, after in grown:
-                print(f"FAIL: loc_growth {rel}: {before} -> {after}")
-            return 2
+    elif _loc_growth_failed(budgets, current_locs):
+        return 2
 
     increased = {m: (baseline[m], current[m]) for m in METRICS if current[m] > baseline[m]}
     if increased:
-        for metric, (before, after) in increased.items():
-            print(f"FAIL: {metric} {before}개 -> {after}개 (증가)")
-            # loc_over_* 목록은 임계값을 넘긴 파일만 담아 짧고, 경로 사전순 --top 절단 시
-            # 방금 임계값을 넘긴 파일이 잘려 나가 실패 원인이 보이지 않는다(task-23304). 전부 출력.
-            shown = hits[metric] if metric.startswith("loc_over_") else hits[metric][: args.top]
-            for rel, lineno in shown:
-                print(f"    {rel}:{lineno}")
+        _print_increased(increased, hits, args.top)
         return 2
 
     decreased = {m for m in METRICS if current[m] < baseline[m]}

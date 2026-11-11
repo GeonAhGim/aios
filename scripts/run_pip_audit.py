@@ -221,6 +221,35 @@ def evaluate_pip_audit_json(raw_stdout: str, ignored_ids: set[str]) -> list[str]
     return failures
 
 
+def _report_failures(failures: list[str], lock_file: Path) -> None:
+    print("pip-audit 게이트 실패:", file=sys.stderr)
+    for line in failures:
+        print(f"  - {line}", file=sys.stderr)
+    # task-11447: lock 밖(local-only) 패키지의 취약점은 GitHub Actions가 절대
+    # 보지 않는 영역(parity 밖)이라는 걸 tail에 명시해 "어디서 왜 적색인지"를
+    # 혼동하지 않게 한다 -- 여전히 게이트는 fail한다, 진단만 분리한다.
+    lock_text = lock_file.read_text(encoding="utf-8") if lock_file.exists() else ""
+    locked, local_only = split_failures_by_lock(failures, parse_lock_names(lock_text))
+    if local_only:
+        print(
+            f"\n참고: 위 {len(local_only)}건은 {lock_file.name}에 핀이 없는 "
+            "로컬 전용 패키지다(예: mutation extras의 전이 의존) -- GitHub Actions는 "
+            "이 패키지를 설치하지 않아 같은 취약점을 보지 못한다(Actions parity 밖). "
+            "`pip install --upgrade <package>`로 로컬 venv에서 직접 고친다:",
+            file=sys.stderr,
+        )
+        for line in local_only:
+            print(f"  - {line}", file=sys.stderr)
+    if locked:
+        print(
+            f"\n참고: 위 {len(locked)}건은 {lock_file.name}에 핀이 있다 -- "
+            "requirements-lock.txt를 fix 버전 이상으로 재생성(손편집 금지)하고 "
+            "이 스크립트가 exit 0임을 확인하라. "
+            "메이저 범프는 로컬 전체 게이트 녹색이 머지 조건이다.",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ignore-file", type=Path, default=DEFAULT_IGNORE_FILE)
@@ -329,32 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     failures = env_failures + lock_failures
 
     if failures:
-        print("pip-audit 게이트 실패:", file=sys.stderr)
-        for line in failures:
-            print(f"  - {line}", file=sys.stderr)
-        # task-11447: lock 밖(local-only) 패키지의 취약점은 GitHub Actions가 절대
-        # 보지 않는 영역(parity 밖)이라는 걸 tail에 명시해 "어디서 왜 적색인지"를
-        # 혼동하지 않게 한다 -- 여전히 게이트는 fail한다, 진단만 분리한다.
-        lock_text = args.lock_file.read_text(encoding="utf-8") if args.lock_file.exists() else ""
-        locked, local_only = split_failures_by_lock(failures, parse_lock_names(lock_text))
-        if local_only:
-            print(
-                f"\n참고: 위 {len(local_only)}건은 {args.lock_file.name}에 핀이 없는 "
-                "로컬 전용 패키지다(예: mutation extras의 전이 의존) -- GitHub Actions는 "
-                "이 패키지를 설치하지 않아 같은 취약점을 보지 못한다(Actions parity 밖). "
-                "`pip install --upgrade <package>`로 로컬 venv에서 직접 고친다:",
-                file=sys.stderr,
-            )
-            for line in local_only:
-                print(f"  - {line}", file=sys.stderr)
-        if locked:
-            print(
-                f"\n참고: 위 {len(locked)}건은 {args.lock_file.name}에 핀이 있다 -- "
-                "requirements-lock.txt를 fix 버전 이상으로 재생성(손편집 금지)하고 "
-                "이 스크립트가 exit 0임을 확인하라. "
-                "메이저 범프는 로컬 전체 게이트 녹색이 머지 조건이다.",
-                file=sys.stderr,
-            )
+        _report_failures(failures, args.lock_file)
         return 1
 
     print(f"pip-audit 게이트 통과 (ignored={sorted(ignored_ids)})")
